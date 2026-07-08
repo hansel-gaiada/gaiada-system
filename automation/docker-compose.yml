@@ -1,0 +1,22 @@
+# N8N — light automation glue (WS4). Backbone rule: N8N orchestrates, MCP accesses,
+# custom services hold the logic. Workflows here call mcp-hub tools; no business logic.
+#   cp .env.example .env && docker compose up -d   ->  http://localhost:5678
+name: gaiada-automation
+
+services:
+  n8n:
+    image: n8nio/n8n
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5678:5678" # local only; tunnel in from outside (ssh -L 5678:localhost:5678)
+    environment:
+      N8N_BASIC_AUTH_ACTIVE: "true"
+      N8N_BASIC_AUTH_USER: admin
+      N8N_BASIC_AUTH_PASSWORD: ${N8N_PASSWORD:?set N8N_PASSWORD in .env}
+      GENERIC_TIMEZONE: ${TZ:-Asia/Singapore}
+      N8N_DIAGNOSTICS_ENABLED: "false"
+    volumes:
+      - n8n-data:/home/node/.n8n
+
+volumes:
+  n8n-data:

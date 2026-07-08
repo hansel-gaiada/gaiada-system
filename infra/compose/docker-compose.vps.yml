@@ -1,0 +1,222 @@
+# Gaiada trial stack — everything on one VPS with one command:
+#   cd infra/compose && cp .env.example .env   # fill it in
+#   docker compose -f docker-compose.vps.yml up -d --build
+# Only WAHA's dashboard (localhost) and nothing else is exposed beyond the box;
+# the bot reaches Telegram/WAHA outbound. Backups: see ../scripts/backup.sh + the runbook.
+name: gaiada
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: gaiada
+      POSTGRES_PASSWORD: ${POSTGRES_SUPER_PASSWORD:?}
+      POSTGRES_APP_PASSWORD: ${POSTGRES_APP_PASSWORD:?}
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+      - ../../wa-chat-bot/db/init.sh:/docker-entrypoint-initdb.d/10-app-role.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d gaiada"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redis-data:/data
+
+  waha:
+    image: devlikeapro/waha
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3000:3000" # dashboard via SSH tunnel only; never public
+    environment:
+      WHATSAPP_HOOK_URL: "http://bot:3001/webhook?token=${WEBHOOK_SECRET:?}"
+      WHATSAPP_HOOK_EVENTS: "message"
+      WHATSAPP_API_KEY: ${WAHA_API_KEY:?}
+      WAHA_DASHBOARD_USERNAME: admin
+      WAHA_DASHBOARD_PASSWORD: ${WAHA_DASHBOARD_PASSWORD:?}
+      WHATSAPP_RESTART_ALL_SESSIONS: "True"
+    volumes:
+      - waha-sessions:/app/.sessions
+
+  ai-gateway:
+    build: ../../ai-gateway
+    restart: unless-stopped
+    environment:
+      GATEWAY_TOKEN: ${GATEWAY_TOKEN:?}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      # Local-first: point at an Ollama on the VPS (e.g. http://host.docker.internal:11434);
+      # empty disables the local provider and the chain goes straight to cloud/echo.
+      OLLAMA_URL: ${OLLAMA_URL:-}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3.2}
+      WHISPER_URL: http://whisper:8000
+      WHISPER_MODEL: ${WHISPER_MODEL:-Systran/faster-whisper-small}
+      GATEWAY_DAILY_CALL_CAP: ${GATEWAY_DAILY_CALL_CAP:-2000}
+    volumes:
+      - gateway-data:/app/data # egress audit
+
+  # Keycloak (5b) — self-hosted IdP. Realm imported from ./keycloak on first boot.
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.0
+    restart: unless-stopped
+    command: ["start-dev", "--import-realm"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?}
+      KC_HEALTH_ENABLED: "true"
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - ./keycloak:/opt/keycloak/data/import:ro
+      - kc-data:/opt/keycloak/data
+
+  # Cerbos (5b) — policy decision point. Policies from ./cerbos/policies (read-only).
+  cerbos:
+    image: ghcr.io/cerbos/cerbos:latest
+    restart: unless-stopped
+    command: ["server", "--config=/config/cerbos.yaml"]
+    volumes:
+      - ../../platform-nest/cerbos:/config:ro
+      - ../../platform-nest/cerbos/policies:/policies:ro
+
+  platform:
+    build: ../../platform-nest
+    restart: unless-stopped
+    environment:
+      PLATFORM_SERVICE_TOKEN: ${PLATFORM_SERVICE_TOKEN:?}
+      DATABASE_URL: postgres://gaiada_app:${POSTGRES_APP_PASSWORD:?}@postgres:5432/gaiada_platform
+      AUTH_MODE: ${PLATFORM_AUTH_MODE:-dev}
+      OIDC_ISSUER: http://keycloak:8080/realms/gaiada
+      OIDC_JWKS_URI: http://keycloak:8080/realms/gaiada/protocol/openid-connect/certs
+      OIDC_AUDIENCE: gaiada-platform
+      CERBOS_URL: http://cerbos:3592
+      # 5c.4 file store — persistent volume so attachments survive restarts.
+      FILES_DIR: /data/files
+      REDIS_URL: redis://redis:6379
+    volumes:
+      - platform-files:/data/files
+    depends_on:
+      postgres:
+        condition: service_healthy
+      # Every request authorizes against Cerbos; start it first (fail-closed if it's down).
+      cerbos:
+        condition: service_started
+      redis:
+        condition: service_started
+
+  platform-ui:
+    build: ../../platform-ui
+    restart: unless-stopped
+    environment:
+      PLATFORM_URL: http://platform:3004
+      PLATFORM_SERVICE_TOKEN: ${PLATFORM_SERVICE_TOKEN:?}
+      SESSION_SECRET: ${UI_SESSION_SECRET:?}
+    ports:
+      - "3005:3005"
+    depends_on:
+      - platform
+
+  # Self-hosted transcription (5a.3) — CPU image; audio transcribes locally, never
+  # leaving the box. First request downloads the model into the volume (be patient).
+  whisper:
+    image: fedirz/faster-whisper-server:latest-cpu
+    restart: unless-stopped
+    volumes:
+      - whisper-models:/root/.cache/huggingface
+
+  knowledge:
+    build:
+      context: ../../ai-agents
+    command: ["npx", "tsx", "src/knowledge/service.ts"]
+    restart: unless-stopped
+    environment:
+      KNOWLEDGE_SERVICE_TOKEN: ${KNOWLEDGE_SERVICE_TOKEN:?}
+      KNOWLEDGE_DATABASE_URL: postgres://gaiada_app:${POSTGRES_APP_PASSWORD:?}@postgres:5432/gaiada_knowledge
+      PLATFORM_URL: http://platform:3004
+      PLATFORM_SERVICE_TOKEN: ${PLATFORM_SERVICE_TOKEN:?}
+      GATEWAY_URL: http://ai-gateway:3002
+      GATEWAY_TOKEN: ${GATEWAY_TOKEN:?}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      platform:
+        condition: service_started
+      ai-gateway:
+        condition: service_started
+
+  mcp-hub:
+    build: ../../mcp-hub
+    restart: unless-stopped
+    environment:
+      HUB_SERVICE_TOKEN: ${HUB_SERVICE_TOKEN:?}
+      GATEWAY_URL: http://ai-gateway:3002
+      GATEWAY_TOKEN: ${GATEWAY_TOKEN:?}
+      PLATFORM_URL: http://platform:3004
+      PLATFORM_SERVICE_TOKEN: ${PLATFORM_SERVICE_TOKEN:?}
+      KNOWLEDGE_URL: http://knowledge:3005
+      KNOWLEDGE_SERVICE_TOKEN: ${KNOWLEDGE_SERVICE_TOKEN:?}
+    volumes:
+      - hub-data:/app/data # tool audit
+    depends_on:
+      - ai-gateway
+      - platform
+
+  bot:
+    build: ../../wa-chat-bot
+    restart: unless-stopped
+    environment:
+      WEBHOOK_SECRET: ${WEBHOOK_SECRET:?}
+      ADMIN_TOKEN: ${ADMIN_TOKEN:-}
+      GATEWAY_URL: http://ai-gateway:3002
+      GATEWAY_TOKEN: ${GATEWAY_TOKEN:?}
+      WAHA_URL: http://waha:3000
+      WAHA_API_KEY: ${WAHA_API_KEY:?}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      DATABASE_URL: postgres://gaiada_app:${POSTGRES_APP_PASSWORD:?}@postgres:5432/gaiada
+      MANAGEMENT_GROUP_ID: ${MANAGEMENT_GROUP_ID:-}
+      POST_TO_GROUPS: ${POST_TO_GROUPS:-false}
+      REDIS_URL: redis://redis:6379
+    volumes:
+      - bot-data:/app/data # LocalKms keys + schedule state + discovery (EXCLUDE keys.json from backups!)
+      - ./groups.yaml:/app/config/groups.yaml:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ai-gateway:
+        condition: service_started
+
+  bot-media-worker:
+    build: ../../wa-chat-bot
+    command: ["npx", "tsx", "src/media-worker.ts"]
+    restart: unless-stopped
+    environment:
+      GATEWAY_URL: http://ai-gateway:3002
+      GATEWAY_TOKEN: ${GATEWAY_TOKEN:?}
+      WAHA_URL: http://waha:3000
+      WAHA_API_KEY: ${WAHA_API_KEY:?}
+      DATABASE_URL: postgres://gaiada_app:${POSTGRES_APP_PASSWORD:?}@postgres:5432/gaiada
+      REDIS_URL: redis://redis:6379
+      MEDIA_WORKER_CONCURRENCY: ${MEDIA_WORKER_CONCURRENCY:-2}
+    volumes:
+      - bot-data:/app/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+
+volumes:
+  pg-data:
+  redis-data:
+  whisper-models:
+  kc-data:
+  waha-sessions:
+  gateway-data:
+  hub-data:
+  bot-data:
+  platform-files:

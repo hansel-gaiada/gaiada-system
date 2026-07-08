@@ -1,0 +1,20 @@
+/* Dynamic field forms — hairline-underline inputs, no radius/shadow, matches login page. */
+.lux-form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 20px; }
+
+.lux-field { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.lux-field__control {
+  border: none;
+  border-bottom: 0.5px solid rgba(26, 25, 22, 0.22);
+  background: transparent;
+  outline: none;
+  padding: 8px 2px;
+  font: 400 14px var(--font-body);
+  color: var(--text-primary);
+  transition: border-color 0.28s var(--erp-ease);
+}
+.lux-field__control:focus { border-bottom-color: var(--erp-accent); }
+.lux-field__control--textarea { resize: vertical; min-height: 72px; font-family: var(--font-body); }
+select.lux-field__control { appearance: none; cursor: pointer; }
+
+.lux-field--checkbox { flex-direction: row-reverse; justify-content: flex-end; align-items: center; gap: 10px; }
+.lux-field__checkbox { width: 14px; height: 14px; accent-color: var(--erp-accent); cursor: pointer; }

@@ -1,0 +1,19 @@
+apiVersion: api.cerbos.dev/v1
+# Chat group administration (action-agent Phase F). The bot's group-admin actions
+# (remove/promote/rename/pin) authorize against this resource before touching WhatsApp/
+# Telegram. Highest-risk: only company_admin (or platform_admin) — never plain members —
+# and never a low-assurance chat identity (notLow).
+resourcePolicy:
+  version: default
+  resource: chat_group
+  importDerivedRoles: ["gaiada_scopes"]
+  variables:
+    import: ["gaiada_common"]
+  rules:
+    - actions: ["*"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["platform_admin"]
+    - actions: ["remove_member", "promote_member", "set_subject", "pin", "add_member"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }

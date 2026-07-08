@@ -1,0 +1,12 @@
+/* =====================================================================
+   Luxury Minimalist Design System — Global Entry
+   ---------------------------------------------------------------------
+   Consumers link THIS file only. It is an import manifest: no rules
+   live here. Everything reachable from these imports ships downstream.
+   ===================================================================== */
+
+@import "tokens/fonts.css";
+@import "tokens/colors.css";
+@import "tokens/typography.css";
+@import "tokens/spacing.css";
+@import "components/components.css";

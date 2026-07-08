@@ -1,0 +1,12 @@
+groups:
+  - id: "site@g.us"
+    name: Site A
+    category: construction
+    optIn: true
+  - id: "office@g.us"
+    name: Back Office
+    category: office
+    optIn: false
+  - id: "mgmt@g.us"
+    name: Management
+    isManagement: true

@@ -1,0 +1,17 @@
+/* Shared console primitives — 0 radius, no shadow, hairlines, opacity hovers.
+   The status dot is the one sanctioned circle (border-radius: 50%). */
+.sys-status-dot { display: inline-flex; align-items: center; gap: 6px; }
+.sys-status-dot__mark { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.sys-status-dot__label { font: 700 11px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; }
+
+.sys-connection-state__copy { margin: 6px 0 0; font: 400 14px var(--font-body); color: var(--erp-ink-50); }
+
+.sys-empty-note { margin: 0; font: 400 14px/1.5 var(--font-body); color: var(--erp-ink-50); }
+
+.sys-status-card__head { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.sys-status-card__version,
+.sys-status-card__uptime { font: 400 13px var(--font-body); color: var(--erp-ink-50); }
+.sys-status-card__counters { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; margin-top: 16px; }
+
+.sys-config-field { display: flex; align-items: flex-end; gap: 10px; margin-bottom: 14px; }
+.sys-config-field:last-child { margin-bottom: 0; }

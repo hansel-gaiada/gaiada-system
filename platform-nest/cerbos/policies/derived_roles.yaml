@@ -1,0 +1,83 @@
+# Scope cascade (RBAC spec §2) as Cerbos derived roles. The platform passes the principal's
+# raw grants as attr.grants=[{role,scopeType,scopeId}] and the authorized tenant set as
+# attr.companies; these derived roles compute "does a grant COVER this resource" — grants
+# cascade downward (global → company → project → record).
+apiVersion: api.cerbos.dev/v1
+description: Gaiada scope-cascade derived roles
+derivedRoles:
+  name: gaiada_scopes
+  definitions:
+    - name: platform_admin
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.grants.exists(g,
+              g.role == "platform_admin" && g.scopeType == "global")
+
+    - name: group_executive
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.grants.exists(g,
+              g.role == "group_executive" && g.scopeType == "global")
+
+    - name: company_admin
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.grants.exists(g, g.role == "company_admin" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+
+    - name: manager
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.grants.exists(g, g.role == "manager" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId) ||
+              (g.scopeType == "project" && (g.scopeId == request.resource.attr.projectId || g.scopeId == request.resource.attr.id))))
+
+    - name: member
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.grants.exists(g, g.role == "member" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId) ||
+              (g.scopeType == "project" && (g.scopeId == request.resource.attr.projectId || g.scopeId == request.resource.attr.id))))
+
+    - name: viewer
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.grants.exists(g, g.role == "viewer" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+
+    # Team scope (5b.7): a team_lead grant covers resources tagged with that team id.
+    - name: team_lead
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.grants.exists(g, g.role == "team_lead" &&
+              g.scopeType == "team" && g.scopeId == request.resource.attr.teamId)
+
+    # Module-elevated approver (e.g. agency_approver) covering its module's resources.
+    - name: module_approver
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.resource.attr.module != "" &&
+            request.principal.attr.grants.exists(g,
+              g.role == (request.resource.attr.module + "_approver") && (
+                g.scopeType == "global" ||
+                (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))

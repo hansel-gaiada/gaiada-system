@@ -1,0 +1,44 @@
+/* =====================================================================
+   Luxury Minimalist Design System — Color System  ·  3-Tier Design Tokens
+   ---------------------------------------------------------------------
+   TIER 1  Primitives  — raw, immutable reference values
+   TIER 2  Brand        — the FIVE editable brand variables (live panel)
+   TIER 3  Semantic     — purpose-driven aliases consumed by components
+
+   The system is color-agnostic at its core: every component reads only
+   the semantic aliases, which in turn resolve to the editable brand
+   variables. Re-point the brand layer and the whole system re-renders.
+   Append your own --brand-* variables below without breaking hierarchy.
+   ===================================================================== */
+
+:root {
+  /* ---- TIER 1 · Primitives ---------------------------------------- */
+  --primitive-off-white:   #F4F1EA;  /* premium warm linen          */
+  --primitive-off-black:   #1A1916;  /* matte editorial near-black  */
+  --primitive-bronze:      #6E5A43;  /* burnished accent            */
+  --primitive-champagne:   #A39174;  /* secondary highlight         */
+  --primitive-paper:       #FBFAF6;  /* raised card surface         */
+  --primitive-line:        #1A1916;  /* hairline reference          */
+
+  /* ---- TIER 2 · Brand (EDITABLE — wired to the live token panel) -- */
+  --brand-color-primary:   var(--primitive-bronze);     /* accents, buttons, signature */
+  --brand-color-secondary: var(--primitive-champagne);  /* secondary highlights        */
+  --brand-color-bg:        var(--primitive-off-white);  /* layout background           */
+  --brand-color-text-dark: var(--primitive-off-black);  /* premium editorial text      */
+  --brand-logo-text:       "Logo"; /* @kind other */  /* wordmark fallback */
+  --brand-logo-source:     none; /* @kind other */                  /* image url() set via panel */
+
+  /* ---- TIER 3 · Semantic aliases (consumed by all components) ----- */
+  --surface-page:     var(--brand-color-bg);
+  --surface-card:     var(--primitive-paper);
+  --text-primary:     var(--brand-color-text-dark);
+  --text-on-accent:   var(--brand-color-bg);
+  --accent:           var(--brand-color-primary);
+  --accent-secondary: var(--brand-color-secondary);
+  --hairline:         var(--brand-color-text-dark);
+
+  /* Opacity rhythm — used for hover fades, captions, icon rest state */
+  --opacity-muted:    0.60; /* @kind other */   /* captions, ©, icon rest   */
+  --opacity-fade:     0.55; /* @kind other */   /* button hover fade clamp  */
+  --opacity-hairline: 0.18; /* @kind other */   /* hairline over light bg   */
+}

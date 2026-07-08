@@ -1,0 +1,19 @@
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: file
+  importDerivedRoles: ["gaiada_scopes"]
+  variables:
+    import: ["gaiada_common"]
+  rules:
+    - actions: ["*"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["platform_admin"]
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin", "manager", "member", "viewer", "team_lead"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    - actions: ["create", "delete"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin", "manager", "member", "team_lead"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }

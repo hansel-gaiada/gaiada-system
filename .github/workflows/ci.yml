@@ -1,0 +1,30 @@
+# CI for the gaiada-system components. NOTE: GitHub only runs workflows from the
+# REPOSITORY ROOT — this activates when gaiada-system is pushed as its own repository
+# (currently it lives inside a larger working folder with no gaiada remote).
+# Until then, run the same checks locally: sh infra/scripts/test-all.sh
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        project: [wa-chat-bot, ai-gateway, mcp-hub, platform, ai-agents]
+    defaults:
+      run:
+        working-directory: ${{ matrix.project }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ${{ matrix.project }}/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test

@@ -1,0 +1,777 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="_ds/luxury-minimalist-design-system-c156e5b1-7edc-4777-82f1-e102cdc8a274/tokens/fonts.css">
+  <link rel="stylesheet" href="_ds/luxury-minimalist-design-system-c156e5b1-7edc-4777-82f1-e102cdc8a274/tokens/colors.css">
+  <link rel="stylesheet" href="_ds/luxury-minimalist-design-system-c156e5b1-7edc-4777-82f1-e102cdc8a274/tokens/typography.css">
+  <link rel="stylesheet" href="_ds/luxury-minimalist-design-system-c156e5b1-7edc-4777-82f1-e102cdc8a274/tokens/spacing.css">
+  <link rel="stylesheet" href="_ds/luxury-minimalist-design-system-c156e5b1-7edc-4777-82f1-e102cdc8a274/components/components.css">
+  <link rel="stylesheet" href="_ds/luxury-minimalist-design-system-c156e5b1-7edc-4777-82f1-e102cdc8a274/styles.css">
+  <script src="_ds/luxury-minimalist-design-system-c156e5b1-7edc-4777-82f1-e102cdc8a274/_ds_bundle.js"></script>
+  <style>
+    html,body{margin:0;height:100%;background:#EFEBE2}
+    *{box-sizing:border-box}
+    .erp-scroll::-webkit-scrollbar{width:9px;height:9px}
+    .erp-scroll::-webkit-scrollbar-thumb{background:rgba(26,25,22,.16)}
+    .erp-scroll::-webkit-scrollbar-track{background:transparent}
+    .erp-navbtn:hover{background:rgba(110,90,67,.05)!important}
+    .erp-navbtn:hover .erp-navlabel{opacity:1!important}
+    .erp-quiet{opacity:.6;transition:opacity .28s cubic-bezier(.22,.61,.36,1)}
+    .erp-quiet:hover{opacity:1}
+    .erp-rowh:hover{background:rgba(110,90,67,.04)}
+    @keyframes erp-fade{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+    @keyframes erp-toast{from{opacity:0;transform:translate(-50%,10px)}to{opacity:1;transform:translate(-50%,0)}}
+  </style>
+</helmet>
+<div class="erp-app" style="{{ shellStyle }}">
+
+  <!-- ================= SIDEBAR ================= -->
+  <aside style="grid-area:side;background:#F4F1EA;border-right:.5px solid rgba(26,25,22,.14);display:flex;flex-direction:column;min-height:0">
+    <div style="padding:22px 22px 18px;border-bottom:.5px solid rgba(26,25,22,.1)">
+      <div style="font-family:var(--font-display);font-weight:700;font-size:22px;line-height:1;letter-spacing:.14em;color:#1A1916">{{ brand }}</div>
+      <div class="type-eyebrow" style="margin-top:7px;opacity:.55">{{ productTag }}</div>
+    </div>
+
+    <nav class="erp-scroll" style="flex:1;overflow-y:auto;padding:16px 12px;min-height:0">
+      <div class="type-eyebrow" style="padding:0 10px 10px;opacity:.4;font-size:10px">Workspace</div>
+      <sc-for list="{{ navWork }}" as="item" hint-placeholder-count="1">
+        <button class="erp-navbtn" style="{{ item.rowStyle }}" onClick="{{ item.onClick }}">
+          <sc-if value="{{ item.active }}" hint-placeholder-val="{{ true }}"><span style="position:absolute;left:0;top:8px;bottom:8px;width:2px;background:var(--erp-accent,#6E5A43)"></span></sc-if>
+          <span style="display:inline-flex;width:20px;height:20px">{{ item.icon }}</span>
+          <span class="erp-navlabel" style="{{ item.labelStyle }}">{{ item.label }}</span>
+        </button>
+      </sc-for>
+
+      <div class="type-eyebrow" style="padding:22px 10px 10px;opacity:.4;font-size:10px">Departments</div>
+      <sc-for list="{{ navDepts }}" as="item" hint-placeholder-count="7">
+        <button class="erp-navbtn" style="{{ item.rowStyle }}" onClick="{{ item.onClick }}">
+          <sc-if value="{{ item.active }}" hint-placeholder-val="{{ true }}"><span style="position:absolute;left:0;top:8px;bottom:8px;width:2px;background:var(--erp-accent,#6E5A43)"></span></sc-if>
+          <span style="display:inline-flex;width:20px;height:20px">{{ item.icon }}</span>
+          <span class="erp-navlabel" style="{{ item.labelStyle }}">{{ item.label }}</span>
+          <sc-if value="{{ item.count }}" hint-placeholder-val="{{ 3 }}"><span style="margin-left:auto;font:400 11px var(--font-body);color:var(--erp-accent,#6E5A43)">{{ item.count }}</span></sc-if>
+        </button>
+      </sc-for>
+    </nav>
+
+    <div style="border-top:.5px solid rgba(26,25,22,.1);padding:14px 16px;display:flex;align-items:center;gap:12px">
+      <div style="width:36px;height:36px;background:var(--erp-accent,#6E5A43);color:#F4F1EA;display:flex;align-items:center;justify-content:center;font-family:var(--font-display);font-weight:700;font-size:15px">{{ userInitials }}</div>
+      <div style="min-width:0;line-height:1.25">
+        <div style="font:700 13px var(--font-body);color:#1A1916;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ userName }}</div>
+        <div style="font:400 11px var(--font-body);color:rgba(26,25,22,.55);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ userRole }}</div>
+      </div>
+      <span class="erp-quiet" style="margin-left:auto;display:inline-flex;cursor:pointer">{{ iconSettings }}</span>
+    </div>
+  </aside>
+
+  <!-- ================= TOP BAR ================= -->
+  <header style="grid-area:top;background:#F4F1EA;border-bottom:.5px solid rgba(26,25,22,.14);display:flex;align-items:center;gap:20px;padding:0 26px">
+    <div style="display:flex;align-items:baseline;gap:12px;min-width:0">
+      <span class="type-eyebrow" style="color:var(--erp-accent,#6E5A43)">{{ moduleEyebrow }}</span>
+      <span style="width:.5px;height:16px;background:rgba(26,25,22,.2)"></span>
+      <span style="font:400 13px var(--font-body);color:rgba(26,25,22,.6);white-space:nowrap">{{ dateLine }}</span>
+    </div>
+
+    <label style="margin-left:8px;flex:1;max-width:420px;display:flex;align-items:center;gap:10px;border-bottom:.5px solid rgba(26,25,22,.22);padding:8px 2px">
+      <span style="display:inline-flex;opacity:.5">{{ iconSearch }}</span>
+      <input value="{{ query }}" onInput="{{ setQuery }}" placeholder="Search records, people, approvals…" style="border:none;background:transparent;outline:none;width:100%;font:400 14px var(--font-body);color:#1A1916" />
+    </label>
+
+    <div style="margin-left:auto;display:flex;align-items:center;gap:18px">
+      <button class="luxury-btn luxury-btn--solid luxury-btn--sm" style="width:auto;gap:8px" onClick="{{ onNew }}">{{ iconPlus }} New</button>
+      <div style="position:relative">
+        <button class="erp-quiet" onClick="{{ toggleNotif }}" style="background:none;border:none;cursor:pointer;padding:4px;display:inline-flex;position:relative;color:#1A1916">
+          {{ iconBell }}
+          <sc-if value="{{ notifCount }}" hint-placeholder-val="{{ 3 }}"><span style="position:absolute;top:0;right:0;min-width:15px;height:15px;padding:0 3px;background:var(--erp-accent,#6E5A43);color:#F4F1EA;border-radius:9px;font:700 9px var(--font-body);display:flex;align-items:center;justify-content:center">{{ notifCount }}</span></sc-if>
+        </button>
+        <sc-if value="{{ notifOpen }}" hint-placeholder-val="{{ false }}">
+          <div style="position:absolute;top:36px;right:0;width:320px;background:#FBFAF6;border:.5px solid rgba(26,25,22,.16);box-shadow:0 14px 44px rgba(26,25,22,.1);z-index:50;animation:erp-fade .28s cubic-bezier(.22,.61,.36,1)">
+            <div style="padding:14px 18px;border-bottom:.5px solid rgba(26,25,22,.1);display:flex;justify-content:space-between;align-items:baseline">
+              <span class="type-eyebrow">Notifications</span>
+              <span style="font:400 11px var(--font-body);color:rgba(26,25,22,.5)">{{ notifCount }} new</span>
+            </div>
+            <sc-for list="{{ notifItems }}" as="n" hint-placeholder-count="4">
+              <div style="padding:13px 18px;border-bottom:.5px solid rgba(26,25,22,.08);display:flex;gap:11px">
+                <span style="margin-top:6px;width:6px;height:6px;flex:none;background:var(--erp-accent,#6E5A43);border-radius:50%"></span>
+                <div><div style="font:400 13px/1.4 var(--font-body);color:#1A1916">{{ n.text }}</div><div style="font:400 11px var(--font-body);color:rgba(26,25,22,.5);margin-top:3px">{{ n.time }}</div></div>
+              </div>
+            </sc-for>
+          </div>
+        </sc-if>
+      </div>
+    </div>
+  </header>
+
+  <!-- ================= MAIN ================= -->
+  <main class="erp-scroll" style="grid-area:main;overflow-y:auto;min-height:0;background:#EFEBE2">
+    <div style="padding:30px 32px 40px">
+
+      <!-- page header -->
+      <div style="display:flex;justify-content:space-between;align-items:flex-end;gap:24px;flex-wrap:wrap;margin-bottom:26px">
+        <div>
+          <div class="type-eyebrow" style="color:var(--erp-accent,#6E5A43);margin-bottom:8px">{{ greetingEyebrow }}</div>
+          <h1 style="margin:0;font-family:var(--font-display);font-weight:700;font-size:34px;line-height:1.1;color:#1A1916">{{ greetingTitle }}</h1>
+          <p style="margin:9px 0 0;font:400 15px/1.5 var(--font-body);color:rgba(26,25,22,.62);max-width:560px">{{ greetingSub }}</p>
+        </div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <sc-for list="{{ quickActions }}" as="q" hint-placeholder-count="3">
+            <button class="luxury-btn luxury-btn--ghost luxury-btn--sm" style="width:auto" onClick="{{ q.onClick }}">{{ q.label }}</button>
+          </sc-for>
+        </div>
+      </div>
+
+      <!-- grid -->
+      <div style="display:grid;gap:var(--erp-gap,20px);grid-template-columns:var(--erp-cols,1.7fr 1fr);grid-template-areas:var(--erp-areas, 'kpi kpi' 'chart tasks' 'table activity' 'table agenda')">
+
+        <!-- KPIs -->
+        <section style="grid-area:kpi;display:grid;gap:var(--erp-gap,20px);grid-template-columns:repeat(auto-fit,minmax(170px,1fr))">
+          <sc-for list="{{ kpis }}" as="k" hint-placeholder-count="4">
+            <div style="background:#FBFAF6;border:.5px solid rgba(26,25,22,.14);padding:var(--erp-tp,22px);display:flex;flex-direction:column;gap:12px">
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+                <span class="type-eyebrow" style="font-size:10px;opacity:.6">{{ k.label }}</span>
+                <span style="display:inline-flex;opacity:.4">{{ k.icon }}</span>
+              </div>
+              <div style="font-family:var(--font-display);font-weight:700;font-size:32px;line-height:1;color:#1A1916">{{ k.value }}</div>
+              <div style="display:flex;align-items:center;gap:6px;font:400 12px var(--font-body)"><span style="color:{{ k.deltaColor }};font-weight:700">{{ k.delta }}</span><span style="color:rgba(26,25,22,.5)">{{ k.foot }}</span></div>
+            </div>
+          </sc-for>
+        </section>
+
+        <!-- CHART -->
+        <section style="grid-area:chart;background:#FBFAF6;border:.5px solid rgba(26,25,22,.14);padding:var(--erp-tp,22px);display:flex;flex-direction:column;min-width:0">
+          <div style="display:flex;justify-content:space-between;align-items:baseline;gap:12px;margin-bottom:4px">
+            <div><h3 style="margin:0;font-family:var(--font-display);font-weight:700;font-size:20px;color:#1A1916">{{ chartTitle }}</h3><div style="font:400 12px var(--font-body);color:rgba(26,25,22,.55);margin-top:2px">{{ chartSub }}</div></div>
+            <span class="luxury-badge luxury-badge--accent" style="min-width:0">{{ chartTag }}</span>
+          </div>
+          <div style="margin-top:18px">{{ chartEl }}</div>
+          <div style="display:flex;justify-content:space-between;margin-top:8px">
+            <sc-for list="{{ chartLabels }}" as="lb" hint-placeholder-count="12"><span style="font:400 10px var(--font-body);color:rgba(26,25,22,.45)">{{ lb }}</span></sc-for>
+          </div>
+        </section>
+
+        <!-- TASKS / APPROVALS -->
+        <section style="grid-area:tasks;background:#FBFAF6;border:.5px solid rgba(26,25,22,.14);padding:var(--erp-tp,22px);display:flex;flex-direction:column">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+            <h3 style="margin:0;font-family:var(--font-display);font-weight:700;font-size:20px;color:#1A1916">{{ tasksTitle }}</h3>
+            <span style="font:700 11px var(--font-body);letter-spacing:.06em;color:var(--erp-accent,#6E5A43);border:.5px solid var(--erp-accent,#6E5A43);padding:4px 9px">{{ pendingCount }} PENDING</span>
+          </div>
+          <sc-if value="{{ hasTasks }}" hint-placeholder-val="{{ true }}">
+            <div style="display:flex;flex-direction:column">
+              <sc-for list="{{ tasks }}" as="t" hint-placeholder-count="4">
+                <div style="padding:13px 0;border-top:.5px solid rgba(26,25,22,.1);display:flex;gap:12px;align-items:flex-start">
+                  <div style="min-width:0;flex:1">
+                    <div style="font:400 14px/1.35 var(--font-body);color:#1A1916">{{ t.title }}</div>
+                    <div style="font:400 12px var(--font-body);color:rgba(26,25,22,.55);margin-top:3px">{{ t.meta }}</div>
+                  </div>
+                  <div style="text-align:right;display:flex;flex-direction:column;align-items:flex-end;gap:8px">
+                    <sc-if value="{{ t.amount }}" hint-placeholder-val="{{ true }}"><span style="font-family:var(--font-display);font-weight:700;font-size:16px;color:#1A1916">{{ t.amount }}</span></sc-if>
+                    <div style="display:flex;gap:6px">
+                      <button onClick="{{ t.approve }}" title="Approve" style="width:26px;height:26px;border:.5px solid var(--erp-accent,#6E5A43);background:var(--erp-accent,#6E5A43);color:#F4F1EA;cursor:pointer;display:inline-flex;align-items:center;justify-content:center">{{ iconCheck }}</button>
+                      <button onClick="{{ t.decline }}" title="Decline" style="width:26px;height:26px;border:.5px solid rgba(26,25,22,.3);background:transparent;color:#1A1916;cursor:pointer;display:inline-flex;align-items:center;justify-content:center">{{ iconX }}</button>
+                    </div>
+                  </div>
+                </div>
+              </sc-for>
+            </div>
+          </sc-if>
+          <sc-if value="{{ noTasks }}" hint-placeholder-val="{{ false }}">
+            <div style="padding:26px 0;text-align:center"><div style="font-family:var(--font-display);font-size:18px;color:#1A1916">All clear</div><div style="font:400 13px var(--font-body);color:rgba(26,25,22,.55);margin-top:6px">Nothing awaiting your review right now.</div></div>
+          </sc-if>
+        </section>
+
+        <!-- TABLE -->
+        <section style="grid-area:table;background:#FBFAF6;border:.5px solid rgba(26,25,22,.14);padding:var(--erp-tp,22px) 0 8px;display:flex;flex-direction:column;min-width:0">
+          <div style="display:flex;justify-content:space-between;align-items:baseline;padding:0 var(--erp-tp,22px) 14px">
+            <h3 style="margin:0;font-family:var(--font-display);font-weight:700;font-size:20px;color:#1A1916">{{ tableTitle }}</h3>
+            <button class="erp-quiet" style="background:none;border:none;cursor:pointer;font:700 11px var(--font-body);letter-spacing:.14em;text-transform:uppercase;color:#1A1916" onClick="{{ onViewAll }}">View all</button>
+          </div>
+          <div style="display:grid;grid-template-columns:var(--erp-tcols, 2fr 1fr 1fr 1fr);padding:0 var(--erp-tp,22px) 9px;border-bottom:.5px solid rgba(26,25,22,.14)">
+            <sc-for list="{{ tableCols }}" as="c" hint-placeholder-count="4"><span class="type-eyebrow" style="font-size:10px;opacity:.5;{{ c.align }}">{{ c.label }}</span></sc-for>
+          </div>
+          <sc-if value="{{ hasRows }}" hint-placeholder-val="{{ true }}">
+            <div>
+              <sc-for list="{{ tableRows }}" as="r" hint-placeholder-count="6">
+                <div class="erp-rowh" style="display:grid;grid-template-columns:var(--erp-tcols, 2fr 1fr 1fr 1fr);align-items:center;padding:12px var(--erp-tp,22px);border-bottom:.5px solid rgba(26,25,22,.07)">
+                  <span style="font:400 14px var(--font-body);color:#1A1916">{{ r.c0 }}</span>
+                  <span style="font:400 13px var(--font-body);color:rgba(26,25,22,.65)">{{ r.c1 }}</span>
+                  <span style="font:400 13px var(--font-body);color:rgba(26,25,22,.65)">{{ r.c2 }}</span>
+                  <span style="justify-self:end"><span style="display:inline-flex;align-items:center;gap:6px;font:700 10px var(--font-body);letter-spacing:.08em;text-transform:uppercase;color:{{ r.badgeColor }}"><span style="width:6px;height:6px;border-radius:50%;background:{{ r.badgeColor }}"></span>{{ r.c3 }}</span></span>
+                </div>
+              </sc-for>
+            </div>
+          </sc-if>
+          <sc-if value="{{ noRows }}" hint-placeholder-val="{{ false }}">
+            <div style="padding:26px var(--erp-tp,22px);font:400 13px var(--font-body);color:rgba(26,25,22,.55)">No matching records for “{{ query }}”.</div>
+          </sc-if>
+        </section>
+
+        <!-- ACTIVITY -->
+        <section style="grid-area:activity;background:#FBFAF6;border:.5px solid rgba(26,25,22,.14);padding:var(--erp-tp,22px);display:flex;flex-direction:column">
+          <h3 style="margin:0 0 16px;font-family:var(--font-display);font-weight:700;font-size:20px;color:#1A1916">Activity</h3>
+          <sc-for list="{{ activity }}" as="a" hint-placeholder-count="5">
+            <div style="display:flex;gap:12px;padding-bottom:16px">
+              <div style="display:flex;flex-direction:column;align-items:center"><span style="width:8px;height:8px;border-radius:50%;background:var(--erp-accent,#6E5A43);margin-top:5px"></span><span style="flex:1;width:.5px;background:rgba(26,25,22,.14);margin-top:5px"></span></div>
+              <div style="min-width:0"><div style="font:400 13px/1.45 var(--font-body);color:#1A1916"><b style="font-weight:700">{{ a.who }}</b> {{ a.text }}</div><div style="font:400 11px var(--font-body);color:rgba(26,25,22,.5);margin-top:3px">{{ a.time }}</div></div>
+            </div>
+          </sc-for>
+        </section>
+
+        <!-- AGENDA -->
+        <sc-if value="{{ showAgenda }}" hint-placeholder-val="{{ true }}">
+          <section style="grid-area:agenda;background:#1A1916;color:#F4F1EA;padding:var(--erp-tp,22px);display:flex;flex-direction:column">
+            <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:16px">
+              <h3 style="margin:0;font-family:var(--font-display);font-weight:700;font-size:20px;color:#F4F1EA">Today</h3>
+              <span class="type-eyebrow" style="color:var(--erp-accent2,#A39174)">{{ agendaCount }} events</span>
+            </div>
+            <sc-for list="{{ agenda }}" as="e" hint-placeholder-count="4">
+              <div style="display:flex;gap:14px;padding:11px 0;border-top:.5px solid rgba(244,241,234,.14)">
+                <span style="font-family:var(--font-display);font-weight:700;font-size:15px;color:var(--erp-accent2,#A39174);white-space:nowrap">{{ e.time }}</span>
+                <div><div style="font:400 13px/1.35 var(--font-body);color:#F4F1EA">{{ e.title }}</div><div style="font:400 11px var(--font-body);color:rgba(244,241,234,.55);margin-top:2px">{{ e.tag }}</div></div>
+              </div>
+            </sc-for>
+          </section>
+        </sc-if>
+
+      </div>
+    </div>
+  </main>
+
+  <sc-if value="{{ toast }}" hint-placeholder-val="{{ false }}">
+    <div style="position:fixed;bottom:28px;left:50%;transform:translateX(-50%);background:#1A1916;color:#F4F1EA;padding:13px 22px;font:400 13px var(--font-body);letter-spacing:.02em;z-index:200;animation:erp-toast .28s cubic-bezier(.22,.61,.36,1)">{{ toast }}</div>
+  </sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1440,&quot;height&quot;:900},&quot;layout&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;Balanced&quot;,&quot;Workspace&quot;,&quot;Analytics&quot;],&quot;default&quot;:&quot;Balanced&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Layout&quot;},&quot;density&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;Comfortable&quot;,&quot;Compact&quot;],&quot;default&quot;:&quot;Comfortable&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Layout&quot;},&quot;accent&quot;:{&quot;editor&quot;:&quot;color&quot;,&quot;default&quot;:&quot;#6E5A43&quot;,&quot;options&quot;:[&quot;#6E5A43&quot;,&quot;#1A1916&quot;,&quot;#4B6358&quot;,&quot;#9B5A3C&quot;],&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Theme&quot;},&quot;showAgenda&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Layout&quot;}}">
+class Component extends DCLogic {
+  state = { deptId: "home", query: "", notifOpen: false, resolved: {}, toast: null };
+
+  // ---------- icon helpers ----------
+  svg(children, o) {
+    o = o || {};
+    return React.createElement("svg", { viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: o.sw || 1.6, strokeLinecap: "round", strokeLinejoin: "round", width: o.s || 20, height: o.s || 20, style: { display: "block" } }, children);
+  }
+  p(d, k) { return React.createElement("path", { key: k, d: d }); }
+  ic(name, o) {
+    const P = this.p.bind(this);
+    const m = {
+      home: () => this.svg([P("M3 10.5 12 3l9 7.5", "a"), P("M5 9.5V21h14V9.5", "b")], o),
+      finance: () => this.svg([P("M3 21h18", "a"), P("M5 21V10M9 21V10M15 21V10M19 21V10", "b"), P("M3 10l9-6 9 6", "c")], o),
+      sales: () => this.svg([P("M3 17l6-6 4 4 8-8", "a"), P("M17 7h4v4", "b")], o),
+      inventory: () => this.svg([P("M21 8l-9-5-9 5 9 5 9-5z", "a"), P("M3 8v8l9 5 9-5V8", "b"), P("M12 13v8", "c")], o),
+      hr: () => this.svg([React.createElement("circle", { key: "c", cx: 9, cy: 8, r: 3.2 }), P("M2.5 20a6.5 6.5 0 0 1 13 0", "a"), P("M16 6a3 3 0 0 1 0 6", "b"), P("M17 20a5.5 5.5 0 0 0-3-4.9", "c")], o),
+      manufacturing: () => this.svg([P("M2 21h20", "a"), P("M4 21V9l5 3V9l5 3V9l5 3v9", "b"), P("M9 17h1M14 17h1", "c")], o),
+      procurement: () => this.svg([React.createElement("circle", { key: "c1", cx: 9, cy: 20, r: 1.2 }), React.createElement("circle", { key: "c2", cx: 18, cy: 20, r: 1.2 }), P("M1 3h3l2.4 12.1a1.8 1.8 0 0 0 1.8 1.4h9.3a1.8 1.8 0 0 0 1.8-1.4L22 7H5.2", "a")], o),
+      projects: () => this.svg([P("M4 4h6v13H4zM14 4h6v8h-6z", "a")], o),
+      settings: () => this.svg([React.createElement("circle", { key: "c", cx: 12, cy: 12, r: 3 }), P("M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9L17 7M7 17l-2.1 2.1", "a")], o),
+      search: () => this.svg([React.createElement("circle", { key: "c", cx: 11, cy: 11, r: 7 }), P("M21 21l-4.3-4.3", "a")], o),
+      bell: () => this.svg([P("M18 8a6 6 0 1 0-12 0c0 7-3 8-3 8h18s-3-1-3-8", "a"), P("M13.7 21a2 2 0 0 1-3.4 0", "b")], o),
+      plus: () => this.svg([P("M12 5v14M5 12h14", "a")], { s: 15, sw: 2 }),
+      check: () => this.svg([P("M20 6L9 17l-5-5", "a")], { s: 14, sw: 2.2 }),
+      x: () => this.svg([P("M18 6L6 18M6 6l12 12", "a")], { s: 14, sw: 2.2 }),
+      wallet: () => this.svg([P("M3 7h16a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z", "a"), P("M16 12h3", "b")], o),
+      pulse: () => this.svg([P("M3 12h4l2-6 4 12 2-6h6", "a")], o),
+      box: () => this.svg([P("M21 8l-9-5-9 5 9 5 9-5zM3 8v8l9 5 9-5V8", "a")], o),
+      clock: () => this.svg([React.createElement("circle", { key: "c", cx: 12, cy: 12, r: 9 }), P("M12 7v5l3 2", "a")], o),
+    };
+    return (m[name] || m.home)();
+  }
+
+  // ---------- palette ----------
+  cAccent() { return this.props.accent || "#6E5A43"; }
+  cAccent2() { return "#A39174"; }
+  colUp() { return this.cAccent(); }
+  colDown() { return "rgba(26,25,22,.45)"; }
+  statusColor(s) {
+    const map = { Approved: "#4B7A5A", "On track": "#4B7A5A", Paid: "#4B7A5A", Active: "#4B7A5A", Open: "#6E5A43", Pending: "#6E5A43", Draft: "#A39174", "At risk": "#B5622F", Overdue: "#B5622F", Low: "#B5622F", Critical: "#B5622F", Review: "#6E5A43", Shipped: "#4B7A5A" };
+    return map[s] || "#6E5A43";
+  }
+
+  // ---------- chart ----------
+  buildChart(series) {
+    const accent = this.cAccent();
+    const w = 600, h = 180, pad = 6;
+    const max = Math.max.apply(null, series), min = Math.min.apply(null, series);
+    const rng = (max - min) || 1, n = series.length;
+    const xs = i => pad + i * ((w - 2 * pad) / (n - 1));
+    const ys = v => (h - pad) - ((v - min) / rng) * (h - 2 * pad);
+    let line = series.map((v, i) => (i ? "L" : "M") + xs(i).toFixed(1) + " " + ys(v).toFixed(1)).join(" ");
+    const area = line + " L" + xs(n - 1).toFixed(1) + " " + h + " L" + xs(0).toFixed(1) + " " + h + " Z";
+    const grid = [0.25, 0.5, 0.75].map((g, i) => React.createElement("line", { key: "g" + i, x1: pad, x2: w - pad, y1: (pad + g * (h - 2 * pad)).toFixed(1), y2: (pad + g * (h - 2 * pad)).toFixed(1), stroke: "#1A1916", strokeWidth: 0.5, strokeOpacity: 0.09 }));
+    return React.createElement("svg", { viewBox: "0 0 " + w + " " + h, preserveAspectRatio: "none", style: { width: "100%", height: "180px", display: "block" } }, [
+      grid,
+      React.createElement("path", { key: "ar", d: area, fill: accent, fillOpacity: 0.09 }),
+      React.createElement("path", { key: "ln", d: line, fill: "none", stroke: accent, strokeWidth: 1.6 }),
+      React.createElement("circle", { key: "dot", cx: xs(n - 1).toFixed(1), cy: ys(series[n - 1]).toFixed(1), r: 3.2, fill: accent }),
+    ]);
+  }
+
+  // ---------- data ----------
+  data() {
+    const A = this.cAccent();
+    return {
+      home: {
+        module: "My Workspace", icon: "home",
+        eyebrow: "Personal home", title: "Good " + this.timeOfDay() + ", Elena",
+        sub: "You have 8 items awaiting review across four departments and five tasks due today. Here is your morning brief.",
+        quick: ["New request", "Approve all", "Weekly report", "Message team"],
+        kpis: [
+          { label: "Approvals pending", value: "8", delta: "+3", foot: "since yesterday", up: 1, icon: "check" },
+          { label: "Tasks due today", value: "5", delta: "2 overdue", foot: "", up: 0, icon: "clock" },
+          { label: "Unread mentions", value: "12", delta: "+4", foot: "this week", up: 1, icon: "bell" },
+          { label: "Meetings today", value: "4", delta: "next 9:30", foot: "", up: 1, icon: "clock" },
+        ],
+        chartTitle: "Your throughput", chartSub: "Items resolved · last 12 weeks", tag: "+18%",
+        series: [12, 15, 11, 18, 16, 22, 19, 24, 21, 27, 25, 31], labels: ["W1", "", "W3", "", "W5", "", "W7", "", "W9", "", "W11", ""],
+        tasksTitle: "Awaiting you",
+        tasks: [
+          { id: "h1", title: "Invoice #INV-2231 · Meridian Logistics", meta: "Finance · €48,200", amount: "€48.2K" },
+          { id: "h2", title: "Discount override — Northwind account", meta: "Sales · 18% on €120K deal", amount: "18%" },
+          { id: "h3", title: "Leave request — Marco Rossi", meta: "People · 5 days, Aug 12–16", amount: "" },
+          { id: "h4", title: "PO #PO-8841 · steel stock replenish", meta: "Procurement · €31,900", amount: "€31.9K" },
+        ],
+        tableTitle: "Assigned to you", tcols: "2.2fr 1fr 1fr 1fr",
+        columns: ["Item", "Module", "Due", "Priority"],
+        rows: [
+          ["Q3 budget variance memo", "Finance", "Today", "Critical"],
+          ["Approve vendor onboarding", "Procurement", "Today", "Open"],
+          ["Review pipeline forecast", "Sales", "Tomorrow", "Review"],
+          ["Sign off on payroll run", "People", "Jul 3", "Pending"],
+          ["Close sprint 24 retro", "Projects", "Jul 4", "On track"],
+        ],
+        activity: [
+          { who: "Aria N.", text: "approved invoice #INV-2209", time: "8 min ago" },
+          { who: "System", text: "posted month-end reminder to Finance", time: "40 min ago" },
+          { who: "Marco R.", text: "submitted a leave request", time: "1 hr ago" },
+          { who: "Sofia K.", text: "moved deal ‘Northwind’ to Negotiation", time: "2 hr ago" },
+          { who: "Warehouse 2", text: "flagged 6 SKUs below reorder point", time: "3 hr ago" },
+        ],
+        agenda: [
+          { time: "09:30", title: "Finance month-close standup", tag: "Video · 30 min" },
+          { time: "11:00", title: "Northwind contract review", tag: "Room 4 · with Sales" },
+          { time: "14:00", title: "Procurement supplier QBR", tag: "Video · 45 min" },
+          { time: "16:30", title: "1:1 with Marco Rossi", tag: "Room 2" },
+        ],
+      },
+      finance: {
+        module: "Finance & Accounting", icon: "finance",
+        eyebrow: "Department", title: "Finance & Accounting",
+        sub: "Month-end close is 62% complete. Cash position is healthy; three vendor invoices exceed your approval threshold.",
+        quick: ["New invoice", "Run report", "Reconcile", "Close period"],
+        kpis: [
+          { label: "Cash position", value: "€4.82M", delta: "+2.1%", foot: "MoM", up: 1, icon: "wallet" },
+          { label: "AR outstanding", value: "€1.24M", delta: "-4.0%", foot: "31 days avg", up: 1, icon: "pulse" },
+          { label: "AP due (7d)", value: "€386K", delta: "9 invoices", foot: "", up: 0, icon: "clock" },
+          { label: "Month close", value: "62%", delta: "on track", foot: "", up: 1, icon: "check" },
+        ],
+        chartTitle: "Revenue vs. expense", chartSub: "Net position · last 12 months", tag: "+11%",
+        series: [3.1, 3.0, 3.4, 3.3, 3.6, 3.5, 3.9, 4.0, 3.8, 4.3, 4.5, 4.8], labels: ["Jul", "Aug", "Sep", "Oct", "Nov", "Dec", "Jan", "Feb", "Mar", "Apr", "May", "Jun"],
+        tasksTitle: "Invoice approvals",
+        tasks: [
+          { id: "f1", title: "INV-2231 · Meridian Logistics", meta: "Net-30 · due Jul 9", amount: "€48.2K" },
+          { id: "f2", title: "INV-2244 · Halcyon Media", meta: "Net-15 · due Jul 5", amount: "€12.6K" },
+          { id: "f3", title: "INV-2251 · Baltic Freight", meta: "Net-30 · due Jul 12", amount: "€73.9K" },
+          { id: "f4", title: "Expense report · Field team Q2", meta: "14 line items", amount: "€6.4K" },
+        ],
+        tableTitle: "Open invoices", tcols: "1.4fr 1.6fr 1fr 1fr",
+        columns: ["Invoice", "Vendor", "Amount", "Status"],
+        rows: [
+          ["INV-2231", "Meridian Logistics", "€48,200", "Pending"],
+          ["INV-2244", "Halcyon Media", "€12,600", "Review"],
+          ["INV-2251", "Baltic Freight", "€73,900", "Pending"],
+          ["INV-2198", "Orion Supplies", "€9,400", "Paid"],
+          ["INV-2205", "Vantage Cloud", "€21,750", "Overdue"],
+          ["INV-2210", "Nordic Steel", "€54,120", "Paid"],
+        ],
+        activity: [
+          { who: "Aria N.", text: "approved INV-2209 (€18.4K)", time: "8 min ago" },
+          { who: "System", text: "bank feed reconciled — 2 exceptions", time: "1 hr ago" },
+          { who: "Luca P.", text: "posted the June depreciation batch", time: "3 hr ago" },
+          { who: "Elena V.", text: "opened the month-close checklist", time: "5 hr ago" },
+        ],
+        agenda: [
+          { time: "09:30", title: "Month-close standup", tag: "Video · 30 min" },
+          { time: "13:00", title: "Audit prep with KPMG", tag: "Room 4" },
+          { time: "15:30", title: "Cash-flow forecast review", tag: "Video" },
+        ],
+      },
+      sales: {
+        module: "Sales & CRM", icon: "sales",
+        eyebrow: "Department", title: "Sales & CRM",
+        sub: "Pipeline is up 14% quarter to date. Two discount overrides need sign-off before quotes can be sent.",
+        quick: ["New deal", "Log activity", "Forecast", "Import leads"],
+        kpis: [
+          { label: "Pipeline value", value: "€7.4M", delta: "+14%", foot: "QTD", up: 1, icon: "sales" },
+          { label: "Won this month", value: "€1.10M", delta: "+8%", foot: "vs target", up: 1, icon: "check" },
+          { label: "Win rate", value: "34%", delta: "+3 pts", foot: "trailing 90d", up: 1, icon: "pulse" },
+          { label: "Open deals", value: "128", delta: "12 closing", foot: "this week", up: 1, icon: "clock" },
+        ],
+        chartTitle: "Bookings", chartSub: "Closed-won · last 12 months", tag: "+9%",
+        series: [0.7, 0.8, 0.75, 0.9, 0.85, 1.0, 0.95, 1.1, 1.05, 1.2, 1.15, 1.3], labels: ["Jul", "Aug", "Sep", "Oct", "Nov", "Dec", "Jan", "Feb", "Mar", "Apr", "May", "Jun"],
+        tasksTitle: "Quote approvals",
+        tasks: [
+          { id: "s1", title: "Discount override — Northwind", meta: "18% on €120K · rep: Sofia K.", amount: "18%" },
+          { id: "s2", title: "Discount override — Cedar Group", meta: "22% on €64K · rep: Tom H.", amount: "22%" },
+          { id: "s3", title: "Multi-year contract — Vertex", meta: "3-year · €410K TCV", amount: "€410K" },
+          { id: "s4", title: "New pricing tier — SMB bundle", meta: "Requires VP sign-off", amount: "" },
+        ],
+        tableTitle: "Top opportunities", tcols: "1.8fr 1fr 1fr 1fr",
+        columns: ["Account", "Stage", "Value", "Status"],
+        rows: [
+          ["Northwind Traders", "Negotiation", "€120,000", "At risk"],
+          ["Vertex Analytics", "Proposal", "€410,000", "On track"],
+          ["Cedar Group", "Negotiation", "€64,000", "Review"],
+          ["Atlas Freight", "Discovery", "€28,000", "Open"],
+          ["Lumen Retail", "Closed won", "€96,500", "Approved"],
+          ["Pallas Foods", "Proposal", "€52,300", "On track"],
+        ],
+        activity: [
+          { who: "Sofia K.", text: "moved ‘Northwind’ to Negotiation", time: "22 min ago" },
+          { who: "Tom H.", text: "logged a call with Cedar Group", time: "1 hr ago" },
+          { who: "System", text: "‘Lumen Retail’ marked closed-won", time: "2 hr ago" },
+          { who: "Priya D.", text: "assigned 6 inbound leads", time: "4 hr ago" },
+        ],
+        agenda: [
+          { time: "10:00", title: "Pipeline review — EMEA", tag: "Video · 45 min" },
+          { time: "11:00", title: "Northwind contract review", tag: "Room 4" },
+          { time: "15:00", title: "Demo — Vertex Analytics", tag: "Video" },
+        ],
+      },
+      inventory: {
+        module: "Inventory & Supply Chain", icon: "inventory",
+        eyebrow: "Department", title: "Inventory & Supply Chain",
+        sub: "37 SKUs have dropped below their reorder point. Two stock adjustments and a transfer need your approval.",
+        quick: ["New transfer", "Cycle count", "Reorder", "Adjust stock"],
+        kpis: [
+          { label: "SKUs tracked", value: "4,210", delta: "+62", foot: "this month", up: 1, icon: "box" },
+          { label: "Stock value", value: "€3.6M", delta: "-1.4%", foot: "MoM", up: 0, icon: "wallet" },
+          { label: "Low stock", value: "37", delta: "+9", foot: "below reorder", up: 0, icon: "pulse" },
+          { label: "Inventory turns", value: "6.2", delta: "+0.3", foot: "annualised", up: 1, icon: "clock" },
+        ],
+        chartTitle: "Inbound vs. outbound", chartSub: "Units moved · last 12 weeks", tag: "Balanced",
+        series: [8, 9, 7, 10, 12, 9, 11, 13, 10, 12, 14, 11], labels: ["W1", "", "W3", "", "W5", "", "W7", "", "W9", "", "W11", ""],
+        tasksTitle: "Stock approvals",
+        tasks: [
+          { id: "i1", title: "Transfer — Warehouse 1 → 3", meta: "420 units · SKU-3391", amount: "420" },
+          { id: "i2", title: "Stock write-off — damaged pallet", meta: "SKU-1120 · 60 units", amount: "60" },
+          { id: "i3", title: "Reorder — carbon filters", meta: "Below reorder point", amount: "1,200" },
+          { id: "i4", title: "Cycle-count variance approval", meta: "Warehouse 2 · aisle C", amount: "" },
+        ],
+        tableTitle: "Reorder alerts", tcols: "1.4fr 1.4fr 1fr 1fr",
+        columns: ["SKU", "Warehouse", "On hand", "Status"],
+        rows: [
+          ["SKU-3391 · Hex bolts", "WH-1 Rotterdam", "84", "Low"],
+          ["SKU-1120 · Filters", "WH-2 Hamburg", "12", "Critical"],
+          ["SKU-2044 · Sealant", "WH-1 Rotterdam", "310", "Open"],
+          ["SKU-5510 · Casings", "WH-3 Antwerp", "6", "Critical"],
+          ["SKU-2290 · Gaskets", "WH-2 Hamburg", "540", "Active"],
+          ["SKU-7781 · Cable", "WH-3 Antwerp", "128", "Low"],
+        ],
+        activity: [
+          { who: "Warehouse 2", text: "flagged 6 SKUs below reorder point", time: "18 min ago" },
+          { who: "Nils B.", text: "received shipment PO-8830 (14 pallets)", time: "1 hr ago" },
+          { who: "System", text: "auto-generated 3 reorder drafts", time: "2 hr ago" },
+          { who: "Anna L.", text: "closed cycle count for aisle B", time: "5 hr ago" },
+        ],
+        agenda: [
+          { time: "08:30", title: "Inbound dock review", tag: "WH-1 floor" },
+          { time: "12:00", title: "Supplier lead-time sync", tag: "Video" },
+          { time: "16:00", title: "Safety-stock policy review", tag: "Room 3" },
+        ],
+      },
+      hr: {
+        module: "People & HR", icon: "hr",
+        eyebrow: "Department", title: "People & HR",
+        sub: "23 requisitions are open and 14 leave requests await approval. Attrition ticked down to 7.4% this quarter.",
+        quick: ["New requisition", "Approve leave", "Run payroll", "Add employee"],
+        kpis: [
+          { label: "Headcount", value: "842", delta: "+11", foot: "this quarter", up: 1, icon: "hr" },
+          { label: "Open requisitions", value: "23", delta: "+4", foot: "vs last month", up: 0, icon: "clock" },
+          { label: "Attrition (TTM)", value: "7.4%", delta: "-0.6 pts", foot: "improving", up: 1, icon: "pulse" },
+          { label: "Pending leave", value: "14", delta: "review", foot: "", up: 0, icon: "check" },
+        ],
+        chartTitle: "Headcount trend", chartSub: "Total employees · last 12 months", tag: "+1.3%",
+        series: [780, 788, 795, 800, 806, 812, 818, 822, 828, 831, 837, 842], labels: ["Jul", "Aug", "Sep", "Oct", "Nov", "Dec", "Jan", "Feb", "Mar", "Apr", "May", "Jun"],
+        tasksTitle: "People approvals",
+        tasks: [
+          { id: "p1", title: "Leave — Marco Rossi", meta: "5 days · Aug 12–16", amount: "5d" },
+          { id: "p2", title: "Leave — Julia Chen", meta: "2 days · Jul 8–9", amount: "2d" },
+          { id: "p3", title: "Offer approval — Sr. Engineer", meta: "Band 4 · €96K base", amount: "€96K" },
+          { id: "p4", title: "Expense — conference travel", meta: "3 attendees · Berlin", amount: "€4.2K" },
+        ],
+        tableTitle: "Open requisitions", tcols: "1.8fr 1fr 1fr 1fr",
+        columns: ["Role", "Team", "Stage", "Status"],
+        rows: [
+          ["Senior Engineer", "Platform", "Offer", "Review"],
+          ["Account Executive", "Sales EMEA", "Interview", "Open"],
+          ["Warehouse Lead", "Ops", "Screening", "Open"],
+          ["Financial Analyst", "Finance", "Offer", "Pending"],
+          ["Product Designer", "Product", "Filled", "Approved"],
+          ["Recruiter", "People", "Screening", "At risk"],
+        ],
+        activity: [
+          { who: "Marco R.", text: "submitted a leave request", time: "1 hr ago" },
+          { who: "System", text: "onboarding started for 2 new hires", time: "2 hr ago" },
+          { who: "Nadia F.", text: "moved ‘Sr. Engineer’ to Offer", time: "3 hr ago" },
+          { who: "Payroll", text: "June run scheduled for Jul 3", time: "6 hr ago" },
+        ],
+        agenda: [
+          { time: "09:00", title: "Weekly hiring sync", tag: "Video · 30 min" },
+          { time: "11:30", title: "Offer review — Platform", tag: "Room 2" },
+          { time: "15:00", title: "Comp planning workshop", tag: "Room 5" },
+        ],
+      },
+      manufacturing: {
+        module: "Manufacturing & Ops", icon: "manufacturing",
+        eyebrow: "Department", title: "Manufacturing & Ops",
+        sub: "OEE is holding at 78% across all lines. Line 3 has an open maintenance request that will affect tomorrow's plan.",
+        quick: ["New work order", "Log downtime", "Schedule maint.", "Quality check"],
+        kpis: [
+          { label: "OEE", value: "78%", delta: "+2 pts", foot: "vs last week", up: 1, icon: "pulse" },
+          { label: "Output (units)", value: "12.4K", delta: "+540", foot: "today", up: 1, icon: "box" },
+          { label: "Downtime", value: "3.1%", delta: "-0.4 pts", foot: "improving", up: 1, icon: "clock" },
+          { label: "Open work orders", value: "46", delta: "7 due", foot: "today", up: 0, icon: "check" },
+        ],
+        chartTitle: "Output vs. plan", chartSub: "Units produced · last 12 shifts", tag: "98% of plan",
+        series: [11.2, 11.8, 11.5, 12.0, 11.7, 12.3, 12.1, 12.6, 12.2, 12.8, 12.5, 12.4], labels: ["S1", "", "S3", "", "S5", "", "S7", "", "S9", "", "S11", ""],
+        tasksTitle: "Work order approvals",
+        tasks: [
+          { id: "m1", title: "WO-4471 · Line 2 changeover", meta: "Product batch 8842", amount: "" },
+          { id: "m2", title: "Maintenance — Line 3 conveyor", meta: "Est. 4 hr downtime", amount: "4h" },
+          { id: "m3", title: "Overtime authorization — Shift B", meta: "12 operators · Fri", amount: "12" },
+          { id: "m4", title: "Scrap approval — QC reject lot", meta: "Batch 8790 · 220 units", amount: "220" },
+        ],
+        tableTitle: "Active work orders", tcols: "1.2fr 1fr 1fr 1fr",
+        columns: ["Work order", "Line", "Qty", "Status"],
+        rows: [
+          ["WO-4471", "Line 2", "8,000", "Active"],
+          ["WO-4468", "Line 1", "5,200", "On track"],
+          ["WO-4459", "Line 3", "3,400", "At risk"],
+          ["WO-4472", "Line 4", "6,100", "Open"],
+          ["WO-4455", "Line 2", "7,800", "Shipped"],
+          ["WO-4463", "Line 1", "2,900", "Review"],
+        ],
+        activity: [
+          { who: "Line 3", text: "logged 22 min unplanned downtime", time: "30 min ago" },
+          { who: "QC", text: "passed batch 8842 inspection", time: "1 hr ago" },
+          { who: "Erik S.", text: "closed WO-4455 and shipped", time: "3 hr ago" },
+          { who: "System", text: "scheduled preventive maint. Line 1", time: "5 hr ago" },
+        ],
+        agenda: [
+          { time: "07:00", title: "Shift-A handover", tag: "Floor · 15 min" },
+          { time: "10:30", title: "Line 3 maintenance window", tag: "Bay 3" },
+          { time: "14:00", title: "Production planning", tag: "Room 1" },
+        ],
+      },
+      procurement: {
+        module: "Procurement", icon: "procurement",
+        eyebrow: "Department", title: "Procurement",
+        sub: "214 purchase orders are open and five requisitions are ready to convert. You've realised 4.8% savings this month.",
+        quick: ["New PO", "New requisition", "Supplier review", "Approve PO"],
+        kpis: [
+          { label: "Spend (MTD)", value: "€2.1M", delta: "+6%", foot: "vs budget", up: 0, icon: "wallet" },
+          { label: "Open POs", value: "214", delta: "+18", foot: "this week", up: 1, icon: "box" },
+          { label: "Savings rate", value: "4.8%", delta: "+0.9 pts", foot: "negotiated", up: 1, icon: "pulse" },
+          { label: "Active suppliers", value: "356", delta: "+7", foot: "onboarded", up: 1, icon: "hr" },
+        ],
+        chartTitle: "Spend by month", chartSub: "Committed spend · last 12 months", tag: "On budget",
+        series: [1.7, 1.9, 1.8, 2.0, 1.9, 2.2, 2.0, 2.3, 2.1, 2.4, 2.2, 2.1], labels: ["Jul", "Aug", "Sep", "Oct", "Nov", "Dec", "Jan", "Feb", "Mar", "Apr", "May", "Jun"],
+        tasksTitle: "PO approvals",
+        tasks: [
+          { id: "pr1", title: "PO-8841 · Nordic Steel", meta: "Steel stock replenish", amount: "€31.9K" },
+          { id: "pr2", title: "PO-8845 · Vantage Cloud", meta: "Annual license renewal", amount: "€22.4K" },
+          { id: "pr3", title: "Requisition — packaging", meta: "Convert to PO · Q3", amount: "€8.6K" },
+          { id: "pr4", title: "New supplier — Baltic Freight", meta: "Onboarding approval", amount: "" },
+        ],
+        tableTitle: "Requisitions awaiting PO", tcols: "1.3fr 1.3fr 1fr 1fr",
+        columns: ["Requisition", "Category", "Amount", "Status"],
+        rows: [
+          ["REQ-2210", "Raw materials", "€31,900", "Pending"],
+          ["REQ-2214", "Software", "€22,400", "Review"],
+          ["REQ-2201", "Packaging", "€8,600", "Open"],
+          ["REQ-2196", "Logistics", "€14,200", "Approved"],
+          ["REQ-2188", "Facilities", "€5,300", "Open"],
+          ["REQ-2219", "MRO", "€19,750", "At risk"],
+        ],
+        activity: [
+          { who: "System", text: "PO-8830 fully received", time: "40 min ago" },
+          { who: "Diego M.", text: "negotiated 3% on Nordic Steel", time: "2 hr ago" },
+          { who: "Elena V.", text: "approved supplier Halcyon Media", time: "3 hr ago" },
+          { who: "Sourcing", text: "opened RFQ for packaging Q3", time: "5 hr ago" },
+        ],
+        agenda: [
+          { time: "09:30", title: "Supplier QBR — Nordic Steel", tag: "Video · 45 min" },
+          { time: "11:00", title: "Sourcing standup", tag: "Room 3" },
+          { time: "15:30", title: "Contract renewal review", tag: "Video" },
+        ],
+      },
+      projects: {
+        module: "Projects", icon: "projects",
+        eyebrow: "Department", title: "Projects & Delivery",
+        sub: "34 projects are active, 71% on track. Two change orders and a timesheet batch need approval before billing.",
+        quick: ["New project", "Approve time", "Change order", "Status report"],
+        kpis: [
+          { label: "Active projects", value: "34", delta: "+2", foot: "this month", up: 1, icon: "projects" },
+          { label: "On track", value: "71%", delta: "+4 pts", foot: "portfolio", up: 1, icon: "check" },
+          { label: "At risk", value: "6", delta: "+1", foot: "needs review", up: 0, icon: "pulse" },
+          { label: "Billable rate", value: "82%", delta: "+3 pts", foot: "utilisation", up: 1, icon: "clock" },
+        ],
+        chartTitle: "Portfolio burn", chartSub: "Delivered value · last 12 weeks", tag: "+7%",
+        series: [40, 44, 42, 48, 46, 52, 50, 56, 54, 60, 58, 64], labels: ["W1", "", "W3", "", "W5", "", "W7", "", "W9", "", "W11", ""],
+        tasksTitle: "Delivery approvals",
+        tasks: [
+          { id: "j1", title: "Change order — Vertex rollout", meta: "+120 hrs · scope add", amount: "120h" },
+          { id: "j2", title: "Timesheet batch — week 26", meta: "18 consultants", amount: "€41K" },
+          { id: "j3", title: "Milestone sign-off — Phase 2", meta: "Cedar Group build", amount: "" },
+          { id: "j4", title: "Change order — Atlas migration", meta: "-2 weeks · descope", amount: "-2w" },
+        ],
+        tableTitle: "Project portfolio", tcols: "1.6fr 1.2fr 1fr 1fr",
+        columns: ["Project", "Client", "Due", "Status"],
+        rows: [
+          ["ERP rollout", "Vertex Analytics", "Sep 30", "On track"],
+          ["Data migration", "Atlas Freight", "Aug 15", "At risk"],
+          ["Portal build — Phase 2", "Cedar Group", "Jul 22", "Review"],
+          ["Warehouse WMS", "Lumen Retail", "Oct 10", "Open"],
+          ["BI dashboard suite", "Pallas Foods", "Jul 5", "On track"],
+          ["Mobile app v2", "Northwind", "Nov 1", "Approved"],
+        ],
+        activity: [
+          { who: "Sara T.", text: "closed milestone ‘Phase 1’ on Cedar", time: "35 min ago" },
+          { who: "System", text: "flagged ‘Data migration’ at risk", time: "1 hr ago" },
+          { who: "Omar D.", text: "logged 14 hrs to Vertex rollout", time: "3 hr ago" },
+          { who: "Elena V.", text: "approved week-25 timesheets", time: "6 hr ago" },
+        ],
+        agenda: [
+          { time: "09:00", title: "Portfolio standup", tag: "Video · 20 min" },
+          { time: "11:00", title: "Vertex rollout steering", tag: "Room 4" },
+          { time: "16:00", title: "At-risk project review", tag: "Video" },
+        ],
+      },
+    };
+  }
+
+  timeOfDay() {
+    const h = new Date().getHours();
+    return h < 12 ? "morning" : h < 18 ? "afternoon" : "evening";
+  }
+  dateLine() {
+    return new Date().toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long" });
+  }
+
+  // ---------- actions ----------
+  select(id) { this.setState({ deptId: id, query: "", notifOpen: false }); }
+  toast(msg) { this.setState({ toast: msg }); clearTimeout(this._tt); this._tt = setTimeout(() => this.setState({ toast: null }), 2200); }
+  resolve(id, kind) {
+    const r = Object.assign({}, this.state.resolved); r[id] = kind;
+    this.setState({ resolved: r });
+    this.toast(kind === "approved" ? "Approved — routed to finance" : "Declined — requester notified");
+  }
+
+  navRow(active) {
+    return "display:flex;align-items:center;gap:11px;padding:9px 12px 9px 14px;border:none;background:" + (active ? "rgba(110,90,67,.06)" : "transparent") + ";cursor:pointer;width:100%;text-align:left;position:relative;color:" + (active ? "#1A1916" : "rgba(26,25,22,.62)") + ";transition:background .2s";
+  }
+  navLabel(active) {
+    return "font-family:var(--font-body);font-size:14px;font-weight:" + (active ? "700" : "400") + ";opacity:" + (active ? "1" : ".72") + ";white-space:nowrap";
+  }
+
+  renderVals() {
+    const d = this.data();
+    const cur = d[this.state.deptId] || d.home;
+    const A = this.cAccent(), A2 = this.cAccent2();
+    const q = (this.state.query || "").trim().toLowerCase();
+
+    // nav
+    const mkNav = (id, cfg) => {
+      const active = this.state.deptId === id;
+      return {
+        id, label: cfg.label, icon: this.ic(cfg.icon, { s: 19 }), active,
+        count: cfg.count || 0,
+        rowStyle: this.navRow(active), labelStyle: this.navLabel(active),
+        onClick: () => this.select(id),
+      };
+    };
+    const navWork = [mkNav("home", { label: "My Work", icon: "home" })];
+    const navDepts = [
+      mkNav("finance", { label: "Finance", icon: "finance", count: 3 }),
+      mkNav("sales", { label: "Sales & CRM", icon: "sales", count: 2 }),
+      mkNav("inventory", { label: "Inventory", icon: "inventory" }),
+      mkNav("hr", { label: "People & HR", icon: "hr", count: 2 }),
+      mkNav("manufacturing", { label: "Manufacturing", icon: "manufacturing" }),
+      mkNav("procurement", { label: "Procurement", icon: "procurement", count: 1 }),
+      mkNav("projects", { label: "Projects", icon: "projects" }),
+    ];
+
+    // kpis
+    const kpis = cur.kpis.map(k => ({
+      label: k.label, value: k.value, delta: (k.up ? "▲ " : "▼ ") + k.delta, foot: k.foot,
+      deltaColor: k.up ? this.colUp() : this.colDown(), icon: this.ic(k.icon, { s: 18 }),
+    }));
+
+    // tasks (filter resolved + search)
+    const tasksAll = cur.tasks.filter(t => !this.state.resolved[t.id]);
+    const tasksF = q ? tasksAll.filter(t => (t.title + " " + t.meta).toLowerCase().includes(q)) : tasksAll;
+    const tasks = tasksF.map(t => ({
+      title: t.title, meta: t.meta, amount: t.amount,
+      approve: () => this.resolve(t.id, "approved"), decline: () => this.resolve(t.id, "declined"),
+    }));
+
+    // table
+    const rowsAll = cur.rows.map(r => ({ c0: r[0], c1: r[1], c2: r[2], c3: r[3], badgeColor: this.statusColor(r[3]) }));
+    const rows = q ? rowsAll.filter(r => (r.c0 + r.c1 + r.c2 + r.c3).toLowerCase().includes(q)) : rowsAll;
+
+    // quick actions
+    const quickActions = cur.quick.map(label => ({ label, onClick: () => this.toast(label + " — opening…") }));
+
+    // notifications from activity
+    const notifItems = cur.activity.slice(0, 4).map(a => ({ text: a.who + " " + a.text, time: a.time }));
+
+    // layout arrangement
+    const layout = this.props.layout || "Balanced";
+    let cols = "1.7fr 1fr";
+    let areas = "'kpi kpi' 'chart tasks' 'table activity' 'table agenda'";
+    if (layout === "Workspace") { cols = "1fr 1fr"; areas = "'tasks tasks' 'kpi kpi' 'chart activity' 'table agenda'"; }
+    if (layout === "Analytics") { cols = "1fr 1fr 1fr"; areas = "'kpi kpi kpi' 'chart chart tasks' 'table table activity' 'table table agenda'"; }
+    const compact = (this.props.density || "Comfortable") === "Compact";
+    const tp = compact ? "15px" : "22px";
+    const gap = compact ? "14px" : "20px";
+
+    const shellStyle =
+      "--erp-accent:" + A + ";--erp-accent2:" + A2 + ";--erp-card:#FBFAF6;" +
+      "--erp-cols:" + cols + ";--erp-areas:" + areas + ";--erp-tp:" + tp + ";--erp-gap:" + gap + ";--erp-tcols:" + cur.tcols + ";" +
+      "display:grid;grid-template-columns:248px 1fr;grid-template-rows:64px 1fr;grid-template-areas:'side top' 'side main';height:100vh;width:100%;background:#EFEBE2;font-family:var(--font-body)";
+
+    return {
+      shellStyle,
+      brand: "MERIDIAN", productTag: "ERP Suite",
+      userName: "Elena Vasquez", userRole: "Operations Director", userInitials: "EV",
+      iconSettings: this.ic("settings", { s: 18 }), iconSearch: this.ic("search", { s: 18 }),
+      iconBell: this.ic("bell", { s: 20 }), iconPlus: this.ic("plus"), iconCheck: this.ic("check"), iconX: this.ic("x"),
+      navWork, navDepts,
+      moduleEyebrow: cur.module, dateLine: this.dateLine(),
+      query: this.state.query, setQuery: (e) => this.setState({ query: e.target.value }),
+      onNew: () => this.toast("New record — choose a type"),
+      toggleNotif: () => this.setState({ notifOpen: !this.state.notifOpen }),
+      notifOpen: this.state.notifOpen, notifCount: notifItems.length, notifItems,
+      greetingEyebrow: cur.eyebrow, greetingTitle: cur.title, greetingSub: cur.sub,
+      quickActions,
+      kpis,
+      chartEl: this.buildChart(cur.series), chartTitle: cur.chartTitle, chartSub: cur.chartSub, chartTag: cur.tag, chartLabels: cur.labels,
+      tasksTitle: cur.tasksTitle, tasks, pendingCount: tasksAll.length,
+      hasTasks: tasks.length > 0, noTasks: tasks.length === 0,
+      tableTitle: cur.tableTitle, tableCols: cur.columns.map((label, i) => ({ label, align: i === cur.columns.length - 1 ? "text-align:right;justify-self:end" : "" })),
+      tableRows: rows, hasRows: rows.length > 0, noRows: rows.length === 0,
+      onViewAll: () => this.toast("Opening full " + cur.tableTitle.toLowerCase()),
+      activity: cur.activity,
+      showAgenda: this.props.showAgenda !== false, agenda: cur.agenda, agendaCount: cur.agenda.length,
+      toast: this.state.toast,
+    };
+  }
+}
+</script>
+</body>
+</html>

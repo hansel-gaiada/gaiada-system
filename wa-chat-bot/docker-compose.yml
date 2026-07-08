@@ -1,0 +1,81 @@
+# WAHA (WhatsApp HTTP API) — one command: `docker compose up -d`
+# Reads WEBHOOK_SECRET from .env in this directory (compose interpolates it).
+# Then open http://localhost:3000, start the `default` session, scan the QR
+# with the bot's spare WhatsApp number. Session persists in the volume, so
+# you only scan once.
+services:
+  # Postgres for the bot store (optional — file store is used when DATABASE_URL is unset).
+  # Start with: docker compose --profile db up -d
+  # db/init.sh creates a NOBYPASSRLS app role; connect the bot as gaiada_app, NEVER postgres
+  # (superusers bypass RLS). DATABASE_URL=postgres://gaiada_app:${POSTGRES_APP_PASSWORD}@localhost:5433/gaiada
+  postgres:
+    image: postgres:17-alpine
+    container_name: gaiada-postgres
+    profiles: ["db"]
+    restart: unless-stopped
+    ports:
+      - "5433:5432" # 5433 on the host to avoid clashing with a local Postgres
+    environment:
+      POSTGRES_DB: gaiada
+      POSTGRES_PASSWORD: ${POSTGRES_SUPER_PASSWORD:?set POSTGRES_SUPER_PASSWORD in .env}
+      POSTGRES_APP_PASSWORD: ${POSTGRES_APP_PASSWORD:?set POSTGRES_APP_PASSWORD in .env}
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+      - ./db/init.sh:/docker-entrypoint-initdb.d/10-app-role.sh:ro
+
+  # Redis (media queue, 5a.1) — `docker compose --profile queue up -d`; pairs with the
+  # Postgres store + `npm run media-worker`.
+  redis:
+    image: redis:7-alpine
+    container_name: gaiada-redis
+    profiles: ["queue"]
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - redis-data:/data
+
+  # OpenBao (key custody) — LOCAL DEV ONLY via `docker compose --profile kms up -d`.
+  # Dev mode: in-memory, auto-unsealed, root token from .env. PRODUCTION runs on an
+  # ISOLATED VPS (never beside the app/DB) — see docs/runbooks/key-custody.md.
+  # After first start: docker exec gaiada-openbao bao secrets enable transit
+  openbao:
+    image: openbao/openbao
+    container_name: gaiada-openbao
+    profiles: ["kms"]
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8200:8200"
+    environment:
+      BAO_DEV_ROOT_TOKEN_ID: ${BAO_TOKEN:-dev-only-token}
+      BAO_DEV_LISTEN_ADDRESS: 0.0.0.0:8200
+    command: server -dev
+    cap_add:
+      - IPC_LOCK
+
+  waha:
+    image: devlikeapro/waha
+    container_name: gaiada-waha
+    restart: unless-stopped
+    ports:
+      # localhost-only: never expose the WAHA API to the network (it can send as your number)
+      - "127.0.0.1:3000:3000"
+    environment:
+      WHATSAPP_HOOK_URL: "http://host.docker.internal:3001/webhook?token=${WEBHOOK_SECRET}"
+      WHATSAPP_HOOK_EVENTS: "message"
+      # REST API auth — the bot sends this as X-Api-Key (WAHA_API_KEY in .env)
+      WHATSAPP_API_KEY: ${WAHA_API_KEY:?set WAHA_API_KEY in .env}
+      # Dashboard + Swagger login (defaults are waha/waha — override them)
+      WAHA_DASHBOARD_USERNAME: admin
+      WAHA_DASHBOARD_PASSWORD: ${WAHA_DASHBOARD_PASSWORD:?set WAHA_DASHBOARD_PASSWORD in .env}
+      # Re-start the saved session automatically after a container restart (no re-scan)
+      WHATSAPP_RESTART_ALL_SESSIONS: "True"
+    extra_hosts:
+      - "host.docker.internal:host-gateway" # so the Linux host is reachable too
+    volumes:
+      - waha-sessions:/app/.sessions
+
+volumes:
+  waha-sessions:
+  pg-data:
+  redis-data:

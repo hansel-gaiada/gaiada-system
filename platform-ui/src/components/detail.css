@@ -1,0 +1,5 @@
+/* DescriptionList — hairline key/value rows for detail views. */
+.lux-dlist { display: flex; flex-direction: column; min-width: 0; }
+.lux-dlist__row { display: grid; grid-template-columns: 180px 1fr; gap: 16px; align-items: baseline; padding: 12px 0; border-bottom: 0.5px solid var(--erp-hairline-soft); }
+.lux-dlist__row:last-child { border-bottom: none; }
+.lux-dlist__value { font: 400 14px/1.5 var(--font-body); color: var(--text-primary); min-width: 0; word-break: break-word; }

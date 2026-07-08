@@ -1,0 +1,30 @@
+/* Primitives — every rule obeys: 0 radius, no shadow, hairlines, opacity hovers. */
+.lux-card { background: var(--surface-card); border: 0.5px solid var(--erp-hairline); padding: 22px; display: flex; flex-direction: column; min-width: 0; }
+.lux-card--dark { background: #1a1916; color: #f4f1ea; border-color: transparent; }
+.lux-card__title { margin: 0; font-family: var(--font-display); font-weight: 700; font-size: 20px; }
+.lux-card__head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin-bottom: 16px; }
+
+.lux-btn { border: 0.5px solid var(--erp-accent); cursor: pointer; font-family: var(--font-body); font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; transition: opacity 0.28s var(--erp-ease); }
+.lux-btn:disabled { opacity: 0.4; cursor: default; }
+.lux-btn--solid { background: var(--erp-accent); color: #f4f1ea; }
+.lux-btn--solid:hover:not(:disabled) { opacity: 0.55; }
+.lux-btn--ghost { background: transparent; color: var(--text-primary); border-color: rgba(26, 25, 22, 0.3); }
+.lux-btn--ghost:hover:not(:disabled) { background: rgba(110, 90, 67, 0.05); }
+.lux-btn--sm { font-size: 11px; padding: 8px 14px; }
+.lux-btn--md { font-size: 12px; padding: 11px 20px; }
+
+.lux-badge { display: inline-flex; align-items: center; gap: 6px; font: 700 10px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; }
+.lux-badge__dot { width: 6px; height: 6px; border-radius: 50%; } /* the dot is the system's one sanctioned circle */
+
+.lux-kpi { background: var(--surface-card); border: 0.5px solid var(--erp-hairline); padding: 22px; display: flex; flex-direction: column; gap: 12px; }
+.lux-kpi__value { font-family: var(--font-display); font-weight: 700; font-size: 32px; line-height: 1; }
+.lux-kpi__delta { display: flex; align-items: center; gap: 6px; font: 400 12px var(--font-body); }
+
+.lux-table { display: flex; flex-direction: column; min-width: 0; }
+.lux-table__head, .lux-table__row { display: grid; grid-template-columns: var(--lux-tcols, 2fr 1fr 1fr 1fr); align-items: center; padding: 12px 22px; }
+.lux-table__head { border-bottom: 0.5px solid var(--erp-hairline); padding-top: 0; padding-bottom: 9px; }
+.lux-table__row { border-bottom: 0.5px solid var(--erp-hairline-soft); transition: background 0.2s var(--erp-ease); }
+.lux-table__row:hover { background: rgba(110, 90, 67, 0.04); }
+.lux-table__cell--right { justify-self: end; text-align: right; }
+
+.lux-toast { position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%); background: #1a1916; color: #f4f1ea; padding: 13px 22px; font: 400 13px var(--font-body); letter-spacing: 0.02em; z-index: 200; animation: erp-toast 0.28s var(--erp-ease); }

@@ -1,0 +1,11 @@
+# Shared CEL used across resource policies (imported via variables.import).
+apiVersion: api.cerbos.dev/v1
+exportVariables:
+  name: gaiada_common
+  definitions:
+    # Tenant gate (D5): the resource's tenant must be in the principal's authorized set.
+    inTenant: request.resource.attr.tenantId in request.principal.attr.companies
+    # Assurance ceiling (D4): low-assurance chat sessions get NO company data.
+    notLow: request.principal.attr.assurance != "low"
+    # Does the principal own this resource?
+    owns: has(request.resource.attr.ownerId) && request.resource.attr.ownerId == request.principal.id

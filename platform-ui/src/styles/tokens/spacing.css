@@ -1,0 +1,95 @@
+/* =====================================================================
+   Luxury Minimalist Design System — Spacing, Layout & Component Primitives
+   ---------------------------------------------------------------------
+   STRICT OCD COMPLIANCE: no decimals, no odd values, no arbitrary
+   numbers. Every gap, pad and rhythm step resolves to a token below.
+   ===================================================================== */
+
+:root {
+  /* ---- Primitive spacing scale ------------------------------------ */
+  --space-10:  10px;
+  --space-15:  15px;   /* internal card content only */
+  --space-20:  20px;
+  --space-30:  30px;
+  --space-40:  40px;
+  --space-50:  50px;
+  --space-60:  60px;
+  --space-100: 100px;
+
+  /* ---- Canvas & section geometry ---------------------------------- */
+  --canvas-width:        1440px;   /* desktop / 16:9 slide canvas      */
+  --section-max-width:   1340px;   /* centered content boundary        */
+  --section-pad-inline:  50px;     /* L / R inner padding (40 tablet · 20 mobile) */
+  --section-pad-block:   100px;    /* T / B luxury whitespace          */
+  --card-grid-max:       1340px;   /* grid must terminate at 1340px    */
+
+  /* Unified content gutter — full-bleed wrappers pin content to the 1340px
+     axis with a minimum L/R buffer of --section-pad-inline. Header inner,
+     every Section, and the Footer inner all share this so their left/right
+     edges line up on one vertical axis at every breakpoint. */
+  --layout-gutter: max(var(--section-pad-inline), calc((100% - var(--section-max-width)) / 2));
+
+  /* ---- Component dimension tokens (Tier 3) ------------------------ */
+  --logo-height:        35px;   /* locked to small-button height      */
+  --header-height:      80px;   /* fixed navigation bar               */
+  --button-height-md:   40px;   /* normal button                      */
+  --button-height-sm:   35px;   /* small button (mandatory in cards)  */
+  --nav-item-gap:       55px;   /* consistent 50–60px nav rhythm       */
+  --card-padding:       30px;   /* symmetrical card inset             */
+  --card-gap:           20px;   /* gap between adjacent cards         */
+  --icon-size:          20px;   /* perfect 20×20 square               */
+  --hairline-weight:    0.5px;  /* separators & input underline       */
+  --input-underline:    0.5px;  /* borderless floating field          */
+
+  /* ---- Motion — restrained, editorial (no bounce) ----------------- */
+  --ease-luxury: cubic-bezier(0.22, 0.61, 0.36, 1);  /* @kind other */
+  --dur-quick:   180ms;  /* @kind other */
+  --dur-base:    280ms;  /* @kind other */
+  --dur-slow:    520ms;  /* @kind other */
+
+  /* ---- Elevation & blur (frosted-glass header, scrim overlay) ----- */
+  --blur-glass:      12px;  /* scrolled header backdrop blur */
+  --blur-overlay:    2px;   /* mobile drawer scrim blur     */
+  --hairline-strong: 1px;   /* 1px structural micro-divider */
+  --overlay-scrim:   color-mix(in srgb, var(--text-primary) 40%, transparent);  /* drawer dim */
+
+  /* ---- Component geometry (named dimension tokens) ---------------- */
+  --drawer-width:    300px;  /* mobile nav drawer            */
+  --drawer-width-sm: 320px;  /* drawer on small phones       */
+  --cta-width:       150px;  /* fixed header CTA width        */
+  --icon-touch:      24px;   /* burger / close hit area       */
+  --bar-weight:      2px;    /* burger & close stroke weight  */
+
+  /* ---- Layout typography measures (reading widths) ---------------- */
+  --measure-hero:  560px;  /* hero opener line length      */
+  --measure-note:  280px;  /* doc-note column              */
+  --measure-form:  320px;  /* form column min width        */
+  --opacity-soft:   0.70;  /* @kind other */
+  --opacity-strong: 0.55;  /* @kind other */
+}
+
+/* ---- Layout wrappers (PascalCase-spirit, kebab-case classes) ------ */
+/* UNIFIED CORE-WIDTH LAW — fluid outer / fixed 1340px inner.
+   The Canvas spans 100% of the viewport at ALL widths (no 1440px cap), so the
+   Header, every Section, and the Footer expand fluidly edge-to-edge — section
+   background bands fill the full screen. Their inner content is locked to
+   1340px and dead-centered by --layout-gutter:
+     gutter = max(50px, (100% − 1340px) / 2)
+   → at 1440px the L/R clear space resolves to exactly 50px; beyond 1440px the
+   content stays pinned at 1340px while the gutters grow symmetrically. */
+.Canvas {
+  width: 100%;
+  margin-inline: auto;
+  background: var(--surface-page);
+  /* `clip` (not `hidden`) contains 100vw full-bleed breakouts WITHOUT creating
+     a scroll container — so descendant `position: sticky` still tracks the
+     viewport. Prevents the hero breakout from adding horizontal scroll. */
+  overflow-x: clip;
+}
+
+.Section {
+  width: 100%;
+  margin-inline: auto;
+  padding-inline: var(--layout-gutter);
+  padding-block: var(--section-pad-block);
+}

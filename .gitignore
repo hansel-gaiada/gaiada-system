@@ -1,0 +1,12 @@
+# Dependencies / build output (all components)
+node_modules/
+dist/
+.next/
+*.tsbuildinfo
+*.log
+
+# Secrets — real env files never leave the machine (.env.example is the template)
+.env
+.env.local
+.env.tmp
+.env.*.local

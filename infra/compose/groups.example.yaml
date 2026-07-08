@@ -1,0 +1,20 @@
+# Copy to groups.yaml and edit. While groups.yaml exists, ONLY groups listed here are
+# monitored (persisted + digested); messages from any other group are dropped and the
+# group is logged once so you can add it. Delete groups.yaml to fall back to trial
+# behavior (monitor every group the bot is in). Hot-reloads — no restart needed.
+#
+# Find chat ids in the bot log or the WAHA dashboard (they end in @g.us).
+groups:
+  - id: "120000000000000001@g.us"
+    name: Site A — Construction
+    category: construction
+    optIn: true # post this group's own digest back into the group at 12:00/18:00
+
+  - id: "120000000000000002@g.us"
+    name: Back Office
+    category: office
+    optIn: false # digested for management only
+
+  - id: "120000000000000009@g.us"
+    name: Management
+    isManagement: true # receives the combined categorized digest; not ingested

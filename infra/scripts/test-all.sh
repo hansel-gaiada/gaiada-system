@@ -1,0 +1,16 @@
+#!/bin/sh
+# Local CI: typecheck + test every component. Run from anywhere:
+#   sh infra/scripts/test-all.sh
+set -eu
+# NOTE: the platform suite needs Postgres (DATABASE_URL_TEST) AND a running Cerbos
+# (CERBOS_URL, default :3592). Start Cerbos: docker run -p 3592:3592 -v <repo>/platform-nest/cerbos:/config -v <repo>/platform-nest/cerbos/policies:/policies ghcr.io/cerbos/cerbos server --config=/config/cerbos.yaml
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+
+for proj in wa-chat-bot ai-gateway mcp-hub platform-nest ai-agents; do
+  echo "=== $proj ==="
+  cd "$ROOT/$proj"
+  [ -d node_modules ] || npm ci
+  npm run typecheck
+  npm test
+done
+echo "=== ALL GREEN ==="

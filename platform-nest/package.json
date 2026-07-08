@@ -1,0 +1,36 @@
+{
+  "name": "gaiada-platform-nest",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Gaiada Platform core — NestJS port of the Fastify v1 core (spec-locked backend, WS1). Contract-identical; the 86 platform tests are the parity oracle.",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/main.js",
+    "migrate": "node dist/db/migrate.js",
+    "seed:agency": "node dist/seed/agency.js",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@nestjs/common": "^10.4.4",
+    "@nestjs/core": "^10.4.4",
+    "@nestjs/platform-fastify": "^10.4.4",
+    "dotenv": "^16.4.5",
+    "ioredis": "^5.11.1",
+    "jose": "^6.2.3",
+    "pg": "^8.13.1",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.1",
+    "uuid": "^11.0.0"
+  },
+  "devDependencies": {
+    "@nestjs/cli": "^10.4.5",
+    "@nestjs/testing": "^10.4.4",
+    "@swc/core": "^1.7.28",
+    "@types/node": "^22.9.0",
+    "@types/pg": "^8.11.10",
+    "typescript": "^5.6.3",
+    "unplugin-swc": "^1.5.1",
+    "vitest": "^2.1.5"
+  }
+}

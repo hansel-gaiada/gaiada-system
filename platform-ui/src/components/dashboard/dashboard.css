@@ -1,0 +1,16 @@
+.dash-grid { display: grid; gap: 20px; grid-template-columns: 1.7fr 1fr; grid-template-areas: "kpi kpi" "chart tasks" "table activity"; }
+.dash-kpis { grid-area: kpi; display: grid; gap: 20px; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); }
+.dash-approval { padding: 13px 0; border-top: 0.5px solid rgba(26, 25, 22, 0.1); display: flex; gap: 12px; align-items: flex-start; }
+.dash-approval__title { font: 400 14px/1.35 var(--font-body); color: var(--text-primary); }
+.dash-approval__meta { font: 400 12px var(--font-body); color: rgba(26, 25, 22, 0.55); margin-top: 3px; }
+.dash-approval__actions { display: flex; gap: 6px; }
+.dash-approval__btn { width: 26px; height: 26px; border: 0.5px solid rgba(26, 25, 22, 0.3); background: transparent; color: var(--text-primary); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
+.dash-approval__btn--solid { border-color: var(--erp-accent); background: var(--erp-accent); color: #f4f1ea; }
+.dash-empty { padding: 26px 0; text-align: center; }
+.dash-empty p { font: 400 13px var(--font-body); color: rgba(26, 25, 22, 0.55); margin-top: 6px; }
+.dash-pending-chip { font: 700 11px var(--font-body); letter-spacing: 0.06em; color: var(--erp-accent); border: 0.5px solid var(--erp-accent); padding: 4px 9px; }
+.dash-activity-row { display: flex; gap: 12px; padding-bottom: 16px; }
+.dash-activity-dot { display: flex; flex-direction: column; align-items: center; }
+.dash-activity-dot span:first-child { width: 8px; height: 8px; border-radius: 50%; background: var(--erp-accent); margin-top: 5px; }
+.dash-activity-dot span:last-child { flex: 1; width: 0.5px; background: var(--erp-hairline); margin-top: 5px; }
+@media (max-width: 1100px) { .dash-grid { grid-template-columns: 1fr; grid-template-areas: "kpi" "chart" "tasks" "table" "activity"; } }

@@ -1,0 +1,17 @@
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: notification
+  importDerivedRoles: ["gaiada_scopes"]
+  variables:
+    import: ["gaiada_common"]
+  rules:
+    - actions: ["*"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["platform_admin"]
+    # Any tenant member may read/mark their own notifications; the route scopes rows to
+    # user_id = principal, so this is a per-user inbox even though RLS is tenant-level.
+    - actions: ["read", "update"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin", "manager", "member", "viewer", "team_lead"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }

@@ -1,0 +1,853 @@
+/* =====================================================================
+   Luxury Minimalist Design System — Component Styles
+   Class-based, token-driven. JSX primitives apply these classes so
+   hover / focus / state behaviour ships to consumers natively.
+   Naming: kebab-case classes, BEM-ish modifiers (luxury-block--modifier).
+   ===================================================================== */
+
+/* ---------------------------------------------------------------------
+   GLOBAL BOX MODEL — every element measures border-box so padding +
+   border never push computed widths/heights into sub-pixel remainders.
+   --------------------------------------------------------------------- */
+*, *::before, *::after { box-sizing: border-box; }
+
+/* ---------------------------------------------------------------------
+   BUTTON
+   --------------------------------------------------------------------- */
+.luxury-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-10);
+  font-family: var(--font-body);
+  font-weight: var(--weight-bold);
+  letter-spacing: 0.01em;
+  text-transform: none;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+  border: var(--hairline-weight) solid transparent;
+  border-radius: 0;                 /* luxury minimalist — square edges */
+  padding-inline: var(--space-30);
+  transition: background-color var(--dur-base) var(--ease-luxury),
+              color var(--dur-base) var(--ease-luxury),
+              opacity var(--dur-base) var(--ease-luxury),
+              border-color var(--dur-base) var(--ease-luxury);
+  -webkit-font-smoothing: antialiased;
+}
+.luxury-btn:focus-visible {
+  outline: var(--hairline-weight) solid var(--accent);
+  outline-offset: 3px;
+}
+
+/* sizes */
+.luxury-btn--md { height: var(--button-height-md); font-size: var(--body-sm-size);  line-height: var(--body-sm-line); }
+.luxury-btn--sm { height: var(--button-height-sm); font-size: var(--caption-size);  line-height: var(--caption-line); }
+
+/* Type 1 — Ghost → Solid: transparent + hairline border, fills on hover */
+.luxury-btn--ghost {
+  background: transparent;
+  color: var(--text-primary);
+  border-color: var(--text-primary);
+}
+.luxury-btn--ghost:hover {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--text-on-accent);
+  opacity: var(--opacity-fade);     /* clamps fill at 50–60% */
+}
+
+/* Type 2 — Solid → Fade: solid fill that fades to 50–60% on hover */
+.luxury-btn--solid {
+  background: var(--accent);
+  color: var(--text-on-accent);
+  border-color: var(--accent);
+}
+.luxury-btn--solid:hover { opacity: var(--opacity-fade); }
+
+/* secondary accent variant (applies to either type) */
+.luxury-btn--secondary.luxury-btn--solid { background: var(--accent-secondary); border-color: var(--accent-secondary); }
+.luxury-btn--secondary.luxury-btn--ghost:hover { background: var(--accent-secondary); border-color: var(--accent-secondary); }
+
+.luxury-btn:disabled,
+.luxury-btn[aria-disabled="true"] {
+  opacity: 0.35;
+  pointer-events: none;
+}
+
+/* ---------------------------------------------------------------------
+   ICON BUTTON / ICON UTILITY  — perfect 20×20, 60%→100% opacity
+   --------------------------------------------------------------------- */
+.luxury-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--icon-size);
+  height: var(--icon-size);
+  opacity: var(--opacity-muted);
+  transition: opacity var(--dur-base) var(--ease-luxury);
+}
+.luxury-icon > svg { width: 100%; height: 100%; display: block; }
+.luxury-icon-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  color: var(--text-primary);
+}
+.luxury-icon-btn:hover .luxury-icon,
+a:hover .luxury-icon { opacity: 1; }
+
+/* ---------------------------------------------------------------------
+   CARD  — 30px symmetrical inset, paper surface, hairline edge
+   ---------------------------------------------------------------------
+   CONDITIONAL BORDER: a card on the light off-white/paper surface carries
+   the ultra-thin hairline; any FILLED card (accent / secondary / dark)
+   drops the border entirely and inverts its ink for contrast.
+   --------------------------------------------------------------------- */
+.luxury-card {
+  display: flex;
+  flex-direction: column;
+  background: var(--surface-card);
+  padding: var(--card-padding);
+  border: none;          /* fully borderless — contrast + spacing define form */
+  box-shadow: none;
+  border-radius: 0;
+}
+
+/* filled variants — inverted ink (all cards are borderless system-wide) */
+.luxury-card--accent    { background: var(--accent); }
+.luxury-card--secondary { background: var(--accent-secondary); }
+.luxury-card--dark      { background: var(--text-primary); }
+
+.luxury-card--accent .luxury-card__title,
+.luxury-card--accent .luxury-card__body,
+.luxury-card--secondary .luxury-card__title,
+.luxury-card--secondary .luxury-card__body,
+.luxury-card--dark .luxury-card__title,
+.luxury-card--dark .luxury-card__body { color: var(--surface-page); }
+
+/* ghost buttons inside filled cards invert to the light ink */
+.luxury-card--accent .luxury-btn--ghost,
+.luxury-card--secondary .luxury-btn--ghost,
+.luxury-card--dark .luxury-btn--ghost {
+  color: var(--surface-page);
+  border-color: var(--surface-page);
+}
+.luxury-card--accent .luxury-btn--ghost:hover,
+.luxury-card--secondary .luxury-btn--ghost:hover,
+.luxury-card--dark .luxury-btn--ghost:hover {
+  background: var(--surface-page);
+  color: var(--text-primary);
+  border-color: var(--surface-page);
+  opacity: 1;
+}
+
+.luxury-card__title { /* H3 Cormorant — set by component */
+  font-family: var(--font-display);
+  font-weight: var(--weight-bold);
+  font-size: var(--h3-size);
+  line-height: var(--h3-line);
+  color: var(--text-primary);
+  margin: 0;
+}
+.luxury-card__body {  /* Body Normal */
+  font-family: var(--font-body);
+  font-weight: var(--weight-regular);
+  font-size: var(--body-md-size);
+  line-height: var(--body-md-line);
+  color: var(--text-primary);
+  margin: var(--space-15) 0 0;       /* Title → description = 15px */
+}
+.luxury-card__actions {
+  margin-top: var(--space-30);       /* description → small button = 30px */
+}
+
+/* card grid — gaps of 20px, terminates at 1340px */
+.luxury-card-grid {
+  display: grid;
+  gap: var(--card-gap);
+  max-width: var(--card-grid-max);
+  grid-template-columns: repeat(var(--cols, 3), 1fr);
+}
+
+/* ---------------------------------------------------------------------
+   BADGE / TAG  — Caption regular, hairline pill or square
+   --------------------------------------------------------------------- */
+.luxury-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-10);
+  min-width: 80px;                 /* strict even-integer minimum footprint */
+  font-family: var(--font-body);
+  font-weight: var(--weight-regular);
+  font-size: var(--caption-size);
+  line-height: 1;                  /* single-line — no height collision */
+  letter-spacing: var(--track-wide);
+  text-transform: uppercase;
+  white-space: nowrap;             /* never wrap multi-word tags */
+  padding: 8px 16px;               /* integer box; padding drives the height */
+  border: var(--hairline-weight) solid var(--text-primary);
+  color: var(--text-primary);
+  background: transparent;
+  border-radius: 0;
+}
+.luxury-badge--accent { color: var(--accent); border-color: var(--accent); }
+.luxury-badge--solid  { background: var(--accent); border-color: var(--accent); color: var(--text-on-accent); }
+
+/* ---------------------------------------------------------------------
+   SEPARATOR  — hairline 0.5px, horizontal or vertical
+   --------------------------------------------------------------------- */
+.luxury-separator {
+  background: var(--hairline);
+  opacity: var(--opacity-hairline);
+  border: none;
+}
+.luxury-separator--h { width: 100%; height: var(--hairline-weight); margin: 0; }
+.luxury-separator--v { width: var(--hairline-weight); align-self: stretch; min-height: 1em; }
+
+/* ---------------------------------------------------------------------
+   FLOATING INPUT  — borderless, 0.5px underline, floating label
+   --------------------------------------------------------------------- */
+.luxury-field {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  padding-top: var(--space-20);      /* room for the floated label */
+}
+.luxury-field__input {
+  font-family: var(--font-body);
+  font-weight: var(--weight-regular);
+  font-size: var(--body-md-size);
+  line-height: var(--body-md-line);
+  color: var(--text-primary);
+  background: transparent;
+  border: none;
+  border-bottom: var(--input-underline) solid var(--accent);
+  padding: var(--space-10) 0;
+  width: 100%;
+  outline: none;
+  transition: border-color var(--dur-base) var(--ease-luxury);
+}
+.luxury-field__input::placeholder { color: transparent; }  /* label stands in */
+.luxury-field__label {
+  position: absolute;
+  left: 0;
+  top: calc(var(--space-20) + var(--space-10));
+  font-family: var(--font-body);
+  font-weight: var(--weight-regular);
+  font-size: var(--body-md-size);
+  line-height: var(--body-md-line);
+  color: var(--text-primary);
+  opacity: var(--opacity-muted);
+  pointer-events: none;
+  transform-origin: left top;
+  transition: transform var(--dur-base) var(--ease-luxury),
+              opacity var(--dur-base) var(--ease-luxury);
+}
+/* float up + scale to Body Small (14/16 = 0.875) when focused or filled */
+.luxury-field__input:focus + .luxury-field__label,
+.luxury-field__input:not(:placeholder-shown) + .luxury-field__label {
+  transform: translateY(-22px) scale(0.875);
+  opacity: 1;
+}
+.luxury-field__input:focus { border-bottom-color: var(--accent); }
+.luxury-field__error {
+  font-family: var(--font-body);
+  font-weight: var(--weight-regular);
+  font-size: var(--caption-size);
+  line-height: var(--caption-line);
+  color: var(--accent);
+  opacity: var(--opacity-muted);     /* empathetic, elegant — not alarmist */
+  margin-top: var(--space-10);
+}
+.luxury-field--error .luxury-field__input { border-bottom-color: var(--accent); }
+
+/* ---------------------------------------------------------------------
+   HEADER  — 80px fixed bar, 35px logo, 50–60px nav rhythm
+   --------------------------------------------------------------------- */
+/* Full-width bar: spans the whole canvas, locked to 80px.
+   Background, shadow and border all transition for the smart-scroll engine
+   (transparent overlay → solid off-white), locked to 300ms ease-in-out. */
+.luxury-header {
+  height: var(--header-height);
+  min-height: var(--header-height);
+  max-height: var(--header-height);
+  width: 100%;
+  background: var(--surface-page);
+  border-bottom: var(--hairline-weight) solid color-mix(in srgb, var(--hairline) 18%, transparent);
+  transition: background-color 300ms ease-in-out,
+              box-shadow 300ms ease-in-out,
+              border-color 300ms ease-in-out;
+}
+
+/* Sticky positioning for the scroll engine. */
+.luxury-header--sticky { position: sticky; top: 0; z-index: 100; }
+
+/* OVERLAY (at top of an immersive hero): transparent bar, light contrast
+   content inheriting the off-white background token for readability. */
+.luxury-header--overlay {
+  background-color: transparent;
+  border-bottom-color: transparent;
+}
+.luxury-header--overlay .luxury-header__logo-word { color: var(--brand-color-bg); }
+.luxury-header--overlay .luxury-header__link      { color: var(--brand-color-bg); opacity: 1; }
+.luxury-header--overlay .luxury-header__link:hover,
+.luxury-header--overlay .luxury-header__link[aria-current="page"] { opacity: 1; }
+/* ACTIVE — UNIFIED color across BOTH header states (transparent hero +
+   scrolled off-white). Champagne secondary is the most balanced brand token
+   across the two opposite-luminance backgrounds, so it is locked identically
+   in both contexts for a uniform, legible selected mark. */
+.luxury-header--overlay .luxury-header__link[aria-current="page"] { color: var(--brand-color-secondary); }
+.luxury-header--overlay .luxury-btn--ghost {
+  color: var(--brand-color-bg);
+  border-color: var(--brand-color-bg);
+}
+.luxury-header--overlay .luxury-btn--ghost:hover {
+  background: var(--brand-color-bg);
+  color: var(--brand-color-text-dark);
+  opacity: 1;
+}
+
+/* SCROLLED state (window.scrollY > 20): solid off-white, refined drop shadow
+   (no hairline border), blur, and the inner content inverts to dark. */
+/* SCROLLED state (window.scrollY > 20): frosted off-white glass, refined drop
+   shadow, 12px backdrop blur, micro hairline, and dark inner content.
+   The translucent fill is derived from the LIVE --brand-color-bg token at 92%
+   (via color-mix) so the panel still drives the hue; blur reveals the editorial
+   content passing beneath without harming nav contrast. */
+.luxury-header.is-scrolled {
+  background-color: color-mix(in srgb, var(--brand-color-bg) 92%, transparent);
+  -webkit-backdrop-filter: blur(var(--blur-glass));
+  backdrop-filter: blur(var(--blur-glass));
+  box-shadow: var(--shadow-header);
+  border-bottom: var(--hairline-strong) solid color-mix(in srgb, var(--text-primary) 5%, transparent);   /* micro hairline for structural clarity */
+}
+.luxury-header.is-scrolled .luxury-header__logo-word { color: var(--brand-color-text-dark); }
+.luxury-header.is-scrolled .luxury-header__link      { color: var(--brand-color-text-dark); opacity: 1; }
+.luxury-header.is-scrolled .luxury-header__link:hover,
+.luxury-header.is-scrolled .luxury-header__link[aria-current="page"] { opacity: 1; }
+/* ACTIVE — unified champagne secondary, identical to the overlay state. */
+.luxury-header.is-scrolled .luxury-header__link[aria-current="page"] { color: var(--brand-color-secondary); }
+.luxury-header.is-scrolled .luxury-btn--ghost {
+  color: var(--brand-color-text-dark);
+  border-color: var(--brand-color-text-dark);
+}
+.luxury-header.is-scrolled .luxury-btn--ghost:hover {
+  background: var(--accent);
+  color: var(--text-on-accent);
+  opacity: var(--opacity-fade);
+}
+/* Inner content container: full-bleed with the unified gutter so its content
+   edges align to the same 1340px axis as every Section and the Footer.
+   3-column grid keeps the nav centered; brand pins left, actions pin right. */
+.luxury-header__inner {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  height: 100%;
+  width: 100%;
+  margin: 0 auto;
+  padding-inline: var(--layout-gutter);
+  box-sizing: border-box;
+}
+.luxury-header__brand { display: flex; align-items: center; gap: var(--space-15); text-decoration: none; justify-self: start; grid-column: 1; }
+.luxury-header__logo-img { height: var(--logo-height); width: auto; display: block; }
+.luxury-header__logo-word {
+  font-family: var(--font-display);
+  font-weight: var(--weight-bold);
+  font-size: var(--h3-size);
+  line-height: var(--logo-height);
+  letter-spacing: 0.12em;
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+.luxury-header__nav {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  justify-self: center;
+  grid-column: 2;
+  gap: var(--nav-item-gap);
+  height: var(--button-height-sm);   /* nav text height matched to small button */
+}
+.luxury-header__link {
+  position: relative;         /* anchor for the ::after hover indicator */
+  font-family: var(--font-body);
+  font-weight: var(--weight-regular);
+  font-size: var(--body-sm-size);
+  line-height: var(--body-sm-line);
+  letter-spacing: var(--track-normal);
+  text-transform: none;       /* Title Case content — no uppercase transform */
+  text-decoration: none;
+  color: var(--text-primary);
+  opacity: 1;                 /* DEFAULT: regular (Light) · 100% solid */
+  transition: opacity var(--dur-base) var(--ease-luxury);
+}
+/* Editorial hover indicator: a 1px center-anchored rule covering ~65% of the
+   word, sliding open from the center. Inherits the active text color. */
+.luxury-header__link::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: -6px;
+  width: 45%;                 /* 40–50% of the word, centered */
+  height: var(--hairline-strong);
+  background-color: currentColor;
+  transform: translateX(-50%) scaleX(0);
+  transform-origin: center;
+  opacity: 0;
+  transition: transform var(--dur-base) var(--ease-luxury),
+              opacity var(--dur-base) var(--ease-luxury);
+}
+.luxury-header__link:hover,
+.luxury-header__link[aria-current="page"] { opacity: 1; }   /* HOVER & ACTIVE: 100% solid */
+/* SELECTED (active): Bold 700, line indicator + hover fully disabled.
+   Unified active color (champagne secondary) — identical in every header state. */
+.luxury-header__link[aria-current="page"] { font-weight: var(--weight-bold); color: var(--brand-color-secondary); }
+.luxury-header__link[aria-current="page"]:hover::after { transform: translateX(-50%) scaleX(0); opacity: 0; }
+/* HOVER (default only): weight unchanged — only the center line reveals. */
+.luxury-header__link:not([aria-current="page"]):hover::after { transform: translateX(-50%) scaleX(1); opacity: 1; }
+.luxury-header__actions { display: flex; align-items: center; justify-content: flex-end; justify-self: end; grid-column: 3; gap: var(--space-20); }
+.luxury-header__actions .luxury-btn { width: var(--cta-width); }   /* tokenized CTA width — no sub-pixel */
+
+/* ---------------------------------------------------------------------
+   HAMBURGER + SLIDE-OUT DRAWER (≤1024px) — desktop hides all of this
+   --------------------------------------------------------------------- */
+/* Trigger — raw minimalist bars, no container shape. Hidden on desktop. */
+.luxury-header__burger {
+  display: none;
+  grid-column: 3;
+  justify-self: end;
+  align-items: center;
+  justify-content: center;
+  width: var(--icon-touch);
+  height: var(--icon-touch);
+  padding: 0;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: inherit;
+}
+.luxury-header__burger-bars,
+.luxury-header__burger-bars::before,
+.luxury-header__burger-bars::after {
+  content: "";
+  display: block;
+  width: var(--icon-touch);
+  height: var(--bar-weight);
+  background-color: currentColor;
+  transition: opacity var(--dur-base) var(--ease-luxury);
+}
+.luxury-header__burger-bars { position: relative; }
+.luxury-header__burger-bars::before { position: absolute; top: -7px; left: 0; }
+.luxury-header__burger-bars::after  { position: absolute; top: 7px;  left: 0; }
+/* burger inherits the header's current text color (overlay = light, scrolled = dark) */
+.luxury-header--overlay .luxury-header__burger { color: var(--brand-color-bg); }
+.luxury-header.is-scrolled .luxury-header__burger { color: var(--brand-color-text-dark); }
+
+/* Dimming overlay */
+.luxury-nav-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9998;
+  background-color: var(--overlay-scrim);
+  -webkit-backdrop-filter: blur(var(--blur-overlay));
+  backdrop-filter: blur(var(--blur-overlay));
+  opacity: 0;
+  transition: opacity var(--dur-base) var(--ease-luxury);
+}
+.luxury-header.is-menu-open .luxury-nav-overlay,
+.is-menu-open ~ .luxury-nav-overlay,
+.luxury-nav-overlay.is-open { opacity: 1; }
+.luxury-nav-overlay[hidden] { display: none; }
+
+/* Right slide-out drawer — fully isolated from the header: fixed, full-height,
+   high z-index, fixed integer width, off-white. Slides in from the right. */
+.luxury-nav-drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  z-index: 9999;
+  height: 100vh;
+  width: var(--drawer-width);
+  max-width: 100%;
+  background-color: var(--brand-color-bg);
+  padding: var(--space-20);
+  box-sizing: border-box;
+  transform: translateX(100%);
+  transition: transform var(--dur-base) var(--ease-luxury);
+  display: flex;
+  flex-direction: column;
+}
+.luxury-header.is-menu-open .luxury-nav-drawer,
+.is-menu-open ~ .luxury-nav-drawer,
+.luxury-nav-drawer.is-open { transform: translateX(0); }
+
+/* Close (X) — pinned to the EXACT coordinate of the burger trigger.
+   Burger sits at the inner's right padding edge (50px) and is vertically
+   centered in the 80px bar. The drawer is position:fixed, so the close
+   button's absolute offsets are viewport-relative: right = 50px (section
+   padding), top = (80 − 24) / 2 = 28px. Tapping the burger and the close
+   lands on the same screen point. */
+.luxury-nav-drawer__close {
+  position: absolute;
+  top: 28px;                       /* (80 header − 24 icon) / 2 — vertically centered */
+  right: var(--layout-gutter);     /* tracks the burger at every breakpoint (40/20px) */
+  width: var(--icon-touch);
+  height: var(--icon-touch);
+  padding: 0;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--brand-color-text-dark);
+}
+.luxury-nav-drawer__close-mark { position: relative; display: block; width: var(--icon-touch); height: var(--icon-touch); }
+.luxury-nav-drawer__close-mark::before,
+.luxury-nav-drawer__close-mark::after {
+  content: "";
+  position: absolute;
+  top: 11px;
+  left: 0;
+  width: var(--icon-touch);
+  height: var(--bar-weight);
+  background-color: currentColor;
+}
+.luxury-nav-drawer__close-mark::before { transform: rotate(45deg); }
+.luxury-nav-drawer__close-mark::after  { transform: rotate(-45deg); }
+
+.luxury-nav-drawer__links {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-30);
+  margin-top: var(--header-height);   /* clear the close button row */
+}
+.luxury-nav-drawer__link {
+  font-family: var(--font-body);
+  font-weight: var(--weight-regular);
+  font-size: var(--body-md-size);
+  line-height: var(--body-md-line);
+  text-decoration: none;
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+.luxury-nav-drawer__link[aria-current="page"] { font-weight: var(--weight-bold); color: var(--brand-color-secondary); }
+.luxury-nav-drawer__actions { margin-top: var(--space-40); }
+.luxury-nav-drawer__actions .luxury-btn { width: 100%; }
+
+/* ---------------------------------------------------------------------
+   FOOTER  — editorial multi-column (brand + address left, link columns right)
+   Type ceiling: Body Normal (16px). Floor: Caption (12px) for © only.
+   --------------------------------------------------------------------- */
+.luxury-footer {
+  width: 100%;
+  background: var(--surface-page);
+  border-top: var(--hairline-weight) solid color-mix(in srgb, var(--hairline) 18%, transparent);
+}
+.luxury-footer__inner {
+  width: 100%;
+  margin: 0 auto;
+  padding: var(--space-60) var(--layout-gutter) var(--space-40);
+  box-sizing: border-box;
+  display: grid;
+  /* Brand absorbs the slack (1fr); the 3 link groups shrink to content (auto)
+     and pack against the right edge, so the last column's right edge sits
+     flush with the right end of the base divider. */
+  grid-template-columns: 1fr auto auto auto;
+  column-gap: var(--space-60);
+  row-gap: var(--space-40);
+}
+/* Column 1 — brand, address, contact, social.
+   Explicit per-child top margins (no shared `gap`) give exact vertical
+   control: logo → address = 30px, address(email) → social = 15px. */
+.luxury-footer__brand-col { display: flex; flex-direction: column; }
+.luxury-footer__brand-col > .luxury-footer__address { margin-top: var(--space-30); }
+.luxury-footer__brand-col > .luxury-footer__social  { margin-top: var(--space-15); }
+.luxury-footer__logo {
+  font-family: var(--font-display);
+  font-weight: var(--weight-bold);
+  font-size: var(--h3-size);
+  line-height: var(--logo-height);
+  letter-spacing: 0.12em;
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+.luxury-footer__logo-img { height: var(--logo-height); width: auto; display: block; }
+.luxury-footer__address {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-20);
+  font-family: var(--font-body);
+  font-weight: var(--weight-regular);
+  font-size: var(--body-md-size);
+  line-height: var(--body-md-line);
+  color: var(--text-primary);
+}
+.luxury-footer__address a { color: inherit; text-decoration: none; opacity: var(--opacity-muted); transition: opacity var(--dur-base) var(--ease-luxury); }
+.luxury-footer__address a:hover { opacity: 1; }
+/* Merged meta block — both phrases in one tag; inherits the global type matrix.
+   Subtext uses the primary brand color (token-driven). */
+.luxury-footer__meta { margin: 0; color: var(--brand-color-primary); }
+/* Footer brand description — 100% token-driven, no hardcoded values. */
+.luxury-footer__brand-desc {
+  margin: 0;
+  font-family: var(--font-body);
+  font-weight: var(--weight-regular);
+  font-size: var(--body-md-size);
+  line-height: var(--body-md-line);
+  color: var(--brand-color-primary);
+}
+.luxury-footer__social { display: flex; align-items: center; gap: var(--space-20); }
+
+/* ---------------------------------------------------------------------
+   META COLUMN — EXACT 15px EMAIL → SOCIAL VERTICAL FLOW
+   The email sits as the last line of .luxury-footer__address; its 25px
+   line-height left trailing leading below the glyph which, added to the
+   15px social margin, read as an oversized gap. We tighten the email
+   line-box to its 16px font size (integer, no leading) and strip any
+   residual margins so the social row sits a clean, exact 15px below.
+   --------------------------------------------------------------------- */
+.luxury-footer__brand-col > .luxury-footer__social { margin-top: var(--space-15); }   /* exactly 15px */
+.luxury-footer__brand-col .luxury-footer__address > a {
+  display: block;
+  line-height: var(--body-md-size);   /* 16px = font size → zero trailing leading */
+  margin: 0;
+}
+.luxury-footer__brand-col .luxury-footer__social,
+.luxury-footer__brand-col .luxury-footer__social a { margin-bottom: 0; }
+
+/* Columns 2–4 — link groups.
+   Desktop only: the brand column leads with the "Logo" wordmark (35px) then a
+   30px gap before the tagline. To put the column titles on the SAME baseline as
+   that tagline (not the logo), offset the columns down by logo-height + 30px.
+   Reset to 0 at ≤1080px where the brand column spans its own full row. */
+.luxury-footer__col {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-30);
+  margin-top: calc(var(--logo-height) + var(--space-30));   /* 35 + 30 = 65px → aligns titles to tagline */
+}
+.luxury-footer__col-title {
+  font-family: var(--font-body);
+  font-weight: var(--weight-regular);
+  font-size: var(--body-md-size);
+  line-height: var(--body-md-line);
+  letter-spacing: var(--track-wide);
+  text-transform: capitalize;   /* soft title case — only first letter of each word */
+  color: var(--brand-color-primary);   /* primary brand color */
+}
+.luxury-footer__links { display: flex; flex-direction: column; gap: var(--space-20); }
+.luxury-footer__link {
+  font-family: var(--font-body);
+  font-weight: var(--weight-regular);
+  font-size: var(--body-md-size);
+  line-height: var(--body-md-line);
+  text-decoration: none;
+  color: var(--text-primary);
+  opacity: var(--opacity-muted);
+  transition: opacity var(--dur-base) var(--ease-luxury);
+}
+.luxury-footer__link:hover { opacity: 1; }
+
+/* Copyright bar — copyright (Caption, left) + social icons (right), split by a
+   hairline. Full-bleed with the unified gutter; divider spans the 1340px axis. */
+.luxury-footer__base {
+  position: relative;
+  width: 100%;
+  margin: 0 auto;
+  padding: var(--space-30) var(--layout-gutter) var(--space-50);
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-20);
+  flex-wrap: wrap;
+}
+.luxury-footer__base::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: var(--layout-gutter);
+  right: var(--layout-gutter);
+  height: var(--hairline-weight);
+  background: color-mix(in srgb, var(--hairline) 18%, transparent);
+}
+.luxury-footer__copy {
+  display: block;
+  font-family: var(--font-body);
+  font-weight: var(--weight-regular);
+  font-size: var(--caption-size);
+  line-height: var(--caption-line);
+  letter-spacing: 0.06em;
+  color: var(--text-primary);
+  opacity: var(--opacity-muted);
+}
+/* Social icons live in the base bar, right-aligned opposite the copyright. */
+.luxury-footer__base > .luxury-footer__social { margin: 0; gap: var(--space-30); }
+
+@media (max-width: 1080px) {
+  .luxury-footer__inner { grid-template-columns: 1.4fr 1fr 1fr; }
+  .luxury-footer__brand-col { grid-column: 1 / -1; margin-bottom: var(--space-20); }
+  .luxury-footer__col { margin-top: 0; }   /* columns now lead their own row — no offset */
+}
+@media (max-width: 640px) {
+  .luxury-footer__inner { grid-template-columns: 1fr 1fr; }
+  .luxury-footer__brand-col { grid-column: 1 / -1; }
+}
+@media (max-width: 420px) {
+  .luxury-footer__inner { grid-template-columns: 1fr; }
+}
+
+/* ---------------------------------------------------------------------
+   SECTION TONES — rhythmic background alternation (zebra striping)
+   ---------------------------------------------------------------------
+   Full-bleed backgrounds; content stays centered to the 1340px boundary.
+   --paper : premium off-white, off-black text
+   --tint  : muted secondary-accent wash, off-black text (AAA on light tint)
+   --dark  : matte ink immersive layer, off-white text (hero / feature)
+   --------------------------------------------------------------------- */
+.section-tone--paper { background-color: var(--surface-page); color: var(--text-primary); }
+.section-tone--tint  { background-color: color-mix(in srgb, var(--accent-secondary) 12%, var(--surface-page)); color: var(--text-primary); }
+.section-tone--dark  { background-color: var(--text-primary); color: var(--surface-page); }
+
+/* On the dark immersive layer, force editorial type to the light token. */
+.section-tone--dark .type-h1,
+.section-tone--dark .type-h2,
+.section-tone--dark .type-h3,
+.section-tone--dark .type-body-lg,
+.section-tone--dark .type-body-md,
+.section-tone--dark .type-body-sm,
+.section-tone--dark .type-caption,
+.section-tone--dark .type-eyebrow { color: var(--surface-page); }
+
+/* Ghost buttons on the dark immersive layer invert to the light token. */
+.section-tone--dark .luxury-btn--ghost {
+  color: var(--surface-page);
+  border-color: var(--surface-page);
+}
+.section-tone--dark .luxury-btn--ghost:hover {
+  background: var(--surface-page);
+  color: var(--text-primary);
+  border-color: var(--surface-page);
+  opacity: 1;
+}
+
+/* =====================================================================
+   HERO — sticky / parallax / full-bleed scroll-reveal engine
+   ---------------------------------------------------------------------
+   Promoted out of the dashboard's local <style> into the shipped system so
+   any consuming project can build an immersive hero. The hero pins to the
+   top (z-1) while .luxury-sections-below slides up and stacks over it like
+   an editorial curtain reveal. Content stays pinned to the 1340px axis via
+   --layout-gutter; text is flex-centered in the area below the 80px header
+   so the gap above and below is mathematically identical.
+   ===================================================================== */
+html { scroll-behavior: smooth; }   /* cinematic document scroll */
+
+.luxury-hero {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  width: 100%;
+  min-height: 100vh;
+  margin-top: calc(var(--header-height) * -1);   /* sit behind the overlay header */
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: var(--header-height) var(--layout-gutter) 0;   /* balanced vertical centering */
+  box-sizing: border-box;
+}
+
+/* Full-bleed modifier — span the viewport edge-to-edge even inside a capped
+   parent; inner content stays centered on the 1340px axis via the gutter. */
+.luxury-hero--full-bleed {
+  width: 100vw;
+  max-width: 100vw;
+  margin-left: calc(50% - 50vw);
+  margin-right: calc(50% - 50vw);
+}
+
+/* Content stack rides above the pinned hero. */
+.luxury-sections-below { position: relative; z-index: 2; }
+
+/* Hero inner content — full-width, centered editorial column. */
+.luxury-hero__content { text-align: center; width: 100%; }
+.luxury-hero__content .type-eyebrow { display: block; margin-bottom: var(--space-30); }
+.luxury-hero__content h1 { margin: 0; }
+.luxury-hero__content p  { margin: var(--space-30) auto 0; max-width: var(--measure-hero); }
+.luxury-hero__cta {
+  margin-top: var(--space-60);
+  display: flex;
+  gap: var(--space-20);
+  justify-content: center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+}
+
+/* =====================================================================
+   RESPONSIVE — Tablet (≤1024px) & Mobile (≤768px)
+   Strict whole-integer sizing; no fluid/fractional values. The horizontal
+   menu collapses into the right-side hamburger drawer.
+   ===================================================================== */
+@media (max-width: 1024px) {
+  /* Unified gutter — one token drives header, sections & footer alike. */
+  :root { --section-pad-inline: 40px; }
+
+  /* Collapse desktop nav + CTA; reveal the hamburger in the right slot. */
+  .luxury-header__nav,
+  .luxury-header__actions { display: none; }
+  .luxury-header__burger { display: inline-flex; }
+
+  /* Tablet vertical rhythm — integer step. */
+  .Section { padding-block: var(--space-60); }
+
+  /* Footer compresses to a clean 2-column grid (brand spans full row). */
+  .luxury-footer__inner { grid-template-columns: 1fr 1fr; gap: var(--space-40); }
+  .luxury-footer__brand-col { grid-column: 1 / -1; margin-bottom: var(--space-20); }
+
+  /* Card grid → 2 across at tablet. */
+  .luxury-card-grid { grid-template-columns: repeat(2, 1fr); }
+}
+
+@media (max-width: 768px) {
+  /* Unified gutter — 20px on every wrapper via the shared token. */
+  :root {
+    --section-pad-inline: 20px;
+    --h1-size: 32px;  --h1-line: 44px;
+    --h2-size: 28px;  --h2-line: 40px;
+    --h3-size: 22px;  --h3-line: 32px;
+    --body-lg-size: 16px; --body-lg-line: 26px;
+  }
+
+  .Section { padding-block: var(--space-60); }
+
+  /* Single-column stacks — prevents cramped wrapping. */
+  .luxury-card-grid { grid-template-columns: 1fr; }
+  .luxury-footer__inner { grid-template-columns: 1fr; gap: var(--space-30); }
+
+  /* Wider drawer on small phones. */
+  .luxury-nav-drawer { width: var(--drawer-width-sm); }
+
+  /* Buttons span the row so labels never wrap; keep the 40px height. */
+  .luxury-btn--md { width: 100%; }
+
+  /* Hero / section CTA groups stack vertically, full-width, tight 15px gap.
+     All shared classes now — no inline source-order collision to defeat. */
+  .luxury-hero__cta,
+  .kit-hero__cta,
+  .kit-pdp__cta,
+  [data-equalize-cta] {
+    flex-direction: column;
+    align-items: stretch;
+    width: 100%;
+    gap: var(--space-15);
+  }
+  .luxury-hero__cta .luxury-btn,
+  .kit-hero__cta .luxury-btn,
+  .kit-pdp__cta .luxury-btn,
+  [data-equalize-cta] .luxury-btn { width: 100%; }
+}
+

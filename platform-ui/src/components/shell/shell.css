@@ -1,0 +1,17 @@
+.erp-app { display: grid; grid-template-columns: 248px 1fr; grid-template-rows: 64px 1fr; grid-template-areas: "side top" "side main"; height: 100vh; width: 100%; background: var(--surface-page); font-family: var(--font-body); }
+.erp-side { grid-area: side; background: #f4f1ea; border-right: 0.5px solid var(--erp-hairline); display: flex; flex-direction: column; min-height: 0; }
+.erp-side__brand { padding: 22px 22px 18px; border-bottom: 0.5px solid rgba(26, 25, 22, 0.1); }
+.erp-side__wordmark { font-family: var(--font-display); font-weight: 700; font-size: 22px; line-height: 1; letter-spacing: 0.14em; color: var(--text-primary); }
+.erp-side__nav { flex: 1; overflow-y: auto; padding: 16px 12px; min-height: 0; }
+.erp-navbtn { display: flex; align-items: center; gap: 11px; padding: 9px 12px 9px 14px; border: none; background: transparent; cursor: pointer; width: 100%; text-align: left; position: relative; color: rgba(26, 25, 22, 0.62); transition: background 0.2s var(--erp-ease); text-decoration: none; font: 400 14px var(--font-body); }
+.erp-navbtn:hover { background: rgba(110, 90, 67, 0.05); }
+.erp-navbtn--active { background: rgba(110, 90, 67, 0.06); color: var(--text-primary); font-weight: 700; }
+.erp-navbtn--active::before { content: ""; position: absolute; left: 0; top: 8px; bottom: 8px; width: 2px; background: var(--erp-accent); }
+.erp-side__user { border-top: 0.5px solid rgba(26, 25, 22, 0.1); padding: 14px 16px; display: flex; align-items: center; gap: 12px; }
+.erp-side__avatar { width: 36px; height: 36px; background: var(--erp-accent); color: #f4f1ea; display: flex; align-items: center; justify-content: center; font-family: var(--font-display); font-weight: 700; font-size: 15px; }
+.erp-top { grid-area: top; background: #f4f1ea; border-bottom: 0.5px solid var(--erp-hairline); display: flex; align-items: center; gap: 20px; padding: 0 26px; }
+.erp-top__search { margin-left: 8px; flex: 1; max-width: 420px; display: flex; align-items: center; gap: 10px; border-bottom: 0.5px solid rgba(26, 25, 22, 0.22); padding: 8px 2px; }
+.erp-top__search input { border: none; background: transparent; outline: none; width: 100%; font: 400 14px var(--font-body); color: var(--text-primary); }
+.erp-main { grid-area: main; overflow-y: auto; min-height: 0; background: var(--surface-page); }
+.erp-main__inner { padding: 30px 32px 40px; }
+.erp-tenant select { border: none; background: transparent; font: 400 13px var(--font-body); color: var(--erp-ink-60); cursor: pointer; }
