@@ -1,6 +1,7 @@
 import type { Me } from "@/lib/platform";
 import { navFor } from "./nav";
 import { NavLink } from "./NavLink";
+import { UserMenu } from "./UserMenu";
 import { Eyebrow } from "@/components/ui";
 
 export function Sidebar({ me }: { me: Me }) {
@@ -21,13 +22,7 @@ export function Sidebar({ me }: { me: Me }) {
           </div>
         ))}
       </nav>
-      <div className="erp-side__user">
-        <div className="erp-side__avatar">{initials}</div>
-        <div style={{ minWidth: 0, lineHeight: 1.25 }}>
-          <div style={{ font: "700 13px var(--font-body)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{me.name}</div>
-          <div style={{ font: "400 11px var(--font-body)", color: "rgba(26,25,22,.55)" }}>{me.title ?? me.email}</div>
-        </div>
-      </div>
+      <UserMenu name={me.name} secondary={me.title ?? me.email} initials={initials} />
     </aside>
   );
 }

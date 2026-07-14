@@ -94,10 +94,10 @@ Update this as each item completes. `☐` todo · `▣` in progress · `☑` don
 - [x] Tasks (list/detail/create) — ✓ edit degrades gracefully pending backend PATCH
 - [x] Agency (campaigns list/detail/create) — ✓ briefs degrade gracefully pending backend
 - [x] Rollups (exec cross-company view + recompute) — ✓
-- [ ] Backend: task-update (`PATCH`) endpoint — dependency on concurrent backend session
-- [ ] Backend: custom-field-defs endpoint — dependency on concurrent backend session
-- [ ] Backend: company-detail endpoint — dependency on concurrent backend session
-- [ ] Backend: agency-briefs endpoint — dependency on concurrent backend session
+- [x] Backend: task-update (`PATCH`) endpoint — ✓ `platform-nest` CoreController PATCH `/api/:t/tasks/:id` (+ project PATCH)
+- [x] Backend: custom-field-defs endpoint — ✓ GET `/api/:t/custom-fields?entityType=`
+- [ ] Backend: company-detail endpoint — still absent; UI falls back to list-derivation (non-blocking)
+- [x] Backend: agency-briefs endpoint — ✓ GET/POST `/api/:t/modules/agency/campaigns/:cid/briefs`
 
 ### Plan 3 — Systems & Intelligence consoles (UI)  `▣`  *(UI-only; plan: `2026-07-05-erp-ui-plan-3-systems-intelligence.md`)*
 
@@ -133,6 +133,21 @@ ai-gateway, mcp-hub w/ platform tools, infra v1 (VPS compose incl. platform), au
 WS8 steps 1-3 (specialists + orchestrator + D9 knowledge/memory platform), local-first
 Ollama chain + /embed, bot /projects via hub (D4 end-to-end). Suite totals: bot 88 +
 gateway 13 + hub 12 + platform 34 + ai-agents 23 = **170 tests**.
+
+**Update (2026-07-09) — this checklist predates the post-07-05 backend work; see `CLAUDE.md`
+"Current status" + the full-fidelity gap register for the live picture:**
+- **NestJS port DONE (07-05):** `platform-nest/` replaced and DELETED the Fastify `platform/`
+  (92 tests). All Phase-4/5c items above now live in `platform-nest`. `2026-07-05-nestjs-port-subspec.md`.
+- **Event backbone DONE (07-06):** transactional outbox → Redis Streams relay → consumer w/
+  dead-letter (`platform-nest/src/events/`, migration 0010). `2026-07-06-ws1-event-backbone-plan.md`.
+- **Go gateway is THE gateway; cutover done (07-14):** `ai-gateway-go/` — contract-parity + mTLS,
+  topology, DLP classifier, streaming; runs as the `ai-gateway` service on :3002. The Node gateway
+  was retired and its directory deleted.
+  `2026-07-06-ws3-go-gateway-rewrite-plan.md` + `2026-07-09-ws3-go-gateway-completion-report.md`.
+- **Plan-2 UI backend deps landed** (task/project PATCH, custom-field-defs, agency briefs).
+- **Still open (next up):** the **admin/systems API layer** (`/api/admin/:system/{status,config}`
+  + plan-4 identity endpoints) — blocks the built-but-placeholder UI Systems/Intelligence/Admin
+  pages (Plan-3 backend items below are all still ☐). Sync engine (Go) NOT STARTED. Other verticals.
 
 **Earlier status:** Phases 0–3 code-complete in trial-lite form (84 tests passing:
 RLS on live Postgres, day-one shred drill, phase-1/2 e2e, D9 RAG isolation). The WA-bot pilot

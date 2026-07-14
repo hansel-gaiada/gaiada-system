@@ -3,8 +3,14 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { sealSession, SESSION_COOKIE } from "@/lib/session";
 
+// Only allow same-app relative return paths — never an absolute/protocol URL.
+function safeReturn(raw: string): string {
+  return raw.startsWith("/") && !raw.startsWith("//") ? raw : "/";
+}
+
 export async function login(_prev: { error: string } | null, formData: FormData): Promise<{ error: string }> {
   const email = String(formData.get("email") ?? "").trim();
+  const returnTo = safeReturn(String(formData.get("return") ?? "/"));
   if (!email) return { error: "Enter your email to continue." };
 
   // TEMP DEMO MODE — see lib/demoFixtures.ts. Any email logs in as the demo
@@ -17,7 +23,7 @@ export async function login(_prev: { error: string } | null, formData: FormData)
       path: "/",
       secure: process.env.NODE_ENV === "production",
     });
-    redirect("/");
+    redirect(returnTo);
   }
 
   const base = process.env.PLATFORM_URL ?? "http://localhost:3004";
@@ -34,5 +40,5 @@ export async function login(_prev: { error: string } | null, formData: FormData)
     path: "/",
     secure: process.env.NODE_ENV === "production",
   });
-  redirect("/");
+  redirect(returnTo);
 }

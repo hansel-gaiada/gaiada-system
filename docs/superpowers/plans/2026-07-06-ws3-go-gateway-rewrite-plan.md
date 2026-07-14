@@ -1,5 +1,34 @@
 # Go Gateway Rewrite Implementation Plan
 
+## STATUS (2026-07-09): ✅ CODE-COMPLETE — pre-cutover, runs alongside the Node gateway
+All 13 tasks are implemented in `ai-gateway-go/` and verified with the Go toolchain
+(`go build ./...`, `go vet ./...`, `go test ./...` all green on go1.26.5) plus an end-to-end
+smoke run of the built binary (health / complete / embed / 401 / complete-stream, with the
+DLP scrubber redacting a PAN before egress and the JSONL audit written). Delivered on top of
+the pre-existing Tasks 1–6 (config/providers/chain/DLP-scrub/budget/audit): egress allowlist
+transport (Task 7), contract-parity HTTP server + `cmd/gateway/main.go` (Task 8), self-signed
+internal CA + mTLS peer allowlist (Task 9), site/central topology via a central-forward
+provider (Task 10), fail-closed Ollama DLP classifier (Task 11), `POST /complete/stream` SSE
+(Task 12), Dockerfile + a `ai-gateway-go` compose service alongside `ai-gateway` (Task 13).
+
+**Deliberate deviations from the plan snippets (both for deployment correctness):**
+1. **DLP classifier is opt-in** (`DLP_CLASSIFIER_ENABLED`, default off; `config.go`). An
+   always-on fail-closed classifier would 503 every `/complete` wherever Ollama is
+   unreachable — breaking the byte-for-byte parity invariant the plan mandates. Gating it
+   matches the plan's own "config-gated so today's single-VPS deployment runs unaffected."
+2. **Compose runs the Go gateway with `GATEWAY_TLS_MODE: off`** (not `permissive`), and the
+   permissive-mode `VerifyPeerCertificate` wrapper passes cert-less clients. Today's callers
+   (bot/hub/knowledge) speak plain HTTP with no client cert; a permissive HTTPS listener +
+   the raw `VerifyPeer` (which rejects empty chains) would break them. mTLS switches on once
+   callers are enrolled with client certs — a later step.
+
+**Not done (needs a Docker host):** `docker build` of the Dockerfile + `docker compose config`
+validation — this environment has no Docker. Deploy-only; verify on a Docker host before cutover.
+**Deferred per spec §9 (unchanged):** OpenBao-issued provider creds, media DLP classification,
+native per-provider token streaming (current `/complete/stream` uses a single-event fallback),
+DNS control / SIEM rule, automated cert rotation. See the completion report:
+`2026-07-09-ws3-go-gateway-completion-report.md`.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Replace the Node/Fastify `ai-gateway/` with a Go service (`ai-gateway-go/`) that preserves the exact HTTP contract, and adds mTLS + peer allowlist, per-site/central topology, a local-Ollama DLP classifier, and token streaming.

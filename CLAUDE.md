@@ -13,8 +13,15 @@ Components are **separate standalone projects — not a shared-package monorepo.
 3. `docs/superpowers/plans/2026-07-05-CHECKLIST.md` — **current status / what's done vs next**.
 4. `docs/superpowers/specs/2026-07-04-INDEX-overview.md` — full architecture (21 specs).
 5. `docs/superpowers/specs/2026-07-05-adversarial-weakness-review.md` — the 63 verified findings (all resolved/parked).
+6. `docs/superpowers/plans/2026-07-05-phase-5-full-fidelity.md` — the **gap register** (spec→current→close-by); the live list of what remains, kept current.
 
-## Current status (2026-07-05)
+## Current status (2026-07-09)
+> **The backend moved fast after 07-05; this section + the full-fidelity register are the
+> source of truth. Older docs that call the NestJS port / event backbone / Go gateway
+> "deferred" are stale — verify against code.** Since 07-05: the **NestJS port** replaced the
+> Fastify core (`platform-nest/` is the platform now; `platform/` deleted), the **event
+> backbone** shipped, and the **Go gateway rewrite** (`ai-gateway-go/`) replaced and retired
+> the Node `ai-gateway/` (2026-07-14) — it is now THE gateway (the `ai-gateway` service on :3002).
 - **wa-chat-bot/** — Phases 0–3 code-complete, trial-lite (84 tests). Pipeline: webhook
   (fail-closed) → group registry (`config/groups.yaml`, hot-reload) → PAN/KTP scrub →
   crypto-shred store (file or Postgres w/ FORCE RLS) → skills/Q&A reply. 12:00/18:00 digests
@@ -26,36 +33,60 @@ Components are **separate standalone projects — not a shared-package monorepo.
 - **Blocked on user/infra:** OpenBao VPS (0.4); Gemini key; WAHA QR scan (+ Plus for media);
   warm-standby number; Telegram token (optional); legal Gate 1 before real ingestion.
   Hardening backlog in the checklist (map-reduce, docx/xlsx, pgvector RAG, TG media).
-- **ai-gateway/** — standalone WS3 service BUILT (10 tests): provider chain w/ failover + circuit
-  breaker (gemini/claude/echo), fail-closed auth + DLP, daily cost cap, egress audit. Same HTTP
-  contract as the bot's embedded gateway (supersedes it — cutover = GATEWAY_URL).
+- **ai-gateway/** (Node, WS3) — **RETIRED 2026-07-14.** Directory deleted; replaced by the Go
+  rewrite below after code-complete parity + green build/tests. History note only.
+- **ai-gateway-go/** (Go, WS3) — **THE gateway.** Deployed as the `ai-gateway` compose service on
+  port 3002 (config default), so bot/hub/knowledge/media-worker reach it unchanged at
+  `http://ai-gateway:3002`. Byte-for-byte HTTP contract parity with the old Node gateway
+  (`/health`, `/complete`, `/media`, `/embed`) plus `POST /complete/stream` (SSE). Provider chain
+  w/ failover + circuit breaker (ollama/gemini/claude/echo), fail-closed auth + DLP, daily cost
+  cap, egress audit. Adds egress allowlist (DialContext-enforced), self-signed internal CA + mTLS
+  peer allowlist, site/central topology (central-forward provider), a fail-closed local-Ollama DLP
+  classifier (opt-in via `DLP_CLASSIFIER_ENABLED`). go1.26.4 build/vet/test green. Compose runs it
+  with `GATEWAY_TLS_MODE: off` (callers speak plain HTTP); enroll client certs to move to
+  permissive/enforced. Plan + report: `2026-07-06-ws3-go-gateway-rewrite-plan.md`,
+  `2026-07-09-ws3-go-gateway-completion-report.md`. **Not verified locally: docker build (no
+  Docker in the dev env) — validate on a Docker host before deploy.** Still deferred per spec §9:
+  OpenBao-issued provider creds, media DLP classification, native per-provider token streaming,
+  DNS control / SIEM rule, automated cert rotation.
 - **mcp-hub/** — WS2 skeleton BUILT (7 tests): MCP server (official SDK, Streamable HTTP,
   stateless), OBO principal minting (clients can't assert roles), deny-by-default policy w/
   per-principal tool visibility, JSONL audit. Company tools await the platform (WS1).
 - **Telegram is the live surface for now** (long-polling, no public URL needed — see the bot
   README quickstart); WAHA becomes primary + Telegram fallback once its number is scanned.
 - **infra/** — v1 slice BUILT: full-stack VPS compose (`infra/compose/docker-compose.vps.yml`:
-  postgres+waha+bot+gateway+hub), Dockerfiles in each component, crypto-shred-safe nightly
-  backup script, `infra/scripts/test-all.sh` local CI, GH Actions workflow (inert until
-  gaiada-system gets its own repo — current git root/remote are unrelated). Runbook:
-  `infra/runbooks/deploy-vps.md`.
+  postgres + redis + waha + ai-gateway (the Go `ai-gateway-go/` service) + keycloak +
+  cerbos + platform-nest + platform-ui + whisper + knowledge + mcp-hub + bot + bot-media-worker),
+  Dockerfiles in each component, crypto-shred-safe nightly backup script,
+  `infra/scripts/test-all.sh` local CI, GH Actions workflow (inert until gaiada-system gets its
+  own repo — current git root/remote are unrelated). Runbook: `infra/runbooks/deploy-vps.md`.
 - **automation/** — v1 glue BUILT: n8n compose + `summarize-via-mcp` template (backbone rule:
   n8n orchestrates, MCP accesses, no logic in workflows). Temporal deferred until a durable
   flow exists.
-- **platform/** — Phase 4 core + **Phase 5c COMPLETE (86 tests, live PG + Cerbos):** core
-  schema (FORCE RLS on authorized-tenant-set, D5), ModuleContract framework w/ per-tenant
-  enable gate, **Cerbos** RBAC (18 policies, scope cascade, decision audit, D11 revocation,
-  D16 PlanResources), D4 identity_links + OBO + dual-proof enrollment, D12 rollups (only
-  cross-company read path). **First-deploy agency vertical is genuinely operable:** clients /
-  deliverables / time_entries (core client-work, D17 custom fields), agency campaigns / briefs /
-  creative-asset review lifecycle, threaded comments + per-user notifications (assignment /
-  mention / approval), files/attachments (local-first storage, day-one PII scrub, XSS/IDOR/
-  header-injection hardened), management rollups (utilization num/den, deliverables-due). Seed
-  `npm run seed:agency`; first-deploy e2e + readiness checklist
-  (`docs/superpowers/plans/2026-07-05-agency-first-deploy-readiness.md`). mcp-hub fronts it.
-  Plans: `2026-07-05-phase-5c-platform-to-spec.md`. Deferred (non-blocking): NestJS port,
-  event backbone, sync engine, other verticals. **Dev infra note:** Cerbos must run with
-  published ports (`-p 3592:3592 -p 3593:3593`) — a portless container fails all authz.
+- **platform-nest/** (WS1) — **THE platform** (NestJS + Fastify-adapter). The Phase-5c Fastify
+  `platform/` was **ported to NestJS and DELETED** (2026-07-05); this dir is the only backend.
+  92 tests pass on NestJS against live PG + Cerbos. Carries everything P5c delivered: core schema
+  (FORCE RLS on authorized-tenant-set, D5), ModuleContract framework w/ per-tenant enable gate,
+  **Cerbos** RBAC (scope cascade, decision audit, D11 revocation, D16 PlanResources), D4
+  identity_links + OBO + dual-proof enrollment, D12 rollups (only cross-company read path).
+  **First-deploy agency vertical is genuinely operable:** clients / deliverables / time_entries
+  (core client-work, D17 custom fields), agency campaigns / briefs / creative-asset review,
+  threaded comments + per-user notifications, files/attachments (local storage, day-one scrub,
+  XSS/IDOR/header-injection hardened), management rollups. Core write paths (task/project PATCH,
+  custom-field defs GET, agency briefs) are ALL built — the stale checklist wrongly lists them
+  "pending". Seed `npm run seed:agency`. Plans: `2026-07-05-nestjs-port-subspec.md`,
+  `2026-07-05-phase-5c-platform-to-spec.md`.
+  **Event backbone DONE** (`src/events/`, migration `0010_outbox_events.sql`): transactional
+  outbox → Redis Streams relay → consumer w/ dead-letter, started in `main.ts` (Redis-gated);
+  `outbox_events` is also the sync-engine `sync_outbox`. Plan: `2026-07-06-ws1-event-backbone-plan.md`.
+  **Still deferred (backend gaps to pick up next):** (1) the **admin/systems API layer** —
+  `/api/admin/{bot,gateway,hub,automation}/{status,config}` + plan-4 identity endpoints
+  (users-with-roles, role assign/revoke, identity-links CRUD, module enable/disable,
+  custom-field PATCH/DELETE, compliance-gates, filtered audit); no AdminController exists yet —
+  this is what blocks the built-but-placeholder UI Systems/Intelligence/Admin sections. (2) the
+  **sync engine** (Go, `sync-engine-go/`, NOT STARTED — design approved). (3) other verticals.
+  **Dev infra note:** Cerbos must run with published ports (`-p 3592:3592 -p 3593:3593`) — a
+  portless container fails all authz.
 - **ai-agents/** — WS8 steps 1+2 BUILT (13 tests): specialist framework (status-reporter,
   approvals-chaser) + **supervisor orchestrator** (blackboard, cycle guard, per-goal budget
   across the tree, fan-out cap, approval suspension bubbles up) — Gateway for models, hub
@@ -68,15 +99,17 @@ Components are **separate standalone projects — not a shared-package monorepo.
   `docs/superpowers/plans/2026-07-05-erp-ui-plan-1-foundation.md`.
   **Plan 2 (business modules) UI BUILT:** Companies (list+detail), Projects (full CRUD w/ D17
   custom-field forms), Tasks (list/detail/create), Agency (campaigns list/detail/create),
-  Rollups (exec cross-company view + recompute) — all UI follows the backend contract; task
-  edit and agency briefs degrade gracefully pending backend `PATCH`/custom-field-defs/
-  company-detail/agency-briefs endpoints (owned by a concurrent backend session).
-  **Plan 3 (Systems & Intelligence consoles) UI BUILT:** WhatsApp/Telegram Bot, Automation,
-  AI Gateway, MCP Hub (Systems group) and AI Agents, Knowledge (Intelligence group) — all
-  consume the `lib/admin.ts` admin-API contract (the UI follows/defines it) and degrade
-  gracefully (ConnectionState/EmptyNote) until the concurrent backend session wires
-  `/api/admin/:system/status|config` and the agents/knowledge admin endpoints. Next:
-  Plan 4 (Admin section + step-up), Plan 5 (polish).
+  Rollups (exec cross-company view + recompute). Its backend deps have since **landed** (task/
+  project PATCH, custom-field-defs GET, agency briefs); only single-resource company-detail /
+  campaign-detail GETs are absent and the UI already falls back to list-derivation — so Plan 2
+  is effectively unblocked.
+  **Plan 3 (Systems & Intelligence consoles) UI BUILT** and **Plan 4 (Admin + step-up) UI**:
+  Bot/Automation/AI-Gateway/MCP-Hub (Systems), AI-Agents/Knowledge (Intelligence), and the Admin
+  section — all consume the `lib/admin.ts` / `adminData.ts` admin-API contract and degrade
+  gracefully (ConnectionState/EmptyNote) because **the backend admin layer is not built yet**:
+  `/api/admin/:system/status|config`, agents/knowledge admin reads, and the plan-4 identity
+  write endpoints. These pages render as placeholders until that layer lands (see platform-nest
+  "still deferred" above — the top frontend-blocking backend gap). Next: Plan 5 (polish).
 - **Local-first (dev + VPS, no cloud required):** ai-gateway chain defaults to
   `ollama,gemini,claude` — with Ollama running (`ollama pull llama3.2`) the entire stack
   works offline; cloud keys are optional failover. Echo mode remains the keyless terminator.
@@ -95,15 +128,18 @@ Components are **separate standalone projects — not a shared-package monorepo.
   scope) — 13-case parity + all suites live-verified against Cerbos+PG; dual-proof enrollment
   (D4.4), authoritative revocation (D11). Platform tests now require Cerbos running (docs in
   `platform/.env.example` + `test-all.sh`).
-- **P5c COMPLETE (platform to spec / agency first-deploy, 2026-07-05):** the digital-agency
-  vertical is genuinely operable at first deploy on the Fastify core. Core client-work
-  (clients/deliverables/time_entries wired to the shared 0001 tables — NOT agency dupes),
-  agency campaigns/briefs/creative-asset review, threaded comments + per-user notifications,
-  files/attachments (local-first storage, day-one scrub, XSS/IDOR/header hardened), D17
-  custom-field registry, agency management rollups (utilization num/den, deliverables-due).
-  86 platform tests, first-deploy e2e + idempotent seed (`npm run seed:agency`) + readiness
-  checklist. NestJS port + event backbone + sync engine deferred (non-blocking; ModuleContract
-  keeps the port mechanical). Next: further verticals, or P5d per the full-fidelity register.
+- **P5c COMPLETE (platform to spec / agency first-deploy):** the digital-agency vertical is
+  genuinely operable at first deploy. Core client-work (clients/deliverables/time_entries wired
+  to the shared 0001 tables — NOT agency dupes), agency campaigns/briefs/creative-asset review,
+  threaded comments + per-user notifications, files/attachments (local-first storage, day-one
+  scrub, XSS/IDOR/header hardened), D17 custom-field registry, agency management rollups.
+  first-deploy e2e + idempotent seed (`npm run seed:agency`) + readiness checklist.
+  **NestJS port DONE (2026-07-05)** — `platform-nest/` replaced and deleted the Fastify `platform/`
+  (92 tests); **event backbone DONE (2026-07-06)**. Still deferred: sync engine, further
+  verticals, and the admin/systems API layer (see the platform-nest status bullet above).
+- **Go gateway is THE gateway (cutover done 2026-07-14):** `ai-gateway-go/` runs as the
+  `ai-gateway` compose service on :3002; the Node `ai-gateway/` was retired and its directory
+  deleted. See the ai-gateway-go status bullet + `2026-07-09-ws3-go-gateway-completion-report.md`.
 - **AGENCY IS A FIRST-DEPLOY CHILD COMPANY (2026-07-05):** the digital-agency vertical +
   the core entities it needs (clients, deliverables, time, briefs, creative assets, approvals)
   are genuinely operable at first deploy (see P5c COMPLETE above). Web UI (`platform-ui`,

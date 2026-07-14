@@ -1,0 +1,10 @@
+{
+  "name": "hermes-gateway",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "AI Gateway shim that uses the local Hermes agent as the wa-chat-bot's brain (trial).",
+  "scripts": {
+    "start": "node server.mjs"
+  }
+}

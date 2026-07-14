@@ -14,7 +14,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        project: [wa-chat-bot, ai-gateway, mcp-hub, platform, ai-agents]
+        project: [wa-chat-bot, mcp-hub, platform, ai-agents]
     defaults:
       run:
         working-directory: ${{ matrix.project }}
@@ -28,3 +28,19 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
+
+  # ai-gateway is the Go service (ai-gateway-go/); it replaced the retired Node gateway.
+  gateway-go:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ai-gateway-go
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.4"
+          cache: false # stdlib-only module, no go.sum to key a cache on
+      - run: go build ./...
+      - run: go vet ./...
+      - run: go test ./...

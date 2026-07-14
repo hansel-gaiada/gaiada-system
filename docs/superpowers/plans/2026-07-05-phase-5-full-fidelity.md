@@ -46,14 +46,23 @@ session are now fully exercisable at no cost.
 - [ ] Next vertical modules (resort, marine, printing) via ModuleContract
 
 ### P5d — Gateway to spec (ws3)
-- [~] Deterministic egress floor (default-deny outbound, FQDN allowlist) **DONE** — `egress.ts`
-  wraps global fetch, provider-host allowlist, installed at start, tested. Remaining: per-site/
-  central split, mTLS + peer allowlist, DNS control, SIEM rule.
+> **Go rewrite is THE gateway; cutover done 2026-07-14** (`ai-gateway-go/`, go1.26.4
+> build/vet/test green). It now runs as the `ai-gateway` compose service on :3002; the Node
+> `ai-gateway/` was retired and its directory deleted. Closes several items below. Plan + report:
+> `2026-07-06-ws3-go-gateway-rewrite-plan.md` (STATUS header),
+> `2026-07-09-ws3-go-gateway-completion-report.md`.
+- [x] Deterministic egress floor (default-deny outbound, FQDN allowlist) **DONE** — Node
+  `egress.ts` wraps global fetch; the Go rewrite enforces it at `http.Transport.DialContext`
+  (stronger, catches every outbound dial). **per-site/central split DONE** (topology mode +
+  central-forward provider); **mTLS + peer allowlist DONE** (self-signed internal CA, CN
+  allowlist). Remaining: DNS control, SIEM rule.
 - [ ] Vault/OpenBao-issued short-TTL provider creds; per-key provider-side spend caps
-- [~] Per-tenant budgets **DONE** (`budget.ts` per-tenant cap + scope on breach, x-tenant-id).
+- [~] Per-tenant budgets **DONE** (`budget.ts` / Go `budget.go` per-tenant cap + scope on breach, x-tenant-id).
   Remaining: alert escalation (management group message), provider-account load balancing, HA pair.
-- [ ] Model-assisted DLP classifier (fail-closed) + media DLP classification
-- [ ] Token streaming pass-through
+- [~] Model-assisted DLP classifier (fail-closed) **DONE (text, opt-in)** — Go `dlp/classifier.go`,
+  local Ollama, synchronous, fail-closed, `DLP_CLASSIFIER_ENABLED`-gated. Remaining: media DLP classification.
+- [~] Token streaming pass-through **DONE (wire contract)** — Go `POST /complete/stream` (SSE),
+  single-event fallback + optional `StreamingProvider` interface. Remaining: native per-provider token streaming.
 
 ### P5e — Agents to spec (ws8, D13/D14)
 - [~] pgvector **DONE** (dual-mode: `vector(dim)` + HNSW + SQL ranking where the extension

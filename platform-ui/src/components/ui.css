@@ -28,3 +28,17 @@
 .lux-table__cell--right { justify-self: end; text-align: right; }
 
 .lux-toast { position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%); background: #1a1916; color: #f4f1ea; padding: 13px 22px; font: 400 13px var(--font-body); letter-spacing: 0.02em; z-index: 200; animation: erp-toast 0.28s var(--erp-ease); }
+
+/* Reusable filter bar (audit, search, any GET-form filter row). */
+.lux-filters { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 16px; }
+.lux-filters__field { display: flex; flex-direction: column; gap: 6px; font: 700 10px var(--font-body); letter-spacing: 0.1em; text-transform: uppercase; color: var(--erp-ink-50); }
+.lux-filters__field select, .lux-filters__field input { border: none; border-bottom: 0.5px solid rgba(26, 25, 22, 0.22); background: transparent; outline: none; padding: 7px 2px; min-width: 150px; font: 400 14px var(--font-body); letter-spacing: normal; text-transform: none; color: var(--text-primary); }
+.lux-filters__field select:focus-visible, .lux-filters__field input:focus-visible { border-bottom-color: var(--erp-accent); }
+.lux-filters__actions { display: flex; gap: 10px; margin-left: auto; }
+a.lux-btn { display: inline-flex; align-items: center; text-decoration: none; }
+
+/* Search-result rows. */
+.lux-hit { display: block; border-bottom: 0.5px solid var(--erp-hairline-soft); text-decoration: none; color: inherit; }
+.lux-hit:last-child { border-bottom: none; }
+.lux-hit--link { transition: background 0.2s var(--erp-ease); }
+.lux-hit--link:hover { background: rgba(110, 90, 67, 0.05); }

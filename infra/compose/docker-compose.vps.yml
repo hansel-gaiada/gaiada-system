@@ -43,10 +43,17 @@ services:
     volumes:
       - waha-sessions:/app/.sessions
 
+  # AI gateway — the Go service (ai-gateway-go/) IS the gateway. The Node ai-gateway/ it
+  # replaced was retired 2026-07-14 after code-complete parity + green build/tests; the service
+  # keeps the name `ai-gateway` on port 3002 so every caller (bot, hub, knowledge, media-worker)
+  # reaches it unchanged at http://ai-gateway:3002.
+  # TLS is OFF here so the plain-HTTP contract callers speak keeps working; switch
+  # GATEWAY_TLS_MODE to permissive/enforced once callers are enrolled with client certs.
   ai-gateway:
-    build: ../../ai-gateway
+    build: ../../ai-gateway-go
     restart: unless-stopped
     environment:
+      # GATEWAY_PORT defaults to 3002 in config.go — left unset so callers need no URL change.
       GATEWAY_TOKEN: ${GATEWAY_TOKEN:?}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
@@ -57,8 +64,13 @@ services:
       WHISPER_URL: http://whisper:8000
       WHISPER_MODEL: ${WHISPER_MODEL:-Systran/faster-whisper-small}
       GATEWAY_DAILY_CALL_CAP: ${GATEWAY_DAILY_CALL_CAP:-2000}
+      GATEWAY_TLS_MODE: "off"
+      GATEWAY_TOPOLOGY_MODE: central
+      # Model-assisted DLP classifier stays opt-in; enable only where Ollama is reachable.
+      DLP_CLASSIFIER_ENABLED: ${DLP_CLASSIFIER_ENABLED:-false}
+      EGRESS_ALLOWLIST: generativelanguage.googleapis.com,api.anthropic.com,whisper,host.docker.internal
     volumes:
-      - gateway-data:/app/data # egress audit
+      - gateway-data:/app/data # egress audit (JSONL)
 
   # Keycloak (5b) — self-hosted IdP. Realm imported from ./keycloak on first boot.
   keycloak:

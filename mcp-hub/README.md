@@ -27,7 +27,7 @@ when the platform (WS1) exists to front (tools must call platform services, neve
 - `media.extract` (low) — audio→transcript / image→description / pdf→text **via the AI Gateway**
 - `rollup.metrics` (verified-only — unreachable until platform-minted principals exist)
 
-AI-backed tools require `../ai-gateway` running (`GATEWAY_URL`/`GATEWAY_TOKEN` in `.env`) —
+AI-backed tools require the `../ai-gateway-go` gateway running (`GATEWAY_URL`/`GATEWAY_TOKEN` in `.env`) —
 the hub holds no provider keys; the Gateway applies DLP, failover, cost cap, and its own audit.
 
 ## Connect from Claude Code (example client)
