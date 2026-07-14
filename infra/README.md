@@ -11,13 +11,16 @@ is deliberately hiring-gated; see the specs.
 
 | Piece | Where |
 |---|---|
-| Full-stack VPS deploy (Postgres + WAHA + bot + ai-gateway + mcp-hub) | `compose/docker-compose.vps.yml` + `runbooks/deploy-vps.md` |
-| Dockerfiles | in each component (`wa-chat-bot/`, `ai-gateway/`, `mcp-hub/`) |
-| Nightly DB backup + rotation (crypto-shred-safe: DB only, never key material) | `scripts/backup.sh` |
+| Full-stack VPS deploy — Postgres + Redis + WAHA + ai-gateway (Go) + Keycloak + Cerbos + platform-nest + platform-ui + whisper + knowledge + mcp-hub + bot + bot-media-worker + sync-central (idle) | `compose/docker-compose.vps.yml` + `runbooks/deploy-vps.md` |
+| Env template (every var the compose reads, required + optional) | `compose/.env.example` |
+| Keycloak starter realm (`gaiada`, client + roles) imported on first boot | `compose/keycloak/gaiada-realm.json` |
+| Dockerfiles | in each component (`wa-chat-bot/`, `ai-gateway-go/`, `mcp-hub/`, `platform-nest/`, `platform-ui/`, `ai-agents/`, `sync-engine-go/`) |
+| Nightly backup of ALL THREE DBs (gaiada + gaiada_platform + gaiada_knowledge) + rotation — crypto-shred-safe: DBs only, never key material | `scripts/backup.sh` |
+| Uptime alerting (cron pings each `/health`, alerts to Telegram on failure) | `scripts/healthcheck.sh` |
 | Local CI (typecheck + all test suites) | `scripts/test-all.sh` |
-| GitHub Actions CI (per-component matrix) | `../.github/workflows/ci.yml` — **inert until `gaiada-system` is pushed as its own repo** (GitHub only runs root-level workflows; the current working folder's remote is unrelated) |
+| GitHub Actions CI (Node matrix + dedicated platform-nest / gateway-go / sync-engine-go jobs) | `../.github/workflows/ci.yml` |
 
 ## Next steps (when they earn their keep)
 
-Own GitHub repo for `gaiada-system` (activates CI) → uptime alerting (healthcheck cron →
-Telegram message) → OpenBao VPS (checklist 0.4) → the target-state items above.
+OpenBao VPS (checklist 0.4) → flip Keycloak/platform to `oidc` once MFA is configured
+(`../docs/runbooks/idp-keycloak.md`) → the target-state items above.

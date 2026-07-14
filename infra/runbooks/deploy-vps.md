@@ -1,6 +1,10 @@
 # Runbook — Deploy the Trial Stack to the Personal VPS
 
-One box, one compose file, five services: Postgres, WAHA, ai-gateway, mcp-hub, the bot.
+One box, one compose file. Services: Postgres, Redis, WAHA, ai-gateway (Go), Keycloak, Cerbos,
+platform-nest (API) + platform-ui, whisper, knowledge, mcp-hub, the bot + media-worker, and the
+idle `sync-central` (waits on a real second site). Only WAHA's dashboard, Keycloak's admin
+console (both localhost-bound), and the UI (`:3005`) are reachable; everything else is
+box-internal.
 
 ## Prerequisites
 
@@ -14,11 +18,16 @@ One box, one compose file, five services: Postgres, WAHA, ai-gateway, mcp-hub, t
 ```bash
 cd gaiada-system/infra/compose
 cp .env.example .env            # fill in: openssl rand -hex 16 for every token/password
+                                # (UI_SESSION_SECRET is REQUIRED — compose aborts if it's blank)
 cp groups.example.yaml groups.yaml   # edit once you know the real group ids
 docker compose -f docker-compose.vps.yml up -d --build
 docker compose -f docker-compose.vps.yml ps    # everything Up?
 docker compose -f docker-compose.vps.yml logs -f bot   # watch it come up
 ```
+
+Keycloak imports the `gaiada` realm from `keycloak/gaiada-realm.json` on first boot, but the
+platform stays in `AUTH_MODE=dev` until you set client secrets + MFA and flip
+`PLATFORM_AUTH_MODE=oidc` (see `../../docs/runbooks/idp-keycloak.md`).
 
 Then per surface:
 
@@ -42,16 +51,30 @@ crontab -e   # add:
 # 0 3 * * * /home/<user>/gaiada-system/infra/scripts/backup.sh >> /var/log/gaiada-backup.log 2>&1
 ```
 
-Database only. **Never back up the bot's data volume** — it holds `keys.json` (LocalKms);
+Backs up all three application DBs (`gaiada`, `gaiada_platform`, `gaiada_knowledge`) — one
+`*.sql.gz` each. **Never back up any data volume** — the bot's holds `keys.json` (LocalKms);
 key material in the backup set voids crypto-shred (see `../../docs/runbooks/erasure-divestiture.md`).
 Copy the newest `~/gaiada-backups/*.sql.gz` off-box weekly (e.g. `scp` to your laptop).
 
-## Health checks
+## Uptime alerting (optional)
+
+`scripts/healthcheck.sh` pings each service's `/health` and, on any failure, sends a Telegram
+message (set `TELEGRAM_BOT_TOKEN` + `ALERT_CHAT_ID`). Add to cron alongside the backup:
 
 ```bash
-docker compose -f docker-compose.vps.yml exec bot wget -qO- http://localhost:3001/health
-docker compose -f docker-compose.vps.yml exec bot wget -qO- http://ai-gateway:3002/health
-docker compose -f docker-compose.vps.yml exec bot wget -qO- http://mcp-hub:3003/health
+# */5 * * * * TELEGRAM_BOT_TOKEN=... ALERT_CHAT_ID=... /home/<user>/gaiada-system/infra/scripts/healthcheck.sh >> /var/log/gaiada-health.log 2>&1
+```
+
+## Health checks (manual)
+
+```bash
+C=docker compose -f docker-compose.vps.yml exec -T bot wget -qO-
+$C http://bot:3001/health
+$C http://ai-gateway:3002/health
+$C http://mcp-hub:3003/health
+$C http://platform:3004/health
+$C http://knowledge:3005/health
+$C http://platform-ui:3005/         # UI is also published on the host at :3005
 ```
 
 ## Security notes

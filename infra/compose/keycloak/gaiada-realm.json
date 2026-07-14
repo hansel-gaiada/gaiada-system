@@ -1,0 +1,107 @@
+{
+  "realm": "gaiada",
+  "enabled": true,
+  "displayName": "Gaiada",
+  "comment": "Starter realm imported on first boot (--import-realm). Matches docs/runbooks/idp-keycloak.md. AFTER import: (1) regenerate the gaiada-platform client secret in the admin console and wire it into the platform, (2) confirm MFA is enforced, (3) flip PLATFORM_AUTH_MODE=oidc. Leaving AUTH_MODE=dev keeps this realm dormant.",
+
+  "verifyEmail": true,
+  "loginWithEmailAllowed": true,
+  "registrationAllowed": false,
+  "resetPasswordAllowed": true,
+
+  "accessTokenLifespan": 300,
+  "ssoSessionIdleTimeout": 1800,
+  "ssoSessionMaxLifespan": 36000,
+
+  "otpPolicyType": "totp",
+  "otpPolicyAlgorithm": "HmacSHA1",
+  "otpPolicyDigits": 6,
+  "otpPolicyPeriod": 30,
+
+  "requiredActions": [
+    {
+      "alias": "CONFIGURE_TOTP",
+      "name": "Configure OTP",
+      "providerId": "CONFIGURE_TOTP",
+      "enabled": true,
+      "defaultAction": true,
+      "priority": 10
+    },
+    {
+      "alias": "VERIFY_EMAIL",
+      "name": "Verify Email",
+      "providerId": "VERIFY_EMAIL",
+      "enabled": true,
+      "defaultAction": true,
+      "priority": 50
+    }
+  ],
+
+  "roles": {
+    "realm": [
+      { "name": "platform_admin", "description": "Superadmin — full platform scope" },
+      { "name": "group_executive", "description": "Owner — cross-company read/write within the group" },
+      { "name": "company_admin", "description": "Admin of a single company" },
+      { "name": "manager", "description": "Team/project manager" },
+      { "name": "member", "description": "Standard member" },
+      { "name": "viewer", "description": "Read-only" },
+      { "name": "agency_approver", "description": "Approves agency creative assets / deliverables" }
+    ]
+  },
+
+  "clients": [
+    {
+      "clientId": "gaiada-platform",
+      "name": "Gaiada Platform API",
+      "description": "Confidential client — its audience is OIDC_AUDIENCE on the platform. REGENERATE this secret after import.",
+      "protocol": "openid-connect",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "secret": "CHANGE-ME-AFTER-IMPORT",
+      "redirectUris": ["http://localhost:3005/*"],
+      "webOrigins": ["+"],
+      "protocolMappers": [
+        {
+          "name": "gaiada-platform-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "gaiada-platform",
+            "id.token.claim": "false",
+            "access.token.claim": "true"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "gaiada-ui",
+      "name": "Gaiada Web UI",
+      "description": "Public PKCE client for platform-ui. Requests the gaiada-platform audience so its tokens validate at the API.",
+      "protocol": "openid-connect",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "attributes": { "pkce.code.challenge.method": "S256" },
+      "redirectUris": ["http://localhost:3005/*"],
+      "webOrigins": ["+"],
+      "protocolMappers": [
+        {
+          "name": "gaiada-platform-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "gaiada-platform",
+            "id.token.claim": "false",
+            "access.token.claim": "true"
+          }
+        }
+      ]
+    }
+  ]
+}

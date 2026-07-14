@@ -14,7 +14,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        project: [wa-chat-bot, mcp-hub, platform, ai-agents]
+        # platform-nest has its own job below (it needs Postgres + Cerbos to actually run its
+        # suite). These three run standalone; their DB-backed suites self-skip without a test DB.
+        project: [wa-chat-bot, mcp-hub, ai-agents]
     defaults:
       run:
         working-directory: ${{ matrix.project }}
@@ -28,6 +30,54 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
+
+  # platform-nest (WS1 core) — its suite is meaningful only against live Postgres + Cerbos, so
+  # it gets a dedicated job. The vitest harness (src/testing/setup.ts) DROP SCHEMAs + applies
+  # migrations itself and repoints at a NOBYPASSRLS role, so CI only supplies a superuser test DB,
+  # Cerbos, and Redis (event/relay suites self-skip without REDIS_URL).
+  platform-nest:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s
+          --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 5s
+          --health-timeout 5s --health-retries 10
+    defaults:
+      run:
+        working-directory: platform-nest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: platform-nest/package-lock.json
+      # Cerbos runs as a step (not a service) so it can mount the checked-out policy repo.
+      - name: Start Cerbos
+        run: |
+          docker run -d --name cerbos -p 3592:3592 \
+            -v "$PWD/cerbos:/config:ro" -v "$PWD/cerbos/policies:/policies:ro" \
+            ghcr.io/cerbos/cerbos:latest server --config=/config/cerbos.yaml
+          for i in $(seq 1 30); do
+            curl -fsS http://localhost:3592/_cerbos/health && break || sleep 1
+          done
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+        env:
+          DATABASE_URL_TEST: postgres://postgres:postgres@localhost:5432/postgres
+          CERBOS_URL: http://localhost:3592
+          REDIS_URL: redis://localhost:6379
 
   # ai-gateway is the Go service (ai-gateway-go/); it replaced the retired Node gateway.
   gateway-go:
