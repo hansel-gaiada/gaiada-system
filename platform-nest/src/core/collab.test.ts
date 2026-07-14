@@ -111,4 +111,21 @@ describe.skipIf(!TEST_URL)("collaboration: comments + notifications", () => {
     });
     expect((await unread(assignee)).length).toBe(0);
   });
+
+  // WS4: POST /notifications — an elevated actor (or scoped automation account) raises a
+  // notice for another member; a plain member cannot.
+  it("a manager can raise a notification for a member; a member cannot", async () => {
+    const ok = await app.inject({
+      method: "POST", url: `/api/${co}/notifications`,
+      headers: asUser(manager), payload: { recipientId: viewer, type: "client_onboarded", payload: { note: "x" } },
+    });
+    expect(ok.statusCode).toBe(201);
+    expect((await unread(viewer)).some((x) => x.type === "client_onboarded")).toBe(true);
+
+    const denied = await app.inject({
+      method: "POST", url: `/api/${co}/notifications`,
+      headers: asUser(member), payload: { recipientId: viewer, type: "spam" },
+    });
+    expect(denied.statusCode).toBe(403);
+  });
 });

@@ -110,6 +110,27 @@ services:
       # 5c.4 file store — persistent volume so attachments survive restarts.
       FILES_DIR: /data/files
       REDIS_URL: redis://redis:6379
+      # Admin/Systems console aggregator (Phase C) — read-only probes of each downstream
+      # service. All fail-soft: an unset URL just reports "not configured" in the console.
+      GATEWAY_URL: http://ai-gateway:3002
+      GATEWAY_TOKEN: ${GATEWAY_TOKEN:-}
+      BOT_URL: http://bot:3001
+      ADMIN_TOKEN: ${BOT_ADMIN_TOKEN:-}
+      HUB_URL: http://mcp-hub:3003
+      HUB_SERVICE_TOKEN: ${HUB_SERVICE_TOKEN:-}
+      KNOWLEDGE_URL: http://knowledge:3005
+      KNOWLEDGE_SERVICE_TOKEN: ${KNOWLEDGE_SERVICE_TOKEN:-}
+      # Automation is the separate `gaiada-automation` n8n stack; set these only if n8n is
+      # reachable from this network. AUTOMATION_API_KEY is an n8n Public-API key → the
+      # Systems→Automation console then lists real workflows + last-run.
+      AUTOMATION_URL: ${AUTOMATION_URL:-}
+      AUTOMATION_API_KEY: ${AUTOMATION_API_KEY:-}
+      # Event → n8n bridge (WS4 §4). Off unless all four are set. N8N_BRIDGE_SECRET must match
+      # the value the event workflows check. Only set N8N_WEBHOOK_BASE_URL if n8n is reachable.
+      N8N_WEBHOOK_BASE_URL: ${N8N_WEBHOOK_BASE_URL:-}
+      N8N_BRIDGE_SECRET: ${N8N_BRIDGE_SECRET:-}
+      N8N_BRIDGE_EVENTS: ${N8N_BRIDGE_EVENTS:-}
+      N8N_BRIDGE_ENTITY_TYPES: ${N8N_BRIDGE_ENTITY_TYPES:-}
     volumes:
       - platform-files:/data/files
     depends_on:

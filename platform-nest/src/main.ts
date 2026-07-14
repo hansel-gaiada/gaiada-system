@@ -5,7 +5,7 @@ import "reflect-metadata";
 import { NestFactory } from "@nestjs/core";
 import { FastifyAdapter, type NestFastifyApplication } from "@nestjs/platform-fastify";
 import { AppModule } from "./app.module";
-import { config } from "./config";
+import { config, n8nBridgeEnabled } from "./config";
 import { HttpErrorFilter } from "./http-error.filter";
 import { migrate } from "./db/migrate";
 import { getPool } from "./db";
@@ -16,6 +16,7 @@ import { registerCoreRollupProvider, coreTaskRollups, syncMetricDefinitions } fr
 import { clientWorkRollups } from "./core/client-work";
 import { startRelayLoop } from "./events/relay";
 import { startConsumerLoop } from "./events/consumer.service";
+import { startN8nBridgeLoop } from "./events/n8n-bridge";
 
 export async function buildApp(): Promise<NestFastifyApplication> {
   const app = await NestFactory.create<NestFastifyApplication>(AppModule, new FastifyAdapter(), { logger: false });
@@ -42,6 +43,12 @@ async function bootstrap(): Promise<void> {
     startRelayLoop();
     // Entity types with at least one registered handler; extend as modules add eventHandlers.
     startConsumerLoop(["deliverable"]);
+    // Event → n8n bridge (WS4 §4): only when fully configured (URL + secret + allow-lists).
+    if (n8nBridgeEnabled()) {
+      startN8nBridgeLoop(config.n8nBridge.entityTypes);
+      // eslint-disable-next-line no-console
+      console.log(`n8n bridge on: events [${config.n8nBridge.events.join(", ")}] over streams [${config.n8nBridge.entityTypes.join(", ")}]`);
+    }
   }
   const app = await buildApp();
   const port = Number(process.env.PLATFORM_PORT ?? 3004);

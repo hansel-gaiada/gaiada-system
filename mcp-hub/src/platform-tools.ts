@@ -87,4 +87,16 @@ export function registerPlatformTools(): void {
     handler: (args, principal) =>
       platformGet(`/api/${String(args.tenantId)}/modules/agency/approvals/pending`, principal),
   });
+
+  registerTool({
+    name: "compliance.gates",
+    description: "Compliance-gate statuses for a company (admin surface). Read-only.",
+    minAssurance: "low", // the platform's Cerbos policy is the real gate (company_admin only)
+    inputSchema: {
+      type: "object",
+      properties: { tenantId: { type: "string" } },
+      required: ["tenantId"],
+    },
+    handler: (args, principal) => platformGet(`/api/${String(args.tenantId)}/compliance-gates`, principal),
+  });
 }

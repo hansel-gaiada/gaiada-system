@@ -61,6 +61,24 @@ export class CollabController {
     return { id };
   }
 
+  // Raise an in-app notification for another member (5c.3 + WS4 §3): used by elevated actors
+  // and scoped automation service accounts (e.g. wf:new-client-seed) to push a notice into a
+  // user's inbox. `notify()` is best-effort and skips self / non-members. Cerbos gates "create"
+  // to company_admin/manager (+ platform_admin); a low-assurance chat session cannot reach it.
+  @Post(":tenantId/notifications")
+  @HttpCode(201)
+  async createNotification(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Body() body: { recipientId?: string; type?: string; payload?: Record<string, unknown> },
+  ) {
+    const { recipientId, type, payload = {} } = body ?? {};
+    if (!recipientId || !type) throw new BadRequestException("recipientId and type required");
+    await authorize(req.principal, { kind: "notification", tenantId }, "create");
+    await notify(tenantId, recipientId, req.principal.userId, type, payload);
+    return { ok: true };
+  }
+
   @Get(":tenantId/notifications")
   async listNotifications(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Query("unread") unread?: string) {
     await authorize(req.principal, { kind: "notification", tenantId }, "read");

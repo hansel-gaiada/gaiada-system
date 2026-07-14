@@ -1,0 +1,42 @@
+{
+  "name": "digest-fanout (CRON)",
+  "meta": { "description": "Fires the bot's scheduled digest sweep at 12:00 & 18:00. The digest LOGIC lives in the bot; n8n only triggers the slot on its admin endpoint (a service-job trigger, not data access — so no MCP/hub scope needed). Env: BOT_URL, BOT_ADMIN_TOKEN." },
+  "nodes": [
+    {
+      "parameters": { "rule": { "interval": [{ "field": "cronExpression", "expression": "0 12,18 * * *" }] } },
+      "name": "At 12:00 and 18:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Pick the slot the bot expects (noon|evening) from the fire time.\nconst slot = new Date().getHours() < 15 ? 'noon' : 'evening';\nreturn [{ json: { slot } }];"
+      },
+      "name": "Pick slot",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [220, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.BOT_URL }}/run-digests/{{ $json.slot }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [{ "name": "Authorization", "value": "=Bearer {{ $env.BOT_ADMIN_TOKEN }}" }]
+        }
+      },
+      "name": "Bot: run-digests/{slot}",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [440, 0]
+    }
+  ],
+  "connections": {
+    "At 12:00 and 18:00": { "main": [[{ "node": "Pick slot", "type": "main", "index": 0 }]] },
+    "Pick slot": { "main": [[{ "node": "Bot: run-digests/{slot}", "type": "main", "index": 0 }]] }
+  },
+  "settings": {},
+  "pinData": {}
+}

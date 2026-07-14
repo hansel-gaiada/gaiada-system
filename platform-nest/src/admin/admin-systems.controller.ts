@@ -78,12 +78,55 @@ async function probeStatus(system: SystemKey): Promise<SystemStatus> {
           clearTimeout(t);
         }
       });
-      return { ok: true, detail: { url: base } };
+      // With a Public-API key we can list real workflows; without one the UI still degrades.
+      const workflows = await listN8nWorkflows(base, config.services.automation.token);
+      return { ok: true, counters: { workflows: workflows.length }, detail: { url: base, n8nUrl: base, workflows } };
     }
     const h = (await getJson(`${base}${healthPath}`)) as Record<string, unknown>;
     return shapeHealth(system, h);
   } catch (e) {
     return { ok: false, detail: { error: (e as Error).message, url: base } };
+  }
+}
+
+interface WorkflowRow {
+  name: string;
+  status: string;
+  lastRun: string | null;
+}
+
+/** List n8n workflows via its Public API (needs an API key), each annotated with its most
+ *  recent execution's status/time. Fail-soft: no key or unreachable API -> [] (UI degrades). */
+async function listN8nWorkflows(base: string, apiKey: string): Promise<WorkflowRow[]> {
+  if (!apiKey) return [];
+  const key = (url: string) => {
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), config.adminProbeTimeoutMs);
+    return fetch(url, { signal: ac.signal, headers: { "X-N8N-API-KEY": apiKey } })
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
+      .finally(() => clearTimeout(timer));
+  };
+  try {
+    const [wfRes, exRes] = await Promise.all([
+      key(`${base}/api/v1/workflows`) as Promise<{ data?: Array<{ id: string; name: string; active: boolean }> }>,
+      key(`${base}/api/v1/executions?limit=100`).catch(() => ({ data: [] })) as Promise<{
+        data?: Array<{ workflowId: string; status?: string; finished?: boolean; stoppedAt?: string; startedAt?: string }>;
+      }>,
+    ]);
+    // Most-recent execution per workflow (executions come newest-first).
+    const latest = new Map<string, { status?: string; finished?: boolean; stoppedAt?: string; startedAt?: string }>();
+    for (const e of exRes.data ?? []) if (!latest.has(e.workflowId)) latest.set(e.workflowId, e);
+    return (wfRes.data ?? []).map((w) => {
+      const e = latest.get(w.id);
+      const runStatus = e ? (e.status ?? (e.finished ? "success" : "running")) : "never run";
+      return {
+        name: w.name,
+        status: w.active ? runStatus : "inactive",
+        lastRun: e?.stoppedAt ?? e?.startedAt ?? null,
+      };
+    });
+  } catch {
+    return [];
   }
 }
 
@@ -128,9 +171,8 @@ function connectionConfig(system: SystemKey): ConfigField[] {
   const fields: ConfigField[] = [
     { key: "url", label: "Service URL", value: svc?.url || "(not set)", kind: "text", editable: false },
   ];
-  if (system !== "automation") {
-    fields.push({ key: "tokenConfigured", label: "Auth token configured", value: !!svc?.token, kind: "secretPresence", editable: false });
-  }
+  const tokenLabel = system === "automation" ? "Public-API key configured" : "Auth token configured";
+  fields.push({ key: "tokenConfigured", label: tokenLabel, value: !!svc?.token, kind: "secretPresence", editable: false });
   return fields;
 }
 

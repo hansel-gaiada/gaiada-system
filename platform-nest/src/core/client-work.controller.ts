@@ -6,6 +6,7 @@ import { newId, withTenants } from "../db";
 import { config } from "../config";
 import { authorize, writeActivity } from "./http";
 import { validateCustomFields } from "./custom-fields";
+import { emitEvent } from "../events/outbox.service";
 import { AuthGuard } from "../auth/guards";
 
 @Controller("api")
@@ -35,6 +36,8 @@ export class ClientWorkController {
         `INSERT INTO clients (id, tenant_id, name, contact, custom_fields, origin_site) VALUES ($1, $2, $3, $4, $5, $6)`,
         [id, tenantId, name, JSON.stringify(contact), JSON.stringify(customFields), config.originSite],
       );
+      // Transactional outbox (same tx as the insert): powers the event→n8n bridge / consumers.
+      await emitEvent(c, tenantId, "client", id, "client.created", { name });
     });
     await writeActivity(tenantId, req.principal.userId, "created", "client", id, { name });
     return { id };

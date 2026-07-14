@@ -31,8 +31,28 @@ export const config = {
     bot: { url: process.env.BOT_URL ?? "", token: process.env.BOT_ADMIN_TOKEN ?? process.env.ADMIN_TOKEN ?? "" },
     hub: { url: process.env.HUB_URL ?? "", token: process.env.HUB_SERVICE_TOKEN ?? "" },
     knowledge: { url: process.env.KNOWLEDGE_URL ?? "", token: process.env.KNOWLEDGE_SERVICE_TOKEN ?? "" },
-    automation: { url: process.env.AUTOMATION_URL ?? "", token: "" },
+    // n8n: token is its Public-API key (X-N8N-API-KEY) used to list workflows/executions.
+    automation: { url: process.env.AUTOMATION_URL ?? "", token: process.env.AUTOMATION_API_KEY ?? "" },
   },
   // Per-outbound-call timeout for the admin aggregator's probes (ms).
   adminProbeTimeoutMs: Number(process.env.ADMIN_PROBE_TIMEOUT_MS ?? 3000),
+  // Event → n8n bridge (WS4 §4): forwards allow-listed event-backbone events to n8n webhooks
+  // so automations can trigger on business events, not just CRON/webhook. Fail-closed: the
+  // bridge only starts when a webhook base URL, a shared secret, an event allow-list, AND the
+  // entity_type streams to watch are ALL set (empty anything -> bridge disabled).
+  n8nBridge: {
+    webhookBaseUrl: process.env.N8N_WEBHOOK_BASE_URL ?? "",
+    secret: process.env.N8N_BRIDGE_SECRET ?? "",
+    // Event types (event_type column) allowed to cross to n8n, e.g. "org_structure.updated".
+    events: (process.env.N8N_BRIDGE_EVENTS ?? "").split(",").map((s) => s.trim()).filter(Boolean),
+    // Redis Streams to watch (keyed by entity_type), e.g. "deliverable,org_structure,client".
+    entityTypes: (process.env.N8N_BRIDGE_ENTITY_TYPES ?? "").split(",").map((s) => s.trim()).filter(Boolean),
+    timeoutMs: Number(process.env.N8N_BRIDGE_TIMEOUT_MS ?? 5000),
+  },
 };
+
+/** The bridge is fully configured (all four knobs present) and may start. */
+export function n8nBridgeEnabled(): boolean {
+  const b = config.n8nBridge;
+  return !!(b.webhookBaseUrl && b.secret && b.events.length && b.entityTypes.length);
+}

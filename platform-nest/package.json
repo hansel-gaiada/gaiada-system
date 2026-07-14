@@ -8,6 +8,7 @@
     "start": "node dist/main.js",
     "migrate": "node dist/db/migrate.js",
     "seed:agency": "node dist/seed/agency.js",
+    "seed:automation": "node dist/seed/automation.js",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },

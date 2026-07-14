@@ -1,0 +1,49 @@
+{
+  "name": "on org_structure.updated -> notify (EVENT)",
+  "meta": { "description": "Fired by the platform event->n8n bridge at POST /webhook/ev/org_structure.updated. Verifies the bridge secret, then posts a notice. Read/notify only. Env: N8N_BRIDGE_SECRET, NOTIFY_WEBHOOK_URL." },
+  "nodes": [
+    {
+      "parameters": { "httpMethod": "POST", "path": "ev/org_structure.updated", "responseMode": "responseNode" },
+      "name": "Webhook: bridge ev/org_structure.updated",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Fail-closed: only the platform bridge (shared secret) may drive this workflow.\nconst got = $input.first().json.headers?.['x-gaiada-bridge-secret'];\nif (!got || got !== $env.N8N_BRIDGE_SECRET) throw new Error('bad bridge secret');\nconst e = $input.first().json.body ?? {};\nif (e.v !== 1) throw new Error(`unexpected envelope version ${e.v}`);\nreturn [{ json: { text: `\\ud83c\\udff7\\ufe0f Org structure updated for tenant ${e.tenantId} (entity ${e.entityId}) at ${e.createdAt}`, event: e } }];"
+      },
+      "name": "Verify secret + build notice",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [220, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.NOTIFY_WEBHOOK_URL }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ text: $json.text }) }}"
+      },
+      "name": "Notify channel",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [440, 0]
+    },
+    {
+      "parameters": { "respondWith": "json", "responseBody": "={{ JSON.stringify({ ok: true }) }}" },
+      "name": "Respond 200",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [660, 0]
+    }
+  ],
+  "connections": {
+    "Webhook: bridge ev/org_structure.updated": { "main": [[{ "node": "Verify secret + build notice", "type": "main", "index": 0 }]] },
+    "Verify secret + build notice": { "main": [[{ "node": "Notify channel", "type": "main", "index": 0 }]] },
+    "Notify channel": { "main": [[{ "node": "Respond 200", "type": "main", "index": 0 }]] }
+  },
+  "settings": {},
+  "pinData": {}
+}

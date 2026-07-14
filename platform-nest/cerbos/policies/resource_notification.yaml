@@ -15,3 +15,9 @@ resourcePolicy:
       effect: EFFECT_ALLOW
       derivedRoles: ["company_admin", "manager", "member", "viewer", "team_lead"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    # Raising a notification FOR another member is an elevated/automation action: company
+    # admins, managers (their team), and scoped automation service accounts granted those roles.
+    - actions: ["create"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin", "manager"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }

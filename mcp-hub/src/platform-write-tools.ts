@@ -63,6 +63,8 @@ export function registerPlatformWriteTools(): void {
     name: "projects.create",
     description: "Create a project in a company you belong to.",
     minAssurance: "low",
+    write: true,
+    impact: "low", // in-tenant, reversible; Cerbos + RLS still enforced at the platform
     inputSchema: {
       type: "object",
       properties: { tenantId: { type: "string" }, name: { type: "string" }, clientId: { type: "string" } },
@@ -76,6 +78,8 @@ export function registerPlatformWriteTools(): void {
     name: "tasks.create",
     description: "Create a task under a project.",
     minAssurance: "low",
+    write: true,
+    impact: "low",
     inputSchema: {
       type: "object",
       properties: { tenantId: { type: "string" }, projectId: { type: "string" }, title: { type: "string" } },
@@ -86,9 +90,36 @@ export function registerPlatformWriteTools(): void {
   });
 
   registerTool({
+    name: "notify",
+    description: "Raise an in-app notification for a member (elevated/automation). recipientId + type required.",
+    minAssurance: "low",
+    write: true,
+    impact: "low", // in-tenant, reversible (a notification row); Cerbos gates create to admin/manager
+    inputSchema: {
+      type: "object",
+      properties: {
+        tenantId: { type: "string" },
+        recipientId: { type: "string" },
+        type: { type: "string" },
+        payload: { type: "object" },
+      },
+      required: ["tenantId", "recipientId", "type"],
+    },
+    handler: (args, principal) =>
+      platformSend(
+        "POST",
+        `/api/${String(args.tenantId)}/notifications`,
+        { recipientId: args.recipientId, type: args.type, payload: args.payload ?? {} },
+        principal,
+      ),
+  });
+
+  registerTool({
     name: "tasks.update",
     description: "Update a task: assign (assigneeId), change status (e.g. done), priority, or due date.",
     minAssurance: "low",
+    write: true,
+    impact: "low",
     inputSchema: {
       type: "object",
       properties: {

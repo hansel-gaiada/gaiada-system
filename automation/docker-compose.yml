@@ -1,20 +1,50 @@
 # N8N — light automation glue (WS4). Backbone rule: N8N orchestrates, MCP accesses,
 # custom services hold the logic. Workflows here call mcp-hub tools; no business logic.
 #   cp .env.example .env && docker compose up -d   ->  http://localhost:5678
+# First visit shows n8n's owner-account setup wizard (email + password) — n8n 2.x has
+# no basic-auth; you create the admin user in the UI. Keep N8N_ENCRYPTION_KEY stable or
+# saved credentials become unreadable after a volume reset.
 name: gaiada-automation
 
 services:
   n8n:
-    image: n8nio/n8n
+    image: n8nio/n8n:2.30.4
     restart: unless-stopped
     ports:
       - "127.0.0.1:5678:5678" # local only; tunnel in from outside (ssh -L 5678:localhost:5678)
     environment:
-      N8N_BASIC_AUTH_ACTIVE: "true"
-      N8N_BASIC_AUTH_USER: admin
-      N8N_BASIC_AUTH_PASSWORD: ${N8N_PASSWORD:?set N8N_PASSWORD in .env}
       GENERIC_TIMEZONE: ${TZ:-Asia/Singapore}
       N8N_DIAGNOSTICS_ENABLED: "false"
+      # Portability: pin the key so credentials survive a volume reset / host move.
+      N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:?set N8N_ENCRYPTION_KEY in .env}
+      # Public URL used to register webhook + form endpoints (event bridge posts here).
+      N8N_WEBHOOK_URL: ${N8N_WEBHOOK_URL:-http://localhost:5678/}
+      # Pin former-default values that n8n warns will change in a future version.
+      N8N_RUNNERS_TASK_TIMEOUT: "300"
+      N8N_UNVERIFIED_PACKAGES_ENABLED: "true"
+      N8N_COMPRESSION_NODE_MAX_DECOMPRESSED_SIZE_BYTES: "2147483648"
+      N8N_COMPRESSION_NODE_MAX_ZIP_ENTRIES: "5000"
+      # --- Workflow variables (read by imported flows as $env.<NAME>; no hand-editing) ---
+      # Hub access (backbone: workflows call mcp-hub with a service token + OBO identity).
+      HUB_SERVICE_TOKEN: ${HUB_SERVICE_TOKEN:-}
+      AGENCY_TENANT_ID: ${AGENCY_TENANT_ID:-}
+      # Event-bridge shared secret — MUST match platform's N8N_BRIDGE_SECRET.
+      N8N_BRIDGE_SECRET: ${N8N_BRIDGE_SECRET:-}
+      # Notifications (workflows skip the notify step if URL is empty).
+      NOTIFY_WEBHOOK_URL: ${NOTIFY_WEBHOOK_URL:-}
+      NOTIFY_USER_ID: ${NOTIFY_USER_ID:-}
+      # on-client-created-seed: destination project for the seed task.
+      INTAKE_PROJECT_ID: ${INTAKE_PROJECT_ID:-}
+      # digest-fanout (kept out of the hub allow-list; talks to the bot admin API directly).
+      BOT_URL: ${BOT_URL:-}
+      BOT_ADMIN_TOKEN: ${BOT_ADMIN_TOKEN:-}
+      # on-inbound-lead webhook ingest — fail-closed: stays off unless explicitly enabled.
+      INGEST_ENABLED: ${INGEST_ENABLED:-false}
+      INGEST_SECRET: ${INGEST_SECRET:-}
+    # Standalone: resolve the workflows' hardcoded http://mcp-hub:3003 to a hub on the host.
+    # (On the VPS stack n8n shares the network and mcp-hub resolves natively; this is harmless there.)
+    extra_hosts:
+      - "mcp-hub:host-gateway"
     volumes:
       - n8n-data:/home/node/.n8n
 

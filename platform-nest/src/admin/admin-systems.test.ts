@@ -31,6 +31,15 @@ function startStub(): Promise<{ server: Server; base: string }> {
     if (url === "/kn/health") return send(200, { ok: true });
     if (url.startsWith("/kn/sources")) return send(200, [{ sourceRef: "handbook.pdf", kind: "doc", chunks: 3, provenance: "human", status: "indexed", updatedAt: "2026-07-14T00:00:00Z" }]);
     if (url === "/n8n/healthz") return send(200, "OK", false);
+    if (url === "/n8n/api/v1/workflows") {
+      // Requires the API key header; without it n8n 401s (we assert the fail-soft path separately).
+      if (req.headers["x-n8n-api-key"] !== "n8n-key") return send(401, { message: "unauthorized" });
+      return send(200, { data: [{ id: "wf1", name: "summarize-via-mcp", active: true }, { id: "wf2", name: "draft-flow", active: false }] });
+    }
+    if (url.startsWith("/n8n/api/v1/executions")) {
+      if (req.headers["x-n8n-api-key"] !== "n8n-key") return send(401, { message: "unauthorized" });
+      return send(200, { data: [{ workflowId: "wf1", status: "success", finished: true, stoppedAt: "2026-07-15T00:00:00Z" }] });
+    }
     return send(404, { error: "not found" });
   });
   return new Promise((resolve) => {
@@ -98,8 +107,26 @@ describe.skipIf(!TEST_URL)("admin systems aggregator (Phase C)", () => {
     const agents = (await app.inject({ method: "GET", url: `/api/admin/agents/status`, headers: asUser(admin) })).json() as { ok: boolean; detail?: { note?: string } };
     expect(agents.ok).toBe(false);
     expect(agents.detail?.note).toContain("CLI/library");
-    const auto = (await app.inject({ method: "GET", url: `/api/admin/automation/status`, headers: asUser(admin) })).json() as { ok: boolean };
+    const auto = (await app.inject({ method: "GET", url: `/api/admin/automation/status`, headers: asUser(admin) })).json() as { ok: boolean; detail?: { workflows?: unknown[] } };
     expect(auto.ok).toBe(true);
+    // No API key configured -> alive but no workflow list (UI degrades gracefully).
+    expect(auto.detail?.workflows).toEqual([]);
+  });
+
+  it("automation lists n8n workflows + last-run when a Public-API key is configured", async () => {
+    config.services.automation = { url: config.services.automation.url, token: "n8n-key" };
+    const r = (await app.inject({ method: "GET", url: `/api/admin/automation/status`, headers: asUser(admin) })).json() as {
+      ok: boolean;
+      counters?: { workflows?: number };
+      detail?: { n8nUrl?: string; workflows?: Array<{ name: string; status: string; lastRun: string | null }> };
+    };
+    expect(r.ok).toBe(true);
+    expect(r.detail?.n8nUrl).toContain("/n8n");
+    expect(r.counters?.workflows).toBe(2);
+    const byName = Object.fromEntries((r.detail?.workflows ?? []).map((w) => [w.name, w]));
+    expect(byName["summarize-via-mcp"]).toMatchObject({ status: "success", lastRun: "2026-07-15T00:00:00Z" });
+    expect(byName["draft-flow"]).toMatchObject({ status: "inactive" }); // inactive workflow, no run
+    config.services.automation = { url: config.services.automation.url, token: "" };
   });
 
   it("status of an unreachable service is ok:false with an error, not a throw", async () => {

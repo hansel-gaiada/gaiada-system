@@ -38,7 +38,15 @@ export function buildHttpApp(): express.Express {
   // Non-sensitive metadata (like /health's name list); the actual per-principal filtering
   // happens over /mcp's tools/list. No handler/inputSchema is exposed here.
   app.get("/tools", (_req, res) => {
-    res.json(allTools().map((t) => ({ name: t.name, description: t.description, minAssurance: t.minAssurance })));
+    res.json(
+      allTools().map((t) => ({
+        name: t.name,
+        description: t.description,
+        minAssurance: t.minAssurance,
+        write: !!t.write,
+        impact: t.impact ?? null,
+      })),
+    );
   });
 
   app.post("/mcp", async (req, res) => {

@@ -14,6 +14,7 @@ import { resetModules } from "../modules/registry";
 import { clientWorkRollups } from "./client-work";
 import { initTestDb, teardownTestDb, TEST_URL } from "../testing/setup";
 import { createCompany, createUser, addMembership, createRole, grantRole, createProject } from "../testing/fixtures";
+import { withTenants } from "../db";
 
 describe.skipIf(!TEST_URL)("core client-work", () => {
   let app: NestFastifyApplication;
@@ -70,6 +71,16 @@ describe.skipIf(!TEST_URL)("core client-work", () => {
     clientId = r.json().id;
     const list = await app.inject({ method: "GET", url: `/api/${co}/clients`, headers: asUser(member) });
     expect((list.json() as Array<{ id: string }>).some((c) => c.id === clientId)).toBe(true);
+  });
+
+  it("creating a client emits a client.created outbox event (drives the n8n bridge)", async () => {
+    const ev = await withTenants([co], (c) =>
+      c.query<{ entity_id: string }>(
+        `SELECT entity_id FROM outbox_events WHERE event_type = 'client.created' AND entity_id = $1`,
+        [clientId],
+      ),
+    );
+    expect(ev.rows).toHaveLength(1);
   });
 
   it("a viewer cannot create a client (read-only role)", async () => {
