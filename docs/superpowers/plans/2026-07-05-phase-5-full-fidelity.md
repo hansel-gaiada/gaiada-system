@@ -41,7 +41,12 @@ session are now fully exercisable at no cost.
   sync-apply path waits on the sync engine; expand/contract migration discipline still to document.
 - [ ] Web UI (Next.js, WS5) — auth via IdP, module UI manifests rendered, management rollup dashboard
 - [ ] Event backbone (Redpanda/NATS) — modules emit/consume; outbox table feeds it
-- [ ] Sync engine (Go, own sub-spec FIRST — highest risk): outbox → scheduled sync, idempotent apply, LWW + human-review conflicts, hub-first migrations
+- [x] Sync engine (Go, `sync-engine-go/`) — **DONE 2026-07-14.** Outbox → mTLS push/pull, idempotent
+  apply (dedup ledger, never `relayed_at`), HLC ordering, declarative per-field conflicts (status/money
+  → conflict-queue, else LWW; all recorded, no silent loss), per-tenant RLS + central ACL (D5),
+  new-node bootstrap (snapshot + watermark + merkle gate + anti-entropy), watermark-gated tombstone GC.
+  Property-based convergence + partition/chaos suite green on a local 2-Postgres harness. Closes
+  D3/D5/D7. Report: `2026-07-14-ws1-sync-engine-completion-report.md`.
 - [ ] Go edge services: realtime hub (WebSockets), media workers
 - [ ] Next vertical modules (resort, marine, printing) via ModuleContract
 

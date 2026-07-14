@@ -55,7 +55,15 @@ export default async function CompanyDetailPage({ params }: { params: Promise<{ 
 
   return (
     <>
-      <PageHeader eyebrow="Company" title={company.name} />
+      <PageHeader
+        eyebrow="Company"
+        title={company.name}
+        actions={
+          <Link href={`/companies/${company.id}/org`} className="lux-btn lux-btn--ghost lux-btn--sm">
+            Org structure
+          </Link>
+        }
+      />
       <DescriptionList items={items} />
     </>
   );

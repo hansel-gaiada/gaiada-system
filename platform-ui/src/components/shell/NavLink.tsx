@@ -11,7 +11,13 @@ export function NavLink({ item }: { item: NavItem }) {
   const pathname = usePathname();
   const active = pathname === item.href;
   return (
-    <Link href={item.href} className={`erp-navbtn${active ? " erp-navbtn--active" : ""}`}>
+    <Link
+      href={item.href}
+      className={`erp-navbtn${active ? " erp-navbtn--active" : ""}`}
+      aria-label={item.label}
+      title={item.label}
+      aria-current={active ? "page" : undefined}
+    >
       <Icon name={item.icon} />
       <span>{item.label}</span>
     </Link>

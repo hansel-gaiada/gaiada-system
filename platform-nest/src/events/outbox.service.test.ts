@@ -21,13 +21,31 @@ describe.skipIf(!TEST_URL)("OutboxService.emit", () => {
       await emitEvent(c, co, "deliverable", entityId, "deliverable.approved", { approvedBy: "u1" });
     });
     const { rows } = await adminPool().query(
-      `SELECT tenant_id, entity_type, entity_id, event_type, payload, relayed_at FROM outbox_events WHERE entity_id = $1`,
+      `SELECT tenant_id, entity_type, entity_id, event_type, payload, relayed_at, hlc FROM outbox_events WHERE entity_id = $1`,
       [entityId],
     );
     expect(rows).toHaveLength(1);
     expect(rows[0].event_type).toBe("deliverable.approved");
     expect(rows[0].payload).toEqual({ approvedBy: "u1" });
     expect(rows[0].relayed_at).toBeNull();
+    // Every emitted row carries the HLC the sync engine orders by (D3 #2).
+    expect(rows[0].hlc).toMatch(/^\d{13}\.\d{10}$/);
+  });
+
+  it("stamps a strictly increasing HLC across successive emits", async () => {
+    const e1 = "00000000-0000-0000-0000-0000000000a1";
+    const e2 = "00000000-0000-0000-0000-0000000000a2";
+    await withTenants([co], async (c) => {
+      await emitEvent(c, co, "deliverable", e1, "deliverable.updated", {});
+      await emitEvent(c, co, "deliverable", e2, "deliverable.updated", {});
+    });
+    const { rows } = await adminPool().query<{ entity_id: string; hlc: string }>(
+      `SELECT entity_id, hlc FROM outbox_events WHERE entity_id IN ($1, $2)`,
+      [e1, e2],
+    );
+    const h1 = rows.find((r) => r.entity_id === e1)!.hlc;
+    const h2 = rows.find((r) => r.entity_id === e2)!.hlc;
+    expect(h2 > h1).toBe(true); // padded text ordering == logical ordering
   });
 
   it("rolls back the outbox row if the transaction rolls back", async () => {

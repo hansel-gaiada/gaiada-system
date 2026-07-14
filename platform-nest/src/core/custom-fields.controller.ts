@@ -1,6 +1,6 @@
 // D17 registry management (Nest port). The UI reads field defs to render dynamic forms;
 // admins/managers define them. Validation-on-write lives in custom-fields.ts (the validator).
-import { BadRequestException, Body, ConflictException, Controller, Get, HttpCode, Param, Post, Query, Req, UseGuards } from "@nestjs/common";
+import { BadRequestException, Body, ConflictException, Controller, Delete, Get, HttpCode, NotFoundException, Param, Patch, Post, Query, Req, UseGuards } from "@nestjs/common";
 import type { FastifyRequest } from "fastify";
 import { newId, withTenants } from "../db";
 import { config } from "../config";
@@ -53,5 +53,55 @@ export class CustomFieldsController {
     }
     await writeActivity(tenantId, req.principal.userId, "created", "custom_field", id, { entityType, key });
     return { id };
+  }
+
+  // Edit a field def — label/options/required only (key/entity_type/data_type are immutable
+  // to keep the JSONB values already written under that key valid).
+  @Patch(":tenantId/custom-fields/:fieldId")
+  async update(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Param("fieldId") fieldId: string,
+    @Body() body: { label?: string; options?: unknown[]; required?: boolean },
+  ) {
+    await authorize(req.principal, { kind: "custom_field", tenantId }, "update");
+    const { label, options, required } = body ?? {};
+    if (label === undefined && options === undefined && required === undefined) {
+      throw new BadRequestException("nothing to update");
+    }
+    const res = await withTenants([tenantId], (c) =>
+      c.query(
+        `UPDATE custom_field_definitions
+         SET label = COALESCE($2, label),
+             options = COALESCE($3::jsonb, options),
+             required = COALESCE($4, required),
+             updated_at = now()
+         WHERE id = $1 AND deleted_at IS NULL`,
+        [fieldId, label ?? null, options === undefined ? null : JSON.stringify(options), required ?? null],
+      ),
+    );
+    if (res.rowCount === 0) throw new NotFoundException("field definition not found");
+    await writeActivity(tenantId, req.principal.userId, "updated", "custom_field", fieldId);
+    return { id: fieldId };
+  }
+
+  // Soft-delete a field def (existing values on entities are left untouched).
+  @Delete(":tenantId/custom-fields/:fieldId")
+  async remove(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Param("fieldId") fieldId: string,
+  ) {
+    await authorize(req.principal, { kind: "custom_field", tenantId }, "delete");
+    const res = await withTenants([tenantId], (c) =>
+      c.query(
+        `UPDATE custom_field_definitions SET deleted_at = now(), updated_at = now()
+         WHERE id = $1 AND deleted_at IS NULL`,
+        [fieldId],
+      ),
+    );
+    if (res.rowCount === 0) throw new NotFoundException("field definition not found");
+    await writeActivity(tenantId, req.principal.userId, "deleted", "custom_field", fieldId);
+    return { id: fieldId, deleted: true };
   }
 }

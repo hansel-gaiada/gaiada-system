@@ -1,0 +1,8 @@
+# Local test-build scratch (Smart App Control workaround — see run-tests.sh)
+.gotmp/
+# Issued certs / CA material — never commit
+data/
+certs/
+*.pem
+*.crt
+*.key

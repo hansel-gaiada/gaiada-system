@@ -24,4 +24,15 @@ export const config = {
   filesDir: process.env.FILES_DIR ?? "./data/files",
   // Event backbone (5c continuation): Redis Streams for outbox relay + consumption.
   redisUrl: process.env.REDIS_URL ?? "",
+  // Downstream service endpoints the admin/systems console aggregates (Phase C). All
+  // read-only; empty URL -> that system reports "not configured" (fail-soft, never fake).
+  services: {
+    gateway: { url: process.env.GATEWAY_URL ?? "", token: process.env.GATEWAY_TOKEN ?? "" },
+    bot: { url: process.env.BOT_URL ?? "", token: process.env.BOT_ADMIN_TOKEN ?? process.env.ADMIN_TOKEN ?? "" },
+    hub: { url: process.env.HUB_URL ?? "", token: process.env.HUB_SERVICE_TOKEN ?? "" },
+    knowledge: { url: process.env.KNOWLEDGE_URL ?? "", token: process.env.KNOWLEDGE_SERVICE_TOKEN ?? "" },
+    automation: { url: process.env.AUTOMATION_URL ?? "", token: "" },
+  },
+  // Per-outbound-call timeout for the admin aggregator's probes (ms).
+  adminProbeTimeoutMs: Number(process.env.ADMIN_PROBE_TIMEOUT_MS ?? 3000),
 };

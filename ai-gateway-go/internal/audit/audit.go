@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 type EgressAudit struct {
@@ -34,4 +35,30 @@ func WriteAudit(path string, e EgressAudit) error {
 	}
 	_, err = f.Write(append(line, '\n'))
 	return err
+}
+
+// ReadRecent returns up to `limit` most-recent audit entries (newest first). A missing
+// file is not an error — it yields an empty slice. Malformed lines are skipped.
+func ReadRecent(path string, limit int) ([]EgressAudit, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return []EgressAudit{}, nil
+		}
+		return nil, err
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	out := make([]EgressAudit, 0, limit)
+	// Walk from the end so we collect the newest entries first.
+	for i := len(lines) - 1; i >= 0 && len(out) < limit; i-- {
+		line := strings.TrimSpace(lines[i])
+		if line == "" {
+			continue
+		}
+		var e EgressAudit
+		if json.Unmarshal([]byte(line), &e) == nil {
+			out = append(out, e)
+		}
+	}
+	return out, nil
 }

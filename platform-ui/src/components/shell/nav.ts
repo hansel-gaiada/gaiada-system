@@ -4,10 +4,16 @@ import type { IconName } from "./icons";
 export interface NavItem { label: string; href: string; icon: IconName }
 export interface NavGroup { label: string; items: NavItem[] }
 
+// "Elevated" = superadmin (platform_admin) or owner (group_executive). Shared
+// by the nav and the employee-view access check (lib/people.ts) so the rule
+// lives in one place.
 const ELEVATED = new Set(["platform_admin", "group_executive"]);
+export function isElevated(me: Me): boolean {
+  return me.roles.some((r) => ELEVATED.has(r.role));
+}
 
 export function navFor(me: Me): NavGroup[] {
-  const elevated = me.roles.some((r) => ELEVATED.has(r.role));
+  const elevated = isElevated(me);
   const business: NavItem[] = [
     { label: "Companies", href: "/companies", icon: "finance" },
     { label: "Projects", href: "/projects", icon: "projects" },
@@ -19,6 +25,9 @@ export function navFor(me: Me): NavGroup[] {
     { label: "Workspace", items: [
       { label: "My Work", href: "/", icon: "home" },
       { label: "Approvals", href: "/approvals", icon: "check" },
+      // People directory is elevated-only; every employee still reaches their
+      // own /people/[id] page from Account.
+      ...(elevated ? [{ label: "People", href: "/people", icon: "hr" } as NavItem] : []),
     ] },
     { label: "Business", items: business },
     { label: "Intelligence", items: [

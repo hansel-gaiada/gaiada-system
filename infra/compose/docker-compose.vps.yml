@@ -121,6 +121,37 @@ services:
       redis:
         condition: service_started
 
+  # Sync engine (WS1 T2) — CENTRAL role. Serves push/pull over mTLS to remote site nodes and runs
+  # the tombstone GC sweep. Reconciles the SAME gaiada_platform DB the platform writes (the sync
+  # tables + the outbox hlc column ship in platform-nest migrations 0012/0013). Idle until a real
+  # second site is enrolled; deploying it now is harmless (no site nodes → nothing to serve).
+  # ONE-TIME cert provisioning (mTLS is mandatory here, unlike the gateway): the gateway persists
+  # the internal CA to the gateway-data volume; issue this node's server cert from it once, e.g.
+  #   docker compose run --rm --entrypoint /synccert sync-central \
+  #     -ca-cert /gateway-ca/ca-cert.pem -ca-key /gateway-ca/ca-key.pem \
+  #     -cn central -out-cert /app/data/sync.crt -out-key /app/data/sync.key
+  # then issue each site node's client cert (CN = its NODE_ID) and add it to site_subscriptions.
+  sync-central:
+    build: ../../sync-engine-go
+    restart: unless-stopped
+    environment:
+      SYNC_MODE: central
+      NODE_ID: central
+      DATABASE_URL: postgres://gaiada_app:${POSTGRES_APP_PASSWORD:?}@postgres:5432/gaiada_platform
+      SYNC_LISTEN_ADDR: 0.0.0.0:3013
+      SYNC_CA_CERT: /gateway-ca/ca-cert.pem
+      SYNC_CERT: /app/data/sync.crt
+      SYNC_KEY: /app/data/sync.key
+      # Empty = accept any CA-signed node (the site_subscriptions ACL is then the sole tenant
+      # gate); set to a comma list of node CNs to also pin an allowlist.
+      SYNC_ALLOWED_CNS: ${SYNC_ALLOWED_CNS:-}
+    volumes:
+      - sync-data:/app/data
+      - gateway-data:/gateway-ca:ro # reuse the gateway's persisted internal CA
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   platform-ui:
     build: ../../platform-ui
     restart: unless-stopped
@@ -232,3 +263,4 @@ volumes:
   hub-data:
   bot-data:
   platform-files:
+  sync-data:

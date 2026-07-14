@@ -1,26 +1,36 @@
+import Link from "next/link";
 import type { Me } from "@/lib/platform";
+import { listNotifications } from "@/lib/entities";
 import { Icon } from "./icons";
 import { Eyebrow } from "@/components/ui";
 import { TenantSwitcher } from "./TenantSwitcher";
 
-// Search is display-only this task — global search wires up with the module pages.
-export function TopBar({ me, tenantId, moduleLabel }: { me: Me; tenantId: string | null; moduleLabel: string }) {
+export async function TopBar({ me, tenantId, moduleLabel }: { me: Me; tenantId: string | null; moduleLabel: string }) {
   const dateLine = new Date().toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long" });
+
+  // Unread notification count for the bell badge — degrades to 0 if the feed
+  // is unavailable (never blocks the shell).
+  const unread = tenantId
+    ? (await listNotifications(me.userId, tenantId, true).catch(() => [])).length
+    : 0;
+
   return (
     <header className="erp-top">
-      <div style={{ display: "flex", alignItems: "baseline", gap: 12, minWidth: 0 }}>
+      <div className="erp-top__meta">
         <Eyebrow style={{ color: "var(--erp-accent)" }}>{moduleLabel}</Eyebrow>
-        <span style={{ width: 0.5, height: 16, background: "rgba(26,25,22,.2)" }} />
-        <span style={{ font: "400 13px var(--font-body)", color: "var(--erp-ink-60)", whiteSpace: "nowrap" }}>{dateLine}</span>
+        <span className="erp-top__divider" />
+        <span className="erp-top__date">{dateLine}</span>
       </div>
-      <label className="erp-top__search">
+      <form className="erp-top__search" action="/search" method="get" role="search">
         <Icon name="search" size={18} />
-        <input placeholder="Search records, people, approvals…" aria-label="Search" />
-      </label>
-      <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 18 }}>
-        {me.companies.length > 1 && (
-          <TenantSwitcher companies={me.companies} current={tenantId} />
-        )}
+        <input name="q" placeholder="Search records, people, approvals…" aria-label="Search" defaultValue="" />
+      </form>
+      <div className="erp-top__actions">
+        <Link href="/notifications" className="erp-top__bell" aria-label={unread > 0 ? `Notifications, ${unread} unread` : "Notifications"}>
+          <Icon name="bell" size={19} />
+          {unread > 0 && <span className="erp-top__badge" aria-hidden="true">{unread > 9 ? "9+" : unread}</span>}
+        </Link>
+        {me.companies.length > 1 && <TenantSwitcher companies={me.companies} current={tenantId} />}
       </div>
     </header>
   );

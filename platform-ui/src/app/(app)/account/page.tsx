@@ -1,10 +1,12 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
+import { getPrefs } from "@/lib/prefs";
 import { PageHeader } from "@/components/PageHeader";
 import { Card, StatusBadge } from "@/components/ui";
 import { DescriptionList } from "@/components/DescriptionList";
-import { logout } from "./actions";
+import { logout, savePrefs } from "./actions";
 
 const SCOPE_LABEL: Record<string, string> = {
   global: "Global",
@@ -16,6 +18,7 @@ export default async function AccountPage() {
   const userId = await getSessionUserId();
   if (!userId) redirect("/login");
   const me = await getMe(userId);
+  const prefs = await getPrefs();
 
   const identity = [
     { label: "Name", value: me.name },
@@ -31,9 +34,12 @@ export default async function AccountPage() {
         title="Your profile"
         subtitle="The principal the platform recognises for you, the companies you can act in, and the roles you hold."
         actions={
-          <form action={logout}>
-            <button type="submit" className="lux-btn lux-btn--ghost lux-btn--sm">Sign out</button>
-          </form>
+          <>
+            <Link href={`/people/${me.userId}`} className="lux-btn lux-btn--ghost lux-btn--sm">My employee page</Link>
+            <form action={logout}>
+              <button type="submit" className="lux-btn lux-btn--ghost lux-btn--sm">Sign out</button>
+            </form>
+          </>
         }
       />
 
@@ -61,6 +67,33 @@ export default async function AccountPage() {
               ))}
             </div>
           )}
+        </Card>
+      </div>
+
+      <div style={{ marginTop: 20 }}>
+        <Card title="Display preferences">
+          <p style={{ margin: "0 0 16px", font: "400 13px/1.5 var(--font-body)", color: "var(--erp-ink-60)" }}>
+            How this workspace is laid out on your screen. Saved to this browser.
+          </p>
+          <form className="lux-filters" action={savePrefs}>
+            <label className="lux-filters__field">
+              <span>Density</span>
+              <select name="density" defaultValue={prefs.density}>
+                <option value="comfortable">Comfortable</option>
+                <option value="compact">Compact</option>
+              </select>
+            </label>
+            <label className="lux-filters__field">
+              <span>Content width</span>
+              <select name="width" defaultValue={prefs.width}>
+                <option value="standard">Standard</option>
+                <option value="wide">Wide</option>
+              </select>
+            </label>
+            <div className="lux-filters__actions">
+              <button type="submit" className="lux-btn lux-btn--solid lux-btn--sm">Save</button>
+            </div>
+          </form>
         </Card>
       </div>
 

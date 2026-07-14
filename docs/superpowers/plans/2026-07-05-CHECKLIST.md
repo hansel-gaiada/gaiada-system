@@ -115,6 +115,56 @@ Update this as each item completes. `☐` todo · `▣` in progress · `☑` don
 - [ ] Backend: agents goals admin endpoint — dependency on concurrent backend session
 - [ ] Backend: knowledge sources/review admin endpoints — dependency on concurrent backend session
 
+### Plan 4 — Admin section + account/identity (UI)  `▣`  *(UI-only; plan: `2026-07-05-erp-ui-plan-4-admin-identity-fullstack.md`)*
+
+- [x] Admin data layer (`lib/adminData.ts`) + logout/account helpers — ✓
+- [x] Users & Roles page (`/admin/users`) — ✓ RoleManager; session-revoke real, assign/revoke degrade
+- [x] Identity Links page (`/admin/identity`) — ✓ verify/unlink degrade (D4 dual-proof note)
+- [x] Modules & Custom Fields page (`/admin/modules`) — ✓ field-def create real; toggle/edit/delete degrade
+- [x] Compliance Gates page (`/admin/compliance`) — ✓ real G.1–G.6 checklist; persistence degrades
+- [x] Audit page (`/admin/audit`) — ✓ verb/entity/date filters + load-more (via `/activity` fallback)
+- [x] Account/profile page (`/account`) + Sign out — ✓ wired the real `logout()` (was dead code)
+- [x] Sidebar Sign-out affordance (`UserMenu`) — ✓ user-card is now a menu (Account / Sign out)
+- [x] `/step-up` landing (D4) + middleware allowlist — ✓ reads `?return=`; login honours validated return
+- [ ] Backend: users-with-roles, role assign/revoke, identity-links CRUD, module enable/disable,
+  custom-field PATCH/DELETE, compliance-gate persistence, filtered `/audit` — all degrade gracefully
+
+### Plan 5 — Polish (UI)  `☑`  *(UI-only; done 2026-07-14)*
+
+- [x] Loading / error / not-found states — ✓ `PageSkeleton`, app+root `error`/`not-found`, `global-error`
+- [x] Global search — ✓ TopBar → `/search` across companies/projects/tasks/campaigns/people (`lib/search.ts`)
+- [x] Notifications — ✓ TopBar bell + unread badge → `/notifications` (mark-all-read, degrades)
+- [x] Layout/density preferences — ✓ density + content-width, cookie-persisted, applied on the shell (`lib/prefs.ts`)
+- [x] Responsive pass — ✓ shell collapses to an icon-rail on small viewports
+- [x] a11y pass — ✓ skip link, reduced-motion, nav accessible names + `aria-current`, focus-visible
+- [x] Playwright e2e — ✓ 11 tests (login, nav, search, notifications, audit, account/prefs, sign-out, step-up) vs `DEMO_MODE`
+- [x] `DEMO_MODE=1` demo fixtures cover every surface (incl. notifications) for backend-free review
+
+### People / Employee view (UI)  `☑`  *(UI-only; added 2026-07-14, beyond Plans 1–5)*
+
+- [x] People directory (`/people`) — elevated-only (superadmin/owner) member list → per-employee page
+- [x] Employee 360 (`/people/[userId]`) — profile + roles, KPIs (open tasks / projects owned / hours / linked channels),
+  assigned tasks, projects owned, recent time, WA/TG identity links, recent activity (`lib/people.ts`)
+- [x] Access: **self OR superadmin (`platform_admin`) OR owner (`group_executive`)** — `canViewEmployee` gate (unit-tested); backend RLS/Cerbos is the real boundary
+- [x] Reached by employees from Account ("My employee page"); by owners/admins from the People directory
+- [x] Data derived from existing tenant lists sliced by userId (tasks assignee / projects owner / time / identity-links / audit actor) — no new backend endpoints required; each source degrades independently
+
+### Org structure builder + departments (UI)  `☑`  *(UI-only; added 2026-07-14, beyond Plans 1–5)*
+
+- [x] Per-company org builder (`/companies/[companyId]/org`) — drag-a-unit-to-re-parent, inline edit
+  (name / kind / assignee), **side-by-side live org-chart preview** (`components/org/OrgBuilder.tsx`)
+- [x] Agency departments seeded: **Web Dev, SEO, SMM, Video Editor, Design Graphic** (`lib/org.ts` default)
+- [x] Edit gated to **superadmin/owner**; everyone else sees the read-only chart
+- [x] **Backend-ready:** BFF contract `GET/PUT /api/:t/org-structure` (`OrgStructure` JSON) with cookie
+  fallback + seeded default until it lands — **backend TODO recorded in memory `org-structure-contract`**
+- [x] Reached from the company detail page ("Org structure")
+
+**UI status (2026-07-14):** the ERP UI is **feature-complete** (Plans 1–5 + People/Employee view + per-company org builder). Every nav route resolves
+to a real page; only the `[...placeholder]` catch-all remains for genuinely unknown paths. Verified:
+`tsc --noEmit` clean, 55 unit tests + 11 e2e pass, `next build` green. **The only remaining work is
+backend:** the admin/systems API layer + plan-4 identity write endpoints (all UI degrades gracefully
+and lights up automatically when they land), plus optional single-GET company/campaign detail endpoints.
+
 ---
 
 ## Compliance / launch gate (must be green before real-message ingestion — Phase 1)

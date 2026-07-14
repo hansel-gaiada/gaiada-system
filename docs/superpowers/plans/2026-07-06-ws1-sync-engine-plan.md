@@ -1,5 +1,9 @@
 # Sync Engine Implementation Plan
 
+> **STATUS: BUILT 2026-07-14** as `sync-engine-go/` — extended beyond this plan's primitives to a
+> fully runnable engine (wire protocol, central server, tick-loop binary, bootstrap, GC). See
+> `2026-07-14-ws1-sync-engine-completion-report.md` for what shipped and the deliberate deviations.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Build the Go sync engine (T2 cross-site reconciliation) per the revised spec — reads/writes the same `outbox_events` table the event backbone uses, with HLC-based ordering, declarative per-field conflict resolution, tenant-scoped RLS on every operation, and a chaos-tested convergence guarantee.

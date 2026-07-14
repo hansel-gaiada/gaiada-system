@@ -1,7 +1,7 @@
 # Workstream 1 · Sub-spec — Sync Engine Revision (closes D3/D5/D7)
 
 **Date:** 2026-07-06
-**Status:** Design approved (brainstorming stage — not yet built)
+**Status:** BUILT 2026-07-14 (`sync-engine-go/`) — see `../plans/2026-07-14-ws1-sync-engine-completion-report.md`. Closes D3/D5/D7.
 **Supersedes-in-part:** `2026-07-04-ws1-sync-engine.md` (topology §1-2, tables §4, security floor §6, backup/DR §7 all still stand; this doc replaces §3 reconciliation design and §8 open items with the adversarial review's mandatory fixes, and removes the "deferred to target-state" status per the full-fidelity mandate)
 **Fixes:** D3 (silent data loss/corruption), D5 (RLS tenant-isolation gap on the sync path), D7 (event-backbone/sync-outbox collision) from `2026-07-05-adversarial-weakness-review.md`
 **Depends on:** `2026-07-05-ws1-event-backbone.md` (shares one outbox table), `2026-07-06-ws3-go-gateway-rewrite.md` (mTLS node identity)

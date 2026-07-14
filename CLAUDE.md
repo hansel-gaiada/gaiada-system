@@ -83,10 +83,25 @@ Components are **separate standalone projects — not a shared-package monorepo.
   `/api/admin/{bot,gateway,hub,automation}/{status,config}` + plan-4 identity endpoints
   (users-with-roles, role assign/revoke, identity-links CRUD, module enable/disable,
   custom-field PATCH/DELETE, compliance-gates, filtered audit); no AdminController exists yet —
-  this is what blocks the built-but-placeholder UI Systems/Intelligence/Admin sections. (2) the
-  **sync engine** (Go, `sync-engine-go/`, NOT STARTED — design approved). (3) other verticals.
+  this is what blocks the built-but-placeholder UI Systems/Intelligence/Admin sections. (2) other
+  verticals. **The sync engine is now BUILT** — see the `sync-engine-go/` bullet below.
   **Dev infra note:** Cerbos must run with published ports (`-p 3592:3592 -p 3593:3593`) — a
   portless container fails all authz.
+- **sync-engine-go/** (WS1 T2) — **BUILT 2026-07-14.** Cross-site reconciliation: one Go binary
+  runs central (serves push/pull over mTLS) or site (push→pull→GC ticker), reconciling the shared
+  `outbox_events` log with HLC ordering, declarative per-field conflict resolution (status/money →
+  conflict-queue, else lww), per-tenant RLS on every op (Go port of `withTenants`), a
+  central-authoritative `site_subscriptions` ACL (D5), new-node bootstrap (snapshot + atomic
+  watermark + merkle gate + anti-entropy sweep), and watermark-gated tombstone GC (delete-wins,
+  no resurrection). HLC is stamped by platform-nest on every emit (`0012_outbox_hlc.sql` +
+  `src/events/hlc.ts`); sync tables are `0013_sync_tables.sql` (incl. a `sync_applied_events`
+  dedup ledger — the sync path NEVER touches the relay's `relayed_at`, D7). mTLS reuses the
+  gateway's persisted internal CA (`cmd/synccert` issues node certs). Full suite green incl.
+  property-based convergence + partition/chaos on a local 2-Postgres harness
+  (`docker-compose.chaos.yml`); CI job `sync-engine-go` provisions Postgres + migrations + a
+  NOBYPASSRLS role and runs it all. Deployed as the idle `sync-central` compose service (waits on a
+  real second site). Plan/spec: `2026-07-06-ws1-sync-engine-plan.md`,
+  `2026-07-06-ws1-sync-engine-revision.md`; report: `2026-07-14-ws1-sync-engine-completion-report.md`.
 - **ai-agents/** — WS8 steps 1+2 BUILT (13 tests): specialist framework (status-reporter,
   approvals-chaser) + **supervisor orchestrator** (blackboard, cycle guard, per-goal budget
   across the tree, fan-out cap, approval suspension bubbles up) — Gateway for models, hub
@@ -103,13 +118,33 @@ Components are **separate standalone projects — not a shared-package monorepo.
   project PATCH, custom-field-defs GET, agency briefs); only single-resource company-detail /
   campaign-detail GETs are absent and the UI already falls back to list-derivation — so Plan 2
   is effectively unblocked.
-  **Plan 3 (Systems & Intelligence consoles) UI BUILT** and **Plan 4 (Admin + step-up) UI**:
-  Bot/Automation/AI-Gateway/MCP-Hub (Systems), AI-Agents/Knowledge (Intelligence), and the Admin
-  section — all consume the `lib/admin.ts` / `adminData.ts` admin-API contract and degrade
-  gracefully (ConnectionState/EmptyNote) because **the backend admin layer is not built yet**:
-  `/api/admin/:system/status|config`, agents/knowledge admin reads, and the plan-4 identity
-  write endpoints. These pages render as placeholders until that layer lands (see platform-nest
-  "still deferred" above — the top frontend-blocking backend gap). Next: Plan 5 (polish).
+  **Plan 3 (Systems & Intelligence consoles) UI BUILT:** Bot/Automation/AI-Gateway/MCP-Hub
+  (Systems), AI-Agents/Knowledge (Intelligence) — all consume the `lib/admin.ts` / `adminData.ts`
+  admin-API contract and degrade gracefully (ConnectionState/EmptyNote) because **the backend
+  admin layer is not built yet** (`/api/admin/:system/status|config`, agents/knowledge admin
+  reads, plan-4 identity write endpoints — see platform-nest "still deferred" above, the top
+  frontend-blocking backend gap).
+  **Plan 4 (Admin + account/identity) UI DONE (2026-07-14):** `/admin/{users,identity,modules,
+  compliance,audit}`, `/account` + real Sign out (sidebar `UserMenu`), `/step-up` (D4) + middleware
+  allowlist w/ validated `?return=`. Write paths degrade gracefully pending the backend.
+  **Plan 5 (polish) DONE (2026-07-14):** loading/error/not-found states, global search
+  (TopBar → `/search`, `lib/search.ts`), notifications (bell + `/notifications`), layout/density
+  prefs (`lib/prefs.ts`), responsive icon-rail, a11y (skip link, reduced-motion, aria), and a
+  **Playwright e2e suite** (`DEMO_MODE`).
+  **People / Employee view DONE (2026-07-14):** `/people` directory (elevated-only) + `/people/[userId]`
+  employee 360 — profile/roles, KPIs, assigned tasks, projects owned, time, WA/TG identity links,
+  recent activity (`lib/people.ts`). Access = **self OR superadmin (`platform_admin`) OR owner
+  (`group_executive`)** via `canViewEmployee`; data sliced from existing tenant lists (no new backend
+  endpoints). Reached from Account ("My employee page") and the People directory.
+  **Org structure builder DONE (2026-07-14):** per-company `/companies/[companyId]/org` — drag-to-reparent
+  editor + live CSS org-chart preview (`components/org/OrgBuilder.tsx`, `lib/org.ts`); agency seeded with
+  departments Web Dev/SEO/SMM/Video Editor/Design Graphic; edit gated to superadmin/owner, others read-only.
+  Backend-ready via a `GET/PUT /api/:t/org-structure` BFF contract (cookie + seeded fallback until built) —
+  **backend TODO in memory `org-structure-contract`**.
+  **UI is feature-complete (Plans 1–5 + People view + org builder)** — every nav route is a real page;
+  `tsc` clean, 63 unit + 14 e2e pass, `next build` green. Browse it all backend-free with
+  `DEMO_MODE=1 npm run dev` (`lib/demoFixtures.ts`). Remaining work is backend-only (admin/systems API +
+  identity writes + the org-structure endpoints; the UI lights up automatically once they land).
 - **Local-first (dev + VPS, no cloud required):** ai-gateway chain defaults to
   `ollama,gemini,claude` — with Ollama running (`ollama pull llama3.2`) the entire stack
   works offline; cloud keys are optional failover. Echo mode remains the keyless terminator.
@@ -135,7 +170,8 @@ Components are **separate standalone projects — not a shared-package monorepo.
   scrub, XSS/IDOR/header hardened), D17 custom-field registry, agency management rollups.
   first-deploy e2e + idempotent seed (`npm run seed:agency`) + readiness checklist.
   **NestJS port DONE (2026-07-05)** — `platform-nest/` replaced and deleted the Fastify `platform/`
-  (92 tests); **event backbone DONE (2026-07-06)**. Still deferred: sync engine, further
+  (92 tests); **event backbone DONE (2026-07-06)**; **sync engine DONE (2026-07-14,
+  `sync-engine-go/`)**. Still deferred: further
   verticals, and the admin/systems API layer (see the platform-nest status bullet above).
 - **Go gateway is THE gateway (cutover done 2026-07-14):** `ai-gateway-go/` runs as the
   `ai-gateway` compose service on :3002; the Node `ai-gateway/` was retired and its directory

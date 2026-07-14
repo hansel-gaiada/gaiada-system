@@ -1,0 +1,60 @@
+/* Org-structure builder — editor + live chart preview. Design rules: radius 0,
+   hairlines, no shadow, opacity/tint hovers. */
+
+.org-bar { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 14px; }
+.org-note { font: 400 12px var(--font-body); color: var(--erp-ink-50); }
+.org-dirty { color: var(--erp-accent); font-weight: 700; }
+.org-msg { color: var(--text-primary); }
+
+.org-wrap { display: grid; grid-template-columns: minmax(300px, 380px) 1fr; gap: 20px; align-items: start; }
+.org-editor, .org-preview { border: 0.5px solid var(--erp-hairline); background: var(--surface-card); padding: 16px; max-height: 70vh; overflow: auto; min-width: 0; }
+.org-preview { display: flex; justify-content: center; }
+.org-readonly .org-preview { max-height: none; }
+
+/* ---- Editor: nested indented list ---- */
+.org-tree, .org-tree ul { list-style: none; margin: 0; padding: 0; }
+.org-tree ul { margin-left: 16px; border-left: 0.5px solid var(--erp-hairline-soft); padding-left: 8px; }
+.org-erow { display: flex; align-items: center; gap: 8px; padding: 6px 6px; border: 0.5px solid transparent; transition: background 0.2s var(--erp-ease), border-color 0.2s var(--erp-ease); }
+.org-erow:hover { background: rgba(110, 90, 67, 0.04); }
+.org-erow--drop { border-color: var(--erp-accent); background: rgba(110, 90, 67, 0.08); }
+
+.org-grip { flex: 0 0 auto; width: 12px; height: 18px; cursor: grab; position: relative; opacity: 0.5; }
+.org-grip::before { content: ""; position: absolute; inset: 3px 3px; border-left: 2px dotted currentColor; border-right: 2px dotted currentColor; }
+.org-grip:hover { opacity: 0.9; }
+.org-grip--locked { cursor: default; opacity: 0.2; }
+
+.org-name { flex: 1 1 auto; min-width: 60px; border: none; border-bottom: 0.5px solid rgba(26, 25, 22, 0.18); background: transparent; outline: none; padding: 4px 2px; font: 400 14px var(--font-body); color: var(--text-primary); }
+.org-name:focus-visible { border-bottom-color: var(--erp-accent); }
+.org-kind, .org-assignee { flex: 0 0 auto; border: 0.5px solid var(--erp-hairline); background: transparent; padding: 4px 6px; font: 400 12px var(--font-body); color: var(--erp-ink-60); text-transform: capitalize; cursor: pointer; }
+.org-assignee { max-width: 130px; }
+
+.org-iconbtn { flex: 0 0 auto; width: 24px; height: 24px; line-height: 1; border: 0.5px solid var(--erp-hairline); background: transparent; color: var(--erp-ink-60); cursor: pointer; font-size: 15px; transition: background 0.2s var(--erp-ease), color 0.2s var(--erp-ease); }
+.org-iconbtn:hover { background: rgba(110, 90, 67, 0.06); color: var(--text-primary); }
+.org-iconbtn--danger:hover { color: var(--erp-accent); border-color: var(--erp-accent); }
+
+/* ---- Preview: pure-CSS org chart (top-down, hairline connectors) ---- */
+.org-chart, .org-chart ul { display: flex; padding: 0; margin: 0; list-style: none; }
+.org-chart ul { padding-top: 20px; position: relative; }
+.org-chart li { display: flex; flex-direction: column; align-items: center; position: relative; padding: 20px 10px 0; }
+/* connectors down from parent + across siblings */
+.org-chart li::before, .org-chart li::after { content: ""; position: absolute; top: 0; right: 50%; width: 50%; height: 20px; border-top: 0.5px solid var(--erp-hairline); }
+.org-chart li::after { right: auto; left: 50%; border-left: 0.5px solid var(--erp-hairline); }
+.org-chart li:only-child::before, .org-chart li:only-child::after { display: none; }
+.org-chart li:only-child { padding-top: 0; }
+.org-chart li:first-child::before, .org-chart li:last-child::after { border: 0 none; }
+.org-chart li:last-child::before { border-right: 0.5px solid var(--erp-hairline); }
+.org-chart ul ul::before { content: ""; position: absolute; top: 0; left: 50%; border-left: 0.5px solid var(--erp-hairline); width: 0; height: 20px; }
+
+.org-box { border: 0.5px solid var(--erp-hairline); background: var(--surface-card); padding: 8px 14px; text-align: center; min-width: 120px; display: inline-flex; flex-direction: column; gap: 2px; }
+.org-box__name { font: 400 13px var(--font-body); color: var(--text-primary); white-space: nowrap; }
+.org-box__meta { font: 700 9px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--erp-ink-50); }
+/* company root reads as the anchor; departments get the accent edge */
+.org-box--company { background: #1a1916; border-color: transparent; }
+.org-box--company .org-box__name { color: #f4f1ea; }
+.org-box--company .org-box__meta { color: rgba(244, 241, 234, 0.55); }
+.org-box--department { border-left: 2px solid var(--erp-accent); }
+
+@media (max-width: 900px) {
+  .org-wrap { grid-template-columns: 1fr; }
+  .org-editor, .org-preview { max-height: none; }
+}

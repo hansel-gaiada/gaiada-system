@@ -63,6 +63,22 @@ describe.skipIf(!url)("knowledge service", () => {
     expect((r.json() as { hits: unknown[] }).hits).toEqual([]);
   });
 
+  it("lists sources for a tenant (service-token gated)", async () => {
+    const unauth = await app.inject({ method: "GET", url: `/sources?tenant=${T_A}` });
+    expect(unauth.statusCode).toBe(401);
+
+    const missing = await app.inject({ method: "GET", url: "/sources", headers: svc });
+    expect(missing.statusCode).toBe(400);
+
+    const r = await app.inject({ method: "GET", url: `/sources?tenant=${T_A}`, headers: svc });
+    expect(r.statusCode).toBe(200);
+    const rows = r.json() as Array<{ sourceRef: string; status: string; chunks: number }>;
+    const doc = rows.find((s) => s.sourceRef === "svc-doc")!;
+    expect(doc).toBeTruthy();
+    expect(doc.status).toBe("indexed");
+    expect(doc.chunks).toBeGreaterThan(0);
+  });
+
   it("erase hard-deletes by source", async () => {
     const r = await app.inject({ method: "POST", url: "/erase", headers: svc, payload: { sourceRef: "svc-doc" } });
     expect((r.json() as { deleted: number }).deleted).toBeGreaterThan(0);

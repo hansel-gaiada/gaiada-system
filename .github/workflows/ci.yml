@@ -44,3 +44,47 @@ jobs:
       - run: go build ./...
       - run: go vet ./...
       - run: go test ./...
+
+  # sync-engine-go (WS1 T2 cross-site reconciliation). Runs the FULL suite incl. the DB-backed
+  # convergence/chaos tests, against two databases with the platform-nest migrations applied and
+  # a NOBYPASSRLS role (superusers bypass RLS and would test nothing).
+  sync-engine-go:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s
+          --health-timeout 5s --health-retries 10
+    defaults:
+      run:
+        working-directory: sync-engine-go
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.4"
+      - name: Install psql client
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+      - name: Provision two DBs + NOBYPASSRLS role + migrations
+        env:
+          PGPASSWORD: postgres
+        run: |
+          for dbname in gaiada_sync_test gaiada_sync_central; do
+            psql -h localhost -U postgres -c "CREATE DATABASE $dbname;"
+            for f in $(ls ../platform-nest/migrations/*.sql | sort); do
+              psql -h localhost -U postgres -d "$dbname" -v ON_ERROR_STOP=1 -f "$f" >/dev/null
+            done
+            psql -h localhost -U postgres -d "$dbname" -c "DO \$\$ BEGIN CREATE ROLE sync_app LOGIN PASSWORD 'test' NOSUPERUSER NOBYPASSRLS; EXCEPTION WHEN duplicate_object THEN NULL; END \$\$; GRANT USAGE ON SCHEMA public TO sync_app; GRANT SELECT,INSERT,UPDATE,DELETE ON ALL TABLES IN SCHEMA public TO sync_app;"
+          done
+      - run: go build ./...
+      - run: go vet ./...
+      - name: go test (full suite incl. convergence/chaos)
+        env:
+          DATABASE_URL_TEST: postgres://sync_app:test@localhost:5432/gaiada_sync_test
+          DATABASE_URL_CENTRAL: postgres://sync_app:test@localhost:5432/gaiada_sync_central
+          DATABASE_URL_SITE_A: postgres://sync_app:test@localhost:5432/gaiada_sync_test
+        run: go test ./...

@@ -1,0 +1,27 @@
+# Local convergence/chaos harness — two Postgres instances simulate a site + central on ONE dev
+# machine, per the sync-engine revision's status change (buildable/verifiable now, no real second
+# physical site). Apply the platform-nest migrations to BOTH databases, then:
+#
+#   docker compose -f docker-compose.chaos.yml up -d
+#   # apply platform-nest/migrations/*.sql to both (see README / test-all.sh)
+#   DATABASE_URL_SITE_A=postgres://postgres:test@localhost:55432/site_a \
+#   DATABASE_URL_CENTRAL=postgres://postgres:test@localhost:55433/central \
+#     go test ./test/... -v
+#
+# NOTE: RLS is FORCE-enabled on the synced tables, so create a NOSUPERUSER NOBYPASSRLS role and
+# point the URLs at it to exercise the real tenant-isolation path (the default postgres superuser
+# bypasses RLS and would test nothing).
+name: sync-engine-chaos
+services:
+  site-a-db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_PASSWORD: test
+      POSTGRES_DB: site_a
+    ports: ["55432:5432"]
+  central-db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_PASSWORD: test
+      POSTGRES_DB: central
+    ports: ["55433:5432"]

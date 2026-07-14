@@ -132,6 +132,14 @@ const ACTIVITY = [
   { id: "a-4", actor_id: "u-finance", actor_name: "Rina Wibawa", verb: "updated", target_entity_type: "project", target_entity_id: "p-fin-1", occurred_at: "2026-07-03T14:00:00Z", metadata: {} },
 ];
 
+const NOTIFICATIONS = [
+  { id: "n-1", type: "approval.requested", payload: { title: "Approval requested", message: "Ad spend increase — 20% on Q3 lead-gen push is waiting for your decision." }, read_at: null, created_at: "2026-07-05T08:10:00Z" },
+  { id: "n-2", type: "comment.mention", payload: { title: "Dewi mentioned you", message: "“@Hansel can you confirm the launch date on the client site redesign?”" }, read_at: null, created_at: "2026-07-04T15:40:00Z" },
+  { id: "n-3", type: "task.assigned", payload: { title: "Task assigned to you", message: "Keyword gap analysis on SEO audit — Q3." }, read_at: null, created_at: "2026-07-04T09:05:00Z" },
+  { id: "n-4", type: "brief.approved", payload: { title: "Brief approved", message: "Landing page copy brief was approved." }, read_at: "2026-07-03T12:00:00Z", created_at: "2026-07-03T11:30:00Z" },
+  { id: "n-5", type: "project.updated", payload: { title: "Project updated", message: "FY26 budget review moved to On hold." }, read_at: "2026-07-03T10:00:00Z", created_at: "2026-07-03T09:50:00Z" },
+];
+
 const ROLLUPS = [
   { tenant_id: "co-agency", company: "Gaiada Agency", module: "agency", metric_key: "agency.campaigns.active", numerator: 1, denominator: null, currency: null, period: "2026-07-05" },
   { tenant_id: "co-agency", company: "Gaiada Agency", module: "agency", metric_key: "agency.approvals.pending", numerator: 2, denominator: null, currency: null, period: "2026-07-05" },
@@ -218,6 +226,23 @@ const USERS = [
     status: "active",
     roles: [{ grantId: "gr-3", role: "member", scopeType: "company", scopeId: "co-agency" }],
   },
+  {
+    id: "u-finance",
+    name: "Rina Wibawa",
+    email: "rina@gaiada.com",
+    title: "Finance Lead",
+    status: "active",
+    roles: [{ grantId: "gr-4", role: "manager", scopeType: "company", scopeId: "co-holding" }],
+  },
+];
+
+// Time entries — keyed for the employee 360 (filtered by userId / mine).
+const TIME_ENTRIES = [
+  { id: "te-1", user_id: DEMO_USER_ID, project_id: "p-hr-1", task_id: "t-1", minutes: 150, billable: false, entry_date: "2026-07-05", notes: "Onboarding flow draft" },
+  { id: "te-2", user_id: DEMO_USER_ID, project_id: "p-seo-1", task_id: "t-6", minutes: 90, billable: true, entry_date: "2026-07-04", notes: "Keyword research" },
+  { id: "te-3", user_id: "u-dev", project_id: "p-web-1", task_id: "t-4", minutes: 240, billable: true, entry_date: "2026-07-05", notes: "Homepage hero" },
+  { id: "te-4", user_id: "u-dev", project_id: "p-web-1", task_id: "t-5", minutes: 180, billable: true, entry_date: "2026-07-04", notes: "Checkout QA" },
+  { id: "te-5", user_id: "u-finance", project_id: "p-fin-1", task_id: "t-3", minutes: 120, billable: false, entry_date: "2026-06-25", notes: "Q2 reconciliation" },
 ];
 
 const IDENTITY_LINKS = [
@@ -256,6 +281,14 @@ export function getDemoResponse(method: string, fullPath: string): DemoResult {
   if (p.match(/^\/api\/[^/]+\/members$/)) return ok(MEMBERS[tenantFromPath(p)!] ?? []);
   if (p.match(/^\/api\/[^/]+\/activity$/)) return ok(ACTIVITY);
 
+  // Notifications (bell badge + /notifications page). Tenant-independent in demo.
+  if (p.match(/^\/api\/[^/]+\/notifications$/)) {
+    if (m === "POST") return ok({ ok: true }); // mark-all-read
+    const unreadOnly = url.searchParams.get("unread") === "true";
+    return ok(unreadOnly ? NOTIFICATIONS.filter((n) => !n.read_at) : NOTIFICATIONS);
+  }
+  if (p.match(/^\/api\/[^/]+\/notifications\/[^/]+\/read$/) && m === "POST") return ok({ ok: true });
+
   const projMatch = p.match(/^\/api\/([^/]+)\/projects$/);
   if (projMatch) {
     if (m === "POST") return { status: 201, json: { id: `p-new-${Date.now()}` } };
@@ -289,6 +322,23 @@ export function getDemoResponse(method: string, fullPath: string): DemoResult {
     const base = ALL_TASKS.find((t) => (t as { id: string }).id === id) as Record<string, unknown> | undefined;
     if (base) return ok({ ...base, assignee_name: base.assignee_id === DEMO_USER_ID ? "Clement Hansel" : "Team member", custom_fields: {} });
     return ok({ id, title: "New task", status: "todo", priority: "normal", assignee_id: null, assignee_name: null, due_date: null, project_id: "p-web-1", project_name: "Client site redesign", custom_fields: {} });
+  }
+
+  // Org structure: no demo backend — return 404 so lib/org.ts uses its
+  // cookie/seeded-default path (edits persist to the per-company cookie and
+  // survive reload, exercising the exact backend-ready flow).
+  if (p.match(/^\/api\/[^/]+\/org-structure$/)) return { status: 404, json: { error: "org-structure endpoint not implemented" } };
+
+  const timeMatch = p.match(/^\/api\/[^/]+\/time-entries$/);
+  if (timeMatch) {
+    const uid = url.searchParams.get("userId");
+    const mine = url.searchParams.get("mine") === "me";
+    const rows = mine
+      ? TIME_ENTRIES.filter((e) => e.user_id === DEMO_USER_ID)
+      : uid
+        ? TIME_ENTRIES.filter((e) => e.user_id === uid)
+        : TIME_ENTRIES;
+    return ok(rows);
   }
 
   const fieldsMatch = p.match(/^\/api\/[^/]+\/custom-fields$/);

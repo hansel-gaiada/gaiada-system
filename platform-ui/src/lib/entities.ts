@@ -155,10 +155,14 @@ export const listClients = (u: string, t: string) =>
   skipUnavailable(platformFetch<Client[]>(`/api/${t}/clients`, u), [] as Client[]);
 export const listDeliverables = (u: string, t: string, projectId?: string) =>
   skipUnavailable(platformFetch<Deliverable[]>(`/api/${t}/deliverables${projectId ? `?projectId=${projectId}` : ""}`, u), [] as Deliverable[]);
-export const listTimeEntries = (u: string, t: string, q: { projectId?: string; mine?: boolean } = {}) =>
+export const listTimeEntries = (u: string, t: string, q: { projectId?: string; mine?: boolean; userId?: string } = {}) =>
   skipUnavailable(
     platformFetch<TimeEntry[]>(
-      `/api/${t}/time-entries?${new URLSearchParams({ ...(q.projectId ? { projectId: q.projectId } : {}), ...(q.mine ? { mine: "me" } : {}) })}`,
+      `/api/${t}/time-entries?${new URLSearchParams({
+        ...(q.projectId ? { projectId: q.projectId } : {}),
+        ...(q.mine ? { mine: "me" } : {}),
+        ...(q.userId ? { userId: q.userId } : {}),
+      })}`,
       u,
     ),
     [] as TimeEntry[],

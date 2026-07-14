@@ -52,6 +52,38 @@ func TestHealthDoesNotRequireAuth(t *testing.T) {
 	}
 }
 
+func TestEgressAuditRequiresAuthAndReturnsEntries(t *testing.T) {
+	srv := testServer(t, "secret")
+	defer srv.Close()
+
+	// Unauthenticated read is rejected.
+	res, err := http.Get(srv.URL + "/egress-audit")
+	if err != nil || res.StatusCode != 401 {
+		t.Fatalf("expected 401 without token, got %v %v", res, err)
+	}
+
+	// A successful /complete writes an audit entry.
+	postJSON(t, srv, "/complete", "secret", map[string]any{"prompt": "hello"}).Body.Close()
+
+	req, _ := http.NewRequest("GET", srv.URL+"/egress-audit", nil)
+	req.Header.Set("Authorization", "Bearer secret")
+	res, err = http.DefaultClient.Do(req)
+	if err != nil || res.StatusCode != 200 {
+		t.Fatalf("expected 200 with token, got %v %v", res, err)
+	}
+	var rows []map[string]any
+	if err := json.NewDecoder(res.Body).Decode(&rows); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	res.Body.Close()
+	if len(rows) == 0 {
+		t.Fatalf("expected at least one audit entry after a /complete")
+	}
+	if _, ok := rows[0]["capability"]; !ok {
+		t.Fatalf("expected audit rows to carry a capability field, got %v", rows[0])
+	}
+}
+
 func TestCompleteRejectsWithout401(t *testing.T) {
 	srv := testServer(t, "secret")
 	defer srv.Close()

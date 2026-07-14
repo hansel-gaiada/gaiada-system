@@ -8,6 +8,8 @@ import { AppModule } from "./app.module";
 import { config } from "./config";
 import { HttpErrorFilter } from "./http-error.filter";
 import { migrate } from "./db/migrate";
+import { getPool } from "./db";
+import { seedClockFromDb } from "./events/hlc";
 import { registerModule } from "./modules/registry";
 import { agencyModule } from "./modules/agency";
 import { registerCoreRollupProvider, coreTaskRollups, syncMetricDefinitions } from "./rollups/engine";
@@ -29,6 +31,9 @@ async function bootstrap(): Promise<void> {
   // Same startup sequence the Fastify server ran: migrate, register compiled-in modules +
   // core rollup providers, sync the governed metric registry, then serve.
   await migrate();
+  // Seed the HLC from the greatest clock this origin_site has already committed, so a restart
+  // never mints an HLC that regresses (sync-engine-revision §2, D3 #4).
+  await seedClockFromDb(getPool());
   registerModule(agencyModule);
   registerCoreRollupProvider(coreTaskRollups);
   registerCoreRollupProvider(clientWorkRollups);

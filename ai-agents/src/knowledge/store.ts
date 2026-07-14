@@ -204,6 +204,34 @@ export class KnowledgeStore {
       .slice(0, topK);
   }
 
+  /** Distinct sources for a tenant set (admin console read). Aggregates chunks per
+   *  source_ref with its latest provenance + a derived status. No chunk text leaves here. */
+  async listSources(tenantSet: string[]): Promise<
+    { sourceRef: string; kind: string; chunks: number; provenance: Provenance; status: string; updatedAt: string }[]
+  > {
+    if (tenantSet.length === 0) return [];
+    const { rows } = await this.pool.query<{
+      source_ref: string; kind: string; chunks: string; provenance: Provenance; quarantined: boolean; updated_at: string;
+    }>(
+      `SELECT source_ref, min(kind) AS kind, count(*)::int AS chunks,
+              (array_agg(provenance ORDER BY created_at DESC))[1] AS provenance,
+              bool_and(quarantined) AS quarantined, max(source_hlc) AS updated_at
+       FROM knowledge_chunks
+       WHERE tenant_id = ANY($1::uuid[])
+       GROUP BY source_ref
+       ORDER BY max(source_hlc) DESC`,
+      [tenantSet],
+    );
+    return rows.map((r) => ({
+      sourceRef: r.source_ref,
+      kind: r.kind,
+      chunks: Number(r.chunks),
+      provenance: r.provenance,
+      status: r.quarantined ? "quarantined" : "indexed",
+      updatedAt: r.updated_at,
+    }));
+  }
+
   /** D9.2: erasure hard-deletes derived rows (crypto-shred reaches this store). */
   async eraseSource(sourceRef: string): Promise<number> {
     const r = await this.pool.query(`DELETE FROM knowledge_chunks WHERE source_ref = $1`, [sourceRef]);

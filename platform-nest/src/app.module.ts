@@ -11,12 +11,17 @@ import { AuthzCheckController } from "./core/authz-check.controller";
 import { ClientWorkController } from "./core/client-work.controller";
 import { CollabController } from "./core/collab.controller";
 import { FilesController } from "./core/files.controller";
+import { AdminIdentityController } from "./admin/admin-identity.controller";
+import { CompanyAdminController } from "./admin/company-admin.controller";
+import { AdminSystemsController } from "./admin/admin-systems.controller";
+import { IntelligenceController } from "./admin/intelligence.controller";
 import { AgencyController } from "./modules/agency/agency.controller";
 
 @Module({
   controllers: [
     HealthController, IdentityController, CoreController, TeamsController, CustomFieldsController,
-    AuthzCheckController, ClientWorkController, CollabController, FilesController,
+    AuthzCheckController, ClientWorkController, CollabController, FilesController, AdminIdentityController,
+    CompanyAdminController, AdminSystemsController, IntelligenceController,
     // Vertical modules (compiled-in; per-tenant enable gate at the controller).
     AgencyController,
   ],

@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -78,6 +79,27 @@ func NewServer(cfg config.Config, chains Chains, b *budget.Budget, classifier *d
 			body["classifierReachable"] = classifierReachable(classifier)
 		}
 		writeJSON(w, 200, body)
+	})
+
+	// Read-only egress audit for the platform admin console (bearer-gated, like the egress
+	// routes). Returns the most-recent entries newest-first from the JSONL audit log.
+	mux.HandleFunc("GET /egress-audit", func(w http.ResponseWriter, r *http.Request) {
+		if !authorized(r, cfg.GatewayToken) {
+			writeErr(w, 401, "unauthorized")
+			return
+		}
+		limit := 100
+		if q := strings.TrimSpace(r.URL.Query().Get("limit")); q != "" {
+			if n, err := strconv.Atoi(q); err == nil && n > 0 && n <= 1000 {
+				limit = n
+			}
+		}
+		rows, err := audit.ReadRecent(cfg.AuditFile, limit)
+		if err != nil {
+			writeErr(w, 500, "audit read failed")
+			return
+		}
+		writeJSON(w, 200, rows)
 	})
 
 	mux.HandleFunc("POST /complete", func(w http.ResponseWriter, r *http.Request) {

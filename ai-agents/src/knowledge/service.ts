@@ -83,6 +83,16 @@ export function buildKnowledgeApp(store: KnowledgeStore, resolveEnvelope: Envelo
     return { hits };
   });
 
+  // Admin-console source list (service-token gated). The platform is the trust boundary:
+  // it has already authorized the caller for `tenant`, so we list that tenant's sources
+  // directly (same trust model as /ingest trusting the body tenantId). No chunk text.
+  app.get<{ Querystring: { tenant?: string } }>("/sources", async (req, reply) => {
+    if (!authorized(req)) return reply.code(401).send({ error: "unauthorized" });
+    const tenant = req.query?.tenant;
+    if (!tenant) return reply.code(400).send({ error: "tenant required" });
+    return store.listSources([tenant]);
+  });
+
   app.post<{ Body: { sourceRef?: string; tenantId?: string } }>("/erase", async (req, reply) => {
     if (!authorized(req)) return reply.code(401).send({ error: "unauthorized" });
     const { sourceRef, tenantId } = req.body ?? {};

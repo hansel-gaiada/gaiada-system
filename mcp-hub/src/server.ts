@@ -34,6 +34,13 @@ export function buildHttpApp(): express.Express {
     res.json({ ok: true, tools: allTools().map((t) => t.name) });
   });
 
+  // Read-only tool catalog for the platform admin console (name/description/minAssurance).
+  // Non-sensitive metadata (like /health's name list); the actual per-principal filtering
+  // happens over /mcp's tools/list. No handler/inputSchema is exposed here.
+  app.get("/tools", (_req, res) => {
+    res.json(allTools().map((t) => ({ name: t.name, description: t.description, minAssurance: t.minAssurance })));
+  });
+
   app.post("/mcp", async (req, res) => {
     // Service auth (fail-closed).
     const h = req.headers.authorization ?? "";
