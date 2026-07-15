@@ -14,7 +14,20 @@ import (
 )
 
 func NewPool(ctx context.Context, connString string) (*pgxpool.Pool, error) {
-	return pgxpool.New(ctx, connString)
+	cfg, err := pgxpool.ParseConfig(connString)
+	if err != nil {
+		return nil, err
+	}
+	// site_subscriptions (the central node->tenant ACL, migration 0015) is under FORCE RLS gated on
+	// the app.sync_context GUC. Opt EVERY sync-engine connection in at session scope so its
+	// context-free ACL reads/writes (acl.go, tombstone.go) work, while the shared platform role —
+	// which never sets this — is fail-closed out of the ACL. This is orthogonal to the per-tx
+	// app.current_tenant_ids used for tenant RLS (WithTenant), so it does not affect isolation.
+	cfg.AfterConnect = func(ctx context.Context, c *pgx.Conn) error {
+		_, err := c.Exec(ctx, "SELECT set_config('app.sync_context', 'on', false)")
+		return err
+	}
+	return pgxpool.NewWithConfig(ctx, cfg)
 }
 
 // WithTenant runs fn inside a transaction authorized for exactly tenantIDs. set_config(...,true)

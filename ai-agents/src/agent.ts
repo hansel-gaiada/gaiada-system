@@ -16,6 +16,11 @@ export interface AgentDef {
   tools: Record<string, Impact>;
   maxSteps: number; // model calls per run
   maxToolCalls: number;
+  /** D13 — providers that have passed THIS agent's eval suite + tool-calling contract test and may
+   *  therefore serve it while it holds write capability. Empty/omitted ⇒ no provider is cleared, so a
+   *  write-capable agent is forced read-only until an operator evals one (see runWriteAgent). Ignored
+   *  for read-only agents. */
+  evaledProviders?: string[];
 }
 
 export interface Envelope {
@@ -28,6 +33,9 @@ export interface AgentDeps {
   complete(prompt: string): Promise<string>;
   /** MCP hub tool call, carrying the OBO envelope. */
   callTool(name: string, args: Record<string, unknown>, envelope: Envelope): Promise<string>;
+  /** The provider the Gateway actually served the last completion with (after any failover), when it
+   *  reported one — used for D13 attribution + WS9. Optional so scripted/test deps can omit it. */
+  lastProvider?: () => string | undefined;
 }
 
 export interface AgentStep {
@@ -47,7 +55,12 @@ export class ToolNotAllowedError extends Error {
 }
 
 export class ApprovalRequiredError extends Error {
-  constructor(tool: string, impact: Impact | "unclassified", public steps: AgentStep[]) {
+  constructor(
+    public tool: string,
+    public impact: Impact | "unclassified",
+    public args: Record<string, unknown>,
+    public steps: AgentStep[],
+  ) {
     super(`tool ${tool} (${impact}) requires human approval — run suspended, nothing committed`);
   }
 }
@@ -136,7 +149,7 @@ export async function runAgent(
       // tool, this is also the "unclassified ⇒ confirmation required" path (D14).
       throw new ToolNotAllowedError(tool, steps);
     }
-    if (impact === "high_write") throw new ApprovalRequiredError(tool, impact, steps);
+    if (impact === "high_write") throw new ApprovalRequiredError(tool, impact, action.args ?? {}, steps);
 
     if (toolCalls >= def.maxToolCalls) throw new BudgetExhaustedError("toolCalls", steps);
     toolCalls++;

@@ -76,6 +76,36 @@ export function registerPlatformTools(): void {
   });
 
   registerTool({
+    name: "knowledge.graph",
+    description: "Traverse the company knowledge graph from an entity (WS8 semantic layer; results limited to what YOUR identity may see).",
+    minAssurance: "low", // the knowledge service resolves the envelope and pre-filters the walk (D9.1)
+    inputSchema: {
+      type: "object",
+      properties: {
+        startKey: { type: "string", description: "entity key to start from, e.g. client:acme" },
+        scope: { type: "string", description: "Your current scope, e.g. group chat / project id" },
+        rel: { type: "string", description: "optional relation filter, e.g. owns" },
+        maxDepth: { type: "number", description: "traversal depth (default 2)" },
+      },
+      required: ["startKey", "scope"],
+    },
+    handler: async (args, principal) => {
+      const res = await fetch(`${config.knowledgeUrl}/graph/neighbors`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${config.knowledgeToken}`,
+          "x-obo-provider": principal.provider,
+          "x-obo-external-id": principal.externalId,
+        },
+        body: JSON.stringify({ startKey: String(args.startKey ?? ""), scope: String(args.scope ?? ""), rel: args.rel, maxDepth: args.maxDepth }),
+      });
+      if (!res.ok) throw new Error(`knowledge /graph/neighbors ${res.status}`);
+      return JSON.stringify(((await res.json()) as { nodes: unknown[] }).nodes);
+    },
+  });
+
+  registerTool({
     name: "agency.pendingApprovals",
     description: "Approvals waiting for a decision (agency module).",
     minAssurance: "low",

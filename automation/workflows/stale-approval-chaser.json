@@ -1,6 +1,6 @@
 {
   "name": "stale-approval-chaser (CRON)",
-  "meta": { "description": "Hourly: list pending agency approvals via MCP and post a nudge to the notify channel. Read-only; no business logic. Scoped identity wf:stale-approval-chaser -> [agency.pendingApprovals]. Env: HUB_SERVICE_TOKEN, AGENCY_TENANT_ID, NOTIFY_WEBHOOK_URL." },
+  "meta": { "description": "Hourly: list pending agency approvals via MCP; if any, raise an IN-APP notification for the ops lead via the hub `notify` tool (no external channel). Scoped identity wf:stale-approval-chaser -> [agency.pendingApprovals, notify] (notify is a LOW write; the service account is a manager). Env: HUB_SERVICE_TOKEN, AGENCY_TENANT_ID, NOTIFY_USER_ID." },
   "nodes": [
     {
       "parameters": { "rule": { "interval": [{ "field": "hours", "hoursInterval": 1 }] } },
@@ -35,9 +35,9 @@
     },
     {
       "parameters": {
-        "jsCode": "// Parse the hub's SSE-framed JSON-RPC reply, then build a nudge only if approvals are pending.\nconst raw = $input.first().json.data ?? $input.first().json.body ?? '';\nconst line = String(raw).split('\\n').find((l) => l.startsWith('data:')) ?? '';\nconst rpc = JSON.parse(line.slice(5).trim());\nif (rpc.result?.isError) throw new Error(rpc.result.content?.[0]?.text ?? 'tool error');\nconst approvals = JSON.parse(rpc.result?.content?.[0]?.text ?? '[]');\nif (!Array.isArray(approvals) || approvals.length === 0) return []; // nothing pending -> stop\nconst lines = approvals.map((a) => `\\u2022 ${a.subject ?? a.id} (${a.campaign ?? 'campaign'})`).join('\\n');\nreturn [{ json: { text: `\\u23f3 ${approvals.length} approval(s) still pending:\\n${lines}` } }];"
+        "jsCode": "// Parse the hub's SSE-framed JSON-RPC reply; emit a notification payload only if approvals pend.\nconst raw = $input.first().json.data ?? $input.first().json.body ?? '';\nconst line = String(raw).split('\\n').find((l) => l.startsWith('data:')) ?? '';\nconst rpc = JSON.parse(line.slice(5).trim());\nif (rpc.result?.isError) throw new Error(rpc.result.content?.[0]?.text ?? 'tool error');\nconst approvals = JSON.parse(rpc.result?.content?.[0]?.text ?? '[]');\nif (!Array.isArray(approvals) || approvals.length === 0) return []; // nothing pending -> stop\nconst subjects = approvals.map((a) => a.subject ?? a.id).slice(0, 10);\nreturn [{ json: { count: approvals.length, subjects } }];"
       },
-      "name": "Build nudge (skip if none)",
+      "name": "Build payload (skip if none)",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [440, 0]
@@ -45,21 +45,42 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "={{ $env.NOTIFY_WEBHOOK_URL }}",
+        "url": "http://mcp-hub:3003/mcp",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{ $env.HUB_SERVICE_TOKEN }}" },
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "Accept", "value": "application/json, text/event-stream" },
+            { "name": "x-obo-provider", "value": "n8n" },
+            { "name": "x-obo-external-id", "value": "wf:stale-approval-chaser" }
+          ]
+        },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ text: $json.text }) }}"
+        "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", id: 1, method: \"tools/call\", params: { name: \"notify\", arguments: { tenantId: $env.AGENCY_TENANT_ID, recipientId: $env.NOTIFY_USER_ID, type: \"approvals_pending\", payload: { count: $json.count, subjects: $json.subjects } } } }) }}",
+        "options": { "response": { "response": { "responseFormat": "text" } } }
       },
-      "name": "Notify channel",
+      "name": "MCP notify (in-app)",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [660, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json.data ?? $input.first().json.body ?? '';\nconst line = String(raw).split('\\n').find((l) => l.startsWith('data:')) ?? '';\nconst rpc = JSON.parse(line.slice(5).trim());\nif (rpc.result?.isError) throw new Error(rpc.result.content?.[0]?.text ?? 'notify failed');\nreturn [{ json: { ok: true } }];"
+      },
+      "name": "Parse notify result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [880, 0]
     }
   ],
   "connections": {
     "Every hour": { "main": [[{ "node": "MCP tools/call agency.pendingApprovals", "type": "main", "index": 0 }]] },
-    "MCP tools/call agency.pendingApprovals": { "main": [[{ "node": "Build nudge (skip if none)", "type": "main", "index": 0 }]] },
-    "Build nudge (skip if none)": { "main": [[{ "node": "Notify channel", "type": "main", "index": 0 }]] }
+    "MCP tools/call agency.pendingApprovals": { "main": [[{ "node": "Build payload (skip if none)", "type": "main", "index": 0 }]] },
+    "Build payload (skip if none)": { "main": [[{ "node": "MCP notify (in-app)", "type": "main", "index": 0 }]] },
+    "MCP notify (in-app)": { "main": [[{ "node": "Parse notify result", "type": "main", "index": 0 }]] }
   },
   "settings": {},
   "pinData": {}

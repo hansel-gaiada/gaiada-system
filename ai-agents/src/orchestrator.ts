@@ -17,6 +17,7 @@ import {
   type AgentDeps,
   type Envelope,
 } from "./agent";
+import { isWriteCapable, runWriteAgent } from "./write-agent";
 
 export interface OrchestratorDef {
   name: string;
@@ -48,6 +49,14 @@ export class UnknownSpecialistError extends Error {
 export class GoalBudgetExhaustedError extends Error {
   constructor(which: string, public blackboard: BlackboardEntry[]) {
     super(`per-goal ${which} budget exhausted — goal suspended for human resume, nothing committed`);
+  }
+}
+
+/** A write-capable sub-agent hit a high_write: the whole goal suspends (D14), now WITH a durable
+ *  approval on file (via runWriteAgent → the shared approvals inbox). Nothing was committed. */
+export class GoalSuspendedError extends Error {
+  constructor(public specialist: string, public approvalId: string | null, public blackboard: BlackboardEntry[]) {
+    super(`goal suspended: ${specialist} requires human approval (filed ${approvalId ?? "?"}) — nothing committed`);
   }
 }
 
@@ -112,6 +121,7 @@ function budgetedDeps(deps: AgentDeps, budget: { modelCalls: number; toolCalls: 
       if (++toolCalls > budget.toolCalls) throw new GoalBudgetExhaustedError("toolCalls", blackboard);
       return deps.callTool(name, args, envelope);
     },
+    lastProvider: deps.lastProvider, // forward so write-routing can attribute the served provider
   };
 }
 
@@ -120,6 +130,7 @@ export async function runOrchestrator(
   goal: string,
   envelope: Envelope,
   rawDeps: AgentDeps,
+  opts: { tenantId?: string; servingProvider?: string } = {},
 ): Promise<OrchestratorRun> {
   const blackboard: BlackboardEntry[] = [];
   const notes: string[] = [];
@@ -159,11 +170,23 @@ export async function runOrchestrator(
     subRuns++;
 
     try {
-      const run = await runAgent(specialist, task!, envelope, deps);
-      blackboard.push({ specialist: name!, task: task!, status: "ok", summary: run.outcome });
+      if (isWriteCapable(specialist)) {
+        // Route write-capable specialists through the D13 provider gate + D14 approval filing.
+        const provider = opts.servingProvider ?? deps.lastProvider?.() ?? "echo";
+        const res = await runWriteAgent(specialist, task!, envelope, deps, opts.tenantId ?? "", provider);
+        if (res.status === "suspended") {
+          // D14: a high_write suspends the WHOLE goal — now with a durable approval on file.
+          throw new GoalSuspendedError(name!, res.filed.approvalId, blackboard);
+        }
+        const note = res.status === "forced_read_only" ? ` [read-only: ${res.reason}]` : "";
+        blackboard.push({ specialist: name!, task: task!, status: "ok", summary: res.run.outcome + note });
+      } else {
+        const run = await runAgent(specialist, task!, envelope, deps);
+        blackboard.push({ specialist: name!, task: task!, status: "ok", summary: run.outcome });
+      }
     } catch (err) {
-      // Approval suspension is a HUMAN decision — it suspends the whole goal (D14).
-      if (err instanceof ApprovalRequiredError || err instanceof GoalBudgetExhaustedError) throw err;
+      // A suspension/budget exhaustion is a HUMAN decision — it suspends the whole goal (D14).
+      if (err instanceof GoalSuspendedError || err instanceof ApprovalRequiredError || err instanceof GoalBudgetExhaustedError) throw err;
       // Everything else is data: the planner decides how to proceed with a failed subtask.
       blackboard.push({ specialist: name!, task: task!, status: "failed", summary: (err as Error).message });
     }

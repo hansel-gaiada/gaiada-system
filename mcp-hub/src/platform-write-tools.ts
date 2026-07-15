@@ -140,4 +140,47 @@ export function registerPlatformWriteTools(): void {
         principal,
       ),
   });
+
+  // WS4 §3 / D14 — the suspension surface. When the automation write gate (policy.ts) refuses a
+  // medium+/unclassified write with a `suspend:` reason, the workflow calls THIS (a low-impact
+  // write: it only records an intent for a human to review, it performs no business mutation) to
+  // file a pending approval. A human decides it from the platform-ui approvals inbox. Keeping this
+  // on the hub preserves the backbone rule: n8n → MCP (OBO) → platform, so the request is audited
+  // under the workflow's least-privilege identity like every other action.
+  registerTool({
+    name: "approvals.request",
+    description: "Record a suspended automation write for human approval (used after the gate returns suspend). workflowId + toolName required.",
+    minAssurance: "low",
+    write: true,
+    impact: "low", // records an intent only; the gated write itself is NOT performed here
+    inputSchema: {
+      type: "object",
+      properties: {
+        tenantId: { type: "string" },
+        workflowId: { type: "string", description: "the OBO external id — wf:<name> for automation, or the agent's id" },
+        toolName: { type: "string", description: "the tool that was suspended" },
+        toolArgs: { type: "object", description: "the arguments it intended to use" },
+        impact: { type: "string", enum: ["medium", "high", "unclassified"] },
+        reason: { type: "string", description: "the suspend reason (hub gate for automation; high_write for an agent)" },
+        origin: { type: "string", enum: ["automation", "agent"], description: "who was suspended (default automation)" },
+        agentName: { type: "string", description: "the WS8 agent name when origin=agent" },
+      },
+      required: ["tenantId", "workflowId", "toolName"],
+    },
+    handler: (args, principal) =>
+      platformSend(
+        "POST",
+        `/api/${String(args.tenantId)}/automation-approvals`,
+        {
+          workflowId: args.workflowId,
+          toolName: args.toolName,
+          toolArgs: args.toolArgs ?? {},
+          impact: args.impact ?? "unclassified",
+          reason: args.reason,
+          origin: args.origin ?? "automation",
+          agentName: args.agentName,
+        },
+        principal,
+      ),
+  });
 }

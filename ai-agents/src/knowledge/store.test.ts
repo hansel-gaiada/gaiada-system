@@ -1,10 +1,11 @@
-import "dotenv/config";
-// D9 invariants at store level. Needs DATABASE_URL_TEST (disposable DB) — skips without.
+// D9 invariants at store level. Needs a REACHABLE DATABASE_URL_TEST (disposable DB) — skips
+// cleanly without one (a set-but-unreachable URL from .env would otherwise crash the suite).
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { Pool } from "pg";
 import { KnowledgeStore } from "./store";
+import { TEST_DB_URL as url, testDbReachable } from "./testdb";
 
-const url = process.env.DATABASE_URL_TEST ?? "";
+const dbUp = await testDbReachable();
 const T_A = "aaaaaaaa-0000-4000-8000-000000000001";
 const T_B = "aaaaaaaa-0000-4000-8000-000000000002";
 
@@ -20,7 +21,7 @@ async function hashEmbed(text: string): Promise<number[]> {
   return v;
 }
 
-describe.skipIf(!url)("knowledge store (D9)", () => {
+describe.skipIf(!dbUp)("knowledge store (D9)", () => {
   let pool: Pool;
   let store: KnowledgeStore;
 

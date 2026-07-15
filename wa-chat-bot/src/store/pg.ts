@@ -53,7 +53,13 @@ export class PgStore implements Store {
   }
 
   async init(): Promise<void> {
-    await this.pool.query(`
+    // DDL runs as the OWNER (bot_owner) via MIGRATE_DATABASE_URL; the runtime pool stays on the
+    // restricted bot_app. In dev (no migrate DSN) this falls back to the runtime pool, where
+    // owner==runtime. A short-lived pool keeps ownership of new objects with bot_owner.
+    const ddlUrl = config.migrateDatabaseUrl;
+    const ddlPool = ddlUrl ? new Pool({ connectionString: ddlUrl }) : this.pool;
+    try {
+      await ddlPool.query(`
       CREATE TABLE IF NOT EXISTS messages (
         id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
         tenant_id text NOT NULL DEFAULT 'trial',
@@ -80,6 +86,9 @@ export class PgStore implements Store {
         USING (tenant_id = ANY(string_to_array(current_setting('app.current_tenant_ids', true), ',')))
         WITH CHECK (tenant_id = ANY(string_to_array(current_setting('app.current_tenant_ids', true), ',')));
     `);
+    } finally {
+      if (ddlPool !== this.pool) await ddlPool.end();
+    }
   }
 
   async saveMessage(m: StoredMessage): Promise<void> {

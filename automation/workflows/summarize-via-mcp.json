@@ -10,7 +10,11 @@
       "name": "Webhook: POST /webhook/summarize {text}",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
-      "position": [0, 0]
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "b87b8c3c-d724-4f5e-b164-2e85ab4ba885"
     },
     {
       "parameters": {
@@ -19,22 +23,46 @@
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
-            { "name": "Authorization", "value": "Bearer REPLACE_WITH_HUB_SERVICE_TOKEN" },
-            { "name": "Content-Type", "value": "application/json" },
-            { "name": "Accept", "value": "application/json, text/event-stream" },
-            { "name": "x-obo-provider", "value": "n8n" },
-            { "name": "x-obo-external-id", "value": "wf:summarize-via-mcp" }
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.HUB_SERVICE_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json, text/event-stream"
+            },
+            {
+              "name": "x-obo-provider",
+              "value": "n8n"
+            },
+            {
+              "name": "x-obo-external-id",
+              "value": "wf:summarize-via-mcp"
+            }
           ]
         },
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", id: 1, method: \"tools/call\", params: { name: \"llm.summarize\", arguments: { text: $json.body.text } } }) }}",
-        "options": { "response": { "response": { "responseFormat": "text" } } }
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
       },
       "name": "MCP tools/call llm.summarize",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [220, 0]
+      "position": [
+        220,
+        0
+      ]
     },
     {
       "parameters": {
@@ -43,20 +71,56 @@
       "name": "Parse SSE → summary",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [440, 0]
+      "position": [
+        440,
+        0
+      ]
     },
     {
       "parameters": {},
       "name": "Respond",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
-      "position": [660, 0]
+      "position": [
+        660,
+        0
+      ]
     }
   ],
   "connections": {
-    "Webhook: POST /webhook/summarize {text}": { "main": [[{ "node": "MCP tools/call llm.summarize", "type": "main", "index": 0 }]] },
-    "MCP tools/call llm.summarize": { "main": [[{ "node": "Parse SSE → summary", "type": "main", "index": 0 }]] },
-    "Parse SSE → summary": { "main": [[{ "node": "Respond", "type": "main", "index": 0 }]] }
+    "Webhook: POST /webhook/summarize {text}": {
+      "main": [
+        [
+          {
+            "node": "MCP tools/call llm.summarize",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MCP tools/call llm.summarize": {
+      "main": [
+        [
+          {
+            "node": "Parse SSE → summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse SSE → summary": {
+      "main": [
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
   },
   "settings": {},
   "pinData": {}

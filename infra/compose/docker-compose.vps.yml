@@ -10,23 +10,61 @@ services:
     image: postgres:17-alpine
     restart: unless-stopped
     environment:
-      POSTGRES_DB: gaiada
+      POSTGRES_DB: gaiada # bootstrap/maintenance DB only; app data lives in gaiada_platform/_knowledge/_bot
       POSTGRES_PASSWORD: ${POSTGRES_SUPER_PASSWORD:?}
-      POSTGRES_APP_PASSWORD: ${POSTGRES_APP_PASSWORD:?}
+      # Per-service owner (migrator) + runtime roles — see infra/db/init-cluster.sh (DB topology plan).
+      # (bot roles live on the isolated pg-bot instance, not here.)
+      PLATFORM_OWNER_PASSWORD: ${PLATFORM_OWNER_PASSWORD:?}
+      PLATFORM_APP_PASSWORD: ${PLATFORM_APP_PASSWORD:?}
+      SYNC_APP_PASSWORD: ${SYNC_APP_PASSWORD:?}
+      KNOWLEDGE_OWNER_PASSWORD: ${KNOWLEDGE_OWNER_PASSWORD:?}
+      KNOWLEDGE_APP_PASSWORD: ${KNOWLEDGE_APP_PASSWORD:?}
+      KEYCLOAK_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD:?}
+      N8N_DB_PASSWORD: ${N8N_DB_PASSWORD:?}
+    ports:
+      - "127.0.0.1:55433:5432" # localhost-only; lets the standalone automation stack (n8n) reach gaiada_n8n
     volumes:
       - pg-data:/var/lib/postgresql/data
-      - ../../wa-chat-bot/db/init.sh:/docker-entrypoint-initdb.d/10-app-role.sh:ro
+      - ../../infra/db/init-cluster.sh:/docker-entrypoint-initdb.d/10-init-cluster.sh:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d gaiada"]
       interval: 5s
       timeout: 3s
       retries: 20
 
+  # Isolated instance for the WhatsApp bot's PII/crypto-shred store (DB topology plan Phase E).
+  pg-bot:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: gaiada # bootstrap DB only; the bot store lives in gaiada_bot
+      POSTGRES_PASSWORD: ${POSTGRES_SUPER_PASSWORD:?}
+      BOT_OWNER_PASSWORD: ${BOT_OWNER_PASSWORD:?}
+      BOT_APP_PASSWORD: ${BOT_APP_PASSWORD:?}
+    volumes:
+      - pg-bot-data:/var/lib/postgresql/data
+      - ../../infra/db/init-bot.sh:/docker-entrypoint-initdb.d/10-init-bot.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d gaiada"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # Core Redis — platform event backbone (Redis Streams relay/consumer + dead-letter).
   redis:
     image: redis:7-alpine
     restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
     volumes:
       - redis-data:/data
+
+  # Bot Redis — BullMQ media queue, isolated with the bot's data plane (DB topology plan Phase F).
+  redis-bot:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-bot-data:/data
 
   waha:
     image: devlikeapro/waha
@@ -72,7 +110,10 @@ services:
     volumes:
       - gateway-data:/app/data # egress audit (JSONL)
 
-  # Keycloak (5b) — self-hosted IdP. Realm imported from ./keycloak on first boot.
+  # Keycloak (5b) — self-hosted IdP. Realm imported from ./keycloak on first boot. Backed by
+  # Postgres (gaiada_keycloak) instead of embedded H2 (DB topology plan Phase D) — durable + backed
+  # up with the core instance. Kept on start-dev for the trial (no TLS/hostname setup); a prod
+  # deploy should move to `start` (KC_HOSTNAME + TLS) — see the plan's deploy notes.
   keycloak:
     image: quay.io/keycloak/keycloak:26.0
     restart: unless-stopped
@@ -81,11 +122,18 @@ services:
       KC_BOOTSTRAP_ADMIN_USERNAME: admin
       KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?}
       KC_HEALTH_ENABLED: "true"
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/gaiada_keycloak
+      KC_DB_USERNAME: keycloak
+      KC_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD:?}
     ports:
       - "127.0.0.1:8080:8080"
     volumes:
       - ./keycloak:/opt/keycloak/data/import:ro
       - kc-data:/opt/keycloak/data
+    depends_on:
+      postgres:
+        condition: service_healthy
 
   # Cerbos (5b) — policy decision point. Policies from ./cerbos/policies (read-only).
   cerbos:
@@ -101,7 +149,9 @@ services:
     restart: unless-stopped
     environment:
       PLATFORM_SERVICE_TOKEN: ${PLATFORM_SERVICE_TOKEN:?}
-      DATABASE_URL: postgres://gaiada_app:${POSTGRES_APP_PASSWORD:?}@postgres:5432/gaiada_platform
+      # Runtime = restricted platform_app; migrations/grants run as platform_owner (MIGRATE_DATABASE_URL).
+      DATABASE_URL: postgres://platform_app:${PLATFORM_APP_PASSWORD:?}@postgres:5432/gaiada_platform
+      MIGRATE_DATABASE_URL: postgres://platform_owner:${PLATFORM_OWNER_PASSWORD:?}@postgres:5432/gaiada_platform
       AUTH_MODE: ${PLATFORM_AUTH_MODE:-dev}
       OIDC_ISSUER: http://keycloak:8080/realms/gaiada
       OIDC_JWKS_URI: http://keycloak:8080/realms/gaiada/protocol/openid-connect/certs
@@ -158,7 +208,8 @@ services:
     environment:
       SYNC_MODE: central
       NODE_ID: central
-      DATABASE_URL: postgres://gaiada_app:${POSTGRES_APP_PASSWORD:?}@postgres:5432/gaiada_platform
+      # Runtime = restricted sync_app (scoped to the sync footprint; DENIED platform-internal tables).
+      DATABASE_URL: postgres://sync_app:${SYNC_APP_PASSWORD:?}@postgres:5432/gaiada_platform
       SYNC_LISTEN_ADDR: 0.0.0.0:3013
       SYNC_CA_CERT: /gateway-ca/ca-cert.pem
       SYNC_CERT: /app/data/sync.crt
@@ -200,7 +251,9 @@ services:
     restart: unless-stopped
     environment:
       KNOWLEDGE_SERVICE_TOKEN: ${KNOWLEDGE_SERVICE_TOKEN:?}
-      KNOWLEDGE_DATABASE_URL: postgres://gaiada_app:${POSTGRES_APP_PASSWORD:?}@postgres:5432/gaiada_knowledge
+      # Runtime = knowledge_app; schema DDL runs as knowledge_owner (MIGRATE_DATABASE_URL).
+      KNOWLEDGE_DATABASE_URL: postgres://knowledge_app:${KNOWLEDGE_APP_PASSWORD:?}@postgres:5432/gaiada_knowledge
+      MIGRATE_DATABASE_URL: postgres://knowledge_owner:${KNOWLEDGE_OWNER_PASSWORD:?}@postgres:5432/gaiada_knowledge
       PLATFORM_URL: http://platform:3004
       PLATFORM_SERVICE_TOKEN: ${PLATFORM_SERVICE_TOKEN:?}
       GATEWAY_URL: http://ai-gateway:3002
@@ -216,6 +269,8 @@ services:
   mcp-hub:
     build: ../../mcp-hub
     restart: unless-stopped
+    ports:
+      - "127.0.0.1:3003:3003" # localhost-only; lets the standalone automation stack (n8n) reach the hub
     environment:
       HUB_SERVICE_TOKEN: ${HUB_SERVICE_TOKEN:?}
       GATEWAY_URL: http://ai-gateway:3002
@@ -241,15 +296,17 @@ services:
       WAHA_URL: http://waha:3000
       WAHA_API_KEY: ${WAHA_API_KEY:?}
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
-      DATABASE_URL: postgres://gaiada_app:${POSTGRES_APP_PASSWORD:?}@postgres:5432/gaiada
+      # Isolated bot instance (pg-bot) + bot Redis (redis-bot). Runtime = bot_app; DDL = bot_owner.
+      DATABASE_URL: postgres://bot_app:${BOT_APP_PASSWORD:?}@pg-bot:5432/gaiada_bot
+      MIGRATE_DATABASE_URL: postgres://bot_owner:${BOT_OWNER_PASSWORD:?}@pg-bot:5432/gaiada_bot
       MANAGEMENT_GROUP_ID: ${MANAGEMENT_GROUP_ID:-}
       POST_TO_GROUPS: ${POST_TO_GROUPS:-false}
-      REDIS_URL: redis://redis:6379
+      REDIS_URL: redis://redis-bot:6379
     volumes:
       - bot-data:/app/data # LocalKms keys + schedule state + discovery (EXCLUDE keys.json from backups!)
       - ./groups.yaml:/app/config/groups.yaml:ro
     depends_on:
-      postgres:
+      pg-bot:
         condition: service_healthy
       ai-gateway:
         condition: service_started
@@ -263,20 +320,23 @@ services:
       GATEWAY_TOKEN: ${GATEWAY_TOKEN:?}
       WAHA_URL: http://waha:3000
       WAHA_API_KEY: ${WAHA_API_KEY:?}
-      DATABASE_URL: postgres://gaiada_app:${POSTGRES_APP_PASSWORD:?}@postgres:5432/gaiada
-      REDIS_URL: redis://redis:6379
+      DATABASE_URL: postgres://bot_app:${BOT_APP_PASSWORD:?}@pg-bot:5432/gaiada_bot
+      MIGRATE_DATABASE_URL: postgres://bot_owner:${BOT_OWNER_PASSWORD:?}@pg-bot:5432/gaiada_bot
+      REDIS_URL: redis://redis-bot:6379
       MEDIA_WORKER_CONCURRENCY: ${MEDIA_WORKER_CONCURRENCY:-2}
     volumes:
       - bot-data:/app/data
     depends_on:
-      postgres:
+      pg-bot:
         condition: service_healthy
-      redis:
+      redis-bot:
         condition: service_started
 
 volumes:
   pg-data:
+  pg-bot-data:
   redis-data:
+  redis-bot-data:
   whisper-models:
   kc-data:
   waha-sessions:

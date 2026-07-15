@@ -6,6 +6,10 @@ export const config = {
   // Postgres. Connect as a NON-superuser NOBYPASSRLS role in any real deployment —
   // superusers bypass RLS entirely (D5).
   databaseUrl: process.env.DATABASE_URL ?? "",
+  // Migrations/DDL + runtime-grant provisioning run as the OWNER role (migrate() uses this, not
+  // the restricted runtime role). Empty -> migrate() falls back to databaseUrl at call time
+  // (dev/tests, where owner==runtime).
+  migrateDatabaseUrl: process.env.MIGRATE_DATABASE_URL ?? "",
   // Service token surfaces (bot, mcp-hub, n8n) must present. Empty -> reject (fail-closed).
   serviceToken: process.env.PLATFORM_SERVICE_TOKEN ?? "",
   // This site's identifier (sync retrofit later; recorded on every row now).

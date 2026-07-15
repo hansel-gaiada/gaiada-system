@@ -20,6 +20,7 @@ export interface SeededAgency {
   clients: string[];
   projects: string[];
   campaignId: string;
+  intakeProjectId: string;
 }
 
 async function alreadySeeded(): Promise<string | null> {
@@ -32,7 +33,7 @@ async function alreadySeeded(): Promise<string | null> {
 export async function seedAgency(): Promise<SeededAgency> {
   const existing = await alreadySeeded();
   if (existing) {
-    return { tenantId: existing, users: {}, clients: [], projects: [], campaignId: "" };
+    return { tenantId: existing, users: {}, clients: [], projects: [], campaignId: "", intakeProjectId: "" };
   }
   const site = config.originSite;
   const tenantId = await createCompany(AGENCY_NAME, ["agency"]);
@@ -74,6 +75,10 @@ export async function seedAgency(): Promise<SeededAgency> {
     await withTenants([tenantId], (c) => c.query(`UPDATE projects SET client_id = $2 WHERE id = $1`, [pid, clients[i]]));
     projects.push(pid);
   }
+
+  // Lead-intake project: the landing zone for the on-inbound-lead automation (INTAKE_PROJECT_ID).
+  // Not client-linked — inbound leads become intake tasks here until qualified into a client project.
+  const intakeProjectId = await createProject(tenantId, "Lead Intake", users.pm);
 
   // A live campaign with briefs + creative assets (one already in review).
   const campaignId = newId();
@@ -123,14 +128,20 @@ export async function seedAgency(): Promise<SeededAgency> {
     );
   });
 
-  return { tenantId, users, clients, projects, campaignId };
+  return { tenantId, users, clients, projects, campaignId, intakeProjectId };
 }
 
 if (require.main === module) {
   (async () => {
     await migrate();
     const r = await seedAgency();
-    console.log(r.campaignId ? `seeded agency tenant ${r.tenantId}` : `agency tenant already present (${r.tenantId})`);
+    if (r.campaignId) {
+      console.log(`seeded agency tenant ${r.tenantId}`);
+      console.log(`  AGENCY_TENANT_ID=${r.tenantId}`);
+      console.log(`  INTAKE_PROJECT_ID=${r.intakeProjectId}`);
+    } else {
+      console.log(`agency tenant already present (${r.tenantId})`);
+    }
     await closePool();
     process.exit(0);
   })().catch((e) => {

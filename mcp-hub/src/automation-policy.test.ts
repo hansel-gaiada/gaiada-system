@@ -21,10 +21,11 @@ describe("automation scoped service accounts + write gate (WS4 §3)", () => {
   });
 
   it("scopes a workflow to only its allow-listed tools (deny-by-default)", () => {
-    const p = wf("wf:stale-approval-chaser"); // scoped to ["agency.pendingApprovals"]
-    const visible = visibleTools(p).map((t) => t.name);
-    expect(visible).toEqual(["agency.pendingApprovals"]);
+    const p = wf("wf:stale-approval-chaser"); // scoped to ["agency.pendingApprovals", "notify"]
+    const visible = visibleTools(p).map((t) => t.name).sort();
+    expect(visible).toEqual(["agency.pendingApprovals", "notify"]);
     expect(authorize(p, "agency.pendingApprovals").allow).toBe(true);
+    expect(authorize(p, "notify").allow).toBe(true);
     // Out of scope even though a low-assurance human could see it:
     expect(authorize(p, "llm.summarize").allow).toBe(false);
   });
@@ -41,6 +42,15 @@ describe("automation scoped service accounts + write gate (WS4 §3)", () => {
     const p = wf("wf:new-client-seed"); // scoped to projects.create + tasks.create (both low)
     expect(authorize(p, "projects.create").allow).toBe(true);
     expect(authorize(p, "tasks.create").allow).toBe(true);
+  });
+
+  it("a write workflow may call approvals.request (the LOW-impact suspension surface)", () => {
+    // The impact-gate/suspend path (§3/D14): a write workflow files a pending approval via this
+    // tool when the gate refuses a medium+/unclassified write. It's a low write, so it runs auto.
+    expect(authorize(wf("wf:new-client-seed"), "approvals.request").allow).toBe(true);
+    expect(authorize(wf("wf:task-sla"), "approvals.request").allow).toBe(true);
+    // A read-only workflow is NOT scoped for it.
+    expect(authorize(wf("wf:stale-approval-chaser"), "approvals.request").allow).toBe(false);
   });
 
   it("does NOT grant humans automation scoping (a low human keeps normal visibility)", () => {

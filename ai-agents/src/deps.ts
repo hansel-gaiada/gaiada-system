@@ -10,6 +10,10 @@ const config = {
   hubServiceToken: process.env.HUB_SERVICE_TOKEN ?? "",
 };
 
+// The provider the Gateway reported for the most recent completion (after any failover). Used by the
+// D13 write gate (runWriteAgent) + WS9 attribution; undefined until the first completion.
+let lastServedProvider: string | undefined;
+
 async function complete(prompt: string): Promise<string> {
   const res = await fetch(`${config.gatewayUrl}/complete`, {
     method: "POST",
@@ -17,7 +21,9 @@ async function complete(prompt: string): Promise<string> {
     body: JSON.stringify({ prompt }),
   });
   if (!res.ok) throw new Error(`gateway ${res.status}`);
-  return ((await res.json()) as { text: string }).text;
+  const body = (await res.json()) as { text: string; provider?: string };
+  lastServedProvider = body.provider;
+  return body.text;
 }
 
 async function callTool(name: string, args: Record<string, unknown>, envelope: Envelope): Promise<string> {
@@ -43,4 +49,4 @@ async function callTool(name: string, args: Record<string, unknown>, envelope: E
   return text;
 }
 
-export const liveDeps: AgentDeps = { complete, callTool };
+export const liveDeps: AgentDeps = { complete, callTool, lastProvider: () => lastServedProvider };

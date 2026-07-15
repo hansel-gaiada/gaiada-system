@@ -7,12 +7,17 @@ import { timingSafeEqual } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { Pool } from "pg";
 import { KnowledgeStore, type IngestDoc } from "./store";
+import { KnowledgeGraph } from "./graph";
+import { ingestEvent, type PlatformEvent } from "./graph-ingest";
+import { PgEpisodicStore } from "../memory/episodic-pg";
 
 export const knowledgeConfig = {
   port: Number(process.env.KNOWLEDGE_PORT ?? 3005),
   host: process.env.HOST ?? "0.0.0.0",
   serviceToken: process.env.KNOWLEDGE_SERVICE_TOKEN ?? "",
   databaseUrl: process.env.KNOWLEDGE_DATABASE_URL ?? "",
+  // Owner DSN for schema DDL (knowledge_owner); runtime uses knowledge_app on KNOWLEDGE_DATABASE_URL.
+  migrateDatabaseUrl: process.env.MIGRATE_DATABASE_URL ?? "",
   platformUrl: process.env.PLATFORM_URL ?? "http://localhost:3004",
   platformToken: process.env.PLATFORM_SERVICE_TOKEN ?? "",
   gatewayUrl: process.env.GATEWAY_URL ?? "http://localhost:3002",
@@ -33,18 +38,26 @@ function authorized(req: FastifyRequest): boolean {
   return safeEqual(token, knowledgeConfig.serviceToken);
 }
 
-export type EnvelopeResolver = (provider: string, externalId: string) => Promise<string[]>; // authorized tenant set
+/** Resolved authorization for a caller: the tenant set + whether they may see cross-company
+ *  "one-brain" graph nodes (group_executive / platform_admin — spec §4 / D9.1). */
+export interface ResolvedAuth {
+  tenantSet: string[];
+  crossCompany: boolean;
+}
+export type EnvelopeResolver = (provider: string, externalId: string) => Promise<ResolvedAuth>;
 
-export async function resolveViaPlatform(provider: string, externalId: string): Promise<string[]> {
+export async function resolveViaPlatform(provider: string, externalId: string): Promise<ResolvedAuth> {
   const res = await fetch(`${knowledgeConfig.platformUrl}/principal/resolve`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${knowledgeConfig.platformToken}` },
     body: JSON.stringify({ provider, externalId }),
   });
   if (!res.ok) throw new Error(`platform resolve ${res.status}`);
-  const principal = (await res.json()) as { assurance: string; companies?: string[] };
-  if (principal.assurance === "low") return []; // D4 ceiling: unverified → no knowledge
-  return principal.companies ?? [];
+  const principal = (await res.json()) as { assurance: string; companies?: string[]; roles?: { role: string }[] };
+  if (principal.assurance === "low") return { tenantSet: [], crossCompany: false }; // D4 ceiling: unverified → no knowledge
+  // Cross-company elevation is group_executive / platform_admin only (the "one brain" is owner-gated).
+  const crossCompany = (principal.roles ?? []).some((r) => r.role === "group_executive" || r.role === "platform_admin");
+  return { tenantSet: principal.companies ?? [], crossCompany };
 }
 
 export async function embedViaGateway(text: string): Promise<number[]> {
@@ -57,7 +70,12 @@ export async function embedViaGateway(text: string): Promise<number[]> {
   return ((await res.json()) as { embedding: number[] }).embedding;
 }
 
-export function buildKnowledgeApp(store: KnowledgeStore, resolveEnvelope: EnvelopeResolver): FastifyInstance {
+export function buildKnowledgeApp(
+  store: KnowledgeStore,
+  resolveEnvelope: EnvelopeResolver,
+  graph?: KnowledgeGraph,
+  episodic?: PgEpisodicStore,
+): FastifyInstance {
   const app = Fastify({ logger: false });
 
   app.get("/health", async () => ({ ok: true }));
@@ -78,9 +96,59 @@ export function buildKnowledgeApp(store: KnowledgeStore, resolveEnvelope: Envelo
     const externalId = String(req.headers["x-obo-external-id"] ?? "");
     const { query, scope } = req.body ?? {};
     if (!query || !scope) return reply.code(400).send({ error: "query and scope required" });
-    const tenantSet = provider && externalId ? await resolveEnvelope(provider, externalId) : [];
+    const { tenantSet } = provider && externalId ? await resolveEnvelope(provider, externalId) : { tenantSet: [] };
     const hits = await store.search(query, { tenantSet, scope, topK: req.body?.topK });
     return { hits };
+  });
+
+  // Knowledge-graph traversal (WS8 Step E). Same trust model as /search: the caller's OBO envelope
+  // resolves to an authorized-tenant-set that hard pre-filters the walk (D9.1). Cross-company
+  // "one-brain" nodes stay invisible here (crossCompany defaults false) — surfacing them requires a
+  // group_executive elevation the platform resolver must attest (documented follow-up); fail-closed.
+  app.post<{ Body: { startKey?: string; scope?: string; rel?: string; maxDepth?: number } }>("/graph/neighbors", async (req, reply) => {
+    if (!authorized(req)) return reply.code(401).send({ error: "unauthorized" });
+    if (!graph) return reply.code(501).send({ error: "graph not configured" });
+    const provider = String(req.headers["x-obo-provider"] ?? "");
+    const externalId = String(req.headers["x-obo-external-id"] ?? "");
+    const { startKey, scope, rel, maxDepth } = req.body ?? {};
+    if (!startKey || !scope) return reply.code(400).send({ error: "startKey and scope required" });
+    const { tenantSet, crossCompany } = provider && externalId ? await resolveEnvelope(provider, externalId) : { tenantSet: [], crossCompany: false };
+    const nodes = await graph.neighbors(startKey, { tenantSet, scope, crossCompany, maxDepth }, rel ? { rel } : undefined);
+    return { nodes };
+  });
+
+  // Graph ingestion (WS8 Step E live wire, D9.2 "indexer subscribes to source changes"). The platform
+  // graph-bridge forwards allow-listed business events here; we turn each into source-of-truth nodes +
+  // edges. Service-token gated (internal pipeline, like /ingest — the platform already authorized it).
+  app.post<{ Body: PlatformEvent }>("/graph/ingest", async (req, reply) => {
+    if (!authorized(req)) return reply.code(401).send({ error: "unauthorized" });
+    if (!graph) return reply.code(501).send({ error: "graph not configured" });
+    const e = req.body;
+    if (!e?.tenantId || !e.entityType || !e.entityId) return reply.code(400).send({ error: "tenantId, entityType, entityId required" });
+    const m = await ingestEvent(graph, e);
+    return { nodes: m.nodes.length, edges: m.edges.length };
+  });
+
+  // Human feedback on an agent run (WS8 Step D). D9.3: trust is derived from the caller's resolved
+  // identity — a verified member's feedback is a TRUSTED trainer signal; an unresolved/low caller's is
+  // recorded but QUARANTINED (untrusted), never auto-promoted. Service-token gated + OBO for identity.
+  app.post<{ Body: { runId?: string; rating?: "up" | "down"; note?: string } }>("/feedback", async (req, reply) => {
+    if (!authorized(req)) return reply.code(401).send({ error: "unauthorized" });
+    if (!episodic) return reply.code(501).send({ error: "episodic store not configured" });
+    const provider = String(req.headers["x-obo-provider"] ?? "");
+    const externalId = String(req.headers["x-obo-external-id"] ?? "");
+    const { runId, rating, note } = req.body ?? {};
+    if (!runId || (rating !== "up" && rating !== "down")) return reply.code(400).send({ error: "runId and rating(up|down) required" });
+    const resolved = provider && externalId ? await resolveEnvelope(provider, externalId) : { tenantSet: [], crossCompany: false };
+    const trusted = resolved.tenantSet.length > 0; // a resolved member; unresolved/low → quarantined
+    await episodic.addFeedback(runId, {
+      rating,
+      note,
+      provenance: trusted ? "human" : "external",
+      trust: trusted ? "trusted" : "untrusted",
+      at: Date.now(),
+    });
+    return { ok: true, trust: trusted ? "trusted" : "untrusted" };
   });
 
   // Admin-console source list (service-token gated). The platform is the trust boundary:
@@ -106,9 +174,13 @@ export function buildKnowledgeApp(store: KnowledgeStore, resolveEnvelope: Envelo
 
 async function start(): Promise<void> {
   const pool = new Pool({ connectionString: knowledgeConfig.databaseUrl });
-  const store = new KnowledgeStore(pool, embedViaGateway);
+  const store = new KnowledgeStore(pool, embedViaGateway, { migrateUrl: knowledgeConfig.migrateDatabaseUrl });
   await store.init();
-  const app = buildKnowledgeApp(store, resolveViaPlatform);
+  const graph = new KnowledgeGraph(pool, { migrateUrl: knowledgeConfig.migrateDatabaseUrl });
+  await graph.init();
+  const episodic = new PgEpisodicStore(pool, { migrateUrl: knowledgeConfig.migrateDatabaseUrl });
+  await episodic.init();
+  const app = buildKnowledgeApp(store, resolveViaPlatform, graph, episodic);
   await app.listen({ port: knowledgeConfig.port, host: knowledgeConfig.host });
   console.log(`Gaiada Knowledge service on :${knowledgeConfig.port}`);
 }

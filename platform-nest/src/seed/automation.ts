@@ -14,13 +14,17 @@ import { createUser, addMembership, createRole, grantRole, linkIdentity } from "
 const AGENCY_NAME = "Gaiada Creative";
 
 // Each account's role is the MINIMUM its workflow's tools need (verified against the Cerbos
-// resource policies): read approvals -> member; create project/task + notify -> manager;
-// read compliance gates -> company_admin.
+// resource policies): read approvals -> member; read+update tasks -> member; create project/task
+// + notify -> manager; read compliance gates -> company_admin.
 export const AUTOMATION_ACCOUNTS: ReadonlyArray<{ workflowId: string; role: string; email: string; name: string }> = [
-  { workflowId: "wf:stale-approval-chaser", role: "member", email: "automation+stale-approval-chaser@gaiada.system", name: "Automation — Stale-approval chaser" },
+  // manager (not member): raises in-app notifications (Cerbos gates notification.create to admin/manager).
+  { workflowId: "wf:stale-approval-chaser", role: "manager", email: "automation+stale-approval-chaser@gaiada.system", name: "Automation — Stale-approval chaser" },
+  { workflowId: "wf:task-sla", role: "member", email: "automation+task-sla@gaiada.system", name: "Automation — Task SLA escalation" },
   { workflowId: "wf:new-client-seed", role: "manager", email: "automation+new-client-seed@gaiada.system", name: "Automation — New-client seed" },
   { workflowId: "wf:compliance-gate-nag", role: "company_admin", email: "automation+compliance-gate-nag@gaiada.system", name: "Automation — Compliance-gate nag" },
   { workflowId: "wf:inbound-lead-intake", role: "manager", email: "automation+inbound-lead-intake@gaiada.system", name: "Automation — Inbound lead intake" },
+  // Event notify flow (org_structure.updated -> in-app notification). manager = can notify.
+  { workflowId: "wf:org-updated-notify", role: "manager", email: "automation+org-updated-notify@gaiada.system", name: "Automation — Org-updated notify" },
 ];
 
 async function existingLink(externalId: string): Promise<boolean> {
@@ -30,6 +34,13 @@ async function existingLink(externalId: string): Promise<boolean> {
   return rows.length > 0;
 }
 
+async function userIdByEmail(email: string): Promise<string | null> {
+  const { rows } = await withGlobal((c) =>
+    c.query<{ id: string }>(`SELECT id FROM users WHERE email = $1`, [email]),
+  );
+  return rows[0]?.id ?? null;
+}
+
 async function findAgencyTenant(): Promise<string | null> {
   const { rows } = await withGlobal((c) =>
     c.query<{ id: string }>(`SELECT id FROM companies WHERE name = $1 AND deleted_at IS NULL`, [AGENCY_NAME]),
@@ -37,16 +48,22 @@ async function findAgencyTenant(): Promise<string | null> {
   return rows[0]?.id ?? null;
 }
 
-/** Seed the automation service accounts for a tenant. Returns the count newly created. */
+/** Seed the automation service accounts for a tenant. Returns the count newly created.
+ * Idempotent AND self-healing: membership + the scoped role are (re)ensured on every run
+ * (fixtures use ON CONFLICT DO NOTHING), so changing an account's `role` here and re-running
+ * applies the new grant to an already-linked service user — no manual RBAC edits. */
 export async function seedAutomationAccounts(tenantId: string): Promise<number> {
   let created = 0;
   for (const acc of AUTOMATION_ACCOUNTS) {
-    if (await existingLink(acc.workflowId)) continue; // idempotent
-    const userId = await createUser(acc.email, acc.name, "Automation service account");
-    await addMembership(tenantId, userId);
-    await grantRole(userId, await createRole(acc.role), "company", tenantId);
-    await linkIdentity(userId, "n8n", acc.workflowId, true); // verified -> AuthGuard mints a real principal
-    created++;
+    const linked = await existingLink(acc.workflowId);
+    let userId = linked ? await userIdByEmail(acc.email) : null;
+    if (!userId) {
+      userId = await createUser(acc.email, acc.name, "Automation service account");
+      if (!linked) created++;
+    }
+    await addMembership(tenantId, userId); // idempotent
+    await grantRole(userId, await createRole(acc.role), "company", tenantId); // idempotent; ensures/upgrades role
+    if (!linked) await linkIdentity(userId, "n8n", acc.workflowId, true); // verified -> AuthGuard mints a real principal
   }
   return created;
 }

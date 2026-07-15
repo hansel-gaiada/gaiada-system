@@ -51,9 +51,16 @@ describe.skipIf(!TEST_URL)("automation service accounts (WS4 §3)", () => {
     expect(r.statusCode).toBe(403);
   });
 
-  it("wf:stale-approval-chaser (member role) is a real non-anonymous principal (can read projects)", async () => {
+  it("wf:stale-approval-chaser (manager role) is a real non-anonymous principal (can read projects)", async () => {
     const r = await app.inject({
       method: "GET", url: `/api/${co}/projects`, headers: asWorkflow("wf:stale-approval-chaser"),
+    });
+    expect(r.statusCode).toBe(200);
+  });
+
+  it("wf:task-sla (member role) resolves to a real principal (can read tasks)", async () => {
+    const r = await app.inject({
+      method: "GET", url: `/api/${co}/tasks`, headers: asWorkflow("wf:task-sla"),
     });
     expect(r.statusCode).toBe(200);
   });

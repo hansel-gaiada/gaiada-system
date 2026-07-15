@@ -31,6 +31,32 @@ export const specialists: Record<string, AgentDef> = {
   [approvalsChaser.name]: approvalsChaser,
 };
 
+// The first WRITE-CAPABLE specialist (WS8 Step B). It keeps the company's open tasks healthy with
+// LOW-impact `tasks.update` writes (in-tenant, reversible, Cerbos+RLS enforced at the platform).
+// D13: `evaledProviders` is EMPTY, so until an operator runs its eval + tool-contract suite against a
+// real provider and adds that provider here, `runWriteAgent` serves it READ-ONLY. This is the correct
+// safe default — write capability is earned per provider, never assumed. Run it through
+// `runWriteAgent` (not the plain runner / supervisor) so the D13 gate + D14 approval-filing apply.
+export const taskTriager: AgentDef = {
+  name: "task-triager",
+  systemPrompt:
+    "You are Gaiada's task triager. Review the company's open tasks and keep them healthy: raise priority on overdue tasks and mark clearly-finished ones done. Change only what the returned data justifies; never invent tasks. Make one tool call at a time.",
+  tools: {
+    "tasks.list": "read",
+    "tasks.update": "low_write", // auto per D14 (low + reversible); still Cerbos+RLS-gated at the platform
+  },
+  maxSteps: 10,
+  maxToolCalls: 6,
+  evaledProviders: [], // none cleared yet ⇒ forced read-only until a provider passes this agent's evals
+};
+
+/** Write-capable specialists — driven via runWriteAgent (D13 provider gate + D14 approval filing),
+ *  deliberately NOT in the read-only supervisor set until the orchestrator routes writes through the
+ *  same gate (WS8 Step B follow-up). */
+export const writeSpecialists: Record<string, AgentDef> = {
+  [taskTriager.name]: taskTriager,
+};
+
 /** The default supervisor over all registered specialists (WS8 §2.2). */
 export const supervisor = {
   name: "supervisor",

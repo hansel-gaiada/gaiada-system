@@ -1,22 +1,80 @@
 {
   "name": "on client.created -> seed project+task (EVENT, low-impact write)",
-  "meta": { "description": "Fired by the event->n8n bridge at POST /webhook/ev/client.created. Seeds a default onboarding project + kickoff task via MCP, then raises an in-app notification for the ops lead. All LOW-impact writes -> run unattended (the hub gate suspends medium+/unclassified). Scoped identity wf:new-client-seed -> [projects.create, tasks.create, notify]. Env: N8N_BRIDGE_SECRET, HUB_SERVICE_TOKEN, NOTIFY_USER_ID." },
+  "meta": {
+    "description": "Fired by the event->n8n bridge at POST /webhook/ev/client.created. Verifies the bridge secret, DEDUPES on the envelope id (the bridge is at-least-once — without this a redelivery would double-seed), then seeds a default onboarding project + kickoff task and notifies the ops lead. All LOW-impact writes -> run unattended (the hub gate suspends medium+/unclassified). Scoped identity wf:new-client-seed -> [projects.create, tasks.create, notify]. Env: N8N_BRIDGE_SECRET, HUB_SERVICE_TOKEN, NOTIFY_USER_ID."
+  },
   "nodes": [
     {
-      "parameters": { "httpMethod": "POST", "path": "ev/client.created", "responseMode": "responseNode" },
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ev/client.created",
+        "responseMode": "responseNode"
+      },
       "name": "Webhook: bridge ev/client.created",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
-      "position": [0, 0]
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "030a3e35-1d33-4d32-80e6-2ab82ea00bbf"
     },
     {
       "parameters": {
-        "jsCode": "const got = $input.first().json.headers?.['x-gaiada-bridge-secret'];\nif (!got || got !== $env.N8N_BRIDGE_SECRET) throw new Error('bad bridge secret');\nconst e = $input.first().json.body ?? {};\nif (e.v !== 1) throw new Error(`unexpected envelope version ${e.v}`);\nreturn [{ json: { tenantId: e.tenantId, clientId: e.entityId, clientName: e.payload?.name ?? 'New client' } }];"
+        "jsCode": "// Verify the bridge secret, then dedupe on the envelope id (bridge is at-least-once).\nconst got = $input.first().json.headers?.['x-gaiada-bridge-secret'];\nif (!got || got !== $env.N8N_BRIDGE_SECRET) throw new Error('bad bridge secret');\nconst e = $input.first().json.body ?? {};\nif (e.v !== 1) throw new Error(`unexpected envelope version ${e.v}`);\nconst store = $getWorkflowStaticData('global');\nstore.seen = store.seen || {};\nconst dup = Object.prototype.hasOwnProperty.call(store.seen, e.id);\nif (!dup) {\n  store.seen[e.id] = Date.now();\n  const ids = Object.keys(store.seen);\n  if (ids.length > 1000) for (const k of ids.slice(0, ids.length - 1000)) delete store.seen[k];\n}\nreturn [{ json: { dup, tenantId: e.tenantId, clientId: e.entityId, clientName: e.payload?.name ?? 'New client' } }];"
       },
-      "name": "Verify secret + extract",
+      "name": "Verify secret + dedupe",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [220, 0]
+      "position": [
+        220,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "is-dup",
+              "leftValue": "={{ $json.dup }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Duplicate?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        440,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: true, deduped: true }) }}"
+      },
+      "name": "Respond (dedup skip)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        660,
+        -140
+      ]
     },
     {
       "parameters": {
@@ -25,31 +83,58 @@
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
-            { "name": "Authorization", "value": "=Bearer {{ $env.HUB_SERVICE_TOKEN }}" },
-            { "name": "Content-Type", "value": "application/json" },
-            { "name": "Accept", "value": "application/json, text/event-stream" },
-            { "name": "x-obo-provider", "value": "n8n" },
-            { "name": "x-obo-external-id", "value": "wf:new-client-seed" }
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.HUB_SERVICE_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json, text/event-stream"
+            },
+            {
+              "name": "x-obo-provider",
+              "value": "n8n"
+            },
+            {
+              "name": "x-obo-external-id",
+              "value": "wf:new-client-seed"
+            }
           ]
         },
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", id: 1, method: \"tools/call\", params: { name: \"projects.create\", arguments: { tenantId: $json.tenantId, name: `${$json.clientName} \\u2014 Onboarding`, clientId: $json.clientId } } }) }}",
-        "options": { "response": { "response": { "responseFormat": "text" } } }
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
       },
       "name": "MCP projects.create (low write)",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [440, 0]
+      "position": [
+        660,
+        120
+      ]
     },
     {
       "parameters": {
-        "jsCode": "// Carry tenantId forward and pull the new projectId out of the SSE-framed reply.\nconst prev = $('Verify secret + extract').first().json;\nconst raw = $input.first().json.data ?? $input.first().json.body ?? '';\nconst line = String(raw).split('\\n').find((l) => l.startsWith('data:')) ?? '';\nconst rpc = JSON.parse(line.slice(5).trim());\nif (rpc.result?.isError) throw new Error(rpc.result.content?.[0]?.text ?? 'projects.create failed (a medium+ write would be suspended here)');\nconst project = JSON.parse(rpc.result?.content?.[0]?.text ?? '{}');\nreturn [{ json: { tenantId: prev.tenantId, projectId: project.id } }];"
+        "jsCode": "// Carry tenantId forward and pull the new projectId out of the SSE-framed reply.\nconst prev = $('Verify secret + dedupe').first().json;\nconst raw = $input.first().json.data ?? $input.first().json.body ?? '';\nconst line = String(raw).split('\\n').find((l) => l.startsWith('data:')) ?? '';\nconst rpc = JSON.parse(line.slice(5).trim());\nif (rpc.result?.isError) throw new Error(rpc.result.content?.[0]?.text ?? 'projects.create failed (a medium+ write would be suspended here)');\nconst project = JSON.parse(rpc.result?.content?.[0]?.text ?? '{}');\nreturn [{ json: { tenantId: prev.tenantId, clientId: prev.clientId, projectId: project.id } }];"
       },
       "name": "Parse projectId",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [660, 0]
+      "position": [
+        880,
+        120
+      ]
     },
     {
       "parameters": {
@@ -58,22 +143,46 @@
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
-            { "name": "Authorization", "value": "=Bearer {{ $env.HUB_SERVICE_TOKEN }}" },
-            { "name": "Content-Type", "value": "application/json" },
-            { "name": "Accept", "value": "application/json, text/event-stream" },
-            { "name": "x-obo-provider", "value": "n8n" },
-            { "name": "x-obo-external-id", "value": "wf:new-client-seed" }
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.HUB_SERVICE_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json, text/event-stream"
+            },
+            {
+              "name": "x-obo-provider",
+              "value": "n8n"
+            },
+            {
+              "name": "x-obo-external-id",
+              "value": "wf:new-client-seed"
+            }
           ]
         },
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", id: 2, method: \"tools/call\", params: { name: \"tasks.create\", arguments: { tenantId: $json.tenantId, projectId: $json.projectId, title: \"Kickoff & brief intake\" } } }) }}",
-        "options": { "response": { "response": { "responseFormat": "text" } } }
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
       },
       "name": "MCP tasks.create (low write)",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [880, 0]
+      "position": [
+        1100,
+        120
+      ]
     },
     {
       "parameters": {
@@ -82,38 +191,146 @@
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
-            { "name": "Authorization", "value": "=Bearer {{ $env.HUB_SERVICE_TOKEN }}" },
-            { "name": "Content-Type", "value": "application/json" },
-            { "name": "Accept", "value": "application/json, text/event-stream" },
-            { "name": "x-obo-provider", "value": "n8n" },
-            { "name": "x-obo-external-id", "value": "wf:new-client-seed" }
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.HUB_SERVICE_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json, text/event-stream"
+            },
+            {
+              "name": "x-obo-provider",
+              "value": "n8n"
+            },
+            {
+              "name": "x-obo-external-id",
+              "value": "wf:new-client-seed"
+            }
           ]
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", id: 3, method: \"tools/call\", params: { name: \"notify\", arguments: { tenantId: $('Verify secret + extract').first().json.tenantId, recipientId: $env.NOTIFY_USER_ID, type: \"client_onboarded\", payload: { clientId: $('Verify secret + extract').first().json.clientId } } } }) }}",
-        "options": { "response": { "response": { "responseFormat": "text" } } }
+        "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", id: 3, method: \"tools/call\", params: { name: \"notify\", arguments: { tenantId: $('Verify secret + dedupe').first().json.tenantId, recipientId: $env.NOTIFY_USER_ID, type: \"client_onboarded\", payload: { clientId: $('Verify secret + dedupe').first().json.clientId } } } }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
       },
       "name": "MCP notify ops lead (low write)",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [1100, 0]
+      "position": [
+        1320,
+        120
+      ]
     },
     {
-      "parameters": { "respondWith": "json", "responseBody": "={{ JSON.stringify({ ok: true }) }}" },
-      "name": "Respond 200",
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: true }) }}"
+      },
+      "name": "Respond (done)",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
-      "position": [1320, 0]
+      "position": [
+        1540,
+        120
+      ]
     }
   ],
   "connections": {
-    "Webhook: bridge ev/client.created": { "main": [[{ "node": "Verify secret + extract", "type": "main", "index": 0 }]] },
-    "Verify secret + extract": { "main": [[{ "node": "MCP projects.create (low write)", "type": "main", "index": 0 }]] },
-    "MCP projects.create (low write)": { "main": [[{ "node": "Parse projectId", "type": "main", "index": 0 }]] },
-    "Parse projectId": { "main": [[{ "node": "MCP tasks.create (low write)", "type": "main", "index": 0 }]] },
-    "MCP tasks.create (low write)": { "main": [[{ "node": "MCP notify ops lead (low write)", "type": "main", "index": 0 }]] },
-    "MCP notify ops lead (low write)": { "main": [[{ "node": "Respond 200", "type": "main", "index": 0 }]] }
+    "Webhook: bridge ev/client.created": {
+      "main": [
+        [
+          {
+            "node": "Verify secret + dedupe",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verify secret + dedupe": {
+      "main": [
+        [
+          {
+            "node": "Duplicate?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Duplicate?": {
+      "main": [
+        [
+          {
+            "node": "Respond (dedup skip)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "MCP projects.create (low write)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MCP projects.create (low write)": {
+      "main": [
+        [
+          {
+            "node": "Parse projectId",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse projectId": {
+      "main": [
+        [
+          {
+            "node": "MCP tasks.create (low write)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MCP tasks.create (low write)": {
+      "main": [
+        [
+          {
+            "node": "MCP notify ops lead (low write)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MCP notify ops lead (low write)": {
+      "main": [
+        [
+          {
+            "node": "Respond (done)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
   },
   "settings": {},
   "pinData": {}

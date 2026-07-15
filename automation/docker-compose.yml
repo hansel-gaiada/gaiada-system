@@ -15,6 +15,19 @@ services:
     environment:
       GENERIC_TIMEZONE: ${TZ:-Asia/Singapore}
       N8N_DIAGNOSTICS_ENABLED: "false"
+      # Persistence: Postgres (gaiada_n8n on the core instance) instead of the default SQLite
+      # (DB topology plan Phase D) — durable, backed up, and required for n8n queue-mode/scaling.
+      # N8N_DB_HOST defaults to the compose service `postgres` (when n8n shares the VPS network);
+      # standalone, set it to host.docker.internal or the core DB host in .env.
+      DB_TYPE: postgresdb
+      DB_POSTGRESDB_HOST: ${N8N_DB_HOST:-postgres}
+      DB_POSTGRESDB_PORT: ${N8N_DB_PORT:-5432}
+      DB_POSTGRESDB_DATABASE: gaiada_n8n
+      DB_POSTGRESDB_USER: n8n
+      DB_POSTGRESDB_PASSWORD: ${N8N_DB_PASSWORD:?set N8N_DB_PASSWORD in .env}
+      # Workflows read config via $env.<NAME> expressions — must NOT be blocked (default flips
+      # to blocked in recent n8n). Without this, $env.HUB_SERVICE_TOKEN etc. resolve to undefined.
+      N8N_BLOCK_ENV_ACCESS_IN_NODE: "false"
       # Portability: pin the key so credentials survive a volume reset / host move.
       N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:?set N8N_ENCRYPTION_KEY in .env}
       # Public URL used to register webhook + form endpoints (event bridge posts here).
@@ -35,6 +48,8 @@ services:
       NOTIFY_USER_ID: ${NOTIFY_USER_ID:-}
       # on-client-created-seed: destination project for the seed task.
       INTAKE_PROJECT_ID: ${INTAKE_PROJECT_ID:-}
+      # task-sla: project whose tasks are swept for SLA breaches (single-project v1).
+      SLA_PROJECT_ID: ${SLA_PROJECT_ID:-}
       # digest-fanout (kept out of the hub allow-list; talks to the bot admin API directly).
       BOT_URL: ${BOT_URL:-}
       BOT_ADMIN_TOKEN: ${BOT_ADMIN_TOKEN:-}

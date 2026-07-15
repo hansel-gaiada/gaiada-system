@@ -149,7 +149,9 @@ func NewServer(cfg config.Config, chains Chains, b *budget.Budget, classifier *d
 			return
 		}
 		_ = audit.WriteAudit(cfg.AuditFile, audit.EgressAudit{TS: started.UnixMilli(), Capability: "llm", Provider: strPtr(provider), OK: true, Redactions: len(result.Redactions), LatencyMs: time.Since(started).Milliseconds()})
-		writeJSON(w, 200, map[string]string{"text": text})
+		// Report the provider that actually served (after any failover) so a WS8 write-capable agent
+		// can enforce the D13 failover gate + WS9 can attribute the run. Additive/back-compatible.
+		writeJSON(w, 200, map[string]string{"text": text, "provider": provider})
 	})
 
 	mux.HandleFunc("POST /media", func(w http.ResponseWriter, r *http.Request) {

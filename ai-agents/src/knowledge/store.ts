@@ -50,6 +50,8 @@ export type Embedder = (text: string) => Promise<number[]>;
 export interface StoreOpts {
   /** Fixed embedding dimension for the pgvector column (ignored in array fallback mode). */
   dim?: number;
+  /** Owner DSN for schema DDL (knowledge_owner). Empty -> DDL runs on the runtime pool (dev). */
+  migrateUrl?: string;
 }
 
 /** pgvector text literal: '[1,2,3]'. */
@@ -73,6 +75,7 @@ function cosine(a: number[], b: number[]): number {
 export class KnowledgeStore {
   private pgvector = false;
   private dim: number;
+  private migrateUrl: string;
 
   constructor(
     private pool: Pool,
@@ -80,6 +83,7 @@ export class KnowledgeStore {
     opts: StoreOpts = {},
   ) {
     this.dim = opts.dim ?? 768;
+    this.migrateUrl = opts.migrateUrl ?? "";
   }
 
   /** Which vector backend init() selected — 'pgvector' or 'array' (fallback). */
@@ -88,15 +92,16 @@ export class KnowledgeStore {
   }
 
   async init(): Promise<void> {
-    // Prefer pgvector; fall back to float8[] where the extension isn't installed.
+    // DDL runs as the OWNER (knowledge_owner) via migrateUrl; the runtime pool stays on the
+    // restricted knowledge_app. Dev (no migrateUrl) falls back to the runtime pool.
+    const ddlPool = this.migrateUrl ? new Pool({ connectionString: this.migrateUrl }) : this.pool;
     try {
-      await this.pool.query("CREATE EXTENSION IF NOT EXISTS vector");
-      this.pgvector = true;
-    } catch {
-      this.pgvector = false;
-    }
-    const embType = this.pgvector ? `vector(${this.dim})` : "double precision[]";
-    await this.pool.query(`
+      // Detect pgvector by READ (the extension is created at provisioning by a superuser — the
+      // owner/app roles can't CREATE it). Runtime never needs DDL for this.
+      const ext = await this.pool.query("SELECT 1 FROM pg_extension WHERE extname = 'vector'");
+      this.pgvector = (ext.rowCount ?? 0) > 0;
+      const embType = this.pgvector ? `vector(${this.dim})` : "double precision[]";
+      await ddlPool.query(`
       CREATE TABLE IF NOT EXISTS knowledge_chunks (
         id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
         tenant_id uuid NOT NULL,
@@ -115,11 +120,14 @@ export class KnowledgeStore {
       CREATE INDEX IF NOT EXISTS idx_knowledge_tenant ON knowledge_chunks (tenant_id, kind);
       CREATE INDEX IF NOT EXISTS idx_knowledge_source ON knowledge_chunks (source_ref);
     `);
-    if (this.pgvector) {
-      // HNSW cosine index; ignore if the pgvector build is too old for HNSW (ivfflat would do).
-      await this.pool
-        .query(`CREATE INDEX IF NOT EXISTS idx_knowledge_vec ON knowledge_chunks USING hnsw (embedding vector_cosine_ops)`)
-        .catch(() => undefined);
+      if (this.pgvector) {
+        // HNSW cosine index; ignore if the pgvector build is too old for HNSW (ivfflat would do).
+        await ddlPool
+          .query(`CREATE INDEX IF NOT EXISTS idx_knowledge_vec ON knowledge_chunks USING hnsw (embedding vector_cosine_ops)`)
+          .catch(() => undefined);
+      }
+    } finally {
+      if (ddlPool !== this.pool) await ddlPool.end();
     }
   }
 

@@ -1,7 +1,7 @@
 // WS8 §2.2 + D14 brigade bounds, proven at the orchestrator level.
 import { describe, it, expect } from "vitest";
-import { runOrchestrator, UnknownSpecialistError, GoalBudgetExhaustedError, type OrchestratorDef } from "./orchestrator";
-import { ApprovalRequiredError, type AgentDeps } from "./agent";
+import { runOrchestrator, UnknownSpecialistError, GoalBudgetExhaustedError, GoalSuspendedError, type OrchestratorDef } from "./orchestrator";
+import { ApprovalRequiredError, type AgentDef, type AgentDeps } from "./agent";
 
 const envelope = { provider: "telegram", externalId: "tg:555" };
 
@@ -141,27 +141,59 @@ describe("orchestrator (WS8 step 2)", () => {
     expect(run.outcome).toContain("Could not fetch");
   });
 
-  it("a high_write approval suspension bubbles up and suspends the WHOLE goal (D14)", async () => {
-    const withWriter: OrchestratorDef = {
-      ...def,
-      specialists: {
-        ...def.specialists,
-        writer: {
-          name: "writer",
-          systemPrompt: "Writes tasks.",
-          tools: { "tasks.create": "high_write" },
-          maxSteps: 3,
-          maxToolCalls: 2,
-        },
-      },
-    };
+  // A write-capable specialist (evaled on the serving provider). Its high_write routes through the
+  // D13/D14 gate in the orchestrator (runWriteAgent), not the plain runner.
+  const writer: AgentDef = {
+    name: "writer",
+    systemPrompt: "Writes tasks.",
+    tools: { "tasks.create": "high_write" },
+    maxSteps: 3,
+    maxToolCalls: 2,
+    evaledProviders: ["gemini"],
+  };
+  const withWriter: OrchestratorDef = { ...def, specialists: { ...def.specialists, writer } };
+
+  it("a high_write suspends the WHOLE goal AND files a durable approval (D14 + write-routing)", async () => {
+    const calls: string[] = [];
     const deps: AgentDeps = {
       complete: async (prompt) =>
         prompt.includes("You coordinate specialist agents")
           ? `{"assign": {"specialist": "writer", "task": "create a task"}}`
           : `{"tool": "tasks.create", "args": {"title": "x"}}`,
-      callTool: async () => "created",
+      callTool: async (name) => {
+        calls.push(name);
+        return name === "approvals.request" ? JSON.stringify({ id: "ap-1" }) : "created";
+      },
+      lastProvider: () => "gemini",
     };
-    await expect(runOrchestrator(withWriter, "g", envelope, deps)).rejects.toThrow(ApprovalRequiredError);
+    // Served by gemini (evaled) → the high_write is attempted → gate suspends → approval filed.
+    await expect(
+      runOrchestrator(withWriter, "g", envelope, deps, { tenantId: "co-1", servingProvider: "gemini" }),
+    ).rejects.toThrow(GoalSuspendedError);
+    expect(calls).toContain("approvals.request"); // durable record created
+    expect(calls).not.toContain("tasks.create"); // the write itself never executed
+  });
+
+  it("D13: on an un-evaled provider the write specialist runs read-only; the goal still completes", async () => {
+    let plannerTurn = 0;
+    const calls: string[] = [];
+    const deps: AgentDeps = {
+      complete: async (prompt) => {
+        if (prompt.includes("You coordinate specialist agents")) {
+          plannerTurn++;
+          return plannerTurn === 1 ? `{"assign": {"specialist": "writer", "task": "triage"}}` : `{"final": "done (read-only)"}`;
+        }
+        return `{"final": "nothing to change"}`; // stays within reads
+      },
+      callTool: async (name) => {
+        calls.push(name);
+        return "[]";
+      },
+      lastProvider: () => "claude", // NOT in writer.evaledProviders
+    };
+    const run = await runOrchestrator(withWriter, "g", envelope, deps, { tenantId: "co-1" });
+    expect(run.outcome).toContain("done");
+    expect(run.blackboard[0].summary).toMatch(/read-only/);
+    expect(calls).not.toContain("tasks.create");
   });
 });

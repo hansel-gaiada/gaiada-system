@@ -27,7 +27,7 @@ func poolFromEnv(t *testing.T, env string) *pgxpool.Pool {
 	if c == "" {
 		t.Skipf("%s not set", env)
 	}
-	p, err := pgxpool.New(context.Background(), c)
+	p, err := db.NewPool(context.Background(), c) // production pool: sets app.sync_context for the site_subscriptions ACL (0015)
 	if err != nil {
 		t.Fatalf("pool %s: %v", env, err)
 	}

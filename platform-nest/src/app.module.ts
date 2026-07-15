@@ -10,6 +10,7 @@ import { CustomFieldsController } from "./core/custom-fields.controller";
 import { AuthzCheckController } from "./core/authz-check.controller";
 import { ClientWorkController } from "./core/client-work.controller";
 import { CollabController } from "./core/collab.controller";
+import { AutomationApprovalsController } from "./core/automation-approvals.controller";
 import { FilesController } from "./core/files.controller";
 import { AdminIdentityController } from "./admin/admin-identity.controller";
 import { CompanyAdminController } from "./admin/company-admin.controller";
@@ -20,7 +21,7 @@ import { AgencyController } from "./modules/agency/agency.controller";
 @Module({
   controllers: [
     HealthController, IdentityController, CoreController, TeamsController, CustomFieldsController,
-    AuthzCheckController, ClientWorkController, CollabController, FilesController, AdminIdentityController,
+    AuthzCheckController, ClientWorkController, CollabController, AutomationApprovalsController, FilesController, AdminIdentityController,
     CompanyAdminController, AdminSystemsController, IntelligenceController,
     // Vertical modules (compiled-in; per-tenant enable gate at the controller).
     AgencyController,

@@ -14,12 +14,17 @@
 export const AUTOMATION_ALLOWLIST: Record<string, readonly string[]> = {
   // Template / read-only glue
   "wf:summarize-via-mcp": ["llm.summarize"],
-  // CRON read/notify flows (§2)
-  "wf:stale-approval-chaser": ["agency.pendingApprovals"],
-  "wf:compliance-gate-nag": ["compliance.gates", "llm.summarize"],
-  // Event-triggered LOW-impact write flows (§2) — writes still pass the impact gate
-  "wf:new-client-seed": ["projects.create", "tasks.create", "notify"],
-  "wf:task-sla": ["tasks.list", "tasks.update"],
+  // CRON read/notify flows (§2). `notify` raises an in-app notification for the ops lead
+  // (LOW write; Cerbos gates create to company_admin/manager — the service-account roles below).
+  "wf:stale-approval-chaser": ["agency.pendingApprovals", "notify"],
+  "wf:compliance-gate-nag": ["compliance.gates", "llm.summarize", "notify"],
+  // Event notify flow (§2): org_structure.updated -> in-app notification (no external channel).
+  "wf:org-updated-notify": ["notify"],
+  // Event-triggered LOW-impact write flows (§2) — writes still pass the impact gate.
+  // `approvals.request` lets a write workflow file a human-approval suspension (§3/D14) when the
+  // gate refuses a medium+/unclassified tool; it is itself a LOW write (records an intent only).
+  "wf:new-client-seed": ["projects.create", "tasks.create", "notify", "approvals.request"],
+  "wf:task-sla": ["tasks.list", "tasks.update", "approvals.request"],
   // Webhook ingest (§ step 4) — inbound lead/form -> a task in the intake project. LOW write.
   // Kept inert by the workflow's INGEST_ENABLED gate until legal Gate 1 + the day-one gate pass.
   "wf:inbound-lead-intake": ["tasks.create"],

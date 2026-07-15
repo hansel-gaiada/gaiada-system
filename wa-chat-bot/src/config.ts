@@ -63,6 +63,9 @@ export const config = {
   telegramWebhookSecret: process.env.TELEGRAM_WEBHOOK_SECRET ?? "",
   // Store: Postgres when DATABASE_URL is set, else the local file store.
   databaseUrl: process.env.DATABASE_URL ?? "",
+  // Schema DDL runs as the OWNER (bot_owner) via this DSN; runtime uses the restricted bot_app on
+  // DATABASE_URL. Empty -> DDL falls back to DATABASE_URL (dev, where owner==runtime).
+  migrateDatabaseUrl: process.env.MIGRATE_DATABASE_URL ?? "",
   // OpenBao (key custody, 5a.10). Both set -> transit engine; else LocalKms dev fallback.
   baoUrl: process.env.BAO_URL ?? "",
   baoToken: process.env.BAO_TOKEN ?? "",

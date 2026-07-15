@@ -1,0 +1,77 @@
+{
+  "name": "task-sla (CRON)",
+  "meta": { "description": "Every 6h: list a project's tasks via MCP and escalate any that are past due and not done (priority -> high) with a low-impact tasks.update. Scoped identity wf:task-sla -> [tasks.list, tasks.update]. Single-project by SLA_PROJECT_ID (tenant-wide sweep is target-state — needs a tenant-scoped tasks.list tool). Env: HUB_SERVICE_TOKEN, AGENCY_TENANT_ID, SLA_PROJECT_ID." },
+  "nodes": [
+    {
+      "parameters": { "rule": { "interval": [{ "field": "hours", "hoursInterval": 6 }] } },
+      "name": "Every 6 hours",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://mcp-hub:3003/mcp",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{ $env.HUB_SERVICE_TOKEN }}" },
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "Accept", "value": "application/json, text/event-stream" },
+            { "name": "x-obo-provider", "value": "n8n" },
+            { "name": "x-obo-external-id", "value": "wf:task-sla" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", id: 1, method: \"tools/call\", params: { name: \"tasks.list\", arguments: { tenantId: $env.AGENCY_TENANT_ID, projectId: $env.SLA_PROJECT_ID } } }) }}",
+        "options": { "response": { "response": { "responseFormat": "text" } } }
+      },
+      "name": "MCP tools/call tasks.list",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [220, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse the hub's SSE-framed JSON-RPC reply, then emit one item per task that has\n// breached SLA: past its due date, not already done/cancelled, and not already high priority.\nconst raw = $input.first().json.data ?? $input.first().json.body ?? '';\nconst line = String(raw).split('\\n').find((l) => l.startsWith('data:')) ?? '';\nconst rpc = JSON.parse(line.slice(5).trim());\nif (rpc.result?.isError) throw new Error(rpc.result.content?.[0]?.text ?? 'tool error');\nconst tasks = JSON.parse(rpc.result?.content?.[0]?.text ?? '[]');\nif (!Array.isArray(tasks)) return [];\nconst today = new Date().toISOString().slice(0, 10);\nconst done = new Set(['done', 'delivered', 'accepted', 'cancelled']);\nconst overdue = tasks.filter((t) => t.dueDate && String(t.dueDate).slice(0, 10) < today && !done.has(String(t.status)) && String(t.priority) !== 'high');\nreturn overdue.map((t) => ({ json: { taskId: t.id } }));"
+      },
+      "name": "Find overdue (skip if none)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [440, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://mcp-hub:3003/mcp",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{ $env.HUB_SERVICE_TOKEN }}" },
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "Accept", "value": "application/json, text/event-stream" },
+            { "name": "x-obo-provider", "value": "n8n" },
+            { "name": "x-obo-external-id", "value": "wf:task-sla" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", id: 1, method: \"tools/call\", params: { name: \"tasks.update\", arguments: { tenantId: $env.AGENCY_TENANT_ID, taskId: $json.taskId, priority: \"high\" } } }) }}",
+        "options": { "response": { "response": { "responseFormat": "text" } } }
+      },
+      "name": "MCP tools/call tasks.update (escalate)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [660, 0]
+    }
+  ],
+  "connections": {
+    "Every 6 hours": { "main": [[{ "node": "MCP tools/call tasks.list", "type": "main", "index": 0 }]] },
+    "MCP tools/call tasks.list": { "main": [[{ "node": "Find overdue (skip if none)", "type": "main", "index": 0 }]] },
+    "Find overdue (skip if none)": { "main": [[{ "node": "MCP tools/call tasks.update (escalate)", "type": "main", "index": 0 }]] }
+  },
+  "settings": {},
+  "pinData": {}
+}

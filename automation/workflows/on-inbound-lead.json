@@ -1,13 +1,23 @@
 {
   "name": "on inbound lead -> task (WEBHOOK ingest, GATED)",
-  "meta": { "description": "Out-of-band intake: POST /webhook/ingest/lead {source,subject,body} -> creates a task in the intake project via MCP (LOW write). GATED: stays inert unless INGEST_ENABLED=1 — do NOT enable until legal Gate 1 + the day-one technical gate are green (no real personal data before then). Scoped identity wf:inbound-lead-intake -> [tasks.create]. Env: INGEST_ENABLED, INGEST_SECRET, HUB_SERVICE_TOKEN, AGENCY_TENANT_ID, INTAKE_PROJECT_ID." },
+  "meta": {
+    "description": "Out-of-band intake: POST /webhook/ingest/lead {source,subject,body} -> creates a task in the intake project via MCP (LOW write). GATED: stays inert unless INGEST_ENABLED=1 — do NOT enable until legal Gate 1 + the day-one technical gate are green (no real personal data before then). Scoped identity wf:inbound-lead-intake -> [tasks.create]. Env: INGEST_ENABLED, INGEST_SECRET, HUB_SERVICE_TOKEN, AGENCY_TENANT_ID, INTAKE_PROJECT_ID."
+  },
   "nodes": [
     {
-      "parameters": { "httpMethod": "POST", "path": "ingest/lead", "responseMode": "responseNode" },
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ingest/lead",
+        "responseMode": "responseNode"
+      },
       "name": "Webhook: POST /webhook/ingest/lead",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
-      "position": [0, 0]
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "4238e7b1-b152-483c-bccd-52bcac10c645"
     },
     {
       "parameters": {
@@ -16,7 +26,10 @@
       "name": "Gate + build title",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [220, 0]
+      "position": [
+        220,
+        0
+      ]
     },
     {
       "parameters": {
@@ -25,35 +38,95 @@
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
-            { "name": "Authorization", "value": "=Bearer {{ $env.HUB_SERVICE_TOKEN }}" },
-            { "name": "Content-Type", "value": "application/json" },
-            { "name": "Accept", "value": "application/json, text/event-stream" },
-            { "name": "x-obo-provider", "value": "n8n" },
-            { "name": "x-obo-external-id", "value": "wf:inbound-lead-intake" }
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.HUB_SERVICE_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json, text/event-stream"
+            },
+            {
+              "name": "x-obo-provider",
+              "value": "n8n"
+            },
+            {
+              "name": "x-obo-external-id",
+              "value": "wf:inbound-lead-intake"
+            }
           ]
         },
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", id: 1, method: \"tools/call\", params: { name: \"tasks.create\", arguments: { tenantId: $env.AGENCY_TENANT_ID, projectId: $env.INTAKE_PROJECT_ID, title: $json.title } } }) }}",
-        "options": { "response": { "response": { "responseFormat": "text" } } }
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
       },
       "name": "MCP tasks.create (low write)",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [440, 0]
+      "position": [
+        440,
+        0
+      ]
     },
     {
-      "parameters": { "respondWith": "json", "responseBody": "={{ JSON.stringify({ ok: true }) }}" },
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: true }) }}"
+      },
       "name": "Respond 200",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
-      "position": [660, 0]
+      "position": [
+        660,
+        0
+      ]
     }
   ],
   "connections": {
-    "Webhook: POST /webhook/ingest/lead": { "main": [[{ "node": "Gate + build title", "type": "main", "index": 0 }]] },
-    "Gate + build title": { "main": [[{ "node": "MCP tasks.create (low write)", "type": "main", "index": 0 }]] },
-    "MCP tasks.create (low write)": { "main": [[{ "node": "Respond 200", "type": "main", "index": 0 }]] }
+    "Webhook: POST /webhook/ingest/lead": {
+      "main": [
+        [
+          {
+            "node": "Gate + build title",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gate + build title": {
+      "main": [
+        [
+          {
+            "node": "MCP tasks.create (low write)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MCP tasks.create (low write)": {
+      "main": [
+        [
+          {
+            "node": "Respond 200",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
   },
   "settings": {},
   "pinData": {}

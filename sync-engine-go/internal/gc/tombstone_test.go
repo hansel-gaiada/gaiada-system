@@ -19,7 +19,7 @@ func testPool(t *testing.T) *pgxpool.Pool {
 	if c == "" {
 		t.Skip("DATABASE_URL_TEST not set")
 	}
-	p, err := pgxpool.New(context.Background(), c)
+	p, err := db.NewPool(context.Background(), c) // production pool: sets app.sync_context for the site_subscriptions ACL (0015)
 	if err != nil {
 		t.Fatalf("pool: %v", err)
 	}

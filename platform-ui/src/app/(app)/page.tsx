@@ -62,18 +62,20 @@ export default async function MyWork() {
           <ApprovalsPanel items={approvals} decide={decideApproval} />
         </Card>
 
-        <Card title="Assigned to you" style={{ gridArea: "table", padding: "22px 0 8px" }}>
+        <Card title="Assigned to you" style={{ gridArea: "table", padding: "22px 22px 8px" }}>
           {tasks.length === 0 ? (
             <div className="dash-empty"><p>No open tasks assigned to you in this company.</p></div>
           ) : (
-            <HairlineTable
-              tcols="2.2fr 1.2fr 1fr 1fr"
-              columns={[{ label: "Task" }, { label: "Project" }, { label: "Due" }, { label: "Status", align: "right" }]}
-              rows={tasks.slice(0, 8).map((t) => [
-                t.title, t.project_name, t.due_date ? t.due_date.slice(0, 10) : "—",
-                <StatusBadge key={t.id} label={t.status ?? "Open"} />,
-              ])}
-            />
+            <div style={{ margin: "0 -22px" }}>
+              <HairlineTable
+                tcols="2.2fr 1.2fr 1fr 1fr"
+                columns={[{ label: "Task" }, { label: "Project" }, { label: "Due" }, { label: "Status", align: "right" }]}
+                rows={tasks.slice(0, 8).map((t) => [
+                  t.title, t.project_name, t.due_date ? t.due_date.slice(0, 10) : "—",
+                  <StatusBadge key={t.id} label={t.status ?? "Open"} />,
+                ])}
+              />
+            </div>
           )}
         </Card>
 

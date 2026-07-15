@@ -31,7 +31,8 @@ export async function createUser(email: string, name = email.split("@")[0], titl
 export async function addMembership(tenantId: string, userId: string): Promise<void> {
   await withTenants([tenantId], (c) =>
     c.query(
-      `INSERT INTO company_memberships (id, tenant_id, user_id, origin_site) VALUES ($1, $2, $3, $4)`,
+      `INSERT INTO company_memberships (id, tenant_id, user_id, origin_site) VALUES ($1, $2, $3, $4)
+       ON CONFLICT (tenant_id, user_id) DO NOTHING`,
       [newId(), tenantId, userId, site()],
     ),
   );

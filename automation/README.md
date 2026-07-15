@@ -33,6 +33,36 @@ Today's write tools (`projects.create`, `tasks.create`, `tasks.update`) are all 
 > scoping is by the OBO `wf:<name>` id. True per-workflow *credentials* (RBAC-minted, short-lived)
 > are target-state — see the WS4 plan §8.
 
+### The impact-gate: suspending a write for human approval (§3/D14)
+
+When the gate refuses a write, the hub reply is a `tools/call` result with `isError: true` and a
+`text` that starts with `suspend:`. A workflow that calls any **medium+/unclassified** write must
+detect that and, instead of failing, file a pending approval via the low-impact `approvals.request`
+tool — which lands in the platform's tenant-scoped `automation_approvals` inbox (FORCE RLS,
+Cerbos-gated) for a human to approve/reject in **platform-ui → Approvals**. Drop this Code node
+between the write attempt and its parse step:
+
+```js
+// After an MCP write call, before treating the reply as success:
+const raw  = $input.first().json.data ?? $input.first().json.body ?? '';
+const line = String(raw).split('\n').find((l) => l.startsWith('data:')) ?? '';
+const rpc  = JSON.parse(line.slice(5).trim());
+const text = rpc.result?.content?.[0]?.text ?? '';
+if (rpc.result?.isError && text.startsWith('suspend:')) {
+  // Route to an `approvals.request` MCP node instead of proceeding:
+  return [{ json: { suspended: true, toolName: '<the tool>', toolArgs: { /* intended args */ },
+                    impact: 'medium', reason: text } }];
+}
+return [{ json: { suspended: false /* …parsed result… */ } }];
+```
+
+The `approvals.request` node is an ordinary hub `tools/call` (same OBO headers) with
+`params.name = "approvals.request"` and args `{ tenantId, workflowId: "wf:<name>", toolName,
+toolArgs, impact, reason }`. Today all shipped write tools are `low`, so no live workflow hits this
+branch — but the surface is built and tested end-to-end, ready the moment a `medium+` tool lands.
+**v1 records + decides; it does not auto-resume the approved call** (re-driving it is a Temporal
+concern the spec defers — the approved row is the durable artifact a resume step would read).
+
 ## Run
 
 ```bash
@@ -50,16 +80,17 @@ Import each JSON in the n8n UI and activate. They read the hub token + tenant/no
 as **container env vars** (`$env.<NAME>`), all pre-wired through `.env` → compose, so there's
 nothing to hand-edit in the UI — just fill the values in `.env` and `docker compose up -d`:
 `HUB_SERVICE_TOKEN`, `AGENCY_TENANT_ID`, `N8N_BRIDGE_SECRET`, `NOTIFY_WEBHOOK_URL`,
-`NOTIFY_USER_ID`, `INTAKE_PROJECT_ID`, `BOT_URL`, `BOT_ADMIN_TOKEN`, `INGEST_ENABLED`,
-`INGEST_SECRET` (see `.env.example` for what each drives).
+`NOTIFY_USER_ID`, `INTAKE_PROJECT_ID`, `SLA_PROJECT_ID`, `BOT_URL`, `BOT_ADMIN_TOKEN`,
+`INGEST_ENABLED`, `INGEST_SECRET` (see `.env.example` for what each drives).
 
 | File | Trigger | Does | Scoped identity |
 |---|---|---|---|
 | `summarize-via-mcp.json` | `POST /webhook/summarize` | hub `llm.summarize` → return summary (the base pattern) | `wf:summarize-via-mcp` |
-| `stale-approval-chaser.json` | CRON hourly | hub `agency.pendingApprovals` → nudge `NOTIFY_WEBHOOK_URL` (skips if none) | `wf:stale-approval-chaser` |
-| `compliance-gate-nag.json` | CRON daily 09:00 | hub `compliance.gates` → reminder if any gate still open | `wf:compliance-gate-nag` |
+| `stale-approval-chaser.json` | CRON hourly | hub `agency.pendingApprovals` → if any, in-app notify the ops lead (hub `notify`) | `wf:stale-approval-chaser` |
+| `task-sla.json` | CRON every 6h | hub `tasks.list` → escalate overdue-and-unfinished tasks (`tasks.update` priority→high, LOW write); single project via `SLA_PROJECT_ID` | `wf:task-sla` |
+| `compliance-gate-nag.json` | CRON daily 09:00 | hub `compliance.gates` → if any open, in-app notify the ops lead (hub `notify`) | `wf:compliance-gate-nag` |
 | `digest-fanout.json` | CRON 12:00 & 18:00 | trigger the bot's digest sweep on its admin API | — (bot admin, no hub) |
-| `on-org-updated-notify.json` | event bridge `POST /webhook/ev/org_structure.updated` | verify bridge secret → notify | — (no hub call) |
+| `on-org-updated-notify.json` | event bridge `POST /webhook/ev/org_structure.updated` | verify bridge secret → in-app notify the ops lead (hub `notify`) | `wf:org-updated-notify` |
 | `on-client-created-seed.json` | event bridge `POST /webhook/ev/client.created` | seed onboarding project + kickoff task, then notify the ops lead (three LOW-impact writes) | `wf:new-client-seed` |
 | `on-inbound-lead.json` | `POST /webhook/ingest/lead` **(gated)** | inbound lead → intake task; inert unless `INGEST_ENABLED=1` (legal Gate 1) | `wf:inbound-lead-intake` |
 
@@ -77,6 +108,29 @@ accounts above) — otherwise the hub denies it.
 Note: workflows call the hub at `http://mcp-hub:3003`. On the VPS stack n8n shares the network
 and that resolves natively; standalone, the compose adds `extra_hosts: mcp-hub:host-gateway`
 so the same URL reaches a hub on the host's port 3003 — no workflow edits either way.
+
+## Notifications (internal, no external channel)
+
+The notify flows (`stale-approval-chaser`, `compliance-gate-nag`, `on-org-updated-notify`) raise
+an **in-app notification** for `NOTIFY_USER_ID` via the hub **`notify`** tool → `POST
+/api/:t/notifications` → the platform's per-user inbox (the bell + `/notifications` page in
+platform-ui). No Slack/Teams/webhook is required. Cerbos gates `notification.create` to
+`company_admin`/`manager`, so those workflows' **service accounts are granted `manager`** (or
+`company_admin` for the compliance flow) in `seed:automation`, and `notify` is on each one's hub
+allow-list. `NOTIFY_WEBHOOK_URL` is now optional — only for a custom flow you add that posts
+externally.
+
+## Deferred flows (off by design — activate when their dependency exists)
+
+- **`digest-fanout`** — needs the **wa-chat-bot** running: it calls the bot's admin API
+  (`BOT_URL` + `BOT_ADMIN_TOKEN`) to trigger the categorized 12:00/18:00 digest sweep to WhatsApp/
+  Telegram groups. This is inherently a bot function (chat-group delivery), not something the
+  in-app notifier replaces. Activate once the bot is deployed (its WAHA number scanned or Telegram
+  token set — see the bot README; blocked on infra, not on this stack).
+- **`on-inbound-lead`** — kept inert by `INGEST_ENABLED=false`. This is a **deliberate legal gate**
+  (Gate 1: DPIA/LIA/notices in `legal/`); inbound-lead ingestion must not run until legal sign-off
+  **and** the day-one technical gate are both green. The flow is built + scoped (`wf:inbound-lead-intake`
+  → `tasks.create` into `INTAKE_PROJECT_ID`); flip `INGEST_ENABLED=true` only after Gate 1 clears.
 
 ## Event → n8n bridge (business-event triggers)
 

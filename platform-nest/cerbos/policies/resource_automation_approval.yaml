@@ -1,0 +1,27 @@
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: automation_approval
+  importDerivedRoles: ["gaiada_scopes"]
+  variables:
+    import: ["gaiada_common"]
+  rules:
+    - actions: ["*"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["platform_admin"]
+    # Filing a suspension is a low-privilege ask ("please review this action"): any scoped
+    # automation service account (member/manager/company_admin) or an elevated human may create.
+    - actions: ["create"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin", "manager", "member"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    # Reading the inbox is elevated (it exposes intended writes across the tenant's workflows).
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin", "manager", "group_executive"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    # Deciding (approve/reject) is a human governance action — company admins and owners only.
+    - actions: ["decide"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin", "group_executive"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }

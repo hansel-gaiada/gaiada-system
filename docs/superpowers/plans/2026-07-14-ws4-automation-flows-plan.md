@@ -3,8 +3,9 @@
 **Date:** 2026-07-14
 **Status:** Steps 1–4 BUILT 2026-07-15 (foundation + CRON flows + event→n8n bridge + event flows +
 gated webhook ingest), plus the automation service-principal + notify tool + compliance-gate/digest
-paths. All §8 tool-path gaps closed. Remaining: Temporal (deferred by design) + per-workflow
-RBAC-minted creds (target-state).
+paths, **plus the approvals suspension surface (§3/D14) — WS4 is now code-complete.** All §8
+tool-path gaps closed. Remaining is target-state only: Temporal (deferred by design) + per-workflow
+RBAC-minted short-lived creds + auto-resume of an approved suspension (a Temporal concern).
 **Parent spec:** `../specs/2026-07-05-ws4-automation-orchestration.md`
 **Depends on:** WS2 mcp-hub (tools + OBO audit), WS1 event backbone (`platform-nest/src/events/`),
 WS1 RBAC/Cerbos (service-account principals), WS3 gateway (via `llm.*` hub tools).
@@ -190,20 +191,54 @@ In `admin-systems.controller.ts`, extend the `automation` branch beyond the `/he
 - **Deploy wiring for the live flows:** set `N8N_BRIDGE_EVENTS`/`N8N_BRIDGE_ENTITY_TYPES` to include
   `client.created`/`client`, run `seed:agency` → `seed:automation`, and set the n8n workflow env
   (`AGENCY_TENANT_ID`, `INTAKE_PROJECT_ID`, `NOTIFY_USER_ID`, `BOT_URL`/`BOT_ADMIN_TOKEN`).
-- **Approvals suspension surface:** the hub returns a `suspend: …` reason for medium+/unclassified
-  writes, but no workflow-side "create a pending approval" step exists yet — reuse the agency approvals
-  inbox (preferred) vs a dedicated `automation_approvals` store.
+- **Bridge n8n dedupe — ✅ DONE 2026-07-15.** Both event workflows (`on-client-created-seed`,
+  `on-org-updated-notify`) now dedupe on the envelope `id` via n8n workflow static data + an IF branch
+  that always responds 200 (so the at-least-once bridge still gets its ack on a duplicate). This closes a
+  real correctness gap — a redelivered `client.created` would otherwise double-seed onboarding.
+- **`wf:task-sla` service account — ✅ DONE 2026-07-15.** The task-SLA flow was allow-listed + shipped
+  (`task-sla.json`) but had no seeded principal (would 403 as anonymous). Added to `seed:automation`
+  (member role — `resource_task` lets member update in-tenant tasks). Proven in `automation.test.ts`.
+- **Approvals suspension surface — ✅ BUILT 2026-07-15 (supersedes the earlier "deliberately not built"
+  call).** An earlier pass deferred this as speculative-YAGNI (all current write tools are `low`, so
+  nothing triggers a `suspend:` today). Reconsidered under the full-fidelity mandate + the explicit
+  "finish WS4" ask: the write-safety spine (§3/D14) is incomplete without a durable place for a suspended
+  write to land, so the surface is now built and tested end-to-end — the one thing missing was NOT the
+  trigger (that arrives with the first medium+ tool) but the mechanism, which shouldn't be improvised
+  under pressure later. What shipped:
+  - A **dedicated** `automation_approvals` store — migration `0014_automation_approvals.sql`, FORCE-RLS
+    tenant-isolated (NOT the agency approvals table, which is campaign/asset-bound; a cross-cutting
+    automation concern deserves its own store).
+  - `platform-nest` `src/core/automation-approvals.controller.ts`: `POST /api/:t/automation-approvals`
+    (file a suspension), `GET` (pending inbox), `POST .../:id/decide` (approve|reject). Cerbos
+    `resource_automation_approval.yaml`: automation service accounts + members may **create**; elevated
+    humans **read**; only `company_admin`/`group_executive` may **decide**.
+  - mcp-hub `approvals.request` tool (LOW write — it records an *intent*, never the gated write) so the
+    workflow files the suspension **through the hub** (backbone rule preserved: n8n → MCP OBO → platform).
+    Added to the write workflows' allow-list (`wf:new-client-seed`, `wf:task-sla`).
+  - The reusable **impact-gate Code-node snippet** (detect `suspend:` → route to `approvals.request`) is
+    documented in `automation/README.md`; live workflows stay clean (no dead branch) until a medium+ tool
+    exists. Verified: hub tsc + 14 tests; platform tsc + `automation-approvals.test.ts` (4) live PG+Cerbos+RLS.
+  - **Still deferred (Temporal):** *auto-resuming* an approved suspension (re-driving the tool call) — v1
+    records + decides; the approved row is the durable artifact a future resume step reads.
 - **Per-workflow service-account minting:** v1 uses seeded static service users + verified links; the
   shared hub token still authenticates n8n-as-a-service. RBAC-minted short-lived per-workflow creds are
   target-state (spec §3).
-- **Bridge n8n dedupe:** workflows should dedupe on envelope `id` (bridge is at-least-once); not yet
-  added to the shipped event workflows.
-- **RESOLVED (pre-existing, not WS4):** `rls.test.ts` was failing on `site_subscriptions`. Investigated:
-  it is the central node→tenant ACL and is **intentionally not tenant-RLS'd** (0013 comment; the Go sync
-  engine reads it with NO tenant context — `acl.go` `WHERE node_id=$1`, `tombstone.go` `SELECT DISTINCT
-  tenant_id`), so a tenant-isolation policy would return zero rows and break the ACL/GC. The blanket
-  invariant test predated the sync tables. Fix: encoded the precise invariant — `rls.test.ts` now has a
-  documented `RLS_EXEMPT_TENANT_TABLES` set (with a guard that each exempt name still exists). Full suite
-  green (141). Residual (noted, not fixed here): in the shared DB the platform app role has blanket DML
-  on sync-engine tables incl. this ACL; the migration relies on it being "central-operator-only"
-  operationally, not by grant — a privileges-hardening item for the sync-engine/infra owner.
+- **`site_subscriptions` D5 gap — ✅ FIXED + VERIFIED 2026-07-15 (was pre-existing, not WS4).**
+  `rls.test.ts` flagged that this table (a `tenant_id` column) had no FORCE RLS. It is the central
+  node→tenant ACL and is **not tenant-isolated** — the Go sync engine reads it with NO tenant context
+  (`acl.go` `WHERE node_id=$1`, `tombstone.go` `SELECT DISTINCT tenant_id`), so a tenant-isolation policy
+  would return zero rows and break the ACL/GC. But leaving it with NO RLS let the shared `gaiada_app`
+  owner (which also runs the platform) read/tamper with the sync ACL, and `gaiada_app` owns the DB so
+  `REVOKE` can't bind it. **Fix (migration `0015_site_subscriptions_rls.sql`):** FORCE RLS gated on a
+  session GUC `app.sync_context='on'` that ONLY the sync engine opts into (`sync-engine-go`
+  `internal/db.NewPool` now sets it per connection via `AfterConnect`). The platform never sets it →
+  fail-closed out of the ACL (zero rows / RLS-violation on write); the sync engine's context-free reads
+  still work. This restores the clean invariant (the test's `RLS_EXEMPT_TENANT_TABLES` exemption was
+  removed) **and** closes the exposure — a real barrier against the shared role, not just accidental.
+  **Verified on WSL (Go 1.26.5):** manual gate check (0 rows without ctx / 1 with / INSERT-without-ctx
+  → RLS violation) + the **full `sync-engine-go` suite green** against a NOBYPASSRLS role (bootstrap,
+  server, gc, protocol, 2-DB chaos harness) + `go vet` clean; platform full suite green (146). The test
+  helpers were switched from raw `pgxpool.New` to the production `db.NewPool` so they exercise the real
+  connection setup. **Note (still target-state):** a *hard* boundary against a compromised platform would
+  need a separate DB role (platform + sync-central currently share `gaiada_app`); the GUC gate is
+  defense-in-depth within the shared-role model, not a role split.

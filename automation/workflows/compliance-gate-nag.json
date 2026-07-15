@@ -1,6 +1,6 @@
 {
   "name": "compliance-gate-nag (CRON)",
-  "meta": { "description": "Daily: read the company's compliance gates via MCP; if any are still open/in_progress, post a reminder to the notify channel. Read-only. Scoped identity wf:compliance-gate-nag -> [compliance.gates, llm.summarize]; the platform gates the read to company_admin (the service account is granted that role). Env: HUB_SERVICE_TOKEN, AGENCY_TENANT_ID, NOTIFY_WEBHOOK_URL." },
+  "meta": { "description": "Daily: read the company's compliance gates via MCP; if any are still open/in_progress, raise an IN-APP notification for the ops lead via the hub `notify` tool (no external channel). Scoped identity wf:compliance-gate-nag -> [compliance.gates, llm.summarize, notify]; the platform gates the read + notify to company_admin (the service account is granted that role). Env: HUB_SERVICE_TOKEN, AGENCY_TENANT_ID, NOTIFY_USER_ID." },
   "nodes": [
     {
       "parameters": { "rule": { "interval": [{ "field": "cronExpression", "expression": "0 9 * * *" }] } },
@@ -35,9 +35,9 @@
     },
     {
       "parameters": {
-        "jsCode": "// Parse the SSE-framed reply; nag only if a gate is still open/in_progress.\nconst raw = $input.first().json.data ?? $input.first().json.body ?? '';\nconst line = String(raw).split('\\n').find((l) => l.startsWith('data:')) ?? '';\nconst rpc = JSON.parse(line.slice(5).trim());\nif (rpc.result?.isError) throw new Error(rpc.result.content?.[0]?.text ?? 'tool error');\nconst gates = JSON.parse(rpc.result?.content?.[0]?.text ?? '[]');\nconst open = (Array.isArray(gates) ? gates : []).filter((g) => g.status === 'open' || g.status === 'in_progress');\nif (open.length === 0) return []; // all clear -> stop\nconst lines = open.map((g) => `\\u2022 ${g.key}: ${g.status}`).join('\\n');\nreturn [{ json: { text: `\\ud83d\\udea7 ${open.length} compliance gate(s) still open:\\n${lines}` } }];"
+        "jsCode": "// Parse the SSE-framed reply; nag only if a gate is still open/in_progress.\nconst raw = $input.first().json.data ?? $input.first().json.body ?? '';\nconst line = String(raw).split('\\n').find((l) => l.startsWith('data:')) ?? '';\nconst rpc = JSON.parse(line.slice(5).trim());\nif (rpc.result?.isError) throw new Error(rpc.result.content?.[0]?.text ?? 'tool error');\nconst gates = JSON.parse(rpc.result?.content?.[0]?.text ?? '[]');\nconst open = (Array.isArray(gates) ? gates : []).filter((g) => g.status === 'open' || g.status === 'in_progress');\nif (open.length === 0) return []; // all clear -> stop\nconst keys = open.map((g) => `${g.key}:${g.status}`);\nreturn [{ json: { count: open.length, keys } }];"
       },
-      "name": "Build reminder (skip if clear)",
+      "name": "Build payload (skip if clear)",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [440, 0]
@@ -45,21 +45,42 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "={{ $env.NOTIFY_WEBHOOK_URL }}",
+        "url": "http://mcp-hub:3003/mcp",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{ $env.HUB_SERVICE_TOKEN }}" },
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "Accept", "value": "application/json, text/event-stream" },
+            { "name": "x-obo-provider", "value": "n8n" },
+            { "name": "x-obo-external-id", "value": "wf:compliance-gate-nag" }
+          ]
+        },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ text: $json.text }) }}"
+        "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", id: 1, method: \"tools/call\", params: { name: \"notify\", arguments: { tenantId: $env.AGENCY_TENANT_ID, recipientId: $env.NOTIFY_USER_ID, type: \"compliance_gates_open\", payload: { count: $json.count, keys: $json.keys } } } }) }}",
+        "options": { "response": { "response": { "responseFormat": "text" } } }
       },
-      "name": "Notify channel",
+      "name": "MCP notify (in-app)",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [660, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json.data ?? $input.first().json.body ?? '';\nconst line = String(raw).split('\\n').find((l) => l.startsWith('data:')) ?? '';\nconst rpc = JSON.parse(line.slice(5).trim());\nif (rpc.result?.isError) throw new Error(rpc.result.content?.[0]?.text ?? 'notify failed');\nreturn [{ json: { ok: true } }];"
+      },
+      "name": "Parse notify result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [880, 0]
     }
   ],
   "connections": {
     "Daily 09:00": { "main": [[{ "node": "MCP tools/call compliance.gates", "type": "main", "index": 0 }]] },
-    "MCP tools/call compliance.gates": { "main": [[{ "node": "Build reminder (skip if clear)", "type": "main", "index": 0 }]] },
-    "Build reminder (skip if clear)": { "main": [[{ "node": "Notify channel", "type": "main", "index": 0 }]] }
+    "MCP tools/call compliance.gates": { "main": [[{ "node": "Build payload (skip if clear)", "type": "main", "index": 0 }]] },
+    "Build payload (skip if clear)": { "main": [[{ "node": "MCP notify (in-app)", "type": "main", "index": 0 }]] },
+    "MCP notify (in-app)": { "main": [[{ "node": "Parse notify result", "type": "main", "index": 0 }]] }
   },
   "settings": {},
   "pinData": {}

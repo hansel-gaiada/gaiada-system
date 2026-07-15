@@ -1,0 +1,9 @@
+# Local dev override — layer on top of docker-compose.vps.yml:
+#   docker compose -f docker-compose.vps.yml -f docker-compose.local.yml up -d --build mcp-hub
+# Publishes mcp-hub on the host so the separate gaiada-automation n8n stack (which maps
+# mcp-hub -> host-gateway) can reach it. Internal-only in the committed VPS compose by design.
+name: gaiada
+services:
+  mcp-hub:
+    ports:
+      - "127.0.0.1:3003:3003"

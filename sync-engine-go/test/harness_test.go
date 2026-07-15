@@ -25,11 +25,11 @@ func twoPools(t *testing.T) (*pgxpool.Pool, *pgxpool.Pool) {
 	if a == "" || c == "" {
 		t.Skip("DATABASE_URL_SITE_A / DATABASE_URL_CENTRAL not set — run docker-compose.chaos.yml")
 	}
-	pa, err := pgxpool.New(context.Background(), a)
+	pa, err := db.NewPool(context.Background(), a) // production pool: sets app.sync_context for the site_subscriptions ACL (0015)
 	if err != nil {
 		t.Fatalf("site-a pool: %v", err)
 	}
-	pc, err := pgxpool.New(context.Background(), c)
+	pc, err := db.NewPool(context.Background(), c) // production pool: sets app.sync_context for the site_subscriptions ACL (0015)
 	if err != nil {
 		t.Fatalf("central pool: %v", err)
 	}
