@@ -181,6 +181,9 @@ services:
       N8N_BRIDGE_SECRET: ${N8N_BRIDGE_SECRET:-}
       N8N_BRIDGE_EVENTS: ${N8N_BRIDGE_EVENTS:-}
       N8N_BRIDGE_ENTITY_TYPES: ${N8N_BRIDGE_ENTITY_TYPES:-}
+      # Event → knowledge-graph bridge (WS8 Step E). Forwards business events on these entity streams
+      # to the knowledge service /graph/ingest (reuses KNOWLEDGE_URL/TOKEN above). Off unless set.
+      GRAPH_BRIDGE_ENTITY_TYPES: ${GRAPH_BRIDGE_ENTITY_TYPES:-}
     volumes:
       - platform-files:/data/files
     depends_on:
@@ -279,11 +282,45 @@ services:
       PLATFORM_SERVICE_TOKEN: ${PLATFORM_SERVICE_TOKEN:?}
       KNOWLEDGE_URL: http://knowledge:3005
       KNOWLEDGE_SERVICE_TOKEN: ${KNOWLEDGE_SERVICE_TOKEN:?}
+      # WS2 §5: make the versioned `mcp_tool` Cerbos policy authoritative (in-code stays as fallback).
+      CERBOS_URL: http://cerbos:3592
+      # WS2 §7: site hub (fronts this platform). The central hub runs as mcp-hub-central below.
+      HUB_TOPOLOGY: site
+      # WS2 §3: mTLS off until certs are enrolled (mirrors the gateway's GATEWAY_TLS_MODE: off).
+      # Enroll with synccert (see mcp-hub/.env.example), mount them, then set HUB_TLS_MODE: enforced.
+      HUB_TLS_MODE: ${HUB_TLS_MODE:-off}
     volumes:
       - hub-data:/app/data # tool audit
     depends_on:
       - ai-gateway
       - platform
+      - cerbos
+
+  # Central hub (WS2 §7): SAME codebase, HUB_TOPOLOGY=central — adds cross-company/management tools
+  # (real rollup.metrics over the platform's D12 /rollups read). Idle-but-defined like sync-central;
+  # in a single-region v1 it points at the same platform. Not published (reach it via the internal
+  # network / an enrolled mTLS peer). Give it a real second-site platform URL when one exists.
+  mcp-hub-central:
+    build: ../../mcp-hub
+    restart: unless-stopped
+    profiles: ["central"] # only starts with `--profile central`
+    environment:
+      HUB_SERVICE_TOKEN: ${HUB_SERVICE_TOKEN:?}
+      GATEWAY_URL: http://ai-gateway:3002
+      GATEWAY_TOKEN: ${GATEWAY_TOKEN:?}
+      PLATFORM_URL: http://platform:3004
+      PLATFORM_SERVICE_TOKEN: ${PLATFORM_SERVICE_TOKEN:?}
+      KNOWLEDGE_URL: http://knowledge:3005
+      KNOWLEDGE_SERVICE_TOKEN: ${KNOWLEDGE_SERVICE_TOKEN:?}
+      CERBOS_URL: http://cerbos:3592
+      HUB_TOPOLOGY: central
+      HUB_TLS_MODE: ${HUB_TLS_MODE:-off}
+    volumes:
+      - hub-central-data:/app/data
+    depends_on:
+      - ai-gateway
+      - platform
+      - cerbos
 
   bot:
     build: ../../wa-chat-bot
@@ -342,6 +379,7 @@ volumes:
   waha-sessions:
   gateway-data:
   hub-data:
+  hub-central-data:
   bot-data:
   platform-files:
   sync-data:

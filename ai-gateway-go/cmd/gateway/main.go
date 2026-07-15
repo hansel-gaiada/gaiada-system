@@ -5,6 +5,7 @@
 package main
 
 import (
+	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
@@ -18,9 +19,13 @@ import (
 	"gaiada/ai-gateway-go/internal/config"
 	"gaiada/ai-gateway-go/internal/dlp"
 	"gaiada/ai-gateway-go/internal/egress"
+	"gaiada/ai-gateway-go/internal/metrics"
 	"gaiada/ai-gateway-go/internal/providers"
 	"gaiada/ai-gateway-go/internal/server"
+	"gaiada/ai-gateway-go/internal/telemetry"
 	gatewaytls "gaiada/ai-gateway-go/internal/tls"
+
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
 func buildChain(names []string, cfg config.Config, client *http.Client) *chain.Chain {
@@ -71,11 +76,22 @@ func loadOrCreateCA(certPath, keyPath string) (certPEM, keyPEM []byte, err error
 
 func main() {
 	cfg := config.Load()
+
+	// WS9 telemetry: fail-soft OTel init (no-op unless OTEL_ENABLED) + JSON logs correlated to traces.
+	telemetry.NewLogger("ai-gateway")
+	shutdown, err := telemetry.Init(context.Background(), "ai-gateway")
+	if err != nil {
+		log.Printf("telemetry init failed (continuing without it): %v", err)
+	}
+	defer func() { _ = shutdown(context.Background()) }()
+
 	allowlist := append([]string{}, cfg.EgressAllowlist...)
 	transport := egress.NewAllowlistTransport(allowlist, func(host string) {
 		log.Printf("egress blocked (not on allowlist): %s", host)
 	})
-	client := &http.Client{Transport: transport}
+	// Wrap outbound transport so traceparent propagates to providers / central-forward and each
+	// upstream call becomes a client span. otelhttp is a no-op passthrough when OTEL is disabled.
+	client := &http.Client{Transport: otelhttp.NewTransport(transport)}
 
 	chains := server.Chains{
 		LLM:   buildChain(cfg.LLMChain, cfg, client),
@@ -83,19 +99,31 @@ func main() {
 		Embed: buildChain(cfg.EmbedChain, cfg, client),
 	}
 	b := budget.NewBudget(cfg.DailyCallCap, cfg.PerTenantDailyCallCap)
+	if cfg.DRMode { // env-declared failover: open the DR-burst window at boot
+		b.EnableDR(time.Now(), time.Duration(cfg.DRDurationMin)*time.Minute, cfg.DRBurstCap)
+		log.Printf("DR-burst budget unlocked at boot: +%d calls for %d min", cfg.DRBurstCap, cfg.DRDurationMin)
+	}
 
 	var classifier *dlp.Classifier
 	if cfg.DLPClassifierEnabled {
 		classifier = dlp.NewClassifier(cfg.OllamaURL, cfg.DLPClassifierModel, cfg.DLPClassifierTimeoutMs, client)
 	}
 
-	mux := server.NewServer(cfg, chains, b, classifier)
+	inst := metrics.New()
+	// Mirror the live cost budget as observable gauges (cost/tokens/tenants + DR-mode).
+	metrics.RegisterBudgetGauges(func() metrics.BudgetSnapshot {
+		used, cap, tenants, perTenantCap := b.Snapshot(time.Now())
+		return metrics.BudgetSnapshot{Used: used, Cap: cap, Tenants: tenants, PerTenantCap: perTenantCap, DRMode: b.DRModeActive(time.Now())}
+	})
+
+	// Wrap the router so every inbound request extracts traceparent and gets a server span.
+	var handler http.Handler = otelhttp.NewHandler(server.NewServer(cfg, chains, b, classifier, inst), "gateway")
 	addr := fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)
 	log.Printf("Gaiada AI Gateway (Go) on %s — llm: %v, media: %v, auth: %v, cap: %d/day, tls: %s, topology: %s, classifier: %v",
 		addr, cfg.LLMChain, cfg.MediaChain, cfg.GatewayToken != "", cfg.DailyCallCap, cfg.TLSMode, cfg.TopologyMode, cfg.DLPClassifierEnabled)
 
 	if cfg.TLSMode == "off" {
-		log.Fatal(http.ListenAndServe(addr, mux))
+		log.Fatal(http.ListenAndServe(addr, handler))
 		return
 	}
 
@@ -141,6 +169,6 @@ func main() {
 		ClientAuth:            clientAuth,
 		VerifyPeerCertificate: verifyPeer,
 	}
-	srv := &http.Server{Addr: addr, Handler: mux, TLSConfig: tlsConfig}
+	srv := &http.Server{Addr: addr, Handler: handler, TLSConfig: tlsConfig}
 	log.Fatal(srv.ListenAndServeTLS("", ""))
 }

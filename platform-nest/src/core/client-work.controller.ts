@@ -22,6 +22,16 @@ export class ClientWorkController {
     return rows.rows;
   }
 
+  @Get(":tenantId/clients/:clientId")
+  async getClient(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("clientId") clientId: string) {
+    await authorize(req.principal, { kind: "client", id: clientId, tenantId }, "read");
+    const rows = await withTenants([tenantId], (c) =>
+      c.query(`SELECT id, name, contact, status, custom_fields FROM clients WHERE id = $1 AND deleted_at IS NULL`, [clientId]),
+    );
+    if (!rows.rows[0]) throw new NotFoundException("client not found");
+    return rows.rows[0];
+  }
+
   @Post(":tenantId/clients")
   @HttpCode(201)
   async createClient(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Body() body: { name?: string; contact?: Record<string, unknown>; customFields?: Record<string, unknown> }) {
@@ -76,6 +86,16 @@ export class ClientWorkController {
       ),
     );
     return rows.rows;
+  }
+
+  @Get(":tenantId/deliverables/:deliverableId")
+  async getDeliverable(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("deliverableId") deliverableId: string) {
+    await authorize(req.principal, { kind: "deliverable", id: deliverableId, tenantId }, "read");
+    const rows = await withTenants([tenantId], (c) =>
+      c.query(`SELECT id, project_id, client_id, name, status, due_date, custom_fields FROM deliverables WHERE id = $1 AND deleted_at IS NULL`, [deliverableId]),
+    );
+    if (!rows.rows[0]) throw new NotFoundException("deliverable not found");
+    return rows.rows[0];
   }
 
   @Post(":tenantId/deliverables")

@@ -1,0 +1,85 @@
+# WS9 operational alerts — the estate's health signals + the D15 dead-man's-switch. These fire to
+# Alertmanager, which fans them to ≥2 independent transports (Telegram/email/ntfy/webhook).
+groups:
+  - name: gaiada_operational
+    rules:
+      # --- D15 dead-man's-switch. Watchdog ALWAYS fires; Alertmanager routes it to an EXTERNAL
+      # heartbeat (healthchecks.io/Cronitor). If Prometheus itself is dead, the external service
+      # stops seeing the heartbeat and pages — so a fully-dark box is detectable, not silently fine.
+      - alert: Watchdog
+        expr: vector(1)
+        labels:
+          severity: watchdog
+        annotations:
+          summary: "Prometheus is alive (dead-man's-switch heartbeat)"
+          description: "Always-firing. Its ABSENCE at the external dead-man's-switch means the estate is dark."
+
+      # --- A service's synthetic probe is failing outright.
+      - alert: ServiceDown
+        expr: probe_success == 0
+        for: 2m
+        labels:
+          severity: page
+        annotations:
+          summary: "{{ $labels.instance }} is failing its health probe"
+          description: "Blackbox probe to {{ $labels.instance }} has failed for 2m."
+
+      # --- Event backbone: any dead-letter is worth a ticket (data path is dropping events).
+      - alert: EventBackboneDeadLetters
+        expr: increase(platform_events_dead_lettered_total[15m]) > 0
+        for: 0m
+        labels:
+          severity: ticket
+        annotations:
+          summary: "Backbone events dead-lettered"
+          description: "{{ $value }} event(s) moved to dead-letter in 15m (entity_type={{ $labels.entity_type }})."
+
+      # --- Sync freshness: central hasn't seen a successful cycle recently (site offline / partition).
+      - alert: SyncStale
+        expr: sync_seconds_since_last_success > 900
+        for: 5m
+        labels:
+          severity: ticket
+        annotations:
+          summary: "Cross-site sync is stale"
+          description: "No successful sync cycle for {{ $value | humanizeDuration }}."
+
+      # --- AI cost: steady daily cap nearly exhausted (per-tenant degradation imminent).
+      - alert: GatewayBudgetNearCap
+        expr: gateway_budget_calls_used / clamp_min(gateway_budget_calls_cap, 1) > 0.9
+        for: 5m
+        labels:
+          severity: ticket
+        annotations:
+          summary: "AI gateway near daily call cap"
+          description: "{{ $value | humanizePercentage }} of the daily AI call cap spent."
+
+      # --- DR-burst budget is currently unlocked (informational-but-important: a declared failover).
+      - alert: GatewayDRModeActive
+        expr: gateway_dr_mode == 1
+        for: 0m
+        labels:
+          severity: ticket
+        annotations:
+          summary: "AI gateway DR-burst budget is UNLOCKED"
+          description: "A failover was declared; the bounded DR-burst AI budget is active. Confirm it's intended."
+
+      # --- Agent quality: the WS8 collector is flagging a low-success / high-refusal agent.
+      - alert: AgentQualityAlert
+        expr: agent_quality_alert == 1
+        for: 5m
+        labels:
+          severity: ticket
+        annotations:
+          summary: "Agent quality alert: {{ $labels.agent }} / {{ $labels.kind }}"
+          description: "The WS8 observability collector flagged {{ $labels.agent }} ({{ $labels.kind }})."
+
+      # --- D13 detective: an agent wrote while served by a non-eval-cleared provider.
+      - alert: AgentWroteOnUnevaledProvider
+        expr: agent_writes_on_unevaled_provider > 0
+        for: 0m
+        labels:
+          severity: page
+        annotations:
+          summary: "Agent write on an un-evaled provider (D13)"
+          description: "{{ $value }} run(s) performed a write while served by a provider not eval-cleared for that agent."

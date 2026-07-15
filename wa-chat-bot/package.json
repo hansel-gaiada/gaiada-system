@@ -14,6 +14,12 @@
   },
   "dependencies": {
     "@google/generative-ai": "^0.21.0",
+    "@opentelemetry/api": "^1.9.1",
+    "@opentelemetry/auto-instrumentations-node": "^0.78.0",
+    "@opentelemetry/exporter-metrics-otlp-http": "^0.220.0",
+    "@opentelemetry/exporter-trace-otlp-http": "^0.220.0",
+    "@opentelemetry/sdk-metrics": "^2.9.0",
+    "@opentelemetry/sdk-node": "^0.220.0",
     "bullmq": "^5.79.2",
     "dotenv": "^16.4.5",
     "fastify": "^5.1.0",

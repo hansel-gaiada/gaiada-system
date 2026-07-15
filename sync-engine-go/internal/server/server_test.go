@@ -82,7 +82,7 @@ func mtlsHarness(t *testing.T, centralPool *pgxpool.Pool, nodeCN string) (url st
 	if err != nil {
 		t.Fatal(err)
 	}
-	ts := httptest.NewUnstartedServer(New(centralPool, nil).Handler())
+	ts := httptest.NewUnstartedServer(New(centralPool, nil, nil).Handler())
 	ts.TLS = srvTLS
 	ts.StartTLS()
 	t.Cleanup(ts.Close)

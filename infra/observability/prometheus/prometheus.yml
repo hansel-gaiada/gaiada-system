@@ -1,0 +1,57 @@
+# WS9 Prometheus — scrapes the collector (app/business metrics pushed over OTLP) and the infra
+# exporters (postgres/redis/node/cadvisor/blackbox). Recording + SLO/alerting rules load from ./rules.
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    monitor: gaiada
+
+rule_files:
+  - /etc/prometheus/rules/*.yml
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["alertmanager:9093"]
+
+scrape_configs:
+  - job_name: otel-collector
+    static_configs:
+      - targets: ["otel-collector:8889"] # app + business metrics fanned out by the collector
+  - job_name: otel-collector-self
+    static_configs:
+      - targets: ["otel-collector:8888"] # the collector's own health metrics
+
+  - job_name: postgres
+    static_configs:
+      - targets: ["postgres-exporter:9187", "postgres-exporter-bot:9187"]
+  - job_name: redis
+    static_configs:
+      - targets: ["redis-exporter:9121", "redis-exporter-bot:9121"]
+  - job_name: node
+    static_configs:
+      - targets: ["node-exporter:9100"]
+  - job_name: cadvisor
+    static_configs:
+      - targets: ["cadvisor:8080"]
+
+  # Blackbox synthetic probes — Prometheus scrapes the exporter, which probes each target URL.
+  - job_name: blackbox-http
+    metrics_path: /probe
+    params:
+      module: [http_2xx]
+    static_configs:
+      - targets:
+          - http://ai-gateway:3002/health
+          - http://bot:3001/health
+          - http://mcp-hub:3003/health
+          - http://platform:3004/health
+          - http://knowledge:3005/health
+          - http://platform-ui:3005/
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox-exporter:9115

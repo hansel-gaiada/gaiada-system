@@ -4,6 +4,7 @@ import { resetRegistry, registerTool } from "./registry";
 import { registerCoreTools } from "./tools";
 import { registerPlatformTools } from "./platform-tools";
 import { registerPlatformWriteTools } from "./platform-write-tools";
+import { registerModuleTools } from "./module-tools";
 import { AUTOMATION_ALLOWLIST } from "./automation-policy";
 import type { Principal } from "./principal";
 
@@ -12,12 +13,23 @@ function wf(externalId: string): Principal {
   return { provider: "n8n", externalId, assurance: "low" };
 }
 
+// Module-contributed tools (e.g. agency.pendingApprovals) are aggregated from the platform at
+// boot (WS2 §6); tests stub that fetch so the module tool is present in the registry.
+const moduleDefsFetch = (async () => ({
+  ok: true,
+  status: 200,
+  json: async () => [
+    { name: "agency.pendingApprovals", description: "Approvals waiting", minAssurance: "low", method: "GET", pathTemplate: "/api/:tenantId/modules/agency/approvals/pending", inputSchema: { type: "object", properties: { tenantId: { type: "string" } }, required: ["tenantId"] } },
+  ],
+})) as unknown as typeof fetch;
+
 describe("automation scoped service accounts + write gate (WS4 §3)", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     resetRegistry();
     registerCoreTools();
     registerPlatformTools();
     registerPlatformWriteTools();
+    await registerModuleTools(moduleDefsFetch);
   });
 
   it("scopes a workflow to only its allow-listed tools (deny-by-default)", () => {

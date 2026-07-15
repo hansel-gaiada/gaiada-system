@@ -1,0 +1,48 @@
+{
+  "uid": "gaiada-ws8-surfaces",
+  "title": "Gaiada — WS8 Agents, Hub & Bot",
+  "tags": ["gaiada", "ws8", "ws2", "bot"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Agent success rate",
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1 } },
+      "targets": [ { "expr": "agent_success_rate", "legendFormat": "{{agent}}", "refId": "A" } ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "MCP tool calls/s by decision",
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [ { "expr": "sum by (decision) (rate(hub_tool_calls_total[5m]))", "legendFormat": "{{decision}}", "refId": "A" } ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Bot media pipeline (enqueued vs processed/s)",
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 7 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [
+        { "expr": "rate(bot_media_enqueued_total[5m])", "legendFormat": "enqueued", "refId": "A" },
+        { "expr": "sum by (result) (rate(bot_media_processed_total[5m]))", "legendFormat": "processed {{result}}", "refId": "B" }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Assistant discovery events/s by kind",
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 7 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [ { "expr": "sum by (surface, kind) (rate(bot_discovery_events_total[5m]))", "legendFormat": "{{surface}} {{kind}}", "refId": "A" } ]
+    }
+  ]
+}

@@ -25,7 +25,12 @@ export class IdentityController {
     const row = link.rows[0];
     if (!row) return { ...ANONYMOUS };
     if (!row.verified_at) return { ...ANONYMOUS, userId: row.user_id };
-    return (await assemblePrincipal(row.user_id, "linked")) ?? { ...ANONYMOUS };
+    const principal = await assemblePrincipal(row.user_id, "linked");
+    // D11: a VERIFIED link whose user is now inactive/deleted is a REVOCATION (distinct from an
+    // unknown/unlinked identity). Surface it so downstream services — e.g. the MCP hub, which
+    // otherwise never re-hits the platform for gateway-backed tools — can cut the caller off.
+    if (!principal) return { ...ANONYMOUS, userId: row.user_id, revoked: true };
+    return principal;
   }
 
   // Dual-proof enrollment (D4.4): a high-assurance user requests a one-time code.

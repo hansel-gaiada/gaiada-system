@@ -16,6 +16,15 @@ export interface McpToolDef {
   description: string;
   minAssurance: "low" | "verified";
   inputSchema: Record<string, unknown>;
+  /** HTTP mapping so the MCP hub can front this tool generically (WS2 §6 aggregation).
+   *  `pathTemplate` uses :param tokens filled from the tool's args (e.g.
+   *  "/api/:tenantId/modules/agency/campaigns"); remaining args become the request body for
+   *  POST/PATCH. Omit method/pathTemplate for a purely-informational def. */
+  method?: "GET" | "POST" | "PATCH";
+  pathTemplate?: string;
+  /** Mutating tool (drives the hub's D14 automation write gate). */
+  write?: boolean;
+  impact?: "low" | "medium" | "high";
 }
 
 export interface MetricDef {

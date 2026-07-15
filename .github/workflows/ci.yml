@@ -89,8 +89,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.26.4"
-          cache: false # stdlib-only module, no go.sum to key a cache on
+          go-version: "1.26.4" # now has go.sum (WS9 OTel deps); setup-go caches on it
       - run: go build ./...
       - run: go vet ./...
       - run: go test ./...
@@ -138,3 +137,20 @@ jobs:
           DATABASE_URL_CENTRAL: postgres://sync_app:test@localhost:5432/gaiada_sync_central
           DATABASE_URL_SITE_A: postgres://sync_app:test@localhost:5432/gaiada_sync_test
         run: go test ./...
+
+  # WS9 observability config-lint: promtool (rules + scrape), amtool (alertmanager, env-rendered),
+  # and a YAML/JSON parse fallback. otelcol validate is skipped in CI (large binary); the collector
+  # config is YAML-parsed here and otelcol-validated on a Docker host before deploy.
+  observability-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install promtool + amtool
+        run: |
+          curl -fsSL https://github.com/prometheus/prometheus/releases/download/v3.1.0/prometheus-3.1.0.linux-amd64.tar.gz \
+            | sudo tar xz -C /usr/local/bin --strip-components=1 prometheus-3.1.0.linux-amd64/promtool
+          curl -fsSL https://github.com/prometheus/alertmanager/releases/download/v0.28.0/alertmanager-0.28.0.linux-amd64.tar.gz \
+            | sudo tar xz -C /usr/local/bin --strip-components=1 alertmanager-0.28.0.linux-amd64/amtool
+      - name: Install pyyaml + gettext (envsubst)
+        run: pip3 install pyyaml && sudo apt-get update && sudo apt-get install -y gettext-base
+      - run: sh infra/scripts/lint-observability.sh

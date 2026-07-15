@@ -53,10 +53,23 @@ export const config = {
     entityTypes: (process.env.N8N_BRIDGE_ENTITY_TYPES ?? "").split(",").map((s) => s.trim()).filter(Boolean),
     timeoutMs: Number(process.env.N8N_BRIDGE_TIMEOUT_MS ?? 5000),
   },
+  // Event → knowledge-graph bridge (WS8 Step E live wire): forwards every business event on the
+  // watched entity_type streams to the WS8 knowledge service's /graph/ingest, which turns each into
+  // source-of-truth graph nodes/edges (D9.2). Reuses services.knowledge.{url,token}. Fail-closed:
+  // starts only when the knowledge URL+token AND an entity-type list are all set.
+  graphBridge: {
+    entityTypes: (process.env.GRAPH_BRIDGE_ENTITY_TYPES ?? "").split(",").map((s) => s.trim()).filter(Boolean),
+    timeoutMs: Number(process.env.GRAPH_BRIDGE_TIMEOUT_MS ?? 5000),
+  },
 };
 
 /** The bridge is fully configured (all four knobs present) and may start. */
 export function n8nBridgeEnabled(): boolean {
   const b = config.n8nBridge;
   return !!(b.webhookBaseUrl && b.secret && b.events.length && b.entityTypes.length);
+}
+
+/** The graph bridge may start: a reachable knowledge service + at least one entity stream to watch. */
+export function graphBridgeEnabled(): boolean {
+  return !!(config.services.knowledge.url && config.services.knowledge.token && config.graphBridge.entityTypes.length);
 }

@@ -27,7 +27,12 @@ session are now fully exercisable at no cost.
 - [ ] Self-hosted IdP (Zitadel or Keycloak — decide) + OIDC on the platform; auto-provision on first login
 - [ ] Step-up MFA flow; dual-proof `identity_links` enrollment (D4.4); assurance `high` becomes real
 - [ ] Cerbos deployed: versioned policy repo + CI policy tests; in-code policy module retired; derived roles for the scope cascade; `PlanResources` for set-returning tools + RAG pre-filter (D16)
-- [ ] Minute-scale token TTL + session-version deny-list on every MCP call (D11 full)
+- [~] Minute-scale token TTL + session-version deny-list on every MCP call (D11 full) — **MCP-hub
+  side DONE (2026-07-15, WS2):** every hub request re-checks revocation via the platform's
+  `POST /principal/resolve` (now returns a `revoked` flag for a verified-link user deactivated),
+  cached per principal — covers gateway-backed tools that never re-hit the platform. Still deferred:
+  **minute-scale token TTL** (short-lived minted service creds — OpenBao target-state; v1 uses a
+  static service token with documented rotation).
 - [ ] Team-scope coverage in policies (currently unimplemented scope tier)
 
 ### P5c — Platform to spec (ws1-architecture, ws1-core-schema)
@@ -81,8 +86,19 @@ session are now fully exercisable at no cost.
 - [ ] Trainer agent (eval-gated, human-approved improvements)
 
 ### P5f — Infra/observability/security to spec (ws9, ws10, ws7)
-- [ ] OpenTelemetry traces/metrics/logs across all services; SLOs; run tracing for agents
-- [ ] Uptime alerting → Telegram; off-box backup automation
+- [x] **OpenTelemetry traces/metrics/logs across all services; SLOs; run tracing for agents — DONE
+  (WS9, 2026-07-15).** All 7 services (Go: ai-gateway-go, sync-engine-go; TS: platform-nest, mcp-hub,
+  wa-chat-bot+worker, ai-agents) emit OTLP traces+metrics + trace-correlated JSON logs with W3C
+  propagation. Self-hosted OTel Collector → Prometheus/Tempo/Loki + Grafana + Alertmanager +
+  exporters + ntfy (opt-in `docker-compose.observability.yml`). Multi-burn-rate SLOs, per-workstream
+  + exec dashboards, blackbox synthetics. Agent run-quality flows in via the WS8 collector→OTel
+  bridge. Config-linted (promtool/amtool/otelcol). Plan/report: `2026-07-15-ws9-observability-plan.md`,
+  `2026-07-15-ws9-observability-completion-report.md`. **D15 carry-overs closed:** ≥2 independent
+  alert transports + external dead-man's-switch; a measured restore drill (`restore-drill.sh`);
+  DR-burst AI budget (gateway). Deferred: live `compose up` E2E on a Docker host; deeper synthetic
+  *journeys* (bot reply / login) beyond HTTP liveness probes.
+- [x] Uptime alerting → Telegram — DONE (upgraded `healthcheck.sh` to ≥2 transports +
+  dead-man's-switch, independent of the Prometheus pipeline). Off-box backup automation still open.
 - [ ] Zero-trust floor: mTLS everywhere, SPIFFE/SPIRE identities; k3s/K8s + GitOps + Sigstore/SBOM/SLSA (staged as estate grows)
 - [ ] Temporal + N8N hardening (credential scoping, event triggers)
 

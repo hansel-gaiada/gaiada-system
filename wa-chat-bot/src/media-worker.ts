@@ -2,6 +2,7 @@
 //   npm run media-worker
 // Requires REDIS_URL and DATABASE_URL (the file store is single-process; running a
 // separate worker against it would corrupt data — refused at startup).
+import "./telemetry"; // WS9: start OTel first (no-op unless OTEL_ENABLED)
 import { fileURLToPath } from "node:url";
 import { config } from "./config";
 import { initStore } from "./store";

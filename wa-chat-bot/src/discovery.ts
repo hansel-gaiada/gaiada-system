@@ -4,6 +4,7 @@
 import { appendFileSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { config } from "./config";
+import { recordDiscovery } from "./metrics";
 
 export interface DiscoveryEvent {
   ts: number;
@@ -14,6 +15,7 @@ export interface DiscoveryEvent {
 }
 
 export function emitDiscovery(e: DiscoveryEvent): void {
+  recordDiscovery(e); // WS9: mirror as a PII-free metric (the JSONL log stays the source of truth)
   try {
     mkdirSync(dirname(config.discoveryFile), { recursive: true });
     appendFileSync(config.discoveryFile, JSON.stringify(e) + "\n");

@@ -11,6 +11,8 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
 func loadCAPool(caCertPath string) (*x509.CertPool, error) {
@@ -35,13 +37,16 @@ func NewClient(caCertPath, clientCertPath, clientKeyPath string) (*http.Client, 
 	if err != nil {
 		return nil, fmt.Errorf("load client keypair: %w", err)
 	}
-	return &http.Client{Transport: &http.Transport{
+	// Wrap the mTLS transport with otelhttp so outbound push/pull carry traceparent and become
+	// client spans (no-op passthrough when OTEL is disabled).
+	base := &http.Transport{
 		TLSClientConfig: &tls.Config{
 			RootCAs:      pool,
 			Certificates: []tls.Certificate{cert},
 			MinVersion:   tls.VersionTLS12,
 		},
-	}}, nil
+	}
+	return &http.Client{Transport: otelhttp.NewTransport(base)}, nil
 }
 
 // ServerTLSConfig requires a client cert signed by the CA whose CN is in allowedCNs. An empty

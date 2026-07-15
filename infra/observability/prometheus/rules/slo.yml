@@ -1,0 +1,65 @@
+# WS9 SLOs — SLIs as recording rules + multi-window multi-burn-rate error-budget alerts
+# (Google SRE method: page fast on a 14.4x burn over 1h/5m, ticket on a 6x burn over 6h/30m).
+# Availability SLIs come from the blackbox synthetic probes (name-stable, deterministic); service
+# error/freshness SLIs come from the estate's own WS9 metrics (stable names we control).
+groups:
+  - name: slo_sli_recording
+    interval: 30s
+    rules:
+      # --- Availability SLI: fraction of synthetic probes that succeeded, per target, over windows.
+      - record: sli:probe_success:ratio_rate5m
+        expr: avg_over_time(probe_success[5m])
+      - record: sli:probe_success:ratio_rate30m
+        expr: avg_over_time(probe_success[30m])
+      - record: sli:probe_success:ratio_rate1h
+        expr: avg_over_time(probe_success[1h])
+      - record: sli:probe_success:ratio_rate6h
+        expr: avg_over_time(probe_success[6h])
+
+      # --- Gateway egress error ratio (5xx/blocked over total), from our own counter.
+      - record: sli:gateway_egress_error:ratio_rate5m
+        expr: |
+          sum(rate(gateway_egress_requests_total{ok="false"}[5m]))
+            /
+          clamp_min(sum(rate(gateway_egress_requests_total[5m])), 1)
+
+  - name: slo_burn_rate_alerts
+    rules:
+      # Availability SLO = 99% per probed service. Error budget = 1%.
+      # Fast burn (14.4x): budget gone in ~2 days if sustained → page.
+      - alert: SLOAvailabilityFastBurn
+        expr: |
+          (1 - sli:probe_success:ratio_rate1h) > (14.4 * 0.01)
+          and
+          (1 - sli:probe_success:ratio_rate5m) > (14.4 * 0.01)
+        for: 2m
+        labels:
+          severity: page
+          slo: availability
+        annotations:
+          summary: "Fast error-budget burn on {{ $labels.instance }}"
+          description: "Availability SLO (99%) burning at >14.4x over 1h and 5m. Budget will exhaust in ~2 days."
+      # Slow burn (6x): budget gone in ~5 days → ticket.
+      - alert: SLOAvailabilitySlowBurn
+        expr: |
+          (1 - sli:probe_success:ratio_rate6h) > (6 * 0.01)
+          and
+          (1 - sli:probe_success:ratio_rate30m) > (6 * 0.01)
+        for: 15m
+        labels:
+          severity: ticket
+          slo: availability
+        annotations:
+          summary: "Slow error-budget burn on {{ $labels.instance }}"
+          description: "Availability SLO (99%) burning at >6x over 6h and 30m."
+
+      # Gateway request-error SLO = 99% success. Fast burn pages.
+      - alert: SLOGatewayErrorFastBurn
+        expr: sli:gateway_egress_error:ratio_rate5m > (14.4 * 0.01)
+        for: 5m
+        labels:
+          severity: page
+          slo: gateway_success
+        annotations:
+          summary: "Gateway egress errors burning error budget fast"
+          description: "Gateway request-success SLO (99%) burning at >14.4x over 5m ({{ $value | humanizePercentage }} errors)."

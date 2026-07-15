@@ -3,6 +3,7 @@
 // event_type. Each handler call is isolated (try/catch) so one module's failure can't
 // stall dispatch to others sharing the same batch.
 import { allModules, isModuleEnabled } from "../modules/registry";
+import { recordDeadLetter, recordEventConsumed, recordProcessingLag } from "../metrics";
 import { getRedis } from "./redis";
 import type { OutboxEvent } from "./types";
 
@@ -81,9 +82,12 @@ export async function consumeOnce(entityType: string, groupName = GROUP): Promis
       // Only ack when every handler for this entry succeeded — leave un-ACKed on any
       // failure so it's redelivered on a future XREADGROUP/XCLAIM pass.
       await redis.xack(stream, groupName, entryId);
+      recordEventConsumed(entityType, true);
+      recordProcessingLag(entityType, event.createdAt);
       handled++;
       continue;
     }
+    recordEventConsumed(entityType, false);
     // A handler failed: check how many times this entry has now been delivered via
     // XPENDING (the 4th field of the summary entry is the delivery count) and, past
     // the retry threshold, move it to a plain dead-letter stream and ack the original
@@ -94,11 +98,10 @@ export async function consumeOnce(entityType: string, groupName = GROUP): Promis
     if (deliveryCount >= DEAD_LETTER_MAX_RETRIES) {
       await redis.xadd(`${stream}:dead-letter`, "*", ...fields);
       await redis.xack(stream, groupName, entryId);
-      // Structured, greppable/alertable log line (distinctly tagged so log-monitoring
-      // tooling can page on it). Real cross-service alerting (paging/notifying an
-      // operator, the way the bot's cost-cap alert posts to a management group) is a
-      // follow-up for the WS9 observability workstream — not built here. This at least
-      // keeps a growing dead-letter stream visible instead of silently swallowed.
+      // WS9: emit the dead-letter as a metric so Alertmanager can page on a nonzero rate
+      // (`platform_events_dead_lettered_total`) — the cross-service alerting this comment used to
+      // defer. The greppable log line stays for forensic context.
+      recordDeadLetter(entityType, event.eventType);
       // eslint-disable-next-line no-console
       console.error("[DEAD-LETTER]", {
         stream,

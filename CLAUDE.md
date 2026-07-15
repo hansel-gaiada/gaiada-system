@@ -49,9 +49,20 @@ Components are **separate standalone projects — not a shared-package monorepo.
   Docker in the dev env) — validate on a Docker host before deploy.** Still deferred per spec §9:
   OpenBao-issued provider creds, media DLP classification, native per-provider token streaming,
   DNS control / SIEM rule, automated cert rotation.
-- **mcp-hub/** — WS2 skeleton BUILT (7 tests): MCP server (official SDK, Streamable HTTP,
-  stateless), OBO principal minting (clients can't assert roles), deny-by-default policy w/
-  per-principal tool visibility, JSONL audit. Company tools await the platform (WS1).
+- **mcp-hub/** — WS2 **COMPLETE to spec incl. target-state (2026-07-15).** MCP server (official
+  SDK, Streamable HTTP, stateless) with OBO principal minting (clients can't assert roles) and
+  deny-by-default policy. Full primitive surface: **Tools** (core + platform read/write +
+  AI-backed `llm.summarize`/`ocr`/`vision`/`transcribe` + module-contributed), **Resources**
+  (`gaiada://…`), **Prompts**. Tools are aggregated from the platform's `ModuleContract.mcpTools`
+  via `GET /mcp/tool-defs` (not hardcoded). **Cerbos-authoritative** policy (versioned
+  `mcp_tool` policy; in-code engine kept as fail-closed fallback + reason source). Rate limiting
+  (§8), **D11 revocation** (platform `POST /principal/resolve` gained a `revoked` flag),
+  **mTLS/zero-trust floor** (`HUB_TLS_MODE`, CA reuse via synccert, peer-CN allowlist), and
+  **site/central topology** (`HUB_TOPOLOGY`; real `rollup.metrics` over D12 on central). JSONL
+  audit on every decision. 59 hub tests (+ platform `/mcp/tool-defs`). Report:
+  `docs/superpowers/plans/2026-07-15-ws2-mcp-hub-completion-report.md`. Still deferred: OpenBao-
+  minted short-lived service creds (target-state), Magnific `image.enhance` (no Gateway capability
+  yet), Redis-backed multi-instance rate limiting.
 - **Telegram is the live surface for now** (long-polling, no public URL needed — see the bot
   README quickstart); WAHA becomes primary + Telegram fallback once its number is scanned.
 - **infra/** — v1 slice BUILT: full-stack VPS compose (`infra/compose/docker-compose.vps.yml`:
@@ -60,6 +71,22 @@ Components are **separate standalone projects — not a shared-package monorepo.
   Dockerfiles in each component, crypto-shred-safe nightly backup script,
   `infra/scripts/test-all.sh` local CI, GH Actions workflow (inert until gaiada-system gets its
   own repo — current git root/remote are unrelated). Runbook: `infra/runbooks/deploy-vps.md`.
+- **observability/ (WS9)** — **BUILT 2026-07-15, code-complete.** All 7 services instrumented with
+  OpenTelemetry (traces+metrics+trace-correlated JSON logs, W3C propagation, fail-soft — no-op unless
+  `OTEL_ENABLED`); per-service telemetry bootstrap (Go `internal/telemetry`, TS `src/telemetry.ts`)
+  wrapping existing sources (gateway budget/egress-audit, sync anomaly path, event-backbone
+  dead-letters, hub tool-audit, bot discovery/media, and the WS8 collector→OTel bridge). Self-hosted
+  stack as an **opt-in** second compose file (`infra/compose/docker-compose.observability.yml`):
+  OTel Collector → Prometheus/Tempo/Loki + Grafana (provisioned datasources+dashboards) +
+  Alertmanager + exporters (pg×2/redis×2/node/cadvisor/blackbox) + ntfy. Multi-burn-rate SLOs,
+  exec + per-workstream dashboards, blackbox synthetics. **D15 carry-overs closed:** ≥2 independent
+  alert transports + external dead-man's-switch (Alertmanager + upgraded out-of-band `healthcheck.sh`);
+  measured restore drill (`infra/scripts/restore-drill.sh`); DR-burst AI budget (gateway `DR_MODE` /
+  `POST /admin/dr-mode`). Config-linted with the real tools (promtool/amtool/otelcol validate) +
+  a CI `observability-lint` job. **Not run E2E locally: `compose up` (no Docker in the dev env) —
+  validate on a Docker host per the completion report's checklist.** Configs `infra/observability/`;
+  runbooks `infra/runbooks/observability{,-slo}.md`, `restore-drill.md`; plan+report
+  `docs/superpowers/plans/2026-07-15-ws9-observability-*.md`.
 - **automation/** — v1 glue BUILT: n8n compose + `summarize-via-mcp` template (backbone rule:
   n8n orchestrates, MCP accesses, no logic in workflows). Temporal deferred until a durable
   flow exists.

@@ -1,3 +1,5 @@
+import "./telemetry"; // WS9: start OTel first (before Fastify/gateway/store) so it patches http/pg/ioredis
+import { fastifyLoggerOption } from "./telemetry";
 import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
 import { timingSafeEqual } from "node:crypto";
 import { fileURLToPath } from "node:url";
@@ -43,7 +45,7 @@ function bearer(req: FastifyRequest): string {
 }
 
 export function buildApp(gateway: WhatsAppGateway = new SurfaceRouter()): FastifyInstance {
-  const app = Fastify({ logger: true });
+  const app = Fastify({ logger: fastifyLoggerOption() as never });
 
   app.get("/health", async () => ({ ok: true, ai: aiEnabled ? "on" : "echo" }));
 

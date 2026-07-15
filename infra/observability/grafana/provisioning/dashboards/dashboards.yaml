@@ -1,0 +1,14 @@
+# WS9 Grafana dashboard provider — loads every dashboard JSON under /var/lib/grafana/dashboards.
+apiVersion: 1
+
+providers:
+  - name: gaiada
+    orgId: 1
+    folder: Gaiada
+    type: file
+    disableDeletion: false
+    editable: true
+    updateIntervalSeconds: 30
+    options:
+      path: /var/lib/grafana/dashboards
+      foldersFromFilesStructure: false

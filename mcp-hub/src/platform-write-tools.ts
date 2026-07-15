@@ -90,6 +90,124 @@ export function registerPlatformWriteTools(): void {
   });
 
   registerTool({
+    name: "clients.create",
+    description: "Create a client in a company you belong to.",
+    minAssurance: "low",
+    write: true,
+    impact: "low", // in-tenant, reversible
+    inputSchema: {
+      type: "object",
+      properties: { tenantId: { type: "string" }, name: { type: "string" }, contact: { type: "object" } },
+      required: ["tenantId", "name"],
+    },
+    handler: (args, principal) =>
+      platformSend("POST", `/api/${String(args.tenantId)}/clients`, { name: args.name, contact: args.contact ?? {} }, principal),
+  });
+
+  registerTool({
+    name: "clients.update",
+    description: "Update a client: name, contact, or status.",
+    minAssurance: "low",
+    write: true,
+    impact: "low",
+    inputSchema: {
+      type: "object",
+      properties: { tenantId: { type: "string" }, clientId: { type: "string" }, name: { type: "string" }, contact: { type: "object" }, status: { type: "string" } },
+      required: ["tenantId", "clientId"],
+    },
+    handler: (args, principal) =>
+      platformSend("PATCH", `/api/${String(args.tenantId)}/clients/${String(args.clientId)}`, { name: args.name, contact: args.contact, status: args.status }, principal),
+  });
+
+  registerTool({
+    name: "deliverables.create",
+    description: "Create a deliverable under a project.",
+    minAssurance: "low",
+    write: true,
+    impact: "low",
+    inputSchema: {
+      type: "object",
+      properties: { tenantId: { type: "string" }, projectId: { type: "string" }, name: { type: "string" }, clientId: { type: "string" }, dueDate: { type: "string" } },
+      required: ["tenantId", "projectId", "name"],
+    },
+    handler: (args, principal) =>
+      platformSend(
+        "POST",
+        `/api/${String(args.tenantId)}/deliverables`,
+        { projectId: args.projectId, name: args.name, clientId: args.clientId, dueDate: args.dueDate },
+        principal,
+      ),
+  });
+
+  registerTool({
+    name: "deliverables.update",
+    description: "Update a deliverable: name, status, due date, or client.",
+    minAssurance: "low",
+    write: true,
+    impact: "low",
+    inputSchema: {
+      type: "object",
+      properties: { tenantId: { type: "string" }, deliverableId: { type: "string" }, name: { type: "string" }, status: { type: "string" }, dueDate: { type: "string" }, clientId: { type: "string" } },
+      required: ["tenantId", "deliverableId"],
+    },
+    handler: (args, principal) =>
+      platformSend(
+        "PATCH",
+        `/api/${String(args.tenantId)}/deliverables/${String(args.deliverableId)}`,
+        { name: args.name, status: args.status, dueDate: args.dueDate, clientId: args.clientId },
+        principal,
+      ),
+  });
+
+  registerTool({
+    name: "time.log",
+    description: "Log a time entry (owned by the caller) against a project/task. minutes must be a positive integer.",
+    minAssurance: "low",
+    write: true,
+    impact: "low", // records the caller's own time; reversible
+    inputSchema: {
+      type: "object",
+      properties: {
+        tenantId: { type: "string" },
+        projectId: { type: "string" },
+        taskId: { type: "string" },
+        minutes: { type: "number" },
+        billable: { type: "boolean" },
+        entryDate: { type: "string", description: "YYYY-MM-DD (defaults to today)" },
+        notes: { type: "string" },
+      },
+      required: ["tenantId", "projectId", "minutes"],
+    },
+    handler: (args, principal) =>
+      platformSend(
+        "POST",
+        `/api/${String(args.tenantId)}/time-entries`,
+        { projectId: args.projectId, taskId: args.taskId, minutes: args.minutes, billable: args.billable ?? false, entryDate: args.entryDate, notes: args.notes ?? "" },
+        principal,
+      ),
+  });
+
+  registerTool({
+    name: "time.update",
+    description: "Update one of the caller's own time entries: minutes, billable, or notes.",
+    minAssurance: "low",
+    write: true,
+    impact: "low",
+    inputSchema: {
+      type: "object",
+      properties: { tenantId: { type: "string" }, entryId: { type: "string" }, minutes: { type: "number" }, billable: { type: "boolean" }, notes: { type: "string" } },
+      required: ["tenantId", "entryId"],
+    },
+    handler: (args, principal) =>
+      platformSend(
+        "PATCH",
+        `/api/${String(args.tenantId)}/time-entries/${String(args.entryId)}`,
+        { minutes: args.minutes, billable: args.billable, notes: args.notes },
+        principal,
+      ),
+  });
+
+  registerTool({
     name: "notify",
     description: "Raise an in-app notification for a member (elevated/automation). recipientId + type required.",
     minAssurance: "low",

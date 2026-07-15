@@ -3,6 +3,7 @@
 import { appendFileSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { config } from "./config";
+import { recordToolAudit } from "./metrics";
 import type { Principal } from "./principal";
 
 export interface ToolAudit {
@@ -15,6 +16,7 @@ export interface ToolAudit {
 }
 
 export function auditToolCall(e: ToolAudit): void {
+  recordToolAudit(e); // WS9: mirror the decision as a metric (audit remains the source of truth)
   try {
     mkdirSync(dirname(config.auditFile), { recursive: true });
     appendFileSync(config.auditFile, JSON.stringify(e) + "\n");

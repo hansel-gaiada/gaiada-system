@@ -2,6 +2,8 @@
 // the caller forwards an OBO envelope; we resolve it via /principal/resolve and use the
 // principal's authorized company set as the D9 pre-filter. Unlinked/low → empty set →
 // zero results. Ingest/erase are service-token-only internal pipeline operations.
+import "../telemetry"; // WS9: start OTel first (before Fastify/pg) so it patches http/pg. No-op unless OTEL_ENABLED.
+import { fastifyLoggerOption } from "../telemetry";
 import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
 import { timingSafeEqual } from "node:crypto";
 import { fileURLToPath } from "node:url";
@@ -76,7 +78,7 @@ export function buildKnowledgeApp(
   graph?: KnowledgeGraph,
   episodic?: PgEpisodicStore,
 ): FastifyInstance {
-  const app = Fastify({ logger: false });
+  const app = Fastify({ logger: fastifyLoggerOption() as never });
 
   app.get("/health", async () => ({ ok: true }));
 

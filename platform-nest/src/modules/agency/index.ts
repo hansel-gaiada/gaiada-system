@@ -46,8 +46,22 @@ export const agencyModule: ModuleContract = {
   ],
   customFieldTargets: ["agency_campaign", "agency_creative_asset"],
   mcpTools: [
-    { name: "agency.listCampaigns", description: "List the tenant's campaigns with status", minAssurance: "low", inputSchema: { type: "object", properties: {} } },
-    { name: "agency.pendingApprovals", description: "Approvals waiting for a decision", minAssurance: "low", inputSchema: { type: "object", properties: {} } },
+    {
+      name: "agency.listCampaigns",
+      description: "List the tenant's campaigns with status",
+      minAssurance: "low",
+      method: "GET",
+      pathTemplate: "/api/:tenantId/modules/agency/campaigns",
+      inputSchema: { type: "object", properties: { tenantId: { type: "string" } }, required: ["tenantId"] },
+    },
+    {
+      name: "agency.pendingApprovals",
+      description: "Approvals waiting for a decision",
+      minAssurance: "low",
+      method: "GET",
+      pathTemplate: "/api/:tenantId/modules/agency/approvals/pending",
+      inputSchema: { type: "object", properties: { tenantId: { type: "string" } }, required: ["tenantId"] },
+    },
   ],
   rollupProviders: [agencyRollups],
   uiManifest: [

@@ -18,7 +18,8 @@ project** (own `package.json`, own deploy) — deliberately **not** a shared-pac
 | `automation/` | N8N + Temporal orchestration | WS4 | **v1 glue — N8N + MCP-calling template** |
 | `ai-agents/` | Agent brigade + ML trainer | WS8 | **Built — specialist framework + supervisor + D9 knowledge/memory (D14 safety)** |
 | `sync-engine-go/` | Go cross-site sync engine (T2) | WS1 | **Not started — design approved (`2026-07-06-ws1-sync-engine-*`)** |
-| `infra/` | IaC + GitOps + delivery + observability | WS10 / WS9 | **v1 slice — VPS compose stack, CI, backups** |
+| `infra/` | IaC + GitOps + delivery | WS10 | **v1 slice — VPS compose stack, CI, backups** |
+| `infra/observability/` + `docker-compose.observability.yml` | OpenTelemetry + Grafana stack (metrics/traces/logs), SLOs, alerting, D15 resilience | WS9 | **Built — code-complete 2026-07-15; all 7 services instrumented; opt-in self-hosted stack; live `compose up` deferred to a Docker host** |
 
 ## Where to start
 

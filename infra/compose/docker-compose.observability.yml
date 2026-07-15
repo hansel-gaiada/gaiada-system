@@ -1,0 +1,205 @@
+# WS9 Observability stack — merged into the `gaiada` compose project so it shares the network with
+# the core services. Bring the whole estate up WITH observability:
+#   docker compose -f docker-compose.vps.yml -f docker-compose.observability.yml up -d
+# It is opt-in (kept in its own file like the separate automation stack) and adds no runtime
+# dependency to the data plane: services export telemetry only when OTEL_ENABLED=1 (see the core
+# compose env additions). Everything self-hosted, nothing published beyond localhost.
+name: gaiada
+
+services:
+  # --- Pipeline: OTLP ingest → fan out to Prometheus/Tempo/Loki ---
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.116.1
+    restart: unless-stopped
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes:
+      - ../../infra/observability/otel-collector/config.yaml:/etc/otelcol/config.yaml:ro
+      # Read-only tail of container stdout for the filelog receiver (logs → Loki).
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+    depends_on:
+      - tempo
+      - loki
+
+  prometheus:
+    image: prom/prometheus:v3.1.0
+    restart: unless-stopped
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.retention.time=15d"
+      - "--web.enable-lifecycle"
+    volumes:
+      - ../../infra/observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ../../infra/observability/prometheus/rules:/etc/prometheus/rules:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "127.0.0.1:9090:9090" # localhost-only (SSH tunnel)
+
+  tempo:
+    image: grafana/tempo:2.7.0
+    restart: unless-stopped
+    command: ["-config.file=/etc/tempo/tempo.yaml"]
+    volumes:
+      - ../../infra/observability/tempo/tempo.yaml:/etc/tempo/tempo.yaml:ro
+      - tempo-data:/var/tempo
+
+  loki:
+    image: grafana/loki:3.3.2
+    restart: unless-stopped
+    command: ["-config.file=/etc/loki/loki.yaml"]
+    volumes:
+      - ../../infra/observability/loki/loki.yaml:/etc/loki/loki.yaml:ro
+      - loki-data:/loki
+
+  grafana:
+    image: grafana/grafana:11.4.0
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+    volumes:
+      - ../../infra/observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ../../infra/observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "127.0.0.1:3001:3000" # localhost-only (SSH tunnel); 3001 host to avoid clashing bot:3001 internal
+    depends_on:
+      - prometheus
+      - tempo
+      - loki
+
+  # --- Alerting: D15 multi-transport + dead-man's-switch. alertmanager.yml is env-templated; the
+  # deploy step renders ${VARS} via envsubst before start (see infra/runbooks/observability.md). ---
+  alertmanager:
+    image: prom/alertmanager:v0.28.0
+    restart: unless-stopped
+    command: ["--config.file=/etc/alertmanager/alertmanager.yml"]
+    environment:
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      ALERT_CHAT_ID: ${ALERT_CHAT_ID:-0}
+      SMTP_SMARTHOST: ${SMTP_SMARTHOST:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      ALERT_EMAIL_TO: ${ALERT_EMAIL_TO:-}
+      ALERT_WEBHOOK_URL: ${ALERT_WEBHOOK_URL:-http://ntfy/gaiada-alerts}
+      DEADMANSSWITCH_URL: ${DEADMANSSWITCH_URL:-}
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        apk add --no-cache gettext >/dev/null 2>&1 || true
+        envsubst < /etc/alertmanager/alertmanager.tmpl.yml > /tmp/alertmanager.yml
+        exec /bin/alertmanager --config.file=/tmp/alertmanager.yml
+    volumes:
+      - ../../infra/observability/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.tmpl.yml:ro
+      - ../../infra/observability/alertmanager/templates:/etc/alertmanager/templates:ro
+      - alertmanager-data:/alertmanager
+
+  ntfy:
+    image: binwiederhier/ntfy:v2.11.0
+    restart: unless-stopped
+    command: ["serve"]
+    volumes:
+      - ../../infra/observability/ntfy/server.yml:/etc/ntfy/server.yml:ro
+      - ntfy-data:/var/cache/ntfy
+
+  # --- Exporters ---
+  postgres-exporter:
+    image: quay.io/prometheuscommunity/postgres-exporter:v0.16.0
+    restart: unless-stopped
+    environment:
+      DATA_SOURCE_NAME: "postgresql://postgres:${POSTGRES_SUPER_PASSWORD}@postgres:5432/gaiada?sslmode=disable"
+    depends_on:
+      - prometheus
+
+  postgres-exporter-bot:
+    image: quay.io/prometheuscommunity/postgres-exporter:v0.16.0
+    restart: unless-stopped
+    environment:
+      DATA_SOURCE_NAME: "postgresql://postgres:${POSTGRES_SUPER_PASSWORD}@pg-bot:5432/gaiada?sslmode=disable"
+
+  redis-exporter:
+    image: oliver006/redis_exporter:v1.67.0
+    restart: unless-stopped
+    command: ["--redis.addr=redis://redis:6379"]
+
+  redis-exporter-bot:
+    image: oliver006/redis_exporter:v1.67.0
+    restart: unless-stopped
+    command: ["--redis.addr=redis://redis-bot:6379"]
+
+  node-exporter:
+    image: prom/node-exporter:v1.8.2
+    restart: unless-stopped
+    command:
+      - "--path.rootfs=/host"
+    pid: host
+    volumes:
+      - /:/host:ro,rslave
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.49.1
+    restart: unless-stopped
+    privileged: true
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+
+  blackbox-exporter:
+    image: prom/blackbox-exporter:v0.25.0
+    restart: unless-stopped
+    command: ["--config.file=/etc/blackbox/blackbox.yml"]
+    volumes:
+      - ../../infra/observability/blackbox/blackbox.yml:/etc/blackbox/blackbox.yml:ro
+
+  # --- Merge-overrides: switch ON telemetry export for the core services. Compose merges these
+  # `environment` maps into the services defined in docker-compose.vps.yml, so OTEL is enabled ONLY
+  # when this observability file is included — the data plane never depends on the collector. Each
+  # service's telemetry bootstrap reads OTEL_ENABLED + OTEL_EXPORTER_OTLP_ENDPOINT + OTEL_SERVICE_NAME.
+  ai-gateway:
+    environment:
+      OTEL_ENABLED: "1"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4318"
+      OTEL_SERVICE_NAME: "ai-gateway"
+  platform:
+    environment:
+      OTEL_ENABLED: "1"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4318"
+      OTEL_SERVICE_NAME: "platform"
+  sync-central:
+    environment:
+      OTEL_ENABLED: "1"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4318"
+      OTEL_SERVICE_NAME: "sync-engine"
+  knowledge:
+    environment:
+      OTEL_ENABLED: "1"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4318"
+      OTEL_SERVICE_NAME: "knowledge"
+  mcp-hub:
+    environment:
+      OTEL_ENABLED: "1"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4318"
+      OTEL_SERVICE_NAME: "mcp-hub"
+  bot:
+    environment:
+      OTEL_ENABLED: "1"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4318"
+      OTEL_SERVICE_NAME: "wa-chat-bot"
+  bot-media-worker:
+    environment:
+      OTEL_ENABLED: "1"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4318"
+      OTEL_SERVICE_NAME: "bot-media-worker"
+
+volumes:
+  prometheus-data:
+  tempo-data:
+  loki-data:
+  grafana-data:
+  alertmanager-data:
+  ntfy-data:

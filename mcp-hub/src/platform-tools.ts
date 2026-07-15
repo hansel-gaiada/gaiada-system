@@ -35,6 +35,19 @@ export function registerPlatformTools(): void {
   });
 
   registerTool({
+    name: "projects.get",
+    description: "Get one project's detail (client, owner, dates, custom fields).",
+    minAssurance: "low",
+    inputSchema: {
+      type: "object",
+      properties: { tenantId: { type: "string" }, projectId: { type: "string" } },
+      required: ["tenantId", "projectId"],
+    },
+    handler: (args, principal) =>
+      platformGet(`/api/${String(args.tenantId)}/projects/${String(args.projectId)}`, principal),
+  });
+
+  registerTool({
     name: "tasks.list",
     description: "List a project's tasks.",
     minAssurance: "low",
@@ -48,6 +61,112 @@ export function registerPlatformTools(): void {
     },
     handler: (args, principal) =>
       platformGet(`/api/${String(args.tenantId)}/projects/${String(args.projectId)}/tasks`, principal),
+  });
+
+  registerTool({
+    name: "tasks.get",
+    description: "Get one task's detail (assignee, status, project, custom fields).",
+    minAssurance: "low",
+    inputSchema: {
+      type: "object",
+      properties: { tenantId: { type: "string" }, taskId: { type: "string" } },
+      required: ["tenantId", "taskId"],
+    },
+    handler: (args, principal) => platformGet(`/api/${String(args.tenantId)}/tasks/${String(args.taskId)}`, principal),
+  });
+
+  registerTool({
+    name: "clients.list",
+    description: "List the tenant's clients.",
+    minAssurance: "low",
+    inputSchema: {
+      type: "object",
+      properties: { tenantId: { type: "string" } },
+      required: ["tenantId"],
+    },
+    handler: (args, principal) => platformGet(`/api/${String(args.tenantId)}/clients`, principal),
+  });
+
+  registerTool({
+    name: "clients.get",
+    description: "Get one client's detail (contact, status, custom fields).",
+    minAssurance: "low",
+    inputSchema: {
+      type: "object",
+      properties: { tenantId: { type: "string" }, clientId: { type: "string" } },
+      required: ["tenantId", "clientId"],
+    },
+    handler: (args, principal) => platformGet(`/api/${String(args.tenantId)}/clients/${String(args.clientId)}`, principal),
+  });
+
+  registerTool({
+    name: "deliverables.list",
+    description: "List deliverables, optionally filtered by projectId or clientId.",
+    minAssurance: "low",
+    inputSchema: {
+      type: "object",
+      properties: { tenantId: { type: "string" }, projectId: { type: "string" }, clientId: { type: "string" } },
+      required: ["tenantId"],
+    },
+    handler: (args, principal) => {
+      const q = new URLSearchParams();
+      if (args.projectId) q.set("projectId", String(args.projectId));
+      if (args.clientId) q.set("clientId", String(args.clientId));
+      const qs = q.toString();
+      return platformGet(`/api/${String(args.tenantId)}/deliverables${qs ? `?${qs}` : ""}`, principal);
+    },
+  });
+
+  registerTool({
+    name: "deliverables.get",
+    description: "Get one deliverable's detail.",
+    minAssurance: "low",
+    inputSchema: {
+      type: "object",
+      properties: { tenantId: { type: "string" }, deliverableId: { type: "string" } },
+      required: ["tenantId", "deliverableId"],
+    },
+    handler: (args, principal) =>
+      platformGet(`/api/${String(args.tenantId)}/deliverables/${String(args.deliverableId)}`, principal),
+  });
+
+  registerTool({
+    name: "time.list",
+    description: "List time entries, optionally filtered by projectId, taskId, or mine=me.",
+    minAssurance: "low",
+    inputSchema: {
+      type: "object",
+      properties: {
+        tenantId: { type: "string" },
+        projectId: { type: "string" },
+        taskId: { type: "string" },
+        mine: { type: "string", description: "'me' to restrict to the caller's own entries" },
+      },
+      required: ["tenantId"],
+    },
+    handler: (args, principal) => {
+      const q = new URLSearchParams();
+      if (args.projectId) q.set("projectId", String(args.projectId));
+      if (args.taskId) q.set("taskId", String(args.taskId));
+      if (args.mine) q.set("mine", String(args.mine));
+      const qs = q.toString();
+      return platformGet(`/api/${String(args.tenantId)}/time-entries${qs ? `?${qs}` : ""}`, principal);
+    },
+  });
+
+  registerTool({
+    name: "activity.feed",
+    description: "Recent activity feed for the company (who did what, newest first).",
+    minAssurance: "low",
+    inputSchema: {
+      type: "object",
+      properties: { tenantId: { type: "string" }, limit: { type: "number", description: "1..100 (default 20)" } },
+      required: ["tenantId"],
+    },
+    handler: (args, principal) => {
+      const limit = args.limit ? `?limit=${Number(args.limit)}` : "";
+      return platformGet(`/api/${String(args.tenantId)}/activity${limit}`, principal);
+    },
   });
 
   registerTool({
@@ -106,17 +225,39 @@ export function registerPlatformTools(): void {
   });
 
   registerTool({
-    name: "agency.pendingApprovals",
-    description: "Approvals waiting for a decision (agency module).",
-    minAssurance: "low",
+    name: "agent.feedback",
+    description: "Give 👍/👎 feedback on an agent run (WS8 trainer signal). Your identity sets its trust: an unverified chat session's feedback is quarantined, never used to train.",
+    minAssurance: "low", // knowledge derives trust from the resolved identity (D9.3); low ⇒ quarantined
+    write: true,
+    impact: "low", // appends a feedback row; never a business mutation
     inputSchema: {
       type: "object",
-      properties: { tenantId: { type: "string" } },
-      required: ["tenantId"],
+      properties: {
+        runId: { type: "string", description: "the agent run id being rated" },
+        rating: { type: "string", enum: ["up", "down"] },
+        note: { type: "string" },
+      },
+      required: ["runId", "rating"],
     },
-    handler: (args, principal) =>
-      platformGet(`/api/${String(args.tenantId)}/modules/agency/approvals/pending`, principal),
+    handler: async (args, principal) => {
+      const res = await fetch(`${config.knowledgeUrl}/feedback`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${config.knowledgeToken}`,
+          "x-obo-provider": principal.provider,
+          "x-obo-external-id": principal.externalId,
+        },
+        body: JSON.stringify({ runId: String(args.runId ?? ""), rating: args.rating, note: args.note }),
+      });
+      if (!res.ok) throw new Error(`knowledge /feedback ${res.status}`);
+      return JSON.stringify(await res.json());
+    },
   });
+
+  // NOTE: module-owned tools (e.g. agency.listCampaigns / agency.pendingApprovals) are no longer
+  // hardcoded here — they are aggregated from the platform's ModuleContract.mcpTools at boot via
+  // module-tools.ts (WS2 §6). Only core/cross-module tools live in this file.
 
   registerTool({
     name: "compliance.gates",

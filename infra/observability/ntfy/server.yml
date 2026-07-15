@@ -1,0 +1,8 @@
+# WS9 self-hosted ntfy — independent push transport (D15). Trial defaults: open on the compose
+# network only (never published to the internet). Alertmanager POSTs to http://ntfy/gaiada-alerts.
+base-url: "http://ntfy"
+listen-http: ":80"
+behind-proxy: false
+# Trial: no auth (network-internal only). For a public deploy, set auth-default-access: deny and
+# create tokens — see infra/runbooks/observability.md.
+auth-default-access: "read-write"

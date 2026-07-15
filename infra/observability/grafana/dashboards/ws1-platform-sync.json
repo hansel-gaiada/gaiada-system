@@ -1,0 +1,48 @@
+{
+  "uid": "gaiada-ws1",
+  "title": "Gaiada — WS1 Platform & Sync",
+  "tags": ["gaiada", "ws1", "platform", "sync"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Events consumed/s by outcome",
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [ { "expr": "sum by (entity_type, result) (rate(platform_events_consumed_total[5m]))", "legendFormat": "{{entity_type}} {{result}}", "refId": "A" } ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Event processing lag p95 (ms)",
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [ { "expr": "histogram_quantile(0.95, sum by (le) (rate(platform_event_processing_lag_ms_bucket[5m])))", "legendFormat": "p95", "refId": "A" } ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Sync events applied vs rejected/s",
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 7 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [
+        { "expr": "rate(sync_events_applied_total[5m])", "legendFormat": "applied", "refId": "A" },
+        { "expr": "sum by (reason) (rate(sync_events_rejected_total[5m]))", "legendFormat": "rejected {{reason}}", "refId": "B" }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Sync freshness (s since last success)",
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 7 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "fieldConfig": { "defaults": { "unit": "s", "thresholds": { "steps": [ { "color": "green", "value": null }, { "color": "yellow", "value": 300 }, { "color": "red", "value": 900 } ] } } },
+      "targets": [ { "expr": "max(sync_seconds_since_last_success)", "refId": "A" } ]
+    }
+  ]
+}

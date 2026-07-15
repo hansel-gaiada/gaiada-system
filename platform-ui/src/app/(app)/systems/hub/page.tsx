@@ -37,11 +37,16 @@ export default async function HubSystemPage() {
         <Card title="Tool registry">
           {tools.length > 0 ? (
             <HairlineTable
-              columns={[{ label: "Tool" }, { label: "Description" }, { label: "Min assurance" }]}
+              columns={[{ label: "Tool" }, { label: "Description" }, { label: "Min assurance" }, { label: "Kind" }]}
               rows={tools.map((tool) => [
                 tool.name,
                 tool.description,
                 <StatusBadge key="assurance" label={tool.minAssurance} />,
+                tool.write ? (
+                  <StatusBadge key="kind" label={`write · ${tool.impact ?? "unclassified"}`} />
+                ) : (
+                  <StatusBadge key="kind" label="read" />
+                ),
               ])}
             />
           ) : (

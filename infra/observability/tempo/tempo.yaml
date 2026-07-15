@@ -1,0 +1,29 @@
+# WS9 Tempo — trace backend. Single-binary, local filesystem storage (trial scale). Receives OTLP
+# from the collector; Grafana queries it as the Tempo datasource (with trace↔log correlation to Loki).
+server:
+  http_listen_port: 3200
+
+distributor:
+  receivers:
+    otlp:
+      protocols:
+        grpc:
+          endpoint: 0.0.0.0:4317
+
+ingester:
+  max_block_duration: 5m
+
+compactor:
+  compaction:
+    block_retention: 168h # 7 days of traces at trial scale
+
+storage:
+  trace:
+    backend: local
+    local:
+      path: /var/tempo/blocks
+    wal:
+      path: /var/tempo/wal
+
+usage_report:
+  reporting_enabled: false

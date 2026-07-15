@@ -32,6 +32,53 @@ func TestTakeBudgetRefusesAtTenantCapBeforeGlobal(t *testing.T) {
 	}
 }
 
+func TestDRBurstRaisesGlobalCapWhileActiveThenExpires(t *testing.T) {
+	b := NewBudget(1, 100)
+	now := time.Now()
+	// Steady cap is 1; spend it.
+	if ok, _ := b.Take("", now); !ok {
+		t.Fatal("first steady call should succeed")
+	}
+	if ok, scope := b.Take("", now); ok || scope != "global" {
+		t.Fatalf("steady cap should be exhausted, got ok=%v scope=%q", ok, scope)
+	}
+	// Declare failover: +5 burst for 1h. Now more calls are allowed, but still bounded.
+	b.EnableDR(now, time.Hour, 5)
+	if !b.DRModeActive(now) {
+		t.Fatal("DR mode should be active")
+	}
+	got := 0
+	for i := 0; i < 10; i++ {
+		if ok, _ := b.Take("", now); ok {
+			got++
+		}
+	}
+	if got != 5 {
+		t.Fatalf("DR burst should allow exactly the burst cap (5) more calls, got %d", got)
+	}
+	// After the window, DR is inactive again (time-boxed, no runaway).
+	later := now.Add(2 * time.Hour)
+	if b.DRModeActive(later) {
+		t.Fatal("DR mode should have expired")
+	}
+}
+
+func TestDisableDREndsBurstImmediately(t *testing.T) {
+	b := NewBudget(0, 100)
+	now := time.Now()
+	b.EnableDR(now, time.Hour, 3)
+	if ok, _ := b.Take("", now); !ok {
+		t.Fatal("DR burst should allow a call above the zero steady cap")
+	}
+	b.DisableDR()
+	if b.DRModeActive(now) {
+		t.Fatal("DR mode should be off after DisableDR")
+	}
+	if ok, scope := b.Take("", now); ok || scope != "global" {
+		t.Fatalf("with DR off and steady cap 0, calls must be refused, got ok=%v scope=%q", ok, scope)
+	}
+}
+
 func TestBudgetRollsOverAtDayBoundary(t *testing.T) {
 	b := NewBudget(1, 10)
 	day1 := time.Date(2026, 7, 6, 23, 59, 0, 0, time.UTC)

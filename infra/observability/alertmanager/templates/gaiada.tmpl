@@ -1,0 +1,7 @@
+{{ define "gaiada.telegram" }}
+{{ if eq .Status "firing" }}🔴{{ else }}✅{{ end }} <b>{{ .CommonLabels.alertname }}</b> ({{ .Status }})
+{{ range .Alerts }}
+• {{ .Annotations.summary }}
+  {{ .Annotations.description }}
+{{ end }}
+{{ end }}

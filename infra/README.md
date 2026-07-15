@@ -19,6 +19,14 @@ is deliberately hiring-gated; see the specs.
 | Uptime alerting (cron pings each `/health`, alerts to Telegram on failure) | `scripts/healthcheck.sh` |
 | Local CI (typecheck + all test suites) | `scripts/test-all.sh` |
 | GitHub Actions CI (Node matrix + dedicated platform-nest / gateway-go / sync-engine-go jobs) | `../.github/workflows/ci.yml` |
+| **Supply-chain-secure release** (WS10): build+push each image to GHCR, then SBOM + cosign **keyless** sign + **SLSA** provenance attestation. Tag-/dispatch-gated; verify with `cosign verify` / `gh attestation verify`. | `../.github/workflows/release.yml` |
+| Local model serving + model-registry approval + GPU sizing | `runbooks/local-model-serving.md` |
+
+## WS10 — Platform Engineering & Delivery
+
+v1 is **managed-first** (single-host compose + the secure release pipeline above); full
+K8s/GitOps/SPIFFE/IDP is **target-state, hiring/hardware-gated** per the roadmap's Solo-Viable
+decision. Build order + decisions to lock: `../docs/superpowers/plans/2026-07-15-ws10-platform-engineering-plan.md`.
 
 ## Next steps (when they earn their keep)
 

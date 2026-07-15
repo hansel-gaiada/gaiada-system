@@ -41,6 +41,9 @@ export interface HubTool {
   name: string;
   description: string;
   minAssurance: string;
+  // The hub's /tools endpoint also reports whether a tool mutates and its D14 impact tier.
+  write?: boolean;
+  impact?: "low" | "medium" | "high" | null;
 }
 
 export interface AgentGoal {

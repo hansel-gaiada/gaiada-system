@@ -3,6 +3,7 @@
 // AI-backed tools wrap the Gateway (spec §6) — no provider keys in the hub.
 import { registerTool } from "./registry";
 import { gatewayComplete, gatewayMedia } from "./gateway-client";
+import { config } from "./config";
 
 export function registerCoreTools(): void {
   registerTool({
@@ -39,34 +40,100 @@ export function registerCoreTools(): void {
     },
   });
 
+  // Media extraction tools (spec §6). The Gateway routes by MIME internally, so ocr/vision/
+  // transcribe share one egress path — the distinct tool names give AI clients a precise verb
+  // and a schema hint for the file kind. `media.extract` stays as the general alias.
+  const mediaInput = (hint: string) => ({
+    type: "object",
+    properties: {
+      base64: { type: "string", description: "Base64-encoded file bytes" },
+      mime: { type: "string", description: hint },
+    },
+    required: ["base64", "mime"],
+  });
+  const mediaHandler = async (args: Record<string, unknown>): Promise<string> => {
+    const base64 = String(args.base64 ?? "");
+    const mime = String(args.mime ?? "");
+    if (!base64 || !mime) throw new Error("base64 and mime required");
+    return gatewayMedia(base64, mime);
+  };
+
   registerTool({
     name: "media.extract",
     description:
-      "Extract text from media via the governed AI Gateway: audio → transcript, image → description + visible text, pdf → text.",
+      "Extract text from any media via the governed AI Gateway: audio → transcript, image → description + visible text, pdf → text.",
     minAssurance: "low",
-    inputSchema: {
-      type: "object",
-      properties: {
-        base64: { type: "string", description: "Base64-encoded file bytes" },
-        mime: { type: "string", description: "MIME type, e.g. audio/ogg, image/jpeg, application/pdf" },
-      },
-      required: ["base64", "mime"],
-    },
-    handler: async (args) => {
-      const base64 = String(args.base64 ?? "");
-      const mime = String(args.mime ?? "");
-      if (!base64 || !mime) throw new Error("base64 and mime required");
-      return gatewayMedia(base64, mime);
+    inputSchema: mediaInput("MIME type, e.g. audio/ogg, image/jpeg, application/pdf"),
+    handler: mediaHandler,
+  });
+
+  registerTool({
+    name: "ocr.extract",
+    description: "OCR: extract visible text from an image or PDF via the governed AI Gateway.",
+    minAssurance: "low",
+    inputSchema: mediaInput("MIME type, e.g. image/jpeg, image/png, application/pdf"),
+    handler: mediaHandler,
+  });
+
+  registerTool({
+    name: "vision.describe",
+    description: "Describe an image (scene + any visible text) via the governed AI Gateway.",
+    minAssurance: "low",
+    inputSchema: mediaInput("Image MIME type, e.g. image/jpeg, image/png"),
+    handler: mediaHandler,
+  });
+
+  registerTool({
+    name: "media.transcribe",
+    description: "Transcribe audio to text via the governed AI Gateway.",
+    minAssurance: "low",
+    inputSchema: mediaInput("Audio MIME type, e.g. audio/ogg, audio/mpeg, audio/wav"),
+    handler: mediaHandler,
+  });
+
+  // Spec §6 lists image.enhance (Magnific). The Go Gateway exposes no image-enhance capability
+  // (only /complete, /media, /embed), so the tool is registered but fails closed with a clear
+  // message rather than pretending — it lights up when the Gateway adds the capability.
+  registerTool({
+    name: "image.enhance",
+    description: "Upscale/enhance an image (Magnific) via the governed AI Gateway — NOT YET ENABLED (no Gateway capability).",
+    minAssurance: "low",
+    inputSchema: mediaInput("Image MIME type, e.g. image/jpeg, image/png"),
+    handler: async () => {
+      throw new Error("image.enhance is not enabled: the AI Gateway exposes no image-enhance capability yet");
     },
   });
 
-  // Deliberately verified-only: demonstrates (and tests) the ceiling. No chat surface
-  // can reach it until platform-minted verified principals exist.
+  // Cross-company management rollups (§7). Verified-only (no chat surface can reach it) AND
+  // topology-scoped: only the CENTRAL hub serves real rollups, over the platform's D12 cross-
+  // company read path (GET /rollups — the single sanctioned cross-company read; the platform
+  // re-checks with Cerbos: platform_admin / group_executive). A site hub returns a clear note.
   registerTool({
     name: "rollup.metrics",
-    description: "Cross-company management rollups (verified principals only).",
+    description: "Cross-company management rollups (verified principals; central hub only).",
     minAssurance: "verified",
-    inputSchema: { type: "object", properties: {} },
-    handler: async () => JSON.stringify({ note: "management rollup placeholder" }),
+    inputSchema: {
+      type: "object",
+      properties: { period: { type: "string", description: "YYYY-MM-DD (defaults to today)" } },
+    },
+    handler: async (args, principal) => {
+      if (config.topology !== "central") {
+        return JSON.stringify({ note: "cross-company rollups are served by the central hub only", topology: config.topology });
+      }
+      const qs = args.period ? `?period=${encodeURIComponent(String(args.period))}` : "";
+      const res = await fetch(`${config.platformUrl}/rollups${qs}`, {
+        headers: {
+          Authorization: `Bearer ${config.platformToken}`,
+          "x-obo-provider": principal.provider,
+          "x-obo-external-id": principal.externalId,
+        },
+      });
+      if (res.status === 401 || res.status === 403) {
+        const b = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(b.error ?? "platform denied the request");
+      }
+      if (!res.ok) throw new Error(`platform /rollups ${res.status}`);
+      return JSON.stringify(await res.json());
+    },
   });
 }

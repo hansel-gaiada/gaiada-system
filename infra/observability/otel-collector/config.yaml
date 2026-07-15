@@ -1,0 +1,78 @@
+# WS9 OpenTelemetry Collector — the single ingest point for the estate's telemetry.
+# Services push OTLP (traces + metrics); this fans out to Tempo / Prometheus / Loki. Container
+# stdout (JSON logs with trace_id) is tailed by the filelog receiver and shipped to Loki, so the
+# services stay decoupled from the log backend.
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+  # Tail every gaiada container's JSON log file. The Docker json-file driver wraps each line as
+  # {"log": "...", "stream": "...", "time": "..."}; we unwrap `log`, then parse the service's own
+  # JSON (pino/slog) to lift trace_id/span_id/level so logs correlate to traces in Grafana.
+  filelog:
+    include:
+      - /var/lib/docker/containers/*/*-json.log
+    include_file_path: true
+    operators:
+      - type: json_parser
+        parse_from: body
+        parse_to: attributes.docker
+      - type: move
+        from: attributes.docker.log
+        to: body
+      - type: json_parser
+        parse_from: body
+        parse_to: attributes
+        if: 'body matches "^\\s*\\{"'
+      - type: severity_parser
+        parse_from: attributes.level
+        if: 'attributes.level != nil'
+
+processors:
+  batch:
+    timeout: 10s
+  resourcedetection:
+    detectors: [env, system]
+    timeout: 5s
+  # Cap memory so the collector can never OOM the box under a telemetry burst.
+  memory_limiter:
+    check_interval: 5s
+    limit_percentage: 80
+    spike_limit_percentage: 25
+
+exporters:
+  # Prometheus scrapes THIS endpoint for all app/business metrics pushed over OTLP.
+  prometheus:
+    endpoint: 0.0.0.0:8889
+    resource_to_telemetry_conversion:
+      enabled: true
+  otlp/tempo:
+    endpoint: tempo:4317
+    tls:
+      insecure: true
+  otlphttp/loki:
+    endpoint: http://loki:3100/otlp
+  debug:
+    verbosity: basic
+
+service:
+  telemetry:
+    logs:
+      level: info
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, resourcedetection, batch]
+      exporters: [otlp/tempo]
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, resourcedetection, batch]
+      exporters: [prometheus]
+    logs:
+      receivers: [otlp, filelog]
+      processors: [memory_limiter, resourcedetection, batch]
+      exporters: [otlphttp/loki]

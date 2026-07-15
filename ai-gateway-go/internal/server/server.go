@@ -19,6 +19,7 @@ import (
 	"gaiada/ai-gateway-go/internal/chain"
 	"gaiada/ai-gateway-go/internal/config"
 	"gaiada/ai-gateway-go/internal/dlp"
+	"gaiada/ai-gateway-go/internal/metrics"
 	"gaiada/ai-gateway-go/internal/providers"
 )
 
@@ -66,8 +67,20 @@ func classifierReachable(classifier *dlp.Classifier) bool {
 	return err == nil
 }
 
-func NewServer(cfg config.Config, chains Chains, b *budget.Budget, classifier *dlp.Classifier) *http.ServeMux {
+func NewServer(cfg config.Config, chains Chains, b *budget.Budget, classifier *dlp.Classifier, inst *metrics.Instruments) *http.ServeMux {
 	mux := http.NewServeMux()
+
+	// emit writes one egress-audit row AND mirrors it as a WS9 metric, keeping the two in lockstep
+	// (the audit stays the source of truth; the metric is a derived signal). Every former
+	// `audit.WriteAudit(cfg.AuditFile, …)` call site now goes through here.
+	emit := func(ctx context.Context, e audit.EgressAudit) {
+		_ = audit.WriteAudit(cfg.AuditFile, e)
+		provider := ""
+		if e.Provider != nil {
+			provider = *e.Provider
+		}
+		inst.RecordEgress(ctx, e.Capability, provider, e.OK, e.Blocked, e.LatencyMs)
+	}
 
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		body := map[string]any{
@@ -102,10 +115,35 @@ func NewServer(cfg config.Config, chains Chains, b *budget.Budget, classifier *d
 		writeJSON(w, 200, rows)
 	})
 
+	// WS9 D15 — declare/resolve a failover to (un)lock the bounded DR-burst budget. Bearer-gated.
+	// Body: {"enable":true,"durationMinutes":720}. durationMinutes optional (defaults to config).
+	mux.HandleFunc("POST /admin/dr-mode", func(w http.ResponseWriter, r *http.Request) {
+		if !authorized(r, cfg.GatewayToken) {
+			writeErr(w, 401, "unauthorized")
+			return
+		}
+		var body struct {
+			Enable          bool `json:"enable"`
+			DurationMinutes int  `json:"durationMinutes"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		now := time.Now()
+		if body.Enable {
+			mins := body.DurationMinutes
+			if mins <= 0 {
+				mins = cfg.DRDurationMin
+			}
+			b.EnableDR(now, time.Duration(mins)*time.Minute, cfg.DRBurstCap)
+		} else {
+			b.DisableDR()
+		}
+		writeJSON(w, 200, map[string]any{"drMode": b.DRModeActive(now), "budget": b.State(now)})
+	})
+
 	mux.HandleFunc("POST /complete", func(w http.ResponseWriter, r *http.Request) {
 		started := time.Now()
 		if !authorized(r, cfg.GatewayToken) {
-			_ = audit.WriteAudit(cfg.AuditFile, audit.EgressAudit{TS: started.UnixMilli(), Capability: "llm", OK: false, Blocked: "auth"})
+			emit(r.Context(), audit.EgressAudit{TS: started.UnixMilli(), Capability: "llm", OK: false, Blocked: "auth"})
 			writeErr(w, 401, "unauthorized")
 			return
 		}
@@ -119,19 +157,19 @@ func NewServer(cfg config.Config, chains Chains, b *budget.Budget, classifier *d
 		}
 		ok, scope := b.Take(tenantOf(r), started)
 		if !ok {
-			_ = audit.WriteAudit(cfg.AuditFile, audit.EgressAudit{TS: started.UnixMilli(), Capability: "llm", OK: false, Blocked: "budget"})
+			emit(r.Context(), audit.EgressAudit{TS: started.UnixMilli(), Capability: "llm", OK: false, Blocked: "budget"})
 			writeErr(w, 429, scope+" daily budget exceeded — degraded until tomorrow")
 			return
 		}
 		result, err := dlp.DLP(body.Prompt)
 		if err != nil {
-			_ = audit.WriteAudit(cfg.AuditFile, audit.EgressAudit{TS: started.UnixMilli(), Capability: "llm", OK: false, Blocked: "dlp", LatencyMs: time.Since(started).Milliseconds()})
+			emit(r.Context(), audit.EgressAudit{TS: started.UnixMilli(), Capability: "llm", OK: false, Blocked: "dlp", LatencyMs: time.Since(started).Milliseconds()})
 			writeErr(w, 503, err.Error())
 			return
 		}
 		if classifier != nil {
 			if allowed, cerr := classifier.Classify(r.Context(), result.Clean); cerr != nil || !allowed {
-				_ = audit.WriteAudit(cfg.AuditFile, audit.EgressAudit{TS: started.UnixMilli(), Capability: "llm", OK: false, Blocked: "dlp", Redactions: len(result.Redactions), LatencyMs: time.Since(started).Milliseconds()})
+				emit(r.Context(), audit.EgressAudit{TS: started.UnixMilli(), Capability: "llm", OK: false, Blocked: "dlp", Redactions: len(result.Redactions), LatencyMs: time.Since(started).Milliseconds()})
 				msg := "DLP classifier blocked this request"
 				if cerr != nil {
 					msg = cerr.Error()
@@ -144,11 +182,11 @@ func NewServer(cfg config.Config, chains Chains, b *budget.Budget, classifier *d
 			return p.Complete(context.Background(), result.Clean)
 		})
 		if err != nil {
-			_ = audit.WriteAudit(cfg.AuditFile, audit.EgressAudit{TS: started.UnixMilli(), Capability: "llm", OK: false, Blocked: "provider", Redactions: len(result.Redactions), LatencyMs: time.Since(started).Milliseconds()})
+			emit(r.Context(), audit.EgressAudit{TS: started.UnixMilli(), Capability: "llm", OK: false, Blocked: "provider", Redactions: len(result.Redactions), LatencyMs: time.Since(started).Milliseconds()})
 			writeErr(w, 502, err.Error())
 			return
 		}
-		_ = audit.WriteAudit(cfg.AuditFile, audit.EgressAudit{TS: started.UnixMilli(), Capability: "llm", Provider: strPtr(provider), OK: true, Redactions: len(result.Redactions), LatencyMs: time.Since(started).Milliseconds()})
+		emit(r.Context(), audit.EgressAudit{TS: started.UnixMilli(), Capability: "llm", Provider: strPtr(provider), OK: true, Redactions: len(result.Redactions), LatencyMs: time.Since(started).Milliseconds()})
 		// Report the provider that actually served (after any failover) so a WS8 write-capable agent
 		// can enforce the D13 failover gate + WS9 can attribute the run. Additive/back-compatible.
 		writeJSON(w, 200, map[string]string{"text": text, "provider": provider})
@@ -157,7 +195,7 @@ func NewServer(cfg config.Config, chains Chains, b *budget.Budget, classifier *d
 	mux.HandleFunc("POST /media", func(w http.ResponseWriter, r *http.Request) {
 		started := time.Now()
 		if !authorized(r, cfg.GatewayToken) {
-			_ = audit.WriteAudit(cfg.AuditFile, audit.EgressAudit{TS: started.UnixMilli(), Capability: "media", OK: false, Blocked: "auth"})
+			emit(r.Context(), audit.EgressAudit{TS: started.UnixMilli(), Capability: "media", OK: false, Blocked: "auth"})
 			writeErr(w, 401, "unauthorized")
 			return
 		}
@@ -172,7 +210,7 @@ func NewServer(cfg config.Config, chains Chains, b *budget.Budget, classifier *d
 		}
 		ok, scope := b.Take(tenantOf(r), started)
 		if !ok {
-			_ = audit.WriteAudit(cfg.AuditFile, audit.EgressAudit{TS: started.UnixMilli(), Capability: "media", OK: false, Blocked: "budget"})
+			emit(r.Context(), audit.EgressAudit{TS: started.UnixMilli(), Capability: "media", OK: false, Blocked: "budget"})
 			writeErr(w, 429, scope+" daily budget exceeded — degraded until tomorrow")
 			return
 		}
@@ -180,24 +218,24 @@ func NewServer(cfg config.Config, chains Chains, b *budget.Budget, classifier *d
 			return p.Media(context.Background(), body.Base64, body.Mime)
 		})
 		if err != nil {
-			_ = audit.WriteAudit(cfg.AuditFile, audit.EgressAudit{TS: started.UnixMilli(), Capability: "media", OK: false, Blocked: "provider", LatencyMs: time.Since(started).Milliseconds()})
+			emit(r.Context(), audit.EgressAudit{TS: started.UnixMilli(), Capability: "media", OK: false, Blocked: "provider", LatencyMs: time.Since(started).Milliseconds()})
 			writeErr(w, 502, err.Error())
 			return
 		}
 		result, err := dlp.DLP(text)
 		if err != nil {
-			_ = audit.WriteAudit(cfg.AuditFile, audit.EgressAudit{TS: started.UnixMilli(), Capability: "media", OK: false, Blocked: "dlp", LatencyMs: time.Since(started).Milliseconds()})
+			emit(r.Context(), audit.EgressAudit{TS: started.UnixMilli(), Capability: "media", OK: false, Blocked: "dlp", LatencyMs: time.Since(started).Milliseconds()})
 			writeErr(w, 503, err.Error())
 			return
 		}
-		_ = audit.WriteAudit(cfg.AuditFile, audit.EgressAudit{TS: started.UnixMilli(), Capability: "media", Provider: strPtr(provider), OK: true, Redactions: len(result.Redactions), LatencyMs: time.Since(started).Milliseconds()})
+		emit(r.Context(), audit.EgressAudit{TS: started.UnixMilli(), Capability: "media", Provider: strPtr(provider), OK: true, Redactions: len(result.Redactions), LatencyMs: time.Since(started).Milliseconds()})
 		writeJSON(w, 200, map[string]string{"text": result.Clean})
 	})
 
 	mux.HandleFunc("POST /embed", func(w http.ResponseWriter, r *http.Request) {
 		started := time.Now()
 		if !authorized(r, cfg.GatewayToken) {
-			_ = audit.WriteAudit(cfg.AuditFile, audit.EgressAudit{TS: started.UnixMilli(), Capability: "embed", OK: false, Blocked: "auth"})
+			emit(r.Context(), audit.EgressAudit{TS: started.UnixMilli(), Capability: "embed", OK: false, Blocked: "auth"})
 			writeErr(w, 401, "unauthorized")
 			return
 		}
@@ -211,13 +249,13 @@ func NewServer(cfg config.Config, chains Chains, b *budget.Budget, classifier *d
 		}
 		ok, scope := b.Take(tenantOf(r), started)
 		if !ok {
-			_ = audit.WriteAudit(cfg.AuditFile, audit.EgressAudit{TS: started.UnixMilli(), Capability: "embed", OK: false, Blocked: "budget"})
+			emit(r.Context(), audit.EgressAudit{TS: started.UnixMilli(), Capability: "embed", OK: false, Blocked: "budget"})
 			writeErr(w, 429, scope+" daily budget exceeded — degraded until tomorrow")
 			return
 		}
 		result, err := dlp.DLP(body.Text)
 		if err != nil {
-			_ = audit.WriteAudit(cfg.AuditFile, audit.EgressAudit{TS: started.UnixMilli(), Capability: "embed", OK: false, Blocked: "dlp", LatencyMs: time.Since(started).Milliseconds()})
+			emit(r.Context(), audit.EgressAudit{TS: started.UnixMilli(), Capability: "embed", OK: false, Blocked: "dlp", LatencyMs: time.Since(started).Milliseconds()})
 			writeErr(w, 503, err.Error())
 			return
 		}
@@ -225,11 +263,11 @@ func NewServer(cfg config.Config, chains Chains, b *budget.Budget, classifier *d
 			return p.Embed(context.Background(), result.Clean)
 		})
 		if err != nil {
-			_ = audit.WriteAudit(cfg.AuditFile, audit.EgressAudit{TS: started.UnixMilli(), Capability: "embed", OK: false, Blocked: "provider", Redactions: len(result.Redactions), LatencyMs: time.Since(started).Milliseconds()})
+			emit(r.Context(), audit.EgressAudit{TS: started.UnixMilli(), Capability: "embed", OK: false, Blocked: "provider", Redactions: len(result.Redactions), LatencyMs: time.Since(started).Milliseconds()})
 			writeErr(w, 502, err.Error())
 			return
 		}
-		_ = audit.WriteAudit(cfg.AuditFile, audit.EgressAudit{TS: started.UnixMilli(), Capability: "embed", Provider: strPtr(provider), OK: true, Redactions: len(result.Redactions), LatencyMs: time.Since(started).Milliseconds()})
+		emit(r.Context(), audit.EgressAudit{TS: started.UnixMilli(), Capability: "embed", Provider: strPtr(provider), OK: true, Redactions: len(result.Redactions), LatencyMs: time.Since(started).Milliseconds()})
 		writeJSON(w, 200, map[string]any{"embedding": embedding})
 	})
 

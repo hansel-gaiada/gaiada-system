@@ -1,0 +1,78 @@
+# WS9 / D15 Alertmanager — fans alerts to ≥2 INDEPENDENT transports so a single failing path can't
+# hide an incident, plus a dead-man's-switch route. Secrets come from the environment (Alertmanager
+# expands ${VAR} when started with --enable-feature=... no — it does NOT expand env by default, so
+# these are templated by envsubst at deploy time OR set here directly; see deploy-vps.md). Transports:
+#   1. Telegram   (transport #1, already used by the cron healthcheck)
+#   2. Email/SMTP (independent path)
+#   3. ntfy       (self-hosted push, independent of any third party)
+#   4. Webhook    (generic — Slack/Discord/custom)
+#   + Watchdog → external dead-man's-switch (healthchecks.io / Cronitor)
+global:
+  resolve_timeout: 5m
+  smtp_smarthost: "${SMTP_SMARTHOST}"
+  smtp_from: "${SMTP_FROM}"
+  smtp_auth_username: "${SMTP_USERNAME}"
+  smtp_auth_password: "${SMTP_PASSWORD}"
+
+route:
+  receiver: default-multi
+  group_by: ["alertname", "instance"]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  routes:
+    # The always-firing heartbeat goes ONLY to the external dead-man's-switch, never to humans.
+    - matchers: ['severity="watchdog"']
+      receiver: deadmansswitch
+      group_wait: 0s
+      group_interval: 1m
+      repeat_interval: 1m
+      continue: false
+    # Pages hit every human transport immediately.
+    - matchers: ['severity="page"']
+      receiver: page-all
+      group_wait: 10s
+      repeat_interval: 1h
+
+receivers:
+  # Default: Telegram + email (two independent paths) for tickets and anything unmatched.
+  - name: default-multi
+    telegram_configs:
+      - bot_token: "${TELEGRAM_BOT_TOKEN}"
+        chat_id: ${ALERT_CHAT_ID}
+        api_url: "https://api.telegram.org"
+        message: '{{ template "gaiada.telegram" . }}'
+        send_resolved: true
+    email_configs:
+      - to: "${ALERT_EMAIL_TO}"
+        send_resolved: true
+
+  # Pages: all four transports at once — maximal independence for the worst incidents.
+  - name: page-all
+    telegram_configs:
+      - bot_token: "${TELEGRAM_BOT_TOKEN}"
+        chat_id: ${ALERT_CHAT_ID}
+        api_url: "https://api.telegram.org"
+        message: '{{ template "gaiada.telegram" . }}'
+        send_resolved: true
+    email_configs:
+      - to: "${ALERT_EMAIL_TO}"
+        send_resolved: true
+    webhook_configs:
+      # ntfy: self-hosted push. ntfy accepts a JSON webhook on its topic URL.
+      - url: "http://ntfy/gaiada-alerts"
+        send_resolved: true
+      # Generic webhook (Slack/Discord/custom) — set ALERT_WEBHOOK_URL, else this receiver entry is
+      # harmlessly a duplicate ntfy post; deploy notes explain wiring the real endpoint.
+      - url: "${ALERT_WEBHOOK_URL}"
+        send_resolved: true
+
+  # Dead-man's-switch: post the heartbeat to an EXTERNAL monitor. If Prometheus/Alertmanager die,
+  # the external monitor stops receiving pings and raises the alarm out-of-band.
+  - name: deadmansswitch
+    webhook_configs:
+      - url: "${DEADMANSSWITCH_URL}"
+        send_resolved: false
+
+templates:
+  - /etc/alertmanager/templates/*.tmpl

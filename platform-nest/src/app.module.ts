@@ -17,6 +17,7 @@ import { CompanyAdminController } from "./admin/company-admin.controller";
 import { AdminSystemsController } from "./admin/admin-systems.controller";
 import { IntelligenceController } from "./admin/intelligence.controller";
 import { AgencyController } from "./modules/agency/agency.controller";
+import { McpToolsController } from "./modules/mcp-tools.controller";
 
 @Module({
   controllers: [
@@ -25,6 +26,8 @@ import { AgencyController } from "./modules/agency/agency.controller";
     CompanyAdminController, AdminSystemsController, IntelligenceController,
     // Vertical modules (compiled-in; per-tenant enable gate at the controller).
     AgencyController,
+    // MCP tool-def aggregation for the hub (WS2 §6).
+    McpToolsController,
   ],
 })
 export class AppModule {}

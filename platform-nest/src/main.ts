@@ -2,10 +2,13 @@
 // perf profile AND `app.inject(...)`, so the existing platform test suite can run against the
 // Nest app unchanged as the contract-parity oracle. buildApp() is the buildServer() analogue.
 import "reflect-metadata";
+// WS9: start OpenTelemetry BEFORE any module that touches http/pg/ioredis, so auto-instrumentation
+// patches them. No-op unless OTEL_ENABLED. Must stay above the AppModule import.
+import { fastifyLoggerOption } from "./telemetry";
 import { NestFactory } from "@nestjs/core";
 import { FastifyAdapter, type NestFastifyApplication } from "@nestjs/platform-fastify";
 import { AppModule } from "./app.module";
-import { config, n8nBridgeEnabled } from "./config";
+import { config, n8nBridgeEnabled, graphBridgeEnabled } from "./config";
 import { HttpErrorFilter } from "./http-error.filter";
 import { migrate } from "./db/migrate";
 import { getPool } from "./db";
@@ -17,9 +20,16 @@ import { clientWorkRollups } from "./core/client-work";
 import { startRelayLoop } from "./events/relay";
 import { startConsumerLoop } from "./events/consumer.service";
 import { startN8nBridgeLoop } from "./events/n8n-bridge";
+import { startGraphBridgeLoop } from "./events/graph-bridge";
 
 export async function buildApp(): Promise<NestFastifyApplication> {
-  const app = await NestFactory.create<NestFastifyApplication>(AppModule, new FastifyAdapter(), { logger: false });
+  // Fastify logs are pino JSON with trace_id/span_id when OTEL is on, else stay off (unchanged
+  // default preserved for the test oracle).
+  const app = await NestFactory.create<NestFastifyApplication>(
+    AppModule,
+    new FastifyAdapter({ logger: fastifyLoggerOption() as never }),
+    { logger: false },
+  );
   // No global prefix: the core controller is @Controller("api"); health/principal/enroll/admin/
   // dev controllers sit at the root, matching the Fastify server's paths exactly.
   // { error: msg } error bodies, matching the Fastify server (UI/bot read `.error`).
@@ -48,6 +58,12 @@ async function bootstrap(): Promise<void> {
       startN8nBridgeLoop(config.n8nBridge.entityTypes);
       // eslint-disable-next-line no-console
       console.log(`n8n bridge on: events [${config.n8nBridge.events.join(", ")}] over streams [${config.n8nBridge.entityTypes.join(", ")}]`);
+    }
+    // Event → knowledge-graph bridge (WS8 Step E): forward business events to the knowledge service.
+    if (graphBridgeEnabled()) {
+      startGraphBridgeLoop(config.graphBridge.entityTypes);
+      // eslint-disable-next-line no-console
+      console.log(`graph bridge on: streams [${config.graphBridge.entityTypes.join(", ")}] -> knowledge /graph/ingest`);
     }
   }
   const app = await buildApp();

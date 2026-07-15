@@ -10,8 +10,10 @@ import (
 	"net/http"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
 	"gaiada/sync-engine-go/internal/conflict"
+	"gaiada/sync-engine-go/internal/metrics"
 	"gaiada/sync-engine-go/internal/mtls"
 	"gaiada/sync-engine-go/internal/protocol"
 )
@@ -23,15 +25,19 @@ type AnomalyFunc func(nodeID, tenantID, outboxID, reason string)
 type Server struct {
 	pool    *pgxpool.Pool
 	anomaly AnomalyFunc
+	metrics *metrics.Instruments
 }
 
-func New(pool *pgxpool.Pool, anomaly AnomalyFunc) *Server {
+func New(pool *pgxpool.Pool, anomaly AnomalyFunc, inst *metrics.Instruments) *Server {
 	if anomaly == nil {
 		anomaly = func(nodeID, tenantID, outboxID, reason string) {
 			log.Printf("sync anomaly: node=%s tenant=%s event=%s reason=%s", nodeID, tenantID, outboxID, reason)
 		}
 	}
-	return &Server{pool: pool, anomaly: anomaly}
+	if inst == nil {
+		inst = metrics.New()
+	}
+	return &Server{pool: pool, anomaly: anomaly, metrics: inst}
 }
 
 func (s *Server) Handler() http.Handler {
@@ -39,7 +45,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/sync/push", s.handlePush)
 	mux.HandleFunc("/sync/pull", s.handlePull)
 	mux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok")) })
-	return mux
+	// Every inbound request extracts traceparent and gets a server span (no-op when OTEL is off).
+	return otelhttp.NewHandler(mux, "sync")
 }
 
 func (s *Server) handlePush(w http.ResponseWriter, r *http.Request) {
@@ -67,12 +74,14 @@ func (s *Server) handlePush(w http.ResponseWriter, r *http.Request) {
 		if !authorized {
 			// D5: reject out-of-scope to the anomaly path — not silent.
 			s.anomaly(nodeID, wev.TenantID, wev.OutboxID, "tenant not in site_subscriptions")
+			s.metrics.RecordRejected(r.Context(), "acl")
 			res.Rejected = append(res.Rejected, wev.OutboxID)
 			continue
 		}
 		ev, err := protocol.ToIncoming(wev)
 		if err != nil {
 			s.anomaly(nodeID, wev.TenantID, wev.OutboxID, "malformed hlc")
+			s.metrics.RecordRejected(r.Context(), "malformed_hlc")
 			res.Rejected = append(res.Rejected, wev.OutboxID)
 			continue
 		}
@@ -82,6 +91,7 @@ func (s *Server) handlePush(w http.ResponseWriter, r *http.Request) {
 		}
 		res.Applied++
 	}
+	s.metrics.RecordApplied(r.Context(), res.Applied)
 	writeJSON(w, res)
 }
 

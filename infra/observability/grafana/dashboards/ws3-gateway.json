@@ -1,0 +1,51 @@
+{
+  "uid": "gaiada-ws3-gateway",
+  "title": "Gaiada — WS3 AI Gateway",
+  "tags": ["gaiada", "ws3", "gateway"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Egress requests/s by capability & outcome",
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [ { "expr": "sum by (capability, ok) (rate(gateway_egress_requests_total[5m]))", "legendFormat": "{{capability}} ok={{ok}}", "refId": "A" } ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Blocked egress by reason/s",
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [ { "expr": "sum by (blocked) (rate(gateway_egress_requests_total{ok=\"false\"}[5m]))", "legendFormat": "{{blocked}}", "refId": "A" } ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Egress latency p50/p95 (ms)",
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 7 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [
+        { "expr": "histogram_quantile(0.5, sum by (le, capability) (rate(gateway_egress_latency_ms_bucket[5m])))", "legendFormat": "p50 {{capability}}", "refId": "A" },
+        { "expr": "histogram_quantile(0.95, sum by (le, capability) (rate(gateway_egress_latency_ms_bucket[5m])))", "legendFormat": "p95 {{capability}}", "refId": "B" }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Daily budget used vs cap (+ active tenants)",
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 7 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [
+        { "expr": "gateway_budget_calls_used", "legendFormat": "used", "refId": "A" },
+        { "expr": "gateway_budget_calls_cap", "legendFormat": "cap", "refId": "B" },
+        { "expr": "gateway_budget_active_tenants", "legendFormat": "tenants", "refId": "C" }
+      ]
+    }
+  ]
+}

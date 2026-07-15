@@ -1,5 +1,6 @@
 // Run a specialist from the command line:
 //   npm run run-agent -- status-reporter "How are our projects doing? tenant=<uuid>" whatsapp 628110@c.us
+import "./telemetry"; // WS9: start OTel first (no-op unless OTEL_ENABLED)
 import { runAgent } from "./agent";
 import { runOrchestrator } from "./orchestrator";
 import { runWriteAgent } from "./write-agent";

@@ -12,6 +12,7 @@ import (
 	"gaiada/ai-gateway-go/internal/budget"
 	"gaiada/ai-gateway-go/internal/chain"
 	"gaiada/ai-gateway-go/internal/config"
+	"gaiada/ai-gateway-go/internal/metrics"
 	"gaiada/ai-gateway-go/internal/providers"
 )
 
@@ -25,7 +26,7 @@ func testServer(t *testing.T, token string) *httptest.Server {
 		Embed: chain.NewChain([]providers.Provider{echo}, 3, 60_000, time.Now),
 	}
 	// classifier nil: contract parity with the Node gateway (no model-assisted DLP by default).
-	return httptest.NewServer(NewServer(cfg, chains, budget.NewBudget(cfg.DailyCallCap, cfg.PerTenantDailyCallCap), nil))
+	return httptest.NewServer(NewServer(cfg, chains, budget.NewBudget(cfg.DailyCallCap, cfg.PerTenantDailyCallCap), nil, metrics.New()))
 }
 
 func postJSON(t *testing.T, srv *httptest.Server, path, token string, body map[string]any) *http.Response {

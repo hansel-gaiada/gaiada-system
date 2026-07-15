@@ -17,15 +17,25 @@ import (
 	"gaiada/sync-engine-go/internal/config"
 	"gaiada/sync-engine-go/internal/db"
 	"gaiada/sync-engine-go/internal/gc"
+	"gaiada/sync-engine-go/internal/metrics"
 	"gaiada/sync-engine-go/internal/mtls"
 	"gaiada/sync-engine-go/internal/protocol"
 	"gaiada/sync-engine-go/internal/server"
+	"gaiada/sync-engine-go/internal/telemetry"
 )
 
 func main() {
 	cfg := config.Load()
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	// WS9 telemetry: fail-soft OTel + trace-correlated JSON logs.
+	telemetry.NewLogger("sync-engine")
+	shutdown, terr := telemetry.Init(ctx, "sync-engine")
+	if terr != nil {
+		log.Printf("telemetry init failed (continuing without it): %v", terr)
+	}
+	defer func() { _ = shutdown(context.Background()) }()
 
 	pool, err := db.NewPool(ctx, cfg.DatabaseURL)
 	if err != nil {
@@ -35,20 +45,21 @@ func main() {
 
 	log.Printf("sync-engine mode=%s node=%s origin=%s central=%s", cfg.Mode, cfg.NodeID, cfg.OriginSite, cfg.CentralURL)
 
+	inst := metrics.New()
 	switch cfg.Mode {
 	case "central":
-		runCentral(ctx, cfg, pool)
+		runCentral(ctx, cfg, pool, inst)
 	default:
-		runSite(ctx, cfg, pool)
+		runSite(ctx, cfg, pool, inst)
 	}
 }
 
-func runCentral(ctx context.Context, cfg config.Config, pool *pgxpool.Pool) {
+func runCentral(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, inst *metrics.Instruments) {
 	tlsCfg, err := mtls.ServerTLSConfig(cfg.CACertPath, cfg.CertPath, cfg.KeyPath, cfg.AllowedCNs)
 	if err != nil {
 		log.Fatalf("server TLS: %v", err)
 	}
-	srv := &http.Server{Addr: cfg.ListenAddr, Handler: server.New(pool, nil).Handler(), TLSConfig: tlsCfg}
+	srv := &http.Server{Addr: cfg.ListenAddr, Handler: server.New(pool, nil, inst).Handler(), TLSConfig: tlsCfg}
 
 	// Central also runs the tombstone GC sweep on the ticker (it holds every subscriber's cursor).
 	go tickerLoop(ctx, cfg, func() {
@@ -72,7 +83,7 @@ func runCentral(ctx context.Context, cfg config.Config, pool *pgxpool.Pool) {
 	}
 }
 
-func runSite(ctx context.Context, cfg config.Config, pool *pgxpool.Pool) {
+func runSite(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, inst *metrics.Instruments) {
 	client, err := mtls.NewClient(cfg.CACertPath, cfg.CertPath, cfg.KeyPath)
 	if err != nil {
 		log.Fatalf("mTLS client: %v", err)
@@ -87,13 +98,21 @@ func runSite(ctx context.Context, cfg config.Config, pool *pgxpool.Pool) {
 		}
 		if n, err := protocol.PushOnce(ctx, pool, client, cfg.CentralURL, cfg.NodeID, cfg.OriginSite, tenants); err != nil {
 			log.Printf("push: %v", err)
-		} else if n > 0 {
-			log.Printf("pushed %d events", n)
+			inst.RecordCycle(ctx, "push", false, 0)
+		} else {
+			inst.RecordCycle(ctx, "push", true, n)
+			if n > 0 {
+				log.Printf("pushed %d events", n)
+			}
 		}
 		if n, err := protocol.PullOnce(ctx, pool, client, cfg.CentralURL, cfg.NodeID); err != nil {
 			log.Printf("pull: %v", err)
-		} else if n > 0 {
-			log.Printf("pulled+applied %d events", n)
+			inst.RecordCycle(ctx, "pull", false, 0)
+		} else {
+			inst.RecordCycle(ctx, "pull", true, n)
+			if n > 0 {
+				log.Printf("pulled+applied %d events", n)
+			}
 		}
 		if cfg.GCEveryTicks > 0 && tick%cfg.GCEveryTicks == 0 {
 			if _, err := gc.Sweep(ctx, pool); err != nil {

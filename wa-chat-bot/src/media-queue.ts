@@ -5,6 +5,7 @@ import { Queue, Worker } from "bullmq";
 import { config } from "./config";
 import { getPendingMedia, updateMedia } from "./store";
 import { processMediaRow } from "./media";
+import { recordMediaEnqueued, recordMediaProcessed } from "./metrics";
 
 export const queueEnabled = (): boolean => config.redisUrl.length > 0;
 
@@ -29,6 +30,7 @@ export async function enqueueMedia(waMessageId: string): Promise<boolean> {
       { waMessageId },
       { jobId: waMessageId, attempts: 3, backoff: { type: "exponential", delay: 5000 }, removeOnComplete: true, removeOnFail: 100 },
     );
+    recordMediaEnqueued();
     return true;
   } catch (err) {
     console.warn(`[media-queue] enqueue failed (reconciler will catch it): ${(err as Error).message}`);
@@ -40,8 +42,17 @@ export async function enqueueMedia(waMessageId: string): Promise<boolean> {
 export async function handleMediaJob(waMessageId: string): Promise<"settled" | "not-pending"> {
   const rows = await getPendingMedia(100);
   const row = rows.find((r) => r.waMessageId === waMessageId);
-  if (!row) return "not-pending";
-  await processMediaRow(row);
+  if (!row) {
+    recordMediaProcessed("not-pending");
+    return "not-pending";
+  }
+  try {
+    await processMediaRow(row);
+  } catch (err) {
+    recordMediaProcessed("error");
+    throw err;
+  }
+  recordMediaProcessed("settled");
   return "settled";
 }
 

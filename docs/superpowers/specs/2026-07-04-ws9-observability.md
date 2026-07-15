@@ -1,7 +1,16 @@
 # Workstream 9 — Observability
 
 **Date:** 2026-07-04
-**Status:** Design stub (brainstorming stage — not being built yet)
+**Status:** ✅ BUILT (code-complete 2026-07-15). All 7 services instrumented with OpenTelemetry
+(traces + metrics + trace-correlated logs, W3C context propagation); self-hosted stack
+(OTel Collector → Prometheus/Tempo/Loki + Grafana + Alertmanager + exporters + ntfy) as an opt-in
+compose file; SLOs + multi-burn-rate alerts; per-workstream + exec dashboards; blackbox synthetic
+probes; and the **D15 carry-overs** (≥2 independent alert transports + dead-man's-switch, a measured
+restore drill, and a DR-burst AI budget). Verified by builds/tests + real config-linters
+(promtool/amtool/otelcol validate); the live `compose up` E2E run is deferred to a Docker host (no
+Docker in the dev env — same precedent as the Go-gateway cutover). Plan:
+`../plans/2026-07-15-ws9-observability-plan.md`; report:
+`../plans/2026-07-15-ws9-observability-completion-report.md`.
 **Parent:** `2026-07-04-gaiada-ai-platform-roadmap.md` (Workstream 9)
 **Scope:** System-wide observability — distinct from the WS7 security SIEM. How we see, measure, and operate the whole estate at top-tier grade.
 

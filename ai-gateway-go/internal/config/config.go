@@ -38,6 +38,12 @@ type Config struct {
 	DLPClassifierEnabled   bool
 	DLPClassifierModel     string
 	DLPClassifierTimeoutMs int
+	// WS9 D15 DR-burst budget: bounded, time-boxed AI-cost burst unlocked only on a declared
+	// failover. DRMode=true auto-declares at boot (env-driven failover); the /admin/dr-mode endpoint
+	// toggles it at runtime. Extra allowance is DRBurstCap for DRDurationMin minutes.
+	DRMode        bool
+	DRBurstCap    int
+	DRDurationMin int
 }
 
 func envBool(key string, fallback bool) bool {
@@ -111,5 +117,8 @@ func Load() Config {
 		DLPClassifierEnabled:   envBool("DLP_CLASSIFIER_ENABLED", false),
 		DLPClassifierModel:     envOr("DLP_CLASSIFIER_MODEL", envOr("OLLAMA_MODEL", "llama3.2")),
 		DLPClassifierTimeoutMs: envInt("DLP_CLASSIFIER_TIMEOUT_MS", 2000),
+		DRMode:                 envBool("DR_MODE", false),
+		DRBurstCap:             envInt("DR_BURST_CAP", 2000),
+		DRDurationMin:          envInt("DR_DURATION_MIN", 1440),
 	}
 }

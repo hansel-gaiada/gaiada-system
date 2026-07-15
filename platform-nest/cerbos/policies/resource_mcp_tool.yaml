@@ -1,0 +1,32 @@
+# WS2 §5 — MCP hub tool-call authorization, versioned. The hub delegates its per-call and
+# tool-visibility decisions to this policy (replacing the in-code policy module; the hub keeps the
+# same logic as a fail-closed fallback when Cerbos is unreachable). The hub principal is coarse:
+# an assurance level plus, for n8n automation callers, the workflow's scoped tool allow-list.
+#
+# Parity with mcp-hub/src/policy.ts:
+#   - assurance rank gate: anonymous(0) < low(1) < verified(2); caller rank >= tool.minAssurance.
+#   - automation (isAutomation): the tool must be in the workflow's scope, AND unattended runs may
+#     only perform LOW-impact writes — medium/high/unclassified writes are denied (the hub turns
+#     that denial into a "suspend for human approval", WS4 §3 / D14).
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: mcp_tool
+  rules:
+    - actions: ["call"]
+      effect: EFFECT_ALLOW
+      roles: ["hub_caller"]
+      condition:
+        match:
+          all:
+            of:
+              # Assurance sufficient for the tool's minimum.
+              - expr: >
+                  request.principal.attr.assurance == "verified" ||
+                  (request.principal.attr.assurance == "low" && request.resource.attr.minAssurance != "verified") ||
+                  (request.principal.attr.assurance == "anonymous" && request.resource.attr.minAssurance == "anonymous")
+              # Automation callers: in-scope AND (read/probe OR a low-impact write) only.
+              - expr: >
+                  !request.principal.attr.isAutomation ||
+                  (request.resource.attr.name in request.principal.attr.automationScope &&
+                   (!request.resource.attr.write || request.resource.attr.impact == "low"))

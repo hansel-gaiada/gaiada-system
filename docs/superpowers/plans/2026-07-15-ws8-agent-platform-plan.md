@@ -258,7 +258,22 @@ With §8 steps 1–6 code-complete, this batch closed the live wires and stood u
   proven: a fresh instance on the same DB sees prior approvals). This turns the trainer/feedback loop
   and the routing gate from in-memory into durable state.
 
-**Still open (genuinely infra / cross-repo, documented):** the Gateway consulting `isRoutable` before
-routing to a local model (now that the registry is durable/shareable, this is a read-endpoint away);
-**graph-ingestion live subscription** on the event backbone; a **UI feedback-capture** page writing
-trusted feedback into the durable episodic store; Temporal; and real GPU/serving/fine-tune provisioning (WS10).
+- **Graph-ingestion LIVE subscription — BUILT.** `platform-nest/src/events/graph-bridge.ts` — a
+  separate `graph-bridge` Redis consumer group over the entity streams forwarding every business event
+  to the knowledge service `POST /graph/ingest` (which maps it to source-of-truth nodes/edges).
+  Fail-closed via `graphBridgeEnabled()` (needs KNOWLEDGE_URL+token + `GRAPH_BRIDGE_ENTITY_TYPES`),
+  started in `main.ts`, dead-letters after 5. Compose + `.env.example` wired. +2 forward tests; the
+  `/graph/ingest` endpoint proven end-to-end in the service test (event → traversable node).
+- **Feedback data path + emitter — BUILT.** Knowledge `POST /feedback` writes into the durable
+  `PgEpisodicStore` with D9.3 trust derived from the resolved identity (verified member → trusted;
+  unresolved/low → quarantined). The hub `agent.feedback` tool (low write) is the OBO-carrying emitter
+  primitive any surface can call. Verified end-to-end (service test: trusted vs quarantined; hub test).
+  Note: the trust model is OBO-based, so the natural emitter is a chat/assistant surface (a 👍/👎
+  reaction → `agent.feedback`), NOT the platform-ui admin console (its users aren't OBO envelopes) —
+  the remaining bit is that thin bot/assistant UX hook, not the data path.
+
+**Still open (genuinely infra / product-surface, documented):** the Gateway consulting `isRoutable` —
+kept **operational** (the Go gateway routes by provider and holds no DB; the runbook has the operator
+set an approved model in the chain), not a per-request DB/HTTP lookup on the hot path; the **bot/
+assistant feedback UX hook** calling `agent.feedback`; Temporal; and real GPU/serving/fine-tune
+provisioning (WS10, runbook exists).
