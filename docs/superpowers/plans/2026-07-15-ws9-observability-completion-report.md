@@ -1,10 +1,14 @@
 # WS9 — Observability: completion report
 
 **Date:** 2026-07-15
-**Status:** ✅ CODE-COMPLETE. Full-estate OpenTelemetry + self-hosted Grafana stack + SLOs +
-dashboards + synthetic checks + the D15 resilience carry-overs. Verified by builds/tests + the real
-config-linters; the live `compose up` E2E run is **deferred to a Docker host** (no Docker in the dev
-env — the same precedent as the Go-gateway cutover).
+**Status:** ✅ COMPLETE **and verified end-to-end on a live Docker stack (2026-07-15).** Full-estate
+OpenTelemetry + self-hosted Grafana stack + SLOs + dashboards + functional synthetic journeys + the
+D15 resilience carry-overs. The pipeline was stood up for real (`docker compose … -f
+docker-compose.observability.yml up`), traffic driven, and traces/metrics/alerts/restore-drill
+observed working — which caught **three runtime bugs that builds/tests did not** (see "Bugs found by
+running it"). Not reproducible in this env: filelog→Loki log shipping (Docker Desktop denies the
+`/var/lib/docker/containers` bind; works on the Linux VPS) and actual external alert delivery (needs
+real Telegram/SMTP creds — routing to the receivers is verified).
 **Plan:** `2026-07-15-ws9-observability-plan.md`. **Spec:** `../specs/2026-07-04-ws9-observability.md`.
 
 ---
@@ -60,37 +64,61 @@ core services via merge-override env in that file, so the data plane never depen
 
 ---
 
-## Verification done here
+## Static verification
 
-- **Go**: `go build ./... && go vet ./... && go test ./...` green for both services (incl. new
-  DR-burst budget, telemetry no-op, and sync freshness-metric tests). DB-backed sync suite runs in CI.
-- **TS**: `tsc --noEmit` clean for all four projects; test suites green
-  (mcp-hub 51, wa-chat-bot 187 non-DB, ai-agents 87 incl. the new collector→OTel bridge test);
-  platform-nest `npm run build` green. Postgres/Cerbos/Redis-dependent suites run in CI as before.
-- **Config-linters (real tools, via WSL)**: `promtool check rules` (16 rules) + `promtool check
-  config` ✓; `amtool check-config` (env-rendered) ✓; `otelcol-contrib validate` ✓; YAML/JSON parse
-  for tempo/loki/grafana/blackbox/ntfy/compose ✓; `dash -n` for all scripts ✓. Wired into
-  `infra/scripts/lint-observability.sh`, `test-all.sh`, and a new CI `observability-lint` job.
+- **Go**: `go build/vet/test` green both services (incl. DR-burst budget, telemetry no-op, sync
+  freshness-metric tests). DB-backed sync suite runs in CI.
+- **TS**: `tsc --noEmit` clean all four; suites green (mcp-hub 51, wa-chat-bot 187 non-DB, ai-agents 87
+  incl. the collector→OTel bridge test); platform-nest `build` green.
+- **Config-linters (real tools)**: `promtool check rules` (17 rules incl. the synthetic-journey
+  alert) + `promtool check config` ✓; `amtool check-config` ✓; `otelcol validate` ✓; YAML/JSON parse
+  ✓; `dash -n` all scripts ✓. Wired into `lint-observability.sh` + a CI `observability-lint` job.
 - **Bonus fix**: normalized `infra/scripts/*.sh` to LF — `backup.sh`/`test-all.sh` had CRLF that
-  would have broken them under Linux `sh`/dash.
+  would break them under Linux `sh`/dash.
 
-## Deferred to a Docker host (checklist)
+## End-to-end verification on a live Docker stack (2026-07-15)
 
-The dev env has no Docker, so the stack was not run end-to-end. Before relying on it in prod:
+Brought the observability stack up alongside the running core stack and drove real traffic:
 
-- [ ] `docker compose -f docker-compose.vps.yml -f docker-compose.observability.yml up -d --build`
-      (also run `otelcol validate` there if not already).
-- [ ] Confirm a single request traces **end-to-end** surface→Gateway→MCP→platform→(sync) in Tempo,
-      with logs correlated by `trace_id` in Loki.
-- [ ] Confirm all four Grafana dashboards populate from Prometheus.
-- [ ] Fire a test alert and confirm delivery on **every** configured transport
-      (Telegram/email/ntfy/webhook) + that the external dead-man's-switch registers the heartbeat.
-- [ ] Run `restore-drill.sh` once; copy the measured RTO/RPO into `observability-slo.md`.
-- [ ] Exercise DR-mode (`POST /admin/dr-mode`) and confirm the `GatewayDRModeActive` alert.
+- **Docker builds**: the WS9-instrumented **Go gateway** and **TS mcp-hub** images build and run.
+- **Metrics**: drove 6 successful + 1 auth-blocked `/complete` calls across 2 tenants →
+  Prometheus shows `gateway_egress_requests_total{ok="true"}=6`, `{blocked="auth"}=1`,
+  `gateway_budget_calls_used=6`, `gateway_budget_active_tenants=2` — exact match. OTLP → collector →
+  Prometheus proven.
+- **Traces**: Tempo holds spans from `ai-gateway` (Go), `mcp-hub` + `platform` (TS NodeSDK) — both
+  instrumentation stacks confirmed.
+- **Observable gauges + DR-burst**: `POST /admin/dr-mode {enable:true}` → `gateway_dr_mode` flipped
+  1 in Prometheus; disabling flipped it back.
+- **Synthetic journeys**: the prober's 4 journeys (incl. a real AI completion through the provider
+  chain) all report `synthetic_journey_up=1` in Prometheus.
+- **SLO + operational alerts fired on real data** — `Watchdog`, `ServiceDown`, `SLOAvailabilityFastBurn`
+  (a service was intentionally absent) — and **Alertmanager received + routed them to the correct
+  D15 receivers** (`Watchdog → deadmansswitch`, page → `page-all` = all four transports). The
+  env-templated Alertmanager config renders + loads (via the init-render container).
+- **Grafana**: provisioned Prometheus/Tempo/Loki datasources (trace↔log correlation) confirmed.
+- **Restore drill**: created a real dump of `gaiada_platform`, ran `restore-drill.sh` → restored into
+  an isolated throwaway Postgres, integrity-checked (37 tables), **RTO=2s, RPO=0h**.
+
+### Bugs found by running it (that builds/tests did NOT catch)
+1. **Go resource schema-URL conflict** — `resource.Merge(Default(), NewWithAttributes(semconv.SchemaURL,…))`
+   errored at runtime (`conflicting Schema URL 1.41.0 vs 1.26.0`), so telemetry silently fell back to
+   no-op and exported nothing. Fixed: use `resource.NewSchemaless(…)`. (gateway + sync)
+2. **Alertmanager envsubst render** — the entrypoint did `apk add gettext` but `prom/alertmanager`
+   isn't Alpine, so `envsubst` was missing and it wrote an empty config ("no route provided"). Fixed:
+   a dedicated `alertmanager-render` init container (alpine + gettext) renders into a shared volume.
+3. **Restore into isolation failed on missing roles** — `backup.sh` dumps WITH ownership/GRANTs, so a
+   restore into a role-less instance errored under `ON_ERROR_STOP`. Fixed: the drill pre-creates the
+   cluster's roles as no-login stubs before restore.
+
+### Not reproducible in this env (works on the Linux VPS target)
+- **filelog → Loki**: Docker Desktop denies the `/var/lib/docker/containers` bind mount
+  (`permission denied`); the Linux VPS has no such restriction. Metrics/traces (OTLP push) are
+  unaffected and proven above.
+- **External alert delivery**: routing to the receivers is verified; actual send needs real
+  Telegram/SMTP/webhook creds.
 
 ## Known follow-ups (not blockers)
 
-- Synthetic **journeys** beyond HTTP liveness (authenticated bot-reply / assistant-skill / login
-  probes) — needs test credentials; staged as a follow-up.
+- Copy measured per-tier RTO/RPO into `observability-slo.md` after a few real weekly drills.
 - Metric cardinality/retention budget at multi-site scale (spec §5 open item).
 - Off-box backup shipping (P5f) and the WS10 zero-trust/GitOps items remain open.

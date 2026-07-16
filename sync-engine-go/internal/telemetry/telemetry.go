@@ -54,8 +54,10 @@ func Init(ctx context.Context, serviceName string) (func(context.Context) error,
 	if n := os.Getenv("OTEL_SERVICE_NAME"); n != "" {
 		serviceName = n
 	}
-	res, err := resource.Merge(resource.Default(), resource.NewWithAttributes(
-		semconv.SchemaURL,
+	// NewSchemaless (no schema URL) so merging with resource.Default() — whose bundled semconv
+	// schema may differ from ours — never errors with a "conflicting Schema URL". service.name is a
+	// stable attribute key across semconv versions.
+	res, err := resource.Merge(resource.Default(), resource.NewSchemaless(
 		semconv.ServiceName(serviceName),
 	))
 	if err != nil {

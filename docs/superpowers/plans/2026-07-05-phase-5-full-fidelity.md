@@ -94,9 +94,10 @@ session are now fully exercisable at no cost.
   + exec dashboards, blackbox synthetics. Agent run-quality flows in via the WS8 collector→OTel
   bridge. Config-linted (promtool/amtool/otelcol). Plan/report: `2026-07-15-ws9-observability-plan.md`,
   `2026-07-15-ws9-observability-completion-report.md`. **D15 carry-overs closed:** ≥2 independent
-  alert transports + external dead-man's-switch; a measured restore drill (`restore-drill.sh`);
-  DR-burst AI budget (gateway). Deferred: live `compose up` E2E on a Docker host; deeper synthetic
-  *journeys* (bot reply / login) beyond HTTP liveness probes.
+  alert transports + external dead-man's-switch; a measured restore drill (`restore-drill.sh`, RTO=2s
+  on the smoke test); DR-burst AI budget (gateway). **VERIFIED E2E on a live Docker stack 2026-07-15**
+  (metrics/traces/alerts/routing/restore-drill observed; 3 runtime bugs found + fixed). A functional
+  **synthetic-journey prober** (real AI-completion + tool-catalog probes, not just liveness) ships too.
 - [x] Uptime alerting → Telegram — DONE (upgraded `healthcheck.sh` to ≥2 transports +
   dead-man's-switch, independent of the Prometheus pipeline). Off-box backup automation still open.
 - [ ] Zero-trust floor: mTLS everywhere, SPIFFE/SPIRE identities; k3s/K8s + GitOps + Sigstore/SBOM/SLSA (staged as estate grows)

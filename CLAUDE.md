@@ -83,8 +83,13 @@ Components are **separate standalone projects — not a shared-package monorepo.
   alert transports + external dead-man's-switch (Alertmanager + upgraded out-of-band `healthcheck.sh`);
   measured restore drill (`infra/scripts/restore-drill.sh`); DR-burst AI budget (gateway `DR_MODE` /
   `POST /admin/dr-mode`). Config-linted with the real tools (promtool/amtool/otelcol validate) +
-  a CI `observability-lint` job. **Not run E2E locally: `compose up` (no Docker in the dev env) —
-  validate on a Docker host per the completion report's checklist.** Configs `infra/observability/`;
+  a CI `observability-lint` job. **VERIFIED END-TO-END on a live Docker stack (2026-07-15):** real
+  traffic → metrics in Prometheus (exact counts), traces in Tempo from Go + TS services, DR-burst
+  gauge flip, 4 functional synthetic journeys green, SLO/operational alerts firing + routed to the
+  correct D15 receivers, and a restore drill (RTO=2s). Running it caught + fixed 3 runtime bugs
+  builds/tests missed (Go resource schema-URL conflict; Alertmanager envsubst render; restore-drill
+  role bootstrap). Only filelog→Loki is env-limited on Docker Desktop (works on the Linux VPS).
+  Configs `infra/observability/`;
   runbooks `infra/runbooks/observability{,-slo}.md`, `restore-drill.md`; plan+report
   `docs/superpowers/plans/2026-07-15-ws9-observability-*.md`.
 - **automation/** — v1 glue BUILT: n8n compose + `summarize-via-mcp` template (backbone rule:

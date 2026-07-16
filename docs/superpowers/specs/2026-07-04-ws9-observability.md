@@ -6,9 +6,9 @@
 (OTel Collector → Prometheus/Tempo/Loki + Grafana + Alertmanager + exporters + ntfy) as an opt-in
 compose file; SLOs + multi-burn-rate alerts; per-workstream + exec dashboards; blackbox synthetic
 probes; and the **D15 carry-overs** (≥2 independent alert transports + dead-man's-switch, a measured
-restore drill, and a DR-burst AI budget). Verified by builds/tests + real config-linters
-(promtool/amtool/otelcol validate); the live `compose up` E2E run is deferred to a Docker host (no
-Docker in the dev env — same precedent as the Go-gateway cutover). Plan:
+restore drill, and a DR-burst AI budget). **Verified end-to-end on a live Docker stack (2026-07-15)** —
+metrics/traces/alerts/routing/restore-drill all observed working (which caught + fixed 3 runtime bugs
+static checks missed); only filelog→Loki is Docker-Desktop-limited (works on the Linux VPS). Plan:
 `../plans/2026-07-15-ws9-observability-plan.md`; report:
 `../plans/2026-07-15-ws9-observability-completion-report.md`.
 **Parent:** `2026-07-04-gaiada-ai-platform-roadmap.md` (Workstream 9)

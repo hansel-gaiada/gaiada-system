@@ -50,6 +50,16 @@ until docker exec "$CONTAINER" pg_isready -U postgres >/dev/null 2>&1; do
   i=$((i + 1)); [ "$i" -gt 30 ] && fail "isolated postgres never became ready"; sleep 1
 done
 
+# Pre-create the cluster's roles as no-login stubs. backup.sh dumps WITH ownership + GRANTs (plain
+# pg_dump), so a restore into a fresh instance references these roles; without them the restore errors
+# under ON_ERROR_STOP. This mirrors the production role set (see infra/db/init-cluster.sh) so the drill
+# validates the dump restores cleanly given the standard roles — not a role-less blank slate.
+ROLES="${DRILL_ROLES:-platform_owner platform_app knowledge_owner knowledge_app sync_app bot_owner bot_app keycloak n8n}"
+for role in $ROLES; do
+  docker exec "$CONTAINER" psql -U postgres -c \
+    "DO \$\$ BEGIN CREATE ROLE $role NOLOGIN; EXCEPTION WHEN duplicate_object THEN NULL; END \$\$;" >/dev/null 2>&1 || true
+done
+
 WORST_RPO_HOURS=0
 DRILL_START=$(date +%s)
 

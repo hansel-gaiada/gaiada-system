@@ -1,0 +1,32 @@
+[
+  {
+    "name": "gateway-complete",
+    "method": "POST",
+    "url": "http://ai-gateway:3002/complete",
+    "headers": { "Authorization": "Bearer ${GATEWAY_TOKEN}", "x-tenant-id": "synthetic", "Content-Type": "application/json" },
+    "body": "{\"prompt\":\"synthetic journey ping\"}",
+    "expectStatus": 200,
+    "expectBody": "text"
+  },
+  {
+    "name": "hub-tool-catalog",
+    "method": "GET",
+    "url": "http://mcp-hub:3003/tools",
+    "expectStatus": 200,
+    "expectBody": "name"
+  },
+  {
+    "name": "platform-health",
+    "method": "GET",
+    "url": "http://platform:3004/health",
+    "expectStatus": 200,
+    "expectBody": "ok"
+  },
+  {
+    "name": "knowledge-health",
+    "method": "GET",
+    "url": "http://knowledge:3005/health",
+    "expectStatus": 200,
+    "expectBody": "ok"
+  }
+]

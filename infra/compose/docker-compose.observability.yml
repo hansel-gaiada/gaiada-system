@@ -69,13 +69,12 @@ services:
       - tempo
       - loki
 
-  # --- Alerting: D15 multi-transport + dead-man's-switch. alertmanager.yml is env-templated; the
-  # deploy step renders ${VARS} via envsubst before start (see infra/runbooks/observability.md). ---
-  alertmanager:
-    image: prom/alertmanager:v0.28.0
-    restart: unless-stopped
-    command: ["--config.file=/etc/alertmanager/alertmanager.yml"]
-    environment:
+  # --- Alerting: D15 multi-transport + dead-man's-switch. alertmanager.yml is env-templated. The
+  # prom/alertmanager image has no envsubst (it's not Alpine), so a one-shot init container renders
+  # the config into a shared volume before Alertmanager starts (standard init pattern). ---
+  alertmanager-render:
+    image: alpine:3.21
+    environment: &am_env
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       ALERT_CHAT_ID: ${ALERT_CHAT_ID:-0}
       SMTP_SMARTHOST: ${SMTP_SMARTHOST:-}
@@ -88,14 +87,28 @@ services:
     entrypoint:
       - /bin/sh
       - -c
-      - |
-        apk add --no-cache gettext >/dev/null 2>&1 || true
-        envsubst < /etc/alertmanager/alertmanager.tmpl.yml > /tmp/alertmanager.yml
-        exec /bin/alertmanager --config.file=/tmp/alertmanager.yml
+      - >
+        apk add --no-cache gettext >/dev/null &&
+        mkdir -p /rendered/templates &&
+        cp /tpl/templates/* /rendered/templates/ &&
+        envsubst < /tpl/alertmanager.yml > /rendered/alertmanager.yml &&
+        echo "alertmanager config rendered"
     volumes:
-      - ../../infra/observability/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.tmpl.yml:ro
-      - ../../infra/observability/alertmanager/templates:/etc/alertmanager/templates:ro
+      - ../../infra/observability/alertmanager/alertmanager.yml:/tpl/alertmanager.yml:ro
+      - ../../infra/observability/alertmanager/templates:/tpl/templates:ro
+      - alertmanager-config:/rendered
+
+  alertmanager:
+    image: prom/alertmanager:v0.28.0
+    restart: unless-stopped
+    command: ["--config.file=/etc/alertmanager/alertmanager.yml"]
+    environment: *am_env
+    volumes:
+      - alertmanager-config:/etc/alertmanager
       - alertmanager-data:/alertmanager
+    depends_on:
+      alertmanager-render:
+        condition: service_completed_successfully
 
   ntfy:
     image: binwiederhier/ntfy:v2.11.0
@@ -156,6 +169,22 @@ services:
     volumes:
       - ../../infra/observability/blackbox/blackbox.yml:/etc/blackbox/blackbox.yml:ro
 
+  # Synthetic JOURNEY prober — functional probes (real authenticated requests through the provider
+  # chain / tool catalog), not just liveness. Exports synthetic_journey_up/_duration_ms over OTLP.
+  synthetic-prober:
+    build: ../../infra/observability/synthetic-prober
+    restart: unless-stopped
+    environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4318"
+      OTEL_SERVICE_NAME: "synthetic-prober"
+      PROBER_JOURNEYS_FILE: /journeys.json
+      PROBE_INTERVAL_MS: ${PROBE_INTERVAL_MS:-30000}
+      GATEWAY_TOKEN: ${GATEWAY_TOKEN:-}
+    volumes:
+      - ../../infra/observability/synthetic-prober/journeys.json:/journeys.json:ro
+    depends_on:
+      - otel-collector
+
   # --- Merge-overrides: switch ON telemetry export for the core services. Compose merges these
   # `environment` maps into the services defined in docker-compose.vps.yml, so OTEL is enabled ONLY
   # when this observability file is included — the data plane never depends on the collector. Each
@@ -202,4 +231,5 @@ volumes:
   loki-data:
   grafana-data:
   alertmanager-data:
+  alertmanager-config:
   ntfy-data:

@@ -74,6 +74,16 @@ groups:
           summary: "Agent quality alert: {{ $labels.agent }} / {{ $labels.kind }}"
           description: "The WS8 observability collector flagged {{ $labels.agent }} ({{ $labels.kind }})."
 
+      # --- Synthetic journey failing (functional, end-to-end — stronger signal than a liveness probe).
+      - alert: SyntheticJourneyFailing
+        expr: synthetic_journey_up == 0
+        for: 3m
+        labels:
+          severity: page
+        annotations:
+          summary: "Synthetic journey '{{ $labels.journey }}' is failing"
+          description: "The end-to-end journey {{ $labels.journey }} has not met its expected result for 3m."
+
       # --- D13 detective: an agent wrote while served by a non-eval-cleared provider.
       - alert: AgentWroteOnUnevaledProvider
         expr: agent_writes_on_unevaled_provider > 0

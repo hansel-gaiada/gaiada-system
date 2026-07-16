@@ -63,10 +63,27 @@ sh infra/scripts/lint-observability.sh   # promtool + amtool + otelcol validate 
 Prometheus 15d, Tempo/Loki 7d. Bump the `--storage.tsdb.retention.time` flag and the Tempo/Loki
 `retention_period` as the estate grows; watch metric cardinality (WS9 spec §5 open item).
 
-## Deferred until a Docker host
+## Alertmanager config rendering
 
-This dev environment has no Docker, so the stack has **not been run end-to-end here** (same precedent
-as the Go-gateway cutover). Before relying on it in production, run the checklist in the WS9
-completion report: `compose up`, confirm a request traces surface→Gateway→MCP→platform in Tempo,
-dashboards populate, logs correlate in Loki, fire a test alert to every transport + verify the
-dead-man's-switch, and run one restore drill.
+`alertmanager.yml` is env-templated (`${VAR}`). The `prom/alertmanager` image has no `envsubst`, so a
+one-shot **`alertmanager-render`** init container (alpine + gettext) renders it into a shared volume
+before Alertmanager starts. Each transport you declare in the config must have its secret set — e.g.
+an empty `TELEGRAM_BOT_TOKEN` makes Alertmanager reject the telegram receiver. Set the transports you
+use in `.env`; comment out the receivers you don't.
+
+## Synthetic journeys
+
+`synthetic-prober` (`infra/observability/synthetic-prober/`) runs **functional** journeys (a real AI
+completion through the Gateway, the hub tool-catalog, platform/knowledge reads) on a timer and exports
+`synthetic_journey_up` / `_duration_ms`. Edit `journeys.json` to add probes (config, not code); secrets
+are injected via `${ENV}` in header values. The `SyntheticJourneyFailing` alert pages on a 3-minute
+failure.
+
+## Verified end-to-end (2026-07-15)
+
+The stack was run for real on a Docker host: metrics land in Prometheus with exact counts, traces from
+Go + TS services appear in Tempo, the DR-burst gauge flips, the 4 synthetic journeys pass, SLO +
+operational alerts fire and route to the correct receivers, and a restore drill completed (RTO=2s).
+See the completion report for details. **One caveat**: on Docker **Desktop** the collector's filelog
+receiver can't read `/var/lib/docker/containers` (permission denied), so logs→Loki only works on the
+Linux VPS; metrics + traces are unaffected.
