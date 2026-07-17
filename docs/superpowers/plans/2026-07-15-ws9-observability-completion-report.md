@@ -1,7 +1,9 @@
 # WS9 — Observability: completion report
 
-**Date:** 2026-07-15
-**Status:** ✅ COMPLETE **and verified end-to-end on a live Docker stack (2026-07-15).** Full-estate
+**Date:** 2026-07-15 (re-verified full-estate 2026-07-16)
+**Status:** ✅ COMPLETE **and verified end-to-end on a live Docker stack (2026-07-15; re-verified as
+part of a full 31-container estate bring-up on 2026-07-16 — see "Full-estate local re-verification").**
+Full-estate
 OpenTelemetry + self-hosted Grafana stack + SLOs + dashboards + functional synthetic journeys + the
 D15 resilience carry-overs. The pipeline was stood up for real (`docker compose … -f
 docker-compose.observability.yml up`), traffic driven, and traces/metrics/alerts/restore-drill
@@ -116,6 +118,41 @@ Brought the observability stack up alongside the running core stack and drove re
   unaffected and proven above.
 - **External alert delivery**: routing to the receivers is verified; actual send needs real
   Telegram/SMTP/webhook creds.
+
+## Full-estate local re-verification (2026-07-16)
+
+The observability stack was brought up again as part of running the **entire** platform locally in
+Docker — **31 containers**: the full core/data plane (postgres×2, redis×2, cerbos, ai-gateway,
+keycloak, platform, knowledge, mcp-hub, bot+media-worker, waha, whisper, sync-central), the separate
+n8n automation stack, and the complete observability stack. Layered as
+`-f docker-compose.vps.yml -f docker-compose.local.yml -f docker-compose.devui.yml
+-f docker-compose.observability.yml -f docker-compose.obs-local.yml`.
+
+- **Telemetry flowing, all targets green:** Prometheus **14/14 scrape targets UP**; the collector's
+  `prometheusexporter` actively processing OTLP metrics from the core services; Grafana (`:3001`) +
+  Prometheus (`:9090`) healthy. (`platform-ui` runs as a host `next dev` hot-reload server, so its
+  container is intentionally stopped — the UI role is still served.)
+
+### Additional bugs found by running it (that builds/tests did NOT catch)
+4. **otel-collector self-metrics unreachable** — `service.telemetry.metrics.address` was unset, so the
+   collector bound its own metrics to `localhost:8888`; Prometheus (which scrapes `otel-collector:8888`
+   per `prometheus.yml`) got connection-refused → 1 target permanently down. Fixed: set
+   `address: 0.0.0.0:8888` in `otel-collector/config.yaml` (a real fix — applies on the VPS too). 14/14 after.
+5. **node-exporter mount rejected on Docker Desktop** — `/:/host:ro,rslave` propagation errors
+   ("path / is mounted on / but it is not a shared or slave mount") on Docker Desktop/WSL2, which
+   aborted the compose `up`. Fixed locally in `docker-compose.obs-local.yml` (`!override` drops
+   `rslave`); the committed VPS file keeps `rslave` for real Linux hosts.
+6. **Alertmanager crash-loop with no creds** — the prod `alertmanager.yml` requires
+   Telegram/SMTP/dead-man's-switch secrets absent on a dev box → "missing bot_token" load failure,
+   restart loop. Fixed for local with `alertmanager.local.yml` (routes to the self-hosted ntfy, no
+   creds), mounted via `docker-compose.obs-local.yml`; the prod multi-transport config is untouched.
+
+New local-only override files added this session: `infra/compose/docker-compose.obs-local.yml`,
+`infra/observability/alertmanager/alertmanager.local.yml`. The `filelog → Loki` limitation is
+unchanged (Docker Desktop denies the container-logs bind; unaffected on the Linux VPS).
+
+> Same 2026-07-16 bring-up also stood up the rest of the estate and added **hybrid OIDC/SSO**
+> (Keycloak) alongside dev-login — outside WS9 scope; documented separately (identity/authz).
 
 ## Known follow-ups (not blockers)
 
