@@ -1,0 +1,21 @@
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: invoice
+  importDerivedRoles: ["gaiada_scopes"]
+  variables:
+    import: ["gaiada_common"]
+  rules:
+    - actions: ["*"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["platform_admin", "group_executive"]
+    # Finance surface — company admins manage invoices for their company (UI gates company.manage).
+    - actions: ["read", "create", "update", "delete"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    # Managers may view invoices but not issue/edit them.
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["manager"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }

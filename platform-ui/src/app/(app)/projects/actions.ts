@@ -47,6 +47,21 @@ export async function createProject(_prev: ProjectFormState | null, formData: Fo
   redirect(`/projects/${id}`);
 }
 
+// Archive a project (soft-delete via status). Real PATCH endpoint exists.
+export async function archiveProject(projectId: string): Promise<void> {
+  const resolved = await resolveTenant();
+  if ("error" in resolved) return;
+  const { userId, tenant } = resolved;
+  try {
+    await platformFetch(`/api/${tenant}/projects/${projectId}`, userId, { method: "PATCH", body: JSON.stringify({ status: "archived" }) });
+  } catch (e) {
+    if (!(e instanceof PlatformError)) throw e;
+  }
+  revalidatePath("/projects");
+  revalidatePath(`/projects/${projectId}`);
+  redirect("/projects");
+}
+
 export async function updateProject(projectId: string, _prev: ProjectFormState | null, formData: FormData): Promise<ProjectFormState> {
   const resolved = await resolveTenant();
   if ("error" in resolved) return { error: resolved.error };

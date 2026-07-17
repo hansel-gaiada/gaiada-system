@@ -1,0 +1,20 @@
+# Dev-UI override — run the frontend via `next dev` (hot reload) on the HOST instead of the
+# baked production container, wired to the live backend in compose.
+#   docker compose -f docker-compose.vps.yml -f docker-compose.local.yml -f docker-compose.devui.yml up -d platform
+#   docker compose -f docker-compose.vps.yml -f docker-compose.local.yml -f docker-compose.devui.yml stop platform-ui
+#   (then run `npm run dev` in ../../platform-ui with platform-ui/.env.local)
+# Publishes the platform API to the host so the host-run dev server can reach it.
+name: gaiada
+services:
+  platform:
+    ports:
+      - "127.0.0.1:3004:3004"
+    environment:
+      # Local hybrid auth: accept BOTH IdP JWTs (real SSO) and the dev x-user-id BFF path.
+      AUTH_MODE: ${PLATFORM_AUTH_MODE:-hybrid}
+      # Tokens are minted through the host-published Keycloak (localhost:8080) so their `iss`
+      # is localhost:8080 — the platform must string-match that. But it fetches JWKS over the
+      # internal docker network (keycloak:8080), which is decoupled from the issuer string.
+      OIDC_ISSUER: http://localhost:8080/realms/gaiada
+      OIDC_JWKS_URI: http://keycloak:8080/realms/gaiada/protocol/openid-connect/certs
+      OIDC_AUDIENCE: gaiada-platform

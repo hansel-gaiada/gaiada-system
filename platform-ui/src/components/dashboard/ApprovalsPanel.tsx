@@ -1,5 +1,6 @@
 "use client";
 import { useState } from "react";
+import Link from "next/link";
 import type { ApprovalItem } from "@/lib/data";
 import { Icon } from "@/components/shell/icons";
 import { Toast } from "@/components/ui";
@@ -36,8 +37,12 @@ export function ApprovalsPanel({ items, decide }: { items: ApprovalItem[]; decid
       {visible.map((t) => (
         <div key={t.id} className="dash-approval">
           <div style={{ minWidth: 0, flex: 1 }}>
-            <div className="dash-approval__title">{t.subject}</div>
-            <div className="dash-approval__meta">{t.company} · {t.campaign}</div>
+            <div className="dash-approval__title">
+              {t.campaignId ? <Link href={`/agency/${t.campaignId}`} style={{ color: "inherit", textDecoration: "none" }}>{t.subject}</Link> : t.subject}
+            </div>
+            <div className="dash-approval__meta">
+              {t.company} · {t.campaignId ? <Link href={`/agency/${t.campaignId}`} style={{ color: "var(--erp-accent)", textDecoration: "none" }}>{t.campaign}</Link> : t.campaign}
+            </div>
           </div>
           <div className="dash-approval__actions">
             <button title="Approve" className="dash-approval__btn dash-approval__btn--solid" onClick={() => act(t, "approved")}><Icon name="check" size={14} /></button>

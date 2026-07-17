@@ -25,6 +25,13 @@ export const AUTOMATION_ACCOUNTS: ReadonlyArray<{ workflowId: string; role: stri
   { workflowId: "wf:inbound-lead-intake", role: "manager", email: "automation+inbound-lead-intake@gaiada.system", name: "Automation — Inbound lead intake" },
   // Event notify flow (org_structure.updated -> in-app notification). manager = can notify.
   { workflowId: "wf:org-updated-notify", role: "manager", email: "automation+org-updated-notify@gaiada.system", name: "Automation — Org-updated notify" },
+  // WS11 meeting-to-delivery pipeline. Dispatcher/delivery/scope create runs+stages and open gates
+  // (create posture = member/manager, like new-client-seed); report only notifies. None DECIDE gates
+  // (that stays a human governance action). manager covers create-run/stage/gate + notify.
+  { workflowId: "wf:mtg-dispatcher", role: "manager", email: "automation+mtg-dispatcher@gaiada.system", name: "Automation — Meeting dispatcher" },
+  { workflowId: "wf:delivery", role: "manager", email: "automation+delivery@gaiada.system", name: "Automation — Delivery track" },
+  { workflowId: "wf:scope", role: "manager", email: "automation+scope@gaiada.system", name: "Automation — Scope agreement track" },
+  { workflowId: "wf:report", role: "manager", email: "automation+report@gaiada.system", name: "Automation — Report track" },
 ];
 
 async function existingLink(externalId: string): Promise<boolean> {

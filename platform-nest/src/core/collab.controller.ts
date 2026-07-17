@@ -48,15 +48,17 @@ export class CollabController {
       throw new BadRequestException((err as Error).message);
     }
     await writeActivity(tenantId, actorId, "commented", entityType, entityId, { commentId: id });
+    // Deep-link target for the notification bell (payload.href) — tasks resolve to their page.
+    const href = entityType === "task" ? `/tasks/${entityId}` : undefined;
     for (const m of Array.from(new Set(mentions)).slice(0, 50)) {
-      await notify(tenantId, m, actorId, "mention", { entityType, entityId, commentId: id });
+      await notify(tenantId, m, actorId, "mention", { entityType, entityId, commentId: id, href });
     }
     if (entityType === "task") {
       const assignee = await withTenants([tenantId], (c) =>
         c.query<{ assignee_id: string | null }>(`SELECT assignee_id FROM tasks WHERE id = $1`, [entityId]),
       );
       const a = assignee.rows[0]?.assignee_id;
-      if (a && !mentions.includes(a)) await notify(tenantId, a, actorId, "comment", { entityType, entityId, commentId: id });
+      if (a && !mentions.includes(a)) await notify(tenantId, a, actorId, "comment", { entityType, entityId, commentId: id, href });
     }
     return { id };
   }

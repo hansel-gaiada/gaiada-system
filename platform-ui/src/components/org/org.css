@@ -48,11 +48,15 @@
 .org-box { border: 0.5px solid var(--erp-hairline); background: var(--surface-card); padding: 8px 14px; text-align: center; min-width: 120px; display: inline-flex; flex-direction: column; gap: 2px; }
 .org-box__name { font: 400 13px var(--font-body); color: var(--text-primary); white-space: nowrap; }
 .org-box__meta { font: 700 9px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--erp-ink-50); }
-/* company root reads as the anchor; departments get the accent edge */
-.org-box--company { background: #1a1916; border-color: transparent; }
-.org-box--company .org-box__name { color: #f4f1ea; }
-.org-box--company .org-box__meta { color: rgba(244, 241, 234, 0.55); }
+/* holding + company roots read as anchors; departments/divisions get edges */
+.org-box--holding, .org-box--company { background: #1a1916; border-color: transparent; }
+.org-box--holding .org-box__name, .org-box--company .org-box__name { color: #f4f1ea; }
+.org-box--holding .org-box__meta, .org-box--company .org-box__meta { color: rgba(244, 241, 234, 0.55); }
+.org-box--holding { border-bottom: 2px solid var(--erp-accent); }
 .org-box--department { border-left: 2px solid var(--erp-accent); }
+/* division (renamed from team) sits under a department — softer accent edge */
+.org-box--division, .org-box--team { border-left: 2px solid var(--erp-hairline); }
+.org-box--role { border-left: 2px dotted var(--erp-hairline); }
 
 @media (max-width: 900px) {
   .org-wrap { grid-template-columns: 1fr; }

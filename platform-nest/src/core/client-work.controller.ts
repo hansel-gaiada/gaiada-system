@@ -1,6 +1,6 @@
 // Core client-work routes (Nest port of core/client-work.ts): clients, deliverables,
 // time_entries. authorize() → RLS query → activity; time-entry owned by the logger.
-import { BadRequestException, Body, Controller, Get, HttpCode, NotFoundException, Param, Patch, Post, Query, Req, UseGuards } from "@nestjs/common";
+import { BadRequestException, Body, Controller, Delete, Get, HttpCode, NotFoundException, Param, Patch, Post, Query, Req, UseGuards } from "@nestjs/common";
 import type { FastifyRequest } from "fastify";
 import { newId, withTenants } from "../db";
 import { config } from "../config";
@@ -71,6 +71,19 @@ export class ClientWorkController {
     });
     await writeActivity(tenantId, req.principal.userId, "updated", "client", clientId);
     return { id: clientId };
+  }
+
+  @Delete(":tenantId/clients/:clientId")
+  @HttpCode(200)
+  async deleteClient(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("clientId") clientId: string) {
+    await authorize(req.principal, { kind: "client", id: clientId, tenantId }, "delete");
+    await withTenants([tenantId], async (c) => {
+      const res = await c.query(`UPDATE clients SET deleted_at = now() WHERE id = $1 AND deleted_at IS NULL`, [clientId]);
+      if (res.rowCount === 0) throw new NotFoundException("client not found");
+      await emitEvent(c, tenantId, "client", clientId, "client.deleted", {});
+    });
+    await writeActivity(tenantId, req.principal.userId, "deleted", "client", clientId);
+    return { ok: true };
   }
 
   // ---- Deliverables ----

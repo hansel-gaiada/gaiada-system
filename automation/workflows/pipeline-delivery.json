@@ -1,0 +1,1387 @@
+{
+  "id": "ws11delivery0001",
+  "name": "WS11 delivery track (hard gate -> design -> 3-beat -> Claude Code -> deploy)",
+  "meta": {
+    "description": "WS11 build item 8 (full). Stateless event-driven delivery state machine; state lives in the DB. Triggers ev/pipeline.gate.decided + ev/scope.signed. Transitions: hard gate (prd_sign+scope signed) -> design.prototype -> claude_design stage -> pm_review(beat1) -> customer_feedback(beat2) -> pm_approval(beat3) -> release_code (github.repoStatus gate: if repo exists -> code.scaffold -> claude_code stage -> web-dev pm_review; else notify repo_needed) -> web-dev approved -> deploy.staging -> staging stage + notify. github.repoStatus + deploy.staging fail SOFT (onError continue): unconfigured/absent -> a graceful notify, never a crash. Repo name = slug(run.title). All actions are OBO tools/call as wf:delivery. Dev creds via GITHUB_TOKEN/GITHUB_ORG + DEPLOY_STAGING_URL on the hub; prod swaps to a dedicated account. Bounded revise loop on changes_requested is the remaining Temporal-candidate refinement. Env: N8N_BRIDGE_SECRET, HUB_SERVICE_TOKEN, NOTIFY_USER_ID."
+  },
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ev/pipeline.gate.decided",
+        "responseMode": "responseNode"
+      },
+      "name": "Trigger: gate.decided",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        -120
+      ],
+      "webhookId": "e4b7c3d2-delivery-gate-decided-001"
+    },
+    {
+      "parameters": {
+        "jsCode": "const got = $input.first().json.headers?.['x-gaiada-bridge-secret'];\nif (!got || got !== $env.N8N_BRIDGE_SECRET) throw new Error('bad bridge secret');\nconst e = $input.first().json.body ?? {};\nif (e.v !== 1) throw new Error('bad envelope v');\nconst runId = e.payload?.runId ?? e.entityId;\nconst store = $getWorkflowStaticData('global'); store.seen = store.seen || {};\nconst dup = Object.prototype.hasOwnProperty.call(store.seen, e.id);\nif (!dup) { store.seen[e.id] = Date.now(); const ids = Object.keys(store.seen); if (ids.length > 1000) for (const k of ids.slice(0, ids.length - 1000)) delete store.seen[k]; }\nreturn [{ json: { dup, tenantId: e.tenantId, runId } }];"
+      },
+      "name": "Verify (gate)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        200,
+        -120
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ev/scope.signed",
+        "responseMode": "responseNode"
+      },
+      "name": "Trigger: scope.signed",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        100
+      ],
+      "webhookId": "e4b7c3d2-delivery-scope-signed-001"
+    },
+    {
+      "parameters": {
+        "jsCode": "const got = $input.first().json.headers?.['x-gaiada-bridge-secret'];\nif (!got || got !== $env.N8N_BRIDGE_SECRET) throw new Error('bad bridge secret');\nconst e = $input.first().json.body ?? {};\nif (e.v !== 1) throw new Error('bad envelope v');\nconst runId = e.payload?.runId ?? e.entityId;\nconst store = $getWorkflowStaticData('global'); store.seen = store.seen || {};\nconst dup = Object.prototype.hasOwnProperty.call(store.seen, e.id);\nif (!dup) { store.seen[e.id] = Date.now(); const ids = Object.keys(store.seen); if (ids.length > 1000) for (const k of ids.slice(0, ids.length - 1000)) delete store.seen[k]; }\nreturn [{ json: { dup, tenantId: e.tenantId, runId } }];"
+      },
+      "name": "Verify (scope)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        200,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://mcp-hub:3003/mcp",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.HUB_SERVICE_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json, text/event-stream"
+            },
+            {
+              "name": "x-obo-provider",
+              "value": "n8n"
+            },
+            {
+              "name": "x-obo-external-id",
+              "value": "wf:delivery"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", id: 1, method: \"tools/call\", params: { name: \"pipeline.getRun\", arguments: { tenantId: $json.tenantId, runId: $json.runId } } }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "name": "MCP getRun",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        420,
+        -10
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json.data ?? $input.first().json.body ?? '';\nconst line = String(raw).split('\\n').find((l) => l.startsWith('data:')) ?? '';\nconst rpc = JSON.parse(line.slice(5).trim());\nif (rpc.result?.isError) throw new Error(rpc.result.content?.[0]?.text ?? 'getRun failed');\nconst run = JSON.parse(rpc.result?.content?.[0]?.text ?? '{}');\nconst stages = run.stages||[], gates = run.gates||[], signoffs = run.scopeSignoffs||[];\nconst prdSigned = gates.some(g=>g.kind==='prd_sign'&&g.decision==='signed');\nconst scopeSigned = (signoffs.some(s=>s.party==='provider')&&signoffs.some(s=>s.party==='client'))||gates.some(g=>g.kind==='scope_signoff'&&g.decision==='signed');\nconst design = stages.find(s=>s.name==='claude_design'); const code = stages.find(s=>s.name==='claude_code'); const staging = stages.find(s=>s.name==='staging');\nconst gof=(kind,sid)=>gates.filter(g=>g.kind===kind&&g.stage_id===sid).sort((a,b)=>a.created_at<b.created_at?-1:1).pop();\nconst ok=g=>g&&g.status==='decided'&&g.decision==='approved';\nconst has=(kind,sid)=>gates.some(g=>g.kind===kind&&g.stage_id===sid);\nconst prd=(stages.find(s=>s.name==='prd_extract')||{}).artifact_ref||'';\nconst slug=String(run.title||('run-'+run.id)).toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'').slice(0,40);\nlet action='noop',nextKind='',nextActor='',stageId='';\nif(prdSigned&&scopeSigned){\n  if(!design){action='release_design';}\n  else if(ok(gof('pm_review',design.id))&&!has('customer_feedback',design.id)){action='open_gate';nextKind='customer_feedback';nextActor='client';stageId=design.id;}\n  else if(ok(gof('customer_feedback',design.id))&&!has('pm_approval',design.id)){action='open_gate';nextKind='pm_approval';nextActor='internal';stageId=design.id;}\n  else if(ok(gof('pm_approval',design.id))&&!code){action='release_code';}\n  else if(code&&ok(gof('pm_review',code.id))&&!staging){action='deploy';}\n}\nconst proto=(design||{}).artifact_ref||'';\nreturn [{ json: { tenantId: run.tenant_id, runId: run.id, action, nextKind, nextActor, stageId, prd, proto, slug } }];"
+      },
+      "name": "Load + decide",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        640,
+        -10
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "Release design?",
+              "leftValue": "={{ $json.action }}",
+              "rightValue": "release_design",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Release design?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        860,
+        -10
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://mcp-hub:3003/mcp",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.HUB_SERVICE_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json, text/event-stream"
+            },
+            {
+              "name": "x-obo-provider",
+              "value": "n8n"
+            },
+            {
+              "name": "x-obo-external-id",
+              "value": "wf:delivery"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", id: 2, method: \"tools/call\", params: { name: \"design.prototype\", arguments: { prd: $json.prd } } }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "name": "MCP design.prototype",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1080,
+        -260
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json.data ?? $input.first().json.body ?? '';\nconst line = String(raw).split('\\n').find((l) => l.startsWith('data:')) ?? '';\nconst rpc = JSON.parse(line.slice(5).trim());\nif (rpc.result?.isError) throw new Error(rpc.result.content?.[0]?.text ?? 'design failed');\nlet p={};try{p=JSON.parse(rpc.result?.content?.[0]?.text??'{}')}catch{}\nconst d=$('Load + decide').first().json;\nreturn [{ json: { tenantId:d.tenantId, runId:d.runId, doc:p.content??'' } }];"
+      },
+      "name": "Parse prototype",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1300,
+        -260
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://mcp-hub:3003/mcp",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.HUB_SERVICE_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json, text/event-stream"
+            },
+            {
+              "name": "x-obo-provider",
+              "value": "n8n"
+            },
+            {
+              "name": "x-obo-external-id",
+              "value": "wf:delivery"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", id: 3, method: \"tools/call\", params: { name: \"pipeline.createStage\", arguments: { tenantId: $json.tenantId, runId: $json.runId, track: \"delivery\", name: \"claude_design\", status: \"awaiting_gate\", artifactRef: $json.doc } } }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "name": "MCP createStage design",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1520,
+        -260
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json.data ?? $input.first().json.body ?? '';\nconst line = String(raw).split('\\n').find((l) => l.startsWith('data:')) ?? '';\nconst rpc = JSON.parse(line.slice(5).trim());\nif (rpc.result?.isError) throw new Error(rpc.result.content?.[0]?.text ?? 'createStage failed');\nconst s=JSON.parse(rpc.result?.content?.[0]?.text??'{}');\nconst d=$('Load + decide').first().json;\nreturn [{ json: { tenantId:d.tenantId, runId:d.runId, stageId:s.id } }];"
+      },
+      "name": "Parse design stage",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1740,
+        -260
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://mcp-hub:3003/mcp",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.HUB_SERVICE_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json, text/event-stream"
+            },
+            {
+              "name": "x-obo-provider",
+              "value": "n8n"
+            },
+            {
+              "name": "x-obo-external-id",
+              "value": "wf:delivery"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", id: 4, method: \"tools/call\", params: { name: \"pipeline.openGate\", arguments: { tenantId: $json.tenantId, runId: $json.runId, stageId: $json.stageId, kind: \"pm_review\", actorSide: \"internal\", note: \"Prototype ready — Submission beat 1 (PM/UI review)\" } } }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "name": "MCP openGate pm_review(design)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1960,
+        -260
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok:true, action:'released_design', runId:$('Load + decide').first().json.runId }) }}"
+      },
+      "name": "Respond (released)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        2180,
+        -260
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "Open next gate?",
+              "leftValue": "={{ $json.action }}",
+              "rightValue": "open_gate",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Open next gate?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1080,
+        -10
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://mcp-hub:3003/mcp",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.HUB_SERVICE_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json, text/event-stream"
+            },
+            {
+              "name": "x-obo-provider",
+              "value": "n8n"
+            },
+            {
+              "name": "x-obo-external-id",
+              "value": "wf:delivery"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", id: 5, method: \"tools/call\", params: { name: \"pipeline.openGate\", arguments: { tenantId: $json.tenantId, runId: $json.runId, stageId: $json.stageId, kind: $json.nextKind, actorSide: $json.nextActor, note: \"Submission beat\" } } }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "name": "MCP openGate next",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1300,
+        -60
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok:true, action:'opened_'+$('Load + decide').first().json.nextKind }) }}"
+      },
+      "name": "Respond (opened)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1520,
+        -60
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "Release code?",
+              "leftValue": "={{ $json.action }}",
+              "rightValue": "release_code",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Release code?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1080,
+        180
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://mcp-hub:3003/mcp",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.HUB_SERVICE_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json, text/event-stream"
+            },
+            {
+              "name": "x-obo-provider",
+              "value": "n8n"
+            },
+            {
+              "name": "x-obo-external-id",
+              "value": "wf:delivery"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", id: 6, method: \"tools/call\", params: { name: \"github.repoStatus\", arguments: { repo: $('Load + decide').first().json.slug } } }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "name": "MCP github.repoStatus",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1300,
+        120
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "let raw = $input.first().json.data ?? $input.first().json.body ?? '';\nconst line = String(raw).split('\\n').find((l) => l.startsWith('data:')) ?? '';\nconst rpc = JSON.parse(line.slice(5).trim());\nlet ready=false, reason='';\ntry{ if(rpc.result?.isError){reason=rpc.result.content?.[0]?.text||'repo check failed';} else { const r=JSON.parse(rpc.result?.content?.[0]?.text??'{}'); ready=!!r.exists; if(!ready) reason='repo does not exist yet'; } }catch(e){ reason='github not configured'; }\nconst d=$('Load + decide').first().json;\nreturn [{ json: { tenantId:d.tenantId, runId:d.runId, prd:d.prd, proto:d.proto, slug:d.slug, ready, reason } }];"
+      },
+      "name": "Repo ready?",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1520,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "Repo exists?",
+              "leftValue": "={{ $json.ready }}",
+              "rightValue": "true",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Repo exists?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1740,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://mcp-hub:3003/mcp",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.HUB_SERVICE_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json, text/event-stream"
+            },
+            {
+              "name": "x-obo-provider",
+              "value": "n8n"
+            },
+            {
+              "name": "x-obo-external-id",
+              "value": "wf:delivery"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", id: 7, method: \"tools/call\", params: { name: \"code.scaffold\", arguments: { prd: $json.prd, prototype: $json.proto, repo: $json.slug } } }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "name": "MCP code.scaffold",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1960,
+        60
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json.data ?? $input.first().json.body ?? '';\nconst line = String(raw).split('\\n').find((l) => l.startsWith('data:')) ?? '';\nconst rpc = JSON.parse(line.slice(5).trim());\nif (rpc.result?.isError) throw new Error(rpc.result.content?.[0]?.text ?? 'code.scaffold failed');\nlet p={};try{p=JSON.parse(rpc.result?.content?.[0]?.text??'{}')}catch{}\nconst d=$('Load + decide').first().json;\nreturn [{ json: { tenantId:d.tenantId, runId:d.runId, doc:p.content??'' } }];"
+      },
+      "name": "Parse code",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2180,
+        60
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://mcp-hub:3003/mcp",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.HUB_SERVICE_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json, text/event-stream"
+            },
+            {
+              "name": "x-obo-provider",
+              "value": "n8n"
+            },
+            {
+              "name": "x-obo-external-id",
+              "value": "wf:delivery"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", id: 8, method: \"tools/call\", params: { name: \"pipeline.createStage\", arguments: { tenantId: $json.tenantId, runId: $json.runId, track: \"delivery\", name: \"claude_code\", status: \"awaiting_gate\", artifactRef: $json.doc } } }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "name": "MCP createStage code",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2400,
+        60
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json.data ?? $input.first().json.body ?? '';\nconst line = String(raw).split('\\n').find((l) => l.startsWith('data:')) ?? '';\nconst rpc = JSON.parse(line.slice(5).trim());\nif (rpc.result?.isError) throw new Error(rpc.result.content?.[0]?.text ?? 'createStage failed');\nconst s=JSON.parse(rpc.result?.content?.[0]?.text??'{}');\nconst d=$('Load + decide').first().json;\nreturn [{ json: { tenantId:d.tenantId, runId:d.runId, stageId:s.id } }];"
+      },
+      "name": "Parse code stage",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2620,
+        60
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://mcp-hub:3003/mcp",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.HUB_SERVICE_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json, text/event-stream"
+            },
+            {
+              "name": "x-obo-provider",
+              "value": "n8n"
+            },
+            {
+              "name": "x-obo-external-id",
+              "value": "wf:delivery"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", id: 9, method: \"tools/call\", params: { name: \"pipeline.openGate\", arguments: { tenantId: $json.tenantId, runId: $json.runId, stageId: $json.stageId, kind: \"pm_review\", actorSide: \"internal\", note: \"Code ready to stage — Web Dev review\" } } }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "name": "MCP openGate web-dev",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2840,
+        60
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok:true, action:'released_code', runId:$('Load + decide').first().json.runId }) }}"
+      },
+      "name": "Respond (code)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        3060,
+        60
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://mcp-hub:3003/mcp",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.HUB_SERVICE_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json, text/event-stream"
+            },
+            {
+              "name": "x-obo-provider",
+              "value": "n8n"
+            },
+            {
+              "name": "x-obo-external-id",
+              "value": "wf:delivery"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", id: 10, method: \"tools/call\", params: { name: \"notify\", arguments: { tenantId: $json.tenantId, recipientId: $env.NOTIFY_USER_ID, type: \"repo_needed\", payload: { runId: $json.runId, repo: $json.slug, reason: $json.reason } } } }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "name": "MCP notify repo_needed",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1960,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok:true, action:'repo_needed', reason:$json.reason }) }}"
+      },
+      "name": "Respond (repo needed)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        2180,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "Deploy?",
+              "leftValue": "={{ $json.action }}",
+              "rightValue": "deploy",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Deploy?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1080,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://mcp-hub:3003/mcp",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.HUB_SERVICE_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json, text/event-stream"
+            },
+            {
+              "name": "x-obo-provider",
+              "value": "n8n"
+            },
+            {
+              "name": "x-obo-external-id",
+              "value": "wf:delivery"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", id: 11, method: \"tools/call\", params: { name: \"deploy.staging\", arguments: { repo: $('Load + decide').first().json.slug, ref: 'main', runId: $('Load + decide').first().json.runId } } }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "name": "MCP deploy.staging",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1300,
+        400
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "let raw = $input.first().json.data ?? $input.first().json.body ?? '';\nconst line = String(raw).split('\\n').find((l) => l.startsWith('data:')) ?? '';\nconst rpc = JSON.parse(line.slice(5).trim());\nlet ok2=false, reason='';\ntry{ if(rpc.result?.isError){reason=rpc.result.content?.[0]?.text||'deploy failed';} else { ok2=true; } }catch(e){ reason='deploy not configured'; }\nconst d=$('Load + decide').first().json;\nreturn [{ json: { tenantId:d.tenantId, runId:d.runId, ok2, reason, status: ok2?'done':'failed' } }];"
+      },
+      "name": "Deploy result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1520,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://mcp-hub:3003/mcp",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.HUB_SERVICE_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json, text/event-stream"
+            },
+            {
+              "name": "x-obo-provider",
+              "value": "n8n"
+            },
+            {
+              "name": "x-obo-external-id",
+              "value": "wf:delivery"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", id: 12, method: \"tools/call\", params: { name: \"pipeline.createStage\", arguments: { tenantId: $json.tenantId, runId: $json.runId, track: \"delivery\", name: \"staging\", status: $json.status, artifactRef: ($json.ok2 ? \"deployed to staging\" : $json.reason) } } }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "name": "MCP createStage staging",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1740,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json.data ?? $input.first().json.body ?? '';\nconst line = String(raw).split('\\n').find((l) => l.startsWith('data:')) ?? '';\nconst rpc = JSON.parse(line.slice(5).trim());\nconst d=$('Deploy result').first().json;\nreturn [{ json: { tenantId:d.tenantId, runId:d.runId, ok2:d.ok2, reason:d.reason } }];"
+      },
+      "name": "After staging",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1960,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://mcp-hub:3003/mcp",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.HUB_SERVICE_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json, text/event-stream"
+            },
+            {
+              "name": "x-obo-provider",
+              "value": "n8n"
+            },
+            {
+              "name": "x-obo-external-id",
+              "value": "wf:delivery"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", id: 13, method: \"tools/call\", params: { name: \"notify\", arguments: { tenantId: $json.tenantId, recipientId: $env.NOTIFY_USER_ID, type: ($json.ok2 ? \"staging_deployed\" : \"staging_deploy_failed\"), payload: { runId: $json.runId, reason: $json.reason } } } }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "name": "MCP notify staging",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2180,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok:true, action:'deploy', deployed:$('Deploy result').first().json.ok2 }) }}"
+      },
+      "name": "Respond (deploy)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        2400,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok:true, action:'noop' }) }}"
+      },
+      "name": "Respond (noop)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1300,
+        560
+      ]
+    }
+  ],
+  "connections": {
+    "Trigger: gate.decided": {
+      "main": [
+        [
+          {
+            "node": "Verify (gate)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verify (gate)": {
+      "main": [
+        [
+          {
+            "node": "MCP getRun",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Trigger: scope.signed": {
+      "main": [
+        [
+          {
+            "node": "Verify (scope)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verify (scope)": {
+      "main": [
+        [
+          {
+            "node": "MCP getRun",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MCP getRun": {
+      "main": [
+        [
+          {
+            "node": "Load + decide",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load + decide": {
+      "main": [
+        [
+          {
+            "node": "Release design?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Release design?": {
+      "main": [
+        [
+          {
+            "node": "MCP design.prototype",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Open next gate?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MCP design.prototype": {
+      "main": [
+        [
+          {
+            "node": "Parse prototype",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse prototype": {
+      "main": [
+        [
+          {
+            "node": "MCP createStage design",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MCP createStage design": {
+      "main": [
+        [
+          {
+            "node": "Parse design stage",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse design stage": {
+      "main": [
+        [
+          {
+            "node": "MCP openGate pm_review(design)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MCP openGate pm_review(design)": {
+      "main": [
+        [
+          {
+            "node": "Respond (released)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Open next gate?": {
+      "main": [
+        [
+          {
+            "node": "MCP openGate next",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Release code?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MCP openGate next": {
+      "main": [
+        [
+          {
+            "node": "Respond (opened)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Release code?": {
+      "main": [
+        [
+          {
+            "node": "MCP github.repoStatus",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Deploy?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MCP github.repoStatus": {
+      "main": [
+        [
+          {
+            "node": "Repo ready?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Repo ready?": {
+      "main": [
+        [
+          {
+            "node": "Repo exists?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Repo exists?": {
+      "main": [
+        [
+          {
+            "node": "MCP code.scaffold",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "MCP notify repo_needed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MCP code.scaffold": {
+      "main": [
+        [
+          {
+            "node": "Parse code",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse code": {
+      "main": [
+        [
+          {
+            "node": "MCP createStage code",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MCP createStage code": {
+      "main": [
+        [
+          {
+            "node": "Parse code stage",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse code stage": {
+      "main": [
+        [
+          {
+            "node": "MCP openGate web-dev",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MCP openGate web-dev": {
+      "main": [
+        [
+          {
+            "node": "Respond (code)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MCP notify repo_needed": {
+      "main": [
+        [
+          {
+            "node": "Respond (repo needed)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Deploy?": {
+      "main": [
+        [
+          {
+            "node": "MCP deploy.staging",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond (noop)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MCP deploy.staging": {
+      "main": [
+        [
+          {
+            "node": "Deploy result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Deploy result": {
+      "main": [
+        [
+          {
+            "node": "MCP createStage staging",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MCP createStage staging": {
+      "main": [
+        [
+          {
+            "node": "After staging",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "After staging": {
+      "main": [
+        [
+          {
+            "node": "MCP notify staging",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MCP notify staging": {
+      "main": [
+        [
+          {
+            "node": "Respond (deploy)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {},
+  "pinData": {}
+}

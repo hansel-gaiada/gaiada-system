@@ -18,7 +18,7 @@
 .erp-usermenu__item--danger { color: var(--erp-accent); }
 .erp-side__avatar { width: 36px; height: 36px; background: var(--erp-accent); color: #f4f1ea; display: flex; align-items: center; justify-content: center; font-family: var(--font-display); font-weight: 700; font-size: 15px; }
 .erp-top { grid-area: top; background: #f4f1ea; border-bottom: 0.5px solid var(--erp-hairline); display: flex; align-items: center; gap: 20px; padding: 0 26px; }
-.erp-top__meta { display: flex; align-items: baseline; gap: 12px; min-width: 0; }
+.erp-top__meta { display: flex; align-items: center; gap: 12px; min-width: 0; }
 .erp-top__divider { width: 0.5px; height: 16px; background: rgba(26, 25, 22, 0.2); }
 .erp-top__date { font: 400 13px var(--font-body); color: var(--erp-ink-60); white-space: nowrap; }
 .erp-top__search { margin-left: 8px; flex: 1; max-width: 420px; display: flex; align-items: center; gap: 10px; border-bottom: 0.5px solid rgba(26, 25, 22, 0.22); padding: 8px 2px; }
@@ -29,7 +29,20 @@
 .erp-top__badge { position: absolute; top: -6px; right: -8px; min-width: 15px; height: 15px; padding: 0 4px; background: var(--erp-accent); color: #f4f1ea; font: 700 9px var(--font-body); display: inline-flex; align-items: center; justify-content: center; }
 .erp-main { grid-area: main; overflow-y: auto; min-height: 0; background: var(--surface-page); }
 .erp-main__inner { padding: 30px 32px 40px; max-width: 1180px; }
-.erp-tenant select { border: none; background: transparent; font: 400 13px var(--font-body); color: var(--erp-ink-60); cursor: pointer; }
+/* ---- Global "+ New" menu ---- */
+.erp-new { position: relative; }
+.erp-new__btn { display: inline-flex; align-items: center; gap: 6px; border: 0.5px solid var(--erp-hairline); background: var(--erp-accent); color: #f4f1ea; padding: 7px 12px; font: 600 13px var(--font-body); cursor: pointer; }
+.erp-new__btn:hover { opacity: 0.92; }
+.erp-new__menu { position: absolute; right: 0; top: calc(100% + 6px); min-width: 180px; background: var(--surface-card); border: 0.5px solid var(--erp-hairline); z-index: 40; display: flex; flex-direction: column; padding: 4px; }
+.erp-new__item { padding: 9px 12px; font: 400 13px var(--font-body); color: var(--text-primary); text-decoration: none; }
+.erp-new__item:hover { background: rgba(110,90,67,.06); }
+
+/* ---- Company context (top-level tenant scope) ---- */
+.erp-company { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.erp-company__name { font: 600 14px var(--font-body); color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px; }
+.erp-company__form { display: flex; }
+.erp-company__select { border: none; background: transparent; font: 600 14px var(--font-body); color: var(--text-primary); cursor: pointer; padding: 0; max-width: 230px; outline: none; }
+.erp-company__select:hover { color: var(--erp-accent); }
 
 /* ---- Display preferences (data-attributes set on .erp-app by the Shell) ---- */
 .erp-app[data-width="wide"] .erp-main__inner { max-width: none; }

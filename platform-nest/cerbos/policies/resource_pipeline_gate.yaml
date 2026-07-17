@@ -1,0 +1,30 @@
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: pipeline_gate
+  importDerivedRoles: ["gaiada_scopes"]
+  variables:
+    import: ["gaiada_common"]
+  rules:
+    - actions: ["*"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["platform_admin"]
+    # Opening a gate ("please review/sign this") is the low-privilege ask — automation accounts or
+    # elevated humans, mirroring automation_approval.create.
+    - actions: ["create"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin", "manager", "member"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    # Reading the gate inbox is elevated (exposes in-flight review state across the tenant).
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin", "manager", "group_executive"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    # Deciding a gate (approve / request-changes / reject / sign) is a human governance action.
+    # NOTE: client-side gates (prd_sign, customer_feedback, scope_signoff) will be decided by the
+    # client principal through the portal BFF (WS11 build item 4); this rule covers staff decisions
+    # and staff-recorded client sign-offs in the interim.
+    - actions: ["decide"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin", "group_executive"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }

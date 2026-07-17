@@ -1,0 +1,32 @@
+# LOCAL-ONLY Alertmanager config. The production alertmanager.yml fans out to Telegram + SMTP +
+# external dead-man's-switch, all of which need real credentials we don't have on a dev box (empty
+# TELEGRAM_BOT_TOKEN/SMTP_*/DEADMANSSWITCH_URL make Alertmanager reject the config and crash-loop).
+# Locally we route everything to the self-hosted ntfy, which needs no credentials — a real, working
+# alert path for testing. Mounted directly over /etc/alertmanager/alertmanager.yml by
+# docker-compose.obs-local.yml (bypasses the envsubst render step).
+global:
+  resolve_timeout: 5m
+
+route:
+  receiver: local-ntfy
+  group_by: ["alertname", "instance"]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  routes:
+    - matchers: ['severity="watchdog"']
+      receiver: local-ntfy-watchdog
+      group_wait: 0s
+      group_interval: 1m
+      repeat_interval: 1m
+      continue: false
+
+receivers:
+  - name: local-ntfy
+    webhook_configs:
+      - url: "http://ntfy/gaiada-alerts"
+        send_resolved: true
+  - name: local-ntfy-watchdog
+    webhook_configs:
+      - url: "http://ntfy/gaiada-watchdog"
+        send_resolved: false

@@ -1,0 +1,361 @@
+{
+  "id": "ws11fanout000001",
+  "name": "WS11 fan-out (on pipeline.run.created -> scope sign-off + report route)",
+  "meta": {
+    "description": "WS11 build items 5 + 10. The event->n8n bridge POSTs pipeline.run.created to /webhook/ev/pipeline.run.created (a webhook path is unique in n8n, so the scope + report tracks that both react to run.created share ONE workflow; least privilege is preserved per call via the OBO id on each node). SCOPE track (as wf:scope): open the client-side scope_signoff gate + notify the PM to counter-sign. REPORT track (as wf:report): route the extracted report to the internal process — a STUB (in-app notify) until that process is designed (WS11 plan §10). The DELIVERY track does NOT trigger here — it waits on prd_sign + scope.signed (see pipeline-delivery.json). Env: N8N_BRIDGE_SECRET, HUB_SERVICE_TOKEN, NOTIFY_USER_ID. Bridge must forward pipeline.run.created over the pipeline_run stream."
+  },
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ev/pipeline.run.created",
+        "responseMode": "responseNode"
+      },
+      "name": "Webhook: bridge ev/pipeline.run.created",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "c2f5a1b0-pipeline-fanout-0001"
+    },
+    {
+      "parameters": {
+        "jsCode": "const got = $input.first().json.headers?.['x-gaiada-bridge-secret'];\nif (!got || got !== $env.N8N_BRIDGE_SECRET) throw new Error('bad bridge secret');\nconst e = $input.first().json.body ?? {};\nif (e.v !== 1) throw new Error(`unexpected envelope version ${e.v}`);\nconst store = $getWorkflowStaticData('global');\nstore.seen = store.seen || {};\nconst dup = Object.prototype.hasOwnProperty.call(store.seen, e.id);\nif (!dup) { store.seen[e.id] = Date.now(); const ids = Object.keys(store.seen); if (ids.length > 1000) for (const k of ids.slice(0, ids.length - 1000)) delete store.seen[k]; }\nreturn [{ json: { dup, tenantId: e.tenantId, runId: e.entityId } }];"
+      },
+      "name": "Verify secret + dedupe",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "is-dup",
+              "leftValue": "={{ $json.dup }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Duplicate?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        440,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: true, deduped: true }) }}"
+      },
+      "name": "Respond (dedup skip)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        660,
+        -160
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://mcp-hub:3003/mcp",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.HUB_SERVICE_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json, text/event-stream"
+            },
+            {
+              "name": "x-obo-provider",
+              "value": "n8n"
+            },
+            {
+              "name": "x-obo-external-id",
+              "value": "wf:scope"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", id: 1, method: \"tools/call\", params: { name: \"pipeline.openGate\", arguments: { tenantId: $json.tenantId, runId: $json.runId, kind: \"scope_signoff\", actorSide: \"client\", note: \"Scope Agreement ready for dual sign-off\" } } }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "name": "SCOPE: openGate (wf:scope)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        660,
+        60
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json.data ?? $input.first().json.body ?? '';\nconst line = String(raw).split('\\n').find((l) => l.startsWith('data:')) ?? '';\nconst rpc = JSON.parse(line.slice(5).trim());\nif (rpc.result?.isError) throw new Error(rpc.result.content?.[0]?.text ?? 'scope openGate failed');\nconst v = $('Verify secret + dedupe').first().json;\nreturn [{ json: { tenantId: v.tenantId, runId: v.runId } }];"
+      },
+      "name": "Parse scope gate",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        60
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://mcp-hub:3003/mcp",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.HUB_SERVICE_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json, text/event-stream"
+            },
+            {
+              "name": "x-obo-provider",
+              "value": "n8n"
+            },
+            {
+              "name": "x-obo-external-id",
+              "value": "wf:scope"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", id: 2, method: \"tools/call\", params: { name: \"notify\", arguments: { tenantId: $json.tenantId, recipientId: $env.NOTIFY_USER_ID, type: \"scope_ready_for_signoff\", payload: { runId: $json.runId } } } }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "name": "SCOPE: notify PM (wf:scope)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1100,
+        60
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json.data ?? $input.first().json.body ?? '';\nconst line = String(raw).split('\\n').find((l) => l.startsWith('data:')) ?? '';\nconst rpc = JSON.parse(line.slice(5).trim());\nif (rpc.result?.isError) throw new Error(rpc.result.content?.[0]?.text ?? 'scope notify failed');\nconst v = $('Verify secret + dedupe').first().json;\nreturn [{ json: { tenantId: v.tenantId, runId: v.runId } }];"
+      },
+      "name": "After scope",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        60
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://mcp-hub:3003/mcp",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.HUB_SERVICE_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json, text/event-stream"
+            },
+            {
+              "name": "x-obo-provider",
+              "value": "n8n"
+            },
+            {
+              "name": "x-obo-external-id",
+              "value": "wf:report"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", id: 3, method: \"tools/call\", params: { name: \"notify\", arguments: { tenantId: $json.tenantId, recipientId: $env.NOTIFY_USER_ID, type: \"report_ready_internal\", payload: { runId: $json.runId, note: \"STUB sink — wire the real internal process here\" } } } }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "name": "REPORT: route to internal (STUB, wf:report)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1540,
+        60
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: true }) }}"
+      },
+      "name": "Respond (done)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1760,
+        60
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook: bridge ev/pipeline.run.created": {
+      "main": [
+        [
+          {
+            "node": "Verify secret + dedupe",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verify secret + dedupe": {
+      "main": [
+        [
+          {
+            "node": "Duplicate?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Duplicate?": {
+      "main": [
+        [
+          {
+            "node": "Respond (dedup skip)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "SCOPE: openGate (wf:scope)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "SCOPE: openGate (wf:scope)": {
+      "main": [
+        [
+          {
+            "node": "Parse scope gate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse scope gate": {
+      "main": [
+        [
+          {
+            "node": "SCOPE: notify PM (wf:scope)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "SCOPE: notify PM (wf:scope)": {
+      "main": [
+        [
+          {
+            "node": "After scope",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "After scope": {
+      "main": [
+        [
+          {
+            "node": "REPORT: route to internal (STUB, wf:report)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "REPORT: route to internal (STUB, wf:report)": {
+      "main": [
+        [
+          {
+            "node": "Respond (done)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {},
+  "pinData": {}
+}

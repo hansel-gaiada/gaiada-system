@@ -1,17 +1,20 @@
 import type { ReactNode } from "react";
 import { Eyebrow } from "@/components/ui";
+import { Breadcrumbs, type Crumb } from "@/components/Breadcrumbs";
 
 // The standard page title block, extracted from the dashboard/approvals pages
 // (eyebrow + 34px display H1 + subtitle), now shared by every page.
-export function PageHeader({ eyebrow, title, subtitle, actions }: {
+export function PageHeader({ eyebrow, title, subtitle, actions, breadcrumbs }: {
   eyebrow: string;
   title: string;
   subtitle?: ReactNode;
   actions?: ReactNode;
+  breadcrumbs?: Crumb[];
 }) {
   return (
     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", gap: 24, flexWrap: "wrap", marginBottom: 26 }}>
       <div>
+        {breadcrumbs && breadcrumbs.length > 0 && <Breadcrumbs items={breadcrumbs} />}
         <Eyebrow style={{ color: "var(--erp-accent)", marginBottom: 8, display: "block" }}>{eyebrow}</Eyebrow>
         <h1 style={{ margin: 0, fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 34, lineHeight: 1.1 }}>
           {title}

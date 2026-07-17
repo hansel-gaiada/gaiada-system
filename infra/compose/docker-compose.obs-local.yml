@@ -1,0 +1,18 @@
+# Local override for the observability stack on Docker Desktop / WSL2.
+# node-exporter's `rslave` mount propagation ("/:/host:ro,rslave") is rejected on Docker Desktop
+# ("path / is mounted on / but it is not a shared or slave mount"). Drop the propagation locally.
+# !override replaces the merged list instead of appending (Compose Spec, needs a recent compose).
+#   docker compose -f docker-compose.vps.yml -f docker-compose.local.yml -f docker-compose.devui.yml \
+#     -f docker-compose.observability.yml -f docker-compose.obs-local.yml up -d node-exporter
+name: gaiada
+services:
+  node-exporter:
+    volumes: !override
+      - /:/host:ro
+
+  # Alertmanager's prod config needs Telegram/SMTP/dead-man's-switch creds we don't have locally →
+  # crash-loops on "missing bot_token". Mount a local ntfy-only config directly (no creds needed).
+  alertmanager:
+    volumes: !override
+      - ../../infra/observability/alertmanager/alertmanager.local.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager-data:/alertmanager

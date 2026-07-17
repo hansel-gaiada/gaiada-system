@@ -10,11 +10,12 @@ export function TenantSwitcher({ companies, current }: {
 }) {
   const formRef = useRef<HTMLFormElement>(null);
   return (
-    <form ref={formRef} action={switchTenant} className="erp-tenant">
+    <form ref={formRef} action={switchTenant} className="erp-company__form">
       <select
         name="tenantId"
+        className="erp-company__select"
         defaultValue={current ?? undefined}
-        aria-label="Company"
+        aria-label="Active company"
         onChange={() => formRef.current?.requestSubmit()}
       >
         {companies.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}

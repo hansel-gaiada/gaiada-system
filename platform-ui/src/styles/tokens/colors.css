@@ -25,7 +25,7 @@
   --brand-color-secondary: var(--primitive-champagne);  /* secondary highlights        */
   --brand-color-bg:        var(--primitive-off-white);  /* layout background           */
   --brand-color-text-dark: var(--primitive-off-black);  /* premium editorial text      */
-  --brand-logo-text:       "GAIADA"; /* @kind other */  /* wordmark fallback */
+  --brand-logo-text:       "SYROWATKA"; /* @kind other */  /* wordmark fallback */
   --brand-logo-source:     none; /* @kind other */                  /* image url() set via panel */
 
   /* ---- TIER 3 · Semantic aliases (consumed by all components) ----- */

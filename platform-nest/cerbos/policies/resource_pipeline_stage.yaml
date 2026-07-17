@@ -1,0 +1,20 @@
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: pipeline_stage
+  importDerivedRoles: ["gaiada_scopes"]
+  variables:
+    import: ["gaiada_common"]
+  rules:
+    - actions: ["*"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["platform_admin"]
+    # Automation accounts advance stages (running -> awaiting_gate -> done) as the workflow progresses.
+    - actions: ["create", "update"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin", "manager", "member"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin", "manager", "group_executive"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }

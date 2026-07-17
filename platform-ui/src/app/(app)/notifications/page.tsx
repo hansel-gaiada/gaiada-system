@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
@@ -12,7 +13,7 @@ const SUBTITLE = "Approvals, mentions and record changes that involve you.";
 
 // Best-effort human summary from an opaque payload — the backend notification
 // shape is still settling, so we read a few likely fields and fall back to type.
-function summarize(n: NotificationItem): { title: string; body?: string } {
+function summarize(n: NotificationItem): { title: string; body?: string; href?: string } {
   const p = n.payload ?? {};
   const title =
     (typeof p.title === "string" && p.title) ||
@@ -22,7 +23,8 @@ function summarize(n: NotificationItem): { title: string; body?: string } {
     (typeof p.message === "string" && p.message) ||
     (typeof p.body === "string" && p.body) ||
     undefined;
-  return { title: title.charAt(0).toUpperCase() + title.slice(1), body };
+  const href = typeof p.href === "string" && p.href.startsWith("/") ? p.href : undefined;
+  return { title: title.charAt(0).toUpperCase() + title.slice(1), body, href };
 }
 
 function when(iso: string): string {
@@ -97,8 +99,11 @@ export default async function NotificationsPage() {
                     }}
                   />
                   <div style={{ minWidth: 0, flex: 1 }}>
-                    <div style={{ font: `${isUnread ? 700 : 400} 14px var(--font-body)`, color: "var(--text-primary)" }}>{s.title}</div>
+                    <div style={{ font: `${isUnread ? 700 : 400} 14px var(--font-body)`, color: "var(--text-primary)" }}>
+                      {s.href ? <Link href={s.href} style={{ color: "inherit", textDecoration: "none" }}>{s.title}</Link> : s.title}
+                    </div>
                     {s.body && <div style={{ font: "400 13px/1.5 var(--font-body)", color: "var(--erp-ink-60)", marginTop: 2 }}>{s.body}</div>}
+                    {s.href && <Link href={s.href} style={{ font: "400 12px var(--font-body)", color: "var(--erp-accent)", textDecoration: "none", marginTop: 4, display: "inline-block" }}>Open →</Link>}
                   </div>
                   <span style={{ font: "400 12px var(--font-body)", color: "var(--erp-ink-50)", whiteSpace: "nowrap" }}>{when(n.created_at)}</span>
                 </div>

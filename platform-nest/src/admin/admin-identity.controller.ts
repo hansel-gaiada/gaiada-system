@@ -8,7 +8,9 @@ import {
 } from "@nestjs/common";
 import type { FastifyRequest } from "fastify";
 import { newId, withGlobal, withTenants } from "../db";
+import { config } from "../config";
 import { authorize, writeActivity } from "../core/http";
+import { emitEvent } from "../events/outbox.service";
 import { AuthGuard } from "../auth/guards";
 
 const SCOPE_TYPES = new Set(["global", "company", "team", "project", "record"]);
@@ -102,6 +104,98 @@ export class AdminIdentityController {
         scopeId: g.scopeId,
       })),
     }));
+  }
+
+  // ---- Invite / onboard a user into this company ----
+  // Creates the global user record (or reuses an existing one by email), adds a company
+  // membership, and optionally grants an initial role at company scope. Emits `user.invited`.
+  @Post(":tenantId/users")
+  @HttpCode(201)
+  async inviteUser(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Body() body: { name?: string; email?: string; title?: string | null; roleId?: string },
+  ) {
+    const name = body?.name?.trim();
+    const email = body?.email?.trim().toLowerCase();
+    if (!name || !email) throw new BadRequestException("name and email required");
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) throw new BadRequestException("invalid email");
+    await authorize(req.principal, { kind: "user", tenantId }, "create");
+
+    if (body?.roleId) {
+      const role = await withGlobal((c) => c.query(`SELECT 1 FROM roles WHERE id = $1`, [body.roleId]));
+      if (!role.rows[0]) throw new BadRequestException("unknown role");
+    }
+
+    // Reuse an existing global user by email (invite an existing person into another company)
+    // or provision a new one. users.email is UNIQUE.
+    const userId = await withGlobal(async (c) => {
+      const existing = await c.query<{ id: string }>(`SELECT id FROM users WHERE email = $1 AND deleted_at IS NULL`, [email]);
+      if (existing.rows[0]) return existing.rows[0].id;
+      const id = newId();
+      await c.query(
+        `INSERT INTO users (id, email, name, title, origin_site) VALUES ($1, $2, $3, $4, $5)`,
+        [id, email, name, body?.title ?? null, config.originSite],
+      );
+      return id;
+    });
+
+    await withTenants([tenantId], async (c) => {
+      await c.query(
+        `INSERT INTO company_memberships (id, tenant_id, user_id, origin_site) VALUES ($1, $2, $3, $4)
+         ON CONFLICT (tenant_id, user_id) DO UPDATE SET status = 'active', deleted_at = NULL`,
+        [newId(), tenantId, userId, config.originSite],
+      );
+      await emitEvent(c, tenantId, "user", userId, "user.invited", { email, name });
+    });
+
+    if (body?.roleId) {
+      await withGlobal((c) =>
+        c.query(
+          `INSERT INTO user_roles (id, user_id, role_id, scope_type, scope_id) VALUES ($1, $2, $3, 'company', $4)
+           ON CONFLICT (user_id, role_id, scope_type, scope_id) DO NOTHING`,
+          [newId(), userId, body.roleId, tenantId],
+        ),
+      );
+      await bumpSession(userId);
+    }
+    await writeActivity(tenantId, req.principal.userId, "user.invited", "user", userId, { email });
+    return { id: userId };
+  }
+
+  // ---- Edit a member's profile / (de)activate them ----
+  @Patch(":tenantId/users/:userId")
+  @HttpCode(200)
+  async updateUser(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Param("userId") userId: string,
+    @Body() b: { name?: string; title?: string | null; status?: string },
+  ) {
+    await authorize(req.principal, { kind: "user", id: userId, tenantId }, "update");
+    if (!(await memberIds(tenantId)).includes(userId)) {
+      throw new NotFoundException("user is not a member of this company");
+    }
+    const nothing = b?.name === undefined && b?.title === undefined && b?.status === undefined;
+    if (nothing) throw new BadRequestException("nothing to update");
+    const deactivating = b?.status !== undefined && b.status !== "active";
+    await withGlobal((c) =>
+      c.query(
+        `UPDATE users SET name = COALESCE($2, name), title = COALESCE($3, title),
+           status = COALESCE($4, status), updated_at = now()
+         WHERE id = $1 AND deleted_at IS NULL`,
+        [userId, b?.name ?? null, b?.title ?? null, b?.status ?? null],
+      ),
+    );
+    // Reflect (de)activation on the tenant membership too, and cut live sessions (D11).
+    if (b?.status !== undefined) {
+      await withTenants([tenantId], (c) =>
+        c.query(`UPDATE company_memberships SET status = $2, updated_at = now() WHERE user_id = $1`, [userId, b.status]),
+      );
+      if (deactivating) await bumpSession(userId);
+    }
+    await writeActivity(tenantId, req.principal.userId, "updated", "user", userId, { status: b?.status });
+    return { ok: true };
   }
 
   // ---- Assign a role grant ----

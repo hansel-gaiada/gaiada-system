@@ -1,0 +1,25 @@
+/* Data table — search/sort/paginate/export. Hairline design language. */
+.dt { border: 0.5px solid var(--erp-hairline); background: var(--surface-card); }
+.dt__bar { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-bottom: 0.5px solid var(--erp-hairline-soft); }
+.dt__search { flex: 1; min-width: 0; display: flex; align-items: center; }
+.dt__search input { width: 100%; max-width: 320px; border: none; border-bottom: 0.5px solid var(--erp-hairline); background: transparent; outline: none; padding: 6px 2px; font: 400 13px var(--font-body); color: var(--text-primary); }
+.dt__search input:focus-visible { border-bottom-color: var(--erp-accent); }
+.dt__count { font: 700 10px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--erp-ink-50); }
+
+.dt__scroll { overflow-x: auto; }
+.dt__table { width: 100%; border-collapse: collapse; font: 400 13.5px var(--font-body); }
+.dt__table thead th { text-align: left; padding: 10px 14px; border-bottom: 0.5px solid var(--erp-hairline); background: var(--surface-card); position: sticky; top: 0; }
+.dt__sort { border: none; background: transparent; cursor: pointer; font: 700 10px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--erp-ink-50); display: inline-flex; align-items: center; gap: 6px; padding: 0; }
+.dt__sort:hover { color: var(--text-primary); }
+.dt__arrow { font-size: 8px; color: var(--erp-accent); width: 8px; }
+.dt__table thead th:not(:has(.dt__sort)) { font: 700 10px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--erp-ink-50); }
+.dt__table tbody td { padding: 10px 14px; border-bottom: 0.5px solid var(--erp-hairline-soft); color: var(--erp-ink-70, rgba(26,25,22,.72)); vertical-align: middle; }
+.dt__table tbody tr:last-child td { border-bottom: none; }
+.dt__table tbody tr:hover td { background: rgba(110, 90, 67, 0.03); }
+.dt--right { text-align: right; }
+.dt__link { color: var(--text-primary); text-decoration: none; }
+.dt__link:hover { color: var(--erp-accent); }
+.dt__empty { text-align: center; padding: 28px 14px !important; color: var(--erp-ink-50); font-style: italic; }
+
+.dt__pager { display: flex; align-items: center; justify-content: flex-end; gap: 12px; padding: 10px 12px; border-top: 0.5px solid var(--erp-hairline-soft); }
+.dt__pageinfo { font: 400 12px var(--font-body); color: var(--erp-ink-50); }

@@ -6,7 +6,7 @@
 //
 // Access is platform-global admin (platform_admin) or owner (group_executive) — checked in
 // code (these are not tenant resources). Non-admins get 403, which the UI absorbs gracefully.
-import { Controller, ForbiddenException, Get, Param, Req, UseGuards } from "@nestjs/common";
+import { Controller, ForbiddenException, Get, NotFoundException, Param, Req, UseGuards } from "@nestjs/common";
 import type { FastifyRequest } from "fastify";
 import { config } from "../config";
 import { authorize } from "../core/http";
@@ -39,6 +39,15 @@ function isElevated(req: FastifyRequest): boolean {
   );
 }
 
+// The n8n workflow VIEWER (read-only canvas in the IT section) is reachable by IT staff too,
+// not just platform admins. Any it_admin/it_manager/it grant (any scope) qualifies.
+function isItOrElevated(req: FastifyRequest): boolean {
+  return (
+    isElevated(req) ||
+    req.principal.roles.some((r) => r.role === "it_admin" || r.role === "it_manager" || r.role === "it")
+  );
+}
+
 /** GET with a hard timeout; returns parsed JSON or throws. */
 async function getJson(url: string, token?: string): Promise<unknown> {
   const ac = new AbortController();
@@ -48,6 +57,19 @@ async function getJson(url: string, token?: string): Promise<unknown> {
       signal: ac.signal,
       headers: token ? { authorization: `Bearer ${token}` } : {},
     });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return await res.json();
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** GET the n8n Public API with the configured API key; throws on non-2xx. */
+async function getN8n(base: string, apiKey: string, path: string): Promise<unknown> {
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), config.adminProbeTimeoutMs);
+  try {
+    const res = await fetch(`${base}${path}`, { signal: ac.signal, headers: { "X-N8N-API-KEY": apiKey } });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return await res.json();
   } finally {
@@ -216,6 +238,39 @@ export class AdminSystemsController {
     } catch {
       return []; // graceful empty (UI shows "no audit")
     }
+  }
+
+  // ---- n8n workflow viewer (IT section, read-only canvas). Fail-soft to []/404. ----
+  @Get("automation/workflows")
+  async workflows(@Req() req: FastifyRequest) {
+    if (!isItOrElevated(req)) throw new ForbiddenException("IT or platform admin required");
+    const svc = config.services.automation;
+    if (!svc.url || !svc.token) return []; // no n8n API key → UI degrades to empty
+    const base = svc.url.replace(/\/$/, "");
+    try {
+      const res = (await getN8n(base, svc.token, `/api/v1/workflows`)) as {
+        data?: Array<{ id: string; name: string; active: boolean; updatedAt?: string }>;
+      };
+      return (res.data ?? []).map((w) => ({ id: String(w.id), name: w.name, active: !!w.active, updatedAt: w.updatedAt ?? null }));
+    } catch {
+      return [];
+    }
+  }
+
+  @Get("automation/workflows/:workflowId")
+  async workflow(@Req() req: FastifyRequest, @Param("workflowId") workflowId: string) {
+    if (!isItOrElevated(req)) throw new ForbiddenException("IT or platform admin required");
+    const svc = config.services.automation;
+    if (!svc.url || !svc.token) throw new NotFoundException("automation not configured");
+    const base = svc.url.replace(/\/$/, "");
+    let w: { id: string; name: string; active?: boolean; nodes?: unknown[]; connections?: Record<string, unknown> };
+    try {
+      w = (await getN8n(base, svc.token, `/api/v1/workflows/${encodeURIComponent(workflowId)}`)) as typeof w;
+    } catch {
+      throw new NotFoundException("workflow not found");
+    }
+    // Pass through only the subset the canvas needs (nodes positions + connections map).
+    return { id: String(w.id), name: w.name, active: w.active, nodes: w.nodes ?? [], connections: w.connections ?? {} };
   }
 
   @Get("hub/tools")

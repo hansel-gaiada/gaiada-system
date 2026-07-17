@@ -14,8 +14,8 @@ resourcePolicy:
       effect: EFFECT_ALLOW
       derivedRoles: ["company_admin", "manager"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }
-    # Assigning/revoking role grants — company admins only.
-    - actions: ["create", "delete"]
+    # Inviting/editing members + assigning/revoking role grants — company admins only.
+    - actions: ["create", "update", "delete"]
       effect: EFFECT_ALLOW
       derivedRoles: ["company_admin"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }

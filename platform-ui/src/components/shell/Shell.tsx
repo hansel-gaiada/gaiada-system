@@ -12,7 +12,7 @@ export function Shell({ me, tenantId, moduleLabel, prefs = DEFAULT_PREFS, childr
   return (
     <div className="erp-app" data-density={prefs.density} data-width={prefs.width}>
       <a href="#main-content" className="skip-link">Skip to content</a>
-      <Sidebar me={me} />
+      <Sidebar me={me} tenantId={tenantId} />
       <TopBar me={me} tenantId={tenantId} moduleLabel={moduleLabel} />
       <main id="main-content" className="erp-main erp-scroll" tabIndex={-1}><div className="erp-main__inner">{children}</div></main>
     </div>

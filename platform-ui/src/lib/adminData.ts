@@ -122,6 +122,27 @@ export async function listUsers(u: string, t: string): Promise<UserRow[]> {
 
 export const listRoles = (u: string) => skipMissing(platformFetch<RoleRow[]>(`/api/roles`, u), [] as RoleRow[]);
 
+// Invite/onboard a person and edit their profile — BFF contract (backend TODO,
+// see docs/FRONTEND-BFF-CONTRACT.md):
+//   POST  /api/:t/users            body {name,email,title?,roleId?}  -> { id }
+//   PATCH /api/:t/users/:id         body {title?,status?,name?}       -> { ok }
+// admin.access (company_admin/elevated) only.
+export interface InviteInput { name: string; email: string; title?: string; roleId?: string }
+export async function inviteUser(u: string, t: string, body: InviteInput): Promise<AdminActionState & { id?: string }> {
+  try {
+    const res = await platformFetch<{ id: string }>(`/api/${t}/users`, u, { method: "POST", body: JSON.stringify(body) });
+    return { ok: true, id: res?.id };
+  } catch (e) {
+    if (e instanceof PlatformError) {
+      if (e.status === 404 || e.status === 405) return { ok: false, error: "Not available yet — the backend endpoint is pending." };
+      return { ok: false, error: e.message };
+    }
+    throw e;
+  }
+}
+export const updateUser = (u: string, t: string, id: string, body: { title?: string; status?: string; name?: string }) =>
+  gracefulWrite(platformFetch(`/api/${t}/users/${id}`, u, { method: "PATCH", body: JSON.stringify(body) }));
+
 export const assignRole = (
   u: string,
   t: string,

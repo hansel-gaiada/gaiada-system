@@ -1,6 +1,6 @@
 // Phase C (Intelligence surfaces, tenant-scoped): agent goals + knowledge sources. Both are
 // read-only and degrade to [] when there is no live source — see per-endpoint notes.
-import { Controller, Get, Param, Req, UseGuards } from "@nestjs/common";
+import { BadRequestException, Body, Controller, Get, HttpCode, NotFoundException, Param, Post, Req, UseGuards } from "@nestjs/common";
 import type { FastifyRequest } from "fastify";
 import { config } from "../config";
 import { authorize } from "../core/http";
@@ -51,5 +51,41 @@ export class IntelligenceController {
     } catch {
       return [];
     }
+  }
+
+  // Approve/reject a quarantined knowledge source. Proxies the write to the knowledge service
+  // (service-token). 404 when the service isn't configured/reachable so the UI degrades to
+  // "reviewing isn't available yet" instead of erroring.
+  @Post(":tenantId/knowledge/sources/:sourceId/review")
+  @HttpCode(200)
+  async reviewSource(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Param("sourceId") sourceId: string,
+    @Body() body: { decision?: string },
+  ) {
+    const decision = body?.decision;
+    if (decision !== "approved" && decision !== "rejected") throw new BadRequestException("decision must be approved|rejected");
+    await authorize(req.principal, { kind: "knowledge_source", tenantId }, "update");
+    const svc = config.services.knowledge;
+    if (!svc.url) throw new NotFoundException("knowledge service not configured");
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), config.adminProbeTimeoutMs);
+    try {
+      const res = await fetch(`${svc.url.replace(/\/$/, "")}/sources/${encodeURIComponent(sourceId)}/review`, {
+        method: "POST",
+        signal: ac.signal,
+        headers: { "Content-Type": "application/json", ...(svc.token ? { authorization: `Bearer ${svc.token}` } : {}) },
+        body: JSON.stringify({ tenantId, decision }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    } catch {
+      throw new NotFoundException("knowledge review unavailable");
+    } finally {
+      clearTimeout(timer);
+    }
+    // Audit lives in the knowledge service (D9-owned); the source ref is not a platform uuid,
+    // so we do not write it to the tenant activity feed here.
+    return { ok: true };
   }
 }

@@ -9,7 +9,7 @@ export default function RootNotFound() {
         code="404"
         title="Page not found"
         body="We couldn't find that page."
-        actions={<Link href="/" className="lux-btn lux-btn--solid lux-btn--sm">Go to Gaiada</Link>}
+        actions={<Link href="/" className="lux-btn lux-btn--solid lux-btn--sm">Go to Syrowatka</Link>}
       />
     </main>
   );

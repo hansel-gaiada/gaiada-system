@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { canViewEmployee } from "./people";
+import { canViewEmployee, findPlacement } from "./people";
 import type { Me } from "./platform";
+import type { OrgNode } from "./org";
 
 function me(userId: string, roles: string[]): Me {
   return {
@@ -29,5 +30,29 @@ describe("canViewEmployee", () => {
 
   it("lets an owner (group_executive) view anyone", () => {
     expect(canViewEmployee(me("owner", ["group_executive"]), "u-2")).toBe(true);
+  });
+});
+
+describe("findPlacement", () => {
+  const tree: OrgNode = {
+    id: "root", name: "Gaia Digital Agency", kind: "company", children: [
+      { id: "d1", name: "Web Dev", kind: "department", children: [
+        { id: "v1", name: "Frontend", kind: "division", children: [
+          { id: "r1", name: "Senior Developer", kind: "role", children: [
+            { id: "p1", name: "Made Putra", kind: "person", assigneeId: "u-dev", assigneeName: "Made Putra", children: [] },
+          ] },
+        ] },
+      ] },
+    ],
+  };
+
+  it("returns the ancestor chain (excluding the company root) for a placed person", () => {
+    const chain = findPlacement(tree, "u-dev");
+    expect(chain.map((s) => s.name)).toEqual(["Web Dev", "Frontend", "Senior Developer"]);
+    expect(chain.map((s) => s.kind)).toEqual(["department", "division", "role"]);
+  });
+
+  it("returns an empty chain when the person isn't placed", () => {
+    expect(findPlacement(tree, "u-nobody")).toEqual([]);
   });
 });

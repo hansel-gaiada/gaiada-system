@@ -57,10 +57,27 @@ export class AgencyController {
   @Get("approvals/pending")
   async pending(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string) {
     await authorize(req.principal, { kind: "agency_approval", tenantId, module: "agency" }, "read");
+    // campaignId lets the UI deep-link a pending item to its campaign.
     const rows = await withTenants([tenantId], (c) =>
-      c.query(`SELECT a.id, a.subject, a.created_at, c.name AS campaign FROM agency_approvals a
+      c.query(`SELECT a.id, a.subject, a.created_at, a.campaign_id AS "campaignId", c.name AS campaign FROM agency_approvals a
                JOIN agency_campaigns c ON c.id = a.campaign_id
                WHERE a.status = 'pending' AND a.deleted_at IS NULL ORDER BY a.created_at`),
+    );
+    return rows.rows;
+  }
+
+  // Decided-approval history (Approvals page "Recently decided").
+  @Get("approvals/decided")
+  async decided(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string) {
+    await authorize(req.principal, { kind: "agency_approval", tenantId, module: "agency" }, "read");
+    const rows = await withTenants([tenantId], (c) =>
+      c.query(`SELECT a.id, a.subject, a.campaign_id AS "campaignId", c.name AS campaign, a.status AS decision,
+                      a.decided_at, u.name AS decided_by
+               FROM agency_approvals a
+               JOIN agency_campaigns c ON c.id = a.campaign_id
+               LEFT JOIN users u ON u.id = a.decided_by
+               WHERE a.status IN ('approved','rejected') AND a.deleted_at IS NULL
+               ORDER BY a.decided_at DESC LIMIT 100`),
     );
     return rows.rows;
   }

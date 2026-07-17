@@ -105,6 +105,18 @@ describe.skipIf(!TEST_URL)("agency module (phase e2e)", () => {
     expect(pending.json()).toEqual([]);
   });
 
+  it("decided-approval history lists the decision with campaignId + decider", async () => {
+    const decided = await app.inject({
+      method: "GET", url: `/api/${agencyCo}/modules/agency/approvals/decided`, headers: asUser(member),
+    });
+    expect(decided.statusCode).toBe(200);
+    const rows = decided.json() as Array<{ id: string; campaignId: string; decision: string; decided_by: string | null }>;
+    const row = rows.find((r) => r.id === approvalId)!;
+    expect(row.decision).toBe("approved");
+    expect(row.campaignId).toBe(campaignId);
+    expect(row.decided_by).toBeTruthy();
+  });
+
   it("module rollups feed the cross-company management view", async () => {
     const period = "2026-07-05";
     await recomputeRollups(agencyCo, period);

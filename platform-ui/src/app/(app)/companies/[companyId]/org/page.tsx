@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
-import { isElevated } from "@/components/shell/nav";
+import { can } from "@/lib/rbac";
 import { getCompany, listMembers } from "@/lib/entities";
 import { getOrgStructure } from "@/lib/org";
 import { PageHeader } from "@/components/PageHeader";
@@ -27,7 +27,7 @@ export default async function OrgPage({ params }: { params: Params }) {
     );
   }
 
-  const canEdit = isElevated(me) && me.companies.some((c) => c.id === companyId);
+  const canEdit = can(me, "org.edit", companyId) && me.companies.some((c) => c.id === companyId);
   const [{ structure, source }, members] = await Promise.all([
     getOrgStructure(userId, companyId, company),
     listMembers(userId, companyId).catch(() => []),

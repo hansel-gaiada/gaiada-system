@@ -2,7 +2,7 @@
 import { revalidatePath } from "next/cache";
 import { getSessionUserId } from "@/lib/session-server";
 import { getMe, PlatformError } from "@/lib/platform";
-import { isElevated } from "@/components/shell/nav";
+import { can } from "@/lib/rbac";
 import { persistOrgStructure, sanitizeStructure } from "@/lib/org";
 
 export interface SaveOrgState {
@@ -18,8 +18,8 @@ export async function saveOrg(companyId: string, treeJson: string): Promise<Save
   const userId = await getSessionUserId();
   if (!userId) return { ok: false, error: "Not signed in." };
   const me = await getMe(userId);
-  if (!isElevated(me)) return { ok: false, error: "Only owners and administrators can edit the org structure." };
   if (!me.companies.some((c) => c.id === companyId)) return { ok: false, error: "Unknown company." };
+  if (!can(me, "org.edit", companyId)) return { ok: false, error: "Only owners and administrators can edit the org structure." };
 
   let parsed: unknown;
   try {

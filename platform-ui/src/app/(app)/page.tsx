@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
@@ -71,7 +72,8 @@ export default async function MyWork() {
                 tcols="2.2fr 1.2fr 1fr 1fr"
                 columns={[{ label: "Task" }, { label: "Project" }, { label: "Due" }, { label: "Status", align: "right" }]}
                 rows={tasks.slice(0, 8).map((t) => [
-                  t.title, t.project_name, t.due_date ? t.due_date.slice(0, 10) : "—",
+                  <Link key={`${t.id}-t`} href={`/tasks/${t.id}`} style={{ color: "var(--text-primary)", textDecoration: "none" }}>{t.title}</Link>,
+                  t.project_name, t.due_date ? t.due_date.slice(0, 10) : "—",
                   <StatusBadge key={t.id} label={t.status ?? "Open"} />,
                 ])}
               />

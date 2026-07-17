@@ -49,4 +49,13 @@ export const config = {
   //   central — additionally exposes cross-company/management tools (real rollup.metrics over the
   //             central platform's D12 rollup read path — the only sanctioned cross-company read).
   topology: (process.env.HUB_TOPOLOGY ?? "site") as "site" | "central",
+  // WS11 delivery tools (build item 9). GitHub repo checks + staging deploy trigger. All fail
+  // CLOSED with a clear message when unset (like image.enhance), so the tools register but never
+  // pretend. github: a PAT/app token + API base (default github.com). deploy: a workflow_dispatch-
+  // style webhook the release pipeline (WS10) exposes, plus its auth token.
+  githubApiUrl: process.env.GITHUB_API_URL ?? "https://api.github.com",
+  githubToken: process.env.GITHUB_TOKEN ?? "",
+  githubOrg: process.env.GITHUB_ORG ?? "",
+  deployStagingUrl: process.env.DEPLOY_STAGING_URL ?? "",
+  deployStagingToken: process.env.DEPLOY_STAGING_TOKEN ?? "",
 };

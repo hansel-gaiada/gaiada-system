@@ -3,8 +3,29 @@ import { useMemo, useRef, useState, useTransition } from "react";
 import type { OrgNode, OrgKind } from "@/lib/org";
 import "./org.css";
 
-const KINDS: OrgKind[] = ["company", "department", "team", "role", "person"];
-const ASSIGNABLE = new Set<OrgKind>(["team", "role", "person"]);
+const KINDS: OrgKind[] = ["holding", "company", "department", "division", "role", "person"];
+const ASSIGNABLE = new Set<OrgKind>(["division", "role", "person"]);
+// The sensible child kind one level below a given kind — keeps added units on
+// the canonical ladder (holding → company → department → division → role →
+// person). Defined here (not in the server-only lib/org) so this client
+// component doesn't pull server modules into the browser bundle.
+const CHILD_KIND: Partial<Record<OrgKind, OrgKind>> = {
+  holding: "company",
+  company: "department",
+  department: "division",
+  division: "role",
+  role: "person",
+};
+const childKindFor = (kind: OrgKind): OrgKind => CHILD_KIND[kind] ?? "person";
+// Default names for a freshly-added child of each kind.
+const NEW_LABEL: Record<OrgKind, string> = {
+  holding: "New company",
+  company: "New department",
+  department: "New division",
+  division: "New role",
+  role: "New person",
+  person: "New person",
+};
 
 type SaveResult = { ok: boolean; error?: string; source?: "backend" | "local"; savedAt?: string };
 interface Props {
@@ -127,7 +148,11 @@ export function OrgBuilder({ companyId, initial, canEdit, members, source, updat
                 const m = members.find((x) => x.id === assigneeId);
                 mutate(patchNode(root, id, { assigneeId: assigneeId || null, assigneeName: m?.name ?? null }));
               }}
-              onAdd={(parentId) => mutate(addChildTo(root, parentId, { id: uid(), name: "New role", kind: "role", children: [] }))}
+              onAdd={(parentId) => {
+                const parent = findNode(root, parentId);
+                const kind = childKindFor(parent?.kind ?? "division");
+                mutate(addChildTo(root, parentId, { id: uid(), name: NEW_LABEL[kind], kind, children: [] }));
+              }}
               onRemove={(id) => mutate(removeNode(root, id))}
             />
           </ul>

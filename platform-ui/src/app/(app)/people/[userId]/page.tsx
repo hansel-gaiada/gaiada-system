@@ -4,6 +4,7 @@ import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
 import { canViewEmployee, getEmployee } from "@/lib/people";
+import { can } from "@/lib/rbac";
 import { PageHeader } from "@/components/PageHeader";
 import { Card, HairlineTable, KpiTile, StatusBadge } from "@/components/ui";
 import { DescriptionList } from "@/components/DescriptionList";
@@ -62,7 +63,7 @@ export default async function EmployeePage({ params }: { params: Params }) {
   const emp = await getEmployee(viewerId, tenant, userId, me);
   if (!emp) return shell("Person not found", <EmptyNote>No person with that id in this company.</EmptyNote>);
 
-  const { profile, isSelf, tasks, projects, timeEntries, identityLinks, activity } = emp;
+  const { profile, isSelf, tasks, projects, timeEntries, identityLinks, activity, placement } = emp;
   const openTasks = tasks.filter((t) => OPEN.has((t.status ?? "").toLowerCase())).length;
   const totalMinutes = timeEntries.reduce((n, e) => n + (e.minutes ?? 0), 0);
 
@@ -78,7 +79,13 @@ export default async function EmployeePage({ params }: { params: Params }) {
         eyebrow="People"
         title={profile.name}
         subtitle={profile.title ?? profile.email}
-        actions={isSelf ? <StatusBadge label="You" /> : undefined}
+        breadcrumbs={[{ label: "People", href: "/people" }, { label: profile.name }]}
+        actions={
+          <>
+            {isSelf && <StatusBadge label="You" />}
+            {can(me, "admin.access", tenant) && <Link href={`/people/${userId}/edit`} className="lux-btn lux-btn--ghost lux-btn--sm">Edit</Link>}
+          </>
+        }
       />
 
       <div style={{ display: "grid", gap: 16, gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", marginBottom: 20 }}>
@@ -102,6 +109,26 @@ export default async function EmployeePage({ params }: { params: Params }) {
                   <span style={{ font: "400 13px var(--font-body)", color: "var(--text-primary)" }}>{r.role}</span>
                   <span style={{ font: "700 10px var(--font-body)", letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--erp-ink-50)" }}>
                     {SCOPE_LABEL[r.scopeType] ?? r.scopeType}
+                  </span>
+                </span>
+              ))}
+            </div>
+          )}
+        </Card>
+      </div>
+
+      <div style={{ marginTop: 20 }}>
+        <Card title="Organization" headerRight={<Link href={`/companies/${tenant}/org`} style={{ font: "400 12px var(--font-body)", color: "var(--erp-accent)", textDecoration: "none" }}>View org chart →</Link>}>
+          {placement.length === 0 ? (
+            <EmptyNote>Not placed in the company org structure yet.</EmptyNote>
+          ) : (
+            <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, font: "400 14px var(--font-body)", color: "var(--text-primary)" }}>
+              {placement.map((step, i) => (
+                <span key={`${step.name}-${i}`} style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                  {i > 0 && <span style={{ color: "var(--erp-ink-50)" }}>›</span>}
+                  <span style={{ display: "inline-flex", flexDirection: "column" }}>
+                    <span>{step.name}</span>
+                    <span style={{ font: "700 9px var(--font-body)", letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--erp-ink-50)" }}>{step.kind}</span>
                   </span>
                 </span>
               ))}

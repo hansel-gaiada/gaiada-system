@@ -163,6 +163,19 @@ export function buildKnowledgeApp(
     return store.listSources([tenant]);
   });
 
+  // Quarantine review for a source (admin console). Service-token-only, tenant-scoped.
+  app.post<{ Params: { ref: string }; Body: { tenantId?: string; decision?: string } }>("/sources/:ref/review", async (req, reply) => {
+    if (!authorized(req)) return reply.code(401).send({ error: "unauthorized" });
+    const { tenantId, decision } = req.body ?? {};
+    const sourceRef = decodeURIComponent(req.params.ref);
+    if (!tenantId || (decision !== "approved" && decision !== "rejected")) {
+      return reply.code(400).send({ error: "tenantId and decision (approved|rejected) required" });
+    }
+    const updated = await store.reviewSource(tenantId, sourceRef, decision);
+    if (updated === 0) return reply.code(404).send({ error: "source not found" });
+    return { ok: true, updated, decision };
+  });
+
   app.post<{ Body: { sourceRef?: string; tenantId?: string } }>("/erase", async (req, reply) => {
     if (!authorized(req)) return reply.code(401).send({ error: "unauthorized" });
     const { sourceRef, tenantId } = req.body ?? {};

@@ -1,0 +1,21 @@
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: scope_signoff
+  importDerivedRoles: ["gaiada_scopes"]
+  variables:
+    import: ["gaiada_common"]
+  rules:
+    - actions: ["*"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["platform_admin"]
+    # Recording a party's scope-agreement signature is a governance action. Staff record it now;
+    # the client's own countersignature arrives via the portal BFF (WS11 build item 4).
+    - actions: ["create"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin", "group_executive"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin", "manager", "group_executive"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }

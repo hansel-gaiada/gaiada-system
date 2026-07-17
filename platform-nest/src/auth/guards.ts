@@ -43,7 +43,9 @@ export class AuthGuard implements CanActivate {
     const bearer = bearerOf(req);
 
     // OIDC user path — a valid IdP token authenticates the user directly.
-    if (config.authMode === "oidc" && bearer && bearer !== config.serviceToken) {
+    // "hybrid" (local dev) accepts BOTH an IdP JWT here AND the dev x-user-id path below,
+    // so real SSO and the service-token/dev-login BFF can coexist. Prod uses "oidc".
+    if ((config.authMode === "oidc" || config.authMode === "hybrid") && bearer && bearer !== config.serviceToken) {
       try {
         const principal = await principalFromToken(bearer);
         if (principal) {
@@ -62,9 +64,9 @@ export class AuthGuard implements CanActivate {
       throw new UnauthorizedException("unauthorized");
     }
 
-    // Dev mode: the acting user is named by x-user-id (local + tests).
+    // Dev mode: the acting user is named by x-user-id (local + tests). Also allowed in "hybrid".
     const userId = req.headers["x-user-id"];
-    if (config.authMode === "dev" && typeof userId === "string" && userId) {
+    if ((config.authMode === "dev" || config.authMode === "hybrid") && typeof userId === "string" && userId) {
       const principal = await assemblePrincipal(userId, "high");
       if (!principal) throw new UnauthorizedException("unknown or inactive user");
       req.principal = principal;

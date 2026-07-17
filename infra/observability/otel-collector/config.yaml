@@ -63,6 +63,10 @@ service:
   telemetry:
     logs:
       level: info
+    metrics:
+      # Bind on all interfaces so Prometheus can scrape the collector's own metrics at
+      # otel-collector:8888 (prometheus.yml expects this target). Default is localhost = unreachable cross-container.
+      address: 0.0.0.0:8888
   pipelines:
     traces:
       receivers: [otlp]

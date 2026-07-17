@@ -19,6 +19,12 @@ import {
   type TimeEntry,
 } from "./entities";
 import { listUsers, listIdentityLinks, getAudit, type IdentityLink, type AuditEntry } from "./adminData";
+import { getOrgStructure, type OrgNode, type OrgKind } from "./org";
+
+// Where an employee sits in the company org tree: the ancestor chain from the
+// top department down to the immediate parent (e.g. Web Dev › Frontend ›
+// Senior Developer). Empty when the person isn't placed in the structure.
+export interface OrgPlacementStep { name: string; kind: OrgKind }
 
 export interface EmployeeProfile {
   id: string;
@@ -37,11 +43,28 @@ export interface Employee {
   timeEntries: TimeEntry[];
   identityLinks: IdentityLink[];
   activity: AuditEntry[];
+  placement: OrgPlacementStep[];
 }
 
 // Self OR elevated (superadmin / owner). Pure — unit-tested.
 export function canViewEmployee(me: Me, userId: string): boolean {
   return me.userId === userId || isElevated(me);
+}
+
+// Depth-first search for the node assigned to userId; returns the ancestor
+// chain (excluding the company root) or [] when unplaced. Pure — unit-tested.
+export function findPlacement(root: OrgNode, userId: string): OrgPlacementStep[] {
+  function walk(node: OrgNode, trail: OrgPlacementStep[]): OrgPlacementStep[] | null {
+    if (node.assigneeId === userId && node.kind !== "company") return trail;
+    for (const child of node.children) {
+      const found = walk(child, [...trail, { name: node.name, kind: node.kind }]);
+      if (found) return found;
+    }
+    return null;
+  }
+  // Drop the company root from the trail (the first crumb of any match).
+  const chain = walk(root, []);
+  return chain ? chain.filter((s) => s.kind !== "company") : [];
 }
 
 async function safe<T>(p: Promise<T>, fallback: T): Promise<T> {
@@ -79,12 +102,13 @@ export async function getEmployee(u: string, t: string, userId: string, me: Me):
 
   const isSelf = me.userId === userId;
 
-  const [allTasks, allProjects, timeEntries, allLinks, activity] = await Promise.all([
+  const [allTasks, allProjects, timeEntries, allLinks, activity, org] = await Promise.all([
     safe(listTasks(u, t), []),
     safe(listProjects(u, t), []),
     safe(listTimeEntries(u, t, isSelf ? { mine: true } : { userId }), []),
     safe(listIdentityLinks(u, t), []),
     safe(getAudit(u, t, { actorId: userId, limit: 25 }), []),
+    safe(getOrgStructure(u, t, { id: t, name: profile.name, type: null }), null),
   ]);
 
   return {
@@ -95,5 +119,6 @@ export async function getEmployee(u: string, t: string, userId: string, me: Me):
     timeEntries,
     identityLinks: allLinks.filter((l) => l.user_id === userId),
     activity,
+    placement: org ? findPlacement(org.structure.root, userId) : [],
   };
 }

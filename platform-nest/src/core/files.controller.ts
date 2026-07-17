@@ -37,14 +37,43 @@ export class FilesController {
     return rows.rows;
   }
 
+  // Two modes: (1) base64 binary upload {content} — scrubbed + stored; (2) reference attach
+  // {url?} — filename (+ optional link) recorded with no blob (UI's current attach; true
+  // multipart is a documented follow-up). Accepts both targetType/targetId and the UI's
+  // entityType/entityId aliases; contentType and content_type are equivalent.
   @Post(":tenantId/files")
   @HttpCode(201)
-  async upload(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Body() body: { targetType?: string; targetId?: string; filename?: string; contentType?: string; content?: string }) {
-    const { targetType, targetId, filename, contentType = "application/octet-stream", content } = body ?? {};
-    if (!targetType || !targetId || !filename || !content) throw new BadRequestException("targetType, targetId, filename and content (base64) required");
+  async upload(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Body() body: { targetType?: string; targetId?: string; entityType?: string; entityId?: string; filename?: string; contentType?: string; content_type?: string; content?: string; url?: string },
+  ) {
+    const b = body ?? {};
+    const targetType = b.targetType ?? b.entityType;
+    const targetId = b.targetId ?? b.entityId;
+    const contentType = b.contentType ?? b.content_type ?? "application/octet-stream";
+    const { filename, content, url } = b;
+    if (!targetType || !targetId || !filename) throw new BadRequestException("targetType/entityType, targetId/entityId and filename required");
     if (!TARGET_KINDS.has(targetType)) throw new BadRequestException("unsupported target type");
     await authorize(req.principal, { kind: "file", tenantId }, "create");
     await authorize(req.principal, { kind: targetType, id: targetId, tenantId }, "read");
+
+    const cleanName = scrubText(filename).text;
+    const id = newId();
+
+    // Reference attach (no binary content): store filename + optional URL, no blob.
+    if (!content) {
+      const cleanUrl = url ? scrubText(url).text.slice(0, 2048) : null;
+      await withTenants([tenantId], (c) =>
+        c.query(
+          `INSERT INTO files (id, tenant_id, uploader_id, target_entity_type, target_entity_id, filename, content_type, byte_size, storage_key, url, scrubbed, origin_site)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, 0, NULL, $8, false, $9)`,
+          [id, tenantId, req.principal.userId, targetType, targetId, cleanName, contentType, cleanUrl, config.originSite],
+        ),
+      );
+      await writeActivity(tenantId, req.principal.userId, "attached", targetType, targetId, { fileId: id, filename: cleanName });
+      return { id, scrubbed: false, byteSize: 0 };
+    }
 
     const raw = Buffer.from(content, "base64");
     if (raw.byteLength > MAX_BYTES) throw new BadRequestException("file too large");
@@ -55,8 +84,6 @@ export class FilesController {
       bytes = Buffer.from(text, "utf8");
       scrubbed = redactions > 0;
     }
-    const cleanName = scrubText(filename).text;
-    const id = newId();
     const storageKey = `${tenantId}/${id}`;
     await storage().put(storageKey, bytes);
     await withTenants([tenantId], (c) =>
@@ -98,6 +125,7 @@ export class FilesController {
     const f = rows.rows[0];
     if (!f) throw new NotFoundException("file not found");
     await authorize(req.principal, { kind: f.target_entity_type, id: f.target_entity_id, tenantId }, "read");
+    if (!f.storage_key) throw new NotFoundException("no stored content (reference attachment)");
     const bytes = await storage().get(f.storage_key);
     await reply
       .header("content-disposition", dispositionHeader(f.filename))
@@ -120,7 +148,7 @@ export class FilesController {
     if (!f) throw new NotFoundException("file not found");
     await authorize(req.principal, { kind: f.target_entity_type, id: f.target_entity_id, tenantId }, "read");
     await withTenants([tenantId], (c) => c.query(`UPDATE files SET deleted_at = now(), updated_at = now() WHERE id = $1`, [fileId]));
-    await storage().del(f.storage_key);
+    if (f.storage_key) await storage().del(f.storage_key);
     await writeActivity(tenantId, req.principal.userId, "deleted", "file", fileId);
     return { id: fileId, deleted: true };
   }

@@ -1,0 +1,548 @@
+{
+  "id": "ws11mtgdispatch0",
+  "name": "WS11 meeting dispatcher (transcript -> MOM -> 3 extractions -> pipeline run)",
+  "meta": {
+    "description": "WS11 build item 3. Entry point of the meeting-to-delivery pipeline. The meeting bot POSTs a completed recording to /webhook/mtg/recording-complete (bridge-secret header, at-least-once — dedupe on meetingId). The dispatcher: (1) verifies the secret + resolves the transcript, (2) llm.summarize -> MOM, (3) THREE separate targeted llm.extract passes (prd|report|scope) each returning {content,confidence}, (4) pipeline.createRun with all three stages populated (artifact + confidence) in one call. The `pipeline.run.created` event the platform emits is what the delivery/report/scope sub-workflows subscribe to (event->n8n bridge) — the fan-out is event-driven, not a direct Execute Workflow. Backbone rule holds: every action is an mcp-hub tools/call under the OBO identity wf:mtg-dispatcher (scoped to media.transcribe, llm.summarize, llm.extract, pipeline.createRun, pipeline.updateStage, notify). v1 requires body.transcript; audioRef-only transcription is a later enhancement. v1 inlines MOM + extracted markdown into mom_ref/artifact_ref (a storage service replaces this later). Env: N8N_BRIDGE_SECRET, HUB_SERVICE_TOKEN."
+  },
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "mtg/recording-complete",
+        "responseMode": "responseNode"
+      },
+      "name": "Webhook: bot recording-complete",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "b1e4c0a2-77d1-4b3a-9c21-mtgdispatch01"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Verify the bridge secret, resolve the transcript, dedupe on meetingId (bot is at-least-once).\nconst got = $input.first().json.headers?.['x-gaiada-bridge-secret'];\nif (!got || got !== $env.N8N_BRIDGE_SECRET) throw new Error('bad bridge secret');\nconst e = $input.first().json.body ?? {};\nif (e.v !== 1) throw new Error(`unexpected envelope version ${e.v}`);\nif (!e.tenantId) throw new Error('tenantId required');\nconst transcript = (e.transcript && String(e.transcript).trim()) ? String(e.transcript) : '';\nif (!transcript) throw new Error('v1 requires body.transcript (audioRef-only transcription is a later enhancement)');\nconst store = $getWorkflowStaticData('global');\nstore.seen = store.seen || {};\nconst key = e.meetingId || '';\nconst dup = key ? Object.prototype.hasOwnProperty.call(store.seen, key) : false;\nif (key && !dup) { store.seen[key] = Date.now(); const ids = Object.keys(store.seen); if (ids.length > 1000) for (const k of ids.slice(0, ids.length - 1000)) delete store.seen[k]; }\nreturn [{ json: { dup, tenantId: e.tenantId, meetingId: key, title: e.title ?? null, transcript } }];"
+      },
+      "name": "Verify + dedupe + resolve transcript",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "is-dup",
+              "leftValue": "={{ $json.dup }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Duplicate?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        440,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: true, deduped: true }) }}"
+      },
+      "name": "Respond (dedup skip)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        660,
+        -160
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://mcp-hub:3003/mcp",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.HUB_SERVICE_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json, text/event-stream"
+            },
+            {
+              "name": "x-obo-provider",
+              "value": "n8n"
+            },
+            {
+              "name": "x-obo-external-id",
+              "value": "wf:mtg-dispatcher"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", id: 1, method: \"tools/call\", params: { name: \"llm.summarize\", arguments: { text: $('Verify + dedupe + resolve transcript').first().json.transcript } } }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "name": "MCP llm.summarize (MOM)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        660,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json.data ?? $input.first().json.body ?? '';\nconst line = String(raw).split('\\n').find((l) => l.startsWith('data:')) ?? '';\nconst rpc = JSON.parse(line.slice(5).trim());\nif (rpc.result?.isError) throw new Error(rpc.result.content?.[0]?.text ?? 'llm.summarize error');\nconst mom = rpc.result?.content?.[0]?.text ?? '';\nconst v = $('Verify + dedupe + resolve transcript').first().json;\nreturn [{ json: { ...v, mom } }];"
+      },
+      "name": "Parse MOM",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://mcp-hub:3003/mcp",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.HUB_SERVICE_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json, text/event-stream"
+            },
+            {
+              "name": "x-obo-provider",
+              "value": "n8n"
+            },
+            {
+              "name": "x-obo-external-id",
+              "value": "wf:mtg-dispatcher"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", id: 2, method: \"tools/call\", params: { name: \"llm.extract\", arguments: { kind: \"prd\", text: $('Verify + dedupe + resolve transcript').first().json.transcript } } }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "name": "MCP llm.extract prd",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1100,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json.data ?? $input.first().json.body ?? '';\nconst line = String(raw).split('\\n').find((l) => l.startsWith('data:')) ?? '';\nconst rpc = JSON.parse(line.slice(5).trim());\nif (rpc.result?.isError) throw new Error(rpc.result.content?.[0]?.text ?? 'llm.extract prd error');\nlet parsed = {}; try { parsed = JSON.parse(rpc.result?.content?.[0]?.text ?? '{}'); } catch { parsed = {}; }\nconst prev = $('Parse MOM').first().json;\nreturn [{ json: { ...prev, prd: { content: parsed.content ?? '', confidence: (typeof parsed.confidence === 'number' ? parsed.confidence : null) } } }];"
+      },
+      "name": "Parse prd",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://mcp-hub:3003/mcp",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.HUB_SERVICE_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json, text/event-stream"
+            },
+            {
+              "name": "x-obo-provider",
+              "value": "n8n"
+            },
+            {
+              "name": "x-obo-external-id",
+              "value": "wf:mtg-dispatcher"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", id: 3, method: \"tools/call\", params: { name: \"llm.extract\", arguments: { kind: \"report\", text: $('Verify + dedupe + resolve transcript').first().json.transcript } } }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "name": "MCP llm.extract report",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1540,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json.data ?? $input.first().json.body ?? '';\nconst line = String(raw).split('\\n').find((l) => l.startsWith('data:')) ?? '';\nconst rpc = JSON.parse(line.slice(5).trim());\nif (rpc.result?.isError) throw new Error(rpc.result.content?.[0]?.text ?? 'llm.extract report error');\nlet parsed = {}; try { parsed = JSON.parse(rpc.result?.content?.[0]?.text ?? '{}'); } catch { parsed = {}; }\nconst prev = $('Parse prd').first().json;\nreturn [{ json: { ...prev, report: { content: parsed.content ?? '', confidence: (typeof parsed.confidence === 'number' ? parsed.confidence : null) } } }];"
+      },
+      "name": "Parse report",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1760,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://mcp-hub:3003/mcp",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.HUB_SERVICE_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json, text/event-stream"
+            },
+            {
+              "name": "x-obo-provider",
+              "value": "n8n"
+            },
+            {
+              "name": "x-obo-external-id",
+              "value": "wf:mtg-dispatcher"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", id: 4, method: \"tools/call\", params: { name: \"llm.extract\", arguments: { kind: \"scope\", text: $('Verify + dedupe + resolve transcript').first().json.transcript } } }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "name": "MCP llm.extract scope",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1980,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json.data ?? $input.first().json.body ?? '';\nconst line = String(raw).split('\\n').find((l) => l.startsWith('data:')) ?? '';\nconst rpc = JSON.parse(line.slice(5).trim());\nif (rpc.result?.isError) throw new Error(rpc.result.content?.[0]?.text ?? 'llm.extract scope error');\nlet parsed = {}; try { parsed = JSON.parse(rpc.result?.content?.[0]?.text ?? '{}'); } catch { parsed = {}; }\nconst prev = $('Parse report').first().json;\nconst scope = { content: parsed.content ?? '', confidence: (typeof parsed.confidence === 'number' ? parsed.confidence : null) };\n// Assemble the pipeline.createRun arguments; drop null confidence so the tool schema stays happy.\nconst stage = (track, name, art) => { const s = { track, name, status: 'done', artifactRef: art.content }; if (typeof art.confidence === 'number') s.confidence = art.confidence; return s; };\nconst args = { tenantId: prev.tenantId, sourceMeetingId: prev.meetingId || undefined, title: prev.title || undefined, momRef: prev.mom || undefined, stages: [ stage('delivery', 'prd_extract', prev.prd), stage('report', 'report_extract', prev.report), stage('scope', 'scope_extract', scope) ] };\nreturn [{ json: { args, prdConfidence: prev.prd.confidence } }];"
+      },
+      "name": "Assemble createRun args",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2200,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://mcp-hub:3003/mcp",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.HUB_SERVICE_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json, text/event-stream"
+            },
+            {
+              "name": "x-obo-provider",
+              "value": "n8n"
+            },
+            {
+              "name": "x-obo-external-id",
+              "value": "wf:mtg-dispatcher"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", id: 5, method: \"tools/call\", params: { name: \"pipeline.createRun\", arguments: $json.args } }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "name": "MCP pipeline.createRun (low write)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2420,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json.data ?? $input.first().json.body ?? '';\nconst line = String(raw).split('\\n').find((l) => l.startsWith('data:')) ?? '';\nconst rpc = JSON.parse(line.slice(5).trim());\nif (rpc.result?.isError) throw new Error(rpc.result.content?.[0]?.text ?? 'pipeline.createRun failed (a medium+ write would suspend here)');\nconst run = JSON.parse(rpc.result?.content?.[0]?.text ?? '{}');\nreturn [{ json: { runId: run.id, deduped: run.deduped ?? false, prdConfidence: $('Assemble createRun args').first().json.prdConfidence } }];"
+      },
+      "name": "Parse run",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2640,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: true, runId: $json.runId, deduped: $json.deduped, prdConfidence: $json.prdConfidence }) }}"
+      },
+      "name": "Respond (done)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        2860,
+        120
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook: bot recording-complete": {
+      "main": [
+        [
+          {
+            "node": "Verify + dedupe + resolve transcript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verify + dedupe + resolve transcript": {
+      "main": [
+        [
+          {
+            "node": "Duplicate?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Duplicate?": {
+      "main": [
+        [
+          {
+            "node": "Respond (dedup skip)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "MCP llm.summarize (MOM)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MCP llm.summarize (MOM)": {
+      "main": [
+        [
+          {
+            "node": "Parse MOM",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse MOM": {
+      "main": [
+        [
+          {
+            "node": "MCP llm.extract prd",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MCP llm.extract prd": {
+      "main": [
+        [
+          {
+            "node": "Parse prd",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse prd": {
+      "main": [
+        [
+          {
+            "node": "MCP llm.extract report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MCP llm.extract report": {
+      "main": [
+        [
+          {
+            "node": "Parse report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse report": {
+      "main": [
+        [
+          {
+            "node": "MCP llm.extract scope",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MCP llm.extract scope": {
+      "main": [
+        [
+          {
+            "node": "Assemble createRun args",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Assemble createRun args": {
+      "main": [
+        [
+          {
+            "node": "MCP pipeline.createRun (low write)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MCP pipeline.createRun (low write)": {
+      "main": [
+        [
+          {
+            "node": "Parse run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse run": {
+      "main": [
+        [
+          {
+            "node": "Respond (done)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {},
+  "pinData": {}
+}

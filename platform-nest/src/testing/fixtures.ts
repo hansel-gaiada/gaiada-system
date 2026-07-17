@@ -102,6 +102,16 @@ export async function defineCustomField(
   );
 }
 
+export async function createClient(tenantId: string, name: string, portalUserId?: string): Promise<string> {
+  const id = newId();
+  await withTenants([tenantId], (c) =>
+    c.query(`INSERT INTO clients (id, tenant_id, name, portal_user_id, origin_site) VALUES ($1, $2, $3, $4, $5)`, [
+      id, tenantId, name, portalUserId ?? null, site(),
+    ]),
+  );
+  return id;
+}
+
 export async function createProject(tenantId: string, name: string, ownerId?: string): Promise<string> {
   const id = newId();
   await withTenants([tenantId], (c) =>

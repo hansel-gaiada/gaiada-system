@@ -4,7 +4,8 @@ import { notFound, redirect } from "next/navigation";
 import { getSessionUserId } from "@/lib/session-server";
 import { getMe, PlatformError } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
-import { getCompany, type Company } from "@/lib/entities";
+import { isElevated, can } from "@/lib/rbac";
+import { getCompany, listCompanies, type Company } from "@/lib/entities";
 import { PageHeader } from "@/components/PageHeader";
 import { DescriptionList } from "@/components/DescriptionList";
 import { Card } from "@/components/ui";
@@ -41,15 +42,20 @@ export default async function CompanyDetailPage({ params }: { params: Promise<{ 
   }
   if (!company) notFound();
 
+  const canManage = can(me, "company.manage", companyId) || isElevated(me);
+  const parentName = company.parent_company_id
+    ? (await listCompanies(userId).catch(() => [])).find((c) => c.id === company!.parent_company_id)?.name ?? company.parent_company_id
+    : null;
+
   const items: { label: string; value: ReactNode }[] = [
     { label: "Type", value: company.type ?? "—" },
     { label: "Status", value: company.status },
     { label: "Enabled modules", value: (company.enabled_modules ?? []).join(", ") || "None" },
   ];
-  if (company.parent_company_id) {
+  if (parentName) {
     items.splice(1, 0, {
       label: "Parent",
-      value: <Link href={`/companies/${company.parent_company_id}`}>{company.parent_company_id}</Link>,
+      value: <Link href={`/companies/${company.parent_company_id}`}>{parentName}</Link>,
     });
   }
 
@@ -58,10 +64,12 @@ export default async function CompanyDetailPage({ params }: { params: Promise<{ 
       <PageHeader
         eyebrow="Company"
         title={company.name}
+        breadcrumbs={[{ label: "Companies", href: "/companies" }, { label: company.name }]}
         actions={
-          <Link href={`/companies/${company.id}/org`} className="lux-btn lux-btn--ghost lux-btn--sm">
-            Org structure
-          </Link>
+          <>
+            <Link href={`/companies/${company.id}/org`} className="lux-btn lux-btn--ghost lux-btn--sm">Org structure</Link>
+            {canManage && <Link href={`/companies/${company.id}/edit`} className="lux-btn lux-btn--solid lux-btn--sm">Edit</Link>}
+          </>
         }
       />
       <DescriptionList items={items} />

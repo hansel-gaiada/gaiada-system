@@ -93,6 +93,9 @@ nothing to hand-edit in the UI — just fill the values in `.env` and `docker co
 | `on-org-updated-notify.json` | event bridge `POST /webhook/ev/org_structure.updated` | verify bridge secret → in-app notify the ops lead (hub `notify`) | `wf:org-updated-notify` |
 | `on-client-created-seed.json` | event bridge `POST /webhook/ev/client.created` | seed onboarding project + kickoff task, then notify the ops lead (three LOW-impact writes) | `wf:new-client-seed` |
 | `on-inbound-lead.json` | `POST /webhook/ingest/lead` **(gated)** | inbound lead → intake task; inert unless `INGEST_ENABLED=1` (legal Gate 1) | `wf:inbound-lead-intake` |
+| `mtg-dispatcher.json` | `POST /webhook/mtg/recording-complete` (bridge secret, dedupe on `meetingId`) | **WS11** meeting → `llm.summarize` (MOM) → 3 separate `llm.extract` passes (prd/report/scope) → `pipeline.createRun` with all three stages populated. Fan-out to delivery/report/scope is event-driven via `pipeline.run.created`. | `wf:mtg-dispatcher` |
+| `pipeline-fanout.json` | event bridge `POST /webhook/ev/pipeline.run.created` | **WS11** scope track: open the client `scope_signoff` gate + notify PM (`wf:scope`); report track: route to internal process — STUB in-app notify (`wf:report`). | `wf:scope`, `wf:report` |
+| `pipeline-delivery.json` | event bridge `ev/pipeline.gate.decided` + `ev/scope.signed` | **WS11** delivery spine: on PRD signed **AND** scope signed → `design.prototype` → add `claude_design` stage → open first Submission (`pm_review`) → notify PM. (v1 spine; code/deploy/3-beat/revise are the documented extension.) | `wf:delivery` |
 
 Every hub call is a raw JSON-RPC `tools/call` (the hub is stateless — no handshake; replies are
 SSE-framed and parsed by a Code node) carrying the workflow's OBO identity headers. Adding a
@@ -158,3 +161,35 @@ The build order, flow catalog, and per-step status live in
 flows, event→n8n bridge + event flows, gated webhook ingest) are built. Temporal stays absent
 until a genuinely durable multi-step flow exists; per-workflow RBAC-minted short-lived credentials
 (vs today's seeded service users) are target-state.
+
+## WS11 meeting-to-delivery pipeline (new, in progress)
+
+`mtg-dispatcher.json` is the entry point of the WS11 pipeline
+(`../docs/superpowers/plans/2026-07-16-ws11-delivery-pipeline-plan.md`). Its hub tools
+(`llm.extract`, `pipeline.createRun|updateStage|openGate`, reads) and platform state (migration
+`0017_pipeline.sql`, `PipelineController`) are **built + tested**. The delivery/scope/report
+sub-workflows + the client portal are subsequent build items.
+
+**Test the dispatcher with a pasted transcript** (before the meeting bot exists), once the stack
+runs the WS11 platform + hub build:
+
+```bash
+curl -sX POST http://localhost:5678/webhook/mtg/recording-complete \
+  -H "x-gaiada-bridge-secret: $N8N_BRIDGE_SECRET" -H 'Content-Type: application/json' \
+  -d '{"v":1,"meetingId":"mtg-demo-1","tenantId":"'"$AGENCY_TENANT_ID"'",
+       "title":"Acme kickoff",
+       "transcript":"Client wants a 3-page marketing site. Budget 5k, 3 weeks. ..."}'
+# -> { ok, runId, deduped, prdConfidence }   then inspect: pipeline.getRun / platform-ui dashboard
+```
+
+Fan-out is **event-driven**: the run's `pipeline.run.created` event (plus later stage/gate events)
+is what the delivery/scope/report sub-workflows subscribe to via the event→n8n bridge — the
+dispatcher does not call Execute Workflow directly. Add
+`pipeline.run.created` to `N8N_BRIDGE_EVENTS` and `pipeline_run` to `N8N_BRIDGE_ENTITY_TYPES` when
+those sub-workflows land.
+
+> **Live n8n import is pending a stack rebuild.** The running containers predate the WS11
+> platform/hub code, so importing + triggering this workflow needs the `platform` + `mcp-hub`
+> images (or tsx processes) rebuilt from the current source first. The workflow JSON is
+> structure-validated and its tool chain is verified (platform endpoints against live PG+Cerbos;
+> hub tools unit-tested); only the in-n8n execution is not yet exercised.

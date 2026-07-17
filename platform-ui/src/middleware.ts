@@ -6,7 +6,8 @@ export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
   // /step-up is reachable pre-full-session (WA/Telegram users land here for
   // sensitive actions), so it's public like /login.
-  const isPublic = pathname.startsWith("/login") || pathname.startsWith("/step-up");
+  const isPublic =
+    pathname.startsWith("/login") || pathname.startsWith("/step-up") || pathname.startsWith("/auth");
   const hasSession = Boolean(req.cookies.get("gaiada_session")?.value);
   if (!isPublic && !hasSession) return NextResponse.redirect(new URL("/login", req.url));
   return NextResponse.next();

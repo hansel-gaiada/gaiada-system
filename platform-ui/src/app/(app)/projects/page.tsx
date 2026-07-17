@@ -5,10 +5,16 @@ import { getMe, PlatformError } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
 import { listMembers, listProjects, type Member, type Project } from "@/lib/entities";
 import { PageHeader } from "@/components/PageHeader";
-import { Card, HairlineTable, StatusBadge } from "@/components/ui";
+import { Card } from "@/components/ui";
+import { EmptyNote } from "@/components/systems/EmptyNote";
+import { DataTable, type Column } from "@/components/data/DataTable";
 
-const COLUMNS = [{ label: "Name" }, { label: "Status" }, { label: "Due date" }, { label: "Owner", align: "right" as const }];
-const TCOLS = "2fr 1fr 1fr 1fr";
+const COLUMNS: Column[] = [
+  { key: "name", header: "Name", sortable: true },
+  { key: "status", header: "Status", format: "status", sortable: true },
+  { key: "due_date", header: "Due date", format: "date", sortable: true },
+  { key: "owner", header: "Owner", sortable: true, align: "right" },
+];
 
 export default async function ProjectsPage() {
   const userId = await getSessionUserId();
@@ -38,37 +44,26 @@ export default async function ProjectsPage() {
     throw e;
   }
   const ownerName = new Map(members.map((m) => [m.user_id, m.name]));
+  const rows = projects.map((p) => ({
+    id: p.id,
+    name: p.name,
+    status: p.status,
+    due_date: p.due_date,
+    owner: (p.owner_id && ownerName.get(p.owner_id)) ?? "—",
+  }));
 
   return (
     <>
       <PageHeader
         eyebrow="Business"
         title="Projects"
-        actions={
-          <Link href="/projects/new" className="lux-btn lux-btn--solid lux-btn--sm">
-            New project
-          </Link>
-        }
+        actions={<Link href="/projects/new" className="lux-btn lux-btn--solid lux-btn--sm">New project</Link>}
       />
-      <Card>
-        {projects.length === 0 ? (
-          <div className="dash-empty">
-            <div style={{ fontFamily: "var(--font-display)", fontSize: 18 }}>No projects yet</div>
-            <p>Create the first project to get started.</p>
-          </div>
-        ) : (
-          <HairlineTable
-            tcols={TCOLS}
-            columns={COLUMNS}
-            rows={projects.map((p) => [
-              <Link key={p.id} href={`/projects/${p.id}`}>{p.name}</Link>,
-              <StatusBadge key={`${p.id}-status`} label={p.status} />,
-              p.due_date ?? "—",
-              (p.owner_id && ownerName.get(p.owner_id)) ?? "—",
-            ])}
-          />
-        )}
-      </Card>
+      {projects.length === 0 ? (
+        <Card><EmptyNote>No projects yet. Create the first project to get started.</EmptyNote></Card>
+      ) : (
+        <DataTable columns={COLUMNS} rows={rows} link={{ base: "/projects", idKey: "id", labelKey: "name" }} csvName="projects" pageSize={20} />
+      )}
     </>
   );
 }

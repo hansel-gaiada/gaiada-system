@@ -2,15 +2,17 @@
   "realm": "gaiada",
   "enabled": true,
   "displayName": "Gaiada",
-  "comment": "Starter realm imported on first boot (--import-realm). Matches docs/runbooks/idp-keycloak.md. AFTER import: (1) regenerate the gaiada-platform client secret in the admin console and wire it into the platform, (2) confirm MFA is enforced, (3) flip PLATFORM_AUTH_MODE=oidc. Leaving AUTH_MODE=dev keeps this realm dormant.",
+  "attributes": {
+    "gaiada.note": "Starter realm imported on first boot (--import-realm). Matches docs/runbooks/idp-keycloak.md. AFTER import: (1) regenerate the gaiada-platform client secret in the admin console and wire it into the platform, (2) confirm MFA is enforced, (3) flip PLATFORM_AUTH_MODE=oidc. Leaving AUTH_MODE=dev keeps this realm dormant."
+  },
 
   "verifyEmail": true,
   "loginWithEmailAllowed": true,
   "registrationAllowed": false,
   "resetPasswordAllowed": true,
 
-  "accessTokenLifespan": 300,
-  "ssoSessionIdleTimeout": 1800,
+  "accessTokenLifespan": 3600,
+  "ssoSessionIdleTimeout": 36000,
   "ssoSessionMaxLifespan": 36000,
 
   "otpPolicyType": "totp",
@@ -24,7 +26,7 @@
       "name": "Configure OTP",
       "providerId": "CONFIGURE_TOTP",
       "enabled": true,
-      "defaultAction": true,
+      "defaultAction": false,
       "priority": 10
     },
     {
@@ -32,7 +34,7 @@
       "name": "Verify Email",
       "providerId": "VERIFY_EMAIL",
       "enabled": true,
-      "defaultAction": true,
+      "defaultAction": false,
       "priority": 50
     }
   ],

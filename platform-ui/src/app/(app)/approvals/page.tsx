@@ -1,16 +1,21 @@
 import { redirect } from "next/navigation";
 import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
-import { getPendingApprovals } from "@/lib/data";
+import { getPendingApprovals, getDecidedApprovals } from "@/lib/data";
 import { decideApproval } from "../actions";
-import { Card, Eyebrow } from "@/components/ui";
+import { Card, Eyebrow, HairlineTable, StatusBadge } from "@/components/ui";
+import { EmptyNote } from "@/components/systems/EmptyNote";
 import { ApprovalsPanel } from "@/components/dashboard/ApprovalsPanel";
+import { formatDateTime } from "@/lib/format";
 
 export default async function ApprovalsPage() {
   const userId = await getSessionUserId();
   if (!userId) redirect("/login");
   const me = await getMe(userId);
-  const approvals = await getPendingApprovals(userId, me.companies);
+  const [approvals, decided] = await Promise.all([
+    getPendingApprovals(userId, me.companies),
+    getDecidedApprovals(userId, me.companies),
+  ]);
   const byCompany = new Map<string, typeof approvals>();
   for (const a of approvals) {
     const list = byCompany.get(a.company) ?? [];
@@ -41,6 +46,25 @@ export default async function ApprovalsPage() {
           ))}
         </div>
       )}
+
+      <div style={{ marginTop: 28 }}>
+        <Card title="Recently decided">
+          {decided.length === 0 ? (
+            <EmptyNote>No decisions recorded yet.</EmptyNote>
+          ) : (
+            <HairlineTable
+              columns={[{ label: "Decision" }, { label: "Subject" }, { label: "Company" }, { label: "When", align: "right" }]}
+              rows={decided.slice(0, 20).map((d) => [
+                <StatusBadge key="d" label={d.decision} />,
+                d.subject,
+                `${d.company} · ${d.campaign}`,
+                formatDateTime(d.decided_at),
+              ])}
+              tcols="0.8fr 1.8fr 1.4fr 1fr"
+            />
+          )}
+        </Card>
+      </div>
     </>
   );
 }

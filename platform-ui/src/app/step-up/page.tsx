@@ -33,7 +33,7 @@ export default async function StepUpPage({ searchParams }: { searchParams: SP })
         }}
       >
         <div>
-          <div style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 26, letterSpacing: "0.14em" }}>GAIADA</div>
+          <div style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 26, letterSpacing: "0.14em" }}>SYROWATKA</div>
           <Eyebrow style={{ color: "var(--erp-accent)", marginTop: 9, display: "block" }}>Identity verification</Eyebrow>
         </div>
 

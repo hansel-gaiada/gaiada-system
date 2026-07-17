@@ -1,0 +1,80 @@
+/* Project-management surfaces — board, task detail, tracker. Design rules:
+   radius 0, hairlines, no shadow, opacity/tint hovers (matches org.css/it.css). */
+
+/* ---- progress bar ---- */
+.pm-progress { display: flex; align-items: center; gap: 10px; }
+.pm-progress__track { flex: 1 1 auto; height: 6px; background: rgba(26, 25, 22, 0.08); position: relative; min-width: 80px; }
+.pm-progress__fill { position: absolute; inset: 0 auto 0 0; background: var(--erp-accent); }
+.pm-progress__val { flex: 0 0 auto; font: 700 11px var(--font-body); color: var(--erp-ink-60); min-width: 34px; text-align: right; }
+
+/* ---- view switcher ---- */
+.pm-tabs { display: flex; gap: 2px; border-bottom: 0.5px solid var(--erp-hairline); margin-bottom: 20px; }
+.pm-tab { padding: 10px 16px; font: 400 13px var(--font-body); color: var(--erp-ink-60); text-decoration: none; border-bottom: 2px solid transparent; margin-bottom: -0.5px; }
+.pm-tab:hover { color: var(--text-primary); }
+.pm-tab--active { color: var(--text-primary); border-bottom-color: var(--erp-accent); font-weight: 700; }
+
+/* ---- kanban board ---- */
+.pm-board { display: grid; grid-template-columns: repeat(4, minmax(220px, 1fr)); gap: 14px; align-items: start; }
+.pm-col { border: 0.5px solid var(--erp-hairline); background: var(--surface-card); min-height: 120px; display: flex; flex-direction: column; }
+.pm-col__head { display: flex; align-items: center; justify-content: space-between; padding: 11px 13px; border-bottom: 0.5px solid var(--erp-hairline-soft); }
+.pm-col__title { font: 700 10px var(--font-body); letter-spacing: 0.1em; text-transform: uppercase; color: var(--erp-ink-60); }
+.pm-col__count { font: 700 10px var(--font-body); color: var(--erp-ink-50); }
+.pm-col__body { padding: 10px; display: flex; flex-direction: column; gap: 10px; flex: 1 1 auto; transition: background 0.2s var(--erp-ease); }
+.pm-col__body--drop { background: rgba(110, 90, 67, 0.06); }
+.pm-card { border: 0.5px solid var(--erp-hairline); border-left-width: 2px; background: var(--surface-card); padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; cursor: grab; text-decoration: none; transition: background 0.2s var(--erp-ease); }
+.pm-card:hover { background: rgba(110, 90, 67, 0.04); }
+.pm-card--p-high { border-left-color: #B5622F; }
+.pm-card--p-urgent { border-left-color: #B5622F; }
+.pm-card--p-normal { border-left-color: var(--erp-hairline); }
+.pm-card--p-low { border-left-color: var(--erp-hairline-soft); }
+.pm-card__title { font: 400 13px var(--font-body); color: var(--text-primary); }
+.pm-card__meta { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.pm-chip { font: 700 9px var(--font-body); letter-spacing: 0.06em; text-transform: uppercase; color: var(--erp-ink-50); border: 0.5px solid var(--erp-hairline); padding: 2px 6px; }
+.pm-who { font: 400 11px var(--font-body); color: var(--erp-ink-60); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ---- subtasks / checklist ---- */
+.pm-subs { display: flex; flex-direction: column; gap: 2px; }
+.pm-sub { display: flex; align-items: center; gap: 10px; padding: 7px 4px; border-bottom: 0.5px solid var(--erp-hairline-soft); }
+.pm-sub:last-child { border-bottom: 0; }
+.pm-sub__title { font: 400 13px var(--font-body); color: var(--text-primary); flex: 1 1 auto; }
+.pm-sub__title--done { text-decoration: line-through; color: var(--erp-ink-50); }
+
+/* ---- comments / activity ---- */
+.pm-thread { display: flex; flex-direction: column; gap: 14px; }
+.pm-comment { display: flex; flex-direction: column; gap: 4px; padding-bottom: 12px; border-bottom: 0.5px solid var(--erp-hairline-soft); }
+.pm-comment:last-child { border-bottom: 0; }
+.pm-comment__head { display: flex; align-items: center; gap: 8px; }
+.pm-comment__author { font: 700 12px var(--font-body); color: var(--text-primary); }
+.pm-comment__time { font: 400 11px var(--font-body); color: var(--erp-ink-50); }
+.pm-comment__body { font: 400 13px/1.5 var(--font-body); color: var(--text-primary); white-space: pre-wrap; }
+.pm-ai-badge { font: 700 8px var(--font-body); letter-spacing: 0.1em; text-transform: uppercase; color: var(--erp-accent); border: 0.5px solid var(--erp-accent); padding: 1px 5px; }
+
+/* ---- AI tracker panel ---- */
+.pm-sugg { border: 0.5px solid var(--erp-hairline); border-left: 2px solid var(--erp-accent); background: var(--surface-card); padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; }
+.pm-sugg__row { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.pm-sugg__label { font: 700 10px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--erp-ink-60); }
+.pm-docs { display: flex; flex-wrap: wrap; gap: 8px; }
+.pm-doc { font: 400 12px var(--font-body); color: var(--erp-ink-70, var(--text-primary)); border: 0.5px solid var(--erp-hairline); padding: 4px 9px; text-decoration: none; }
+.pm-doc:hover { border-color: var(--erp-accent); color: var(--erp-accent); }
+
+/* ---- gantt / timeline ---- */
+.pm-gantt { display: flex; flex-direction: column; gap: 8px; min-width: 560px; }
+.pm-gantt__axis { display: flex; justify-content: space-between; font: 700 10px var(--font-body); letter-spacing: 0.06em; text-transform: uppercase; color: var(--erp-ink-50); padding-left: 200px; }
+.pm-gantt__row { display: grid; grid-template-columns: 200px 1fr; align-items: center; gap: 12px; }
+.pm-gantt__label { font: 400 13px var(--font-body); color: var(--text-primary); text-decoration: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pm-gantt__label:hover { color: var(--erp-accent); }
+.pm-gantt__track { position: relative; height: 22px; background: rgba(26, 25, 22, 0.04); border: 0.5px solid var(--erp-hairline-soft); }
+.pm-gantt__bar { position: absolute; top: 3px; bottom: 3px; background: var(--erp-accent); opacity: 0.85; display: flex; align-items: center; padding: 0 6px; font: 700 9px var(--font-body); color: #f4f1ea; white-space: nowrap; overflow: hidden; text-decoration: none; min-width: 4px; }
+.pm-gantt__bar--done { background: #4B7A5A; }
+.pm-gantt__bar--blocked { background: #B5622F; }
+.pm-gantt__bar--todo { background: #A39174; }
+.pm-gantt__bar--dashed { border: 1px dashed rgba(244, 241, 234, 0.7); }
+
+/* ---- dependencies ---- */
+.pm-deps { display: flex; flex-direction: column; gap: 8px; }
+.pm-dep { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 10px; border: 0.5px solid var(--erp-hairline); }
+.pm-dep__title { font: 400 13px var(--font-body); color: var(--text-primary); }
+.pm-blocked-chip { font: 700 9px var(--font-body); letter-spacing: 0.06em; text-transform: uppercase; color: #B5622F; border: 0.5px solid #B5622F; padding: 2px 6px; }
+
+@media (max-width: 1000px) { .pm-board { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 620px) { .pm-board { grid-template-columns: 1fr; } }

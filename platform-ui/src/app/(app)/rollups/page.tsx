@@ -7,18 +7,19 @@ import { PageHeader } from "@/components/PageHeader";
 import { Card, KpiTile, HairlineTable } from "@/components/ui";
 import { RecomputeButton } from "@/components/RecomputeButton";
 
-export default async function RollupsPage() {
+export default async function RollupsPage({ searchParams }: { searchParams: Promise<{ period?: string }> }) {
   const userId = await getSessionUserId();
   if (!userId) redirect("/login");
+  const { period: periodParam } = await searchParams;
 
   let rows: RollupRow[];
   try {
-    rows = await getRollups(userId);
+    rows = await getRollups(userId, periodParam);
   } catch (e) {
     if (e instanceof PlatformError && e.status === 403) {
       return (
         <>
-          <PageHeader eyebrow="Business" title="Rollups" subtitle="Cross-company metrics across the Gaiada group." />
+          <PageHeader eyebrow="Business" title="Rollups" subtitle="Cross-company metrics across the D & A Syrowatka group." />
           <Card>
             <p style={{ margin: 0, font: "400 14px/1.5 var(--font-body)", color: "rgba(26,25,22,.62)" }}>
               This view is limited to group executives.
@@ -31,17 +32,20 @@ export default async function RollupsPage() {
   }
 
   const groups = groupRollups(rows);
-  const period = rows[0]?.period;
+  const period = periodParam ?? rows[0]?.period;
 
   return (
     <>
       <PageHeader
         eyebrow="Business"
         title="Rollups"
-        subtitle={
-          <>
-            Cross-company metrics across the Gaiada group.{period ? ` Period: ${period}.` : ""}
-          </>
+        subtitle={<>Cross-company metrics across the D & A Syrowatka group.{period ? ` Period: ${period}.` : ""}</>}
+        actions={
+          <form method="get" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <input type="date" name="period" defaultValue={period ?? undefined} aria-label="Period"
+              style={{ border: "0.5px solid var(--erp-hairline)", background: "transparent", padding: "6px 8px", font: "400 13px var(--font-body)", color: "var(--text-primary)" }} />
+            <button type="submit" className="lux-btn lux-btn--ghost lux-btn--sm">View</button>
+          </form>
         }
       />
       {groups.length === 0 ? (

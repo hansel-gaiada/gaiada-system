@@ -21,8 +21,8 @@ export class CoreController {
     const rows = await withGlobal((c) =>
       c.query(
         isAdmin
-          ? `SELECT id, name, type, enabled_modules, status FROM companies WHERE deleted_at IS NULL`
-          : `SELECT id, name, type, enabled_modules, status FROM companies WHERE deleted_at IS NULL AND id = ANY($1::uuid[])`,
+          ? `SELECT id, name, type, enabled_modules, status, parent_company_id FROM companies WHERE deleted_at IS NULL`
+          : `SELECT id, name, type, enabled_modules, status, parent_company_id FROM companies WHERE deleted_at IS NULL AND id = ANY($1::uuid[])`,
         isAdmin ? [] : [req.principal.companies],
       ),
     );
@@ -203,7 +203,7 @@ export class CoreController {
       if (b.assigneeId && b.assigneeId !== prev.rows[0].assignee_id) newlyAssigned = b.assigneeId;
     });
     await writeActivity(tenantId, req.principal.userId, "updated", "task", taskId, { status: b.status });
-    if (newlyAssigned) await notify(tenantId, newlyAssigned, req.principal.userId, "assignment", { entityType: "task", entityId: taskId });
+    if (newlyAssigned) await notify(tenantId, newlyAssigned, req.principal.userId, "assignment", { entityType: "task", entityId: taskId, href: `/tasks/${taskId}` });
     return { id: taskId };
   }
 

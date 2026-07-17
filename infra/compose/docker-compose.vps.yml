@@ -289,6 +289,12 @@ services:
       # WS2 §3: mTLS off until certs are enrolled (mirrors the gateway's GATEWAY_TLS_MODE: off).
       # Enroll with synccert (see mcp-hub/.env.example), mount them, then set HUB_TLS_MODE: enforced.
       HUB_TLS_MODE: ${HUB_TLS_MODE:-off}
+      # WS11 delivery tools (build item 9). All fail CLOSED when unset (github.repoStatus / deploy.staging
+      # simply refuse), so leaving these blank is safe — set them to enable the code + deploy stages.
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      GITHUB_ORG: ${GITHUB_ORG:-}
+      DEPLOY_STAGING_URL: ${DEPLOY_STAGING_URL:-}
+      DEPLOY_STAGING_TOKEN: ${DEPLOY_STAGING_TOKEN:-}
     volumes:
       - hub-data:/app/data # tool audit
     depends_on:

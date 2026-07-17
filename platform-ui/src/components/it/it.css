@@ -1,0 +1,54 @@
+/* IT section — device tiles, Site→Network→Device topology, and the read-only
+   n8n workflow canvas. Design rules: radius 0, hairlines, no shadow, opacity/
+   tint hovers — matches org.css / systems.css. */
+
+/* ---- status dot + pill ---- */
+.it-dot { display: inline-flex; align-items: center; gap: 7px; }
+.it-dot__mark { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto; }
+.it-dot__label { font: 700 10px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; }
+
+/* ---- device tiles (topology + grids) ---- */
+.it-tile { border: 0.5px solid var(--erp-hairline); border-left-width: 2px; background: var(--surface-card); padding: 10px 12px; display: flex; flex-direction: column; gap: 4px; min-width: 150px; text-decoration: none; transition: background 0.2s var(--erp-ease); }
+.it-tile:hover { background: rgba(110, 90, 67, 0.04); }
+.it-tile__name { font: 400 13px var(--font-body); color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.it-tile__meta { font: 700 9px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--erp-ink-50); }
+.it-tile--online { border-left-color: #4B7A5A; }
+.it-tile--degraded { border-left-color: #B5622F; }
+.it-tile--offline { border-left-color: #B5622F; opacity: 0.7; }
+.it-tile--unknown { border-left-color: #A39174; }
+
+/* ---- topology: Site → Network → Device ---- */
+.it-topo { display: flex; flex-direction: column; gap: 20px; }
+.it-site { border: 0.5px solid var(--erp-hairline); background: var(--surface-card); }
+.it-site__head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 12px 16px; background: #1a1916; }
+.it-site__name { font: 400 14px var(--font-body); color: #f4f1ea; }
+.it-site__count { font: 700 10px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; color: rgba(244, 241, 234, 0.55); }
+.it-net { padding: 14px 16px; border-top: 0.5px solid var(--erp-hairline-soft); }
+.it-net:first-of-type { border-top: 0; }
+.it-net__head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+.it-net__name { font: 700 10px var(--font-body); letter-spacing: 0.1em; text-transform: uppercase; color: var(--erp-ink-60); border-left: 2px solid var(--erp-accent); padding-left: 8px; }
+.it-net__devices { display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); }
+
+/* ---- n8n workflow canvas ---- */
+.it-wf-wrap { display: grid; grid-template-columns: minmax(200px, 260px) 1fr; gap: 16px; align-items: start; }
+.it-wf-list { display: flex; flex-direction: column; gap: 2px; }
+.it-wf-item { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 9px 12px; border: 0.5px solid transparent; text-decoration: none; font: 400 13px var(--font-body); color: var(--text-primary); transition: background 0.2s var(--erp-ease); }
+.it-wf-item:hover { background: rgba(110, 90, 67, 0.05); }
+.it-wf-item--active { border-color: var(--erp-hairline); background: rgba(110, 90, 67, 0.06); }
+
+.it-canvas-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; flex-wrap: wrap; }
+.it-canvas-zoom { display: flex; align-items: center; gap: 6px; }
+.it-canvas { position: relative; border: 0.5px solid var(--erp-hairline); background:
+  repeating-linear-gradient(0deg, transparent, transparent 23px, rgba(26,25,22,.05) 23px, rgba(26,25,22,.05) 24px),
+  repeating-linear-gradient(90deg, transparent, transparent 23px, rgba(26,25,22,.05) 23px, rgba(26,25,22,.05) 24px),
+  var(--surface-card);
+  overflow: auto; max-height: 68vh; }
+.it-canvas__inner { position: relative; transform-origin: top left; }
+.it-edges { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
+.it-node { position: absolute; border: 0.5px solid var(--erp-hairline); border-top: 2px solid var(--erp-accent); background: var(--surface-card); padding: 7px 10px; width: 150px; box-sizing: border-box; display: flex; flex-direction: column; gap: 2px; }
+.it-node__name { font: 400 12px var(--font-body); color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.it-node__type { font: 700 9px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--erp-ink-50); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+@media (max-width: 900px) {
+  .it-wf-wrap { grid-template-columns: 1fr; }
+}

@@ -94,13 +94,23 @@ async function skipUnavailable<T>(p: Promise<T>, fallback: T): Promise<T> {
   }
 }
 
-// ---- Companies (list endpoint exists; no per-company detail endpoint yet) ----
+// ---- Companies (list endpoint exists; detail derived from list) ----
 export const listCompanies = (u: string) => platformFetch<Company[]>(`/api/companies`, u);
 
 export async function getCompany(u: string, _t: string, id: string): Promise<Company | null> {
   const list = await listCompanies(u);
   return list.find((c) => c.id === id) ?? null;
 }
+
+// Company CRUD — BFF contract (backend TODO, see docs/FRONTEND-BFF-CONTRACT.md):
+//   POST  /api/companies                 body {name,type,parentCompanyId?,modules?} -> { id }
+//   PATCH /api/companies/:id              body (partial)                             -> { ok }
+// Elevated / company.manage only (backend RLS is the real boundary).
+export interface CompanyInput { name: string; type?: string | null; parentCompanyId?: string | null; modules?: string[]; status?: string }
+export const createCompany = (u: string, body: CompanyInput) =>
+  platformFetch<{ id: string }>(`/api/companies`, u, { method: "POST", body: JSON.stringify(body) });
+export const updateCompany = (u: string, id: string, body: Partial<CompanyInput>) =>
+  platformFetch<{ ok: true }>(`/api/companies/${id}`, u, { method: "PATCH", body: JSON.stringify(body) });
 
 // ---- Projects (list + detail endpoints both exist) ----
 export const listProjects = (u: string, t: string) => platformFetch<Project[]>(`/api/${t}/projects`, u);
@@ -153,8 +163,22 @@ export interface TimeEntry { id: string; user_id: string; project_id: string; ta
 
 export const listClients = (u: string, t: string) =>
   skipUnavailable(platformFetch<Client[]>(`/api/${t}/clients`, u), [] as Client[]);
+export async function getClient(u: string, t: string, id: string): Promise<Client | null> {
+  const list = await listClients(u, t);
+  return list.find((c) => c.id === id) ?? null;
+}
+// Client-work CRUD — BFF contract (backend TODO, see docs/FRONTEND-BFF-CONTRACT.md).
+export const createClient = (u: string, t: string, body: { name: string; status?: string; contact?: Record<string, unknown> }) =>
+  platformFetch<{ id: string }>(`/api/${t}/clients`, u, { method: "POST", body: JSON.stringify(body) });
+export const deleteClient = (u: string, t: string, id: string) =>
+  platformFetch<{ ok: true }>(`/api/${t}/clients/${id}`, u, { method: "DELETE" });
+
 export const listDeliverables = (u: string, t: string, projectId?: string) =>
   skipUnavailable(platformFetch<Deliverable[]>(`/api/${t}/deliverables${projectId ? `?projectId=${projectId}` : ""}`, u), [] as Deliverable[]);
+export const createDeliverable = (u: string, t: string, body: { name: string; projectId?: string; clientId?: string; dueDate?: string; status?: string }) =>
+  platformFetch<{ id: string }>(`/api/${t}/deliverables`, u, { method: "POST", body: JSON.stringify(body) });
+export const createTimeEntry = (u: string, t: string, body: { minutes: number; projectId?: string; taskId?: string; billable: boolean; entryDate: string; notes?: string }) =>
+  platformFetch<{ id: string }>(`/api/${t}/time-entries`, u, { method: "POST", body: JSON.stringify(body) });
 export const listTimeEntries = (u: string, t: string, q: { projectId?: string; mine?: boolean; userId?: string } = {}) =>
   skipUnavailable(
     platformFetch<TimeEntry[]>(
@@ -181,3 +205,14 @@ export const listNotifications = (u: string, t: string, unreadOnly = false) =>
 export interface FileMeta { id: string; filename: string; content_type: string; byte_size: number; scrubbed: boolean; uploader_id: string | null; created_at: string }
 export const listFiles = (u: string, t: string, entityType: string, entityId: string) =>
   skipUnavailable(platformFetch<FileMeta[]>(`/api/${t}/files?entityType=${entityType}&entityId=${entityId}`, u), [] as FileMeta[]);
+// Attach a file reference (metadata + optional URL). True binary/multipart upload
+// is a documented follow-up — see docs/FRONTEND-BFF-CONTRACT.md.
+export const attachFile = (u: string, t: string, body: { entityType: string; entityId: string; filename: string; url?: string; content_type?: string }) =>
+  platformFetch<{ id: string }>(`/api/${t}/files`, u, { method: "POST", body: JSON.stringify(body) });
+export const deleteFile = (u: string, t: string, id: string) =>
+  platformFetch<{ ok: true }>(`/api/${t}/files/${id}`, u, { method: "DELETE" });
+
+// Generic threaded comments on any entity (task comments already flow through
+// lib/pm). Reused for projects, etc.
+export const postComment = (u: string, t: string, entityType: string, entityId: string, body: string) =>
+  platformFetch<{ id: string }>(`/api/${t}/comments?entityType=${entityType}&entityId=${entityId}`, u, { method: "POST", body: JSON.stringify({ body }) });

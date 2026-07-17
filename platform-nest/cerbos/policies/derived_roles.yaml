@@ -70,6 +70,29 @@ derivedRoles:
             request.principal.attr.grants.exists(g, g.role == "team_lead" &&
               g.scopeType == "team" && g.scopeId == request.resource.attr.teamId)
 
+    # IT staff (it_admin/it_manager/it) covering the IT device registry for their company.
+    - name: it_staff
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.grants.exists(g,
+              (g.role == "it_admin" || g.role == "it_manager" || g.role == "it") && (
+                g.scopeType == "global" ||
+                (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+
+    # External client (WS11 portal): a `client` grant covers the client-portal surface for its
+    # company. Client-to-run isolation (a client sees only THEIR runs) is enforced in the portal
+    # controller by run.client_id, not here — this only establishes "is an authenticated client of
+    # this tenant". Deliberately NOT a parent of any staff role, so it matches no other resource policy.
+    - name: client
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.grants.exists(g, g.role == "client" && (
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+
     # Module-elevated approver (e.g. agency_approver) covering its module's resources.
     - name: module_approver
       parentRoles: ["user"]

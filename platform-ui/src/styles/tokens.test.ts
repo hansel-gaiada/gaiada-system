@@ -4,9 +4,9 @@ import { describe, it, expect } from "vitest";
 const read = (p: string) => readFileSync(new URL(p, import.meta.url), "utf8");
 
 describe("design tokens", () => {
-  it("brand layer is Gaiada with the bronze accent intact", () => {
+  it("brand layer is SYROWATKA with the bronze accent intact", () => {
     const colors = read("./tokens/colors.css");
-    expect(colors).toContain('--brand-logo-text:       "GAIADA"');
+    expect(colors).toContain('--brand-logo-text:       "SYROWATKA"');
     expect(colors).toContain("#6E5A43");
   });
   it("globals enforce the hairline + easing rules and never declare radius or shadows", () => {

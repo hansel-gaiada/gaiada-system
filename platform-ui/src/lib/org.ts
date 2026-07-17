@@ -15,8 +15,12 @@ import "server-only";
 import { cookies } from "next/headers";
 import { platformFetch, PlatformError } from "./platform";
 
-export type OrgKind = "company" | "department" | "team" | "role" | "person";
-export const ORG_KINDS: OrgKind[] = ["company", "department", "team", "role", "person"];
+// Canonical org depth: holding → company → department → division → role → person.
+// ("team" was renamed to "division"; legacy "team" nodes are migrated on read —
+// see sanitizeStructure.) "role" is kept as an optional position layer between a
+// division and the employee (person) who holds it.
+export type OrgKind = "holding" | "company" | "department" | "division" | "role" | "person";
+export const ORG_KINDS: OrgKind[] = ["holding", "company", "department", "division", "role", "person"];
 
 export interface OrgNode {
   id: string;
@@ -34,14 +38,40 @@ export interface OrgStructure {
 const MAX_NODES = 300;
 const MAX_DEPTH = 8;
 
-// The agency's initial departments (the ask). Seeded for the agency-type
-// company; other companies start with just the company root, fully editable.
-const AGENCY_DEPARTMENTS = ["Web Dev", "SEO", "SMM", "Video Editor", "Design Graphic"];
+// The agency's initial org (the ask): five departments, each with a division,
+// and the first two carrying a role → employee so the full canonical depth
+// (department → division → role → person) is visible out of the box. Assignees
+// reference the seeded/demo members; admins re-assign after first edit.
+const person = (id: string, name: string, assigneeId?: string): OrgNode => ({
+  id,
+  name,
+  kind: "person",
+  assigneeId: assigneeId ?? null,
+  assigneeName: assigneeId ? name : null,
+  children: [],
+});
+const AGENCY_DEPARTMENTS: { name: string; divisions: { name: string; roles?: OrgNode[] }[] }[] = [
+  { name: "Web Dev", divisions: [{ name: "Frontend", roles: [{ id: "d1-r1", name: "Senior Developer", kind: "role", children: [person("d1-p1", "Made Putra", "u-dev")] }] }] },
+  { name: "SEO", divisions: [{ name: "On-page", roles: [{ id: "d2-r1", name: "SEO Specialist", kind: "role", children: [] }] }] },
+  { name: "SMM", divisions: [{ name: "Social", roles: [{ id: "d3-r1", name: "Account Manager", kind: "role", children: [person("d3-p1", "Dewi Santoso", "u-pm")] }] }] },
+  { name: "Video Editor", divisions: [{ name: "Production", roles: [] }] },
+  { name: "Design Graphic", divisions: [{ name: "Brand", roles: [] }] },
+];
 
 export function defaultStructure(company: { id: string; name: string; type: string | null }): OrgStructure {
   const isAgency = company.type === "agency" || company.id === "co-agency";
   const children: OrgNode[] = isAgency
-    ? AGENCY_DEPARTMENTS.map((name, i) => ({ id: `dept-${i + 1}`, name, kind: "department" as const, children: [] }))
+    ? AGENCY_DEPARTMENTS.map((dept, i) => ({
+        id: `dept-${i + 1}`,
+        name: dept.name,
+        kind: "department" as const,
+        children: dept.divisions.map((div, j) => ({
+          id: `dept-${i + 1}-div-${j + 1}`,
+          name: div.name,
+          kind: "division" as const,
+          children: div.roles ?? [],
+        })),
+      }))
     : [];
   return { root: { id: "root", name: company.name, kind: "company", children }, updatedAt: null };
 }
@@ -56,7 +86,10 @@ export function sanitizeStructure(input: unknown, fallbackName = "Company"): Org
   function node(raw: unknown, depth: number): OrgNode {
     const r = (raw ?? {}) as Record<string, unknown>;
     count += 1;
-    const kind = ORG_KINDS.includes(r.kind as OrgKind) ? (r.kind as OrgKind) : "role";
+    // Migrate the legacy "team" kind to its rename "division"; unknown kinds
+    // fall back to "role".
+    const rawKind = r.kind === "team" ? "division" : r.kind;
+    const kind = ORG_KINDS.includes(rawKind as OrgKind) ? (rawKind as OrgKind) : "role";
     const rawChildren = Array.isArray(r.children) ? r.children : [];
     const children: OrgNode[] = [];
     if (depth < MAX_DEPTH) {

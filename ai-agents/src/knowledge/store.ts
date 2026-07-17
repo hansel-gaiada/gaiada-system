@@ -250,4 +250,15 @@ export class KnowledgeStore {
     const r = await this.pool.query(`DELETE FROM knowledge_chunks WHERE tenant_id = $1`, [tenantId]);
     return r.rowCount ?? 0;
   }
+
+  /** Quarantine review (D9.3): approve un-quarantines a source's chunks so retrieval can
+   *  surface them; reject quarantines them (kept for provenance, never retrieved). Scoped to
+   *  the tenant so a review can never touch another company's chunks. Returns rows affected. */
+  async reviewSource(tenantId: string, sourceRef: string, decision: "approved" | "rejected"): Promise<number> {
+    const r = await this.pool.query(
+      `UPDATE knowledge_chunks SET quarantined = $3 WHERE tenant_id = $1 AND source_ref = $2`,
+      [tenantId, sourceRef, decision === "rejected"],
+    );
+    return r.rowCount ?? 0;
+  }
 }

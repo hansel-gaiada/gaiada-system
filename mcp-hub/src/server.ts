@@ -15,6 +15,8 @@ import { mintPrincipal } from "./principal";
 import { registerCoreTools } from "./tools";
 import { registerPlatformTools } from "./platform-tools";
 import { registerPlatformWriteTools } from "./platform-write-tools";
+import { registerPipelineTools } from "./pipeline-tools";
+import { registerDeliveryTools } from "./delivery-tools";
 import { registerModuleTools } from "./module-tools";
 import { take } from "./ratelimit";
 import { isRevoked } from "./revocation";
@@ -34,6 +36,8 @@ export function buildHttpApp(): express.Express {
     registerCoreTools();
     registerPlatformTools();
     registerPlatformWriteTools();
+    registerPipelineTools();
+    registerDeliveryTools();
   }
   const app = express();
   app.use(express.json({ limit: "4mb" }));

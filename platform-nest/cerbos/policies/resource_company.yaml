@@ -6,9 +6,10 @@ resourcePolicy:
   variables:
     import: ["gaiada_common"]
   rules:
+    # Global-elevated roles manage the whole holding (create/update/delete/read any company).
     - actions: ["*"]
       effect: EFFECT_ALLOW
-      derivedRoles: ["platform_admin"]
+      derivedRoles: ["platform_admin", "group_executive"]
     - actions: ["read"]
       effect: EFFECT_ALLOW
       derivedRoles: ["company_admin", "manager", "member", "viewer"]
