@@ -11,6 +11,7 @@ import { authorize, writeActivity, notify } from "./http";
 import { validateCustomFields } from "./custom-fields";
 import { recomputeRollups } from "../rollups/engine";
 import { AuthGuard } from "../auth/guards";
+import { getServiceScopes } from "./service-scopes";
 
 @Controller("api")
 @UseGuards(AuthGuard)
@@ -45,6 +46,9 @@ export class CoreController {
           ]),
         )
       : { rows: [] };
+    // ORG-7b: serviceScopes is ADDITIVE to the Me shape — existing consumers that don't read it
+    // are unaffected; [] whenever the release-train flag is off (default) or there is none.
+    const serviceScopes = await getServiceScopes(req.principal.userId);
     return {
       userId: req.principal.userId,
       assurance: req.principal.assurance,
@@ -53,6 +57,7 @@ export class CoreController {
       title: profile.rows[0]?.title ?? null,
       companies: companies.rows,
       roles: req.principal.roles,
+      serviceScopes,
     };
   }
 
@@ -251,17 +256,34 @@ export class CoreController {
   }
 
   @Get(":tenantId/members")
-  async members(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string) {
+  async members(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Query("includeService") includeServiceRaw?: string,
+  ) {
     await authorize(req.principal, { kind: "member", tenantId }, "read");
+    // ORG-7b service-row badging: gated behind the release-train flag so this stays exactly the
+    // pre-existing behavior (no kind filtering, no `kind`/`isService` fields) while
+    // SERVICE_ASSIGNMENTS_ENABLED is off — the default, and true today for every deployed
+    // consumer of this endpoint. Once the flag is on: default filters to kind='employee' (hides
+    // reconciler-materialized service rows from the ordinary directory); `?includeService=1`
+    // includes both kinds and marks each row so the UI can badge service members (matches ORG-12's
+    // planned "served-company badging" consumption).
+    const includeService = config.serviceAssignmentsEnabled && includeServiceRaw === "1";
+    const filterEmployeeOnly = config.serviceAssignmentsEnabled && !includeService;
     const rows = await withTenants([tenantId], async (c) => {
       // Reset a possibly-stale principal_user_id GUC before the RLS'd read (see Fastify note).
       await c.query("SELECT set_config('app.principal_user_id', NULL, true)");
-      return c.query(
-        `SELECT m.user_id, u.name, u.email, u.title FROM company_memberships m JOIN users u ON u.id = m.user_id
-         WHERE m.deleted_at IS NULL AND u.deleted_at IS NULL AND u.status = 'active' ORDER BY u.name`,
+      return c.query<{ user_id: string; name: string; email: string; title: string | null; kind?: string }>(
+        `SELECT m.user_id, u.name, u.email, u.title${config.serviceAssignmentsEnabled ? ", m.kind" : ""}
+         FROM company_memberships m JOIN users u ON u.id = m.user_id
+         WHERE m.deleted_at IS NULL AND u.deleted_at IS NULL AND u.status = 'active'
+           ${filterEmployeeOnly ? "AND m.kind = 'employee'" : ""}
+         ORDER BY u.name`,
       );
     });
-    return rows.rows;
+    if (!config.serviceAssignmentsEnabled) return rows.rows;
+    return rows.rows.map((r) => ({ ...r, isService: r.kind === "service" }));
   }
 
   @Post(":tenantId/rollups/recompute")

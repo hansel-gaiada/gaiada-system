@@ -26,7 +26,7 @@ function whenTime(iso?: string | null): string {
 function shell(title: string, body: React.ReactNode) {
   return (
     <>
-      <PageHeader eyebrow="IT" title={title} />
+      <PageHeader eyebrow="IT" title={title} breadcrumbs={[{ label: "IT", href: "/it" }, { label: "Devices", href: "/it/devices" }, { label: title }]} />
       {body}
     </>
   );
@@ -64,6 +64,7 @@ export default async function DeviceDetailPage({ params }: { params: Params }) {
         eyebrow="IT"
         title={device.name}
         subtitle={device.kind}
+        breadcrumbs={[{ label: "IT", href: "/it" }, { label: "Devices", href: "/it/devices" }, { label: device.name }]}
         actions={<DeviceStatus status={device.status} />}
       />
 

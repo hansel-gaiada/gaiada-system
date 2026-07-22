@@ -11,9 +11,31 @@ import { migrate } from "../db/migrate";
 import { createRole, grantRole, addMembership } from "../testing/fixtures";
 
 const HOLDING_NAME = "D & A Syrowatka";
-const AGENCY_NAME = "Gaiada Creative";
+const AGENCY_NAME = "Gaia Digital Agency";
 const RESORT_NAME = "Sanur Resort";
 const site = () => config.originSite;
+
+// Agency employees placed under org-tree nodes (division v-* or, for the no-division
+// departments Social Media / GM, the department d-*). Reused people (existing emails)
+// resolve to their existing accounts; the rest are created. [email, name, title, target].
+const EMPLOYEES: [string, string, string, string][] = [
+  ["gede@gaia.test", "Gede Pratama", "Frontend Developer", "v-webdev"],
+  ["komang.adi@gaia.test", "Komang Adi", "Backend Developer", "v-webdev"],
+  ["putu.yoga@gaia.test", "Putu Yoga", "Web Maintenance Engineer", "v-webmaint"],
+  ["hansel@gaiada.com", "Clement Hansel", "AI Manager", "v-aimgr"],
+  ["kadek.sari@gaia.test", "Kadek Sari", "UI/UX Designer", "v-uiux"],
+  ["design@gaiada-creative.test", "Citra (Design)", "Senior Designer", "v-design"],
+  ["luh.ayu@gaia.test", "Luh Ayu", "Graphic Designer", "v-design"],
+  ["wayan.krisna@gaia.test", "Wayan Krisna", "Video Editor", "v-video"],
+  ["nyoman.bagus@gaia.test", "Nyoman Bagus", "SEO Specialist", "v-seo"],
+  ["kadek.rai@gaia.test", "Kadek Rai", "SEM Specialist", "v-sem"],
+  ["copy@gaiada-creative.test", "Dewi (Copy)", "Copywriter", "v-copy"],
+  ["putu.wira@gaia.test", "Putu Wira", "Backlink Specialist", "v-backlink"],
+  ["made.ayu@gaia.test", "Made Ayu", "Social Media Manager", "d-social"],
+  ["komang.dewi@gaia.test", "Komang Dewi", "Content Creator", "d-social"],
+  ["owner@gaiada-creative.test", "Ayu (Owner)", "Managing Director", "d-gm"],
+];
+type Placements = Record<string, { id: string; name: string }[]>;
 
 export interface SeededAgency {
   tenantId: string;
@@ -156,7 +178,15 @@ export async function seedAgency(): Promise<SeededAgency> {
   }
 
   await seedDecidedApprovals(tenantId, campaignId, users);
-  await seedOrgStructures(tenantId, resortId, users);
+  // Employees: create/resolve accounts + memberships, and collect org placements.
+  const placements: Placements = {};
+  for (const [email, name, title, target] of EMPLOYEES) {
+    const id = await ensureUser(email, name, title);
+    await addMembership(tenantId, id);
+    await grantRole(id, roleMember, "company", tenantId);
+    (placements[target] ??= []).push({ id, name });
+  }
+  await seedOrgStructures(tenantId, resortId, users, placements);
   await seedPm(tenantId, projects[0], users);
   await seedIt(tenantId, resortId);
   await seedInvoices(tenantId, clients[0]);
@@ -169,32 +199,32 @@ export async function seedAgency(): Promise<SeededAgency> {
 }
 
 // ---- Org structures ----
-async function seedOrgStructures(tenantId: string, resortId: string, u: Record<string, string>) {
+async function seedOrgStructures(tenantId: string, resortId: string, u: Record<string, string>, placements: Placements = {}) {
+  // Gaia Digital Agency: departments → divisions → placed employees.
+  const people = (nodeId: string) =>
+    (placements[nodeId] ?? []).map((p) => ({ id: "p-" + p.id.slice(0, 8), name: p.name, kind: "person", assigneeId: p.id, assigneeName: p.name, children: [] }));
+  const div = (id: string, name: string) => ({ id, name, kind: "division", children: people(id) });
+  const dept = (id: string, name: string, divisions: [string, string][]) =>
+    ({ id, name, kind: "department", children: [...divisions.map(([vid, vname]) => div(vid, vname)), ...people(id)] });
   const agency = {
     root: { id: "root", name: AGENCY_NAME, kind: "company", children: [
-      { id: "d-delivery", name: "Delivery", kind: "department", children: [
-        { id: "v-projects", name: "Projects", kind: "division", children: [
-          { id: "r-pm", name: "Project Manager", kind: "role", children: [
-            { id: "p-pm", name: "Budi (PM)", kind: "person", assigneeId: u.pm, assigneeName: "Budi (PM)", children: [] }] }] },
-        { id: "v-creative", name: "Creative", kind: "division", children: [
-          { id: "r-design", name: "Senior Designer", kind: "role", children: [
-            { id: "p-design", name: "Citra (Design)", kind: "person", assigneeId: u.designer, assigneeName: "Citra (Design)", children: [] }] },
-          { id: "r-copy", name: "Copywriter", kind: "role", children: [
-            { id: "p-copy", name: "Dewi (Copy)", kind: "person", assigneeId: u.copy, assigneeName: "Dewi (Copy)", children: [] }] }] }] },
-      { id: "d-clients", name: "Client Services", kind: "department", children: [
-        { id: "v-accounts", name: "Accounts", kind: "division", children: [
-          { id: "r-lead", name: "Client Lead", kind: "role", children: [
-            { id: "p-lead", name: "Eka (Client Lead)", kind: "person", assigneeId: u.approver, assigneeName: "Eka (Client Lead)", children: [] }] }] }] }] },
+      dept("d-webdev", "Web Dev", [["v-webdev", "Web Dev"], ["v-webmaint", "Web Maintenance"], ["v-aimgr", "AI Manager"], ["v-uiux", "UI/UX"]]),
+      dept("d-creatives", "Creatives", [["v-design", "Design Graphics"], ["v-video", "Video Editor"]]),
+      dept("d-seo", "SEO", [["v-seo", "SEO"], ["v-sem", "SEM"], ["v-copy", "Copywriter"], ["v-backlink", "Backlink"]]),
+      dept("d-social", "Social Media", []),
+      dept("d-gm", "GM", []),
+    ] },
   };
   const resort = { root: { id: "root", name: RESORT_NAME, kind: "company", children: [
     { id: "d-ops", name: "Operations", kind: "department", children: [
       { id: "v-fo", name: "Front Office", kind: "division", children: [
         { id: "r-gm", name: "General Manager", kind: "role", children: [
           { id: "p-gm", name: "Wayan (GM)", kind: "person", assigneeId: u.resortGm, assigneeName: "Wayan (GM)", children: [] }] }] }] }] } };
+  // Insert-if-absent: seed a starting tree but NEVER overwrite edits made in the org builder.
   for (const [tid, struct] of [[tenantId, agency], [resortId, resort]] as const) {
     await withTenants([tid], (c) => c.query(
       `INSERT INTO company_org_structure (tenant_id, structure, origin_site) VALUES ($1,$2,$3)
-       ON CONFLICT (tenant_id) DO UPDATE SET structure=EXCLUDED.structure, updated_at=now()`,
+       ON CONFLICT (tenant_id) DO NOTHING`,
       [tid, JSON.stringify(struct), site()]));
   }
 }
@@ -215,10 +245,10 @@ async function seedPm(tenantId: string, projectId: string, u: Record<string, str
         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
         [id, tenantId, projectId, title, desc, status, prio, prog, JSON.stringify(assignee), JSON.stringify(subs), ms, 480, deps, site()]);
     await mk(t4, "Kickoff & brief intake", "done", "normal", 100, person(u.pm, "Budi (PM)"), [sub("Agenda", true), sub("Notes", true)], m1, [], "Kickoff meeting + brief.");
-    await mk(t1, "Design hero banner", "in_progress", "high", 67, person(u.designer, "Citra (Design)"), [sub("Layout", true), sub("Responsive", true), sub("Final art", false)], m1, [t4], "Hero from approved mockup.");
-    await mk(t2, "Write launch copy", "todo", "normal", 0, person(u.copy, "Dewi (Copy)"), [], m2, [t1], "Landing + email copy.");
-    await mk(t3, "QA microsite", "blocked", "urgent", 20, unit("division", "v-creative", "Creative", u.designer, "Citra (Design)"), [sub("Repro bug", true), sub("Fix + retest", false)], m2, [t1], "Cross-browser QA.");
-    await mk(t5, "Analytics + consent", "todo", "low", 0, unit("department", "d-delivery", "Delivery", u.pm, "Budi (PM)"), [], m2, [], "Instrument + consent banner.");
+    await mk(t1, "Design hero banner", "in_progress", "high", 67, unit("division", "v-design", "Design Graphics", u.designer, "Citra (Design)"), [sub("Layout", true), sub("Responsive", true), sub("Final art", false)], m1, [t4], "Hero from approved mockup.");
+    await mk(t2, "Write launch copy", "todo", "normal", 0, unit("division", "v-copy", "Copywriter", u.copy, "Dewi (Copy)"), [], m2, [t1], "Landing + email copy.");
+    await mk(t3, "QA microsite", "blocked", "urgent", 20, unit("division", "v-webmaint", "Web Maintenance", u.designer, "Citra (Design)"), [sub("Repro bug", true), sub("Fix + retest", false)], m2, [t1], "Cross-browser QA.");
+    await mk(t5, "Analytics + consent", "todo", "low", 0, unit("department", "d-webdev", "Web Dev", u.pm, "Budi (PM)"), [], m2, [], "Instrument + consent banner.");
     // Dates set via SQL current_date arithmetic.
     await c.query(`UPDATE pm_tasks SET start_date=current_date-7, due_date=current_date-5 WHERE id=$1`, [t4]);
     await c.query(`UPDATE pm_tasks SET start_date=current_date-2, due_date=current_date+2 WHERE id=$1`, [t1]);

@@ -37,7 +37,7 @@ describe.skipIf(!TEST_URL)("agency first-deploy daily flow (e2e)", () => {
     registerCoreRollupProvider(clientWorkRollups);
     await syncMetricDefinitions();
 
-    co = await createCompany("Gaiada Creative", ["agency"]);
+    co = await createCompany("Gaiada Creative", ["agency", "clients"]);
     u.admin = await createUser("owner@gc.test", "Ayu");
     u.pm = await createUser("pm@gc.test", "Budi");
     u.designer = await createUser("design@gc.test", "Citra");

@@ -16,7 +16,7 @@ describe("navFor (RBAC-gated visibility)", () => {
     expect(business.items.map((i) => i.label)).not.toContain("Rollups");
     // Companies moved under the new Organization group.
     const org = groups.find((g) => g.label === "Organization")!;
-    expect(org.items.map((i) => i.label)).toEqual(["Overview", "Companies"]);
+    expect(org.items.map((i) => i.label)).toEqual(["Overview", "Companies", "Departments"]);
     // IT section is visible to everyone (read-only for non-managers).
     const itGroup = groups.find((g) => g.label === "IT")!;
     expect(itGroup.items.map((i) => i.label)).toEqual(["Overview", "Devices", "Topology", "Workflows"]);

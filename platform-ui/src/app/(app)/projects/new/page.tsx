@@ -19,7 +19,7 @@ export default async function NewProjectPage() {
 
   return (
     <>
-      <PageHeader eyebrow="Project" title="New project" />
+      <PageHeader eyebrow="Project" title="New project" breadcrumbs={[{ label: "Projects", href: "/projects" }, { label: "New project" }]} />
       <ProjectForm action={createProject} defs={defs} members={members} />
     </>
   );

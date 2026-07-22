@@ -12,6 +12,7 @@ import { config } from "../../config";
 import { authorize, writeActivity } from "../../core/http";
 import { emitEvent } from "../../events/outbox.service";
 import { AuthGuard } from "../../auth/guards";
+import { ModuleEnabledGuard } from "../module-enabled.guard";
 
 const KINDS = new Set(["cctv", "printer", "server", "workstation", "network", "sensor", "iot", "other"]);
 const STATUSES = new Set(["online", "offline", "degraded", "unknown"]);
@@ -48,7 +49,7 @@ async function recordEvent(
 }
 
 @Controller("api")
-@UseGuards(AuthGuard)
+@UseGuards(AuthGuard, ModuleEnabledGuard("it"))
 export class ItController {
   @Get(":tenantId/it/devices")
   async listDevices(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string) {

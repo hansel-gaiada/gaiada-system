@@ -19,7 +19,7 @@ export default async function NewCampaignPage() {
 
   return (
     <>
-      <PageHeader eyebrow="Campaign" title="New campaign" />
+      <PageHeader eyebrow="Campaign" title="New campaign" breadcrumbs={[{ label: "Agency", href: "/agency" }, { label: "New campaign" }]} />
       <CampaignForm action={createCampaign} projects={projects} />
     </>
   );

@@ -20,7 +20,7 @@ describe.skipIf(!TEST_URL)("IT subsystem (§6)", () => {
   beforeAll(async () => {
     await initTestDb();
     config.serviceToken = "svc-token";
-    tenant = await createCompany("Agency A", ["agency"]);
+    tenant = await createCompany("Agency A", ["agency", "it"]);
     itAdmin = await createUser("it@a.test");
     member = await createUser("mem@a.test");
     await addMembership(tenant, itAdmin);

@@ -15,10 +15,17 @@ import { getPool } from "./db";
 import { seedClockFromDb } from "./events/hlc";
 import { registerModule } from "./modules/registry";
 import { agencyModule } from "./modules/agency";
+import { pmModule } from "./modules/pm";
+import { itModule } from "./modules/it";
+import { billingModule } from "./modules/billing";
+import { clientsModule } from "./modules/clients";
+import { knowledgeModule } from "./modules/knowledge";
+import { automationConsoleModule } from "./modules/automation-console";
 import { registerCoreRollupProvider, coreTaskRollups, syncMetricDefinitions } from "./rollups/engine";
 import { clientWorkRollups } from "./core/client-work";
 import { startRelayLoop } from "./events/relay";
 import { startConsumerLoop } from "./events/consumer.service";
+import { startReconcileLoop, startDriftSweepLoop } from "./events/reconcile-consumer";
 import { startN8nBridgeLoop } from "./events/n8n-bridge";
 import { startGraphBridgeLoop } from "./events/graph-bridge";
 
@@ -46,6 +53,12 @@ async function bootstrap(): Promise<void> {
   // never mints an HLC that regresses (sync-engine-revision §2, D3 #4).
   await seedClockFromDb(getPool());
   registerModule(agencyModule);
+  registerModule(pmModule);
+  registerModule(itModule);
+  registerModule(billingModule);
+  registerModule(clientsModule);
+  registerModule(knowledgeModule);
+  registerModule(automationConsoleModule);
   registerCoreRollupProvider(coreTaskRollups);
   registerCoreRollupProvider(clientWorkRollups);
   await syncMetricDefinitions();
@@ -53,6 +66,13 @@ async function bootstrap(): Promise<void> {
     startRelayLoop();
     // Entity types with at least one registered handler; extend as modules add eventHandlers.
     startConsumerLoop(["deliverable"]);
+    // ORG-6 service-assignment reconciler (A7): outbox-driven, own consumer group. Only when the
+    // release-train flag is on — dark by default so assignments stay dormant metadata.
+    if (config.serviceAssignmentsEnabled) {
+      startReconcileLoop();
+      // eslint-disable-next-line no-console
+      console.log("service-assignment reconciler on: streams [service_assignment, org_structure]");
+    }
     // Event → n8n bridge (WS4 §4): only when fully configured (URL + secret + allow-lists).
     if (n8nBridgeEnabled()) {
       startN8nBridgeLoop(config.n8nBridge.entityTypes);
@@ -65,6 +85,14 @@ async function bootstrap(): Promise<void> {
       // eslint-disable-next-line no-console
       console.log(`graph bridge on: streams [${config.graphBridge.entityTypes.join(", ")}] -> knowledge /graph/ingest`);
     }
+  }
+  // ORG-7 §3: nightly drift/orphan sweep. Deliberately OUTSIDE the redisUrl gate above — it's a
+  // plain Postgres sweep (sweepDriftAndOrphans), not stream-driven — but still dark unless the
+  // whole release-train flag is on.
+  if (config.serviceAssignmentsEnabled) {
+    startDriftSweepLoop(config.serviceDriftSweepIntervalMs);
+    // eslint-disable-next-line no-console
+    console.log(`service-assignment drift sweep on: every ${config.serviceDriftSweepIntervalMs}ms`);
   }
   const app = await buildApp();
   const port = Number(process.env.PLATFORM_PORT ?? 3004);

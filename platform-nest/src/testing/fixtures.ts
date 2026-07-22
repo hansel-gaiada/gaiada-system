@@ -5,15 +5,17 @@ import { config } from "../config";
 
 const site = () => config.originSite;
 
-export async function createCompany(name: string, enabledModules: string[] = []): Promise<string> {
+export async function createCompany(
+  name: string,
+  enabledModules: string[] = [],
+  parentCompanyId: string | null = null,
+): Promise<string> {
   const id = newId();
   await withGlobal((c) =>
-    c.query(`INSERT INTO companies (id, name, enabled_modules, origin_site) VALUES ($1, $2, $3, $4)`, [
-      id,
-      name,
-      enabledModules,
-      site(),
-    ]),
+    c.query(
+      `INSERT INTO companies (id, name, enabled_modules, parent_company_id, origin_site) VALUES ($1, $2, $3, $4, $5)`,
+      [id, name, enabledModules, parentCompanyId, site()],
+    ),
   );
   return id;
 }

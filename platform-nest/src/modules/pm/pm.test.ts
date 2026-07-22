@@ -21,7 +21,7 @@ describe.skipIf(!TEST_URL)("PM subsystem (§5)", () => {
   beforeAll(async () => {
     await initTestDb();
     config.serviceToken = "svc-token";
-    tenant = await createCompany("Agency A", ["agency"]);
+    tenant = await createCompany("Agency A", ["agency", "pm"]);
     manager = await createUser("mgr@a.test", "Manager Mo");
     member = await createUser("mem@a.test", "Member Mel");
     await addMembership(tenant, manager);
@@ -148,5 +148,12 @@ describe.skipIf(!TEST_URL)("PM subsystem (§5)", () => {
   it("a plain member cannot create or delete a task (manage-gated)", async () => {
     const create = await createTask({ title: "nope" }, asUser(member));
     expect(create.statusCode).toBe(403);
+  });
+
+  it("a tenant without the pm module enabled 404s on /pm/* (WSA-2 ModuleEnabledGuard)", async () => {
+    const darkTenant = await createCompany("Agency B (no pm)", ["agency"]);
+    await addMembership(darkTenant, manager);
+    const r = await app.inject({ method: "GET", url: `/api/${darkTenant}/pm/tasks`, headers: hdr() });
+    expect(r.statusCode).toBe(404);
   });
 });

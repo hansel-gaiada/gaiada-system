@@ -5,6 +5,7 @@ import { getPendingApprovals, getDecidedApprovals } from "@/lib/data";
 import { decideApproval } from "../actions";
 import { Card, Eyebrow, HairlineTable, StatusBadge } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { ApprovalsPanel } from "@/components/dashboard/ApprovalsPanel";
 import { formatDateTime } from "@/lib/format";
 
@@ -26,6 +27,7 @@ export default async function ApprovalsPage() {
   return (
     <>
       <div style={{ marginBottom: 26 }}>
+        <Breadcrumbs items={[{ label: "Home", href: "/" }, { label: "Approvals" }]} />
         <Eyebrow style={{ color: "var(--erp-accent)", marginBottom: 8, display: "block" }}>Workspace</Eyebrow>
         <h1 style={{ margin: 0, fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 34, lineHeight: 1.1 }}>Approvals</h1>
         <p style={{ margin: "9px 0 0", font: "400 15px/1.5 var(--font-body)", color: "rgba(26,25,22,.62)", maxWidth: 560 }}>

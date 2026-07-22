@@ -33,6 +33,7 @@ export default async function WorkflowsPage({ searchParams }: { searchParams: Se
         eyebrow="IT"
         title="Workflows"
         subtitle="n8n automation workflows — read-only viewer. n8n orchestrates; MCP is the only access path."
+        breadcrumbs={[{ label: "IT", href: "/it" }, { label: "Workflows" }]}
         actions={
           n8nUrl ? (
             <a href={n8nUrl} target="_blank" rel="noreferrer" className="lux-btn lux-btn--solid lux-btn--sm">Open in n8n</a>

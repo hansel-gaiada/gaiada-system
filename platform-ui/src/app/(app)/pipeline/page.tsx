@@ -7,6 +7,7 @@ import { listPipelineRuns, listInternalPendingGates, GATE_LABEL } from "@/lib/pi
 import { decideGateAction } from "@/lib/pipelineActions";
 import { Card, Eyebrow, HairlineTable, StatusBadge } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { formatDateTime } from "@/lib/format";
 
 // WS11 build item 6 — internal delivery-pipeline dashboard + review inbox. Runs across the three
@@ -34,6 +35,7 @@ export default async function PipelinePage() {
   return (
     <>
       <div style={{ marginBottom: 26 }}>
+        <Breadcrumbs items={[{ label: "Home", href: "/" }, { label: "Delivery Pipeline" }]} />
         <Eyebrow style={{ color: "var(--erp-accent)", marginBottom: 8, display: "block" }}>Delivery</Eyebrow>
         <h1 style={{ margin: 0, fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 34, lineHeight: 1.1 }}>Delivery Pipeline</h1>
         <p style={{ margin: "9px 0 0", font: "400 15px/1.5 var(--font-body)", color: "rgba(26,25,22,.62)", maxWidth: 620 }}>

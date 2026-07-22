@@ -1,0 +1,50 @@
+# ORG-3: service_assignments lifecycle (propose/accept/revoke/suspend/resume/relink). Minimal
+# policy needed for the ServiceAssignmentsController routes built in this ticket — the fuller
+# ORG-5 release (module_staff/module_manager derived roles, resource_hr_case/record.yaml, the
+# member-read extension, the zero-assignment 13-case parity replay) is explicitly out of scope
+# here and ships separately.
+#
+# The controller always sets resource.attr.tenantId to the URL's :tenantId, which is:
+#   - the PROVIDER for propose/relink (provider-only actions; the controller separately verifies
+#     the fetched row's provider_tenant_id matches, since the dual-side RLS/read visibility alone
+#     would let a target admin fetch the row too),
+#   - the TARGET for accept,
+#   - EITHER side for revoke/suspend/resume/reconcile (the controller accepts the URL's tenantId
+#     being either the row's provider_tenant_id or target_tenant_id).
+# So a single company_admin/group_executive rule keyed on variables.inTenant (resource.attr.tenantId
+# in principal.attr.companies) covers every action; the app layer enforces which side a given action
+# is legal from, matching the existing "Cerbos is the per-request gate, the controller is the
+# side-of-relationship gate" split used elsewhere (e.g. the portal's client_id linkage check).
+#
+# ORG-7: "reconcile" (the manual re-materialization trigger) is deliberately ADMIN/GLOBAL-ONLY —
+# NOT extended to company_admin like the lifecycle actions above. It forces an immediate write to
+# the OTHER side's memberships/grants outside the normal propose/accept consent handshake, so it
+# is scoped to the same actors who already bypass consent entirely (global auto-active creation).
+#
+# ORG-7b: "read" backs the new GET assignments/service-units list endpoints + the propose
+# endpoint's `?dryRun=1` preview mode. Scoped identically to the existing lifecycle actions
+# (company_admin in-tenant / group_executive / platform_admin) — NOT yet extended to
+# module_staff/module_manager, since that derived-role pair is ORG-5's fuller release (not landed
+# in this ticket); when ORG-5/ORG-11 land, "read" (and only "read") should gain those roles too.
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: service_assignment
+  importDerivedRoles: ["gaiada_scopes"]
+  variables:
+    import: ["gaiada_common"]
+  rules:
+    - actions: ["*"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["platform_admin"]
+    # Group executive (owner) is a global role — cross-company, not membership-gated.
+    - actions: ["propose", "accept", "revoke", "suspend", "resume", "relink", "reconcile", "read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["group_executive"]
+      condition: { match: { expr: "variables.notLow" } }
+    # Company admin, in-tenant on whichever side the controller names as resource.attr.tenantId.
+    # Deliberately EXCLUDES "reconcile" (ORG-7: admin/global-only, see header note).
+    - actions: ["propose", "accept", "revoke", "suspend", "resume", "relink", "read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }

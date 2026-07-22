@@ -1,8 +1,8 @@
 {
   "id": "ws11delivery0001",
-  "name": "WS11 delivery track (hard gate -> design -> 3-beat -> Claude Code -> deploy)",
+  "name": "WS11 delivery track (hard gate -> design -> 3-beat -> revise loop -> Claude Code -> staging -> prod)",
   "meta": {
-    "description": "WS11 build item 8 (full). Stateless event-driven delivery state machine; state lives in the DB. Triggers ev/pipeline.gate.decided + ev/scope.signed. Transitions: hard gate (prd_sign+scope signed) -> design.prototype -> claude_design stage -> pm_review(beat1) -> customer_feedback(beat2) -> pm_approval(beat3) -> release_code (github.repoStatus gate: if repo exists -> code.scaffold -> claude_code stage -> web-dev pm_review; else notify repo_needed) -> web-dev approved -> deploy.staging -> staging stage + notify. github.repoStatus + deploy.staging fail SOFT (onError continue): unconfigured/absent -> a graceful notify, never a crash. Repo name = slug(run.title). All actions are OBO tools/call as wf:delivery. Dev creds via GITHUB_TOKEN/GITHUB_ORG + DEPLOY_STAGING_URL on the hub; prod swaps to a dedicated account. Bounded revise loop on changes_requested is the remaining Temporal-candidate refinement. Env: N8N_BRIDGE_SECRET, HUB_SERVICE_TOKEN, NOTIFY_USER_ID."
+    "description": "WS11 build item 8 (full) + tails. Stateless event-driven delivery state machine; state lives in the DB. Triggers ev/pipeline.gate.decided + ev/scope.signed. Path: hard gate (prd_sign+scope) -> design.prototype -> claude_design -> pm_review(b1) -> customer_feedback(b2) -> [changes_requested => BOUNDED REVISE LOOP: regenerate prototype from feedback -> new claude_design revision -> reopen b1, up to 3 designs then escalate to PM] -> pm_approval(b3) -> release_code (repoStatus gate) -> web-dev review -> deploy.staging -> staging stage + notify -> client staging sign-off (customer_feedback on staging) -> pm_approval (prod) -> deploy.production -> production stage + notify. github.repoStatus/deploy.staging/deploy.production fail SOFT. All actions OBO as wf:delivery. Env: N8N_BRIDGE_SECRET, HUB_SERVICE_TOKEN, NOTIFY_USER_ID; hub creds GITHUB_TOKEN/GITHUB_ORG/DEPLOY_STAGING_URL/DEPLOY_PRODUCTION_URL."
   },
   "nodes": [
     {
@@ -109,7 +109,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const raw = $input.first().json.data ?? $input.first().json.body ?? '';\nconst line = String(raw).split('\\n').find((l) => l.startsWith('data:')) ?? '';\nconst rpc = JSON.parse(line.slice(5).trim());\nif (rpc.result?.isError) throw new Error(rpc.result.content?.[0]?.text ?? 'getRun failed');\nconst run = JSON.parse(rpc.result?.content?.[0]?.text ?? '{}');\nconst stages = run.stages||[], gates = run.gates||[], signoffs = run.scopeSignoffs||[];\nconst prdSigned = gates.some(g=>g.kind==='prd_sign'&&g.decision==='signed');\nconst scopeSigned = (signoffs.some(s=>s.party==='provider')&&signoffs.some(s=>s.party==='client'))||gates.some(g=>g.kind==='scope_signoff'&&g.decision==='signed');\nconst design = stages.find(s=>s.name==='claude_design'); const code = stages.find(s=>s.name==='claude_code'); const staging = stages.find(s=>s.name==='staging');\nconst gof=(kind,sid)=>gates.filter(g=>g.kind===kind&&g.stage_id===sid).sort((a,b)=>a.created_at<b.created_at?-1:1).pop();\nconst ok=g=>g&&g.status==='decided'&&g.decision==='approved';\nconst has=(kind,sid)=>gates.some(g=>g.kind===kind&&g.stage_id===sid);\nconst prd=(stages.find(s=>s.name==='prd_extract')||{}).artifact_ref||'';\nconst slug=String(run.title||('run-'+run.id)).toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'').slice(0,40);\nlet action='noop',nextKind='',nextActor='',stageId='';\nif(prdSigned&&scopeSigned){\n  if(!design){action='release_design';}\n  else if(ok(gof('pm_review',design.id))&&!has('customer_feedback',design.id)){action='open_gate';nextKind='customer_feedback';nextActor='client';stageId=design.id;}\n  else if(ok(gof('customer_feedback',design.id))&&!has('pm_approval',design.id)){action='open_gate';nextKind='pm_approval';nextActor='internal';stageId=design.id;}\n  else if(ok(gof('pm_approval',design.id))&&!code){action='release_code';}\n  else if(code&&ok(gof('pm_review',code.id))&&!staging){action='deploy';}\n}\nconst proto=(design||{}).artifact_ref||'';\nreturn [{ json: { tenantId: run.tenant_id, runId: run.id, action, nextKind, nextActor, stageId, prd, proto, slug } }];"
+        "jsCode": "const raw = $input.first().json.data ?? $input.first().json.body ?? '';\nconst line = String(raw).split('\\n').find((l) => l.startsWith('data:')) ?? '';\nconst rpc = JSON.parse(line.slice(5).trim());\nif (rpc.result?.isError) throw new Error(rpc.result.content?.[0]?.text ?? 'getRun failed');\nconst run = JSON.parse(rpc.result?.content?.[0]?.text ?? '{}');\nconst stages = run.stages||[], gates = run.gates||[], signoffs = run.scopeSignoffs||[];\nconst prdSigned = gates.some(g=>g.kind==='prd_sign'&&g.decision==='signed');\nconst scopeSigned = (signoffs.some(s=>s.party==='provider')&&signoffs.some(s=>s.party==='client'))||gates.some(g=>g.kind==='scope_signoff'&&g.decision==='signed');\nconst designs = stages.filter(s=>s.name==='claude_design'); const design = designs[designs.length-1];\nconst code = stages.find(s=>s.name==='claude_code'); const staging = stages.find(s=>s.name==='staging'); const prodStage = stages.find(s=>s.name==='production');\nconst MAX_DESIGNS = 3;\nconst gof=(kind,sid)=>gates.filter(g=>g.kind===kind&&g.stage_id===sid).sort((a,b)=>a.created_at<b.created_at?-1:1).pop();\nconst ok=g=>g&&g.status==='decided'&&g.decision==='approved';\nconst has=(kind,sid)=>gates.some(g=>g.kind===kind&&g.stage_id===sid);\nconst prd=(stages.find(s=>s.name==='prd_extract')||{}).artifact_ref||'';\nconst slug=String(run.title||('run-'+run.id)).toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'').slice(0,40);\nlet action='noop',nextKind='',nextActor='',stageId='',note='';\nif(prdSigned&&scopeSigned){\n  if(!design){action='release_design';}\n  else {\n    const cfd=gof('customer_feedback',design.id);\n    if(ok(gof('pm_review',design.id))&&!has('customer_feedback',design.id)){action='open_gate';nextKind='customer_feedback';nextActor='client';stageId=design.id;note='Submission beat 2 — client feedback';}\n    else if(cfd&&cfd.status==='decided'&&cfd.decision==='changes_requested'){ if(designs.length<MAX_DESIGNS){action='revise_design';note=cfd.note||'';} else {action='escalate_revise';note=cfd.note||'';} }\n    else if(ok(cfd)&&!has('pm_approval',design.id)){action='open_gate';nextKind='pm_approval';nextActor='internal';stageId=design.id;note='Submission beat 3 — PM approval';}\n    else if(ok(gof('pm_approval',design.id))&&!code){action='release_code';}\n    else if(code&&ok(gof('pm_review',code.id))&&!staging){action='deploy';}\n    else if(staging&&ok(gof('customer_feedback',staging.id))&&!has('pm_approval',staging.id)){action='open_gate';nextKind='pm_approval';nextActor='internal';stageId=staging.id;note='Production approval';}\n    else if(staging&&ok(gof('pm_approval',staging.id))&&!prodStage){action='deploy_prod';}\n  }\n}\nconst proto=(design||{}).artifact_ref||'';\nreturn [{ json: { tenantId: run.tenant_id, runId: run.id, action, nextKind, nextActor, stageId, note, prd, proto, slug } }];"
       },
       "name": "Load + decide",
       "type": "n8n-nodes-base.code",
@@ -393,7 +393,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", id: 5, method: \"tools/call\", params: { name: \"pipeline.openGate\", arguments: { tenantId: $json.tenantId, runId: $json.runId, stageId: $json.stageId, kind: $json.nextKind, actorSide: $json.nextActor, note: \"Submission beat\" } } }) }}",
+        "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", id: 5, method: \"tools/call\", params: { name: \"pipeline.openGate\", arguments: { tenantId: $json.tenantId, runId: $json.runId, stageId: $json.stageId, kind: $json.nextKind, actorSide: $json.nextActor, note: ($json.note || \"Submission beat\") } } }) }}",
         "options": {
           "response": {
             "response": {
@@ -930,7 +930,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const raw = $input.first().json.data ?? $input.first().json.body ?? '';\nconst line = String(raw).split('\\n').find((l) => l.startsWith('data:')) ?? '';\nconst rpc = JSON.parse(line.slice(5).trim());\nconst d=$('Deploy result').first().json;\nreturn [{ json: { tenantId:d.tenantId, runId:d.runId, ok2:d.ok2, reason:d.reason } }];"
+        "jsCode": "const raw = $input.first().json.data ?? $input.first().json.body ?? '';\nconst line = String(raw).split('\\n').find((l) => l.startsWith('data:')) ?? '';\nconst rpc = JSON.parse(line.slice(5).trim());\nif (rpc.result?.isError) throw new Error(rpc.result.content?.[0]?.text ?? 'createStage staging failed');\nconst s=JSON.parse(rpc.result?.content?.[0]?.text??'{}');\nconst dr=$('Deploy result').first().json;\nreturn [{ json: { tenantId:dr.tenantId, runId:dr.runId, ok2:dr.ok2, reason:dr.reason, stagingStageId:s.id, ok2str:String(!!dr.ok2) } }];"
       },
       "name": "After staging",
       "type": "n8n-nodes-base.code",
@@ -990,6 +990,85 @@
     },
     {
       "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "Staging deployed?",
+              "leftValue": "={{ $('After staging').first().json.ok2str }}",
+              "rightValue": "true",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Staging deployed?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2400,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://mcp-hub:3003/mcp",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.HUB_SERVICE_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json, text/event-stream"
+            },
+            {
+              "name": "x-obo-provider",
+              "value": "n8n"
+            },
+            {
+              "name": "x-obo-external-id",
+              "value": "wf:delivery"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", id: 14, method: \"tools/call\", params: { name: \"pipeline.openGate\", arguments: { tenantId: $('After staging').first().json.tenantId, runId: $('After staging').first().json.runId, stageId: $('After staging').first().json.stagingStageId, kind: \"customer_feedback\", actorSide: \"client\", note: \"Staging is live — client sign-off before production\" } } }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "name": "MCP openGate staging-signoff",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2620,
+        320
+      ]
+    },
+    {
+      "parameters": {
         "respondWith": "json",
         "responseBody": "={{ JSON.stringify({ ok:true, action:'deploy', deployed:$('Deploy result').first().json.ok2 }) }}"
       },
@@ -997,8 +1076,525 @@
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
       "position": [
-        2400,
+        2840,
         400
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "Revise design?",
+              "leftValue": "={{ $json.action }}",
+              "rightValue": "revise_design",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Revise design?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1080,
+        620
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://mcp-hub:3003/mcp",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.HUB_SERVICE_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json, text/event-stream"
+            },
+            {
+              "name": "x-obo-provider",
+              "value": "n8n"
+            },
+            {
+              "name": "x-obo-external-id",
+              "value": "wf:delivery"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", id: 15, method: \"tools/call\", params: { name: \"design.prototype\", arguments: { prd: $('Load + decide').first().json.prd, notes: $('Load + decide').first().json.note } } }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "name": "MCP design.prototype (revise)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1300,
+        620
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json.data ?? $input.first().json.body ?? '';\nconst line = String(raw).split('\\n').find((l) => l.startsWith('data:')) ?? '';\nconst rpc = JSON.parse(line.slice(5).trim());\nif (rpc.result?.isError) throw new Error(rpc.result.content?.[0]?.text ?? 'design revise failed');\nlet p={};try{p=JSON.parse(rpc.result?.content?.[0]?.text??'{}')}catch{}\nconst d=$('Load + decide').first().json;\nreturn [{ json: { tenantId:d.tenantId, runId:d.runId, doc:p.content??'' } }];"
+      },
+      "name": "Parse revise",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1520,
+        620
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://mcp-hub:3003/mcp",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.HUB_SERVICE_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json, text/event-stream"
+            },
+            {
+              "name": "x-obo-provider",
+              "value": "n8n"
+            },
+            {
+              "name": "x-obo-external-id",
+              "value": "wf:delivery"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", id: 16, method: \"tools/call\", params: { name: \"pipeline.createStage\", arguments: { tenantId: $json.tenantId, runId: $json.runId, track: \"delivery\", name: \"claude_design\", status: \"awaiting_gate\", artifactRef: $json.doc } } }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "name": "MCP createStage design (revise)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1740,
+        620
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json.data ?? $input.first().json.body ?? '';\nconst line = String(raw).split('\\n').find((l) => l.startsWith('data:')) ?? '';\nconst rpc = JSON.parse(line.slice(5).trim());\nif (rpc.result?.isError) throw new Error(rpc.result.content?.[0]?.text ?? 'createStage revise failed');\nconst s=JSON.parse(rpc.result?.content?.[0]?.text??'{}');\nconst d=$('Load + decide').first().json;\nreturn [{ json: { tenantId:d.tenantId, runId:d.runId, stageId:s.id } }];"
+      },
+      "name": "Parse revise stage",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1960,
+        620
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://mcp-hub:3003/mcp",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.HUB_SERVICE_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json, text/event-stream"
+            },
+            {
+              "name": "x-obo-provider",
+              "value": "n8n"
+            },
+            {
+              "name": "x-obo-external-id",
+              "value": "wf:delivery"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", id: 17, method: \"tools/call\", params: { name: \"pipeline.openGate\", arguments: { tenantId: $json.tenantId, runId: $json.runId, stageId: $json.stageId, kind: \"pm_review\", actorSide: \"internal\", note: \"Revised prototype — Submission beat 1 (PM/UI review)\" } } }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "name": "MCP openGate pm_review(revise)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2180,
+        620
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok:true, action:'revised_design', runId:$('Load + decide').first().json.runId }) }}"
+      },
+      "name": "Respond (revised)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        2400,
+        620
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "Escalate revise?",
+              "leftValue": "={{ $json.action }}",
+              "rightValue": "escalate_revise",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Escalate revise?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1080,
+        820
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://mcp-hub:3003/mcp",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.HUB_SERVICE_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json, text/event-stream"
+            },
+            {
+              "name": "x-obo-provider",
+              "value": "n8n"
+            },
+            {
+              "name": "x-obo-external-id",
+              "value": "wf:delivery"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", id: 18, method: \"tools/call\", params: { name: \"notify\", arguments: { tenantId: $json.tenantId, recipientId: $env.NOTIFY_USER_ID, type: \"revise_budget_exhausted\", payload: { runId: $json.runId, note: $json.note } } } }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "name": "MCP notify revise-escalation",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1300,
+        820
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok:true, action:'escalated_revise', runId:$('Load + decide').first().json.runId }) }}"
+      },
+      "name": "Respond (escalated)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1520,
+        820
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "Deploy prod?",
+              "leftValue": "={{ $json.action }}",
+              "rightValue": "deploy_prod",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Deploy prod?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1080,
+        1020
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://mcp-hub:3003/mcp",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.HUB_SERVICE_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json, text/event-stream"
+            },
+            {
+              "name": "x-obo-provider",
+              "value": "n8n"
+            },
+            {
+              "name": "x-obo-external-id",
+              "value": "wf:delivery"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", id: 19, method: \"tools/call\", params: { name: \"deploy.production\", arguments: { repo: $('Load + decide').first().json.slug, ref: 'main', runId: $('Load + decide').first().json.runId } } }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "name": "MCP deploy.production",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1300,
+        1020
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "let raw = $input.first().json.data ?? $input.first().json.body ?? '';\nconst line = String(raw).split('\\n').find((l) => l.startsWith('data:')) ?? '';\nconst rpc = JSON.parse(line.slice(5).trim());\nlet ok3=false, reason='';\ntry{ if(rpc.result?.isError){reason=rpc.result.content?.[0]?.text||'prod deploy failed';} else { ok3=true; } }catch(e){ reason='prod deploy not configured'; }\nconst d=$('Load + decide').first().json;\nreturn [{ json: { tenantId:d.tenantId, runId:d.runId, ok3, reason, status: ok3?'done':'failed' } }];"
+      },
+      "name": "Prod result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1520,
+        1020
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://mcp-hub:3003/mcp",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.HUB_SERVICE_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json, text/event-stream"
+            },
+            {
+              "name": "x-obo-provider",
+              "value": "n8n"
+            },
+            {
+              "name": "x-obo-external-id",
+              "value": "wf:delivery"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", id: 20, method: \"tools/call\", params: { name: \"pipeline.createStage\", arguments: { tenantId: $json.tenantId, runId: $json.runId, track: \"delivery\", name: \"production\", status: $json.status, artifactRef: ($json.ok3 ? \"deployed to production\" : $json.reason) } } }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "name": "MCP createStage production",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1740,
+        1020
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json.data ?? $input.first().json.body ?? '';\nconst line = String(raw).split('\\n').find((l) => l.startsWith('data:')) ?? '';\nconst rpc = JSON.parse(line.slice(5).trim());\nif (rpc.result?.isError) throw new Error(rpc.result.content?.[0]?.text ?? 'createStage production failed');\nconst pr=$('Prod result').first().json;\nreturn [{ json: { tenantId:pr.tenantId, runId:pr.runId, ok3:pr.ok3, reason:pr.reason } }];"
+      },
+      "name": "After prod",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1960,
+        1020
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://mcp-hub:3003/mcp",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.HUB_SERVICE_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json, text/event-stream"
+            },
+            {
+              "name": "x-obo-provider",
+              "value": "n8n"
+            },
+            {
+              "name": "x-obo-external-id",
+              "value": "wf:delivery"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", id: 21, method: \"tools/call\", params: { name: \"notify\", arguments: { tenantId: $json.tenantId, recipientId: $env.NOTIFY_USER_ID, type: ($json.ok3 ? \"production_deployed\" : \"production_deploy_failed\"), payload: { runId: $json.runId, reason: $json.reason } } } }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "name": "MCP notify production",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2180,
+        1020
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok:true, action:'deploy_prod', deployed:$('Prod result').first().json.ok3 }) }}"
+      },
+      "name": "Respond (prod)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        2400,
+        1020
       ]
     },
     {
@@ -1011,7 +1607,7 @@
       "typeVersion": 1.1,
       "position": [
         1300,
-        560
+        1220
       ]
     }
   ],
@@ -1319,7 +1915,7 @@
         ],
         [
           {
-            "node": "Respond (noop)",
+            "node": "Revise design?",
             "type": "main",
             "index": 0
           }
@@ -1374,7 +1970,211 @@
       "main": [
         [
           {
+            "node": "Staging deployed?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Staging deployed?": {
+      "main": [
+        [
+          {
+            "node": "MCP openGate staging-signoff",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
             "node": "Respond (deploy)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MCP openGate staging-signoff": {
+      "main": [
+        [
+          {
+            "node": "Respond (deploy)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Revise design?": {
+      "main": [
+        [
+          {
+            "node": "MCP design.prototype (revise)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Escalate revise?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MCP design.prototype (revise)": {
+      "main": [
+        [
+          {
+            "node": "Parse revise",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse revise": {
+      "main": [
+        [
+          {
+            "node": "MCP createStage design (revise)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MCP createStage design (revise)": {
+      "main": [
+        [
+          {
+            "node": "Parse revise stage",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse revise stage": {
+      "main": [
+        [
+          {
+            "node": "MCP openGate pm_review(revise)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MCP openGate pm_review(revise)": {
+      "main": [
+        [
+          {
+            "node": "Respond (revised)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Escalate revise?": {
+      "main": [
+        [
+          {
+            "node": "MCP notify revise-escalation",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Deploy prod?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MCP notify revise-escalation": {
+      "main": [
+        [
+          {
+            "node": "Respond (escalated)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Deploy prod?": {
+      "main": [
+        [
+          {
+            "node": "MCP deploy.production",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond (noop)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MCP deploy.production": {
+      "main": [
+        [
+          {
+            "node": "Prod result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prod result": {
+      "main": [
+        [
+          {
+            "node": "MCP createStage production",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MCP createStage production": {
+      "main": [
+        [
+          {
+            "node": "After prod",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "After prod": {
+      "main": [
+        [
+          {
+            "node": "MCP notify production",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MCP notify production": {
+      "main": [
+        [
+          {
+            "node": "Respond (prod)",
             "type": "main",
             "index": 0
           }

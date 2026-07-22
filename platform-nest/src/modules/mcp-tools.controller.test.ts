@@ -4,9 +4,26 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { McpToolsController } from "./mcp-tools.controller";
 import { resetModules, registerModule } from "./registry";
 import { agencyModule } from "./agency";
+import { pmModule } from "./pm";
+import { itModule } from "./it";
+import { billingModule } from "./billing";
+import { clientsModule } from "./clients";
+import { knowledgeModule } from "./knowledge";
+import { automationConsoleModule } from "./automation-console";
 
 describe("McpToolsController (WS2 §6 aggregation)", () => {
   beforeEach(() => resetModules());
+
+  it("WSA-2: lists tools from every registered module (main.ts's full compiled-in set)", () => {
+    [agencyModule, pmModule, itModule, billingModule, clientsModule, knowledgeModule, automationConsoleModule].forEach(registerModule);
+    const names = new McpToolsController().toolDefs().map((d) => d.name);
+    expect(names).toEqual(
+      expect.arrayContaining([
+        "pm.listTasks", "it.listDevices", "billing.listInvoices",
+        "clients.listClients", "knowledge.listSources", "automation.listWorkflows",
+      ]),
+    );
+  });
 
   it("returns the union of enabled-in-code modules' mcpTools with their HTTP mapping", () => {
     registerModule(agencyModule);

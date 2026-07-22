@@ -28,6 +28,18 @@ export const config = {
   filesDir: process.env.FILES_DIR ?? "./data/files",
   // Event backbone (5c continuation): Redis Streams for outbox relay + consumption.
   redisUrl: process.env.REDIS_URL ?? "",
+  // ORG-6 release train (A4): the whole shared-service reconciler is DARK by default. When off,
+  // the reconcile consumer drains its stream but materializes nothing — assignments stay dormant
+  // metadata (exactly as ORG-2/ORG-3 left them). Flips on only with the rest of the train green.
+  serviceAssignmentsEnabled:
+    process.env.SERVICE_ASSIGNMENTS_ENABLED === "1" || process.env.SERVICE_ASSIGNMENTS_ENABLED === "true",
+  // A16 orphan escalation: an ACTIVE assignment whose provider unit node has been orphaned for
+  // longer than this TTL is auto-suspended by the nightly drift sweep (grants off, edge kept), so
+  // an accidental chart edit cannot leave cross-company access standing indefinitely. Default 7d.
+  serviceOrphanTtlMs: Number(process.env.SERVICE_ORPHAN_TTL_MS ?? 7 * 24 * 3600 * 1000),
+  // ORG-7 §3: how often the nightly drift/orphan sweep runs (sweepDriftAndOrphans). Default 24h;
+  // dev/tests override to something short-lived. No effect unless serviceAssignmentsEnabled.
+  serviceDriftSweepIntervalMs: Number(process.env.SERVICE_DRIFT_SWEEP_INTERVAL_MS ?? 24 * 3600 * 1000),
   // Downstream service endpoints the admin/systems console aggregates (Phase C). All
   // read-only; empty URL -> that system reports "not configured" (fail-soft, never fake).
   services: {

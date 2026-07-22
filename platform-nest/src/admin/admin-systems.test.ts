@@ -69,7 +69,7 @@ describe.skipIf(!TEST_URL)("admin systems aggregator (Phase C)", () => {
     config.services.knowledge = { url: `${base}/kn`, token: "kn-token" };
     config.services.automation = { url: `${base}/n8n`, token: "" };
 
-    tenantA = await createCompany("Agency A", ["agency"]);
+    tenantA = await createCompany("Agency A", ["agency", "knowledge"]);
     admin = await createUser("admin@a.test");
     member = await createUser("member@a.test");
     await addMembership(tenantA, admin);

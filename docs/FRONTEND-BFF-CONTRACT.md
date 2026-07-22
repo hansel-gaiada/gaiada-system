@@ -35,6 +35,13 @@ all of these (degrades now, lights up on deploy — no UI change needed).
 shows "select a company" everywhere except cross-company `/rollups`. Real operators log in as company
 members (owner/manager/member). Consider seeding execs into companies or a dedicated exec landing.
 
+**2026-07-17 contract-doc truth sweep (WS0-3):** the section above is a snapshot of the *running*
+:3004 process from 2026-07-16 and is now known-stale — that process was missing the 0018–0020
+buildout. The tables below have been reconciled directly against **code** (a 108-route inventory
+enumerated from the `platform-nest` controller sources on 2026-07-17), which is the source of
+truth regardless of what any particular running container has deployed. Where the two disagree,
+trust the tables below, not the paragraph above.
+
 ## Conventions
 - **Base:** `PLATFORM_URL` (default `http://localhost:3004`). All app data under `/api`. A few
   app-level routes (session revoke) are not tenant-scoped and sit outside `/api`.
@@ -72,22 +79,35 @@ pm.manage, it.manage, approvals.decide, knowledge.review`.
 | ✅ | PATCH | `/api/companies/:id` | partial `{name?,type?,parentCompanyId?,status?,modules?}` → `{ok}` | BUILT. `company.manage`; self-parent rejected; emits `company.updated`. |
 | ✅ | GET | `/api/companies/:id` | → `CompanyDetail` | BUILT (incl. `settings`). |
 | ✅ | GET | `/api/:t/members` | → `Member[]` | Company membership. |
-| ⛔ | GET/PUT | `/api/:t/org-structure` | `OrgStructure` | **See [`memory/org-structure-contract`].** JSONB blob per company; kinds `holding\|company\|department\|division\|role\|person` (migrate legacy `team`→`division`). PUT elevated/`org.edit`. Emit `org_structure.updated`. UI currently persists to a per-browser cookie — **replace with real storage** (a real org exceeds the 4 KB cookie cap). |
+| ✅ | GET/PUT | `/api/:t/org-structure` | `OrgStructure` | BUILT (`company-admin.controller.ts`). **See [`memory/org-structure-contract`].** JSONB blob per company; kinds `holding\|company\|department\|division\|role\|person` (migrate legacy `team`→`division`). PUT elevated/`org.edit`. Emit `org_structure.updated`. |
+| ✅ | POST | `/api/:t/org-structure/units/:nodeId/assignments` | `{targets:string[], module, leadUserId?}` → `201 {assignments:[{id,target,status}]}` | ORG-3 (`service-assignments.controller.ts`). Provider-admin/global only (Cerbos `service_assignment:propose`). Global actor → `active` immediately; provider `company_admin` → `proposed` (target must accept). Same-holding enforced (A5, 422 on cross-holding target); module key validated against the in-process registry once populated (format-only until WSA-2 registers real modules — see the completion report). Writes only the `service_assignments` row itself — **materialization of the target's membership/grants now happens out-of-band** via the ORG-6 reconciler, driven off the `service_assignment.proposed`/`.activated` outbox event ORG-7 wired a dedicated consumer group onto (`events/reconcile-consumer.ts`), gated behind `SERVICE_ASSIGNMENTS_ENABLED` (default off). |
+| ✅ | POST | `/api/:t/org-structure/assignments/:id/accept` | → `200 {ok,status:'active'}` | ORG-3. Target-side only (`service_assignment:accept`); `proposed`→`active`. Triggers reconciliation via the same event path once the flag is on. |
+| ✅ | DELETE | `/api/:t/org-structure/assignments/:id` | → `200 {ok,status:'revoked'}` | ORG-3. Either side (`service_assignment:revoke`). **UPDATE to `status='revoked'`, never a DELETE** — row and audit trail persist. 409 if already revoked. Triggers the reconciler's teardown (deletion-guard-respecting) diff via the event path. |
+| ✅ | PATCH | `/api/:t/org-structure/assignments/:id/suspend` `/resume` | → `200 {ok,status}` | ORG-3. Either side. `active`⇄`suspended` only (409 otherwise). ORG-7 verified end-to-end (live PG+Redis+Cerbos): suspend strips the reconciler-managed grants but the membership row is only deactivated, never deleted (A16 grants-off-edge-kept); resume RE-materializes onto the SAME membership row (resume-not-recreate), not a fresh one. |
+| ✅ | PATCH | `/api/:t/org-structure/assignments/:id` | `{nodeId}` → `200 {ok,status,reconsentRequired}` | ORG-3 re-link. Provider-admin/global only (403 from the target side). Non-global re-link on a non-orphaned assignment flips `status`→`proposed` and clears `accepted_by/at` (target must re-accept); orphan-repair re-links (current `unit_status='orphaned'`) and global-actor re-links skip re-consent. DB-enforced: `unit_id` can only reference an `org_units` row owned by the same `provider_tenant_id` (composite FK, migration `0027_service_assignment_unit_guard.sql`). ORG-7 verified: a re-consent-flip re-link empties the target's grants (desired-empty while `proposed`) via the event path until the target re-accepts. |
+| ✅ | POST | `/api/:t/org-structure/assignments/:id/reconcile` | → `200 ReconcileResult` (`{assignmentId,status,granted,revoked,orphaned,skipped,affectedUsers}`) | **ORG-7, NEW.** Manual re-materialization trigger — calls `reconcileAssignment` synchronously instead of waiting on the event loop. **Admin/global-ONLY** (Cerbos `service_assignment:reconcile` — deliberately excludes `company_admin`, unlike every other lifecycle action on this resource, since it bypasses the propose/accept consent pacing and forces an immediate cross-tenant write). 404 if the assignment isn't visible from `:tenantId` (either side); 409 if `SERVICE_ASSIGNMENTS_ENABLED` is off. |
+| ✅ | POST | `/api/:t/org-structure/reconcile` | → `200 {results: ReconcileResult[]}` | **ORG-7, NEW.** Provider-level fan-out — the same re-diff `org_structure.updated` drives (`reconcileProvider`), callable on demand. Same admin/global gate + flag-off 409 as the single-assignment route above. |
+| ✅ | POST | `/api/:t/org-structure/units/:nodeId/assignments?dryRun=1` | same body as propose → `201 {dryRun:true, unit:{nodeId,name,kind}, items:StaffPreviewRow[], companies:EnvelopeCompany[]}` | **ORG-7b, NEW.** Read-only preview: who WOULD be materialized for this unit/module, without writing a `service_assignments` row. Reuses the reconciler's own `collectSubtreePersons` (never re-implemented) so it can't drift from a real reconcile. `companies[]` reports each requested target's legality (cross-holding/nonexistent → `included:false, reason:"no_access"`); `items` (`{userId,name,email,role:"staff"\|"manager"}`) is the same regardless of target legality — placement is a property of the provider unit alone. Same `propose` authz gate. 409 if `SERVICE_ASSIGNMENTS_ENABLED` is off. |
+| ✅ | GET | `/api/:t/org-structure/assignments?direction=provided\|served&companyIds=&status=` | → `200 Envelope<AssignmentSummary>` | **ORG-7b, NEW.** Lists `service_assignments` rows from `:t`'s side (`direction` picks provider vs. target column). `:t` itself is authorized the normal way (a real 403 propagates, matching every other endpoint — contract convention, not an envelope concern); `companyIds` OPTIONALLY widens the fan-out (e.g. an hr_staff wanting "all served companies" in one call, UX-2 §3's ServicedBlock pill) — each extra id is independently probed and a denial there becomes `{included:false, reason:"no_access"}` in `companies[]`, never a blanket 403, never a silent drop. 409 if the flag is off. |
+| ✅ | GET | `/api/:t/org-structure/service-units?companyIds=` | → `200 Envelope<ServiceUnitRow>` (`{unitId,nodeId,name,kind,status,servedCompanyCount,modules[],providerTenantId}`) | **ORG-7b, NEW.** Provider-side only (A8: `org_units` never leaves the provider) — units of `:t` (+ optional `companyIds` widen, same envelope semantics as the row above) that currently have ≥1 live-ish (`active\|suspended\|proposed`) assignment. No raw provider userIds leave this endpoint (A6) — just unit identity + served-company count + module keys. 409 if the flag is off. |
+| ✅ | GET | `/api/me` `serviceScopes` | `Me.serviceScopes: {companyId,companyName,assignmentId,module,unitName,role:"staff"\|"manager"}[]` | **ORG-7b, NEW, additive to `Me`.** Companies the caller has ACTIVE service (reconciler-materialized) access into — backs the UX-2 company-selector's "served companies" badging. Derives from `service_grant_claims` joined to `service_assignments.status='active'` (the reconciler's own liveness source, A2) — never trusts the `managed_by` marker alone. `[]` whenever `SERVICE_ASSIGNMENTS_ENABLED` is off (default) or the caller has none. |
+| ✅ | GET | `/api/:t/members?includeService=1` | → `Member[]` (+`kind`, `isService` when the flag is on) | **ORG-7b, NEW.** Gated behind `SERVICE_ASSIGNMENTS_ENABLED` end-to-end: while off, this endpoint is byte-for-byte the pre-existing behavior (no `kind` filter, no `isService` field) — every current deployed consumer is unaffected. Once on: default response filters to `kind='employee'` (hides reconciler-materialized service rows from the ordinary directory); `?includeService=1` includes both kinds and marks each row `isService:boolean` so the UI can badge service members (feeds ORG-12/WSD-4's served-company badging). |
+| ✅ | POST | `/api/:t/users` | (A14, membership-side) | **ORG-7b, NEW.** `inviteUser` now mirrors the existing `assignRole` A14 hook on `company_memberships`: if the invite lands on (re-activates, or simply hits) an existing membership row that is reconciler-managed (`kind='service' AND managed_by IS NOT NULL`), the explicit invite ADOPTS it as manual (`adoptManagedGrantAsManual` — `kind→'employee'`, `managed_by→NULL`, drops its `service_grant_claims`) so a later revoke of the OWNING service assignment cannot decrement this now-doubly-intended membership into deletion. Behind `SERVICE_ASSIGNMENTS_ENABLED`; inert (byte-for-byte prior behavior) while off. |
 
 ## 3. People / employees & admin — `lib/adminData.ts`, `lib/people.ts`
 | Status | Method | Path | Body → Response | Notes |
 |---|---|---|---|---|
-| ⛔ | GET | `/api/:t/users` | → `UserRow[]` (incl. real `status` + `roles`) | UI falls back to `/members` with fabricated `status:"active"`/no roles — build this to stop the fabrication. |
-| ⛔ | POST | `/api/:t/users` | `{name,email,title?,roleId?}` → `{id}` | Invite/onboard. `admin.access`. Emit `user.invited`. |
-| ⛔ | PATCH | `/api/:t/users/:id` | `{title?,status?,name?}` → `{ok}` | Edit profile / deactivate. `admin.access`. |
-| ⛔ | GET | `/api/roles` | → `RoleRow[]` | Assignable roles (drives the invite + role pickers). |
-| ⛔ | POST | `/api/:t/users/:id/roles` | `{roleId,scopeType,scopeId?}` → `{ok}` | Assign role. Emit `role.assigned`. |
-| ⛔ | DELETE | `/api/:t/users/:id/roles/:grantId` | → `{ok}` | Revoke role. |
-| ⛔ | GET / POST(verify) / DELETE | `/api/:t/identity-links[/:id[/verify]]` | → `IdentityLink[]` | WA/TG identity links. |
-| 🟡 | GET/POST/PATCH/DELETE | `/api/:t/custom-fields[?entityType][/:id]` | → `FieldDef[]` | **POST exists**; GET/PATCH/DELETE pending. |
-| ⛔ | GET/PATCH | `/api/:t/compliance-gates[/:id]` | → `ComplianceGate[]` | UI shows a hardcoded 6-gate template until this lands; PATCH persists status/evidence. |
-| ⛔ | PATCH | `/api/:t/company/modules` | `{module,enabled}` → `{ok}` | Enable/disable modules. |
-| 🟡 | GET | `/api/:t/audit?verb&actorId&entityType&since&until&limit` | → `AuditEntry[]` | Falls back to `/api/:t/activity` (✅) + client-side filter. Build a real filtered/paginated audit endpoint (+ export). |
+| ✅ | GET | `/api/:t/users` | → `UserRow[]` (incl. real `status` + `roles`) | BUILT (`admin-identity.controller.ts`). |
+| ✅ | POST | `/api/:t/users` | `{name,email,title?,roleId?}` → `{id}` | BUILT. Invite/onboard. `admin.access`. Emit `user.invited`. |
+| ✅ | PATCH | `/api/:t/users/:id` | `{title?,status?,name?}` → `{ok}` | BUILT. Edit profile / deactivate. `admin.access`. |
+| ✅ | GET | `/api/roles` | → `RoleRow[]` | BUILT. Assignable roles (drives the invite + role pickers). |
+| ✅ | POST | `/api/:t/users/:id/roles` | `{roleId,scopeType,scopeId?}` → `{ok}` | BUILT. Assign role. Emit `role.assigned`. **ORG-7 A14 hook (NEW, behind `SERVICE_ASSIGNMENTS_ENABLED`):** if `scopeType='company'` and the (user,role,scope) row already exists reconciler-managed (`managed_by IS NOT NULL`), this admin grant ADOPTS it as manual (`adoptManagedGrantAsManual` — clears `managed_by`, drops its `service_grant_claims`) so a later revoke of the OWNING service assignment cannot decrement this now-doubly-intended row into deletion. |
+| ✅ | DELETE | `/api/:t/users/:id/roles/:grantId` | → `{ok}` | BUILT. Revoke role. |
+| ✅ | GET / POST(verify) / DELETE | `/api/:t/identity-links[/:id[/verify]]` | → `IdentityLink[]` | BUILT. WA/TG identity links. |
+| ✅ | GET/POST/PATCH/DELETE | `/api/:t/custom-fields[?entityType][/:id]` | → `FieldDef[]` | BUILT — all four methods present (`custom-fields.controller.ts`). |
+| ✅ | GET/PATCH | `/api/:t/compliance-gates[/:id]` | → `ComplianceGate[]` | BUILT (`company-admin.controller.ts`). PATCH persists status/evidence. |
+| ✅ | PATCH | `/api/:t/company/modules` | `{module,enabled}` → `{ok}` | BUILT. Enable/disable modules. |
+| ✅ | GET | `/api/:t/audit?verb&actorId&entityType&since&until&limit` | → `AuditEntry[]` | BUILT (`admin-identity.controller.ts`). Filter/pagination richness of query params not verified from route inventory alone — confirm before closing the gap register. |
 
 ## 4. Work management — `lib/entities.ts`, `lib/data.ts`
 | Status | Method | Path | Notes |
@@ -95,22 +115,23 @@ pm.manage, it.manage, approvals.decide, knowledge.review`.
 | ✅ | GET/POST | `/api/:t/projects`, `/api/:t/projects/:id` | list + detail + create + PATCH exist. **No delete/archive endpoint — add one.** |
 | ✅ | GET | `/api/:t/tasks?assignee=me` | base task list. |
 | ✅ | GET/POST | `/api/:t/projects/:pid/tasks` | list + create. |
-| ⛔ | PATCH | `/api/:t/tasks/:id` | base task update is **pending** (UI edit form degrades). |
-| ✅/⛔ | Agency | `/api/:t/modules/agency/campaigns[/:cid/briefs]`, `/approvals/pending`, `/approvals/:id/decide` | campaigns + approvals ✅; **briefs POST ⛔**; **no campaign detail/edit/delete, no creative-asset review endpoints**. |
-| ⛔ (UI built) | GET/POST/DELETE | `/api/:t/clients[/:id]` | UI: `/clients` list + `/clients/new` + `/clients/[id]` detail. Create/delete gated `pm.manage`. |
-| ⛔ (UI built) | GET/POST | `/api/:t/deliverables[?projectId]` | UI: `/deliverables` list + `/deliverables/new`. |
-| ⛔ (UI built) | GET/POST | `/api/:t/time-entries` | UI: `/timesheets` (totals + billable rollup + log). POST body `{minutes,projectId?,taskId?,billable,entryDate,notes}`. |
-| ⛔ (UI built) | GET/POST | `/api/:t/invoices[/:id]` (+`PATCH` status) | **Billing** UI: `/billing` list + `/billing/new` (generate from billable time in a period × rate) + `/billing/[id]` (line items, mark sent/paid). `Invoice` shape in `lib/billing.ts`. `company.manage` only. Backend computes line items from billable `time-entries`. |
-| ⛔ (UI built) | GET | `/api/:t/modules/agency/approvals/decided` | Decided-approval **history** (Approvals page "Recently decided"). Add `campaignId` to pending items so the UI deep-links to the campaign. |
+| ✅ | PATCH | `/api/:t/tasks/:id` | BUILT (`core.controller.ts`). Base task update. |
+| ✅ | Agency | `/api/:t/modules/agency/campaigns[/:cid/briefs]`, `/approvals/pending`, `/approvals/:id/decide` | campaigns + approvals ✅; **briefs GET+POST ✅** (`agency.controller.ts`); assets GET+POST ✅, submit ✅. **Still no campaign detail/edit/delete endpoints** (not in route inventory). |
+| ✅ (UI built) | GET/POST/DELETE | `/api/:t/clients[/:id]` | BUILT (`client-work.controller.ts`: GET, GET/:id, POST, PATCH, DELETE). UI: `/clients` list + `/clients/new` + `/clients/[id]` detail. Create/delete gated `pm.manage`. |
+| ✅ (UI built) | GET/POST/PATCH | `/api/:t/deliverables[?projectId][/:id]` | BUILT (`client-work.controller.ts`). UI: `/deliverables` list + `/deliverables/new`. |
+| ✅ (UI built) | GET/POST | `/api/:t/time-entries` | BUILT (incl. PATCH). UI: `/timesheets` (totals + billable rollup + log). POST body `{minutes,projectId?,taskId?,billable,entryDate,notes}`. |
+| ✅ (UI built) | GET/POST | `/api/:t/invoices[/:id]` (+`PATCH` status) | BUILT (`billing.controller.ts`: GET, GET/:id, POST, PATCH). **Billing** UI: `/billing` list + `/billing/new` (generate from billable time in a period × rate) + `/billing/[id]` (line items, mark sent/paid). `Invoice` shape in `lib/billing.ts`. `company.manage` only. |
+| ✅ (UI built) | GET | `/api/:t/modules/agency/approvals/decided` | BUILT. Decided-approval **history** (Approvals page "Recently decided"). Add `campaignId` to pending items so the UI deep-links to the campaign. |
 | — | (pure UI) | Calendar `/calendar` | Agenda + workload built entirely from existing task/deliverable/project due dates — no new endpoint. |
-| ⛔ (UI built) | GET/POST/DELETE | `/api/:t/files[?entityType&entityId][/:id]` | **Attachments** on project + task detail. POST body today is a **reference** `{entityType,entityId,filename,url?}` → `{id}`. **TODO: true binary/multipart upload** (`multipart/form-data` with the file part) — UI attaches references for now. |
-| ⛔ (UI built) | GET/POST | `/api/:t/comments?entityType=&entityId=` | **Generic threaded comments** — task comments (via `lib/pm`) + **project "Discussion"** (via `lib/entities.postComment`). Any `entityType`. POST body `{body}`. |
+| ✅ (UI built) | GET/POST/DELETE | `/api/:t/files[?entityType&entityId][/:id]` | BUILT (`files.controller.ts`: GET, POST, GET/:id, GET/:id/content, DELETE). **Attachments** on project + task detail. POST body today is a **reference** `{entityType,entityId,filename,url?}` → `{id}`. **TODO: true binary/multipart upload** (`multipart/form-data` with the file part) — UI attaches references for now. |
+| ✅ (UI built) | GET/POST | `/api/:t/comments?entityType=&entityId=` | BUILT (`collab.controller.ts`). **Generic threaded comments** — task comments (via `lib/pm`) + **project "Discussion"** (via `lib/entities.postComment`). Any `entityType`. POST body `{body}`. |
 | ✅ | GET/POST | `/api/rollups?period`, `/api/:t/rollups/recompute` | Add drill-down (records behind a metric) + period history for the reporting UI. |
-| 🟡 | GET/POST | `/api/:t/notifications[?unread]`, `/api/:t/notifications/:id/read` | list ✅; per-item read ⛔. **Add `payload.href`** (deep-link target) so notifications become clickable. |
+| ✅ | GET/POST | `/api/:t/notifications[?unread]`, `/api/:t/notifications/:id/read` | BUILT — list, per-item read, and `read-all` all present (`collab.controller.ts`). **Add `payload.href`** (deep-link target) so notifications become clickable. |
 
-## 5. Project management (Repsona-style) — `lib/pm.ts`, `lib/pmActions.ts`  — **ALL ⛔**
-**See [`memory/pm-ai-tracker-contract`].** Today the entire PM workspace runs only on the in-memory
-demo store `lib/demoPm.ts`. Implement:
+## 5. Project management (Repsona-style) — `lib/pm.ts`, `lib/pmActions.ts`  — **ALL ✅ BUILT**
+**See [`memory/pm-ai-tracker-contract`].** All routes below are present in `modules/pm/pm.controller.ts`
+per the 2026-07-17 route inventory (confirm UI has been repointed off the in-memory demo store
+`lib/demoPm.ts` if it still is):
 - `GET /api/:t/pm/projects/:id` (+`PATCH` owner/status), `GET /api/:t/pm/projects/:id/tasks`
 - `GET /api/:t/pm/tasks?assignee=me` (tenant-wide task list — the Tasks page uses this; falls back to base `/api/:t/tasks`)
 - `GET /api/:t/pm/tasks/:id`, `POST /api/:t/pm/tasks`, `PATCH /api/:t/pm/tasks/:id`, `DELETE /api/:t/pm/tasks/:id`
@@ -126,18 +147,35 @@ demo store `lib/demoPm.ts`. Implement:
 - Emit `pm.task.created|updated`, `pm.tracker.run`, `pm.suggestion.confirmed`. The AI Tracker should run
   as the WS8 PM specialist agent (Gateway model + Knowledge/D9 docs); the UI renders its output.
 
-## 6. IT: devices & n8n — `lib/it.ts`  — **ALL ⛔**
-**See [`memory/it-device-contract`].** `GET/POST /api/:t/it/devices`, `GET /api/:t/it/devices/:id`,
-`GET /api/:t/it/events`, `GET /api/admin/automation/workflows`, `GET /api/admin/automation/workflows/:id`.
-Emit `device.registered|online|offline|degraded|alert`. Heartbeat ingest
-(`POST /api/:t/it/devices/:id/heartbeat`) is backend-only (UI reads).
+## 6. IT: devices & n8n — `lib/it.ts`  — **ALL ✅ BUILT**
+**See [`memory/it-device-contract`].** All present per the route inventory: `GET/POST /api/:t/it/devices`,
+`GET /api/:t/it/devices/:id`, `GET /api/:t/it/events`, `GET /api/admin/automation/workflows`,
+`GET /api/admin/automation/workflows/:id` (`modules/it/it.controller.ts` +
+`admin/admin-systems.controller.ts`). Heartbeat ingest (`POST /api/:t/it/devices/:id/heartbeat`) is
+backend-only (UI reads) and is also present.
 
-## 7. Systems & Intelligence consoles — `lib/admin.ts`  — **ALL ⛔**
-This is the program's own top backend gap ("no AdminController yet"). Build:
-- `GET /api/admin/:system/status`, `GET/PUT /api/admin/:system/config` for `system ∈
-  {bot,gateway,hub,agents,knowledge,automation}`.
-- Extra reads: `GET /api/admin/gateway/egress-audit`, `GET /api/admin/hub/tools`,
-  `GET /api/:t/agents/goals`, `GET /api/:t/knowledge/sources` (+ `POST …/:id/review`).
+## 7. Systems & Intelligence consoles — `lib/admin.ts`  — **MOSTLY ✅ BUILT (one gap)**
+`admin/admin-systems.controller.ts` + `admin/intelligence.controller.ts` now exist:
+- ✅ `GET /api/admin/:system/status`, ✅ `GET /api/admin/:system/config` for `system ∈
+  {bot,gateway,hub,agents,knowledge,automation}`. **⛔ `PUT /api/admin/:system/config` is NOT in the
+  route inventory — config remains read-only; the write side is still pending.**
+- ✅ `GET /api/admin/gateway/egress-audit`, ✅ `GET /api/admin/hub/tools`,
+  ✅ `GET /api/:t/agents/goals`, ✅ `GET /api/:t/knowledge/sources` (+ ✅ `POST …/:id/review`).
+
+## 8. Backend surfaces with no UI/`lib/*` consumer yet
+Found in the 2026-07-17 route inventory but not referenced anywhere in this contract doc (no
+`platform-ui/src/lib/*.ts` client uses them yet). Listed here for completeness — all ✅ BUILT
+in code, flagged only for "no frontend wired" rather than "backend pending":
+| Status | Method | Path | Notes |
+|---|---|---|---|
+| ✅ (no UI) | POST | `/api/:t/authz/check` | `core/authz-check.controller.ts`. |
+| ✅ (no UI) | GET/POST/PATCH | `/api/:t/teams[/:teamId]`, POST/DELETE `/api/:t/teams/:teamId/members[/:userId]` | `core/teams.controller.ts` — base teams entity, no UI screen yet. |
+| ✅ (no UI) | GET | `/health` | `health/health.controller.ts` — bare, no `/api` prefix; infra healthcheck only. |
+| ✅ (no UI) | POST/GET | `/api/:t/automation-approvals[/:id/decide]` | `core/automation-approvals.controller.ts` — WS4 automation-suspension surface; distinct from `/modules/agency/approvals`. |
+| ✅ (no UI) | GET | `/mcp/tool-defs` | `modules/mcp-tools.controller.ts` (`@Controller("mcp")`) — consumed by MCP Hub, not platform-ui. |
+| ✅ (no UI) | POST | `/principal/resolve`, `/identity/enroll/start`, `/identity/enroll/confirm` | `identity/identity.controller.ts` — root-level, not under `/api`; OBO/D4 enrollment, service-to-service. |
+| ✅ (no UI) | GET/POST | `/api/:t/portal/runs[/:runId]`, POST `/gates/:id/decide`, POST `/runs/:runId/scope-sign` | `core/portal.controller.ts` — likely the WS11 delivery-pipeline client portal surface. |
+| ✅ (no UI) | POST/GET/PATCH | `/api/:t/pipeline/runs[/:runId][/stages]`, `/pipeline/stages/:id`, `/pipeline/gates[/:id/decide]`, `/pipeline/runs/:runId/scope-signoffs` | `core/pipeline.controller.ts` — likely the WS11 meeting→MOM→PRD/Report/Scope pipeline (see `memory/ws11-delivery-pipeline-plan`). |
 
 ---
 
@@ -152,6 +190,16 @@ This is the program's own top backend gap ("no AdminController yet"). Build:
 - **i18n/timezone/currency** — money is currency-aware in `lib/format.ts`; locale is `en-GB` hardcoded
   (make it a user preference later).
 
+## 9. Daily-Work UX (UX-2, 2026-07-20) — binding new reads, all additive
+
+From `docs/superpowers/specs/2026-07-20-daily-work-ux-spec.md`. All four are NEW reads — no
+existing endpoint's shape changes breakingly. Assumes `rbac.ts scopeCovers` fix (A4) lands first.
+
+- **(a) Unified approvals** — ⬜ PENDING. `GET /api/approvals?scope=all|<companyId>&origin=agency,pipeline,hr,automation,agent&status=pending|decided&sort=urgency|age` → `Envelope<UnifiedApprovalItem>`. Plus generic decide façade `POST /api/:t/approvals/:id/decide {origin,decision,note?}` → `{ok:true}` over existing origin decide handlers. Replaces agency-only `/approvals/pending` as the inbox source.
+- **(b) Cross-company My-Work tasks** — ⬜ PENDING. `GET /api/tasks/mine?scope=all|<companyId>&companyIds=&status=&dueBefore=` → `Envelope<TaskRow>`; `TaskRow` gains `company`/`tenantId` (additive alongside existing single-tenant `/api/:t/tasks?assignee=me`).
+- **(c) Typed notification payload** — ⬜ PENDING (tighten, not new path). `GET /api/:t/notifications` `payload` becomes required `{title, href, body?, entityType?, entityId?, severity?}` (was opaque). Every notification writer must populate it.
+- **(d) Inclusion envelope** — ⬜ PENDING (shared shape). `Envelope<T> = {items: T[], companies: [{id,name,included,reason?}]}`, required on (a), (b), and every future ALL/served-company fan-out (`/api/scoped/*`, department Serviced-block once ORG-13 lands).
+
 _Cross-references:_ `memory/org-structure-contract`, `memory/it-device-contract`,
-`memory/pm-ai-tracker-contract`, `memory/ui-rbac-and-company-scope`. Type shapes are canonical in
+`memory/pm-ai-tracker-contract`, `memory/ui-rbac-and-company-scope`, `memory/backbone-program`. Type shapes are canonical in
 `platform-ui/src/lib/{platform,entities,adminData,org,organization,pm,it,admin}.ts`.

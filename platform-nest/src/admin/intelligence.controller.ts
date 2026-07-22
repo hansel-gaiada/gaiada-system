@@ -5,6 +5,7 @@ import type { FastifyRequest } from "fastify";
 import { config } from "../config";
 import { authorize } from "../core/http";
 import { AuthGuard } from "../auth/guards";
+import { ModuleEnabledGuard } from "../modules/module-enabled.guard";
 
 async function getJson(url: string, token?: string): Promise<unknown> {
   const ac = new AbortController();
@@ -31,7 +32,10 @@ export class IntelligenceController {
 
   // Proxies the knowledge service's per-tenant source list (D9), reshaped to the UI's
   // KnowledgeSource. Degrades to [] if the service isn't configured or lacks /sources.
+  // Method-scoped (not class-scoped) guard: agentGoals above is not part of the knowledge
+  // module contract and must stay reachable regardless of the "knowledge" enable flag.
   @Get(":tenantId/knowledge/sources")
+  @UseGuards(ModuleEnabledGuard("knowledge"))
   async knowledgeSources(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string) {
     await authorize(req.principal, { kind: "activity", tenantId }, "read");
     const svc = config.services.knowledge;
@@ -57,6 +61,7 @@ export class IntelligenceController {
   // (service-token). 404 when the service isn't configured/reachable so the UI degrades to
   // "reviewing isn't available yet" instead of erroring.
   @Post(":tenantId/knowledge/sources/:sourceId/review")
+  @UseGuards(ModuleEnabledGuard("knowledge"))
   @HttpCode(200)
   async reviewSource(
     @Req() req: FastifyRequest,

@@ -42,7 +42,7 @@ export default async function CampaignDetailPage({ params }: { params: Promise<{
 
   return (
     <>
-      <PageHeader eyebrow="Campaign" title={campaign.name} />
+      <PageHeader eyebrow="Campaign" title={campaign.name} breadcrumbs={[{ label: "Agency", href: "/agency" }, { label: campaign.name }]} />
       <DescriptionList items={items} />
       <div style={{ marginTop: 28 }}>
         <Card title="Briefs">

@@ -132,4 +132,36 @@ export function registerDeliveryTools(): void {
       return JSON.stringify({ dispatched: true, repo: args.repo, ref: args.ref ?? "main", response: text.slice(0, 500) });
     },
   });
+
+  registerTool({
+    name: "deploy.production",
+    description:
+      "Trigger a PRODUCTION deploy of a repo/ref via the WS10 release pipeline. HIGH-impact: customer-facing + not trivially reversible. The workflow only reaches this after a human PM prod-approval AND the client's staging sign-off (WS11 tail B). Returns the dispatch response.",
+    minAssurance: "low",
+    write: true,
+    impact: "high", // production, customer-facing — gated on two human approvals upstream (plan §8 tail B)
+    inputSchema: {
+      type: "object",
+      properties: {
+        repo: { type: "string", description: "full owner/name of the repo to deploy" },
+        ref: { type: "string", description: "git ref/branch/sha (default main)" },
+        runId: { type: "string", description: "the pipeline run this deploy belongs to (for audit correlation)" },
+      },
+      required: ["repo"],
+    },
+    handler: async (args) => {
+      if (!config.deployProductionUrl) throw new Error("deploy.production not enabled: set DEPLOY_PRODUCTION_URL (the WS10 release-pipeline production dispatch webhook)");
+      const res = await fetch(config.deployProductionUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(config.deployProductionToken ? { Authorization: `Bearer ${config.deployProductionToken}` } : {}),
+        },
+        body: JSON.stringify({ repo: args.repo, ref: args.ref ?? "main", runId: args.runId, target: "production" }),
+      });
+      if (!res.ok) throw new Error(`deploy.production dispatch ${res.status}`);
+      const text = await res.text();
+      return JSON.stringify({ dispatched: true, repo: args.repo, ref: args.ref ?? "main", target: "production", response: text.slice(0, 500) });
+    },
+  });
 }

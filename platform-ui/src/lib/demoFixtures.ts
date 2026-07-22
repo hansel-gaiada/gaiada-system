@@ -6,6 +6,7 @@ import "server-only";
 // touching the network when demo mode is on.
 
 import { pmDemo, allTrackerNotifications } from "./demoPm";
+import { meetingsDemo } from "./demoMeetings";
 
 export interface DemoResult {
   status: number;
@@ -391,6 +392,10 @@ export function getDemoResponse(method: string, fullPath: string, body?: string)
   // PM surface + task comments — stateful in-memory store (lib/demoPm.ts).
   const pm = pmDemo(method, p, url.searchParams, body);
   if (pm) return pm;
+
+  // Meeting-recordings registry (WS11 capture edge) — stateful store (lib/demoMeetings.ts).
+  const meetings = meetingsDemo(method, p, url.searchParams, body);
+  if (meetings) return meetings;
 
   // /api/me reflects the (mutable) company set so newly-created companies appear.
   if (p === "/api/me") return ok({ ...ME, companies: COMPANIES.map((c) => ({ id: c.id, name: c.name, type: c.type })) });

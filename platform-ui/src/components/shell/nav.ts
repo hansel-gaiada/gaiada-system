@@ -25,6 +25,7 @@ export function navFor(me: Me, tenantId?: string | null): NavGroup[] {
     { label: "Timesheets", href: "/timesheets", icon: "clock" },
     ...(can(me, "company.manage", tenantId) ? [{ label: "Billing", href: "/billing", icon: "wallet" } as NavItem] : []),
     { label: "Agency", href: "/agency", icon: "sales" },
+    { label: "Meetings", href: "/meetings", icon: "clock" },
     { label: "Delivery Pipeline", href: "/pipeline", icon: "pulse" },
     ...(can(me, "rollups.view") ? [{ label: "Rollups", href: "/rollups", icon: "pulse" } as NavItem] : []),
   ];
@@ -38,6 +39,7 @@ export function navFor(me: Me, tenantId?: string | null): NavGroup[] {
     { label: "Organization", items: [
       { label: "Overview", href: "/organization", icon: "inventory" },
       { label: "Companies", href: "/companies", icon: "finance" },
+      { label: "Departments", href: "/departments", icon: "hr" },
     ] },
     { label: "Business", items: business },
     { label: "Intelligence", items: [

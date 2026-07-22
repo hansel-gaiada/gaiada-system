@@ -23,7 +23,7 @@ export default async function EditTaskPage({ params }: { params: Promise<{ taskI
 
   return (
     <>
-      <PageHeader eyebrow="Task" title={`Edit ${task.title}`} />
+      <PageHeader eyebrow="Task" title={`Edit ${task.title}`} breadcrumbs={[{ label: "Tasks", href: "/tasks" }, { label: task.title, href: `/tasks/${taskId}` }, { label: "Edit" }]} />
       <TaskForm action={updateTask.bind(null, taskId)} defs={defs} members={members} task={task} />
       <p style={{ marginTop: 16, font: "400 13px var(--font-body)", color: "rgba(26,25,22,.55)" }}>
         Saving requires the task-update backend endpoint (pending).

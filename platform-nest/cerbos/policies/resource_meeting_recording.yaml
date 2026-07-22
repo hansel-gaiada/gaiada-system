@@ -1,0 +1,23 @@
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: meeting_recording
+  importDerivedRoles: ["gaiada_scopes"]
+  variables:
+    import: ["gaiada_common"]
+  rules:
+    - actions: ["*"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["platform_admin"]
+    # Reading the recordings registry is member-level (the whole team references recordings).
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin", "manager", "member", "viewer", "team_lead"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    # Registering / advancing / ingesting / Drive-syncing a recording — "whoever did the meeting"
+    # (any staff member), mirroring deliverable create/update. ingest proxies the frozen contract;
+    # sync_drive triggers the non-blocking Shared-Drive upload.
+    - actions: ["create", "update", "ingest", "sync_drive"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin", "manager", "member", "team_lead"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }

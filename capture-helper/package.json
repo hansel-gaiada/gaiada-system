@@ -1,0 +1,17 @@
+{
+  "name": "gaiada-capture-helper",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "WS11 capture edge — desktop helper: record a client meeting locally, transcribe with local whisper, register + ingest into the Gaiada delivery pipeline, and upload the media to a (free personal) Google Drive folder. Node ESM, no build step (dodges Smart App Control); needs Node 20+ and ffmpeg on PATH.",
+  "bin": {
+    "gaiada-capture": "src/index.mjs"
+  },
+  "scripts": {
+    "start": "node src/index.mjs",
+    "devices": "node src/recorder.mjs --list-devices",
+    "drive-token": "node scripts/get-drive-token.mjs",
+    "check": "node --check src/index.mjs"
+  },
+  "engines": { "node": ">=20" }
+}

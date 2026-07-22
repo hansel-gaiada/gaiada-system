@@ -12,7 +12,9 @@ import { emitEvent } from "../events/outbox.service";
 import { AuthGuard } from "../auth/guards";
 
 // ---- Org-structure types + sanitizer (mirror platform-ui/src/lib/org.ts) ----
-const ORG_KINDS = new Set(["company", "department", "team", "role", "person"]);
+// Canonical depth: holding → company → department → division → role → person.
+// Legacy "team" nodes are migrated to "division" on read/write.
+const ORG_KINDS = new Set(["holding", "company", "department", "division", "role", "person"]);
 const MAX_NODES = 300;
 const MAX_DEPTH = 8;
 
@@ -36,7 +38,8 @@ function sanitizeStructure(input: unknown, fallbackName = "Company"): OrgStructu
   function node(raw: unknown, depth: number): OrgNode {
     const r = (raw ?? {}) as Record<string, unknown>;
     count += 1;
-    const kind = ORG_KINDS.has(r.kind as string) ? (r.kind as string) : "role";
+    const rawKind = r.kind === "team" ? "division" : (r.kind as string);
+    const kind = ORG_KINDS.has(rawKind) ? rawKind : "role";
     const rawChildren = Array.isArray(r.children) ? r.children : [];
     const children: OrgNode[] = [];
     if (depth < MAX_DEPTH) {

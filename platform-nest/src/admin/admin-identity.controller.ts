@@ -12,6 +12,7 @@ import { config } from "../config";
 import { authorize, writeActivity } from "../core/http";
 import { emitEvent } from "../events/outbox.service";
 import { AuthGuard } from "../auth/guards";
+import { adoptManagedGrantAsManual } from "./service-reconciler";
 
 const SCOPE_TYPES = new Set(["global", "company", "team", "project", "record"]);
 
@@ -140,7 +141,25 @@ export class AdminIdentityController {
       return id;
     });
 
+    // ORG-7b A14 membership-side hook (mirrors the assignRole hook below EXACTLY): if this invite
+    // lands on (re-activates, or simply hits) an EXISTING company_memberships row that is
+    // reconciler-managed (kind='service' AND managed_by IS NOT NULL), an admin explicitly
+    // inviting/onboarding this person as an employee is a manual act that must ADOPT the row —
+    // convert it to kind='employee'/managed_by=NULL and drop its service_grant_claims — so a
+    // later revoke of the OWNING service assignment cannot decrement this now-doubly-intended
+    // membership into deletion out from under the admin's explicit invite. Without this, inviting
+    // someone who already has a live service-provided membership (e.g. an HR-served staffer being
+    // hired directly by the target company) would silently leave their access hostage to a
+    // service assignment they no longer need.
+    let membershipToAdopt: string | null = null;
     await withTenants([tenantId], async (c) => {
+      const existing = await c.query<{ id: string; kind: string; managed_by: string | null }>(
+        `SELECT id, kind, managed_by FROM company_memberships WHERE tenant_id = $1 AND user_id = $2`,
+        [tenantId, userId],
+      );
+      if (existing.rows[0]?.kind === "service" && existing.rows[0]?.managed_by) {
+        membershipToAdopt = existing.rows[0].id;
+      }
       await c.query(
         `INSERT INTO company_memberships (id, tenant_id, user_id, origin_site) VALUES ($1, $2, $3, $4)
          ON CONFLICT (tenant_id, user_id) DO UPDATE SET status = 'active', deleted_at = NULL`,
@@ -148,6 +167,9 @@ export class AdminIdentityController {
       );
       await emitEvent(c, tenantId, "user", userId, "user.invited", { email, name });
     });
+    if (config.serviceAssignmentsEnabled && membershipToAdopt) {
+      await adoptManagedGrantAsManual(tenantId, { membershipId: membershipToAdopt });
+    }
 
     if (body?.roleId) {
       await withGlobal((c) =>
@@ -225,17 +247,30 @@ export class AdminIdentityController {
         [id, userId, roleId, scopeType, scopeId],
       ),
     );
-    const grantId =
-      inserted.rows[0]?.id ??
-      (
+    let grantId: string | undefined = inserted.rows[0]?.id;
+    if (!grantId) {
+      // The row already existed (ON CONFLICT DO NOTHING fired) — fetch it, and check whether it
+      // is reconciler-managed. A14: an admin explicitly (re-)granting a role that collides with a
+      // service-assignment-managed grant must ADOPT it as manual (clear managed_by + drop its
+      // claims) here, in-band with the grant — otherwise a later revoke of the OWNING assignment
+      // would decrement this now-doubly-intended row straight into deletion out from under the
+      // admin's explicit grant (A2's "no coalescing" cuts both ways: a manual act must also win).
+      // Reconciler-managed grants are always scope_type='company' with scope_id=<the served
+      // tenant> (service-reconciler.ts), so the adoption is only attempted on that shape.
+      const existing = (
         await withGlobal((c) =>
-          c.query<{ id: string }>(
-            `SELECT id FROM user_roles WHERE user_id = $1 AND role_id = $2 AND scope_type = $3
+          c.query<{ id: string; managed_by: string | null }>(
+            `SELECT id, managed_by FROM user_roles WHERE user_id = $1 AND role_id = $2 AND scope_type = $3
              AND scope_id IS NOT DISTINCT FROM $4`,
             [userId, roleId, scopeType, scopeId],
           ),
         )
-      ).rows[0]?.id;
+      ).rows[0];
+      grantId = existing?.id;
+      if (config.serviceAssignmentsEnabled && existing?.managed_by && scopeType === "company" && scopeId) {
+        await adoptManagedGrantAsManual(scopeId, { userRoleId: existing.id });
+      }
+    }
     await bumpSession(userId);
     await writeActivity(tenantId, req.principal.userId, "role.assigned", "user", userId, { roleId, scopeType, scopeId });
     return { grantId };

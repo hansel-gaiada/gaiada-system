@@ -22,7 +22,7 @@ describe("WS11 delivery tools", () => {
   });
 
   it("registers design/code + github/deploy tools", () => {
-    for (const n of ["design.prototype", "code.scaffold", "github.repoStatus", "github.createRepo", "deploy.staging"]) {
+    for (const n of ["design.prototype", "code.scaffold", "github.repoStatus", "github.createRepo", "deploy.staging", "deploy.production"]) {
       expect(getTool(n)).toBeDefined();
     }
   });
@@ -65,5 +65,15 @@ describe("WS11 delivery tools", () => {
     config.deployStagingUrl = "https://ci.example/dispatch";
     vi.stubGlobal("fetch", mockFetch(200, "queued", false));
     expect(JSON.parse(await t.handler({ repo: "gaiada/site", ref: "main", runId: "r1" }, principal))).toMatchObject({ dispatched: true, repo: "gaiada/site" });
+  });
+
+  it("deploy.production is HIGH impact, fails CLOSED when unconfigured, dispatches to the production target when set", async () => {
+    const t = getTool("deploy.production")!;
+    expect(t.write).toBe(true);
+    expect(t.impact).toBe("high");
+    await expect(t.handler({ repo: "gaiada/site" }, principal)).rejects.toThrow(/not enabled/);
+    config.deployProductionUrl = "https://ci.example/dispatch-prod";
+    vi.stubGlobal("fetch", mockFetch(200, "queued", false));
+    expect(JSON.parse(await t.handler({ repo: "gaiada/site", ref: "main", runId: "r1" }, principal))).toMatchObject({ dispatched: true, repo: "gaiada/site", target: "production" });
   });
 });

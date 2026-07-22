@@ -40,7 +40,7 @@ describe.skipIf(!TEST_URL)("core client-work", () => {
     registerCoreRollupProvider(clientWorkRollups);
     await syncMetricDefinitions();
 
-    co = await createCompany("Creative House");
+    co = await createCompany("Creative House", ["clients"]);
     manager = await createUser("mgr@cw.test");
     member = await createUser("mem@cw.test");
     member2 = await createUser("mem2@cw.test");

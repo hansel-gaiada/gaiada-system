@@ -13,6 +13,7 @@ import { config } from "../../config";
 import { authorize, writeActivity, notify } from "../../core/http";
 import { emitEvent } from "../../events/outbox.service";
 import { AuthGuard } from "../../auth/guards";
+import { ModuleEnabledGuard } from "../module-enabled.guard";
 
 type Assignee = {
   kind: "person" | "department" | "division";
@@ -69,7 +70,7 @@ async function projectExists(c: PoolClient, projectId: string): Promise<boolean>
 }
 
 @Controller("api")
-@UseGuards(AuthGuard)
+@UseGuards(AuthGuard, ModuleEnabledGuard("pm"))
 export class PmController {
   // ---------------- Projects ----------------
   @Get(":tenantId/pm/projects/:projectId")

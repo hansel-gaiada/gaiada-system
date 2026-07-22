@@ -24,7 +24,7 @@ export default async function TopologyPage() {
   if (!tenant) {
     return (
       <>
-        <PageHeader eyebrow="IT" title="Topology" subtitle="Site → Network → Device map." />
+        <PageHeader eyebrow="IT" title="Topology" subtitle="Site → Network → Device map." breadcrumbs={[{ label: "IT", href: "/it" }, { label: "Topology" }]} />
         <EmptyNote>Select a company from the top bar.</EmptyNote>
       </>
     );
@@ -40,6 +40,7 @@ export default async function TopologyPage() {
         eyebrow="IT"
         title="Topology"
         subtitle={`Site → Network → Device. ${health.total} devices · ${health.online} online · ${health.offline + health.degraded} needing attention.`}
+        breadcrumbs={[{ label: "IT", href: "/it" }, { label: "Topology" }]}
       />
 
       <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 16 }}>

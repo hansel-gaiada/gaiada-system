@@ -21,7 +21,7 @@ export default async function OrgPage({ params }: { params: Params }) {
   if (!company) {
     return (
       <>
-        <PageHeader eyebrow="Organization" title="Org structure" />
+        <PageHeader eyebrow="Organization" title="Org structure" breadcrumbs={[{ label: "Companies", href: "/companies" }, { label: "Org structure" }]} />
         <EmptyNote>That company isn&apos;t available to you.</EmptyNote>
       </>
     );
@@ -38,9 +38,10 @@ export default async function OrgPage({ params }: { params: Params }) {
       <PageHeader
         eyebrow="Organization"
         title={`${company.name} — Org structure`}
+        breadcrumbs={[{ label: "Companies", href: "/companies" }, { label: company.name, href: `/companies/${companyId}` }, { label: "Org structure" }]}
         subtitle={
           canEdit
-            ? "Drag a unit onto another to re-parent it. Add, rename, assign people, then save. The right pane previews the live chart."
+            ? "Edit right on the chart: click a unit to rename/assign, drag it onto another to re-parent, or ＋ to add below. The detailed list editor is underneath. Save when done."
             : "The organization chart for this company. Editing is limited to owners and administrators."
         }
       />

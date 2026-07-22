@@ -43,7 +43,7 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ tas
     if (!base) notFound();
     return (
       <>
-        <PageHeader eyebrow="Task" title={base.title} />
+        <PageHeader eyebrow="Task" title={base.title} breadcrumbs={[{ label: "Projects", href: "/projects" }, ...(base.project_name ? [{ label: base.project_name, href: `/projects/${base.project_id}` }] : []), { label: base.title }]} />
         <DescriptionList items={[
           { label: "Project", value: <Link href={`/projects/${base.project_id}`}>{base.project_name}</Link> },
           { label: "Status", value: <StatusBadge label={base.status ?? "—"} /> },
@@ -90,6 +90,7 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ tas
         eyebrow="Task"
         title={task.title}
         subtitle={task.projectName}
+        breadcrumbs={[{ label: "Projects", href: "/projects" }, { label: task.projectName, href: `/projects/${task.projectId}` }, { label: task.title }]}
         actions={
           <>
             <Link href={`/tasks/${task.id}/edit`} className="lux-btn lux-btn--ghost lux-btn--sm">Edit</Link>

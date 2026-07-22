@@ -11,8 +11,9 @@
 import type { Me } from "./platform";
 
 export type Role =
-  | "platform_admin"   // superadmin — everything, everywhere
-  | "group_executive"  // owner — everything across the group's companies
+  | "platform_admin"   // superadmin — everything, everywhere (unrestricted)
+  | "group_executive"  // owner — everything across the group's companies (unrestricted)
+  | "holding_head"     // head-of-department at the holding — may VIEW every company, not unrestricted
   | "company_admin"    // admin within a company
   | "manager"          // runs work within a company
   | "member"           // baseline access
@@ -37,6 +38,8 @@ const ALL: Capability[] = [
 export const ROLE_CAPS: Record<Role, Capability[]> = {
   platform_admin: ALL,
   group_executive: ALL,
+  // View-across-the-holding, but not unrestricted: cross-company read surfaces only.
+  holding_head: ["people.directory", "rollups.view"],
   company_admin: ["admin.access", "company.manage", "org.edit", "people.directory", "pm.manage", "it.manage", "approvals.decide", "knowledge.review"],
   manager: ["pm.manage", "approvals.decide", "people.directory"],
   member: [],
@@ -74,6 +77,17 @@ export function isElevated(me: Me): boolean {
   return me.roles.some((r) => ELEVATED.has(r.role as Role) && r.scopeType === "global");
 }
 
+// Access tiers requested by the org:
+// • UNRESTRICTED — owner (group_executive) + superadmin (platform_admin): may do anything, anywhere.
+// • VIEW-ALL — the above PLUS a holding head-of-department: may SEE every company under the holding
+//   (read/oversight), but is NOT unrestricted. Everything a view-all user sees is "special access".
+export function isUnrestricted(me: Me): boolean {
+  return isElevated(me);
+}
+export function canViewAllCompanies(me: Me): boolean {
+  return isUnrestricted(me) || me.roles.some((r) => r.role === "holding_head" && (r.scopeType === "global" || r.scopeType === "company"));
+}
+
 // WS11: an external client (client-portal user). Gated by a `client` grant; drives portal-only nav.
 // The real boundary is the portal BFF (client role + run ownership); this is nav/visibility.
 export function isClient(me: Me): boolean {
@@ -91,7 +105,9 @@ export function canManageIT(me: Me, companyId?: string | null): boolean {
 // companies the user can access in `me.companies`; a global (elevated) role can
 // reach all of them, a company-scoped user reaches the ones they're granted in.
 export function accessibleCompanies(me: Me): { id: string; name: string; type: string | null }[] {
-  if (isElevated(me)) return me.companies;
+  // Unrestricted (owner/superadmin) AND view-all (holding head-of-department)
+  // reach every company under the holding — the switcher lists them all.
+  if (canViewAllCompanies(me)) return me.companies;
   const scoped = new Set(
     me.roles.filter((g) => g.scopeType === "company" && g.scopeId).map((g) => g.scopeId as string),
   );

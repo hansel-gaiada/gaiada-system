@@ -3,7 +3,6 @@ import type { Me } from "@/lib/platform";
 import { listNotifications } from "@/lib/entities";
 import { Icon } from "./icons";
 import { Eyebrow } from "@/components/ui";
-import { CompanyContext } from "./CompanyContext";
 import { NewMenu } from "./NewMenu";
 import { can } from "@/lib/rbac";
 
@@ -29,8 +28,6 @@ export async function TopBar({ me, tenantId, moduleLabel }: { me: Me; tenantId: 
   return (
     <header className="erp-top">
       <div className="erp-top__meta">
-        <CompanyContext me={me} tenantId={tenantId} />
-        <span className="erp-top__divider" />
         <Eyebrow style={{ color: "var(--erp-accent)" }}>{moduleLabel}</Eyebrow>
         <span className="erp-top__divider" />
         <span className="erp-top__date">{dateLine}</span>

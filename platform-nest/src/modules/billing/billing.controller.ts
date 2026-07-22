@@ -1,13 +1,15 @@
 // Billing / invoicing (BFF §4) — backs platform-ui lib/billing.ts. An invoice is generated for
 // a client over a period at an hourly rate; line items are computed at creation from billable
 // time_entries on that client's projects and frozen onto the invoice. Finance = company.manage.
+// WSA-2: moved from src/core to the billing MODULE; gated by ModuleEnabledGuard("billing").
 import { BadRequestException, Body, Controller, Get, HttpCode, NotFoundException, Param, Patch, Post, Req, UseGuards } from "@nestjs/common";
 import type { FastifyRequest } from "fastify";
-import { newId, withTenants } from "../db";
-import { config } from "../config";
-import { authorize, writeActivity } from "./http";
-import { emitEvent } from "../events/outbox.service";
-import { AuthGuard } from "../auth/guards";
+import { newId, withTenants } from "../../db";
+import { config } from "../../config";
+import { authorize, writeActivity } from "../../core/http";
+import { emitEvent } from "../../events/outbox.service";
+import { AuthGuard } from "../../auth/guards";
+import { ModuleEnabledGuard } from "../module-enabled.guard";
 
 const STATUSES = new Set(["draft", "sent", "paid", "void"]);
 
@@ -19,7 +21,7 @@ const INVOICE_SELECT = `
   WHERE i.deleted_at IS NULL`;
 
 @Controller("api")
-@UseGuards(AuthGuard)
+@UseGuards(AuthGuard, ModuleEnabledGuard("billing"))
 export class BillingController {
   @Get(":tenantId/invoices")
   async list(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string) {

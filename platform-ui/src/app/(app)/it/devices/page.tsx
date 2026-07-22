@@ -32,7 +32,7 @@ export default async function DevicesPage({ searchParams }: { searchParams: Sear
   if (!tenant) {
     return (
       <>
-        <PageHeader eyebrow="IT" title="Devices" subtitle="Registered devices across the estate." />
+        <PageHeader eyebrow="IT" title="Devices" subtitle="Registered devices across the estate." breadcrumbs={[{ label: "IT", href: "/it" }, { label: "Devices" }]} />
         <EmptyNote>Select a company from the top bar.</EmptyNote>
       </>
     );
@@ -64,6 +64,7 @@ export default async function DevicesPage({ searchParams }: { searchParams: Sear
         eyebrow="IT"
         title="Devices"
         subtitle="Registered devices — CCTV, printers, servers, network gear and connected endpoints."
+        breadcrumbs={[{ label: "IT", href: "/it" }, { label: "Devices" }]}
         actions={canManage ? <DeviceForm register={registerDevice} /> : undefined}
       />
 

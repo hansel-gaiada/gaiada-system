@@ -58,4 +58,9 @@ export const config = {
   githubOrg: process.env.GITHUB_ORG ?? "",
   deployStagingUrl: process.env.DEPLOY_STAGING_URL ?? "",
   deployStagingToken: process.env.DEPLOY_STAGING_TOKEN ?? "",
+  // Production deploy (WS11 tail B): a SEPARATE dispatch webhook from staging — production is
+  // customer-facing + not trivially reversible, so it is HIGH-impact and gated on a human PM
+  // prod-approval AND the client's staging sign-off before the workflow ever calls it.
+  deployProductionUrl: process.env.DEPLOY_PRODUCTION_URL ?? "",
+  deployProductionToken: process.env.DEPLOY_PRODUCTION_TOKEN ?? "",
 };

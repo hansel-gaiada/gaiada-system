@@ -6,6 +6,7 @@ import { listPortalRuns, getPortalRun } from "@/lib/portal";
 import { portalDecideGate, portalScopeSign } from "@/lib/portalActions";
 import { Card, Eyebrow, StatusBadge } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
 
 // WS11 client portal — a distinct client-facing DASHBOARD (same app, client-role-gated, its own login
 // realm in prod). Shows the client's projects, a plain-language "current blockage" banner, and their
@@ -24,6 +25,7 @@ export default async function PortalPage() {
   return (
     <>
       <div style={{ marginBottom: 26 }}>
+        <Breadcrumbs items={[{ label: "Home", href: "/" }, { label: "Project Portal" }]} />
         <Eyebrow style={{ color: "var(--erp-accent)", marginBottom: 8, display: "block" }}>Your projects</Eyebrow>
         <h1 style={{ margin: 0, fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 34, lineHeight: 1.1 }}>Project Portal</h1>
         <p style={{ margin: "9px 0 0", font: "400 15px/1.5 var(--font-body)", color: "rgba(26,25,22,.62)", maxWidth: 620 }}>

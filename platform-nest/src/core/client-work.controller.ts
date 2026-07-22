@@ -1,91 +1,19 @@
-// Core client-work routes (Nest port of core/client-work.ts): clients, deliverables,
-// time_entries. authorize() → RLS query → activity; time-entry owned by the logger.
-import { BadRequestException, Body, Controller, Delete, Get, HttpCode, NotFoundException, Param, Patch, Post, Query, Req, UseGuards } from "@nestjs/common";
+// Core client-work routes: deliverables + time_entries. These are the SHARED work substrate
+// that every vertical (PM, agency, billing) reads/writes, so they remain CORE and are NOT
+// module-gated. The `clients` CRM resource was moved to the clients MODULE (WSA-2 —
+// src/modules/clients/clients.controller.ts, ModuleEnabledGuard("clients")).
+// authorize() → RLS query → activity; time-entry owned by the logger.
+import { BadRequestException, Body, Controller, Get, HttpCode, NotFoundException, Param, Patch, Post, Query, Req, UseGuards } from "@nestjs/common";
 import type { FastifyRequest } from "fastify";
 import { newId, withTenants } from "../db";
 import { config } from "../config";
 import { authorize, writeActivity } from "./http";
 import { validateCustomFields } from "./custom-fields";
-import { emitEvent } from "../events/outbox.service";
 import { AuthGuard } from "../auth/guards";
 
 @Controller("api")
 @UseGuards(AuthGuard)
 export class ClientWorkController {
-  // ---- Clients ----
-  @Get(":tenantId/clients")
-  async listClients(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string) {
-    await authorize(req.principal, { kind: "client", tenantId }, "read");
-    const rows = await withTenants([tenantId], (c) =>
-      c.query(`SELECT id, name, contact, status, custom_fields FROM clients WHERE deleted_at IS NULL ORDER BY created_at DESC`),
-    );
-    return rows.rows;
-  }
-
-  @Get(":tenantId/clients/:clientId")
-  async getClient(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("clientId") clientId: string) {
-    await authorize(req.principal, { kind: "client", id: clientId, tenantId }, "read");
-    const rows = await withTenants([tenantId], (c) =>
-      c.query(`SELECT id, name, contact, status, custom_fields FROM clients WHERE id = $1 AND deleted_at IS NULL`, [clientId]),
-    );
-    if (!rows.rows[0]) throw new NotFoundException("client not found");
-    return rows.rows[0];
-  }
-
-  @Post(":tenantId/clients")
-  @HttpCode(201)
-  async createClient(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Body() body: { name?: string; contact?: Record<string, unknown>; customFields?: Record<string, unknown> }) {
-    const { name, contact = {}, customFields = {} } = body ?? {};
-    if (!name) throw new BadRequestException("name required");
-    await authorize(req.principal, { kind: "client", tenantId }, "create");
-    const id = newId();
-    await withTenants([tenantId], async (c) => {
-      const cfError = await validateCustomFields(c, tenantId, "client", customFields);
-      if (cfError) throw new BadRequestException(cfError);
-      await c.query(
-        `INSERT INTO clients (id, tenant_id, name, contact, custom_fields, origin_site) VALUES ($1, $2, $3, $4, $5, $6)`,
-        [id, tenantId, name, JSON.stringify(contact), JSON.stringify(customFields), config.originSite],
-      );
-      // Transactional outbox (same tx as the insert): powers the event→n8n bridge / consumers.
-      await emitEvent(c, tenantId, "client", id, "client.created", { name });
-    });
-    await writeActivity(tenantId, req.principal.userId, "created", "client", id, { name });
-    return { id };
-  }
-
-  @Patch(":tenantId/clients/:clientId")
-  async updateClient(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("clientId") clientId: string, @Body() b: { name?: string; contact?: Record<string, unknown>; status?: string; customFields?: Record<string, unknown> }) {
-    await authorize(req.principal, { kind: "client", id: clientId, tenantId }, "update");
-    await withTenants([tenantId], async (c) => {
-      if (b.customFields) {
-        const cfError = await validateCustomFields(c, tenantId, "client", b.customFields);
-        if (cfError) throw new BadRequestException(cfError);
-      }
-      const res = await c.query(
-        `UPDATE clients SET name = COALESCE($2, name), contact = COALESCE($3, contact), status = COALESCE($4, status),
-           custom_fields = COALESCE($5, custom_fields), updated_at = now()
-         WHERE id = $1 AND deleted_at IS NULL`,
-        [clientId, b.name ?? null, b.contact ? JSON.stringify(b.contact) : null, b.status ?? null, b.customFields ? JSON.stringify(b.customFields) : null],
-      );
-      if (res.rowCount === 0) throw new NotFoundException("client not found");
-    });
-    await writeActivity(tenantId, req.principal.userId, "updated", "client", clientId);
-    return { id: clientId };
-  }
-
-  @Delete(":tenantId/clients/:clientId")
-  @HttpCode(200)
-  async deleteClient(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("clientId") clientId: string) {
-    await authorize(req.principal, { kind: "client", id: clientId, tenantId }, "delete");
-    await withTenants([tenantId], async (c) => {
-      const res = await c.query(`UPDATE clients SET deleted_at = now() WHERE id = $1 AND deleted_at IS NULL`, [clientId]);
-      if (res.rowCount === 0) throw new NotFoundException("client not found");
-      await emitEvent(c, tenantId, "client", clientId, "client.deleted", {});
-    });
-    await writeActivity(tenantId, req.principal.userId, "deleted", "client", clientId);
-    return { ok: true };
-  }
-
   // ---- Deliverables ----
   @Get(":tenantId/deliverables")
   async listDeliverables(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Query("projectId") projectId?: string, @Query("clientId") clientId?: string) {

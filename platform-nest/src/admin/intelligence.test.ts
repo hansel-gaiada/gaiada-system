@@ -23,7 +23,7 @@ describe.skipIf(!TEST_URL)("knowledge review proxy (§7)", () => {
   beforeAll(async () => {
     await initTestDb();
     config.serviceToken = "svc-token";
-    tenant = await createCompany("Agency A", ["agency"]);
+    tenant = await createCompany("Agency A", ["agency", "knowledge"]);
     admin = await createUser("admin@a.test");
     member = await createUser("mem@a.test");
     await addMembership(tenant, admin);

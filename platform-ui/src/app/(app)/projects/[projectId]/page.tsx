@@ -71,6 +71,7 @@ export default async function ProjectWorkspace({ params, searchParams }: { param
       <PageHeader
         eyebrow="Project"
         title={name}
+        breadcrumbs={[{ label: "Projects", href: "/projects" }, { label: name }]}
         actions={
           <>
             <Link href={`/projects/${projectId}/edit`} className="lux-btn lux-btn--ghost lux-btn--sm">Edit</Link>

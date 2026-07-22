@@ -26,7 +26,7 @@ export default async function NewTaskPage({
     const projects = await listProjects(userId, tenant);
     return (
       <>
-        <PageHeader eyebrow="Task" title="New task" subtitle="Choose the project this task belongs to." />
+        <PageHeader eyebrow="Task" title="New task" subtitle="Choose the project this task belongs to." breadcrumbs={[{ label: "Tasks", href: "/tasks" }, { label: "New task" }]} />
         <Card>
           {projects.length === 0 ? (
             <div className="dash-empty">
@@ -52,7 +52,7 @@ export default async function NewTaskPage({
 
   return (
     <>
-      <PageHeader eyebrow="Task" title="New task" />
+      <PageHeader eyebrow="Task" title="New task" breadcrumbs={[{ label: "Tasks", href: "/tasks" }, { label: "New task" }]} />
       <TaskForm action={createTaskInProject.bind(null, projectId)} defs={defs} members={[]} />
     </>
   );

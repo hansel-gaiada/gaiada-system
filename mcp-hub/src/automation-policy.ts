@@ -31,7 +31,7 @@ export const AUTOMATION_ALLOWLIST: Record<string, readonly string[]> = {
   // WS11 meeting-to-delivery pipeline. n8n opens gates + advances stages (all LOW writes) and
   // extracts artifacts; it NEVER decides a gate or records a signature (those are human/UI actions).
   "wf:mtg-dispatcher": ["media.transcribe", "llm.summarize", "llm.extract", "pipeline.createRun", "pipeline.updateStage", "notify"],
-  "wf:delivery": ["pipeline.getRun", "pipeline.createStage", "pipeline.updateStage", "pipeline.openGate", "design.prototype", "code.scaffold", "github.repoStatus", "deploy.staging", "notify", "approvals.request"],
+  "wf:delivery": ["pipeline.getRun", "pipeline.createStage", "pipeline.updateStage", "pipeline.openGate", "design.prototype", "code.scaffold", "github.repoStatus", "deploy.staging", "deploy.production", "notify", "approvals.request"],
   "wf:scope": ["pipeline.getRun", "pipeline.openGate", "notify"],
   "wf:report": ["pipeline.getRun", "pipeline.updateStage", "notify"],
 };

@@ -28,7 +28,7 @@ export default async function EditProjectPage({ params }: { params: Promise<{ pr
 
   return (
     <>
-      <PageHeader eyebrow="Project" title={`Edit ${project.name}`} />
+      <PageHeader eyebrow="Project" title={`Edit ${project.name}`} breadcrumbs={[{ label: "Projects", href: "/projects" }, { label: project.name, href: `/projects/${projectId}` }, { label: "Edit" }]} />
       <ProjectForm action={updateProject.bind(null, projectId)} defs={defs} members={members} project={project} />
     </>
   );
