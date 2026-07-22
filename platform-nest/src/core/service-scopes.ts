@@ -11,6 +11,18 @@
 // global, no RLS needed), then re-derive the actual live scopes from service_grant_claims joined to
 // service_assignments.status='active' — the exact artifacts service-reconciler.ts itself treats as
 // authoritative — under RLS scoped to those candidate targets.
+//
+// Hardening (architect gate, pre-flip): the candidate set above is sized from user_roles alone —
+// a marker that is stamped once and never updated (see above), so a grant can go stale (its
+// backing company_memberships row torn down or suspended by some path other than the
+// reconciler's own clear-managed_by-on-full-suspend sequence) while managed_by stays NOT NULL.
+// Passing that raw candidate set to withTenants() would widen the RLS tenant GUC to include
+// that stale company for the lifetime of the call, BEFORE the sa.status='active' SQL filter
+// below ever runs -- the widening is in what the GUC permits the connection to see, not just in
+// what this query happens to return. Fix: INTERSECT the candidates with `liveCompanyIds` (the
+// caller's live company_memberships, i.e. principal.companies -- assembled independently in
+// rbac/principal.ts) before it is ever used to size the GUC. The resulting targetIds is
+// therefore always a subset of the caller's own already-authorized tenant set.
 import { withGlobal, withTenants } from "../db";
 import { config } from "../config";
 
@@ -23,7 +35,7 @@ export interface ServiceScope {
   role: "staff" | "manager";
 }
 
-export async function getServiceScopes(userId: string | null): Promise<ServiceScope[]> {
+export async function getServiceScopes(userId: string | null, liveCompanyIds: string[]): Promise<ServiceScope[]> {
   if (!config.serviceAssignmentsEnabled || !userId) return [];
 
   const candidates = await withGlobal((c) =>
@@ -33,7 +45,11 @@ export async function getServiceScopes(userId: string | null): Promise<ServiceSc
       [userId],
     ),
   );
-  const targetIds = candidates.rows.map((r) => r.scope_id);
+  // Intersect with the caller's live company memberships (principal.companies) — see the file
+  // header. A stale managed_by grant whose backing membership is gone can no longer widen the
+  // GUC below beyond what the caller is already independently authorized into.
+  const liveSet = new Set(liveCompanyIds);
+  const targetIds = candidates.rows.map((r) => r.scope_id).filter((id) => liveSet.has(id));
   if (!targetIds.length) return [];
 
   // Re-verify under RLS scoped to exactly the candidate targets (sa_select's dual-side policy

@@ -11,7 +11,7 @@ import type { NestFastifyApplication } from "@nestjs/platform-fastify";
 import { config } from "../config";
 import { withGlobal, withTenants, newId } from "../db";
 import { buildApp } from "../main";
-import { initTestDb, teardownTestDb, TEST_URL } from "../testing/setup";
+import { initTestDb, teardownTestDb, adminPool, TEST_URL } from "../testing/setup";
 import { createCompany, createUser, addMembership, createRole, grantRole } from "../testing/fixtures";
 import { registerModule, resetModules } from "../modules/registry";
 import { reconcileAssignment } from "./service-reconciler";
@@ -265,6 +265,59 @@ describe.skipIf(!TEST_URL)("ORG-7b — membership A14 fix + read surface", () =>
       expect(bScope.role).toBe("staff");
     });
 
+    it("a stale managed_by grant with no live membership does NOT widen serviceScopes past principal.companies (architect gate hardening)", async () => {
+      const staffer = await createUser("org7b-scopes-stale@x.test");
+      await addMembership(A, staffer);
+      const X = await createCompany("ORG7b Scopes Stale Target", [], A);
+      await app.inject({
+        method: "PUT",
+        url: `/api/${A}/org-structure`,
+        headers: asUser(providerAdmin),
+        payload: {
+          root: {
+            id: "root", name: "P", kind: "company",
+            children: [{ id: "d-hr", name: "HR", kind: "department", children: [
+              { id: "p1", name: "SC", kind: "person", assigneeId: staffer },
+            ] }],
+          },
+        },
+      });
+      const created = await app.inject({
+        method: "POST",
+        url: `/api/${A}/org-structure/units/d-hr/assignments`,
+        headers: asUser(globalExec),
+        payload: { targets: [X], module: "org7b_hr4" },
+      });
+      const assignmentId = (created.json() as { assignments: Array<{ id: string }> }).assignments[0].id;
+      await reconcileAssignment(assignmentId, A);
+
+      // Sanity: freshly reconciled, X shows up like any other served company.
+      const before = await app.inject({ method: "GET", url: "/api/me", headers: asUser(staffer) });
+      const beforeIds = (before.json() as { serviceScopes: Array<{ companyId: string }> }).serviceScopes.map(
+        (s) => s.companyId,
+      );
+      expect(beforeIds).toContain(X);
+
+      // Simulate drift: something OTHER than the reconciler's own suspend/clear sequence tears
+      // down the materialized company_memberships row at X, while user_roles.managed_by (the
+      // candidate-sizing marker) and the backing service_grant_claims/service_assignments row
+      // are left untouched. This is the exact "stale grant, no live membership" scenario the
+      // architect flagged: the un-intersected candidate set would still contain X, and the
+      // inner authoritative query (service_grant_claims + service_assignments.status='active')
+      // doesn't reference company_memberships at all, so pre-fix this would still surface X.
+      await adminPool().query(
+        `UPDATE company_memberships SET status = 'inactive', deleted_at = now(), updated_at = now()
+         WHERE tenant_id = $1 AND user_id = $2`,
+        [X, staffer],
+      );
+
+      const after = await app.inject({ method: "GET", url: "/api/me", headers: asUser(staffer) });
+      expect(after.statusCode).toBe(200);
+      const afterBody = after.json() as { serviceScopes: Array<{ companyId: string }>; companies: Array<{ id: string }> };
+      expect(afterBody.companies.map((c) => c.id)).not.toContain(X); // principal.companies is live too
+      expect(afterBody.serviceScopes.map((s) => s.companyId)).not.toContain(X); // the fix under test
+    });
+
     it("a user with no service grants gets an empty serviceScopes", async () => {
       const plain = await createUser("org7b-scopes-none@x.test");
       await addMembership(A, plain);
@@ -498,7 +551,7 @@ describe.skipIf(!TEST_URL)("ORG-7b — membership A14 fix + read surface", () =>
       });
       expect(dry.statusCode).toBe(201);
       const body = dry.json() as { companies: Array<{ id: string; included: boolean; reason?: string }> };
-      expect(body.companies).toEqual([{ id: unrelated, name: expect.any(String), included: false, reason: "no_access" }]);
+      expect(body.companies).toEqual([{ id: unrelated, included: false, reason: "no_access" }]);
     });
 
     it("dry-run 409s when the flag is off", async () => {

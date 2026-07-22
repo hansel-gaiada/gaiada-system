@@ -66,14 +66,20 @@ const ALLOWLIST = [
     line: 310,
     reason:
       "D12 cross-company rollups read: Cerbos-gated to platform_admin/group_executive only " +
-      "(resource_rollup.yaml); tenant array is the platform's own companies table, not client input.",
+      "(resource_rollup.yaml); tenant array is the platform's own companies table, not client input. " +
+      "Must stay READ-ONLY: this is GET /rollups only. The mutating counterpart -- POST " +
+      "/:tenantId/rollups/recompute -- is per-tenant (single :tenantId route param, one company's " +
+      "rollup_metrics written per call) and does not and must not adopt this multi-tenant array.",
   },
   {
     file: "src/core/service-scopes.ts",
-    line: 42,
+    line: 58,
     reason:
-      "GET /me serviceScopes: tenant array is the CALLER's own held user_roles.scope_id set " +
-      "(self-derived — cannot contain a tenant the caller doesn't already hold a role in).",
+      "GET /me serviceScopes: tenant array starts as the CALLER's own held user_roles.scope_id " +
+      "set, then is explicitly INTERSECTED with principal.companies (the caller's live company " +
+      "memberships) before this call — see the file header's 'Hardening' note. So the array " +
+      "passed here is provably a SUBSET of the caller's already-authorized tenant set, closing " +
+      "the stale-managed_by-grant GUC-widening gap an architect gate flagged pre-flip.",
   },
   {
     file: "src/events/relay.ts",

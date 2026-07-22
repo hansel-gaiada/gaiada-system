@@ -48,7 +48,7 @@ export class CoreController {
       : { rows: [] };
     // ORG-7b: serviceScopes is ADDITIVE to the Me shape — existing consumers that don't read it
     // are unaffected; [] whenever the release-train flag is off (default) or there is none.
-    const serviceScopes = await getServiceScopes(req.principal.userId);
+    const serviceScopes = await getServiceScopes(req.principal.userId, req.principal.companies);
     return {
       userId: req.principal.userId,
       assurance: req.principal.assurance,

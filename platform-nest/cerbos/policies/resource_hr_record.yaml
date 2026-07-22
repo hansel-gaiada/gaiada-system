@@ -2,6 +2,11 @@
 # than hr_case: per design §1 Scope, subject self-read of records is OUT in v1 (no `member` rule
 # here — deliberately). Same served-company slicing as hr_case (design §2.2). Nothing here trusts
 # client-supplied scope; tenantId is the URL/served tenant, matched against the materialized grant.
+#
+# group_executive is intentionally DENIED here (no rule below grants it, unlike resource_hr_case.yaml
+# which does) — hr_record holds raw per-subject rows (contracts/documents/notes), and those stay
+# sensitive even to the holding-level executive. group_executive's cross-company visibility is
+# served exclusively through rollups (D12 aggregates), never raw hr_record reads.
 apiVersion: api.cerbos.dev/v1
 resourcePolicy:
   version: default
