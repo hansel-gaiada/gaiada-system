@@ -1,0 +1,31 @@
+/* Scope pill + inclusion-envelope banner (UX-2 §4). Design rules match the
+   rest of the ERP shell: radius 0, hairlines, no shadow, opacity/tint hovers. */
+
+.scope-pill { position: relative; display: inline-block; }
+.scope-pill__static { font-size: 12px; }
+.scope-pill__summary {
+  display: flex; align-items: center; gap: 8px; cursor: pointer; list-style: none;
+  border: 0.5px solid var(--erp-hairline); padding: 6px 10px; background: var(--surface-card);
+  user-select: none;
+}
+.scope-pill__summary::-webkit-details-marker { display: none; }
+.scope-pill__eyebrow {
+  font: 700 9px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--erp-ink-50);
+}
+.scope-pill__value { font: 400 13px var(--font-body); color: var(--text-primary); }
+.scope-pill__menu {
+  position: absolute; top: calc(100% + 4px); left: 0; z-index: 10; min-width: 220px;
+  border: 0.5px solid var(--erp-hairline); background: var(--surface-card); max-height: 320px; overflow: auto;
+}
+.scope-pill__item {
+  display: block; padding: 8px 12px; font: 400 13px var(--font-body); color: var(--text-primary);
+  text-decoration: none; border-bottom: 0.5px solid var(--erp-hairline-soft);
+}
+.scope-pill__item:hover { background: rgba(110, 90, 67, 0.06); }
+.scope-pill__item--active { color: var(--erp-accent); font-weight: 700; }
+
+.scope-envelope { margin: 0 0 16px; }
+.scope-envelope__why { display: inline; }
+.scope-envelope__why summary { display: inline; cursor: pointer; color: var(--erp-accent); font-weight: 700; list-style: none; }
+.scope-envelope__why summary::-webkit-details-marker { display: none; }
+.scope-envelope__list { margin: 6px 0 0; padding-left: 18px; font: 400 12px var(--font-body); color: var(--erp-ink-60); }

@@ -1,5 +1,6 @@
 import type { Me } from "@/lib/platform";
 import { accessibleCompanies, canSwitchCompany } from "@/lib/rbac";
+import { servedCompanyBadge } from "@/lib/serviceAssignments";
 import { Eyebrow } from "@/components/ui";
 import { TenantSwitcher } from "./TenantSwitcher";
 
@@ -7,18 +8,31 @@ import { TenantSwitcher } from "./TenantSwitcher";
 // company, so this is shown prominently. Users who can reach more than one
 // company (elevated / multi-company grants) get a switcher; everyone else sees
 // a static label of the single company they're in.
+//
+// ORG-13: companies reached via a reconciler-materialized service assignment
+// (Me.serviceScopes) rather than plain membership get a "· via {MODULE}"
+// badge, so a shared-service staffer can tell at a glance which entries in
+// the switcher are "their own company" vs. "a company they serve". `[]`
+// whenever SERVICE_ASSIGNMENTS_ENABLED is off — badges simply don't appear.
 export function CompanyContext({ me, tenantId }: { me: Me; tenantId: string | null }) {
   const companies = accessibleCompanies(me);
   if (companies.length === 0) return null;
   const current = companies.find((c) => c.id === tenantId) ?? companies[0];
+  const currentBadge = servedCompanyBadge(me, current.id);
 
   return (
     <div className="erp-company">
       <Eyebrow style={{ fontSize: 9, opacity: 0.5 }}>Company</Eyebrow>
       {canSwitchCompany(me) ? (
-        <TenantSwitcher companies={companies} current={current.id} />
+        <TenantSwitcher
+          companies={companies.map((c) => ({ id: c.id, name: c.name, badge: servedCompanyBadge(me, c.id) }))}
+          current={current.id}
+        />
       ) : (
-        <span className="erp-company__name">{current.name}</span>
+        <span className="erp-company__name">
+          {current.name}
+          {currentBadge && <span className="erp-company__served-badge">· {currentBadge}</span>}
+        </span>
       )}
     </div>
   );

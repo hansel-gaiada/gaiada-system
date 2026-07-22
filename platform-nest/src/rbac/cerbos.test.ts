@@ -93,4 +93,32 @@ describe.skipIf(!live)("Cerbos policy parity (role × scope matrix)", () => {
     expect((await planResources(admin, "project", "read")).kind).toBe("always-allowed");
     expect((await planResources(principal([]), "project", "read")).kind).toBe("always-denied");
   });
+
+  // P1-04: work_activity — read is member-level; ingest ("create") is admin/service only.
+  it("work_activity: any member reads, but cannot ingest", async () => {
+    const p = principal([{ role: "member", scopeType: "company", scopeId: T1 }]);
+    expect(await allow(p, { kind: "work_activity", tenantId: T1 }, "read")).toBe(true);
+    expect(await allow(p, { kind: "work_activity", tenantId: T1 }, "create")).toBe(false);
+  });
+
+  it("work_activity: company_admin can ingest within its tenant, not a rival tenant", async () => {
+    const p = principal([{ role: "company_admin", scopeType: "company", scopeId: T1 }]);
+    expect(await allow(p, { kind: "work_activity", tenantId: T1 }, "create")).toBe(true);
+    expect(await allow(p, { kind: "work_activity", tenantId: T2 }, "create")).toBe(false);
+  });
+
+  it("work_activity: platform_admin (global) can ingest anywhere", async () => {
+    const p = principal([{ role: "platform_admin", scopeType: "global", scopeId: null }], []);
+    expect(await allow(p, { kind: "work_activity", tenantId: T2 }, "create")).toBe(true);
+  });
+
+  it("work_activity: a manager (non-admin) cannot ingest", async () => {
+    const p = principal([{ role: "manager", scopeType: "company", scopeId: T1 }]);
+    expect(await allow(p, { kind: "work_activity", tenantId: T1 }, "create")).toBe(false);
+  });
+
+  it("work_activity: low-assurance gets no read (D4 ceiling)", async () => {
+    const p = principal([{ role: "member", scopeType: "company", scopeId: T1 }], [T1], "low");
+    expect(await allow(p, { kind: "work_activity", tenantId: T1 }, "read")).toBe(false);
+  });
 });

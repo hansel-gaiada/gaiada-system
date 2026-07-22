@@ -1,7 +1,199 @@
-/* Department console — launcher grid. Tab styles now live in shell.css
-   (.sec-tabs), shared by every console-style section. */
+/* Department console — design system extension for the command-center redesign
+   (P1-02, docs/superpowers/specs/2026-07-22-dept-console-design.md). Tab styles
+   live in shell.css (.sec-tabs); this file owns everything inside a console
+   body: the 2-col shell + rail, KPI strip, health rings, activity feed,
+   launcher row, and the shared "teach" empty-state. Extends ui.css's
+   primitives (0 radius, no shadow, hairline borders, opacity hovers) — no
+   new primitive is introduced without a reason tied to this spec. */
 
-/* Build Tools — launcher cards */
+:root {
+  /* Console-scoped semantic tokens. Kept here (not colors.css) because they
+     exist only for this surface: a single "signal" colour (risk) plus a
+     positive alias, so every dept-console component reads risk the same way
+     the rest of the system already does (matches ui.tsx STATUS_COLORS'
+     "at risk"/"blocked"/"overdue" = #B5622F — one colour, one meaning). */
+  --dept-risk: #B5622F;
+  --dept-positive: var(--erp-accent);
+  --dept-ring-track: var(--erp-hairline);
+}
+
+/* ── Console shell — 2-col with persistent rail ─────────────────────────── */
+/* DOM order is always main-then-rail; on narrow viewports the grid simply
+   collapses to one column and the rail falls in normal flow below the main
+   content (no reorder) — main content stays first for mobile scan order and
+   screen readers, and no JS is needed for the "responsive collapse". */
+.dept-shell {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 24px;
+  align-items: start;
+}
+.dept-shell__main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+.dept-shell__rail {
+  position: sticky;
+  top: 24px;
+}
+@media (max-width: 1180px) {
+  .dept-shell { grid-template-columns: 1fr; }
+  .dept-shell__rail { position: static; }
+}
+
+/* ── KPI strip — Active / Due soon / Blocked / Progress (decision #12) ──── */
+.dept-kpi-strip {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+.dept-kpi {
+  background: var(--surface-card);
+  border: 0.5px solid var(--erp-hairline);
+  padding: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.dept-kpi__label { opacity: 0.6; font-size: 10px; }
+.dept-kpi__value { font-family: var(--font-display); font-weight: 700; font-size: 32px; line-height: 1; color: var(--text-primary); }
+.dept-kpi__value--attention { color: var(--dept-risk); }
+.dept-kpi__foot { font: 400 12px var(--font-body); color: var(--erp-ink-50); }
+.dept-kpi__bar { height: 3px; background: var(--erp-hairline-soft); }
+.dept-kpi__bar span { display: block; height: 100%; background: var(--dept-positive); transition: width 0.4s var(--erp-ease); }
+
+/* ── Health ring cards — one per owned project ──────────────────────────── */
+.dept-ring-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+}
+.dept-ring-card {
+  background: var(--surface-card);
+  border: 0.5px solid var(--erp-hairline);
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.dept-ring-card--risk { border-color: var(--dept-risk); }
+.dept-ring-card__head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.dept-ring-card__name { font: 700 14px var(--font-body); color: var(--text-primary); text-decoration: none; }
+a.dept-ring-card__name:hover { opacity: 0.6; }
+.dept-ring-card__risk-badge { color: var(--dept-risk); }
+.dept-ring-card__risk-badge .lux-badge__dot { background: var(--dept-risk); }
+.dept-ring-card__body { display: flex; align-items: center; gap: 18px; }
+.dept-ring-wrap { position: relative; width: 96px; height: 96px; flex: 0 0 96px; }
+.dept-ring { transform: rotate(-90deg); }
+.dept-ring__track { fill: none; stroke: var(--dept-ring-track); stroke-width: 6; }
+.dept-ring__value { fill: none; stroke: var(--dept-positive); stroke-width: 6; stroke-linecap: butt; transition: stroke-dashoffset 0.5s var(--erp-ease), stroke 0.3s var(--erp-ease); }
+.dept-ring-card--risk .dept-ring__value { stroke: var(--dept-risk); }
+.dept-ring__label { position: absolute; inset: 0; display: grid; place-items: center; font-family: var(--font-display); font-weight: 700; font-size: 18px; }
+.dept-ring-card__stats { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.dept-ring-card__stat { display: flex; flex-direction: column; gap: 2px; }
+.dept-ring-card__stat dt { opacity: 0.5; font-size: 10px; }
+.dept-ring-card__stat dd { margin: 0; font: 400 13px var(--font-body); color: var(--text-primary); }
+.dept-ring-card__reason { margin: 0; font: 400 12px var(--font-body); color: var(--dept-risk); }
+
+/* ── Activity feed ───────────────────────────────────────────────────────── */
+.dept-activity { list-style: none; margin: 0; padding: 0; }
+.dept-activity__group { display: flex; flex-direction: column; }
+.dept-activity__day { display: block; opacity: 0.5; font-size: 10px; margin: 18px 0 8px; }
+.dept-activity__group:first-child .dept-activity__day { margin-top: 0; }
+.dept-activity__item {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 9px 0;
+  border-bottom: 0.5px solid var(--erp-hairline-soft);
+  text-decoration: none;
+  color: inherit;
+}
+.dept-activity__item--link { transition: opacity 0.2s var(--erp-ease); }
+.dept-activity__item--link:hover { opacity: 0.6; }
+.dept-activity__chip {
+  flex: 0 0 auto;
+  font: 700 9px var(--font-body);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--erp-ink-50);
+  border: 0.5px solid var(--erp-hairline);
+  padding: 2px 6px;
+}
+.dept-activity__text { flex: 1 1 auto; min-width: 0; font: 400 13px var(--font-body); color: var(--text-primary); }
+.dept-activity__object { color: var(--erp-ink-60); }
+.dept-activity__time { flex: 0 0 auto; font: 400 11px var(--font-body); color: var(--erp-ink-50); }
+
+/* ── My-work rail (persistent, decision #10) ────────────────────────────── */
+.dept-rail { display: flex; flex-direction: column; gap: 0; background: var(--surface-card); border: 0.5px solid var(--erp-hairline); }
+.dept-rail__section { padding: 20px 22px; }
+.dept-rail__section + .dept-rail__section { border-top: 0.5px solid var(--erp-hairline); }
+.dept-rail__heading { display: block; opacity: 0.6; font-size: 10px; margin-bottom: 14px; }
+.dept-rail__empty { margin: 0; font: 400 13px var(--font-body); color: var(--erp-ink-50); }
+.dept-rail__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.dept-rail__item + .dept-rail__item { border-top: 0.5px solid var(--erp-hairline-soft); }
+.dept-rail__item-link { display: flex; flex-direction: column; gap: 4px; padding: 10px 0; text-decoration: none; color: inherit; transition: opacity 0.2s var(--erp-ease); }
+.dept-rail__item-link:hover { opacity: 0.6; }
+.dept-rail__item { display: flex; flex-direction: column; }
+.dept-rail__item:not(:has(.dept-rail__item-link)) { padding: 10px 0; gap: 4px; }
+.dept-rail__item-title { font: 400 13px var(--font-body); color: var(--text-primary); }
+.dept-rail__item-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font: 400 11px var(--font-body); color: var(--erp-ink-50); }
+.dept-rail__item-project { color: var(--erp-ink-50); }
+.dept-rail__due { font-weight: 700; letter-spacing: 0.02em; }
+.dept-rail__due--risk { color: var(--dept-risk); }
+.dept-rail__due--soon { color: var(--brand-color-primary); }
+.dept-rail__due--quiet { color: var(--erp-ink-50); }
+.dept-rail__priority { font: 700 10px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--dept-risk); }
+.dept-rail__kind { font: 700 10px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--erp-ink-60); }
+/* "Waiting on me" rows carry an accent bar — the only place the rail signals
+   "this needs you", vs. "My work today" which is informational-neutral. */
+.dept-rail__item--waiting { border-left: 2px solid var(--dept-risk); padding-left: 10px; margin-left: -12px; }
+
+/* ── Launcher row (Build Tools merged into Home, decision #10/Q4) ──────── */
+.dept-launcher-row { display: flex; gap: 10px; overflow-x: auto; padding-bottom: 2px; }
+.dept-launcher-chip {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border: 0.5px solid var(--erp-hairline);
+  background: var(--surface-card);
+  text-decoration: none;
+  color: var(--text-primary);
+  transition: border-color 0.15s ease;
+  white-space: nowrap;
+}
+.dept-launcher-chip:hover { border-color: var(--erp-accent); }
+.dept-launcher-chip__glyph {
+  display: grid; place-items: center; width: 28px; height: 28px; flex: 0 0 28px;
+  font-size: 15px; border: 0.5px solid var(--erp-hairline); color: var(--erp-accent);
+}
+.dept-launcher-chip__body { display: flex; flex-direction: column; min-width: 0; }
+.dept-launcher-chip__label { font: 700 12px var(--font-body); }
+.dept-launcher-chip__seat { font: 400 11px var(--font-body); color: var(--erp-ink-50); }
+.dept-launcher-chip__seat--unmapped { color: var(--dept-risk); }
+
+/* ── Shared "teach" empty-state (Connect X pattern) ─────────────────────── */
+/* Warmer than systems/EmptyNote (which is one quiet caption for "connected but
+   empty"); used inside ActivityFeed/LauncherRow/etc. when a department has
+   nothing yet and there's a concrete next step (usually the Connections tab). */
+.dept-teach {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 28px 4px;
+}
+.dept-teach__glyph { font-size: 22px; color: var(--erp-accent); margin-bottom: 4px; }
+.dept-teach__title { font: 700 14px var(--font-body); color: var(--text-primary); }
+.dept-teach__body { font: 400 13px var(--font-body); color: var(--erp-ink-50); max-width: 44ch; }
+.dept-teach__cta { margin-top: 10px; }
+
+/* Build Tools — launcher cards (full-page grid; retained for the standalone
+   /tools route until P1-06 redirects it into the Home launcher row above). */
 .dept-launchers {
   display: grid;
   gap: 14px;
@@ -45,3 +237,18 @@
   color: var(--erp-ink-50);
   font-size: 15px;
 }
+
+/* ---- ServicedBlock (ORG-13 / UX-2 §3C) ---- */
+.serviced-block {
+  border: 0.5px solid var(--erp-hairline);
+  background: var(--surface-card);
+  padding: 16px;
+  margin-top: 16px;
+}
+.serviced-block__head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; flex-wrap: wrap; }
+.serviced-block__eyebrow { font: 700 10px var(--font-body); letter-spacing: 0.1em; text-transform: uppercase; color: var(--erp-ink-50); }
+.serviced-block__empty { font: 400 13px var(--font-body); color: var(--erp-ink-50); margin: 0; }
+.serviced-block__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.serviced-block__row { display: flex; align-items: center; gap: 12px; padding: 8px 0; border-bottom: 0.5px solid var(--erp-hairline-soft); }
+.serviced-block__company { font: 400 13px var(--font-body); color: var(--text-primary); flex: 1 1 auto; }
+.serviced-block__module { font: 700 10px var(--font-body); letter-spacing: 0.06em; text-transform: uppercase; color: var(--erp-ink-50); }

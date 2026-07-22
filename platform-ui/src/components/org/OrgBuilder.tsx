@@ -1,10 +1,17 @@
 "use client";
-import { useRef, useState, useTransition } from "react";
+import { useState, useRef, useTransition } from "react";
 import type { OrgNode, OrgKind } from "@/lib/org";
+import type { AssignmentSummary } from "@/lib/serviceAssignments";
+import { ConnectServicePanel, type ConnectServiceActions } from "./ConnectServicePanel";
 import "./org.css";
 
 const KINDS: OrgKind[] = ["holding", "company", "department", "division", "role", "person"];
 const ASSIGNABLE = new Set<OrgKind>(["division", "role", "person"]);
+// ORG-13 (A9): only a department or division can be turned into a
+// shared-service provider — matches the plan's "Connect service button on
+// department cards" framing, extended to division since a division is
+// equally a valid org_units anchor.
+const CONNECTABLE = new Set<OrgKind>(["department", "division"]);
 // Sensible child kind one level below a given kind (server-only lib not imported here).
 const CHILD_KIND: Partial<Record<OrgKind, OrgKind>> = {
   holding: "company", company: "department", department: "division", division: "role", role: "person",
@@ -16,6 +23,17 @@ const NEW_LABEL: Record<OrgKind, string> = {
 };
 
 type SaveResult = { ok: boolean; error?: string; source?: "backend" | "local"; savedAt?: string };
+// ORG-13 — everything Connect-service related, bundled into one prop so the
+// common (flag-off) case is a single `enabled: false` check rather than a
+// handful of optional props threaded through. Fully absent behind
+// SERVICE_ASSIGNMENTS_ENABLED (default off): no button renders, nothing is
+// fetched, OrgBuilder behaves byte-for-byte as it did before ORG-13.
+export interface ServiceProps {
+  enabled: boolean;
+  companies: { id: string; name: string }[]; // candidate targets (self already excluded by the caller)
+  modules: readonly string[];
+  actions: ConnectServiceActions;
+}
 interface Props {
   companyId: string;
   initial: OrgNode;
@@ -24,6 +42,7 @@ interface Props {
   source: "backend" | "local" | "default";
   updatedAt: string | null;
   save: (companyId: string, treeJson: string) => Promise<SaveResult>;
+  service: ServiceProps;
 }
 
 // ---- pure tree ops (return a new root) ----
@@ -54,7 +73,7 @@ function moveNode(root: OrgNode, dragId: string, targetId: string): OrgNode {
   return addChildTo(removeNode(root, dragId), targetId, dragNode);
 }
 
-export function OrgBuilder({ companyId, initial, canEdit, members, source, updatedAt, save }: Props) {
+export function OrgBuilder({ companyId, initial, canEdit, members, source, updatedAt, save, service }: Props) {
   const [root, setRoot] = useState<OrgNode>(initial);
   const [dirty, setDirty] = useState(false);
   const [dropId, setDropId] = useState<string | null>(null);
@@ -62,6 +81,22 @@ export function OrgBuilder({ companyId, initial, canEdit, members, source, updat
   const [msg, setMsg] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   const dragId = useRef<string | null>(null);
+
+  // ORG-13 Connect-service panel state — kept separate from the tree-edit
+  // `pending`/`msg` state above so opening the panel never blocks or is
+  // blocked by an in-flight structure save.
+  const [connectNodeId, setConnectNodeId] = useState<string | null>(null);
+  const [existingAssignments, setExistingAssignments] = useState<AssignmentSummary[]>([]);
+  const [, startAssignTransition] = useTransition();
+  const openConnectService = (nodeId: string) => {
+    setConnectNodeId(nodeId);
+    setExistingAssignments([]);
+    startAssignTransition(async () => {
+      const rows = await service.actions.listForUnit(nodeId);
+      setExistingAssignments(rows);
+    });
+  };
+  const closeConnectService = () => { setConnectNodeId(null); setExistingAssignments([]); };
 
   const mutate = (next: OrgNode) => { setRoot(next); setDirty(true); setMsg(null); };
   const rename = (id: string, name: string) => mutate(patchNode(root, id, { name }));
@@ -135,6 +170,8 @@ export function OrgBuilder({ companyId, initial, canEdit, members, source, updat
               onAdd={addChild}
               onRemove={remove}
               onClose={() => setSelectedId(null)}
+              canConnectService={service.enabled && CONNECTABLE.has(selected.kind)}
+              onConnectService={() => openConnectService(selected.id)}
             />
           ) : (
             <span className="org-hint">Click a unit to edit it · drag a unit onto another to re-parent · use ＋ to add below.</span>
@@ -155,6 +192,20 @@ export function OrgBuilder({ companyId, initial, canEdit, members, source, updat
           />
         </div>
       </section>
+
+      {/* ORG-13 — Connect-service confirm-sheet, opened from the inspector's
+          "Connect service…" button on an eligible (department/division) node. */}
+      {service.enabled && connectNodeId && selected && selected.id === connectNodeId && (
+        <ConnectServicePanel
+          node={selected}
+          companies={service.companies}
+          modules={service.modules}
+          members={members}
+          actions={service.actions}
+          existing={existingAssignments}
+          onClose={closeConnectService}
+        />
+      )}
 
       {/* BOTTOM — detailed list editor */}
       <section className="org-listwrap" aria-label="Detailed editor">
@@ -178,10 +229,11 @@ export function OrgBuilder({ companyId, initial, canEdit, members, source, updat
 }
 
 // ---- Inspector: click-to-edit panel for the selected node ----
-function NodeInspector({ node, isRoot, members, onRename, onKind, onAssign, onAdd, onRemove, onClose }: {
+function NodeInspector({ node, isRoot, members, onRename, onKind, onAssign, onAdd, onRemove, onClose, canConnectService, onConnectService }: {
   node: OrgNode; isRoot: boolean; members: { id: string; name: string }[];
   onRename: (id: string, name: string) => void; onKind: (id: string, kind: OrgKind) => void;
   onAssign: (id: string, assigneeId: string) => void; onAdd: (id: string) => void; onRemove: (id: string) => void; onClose: () => void;
+  canConnectService: boolean; onConnectService: () => void;
 }) {
   return (
     <div className="org-insp">
@@ -200,6 +252,9 @@ function NodeInspector({ node, isRoot, members, onRename, onKind, onAssign, onAd
       )}
       <button type="button" className="lux-btn lux-btn--ghost lux-btn--sm" onClick={() => onAdd(node.id)}>＋ Add unit</button>
       {!isRoot && <button type="button" className="lux-btn lux-btn--ghost lux-btn--sm" onClick={() => onRemove(node.id)}>Remove</button>}
+      {canConnectService && (
+        <button type="button" className="lux-btn lux-btn--ghost lux-btn--sm" onClick={onConnectService}>Connect service…</button>
+      )}
       <button type="button" className="org-insp__close" aria-label="Close" onClick={onClose}>×</button>
     </div>
   );

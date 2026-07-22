@@ -69,6 +69,41 @@ describe("hr caps (hr_staff/hr_manager)", () => {
   });
 });
 
+describe("scopeCovers — A4 fixes (no over-grant)", () => {
+  it("a null-scope company grant does NOT cover any company (not a wildcard)", () => {
+    const nullScoped = me([{ role: "manager", scopeType: "company", scopeId: null }]);
+    expect(can(nullScoped, "pm.manage", "co-a")).toBe(false);
+    expect(can(nullScoped, "pm.manage", "co-b")).toBe(false);
+  });
+
+  it("a team-scoped grant does not blanket-cover the whole company", () => {
+    const teamScoped = me([{ role: "manager", scopeType: "team", scopeId: "div-1" }]);
+    expect(can(teamScoped, "pm.manage", "co-a")).toBe(false);
+    expect(can(teamScoped, "pm.manage", "co-b")).toBe(false);
+  });
+
+  it("hr_staff scoped to company B covers only B, never A", () => {
+    const staffB = me([{ role: "hr_staff", scopeType: "company", scopeId: "co-b" }]);
+    expect(can(staffB, "hr.view", "co-b")).toBe(true);
+    expect(can(staffB, "hr.view", "co-a")).toBe(false);
+  });
+
+  it("hr_manager scoped to company B covers only B, never A", () => {
+    const managerB = me([{ role: "hr_manager", scopeType: "company", scopeId: "co-b" }]);
+    expect(can(managerB, "hr.manage", "co-b")).toBe(true);
+    expect(can(managerB, "hr.manage", "co-a")).toBe(false);
+  });
+
+  it("global/elevated grants are unaffected — still cover every company", () => {
+    const admin = me([{ role: "platform_admin", scopeType: "global", scopeId: null }]);
+    const exec = me([{ role: "group_executive", scopeType: "global", scopeId: null }]);
+    expect(can(admin, "hr.manage", "co-a")).toBe(true);
+    expect(can(admin, "hr.manage", "co-b")).toBe(true);
+    expect(can(exec, "hr.manage", "co-a")).toBe(true);
+    expect(can(exec, "hr.manage", "co-b")).toBe(true);
+  });
+});
+
 describe("canManageIT", () => {
   const itA = me([{ role: "it_admin", scopeType: "company", scopeId: "co-a" }]);
   it("scoped to a company when given, else 'anywhere'", () => {

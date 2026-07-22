@@ -255,6 +255,20 @@ const TIME_ENTRIES: Record<string, unknown>[] = [
   { id: "te-5", user_id: "u-finance", project_id: "p-fin-1", task_id: "t-3", minutes: 120, billable: false, entry_date: "2026-06-25", notes: "Q2 reconciliation" },
 ];
 
+// ORG-13 service assignments — session-only in-memory store (matches every
+// other demo store's "resets on restart" convention). Empty by default:
+// nothing is pre-seeded as served/serving so the Connect-service /
+// ServicedBlock / /admin/services surfaces show their real "not connected
+// yet" empty states out of the box, same as production before any assignment
+// is created.
+const DEMO_ASSIGNMENTS: {
+  id: string; providerTenantId: string; providerCompanyName?: string;
+  targetTenantId: string; targetCompanyName?: string;
+  unitId: string; unitName: string; unitKind: string; unitStatus: "active" | "orphaned";
+  module: string; status: "proposed" | "active" | "suspended" | "revoked";
+  leadUserId: string | null; createdAt: string;
+}[] = [];
+
 const CLIENTS: Record<string, unknown>[] = [
   { id: "cl-1", name: "Northwind Traders", contact: { email: "ops@northwind.example" }, status: "active", custom_fields: {} },
   { id: "cl-2", name: "Cedar Group", contact: { email: "hello@cedar.example" }, status: "active", custom_fields: {} },
@@ -476,6 +490,70 @@ export function getDemoResponse(method: string, fullPath: string, body?: string)
   // cookie/seeded-default path (edits persist to the per-company cookie and
   // survive reload, exercising the exact backend-ready flow).
   if (p.match(/^\/api\/[^/]+\/org-structure$/)) return { status: 404, json: { error: "org-structure endpoint not implemented" } };
+
+  // ORG-13 service assignments. Real shapes (not the generic {id,ok:true}
+  // catch-all further down) so the Connect-service dialog / /admin/services
+  // page can be exercised end-to-end with DEMO_MODE=1 + SERVICE_ASSIGNMENTS_
+  // ENABLED=1 without crashing on an unexpected undefined field. Session-only
+  // in-memory list — resets on server restart, matches every other demo store.
+  const assignUnitMatch = p.match(/^\/api\/[^/]+\/org-structure\/units\/([^/]+)\/assignments$/);
+  if (assignUnitMatch && m === "POST") {
+    const nodeId = assignUnitMatch[1];
+    const b = JSON.parse(body || "{}") as { targets?: string[]; module?: string; leadUserId?: string };
+    const targets = Array.isArray(b.targets) ? b.targets : [];
+    const companies = targets.map((id) => {
+      const co = COMPANIES.find((c) => c.id === id) as { id: string; name: string } | undefined;
+      return { id, name: co?.name ?? id, included: true };
+    });
+    if (url.searchParams.get("dryRun") === "1") {
+      return ok({
+        dryRun: true,
+        unit: { nodeId, name: "Demo unit", kind: "department" },
+        items: [{ userId: DEMO_USER_ID, name: "Clement Hansel", email: "hansel@gaiada.com", role: "staff" }],
+        companies,
+      });
+    }
+    const assignments = targets.map((t) => ({ id: demoId("sa"), target: t, status: "proposed" as const }));
+    DEMO_ASSIGNMENTS.push(...assignments.map((a, i) => ({
+      id: a.id, providerTenantId: tenantFromPath(p) ?? "", providerCompanyName: undefined,
+      targetTenantId: targets[i], targetCompanyName: companies[i]?.name,
+      unitId: nodeId, unitName: "Demo unit", unitKind: "department", unitStatus: "active" as const,
+      module: b.module ?? "hr", status: "proposed" as const, leadUserId: b.leadUserId ?? null, createdAt: new Date().toISOString(),
+    })));
+    return { status: 201, json: { assignments } };
+  }
+  const assignActionMatch = p.match(/^\/api\/[^/]+\/org-structure\/assignments\/([^/]+)\/(accept|suspend|resume|reconcile)$/);
+  if (assignActionMatch) {
+    const row = DEMO_ASSIGNMENTS.find((a) => a.id === assignActionMatch[1]);
+    const action = assignActionMatch[2];
+    if (row) {
+      if (action === "accept") row.status = "active";
+      else if (action === "suspend") row.status = "suspended";
+      else if (action === "resume") row.status = "active";
+    }
+    if (action === "reconcile") return ok({ assignmentId: assignActionMatch[1], status: row?.status ?? "active", granted: 1, revoked: 0, orphaned: 0, skipped: 0, affectedUsers: 1 });
+    return ok({ ok: true, status: row?.status ?? "active" });
+  }
+  const assignByIdMatch = p.match(/^\/api\/[^/]+\/org-structure\/assignments\/([^/]+)$/);
+  if (assignByIdMatch && m === "DELETE") {
+    const row = DEMO_ASSIGNMENTS.find((a) => a.id === assignByIdMatch[1]);
+    if (row) row.status = "revoked";
+    return ok({ ok: true, status: "revoked" });
+  }
+  if (assignByIdMatch && m === "PATCH") {
+    const row = DEMO_ASSIGNMENTS.find((a) => a.id === assignByIdMatch[1]);
+    const b = JSON.parse(body || "{}") as { nodeId?: string };
+    if (row && b.nodeId) { row.unitId = b.nodeId; row.unitStatus = "active"; }
+    return ok({ ok: true, status: row?.status ?? "active", reconsentRequired: false });
+  }
+  if (p.match(/^\/api\/[^/]+\/org-structure\/reconcile$/) && m === "POST") return ok({ results: [] });
+  if (p.match(/^\/api\/[^/]+\/org-structure\/assignments$/) && m === "GET") {
+    const direction = url.searchParams.get("direction");
+    const t = tenantFromPath(p);
+    const items = DEMO_ASSIGNMENTS.filter((a) => (direction === "served" ? a.targetTenantId === t : a.providerTenantId === t));
+    return ok({ items, companies: [] });
+  }
+  if (p.match(/^\/api\/[^/]+\/org-structure\/service-units$/) && m === "GET") return ok({ items: [], companies: [] });
 
   const timeMatch = p.match(/^\/api\/[^/]+\/time-entries$/);
   if (timeMatch) {

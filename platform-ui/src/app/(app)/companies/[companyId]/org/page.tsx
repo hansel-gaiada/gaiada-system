@@ -2,12 +2,17 @@ import { redirect } from "next/navigation";
 import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
 import { can } from "@/lib/rbac";
-import { getCompany, listMembers } from "@/lib/entities";
+import { getCompany, listMembers, listCompanies } from "@/lib/entities";
 import { getOrgStructure } from "@/lib/org";
+import { listAssignments, SERVICE_ASSIGNMENTS_ENABLED, SERVICE_MODULE_OPTIONS } from "@/lib/serviceAssignments";
 import { PageHeader } from "@/components/PageHeader";
 import { EmptyNote } from "@/components/systems/EmptyNote";
 import { OrgBuilder } from "@/components/org/OrgBuilder";
-import { saveOrg } from "./actions";
+import { ServicedFunctionsPanel } from "@/components/org/ServicedFunctionsPanel";
+import {
+  saveOrg, dryRunConnectServiceAction, proposeConnectServiceAction, listNodeAssignmentsAction,
+  revokeAssignmentAction, suspendAssignmentAction, resumeAssignmentAction,
+} from "./actions";
 
 type Params = Promise<{ companyId: string }>;
 
@@ -28,9 +33,11 @@ export default async function OrgPage({ params }: { params: Params }) {
   }
 
   const canEdit = can(me, "org.edit", companyId) && me.companies.some((c) => c.id === companyId);
-  const [{ structure, source }, members] = await Promise.all([
+  const [{ structure, source }, members, allCompanies, servedByOthers] = await Promise.all([
     getOrgStructure(userId, companyId, company),
     listMembers(userId, companyId).catch(() => []),
+    listCompanies(userId).catch(() => []),
+    listAssignments(userId, companyId, { direction: "served" }),
   ]);
 
   return (
@@ -53,6 +60,27 @@ export default async function OrgPage({ params }: { params: Params }) {
         source={source}
         updatedAt={structure.updatedAt ?? null}
         save={saveOrg}
+        service={{
+          // ORG-13 (A9 + A4): gated on both the flag AND the same org.edit
+          // capability the rest of the editor uses — cosmetic only, the
+          // backend's Cerbos propose gate is the real boundary.
+          enabled: SERVICE_ASSIGNMENTS_ENABLED && canEdit,
+          companies: allCompanies.filter((c) => c.id !== companyId).map((c) => ({ id: c.id, name: c.name })),
+          modules: SERVICE_MODULE_OPTIONS,
+          actions: {
+            dryRun: dryRunConnectServiceAction.bind(null, companyId),
+            propose: proposeConnectServiceAction.bind(null, companyId),
+            listForUnit: listNodeAssignmentsAction.bind(null, companyId),
+            revoke: revokeAssignmentAction.bind(null, companyId),
+          },
+        }}
+      />
+
+      <ServicedFunctionsPanel
+        envelope={servedByOthers}
+        onSuspend={suspendAssignmentAction.bind(null, companyId)}
+        onResume={resumeAssignmentAction.bind(null, companyId)}
+        onRevoke={revokeAssignmentAction.bind(null, companyId)}
       />
     </>
   );

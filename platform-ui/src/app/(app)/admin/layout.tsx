@@ -6,6 +6,9 @@ const TABS = [
   { key: "users", label: "Users & Roles", href: "/admin/users", icon: "hr" as const },
   { key: "identity", label: "Identity Links", href: "/admin/identity", icon: "hub" as const },
   { key: "modules", label: "Modules & Fields", href: "/admin/modules", icon: "box" as const },
+  // ORG-13 — propose→accept lifecycle for shared-service connections; renders
+  // an empty/quiet state whenever SERVICE_ASSIGNMENTS_ENABLED is off.
+  { key: "services", label: "Services", href: "/admin/services", icon: "hub" as const },
   { key: "compliance", label: "Compliance", href: "/admin/compliance", icon: "check" as const },
   { key: "audit", label: "Audit", href: "/admin/audit", icon: "clock" as const },
 ];

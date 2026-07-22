@@ -13,7 +13,6 @@ import type { Me } from "./platform";
 export type Role =
   | "platform_admin"   // superadmin — everything, everywhere (unrestricted)
   | "group_executive"  // owner — everything across the group's companies (unrestricted)
-  | "holding_head"     // head-of-department at the holding — may VIEW every company, not unrestricted
   | "company_admin"    // admin within a company
   | "manager"          // runs work within a company
   | "member"           // baseline access
@@ -42,8 +41,6 @@ const ALL: Capability[] = [
 export const ROLE_CAPS: Record<Role, Capability[]> = {
   platform_admin: ALL,
   group_executive: ALL,
-  // View-across-the-holding, but not unrestricted: cross-company read surfaces only.
-  holding_head: ["people.directory", "rollups.view"],
   company_admin: ["admin.access", "company.manage", "org.edit", "people.directory", "pm.manage", "it.manage", "approvals.decide", "knowledge.review", "hr.view", "hr.manage"],
   manager: ["pm.manage", "approvals.decide", "people.directory"],
   member: [],
@@ -58,14 +55,16 @@ type Grant = Me["roles"][number];
 
 // Does a grant's scope cover the target company? A global grant covers
 // everything. With no companyId (a cross-company question) only global counts.
-// A company grant with a null scopeId is treated as covering any company in the
-// user's set (defensive — the backend already limits the set). Team grants are
-// treated as company-level for now (refine when team scoping lands).
+// A company grant must match the granted company EXACTLY — a null/absent
+// scopeId is NOT a wildcard for "any company" (that over-grants; A4). A team
+// grant is scoped to its unit, not the whole company: `can()` only reasons
+// about companyId, so a team grant can never resolve "yes, this company" from
+// here — it must not blanket-cover company-wide capabilities (A4). Unit-level
+// checks belong to a caller that actually has the unit id.
 function scopeCovers(g: Grant, companyId?: string | null): boolean {
   if (g.scopeType === "global") return true;
   if (companyId == null) return false;
-  if (g.scopeType === "company") return g.scopeId == null || g.scopeId === companyId;
-  if (g.scopeType === "team") return true;
+  if (g.scopeType === "company") return g.scopeId != null && g.scopeId === companyId;
   return false;
 }
 
@@ -85,13 +84,19 @@ export function isElevated(me: Me): boolean {
 
 // Access tiers requested by the org:
 // • UNRESTRICTED — owner (group_executive) + superadmin (platform_admin): may do anything, anywhere.
-// • VIEW-ALL — the above PLUS a holding head-of-department: may SEE every company under the holding
-//   (read/oversight), but is NOT unrestricted. Everything a view-all user sees is "special access".
+// • VIEW-ALL — same set as UNRESTRICTED today. There used to be a second,
+//   narrower "view every company but not unrestricted" tier (`holding_head`,
+//   people.directory + rollups.view only) — removed per the backbone-program
+//   plan's A4 amendment: ORG-7/ORG-12's `serviceScopes` (a real, module-scoped,
+//   consent-based grant materialized by the reconciler) supersedes the old
+//   blanket "view everything" role. Cross-company oversight now happens
+//   through an actual service assignment (Me.serviceScopes) or a normal
+//   company/global grant — never a free-floating "can see all" role.
 export function isUnrestricted(me: Me): boolean {
   return isElevated(me);
 }
 export function canViewAllCompanies(me: Me): boolean {
-  return isUnrestricted(me) || me.roles.some((r) => r.role === "holding_head" && (r.scopeType === "global" || r.scopeType === "company"));
+  return isUnrestricted(me);
 }
 
 // WS11: an external client (client-portal user). Gated by a `client` grant; drives portal-only nav.

@@ -147,4 +147,71 @@ describe.skipIf(!TEST_URL)("core client-work", () => {
     expect(Number(rows.find((r) => r.metric_key === "core.time.billable_minutes")?.numerator)).toBe(120);
     expect(Number(rows.find((r) => r.metric_key === "core.deliverables.open")?.numerator)).toBeGreaterThanOrEqual(1);
   });
+
+  it("member creates a project with departmentId; it lists and details with department_id", async () => {
+    const createResp = await app.inject({
+      method: "POST", url: `/api/${co}/projects`,
+      headers: asUser(member), payload: { name: "Mobile Redesign", departmentId: "web-dev-dept-123" },
+    });
+    expect(createResp.statusCode).toBe(201);
+    const newProjectId = createResp.json().id;
+
+    const listResp = await app.inject({
+      method: "GET", url: `/api/${co}/projects`,
+      headers: asUser(member),
+    });
+    expect(listResp.statusCode).toBe(200);
+    const projects = listResp.json() as Array<{ id: string; department_id: string | null }>;
+    const created = projects.find((p) => p.id === newProjectId);
+    expect(created).toBeDefined();
+    expect(created?.department_id).toBe("web-dev-dept-123");
+
+    const detailResp = await app.inject({
+      method: "GET", url: `/api/${co}/projects/${newProjectId}`,
+      headers: asUser(member),
+    });
+    expect(detailResp.statusCode).toBe(200);
+    const detail = detailResp.json() as { id: string; department_id: string | null };
+    expect(detail.department_id).toBe("web-dev-dept-123");
+  });
+
+  it("member can PATCH a project to update departmentId", async () => {
+    const createResp = await app.inject({
+      method: "POST", url: `/api/${co}/projects`,
+      headers: asUser(member), payload: { name: "SEO Overhaul" },
+    });
+    expect(createResp.statusCode).toBe(201);
+    const newProjectId = createResp.json().id;
+
+    const patchResp = await app.inject({
+      method: "PATCH", url: `/api/${co}/projects/${newProjectId}`,
+      headers: asUser(member), payload: { departmentId: "seo-dept-456" },
+    });
+    expect(patchResp.statusCode).toBe(200);
+
+    const detailResp = await app.inject({
+      method: "GET", url: `/api/${co}/projects/${newProjectId}`,
+      headers: asUser(member),
+    });
+    expect(detailResp.statusCode).toBe(200);
+    const detail = detailResp.json() as { id: string; department_id: string | null };
+    expect(detail.department_id).toBe("seo-dept-456");
+  });
+
+  it("project departmentId can be null when not provided", async () => {
+    const createResp = await app.inject({
+      method: "POST", url: `/api/${co}/projects`,
+      headers: asUser(member), payload: { name: "Generic Project" },
+    });
+    expect(createResp.statusCode).toBe(201);
+    const newProjectId = createResp.json().id;
+
+    const detailResp = await app.inject({
+      method: "GET", url: `/api/${co}/projects/${newProjectId}`,
+      headers: asUser(member),
+    });
+    expect(detailResp.statusCode).toBe(200);
+    const detail = detailResp.json() as { id: string; department_id: string | null };
+    expect(detail.department_id).toBeNull();
+  });
 });

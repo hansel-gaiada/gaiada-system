@@ -97,7 +97,7 @@ export class CoreController {
   async projects(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string) {
     await authorize(req.principal, { kind: "project", tenantId }, "read");
     const rows = await withTenants([tenantId], (c) =>
-      c.query(`SELECT id, name, status, client_id, is_internal, owner_id, due_date, custom_fields
+      c.query(`SELECT id, name, status, client_id, is_internal, owner_id, due_date, custom_fields, department_id
                FROM projects WHERE deleted_at IS NULL ORDER BY created_at DESC`),
     );
     return rows.rows;
@@ -108,9 +108,9 @@ export class CoreController {
   async createProject(
     @Req() req: FastifyRequest,
     @Param("tenantId") tenantId: string,
-    @Body() body: { name?: string; clientId?: string; customFields?: Record<string, unknown> },
+    @Body() body: { name?: string; clientId?: string; departmentId?: string; customFields?: Record<string, unknown> },
   ) {
-    const { name, clientId, customFields = {} } = body ?? {};
+    const { name, clientId, departmentId, customFields = {} } = body ?? {};
     if (!name) throw new BadRequestException("name required");
     await authorize(req.principal, { kind: "project", tenantId }, "create");
     const id = newId();
@@ -118,9 +118,9 @@ export class CoreController {
       const cfError = await validateCustomFields(c, tenantId, "project", customFields);
       if (cfError) throw new BadRequestException(cfError);
       await c.query(
-        `INSERT INTO projects (id, tenant_id, name, client_id, owner_id, custom_fields, origin_site)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-        [id, tenantId, name, clientId ?? null, req.principal.userId, JSON.stringify(customFields), config.originSite],
+        `INSERT INTO projects (id, tenant_id, name, client_id, owner_id, custom_fields, department_id, origin_site)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+        [id, tenantId, name, clientId ?? null, req.principal.userId, JSON.stringify(customFields), departmentId ?? null, config.originSite],
       );
     });
     await writeActivity(tenantId, req.principal.userId, "created", "project", id, { name });
@@ -218,7 +218,7 @@ export class CoreController {
     const rows = await withTenants([tenantId], (c) =>
       c.query(
         `SELECT p.id, p.name, p.status, p.client_id, cl.name AS client_name, p.is_internal,
-                p.owner_id, u.name AS owner_name, p.start_date, p.due_date, p.custom_fields
+                p.owner_id, u.name AS owner_name, p.start_date, p.due_date, p.custom_fields, p.department_id
          FROM projects p LEFT JOIN clients cl ON cl.id = p.client_id LEFT JOIN users u ON u.id = p.owner_id
          WHERE p.id = $1 AND p.deleted_at IS NULL`,
         [projectId],
@@ -233,7 +233,7 @@ export class CoreController {
     @Req() req: FastifyRequest,
     @Param("tenantId") tenantId: string,
     @Param("projectId") projectId: string,
-    @Body() b: { name?: string; status?: string; clientId?: string | null; startDate?: string | null; dueDate?: string | null; customFields?: Record<string, unknown> },
+    @Body() b: { name?: string; status?: string; clientId?: string | null; startDate?: string | null; dueDate?: string | null; departmentId?: string | null; customFields?: Record<string, unknown> },
   ) {
     await authorize(req.principal, { kind: "project", tenantId, id: projectId }, "update");
     await withTenants([tenantId], async (c) => {
@@ -244,10 +244,10 @@ export class CoreController {
       const res = await c.query(
         `UPDATE projects SET name = COALESCE($2, name), status = COALESCE($3, status), client_id = COALESCE($4, client_id),
            start_date = COALESCE($5, start_date), due_date = COALESCE($6, due_date), custom_fields = COALESCE($7, custom_fields),
-           updated_at = now()
+           department_id = COALESCE($8, department_id), updated_at = now()
          WHERE id = $1 AND deleted_at IS NULL`,
         [projectId, b.name ?? null, b.status ?? null, b.clientId ?? null, b.startDate ?? null, b.dueDate ?? null,
-         b.customFields ? JSON.stringify(b.customFields) : null],
+         b.customFields ? JSON.stringify(b.customFields) : null, b.departmentId ?? null],
       );
       if (res.rowCount === 0) throw new NotFoundException("project not found");
     });

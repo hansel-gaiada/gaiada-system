@@ -1,0 +1,23 @@
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: work_activity
+  importDerivedRoles: ["gaiada_scopes"]
+  variables:
+    import: ["gaiada_common"]
+  rules:
+    - actions: ["*"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["platform_admin"]
+    # Reading the evidence trail is member-level (the whole team references it, mirrors activity/
+    # meeting_recording read).
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin", "manager", "member", "viewer", "team_lead"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    # Ingest is an admin/service-principal write (the P1-05 outbox consumer, or an admin backfill
+    # script) — NOT an everyday staff action, mirrors resource_rollup_recompute.yaml's create tier.
+    - actions: ["create"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }

@@ -55,6 +55,8 @@
 .erp-company__form { display: flex; }
 .erp-company__select { border: none; background: transparent; font: 600 14px var(--font-body); color: var(--text-primary); cursor: pointer; padding: 0; max-width: 230px; outline: none; }
 .erp-company__select:hover { color: var(--erp-accent); }
+/* Served-company badge (ORG-13) — companies reached via a service assignment, not membership. */
+.erp-company__served-badge { font-size: 10px; opacity: 0.65; margin-left: 4px; white-space: nowrap; }
 
 /* ---- Special-access banner (shown while viewing across the holding) ---- */
 .erp-special { position: sticky; top: 0; z-index: 6; display: flex; align-items: baseline; gap: 12px; padding: 9px 32px; background: rgba(181, 98, 47, 0.1); border-bottom: 0.5px solid rgba(181, 98, 47, 0.4); }

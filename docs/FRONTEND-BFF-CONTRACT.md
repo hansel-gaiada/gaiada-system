@@ -112,7 +112,7 @@ pm.manage, it.manage, approvals.decide, knowledge.review`.
 ## 4. Work management — `lib/entities.ts`, `lib/data.ts`
 | Status | Method | Path | Notes |
 |---|---|---|---|
-| ✅ | GET/POST | `/api/:t/projects`, `/api/:t/projects/:id` | list + detail + create + PATCH exist. **No delete/archive endpoint — add one.** **NEW: projects gain an owning `department_id` (org-node id, nullable) — GET must return it; POST/PATCH accept `departmentId`.** Drives the Projects "Department" column + each department console's owned-projects list. Cross-department work still flows via task assignment. |
+| ✅ | GET/POST/PATCH | `/api/:t/projects`, `/api/:t/projects/:id` | list + detail + create + PATCH exist. Projects gain an owning `department_id` (org-node id, nullable) — GET/detail returns it; POST/PATCH accept `departmentId` (optional, camelCase in body). Migration `0029_projects_department.sql` adds the column. Drives the Projects "Department" column + each department console's owned-projects list. Cross-department work still flows via task assignment. **No delete/archive endpoint — add one.** |
 | ✅ | GET | `/api/:t/tasks?assignee=me` | base task list. |
 | ✅ | GET/POST | `/api/:t/projects/:pid/tasks` | list + create. |
 | ✅ | PATCH | `/api/:t/tasks/:id` | BUILT (`core.controller.ts`). Base task update. |
@@ -228,3 +228,59 @@ From `docs/superpowers/specs/2026-07-20-hr-module-design.md`. Module key `'hr'`;
   management view like every other module.
 - **⬜ PENDING (WSD-5):** `/hr`, `/hr/leave`, `/hr/attendance`, `/hr/onboarding` UI + `lib/hr.ts` +
   `rbac.ts` `hr.view`/`hr.manage` caps. Backend is UI-ready — every route above is live now.
+
+## 11. Work-activity / evidence model (P1-04, Web-Dev Phase 1) — `src/core/work-activity.controller.ts` — **BACKEND ✅ BUILT (no UI/`lib/activity.ts` consumer yet — P1-05 wires the feed)**
+
+**BACKEND-FIRST** (unlike most of this doc): this is a NEW core (not module-gated) normalized
+activity/evidence model — schema + a synchronous ingest/read API + a pure auto-link engine. There is
+no `lib/activity.ts` on the frontend yet; **the shapes below ARE the canonical contract** — when the
+UI is built, export `WorkActivityRow` in `platform-ui/src/lib/activity.ts` matching this shape
+verbatim (per the ticket's own naming). Migration `0030_work_activity.sql`. Deliberately **not**
+named `activities`/`audit` — those are the pre-existing flat audit table
+(`core.controller.ts GET /api/:t/activity`), untouched by this work.
+
+**Scope note:** this ticket (P1-04) builds the schema + this API + the linker + Cerbos only. The
+**outbox consumer** that drives ingestion automatically off pm/pipeline/github/drive events, and the
+**historical backfill**, are **P1-05 (separate ticket, not yet built)** — until it lands, this API
+has no automatic writers; a human, script, or admin tool must POST activities explicitly.
+
+- ✅ `GET /api/:t/work-activity?deptId=&projectId=&personId=&since=&limit=` → `WorkActivityRow[]`
+  (member-level read; `deptId`/`projectId`/`personId` filter via a join on `work_activity_links`;
+  `since` is an ISO timestamp lower bound on `occurredAt`; `limit` default 100, max 500).
+  ```ts
+  interface WorkActivityRow {
+    id: string; tenantId: string;
+    source: 'pm'|'pipeline'|'github'|'google_drive'|'claude'|'manual'|'system';
+    sourceRef: string;                    // idempotency leg; the source's own stable id
+    actorUserId: string | null; actorExternal: string | null;
+    verb: string; objectKind: string; objectRef: string; title: string | null;
+    payload: Record<string, unknown>;
+    occurredAt: string; originSite: string; createdAt: string;
+    links: Array<{ targetKind: 'pm_task'|'project'|'person'|'department'; targetId: string;
+                    confidence: 'exact'|'inferred'; rule: string }>;
+  }
+  ```
+- ✅ `POST /api/:t/work-activity` → `201 WorkActivityRow & {deduped: boolean}`. **Admin/service-
+  principal only** (Cerbos `work_activity:create`, `company_admin`+ — mirrors
+  `rollup_recompute:create`; NOT an everyday staff action). Body: `{source, sourceRef, verb,
+  objectKind, objectRef, actorUserId?, actorExternal?, title?, payload?, occurredAt?, text?}`.
+  **Idempotent** on `(tenantId, source, sourceRef)` (`ON CONFLICT DO UPDATE`, returns the
+  existing/updated row with `deduped:true` on a redelivery; `work_activity.created` fires on the
+  outbox only on the FIRST ingest of a given key, never on a redelivery). `payload.taskId` /
+  `payload.projectId` / `payload.actorId` are structured link hints (exact); `title`+`text` are
+  uuid-scanned for additional (inferred) links the auto-link engine can positively classify as a
+  pm_task/project/person id already in this tenant. `sourceRef` is REQUIRED (it IS the idempotency
+  key — omitting it is a 400, not an auto-minted id, since a minted id could never dedupe a retry).
+- **Auto-link engine** (`src/core/work-activity-linker.ts`): a PURE function, unit-tested
+  independent of any database (`work-activity-linker.test.ts`, 16 cases). Rule order: (a) structured
+  hints → exact; (b) uuid-scan in free text, only for uuids the DB-lookup boundary positively
+  classified → inferred; (c) derived chain — task→its project, project→its `department_id`
+  (NULL-tolerant), actor→person → inferred. An exact link is never downgraded by an inferred rule on
+  the same target. **GitHub/Drive source-specific rules are Phase-2 slots**, not implemented (the
+  `source` CHECK already accepts `'github'`/`'google_drive'` rows so P1-05 can start writing them).
+- `deliverable_evidence` — a plain SQL VIEW (no RLS of its own; inherits the base tables' FORCE RLS
+  as any view does) over `work_activity` rows whose `objectKind ∈ {file,doc,deliverable}`, left-
+  joined to `work_activity_links`. No endpoint yet — a future reporting surface reads it directly.
+- Cerbos: `cerbos/policies/resource_work_activity.yaml` (read = member/viewer/manager/team_lead/
+  company_admin; create = company_admin/platform_admin only). Policy-parity tests added to
+  `src/rbac/cerbos.test.ts` (5 new cases, live-Cerbos-gated like the rest of that file).

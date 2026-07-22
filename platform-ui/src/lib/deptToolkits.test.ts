@@ -14,13 +14,22 @@ describe("toolkitFor", () => {
   it("returns the bespoke Web Dev toolkit with its full tab set", () => {
     const tk = toolkitFor("Web Dev");
     expect(tk.slug).toBe("web-dev");
-    expect(tk.tabs.map((t) => t.key)).toEqual(["overview", "workflow", "prd", "tools"]);
+    expect(tk.tabs.map((t) => t.key)).toEqual([
+      "home", "projects", "board", "timeline", "activity", "prd", "repositories", "deliverables", "connections",
+    ]);
     expect(tk.launchers.some((l) => l.key === "claude-code")).toBe(true);
   });
-  it("falls back to a generic Overview-only toolkit for unbuilt departments", () => {
+  it("returns the bespoke Creatives toolkit with the Image Studio tab", () => {
     const tk = toolkitFor("Creatives");
     expect(tk.slug).toBe("creatives");
-    expect(tk.tabs.map((t) => t.key)).toEqual(["overview"]);
+    expect(tk.tabs.map((t) => t.key)).toEqual(["home", "studio", "tools"]);
+    expect(tk.tabs.some((t) => t.path === "studio")).toBe(true);
+    expect(tk.launchers.length).toBeGreaterThan(0);
+  });
+  it("falls back to a generic Home-only toolkit for unbuilt departments", () => {
+    const tk = toolkitFor("SEO");
+    expect(tk.slug).toBe("seo");
+    expect(tk.tabs.map((t) => t.key)).toEqual(["home"]);
     expect(tk.launchers).toEqual([]);
   });
 });
@@ -33,10 +42,10 @@ describe("hasBespokeToolkit", () => {
 });
 
 describe("tabHref", () => {
-  it("routes the overview tab to the console root and others to sub-paths", () => {
+  it("routes the home tab to the console root and others to sub-paths", () => {
     const tk = toolkitFor("Web Dev");
-    const [overview, workflow] = tk.tabs;
-    expect(tabHref("dept-1", overview)).toBe("/departments/dept-1");
-    expect(tabHref("dept-1", workflow)).toBe("/departments/dept-1/workflow");
+    const [home, projects] = tk.tabs;
+    expect(tabHref("dept-1", home)).toBe("/departments/dept-1");
+    expect(tabHref("dept-1", projects)).toBe("/departments/dept-1/projects");
   });
 });

@@ -16,6 +16,7 @@ import { PipelineController } from "./core/pipeline.controller";
 import { MeetingRecordingsController } from "./core/meetings.controller";
 import { PortalController } from "./core/portal.controller";
 import { FilesController } from "./core/files.controller";
+import { WorkActivityController } from "./core/work-activity.controller";
 import { AdminIdentityController } from "./admin/admin-identity.controller";
 import { CompanyAdminController } from "./admin/company-admin.controller";
 import { ServiceAssignmentsController } from "./admin/service-assignments.controller";
@@ -32,7 +33,7 @@ import { McpToolsController } from "./modules/mcp-tools.controller";
 @Module({
   controllers: [
     HealthController, IdentityController, CoreController, TeamsController, CustomFieldsController,
-    AuthzCheckController, ClientWorkController, BillingController, CollabController, AutomationApprovalsController, PipelineController, MeetingRecordingsController, PortalController, FilesController, AdminIdentityController,
+    AuthzCheckController, ClientWorkController, BillingController, CollabController, AutomationApprovalsController, PipelineController, MeetingRecordingsController, PortalController, FilesController, WorkActivityController, AdminIdentityController,
     CompanyAdminController, ServiceAssignmentsController, CompanyCrudController, AdminSystemsController, IntelligenceController,
     // Vertical modules (compiled-in; per-tenant enable gate at the controller).
     AgencyController, PmController, ItController, ClientsController, HrController,

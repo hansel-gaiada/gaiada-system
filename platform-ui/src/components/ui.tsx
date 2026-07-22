@@ -55,6 +55,8 @@ const STATUS_COLORS: Record<string, string> = {
   // rust — attention/negative states
   "at risk": "#B5622F", overdue: "#B5622F", low: "#B5622F", critical: "#B5622F", blocked: "#B5622F",
   "on hold": "#B5622F", rejected: "#B5622F",
+  // ORG-13 service-assignment lifecycle states
+  proposed: "#6E5A43", suspended: "#A39174", orphaned: "#B5622F", revoked: "#B5622F",
 };
 export function statusColor(s: string): string {
   return STATUS_COLORS[normalizeStatus(s)] ?? "#6E5A43";

@@ -1,0 +1,82 @@
+/* Image Studio — creative department grading surface. Uses the platform design
+   tokens (surface/hairline/accent/text) so it reads as part of the ERP shell. */
+
+.cs { display: flex; flex-direction: column; gap: 16px; }
+
+/* Filmstrip of uploaded images */
+.cs-strip { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; }
+.cs-thumb {
+  flex: 0 0 auto; width: 72px; height: 72px; padding: 0; border-radius: 8px;
+  overflow: hidden; cursor: pointer; background: var(--surface-card);
+  border: 1px solid color-mix(in srgb, var(--hairline) 100%, transparent);
+  outline: 2px solid transparent; transition: outline-color .12s ease;
+}
+.cs-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.cs-thumb.is-active { outline-color: var(--accent); }
+
+.cs-main { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 16px; align-items: start; }
+@media (max-width: 860px) { .cs-main { grid-template-columns: 1fr; } }
+
+/* Preview + before/after slider */
+.cs-preview { min-width: 0; }
+.cs-ba {
+  position: relative; width: 100%; border-radius: 12px; overflow: hidden;
+  background: var(--surface-card); border: 1px solid var(--hairline); user-select: none; touch-action: none;
+  line-height: 0;
+}
+.cs-ba__img { width: 100%; height: auto; display: block; }
+.cs-ba__after { position: absolute; inset: 0; }
+.cs-ba__after .cs-ba__img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+.cs-ba__handle { position: absolute; top: 0; bottom: 0; width: 2px; background: #fff; box-shadow: 0 0 0 1px rgba(0,0,0,.35); transform: translateX(-1px); }
+.cs-ba__grip {
+  position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  width: 30px; height: 30px; border-radius: 50%; background: #fff; color: #111;
+  display: grid; place-items: center; font-size: 13px; box-shadow: 0 1px 6px rgba(0,0,0,.35);
+}
+.cs-ba__tag {
+  position: absolute; top: 8px; font-size: 10px; letter-spacing: .08em; text-transform: uppercase;
+  padding: 2px 8px; border-radius: 999px; background: rgba(0,0,0,.55); color: #fff; line-height: 1.4;
+}
+.cs-ba__tag--l { left: 8px; } .cs-ba__tag--r { right: 8px; }
+.cs-ba__range { position: absolute; inset: auto 0 8px; width: 60%; margin: 0 auto; opacity: 0; height: 24px; }
+
+/* Control panel */
+.cs-panel { display: flex; flex-direction: column; gap: 18px; }
+.cs-section { display: flex; flex-direction: column; gap: 10px; }
+.cs-h { margin: 0; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: color-mix(in srgb, var(--text-primary) 60%, transparent); }
+
+.cs-presets { display: flex; flex-wrap: wrap; gap: 6px; }
+.cs-chip {
+  padding: 6px 12px; border-radius: 999px; font-size: 12px; cursor: pointer;
+  background: var(--surface-card); color: var(--text-primary);
+  border: 1px solid var(--hairline); transition: all .12s ease;
+}
+.cs-chip:hover { border-color: var(--accent); }
+.cs-chip.is-active { background: var(--accent); color: var(--text-on-accent); border-color: var(--accent); }
+.cs-chip--ai { opacity: .55; cursor: not-allowed; font-style: italic; }
+.cs-chip--ai:hover { border-color: var(--hairline); }
+
+.cs-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* Sliders */
+.cs-sliders { display: flex; flex-direction: column; gap: 12px; }
+.cs-slider { display: flex; flex-direction: column; gap: 4px; }
+.cs-slider__head { display: flex; justify-content: space-between; align-items: baseline; font-size: 12px; }
+.cs-slider__label { color: var(--text-primary); }
+.cs-slider__label em { color: color-mix(in srgb, var(--text-primary) 45%, transparent); font-style: normal; font-size: 10px; }
+.cs-slider__val { font-variant-numeric: tabular-nums; color: color-mix(in srgb, var(--text-primary) 60%, transparent); font-size: 11px; }
+.cs-slider input[type="range"] { width: 100%; accent-color: var(--accent); }
+
+.cs-note { margin: 4px 0 0; font-size: 11px; color: color-mix(in srgb, var(--text-primary) 50%, transparent); line-height: 1.4; }
+
+/* Dropzone */
+.cs-drop {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
+  flex: 0 0 auto; width: 72px; height: 72px; border-radius: 8px; cursor: pointer;
+  border: 1px dashed color-mix(in srgb, var(--text-primary) 30%, transparent);
+  color: color-mix(in srgb, var(--text-primary) 55%, transparent); background: transparent; transition: all .12s ease;
+}
+.cs-drop:hover, .cs-drop.is-over { border-color: var(--accent); color: var(--accent); }
+.cs-drop--lg { width: 100%; height: 280px; }
+.cs-drop--lg strong { color: var(--text-primary); font-size: 15px; }
+.cs-drop__glyph { font-size: 22px; line-height: 1; }
