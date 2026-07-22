@@ -17,6 +17,10 @@ export default async function HRConsoleLayout({ children }: { children: React.Re
   const tabs: SectionTab[] = [
     { key: "overview", label: "Overview", href: "/hr", icon: "home" },
     { key: "people", label: "People", href: "/hr/people", icon: "hr" },
+    { key: "leave", label: "Leave", href: "/hr/leave", icon: "clock" },
+    { key: "attendance", label: "Attendance", href: "/hr/attendance", icon: "check" },
+    { key: "onboarding", label: "Onboarding", href: "/hr/onboarding", icon: "box" },
+    { key: "cases", label: "Cases", href: "/hr/cases", icon: "inventory" },
     // Org structure is edited on the company org builder; HR is its main consumer.
     ...(tenant ? [{ key: "org", label: "Org structure", href: `/companies/${tenant}/org`, icon: "inventory" as const }] : []),
   ];

@@ -63,9 +63,8 @@ const AGENCY_DEPARTMENTS: { name: string; divisions: { name: string; roles?: Org
     { name: "On-page", roles: [{ id: "d3-r1", name: "SEO Specialist", kind: "role", children: [] }] },
     { name: "Off-page", roles: [] },
   ] },
-  // Social Media / GM have no divisions — people sit directly under the department.
+  // Social Media has no divisions — people sit directly under the department.
   { name: "Social Media", divisions: [], people: [person("d4-p1", "Dewi Santoso", "u-pm")] },
-  { name: "GM", divisions: [], people: [person("d5-p1", "General Manager")] },
 ];
 
 export function defaultStructure(company: { id: string; name: string; type: string | null }): OrgStructure {

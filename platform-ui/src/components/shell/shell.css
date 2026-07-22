@@ -19,15 +19,6 @@
 .sec-tab--active { color: var(--erp-accent); border-bottom-color: var(--erp-accent); }
 .sec-tab svg { opacity: 0.8; }
 
-/* Expandable nav item (e.g. Departments → per-department children) */
-.erp-disc__head { display: flex; align-items: center; }
-.erp-disc__toggle { background: transparent; border: none; cursor: pointer; padding: 8px 12px; color: rgba(26, 25, 22, 0.42); display: flex; align-items: center; transition: color 0.2s var(--erp-ease); }
-.erp-disc__toggle:hover { color: var(--text-primary); }
-.erp-disc__kids { display: flex; flex-direction: column; }
-.erp-navbtn--sub { padding-left: 39px; font-size: 13px; color: rgba(26, 25, 22, 0.55); }
-.erp-disc__bullet { width: 4px; height: 4px; border-radius: 50%; background: currentColor; opacity: 0.45; flex: 0 0 4px; }
-.erp-navbtn--sub.erp-navbtn--active .erp-disc__bullet { opacity: 1; }
-
 .erp-side__user { border-top: 0.5px solid rgba(26, 25, 22, 0.1); padding: 14px 16px; display: flex; align-items: center; gap: 12px; }
 .erp-usermenu { position: relative; }
 .erp-usermenu__trigger { width: 100%; background: transparent; border: none; border-top: 0.5px solid rgba(26, 25, 22, 0.1); cursor: pointer; color: var(--text-primary); font-family: var(--font-body); transition: background 0.2s var(--erp-ease); }
@@ -93,9 +84,6 @@
   .erp-side__nav .erp-navbtn { justify-content: center; gap: 0; padding-left: 10px; padding-right: 10px; }
   .erp-side__nav .erp-navbtn span { display: none; }
   .erp-side__nav .type-eyebrow { display: none; }
-  /* Compact icon-rail: hide the disclosure toggle + children; the Departments
-     icon still links to the list page, which fans out from there. */
-  .erp-side__nav .erp-disc__toggle, .erp-side__nav .erp-disc__kids { display: none; }
   .erp-side__brand { padding: 16px 0; text-align: center; }
   .erp-side__brand .erp-side__wordmark { font-size: 15px; letter-spacing: 0.04em; }
   .erp-side__brand .type-eyebrow { display: none; }

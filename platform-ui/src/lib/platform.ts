@@ -54,10 +54,24 @@ export async function platformFetch<T>(path: string, userId: string, init: Reque
   return (await res.json()) as T;
 }
 
+// A served-company grant materialized by the ORG-6 reconciler for a shared-service
+// unit (e.g. an HR staffer placed in a provider company's HR department, serving
+// one or more target companies for a given module). `[]` whenever
+// SERVICE_ASSIGNMENTS_ENABLED is off or the caller has none (ORG-7b, additive).
+export interface ServiceScope {
+  companyId: string;
+  companyName: string;
+  assignmentId: string;
+  module: string;
+  unitName: string;
+  role: "staff" | "manager";
+}
+
 export interface Me {
   userId: string; name: string; email: string; title: string | null; assurance: string;
   companies: { id: string; name: string; type: string | null }[];
   roles: { role: string; scopeType: string; scopeId: string | null }[];
+  serviceScopes?: ServiceScope[];
 }
 
 export const getMe = (userId: string) => platformFetch<Me>("/api/me", userId);

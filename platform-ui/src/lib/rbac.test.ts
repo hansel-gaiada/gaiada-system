@@ -46,6 +46,29 @@ describe("can() — capability + scope", () => {
   });
 });
 
+describe("hr caps (hr_staff/hr_manager)", () => {
+  const staff = me([{ role: "hr_staff", scopeType: "company", scopeId: "co-a" }]);
+  const manager = me([{ role: "hr_manager", scopeType: "company", scopeId: "co-a" }]);
+
+  it("hr_staff can view but not manage, scoped to their company", () => {
+    expect(can(staff, "hr.view", "co-a")).toBe(true);
+    expect(can(staff, "hr.manage", "co-a")).toBe(false);
+    expect(can(staff, "hr.view", "co-b")).toBe(false);
+  });
+
+  it("hr_manager can view and manage in their company only", () => {
+    expect(can(manager, "hr.view", "co-a")).toBe(true);
+    expect(can(manager, "hr.manage", "co-a")).toBe(true);
+    expect(can(manager, "hr.manage", "co-b")).toBe(false);
+  });
+
+  it("company_admin gets both hr caps in their own company", () => {
+    const coAdminA = me([{ role: "company_admin", scopeType: "company", scopeId: "co-a" }]);
+    expect(can(coAdminA, "hr.view", "co-a")).toBe(true);
+    expect(can(coAdminA, "hr.manage", "co-a")).toBe(true);
+  });
+});
+
 describe("canManageIT", () => {
   const itA = me([{ role: "it_admin", scopeType: "company", scopeId: "co-a" }]);
   it("scoped to a company when given, else 'anywhere'", () => {

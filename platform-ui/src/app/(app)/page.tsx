@@ -5,6 +5,7 @@ import { getMe } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
 import { getPendingApprovals, getMyTasks, getActivity, weeklyThroughput } from "@/lib/data";
 import { myPlacement } from "@/lib/departments";
+import { listProjects } from "@/lib/entities";
 import { decideApproval } from "./actions";
 import { Card, Eyebrow, KpiTile, HairlineTable, StatusBadge } from "@/components/ui";
 import { LineChart } from "@/components/LineChart";
@@ -15,37 +16,34 @@ function timeOfDay(): string {
   return h < 12 ? "morning" : h < 18 ? "afternoon" : "evening";
 }
 
-export default async function MyWork() {
+// The personal Dashboard — a person's command center. Everything related to the
+// signed-in person: what's awaiting them, their tasks, their department, the
+// projects they own, their throughput and recent activity. Every person lands
+// here; their department console is one click away via the "My department" card.
+export default async function Dashboard() {
   const userId = await getSessionUserId();
   if (!userId) redirect("/login");
   const me = await getMe(userId);
   const tenantId = await getActiveTenant(me);
-
-  // Department-first: an employee placed in the active company's org lands in — and
-  // works from — their own department console, not this cross-company personal home.
-  // People who aren't placed in a department (e.g. owners / holding executives who
-  // oversee everything) keep this dashboard as their landing.
-  if (tenantId) {
-    const placement = await myPlacement(userId, tenantId, userId).catch(() => null);
-    if (placement) redirect(`/departments/${placement.deptId}`);
-  }
-
   const firstName = me.name.split(/\s+/)[0];
 
-  const [approvals, tasks, activity] = await Promise.all([
+  const [approvals, tasks, activity, placement, projects] = await Promise.all([
     getPendingApprovals(userId, me.companies),
     tenantId ? getMyTasks(userId, tenantId) : Promise.resolve([]),
     tenantId ? getActivity(userId, tenantId) : Promise.resolve([]),
+    tenantId ? myPlacement(userId, tenantId, userId).catch(() => null) : Promise.resolve(null),
+    tenantId ? listProjects(userId, tenantId).catch(() => []) : Promise.resolve([]),
   ]);
   const today = new Date().toISOString().slice(0, 10);
   const dueToday = tasks.filter((t) => t.due_date && t.due_date.slice(0, 10) <= today).length;
   const series = weeklyThroughput(activity);
+  const myProjects = projects.filter((p) => p.owner_id === userId);
 
   return (
     <>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", gap: 24, flexWrap: "wrap", marginBottom: 26 }}>
         <div>
-          <Eyebrow style={{ color: "var(--erp-accent)", marginBottom: 8, display: "block" }}>Personal home</Eyebrow>
+          <Eyebrow style={{ color: "var(--erp-accent)", marginBottom: 8, display: "block" }}>Command center</Eyebrow>
           <h1 style={{ margin: 0, fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 34, lineHeight: 1.1 }}>
             Good {timeOfDay()}, {firstName}
           </h1>
@@ -55,6 +53,15 @@ export default async function MyWork() {
               : "Nothing is waiting on you right now. Here is your brief."}
           </p>
         </div>
+        {placement && (
+          <Link
+            href={`/departments/${placement.deptId}`}
+            className="lux-btn lux-btn--ghost lux-btn--sm"
+            style={{ textDecoration: "none" }}
+          >
+            My department: {placement.deptName}{placement.divisionName ? ` · ${placement.divisionName}` : ""} →
+          </Link>
+        )}
       </div>
 
       <div className="dash-grid">
@@ -110,6 +117,22 @@ export default async function MyWork() {
           ))}
         </Card>
       </div>
+
+      {myProjects.length > 0 && (
+        <div style={{ marginTop: 20 }}>
+          <Card title="Projects you own" headerRight={<Link href="/projects" className="lux-btn lux-btn--ghost lux-btn--sm">All projects →</Link>}>
+            <HairlineTable
+              tcols="2.4fr 1fr 1fr"
+              columns={[{ label: "Project" }, { label: "Status" }, { label: "Due", align: "right" }]}
+              rows={myProjects.slice(0, 8).map((p) => [
+                <Link key={p.id} href={`/projects/${p.id}`} style={{ color: "var(--text-primary)", textDecoration: "none" }}>{p.name}</Link>,
+                <StatusBadge key={`${p.id}-s`} label={p.status} />,
+                p.due_date ? p.due_date.slice(0, 10) : "—",
+              ])}
+            />
+          </Card>
+        </div>
+      )}
     </>
   );
 }

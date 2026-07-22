@@ -6,7 +6,7 @@ import type { IconName } from "./icons";
 // because existing call sites import them from the nav module.
 export { isElevated, canManageIT } from "@/lib/rbac";
 
-export interface NavItem { label: string; href: string; icon: IconName; children?: NavItem[] }
+export interface NavItem { label: string; href: string; icon: IconName }
 export interface NavGroup { label: string; items: NavItem[] }
 
 // Nav is capability-gated against the ACTIVE company (tenantId). Company-scoped
@@ -33,26 +33,26 @@ export function navFor(me: Me, tenantId?: string | null, departments: { id: stri
     { label: "Delivery Pipeline", href: "/pipeline", icon: "pulse" },
     ...(can(me, "rollups.view") ? [{ label: "Rollups", href: "/rollups", icon: "pulse" } as NavItem] : []),
   ];
-  // Departments is the organizational home: the business departments (from the
-  // org structure) plus the always-present functional departments HR and IT.
-  // Each child opens that department's console.
-  const deptChildren: NavItem[] = [
+  // Departments is its own section (rendered exactly like Organization — a group
+  // header with a flat list of rows): the business departments (from the org
+  // structure) plus the always-present functional departments HR and IT. Each
+  // row opens that department's console.
+  const deptItems: NavItem[] = [
     ...departments.map((d) => ({ label: d.name, href: `/departments/${d.id}`, icon: "hr" as IconName })),
     { label: "HR", href: "/hr", icon: "hr" },
     { label: "IT", href: "/it", icon: "pulse" },
   ];
   const groups: NavGroup[] = [
     { label: "Workspace", items: [
-      { label: "My Work", href: "/", icon: "home" },
+      { label: "Dashboard", href: "/", icon: "home" },
       { label: "Calendar", href: "/calendar", icon: "clock" },
       { label: "Approvals", href: "/approvals", icon: "check" },
     ] },
-    // Companies now live inside the Organization Overview; the sidebar just links
-    // to Overview and the expandable Departments tree.
+    // Companies now live inside the Organization Overview.
     { label: "Organization", items: [
       { label: "Overview", href: "/organization", icon: "inventory" },
-      { label: "Departments", href: "/departments", icon: "hr", children: deptChildren },
     ] },
+    { label: "Departments", items: deptItems },
     { label: "Business", items: business },
     { label: "Intelligence", items: [
       { label: "Knowledge", href: "/knowledge", icon: "box" },

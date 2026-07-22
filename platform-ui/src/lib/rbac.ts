@@ -17,7 +17,8 @@ export type Role =
   | "company_admin"    // admin within a company
   | "manager"          // runs work within a company
   | "member"           // baseline access
-  | "it_admin" | "it_manager" | "it"; // IT operators
+  | "it_admin" | "it_manager" | "it"  // IT operators
+  | "hr_staff" | "hr_manager"; // HR module derived roles (WSD-2 module_staff/module_manager, string-composed from grants — see hr module design §2.1). Company-scoped; may be reconciler-materialized onto a SERVED company (Me.serviceScopes) when the grant rides a service assignment.
 
 export type Capability =
   | "admin.access"       // /admin/* (users, identity, modules, compliance, audit)
@@ -28,24 +29,29 @@ export type Capability =
   | "pm.manage"          // create/assign/move tasks, confirm AI-tracker writes
   | "it.manage"          // register/edit devices
   | "approvals.decide"   // approve/reject
-  | "knowledge.review";  // review/quarantine knowledge sources
+  | "knowledge.review"   // review/quarantine knowledge sources
+  | "hr.view"            // read hr_cases/hr_records/leave/attendance for a company
+  | "hr.manage";         // file/decide leave on others' behalf, edit cases/records/checklists, manage templates
 
 // What each role grants (within its own scope). Order/duplication is harmless.
 const ALL: Capability[] = [
   "admin.access", "company.manage", "org.edit", "people.directory",
   "rollups.view", "pm.manage", "it.manage", "approvals.decide", "knowledge.review",
+  "hr.view", "hr.manage",
 ];
 export const ROLE_CAPS: Record<Role, Capability[]> = {
   platform_admin: ALL,
   group_executive: ALL,
   // View-across-the-holding, but not unrestricted: cross-company read surfaces only.
   holding_head: ["people.directory", "rollups.view"],
-  company_admin: ["admin.access", "company.manage", "org.edit", "people.directory", "pm.manage", "it.manage", "approvals.decide", "knowledge.review"],
+  company_admin: ["admin.access", "company.manage", "org.edit", "people.directory", "pm.manage", "it.manage", "approvals.decide", "knowledge.review", "hr.view", "hr.manage"],
   manager: ["pm.manage", "approvals.decide", "people.directory"],
   member: [],
   it_admin: ["it.manage", "company.manage"],
   it_manager: ["it.manage"],
   it: ["it.manage"],
+  hr_staff: ["hr.view"],
+  hr_manager: ["hr.view", "hr.manage"],
 };
 
 type Grant = Me["roles"][number];

@@ -5,7 +5,7 @@ describe("defaultStructure", () => {
   it("seeds the five departments for the agency", () => {
     const s = defaultStructure({ id: "co-agency", name: "Gaia Digital Agency", type: "agency" });
     expect(s.root.kind).toBe("company");
-    expect(s.root.children.map((c) => c.name)).toEqual(["Web Dev", "Creatives", "SEO", "Social Media", "GM"]);
+    expect(s.root.children.map((c) => c.name)).toEqual(["Web Dev", "Creatives", "SEO", "Social Media"]);
     expect(s.root.children.every((c) => c.kind === "department")).toBe(true);
   });
 

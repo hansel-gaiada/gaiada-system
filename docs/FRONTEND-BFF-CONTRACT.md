@@ -112,7 +112,7 @@ pm.manage, it.manage, approvals.decide, knowledge.review`.
 ## 4. Work management — `lib/entities.ts`, `lib/data.ts`
 | Status | Method | Path | Notes |
 |---|---|---|---|
-| ✅ | GET/POST | `/api/:t/projects`, `/api/:t/projects/:id` | list + detail + create + PATCH exist. **No delete/archive endpoint — add one.** |
+| ✅ | GET/POST | `/api/:t/projects`, `/api/:t/projects/:id` | list + detail + create + PATCH exist. **No delete/archive endpoint — add one.** **NEW: projects gain an owning `department_id` (org-node id, nullable) — GET must return it; POST/PATCH accept `departmentId`.** Drives the Projects "Department" column + each department console's owned-projects list. Cross-department work still flows via task assignment. |
 | ✅ | GET | `/api/:t/tasks?assignee=me` | base task list. |
 | ✅ | GET/POST | `/api/:t/projects/:pid/tasks` | list + create. |
 | ✅ | PATCH | `/api/:t/tasks/:id` | BUILT (`core.controller.ts`). Base task update. |
