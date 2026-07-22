@@ -184,6 +184,9 @@ services:
       # Event → knowledge-graph bridge (WS8 Step E). Forwards business events on these entity streams
       # to the knowledge service /graph/ingest (reuses KNOWLEDGE_URL/TOKEN above). Off unless set.
       GRAPH_BRIDGE_ENTITY_TYPES: ${GRAPH_BRIDGE_ENTITY_TYPES:-}
+      # ORG-6 release train (WSD-8 go-live 2026-07-22): shared-service assignments + reconciler.
+      # Dark by default (empty/unset -> off); "1"/"true" flips the whole train on.
+      SERVICE_ASSIGNMENTS_ENABLED: ${SERVICE_ASSIGNMENTS_ENABLED:-}
     volumes:
       - platform-files:/data/files
     depends_on:
@@ -234,6 +237,10 @@ services:
       PLATFORM_URL: http://platform:3004
       PLATFORM_SERVICE_TOKEN: ${PLATFORM_SERVICE_TOKEN:?}
       SESSION_SECRET: ${UI_SESSION_SECRET:?}
+      # UI-side mirror of the backend flag (ORG-13; default OFF). Must match the platform's
+      # SERVICE_ASSIGNMENTS_ENABLED so the Connect-service UI surfaces only when the backend
+      # actually serves it (writes 409 while off).
+      SERVICE_ASSIGNMENTS_ENABLED: ${SERVICE_ASSIGNMENTS_ENABLED:-}
     ports:
       - "3005:3005"
     depends_on:
