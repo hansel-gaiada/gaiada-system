@@ -287,6 +287,102 @@ const FILES: Record<string, unknown>[] = [
   { id: "f-2", entity_type: "task", entity_id: "t-4", filename: "hero-mock.fig", content_type: "application/octet-stream", byte_size: 51200, scrubbed: true, uploader_id: "u-dev", created_at: "2026-07-03T09:00:00Z", url: null },
 ];
 
+// ---- F2 work-activity feed (P1-04 backend contract, P1-07 wires the UI) ----
+// Session-only, dept-1 (Web Dev)-heavy so the department console's Home +
+// Activity tab render real rows out of the box. `links` mirror what the real
+// auto-link engine would derive (structured hints -> exact; task->project->
+// department chain -> inferred) — see FRONTEND-BFF-CONTRACT.md §11.
+const WORK_ACTIVITY: Record<string, unknown>[] = [
+  {
+    id: "wa-1", tenantId: "co-agency", source: "pm", sourceRef: "pm-t-4-1", actorUserId: "u-dev", actorExternal: null,
+    verb: "updated", objectKind: "pm_task", objectRef: "t-4", title: "Wire homepage hero",
+    payload: {}, occurredAt: "2026-07-22T09:10:00Z", originSite: "central", createdAt: "2026-07-22T09:10:00Z",
+    links: [
+      { targetKind: "pm_task", targetId: "t-4", confidence: "exact", rule: "structured" },
+      { targetKind: "project", targetId: "p-web-1", confidence: "inferred", rule: "task_project_chain" },
+      { targetKind: "department", targetId: "dept-1", confidence: "inferred", rule: "project_department_chain" },
+      { targetKind: "person", targetId: "u-dev", confidence: "exact", rule: "structured" },
+    ],
+  },
+  {
+    id: "wa-2", tenantId: "co-agency", source: "pm", sourceRef: "pm-t-5-1", actorUserId: "u-dev", actorExternal: null,
+    verb: "commented", objectKind: "pm_task", objectRef: "t-5", title: "QA checkout flow",
+    payload: {}, occurredAt: "2026-07-22T08:05:00Z", originSite: "central", createdAt: "2026-07-22T08:05:00Z",
+    links: [
+      { targetKind: "pm_task", targetId: "t-5", confidence: "exact", rule: "structured" },
+      { targetKind: "project", targetId: "p-web-1", confidence: "inferred", rule: "task_project_chain" },
+      { targetKind: "department", targetId: "dept-1", confidence: "inferred", rule: "project_department_chain" },
+      { targetKind: "person", targetId: "u-dev", confidence: "exact", rule: "structured" },
+    ],
+  },
+  {
+    id: "wa-3", tenantId: "co-agency", source: "manual", sourceRef: "manual-doc-1", actorUserId: "demo-hansel", actorExternal: null,
+    verb: "created", objectKind: "doc", objectRef: "doc-1", title: "Homepage hero brief",
+    payload: {}, occurredAt: "2026-07-21T15:30:00Z", originSite: "central", createdAt: "2026-07-21T15:30:00Z",
+    links: [
+      { targetKind: "project", targetId: "p-web-1", confidence: "inferred", rule: "structured" },
+      { targetKind: "department", targetId: "dept-1", confidence: "inferred", rule: "project_department_chain" },
+      { targetKind: "person", targetId: "demo-hansel", confidence: "exact", rule: "structured" },
+    ],
+  },
+  {
+    id: "wa-4", tenantId: "co-agency", source: "system", sourceRef: "tracker-run-t-4-1", actorUserId: null, actorExternal: "scheduler",
+    verb: "ran", objectKind: "tracker_run", objectRef: "t-4", title: "AI Tracker analysis",
+    payload: {}, occurredAt: "2026-07-21T06:00:00Z", originSite: "central", createdAt: "2026-07-21T06:00:00Z",
+    links: [
+      { targetKind: "pm_task", targetId: "t-4", confidence: "exact", rule: "structured" },
+      { targetKind: "project", targetId: "p-web-1", confidence: "inferred", rule: "task_project_chain" },
+      { targetKind: "department", targetId: "dept-1", confidence: "inferred", rule: "project_department_chain" },
+    ],
+  },
+  {
+    id: "wa-5", tenantId: "co-agency", source: "pm", sourceRef: "pm-t-6-1", actorUserId: "demo-hansel", actorExternal: null,
+    verb: "updated", objectKind: "pm_task", objectRef: "t-6", title: "Keyword gap analysis",
+    payload: {}, occurredAt: "2026-07-20T11:00:00Z", originSite: "central", createdAt: "2026-07-20T11:00:00Z",
+    links: [
+      { targetKind: "pm_task", targetId: "t-6", confidence: "exact", rule: "structured" },
+      { targetKind: "project", targetId: "p-seo-1", confidence: "inferred", rule: "task_project_chain" },
+      { targetKind: "department", targetId: "dept-3", confidence: "inferred", rule: "project_department_chain" },
+      { targetKind: "person", targetId: "demo-hansel", confidence: "exact", rule: "structured" },
+    ],
+  },
+  {
+    id: "wa-6", tenantId: "co-agency", source: "pm", sourceRef: "pm-m-1-1", actorUserId: "u-dev", actorExternal: null,
+    verb: "created", objectKind: "milestone", objectRef: "m-1", title: "Beta launch",
+    payload: {}, occurredAt: "2026-07-19T09:00:00Z", originSite: "central", createdAt: "2026-07-19T09:00:00Z",
+    links: [
+      { targetKind: "project", targetId: "p-web-1", confidence: "inferred", rule: "structured" },
+      { targetKind: "department", targetId: "dept-1", confidence: "inferred", rule: "project_department_chain" },
+      { targetKind: "person", targetId: "u-dev", confidence: "exact", rule: "structured" },
+    ],
+  },
+];
+
+interface DemoWorkActivityLink { targetKind: string; targetId: string }
+function activityLinks(row: Record<string, unknown>): DemoWorkActivityLink[] {
+  return (row.links as DemoWorkActivityLink[] | undefined) ?? [];
+}
+
+// ---- WS4 automation-approvals inbox (§8) — feeds the dept console's
+// "Waiting on me" rail. Tenant-wide (not department-scoped in the real
+// schema), both pending so the demo rail always has something to show.
+const AUTOMATION_APPROVALS: Record<string, unknown>[] = [
+  {
+    id: "aa-1", workflow_id: "wf-device-alert", tool_name: "it.devices.disable",
+    tool_args: { deviceId: "dev-cam-park" }, impact: "high",
+    reason: "Repeated auth failures on CCTV — Parking; auto-disable suspended for review.",
+    status: "pending", origin: "automation", agent_name: null, requested_by: "system",
+    decided_by: null, decided_at: null, created_at: "2026-07-21T22:00:00Z",
+  },
+  {
+    id: "aa-2", workflow_id: "wf-summarize", tool_name: "pm.tasks.bulkUpdate",
+    tool_args: { projectId: "p-web-1" }, impact: "medium",
+    reason: "Bulk status update flagged unclassified by the write gate.",
+    status: "pending", origin: "agent", agent_name: "status-reporter", requested_by: "agent:status-reporter",
+    decided_by: null, decided_at: null, created_at: "2026-07-22T07:30:00Z",
+  },
+];
+
 const IDENTITY_LINKS = [
   { id: "il-1", user_id: "u-pm", user_name: "Dewi Santoso", provider: "whatsapp", external_id: "628999@c.us", verified_at: "2026-06-01T00:00:00Z" },
   { id: "il-2", user_id: "u-dev", user_name: "Made Putra", provider: "telegram", external_id: "tg:5551", verified_at: null },
@@ -746,6 +842,59 @@ export function getDemoResponse(method: string, fullPath: string, body?: string)
   if (p.match(/^\/api\/[^/]+\/compliance-gates$/)) return ok(COMPLIANCE_GATES);
   if (p.match(/^\/api\/[^/]+\/compliance-gates\/[^/]+$/)) return ok({ ok: true });
   if (p.match(/^\/api\/[^/]+\/audit$/)) return ok(ACTIVITY);
+
+  // ---- F2 work-activity feed (lib/activity.ts) ----
+  const workActivityMatch = p.match(/^\/api\/[^/]+\/work-activity$/);
+  if (workActivityMatch) {
+    if (m === "POST") {
+      const b = JSON.parse(body || "{}");
+      return { status: 201, json: { id: demoId("wa"), deduped: false, ...b } };
+    }
+    const deptId = url.searchParams.get("deptId");
+    const projectId = url.searchParams.get("projectId");
+    const personId = url.searchParams.get("personId");
+    const since = url.searchParams.get("since");
+    const limit = Math.max(1, Math.min(500, Number(url.searchParams.get("limit")) || 100));
+    let rows = WORK_ACTIVITY;
+    if (deptId) rows = rows.filter((r) => activityLinks(r).some((l) => l.targetKind === "department" && l.targetId === deptId));
+    if (projectId) {
+      rows = rows.filter(
+        (r) =>
+          activityLinks(r).some((l) => l.targetKind === "project" && l.targetId === projectId) ||
+          (r.objectKind === "project" && r.objectRef === projectId),
+      );
+    }
+    if (personId) {
+      rows = rows.filter(
+        (r) => r.actorUserId === personId || activityLinks(r).some((l) => l.targetKind === "person" && l.targetId === personId),
+      );
+    }
+    if (since) rows = rows.filter((r) => String(r.occurredAt) >= since);
+    const sorted = [...rows].sort((a, b) => String(b.occurredAt).localeCompare(String(a.occurredAt)));
+    return ok(sorted.slice(0, limit));
+  }
+
+  // ---- WS4 automation-approvals inbox (lib/automationApprovals.ts) ----
+  const autoApprovalDecide = p.match(/^\/api\/[^/]+\/automation-approvals\/([^/]+)\/decide$/);
+  if (autoApprovalDecide && m === "POST") {
+    const row = AUTOMATION_APPROVALS.find((a) => a.id === autoApprovalDecide[1]);
+    const b = JSON.parse(body || "{}") as { decision?: "approved" | "rejected" };
+    if (row && b.decision) { row.status = b.decision; row.decided_by = DEMO_USER_ID; row.decided_at = "2026-07-22T09:00:00Z"; }
+    return ok({ id: autoApprovalDecide[1], status: row?.status ?? "approved" });
+  }
+  const autoApprovalsMatch = p.match(/^\/api\/[^/]+\/automation-approvals$/);
+  if (autoApprovalsMatch) {
+    if (m === "POST") {
+      const b = JSON.parse(body || "{}");
+      return { status: 201, json: { id: demoId("aa"), status: "pending", ...b } };
+    }
+    const status = url.searchParams.get("status") ?? "pending";
+    const origin = url.searchParams.get("origin");
+    let rows = AUTOMATION_APPROVALS;
+    if (status) rows = rows.filter((r) => r.status === status);
+    if (origin) rows = rows.filter((r) => r.origin === origin);
+    return ok(rows);
+  }
 
   // Anything else (comments, files, notifications, clients, deliverables,
   // time-entries, dev-only routes): safe empty-list default for GET, generic

@@ -95,6 +95,6 @@ function clamp(x: number, lo: number, hi: number): number {
 }
 
 /** Convenience: pixels → neutral auto grade. */
-export function autoGradeForImage(rgba: Uint8ClampedArray | number[]): Grade {
-  return deriveAutoGrade(analyseImage(rgba));
+export function autoGradeForImage(rgba: Uint8ClampedArray | number[], stride = 4): Grade {
+  return deriveAutoGrade(analyseImage(rgba, stride));
 }

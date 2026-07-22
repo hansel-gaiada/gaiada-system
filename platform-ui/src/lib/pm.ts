@@ -2,12 +2,16 @@ import "server-only";
 // Project-management data layer — Repsona-style projects/tasks with a board,
 // progress, poly-assignees (person | department | division + a responsible
 // person), subtasks, milestones, docs, and an AI Tracker. The backend PM API
-// (/api/:t/pm/*) does not exist yet; every reader DEGRADES gracefully (null/[]
-// on 404/403) so pages ship ahead of the backend — same pattern as lib/it.ts
-// and lib/admin.ts. In DEMO_MODE the whole surface is fully working against an
-// in-memory store (lib/demoPm.ts).
+// (/api/:t/pm/*) is BUILT and live (platform-nest/src/modules/pm/pm.controller.ts,
+// migration 0018) — every call here goes through platformFetch against the real
+// endpoints below. Readers still DEGRADE gracefully (null/[] on 404/403) so this
+// surface tolerates the module being disabled for a tenant or a stale deploy —
+// same defensive pattern as lib/it.ts and lib/admin.ts, not a "backend missing"
+// workaround. In DEMO_MODE (env-gated, see lib/platform.ts + lib/demoFixtures.ts)
+// the whole surface instead runs fully in-memory against lib/demoPm.ts, for
+// browsing the UI with no backend at all.
 //
-// BFF CONTRACT (implement in platform-nest to match — see memory
+// BFF CONTRACT (implemented in platform-nest to match — see memory
 // [[pm-ai-tracker-contract]]):
 //   GET  /api/:t/pm/projects/:id                 -> PmProject
 //   GET  /api/:t/pm/projects/:id/tasks           -> PmTask[]
@@ -208,7 +212,8 @@ export function groupByStatus(tasks: PmTask[]): BoardColumn[] {
 export interface Suggestion { progress: number; status: TaskStatus; rationale: string }
 // Deterministic tracker analysis: derive progress from subtasks (if any) and a
 // status transition from that progress. Pure so it's testable; the doc/comment/
-// notification delivery lives in the tracker runner (demoPm / backend).
+// notification delivery lives in the tracker runner (pm.controller.ts on the
+// backend, lib/demoPm.ts under DEMO_MODE) — both implement the same formula.
 export function suggestFromTask(task: PmTask): Suggestion {
   const sub = task.subtasks ?? [];
   const progress = sub.length > 0 ? taskProgressFromSubtasks(sub) : task.progress;

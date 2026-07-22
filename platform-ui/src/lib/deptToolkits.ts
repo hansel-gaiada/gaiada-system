@@ -104,7 +104,7 @@ const CREATIVES: DeptToolkit = {
   label: "Creatives",
   mission: "Creative production — from raw capture to on-brand, export-ready assets.",
   tabs: [
-    OVERVIEW,
+    HOME,
     { key: "studio", label: "Image Studio", path: "studio", icon: "box", blurb: "Auto-correct, grade and batch-export product & creative imagery." },
     { key: "tools", label: "Build Tools", path: "tools", icon: "gateway", blurb: "Launch into the tools the team creates with." },
   ],

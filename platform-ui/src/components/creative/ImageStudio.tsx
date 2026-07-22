@@ -6,9 +6,20 @@ import {
 } from "@/lib/imaging";
 import { BeforeAfterSlider } from "./BeforeAfterSlider";
 import { GradeSliders } from "./GradeSliders";
+import { saveCreativeAsset } from "@/lib/creativeActions";
 import "./creative.css";
 
 interface Item { id: string; url: string; name: string }
+
+// Blob → bare base64 (no data-URI prefix), for the JSON persist body.
+function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onload = () => resolve(String(fr.result).split(",")[1] ?? "");
+    fr.onerror = reject;
+    fr.readAsDataURL(blob);
+  });
+}
 
 let uid = 0;
 const nextId = () => `img-${Date.now()}-${uid++}`;
@@ -19,12 +30,13 @@ const nextId = () => `img-${Date.now()}-${uid++}`;
 // engine bakes each look into a 3D LUT and applies it on the GPU); the ERP only
 // ever receives the finished asset. The manual sliders and the preset/Auto looks
 // edit the SAME Grade, so AI-and-manual are one workflow, not two.
-export function ImageStudio() {
+export function ImageStudio({ deptId }: { deptId?: string }) {
   const [items, setItems] = useState<Item[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [grades, setGrades] = useState<Record<string, Grade>>({});
   const [activePreset, setActivePreset] = useState<string>("neutral");
   const [busy, setBusy] = useState(false);
+  const [saveMsg, setSaveMsg] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
 
   const imgCache = useRef<Map<string, HTMLImageElement>>(new Map());
@@ -144,6 +156,36 @@ export function ImageStudio() {
     }
   }, [selected, grades, loadImage]);
 
+  // Persist to the ERP: the graded result + the ORIGINAL + the exact grade params, so the
+  // correction is reproducible/reversible (and becomes an AI training pair, phase 2).
+  const saveToErp = useCallback(async () => {
+    if (!selected || !canvasRef.current) return;
+    setBusy(true); setSaveMsg(null);
+    try {
+      const g = grades[selected.id] ?? IDENTITY_GRADE;
+      const img = await loadImage(selected);
+      renderToCanvas(img, bakeLut(g), canvasRef.current);
+      const gradedBlob = await canvasToWebp(canvasRef.current, 0.88);
+      const originalBlob = await (await fetch(selected.url)).blob();
+      const res = await saveCreativeAsset({
+        name: selected.name.replace(/\.[^.]+$/, "") + ".webp",
+        presetId: activePreset,
+        width: canvasRef.current.width,
+        height: canvasRef.current.height,
+        grade: g as unknown as Record<string, number>,
+        graded: await blobToBase64(gradedBlob),
+        original: await blobToBase64(originalBlob),
+        originalContentType: originalBlob.type || "image/jpeg",
+        departmentId: deptId,
+      });
+      setSaveMsg(res.ok ? "Saved to ERP ✓" : res.error ?? "Save failed.");
+    } catch (e) {
+      setSaveMsg(e instanceof Error ? e.message : "Save failed.");
+    } finally {
+      setBusy(false);
+    }
+  }, [selected, grades, activePreset, deptId, loadImage]);
+
   // ── Empty state ────────────────────────────────────────────────────────────
   if (items.length === 0) {
     return (
@@ -214,10 +256,16 @@ export function ImageStudio() {
           </div>
 
           <div className="cs-section">
-            <button className="lux-btn lux-btn--solid lux-btn--md" onClick={exportSelected} disabled={busy}>
-              {busy ? "Exporting…" : "Export WebP"}
-            </button>
-            <p className="cs-note">Client-side only — the original never leaves this machine until you export.</p>
+            <div className="cs-actions">
+              <button className="lux-btn lux-btn--solid lux-btn--md" onClick={saveToErp} disabled={busy}>
+                {busy ? "Saving…" : "Save to ERP"}
+              </button>
+              <button className="lux-btn lux-btn--ghost lux-btn--md" onClick={exportSelected} disabled={busy}>
+                Export WebP
+              </button>
+            </div>
+            {saveMsg && <p className="cs-note" role="status">{saveMsg}</p>}
+            <p className="cs-note">Grading is client-side. Save keeps the original + grade params for reproducibility.</p>
           </div>
         </aside>
       </div>

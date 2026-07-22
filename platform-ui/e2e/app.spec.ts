@@ -102,6 +102,60 @@ test("account links to own employee page", async ({ page }) => {
   await expect(page.getByText("You", { exact: true })).toBeVisible();
 });
 
+async function switchToAgency(page: Page) {
+  await page.goto("/");
+  await page.getByLabel("Active company").selectOption({ label: "Gaia Digital Agency" });
+  await page.waitForLoadState("networkidle");
+}
+
+test("department Home shows live KPIs, a project health ring, activity feed, and the rail", async ({ page }) => {
+  await switchToAgency(page);
+  await page.goto("/departments/dept-1");
+  await expect(page.getByRole("heading", { level: 1 })).toContainText(/web dev/i);
+
+  // KPI strip — real numbers from the seeded PM demo store (Active=2, Due
+  // soon=3, Blocked=1 across the department's own tasks; Progress=43% from
+  // the one owned project), not the P1-06 all-zero placeholders.
+  const kpi = (label: string) => page.locator(".dept-kpi", { hasText: label }).locator(".dept-kpi__value");
+  await expect(kpi("Active")).toHaveText("2");
+  await expect(kpi("Due soon")).toHaveText("3");
+  await expect(kpi("Blocked")).toHaveText("1");
+  await expect(kpi("Progress")).toHaveText("43%");
+
+  // Project health ring for the one owned project, flagged at risk.
+  await expect(page.getByRole("link", { name: "Client site redesign" })).toBeVisible();
+  await expect(page.getByText(/at risk/i)).toBeVisible();
+  await expect(page.getByText(/overdue.*blocked|blocked.*overdue/i)).toBeVisible();
+
+  // Activity feed — real F2 rows for this department, not the empty teach-state.
+  await expect(page.getByText("Task: Wire homepage hero")).toBeVisible();
+  await expect(page.getByText(/no activity yet/i)).toHaveCount(0);
+
+  // The persistent rail (rendered once in the layout) shows real "waiting on
+  // me" data: pending agency approvals + WS4 automation approvals.
+  await expect(page.getByText(/waiting on me/i)).toBeVisible();
+  await expect(page.getByText("Landing page copy brief")).toBeVisible();
+});
+
+test("department Activity tab filters by project and person", async ({ page }) => {
+  await switchToAgency(page);
+  await page.goto("/departments/dept-1/activity");
+  await expect(page.getByRole("heading", { level: 1 })).toContainText(/web dev/i);
+  await expect(page.getByRole("form", { name: /activity filters/i })).toBeVisible();
+  await expect(page.getByText("Task: Wire homepage hero")).toBeVisible();
+
+  // Filtering to a person with no activity in this department empties the feed.
+  await page.locator('select[name="personId"]').selectOption({ label: "Dewi Santoso" });
+  await page.getByRole("button", { name: /^apply$/i }).click();
+  await page.waitForURL(/personId=u-pm/);
+  await expect(page.getByText(/no activity matches these filters/i)).toBeVisible();
+
+  // Resetting clears the filter and the feed shows rows again.
+  await page.getByRole("link", { name: /reset/i }).click();
+  await page.waitForURL(/\/departments\/dept-1\/activity$/);
+  await expect(page.getByText("Task: Wire homepage hero")).toBeVisible();
+});
+
 test("sign out returns to login", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("button", { name: /clement hansel/i }).click();

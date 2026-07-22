@@ -29,7 +29,7 @@ export default async function ImageStudioPage({ params }: { params: Params }) {
   return (
     <Card title="Image Studio">
       {hasStudio ? (
-        <ImageStudio />
+        <ImageStudio deptId={deptId} />
       ) : (
         <EmptyNote>The Image Studio isn&apos;t configured for this department.</EmptyNote>
       )}

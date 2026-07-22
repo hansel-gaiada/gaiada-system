@@ -4,11 +4,13 @@ import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
 import { can } from "@/lib/rbac";
-import { getDepartment } from "@/lib/departments";
+import { getDepartment, myDeptTasksToday, myBlockedTasks, toRailPriority } from "@/lib/departments";
+import { getPendingApprovals } from "@/lib/data";
+import { listAutomationApprovals } from "@/lib/automationApprovals";
 import { toolkitFor, tabHref } from "@/lib/deptToolkits";
 import { PageHeader } from "@/components/PageHeader";
 import { SectionTabs } from "@/components/shell/SectionTabs";
-import { MyWorkRail } from "@/components/departments/MyWorkRail";
+import { MyWorkRail, type RailTaskItem, type RailWaitingItem } from "@/components/departments/MyWorkRail";
 import "@/components/departments/departments.css";
 
 type Params = Promise<{ deptId: string }>;
@@ -20,8 +22,14 @@ type Params = Promise<{ deptId: string }>;
 // comes from the department's toolkit — Web Dev gets the full nine-tab set;
 // departments without a bespoke toolkit get Home only, same shell either way.
 //
-// Rail props are placeholder/empty here (P1-06, structure only) — the real
-// "my work today" / "waiting on me" queries + sort are P1-07's job.
+// Rail data (P1-07, decision #12): "My work today" = this person's own
+// not-done department tasks (poly-assignee, `dept.tasks` — already fetched
+// by `getDepartment`, no extra call); "Waiting on me" = pending agency
+// approvals + pending WS4 automation-approvals + this person's own blocked
+// department tasks. Every source degrades to [] on its own (lib/data.ts,
+// lib/automationApprovals.ts) so a disabled/missing endpoint never breaks
+// the rail — it just renders its empty state. `MyWorkRail` itself does NOT
+// sort; the (due, priority) ordering happens here per decision #12.
 export default async function DepartmentConsoleLayout({ children, params }: { children: React.ReactNode; params: Params }) {
   const userId = await getSessionUserId();
   if (!userId) redirect("/login");
@@ -36,6 +44,43 @@ export default async function DepartmentConsoleLayout({ children, params }: { ch
   const toolkit = toolkitFor(dept.name);
   const canEditOrg = can(me, "org.edit", tenant);
 
+  const [pendingApprovals, automationApprovals] = await Promise.all([
+    getPendingApprovals(userId, [{ id: tenant, name: tenant }]),
+    listAutomationApprovals(userId, tenant, { status: "pending" }),
+  ]);
+
+  const today: RailTaskItem[] = myDeptTasksToday(dept.tasks, userId).map((t) => ({
+    id: t.id,
+    title: t.title,
+    href: `/tasks/${t.id}`,
+    dueDate: t.dueDate,
+    priority: toRailPriority(t.priority),
+    projectName: t.projectName,
+  }));
+
+  const waiting: RailWaitingItem[] = [
+    ...pendingApprovals.map((a): RailWaitingItem => ({
+      id: a.id,
+      title: a.subject,
+      href: a.campaignId ? `/agency/${a.campaignId}` : "/approvals",
+      kind: "approval",
+      waitingOn: a.campaign,
+    })),
+    ...automationApprovals.map((a): RailWaitingItem => ({
+      id: a.id,
+      title: a.tool_name,
+      kind: "approval",
+      waitingOn: a.reason ?? (a.origin === "agent" ? (a.agent_name ?? "Agent") : "Automation"),
+    })),
+    ...myBlockedTasks(dept.tasks, userId).map((t): RailWaitingItem => ({
+      id: t.id,
+      title: t.title,
+      href: `/tasks/${t.id}`,
+      kind: "blocked_task",
+      waitingOn: t.dependsOn.length > 0 ? "a blocking task" : undefined,
+    })),
+  ];
+
   return (
     <>
       <PageHeader
@@ -49,7 +94,7 @@ export default async function DepartmentConsoleLayout({ children, params }: { ch
       <div className="dept-shell">
         <div className="dept-shell__main">{children}</div>
         <div className="dept-shell__rail">
-          <MyWorkRail today={[]} waiting={[]} />
+          <MyWorkRail today={today} waiting={waiting} />
         </div>
       </div>
     </>

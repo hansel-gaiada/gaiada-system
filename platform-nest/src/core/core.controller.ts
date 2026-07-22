@@ -112,7 +112,12 @@ export class CoreController {
   ) {
     const { name, clientId, departmentId, customFields = {} } = body ?? {};
     if (!name) throw new BadRequestException("name required");
-    await authorize(req.principal, { kind: "project", tenantId }, "create");
+    // The controller always sets owner_id = the creating user on insert (below) — pass that same
+    // intended ownerId into the authz check so Cerbos's member "create own project" rule
+    // (resource_project.yaml's `owns` condition) can actually be satisfied. Without this, a brand
+    // new resource's ownerId attr was always "" (never equal to principal.id), so the member rule
+    // was structurally unreachable and only company_admin/manager/team_lead could ever create.
+    await authorize(req.principal, { kind: "project", tenantId, ownerId: req.principal.userId ?? undefined }, "create");
     const id = newId();
     await withTenants([tenantId], async (c) => {
       const cfError = await validateCustomFields(c, tenantId, "project", customFields);
@@ -235,7 +240,14 @@ export class CoreController {
     @Param("projectId") projectId: string,
     @Body() b: { name?: string; status?: string; clientId?: string | null; startDate?: string | null; dueDate?: string | null; departmentId?: string | null; customFields?: Record<string, unknown> },
   ) {
-    await authorize(req.principal, { kind: "project", tenantId, id: projectId }, "update");
+    // Fetch the REAL owner from the row (never trust a client-asserted ownerId) so Cerbos's member
+    // "update own project" `owns` rule can be evaluated against the actual resource, mirroring
+    // client-work.controller.ts's updateTime pattern.
+    const existing = await withTenants([tenantId], (c) =>
+      c.query<{ owner_id: string | null }>(`SELECT owner_id FROM projects WHERE id = $1 AND deleted_at IS NULL`, [projectId]),
+    );
+    if (!existing.rows[0]) throw new NotFoundException("project not found");
+    await authorize(req.principal, { kind: "project", tenantId, id: projectId, ownerId: existing.rows[0].owner_id ?? undefined }, "update");
     await withTenants([tenantId], async (c) => {
       if (b.customFields) {
         const cfError = await validateCustomFields(c, tenantId, "project", b.customFields);
