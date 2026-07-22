@@ -11,6 +11,8 @@ for proj in wa-chat-bot mcp-hub platform-nest ai-agents; do
   cd "$ROOT/$proj"
   [ -d node_modules ] || npm ci
   npm run typecheck
+  # A1: withTenants() tenant-scoping lint — platform-nest only (the choke-point it guards).
+  [ "$proj" = "platform-nest" ] && npm run lint:withtenants
   npm test
 done
 

@@ -10,7 +10,8 @@
     "seed:agency": "node dist/seed/agency.js",
     "seed:automation": "node dist/seed/automation.js",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "lint:withtenants": "node scripts/lint-withtenants.mjs"
   },
   "dependencies": {
     "@nestjs/common": "^10.4.4",

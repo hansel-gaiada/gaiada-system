@@ -73,6 +73,10 @@ jobs:
           done
       - run: npm ci
       - run: npm run typecheck
+      # A1: grep/AST-lite guard on the withTenants() tenant-scoping choke-point — fails if any
+      # file outside the sanctioned reconciler/allowlist passes a multi-tenant or computed
+      # (non-single-element) tenant array. See scripts/lint-withtenants.mjs for the rationale.
+      - run: npm run lint:withtenants
       - run: npm test
         env:
           DATABASE_URL_TEST: postgres://postgres:postgres@localhost:5432/postgres

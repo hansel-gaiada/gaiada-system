@@ -241,12 +241,13 @@ export class ServiceAssignmentsController {
           c.query<{ id: string }>(`SELECT id FROM companies WHERE id = $1 AND deleted_at IS NULL`, [target]),
         );
         if (!exists[0]) {
-          companies.push({ id: target, name: nameById.get(target) ?? target, included: false, reason: "no_access" });
+          // F1: no name on excluded entries — see EnvelopeCompany.name doc comment.
+          companies.push({ id: target, included: false, reason: "no_access" });
           continue;
         }
         const targetRoot = await holdingRoot(target);
         if (targetRoot !== providerRoot) {
-          companies.push({ id: target, name: nameById.get(target) ?? target, included: false, reason: "no_access" });
+          companies.push({ id: target, included: false, reason: "no_access" });
           continue;
         }
         companies.push({ id: target, name: nameById.get(target) ?? target, included: true });
@@ -610,7 +611,8 @@ export class ServiceAssignmentsController {
 
     for (const cid of scopeIds) {
       if (cid !== tenantId && !(await canRead(req.principal, cid, moduleQ || undefined))) {
-        companies.push({ id: cid, name: nameById.get(cid) ?? cid, included: false, reason: "no_access" });
+        // F1: no name on excluded entries — see EnvelopeCompany.name doc comment.
+        companies.push({ id: cid, included: false, reason: "no_access" });
         continue;
       }
       const clauses = [`${col} = $1`];
@@ -674,7 +676,8 @@ export class ServiceAssignmentsController {
 
     for (const cid of scopeIds) {
       if (cid !== tenantId && !(await canRead(req.principal, cid, moduleQ || undefined))) {
-        companies.push({ id: cid, name: nameById.get(cid) ?? cid, included: false, reason: "no_access" });
+        // F1: no name on excluded entries — see EnvelopeCompany.name doc comment.
+        companies.push({ id: cid, included: false, reason: "no_access" });
         continue;
       }
       const { rows } = await withTenants([cid], (c) =>

@@ -5,7 +5,11 @@
 // read (permission denial, cross-holding boundary, a requested id that no longer resolves, ...).
 export interface EnvelopeCompany {
   id: string;
-  name: string;
+  // F1 (ORG-14): name is present ONLY when included===true. An excluded company must never carry
+  // a resolved display name — that would make this envelope a cross-holding UUID->name oracle for
+  // any caller who can enumerate ids but not read them. Excluded entries are {id, included:false,
+  // reason} only.
+  name?: string;
   included: boolean;
   reason?: "no_access" | "not_served" | "suspended" | "error";
 }
