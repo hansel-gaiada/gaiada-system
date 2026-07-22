@@ -6,13 +6,17 @@ import type { IconName } from "./icons";
 // because existing call sites import them from the nav module.
 export { isElevated, canManageIT } from "@/lib/rbac";
 
-export interface NavItem { label: string; href: string; icon: IconName }
+export interface NavItem { label: string; href: string; icon: IconName; children?: NavItem[] }
 export interface NavGroup { label: string; items: NavItem[] }
 
 // Nav is capability-gated against the ACTIVE company (tenantId). Company-scoped
 // capabilities (people.directory, admin.access) resolve for that company;
 // cross-company ones (rollups.view) require a global grant.
-export function navFor(me: Me, tenantId?: string | null): NavGroup[] {
+//
+// `departments` (id+name for the active company) are threaded in so the
+// Organization → Departments item becomes an expandable disclosure, one child
+// per department linking straight into that department's console/interface.
+export function navFor(me: Me, tenantId?: string | null, departments: { id: string; name: string }[] = []): NavGroup[] {
   // WS11: an external client (not also staff) gets a clean portal-only nav — never the staff surface.
   if (isClient(me) && !isElevated(me)) {
     return [{ label: "Portal", items: [{ label: "Project Portal", href: "/portal", icon: "home" }] }];
@@ -29,17 +33,25 @@ export function navFor(me: Me, tenantId?: string | null): NavGroup[] {
     { label: "Delivery Pipeline", href: "/pipeline", icon: "pulse" },
     ...(can(me, "rollups.view") ? [{ label: "Rollups", href: "/rollups", icon: "pulse" } as NavItem] : []),
   ];
+  // Departments is the organizational home: the business departments (from the
+  // org structure) plus the always-present functional departments HR and IT.
+  // Each child opens that department's console.
+  const deptChildren: NavItem[] = [
+    ...departments.map((d) => ({ label: d.name, href: `/departments/${d.id}`, icon: "hr" as IconName })),
+    { label: "HR", href: "/hr", icon: "hr" },
+    { label: "IT", href: "/it", icon: "pulse" },
+  ];
   const groups: NavGroup[] = [
     { label: "Workspace", items: [
       { label: "My Work", href: "/", icon: "home" },
       { label: "Calendar", href: "/calendar", icon: "clock" },
       { label: "Approvals", href: "/approvals", icon: "check" },
-      ...(can(me, "people.directory", tenantId) ? [{ label: "People", href: "/people", icon: "hr" } as NavItem] : []),
     ] },
+    // Companies now live inside the Organization Overview; the sidebar just links
+    // to Overview and the expandable Departments tree.
     { label: "Organization", items: [
       { label: "Overview", href: "/organization", icon: "inventory" },
-      { label: "Companies", href: "/companies", icon: "finance" },
-      { label: "Departments", href: "/departments", icon: "hr" },
+      { label: "Departments", href: "/departments", icon: "hr", children: deptChildren },
     ] },
     { label: "Business", items: business },
     { label: "Intelligence", items: [
@@ -52,22 +64,11 @@ export function navFor(me: Me, tenantId?: string | null): NavGroup[] {
       { label: "MCP Hub", href: "/systems/hub", icon: "hub" },
       { label: "Automation", href: "/systems/automation", icon: "automation" },
     ] },
-    // IT: read-only to everyone; write surfaces gate on canManageIT.
-    { label: "IT", items: [
-      { label: "Overview", href: "/it", icon: "pulse" },
-      { label: "Devices", href: "/it/devices", icon: "inventory" },
-      { label: "Topology", href: "/it/topology", icon: "hub" },
-      { label: "Workflows", href: "/it/workflows", icon: "automation" },
-    ] },
   ];
+  // Settings (formerly "Admin") — a single sidebar entry; its sub-sections
+  // (users/identity/modules/compliance/audit) are in-page tabs on the page itself.
   if (can(me, "admin.access", tenantId)) {
-    groups.push({ label: "Admin", items: [
-      { label: "Users & Roles", href: "/admin/users", icon: "hr" },
-      { label: "Identity Links", href: "/admin/identity", icon: "hub" },
-      { label: "Modules & Fields", href: "/admin/modules", icon: "box" },
-      { label: "Compliance Gates", href: "/admin/compliance", icon: "check" },
-      { label: "Audit", href: "/admin/audit", icon: "clock" },
-    ] });
+    groups.push({ label: "", items: [{ label: "Settings", href: "/admin", icon: "settings" }] });
   }
   return groups;
 }

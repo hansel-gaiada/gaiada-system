@@ -14,6 +14,11 @@ export interface Resource {
   projectId?: string;
   teamId?: string;
   module?: string;
+  /** WSD-4: the HR-case/record/leave "subject" (the employee the row is about), so the
+   *  member-self-service derived-role rules (resource_hr_case.yaml et al.) can match
+   *  `resource.attr.subjectUserId == principal.id`. Omitted -> "" -> those rules fail
+   *  closed (never a leak from a handler that forgot to pass it). */
+  subjectUserId?: string;
 }
 
 export type Decision = { allow: true } | { allow: false; reason: string };
@@ -41,6 +46,7 @@ function resourcePayload(r: Resource) {
       projectId: r.projectId ?? "",
       teamId: r.teamId ?? "",
       module: r.module ?? "",
+      subjectUserId: r.subjectUserId ?? "",
     },
   };
 }

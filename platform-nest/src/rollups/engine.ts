@@ -63,7 +63,11 @@ export async function recomputeRollups(tenantId: string, period: string): Promis
   for (const mod of allModules()) {
     if (!(await isModuleEnabled(tenantId, mod.key))) continue;
     for (const provider of mod.rollupProviders) {
-      const rows = await withTenants([tenantId], (c) => provider.compute(c, tenantId, period));
+      // WSD-4 (design §2.4 consequence): invoke each module's provider under ITS OWN
+      // module scope — a module-sliced table (e.g. hr_*) reads zero rows otherwise, even
+      // for a tenant that is genuinely enabled (incl. served-tenant, via isModuleEnabled's
+      // OR-extension above). Non-module-sliced tables are unaffected by the extra scope.
+      const rows = await withTenants([tenantId], (c) => provider.compute(c, tenantId, period), { modules: [mod.key] });
       await upsertRows(tenantId, mod.key, period, rows);
       written += rows.length;
     }

@@ -50,12 +50,22 @@ const person = (id: string, name: string, assigneeId?: string): OrgNode => ({
   assigneeName: assigneeId ? name : null,
   children: [],
 });
-const AGENCY_DEPARTMENTS: { name: string; divisions: { name: string; roles?: OrgNode[] }[] }[] = [
-  { name: "Web Dev", divisions: [{ name: "Frontend", roles: [{ id: "d1-r1", name: "Senior Developer", kind: "role", children: [person("d1-p1", "Made Putra", "u-dev")] }] }] },
-  { name: "SEO", divisions: [{ name: "On-page", roles: [{ id: "d2-r1", name: "SEO Specialist", kind: "role", children: [] }] }] },
-  { name: "SMM", divisions: [{ name: "Social", roles: [{ id: "d3-r1", name: "Account Manager", kind: "role", children: [person("d3-p1", "Dewi Santoso", "u-pm")] }] }] },
-  { name: "Video Editor", divisions: [{ name: "Production", roles: [] }] },
-  { name: "Design Graphic", divisions: [{ name: "Brand", roles: [] }] },
+const AGENCY_DEPARTMENTS: { name: string; divisions: { name: string; roles?: OrgNode[] }[]; people?: OrgNode[] }[] = [
+  { name: "Web Dev", divisions: [
+    { name: "Frontend", roles: [{ id: "d1-r1", name: "Senior Developer", kind: "role", children: [person("d1-p1", "Made Putra", "u-dev")] }] },
+    { name: "Backend", roles: [] },
+  ] },
+  { name: "Creatives", divisions: [
+    { name: "Design", roles: [] },
+    { name: "Video", roles: [] },
+  ] },
+  { name: "SEO", divisions: [
+    { name: "On-page", roles: [{ id: "d3-r1", name: "SEO Specialist", kind: "role", children: [] }] },
+    { name: "Off-page", roles: [] },
+  ] },
+  // Social Media / GM have no divisions — people sit directly under the department.
+  { name: "Social Media", divisions: [], people: [person("d4-p1", "Dewi Santoso", "u-pm")] },
+  { name: "GM", divisions: [], people: [person("d5-p1", "General Manager")] },
 ];
 
 export function defaultStructure(company: { id: string; name: string; type: string | null }): OrgStructure {
@@ -65,12 +75,15 @@ export function defaultStructure(company: { id: string; name: string; type: stri
         id: `dept-${i + 1}`,
         name: dept.name,
         kind: "department" as const,
-        children: dept.divisions.map((div, j) => ({
-          id: `dept-${i + 1}-div-${j + 1}`,
-          name: div.name,
-          kind: "division" as const,
-          children: div.roles ?? [],
-        })),
+        children: [
+          ...dept.divisions.map((div, j) => ({
+            id: `dept-${i + 1}-div-${j + 1}`,
+            name: div.name,
+            kind: "division" as const,
+            children: div.roles ?? [],
+          })),
+          ...(dept.people ?? []),
+        ],
       }))
     : [];
   return { root: { id: "root", name: company.name, kind: "company", children }, updatedAt: null };

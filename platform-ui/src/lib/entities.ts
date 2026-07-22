@@ -12,6 +12,10 @@ export interface Project {
   client_id: string | null;
   is_internal: boolean;
   owner_id: string | null;
+  // Owning department (org-structure node id). A project belongs to one
+  // department; cross-department work still flows via task assignment. Null =
+  // company-level / unassigned. BFF: GET returns it; POST/PATCH accept departmentId.
+  department_id: string | null;
   due_date: string | null;
   custom_fields: Record<string, unknown>;
 }

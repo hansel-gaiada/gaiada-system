@@ -32,7 +32,7 @@ export default async function AdminModulesPage() {
   if (!tenant) {
     return (
       <>
-        <PageHeader eyebrow="Admin" title="Modules & Custom Fields" subtitle={SUBTITLE} />
+        <PageHeader eyebrow="Settings" title="Modules & Custom Fields" subtitle={SUBTITLE} />
         <EmptyNote>Select a company from the top bar.</EmptyNote>
       </>
     );
@@ -47,7 +47,7 @@ export default async function AdminModulesPage() {
     if (e instanceof PlatformError && e.status === 403) {
       return (
         <>
-          <PageHeader eyebrow="Admin" title="Modules & Custom Fields" subtitle={SUBTITLE} />
+          <PageHeader eyebrow="Settings" title="Modules & Custom Fields" subtitle={SUBTITLE} />
           <Card>
             <p style={{ margin: 0, font: "400 14px/1.5 var(--font-body)", color: "rgba(26,25,22,.62)" }}>
               This page is limited to administrators.
@@ -63,7 +63,7 @@ export default async function AdminModulesPage() {
 
   return (
     <>
-      <PageHeader eyebrow="Admin" title="Modules & Custom Fields" subtitle={SUBTITLE} />
+      <PageHeader eyebrow="Settings" title="Modules & Custom Fields" subtitle={SUBTITLE} />
 
       <Card title="Modules">
         {moduleKeys.length === 0 ? (

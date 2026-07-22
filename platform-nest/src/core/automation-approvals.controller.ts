@@ -11,6 +11,7 @@ import type { FastifyRequest } from "fastify";
 import { newId, withTenants } from "../db";
 import { config } from "../config";
 import { authorize, writeActivity } from "./http";
+import { emitEvent } from "../events/outbox.service";
 import { AuthGuard } from "../auth/guards";
 
 const IMPACTS = new Set(["medium", "high", "unclassified"]);
@@ -47,16 +48,31 @@ export class AutomationApprovalsController {
   }
 
   @Get(":tenantId/automation-approvals")
-  async list(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Query("status") status?: string) {
-    await authorize(req.principal, { kind: "automation_approval", tenantId }, "read");
+  async list(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Query("status") status?: string,
+    // WSD-4: an optional origin filter. origin='hr' additionally passes resource.attr.module
+    // so an hr_manager (module_manager, no company_admin grant) can read the served company's
+    // leave-approval slice of the unified inbox — the module_manager rule in
+    // resource_automation_approval.yaml is scoped tightly to module=='hr' (WSD-2), so this
+    // never widens visibility for any other origin.
+    @Query("origin") origin?: string,
+  ) {
+    await authorize(req.principal, { kind: "automation_approval", tenantId, module: origin === "hr" ? "hr" : undefined }, "read");
     const filterPending = status === undefined || status === "pending";
+    const params: unknown[] = [];
+    const clauses = ["deleted_at IS NULL"];
+    if (filterPending) clauses.push("status = 'pending'");
+    else if (status) { params.push(status); clauses.push(`status = $${params.length}`); }
+    if (origin) { params.push(origin); clauses.push(`origin = $${params.length}`); }
     const rows = await withTenants([tenantId], (c) =>
       c.query(
         `SELECT id, workflow_id, tool_name, tool_args, impact, reason, status, origin, agent_name, requested_by, decided_by, decided_at, created_at
          FROM automation_approvals
-         WHERE deleted_at IS NULL ${filterPending ? "AND status = 'pending'" : status ? "AND status = $1" : ""}
+         WHERE ${clauses.join(" AND ")}
          ORDER BY created_at DESC LIMIT 200`,
-        filterPending || !status ? [] : [status],
+        params,
       ),
     );
     return rows.rows;
@@ -72,15 +88,39 @@ export class AutomationApprovalsController {
   ) {
     const decision = body?.decision;
     if (decision !== "approved" && decision !== "rejected") throw new BadRequestException("decision must be approved|rejected");
-    await authorize(req.principal, { kind: "automation_approval", id, tenantId }, "decide");
-    const res = await withTenants([tenantId], (c) =>
-      c.query(
-        `UPDATE automation_approvals SET status = $2, decided_by = $3, decided_at = now(), updated_at = now()
-         WHERE id = $1 AND status = 'pending' AND deleted_at IS NULL`,
-        [id, decision, req.principal.userId],
-      ),
+    // WSD-4: fetch the row's origin BEFORE authorizing, so an hr-origin approval carries
+    // resource.attr.module='hr' — the ONLY way the module_manager derived role (the
+    // providing unit's hr_manager, who is not necessarily the served company's admin) can
+    // decide (resource_automation_approval.yaml, WSD-2). Every other origin is unaffected
+    // (module stays "").  404s here (not 403) when the id doesn't exist/isn't visible, same
+    // as before this change — no new information disclosed to a non-authorized caller.
+    const existing = await withTenants([tenantId], (c) =>
+      c.query<{ origin: string }>(`SELECT origin FROM automation_approvals WHERE id = $1 AND deleted_at IS NULL`, [id]),
     );
-    if (res.rowCount === 0) throw new NotFoundException("approval not found or already decided");
+    if (!existing.rows[0]) throw new NotFoundException("approval not found or already decided");
+    const module = existing.rows[0].origin === "hr" ? "hr" : undefined;
+    await authorize(req.principal, { kind: "automation_approval", id, tenantId, module }, "decide");
+    const res = await withTenants([tenantId], async (c) => {
+      const upd = await c.query<{ origin: string; tool_args: unknown; workflow_id: string; tool_name: string }>(
+        `UPDATE automation_approvals SET status = $2, decided_by = $3, decided_at = now(), updated_at = now()
+         WHERE id = $1 AND status = 'pending' AND deleted_at IS NULL
+         RETURNING origin, tool_args, workflow_id, tool_name`,
+        [id, decision, req.principal.userId],
+      );
+      if (upd.rowCount === 0) return null;
+      // Outbox event so module eventHandlers (WSD-4: HR's leave-decision handler) can react.
+      // entityType "automation_approval" — see startConsumerLoop's watched streams in main.ts.
+      await emitEvent(c, tenantId, "automation_approval", id, "automation_approval.decided", {
+        decision,
+        origin: upd.rows[0].origin,
+        toolArgs: upd.rows[0].tool_args,
+        workflowId: upd.rows[0].workflow_id,
+        toolName: upd.rows[0].tool_name,
+        decidedBy: req.principal.userId,
+      });
+      return upd.rows[0];
+    });
+    if (!res) throw new NotFoundException("approval not found or already decided");
     await writeActivity(tenantId, req.principal.userId, decision, "automation_approval", id);
     return { id, status: decision };
   }

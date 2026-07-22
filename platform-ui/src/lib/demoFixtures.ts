@@ -66,13 +66,13 @@ const MEMBERS: Record<string, { user_id: string; name: string; email: string; ti
 
 const PROJECTS: Record<string, unknown[]> = {
   "co-holding": [
-    { id: "p-hr-1", name: "HR system rollout", status: "active", client_id: null, is_internal: true, owner_id: DEMO_USER_ID, due_date: "2026-08-15", custom_fields: {} },
-    { id: "p-fin-1", name: "FY26 budget review", status: "on_hold", client_id: null, is_internal: true, owner_id: "u-finance", due_date: "2026-07-30", custom_fields: {} },
+    { id: "p-hr-1", name: "HR system rollout", status: "active", client_id: null, is_internal: true, owner_id: DEMO_USER_ID, department_id: null, due_date: "2026-08-15", custom_fields: {} },
+    { id: "p-fin-1", name: "FY26 budget review", status: "on_hold", client_id: null, is_internal: true, owner_id: "u-finance", department_id: null, due_date: "2026-07-30", custom_fields: {} },
   ],
   "co-agency": [
-    { id: "p-web-1", name: "Client site redesign", status: "active", client_id: "cl-1", is_internal: false, owner_id: "u-pm", due_date: "2026-07-20", custom_fields: { phase: "build" } },
-    { id: "p-seo-1", name: "SEO audit — Q3", status: "active", client_id: "cl-2", is_internal: false, owner_id: "u-pm", due_date: "2026-08-01", custom_fields: { phase: "discovery" } },
-    { id: "p-int-1", name: "Internal brand refresh", status: "completed", client_id: null, is_internal: true, owner_id: DEMO_USER_ID, due_date: "2026-06-01", custom_fields: {} },
+    { id: "p-web-1", name: "Client site redesign", status: "active", client_id: "cl-1", is_internal: false, owner_id: "u-pm", department_id: "dept-1", due_date: "2026-07-20", custom_fields: { phase: "build" } },
+    { id: "p-seo-1", name: "SEO audit — Q3", status: "active", client_id: "cl-2", is_internal: false, owner_id: "u-pm", department_id: "dept-3", due_date: "2026-08-01", custom_fields: { phase: "discovery" } },
+    { id: "p-int-1", name: "Internal brand refresh", status: "completed", client_id: null, is_internal: true, owner_id: DEMO_USER_ID, department_id: "dept-2", due_date: "2026-06-01", custom_fields: {} },
   ],
   "co-resort": [],
 };
@@ -450,7 +450,7 @@ export function getDemoResponse(method: string, fullPath: string, body?: string)
     const extra = PROJECT_DETAIL_EXTRA[id] ?? { client_name: null, owner_name: "Clement Hansel", start_date: "2026-06-01" };
     if (base) return ok({ ...base, ...extra });
     // Freshly-created or unknown id: synthesize a plausible draft so create→view flows never dead-end.
-    return ok({ id, name: "New project", status: "active", client_id: null, is_internal: true, owner_id: DEMO_USER_ID, due_date: null, custom_fields: {}, ...extra });
+    return ok({ id, name: "New project", status: "active", client_id: null, is_internal: true, owner_id: DEMO_USER_ID, department_id: null, due_date: null, custom_fields: {}, ...extra });
   }
   const projTasksMatch = p.match(/^\/api\/([^/]+)\/projects\/([^/]+)\/tasks$/);
   if (projTasksMatch) {

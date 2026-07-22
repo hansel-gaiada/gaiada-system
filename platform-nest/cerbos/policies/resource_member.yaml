@@ -14,3 +14,11 @@ resourcePolicy:
       effect: EFFECT_ALLOW
       derivedRoles: ["company_admin", "manager", "member", "viewer", "team_lead"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    # WSD-2: HR staff may read the SERVED company's directory — but only on the HR-workspace
+    # directory path, where the members controller sets resource.attr.module = "hr". The
+    # module_staff derived role self-gates on module != "", so on every other members read (no
+    # module attr) this rule cannot fire and other modules' staff never inherit directory access.
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["module_staff"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }

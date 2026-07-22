@@ -4,7 +4,6 @@ import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
 import { listDevices, listDeviceEvents, summarizeHealth } from "@/lib/it";
-import { PageHeader } from "@/components/PageHeader";
 import { Card, KpiTile, HairlineTable, StatusBadge } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
 
@@ -24,12 +23,7 @@ export default async function ITOverviewPage() {
   const tenant = await getActiveTenant(me);
 
   if (!tenant) {
-    return (
-      <>
-        <PageHeader eyebrow="IT" title="IT operations" subtitle="Device estate health and activity." />
-        <EmptyNote>Select a company from the top bar.</EmptyNote>
-      </>
-    );
+    return <Card><EmptyNote>Select a company from the top bar.</EmptyNote></Card>;
   }
 
   const [devices, events] = await Promise.all([
@@ -41,25 +35,12 @@ export default async function ITOverviewPage() {
 
   return (
     <>
-      <PageHeader
-        eyebrow="IT"
-        title="IT operations"
-        subtitle="Device estate health, heartbeat activity and events. Device events also flow to the audit log and notifications."
-      />
-
       <div style={{ display: "grid", gap: 16, gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", marginBottom: 20 }}>
         <KpiTile label="Devices" value={String(health.total)} foot={`${health.unknown} unknown`} />
         <KpiTile label="Online" value={String(health.online)} />
         <KpiTile label="Degraded" value={String(health.degraded)} />
         <KpiTile label="Offline" value={String(health.offline)} />
         <KpiTile label="Open alerts" value={String(openAlerts)} foot="warn + critical" />
-      </div>
-
-      <div style={{ display: "flex", gap: 10, marginBottom: 20, flexWrap: "wrap" }}>
-        <Link href="/it/devices" className="lux-btn lux-btn--solid lux-btn--sm" style={{ textDecoration: "none" }}>Devices</Link>
-        <Link href="/it/topology" className="lux-btn lux-btn--ghost lux-btn--sm" style={{ textDecoration: "none" }}>Topology</Link>
-        <Link href="/it/workflows" className="lux-btn lux-btn--ghost lux-btn--sm" style={{ textDecoration: "none" }}>Workflows</Link>
-        <Link href="/admin/audit" className="lux-btn lux-btn--ghost lux-btn--sm" style={{ textDecoration: "none" }}>Audit log</Link>
       </div>
 
       <Card title="Recent device events">

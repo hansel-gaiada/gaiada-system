@@ -1,4 +1,5 @@
 import "server-only";
+import { cache } from "react";
 // Department workspaces — a "place to work" per department, composed from data
 // that already exists: the org structure (lib/org) gives each department its
 // divisions + placed people; PM tasks (lib/pm) are routed to a department via
@@ -57,11 +58,19 @@ function belongs(task: PmTask, deptId: string, divisionIds: Set<string>, personI
   return false;
 }
 
-async function departmentNodes(u: string, t: string): Promise<OrgNode[]> {
+const departmentNodes = cache(async function departmentNodes(u: string, t: string): Promise<OrgNode[]> {
   try {
     const { structure } = await getOrgStructure(u, t, company(t));
     return structure.root.children.filter((c) => c.kind === "department");
   } catch { return []; }
+});
+
+// Lightweight {id,name} list for the sidebar nav (department children). Reads only
+// the org structure — no task scan — and shares departmentNodes' cache with
+// myPlacement so the sidebar adds no extra fetch per page.
+export interface DeptBrief { id: string; name: string }
+export async function listDepartmentBriefs(u: string, t: string): Promise<DeptBrief[]> {
+  return (await departmentNodes(u, t)).map((d) => ({ id: d.id, name: d.name }));
 }
 
 export async function listDepartments(u: string, t: string): Promise<DeptSummary[]> {
@@ -91,11 +100,18 @@ export async function myPlacement(u: string, t: string, userId: string): Promise
   return null;
 }
 
-export async function getDepartment(u: string, t: string, deptId: string): Promise<DepartmentWorkspace | null> {
+// Memoised for the duration of one request render so the department console
+// LAYOUT (header/tabs) and its child PAGE (Overview/Workflow/…) share a single
+// fetch of the org structure + task list rather than each re-fetching.
+export const getDepartment = cache(async function getDepartment(
+  u: string,
+  t: string,
+  deptId: string,
+): Promise<DepartmentWorkspace | null> {
   const [depts, tasks] = await Promise.all([departmentNodes(u, t), listAllPmTasks(u, t)]);
   const d = depts.find((x) => x.id === deptId);
   if (!d) return null;
   const { divisionIds, personIds, people, divisions } = scan(d);
   const deptTasks = tasks.filter((x) => belongs(x, d.id, divisionIds, personIds));
   return { id: d.id, name: d.name, divisions, people, tasks: deptTasks, columns: groupByStatus(deptTasks) };
-}
+});

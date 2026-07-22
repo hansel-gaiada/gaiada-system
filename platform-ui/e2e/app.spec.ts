@@ -87,7 +87,7 @@ test("company org builder shows agency departments and editor", async ({ page })
   await page.goto("/companies/co-agency/org");
   await expect(page.getByRole("heading", { level: 1 })).toContainText(/org structure/i);
   // Seeded agency departments appear in the preview chart.
-  for (const dept of ["Web Dev", "SEO", "SMM", "Video Editor", "Design Graphic"]) {
+  for (const dept of ["Web Dev", "Creatives", "SEO", "Social Media", "GM"]) {
     await expect(page.getByText(dept, { exact: true }).first()).toBeVisible();
   }
   // Elevated viewer gets the editor (Save button present).

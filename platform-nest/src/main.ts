@@ -21,6 +21,7 @@ import { billingModule } from "./modules/billing";
 import { clientsModule } from "./modules/clients";
 import { knowledgeModule } from "./modules/knowledge";
 import { automationConsoleModule } from "./modules/automation-console";
+import { hrModule } from "./modules/hr";
 import { registerCoreRollupProvider, coreTaskRollups, syncMetricDefinitions } from "./rollups/engine";
 import { clientWorkRollups } from "./core/client-work";
 import { startRelayLoop } from "./events/relay";
@@ -59,13 +60,16 @@ async function bootstrap(): Promise<void> {
   registerModule(clientsModule);
   registerModule(knowledgeModule);
   registerModule(automationConsoleModule);
+  registerModule(hrModule);
   registerCoreRollupProvider(coreTaskRollups);
   registerCoreRollupProvider(clientWorkRollups);
   await syncMetricDefinitions();
   if (config.redisUrl) {
     startRelayLoop();
     // Entity types with at least one registered handler; extend as modules add eventHandlers.
-    startConsumerLoop(["deliverable"]);
+    // WSD-4 adds "user" (hr's user.invited -> onboarding auto-instantiation) and
+    // "automation_approval" (hr's automation_approval.decided -> leave decision + balance + notify).
+    startConsumerLoop(["deliverable", "user", "automation_approval"]);
     // ORG-6 service-assignment reconciler (A7): outbox-driven, own consumer group. Only when the
     // release-train flag is on — dark by default so assignments stay dormant metadata.
     if (config.serviceAssignmentsEnabled) {

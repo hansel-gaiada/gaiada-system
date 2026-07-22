@@ -29,13 +29,14 @@ export async function createProject(_prev: ProjectFormState | null, formData: Fo
   const customFields = parseCustomFields(formData, defs);
   const name = String(formData.get("name") ?? "").trim();
   const clientId = String(formData.get("clientId") ?? "").trim() || undefined;
+  const departmentId = String(formData.get("departmentId") ?? "").trim() || null;
   if (!name) return { error: "Name is required." };
 
   let id: string;
   try {
     const created = await platformFetch<{ id: string }>(`/api/${tenant}/projects`, userId, {
       method: "POST",
-      body: JSON.stringify({ name, clientId, customFields }),
+      body: JSON.stringify({ name, clientId, departmentId, customFields }),
     });
     id = created.id;
   } catch (e) {
@@ -72,6 +73,7 @@ export async function updateProject(projectId: string, _prev: ProjectFormState |
   const name = String(formData.get("name") ?? "").trim();
   const status = String(formData.get("status") ?? "").trim() || undefined;
   const clientId = String(formData.get("clientId") ?? "").trim() || undefined;
+  const departmentId = String(formData.get("departmentId") ?? "").trim() || null;
   const startDate = String(formData.get("startDate") ?? "").trim() || undefined;
   const dueDate = String(formData.get("dueDate") ?? "").trim() || undefined;
   if (!name) return { error: "Name is required." };
@@ -79,7 +81,7 @@ export async function updateProject(projectId: string, _prev: ProjectFormState |
   try {
     await platformFetch(`/api/${tenant}/projects/${projectId}`, userId, {
       method: "PATCH",
-      body: JSON.stringify({ name, status, clientId, startDate, dueDate, customFields }),
+      body: JSON.stringify({ name, status, clientId, departmentId, startDate, dueDate, customFields }),
     });
   } catch (e) {
     if (e instanceof PlatformError) return { error: e.message };

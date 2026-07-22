@@ -1,0 +1,52 @@
+# WSD-2 (HR module). hr_case = the generic HR container (onboarding|offboarding|review|grievance|
+# other); leave requests inherit these decisions via their own controller path (design §2.2).
+# Every HR handler passes resource.attr = {kind, tenantId: <SERVED company>, module: "hr",
+# subjectUserId: <subject>, ...}; tenantId is the URL/served tenant, so a materialized
+# (hr_staff|hr_manager, company, <served>) grant lights up ONLY this company's HR surface.
+# Three independent walls back this: this Cerbos gate, the ORG-3 tenant choke-point, and the
+# module-sliced RLS (app_module_allowed('hr'), WSD-3). Nothing here trusts client-supplied scope.
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: hr_case
+  importDerivedRoles: ["gaiada_scopes"]
+  variables:
+    import: ["gaiada_common"]
+  rules:
+    - actions: ["*"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["platform_admin"]
+    # Group executive (owner) is a global role — cross-company by design (design §2.2).
+    - actions: ["read", "create", "update", "delete", "export", "cancel"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["group_executive"]
+      condition: { match: { expr: "variables.notLow" } }
+    # HR staff / manager (served-company grant) + the served company's own admin: full working set.
+    - actions: ["read", "create", "update"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["module_staff", "module_manager", "company_admin"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    # Elevated destructive/administrative actions: manager + company admin only (NOT plain staff).
+    - actions: ["delete"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["module_manager", "company_admin"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    # Bulk export is the first real use of the D4 high-assurance tier (design §2.2).
+    - actions: ["export"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["module_manager", "company_admin"]
+      condition:
+        match:
+          expr: >-
+            variables.inTenant && request.principal.attr.assurance == "high"
+    # Subject self-service: read own case, file own leave/case, cancel own pending. Guarded with
+    # has() so the rule fails CLOSED on any handler that omits subjectUserId (fail-safe, not a leak).
+    - actions: ["read", "create", "cancel"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["member"]
+      condition:
+        match:
+          expr: >-
+            variables.inTenant && variables.notLow &&
+            has(request.resource.attr.subjectUserId) &&
+            request.resource.attr.subjectUserId == request.principal.id

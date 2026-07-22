@@ -3,7 +3,6 @@ import { redirect } from "next/navigation";
 import { getSessionUserId } from "@/lib/session-server";
 import { listWorkflows, getWorkflow, layoutGraph } from "@/lib/it";
 import { getSystemStatus } from "@/lib/admin";
-import { PageHeader } from "@/components/PageHeader";
 import { Card, StatusBadge } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
 import { WorkflowCanvas } from "@/components/it/WorkflowCanvas";
@@ -29,17 +28,12 @@ export default async function WorkflowsPage({ searchParams }: { searchParams: Se
 
   return (
     <>
-      <PageHeader
-        eyebrow="IT"
-        title="Workflows"
-        subtitle="n8n automation workflows — read-only viewer. n8n orchestrates; MCP is the only access path."
-        breadcrumbs={[{ label: "IT", href: "/it" }, { label: "Workflows" }]}
-        actions={
-          n8nUrl ? (
-            <a href={n8nUrl} target="_blank" rel="noreferrer" className="lux-btn lux-btn--solid lux-btn--sm">Open in n8n</a>
-          ) : undefined
-        }
-      />
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 16 }}>
+        <span style={{ font: "400 13px var(--font-body)", color: "var(--erp-ink-60)" }}>
+          n8n automation workflows — read-only viewer. n8n orchestrates; MCP is the only access path.
+        </span>
+        {n8nUrl && <a href={n8nUrl} target="_blank" rel="noreferrer" className="lux-btn lux-btn--solid lux-btn--sm">Open in n8n</a>}
+      </div>
 
       {workflows.length === 0 ? (
         <Card><EmptyNote>No workflows found. The list appears once Automation is connected.</EmptyNote></Card>

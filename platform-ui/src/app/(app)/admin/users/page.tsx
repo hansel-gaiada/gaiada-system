@@ -32,7 +32,7 @@ export default async function AdminUsersPage() {
     if (e instanceof PlatformError && e.status === 403) {
       return (
         <>
-          <PageHeader eyebrow="Admin" title="Users & Roles" subtitle="Members, access grants and session control." />
+          <PageHeader eyebrow="Settings" title="Users & Roles" subtitle="Members, access grants and session control." />
           <Card>
             <p style={{ margin: 0, font: "400 14px/1.5 var(--font-body)", color: "rgba(26,25,22,.62)" }}>
               This page is limited to administrators.
@@ -49,7 +49,7 @@ export default async function AdminUsersPage() {
   return (
     <>
       <PageHeader
-        eyebrow="Admin"
+        eyebrow="Settings"
         title="Users & Roles"
         subtitle="Members of the active company, their role grants, and session control."
       />

@@ -1,12 +1,16 @@
 import { Eyebrow } from "@/components/ui";
 import "./forms.css";
 
-export function Field({ name, label, type = "text", defaultValue, options, required, disabled }: {
+export function Field({ name, label, type = "text", defaultValue, options, optionItems, placeholder, required, disabled }: {
   name: string;
   label: string;
   type?: "text" | "number" | "date" | "select" | "textarea" | "boolean";
   defaultValue?: unknown;
   options?: string[];
+  // Value/label pairs for selects where the submitted value differs from the
+  // display text (e.g. a department id → name). Takes precedence over `options`.
+  optionItems?: { value: string; label: string }[];
+  placeholder?: string;
   required?: boolean;
   disabled?: boolean;
 }) {
@@ -30,10 +34,10 @@ export function Field({ name, label, type = "text", defaultValue, options, requi
       <label className="lux-field">
         <Eyebrow style={{ fontSize: 10, opacity: 0.6 }}>{label}</Eyebrow>
         <select name={name} defaultValue={defaultValue != null ? String(defaultValue) : ""} required={required} className="lux-field__control">
-          <option value="" disabled hidden />
-          {(options ?? []).map((o) => (
-            <option key={o} value={o}>{o}</option>
-          ))}
+          <option value="">{placeholder ?? ""}</option>
+          {optionItems
+            ? optionItems.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)
+            : (options ?? []).map((o) => <option key={o} value={o}>{o}</option>)}
         </select>
       </label>
     );

@@ -3,6 +3,7 @@ import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
 import { getFieldDefs, listMembers } from "@/lib/entities";
+import { listDepartmentBriefs } from "@/lib/departments";
 import { PageHeader } from "@/components/PageHeader";
 import { ProjectForm } from "@/components/forms/ProjectForm";
 import { createProject } from "../actions";
@@ -15,12 +16,16 @@ export default async function NewProjectPage() {
   const tenant = await getActiveTenant(me);
   if (!tenant) redirect("/projects");
 
-  const [defs, members] = await Promise.all([getFieldDefs(userId, tenant, "project"), listMembers(userId, tenant)]);
+  const [defs, members, departments] = await Promise.all([
+    getFieldDefs(userId, tenant, "project"),
+    listMembers(userId, tenant),
+    listDepartmentBriefs(userId, tenant).catch(() => []),
+  ]);
 
   return (
     <>
       <PageHeader eyebrow="Project" title="New project" breadcrumbs={[{ label: "Projects", href: "/projects" }, { label: "New project" }]} />
-      <ProjectForm action={createProject} defs={defs} members={members} />
+      <ProjectForm action={createProject} defs={defs} members={members} departments={departments} />
     </>
   );
 }

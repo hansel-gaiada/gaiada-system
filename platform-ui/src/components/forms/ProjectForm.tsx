@@ -14,15 +14,20 @@ const STATUS_OPTIONS = ["active", "on_hold", "completed", "archived"];
 // accepts an ownerId, and there is no clients-list endpoint yet, so the
 // owner and client pickers are deferred to a later slice — the form only
 // submits fields the backend can actually persist.
+//
+// `departments` powers the owning-department picker: a project belongs to one
+// department (Web Dev, Creatives, …). Empty = company-level / unassigned.
 export function ProjectForm({
   action,
   defs,
   members: _members,
+  departments = [],
   project,
 }: {
   action: (prev: ProjectFormState | null, formData: FormData) => Promise<ProjectFormState>;
   defs: FieldDef[];
   members: Member[];
+  departments?: { id: string; name: string }[];
   project?: ProjectDetail;
 }) {
   const [state, formAction, pending] = useActionState(action, null);
@@ -30,6 +35,17 @@ export function ProjectForm({
   return (
     <form action={formAction} className="lux-form-grid" style={{ maxWidth: 720 }}>
       <Field name="name" label="Name" required defaultValue={project?.name} />
+
+      {departments.length > 0 && (
+        <Field
+          name="departmentId"
+          label="Owning department"
+          type="select"
+          placeholder="— Company-level —"
+          optionItems={departments.map((d) => ({ value: d.id, label: d.name }))}
+          defaultValue={project?.department_id ?? undefined}
+        />
+      )}
 
       {project && (
         <>

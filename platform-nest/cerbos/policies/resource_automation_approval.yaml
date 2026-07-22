@@ -25,3 +25,15 @@ resourcePolicy:
       effect: EFFECT_ALLOW
       derivedRoles: ["company_admin", "group_executive"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    # WSD-2: hr-origin approvals (leave). Rows carry resource.attr.module == "hr". Both sides of
+    # the shared-service relationship can unblock people: the served company's admin (via the
+    # company_admin rules above) AND the PROVIDING unit's hr_manager (module_manager here). Scoped
+    # tightly to module == "hr" so a stray "<other>_manager" grant never reaches non-hr approvals.
+    - actions: ["read", "decide"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["module_manager"]
+      condition:
+        match:
+          expr: >-
+            variables.inTenant && variables.notLow &&
+            request.resource.attr.module == "hr"

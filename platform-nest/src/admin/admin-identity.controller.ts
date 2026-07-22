@@ -165,7 +165,9 @@ export class AdminIdentityController {
          ON CONFLICT (tenant_id, user_id) DO UPDATE SET status = 'active', deleted_at = NULL`,
         [newId(), tenantId, userId, config.originSite],
       );
-      await emitEvent(c, tenantId, "user", userId, "user.invited", { email, name });
+      // invitedBy: WSD-4's onboarding auto-instantiation needs a human actor for hr_cases.created_by
+      // (a NOT NULL FK) — the inviting admin is the natural author of an auto-spawned onboarding case.
+      await emitEvent(c, tenantId, "user", userId, "user.invited", { email, name, invitedBy: req.principal.userId });
     });
     if (config.serviceAssignmentsEnabled && membershipToAdopt) {
       await adoptManagedGrantAsManual(tenantId, { membershipId: membershipToAdopt });

@@ -1,0 +1,47 @@
+/* Department console — launcher grid. Tab styles now live in shell.css
+   (.sec-tabs), shared by every console-style section. */
+
+/* Build Tools — launcher cards */
+.dept-launchers {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+}
+.dept-launcher {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 16px;
+  border: 0.5px solid var(--erp-hairline);
+  background: var(--erp-surface, #fff);
+  text-decoration: none;
+  color: var(--text-primary);
+  transition: border-color 0.15s ease, transform 0.1s ease;
+}
+.dept-launcher:hover {
+  border-color: var(--erp-accent);
+  transform: translateY(-1px);
+}
+.dept-launcher__glyph {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  flex: 0 0 40px;
+  font-size: 20px;
+  border: 0.5px solid var(--erp-hairline);
+  color: var(--erp-accent);
+}
+.dept-launcher__label {
+  font: 700 14px var(--font-body);
+  margin-bottom: 2px;
+}
+.dept-launcher__desc {
+  font: 400 12px/1.4 var(--font-body);
+  color: var(--erp-ink-50);
+}
+.dept-launcher__arrow {
+  margin-left: auto;
+  color: var(--erp-ink-50);
+  font-size: 15px;
+}

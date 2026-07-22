@@ -260,8 +260,13 @@ export class CoreController {
     @Req() req: FastifyRequest,
     @Param("tenantId") tenantId: string,
     @Query("includeService") includeServiceRaw?: string,
+    // WSD-4: the HR-workspace directory view passes ?module=hr so a served-company hr_staff grant
+    // (module_staff, resource_member.yaml) can read this tenant's directory — module_staff self-
+    // gates on `module != ""` and matches no other resource kind, so every OTHER caller of this
+    // endpoint (which never sends `module`) is completely unaffected by this addition.
+    @Query("module") moduleQ?: string,
   ) {
-    await authorize(req.principal, { kind: "member", tenantId }, "read");
+    await authorize(req.principal, { kind: "member", tenantId, module: moduleQ || undefined }, "read");
     // ORG-7b service-row badging: gated behind the release-train flag so this stays exactly the
     // pre-existing behavior (no kind filtering, no `kind`/`isService` fields) while
     // SERVICE_ASSIGNMENTS_ENABLED is off — the default, and true today for every deployed

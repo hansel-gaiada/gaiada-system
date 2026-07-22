@@ -104,3 +104,32 @@ derivedRoles:
               g.role == (request.resource.attr.module + "_approver") && (
                 g.scopeType == "global" ||
                 (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+
+    # WSD-2 (HR module linchpin). Generic module-staff / module-manager pair: the role name is
+    # string-composed from the resource's `module` attribute, so ONE pair serves hr/finance/legal/
+    # it-as-a-service — no per-module policy explosion. Every module handler passes
+    # resource.attr = {module: "<key>", tenantId: <SERVED company>, ...}; a reconciler-materialized
+    # grant `{role:"<key>_staff", scopeType:"company", scopeId:<served tenant>}` (ORG-6) matches
+    # only when the resource's tenantId equals the served company, so a served-company grant lights
+    # up ONLY that module's surface in that company. Byte-level sibling of module_approver above.
+    - name: module_staff
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            has(request.resource.attr.module) && request.resource.attr.module != "" &&
+            request.principal.attr.grants.exists(g,
+              g.role == (request.resource.attr.module + "_staff") && (
+                g.scopeType == "global" ||
+                (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+
+    - name: module_manager
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            has(request.resource.attr.module) && request.resource.attr.module != "" &&
+            request.principal.attr.grants.exists(g,
+              g.role == (request.resource.attr.module + "_manager") && (
+                g.scopeType == "global" ||
+                (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))

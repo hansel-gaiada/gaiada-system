@@ -35,7 +35,7 @@ export default async function AdminIdentityPage() {
     if (e instanceof PlatformError && e.status === 403) {
       return (
         <>
-          <PageHeader eyebrow="Admin" title="Identity Links" subtitle={SUBTITLE} />
+          <PageHeader eyebrow="Settings" title="Identity Links" subtitle={SUBTITLE} />
           <Card>
             <p style={{ margin: 0, font: "400 14px/1.5 var(--font-body)", color: "rgba(26,25,22,.62)" }}>
               This page is limited to administrators.
@@ -49,7 +49,7 @@ export default async function AdminIdentityPage() {
 
   return (
     <>
-      <PageHeader eyebrow="Admin" title="Identity Links" subtitle={SUBTITLE} />
+      <PageHeader eyebrow="Settings" title="Identity Links" subtitle={SUBTITLE} />
       <Card>
         {links.length === 0 ? (
           <EmptyNote>Identity links appear here once the backend endpoint is connected.</EmptyNote>

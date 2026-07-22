@@ -176,10 +176,14 @@ async function namesFor(ids: string[]): Promise<Map<string, string>> {
 
 /** Cerbos-authoritative per-company visibility probe for an envelope fan-out: never lets a denial
  *  propagate as a request-wide 403 — the caller becomes {included:false, reason:"no_access"}
- *  instead, per the UX-2 inclusion-envelope contract (never a silent drop, never a leak). */
-async function canRead(principal: Principal, tenantId: string): Promise<boolean> {
+ *  instead, per the UX-2 inclusion-envelope contract (never a silent drop, never a leak).
+ *  `module`, when given, additionally passes resource.attr.module (WSD-4: closes the ORG-7b header
+ *  note in resource_service_assignment.yaml — module_staff/module_manager gain "read" ONLY when
+ *  the caller declares which module's edges they're asking about, e.g. the HR workspace header /
+ *  scope-pill source calling with module='hr'). */
+async function canRead(principal: Principal, tenantId: string, module?: string): Promise<boolean> {
   try {
-    await authorize(principal, { kind: "service_assignment", tenantId }, "read");
+    await authorize(principal, { kind: "service_assignment", tenantId, module }, "read");
     return true;
   } catch {
     return false;
@@ -584,6 +588,8 @@ export class ServiceAssignmentsController {
     @Query("direction") direction = "provided",
     @Query("companyIds") companyIdsRaw?: string,
     @Query("status") statusRaw?: string,
+    // WSD-4: e.g. module='hr' — see the canRead() doc comment above.
+    @Query("module") moduleQ?: string,
   ): Promise<Envelope<Record<string, unknown>>> {
     if (!config.serviceAssignmentsEnabled) {
       throw new ConflictException("service-assignment reads are disabled (SERVICE_ASSIGNMENTS_ENABLED)");
@@ -591,7 +597,7 @@ export class ServiceAssignmentsController {
     if (direction !== "provided" && direction !== "served") {
       throw new BadRequestException("direction must be 'provided' or 'served'");
     }
-    await authorize(req.principal, { kind: "service_assignment", tenantId }, "read");
+    await authorize(req.principal, { kind: "service_assignment", tenantId, module: moduleQ || undefined }, "read");
 
     const statusFilter = statusRaw ? statusRaw.split(",").map((s) => s.trim()).filter(Boolean) : null;
     const extraIds = parseCsv(companyIdsRaw).filter((id) => id !== tenantId);
@@ -603,7 +609,7 @@ export class ServiceAssignmentsController {
     const col = direction === "provided" ? "provider_tenant_id" : "target_tenant_id";
 
     for (const cid of scopeIds) {
-      if (cid !== tenantId && !(await canRead(req.principal, cid))) {
+      if (cid !== tenantId && !(await canRead(req.principal, cid, moduleQ || undefined))) {
         companies.push({ id: cid, name: nameById.get(cid) ?? cid, included: false, reason: "no_access" });
         continue;
       }
@@ -651,11 +657,13 @@ export class ServiceAssignmentsController {
     @Req() req: FastifyRequest,
     @Param("tenantId") tenantId: string,
     @Query("companyIds") companyIdsRaw?: string,
+    // WSD-4: e.g. module='hr' — see the canRead() doc comment above.
+    @Query("module") moduleQ?: string,
   ): Promise<Envelope<Record<string, unknown>>> {
     if (!config.serviceAssignmentsEnabled) {
       throw new ConflictException("service-assignment reads are disabled (SERVICE_ASSIGNMENTS_ENABLED)");
     }
-    await authorize(req.principal, { kind: "service_assignment", tenantId }, "read");
+    await authorize(req.principal, { kind: "service_assignment", tenantId, module: moduleQ || undefined }, "read");
 
     const extraIds = parseCsv(companyIdsRaw).filter((id) => id !== tenantId);
     const scopeIds = [tenantId, ...extraIds];
@@ -665,7 +673,7 @@ export class ServiceAssignmentsController {
     const companies: EnvelopeCompany[] = [];
 
     for (const cid of scopeIds) {
-      if (cid !== tenantId && !(await canRead(req.principal, cid))) {
+      if (cid !== tenantId && !(await canRead(req.principal, cid, moduleQ || undefined))) {
         companies.push({ id: cid, name: nameById.get(cid) ?? cid, included: false, reason: "no_access" });
         continue;
       }

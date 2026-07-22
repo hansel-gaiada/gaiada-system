@@ -3,7 +3,6 @@ import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
 import { listDevices, buildTopology, summarizeHealth } from "@/lib/it";
-import { PageHeader } from "@/components/PageHeader";
 import { Card } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
 import { Topology } from "@/components/it/Topology";
@@ -22,12 +21,7 @@ export default async function TopologyPage() {
   const tenant = await getActiveTenant(me);
 
   if (!tenant) {
-    return (
-      <>
-        <PageHeader eyebrow="IT" title="Topology" subtitle="Site → Network → Device map." breadcrumbs={[{ label: "IT", href: "/it" }, { label: "Topology" }]} />
-        <EmptyNote>Select a company from the top bar.</EmptyNote>
-      </>
-    );
+    return <Card><EmptyNote>Select a company from the top bar.</EmptyNote></Card>;
   }
 
   const devices = await listDevices(userId, tenant);
@@ -36,12 +30,9 @@ export default async function TopologyPage() {
 
   return (
     <>
-      <PageHeader
-        eyebrow="IT"
-        title="Topology"
-        subtitle={`Site → Network → Device. ${health.total} devices · ${health.online} online · ${health.offline + health.degraded} needing attention.`}
-        breadcrumbs={[{ label: "IT", href: "/it" }, { label: "Topology" }]}
-      />
+      <div style={{ font: "400 13px var(--font-body)", color: "var(--erp-ink-60)", marginBottom: 14 }}>
+        Site → Network → Device. {health.total} devices · {health.online} online · {health.offline + health.degraded} needing attention.
+      </div>
 
       <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 16 }}>
         {LEGEND.map((l) => (

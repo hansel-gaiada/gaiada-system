@@ -27,7 +27,7 @@ function formatWhen(iso: string): string {
 function limitedState() {
   return (
     <>
-      <PageHeader eyebrow="Admin" title="Audit" subtitle={SUBTITLE} />
+      <PageHeader eyebrow="Settings" title="Audit" subtitle={SUBTITLE} />
       <Card>
         <p style={{ margin: 0, font: "400 14px/1.5 var(--font-body)", color: "rgba(26,25,22,.62)" }}>
           This page is limited to administrators.
@@ -46,7 +46,7 @@ export default async function AdminAuditPage({ searchParams }: { searchParams: S
   if (!tenant) {
     return (
       <>
-        <PageHeader eyebrow="Admin" title="Audit" subtitle={SUBTITLE} />
+        <PageHeader eyebrow="Settings" title="Audit" subtitle={SUBTITLE} />
         <EmptyNote>Select a company from the top bar.</EmptyNote>
       </>
     );
@@ -93,7 +93,7 @@ export default async function AdminAuditPage({ searchParams }: { searchParams: S
 
   return (
     <>
-      <PageHeader eyebrow="Admin" title="Audit" subtitle={SUBTITLE} />
+      <PageHeader eyebrow="Settings" title="Audit" subtitle={SUBTITLE} />
 
       <Card style={{ marginBottom: 20 }}>
         <form className="lux-filters" method="get" aria-label="Audit filters">

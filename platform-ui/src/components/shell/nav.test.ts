@@ -8,22 +8,37 @@ const base: Me = {
 };
 
 describe("navFor (RBAC-gated visibility)", () => {
-  it("member sees Workspace/Organization/Business/Intelligence/Systems but no Admin, no Rollups", () => {
+  it("member sees Workspace/Organization/Business/Intelligence/Systems but no Settings, no Rollups", () => {
     const groups = navFor({ ...base, roles: [{ role: "member", scopeType: "company", scopeId: "c1" }] });
     const labels = groups.map((g) => g.label);
-    expect(labels).toEqual(["Workspace", "Organization", "Business", "Intelligence", "Systems", "IT"]);
+    expect(labels).toEqual(["Workspace", "Organization", "Business", "Intelligence", "Systems"]);
     const business = groups.find((g) => g.label === "Business")!;
     expect(business.items.map((i) => i.label)).not.toContain("Rollups");
-    // Companies moved under the new Organization group.
+    // Companies moved into the Organization Overview; Organization = Overview + Departments.
     const org = groups.find((g) => g.label === "Organization")!;
-    expect(org.items.map((i) => i.label)).toEqual(["Overview", "Companies", "Departments"]);
-    // IT section is visible to everyone (read-only for non-managers).
-    const itGroup = groups.find((g) => g.label === "IT")!;
-    expect(itGroup.items.map((i) => i.label)).toEqual(["Overview", "Devices", "Topology", "Workflows"]);
+    expect(org.items.map((i) => i.label)).toEqual(["Overview", "Departments"]);
+    // No standalone IT group (IT is now a department) and no People in Workspace (now HR).
+    const workspace = groups.find((g) => g.label === "Workspace")!;
+    expect(workspace.items.map((i) => i.label)).toEqual(["My Work", "Calendar", "Approvals"]);
   });
-  it("platform_admin sees Admin group and Rollups", () => {
+  it("attaches business departments plus the functional HR/IT departments as children", () => {
+    const groups = navFor(
+      { ...base, roles: [{ role: "member", scopeType: "company", scopeId: "c1" }] },
+      "c1",
+      [{ id: "dept-1", name: "Web Dev" }, { id: "dept-2", name: "SEO" }],
+    );
+    const depts = groups.find((g) => g.label === "Organization")!.items.find((i) => i.label === "Departments")!;
+    expect(depts.children?.map((c) => c.label)).toEqual(["Web Dev", "SEO", "HR", "IT"]);
+    expect(depts.children?.map((c) => c.href)).toEqual(["/departments/dept-1", "/departments/dept-2", "/hr", "/it"]);
+  });
+  it("still lists HR and IT when no business departments are passed", () => {
+    const groups = navFor({ ...base, roles: [{ role: "member", scopeType: "company", scopeId: "c1" }] }, "c1");
+    const depts = groups.find((g) => g.label === "Organization")!.items.find((i) => i.label === "Departments")!;
+    expect(depts.children?.map((c) => c.label)).toEqual(["HR", "IT"]);
+  });
+  it("platform_admin gets a Settings entry and Rollups", () => {
     const groups = navFor({ ...base, roles: [{ role: "platform_admin", scopeType: "global", scopeId: null }] });
-    expect(groups.map((g) => g.label)).toContain("Admin");
+    expect(groups.flatMap((g) => g.items).some((i) => i.label === "Settings" && i.href === "/admin")).toBe(true);
     const business = groups.find((g) => g.label === "Business")!;
     expect(business.items.map((i) => i.label)).toContain("Rollups");
   });

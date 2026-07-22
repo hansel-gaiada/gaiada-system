@@ -4,6 +4,7 @@ import { getSessionUserId } from "@/lib/session-server";
 import { getMe, PlatformError } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
 import { listMembers, listProjects, type Member, type Project } from "@/lib/entities";
+import { listDepartmentBriefs } from "@/lib/departments";
 import { PageHeader } from "@/components/PageHeader";
 import { Card } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
@@ -11,6 +12,7 @@ import { DataTable, type Column } from "@/components/data/DataTable";
 
 const COLUMNS: Column[] = [
   { key: "name", header: "Name", sortable: true },
+  { key: "department", header: "Department", sortable: true },
   { key: "status", header: "Status", format: "status", sortable: true },
   { key: "due_date", header: "Due date", format: "date", sortable: true },
   { key: "owner", header: "Owner", sortable: true, align: "right" },
@@ -24,10 +26,11 @@ export default async function ProjectsPage() {
   const tenant = await getActiveTenant(me);
   let projects: Project[];
   let members: Member[];
+  let departments: { id: string; name: string }[] = [];
   try {
-    [projects, members] = tenant
-      ? await Promise.all([listProjects(userId, tenant), listMembers(userId, tenant)])
-      : [[], []];
+    [projects, members, departments] = tenant
+      ? await Promise.all([listProjects(userId, tenant), listMembers(userId, tenant), listDepartmentBriefs(userId, tenant).catch(() => [])])
+      : [[], [], []];
   } catch (e) {
     if (e instanceof PlatformError && e.status === 403) {
       return (
@@ -44,9 +47,11 @@ export default async function ProjectsPage() {
     throw e;
   }
   const ownerName = new Map(members.map((m) => [m.user_id, m.name]));
+  const deptName = new Map(departments.map((d) => [d.id, d.name]));
   const rows = projects.map((p) => ({
     id: p.id,
     name: p.name,
+    department: (p.department_id && deptName.get(p.department_id)) ?? "—",
     status: p.status,
     due_date: p.due_date,
     owner: (p.owner_id && ownerName.get(p.owner_id)) ?? "—",

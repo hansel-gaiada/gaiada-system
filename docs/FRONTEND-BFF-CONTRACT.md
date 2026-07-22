@@ -203,3 +203,28 @@ existing endpoint's shape changes breakingly. Assumes `rbac.ts scopeCovers` fix 
 _Cross-references:_ `memory/org-structure-contract`, `memory/it-device-contract`,
 `memory/pm-ai-tracker-contract`, `memory/ui-rbac-and-company-scope`, `memory/backbone-program`. Type shapes are canonical in
 `platform-ui/src/lib/{platform,entities,adminData,org,organization,pm,it,admin}.ts`.
+
+## 10. HR module (WSD-4, 2026-07-22) — `modules/hr/hr.controller.ts` — **BACKEND ✅ BUILT (no UI/`lib/hr.ts` consumer yet — WSD-5)**
+
+From `docs/superpowers/specs/2026-07-20-hr-module-design.md`. Module key `'hr'`; dark unless
+`companies.enabled_modules ∋ 'hr'` OR an ACTIVE `service_assignment` serves `'hr'` to the tenant
+(`registry.ts isModuleEnabled`, §4). All routes mounted `/api/:tenantId/modules/hr/*`.
+
+- ✅ `GET/POST /api/:t/modules/hr/cases`, ✅ `GET/PATCH/DELETE /api/:t/modules/hr/cases/:id`,
+  ✅ `POST /api/:t/modules/hr/cases/:id/cancel`, ✅ `PATCH /api/:t/modules/hr/cases/:id/checklist`
+  (onboarding/offboarding/review/grievance/other; self-service read/create/cancel of one's own case).
+- ✅ `GET/POST /api/:t/modules/hr/records`, ✅ `PATCH/DELETE .../records/:id`,
+  ✅ `GET /api/:t/modules/hr/records/export` (D4 high-assurance gate; NO subject self-read in v1).
+- ✅ `GET/POST /api/:t/modules/hr/leave` (file → `hr_leave_requests` + an `automation_approvals`
+  row with `origin:'hr'` in one transaction), ✅ `POST .../leave/:id/cancel` (own pending only),
+  ✅ `GET /api/:t/modules/hr/leave/balances`. Deciding rides the EXISTING
+  `POST /api/:t/automation-approvals/:id/decide` (now accepts `?origin=hr` on the list GET too) —
+  no forked decide endpoint; the hr eventHandler applies the outcome + moves the balance + notifies
+  the subject (`payload.href = "/hr/leave/:id"`).
+- ✅ `GET/POST /api/:t/modules/hr/attendance` (staff-editable only, per-day upsert).
+- ✅ `GET/POST /api/:t/modules/hr/checklist-templates`, ✅ `POST /api/:t/modules/hr/onboarding/instantiate`
+  (manual trigger; the same helper backs the automatic `user.invited` → onboarding-case spawn).
+- Rollups: `hr.open_cases`, `hr.leave_pending`, `hr.onboarding_active` feed the cross-company
+  management view like every other module.
+- **⬜ PENDING (WSD-5):** `/hr`, `/hr/leave`, `/hr/attendance`, `/hr/onboarding` UI + `lib/hr.ts` +
+  `rbac.ts` `hr.view`/`hr.manage` caps. Backend is UI-ready — every route above is live now.

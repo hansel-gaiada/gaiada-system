@@ -4,6 +4,7 @@ import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
 import { getPendingApprovals, getMyTasks, getActivity, weeklyThroughput } from "@/lib/data";
+import { myPlacement } from "@/lib/departments";
 import { decideApproval } from "./actions";
 import { Card, Eyebrow, KpiTile, HairlineTable, StatusBadge } from "@/components/ui";
 import { LineChart } from "@/components/LineChart";
@@ -19,6 +20,16 @@ export default async function MyWork() {
   if (!userId) redirect("/login");
   const me = await getMe(userId);
   const tenantId = await getActiveTenant(me);
+
+  // Department-first: an employee placed in the active company's org lands in — and
+  // works from — their own department console, not this cross-company personal home.
+  // People who aren't placed in a department (e.g. owners / holding executives who
+  // oversee everything) keep this dashboard as their landing.
+  if (tenantId) {
+    const placement = await myPlacement(userId, tenantId, userId).catch(() => null);
+    if (placement) redirect(`/departments/${placement.deptId}`);
+  }
+
   const firstName = me.name.split(/\s+/)[0];
 
   const [approvals, tasks, activity] = await Promise.all([

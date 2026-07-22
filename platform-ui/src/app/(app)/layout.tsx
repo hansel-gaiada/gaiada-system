@@ -3,7 +3,7 @@ import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
 import { getPrefs } from "@/lib/prefs";
-import { myPlacement, type MyPlacement } from "@/lib/departments";
+import { myPlacement, listDepartmentBriefs, type MyPlacement, type DeptBrief } from "@/lib/departments";
 import { Shell } from "@/components/shell/Shell";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
@@ -13,10 +13,17 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   if (!me) redirect("/login");
   const tenantId = await getActiveTenant(me);
   const prefs = await getPrefs();
-  // The signed-in employee's own department/division in the active company (sidebar "My team").
-  const placement: MyPlacement | null = tenantId ? await myPlacement(userId, tenantId, userId).catch(() => null) : null;
+  // The signed-in employee's own department/division in the active company (sidebar "My team"),
+  // plus the active company's departments for the expandable Departments nav (shares the
+  // org-structure fetch via cache — no extra round-trip).
+  const [placement, departments]: [MyPlacement | null, DeptBrief[]] = tenantId
+    ? await Promise.all([
+        myPlacement(userId, tenantId, userId).catch(() => null),
+        listDepartmentBriefs(userId, tenantId).catch(() => [] as DeptBrief[]),
+      ])
+    : [null, []];
   return (
-    <Shell me={me} tenantId={tenantId} moduleLabel="My Workspace" prefs={prefs} placement={placement}>
+    <Shell me={me} tenantId={tenantId} moduleLabel="My Workspace" prefs={prefs} placement={placement} departments={departments}>
       {children}
     </Shell>
   );

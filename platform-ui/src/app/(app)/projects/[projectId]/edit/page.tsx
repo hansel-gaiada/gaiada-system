@@ -3,6 +3,7 @@ import { getSessionUserId } from "@/lib/session-server";
 import { getMe, PlatformError } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
 import { getFieldDefs, getProject, listMembers } from "@/lib/entities";
+import { listDepartmentBriefs } from "@/lib/departments";
 import { PageHeader } from "@/components/PageHeader";
 import { ProjectForm } from "@/components/forms/ProjectForm";
 import { updateProject } from "../../actions";
@@ -24,12 +25,16 @@ export default async function EditProjectPage({ params }: { params: Promise<{ pr
     throw e;
   }
 
-  const [defs, members] = await Promise.all([getFieldDefs(userId, tenant, "project"), listMembers(userId, tenant)]);
+  const [defs, members, departments] = await Promise.all([
+    getFieldDefs(userId, tenant, "project"),
+    listMembers(userId, tenant),
+    listDepartmentBriefs(userId, tenant).catch(() => []),
+  ]);
 
   return (
     <>
       <PageHeader eyebrow="Project" title={`Edit ${project.name}`} breadcrumbs={[{ label: "Projects", href: "/projects" }, { label: project.name, href: `/projects/${projectId}` }, { label: "Edit" }]} />
-      <ProjectForm action={updateProject.bind(null, projectId)} defs={defs} members={members} project={project} />
+      <ProjectForm action={updateProject.bind(null, projectId)} defs={defs} members={members} departments={departments} project={project} />
     </>
   );
 }

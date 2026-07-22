@@ -26,6 +26,7 @@ import { AgencyController } from "./modules/agency/agency.controller";
 import { PmController } from "./modules/pm/pm.controller";
 import { ItController } from "./modules/it/it.controller";
 import { ClientsController } from "./modules/clients/clients.controller";
+import { HrController } from "./modules/hr/hr.controller";
 import { McpToolsController } from "./modules/mcp-tools.controller";
 
 @Module({
@@ -34,7 +35,7 @@ import { McpToolsController } from "./modules/mcp-tools.controller";
     AuthzCheckController, ClientWorkController, BillingController, CollabController, AutomationApprovalsController, PipelineController, MeetingRecordingsController, PortalController, FilesController, AdminIdentityController,
     CompanyAdminController, ServiceAssignmentsController, CompanyCrudController, AdminSystemsController, IntelligenceController,
     // Vertical modules (compiled-in; per-tenant enable gate at the controller).
-    AgencyController, PmController, ItController, ClientsController,
+    AgencyController, PmController, ItController, ClientsController, HrController,
     // MCP tool-def aggregation for the hub (WS2 §6).
     McpToolsController,
   ],

@@ -48,3 +48,12 @@ resourcePolicy:
       effect: EFFECT_ALLOW
       derivedRoles: ["company_admin"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    # WSD-2 (closes the ORG-7b header note): "read" — and ONLY read — gains the module roles, so
+    # HR staff/managers see their unit's serving edges (workspace header, scope-pill source). The
+    # controller must set resource.attr.module to the assignment's module_key for the derived role
+    # to string-compose "<module>_staff"/"<module>_manager"; inert until it does (WSD-4). Lifecycle
+    # actions (propose/accept/revoke/…) are NOT extended — module staff never mutate serving edges.
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["module_staff", "module_manager"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }

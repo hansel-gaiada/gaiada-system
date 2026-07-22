@@ -5,7 +5,6 @@ import { getMe } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
 import { canManageIT } from "@/components/shell/nav";
 import { listDevices, DEVICE_STATUSES, type Device, type DeviceStatus } from "@/lib/it";
-import { PageHeader } from "@/components/PageHeader";
 import { Card, HairlineTable } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
 import { DeviceStatus as StatusPill } from "@/components/it/DeviceStatus";
@@ -30,12 +29,7 @@ export default async function DevicesPage({ searchParams }: { searchParams: Sear
   const canManage = canManageIT(me, tenant);
 
   if (!tenant) {
-    return (
-      <>
-        <PageHeader eyebrow="IT" title="Devices" subtitle="Registered devices across the estate." breadcrumbs={[{ label: "IT", href: "/it" }, { label: "Devices" }]} />
-        <EmptyNote>Select a company from the top bar.</EmptyNote>
-      </>
-    );
+    return <Card><EmptyNote>Select a company from the top bar.</EmptyNote></Card>;
   }
 
   const all = await listDevices(userId, tenant);
@@ -60,13 +54,11 @@ export default async function DevicesPage({ searchParams }: { searchParams: Sear
 
   return (
     <>
-      <PageHeader
-        eyebrow="IT"
-        title="Devices"
-        subtitle="Registered devices — CCTV, printers, servers, network gear and connected endpoints."
-        breadcrumbs={[{ label: "IT", href: "/it" }, { label: "Devices" }]}
-        actions={canManage ? <DeviceForm register={registerDevice} /> : undefined}
-      />
+      {canManage && (
+        <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 16 }}>
+          <DeviceForm register={registerDevice} />
+        </div>
+      )}
 
       <Card style={{ marginBottom: 16 }}>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>

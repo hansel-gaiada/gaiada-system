@@ -1,0 +1,33 @@
+# WSD-2 (HR module). hr_record = contract|document|note references per subject. More sensitive
+# than hr_case: per design §1 Scope, subject self-read of records is OUT in v1 (no `member` rule
+# here — deliberately). Same served-company slicing as hr_case (design §2.2). Nothing here trusts
+# client-supplied scope; tenantId is the URL/served tenant, matched against the materialized grant.
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: hr_record
+  importDerivedRoles: ["gaiada_scopes"]
+  variables:
+    import: ["gaiada_common"]
+  rules:
+    - actions: ["*"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["platform_admin"]
+    # HR staff / manager (served-company grant) + the served company's own admin.
+    - actions: ["read", "create", "update"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["module_staff", "module_manager", "company_admin"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    # Destructive: manager + company admin only.
+    - actions: ["delete"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["module_manager", "company_admin"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    # Export gated on the D4 high-assurance tier.
+    - actions: ["export"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["module_manager", "company_admin"]
+      condition:
+        match:
+          expr: >-
+            variables.inTenant && request.principal.attr.assurance == "high"
