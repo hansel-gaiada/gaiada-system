@@ -32,10 +32,14 @@ export function ScopePill({ companies, value, onChangeHref, countLabel, allLabel
         <span className="scope-pill__eyebrow">Scope</span>
         <span className="scope-pill__value">{currentLabel} ▾</span>
       </summary>
-      <div className="scope-pill__menu" role="menu">
+      {/* Plain disclosure content, not a fake menu (WSUX-11 Major-2 fix): this
+          is a native <details>/<summary> with ordinary links inside — Tab
+          moves through them like any other link list, so it must not claim
+          ARIA menu semantics (arrow-key/Home/End/Escape) it doesn't wire up.
+          A <nav> landmark with a label is the correct, honest disclosure. */}
+      <nav className="scope-pill__menu" aria-label="Scope">
         <Link
           href={onChangeHref("all")}
-          role="menuitem"
           className={`scope-pill__item${value === "all" ? " scope-pill__item--active" : ""}`}
         >
           {allLabel} ({count})
@@ -44,13 +48,12 @@ export function ScopePill({ companies, value, onChangeHref, countLabel, allLabel
           <Link
             key={c.id}
             href={onChangeHref(c.id)}
-            role="menuitem"
             className={`scope-pill__item${value === c.id ? " scope-pill__item--active" : ""}`}
           >
             {c.name}
           </Link>
         ))}
-      </div>
+      </nav>
     </details>
   );
 }

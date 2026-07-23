@@ -19,8 +19,14 @@
 
 .needs-me-queue__row { display: flex; align-items: flex-start; gap: 12px; padding: 13px 0; border-top: 0.5px solid rgba(26, 25, 22, 0.1); }
 .needs-me-queue__dot { width: 8px; height: 8px; border-radius: 50%; margin-top: 6px; flex-shrink: 0; }
-.needs-me-queue__dot--now { background: var(--erp-accent, #6E5A43); }
-.needs-me-queue__dot--today { background: #B5622F; }
+/* Risk-colour discipline (WSUX-11 Major-1 fix): rust (#B5622F) is the app's
+   one alarm colour, reserved for the most urgent band. `urgencyBand()`
+   (lib/queueUrgency.ts) maps pending approvals/gates AND already-overdue
+   tasks to "now" — those get the alarm colour. "today" (due today, not yet
+   late) gets the calm bronze the rest of the app uses for in-flight/attention
+   states (matches Notifications' warning tier). "soon" stays neutral grey. */
+.needs-me-queue__dot--now { background: #B5622F; }
+.needs-me-queue__dot--today { background: var(--erp-accent, #6E5A43); }
 .needs-me-queue__dot--soon { background: rgba(26, 25, 22, 0.28); }
 .needs-me-queue__body { min-width: 0; flex: 1; }
 .needs-me-queue__line { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }

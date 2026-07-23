@@ -49,6 +49,32 @@ describe("NeedsMeQueue", () => {
     expect(screen.queryByText("Approve")).not.toBeInTheDocument();
   });
 
+  it("maps the urgency band to the dot class the alarm colour is keyed on (WSUX-11 Major-1 guard)", () => {
+    // "now" (approvals/gates, overdue tasks) must render the alarm-mapped
+    // `--now` dot class; "today" (due today, not yet late) must render the
+    // calm-mapped `--today` class. dashboard.css keys its one alarm colour
+    // (#B5622F) off `--now` — this locks the band→class wiring so a future
+    // edit can't silently swap them without a red test.
+    const { container, rerender } = render(
+      <NeedsMeQueue
+        items={[item({ id: "agency:a4", type: "approval", title: "Needs a decision", origin: "agency", originId: "a4" })]}
+        decide={vi.fn()}
+      />,
+    );
+    expect(container.querySelector(".needs-me-queue__dot--now")).toBeInTheDocument();
+    expect(container.querySelector(".needs-me-queue__dot--today")).not.toBeInTheDocument();
+
+    const todayIso = new Date().toISOString();
+    rerender(
+      <NeedsMeQueue
+        items={[item({ id: "task:co-a:t2", type: "task", title: "Due today, on track", dueDate: todayIso, href: "/tasks/t2" })]}
+        decide={vi.fn()}
+      />,
+    );
+    expect(container.querySelector(".needs-me-queue__dot--today")).toBeInTheDocument();
+    expect(container.querySelector(".needs-me-queue__dot--now")).not.toBeInTheDocument();
+  });
+
   it("restores the row and shows an error toast when decide fails", async () => {
     const decide = vi.fn(async () => ({ ok: false, error: "nope" }));
     render(
