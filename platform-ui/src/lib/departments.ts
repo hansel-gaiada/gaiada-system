@@ -276,3 +276,77 @@ export function myDeptTasksToday(tasks: PmTask[], userId: string): PmTask[] {
 export function myBlockedTasks(tasks: PmTask[], userId: string): PmTask[] {
   return tasks.filter((t) => t.status === "blocked" && t.assignee?.responsibleId === userId);
 }
+
+// ---------------- Board focus model (WSUX-7, R-2 — ORG-CORE STEP-5 semantics) ----------------
+// The daily-work spec's §3 "Focus: Whole dept / Division:<name> / Just me" grafted into the
+// console's Board tab. Pure filters over `dept.tasks` (already scanned by `belongs()` in
+// `getDepartment`) — no new backend call, no re-traversal of the org tree; division membership
+// reuses the SAME `divisions[].people` shape `scan()` already produced.
+export type BoardFocusMode = "dept" | "division" | "me";
+export interface BoardFocus { mode: BoardFocusMode; divisionId?: string }
+
+// Encode/decode the `?focus=` query value: "dept" | "me" | "division:<id>".
+export function parseBoardFocus(raw: string | undefined): BoardFocus {
+  if (!raw || raw === "dept") return { mode: "dept" };
+  if (raw === "me") return { mode: "me" };
+  if (raw.startsWith("division:")) return { mode: "division", divisionId: raw.slice("division:".length) };
+  return { mode: "dept" };
+}
+export function encodeBoardFocus(focus: BoardFocus): string {
+  if (focus.mode === "division" && focus.divisionId) return `division:${focus.divisionId}`;
+  return focus.mode;
+}
+
+function divisionTaskIds(task: PmTask, division: DeptDivision): boolean {
+  const a = task.assignee;
+  if (!a) return false;
+  if (a.kind === "division" && a.refId === division.id) return true;
+  const personIds = new Set(division.people.map((p) => p.id));
+  if (a.responsibleId && personIds.has(a.responsibleId)) return true;
+  if (a.kind === "person" && personIds.has(a.refId)) return true;
+  return false;
+}
+
+// `Focus: Just me` needs no permission beyond viewing the department (spec §3.4) — it's a
+// client-... er, server-side filter over data already fetched for this viewer. `Focus: Division`
+// is validated against `dept.divisions` by the caller (an unknown/foreign division id yields no
+// tasks here rather than silently falling back to "whole dept").
+export function filterTasksByFocus(tasks: PmTask[], divisions: DeptDivision[], focus: BoardFocus, userId: string): PmTask[] {
+  if (focus.mode === "me") return tasks.filter((t) => t.assignee?.responsibleId === userId);
+  if (focus.mode === "division") {
+    const division = divisions.find((d) => d.id === focus.divisionId);
+    if (!division) return [];
+    return tasks.filter((t) => divisionTaskIds(t, division));
+  }
+  return tasks;
+}
+
+// ---------------- Board swimlane-by (WSUX-7, R-2 — Status/Division/Person) ----------------
+// Status stays `groupByStatus` (lib/pm.ts) unchanged — the existing draggable board. Division and
+// Person are read groupings only (no drag semantics attached to a lane change) grafted in as an
+// alternate render for the same filtered task set.
+export type BoardSwimlane = "status" | "division" | "person";
+export interface BoardLane { key: string; label: string; tasks: PmTask[] }
+
+export function groupBoardLanes(tasks: PmTask[], divisions: DeptDivision[], swimlane: "division" | "person"): BoardLane[] {
+  if (swimlane === "division") {
+    const lanes: BoardLane[] = divisions.map((d) => ({
+      key: d.id,
+      label: d.name,
+      tasks: tasks.filter((t) => divisionTaskIds(t, d)),
+    }));
+    const laned = new Set(lanes.flatMap((l) => l.tasks.map((t) => t.id)));
+    const rest = tasks.filter((t) => !laned.has(t.id));
+    if (rest.length > 0) lanes.push({ key: "__no_division", label: "No division", tasks: rest });
+    return lanes;
+  }
+  // person
+  const byPerson = new Map<string, BoardLane>();
+  for (const t of tasks) {
+    const id = t.assignee?.responsibleId ?? "__unassigned";
+    const label = t.assignee?.responsibleName || "Unassigned";
+    if (!byPerson.has(id)) byPerson.set(id, { key: id, label, tasks: [] });
+    byPerson.get(id)!.tasks.push(t);
+  }
+  return [...byPerson.values()].sort((a, b) => a.label.localeCompare(b.label));
+}

@@ -15,6 +15,9 @@
 
 /* ---- kanban board ---- */
 .pm-board { display: grid; grid-template-columns: repeat(4, minmax(220px, 1fr)); gap: 14px; align-items: start; }
+/* Division/person swimlane view (WSUX-7) can have an arbitrary lane count, so
+   it auto-fits instead of the fixed 4-up Status board. */
+.pm-board--lanes { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
 .pm-col { border: 0.5px solid var(--erp-hairline); background: var(--surface-card); min-height: 120px; display: flex; flex-direction: column; }
 .pm-col__head { display: flex; align-items: center; justify-content: space-between; padding: 11px 13px; border-bottom: 0.5px solid var(--erp-hairline-soft); }
 .pm-col__title { font: 700 10px var(--font-body); letter-spacing: 0.1em; text-transform: uppercase; color: var(--erp-ink-60); }

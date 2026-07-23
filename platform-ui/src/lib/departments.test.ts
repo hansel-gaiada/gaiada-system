@@ -2,6 +2,8 @@ import { describe, it, expect } from "vitest";
 import {
   isOverdue, isDueSoon, computeDeptKpis, computeProjectHealth,
   toRailPriority, myDeptTasksToday, myBlockedTasks,
+  parseBoardFocus, encodeBoardFocus, filterTasksByFocus, groupBoardLanes,
+  type DeptDivision,
 } from "./departments";
 import type { PmTask } from "./pm";
 
@@ -118,5 +120,77 @@ describe("myBlockedTasks", () => {
       task({ id, status: "blocked", assignee: { kind: "person", refId: respId, refName: "X", responsibleId: respId, responsibleName: "X" } });
     const tasks = [blocked("mine", "u-1"), blocked("theirs", "u-2"), task({ id: "not-blocked", status: "todo", assignee: { kind: "person", refId: "u-1", refName: "Me", responsibleId: "u-1", responsibleName: "Me" } })];
     expect(myBlockedTasks(tasks, "u-1").map((t) => t.id)).toEqual(["mine"]);
+  });
+});
+
+// ---------------- Board focus model (WSUX-7) ----------------
+const divisions: DeptDivision[] = [
+  { id: "div-seo", name: "SEO", people: [{ id: "u-1", name: "Ada" }] },
+  { id: "div-video", name: "Video", people: [{ id: "u-2", name: "Ben" }] },
+];
+
+describe("parseBoardFocus / encodeBoardFocus", () => {
+  it("round-trips dept/me/division:<id>", () => {
+    expect(parseBoardFocus(undefined)).toEqual({ mode: "dept" });
+    expect(parseBoardFocus("dept")).toEqual({ mode: "dept" });
+    expect(parseBoardFocus("me")).toEqual({ mode: "me" });
+    expect(parseBoardFocus("division:div-seo")).toEqual({ mode: "division", divisionId: "div-seo" });
+  });
+  it("falls back to dept on garbage input", () => {
+    expect(parseBoardFocus("nonsense")).toEqual({ mode: "dept" });
+  });
+  it("encodeBoardFocus is the inverse", () => {
+    expect(encodeBoardFocus({ mode: "dept" })).toBe("dept");
+    expect(encodeBoardFocus({ mode: "me" })).toBe("me");
+    expect(encodeBoardFocus({ mode: "division", divisionId: "div-seo" })).toBe("division:div-seo");
+  });
+});
+
+describe("filterTasksByFocus", () => {
+  const divAssignee = (kind: "division" | "person", refId: string, responsibleId?: string) =>
+    ({ kind, refId, refName: "X", responsibleId: responsibleId ?? refId, responsibleName: "X" }) as PmTask["assignee"];
+  const tasks: PmTask[] = [
+    task({ id: "seo-direct", assignee: divAssignee("division", "div-seo") }),
+    task({ id: "seo-person", assignee: divAssignee("person", "u-1") }),
+    task({ id: "video-task", assignee: divAssignee("division", "div-video") }),
+    task({ id: "mine", assignee: { kind: "person", refId: "u-9", refName: "X", responsibleId: "u-1", responsibleName: "Ada" } }),
+  ];
+
+  it("mode dept returns everything unfiltered", () => {
+    expect(filterTasksByFocus(tasks, divisions, { mode: "dept" }, "u-1").map((t) => t.id)).toEqual(
+      tasks.map((t) => t.id),
+    );
+  });
+  it("mode me filters to responsibleId === userId", () => {
+    expect(filterTasksByFocus(tasks, divisions, { mode: "me" }, "u-1").map((t) => t.id)).toEqual(["seo-person", "mine"]);
+  });
+  it("mode division includes direct division assignment, its people's tasks, and responsible-in-division", () => {
+    const result = filterTasksByFocus(tasks, divisions, { mode: "division", divisionId: "div-seo" }, "u-9").map((t) => t.id);
+    expect(result).toEqual(["seo-direct", "seo-person", "mine"]);
+  });
+  it("an unknown division id yields no tasks (never silently falls back to whole dept)", () => {
+    expect(filterTasksByFocus(tasks, divisions, { mode: "division", divisionId: "does-not-exist" }, "u-1")).toEqual([]);
+  });
+});
+
+describe("groupBoardLanes", () => {
+  const tasks: PmTask[] = [
+    task({ id: "a", assignee: { kind: "division", refId: "div-seo", refName: "SEO", responsibleId: "u-1", responsibleName: "Ada" } }),
+    task({ id: "b", assignee: { kind: "division", refId: "div-video", refName: "Video", responsibleId: "u-2", responsibleName: "Ben" } }),
+    task({ id: "c", assignee: null }),
+  ];
+
+  it("division swimlane groups by division and buckets unmatched into 'No division'", () => {
+    const lanes = groupBoardLanes(tasks, divisions, "division");
+    expect(lanes.map((l) => [l.label, l.tasks.map((t) => t.id)])).toEqual([
+      ["SEO", ["a"]],
+      ["Video", ["b"]],
+      ["No division", ["c"]],
+    ]);
+  });
+  it("person swimlane groups by responsibleId, sorted by label, with an Unassigned lane", () => {
+    const lanes = groupBoardLanes(tasks, divisions, "person");
+    expect(lanes.map((l) => l.label)).toEqual(["Ada", "Ben", "Unassigned"]);
+    expect(lanes.find((l) => l.label === "Unassigned")?.tasks.map((t) => t.id)).toEqual(["c"]);
   });
 });

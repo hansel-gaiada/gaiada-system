@@ -3,6 +3,7 @@ import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import type { BoardColumn, PmTask, TaskStatus } from "@/lib/pm";
+import type { BoardLane } from "@/lib/departments";
 import { ProgressBar } from "./ProgressBar";
 import "./pm.css";
 
@@ -52,15 +53,37 @@ export function Board({ columns, move }: Props) {
   );
 }
 
-function Card({ task, onDragStart }: { task: PmTask; onDragStart: (id: string) => void }) {
+// Swimlane-by Division/Person (WSUX-7, R-2). Read-only groupings — grouping a
+// task by which division or person it's tagged to isn't a status transition,
+// so there's no drag target to drop it on (unlike the Status board above,
+// where a column IS the status). Same card rendering, no `move` prop needed.
+export function BoardLanes({ lanes }: { lanes: BoardLane[] }) {
+  return (
+    <div className="pm-board pm-board--lanes">
+      {lanes.map((lane) => (
+        <section key={lane.key} className="pm-col" aria-label={lane.label}>
+          <div className="pm-col__head">
+            <span className="pm-col__title">{lane.label}</span>
+            <span className="pm-col__count">{lane.tasks.length}</span>
+          </div>
+          <div className="pm-col__body">
+            {lane.tasks.map((t) => <Card key={t.id} task={t} onDragStart={() => {}} draggable={false} />)}
+          </div>
+        </section>
+      ))}
+    </div>
+  );
+}
+
+function Card({ task, onDragStart, draggable = true }: { task: PmTask; onDragStart: (id: string) => void; draggable?: boolean }) {
   const who = task.assignee ? (task.assignee.responsibleName || task.assignee.refName) : "Unassigned";
   const unitTag = task.assignee && task.assignee.kind !== "person" ? task.assignee.refName : null;
   return (
     <Link
       href={`/tasks/${task.id}`}
       className={`pm-card pm-card--p-${task.priority}`}
-      draggable
-      onDragStart={(e) => { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", task.id); onDragStart(task.id); }}
+      draggable={draggable}
+      onDragStart={draggable ? (e) => { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", task.id); onDragStart(task.id); } : undefined}
     >
       <span className="pm-card__title">{task.title}</span>
       <ProgressBar value={task.progress} />
