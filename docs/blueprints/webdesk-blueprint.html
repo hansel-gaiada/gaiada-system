@@ -1,0 +1,1116 @@
+<title>GAIADA WebDesk — Engineering Blueprint</title>
+<style>
+  :root{
+    --paper:#F6F7F5; --surface:#FFFFFF; --raise:#FBFCFB;
+    --ink:#14201A; --ink-soft:#4B574F; --ink-faint:#7A857D;
+    --line:#DBE1DB; --line-strong:#C4CDC5;
+    --accent:#1E5E44; --accent-2:#2C7A57; --accent-soft:#E7F0EA;
+    --ochre:#9C6714; --ochre-soft:#F3E9D6;
+    --ok:#2F7D57; --warn:#9A5A0B; --crit:#B42318; --info:#2A5C86;
+    --plate:#FBFCFB; --plate-line:#D5DBD5; --plate-ink:#1B2721;
+    --serif:"Iowan Old Style","Palatino Linotype",Palatino,"Book Antiqua",Georgia,ui-serif,serif;
+    --sans:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    --mono:ui-monospace,"SF Mono","Cascadia Code","JetBrains Mono","Roboto Mono",Menlo,Consolas,monospace;
+    --maxw:74ch;
+    --shadow:0 1px 2px rgba(20,32,26,.04),0 8px 24px rgba(20,32,26,.05);
+  }
+  @media (prefers-color-scheme:dark){
+    :root{
+      --paper:#0E1411; --surface:#161D18; --raise:#1B231D;
+      --ink:#E8ECE7; --ink-soft:#A6B2A9; --ink-faint:#76827A;
+      --line:#26302A; --line-strong:#334036;
+      --accent:#4FB183; --accent-2:#6BC79B; --accent-soft:#16271E;
+      --ochre:#D9A441; --ochre-soft:#2A2213;
+      --ok:#5CB98A; --warn:#D19A3C; --crit:#E8776B; --info:#7AAAD6;
+    }
+  }
+  :root[data-theme="light"]{
+    --paper:#F6F7F5; --surface:#FFFFFF; --raise:#FBFCFB;
+    --ink:#14201A; --ink-soft:#4B574F; --ink-faint:#7A857D;
+    --line:#DBE1DB; --line-strong:#C4CDC5;
+    --accent:#1E5E44; --accent-2:#2C7A57; --accent-soft:#E7F0EA;
+    --ochre:#9C6714; --ochre-soft:#F3E9D6;
+    --ok:#2F7D57; --warn:#9A5A0B; --crit:#B42318; --info:#2A5C86;
+  }
+  :root[data-theme="dark"]{
+    --paper:#0E1411; --surface:#161D18; --raise:#1B231D;
+    --ink:#E8ECE7; --ink-soft:#A6B2A9; --ink-faint:#76827A;
+    --line:#26302A; --line-strong:#334036;
+    --accent:#4FB183; --accent-2:#6BC79B; --accent-soft:#16271E;
+    --ochre:#D9A441; --ochre-soft:#2A2213;
+    --ok:#5CB98A; --warn:#D19A3C; --crit:#E8776B; --info:#7AAAD6;
+  }
+
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  @media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+  body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans);
+    font-size:16px;line-height:1.65;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+
+  /* ---------- layout ---------- */
+  .layout{display:grid;grid-template-columns:264px minmax(0,1fr);gap:0;max-width:1320px;margin:0 auto}
+  .toc{position:sticky;top:0;align-self:start;height:100vh;overflow-y:auto;padding:2.2rem 1.3rem 3rem;
+    border-right:1px solid var(--line);background:var(--paper)}
+  .main{min-width:0;padding:0 clamp(1.1rem,4vw,3.4rem) 6rem}
+  .wrap{max-width:var(--maxw)}
+  @media (max-width:960px){
+    .layout{grid-template-columns:1fr}
+    .toc{display:none}
+  }
+
+  /* ---------- TOC ---------- */
+  .toc-brand{font-family:var(--mono);font-size:.7rem;letter-spacing:.16em;text-transform:uppercase;
+    color:var(--accent);margin-bottom:1.4rem;line-height:1.5}
+  .toc-brand b{display:block;color:var(--ink);font-weight:700;letter-spacing:.14em}
+  .toc ol{list-style:none;margin:0;padding:0;counter-reset:toc}
+  .toc li{margin:.1rem 0}
+  .toc a{display:flex;gap:.55rem;align-items:baseline;text-decoration:none;color:var(--ink-soft);
+    font-size:.83rem;padding:.28rem .5rem;border-radius:5px;line-height:1.35}
+  .toc a .n{font-family:var(--mono);font-size:.68rem;color:var(--ink-faint);min-width:1.7em}
+  .toc a:hover{background:var(--accent-soft);color:var(--ink)}
+  .toc a.active{background:var(--accent-soft);color:var(--accent);font-weight:600}
+  .toc a.active .n{color:var(--accent)}
+
+  /* ---------- cover ---------- */
+  .cover{padding:3.6rem 0 2.4rem;border-bottom:2px solid var(--ink)}
+  .eyebrow{font-family:var(--mono);font-size:.72rem;letter-spacing:.2em;text-transform:uppercase;color:var(--accent);margin:0}
+  .cover h1{font-family:var(--serif);font-weight:600;font-size:clamp(2.3rem,5.4vw,3.5rem);line-height:1.04;
+    margin:.7rem 0 .5rem;letter-spacing:-.01em;text-wrap:balance}
+  .cover .lede{font-size:1.12rem;color:var(--ink-soft);max-width:60ch;margin:.2rem 0 0}
+  .titleblock{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:0;margin-top:2.4rem;
+    border:1px solid var(--line-strong);border-radius:8px;overflow:hidden;background:var(--surface)}
+  .titleblock div{padding:.85rem 1rem;border-right:1px solid var(--line);border-bottom:1px solid var(--line)}
+  .titleblock dt{font-family:var(--mono);font-size:.64rem;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-faint);margin:0 0 .28rem}
+  .titleblock dd{margin:0;font-size:.9rem;font-weight:600}
+  .pill{display:inline-flex;align-items:center;gap:.4rem;font-family:var(--mono);font-size:.68rem;font-weight:600;
+    padding:.16rem .5rem;border-radius:100px;letter-spacing:.04em;text-transform:uppercase}
+  .pill.draft{background:var(--ochre-soft);color:var(--ochre)}
+  .pill::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor}
+
+  /* ---------- parts / headings ---------- */
+  .part{padding-top:3.2rem;margin-top:2.2rem;border-top:1px solid var(--line)}
+  .part:first-of-type{border-top:none}
+  .part-head{display:flex;align-items:baseline;gap:.9rem;margin-bottom:.4rem}
+  .part-num{font-family:var(--mono);font-size:.82rem;color:var(--accent);font-weight:600;letter-spacing:.08em}
+  .part h2{font-family:var(--serif);font-weight:600;font-size:clamp(1.6rem,3.2vw,2.15rem);line-height:1.1;
+    margin:0;letter-spacing:-.01em;text-wrap:balance}
+  .part>.dek{color:var(--ink-soft);font-size:1.02rem;max-width:64ch;margin:.4rem 0 0}
+  h3{font-family:var(--sans);font-weight:700;font-size:1.22rem;margin:2.3rem 0 .5rem;letter-spacing:-.005em}
+  h4{font-family:var(--sans);font-weight:700;font-size:1rem;margin:1.5rem 0 .4rem}
+  .sublabel{font-family:var(--mono);font-size:.7rem;letter-spacing:.16em;text-transform:uppercase;color:var(--accent);
+    margin:2.2rem 0 .6rem;font-weight:600}
+  p{margin:.7rem 0;max-width:var(--maxw)}
+  .wrap p,.wrap ul,.wrap ol{max-width:var(--maxw)}
+  ul,ol{padding-left:1.2rem}
+  li{margin:.28rem 0}
+  strong{font-weight:700}
+  a{color:var(--accent);text-decoration-thickness:1px;text-underline-offset:2px}
+  code{font-family:var(--mono);font-size:.86em;background:var(--accent-soft);color:var(--accent-2);
+    padding:.08em .38em;border-radius:4px;word-break:break-word}
+  :root[data-theme="dark"] code,@media(prefers-color-scheme:dark){}
+  .lead{font-size:1.08rem;color:var(--ink-soft)}
+
+  /* ---------- callouts ---------- */
+  .note{border-left:3px solid var(--accent);background:var(--accent-soft);padding:.85rem 1.1rem;border-radius:0 8px 8px 0;
+    margin:1.2rem 0;font-size:.95rem;max-width:var(--maxw)}
+  .note.warn{border-color:var(--warn);background:var(--ochre-soft)}
+  .note .k{font-family:var(--mono);font-size:.66rem;letter-spacing:.14em;text-transform:uppercase;color:var(--accent);display:block;margin-bottom:.25rem;font-weight:700}
+  .note.warn .k{color:var(--warn)}
+
+  /* ---------- figure plates ---------- */
+  figure{margin:1.8rem 0;max-width:100%}
+  .plate{background:var(--plate);border:1px solid var(--plate-line);border-radius:10px;padding:1.4rem 1rem 1rem;
+    overflow-x:auto;box-shadow:var(--shadow)}
+  .plate .mermaid{min-width:520px;display:flex;justify-content:center}
+  figure.wide{max-width:none}
+  figcaption{font-family:var(--mono);font-size:.72rem;color:var(--ink-faint);margin-top:.6rem;letter-spacing:.03em}
+  figcaption b{color:var(--accent);font-weight:600}
+
+  /* ---------- spec cards ---------- */
+  .spec{border:1px solid var(--line);border-radius:12px;background:var(--surface);margin:1.4rem 0;overflow:hidden;box-shadow:var(--shadow)}
+  .spec-head{display:flex;flex-wrap:wrap;align-items:center;gap:.6rem;padding:.9rem 1.15rem;border-bottom:1px solid var(--line);background:var(--raise)}
+  .spec-head .id{font-family:var(--mono);font-size:.72rem;font-weight:700;color:var(--accent);letter-spacing:.05em}
+  .spec-head h3{margin:0;font-size:1.08rem}
+  .spec-head .zone{margin-left:auto;font-family:var(--mono);font-size:.64rem;text-transform:uppercase;letter-spacing:.1em;
+    padding:.18rem .5rem;border-radius:5px;font-weight:700}
+  .zone.a{background:var(--info);color:#fff}
+  .zone.b{background:var(--accent);color:#fff}
+  :root[data-theme="dark"] .zone.a{color:#08131d}
+  :root[data-theme="dark"] .zone.b{color:#06140d}
+  .spec-body{padding:.4rem 1.15rem 1.1rem}
+  .spec-body dl{display:grid;grid-template-columns:minmax(110px,150px) 1fr;gap:0;margin:0}
+  .spec-body dt{font-family:var(--mono);font-size:.66rem;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-faint);
+    padding:.7rem .8rem .7rem 0;border-bottom:1px solid var(--line);font-weight:600}
+  .spec-body dd{margin:0;padding:.7rem 0;border-bottom:1px solid var(--line);font-size:.92rem}
+  .spec-body dd:last-child,.spec-body dt:last-of-type{border-bottom:none}
+  .spec-body ul{margin:.1rem 0;padding-left:1.05rem}
+  .spec-body li{margin:.18rem 0}
+  @media (max-width:560px){.spec-body dl{grid-template-columns:1fr}.spec-body dt{border-bottom:none;padding-bottom:.1rem}}
+
+  /* ---------- tables ---------- */
+  .tablewrap{overflow-x:auto;margin:1.3rem 0;border:1px solid var(--line);border-radius:10px}
+  table{border-collapse:collapse;width:100%;font-size:.88rem;min-width:520px}
+  th,td{text-align:left;padding:.6rem .8rem;border-bottom:1px solid var(--line);vertical-align:top}
+  thead th{background:var(--raise);font-family:var(--mono);font-size:.66rem;letter-spacing:.09em;text-transform:uppercase;
+    color:var(--ink-soft);font-weight:700;position:sticky;top:0}
+  tbody tr:last-child td{border-bottom:none}
+  td.mono,th.mono,.num{font-family:var(--mono);font-variant-numeric:tabular-nums}
+  td .tag{font-family:var(--mono);font-size:.68rem;font-weight:700;padding:.12rem .45rem;border-radius:4px;white-space:nowrap}
+  .t-ok{background:var(--accent-soft);color:var(--ok)}
+  .t-warn{background:var(--ochre-soft);color:var(--warn)}
+  .t-crit{background:rgba(180,35,24,.1);color:var(--crit)}
+  .t-info{background:rgba(42,92,134,.1);color:var(--info)}
+  :root[data-theme="dark"] .t-crit{background:rgba(232,119,107,.14)}
+  :root[data-theme="dark"] .t-info{background:rgba(122,170,214,.14)}
+
+  /* ---------- grids ---------- */
+  .cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:1rem;margin:1.3rem 0;max-width:var(--maxw)}
+  .card{border:1px solid var(--line);border-radius:10px;padding:1rem 1.1rem;background:var(--surface)}
+  .card h4{margin:.1rem 0 .35rem}
+  .card p{margin:.2rem 0;font-size:.9rem;color:var(--ink-soft)}
+  .card .k{font-family:var(--mono);font-size:.66rem;letter-spacing:.12em;text-transform:uppercase;color:var(--accent);font-weight:700}
+
+  /* ---------- phase timeline ---------- */
+  .phases{display:flex;flex-direction:column;gap:.5rem;margin:1.4rem 0;max-width:var(--maxw)}
+  .phase{display:grid;grid-template-columns:2.4rem 1fr;gap:.9rem;border:1px solid var(--line);border-radius:10px;
+    padding:.9rem 1rem;background:var(--surface);position:relative}
+  .phase .pn{font-family:var(--mono);font-weight:700;color:var(--accent);font-size:1rem}
+  .phase h4{margin:0 0 .2rem}
+  .phase p{margin:.15rem 0;font-size:.9rem;color:var(--ink-soft)}
+  .phase .meta{font-family:var(--mono);font-size:.7rem;color:var(--ink-faint);margin-top:.35rem;letter-spacing:.02em}
+  .phase.gate{border-left:3px solid var(--ochre)}
+
+  hr.soft{border:none;border-top:1px solid var(--line);margin:2.4rem 0}
+  .kbd{font-family:var(--mono);font-size:.8rem;background:var(--surface);border:1px solid var(--line-strong);
+    border-bottom-width:2px;border-radius:5px;padding:.05em .4em}
+
+  footer{margin-top:4rem;padding-top:1.6rem;border-top:2px solid var(--ink);font-size:.85rem;color:var(--ink-soft)}
+  footer .mono{font-family:var(--mono);font-size:.72rem;color:var(--ink-faint)}
+
+  /* ---------- print ---------- */
+  @media print{
+    :root{--paper:#fff;--surface:#fff;--raise:#fff;--ink:#111;--ink-soft:#333;--line:#bbb;--accent:#14503a;--plate:#fff}
+    body{font-size:10.5pt}
+    .layout{display:block;max-width:none}
+    .toc,.themehint{display:none!important}
+    .main{padding:0}
+    .part{break-before:page;border-top:none;padding-top:.4rem}
+    .part:first-of-type{break-before:avoid}
+    .cover{break-after:page}
+    .spec,.plate,.tablewrap,figure,.phase,.card{break-inside:avoid}
+    .plate{box-shadow:none}
+    a{color:#14503a;text-decoration:none}
+  }
+  .themehint{position:fixed;bottom:12px;right:14px;font-family:var(--mono);font-size:.62rem;color:var(--ink-faint);
+    background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:.3rem .55rem;opacity:.75}
+</style>
+
+<div class="layout">
+  <nav class="toc" aria-label="Contents">
+    <div class="toc-brand">GAIADA <b>WebDesk</b> Engineering Blueprint</div>
+    <ol>
+      <li><a href="#p00"><span class="n">00</span> Executive Summary</a></li>
+      <li><a href="#p01"><span class="n">01</span> Goals &amp; Principles</a></li>
+      <li><a href="#p02"><span class="n">02</span> System Overview</a></li>
+      <li><a href="#p03"><span class="n">03</span> Trust Zones &amp; Network</a></li>
+      <li><a href="#p04"><span class="n">04</span> Deployment Topology</a></li>
+      <li><a href="#p05"><span class="n">05</span> Component Specs</a></li>
+      <li><a href="#p06"><span class="n">06</span> Data Model &amp; Tenancy</a></li>
+      <li><a href="#p07"><span class="n">07</span> Content Model</a></li>
+      <li><a href="#p08"><span class="n">08</span> Contract &amp; Codegen</a></li>
+      <li><a href="#p09"><span class="n">09</span> Key Flows</a></li>
+      <li><a href="#p10"><span class="n">10</span> Security Architecture</a></li>
+      <li><a href="#p11"><span class="n">11</span> Environments &amp; Promotion</a></li>
+      <li><a href="#p12"><span class="n">12</span> Observability &amp; Ops</a></li>
+      <li><a href="#p13"><span class="n">13</span> Roadmap &amp; Milestones</a></li>
+      <li><a href="#p14"><span class="n">14</span> Risks &amp; Decisions</a></li>
+      <li><a href="#gloss"><span class="n">15</span> Glossary</a></li>
+    </ol>
+  </nav>
+
+  <main class="main">
+    <!-- ================= COVER ================= -->
+    <header class="cover">
+      <p class="eyebrow">Web Dev Department · Platform Engineering</p>
+      <h1>GAIADA WebDesk</h1>
+      <p class="lede">A centralized, multi-tenant website backend — CMS, forms, and mail — serving every client site through one uniform, contractual, AI-operable platform. Engineering blueprint, team roadmap, and milestone reference.</p>
+      <dl class="titleblock">
+        <div><dt>Document</dt><dd>Engineering Blueprint v1.0</dd></div>
+        <div><dt>Codename</dt><dd class="mono">WebDesk <span style="color:var(--ink-faint);font-weight:400">(placeholder)</span></dd></div>
+        <div><dt>Date</dt><dd>2026-07-23</dd></div>
+        <div><dt>Owner</dt><dd>Web Dev · Platform</dd></div>
+        <div><dt>Status</dt><dd><span class="pill draft">Draft for review</span></dd></div>
+        <div><dt>Classification</dt><dd>Internal</dd></div>
+      </dl>
+    </header>
+
+    <!-- ================= 00 EXEC SUMMARY ================= -->
+    <section class="part" id="p00">
+      <div class="part-head"><span class="part-num">§00</span><h2>Executive Summary</h2></div>
+      <p class="dek">What we are building, why, and the shape of the decision already made.</p>
+      <div class="wrap">
+        <p>WebDesk is a <strong>Website-Backend-as-a-Service</strong> operated in-house. Today every client website carries its own backend: a WordPress install here, a hand-rolled Node API there, <code>web3forms</code> for a contact form somewhere else. Each is provisioned, secured, and maintained separately. WebDesk collapses that into <strong>one central backend</strong> that all client frontends — WordPress, Astro static sites, and Node apps — consume through a single, versioned, uniform contract.</p>
+        <p>The strategic payoff is that <strong>frontend engineers stop building backends</strong>. The API surface is pre-built, deterministic, and contractual; a new client site becomes a frontend composed against a generated, typed SDK. The same control surface is operable three ways — by a person clicking in the ERP, or by an AI agent acting on a human request, or automatically — because every operation is one command behind one authorization model.</p>
+        <h4>The shape, in one paragraph</h4>
+        <p>A rebranded, self-hosted <strong>Payload 3</strong> instance is the content engine. Around it sit purpose-built <strong>NestJS services</strong> for forms, mail, media, and provisioning. Content is modeled as a <strong>fixed vocabulary of blocks and fields composed per client</strong>, and every tenant's schema is compiled into a <strong>typed SDK plus an OpenAPI contract plus a human-readable content contract</strong> that the frontend (and Claude, when building it) targets. The platform is internet-facing and lives in its own hard <strong>trust zone</strong>, physically separate from the ERP that holds company data. The ERP controls it over a one-way, mutually-authenticated channel. It runs on three boxes — internal ERP, a staging site, and a live site — with <strong>one-click, versioned, reversible promotion</strong> between staging and live.</p>
+        <div class="note"><span class="k">Decision state</span>All architecture-level decisions in this document are <strong>locked</strong> (see §14 Decision Log). What remains open are the four implementation-detail items flagged in §14 Open Items. This blueprint is the spec that feeds decomposition into tiered build tickets.</div>
+      </div>
+    </section>
+
+    <!-- ================= 01 GOALS ================= -->
+    <section class="part" id="p01">
+      <div class="part-head"><span class="part-num">§01</span><h2>Goals, Non-Goals &amp; Principles</h2></div>
+      <div class="wrap">
+        <h3>Goals</h3>
+        <ul>
+          <li><strong>One backend, many frontends.</strong> WordPress, Astro, and Node sites all consume the same central CMS, forms, and mail.</li>
+          <li><strong>Deterministic, uniform contracts.</strong> FE devs get a typed SDK and a stable API; they never hand-write backend calls or invent shapes.</li>
+          <li><strong>Tri-modal operation.</strong> Every action is executable manually (ERP click), autonomously (AI on human request), or programmatically — via one command set.</li>
+          <li><strong>Hard isolation from company data.</strong> An internet-facing platform must never be a path into the ERP's data.</li>
+          <li><strong>Portable.</strong> Runs on Hostinger KVM8 today; relocatable to AWS/GCP with config, not code, changes.</li>
+          <li><strong>Smooth staging→live.</strong> One click promotes a project between environments; one click rolls it back.</li>
+        </ul>
+        <h3>Non-Goals (v1)</h3>
+        <ul>
+          <li>Not a public, self-serve SaaS for external customers — it is an internal platform operated by Gaiada staff and its AI workforce.</li>
+          <li>Not a page-builder/WYSIWYG for clients — frontends are bespoke, built by our team against the contract.</li>
+          <li>No zero-deploy runtime schema authoring — new structured collections go through an approved, versioned deploy (see §07).</li>
+          <li>No Kubernetes in v1 — Docker Compose per box; K8s is a documented future path, not a launch requirement.</li>
+        </ul>
+        <h3>Architectural principles</h3>
+        <div class="cols">
+          <div class="card"><span class="k">P1 · Contracts first</span><p>The versioned contract is the product. Schema is a compilation source; SDKs are generated, never hand-written.</p></div>
+          <div class="card"><span class="k">P2 · Two trust zones</span><p>Internet-facing platform and internal ERP are separate zones with a one-way, authenticated seam. Breach containment over convenience.</p></div>
+          <div class="card"><span class="k">P3 · One command, one authz</span><p>Human, AI, and automation call the same control-plane commands under the same Cerbos/RBAC and WS4 approval gates. No backdoors.</p></div>
+          <div class="card"><span class="k">P4 · Uniform vocabulary</span><p>Flexibility lives in composition (data); uniformity lives in the fixed block/field/envelope vocabulary (code).</p></div>
+          <div class="card"><span class="k">P5 · Portable primitives</span><p>Postgres, Redis, and an S3 API only. No proprietary managed service in the hot path.</p></div>
+          <div class="card"><span class="k">P6 · Reversible by default</span><p>Every promotion is a versioned release with a snapshot and a rollback. Irreversible actions are gated.</p></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= 02 SYSTEM OVERVIEW ================= -->
+    <section class="part" id="p02">
+      <div class="part-head"><span class="part-num">§02</span><h2>System Overview</h2></div>
+      <p class="dek">The whole platform on one plate: the two zones, the services in each, and every seam between them.</p>
+      <figure class="wide">
+        <div class="plate">
+          <pre class="mermaid">
+%%{init:{'theme':'base','themeVariables':{'fontFamily':'ui-monospace,monospace','fontSize':'13px','background':'#FBFCFB','mainBkg':'#E7F0EA','primaryColor':'#E7F0EA','secondaryColor':'#EEF3EE','tertiaryColor':'#EEF3EE','primaryBorderColor':'#1E5E44','primaryTextColor':'#14201A','secondaryTextColor':'#14201A','tertiaryTextColor':'#14201A','textColor':'#14201A','nodeTextColor':'#14201A','lineColor':'#4B574F','clusterBkg':'#EEF3EE','clusterBorder':'#B7C3B8','edgeLabelBackground':'#FBFCFB','titleColor':'#14201A'}}}%%
+flowchart TB
+  CLIENTS["Client frontends<br/>Astro · Node · WordPress"]
+
+  subgraph ZB["ZONE B — internet-facing (staging box + live box)"]
+    direction TB
+    CF["Cloudflare edge<br/>WAF · CDN · DDoS · Turnstile"]
+    PROXY["Caddy / Traefik<br/>auto-TLS · per-tenant domains"]
+    subgraph PLAT["Website Platform (per environment)"]
+      direction TB
+      PAY["Payload 3<br/>content engine (rebranded)"]
+      FORMS["Forms service"]
+      MAIL["Mail service"]
+      MEDIA["Media service"]
+      CTRL["Control-plane API<br/>+ Provisioning"]
+      QUEUE["BullMQ workers / Redis"]
+    end
+    PGB[("Postgres · RLS<br/>content + platform")]
+    OBJ[("MinIO — VPS disk<br/>+ R2 for video")]
+  end
+
+  subgraph ZA["ZONE A — internal (ERP box, not internet-exposed)"]
+    direction TB
+    UI["platform-ui<br/>WebDev console"]
+    NEST["platform-nest<br/>WebDev module + BFF"]
+    KC["Keycloak"]
+    MCPH["MCP Hub"]
+    N8N["n8n event bridge"]
+    CDB[("Company DB")]
+  end
+
+  CLIENTS -->|HTTPS| CF --> PROXY --> PLAT
+  PAY --- PGB
+  FORMS --- PGB
+  CTRL --- PGB
+  MEDIA --- OBJ
+  MAIL -->|SMTP provider| EXT["Mail provider<br/>Hostinger SMTP → SES"]
+
+  UI --> NEST
+  MCPH --> NEST
+  NEST ==>|"control: Keycloak svc-token + mTLS (outbound only)"| CTRL
+  PLAT -. "signed webhooks" .-> N8N
+  KC -. issues tokens .- NEST
+  NEST --- CDB
+  classDef default fill:#E7F0EA,stroke:#1E5E44,color:#14201A,stroke-width:1px;
+          </pre>
+        </div>
+        <figcaption><b>FIG. 02-1</b> — Master system diagram. Bold seam = control (one-way, mutually authenticated). Dotted seam = events (signed, validated). No line crosses from a client site into Zone A.</figcaption>
+      </figure>
+      <div class="wrap">
+        <h3>Reading the diagram</h3>
+        <ul>
+          <li><strong>Client frontends</strong> only ever reach <strong>Zone B</strong>, and only through Cloudflare. They authenticate with scoped, per-tenant keys.</li>
+          <li><strong>Zone B</strong> is the website platform, deployed once per environment (staging box, live box). It owns its own Postgres and object storage.</li>
+          <li><strong>Zone A</strong> is the ERP. It <em>controls</em> Zone B via outbound calls only; it never exposes company data to Zone B.</li>
+          <li>The <strong>control seam</strong> carries commands (provision, deploy, promote, rotate). The <strong>event seam</strong> carries facts back (form received, deploy done, error) as signed webhooks into the existing n8n bridge.</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- ================= 03 TRUST ZONES ================= -->
+    <section class="part" id="p03">
+      <div class="part-head"><span class="part-num">§03</span><h2>Trust Zones &amp; Network</h2></div>
+      <p class="dek">The security backbone: what is exposed, what is private, and the exact ports and directions across the boundary.</p>
+      <figure class="wide">
+        <div class="plate">
+          <pre class="mermaid">
+%%{init:{'theme':'base','themeVariables':{'fontFamily':'ui-monospace,monospace','fontSize':'13px','background':'#FBFCFB','mainBkg':'#E7F0EA','primaryColor':'#E7F0EA','secondaryColor':'#EEF3EE','tertiaryColor':'#EEF3EE','primaryBorderColor':'#1E5E44','primaryTextColor':'#14201A','secondaryTextColor':'#14201A','tertiaryTextColor':'#14201A','textColor':'#14201A','nodeTextColor':'#14201A','lineColor':'#4B574F','clusterBkg':'#EEF3EE','clusterBorder':'#B7C3B8','edgeLabelBackground':'#FBFCFB','titleColor':'#14201A'}}}%%
+flowchart LR
+  INET(("Public<br/>internet"))
+  subgraph EDGE["Cloudflare"]
+    WAF["WAF · DDoS · rate-limit<br/>Turnstile · CDN cache"]
+  end
+  subgraph ZB["ZONE B — internet-facing"]
+    direction TB
+    RP["Reverse proxy :443<br/>only public port"]
+    APP["Platform services<br/>(internal network)"]
+    DB2[("Postgres :5432<br/>internal only")]
+    S3[("MinIO :9000<br/>internal only")]
+    RD2[("Redis :6379<br/>internal only")]
+  end
+  subgraph ZA["ZONE A — internal"]
+    direction TB
+    ERP["ERP BFF<br/>staff-auth only"]
+    OUT["Egress client<br/>→ Zone B control API"]
+  end
+  INET --> WAF --> RP --> APP
+  APP --- DB2
+  APP --- S3
+  APP --- RD2
+  OUT ==>|":443 mTLS + svc-token"| RP
+  APP -. ":443 signed webhook" .-> ERP
+  classDef default fill:#E7F0EA,stroke:#1E5E44,color:#14201A,stroke-width:1px;
+          </pre>
+        </div>
+        <figcaption><b>FIG. 03-1</b> — Network boundaries. Only <code>:443</code> is public in Zone B; datastores never leave the internal Docker network. Zone A initiates control; Zone B initiates only signed events.</figcaption>
+      </figure>
+      <div class="wrap">
+        <h3>Zone definitions</h3>
+        <div class="tablewrap"><table>
+          <thead><tr><th>Property</th><th>Zone A — ERP</th><th>Zone B — Website platform</th></tr></thead>
+          <tbody>
+            <tr><td>Exposure</td><td>Internal only (staff-auth / VPN); no public ingress</td><td>Internet-facing behind Cloudflare</td></tr>
+            <tr><td>Holds</td><td>Company DB, PM/HR/IT data, AI automations</td><td>Client website content, media, form submissions</td></tr>
+            <tr><td>Datastores</td><td>Existing company Postgres, Redis</td><td>Dedicated Postgres + MinIO + Redis (separate instances)</td></tr>
+            <tr><td>Trusts input from</td><td>Authenticated staff + AI via Keycloak</td><td>Untrusted public + scoped tenant keys</td></tr>
+            <tr><td>Blast radius if breached</td><td>Company data (highest value)</td><td class="mono">Website + form data only</td></tr>
+          </tbody>
+        </table></div>
+        <div class="note"><span class="k">Containment invariant</span>There is no network route and no credential by which a compromised client site, or a full compromise of Zone B, can read or write company data in Zone A. The only Zone B → Zone A path is a signed, schema-validated webhook that the ERP treats as untrusted input.</div>
+        <h3>Boundary rules</h3>
+        <ul>
+          <li><strong>Control is outbound from Zone A only.</strong> The ERP calls Zone B; Zone B has no credentials for Zone A's APIs or DB.</li>
+          <li><strong>Datastores are never exposed.</strong> Postgres, MinIO, and Redis bind to the internal Docker network; the only public listener is the reverse proxy on <code>:443</code>.</li>
+          <li><strong>mTLS + service token</strong> on the control channel — a stolen token alone is insufficient without the client certificate.</li>
+          <li><strong>Events are validated.</strong> Zone B → Zone A webhooks are signed (HMAC) and schema-checked; the ERP never executes on their contents without validation.</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- ================= 04 DEPLOYMENT TOPOLOGY ================= -->
+    <section class="part" id="p04">
+      <div class="part-head"><span class="part-num">§04</span><h2>Deployment Topology</h2></div>
+      <p class="dek">Three physical boxes, the containers on each, and how the platform stays portable off Hostinger.</p>
+      <figure class="wide">
+        <div class="plate">
+          <pre class="mermaid">
+%%{init:{'theme':'base','themeVariables':{'fontFamily':'ui-monospace,monospace','fontSize':'13px','background':'#FBFCFB','mainBkg':'#E7F0EA','primaryColor':'#E7F0EA','secondaryColor':'#EEF3EE','tertiaryColor':'#EEF3EE','primaryBorderColor':'#1E5E44','primaryTextColor':'#14201A','secondaryTextColor':'#14201A','tertiaryTextColor':'#14201A','textColor':'#14201A','nodeTextColor':'#14201A','lineColor':'#4B574F','clusterBkg':'#EEF3EE','clusterBorder':'#B7C3B8','edgeLabelBackground':'#FBFCFB','titleColor':'#14201A'}}}%%
+flowchart TB
+  subgraph BOX1["BOX 1 · ERP (internal)"]
+    direction TB
+    C1["platform-nest · platform-ui<br/>Keycloak · MCP Hub · n8n<br/>Company Postgres · Redis"]
+  end
+  subgraph BOX2["BOX 2 · STAGING KVM8 (Zone B)"]
+    direction TB
+    C2["Payload · NestJS svcs · BullMQ<br/>Postgres · MinIO · Redis<br/>Caddy/Traefik"]
+  end
+  subgraph BOX3["BOX 3 · LIVE KVM8 (Zone B)"]
+    direction TB
+    C3["Payload · NestJS svcs · BullMQ<br/>Postgres · MinIO · Redis<br/>Caddy/Traefik"]
+  end
+  C1 ==>|control| C2
+  C1 ==>|control| C3
+  C2 -->|"promote (versioned + rollback)"| C3
+  CFG["Cloudflare · R2 · external backup"] -.-> C2
+  CFG -.-> C3
+  classDef default fill:#E7F0EA,stroke:#1E5E44,color:#14201A,stroke-width:1px;
+          </pre>
+        </div>
+        <figcaption><b>FIG. 04-1</b> — Three-box topology. Staging and live are identical stacks on separate boxes; the ERP controls both; promotion flows staging → live.</figcaption>
+      </figure>
+      <div class="wrap">
+        <h3>Per-box container inventory (Zone B)</h3>
+        <div class="tablewrap"><table>
+          <thead><tr><th>Container</th><th>Image basis</th><th>Purpose</th><th>Exposed</th></tr></thead>
+          <tbody>
+            <tr><td class="mono">proxy</td><td class="mono">caddy / traefik</td><td>TLS termination, per-tenant domain routing</td><td><span class="tag t-warn">:443 public</span></td></tr>
+            <tr><td class="mono">payload</td><td class="mono">node</td><td>Content engine + admin (headless)</td><td><span class="tag t-ok">internal</span></td></tr>
+            <tr><td class="mono">api</td><td class="mono">node (NestJS)</td><td>Forms, mail, media, control-plane</td><td><span class="tag t-ok">internal</span></td></tr>
+            <tr><td class="mono">worker</td><td class="mono">node (BullMQ)</td><td>Mail send, rebuilds, media processing, promotion jobs</td><td><span class="tag t-ok">internal</span></td></tr>
+            <tr><td class="mono">postgres</td><td class="mono">postgres</td><td>Content + platform data (RLS)</td><td><span class="tag t-ok">internal</span></td></tr>
+            <tr><td class="mono">minio</td><td class="mono">minio</td><td>S3-compatible object storage on VPS disk</td><td><span class="tag t-ok">internal</span></td></tr>
+            <tr><td class="mono">redis</td><td class="mono">redis</td><td>Queue + cache</td><td><span class="tag t-ok">internal</span></td></tr>
+            <tr><td class="mono">clamav</td><td class="mono">clamav</td><td>Upload virus scanning</td><td><span class="tag t-ok">internal</span></td></tr>
+            <tr><td class="mono">otel</td><td class="mono">otel-collector</td><td>Telemetry export to Zone-A Grafana stack</td><td><span class="tag t-ok">internal</span></td></tr>
+          </tbody>
+        </table></div>
+        <h3>Portability</h3>
+        <p>Every stateful dependency is a portable primitive: <strong>Postgres</strong>, <strong>Redis</strong>, and an <strong>S3 API</strong>. Moving off Hostinger is a substitution, not a rewrite:</p>
+        <div class="tablewrap"><table>
+          <thead><tr><th>Concern</th><th>Hostinger (v1)</th><th>AWS / GCP (future)</th><th>Change required</th></tr></thead>
+          <tbody>
+            <tr><td>Object storage</td><td class="mono">MinIO on VPS disk</td><td class="mono">S3 / GCS (S3 API)</td><td>endpoint + creds</td></tr>
+            <tr><td>Video</td><td class="mono">Cloudflare R2</td><td class="mono">R2 / S3 / CDN</td><td>bucket config</td></tr>
+            <tr><td>Compute</td><td class="mono">Docker Compose</td><td class="mono">ECS / Cloud Run / K8s</td><td>compose → manifests</td></tr>
+            <tr><td>Mail</td><td class="mono">Hostinger SMTP</td><td class="mono">SES / Resend</td><td>provider adapter</td></tr>
+            <tr><td>Database</td><td class="mono">Postgres container</td><td class="mono">RDS / Cloud SQL</td><td>connection string</td></tr>
+          </tbody>
+        </table></div>
+      </div>
+    </section>
+
+    <!-- ================= 05 COMPONENT SPECS ================= -->
+    <section class="part" id="p05">
+      <div class="part-head"><span class="part-num">§05</span><h2>Component Specifications</h2></div>
+      <p class="dek">Each service specified to the same shape — purpose, technology, responsibilities, interfaces, data owned, security, and operations.</p>
+      <div class="wrap">
+
+      <!-- Payload -->
+      <div class="spec">
+        <div class="spec-head"><span class="id">C-01</span><h3>Content Engine — Payload 3</h3><span class="zone b">Zone B</span></div>
+        <div class="spec-body"><dl>
+          <dt>Purpose</dt><dd>Model, store, and serve structured content for every tenant. Rebranded, headless; its admin is not the primary surface — the ERP is.</dd>
+          <dt>Technology</dt><dd>Payload 3 (Next.js runtime, TypeScript), MIT-licensed, self-hosted on our Postgres. Optional telemetry disabled.</dd>
+          <dt>Responsibilities</dt><dd><ul>
+            <li>Define collections/globals from the fixed vocabulary (§07); enforce access control per tenant.</li>
+            <li>Serve content over REST + GraphQL + Local API (used in-process by NestJS).</li>
+            <li>Manage drafts/publish states and preview tokens.</li>
+            <li>Own media records (metadata, focal point, generated sizes); binaries delegated to storage adapter (C-05).</li>
+          </ul></dd>
+          <dt>Interfaces</dt><dd><span class="mono">in</span>: control-plane provisioning, editor writes · <span class="mono">out</span>: content read API (cached), publish webhooks</dd>
+          <dt>Data owned</dt><dd><code>collections</code>, <code>content</code>, <code>versions</code>, media records — all tenant-scoped by RLS</dd>
+          <dt>Security</dt><dd>Admin never publicly exposed; access control keyed on tenant + Cerbos; secrets via env</dd>
+          <dt>Operations</dt><dd>Schema changes require boot-time recompile + migration (see §07); horizontal read scaling via CDN cache</dd>
+        </dl></div>
+      </div>
+
+      <!-- Forms -->
+      <div class="spec">
+        <div class="spec-head"><span class="id">C-02</span><h3>Forms Service</h3><span class="zone b">Zone B</span></div>
+        <div class="spec-body"><dl>
+          <dt>Purpose</dt><dd>The <code>web3forms</code> replacement — accept public form submissions from any client site, validate, persist, and trigger notifications.</dd>
+          <dt>Technology</dt><dd>NestJS endpoint + BullMQ job on submission.</dd>
+          <dt>Responsibilities</dt><dd><ul>
+            <li>Public <code>POST /v1/forms/:formId/submit</code> with per-tenant CORS origin allowlist.</li>
+            <li>Anti-abuse: Cloudflare Turnstile verification, honeypot field, rate limiting, size caps.</li>
+            <li>Validate against the form's declared schema (zod); sanitize; persist submission.</li>
+            <li>Enqueue notifications (mail via C-03, event to ERP) and optional autoresponder.</li>
+          </ul></dd>
+          <dt>Interfaces</dt><dd><span class="mono">in</span>: public HTTPS POST · <span class="mono">out</span>: mail jobs, signed submission event → ERP</dd>
+          <dt>Data owned</dt><dd><code>form_definitions</code>, <code>submissions</code> (may contain PII → retention policy §10)</dd>
+          <dt>Security</dt><dd>Highest-abuse surface: bot protection + rate limit + strict origin + input validation are mandatory, not optional</dd>
+          <dt>Operations</dt><dd>Submission spikes alert (§12); dead-letter queue for failed notifications</dd>
+        </dl></div>
+      </div>
+
+      <!-- Mail -->
+      <div class="spec">
+        <div class="spec-head"><span class="id">C-03</span><h3>Mail / SMTP Service</h3><span class="zone b">Zone B</span></div>
+        <div class="spec-body"><dl>
+          <dt>Purpose</dt><dd>Centralized transactional mail for all tenants — form notifications, autoresponders, system mail.</dd>
+          <dt>Technology</dt><dd>NestJS + BullMQ; pluggable <strong>provider adapter</strong> (Hostinger SMTP now → SES/Resend later).</dd>
+          <dt>Responsibilities</dt><dd><ul>
+            <li>Template rendering per tenant; from/reply-to per tenant domain.</li>
+            <li>Queue, send, retry with backoff, record delivery status.</li>
+            <li>Suppression list, bounce/complaint handling (provider-dependent).</li>
+          </ul></dd>
+          <dt>Interfaces</dt><dd><span class="mono">in</span>: internal job enqueue only (never public) · <span class="mono">out</span>: SMTP/API to provider</dd>
+          <dt>Data owned</dt><dd><code>mail_templates</code>, <code>mail_log</code>, <code>suppressions</code></dd>
+          <dt>Security</dt><dd>No public endpoint; SPF/DKIM/DMARC per sending domain; rate limits to protect sender reputation</dd>
+          <dt>Operations</dt><dd>Provider swap = adapter config; delivery-failure alerting</dd>
+        </dl></div>
+      </div>
+
+      <!-- Media / storage -->
+      <div class="spec">
+        <div class="spec-head"><span class="id">C-04</span><h3>Media &amp; Object Storage</h3><span class="zone b">Zone B</span></div>
+        <div class="spec-body"><dl>
+          <dt>Purpose</dt><dd>Store and serve images, video, and file binaries for all tenants, portably and behind a CDN.</dd>
+          <dt>Technology</dt><dd><strong>MinIO</strong> (S3 API) on the KVM8 disk for images/files; <strong>Cloudflare R2</strong> for video; Cloudflare CDN in front; ClamAV scan on upload.</dd>
+          <dt>Responsibilities</dt><dd><ul>
+            <li>Accept authenticated uploads (never public write); enforce type allowlist + size caps; virus scan.</li>
+            <li>Store under per-tenant bucket/prefix with scoped credentials.</li>
+            <li>Serve public assets from a <strong>cookieless domain</strong> via CDN; signed URLs for private assets.</li>
+            <li>Generate/serve responsive image variants (Payload sizes or on-the-fly resizer).</li>
+          </ul></dd>
+          <dt>Interfaces</dt><dd><span class="mono">in</span>: authenticated upload via Payload/NestJS · <span class="mono">out</span>: CDN-cached asset URLs</dd>
+          <dt>Data owned</dt><dd>Object binaries (records live in Payload/Postgres)</dd>
+          <dt>Security</dt><dd>Single-disk MinIO has no erasure-coding redundancy → external replication backup required (§12); cookieless serving blocks XSS pivots</dd>
+          <dt>Operations</dt><dd>Route video to R2 to protect VPS bandwidth; lifecycle rules to expire old versions</dd>
+        </dl></div>
+      </div>
+
+      <!-- Control plane -->
+      <div class="spec">
+        <div class="spec-head"><span class="id">C-05</span><h3>Control-Plane API &amp; Provisioning</h3><span class="zone b">Zone B</span></div>
+        <div class="spec-body"><dl>
+          <dt>Purpose</dt><dd>The single command surface the ERP (and AI, and automation) drive. Every lifecycle action is a command here.</dd>
+          <dt>Technology</dt><dd>NestJS; authenticated by Keycloak client-credentials + mTLS; authorized by Cerbos; audited.</dd>
+          <dt>Responsibilities</dt><dd><ul>
+            <li>Tenant &amp; site lifecycle: <code>createTenant</code>, <code>createSite</code>, <code>setDomain</code>, <code>archiveSite</code>.</li>
+            <li>Schema: <code>proposeSchema</code>, <code>applySchema</code> (triggers approved deploy).</li>
+            <li>Keys: <code>mintKey</code>, <code>rotateKey</code>, <code>revokeKey</code>.</li>
+            <li>Release: <code>deploy</code>, <code>promote</code>, <code>rollback</code>, <code>triggerRebuild</code>.</li>
+            <li>Emit signed events to ERP; write immutable audit entries.</li>
+          </ul></dd>
+          <dt>Interfaces</dt><dd><span class="mono">in</span>: ERP control calls (mTLS) · <span class="mono">out</span>: orchestrates Payload/DB/storage/CI; events → ERP</dd>
+          <dt>Data owned</dt><dd><code>tenants</code>, <code>sites</code>, <code>environments</code>, <code>api_keys</code>, <code>audit_log</code>, <code>releases</code></dd>
+          <dt>Security</dt><dd>Every command re-checks authz regardless of caller (human/AI); irreversible commands require WS4 approval token</dd>
+          <dt>Operations</dt><dd>Commands are idempotent where possible; long-running ones run as tracked jobs</dd>
+        </dl></div>
+      </div>
+
+      <!-- ERP integration -->
+      <div class="spec">
+        <div class="spec-head"><span class="id">C-06</span><h3>ERP Integration (WebDev Module)</h3><span class="zone a">Zone A</span></div>
+        <div class="spec-body"><dl>
+          <dt>Purpose</dt><dd>The control-plane <em>client</em> and operator UI, inside the existing ERP. Holds no CMS logic.</dd>
+          <dt>Technology</dt><dd>platform-nest module (BFF + egress client) + platform-ui WebDev console section.</dd>
+          <dt>Responsibilities</dt><dd><ul>
+            <li>Proxy browser requests to the control-plane API (browser never touches Zone B directly).</li>
+            <li>Render site registry, per-tenant status, submissions, storage usage, deploy/promote/rollback controls.</li>
+            <li>Hold Keycloak service credentials + client cert for the control channel.</li>
+            <li>Extend <code>lib/rbac.ts</code> with webdev capabilities; reuse company-scope + WS4 approvals.</li>
+          </ul></dd>
+          <dt>Interfaces</dt><dd><span class="mono">in</span>: staff clicks, MCP tool calls · <span class="mono">out</span>: control-plane API (mTLS)</dd>
+          <dt>Data owned</dt><dd>None authoritative — mirrors Zone B state for display; caches read models</dd>
+          <dt>Security</dt><dd>Staff auth via Keycloak; the ERP is the only holder of Zone B control credentials</dd>
+          <dt>Operations</dt><dd>Degrades cleanly if Zone B unreachable (read-only status)</dd>
+        </dl></div>
+      </div>
+
+      <!-- AI surface -->
+      <div class="spec">
+        <div class="spec-head"><span class="id">C-07</span><h3>AI Execution Surface</h3><span class="zone a">Zone A</span></div>
+        <div class="spec-body"><dl>
+          <dt>Purpose</dt><dd>Let the AI workforce perform the same operations a human can — on human request or autonomously — with the same guardrails.</dd>
+          <dt>Technology</dt><dd>MCP tools on the existing Hub wrapping each control-plane command; WS4 approvals; audit log.</dd>
+          <dt>Responsibilities</dt><dd><ul>
+            <li>Expose commands as MCP tools with typed params and least-privilege service accounts.</li>
+            <li>Draft per-tenant schemas from a client PRD; submit as a proposal for human approval.</li>
+            <li>Route irreversible actions (promote-to-live, delete, domain change, key rotation) through WS4.</li>
+          </ul></dd>
+          <dt>Interfaces</dt><dd><span class="mono">in</span>: agent tool calls · <span class="mono">out</span>: control-plane commands via the ERP module (same path as humans)</dd>
+          <dt>Data owned</dt><dd>None — actions are logged in the shared audit_log with actor = agent + approver</dd>
+          <dt>Security</dt><dd>PRD/content treated as <strong>untrusted</strong> (prompt-injection): the server enforces authz, not the model. No privileged backdoor.</dd>
+          <dt>Operations</dt><dd>Scoped/rate-limited AI actions; every AI write is attributable and reversible</dd>
+        </dl></div>
+      </div>
+
+      <!-- Frontend delivery -->
+      <div class="spec">
+        <div class="spec-head"><span class="id">C-08</span><h3>Frontend Delivery &amp; Block Library</h3><span class="zone b">Zone B consumers</span></div>
+        <div class="spec-body"><dl>
+          <dt>Purpose</dt><dd>The client-facing sites and the shared, typed component library they compose from.</dd>
+          <dt>Technology</dt><dd>Astro / Node (TS) consuming the generated TS SDK; WordPress consuming the PHP SDK. Shared block-renderer library: one FE component per backend block type (1:1).</dd>
+          <dt>Responsibilities</dt><dd><ul>
+            <li>Render any block composition returned by the content API via the shared library.</li>
+            <li>Bespoke per-PRD design layered over the shared blocks; new blocks added once, then reused.</li>
+            <li>Rebuild static sites on publish webhook; warm CDN.</li>
+          </ul></dd>
+          <dt>Interfaces</dt><dd><span class="mono">in</span>: content API (cached), form POST · <span class="mono">out</span>: rendered site behind CDN</dd>
+          <dt>Data owned</dt><dd>None — pure consumer</dd>
+          <dt>Security</dt><dd>Public read keys only; form POSTs via Turnstile; no privileged credentials on the FE</dd>
+          <dt>Operations</dt><dd>Block-library version is a contract — changes governed (§14 open item)</dd>
+        </dl></div>
+      </div>
+
+      </div>
+    </section>
+
+    <!-- ================= 06 DATA MODEL ================= -->
+    <section class="part" id="p06">
+      <div class="part-head"><span class="part-num">§06</span><h2>Data Model &amp; Multi-Tenancy</h2></div>
+      <p class="dek">The core entities, how tenancy is enforced, and the isolation guarantees.</p>
+      <figure class="wide">
+        <div class="plate">
+          <pre class="mermaid">
+%%{init:{'theme':'base','themeVariables':{'fontFamily':'ui-monospace,monospace','fontSize':'13px','background':'#FBFCFB','mainBkg':'#E7F0EA','primaryColor':'#E7F0EA','secondaryColor':'#EEF3EE','tertiaryColor':'#EEF3EE','primaryBorderColor':'#1E5E44','primaryTextColor':'#14201A','secondaryTextColor':'#14201A','tertiaryTextColor':'#14201A','textColor':'#14201A','nodeTextColor':'#14201A','lineColor':'#4B574F','edgeLabelBackground':'#FBFCFB','titleColor':'#14201A'}}}%%
+flowchart TD
+  TENANT["TENANT"] -->|owns| SITE["SITE"]
+  TENANT -->|defines| COLLECTION["COLLECTION"]
+  TENANT -->|owns| MEDIA["MEDIA_ASSET"]
+  TENANT -->|logs| AUDIT["AUDIT_ENTRY"]
+  SITE -->|has| ENV["ENVIRONMENT"]
+  SITE -->|declares| FORM["FORM_DEF"]
+  ENV -->|scopes| KEY["API_KEY"]
+  ENV -->|promotes| REL["RELEASE"]
+  COLLECTION -->|contains| ITEM["CONTENT_ITEM"]
+  ITEM -->|versions| VER["CONTENT_VERSION"]
+  FORM -->|collects| SUB["SUBMISSION"]
+  classDef default fill:#E7F0EA,stroke:#1E5E44,color:#14201A,stroke-width:1px;
+          </pre>
+        </div>
+        <figcaption><b>FIG. 06-1</b> — Core entity relationships (each arrow = one-to-many). Fields below. Every row carries <code>tenant_id</code>; RLS scopes every query.</figcaption>
+      </figure>
+      <div class="wrap">
+        <div class="tablewrap"><table>
+          <thead><tr><th>Entity</th><th>Key columns</th><th>Scope</th></tr></thead>
+          <tbody>
+            <tr><td class="mono">TENANT</td><td class="mono">id (PK) · slug · company_scope</td><td>root</td></tr>
+            <tr><td class="mono">SITE</td><td class="mono">id (PK) · tenant_id (FK) · kind (astro|node|wp) · domain</td><td>per tenant</td></tr>
+            <tr><td class="mono">ENVIRONMENT</td><td class="mono">id (PK) · site_id (FK) · name (staging|production) · status</td><td>per site</td></tr>
+            <tr><td class="mono">API_KEY</td><td class="mono">id (PK) · env_id (FK) · hash · scope</td><td>per env</td></tr>
+            <tr><td class="mono">RELEASE</td><td class="mono">id (PK) · env_id (FK) · version · snapshot_ref (jsonb)</td><td>per env</td></tr>
+            <tr><td class="mono">COLLECTION</td><td class="mono">id (PK) · tenant_id (FK) · name · schema (jsonb)</td><td>per tenant</td></tr>
+            <tr><td class="mono">CONTENT_ITEM</td><td class="mono">id (PK) · tenant_id (FK) · collection · blocks (jsonb) · publish_state</td><td>per tenant</td></tr>
+            <tr><td class="mono">CONTENT_VERSION</td><td class="mono">id (PK) · content_id (FK) · version · snapshot (jsonb)</td><td>per item</td></tr>
+            <tr><td class="mono">MEDIA_ASSET</td><td class="mono">id (PK) · tenant_id (FK) · bucket_key · mime · size</td><td>per tenant</td></tr>
+            <tr><td class="mono">FORM_DEF</td><td class="mono">id (PK) · site_id (FK) · schema (jsonb) · notify</td><td>per site</td></tr>
+            <tr><td class="mono">SUBMISSION</td><td class="mono">id (PK) · form_id (FK) · payload (jsonb) · status</td><td>per form</td></tr>
+            <tr><td class="mono">AUDIT_ENTRY</td><td class="mono">id (PK) · tenant_id (FK) · actor · action · at</td><td>per tenant</td></tr>
+          </tbody>
+        </table></div>
+      </div>
+      <div class="wrap">
+        <h3>Tenancy model</h3>
+        <ul>
+          <li><strong>Single shared instance, tenant-scoped.</strong> Not instance-per-client — one platform, isolation enforced in data.</li>
+          <li><strong>Postgres RLS</strong> on every table keyed by <code>tenant_id</code> (reuses the ERP's existing RLS pattern) — a query can only ever see its tenant's rows.</li>
+          <li><strong>Per-tenant API keys</strong> — hashed at rest, scoped (read/write/env), rotatable, revocable; shown once at mint time.</li>
+          <li><strong>Per-tenant storage</strong> — bucket or key prefix per tenant with scoped MinIO credentials.</li>
+          <li><strong>Cerbos policies</strong> for command-level authorization, layered above RLS.</li>
+        </ul>
+        <div class="note"><span class="k">Defense in depth</span>Isolation is enforced at three layers — application (scoped keys), database (RLS), and authorization (Cerbos). A bug in one layer is caught by the next.</div>
+      </div>
+    </section>
+
+    <!-- ================= 07 CONTENT MODEL ================= -->
+    <section class="part" id="p07">
+      <div class="part-head"><span class="part-num">§07</span><h2>Content Model &amp; Vocabulary</h2></div>
+      <p class="dek">How per-client flexibility and a universal contract coexist — the central design idea.</p>
+      <div class="wrap">
+        <p class="lead">Uniformity lives in a <strong>fixed vocabulary</strong>; flexibility lives in <strong>composition</strong>; determinism comes from <strong>codegen</strong>. These three layers resolve the tension between every client needing something different and every frontend needing a stable contract.</p>
+        <div class="cols">
+          <div class="card"><span class="k">Layer 1 · Vocabulary (fixed)</span><p>Field primitives (text, richtext, media, relation, number, date, select, geo) · a curated set of block types (hero, richText, gallery, cta, featureGrid, form, testimonial, faq, logoCloud) · one response envelope · identical query patterns. Never per-client.</p></div>
+          <div class="card"><span class="k">Layer 2 · Composition (per-client)</span><p>A client's content model is a composition of Layer-1 primitives, stored as schema data. Client A's "Case Study" and Client B's "Menu Item" are different arrangements of the same vocabulary.</p></div>
+          <div class="card"><span class="k">Layer 3 · Codegen (deterministic)</span><p>Each tenant's schema compiles to a typed SDK, an OpenAPI doc, and a <code>CONTENT-CONTRACT.md</code> — the artifacts the FE (and Claude) build against.</p></div>
+        </div>
+        <h3>The response envelope (universal)</h3>
+        <p>Every content read, for every tenant, returns the same shape — so the FE never re-learns how to talk to the backend:</p>
+        <div class="plate" style="padding:1rem"><pre style="margin:0;font-family:var(--mono);font-size:.82rem;color:var(--plate-ink);overflow-x:auto">{
+  "collection": "case-study",
+  "slug": "acme-rebrand",
+  "seo":    { "title": "...", "description": "...", "ogImage": "..." },
+  "meta":   { "publishedAt": "...", "updatedAt": "..." },
+  "blocks": [
+    { "type": "hero",        "props": { ... } },
+    { "type": "richText",    "props": { ... } },
+    { "type": "gallery",     "props": { ... } }
+  ]
+}</pre></div>
+        <h3>Composition-as-data vs. schema change</h3>
+        <div class="tablewrap"><table>
+          <thead><tr><th>Scenario</th><th>Mechanism</th><th>Deploy?</th></tr></thead>
+          <tbody>
+            <tr><td>New page using existing blocks</td><td>Compose blocks in a fixed <code>Page</code>/<code>Post</code> collection</td><td><span class="tag t-ok">none — data only</span></td></tr>
+            <tr><td>New arrangement / layout</td><td>Different block composition</td><td><span class="tag t-ok">none — data only</span></td></tr>
+            <tr><td>New structured, queryable collection</td><td>AI drafts collection config → approved diff → migrate</td><td><span class="tag t-warn">approved deploy</span></td></tr>
+            <tr><td>New block type in the vocabulary</td><td>Build once → governed contract change → reusable everywhere</td><td><span class="tag t-warn">approved deploy</span></td></tr>
+          </tbody>
+        </table></div>
+        <p>The large majority of per-PRD variation is <strong>composition-as-data</strong> — zero deploy. Genuinely new structured collections are the minority and go through an approved, versioned deploy, which is exactly what keeps the contract deterministic.</p>
+      </div>
+    </section>
+
+    <!-- ================= 08 CONTRACT & CODEGEN ================= -->
+    <section class="part" id="p08">
+      <div class="part-head"><span class="part-num">§08</span><h2>Contract &amp; Codegen Pipeline</h2></div>
+      <p class="dek">From a client's PRD to a typed frontend, deterministically — the pipeline that makes AI-built FEs safe.</p>
+      <figure class="wide">
+        <div class="plate">
+          <pre class="mermaid">
+%%{init:{'theme':'base','themeVariables':{'fontFamily':'ui-monospace,monospace','fontSize':'13px','background':'#FBFCFB','mainBkg':'#E7F0EA','primaryColor':'#E7F0EA','secondaryColor':'#EEF3EE','tertiaryColor':'#EEF3EE','primaryBorderColor':'#1E5E44','primaryTextColor':'#14201A','secondaryTextColor':'#14201A','tertiaryTextColor':'#14201A','textColor':'#14201A','nodeTextColor':'#14201A','lineColor':'#4B574F','clusterBkg':'#EEF3EE','clusterBorder':'#B7C3B8','edgeLabelBackground':'#FBFCFB','titleColor':'#14201A'}}}%%
+flowchart LR
+  PRD["Client PRD"] --> DRAFT["AI drafts schema<br/>composition"]
+  DRAFT --> APP["Human approves<br/>(WS4)"]
+  APP --> PROV["Provision in Payload<br/>collections + blocks"]
+  PROV --> GEN{"Codegen"}
+  GEN --> SDK["Typed SDK<br/>TS + PHP"]
+  GEN --> OAS["OpenAPI /v1"]
+  GEN --> DOC["CONTENT-CONTRACT.md"]
+  SDK --> FE["Claude builds bespoke FE<br/>from shared block library"]
+  OAS --> FE
+  DOC --> FE
+  FE --> LIVE["Content authored → served<br/>over uniform cached API"]
+  classDef default fill:#E7F0EA,stroke:#1E5E44,color:#14201A,stroke-width:1px;
+          </pre>
+        </div>
+        <figcaption><b>FIG. 08-1</b> — The contract pipeline. The FE is never built against guesses — only against compiled, typed artifacts.</figcaption>
+      </figure>
+      <div class="wrap">
+        <h3>Generated artifacts</h3>
+        <div class="tablewrap"><table>
+          <thead><tr><th>Artifact</th><th>Consumer</th><th>Guarantees</th></tr></thead>
+          <tbody>
+            <tr><td class="mono">TS SDK</td><td>Astro / Node frontends</td><td>Compile-time typing of every collection, field, block</td></tr>
+            <tr><td class="mono">PHP SDK</td><td>WordPress theme</td><td>Same contract, PHP idioms</td></tr>
+            <tr><td class="mono">openapi.v1.json</td><td>Tooling, tests, external</td><td>Versioned, contract-tested surface</td></tr>
+            <tr><td class="mono">CONTENT-CONTRACT.md</td><td>Claude / FE engineers</td><td>Human-readable enumeration of the tenant's model</td></tr>
+          </tbody>
+        </table></div>
+        <div class="note"><span class="k">Why this matters</span>Because the FE is handed compiled types and an explicit contract, an AI (or a junior FE dev) building the frontend is working from a deterministic source, not inference. This is what makes "Claude builds the FE" reliable rather than risky.</div>
+      </div>
+    </section>
+
+    <!-- ================= 09 KEY FLOWS ================= -->
+    <section class="part" id="p09">
+      <div class="part-head"><span class="part-num">§09</span><h2>Key Flows</h2></div>
+      <p class="dek">The four operational sequences that define day-to-day use.</p>
+      <div class="wrap">
+
+      <h3>9.1 · Provision a new client site (AI-drafted, human-approved)</h3>
+      <figure class="wide"><div class="plate">
+        <pre class="mermaid">
+%%{init:{'theme':'base','themeVariables':{'fontFamily':'ui-monospace,monospace','fontSize':'12px','background':'#FBFCFB','mainBkg':'#E7F0EA','primaryColor':'#E7F0EA','primaryBorderColor':'#1E5E44','primaryTextColor':'#14201A','textColor':'#14201A','lineColor':'#4B574F','actorBkg':'#E7F0EA','actorBorder':'#1E5E44','actorTextColor':'#14201A','actorLineColor':'#5A665E','signalColor':'#14201A','signalTextColor':'#14201A','labelBoxBkgColor':'#E7F0EA','labelBoxBorderColor':'#1E5E44','labelTextColor':'#14201A','loopTextColor':'#14201A','noteBkgColor':'#F3E9D6','noteTextColor':'#14201A','noteBorderColor':'#9C6714','activationBkgColor':'#E7F0EA','activationBorderColor':'#1E5E44','sequenceNumberColor':'#FBFCFB'}}}%%
+sequenceDiagram
+  autonumber
+  participant U as Staff (ERP)
+  participant AI as AI agent
+  participant N as ERP module
+  participant C as Control-plane
+  participant P as Payload
+  U->>AI: "Provision site for client X from this PRD"
+  AI->>N: proposeSchema (draft)
+  N->>C: proposeSchema (mTLS)
+  C-->>N: proposal id
+  N-->>U: review proposal (WS4)
+  U->>N: approve
+  N->>C: applySchema + createSite
+  C->>P: provision collections/blocks
+  C-->>N: keys minted + contract generated
+  N-->>U: site ready · staging URL
+        </pre>
+      </div><figcaption><b>FIG. 09-1</b> — Provisioning. AI drafts; human approves; control-plane executes. Same path whether initiated by click or agent.</figcaption></figure>
+
+      <h3>9.2 · Public form submission</h3>
+      <figure class="wide"><div class="plate">
+        <pre class="mermaid">
+%%{init:{'theme':'base','themeVariables':{'fontFamily':'ui-monospace,monospace','fontSize':'12px','background':'#FBFCFB','mainBkg':'#E7F0EA','primaryColor':'#E7F0EA','primaryBorderColor':'#1E5E44','primaryTextColor':'#14201A','textColor':'#14201A','lineColor':'#4B574F','actorBkg':'#E7F0EA','actorBorder':'#1E5E44','actorTextColor':'#14201A','actorLineColor':'#5A665E','signalColor':'#14201A','signalTextColor':'#14201A','labelBoxBkgColor':'#E7F0EA','labelBoxBorderColor':'#1E5E44','labelTextColor':'#14201A','loopTextColor':'#14201A','noteBkgColor':'#F3E9D6','noteTextColor':'#14201A','noteBorderColor':'#9C6714','activationBkgColor':'#E7F0EA','activationBorderColor':'#1E5E44','sequenceNumberColor':'#FBFCFB'}}}%%
+sequenceDiagram
+  autonumber
+  participant V as Visitor
+  participant CF as Cloudflare
+  participant F as Forms svc
+  participant Q as Queue
+  participant M as Mail svc
+  participant E as ERP (events)
+  V->>CF: POST submit + Turnstile token
+  CF->>F: forward (WAF + rate-limit)
+  F->>F: verify Turnstile · honeypot · validate · sanitize
+  F->>F: persist submission (RLS)
+  F->>Q: enqueue notify
+  Q->>M: send notification + autoresponder
+  F-->>E: signed submission event
+  F-->>V: 200 OK
+        </pre>
+      </div><figcaption><b>FIG. 09-2</b> — Form submission with layered anti-abuse before anything is persisted or sent.</figcaption></figure>
+
+      <h3>9.3 · Staging → live promotion (one click, reversible)</h3>
+      <figure class="wide"><div class="plate">
+        <pre class="mermaid">
+%%{init:{'theme':'base','themeVariables':{'fontFamily':'ui-monospace,monospace','fontSize':'12px','background':'#FBFCFB','mainBkg':'#E7F0EA','primaryColor':'#E7F0EA','primaryBorderColor':'#1E5E44','primaryTextColor':'#14201A','textColor':'#14201A','lineColor':'#4B574F','actorBkg':'#E7F0EA','actorBorder':'#1E5E44','actorTextColor':'#14201A','actorLineColor':'#5A665E','signalColor':'#14201A','signalTextColor':'#14201A','labelBoxBkgColor':'#E7F0EA','labelBoxBorderColor':'#1E5E44','labelTextColor':'#14201A','loopTextColor':'#14201A','noteBkgColor':'#F3E9D6','noteTextColor':'#14201A','noteBorderColor':'#9C6714','activationBkgColor':'#E7F0EA','activationBorderColor':'#1E5E44','sequenceNumberColor':'#FBFCFB'}}}%%
+sequenceDiagram
+  autonumber
+  participant U as Staff (ERP)
+  participant C as Control-plane
+  participant S as Staging box
+  participant L as Live box
+  U->>C: promote(site) [WS4-gated]
+  C->>L: snapshot current live (rollback point)
+  C->>L: apply migrations
+  C->>S: export tenant content + media
+  S->>L: sync content (DB) + replicate media
+  C->>L: deploy built FE
+  C->>L: activate domain + TLS
+  C->>L: purge + warm CDN
+  C-->>U: live · version tag · [Rollback]
+        </pre>
+      </div><figcaption><b>FIG. 09-3</b> — Promotion is a versioned release; the live snapshot taken first is the one-click rollback point.</figcaption></figure>
+
+      <h3>9.4 · Content publish → static rebuild</h3>
+      <p>An editor publishes in Payload → a publish webhook fires → the affected site's rebuild job is enqueued → the static build runs and deploys → the CDN cache for that tenant's tags is purged and warmed. Node/SSR sites skip the rebuild and rely on cache-tag invalidation only.</p>
+      </div>
+    </section>
+
+    <!-- ================= 10 SECURITY ================= -->
+    <section class="part" id="p10">
+      <div class="part-head"><span class="part-num">§10</span><h2>Security Architecture</h2></div>
+      <p class="dek">The threat model and the control matrix — the part that carries the most weight given the ERP connection.</p>
+      <div class="wrap">
+        <h3>Threat model</h3>
+        <div class="tablewrap"><table>
+          <thead><tr><th>Threat</th><th>Vector</th><th>Primary control</th><th>Severity</th></tr></thead>
+          <tbody>
+            <tr><td>Pivot to company data</td><td>Compromised client site / Zone B</td><td>Two hard trust zones; no Zone B→A credentials or route</td><td><span class="tag t-crit">Critical</span></td></tr>
+            <tr><td>Cross-tenant data access</td><td>Broken isolation</td><td>RLS + scoped keys + Cerbos (defense in depth)</td><td><span class="tag t-crit">Critical</span></td></tr>
+            <tr><td>Form spam / abuse</td><td>Public POST endpoint</td><td>Turnstile + honeypot + rate limit + origin allowlist</td><td><span class="tag t-warn">High</span></td></tr>
+            <tr><td>Malware upload</td><td>Media upload</td><td>Auth-only + type allowlist + ClamAV + cookieless serving</td><td><span class="tag t-warn">High</span></td></tr>
+            <tr><td>AI performs harmful action</td><td>Prompt injection via PRD/content</td><td>Server-side authz + WS4 gate + untrusted-input stance</td><td><span class="tag t-crit">Critical</span></td></tr>
+            <tr><td>Credential theft</td><td>Control channel</td><td>Keycloak svc-token + mTLS; rotate; least privilege</td><td><span class="tag t-warn">High</span></td></tr>
+            <tr><td>DDoS</td><td>Public surface</td><td>Cloudflare edge; datastores never exposed</td><td><span class="tag t-info">Medium</span></td></tr>
+            <tr><td>Supply-chain compromise</td><td>Dependencies / images</td><td>Reuse WS10: SBOM, cosign, Dependabot, image scan</td><td><span class="tag t-warn">High</span></td></tr>
+            <tr><td>Data loss</td><td>Single-disk MinIO / DB</td><td>Encrypted external backups; tested restore</td><td><span class="tag t-warn">High</span></td></tr>
+          </tbody>
+        </table></div>
+        <h3>Control layers</h3>
+        <div class="cols">
+          <div class="card"><span class="k">Edge</span><p>Cloudflare WAF, DDoS, bot/rate-limit, TLS. Only <code>:443</code> public; datastores internal-only.</p></div>
+          <div class="card"><span class="k">Tenant</span><p>RLS + scoped/hashed/rotatable keys + per-tenant storage + Cerbos policies.</p></div>
+          <div class="card"><span class="k">Input</span><p>Zod validation on every API input; sanitize; size caps; strict CORS.</p></div>
+          <div class="card"><span class="k">Media</span><p>Auth-only upload, type allowlist, ClamAV, cookieless serving domain.</p></div>
+          <div class="card"><span class="k">AI &amp; automation</span><p>Same authz as humans; WS4 gate on irreversible actions; PRD/content untrusted; full audit.</p></div>
+          <div class="card"><span class="k">Secrets</span><p>None in git; restricted-perm env now, Vault/Infisical later; keys shown once.</p></div>
+          <div class="card"><span class="k">Supply chain</span><p>WS10 pipeline reuse: SBOM, cosign signing, Dependabot, container scanning.</p></div>
+          <div class="card"><span class="k">Data</span><p>Encryption at rest + TLS in transit; encrypted, restore-tested backups; PII retention policy.</p></div>
+        </div>
+        <div class="note warn"><span class="k">AI security — the non-obvious one</span>The AI ingests client PRDs and site content, which are <strong>untrusted input</strong>. Defense against prompt injection is <em>not</em> in the prompt — it is that the <strong>control-plane API enforces authorization on every command regardless of what the model decided</strong>, and every irreversible action requires a human WS4 approval. The model can propose; only an authorized, gated command executes.</div>
+      </div>
+    </section>
+
+    <!-- ================= 11 ENVIRONMENTS ================= -->
+    <section class="part" id="p11">
+      <div class="part-head"><span class="part-num">§11</span><h2>Environments &amp; Promotion</h2></div>
+      <p class="dek">Staging and live as first-class, on separate boxes, with one-click promote and rollback.</p>
+      <div class="wrap">
+        <p>Every site has two environments — <code>staging</code> and <code>production</code> — each with its own domain, data scope, storage prefix, and keys, deployed to <strong>separate physical boxes</strong> so staging load or breakage can never affect live.</p>
+        <h3>Promotion contract</h3>
+        <ul>
+          <li><strong>One command, gated.</strong> <code>promote(site)</code> is a single WS4-approved control-plane command.</li>
+          <li><strong>Snapshot first.</strong> The current live state is snapshotted before any change — this is the rollback point.</li>
+          <li><strong>Ordered steps.</strong> Migrate → sync content → replicate media → deploy FE → activate domain/TLS → purge/warm CDN (see FIG. 09-3).</li>
+          <li><strong>Versioned + reversible.</strong> Each promotion produces a version tag; <code>rollback(site)</code> restores the prior snapshot in one click.</li>
+          <li><strong>Preview before live.</strong> Clients review on the staging URL first.</li>
+        </ul>
+        <div class="tablewrap"><table>
+          <thead><tr><th>Aspect</th><th>Staging</th><th>Production</th></tr></thead>
+          <tbody>
+            <tr><td>Box</td><td class="mono">Staging KVM8</td><td class="mono">Live KVM8</td></tr>
+            <tr><td>Purpose</td><td>Author, preview, client review</td><td>Public traffic</td></tr>
+            <tr><td>Domain</td><td class="mono">staging.&lt;client&gt;</td><td class="mono">&lt;client&gt; production</td></tr>
+            <tr><td>Promotion</td><td>source</td><td>target (WS4-gated)</td></tr>
+            <tr><td>Rollback</td><td>—</td><td>one-click to prior snapshot</td></tr>
+          </tbody>
+        </table></div>
+        <div class="note warn"><span class="k">Open item — content sync mechanism</span>The exact staging→live content transfer (Payload export/import vs. tenant-scoped DB sync vs. publish-target flags) is flagged in §14 for a focused design decision before Phase 4.</div>
+      </div>
+    </section>
+
+    <!-- ================= 12 OBSERVABILITY ================= -->
+    <section class="part" id="p12">
+      <div class="part-head"><span class="part-num">§12</span><h2>Observability &amp; Operations</h2></div>
+      <p class="dek">How we see the platform, back it up, and keep it running — reusing what the estate already has.</p>
+      <div class="wrap">
+        <h3>Telemetry</h3>
+        <ul>
+          <li><strong>Reuse WS9</strong> — OpenTelemetry across all Zone B services, exported to the existing Grafana stack in Zone A (fail-soft via <code>OTEL_ENABLED</code>).</li>
+          <li><strong>Golden signals</strong> per service: request rate, error rate, latency, saturation.</li>
+          <li><strong>Alerts</strong>: form-submission spikes, auth-failure spikes, unusual egress, queue depth, delivery failures, backup failures.</li>
+        </ul>
+        <h3>Backups &amp; DR</h3>
+        <div class="tablewrap"><table>
+          <thead><tr><th>Asset</th><th>Method</th><th>Target</th><th>Cadence</th></tr></thead>
+          <tbody>
+            <tr><td>Postgres (Zone B)</td><td>Logical dump + WAL</td><td>External (R2/B2), encrypted</td><td>Daily + continuous</td></tr>
+            <tr><td>MinIO objects</td><td>Bucket replication</td><td>External S3/R2</td><td>Continuous</td></tr>
+            <tr><td>Config / secrets</td><td>Sealed / vault export</td><td>Secure store</td><td>On change</td></tr>
+            <tr><td>Restore drill</td><td>Rehearsed restore to staging</td><td>—</td><td>Quarterly</td></tr>
+          </tbody>
+        </table></div>
+        <div class="note"><span class="k">Single-disk caveat</span>MinIO on a single VPS disk has no built-in redundancy — external replication is not optional; it is the redundancy. Treat the VPS copy as primary and the external replica as the recoverable backup.</div>
+        <h3>CI/CD &amp; release</h3>
+        <p>Builds run through the <strong>WS10 supply-chain pipeline</strong> (SBOM, cosign, image scan). The ERP <em>promote</em>/<em>deploy</em>/<em>rebuild</em> buttons trigger release jobs; every release is versioned and attributable.</p>
+      </div>
+    </section>
+
+    <!-- ================= 13 ROADMAP ================= -->
+    <section class="part" id="p13">
+      <div class="part-head"><span class="part-num">§13</span><h2>Roadmap, Phases &amp; Milestones</h2></div>
+      <p class="dek">Dependency-ordered phases, each shippable, each with a clear gate before the next.</p>
+      <div class="wrap">
+        <div class="phases">
+          <div class="phase"><span class="pn">P1</span><div>
+            <h4>Foundation</h4>
+            <p>Rebranded Payload + dedicated Postgres with RLS + API-key auth + uniform response envelope + MinIO storage. Proof: one test tenant, one collection, one Astro site reading real content.</p>
+            <p class="meta">GATE → a real page renders from the central API through a scoped key. · Zone B skeleton stood up.</p>
+          </div></div>
+          <div class="phase gate"><span class="pn">P2</span><div>
+            <h4>Forms &amp; Mail — the web3forms kill</h4>
+            <p>Forms service (Turnstile, validation, persistence) + Mail service (provider adapter, queue, retries). Highest immediate value, smallest surface.</p>
+            <p class="meta">GATE → a live client form submits centrally, notifies, and autoresponds. · First production dependency migrated off web3forms.</p>
+          </div></div>
+          <div class="phase gate"><span class="pn">P3</span><div>
+            <h4>Contract &amp; codegen + block library v0</h4>
+            <p>OpenAPI, typed TS SDK, <code>CONTENT-CONTRACT.md</code> generator, shared block-renderer library first set.</p>
+            <p class="meta">GATE → a new site is built purely from generated types + shared blocks, no hand-written backend calls.</p>
+          </div></div>
+          <div class="phase gate"><span class="pn">P4</span><div>
+            <h4>Control plane in the ERP + environments</h4>
+            <p>WebDev console: site registry, provisioning, key management, staging/live promotion + rollback. Control-plane API + mTLS/Keycloak seam. (Resolve content-sync open item first.)</p>
+            <p class="meta">GATE → provision, promote, and roll back a site entirely from ERP clicks.</p>
+          </div></div>
+          <div class="phase gate"><span class="pn">P5</span><div>
+            <h4>AI execution + approvals</h4>
+            <p>MCP tools over the command set, AI schema-drafting from PRD, WS4 approval gating, full audit.</p>
+            <p class="meta">GATE → an agent provisions a site from a PRD, human-approved, fully audited.</p>
+          </div></div>
+          <div class="phase gate"><span class="pn">P6</span><div>
+            <h4>WordPress full-headless</h4>
+            <p>PHP SDK + headless theme pattern. Last, because heaviest — proven model first on Astro/Node.</p>
+            <p class="meta">GATE → a WordPress site renders entirely from the central content API.</p>
+          </div></div>
+        </div>
+
+        <h3>Indicative sequencing</h3>
+        <figure class="wide"><div class="plate">
+          <pre class="mermaid">
+%%{init:{'theme':'base','themeVariables':{'fontFamily':'ui-monospace,monospace','fontSize':'12px','textColor':'#14201A','taskTextColor':'#14201A','taskTextDarkColor':'#14201A','taskTextOutsideColor':'#14201A','taskTextLightColor':'#14201A','sectionBkgColor':'#EEF3EE','altSectionBkgColor':'#FBFCFB','sectionBkgColor2':'#E7F0EA','gridColor':'#C4CDC5','todayLineColor':'#B42318','taskBkgColor':'#E7F0EA','taskBorderColor':'#1E5E44','activeTaskBkgColor':'#2C7A57','activeTaskBorderColor':'#1E5E44','doneTaskBkgColor':'#C4CDC5','doneTaskBorderColor':'#8A968C','titleColor':'#14201A'}}}%%
+gantt
+  dateFormat YYYY-MM-DD
+  axisFormat %b
+  section Platform
+  P1 Foundation            :p1, 2026-08-01, 30d
+  P2 Forms + Mail          :p2, after p1, 24d
+  P3 Contract + codegen    :p3, after p2, 30d
+  section Control
+  P4 ERP control + envs    :p4, after p3, 34d
+  P5 AI + approvals        :p5, after p4, 24d
+  section Consumers
+  P6 WordPress headless    :p6, after p5, 30d
+          </pre>
+        </div><figcaption><b>FIG. 13-1</b> — Indicative timeline; durations are planning estimates, not commitments. Sequencing (dependencies) is the fixed part.</figcaption></figure>
+
+        <h3>Sample ticket decomposition (Phase 1)</h3>
+        <div class="tablewrap"><table>
+          <thead><tr><th>ID</th><th>Ticket</th><th>Tier</th><th>Depends on</th></tr></thead>
+          <tbody>
+            <tr><td class="mono">P1-01</td><td>Zone B compose stack skeleton (proxy, payload, api, pg, minio, redis)</td><td><span class="tag t-info">medior</span></td><td>—</td></tr>
+            <tr><td class="mono">P1-02</td><td>Payload rebrand + Postgres adapter + tenancy fields</td><td><span class="tag t-info">senior-be</span></td><td>P1-01</td></tr>
+            <tr><td class="mono">P1-03</td><td>RLS policies + roles/grants for content tables</td><td><span class="tag t-info">senior-db</span></td><td>P1-02</td></tr>
+            <tr><td class="mono">P1-04</td><td>API-key mint/verify + scoped read middleware</td><td><span class="tag t-info">senior-be</span></td><td>P1-02</td></tr>
+            <tr><td class="mono">P1-05</td><td>Uniform response envelope + first block types</td><td><span class="tag t-info">medior</span></td><td>P1-02</td></tr>
+            <tr><td class="mono">P1-06</td><td>MinIO storage adapter + media upload path</td><td><span class="tag t-info">medior</span></td><td>P1-01</td></tr>
+            <tr><td class="mono">P1-07</td><td>Test Astro site reading real content (proof)</td><td><span class="tag t-info">junior</span></td><td>P1-04, P1-05</td></tr>
+            <tr><td class="mono">P1-08</td><td>QA: tenancy isolation + envelope contract tests</td><td><span class="tag t-info">qa</span></td><td>all</td></tr>
+          </tbody>
+        </table></div>
+        <p class="meta" style="font-family:var(--mono);font-size:.72rem;color:var(--ink-faint)">Full per-phase decomposition (with Opus-tagged tickets per the agent-army standard) is produced by the architect at plan time and fed to <span class="kbd">/army</span>.</p>
+      </div>
+    </section>
+
+    <!-- ================= 14 RISKS & DECISIONS ================= -->
+    <section class="part" id="p14">
+      <div class="part-head"><span class="part-num">§14</span><h2>Risks, Open Items &amp; Decision Log</h2></div>
+      <div class="wrap">
+        <h3>Open items (to resolve before their phase)</h3>
+        <div class="tablewrap"><table>
+          <thead><tr><th>Item</th><th>Decision needed</th><th>Needed by</th></tr></thead>
+          <tbody>
+            <tr><td>Staging→live content sync</td><td>Payload export/import vs. tenant DB sync vs. publish-target flags</td><td class="mono">P4</td></tr>
+            <tr><td>Headless preview/draft</td><td>Preview mechanism for bespoke FEs (Payload draft mode + FE preview routes)</td><td class="mono">P3</td></tr>
+            <tr><td>Block-library governance</td><td>Who approves a new block into the vocabulary (contract change process)</td><td class="mono">P3</td></tr>
+            <tr><td>Cache invalidation</td><td>Per-tenant cache-tag scheme + publish-driven purge granularity</td><td class="mono">P3</td></tr>
+            <tr><td>Custom domains + TLS</td><td>Per-tenant domain onboarding + automated cert issuance on KVM8</td><td class="mono">P4</td></tr>
+          </tbody>
+        </table></div>
+        <h3>Risks &amp; mitigations</h3>
+        <div class="tablewrap"><table>
+          <thead><tr><th>Risk</th><th>Impact</th><th>Mitigation</th></tr></thead>
+          <tbody>
+            <tr><td>Single VPS bandwidth for media/video</td><td>Slow sites, cost</td><td>CDN hard-cache reads; route video to R2</td></tr>
+            <tr><td>MinIO single-disk data loss</td><td>Media loss</td><td>Mandatory external replication + restore drills</td></tr>
+            <tr><td>Schema-change friction (deploy per new collection)</td><td>Slower onboarding</td><td>Maximize composition-as-data; batch schema changes</td></tr>
+            <tr><td>WordPress full-headless effort</td><td>Timeline</td><td>Sequenced last; model proven on Astro/Node first</td></tr>
+            <tr><td>Contract drift across sites</td><td>FE breakage</td><td>Versioned <code>/v1</code>; contract tests in CI</td></tr>
+          </tbody>
+        </table></div>
+        <h3>Decision log (locked)</h3>
+        <div class="tablewrap"><table>
+          <thead><tr><th>#</th><th>Decision</th><th>Rationale</th></tr></thead>
+          <tbody>
+            <tr><td class="mono">D1</td><td>All sites full-headless (incl. WordPress)</td><td>Uniform consumption model; WP last (heaviest)</td></tr>
+            <tr><td class="mono">D2</td><td>Payload 3 as headless engine, rebranded</td><td>MIT (no revenue clause), code-first schema fits codegen, native blocks, local API</td></tr>
+            <tr><td class="mono">D3</td><td>Vocabulary + composition + codegen content model</td><td>Resolves per-PRD flexibility vs. uniform contract</td></tr>
+            <tr><td class="mono">D4</td><td>Bespoke FE from shared typed block library</td><td>Design freedom + deterministic, fast connection</td></tr>
+            <tr><td class="mono">D5</td><td>AI drafts schema, human approves (WS4)</td><td>Autonomous-leaning but safe</td></tr>
+            <tr><td class="mono">D6</td><td>Shared instance + RLS + per-tenant keys</td><td>Scales on one box; reuses ERP pattern</td></tr>
+            <tr><td class="mono">D7</td><td>TypeScript end-to-end (PHP only for WP SDK)</td><td>One language, shared types, staff mobility</td></tr>
+            <tr><td class="mono">D8</td><td>MinIO (VPS disk) + R2 (video) + Cloudflare CDN</td><td>Uses Hostinger storage; S3-portable; protects bandwidth</td></tr>
+            <tr><td class="mono">D9</td><td>Two hard trust zones</td><td>Contain breach; internet platform never a path to company data</td></tr>
+            <tr><td class="mono">D10</td><td>3 boxes: ERP + staging + live</td><td>Physical isolation + true staging/live separation</td></tr>
+            <tr><td class="mono">D11</td><td>Keycloak client-credentials + mTLS control channel</td><td>Reuses infra; strongest practical service auth</td></tr>
+            <tr><td class="mono">D12</td><td>One-way control, signed-webhook events</td><td>No cross-zone DB grants</td></tr>
+            <tr><td class="mono">D13</td><td>Versioned, reversible one-click promotion</td><td>Safe staging→live for humans and AI alike</td></tr>
+          </tbody>
+        </table></div>
+      </div>
+    </section>
+
+    <!-- ================= GLOSSARY ================= -->
+    <section class="part" id="gloss">
+      <div class="part-head"><span class="part-num">§15</span><h2>Glossary</h2></div>
+      <div class="wrap">
+        <div class="tablewrap"><table>
+          <thead><tr><th>Term</th><th>Meaning</th></tr></thead>
+          <tbody>
+            <tr><td class="mono">Zone A / Zone B</td><td>Internal ERP trust zone / internet-facing website-platform trust zone</td></tr>
+            <tr><td class="mono">Vocabulary</td><td>The fixed set of field primitives and block types shared by all tenants</td></tr>
+            <tr><td class="mono">Composition</td><td>A tenant's content model as an arrangement of vocabulary — stored as data</td></tr>
+            <tr><td class="mono">Envelope</td><td>The universal response shape every content read returns</td></tr>
+            <tr><td class="mono">Control-plane</td><td>The single command API for all lifecycle operations</td></tr>
+            <tr><td class="mono">WS4 approvals</td><td>Existing ERP human-approval surface reused to gate irreversible actions</td></tr>
+            <tr><td class="mono">WS9 / WS10</td><td>Existing observability stack / supply-chain-secure release pipeline, reused</td></tr>
+            <tr><td class="mono">Turnstile</td><td>Cloudflare's privacy-first CAPTCHA, used on public form posts</td></tr>
+            <tr><td class="mono">RLS</td><td>Postgres Row-Level Security — per-tenant query scoping</td></tr>
+          </tbody>
+        </table></div>
+      </div>
+    </section>
+
+    <footer>
+      <p><strong>GAIADA WebDesk — Engineering Blueprint v1.0</strong></p>
+      <p class="mono">Status: Draft for review · 2026-07-23 · Web Dev · Platform · Classification: Internal<br/>
+      Architecture decisions locked (§14). Feeds architect decomposition → /army. Not a commitment of dates; sequencing is fixed, durations are estimates.</p>
+    </footer>
+  </main>
+</div>
+
+<div class="themehint">print-ready · A4 / Letter</div>
+
+<script>
+  (function(){
+    var links = Array.prototype.slice.call(document.querySelectorAll('.toc a'));
+    var map = {};
+    links.forEach(function(a){ var id=a.getAttribute('href').slice(1); map[id]=a; });
+    var secs = Array.prototype.slice.call(document.querySelectorAll('.part'));
+    if(!('IntersectionObserver' in window)) return;
+    var obs = new IntersectionObserver(function(entries){
+      entries.forEach(function(e){
+        if(e.isIntersecting){
+          links.forEach(function(l){l.classList.remove('active');});
+          var a = map[e.target.id]; if(a) a.classList.add('active');
+        }
+      });
+    }, {rootMargin:'-10% 0px -80% 0px', threshold:0});
+    secs.forEach(function(s){ obs.observe(s); });
+  })();
+</script>

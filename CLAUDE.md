@@ -182,6 +182,17 @@ Components are **separate standalone projects — not a shared-package monorepo.
   works offline; cloud keys are optional failover. Echo mode remains the keyless terminator.
 - **legal/** — Gate-1 drafts (DPIA/LIA/notices) pending lawyer review; do NOT ingest real employee
   data until Gate 1 (legal) + the day-one gate (technical) are both green.
+- **webdesk/ (planned, Web Dev)** — **Blueprint approved 2026-07-23; not yet built.** A centralized,
+  multi-tenant **client-website backend** (rebranded self-hosted **Payload 3** as the headless CMS +
+  NestJS forms/mail/media/control-plane) so all client sites (WordPress/Astro/Node, all full-headless)
+  consume one uniform, versioned, codegen'd contract — FE devs build only frontends; ops run manually,
+  by AI (MCP + WS4 approvals), or automatically. It is a **separate internet-facing trust zone (Zone B)**,
+  physically split from this platform (Zone A) across 3 boxes (ERP + staging KVM8 + live KVM8), controlled
+  **one-way** by the ERP over Keycloak client-credentials + mTLS; Zone B→A is signed webhooks into the n8n
+  bridge only, so a Zone B breach can never reach company data. Content = fixed block/field vocabulary +
+  per-tenant composition + codegen (typed SDK + OpenAPI + CONTENT-CONTRACT.md). Reuses Keycloak, MCP Hub,
+  WS4 approvals, Cerbos/RLS, n8n bridge, WS9 observability, WS10 pipeline. Full spec + relationship:
+  `docs/BLUEPRINTS.md` (the WebDesk Engineering Blueprint and §12 of the System Blueprint).
 
 ## Non-negotiable decisions (don't relitigate without cause)
 - **P5a COMPLETE (bot production-grade):** OpenBao transit custody + envelope v2; BullMQ

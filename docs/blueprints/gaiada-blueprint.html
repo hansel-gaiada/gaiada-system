@@ -1,0 +1,809 @@
+<title>Gaiada AI Platform — System Blueprint</title>
+<style>
+  :root{
+    --paper:#F6F7F5; --surface:#FFFFFF; --raise:#FBFCFB;
+    --ink:#14201A; --ink-soft:#4B574F; --ink-faint:#7A857D;
+    --line:#DBE1DB; --line-strong:#C4CDC5;
+    --accent:#1E5E44; --accent-2:#2C7A57; --accent-soft:#E7F0EA;
+    --ochre:#9C6714; --ochre-soft:#F3E9D6;
+    --ok:#2F7D57; --warn:#9A5A0B; --crit:#B42318; --info:#2A5C86;
+    --plate:#FBFCFB; --plate-line:#D5DBD5; --plate-ink:#1B2721;
+    --serif:"Iowan Old Style","Palatino Linotype",Palatino,"Book Antiqua",Georgia,ui-serif,serif;
+    --sans:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    --mono:ui-monospace,"SF Mono","Cascadia Code","JetBrains Mono","Roboto Mono",Menlo,Consolas,monospace;
+    --maxw:74ch;
+    --shadow:0 1px 2px rgba(20,32,26,.04),0 8px 24px rgba(20,32,26,.05);
+  }
+  @media (prefers-color-scheme:dark){
+    :root{
+      --paper:#0E1411; --surface:#161D18; --raise:#1B231D;
+      --ink:#E8ECE7; --ink-soft:#A6B2A9; --ink-faint:#76827A;
+      --line:#26302A; --line-strong:#334036;
+      --accent:#4FB183; --accent-2:#6BC79B; --accent-soft:#16271E;
+      --ochre:#D9A441; --ochre-soft:#2A2213;
+      --ok:#5CB98A; --warn:#D19A3C; --crit:#E8776B; --info:#7AAAD6;
+    }
+  }
+  :root[data-theme="light"]{
+    --paper:#F6F7F5; --surface:#FFFFFF; --raise:#FBFCFB;
+    --ink:#14201A; --ink-soft:#4B574F; --ink-faint:#7A857D;
+    --line:#DBE1DB; --line-strong:#C4CDC5;
+    --accent:#1E5E44; --accent-2:#2C7A57; --accent-soft:#E7F0EA;
+    --ochre:#9C6714; --ochre-soft:#F3E9D6;
+    --ok:#2F7D57; --warn:#9A5A0B; --crit:#B42318; --info:#2A5C86;
+  }
+  :root[data-theme="dark"]{
+    --paper:#0E1411; --surface:#161D18; --raise:#1B231D;
+    --ink:#E8ECE7; --ink-soft:#A6B2A9; --ink-faint:#76827A;
+    --line:#26302A; --line-strong:#334036;
+    --accent:#4FB183; --accent-2:#6BC79B; --accent-soft:#16271E;
+    --ochre:#D9A441; --ochre-soft:#2A2213;
+    --ok:#5CB98A; --warn:#D19A3C; --crit:#E8776B; --info:#7AAAD6;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  @media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+  body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans);
+    font-size:16px;line-height:1.65;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+  .layout{display:grid;grid-template-columns:264px minmax(0,1fr);gap:0;max-width:1320px;margin:0 auto}
+  .toc{position:sticky;top:0;align-self:start;height:100vh;overflow-y:auto;padding:2.2rem 1.3rem 3rem;
+    border-right:1px solid var(--line);background:var(--paper)}
+  .main{min-width:0;padding:0 clamp(1.1rem,4vw,3.4rem) 6rem}
+  .wrap{max-width:var(--maxw)}
+  @media (max-width:960px){.layout{grid-template-columns:1fr}.toc{display:none}}
+  .toc-brand{font-family:var(--mono);font-size:.7rem;letter-spacing:.16em;text-transform:uppercase;
+    color:var(--accent);margin-bottom:1.4rem;line-height:1.5}
+  .toc-brand b{display:block;color:var(--ink);font-weight:700;letter-spacing:.14em}
+  .toc ol{list-style:none;margin:0;padding:0}
+  .toc li{margin:.1rem 0}
+  .toc a{display:flex;gap:.55rem;align-items:baseline;text-decoration:none;color:var(--ink-soft);
+    font-size:.83rem;padding:.28rem .5rem;border-radius:5px;line-height:1.35}
+  .toc a .n{font-family:var(--mono);font-size:.68rem;color:var(--ink-faint);min-width:1.7em}
+  .toc a:hover{background:var(--accent-soft);color:var(--ink)}
+  .toc a.active{background:var(--accent-soft);color:var(--accent);font-weight:600}
+  .toc a.active .n{color:var(--accent)}
+  .cover{padding:3.6rem 0 2.4rem;border-bottom:2px solid var(--ink)}
+  .eyebrow{font-family:var(--mono);font-size:.72rem;letter-spacing:.2em;text-transform:uppercase;color:var(--accent);margin:0}
+  .cover h1{font-family:var(--serif);font-weight:600;font-size:clamp(2.3rem,5.4vw,3.5rem);line-height:1.04;
+    margin:.7rem 0 .5rem;letter-spacing:-.01em;text-wrap:balance}
+  .cover .lede{font-size:1.12rem;color:var(--ink-soft);max-width:62ch;margin:.2rem 0 0}
+  .titleblock{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:0;margin-top:2.4rem;
+    border:1px solid var(--line-strong);border-radius:8px;overflow:hidden;background:var(--surface)}
+  .titleblock div{padding:.85rem 1rem;border-right:1px solid var(--line);border-bottom:1px solid var(--line)}
+  .titleblock dt{font-family:var(--mono);font-size:.64rem;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-faint);margin:0 0 .28rem}
+  .titleblock dd{margin:0;font-size:.9rem;font-weight:600}
+  .pill{display:inline-flex;align-items:center;gap:.4rem;font-family:var(--mono);font-size:.68rem;font-weight:600;
+    padding:.16rem .5rem;border-radius:100px;letter-spacing:.04em;text-transform:uppercase}
+  .pill.live{background:var(--accent-soft);color:var(--accent)}
+  .pill.draft{background:var(--ochre-soft);color:var(--ochre)}
+  .pill::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor}
+  .part{padding-top:3.2rem;margin-top:2.2rem;border-top:1px solid var(--line)}
+  .part:first-of-type{border-top:none}
+  .part-head{display:flex;align-items:baseline;gap:.9rem;margin-bottom:.4rem}
+  .part-num{font-family:var(--mono);font-size:.82rem;color:var(--accent);font-weight:600;letter-spacing:.08em}
+  .part h2{font-family:var(--serif);font-weight:600;font-size:clamp(1.6rem,3.2vw,2.15rem);line-height:1.1;
+    margin:0;letter-spacing:-.01em;text-wrap:balance}
+  .part>.dek{color:var(--ink-soft);font-size:1.02rem;max-width:66ch;margin:.4rem 0 0}
+  h3{font-family:var(--sans);font-weight:700;font-size:1.22rem;margin:2.3rem 0 .5rem;letter-spacing:-.005em}
+  h4{font-family:var(--sans);font-weight:700;font-size:1rem;margin:1.5rem 0 .4rem}
+  p{margin:.7rem 0;max-width:var(--maxw)}
+  .wrap p,.wrap ul,.wrap ol{max-width:var(--maxw)}
+  ul,ol{padding-left:1.2rem}
+  li{margin:.28rem 0}
+  strong{font-weight:700}
+  a{color:var(--accent);text-decoration-thickness:1px;text-underline-offset:2px}
+  code{font-family:var(--mono);font-size:.86em;background:var(--accent-soft);color:var(--accent-2);
+    padding:.08em .38em;border-radius:4px;word-break:break-word}
+  .lead{font-size:1.08rem;color:var(--ink-soft)}
+  .note{border-left:3px solid var(--accent);background:var(--accent-soft);padding:.85rem 1.1rem;border-radius:0 8px 8px 0;
+    margin:1.2rem 0;font-size:.95rem;max-width:var(--maxw)}
+  .note.warn{border-color:var(--warn);background:var(--ochre-soft)}
+  .note .k{font-family:var(--mono);font-size:.66rem;letter-spacing:.14em;text-transform:uppercase;color:var(--accent);display:block;margin-bottom:.25rem;font-weight:700}
+  .note.warn .k{color:var(--warn)}
+  figure{margin:1.8rem 0;max-width:100%}
+  .plate{background:var(--plate);border:1px solid var(--plate-line);border-radius:10px;padding:1.4rem 1rem 1rem;
+    overflow-x:auto;box-shadow:var(--shadow)}
+  .plate .mermaid{min-width:520px;display:flex;justify-content:center}
+  figure.wide{max-width:none}
+  figcaption{font-family:var(--mono);font-size:.72rem;color:var(--ink-faint);margin-top:.6rem;letter-spacing:.03em}
+  figcaption b{color:var(--accent);font-weight:600}
+  .spec{border:1px solid var(--line);border-radius:12px;background:var(--surface);margin:1.4rem 0;overflow:hidden;box-shadow:var(--shadow)}
+  .spec-head{display:flex;flex-wrap:wrap;align-items:center;gap:.6rem;padding:.9rem 1.15rem;border-bottom:1px solid var(--line);background:var(--raise)}
+  .spec-head .id{font-family:var(--mono);font-size:.72rem;font-weight:700;color:var(--accent);letter-spacing:.05em}
+  .spec-head h3{margin:0;font-size:1.08rem}
+  .spec-head .st{margin-left:auto;font-family:var(--mono);font-size:.62rem;text-transform:uppercase;letter-spacing:.09em;
+    padding:.18rem .5rem;border-radius:5px;font-weight:700}
+  .st.built{background:var(--accent-soft);color:var(--ok)}
+  .st.livep{background:var(--accent);color:#fff}
+  :root[data-theme="dark"] .st.livep{color:#06140d}
+  .st.part{background:var(--ochre-soft);color:var(--warn)}
+  .st.plan{background:rgba(42,92,134,.12);color:var(--info)}
+  .st.proto{background:var(--ochre-soft);color:var(--warn)}
+  .st.devv{background:var(--accent-soft);color:var(--ok)}
+  .spec-body{padding:.4rem 1.15rem 1.1rem}
+  .spec-body dl{display:grid;grid-template-columns:minmax(110px,150px) 1fr;gap:0;margin:0}
+  .spec-body dt{font-family:var(--mono);font-size:.66rem;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-faint);
+    padding:.7rem .8rem .7rem 0;border-bottom:1px solid var(--line);font-weight:600}
+  .spec-body dd{margin:0;padding:.7rem 0;border-bottom:1px solid var(--line);font-size:.92rem}
+  .spec-body dd:last-child,.spec-body dt:last-of-type{border-bottom:none}
+  .spec-body ul{margin:.1rem 0;padding-left:1.05rem}
+  .spec-body li{margin:.18rem 0}
+  @media (max-width:560px){.spec-body dl{grid-template-columns:1fr}.spec-body dt{border-bottom:none;padding-bottom:.1rem}}
+  .tablewrap{overflow-x:auto;margin:1.3rem 0;border:1px solid var(--line);border-radius:10px}
+  table{border-collapse:collapse;width:100%;font-size:.88rem;min-width:520px}
+  th,td{text-align:left;padding:.6rem .8rem;border-bottom:1px solid var(--line);vertical-align:top}
+  thead th{background:var(--raise);font-family:var(--mono);font-size:.66rem;letter-spacing:.09em;text-transform:uppercase;
+    color:var(--ink-soft);font-weight:700;position:sticky;top:0}
+  tbody tr:last-child td{border-bottom:none}
+  td.mono,th.mono,.num{font-family:var(--mono);font-variant-numeric:tabular-nums}
+  td .tag{font-family:var(--mono);font-size:.68rem;font-weight:700;padding:.12rem .45rem;border-radius:4px;white-space:nowrap}
+  .t-ok{background:var(--accent-soft);color:var(--ok)}
+  .t-warn{background:var(--ochre-soft);color:var(--warn)}
+  .t-crit{background:rgba(180,35,24,.1);color:var(--crit)}
+  .t-info{background:rgba(42,92,134,.1);color:var(--info)}
+  :root[data-theme="dark"] .t-crit{background:rgba(232,119,107,.14)}
+  :root[data-theme="dark"] .t-info{background:rgba(122,170,214,.14)}
+  .cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:1rem;margin:1.3rem 0;max-width:var(--maxw)}
+  .card{border:1px solid var(--line);border-radius:10px;padding:1rem 1.1rem;background:var(--surface)}
+  .card h4{margin:.1rem 0 .35rem}
+  .card p{margin:.2rem 0;font-size:.9rem;color:var(--ink-soft)}
+  .card .k{font-family:var(--mono);font-size:.66rem;letter-spacing:.12em;text-transform:uppercase;color:var(--accent);font-weight:700}
+  .phases{display:flex;flex-direction:column;gap:.5rem;margin:1.4rem 0;max-width:var(--maxw)}
+  .phase{display:grid;grid-template-columns:2.4rem 1fr;gap:.9rem;border:1px solid var(--line);border-radius:10px;
+    padding:.9rem 1rem;background:var(--surface)}
+  .phase .pn{font-family:var(--mono);font-weight:700;color:var(--accent);font-size:1rem}
+  .phase h4{margin:0 0 .2rem}
+  .phase p{margin:.15rem 0;font-size:.9rem;color:var(--ink-soft)}
+  .phase .meta{font-family:var(--mono);font-size:.7rem;color:var(--ink-faint);margin-top:.35rem;letter-spacing:.02em}
+  .phase.gate{border-left:3px solid var(--ochre)}
+  hr.soft{border:none;border-top:1px solid var(--line);margin:2.4rem 0}
+  .kbd{font-family:var(--mono);font-size:.8rem;background:var(--surface);border:1px solid var(--line-strong);
+    border-bottom-width:2px;border-radius:5px;padding:.05em .4em}
+  footer{margin-top:4rem;padding-top:1.6rem;border-top:2px solid var(--ink);font-size:.85rem;color:var(--ink-soft)}
+  footer .mono{font-family:var(--mono);font-size:.72rem;color:var(--ink-faint)}
+  @media print{
+    :root{--paper:#fff;--surface:#fff;--raise:#fff;--ink:#111;--ink-soft:#333;--line:#bbb;--accent:#14503a;--plate:#fff}
+    body{font-size:10.5pt}
+    .layout{display:block;max-width:none}
+    .toc,.themehint{display:none!important}
+    .main{padding:0}
+    .part{break-before:page;border-top:none;padding-top:.4rem}
+    .part:first-of-type{break-before:avoid}
+    .cover{break-after:page}
+    .spec,.plate,.tablewrap,figure,.phase,.card{break-inside:avoid}
+    .plate{box-shadow:none}
+    a{color:#14503a;text-decoration:none}
+  }
+  .themehint{position:fixed;bottom:12px;right:14px;font-family:var(--mono);font-size:.62rem;color:var(--ink-faint);
+    background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:.3rem .55rem;opacity:.75}
+</style>
+
+<div class="layout">
+  <nav class="toc" aria-label="Contents">
+    <div class="toc-brand">GAIADA <b>AI Platform</b> System Blueprint</div>
+    <ol>
+      <li><a href="#p00"><span class="n">00</span> Executive Summary</a></li>
+      <li><a href="#p01"><span class="n">01</span> Vision &amp; Operating Model</a></li>
+      <li><a href="#p02"><span class="n">02</span> System Overview</a></li>
+      <li><a href="#p03"><span class="n">03</span> Workstream Map</a></li>
+      <li><a href="#p04"><span class="n">04</span> Service Catalog</a></li>
+      <li><a href="#p05"><span class="n">05</span> Data, Tenancy &amp; Sync</a></li>
+      <li><a href="#p06"><span class="n">06</span> Identity &amp; Zero-Trust</a></li>
+      <li><a href="#p07"><span class="n">07</span> AI Layer</a></li>
+      <li><a href="#p08"><span class="n">08</span> Automation &amp; Surfaces</a></li>
+      <li><a href="#p09"><span class="n">09</span> Security &amp; Resilience</a></li>
+      <li><a href="#p10"><span class="n">10</span> Observability &amp; Delivery</a></li>
+      <li><a href="#p11"><span class="n">11</span> Deployment &amp; Infra</a></li>
+      <li><a href="#p12"><span class="n">12</span> WebDesk — Website Platform</a></li>
+      <li><a href="#p13"><span class="n">13</span> Roadmap &amp; Status</a></li>
+      <li><a href="#p14"><span class="n">14</span> Decisions &amp; Open Items</a></li>
+      <li><a href="#gloss"><span class="n">15</span> Glossary</a></li>
+    </ol>
+  </nav>
+
+  <main class="main">
+    <header class="cover">
+      <p class="eyebrow">Company Platform Program · C-level Blueprint</p>
+      <h1>Gaiada AI Platform</h1>
+      <p class="lede">An AI-native, zero-trust, multi-business operating platform — one interface to run every company, AI woven through every workflow, data processed locally with cloud failover, defended by a continuously hardening security layer. System blueprint, architecture reference, and program status.</p>
+      <dl class="titleblock">
+        <div><dt>Document</dt><dd>System Blueprint v1.0</dd></div>
+        <div><dt>Scope</dt><dd>WS0–WS11 · Compliance · WebDesk</dd></div>
+        <div><dt>Date</dt><dd>2026-07-23</dd></div>
+        <div><dt>Owner</dt><dd>Platform Program</dd></div>
+        <div><dt>State</dt><dd><span class="pill draft">Prototyped · in progress</span></dd></div>
+        <div><dt>Classification</dt><dd>Internal</dd></div>
+      </dl>
+    </header>
+
+    <!-- 00 -->
+    <section class="part" id="p00">
+      <div class="part-head"><span class="part-num">§00</span><h2>Executive Summary</h2></div>
+      <p class="dek">What the platform is, where it stands today, and how the new WebDesk website platform fits in.</p>
+      <div class="wrap">
+        <p>The Gaiada AI Platform consolidates every company in the group — digital agency, resort, marine, printing, and more — onto <strong>one modular, multi-tenant system</strong> with a single interface to track all work, and with AI woven through every layer to augment every employee. It is delivered as a pragmatic <strong>Solo-Viable v1</strong> (managed-first, cloud-AI-first, single-region) beneath a preserved, hiring-gated <strong>all-local Target-State</strong> that remains the north star.</p>
+        <p>Architecturally it is a <strong>layered platform, not a single app</strong>: a NestJS platform core is the source of truth; an MCP Hub exposes its data and tools to AI and surfaces; a Go AI Gateway is the single secured egress for all model calls; an agent brigade, automation engine, and a family of surfaces (WhatsApp/Telegram bot, ERP web UI, department consoles) sit on top. Each component is a <strong>separate standalone deployable</strong>, not a monorepo package — so each is built, run, and scaled independently.</p>
+        <p>Most of the spine is <strong>prototyped</strong> — running in the dev stack — and in several cases <strong>dev-verified end-to-end</strong> on a live local stack, but <strong>none of it is in production</strong>: the platform core with RBAC and the agency vertical, the event backbone, the Go gateway, the MCP hub, the cross-site sync engine, the observability stack, the automation glue, and a functionally complete ERP UI (in dev) including per-department consoles. What remains is the admin/systems API layer, further verticals, deeper AI-agent capabilities, production deployment, and the target-state infrastructure.</p>
+        <div class="note warn"><span class="k">How to read status in this document</span>Nothing here is production-finished. Statuses use one vocabulary: <strong>PLANNED</strong> (design only) · <strong>IN PROGRESS</strong> (partial) · <strong>PROTOTYPED</strong> (works in dev, not production) · <strong>DEV-VERIFIED</strong> (prototyped + exercised end-to-end on the local stack). "Built/done/complete" is deliberately avoided. Per-module <strong>versions, status, and future plans</strong> live in the authoritative <code>docs/modules/MODULES.md</code> registry and <code>docs/modules/CHANGELOG.md</code>.</div>
+        <div class="note"><span class="k">New in this blueprint — WebDesk</span>The Web Dev department is adding <strong>WebDesk</strong>, a centralized multi-tenant website backend (CMS + forms + mail) that serves all client websites through one uniform contract. It is a <em>new trust zone</em> attached to this platform: internet-facing, physically separated, and controlled by the ERP. It is <strong>PLANNED</strong> (blueprint only, <code>v0.0.0</code>). §12 details how it connects; its full engineering spec is a companion blueprint.</div>
+      </div>
+    </section>
+
+    <!-- 01 -->
+    <section class="part" id="p01">
+      <div class="part-head"><span class="part-num">§01</span><h2>Vision &amp; Operating Model</h2></div>
+      <div class="wrap">
+        <h3>Vision</h3>
+        <p>Migrate Gaiada to AI-assisted operation: enhance every employee's output and consolidate all projects and tasks into <strong>one digital platform with a single interface</strong>. AI augments people; the custom platform is the source of truth; the MCP hub exposes company data and tools to AI and every surface.</p>
+        <h3>Guiding principles</h3>
+        <div class="cols">
+          <div class="card"><span class="k">P1 · Local-first, cloud-failover</span><p>Production processing on Gaiada's own servers; paid cloud AI only as automatic, capped, alerted failover.</p></div>
+          <div class="card"><span class="k">P2 · One source of truth</span><p>Each capability owned by one layer — no logic duplicated across services.</p></div>
+          <div class="card"><span class="k">P3 · Ship small first</span><p>Usable tools shipped early for value + discovery while the platform is built in parallel.</p></div>
+          <div class="card"><span class="k">P4 · Swappable everything</span><p>LLM providers, WhatsApp gateway, data adapters, storage — all behind interfaces.</p></div>
+          <div class="card"><span class="k">P5 · Zero-trust by default</span><p>mTLS mesh, no public listeners, RBAC + RLS, OBO everywhere, immutable audit.</p></div>
+          <div class="card"><span class="k">P6 · Separate deployables</span><p>Components are standalone projects, independently built/run/scaled — not a monorepo.</p></div>
+        </div>
+        <h3>The layer contract (prevents duplicated logic)</h3>
+        <ul>
+          <li><strong>MCP = access.</strong> Exposes data/tools as nouns &amp; verbs; one authoritative interface per capability.</li>
+          <li><strong>Automation (n8n) = orchestration.</strong> Sequences/schedules by calling MCP tools; no business logic lives in workflows.</li>
+          <li><strong>Custom services = logic.</strong> The platform core owns business rules and the data model.</li>
+          <li><strong>Gateway = AI egress.</strong> Every model call exits through one secured, DLP-enforced chokepoint.</li>
+        </ul>
+        <h3>Solo-Viable v1 vs. Target-State</h3>
+        <div class="tablewrap"><table>
+          <thead><tr><th>Concern</th><th>Solo-Viable v1 (now)</th><th>Target-State (hiring-gated)</th></tr></thead>
+          <tbody>
+            <tr><td>Infra</td><td>Managed Postgres + container host / small K8s</td><td>Per-company physical+VPS pairs, all-local</td></tr>
+            <tr><td>Multi-site / sync</td><td>Central primary + replicas <span class="tag t-warn">sync engine prototyped</span></td><td>Offline-first sync, regional primaries</td></tr>
+            <tr><td>AI</td><td>Cloud-AI-first via lean Gateway (local optional)</td><td>Local frontier models + fine-tuning moat</td></tr>
+            <tr><td>Identity/authz</td><td>Keycloak + Cerbos</td><td>Self-hosted IdP, deeper posture</td></tr>
+            <tr><td>Security</td><td>Deterministic zero-trust floor + SIEM</td><td>Self-hosted SIEM + AI-SOC (v2)</td></tr>
+            <tr><td>Surfaces</td><td>WhatsApp/Telegram + ERP UI + dept consoles</td><td>+ mobile, voice, more</td></tr>
+            <tr><td>Verticals</td><td>Agency (first-deploy), backbone → holding-OS</td><td>Resort/marine/print, full multi-tenant</td></tr>
+          </tbody>
+        </table></div>
+      </div>
+    </section>
+
+    <!-- 02 -->
+    <section class="part" id="p02">
+      <div class="part-head"><span class="part-num">§02</span><h2>System Overview</h2></div>
+      <p class="dek">The whole estate on one plate — surfaces, the AI layer, the platform core, data, cross-cutting planes, and the adjacent WebDesk zone.</p>
+      <figure class="wide">
+        <div class="plate">
+          <pre class="mermaid">
+%%{init:{'theme':'base','themeVariables':{'fontFamily':'ui-monospace,monospace','fontSize':'13px','background':'#FBFCFB','mainBkg':'#E7F0EA','primaryColor':'#E7F0EA','secondaryColor':'#EEF3EE','tertiaryColor':'#EEF3EE','primaryBorderColor':'#1E5E44','primaryTextColor':'#14201A','secondaryTextColor':'#14201A','tertiaryTextColor':'#14201A','textColor':'#14201A','nodeTextColor':'#14201A','lineColor':'#4B574F','clusterBkg':'#EEF3EE','clusterBorder':'#B7C3B8','edgeLabelBackground':'#FBFCFB','titleColor':'#14201A'}}}%%
+flowchart TB
+  subgraph SURF["Surfaces (WS5)"]
+    direction LR
+    BOT["WA / Telegram bot"]
+    UI["ERP web UI<br/>+ dept consoles"]
+    CAP["Capture helper"]
+  end
+  subgraph AIL["AI layer"]
+    direction LR
+    HUB["MCP Hub (WS2)<br/>access · OBO · Cerbos"]
+    GW["AI Gateway — Go (WS3)<br/>routing · DLP · mTLS"]
+    AG["Agent brigade (WS8)<br/>supervisor + specialists"]
+    HG["Hermes gateway<br/>local-model shim"]
+  end
+  subgraph CORE["Platform core (WS1)"]
+    direction LR
+    NEST["platform-nest<br/>modules · RBAC · events"]
+    SYNC["sync-engine-go<br/>cross-site reconcile"]
+  end
+  subgraph DATA["Data"]
+    direction LR
+    PG[("Postgres · FORCE RLS")]
+    RD[("Redis streams / cache")]
+    OBJ[("Object / files")]
+  end
+  subgraph XC["Cross-cutting"]
+    direction LR
+    IDP["Keycloak OIDC"]
+    CB["Cerbos authz"]
+    OBS["Observability (WS9)"]
+    DEL["Delivery (WS10)"]
+    AUT["Automation n8n (WS4)"]
+  end
+  WEBDESK["WebDesk — website platform<br/>(Zone B · §12)"]
+
+  BOT --> HUB
+  UI --> NEST
+  CAP --> NEST
+  HUB --> NEST
+  AG --> HUB
+  AG --> GW
+  BOT --> GW
+  HG --> GW
+  NEST --- PG
+  NEST --- RD
+  NEST --- OBJ
+  SYNC --- PG
+  NEST -. events .- AUT
+  IDP -. tokens .- NEST
+  CB -. decisions .- NEST
+  NEST ==>|control| WEBDESK
+  WEBDESK -. signed events .-> AUT
+  classDef default fill:#E7F0EA,stroke:#1E5E44,color:#14201A,stroke-width:1px;
+          </pre>
+        </div>
+        <figcaption><b>FIG. 02-1</b> — Master system map. Bold seam = control to the WebDesk zone. Dotted seams = events/tokens/decisions.</figcaption>
+      </figure>
+      <div class="wrap">
+        <ul>
+          <li><strong>Surfaces</strong> never assert identity and never hold provider keys — they call the hub/gateway with OBO tokens.</li>
+          <li><strong>The AI layer</strong> is split by responsibility: MCP = access, Gateway = egress, agents = reasoning, Hermes = a local-model shim into the gateway contract.</li>
+          <li><strong>The platform core</strong> is the single source of truth; the sync engine reconciles it across sites.</li>
+          <li><strong>Cross-cutting planes</strong> (identity, authz, observability, delivery, automation) serve every component.</li>
+          <li><strong>WebDesk</strong> is an adjacent, internet-facing zone controlled by the core — detailed in §12.</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- 03 -->
+    <section class="part" id="p03">
+      <div class="part-head"><span class="part-num">§03</span><h2>Workstream Map</h2></div>
+      <p class="dek">The program decomposed into workstreams, each brainstormed → spec'd → built independently, with current status.</p>
+      <figure class="wide">
+        <div class="plate">
+          <pre class="mermaid">
+%%{init:{'theme':'base','themeVariables':{'fontFamily':'ui-monospace,monospace','fontSize':'13px','background':'#FBFCFB','mainBkg':'#E7F0EA','primaryColor':'#E7F0EA','secondaryColor':'#EEF3EE','tertiaryColor':'#EEF3EE','primaryBorderColor':'#1E5E44','primaryTextColor':'#14201A','secondaryTextColor':'#14201A','tertiaryTextColor':'#14201A','textColor':'#14201A','nodeTextColor':'#14201A','lineColor':'#4B574F','clusterBkg':'#EEF3EE','clusterBorder':'#B7C3B8','edgeLabelBackground':'#FBFCFB','titleColor':'#14201A'}}}%%
+flowchart LR
+  WS0["WS0 Discovery"] --> WS3
+  WS3["WS3 Gateway"] --> WS1["WS1 Platform"]
+  WS1 --> WS2["WS2 MCP Hub"]
+  WS2 --> WS5["WS5 Surfaces"]
+  WS2 --> WS4["WS4 Automation"]
+  WS1 --> WS9["WS9 Observability"]
+  WS2 --> WS8["WS8 Agents"]
+  WS3 --> WS8
+  WS1 --> WS7["WS7 Security"]
+  WS7 --> ALL["all"]
+  WS10["WS10 Delivery"] --> ALL
+  WS11["WS11 Delivery pipeline"] --> WS5
+  WS1 --> WD["WebDesk"]
+  classDef default fill:#E7F0EA,stroke:#1E5E44,color:#14201A,stroke-width:1px;
+          </pre>
+        </div>
+        <figcaption><b>FIG. 03-1</b> — Workstream dependency graph. WS7 (security) and WS10 (delivery) are cross-cutting.</figcaption>
+      </figure>
+      <div class="wrap">
+        <div class="tablewrap"><table>
+          <thead><tr><th>#</th><th>Workstream</th><th>What it is</th><th>Status</th></tr></thead>
+          <tbody>
+            <tr><td class="mono">0</td><td>Discovery</td><td>Current-state AI/data/workflow audit (continuous)</td><td><span class="tag t-warn">ongoing</span></td></tr>
+            <tr><td class="mono">1</td><td>Platform core + sync</td><td>Modular multi-tenant NestJS core + Go sync engine</td><td><span class="tag t-warn">prototyped</span></td></tr>
+            <tr><td class="mono">2</td><td>MCP Hub</td><td>Access layer exposing data/tools to AI + surfaces</td><td><span class="tag t-warn">prototyped</span></td></tr>
+            <tr><td class="mono">3</td><td>AI Gateway (Go)</td><td>Provider routing + egress security + DLP</td><td><span class="tag t-warn">prototyped</span></td></tr>
+            <tr><td class="mono">4</td><td>Automation (n8n)</td><td>Workflow orchestration by calling MCP tools</td><td><span class="tag t-ok">dev-verified</span></td></tr>
+            <tr><td class="mono">5</td><td>Surfaces</td><td>WA/TG bot, ERP UI, department consoles</td><td><span class="tag t-warn">prototyped</span></td></tr>
+            <tr><td class="mono">6</td><td>Governance</td><td>Identity, audit, data classification (woven)</td><td><span class="tag t-warn">woven-in</span></td></tr>
+            <tr><td class="mono">7</td><td>Security &amp; Resilience</td><td>Zero-trust floor + HA/DR; AI-SOC is v2</td><td><span class="tag t-warn">floor prototyped · AI v2</span></td></tr>
+            <tr><td class="mono">8</td><td>AI-Native / Agents</td><td>Agent brigade + supervisor + RAG/memory + trainer</td><td><span class="tag t-warn">in progress (1–3)</span></td></tr>
+            <tr><td class="mono">9</td><td>Observability</td><td>OTel metrics/traces/logs, SLOs, alerting</td><td><span class="tag t-ok">dev-verified</span></td></tr>
+            <tr><td class="mono">10</td><td>Platform Engineering</td><td>CI/CD + SBOM/cosign/SLSA; K8s/GitOps target</td><td><span class="tag t-warn">prototyped (v1)</span></td></tr>
+            <tr><td class="mono">11</td><td>Delivery pipeline</td><td>Meeting→MOM→PRD pipeline + capture edge</td><td><span class="tag t-warn">in progress</span></td></tr>
+            <tr><td class="mono">C</td><td>Compliance</td><td>GDPR-grade gate, DPIA/LIA, retention/erasure</td><td><span class="tag t-warn">drafts</span></td></tr>
+            <tr><td class="mono">WD</td><td>WebDesk</td><td>Centralized client-website backend (new)</td><td><span class="tag t-info">blueprint</span></td></tr>
+          </tbody>
+        </table></div>
+        <div class="note"><span class="k">Status = dev, not production</span>These statuses describe the <em>dev</em> stack. <strong>Per-module versions, detailed status, and future plans are tracked in <code>docs/modules/MODULES.md</code></strong> (registry) and <code>docs/modules/CHANGELOG.md</code> — the authoritative, git-tracked source that this blueprint summarizes.</div>
+      </div>
+    </section>
+
+    <!-- 04 -->
+    <section class="part" id="p04">
+      <div class="part-head"><span class="part-num">§04</span><h2>Service Catalog</h2></div>
+      <p class="dek">Each standalone component specified to one shape — purpose, technology, version + status, interfaces, and notes.</p>
+      <div class="wrap">
+      <div class="note warn"><span class="k">Reminder</span>Every badge below is a <strong>version + dev status</strong>, not a release. <strong>PROTOTYPED</strong> = works in the dev stack, not production. Authoritative tracking: <code>docs/modules/MODULES.md</code> + <code>CHANGELOG.md</code>.</div>
+
+      <div class="spec">
+        <div class="spec-head"><span class="id">S-01</span><h3>platform-nest — Platform Core</h3><span class="st proto">v0.5 · Prototyped</span></div>
+        <div class="spec-body"><dl>
+          <dt>Purpose</dt><dd>The source of truth: modular multi-tenant data model, RBAC, business logic, event backbone.</dd>
+          <dt>Technology</dt><dd>NestJS (Fastify adapter), Postgres with FORCE RLS, Cerbos, Redis Streams. Service on <code>:3004</code>.</dd>
+          <dt>Capabilities</dt><dd><ul>
+            <li>Core schema + <code>ModuleContract</code> framework (per-tenant enable gate, D17 custom fields).</li>
+            <li>Cerbos RBAC (scope cascade, decision audit, D11 revocation, PlanResources), D4 identity_links + OBO + dual-proof enrollment, D12 cross-company rollups.</li>
+            <li>Agency vertical: clients / deliverables / time_entries, campaigns / briefs / creative-asset review, comments, notifications, files (day-one scrubbed).</li>
+            <li>Event backbone: transactional outbox → Redis Streams relay → consumer w/ dead-letter; HLC-stamped for sync.</li>
+          </ul></dd>
+          <dt>Open</dt><dd>Admin/systems API layer (<code>/api/admin/*</code> + identity writes) — the top frontend-blocking gap; further verticals + the backbone/ORG-CORE holding-OS build-out.</dd>
+        </dl></div>
+      </div>
+
+      <div class="spec">
+        <div class="spec-head"><span class="id">S-02</span><h3>platform-ui — ERP Suite</h3><span class="st proto">v0.5 · Prototyped</span></div>
+        <div class="spec-body"><dl>
+          <dt>Purpose</dt><dd>The single web interface: one place to run every company and department.</dd>
+          <dt>Technology</dt><dd>Next.js, BFF to platform-nest (no direct DB), plain-CSS luxury design system, RBAC-gated nav + company switcher.</dd>
+          <dt>Capabilities</dt><dd><ul>
+            <li>Shell + My Work, cross-company Approvals inbox, Companies/Projects/Tasks, Agency, exec Rollups.</li>
+            <li>Systems &amp; Intelligence consoles, Admin (users/identity/modules/compliance/audit), People 360, drag-drop org-structure builder.</li>
+            <li>Repsona-style PM + AI tracker, IT device registry + embedded n8n canvas, per-department consoles (Web Dev is the reference template).</li>
+            <li>OIDC PKCE login (coexists with dev-login); Playwright e2e; runs backend-free in <code>DEMO_MODE</code>.</li>
+          </ul></dd>
+          <dt>Open</dt><dd>Several sections light up automatically once the backend admin API + org-structure endpoints land.</dd>
+        </dl></div>
+      </div>
+
+      <div class="spec">
+        <div class="spec-head"><span class="id">S-03</span><h3>ai-gateway-go — AI Gateway</h3><span class="st proto">v0.9 · Prototyped</span></div>
+        <div class="spec-body"><dl>
+          <dt>Purpose</dt><dd>The single secured egress for every model call — routing, failover, DLP, cost governance.</dd>
+          <dt>Technology</dt><dd>Go, deployed as the <code>ai-gateway</code> service on <code>:3002</code>. Byte-for-byte HTTP parity with the retired Node gateway.</dd>
+          <dt>Capabilities</dt><dd><ul>
+            <li>Provider chain w/ failover + circuit breaker (ollama/gemini/claude/echo); <code>/complete</code>, <code>/media</code>, <code>/embed</code>, SSE <code>/complete/stream</code>.</li>
+            <li>Fail-closed auth + DLP, daily cost cap, egress audit + allowlist (DialContext-enforced), self-signed internal CA + mTLS, site/central topology, DR-burst budget.</li>
+          </ul></dd>
+          <dt>Open</dt><dd>OpenBao-issued provider creds, media DLP classification, native per-provider token streaming, automated cert rotation.</dd>
+        </dl></div>
+      </div>
+
+      <div class="spec">
+        <div class="spec-head"><span class="id">S-04</span><h3>mcp-hub — Access Layer</h3><span class="st proto">v0.8 · Prototyped</span></div>
+        <div class="spec-body"><dl>
+          <dt>Purpose</dt><dd>Expose company data/tools to AI and surfaces via MCP, with OBO auth and deny-by-default policy.</dd>
+          <dt>Technology</dt><dd>Official MCP SDK (Streamable HTTP, stateless), fronts platform-nest; Cerbos-authoritative policy.</dd>
+          <dt>Capabilities</dt><dd><ul>
+            <li>Full primitive surface: Tools (core + platform read/write + AI-backed summarize/ocr/vision/transcribe + module-contributed), Resources (<code>gaiada://…</code>), Prompts.</li>
+            <li>OBO principal minting (clients can't assert roles), rate limiting, D11 revocation, mTLS floor, site/central topology, JSONL audit on every decision.</li>
+          </ul></dd>
+          <dt>Open</dt><dd>OpenBao-minted short-lived creds, Redis-backed multi-instance rate limiting.</dd>
+        </dl></div>
+      </div>
+
+      <div class="spec">
+        <div class="spec-head"><span class="id">S-05</span><h3>sync-engine-go — Cross-Site Sync</h3><span class="st proto">v0.7 · Prototyped</span></div>
+        <div class="spec-body"><dl>
+          <dt>Purpose</dt><dd>Reconcile the shared event log across sites with correctness guarantees.</dd>
+          <dt>Technology</dt><dd>One Go binary running central (serves push/pull over mTLS) or site (push→pull→GC ticker).</dd>
+          <dt>Capabilities</dt><dd><ul>
+            <li>HLC ordering, declarative per-field conflict resolution (money/status → conflict-queue, else LWW), per-tenant RLS on every op.</li>
+            <li>Central-authoritative subscription ACL, new-node bootstrap (snapshot + watermark + merkle gate), watermark-gated tombstone GC (delete-wins).</li>
+            <li>Property-based convergence + partition/chaos tested. Runs idle as <code>sync-central</code> until a real second site exists.</li>
+          </ul></dd>
+        </dl></div>
+      </div>
+
+      <div class="spec">
+        <div class="spec-head"><span class="id">S-06</span><h3>ai-agents — Agent Brigade</h3><span class="st part">v0.3 · In progress</span></div>
+        <div class="spec-body"><dl>
+          <dt>Purpose</dt><dd>The "one brain": specialized single-responsibility agents + an orchestrator, working through hub tools + the gateway.</dd>
+          <dt>Technology</dt><dd>TS; specialists (status-reporter, approvals-chaser) + supervisor (blackboard, cycle guard, per-goal budget, fan-out cap, approval suspension).</dd>
+          <dt>Status</dt><dd>Steps 1–3 prototyped incl. pgvector RAG; D14 safety enforced in code. The eval harness is the root gate for further autonomy.</dd>
+          <dt>Open</dt><dd>Deeper memory/RAG ownership, local-model registry, eval-gated trainer (steps 4–6).</dd>
+        </dl></div>
+      </div>
+
+      <div class="spec">
+        <div class="spec-head"><span class="id">S-07</span><h3>wa-chat-bot — Messaging Surface</h3><span class="st proto">v0.6 · Prototyped</span></div>
+        <div class="spec-body"><dl>
+          <dt>Purpose</dt><dd>Work-summary + Q&amp;A/assistant bot over WhatsApp (WAHA) and Telegram.</dd>
+          <dt>Technology</dt><dd>Pipeline: webhook (fail-closed) → group registry → PAN/KTP scrub → crypto-shred store → skills/Q&amp;A. 12:00/18:00 digests, media enrichment via gateway.</dd>
+          <dt>Status</dt><dd>Prototyped (trial-lite): Phases 0–3 + P5a features; Telegram live in dev, WAHA primary once its number is scanned. Blocked on infra + legal Gate 1 before real ingestion. Never holds keys, never asserts identity.</dd>
+        </dl></div>
+      </div>
+
+      <div class="spec">
+        <div class="spec-head"><span class="id">S-08</span><h3>hermes-gateway &amp; capture-helper</h3><span class="st proto">v0.2 · Proto / in progress</span></div>
+        <div class="spec-body"><dl>
+          <dt>hermes-gateway</dt><dd>A shim that makes a local Hermes model the bot's brain by speaking the Gateway contract — no bot changes; verified headless.</dd>
+          <dt>capture-helper</dt><dd>WS11 capture edge: in-ERP record → local Whisper <code>.txt</code> → ingest → Shared Drive; feeds the meeting→MOM→PRD delivery pipeline.</dd>
+        </dl></div>
+      </div>
+
+      <div class="spec">
+        <div class="spec-head"><span class="id">S-09</span><h3>automation, observability &amp; infra</h3><span class="st devv">v0.4–0.6 · Dev-verified / Prototyped</span></div>
+        <div class="spec-body"><dl>
+          <dt>automation (WS4)</dt><dd>n8n + MCP-calling templates; scoped n8n accounts, impact gate, event bridge, approvals-suspension surface. Dev-verified — 3 flows exercised e2e on the local stack.</dd>
+          <dt>observability (WS9)</dt><dd>OTel across all services (fail-soft), opt-in Grafana/Prometheus/Tempo/Loki stack, multi-burn-rate SLOs, alerting, restore drills. Verified end-to-end.</dd>
+          <dt>infra (WS10)</dt><dd>Full VPS Docker Compose stack, CI, crypto-shred-safe backups, supply-chain pipeline (SBOM + cosign + SLSA). K8s/GitOps/SPIFFE are target-state.</dd>
+        </dl></div>
+      </div>
+
+      </div>
+    </section>
+
+    <!-- 05 -->
+    <section class="part" id="p05">
+      <div class="part-head"><span class="part-num">§05</span><h2>Data, Tenancy &amp; Sync</h2></div>
+      <p class="dek">One shared database, hard per-tenant isolation, module-driven heterogeneity, and an event log that doubles as the sync spine.</p>
+      <div class="wrap">
+        <h3>Multi-tenancy &amp; modules</h3>
+        <ul>
+          <li><strong>Shared DB + FORCE RLS</strong> on an authorized-tenant-set (D5) — every query is tenant-scoped; the app role is <code>NOBYPASSRLS</code>.</li>
+          <li><strong>Heterogeneity via compile-time modules + custom fields</strong> (D17) — verticals extend the core through the <code>ModuleContract</code> framework and a per-tenant enable gate, not schema forks.</li>
+          <li><strong>Per-service DB roles</strong> — owner/migrator + per-service runtime roles; a hard platform↔sync grant boundary; Keycloak/n8n on Postgres; isolated bot Postgres; split Redis.</li>
+        </ul>
+        <h3>Event backbone &amp; sync</h3>
+        <p>A transactional <strong>outbox</strong> is relayed to Redis Streams and consumed with dead-lettering; the same <code>outbox_events</code> log is the sync spine. platform-nest stamps a <strong>Hybrid Logical Clock</strong> on every emit, and the Go sync engine reconciles across sites with per-field conflict rules and a dedup ledger that never touches the relay's own state (D7).</p>
+        <div class="note"><span class="k">HA ≠ backup</span>Streaming replication provides availability; durability comes from immutable/WORM backups + PITR and rehearsed restores (§10). Crypto-shred (two-axis subject×entity) makes PII erasure real.</div>
+      </div>
+    </section>
+
+    <!-- 06 -->
+    <section class="part" id="p06">
+      <div class="part-head"><span class="part-num">§06</span><h2>Identity, RBAC &amp; Zero-Trust</h2></div>
+      <div class="wrap">
+        <p>Authentication and authorization are split and both authoritative: <strong>Keycloak</strong> (OIDC) proves who you are; <strong>Cerbos</strong> decides what you may do; <strong>RLS</strong> enforces which rows you touch. No surface asserts identity — everything acts <strong>on-behalf-of</strong> a minted principal.</p>
+        <div class="cols">
+          <div class="card"><span class="k">AuthN</span><p>Keycloak OIDC (JWKS verify, auto-provision, email-verified takeover guard). Hybrid: SSO + dev-login coexist; UI uses PKCE.</p></div>
+          <div class="card"><span class="k">AuthZ</span><p>Cerbos versioned policy repo — scope-cascade derived roles, PlanResources, team scope, decision audit, D11 revocation.</p></div>
+          <div class="card"><span class="k">Isolation</span><p>Postgres FORCE RLS on every table; per-service runtime roles; OBO principal minting at the hub.</p></div>
+          <div class="card"><span class="k">Mesh</span><p>Self-signed internal CA + mTLS between gateway/hub/sync; peer-CN allowlists; no public listeners on datastores.</p></div>
+          <div class="card"><span class="k">Enrollment</span><p>D4 dual-proof identity_links (WA/TG ↔ platform user), step-up ceilings for sensitive skills.</p></div>
+          <div class="card"><span class="k">UI RBAC</span><p><code>lib/rbac.ts</code> capability model + company switcher; nav + write actions gated (Cerbos/RLS remain authoritative).</p></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 07 -->
+    <section class="part" id="p07">
+      <div class="part-head"><span class="part-num">§07</span><h2>AI Layer</h2></div>
+      <p class="dek">Four responsibilities, four owners — so no layer duplicates another.</p>
+      <figure class="wide">
+        <div class="plate">
+          <pre class="mermaid">
+%%{init:{'theme':'base','themeVariables':{'fontFamily':'ui-monospace,monospace','fontSize':'12px','background':'#FBFCFB','mainBkg':'#E7F0EA','primaryColor':'#E7F0EA','primaryBorderColor':'#1E5E44','primaryTextColor':'#14201A','textColor':'#14201A','lineColor':'#4B574F','actorBkg':'#E7F0EA','actorBorder':'#1E5E44','actorTextColor':'#14201A','actorLineColor':'#5A665E','signalColor':'#14201A','signalTextColor':'#14201A','labelBoxBkgColor':'#E7F0EA','labelBoxBorderColor':'#1E5E44','labelTextColor':'#14201A','loopTextColor':'#14201A','noteBkgColor':'#F3E9D6','noteTextColor':'#14201A','noteBorderColor':'#9C6714','activationBkgColor':'#E7F0EA','activationBorderColor':'#1E5E44','sequenceNumberColor':'#FBFCFB'}}}%%
+sequenceDiagram
+  autonumber
+  participant S as Surface / Agent
+  participant H as MCP Hub
+  participant P as Platform core
+  participant G as AI Gateway
+  participant M as Model (local/cloud)
+  S->>H: tool call (OBO principal)
+  H->>H: Cerbos authorize + audit
+  H->>P: read/write (RLS-scoped)
+  P-->>H: data
+  H->>G: AI op (summarize/ocr/embed)
+  G->>G: DLP + cost cap + egress audit
+  G->>M: provider chain w/ failover
+  M-->>G: result
+  G-->>H: result
+  H-->>S: tool result
+          </pre>
+        </div>
+        <figcaption><b>FIG. 07-1</b> — A typical AI request: access (hub) → logic (core) → egress (gateway) → model, each enforcing its own controls.</figcaption>
+      </figure>
+      <div class="wrap">
+        <ul>
+          <li><strong>Gateway (WS3)</strong> — the only path to any model; DLP, cost cap, failover, egress audit.</li>
+          <li><strong>MCP Hub (WS2)</strong> — the only path to company data/tools; OBO + Cerbos + audit.</li>
+          <li><strong>Agents (WS8)</strong> — reasoning/orchestration over hub tools, budget- and safety-bounded.</li>
+          <li><strong>Local inference</strong> — Ollama/llama.cpp + Hermes via the gateway contract; cloud is capped failover. The whole stack can run offline.</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- 08 -->
+    <section class="part" id="p08">
+      <div class="part-head"><span class="part-num">§08</span><h2>Automation &amp; Surfaces</h2></div>
+      <div class="wrap">
+        <h3>Automation (WS4)</h3>
+        <p>n8n orchestrates by <strong>calling MCP tools</strong> — no business logic in workflows. Scoped n8n accounts, an impact gate, a platform→n8n event bridge, and an approvals-suspension surface are prototyped; three flows are dev-verified end-to-end on the local stack. Temporal is reserved for when a genuinely durable flow exists.</p>
+        <h3>Surfaces (WS5)</h3>
+        <ul>
+          <li><strong>Messaging</strong> — WhatsApp (WAHA) + Telegram work-summary/assistant bot.</li>
+          <li><strong>ERP web UI</strong> — the primary interface; functionally complete in dev across Plans 1–5 + People + org builder (backend-dependent sections degrade gracefully).</li>
+          <li><strong>Department consoles</strong> — a reusable department-first template (Web Dev prototyped as the reference), with work-detection and integrations on the Web Dev roadmap.</li>
+          <li><strong>Delivery pipeline (WS11)</strong> — meeting capture → MOM → PRD/report/scope, feeding the surfaces.</li>
+        </ul>
+        <div class="note"><span class="k">Holding-OS direction (backbone program)</span>The approved backbone program upgrades org/module/RBAC toward a true holding-OS: shared-service departments serving N companies via a drag-drop org chart, per-company data slicing, and an HR company-selector — a modular monolith, payroll excluded.</div>
+      </div>
+    </section>
+
+    <!-- 09 -->
+    <section class="part" id="p09">
+      <div class="part-head"><span class="part-num">§09</span><h2>Security &amp; Resilience</h2></div>
+      <div class="wrap">
+        <p>Security is a workstream (WS7), not an afterthought: a <strong>deterministic zero-trust floor</strong> now, an <strong>AI security layer</strong> as v2.</p>
+        <div class="tablewrap"><table>
+          <thead><tr><th>Layer</th><th>Control</th><th>State</th></tr></thead>
+          <tbody>
+            <tr><td>Network</td><td>mTLS mesh, peer allowlists, no public listeners on datastores, egress allowlist</td><td><span class="tag t-warn">prototyped</span></td></tr>
+            <tr><td>Identity/authz</td><td>Keycloak + Cerbos + FORCE RLS + OBO + revocation</td><td><span class="tag t-warn">prototyped</span></td></tr>
+            <tr><td>Data protection</td><td>Crypto-shred (two-axis), PAN/KTP ingestion scrubber, encryption at rest</td><td><span class="tag t-warn">prototyped</span></td></tr>
+            <tr><td>Egress/AI</td><td>Gateway DLP, cost cap, egress audit, fail-closed auth</td><td><span class="tag t-warn">prototyped</span></td></tr>
+            <tr><td>Resilience</td><td>Streaming replication + WORM backups + PITR + restore drills; DR-burst budget</td><td><span class="tag t-warn">prototyped</span></td></tr>
+            <tr><td>SIEM / AI-SOC</td><td>Anomaly detection, adaptive response, rogue-employee isolation</td><td><span class="tag t-warn">v2</span></td></tr>
+            <tr><td>Compliance</td><td>DPIA/LIA/notices, retention/erasure/DSR, classification</td><td><span class="tag t-warn">drafts (legal)</span></td></tr>
+          </tbody>
+        </table></div>
+        <div class="note warn"><span class="k">Gates before real data</span>Do not ingest real employee data until both the legal Gate 1 (lawyer-reviewed pack) and the technical day-one gate (crypto-shred + scrubber) are green.</div>
+      </div>
+    </section>
+
+    <!-- 10 -->
+    <section class="part" id="p10">
+      <div class="part-head"><span class="part-num">§10</span><h2>Observability &amp; Delivery</h2></div>
+      <div class="wrap">
+        <h3>Observability (WS9)</h3>
+        <p>All services carry <strong>OpenTelemetry</strong> (traces + metrics + trace-correlated logs, W3C propagation, fail-soft — no-op unless <code>OTEL_ENABLED</code>). An opt-in self-hosted stack — OTel Collector → Prometheus/Tempo/Loki + Grafana + Alertmanager + exporters — provides exec + per-workstream dashboards, multi-burn-rate SLOs, blackbox synthetics, ≥2 independent alert transports, and a measured restore drill. Dev-verified end-to-end on a live local stack (not yet deployed to production).</p>
+        <h3>Delivery (WS10)</h3>
+        <p>A supply-chain-secure release pipeline (<strong>SBOM + cosign + SLSA</strong>), per-component Dockerfiles, a full VPS Compose stack, local CI (<code>test-all.sh</code>), and crypto-shred-safe nightly backups. Kubernetes/GitOps and SPIFFE/SPIRE workload identity are the hiring-gated target-state.</p>
+      </div>
+    </section>
+
+    <!-- 11 -->
+    <section class="part" id="p11">
+      <div class="part-head"><span class="part-num">§11</span><h2>Deployment &amp; Infra</h2></div>
+      <p class="dek">One Compose estate today; the whole stack has run locally with 16 healthy containers.</p>
+      <div class="wrap">
+        <div class="tablewrap"><table>
+          <thead><tr><th>Service</th><th>Role</th><th>Port / note</th></tr></thead>
+          <tbody>
+            <tr><td class="mono">platform-nest</td><td>Platform core / BFF</td><td class="mono">:3004</td></tr>
+            <tr><td class="mono">platform-ui</td><td>ERP web UI</td><td class="mono">Next.js</td></tr>
+            <tr><td class="mono">ai-gateway</td><td>AI egress (Go)</td><td class="mono">:3002</td></tr>
+            <tr><td class="mono">mcp-hub</td><td>Access layer</td><td class="mono">Streamable HTTP</td></tr>
+            <tr><td class="mono">cerbos</td><td>Authz</td><td class="mono">:3592 / :3593</td></tr>
+            <tr><td class="mono">keycloak</td><td>OIDC IdP</td><td class="mono">issuer/JWKS split</td></tr>
+            <tr><td class="mono">postgres ×N</td><td>Platform + isolated bot instance</td><td class="mono">FORCE RLS</td></tr>
+            <tr><td class="mono">redis (split)</td><td>Streams + cache</td><td class="mono">split by concern</td></tr>
+            <tr><td class="mono">waha</td><td>WhatsApp gateway</td><td class="mono">free since 2026.6.1</td></tr>
+            <tr><td class="mono">whisper / knowledge</td><td>Transcription / RAG</td><td class="mono">local</td></tr>
+            <tr><td class="mono">bot + media-worker</td><td>Messaging surface</td><td class="mono">BullMQ</td></tr>
+            <tr><td class="mono">sync-central</td><td>Cross-site sync</td><td class="mono">idle until 2nd site</td></tr>
+            <tr><td class="mono">n8n</td><td>Automation</td><td class="mono">on Postgres</td></tr>
+          </tbody>
+        </table></div>
+        <div class="note"><span class="k">Notes</span>Cerbos must run with published ports or all authz fails. hermes-gateway is intentionally non-dockerized (local model shim). On Windows, Smart App Control blocks locally-compiled Go exes — Go services build/run via WSL. The stack runs fully offline with local Ollama.</div>
+      </div>
+    </section>
+
+    <!-- 12 WEBDESK -->
+    <section class="part" id="p12">
+      <div class="part-head"><span class="part-num">§12</span><h2>WebDesk — Website Platform</h2></div>
+      <p class="dek">How the new centralized client-website backend relates to this platform.</p>
+      <div class="wrap">
+        <p><strong>WebDesk</strong> is the Web Dev department's centralized, multi-tenant website backend — one CMS + forms + mail platform that all client sites (WordPress, Astro, Node) consume through a uniform, versioned contract, so frontend engineers build only frontends. It is <em>not</em> part of the ERP core; it is a <strong>separate, internet-facing trust zone (Zone B)</strong> attached to the platform (Zone A).</p>
+        <figure class="wide">
+          <div class="plate">
+            <pre class="mermaid">
+%%{init:{'theme':'base','themeVariables':{'fontFamily':'ui-monospace,monospace','fontSize':'13px','background':'#FBFCFB','mainBkg':'#E7F0EA','primaryColor':'#E7F0EA','secondaryColor':'#EEF3EE','tertiaryColor':'#EEF3EE','primaryBorderColor':'#1E5E44','primaryTextColor':'#14201A','secondaryTextColor':'#14201A','tertiaryTextColor':'#14201A','textColor':'#14201A','nodeTextColor':'#14201A','lineColor':'#4B574F','clusterBkg':'#EEF3EE','clusterBorder':'#B7C3B8','edgeLabelBackground':'#FBFCFB','titleColor':'#14201A'}}}%%
+flowchart LR
+  subgraph ZA["ZONE A — Gaiada platform (internal)"]
+    NEST["platform-nest<br/>WebDev module + BFF"]
+    KC["Keycloak"]
+    HUB["MCP Hub"]
+    N8N["n8n bridge"]
+  end
+  subgraph ZB["ZONE B — WebDesk (internet-facing)"]
+    CTRL["Control-plane + Payload<br/>+ forms/mail/media"]
+  end
+  CLIENTS["Client sites<br/>Astro · Node · WP"] --> CTRL
+  NEST ==>|"control: Keycloak svc-token + mTLS"| CTRL
+  HUB --> NEST
+  CTRL -. "signed webhooks" .-> N8N
+  KC -. tokens .- NEST
+  classDef default fill:#E7F0EA,stroke:#1E5E44,color:#14201A,stroke-width:1px;
+            </pre>
+          </div>
+          <figcaption><b>FIG. 12-1</b> — WebDesk attaches as Zone B. The ERP controls it one-way; client sites never reach Zone A.</figcaption>
+        </figure>
+        <h3>What WebDesk reuses from this platform</h3>
+        <div class="tablewrap"><table>
+          <thead><tr><th>Platform capability</th><th>WebDesk reuse</th></tr></thead>
+          <tbody>
+            <tr><td>Keycloak (WS1/6)</td><td>Client-credentials + mTLS on the ERP→WebDesk control channel</td></tr>
+            <tr><td>MCP Hub (WS2)</td><td>Control-plane commands exposed as MCP tools for AI operation</td></tr>
+            <tr><td>WS4 approvals</td><td>Gate irreversible WebDesk actions (promote-to-live, delete, key rotation)</td></tr>
+            <tr><td>Cerbos + RLS pattern</td><td>Per-tenant isolation inside WebDesk</td></tr>
+            <tr><td>n8n event bridge (WS4)</td><td>Ingest WebDesk events (form received, deploy done) back into the ERP</td></tr>
+            <tr><td>WS9 observability</td><td>OTel from WebDesk exported to the same Grafana stack</td></tr>
+            <tr><td>WS10 delivery</td><td>SBOM/cosign pipeline + promotion/rollback releases</td></tr>
+            <tr><td>ERP WebDev console (WS5)</td><td>The operator UI: site registry, provisioning, promote/rollback</td></tr>
+          </tbody>
+        </table></div>
+        <div class="note"><span class="k">Relationship in one line</span>The Gaiada platform is the <strong>internal brain and control plane</strong>; WebDesk is an <strong>internet-facing execution zone</strong> it commands. Full details: the companion <em>GAIADA WebDesk — Engineering Blueprint</em>.</div>
+      </div>
+    </section>
+
+    <!-- 13 -->
+    <section class="part" id="p13">
+      <div class="part-head"><span class="part-num">§13</span><h2>Roadmap &amp; Current Status</h2></div>
+      <div class="wrap">
+        <h3>Where we are</h3>
+        <p>The architectural spine (WS1/2/3/7/9/10) is <strong>prototyped</strong> and, for the automation + observability paths, <strong>dev-verified</strong> end-to-end on a live local stack — but not in production. The ERP UI is functionally complete in dev and wired to a running dev backend. The near-term critical path is the <strong>backend admin/systems API</strong> (unblocks the placeholder UI sections), the <strong>backbone/ORG-CORE holding-OS</strong> build-out, deeper <strong>AI-agent</strong> capabilities, a first <strong>production deploy</strong>, and standing up <strong>WebDesk</strong>.</p>
+        <div class="phases">
+          <div class="phase"><span class="pn">A</span><div><h4>Spine — prototyped</h4><p>Platform core + RBAC + events, Go gateway, MCP hub, sync engine, observability, delivery v1, ERP UI.</p><p class="meta">STATUS → prototyped in dev · parts dev-verified on a live local stack · NOT in production.</p></div></div>
+          <div class="phase gate"><span class="pn">B</span><div><h4>Backend admin/systems API</h4><p><code>/api/admin/*</code> + identity writes + org-structure endpoints — the top frontend-blocking gap.</p><p class="meta">GATE → the ERP's Systems/Intelligence/Admin sections light up.</p></div></div>
+          <div class="phase gate"><span class="pn">C</span><div><h4>Backbone → holding-OS (ORG-CORE)</h4><p>Shared-service depts serving N companies, drag-drop org chart, per-company slicing.</p><p class="meta">GATE → the group operates as one holding-OS.</p></div></div>
+          <div class="phase gate"><span class="pn">D</span><div><h4>AI-agent depth (WS8 steps 4–6)</h4><p>Memory/RAG ownership, local-model registry, eval-gated trainer.</p><p class="meta">GATE → agents pass the eval harness for expanded autonomy.</p></div></div>
+          <div class="phase gate"><span class="pn">E</span><div><h4>WebDesk platform</h4><p>Stand up the website backend per its companion blueprint (P1→P6).</p><p class="meta">GATE → client sites served centrally; web3forms retired.</p></div></div>
+          <div class="phase"><span class="pn">F</span><div><h4>Target-state (hiring-gated)</h4><p>All-local infra, self-hosted IdP/SIEM + AI-SOC, local frontier models, more verticals.</p><p class="meta">Opens as headcount grows.</p></div></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 14 -->
+    <section class="part" id="p14">
+      <div class="part-head"><span class="part-num">§14</span><h2>Decisions &amp; Open Items</h2></div>
+      <div class="wrap">
+        <h3>Locked decisions</h3>
+        <div class="tablewrap"><table>
+          <thead><tr><th>#</th><th>Decision</th></tr></thead>
+          <tbody>
+            <tr><td class="mono">L1</td><td>Solo-Viable v1 now; all-local Target-State preserved, hiring-gated</td></tr>
+            <tr><td class="mono">L2</td><td>Layer contract: MCP=access, n8n=orchestration, services=logic, Gateway=AI egress</td></tr>
+            <tr><td class="mono">L3</td><td>Multi-tenant shared DB + FORCE RLS; heterogeneity via modules + custom fields</td></tr>
+            <tr><td class="mono">L4</td><td>Keycloak + Cerbos + RLS + OBO everywhere</td></tr>
+            <tr><td class="mono">L5</td><td>Two-tier replication; HA ≠ backup → WORM backups + PITR</td></tr>
+            <tr><td class="mono">L6</td><td>Go is THE AI gateway (Node retired 2026-07-14)</td></tr>
+            <tr><td class="mono">L7</td><td>Agency is a first-deploy child company; agent trainer is eval-gated + human-approved</td></tr>
+            <tr><td class="mono">L8</td><td>Components stay separate deployables, not a monorepo</td></tr>
+            <tr><td class="mono">L9</td><td>Full-fidelity mandate — no new shortcuts without an explicit decision</td></tr>
+            <tr><td class="mono">L10</td><td>WebDesk is a separate internet-facing trust zone controlled by the ERP</td></tr>
+          </tbody>
+        </table></div>
+        <h3>Open items</h3>
+        <div class="tablewrap"><table>
+          <thead><tr><th>Item</th><th>Owner / gate</th></tr></thead>
+          <tbody>
+            <tr><td>Backend admin/systems API + identity writes</td><td class="mono">platform-nest</td></tr>
+            <tr><td>Backbone/ORG-CORE holding-OS build-out</td><td class="mono">platform</td></tr>
+            <tr><td>AI-agent steps 4–6 (eval harness is the gate)</td><td class="mono">ai-agents</td></tr>
+            <tr><td>Compliance Gate 1 (lawyer review) before real data</td><td class="mono">legal</td></tr>
+            <tr><td>WebDesk stand-up + its five open design items</td><td class="mono">WebDesk blueprint</td></tr>
+            <tr><td>Target-state infra (K8s/GitOps/SPIFFE, self-hosted IdP/SIEM)</td><td class="mono">hiring-gated</td></tr>
+          </tbody>
+        </table></div>
+      </div>
+    </section>
+
+    <!-- GLOSSARY -->
+    <section class="part" id="gloss">
+      <div class="part-head"><span class="part-num">§15</span><h2>Glossary</h2></div>
+      <div class="wrap">
+        <div class="tablewrap"><table>
+          <thead><tr><th>Term</th><th>Meaning</th></tr></thead>
+          <tbody>
+            <tr><td class="mono">WS0–WS11</td><td>Workstreams — the program's independently-developed units (§03)</td></tr>
+            <tr><td class="mono">PROTOTYPED</td><td>Works in the dev stack; not production-complete (see §00 status vocabulary)</td></tr>
+            <tr><td class="mono">DEV-VERIFIED</td><td>Prototyped and exercised end-to-end on the local stack; still not production</td></tr>
+            <tr><td class="mono">OBO</td><td>On-behalf-of — a surface acts as a minted principal, never asserting its own identity</td></tr>
+            <tr><td class="mono">RLS</td><td>Postgres Row-Level Security — per-tenant query scoping (FORCE, NOBYPASSRLS role)</td></tr>
+            <tr><td class="mono">HLC</td><td>Hybrid Logical Clock — stamps event order for cross-site sync</td></tr>
+            <tr><td class="mono">MCP</td><td>Model Context Protocol — the hub's access interface for AI/surfaces</td></tr>
+            <tr><td class="mono">DLP</td><td>Data-loss prevention — enforced at the AI gateway egress</td></tr>
+            <tr><td class="mono">Crypto-shred</td><td>Per-subject×entity key deletion making PII erasure real</td></tr>
+            <tr><td class="mono">Zone A / Zone B</td><td>Internal platform / internet-facing WebDesk trust zones (§12)</td></tr>
+            <tr><td class="mono">Target-State</td><td>The preserved all-local north star, unlocked by hiring</td></tr>
+          </tbody>
+        </table></div>
+      </div>
+    </section>
+
+    <footer>
+      <p><strong>Gaiada AI Platform — System Blueprint v1.0</strong></p>
+      <p class="mono">Internal · 2026-07-23 · Platform Program. Status reflects the code (README/CLAUDE.md) + program memory as of this date; the running code is the source of truth. Companion: GAIADA WebDesk — Engineering Blueprint.</p>
+    </footer>
+  </main>
+</div>
+
+<div class="themehint">print-ready · A4 / Letter</div>
+
+<script>
+  (function(){
+    var links = Array.prototype.slice.call(document.querySelectorAll('.toc a'));
+    var map = {};
+    links.forEach(function(a){ var id=a.getAttribute('href').slice(1); map[id]=a; });
+    var secs = Array.prototype.slice.call(document.querySelectorAll('.part'));
+    if(!('IntersectionObserver' in window)) return;
+    var obs = new IntersectionObserver(function(entries){
+      entries.forEach(function(e){
+        if(e.isIntersecting){
+          links.forEach(function(l){l.classList.remove('active');});
+          var a = map[e.target.id]; if(a) a.classList.add('active');
+        }
+      });
+    }, {rootMargin:'-10% 0px -80% 0px', threshold:0});
+    secs.forEach(function(s){ obs.observe(s); });
+  })();
+</script>

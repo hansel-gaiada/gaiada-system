@@ -20,11 +20,13 @@ project** (own `package.json`, own deploy) — deliberately **not** a shared-pac
 | `sync-engine-go/` | Go cross-site sync engine (T2) | WS1 | **Not started — design approved (`2026-07-06-ws1-sync-engine-*`)** |
 | `infra/` | IaC + GitOps + delivery | WS10 | **v1 slice — VPS compose stack, CI, backups** |
 | `infra/observability/` + `docker-compose.observability.yml` | OpenTelemetry + Grafana stack (metrics/traces/logs), SLOs, alerting, D15 resilience | WS9 | **Built — code-complete 2026-07-15; all 7 services instrumented; opt-in self-hosted stack; live `compose up` deferred to a Docker host** |
+| `webdesk/` *(planned)* | Centralized multi-tenant client-website backend (Payload CMS + forms + mail) — a separate **internet-facing trust zone (Zone B)** controlled by the ERP | Web Dev | **Blueprint approved (2026-07-23)** — see `docs/BLUEPRINTS.md`; not yet built |
 
 ## Where to start
 
 - **Architecture:** `docs/superpowers/specs/2026-07-04-INDEX-overview.md`
-- **Master blueprint (C-level):** rendered artifact (see docs)
+- **Blueprints (rendered, printable):** `docs/BLUEPRINTS.md` — the **Gaiada AI Platform — System Blueprint** (whole system) and the **GAIADA WebDesk — Engineering Blueprint** (website platform).
+- **Module status / versions / future plans:** `docs/modules/MODULES.md` (registry) + `docs/modules/CHANGELOG.md`. **Status vocabulary:** PLANNED · IN PROGRESS · PROTOTYPED (dev-only) · DEV-VERIFIED (e2e on local stack). None mean production-done — read older "Built/Complete" wording here as PROTOTYPED.
 - **Build plan + checklist:** `docs/superpowers/plans/2026-07-05-IMPLEMENTATION-INDEX.md`
 - **Current status (source of truth):** `CLAUDE.md` "Current status" + the gap register
   `docs/superpowers/plans/2026-07-05-phase-5-full-fidelity.md`. (The `2026-07-05-CHECKLIST.md`
