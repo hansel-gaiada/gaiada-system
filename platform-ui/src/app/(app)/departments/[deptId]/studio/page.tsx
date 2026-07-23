@@ -7,6 +7,8 @@ import { toolkitFor } from "@/lib/deptToolkits";
 import { Card } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
 import { ImageStudio } from "@/components/creative/ImageStudio";
+import { AssetLibrary } from "@/components/creative/AssetLibrary";
+import { listCreativeAssets } from "@/lib/creative";
 
 type Params = Promise<{ deptId: string }>;
 
@@ -25,14 +27,26 @@ export default async function ImageStudioPage({ params }: { params: Params }) {
   if (!dept) notFound();
 
   const hasStudio = toolkitFor(dept.name).tabs.some((t) => t.path === "studio");
+  if (!hasStudio) {
+    return (
+      <Card title="Image Studio">
+        <EmptyNote>The Image Studio isn&apos;t configured for this department.</EmptyNote>
+      </Card>
+    );
+  }
+
+  // The persisted-asset library (originals + grade params) doubles as the phase-2 AI's
+  // training set — surfaced here so the team can review captures and curate exemplars.
+  const assets = await listCreativeAssets(userId, tenant);
 
   return (
-    <Card title="Image Studio">
-      {hasStudio ? (
+    <>
+      <Card title="Image Studio">
         <ImageStudio deptId={deptId} />
-      ) : (
-        <EmptyNote>The Image Studio isn&apos;t configured for this department.</EmptyNote>
-      )}
-    </Card>
+      </Card>
+      <Card title="Saved assets & training set" style={{ marginTop: 16 }}>
+        <AssetLibrary assets={assets} />
+      </Card>
+    </>
   );
 }

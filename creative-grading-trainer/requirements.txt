@@ -1,0 +1,7 @@
+# Pinned loosely — any recent torch works. Install a CUDA build on a GPU box for speed.
+torch>=2.1
+torchvision>=0.16
+pillow>=10.0
+numpy>=1.24
+onnx>=1.15
+requests>=2.31

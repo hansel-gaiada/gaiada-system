@@ -7,7 +7,7 @@
 // authz surface. Bytes live in storage (keyed); only metadata + the small grade JSON
 // live in Postgres (mirrors FilesController). Images are not scrubbable text, so no PII
 // scrub runs on the pixels (the day-one scrubber only touches text content types).
-import { BadRequestException, Body, Controller, Delete, Get, HttpCode, NotFoundException, Param, Post, Req, Res, UseGuards } from "@nestjs/common";
+import { BadRequestException, Body, Controller, Delete, Get, HttpCode, NotFoundException, Param, Patch, Post, Query, Req, Res, UseGuards } from "@nestjs/common";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { newId, withTenants } from "../db";
 import { config } from "../config";
@@ -59,17 +59,38 @@ interface SaveBody {
 @Controller("api")
 @UseGuards(AuthGuard)
 export class CreativeController {
+  // ?trainingReady=true|false filters to curated exemplars — the trainer's data pull uses it.
   @Get(":tenantId/creative/assets")
-  async list(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string) {
+  async list(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Query("trainingReady") trainingReady?: string) {
     await authorize(req.principal, { kind: "file", tenantId }, "read");
+    const filter = trainingReady === "true" ? " AND training_ready = true" : trainingReady === "false" ? " AND training_ready = false" : "";
     const rows = await withTenants([tenantId], (c) =>
       c.query(
         `SELECT id, name, content_type, width, height, preset_id, grade, department_id,
-                original_byte_size, graded_byte_size, uploader_id, created_at
-         FROM creative_assets WHERE deleted_at IS NULL ORDER BY created_at DESC`,
+                original_key IS NOT NULL AS has_original, original_byte_size, graded_byte_size,
+                training_ready, uploader_id, created_at
+         FROM creative_assets WHERE deleted_at IS NULL${filter} ORDER BY created_at DESC`,
       ),
     );
     return rows.rows;
+  }
+
+  // Curation: mark whether this asset is a good training exemplar (and/or rename it).
+  @Patch(":tenantId/creative/assets/:id")
+  async update(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("id") id: string, @Body() body: { trainingReady?: boolean; name?: string }) {
+    await authorize(req.principal, { kind: "file", tenantId }, "create");
+    const sets: string[] = [];
+    const vals: unknown[] = [];
+    if (typeof body?.trainingReady === "boolean") { sets.push(`training_ready = $${sets.length + 1}`); vals.push(body.trainingReady); }
+    if (typeof body?.name === "string" && body.name.trim()) { sets.push(`name = $${sets.length + 1}`); vals.push(body.name.trim()); }
+    if (sets.length === 0) throw new BadRequestException("nothing to update");
+    vals.push(id);
+    const res = await withTenants([tenantId], (c) =>
+      c.query(`UPDATE creative_assets SET ${sets.join(", ")}, updated_at = now() WHERE id = $${vals.length} AND deleted_at IS NULL RETURNING id, training_ready, name`, vals),
+    );
+    if (!res.rows[0]) throw new NotFoundException("asset not found");
+    await writeActivity(tenantId, req.principal.userId, "updated", "creative_asset", id, { trainingReady: body.trainingReady });
+    return res.rows[0];
   }
 
   @Post(":tenantId/creative/assets")
@@ -119,7 +140,8 @@ export class CreativeController {
     const rows = await withTenants([tenantId], (c) =>
       c.query(
         `SELECT id, name, content_type, width, height, preset_id, grade, department_id,
-                original_byte_size, graded_byte_size, uploader_id, created_at
+                original_key IS NOT NULL AS has_original, original_byte_size, graded_byte_size,
+                training_ready, uploader_id, created_at
          FROM creative_assets WHERE id = $1 AND deleted_at IS NULL`,
         [id],
       ),

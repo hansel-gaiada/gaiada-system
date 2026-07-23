@@ -4,6 +4,7 @@
 // bytes, and the exact grade params — to the platform persist endpoint (creative.controller),
 // which keeps them for reproducibility. Tokens never reach the browser (platformFetch is
 // server-only). base64 in a JSON body matches the endpoint's contract (no multipart).
+import { revalidatePath } from "next/cache";
 import { getSessionUserId } from "./session-server";
 import { getMe, platformFetch, PlatformError } from "./platform";
 import { getActiveTenant } from "./tenant";
@@ -23,6 +24,25 @@ export interface SaveAssetInput {
 }
 
 export interface SaveAssetResult { ok: boolean; id?: string; error?: string }
+
+export interface ToggleResult { ok: boolean; error?: string }
+
+/** Curate: mark whether a saved asset is a good training exemplar for the phase-2 AI. */
+export async function setAssetTraining(id: string, trainingReady: boolean): Promise<ToggleResult> {
+  const userId = await getSessionUserId();
+  if (!userId) return { ok: false, error: "Session expired." };
+  const me = await getMe(userId);
+  const tenant = await getActiveTenant(me);
+  if (!tenant) return { ok: false, error: "Select a company first." };
+  try {
+    await platformFetch(`/api/${tenant}/creative/assets/${id}`, userId, { method: "PATCH", body: JSON.stringify({ trainingReady }) });
+    revalidatePath("/departments/[deptId]/studio", "page");
+    return { ok: true };
+  } catch (e) {
+    if (e instanceof PlatformError && (e.status === 404 || e.status === 405)) return { ok: false, error: "Persist endpoint not deployed yet." };
+    return { ok: false, error: e instanceof Error ? e.message : "Update failed." };
+  }
+}
 
 export async function saveCreativeAsset(input: SaveAssetInput): Promise<SaveAssetResult> {
   const userId = await getSessionUserId();

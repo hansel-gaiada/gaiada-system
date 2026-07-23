@@ -104,8 +104,13 @@ test("account links to own employee page", async ({ page }) => {
 
 async function switchToAgency(page: Page) {
   await page.goto("/");
-  await page.getByLabel("Active company").selectOption({ label: "Gaia Digital Agency" });
-  await page.waitForLoadState("networkidle");
+  // The switcher auto-submits a server action (no URL change, so waitForURL/
+  // networkidle are both unreliable signals here — Next dev's HMR socket
+  // keeps the connection non-idle). Wait for the action's own POST instead.
+  await Promise.all([
+    page.waitForResponse((r) => r.request().method() === "POST"),
+    page.getByLabel("Active company").selectOption({ label: "Gaia Digital Agency" }),
+  ]);
 }
 
 test("department Home shows live KPIs, a project health ring, activity feed, and the rail", async ({ page }) => {

@@ -7,3 +7,9 @@ services:
   mcp-hub:
     ports:
       - "127.0.0.1:3003:3003"
+  # Publishes platform-nest on the host so platform-ui (runs on host via `next dev`,
+  # not containerized) can reach it at localhost:3004. Internal-only in the committed
+  # VPS compose by design (sibling-reachable only).
+  platform:
+    ports:
+      - "127.0.0.1:3004:3004"

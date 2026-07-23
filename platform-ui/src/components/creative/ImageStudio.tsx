@@ -4,6 +4,7 @@ import {
   IDENTITY_GRADE, bakeLut, renderToCanvas, canvasToWebp, webglAvailable,
   analyseImage, deriveAutoGrade, PRESETS, type Grade, type ImageStats,
 } from "@/lib/imaging";
+import { aiLookAvailable, predictGrade } from "@/lib/imaging/aiLook";
 import { BeforeAfterSlider } from "./BeforeAfterSlider";
 import { GradeSliders } from "./GradeSliders";
 import { saveCreativeAsset } from "@/lib/creativeActions";
@@ -38,6 +39,7 @@ export function ImageStudio({ deptId }: { deptId?: string }) {
   const [busy, setBusy] = useState(false);
   const [saveMsg, setSaveMsg] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
+  const [aiReady, setAiReady] = useState(false);
 
   const imgCache = useRef<Map<string, HTMLImageElement>>(new Map());
   const statsCache = useRef<Map<string, ImageStats>>(new Map());
@@ -50,6 +52,8 @@ export function ImageStudio({ deptId }: { deptId?: string }) {
     canvasRef.current = document.createElement("canvas");
     gpu.current = webglAvailable();
     setCanvasReady(true);
+    // Feature-detect the phase-2 AI look (runtime + model both present).
+    aiLookAvailable().then(setAiReady).catch(() => setAiReady(false));
   }, []);
 
   const selected = items.find((i) => i.id === selectedId) ?? null;
@@ -125,6 +129,20 @@ export function ImageStudio({ deptId }: { deptId?: string }) {
     setActivePreset("auto");
     setGrades((prev) => ({ ...prev, [selected.id]: deriveAutoGrade(stats!) }));
   }, [selected, loadImage]);
+
+  // Phase-2 AI look: the learned model predicts the 9 grade params from the image; the
+  // result lands on the sliders (editable), exactly like a preset. No-op if unavailable.
+  const applyAiLook = useCallback(async () => {
+    if (!selected || !aiReady) return;
+    setBusy(true);
+    try {
+      const img = await loadImage(selected);
+      const g = await predictGrade(img);
+      if (g) { setActivePreset("ai"); setGrades((prev) => ({ ...prev, [selected.id]: g })); }
+    } finally {
+      setBusy(false);
+    }
+  }, [selected, aiReady, loadImage]);
 
   const applyToAll = useCallback(() => {
     if (!selectedId) return;
@@ -240,8 +258,13 @@ export function ImageStudio({ deptId }: { deptId?: string }) {
                   {p.label}
                 </button>
               ))}
-              <button className="cs-chip cs-chip--ai" disabled title="Trained on your before/after catalogue — phase 2">
-                AI look · soon
+              <button
+                className={`cs-chip${aiReady ? (activePreset === "ai" ? " is-active" : "") : " cs-chip--ai"}`}
+                onClick={applyAiLook}
+                disabled={!aiReady || busy}
+                title={aiReady ? "Predict your house grade from this image (editable after)" : "Trained on your before/after catalogue — add a model to enable (phase 2)"}
+              >
+                {aiReady ? "AI look" : "AI look · soon"}
               </button>
             </div>
             <div className="cs-actions">

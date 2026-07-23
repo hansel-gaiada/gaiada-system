@@ -69,6 +69,21 @@
 
 .cs-note { margin: 4px 0 0; font-size: 11px; color: color-mix(in srgb, var(--text-primary) 50%, transparent); line-height: 1.4; }
 
+/* Asset library / training set */
+.cs-lib { display: flex; flex-direction: column; gap: 10px; }
+.cs-lib__grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 10px; }
+.cs-lib__card {
+  display: flex; flex-direction: column; gap: 8px; padding: 12px; border-radius: 10px;
+  background: var(--surface-card); border: 1px solid var(--hairline);
+}
+.cs-lib__card.is-training { border-color: var(--accent); }
+.cs-lib__meta { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.cs-lib__name { font-size: 13px; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cs-lib__sub { font-size: 11px; color: color-mix(in srgb, var(--text-primary) 50%, transparent); }
+.cs-lib__toggle { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-primary); cursor: pointer; }
+.cs-lib__toggle input { accent-color: var(--accent); }
+.cs-lib__err { font-size: 11px; color: #b3261e; }
+
 /* Dropzone */
 .cs-drop {
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
