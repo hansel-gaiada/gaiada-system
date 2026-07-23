@@ -9,31 +9,59 @@ const files = [
   { in: 'gaiada-blueprint.html',  out: 'Gaiada-AI-Platform-System-Blueprint.pdf', foot: 'Gaiada AI Platform — System Blueprint' },
 ];
 
-// Reproduce the artifact LIGHT theme in print (not the ink-saver theme) + page-fit diagrams + a contents page.
+// Reproduce the artifact LIGHT theme in print + page-fit diagrams + contents page,
+// but COMPACT: use the full page width and let sections flow (no page-per-section waste).
 const themeCss = `
   *{ -webkit-print-color-adjust:exact !important; print-color-adjust:exact !important; }
   html,body{ background:var(--paper) !important; }
+  body{ font-size:10pt !important; }
   .themehint{ display:none !important; }
+
+  /* --- use the FULL page width: drop the 74ch reading-measure cap for PDF --- */
+  .main{ padding:0 !important; }
+  .wrap{ max-width:none !important; }
+  .wrap p,.wrap ul,.wrap ol,p,.note,.cols,.phases,.part>.dek,.cover .lede{ max-width:none !important; }
+  .cols{ grid-template-columns:repeat(auto-fit,minmax(210px,1fr)) !important; gap:.6rem !important; margin:.8rem 0 !important; }
+
+  /* --- flow sections instead of one page each; keep cover + contents standalone --- */
+  .part{ break-before:auto !important; border-top:1px solid var(--line) !important;
+         padding-top:1.1rem !important; margin-top:1.1rem !important; }
+  .part:first-of-type{ break-before:auto !important; border-top:none !important; }
+  .cover{ break-after:page !important; }
+  .contents-page{ break-after:page !important; }
+
+  /* --- tighten vertical rhythm --- */
+  .part h2{ font-size:1.55rem !important; }
+  .part>.dek{ font-size:.95rem !important; margin-top:.25rem !important; }
+  h3{ margin:1.1rem 0 .35rem !important; font-size:1.08rem !important; }
+  h4{ margin:.8rem 0 .25rem !important; }
+  p{ margin:.5rem 0 !important; }
+  figure{ margin:.9rem 0 !important; }
+  .spec{ margin:.8rem 0 !important; }
+  .tablewrap{ margin:.8rem 0 !important; }
+  .note{ margin:.8rem 0 !important; padding:.7rem .9rem !important; }
+  .phases{ gap:.4rem !important; }
+  .plate{ padding:1rem .8rem .7rem !important; }
+
+  /* --- keep atomic blocks whole; keep headings with their content --- */
   .plate{ overflow:visible !important; box-shadow:none !important; background:var(--plate) !important; border:1px solid var(--plate-line) !important; }
   .plate .mermaid{ min-width:0 !important; display:block !important; }
-  .mermaid svg{ max-width:100% !important; max-height:216mm !important; width:auto !important; height:auto !important; display:block; margin:0 auto; }
-  figure,.spec,.tablewrap,.phase,.card,.note,.titleblock{ break-inside:avoid; }
+  .mermaid svg{ max-width:100% !important; max-height:210mm !important; width:auto !important; height:auto !important; display:block; margin:0 auto; }
+  figure,.spec,.phase,.card,.note,.titleblock{ break-inside:avoid; }
+  .tablewrap{ break-inside:auto; }
   .spec-head,tr,.part-head{ break-inside:avoid; }
   h2,h3,h4{ break-after:avoid; }
-  .part{ break-before:page; }
-  .part:first-of-type{ break-before:page; }
-  .cover{ break-after:page; }
   .spec,.card,.tablewrap{ box-shadow:none !important; }
 
   /* contents page */
-  .contents-page{ break-after:page; padding-top:.4rem; }
-  .contents-title{ font-family:var(--serif); font-weight:600; font-size:2rem; color:var(--ink);
-    margin:0 0 1.3rem; border-bottom:2px solid var(--ink); padding-bottom:.5rem; }
-  .contents-list{ list-style:none; margin:0; padding:0; }
-  .contents-list li{ display:flex; gap:1rem; align-items:baseline; padding:.5rem .2rem;
-    border-bottom:1px solid var(--line); font-size:1.02rem; }
-  .contents-list .cn{ font-family:var(--mono); color:var(--accent); font-weight:600; min-width:2.4em; }
-  .contents-note{ font-family:var(--mono); font-size:.72rem; color:var(--ink-faint); margin-top:1.3rem; letter-spacing:.02em; }
+  .contents-page{ padding-top:.3rem; }
+  .contents-title{ font-family:var(--serif); font-weight:600; font-size:1.8rem; color:var(--ink);
+    margin:0 0 1rem; border-bottom:2px solid var(--ink); padding-bottom:.4rem; }
+  .contents-list{ list-style:none; margin:0; padding:0; columns:2; column-gap:2.4rem; }
+  .contents-list li{ display:flex; gap:.8rem; align-items:baseline; padding:.35rem .1rem;
+    border-bottom:1px solid var(--line); font-size:.92rem; break-inside:avoid; }
+  .contents-list .cn{ font-family:var(--mono); color:var(--accent); font-weight:600; min-width:2.2em; }
+  .contents-note{ font-family:var(--mono); font-size:.7rem; color:var(--ink-faint); margin-top:1rem; letter-spacing:.02em; }
 `;
 
 const footer = (title) => `
