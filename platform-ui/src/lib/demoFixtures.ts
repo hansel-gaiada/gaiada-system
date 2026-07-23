@@ -14,6 +14,7 @@ export interface DemoResult {
 }
 
 const DEMO_USER_ID = "demo-hansel";
+const DEMO_USER_IC_ID = "gede-ic";  // IC (Individual Contributor) tier — member role only
 
 let demoSeq = 1000;
 const demoId = (p: string) => `${p}-${++demoSeq}`;
@@ -51,6 +52,20 @@ const ME = {
   ],
 };
 
+// IC-tier identity: Frontend Developer with member-only role (no manager-tier roles).
+// `isManagerTier` returns false, so the Queue+Agenda Home variant renders instead of Command Center.
+const ME_IC = {
+  userId: DEMO_USER_IC_ID,
+  name: "Gede Kusuma",
+  email: "gede@gaiada.com",
+  title: "Frontend Developer",
+  assurance: "high",
+  companies: [{ id: "co-agency", name: "Gaia Digital Agency", type: "agency" }],
+  roles: [
+    { role: "member", scopeType: "company", scopeId: "co-agency" },
+  ],
+};
+
 const MEMBERS: Record<string, { user_id: string; name: string; email: string; title: string | null }[]> = {
   "co-holding": [
     { user_id: DEMO_USER_ID, name: "Clement Hansel", email: "hansel@gaiada.com", title: "AI Manager" },
@@ -58,6 +73,7 @@ const MEMBERS: Record<string, { user_id: string; name: string; email: string; ti
   ],
   "co-agency": [
     { user_id: DEMO_USER_ID, name: "Clement Hansel", email: "hansel@gaiada.com", title: "AI Manager" },
+    { user_id: DEMO_USER_IC_ID, name: "Gede Kusuma", email: "gede@gaiada.com", title: "Frontend Developer" },
     { user_id: "u-pm", name: "Dewi Santoso", email: "dewi@gaiada.com", title: "Account Manager" },
     { user_id: "u-dev", name: "Made Putra", email: "made@gaiada.com", title: "Web Developer" },
   ],
@@ -590,7 +606,12 @@ function ok(json: unknown): DemoResult {
   return { status: 200, json };
 }
 
-export function getDemoResponse(method: string, fullPath: string, body?: string): DemoResult {
+// Resolve the current demo identity based on the logged-in userId.
+function getCurrentDemoIdentity(userId: string) {
+  return userId === DEMO_USER_IC_ID ? ME_IC : ME;
+}
+
+export function getDemoResponse(method: string, fullPath: string, userId: string = DEMO_USER_ID, body?: string): DemoResult {
   const url = new URL(fullPath, "http://demo");
   const p = url.pathname;
   const m = method.toUpperCase();
@@ -603,8 +624,10 @@ export function getDemoResponse(method: string, fullPath: string, body?: string)
   const meetings = meetingsDemo(method, p, url.searchParams, body);
   if (meetings) return meetings;
 
+  const currentIdentity = getCurrentDemoIdentity(userId);
+
   // /api/me reflects the (mutable) company set so newly-created companies appear.
-  if (p === "/api/me") return ok({ ...ME, companies: COMPANIES.map((c) => ({ id: c.id, name: c.name, type: c.type })) });
+  if (p === "/api/me") return ok({ ...currentIdentity, companies: COMPANIES.map((c) => ({ id: c.id, name: c.name, type: c.type })) });
   if (p === "/api/companies") {
     if (m === "POST") {
       const b = JSON.parse(body || "{}");

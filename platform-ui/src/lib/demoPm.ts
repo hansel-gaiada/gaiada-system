@@ -33,6 +33,7 @@ const stamp = () => `2026-07-16T${String(8 + (seq % 12)).padStart(2, "0")}:${Str
 
 const MEMBERS: Record<string, string> = {
   "demo-hansel": "Clement Hansel",
+  "gede-ic": "Gede Kusuma",
   "u-pm": "Dewi Santoso",
   "u-dev": "Made Putra",
   "u-finance": "Rina Wibawa",

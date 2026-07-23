@@ -13,11 +13,15 @@ export async function login(_prev: { error: string } | null, formData: FormData)
   const returnTo = safeReturn(String(formData.get("return") ?? "/"));
   if (!email) return { error: "Enter your email to continue." };
 
-  // TEMP DEMO MODE — see lib/demoFixtures.ts. Any email logs in as the demo
-  // user; no backend call. Inert unless DEMO_MODE=1 is set locally.
+  // TEMP DEMO MODE — see lib/demoFixtures.ts. Select between two demo identities:
+  // • "gede@gaiada.com" or email containing "ic" → IC tier (Queue+Agenda Home)
+  // • any other email → manager tier (Command Center Home)
+  // Inert unless DEMO_MODE=1 is set locally.
   if (process.env.DEMO_MODE === "1") {
+    const isIC = email === "gede@gaiada.com" || email.toLowerCase().includes("ic");
+    const userId = isIC ? "gede-ic" : "demo-hansel";
     const jar = await cookies();
-    jar.set(SESSION_COOKIE, sealSession("demo-hansel"), {
+    jar.set(SESSION_COOKIE, sealSession(userId), {
       httpOnly: true,
       sameSite: "lax",
       path: "/",

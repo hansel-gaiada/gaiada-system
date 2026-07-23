@@ -10,7 +10,7 @@ export async function platformFetch<T>(path: string, userId: string, init: Reque
   if (process.env.DEMO_MODE === "1") {
     const { getDemoResponse } = await import("./demoFixtures");
     const body = typeof init.body === "string" ? init.body : undefined;
-    const { status, json } = getDemoResponse(init.method ?? "GET", path, body);
+    const { status, json } = getDemoResponse(init.method ?? "GET", path, userId, body);
     if (status < 200 || status >= 300) {
       throw new PlatformError(status, (json as { error?: string })?.error ?? `platform ${status}`);
     }
