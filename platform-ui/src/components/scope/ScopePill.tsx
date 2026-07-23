@@ -41,6 +41,7 @@ export function ScopePill({ companies, value, onChangeHref, countLabel, allLabel
         <Link
           href={onChangeHref("all")}
           className={`scope-pill__item${value === "all" ? " scope-pill__item--active" : ""}`}
+          aria-current={value === "all" ? "true" : undefined}
         >
           {allLabel} ({count})
         </Link>
@@ -49,6 +50,7 @@ export function ScopePill({ companies, value, onChangeHref, countLabel, allLabel
             key={c.id}
             href={onChangeHref(c.id)}
             className={`scope-pill__item${value === c.id ? " scope-pill__item--active" : ""}`}
+            aria-current={value === c.id ? "true" : undefined}
           >
             {c.name}
           </Link>

@@ -28,6 +28,7 @@ export function FilterChips({ chips, active, buildHref }: {
             key={c.key}
             href={buildHref(isActive ? undefined : c.key)}
             className={`filter-chip${isActive ? " filter-chip--active" : ""}`}
+            aria-current={isActive ? "true" : undefined}
           >
             <span className="filter-chip__label">{c.label}</span>
             <span className="filter-chip__count">{c.count}</span>

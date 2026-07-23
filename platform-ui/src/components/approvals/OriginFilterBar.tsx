@@ -19,7 +19,11 @@ export function OriginFilterBar({
 }) {
   return (
     <div className="filter-chips" role="group" aria-label="Filter by origin">
-      <Link href={buildHref(undefined)} className={`filter-chip${active === undefined ? " filter-chip--active" : ""}`}>
+      <Link
+        href={buildHref(undefined)}
+        className={`filter-chip${active === undefined ? " filter-chip--active" : ""}`}
+        aria-current={active === undefined ? "true" : undefined}
+      >
         <span className="filter-chip__label">All</span>
         <span className="filter-chip__count">{total}</span>
       </Link>
@@ -28,6 +32,7 @@ export function OriginFilterBar({
           key={o}
           href={buildHref(active === o ? undefined : o)}
           className={`filter-chip${active === o ? " filter-chip--active" : ""}`}
+          aria-current={active === o ? "true" : undefined}
         >
           <span className="filter-chip__label">{ORIGIN_LABEL[o]}</span>
           <span className="filter-chip__count">{counts[o]}</span>

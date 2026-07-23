@@ -95,7 +95,7 @@ const unit = (kind: string, refId: string, refName: string, respId: string, resp
 export async function seedAgency(): Promise<SeededAgency> {
   // ---- Holding + member companies ----
   const holdingId = await ensureCompany(HOLDING_NAME, [], "holding", null);
-  const tenantId = await ensureCompany(AGENCY_NAME, ["agency"], "agency", holdingId);
+  const tenantId = await ensureCompany(AGENCY_NAME, ["agency", "hr"], "agency", holdingId);
   const resortId = await ensureCompany(RESORT_NAME, [], "resort", holdingId);
 
   // ---- People ----
