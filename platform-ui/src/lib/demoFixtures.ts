@@ -171,12 +171,17 @@ const ACTIVITY = [
   { id: "a-4", actor_id: "u-finance", actor_name: "Rina Wibawa", verb: "updated", target_entity_type: "project", target_entity_id: "p-fin-1", occurred_at: "2026-07-03T14:00:00Z", metadata: {} },
 ];
 
+// WSUX-9: typed payload shape ({title, href, body?, entityType?, entityId?,
+// severity?} per WSUX-4 / platform-nest src/core/http.ts NotificationPayload).
+// n-6 deliberately omits `severity` to exercise the page's graceful default
+// (an "info" treatment) for pre-WSUX-4 rows that never get backfilled.
 const NOTIFICATIONS = [
-  { id: "n-1", type: "approval.requested", payload: { title: "Approval requested", message: "Ad spend increase — 20% on Q3 lead-gen push is waiting for your decision.", href: "/approvals" }, read_at: null, created_at: "2026-07-05T08:10:00Z" },
-  { id: "n-2", type: "comment.mention", payload: { title: "Dewi mentioned you", message: "“@Hansel can you confirm the launch date on the client site redesign?”", href: "/tasks/t-4" }, read_at: null, created_at: "2026-07-04T15:40:00Z" },
-  { id: "n-3", type: "task.assigned", payload: { title: "Task assigned to you", message: "Keyword gap analysis on SEO audit — Q3.", href: "/tasks/t-6" }, read_at: null, created_at: "2026-07-04T09:05:00Z" },
-  { id: "n-4", type: "brief.approved", payload: { title: "Brief approved", message: "Landing page copy brief was approved.", href: "/agency" }, read_at: "2026-07-03T12:00:00Z", created_at: "2026-07-03T11:30:00Z" },
-  { id: "n-5", type: "project.updated", payload: { title: "Project updated", message: "FY26 budget review moved to On hold.", href: "/projects/p-fin-1" }, read_at: "2026-07-03T10:00:00Z", created_at: "2026-07-03T09:50:00Z" },
+  { id: "n-1", type: "approval.requested", payload: { title: "Approval requested", body: "Ad spend increase — 20% on Q3 lead-gen push is waiting for your decision.", href: "/approvals", entityType: "approval", severity: "warning" }, read_at: null, created_at: "2026-07-05T08:10:00Z" },
+  { id: "n-critical", type: "budget.overrun", payload: { title: "Budget overrun flagged", body: "FY26 marketing spend crossed 110% of the approved cap.", href: "/rollups", entityType: "rollup", severity: "critical" }, read_at: null, created_at: "2026-07-05T07:55:00Z" },
+  { id: "n-2", type: "comment.mention", payload: { title: "Dewi mentioned you", body: "“@Hansel can you confirm the launch date on the client site redesign?”", href: "/tasks/t-4", entityType: "task", entityId: "t-4", severity: "info" }, read_at: null, created_at: "2026-07-04T15:40:00Z" },
+  { id: "n-3", type: "task.assigned", payload: { title: "Task assigned to you", body: "Keyword gap analysis on SEO audit — Q3.", href: "/tasks/t-6", entityType: "task", entityId: "t-6", severity: "info" }, read_at: null, created_at: "2026-07-04T09:05:00Z" },
+  { id: "n-4", type: "brief.approved", payload: { title: "Brief approved", body: "Landing page copy brief was approved.", href: "/agency", entityType: "brief", severity: "info" }, read_at: "2026-07-03T12:00:00Z", created_at: "2026-07-03T11:30:00Z" },
+  { id: "n-5", type: "project.updated", payload: { title: "Project updated", body: "FY26 budget review moved to On hold.", href: "/projects/p-fin-1" }, read_at: "2026-07-03T10:00:00Z", created_at: "2026-07-03T09:50:00Z" },
 ];
 
 const ROLLUPS = [

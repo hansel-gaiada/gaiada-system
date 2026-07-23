@@ -196,7 +196,9 @@ export class PmController {
       await emitEvent(c, tenantId, "pm_task", id, "pm.task.created", { title, projectId: b.projectId });
     });
     if (assignee?.responsibleId) {
-      await notify(tenantId, assignee.responsibleId, req.principal.userId, "assignment", { entityType: "task", entityId: id, href: `/tasks/${id}` });
+      await notify(tenantId, assignee.responsibleId, req.principal.userId, "assignment", {
+        title: "You were assigned a task", severity: "info", entityType: "task", entityId: id, href: `/tasks/${id}`,
+      });
     }
     await writeActivity(tenantId, req.principal.userId, "created", "pm_task", id, { title });
     return { id };
@@ -302,7 +304,9 @@ export class PmController {
       await emitEvent(c, tenantId, "pm_task", taskId, "pm.task.updated", { status });
     });
     if (notifyResponsible) {
-      await notify(tenantId, notifyResponsible, req.principal.userId, "assignment", { entityType: "task", entityId: taskId, href: `/tasks/${taskId}` });
+      await notify(tenantId, notifyResponsible, req.principal.userId, "assignment", {
+        title: "You were assigned a task", severity: "info", entityType: "task", entityId: taskId, href: `/tasks/${taskId}`,
+      });
     }
     await writeActivity(tenantId, req.principal.userId, "updated", "pm_task", taskId, {});
     return { ok: true };
@@ -542,7 +546,9 @@ export class PmController {
     });
     // Notify the person in charge that the tracker delivered an update.
     if (result.responsibleId) {
-      await notify(tenantId, result.responsibleId, req.principal.userId, "tracker", { entityType: "task", entityId: taskId, href: `/tasks/${taskId}` });
+      await notify(tenantId, result.responsibleId, req.principal.userId, "tracker", {
+        title: "AI Tracker updated your task", severity: "info", entityType: "task", entityId: taskId, href: `/tasks/${taskId}`,
+      });
     }
     await writeActivity(tenantId, req.principal.userId, "tracker.run", "pm_task", taskId, { suggestions: result.suggestions.length });
     return { suggestions: result.suggestions, delivered: result.delivered };

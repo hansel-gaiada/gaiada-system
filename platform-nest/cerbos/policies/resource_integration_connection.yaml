@@ -1,0 +1,49 @@
+# WSUX-14 (ex-P1-08) — F1 connections subsystem authz (locked decision #8).
+#
+# integration_connection = a person's (or a company's) link to an external provider (github|
+# google_drive|claude) + the at-rest credential vault for it. Every handler passes
+# resource.attr = {kind: "integration_connection", tenantId: <company>, id?, ownerId: <see below>}.
+#
+# Two tiers, per decision #8:
+#   * SELF-SERVICE — a member manages THEIR OWN user-owned connection rows. The controller passes
+#     ownerId = the row's owner_id ONLY when it is a user row; `owns` (gaiada_common:
+#     resource.attr.ownerId == principal.id) then matches, so a plain member can read/create/update/
+#     revoke their own link without any elevated role.
+#   * COMPANY.MANAGE (manager+) — company-owned rows AND other people's user rows. For those the
+#     controller passes ownerId = "" (a company id can never equal a user's principal.id, and other
+#     users' ids never equal the caller's), so `owns` is false and only company_admin / manager /
+#     group_executive (owner) / platform_admin qualify.
+# tenant gate (inTenant) + assurance floor (notLow) apply on every non-admin rule. RLS + the
+# controller's tenant-scoped row load are the independent second wall against a cross-tenant :id.
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: integration_connection
+  importDerivedRoles: ["gaiada_scopes"]
+  variables:
+    import: ["gaiada_common"]
+  rules:
+    - actions: ["*"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["platform_admin"]
+    # Group executive (owner) is a global cross-company role — full management of any connection row.
+    - actions: ["read", "create", "update", "delete"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["group_executive"]
+      condition: { match: { expr: "variables.notLow" } }
+    # company.manage tier: company-owned rows + reading/managing OTHERS' user rows. Manager+ within
+    # the tenant. (The controller only routes ownerId="" here — see the policy header.)
+    - actions: ["read", "create", "update", "delete"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin", "manager"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    # Self-service: a member (or higher, incl. viewer with a live grant) fully manages their OWN
+    # user-owned connection. Guarded by `owns` so it fails CLOSED if a handler omits ownerId — the
+    # rule simply doesn't match rather than leaking. viewer included so a read-only staffer can still
+    # link their own tools; the `owns` clause keeps it to strictly their own rows.
+    - actions: ["read", "create", "update", "delete"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["member", "viewer", "team_lead"]
+      condition:
+        match:
+          expr: "variables.inTenant && variables.notLow && variables.owns"

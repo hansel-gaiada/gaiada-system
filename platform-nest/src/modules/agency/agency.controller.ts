@@ -88,20 +88,30 @@ export class AgencyController {
     const decision = body?.decision;
     if (decision !== "approved" && decision !== "rejected") throw new BadRequestException("decision must be approved|rejected");
     await authorize(req.principal, { kind: "agency_approval", id: approvalId, tenantId, module: "agency" }, "approve");
-    const requestedBy = await withTenants([tenantId], async (c) => {
-      const upd = await c.query<{ asset_id: string | null; requested_by: string | null }>(
+    const decided = await withTenants([tenantId], async (c) => {
+      const upd = await c.query<{ asset_id: string | null; requested_by: string | null; campaign_id: string }>(
         `UPDATE agency_approvals SET status = $2, decided_by = $3, decided_at = now(), updated_at = now()
-         WHERE id = $1 AND status = 'pending' RETURNING asset_id, requested_by`,
+         WHERE id = $1 AND status = 'pending' RETURNING asset_id, requested_by, campaign_id`,
         [approvalId, decision, req.principal.userId],
       );
       const assetId = upd.rows[0]?.asset_id;
       if (assetId) {
         await c.query(`UPDATE agency_creative_assets SET review_status = $2, updated_at = now() WHERE id = $1`, [assetId, decision]);
       }
-      return upd.rows[0]?.requested_by ?? null;
+      return upd.rows[0] ?? null;
     });
     await writeActivity(tenantId, req.principal.userId, decision, "agency_approval", approvalId);
-    await notify(tenantId, requestedBy, req.principal.userId, "approval_decided", { approvalId, decision });
+    if (decided?.requested_by) {
+      // Deep-link to the campaign the reviewed asset/subject belongs to (agency has no
+      // standalone asset detail page today — /agency/campaigns/:id is the existing convention).
+      await notify(tenantId, decided.requested_by, req.principal.userId, "approval_decided", {
+        title: decision === "approved" ? "Your submission was approved" : "Your submission was rejected",
+        severity: decision === "approved" ? "info" : "warning",
+        entityType: "agency_approval", entityId: approvalId,
+        href: `/agency/campaigns/${decided.campaign_id}`,
+        approvalId, decision,
+      });
+    }
     return { id: approvalId, status: decision };
   }
 

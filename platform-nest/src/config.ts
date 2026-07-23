@@ -26,6 +26,11 @@ export const config = {
   // File storage (5c.4). Local-first backend now (a directory on disk / mounted volume);
   // an object store is the target-state swap behind the same StorageBackend interface.
   filesDir: process.env.FILES_DIR ?? "./data/files",
+  // WSUX-14 connection-credential vault (decision #7): base64 of exactly 32 bytes (AES-256) used by
+  // src/core/secret-box.ts to seal integration_connections tokens at rest. UNSET -> the token write
+  // path is fail-closed 503 (mapping create/list/revoke still work); a future OpenBao/KMS key rotates
+  // in behind token_key_version. NEVER logged.
+  integrationTokenKey: process.env.INTEGRATION_TOKEN_KEY ?? "",
   // Event backbone (5c continuation): Redis Streams for outbox relay + consumption.
   redisUrl: process.env.REDIS_URL ?? "",
   // ORG-6 release train (A4): the whole shared-service reconciler is DARK by default. When off,

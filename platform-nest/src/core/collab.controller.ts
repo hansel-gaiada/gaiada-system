@@ -51,14 +51,20 @@ export class CollabController {
     // Deep-link target for the notification bell (payload.href) — tasks resolve to their page.
     const href = entityType === "task" ? `/tasks/${entityId}` : undefined;
     for (const m of Array.from(new Set(mentions)).slice(0, 50)) {
-      await notify(tenantId, m, actorId, "mention", { entityType, entityId, commentId: id, href });
+      await notify(tenantId, m, actorId, "mention", {
+        title: "You were mentioned in a comment", severity: "info", entityType, entityId, commentId: id, href,
+      });
     }
     if (entityType === "task") {
       const assignee = await withTenants([tenantId], (c) =>
         c.query<{ assignee_id: string | null }>(`SELECT assignee_id FROM tasks WHERE id = $1`, [entityId]),
       );
       const a = assignee.rows[0]?.assignee_id;
-      if (a && !mentions.includes(a)) await notify(tenantId, a, actorId, "comment", { entityType, entityId, commentId: id, href });
+      if (a && !mentions.includes(a)) {
+        await notify(tenantId, a, actorId, "comment", {
+          title: "New comment on your task", severity: "info", entityType, entityId, commentId: id, href,
+        });
+      }
     }
     return { id };
   }
@@ -67,6 +73,9 @@ export class CollabController {
   // and scoped automation service accounts (e.g. wf:new-client-seed) to push a notice into a
   // user's inbox. `notify()` is best-effort and skips self / non-members. Cerbos gates "create"
   // to company_admin/manager (+ platform_admin); a low-assurance chat session cannot reach it.
+  // Callers SHOULD pass the typed payload {title, href, body?, entityType?, entityId?, severity?}
+  // (WSUX-4 / FRONTEND-BFF-CONTRACT §9(c)) — notify() supplies a humanized fallback `title`
+  // derived from `type` for callers that don't, so no notification ever ships title-less.
   @Post(":tenantId/notifications")
   @HttpCode(201)
   async createNotification(

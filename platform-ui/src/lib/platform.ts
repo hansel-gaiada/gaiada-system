@@ -41,7 +41,11 @@ export async function platformFetch<T>(path: string, userId: string, init: Reque
     ...init,
     headers: {
       ...authHeaders,
-      "content-type": "application/json",
+      // Only claim a JSON content-type when a body is actually being sent —
+      // Fastify's JSON body parser 400s on an empty body declared as
+      // application/json (hit by every bodyless POST, e.g. mark-read /
+      // mark-all-read / other no-payload actions).
+      ...(init.body !== undefined ? { "content-type": "application/json" } : {}),
       ...(init.headers ?? {}),
     },
     cache: "no-store",

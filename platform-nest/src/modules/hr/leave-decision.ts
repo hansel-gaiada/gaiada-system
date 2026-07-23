@@ -59,8 +59,12 @@ export async function applyLeaveDecision(event: OutboxEvent): Promise<void> {
   if (!decided) return;
 
   await notify(tenantId, decided.subject_user_id, null, "hr.leave.decided", {
+    title: newStatus === "approved" ? "Your leave request was approved" : "Your leave request was denied",
+    severity: newStatus === "approved" ? "info" : "warning",
+    entityType: "hr_leave_request",
+    entityId: leaveRequestId,
+    href: `/hr/leave/${leaveRequestId}`,
     leaveRequestId,
     decision: newStatus,
-    href: `/hr/leave/${leaveRequestId}`,
   });
 }

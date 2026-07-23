@@ -334,3 +334,93 @@ has no automatic writers; a human, script, or admin tool must POST activities ex
 - Cerbos: `cerbos/policies/resource_work_activity.yaml` (read = member/viewer/manager/team_lead/
   company_admin; create = company_admin/platform_admin only). Policy-parity tests added to
   `src/rbac/cerbos.test.ts` (5 new cases, live-Cerbos-gated like the rest of that file).
+
+## 12. Connections subsystem / integration credential vault (WSUX-14, ex-P1-08) — `src/core/integrations.controller.ts` — **BACKEND ✅ BUILT (vault + core API; no UI/`lib/connections.ts` consumer yet — WSUX-16 wires it)**
+
+**BACKEND-FIRST.** A NEW core (not module-gated) subsystem: the single place a person or a company
+links an external provider (`github`|`google_drive`|`claude`) to the ERP, plus the **at-rest
+credential vault** for that link's OAuth/API tokens. Migration `0033_integration_connections.sql`
+(FORCE RLS, tenant-scoped — connections are **per-company** in v1; a person re-links per company).
+When the UI is built, export `ConnectionRow` in `platform-ui/src/lib/connections.ts` matching the
+response shape below verbatim.
+
+**Vault + token non-exposure (security-critical — the WSUX-12 gate probes this):** tokens are sealed
+with app-layer **AES-256-GCM** (`src/core/secret-box.ts`, `enc:v1:<iv>:<tag>:<data>`, key from env
+`INTEGRATION_TOKEN_KEY`, base64 32 bytes; `token_key_version` column for a future OpenBao/KMS swap).
+**No response ever serializes `access_token_enc`/`refresh_token_enc`** — a stored credential surfaces
+ONLY as `hasToken`/`hasRefreshToken` booleans. Token writes are **fail-closed** (503 without the key).
+**Phase-1 HTTP create/patch accept NO tokens**; the seal path (`setConnectionTokens`) is internal,
+for the Phase-2 OAuth callbacks that ride this foundation.
+
+- ✅ `GET /api/:t/integrations/connections?owner=me|company|user:<id>&provider=` → `ConnectionRow[]`
+  (default `owner=me`; excludes soft-revoked rows). Authz: `owner=me` = self-service (any member);
+  `owner=company` and `owner=user:<other>` require **manager+/company_admin** (`company.manage` tier).
+  ```ts
+  interface ConnectionRow {
+    id: string; tenantId: string;
+    ownerKind: 'user'|'company'; ownerId: string;
+    provider: 'github'|'google_drive'|'claude';
+    externalAccount: string | null;            // github login / google email / claude seat email
+    scopes: string[];
+    status: 'unconfigured'|'pending'|'linked'|'error'|'revoked';
+    hasToken: boolean; hasRefreshToken: boolean;   // NEVER the token itself
+    tokenExpiresAt: string | null; tokenKeyVersion: string | null;
+    meta: Record<string, unknown>;             // e.g. { designLogin } for provider='claude' (C1)
+    createdBy: string | null; originSite: string; createdAt: string; updatedAt: string;
+  }
+  ```
+- ✅ `POST /api/:t/integrations/connections` → `201 ConnectionRow`. Body:
+  `{ provider, ownerKind?='user', ownerId?, externalAccount?, scopes?, meta? }`. A `user` connection
+  defaults `ownerId` to the caller (self-service, member-ok); creating for another user or an
+  `ownerKind='company'` row (its `ownerId` is forced to the tenant) requires **manager+**. **No tokens
+  accepted.** Idempotent on `UNIQUE(tenantId, ownerKind, ownerId, provider)` — a repeat create (incl.
+  re-linking a soft-revoked row) upserts the mapping back to `unconfigured` and returns the same `id`.
+- ✅ `PATCH /api/:t/integrations/connections/:id` → `200 ConnectionRow`. Body:
+  `{ externalAccount?, meta?, status?, scopes? }`. `status` is client-settable only to
+  `unconfigured|pending|error` (400 otherwise — `linked` is set by the token path, `revoked` by
+  DELETE). Own-row = self-service; others'/company rows = manager+.
+- ✅ `DELETE /api/:t/integrations/connections/:id` → `200 ConnectionRow` — **SOFT revoke**:
+  `status='revoked'`, all token columns NULLed, row KEPT (mirrors service-assignment revoke). Same
+  own-vs-company authz. A forged/other-tenant `:id` is a **404** (tenant-scoped row load before authz).
+- Events: `integration_connection.created` / `.updated` / `.revoked` / `.linked` on the outbox.
+- Cerbos: `cerbos/policies/resource_integration_connection.yaml` — own user-rows = self-service
+  (`member`/`viewer`/`team_lead` gated by the shared `owns` variable); company rows + others' rows =
+  `company_admin`/`manager`/`group_executive`/`platform_admin`.
+
+### 12a. C1 Claude seat registry (WSUX-17, ex-P1-10) — `src/core/claude-seats.{controller,service}.ts` — **BACKEND ✅ BUILT (no UI consumer yet — WSUX-16/17's FE half is not built)**
+
+A thin, provider-scoped projection over §12's vault — **NO new table, NO new secret path**. A "seat"
+IS an `integration_connections` row with `owner_kind='user'` and `provider='claude'`; this API just
+reshapes it (`codeSeatEmail`/`designLogin`/`mapped`) and adds the one thing the generic API can't do:
+list every user's claude row in a tenant at once (the team roster). Reuses
+`resource_integration_connection.yaml` verbatim — no new Cerbos policy file.
+
+- ✅ `GET /api/:t/integrations/claude-seats?owner=me|team|user:<id>` → `SeatRow[]` (0 or 1 item for
+  `me`/`user:<id>`, since a person has at most one claude row per company; any length for `team`).
+  `owner=me` = self-service; `owner=team` and `owner=user:<other>` require **company.manage**
+  (manager+) — the console's team grid is gated the same as §12's `owner=company`. **`owner=team`
+  excludes revoked rows by default**, same convention as §12's list (a person who was never
+  seat-mapped has NO row at all — that, not a revoked row, is the `LauncherRow` "Map your seat" state).
+  ```ts
+  interface SeatRow {
+    id: string; tenantId: string; personId: string;      // = the row's owner_id
+    codeSeatEmail: string | null;                         // = ConnectionRow.externalAccount
+    designLogin: string | null;                           // = ConnectionRow.meta.designLogin
+    status: 'unconfigured'|'pending'|'linked'|'error'|'revoked';
+    scopes: string[];
+    mapped: boolean;             // codeSeatEmail set AND not revoked — NOT derived from status alone
+    createdBy: string | null; createdAt: string; updatedAt: string;
+  }
+  ```
+- ✅ `POST /api/:t/integrations/claude-seats` → `201 SeatRow`. Body:
+  `{ userId?, codeSeatEmail, designLogin? }`. `userId` defaults to the caller (self-map); mapping
+  another `userId` requires company.manage (admin mapping). Upserts on the same
+  `UNIQUE(tenant,owner_kind,owner_id,provider)` as §12 — re-mapping (incl. after unmap) reuses the row.
+- ✅ `PATCH /api/:t/integrations/claude-seats/:id` → `200 SeatRow`. Body:
+  `{ codeSeatEmail?, designLogin?, status? }`. `designLogin` is **read-merged** into the existing
+  `meta` (not a wholesale replace) so it never clobbers other meta keys. Same `status` restriction as
+  §12. 404s (not just 403) if `:id` isn't a `provider='claude'` row in this tenant.
+- ✅ `DELETE /api/:t/integrations/claude-seats/:id` → `200 SeatRow` — unmap, i.e. §12's soft revoke.
+- Optional ops/QA seed: `npm run seed:claude-seats [companyName]` (default `Gaia Digital Agency`) —
+  maps the first company member's seat, maps+unmaps the second (leaves a revoked row on hand), prints
+  the team roster count. Distinct from WSUX-10's DEMO_MODE frontend fixtures.

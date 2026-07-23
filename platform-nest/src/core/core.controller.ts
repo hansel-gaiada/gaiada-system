@@ -213,7 +213,11 @@ export class CoreController {
       if (b.assigneeId && b.assigneeId !== prev.rows[0].assignee_id) newlyAssigned = b.assigneeId;
     });
     await writeActivity(tenantId, req.principal.userId, "updated", "task", taskId, { status: b.status });
-    if (newlyAssigned) await notify(tenantId, newlyAssigned, req.principal.userId, "assignment", { entityType: "task", entityId: taskId, href: `/tasks/${taskId}` });
+    if (newlyAssigned) {
+      await notify(tenantId, newlyAssigned, req.principal.userId, "assignment", {
+        title: "You were assigned a task", severity: "info", entityType: "task", entityId: taskId, href: `/tasks/${taskId}`,
+      });
+    }
     return { id: taskId };
   }
 

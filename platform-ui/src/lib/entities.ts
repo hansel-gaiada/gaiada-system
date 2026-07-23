@@ -198,7 +198,21 @@ export const listTimeEntries = (u: string, t: string, q: { projectId?: string; m
 
 // ---- Collaboration: comments + notifications (5c.3 — endpoints exist) ----
 export interface Comment { id: string; author_id: string | null; author_name: string | null; body: string; parent_comment_id: string | null; created_at: string }
-export interface NotificationItem { id: string; type: string; payload: Record<string, unknown>; read_at: string | null; created_at: string }
+// WSUX-4 typed contract (platform-nest src/core/http.ts NotificationPayload,
+// FRONTEND-BFF-CONTRACT §9(c)): every row's payload now guarantees {title, href}
+// plus optional body/entityType/entityId/severity. Additive — legacy keys (e.g.
+// commentId, decision, approvalId) may still ride alongside for callers that
+// read them directly, so the interface stays a Record<string, unknown> superset
+// rather than narrowing away fields older/other readers depend on.
+export interface NotificationPayload extends Record<string, unknown> {
+  title?: string;
+  href?: string;
+  body?: string;
+  entityType?: string;
+  entityId?: string;
+  severity?: "info" | "warning" | "critical";
+}
+export interface NotificationItem { id: string; type: string; payload: NotificationPayload; read_at: string | null; created_at: string }
 
 export const listComments = (u: string, t: string, entityType: string, entityId: string) =>
   skipUnavailable(platformFetch<Comment[]>(`/api/${t}/comments?entityType=${entityType}&entityId=${entityId}`, u), [] as Comment[]);

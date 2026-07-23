@@ -40,13 +40,37 @@ export async function writeActivity(
   );
 }
 
+/** Typed notification payload contract (WSUX-4; FRONTEND-BFF-CONTRACT §9(c)): every notification
+ *  row's `payload` carries `{title, href, body?, entityType?, entityId?, severity?}` so the UI
+ *  never has to guess a title or re-derive a deep-link route. Additive — extra legacy keys
+ *  (e.g. `commentId`, `decision`, `approvalId`) may still ride alongside for callers that read
+ *  them directly; nothing is removed from the bag, only the typed fields are now guaranteed. */
+export interface NotificationPayload extends Record<string, unknown> {
+  title?: string;
+  href?: string;
+  body?: string;
+  entityType?: string;
+  entityId?: string;
+  severity?: "info" | "warning" | "critical";
+}
+
+/** Humanizes a notification `type` ("hr.leave.decided" -> "Hr Leave Decided") as the fallback
+ *  title for callers that don't supply one (chiefly the generic elevated-actor passthrough
+ *  below) — every notification ships with a non-empty title, never an opaque bag. */
+function titleFromType(type: string): string {
+  return type
+    .replace(/[_.]/g, " ")
+    .trim()
+    .replace(/\b\w/g, (c) => c.toUpperCase()) || "Notification";
+}
+
 /** Best-effort in-app notification (5c.3); skips self and non-members. */
 export async function notify(
   tenantId: string,
   recipientId: string | null,
   actorId: string | null,
   type: string,
-  payload: Record<string, unknown> = {},
+  payload: NotificationPayload = {},
 ): Promise<void> {
   if (!recipientId || recipientId === actorId) return;
   await withTenants([tenantId], async (c) => {
@@ -55,10 +79,11 @@ export async function notify(
       [recipientId],
     );
     if (!member.rows[0]) return;
+    const typed: NotificationPayload = { title: titleFromType(type), ...payload };
     await c.query(
       `INSERT INTO notifications (id, tenant_id, user_id, type, payload, origin_site)
        VALUES ($1, $2, $3, $4, $5, $6)`,
-      [newId(), tenantId, recipientId, type, JSON.stringify({ ...payload, actorId }), config.originSite],
+      [newId(), tenantId, recipientId, type, JSON.stringify({ ...typed, actorId }), config.originSite],
     );
   });
 }

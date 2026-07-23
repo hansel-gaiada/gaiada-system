@@ -18,7 +18,7 @@ export async function markRead(id?: string): Promise<ActionState> {
   const tenant = await getActiveTenant(me);
   if (!tenant) return { ok: false, error: "No active company." };
 
-  const path = id ? `/api/${tenant}/notifications/${id}/read` : `/api/${tenant}/notifications/read`;
+  const path = id ? `/api/${tenant}/notifications/${id}/read` : `/api/${tenant}/notifications/read-all`;
   try {
     await platformFetch(path, userId, { method: "POST" });
     revalidatePath("/notifications");
@@ -36,4 +36,11 @@ export async function markRead(id?: string): Promise<ActionState> {
 // plain <form action={markAllReadAction}> and no client component.
 export async function markAllReadAction(): Promise<void> {
   await markRead();
+}
+
+// Form-action wrapper for a single notification, bindable as
+// `action={markReadAction.bind(null, id)}` from a server component with no
+// client-side JS. Ignores the FormData Next.js appends after the bound id.
+export async function markReadAction(id: string): Promise<void> {
+  await markRead(id);
 }

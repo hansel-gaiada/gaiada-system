@@ -83,7 +83,7 @@ const comments: Record<string, Comment[]> = {
 };
 
 let suggestions: TrackerSuggestion[] = [];
-const trackerNotifications: { id: string; type: string; payload: { title: string; message: string; href?: string }; read_at: string | null; created_at: string; forUserId: string }[] = [];
+const trackerNotifications: { id: string; type: string; payload: { title: string; body: string; href?: string; entityType?: string; entityId?: string; severity?: "info" | "warning" | "critical" }; read_at: string | null; created_at: string; forUserId: string }[] = [];
 
 // Knowledge/info the tracker can hand to the person in charge (stands in for a
 // real Knowledge/RAG lookup).
@@ -327,7 +327,7 @@ function runTracker(taskId: string): Result {
   if (responsibleId) {
     trackerNotifications.push({
       id: nextId("n"), forUserId: responsibleId, type: "pm.tracker.update", read_at: null, created_at: stamp(),
-      payload: { title: `AI Tracker update — ${t.title}`, message: `${s.rationale}${docLine}`, href: `/tasks/${t.id}` },
+      payload: { title: `AI Tracker update — ${t.title}`, body: `${s.rationale}${docLine}`, href: `/tasks/${t.id}`, entityType: "task", entityId: taskId, severity: "info" },
     });
   }
 
