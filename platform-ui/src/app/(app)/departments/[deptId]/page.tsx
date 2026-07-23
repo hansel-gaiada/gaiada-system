@@ -7,6 +7,7 @@ import { getDepartment, getServicedCompanies, computeDeptKpis, computeProjectHea
 import { listProjects, listMembers } from "@/lib/entities";
 import { listPmTasks, listMilestones } from "@/lib/pm";
 import { listWorkActivity, objectLabel, activityHref, humanizeVerb, actorLabel } from "@/lib/activity";
+import { listClaudeSeats, mySeat, launcherSeatProps } from "@/lib/claudeSeats";
 import { toolkitFor } from "@/lib/deptToolkits";
 import { Card } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
@@ -47,16 +48,27 @@ export default async function DepartmentHomePage({ params, searchParams }: { par
 
   const { sscope } = await searchParams;
   const servicedScope = sscope ?? "all";
-  const [serviced, allProjects, feed, members] = await Promise.all([
+  const [serviced, allProjects, feed, members, mySeats] = await Promise.all([
     getServicedCompanies(userId, tenant, deptId),
     listProjects(userId, tenant).catch(() => []),
     listWorkActivity(userId, tenant, { deptId, limit: ACTIVITY_PREVIEW_LIMIT }),
     listMembers(userId, tenant).catch(() => []),
+    listClaudeSeats(userId, tenant, "me"),
   ]);
   const buildServicedHref = (v: "all" | string) => `/departments/${deptId}${v === "all" ? "" : `?sscope=${v}`}`;
 
+  // WSUX-17: launcher chips with a per-person seat concept ("opens as
+  // <seat>" / "Map your seat") reuse the exact `LauncherRow` forward-compat
+  // props built for this in P1-02 — only the three Claude tools have a seat
+  // (GitHub/Figma/VS Code don't, so they keep their plain `desc`).
+  const seat = mySeat(mySeats.rows, userId);
+  const seatProps = launcherSeatProps(seat, mySeats.unavailable);
+  const CLAUDE_LAUNCHER_KEYS = new Set(["claude-code", "claude", "claude-design"]);
   const { launchers } = toolkitFor(dept.name);
-  const launcherItems = launchers.map((l) => ({ key: l.key, label: l.label, desc: l.desc, href: l.url, glyph: l.glyph }));
+  const launcherItems = launchers.map((l) => ({
+    key: l.key, label: l.label, desc: l.desc, href: l.url, glyph: l.glyph,
+    ...(CLAUDE_LAUNCHER_KEYS.has(l.key) ? seatProps : {}),
+  }));
   // Ownership (department_id === deptId, P1-01) is real. Each owned project's
   // ring health comes from ITS OWN task/milestone lists (decision #12), not
   // the department's poly-assignee task list — a project can have open work

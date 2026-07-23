@@ -417,6 +417,60 @@ const AUTOMATION_APPROVALS: Record<string, unknown>[] = [
   },
 ];
 
+// ---- F1 connections vault + C1 Claude seats (WSUX-14 vault, WSUX-16/17 UI) ----
+// Session-only, matches every other demo store's "resets on restart"
+// convention. A seat IS a `provider: 'claude'` row, same as the real backend
+// (§12a — "no new table, no new secret path"). Seeded with a deliberate mix
+// per the plan's WSUX-10 fixture note: demo-hansel is github-connected
+// (pending — identity recorded, no token, Phase-1) + claude-seat-mapped
+// (exercises "linked"/"opens as …"); Made Putra (u-dev) has a mapped seat +
+// pending github too; Dewi Santoso (u-pm) has NOTHING connected (exercises
+// every provider's empty "Map your seat"/"Connect" teach state) — so both the
+// populated and empty states render out of the box with no setup.
+interface DemoConnection {
+  id: string; tenantId: string; ownerKind: "user" | "company"; ownerId: string;
+  provider: "github" | "google_drive" | "claude";
+  externalAccount: string | null; scopes: string[]; status: string;
+  hasToken: boolean; hasRefreshToken: boolean; tokenExpiresAt: string | null; tokenKeyVersion: string | null;
+  meta: Record<string, unknown>; createdBy: string | null; originSite: string; createdAt: string; updatedAt: string;
+}
+const CONNECTIONS: DemoConnection[] = [
+  {
+    id: "conn-1", tenantId: "co-agency", ownerKind: "user", ownerId: DEMO_USER_ID, provider: "github",
+    externalAccount: "hansel-gh", scopes: [], status: "pending", hasToken: false, hasRefreshToken: false,
+    tokenExpiresAt: null, tokenKeyVersion: null, meta: {}, createdBy: DEMO_USER_ID, originSite: "central",
+    createdAt: "2026-07-10T09:00:00Z", updatedAt: "2026-07-10T09:00:00Z",
+  },
+  {
+    id: "conn-2", tenantId: "co-agency", ownerKind: "user", ownerId: DEMO_USER_ID, provider: "claude",
+    externalAccount: "hansel@gaiada.com", scopes: [], status: "linked", hasToken: false, hasRefreshToken: false,
+    tokenExpiresAt: null, tokenKeyVersion: null, meta: { designLogin: "hansel@gaiada.com" }, createdBy: DEMO_USER_ID,
+    originSite: "central", createdAt: "2026-07-10T09:05:00Z", updatedAt: "2026-07-10T09:05:00Z",
+  },
+  {
+    id: "conn-3", tenantId: "co-agency", ownerKind: "user", ownerId: "u-dev", provider: "claude",
+    externalAccount: "made@gaiada.com", scopes: [], status: "linked", hasToken: false, hasRefreshToken: false,
+    tokenExpiresAt: null, tokenKeyVersion: null, meta: {}, createdBy: "u-dev", originSite: "central",
+    createdAt: "2026-07-11T09:00:00Z", updatedAt: "2026-07-11T09:00:00Z",
+  },
+  {
+    id: "conn-4", tenantId: "co-agency", ownerKind: "user", ownerId: "u-dev", provider: "github",
+    externalAccount: "made-putra", scopes: [], status: "pending", hasToken: false, hasRefreshToken: false,
+    tokenExpiresAt: null, tokenKeyVersion: null, meta: {}, createdBy: "u-dev", originSite: "central",
+    createdAt: "2026-07-11T09:10:00Z", updatedAt: "2026-07-11T09:10:00Z",
+  },
+];
+
+function toSeatRow(c: DemoConnection) {
+  return {
+    id: c.id, tenantId: c.tenantId, personId: c.ownerId,
+    codeSeatEmail: c.externalAccount, designLogin: (c.meta.designLogin as string | null) ?? null,
+    status: c.status, scopes: c.scopes,
+    mapped: !!c.externalAccount && c.status !== "revoked",
+    createdBy: c.createdBy, createdAt: c.createdAt, updatedAt: c.updatedAt,
+  };
+}
+
 const IDENTITY_LINKS = [
   { id: "il-1", user_id: "u-pm", user_name: "Dewi Santoso", provider: "whatsapp", external_id: "628999@c.us", verified_at: "2026-06-01T00:00:00Z" },
   { id: "il-2", user_id: "u-dev", user_name: "Made Putra", provider: "telegram", external_id: "tg:5551", verified_at: null },
@@ -969,6 +1023,112 @@ export function getDemoResponse(method: string, fullPath: string, body?: string)
     if (status) rows = rows.filter((r) => r.status === status);
     if (origin) rows = rows.filter((r) => r.origin === origin);
     return ok(rows);
+  }
+
+  // ---- F1 connections vault (lib/connections.ts) ----
+  const connOneMatch = p.match(/^\/api\/[^/]+\/integrations\/connections\/([^/]+)$/);
+  if (connOneMatch) {
+    const row = CONNECTIONS.find((c) => c.id === connOneMatch[1]);
+    if (!row) return { status: 404, json: { error: "connection not found" } };
+    if (m === "PATCH") {
+      const b = JSON.parse(body || "{}") as { externalAccount?: string; meta?: Record<string, unknown>; status?: string; scopes?: string[] };
+      if (b.externalAccount !== undefined) row.externalAccount = b.externalAccount;
+      if (b.meta) row.meta = { ...row.meta, ...b.meta };
+      if (b.status) row.status = b.status;
+      if (b.scopes) row.scopes = b.scopes;
+      row.updatedAt = new Date().toISOString();
+      return ok(row);
+    }
+    if (m === "DELETE") {
+      row.status = "revoked"; row.hasToken = false; row.hasRefreshToken = false; row.updatedAt = new Date().toISOString();
+      return ok(row);
+    }
+    return ok(row);
+  }
+  const connListMatch = p.match(/^\/api\/([^/]+)\/integrations\/connections$/);
+  if (connListMatch) {
+    const t = connListMatch[1];
+    if (m === "POST") {
+      const b = JSON.parse(body || "{}") as { provider: string; ownerKind?: string; ownerId?: string; externalAccount?: string; scopes?: string[]; meta?: Record<string, unknown> };
+      const ownerKind = (b.ownerKind as "user" | "company") ?? "user";
+      const ownerId = ownerKind === "company" ? t : (b.ownerId ?? DEMO_USER_ID);
+      const existing = CONNECTIONS.find((c) => c.tenantId === t && c.ownerKind === ownerKind && c.ownerId === ownerId && c.provider === b.provider);
+      if (existing) {
+        if (b.externalAccount !== undefined) existing.externalAccount = b.externalAccount;
+        if (b.scopes) existing.scopes = b.scopes;
+        if (b.meta) existing.meta = { ...existing.meta, ...b.meta };
+        existing.status = "unconfigured";
+        existing.updatedAt = new Date().toISOString();
+        return { status: 201, json: existing };
+      }
+      const row: DemoConnection = {
+        id: demoId("conn"), tenantId: t, ownerKind, ownerId, provider: b.provider as DemoConnection["provider"],
+        externalAccount: b.externalAccount ?? null, scopes: b.scopes ?? [], status: "unconfigured",
+        hasToken: false, hasRefreshToken: false, tokenExpiresAt: null, tokenKeyVersion: null,
+        meta: b.meta ?? {}, createdBy: DEMO_USER_ID, originSite: "central",
+        createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+      };
+      CONNECTIONS.push(row);
+      return { status: 201, json: row };
+    }
+    const owner = url.searchParams.get("owner") ?? "me";
+    const provider = url.searchParams.get("provider");
+    let rows = CONNECTIONS.filter((c) => c.tenantId === t && c.status !== "revoked");
+    if (owner === "me") rows = rows.filter((c) => c.ownerKind === "user" && c.ownerId === DEMO_USER_ID);
+    else if (owner === "company") rows = rows.filter((c) => c.ownerKind === "company");
+    else if (owner.startsWith("user:")) { const uid = owner.slice(5); rows = rows.filter((c) => c.ownerKind === "user" && c.ownerId === uid); }
+    if (provider) rows = rows.filter((c) => c.provider === provider);
+    return ok(rows);
+  }
+
+  // ---- C1 Claude seat registry (lib/claudeSeats.ts) — a projection over
+  // CONNECTIONS rows with provider='claude', same as the real backend. ----
+  const seatOneMatch = p.match(/^\/api\/[^/]+\/integrations\/claude-seats\/([^/]+)$/);
+  if (seatOneMatch) {
+    const row = CONNECTIONS.find((c) => c.id === seatOneMatch[1] && c.provider === "claude");
+    if (!row) return { status: 404, json: { error: "seat not found" } };
+    if (m === "PATCH") {
+      const b = JSON.parse(body || "{}") as { codeSeatEmail?: string; designLogin?: string; status?: string };
+      if (b.codeSeatEmail !== undefined) row.externalAccount = b.codeSeatEmail;
+      if (b.designLogin !== undefined) row.meta = { ...row.meta, designLogin: b.designLogin };
+      if (b.status) row.status = b.status;
+      row.updatedAt = new Date().toISOString();
+      return ok(toSeatRow(row));
+    }
+    if (m === "DELETE") {
+      row.status = "revoked"; row.hasToken = false; row.hasRefreshToken = false; row.updatedAt = new Date().toISOString();
+      return ok(toSeatRow(row));
+    }
+    return ok(toSeatRow(row));
+  }
+  const seatListMatch = p.match(/^\/api\/([^/]+)\/integrations\/claude-seats$/);
+  if (seatListMatch) {
+    const t = seatListMatch[1];
+    if (m === "POST") {
+      const b = JSON.parse(body || "{}") as { userId?: string; codeSeatEmail: string; designLogin?: string };
+      const ownerId = b.userId ?? DEMO_USER_ID;
+      const existing = CONNECTIONS.find((c) => c.tenantId === t && c.ownerKind === "user" && c.ownerId === ownerId && c.provider === "claude");
+      if (existing) {
+        existing.externalAccount = b.codeSeatEmail;
+        if (b.designLogin !== undefined) existing.meta = { ...existing.meta, designLogin: b.designLogin };
+        existing.updatedAt = new Date().toISOString();
+        return { status: 201, json: toSeatRow(existing) };
+      }
+      const row: DemoConnection = {
+        id: demoId("seat"), tenantId: t, ownerKind: "user", ownerId, provider: "claude",
+        externalAccount: b.codeSeatEmail, scopes: [], status: "unconfigured", hasToken: false, hasRefreshToken: false,
+        tokenExpiresAt: null, tokenKeyVersion: null, meta: b.designLogin ? { designLogin: b.designLogin } : {},
+        createdBy: DEMO_USER_ID, originSite: "central", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+      };
+      CONNECTIONS.push(row);
+      return { status: 201, json: toSeatRow(row) };
+    }
+    const owner = url.searchParams.get("owner") ?? "me";
+    let rows = CONNECTIONS.filter((c) => c.tenantId === t && c.provider === "claude" && c.status !== "revoked");
+    if (owner === "me") rows = rows.filter((c) => c.ownerId === DEMO_USER_ID);
+    else if (owner.startsWith("user:")) { const uid = owner.slice(5); rows = rows.filter((c) => c.ownerId === uid); }
+    // owner === "team": every claude row in the tenant, no further filter.
+    return ok(rows.map(toSeatRow));
   }
 
   // Anything else (comments, files, notifications, clients, deliverables,

@@ -238,6 +238,40 @@ a.dept-ring-card__name:hover { opacity: 0.6; }
   font-size: 15px;
 }
 
+/* ── Connections (F1/C1, WSUX-16/17) ────────────────────────────────────── */
+.dept-conn-banner {
+  margin: 0 0 14px;
+  padding: 10px 14px;
+  border: 0.5px solid var(--dept-risk);
+  color: var(--dept-risk);
+  font: 400 12px var(--font-body);
+}
+.dept-conn-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.dept-conn-row { padding: 14px 0; border-bottom: 0.5px solid var(--erp-hairline-soft); display: flex; flex-direction: column; gap: 8px; }
+.dept-conn-row:last-child { border-bottom: none; }
+.dept-conn-row__main { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.dept-conn-row__label { font: 700 13px var(--font-body); color: var(--text-primary); flex: 1 1 auto; min-width: 120px; }
+.dept-conn-row__account { font: 400 12px var(--font-body); color: var(--erp-ink-50); }
+.dept-conn-row__actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.dept-conn-row__form { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.dept-conn-row__input {
+  font: 400 13px var(--font-body);
+  border: 0.5px solid var(--erp-hairline);
+  background: var(--surface-card);
+  color: var(--text-primary);
+  padding: 6px 10px;
+  min-width: 200px;
+}
+.dept-conn-row__error { margin: 0; font: 400 12px var(--font-body); color: var(--dept-risk); }
+.dept-conn-row__cred { font: 400 11px var(--font-body); color: var(--erp-ink-50); }
+
+/* Team status grid (admin/manager-gated) */
+.dept-conn-grid { width: 100%; border-collapse: collapse; }
+.dept-conn-grid th { text-align: left; font: 700 10px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--erp-ink-50); padding: 8px 10px; border-bottom: 0.5px solid var(--erp-hairline); }
+.dept-conn-grid td { padding: 10px; border-bottom: 0.5px solid var(--erp-hairline-soft); vertical-align: top; }
+.dept-conn-grid__person { font: 400 13px var(--font-body); color: var(--text-primary); }
+.dept-conn-grid__cell { display: flex; flex-direction: column; gap: 4px; }
+
 /* ---- ServicedBlock (ORG-13 / UX-2 §3C) ---- */
 .serviced-block {
   border: 0.5px solid var(--erp-hairline);
