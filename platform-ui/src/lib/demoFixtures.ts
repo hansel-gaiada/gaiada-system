@@ -135,6 +135,35 @@ const APPROVALS_DECIDED = [
   { id: "ad-2", subject: "Influencer budget — round 1", campaign: "Brand awareness — social", decision: "rejected", decided_at: "2026-07-02T11:00:00Z", decided_by: "Clement Hansel" },
 ];
 
+// ---- WSUX-1/6 unified approvals inbox (lib/approvals.ts, `GET /api/approvals`
+// + `POST /api/:t/approvals/:id/decide`) — a stateful mirror of
+// approvals-urgency.ts's weighting so the demo's urgency/age sort behaves
+// like the real endpoint. Deliberately spans every origin + more than one
+// company so the origin chips and scope pill both have something to filter.
+const UNIFIED_BASE_WEIGHT: Record<string, number> = { pipeline: 100, agency: 90, automation: 80, agent: 80, hr: 70 };
+const UNIFIED_IMPACT_BONUS: Record<string, number> = { high: 15, medium: 5, unclassified: 0 };
+function unifiedAgeBonus(ageMs: number): number {
+  const hours = Math.max(0, ageMs) / 3_600_000;
+  return Math.min(hours, 80) * (40 / 80);
+}
+function unifiedUrgency(origin: string, ageMs: number, impact?: string): number {
+  return (UNIFIED_BASE_WEIGHT[origin] ?? 0) + (impact ? (UNIFIED_IMPACT_BONUS[impact] ?? 0) : 0) + unifiedAgeBonus(ageMs);
+}
+interface UnifiedDemoRow {
+  id: string; origin: "agency" | "pipeline" | "hr" | "automation" | "agent"; tenantId: string;
+  subject: string; subjectHref?: string; previewUrl?: string; createdAt: string; status: string; impact?: string;
+}
+const UNIFIED_APPROVALS: UnifiedDemoRow[] = [
+  { id: "ap-1", origin: "agency", tenantId: "co-agency", subject: "Landing page copy brief", subjectHref: "/agency/cam-1", createdAt: "2026-07-04T10:00:00Z", status: "pending" },
+  { id: "ap-2", origin: "agency", tenantId: "co-agency", subject: "Ad spend increase — 20%", subjectHref: "/agency/cam-1", createdAt: "2026-07-05T08:00:00Z", status: "pending" },
+  { id: "ad-1", origin: "agency", tenantId: "co-agency", subject: "Homepage hero creative", subjectHref: "/agency/cam-1", createdAt: "2026-07-04T09:00:00Z", status: "approved" },
+  { id: "ad-2", origin: "agency", tenantId: "co-agency", subject: "Influencer budget — round 1", subjectHref: "/agency/cam-2", createdAt: "2026-07-02T08:00:00Z", status: "rejected" },
+  { id: "pg-1", origin: "pipeline", tenantId: "co-agency", subject: "Prototype sign-off — Client site redesign", subjectHref: "/pipeline", createdAt: "2026-07-21T09:00:00Z", status: "pending" },
+  { id: "un-aa-1", origin: "automation", tenantId: "co-agency", subject: "Repeated auth failures on CCTV — Parking; auto-disable suspended for review.", createdAt: "2026-07-21T22:00:00Z", status: "pending", impact: "high" },
+  { id: "un-aa-2", origin: "agent", tenantId: "co-agency", subject: "Bulk status update flagged unclassified by the write gate.", createdAt: "2026-07-22T07:30:00Z", status: "pending", impact: "medium" },
+  { id: "hr-1", origin: "hr", tenantId: "co-resort", subject: "Leave request — Andi (3 days)", subjectHref: "/hr", createdAt: "2026-07-22T02:00:00Z", status: "pending" },
+];
+
 const ACTIVITY = [
   { id: "a-1", actor_id: "u-pm", actor_name: "Dewi Santoso", verb: "created", target_entity_type: "agency_brief", target_entity_id: "b-2", occurred_at: "2026-07-05T09:00:00Z", metadata: {} },
   { id: "a-2", actor_id: "u-dev", actor_name: "Made Putra", verb: "updated", target_entity_type: "task", target_entity_id: "t-5", occurred_at: "2026-07-05T08:30:00Z", metadata: {} },
@@ -758,6 +787,42 @@ export function getDemoResponse(method: string, fullPath: string, body?: string)
   const decideMatch = p.match(/^\/api\/[^/]+\/modules\/agency\/approvals\/([^/]+)\/decide$/);
   if (decideMatch && m === "POST") return ok({ id: decideMatch[1], status: "approved" });
 
+  // ---- WSUX-1 unified read (lib/approvals.ts) ----
+  if (p === "/api/approvals") {
+    const scopeParam = url.searchParams.get("scope") ?? "all";
+    const statusParam = url.searchParams.get("status") ?? "pending";
+    const sortParam = url.searchParams.get("sort") ?? "urgency";
+    const originParam = url.searchParams.get("origin");
+    const originFilter = originParam ? new Set(originParam.split(",")) : null;
+    const scopeIds = scopeParam === "all" ? COMPANIES.map((c) => c.id as string) : [scopeParam];
+    const now = Date.now();
+    const items = UNIFIED_APPROVALS
+      .filter((r) => scopeIds.includes(r.tenantId))
+      .filter((r) => (originFilter ? originFilter.has(r.origin) : true))
+      .filter((r) => (statusParam === "pending" ? r.status === "pending" : r.status !== "pending"))
+      .map((r) => {
+        const ageMs = now - new Date(r.createdAt).getTime();
+        return {
+          id: r.id, origin: r.origin, tenantId: r.tenantId,
+          company: (COMPANIES.find((c) => c.id === r.tenantId)?.name as string) ?? "",
+          subject: r.subject, subjectHref: r.subjectHref, previewUrl: r.previewUrl,
+          createdAt: r.createdAt, ageMs, urgencyScore: unifiedUrgency(r.origin, ageMs, r.impact),
+          decidable: true, status: r.status,
+        };
+      });
+    items.sort((a, b) => (sortParam === "age" ? b.ageMs - a.ageMs : b.urgencyScore - a.urgencyScore));
+    const companies = scopeIds.map((id) => ({ id, name: (COMPANIES.find((c) => c.id === id)?.name as string) ?? "", included: true }));
+    return ok({ items, companies });
+  }
+  // ---- WSUX-2 decide façade (app/(app)/actions.ts's decideApprovalItem) ----
+  const unifiedDecideMatch = p.match(/^\/api\/([^/]+)\/approvals\/([^/]+)\/decide$/);
+  if (unifiedDecideMatch && m === "POST") {
+    const row = UNIFIED_APPROVALS.find((r) => r.id === unifiedDecideMatch[2]);
+    const b = JSON.parse(body || "{}") as { decision?: string };
+    if (row && b.decision) row.status = b.decision === "approved" ? "approved" : "rejected";
+    return ok({ ok: true });
+  }
+
   // ---- IT: devices / events / topology (lib/it.ts) ----
   const devDetailMatch = p.match(/^\/api\/([^/]+)\/it\/devices\/([^/]+)$/);
   if (devDetailMatch) {
@@ -882,12 +947,17 @@ export function getDemoResponse(method: string, fullPath: string, body?: string)
     if (row && b.decision) { row.status = b.decision; row.decided_by = DEMO_USER_ID; row.decided_at = "2026-07-22T09:00:00Z"; }
     return ok({ id: autoApprovalDecide[1], status: row?.status ?? "approved" });
   }
-  const autoApprovalsMatch = p.match(/^\/api\/[^/]+\/automation-approvals$/);
+  const autoApprovalsMatch = p.match(/^\/api\/([^/]+)\/automation-approvals$/);
   if (autoApprovalsMatch) {
     if (m === "POST") {
       const b = JSON.parse(body || "{}");
       return { status: 201, json: { id: demoId("aa"), status: "pending", ...b } };
     }
+    // Both demo rows reference co-agency records (a CCTV device + a co-agency
+    // project); scope the GET to that tenant so a cross-company fan-out
+    // (WSUX-5's getMyWorkQueue) doesn't show the same two rows tripled across
+    // every demo company.
+    if (autoApprovalsMatch[1] !== "co-agency") return ok([]);
     const status = url.searchParams.get("status") ?? "pending";
     const origin = url.searchParams.get("origin");
     let rows = AUTOMATION_APPROVALS;

@@ -1,0 +1,25 @@
+/* UX-2 §2 — unified approvals inbox (WSUX-6). Rows extend the dashboard's
+   `.needs-me-queue__*` classes (shared visual language, not reinvented). */
+
+.approval-row__age { font: 700 11px var(--font-body); color: rgba(26, 25, 22, 0.5); flex-shrink: 0; width: 34px; }
+.approval-row__origin {
+  font: 700 9px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--erp-accent); border: 0.5px solid var(--erp-accent); padding: 2px 7px; flex-shrink: 0;
+}
+.approval-row__note {
+  font: 400 12px var(--font-body); border: 0.5px solid var(--erp-hairline); background: var(--surface-card);
+  color: var(--text-primary); padding: 5px 8px; width: 140px;
+}
+.approval-row__preview { color: var(--erp-accent); font: 400 12px var(--font-body); text-decoration: none; }
+.approval-row__preview:hover { text-decoration: underline; }
+
+.approvals-status-toggle, .approvals-sort-toggle { display: flex; gap: 6px; align-items: center; }
+.approvals-status-toggle a, .approvals-sort-toggle a {
+  font: 400 12px var(--font-body); color: rgba(26, 25, 22, 0.55); text-decoration: none;
+  padding: 5px 10px; border: 0.5px solid transparent;
+}
+.approvals-status-toggle a:hover, .approvals-sort-toggle a:hover { color: var(--text-primary); }
+.approvals-status-toggle a.is-active, .approvals-sort-toggle a.is-active {
+  color: var(--erp-accent); border-color: var(--erp-accent);
+}
+.approvals-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; margin: 16px 0; }

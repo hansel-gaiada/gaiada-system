@@ -5,8 +5,7 @@ import { getMe } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
 import { can } from "@/lib/rbac";
 import { getDepartment, myDeptTasksToday, myBlockedTasks, toRailPriority } from "@/lib/departments";
-import { getPendingApprovals } from "@/lib/data";
-import { listAutomationApprovals } from "@/lib/automationApprovals";
+import { getMyWorkQueue, projectQueueForCompany } from "@/lib/queue";
 import { toolkitFor, tabHref } from "@/lib/deptToolkits";
 import { PageHeader } from "@/components/PageHeader";
 import { SectionTabs } from "@/components/shell/SectionTabs";
@@ -22,14 +21,17 @@ type Params = Promise<{ deptId: string }>;
 // comes from the department's toolkit — Web Dev gets the full nine-tab set;
 // departments without a bespoke toolkit get Home only, same shell either way.
 //
-// Rail data (P1-07, decision #12): "My work today" = this person's own
-// not-done department tasks (poly-assignee, `dept.tasks` — already fetched
-// by `getDepartment`, no extra call); "Waiting on me" = pending agency
-// approvals + pending WS4 automation-approvals + this person's own blocked
-// department tasks. Every source degrades to [] on its own (lib/data.ts,
-// lib/automationApprovals.ts) so a disabled/missing endpoint never breaks
-// the rail — it just renders its empty state. `MyWorkRail` itself does NOT
-// sort; the (due, priority) ordering happens here per decision #12.
+// Rail data (P1-07, decision #12; repointed onto the shared queue per
+// WS-UX-plan R-1): "My work today" = this person's own not-done department
+// tasks (poly-assignee, `dept.tasks` — already fetched by `getDepartment`, no
+// extra call); "Waiting on me" = a dept(=company)-scoped PROJECTION of the
+// SAME `getMyWorkQueue` spine the app Home uses (`lib/queue.ts`) — restricted
+// to approval/gate items — plus this person's own blocked department tasks
+// (which aren't part of the generic queue model; that's dept-board-specific).
+// No second merge of approvals/automation-approvals exists here anymore.
+// Every source still degrades on its own so a disabled/missing endpoint never
+// breaks the rail — it just renders its empty state. `MyWorkRail` itself does
+// NOT sort; the (due, priority) ordering happens here per decision #12.
 export default async function DepartmentConsoleLayout({ children, params }: { children: React.ReactNode; params: Params }) {
   const userId = await getSessionUserId();
   if (!userId) redirect("/login");
@@ -44,10 +46,8 @@ export default async function DepartmentConsoleLayout({ children, params }: { ch
   const toolkit = toolkitFor(dept.name);
   const canEditOrg = can(me, "org.edit", tenant);
 
-  const [pendingApprovals, automationApprovals] = await Promise.all([
-    getPendingApprovals(userId, [{ id: tenant, name: tenant }]),
-    listAutomationApprovals(userId, tenant, { status: "pending" }),
-  ]);
+  const queue = await getMyWorkQueue(me, userId, [{ id: tenant, name: tenant }]);
+  const waitingFromQueue = projectQueueForCompany(queue, tenant, { types: ["approval", "gate"] });
 
   const today: RailTaskItem[] = myDeptTasksToday(dept.tasks, userId).map((t) => ({
     id: t.id,
@@ -59,18 +59,12 @@ export default async function DepartmentConsoleLayout({ children, params }: { ch
   }));
 
   const waiting: RailWaitingItem[] = [
-    ...pendingApprovals.map((a): RailWaitingItem => ({
-      id: a.id,
-      title: a.subject,
-      href: a.campaignId ? `/agency/${a.campaignId}` : "/approvals",
+    ...waitingFromQueue.map((i): RailWaitingItem => ({
+      id: i.id,
+      title: i.title,
+      href: i.href,
       kind: "approval",
-      waitingOn: a.campaign,
-    })),
-    ...automationApprovals.map((a): RailWaitingItem => ({
-      id: a.id,
-      title: a.tool_name,
-      kind: "approval",
-      waitingOn: a.reason ?? (a.origin === "agent" ? (a.agent_name ?? "Agent") : "Automation"),
+      waitingOn: i.meta,
     })),
     ...myBlockedTasks(dept.tasks, userId).map((t): RailWaitingItem => ({
       id: t.id,

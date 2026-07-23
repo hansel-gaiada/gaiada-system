@@ -195,8 +195,58 @@ in code, flagged only for "no frontend wired" rather than "backend pending":
 From `docs/superpowers/specs/2026-07-20-daily-work-ux-spec.md`. All four are NEW reads — no
 existing endpoint's shape changes breakingly. Assumes `rbac.ts scopeCovers` fix (A4) lands first.
 
-- **(a) Unified approvals** — ⬜ PENDING. `GET /api/approvals?scope=all|<companyId>&origin=agency,pipeline,hr,automation,agent&status=pending|decided&sort=urgency|age` → `Envelope<UnifiedApprovalItem>`. Plus generic decide façade `POST /api/:t/approvals/:id/decide {origin,decision,note?}` → `{ok:true}` over existing origin decide handlers. Replaces agency-only `/approvals/pending` as the inbox source.
-- **(b) Cross-company My-Work tasks** — ⬜ PENDING. `GET /api/tasks/mine?scope=all|<companyId>&companyIds=&status=&dueBefore=` → `Envelope<TaskRow>`; `TaskRow` gains `company`/`tenantId` (additive alongside existing single-tenant `/api/:t/tasks?assignee=me`).
+- **(a) Unified approvals** — ✅ BUILT (read only; WSUX-1, 2026-07-23). `GET /api/approvals?scope=all|<companyId>&origin=agency,pipeline,hr,automation,agent&status=pending|decided&sort=urgency|age` → `Envelope<UnifiedApprovalItem>`
+  (`src/core/approvals.controller.ts`). Unions three EXISTING, independently-Cerbos-gated sources
+  — `agency_approvals` (origin `agency`), `pipeline_gates` (origin `pipeline`), and
+  `automation_approvals` (origins `automation`/`agent`/`hr`, per WSD-4's hr-leave-rides-automation-
+  approvals design) — no new authorization model: every row's visibility/decidability is the SAME
+  `authorize()`/Cerbos call each origin's own native endpoint already makes, probed per
+  `(tenant, origin[, module])` leg. Cross-company fan-out is per-tenant `withTenants([t])` legs
+  over the caller's OWN authorized companies (D-UX-2) — never a widened GUC set (A1 lint stays
+  clean, zero new allowlist entries). A company with zero readable origins for this request is
+  `{included:false, reason:"no_access"}` (soft-probed, never a hard 403 — a crafted/foreign
+  `scope=<companyId>` degrades to an excluded envelope entry, not a leak); a per-tenant query
+  failure is `{included:false, reason:"error"}`, never a request-wide 500. `UnifiedApprovalItem`
+  gains one additive field beyond the interface below — `status: string` (the origin's own
+  terminal-state word: `pending` / `approved` / `rejected` / `changes_requested` / `signed` /
+  `decided`) — needed for `status=decided` history mode.
+  **Canonical `urgencyScore` weights (D-UX-3, `src/core/approvals-urgency.ts` — the ONE file to
+  retune, Q13):** `urgencyScore = originBase(origin) + impactBonus(impact) + ageBonus(ageMs)`,
+  where `originBase = {pipeline:100, agency:90, automation:80, agent:80, hr:70}` (mirrors the
+  binding spec §1.2 mock: gates/agency review rank "NOW", hr leave ranks "SOON" at equal age),
+  `impactBonus = {high:15, medium:5, unclassified:0}` (automation/agent only — the other three
+  origins pass no impact), and `ageBonus(ageMs)` climbs linearly to +40 as the item approaches
+  ~80h (3.3 days) pending, then saturates. The UI's later `lib/queueUrgency.ts` (WSUX-5) MUST cite
+  this same table rather than inventing its own, per the ordering-parity fixture test in its AC.
+  Plus generic decide façade — ✅ BUILT (WSUX-2, 2026-07-23). `POST /api/:t/approvals/:id/decide {origin,decision,note?}` → `{ok:true}` (`src/core/approvals-decide.controller.ts`). A thin dispatcher, not a reimplementation: it validates `origin` against the same taxonomy, then calls the origin's OWN controller method directly (`AgencyController.decide` / `PipelineController.decideGate` / `AutomationApprovalsController.decide` for automation+agent+hr) — same `authorize()`/Cerbos call, same SQL transition, same outbox event (`pipeline.gate.decided`, `automation_approval.decided`; agency has none). No new authorization model, no widened visibility — a caller denied by the native endpoint is denied identically through the façade (same exception, same status code). The one origin-specific replica needed: agency is module-gated via a class-level `ModuleEnabledGuard`, which a direct method call bypasses, so the façade re-checks `isModuleEnabled(tenantId,'agency')` itself before dispatching (404 if disabled, matching the native route). `decision` shape validation is NOT duplicated here — each origin's own handler still 400s on an invalid value for that origin (e.g. `changes_requested` is valid for pipeline, not for automation/agency). Replaces agency-only `/approvals/pending` as the inbox source.
+- **(b) Cross-company My-Work tasks** — ✅ BUILT (read only; WSUX-3, 2026-07-23).
+  `GET /api/tasks/mine?scope=all|<companyId>&status=&dueBefore=` → `Envelope<TaskRow>`
+  (`src/core/tasks-mine.controller.ts`). A **union shim over the forked task model** (D-UX-1: the
+  fork stays until WS-B unifies it) — per authorized company, unions the caller's OWN assigned
+  rows from BOTH `tasks` (single-person `assignee_id`) and `pm_tasks` (poly-assignee jsonb,
+  module-gated), normalized into one `TaskRow`. No new authorization model: each leg is the SAME
+  `authorize()`/Cerbos "read" check (+ pm's own per-tenant module-enable gate) the native
+  `/api/:t/tasks?assignee=me` / `/api/:t/pm/tasks?assignee=me` endpoints already make. Cross-
+  company fan-out is per-tenant `withTenants([t])` legs over the caller's own authorized
+  companies (D-UX-2) — never a widened GUC set (A1 lint stays clean, zero new allowlist
+  entries); an inaccessible/foreign `scope=<companyId>` degrades to `{included:false,
+  reason:"no_access"}`, a per-tenant query failure to `{included:false, reason:"error"}` —
+  never a 500, never a cross-tenant leak. `TaskRow` gains `company`/`tenantId` (additive
+  alongside the existing single-tenant reads) **plus two more additive fields**: `source:
+  "task"|"pm_task"` (which model the row came from) and a server-computed `href` (both sources
+  resolve to `/tasks/:id` today — the pre-existing convention `pm.controller.ts`'s own
+  notifications already use — so the UI never re-derives the detail route itself; a future
+  per-source route split is backend-only). **Disjointness is asserted, never silently merged:**
+  rows are NEVER deduped by id across the two models; if the same id exists in both `tasks` and
+  `pm_tasks` for one tenant (a data bug, e.g. a migration collision), that tenant's leg throws
+  and is reported as an excluded/errored company entry rather than folding both rows together or
+  crashing the whole request. **WS-B swap marker:** the entire union lives in one function,
+  `tasksLegForTenant` in `tasks-mine.controller.ts`, clearly marked — when WS-B unifies the
+  models, only that function's body collapses to one query; the wire contract is unchanged.
+  Deviation from the pre-existing draft above: no `companyIds=` widening param was built (the
+  ticket's endpoint shape omitted it and `GET /api/approvals`, WSUX-1, set no precedent for it
+  either) — add it later analogous to ORG-7b's envelope reads if a caller needs to widen beyond
+  its own companies.
 - **(c) Typed notification payload** — ⬜ PENDING (tighten, not new path). `GET /api/:t/notifications` `payload` becomes required `{title, href, body?, entityType?, entityId?, severity?}` (was opaque). Every notification writer must populate it.
 - **(d) Inclusion envelope** — ⬜ PENDING (shared shape). `Envelope<T> = {items: T[], companies: [{id,name,included,reason?}]}`, required on (a), (b), and every future ALL/served-company fan-out (`/api/scoped/*`, department Serviced-block once ORG-13 lands).
 

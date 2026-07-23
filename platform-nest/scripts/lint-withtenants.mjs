@@ -63,7 +63,7 @@ const ALLOWED_FILES = new Set(["src/admin/service-reconciler.ts"]);
 const ALLOWLIST = [
   {
     file: "src/core/core.controller.ts",
-    line: 310,
+    line: 322,
     reason:
       "D12 cross-company rollups read: Cerbos-gated to platform_admin/group_executive only " +
       "(resource_rollup.yaml); tenant array is the platform's own companies table, not client input. " +

@@ -29,6 +29,8 @@ import { startConsumerLoop } from "./events/consumer.service";
 import { startReconcileLoop, startDriftSweepLoop } from "./events/reconcile-consumer";
 import { startN8nBridgeLoop } from "./events/n8n-bridge";
 import { startGraphBridgeLoop } from "./events/graph-bridge";
+import { startWorkActivityConsumerLoop } from "./events/work-activity-consumer";
+import { runWorkActivityBackfill } from "./core/work-activity-backfill";
 
 export async function buildApp(): Promise<NestFastifyApplication> {
   // Fastify logs are pino JSON with trace_id/span_id when OTEL is on, else stay off (unchanged
@@ -89,6 +91,14 @@ async function bootstrap(): Promise<void> {
       // eslint-disable-next-line no-console
       console.log(`graph bridge on: streams [${config.graphBridge.entityTypes.join(", ")}] -> knowledge /graph/ingest`);
     }
+    // WSUX-15 (ex-P1-05): work-activity outbox consumer, own dedicated group (own retry/dead-letter
+    // accounting, independent of the module-dispatch and reconciler groups above) — makes the P1-04
+    // department ActivityFeed LIVE off pm/meeting/pipeline events. One-shot backfill runs first (and
+    // is itself idempotent, so it's safe to run on every boot) so restarts never re-skip history.
+    await runWorkActivityBackfill();
+    startWorkActivityConsumerLoop();
+    // eslint-disable-next-line no-console
+    console.log("work-activity consumer on: streams [pm_task, pm_project, meeting_recording, pipeline_run]");
   }
   // ORG-7 §3: nightly drift/orphan sweep. Deliberately OUTSIDE the redisUrl gate above — it's a
   // plain Postgres sweep (sweepDriftAndOrphans), not stream-driven — but still dark unless the

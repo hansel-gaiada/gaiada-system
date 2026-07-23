@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { can, isElevated, canManageIT, accessibleCompanies, canSwitchCompany } from "./rbac";
+import { can, isElevated, canManageIT, accessibleCompanies, canSwitchCompany, isManagerTier } from "./rbac";
 import type { Me } from "./platform";
 
 const companies = [
@@ -111,6 +111,34 @@ describe("canManageIT", () => {
     expect(canManageIT(itA, "co-b")).toBe(false);
     expect(canManageIT(itA)).toBe(true); // has it.manage somewhere
     expect(canManageIT(me([{ role: "member", scopeType: "company", scopeId: "co-a" }]))).toBe(false);
+  });
+});
+
+describe("isManagerTier — UX-2 §1.3 Home role boundary", () => {
+  it("platform_admin/group_executive/company_admin/manager/it_admin/it_manager are manager-tier", () => {
+    for (const role of ["platform_admin", "group_executive", "company_admin", "manager", "it_admin", "it_manager"] as const) {
+      expect(isManagerTier(me([{ role, scopeType: "company", scopeId: "co-a" }]))).toBe(true);
+    }
+  });
+
+  it("member/it/hr_staff/hr_manager get the Queue+Agenda hybrid (not manager-tier)", () => {
+    for (const role of ["member", "it", "hr_staff", "hr_manager"] as const) {
+      expect(isManagerTier(me([{ role, scopeType: "company", scopeId: "co-a" }]))).toBe(false);
+    }
+  });
+
+  it("holding_head is NOT manager-tier — D-UX-4/A4 dropped the role entirely", () => {
+    // holding_head no longer exists as a Role; a stale grant string from an old
+    // session should simply not match any known tier, not crash or over-grant.
+    expect(isManagerTier(me([{ role: "holding_head", scopeType: "global", scopeId: null }]))).toBe(false);
+  });
+
+  it("any manager-tier grant wins even alongside a member grant elsewhere (tie-break rule)", () => {
+    const mixed = me([
+      { role: "manager", scopeType: "company", scopeId: "co-a" },
+      { role: "member", scopeType: "company", scopeId: "co-b" },
+    ]);
+    expect(isManagerTier(mixed)).toBe(true);
   });
 });
 

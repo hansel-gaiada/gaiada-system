@@ -14,3 +14,44 @@
 .dash-activity-dot span:first-child { width: 8px; height: 8px; border-radius: 50%; background: var(--erp-accent); margin-top: 5px; }
 .dash-activity-dot span:last-child { flex: 1; width: 0.5px; background: var(--erp-hairline); margin-top: 5px; }
 @media (max-width: 1100px) { .dash-grid { grid-template-columns: 1fr; grid-template-areas: "kpi" "chart" "tasks" "table" "activity"; } }
+
+/* ---- UX-2 §1: role-differentiated Home (WSUX-5) ---- */
+
+.needs-me-queue__row { display: flex; align-items: flex-start; gap: 12px; padding: 13px 0; border-top: 0.5px solid rgba(26, 25, 22, 0.1); }
+.needs-me-queue__dot { width: 8px; height: 8px; border-radius: 50%; margin-top: 6px; flex-shrink: 0; }
+.needs-me-queue__dot--now { background: var(--erp-accent, #6E5A43); }
+.needs-me-queue__dot--today { background: #B5622F; }
+.needs-me-queue__dot--soon { background: rgba(26, 25, 22, 0.28); }
+.needs-me-queue__body { min-width: 0; flex: 1; }
+.needs-me-queue__line { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.needs-me-queue__type { font: 700 9px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--erp-ink-50); }
+.needs-me-queue__title { font: 400 14px/1.35 var(--font-body); color: var(--text-primary); }
+.needs-me-queue__title-link { color: inherit; text-decoration: none; }
+.needs-me-queue__title-link:hover { text-decoration: underline; }
+.needs-me-queue__meta { font: 400 12px var(--font-body); color: rgba(26, 25, 22, 0.55); margin-top: 3px; }
+.needs-me-queue__actions { display: flex; gap: 6px; flex-shrink: 0; }
+
+.filter-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.filter-chip { display: inline-flex; align-items: center; gap: 8px; border: 0.5px solid var(--erp-hairline); padding: 8px 14px; text-decoration: none; color: var(--text-primary); background: var(--surface-card); }
+.filter-chip:hover { background: rgba(110, 90, 67, 0.06); }
+.filter-chip--active { border-color: var(--erp-accent); color: var(--erp-accent); }
+.filter-chip__label { font: 400 12px var(--font-body); }
+.filter-chip__count { font: 700 12px var(--font-body); }
+
+.command-center__chips-row { display: flex; justify-content: space-between; align-items: flex-end; gap: 24px; flex-wrap: wrap; margin-bottom: 22px; }
+.command-center__chips-row .throughput-sparkline { min-width: 160px; max-width: 260px; flex: 1; }
+.command-center__heading { display: block; margin-bottom: 10px; }
+
+.queue-agenda { display: grid; grid-template-columns: 1.6fr 1fr; gap: 24px; align-items: start; }
+.queue-agenda__heading { display: block; margin-bottom: 10px; }
+@media (max-width: 900px) { .queue-agenda { grid-template-columns: 1fr; } }
+
+.today-agenda__bucket { margin-bottom: 18px; }
+.today-agenda__heading { display: block; margin-bottom: 8px; }
+.today-agenda__list { list-style: none; margin: 0; padding: 0; }
+.today-agenda__item { font: 400 13px/1.5 var(--font-body); color: var(--text-primary); padding: 6px 0; border-top: 0.5px solid rgba(26, 25, 22, 0.08); }
+.today-agenda__link { color: inherit; text-decoration: none; }
+.today-agenda__link:hover { text-decoration: underline; }
+.today-agenda__meta { color: rgba(26, 25, 22, 0.5); }
+
+.throughput-sparkline { text-align: right; }

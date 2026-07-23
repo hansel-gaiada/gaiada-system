@@ -132,3 +132,20 @@ export function accessibleCompanies(me: Me): { id: string; name: string; type: s
 export function canSwitchCompany(me: Me): boolean {
   return accessibleCompanies(me).length > 1;
 }
+
+// UX-2 §1.3 — Command Center (manager-tier) vs Queue+Agenda hybrid (everyone
+// else). Keyed on role, not capability, so it's a simple lookup independent
+// of scope/company. Deliberately does NOT include `holding_head` (D-UX-4 /
+// the backbone A4 amendment already dropped that role from rbac.ts entirely —
+// see `isUnrestricted`'s comment above; ORG-7/ORG-12 `serviceScopes` replaced
+// it, and a served-company grant doesn't by itself imply manager-tier framing).
+const MANAGER_TIER = new Set<Role>([
+  "platform_admin", "group_executive", "company_admin", "manager", "it_admin", "it_manager",
+]);
+
+// "Any grant qualifies," not "every grant qualifies" — a user holding a
+// manager-tier grant in one company and a plain `member`/`it`/`hr_*` grant in
+// another still gets Command Center (UX-2 §1.3, explicit tie-break).
+export function isManagerTier(me: Me): boolean {
+  return me.roles.some((r) => MANAGER_TIER.has(r.role as Role));
+}
