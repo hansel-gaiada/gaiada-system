@@ -5,7 +5,7 @@ import "server-only";
 // Single entry point: platformFetch() calls getDemoResponse() before ever
 // touching the network when demo mode is on.
 
-import { pmDemo, allTrackerNotifications } from "./demoPm";
+import { pmDemo, allTrackerNotifications, pmTasksForUser } from "./demoPm";
 import { meetingsDemo } from "./demoMeetings";
 
 export interface DemoResult {
@@ -103,6 +103,14 @@ const TASKS: Record<string, unknown[]> = {
   "p-int-1": [],
 };
 const ALL_TASKS = Object.values(TASKS).flat();
+
+// project id -> owning company id, derived from PROJECTS — backs the WSUX-8
+// `/api/tasks/mine` demo leg (the base `tasks` model has no direct tenant
+// column of its own, same as the real schema; the tenant comes from the row's
+// RLS context, which in demo mode we recover via the project's company).
+const PROJECT_COMPANY: Record<string, string> = Object.fromEntries(
+  Object.entries(PROJECTS).flatMap(([companyId, ps]) => (ps as { id: string }[]).map((p) => [p.id, companyId])),
+);
 
 const CUSTOM_FIELDS: Record<string, unknown[]> = {
   project: [
@@ -845,6 +853,42 @@ export function getDemoResponse(method: string, fullPath: string, body?: string)
   }
   const decideMatch = p.match(/^\/api\/[^/]+\/modules\/agency\/approvals\/([^/]+)\/decide$/);
   if (decideMatch && m === "POST") return ok({ id: decideMatch[1], status: "approved" });
+
+  // ---- WSUX-3 cross-company My-Work tasks (lib/agenda.ts, `GET /api/tasks/mine`) ----
+  // Union shim demo leg: base ALL_TASKS (assignee_id) + PM poly-assignee tasks,
+  // tagged with their owning company, mirroring tasks-mine.controller.ts's
+  // real disjoint-union shape (`source`, `href`, `company`/`tenantId`).
+  if (p === "/api/tasks/mine") {
+    const scopeParam = url.searchParams.get("scope") ?? "all";
+    const statusParam = url.searchParams.get("status");
+    const dueBeforeParam = url.searchParams.get("dueBefore");
+    const scopeIds = scopeParam === "all" ? COMPANIES.map((c) => c.id as string) : [scopeParam];
+    const nameFor = (id: string) => (COMPANIES.find((c) => c.id === id)?.name as string) ?? "";
+
+    const baseRows = ALL_TASKS
+      .filter((t) => (t as { assignee_id: string | null }).assignee_id === DEMO_USER_ID)
+      .map((t) => {
+        const tr = t as { id: string; title: string; status: string; due_date: string | null; project_id: string };
+        return { id: tr.id, title: tr.title, status: tr.status, dueDate: tr.due_date, tenantId: PROJECT_COMPANY[tr.project_id] ?? "", source: "task" as const };
+      });
+    const pmRows = pmTasksForUser(DEMO_USER_ID).map((t) => ({
+      id: t.id, title: t.title, status: t.status, dueDate: t.dueDate, tenantId: "co-agency", source: "pm_task" as const,
+    }));
+
+    const items = [...baseRows, ...pmRows]
+      .filter((r) => scopeIds.includes(r.tenantId))
+      .filter((r) => (statusParam ? r.status === statusParam : true))
+      .filter((r) => (dueBeforeParam ? (r.dueDate !== null && r.dueDate <= dueBeforeParam) : true))
+      .map((r) => ({ ...r, company: nameFor(r.tenantId), href: `/tasks/${r.id}` }));
+    items.sort((a, b) => {
+      if (a.dueDate === b.dueDate) return 0;
+      if (a.dueDate === null) return 1;
+      if (b.dueDate === null) return -1;
+      return a.dueDate < b.dueDate ? -1 : 1;
+    });
+    const companies = scopeIds.map((id) => ({ id, name: nameFor(id), included: true }));
+    return ok({ items, companies });
+  }
 
   // ---- WSUX-1 unified read (lib/approvals.ts) ----
   if (p === "/api/approvals") {

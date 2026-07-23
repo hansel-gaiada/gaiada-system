@@ -1,16 +1,21 @@
 import Link from "next/link";
+import type { ReactNode } from "react";
 import { redirect } from "next/navigation";
 import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
+import { accessibleCompanies } from "@/lib/rbac";
 import { listAllPmTasks } from "@/lib/pm";
 import { listDeliverables, listProjects } from "@/lib/entities";
+import { listMyTasks } from "@/lib/agenda";
 import { PageHeader } from "@/components/PageHeader";
 import { Card, StatusBadge, KpiTile } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
+import { ScopePill } from "@/components/scope/ScopePill";
+import { EnvelopeBanner } from "@/components/scope/EnvelopeBanner";
 import { formatDate } from "@/lib/format";
 
-interface Item { date: string; kind: "task" | "deliverable" | "project"; title: string; href?: string; status: string; who?: string }
+interface Item { date: string; kind: "task" | "deliverable" | "project"; title: string; href?: string; status: string; who?: string; company?: string }
 
 function bucketLabel(dateISO: string, today: string): string {
   const d = new Date(dateISO), t = new Date(today);
@@ -24,25 +29,69 @@ function bucketLabel(dateISO: string, today: string): string {
 }
 const ORDER = ["Overdue", "Today", "Tomorrow", "This week", "This month", "Later"];
 
-export default async function CalendarPage() {
+type SearchParams = Promise<{ scope?: string }>;
+
+export default async function CalendarPage({ searchParams }: { searchParams: SearchParams }) {
   const userId = await getSessionUserId();
   if (!userId) redirect("/login");
   const me = await getMe(userId);
-  const tenant = await getActiveTenant(me);
-  if (!tenant) {
-    return (<><PageHeader eyebrow="Workspace" title="Calendar" /><EmptyNote>Select a company from the top bar.</EmptyNote></>);
+  const { scope: rawScope } = await searchParams;
+
+  const companies = accessibleCompanies(me);
+  const scope = rawScope && companies.some((c) => c.id === rawScope) ? rawScope : "all";
+
+  if (companies.length === 0) {
+    return (<><PageHeader eyebrow="Workspace" title="Calendar" /><EmptyNote>You don&apos;t have access to any company yet.</EmptyNote></>);
   }
 
-  const [tasks, deliverables, projects] = await Promise.all([
-    listAllPmTasks(userId, tenant), listDeliverables(userId, tenant), listProjects(userId, tenant).catch(() => []),
-  ]);
+  const buildScopeHref = (v: "all" | string) => (v === "all" ? "/calendar" : `/calendar?scope=${v}`);
 
   const items: Item[] = [];
-  for (const t of tasks) if (t.dueDate && t.status !== "done") items.push({ date: t.dueDate, kind: "task", title: t.title, href: `/tasks/${t.id}`, status: t.status, who: t.assignee?.responsibleName });
-  for (const d of deliverables) if (d.due_date && d.status !== "done") items.push({ date: d.due_date, kind: "deliverable", title: d.name, status: d.status });
-  for (const p of projects) if (p.due_date && p.status !== "completed" && p.status !== "archived") items.push({ date: p.due_date, kind: "project", title: p.name, href: `/projects/${p.id}`, status: p.status });
-  items.sort((a, b) => a.date.localeCompare(b.date));
+  let envelopeBanner: ReactNode = null;
+  let workload: [string, number][] = [];
+  let workloadNote: string | null = null;
 
+  if (scope === "all") {
+    // Cross-company default (owner decision): the caller's own due tasks,
+    // company-tagged, via the WSUX-3 union shim — plus the active company's
+    // deliverables/projects (no cross-company reader exists for those yet).
+    const [{ envelope, unavailable }, activeTenant] = await Promise.all([
+      listMyTasks(userId, { scope: "all" }),
+      getActiveTenant(me),
+    ]);
+    for (const t of envelope.items) if (t.dueDate && t.status !== "done") items.push({ date: t.dueDate, kind: "task", title: t.title, href: t.href, status: t.status, company: t.company });
+    envelopeBanner = unavailable ? (
+      <p className="sys-empty-note" role="status">Cross-company tasks aren&apos;t reachable right now — showing nothing rather than a guess. Try again shortly.</p>
+    ) : (
+      <EnvelopeBanner companies={envelope.companies} />
+    );
+    if (activeTenant) {
+      const activeName = companies.find((c) => c.id === activeTenant)?.name ?? "your active company";
+      const [deliverables, projects] = await Promise.all([
+        listDeliverables(userId, activeTenant), listProjects(userId, activeTenant).catch(() => []),
+      ]);
+      for (const d of deliverables) if (d.due_date && d.status !== "done") items.push({ date: d.due_date, kind: "deliverable", title: d.name, status: d.status, company: activeName });
+      for (const p of projects) if (p.due_date && p.status !== "completed" && p.status !== "archived") items.push({ date: p.due_date, kind: "project", title: p.name, href: `/projects/${p.id}`, status: p.status, company: activeName });
+    }
+    workloadNote = "Workload needs a single company — narrow the scope pill above.";
+  } else {
+    // Single-company scope — unchanged behavior (every task in the company,
+    // not just the caller's own), resolved from the ScopePill's chosen
+    // company rather than the top-bar active tenant.
+    const tenant = scope;
+    const [tasks, deliverables, projects] = await Promise.all([
+      listAllPmTasks(userId, tenant), listDeliverables(userId, tenant), listProjects(userId, tenant).catch(() => []),
+    ]);
+    for (const t of tasks) if (t.dueDate && t.status !== "done") items.push({ date: t.dueDate, kind: "task", title: t.title, href: `/tasks/${t.id}`, status: t.status, who: t.assignee?.responsibleName });
+    for (const d of deliverables) if (d.due_date && d.status !== "done") items.push({ date: d.due_date, kind: "deliverable", title: d.name, status: d.status });
+    for (const p of projects) if (p.due_date && p.status !== "completed" && p.status !== "archived") items.push({ date: p.due_date, kind: "project", title: p.name, href: `/projects/${p.id}`, status: p.status });
+
+    const load = new Map<string, number>();
+    for (const t of tasks) if (t.status !== "done") { const w = t.assignee?.responsibleName ?? "Unassigned"; load.set(w, (load.get(w) ?? 0) + 1); }
+    workload = [...load.entries()].sort((a, b) => b[1] - a[1]);
+  }
+
+  items.sort((a, b) => a.date.localeCompare(b.date));
   const today = new Date().toISOString().slice(0, 10);
   const buckets = new Map<string, Item[]>();
   for (const it of items) {
@@ -51,18 +100,18 @@ export default async function CalendarPage() {
     arr.push(it);
     buckets.set(b, arr);
   }
-
-  // Workload: open tasks per responsible person.
-  const load = new Map<string, number>();
-  for (const t of tasks) if (t.status !== "done") { const w = t.assignee?.responsibleName ?? "Unassigned"; load.set(w, (load.get(w) ?? 0) + 1); }
-  const workload = [...load.entries()].sort((a, b) => b[1] - a[1]);
   const maxLoad = Math.max(1, ...workload.map(([, n]) => n));
-
   const overdue = (buckets.get("Overdue") ?? []).length;
 
   return (
     <>
-      <PageHeader eyebrow="Workspace" title="Calendar" subtitle="Everything with a due date across this company — tasks, deliverables and projects." />
+      <PageHeader
+        eyebrow="Workspace"
+        title="Calendar"
+        subtitle={scope === "all" ? "Your due tasks across every company, plus your active company's deliverables and projects." : "Everything with a due date in this company — tasks, deliverables and projects."}
+        actions={<ScopePill companies={companies} value={scope} onChangeHref={buildScopeHref} />}
+      />
+      {envelopeBanner}
 
       <div style={{ display: "grid", gap: 16, gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", marginBottom: 20 }}>
         <KpiTile label="Due items" value={String(items.length)} />
@@ -84,6 +133,7 @@ export default async function CalendarPage() {
                       <span style={{ font: "700 9px var(--font-body)", letterSpacing: ".06em", textTransform: "uppercase", color: "var(--erp-ink-50)", border: "0.5px solid var(--erp-hairline)", padding: "2px 6px" }}>{it.kind}</span>
                       {it.href ? <Link href={it.href} style={{ font: "400 14px var(--font-body)", color: "var(--text-primary)", textDecoration: "none" }}>{it.title}</Link> : <span style={{ font: "400 14px var(--font-body)" }}>{it.title}</span>}
                       {it.who && <span style={{ font: "400 12px var(--font-body)", color: "var(--erp-ink-50)" }}>· {it.who}</span>}
+                      {it.company && <span style={{ font: "400 12px var(--font-body)", color: "var(--erp-ink-50)" }}>· {it.company}</span>}
                     </span>
                     <span style={{ display: "inline-flex", gap: 10, alignItems: "center", whiteSpace: "nowrap" }}>
                       <StatusBadge label={it.status} />
@@ -97,7 +147,7 @@ export default async function CalendarPage() {
         </div>
 
         <Card title="Workload — open tasks">
-          {workload.length === 0 ? <EmptyNote>No open tasks.</EmptyNote> : (
+          {workloadNote ? <EmptyNote>{workloadNote}</EmptyNote> : workload.length === 0 ? <EmptyNote>No open tasks.</EmptyNote> : (
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
               {workload.map(([who, n]) => (
                 <div key={who} style={{ display: "flex", flexDirection: "column", gap: 4 }}>

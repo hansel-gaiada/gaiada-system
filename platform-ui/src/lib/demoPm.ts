@@ -57,7 +57,10 @@ let tasks: PmTask[] = [
   mkTask("t-5", "p-web-1", "QA checkout flow", "blocked", "urgent", person("u-dev"), [sub("s1", "Repro payment bug", true), sub("s2", "Fix + retest", false)], "m-2", "2026-07-09", "End-to-end QA of the checkout, blocked on the payment gateway sandbox.", "2026-07-07", 360, ["t-4"]),
   mkTask("t-web-a", "p-web-1", "Design homepage mockup", "done", "normal", person("u-pm"), [sub("s1", "Wireframe", true), sub("s2", "Hi-fi", true)], "m-1", "2026-06-28", "Deliver the hi-fi homepage mockup for sign-off.", "2026-06-24", 600, []),
   mkTask("t-web-b", "p-web-1", "Set up analytics", "todo", "normal", unit("division", "dept-1-div-1", "Frontend", "u-dev"), [], "m-2", "2026-07-18", "Instrument the site with product analytics and consent.", "2026-07-15", 240, []),
-  mkTask("t-web-c", "p-web-1", "Content migration", "todo", "low", null, [], null, "2026-07-19", "Migrate legacy CMS content into the new site.", "2026-07-16", 300, []),
+  // Assignee is the demo user (rather than null) so the WSUX-8 cross-company
+  // `/api/tasks/mine` demo leg has a real pm_task row alongside its base
+  // `tasks` rows — exercising the disjoint union, not just one side of it.
+  mkTask("t-web-c", "p-web-1", "Content migration", "todo", "low", person("demo-hansel"), [], null, "2026-07-19", "Migrate legacy CMS content into the new site.", "2026-07-16", 300, []),
   mkTask("t-6", "p-seo-1", "Keyword gap analysis", "todo", "normal", person("u-pm"), [], null, "2026-07-18", "Identify keyword gaps vs. the top 3 competitors.", "2026-07-16", 240, []),
 ];
 
@@ -135,6 +138,15 @@ export function allTrackerNotifications() {
   return trackerNotifications
     .map(({ forUserId: _f, ...rest }) => rest)
     .reverse();
+}
+
+// Public: WSUX-8's cross-company `/api/tasks/mine` demo leg needs the poly-
+// assignee PM tasks belonging to one user, same shape the real
+// tasks-mine.controller.ts's `source: "pm_task"` leg returns. All demo PM
+// projects live under co-agency (see demoFixtures' PROJECTS map), so the
+// caller tags every row with that tenant.
+export function pmTasksForUser(userId: string): PmTask[] {
+  return tasks.filter((t) => t.assignee?.responsibleId === userId && t.status !== "done");
 }
 
 const ok = (json: unknown): Result => ({ status: 200, json });

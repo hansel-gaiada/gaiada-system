@@ -1,16 +1,23 @@
 import Link from "next/link";
+import type { ReactNode } from "react";
 import { redirect } from "next/navigation";
 import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
-import { getActiveTenant } from "@/lib/tenant";
+import { accessibleCompanies } from "@/lib/rbac";
 import { listAllPmTasks } from "@/lib/pm";
 import { listTasks } from "@/lib/entities";
+import { listMyTasks } from "@/lib/agenda";
 import { PageHeader } from "@/components/PageHeader";
 import { Card } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
 import { DataTable, type Column } from "@/components/data/DataTable";
+import { ScopePill } from "@/components/scope/ScopePill";
+import { EnvelopeBanner } from "@/components/scope/EnvelopeBanner";
 
-type Search = Promise<{ assignee?: string }>;
+type Search = Promise<{ assignee?: string; scope?: string }>;
+
+// Single-company view — the original rich PM-backed columns (project,
+// assignee, priority, progress). Unchanged from before this ticket.
 const COLUMNS: Column[] = [
   { key: "title", header: "Task", sortable: true },
   { key: "project", header: "Project", sortable: true },
@@ -20,26 +27,66 @@ const COLUMNS: Column[] = [
   { key: "status", header: "Status", format: "status", sortable: true, align: "right" },
 ];
 
+// All-companies view (WSUX-8) — backed by `GET /api/tasks/mine` (WSUX-3),
+// which only ever returns the caller's OWN tasks, so there is no
+// project/assignee/priority/progress here (those are single-tenant PM
+// concepts) — a company column replaces them.
+const COLUMNS_ALL: Column[] = [
+  { key: "title", header: "Task", sortable: true },
+  { key: "company", header: "Company", sortable: true },
+  { key: "status", header: "Status", format: "status", sortable: true, align: "right" },
+  { key: "due", header: "Due", format: "date", sortable: true, align: "right" },
+];
+
 export default async function TasksPage({ searchParams }: { searchParams: Search }) {
   const userId = await getSessionUserId();
   if (!userId) redirect("/login");
   const me = await getMe(userId);
-  const tenant = await getActiveTenant(me);
-  const { assignee } = await searchParams;
+  const { assignee, scope: rawScope } = await searchParams;
   const mine = assignee === "me";
 
-  if (!tenant) {
-    return (<><PageHeader eyebrow="Business" title="Tasks" /><EmptyNote>Select a company from the top bar.</EmptyNote></>);
+  const companies = accessibleCompanies(me);
+  const scope = rawScope && companies.some((c) => c.id === rawScope) ? rawScope : "all";
+
+  if (companies.length === 0) {
+    return (<><PageHeader eyebrow="Business" title="Tasks" /><EmptyNote>You don&apos;t have access to any company yet.</EmptyNote></>);
   }
 
-  // Prefer the rich PM tasks (unifies with the board/detail); fall back to base tasks.
+  const buildScopeHref = (v: "all" | string) => {
+    const p = new URLSearchParams();
+    if (v !== "all") p.set("scope", v);
+    if (v !== "all" && mine) p.set("assignee", "me"); // the assignee tab is single-company only
+    const qs = p.toString();
+    return qs ? `/tasks?${qs}` : "/tasks";
+  };
+
   let rows: Record<string, unknown>[];
-  const pm = await listAllPmTasks(userId, tenant, mine ? { assignee: "me" } : {});
-  if (pm.length > 0) {
-    rows = pm.map((t) => ({ id: t.id, title: t.title, project: t.projectName, assignee: t.assignee?.responsibleName ?? "Unassigned", priority: t.priority, progress: t.progress, status: t.status }));
+  let columns: Column[];
+  let envelopeBanner: ReactNode = null;
+
+  if (scope === "all") {
+    // Cross-company default (WS-UX plan owner decision): the union shim over
+    // the forked task model, one company banner if any leg is excluded.
+    const { envelope, unavailable } = await listMyTasks(userId, { scope: "all" });
+    rows = envelope.items.map((t) => ({ id: t.id, title: t.title, company: t.company, status: t.status, due: t.dueDate }));
+    columns = COLUMNS_ALL;
+    envelopeBanner = unavailable ? (
+      <p className="sys-empty-note" role="status">Cross-company tasks aren&apos;t reachable right now — showing nothing rather than a guess. Try again shortly.</p>
+    ) : (
+      <EnvelopeBanner companies={envelope.companies} />
+    );
   } else {
-    const base = await listTasks(userId, tenant).catch(() => []);
-    rows = base.map((t) => ({ id: t.id, title: t.title, project: t.project_name, assignee: t.assignee_id ?? "—", priority: t.priority ?? "—", progress: 0, status: t.status ?? "—" }));
+    // Single-company scope — unchanged behavior, just resolved from the
+    // ScopePill's chosen company instead of the top-bar active tenant.
+    const tenant = scope;
+    const pm = await listAllPmTasks(userId, tenant, mine ? { assignee: "me" } : {});
+    if (pm.length > 0) {
+      rows = pm.map((t) => ({ id: t.id, title: t.title, project: t.projectName, assignee: t.assignee?.responsibleName ?? "Unassigned", priority: t.priority, progress: t.progress, status: t.status }));
+    } else {
+      const base = await listTasks(userId, tenant).catch(() => []);
+      rows = base.map((t) => ({ id: t.id, title: t.title, project: t.project_name, assignee: t.assignee_id ?? "—", priority: t.priority ?? "—", progress: 0, status: t.status ?? "—" }));
+    }
+    columns = COLUMNS;
   }
 
   const tab = (label: string, href: string, active: boolean) => (
@@ -51,16 +98,24 @@ export default async function TasksPage({ searchParams }: { searchParams: Search
       <PageHeader
         eyebrow="Business"
         title="Tasks"
-        actions={<Link href="/tasks/new" className="lux-btn lux-btn--solid lux-btn--sm">New task</Link>}
+        actions={
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <ScopePill companies={companies} value={scope} onChangeHref={buildScopeHref} />
+            <Link href="/tasks/new" className="lux-btn lux-btn--solid lux-btn--sm">New task</Link>
+          </div>
+        }
       />
-      <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
-        {tab("All tasks", "/tasks", !mine)}
-        {tab("Assigned to me", "/tasks?assignee=me", mine)}
-      </div>
+      {scope !== "all" && (
+        <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+          {tab("All tasks", `/tasks?scope=${scope}`, !mine)}
+          {tab("Assigned to me", `/tasks?scope=${scope}&assignee=me`, mine)}
+        </div>
+      )}
+      {envelopeBanner}
       {rows.length === 0 ? (
-        <Card><EmptyNote>{mine ? "No tasks assigned to you." : "No tasks yet. Create one under a project."}</EmptyNote></Card>
+        <Card><EmptyNote>{scope === "all" ? "No tasks assigned to you across your companies." : mine ? "No tasks assigned to you." : "No tasks yet. Create one under a project."}</EmptyNote></Card>
       ) : (
-        <DataTable columns={COLUMNS} rows={rows} link={{ base: "/tasks", idKey: "id", labelKey: "title" }} csvName="tasks" pageSize={25} />
+        <DataTable columns={columns} rows={rows} link={{ base: "/tasks", idKey: "id", labelKey: "title" }} csvName="tasks" pageSize={25} />
       )}
     </>
   );
