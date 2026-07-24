@@ -3,6 +3,7 @@
 // low-assurance chat principal can never satisfy — it gets a step-up prompt, not data.
 import { config } from "./config";
 import { complete } from "./llm";
+import { persona, dataNote, fence } from "./persona";
 import { callHubTool, HubDeniedError } from "./hub";
 import { getMessages, saveMessage } from "./store";
 import { summarizeChat } from "./summarize";
@@ -121,7 +122,15 @@ export function registerBuiltins(): void {
         if (hits.length === 0) return "No matching company knowledge — nothing indexed for you yet, or nothing relevant.";
         const context = hits.map((h, i) => `[${i + 1}] ${h.text}`).join("\n");
         return complete(
-          `Answer the question using ONLY these company-knowledge snippets. Cite the [n] you used. If they don't answer it, say so.\n\n${context}\n\nQuestion: ${question}`,
+          [
+            persona(),
+            "",
+            "Answer the question using ONLY the company-knowledge snippets below. Cite the [n] you used. If they don't answer it, say so plainly — don't guess or pad.",
+            "",
+            fence("COMPANY-KNOWLEDGE SNIPPETS", context),
+            "",
+            fence("QUESTION FROM THE USER", question),
+          ].join("\n"),
         );
       } catch (err) {
         if (err instanceof HubDeniedError) {
@@ -167,8 +176,9 @@ export function registerBuiltins(): void {
         .slice(-200)
         .map((r) => `${r.senderName || r.senderId}: ${r.text}${r.mediaText ? ` [media: ${r.mediaText}]` : ""}`)
         .join("\n");
+      // Extraction task — neutral/factual, injection-guarded, no conversational persona.
       return complete(
-        `From this work-group chat, extract the concrete action items as a short bullet list — owner (if stated), task, deadline (if stated). Only items actually mentioned.\n\n--- CHAT ---\n${lines}\n--- END ---`,
+        `From this work-group chat, extract the concrete action items as a short bullet list — owner (if stated), task, deadline (if stated). Only items actually mentioned; do not invent any.\n\n${dataNote()}\n\n${fence("CHAT", lines)}`,
       );
     },
   });

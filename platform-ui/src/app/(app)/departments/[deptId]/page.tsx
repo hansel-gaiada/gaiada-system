@@ -5,7 +5,7 @@ import { getMe } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
 import { getDepartment, getServicedCompanies, computeDeptKpis, computeProjectHealth } from "@/lib/departments";
 import { listProjects, listMembers } from "@/lib/entities";
-import { listPmTasks, listMilestones } from "@/lib/pm";
+import { listPmTasks, listMilestones, listProjectStatuses } from "@/lib/pm";
 import { listWorkActivity, objectLabel, activityHref, humanizeVerb, actorLabel } from "@/lib/activity";
 import { listClaudeSeats, mySeat, launcherSeatProps } from "@/lib/claudeSeats";
 import { toolkitFor } from "@/lib/deptToolkits";
@@ -74,12 +74,15 @@ export default async function DepartmentHomePage({ params, searchParams }: { par
   // the department's poly-assignee task list — a project can have open work
   // no one in this department is individually assigned to yet.
   const owned = allProjects.filter((p) => p.department_id === deptId);
-  const [ownedTaskLists, ownedMilestoneLists] = await Promise.all([
+  const [ownedTaskLists, ownedMilestoneLists, ownedStatuses] = await Promise.all([
     Promise.all(owned.map((p) => listPmTasks(userId, tenant, p.id))),
     Promise.all(owned.map((p) => listMilestones(userId, tenant, p.id))),
+    Promise.all(owned.map((p) => listProjectStatuses(userId, tenant, p.id))),
   ]);
-  const health = owned.map((p, i) => computeProjectHealth(ownedTaskLists[i], ownedMilestoneLists[i]));
-  const kpis = computeDeptKpis(dept.tasks, health.map((h) => h.progressPct));
+  // P2-05: health/KPI counts derive from the isDone/isBlocked FLAGS resolved per
+  // project's own status registry (correct even when a project renamed "Done").
+  const health = owned.map((p, i) => computeProjectHealth(ownedTaskLists[i], ownedMilestoneLists[i], undefined, ownedStatuses[i]));
+  const kpis = computeDeptKpis(dept.tasks, health.map((h) => h.progressPct), undefined, dept.statusesByProject);
 
   const nameById = new Map(members.map((mm) => [mm.user_id, mm.name]));
   const activityItems: ActivityItem[] = feed.map((row) => ({
@@ -118,7 +121,7 @@ export default async function DepartmentHomePage({ params, searchParams }: { par
               <HealthRingCard
                 key={p.id}
                 projectName={p.name}
-                href={`/projects/${p.id}`}
+                href={`/departments/${deptId}/projects/${p.id}`}
                 progressPct={health[i].progressPct}
                 openCount={health[i].openCount}
                 nextMilestone={health[i].nextMilestone}

@@ -10,26 +10,39 @@ import (
 )
 
 type Config struct {
-	Port                   int
-	Host                   string
-	GatewayToken           string
-	GeminiAPIKey           string
-	GeminiModel            string
-	AnthropicAPIKey        string
-	AnthropicModel         string
-	OllamaURL              string
-	OllamaModel            string
-	OllamaEmbedModel       string
-	WhisperURL             string
-	WhisperModel           string
-	LLMChain               []string
-	MediaChain             []string
-	EmbedChain             []string
-	DailyCallCap           int
-	PerTenantDailyCallCap  int
-	EgressAllowlist        []string
-	BreakerThreshold       int
-	BreakerCooldownMs      int
+	Port             int
+	Host             string
+	GatewayToken     string
+	GeminiAPIKey     string
+	GeminiModel      string
+	AnthropicAPIKey  string
+	AnthropicModel   string
+	OllamaURL        string
+	OllamaModel      string
+	OllamaEmbedModel string
+	// OpenAI-compatible provider (fronts Ollama Cloud / OpenRouter / vLLM / …). Holds a cloud
+	// key, so it is excluded in "site" topology mode the same way gemini/claude are.
+	OpenAIBaseURL         string
+	OpenAIAPIKey          string
+	OpenAIModel           string
+	OpenAIVisionModel     string
+	OpenAIMaxTokens       int
+	WhisperURL            string
+	WhisperModel          string
+	LLMChain              []string
+	MediaChain            []string
+	EmbedChain            []string
+	DailyCallCap          int
+	PerTenantDailyCallCap int
+	EgressAllowlist       []string
+	BreakerThreshold      int
+	BreakerCooldownMs     int
+	// ProviderTimeoutMs bounds a single provider attempt (B5: gateway reliability). Each
+	// capability handler derives a fresh context.WithTimeout(r.Context(), ProviderTimeoutMs)
+	// per provider tried, so a hung provider fails over cleanly within budget instead of
+	// hanging the whole request, and a client disconnect (r.Context() canceled) still
+	// cancels upstream work immediately.
+	ProviderTimeoutMs      int
 	AuditFile              string
 	MediaMaxBytes          int64
 	TLSMode                string // off | permissive | enforced
@@ -96,6 +109,11 @@ func Load() Config {
 		OllamaURL:             envOr("OLLAMA_URL", "http://localhost:11434"),
 		OllamaModel:           envOr("OLLAMA_MODEL", "llama3.2"),
 		OllamaEmbedModel:      envOr("OLLAMA_EMBED_MODEL", "nomic-embed-text"),
+		OpenAIBaseURL:         envOr("OPENAI_BASE_URL", ""),
+		OpenAIAPIKey:          envOr("OPENAI_API_KEY", ""),
+		OpenAIModel:           envOr("OPENAI_MODEL", "deepseek-v4-flash"),
+		OpenAIVisionModel:     envOr("OPENAI_VISION_MODEL", "qwen3.5:397b"),
+		OpenAIMaxTokens:       envInt("OPENAI_MAX_TOKENS", 1024),
 		WhisperURL:            envOr("WHISPER_URL", ""),
 		WhisperModel:          envOr("WHISPER_MODEL", "Systran/faster-whisper-small"),
 		LLMChain:              splitCsv(envOr("LLM_CHAIN", "ollama,gemini,claude")),
@@ -106,6 +124,7 @@ func Load() Config {
 		EgressAllowlist:       splitCsv(envOr("EGRESS_ALLOWLIST", "")),
 		BreakerThreshold:      envInt("BREAKER_THRESHOLD", 3),
 		BreakerCooldownMs:     envInt("BREAKER_COOLDOWN_MS", 60_000),
+		ProviderTimeoutMs:     envInt("PROVIDER_TIMEOUT_MS", 60_000),
 		AuditFile:             envOr("AUDIT_FILE", "data/egress-audit.jsonl"),
 		MediaMaxBytes:         int64(envInt("MEDIA_MAX_BYTES", 15*1024*1024)),
 		TLSMode:               envOr("GATEWAY_TLS_MODE", "permissive"),

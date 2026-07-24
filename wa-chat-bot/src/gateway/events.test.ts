@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { normalizeWahaEvent, normalizeTelegramEvent } from "./events";
+import { config } from "../config";
 
 describe("normalizeWahaEvent", () => {
   it("wraps a text message", () => {
@@ -30,6 +31,28 @@ describe("normalizeWahaEvent", () => {
 
   it("returns null for unknown events", () => {
     expect(normalizeWahaEvent({ event: "presence.update", payload: {} })).toBeNull();
+  });
+
+  it("parses session.status (payload.status shape)", () => {
+    const ev = normalizeWahaEvent({ event: "session.status", payload: { name: "default", status: "WORKING", timestamp: 5 } });
+    expect(ev).toEqual({ kind: "session", session: "default", status: "WORKING", ts: 5000 });
+  });
+
+  it("parses session.status tolerating the payload.body.status shape", () => {
+    const ev = normalizeWahaEvent({ event: "session.status", payload: { name: "default", body: { status: "SCAN_QR_CODE" } } });
+    expect(ev?.kind).toBe("session");
+    if (ev?.kind === "session") expect(ev.status).toBe("SCAN_QR_CODE");
+  });
+
+  it("falls back to config.wahaSession when session.status omits the session name", () => {
+    config.wahaSession = "prod-session";
+    const ev = normalizeWahaEvent({ event: "session.status", payload: { status: "FAILED" } });
+    expect(ev?.kind).toBe("session");
+    if (ev?.kind === "session") expect(ev.session).toBe("prod-session");
+  });
+
+  it("returns null for session.status with no discernible status", () => {
+    expect(normalizeWahaEvent({ event: "session.status", payload: { name: "default" } })).toBeNull();
   });
 });
 

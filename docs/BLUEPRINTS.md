@@ -4,10 +4,11 @@ Rendered, printable engineering blueprints for the program. These are the C-leve
 documents; the running code (`README.md`, `CLAUDE.md`, the `docs/superpowers/` specs) remains the
 source of truth for exact status.
 
-> **Files (in-repo):** both blueprints are committed under [`blueprints/`](./blueprints/) as **PDF**
+> **Files (in-repo):** all three blueprints are committed under [`blueprints/`](./blueprints/) as **PDF**
 > (print-ready, diagrams rendered) and **HTML** source:
 > - `blueprints/GAIADA-WebDesk-Engineering-Blueprint.pdf` · `blueprints/webdesk-blueprint.html`
 > - `blueprints/Gaiada-AI-Platform-System-Blueprint.pdf` · `blueprints/gaiada-blueprint.html`
+> - `blueprints/GAIADA-Search-Marketing-Engineering-Blueprint.pdf` · `blueprints/search-marketing-blueprint.html`
 >
 > They are also hosted as artifacts (private until shared from the artifact's share menu; URLs below).
 >
@@ -15,7 +16,8 @@ source of truth for exact status.
 > renders Mermaid natively). To make PDFs, render through headless Chromium with Mermaid injected and
 > diagrams scaled to fit the page — see `blueprints/render-pdf.js` (Playwright + `mermaid@10`,
 > `useMaxWidth:false` + `svg{max-width:100%;max-height:225mm}` so nothing clips). Run from a dir with
-> `mermaid` installed: `node render-pdf.js`.
+> `mermaid` installed: `node render-pdf.js` (it renders all three files listed in the script's `files`
+> array — add a new blueprint's `{in, out, foot}` entry there when one is added).
 
 ---
 
@@ -42,6 +44,43 @@ architecture, environments & promotion, observability/ops, and the phased roadma
 - **URL:** https://claude.ai/code/artifact/9ccdc040-9886-4c1d-a7ca-c052ca16a731
 - **Version:** v1.0 · 2026-07-23
 - **Print:** A4/Letter, page-breaks per part.
+
+## 3. GAIADA Search-Marketing — Engineering Blueprint
+
+**Search-marketing** blueprint (SEO department): SEO, SEM, and GEO/AEO as one `platform-nest` module
+vertical (`search`) plus a department console — not adopted external apps. Leads with the foundation
+research and the **locked provider/cost model** (DataForSEO Standard primary + Semrush premium behind
+a pluggable abstraction, self-hosted crawlers, local-Hermes-first AI, ~$8–10/client/mo blended), then
+covers scope & pillars, system overview, trust zones, the domain model & schema (incl. the dual-mode
+`search_change_proposals` execution artifact), the data-provider abstraction & cost ledger, the
+fork/adapt verdicts per OSS repo, AI design (task→model routing + the AI-drafts→human-approves→execute
+spine), the console UX **button capability matrix**, ERP integration points, automation flows, trust &
+security, the full **P0–P4 ticket decomposition** (26 tickets + 2 committed P4, /army-ready), and the
+open questions & decision log.
+
+- **URL:** https://claude.ai/code/artifact/631b6c12-cb1f-40bd-9a88-f0e91bfa751e
+- **Version:** v1.1 · 2026-07-23
+- **Print:** A4/Letter, page-breaks per section (28 pages).
+
+## 4. GAIADA Social Media — Engineering Blueprint
+
+**Social-media** blueprint (Social Media department): organic publishing, engagement, copywriting, and
+digital-asset creation as one `platform-nest` module vertical (`social`) plus the **Publish** department
+console (Calendar · Composer · Inbox · Analytics) — not an adopted external app. Its two defining hazards
+frame the design: **public irreversibility** (a bad post ships to the world) and a **license boundary**
+(the AGPL publisher must never infect the platform). Covers scope & pillars (v1 = organic; paid/listening/
+influencer parked), system overview, trust zones & **AGPL containment** (Postiz runs as an isolated
+REST-only engine; drafts never enter it; it sees a post only after WS4 approval), the domain model & schema
+(`social_*` — master posts + per-network variants, connector registry, inbox threads, usage ledger), the
+publisher boundary & cost ledger (X per-post fees + generative credits, stop-loss chain), the fork/adapt
+plan (thin-fork invariants + Mixpost-Pro tripwires), AI design (task→model routing + brand-voice RAG + MCP
+tools), the console **button capability matrix**, ERP integration, automation flows, security (wrong-account
+defence in depth), the full **P0–P4 ticket decomposition** (27 tickets + 2 decision-gated, /army-ready), and
+the open questions & decision log.
+
+- **Design doc:** [`blueprints/smm-design.md`](./blueprints/smm-design.md) · **Foundation:** [`blueprints/smm-foundation.md`](./blueprints/smm-foundation.md)
+- **Version:** v1.0 · 2026-07-23
+- **Print:** A4/Letter, page-breaks per section. (Not yet hosted as a claude.ai artifact.)
 
 ---
 

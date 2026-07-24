@@ -2,10 +2,36 @@ package providers
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 )
+
+// B5: a 429 must yield a typed *RateLimitError with the parsed Retry-After window.
+func TestClaudeCompleteReturnsRateLimitErrorOn429(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Retry-After", "22")
+		w.WriteHeader(http.StatusTooManyRequests)
+		w.Write([]byte(`{"error":{"message":"rate limited"}}`))
+	}))
+	defer srv.Close()
+
+	p := &ClaudeProvider{APIKey: "k", Model: "claude-haiku-4-5-20251001", Client: srv.Client()}
+	p.baseURL = srv.URL
+	_, err := p.Complete(context.Background(), "hi")
+	if err == nil {
+		t.Fatal("expected an error on 429")
+	}
+	var rl *RateLimitError
+	if !errors.As(err, &rl) {
+		t.Fatalf("expected *RateLimitError, got %T: %v", err, err)
+	}
+	if rl.RetryAfter != 22*time.Second {
+		t.Fatalf("expected RetryAfter=22s, got %s", rl.RetryAfter)
+	}
+}
 
 func TestClaudeAvailable(t *testing.T) {
 	if (&ClaudeProvider{APIKey: ""}).Available() {

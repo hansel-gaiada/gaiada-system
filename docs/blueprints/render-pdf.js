@@ -7,7 +7,12 @@ const mermaidJs = fs.readFileSync(path.resolve('node_modules/mermaid/dist/mermai
 const files = [
   { in: 'webdesk-blueprint.html', out: 'GAIADA-WebDesk-Engineering-Blueprint.pdf', foot: 'GAIADA WebDesk — Engineering Blueprint' },
   { in: 'gaiada-blueprint.html',  out: 'Gaiada-AI-Platform-System-Blueprint.pdf', foot: 'Gaiada AI Platform — System Blueprint' },
-];
+  { in: 'search-marketing-blueprint.html', out: 'GAIADA-Search-Marketing-Engineering-Blueprint.pdf', foot: 'GAIADA Search-Marketing — Engineering Blueprint' },
+  { in: 'smm-blueprint.html', out: 'GAIADA-Social-Media-Engineering-Blueprint.pdf', foot: 'GAIADA Social Media — Engineering Blueprint' },
+  { in: 'creative-blueprint.html', out: 'GAIADA-Creative-Engineering-Blueprint.pdf', foot: 'GAIADA Creative — Engineering Blueprint' },
+]
+  // optional CLI filter: `node render-pdf.js creative` renders only matching entries (no arg = all)
+  .filter(f => !process.argv[2] || f.in.includes(process.argv[2]));
 
 // Reproduce the artifact LIGHT theme in print + page-fit diagrams + contents page,
 // but COMPACT: use the full page width and let sections flow (no page-per-section waste).

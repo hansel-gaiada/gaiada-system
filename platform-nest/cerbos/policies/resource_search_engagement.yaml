@@ -1,0 +1,42 @@
+# Search-marketing module (SM-03; docs/blueprints/seo-sem-design.md §11). resource_search_engagement
+# = the outcome-tracked engagement; also covers KPI targets (design §11: "resource_search_engagement
+# (covers kpi_targets)") — SearchController authorizes KPI-target routes against this same kind with
+# the engagement's own id/tenantId, exactly as agency briefs authorize against their parent campaign.
+#
+# `set_scope` is its own action (design §11: "resource_search_engagement carries a set_scope action —
+# the per-client tool-scope decision is itself permission-gated", D-11) and is DELIBERATELY excluded
+# from the module_staff (baseline "member") rule below — only module_manager/company_admin/
+# group_executive/platform_admin may change an engagement's tool-scope config + provider budget cap.
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: resource_search_engagement
+  importDerivedRoles: ["gaiada_scopes"]
+  variables:
+    import: ["gaiada_common"]
+  rules:
+    - actions: ["*"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["platform_admin"]
+    # Owner (group_executive): full oversight, including the scope/budget decision.
+    - actions: ["read", "create", "update", "delete", "set_scope"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["group_executive"]
+      condition: { match: { expr: "variables.notLow" } }
+    # Search staff / manager (served-company grant) + the served company's own admin: baseline set.
+    - actions: ["read", "create", "update"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["module_staff", "module_manager", "company_admin"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    # Destructive: manager + company admin only.
+    - actions: ["delete"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["module_manager", "company_admin"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    # search:scope:write (design §11) — elevated-only. A plain staff/member grant is DENIED here
+    # (no rule matches module_staff for set_scope) — deliberate, per the parity matrix's explicit
+    # "a member cannot ... set_scope" deny case.
+    - actions: ["set_scope"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["module_manager", "company_admin"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }

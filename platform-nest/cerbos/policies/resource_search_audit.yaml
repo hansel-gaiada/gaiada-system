@@ -1,0 +1,33 @@
+# Search-marketing module (SM-03; docs/blueprints/seo-sem-design.md §11). resource_search_audit
+# covers technical/CWV/content/links/geo audits + findings + backlink snapshots + AI-visibility
+# (design §11: "resource_search_audit (audits/findings/backlinks/ai-visibility)"), backing
+# `search:audit:run` (trigger a crawl/CWV/content audit — the $0 🟢 P1 surface). `run` is the
+# job-trigger action (SEONaut/open-seo-crawler/Unlighthouse, egress-guarded, $0 cost); it is kept
+# distinct from `create` so a policy diff can grant/deny "trigger a job" independently of "write a
+# finding/annotation row" if that need ever arises, mirroring hr_case's action granularity.
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: resource_search_audit
+  importDerivedRoles: ["gaiada_scopes"]
+  variables:
+    import: ["gaiada_common"]
+  rules:
+    - actions: ["*"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["platform_admin"]
+    - actions: ["read", "create", "update", "delete", "run"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["group_executive"]
+      condition: { match: { expr: "variables.notLow" } }
+    # Search staff / manager (served-company grant) + the served company's own admin: baseline set
+    # INCLUDING running $0 audit/crawl jobs (design §08: no elevated gate on 🟢 actions).
+    - actions: ["read", "create", "update", "run"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["module_staff", "module_manager", "company_admin"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    # Destructive: manager + company admin only.
+    - actions: ["delete"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["module_manager", "company_admin"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }

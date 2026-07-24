@@ -1,20 +1,20 @@
 // Department toolkits — the per-department "interface" definition. Each company's
-// departments get their own workspace (a console with tools that department needs).
-// This registry maps a department (by its NAME, normalised to a slug — robust to
-// whatever id the org structure/backend assigns) to the set of tool TABS it exposes
-// and the external tools it can LAUNCH.
+// departments get their own workspace (a console with the tools that department
+// needs). This registry maps a department (by its NAME, normalised to a slug —
+// robust to whatever id the org structure/backend assigns) to the set of tool
+// TABS it exposes and the external tools it can LAUNCH.
 //
 // Pure + client-safe (no server-only imports) so the sidebar, the console layout,
-// its tab pages, and tests can all share one source of truth. Departments without a
-// bespoke toolkit fall back to the generic single-tab workspace (Home only).
+// its tab pages, and tests can all share one source of truth. Departments without
+// a bespoke toolkit fall back to the generic single-group workspace (Home only).
 //
-// Tab IA is LOCKED (web-dev-phase1-tickets.md decision #10): Home · Projects · Board ·
-// Timeline · Activity · PRD Studio · Repositories · Deliverables · Connections. The
-// generic toolkit's Home is the SAME shell every department gets (decision #11 —
-// props-only components, zero department-name branching); Web Dev additionally gets
-// the full tab set below. First department built out: Web Dev (the template). Others
-// (Creatives, SEO, Social Media, GM) inherit the generic Home-only shell until their
-// toolkits are built out the same way.
+// IA is TWO-LEVEL (2026-07-23 redesign, docs/superpowers/plans/
+// 2026-07-23-dept-console-ia-redesign.md). A department console is a small stable
+// spine of GROUPS (primary strip); each group holds one or more related TABS
+// (secondary sub-tab strip, shown only when a group has >1 tab). The universal
+// spine every department inherits is Home · Work · <craft group> · Connections;
+// only the craft group differs per department. Routes/paths are unchanged from the
+// old flat model — only the grouping is new — so existing deep links keep working.
 import type { IconName } from "@/components/shell/icons";
 
 export interface DeptTab {
@@ -24,6 +24,18 @@ export interface DeptTab {
   path: string;
   icon: IconName;
   blurb: string;
+  /** Structurally wide surfaces (board/timeline/projects) render full-bleed —
+   *  no `MyWorkRail`, independent of the user's global width pref. */
+  fullBleed?: boolean;
+}
+
+/** A primary-strip group holding one or more related tabs. A single-tab group
+ *  renders as a direct link (no secondary sub-tab strip). */
+export interface DeptGroup {
+  key: string;
+  label: string;
+  icon: IconName;
+  tabs: DeptTab[];
 }
 
 export interface DeptLauncher {
@@ -42,7 +54,7 @@ export interface DeptToolkit {
   label: string;
   /** One-line description of what the department does — shown in the console header. */
   mission: string;
-  tabs: DeptTab[];
+  groups: DeptGroup[];
   launchers: DeptLauncher[];
 }
 
@@ -54,9 +66,11 @@ export function deptSlug(name: string): string {
     .replace(/^-+|-+$/g, "");
 }
 
-// The Home tab every department gets — the console's command center. Build
-// Tools folds into Home as a launcher row (decision #10/Q4) rather than its
-// own tab, so Home is the one tab every toolkit (bespoke or generic) has.
+// ── Universal spine — every department inherits these three groups ────────────
+// Home (command center), Work (the execution views — generic `[deptId]` pages
+// that render for any department), and Connections (integrations/settings).
+// Build Tools folds into Home as a launcher row rather than its own tab, so Home
+// is a single-tab group every toolkit gets.
 const HOME: DeptTab = {
   key: "home",
   label: "Home",
@@ -65,25 +79,49 @@ const HOME: DeptTab = {
   blurb: "Project health, recent activity, and where to go next.",
 };
 
+const HOME_GROUP: DeptGroup = { key: "home", label: "Home", icon: "home", tabs: [HOME] };
+
+const WORK_GROUP: DeptGroup = {
+  key: "work",
+  label: "Work",
+  icon: "projects",
+  tabs: [
+    { key: "projects", label: "Projects", path: "projects", icon: "projects", blurb: "Projects this department owns.", fullBleed: true },
+    { key: "board", label: "Board", path: "board", icon: "box", blurb: "The department's working kanban board.", fullBleed: true },
+    { key: "timeline", label: "Timeline", path: "timeline", icon: "clock", blurb: "Schedule and milestones across owned projects.", fullBleed: true },
+    { key: "charts", label: "Charts", path: "charts", icon: "pulse", blurb: "Cumulative flow, burndown, and tag breakdown across owned projects.", fullBleed: true },
+    { key: "activity", label: "Activity", path: "activity", icon: "pulse", blurb: "The full cross-source activity feed." },
+  ],
+};
+
+const CONNECTIONS_GROUP: DeptGroup = {
+  key: "connections",
+  label: "Connections",
+  icon: "hub",
+  tabs: [{ key: "connections", label: "Connections", path: "connections", icon: "hub", blurb: "Connect GitHub, Google Drive, and Claude seats." }],
+};
+
 // ── Web Dev — the template department ────────────────────────────────────────
-// Handles web development: project ownership + the working board, a schedule
-// view, a cross-source activity feed, requirements capture (audio → PRD via
-// the WS11 pipeline), and the connection-backed tabs (repos/deliverables/
-// connections) that light up once F1 (P1-08) lands.
+// Craft group "Build": the client-requirements → shipped-build pipeline — audio
+// briefing → PRD (WS11), linked repositories, and the deliverables it produces.
 const WEB_DEV: DeptToolkit = {
   slug: "web-dev",
   label: "Web Dev",
   mission: "Web development — from client requirements to a shipped build.",
-  tabs: [
-    HOME,
-    { key: "projects", label: "Projects", path: "projects", icon: "projects", blurb: "Projects this department owns." },
-    { key: "board", label: "Board", path: "board", icon: "box", blurb: "The department's working kanban board." },
-    { key: "timeline", label: "Timeline", path: "timeline", icon: "clock", blurb: "Schedule and milestones across owned projects." },
-    { key: "activity", label: "Activity", path: "activity", icon: "pulse", blurb: "The full cross-source activity feed." },
-    { key: "prd", label: "PRD Studio", path: "prd", icon: "pulse", blurb: "Record a requirements briefing; turn it into a PRD." },
-    { key: "repositories", label: "Repositories", path: "repositories", icon: "gateway", blurb: "Linked code repositories." },
-    { key: "deliverables", label: "Deliverables", path: "deliverables", icon: "box", blurb: "Files and docs this department's work has produced." },
-    { key: "connections", label: "Connections", path: "connections", icon: "hub", blurb: "Connect GitHub, Google Drive, and Claude seats." },
+  groups: [
+    HOME_GROUP,
+    WORK_GROUP,
+    {
+      key: "build",
+      label: "Build",
+      icon: "gateway",
+      tabs: [
+        { key: "prd", label: "PRD Studio", path: "prd", icon: "pulse", blurb: "Record a requirements briefing; turn it into a PRD." },
+        { key: "repositories", label: "Repositories", path: "repositories", icon: "gateway", blurb: "Linked code repositories." },
+        { key: "deliverables", label: "Deliverables", path: "deliverables", icon: "box", blurb: "Files and docs this department's work has produced." },
+      ],
+    },
+    CONNECTIONS_GROUP,
   ],
   launchers: [
     { key: "claude-code", label: "Claude Code", desc: "Agentic coding in the terminal / IDE.", url: "https://claude.ai/code", glyph: "⌘" },
@@ -96,17 +134,27 @@ const WEB_DEV: DeptToolkit = {
 };
 
 // ── Creatives — image production & grading ───────────────────────────────────
-// Handles creative assets: product media and marketing imagery. Its bespoke tool
-// is the Image Studio — client-side auto-correction, presets and manual colour
-// grading (see components/creative). Backed by the imaging engine (lib/imaging).
+// Craft group "Studio": the client-side Image Studio (auto-correction, presets,
+// manual colour grading — see components/creative, backed by lib/imaging) plus
+// the saved-asset library (originals + grade params, which doubles as the
+// phase-2 AI training set). Split into two sub-tabs so each has room.
 const CREATIVES: DeptToolkit = {
   slug: "creatives",
   label: "Creatives",
   mission: "Creative production — from raw capture to on-brand, export-ready assets.",
-  tabs: [
-    HOME,
-    { key: "studio", label: "Image Studio", path: "studio", icon: "box", blurb: "Auto-correct, grade and batch-export product & creative imagery." },
-    { key: "tools", label: "Build Tools", path: "tools", icon: "gateway", blurb: "Launch into the tools the team creates with." },
+  groups: [
+    HOME_GROUP,
+    WORK_GROUP,
+    {
+      key: "studio",
+      label: "Studio",
+      icon: "box",
+      tabs: [
+        { key: "studio", label: "Image Studio", path: "studio", icon: "box", blurb: "Auto-correct, grade and batch-export product & creative imagery." },
+        { key: "assets", label: "Asset Library", path: "assets", icon: "hub", blurb: "Saved originals & grade params — the curated AI training set." },
+      ],
+    },
+    CONNECTIONS_GROUP,
   ],
   launchers: [
     { key: "figma", label: "Figma", desc: "Design files and prototypes.", url: "https://www.figma.com", glyph: "△" },
@@ -116,13 +164,22 @@ const CREATIVES: DeptToolkit = {
   ],
 };
 
+// ── SEO & SMM — DESIGNED, NOT YET BUILT (Phase B) ────────────────────────────
+// The template intentionally leaves room for these. They reuse the Home / Work /
+// Connections spine unchanged; only their craft group is new. Do NOT add them to
+// TOOLKITS until their craft-group pages exist (a toolkit pointing at missing
+// routes would 404). Planned craft groups:
+//   SEO  → "Optimize": Site Audit · Keywords · Rankings · Content Briefs
+//   SMM  → "Publish":  Calendar · Composer · Inbox · Analytics
+// See docs/superpowers/plans/2026-07-23-dept-console-ia-redesign.md §2 & §6.
+
 const TOOLKITS: DeptToolkit[] = [WEB_DEV, CREATIVES];
 
 // The generic toolkit for departments without a bespoke build-out yet. Renders
-// the exact same Home shell as Web Dev's Home tab (decision #11 template
-// proof) — just without the additional bespoke tabs.
+// the exact same Home shell as a bespoke department's Home group — just without
+// the additional Work / craft / Connections groups.
 function genericToolkit(name: string): DeptToolkit {
-  return { slug: deptSlug(name), label: name, mission: `${name} — team workspace.`, tabs: [HOME], launchers: [] };
+  return { slug: deptSlug(name), label: name, mission: `${name} — team workspace.`, groups: [HOME_GROUP], launchers: [] };
 }
 
 /** Resolve a department's toolkit by name. Always returns a toolkit (generic fallback). */
@@ -134,6 +191,11 @@ export function toolkitFor(deptName: string): DeptToolkit {
 /** True when a department has a bespoke toolkit (vs. the generic Home-only shell). */
 export function hasBespokeToolkit(deptName: string): boolean {
   return TOOLKITS.some((t) => t.slug === deptSlug(deptName));
+}
+
+/** Every tab across all of a toolkit's groups, flattened (order preserved). */
+export function deptTabs(toolkit: DeptToolkit): DeptTab[] {
+  return toolkit.groups.flatMap((g) => g.tabs);
 }
 
 /** Absolute href for a tab within a department console. */

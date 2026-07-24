@@ -52,7 +52,7 @@ export default async function DepartmentProjectsPage({ params }: { params: Param
           rows={owned.map((p) => {
             const c = byProject.get(p.id) ?? { total: 0, done: 0 };
             return [
-              <Link key={p.id} href={`/projects/${p.id}`} style={{ color: "var(--text-primary)", textDecoration: "none" }}>{p.name}</Link>,
+              <Link key={p.id} href={`/departments/${deptId}/projects/${p.id}`} style={{ color: "var(--text-primary)", textDecoration: "none" }}>{p.name}</Link>,
               String(c.total),
               String(c.done),
               <StatusBadge key="s" label={p.status} />,

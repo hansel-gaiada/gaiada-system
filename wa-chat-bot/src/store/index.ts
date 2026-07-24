@@ -2,9 +2,9 @@
 import { config } from "../config";
 import { FileStore } from "./file";
 import { PgStore } from "./pg";
-import type { Store, StoredMessage, MediaStatus } from "./types";
+import type { Store, StoredMessage, MediaStatus, ChatSummary } from "./types";
 
-export type { StoredMessage, MediaStatus } from "./types";
+export type { StoredMessage, MediaStatus, ChatSummary } from "./types";
 
 const store: Store = config.databaseUrl ? new PgStore(config.databaseUrl) : new FileStore();
 
@@ -16,3 +16,4 @@ export const getGroupChatIds = (): Promise<string[]> => store.getGroupChatIds();
 export const getPendingMedia = (limit?: number): Promise<StoredMessage[]> => store.getPendingMedia(limit);
 export const updateMedia = (waMessageId: string, patch: { status: MediaStatus; text?: string }): Promise<void> =>
   store.updateMedia(waMessageId, patch);
+export const listChats = (limit?: number): Promise<ChatSummary[]> => store.listChats(limit);

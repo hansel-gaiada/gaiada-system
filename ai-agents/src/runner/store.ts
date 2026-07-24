@@ -1,0 +1,416 @@
+// Agent-runner goal/run store (B1, design §3.1). Postgres-backed goal + run tables created by the
+// runner's owner-DSN init() DDL — EXACTLY like PgEpisodicStore / knowledge/service.ts (tables live in
+// gaiada_knowledge; init-cluster.sh default-grants new owner-created tables to knowledge_app, so no
+// migration and no new DB role is needed). Same conventions: pool + init() DDL, optional owner
+// migrateUrl. Tenant is pinned on EVERY read (getGoal/getRun/listGoals) — a wrong tenant returns null,
+// never another tenant's row (no cross-tenant id probing, design §4).
+import { Pool } from "pg";
+import type { BlackboardEntry } from "../orchestrator";
+import type { AgentStep } from "../agent";
+import type { TraceStatus } from "../evals/trace";
+
+/** Goal lifecycle status (design §3.1). */
+export type GoalStatus =
+  | "queued"
+  | "running"
+  | "ok"
+  | "suspended"
+  | "budget_exhausted"
+  | "failed"
+  | "interrupted"
+  | "cancelled";
+
+export interface BudgetCaps {
+  modelCalls: number;
+  toolCalls: number;
+}
+
+/** What POST /goals persists for a new (queued) goal. */
+export interface GoalInput {
+  tenantId: string;
+  goal: string;
+  agent: string;
+  envelopeProvider: string;
+  envelopeExternalId: string;
+  requestedBy?: string;
+  budget: BudgetCaps;
+}
+
+/** The minimum a worker needs to execute a claimed goal (no PII beyond the goal text + envelope). */
+export interface GoalRunContext {
+  id: string;
+  tenantId: string;
+  goal: string;
+  agent: string;
+  envelopeProvider: string;
+  envelopeExternalId: string;
+  budget: BudgetCaps;
+}
+
+/** The patch a finished goal writes back (the typed-outcome → status mapping result). */
+export interface FinishGoalPatch {
+  status: GoalStatus;
+  outcome?: string | null;
+  errorKind?: string | null;
+  approvalId?: string | null;
+  modelCalls?: number;
+  toolCalls?: number;
+  fanOut?: number;
+  blackboard?: BlackboardEntry[] | null;
+}
+
+/** List item — never carries the blackboard or step transcripts. */
+export interface GoalListItem {
+  id: string;
+  tenantId: string;
+  goal: string;
+  agent: string;
+  status: GoalStatus;
+  outcome: string | null;
+  errorKind: string | null;
+  approvalId: string | null;
+  modelCalls: number;
+  toolCalls: number;
+  fanOut: number;
+  budget: BudgetCaps | null;
+  createdAt: string;
+  startedAt: string | null;
+  endedAt: string | null;
+}
+
+export interface RunSummary {
+  runId: string;
+  agent: string;
+  status: TraceStatus;
+  outcome: string | null;
+  modelCalls: number;
+  toolCalls: number;
+  provider: string | null;
+  startedAt: number;
+  endedAt: number;
+}
+
+/** Full goal detail: list fields + blackboard + run summaries (design §3.2 GET /goals/:id). */
+export interface GoalDetail extends GoalListItem {
+  blackboard: BlackboardEntry[] | null;
+  runs: RunSummary[];
+}
+
+export interface RunInput {
+  runId: string;
+  goalId: string;
+  tenantId: string;
+  agent: string;
+  status: TraceStatus;
+  outcome: string | null;
+  steps: AgentStep[];
+  modelCalls: number;
+  toolCalls: number;
+  toolsCalled: string[];
+  provider: string | null;
+  startedAt: number;
+  endedAt: number;
+}
+
+/** Full run incl. the step transcript (design §3.2 GET /runs/:id). */
+export interface RunRow extends RunSummary {
+  goalId: string;
+  tenantId: string;
+  steps: AgentStep[];
+  toolsCalled: string[];
+}
+
+export type CancelResult = "cancelled" | "not_found" | "conflict";
+
+/** The store contract the runner service depends on. PgGoalStore is the durable impl; tests inject an
+ *  in-memory one (mirrors the EpisodicStore / PgEpisodicStore in-memory-vs-durable idiom). */
+export interface GoalStore {
+  init(): Promise<void>;
+  insertGoal(input: GoalInput): Promise<string>;
+  /** Atomic queued→running claim. Returns null if the goal is no longer queued (e.g. cancelled) —
+   *  the worker then does nothing, so a cancel between enqueue and claim is race-safe. */
+  claimForRun(id: string): Promise<GoalRunContext | null>;
+  finishGoal(id: string, patch: FinishGoalPatch): Promise<void>;
+  insertRun(run: RunInput): Promise<void>;
+  listGoals(tenantId: string, limit: number): Promise<GoalListItem[]>;
+  getGoal(id: string, tenantId: string): Promise<GoalDetail | null>;
+  getRun(runId: string, tenantId: string): Promise<RunRow | null>;
+  cancel(id: string, tenantId: string): Promise<CancelResult>;
+  /** Boot recovery sweep: orphaned queued/running goals → interrupted (design §3.2; no auto re-run). */
+  sweepInterrupted(): Promise<number>;
+}
+
+interface GoalDbRow {
+  id: string;
+  tenant_id: string;
+  goal: string;
+  agent: string;
+  status: GoalStatus;
+  outcome: string | null;
+  error_kind: string | null;
+  approval_id: string | null;
+  model_calls: number;
+  tool_calls: number;
+  budget: BudgetCaps | null;
+  fan_out: number;
+  blackboard: BlackboardEntry[] | null;
+  created_at: string;
+  started_at: string | null;
+  ended_at: string | null;
+}
+
+function listItem(r: GoalDbRow): GoalListItem {
+  return {
+    id: r.id,
+    tenantId: r.tenant_id,
+    goal: r.goal,
+    agent: r.agent,
+    status: r.status,
+    outcome: r.outcome,
+    errorKind: r.error_kind,
+    approvalId: r.approval_id,
+    modelCalls: r.model_calls,
+    toolCalls: r.tool_calls,
+    fanOut: r.fan_out,
+    budget: r.budget,
+    createdAt: r.created_at,
+    startedAt: r.started_at,
+    endedAt: r.ended_at,
+  };
+}
+
+export class PgGoalStore implements GoalStore {
+  private migrateUrl: string;
+  constructor(
+    private pool: Pool,
+    opts: { migrateUrl?: string } = {},
+  ) {
+    this.migrateUrl = opts.migrateUrl ?? "";
+  }
+
+  async init(): Promise<void> {
+    const ddl = this.migrateUrl ? new Pool({ connectionString: this.migrateUrl }) : this.pool;
+    try {
+      await ddl.query(`
+        CREATE TABLE IF NOT EXISTS agent_goals (
+          id                   uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+          tenant_id            uuid NOT NULL,
+          goal                 text NOT NULL,
+          agent                text NOT NULL DEFAULT 'supervisor',
+          envelope_provider    text NOT NULL,
+          envelope_external_id text NOT NULL,
+          requested_by         text,
+          status               text NOT NULL DEFAULT 'queued',
+          outcome              text,
+          error_kind           text,
+          approval_id          text,
+          model_calls          int NOT NULL DEFAULT 0,
+          tool_calls           int NOT NULL DEFAULT 0,
+          budget               jsonb,
+          fan_out              int NOT NULL DEFAULT 0,
+          blackboard           jsonb,
+          created_at           timestamptz NOT NULL DEFAULT now(),
+          started_at           timestamptz,
+          ended_at             timestamptz
+        );
+        CREATE INDEX IF NOT EXISTS idx_agent_goals_tenant ON agent_goals (tenant_id, created_at DESC);
+
+        CREATE TABLE IF NOT EXISTS agent_runs (
+          run_id       text PRIMARY KEY,
+          goal_id      uuid NOT NULL REFERENCES agent_goals(id) ON DELETE CASCADE,
+          tenant_id    uuid NOT NULL,
+          agent        text NOT NULL,
+          status       text NOT NULL,
+          outcome      text,
+          steps        jsonb NOT NULL DEFAULT '[]',
+          model_calls  int NOT NULL DEFAULT 0,
+          tool_calls   int NOT NULL DEFAULT 0,
+          tools_called text[] NOT NULL DEFAULT '{}',
+          provider     text,
+          started_at   bigint NOT NULL DEFAULT 0,
+          ended_at     bigint NOT NULL DEFAULT 0,
+          created_at   timestamptz NOT NULL DEFAULT now()
+        );
+        CREATE INDEX IF NOT EXISTS idx_agent_runs_goal   ON agent_runs (goal_id);
+        CREATE INDEX IF NOT EXISTS idx_agent_runs_tenant ON agent_runs (tenant_id, created_at DESC);
+      `);
+    } finally {
+      if (ddl !== this.pool) await ddl.end();
+    }
+  }
+
+  async insertGoal(input: GoalInput): Promise<string> {
+    const { rows } = await this.pool.query<{ id: string }>(
+      `INSERT INTO agent_goals (tenant_id, goal, agent, envelope_provider, envelope_external_id, requested_by, budget)
+       VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb) RETURNING id`,
+      [
+        input.tenantId,
+        input.goal,
+        input.agent,
+        input.envelopeProvider,
+        input.envelopeExternalId,
+        input.requestedBy ?? null,
+        JSON.stringify(input.budget),
+      ],
+    );
+    return rows[0].id;
+  }
+
+  async claimForRun(id: string): Promise<GoalRunContext | null> {
+    const { rows } = await this.pool.query<GoalDbRow>(
+      `UPDATE agent_goals SET status='running', started_at=now()
+       WHERE id=$1 AND status='queued'
+       RETURNING id, tenant_id, goal, agent, envelope_provider, envelope_external_id, budget`,
+      [id],
+    );
+    if (rows.length === 0) return null;
+    const r = rows[0] as unknown as {
+      id: string; tenant_id: string; goal: string; agent: string;
+      envelope_provider: string; envelope_external_id: string; budget: BudgetCaps | null;
+    };
+    return {
+      id: r.id,
+      tenantId: r.tenant_id,
+      goal: r.goal,
+      agent: r.agent,
+      envelopeProvider: r.envelope_provider,
+      envelopeExternalId: r.envelope_external_id,
+      budget: r.budget ?? { modelCalls: 0, toolCalls: 0 },
+    };
+  }
+
+  async finishGoal(id: string, patch: FinishGoalPatch): Promise<void> {
+    await this.pool.query(
+      `UPDATE agent_goals SET
+         status=$2, outcome=$3, error_kind=$4, approval_id=$5,
+         model_calls=$6, tool_calls=$7, fan_out=$8,
+         blackboard=$9::jsonb, ended_at=now()
+       WHERE id=$1`,
+      [
+        id,
+        patch.status,
+        patch.outcome ?? null,
+        patch.errorKind ?? null,
+        patch.approvalId ?? null,
+        patch.modelCalls ?? 0,
+        patch.toolCalls ?? 0,
+        patch.fanOut ?? 0,
+        patch.blackboard ? JSON.stringify(patch.blackboard) : null,
+      ],
+    );
+  }
+
+  async insertRun(run: RunInput): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO agent_runs
+         (run_id, goal_id, tenant_id, agent, status, outcome, steps, model_calls, tool_calls, tools_called, provider, started_at, ended_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9,$10,$11,$12,$13)
+       ON CONFLICT (run_id) DO NOTHING`,
+      [
+        run.runId,
+        run.goalId,
+        run.tenantId,
+        run.agent,
+        run.status,
+        run.outcome,
+        JSON.stringify(run.steps),
+        run.modelCalls,
+        run.toolCalls,
+        run.toolsCalled,
+        run.provider,
+        run.startedAt,
+        run.endedAt,
+      ],
+    );
+  }
+
+  async listGoals(tenantId: string, limit: number): Promise<GoalListItem[]> {
+    const { rows } = await this.pool.query<GoalDbRow>(
+      `SELECT id, tenant_id, goal, agent, status, outcome, error_kind, approval_id,
+              model_calls, tool_calls, budget, fan_out, NULL::jsonb AS blackboard,
+              created_at, started_at, ended_at
+       FROM agent_goals WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT $2`,
+      [tenantId, limit],
+    );
+    return rows.map(listItem);
+  }
+
+  async getGoal(id: string, tenantId: string): Promise<GoalDetail | null> {
+    const { rows } = await this.pool.query<GoalDbRow>(
+      `SELECT * FROM agent_goals WHERE id=$1 AND tenant_id=$2`,
+      [id, tenantId],
+    );
+    if (rows.length === 0) return null; // tenant mismatch or absent → 404 (no cross-tenant probing)
+    const runs = await this.runSummaries(id, tenantId);
+    return { ...listItem(rows[0]), blackboard: rows[0].blackboard, runs };
+  }
+
+  private async runSummaries(goalId: string, tenantId: string): Promise<RunSummary[]> {
+    const { rows } = await this.pool.query<{
+      run_id: string; agent: string; status: string; outcome: string | null;
+      model_calls: number; tool_calls: number; provider: string | null;
+      started_at: string; ended_at: string;
+    }>(
+      `SELECT run_id, agent, status, outcome, model_calls, tool_calls, provider, started_at, ended_at
+       FROM agent_runs WHERE goal_id=$1 AND tenant_id=$2 ORDER BY created_at`,
+      [goalId, tenantId],
+    );
+    return rows.map((r) => ({
+      runId: r.run_id,
+      agent: r.agent,
+      status: r.status as TraceStatus,
+      outcome: r.outcome,
+      modelCalls: r.model_calls,
+      toolCalls: r.tool_calls,
+      provider: r.provider,
+      startedAt: Number(r.started_at),
+      endedAt: Number(r.ended_at),
+    }));
+  }
+
+  async getRun(runId: string, tenantId: string): Promise<RunRow | null> {
+    const { rows } = await this.pool.query<{
+      run_id: string; goal_id: string; tenant_id: string; agent: string; status: string;
+      outcome: string | null; steps: AgentStep[]; model_calls: number; tool_calls: number;
+      tools_called: string[]; provider: string | null; started_at: string; ended_at: string;
+    }>(
+      `SELECT * FROM agent_runs WHERE run_id=$1 AND tenant_id=$2`,
+      [runId, tenantId],
+    );
+    if (rows.length === 0) return null;
+    const r = rows[0];
+    return {
+      runId: r.run_id,
+      goalId: r.goal_id,
+      tenantId: r.tenant_id,
+      agent: r.agent,
+      status: r.status as TraceStatus,
+      outcome: r.outcome,
+      steps: r.steps ?? [],
+      modelCalls: r.model_calls,
+      toolCalls: r.tool_calls,
+      toolsCalled: r.tools_called,
+      provider: r.provider,
+      startedAt: Number(r.started_at),
+      endedAt: Number(r.ended_at),
+    };
+  }
+
+  async cancel(id: string, tenantId: string): Promise<CancelResult> {
+    const r = await this.pool.query(
+      `UPDATE agent_goals SET status='cancelled', ended_at=now()
+       WHERE id=$1 AND tenant_id=$2 AND status='queued'`,
+      [id, tenantId],
+    );
+    if ((r.rowCount ?? 0) === 1) return "cancelled";
+    const exists = await this.pool.query(`SELECT 1 FROM agent_goals WHERE id=$1 AND tenant_id=$2`, [id, tenantId]);
+    return (exists.rowCount ?? 0) === 0 ? "not_found" : "conflict";
+  }
+
+  async sweepInterrupted(): Promise<number> {
+    const r = await this.pool.query(
+      `UPDATE agent_goals SET status='interrupted', ended_at=now() WHERE status IN ('queued','running')`,
+    );
+    return r.rowCount ?? 0;
+  }
+}

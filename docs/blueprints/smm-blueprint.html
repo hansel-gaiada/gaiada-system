@@ -1,0 +1,955 @@
+<title>GAIADA Social Media — Engineering Blueprint</title>
+<style>
+  :root{
+    --paper:#F6F7F5; --surface:#FFFFFF; --raise:#FBFCFB;
+    --ink:#14201A; --ink-soft:#4B574F; --ink-faint:#7A857D;
+    --line:#DBE1DB; --line-strong:#C4CDC5;
+    --accent:#1E5E44; --accent-2:#2C7A57; --accent-soft:#E7F0EA;
+    --ochre:#9C6714; --ochre-soft:#F3E9D6;
+    --ok:#2F7D57; --warn:#9A5A0B; --crit:#B42318; --info:#2A5C86;
+    --plate:#FBFCFB; --plate-line:#D5DBD5; --plate-ink:#1B2721;
+    --serif:"Iowan Old Style","Palatino Linotype",Palatino,"Book Antiqua",Georgia,ui-serif,serif;
+    --sans:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    --mono:ui-monospace,"SF Mono","Cascadia Code","JetBrains Mono","Roboto Mono",Menlo,Consolas,monospace;
+    --maxw:74ch;
+    --shadow:0 1px 2px rgba(20,32,26,.04),0 8px 24px rgba(20,32,26,.05);
+  }
+  @media (prefers-color-scheme:dark){
+    :root{
+      --paper:#0E1411; --surface:#161D18; --raise:#1B231D;
+      --ink:#E8ECE7; --ink-soft:#A6B2A9; --ink-faint:#76827A;
+      --line:#26302A; --line-strong:#334036;
+      --accent:#4FB183; --accent-2:#6BC79B; --accent-soft:#16271E;
+      --ochre:#D9A441; --ochre-soft:#2A2213;
+      --ok:#5CB98A; --warn:#D19A3C; --crit:#E8776B; --info:#7AAAD6;
+    }
+  }
+  :root[data-theme="light"]{
+    --paper:#F6F7F5; --surface:#FFFFFF; --raise:#FBFCFB;
+    --ink:#14201A; --ink-soft:#4B574F; --ink-faint:#7A857D;
+    --line:#DBE1DB; --line-strong:#C4CDC5;
+    --accent:#1E5E44; --accent-2:#2C7A57; --accent-soft:#E7F0EA;
+    --ochre:#9C6714; --ochre-soft:#F3E9D6;
+    --ok:#2F7D57; --warn:#9A5A0B; --crit:#B42318; --info:#2A5C86;
+  }
+  :root[data-theme="dark"]{
+    --paper:#0E1411; --surface:#161D18; --raise:#1B231D;
+    --ink:#E8ECE7; --ink-soft:#A6B2A9; --ink-faint:#76827A;
+    --line:#26302A; --line-strong:#334036;
+    --accent:#4FB183; --accent-2:#6BC79B; --accent-soft:#16271E;
+    --ochre:#D9A441; --ochre-soft:#2A2213;
+    --ok:#5CB98A; --warn:#D19A3C; --crit:#E8776B; --info:#7AAAD6;
+  }
+
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  @media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+  body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans);
+    font-size:16px;line-height:1.65;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+
+  /* ---------- layout ---------- */
+  .layout{display:grid;grid-template-columns:264px minmax(0,1fr);gap:0;max-width:1320px;margin:0 auto}
+  .toc{position:sticky;top:0;align-self:start;height:100vh;overflow-y:auto;padding:2.2rem 1.3rem 3rem;
+    border-right:1px solid var(--line);background:var(--paper)}
+  .main{min-width:0;padding:0 clamp(1.1rem,4vw,3.4rem) 6rem}
+  .wrap{max-width:var(--maxw)}
+  @media (max-width:960px){
+    .layout{grid-template-columns:1fr}
+    .toc{display:none}
+  }
+
+  /* ---------- TOC ---------- */
+  .toc-brand{font-family:var(--mono);font-size:.7rem;letter-spacing:.16em;text-transform:uppercase;
+    color:var(--accent);margin-bottom:1.4rem;line-height:1.5}
+  .toc-brand b{display:block;color:var(--ink);font-weight:700;letter-spacing:.14em}
+  .toc ol{list-style:none;margin:0;padding:0;counter-reset:toc}
+  .toc li{margin:.1rem 0}
+  .toc a{display:flex;gap:.55rem;align-items:baseline;text-decoration:none;color:var(--ink-soft);
+    font-size:.83rem;padding:.28rem .5rem;border-radius:5px;line-height:1.35}
+  .toc a .n{font-family:var(--mono);font-size:.68rem;color:var(--ink-faint);min-width:1.7em}
+  .toc a:hover{background:var(--accent-soft);color:var(--ink)}
+  .toc a.active{background:var(--accent-soft);color:var(--accent);font-weight:600}
+  .toc a.active .n{color:var(--accent)}
+
+  /* ---------- cover ---------- */
+  .cover{padding:3.6rem 0 2.4rem;border-bottom:2px solid var(--ink)}
+  .eyebrow{font-family:var(--mono);font-size:.72rem;letter-spacing:.2em;text-transform:uppercase;color:var(--accent);margin:0}
+  .cover h1{font-family:var(--serif);font-weight:600;font-size:clamp(2.3rem,5.4vw,3.5rem);line-height:1.04;
+    margin:.7rem 0 .5rem;letter-spacing:-.01em;text-wrap:balance}
+  .cover .lede{font-size:1.12rem;color:var(--ink-soft);max-width:60ch;margin:.2rem 0 0}
+  .titleblock{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:0;margin-top:2.4rem;
+    border:1px solid var(--line-strong);border-radius:8px;overflow:hidden;background:var(--surface)}
+  .titleblock div{padding:.85rem 1rem;border-right:1px solid var(--line);border-bottom:1px solid var(--line)}
+  .titleblock dt{font-family:var(--mono);font-size:.64rem;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-faint);margin:0 0 .28rem}
+  .titleblock dd{margin:0;font-size:.9rem;font-weight:600}
+  .pill{display:inline-flex;align-items:center;gap:.4rem;font-family:var(--mono);font-size:.68rem;font-weight:600;
+    padding:.16rem .5rem;border-radius:100px;letter-spacing:.04em;text-transform:uppercase}
+  .pill.draft{background:var(--ochre-soft);color:var(--ochre)}
+  .pill::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor}
+
+  /* ---------- parts / headings ---------- */
+  .part{padding-top:3.2rem;margin-top:2.2rem;border-top:1px solid var(--line)}
+  .part:first-of-type{border-top:none}
+  .part-head{display:flex;align-items:baseline;gap:.9rem;margin-bottom:.4rem}
+  .part-num{font-family:var(--mono);font-size:.82rem;color:var(--accent);font-weight:600;letter-spacing:.08em}
+  .part h2{font-family:var(--serif);font-weight:600;font-size:clamp(1.6rem,3.2vw,2.15rem);line-height:1.1;
+    margin:0;letter-spacing:-.01em;text-wrap:balance}
+  .part>.dek{color:var(--ink-soft);font-size:1.02rem;max-width:64ch;margin:.4rem 0 0}
+  h3{font-family:var(--sans);font-weight:700;font-size:1.22rem;margin:2.3rem 0 .5rem;letter-spacing:-.005em}
+  h4{font-family:var(--sans);font-weight:700;font-size:1rem;margin:1.5rem 0 .4rem}
+  .sublabel{font-family:var(--mono);font-size:.7rem;letter-spacing:.16em;text-transform:uppercase;color:var(--accent);
+    margin:2.2rem 0 .6rem;font-weight:600}
+  p{margin:.7rem 0;max-width:var(--maxw)}
+  .wrap p,.wrap ul,.wrap ol{max-width:var(--maxw)}
+  ul,ol{padding-left:1.2rem}
+  li{margin:.28rem 0}
+  strong{font-weight:700}
+  a{color:var(--accent);text-decoration-thickness:1px;text-underline-offset:2px}
+  code{font-family:var(--mono);font-size:.86em;background:var(--accent-soft);color:var(--accent-2);
+    padding:.08em .38em;border-radius:4px;word-break:break-word}
+  :root[data-theme="dark"] code,@media(prefers-color-scheme:dark){}
+  .lead{font-size:1.08rem;color:var(--ink-soft)}
+
+  /* ---------- callouts ---------- */
+  .note{border-left:3px solid var(--accent);background:var(--accent-soft);padding:.85rem 1.1rem;border-radius:0 8px 8px 0;
+    margin:1.2rem 0;font-size:.95rem;max-width:var(--maxw)}
+  .note.warn{border-color:var(--warn);background:var(--ochre-soft)}
+  .note .k{font-family:var(--mono);font-size:.66rem;letter-spacing:.14em;text-transform:uppercase;color:var(--accent);display:block;margin-bottom:.25rem;font-weight:700}
+  .note.warn .k{color:var(--warn)}
+
+  /* ---------- figure plates ---------- */
+  figure{margin:1.8rem 0;max-width:100%}
+  .plate{background:var(--plate);border:1px solid var(--plate-line);border-radius:10px;padding:1.4rem 1rem 1rem;
+    overflow-x:auto;box-shadow:var(--shadow)}
+  .plate .mermaid{min-width:520px;display:flex;justify-content:center}
+  figure.wide{max-width:none}
+  figcaption{font-family:var(--mono);font-size:.72rem;color:var(--ink-faint);margin-top:.6rem;letter-spacing:.03em}
+  figcaption b{color:var(--accent);font-weight:600}
+
+  /* ---------- spec cards ---------- */
+  .spec{border:1px solid var(--line);border-radius:12px;background:var(--surface);margin:1.4rem 0;overflow:hidden;box-shadow:var(--shadow)}
+  .spec-head{display:flex;flex-wrap:wrap;align-items:center;gap:.6rem;padding:.9rem 1.15rem;border-bottom:1px solid var(--line);background:var(--raise)}
+  .spec-head .id{font-family:var(--mono);font-size:.72rem;font-weight:700;color:var(--accent);letter-spacing:.05em}
+  .spec-head h3{margin:0;font-size:1.08rem}
+  .spec-head .zone{margin-left:auto;font-family:var(--mono);font-size:.64rem;text-transform:uppercase;letter-spacing:.1em;
+    padding:.18rem .5rem;border-radius:5px;font-weight:700}
+  .zone.a{background:var(--info);color:#fff}
+  .zone.b{background:var(--accent);color:#fff}
+  .zone.l{background:var(--ochre);color:#fff}
+  :root[data-theme="dark"] .zone.a{color:#08131d}
+  :root[data-theme="dark"] .zone.b{color:#06140d}
+  :root[data-theme="dark"] .zone.l{color:#1c1305}
+  .spec-body{padding:.4rem 1.15rem 1.1rem}
+  .spec-body dl{display:grid;grid-template-columns:minmax(110px,150px) 1fr;gap:0;margin:0}
+  .spec-body dt{font-family:var(--mono);font-size:.66rem;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-faint);
+    padding:.7rem .8rem .7rem 0;border-bottom:1px solid var(--line);font-weight:600}
+  .spec-body dd{margin:0;padding:.7rem 0;border-bottom:1px solid var(--line);font-size:.92rem}
+  .spec-body dd:last-child,.spec-body dt:last-of-type{border-bottom:none}
+  .spec-body ul{margin:.1rem 0;padding-left:1.05rem}
+  .spec-body li{margin:.18rem 0}
+  @media (max-width:560px){.spec-body dl{grid-template-columns:1fr}.spec-body dt{border-bottom:none;padding-bottom:.1rem}}
+
+  /* ---------- tables ---------- */
+  .tablewrap{overflow-x:auto;margin:1.3rem 0;border:1px solid var(--line);border-radius:10px}
+  table{border-collapse:collapse;width:100%;font-size:.88rem;min-width:520px}
+  th,td{text-align:left;padding:.6rem .8rem;border-bottom:1px solid var(--line);vertical-align:top}
+  thead th{background:var(--raise);font-family:var(--mono);font-size:.66rem;letter-spacing:.09em;text-transform:uppercase;
+    color:var(--ink-soft);font-weight:700;position:sticky;top:0}
+  tbody tr:last-child td{border-bottom:none}
+  td.mono,th.mono,.num{font-family:var(--mono);font-variant-numeric:tabular-nums}
+  td .tag{font-family:var(--mono);font-size:.68rem;font-weight:700;padding:.12rem .45rem;border-radius:4px;white-space:nowrap}
+  .t-ok{background:var(--accent-soft);color:var(--ok)}
+  .t-warn{background:var(--ochre-soft);color:var(--warn)}
+  .t-crit{background:rgba(180,35,24,.1);color:var(--crit)}
+  .t-info{background:rgba(42,92,134,.1);color:var(--info)}
+  :root[data-theme="dark"] .t-crit{background:rgba(232,119,107,.14)}
+  :root[data-theme="dark"] .t-info{background:rgba(122,170,214,.14)}
+
+  /* ---------- grids ---------- */
+  .cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:1rem;margin:1.3rem 0;max-width:var(--maxw)}
+  .card{border:1px solid var(--line);border-radius:10px;padding:1rem 1.1rem;background:var(--surface)}
+  .card h4{margin:.1rem 0 .35rem}
+  .card p{margin:.2rem 0;font-size:.9rem;color:var(--ink-soft)}
+  .card .k{font-family:var(--mono);font-size:.66rem;letter-spacing:.12em;text-transform:uppercase;color:var(--accent);font-weight:700}
+
+  /* ---------- phase timeline ---------- */
+  .phases{display:flex;flex-direction:column;gap:.5rem;margin:1.4rem 0;max-width:var(--maxw)}
+  .phase{display:grid;grid-template-columns:2.4rem 1fr;gap:.9rem;border:1px solid var(--line);border-radius:10px;
+    padding:.9rem 1rem;background:var(--surface);position:relative}
+  .phase .pn{font-family:var(--mono);font-weight:700;color:var(--accent);font-size:1rem}
+  .phase h4{margin:0 0 .2rem}
+  .phase p{margin:.15rem 0;font-size:.9rem;color:var(--ink-soft)}
+  .phase .meta{font-family:var(--mono);font-size:.7rem;color:var(--ink-faint);margin-top:.35rem;letter-spacing:.02em}
+  .phase.gate{border-left:3px solid var(--ochre)}
+
+  hr.soft{border:none;border-top:1px solid var(--line);margin:2.4rem 0}
+  .kbd{font-family:var(--mono);font-size:.8rem;background:var(--surface);border:1px solid var(--line-strong);
+    border-bottom-width:2px;border-radius:5px;padding:.05em .4em}
+
+  footer{margin-top:4rem;padding-top:1.6rem;border-top:2px solid var(--ink);font-size:.85rem;color:var(--ink-soft)}
+  footer .mono{font-family:var(--mono);font-size:.72rem;color:var(--ink-faint)}
+
+  /* ---------- print ---------- */
+  @media print{
+    :root{--paper:#fff;--surface:#fff;--raise:#fff;--ink:#111;--ink-soft:#333;--line:#bbb;--accent:#14503a;--plate:#fff}
+    body{font-size:10.5pt}
+    .layout{display:block;max-width:none}
+    .toc,.themehint{display:none!important}
+    .main{padding:0}
+    .part{break-before:page;border-top:none;padding-top:.4rem}
+    .part:first-of-type{break-before:avoid}
+    .cover{break-after:page}
+    .spec,.plate,.tablewrap,figure,.phase,.card{break-inside:avoid}
+    .plate{box-shadow:none}
+    a{color:#14503a;text-decoration:none}
+  }
+  .themehint{position:fixed;bottom:12px;right:14px;font-family:var(--mono);font-size:.62rem;color:var(--ink-faint);
+    background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:.3rem .55rem;opacity:.75}
+</style>
+
+<div class="layout">
+  <nav class="toc" aria-label="Contents">
+    <div class="toc-brand">GAIADA <b>Social Media</b> Engineering Blueprint</div>
+    <ol>
+      <li><a href="#p00"><span class="n">00</span> Executive Summary</a></li>
+      <li><a href="#p01"><span class="n">01</span> Scope &amp; Pillars</a></li>
+      <li><a href="#p02"><span class="n">02</span> System Overview</a></li>
+      <li><a href="#p03"><span class="n">03</span> Trust Zones &amp; AGPL Containment</a></li>
+      <li><a href="#p04"><span class="n">04</span> Domain Model &amp; Schema</a></li>
+      <li><a href="#p05"><span class="n">05</span> Publisher Boundary &amp; Cost Ledger</a></li>
+      <li><a href="#p06"><span class="n">06</span> Fork/Adapt Plan</a></li>
+      <li><a href="#p07"><span class="n">07</span> AI Design</a></li>
+      <li><a href="#p08"><span class="n">08</span> Console &amp; Capability Matrix</a></li>
+      <li><a href="#p09"><span class="n">09</span> ERP Integration</a></li>
+      <li><a href="#p10"><span class="n">10</span> Automation Flows</a></li>
+      <li><a href="#p11"><span class="n">11</span> Security</a></li>
+      <li><a href="#p12"><span class="n">12</span> Rollout &amp; Tickets</a></li>
+      <li><a href="#p13"><span class="n">13</span> Open Questions</a></li>
+      <li><a href="#p14"><span class="n">14</span> Decision Log</a></li>
+      <li><a href="#p15"><span class="n">15</span> Glossary</a></li>
+    </ol>
+  </nav>
+
+  <main class="main">
+    <!-- ================= COVER ================= -->
+    <header class="cover">
+      <p class="eyebrow">Social Media Department · Organic Publishing</p>
+      <h1>GAIADA Social Media</h1>
+      <p class="lede">A platform-nest module vertical and department console for organic social publishing — calendar, composer, engagement inbox, and analytics — running on an AGPL-contained publishing engine at arm's length, with mandatory human approval on every action that reaches the public internet. Engineering blueprint and ticket-ready rollout plan.</p>
+      <dl class="titleblock">
+        <div><dt>Document</dt><dd>Engineering Blueprint v1.0</dd></div>
+        <div><dt>Codename</dt><dd class="mono">SMM</dd></div>
+        <div><dt>Date</dt><dd>2026-07-23</dd></div>
+        <div><dt>Owner</dt><dd>Social Media</dd></div>
+        <div><dt>Status</dt><dd><span class="pill draft">Draft for review</span></dd></div>
+        <div><dt>Classification</dt><dd>Internal</dd></div>
+      </dl>
+    </header>
+
+    <!-- ================= 00 EXEC SUMMARY ================= -->
+    <section class="part" id="p00">
+      <div class="part-head"><span class="part-num">§00</span><h2>Executive Summary</h2></div>
+      <p class="dek">What we are building, why the AGPL boundary is the whole architecture, and the shape of the decision already made.</p>
+      <div class="wrap">
+        <p>Social-media becomes a <strong>platform-nest module vertical</strong> (<code>ModuleContract</code> key <code>social</code>, tables <code>social_*</code>) plus a <strong>department console</strong> on the dept-interface-template — the already-reserved <strong>"Publish"</strong> craft group (Calendar · Composer · Inbox · Analytics). The professional moat is <strong>approved platform-app access + brand-fit judgment</strong>, not scheduling plumbing, so the architecture keeps every byte of judgment, tenancy, and approval logic on our side of a hard license line.</p>
+        <h4>The shape, in one paragraph</h4>
+        <p><strong>Postiz is the publishing engine, run AGPL-CONTAINED</strong> — an isolated container reached only over its REST API (mere aggregation; our NestJS/Go/Next.js stay uninfected). All domain state, tenancy, RBAC, approvals, and judgment live outside Postiz in platform-nest. Postiz holds exactly two things: network OAuth tokens (it must, to publish and refresh) and the approved-and-scheduled execution queue — <strong>drafts never enter Postiz</strong>. There is <strong>no universal post object</strong>: a <code>social_posts</code> master carries the idea/brief/approval state, and <code>social_post_variants</code> carry per-network content validated against each network's media rules and quota before anything is queued. A first-class <strong>connector registry</strong> (<code>social_accounts</code> + the platform-app fleet) is surfaced exactly like the IT device registry. AI is <strong>local-first via ai-gateway-go</strong> — Hermes for bulk work, Claude only for client-facing polish, brand-voice RAG riding WS8 knowledge, images from the Creative Image Studio, credits-gated. <strong>Human-in-the-loop is mandatory and stricter than SEO</strong>: every outbound public action — publish, reply, delete — is a WS4 <code>impact:'high'</code> suspension, and execution consumes a one-shot <code>approvalId</code> with payload-hash match. There is no auto-publish path, for humans or agents. Money — X per-post fees and generative-image/video credits — flows through one <code>social_usage_ledger</code> with the SEO-proven stop-loss chain, fail-closed, checked before dispatch.</p>
+        <p>Build order is risk-honest: <strong>P0 contracts + containment spike → P1 organic publish/calendar/composer on our own accounts ($0, own-risk) → P2 engagement inbox → P3 AI copy/assets + analytics/reports (+ X metering) → P4 agent-proposed drafts</strong>. 27 tickets P0–P4 plus 2 decision-gated, /army-ready, in §12.</p>
+        <div class="note"><span class="k">Decision state</span>All architecture-level decisions in this document are <strong>locked</strong> (see §14 Decision Log) and conform to prior foundation-research locks (publisher choice, Chatwoot drop, human-in-the-loop). What remains open are the six owner-decision items in §13. Registration in <code>MODULES.md</code> as <code>social-media · 0.0.0 · PLANNED</code> happens on approval of this doc.</div>
+      </div>
+    </section>
+
+    <!-- ================= 01 SCOPE & PILLARS ================= -->
+    <section class="part" id="p01">
+      <div class="part-head"><span class="part-num">§01</span><h2>Scope &amp; Pillars</h2></div>
+      <p class="dek">Three service lines ship in v1; three are explicitly out with a documented seam.</p>
+      <div class="wrap">
+        <h3>Service lines</h3>
+        <div class="tablewrap"><table>
+          <thead><tr><th>Service line</th><th>v1 delivers</th><th>Deferred</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Organic publishing</strong></td><td>Multi-network content calendar, composer with per-network variants + media-rule/quota validation, approval-gated scheduling/publishing via contained Postiz, publish status + failure surfacing, native-post import for calendar completeness</td><td>Bulk CSV calendar import; onboarding beyond the core five networks; auto-repost/evergreen recycling</td></tr>
+            <tr><td><strong>Content creation</strong> (copy + assets)</td><td>Brand-voice profiles + WS8 RAG corpus per client; AI caption/hashtag/idea drafting (Hermes-first, Claude polish); Creative Image Studio seam for on-brand images (credits-gated)</td><td>Generative video (no gateway capability yet); long-form→shorts repurposing (decision-gated SMM-29); carousel auto-design</td></tr>
+            <tr><td><strong>Community engagement</strong></td><td>Unified inbox of comments/mentions (+ DMs where Postiz supports them), AI sentiment/category triage + spike alerts, approval-gated replies, assignment + SLA timers</td><td>Reviews platforms; social CRM/audience profiles; auto-moderation rules</td></tr>
+            <tr><td><strong>KPIs &amp; reporting</strong> (cross-cutting)</td><td>Outcome-tracked engagements + KPI targets, daily account + per-post metrics via Postiz analytics, monthly client reports (AI narrative → human approve → Drive + deliverable)</td><td>Attribution to revenue; competitor benchmarking</td></tr>
+            <tr><td>Paid social ads</td><td><span class="tag t-crit">OUT of v1</span> (locked)</td><td>Whole line — seam: <code>social_campaigns.kind</code> reserves <code>'paid'</code></td></tr>
+            <tr><td>Social listening</td><td><span class="tag t-crit">OUT of v1</span> (locked)</td><td>Whole line — seam: inbox sentiment/spike events stand in; a future provider plugs in as a driver</td></tr>
+            <tr><td>Influencer / UGC</td><td><span class="tag t-crit">OUT of v1</span> (locked)</td><td>Whole line — seam: creators as agency-vertical contacts + briefs</td></tr>
+          </tbody>
+        </table></div>
+
+        <h3>Non-goals (v1)</h3>
+        <ul>
+          <li><strong>No adopted external UIs</strong> — Postiz's web UI is never exposed; the SMM console is the only operator surface.</li>
+          <li><strong>No direct vendor AI calls</strong> — everything through ai-gateway-go (locked).</li>
+          <li><strong>No second inbox stack</strong> — Chatwoot dropped; wa-chat-bot stays as-is for WhatsApp/Telegram, untouched.</li>
+          <li><strong>No auto-publish, ever</strong> — not a config option, not for agents, not for "trusted" flows. The WS4 gate is structural, not policy.</li>
+          <li><strong>No paid-ad API integration, no listening data purchase, no influencer tooling.</strong></li>
+          <li><strong>No client-facing portal changes</strong> — reports deliver as files (Shared Drive + <code>deliverables</code>).</li>
+        </ul>
+
+        <h3>Architectural pillars</h3>
+        <div class="cols">
+          <div class="card"><span class="k">P1 · Postiz contained</span><p>The publishing engine runs at arm's length behind one REST adapter. No shared code, no shared DB, no linking — the fork stays thin-to-zero.</p></div>
+          <div class="card"><span class="k">P2 · Two-level content</span><p>No universal post object. A master idea/brief/approval row; per-network variants carry content, media, and settings, validated before anything is queued.</p></div>
+          <div class="card"><span class="k">P3 · Connector registry</span><p>Per client × network — app-review status, token health, quota counters, last error — surfaced exactly like the IT device registry.</p></div>
+          <div class="card"><span class="k">P4 · Local-first AI</span><p>Hermes for bulk drafting, Claude for client-facing polish only, brand-voice RAG over WS8 knowledge, images via the Creative Image Studio.</p></div>
+          <div class="card"><span class="k">P5 · Human-in-the-loop, always</span><p>Every outbound public action is a WS4 suspension; execution consumes a one-shot approvalId with payload-hash match. No exceptions for agents.</p></div>
+          <div class="card"><span class="k">P6 · One metered ledger</span><p>X per-post fees and generative credits flow through a single ledger with fail-closed stop-loss — engagement budget → tenant cap → global cap.</p></div>
+        </div>
+
+        <div class="note"><span class="k">Fit with prior decisions</span>Conforms to the ERP holding-OS vision (enablement via <code>enabled_modules</code> OR active <code>service_assignment</code>, WSD-3 module-sliced RLS third wall). Lands on the dept-interface-template exactly as reserved: SMM → "Publish": Calendar · Composer · Inbox · Analytics — this design builds those four pages and only then registers the toolkit. Reuses <code>clients</code>, <code>deliverables</code>, <code>time_entries</code>, <code>files</code>, <code>projects</code>, the Creative Image Studio asset tables, the WS4 approvals surface, and the SEO-proven ledger/stop-loss + one-shot-approval patterns.</div>
+      </div>
+    </section>
+
+    <!-- ================= 02 SYSTEM OVERVIEW ================= -->
+    <section class="part" id="p02">
+      <div class="part-head"><span class="part-num">§02</span><h2>System Overview</h2></div>
+      <p class="dek">The whole subsystem on one plate: the private platform, the license zone at arm's length, and every seam between them.</p>
+      <figure class="wide">
+        <div class="plate">
+          <pre class="mermaid">
+%%{init:{'theme':'base','themeVariables':{'fontFamily':'ui-monospace,monospace','fontSize':'13px','background':'#FBFCFB','mainBkg':'#E7F0EA','primaryColor':'#E7F0EA','secondaryColor':'#EEF3EE','tertiaryColor':'#EEF3EE','primaryBorderColor':'#1E5E44','primaryTextColor':'#14201A','secondaryTextColor':'#14201A','tertiaryTextColor':'#14201A','textColor':'#14201A','nodeTextColor':'#14201A','lineColor':'#4B574F','clusterBkg':'#EEF3EE','clusterBorder':'#B7C3B8','edgeLabelBackground':'#FBFCFB','titleColor':'#14201A'}}}%%
+flowchart TB
+  subgraph ZA["ZONE A — private platform"]
+    direction TB
+    UI["platform-ui<br/>SMM console"]
+    PN["platform-nest<br/>social module"]
+    PDB[("Postgres<br/>social_* · FORCE-RLS")]
+    GW["ai-gateway-go"]
+    HERMES["local Hermes"]
+    CLAUDE["Claude — polish only"]
+    WS8["WS8 knowledge<br/>brand-voice RAG"]
+    HUB["mcp-hub<br/>social.* tools"]
+    N8N["n8n flows<br/>thin orchestration"]
+    EVT["event backbone"]
+    STUDIO["Creative Image Studio"]
+  end
+  subgraph ZL["LICENSE ZONE — AGPL-contained"]
+    direction TB
+    POSTIZ["Postiz<br/>stock image · own PG/Redis"]
+  end
+  subgraph NET["Internet"]
+    SN["Social networks<br/>IG · FB · TikTok · LinkedIn · X · YouTube"]
+  end
+  UI --> PN
+  PN --- PDB
+  PN -->|"/complete /embed"| GW
+  GW --> HERMES
+  GW --> CLAUDE
+  PN -->|"knowledge.search"| WS8
+  HUB -->|"aggregated tool-defs"| PN
+  N8N -->|"MCP tools only"| HUB
+  PN -->|"outbox events"| EVT --> N8N
+  STUDIO --> PN
+  PN ==>|"REST only · org-scoped key<br/>approved work only"| POSTIZ
+  POSTIZ -->|"publish / refresh<br/>tokens live HERE"| SN
+  SN -.->|"OAuth callback + webhook<br/>edge path-allowlisted"| POSTIZ
+  POSTIZ -.->|"status webhook: ids only"| N8N
+  classDef default fill:#E7F0EA,stroke:#1E5E44,color:#14201A,stroke-width:1px;
+          </pre>
+        </div>
+        <figcaption><b>FIG. 02-1</b> — Master system diagram. Bold seam = control (REST, org-scoped, approved work only). Dotted seam = events/callbacks (validated, notification-only). The AGPL boundary is a <strong>license zone, not a network zone</strong> — Postiz runs on the private network but is architecturally at arm's length.</figcaption>
+      </figure>
+      <div class="wrap">
+        <h3>Reading the diagram</h3>
+        <ul>
+          <li><strong>Zone A</strong> holds all state and judgment: the module, its RLS-scoped Postgres, the AI routing, the brand-voice RAG, the MCP tool surface, and the event backbone.</li>
+          <li><strong>The license zone</strong> is Postiz — reached exclusively over REST, no shared code, no shared schema, no in-process embedding. Its own Postgres and Redis are opaque to us; we never query them.</li>
+          <li>Two arrows cross to the internet: Postiz's publish/refresh egress to the networks (where the network tokens live), and a narrow path-allowlisted ingress (edge proxy → Postiz's OAuth-callback and platform-webhook paths only).</li>
+          <li>Status webhooks toward us are <strong>notification-only</strong> (post/integration ids) — the authoritative state is always re-fetched over the authenticated Postiz API, never trusted from the webhook body.</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- ================= 03 TRUST ZONES & AGPL CONTAINMENT ================= -->
+    <section class="part" id="p03">
+      <div class="part-head"><span class="part-num">§03</span><h2>Trust Zones &amp; AGPL Containment</h2></div>
+      <p class="dek">Follows the WebDesk zone doctrine, extended with the license zone this subsystem introduces.</p>
+      <figure class="wide">
+        <div class="plate">
+          <pre class="mermaid">
+%%{init:{'theme':'base','themeVariables':{'fontFamily':'ui-monospace,monospace','fontSize':'13px','background':'#FBFCFB','mainBkg':'#E7F0EA','primaryColor':'#E7F0EA','secondaryColor':'#EEF3EE','tertiaryColor':'#EEF3EE','primaryBorderColor':'#1E5E44','primaryTextColor':'#14201A','secondaryTextColor':'#14201A','tertiaryTextColor':'#14201A','textColor':'#14201A','nodeTextColor':'#14201A','lineColor':'#4B574F','clusterBkg':'#EEF3EE','clusterBorder':'#B7C3B8','edgeLabelBackground':'#FBFCFB','titleColor':'#14201A'}}}%%
+flowchart LR
+  INET(("Public<br/>internet"))
+  subgraph EDGE["Edge proxy"]
+    WAF["Path-allowlist<br/>callbacks + webhooks only"]
+  end
+  subgraph ZL["LICENSE ZONE"]
+    direction TB
+    POSTIZ["Postiz app<br/>UI never routed"]
+    TOK[("Network tokens<br/>+ Postiz PG/Redis")]
+  end
+  subgraph ZA["ZONE A — private"]
+    direction TB
+    PN["social module"]
+    APPCRED[("App creds<br/>OpenBao target-state")]
+    N8N["n8n bridge"]
+  end
+  INET --> WAF -->|"OAuth callback<br/>platform webhook"| POSTIZ
+  POSTIZ --- TOK
+  PN ==>|"REST · org-scoped API key"| POSTIZ
+  APPCRED -.->|"injected at deploy"| POSTIZ
+  POSTIZ -.->|"status webhook: ids only<br/>HMAC + schema-checked"| N8N
+  classDef default fill:#E7F0EA,stroke:#1E5E44,color:#14201A,stroke-width:1px;
+          </pre>
+        </div>
+        <figcaption><b>FIG. 03-1</b> — Network + license boundary. Only Postiz's callback/webhook paths are reachable from outside; its admin UI and general API are never routed. Network tokens live inside Postiz only — never copied into our DB or vault.</figcaption>
+      </figure>
+      <div class="wrap">
+        <h3>Surfaces &amp; rules</h3>
+        <div class="tablewrap"><table>
+          <thead><tr><th>Surface</th><th>Zone</th><th>Rules</th></tr></thead>
+          <tbody>
+            <tr><td><code>social</code> module + ledger + registry</td><td><span class="tag t-info">A</span></td><td>Postiz org-scoped keys + our platform-app credentials are server-side env → OpenBao target-state, held by platform-nest / injected into the Postiz container. Never in the browser, never in n8n credentials, never per-tenant rows.</td></tr>
+            <tr><td>Postiz (publisher engine)</td><td><span class="tag t-ok">A network</span> <span class="tag t-warn">L license</span></td><td>Isolated compose services (app + own Postgres + own Redis, per the db-topology isolation doctrine). Reached ONLY via REST from platform-nest. UI not routed anywhere; DB opaque to us. Containment invariants: no shared libraries/schema/embedding; tenancy/RBAC/approvals entirely on our side; fork thin-to-zero; source-offer footer link.</td></tr>
+            <tr><td>Network OAuth callbacks + platform webhooks</td><td>edge → Postiz</td><td>Exact-path allowlist (everything else 404s), TLS-terminated, rate-limited. The single inbound door; a compromise reaches Postiz, not platform data — and Postiz holds only social tokens.</td></tr>
+            <tr><td>Postiz → us status webhooks</td><td>edge → n8n</td><td>Signed-webhook bridge pattern: HMAC/secret-path, schema-validated, treated as triggers only — n8n calls an MCP tool; the module re-fetches authoritative status from Postiz's API.</td></tr>
+            <tr><td>Client social accounts (tokens)</td><td>inside Postiz only</td><td>Created by Postiz's OAuth flows, stored in its encrypted store, refreshed by it, and never copied into our DB or vault. Our registry mirrors state-about, never the secret.</td></tr>
+            <tr><td>Creative Image Studio / gateway image seam</td><td><span class="tag t-info">A</span></td><td>Generative calls ride ai-gateway-go (budget caps, DLP, egress audit apply automatically); outputs land as <code>files</code> rows.</td></tr>
+            <tr><td>wa-chat-bot</td><td>untouched</td><td>Explicitly out of scope; WhatsApp/Telegram engagement stays there — locked, no social traffic routed into it.</td></tr>
+          </tbody>
+        </table></div>
+        <div class="note warn"><span class="k">Containment invariant</span>There is no network route and no credential by which a compromise of Postiz — or a Postiz CVE — can reach company data or the module's judgment. Postiz receives only approved publishable content and returns only public-surface data (comments, metrics). The license boundary and the security boundary coincide by construction.</div>
+      </div>
+    </section>
+
+    <!-- ================= 04 DOMAIN MODEL & SCHEMA ================= -->
+    <section class="part" id="p04">
+      <div class="part-head"><span class="part-num">§04</span><h2>Domain Model &amp; Schema</h2></div>
+      <p class="dek">The core entities, the two-level content model, and the FORCE-RLS third wall every table inherits.</p>
+      <figure class="wide">
+        <div class="plate">
+          <pre class="mermaid">
+%%{init:{'theme':'base','themeVariables':{'fontFamily':'ui-monospace,monospace','fontSize':'13px','background':'#FBFCFB','mainBkg':'#E7F0EA','primaryColor':'#E7F0EA','secondaryColor':'#EEF3EE','tertiaryColor':'#EEF3EE','primaryBorderColor':'#1E5E44','primaryTextColor':'#14201A','secondaryTextColor':'#14201A','tertiaryTextColor':'#14201A','textColor':'#14201A','nodeTextColor':'#14201A','lineColor':'#4B574F','edgeLabelBackground':'#FBFCFB','titleColor':'#14201A'}}}%%
+erDiagram
+  clients ||--o{ social_engagements : ""
+  clients ||--o{ social_brand_profiles : "voice"
+  social_engagements ||--o{ social_kpi_targets : "targets"
+  clients ||--o{ social_publisher_orgs : "Postiz org"
+  social_publisher_orgs ||--o{ social_accounts : "connectors"
+  social_platform_apps ||--o{ social_accounts : "our app"
+  social_engagements ||--o{ social_campaigns : ""
+  social_campaigns ||--o{ social_posts : ""
+  social_posts ||--o{ social_post_variants : "per-network"
+  social_accounts ||--o{ social_post_variants : "target"
+  files ||--o{ social_post_variants : "media"
+  social_accounts ||--o{ social_inbox_threads : ""
+  social_inbox_threads ||--o{ social_inbox_messages : ""
+  social_accounts ||--o{ social_metrics_daily : ""
+  social_post_variants ||--o{ social_post_metrics : ""
+  social_engagements ||--o{ social_reports : ""
+  deliverables ||--o{ social_reports : "= deliverable"
+  social_engagements ||--o{ social_usage_ledger : "fees + credits"
+  automation_approvals ||--o{ social_post_variants : "one-shot"
+          </pre>
+        </div>
+        <figcaption><b>FIG. 04-1</b> — Entity map. Every arrow = one-to-many. <code>social_posts</code>/<code>social_post_variants</code> is the locked two-level content model — there is no universal post object.</figcaption>
+      </figure>
+      <div class="wrap">
+        <h3>Design rules (inherited, not optional)</h3>
+        <ul>
+          <li>Every tenant table: <code>tenant_id uuid NOT NULL REFERENCES companies(id)</code>, <code>origin_site</code>, <code>created_at/updated_at</code>, soft-delete <code>deleted_at</code> where user-facing.</li>
+          <li><strong>FORCE-RLS with the WSD-3 third wall</strong> — policy predicate <code>tenant_id = ANY(app_current_tenants()) AND app_module_allowed('social')</code> on both USING and WITH CHECK, byte-identical to <code>0028_module_hr.sql</code>. App side reaches these tables only via <code>withTenants(tenants, { modules: ['social'] })</code>.</li>
+          <li>Migrations take the next unused number (0034+ as of 2026-07-23 — coordinate with any in-flight SEO tickets drawing from the same sequence); no in-migration GRANTs; no <code>sync_app</code> grants (social tables do not sync in v1).</li>
+          <li>Money: metered cost is <code>numeric(12,6)</code> USD (same rationale as the SEO ledger). No client-facing money in v1 — no ad spend.</li>
+          <li>The single non-tenant table is <code>social_platform_apps</code> — our own app fleet, no client data, admin-endpoint-only. Unlike SEO there is <strong>no shared market-data cache</strong>: every other byte in this module is client-private.</li>
+        </ul>
+
+        <h3>Tables</h3>
+        <div class="tablewrap"><table>
+          <thead><tr><th>Entity</th><th>Carries</th><th>Scope</th></tr></thead>
+          <tbody>
+            <tr><td class="mono">social_engagements</td><td>Outcome-tracked client engagement · <code>tool_scope jsonb</code> (networks/posting/inbox/ai/reporting toggles) · <code>usage_budget_usd</code></td><td>per client</td></tr>
+            <tr><td class="mono">social_publisher_orgs</td><td>One Postiz org per (tenant, client) · <code>postiz_org_id</code> · <code>api_key_ref</code> · UNIQUE both ways</td><td>per client</td></tr>
+            <tr><td class="mono">social_accounts</td><td>Connector registry: network · handle · status · quota jsonb · capabilities jsonb · health</td><td>per account</td></tr>
+            <tr><td class="mono">social_platform_apps</td><td>Our approved developer-app fleet: review_status, scopes, quota_regime, credential_ref</td><td><strong>global, no RLS</strong></td></tr>
+            <tr><td class="mono">social_brand_profiles</td><td>Voice/tone jsonb, hashtag_strategy, <code>knowledge_source_ids</code> → WS8 corpus pointers</td><td>per client</td></tr>
+            <tr><td class="mono">social_campaigns</td><td>Content campaigns/themes · <code>kind</code> ('organic' now, 'paid' reserved)</td><td>per engagement</td></tr>
+            <tr><td class="mono">social_posts</td><td>Master idea/brief/approval-state row · <code>source</code> (human/ai/agent/native_import) · rolls up variant states</td><td>per engagement</td></tr>
+            <tr><td class="mono">social_post_variants</td><td>Per-network body/media/settings · <code>validation jsonb</code> · <code>payload_hash</code> · <code>approval_id</code> · <code>postiz_post_id</code></td><td>per post × account</td></tr>
+            <tr><td class="mono">social_inbox_threads / _messages</td><td>Comments/DMs/mentions · sentiment (AI-stamped) · SLA · assignment · reply drafts (one-shot gated)</td><td>per account</td></tr>
+            <tr><td class="mono">social_kpi_targets</td><td>Per-engagement metric targets: followers, reach, engagement rate, response time, etc.</td><td>per engagement</td></tr>
+            <tr><td class="mono">social_metrics_daily / _post_metrics</td><td>Account time-series / per-post performance snapshots (append-only)</td><td>per account / variant</td></tr>
+            <tr><td class="mono">social_reports</td><td>Monthly/campaign/adhoc report — metrics snapshot + AI narrative → human-edited → deliverable</td><td>per engagement</td></tr>
+            <tr><td class="mono">social_usage_ledger</td><td>X fees + AI credits, metered, stop-loss chain (§05)</td><td>per engagement</td></tr>
+          </tbody>
+        </table></div>
+
+        <div class="plate" style="padding:1rem"><pre style="margin:0;font-family:var(--mono);font-size:.82rem;color:var(--plate-ink);overflow-x:auto">-- social_post_variants — state law (normative)
+-- payload_hash = hash(body, first_comment, media, settings, scheduled_at)
+--
+-- queued   ⇐ ONLY by consuming an approved one-shot approval_id
+--             whose hash matches this row's current payload_hash
+-- any edit ⇒ approval_id := NULL, status := 'draft', payload_hash recomputed
+-- native_import posts enter directly as 'published' with postiz_post_id NULL
+--             (calendar completeness, not execution — no approval trail faked)</pre></div>
+
+        <div class="note"><span class="k">No shared cache — deliberate contrast with SEO</span>The SEO module's no-RLS <code>search_data_cache</code> exists because market data is public-world and reusable cross-tenant. Nothing in SMM qualifies: posts, inbox threads, metrics, and account state are all client-private. Analytics pulls are cheap ($0 via Postiz), so caching lives inside tenant rows — <code>social_metrics_daily</code> <em>is</em> the cache. D-4: no RLS exemptions in this module beyond the client-data-free <code>social_platform_apps</code> admin table.</div>
+      </div>
+    </section>
+
+    <!-- ================= 05 PUBLISHER BOUNDARY & COST LEDGER ================= -->
+    <section class="part" id="p05">
+      <div class="part-head"><span class="part-num">§05</span><h2>Publisher Boundary &amp; Cost Ledger</h2></div>
+      <p class="dek">One adapter is the entire AGPL containment line; one ledger is the entire money-safety line.</p>
+      <div class="wrap">
+
+      <div class="spec">
+        <div class="spec-head"><span class="id">C-01</span><h3>Publisher Port — <code>SocialPublisher</code></h3><span class="zone a">Zone A</span></div>
+        <div class="spec-body"><dl>
+          <dt>Purpose</dt><dd>The single, capability-based interface every publishing operation goes through. Keeping every call at arm's length behind one adapter <strong>is</strong> the AGPL containment line.</dd>
+          <dt>Technology</dt><dd>platform-nest, <code>src/modules/social/publisher/</code>. One driver ships in v1 (Postiz); the port exists so the Mixpost-Pro fallback (or a direct-API driver) is a driver swap, not a redesign.</dd>
+          <dt>Responsibilities</dt><dd><ul>
+            <li>Org lifecycle: <code>createOrg</code>, <code>connectUrl</code> (OAuth entry), <code>listIntegrations</code> (registry sync source) — tenant mapping stays ours; the driver carries only the opaque org ref.</li>
+            <li>Publishing: <code>schedulePost</code>, <code>cancelPost</code>, <code>getPostStatus</code> — accepts <strong>only</strong> approved work; the caller enforces §07, the driver asserts <code>approvalId</code> present.</li>
+            <li>Engagement: <code>listComments</code>, <code>sendReply</code>.</li>
+            <li>Analytics: <code>getAccountMetrics</code>, <code>getPostMetrics</code>.</li>
+            <li>Money: <code>estimateCostUsd(op)</code> — consulted <strong>before</strong> dispatch (X pay-per-post).</li>
+          </ul></dd>
+          <dt>Interfaces</dt><dd><span class="mono">in</span>: module call sites (dispatch choke-point, registry sync, inbox pull) · <span class="mono">out</span>: HTTP+JSON to Postiz's public API only</dd>
+          <dt>Data owned</dt><dd>None — stateless per call; org-scoped API key resolved from <code>api_key_ref</code> at call time</dd>
+          <dt>Security</dt><dd>Every request/response OTel-annotated (network, org, op, cost_usd); <strong>no Postiz type or code imported</strong> — containment is enforceable by lint (zero <code>postiz</code> package deps)</dd>
+          <dt>Operations</dt><dd>Driver swap (Mixpost fallback) = new driver + deploy change, not a redesign</dd>
+        </dl></div>
+      </div>
+
+      <h3>The usage/cost ledger</h3>
+      <p>X is a metered cost center (~$0.015/post, ~$0.20 with link — reverify at build time) and generative image/video is the highest-cost AI class. Both flow through one ledger, mirroring <code>search_provider_calls</code>: <code>social_usage_ledger</code> (<code>kind</code> in <code>x_post</code>/<code>ai_image</code>/<code>ai_video</code>/<code>ai_cloud_text</code>, <code>cost_usd numeric(12,6)</code>, <code>status</code>, <code>requested_by</code>, <code>correlation_id</code> — indexed <code>(tenant_id, engagement_id, created_at DESC)</code>).</p>
+
+      <h3>Scope + budget stop-loss (fail-closed, one choke-point before dispatch)</h3>
+      <p>Byte-for-byte the SEO pattern:</p>
+      <ol>
+        <li>The capability must be enabled in the engagement's <code>tool_scope</code> (<code>networks.x</code>, <code>ai.imageGen</code>) — a disabled toggle refuses <strong>with the toggle named</strong>, regardless of budget.</li>
+        <li>Month-to-date <code>SUM(cost_usd)</code> vs — engagement <code>usage_budget_usd</code> → tenant monthly cap → global platform cap (env, default $100/mo until X usage is proven).</li>
+        <li>Breach: refuse + emit <code>social.usage.budget_threshold</code> (also at 80%); console shows the blocked state; override = <code>social:credits:admin</code> + audit.</li>
+      </ol>
+      <div class="note"><span class="k">Price of the click</span>The composer surfaces <code>estimateCostUsd</code> on every X variant <strong>before</strong> approval is requested, so the approver sees the price of the click. Ledger powers the per-engagement usage panel, tenant rollup, and the <code>social.usage_cost.month</code> rollup metric. Gateway-side AI cost caps remain enforced upstream independently (defence in depth).</div>
+      </div>
+    </section>
+
+    <!-- ================= 06 FORK/ADAPT PLAN ================= -->
+    <section class="part" id="p06">
+      <div class="part-head"><span class="part-num">§06</span><h2>Fork/Adapt Plan Per Repo</h2></div>
+      <p class="dek">"Contained" = we run it at arm's length as an execution engine; "data-only" = we take reference/technique, never run it.</p>
+      <div class="wrap">
+        <div class="tablewrap"><table>
+          <thead><tr><th>Repo</th><th>Verdict</th><th>Keep</th><th>Strip / never run</th><th>Add / how it plugs in</th></tr></thead>
+          <tbody>
+            <tr><td><strong>gitroomhq/postiz-app</strong> (AGPL-3.0)</td><td><span class="tag t-crit">Adopt · AGPL-CONTAINED</span> (load-bearing). Stock upstream image, isolated compose stack, tenancy mapped in <em>our</em> <code>social_publisher_orgs</code></td><td>14-network connectors, OAuth + token refresh, media upload, queue/retry, comments, analytics endpoints</td><td>Its web UI (never routed); its user/org self-signup (disabled); any temptation to edit its Prisma schema</td><td>Compose services on the private network; edge exposes only callback/webhook paths; app creds injected via OpenBao; <code>SocialPublisher</code> driver; source-offer footer link</td></tr>
+            <tr><td>— fork-touchpoint budget (thin-fork line)</td><td>Allowed ONLY: build/compose/env packaging; disabling signup/UI via config; outbound status-webhook emitter if missing upstream; security backports</td><td>—</td><td>—</td><td><strong>Tripwires → Mixpost fallback:</strong> touching its DB schema/tenancy; embedding our authz inside it; patch surface &gt;~5 files or unrebasable in a day; a licensing-counsel red flag</td></tr>
+            <tr><td><strong>inovector/mixpost</strong> (Pro, proprietary)</td><td><span class="tag t-warn">FALLBACK only</span> — do not run in v1</td><td>11-network coverage + built-in inbox as the driver-port checklist</td><td>Everything (not deployed)</td><td>A <code>mixpost</code> driver behind the same <code>SocialPublisher</code> port</td></tr>
+            <tr><td><strong>chatwoot/chatwoot</strong></td><td><span class="tag t-crit">DROPPED</span> (locked) — overlaps wa-chat-bot</td><td>Its triage/assignment UX informs the Inbox tab</td><td>The app</td><td>—</td></tr>
+            <tr><td><strong>ClipsAI/clipsai</strong> (MIT)</td><td><span class="tag t-info">Decision-gated</span> (SMM-29, not mobilized)</td><td>Python lib as job-mode worker; reuses local faster-whisper</td><td>Any service mode</td><td>Job container → clips land as <code>files</code></td></tr>
+            <tr><td>SamurAIGPT/AI-Youtube-Shorts-Generator (MIT)</td><td>Reference-only</td><td>Highlight-selection prompt patterns</td><td>—</td><td>Folded into SMM-29 design when gated open</td></tr>
+            <tr><td><strong>Creative Image Studio</strong> (internal)</td><td><span class="tag t-ok">Reuse + extend</span> at the seam</td><td>Grading engine, presets, asset library</td><td>—</td><td>"Send to SMM composer" flow + gateway generative-image seam behind credits + WS4</td></tr>
+          </tbody>
+        </table></div>
+
+        <h3>AGPL containment — the five invariants (normative)</h3>
+        <ol>
+          <li>Isolated service/container, REST-only interaction.</li>
+          <li>Multi-tenancy + all proprietary logic outside the Postiz process.</li>
+          <li>Thin-to-zero fork within the touchpoint budget.</li>
+          <li>Source offer to interacting users via console footer link.</li>
+          <li>Postiz frontend never served to anyone.</li>
+        </ol>
+        <div class="note warn"><span class="k">Legal sign-off</span>Legal sign-off on this containment memo is OQ-3 (§13). The Mixpost fallback price of failure is known and bounded — if any tripwire fires, the swap is a driver + deploy change, not a redesign.</div>
+      </div>
+    </section>
+
+    <!-- ================= 07 AI DESIGN ================= -->
+    <section class="part" id="p07">
+      <div class="part-head"><span class="part-num">§07</span><h2>AI Design</h2></div>
+      <p class="dek">Task-to-model routing, the brand-voice RAG, and the WS4 spine — stricter than SEO because a bad post ships to the world.</p>
+      <div class="wrap">
+        <h3>Task → model routing (all via ai-gateway-go; never direct vendor calls)</h3>
+        <div class="tablewrap"><table>
+          <thead><tr><th>Task</th><th>Model</th><th>Trigger</th><th>Notes</th></tr></thead>
+          <tbody>
+            <tr><td>Caption/copy drafting</td><td class="mono">Hermes → Claude</td><td>Composer</td><td>Claude only when <code>tool_scope.ai.cloudPolish</code>; brand profile + WS8 brand-voice RAG</td></tr>
+            <tr><td>Hashtag generation</td><td class="mono">Hermes</td><td>Composer</td><td>Constrained by <code>hashtag_strategy</code>; per-network counts/placement</td></tr>
+            <tr><td>Content ideas / angles</td><td class="mono">/embed + Hermes</td><td>Calendar planning</td><td>Clusters own top-performing posts; no external trend data (listening is out)</td></tr>
+            <tr><td>Comment/DM triage</td><td class="mono">Hermes + rules</td><td><code>smm-inbox-pull</code></td><td>Stamps sentiment; urgent/negative spike → <code>social.sentiment.spike</code></td></tr>
+            <tr><td>Reply drafting</td><td class="mono">Hermes</td><td>Inbox</td><td>Draft rows only; brand-voice RAG applied; sending always WS4-gated</td></tr>
+            <tr><td>Best-time-to-post</td><td class="mono">Classical stats, no LLM</td><td>Weekly job</td><td>Regression/heatmap over own metrics; suggestion chip, never auto-applied</td></tr>
+            <tr><td>Image generation</td><td class="mono">Studio + gateway seam</td><td>Composer/Studio</td><td>Highest-cost class — <code>tool_scope.ai.imageGen</code> + credits ledger; asset still rides the post's WS4 approval</td></tr>
+            <tr><td>Brand-safety pre-check</td><td class="mono">vision + Hermes</td><td>Pre-submit</td><td>Advisory flag only (<code>validation.warnings[]</code>), never a silent block</td></tr>
+            <tr><td>Report narrative</td><td class="mono">Hermes → Claude</td><td>Monthly flow</td><td>The one place cloud polish defaults on (client-facing)</td></tr>
+            <tr><td>Video repurposing</td><td class="mono">faster-whisper + Hermes + ClipsAI</td><td>On demand</td><td>Decision-gated (SMM-29) — not in v1 scope</td></tr>
+          </tbody>
+        </table></div>
+
+        <div class="note"><span class="k">Brand-voice RAG (D9 hygiene)</span>The corpus (approved past posts, brand guidelines, tone docs) is ingested as tenant-ACL'd WS8 knowledge sources — WS8 stays the sole owner of derived knowledge stores; <code>social_brand_profiles</code> stores only <code>knowledge_source_ids</code> pointers. Published posts feed back into the corpus on delivery, continuously sharpening drafts. No new pgvector columns in this module.</div>
+
+        <h3>AI-drafts → human-approves → publish (the WS4 spine)</h3>
+        <ol>
+          <li>AI (or a human, or a WS8 agent) produces <strong>draft rows</strong> — always persisted, never dispatched. Drafts live in our DB only; nothing enters Postiz at draft time.</li>
+          <li>Low-impact artifacts (reports, campaign plans) approve in-console via module permissions. <strong>Anything outbound-public</strong> — publish, reply, cancel-published, delete — goes through WS4: the MCP tool is declared <code>write:true, impact:'high'</code>, the hub write-gate suspends it into <code>automation_approvals</code>, with a full preview (rendered variant, media, target account, scheduled time, estimated X cost).</li>
+          <li><strong>Execute — one-shot, single-mode:</strong> approval produces an <code>approvalId</code> bound to the variant's <code>payload_hash</code>. The dispatch choke-point consumes it (status approved, hash match, unconsumed) in the same transaction that calls <code>schedulePost</code> and stamps <code>postiz_post_id</code> — exactly once, replay-refused. Any edit after approval nulls the approval and the variant re-enters review.</li>
+          <li><strong>Scheduling semantics:</strong> approval covers content + target + time window. Postiz executes the queue; a reconcile flow re-fetches authoritative status. A variant stuck queued past its slot + grace raises <code>social.post.failed</code> for human action — never auto-retry a publish that may have half-succeeded.</li>
+        </ol>
+
+        <figure class="wide"><div class="plate">
+          <pre class="mermaid">
+%%{init:{'theme':'base','themeVariables':{'fontFamily':'ui-monospace,monospace','fontSize':'12px','background':'#FBFCFB','mainBkg':'#E7F0EA','primaryColor':'#E7F0EA','primaryBorderColor':'#1E5E44','primaryTextColor':'#14201A','textColor':'#14201A','lineColor':'#4B574F','actorBkg':'#E7F0EA','actorBorder':'#1E5E44','actorTextColor':'#14201A','actorLineColor':'#5A665E','signalColor':'#14201A','signalTextColor':'#14201A','labelBoxBkgColor':'#E7F0EA','labelBoxBorderColor':'#1E5E44','labelTextColor':'#14201A','loopTextColor':'#14201A','noteBkgColor':'#F3E9D6','noteTextColor':'#14201A','noteBorderColor':'#9C6714','activationBkgColor':'#E7F0EA','activationBorderColor':'#1E5E44','sequenceNumberColor':'#FBFCFB'}}}%%
+sequenceDiagram
+  autonumber
+  participant C as Composer/AI
+  participant M as social module
+  participant W as WS4 approvals
+  participant D as Dispatch choke-point
+  participant P as Postiz
+  participant N as Network
+  C->>M: create draft variant
+  M->>M: media-rule + quota validate
+  C->>M: submit for approval
+  M->>W: suspend (impact:high)
+  W-->>M: approved (approvalId + hash)
+  M->>D: dispatch(approvalId)
+  D->>D: consume one-shot · hash match
+  D->>P: schedulePost (REST)
+  P->>N: publish
+  P-->>D: providerPostId
+  D-->>M: stamp postiz_post_id · queued
+        </pre>
+        </div><figcaption><b>FIG. 07-1</b> — Draft → WS4 approval → one-shot dispatch. No approval, no publish — including for humans in the console. Any edit after approval nulls the approval and the hash is recomputed.</figcaption></figure>
+
+        <h3>Social data + actions as MCP tools (WS8 agents)</h3>
+        <p>Registered via <code>ModuleContract.mcpTools</code> (aggregated by mcp-hub — nothing hub-side to hardcode). Reads are <code>minAssurance:'low'</code>; credit-spending drafts are <code>write:true, impact:'medium'</code>; everything outbound-public is <code>impact:'high'</code>:</p>
+        <div class="tablewrap"><table>
+          <thead><tr><th>Tool</th><th>Kind</th><th>Impact</th></tr></thead>
+          <tbody>
+            <tr><td class="mono">social.listAccounts / queueSummary / inboxSummary / metricsSummary / ledgerSummary</td><td>read</td><td>—</td></tr>
+            <tr><td class="mono">social.draftPost / draftReplies / generateHashtags / suggestPostTime / draftReport</td><td>AI draft</td><td><span class="tag t-ok">low</span> (writes drafts only)</td></tr>
+            <tr><td class="mono">social.generateImage</td><td>credit spend</td><td><span class="tag t-warn">medium</span> (tool_scope + ledger stop-loss)</td></tr>
+            <tr><td class="mono">social.pullInbox / pullMetrics / syncAccountHealth</td><td>$0 sync trigger</td><td><span class="tag t-ok">low</span></td></tr>
+            <tr><td class="mono">social.submitForApproval</td><td>workflow</td><td><span class="tag t-ok">low</span> (creates the suspension)</td></tr>
+            <tr><td class="mono">social.publishPost / sendReply / cancelScheduled / deletePublished</td><td>outbound public</td><td><span class="tag t-crit">high → always suspends</span></td></tr>
+          </tbody>
+        </table></div>
+        <p>This is the P4 agent surface: a WS8 agent can research, draft a week of posts, generate imagery (within credits), and file everything into the approval queue — and can never publish.</p>
+      </div>
+    </section>
+
+    <!-- ================= 08 CONSOLE & CAPABILITY MATRIX ================= -->
+    <section class="part" id="p08">
+      <div class="part-head"><span class="part-num">§08</span><h2>Console &amp; Capability Matrix</h2></div>
+      <p class="dek">One department console on the dept-interface-template, and the button-level matrix that decides what every action needs.</p>
+      <div class="wrap">
+        <p>Department name <strong>"SMM"</strong> (already seeded in the agency org structure), slug <code>smm</code>, on the two-level dept-interface-template exactly as Web Dev/Creatives use it: universal spine <strong>Home · Work · Connections</strong> + the already-reserved craft group <strong>"Publish"</strong> — this design changes nothing about that IA, it builds it.</p>
+        <div class="tablewrap"><table>
+          <thead><tr><th>Group</th><th>Sub-tabs (route under <code>/departments/smm/</code>)</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Publish</strong></td><td>Calendar (<code>calendar</code>, full-bleed) · Composer (<code>composer</code>) · Inbox (<code>inbox</code>) · Analytics (<code>analytics</code>)</td></tr>
+          </tbody>
+        </table></div>
+        <p>Per the toolkit file's own rule, the SMM toolkit is added to <code>TOOLKITS</code> only when all four routes exist. Home = the command-center template (KPI strip: posts scheduled this week, awaiting approval, inbox open + SLA-at-risk, connected accounts + health, MTD metered spend). Connections gains the account-connect flow + connector-health states.</p>
+
+        <h3>Tab intents</h3>
+        <div class="cols">
+          <div class="card"><span class="k">Calendar</span><p>Month/week grid of master posts + variant chips, drag-reschedule (re-approval on hash change), per-network quota strips, campaign swimlanes.</p></div>
+          <div class="card"><span class="k">Composer</span><p>Master post + per-network variant editor, media-rule validation inline, brand-voice AI drafting, Studio attach, submit-for-approval.</p></div>
+          <div class="card"><span class="k">Inbox</span><p>Triage queue (sentiment/urgency sort), thread view, assignment + SLA timers, reply drafts + approval states.</p></div>
+          <div class="card"><span class="k">Analytics</span><p>Account trend charts, per-post leaderboard, KPI-vs-target, usage/ledger panel.</p></div>
+        </div>
+
+        <h3>Button capability matrix</h3>
+        <p><strong>Legend — what each action needs:</strong> <span class="tag t-ok">AI/OWN-STACK</span> local Hermes + gateway + our data, usable immediately, $0 external · <span class="tag t-info">ACCOUNT LINK</span> client network account connected via contained Postiz and our platform app approved for that network · <span class="tag t-warn">METERED</span> X per-post fee or generative credits, ledger stop-loss applies · <span class="tag t-crit">WS4 APPROVAL</span> human decision required, one-shot execution. Every action is additionally gated by the engagement's <code>tool_scope</code>: a disabled network/feature renders the button disabled and names the missing toggle.</p>
+        <div class="tablewrap"><table>
+          <thead><tr><th>Console action</th><th>Tab</th><th>Needs</th><th>Gate</th></tr></thead>
+          <tbody>
+            <tr><td>Create engagement / KPI targets / campaign</td><td>Home/Calendar</td><td>—</td><td>permission only</td></tr>
+            <tr><td><strong>Configure engagement scope &amp; budget</strong></td><td>Home</td><td>—</td><td class="mono">social:scope:write</td></tr>
+            <tr><td>Connect a client social account (OAuth via Postiz)</td><td>Connections</td><td><span class="tag t-info">ACCOUNT LINK</span></td><td class="mono">social:account:connect</td></tr>
+            <tr><td>View connector registry / health / quota</td><td>Connections</td><td>—</td><td>read permission</td></tr>
+            <tr><td>Create post + per-network variants</td><td>Composer</td><td>—</td><td class="mono">social:post:write</td></tr>
+            <tr><td>Validate media rules / quota pre-check</td><td>Composer</td><td><span class="tag t-ok">AI/OWN-STACK</span></td><td>automatic on edit</td></tr>
+            <tr><td>AI draft captions / hashtags / ideas</td><td>Composer</td><td><span class="tag t-ok">AI/OWN-STACK</span></td><td>draft only</td></tr>
+            <tr><td>Claude polish (client-facing copy)</td><td>Composer</td><td><span class="tag t-ok">AI/OWN-STACK</span> (gateway-capped)</td><td>draft only</td></tr>
+            <tr><td>Generate image (Creative Image Studio seam)</td><td>Composer</td><td><span class="tag t-warn">METERED</span></td><td>draft only</td></tr>
+            <tr><td>Attach media from files/Drive/Studio library</td><td>Composer</td><td><span class="tag t-ok">AI/OWN-STACK</span></td><td>—</td></tr>
+            <tr><td>Best-time suggestion chip</td><td>Composer</td><td><span class="tag t-ok">AI/OWN-STACK</span></td><td>advisory only</td></tr>
+            <tr><td>Submit post for approval (preview + X cost shown)</td><td>Composer</td><td>—</td><td>creates WS4 suspension</td></tr>
+            <tr><td><strong>Approve &amp; schedule / publish now</strong></td><td>Approvals inbox</td><td><span class="tag t-info">ACCOUNT LINK</span> + <span class="tag t-warn">METERED</span> if X</td><td><span class="tag t-crit">one-shot</span></td></tr>
+            <tr><td>Reschedule an approved post</td><td>Calendar</td><td>—</td><td>hash change → <span class="tag t-crit">re-approval</span></td></tr>
+            <tr><td>Cancel a scheduled (unpublished) post</td><td>Calendar</td><td><span class="tag t-info">ACCOUNT LINK</span></td><td><span class="tag t-crit">one-shot</span> (outbound-state mutation)</td></tr>
+            <tr><td>Delete a published post</td><td>Calendar/Analytics</td><td><span class="tag t-info">ACCOUNT LINK</span></td><td><span class="tag t-crit">one-shot</span> (public, irreversible)</td></tr>
+            <tr><td>Record a natively-posted item (import)</td><td>Calendar</td><td>—</td><td class="mono">social:post:write (bookkeeping)</td></tr>
+            <tr><td>Pull inbox now / auto-sync comments+DMs</td><td>Inbox</td><td><span class="tag t-info">ACCOUNT LINK</span></td><td>— ($0 read)</td></tr>
+            <tr><td>AI triage sentiment / draft replies</td><td>Inbox</td><td><span class="tag t-ok">AI/OWN-STACK</span></td><td>draft only</td></tr>
+            <tr><td><strong>Send reply</strong> (comment/DM)</td><td>Inbox</td><td><span class="tag t-info">ACCOUNT LINK</span></td><td><span class="tag t-crit">one-shot</span></td></tr>
+            <tr><td>Assign thread / set status / escalate</td><td>Inbox</td><td>—</td><td class="mono">social:inbox:reply</td></tr>
+            <tr><td>Pull account + post metrics</td><td>Analytics</td><td><span class="tag t-info">ACCOUNT LINK</span></td><td>— ($0 read)</td></tr>
+            <tr><td>Generate report (metrics + AI narrative)</td><td>Analytics</td><td><span class="tag t-ok">AI/OWN-STACK</span></td><td class="mono">social:report:approve</td></tr>
+            <tr><td>Deliver report (Shared Drive + deliverable)</td><td>Analytics</td><td><span class="tag t-ok">AI/OWN-STACK</span></td><td>after approve</td></tr>
+            <tr><td>View usage ledger / raise engagement budget</td><td>Home/Analytics</td><td>—</td><td class="mono">social:ledger:read / social:credits:admin</td></tr>
+            <tr><td>Manage platform-app fleet</td><td>Admin (not dept console)</td><td>—</td><td class="mono">social:apps:admin</td></tr>
+          </tbody>
+        </table></div>
+        <div class="note"><span class="k">P1 dogfood</span>Everything green plus the composer/calendar loop against our own brand accounts ships value in P1 with zero external spend and zero client risk — deliberate: own accounts are the dogfood + demo surface while client app reviews grind through OQ-1.</div>
+      </div>
+    </section>
+
+    <!-- ================= 09 ERP INTEGRATION ================= -->
+    <section class="part" id="p09">
+      <div class="part-head"><span class="part-num">§09</span><h2>ERP Integration</h2></div>
+      <p class="dek">Every existing platform subsystem this module plugs into — nothing new to invent, everything reused.</p>
+      <div class="wrap">
+        <div class="tablewrap"><table>
+          <thead><tr><th>Subsystem</th><th>Integration (concrete)</th></tr></thead>
+          <tbody>
+            <tr><td>platform-nest</td><td><code>ModuleContract</code> key <code>social</code>; controller <code>@Controller("api/:tenantId/modules/social")</code> (hr convention); <code>ModuleEnabledGuard</code>; enablement via <code>enabled_modules</code> OR active <code>service_assignment</code></td></tr>
+            <tr><td>BFF contract</td><td>New section in <code>FRONTEND-BFF-CONTRACT.md</code>: engagements, scope, brand-profiles, accounts/connect, campaigns, posts/variants/submit, calendar, inbox threads/reply, kpi-targets, metrics, reports, ledger — shapes canonical in <code>platform-ui/src/lib/social.ts</code></td></tr>
+            <tr><td>Postiz (contained)</td><td>The <code>SocialPublisher</code> Postiz driver is the ONLY caller; compose stack + narrow edge ingress; org-per-client mapping in <code>social_publisher_orgs</code></td></tr>
+            <tr><td>mcp-hub</td><td><code>social.*</code> tools via <code>mcpTools</code> aggregation (§07); no hub changes needed</td></tr>
+            <tr><td>ai-gateway-go</td><td><code>/complete</code> (Hermes default, Claude flagged) + <code>/embed</code> + vision (brand-safety) + generative-image seam; budget caps + DLP + egress audit apply automatically</td></tr>
+            <tr><td>WS8 knowledge</td><td>Brand corpus as tenant-ACL'd knowledge sources; drafting retrieval via <code>knowledge.search</code> (D9 preserved); delivered posts fed back into the corpus</td></tr>
+            <tr><td>Creative Image Studio</td><td>Asset attach flow + generative seam; assets keep their creative-asset lineage; credits metered in the §05 ledger</td></tr>
+            <tr><td>automation (n8n)</td><td>Flows in §10; backbone rule respected — n8n orchestrates, MCP accesses, zero logic in workflows</td></tr>
+            <tr><td>WS4 approvals</td><td>Every outbound-public <code>social.*</code> tool suspends into <code>automation_approvals</code>; execution consumes a one-shot <code>approvalId</code> + payload-hash match; approval preview renders the exact variant</td></tr>
+            <tr><td>Event backbone</td><td><code>social.post.published/failed/awaiting_approval</code>, <code>social.account.expiring/error/quota_near</code>, <code>social.inbox.sla_breach</code>, <code>social.sentiment.spike</code>, <code>social.usage.budget_threshold</code>, <code>social.report.ready_for_review/delivered</code> → notifications bell + n8n bridge</td></tr>
+            <tr><td>Files / Shared Drive (WS11)</td><td>Post media + produced creative + rendered reports as <code>files</code> rows mirrored to the client's Drive folder</td></tr>
+            <tr><td>Rollups (D12)</td><td>Metrics: accounts connected, posts published/month, approvals pending, inbox open, followers total, usage cost/month (USD), reports delivered</td></tr>
+            <tr><td>Cerbos</td><td>New resource policies (§11); UI capabilities mirrored in <code>lib/rbac.ts</code> (defence-in-depth, Cerbos authoritative)</td></tr>
+            <tr><td>observability (WS9)</td><td>OTel spans on every publisher call (network, org, op, cost_usd), publish latency, connector-health gauge, inbox SLA gauge, ledger-vs-cap gauge; fail-soft <code>OTEL_ENABLED</code></td></tr>
+            <tr><td>wa-chat-bot</td><td>Explicit non-integration (locked): WhatsApp/Telegram stay there; no social traffic crosses</td></tr>
+            <tr><td>Future service-line seams</td><td>Paid ads → <code>social_campaigns.kind='paid'</code> + the SEO change-proposal template; listening → provider driver + <code>social_mentions</code>; influencer → agency-vertical briefs. Documented, not built</td></tr>
+          </tbody>
+        </table></div>
+      </div>
+    </section>
+
+    <!-- ================= 10 AUTOMATION FLOWS ================= -->
+    <section class="part" id="p10">
+      <div class="part-head"><span class="part-num">§10</span><h2>Automation Flows (n8n / WS4)</h2></div>
+      <p class="dek">Thin orchestrations calling <code>social.*</code> MCP tools — publishing itself is not an n8n flow.</p>
+      <div class="wrap">
+        <p>All flows live in <code>automation/workflows/</code>, kebab-named like the existing set. <strong>Scheduling is scope-driven:</strong> each flow iterates only engagements whose <code>tool_scope</code> enables the feature (the module filters; n8n stays logic-free per the backbone rule). Publishing itself dispatches transactionally at approval-consumption inside the module (§07) — n8n only reconciles and reacts.</p>
+        <div class="tablewrap"><table>
+          <thead><tr><th>Flow</th><th>Schedule / trigger</th><th>MCP calls</th><th>Phase</th></tr></thead>
+          <tbody>
+            <tr><td class="mono">smm-post-status-sync</td><td>Postiz webhook (ids) + 15-min safety poll</td><td><code>social.syncPostStatus</code> (authoritative re-fetch)</td><td class="mono">P1</td></tr>
+            <tr><td class="mono">smm-connector-health</td><td>daily</td><td><code>social.syncAccountHealth</code> → expiring/error/quota events</td><td class="mono">P1</td></tr>
+            <tr><td class="mono">smm-inbox-pull</td><td>every 15 min per enabled engagement</td><td><code>social.pullInbox</code> (idempotent upsert)</td><td class="mono">P2</td></tr>
+            <tr><td class="mono">smm-sentiment-triage</td><td>event <code>social.inbox.new_batch</code></td><td><code>social.triageInbox</code> → spike detection → notify/escalate</td><td class="mono">P2</td></tr>
+            <tr><td class="mono">smm-inbox-sla-guard</td><td>every 15 min</td><td><code>social.inboxSummary</code> → SLA breach events → notify</td><td class="mono">P2</td></tr>
+            <tr><td class="mono">smm-metrics-daily</td><td>nightly</td><td><code>social.pullMetrics</code> (accounts + recent posts)</td><td class="mono">P3</td></tr>
+            <tr><td class="mono">smm-usage-guard</td><td>daily</td><td><code>social.ledgerSummary</code> → 80%/100% threshold events</td><td class="mono">P3</td></tr>
+            <tr><td class="mono">smm-monthly-report</td><td>monthly per engagement</td><td><code>social.draftReport</code> → review → <code>social.deliverReport</code></td><td class="mono">P3</td></tr>
+            <tr><td class="mono">smm-best-time-refresh</td><td>weekly</td><td><code>social.refreshPostTimeModel</code> (classical stats job)</td><td class="mono">P4</td></tr>
+            <tr><td class="mono">smm-agent-content-brief</td><td>weekly per opted-in engagement</td><td>WS8 agent: draft posts + imagery within credits → <code>social.submitForApproval</code></td><td class="mono">P4</td></tr>
+          </tbody>
+        </table></div>
+      </div>
+    </section>
+
+    <!-- ================= 11 SECURITY ================= -->
+    <section class="part" id="p11">
+      <div class="part-head"><span class="part-num">§11</span><h2>Security</h2></div>
+      <p class="dek">The threat model and control matrix — where the license boundary and the security boundary are the same line.</p>
+      <div class="wrap">
+        <h3>Threat model</h3>
+        <div class="tablewrap"><table>
+          <thead><tr><th>Threat</th><th>Vector</th><th>Primary control</th><th>Severity</th></tr></thead>
+          <tbody>
+            <tr><td>AGPL/license contamination</td><td>Fork drift, shared code/DB with Postiz</td><td>REST-only adapter, lint-enforced zero Postiz deps, fork-touchpoint budget</td><td><span class="tag t-crit">Critical</span></td></tr>
+            <tr><td>Wrong-account publish</td><td>Tenant-mapping bug across the FK chain</td><td>Validated at composer AND dispatch; org UNIQUE; fail-closed refusal + audit</td><td><span class="tag t-crit">Critical</span></td></tr>
+            <tr><td>Accidental / malicious public post</td><td>Auto-publish path, replay, TOCTOU</td><td>WS4 gate structural (not policy); one-shot approvalId + payload-hash match</td><td><span class="tag t-crit">Critical</span></td></tr>
+            <tr><td>Network token theft</td><td>Compromise of our DB/vault</td><td>Tokens live inside Postiz only, never copied out — disjoint blast radii</td><td><span class="tag t-warn">High</span></td></tr>
+            <tr><td>Forged status webhook</td><td>Postiz→us event path</td><td>HMAC/schema-validated, notification-only (ids), authoritative re-fetch</td><td><span class="tag t-info">Medium</span></td></tr>
+            <tr><td>Cross-tenant data access</td><td>Broken isolation</td><td>FORCE-RLS third wall + Cerbos + scoped API (defense in depth)</td><td><span class="tag t-crit">Critical</span></td></tr>
+            <tr><td>Runaway metered spend</td><td>X fees, generative credits</td><td>tool_scope gate → budget stop-loss chain → fail-closed refusal</td><td><span class="tag t-warn">High</span></td></tr>
+            <tr><td>AI performs harmful action</td><td>Prompt injection via brand corpus/content</td><td>Drafts only; server-side authz + WS4 gate; untrusted-input stance</td><td><span class="tag t-crit">Critical</span></td></tr>
+          </tbody>
+        </table></div>
+
+        <h3>Control layers</h3>
+        <div class="cols">
+          <div class="card"><span class="k">Key custody (three-way split)</span><p>App creds (OpenBao → Postiz env) · Postiz org keys (server-side alias) · network tokens (inside Postiz only, never copied). Disjoint blast radii by construction.</p></div>
+          <div class="card"><span class="k">AGPL containment</span><p>No shared code/DB/process, REST-only, lint-enforced zero Postiz deps, fork-touchpoint budget with review. License boundary = security boundary.</p></div>
+          <div class="card"><span class="k">RLS &amp; tenancy</span><p>FORCE-RLS, third-wall predicate, fail-closed empty-set semantics on every <code>social_*</code> table except the client-data-free <code>social_platform_apps</code>.</p></div>
+          <div class="card"><span class="k">Wrong-account defense</span><p>FK chain variant→account→publisher_org→(tenant,client) validated at composer time AND re-validated at the dispatch choke-point.</p></div>
+          <div class="card"><span class="k">Publish safety</span><p>Single dispatch choke-point: scope check → media/quota re-validate → one-shot approvalId + hash match → schedulePost → stamp → true-up. No auto-retry of ambiguous failures.</p></div>
+          <div class="card"><span class="k">Cerbos resources</span><p>Seven new resource policies (engagement, account, post, inbox, report, ledger, platform_app) with derived-roles reuse; UI mirrors in <code>lib/rbac.ts</code>.</p></div>
+          <div class="card"><span class="k">Inbound surfaces</span><p>Edge exposes only exact-path OAuth callbacks/webhooks to Postiz; Postiz→us webhooks notification-only, HMAC/secret-path validated.</p></div>
+          <div class="card"><span class="k">Money safety</span><p>Estimate → tool-scope → ledger stop-loss → dispatch → true-up. X spend visible on the approval card before the human clicks.</p></div>
+        </div>
+
+        <div class="note warn"><span class="k">Publish safety — the non-obvious one</span>The AI ingests brand corpus and past-post content, which is <strong>untrusted input</strong>. Defense against prompt injection is not in the prompt — it is that <strong>every outbound-public tool structurally suspends to WS4 regardless of what the model decided</strong>, and execution requires a one-shot approval bound to an exact payload hash. The model can propose; only an authorized, gated, hash-matched command executes — for humans and agents alike.</div>
+
+        <h3>Audit</h3>
+        <p>Every ledger row, every Cerbos decision (existing), every hub tool call (existing JSONL), every approval decision (existing), every publisher-adapter call (OTel + module log with org/network/op) — nothing new to invent.</p>
+      </div>
+    </section>
+
+    <!-- ================= 12 ROLLOUT & TICKETS ================= -->
+    <section class="part" id="p12">
+      <div class="part-head"><span class="part-num">§12</span><h2>Rollout &amp; Tickets</h2></div>
+      <p class="dek">Risk-honest phase order, each shippable, each with a clear gate before the next. 27 tickets P0–P4, /army-ready.</p>
+      <div class="wrap">
+        <div class="phases">
+          <div class="phase"><span class="pn">P0</span><div>
+            <h4>Foundation + containment</h4>
+            <p>Migrations 0034+ (all §04 tables + third-wall RLS), <code>social</code> ModuleContract skeleton, Cerbos policies, the Postiz containment spike + deploy, the <code>SocialPublisher</code> port + driver + connector-registry sync.</p>
+            <p class="meta">GATE → containment checklist verified (REST-only, zero deps, fork-touchpoint budget); tripwire assessment says thin-fork holds, else escalate to Mixpost fallback.</p>
+          </div></div>
+          <div class="phase gate"><span class="pn">P1</span><div>
+            <h4>Organic publish + calendar + composer (own accounts, $0)</h4>
+            <p>Account connect flow (own brand accounts first), composer backend (media-rule/quota validation, payload-hash), the WS4 publish gate (one-shot approvalId), publish dispatch + status reconcile, console shell (Calendar + Composer).</p>
+            <p class="meta">GATE → a scheduled post on an own account publishes for real; status/URL round-trips; e2e verified against a live account.</p>
+          </div></div>
+          <div class="phase gate"><span class="pn">P2</span><div>
+            <h4>Engagement inbox</h4>
+            <p>Inbox sync (comments/mentions/DMs where supported), AI triage (sentiment/spike), reply flow reusing the P1 approval pattern, Inbox tab UI (triage, assignment, SLA timers).</p>
+            <p class="meta">GATE → full loop in-console: new comment → triaged → assigned → draft → approve → sent; SLA timer renders and breaches visibly.</p>
+          </div></div>
+          <div class="phase gate"><span class="pn">P3</span><div>
+            <h4>AI copy/assets + analytics/reports (+ X metering)</h4>
+            <p>Brand-voice RAG + drafting services, Creative Image Studio seam, metrics pull + Analytics tab, X metering live + ledger stop-loss, monthly reports (AI narrative → approve → deliver).</p>
+            <p class="meta">GATE → scripted sequence reconciles ledger vs dispatches; monthly run produces an approvable, deliverable report.</p>
+          </div></div>
+          <div class="phase gate"><span class="pn">P4</span><div>
+            <h4>Agent-proposed drafts</h4>
+            <p>Full MCP agent surface hardened for automation principals (OBO), <code>smm-agent-content-brief</code> flow, best-time-to-post classical-stats job.</p>
+            <p class="meta">GATE → an agent goal produces a week of draft posts + imagery within credits, landing entirely in the approvals inbox; an agent attempt to publish directly suspends.</p>
+          </div></div>
+        </div>
+
+        <h3>Indicative sequencing</h3>
+        <figure class="wide"><div class="plate">
+          <pre class="mermaid">
+%%{init:{'theme':'base','themeVariables':{'fontFamily':'ui-monospace,monospace','fontSize':'12px','textColor':'#14201A','taskTextColor':'#14201A','taskTextDarkColor':'#14201A','taskTextOutsideColor':'#14201A','taskTextLightColor':'#14201A','sectionBkgColor':'#EEF3EE','altSectionBkgColor':'#FBFCFB','sectionBkgColor2':'#E7F0EA','gridColor':'#C4CDC5','todayLineColor':'#B42318','taskBkgColor':'#E7F0EA','taskBorderColor':'#1E5E44','activeTaskBkgColor':'#2C7A57','activeTaskBorderColor':'#1E5E44','doneTaskBkgColor':'#C4CDC5','doneTaskBorderColor':'#8A968C','titleColor':'#14201A'}}}%%
+gantt
+  dateFormat YYYY-MM-DD
+  axisFormat %b
+  section Foundation
+  P0 Contracts + containment :p0, 2026-08-01, 26d
+  section Publish
+  P1 Calendar + composer     :p1, after p0, 30d
+  section Engagement
+  P2 Inbox                   :p2, after p1, 22d
+  section AI + money
+  P3 AI copy/assets + reports:p3, after p2, 30d
+  section Agents
+  P4 Agent-proposed drafts   :p4, after p3, 20d
+          </pre>
+        </div><figcaption><b>FIG. 12-1</b> — Indicative timeline; durations are planning estimates, not commitments. Sequencing (dependencies) is the fixed part.</figcaption></figure>
+
+        <h3>Sample ticket decomposition (P0 — Foundation + containment)</h3>
+        <div class="tablewrap"><table>
+          <thead><tr><th>ID</th><th>Ticket</th><th>Tier</th><th>Model</th><th>Done when (AC)</th></tr></thead>
+          <tbody>
+            <tr><td class="mono">SMM-01 ⚡</td><td>Migrations 0034+: all §04 tables + third-wall RLS + <code>social_platform_apps</code></td><td><span class="tag t-info">senior-db</span></td><td class="mono">opus·medium</td><td>RLS suite proves right-tenant→rows, cross-tenant→zero; <code>UNIQUE(postiz_org_id)</code> enforced</td></tr>
+            <tr><td class="mono">SMM-02 ⚡</td><td><code>social</code> ModuleContract + controller skeleton + CRUD + tool-scope endpoints</td><td><span class="tag t-info">senior-be</span></td><td class="mono">default</td><td>Module registers; scope toggles round-trip; disabled-module tenant gets 404s</td></tr>
+            <tr><td class="mono">SMM-03 ⚡</td><td>Cerbos policies ×7 + derived-roles + <code>lib/rbac.ts</code> mirror</td><td><span class="tag t-info">medior</span></td><td class="mono">default</td><td>Parity tests incl. publish/reply/delete_published denials</td></tr>
+            <tr><td class="mono">SMM-04 ⚡</td><td>Postiz containment spike + deploy; edge path-allowlist; DM-coverage assessed</td><td><span class="tag t-info">senior-integrator</span></td><td class="mono">opus·medium · QA gate</td><td>UI unreachable from any routed surface; containment-audit note written; tripwire assessment says thin-fork holds</td></tr>
+            <tr><td class="mono">SMM-05 ⚡</td><td><code>SocialPublisher</code> port + Postiz driver + org provisioning + registry sync</td><td><span class="tag t-info">senior-be</span></td><td class="mono">opus·medium</td><td>Cross-client FK-chain validation refuses a mismatched account; zero <code>postiz</code> deps (lint asserted)</td></tr>
+            <tr><td class="mono">SMM-06</td><td>Config plumbing: key aliases, caps env, per-network feature flags</td><td><span class="tag t-info">junior</span></td><td class="mono">default</td><td>Boots with and without Postiz reachable; clean degrade</td></tr>
+          </tbody>
+        </table></div>
+
+        <p class="meta" style="font-family:var(--mono);font-size:.72rem;color:var(--ink-faint)">Full decomposition — 27 tickets across P0–P4: senior-db 1 · senior-be 8 · senior-fe 2 · senior-integrator 2 · medior 11 · junior 3. Opus flags: 4 (SMM-01 med, SMM-04 med, SMM-05 med, SMM-09 high — the WS4 publish gate). Decision-gated, not mobilized: SMM-28 Mixpost fallback swap, SMM-29 video repurposing. Concurrency respects the 1–2 agent cap; SMM-09 (the publish spine) must run alone.</p>
+        <div class="note"><span class="k">Non-code parallel track</span>Platform-app review submissions (OQ-1) run from day one as a parallel non-code workstream — they gate client-account connects, not the build. Registration in <code>MODULES.md</code> as <code>social-media · 0.0.0 · PLANNED</code> happens on approval of this doc; first merged ticket flips it to <code>IN PROGRESS</code> + CHANGELOG entry.</div>
+      </div>
+    </section>
+
+    <!-- ================= 13 OPEN QUESTIONS ================= -->
+    <section class="part" id="p13">
+      <div class="part-head"><span class="part-num">§13</span><h2>Open Questions</h2></div>
+      <p class="dek">Owner decisions — none block the build; several gate client-facing spend or connects.</p>
+      <div class="wrap">
+        <div class="tablewrap"><table>
+          <thead><tr><th>#</th><th>Question</th><th>Blocks</th><th>Default if unanswered</th></tr></thead>
+          <tbody>
+            <tr><td class="mono">OQ-1</td><td>Platform-app review pipeline — which networks first, under which legal entity, who owns the weeks-long Meta/TikTok/LinkedIn review + business-verification work?</td><td>Client-account connects (not the build)</td><td>Submit Meta (IG/FB) + LinkedIn now; TikTok after; YouTube quota with first video client</td></tr>
+            <tr><td class="mono">OQ-2</td><td>Enable X publishing at pay-per-use (~$0.015/post, reverify)? Metering is built regardless.</td><td>X network toggle</td><td>Ship with <code>networks.x</code> disabled in every scope until a client needs it</td></tr>
+            <tr><td class="mono">OQ-3</td><td>Counsel sign-off on the AGPL containment memo (§06 invariants + fork-touchpoint budget + source-offer mechanics) before client accounts connect</td><td>Client-facing P1+ (own-account dogfood proceeds)</td><td>Proceed on own accounts only; hold client connects for sign-off; Mixpost Pro is the priced fallback</td></tr>
+            <tr><td class="mono">OQ-4</td><td>DM coverage: if SMM-04's spike finds Postiz's DM surface thin on key networks, accept comments+mentions-only v1 inbox?</td><td>SMM-15 scope</td><td>Comments+mentions v1; DMs where Postiz supports them; revisit per network</td></tr>
+            <tr><td class="mono">OQ-5</td><td>Video asset storage: local <code>files</code> + Drive mirror, or Drive-first with reference-attach?</td><td>SMM-08 media handling</td><td>files + Drive mirror (existing pattern)</td></tr>
+            <tr><td class="mono">OQ-6</td><td>Video service line timing — when does repurposing get gated open, is generative video wanted at all?</td><td>SMM-29</td><td>Park until a client deliverable demands it</td></tr>
+          </tbody>
+        </table></div>
+      </div>
+    </section>
+
+    <!-- ================= 14 DECISION LOG ================= -->
+    <section class="part" id="p14">
+      <div class="part-head"><span class="part-num">§14</span><h2>Decision Log</h2></div>
+      <div class="wrap">
+        <div class="note"><span class="k">Locked upstream (foundation — not relitigated here)</span>v1 scope = organic content-studio + publisher (posting, engagement, copywriting, digital assets); paid ads / listening / influencer OUT (seams noted); publisher = Postiz (AGPL-3.0, free) run AGPL-CONTAINED, Mixpost Pro paid fallback; Chatwoot dropped (no second inbox; wa-chat-bot untouched); copy via ai-gateway-go + pgvector brand-voice RAG; digital assets via the Creative Image Studio + gateway image seam; per-network app-review/credential/rate-limit reality modeled first-class; generative image/video behind approvals + credits; human-in-the-loop mandatory, stricter than SEO.</div>
+
+        <h3>New decisions made by this design (overturn only with cause)</h3>
+        <div class="tablewrap"><table>
+          <thead><tr><th>#</th><th>Decision</th><th>Why</th></tr></thead>
+          <tbody>
+            <tr><td class="mono">D-1</td><td>Postiz = execution engine only: drafts, approvals, judgment, and all domain state live in platform-nest; a post enters Postiz only after WS4 approval, via one adapter</td><td>Makes the AGPL boundary and the approval boundary the same line — both structurally uncrossable</td></tr>
+            <tr><td class="mono">D-2</td><td>Tenant mapping = one Postiz org per (tenant, client) in our <code>social_publisher_orgs</code> (UNIQUE org), org-scoped API keys server-side; tenancy never forked into Postiz</td><td>Containment (tenancy IP stays ours) + wrong-account-publish defence</td></tr>
+            <tr><td class="mono">D-3</td><td>Module key <code>social</code>, tables <code>social_*</code>, hr-style controller path + third-wall RLS, migrations 0034+</td><td>Newest-vertical (hr) conventions; same as SEO D-3</td></tr>
+            <tr><td class="mono">D-4</td><td>No shared no-RLS cache in this module; sole non-RLS table is the client-data-free <code>social_platform_apps</code></td><td>All social data is client-private; the SEO exemption's justification does not transfer</td></tr>
+            <tr><td class="mono">D-5</td><td>Three-way credential split: platform-app creds (OpenBao → Postiz env) · Postiz org keys (server-side alias) · network tokens (inside Postiz only, never copied)</td><td>Disjoint blast radii; our DB/vault never holds a social token</td></tr>
+            <tr><td class="mono">D-6</td><td>Every outbound-public action = WS4 <code>impact:'high'</code> + one-shot approvalId + payload-hash match, consumed transactionally at dispatch; edits invalidate approvals; no auto-retry of ambiguous failures</td><td>Inherits SEO D-6, tightened for public irreversibility; replay- and TOCTOU-proof</td></tr>
+            <tr><td class="mono">D-7</td><td>Single-mode execution (no manual/api dual mode); hand-posted content enters as <code>native_import</code> bookkeeping</td><td>Publishing is inherently API-shaped; a "manual twin" would just be unbooked work</td></tr>
+            <tr><td class="mono">D-8</td><td>Per-engagement <code>tool_scope</code> + budget carried over from SEO D-11 (networks, cadence, inbox SLA, AI toggles, caps); every flow and metered dispatch consults it</td><td>Fully custom per-client service shape; cost = Σ enabled features</td></tr>
+            <tr><td class="mono">D-9</td><td>X per-post fees + generative credits + attributable cloud-text in one <code>social_usage_ledger</code> with the SEO stop-loss chain</td><td>One metering discipline platform-wide; X never bleeds silently</td></tr>
+            <tr><td class="mono">D-10</td><td>Console = the reserved Publish craft group (Calendar · Composer · Inbox · Analytics) on the dept template, dept name SMM; toolkit registered only when all four routes exist</td><td>IA already ratified in the dept-console plan; honors the toolkit file's own rule</td></tr>
+            <tr><td class="mono">D-11</td><td>Ingress = exact-path allowlisted edge route to Postiz OAuth callbacks/webhooks only; Postiz→us webhooks are notification-only, authoritative state re-fetched</td><td>Smallest possible inbound door; forgery yields only a redundant authenticated fetch</td></tr>
+            <tr><td class="mono">D-12</td><td>Composer owns pre-publish validation (media rules, quotas, cost) — we never rely on Postiz or the network to reject</td><td>Don't let users queue what the API will reject; failures surface before approval, not after</td></tr>
+            <tr><td class="mono">D-13</td><td>Brand corpus lives in WS8 knowledge (tenant-ACL'd); <code>social_brand_profiles</code> holds config/pointers only; no module-local embedding columns</td><td>D9 ownership preserved — nothing here is operational-clustering-shaped</td></tr>
+          </tbody>
+        </table></div>
+      </div>
+    </section>
+
+    <!-- ================= 15 GLOSSARY ================= -->
+    <section class="part" id="p15">
+      <div class="part-head"><span class="part-num">§15</span><h2>Glossary</h2></div>
+      <div class="wrap">
+        <div class="tablewrap"><table>
+          <thead><tr><th>Term</th><th>Meaning</th></tr></thead>
+          <tbody>
+            <tr><td class="mono">AGPL-CONTAINED</td><td>Run at arm's length behind one REST adapter — no shared code, DB, or process — so the platform is never infected by the license</td></tr>
+            <tr><td class="mono">License zone</td><td>A trust-zone variant defined by license boundary, not network location — Postiz runs on the private network but is architecturally isolated</td></tr>
+            <tr><td class="mono">Connector registry</td><td><code>social_accounts</code> — per client × network state (status/quota/health), mirrored from Postiz; modeled like the IT device registry</td></tr>
+            <tr><td class="mono">Two-level content model</td><td><code>social_posts</code> (master idea/brief) + <code>social_post_variants</code> (per-network content) — no universal post object</td></tr>
+            <tr><td class="mono">One-shot approvalId</td><td>A WS4 approval token bound to an exact payload hash, consumable exactly once at dispatch; any edit invalidates it</td></tr>
+            <tr><td class="mono">payload_hash</td><td>Hash of a variant's body/media/settings/schedule — the approval-match anchor; recomputed on every edit</td></tr>
+            <tr><td class="mono">tool_scope</td><td>Per-engagement jsonb config (networks, cadence, inbox SLA, AI toggles, caps) consulted by every flow and metered dispatch</td></tr>
+            <tr><td class="mono">Native import</td><td>A hand-posted item recorded after the fact as <code>published</code> with no approval trail — bookkeeping, not execution</td></tr>
+            <tr><td class="mono">Stop-loss chain</td><td>Fail-closed budget check: engagement cap → tenant cap → global cap, before any metered dispatch</td></tr>
+            <tr><td class="mono">Brand-voice RAG</td><td>Retrieval over a tenant-ACL'd WS8 knowledge corpus of past posts and guidelines, used to keep AI drafts on-brand</td></tr>
+            <tr><td class="mono">WS4 approvals</td><td>Existing ERP human-approval surface reused to gate every outbound-public social action</td></tr>
+            <tr><td class="mono">FORCE-RLS third wall</td><td><code>tenant_id = ANY(app_current_tenants()) AND app_module_allowed('social')</code> on every tenant table</td></tr>
+          </tbody>
+        </table></div>
+      </div>
+    </section>
+
+    <footer>
+      <p><strong>GAIADA Social Media — Engineering Blueprint v1.0</strong></p>
+      <p class="mono">Status: Draft for review · 2026-07-23 · Social Media · Classification: Internal<br/>
+      Architecture decisions locked (§14). Feeds architect decomposition → /army. Not a commitment of dates; sequencing is fixed, durations are estimates.</p>
+    </footer>
+  </main>
+</div>
+
+<div class="themehint">print-ready · A4 / Letter</div>
+
+<script>
+  (function(){
+    var links = Array.prototype.slice.call(document.querySelectorAll('.toc a'));
+    var map = {};
+    links.forEach(function(a){ var id=a.getAttribute('href').slice(1); map[id]=a; });
+    var secs = Array.prototype.slice.call(document.querySelectorAll('.part'));
+    if(!('IntersectionObserver' in window)) return;
+    var obs = new IntersectionObserver(function(entries){
+      entries.forEach(function(e){
+        if(e.isIntersecting){
+          links.forEach(function(l){l.classList.remove('active');});
+          var a = map[e.target.id]; if(a) a.classList.add('active');
+        }
+      });
+    }, {rootMargin:'-10% 0px -80% 0px', threshold:0});
+    secs.forEach(function(s){ obs.observe(s); });
+  })();
+</script>

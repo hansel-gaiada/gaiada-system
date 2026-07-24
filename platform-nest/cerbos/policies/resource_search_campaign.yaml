@@ -1,0 +1,38 @@
+# Search-marketing module (SM-03; docs/blueprints/seo-sem-design.md §11). resource_search_campaign
+# covers campaigns/ad-groups/ads/negatives/metrics/change-proposals (design §11) — the SEM domain.
+# `propose_change` (draft a change proposal; $0, no live side effect) is baseline-gated same as any
+# draft action. `apply_manual` / `launch` / `apply_negatives` / `set_budget` are the dual-mode
+# execution twins (design §07/D-8): EVERY live-account action, manual-mode mark-applied AND
+# automated-mode API execution alike, rides `search:campaign:launch` per the module contract
+# ("covers manual mark-applied and api execution") — so ALL FOUR are elevated-only here, matching
+# the parity matrix's explicit deny case ("a member cannot launch/set_budget/apply_negatives").
+# api-mode execution additionally requires the one-shot WS4 `approvalId` (SM-21) — a SEPARATE,
+# later gate this policy does not model; this policy only answers "may this principal even attempt
+# the action", not "has WS4 approved this specific payload".
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: resource_search_campaign
+  importDerivedRoles: ["gaiada_scopes"]
+  variables:
+    import: ["gaiada_common"]
+  rules:
+    - actions: ["*"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["platform_admin"]
+    - actions: ["read", "create", "update", "delete", "propose_change", "apply_manual", "launch", "apply_negatives", "set_budget"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["group_executive"]
+      condition: { match: { expr: "variables.notLow" } }
+    # Search staff / manager (served-company grant) + the served company's own admin: draft-only
+    # baseline — read/write the plan objects and propose changes, never execute them.
+    - actions: ["read", "create", "update", "propose_change"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["module_staff", "module_manager", "company_admin"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    # Elevated: destructive + BOTH dual-mode execution twins (manual mark-applied and api execution)
+    # + budget/negatives — manager + company admin only (search:campaign:launch, design §11).
+    - actions: ["delete", "apply_manual", "launch", "apply_negatives", "set_budget"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["module_manager", "company_admin"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }

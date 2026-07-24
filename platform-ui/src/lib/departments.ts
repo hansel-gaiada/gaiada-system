@@ -7,7 +7,12 @@ import { cache } from "react";
 // who sits in the department). No new backend/table needed; when work is tagged
 // to a unit or a unit's person, it shows up on that department's board.
 import { getOrgStructure, type OrgNode } from "./org";
-import { listAllPmTasks, groupByStatus, projectProgress, type PmTask, type Priority, type BoardColumn } from "./pm";
+import {
+  listAllPmTasks, listPmTasks, listMilestones, statusesForTasks, statusFlags, isDoneStatus,
+  projectProgress, PRIORITIES, PRIORITY_LABEL, unionStatusColumns,
+  type PmTask, type Priority, type AxisColumn, type Milestone, type ProjectStatus,
+} from "./pm";
+import { listProjects, type Project } from "./entities";
 import { listAssignmentsForUnit, assignmentInclusion, SERVICE_ASSIGNMENTS_ENABLED, type AssignmentSummary } from "./serviceAssignments";
 import type { Envelope } from "./envelope";
 import type { RailPriority } from "@/components/departments/MyWorkRail";
@@ -21,7 +26,10 @@ export interface DepartmentWorkspace {
   divisions: DeptDivision[];
   people: DeptPerson[];
   tasks: PmTask[];
-  columns: BoardColumn[];
+  // P2-05: each project (that this dept's tasks touch) → its own status registry.
+  // Drives the board's union-by-label columns (D-4) and the flag-driven KPI/rail
+  // helpers. A project with no rows resolves to the synth legacy 4 (lib/pm).
+  statusesByProject: Record<string, ProjectStatus[]>;
 }
 
 const company = (t: string) => ({ id: t, name: t, type: null });
@@ -80,7 +88,9 @@ export async function listDepartments(u: string, t: string): Promise<DeptSummary
   const [depts, tasks] = await Promise.all([departmentNodes(u, t), listAllPmTasks(u, t)]);
   return depts.map((d) => {
     const { divisionIds, personIds, people, divisions } = scan(d);
-    const open = tasks.filter((x) => x.status !== "done" && belongs(x, d.id, divisionIds, personIds)).length;
+    // Sidebar summary count — cheap legacy-fallback flag resolution (no per-
+    // project status fetch here; the exact board/KPI numbers use the registry).
+    const open = tasks.filter((x) => !isDoneStatus(x.status) && belongs(x, d.id, divisionIds, personIds)).length;
     return { id: d.id, name: d.name, divisions: divisions.length, people: people.length, openTasks: open };
   });
 }
@@ -116,8 +126,29 @@ export const getDepartment = cache(async function getDepartment(
   if (!d) return null;
   const { divisionIds, personIds, people, divisions } = scan(d);
   const deptTasks = tasks.filter((x) => belongs(x, d.id, divisionIds, personIds));
-  return { id: d.id, name: d.name, divisions, people, tasks: deptTasks, columns: groupByStatus(deptTasks) };
+  const statusesByProject = await statusesForTasks(u, t, deptTasks);
+  return { id: d.id, name: d.name, divisions, people, tasks: deptTasks, statusesByProject };
 });
+
+// ---------------- Owned-projects PM aggregation (P1-04 — dept Timeline) ----------------
+// The department's OWNED projects (department_id === deptId, decision #12 — the
+// same ownership rule the Home page's health rings use) each paired with their
+// own PM tasks + milestones. This is exactly the Home page's owned-project fetch
+// pattern (listProjects → filter → parallel listPmTasks/listMilestones), lifted
+// here so the Timeline page can aggregate the union onto one Gantt axis. Every
+// reader degrades to []/[] on its own (lib/pm.ts), so a disabled/stale PM
+// endpoint yields an empty aggregate, not a throw.
+export interface OwnedProjectPm { project: Project; tasks: PmTask[]; milestones: Milestone[] }
+
+export async function getOwnedProjectsPm(u: string, t: string, deptId: string): Promise<OwnedProjectPm[]> {
+  const all = await listProjects(u, t).catch(() => [] as Project[]);
+  const owned = all.filter((p) => p.department_id === deptId);
+  const [taskLists, milestoneLists] = await Promise.all([
+    Promise.all(owned.map((p) => listPmTasks(u, t, p.id))),
+    Promise.all(owned.map((p) => listMilestones(u, t, p.id))),
+  ]);
+  return owned.map((p, i) => ({ project: p, tasks: taskLists[i], milestones: milestoneLists[i] }));
+}
 
 // ---------------- Serviced companies (ORG-13 / UX-2 §3, ServicedBlock) ----------------
 // "Companies this department currently serves" — the provider-side read for a
@@ -198,10 +229,21 @@ export interface DeptKpis {
 // `getDepartment`); Progress is the average of each OWNED PROJECT's own
 // progress (passed in, since that's computed per-project via lib/pm — see
 // `computeProjectHealth`), not task progress.
-export function computeDeptKpis(tasks: PmTask[], projectProgressPcts: number[], now = new Date()): DeptKpis {
-  const active = tasks.filter((t) => t.status === "todo" || t.status === "in_progress").length;
-  const dueSoon = tasks.filter((t) => t.status !== "done" && isDueSoon(t.dueDate, now)).length;
-  const blocked = tasks.filter((t) => t.status === "blocked").length;
+// P2-05: active/blocked/dueSoon derive from the isDone/isBlocked FLAGS resolved
+// against each task's OWN project's registry (`statusesByProject`), not literal
+// ids — so a project that renamed "Done"→"Shipped" (still isDone) still counts
+// correctly. Omitting the registry falls back to legacy-id semantics (default
+// projects stay correct). Active = not done AND not blocked.
+export function computeDeptKpis(
+  tasks: PmTask[],
+  projectProgressPcts: number[],
+  now = new Date(),
+  statusesByProject: Record<string, ProjectStatus[]> = {},
+): DeptKpis {
+  const flags = (t: PmTask) => statusFlags(t.status, statusesByProject[t.projectId]);
+  const active = tasks.filter((t) => { const f = flags(t); return !f.isDone && !f.isBlocked; }).length;
+  const dueSoon = tasks.filter((t) => !flags(t).isDone && isDueSoon(t.dueDate, now)).length;
+  const blocked = tasks.filter((t) => flags(t).isBlocked).length;
   const progressPct = projectProgressPcts.length === 0
     ? 0
     : Math.round(projectProgressPcts.reduce((a, b) => a + b, 0) / projectProgressPcts.length);
@@ -218,15 +260,20 @@ export interface ProjectHealth {
 
 // One owned project's `HealthRingCard` data. atRisk = overdue>0 || blocked>0
 // (decision #12, verbatim) — the sole risk signal this shell surfaces.
+// P2-05: `statuses` is this ONE project's registry (flag-driven open/overdue/
+// blocked counts); omit it for legacy-id semantics. `now` stays the 3rd param
+// (unchanged call sites); `statuses` is the optional 4th.
 export function computeProjectHealth(
   tasks: PmTask[],
   milestones: { name: string; dueDate: string | null; status: string }[],
   now = new Date(),
+  statuses?: ProjectStatus[],
 ): ProjectHealth {
+  const flags = (t: PmTask) => statusFlags(t.status, statuses);
   const progressPct = projectProgress(tasks);
-  const openCount = tasks.filter((t) => t.status !== "done").length;
-  const overdueCount = tasks.filter((t) => t.status !== "done" && isOverdue(t.dueDate, now)).length;
-  const blockedCount = tasks.filter((t) => t.status === "blocked").length;
+  const openCount = tasks.filter((t) => !flags(t).isDone).length;
+  const overdueCount = tasks.filter((t) => !flags(t).isDone && isOverdue(t.dueDate, now)).length;
+  const blockedCount = tasks.filter((t) => flags(t).isBlocked).length;
   const atRisk = overdueCount > 0 || blockedCount > 0;
   const reasonParts = [
     overdueCount > 0 ? `${overdueCount} overdue` : null,
@@ -259,9 +306,9 @@ export function toRailPriority(p: Priority): RailPriority {
 
 // This person's not-done department tasks, sorted by (due date ascending —
 // undated last, then priority descending). "My work today" (decision #12).
-export function myDeptTasksToday(tasks: PmTask[], userId: string): PmTask[] {
+export function myDeptTasksToday(tasks: PmTask[], userId: string, statusesByProject: Record<string, ProjectStatus[]> = {}): PmTask[] {
   return tasks
-    .filter((t) => t.status !== "done" && t.assignee?.responsibleId === userId)
+    .filter((t) => !statusFlags(t.status, statusesByProject[t.projectId]).isDone && t.assignee?.responsibleId === userId)
     .slice()
     .sort((a, b) => {
       const ad = a.dueDate ?? "9999-12-31";
@@ -273,8 +320,8 @@ export function myDeptTasksToday(tasks: PmTask[], userId: string): PmTask[] {
 
 // This person's blocked department tasks — one half of "Waiting on me"
 // (decision #12; the other half is pending approvals, wired at the call site).
-export function myBlockedTasks(tasks: PmTask[], userId: string): PmTask[] {
-  return tasks.filter((t) => t.status === "blocked" && t.assignee?.responsibleId === userId);
+export function myBlockedTasks(tasks: PmTask[], userId: string, statusesByProject: Record<string, ProjectStatus[]> = {}): PmTask[] {
+  return tasks.filter((t) => statusFlags(t.status, statusesByProject[t.projectId]).isBlocked && t.assignee?.responsibleId === userId);
 }
 
 // ---------------- Board focus model (WSUX-7, R-2 — ORG-CORE STEP-5 semantics) ----------------
@@ -321,32 +368,92 @@ export function filterTasksByFocus(tasks: PmTask[], divisions: DeptDivision[], f
   return tasks;
 }
 
-// ---------------- Board swimlane-by (WSUX-7, R-2 — Status/Division/Person) ----------------
-// Status stays `groupByStatus` (lib/pm.ts) unchanged — the existing draggable board. Division and
-// Person are read groupings only (no drag semantics attached to a lane change) grafted in as an
-// alternate render for the same filtered task set.
-export type BoardSwimlane = "status" | "division" | "person";
-export interface BoardLane { key: string; label: string; tasks: PmTask[] }
+// ---------------- Board axis columns (P1-03 — unify all grouping axes through Board) ----------------
+// Status keeps `groupByStatus` (lib/pm.ts) — the original draggable board. These three build
+// the same `AxisColumn` shape (lib/pm.ts) for the other groupings, and ALL of them are now
+// drag-capable (BoardLanes/read-only lanes are gone): Assignee/Priority commit straight to
+// their `move`; Division additionally carries `people` per column so `Board` can tell whether
+// a drop is unambiguous (current responsible already in the target division → commit
+// immediately) or needs the responsible-person popover.
+// P2-09: the two flat lane axes above stay as-is; "grid-division"/"grid-assignee" are the NEW
+// true 2-axis grid mode (design spec §8) — same `?swimlane=` control, two more options, so the
+// GET-form/URL contract doesn't grow a second query param.
+export type BoardSwimlane = "status" | "assignee" | "priority" | "division" | "grid-division" | "grid-assignee";
 
-export function groupBoardLanes(tasks: PmTask[], divisions: DeptDivision[], swimlane: "division" | "person"): BoardLane[] {
-  if (swimlane === "division") {
-    const lanes: BoardLane[] = divisions.map((d) => ({
-      key: d.id,
-      label: d.name,
-      tasks: tasks.filter((t) => divisionTaskIds(t, d)),
-    }));
-    const laned = new Set(lanes.flatMap((l) => l.tasks.map((t) => t.id)));
-    const rest = tasks.filter((t) => !laned.has(t.id));
-    if (rest.length > 0) lanes.push({ key: "__no_division", label: "No division", tasks: rest });
-    return lanes;
-  }
-  // person
-  const byPerson = new Map<string, BoardLane>();
+export function priorityColumns(tasks: PmTask[]): AxisColumn<Priority>[] {
+  return PRIORITIES.map((p) => ({ key: p, label: PRIORITY_LABEL[p], tasks: tasks.filter((t) => t.priority === p) }));
+}
+
+export function assigneeColumns(tasks: PmTask[]): AxisColumn[] {
+  const byId = new Map<string, AxisColumn>();
   for (const t of tasks) {
     const id = t.assignee?.responsibleId ?? "__unassigned";
     const label = t.assignee?.responsibleName || "Unassigned";
-    if (!byPerson.has(id)) byPerson.set(id, { key: id, label, tasks: [] });
-    byPerson.get(id)!.tasks.push(t);
+    if (!byId.has(id)) byId.set(id, { key: id, label, tasks: [] });
+    byId.get(id)!.tasks.push(t);
   }
-  return [...byPerson.values()].sort((a, b) => a.label.localeCompare(b.label));
+  return [...byId.values()].sort((a, b) => a.label.localeCompare(b.label));
+}
+
+export function divisionColumns(tasks: PmTask[], divisions: DeptDivision[]): AxisColumn[] {
+  const cols: AxisColumn[] = divisions.map((d) => ({
+    key: d.id,
+    label: d.name,
+    tasks: tasks.filter((t) => divisionTaskIds(t, d)),
+    people: d.people,
+  }));
+  const inDivision = new Set(cols.flatMap((c) => c.tasks.map((t) => t.id)));
+  const rest = tasks.filter((t) => !inDivision.has(t.id));
+  // No `people` on this synthetic bucket — Board treats it as a plain (non-ambiguous) column,
+  // and the server action rejects drags into it (dragging "off" a division isn't a supported move).
+  if (rest.length > 0) cols.push({ key: "__no_division", label: "No division", tasks: rest });
+  return cols;
+}
+
+// ---------------- True 2-axis swimlane grid (P2-09, design spec §8) ----------------
+// ROWS = Division or Assignee, COLUMNS = Status — the grid `BoardGrid` (components/pm/Board.tsx)
+// renders. Every row gets the SAME status-column set (key/label/color): `unionStatusColumns`'s
+// labels come from `statusesByProject` alone, never from the tasks passed in, so calling it once
+// per row with that row's own task slice yields uniform columns for free — no separate column-
+// builder needed, and "uniform columns at any status count" (P2-05) falls straight out of reuse.
+export interface GridRow {
+  key: string;
+  label: string;
+  // Set ONLY on division rows — mirrors `AxisColumn.people` on the flat division swimlane:
+  // BoardGrid's cross-row drop checks whether the task's current responsible already belongs to
+  // the TARGET row's division (unambiguous commit) or needs the responsible-person popover.
+  people?: { id: string; name: string }[];
+  columns: AxisColumn<string>[];
+}
+
+export function divisionStatusGrid(
+  tasks: PmTask[],
+  divisions: DeptDivision[],
+  statusesByProject: Record<string, ProjectStatus[]>,
+): GridRow[] {
+  const rows: GridRow[] = divisions.map((d) => ({
+    key: d.id,
+    label: d.name,
+    people: d.people,
+    columns: unionStatusColumns(tasks.filter((t) => divisionTaskIds(t, d)), statusesByProject),
+  }));
+  const inDivision = new Set(rows.flatMap((r) => r.columns.flatMap((c) => c.tasks.map((t) => t.id))));
+  const rest = tasks.filter((t) => !inDivision.has(t.id));
+  // Same "No division" sentinel as `divisionColumns` — no `people`, so BoardGrid treats a
+  // cross-row drop INTO it the same way the flat division swimlane does (server rejects it).
+  if (rest.length > 0) rows.push({ key: "__no_division", label: "No division", columns: unionStatusColumns(rest, statusesByProject) });
+  return rows;
+}
+
+export function assigneeStatusGrid(tasks: PmTask[], statusesByProject: Record<string, ProjectStatus[]>): GridRow[] {
+  const byId = new Map<string, { label: string; tasks: PmTask[] }>();
+  for (const t of tasks) {
+    const id = t.assignee?.responsibleId ?? "__unassigned";
+    const label = t.assignee?.responsibleName || "Unassigned";
+    if (!byId.has(id)) byId.set(id, { label, tasks: [] });
+    byId.get(id)!.tasks.push(t);
+  }
+  return [...byId.entries()]
+    .sort((a, b) => a[1].label.localeCompare(b[1].label))
+    .map(([id, v]) => ({ key: id, label: v.label, columns: unionStatusColumns(v.tasks, statusesByProject) }));
 }

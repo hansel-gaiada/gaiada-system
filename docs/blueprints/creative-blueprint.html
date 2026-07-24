@@ -1,0 +1,901 @@
+<title>GAIADA Creative — Engineering Blueprint</title>
+<style>
+  :root{
+    --paper:#F6F7F5; --surface:#FFFFFF; --raise:#FBFCFB;
+    --ink:#14201A; --ink-soft:#4B574F; --ink-faint:#7A857D;
+    --line:#DBE1DB; --line-strong:#C4CDC5;
+    --accent:#1E5E44; --accent-2:#2C7A57; --accent-soft:#E7F0EA;
+    --ochre:#9C6714; --ochre-soft:#F3E9D6;
+    --ok:#2F7D57; --warn:#9A5A0B; --crit:#B42318; --info:#2A5C86;
+    --plate:#FBFCFB; --plate-line:#D5DBD5; --plate-ink:#1B2721;
+    --serif:"Iowan Old Style","Palatino Linotype",Palatino,"Book Antiqua",Georgia,ui-serif,serif;
+    --sans:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    --mono:ui-monospace,"SF Mono","Cascadia Code","JetBrains Mono","Roboto Mono",Menlo,Consolas,monospace;
+    --maxw:74ch;
+    --shadow:0 1px 2px rgba(20,32,26,.04),0 8px 24px rgba(20,32,26,.05);
+  }
+  @media (prefers-color-scheme:dark){
+    :root{
+      --paper:#0E1411; --surface:#161D18; --raise:#1B231D;
+      --ink:#E8ECE7; --ink-soft:#A6B2A9; --ink-faint:#76827A;
+      --line:#26302A; --line-strong:#334036;
+      --accent:#4FB183; --accent-2:#6BC79B; --accent-soft:#16271E;
+      --ochre:#D9A441; --ochre-soft:#2A2213;
+      --ok:#5CB98A; --warn:#D19A3C; --crit:#E8776B; --info:#7AAAD6;
+    }
+  }
+  :root[data-theme="light"]{
+    --paper:#F6F7F5; --surface:#FFFFFF; --raise:#FBFCFB;
+    --ink:#14201A; --ink-soft:#4B574F; --ink-faint:#7A857D;
+    --line:#DBE1DB; --line-strong:#C4CDC5;
+    --accent:#1E5E44; --accent-2:#2C7A57; --accent-soft:#E7F0EA;
+    --ochre:#9C6714; --ochre-soft:#F3E9D6;
+    --ok:#2F7D57; --warn:#9A5A0B; --crit:#B42318; --info:#2A5C86;
+  }
+  :root[data-theme="dark"]{
+    --paper:#0E1411; --surface:#161D18; --raise:#1B231D;
+    --ink:#E8ECE7; --ink-soft:#A6B2A9; --ink-faint:#76827A;
+    --line:#26302A; --line-strong:#334036;
+    --accent:#4FB183; --accent-2:#6BC79B; --accent-soft:#16271E;
+    --ochre:#D9A441; --ochre-soft:#2A2213;
+    --ok:#5CB98A; --warn:#D19A3C; --crit:#E8776B; --info:#7AAAD6;
+  }
+
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  @media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+  body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans);
+    font-size:16px;line-height:1.65;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+
+  .layout{display:grid;grid-template-columns:264px minmax(0,1fr);gap:0;max-width:1320px;margin:0 auto}
+  .toc{position:sticky;top:0;align-self:start;height:100vh;overflow-y:auto;padding:2.2rem 1.3rem 3rem;
+    border-right:1px solid var(--line);background:var(--paper)}
+  .main{min-width:0;padding:0 clamp(1.1rem,4vw,3.4rem) 6rem}
+  .wrap{max-width:var(--maxw)}
+  @media (max-width:960px){
+    .layout{grid-template-columns:1fr}
+    .toc{display:none}
+  }
+
+  .toc-brand{font-family:var(--mono);font-size:.7rem;letter-spacing:.16em;text-transform:uppercase;
+    color:var(--accent);margin-bottom:1.4rem;line-height:1.5}
+  .toc-brand b{display:block;color:var(--ink);font-weight:700;letter-spacing:.14em}
+  .toc ol{list-style:none;margin:0;padding:0;counter-reset:toc}
+  .toc li{margin:.1rem 0}
+  .toc a{display:flex;gap:.55rem;align-items:baseline;text-decoration:none;color:var(--ink-soft);
+    font-size:.83rem;padding:.28rem .5rem;border-radius:5px;line-height:1.35}
+  .toc a .n{font-family:var(--mono);font-size:.68rem;color:var(--ink-faint);min-width:1.7em}
+  .toc a:hover{background:var(--accent-soft);color:var(--ink)}
+  .toc a.active{background:var(--accent-soft);color:var(--accent);font-weight:600}
+  .toc a.active .n{color:var(--accent)}
+
+  .cover{padding:3.6rem 0 2.4rem;border-bottom:2px solid var(--ink)}
+  .eyebrow{font-family:var(--mono);font-size:.72rem;letter-spacing:.2em;text-transform:uppercase;color:var(--accent);margin:0}
+  .cover h1{font-family:var(--serif);font-weight:600;font-size:clamp(2.3rem,5.4vw,3.5rem);line-height:1.04;
+    margin:.7rem 0 .5rem;letter-spacing:-.01em;text-wrap:balance}
+  .cover .lede{font-size:1.12rem;color:var(--ink-soft);max-width:62ch;margin:.2rem 0 0}
+  .titleblock{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:0;margin-top:2.4rem;
+    border:1px solid var(--line-strong);border-radius:8px;overflow:hidden;background:var(--surface)}
+  .titleblock div{padding:.85rem 1rem;border-right:1px solid var(--line);border-bottom:1px solid var(--line)}
+  .titleblock dt{font-family:var(--mono);font-size:.64rem;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-faint);margin:0 0 .28rem}
+  .titleblock dd{margin:0;font-size:.9rem;font-weight:600}
+  .pill{display:inline-flex;align-items:center;gap:.4rem;font-family:var(--mono);font-size:.68rem;font-weight:600;
+    padding:.16rem .5rem;border-radius:100px;letter-spacing:.04em;text-transform:uppercase}
+  .pill.draft{background:var(--ochre-soft);color:var(--ochre)}
+  .pill::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor}
+
+  .part{padding-top:3.2rem;margin-top:2.2rem;border-top:1px solid var(--line)}
+  .part:first-of-type{border-top:none}
+  .part-head{display:flex;align-items:baseline;gap:.9rem;margin-bottom:.4rem}
+  .part-num{font-family:var(--mono);font-size:.82rem;color:var(--accent);font-weight:600;letter-spacing:.08em}
+  .part h2{font-family:var(--serif);font-weight:600;font-size:clamp(1.6rem,3.2vw,2.15rem);line-height:1.1;
+    margin:0;letter-spacing:-.01em;text-wrap:balance}
+  .part>.dek{color:var(--ink-soft);font-size:1.02rem;max-width:64ch;margin:.4rem 0 0}
+  h3{font-family:var(--sans);font-weight:700;font-size:1.22rem;margin:2.3rem 0 .5rem;letter-spacing:-.005em}
+  h4{font-family:var(--sans);font-weight:700;font-size:1rem;margin:1.5rem 0 .4rem}
+  .sublabel{font-family:var(--mono);font-size:.7rem;letter-spacing:.16em;text-transform:uppercase;color:var(--accent);
+    margin:2.2rem 0 .6rem;font-weight:600}
+  p{margin:.7rem 0;max-width:var(--maxw)}
+  .wrap p,.wrap ul,.wrap ol{max-width:var(--maxw)}
+  ul,ol{padding-left:1.2rem}
+  li{margin:.28rem 0}
+  strong{font-weight:700}
+  a{color:var(--accent);text-decoration-thickness:1px;text-underline-offset:2px}
+  code{font-family:var(--mono);font-size:.86em;background:var(--accent-soft);color:var(--accent-2);
+    padding:.08em .38em;border-radius:4px;word-break:break-word}
+  .lead{font-size:1.08rem;color:var(--ink-soft)}
+
+  .note{border-left:3px solid var(--accent);background:var(--accent-soft);padding:.85rem 1.1rem;border-radius:0 8px 8px 0;
+    margin:1.2rem 0;font-size:.95rem;max-width:var(--maxw)}
+  .note.warn{border-color:var(--warn);background:var(--ochre-soft)}
+  .note .k{font-family:var(--mono);font-size:.66rem;letter-spacing:.14em;text-transform:uppercase;color:var(--accent);display:block;margin-bottom:.25rem;font-weight:700}
+  .note.warn .k{color:var(--warn)}
+
+  figure{margin:1.8rem 0;max-width:100%}
+  .plate{background:var(--plate);border:1px solid var(--plate-line);border-radius:10px;padding:1.4rem 1rem 1rem;
+    overflow-x:auto;box-shadow:var(--shadow)}
+  .plate .mermaid{min-width:520px;display:flex;justify-content:center}
+  figure.wide{max-width:none}
+  figcaption{font-family:var(--mono);font-size:.72rem;color:var(--ink-faint);margin-top:.6rem;letter-spacing:.03em}
+  figcaption b{color:var(--accent);font-weight:600}
+
+  .spec{border:1px solid var(--line);border-radius:12px;background:var(--surface);margin:1.4rem 0;overflow:hidden;box-shadow:var(--shadow)}
+  .spec-head{display:flex;flex-wrap:wrap;align-items:center;gap:.6rem;padding:.9rem 1.15rem;border-bottom:1px solid var(--line);background:var(--raise)}
+  .spec-head .id{font-family:var(--mono);font-size:.72rem;font-weight:700;color:var(--accent);letter-spacing:.05em}
+  .spec-head h3{margin:0;font-size:1.08rem}
+  .spec-head .zone{margin-left:auto;font-family:var(--mono);font-size:.64rem;text-transform:uppercase;letter-spacing:.1em;
+    padding:.18rem .5rem;border-radius:5px;font-weight:700}
+  .zone.a{background:var(--info);color:#fff}
+  .zone.b{background:var(--accent);color:#fff}
+  :root[data-theme="dark"] .zone.a{color:#08131d}
+  :root[data-theme="dark"] .zone.b{color:#06140d}
+  .spec-body{padding:.4rem 1.15rem 1.1rem}
+  .spec-body dl{display:grid;grid-template-columns:minmax(110px,150px) 1fr;gap:0;margin:0}
+  .spec-body dt{font-family:var(--mono);font-size:.66rem;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-faint);
+    padding:.7rem .8rem .7rem 0;border-bottom:1px solid var(--line);font-weight:600}
+  .spec-body dd{margin:0;padding:.7rem 0;border-bottom:1px solid var(--line);font-size:.92rem}
+  .spec-body dd:last-child,.spec-body dt:last-of-type{border-bottom:none}
+  .spec-body ul{margin:.1rem 0;padding-left:1.05rem}
+  .spec-body li{margin:.18rem 0}
+  @media (max-width:560px){.spec-body dl{grid-template-columns:1fr}.spec-body dt{border-bottom:none;padding-bottom:.1rem}}
+
+  .tablewrap{overflow-x:auto;margin:1.3rem 0;border:1px solid var(--line);border-radius:10px}
+  table{border-collapse:collapse;width:100%;font-size:.88rem;min-width:520px}
+  th,td{text-align:left;padding:.6rem .8rem;border-bottom:1px solid var(--line);vertical-align:top}
+  thead th{background:var(--raise);font-family:var(--mono);font-size:.66rem;letter-spacing:.09em;text-transform:uppercase;
+    color:var(--ink-soft);font-weight:700;position:sticky;top:0}
+  tbody tr:last-child td{border-bottom:none}
+  td.mono,th.mono,.num{font-family:var(--mono);font-variant-numeric:tabular-nums}
+  td .tag{font-family:var(--mono);font-size:.68rem;font-weight:700;padding:.12rem .45rem;border-radius:4px;white-space:nowrap}
+  .t-ok{background:var(--accent-soft);color:var(--ok)}
+  .t-warn{background:var(--ochre-soft);color:var(--warn)}
+  .t-crit{background:rgba(180,35,24,.1);color:var(--crit)}
+  .t-info{background:rgba(42,92,134,.1);color:var(--info)}
+  :root[data-theme="dark"] .t-crit{background:rgba(232,119,107,.14)}
+  :root[data-theme="dark"] .t-info{background:rgba(122,170,214,.14)}
+
+  .cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:1rem;margin:1.3rem 0;max-width:var(--maxw)}
+  .card{border:1px solid var(--line);border-radius:10px;padding:1rem 1.1rem;background:var(--surface)}
+  .card h4{margin:.1rem 0 .35rem}
+  .card p{margin:.2rem 0;font-size:.9rem;color:var(--ink-soft)}
+  .card .k{font-family:var(--mono);font-size:.66rem;letter-spacing:.12em;text-transform:uppercase;color:var(--accent);font-weight:700}
+
+  .phases{display:flex;flex-direction:column;gap:.5rem;margin:1.4rem 0;max-width:var(--maxw)}
+  .phase{display:grid;grid-template-columns:2.4rem 1fr;gap:.9rem;border:1px solid var(--line);border-radius:10px;
+    padding:.9rem 1rem;background:var(--surface);position:relative}
+  .phase .pn{font-family:var(--mono);font-weight:700;color:var(--accent);font-size:1rem}
+  .phase h4{margin:0 0 .2rem}
+  .phase p{margin:.15rem 0;font-size:.9rem;color:var(--ink-soft)}
+  .phase .meta{font-family:var(--mono);font-size:.7rem;color:var(--ink-faint);margin-top:.35rem;letter-spacing:.02em}
+  .phase.gate{border-left:3px solid var(--ochre)}
+
+  hr.soft{border:none;border-top:1px solid var(--line);margin:2.4rem 0}
+  .kbd{font-family:var(--mono);font-size:.8rem;background:var(--surface);border:1px solid var(--line-strong);
+    border-bottom-width:2px;border-radius:5px;padding:.05em .4em}
+
+  .legend{display:flex;flex-wrap:wrap;gap:.6rem;margin:1rem 0 1.4rem}
+  .legend span{display:inline-flex;align-items:center;gap:.4rem;font-family:var(--mono);font-size:.74rem;
+    background:var(--surface);border:1px solid var(--line);border-radius:100px;padding:.28rem .7rem .28rem .55rem}
+
+  footer{margin-top:4rem;padding-top:1.6rem;border-top:2px solid var(--ink);font-size:.85rem;color:var(--ink-soft)}
+  footer .mono{font-family:var(--mono);font-size:.72rem;color:var(--ink-faint)}
+
+  @media print{
+    :root{--paper:#fff;--surface:#fff;--raise:#fff;--ink:#111;--ink-soft:#333;--line:#bbb;--accent:#14503a;--plate:#fff}
+    body{font-size:10.5pt}
+    .layout{display:block;max-width:none}
+    .toc,.themehint{display:none!important}
+    .main{padding:0}
+    .part{break-before:page;border-top:none;padding-top:.4rem}
+    .part:first-of-type{break-before:avoid}
+    .cover{break-after:page}
+    .spec,.plate,.tablewrap,figure,.phase,.card{break-inside:avoid}
+    .plate{box-shadow:none}
+    a{color:#14503a;text-decoration:none}
+  }
+  .themehint{position:fixed;bottom:12px;right:14px;font-family:var(--mono);font-size:.62rem;color:var(--ink-faint);
+    background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:.3rem .55rem;opacity:.75}
+</style>
+
+<div class="layout">
+  <nav class="toc" aria-label="Contents">
+    <div class="toc-brand">GAIADA <b>Creative</b> Engineering Blueprint</div>
+    <ol>
+      <li><a href="#p00"><span class="n">00</span> Executive Summary</a></li>
+      <li><a href="#p01"><span class="n">01</span> Scope &amp; Service Lines</a></li>
+      <li><a href="#p02"><span class="n">02</span> System Overview</a></li>
+      <li><a href="#p03"><span class="n">03</span> Trust Zones &amp; Network</a></li>
+      <li><a href="#p04"><span class="n">04</span> Domain Model &amp; Schema</a></li>
+      <li><a href="#p05"><span class="n">05</span> Creative Render Gateway</a></li>
+      <li><a href="#p06"><span class="n">06</span> Backend / Model / License Matrix</a></li>
+      <li><a href="#p07"><span class="n">07</span> AI Design</a></li>
+      <li><a href="#p08"><span class="n">08</span> Console UX</a></li>
+      <li><a href="#p09"><span class="n">09</span> ERP Integration Points</a></li>
+      <li><a href="#p10"><span class="n">10</span> Automation Flows</a></li>
+      <li><a href="#p11"><span class="n">11</span> Trust &amp; Security</a></li>
+      <li><a href="#p12"><span class="n">12</span> Rollout &amp; Tickets</a></li>
+      <li><a href="#p13"><span class="n">13</span> Open Questions</a></li>
+      <li><a href="#p14"><span class="n">14</span> Decision Log</a></li>
+      <li><a href="#gloss"><span class="n">15</span> Glossary</a></li>
+    </ol>
+  </nav>
+
+  <main class="main">
+    <!-- ================= COVER ================= -->
+    <header class="cover">
+      <p class="eyebrow">Creative Department · Platform Engineering</p>
+      <h1>GAIADA Creative</h1>
+      <p class="lede">Image and video generation and editing, Magnific-replacement upscaling, and a cross-department asset library — one production-and-supply subsystem powered by our own or rented GPU compute through a Creative Render Gateway, never a per-seat SaaS subscription.</p>
+      <dl class="titleblock">
+        <div><dt>Document</dt><dd>Engineering Blueprint v1.0</dd></div>
+        <div><dt>Module key</dt><dd class="mono">creative</dd></div>
+        <div><dt>Date</dt><dd>2026-07-23</dd></div>
+        <div><dt>Owner</dt><dd>Creative Dept · Platform</dd></div>
+        <div><dt>Status</dt><dd><span class="pill draft">Expansion Planned · Studio Prototyped</span></dd></div>
+        <div><dt>Classification</dt><dd>Internal</dd></div>
+      </dl>
+    </header>
+
+    <!-- ================= 00 EXEC SUMMARY ================= -->
+    <section class="part" id="p00">
+      <div class="part-head"><span class="part-num">§00</span><h2>Executive Summary</h2></div>
+      <p class="dek">What we are building, why the render gateway exists as a second deployable, and the shape of the four locked decisions this design conforms to.</p>
+      <div class="wrap">
+        <p>Creative becomes a <strong>platform-nest module vertical</strong> (<code>ModuleContract</code> key <code>creative</code>, tables <code>creative_*</code> — extending, not duplicating, the shipped <code>creative_assets</code> table from migrations 0031/0032) plus <strong>one new deployable</strong>, the <strong>Creative Render Gateway</strong> (<code>render-gateway-go/</code>, the mirror of <code>ai-gateway-go</code> for diffusion workloads), plus the expanded Creatives department console. Six moves shape the architecture:</p>
+        <div class="cols">
+          <div class="card"><span class="k">1 · The only door to GPU compute</span><p>A typed render job is created as an RLS-scoped <code>creative_render_jobs</code> row, dispatched to the gateway, which routes it to the cheapest capable <strong>RenderBackend</strong> — serverless GPU, self-hosted headless ComfyUI, or commercial API — filtered by capability + license class + cost cap + scope + health. Platform-nest owns job state; the gateway owns GPU keys and holds no tenant data at rest.</p></div>
+          <div class="card"><span class="k">2 · License discipline is structural</span><p>Every ComfyUI workflow is a versioned JSON artifact carrying a model manifest with license classes. The gateway stamps provenance; platform-nest computes an asset's <code>license_class</code> as the weakest link of its derivation chain; the reuse gate refuses any chain that isn't fully commercial/licensed. FLUX quality is reachable only through the premium tier. v1 ships zero non-commercial workflows enabled.</p></div>
+          <div class="card"><span class="k">3 · DAM = the extended asset domain</span><p>Version stack, collections + brand kits, rights/licensing with expiry, provenance, CLIP embeddings → pgvector search + dedup, BLIP captions/auto-tags, and imgproxy as a stateless signed-URL rendition sidecar. Cross-dept consumers see approved assets only, through the module's BFF surface.</p></div>
+          <div class="card"><span class="k">4 · Two gates, not one</span><p>The <strong>spend gate</strong> (per-client scope → ledger stop-loss chain client → tenant → global, fail-closed, WS4-suspended for automation and above-threshold/premium jobs) and the <strong>reuse gate</strong> (human WS4 approval promoting an asset to cross-dept/deliverable status, where the license chain is verified). Generative spend and generative publication are different risks.</p></div>
+          <div class="card"><span class="k">5 · AI assist is local-first</span><p>Prompt expansion, tag normalization, and alt-text ride ai-gateway-go (Hermes default, Claude polish flag). Vision models run as <code>analyze</code> render jobs — CLIP + BLIP on a cheap CPU worker backend — deliberately <strong>not</strong> the gateway <code>/embed</code>, which is not CLIP-space. Retrieval-shaped RAG stays in WS8.</p></div>
+          <div class="card"><span class="k">6 · The Magnific bleed stops in week one</span><p>Phase 0 is a 1-day spike onto clarity-upscaler via Replicate (~$0.019/run, ~10× cheaper than Magnific credits) before any platform code lands. Build order: <strong>P0 contracts → P1 upscale (Magnific kill) → P2 image generate/edit → P3 DAM search/tagging + cross-dept supply → P4 video</strong>. 27 tickets (CR-00–CR-26), /army-ready (§12).</p></div>
+        </div>
+        <div class="note"><span class="k">Reading this document</span>This is a <strong>design blueprint</strong>. The <strong>Image Studio</strong> persist surface it absorbs (migrations 0031/0032 + <code>CreativeController</code> + the platform-ui studio) is already <strong>PROTOTYPED</strong> — everything else in this document does not exist as code yet. It targets a future <code>creative</code> module registered as <code>0.0.0 · PLANNED</code> in <code>docs/modules/MODULES.md</code> on approval. Primary input: <code>creative-design.md</code> (v1.0, the architecture) and its companion <code>creative-foundation.md</code> (the research + the 4 locked decisions + the GPU-hosting reality, folded into §01/§06 below).</div>
+        <div class="note warn"><span class="k">The defining hazards</span>Where search-marketing is a <em>data + judgment</em> subsystem and SMM is a <em>judgment + publication</em> subsystem, Creative is the <strong>production + supply</strong> subsystem: its hazards are <strong>GPU money burning by the second</strong> and a <strong>license boundary</strong> — a non-commercial model's pixels must be structurally unable to reach a client deliverable.</div>
+      </div>
+    </section>
+
+    <!-- ================= 01 SCOPE & SERVICE LINES ================= -->
+    <section class="part" id="p01">
+      <div class="part-head"><span class="part-num">§01</span><h2>Scope &amp; Service Lines</h2></div>
+      <p class="dek">All five service lines are v1, phased — what ships, what's deliberately deferred, and the Magnific economics that justify building this at all.</p>
+      <div class="tablewrap"><table>
+        <thead><tr><th>Service line</th><th>v1 delivers</th><th>Deferred</th></tr></thead>
+        <tbody>
+          <tr><td><strong>Image enhancement / upscale</strong> (the Magnific replacement)</td><td>Creative upscale (clarity-upscaler recipe: SDXL + ControlNet-Tile), precision upscale (Real-ESRGAN/DiffBIR), relight (IC-Light V1), batch jobs, before/after compare, preset tuning to Magnific parity</td><td>SUPIR (non-commercial — internal experiments only, ships disabled); Topaz-class video masters</td></tr>
+          <tr><td><strong>Image generation</strong></td><td>Text→image on the commercial-clean set (Qwen-Image / SDXL / Z-Image-Turbo), prompt-expansion assist, style presets per brand kit, FLUX hero tier behind the premium gate</td><td>LoRA training on client brand looks; OmniGen 2 unified gen+edit (prototype later)</td></tr>
+          <tr><td><strong>Image editing</strong></td><td>Instruction editing (Qwen-Image-Edit), background removal (BiRefNet — not RMBG), inpaint/outpaint (ControlNet + IP-Adapter), per-network crop/format via renditions</td><td>Full layered canvas editor (v1 = form-canvas + mask-lite; InvokeAI-embed vs own-canvas is OQ-6)</td></tr>
+          <tr><td><strong>Video generation + I2V</strong></td><td>Wan 2.2 T2V / I2V / FLF2V (first+last-frame morph) on serverless GPU; RIFE interpolation + Real-ESRGAN video upscale post-pipeline; commercial-API hero shots (Veo synced audio, Kling/Runway) inside the $100–300/mo envelope</td><td>Generative video editing/NLE (no OSS equivalent — assemble stays ffmpeg/Kdenlive, human-finished); object removal in video (immature)</td></tr>
+          <tr><td><strong>Asset management (DAM)</strong></td><td>The shared library: versions, collections, brand kits, rights/licensing + expiry, provenance, CLIP/BLIP search + dedup, imgproxy renditions, approve-for-reuse, Shared Drive mirror</td><td>Client-facing brand portals; smart-crop face detection (thumbor — add only if needed); federation to external DAMs</td></tr>
+        </tbody>
+      </table></div>
+      <div class="wrap">
+        <h3>Non-goals (v1)</h3>
+        <ul>
+          <li><strong>No adopted external UIs</strong> — ComfyUI and InvokeAI UIs are never exposed; the Creatives console is the only operator surface. ComfyUI runs headless at arm's length (GPL never linked, HTTP only).</li>
+          <li><strong>No owned GPU hardware</strong> — locked. The rented/serverless posture is the design; the owned-box tripwire is OQ-2.</li>
+          <li><strong>No direct vendor AI calls</strong> — LLM assist through ai-gateway-go only; GPU calls through the Render Gateway only.</li>
+          <li><strong>No non-commercial model output on any client-visible path</strong> — structural rule (§05/§07), not policy. SUPIR / IC-Light V2 / RMBG / SVD / FLUX-dev-free-weights are quarantined; HunyuanVideo additionally geo-caveated (EU/UK/S.Korea exclusion) and stays out of v1.</li>
+          <li><strong>No payroll/billing changes</strong> — GPU costs are metered in the creative ledger; invoicing them is the billing module's concern.</li>
+          <li><strong>No new PM system</strong> — creative work items ride the existing PM vertical; the module adds production/library domain only.</li>
+        </ul>
+        <h3>Fit with prior decisions — and two flagged conflicts</h3>
+        <ul>
+          <li>Conforms to the <strong>ERP holding-OS vision</strong>: enablement via <code>enabled_modules</code> OR active <code>service_assignment</code>, WSD-3 module-sliced third-wall RLS — the Creative department in the agency company serves sibling companies without data bleed.</li>
+          <li>Lands on the <strong>dept-interface-template</strong>: Creatives already has the two-level console (craft group "Studio": Image Studio · Asset Library). This design grows it to two craft groups (§08) and keeps the toolkit rule: no tab registered before its route exists.</li>
+          <li>Fills the <strong>mcp-hub reserved seam</strong> — CLAUDE.md lists "Magnific <code>image.enhance</code> (no Gateway capability yet)" as a deferral; <code>creative.enhanceImage</code> (§07) closes it, backed by the Render Gateway rather than a Magnific subscription.</li>
+          <li>Reuses, not duplicates: <code>clients</code>, <code>projects</code>, <code>files</code> storage backend, the <code>file</code> Cerbos policy (already how <code>creative_assets</code> authorizes), WS4 <code>automation_approvals</code> (origin widened), the SEO-proven ledger/stop-loss + one-shot-approval patterns.</li>
+        </ul>
+        <div class="note warn"><span class="k">Flagged conflict 1 — SMM D-9</span><code>smm-design.md</code> books generative-image credits in <code>social_usage_ledger</code>. Once this module exists, the render cost books <strong>exactly once</strong>, in <code>creative_usage_ledger</code>, attributed <code>requester_module='social'</code> + the requesting client; SMM's <code>tool_scope.ai.imageGen</code> toggle still gates the request at its own choke point, but its ledger must not double-book the GPU dollars. Noted for the owner as D-7 (§14) rather than silently overriding SMM's decision log.</div>
+        <div class="note warn"><span class="k">Flagged conflict 2 — agency creative-asset review (0006)</span>The agency vertical already has campaign-bound creative-asset review. That surface is <strong>campaign deliverable review</strong> and stays; the DAM is the production/library layer underneath. v1 keeps them separate; a bridging seam is a noted v2 item, not built now.</div>
+        <div class="note"><span class="k">Design change to shipped code (deliberate, coordinated)</span>0031 gave <code>creative_assets</code> a plain tenant wall with an explicit "not a gated module" comment. This design <strong>retrofits the third wall</strong> and moves the controller into the module (D-3, §04) — the 0031 comment is superseded by the module vertical materializing. The shipped HTTP contract is preserved.</div>
+
+        <h3>The Magnific head-to-head (quality · quantity · price)</h3>
+        <p>Apples-to-apples on Magnific's home turf — creative upscale/enhance (our stack also does gen/edit/video/DAM, not credited here):</p>
+        <ul>
+          <li><strong>Quality — parity for client work.</strong> clarity-upscaler is the open engine powering ClarityAI.co (same SDXL + ControlNet-Tile recipe, same "hallucinated detail" glow). SUPIR would exceed Magnific but is non-commercial → off-limits, so on the clean stack we <strong>match, not beat</strong>. Magnific keeps a "turnkey polish" edge until we tune presets.</li>
+          <li><strong>Quantity — uncapped vs. credit-capped.</strong> Magnific: Pro ~500/mo, Premium ~1,500, Business ~5,000 credits. Ours: limited only by GPU budget/throughput. The same $39 buys ~500 Magnific upscales vs. ~2,000 on Replicate; on an owned box it's unlimited at ~$0 marginal.</li>
+          <li><strong>Price + the seat point — the whole game.</strong> Magnific bills <strong>per account/seat with a credit cap</strong>. Our stack is a backend service the whole team hits via the platform (MCP-mediated) — cost is <strong>decoupled from headcount</strong>. Zero seats, one backend; billing is compute, not people.</li>
+        </ul>
+      </div>
+      <div class="tablewrap"><table>
+        <thead><tr><th>Team of 5, ~2,000 upscales/mo</th><th class="num">Monthly</th><th>Scales with team size?</th></tr></thead>
+        <tbody>
+          <tr><td>Magnific — shared 1 Business acct</td><td class="num">~$299 (concurrency-limited, ToS-gray)</td><td>—</td></tr>
+          <tr><td>Magnific — proper per-seat (5× Premium)</td><td class="num">~$495</td><td><strong>Yes — +$99 per new person</strong></td></tr>
+          <tr><td><strong>Ours — serverless</strong> (Replicate/fal — chosen posture)</td><td class="num"><strong>~$38 compute, unlimited seats</strong></td><td><strong>No — flat</strong></td></tr>
+          <tr><td>Ours — owned/rented 24 GB box</td><td class="num">~$248 flat, unlimited volume + seats</td><td>No</td></tr>
+        </tbody>
+      </table></div>
+      <div class="wrap">
+        <p>Unit cost: <strong>~$0.05–0.20/image</strong> (Magnific credits) vs. <strong>~$0.019</strong> (Replicate) vs. <strong>~$0 marginal</strong> (owned box) — 3–10× cheaper per image, and the gap widens with every added person or batch. The win isn't quality (that's parity) — it's <strong>cost decoupled from headcount + volume</strong>, delivered through MCP.</p>
+        <div class="note"><span class="k">Honest caveats</span>(1) Magnific is zero-effort; ours needs the Render Gateway built + light GPU ops. (2) This week clarity-upscaler on Replicate already saves ~10×/image, but the polished "zero-seat via MCP" state arrives only once the Gateway + console ship (P1). (3) Preset tuning is the work that buys parity. Break-even (even counting build) arrives fast past ~2–3 people or a few hundred images/mo — and unlike Magnific, the bill stops growing with the team.</div>
+      </div>
+    </section>
+
+    <!-- ================= 02 SYSTEM OVERVIEW ================= -->
+    <section class="part" id="p02">
+      <div class="part-head"><span class="part-num">§02</span><h2>System Overview</h2></div>
+      <p class="dek">All state, tenancy, judgment, and money controls live in Zone A. The Render Gateway is Zone-A infrastructure with egress-only GPU traffic; no inbound internet path exists to any of it.</p>
+      <figure class="wide">
+        <div class="plate">
+          <pre class="mermaid">
+%%{init:{'theme':'base','themeVariables':{'fontFamily':'ui-monospace,monospace','fontSize':'13px','background':'#FBFCFB','mainBkg':'#E7F0EA','primaryColor':'#E7F0EA','secondaryColor':'#EEF3EE','tertiaryColor':'#EEF3EE','primaryBorderColor':'#1E5E44','primaryTextColor':'#14201A','secondaryTextColor':'#14201A','tertiaryTextColor':'#14201A','textColor':'#14201A','nodeTextColor':'#14201A','lineColor':'#4B574F','clusterBkg':'#EEF3EE','clusterBorder':'#B7C3B8','edgeLabelBackground':'#FBFCFB','titleColor':'#14201A'}}}%%
+flowchart LR
+  subgraph ZA["Zone A — platform (private)"]
+    UI[platform-ui<br/>Creatives dept console] -->|BFF /api/:t/modules/creative/*| PN[platform-nest<br/>creative module]
+    PN --- PDB[(Postgres<br/>creative_* tables FORCE-RLS<br/>+ global creative_workflows)]
+    PN --- STORE[(file storage<br/>originals · versions · video)]
+    IMGP[imgproxy sidecar<br/>signed rendition URLs] --> STORE
+    UI -->|rendition URLs| IMGP
+    PN -->|/complete /embed<br/>prompt assist, Hermes-first| GW[ai-gateway-go]
+    HUB[mcp-hub] -->|aggregated creative.* tools| PN
+    N8N[n8n flows] -->|MCP tools only| HUB
+    PN -->|outbox events| EVT[event backbone] --> N8N
+    EVT --> NOTIF[notifications / approvals inbox]
+    PN <-->|job dispatch + signed I/O URLs<br/>+ idempotent callback| RG[Creative Render Gateway<br/>render-gateway-go<br/>GPU keys live HERE]
+    CPU[analyze worker backend<br/>CLIP + BLIP, CPU container] --- RG
+    SMM[SMM · SEO · WebDesk] -->|approved assets + renditions| PN
+  end
+  subgraph NET["Internet — GPU / model providers"]
+    SRV[Serverless GPU<br/>RunPod serverless · fal.ai · Replicate<br/>clarity-upscaler · Qwen · SDXL · Wan 2.2]
+    COMFY[Self-host ComfyUI headless<br/>rented 24GB box - later owned]
+    CAPI[Commercial APIs<br/>BFL FLUX · Veo · Kling/Runway]
+  end
+  RG -->|egress-allowlisted, per-job audit| SRV
+  RG -->|workflow JSON over HTTP /prompt| COMFY
+  RG -->|license bundled in price| CAPI
+  classDef default fill:#E7F0EA,stroke:#1E5E44,color:#14201A,stroke-width:1px;
+          </pre>
+        </div>
+        <figcaption><b>FIG. 02-1</b> — Master system diagram. Bytes flow storage → gateway → backend → gateway → storage via short-lived signed URLs platform-nest issues per job; the gateway persists nothing tenant-owned. imgproxy is a stateless sidecar reading the same storage, serving signed, on-the-fly renditions to the UI and to consuming departments.</figcaption>
+      </figure>
+      <div class="wrap">
+        <h3>Reading the diagram</h3>
+        <ul>
+          <li>All state, tenancy, judgment, and money controls live in <strong>Zone A</strong>. The Render Gateway is Zone A infrastructure with <strong>egress-only</strong> GPU traffic (allowlisted hosts, per-job audit of every byte of client pixels leaving — §03).</li>
+          <li>Bytes flow storage → gateway → backend → gateway → storage via <strong>short-lived signed URLs</strong> platform-nest issues per job; the gateway persists nothing tenant-owned.</li>
+          <li><strong>imgproxy</strong> is a stateless sidecar reading the same storage, serving signed, on-the-fly renditions to the UI and to consuming departments.</li>
+          <li>No inbound internet path exists to any of it; commercial-API webhooks are not used — <strong>the gateway polls providers</strong>.</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- ================= 03 TRUST ZONES ================= -->
+    <section class="part" id="p03">
+      <div class="part-head"><span class="part-num">§03</span><h2>Trust Zones &amp; Network</h2></div>
+      <p class="dek">The WebDesk zone doctrine adapted to this subsystem's actual exposure — Creative has no public-facing surface at all; its risk is egress (client pixels to GPU clouds) and money.</p>
+      <div class="tablewrap"><table>
+        <thead><tr><th>Surface</th><th>Zone</th><th>Rules</th></tr></thead>
+        <tbody>
+          <tr><td><code>creative</code> module + DAM + ledger + scopes</td><td><span class="tag t-info">A</span></td><td>Standard FORCE-RLS + third wall; all writes through the module controller; approvals via WS4.</td></tr>
+          <tr><td><strong>Creative Render Gateway</strong> (<code>render-gateway-go</code>)</td><td><span class="tag t-warn">A, egress-only</span></td><td>Holds <strong>all</strong> GPU/model provider keys (RunPod, fal, Replicate, BFL, Google/Veo, Kling/Runway) — env now, OpenBao target-state; platform-nest never sees them. No inbound ports beyond the platform-nest-facing API (service-token auth; mTLS via the synccert CA when enrolled). <strong>Egress allowlist</strong> enforced at DialContext exactly like ai-gateway-go — only registered backend hosts are reachable; every dispatch writes an egress-audit line <code>{job, tenant-hash, client-hash, backend, bytes_out, model}</code>.</td></tr>
+          <tr><td>Self-host ComfyUI target</td><td><span class="tag t-crit">external execution env</span></td><td>A rented box (RunPod/Vast) reachable only from the gateway over its HTTP API (<code>/prompt</code>, <code>/history</code>, ws progress); it holds <strong>zero credentials into Zone A</strong>. Treated as untrusted compute: outputs are content-type-validated and re-encoded on ingest (a compromised worker can corrupt a render, never reach the platform). GPL isolation is the same arm's-length HTTP pattern.</td></tr>
+          <tr><td>Serverless / commercial API backends</td><td><span class="tag t-crit">internet</span></td><td>Server-side keys only, per-call cost accounting, no client identifiers in prompts/filenames (opaque job ids); providers see pixels + prompt, nothing else. Clients who cannot accept cloud-GPU egress get <code>allow_cloud_gpu:false</code> in scope (OQ-5) — their jobs route only to the self-host target or refuse.</td></tr>
+          <tr><td>imgproxy sidecar</td><td><span class="tag t-info">A</span></td><td>Stateless MIT Go/libvips container; <strong>signed URLs only</strong> (<code>IMGPROXY_KEY/SALT</code>, expiring), source restricted to our storage; never exposed to the public internet in v1 (client delivery goes through Drive/files, not hotlinks).</td></tr>
+          <tr><td>Input/output byte transfer</td><td><span class="tag t-info">A ↔ gateway</span></td><td>Platform-nest issues <strong>short-lived signed GET (inputs) and PUT (outputs) URLs</strong> per job; the gateway and backends never get storage credentials; callback references stored keys.</td></tr>
+          <tr><td>Callbacks (gateway → platform-nest)</td><td><span class="tag t-info">A</span></td><td><code>POST /api/internal/creative/render-callback</code>, idempotent by <code>job_id</code>, bearer service token (+ mTLS option), schema-validated; a forged callback without the per-job callback token is refused, and even a replayed valid one is idempotent (terminal-state transitions are one-way).</td></tr>
+        </tbody>
+      </table></div>
+    </section>
+
+    <!-- ================= 04 DOMAIN MODEL ================= -->
+    <section class="part" id="p04">
+      <div class="part-head"><span class="part-num">§04</span><h2>Domain Model &amp; Schema</h2></div>
+      <p class="dek">Every tenant table carries the third-wall RLS predicate; the render job is the state-machine spine; the extended asset row is the DAM.</p>
+      <div class="wrap">
+        <h3>Design rules (inherited, not optional)</h3>
+        <ul>
+          <li>Every tenant table: <code>tenant_id uuid NOT NULL REFERENCES companies(id)</code>, <code>origin_site</code>, <code>created_at/updated_at</code>, soft-delete <code>deleted_at</code> where user-facing.</li>
+          <li><strong>FORCE-RLS with the WSD-3 third wall</strong> — policy predicate <code>tenant_id = ANY(app_current_tenants()) AND app_module_allowed('creative')</code> on both USING and WITH CHECK, byte-identical in shape to <code>0028_module_hr.sql</code>. App side reaches these tables only via <code>withTenants(tenants, { modules: ['creative'] })</code>.</li>
+          <li><strong>Migration numbering — stated assumption:</strong> the module block starts at <strong><code>0036_module_creative.sql</code></strong> (+ <code>0037</code> if a follow-up is needed). Basis: as of 2026-07-23 the ledger runs through <code>0035_integration_connections_search_providers.sql</code> (the SEO design's "0034+" was drawn down by the search module). CR-01 takes the <strong>next unused number at merge time</strong> and coordinates with SMM-01 (which also targets next-unused) — whichever merges second rebases. No in-migration GRANTs; no <code>sync_app</code> grants (creative tables do not sync in v1).</li>
+          <li>Money: <strong>GPU/provider cost is <code>numeric(12,6)</code> USD</strong> (serverless unit prices go to fractions of a cent — same rationale as the SEO ledger). No client-facing money in this module's v1.</li>
+        </ul>
+        <h3>The two RLS decisions this module makes explicitly</h3>
+        <ol>
+          <li><code>creative_workflows</code> is <strong>global, no-RLS, admin-write-only</strong> — it holds pipeline definitions (workflow JSON + model manifests), zero client data; per-tenant duplication would fork the license source of truth. Same class of deliberate exemption as <code>social_platform_apps</code> (SMM D-4), narrower than SEO's <code>search_data_cache</code>.</li>
+          <li><code>creative_assets</code> (shipped with a plain tenant wall in 0031) is <strong>upgraded to the third wall</strong> in this module's migration, in lockstep with moving <code>CreativeController</code> into the module. The HTTP contract (<code>/api/:t/creative/assets</code>, used by the studio UI and <code>creative-grading-trainer</code>) is preserved as a stable alias; new surface lives under <code>/api/:t/modules/creative/*</code>. This is the one behavior change to shipped code and it ships atomically in CR-01+CR-02 (D-3).</li>
+        </ol>
+      </div>
+      <figure class="wide">
+        <div class="plate">
+          <pre class="mermaid">
+%%{init:{'theme':'base','themeVariables':{'fontFamily':'ui-monospace,monospace','fontSize':'13px','background':'#FBFCFB','mainBkg':'#E7F0EA','primaryColor':'#E7F0EA','secondaryColor':'#EEF3EE','tertiaryColor':'#EEF3EE','primaryBorderColor':'#1E5E44','primaryTextColor':'#14201A','secondaryTextColor':'#14201A','tertiaryTextColor':'#14201A','textColor':'#14201A','nodeTextColor':'#14201A','lineColor':'#4B574F','edgeLabelBackground':'#FBFCFB','titleColor':'#14201A'}}}%%
+erDiagram
+  clients ||--o{ creative_assets : "client-attributed assets"
+  clients ||--o{ creative_scopes : "per-client caps + tiers"
+  creative_assets ||--o{ creative_asset_versions : "superseded versions"
+  creative_assets ||--o{ creative_collection_items : ""
+  creative_collections ||--o{ creative_collection_items : ""
+  clients ||--o{ creative_collections : "brand kits per client"
+  creative_render_jobs ||--o{ creative_assets : "outputs land as assets/versions"
+  creative_assets }o--o{ creative_render_jobs : "inputs (asset ids in job)"
+  creative_render_jobs }o--|| creative_workflows : "workflow_key@version (global)"
+  creative_render_jobs ||--o{ creative_usage_ledger : "cost rows"
+  automation_approvals ||--o{ creative_render_jobs : "spend gate (gated jobs)"
+  automation_approvals ||--o{ creative_assets : "reuse gate (approve for reuse)"
+  projects ||--o{ creative_assets : "optional PM linkage"
+          </pre>
+        </div>
+        <figcaption><b>FIG. 04-1</b> — Entity map. <code>creative_render_jobs</code> is the state-machine spine; <code>creative_workflows</code> is the single global source of license truth every job resolves against.</figcaption>
+      </figure>
+      <div class="wrap">
+        <h3>Key tables</h3>
+      </div>
+      <div class="tablewrap"><table>
+        <thead><tr><th>Table</th><th>Purpose</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">creative_assets</td><td><strong>Extended in place</strong> (additive <code>ALTER TABLE</code>) — existing 0031/0032 columns untouched; <code>graded_key</code> remains the storage key of the current/primary bytes (exposed as <code>primaryKey</code>). New columns add <code>kind</code>, <code>source</code>, <code>client_id</code>, <code>project_id</code>, <code>render_job_id</code>, <code>duration_ms</code>, the rights/licensing spine (<code>license_class</code>, <code>rights jsonb</code>, <code>rights_expires_on</code>, <code>reuse_status</code>, <code>reuse_approval_id</code>, <code>approved_by/at</code>), the provenance record (<code>provenance jsonb</code> — workflow/models/backend/prompt hash/seed/derived-from), and search/AI metadata (<code>checksum_sha256</code>, <code>phash</code>, dual-mode <code>embedding vector(512)</code>, <code>caption</code>, <code>auto_tags</code>, <code>exif</code>, <code>current_version</code>). Backfill gives existing studio rows <code>source='studio'</code>, <code>license_class='commercial'</code>.</td></tr>
+          <tr><td class="mono">creative_asset_versions</td><td>Superseded versions only — the asset row always holds current bytes so every shipped read path stays correct. New version = copy current into versions, overwrite the asset row, bump <code>current_version</code>, re-run analyze.</td></tr>
+          <tr><td class="mono">creative_collections / creative_collection_items</td><td><code>kind ('collection','brand_kit')</code>; brand kit <code>slots jsonb</code> = <code>{logo_asset_ids, palette, fonts, approved_imagery}</code>; items = <code>(collection_id, asset_id, position)</code>.</td></tr>
+          <tr><td class="mono">creative_render_jobs</td><td>The job spine — state machine authoritative here, not in the gateway. See the DDL and lifecycle in §05.</td></tr>
+          <tr><td class="mono">creative_usage_ledger</td><td>The metering ledger — one row per dispatched job + true-up (mirrors <code>search_provider_calls</code>): units (GPU-seconds/images/clip-seconds), <code>cost_usd numeric(12,6)</code>, <code>cost_class</code> (image/video/analyze — separate budget envelopes per locked decision 3). Indexed <code>(tenant_id, client_id, created_at DESC)</code>.</td></tr>
+          <tr><td class="mono">creative_scopes</td><td>The human-set per-client service config (the SEO D-11 pattern, creative-shaped) — see the JSON shape in §05/§06. Effective scope = client row else tenant default else platform default (env). Every dispatch and every scheduled flow consults it; a disabled capability refuses <strong>naming the toggle</strong>.</td></tr>
+          <tr><td class="mono">creative_workflows</td><td><strong>Global, no-RLS, admin-write-only</strong> — the single source of truth the router filters on and the license stamp derives from. Workflows are immutable once referenced by a job (new behavior = new version). v1 seeds only commercial-clean workflows active (§06); quarantine rows exist with <code>active=false</code>.</td></tr>
+          <tr><td class="mono">automation_approvals</td><td>Reused with the origin CHECK widened to include <code>'creative'</code>. Both gates ride it: spend-gate rows (<code>tool_name='creative.render'</code>) and reuse-gate rows (<code>tool_name='creative.approveReuse'</code>).</td></tr>
+        </tbody>
+      </table></div>
+      <div class="plate" style="padding:1rem"><pre style="margin:0;font-family:var(--mono);font-size:.8rem;color:var(--plate-ink);overflow-x:auto">CREATE TABLE creative_render_jobs (
+  id uuid PRIMARY KEY,
+  tenant_id uuid NOT NULL REFERENCES companies(id),
+  client_id uuid REFERENCES clients(id),
+  requested_by uuid REFERENCES users(id),          -- human or the OBO automation user
+  requester_module text NOT NULL DEFAULT 'creative'
+    CHECK (requester_module IN ('creative','social','search','webdesk','agent','automation')),
+  capability text NOT NULL CHECK (capability IN
+    ('upscale','generate','edit','bg_remove','relight','analyze',
+     't2v','i2v','flf2v','interpolate','video_upscale')),
+  workflow_key text NOT NULL, workflow_version integer NOT NULL,
+  params jsonb NOT NULL DEFAULT '{}',              -- prompt, size, sliders, masks — client data, RLS-protected
+  input_asset_ids uuid[] NOT NULL DEFAULT '{}',
+  constraints jsonb NOT NULL DEFAULT '{}',         -- {license_floor, max_cost_usd, deny_cloud}
+  status text NOT NULL DEFAULT 'queued' CHECK (status IN
+    ('pending_approval','queued','dispatched','running','uploading',
+     'succeeded','failed','cancelled','refused')),
+  approval_id uuid REFERENCES automation_approvals(id),  -- spend gate (one-shot, §07)
+  backend_key text, backend_ref text,              -- stamped at dispatch
+  license_stamp jsonb,                             -- gateway-returned {models,backend}
+  estimated_cost_usd numeric(12,6),
+  actual_cost_usd numeric(12,6),
+  progress integer NOT NULL DEFAULT 0,
+  error text, attempt integer NOT NULL DEFAULT 0,
+  lease_expires_at timestamptz,                    -- reconciler re-drives stale jobs
+  correlation_id text,                             -- MCP call / n8n run id
+  origin_site text NOT NULL, created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  queued_at timestamptz, started_at timestamptz, finished_at timestamptz
+);
+CREATE INDEX ix_creative_jobs_active ON creative_render_jobs (tenant_id, status)
+  WHERE status IN ('pending_approval','queued','dispatched','running','uploading');</pre></div>
+      <div class="wrap">
+        <h3>Custom fields &amp; relations</h3>
+        <ul>
+          <li>D17 <code>customFieldTargets</code>: <code>creative_asset</code>, <code>creative_collection</code>.</li>
+          <li><strong>Clients/projects</strong> are the core rows — no duplicates. Delivering an approved asset to a client as a formal deliverable rides the existing <code>deliverables</code> flow (seam noted, not new schema).</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- ================= 05 RENDER GATEWAY ================= -->
+    <section class="part" id="p05">
+      <div class="part-head"><span class="part-num">§05</span><h2>Creative Render Gateway</h2></div>
+      <p class="dek">The centerpiece. A separate Go service — mirroring ai-gateway-go's key-custody, egress, and failure-isolation discipline, applied to GPU compute instead of LLM tokens.</p>
+      <div class="wrap">
+        <h3>Verdict and shape</h3>
+        <p><strong>A separate Go service, <code>render-gateway-go/</code></strong> (compose service <code>render-gateway</code>) — <strong>not</strong> a platform-nest in-process worker, for the same reasons ai-gateway-go is separate: key custody isolation (GPU provider keys never enter the platform process), egress-allowlist enforcement at the dialer, independent failure/restart behavior for long-running jobs, and Go's fitness for concurrent poll/stream workloads. <strong>Platform-nest stays the source of truth for job state</strong>; the gateway is a stateless-ish executor (in-flight leases in memory/Redis; crash ⇒ platform reconciler re-drives by lease timeout, idempotent on <code>job_id</code>).</p>
+        <h3>Job lifecycle</h3>
+        <p>States live on <code>creative_render_jobs</code>, not in the gateway:</p>
+      </div>
+      <figure class="wide"><div class="plate">
+        <pre class="mermaid">
+%%{init:{'theme':'base','themeVariables':{'fontFamily':'ui-monospace,monospace','fontSize':'13px','background':'#FBFCFB','mainBkg':'#E7F0EA','primaryColor':'#E7F0EA','secondaryColor':'#EEF3EE','tertiaryColor':'#EEF3EE','primaryBorderColor':'#1E5E44','primaryTextColor':'#14201A','secondaryTextColor':'#14201A','tertiaryTextColor':'#14201A','textColor':'#14201A','nodeTextColor':'#14201A','lineColor':'#4B574F','edgeLabelBackground':'#FBFCFB','titleColor':'#14201A'}}}%%
+stateDiagram-v2
+  [*] --> queued: scope + license + budget OK
+  [*] --> pending_approval: needs approval
+  [*] --> refused: check fails
+  pending_approval --> queued: WS4 approve, one-shot
+  queued --> dispatched
+  dispatched --> running
+  running --> uploading
+  uploading --> succeeded
+  dispatched --> failed: pre-start error, no failover after compute starts
+  running --> failed
+  uploading --> failed
+  queued --> cancelled
+  dispatched --> cancelled
+  running --> cancelled
+  refused --> [*]
+  succeeded --> [*]
+  failed --> [*]
+  cancelled --> [*]
+        </pre>
+      </div><figcaption><b>FIG. 05-1</b> — Job state machine. Mid-run failures never failover to another backend (no double spend) — they fail the job for a human decision.</figcaption></figure>
+      <div class="wrap">
+        <ul>
+          <li><strong>Create</strong> (console button or MCP tool): platform-nest validates capability against the effective <code>creative_scopes</code>, resolves the workflow (<code>key@version</code>, must be <code>active</code>), computes the <strong>license floor</strong> (client-attributed job ⇒ <code>commercial|licensed</code> only), asks the gateway <code>POST /estimate</code> for cost, then runs the stop-loss chain (below). Outcome: <code>queued</code>, <code>pending_approval</code>, or <code>refused</code>.</li>
+          <li><strong>Approval (spend gate):</strong> required when (a) the principal is an automation/agent OBO user — always, D14; (b) <code>estimated_cost_usd &gt; per_job_approval_threshold</code> in scope; (c) the resolved route is a <strong>premium backend</strong> (BFL FLUX tier, commercial video API); or (d) capability class <code>video</code> for any non-human requester. Approved rows are <strong>one-shot</strong>: dispatch consumes <code>approval_id</code> transactionally, replay-proof.</li>
+          <li><strong>Dispatch:</strong> platform-nest → <code>POST /jobs</code> on the gateway with the job envelope (capability, workflow + definition hash, params, signed input/output URLs, constraints, callback token). Idempotent on <code>job_id</code>. Gateway picks the backend (routing policy below) and leases the job.</li>
+          <li><strong>Execute:</strong> backend-specific — serverless (submit, poll), ComfyUI (<code>POST /prompt</code>, ws/poll <code>/history</code>, fetch artifacts), commercial API (submit, poll). Progress callbacks are optional; terminal callback is mandatory and idempotent.</li>
+          <li><strong>Callback:</strong> <code>POST /api/internal/creative/render-callback</code> — platform-nest verifies the per-job token, transitions the row (one-way), <strong>creates the output asset or version</strong> with provenance + computed <code>license_class</code> (weakest of the license stamp's models ∪ input assets' classes), true-ups the ledger row, emits <code>creative.render.completed|failed</code>, and enqueues an <code>analyze</code> job (fail-soft).</li>
+          <li><strong>Reconciler:</strong> a periodic module task re-drives <code>dispatched/running</code> rows past <code>lease_expires_at</code> (<code>GET /jobs/:id</code> first; re-dispatch only for never-started jobs — mid-run failures fail closed to human retry, never silent re-spend).</li>
+        </ul>
+        <h3>The RenderBackend abstraction (gateway-side) and routing</h3>
+      </div>
+      <div class="cols">
+        <div class="card"><span class="k">RenderBackend routing</span><p>A cost-ordered, config-driven candidate list per capability (hot-reloadable like the bot's <code>groups.yaml</code>). At dispatch the router filters by capability ∧ license floor (a <code>commercial</code> floor excludes every non-commercial route and excludes <code>licensed</code> unless the scope has the premium tier) ∧ <code>deny_cloud</code> ∧ <code>max_cost_usd</code> ∧ circuit-breaker health, then takes the first.</p></div>
+        <div class="card"><span class="k">Fail-closed stop-loss</span><p>(0) capability enabled in scope → (1) license floor satisfiable → (2) estimate ≤ cap, threshold/premium/automation ⇒ <code>pending_approval</code> → (3) month-to-date spend per cost class vs. client → tenant → global cap (image $200/mo, video $300/mo, analyze $10/mo defaults; also fires at 80%) → (4) advisory-lock single-flight per job id → dispatch → true-up on callback.</p></div>
+        <div class="card"><span class="k">License wall</span><p>Every workflow's model manifest carries a license class; the router filters routes below the job's floor; the callback stamps the actual models used; an asset's <code>license_class</code> = weakest of the derivation chain. <code>approve_reuse</code> refuses any chain element ∉ {commercial, licensed}. There is no admin override.</p></div>
+      </div>
+      <div class="plate" style="padding:1rem"><pre style="margin:0;font-family:var(--mono);font-size:.8rem;color:var(--plate-ink);overflow-x:auto">// Design sketch — capability-based so drivers can be partial (SearchDataProvider's sibling).
+type RenderBackend interface {
+    Key() string                    // 'replicate' | 'fal' | 'runpod-serverless' | 'comfy-selfhost'
+                                    // | 'bfl-api' | 'video-api' | 'analyze-cpu' | 'echo' (tests)
+    Capabilities() []Capability
+    // License class of what THIS backend runs for a given workflow/model — the router's filter input.
+    LicenseClass(workflow WorkflowRef) LicenseClass   // commercial | licensed | noncommercial
+    EstimateCostUsd(job JobSpec) (float64, error)     // consulted BEFORE dispatch (stop-loss + approval threshold)
+    Submit(ctx context.Context, job JobSpec) (BackendRef, error)
+    Poll(ctx context.Context, ref BackendRef) (JobUpdate, error)
+    Cancel(ctx context.Context, ref BackendRef) error
+}</pre></div>
+      <div class="wrap">
+        <p><strong>Failover:</strong> pre-start errors (429/5xx before compute starts) advance to the next candidate; <strong>mid-run failures never failover</strong> (no double spend) — they fail the job with the backend's error for a human decision. Per-tenant concurrent-job caps and a global concurrency cap are gateway config.</p>
+        <h3>ComfyUI workflows as versioned JSON</h3>
+        <p>The unit of pipeline definition is a <code>creative_workflows</code> row: the exact ComfyUI graph JSON (or API template), a params schema (prompt, image refs, denoise, creativity/HDR sliders mapped to denoise-strength + ControlNet weight), and the <strong>model manifest with license classes</strong>. Platform-nest resolves <code>key@version</code> and sends the definition hash; the gateway verifies hash before execution (a tampered workflow refuses).</p>
+        <p><strong>Seeded v1 set:</strong> <code>upscale-clarity@1</code>, <code>upscale-precision@1</code>, <code>relight-iclight1@1</code>, <code>gen-qwen@1</code>, <code>gen-sdxl@1</code>, <code>gen-zimage@1</code>, <code>edit-qwen@1</code>, <code>bgremove-birefnet@1</code>, <code>analyze-clip-blip@1</code>, <code>t2v-wan22@1</code>, <code>i2v-wan22@1</code>, <code>flf2v-wan22@1</code>, <code>interp-rife@1</code>, <code>vupscale-esrgan@1</code>; premium: <code>gen-flux-bfl@1</code> (api engine). <strong>Quarantined-inactive</strong> (documentation of the boundary, not tribal knowledge): <code>upscale-supir@0</code>, <code>relight-iclight2@0</code>.</p>
+        <p>The ledger powers the Jobs &amp; Usage panel, tenant rollups, and the <code>creative.render_cost.month</code> metric that feeds billing. Manual override = <code>creative:provider:admin</code> + audit.</p>
+      </div>
+    </section>
+
+    <!-- ================= 06 BACKEND/MODEL/LICENSE MATRIX ================= -->
+    <section class="part" id="p06">
+      <div class="part-head"><span class="part-num">§06</span><h2>Backend / Model / License Matrix</h2></div>
+      <p class="dek">The locked hybrid, made operational. Default pipeline = commercial-clean only; the premium tier is a scope flag + permission, never a default.</p>
+      <div class="tablewrap"><table>
+        <thead><tr><th>Capability</th><th>Model / workflow</th><th>License class</th><th>Backend(s), cost-ordered</th><th>Notes</th></tr></thead>
+        <tbody>
+          <tr><td>Upscale (creative)</td><td>clarity-upscaler (SDXL + ControlNet-Tile)</td><td><span class="tag t-ok">commercial</span> <span style="color:var(--ink-faint)">(AGPL tool — OQ-8)</span></td><td>replicate (~$0.019/img) → comfy-selfhost</td><td>THE Magnific replacement; P0 spike target</td></tr>
+          <tr><td>Upscale (precision)</td><td>Real-ESRGAN · DiffBIR</td><td><span class="tag t-ok">commercial</span> <span style="color:var(--ink-faint)">(BSD/Apache)</span></td><td>replicate/fal → comfy-selfhost</td><td>fast/faithful mode</td></tr>
+          <tr><td>Relight</td><td>IC-Light <strong>V1</strong></td><td><span class="tag t-ok">commercial</span></td><td>comfy-selfhost → fal</td><td><strong>V2 is NC — quarantined</strong></td></tr>
+          <tr><td>Generate</td><td>Qwen-Image · SDXL · Z-Image-Turbo · FLUX schnell/klein</td><td><span class="tag t-ok">commercial</span> <span style="color:var(--ink-faint)">(Apache/OpenRAIL)</span></td><td>fal/replicate serverless → comfy-selfhost</td><td>Qwen = text-rendering strength; Z-Image = cheap/fast</td></tr>
+          <tr><td>Generate (hero)</td><td><strong>FLUX dev-class</strong> via BFL/fal hosted API</td><td><span class="tag t-warn">licensed</span></td><td>bfl-api / fal</td><td><strong>Premium tier only</strong>: scope <code>premium.flux</code> + <code>creative:render:premium</code> + spend approval</td></tr>
+          <tr><td>Edit (instruction)</td><td>Qwen-Image-Edit</td><td><span class="tag t-ok">commercial</span> <span style="color:var(--ink-faint)">(Apache)</span></td><td>fal/replicate → comfy-selfhost</td><td>default editing engine</td></tr>
+          <tr><td>BG removal</td><td><strong>BiRefNet</strong> (MIT)</td><td><span class="tag t-ok">commercial</span></td><td>analyze-cpu / replicate</td><td><strong>RMBG is NC — never</strong></td></tr>
+          <tr><td>Inpaint/outpaint/style/structure</td><td>ControlNet + IP-Adapter (SDXL)</td><td><span class="tag t-ok">commercial</span></td><td>comfy-selfhost → serverless</td><td>Magnific-style sliders live here</td></tr>
+          <tr><td>T2V / I2V / FLF2V</td><td><strong>Wan 2.2</strong> (5B/14B)</td><td><span class="tag t-ok">commercial</span> <span style="color:var(--ink-faint)">(Apache)</span></td><td>runpod-serverless ComfyUI (~$0.03–0.10/clip compute)</td><td>anchor; FLF2V = the A→B morph requirement</td></tr>
+          <tr><td>Video (hero / synced audio)</td><td><strong>Veo</strong> · Kling/Runway</td><td><span class="tag t-warn">licensed</span> <span style="color:var(--ink-faint)">(commercial API)</span></td><td>video-api via fal/replicate</td><td><strong>Premium tier</strong>, $100–300/mo envelope, per-clip approval</td></tr>
+          <tr><td>Interpolate / video upscale</td><td>RIFE · Real-ESRGAN</td><td><span class="tag t-ok">commercial</span></td><td>comfy-selfhost / serverless</td><td>post-pipeline for masters</td></tr>
+          <tr><td>Analyze (embed/caption/tag)</td><td>CLIP ViT-B/32 + BLIP-base</td><td><span class="tag t-ok">commercial</span></td><td><strong>analyze-cpu</strong> (local container, ~$0) → replicate</td><td>fail-soft ingest enrichment</td></tr>
+          <tr><td><strong>Quarantined — ships disabled</strong></td><td>SUPIR · IC-Light V2 · RMBG · SVD · FLUX dev free weights · HunyuanVideo (geo-caveat) · LTX (license ambiguous)</td><td><span class="tag t-crit">noncommercial / caveated</span></td><td>none active</td><td>Rows exist <code>active=false</code> so the boundary is visible</td></tr>
+        </tbody>
+      </table></div>
+      <div class="wrap">
+        <div class="note warn"><span class="k">FLUX licensing — the biggest client-facing trap</span>All FLUX <em>dev</em>-class weights are non-commercial. For client work either (a) buy BFL's self-serve commercial license (their "Professional/agency" tier covers up to ~3 clients, then per-client fees — quote-gated, OQ-1), or (b) call the hosted BFL/fal/Replicate API where the license is bundled in the price. <strong>Never ship FLUX dev output to a paying client on the free weights.</strong></div>
+        <div class="note warn"><span class="k">AGPL / GPL posture (OQ-8, counsel memo pending)</span>clarity-upscaler is AGPL-3.0 — internal-use tool, outputs delivered, posture documented for sign-off. ComfyUI (GPL-3.0) runs headless behind the gateway at arm's length over HTTP only — GPL never links into our proprietary code. LTX-Video's license is genuinely ambiguous across sources; confirm with Lightricks before any commercial use. HunyuanVideo excludes EU/UK/S.Korea and carries a 100M-MAU cap — stays out of v1 regardless.</div>
+      </div>
+    </section>
+
+    <!-- ================= 07 AI DESIGN ================= -->
+    <section class="part" id="p07">
+      <div class="part-head"><span class="part-num">§07</span><h2>AI Design</h2></div>
+      <p class="dek">Local-first task routing, the CLIP/BLIP analyze-job pattern that avoids the cross-modal embedding-space pitfall, and the two-gate WS4 spine.</p>
+      <div class="tablewrap"><table>
+        <thead><tr><th>Task</th><th>Where it runs</th><th>Trigger</th><th>Notes</th></tr></thead>
+        <tbody>
+          <tr><td>Prompt expansion / negative-prompt / style suggestions</td><td><strong>ai-gateway-go <code>/complete</code></strong> — Hermes default, Claude flag for client-facing copy</td><td>Generate/Edit canvas</td><td>Never a direct vendor call; gateway DLP + caps apply</td></tr>
+          <tr><td>Alt-text + tag normalization (post-BLIP cleanup)</td><td>ai-gateway <code>/complete</code> (Hermes)</td><td>analyze pipeline</td><td>Draft metadata only</td></tr>
+          <tr><td>Image captioning</td><td><strong>BLIP-base as an <code>analyze</code> render job</strong> on the CPU worker backend</td><td>asset ingest (event-driven, fail-soft)</td><td>NOT via gateway <code>/media</code> — local-first, $0, batch-friendly</td></tr>
+          <tr><td>Visual/semantic embeddings</td><td><strong>CLIP ViT-B/32</strong> as the same <code>analyze</code> job → <code>creative_assets.embedding</code></td><td>ingest + on new version</td><td><strong>Pitfall made explicit:</strong> text→image search must encode the query with the CLIP text encoder (same job capability), NOT ai-gateway <code>/embed</code> (nomic-space ≠ CLIP-space). <code>/embed</code> is never used for asset search.</td></tr>
+          <tr><td>Similar-asset search + dedup</td><td>Postgres: checksum exact → pHash near-dup → pgvector cosine</td><td>Library UX, pre-save dedup hint</td><td>Dual-mode column (pgvector else <code>float8[]</code> + app-side cosine — the WS8 store pattern; OQ-7 shared with SEO)</td></tr>
+          <tr><td>Keyword search</td><td>Postgres FTS over <code>name/caption/auto_tags</code></td><td>Library</td><td>No extra engine</td></tr>
+        </tbody>
+      </table></div>
+      <div class="wrap">
+        <div class="note"><span class="k">D9 hygiene (same reasoning as SEO D-7)</span><code>creative_assets.embedding</code> is an <em>operational feature column</em> (search/dedup over module rows), not a knowledge store. Anything retrieval-shaped (brand-voice corpora, style guides) stays in WS8 via <code>knowledge.search</code>. The existing <code>creative-grading-trainer</code> (learned house-look, Image Studio phase-2) is unchanged by this design — the 3D-LUT seam stays the attach point.</div>
+        <h3>The two-gate WS4 spine</h3>
+        <ol>
+          <li><strong>Spend gate (before GPU money):</strong> §05 choke point. Automation/agent principals <strong>always</strong> suspend into <code>automation_approvals</code> (D14 — MCP render tools are <code>write:true</code>); humans suspend above the per-job threshold or on premium routes. Execution consumes the one-shot approvalId with payload-hash match.</li>
+          <li><strong>Reuse gate (before an asset can leave the department):</strong> a generated/edited asset is born <code>reuse_status='private'</code>. "Submit for reuse" → <code>pending_approval</code> + an approvals-inbox item showing preview + <strong>the full license chain</strong>; approval requires every element of the provenance chain ∈ {commercial, licensed} — the service refuses otherwise (structural rule; there is no override flag). Approved assets become visible to cross-dept consumers (§08) and deliverable to clients; <code>revoked</code> removes them from the shared surface and emits an event.</li>
+        </ol>
+        <h3>Creative capabilities as MCP tools (fills the reserved <code>image.enhance</code> seam)</h3>
+        <p>Registered via <code>ModuleContract.mcpTools</code> (hub-aggregated). Reads <code>minAssurance:'low'</code>; every GPU-spending tool is <code>write:true</code> (spending money is a mutation — SEO D-5), so automation principals hit the D14 gate by construction.</p>
+      </div>
+      <div class="tablewrap"><table>
+        <thead><tr><th>Tool</th><th>Kind</th><th>Impact</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">creative.searchAssets / getAsset / listCollections / listJobs / usageSummary</td><td>read</td><td>—</td></tr>
+          <tr><td class="mono">creative.enhanceImage</td><td>GPU spend</td><td><span class="tag t-warn">medium (budget-checked)</span></td></tr>
+          <tr><td class="mono">creative.generateImage / editImage / removeBackground</td><td>GPU spend</td><td><span class="tag t-warn">medium</span></td></tr>
+          <tr><td class="mono">creative.generateVideo / animateImage (t2v/i2v/flf2v)</td><td>GPU spend, video class</td><td><span class="tag t-crit">high → always suspends for automation</span></td></tr>
+          <tr><td class="mono">creative.submitForReuse</td><td>starts the reuse approval</td><td><span class="tag t-ok">low</span> (no side effect beyond the inbox item)</td></tr>
+          <tr><td class="mono">creative.captionAssets</td><td>cheap job (re-run analyze)</td><td><span class="tag t-ok">low</span></td></tr>
+        </tbody>
+      </table></div>
+    </section>
+
+    <!-- ================= 08 CONSOLE UX ================= -->
+    <section class="part" id="p08">
+      <div class="part-head"><span class="part-num">§08</span><h2>Console UX</h2></div>
+      <p class="dek">Dept Creatives on the two-level dept-interface-template — universal spine plus two craft groups, growing from one (production vs. supply is the natural split).</p>
+      <div class="tablewrap"><table>
+        <thead><tr><th>Group</th><th>Sub-tabs (route under <code>/departments/[deptId]/</code>)</th></tr></thead>
+        <tbody>
+          <tr><td><strong>Studio</strong> (production)</td><td>Image Studio (<code>studio</code> — PROTOTYPED, unchanged) · Generate &amp; Edit (<code>generate</code>) · Upscale (<code>upscale</code>) · Video (<code>video</code>)</td></tr>
+          <tr><td><strong>Library</strong> (supply)</td><td>Assets (<code>assets</code> — exists, upgraded to the DAM surface) · Brand Kits (<code>brand-kits</code>) · Jobs &amp; Usage (<code>jobs</code>)</td></tr>
+        </tbody>
+      </table></div>
+      <div class="wrap">
+        <p>Home = command-center KPIs from rollups (jobs this month, MTD render spend vs. caps, assets approved for reuse, rights expiring ≤30d) + activity feed + launchers (Shared Drive, Figma, Claude). The My-work rail is inherited unchanged.</p>
+        <h3>Button capability matrix</h3>
+        <p>Every 🔵/🟣 action is additionally gated by the client's <code>creative_scopes</code> config: a disabled capability renders the button disabled and names the missing toggle.</p>
+        <div class="legend">
+          <span>🟢 local/$0 — client-side studio, own-data search, drafts</span>
+          <span>🔵 GPU-metered — serverless spend; scope + ledger stop-loss</span>
+          <span>🟣 PREMIUM — FLUX licensed tier / commercial video API, explicit paid opt-in</span>
+          <span>🔴 WS4 approval — human decision before execution</span>
+        </div>
+      </div>
+      <div class="tablewrap"><table>
+        <thead><tr><th>Console action</th><th>Tab</th><th>Needs</th><th>Gate</th></tr></thead>
+        <tbody>
+          <tr><td>Auto-correct / grade / batch-export / Save to ERP</td><td>Image Studio</td><td>🟢</td><td>permission only (shipped behavior)</td></tr>
+          <tr><td>Creative upscale (clarity recipe, sliders)</td><td>Upscale</td><td>🔵</td><td>budget stop-loss</td></tr>
+          <tr><td>Precision upscale / relight (IC-Light V1)</td><td>Upscale</td><td>🔵</td><td>budget stop-loss</td></tr>
+          <tr><td>Batch upscale (n8n-driven)</td><td>Upscale</td><td>🔵</td><td>🔴 above threshold; always 🔴 for automation</td></tr>
+          <tr><td>Generate image (Qwen / SDXL / Z-Image)</td><td>Generate &amp; Edit</td><td>🔵</td><td>budget stop-loss</td></tr>
+          <tr><td>Prompt expansion / style assist</td><td>Generate &amp; Edit</td><td>🟢 (Hermes)</td><td>draft only</td></tr>
+          <tr><td>Instruction edit / inpaint / outpaint / bg-remove</td><td>Generate &amp; Edit</td><td>🔵</td><td>budget stop-loss</td></tr>
+          <tr><td><strong>FLUX hero generation</strong></td><td>Generate &amp; Edit</td><td>🟣</td><td>scope <code>premium.flux</code> + <code>creative:render:premium</code> + 🔴</td></tr>
+          <tr><td>Wan T2V / I2V / first+last-frame morph</td><td>Video</td><td>🔵</td><td>video budget; 🔴 above threshold</td></tr>
+          <tr><td><strong>Veo / Kling hero clip (synced audio)</strong></td><td>Video</td><td>🟣</td><td>scope <code>premium.video_api</code> + 🔴 per clip</td></tr>
+          <tr><td>Interpolate (RIFE) / video upscale</td><td>Video</td><td>🔵</td><td>video budget</td></tr>
+          <tr><td>Search / find-similar / dedup check</td><td>Assets</td><td>🟢 (post-ingest)</td><td>—</td></tr>
+          <tr><td>Re-run caption/tags (analyze)</td><td>Assets</td><td>🟢/🔵 (CPU worker ≈ $0)</td><td>—</td></tr>
+          <tr><td>Edit rights / license metadata</td><td>Assets</td><td>🟢</td><td class="mono">creative:asset:write</td></tr>
+          <tr><td><strong>Submit / approve asset for cross-dept reuse</strong></td><td>Assets</td><td>🟢</td><td>🔴 (reuse gate; license chain must be clean)</td></tr>
+          <tr><td>Revoke reuse (rights expiry etc.)</td><td>Assets</td><td>🟢</td><td class="mono">creative:asset:approve_reuse</td></tr>
+          <tr><td>Assemble / edit brand kit</td><td>Brand Kits</td><td>🟢</td><td class="mono">creative:asset:write</td></tr>
+          <tr><td>Copy rendition URL (per-network crops)</td><td>Assets</td><td>🟢</td><td>signed URL, read permission</td></tr>
+          <tr><td>View job queue / cancel job / view ledger</td><td>Jobs &amp; Usage</td><td>🟢</td><td class="mono">creative:ledger:read</td></tr>
+          <tr><td>Raise caps / edit client scope config</td><td>Jobs &amp; Usage</td><td>🟢</td><td class="mono">creative:scope:write / creative:provider:admin</td></tr>
+        </tbody>
+      </table></div>
+      <div class="wrap">
+        <p><strong>Everything 🟢 plus the 🔵 upscale line ships value in P1</strong> — the Magnific replacement does not wait for the generative canvas.</p>
+      </div>
+    </section>
+
+    <!-- ================= 09 ERP INTEGRATION ================= -->
+    <section class="part" id="p09">
+      <div class="part-head"><span class="part-num">§09</span><h2>ERP Integration Points</h2></div>
+      <p class="dek">Reuse over invention — one new deployable (the Render Gateway); every other plane is an existing platform mechanism applied to a new resource set.</p>
+      <div class="tablewrap"><table>
+        <thead><tr><th>Subsystem</th><th>Integration (concrete)</th></tr></thead>
+        <tbody>
+          <tr><td>platform-nest</td><td><code>ModuleContract</code> key <code>creative</code>; controller <code>@Controller("api/:tenantId/modules/creative")</code> (hr/search convention) + the preserved legacy alias <code>api/:tenantId/creative/assets</code> (studio UI + trainer compat); <code>ModuleEnabledGuard</code>; enablement via <code>enabled_modules</code> OR active <code>service_assignment</code></td></tr>
+          <tr><td>BFF contract</td><td>New section in <code>FRONTEND-BFF-CONTRACT.md</code>: <code>/api/:t/modules/creative/{assets,assets/:id/versions,collections,brand-kits,scopes,jobs,jobs/:id,ledger,search,renditions/sign}</code> — shapes canonical in <code>platform-ui/src/lib/creative.ts</code> (extends the existing file)</td></tr>
+          <tr><td>Creative Render Gateway</td><td>The §05 service — the one new deployable. Compose service <code>render-gateway</code>; GPU keys env→OpenBao; egress allowlist; OTel</td></tr>
+          <tr><td>ai-gateway-go</td><td><code>/complete</code> for prompt/copy assist (Hermes default, Claude flag). NOT used for CLIP/BLIP (§07)</td></tr>
+          <tr><td>mcp-hub</td><td><code>creative.*</code> tools via <code>mcpTools</code> aggregation (§07); closes the hub's reserved Magnific <code>image.enhance</code> deferral</td></tr>
+          <tr><td>WS8 knowledge / pgvector</td><td>Embedding column is operational (dual-mode); brand/style corpora stay WS8-owned; OQ-7 = pgvector in platform DB images (shared with SEO OQ-8)</td></tr>
+          <tr><td>WS4 approvals</td><td><code>automation_approvals.origin</code> widened with <code>'creative'</code>; spend gate + reuse gate both land in the existing inbox; one-shot approvalId consumption at dispatch</td></tr>
+          <tr><td>automation (n8n)</td><td>Flows in §10; backbone rule — n8n orchestrates, MCP accesses, zero logic in workflows</td></tr>
+          <tr><td>Event backbone</td><td><code>creative.asset.ingested</code>, <code>creative.render.completed|failed|awaiting_approval</code>, <code>creative.budget.threshold</code>, <code>creative.asset.reuse_approved|reuse_revoked|rights_expiring</code> → bell + n8n bridge</td></tr>
+          <tr><td>Files / Shared Drive (WS11)</td><td>Asset bytes in the existing storage backend; approved client deliverables mirrored to the client's Drive folder; video default = local storage + Drive mirror</td></tr>
+          <tr><td>imgproxy</td><td>New Zone A sidecar (MIT, Go/libvips): signed, expiring rendition URLs — no rendition rows (D-8)</td></tr>
+          <tr><td>SMM / SEO / WebDesk (consumers)</td><td>Read surface = <strong>approved assets only</strong>: <code>GET /api/:t/modules/creative/assets?reuseStatus=approved</code> + <code>POST .../renditions/sign</code>. Consumers never touch <code>creative_*</code> tables directly (the third wall enforces this structurally). GPU spend requested by siblings books once with <code>requester_module</code> attribution (D-7)</td></tr>
+          <tr><td>Rollups (D12)</td><td><code>creative.renders.month</code> · <code>creative.render_cost.month</code> (money, isMonetary — feeds billing) · <code>creative.assets.added.month</code> · <code>creative.assets.approved_total</code> · <code>creative.rights.expiring_30d</code></td></tr>
+          <tr><td>Cerbos</td><td>New resource policies (§11); asset byte access keeps riding the existing <code>file</code> policy; <code>lib/rbac.ts</code> capability mirror</td></tr>
+          <tr><td>observability (WS9)</td><td>OTel spans: job dispatch/poll/callback with attrs (backend, model, capability, cost_usd); per-backend circuit-state + GPU-seconds gauges; ledger-vs-cap gauge; fail-soft <code>OTEL_ENABLED</code></td></tr>
+        </tbody>
+      </table></div>
+    </section>
+
+    <!-- ================= 10 AUTOMATION FLOWS ================= -->
+    <section class="part" id="p10">
+      <div class="part-head"><span class="part-num">§10</span><h2>Automation Flows</h2></div>
+      <p class="dek">Thin orchestrations calling <code>creative.*</code> MCP tools (impact-gated automatically). JSON lives in <code>automation/workflows/</code>, kebab-named.</p>
+      <div class="tablewrap"><table>
+        <thead><tr><th>Flow</th><th>Schedule / trigger</th><th>MCP calls</th><th>Phase</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">cr-ingest-analyze</td><td>event <code>creative.asset.ingested</code></td><td><code>creative.captionAssets</code> (analyze job: CLIP+BLIP+pHash)</td><td class="mono">P3</td></tr>
+          <tr><td class="mono">cr-batch-upscale</td><td>manual trigger / dropbox folder convention</td><td><code>creative.enhanceImage</code> per item (each budget-checked; batch &gt; threshold suspends)</td><td class="mono">P1</td></tr>
+          <tr><td class="mono">cr-render-notify</td><td>events <code>creative.render.completed|failed</code></td><td>notify requester + on approved-deliverable jobs mirror to Drive</td><td class="mono">P1</td></tr>
+          <tr><td class="mono">cr-ledger-guard</td><td>daily</td><td><code>creative.usageSummary</code> → threshold events → notify / pause queues</td><td class="mono">P1</td></tr>
+          <tr><td class="mono">cr-rights-expiry</td><td>weekly</td><td>list assets <code>rights_expires_on &lt;= 30d</code> → <code>creative.asset.rights_expiring</code> events → notify + auto-revoke at expiry</td><td class="mono">P3</td></tr>
+          <tr><td class="mono">cr-agent-asset-brief</td><td>WS8 agent goal (post-P2)</td><td><code>creative.generateImage</code> drafts → all land as <code>private</code> assets + approvals inbox</td><td class="mono">P4-adjacent</td></tr>
+        </tbody>
+      </table></div>
+    </section>
+
+    <!-- ================= 11 TRUST & SECURITY ================= -->
+    <section class="part" id="p11">
+      <div class="part-head"><span class="part-num">§11</span><h2>Trust &amp; Security</h2></div>
+      <p class="dek">Nothing new to invent — every control reuses an existing platform mechanism, applied to GPU keys, generative pixels, and their license provenance.</p>
+      <div class="cols">
+        <div class="card"><span class="k">Key custody</span><p>GPU/model provider keys (RunPod, fal, Replicate, BFL, Veo, Kling): render gateway env → OpenBao target-state; never in platform-nest, platform-ui, or n8n. Storage access: per-job signed URLs only. imgproxy signing key: imgproxy + platform-nest env.</p></div>
+        <div class="card"><span class="k">RLS</span><p>All <code>creative_*</code> tenant tables: FORCE-RLS, third-wall predicate, fail-closed empty-set semantics. <code>creative_assets</code> policy upgraded in the same migration (D-3). The single exemption is <code>creative_workflows</code> (global, admin-write-only — D-4).</p></div>
+        <div class="card"><span class="k">Cerbos resources</span><p><code>resource_creative_asset</code> (read/write/set_rights/submit_reuse/approve_reuse/revoke_reuse), <code>resource_creative_render_job</code> (read/submit/submit_video/submit_premium/cancel), <code>resource_creative_scope</code>, <code>resource_creative_ledger</code>, <code>resource_creative_workflow</code> (platform-admin only).</p></div>
+        <div class="card"><span class="k">License wall (structural)</span><p>Router filters routes below the job's license floor; callback stamps the actual models used; asset <code>license_class</code> = weakest of the derivation chain; <code>approve_reuse</code> and deliverable paths refuse any chain element ∉ {commercial, licensed}. No admin override exists.</p></div>
+        <div class="card"><span class="k">Money safety</span><p>Single dispatch choke point (scope → license → estimate/approval → MTD caps per cost class → advisory-lock → dispatch → true-up); one-shot approvalId with payload-hash match; no cross-backend failover after compute starts; daily <code>cr-ledger-guard</code> as the independent watchdog.</p></div>
+        <div class="card"><span class="k">Egress control + privacy</span><p>DialContext-enforced allowlist of backend hosts; per-job egress audit (tenant/client hashes, backend, bytes); opaque job ids in anything a provider sees; <code>allow_cloud_gpu:false</code> scope pins a client to self-host routes (OQ-5).</p></div>
+        <div class="card"><span class="k">Untrusted compute</span><p>Outputs from any backend are size-capped, content-type-validated, and re-encoded on ingest; workflow definition hash verified before execution; callback token is per-job and single-purpose.</p></div>
+        <div class="card"><span class="k">Audit</span><p>Ledger row per dispatch, Cerbos decision audit, hub JSONL for every MCP call, approvals decisions, egress audit lines — nothing new to invent.</p></div>
+      </div>
+      <div class="wrap">
+        <p>Module permissions declared in the contract: <code>creative:asset:read|write</code>, <code>creative:asset:approve_reuse</code>, <code>creative:render:submit</code>, <code>creative:render:video</code>, <code>creative:render:premium</code>, <code>creative:scope:write</code>, <code>creative:ledger:read</code>, <code>creative:provider:admin</code>, <code>creative:workflow:admin</code>.</p>
+      </div>
+    </section>
+
+    <!-- ================= 12 ROLLOUT & TICKETS ================= -->
+    <section class="part" id="p12">
+      <div class="part-head"><span class="part-num">§12</span><h2>Rollout &amp; Ticket Decomposition</h2></div>
+      <p class="dek">Cost-honest phases — Phase 0 kills the Magnific bleed with zero platform code; P0 contracts → P1 upscale → P2 image generate/edit → P3 DAM + cross-dept supply → P4 video. 27 tickets (CR-00–CR-26), /army-ready.</p>
+      <div class="wrap">
+        <p>Tiers per the agent-army standard; <strong>model = seat default unless flagged</strong>. ⚡ = touches a contract (schema/API/policy/license boundary) → QA gate + architect design-review on the diff. Registration in <code>MODULES.md</code> as <code>creative · 0.0.0 · PLANNED</code> happens on approval of this doc; the first merged ticket flips it to <code>IN PROGRESS</code> + CHANGELOG entry.</p>
+      </div>
+      <div class="phases">
+        <div class="phase"><span class="pn">P0</span><div>
+          <h4>Stop the Magnific bleed (this week — below mobilization threshold, run inline)</h4>
+          <p>CR-00: clarity-upscaler on Replicate spike — team-usable invocation path, preset notes, cost log, a 10-image parity set vs. Magnific output.</p>
+          <p class="meta">GATE → 10 reference images upscaled at ~$0.02/run; parity notes written; team told to stop buying Magnific credits.</p>
+        </div></div>
+        <div class="phase"><span class="pn">P0</span><div>
+          <h4>Contracts</h4>
+          <p>CR-01–05: module migration + third-wall retrofit, ModuleContract + controller move, Cerbos policies, Render Gateway skeleton, config plumbing.</p>
+          <p class="meta">GATE → module registers, RLS proven, gateway echo-loop round-trips end to end.</p>
+        </div></div>
+        <div class="phase gate"><span class="pn">P1</span><div>
+          <h4>Upscale — the Magnific replacement, through the platform</h4>
+          <p>CR-06–11: router + metering choke point, serverless backend driver, job UX-backend, Upscale + Jobs&amp;Usage tabs, notification wiring, parity bake-off.</p>
+          <p class="meta">GATE → per-image platform cost ≤ $0.03; parity notes signed off; Magnific subscription cancellable.</p>
+        </div></div>
+        <div class="phase gate"><span class="pn">P2</span><div>
+          <h4>Image generation + editing</h4>
+          <p>CR-12–16: ComfyUI serverless backend (QA-gated), the two gates (spend + reuse), Generate &amp; Edit canvas, prompt assist, P2 e2e.</p>
+          <p class="meta">GATE → generate → edit → submit-for-reuse → approve (license chain shown) → visible in the shared surface.</p>
+        </div></div>
+        <div class="phase gate"><span class="pn">P3</span><div>
+          <h4>DAM search/tagging + cross-dept supply</h4>
+          <p>CR-17–22: analyze pipeline, DAM search surface, Library UX v2 + Brand Kits, imgproxy sidecar (QA-gated), cross-dept consumption seams, rights-expiry flow + docs.</p>
+          <p class="meta">GATE → a served sibling company's SMM console lists only approved creative assets of its own tenant; expiry fixture auto-revokes correctly.</p>
+        </div></div>
+        <div class="phase gate"><span class="pn">P4</span><div>
+          <h4>Video</h4>
+          <p>CR-23–26: Wan 2.2 video workflows, commercial video-API driver, Video tab UX, full-stack e2e verification.</p>
+          <p class="meta">GATE → scripted e2e green on the live dev stack (upscale → generate → reuse-approve → SMM pulls rendition → video clip → ledger reconciliation); DEV-VERIFIED criteria documented.</p>
+        </div></div>
+      </div>
+      <div class="tablewrap"><table>
+        <thead><tr><th>#</th><th>Ticket</th><th>Tier</th><th>Model</th><th>Phase</th><th>Deps</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">CR-00</td><td>clarity-upscaler on Replicate spike: invocation path + preset notes + cost log + 10-image parity set vs. Magnific</td><td>medior</td><td>default</td><td class="mono">Phase 0</td><td>—</td></tr>
+          <tr><td class="mono">CR-01 ⚡</td><td>Migration <code>0036_module_creative.sql</code>: extend <code>creative_assets</code> + third-wall policy replacement, all §04 tables + seeds, <code>automation_approvals</code> origin widen, dual-mode embedding column</td><td>senior-db</td><td><span class="tag t-warn">opus·medium</span></td><td class="mono">P0</td><td>—</td></tr>
+          <tr><td class="mono">CR-02 ⚡</td><td><code>creative</code> ModuleContract + NestJS module: registry, permissions, guard, uiManifest, <code>CreativeController</code> moved in (legacy path aliased), DAM CRUD, rollup providers</td><td>senior-be</td><td>default</td><td class="mono">P0</td><td>CR-01</td></tr>
+          <tr><td class="mono">CR-03 ⚡</td><td>Cerbos policies × 5 + derived-roles wiring + policy tests + <code>lib/rbac.ts</code> mirror</td><td>medior</td><td>default</td><td class="mono">P0</td><td>CR-02</td></tr>
+          <tr><td class="mono">CR-04 ⚡</td><td><strong>Render Gateway skeleton</strong> (<code>render-gateway-go/</code>): job-envelope contract, jobs/estimate/cancel/health endpoints, callback tokens, lease store, echo backend, egress-allowlist dialer, OTel, compose entry</td><td>senior-be</td><td>default</td><td class="mono">P0</td><td>CR-01</td></tr>
+          <tr><td class="mono">CR-05</td><td>Config plumbing: gateway env (provider keys, allowlist, concurrency caps), platform env (caps per cost class, thresholds), <code>.env.example</code>s</td><td>junior</td><td>default</td><td class="mono">P0</td><td>CR-04</td></tr>
+          <tr><td class="mono">CR-06 ⚡</td><td><strong>Router + metering choke point</strong>: RenderBackend registry, cost-ordered routing, circuit breakers, pre-start-only failover, platform-side stop-loss chain + ledger writes + threshold events</td><td>senior-be</td><td><span class="tag t-warn">opus·medium</span></td><td class="mono">P1</td><td>CR-04</td></tr>
+          <tr><td class="mono">CR-07</td><td>Serverless backend driver (Replicate + fal): clarity-upscaler, Real-ESRGAN, BiRefNet, IC-Light V1 endpoints; per-call cost accounting; CR-00 presets codified</td><td>senior-be</td><td>default</td><td class="mono">P1</td><td>CR-06</td></tr>
+          <tr><td class="mono">CR-08</td><td>Upscale/relight job UX-backend: submit/list/cancel endpoints, version-vs-new-asset semantics, input signed-URL issuance</td><td>medior</td><td>default</td><td class="mono">P1</td><td>CR-06,02</td></tr>
+          <tr><td class="mono">CR-09 ⚡</td><td>Console P1: Upscale tab (submit + sliders + before/after compare) + Jobs &amp; Usage tab + <code>lib/creative.ts</code> BFF types + toolkit groups update</td><td>senior-fe</td><td>default</td><td class="mono">P1</td><td>CR-08,03</td></tr>
+          <tr><td class="mono">CR-10</td><td>Events → notifications wiring (all §09 event types) + flows <code>cr-render-notify</code>, <code>cr-ledger-guard</code>, <code>cr-batch-upscale</code></td><td>junior</td><td>default</td><td class="mono">P1</td><td>CR-08</td></tr>
+          <tr><td class="mono">CR-11</td><td>P1 verification: Magnific-parity bake-off, cost-per-image report, MODULES.md → <code>IN PROGRESS</code> + CHANGELOG</td><td>medior</td><td>default</td><td class="mono">P1</td><td>CR-09,10</td></tr>
+          <tr><td class="mono">CR-12 ⚡</td><td><strong>ComfyUI serverless backend</strong> (RunPod serverless worker template, OQ-4): workflow-JSON execution, model-cache volume strategy, gen/edit/bgremove workflows seeded; <strong>QA gate mandatory</strong> (egress/creds/untrusted-compute ingest)</td><td>senior-integrator</td><td>default · QA gate</td><td class="mono">P2</td><td>CR-06</td></tr>
+          <tr><td class="mono">CR-13 ⚡</td><td><strong>The two gates</strong>: spend-gate WS4 integration + reuse gate (submit/approve/revoke, license-chain verification) + FLUX premium tier (BFL/fal api-engine workflow behind scope + permission)</td><td>senior-be</td><td><span class="tag t-crit">opus·high</span></td><td class="mono">P2</td><td>CR-06,03</td></tr>
+          <tr><td class="mono">CR-14</td><td><strong>Generate &amp; Edit canvas</strong> (v1 form-canvas: prompt + presets + reference image + mask-lite; model picker limited to allowed routes; premium visibly badged)</td><td>senior-fe</td><td>default</td><td class="mono">P2</td><td>CR-09,13</td></tr>
+          <tr><td class="mono">CR-15</td><td>Prompt assist + style/preset library (ai-gateway Hermes; per-brand-kit style snippets)</td><td>medior</td><td>default</td><td class="mono">P2</td><td>CR-14</td></tr>
+          <tr><td class="mono">CR-16</td><td>P2 e2e on the dev stack: generate → edit → submit-for-reuse → approve (license chain shown) → visible in the shared surface</td><td>medior</td><td>default</td><td class="mono">P2</td><td>CR-13,14</td></tr>
+          <tr><td class="mono">CR-17</td><td><strong>Analyze pipeline</strong>: CPU worker backend container (CLIP + BLIP + pHash), <code>analyze-clip-blip@1</code> workflow, ingest-event trigger, dual-mode embedding writes, fail-soft</td><td>medior</td><td>default</td><td class="mono">P3</td><td>CR-06</td></tr>
+          <tr><td class="mono">CR-18</td><td><strong>DAM search surface</strong>: keyword FTS + similar_to + similar_text (CLIP text encoder) + dedup endpoint (checksum → pHash → cosine)</td><td>medior</td><td>default</td><td class="mono">P3</td><td>CR-17</td></tr>
+          <tr><td class="mono">CR-19</td><td>Library UX v2 + Brand Kits tab: filters, rights badges + expiry warnings, similar-to affordance, brand-kit slots editor, thumbnail rendition wiring</td><td>senior-fe</td><td>default</td><td class="mono">P3</td><td>CR-18,20</td></tr>
+          <tr><td class="mono">CR-20 ⚡</td><td><strong>imgproxy sidecar</strong>: compose service, signed expiring URLs, <code>POST /renditions/sign</code> BFF endpoint, per-network crop presets; <strong>QA gate mandatory</strong> (URL forgery, key handling, no open proxy)</td><td>senior-integrator</td><td>default · QA gate</td><td class="mono">P3</td><td>CR-02</td></tr>
+          <tr><td class="mono">CR-21</td><td>Cross-dept consumption seams: approved-only listing endpoint hardening, SMM attach-flow contract note (supersedes SMM-20's ledger booking per D-7), BFF rows, <code>deptToolkits</code> cross-links</td><td>medior</td><td>default</td><td class="mono">P3</td><td>CR-13,20</td></tr>
+          <tr><td class="mono">CR-22</td><td><code>cr-rights-expiry</code> flow + revoke path + docs/registration: MODULES.md bump, CHANGELOG, BFF-contract rows, runbook stub</td><td>junior</td><td>default</td><td class="mono">P3</td><td>CR-19</td></tr>
+          <tr><td class="mono">CR-23</td><td><strong>Wan 2.2 video workflows</strong> on serverless GPU: t2v/i2v/flf2v + RIFE/Real-ESRGAN post-pipeline, duration/resolution preflight estimator, video storage + Drive mirror</td><td>senior-integrator</td><td>default</td><td class="mono">P4</td><td>CR-12</td></tr>
+          <tr><td class="mono">CR-24</td><td><strong>Commercial video API driver</strong> (video-api via fal/Replicate: Veo + Kling/Runway, vendor bake-off in-ticket): per-clip approval above threshold, monthly envelope enforcement</td><td>senior-be</td><td>default</td><td class="mono">P4</td><td>CR-13,23</td></tr>
+          <tr><td class="mono">CR-25</td><td><strong>Video tab UX</strong>: t2v/i2v/flf2v submit forms, clip review player, version/master handling, premium badging, per-clip approval states</td><td>senior-fe</td><td>default</td><td class="mono">P4</td><td>CR-23,24</td></tr>
+          <tr><td class="mono">CR-26</td><td>P4 e2e + full-stack verification (upscale → generate → reuse-approve → SMM pulls rendition → video clip → ledger reconciliation) + Playwright suite + DEV-VERIFIED criteria</td><td>medior</td><td>default</td><td class="mono">P4</td><td>all</td></tr>
+        </tbody>
+      </table></div>
+      <div class="note"><span class="k">Count by tier (27 tickets CR-00–CR-26)</span>senior-db 1 (CR-01) · senior-be 6 (CR-02, 04, 06, 07, 13, 24) · senior-fe 4 (CR-09, 14, 19, 25) · senior-integrator 3 (CR-12, 20, 23) · medior 10 (CR-00, 03, 08, 11, 15, 16, 17, 18, 21, 26) · junior 3 (CR-05, 10, 22). <strong>Opus flags: 3</strong> — CR-01 (medium, RLS retrofit on a live shipped table), CR-06 (medium, money-safety concurrency across two services), CR-13 (high, the authz-critical approve-execute-replay surface plus the license wall). <strong>QA gates:</strong> CR-01 (RLS), CR-06 (money), CR-12 (egress/untrusted compute), CR-13 (authz/license), CR-20 (signed URLs). Concurrency: respect the 1–2 agent cap; safe early pairs are (CR-03 ∥ CR-04) and (CR-07 ∥ CR-08); CR-06 and CR-13 must each run alone (they define the spines everything after consumes). CR-00 is below the mobilization threshold — run it inline, not via /army.</div>
+    </section>
+
+    <!-- ================= 13 OPEN QUESTIONS ================= -->
+    <section class="part" id="p13">
+      <div class="part-head"><span class="part-num">§13</span><h2>Open Questions</h2></div>
+      <p class="dek">Owner decisions — none block P0/P1; several are decided in-ticket at the phase that needs them.</p>
+      <div class="tablewrap"><table>
+        <thead><tr><th>#</th><th>Question</th><th>Blocks</th><th>Default if unanswered</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">OQ-1</td><td><strong>FLUX license procurement</strong>: buy BFL's self-serve commercial license (agency tier, ~3 clients then per-client fees, quote-gated) vs. hosted-API-only (license bundled per call)?</td><td>Nothing structural (premium tier ships API-first either way)</td><td><strong>Hosted API only</strong>; revisit when FLUX volume makes per-call pricing worse than the license</td></tr>
+          <tr><td class="mono">OQ-2</td><td><strong>Owned-GPU tripwire</strong>: at what sustained spend does a 24 GB box get bought? Proposed: serverless+rented GPU spend &gt; $250/mo for 3 consecutive months, OR a data-residency client lands (OQ-5)</td><td>Nothing in v1 (posture locked serverless-first)</td><td>Adopt the proposed tripwire; ledger rollups make it measurable</td></tr>
+          <tr><td class="mono">OQ-3</td><td><strong>Video-API vendor pick</strong> + envelope split inside the locked $100–300/mo (Veo for audio vs. Kling/Runway for hero)</td><td class="mono">CR-24</td><td>Bake-off at CR-24; Veo weighted for synced audio per the lock</td></tr>
+          <tr><td class="mono">OQ-4</td><td><strong>ComfyUI serverless hosting template</strong>: custom worker image vs. community RunPod template; model-cache volume strategy</td><td class="mono">CR-12</td><td>Custom slim image + network-volume model cache (reproducibility over convenience)</td></tr>
+          <tr><td class="mono">OQ-5</td><td><strong>Confidential-client tier</strong>: is <code>allow_cloud_gpu:false</code> needed for a real client in v1, pulling the rented dedicated ComfyUI box forward?</td><td>Backend priority order only</td><td>Ship the scope flag; activate the dedicated box only when such a client exists</td></tr>
+          <tr><td class="mono">OQ-6</td><td><strong>Canvas depth</strong>: embed InvokeAI's Apache-2.0 layered canvas vs. keep growing our own form-canvas (miniPaint/Filerobot MIT base)?</td><td>Post-P2 editor depth only</td><td>Own-canvas path (matches the "own the UI, engine behind BFF" doctrine); prototype InvokeAI embed only if editors hit a wall</td></tr>
+          <tr><td class="mono">OQ-7</td><td><strong>pgvector extension in the platform DB images</strong> (dual-mode fallback keeps plain-PG tests green) — shared decision with SEO OQ-8</td><td class="mono">CR-01/17 vector mode</td><td>Add to dev/VPS images</td></tr>
+          <tr><td class="mono">OQ-8</td><td><strong>Counsel memo</strong>: AGPL posture for clarity-upscaler (internal-use tool, outputs delivered), GPL arm's-length for ComfyUI, and the §06 quarantine list sign-off</td><td>Client-facing output at scale (build proceeds)</td><td>Proceed on the documented arm's-length/internal-use posture; get sign-off before P2 client volume</td></tr>
+        </tbody>
+      </table></div>
+    </section>
+
+    <!-- ================= 14 DECISION LOG ================= -->
+    <section class="part" id="p14">
+      <div class="part-head"><span class="part-num">§14</span><h2>Decision Log</h2></div>
+      <p class="dek">Four decisions were locked upstream by the owner; this design adds thirteen more, none of which overturn the lock.</p>
+      <div class="wrap">
+        <div class="note"><span class="k">Locked upstream (foundation DECISIONS block, 2026-07-23 — not relitigated here)</span>Serverless/rent-by-second GPU first, owned box later · hybrid image licensing (commercial-clean default, FLUX behind an explicit paid opt-in tier) · hybrid video (Wan 2.2 OSS on rented GPU + $100–300/mo commercial-API budget for Veo/Kling/Runway) · build-light DAM on our own stack.</div>
+      </div>
+      <div class="tablewrap"><table>
+        <thead><tr><th>#</th><th>Decision</th><th>Why</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">D-1</td><td>Render Gateway = <strong>separate Go service</strong> (<code>render-gateway-go</code>); platform-nest owns job state; gateway owns GPU keys and holds no tenant data at rest</td><td>Key-custody isolation (the ai-gateway rule applied to GPUs), egress enforcement at the dialer, independent lifecycle for minutes-long jobs</td></tr>
+          <tr><td class="mono">D-2</td><td>Dispatch = nest→gateway HTTP + idempotent callback + lease/reconciler; bytes via per-job signed URLs; <strong>no new queue infra</strong> (Redis for leases only)</td><td>Reuses proven patterns; avoids a second durable-queue system before Temporal exists</td></tr>
+          <tr><td class="mono">D-3</td><td><code>creative_assets</code> is <strong>extended in place</strong> and upgraded to the third wall; <code>CreativeController</code> moves into the module with the legacy path preserved as an alias</td><td>One asset table (no DAM/studio split-brain); shipped studio + trainer contracts unbroken</td></tr>
+          <tr><td class="mono">D-4</td><td>Module key <code>creative</code>, tables <code>creative_*</code>, hr-style controller path + third-wall RLS; <strong>sole no-RLS table = <code>creative_workflows</code></strong></td><td>Newest-vertical conventions; license source of truth must not fork per tenant</td></tr>
+          <tr><td class="mono">D-5</td><td><strong>License wall is structural</strong>: workflow manifests → gateway license stamp → asset <code>license_class</code> = weakest of the chain → reuse/deliverable paths refuse chains ∉ {commercial, licensed}; no override flag exists</td><td>The one legal exposure that can't be walked back after delivery; policy would drift, structure won't</td></tr>
+          <tr><td class="mono">D-6</td><td><strong>Two-gate model</strong>: spend gate (stop-loss chain + WS4 one-shot approval) + reuse gate (human WS4 approval verifying the license chain)</td><td>Generative spend and generative publication are different risks; one gate would either rubber-stamp money or approval-fatigue the studio</td></tr>
+          <tr><td class="mono">D-7</td><td><strong>One render ledger platform-wide</strong>: sibling-module requests book once with <code>requester_module</code> + client attribution — refines SMM D-9 (flagged §01, for owner awareness)</td><td>A dollar of GPU must exist exactly once in metering; billing rollups depend on it</td></tr>
+          <tr><td class="mono">D-8</td><td>Renditions = <strong>stateless signed imgproxy URLs</strong>, no rendition rows; video derivatives are asset versions; preset crops are code-level constants</td><td>The whole point of imgproxy is no materialized rendition state; rows would rot</td></tr>
+          <tr><td class="mono">D-9</td><td>CLIP/BLIP/pHash run as <strong><code>analyze</code> render jobs on a CPU worker backend</strong> through the same gateway; embeddings are a dual-mode operational column; gateway <code>/embed</code> is never used for asset search</td><td>Uniform job plumbing, ~$0 cost, fail-soft ingest; avoids the cross-modal embedding-space mismatch pitfall</td></tr>
+          <tr><td class="mono">D-10</td><td>Console = Creatives dept, two craft groups: Studio (Image Studio · Generate &amp; Edit · Upscale · Video) + Library (Assets · Brand Kits · Jobs &amp; Usage)</td><td>Dept-template doctrine; production vs. supply is the natural split</td></tr>
+          <tr><td class="mono">D-11</td><td>Video routing per the lock: Wan 2.2 serverless default; commercial API only inside the monthly envelope with per-clip approval above threshold; premium video = scope opt-in like FLUX</td><td>Cost class is 10–50× image; the envelope is the owner's stated budget</td></tr>
+          <tr><td class="mono">D-12</td><td>Cross-dept consumption = <strong>approved-only module endpoints + signed renditions</strong>; consumers never read <code>creative_*</code> tables</td><td>Module boundary enforced by the DB, not convention; rights gating is one choke point</td></tr>
+          <tr><td class="mono">D-13</td><td>Migration block assumption <strong>0036+</strong> (0034/0035 drawn by search); CR-01 takes next-unused at merge time, coordinating with SMM-01</td><td>Ledger truth as of 2026-07-23; the migrations README's rule handles the race</td></tr>
+        </tbody>
+      </table></div>
+    </section>
+
+    <!-- ================= GLOSSARY ================= -->
+    <section class="part" id="gloss">
+      <div class="part-head"><span class="part-num">§15</span><h2>Glossary</h2></div>
+      <div class="wrap">
+        <div class="tablewrap"><table>
+          <thead><tr><th>Term</th><th>Meaning</th></tr></thead>
+          <tbody>
+            <tr><td class="mono">Creative Render Gateway</td><td>The Go service (<code>render-gateway-go</code>) that holds all GPU/model provider keys and executes render jobs; the mirror of ai-gateway-go for diffusion/video workloads</td></tr>
+            <tr><td class="mono">RenderBackend</td><td>A capability-based driver interface (serverless / self-host ComfyUI / commercial API) the gateway's router selects between per job, filtered by capability + license class + cost cap + scope + health</td></tr>
+            <tr><td class="mono">License class</td><td>One of <code>commercial</code>, <code>licensed</code>, or <code>noncommercial</code> — computed for an asset as the weakest link of its full derivation chain; drives the router's license floor and the reuse gate</td></tr>
+            <tr><td class="mono">Render job</td><td>A <code>creative_render_jobs</code> row — the RLS-scoped, state-machine-authoritative unit of GPU work, from creation through dispatch, execution, and callback</td></tr>
+            <tr><td class="mono">Spend gate</td><td>The pre-dispatch stop-loss chain (scope → license → estimate/threshold → per-cost-class MTD caps → advisory-lock) that refuses a job before GPU money is spent</td></tr>
+            <tr><td class="mono">Reuse gate</td><td>The human WS4 approval that promotes a private asset to cross-department / client-deliverable visibility, verifying every element of its license chain</td></tr>
+            <tr><td class="mono">creative_workflows</td><td>The global, no-RLS, admin-write-only table of versioned ComfyUI workflow JSON + model license manifests — the single source of license truth</td></tr>
+            <tr><td class="mono">Third-wall RLS</td><td>FORCE-RLS predicate combining tenant scope with per-module enablement, per the hr-migration convention</td></tr>
+            <tr><td class="mono">DAM</td><td>Digital Asset Management — here, the extended <code>creative_assets</code> domain (versions, collections, brand kits, rights, provenance, CLIP/BLIP search) rather than an adopted external product</td></tr>
+            <tr><td class="mono">imgproxy</td><td>The stateless, signed-URL rendition sidecar (MIT, Go/libvips) serving on-the-fly thumbnails/crops straight off storage — no materialized rendition rows</td></tr>
+            <tr><td class="mono">Analyze job</td><td>A render job of capability <code>analyze</code> running CLIP ViT-B/32 + BLIP-base on a cheap CPU worker backend, for embeddings/captions/tags — never via the LLM gateway's <code>/embed</code></td></tr>
+            <tr><td class="mono">Requester module</td><td>The attribution field on a render job/ledger row identifying which department (creative/social/search/webdesk/agent/automation) asked for the GPU spend, so it books exactly once</td></tr>
+          </tbody>
+        </table></div>
+      </div>
+    </section>
+
+    <footer>
+      <p><strong>GAIADA Creative — Engineering Blueprint v1.0</strong></p>
+      <p class="mono">Status: Design blueprint · Expansion Planned · Studio Prototyped (v0.0.0) · 2026-07-23 · Creative Dept · Platform · Classification: Internal<br/>
+      Architecture conforms to the 4 locked foundation decisions (GPU posture, image/video licensing hybrids, build-light DAM). Feeds /army decomposition (§12). Not a commitment of dates. Cross-references: <code>docs/blueprints/creative-design.md</code> · <code>docs/blueprints/creative-foundation.md</code> · <code>docs/blueprints/seo-sem-design.md</code> · <code>docs/blueprints/smm-design.md</code> · <code>docs/modules/MODULES.md</code> · <code>docs/FRONTEND-BFF-CONTRACT.md</code>.</p>
+    </footer>
+  </main>
+</div>
+
+<div class="themehint">print-ready · A4 / Letter</div>
+
+<script>
+  (function(){
+    var links = Array.prototype.slice.call(document.querySelectorAll('.toc a'));
+    var map = {};
+    links.forEach(function(a){ var id=a.getAttribute('href').slice(1); map[id]=a; });
+    var secs = Array.prototype.slice.call(document.querySelectorAll('.part'));
+    if(!('IntersectionObserver' in window)) return;
+    var obs = new IntersectionObserver(function(entries){
+      entries.forEach(function(e){
+        if(e.isIntersecting){
+          links.forEach(function(l){l.classList.remove('active');});
+          var a = map[e.target.id]; if(a) a.classList.add('active');
+        }
+      });
+    }, {rootMargin:'-10% 0px -80% 0px', threshold:0});
+    secs.forEach(function(s){ obs.observe(s); });
+  })();
+</script>

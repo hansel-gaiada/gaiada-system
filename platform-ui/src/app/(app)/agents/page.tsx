@@ -2,15 +2,20 @@ import { redirect } from "next/navigation";
 import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
-import { getSystemStatus, getAgentGoals } from "@/lib/admin";
+import { getSystemStatus, getAgentGoals, agentOptions } from "@/lib/admin";
+import { isElevated } from "@/lib/rbac";
 import { PageHeader } from "@/components/PageHeader";
-import { Card, HairlineTable, StatusBadge } from "@/components/ui";
+import { Card } from "@/components/ui";
 import { StatusCard } from "@/components/systems/StatusCard";
 import { EmptyNote } from "@/components/systems/EmptyNote";
+import { GoalsTable } from "./GoalsTable";
+import { AgentTriggerCard } from "./AgentTriggerCard";
 
 // Agents are tenant-scoped — the supervisor orchestrator runs a per-tenant
 // goal tree (blackboard, cycle guard, per-goal budget), so the console shows
-// the active company's goals only.
+// the active company's goals only. B4 (doc §3.4): real status probe now that
+// the agent-runner exists, an elevated-gated trigger card, and a goals table
+// that links into per-goal detail + polls while anything is in flight.
 export default async function AgentsPage() {
   const userId = await getSessionUserId();
   if (!userId) redirect("/login");
@@ -23,6 +28,8 @@ export default async function AgentsPage() {
     tenant ? getAgentGoals(userId, tenant) : Promise.resolve([]),
   ]);
 
+  const elevated = isElevated(me);
+
   return (
     <>
       <PageHeader
@@ -33,27 +40,25 @@ export default async function AgentsPage() {
 
       <StatusCard status={status} />
 
-      <div style={{ marginTop: 20 }}>
-        <Card title="Goals">
-          {goals.length > 0 ? (
-            <HairlineTable
-              columns={[{ label: "Goal" }, { label: "Status" }, { label: "Budget" }, { label: "Fan-out" }]}
-              rows={goals.map((g) => [
-                g.goal,
-                <StatusBadge key={`${g.id}-status`} label={g.status} />,
-                `${g.budgetSpent ?? 0} / ${g.budgetTotal ?? "—"}`,
-                g.fanOut ?? "—",
-              ])}
-            />
-          ) : (
-            <EmptyNote>Agent goals appear once the agents admin API is connected.</EmptyNote>
-          )}
-        </Card>
-      </div>
+      {elevated && (
+        <div style={{ marginTop: 20 }}>
+          <Card title="Trigger a goal">
+            {tenant ? (
+              <AgentTriggerCard agentOptions={agentOptions(status)} />
+            ) : (
+              <EmptyNote>Select a company to trigger an agent goal.</EmptyNote>
+            )}
+          </Card>
+        </div>
+      )}
 
       <div style={{ marginTop: 20 }}>
-        <Card title="Run history">
-          <EmptyNote>Run history and blackboard inspection arrive with the agents admin API.</EmptyNote>
+        <Card title="Goals">
+          {tenant ? (
+            <GoalsTable initialGoals={goals} />
+          ) : (
+            <EmptyNote>Select a company to see its agent goals.</EmptyNote>
+          )}
         </Card>
       </div>
     </>

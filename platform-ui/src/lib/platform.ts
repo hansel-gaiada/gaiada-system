@@ -1,7 +1,9 @@
 import "server-only";
 // The ONLY backend this UI talks to. Server-side only — tokens never reach the browser.
 export class PlatformError extends Error {
-  constructor(public status: number, message: string) { super(message); }
+  // `field` is additive (bot admin proxy 400s as {error, field} per doc §2.3/2.4) —
+  // undefined for every existing caller that never sends it.
+  constructor(public status: number, message: string, public field?: string) { super(message); }
 }
 
 export async function platformFetch<T>(path: string, userId: string, init: RequestInit = {}): Promise<T> {
@@ -12,7 +14,8 @@ export async function platformFetch<T>(path: string, userId: string, init: Reque
     const body = typeof init.body === "string" ? init.body : undefined;
     const { status, json } = getDemoResponse(init.method ?? "GET", path, userId, body);
     if (status < 200 || status >= 300) {
-      throw new PlatformError(status, (json as { error?: string })?.error ?? `platform ${status}`);
+      const body = json as { error?: string; field?: string };
+      throw new PlatformError(status, body?.error ?? `platform ${status}`, body?.field);
     }
     return json as T;
   }
@@ -52,8 +55,13 @@ export async function platformFetch<T>(path: string, userId: string, init: Reque
   });
   if (!res.ok) {
     let msg = `platform ${res.status}`;
-    try { msg = ((await res.json()) as { error?: string }).error ?? msg; } catch { /* keep default */ }
-    throw new PlatformError(res.status, msg);
+    let field: string | undefined;
+    try {
+      const body = (await res.json()) as { error?: string; field?: string };
+      msg = body.error ?? msg;
+      field = body.field;
+    } catch { /* keep default */ }
+    throw new PlatformError(res.status, msg, field);
   }
   return (await res.json()) as T;
 }

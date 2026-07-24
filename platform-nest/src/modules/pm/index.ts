@@ -6,7 +6,10 @@ import type { ModuleContract } from "../contract";
 
 export const pmModule: ModuleContract = {
   key: "pm",
-  migrations: ["0018_pm.sql"],
+  migrations: [
+    "0018_pm.sql", "0036_pm_tags.sql", "0037_pm_task_custom_fields.sql", "0038_pm_project_statuses.sql",
+    "0039_pm_task_recurrence.sql", "0040_pm_progress_snapshots.sql",
+  ],
   permissions: [
     { key: "pm:task:read", description: "View project tasks" },
     { key: "pm:task:create", description: "Create project tasks" },

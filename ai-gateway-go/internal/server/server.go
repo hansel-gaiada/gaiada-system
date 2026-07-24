@@ -55,6 +55,18 @@ func tenantOf(r *http.Request) string {
 
 func strPtr(s string) *string { return &s }
 
+// providerTimeout resolves the per-attempt provider budget (B5: gateway reliability).
+// cfg.ProviderTimeoutMs<=0 (unset — e.g. a test-constructed config.Config{} that didn't go
+// through config.Load()) falls back to the same 60s default Load() uses, so a missing/zero
+// value never collapses into an instantly-expired context.WithTimeout.
+func providerTimeout(cfg config.Config) time.Duration {
+	ms := cfg.ProviderTimeoutMs
+	if ms <= 0 {
+		ms = 60_000
+	}
+	return time.Duration(ms) * time.Millisecond
+}
+
 // classifierReachable does a short benign classify to report a health signal, guarded by
 // its own short timeout so a slow/hung classifier never blocks /health.
 func classifierReachable(classifier *dlp.Classifier) bool {
@@ -178,11 +190,17 @@ func NewServer(cfg config.Config, chains Chains, b *budget.Budget, classifier *d
 				return
 			}
 		}
-		text, provider, err := chain.Run(chains.LLM, r.Context(), func(p providers.Provider) (string, error) {
-			return p.Complete(context.Background(), result.Clean)
+		text, provider, taxonomy, err := chain.Run(chains.LLM, r.Context(), func(p providers.Provider) (string, error) {
+			// Fresh per-attempt timeout derived from r.Context(), NOT a single deadline shared
+			// across the whole failover chain: a hung provider costs at most one
+			// PROVIDER_TIMEOUT_MS before failing over, and a client disconnect (r.Context()
+			// canceled) still cancels the in-flight upstream call immediately (B5).
+			ctx, cancel := context.WithTimeout(r.Context(), providerTimeout(cfg))
+			defer cancel()
+			return p.Complete(ctx, result.Clean)
 		})
 		if err != nil {
-			emit(r.Context(), audit.EgressAudit{TS: started.UnixMilli(), Capability: "llm", OK: false, Blocked: "provider", Redactions: len(result.Redactions), LatencyMs: time.Since(started).Milliseconds()})
+			emit(r.Context(), audit.EgressAudit{TS: started.UnixMilli(), Capability: "llm", OK: false, Blocked: taxonomy, Redactions: len(result.Redactions), LatencyMs: time.Since(started).Milliseconds()})
 			writeErr(w, 502, err.Error())
 			return
 		}
@@ -214,11 +232,13 @@ func NewServer(cfg config.Config, chains Chains, b *budget.Budget, classifier *d
 			writeErr(w, 429, scope+" daily budget exceeded — degraded until tomorrow")
 			return
 		}
-		text, provider, err := chain.Run(chains.Media, r.Context(), func(p providers.Provider) (string, error) {
-			return p.Media(context.Background(), body.Base64, body.Mime)
+		text, provider, taxonomy, err := chain.Run(chains.Media, r.Context(), func(p providers.Provider) (string, error) {
+			ctx, cancel := context.WithTimeout(r.Context(), providerTimeout(cfg))
+			defer cancel()
+			return p.Media(ctx, body.Base64, body.Mime)
 		})
 		if err != nil {
-			emit(r.Context(), audit.EgressAudit{TS: started.UnixMilli(), Capability: "media", OK: false, Blocked: "provider", LatencyMs: time.Since(started).Milliseconds()})
+			emit(r.Context(), audit.EgressAudit{TS: started.UnixMilli(), Capability: "media", OK: false, Blocked: taxonomy, LatencyMs: time.Since(started).Milliseconds()})
 			writeErr(w, 502, err.Error())
 			return
 		}
@@ -259,11 +279,13 @@ func NewServer(cfg config.Config, chains Chains, b *budget.Budget, classifier *d
 			writeErr(w, 503, err.Error())
 			return
 		}
-		embedding, provider, err := chain.Run(chains.Embed, r.Context(), func(p providers.Provider) ([]float64, error) {
-			return p.Embed(context.Background(), result.Clean)
+		embedding, provider, taxonomy, err := chain.Run(chains.Embed, r.Context(), func(p providers.Provider) ([]float64, error) {
+			ctx, cancel := context.WithTimeout(r.Context(), providerTimeout(cfg))
+			defer cancel()
+			return p.Embed(ctx, result.Clean)
 		})
 		if err != nil {
-			emit(r.Context(), audit.EgressAudit{TS: started.UnixMilli(), Capability: "embed", OK: false, Blocked: "provider", Redactions: len(result.Redactions), LatencyMs: time.Since(started).Milliseconds()})
+			emit(r.Context(), audit.EgressAudit{TS: started.UnixMilli(), Capability: "embed", OK: false, Blocked: taxonomy, Redactions: len(result.Redactions), LatencyMs: time.Since(started).Milliseconds()})
 			writeErr(w, 502, err.Error())
 			return
 		}
@@ -313,16 +335,21 @@ func NewServer(cfg config.Config, chains Chains, b *budget.Budget, classifier *d
 				flusher.Flush()
 			}
 		}
+		// Unlike Complete/Media/Embed, streaming deliberately does NOT wrap each attempt in a
+		// PROVIDER_TIMEOUT_MS deadline (B5 design doc §3.5): a legitimately long streamed
+		// response can exceed that single-call budget, and the SSE flush loop above is
+		// itself the liveness signal. r.Context() still propagates so a client disconnect
+		// cancels the in-flight upstream call.
 		streamed := false
-		text, _, err := chain.Run(chains.LLM, r.Context(), func(p providers.Provider) (string, error) {
+		text, _, _, err := chain.Run(chains.LLM, r.Context(), func(p providers.Provider) (string, error) {
 			if sp, isStreaming := p.(providers.StreamingProvider); isStreaming {
-				if serr := sp.CompleteStream(context.Background(), result.Clean, emit); serr != nil {
+				if serr := sp.CompleteStream(r.Context(), result.Clean, emit); serr != nil {
 					return "", serr
 				}
 				streamed = true
 				return "", nil
 			}
-			return p.Complete(context.Background(), result.Clean)
+			return p.Complete(r.Context(), result.Clean)
 		})
 		if err != nil {
 			fmt.Fprintf(w, "event: error\ndata: %s\n\n", err.Error())

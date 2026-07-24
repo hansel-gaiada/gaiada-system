@@ -43,6 +43,18 @@
   .dept-shell__rail { position: static; }
 }
 
+/* Full-bleed tabs (Projects/Board/Timeline, P1-01): structurally wide surfaces
+   render with no rail at all — not a 1-col collapse of the 2-col grid, the
+   rail is simply not mounted (see DeptShellFrame). Widen the page's own
+   max-width wrapper via :has so these surfaces use the full viewport, same as
+   the narrow-viewport collapse but independent of the user's width pref. */
+.dept-shell--full {
+  display: block;
+}
+.erp-main__inner:has(.dept-shell--full) {
+  max-width: none;
+}
+
 /* ── KPI strip — Active / Due soon / Blocked / Progress (decision #12) ──── */
 .dept-kpi-strip {
   display: grid;

@@ -1,0 +1,378 @@
+import Link from "next/link";
+import { notFound, redirect } from "next/navigation";
+import { getSessionUserId } from "@/lib/session-server";
+import { getMe } from "@/lib/platform";
+import { getActiveTenant } from "@/lib/tenant";
+import { getProject, listComments, listFiles, getFieldDefs } from "@/lib/entities";
+import { postEntityComment, attachFileAction, deleteFileAction } from "@/lib/collabActions";
+import { CommentThread } from "@/components/pm/CommentThread";
+import { Attachments } from "@/components/Attachments";
+import {
+  getPmProject, listPmTasks, listMilestones, listDocs, assignableUnits, listTags,
+  groupByStatus, computeTimeline, openDependencies, resolveTags, parseTagFilterParam,
+  synthDefaultStatuses, isSynthDefaultStatuses, titleWithRecurrenceGlyph,
+  getBurndown, burndownOverlay, timelineFromDates, getFlow, flowSeries, tagBreakdown,
+  projectProgress, isDoneStatus, type PmTask, type Tag, type ProjectStatus,
+} from "@/lib/pm";
+import {
+  moveTask, createPmTask, setProjectOwner, addMilestone, saveDoc,
+  setTaskPriority, reassignResponsible, createTag, updateTag, deleteTag,
+  createStatus, updateStatus, reorderStatuses, deleteStatus,
+} from "@/lib/pmActions";
+import { can } from "@/lib/rbac";
+import { StatusManager } from "@/components/pm/StatusManager";
+import { archiveProject } from "@/app/(app)/projects/actions";
+import { PageHeader } from "@/components/PageHeader";
+import { Card, HairlineTable, StatusBadge } from "@/components/ui";
+import { EmptyNote } from "@/components/systems/EmptyNote";
+import { Board } from "@/components/pm/Board";
+import { Gantt } from "@/components/pm/Gantt";
+import { Charts, type ChartsKpis } from "@/components/pm/Charts";
+import { ProgressBar } from "@/components/pm/ProgressBar";
+import { NewTaskForm } from "@/components/pm/NewTaskForm";
+import { AssigneeEditor } from "@/components/pm/AssigneeEditor";
+import { MilestoneForm } from "@/components/pm/MilestoneForm";
+import { DocEditor } from "@/components/pm/DocEditor";
+import { TagChip } from "@/components/pm/TagChip";
+import { TagManager } from "@/components/pm/TagManager";
+import { DuplicateProject } from "@/components/pm/DuplicateProject";
+import { assigneeColumns, priorityColumns, type BoardSwimlane } from "@/lib/departments";
+import "@/components/pm/pm.css";
+
+// The full project workspace (Board/List/Timeline/Milestones/Docs + owner/
+// progress + attachments/discussion) — extracted out of the standalone
+// `/projects/[projectId]` route (P1-05, design spec §3) so it can be mounted
+// BOTH there and nested inside a department console
+// (`/departments/[deptId]/projects/[projectId]`) with identical behaviour.
+// The caller owns the breadcrumb's first hop (`backHref`/`backLabel`) and any
+// auth/tenant guard around the mount point; this component re-resolves its
+// own userId/tenant (same as every other server-fetched page/component in
+// this app — e.g. the dept layout + its child pages each do this
+// independently) since it isn't handed them as props.
+export type ProjectWorkspaceSearch = { view?: string; swimlane?: string; tags?: string | string[] };
+
+const VIEWS = ["board", "list", "timeline", "charts", "milestones", "docs"] as const;
+type View = (typeof VIEWS)[number];
+
+// The project board only groups by axes that make sense scoped to ONE
+// project — Status (default), Assignee, Priority. Division and the dept
+// "focus" filter are department-scoped concepts (see the dept Board tab,
+// lib/departments.ts) and don't apply inside a single project's workspace.
+type ProjectSwimlane = Extract<BoardSwimlane, "status" | "assignee" | "priority">;
+const SWIMLANES: { value: ProjectSwimlane; label: string }[] = [
+  { value: "status", label: "Status" },
+  { value: "assignee", label: "Assignee" },
+  { value: "priority", label: "Priority" },
+];
+function isSwimlane(v: string | undefined): v is Exclude<ProjectSwimlane, "status"> {
+  return v === "assignee" || v === "priority";
+}
+
+function who(t: PmTask): string {
+  return t.assignee ? (t.assignee.responsibleName || t.assignee.refName) : "Unassigned";
+}
+
+export async function ProjectWorkspaceView({
+  projectId,
+  backHref,
+  backLabel,
+  searchParams,
+}: {
+  projectId: string;
+  backHref: string;
+  backLabel: string;
+  searchParams: ProjectWorkspaceSearch;
+}) {
+  const view: View = (VIEWS as readonly string[]).includes(searchParams.view ?? "") ? (searchParams.view as View) : "board";
+  const swimlane: ProjectSwimlane = isSwimlane(searchParams.swimlane) ? searchParams.swimlane : "status";
+
+  const userId = await getSessionUserId();
+  if (!userId) redirect("/login");
+  const me = await getMe(userId);
+  const tenant = await getActiveTenant(me);
+  if (!tenant) notFound();
+
+  const [pm, base, tasks, milestones, docs, assignable, comments, files, tags, taskCustomFieldDefs] = await Promise.all([
+    getPmProject(userId, tenant, projectId),
+    getProject(userId, tenant, projectId).catch(() => null),
+    listPmTasks(userId, tenant, projectId),
+    listMilestones(userId, tenant, projectId),
+    listDocs(userId, tenant, projectId),
+    assignableUnits(userId, tenant),
+    listComments(userId, tenant, "project", projectId),
+    listFiles(userId, tenant, "project", projectId),
+    listTags(userId, tenant, projectId),
+    getFieldDefs(userId, tenant, "pm_task"),
+  ]);
+  // Burndown overlay (P2-08, design spec §4 phase-2) — only fetched when the Timeline or Charts
+  // tab is actually being rendered, same lazy pattern as everything else view-scoped on this page.
+  const burndownSeries = (view === "timeline" || view === "charts") ? await getBurndown(userId, tenant, projectId) : [];
+  // Cumulative flow (P3-06) — same lazy pattern; getFlow degrades to [] until the sibling BE
+  // ticket P3-05 ships the real /flow endpoint (DEMO_MODE already returns a seeded series).
+  const flowPoints = view === "charts" ? await getFlow(userId, tenant, projectId) : [];
+
+  if (!pm && !base) notFound();
+  // P2-05: this project's workflow statuses (synth legacy 4 when the registry is
+  // empty / the project is base-only). Everything status-shaped below keys off it.
+  const projectStatuses: ProjectStatus[] = pm?.statuses?.length ? [...pm.statuses].sort((a, b) => a.position - b.position) : synthDefaultStatuses();
+  const statusLabelById = new Map(projectStatuses.map((s) => [s.id, s.label]));
+  const statusLabel = (id: string) => statusLabelById.get(id) ?? id;
+  const statusColorById = new Map(projectStatuses.map((s) => [s.id, s.color]));
+  const canManageStatuses = can(me, "pm.manage", tenant);
+  const showStatusColors = !isSynthDefaultStatuses(projectStatuses);
+  const statusUsage: Record<string, number> = {};
+  for (const s of projectStatuses) statusUsage[s.id] = 0;
+  for (const t of tasks) statusUsage[t.status] = (statusUsage[t.status] ?? 0) + 1;
+
+  const taskById = new Map(tasks.map((t) => [t.id, t]));
+  const blockedIds = new Set(tasks.filter((t) => openDependencies(t, taskById, projectStatuses).length > 0).map((t) => t.id));
+  const name = base?.name ?? pm?.name ?? "Project";
+  const status = base?.status ?? pm?.status ?? "active";
+  const progress = pm?.progress ?? 0;
+  const owner = pm?.owner ?? null;
+
+  // Tags (P2-02, design spec §6) — this project's OWN registry, so filtering
+  // is a plain id match (unlike the dept board's cross-project label match).
+  const taskTags: Record<string, Tag[]> = {};
+  for (const t of tasks) taskTags[t.id] = resolveTags(t.tags, tags);
+  const selectedTagIds = parseTagFilterParam(searchParams.tags);
+  const filteredTasks = selectedTagIds.length === 0 ? tasks : tasks.filter((t) => t.tags.some((id) => selectedTagIds.includes(id)));
+
+  // Own path in whichever mount point rendered this component — derivable
+  // from `backHref` without a 4th "self path" prop: the list page's href
+  // plus this project's id, in both the standalone ("/projects" ->
+  // "/projects/{id}") and nested ("/departments/{d}/projects" ->
+  // "/departments/{d}/projects/{id}") cases.
+  const basePath = `${backHref}/${projectId}`;
+
+  // taskHrefBase (P1-06, design spec §5): when this workspace is mounted
+  // in-console (`backHref` starts with `/departments/`), task links from the
+  // Board/Gantt/List views point at the nested task route so navigating to a
+  // task keeps the user in-console; the standalone mount (`backHref="/projects"`)
+  // leaves it undefined so Board/Gantt/List fall back to `/tasks/{id}`.
+  const taskHrefBase = backHref.startsWith("/departments/") ? `${basePath}/tasks` : undefined;
+  const taskHref = (id: string) => (taskHrefBase ? `${taskHrefBase}/${id}` : `/tasks/${id}`);
+
+  const tab = (v: View, label: string) => (
+    <Link href={`${basePath}?view=${v}`} className={`pm-tab${view === v ? " pm-tab--active" : ""}`}>{label}</Link>
+  );
+
+  return (
+    <>
+      <PageHeader
+        eyebrow="Project"
+        title={name}
+        breadcrumbs={[{ label: backLabel, href: backHref }, { label: name }]}
+        actions={
+          <>
+            <Link href={`/projects/${projectId}/edit`} className="lux-btn lux-btn--ghost lux-btn--sm">Edit</Link>
+            <DuplicateProject projectId={projectId} projectName={name} canManage={canManageStatuses} />
+            <form action={archiveProject.bind(null, projectId)}><button type="submit" className="lux-btn lux-btn--ghost lux-btn--sm">Archive</button></form>
+          </>
+        }
+      />
+
+      <div style={{ display: "grid", gap: 16, gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", marginBottom: 18, alignItems: "center" }}>
+        <div><span className="type-eyebrow" style={{ fontSize: 10, opacity: 0.5, display: "block", marginBottom: 6 }}>Status</span><StatusBadge label={status} /></div>
+        <div><span className="type-eyebrow" style={{ fontSize: 10, opacity: 0.5, display: "block", marginBottom: 6 }}>Progress</span><ProgressBar value={progress} /></div>
+        <div>
+          <span className="type-eyebrow" style={{ fontSize: 10, opacity: 0.5, display: "block", marginBottom: 6 }}>Owner</span>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            <span style={{ font: "400 14px var(--font-body)", color: "var(--text-primary)" }}>
+              {owner ? (owner.responsibleName || owner.refName) : "Unassigned"}
+              {owner && owner.kind !== "person" ? ` · ${owner.refName}` : ""}
+            </span>
+            <AssigneeEditor label={owner ? "Reassign" : "Assign owner"} assignable={assignable} current={owner} save={setProjectOwner.bind(null, projectId)} />
+          </div>
+        </div>
+        <div>
+          <span className="type-eyebrow" style={{ fontSize: 10, opacity: 0.5, display: "block", marginBottom: 6 }}>Tags</span>
+          <TagManager tags={tags} create={createTag.bind(null, projectId)} update={updateTag.bind(null, projectId)} remove={deleteTag.bind(null, projectId)} />
+        </div>
+      </div>
+
+      <NewTaskForm assignable={assignable} milestones={milestones} customFieldDefs={taskCustomFieldDefs} create={createPmTask.bind(null, projectId)} />
+
+      <div className="pm-tabs">
+        {tab("board", "Board")}{tab("list", "List")}{tab("timeline", "Timeline")}{tab("charts", "Charts")}{tab("milestones", "Milestones")}{tab("docs", "Docs")}
+      </div>
+
+      {/* Tag filter (P2-02, design spec §6/§9): a bookmarkable GET form, same
+          pattern as the board's own swimlane control. Applies to Board/List/
+          Timeline uniformly (Milestones/Docs aren't task-list views). */}
+      {tags.length > 0 && (
+        <Card style={{ marginBottom: 16 }}>
+          <form className="lux-filters" method="get" aria-label="Filter by tag">
+            <input type="hidden" name="view" value={view} />
+            {swimlane !== "status" && <input type="hidden" name="swimlane" value={swimlane} />}
+            <div className="pm-tagfilter">
+              <span className="pm-tagfilter__label">Tags</span>
+              <div className="pm-tagfilter__options">
+                {tags.map((tg) => (
+                  <label key={tg.id} className="pm-tagfilter__opt">
+                    <input type="checkbox" name="tags" value={tg.id} defaultChecked={selectedTagIds.includes(tg.id)} />
+                    <TagChip label={tg.label} color={tg.color} />
+                  </label>
+                ))}
+              </div>
+            </div>
+            <div className="lux-filters__actions">
+              <button type="submit" className="lux-btn lux-btn--solid lux-btn--sm">Apply</button>
+              {selectedTagIds.length > 0 && (
+                <a href={`${basePath}?view=${view}`} className="lux-btn lux-btn--ghost lux-btn--sm">Reset</a>
+              )}
+            </div>
+          </form>
+        </Card>
+      )}
+
+      {view === "board" && (
+        filteredTasks.length === 0 ? (
+          <Card><EmptyNote>{tasks.length === 0 ? "No tasks yet — create the first one above." : "No tasks match this tag filter."}</EmptyNote></Card>
+        ) : (
+            <>
+              <Card style={{ marginBottom: 16 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>
+                  <form className="lux-filters" method="get" aria-label="Board group-by">
+                    <input type="hidden" name="view" value="board" />
+                    <label className="lux-filters__field">
+                      <span>Group by</span>
+                      <select name="swimlane" defaultValue={swimlane}>
+                        {SWIMLANES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+                      </select>
+                    </label>
+                    <div className="lux-filters__actions">
+                      <button type="submit" className="lux-btn lux-btn--solid lux-btn--sm">Apply</button>
+                      {swimlane !== "status" && (
+                        <a href={`${basePath}?view=board`} className="lux-btn lux-btn--ghost lux-btn--sm">Reset</a>
+                      )}
+                    </div>
+                  </form>
+                  {swimlane === "status" && canManageStatuses && (
+                    <StatusManager
+                      statuses={projectStatuses}
+                      usageCounts={statusUsage}
+                      create={createStatus.bind(null, projectId)}
+                      update={updateStatus.bind(null, projectId)}
+                      reorder={reorderStatuses.bind(null, projectId)}
+                      remove={deleteStatus.bind(null, projectId)}
+                    />
+                  )}
+                </div>
+              </Card>
+              {swimlane === "priority" ? (
+                <Board columns={priorityColumns(filteredTasks)} move={setTaskPriority} blockedIds={blockedIds} taskHrefBase={taskHrefBase} taskTags={taskTags} />
+              ) : swimlane === "assignee" ? (
+                <Board columns={assigneeColumns(filteredTasks)} move={reassignResponsible} blockedIds={blockedIds} taskHrefBase={taskHrefBase} taskTags={taskTags} />
+              ) : (
+                <Board columns={groupByStatus(filteredTasks, projectStatuses)} move={moveTask} colorColumns={showStatusColors} blockedIds={blockedIds} taskHrefBase={taskHrefBase} taskTags={taskTags} />
+              )}
+            </>
+          )
+      )}
+
+      {view === "list" && (
+        <Card>
+          {filteredTasks.length === 0 ? (
+            <EmptyNote>{tasks.length === 0 ? "No tasks yet." : "No tasks match this tag filter."}</EmptyNote>
+          ) : (
+            <HairlineTable
+              columns={[{ label: "Task" }, { label: "Tags" }, { label: "Assignee" }, { label: "Status" }, { label: "Progress" }, { label: "Due", align: "right" }]}
+              rows={filteredTasks.map((t) => [
+                <Link key="t" href={taskHref(t.id)} style={{ color: "var(--text-primary)", textDecoration: "none" }}>{titleWithRecurrenceGlyph(t)}</Link>,
+                taskTags[t.id]?.length ? (
+                  <div key="tg" className="pm-tags-row">
+                    {taskTags[t.id].map((tg) => <TagChip key={tg.id} label={tg.label} color={tg.color} />)}
+                  </div>
+                ) : "—",
+                who(t),
+                <StatusBadge key="s" label={statusLabel(t.status)} />,
+                <ProgressBar key="p" value={t.progress} />,
+                t.dueDate ?? "—",
+              ])}
+              tcols="2fr 1.4fr 1.2fr 1fr 1.2fr 0.8fr"
+            />
+          )}
+        </Card>
+      )}
+
+      {view === "timeline" && (() => {
+        const tl = computeTimeline(filteredTasks);
+        // P2-05 (§5): bar colours from each task's status colour.
+        const barColors: Record<string, string> = {};
+        for (const t of filteredTasks) { const c = statusColorById.get(t.status); if (c) barColors[t.id] = c; }
+        const burndown = tl ? burndownOverlay(tl, burndownSeries) : [];
+        return (
+          <Card>
+            {tl ? <Gantt timeline={tl} taskHrefBase={taskHrefBase} barColors={barColors} burndown={burndown} /> : <EmptyNote>Add start/due dates to tasks to see them on the timeline.</EmptyNote>}
+          </Card>
+        );
+      })()}
+
+      {view === "charts" && (() => {
+        // Unfiltered by the tag-filter control above — same precedent as Milestones/Docs (both
+        // task-shaped views that ignore it too): burndown/flow are whole-project time series the
+        // backend can't slice by tag, so KPIs/tag-breakdown stay on the SAME full `tasks` set for
+        // internal consistency rather than drifting from a tag-filtered subset.
+        const kpis: ChartsKpis = {
+          open: tasks.filter((t) => !isDoneStatus(t.status, projectStatuses)).length,
+          done: tasks.filter((t) => isDoneStatus(t.status, projectStatuses)).length,
+          avgProgress: projectProgress(tasks),
+        };
+        const flow = flowSeries(flowPoints, projectStatuses);
+        const bdTl = burndownSeries.length ? timelineFromDates(burndownSeries[0].date, burndownSeries[burndownSeries.length - 1].date) : null;
+        const bdOverlay = bdTl ? burndownOverlay(bdTl, burndownSeries) : [];
+        const tagRows = tagBreakdown(tasks, tags);
+        return <Charts kpis={kpis} flow={flow} burndownSeries={burndownSeries} burndownOverlay={bdOverlay} tagRows={tagRows} />;
+      })()}
+
+      {view === "milestones" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          <Card><MilestoneForm add={addMilestone.bind(null, projectId)} /></Card>
+          {milestones.length === 0 && <Card><EmptyNote>No milestones yet.</EmptyNote></Card>}
+          {milestones.map((mst) => {
+            const mtasks = tasks.filter((t) => t.milestoneId === mst.id);
+            return (
+              <Card key={mst.id} title={mst.name} headerRight={<span style={{ display: "inline-flex", gap: 10, alignItems: "center" }}><StatusBadge label={mst.status} /><span style={{ font: "400 12px var(--font-body)", color: "var(--erp-ink-50)" }}>{mst.dueDate ?? "—"}</span></span>}>
+                {mtasks.length === 0 ? <EmptyNote>No tasks in this milestone.</EmptyNote> : (
+                  <HairlineTable
+                    columns={[{ label: "Task" }, { label: "Assignee" }, { label: "Status" }, { label: "Progress", align: "right" }]}
+                    rows={mtasks.map((t) => [
+                      <Link key="t" href={taskHref(t.id)} style={{ color: "var(--text-primary)", textDecoration: "none" }}>{titleWithRecurrenceGlyph(t)}</Link>,
+                      who(t),
+                      <StatusBadge key="s" label={statusLabel(t.status)} />,
+                      <ProgressBar key="p" value={t.progress} />,
+                    ])}
+                    tcols="2fr 1.2fr 1fr 1.2fr"
+                  />
+                )}
+              </Card>
+            );
+          })}
+        </div>
+      )}
+
+      {view === "docs" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          <Card title="New doc"><DocEditor save={saveDoc.bind(null, projectId)} /></Card>
+          {docs.length === 0 && <Card><EmptyNote>No docs yet.</EmptyNote></Card>}
+          {docs.map((d) => (
+            <Card key={d.id} title={d.title} headerRight={<DocEditor doc={d} save={saveDoc.bind(null, projectId)} />}>
+              <pre style={{ margin: 0, whiteSpace: "pre-wrap", font: "400 13px/1.6 var(--font-body)", color: "var(--text-primary)" }}>{d.body}</pre>
+              <p style={{ margin: "10px 0 0", font: "400 11px var(--font-body)", color: "var(--erp-ink-50)" }}>{d.author ? `${d.author} · ` : ""}{d.updatedAt ? new Date(d.updatedAt).toLocaleDateString("en-GB") : ""}</p>
+            </Card>
+          ))}
+        </div>
+      )}
+
+      <div style={{ marginTop: 24, display: "grid", gap: 20, gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))" }}>
+        <Card title={`Attachments${files.length ? ` · ${files.length}` : ""}`}>
+          <Attachments files={files} canEdit={true} attach={attachFileAction.bind(null, "project", projectId)} remove={deleteFileAction.bind(null, "project", projectId)} />
+        </Card>
+        <Card title="Discussion">
+          <CommentThread comments={comments} post={postEntityComment.bind(null, "project", projectId)} />
+        </Card>
+      </div>
+    </>
+  );
+}

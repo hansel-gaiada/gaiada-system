@@ -32,12 +32,13 @@ func buildChain(names []string, cfg config.Config, client *http.Client) *chain.C
 	registry := map[string]providers.Provider{
 		"whisper": providers.NewWhisperProvider(cfg.WhisperURL, cfg.WhisperModel, client),
 		"ollama":  providers.NewOllamaProvider(cfg.OllamaURL, cfg.OllamaModel, cfg.OllamaEmbedModel, client),
+		"openai":  providers.NewOpenAIProvider(cfg.OpenAIBaseURL, cfg.OpenAIAPIKey, cfg.OpenAIModel, cfg.OpenAIVisionModel, cfg.OpenAIMaxTokens, client),
 		"gemini":  providers.NewGeminiProvider(cfg.GeminiAPIKey, cfg.GeminiModel, client),
 		"claude":  providers.NewClaudeProvider(cfg.AnthropicAPIKey, cfg.AnthropicModel, client),
 	}
 	list := []providers.Provider{}
 	for _, n := range names {
-		if cfg.TopologyMode == "site" && (n == "gemini" || n == "claude") {
+		if cfg.TopologyMode == "site" && (n == "gemini" || n == "claude" || n == "openai") {
 			continue // site mode never holds cloud keys — forward instead (spec §4)
 		}
 		if p, ok := registry[n]; ok {

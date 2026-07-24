@@ -58,6 +58,9 @@ func (p *GeminiProvider) generate(ctx context.Context, model string, parts []gem
 		return "", err
 	}
 	defer res.Body.Close()
+	if res.StatusCode == http.StatusTooManyRequests {
+		return "", newRateLimitError(res)
+	}
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
 		return "", fmt.Errorf("gemini %d", res.StatusCode)
 	}
@@ -128,6 +131,9 @@ func (p *GeminiProvider) Embed(ctx context.Context, text string) ([]float64, err
 		return nil, err
 	}
 	defer res.Body.Close()
+	if res.StatusCode == http.StatusTooManyRequests {
+		return nil, newRateLimitError(res)
+	}
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
 		return nil, fmt.Errorf("gemini embed %d", res.StatusCode)
 	}

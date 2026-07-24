@@ -11,6 +11,7 @@ import type { FastifyRequest } from "fastify";
 import { config } from "../config";
 import { authorize } from "../core/http";
 import { AuthGuard } from "../auth/guards";
+import { isElevated } from "./elevated";
 
 type SystemKey = "bot" | "gateway" | "hub" | "agents" | "knowledge" | "automation";
 const SYSTEMS: SystemKey[] = ["bot", "gateway", "hub", "agents", "knowledge", "automation"];
@@ -29,14 +30,6 @@ interface ConfigField {
   kind: "text" | "number" | "boolean" | "select" | "secretPresence";
   options?: string[];
   editable: boolean;
-}
-
-function isElevated(req: FastifyRequest): boolean {
-  return req.principal.roles.some(
-    (r) =>
-      (r.role === "platform_admin" && r.scopeType === "global") ||
-      (r.role === "group_executive" && r.scopeType === "global"),
-  );
 }
 
 // The n8n workflow VIEWER (read-only canvas in the IT section) is reachable by IT staff too,
@@ -79,9 +72,6 @@ async function getN8n(base: string, apiKey: string, path: string): Promise<unkno
 
 /** Reshape one system's /health payload into SystemStatus; fail-soft on unreachable. */
 async function probeStatus(system: SystemKey): Promise<SystemStatus> {
-  if (system === "agents") {
-    return { ok: false, detail: { note: "ai-agents runs as a CLI/library, not an HTTP service; no live status." } };
-  }
   const svc = config.services[system];
   if (!svc?.url) return { ok: false, detail: { note: "not configured (no service URL set on the platform)" } };
   const base = svc.url.replace(/\/$/, "");
@@ -105,6 +95,21 @@ async function probeStatus(system: SystemKey): Promise<SystemStatus> {
       return { ok: true, counters: { workflows: workflows.length }, detail: { url: base, n8nUrl: base, workflows } };
     }
     const h = (await getJson(`${base}${healthPath}`)) as Record<string, unknown>;
+    if (system === "bot") {
+      // A4: bot's own /health carries a session status string; if it's missing (older bot
+      // build) fall back to the ADMIN_TOKEN-gated session/status route. Fail-soft either way —
+      // never let a broken session lookup fail the whole status probe.
+      let session = typeof h.session === "string" ? h.session : undefined;
+      if (!session && svc.token) {
+        try {
+          const s = (await getJson(`${base}/admin/session/status`, svc.token)) as { status?: string };
+          if (typeof s.status === "string") session = s.status;
+        } catch {
+          /* leave undefined -> "unknown" below */
+        }
+      }
+      return { ok: h.ok === true, detail: { ai: h.ai, session: session ?? "unknown" } };
+    }
     return shapeHealth(system, h);
   } catch (e) {
     return { ok: false, detail: { error: (e as Error).message, url: base } };
@@ -165,8 +170,17 @@ function shapeHealth(system: SystemKey, h: Record<string, unknown>): SystemStatu
       const tools = Array.isArray(h.tools) ? (h.tools as string[]) : [];
       return { ok, counters: { tools: tools.length }, detail: { tools } };
     }
-    case "bot":
-      return { ok, detail: { ai: h.ai } };
+    // B3: the runner's own /health ({ok, agents, writeAgents, queue:{queued,running}}).
+    // `detail.agents` is what the UI's agentOptions() reads to populate the trigger select.
+    case "agents": {
+      const queue = (h.queue ?? {}) as { queued?: number; running?: number };
+      return {
+        ok,
+        counters: { queued: queue.queued ?? 0, running: queue.running ?? 0 },
+        detail: { agents: h.agents, writeAgents: h.writeAgents },
+      };
+    }
+    // "bot" is handled inline in probeStatus (session enrichment) and never reaches here.
     case "knowledge":
       return { ok };
     default:
@@ -183,11 +197,44 @@ function flatten(obj: Record<string, unknown>): Record<string, number | string> 
   return out;
 }
 
-/** Read-only connection descriptor per system — what the PLATFORM knows, honestly. Remote
- *  service config is not editable from here (editable:false everywhere). */
-function connectionConfig(system: SystemKey): ConfigField[] {
-  if (system === "agents") {
-    return [{ key: "kind", label: "Deployment", value: "CLI/library (no HTTP service)", kind: "text", editable: false }];
+// Bot config fields don't come with a UI label (the bot's shape is {key,value,editable,type});
+// fill in a friendly label per known key, falling back to the raw key for anything new.
+const BOT_FIELD_LABELS: Record<string, string> = {
+  wahaSession: "WAHA session name",
+  botName: "Bot display name",
+  postToGroups: "Post digests to groups",
+  managementGroupId: "Management group",
+  monitoredCount: "Monitored groups",
+};
+
+function mapBotConfigField(f: { key: string; value: unknown; editable: boolean; type: "text" | "bool" | "number" }): ConfigField {
+  return {
+    key: f.key,
+    label: BOT_FIELD_LABELS[f.key] ?? f.key,
+    value: f.value,
+    kind: f.type === "bool" ? "boolean" : f.type,
+    editable: f.editable,
+  };
+}
+
+/** Read-only connection descriptor per system — what the PLATFORM knows, honestly, UNLESS the
+ *  system is "bot" and reachable: then (A4) proxy the bot's own GET /admin/config fields, which
+ *  is what makes the /systems/bot ConfigField save flow light up with real editable:true fields.
+ *  Falls back to the honest url/tokenConfigured descriptor when the bot isn't configured or
+ *  isn't reachable (fail-soft, never fabricated). */
+async function connectionConfig(system: SystemKey): Promise<ConfigField[]> {
+  if (system === "bot") {
+    const svc = config.services.bot;
+    if (svc?.url && svc.token) {
+      try {
+        const res = (await getJson(`${svc.url.replace(/\/$/, "")}/admin/config`, svc.token)) as {
+          fields?: Array<{ key: string; value: unknown; editable: boolean; type: "text" | "bool" | "number" }>;
+        };
+        if (Array.isArray(res.fields)) return res.fields.map(mapBotConfigField);
+      } catch {
+        /* fall through to the honest read-only descriptor below */
+      }
+    }
   }
   const svc = config.services[system];
   const fields: ConfigField[] = [
@@ -212,7 +259,7 @@ export class AdminSystemsController {
   async config(@Req() req: FastifyRequest, @Param("system") system: string): Promise<{ fields: ConfigField[] }> {
     if (!isElevated(req)) throw new ForbiddenException("platform admin required");
     if (!SYSTEMS.includes(system as SystemKey)) throw new ForbiddenException("unknown system");
-    return { fields: connectionConfig(system as SystemKey) };
+    return { fields: await connectionConfig(system as SystemKey) };
   }
 
   // ---- Extra reads (optional per surface; degrade to [] when the service lacks the route) ----

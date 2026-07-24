@@ -37,6 +37,9 @@ func (p *OllamaProvider) Complete(ctx context.Context, prompt string) (string, e
 		return "", err
 	}
 	defer res.Body.Close()
+	if res.StatusCode == http.StatusTooManyRequests {
+		return "", newRateLimitError(res)
+	}
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
 		return "", fmt.Errorf("ollama %d", res.StatusCode)
 	}
@@ -70,6 +73,9 @@ func (p *OllamaProvider) Embed(ctx context.Context, text string) ([]float64, err
 		return nil, err
 	}
 	defer res.Body.Close()
+	if res.StatusCode == http.StatusTooManyRequests {
+		return nil, newRateLimitError(res)
+	}
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
 		return nil, fmt.Errorf("ollama embed %d", res.StatusCode)
 	}

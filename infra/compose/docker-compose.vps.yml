@@ -67,16 +67,30 @@ services:
       - redis-bot-data:/data
 
   waha:
-    image: devlikeapro/waha
+    # Pinned (never :latest — a floating tag can shift engine/payload behavior under you, an
+    # error the aire project hit). NOWEB variant = Baileys engine, no Chromium (lighter). Bump
+    # deliberately. Since 2026.6.1 all former Plus features ship in this free Core image.
+    image: devlikeapro/waha:noweb-2026.6.2
     restart: unless-stopped
     ports:
       - "127.0.0.1:3000:3000" # dashboard via SSH tunnel only; never public
     environment:
+      # Baileys-based, browser-free engine (per request). Sessions must be created with the NOWEB
+      # store enabled (config.noweb.store.enabled=true) to expose chats/contacts — set at session
+      # creation, not here; see the bot's session bootstrap / go-live runbook.
+      WHATSAPP_DEFAULT_ENGINE: NOWEB
       WHATSAPP_HOOK_URL: "http://bot:3001/webhook?token=${WEBHOOK_SECRET:?}"
-      WHATSAPP_HOOK_EVENTS: "message"
+      # Subscribe to session.status too (not just message) so the bot can see reconnect/ban/logout
+      # state changes instead of relying only on RESTART_ALL_SESSIONS + polling (aire gap).
+      WHATSAPP_HOOK_EVENTS: "message,session.status"
+      # Download inbound media so the bot's media-enrichment (voice/image → text via gateway
+      # vision) actually receives files; without this WAHA serves no media URL.
+      WHATSAPP_DOWNLOAD_MEDIA: "True"
       WHATSAPP_API_KEY: ${WAHA_API_KEY:?}
       WAHA_DASHBOARD_USERNAME: admin
       WAHA_DASHBOARD_PASSWORD: ${WAHA_DASHBOARD_PASSWORD:?}
+      # Persisted sessions (waha-sessions volume) auto-restart on boot, so a linked number
+      # survives restarts/redeploys WITHOUT a fresh QR scan (aire's key reconnect lesson).
       WHATSAPP_RESTART_ALL_SESSIONS: "True"
     volumes:
       - waha-sessions:/app/.sessions
@@ -99,6 +113,22 @@ services:
       # empty disables the local provider and the chain goes straight to cloud/echo.
       OLLAMA_URL: ${OLLAMA_URL:-}
       OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3.2}
+      # OpenAI-compatible cloud brain (Ollama Cloud https://ollama.com/v1). When OPENAI_API_KEY is
+      # set, LLM_CHAIN below routes text to it first; media/embeds fail over to whisper/gemini/ollama.
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-deepseek-v4-flash}
+      # Vision model for image media (image/* only). Ollama Cloud: qwen3.5 accepts images, glm-5.2
+      # does not. Audio/PDF are not vision-handled and fail over to whisper/gemini on MEDIA_CHAIN.
+      OPENAI_VISION_MODEL: ${OPENAI_VISION_MODEL:-qwen3.5:397b}
+      OPENAI_MAX_TOKENS: ${OPENAI_MAX_TOKENS:-1024}
+      # Text chain: OpenAI-compatible brain first, then local Ollama, then cloud fallbacks. A
+      # provider whose key/URL is unset reports Available()=false and is skipped, so this order is
+      # safe even when OPENAI_* is blank (it falls straight through to the old ollama,gemini,claude).
+      LLM_CHAIN: ${LLM_CHAIN:-openai,ollama,gemini,claude}
+      # Media chain: openai vision handles images; audio (and anything non-image) fails over to
+      # whisper for transcription, then gemini. openai auto-skips when its key is unset.
+      MEDIA_CHAIN: ${MEDIA_CHAIN:-openai,whisper,gemini}
       WHISPER_URL: http://whisper:8000
       WHISPER_MODEL: ${WHISPER_MODEL:-Systran/faster-whisper-small}
       GATEWAY_DAILY_CALL_CAP: ${GATEWAY_DAILY_CALL_CAP:-2000}
@@ -106,7 +136,7 @@ services:
       GATEWAY_TOPOLOGY_MODE: central
       # Model-assisted DLP classifier stays opt-in; enable only where Ollama is reachable.
       DLP_CLASSIFIER_ENABLED: ${DLP_CLASSIFIER_ENABLED:-false}
-      EGRESS_ALLOWLIST: generativelanguage.googleapis.com,api.anthropic.com,whisper,host.docker.internal
+      EGRESS_ALLOWLIST: generativelanguage.googleapis.com,api.anthropic.com,ollama.com,whisper,host.docker.internal
     volumes:
       - gateway-data:/app/data # egress audit (JSONL)
 
@@ -170,6 +200,9 @@ services:
       HUB_SERVICE_TOKEN: ${HUB_SERVICE_TOKEN:-}
       KNOWLEDGE_URL: http://knowledge:3005
       KNOWLEDGE_SERVICE_TOKEN: ${KNOWLEDGE_SERVICE_TOKEN:-}
+      # Agent runner (B2) — enables /api/:t/agents/* endpoints
+      AGENTS_URL: http://agent-runner:3006
+      AGENT_RUNNER_TOKEN: ${AGENT_RUNNER_TOKEN:-}
       # Automation is the separate `gaiada-automation` n8n stack; set these only if n8n is
       # reachable from this network. AUTOMATION_API_KEY is an n8n Public-API key → the
       # Systems→Automation console then lists real workflows + last-run.
@@ -276,6 +309,32 @@ services:
       ai-gateway:
         condition: service_started
 
+  # B2: agent-runner (WS8) — goal queue + durable run store around the proven runners
+  # (runOrchestrator / runWriteAgent / traceRun). Serves /goals, /runs, /metrics/agents; reached
+  # by platform-nest /api/:t/agents/* proxy. Tables (agent_goals / agent_runs) live in gaiada_knowledge
+  # alongside the episodic store; no new DB/role needed.
+  agent-runner:
+    build:
+      context: ../../ai-agents
+    command: ["npx", "tsx", "src/runner/service.ts"]
+    restart: unless-stopped
+    environment:
+      AGENT_RUNNER_TOKEN: ${AGENT_RUNNER_TOKEN:?}
+      # Runtime = knowledge_app (same as knowledge service); DDL runs as knowledge_owner.
+      AGENTS_DATABASE_URL: postgres://knowledge_app:${KNOWLEDGE_APP_PASSWORD:?}@postgres:5432/gaiada_knowledge
+      MIGRATE_DATABASE_URL: postgres://knowledge_owner:${KNOWLEDGE_OWNER_PASSWORD:?}@postgres:5432/gaiada_knowledge
+      GATEWAY_URL: http://ai-gateway:3002
+      GATEWAY_TOKEN: ${GATEWAY_TOKEN:?}
+      HUB_URL: http://mcp-hub:3003
+      HUB_SERVICE_TOKEN: ${HUB_SERVICE_TOKEN:?}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ai-gateway:
+        condition: service_started
+      mcp-hub:
+        condition: service_started
+
   mcp-hub:
     build: ../../mcp-hub
     restart: unless-stopped
@@ -352,9 +411,14 @@ services:
       MANAGEMENT_GROUP_ID: ${MANAGEMENT_GROUP_ID:-}
       POST_TO_GROUPS: ${POST_TO_GROUPS:-false}
       REDIS_URL: redis://redis-bot:6379
+      # A3: group registry lives on the writable bot-data volume so the ERP can edit it. No seed
+      # file is mounted — there is no committed real registry (only config/groups.example.yaml in the
+      # image), so the bot boots in trial mode (monitor all, log discovered) until the ERP's
+      # Group Registry surface writes /app/data/groups.yaml. To pre-seed instead, drop a real
+      # groups.yaml next to this compose file and set GROUPS_SEED_FILE to a read-only mount of it.
+      GROUPS_FILE: /app/data/groups.yaml
     volumes:
-      - bot-data:/app/data # LocalKms keys + schedule state + discovery (EXCLUDE keys.json from backups!)
-      - ./groups.yaml:/app/config/groups.yaml:ro
+      - bot-data:/app/data # LocalKms keys + schedule state + discovery + groups registry (EXCLUDE keys.json from backups!)
     depends_on:
       pg-bot:
         condition: service_healthy

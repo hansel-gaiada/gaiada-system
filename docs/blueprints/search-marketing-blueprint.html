@@ -1,0 +1,996 @@
+<title>GAIADA Search-Marketing — Engineering Blueprint</title>
+<style>
+  :root{
+    --paper:#F6F7F5; --surface:#FFFFFF; --raise:#FBFCFB;
+    --ink:#14201A; --ink-soft:#4B574F; --ink-faint:#7A857D;
+    --line:#DBE1DB; --line-strong:#C4CDC5;
+    --accent:#1E5E44; --accent-2:#2C7A57; --accent-soft:#E7F0EA;
+    --ochre:#9C6714; --ochre-soft:#F3E9D6;
+    --ok:#2F7D57; --warn:#9A5A0B; --crit:#B42318; --info:#2A5C86;
+    --plate:#FBFCFB; --plate-line:#D5DBD5; --plate-ink:#1B2721;
+    --serif:"Iowan Old Style","Palatino Linotype",Palatino,"Book Antiqua",Georgia,ui-serif,serif;
+    --sans:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    --mono:ui-monospace,"SF Mono","Cascadia Code","JetBrains Mono","Roboto Mono",Menlo,Consolas,monospace;
+    --maxw:74ch;
+    --shadow:0 1px 2px rgba(20,32,26,.04),0 8px 24px rgba(20,32,26,.05);
+  }
+  @media (prefers-color-scheme:dark){
+    :root{
+      --paper:#0E1411; --surface:#161D18; --raise:#1B231D;
+      --ink:#E8ECE7; --ink-soft:#A6B2A9; --ink-faint:#76827A;
+      --line:#26302A; --line-strong:#334036;
+      --accent:#4FB183; --accent-2:#6BC79B; --accent-soft:#16271E;
+      --ochre:#D9A441; --ochre-soft:#2A2213;
+      --ok:#5CB98A; --warn:#D19A3C; --crit:#E8776B; --info:#7AAAD6;
+    }
+  }
+  :root[data-theme="light"]{
+    --paper:#F6F7F5; --surface:#FFFFFF; --raise:#FBFCFB;
+    --ink:#14201A; --ink-soft:#4B574F; --ink-faint:#7A857D;
+    --line:#DBE1DB; --line-strong:#C4CDC5;
+    --accent:#1E5E44; --accent-2:#2C7A57; --accent-soft:#E7F0EA;
+    --ochre:#9C6714; --ochre-soft:#F3E9D6;
+    --ok:#2F7D57; --warn:#9A5A0B; --crit:#B42318; --info:#2A5C86;
+  }
+  :root[data-theme="dark"]{
+    --paper:#0E1411; --surface:#161D18; --raise:#1B231D;
+    --ink:#E8ECE7; --ink-soft:#A6B2A9; --ink-faint:#76827A;
+    --line:#26302A; --line-strong:#334036;
+    --accent:#4FB183; --accent-2:#6BC79B; --accent-soft:#16271E;
+    --ochre:#D9A441; --ochre-soft:#2A2213;
+    --ok:#5CB98A; --warn:#D19A3C; --crit:#E8776B; --info:#7AAAD6;
+  }
+
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  @media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+  body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans);
+    font-size:16px;line-height:1.65;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+
+  .layout{display:grid;grid-template-columns:264px minmax(0,1fr);gap:0;max-width:1320px;margin:0 auto}
+  .toc{position:sticky;top:0;align-self:start;height:100vh;overflow-y:auto;padding:2.2rem 1.3rem 3rem;
+    border-right:1px solid var(--line);background:var(--paper)}
+  .main{min-width:0;padding:0 clamp(1.1rem,4vw,3.4rem) 6rem}
+  .wrap{max-width:var(--maxw)}
+  @media (max-width:960px){
+    .layout{grid-template-columns:1fr}
+    .toc{display:none}
+  }
+
+  .toc-brand{font-family:var(--mono);font-size:.7rem;letter-spacing:.16em;text-transform:uppercase;
+    color:var(--accent);margin-bottom:1.4rem;line-height:1.5}
+  .toc-brand b{display:block;color:var(--ink);font-weight:700;letter-spacing:.14em}
+  .toc ol{list-style:none;margin:0;padding:0;counter-reset:toc}
+  .toc li{margin:.1rem 0}
+  .toc a{display:flex;gap:.55rem;align-items:baseline;text-decoration:none;color:var(--ink-soft);
+    font-size:.83rem;padding:.28rem .5rem;border-radius:5px;line-height:1.35}
+  .toc a .n{font-family:var(--mono);font-size:.68rem;color:var(--ink-faint);min-width:1.7em}
+  .toc a:hover{background:var(--accent-soft);color:var(--ink)}
+  .toc a.active{background:var(--accent-soft);color:var(--accent);font-weight:600}
+  .toc a.active .n{color:var(--accent)}
+
+  .cover{padding:3.6rem 0 2.4rem;border-bottom:2px solid var(--ink)}
+  .eyebrow{font-family:var(--mono);font-size:.72rem;letter-spacing:.2em;text-transform:uppercase;color:var(--accent);margin:0}
+  .cover h1{font-family:var(--serif);font-weight:600;font-size:clamp(2.3rem,5.4vw,3.5rem);line-height:1.04;
+    margin:.7rem 0 .5rem;letter-spacing:-.01em;text-wrap:balance}
+  .cover .lede{font-size:1.12rem;color:var(--ink-soft);max-width:62ch;margin:.2rem 0 0}
+  .titleblock{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:0;margin-top:2.4rem;
+    border:1px solid var(--line-strong);border-radius:8px;overflow:hidden;background:var(--surface)}
+  .titleblock div{padding:.85rem 1rem;border-right:1px solid var(--line);border-bottom:1px solid var(--line)}
+  .titleblock dt{font-family:var(--mono);font-size:.64rem;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-faint);margin:0 0 .28rem}
+  .titleblock dd{margin:0;font-size:.9rem;font-weight:600}
+  .pill{display:inline-flex;align-items:center;gap:.4rem;font-family:var(--mono);font-size:.68rem;font-weight:600;
+    padding:.16rem .5rem;border-radius:100px;letter-spacing:.04em;text-transform:uppercase}
+  .pill.draft{background:var(--ochre-soft);color:var(--ochre)}
+  .pill::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor}
+
+  .part{padding-top:3.2rem;margin-top:2.2rem;border-top:1px solid var(--line)}
+  .part:first-of-type{border-top:none}
+  .part-head{display:flex;align-items:baseline;gap:.9rem;margin-bottom:.4rem}
+  .part-num{font-family:var(--mono);font-size:.82rem;color:var(--accent);font-weight:600;letter-spacing:.08em}
+  .part h2{font-family:var(--serif);font-weight:600;font-size:clamp(1.6rem,3.2vw,2.15rem);line-height:1.1;
+    margin:0;letter-spacing:-.01em;text-wrap:balance}
+  .part>.dek{color:var(--ink-soft);font-size:1.02rem;max-width:64ch;margin:.4rem 0 0}
+  h3{font-family:var(--sans);font-weight:700;font-size:1.22rem;margin:2.3rem 0 .5rem;letter-spacing:-.005em}
+  h4{font-family:var(--sans);font-weight:700;font-size:1rem;margin:1.5rem 0 .4rem}
+  .sublabel{font-family:var(--mono);font-size:.7rem;letter-spacing:.16em;text-transform:uppercase;color:var(--accent);
+    margin:2.2rem 0 .6rem;font-weight:600}
+  p{margin:.7rem 0;max-width:var(--maxw)}
+  .wrap p,.wrap ul,.wrap ol{max-width:var(--maxw)}
+  ul,ol{padding-left:1.2rem}
+  li{margin:.28rem 0}
+  strong{font-weight:700}
+  a{color:var(--accent);text-decoration-thickness:1px;text-underline-offset:2px}
+  code{font-family:var(--mono);font-size:.86em;background:var(--accent-soft);color:var(--accent-2);
+    padding:.08em .38em;border-radius:4px;word-break:break-word}
+  .lead{font-size:1.08rem;color:var(--ink-soft)}
+
+  .note{border-left:3px solid var(--accent);background:var(--accent-soft);padding:.85rem 1.1rem;border-radius:0 8px 8px 0;
+    margin:1.2rem 0;font-size:.95rem;max-width:var(--maxw)}
+  .note.warn{border-color:var(--warn);background:var(--ochre-soft)}
+  .note .k{font-family:var(--mono);font-size:.66rem;letter-spacing:.14em;text-transform:uppercase;color:var(--accent);display:block;margin-bottom:.25rem;font-weight:700}
+  .note.warn .k{color:var(--warn)}
+
+  figure{margin:1.8rem 0;max-width:100%}
+  .plate{background:var(--plate);border:1px solid var(--plate-line);border-radius:10px;padding:1.4rem 1rem 1rem;
+    overflow-x:auto;box-shadow:var(--shadow)}
+  .plate .mermaid{min-width:520px;display:flex;justify-content:center}
+  figure.wide{max-width:none}
+  figcaption{font-family:var(--mono);font-size:.72rem;color:var(--ink-faint);margin-top:.6rem;letter-spacing:.03em}
+  figcaption b{color:var(--accent);font-weight:600}
+
+  .spec{border:1px solid var(--line);border-radius:12px;background:var(--surface);margin:1.4rem 0;overflow:hidden;box-shadow:var(--shadow)}
+  .spec-head{display:flex;flex-wrap:wrap;align-items:center;gap:.6rem;padding:.9rem 1.15rem;border-bottom:1px solid var(--line);background:var(--raise)}
+  .spec-head .id{font-family:var(--mono);font-size:.72rem;font-weight:700;color:var(--accent);letter-spacing:.05em}
+  .spec-head h3{margin:0;font-size:1.08rem}
+  .spec-head .zone{margin-left:auto;font-family:var(--mono);font-size:.64rem;text-transform:uppercase;letter-spacing:.1em;
+    padding:.18rem .5rem;border-radius:5px;font-weight:700}
+  .zone.a{background:var(--info);color:#fff}
+  .zone.b{background:var(--accent);color:#fff}
+  :root[data-theme="dark"] .zone.a{color:#08131d}
+  :root[data-theme="dark"] .zone.b{color:#06140d}
+  .spec-body{padding:.4rem 1.15rem 1.1rem}
+  .spec-body dl{display:grid;grid-template-columns:minmax(110px,150px) 1fr;gap:0;margin:0}
+  .spec-body dt{font-family:var(--mono);font-size:.66rem;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-faint);
+    padding:.7rem .8rem .7rem 0;border-bottom:1px solid var(--line);font-weight:600}
+  .spec-body dd{margin:0;padding:.7rem 0;border-bottom:1px solid var(--line);font-size:.92rem}
+  .spec-body dd:last-child,.spec-body dt:last-of-type{border-bottom:none}
+  .spec-body ul{margin:.1rem 0;padding-left:1.05rem}
+  .spec-body li{margin:.18rem 0}
+  @media (max-width:560px){.spec-body dl{grid-template-columns:1fr}.spec-body dt{border-bottom:none;padding-bottom:.1rem}}
+
+  .tablewrap{overflow-x:auto;margin:1.3rem 0;border:1px solid var(--line);border-radius:10px}
+  table{border-collapse:collapse;width:100%;font-size:.88rem;min-width:520px}
+  th,td{text-align:left;padding:.6rem .8rem;border-bottom:1px solid var(--line);vertical-align:top}
+  thead th{background:var(--raise);font-family:var(--mono);font-size:.66rem;letter-spacing:.09em;text-transform:uppercase;
+    color:var(--ink-soft);font-weight:700;position:sticky;top:0}
+  tbody tr:last-child td{border-bottom:none}
+  td.mono,th.mono,.num{font-family:var(--mono);font-variant-numeric:tabular-nums}
+  td .tag{font-family:var(--mono);font-size:.68rem;font-weight:700;padding:.12rem .45rem;border-radius:4px;white-space:nowrap}
+  .t-ok{background:var(--accent-soft);color:var(--ok)}
+  .t-warn{background:var(--ochre-soft);color:var(--warn)}
+  .t-crit{background:rgba(180,35,24,.1);color:var(--crit)}
+  .t-info{background:rgba(42,92,134,.1);color:var(--info)}
+  :root[data-theme="dark"] .t-crit{background:rgba(232,119,107,.14)}
+  :root[data-theme="dark"] .t-info{background:rgba(122,170,214,.14)}
+
+  .cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:1rem;margin:1.3rem 0;max-width:var(--maxw)}
+  .card{border:1px solid var(--line);border-radius:10px;padding:1rem 1.1rem;background:var(--surface)}
+  .card h4{margin:.1rem 0 .35rem}
+  .card p{margin:.2rem 0;font-size:.9rem;color:var(--ink-soft)}
+  .card .k{font-family:var(--mono);font-size:.66rem;letter-spacing:.12em;text-transform:uppercase;color:var(--accent);font-weight:700}
+
+  .phases{display:flex;flex-direction:column;gap:.5rem;margin:1.4rem 0;max-width:var(--maxw)}
+  .phase{display:grid;grid-template-columns:2.4rem 1fr;gap:.9rem;border:1px solid var(--line);border-radius:10px;
+    padding:.9rem 1rem;background:var(--surface);position:relative}
+  .phase .pn{font-family:var(--mono);font-weight:700;color:var(--accent);font-size:1rem}
+  .phase h4{margin:0 0 .2rem}
+  .phase p{margin:.15rem 0;font-size:.9rem;color:var(--ink-soft)}
+  .phase .meta{font-family:var(--mono);font-size:.7rem;color:var(--ink-faint);margin-top:.35rem;letter-spacing:.02em}
+  .phase.gate{border-left:3px solid var(--ochre)}
+
+  hr.soft{border:none;border-top:1px solid var(--line);margin:2.4rem 0}
+  .kbd{font-family:var(--mono);font-size:.8rem;background:var(--surface);border:1px solid var(--line-strong);
+    border-bottom-width:2px;border-radius:5px;padding:.05em .4em}
+
+  .legend{display:flex;flex-wrap:wrap;gap:.6rem;margin:1rem 0 1.4rem}
+  .legend span{display:inline-flex;align-items:center;gap:.4rem;font-family:var(--mono);font-size:.74rem;
+    background:var(--surface);border:1px solid var(--line);border-radius:100px;padding:.28rem .7rem .28rem .55rem}
+
+  footer{margin-top:4rem;padding-top:1.6rem;border-top:2px solid var(--ink);font-size:.85rem;color:var(--ink-soft)}
+  footer .mono{font-family:var(--mono);font-size:.72rem;color:var(--ink-faint)}
+
+  @media print{
+    :root{--paper:#fff;--surface:#fff;--raise:#fff;--ink:#111;--ink-soft:#333;--line:#bbb;--accent:#14503a;--plate:#fff}
+    body{font-size:10.5pt}
+    .layout{display:block;max-width:none}
+    .toc,.themehint{display:none!important}
+    .main{padding:0}
+    .part{break-before:page;border-top:none;padding-top:.4rem}
+    .part:first-of-type{break-before:avoid}
+    .cover{break-after:page}
+    .spec,.plate,.tablewrap,figure,.phase,.card{break-inside:avoid}
+    .plate{box-shadow:none}
+    a{color:#14503a;text-decoration:none}
+  }
+  .themehint{position:fixed;bottom:12px;right:14px;font-family:var(--mono);font-size:.62rem;color:var(--ink-faint);
+    background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:.3rem .55rem;opacity:.75}
+</style>
+
+<div class="layout">
+  <nav class="toc" aria-label="Contents">
+    <div class="toc-brand">GAIADA <b>Search-Marketing</b> Engineering Blueprint</div>
+    <ol>
+      <li><a href="#p00"><span class="n">00</span> Executive Summary</a></li>
+      <li><a href="#p01"><span class="n">01</span> Foundation &amp; Cost Model</a></li>
+      <li><a href="#p02"><span class="n">02</span> Scope &amp; Pillars</a></li>
+      <li><a href="#p03"><span class="n">03</span> System Overview</a></li>
+      <li><a href="#p04"><span class="n">04</span> Trust Zones &amp; Network</a></li>
+      <li><a href="#p05"><span class="n">05</span> Domain Model &amp; Schema</a></li>
+      <li><a href="#p06"><span class="n">06</span> Data-Provider Abstraction</a></li>
+      <li><a href="#p07"><span class="n">07</span> Fork/Adapt Plan per Repo</a></li>
+      <li><a href="#p08"><span class="n">08</span> AI Design</a></li>
+      <li><a href="#p09"><span class="n">09</span> Console UX</a></li>
+      <li><a href="#p10"><span class="n">10</span> ERP Integration Points</a></li>
+      <li><a href="#p11"><span class="n">11</span> Automation Flows</a></li>
+      <li><a href="#p12"><span class="n">12</span> Trust &amp; Security</a></li>
+      <li><a href="#p13"><span class="n">13</span> Rollout &amp; Tickets</a></li>
+      <li><a href="#p14"><span class="n">14</span> Open Questions &amp; Decisions</a></li>
+      <li><a href="#gloss"><span class="n">15</span> Glossary</a></li>
+    </ol>
+  </nav>
+
+  <main class="main">
+    <!-- ================= COVER ================= -->
+    <header class="cover">
+      <p class="eyebrow">SEO Department · Platform Engineering</p>
+      <h1>GAIADA Search-Marketing</h1>
+      <p class="lede">SEO, SEM, and GEO/AEO as one platform-nest module vertical and department console — not a fleet of adopted external apps. The professional moat is data, not UI: one provider abstraction, self-hosted crawlers, local-first AI, and a dual-mode execution path for every live-account action.</p>
+      <dl class="titleblock">
+        <div><dt>Document</dt><dd>Engineering Blueprint v1.1</dd></div>
+        <div><dt>Module key</dt><dd class="mono">search <span style="color:var(--ink-faint);font-weight:400">(search-marketing)</span></dd></div>
+        <div><dt>Date</dt><dd>2026-07-23</dd></div>
+        <div><dt>Owner</dt><dd>SEO Dept · Platform</dd></div>
+        <div><dt>Status</dt><dd><span class="pill draft">Planned · v0.0.0</span></dd></div>
+        <div><dt>Classification</dt><dd>Internal</dd></div>
+      </dl>
+    </header>
+
+    <!-- ================= 00 EXEC SUMMARY ================= -->
+    <section class="part" id="p00">
+      <div class="part-head"><span class="part-num">§00</span><h2>Executive Summary</h2></div>
+      <p class="dek">What we are building, why it lives inside platform-nest rather than as adopted tools, and the shape of the decisions already locked.</p>
+      <div class="wrap">
+        <p>Search-marketing becomes a <strong>platform-nest module vertical</strong> (<code>ModuleContract</code> key <code>search</code>, tables <code>search_*</code>) plus a <strong>department console</strong> on the dept-interface-template — the same shape as Web Dev, not a second UI bolted on top of somebody else's SaaS. The professional moat in this discipline is data, not workflow, so the architecture follows that truth end to end.</p>
+        <div class="cols">
+          <div class="card"><span class="k">1 · Provider abstraction</span><p><code>SearchDataProvider</code> drivers (DataForSEO primary, Semrush premium, free-scraper fallback) behind a Postgres cache and a per-client usage/cost ledger that enforces budget stop-losses <em>before</em> money is spent. A human sets which tools run at all, per client.</p></div>
+          <div class="card"><span class="k">2 · Self-hosted crawlers</span><p>SEONaut, open-seo-crawler, and Unlighthouse run as job-mode workers — $0 API cost, egress-guarded, ingested into RLS-scoped <code>search_audits</code>. Their own UIs and auth are never exposed.</p></div>
+          <div class="card"><span class="k">3 · Mine, don't run</span><p><code>open-seo</code> and SerpBear are data-only references: retrofitting single-tenant apps with FORCE-RLS + Keycloak + Cerbos costs more than native implementation, and their UIs are redundant behind our console.</p></div>
+          <div class="card"><span class="k">4 · Local-first AI</span><p>Hermes via ai-gateway-go handles bulk work (clustering, intent-tagging, triage, first drafts); Claude is reserved for client-facing polish only. GEO/brief RAG rides the existing WS8 knowledge store.</p></div>
+          <div class="card"><span class="k">5 · WS4-gated, dual-mode execution</span><p>Everything touching a live site or live ad spend is approval-gated. Every live action ships as a <strong>manual twin</strong> (export, human applies, zero OAuth, P3) and an <strong>automated twin</strong> (API push behind WS4, P4, committed) — the human picks per action.</p></div>
+          <div class="card"><span class="k">6 · GEO/AEO first-class</span><p>AI-visibility snapshots, extractability audits, and citation-oriented tooling ride the same entities and provider abstraction as SEO/SEM — enabled per client like every other paid pull, not a bolt-on premium tier.</p></div>
+        </div>
+        <p>Build order is cost-honest: <strong>P0 contracts → P1 $0-value (crawls + AI on own data) → P2 paid data (needs the $50 DataForSEO deposit) → P3 SEM planning/reports + manual-apply path → P4 live-ads OAuth writes (committed) + decision-gated extras</strong>. 26 tickets P0–P3 plus 2 committed P4 tickets, /army-ready (§13).</p>
+        <div class="note"><span class="k">Reading this document</span>This is a <strong>design blueprint</strong> — nothing in it exists as code yet. It targets a future <code>search-marketing</code> module registered as <code>0.0.0 · PLANNED</code> in <code>docs/modules/MODULES.md</code> on approval. Primary inputs: <code>seo-sem-design.md</code> (v1.1, the architecture) and its companion <code>seo-sem-foundation.md</code> (research + the locked cost model, folded into §01 below).</div>
+      </div>
+    </section>
+
+    <!-- ================= 01 FOUNDATION & COST ================= -->
+    <section class="part" id="p01">
+      <div class="part-head"><span class="part-num">§01</span><h2>Foundation &amp; Cost Model</h2></div>
+      <p class="dek">What SEO and SEM actually are, what clients pay for, the professional toolchain, and the locked provider-cost decision this design conforms to.</p>
+      <div class="wrap">
+        <h3>1.1 · Two disciplines, converging on a third</h3>
+        <p>Both SEO and SEM are <strong>search marketing</strong> — capturing demand from people (and now AI answer engines) actively searching. They differ in how visibility is won and how fast.</p>
+      </div>
+      <div class="tablewrap"><table>
+        <thead><tr><th></th><th>SEO — organic</th><th>SEM — paid (SEA)</th></tr></thead>
+        <tbody>
+          <tr><td>Mechanism</td><td>Earn organic rankings</td><td>Buy placement via ad auctions</td></tr>
+          <tr><td>Speed</td><td>Slow — compounding asset over months</td><td>Instant — traffic the day a campaign goes live</td></tr>
+          <tr><td>Cost shape</td><td>Labor-heavy, no per-click cost</td><td>Media spend + management fee; stops when budget stops</td></tr>
+          <tr><td>Durability</td><td>Durable asset that keeps paying</td><td>Rented traffic; ends with the budget</td></tr>
+        </tbody>
+      </table></div>
+      <div class="wrap">
+        <div class="note"><span class="k">2026 framing</span>The modern view is not "free vs paid" — it's <strong>portfolio management of search intent</strong> across SERP formats <em>and</em> AI answer engines. A third discipline has emerged: <strong>GEO / AEO / LLMO</strong> — optimizing to be <em>cited by</em> ChatGPT, Google AI Overviews, Gemini, Claude, Perplexity. This design treats GEO/AEO as first-class, not an afterthought.</div>
+
+        <h3>1.2 · What clients actually pay for</h3>
+        <p>Clients don't buy rankings or clicks — they buy <strong>business outcomes</strong>. KPIs sit in four SEO buckets (visibility → traffic → engagement → <strong>outcome</strong>) and four SEM metrics (CPC, CTR, Quality Score, <strong>ROAS</strong>). The ERP must model this as an <strong>outcome-tracked engagement</strong>, not a task list — intake the goal, audit current state, execute, measure against a committed KPI, report the outcome.</p>
+      </div>
+      <div class="tablewrap"><table>
+        <thead><tr><th>Discipline</th><th>Primary client outcome</th><th>Timeframe</th></tr></thead>
+        <tbody>
+          <tr><td>SEO</td><td>Durable, compounding organic traffic → leads/revenue at falling CPA</td><td>3–12 months</td></tr>
+          <tr><td>SEM</td><td>Immediate qualified traffic at a controllable, predictable CPA/ROAS</td><td>Days</td></tr>
+          <tr><td>GEO/AEO</td><td>Brand presence &amp; citation inside AI answers — the new zero-click surface</td><td>Emerging</td></tr>
+        </tbody>
+      </table></div>
+
+      <div class="wrap">
+        <h3>1.3 · The professional stack — and the moat</h3>
+        <p>A practical stack = Search Console + GA4 + one crawler + one research platform + one reporting layer + Google Ads for SEM. The commercial layer is where the real cost lives:</p>
+      </div>
+      <div class="tablewrap"><table>
+        <thead><tr><th>Tool</th><th>Role</th><th>Note</th></tr></thead>
+        <tbody>
+          <tr><td>Semrush</td><td>All-in-one SEO+SEM data</td><td>Strongest all-rounder; an MCP connector exists but needs OAuth (OQ-3)</td></tr>
+          <tr><td>Ahrefs</td><td>Backlink data reference standard</td><td>Best-in-class link index</td></tr>
+          <tr><td>Screaming Frog</td><td>Desktop technical crawler</td><td>De-facto site-audit spider</td></tr>
+          <tr><td>Looker Studio</td><td>Reporting / dashboards</td><td>Free; pulls GSC/GA4/Semrush/Ahrefs</td></tr>
+        </tbody>
+      </table></div>
+      <div class="wrap">
+        <div class="note"><span class="k">Key insight</span>The professional moat is <strong>data</strong> (SERP volumes, backlink index), not the UI. Open-source tools replicate the workflow; they still need a paid data API for volume/difficulty/backlink numbers. Our build = OSS workflow + pluggable data provider — never adopted external UIs.</div>
+
+        <h3>1.4 · Where AI genuinely helps</h3>
+      </div>
+      <div class="tablewrap"><table>
+        <thead><tr><th>Task</th><th>AI role</th><th>Model class</th></tr></thead>
+        <tbody>
+          <tr><td>Keyword → intent clustering</td><td>Group thousands of keywords into intent/topic clusters</td><td>Embeddings + small LLM</td></tr>
+          <tr><td>Content briefs / topic maps</td><td>Generate briefs, outlines, entity coverage from SERP + competitors</td><td>Mid/large LLM</td></tr>
+          <tr><td>Technical audit triage</td><td>Summarize crawl findings, prioritize by impact, draft fixes</td><td>Mid LLM</td></tr>
+          <tr><td>SEM search-term / negatives</td><td>Classify terms, propose negatives, draft RSA copy</td><td>Mid LLM + rules</td></tr>
+          <tr><td>GEO/AEO</td><td>Structure content for RAG extraction &amp; citation; track AI mentions</td><td>LLM + retrieval</td></tr>
+          <tr><td>Reporting narrative</td><td>Turn metrics into a client-readable story</td><td>Mid LLM</td></tr>
+        </tbody>
+      </table></div>
+      <div class="wrap">
+        <p><strong>Human-in-the-loop is mandatory</strong> — AI drafts, human approves, routed through the existing WS4 approvals surface, exactly like schema drafting and WebDev.</p>
+
+        <h3>1.5 · LOCKED decision — provider &amp; cost model (2026-07-23)</h3>
+        <div class="note warn"><span class="k">Context</span>Gaiada serves many smaller clients with variable needs from Indonesia; IDR/USD pressure means the stack must be cheapest-yet-professional. This decision is <strong>locked</strong> and this design does not relitigate it.</div>
+        <p><strong>DataForSEO (Standard queue) is primary; Semrush MCP is an optional premium upsell</strong>, behind a pluggable provider abstraction. Rationale: pay-as-you-go maps to per-client billing with no dead subscription floor, and it's a data layer suited to build-it-yourself.</p>
+        <h4>Cost-control levers</h4>
+        <ol>
+          <li>AI bulk work → local Hermes; paid Claude reserved for client-facing polish only.</li>
+          <li>Default DataForSEO Standard queue ($0.0006/SERP, ~5-min) — 3× cheaper than Live.</li>
+          <li>Self-hosted crawlers do all audit/crawl/speed work — $0 API cost.</li>
+          <li>Cache SERP/volume in Postgres — no re-querying the same keyword within a window.</li>
+          <li>Meter per client in the ERP; one shared $50 DataForSEO deposit pool across all clients.</li>
+        </ol>
+      </div>
+      <div class="tablewrap"><table>
+        <thead><tr><th>Tier</th><th>#</th><th>Scope</th><th class="num">$/client</th><th class="num">Subtotal</th></tr></thead>
+        <tbody>
+          <tr><td>Light</td><td class="num">40</td><td>Rank + monthly research (SEO <em>or</em> SEM)</td><td class="num">~$3</td><td class="num">$120</td></tr>
+          <tr><td>Standard</td><td class="num">40</td><td>Full SEO <em>or</em> full SEM</td><td class="num">~$8</td><td class="num">$320</td></tr>
+          <tr><td>Heavy</td><td class="num">20</td><td>Full SEO <strong>+</strong> SEM (more kw/competitors/backlinks)</td><td class="num">~$18</td><td class="num">$360</td></tr>
+          <tr><td><strong>DataForSEO total</strong></td><td class="num">100</td><td></td><td></td><td class="num"><strong>≈ $800/mo</strong></td></tr>
+          <tr><td>AI (local-first + selective cloud)</td><td></td><td></td><td></td><td class="num">+$50–150/mo</td></tr>
+          <tr><td><strong>Grand total</strong></td><td></td><td></td><td></td><td class="num"><strong>≈ $850–950/mo</strong></td></tr>
+        </tbody>
+      </table></div>
+      <div class="wrap">
+        <p>Scenario range: <strong>floor ~$600</strong> (cache-heavy, all-Standard, all-local AI) · <strong>central ~$900</strong> · <strong>ceiling ~$1,800</strong> (all 100 full-heavy on Live queue). Blended <strong>~$8–10/client/mo</strong>.</p>
+      </div>
+      <div class="tablewrap"><table>
+        <thead><tr><th>Metric</th><th class="num">USD</th><th class="num">IDR @ 22k</th></tr></thead>
+        <tbody>
+          <tr><td>Floor (100 clients)</td><td class="num">$600/mo</td><td class="num">~Rp 13.2M/mo</td></tr>
+          <tr><td><strong>Central (100 clients)</strong></td><td class="num"><strong>$900/mo</strong></td><td class="num"><strong>~Rp 19.8M/mo</strong></td></tr>
+          <tr><td>Ceiling (100 clients)</td><td class="num">$1,800/mo</td><td class="num">~Rp 39.6M/mo</td></tr>
+          <tr><td>Blended per client</td><td class="num">$8–10/mo</td><td class="num">~Rp 176k–220k/mo</td></tr>
+        </tbody>
+      </table></div>
+      <div class="wrap">
+        <p>Even buffered at Rp 22,000/USD, data cost is a rounding error against a professional retainer. <strong>vs. Semrush for the same 100 clients:</strong> $500/mo base + heavy unit add-ons for programmatic use → ~$2,000–5,000+/mo, and not meterable per client. DataForSEO is ~3–5× cheaper and bills the way we sell.</p>
+        <div class="note"><span class="k">Sibling deliverable</span>This design follows the same rigor as the <a href="../BLUEPRINTS.md">WebDesk Engineering Blueprint</a> — where WebDesk is the <em>website execution</em> zone, search-marketing is a <em>data + judgment</em> subsystem that lives almost entirely inside the platform (Zone A).</div>
+      </div>
+    </section>
+
+    <!-- ================= 02 SCOPE & PILLARS ================= -->
+    <section class="part" id="p02">
+      <div class="part-head"><span class="part-num">§02</span><h2>Scope &amp; Pillars</h2></div>
+      <p class="dek">All three pillars first-class from v1 — what ships, what's deliberately deferred, and how this fits prior platform decisions.</p>
+      <div class="tablewrap"><table>
+        <thead><tr><th>Pillar</th><th>v1 delivers</th><th>Deferred</th></tr></thead>
+        <tbody>
+          <tr><td><strong>SEO</strong></td><td>Technical audits (crawl/CWV/links), keyword research + intent clustering, rank tracking, backlink snapshots, content briefs + on-page drafts, outcome-tracked engagements + KPI targets, client reports</td><td>Log-file analysis; local SEO (GBP/citations); Bing Webmaster; disavow workflows (human-only); full backlink inventory (snapshots only)</td></tr>
+          <tr><td><strong>SEM</strong></td><td>Campaign/ad-group/ad <em>planning objects</em> from keyword clusters; AI RSA drafts; negative-keyword proposals; imported performance; budget-pacing alerts; dual-mode execution for every live action</td><td>Microsoft Ads; offline conversion import; automated bid strategies</td></tr>
+          <tr><td><strong>GEO / AEO</strong></td><td>AI-visibility snapshots (brand cited across ChatGPT, AI Overviews, Gemini, Claude, Perplexity), extractability audit kind, citation-oriented brief guidance (RAG over crawled content). Enabled per client via the tool-scope config</td><td>Ansvisor-style dedicated tracker fork; automated GEO content rewriting at scale</td></tr>
+        </tbody>
+      </table></div>
+      <div class="wrap">
+        <h3>Non-goals (v1)</h3>
+        <ul>
+          <li><strong>No adopted external UIs</strong> — the console is the only operator surface.</li>
+          <li><strong>No direct vendor AI calls</strong> — everything through ai-gateway-go (locked).</li>
+          <li><strong>No client-facing portal changes</strong> — reports deliver as files (Shared Drive + <code>deliverables</code>).</li>
+          <li><strong>No Matomo</strong> — Umami chosen (MIT, lighter), and even Umami is decision-gated (OQ-5).</li>
+          <li><strong>No payroll/billing changes</strong> — provider costs are metered; invoicing is the existing billing module's concern.</li>
+        </ul>
+        <h3>Fit with prior decisions</h3>
+        <p>Conforms to the <strong>ERP holding-OS vision</strong> (shared-service department serving N companies): the module uses the standard enablement OR-clause (<code>enabled_modules</code> OR active <code>service_assignment</code>) and the WSD-3 module-sliced RLS wall.</p>
+        <div class="note"><span class="k">D-10 · Console ratified 2026-07-23</span>Supersedes one line of the dept-console IA plan (which sketched a single "Optimize" tab). The department keeps the name <strong>SEO</strong>; its console follows the dept-interface-template exactly as Web Dev does — universal spine plus <strong>three craft groups</strong> (Accounts / Optimize / Campaigns), since SEM cannot honestly fit in four SEO sub-tabs.</div>
+      </div>
+    </section>
+
+    <!-- ================= 03 SYSTEM OVERVIEW ================= -->
+    <section class="part" id="p03">
+      <div class="part-head"><span class="part-num">§03</span><h2>System Overview</h2></div>
+      <p class="dek">All state and judgment live in Zone A. Three arrows cross to the internet: crawler egress, provider API calls, and notification-only inbound webhooks.</p>
+      <figure class="wide">
+        <div class="plate">
+          <pre class="mermaid">
+%%{init:{'theme':'base','themeVariables':{'fontFamily':'ui-monospace,monospace','fontSize':'13px','background':'#FBFCFB','mainBkg':'#E7F0EA','primaryColor':'#E7F0EA','secondaryColor':'#EEF3EE','tertiaryColor':'#EEF3EE','primaryBorderColor':'#1E5E44','primaryTextColor':'#14201A','secondaryTextColor':'#14201A','tertiaryTextColor':'#14201A','textColor':'#14201A','nodeTextColor':'#14201A','lineColor':'#4B574F','clusterBkg':'#EEF3EE','clusterBorder':'#B7C3B8','edgeLabelBackground':'#FBFCFB','titleColor':'#14201A'}}}%%
+flowchart LR
+  subgraph ZA["Zone A — platform (private)"]
+    UI["platform-ui<br/>SEO dept console"] -->|"BFF /api/:t/modules/search/*"| PN["platform-nest<br/>search module"]
+    PN --- PDB[("Postgres<br/>search_* tables, FORCE-RLS<br/>+ shared market-data cache")]
+    PN -->|"/complete /embed"| GW["ai-gateway-go"]
+    GW --> HERMES["local Hermes"]
+    GW --> CLAUDE["Claude - polish only"]
+    PN -->|"knowledge.search via hub"| WS8["WS8 knowledge store<br/>pgvector RAG"]
+    HUB["mcp-hub"] -->|"aggregated search.* tools"| PN
+    N8N["n8n flows"] -->|"MCP tools only"| HUB
+    PN -->|"outbox events"| EVT["event backbone"] --> N8N
+    EVT --> NOTIF["notifications / approvals inbox"]
+    CRAWL["crawl workers: SEONaut ·<br/>open-seo-crawler · Unlighthouse<br/>egress-guarded job containers"] -->|"reports ingested"| PN
+  end
+  subgraph NET["Internet"]
+    SITES["client websites"]
+    DFS["DataForSEO API"]
+    SEM2["Semrush MCP - premium"]
+    ADS["Google Ads<br/>Scripts bridge P3 / OAuth P4"]
+  end
+  subgraph ZB["Zone B — internet-facing (WebDesk boxes)"]
+    UMAMI["Umami analytics<br/>decision-gated"]
+  end
+  CRAWL -->|"GET, allowlisted domains only"| SITES
+  PN -->|"task_post / poll, server-side key"| DFS
+  DFS -.->|"postback: task-id only"| N8N
+  PN --> SEM2
+  ADS -.->|"signed webhook: perf + search terms"| N8N
+  SITES -->|"tracker hits"| UMAMI
+  PN -->|"read-only API pull"| UMAMI
+  classDef default fill:#E7F0EA,stroke:#1E5E44,color:#14201A,stroke-width:1px;
+          </pre>
+        </div>
+        <figcaption><b>FIG. 03-1</b> — Master system diagram. Inbound webhooks are notification-only (task ids); the authoritative result is always fetched over the authenticated API. Umami sits in Zone B like everything internet-facing; the ERP only ever pulls from it.</figcaption>
+      </figure>
+      <div class="wrap">
+        <h3>Reading the diagram</h3>
+        <ul>
+          <li>Every arrow that touches money or a live site passes through <strong>platform-nest</strong> — there is no path where n8n, the UI, or an agent calls a provider or a client site directly.</li>
+          <li><strong>Crawler egress</strong> is allowlisted per registered+verified property domain; <strong>provider calls</strong> use server-side keys only; <strong>inbound webhooks</strong> (DataForSEO postbacks, Ads-Scripts) are triggers only — the authoritative fetch always happens over the authenticated API.</li>
+          <li><strong>Umami</strong>, which must receive public traffic, follows WebDesk doctrine and sits in Zone B; the ERP only ever pulls read-only summaries.</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- ================= 04 TRUST ZONES ================= -->
+    <section class="part" id="p04">
+      <div class="part-head"><span class="part-num">§04</span><h2>Trust Zones &amp; Network</h2></div>
+      <p class="dek">The WebDesk zone doctrine, adapted to this subsystem's actual exposure — almost everything lives in Zone A.</p>
+      <div class="tablewrap"><table>
+        <thead><tr><th>Surface</th><th>Zone</th><th>Rules</th></tr></thead>
+        <tbody>
+          <tr><td><code>search</code> module + provider layer + ledger</td><td><span class="tag t-info">A</span></td><td>Paid API keys (DataForSEO, Semrush) are server-side env → OpenBao target-state, held only by platform-nest. Never in the browser, never per-request from the UI, never in n8n credentials.</td></tr>
+          <tr><td>Crawl workers (SEONaut / open-seo-crawler / Unlighthouse)</td><td><span class="tag t-info">A, egress-only</span></td><td>No inbound ports. May fetch only domains registered+verified on a <code>search_properties</code> row; deny RFC-1918/link-local/metadata IPs after DNS resolution (SSRF); respect robots.txt; identified UA; per-host rate cap.</td></tr>
+          <tr><td>DataForSEO postback / Ads-Scripts webhook</td><td>edge → n8n</td><td>HMAC-signed or secret-path, schema-validated, treated as <strong>triggers only</strong>. A forged webhook can cause at most a redundant authenticated fetch.</td></tr>
+          <tr><td>Umami (if approved)</td><td><span class="tag t-ok">B</span></td><td>Deployed with the WebDesk boxes; client sites embed its tracker. ERP holds a read-only API token and pulls; Umami has zero credentials into Zone A.</td></tr>
+          <tr><td>Client Google accounts (GSC/GA4/Ads — P4)</td><td><span class="tag t-info">A vault</span></td><td>Per-client OAuth tokens ride the existing <code>integration_connections</code> vault (AES-256-GCM at rest, <code>hasToken</code> reads only) with <code>owner_kind</code> widened to <code>'client'</code>.</td></tr>
+        </tbody>
+      </table></div>
+    </section>
+
+    <!-- ================= 05 DOMAIN MODEL ================= -->
+    <section class="part" id="p05">
+      <div class="part-head"><span class="part-num">§05</span><h2>Domain Model &amp; Schema</h2></div>
+      <p class="dek">Every tenant table carries the third-wall RLS predicate; the engagement is the outcome-tracked unit; the change-proposal is the dual-mode execution artifact.</p>
+      <div class="wrap">
+        <h3>Design rules (inherited, not optional)</h3>
+        <ul>
+          <li>Every tenant table: <code>tenant_id uuid NOT NULL REFERENCES companies(id)</code>, <code>origin_site</code>, <code>created_at/updated_at</code>, soft-delete <code>deleted_at</code> where user-facing.</li>
+          <li><strong>FORCE-RLS with the WSD-3 third wall</strong> — policy predicate <code>tenant_id = ANY(app_current_tenants()) AND app_module_allowed('search')</code> on both USING and WITH CHECK, byte-identical to <code>0028_module_hr.sql</code>.</li>
+          <li>Migrations: next unused number (0034+ as of 2026-07-23); no in-migration GRANTs; no <code>sync_app</code> grants (search tables do not sync in v1).</li>
+          <li>Money: minor units <code>bigint</code> + <code>currency</code> for client-facing money (SEM budgets/spend); <strong>provider cost is <code>numeric(12,6)</code> USD</strong> (DataForSEO unit prices go to $0.00012).</li>
+        </ul>
+      </div>
+      <figure class="wide">
+        <div class="plate">
+          <pre class="mermaid">
+%%{init:{'theme':'base','themeVariables':{'fontFamily':'ui-monospace,monospace','fontSize':'13px','background':'#FBFCFB','mainBkg':'#E7F0EA','primaryColor':'#E7F0EA','secondaryColor':'#EEF3EE','tertiaryColor':'#EEF3EE','primaryBorderColor':'#1E5E44','primaryTextColor':'#14201A','secondaryTextColor':'#14201A','tertiaryTextColor':'#14201A','textColor':'#14201A','nodeTextColor':'#14201A','lineColor':'#4B574F','edgeLabelBackground':'#FBFCFB','titleColor':'#14201A'}}}%%
+erDiagram
+  clients ||--o{ search_properties : "client web properties"
+  clients ||--o{ search_engagements : ""
+  search_properties ||--o{ search_engagements : "scoped to"
+  search_engagements ||--o{ search_kpi_targets : "outcome commitments"
+  search_engagements ||--o{ search_keyword_sets : ""
+  search_keyword_sets ||--o{ search_keywords : ""
+  search_properties ||--o{ search_rank_snapshots : "keyword x engine x day"
+  search_keywords ||--o{ search_rank_snapshots : ""
+  search_properties ||--o{ search_audits : ""
+  search_audits ||--o{ search_audit_findings : ""
+  search_properties ||--o{ search_backlink_snapshots : ""
+  search_properties ||--o{ search_ai_visibility : "GEO pillar"
+  search_engagements ||--o{ search_campaigns : "SEM"
+  search_campaigns ||--o{ search_ad_groups : ""
+  search_ad_groups ||--o{ search_ads : "RSA drafts"
+  search_campaigns ||--o{ search_negatives : ""
+  search_campaigns ||--o{ search_campaign_metrics_daily : ""
+  search_campaigns ||--o{ search_change_proposals : "dual-mode execution"
+  search_engagements ||--o{ search_reports : ""
+  deliverables ||--o{ search_reports : "report = deliverable"
+  search_engagements ||--o{ search_provider_calls : "cost ledger"
+          </pre>
+        </div>
+        <figcaption><b>FIG. 05-1</b> — Entity map. <code>search_engagements</code> is the outcome-tracked unit; <code>search_change_proposals</code> is the single execution artifact every live-account action materializes as, before either twin applies it.</figcaption>
+      </figure>
+      <div class="wrap">
+        <h3>Key tables</h3>
+      </div>
+      <div class="tablewrap"><table>
+        <thead><tr><th>Table</th><th>Purpose</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">search_properties</td><td>The client web property; anchor for crawls, ranks, GEO, analytics. Carries <code>domain</code> (crawl-allowlist source), <code>targets jsonb</code> (engine/device/locale/location), optional GSC/GA4/Ads connection FKs (P4), <code>verified_at</code> (crawl-consent checkpoint).</td></tr>
+          <tr><td class="mono">search_engagements</td><td>The outcome-tracked engagement. Carries <code>scope_preset</code> (label only) and the real per-client <code>tool_scope jsonb</code> — the human-set enable/cadence/limit config every scheduled flow and paid dispatch consults — plus <code>provider_budget_usd</code> stop-loss.</td></tr>
+          <tr><td class="mono">search_kpi_targets</td><td>Committed outcomes per engagement: <code>metric_key</code> (organic_sessions, top10_keywords, conversions, cpa_minor, roas_ratio, ai_citations…), baseline/target/due-period/direction. Reports measure against these.</td></tr>
+          <tr><td class="mono">search_keyword_sets / search_keywords</td><td>Keyword research + clustering. <code>embedding vector(768)</code> is a dual-mode operational feature column (pgvector when present, <code>float8[]</code> fallback) — an operational feature, not a retrieval store.</td></tr>
+          <tr><td class="mono">search_rank_snapshots</td><td>Append-only time series: keyword × engine × device × location × day, <code>serp_features jsonb</code> (the GEO signal — <code>ai_overview</code>, <code>featured_snippet</code>, <code>local_pack</code> — rides here too).</td></tr>
+          <tr><td class="mono">search_audits / search_audit_findings</td><td>Crawl/CWV/content/links/geo audit kinds; findings carry severity, category, status, and regression tracking (diff of consecutive completed audits).</td></tr>
+          <tr><td class="mono">search_backlink_snapshots</td><td>Monthly aggregates only (totals, new/lost top-N samples) — full link inventory is deliberately not stored in v1.</td></tr>
+          <tr><td class="mono">search_ai_visibility</td><td>The GEO pillar: per engine (chatgpt/google_ai_overview/gemini/claude/perplexity), query, <code>brand_mentioned</code>, <code>cited</code>, <code>cited_url</code>, prominence.</td></tr>
+          <tr><td class="mono">search_campaigns / ad_groups / ads / negatives / metrics_daily</td><td>SEM planning objects: campaigns built from keyword clusters, RSA drafts, AI-proposed negatives, imported daily performance.</td></tr>
+          <tr><td class="mono">search_reports</td><td>Metrics snapshot + KPI-vs-target + AI narrative draft → human-edited → delivered as a <code>files</code> row mirrored to Shared Drive and linked into <code>deliverables</code>.</td></tr>
+          <tr><td class="mono">search_provider_calls</td><td>The metering ledger (§06). <code>search_data_cache</code> is the shared market-data cache (§06, deliberately no-RLS — D-4).</td></tr>
+        </tbody>
+      </table></div>
+      <div class="wrap">
+        <h3>The dual-mode execution artifact</h3>
+        <p><code>search_change_proposals</code> is the mechanism that makes every live-account action safe regardless of which twin executes it — a launch, pause, budget/bid change, negatives batch, or ads batch is always a row first:</p>
+      </div>
+      <div class="plate" style="padding:1rem"><pre style="margin:0;font-family:var(--mono);font-size:.8rem;color:var(--plate-ink);overflow-x:auto">CREATE TABLE search_change_proposals (
+  id uuid PRIMARY KEY,
+  tenant_id uuid NOT NULL REFERENCES companies(id),
+  campaign_id uuid NOT NULL REFERENCES search_campaigns(id),
+  kind text NOT NULL CHECK (kind IN
+    ('launch','pause','budget','bid','negatives_batch','ads_batch')),
+  payload jsonb NOT NULL,             -- the exact intended change (hashed for approval match)
+  status text NOT NULL DEFAULT 'proposed'
+    CHECK (status IN ('proposed','approved','applied','dismissed')),
+  mode text NOT NULL DEFAULT 'manual' CHECK (mode IN ('manual','api')),
+  approval_id uuid REFERENCES automation_approvals(id),  -- WS4 link (api mode; one-shot)
+  export_file_id uuid REFERENCES files(id),   -- Ads-Editor-ready artifact (manual mode)
+  proposed_by uuid REFERENCES users(id), approved_by uuid REFERENCES users(id),
+  applied_by uuid REFERENCES users(id), applied_at timestamptz,
+  origin_site text NOT NULL, created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(), deleted_at timestamptz
+);</pre></div>
+      <div class="wrap">
+        <p>Manual mode records who applied it in the ad platform (<code>applied_by/applied_at</code>, artifact attached); api mode executes only by consuming the one-shot approval (§08, §12). The human picks the mode per action — no approval, no API execution, including for humans in the console.</p>
+        <h3>Custom fields &amp; agency-vertical relations</h3>
+        <ul>
+          <li>D17 <code>customFieldTargets</code>: <code>search_engagement</code>, <code>search_campaign</code>.</li>
+          <li><strong>Clients</strong> are the existing core <code>clients</code> rows — no duplicate client table.</li>
+          <li><strong>Deliverables/time</strong>: reports link into core <code>deliverables</code>; hours log through the normal <code>time_entries</code> path against the optional <code>project_id</code>.</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- ================= 06 PROVIDER ABSTRACTION ================= -->
+    <section class="part" id="p06">
+      <div class="part-head"><span class="part-num">§06</span><h2>Data-Provider Abstraction</h2></div>
+      <p class="dek">The provider layer lives inside platform-nest — metering must be transactional with the ledger, RLS scoping is native, and no new deployable is created.</p>
+      <div class="wrap">
+        <p>DataForSEO's async-queue model (Standard queue) posts a task and resolves by poll or postback-triggered fetch; live/sync providers resolve immediately. The interface is capability-based so drivers can be partial:</p>
+      </div>
+      <div class="plate" style="padding:1rem"><pre style="margin:0;font-family:var(--mono);font-size:.8rem;color:var(--plate-ink);overflow-x:auto">interface SearchDataProvider {
+  key: 'dataforseo' | 'semrush' | 'scraper';
+  capabilities: Set&lt;'serp' | 'volume' | 'suggestions' | 'difficulty'
+                  | 'backlinks' | 'competitors' | 'ai_visibility'&gt;;
+  postSerpTasks(reqs: SerpRequest[]): Promise&lt;TaskRef[]&gt;;
+  fetchSerpResults(refs: TaskRef[]): Promise&lt;SerpResult[]&gt;;
+  getKeywordMetrics(kws: KeywordQuery[]): Promise&lt;KeywordMetrics[]&gt;;
+  getBacklinkSummary(target: string): Promise&lt;BacklinkSummary&gt;;
+  getAiVisibility(q: AiVisibilityQuery): Promise&lt;AiVisibilityResult[]&gt;;
+  estimateCostUsd(op: ProviderOp): number;   // consulted BEFORE dispatch (stop-loss)
+}</pre></div>
+      <div class="wrap">
+        <p><strong>Selection order</strong> per call: engagement <code>tool_scope.provider</code> override → tenant default → platform default (<code>dataforseo</code>, Standard queue). Semrush serves premium engagements; the <code>scraper</code> driver (free autocomplete/PAA) is a capability-limited fallback for suggestions only.</p>
+
+        <h3>Caching-in-Postgres</h3>
+        <p><code>search_data_cache</code> is <strong>shared, no-RLS</strong> (like <code>companies</code>): market data is public-world data, and the whole cost win is cross-tenant reuse — the same keyword volume serves N clients. Only the provider layer reads/writes it; it never serializes raw to tenant APIs; single-flight dispatch (advisory lock per cache key) prevents stampedes.</p>
+      </div>
+      <div class="tablewrap"><table>
+        <thead><tr><th>Kind</th><th>TTL</th></tr></thead>
+        <tbody>
+          <tr><td>volume</td><td class="mono">30 days</td></tr>
+          <tr><td>serp</td><td class="mono">24 hours <span style="color:var(--ink-faint)">(tracked ranks bypass cache)</span></td></tr>
+          <tr><td>suggestions</td><td class="mono">14 days</td></tr>
+          <tr><td>backlinks</td><td class="mono">7 days</td></tr>
+          <tr><td>ai_visibility</td><td class="mono">7 days</td></tr>
+        </tbody>
+      </table></div>
+      <div class="wrap">
+        <div class="note"><span class="k">D-4 · Ratified 2026-07-23</span>This is a deliberate, documented RLS exemption. It contains no client identifiers or client-private data — results are copied onto tenant rows, never returned raw.</div>
+
+        <h3>The usage/cost ledger</h3>
+        <p><strong>Scope + budget stop-loss</strong>, checked in one place before dispatch: (0) the capability must be enabled in the engagement's <code>tool_scope</code> — a disabled tool is refused with the toggle named, regardless of budget; then month-to-date <code>SUM(cost_usd)</code> vs. engagement budget → tenant monthly cap → global platform cap (env, default $150/mo until the deposit model is proven). Any breach: the call is refused, a <code>search.provider.budget_threshold</code> event fires (also at 80%), and the console shows the blocked state.</p>
+        <p>The ledger powers the per-engagement usage panel, tenant admin rollup, the <code>search.provider_cost.month</code> rollup metric (feeds billing), and the §01 "blended $/client" truth — <strong>spend = Σ each engagement's enabled tools</strong>. The scope panel (SM-29) shows a projected monthly cost per toggle so the human sees the price of each switch before flipping it.</p>
+      </div>
+    </section>
+
+    <!-- ================= 07 FORK/ADAPT ================= -->
+    <section class="part" id="p07">
+      <div class="part-head"><span class="part-num">§07</span><h2>Fork/Adapt Plan per Repo</h2></div>
+      <p class="dek">The monolith-adapt vs. data-only call, made per tool. "Data-only" means we take its data/engine/reference — never run its UI or auth.</p>
+      <div class="tablewrap"><table>
+        <thead><tr><th>Repo</th><th>Verdict</th><th>Keep</th><th>Add / how it plugs in</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">every-app/open-seo</td><td><span class="tag t-warn">Data-only</span></td><td>DataForSEO client code + endpoint map; MCP tool shapes as a checklist; audit heuristics</td><td>Its DataForSEO wiring informs the <code>dataforseo</code> driver; tool list informs <code>search.*</code> MCP tools</td></tr>
+          <tr><td class="mono">SEONaut (Go+MySQL)</td><td><span class="tag t-ok">Adapt, job-mode</span></td><td>Crawl engine, severity-ranked audit rules</td><td>Job container (+ ephemeral MySQL sidecar); adapter parses report → <code>search_audit_findings</code>. Fallback spike: port rules into the ingest adapter if the sidecar proves too heavy</td></tr>
+          <tr><td class="mono">open-seo-crawler</td><td><span class="tag t-ok">Adapt, job-mode</span></td><td>Concurrent crawler, sitemap hygiene, exports</td><td>Job container; XLSX/JSON export → ingest adapter; crawled content also feeds WS8 knowledge ingest</td></tr>
+          <tr><td class="mono">Unlighthouse</td><td><span class="tag t-warn">Data-only CLI, job-mode</span></td><td>Site-wide Lighthouse/CWV JSON</td><td>n8n-scheduled CLI job → JSON → <code>search_audits(kind='cwv')</code></td></tr>
+          <tr><td class="mono">SerpBear</td><td><span class="tag t-warn">Data-only (reference)</span></td><td>Its pluggable SERP-scraper adapter list</td><td>Informs the <code>scraper</code> fallback driver; rank UX informs the Rankings tab</td></tr>
+          <tr><td class="mono">Umami</td><td><span class="tag t-ok">Run stock as shared infra</span></td><td>Everything (stock container)</td><td>One Umami website per <code>search_properties</code>; ERP stores read-only API token. Decision-gated (OQ-5)</td></tr>
+          <tr><td class="mono">Claude Ads</td><td><span class="tag t-info">Integrate as MCP tooling, phased</span></td><td>Audit/budget-check/draft-first patterns, scripts</td><td>P3: Scripts patterns → read bridge + manual-apply twin. P4: MCP/API surface executes api-mode proposals behind WS4</td></tr>
+        </tbody>
+      </table></div>
+    </section>
+
+    <!-- ================= 08 AI DESIGN ================= -->
+    <section class="part" id="p08">
+      <div class="part-head"><span class="part-num">§08</span><h2>AI Design</h2></div>
+      <p class="dek">Local-first task routing, the AI-drafts→human-approves→execute spine, and search data exposed as MCP tools.</p>
+      <div class="tablewrap"><table>
+        <thead><tr><th>Task</th><th>Model</th><th>Trigger</th></tr></thead>
+        <tbody>
+          <tr><td>Keyword/intent clustering</td><td>gateway <code>/embed</code> (local) + <strong>Hermes</strong> labels</td><td>Keywords tab, bulk</td></tr>
+          <tr><td>Search-term → negative classification</td><td><strong>Hermes</strong> + rules</td><td>Weekly sweep / import</td></tr>
+          <tr><td>Audit-finding triage &amp; fix drafts</td><td><strong>Hermes</strong></td><td>Post-audit</td></tr>
+          <tr><td>Content briefs (+ GEO extractability)</td><td><strong>Hermes</strong> draft → <strong>Claude</strong> optional polish</td><td>Briefs tab, RAG via WS8</td></tr>
+          <tr><td>Report narrative</td><td><strong>Hermes</strong> draft → <strong>Claude</strong> polish where scoped</td><td>Monthly flow — the one place cloud polish defaults on</td></tr>
+          <tr><td>RSA ad copy</td><td><strong>Hermes</strong> draft → <strong>Claude</strong> final for approved launches</td><td>Ads Studio — drafts never auto-publish</td></tr>
+        </tbody>
+      </table></div>
+      <div class="wrap">
+        <div class="note"><span class="k">pgvector note (D9 hygiene)</span><code>search_keywords.embedding</code> is an operational feature column for clustering, not a retrieval store — it copies the WS8 dual-mode pattern (pgvector when the extension exists, <code>float8[]</code> fallback otherwise). Anything retrieval-shaped (briefs, GEO corpus) goes through WS8.</div>
+
+        <h3>AI-drafts → human-approves → execute</h3>
+      </div>
+      <figure class="wide"><div class="plate">
+        <pre class="mermaid">
+%%{init:{'theme':'base','themeVariables':{'fontFamily':'ui-monospace,monospace','fontSize':'12px','background':'#FBFCFB','mainBkg':'#E7F0EA','primaryColor':'#E7F0EA','primaryBorderColor':'#1E5E44','primaryTextColor':'#14201A','textColor':'#14201A','lineColor':'#4B574F','actorBkg':'#E7F0EA','actorBorder':'#1E5E44','actorTextColor':'#14201A','actorLineColor':'#5A665E','signalColor':'#14201A','signalTextColor':'#14201A','labelBoxBkgColor':'#E7F0EA','labelBoxBorderColor':'#1E5E44','labelTextColor':'#14201A','loopTextColor':'#14201A','noteBkgColor':'#F3E9D6','noteTextColor':'#14201A','noteBorderColor':'#9C6714','activationBkgColor':'#E7F0EA','activationBorderColor':'#1E5E44','sequenceNumberColor':'#FBFCFB'}}}%%
+sequenceDiagram
+  autonumber
+  participant AI as Hermes / Claude
+  participant N as search module
+  participant H as Human (console)
+  participant W as WS4 approvals
+  participant AD as Ad platform
+  AI->>N: draft (ad copy / negatives / report)
+  N->>N: persist as draft row — never applied
+  N-->>H: review in console
+  alt low-impact (briefs, reports)
+    H->>N: approve (module permission)
+  else live site or live spend
+    N->>W: search_change_proposals row + suspend
+    H->>W: approve (one-shot approvalId)
+    alt manual twin
+      H->>N: export Ads-Editor artifact, apply in platform, mark applied
+    else automated twin
+      N->>AD: consume approvalId, execute exactly once
+    end
+  end
+        </pre>
+      </div><figcaption><b>FIG. 08-1</b> — No approval, no execution — including for humans in the console. The one-shot <code>approvalId</code> avoids the deferred Temporal-resume problem the same way WS4 did.</figcaption></figure>
+
+      <div class="wrap">
+        <h3>Search data as MCP tools</h3>
+        <p>Registered via <code>ModuleContract.mcpTools</code> (aggregated by mcp-hub — nothing hub-side to hardcode). Reads are <code>minAssurance:'low'</code>; <strong>paid-data pulls are declared <code>write:true, impact:'medium'</code> even though they're semantically reads — they spend money</strong> — so automation principals route through the D14 gate and the ledger records the OBO automation user.</p>
+      </div>
+      <div class="tablewrap"><table>
+        <thead><tr><th>Tool</th><th>Kind</th><th>Impact</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">search.listEngagements / rankSummary / auditSummary / ledgerSummary</td><td>read</td><td>—</td></tr>
+          <tr><td class="mono">search.keywordResearch</td><td>paid pull</td><td><span class="tag t-warn">medium (budget-checked)</span></td></tr>
+          <tr><td class="mono">search.pullRanks / pullBacklinks / pullAiVisibility</td><td>paid pull</td><td><span class="tag t-warn">medium</span></td></tr>
+          <tr><td class="mono">search.runAudit</td><td>job trigger ($0)</td><td><span class="tag t-ok">low</span></td></tr>
+          <tr><td class="mono">search.clusterKeywords / draftBrief / proposeNegatives / draftReport</td><td>AI draft</td><td><span class="tag t-ok">low (drafts only)</span></td></tr>
+          <tr><td class="mono">search.exportProposal</td><td>export (manual mode)</td><td><span class="tag t-ok">low (no live side effect)</span></td></tr>
+          <tr><td class="mono">search.applyNegatives / setBudget / launchCampaign / publishContent</td><td>live mutation (api mode)</td><td><span class="tag t-crit">high → always suspends to WS4</span></td></tr>
+        </tbody>
+      </table></div>
+    </section>
+
+    <!-- ================= 09 CONSOLE UX ================= -->
+    <section class="part" id="p09">
+      <div class="part-head"><span class="part-num">§09</span><h2>Console UX</h2></div>
+      <p class="dek">One department console, dept name <strong>"SEO"</strong>, on the dept-interface-template exactly as Web Dev uses it — universal spine plus three craft groups.</p>
+      <div class="tablewrap"><table>
+        <thead><tr><th>Group</th><th>Sub-tabs (under <code>/departments/seo/</code>)</th></tr></thead>
+        <tbody>
+          <tr><td><strong>Accounts</strong></td><td>Engagements (<code>engagements</code>) · Reports (<code>reports</code>)</td></tr>
+          <tr><td><strong>Optimize</strong> (SEO+GEO)</td><td>Site Audit (<code>audit</code>) · Keywords (<code>keywords</code>) · Rankings (<code>rankings</code>) · Content Briefs (<code>briefs</code>) · AI Visibility (<code>ai-visibility</code>)</td></tr>
+          <tr><td><strong>Campaigns</strong> (SEM)</td><td>Planner (<code>planner</code>) · Ads Studio (<code>ads</code>) · Search Terms (<code>search-terms</code>) · Pacing (<code>pacing</code>)</td></tr>
+        </tbody>
+      </table></div>
+      <div class="wrap">
+        <p>Home is the command-center template: a KPI strip from rollup metrics (active engagements, top-10 keywords, critical findings, MTD provider spend, MTD ad spend), an activity feed, and a launcher row (GSC, GA4, Google Ads, Looker Studio, Claude). The My-Work rail is inherited unchanged; Connections gains the property/provider link states.</p>
+
+        <h3>Button capability matrix</h3>
+        <p>Every 🔵 action is additionally gated by the engagement's <strong>tool-scope config</strong>: if the human hasn't enabled that tool for the client, the button renders disabled and names the missing toggle. Every live-account action is <strong>dual-mode</strong> — the manual twin and the automated twin appear side by side; the human picks per action.</p>
+        <div class="legend">
+          <span>🟢 AI/crawler-only — $0 external, buildable now</span>
+          <span>🔵 DATA KEY — DataForSEO/Semrush, ledger/budget-checked</span>
+          <span>🟠 ADS LINK — client ad-account OAuth (P4)</span>
+          <span>🔴 WS4 APPROVAL — human decision required</span>
+        </div>
+      </div>
+      <div class="tablewrap"><table>
+        <thead><tr><th>Console action</th><th>Tab</th><th>Needs</th><th>Gate</th></tr></thead>
+        <tbody>
+          <tr><td>Create engagement / property / KPI targets</td><td>Engagements</td><td>—</td><td>permission only</td></tr>
+          <tr><td><strong>Configure engagement scope &amp; budget</strong> (toggle grid + cadence + caps + projected cost)</td><td>Engagements</td><td>—</td><td class="mono">search:scope:write</td></tr>
+          <tr><td>Run technical audit (SEONaut/crawler)</td><td>Site Audit</td><td>🟢</td><td>low</td></tr>
+          <tr><td>Run CWV scan (Unlighthouse)</td><td>Site Audit</td><td>🟢</td><td>low</td></tr>
+          <tr><td>AI triage findings / draft fixes</td><td>Site Audit</td><td>🟢</td><td>draft only</td></tr>
+          <tr><td>Import keywords (CSV / paste / GSC export)</td><td>Keywords</td><td>🟢</td><td>—</td></tr>
+          <tr><td>AI cluster + intent-tag set</td><td>Keywords</td><td>🟢</td><td>draft only</td></tr>
+          <tr><td>Fetch volume / difficulty / CPC</td><td>Keywords</td><td>🔵</td><td>budget stop-loss</td></tr>
+          <tr><td>Keyword suggestions (autocomplete/PAA)</td><td>Keywords</td><td>🟢 (scraper) / 🔵 richer</td><td>budget if 🔵</td></tr>
+          <tr><td>Track keywords / Pull ranks now</td><td>Rankings</td><td>🔵</td><td>budget stop-loss</td></tr>
+          <tr><td>Backlink snapshot</td><td>Rankings</td><td>🔵</td><td>budget stop-loss</td></tr>
+          <tr><td>Draft content brief (RAG over own crawl)</td><td>Briefs</td><td>🟢</td><td>draft only</td></tr>
+          <tr><td>Polish brief/content with Claude</td><td>Briefs</td><td>🟢 (gateway-capped)</td><td>draft only</td></tr>
+          <tr><td><strong>Publish content to client site (WebDesk)</strong></td><td>Briefs</td><td>WebDesk P5 seam</td><td>🔴</td></tr>
+          <tr><td>Pull AI visibility (GEO)</td><td>AI Visibility</td><td>🔵</td><td>budget stop-loss</td></tr>
+          <tr><td>Build campaign plan from clusters</td><td>Planner</td><td>🟢</td><td>draft only</td></tr>
+          <tr><td>Generate RSA drafts</td><td>Ads Studio</td><td>🟢</td><td>draft only</td></tr>
+          <tr><td>Import performance CSV</td><td>Pacing</td><td>🟢</td><td>—</td></tr>
+          <tr><td>Live perf/search-term sync (Scripts bridge P3 / OAuth P4)</td><td>Pacing / Search Terms</td><td>bridge or 🟠</td><td>— (read)</td></tr>
+          <tr><td>AI propose negatives</td><td>Search Terms</td><td>🟢</td><td>draft only</td></tr>
+          <tr><td>Apply negatives — <strong>manual twin</strong>: export + mark applied</td><td>Search Terms</td><td>🟢</td><td class="mono">search:campaign:launch</td></tr>
+          <tr><td>Apply negatives — <strong>automated twin</strong>: API push</td><td>Search Terms</td><td>🟠</td><td>🔴</td></tr>
+          <tr><td>Budget / bid / pause — <strong>manual twin</strong></td><td>Pacing</td><td>🟢</td><td class="mono">search:campaign:launch</td></tr>
+          <tr><td>Budget / bid / pause — <strong>automated twin</strong></td><td>Pacing</td><td>🟠</td><td>🔴</td></tr>
+          <tr><td>Launch campaign — <strong>manual twin</strong>: export build sheet</td><td>Planner</td><td>🟢</td><td class="mono">search:campaign:launch</td></tr>
+          <tr><td>Launch campaign — <strong>automated twin</strong></td><td>Planner</td><td>🟠</td><td>🔴</td></tr>
+          <tr><td>Generate report (metrics + AI narrative)</td><td>Reports</td><td>🟢 (🔵 enriches)</td><td class="mono">search:report:approve</td></tr>
+          <tr><td>Deliver report (Shared Drive + deliverable)</td><td>Reports</td><td>🟢</td><td>after approve</td></tr>
+          <tr><td>View usage ledger / raise engagement budget</td><td>Engagements</td><td>—</td><td class="mono">search:ledger:read / search:provider:admin</td></tr>
+        </tbody>
+      </table></div>
+      <div class="wrap">
+        <p><strong>Everything 🟢 ships value in P1 with zero external spend</strong> — that is deliberate.</p>
+      </div>
+    </section>
+
+    <!-- ================= 10 ERP INTEGRATION ================= -->
+    <section class="part" id="p10">
+      <div class="part-head"><span class="part-num">§10</span><h2>ERP Integration Points</h2></div>
+      <p class="dek">Reuse over invention — no new subsystem is created; this vertical plugs into every existing plane the platform already has.</p>
+      <div class="tablewrap"><table>
+        <thead><tr><th>Subsystem</th><th>Integration</th></tr></thead>
+        <tbody>
+          <tr><td>platform-nest</td><td><code>ModuleContract</code> key <code>search</code>; hr-convention controller path; <code>ModuleEnabledGuard</code>; enablement via <code>enabled_modules</code> OR active <code>service_assignment</code></td></tr>
+          <tr><td>BFF contract</td><td>New section in <code>FRONTEND-BFF-CONTRACT.md</code>: <code>/api/:t/modules/search/{properties,engagements,…/scope,kpi-targets,keyword-sets,keywords,ranks,audits,findings,backlinks,ai-visibility,campaigns,ad-groups,ads,negatives,change-proposals,metrics-daily,reports,ledger,research/*}</code></td></tr>
+          <tr><td>mcp-hub</td><td><code>search.*</code> tools via <code>mcpTools</code> aggregation (§08); no hub changes needed</td></tr>
+          <tr><td>ai-gateway-go</td><td><code>/complete</code> (Hermes default, Claude flagged) + <code>/embed</code>; gateway budget caps + DLP + egress audit apply automatically</td></tr>
+          <tr><td>WS8 knowledge</td><td>Crawled site content ingested as tenant-ACL'd sources; briefs/GEO retrieval via <code>knowledge.search</code> (D9 preserved)</td></tr>
+          <tr><td>automation (n8n)</td><td>Flows in §11; n8n orchestrates, MCP accesses, zero logic in workflows</td></tr>
+          <tr><td>WS4 approvals</td><td>High-impact <code>search.*</code> tools suspend into <code>automation_approvals</code>; api-mode proposals execute only with a one-shot approved <code>approvalId</code></td></tr>
+          <tr><td>Event backbone</td><td><code>search.rank.dropped</code>, <code>audit.completed/regression</code>, <code>backlinks.lost_spike</code>, <code>budget.overspend</code>, <code>provider.budget_threshold</code>, <code>report.ready_for_review/delivered</code>, <code>campaign.proposed</code>, <code>ai_visibility.changed</code> → notifications bell + n8n bridge</td></tr>
+          <tr><td>Files / Shared Drive (WS11)</td><td>Raw crawl exports + rendered reports as <code>files</code> rows mirrored to the client's Drive folder</td></tr>
+          <tr><td>Rollups (D12)</td><td><code>search.engagements.active</code> · <code>search.rank.top10</code> · <code>search.audits.critical_open</code> · <code>search.provider_cost.month</code> (money, isMonetary) · <code>search.sem_spend.month</code> · <code>search.reports.delivered</code></td></tr>
+          <tr><td>Cerbos</td><td>New resource policies (§12); UI capabilities mirrored in <code>lib/rbac.ts</code></td></tr>
+          <tr><td>observability (WS9)</td><td>OTel spans on provider calls (provider, endpoint, items, cost_usd, cache_hit), crawl jobs, AI calls; ledger-vs-cap gauge</td></tr>
+          <tr><td>integration_connections (0033)</td><td>Widen <code>provider</code> CHECK + <code>owner_kind 'client'</code> (polymorphic owner_id → clients.id). Tokens only via <code>setConnectionTokens</code> (P4 OAuth)</td></tr>
+          <tr><td>WebDesk (Zone B)</td><td><code>search.publishContent</code> targets the WebDesk content engine for WebDesk-hosted clients (post-WebDesk-P3); until then briefs export as files</td></tr>
+        </tbody>
+      </table></div>
+    </section>
+
+    <!-- ================= 11 AUTOMATION FLOWS ================= -->
+    <section class="part" id="p11">
+      <div class="part-head"><span class="part-num">§11</span><h2>Automation Flows</h2></div>
+      <p class="dek">All flows are thin orchestrations calling <code>search.*</code> MCP tools. Scheduling is scope-driven — each flow iterates only engagements whose <code>tool_scope</code> enables the tool at the due cadence.</p>
+      <div class="tablewrap"><table>
+        <thead><tr><th>Flow</th><th>Schedule / trigger</th><th>MCP calls</th><th>Phase</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">sm-site-audit</td><td>weekly per active property</td><td><code>search.runAudit(kind='technical')</code> → <code>auditSummary</code> → notify</td><td class="mono">P1</td></tr>
+          <tr><td class="mono">sm-cwv-scan</td><td>weekly</td><td><code>search.runAudit(kind='cwv')</code></td><td class="mono">P1</td></tr>
+          <tr><td class="mono">sm-rank-pull</td><td>cadence from <code>tool_scope</code></td><td><code>search.pullRanks</code> (Standard tasks; scope+ledger-checked)</td><td class="mono">P2</td></tr>
+          <tr><td class="mono">sm-rank-collect</td><td>webhook (task-id only) + safety poll</td><td><code>search.ingestRankResults</code> (authoritative API fetch)</td><td class="mono">P2</td></tr>
+          <tr><td class="mono">sm-keyword-refresh</td><td>monthly</td><td><code>search.keywordResearch</code> (cache-aware)</td><td class="mono">P2</td></tr>
+          <tr><td class="mono">sm-backlink-snapshot</td><td>monthly</td><td><code>search.pullBacklinks</code></td><td class="mono">P2</td></tr>
+          <tr><td class="mono">sm-ai-visibility</td><td>weekly, per scope</td><td><code>search.pullAiVisibility</code></td><td class="mono">P2</td></tr>
+          <tr><td class="mono">sm-provider-ledger-guard</td><td>daily</td><td><code>search.ledgerSummary</code> → threshold events → notify/pause</td><td class="mono">P2</td></tr>
+          <tr><td class="mono">sm-search-term-sweep</td><td>weekly</td><td>ingest terms → <code>proposeNegatives</code> → change proposals</td><td class="mono">P3</td></tr>
+          <tr><td class="mono">sm-budget-pacing</td><td>daily</td><td>pacing calc → <code>budget.overspend</code>; proposed pause = a change proposal</td><td class="mono">P3</td></tr>
+          <tr><td class="mono">sm-monthly-report</td><td>monthly per engagement</td><td><code>draftReport</code> → review → on approve <code>deliverReport</code></td><td class="mono">P3</td></tr>
+        </tbody>
+      </table></div>
+    </section>
+
+    <!-- ================= 12 TRUST & SECURITY ================= -->
+    <section class="part" id="p12">
+      <div class="part-head"><span class="part-num">§12</span><h2>Trust &amp; Security</h2></div>
+      <p class="dek">Nothing new to invent — every control reuses an existing platform mechanism, applied to a new set of resources.</p>
+      <div class="cols">
+        <div class="card"><span class="k">Key custody</span><p>DataForSEO/Semrush keys: platform-nest env → OpenBao target-state; never in platform-ui, n8n credential stores, or per-tenant rows. Client OAuth tokens (P4) ride the <code>integration_connections</code> vault only.</p></div>
+        <div class="card"><span class="k">RLS</span><p>All <code>search_*</code> tenant tables: FORCE-RLS, third-wall predicate, fail-closed empty-set semantics. The single exemption is <code>search_data_cache</code> — ratified, D-4.</p></div>
+        <div class="card"><span class="k">Cerbos resources</span><p>New policy files: <code>resource_search_property/engagement/keyword/audit/campaign/report/ledger</code>. <code>resource_search_engagement</code> carries a <code>set_scope</code> action — the tool-scope decision is itself permission-gated.</p></div>
+        <div class="card"><span class="k">Crawler egress (SSRF)</span><p>Resolve-then-check against registered+verified property domains; deny private/link-local/metadata ranges; robots.txt respect; rate caps; identified UA. Property <code>verified_at</code> is a prerequisite to first crawl.</p></div>
+        <div class="card"><span class="k">Inbound webhooks</span><p>Notification-only (task ids), HMAC/secret-path validated at n8n; authoritative data always re-fetched over the authenticated provider API.</p></div>
+        <div class="card"><span class="k">Money safety</span><p>Single dispatch choke-point (estimate → ledger check → advisory-lock → dispatch → true-up); one-shot approvalId consumption is replay-proof.</p></div>
+      </div>
+      <div class="wrap">
+        <p>Module permissions declared in the contract: <code>search:engagement:read|write</code>, <code>search:scope:write</code>, <code>search:keyword:write</code>, <code>search:rank:read</code>, <code>search:audit:run</code>, <code>search:brief:write</code>, <code>search:campaign:write</code>, <code>search:campaign:launch</code> (covers manual mark-applied <em>and</em> api execution), <code>search:content:publish</code>, <code>search:report:write|approve</code>, <code>search:ledger:read</code>, <code>search:provider:admin</code>.</p>
+        <p><strong>Audit:</strong> every provider call (ledger), every Cerbos decision (existing), every hub tool call (existing JSONL), every approval decision (existing) — nothing new to invent.</p>
+      </div>
+    </section>
+
+    <!-- ================= 13 ROLLOUT & TICKETS ================= -->
+    <section class="part" id="p13">
+      <div class="part-head"><span class="part-num">§13</span><h2>Rollout &amp; Ticket Decomposition</h2></div>
+      <p class="dek">Cost-honest phases — P0 contracts → P1 zero-spend value → P2 paid data → P3 SEM + reports → P4 committed live-ads automation. 26 tickets P0–P3, 2 committed P4, /army-ready.</p>
+      <div class="phases">
+        <div class="phase"><span class="pn">P0</span><div>
+          <h4>Foundation</h4>
+          <p>Migrations for all §05 tables + third-wall RLS + <code>search_data_cache</code> (no-RLS) · ModuleContract + CRUD + tool-scope endpoints · Cerbos policies × 7 · provider abstraction + ledger + stop-loss choke-point · DataForSEO driver · config plumbing.</p>
+          <p class="meta">GATE → module registers, RLS proven, budget stop-loss refuses correctly before any real spend.</p>
+        </div></div>
+        <div class="phase gate"><span class="pn">P1</span><div>
+          <h4>$0 value — crawlers + AI on own data</h4>
+          <p>Crawl workers with egress guard · audit ingest + regression diff · keyword import/embed/cluster · AI drafting services · console shell + Optimize tabs v1 · engagement scope-config surface.</p>
+          <p class="meta">GATE → register a property → crawl → findings → triage → cluster, all in-console, zero external spend.</p>
+        </div></div>
+        <div class="phase gate"><span class="pn">P2</span><div>
+          <h4>Paid data (gate: OQ-2 deposit)</h4>
+          <p>Rank tracking pull/ingest + Rankings UI · n8n flows batch 1 · backlink snapshots + AI-visibility pulls · metering surfaces (usage panel, admin summary, threshold events).</p>
+          <p class="meta">GATE → a real DataForSEO pull renders in Rankings; ledger sums reconcile with a scripted call sequence.</p>
+        </div></div>
+        <div class="phase gate"><span class="pn">P3</span><div>
+          <h4>SEM + reports</h4>
+          <p>SEM domain + change-proposal model · manual-apply path (Ads-Editor exports) · Campaigns craft-group UI with the dual-mode picker · Ads-Scripts read bridge · WS4 execution path (one-shot approvalId) · reports · docs/registration · full-stack e2e.</p>
+          <p class="meta">GATE → the full planning loop runs in-console; both twins render; MODULES.md bumped to DEV-VERIFIED.</p>
+        </div></div>
+        <div class="phase gate"><span class="pn">P4</span><div>
+          <h4>Live-ads automation (committed) + decision-gated extras</h4>
+          <p>Google OAuth (GSC/GA4/Ads) on the 0033 vault · automated live-write executor consuming the one-shot approvalId. Decision-gated: Umami deploy (OQ-5), Semrush premium driver (OQ-3).</p>
+          <p class="meta">GATE → a sandbox/test-account push applies exactly the proposal payload; ledger/audit rows complete.</p>
+        </div></div>
+      </div>
+
+      <div class="wrap"><h3>P0 — Foundation</h3></div>
+      <div class="tablewrap"><table>
+        <thead><tr><th>#</th><th>Ticket</th><th>Tier</th><th>Model</th><th>Deps</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">SM-01 ⚡</td><td>Migration(s): all §05 tables + third-wall RLS + indexes + <code>search_data_cache</code> (no-RLS, D-4) + dual-mode embedding + <code>integration_connections</code> widen</td><td>senior-db</td><td class="mono">opus·medium</td><td>—</td></tr>
+          <tr><td class="mono">SM-02 ⚡</td><td><code>search</code> ModuleContract + controller skeleton + registry + permissions + guard + uiManifest + engagement/property/kpi CRUD + tool-scope endpoints + presets</td><td>senior-be</td><td class="mono">default</td><td>SM-01</td></tr>
+          <tr><td class="mono">SM-03 ⚡</td><td>Cerbos policies × 7 + derived-roles wiring + policy tests + <code>lib/rbac.ts</code> mirror</td><td>medior</td><td class="mono">default</td><td>SM-02</td></tr>
+          <tr><td class="mono">SM-04 ⚡</td><td>Provider abstraction: <code>SearchDataProvider</code>, capability registry, cache layer (TTLs, single-flight), scope+ledger+stop-loss choke-point, cost projection endpoint</td><td>senior-be</td><td class="mono">opus·medium</td><td>SM-01,02</td></tr>
+          <tr><td class="mono">SM-05</td><td>DataForSEO driver: Standard task_post/poll + postback-triggered fetch; SERP/volume/labs/backlinks/ai-visibility endpoints</td><td>senior-be</td><td class="mono">default</td><td>SM-04</td></tr>
+          <tr><td class="mono">SM-06</td><td>Config plumbing: server-side creds, caps env, per-pillar feature flags, <code>.env.example</code></td><td>junior</td><td class="mono">default</td><td>SM-04</td></tr>
+        </tbody>
+      </table></div>
+
+      <div class="wrap"><h3>P1 — $0 value</h3></div>
+      <div class="tablewrap"><table>
+        <thead><tr><th>#</th><th>Ticket</th><th>Tier</th><th>Model</th><th>Deps</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">SM-07</td><td>Crawl workers: SEONaut job-mode (+ MySQL sidecar spike w/ open-seo-crawler fallback), open-seo-crawler, Unlighthouse runner; egress guard</td><td>senior-integrator</td><td class="mono">default · QA gate</td><td>SM-01</td></tr>
+          <tr><td class="mono">SM-08</td><td>Audit ingest adapters, regression diff, events</td><td>medior</td><td class="mono">default</td><td>SM-07,02</td></tr>
+          <tr><td class="mono">SM-09</td><td>Keywords: import, embeddings, clustering (dual-mode), Hermes intent/labels</td><td>medior</td><td class="mono">default</td><td>SM-02</td></tr>
+          <tr><td class="mono">SM-10</td><td>AI drafting services: briefs (WS8 RAG), finding triage, meta suggestions, narrative draft</td><td>senior-be</td><td class="mono">default</td><td>SM-08,09</td></tr>
+          <tr><td class="mono">SM-11 ⚡</td><td>Console shell: <code>seo</code> toolkit (3 craft groups), tab skeletons, <code>lib/search.ts</code> BFF types</td><td>senior-fe</td><td class="mono">default</td><td>SM-02</td></tr>
+          <tr><td class="mono">SM-12</td><td>Optimize tabs v1: Site Audit, Keywords (import/cluster; scope-disabled states)</td><td>medior</td><td class="mono">default</td><td>SM-11,08,09</td></tr>
+          <tr><td class="mono">SM-13</td><td>Events → notifications wiring for all §10 event types</td><td>junior</td><td class="mono">default</td><td>SM-08</td></tr>
+          <tr><td class="mono">SM-29</td><td>Engagement scope-config surface: toggle grid, preset picker, projected monthly cost, budget-cap editor</td><td>medior</td><td class="mono">default</td><td>SM-11,04</td></tr>
+        </tbody>
+      </table></div>
+
+      <div class="wrap"><h3>P2 — Paid data (gate: OQ-2 deposit)</h3></div>
+      <div class="tablewrap"><table>
+        <thead><tr><th>#</th><th>Ticket</th><th>Tier</th><th>Model</th><th>Deps</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">SM-14</td><td>Rank tracking: pull/ingest endpoints + Rankings UI</td><td>medior</td><td class="mono">default</td><td>SM-05,11</td></tr>
+          <tr><td class="mono">SM-15</td><td>n8n flows batch 1 (rank-pull/collect, site-audit, cwv-scan, keyword-refresh) + seeds</td><td>medior</td><td class="mono">default</td><td>SM-05,08</td></tr>
+          <tr><td class="mono">SM-16</td><td>Backlink snapshots + AI-visibility pulls + their panels</td><td>medior</td><td class="mono">default</td><td>SM-05,11</td></tr>
+          <tr><td class="mono">SM-17</td><td>Metering surfaces: engagement usage panel, tenant admin summary, threshold events, rollup metrics</td><td>medior</td><td class="mono">default</td><td>SM-04,11</td></tr>
+        </tbody>
+      </table></div>
+
+      <div class="wrap"><h3>P3 — SEM + reports</h3></div>
+      <div class="tablewrap"><table>
+        <thead><tr><th>#</th><th>Ticket</th><th>Tier</th><th>Model</th><th>Deps</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">SM-18</td><td>SEM domain: campaigns/ad-groups/ads/negatives CRUD, change-proposal model, cluster→plan generator, RSA + negative AI drafts</td><td>senior-be</td><td class="mono">default</td><td>SM-09</td></tr>
+          <tr><td class="mono">SM-30</td><td>Manual-apply path: approved proposal → Ads-Editor-ready exports → mark-applied flow</td><td>senior-be</td><td class="mono">default</td><td>SM-18</td></tr>
+          <tr><td class="mono">SM-19</td><td>Campaigns craft-group UI (Planner, Ads Studio, Search Terms, Pacing) with the dual-mode picker</td><td>senior-fe</td><td class="mono">default</td><td>SM-18,30,11</td></tr>
+          <tr><td class="mono">SM-20</td><td>Ads-Scripts read bridge: exporter template + signed n8n webhook → metrics-daily + search terms</td><td>senior-integrator</td><td class="mono">default</td><td>SM-18</td></tr>
+          <tr><td class="mono">SM-21 ⚡</td><td>WS4 execution path: high-impact tools registered, one-shot approvalId consumption, console execute-after-approve UX</td><td>senior-be</td><td class="mono">opus·high</td><td>SM-18,03</td></tr>
+          <tr><td class="mono">SM-22</td><td>Reports: snapshot + narrative draft → review/approve → render → files/Drive + deliverable link; monthly/pacing/sweep flows</td><td>medior</td><td class="mono">default</td><td>SM-10,17,18</td></tr>
+          <tr><td class="mono">SM-23</td><td>Docs/registration: MODULES.md flip + CHANGELOG, BFF-contract rows, runbook stub, dept-console IA plan update</td><td>junior</td><td class="mono">default</td><td>SM-02</td></tr>
+          <tr><td class="mono">SM-24</td><td>Full-stack e2e verification on the live dev stack + Playwright console suite</td><td>medior</td><td class="mono">default</td><td>all</td></tr>
+        </tbody>
+      </table></div>
+
+      <div class="wrap"><h3>P4 — Live-ads automation (committed) + decision-gated</h3></div>
+      <div class="tablewrap"><table>
+        <thead><tr><th>#</th><th>Ticket</th><th>Tier</th><th>Model</th><th>Deps</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">SM-25 ⚡</td><td>Google OAuth (GSC/GA4/Ads) on the 0033 vault: consent flows, token refresh, <code>owner_kind='client'</code> links</td><td>senior-be</td><td class="mono">opus·medium</td><td>SM-01</td></tr>
+          <tr><td class="mono">SM-26</td><td>Automated live-write executor: approved api-mode proposals → Google Ads API push, one-shot consumption, rollback notes</td><td>senior-integrator</td><td class="mono">default</td><td>SM-21,25</td></tr>
+        </tbody>
+      </table></div>
+      <div class="wrap">
+        <p><strong>Decision-gated (do not mobilize):</strong> SM-27 Umami deploy + property binding [senior-integrator] (OQ-5) · SM-28 Semrush premium driver [medior] (OQ-3).</p>
+        <p><strong>Count by tier (P0–P3, 26 tickets):</strong> senior-db 1 · senior-be 7 · senior-fe 2 · senior-integrator 2 · medior 11 · junior 3. <strong>P4 committed adds:</strong> senior-be 1 · senior-integrator 1. <strong>Opus flags: 4</strong> (SM-01 med, SM-04 med, SM-21 high, SM-25 med). Concurrency: respect the 1–2 agent cap; the only safe parallel pairs early are (SM-03 ∥ SM-04) and (SM-07 ∥ SM-09).</p>
+        <div class="note">⚡ = touches a contract (schema/API/policy) → QA gate + architect design-review on the diff.</div>
+      </div>
+    </section>
+
+    <!-- ================= 14 OPEN QUESTIONS & DECISIONS ================= -->
+    <section class="part" id="p14">
+      <div class="part-head"><span class="part-num">§14</span><h2>Open Questions &amp; Decision Log</h2></div>
+      <p class="dek">Four owner decisions resolved this design (v1.1); four remain, none blocking P0/P1.</p>
+      <div class="wrap">
+        <div class="note"><span class="k">Resolved by the owner 2026-07-23 (v1.1)</span>ex-OQ-1 (console IA + name → D-10) · ex-OQ-4 (SEM dual-mode → D-8) · ex-OQ-6 (per-engagement tool scope → D-11) · ex-OQ-7 (shared cache ratified → D-4).</div>
+        <h3>Remaining open questions</h3>
+      </div>
+      <div class="tablewrap"><table>
+        <thead><tr><th>#</th><th>Question</th><th>Blocks</th><th>Default if unanswered</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">OQ-2</td><td>Fund the $50 DataForSEO deposit now? (P0/P1 proceed regardless)</td><td class="mono">P2</td><td>Build P0/P1, hold P2</td></tr>
+          <tr><td class="mono">OQ-3</td><td>Semrush MCP OAuth — authorize now or at first premium client? (Connector currently unauthorized)</td><td class="mono">SM-28</td><td>Defer to premium demand</td></tr>
+          <tr><td class="mono">OQ-5</td><td>Umami pillar: deploy (Zone B WebDesk boxes vs own VPS) or defer — GSC+GA4 may suffice?</td><td class="mono">SM-27</td><td>Defer</td></tr>
+          <tr><td class="mono">OQ-8</td><td>pgvector extension in the platform DB images (dual-mode fallback keeps plain-PG tests green)</td><td class="mono">SM-01/09</td><td>Add to dev/VPS images</td></tr>
+        </tbody>
+      </table></div>
+      <div class="wrap">
+        <h3>Decision log</h3>
+        <p class="note"><span class="k">Locked upstream (foundation §01 — not relitigated here)</span>DataForSEO Standard primary + Semrush premium behind a pluggable abstraction; local-Hermes-first AI via the gateway; self-hosted crawlers for $0 audit/crawl/speed; Postgres SERP/volume caching; per-client metering on a shared deposit; ~$8–10/client/mo blended · ~$900/mo central at 100 clients.</p>
+      </div>
+      <div class="tablewrap"><table>
+        <thead><tr><th>#</th><th>Decision</th><th>Why</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">D-1</td><td>Provider layer lives inside platform-nest (no new service; open-seo not run)</td><td>Transactional metering, native RLS, no deployable sprawl</td></tr>
+          <tr><td class="mono">D-2</td><td>Per-repo verdicts as §07 (open-seo + SerpBear data-only; SEONaut/crawler/Unlighthouse job-mode; Umami stock infra; Claude Ads via MCP behind WS4)</td><td>Multi-tenant retrofit cost vs. thin data calls; no external UIs</td></tr>
+          <tr><td class="mono">D-3</td><td>Module key <code>search</code>, tables <code>search_*</code>, hr-style controller path + third-wall RLS</td><td>Newest-vertical (hr) conventions</td></tr>
+          <tr><td class="mono">D-4</td><td>Shared no-RLS market-data cache, service-layer-only. Ratified 2026-07-23</td><td>The cross-tenant reuse <em>is</em> the cost model</td></tr>
+          <tr><td class="mono">D-5</td><td>Paid-data pulls declared <code>write:true, impact:'medium'</code> MCP tools</td><td>Spending money is a mutation; automation must hit the D14 gate</td></tr>
+          <tr><td class="mono">D-6</td><td>Api-mode executions require one-shot approved <code>approvalId</code> (humans included)</td><td>Closes the WS4 no-Temporal-resume gap without new infra</td></tr>
+          <tr><td class="mono">D-7</td><td>Keyword embeddings as a dual-mode operational column; retrieval-shaped RAG stays in WS8</td><td>D9 ownership preserved; clustering can't round-trip MCP</td></tr>
+          <tr><td class="mono">D-8</td><td>Dual-mode SEM execution: every live action is a <code>search_change_proposals</code> row; manual twin (P3, zero OAuth) and automated twin (P4 committed); human picks the mode</td><td>Best of both: early value with no OAuth on the critical path, full automation when OAuth lands</td></tr>
+          <tr><td class="mono">D-9</td><td>Umami in Zone B if approved; ERP pulls read-only</td><td>Internet-facing = WebDesk zone doctrine</td></tr>
+          <tr><td class="mono">D-10</td><td>Console ratified: dept name stays SEO; console = dept-interface-template exactly as Web Dev, 3 craft groups as primary-strip divisions</td><td>One console, WebDev-proven pattern</td></tr>
+          <tr><td class="mono">D-11</td><td>Per-engagement tool-scope config: every tool/paid pull enabled per client via <code>tool_scope</code> + per-engagement budget caps; fixed tiers survive only as presets</td><td>Fully custom per-client invocation; cost = Σ enabled tools per engagement</td></tr>
+        </tbody>
+      </table></div>
+    </section>
+
+    <!-- ================= GLOSSARY ================= -->
+    <section class="part" id="gloss">
+      <div class="part-head"><span class="part-num">§15</span><h2>Glossary</h2></div>
+      <div class="wrap">
+        <div class="tablewrap"><table>
+          <thead><tr><th>Term</th><th>Meaning</th></tr></thead>
+          <tbody>
+            <tr><td class="mono">GEO / AEO / LLMO</td><td>Generative/Answer-Engine Optimization — being cited by AI answer engines (ChatGPT, AI Overviews, Gemini, Claude, Perplexity)</td></tr>
+            <tr><td class="mono">Engagement</td><td>The outcome-tracked unit of client work — KPI targets, scope, budget — not a task list</td></tr>
+            <tr><td class="mono">Tool scope</td><td>The per-engagement, human-set config of which tools/paid pulls run for a given client, at what cadence and limit</td></tr>
+            <tr><td class="mono">Change proposal</td><td>The single dual-mode execution artifact every live-account action materializes as, before either twin applies it</td></tr>
+            <tr><td class="mono">Manual twin</td><td>Approved proposal exports Ads-Editor-ready; a human applies it in the ad platform — zero OAuth</td></tr>
+            <tr><td class="mono">Automated twin</td><td>ERP pushes the approved proposal via API behind WS4, consuming a one-shot approval id</td></tr>
+            <tr><td class="mono">Data-only</td><td>We take a tool's data/engine/reference as a build input; we never run its UI or auth</td></tr>
+            <tr><td class="mono">Third-wall RLS</td><td>FORCE-RLS predicate combining tenant scope with per-module enablement, per the hr-migration convention</td></tr>
+            <tr><td class="mono">Stop-loss</td><td>The pre-dispatch check (scope → engagement budget → tenant cap → global cap) that refuses a paid call before money is spent</td></tr>
+            <tr><td class="mono">DataForSEO Standard queue</td><td>The async, ~5-minute, 3×-cheaper-than-Live SERP task queue used as the default provider mode</td></tr>
+          </tbody>
+        </table></div>
+      </div>
+    </section>
+
+    <footer>
+      <p><strong>GAIADA Search-Marketing — Engineering Blueprint v1.1</strong></p>
+      <p class="mono">Status: Design blueprint · Planned (v0.0.0) · 2026-07-23 · SEO Dept · Platform · Classification: Internal<br/>
+      Architecture conforms to the locked foundation cost model (§01). Feeds /army decomposition (§13). Not a commitment of dates. Cross-references: <code>docs/blueprints/seo-sem-design.md</code> · <code>docs/blueprints/seo-sem-foundation.md</code> · <code>docs/BLUEPRINTS.md</code>.</p>
+    </footer>
+  </main>
+</div>
+
+<div class="themehint">print-ready · A4 / Letter</div>
+
+<script>
+  (function(){
+    var links = Array.prototype.slice.call(document.querySelectorAll('.toc a'));
+    var map = {};
+    links.forEach(function(a){ var id=a.getAttribute('href').slice(1); map[id]=a; });
+    var secs = Array.prototype.slice.call(document.querySelectorAll('.part'));
+    if(!('IntersectionObserver' in window)) return;
+    var obs = new IntersectionObserver(function(entries){
+      entries.forEach(function(e){
+        if(e.isIntersecting){
+          links.forEach(function(l){l.classList.remove('active');});
+          var a = map[e.target.id]; if(a) a.classList.add('active');
+        }
+      });
+    }, {rootMargin:'-10% 0px -80% 0px', threshold:0});
+    secs.forEach(function(s){ obs.observe(s); });
+  })();
+</script>

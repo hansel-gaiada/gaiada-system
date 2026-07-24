@@ -27,7 +27,9 @@
 .lux-table__row:hover { background: rgba(110, 90, 67, 0.04); }
 .lux-table__cell--right { justify-self: end; text-align: right; }
 
-.lux-toast { position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%); background: #1a1916; color: #f4f1ea; padding: 13px 22px; font: 400 13px var(--font-body); letter-spacing: 0.02em; z-index: 200; animation: erp-toast 0.28s var(--erp-ease); }
+.lux-toast { position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%); background: #1a1916; color: #f4f1ea; padding: 13px 22px; font: 400 13px var(--font-body); letter-spacing: 0.02em; z-index: 200; animation: erp-toast 0.28s var(--erp-ease); display: flex; align-items: center; gap: 12px; }
+.lux-toast__undo { background: none; border: none; padding: 0; color: #d8c9a3; font: 700 12px var(--font-body); letter-spacing: 0.04em; text-decoration: underline; cursor: pointer; }
+.lux-toast__undo:hover { color: #f4f1ea; }
 
 /* Reusable filter bar (audit, search, any GET-form filter row). */
 .lux-filters { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 16px; }

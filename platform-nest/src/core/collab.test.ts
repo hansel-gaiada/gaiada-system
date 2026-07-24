@@ -128,4 +128,89 @@ describe.skipIf(!TEST_URL)("collaboration: comments + notifications", () => {
     });
     expect(denied.statusCode).toBe(403);
   });
+
+  // ---------------- Reactions (P3-08) ----------------
+  describe("comment reactions (P3-08)", () => {
+    let reactCommentId: string;
+
+    beforeAll(async () => {
+      const r = await app.inject({
+        method: "POST", url: `/api/${co}/comments`,
+        headers: asUser(member), payload: { entityType: "task", entityId: taskId, body: "react to me" },
+      });
+      reactCommentId = (r.json() as { id: string }).id;
+    });
+
+    const reactionsFor = async (id: string, viewerId: string) => {
+      const list = (await app.inject({ method: "GET", url: `/api/${co}/comments?entityType=task&entityId=${taskId}`, headers: asUser(viewerId) })).json() as Array<{
+        id: string; reactions: Array<{ emoji: string; count: number; mine: boolean }>;
+      }>;
+      return list.find((c) => c.id === id)!.reactions;
+    };
+
+    it("adds a reaction, is idempotent on re-add, aggregates count + per-viewer `mine`, and rejects an off-set emoji", async () => {
+      const add = await app.inject({ method: "POST", url: `/api/${co}/comments/${reactCommentId}/reactions`, headers: asUser(manager), payload: { emoji: "👍" } });
+      expect(add.statusCode).toBe(201);
+      const again = await app.inject({ method: "POST", url: `/api/${co}/comments/${reactCommentId}/reactions`, headers: asUser(manager), payload: { emoji: "👍" } });
+      expect(again.statusCode).toBe(201); // idempotent — no PK-conflict error
+
+      const offSet = await app.inject({ method: "POST", url: `/api/${co}/comments/${reactCommentId}/reactions`, headers: asUser(manager), payload: { emoji: "🥸" } });
+      expect(offSet.statusCode).toBe(400);
+
+      const mine = await reactionsFor(reactCommentId, manager);
+      const thumbsMine = mine.find((rr) => rr.emoji === "👍")!;
+      expect(thumbsMine.count).toBe(1); // idempotent add didn't double-count
+      expect(thumbsMine.mine).toBe(true);
+
+      const asOther = await reactionsFor(reactCommentId, member);
+      expect(asOther.find((rr) => rr.emoji === "👍")!.mine).toBe(false); // same count, viewer-scoped `mine`
+    });
+
+    it("404s reacting to a comment that doesn't exist", async () => {
+      const r = await app.inject({
+        method: "POST", url: `/api/${co}/comments/00000000-0000-0000-0000-000000000000/reactions`,
+        headers: asUser(manager), payload: { emoji: "🔥" },
+      });
+      expect(r.statusCode).toBe(404);
+    });
+
+    it("a viewer (read-only role) cannot react", async () => {
+      const r = await app.inject({ method: "POST", url: `/api/${co}/comments/${reactCommentId}/reactions`, headers: asUser(viewer), payload: { emoji: "🎉" } });
+      expect(r.statusCode).toBe(403);
+    });
+
+    it("user A cannot delete user B's reaction; deleting your own works (self-row delete only)", async () => {
+      await app.inject({ method: "POST", url: `/api/${co}/comments/${reactCommentId}/reactions`, headers: asUser(assignee), payload: { emoji: "❤️" } });
+
+      // manager never added a ❤️ — deleting it under manager's session is a no-op, not a cross-user delete
+      await app.inject({ method: "DELETE", url: `/api/${co}/comments/${reactCommentId}/reactions/${encodeURIComponent("❤️")}`, headers: asUser(manager) });
+      let hearts = (await reactionsFor(reactCommentId, assignee)).find((rr) => rr.emoji === "❤️");
+      expect(hearts?.count).toBe(1); // assignee's reaction survived manager's delete attempt
+
+      // assignee deletes their OWN reaction — succeeds
+      await app.inject({ method: "DELETE", url: `/api/${co}/comments/${reactCommentId}/reactions/${encodeURIComponent("❤️")}`, headers: asUser(assignee) });
+      hearts = (await reactionsFor(reactCommentId, assignee)).find((rr) => rr.emoji === "❤️");
+      expect(hearts).toBeUndefined();
+    });
+
+    it("tenant isolation: a rival tenant's session cannot react on this tenant's comment (RLS empty-set, forged id 404s)", async () => {
+      const rivalCo = await createCompany("Rival Co (reactions)");
+      const rivalUser = await createUser("rival-reactions@x.test");
+      await addMembership(rivalCo, rivalUser);
+      await grantRole(rivalUser, await createRole("manager"), "company", rivalCo);
+
+      // not a member of `co` -> denied outright on the real tenant's URL
+      const cross = await app.inject({
+        method: "POST", url: `/api/${co}/comments/${reactCommentId}/reactions`, headers: asUser(rivalUser), payload: { emoji: "👀" },
+      });
+      expect(cross.statusCode).toBe(403);
+
+      // rival's OWN tenant URL against tenant `co`'s comment id -> RLS scopes `comments` (and
+      // comment_reactions) to rivalCo, so the comment is invisible -> 404, never a cross-write.
+      const forged = await app.inject({
+        method: "POST", url: `/api/${rivalCo}/comments/${reactCommentId}/reactions`, headers: asUser(rivalUser), payload: { emoji: "👀" },
+      });
+      expect(forged.statusCode).toBe(404);
+    });
+  });
 });

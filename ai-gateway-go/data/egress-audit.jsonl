@@ -1,0 +1,2 @@
+{"ts":1784856600226,"capability":"llm","provider":null,"ok":false,"blocked":"auth","redactions":0,"latencyMs":0}
+{"ts":1784856717656,"capability":"llm","provider":"openai","ok":true,"redactions":0,"latencyMs":7746}

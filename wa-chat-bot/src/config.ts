@@ -9,7 +9,14 @@ export const config = {
   // API key WAHA requires on its REST API (X-Api-Key). Set the same value in both processes.
   wahaApiKey: process.env.WAHA_API_KEY ?? "",
   commandPrefix: process.env.COMMAND_PREFIX ?? "/",
-  botMention: (process.env.BOT_MENTION ?? "@bot").toLowerCase(),
+  // Text-mention token (case-insensitive; matched as a standalone word). Matches the bot's name so
+  // "@Rhea"/"@rhea"/"@RHEA" all trigger. Real WhatsApp @mentions (which tag the bot's JID, not this
+  // text) are handled separately via the session `me` JID — see bot.ts mentionsSelfJid.
+  botMention: (process.env.BOT_MENTION ?? "@Rhea").toLowerCase(),
+  // Persona identity used in chat-facing replies (see persona.ts). Cosmetic only — does not
+  // affect gating or auth. The agency name frames the bot as an in-house assistant.
+  botName: process.env.BOT_NAME ?? "Rhea",
+  agencyName: process.env.AGENCY_NAME ?? "Gaiada",
   retentionDays: Number(process.env.RETENTION_DAYS ?? 90),
   host: process.env.HOST ?? "0.0.0.0",
   // Shared secret WAHA must include when calling the webhook (append ?token=... to the hook URL).
@@ -17,12 +24,25 @@ export const config = {
   webhookSecret: process.env.WEBHOOK_SECRET ?? "",
   // Bearer token for admin routes (e.g. /digest). If empty, admin routes are disabled.
   adminToken: process.env.ADMIN_TOKEN ?? "",
+  // DM reply policy (SAFETY — esp. when the bot shares a personal number): who the bot answers in
+  // 1:1 chats. "off" = never auto-reply to DMs (store only); "allowlist" = only numbers in
+  // dmAllowlist; "all" = any DM. Default "off" so personal contacts are never auto-answered.
+  dmReplyPolicy: (process.env.DM_REPLY_POLICY ?? "off").toLowerCase(),
+  // Numbers (digits, any format) allowed to get DM replies when dmReplyPolicy="allowlist".
+  dmAllowlist: (process.env.DM_ALLOWLIST ?? "").split(",").map((s) => s.replace(/\D/g, "")).filter(Boolean),
+  // Never REPLY to a message older than this (ms). WAHA delivers a backlog of unread messages on
+  // (re)connect; without this the bot would answer hours-old history. Stored either way; only the
+  // reply is suppressed. Default 3 min.
+  replyMaxAgeMs: Number(process.env.REPLY_MAX_AGE_MS ?? 180_000),
   // Scheduler
   scheduleTimezone: process.env.SCHEDULE_TZ ?? "Asia/Singapore",
   managementGroupId: process.env.MANAGEMENT_GROUP_ID ?? "",
   // Group registry file. If it exists, ONLY listed groups are monitored; if absent,
   // the bot falls back to trial behavior (all groups) and logs discovered groups.
   groupsFile: process.env.GROUPS_FILE ?? "config/groups.yaml",
+  // First-boot seed for the (now writable) groups file: if groupsFile is absent and this
+  // exists, it's copied into place once at boot (A2 / design doc §2.6). Empty -> no seeding.
+  groupsSeedFile: process.env.GROUPS_SEED_FILE ?? "",
   // Where the scheduler persists last-run timestamps (gap-safe windows).
   scheduleStateFile: process.env.SCHEDULE_STATE_FILE ?? "data/schedule.json",
   // File store location (used when DATABASE_URL is unset).

@@ -4,7 +4,7 @@ import { dirname } from "node:path";
 import { config } from "../config";
 import type { Ciphertext } from "../crypto/envelope";
 import { encodeSender, decodeSender } from "./encode";
-import type { Store, StoredMessage, MediaStatus } from "./types";
+import type { Store, StoredMessage, MediaStatus, ChatSummary } from "./types";
 
 interface PersistedMessage {
   chatId: string;
@@ -115,5 +115,45 @@ export class FileStore implements Store {
     row.mediaStatus = patch.status;
     if (patch.text !== undefined) row.mediaText = patch.text;
     this.flush();
+  }
+
+  async listChats(limit = 100): Promise<ChatSummary[]> {
+    interface Agg {
+      count: number;
+      lastTs: number;
+      lastText: string;
+      lastSenderTs: number;
+      lastSenderEnc: Ciphertext | null;
+    }
+    const byChat = new Map<string, Agg>();
+    for (const p of this.load()) {
+      let agg = byChat.get(p.chatId);
+      if (!agg) {
+        agg = { count: 0, lastTs: -Infinity, lastText: "", lastSenderTs: -Infinity, lastSenderEnc: null };
+        byChat.set(p.chatId, agg);
+      }
+      agg.count++;
+      if (p.ts >= agg.lastTs) {
+        agg.lastTs = p.ts;
+        agg.lastText = p.text;
+      }
+      if (!p.fromBot && p.ts >= agg.lastSenderTs) {
+        agg.lastSenderTs = p.ts;
+        agg.lastSenderEnc = p.senderEnc;
+      }
+    }
+    const top = [...byChat.entries()].sort((a, b) => b[1].lastTs - a[1].lastTs).slice(0, limit);
+    return Promise.all(
+      top.map(async ([chatId, agg]) => {
+        const sender = agg.lastSenderTs > -Infinity ? await decodeSender(agg.lastSenderEnc) : null;
+        return {
+          chatId,
+          messageCount: agg.count,
+          lastActivityTs: agg.lastTs,
+          lastPreview: agg.lastText,
+          lastSenderName: sender?.senderName ?? "",
+        };
+      }),
+    );
   }
 }

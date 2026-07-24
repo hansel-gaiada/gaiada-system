@@ -96,7 +96,7 @@ describe.skipIf(!TEST_URL)("admin systems aggregator (Phase C)", () => {
     expect(s.detail).toMatchObject({ classifierReachable: true });
   });
 
-  it("bot/hub/knowledge status shapes; agents reports not-an-HTTP-service; automation healthz ok", async () => {
+  it("bot/hub/knowledge status shapes; agents reports not-configured (no AGENTS_URL in this suite); automation healthz ok", async () => {
     const bot = (await app.inject({ method: "GET", url: `/api/admin/bot/status`, headers: asUser(admin) })).json() as { ok: boolean; detail?: { ai?: string } };
     expect(bot).toMatchObject({ ok: true, detail: { ai: "on" } });
     const hub = (await app.inject({ method: "GET", url: `/api/admin/hub/status`, headers: asUser(admin) })).json() as { ok: boolean; counters?: { tools?: number } };
@@ -106,7 +106,7 @@ describe.skipIf(!TEST_URL)("admin systems aggregator (Phase C)", () => {
     expect(kn.ok).toBe(true);
     const agents = (await app.inject({ method: "GET", url: `/api/admin/agents/status`, headers: asUser(admin) })).json() as { ok: boolean; detail?: { note?: string } };
     expect(agents.ok).toBe(false);
-    expect(agents.detail?.note).toContain("CLI/library");
+    expect(agents.detail?.note).toContain("not configured");
     const auto = (await app.inject({ method: "GET", url: `/api/admin/automation/status`, headers: asUser(admin) })).json() as { ok: boolean; detail?: { workflows?: unknown[] } };
     expect(auto.ok).toBe(true);
     // No API key configured -> alive but no workflow list (UI degrades gracefully).

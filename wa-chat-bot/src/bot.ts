@@ -13,6 +13,8 @@ import { enqueueMedia } from "./media-queue";
 import { seenBefore, dedupKey } from "./safety/dedup";
 import { sendWithRetry } from "./safety/outbound";
 import { config } from "./config";
+import { handleSessionEvent, getSelfJid } from "./session-state";
+import { refreshSelfJid } from "./waha-admin";
 import type { InboundMessage, WhatsAppGateway } from "./waha";
 import type { InboundEvent } from "./gateway/events";
 
@@ -22,12 +24,50 @@ if (listActions().length === 0) {
   registerGroupAdminActions();
 }
 
-/** In groups, respond when addressed: command prefix, @mention, or a reply to the bot. DMs always respond. */
+/** True only when the bot is mentioned as a STANDALONE token (start or after whitespace, followed
+ *  by end/whitespace/punctuation). Prevents accidental triggers from substrings like "@bottom" or
+ *  "someone@bot.com" — a loose includes() would fire the bot on those and make it "go crazy". */
+export function mentionsBot(text: string): boolean {
+  const esc = config.botMention.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(^|\\s)${esc}(?=$|\\W)`, "i").test(text);
+}
+
+/** Just the digits of a JID (628123...@c.us / @s.whatsapp.net / @lid all vary) for robust matching. */
+function jidDigits(s: string): string {
+  return s.match(/\d+/g)?.join("") ?? "";
+}
+
+/** True when the bot's own JID is among the message's @mentioned JIDs — i.e. a REAL WhatsApp
+ *  @mention of the bot (picker mention), which tags the bot's number, not the literal text "@bot".
+ *  Returns false until the session is paired and the bot's JID is known. */
+export function mentionsSelfJid(mentionedJids: string[]): boolean {
+  const self = getSelfJid();
+  if (!self) return false;
+  const sd = jidDigits(self);
+  return sd.length > 0 && mentionedJids.some((j) => jidDigits(j) === sd);
+}
+
+/** Whether the bot may auto-reply to a DM from this sender, per dmReplyPolicy. Default "off"
+ *  protects a shared/personal number — personal contacts are never auto-answered. */
+export function dmReplyAllowed(senderId: string): boolean {
+  if (config.dmReplyPolicy === "all") return true;
+  if (config.dmReplyPolicy === "allowlist") {
+    const digits = senderId.replace(/\D/g, "");
+    return digits.length > 0 && config.dmAllowlist.includes(digits);
+  }
+  return false; // "off"
+}
+
+/** Respond ONLY when properly addressed. Groups: command prefix, a real @mention of the bot (by
+ *  JID or the "@Rhea" text), or a reply to the bot — ordinary chatter is never answered (still
+ *  stored for digests). DMs: only per dmReplyPolicy (default off) so a shared/personal number does
+ *  not auto-reply to personal contacts. */
 export function isTriggered(m: InboundMessage, text: string): boolean {
-  if (!m.isGroup) return true;
+  if (!m.isGroup) return dmReplyAllowed(m.senderId);
   if (m.replyToBot) return true;
-  const t = text.toLowerCase();
-  return text.startsWith(config.commandPrefix) || t.includes(config.botMention);
+  if (text.trimStart().startsWith(config.commandPrefix)) return true;
+  if (mentionsSelfJid(m.mentionedJids)) return true;
+  return mentionsBot(text);
 }
 
 export async function respond(m: InboundMessage, text: string): Promise<string> {
@@ -53,10 +93,12 @@ export async function handleInbound(gw: WhatsAppGateway, inbound: InboundMessage
   // Idempotency: drop webhook redeliveries so nothing is stored or answered twice.
   const surface = inbound.chatId.startsWith("tg:") ? "telegram" : "whatsapp";
   if (inbound.waMessageId && seenBefore(dedupKey(surface, inbound.waMessageId))) return;
-  // Registry active -> only listed groups are ingested; unlisted ones are logged
-  // (observable drop), never persisted. DMs and registry-inactive mode pass through.
+  // Surface EVERY group the bot sees (even in trial mode with no registry) so the ERP monitor
+  // can list them for the operator to formalize. Dedup'd by id inside noteDiscovered.
+  if (inbound.isGroup) noteDiscovered(inbound.chatId);
+  // Registry active -> only listed groups are ingested; unlisted ones are dropped (observable via
+  // the discovered list above), never persisted. DMs and registry-inactive mode pass through.
   if (inbound.isGroup && loadGroups() !== null && !isMonitored(inbound.chatId)) {
-    noteDiscovered(inbound.chatId);
     return;
   }
   const { clean } = scrub(inbound.text);
@@ -76,6 +118,9 @@ export async function handleInbound(gw: WhatsAppGateway, inbound: InboundMessage
   });
   // 5a.1: enqueue eagerly on receipt; the reconciler poller catches any miss.
   if (inbound.media) void enqueueMedia(inbound.waMessageId);
+  // Backlog guard: WAHA delivers unread history on (re)connect. Store it, but NEVER reply to a
+  // stale message — otherwise the bot answers hours-old chatter the moment it comes online.
+  if (config.replyMaxAgeMs > 0 && Date.now() - inbound.ts > config.replyMaxAgeMs) return;
   // A pending confirmation from this user takes precedence over normal handling — even
   // without an explicit trigger, since a "yes"/"1" reply is a plain group message.
   if (await tryConfirmByReply(gw, inbound, clean)) return;
@@ -119,9 +164,16 @@ export async function handleInbound(gw: WhatsAppGateway, inbound: InboundMessage
 }
 
 /** Route a normalized inbound event. Messages take the full pipeline; button presses are
- *  confirmations (always processed); reaction/member events are reserved for Phase F. */
+ *  confirmations (always processed); session events feed the session-state tracker;
+ *  reaction/member events are reserved for Phase F. */
 export async function handleEvent(gw: WhatsAppGateway, event: InboundEvent): Promise<void> {
   if (event.kind === "message") return handleInbound(gw, event.message);
   if (event.kind === "button") return handleButton(gw, event.chatId, event.senderId, event.token);
+  if (event.kind === "session") {
+    handleSessionEvent(event);
+    // On (re)pair, learn the bot's own JID so real @mentions (JID-tagged) trigger replies.
+    if (event.status === "WORKING") void refreshSelfJid().catch(() => {});
+    return;
+  }
   // reaction / member events are not yet actioned.
 }

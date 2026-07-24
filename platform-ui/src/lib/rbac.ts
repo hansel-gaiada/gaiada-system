@@ -17,7 +17,8 @@ export type Role =
   | "manager"          // runs work within a company
   | "member"           // baseline access
   | "it_admin" | "it_manager" | "it"  // IT operators
-  | "hr_staff" | "hr_manager"; // HR module derived roles (WSD-2 module_staff/module_manager, string-composed from grants — see hr module design §2.1). Company-scoped; may be reconciler-materialized onto a SERVED company (Me.serviceScopes) when the grant rides a service assignment.
+  | "hr_staff" | "hr_manager" // HR module derived roles (WSD-2 module_staff/module_manager, string-composed from grants — see hr module design §2.1). Company-scoped; may be reconciler-materialized onto a SERVED company (Me.serviceScopes) when the grant rides a service assignment.
+  | "search_staff" | "search_manager"; // search-marketing (SEO/SEM/GEO) module derived roles (SM-03; same WSD-2 module_staff/module_manager linchpin as HR — string-composed from grants, resource.attr.module === "search"). Company-scoped; may be reconciler-materialized onto a SERVED company.
 
 export type Capability =
   | "admin.access"       // /admin/* (users, identity, modules, compliance, audit)
@@ -30,18 +31,29 @@ export type Capability =
   | "approvals.decide"   // approve/reject
   | "knowledge.review"   // review/quarantine knowledge sources
   | "hr.view"            // read hr_cases/hr_records/leave/attendance for a company
-  | "hr.manage";         // file/decide leave on others' behalf, edit cases/records/checklists, manage templates
+  | "hr.manage"          // file/decide leave on others' behalf, edit cases/records/checklists, manage templates
+  | "search.view"        // read search-marketing properties/engagements/keywords/audits/campaigns/reports/ledger for a company
+  | "search.manage"      // create/edit properties/engagements/keywords/audits/campaign drafts+proposals/report drafts (draft-only working set — mirrors search_staff/search_manager's baseline Cerbos grant)
+  | "search.scope.write" // set an engagement's tool-scope config + provider budget cap (D-11; Cerbos action `set_scope`, elevated-only)
+  | "search.campaign.launch" // mark a manual-mode change proposal applied OR execute an api-mode one (Cerbos actions `launch`/`apply_manual`/`apply_negatives`/`set_budget`, elevated-only)
+  | "search.report.approve"  // approve + deliver an engagement report (Cerbos actions `approve`/`deliver`, elevated-only)
+  | "search.ledger.admin";   // override a provider budget stop-loss cap (Cerbos action `admin` on resource_search_ledger, elevated-only)
 
 // What each role grants (within its own scope). Order/duplication is harmless.
 const ALL: Capability[] = [
   "admin.access", "company.manage", "org.edit", "people.directory",
   "rollups.view", "pm.manage", "it.manage", "approvals.decide", "knowledge.review",
   "hr.view", "hr.manage",
+  "search.view", "search.manage", "search.scope.write", "search.campaign.launch", "search.report.approve", "search.ledger.admin",
 ];
 export const ROLE_CAPS: Record<Role, Capability[]> = {
   platform_admin: ALL,
   group_executive: ALL,
-  company_admin: ["admin.access", "company.manage", "org.edit", "people.directory", "pm.manage", "it.manage", "approvals.decide", "knowledge.review", "hr.view", "hr.manage"],
+  company_admin: [
+    "admin.access", "company.manage", "org.edit", "people.directory", "pm.manage", "it.manage", "approvals.decide", "knowledge.review",
+    "hr.view", "hr.manage",
+    "search.view", "search.manage", "search.scope.write", "search.campaign.launch", "search.report.approve", "search.ledger.admin",
+  ],
   manager: ["pm.manage", "approvals.decide", "people.directory"],
   member: [],
   it_admin: ["it.manage", "company.manage"],
@@ -49,6 +61,11 @@ export const ROLE_CAPS: Record<Role, Capability[]> = {
   it: ["it.manage"],
   hr_staff: ["hr.view"],
   hr_manager: ["hr.view", "hr.manage"],
+  // search_staff = Cerbos module_staff (draft-only baseline: read/create/update, propose_change,
+  // research/run — never launch/set_scope/approve/admin). search_manager = module_manager (adds
+  // the elevated actions). Mirrors hr_staff/hr_manager's split exactly (SM-03).
+  search_staff: ["search.view", "search.manage"],
+  search_manager: ["search.view", "search.manage", "search.scope.write", "search.campaign.launch", "search.report.approve", "search.ledger.admin"],
 };
 
 type Grant = Me["roles"][number];

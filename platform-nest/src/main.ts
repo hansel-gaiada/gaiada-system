@@ -22,6 +22,7 @@ import { clientsModule } from "./modules/clients";
 import { knowledgeModule } from "./modules/knowledge";
 import { automationConsoleModule } from "./modules/automation-console";
 import { hrModule } from "./modules/hr";
+import { searchModule } from "./modules/search";
 import { registerCoreRollupProvider, coreTaskRollups, syncMetricDefinitions } from "./rollups/engine";
 import { clientWorkRollups } from "./core/client-work";
 import { startRelayLoop } from "./events/relay";
@@ -31,6 +32,7 @@ import { startN8nBridgeLoop } from "./events/n8n-bridge";
 import { startGraphBridgeLoop } from "./events/graph-bridge";
 import { startWorkActivityConsumerLoop } from "./events/work-activity-consumer";
 import { runWorkActivityBackfill } from "./core/work-activity-backfill";
+import { startBurndownSnapshotLoop } from "./modules/pm/burndown-job";
 
 export async function buildApp(): Promise<NestFastifyApplication> {
   // Fastify logs are pino JSON with trace_id/span_id when OTEL is on, else stay off (unchanged
@@ -63,6 +65,7 @@ async function bootstrap(): Promise<void> {
   registerModule(knowledgeModule);
   registerModule(automationConsoleModule);
   registerModule(hrModule);
+  registerModule(searchModule);
   registerCoreRollupProvider(coreTaskRollups);
   registerCoreRollupProvider(clientWorkRollups);
   await syncMetricDefinitions();
@@ -107,6 +110,14 @@ async function bootstrap(): Promise<void> {
     startDriftSweepLoop(config.serviceDriftSweepIntervalMs);
     // eslint-disable-next-line no-console
     console.log(`service-assignment drift sweep on: every ${config.serviceDriftSweepIntervalMs}ms`);
+  }
+  // P2-07: nightly burndown-snapshot pre-warmer — a plain Postgres sweep (no Redis dependency),
+  // same as the drift sweep above. Dark unless PM_BURNDOWN_SNAPSHOT_ENABLED; the lazy
+  // upsert-on-read in pm.controller.ts's getBurndown() is the correctness backstop regardless.
+  if (config.pmBurndownSnapshotEnabled) {
+    startBurndownSnapshotLoop(config.pmBurndownSnapshotIntervalMs);
+    // eslint-disable-next-line no-console
+    console.log(`burndown snapshot job on: every ${config.pmBurndownSnapshotIntervalMs}ms`);
   }
   const app = await buildApp();
   const port = Number(process.env.PLATFORM_PORT ?? 3004);

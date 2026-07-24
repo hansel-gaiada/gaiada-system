@@ -1,0 +1,30 @@
+# Search-marketing module (SM-03; docs/blueprints/seo-sem-design.md §11). resource_search_ledger =
+# the provider usage/cost ledger (`search_provider_calls`, SM-04). Read-only for the working set
+# (`search:ledger:read`); `admin` is the elevated budget-stop-loss OVERRIDE action (`search:provider:
+# admin` — design §05: "Manual override = elevated permission (search:provider:admin) + audit"),
+# matching the parity matrix's "a member cannot ... [override the budget cap]" deny case.
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: resource_search_ledger
+  importDerivedRoles: ["gaiada_scopes"]
+  variables:
+    import: ["gaiada_common"]
+  rules:
+    - actions: ["*"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["platform_admin"]
+    - actions: ["read", "admin"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["group_executive"]
+      condition: { match: { expr: "variables.notLow" } }
+    # Search staff / manager (served-company grant) + the served company's own admin: read-only.
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["module_staff", "module_manager", "company_admin"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    # Budget stop-loss override: manager + company admin only (NOT plain staff/member).
+    - actions: ["admin"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["module_manager", "company_admin"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }

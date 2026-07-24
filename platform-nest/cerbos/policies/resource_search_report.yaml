@@ -1,0 +1,31 @@
+# Search-marketing module (SM-03; docs/blueprints/seo-sem-design.md §11). resource_search_report =
+# the engagement's periodic report (metrics snapshot + AI-drafted narrative). `approve` and
+# `deliver` (design §11: "actions incl. approve, deliver") back `search:report:approve` — a
+# client-facing artifact leaving the platform, so drafting (read/create/update, `search:report:
+# write`) stays baseline but approve/deliver are elevated-only, matching the parity matrix's
+# "a member cannot ... approve" deny case.
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: resource_search_report
+  importDerivedRoles: ["gaiada_scopes"]
+  variables:
+    import: ["gaiada_common"]
+  rules:
+    - actions: ["*"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["platform_admin"]
+    - actions: ["read", "create", "update", "delete", "approve", "deliver"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["group_executive"]
+      condition: { match: { expr: "variables.notLow" } }
+    # Search staff / manager (served-company grant) + the served company's own admin: draft-only.
+    - actions: ["read", "create", "update"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["module_staff", "module_manager", "company_admin"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    # Elevated: destructive + approve + deliver — manager + company admin only.
+    - actions: ["delete", "approve", "deliver"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["module_manager", "company_admin"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }

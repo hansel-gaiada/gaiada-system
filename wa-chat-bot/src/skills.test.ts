@@ -38,6 +38,7 @@ function ctx(over: Partial<InboundMessage> = {}, args = ""): SkillCtx {
     isGroup: true,
     fromMe: false,
     replyToBot: false,
+    mentionedJids: [],
     media: null,
     ...over,
   };

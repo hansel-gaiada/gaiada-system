@@ -42,6 +42,10 @@ function wahaEvent(from: string, body: string, extra: Record<string, unknown> = 
 
 describe("phase 1 end-to-end", () => {
   beforeAll(() => {
+    // This e2e asserts the DM trigger kind + replies to fixture messages, so enable DM replies
+    // and disable the backlog/stale guard (fixtures use fixed timestamps).
+    config.dmReplyPolicy = "all";
+    config.replyMaxAgeMs = 0;
     rmSync(DIR, { recursive: true, force: true });
     mkdirSync(DIR, { recursive: true });
     writeFileSync(
@@ -83,7 +87,7 @@ describe("phase 1 end-to-end", () => {
     await handleInbound(gw, normalize(wahaEvent("site@g.us", "/ping"))!);
     expect(sent.at(-1)).toEqual({ chatId: "site@g.us", text: "pong" });
 
-    await handleInbound(gw, normalize(wahaEvent("site@g.us", "@bot what was poured?"))!);
+    await handleInbound(gw, normalize(wahaEvent("site@g.us", "@Rhea what was poured?"))!);
     expect(sent.at(-1)).toEqual({ chatId: "site@g.us", text: "AI-ANSWER" });
 
     await handleInbound(gw, normalize(wahaEvent("site@g.us", "yes that", { _data: { quotedMsg: { fromMe: true } } }))!);

@@ -16,6 +16,9 @@ export interface InboundMessage {
   fromMe: boolean;
   /** True when this message quotes/replies to one of the bot's own messages. */
   replyToBot: boolean;
+  /** JIDs @mentioned in the message (WhatsApp mentions tag a participant's JID, not literal text).
+   *  Used to detect a real @mention of the bot. Empty when none / not a group mention. */
+  mentionedJids: string[];
   /** Present when the message carries media. `url` is empty if WAHA didn't serve the file
    *  (since WAHA 2026.6.1 media is free in core — check media config if empty) — the
    *  worker records an observable failure either way. */
@@ -26,23 +29,53 @@ export interface WhatsAppGateway {
   sendText(chatId: string, text: string): Promise<void>;
 }
 
-/** Map a raw WAHA webhook event to our internal shape. Returns null if not a text message. */
+/** WhatsApp system/pseudo chats that must NEVER be ingested or replied to: status updates,
+ *  broadcast lists, and channels/newsletters. (aire lesson: replying here is a ban/spam risk.) */
+function isSystemChat(chatId: string): boolean {
+  const id = chatId.toLowerCase();
+  return id === "status@broadcast" || id.endsWith("@broadcast") || id.endsWith("@newsletter");
+}
+
+/** Extract @mentioned JIDs from a WAHA message payload. WEBJS and NOWEB (Baileys) put mentions in
+ *  different places (aire lesson — they probe ~5 fields), so check them all and dedupe. */
+function extractMentions(p: any): string[] {
+  const out = new Set<string>();
+  const add = (v: unknown) => {
+    if (Array.isArray(v)) for (const x of v) if (typeof x === "string" && x) out.add(x);
+  };
+  add(p.mentionedIds);
+  add(p.mentions);
+  add(p._data?.mentionedJidList);
+  add(p._data?.message?.extendedTextMessage?.contextInfo?.mentionedJid);
+  add(p._data?.contextInfo?.mentionedJid);
+  return [...out];
+}
+
+/** Map a raw WAHA webhook event to our internal shape. Returns null if not a usable text message.
+ *  Engine-tolerant: reads WAHA's normalized payload fields (`from`/`body`/`media`/`participant`),
+ *  which are consistent across the WEBJS and NOWEB (Baileys) engines; `_data` is the engine-specific
+ *  raw and is only used as a best-effort fallback. */
 export function normalize(event: unknown): InboundMessage | null {
   const e = event as any;
   if (!e || e.event !== "message") return null;
   const p = e.payload ?? {};
   const chatId: string = p.from ?? "";
   if (!chatId) return null;
+  // Never process status/broadcast/newsletter pseudo-chats (engine-agnostic guard).
+  if (isSystemChat(chatId)) return null;
   return {
     chatId,
     senderId: p.participant ?? p.author ?? p.from ?? "",
-    senderName: p.notifyName ?? p._data?.notifyName ?? "",
+    senderName: p.notifyName ?? p._data?.notifyName ?? p._data?.pushName ?? "",
     waMessageId: p.id ?? "",
     ts: p.timestamp ? Number(p.timestamp) * 1000 : Date.now(),
     text: typeof p.body === "string" ? p.body : "",
     isGroup: String(chatId).endsWith("@g.us"),
     fromMe: Boolean(p.fromMe),
-    replyToBot: Boolean(p._data?.quotedMsg?.fromMe),
+    // Engine-tolerant reply-to-bot: WEBJS exposes `_data.quotedMsg.fromMe`; WAHA's normalized
+    // `replyTo.fromMe` (when present) covers NOWEB. Absent → false (mention is the primary trigger).
+    replyToBot: Boolean(p._data?.quotedMsg?.fromMe ?? p.replyTo?.fromMe ?? false),
+    mentionedJids: extractMentions(p),
     media:
       p.hasMedia || p.media
         ? {

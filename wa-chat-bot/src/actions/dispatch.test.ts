@@ -30,7 +30,7 @@ const gw = {
 function msg(over: Partial<InboundMessage> = {}): InboundMessage {
   return {
     chatId: "site@g.us", senderId: "u@c.us", senderName: "U", waMessageId: "m1", ts: 1,
-    text: "", isGroup: true, fromMe: false, replyToBot: false, media: null, ...over,
+    text: "", isGroup: true, fromMe: false, replyToBot: false, mentionedJids: [], media: null, ...over,
   };
 }
 

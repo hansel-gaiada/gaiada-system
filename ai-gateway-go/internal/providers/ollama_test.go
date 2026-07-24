@@ -2,10 +2,35 @@ package providers
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 )
+
+// B5: a 429 must yield a typed *RateLimitError with the parsed Retry-After window.
+func TestOllamaCompleteReturnsRateLimitErrorOn429(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Retry-After", "5")
+		w.WriteHeader(http.StatusTooManyRequests)
+		w.Write([]byte(`{"error":"rate limited"}`))
+	}))
+	defer srv.Close()
+
+	p := NewOllamaProvider(srv.URL, "llama3.2", "llama3.2", srv.Client())
+	_, err := p.Complete(context.Background(), "hi")
+	if err == nil {
+		t.Fatal("expected an error on 429")
+	}
+	var rl *RateLimitError
+	if !errors.As(err, &rl) {
+		t.Fatalf("expected *RateLimitError, got %T: %v", err, err)
+	}
+	if rl.RetryAfter != 5*time.Second {
+		t.Fatalf("expected RetryAfter=5s, got %s", rl.RetryAfter)
+	}
+}
 
 func TestOllamaCompleteTrimsWhitespace(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -45,6 +45,12 @@ export const config = {
   // ORG-7 §3: how often the nightly drift/orphan sweep runs (sweepDriftAndOrphans). Default 24h;
   // dev/tests override to something short-lived. No effect unless serviceAssignmentsEnabled.
   serviceDriftSweepIntervalMs: Number(process.env.SERVICE_DRIFT_SWEEP_INTERVAL_MS ?? 24 * 3600 * 1000),
+  // P2-07 (pm-console-ux-design-spec.md §4, §0 D-2): nightly burndown-snapshot pre-warmer. DARK
+  // by default — the lazy upsert-on-read on every burndown GET (pm.controller.ts) is the
+  // correctness backstop, so this job is a pure best-effort optimization, never load-bearing.
+  pmBurndownSnapshotEnabled:
+    process.env.PM_BURNDOWN_SNAPSHOT_ENABLED === "1" || process.env.PM_BURNDOWN_SNAPSHOT_ENABLED === "true",
+  pmBurndownSnapshotIntervalMs: Number(process.env.PM_BURNDOWN_SNAPSHOT_INTERVAL_MS ?? 24 * 3600 * 1000),
   // Downstream service endpoints the admin/systems console aggregates (Phase C). All
   // read-only; empty URL -> that system reports "not configured" (fail-soft, never fake).
   services: {
@@ -54,9 +60,28 @@ export const config = {
     knowledge: { url: process.env.KNOWLEDGE_URL ?? "", token: process.env.KNOWLEDGE_SERVICE_TOKEN ?? "" },
     // n8n: token is its Public-API key (X-N8N-API-KEY) used to list workflows/executions.
     automation: { url: process.env.AUTOMATION_URL ?? "", token: process.env.AUTOMATION_API_KEY ?? "" },
+    // B3 (erp-whatsapp-and-agent-runtime-e2e.md §3.3): the agent-runner service (B1). Bearer
+    // AGENT_RUNNER_TOKEN gates every runner call, same convention as the other service tokens.
+    agents: { url: process.env.AGENTS_URL ?? "", token: process.env.AGENT_RUNNER_TOKEN ?? "" },
   },
   // Per-outbound-call timeout for the admin aggregator's probes (ms).
   adminProbeTimeoutMs: Number(process.env.ADMIN_PROBE_TIMEOUT_MS ?? 3000),
+  // Search-marketing provider layer (SM-04, design §05/§11). The stop-loss caps + provider-
+  // selection defaults. defaultProvider is the platform default at the tail of the selection
+  // cascade; tenantDefaultProvider is an optional per-deploy tenant default (empty -> falls
+  // through to defaultProvider). globalMonthlyCapUsd is the platform-wide ceiling (env, default
+  // $150/mo until the deposit model is proven). tenantMonthlyCapUsd is an OPTIONAL per-tenant
+  // monthly ceiling (unset -> that tier is skipped; engagement provider_budget_usd + global still
+  // enforced). budgetWarnRatio is the fraction of a cap at which a threshold event fires (0.8).
+  search: {
+    defaultProvider: process.env.SEARCH_DEFAULT_PROVIDER ?? "dataforseo",
+    tenantDefaultProvider: process.env.SEARCH_TENANT_DEFAULT_PROVIDER ?? "",
+    globalMonthlyCapUsd: Number(process.env.SEARCH_GLOBAL_MONTHLY_CAP_USD ?? 150),
+    tenantMonthlyCapUsd: process.env.SEARCH_TENANT_MONTHLY_CAP_USD
+      ? Number(process.env.SEARCH_TENANT_MONTHLY_CAP_USD)
+      : null,
+    budgetWarnRatio: Number(process.env.SEARCH_BUDGET_WARN_RATIO ?? 0.8),
+  },
   // Event → n8n bridge (WS4 §4): forwards allow-listed event-backbone events to n8n webhooks
   // so automations can trigger on business events, not just CRON/webhook. Fail-closed: the
   // bridge only starts when a webhook base URL, a shared secret, an event allow-list, AND the

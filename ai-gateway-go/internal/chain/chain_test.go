@@ -3,6 +3,8 @@ package chain
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -14,6 +16,10 @@ type stubProvider struct {
 	avail     bool
 	failCount int
 	calls     int
+	// err, if set, is returned (instead of the default generic "simulated failure") while
+	// calls<=failCount — lets B5 tests simulate a *providers.RateLimitError or a
+	// context.DeadlineExceeded-wrapping timeout from a specific provider.
+	err error
 }
 
 func (s *stubProvider) Name() string    { return s.name }
@@ -21,6 +27,9 @@ func (s *stubProvider) Available() bool { return s.avail }
 func (s *stubProvider) Complete(_ context.Context, _ string) (string, error) {
 	s.calls++
 	if s.calls <= s.failCount {
+		if s.err != nil {
+			return "", s.err
+		}
 		return "", errors.New("simulated failure")
 	}
 	return "ok from " + s.name, nil
@@ -33,7 +42,7 @@ func TestChainFailsOverToNextProvider(t *testing.T) {
 	ok := &stubProvider{name: "ok", avail: true}
 	c := NewChain([]providers.Provider{failing, ok}, 3, 60_000, time.Now)
 
-	result, provider, err := Run(c, context.Background(), func(p providers.Provider) (string, error) {
+	result, provider, taxonomy, err := Run(c, context.Background(), func(p providers.Provider) (string, error) {
 		return p.Complete(context.Background(), "hi")
 	})
 	if err != nil {
@@ -45,6 +54,9 @@ func TestChainFailsOverToNextProvider(t *testing.T) {
 	if result != "ok from ok" {
 		t.Fatalf("unexpected result: %q", result)
 	}
+	if taxonomy != "" {
+		t.Fatalf("expected empty taxonomy on success, got %q", taxonomy)
+	}
 }
 
 func TestBreakerOpensAfterThreshold(t *testing.T) {
@@ -54,7 +66,7 @@ func TestBreakerOpensAfterThreshold(t *testing.T) {
 	c := NewChain([]providers.Provider{failing}, 2, 60_000, clock)
 
 	for i := 0; i < 2; i++ {
-		_, _, _ = Run(c, context.Background(), func(p providers.Provider) (string, error) {
+		_, _, _, _ = Run(c, context.Background(), func(p providers.Provider) (string, error) {
 			return p.Complete(context.Background(), "hi")
 		})
 	}
@@ -74,7 +86,7 @@ func TestBreakerStaysClosedBelowThreshold(t *testing.T) {
 	failing := &stubProvider{name: "failing", avail: true, failCount: 1}
 	c := NewChain([]providers.Provider{failing}, 3, 60_000, clock)
 
-	_, _, _ = Run(c, context.Background(), func(p providers.Provider) (string, error) {
+	_, _, _, _ = Run(c, context.Background(), func(p providers.Provider) (string, error) {
 		return p.Complete(context.Background(), "hi")
 	})
 	state := c.State()
@@ -92,7 +104,7 @@ func TestBreakerRecoversAfterCooldown(t *testing.T) {
 	c := NewChain([]providers.Provider{failing}, 2, 1_000, clock)
 
 	for i := 0; i < 2; i++ {
-		_, _, _ = Run(c, context.Background(), func(p providers.Provider) (string, error) {
+		_, _, _, _ = Run(c, context.Background(), func(p providers.Provider) (string, error) {
 			return p.Complete(context.Background(), "hi")
 		})
 	}
@@ -102,7 +114,7 @@ func TestBreakerRecoversAfterCooldown(t *testing.T) {
 
 	// Still within cooldown: Run should skip the unhealthy provider entirely (no call made,
 	// so "all providers failed" with the "none available" fallback message).
-	_, _, err := Run(c, context.Background(), func(p providers.Provider) (string, error) {
+	_, _, _, err := Run(c, context.Background(), func(p providers.Provider) (string, error) {
 		return p.Complete(context.Background(), "hi")
 	})
 	if err == nil {
@@ -115,7 +127,7 @@ func TestBreakerRecoversAfterCooldown(t *testing.T) {
 	// Advance past cooldown: provider should be tried again and this time succeed
 	// (failCount=2, calls so far=2, so the 3rd call succeeds), clearing the breaker.
 	now = now.Add(1_100 * time.Millisecond)
-	result, provider, err := Run(c, context.Background(), func(p providers.Provider) (string, error) {
+	result, provider, _, err := Run(c, context.Background(), func(p providers.Provider) (string, error) {
 		return p.Complete(context.Background(), "hi")
 	})
 	if err != nil {
@@ -141,20 +153,136 @@ func TestStateReportsUnconfiguredForUnavailableProvider(t *testing.T) {
 }
 
 // Fidelity check against chain.ts run(): the aggregate error message joins per-provider
-// errors with "; " and is prefixed with "all providers failed — ".
+// errors with "; " and is prefixed with "all providers failed — ". B5: each per-provider
+// entry is now tagged with its taxonomy (a generic simulated failure classifies as
+// "provider_error"), and Run's aggregate taxonomy return is "provider_error" too.
 func TestRunErrorAggregatesProviderMessages(t *testing.T) {
 	a := &stubProvider{name: "a", avail: true, failCount: 999}
 	b := &stubProvider{name: "b", avail: true, failCount: 999}
 	c := NewChain([]providers.Provider{a, b}, 999, 60_000, time.Now)
 
-	_, _, err := Run(c, context.Background(), func(p providers.Provider) (string, error) {
+	_, _, taxonomy, err := Run(c, context.Background(), func(p providers.Provider) (string, error) {
 		return p.Complete(context.Background(), "hi")
 	})
 	if err == nil {
 		t.Fatalf("expected error")
 	}
-	want := "all providers failed — a: simulated failure; b: simulated failure"
+	want := "all providers failed — a [provider_error]: simulated failure; b [provider_error]: simulated failure"
 	if err.Error() != want {
 		t.Fatalf("unexpected error message:\n got: %q\nwant: %q", err.Error(), want)
+	}
+	if taxonomy != TaxonomyProviderError {
+		t.Fatalf("expected aggregate taxonomy %q, got %q", TaxonomyProviderError, taxonomy)
+	}
+}
+
+// B5 (gateway reliability): a *providers.RateLimitError opens that provider's breaker
+// immediately — after a SINGLE 429, not after `threshold` consecutive failures — and Run
+// fails over to the next healthy provider in the same call.
+func TestRateLimitOpensBreakerImmediatelyAndFailsOver(t *testing.T) {
+	now := time.Now()
+	clock := func() time.Time { return now }
+	limited := &stubProvider{name: "limited", avail: true, failCount: 999, err: &providers.RateLimitError{RetryAfter: 30 * time.Second}}
+	ok := &stubProvider{name: "ok", avail: true}
+	// threshold=3: if the 429 wrongly counted as a normal consecutive failure, one attempt
+	// would NOT be enough to open the breaker — proving immediate-open behaves differently
+	// from recordFailure.
+	c := NewChain([]providers.Provider{limited, ok}, 3, 60_000, clock)
+
+	result, provider, taxonomy, err := Run(c, context.Background(), func(p providers.Provider) (string, error) {
+		return p.Complete(context.Background(), "hi")
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if provider != "ok" || result != "ok from ok" {
+		t.Fatalf("expected failover to ok, got %q %q", provider, result)
+	}
+	if taxonomy != "" {
+		t.Fatalf("expected empty taxonomy on eventual success, got %q", taxonomy)
+	}
+	if state := c.State(); state["limited"] != "open" {
+		t.Fatalf("expected limited breaker open immediately after one 429, got %q", state["limited"])
+	}
+	if limited.calls != 1 {
+		t.Fatalf("expected exactly one attempt against the rate-limited provider, got %d", limited.calls)
+	}
+}
+
+// B5: a rate limit must NOT count toward consecutiveFails — recovery after exactly the
+// advertised Retry-After window requires only ONE fresh attempt, not `threshold` of them.
+func TestRateLimitDoesNotCountTowardConsecutiveFailsAndRecoversAfterWindow(t *testing.T) {
+	now := time.Now()
+	clock := func() time.Time { return now }
+	limited := &stubProvider{name: "limited", avail: true, failCount: 1, err: &providers.RateLimitError{RetryAfter: 1 * time.Second}}
+	c := NewChain([]providers.Provider{limited}, 3, 60_000, clock)
+
+	_, _, taxonomy, err := Run(c, context.Background(), func(p providers.Provider) (string, error) {
+		return p.Complete(context.Background(), "hi")
+	})
+	if err == nil {
+		t.Fatalf("expected error (the only provider is rate-limited)")
+	}
+	if taxonomy != TaxonomyRateLimit {
+		t.Fatalf("expected aggregate taxonomy %q, got %q", TaxonomyRateLimit, taxonomy)
+	}
+	if !strings.Contains(err.Error(), "[rate_limit]") {
+		t.Fatalf("expected [rate_limit] tag in aggregate message, got %q", err.Error())
+	}
+	if state := c.State(); state["limited"] != "open" {
+		t.Fatalf("expected breaker open right after the 429, got %q", state["limited"])
+	}
+
+	// Still within the 1s window: Run must skip it (no additional call) and report the
+	// aggregate as rate_limit even though this second Run made zero attempts itself.
+	_, _, taxonomy, err = Run(c, context.Background(), func(p providers.Provider) (string, error) {
+		return p.Complete(context.Background(), "hi")
+	})
+	if err == nil {
+		t.Fatalf("expected error while still inside the rate-limit window")
+	}
+	if taxonomy != TaxonomyRateLimit {
+		t.Fatalf("expected aggregate taxonomy %q while breaker still open from rate limit, got %q", TaxonomyRateLimit, taxonomy)
+	}
+	if limited.calls != 1 {
+		t.Fatalf("expected no additional calls while the rate-limit window is open, got %d calls", limited.calls)
+	}
+
+	// Advance past the window: exactly one fresh attempt (calls becomes 2, which exceeds
+	// failCount=1) must succeed — proving the earlier 429 never incremented
+	// consecutiveFails (a normal breaker with threshold=3 would still need 2 more failures).
+	now = now.Add(1_100 * time.Millisecond)
+	result, provider, _, err := Run(c, context.Background(), func(p providers.Provider) (string, error) {
+		return p.Complete(context.Background(), "hi")
+	})
+	if err != nil {
+		t.Fatalf("unexpected error after the rate-limit window elapsed: %v", err)
+	}
+	if provider != "limited" || result != "ok from limited" {
+		t.Fatalf("unexpected result: %q %q", provider, result)
+	}
+	if state := c.State(); state["limited"] != "ok" {
+		t.Fatalf("expected breaker cleared after success, got %q", state["limited"])
+	}
+}
+
+// B5: a context-deadline error (the PROVIDER_TIMEOUT_MS budget expiring on a hung
+// provider) classifies as "timeout", distinct from both rate_limit and generic
+// provider_error.
+func TestClassifyTimeoutFromContextDeadlineExceeded(t *testing.T) {
+	hung := &stubProvider{name: "hung", avail: true, failCount: 999, err: fmt.Errorf("dial: %w", context.DeadlineExceeded)}
+	c := NewChain([]providers.Provider{hung}, 3, 60_000, time.Now)
+
+	_, _, taxonomy, err := Run(c, context.Background(), func(p providers.Provider) (string, error) {
+		return p.Complete(context.Background(), "hi")
+	})
+	if err == nil {
+		t.Fatalf("expected error")
+	}
+	if taxonomy != TaxonomyTimeout {
+		t.Fatalf("expected taxonomy %q, got %q", TaxonomyTimeout, taxonomy)
+	}
+	if !strings.Contains(err.Error(), "[timeout]") {
+		t.Fatalf("expected [timeout] tag in aggregate message, got %q", err.Error())
 	}
 }

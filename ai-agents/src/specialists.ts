@@ -47,7 +47,14 @@ export const taskTriager: AgentDef = {
   },
   maxSteps: 10,
   maxToolCalls: 6,
-  evaledProviders: [], // none cleared yet ⇒ forced read-only until a provider passes this agent's evals
+  // D13 enrollment (2026-07-24): `openai` (Ollama Cloud, deepseek-v4-flash) cleared for task-triager —
+  // eval/containment suite green (12 tests), tool-contract green (tasks.list read + tasks.update
+  // low_write registered + Cerbos/impact-gated in the MCP hub), and the provider follows the tool-call
+  // protocol live. Writes are LOW-impact (reversible, in-tenant) and STILL bounded by: the triggering
+  // user's Cerbos permissions + RLS at the hub/platform, and the D14 impact gate (a high_write would
+  // suspend for approval — task-triager has none). Revert to [] to force read-only. See
+  // docs/runbooks/agent-evaled-providers-enrollment.md.
+  evaledProviders: ["openai"],
 };
 
 /** Write-capable specialists — driven via runWriteAgent (D13 provider gate + D14 approval filing),

@@ -1,0 +1,33 @@
+# Search-marketing module (SM-03; docs/blueprints/seo-sem-design.md §11). resource_search_keyword
+# covers keyword sets/keywords/rank-tracking snapshots/paid research pulls (design §11: "resource_
+# search_keyword (sets/keywords/ranks/research)"), backing `search:keyword:write` (import/edit) and
+# `search:rank:read` (view rank-tracking snapshots). `research` is the paid-pull action (volume/
+# difficulty/CPC/suggestions/rank pulls — design §07/§08 🔵 buttons); it is a genuine spend action
+# but the budget/tool-scope stop-loss (SM-04) is an APPLICATION-layer choke-point, not a Cerbos
+# concern — Cerbos only answers "is this principal allowed to ask for this at all".
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: resource_search_keyword
+  importDerivedRoles: ["gaiada_scopes"]
+  variables:
+    import: ["gaiada_common"]
+  rules:
+    - actions: ["*"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["platform_admin"]
+    - actions: ["read", "create", "update", "delete", "research"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["group_executive"]
+      condition: { match: { expr: "variables.notLow" } }
+    # Search staff / manager (served-company grant) + the served company's own admin: full working
+    # set INCLUDING paid research pulls (gated by budget, not role — design §08).
+    - actions: ["read", "create", "update", "research"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["module_staff", "module_manager", "company_admin"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    # Destructive: manager + company admin only.
+    - actions: ["delete"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["module_manager", "company_admin"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }

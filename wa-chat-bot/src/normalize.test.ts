@@ -50,6 +50,25 @@ describe("normalize", () => {
     expect(normalize(null)).toBeNull();
   });
 
+  it("ignores status/broadcast/newsletter system chats (never reply there)", () => {
+    expect(normalize({ event: "message", payload: { from: "status@broadcast", body: "x" } })).toBeNull();
+    expect(normalize({ event: "message", payload: { from: "12345@broadcast", body: "x" } })).toBeNull();
+    expect(normalize({ event: "message", payload: { from: "12345@newsletter", body: "x" } })).toBeNull();
+  });
+
+  it("detects a reply to the bot via the NOWEB-normalized replyTo.fromMe field", () => {
+    const m = normalize({
+      event: "message",
+      payload: { from: "1@g.us", body: "yes", replyTo: { fromMe: true, body: "Did you mean X?" } },
+    })!;
+    expect(m.replyToBot).toBe(true);
+  });
+
+  it("reads pushName as a sender-name fallback (NOWEB)", () => {
+    const m = normalize({ event: "message", payload: { from: "1@c.us", body: "hi", _data: { pushName: "Sari" } } })!;
+    expect(m.senderName).toBe("Sari");
+  });
+
   it("flags direct messages as not group", () => {
     const m = normalize({ event: "message", payload: { from: "628110000000@c.us", body: "hi" } })!;
     expect(m.isGroup).toBe(false);

@@ -24,7 +24,7 @@ export default defineConfig({
       name: "chromium",
       use: { ...devices["Desktop Chrome"], storageState: ".auth/user.json" },
       dependencies: ["setup"],
-      testIgnore: /auth\.spec\.ts/,
+      testIgnore: [/auth\.spec\.ts/, /smoke\.spec\.ts/],
     },
     {
       // Anonymous flows (login, step-up, sign-out) — no stored session.
@@ -32,11 +32,24 @@ export default defineConfig({
       use: { ...devices["Desktop Chrome"] },
       testMatch: /auth\.spec\.ts/,
     },
+    {
+      // P3-12 CI build-gate smoke check. Self-contained (does its own login),
+      // no dependency on the "setup" project, so `--grep @smoke` runs just
+      // this one test without pulling in the rest of the suite.
+      name: "smoke",
+      use: { ...devices["Desktop Chrome"] },
+      testMatch: /smoke\.spec\.ts/,
+    },
   ],
   webServer: {
     // `next dev` avoids the `output: standalone` conflict with `next start`
     // and needs no prior build — `npm run e2e` is fully self-contained.
-    command: `npx next dev -p ${PORT}`,
+    // In CI (P3-12), the platform-ui job already ran `npm run build` as its
+    // gate step, so the smoke project starts the real built app instead —
+    // that's the whole point of the smoke check (catch runtime/500s `next
+    // build` + `tsc` + vitest all miss, e.g. a `server-only` import that
+    // reaches a client component).
+    command: process.env.CI ? `npx next start -p ${PORT}` : `npx next dev -p ${PORT}`,
     url: `http://localhost:${PORT}/login`,
     reuseExistingServer: !process.env.CI,
     timeout: 180_000,

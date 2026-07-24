@@ -133,6 +133,15 @@ export function HairlineTable({ columns, rows, tcols }: {
   );
 }
 
-export function Toast({ message }: { message: string }) {
-  return <div className="lux-toast" role="status">{message}</div>;
+// `onUndo` is additive (P2-06 recurring-task "Undo" affordance) — omit it and
+// Toast renders exactly as before (plain message, no action).
+export function Toast({ message, onUndo, undoLabel = "Undo" }: { message: string; onUndo?: () => void; undoLabel?: string }) {
+  return (
+    <div className="lux-toast" role="status">
+      {message}
+      {onUndo && (
+        <button type="button" className="lux-toast__undo" onClick={onUndo}>{undoLabel}</button>
+      )}
+    </div>
+  );
 }

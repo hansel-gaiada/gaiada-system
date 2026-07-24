@@ -18,6 +18,16 @@
 .sec-tab:hover { color: var(--text-primary); }
 .sec-tab--active { color: var(--erp-accent); border-bottom-color: var(--erp-accent); }
 .sec-tab svg { opacity: 0.8; }
+/* Secondary sub-tab strip (department consoles, two-level IA). Visibly
+   subordinate to the primary group strip: lighter, pill-shaped, tighter. When a
+   primary strip is directly followed by a sub-strip, drop its bottom margin so
+   the two levels read as one connected block rather than two stacked rows. */
+.sec-tabs:has(+ .sub-tabs) { margin-bottom: 0; }
+.sub-tabs { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; margin-bottom: 24px; padding: 12px 0 0; }
+.sub-tab { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; font: 500 12.5px var(--font-body); color: var(--erp-ink-50); text-decoration: none; border-radius: 999px; transition: color 0.15s ease, background 0.15s ease; }
+.sub-tab:hover { color: var(--text-primary); background: rgba(110, 90, 67, 0.05); }
+.sub-tab--active { color: var(--erp-accent); background: rgba(181, 98, 47, 0.1); font-weight: 700; }
+.sub-tab svg { opacity: 0.75; }
 
 .erp-side__user { border-top: 0.5px solid rgba(26, 25, 22, 0.1); padding: 14px 16px; display: flex; align-items: center; gap: 12px; }
 .erp-usermenu { position: relative; }

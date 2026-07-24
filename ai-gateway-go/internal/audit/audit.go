@@ -15,9 +15,13 @@ type EgressAudit struct {
 	Capability string  `json:"capability"` // llm | media | embed
 	Provider   *string `json:"provider"`   // nil when blocked before egress
 	OK         bool    `json:"ok"`
-	Blocked    string  `json:"blocked,omitempty"` // auth | budget | dlp | provider
-	Redactions int     `json:"redactions"`
-	LatencyMs  int64   `json:"latencyMs"`
+	// auth | budget | dlp | timeout | rate_limit | provider_error. The last three are the B5
+	// provider-failure taxonomy (chain.TaxonomyTimeout/TaxonomyRateLimit/TaxonomyProviderError):
+	// which one is recorded depends on how every attempted provider in the chain failed —
+	// see chain.overallTaxonomy.
+	Blocked    string `json:"blocked,omitempty"`
+	Redactions int    `json:"redactions"`
+	LatencyMs  int64  `json:"latencyMs"`
 }
 
 func WriteAudit(path string, e EgressAudit) error {

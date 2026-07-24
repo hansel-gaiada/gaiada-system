@@ -54,3 +54,53 @@ describe("FileStore media queue", () => {
     expect(row.mediaStatus).toBe("failed");
   });
 });
+
+describe("FileStore.listChats", () => {
+  let store: FileStore;
+
+  beforeEach(() => {
+    rmSync(DIR, { recursive: true, force: true });
+    store = new FileStore(`${DIR}/messages.json`);
+  });
+  afterAll(() => rmSync(DIR, { recursive: true, force: true }));
+
+  // Timestamps must be within config.retentionDays of "now" — saveMessage purges anything
+  // older on every write (crypto-shred retention), so fixtures use small offsets from
+  // Date.now() rather than tiny epoch values (which would be purged immediately).
+  const now = Date.now();
+
+  it("aggregates one entry per chat, sorted by lastActivityTs desc, with count/preview/sender", async () => {
+    await store.saveMessage(m({ chatId: "a@g.us", waMessageId: "1", ts: now - 3000, text: "first" }));
+    await store.saveMessage(m({ chatId: "a@g.us", waMessageId: "2", ts: now - 1000, text: "third", senderName: "Budi" }));
+    await store.saveMessage(m({ chatId: "b@c.us", waMessageId: "3", ts: now - 2000, text: "dm", senderId: "628", senderName: "Wati" }));
+
+    const chats = await store.listChats();
+    expect(chats.map((c) => c.chatId)).toEqual(["a@g.us", "b@c.us"]);
+
+    const a = chats[0];
+    expect(a.messageCount).toBe(2);
+    expect(a.lastActivityTs).toBe(now - 1000);
+    expect(a.lastPreview).toBe("third");
+    expect(a.lastSenderName).toBe("Budi");
+
+    const b = chats[1];
+    expect(b.messageCount).toBe(1);
+    expect(b.lastSenderName).toBe("Wati");
+  });
+
+  it("bot-only chat has no non-bot sender -> lastSenderName is empty", async () => {
+    await store.saveMessage(m({ chatId: "c@c.us", waMessageId: "1", ts: now - 1000, text: "auto-reply", fromBot: true }));
+    const [chat] = await store.listChats();
+    expect(chat.lastSenderName).toBe("");
+    expect(chat.lastPreview).toBe("auto-reply");
+  });
+
+  it("caps to `limit`, keeping the most recently active chats", async () => {
+    await store.saveMessage(m({ chatId: "old@g.us", waMessageId: "1", ts: now - 3000 }));
+    await store.saveMessage(m({ chatId: "mid@g.us", waMessageId: "2", ts: now - 2000 }));
+    await store.saveMessage(m({ chatId: "new@g.us", waMessageId: "3", ts: now - 1000 }));
+
+    const chats = await store.listChats(2);
+    expect(chats.map((c) => c.chatId)).toEqual(["new@g.us", "mid@g.us"]);
+  });
+});

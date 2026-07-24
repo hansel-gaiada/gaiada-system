@@ -388,6 +388,8 @@ flowchart LR
             <tr><td class="mono">11</td><td>Delivery pipeline</td><td>Meeting→MOM→PRD pipeline + capture edge</td><td><span class="tag t-warn">in progress</span></td></tr>
             <tr><td class="mono">C</td><td>Compliance</td><td>GDPR-grade gate, DPIA/LIA, retention/erasure</td><td><span class="tag t-warn">drafts</span></td></tr>
             <tr><td class="mono">WD</td><td>WebDesk</td><td>Centralized client-website backend (new)</td><td><span class="tag t-info">blueprint</span></td></tr>
+            <tr><td class="mono">SEO</td><td>Search-Marketing</td><td>SEO/SEM/GEO department vertical (new)</td><td><span class="tag t-warn">in progress</span></td></tr>
+            <tr><td class="mono">SMM</td><td>Social Media</td><td>Organic publishing/engagement department vertical (new)</td><td><span class="tag t-info">blueprint</span></td></tr>
           </tbody>
         </table></div>
         <div class="note"><span class="k">Status = dev, not production</span>These statuses describe the <em>dev</em> stack. <strong>Per-module versions, detailed status, and future plans are tracked in <code>docs/modules/MODULES.md</code></strong> (registry) and <code>docs/modules/CHANGELOG.md</code> — the authoritative, git-tracked source that this blueprint summarizes.</div>
@@ -591,7 +593,7 @@ sequenceDiagram
         <ul>
           <li><strong>Messaging</strong> — WhatsApp (WAHA) + Telegram work-summary/assistant bot.</li>
           <li><strong>ERP web UI</strong> — the primary interface; functionally complete in dev across Plans 1–5 + People + org builder (backend-dependent sections degrade gracefully).</li>
-          <li><strong>Department consoles</strong> — a reusable department-first template (Web Dev prototyped as the reference), with work-detection and integrations on the Web Dev roadmap.</li>
+          <li><strong>Department consoles</strong> — a reusable department-first template (Web Dev prototyped as the reference), with work-detection and integrations on the Web Dev roadmap. Department <em>verticals</em> are being specified as their own <code>platform-nest</code> modules + consoles, each with a dedicated engineering blueprint: <strong>Search-Marketing</strong> (SEO/SEM/GEO), <strong>Social Media</strong> (organic publishing — Postiz run AGPL-contained, Calendar/Composer/Inbox/Analytics), and Creatives. See <code>docs/BLUEPRINTS.md</code>.</li>
           <li><strong>Delivery pipeline (WS11)</strong> — meeting capture → MOM → PRD/report/scope, feeding the surfaces.</li>
         </ul>
         <div class="note"><span class="k">Holding-OS direction (backbone program)</span>The approved backbone program upgrades org/module/RBAC toward a true holding-OS: shared-service departments serving N companies via a drag-drop org chart, per-company data slicing, and an HR company-selector — a modular monolith, payroll excluded.</div>

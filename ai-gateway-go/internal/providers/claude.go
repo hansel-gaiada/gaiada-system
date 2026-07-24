@@ -52,6 +52,9 @@ func (p *ClaudeProvider) call(ctx context.Context, content any) (string, error) 
 		return "", err
 	}
 	defer res.Body.Close()
+	if res.StatusCode == http.StatusTooManyRequests {
+		return "", newRateLimitError(res)
+	}
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
 		return "", fmt.Errorf("claude %d", res.StatusCode)
 	}

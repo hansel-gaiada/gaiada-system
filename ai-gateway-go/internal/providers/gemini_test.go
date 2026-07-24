@@ -3,9 +3,11 @@ package providers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 )
 
 func decodeJSONBody(t *testing.T, r *http.Request, v any) {
@@ -57,6 +59,30 @@ func TestGeminiCompleteAllowsEmptyButPresentText(t *testing.T) {
 	}
 	if text != "" {
 		t.Fatalf("expected empty string, got %q", text)
+	}
+}
+
+// B5: a 429 must yield a typed *RateLimitError with the parsed Retry-After window.
+func TestGeminiCompleteReturnsRateLimitErrorOn429(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Retry-After", "9")
+		w.WriteHeader(http.StatusTooManyRequests)
+		w.Write([]byte(`{"error":{"message":"quota exceeded"}}`))
+	}))
+	defer srv.Close()
+
+	p := &GeminiProvider{APIKey: "k", Model: "gemini-1.5-flash", Client: srv.Client()}
+	p.baseURL = srv.URL
+	_, err := p.Complete(context.Background(), "hi")
+	if err == nil {
+		t.Fatal("expected an error on 429")
+	}
+	var rl *RateLimitError
+	if !errors.As(err, &rl) {
+		t.Fatalf("expected *RateLimitError, got %T: %v", err, err)
+	}
+	if rl.RetryAfter != 9*time.Second {
+		t.Fatalf("expected RetryAfter=9s, got %s", rl.RetryAfter)
 	}
 }
 

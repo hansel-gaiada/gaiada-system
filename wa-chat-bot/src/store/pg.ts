@@ -6,7 +6,7 @@ import { Pool, type PoolClient } from "pg";
 import { config } from "../config";
 import type { Ciphertext } from "../crypto/envelope";
 import { encodeSender, decodeSender } from "./encode";
-import type { Store, StoredMessage, MediaStatus } from "./types";
+import type { Store, StoredMessage, MediaStatus, ChatSummary } from "./types";
 
 interface Row {
   chat_id: string;
@@ -164,6 +164,60 @@ export class PgStore implements Store {
       return res.rows;
     });
     return rows.map((r) => r.chat_id);
+  }
+
+  /** One aggregate query (three CTEs over the existing (chat_id, ts) index) instead of
+   *  N+1 per-chat lookups: distinct chats + counts, the last message per chat (any sender,
+   *  for the preview), and the last NON-bot message per chat (for the display name). Sender
+   *  decode only runs on the `limit` rows actually returned, never the whole table. */
+  async listChats(limit = 100): Promise<ChatSummary[]> {
+    interface Row {
+      chat_id: string;
+      message_count: string;
+      last_ts: string;
+      last_text: string | null;
+      sender_enc: Ciphertext | null;
+    }
+    const rows = await withTenant(this.pool, [config.tenantId], async (c) => {
+      const res = await c.query<Row>(
+        `WITH agg AS (
+           SELECT chat_id, COUNT(*)::bigint AS message_count, MAX(ts) AS last_ts
+           FROM messages
+           GROUP BY chat_id
+         ),
+         last_msg AS (
+           SELECT DISTINCT ON (chat_id) chat_id, text AS last_text
+           FROM messages
+           ORDER BY chat_id, ts DESC
+         ),
+         last_sender AS (
+           SELECT DISTINCT ON (chat_id) chat_id, sender_enc
+           FROM messages
+           WHERE from_bot = false
+           ORDER BY chat_id, ts DESC
+         )
+         SELECT agg.chat_id, agg.message_count, agg.last_ts, last_msg.last_text, last_sender.sender_enc
+         FROM agg
+         LEFT JOIN last_msg ON last_msg.chat_id = agg.chat_id
+         LEFT JOIN last_sender ON last_sender.chat_id = agg.chat_id
+         ORDER BY agg.last_ts DESC
+         LIMIT $1`,
+        [limit],
+      );
+      return res.rows;
+    });
+    return Promise.all(
+      rows.map(async (r) => {
+        const sender = r.sender_enc !== null ? await decodeSender(r.sender_enc) : null;
+        return {
+          chatId: r.chat_id,
+          messageCount: Number(r.message_count),
+          lastActivityTs: Number(r.last_ts),
+          lastPreview: r.last_text ?? "",
+          lastSenderName: sender?.senderName ?? "",
+        };
+      }),
+    );
   }
 
   async close(): Promise<void> {

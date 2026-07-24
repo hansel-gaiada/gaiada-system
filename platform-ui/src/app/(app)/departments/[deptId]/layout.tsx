@@ -5,21 +5,25 @@ import { getMe } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
 import { can } from "@/lib/rbac";
 import { getDepartment, myDeptTasksToday, myBlockedTasks, toRailPriority } from "@/lib/departments";
+import { titleWithRecurrenceGlyph } from "@/lib/pm";
 import { getMyWorkQueue, projectQueueForCompany } from "@/lib/queue";
-import { toolkitFor, tabHref } from "@/lib/deptToolkits";
+import { toolkitFor } from "@/lib/deptToolkits";
 import { PageHeader } from "@/components/PageHeader";
-import { SectionTabs } from "@/components/shell/SectionTabs";
+import { DeptTabs } from "@/components/shell/DeptTabs";
+import { DeptShellFrame } from "@/components/departments/DeptShellFrame";
 import { MyWorkRail, type RailTaskItem, type RailWaitingItem } from "@/components/departments/MyWorkRail";
 import "@/components/departments/departments.css";
 
 type Params = Promise<{ deptId: string }>;
 
-// Department console shell. Owns the header + tab strip + the PERSISTENT
-// My-work rail (decision #10: rendered once here, in `.dept-shell__rail`, so
-// every one of the nine tabs sees it without re-rendering it). Each child tab
-// page renders only its own body inside `.dept-shell__main`. The set of tabs
-// comes from the department's toolkit — Web Dev gets the full nine-tab set;
-// departments without a bespoke toolkit get Home only, same shell either way.
+// Department console shell. Owns the header + the two-level tab nav (DeptTabs:
+// primary group strip + a secondary sub-tab strip for the active group) + the
+// PERSISTENT My-work rail (decision #10: rendered once here, in
+// `.dept-shell__rail`, so every tab sees it without re-rendering it). Each child
+// tab page renders only its own body inside `.dept-shell__main`. The groups come
+// from the department's toolkit — bespoke departments get the Home · Work ·
+// <craft> · Connections spine; departments without a bespoke toolkit get Home
+// only, same shell either way.
 //
 // Rail data (P1-07, decision #12; repointed onto the shared queue per
 // WS-UX-plan R-1): "My work today" = this person's own not-done department
@@ -49,9 +53,9 @@ export default async function DepartmentConsoleLayout({ children, params }: { ch
   const queue = await getMyWorkQueue(me, userId, [{ id: tenant, name: tenant }]);
   const waitingFromQueue = projectQueueForCompany(queue, tenant, { types: ["approval", "gate"] });
 
-  const today: RailTaskItem[] = myDeptTasksToday(dept.tasks, userId).map((t) => ({
+  const today: RailTaskItem[] = myDeptTasksToday(dept.tasks, userId, dept.statusesByProject).map((t) => ({
     id: t.id,
-    title: t.title,
+    title: titleWithRecurrenceGlyph(t),
     href: `/tasks/${t.id}`,
     dueDate: t.dueDate,
     priority: toRailPriority(t.priority),
@@ -66,9 +70,9 @@ export default async function DepartmentConsoleLayout({ children, params }: { ch
       kind: "approval",
       waitingOn: i.meta,
     })),
-    ...myBlockedTasks(dept.tasks, userId).map((t): RailWaitingItem => ({
+    ...myBlockedTasks(dept.tasks, userId, dept.statusesByProject).map((t): RailWaitingItem => ({
       id: t.id,
-      title: t.title,
+      title: titleWithRecurrenceGlyph(t),
       href: `/tasks/${t.id}`,
       kind: "blocked_task",
       waitingOn: t.dependsOn.length > 0 ? "a blocking task" : undefined,
@@ -84,13 +88,10 @@ export default async function DepartmentConsoleLayout({ children, params }: { ch
         breadcrumbs={[{ label: "Organization", href: "/organization" }, { label: "Departments", href: "/departments" }, { label: dept.name }]}
         actions={canEditOrg ? <Link href={`/companies/${tenant}/org`} className="lux-btn lux-btn--ghost lux-btn--sm">Edit structure</Link> : undefined}
       />
-      <SectionTabs tabs={toolkit.tabs.map((t) => ({ key: t.key, label: t.label, href: tabHref(deptId, t), icon: t.icon }))} />
-      <div className="dept-shell">
-        <div className="dept-shell__main">{children}</div>
-        <div className="dept-shell__rail">
-          <MyWorkRail today={today} waiting={waiting} />
-        </div>
-      </div>
+      <DeptTabs groups={toolkit.groups} deptId={deptId} />
+      <DeptShellFrame groups={toolkit.groups} deptId={deptId} rail={<MyWorkRail today={today} waiting={waiting} />}>
+        {children}
+      </DeptShellFrame>
     </>
   );
 }

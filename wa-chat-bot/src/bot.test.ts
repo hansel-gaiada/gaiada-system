@@ -3,6 +3,7 @@ import { writeFileSync, mkdirSync } from "node:fs";
 import { config } from "./config";
 import { resetRegistryCache } from "./groups";
 import { isTriggered, respond, handleInbound } from "./bot";
+import { setSelfJid, resetSessionState } from "./session-state";
 import { resetDedup } from "./safety/dedup";
 import type { InboundMessage, WhatsAppGateway } from "./waha";
 
@@ -25,14 +26,24 @@ function msg(over: Partial<InboundMessage>): InboundMessage {
     isGroup: true,
     fromMe: false,
     replyToBot: false,
+    mentionedJids: [],
     media: null,
     ...over,
   };
 }
 
 describe("isTriggered", () => {
-  it("always triggers in a DM", () => {
-    expect(isTriggered(msg({ isGroup: false }), "hello")).toBe(true);
+  it("DM reply policy gates 1:1 chats (default off protects a shared/personal number)", () => {
+    const dm = { isGroup: false, senderId: "628999@c.us" };
+    config.dmReplyPolicy = "off";
+    expect(isTriggered(msg(dm), "hello")).toBe(false); // never auto-reply to DMs by default
+    config.dmReplyPolicy = "all";
+    expect(isTriggered(msg(dm), "hello")).toBe(true);
+    config.dmReplyPolicy = "allowlist";
+    config.dmAllowlist = ["628999"];
+    expect(isTriggered(msg(dm), "hello")).toBe(true); // listed sender
+    expect(isTriggered(msg({ isGroup: false, senderId: "628000@c.us" }), "hi")).toBe(false); // not listed
+    config.dmReplyPolicy = "all"; // leave DMs on for the rest of this suite's group-focused cases
   });
   it("does not trigger on ordinary group chatter", () => {
     expect(isTriggered(msg({ isGroup: true }), "team lunch at 1pm")).toBe(false);
@@ -40,11 +51,29 @@ describe("isTriggered", () => {
   it("triggers on a command", () => {
     expect(isTriggered(msg({ isGroup: true }), "/ping")).toBe(true);
   });
-  it("triggers on an @mention", () => {
-    expect(isTriggered(msg({ isGroup: true }), "hey @bot what's the status")).toBe(true);
+  it("triggers on an @Rhea text mention (case-insensitive)", () => {
+    expect(isTriggered(msg({ isGroup: true }), "hey @Rhea what's the status")).toBe(true);
+    expect(isTriggered(msg({ isGroup: true }), "@rhea help")).toBe(true);
+    expect(isTriggered(msg({ isGroup: true }), "status please @RHEA?")).toBe(true);
+  });
+  it("does NOT trigger on substrings that merely contain the mention token", () => {
+    // loose includes() would fire on these — the standalone-token matcher must not
+    expect(isTriggered(msg({ isGroup: true }), "the @rhealpha channel is quiet")).toBe(false);
+    expect(isTriggered(msg({ isGroup: true }), "email ops@rhea.example.com please")).toBe(false);
+    expect(isTriggered(msg({ isGroup: true }), "no mention here at all")).toBe(false);
   });
   it("triggers on a reply to the bot's own message", () => {
     expect(isTriggered(msg({ isGroup: true, replyToBot: true }), "yes that one")).toBe(true);
+  });
+  it("triggers on a real WhatsApp @mention (bot's own JID in mentionedJids, digit-tolerant)", () => {
+    setSelfJid("628123456789@c.us");
+    // WhatsApp may deliver the JID as @s.whatsapp.net; digit-matching handles both
+    expect(isTriggered(msg({ isGroup: true, mentionedJids: ["628123456789@s.whatsapp.net"] }), "take a look")).toBe(true);
+    // a mention of someone else must NOT trigger
+    expect(isTriggered(msg({ isGroup: true, mentionedJids: ["628999999999@c.us"] }), "cc the lead")).toBe(false);
+    resetSessionState();
+    // with no known self JID (unpaired), a JID mention alone cannot trigger
+    expect(isTriggered(msg({ isGroup: true, mentionedJids: ["628123456789@c.us"] }), "ping")).toBe(false);
   });
 });
 

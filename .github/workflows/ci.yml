@@ -142,6 +142,36 @@ jobs:
           DATABASE_URL_SITE_A: postgres://sync_app:test@localhost:5432/gaiada_sync_test
         run: go test ./...
 
+  # P3-12: platform-ui build gate. `tsc` + vitest alone once passed while `next build` broke
+  # (a `server-only` import reached a client component) and routes 500'd — `npm run build` here
+  # is the actual gate for that class of bug. DEMO_MODE=1 so no backend is needed (demoFixtures).
+  # The optional Playwright smoke check runs against that same build (`next start`, not
+  # `next dev` — see platform-ui/playwright.config.ts) so it exercises the real build artifact.
+  platform-ui:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: platform-ui
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: platform-ui/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+        env:
+          DEMO_MODE: "1"
+      - name: Install Playwright browser (smoke only)
+        run: npx playwright install chromium --with-deps
+      - name: Smoke e2e against the built app
+        run: npx playwright test --project=smoke --grep @smoke
+        env:
+          DEMO_MODE: "1"
+
   # WS9 observability config-lint: promtool (rules + scrape), amtool (alertmanager, env-rendered),
   # and a YAML/JSON parse fallback. otelcol validate is skipped in CI (large binary); the collector
   # config is YAML-parsed here and otelcol-validated on a Docker host before deploy.

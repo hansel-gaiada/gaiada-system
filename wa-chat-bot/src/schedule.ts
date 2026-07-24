@@ -5,6 +5,7 @@ import { getGroupChatIds, getMessages } from "./store";
 import { summarizeChat } from "./summarize";
 import { loadLastRun, saveLastRun, claimSlot } from "./schedule-state";
 import { computeWindow, type Slot } from "./window";
+import { postToGroupsEnabled } from "./safety/post-toggle";
 import type { WhatsAppGateway } from "./waha";
 
 export interface DigestResult {
@@ -46,7 +47,7 @@ export async function runDigests(
       digest = `[digest unavailable: ${(err as Error).message}]`;
     }
     perGroup.push({ chatId, digest });
-    const postBack = registryActive ? groupOptIn(chatId) : config.postToGroups;
+    const postBack = registryActive ? groupOptIn(chatId) : postToGroupsEnabled();
     if (postBack) {
       await gw.sendText(chatId, `*Digest — ${slot}*\n\n${digest}`).catch((err: Error) => {
         console.warn(`[digest] send to ${chatId} failed: ${err.message}`);

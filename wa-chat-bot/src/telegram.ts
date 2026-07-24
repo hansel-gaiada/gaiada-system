@@ -65,6 +65,7 @@ export function normalizeTelegram(update: unknown): InboundMessage | null {
     isGroup: type === "group" || type === "supergroup",
     fromMe: false,
     replyToBot: Boolean(m.reply_to_message?.from?.is_bot),
+    mentionedJids: [], // Telegram mentions are @username text (handled by the text matcher), not JIDs
     media: media ? { url: media.url, mimetype: media.mimetype } : null,
   };
 }

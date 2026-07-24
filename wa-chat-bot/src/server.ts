@@ -13,10 +13,15 @@ import { summarizeChat } from "./summarize";
 import { getMessages } from "./store";
 import { runDigests, startScheduler } from "./schedule";
 import { actionsEnabled, setActionsEnabled } from "./safety/kill-switch";
+import { postToGroupsEnabled, setPostToGroups } from "./safety/post-toggle";
 import { readActionAudit } from "./safety/audit";
 import { startMediaWorker } from "./media";
 import { queueEnabled } from "./media-queue";
 import { initStore } from "./store";
+import { startSession, getSessionStatus, getQr, stopSession, logoutSession, restartSession, refreshSelfJid } from "./waha-admin";
+import { lastEvent, lastKnownStatus, transitions } from "./session-state";
+import { groupsSnapshot, writeGroups, setManagementGroupId, ensureGroupsSeed } from "./groups";
+import { listChats, chatMessages } from "./chat-admin";
 import type { Slot } from "./window";
 
 /** Constant-time string comparison (avoids timing side-channels on token checks). */
@@ -47,7 +52,7 @@ function bearer(req: FastifyRequest): string {
 export function buildApp(gateway: WhatsAppGateway = new SurfaceRouter()): FastifyInstance {
   const app = Fastify({ logger: fastifyLoggerOption() as never });
 
-  app.get("/health", async () => ({ ok: true, ai: aiEnabled ? "on" : "echo" }));
+  app.get("/health", async () => ({ ok: true, ai: aiEnabled ? "on" : "echo", session: lastKnownStatus() }));
 
   // WAHA posts message events here. Must carry the shared secret (?token= or X-Webhook-Token).
   app.post("/webhook", async (req, reply) => {
@@ -129,14 +134,160 @@ export function buildApp(gateway: WhatsAppGateway = new SurfaceRouter()): Fastif
     return { enabled: actionsEnabled(), entries: await readActionAudit(limit) };
   });
 
+  // Admin: WAHA session lifecycle (WhatsApp go-live self-service from the ERP). Every
+  // route is ADMIN_TOKEN-gated (fail-closed, same pattern as above) and operates ONLY on
+  // the configured session (config.wahaSession) — no route accepts a session name from
+  // the caller, so the ERP can never touch another WAHA session on this bot instance.
+  app.post("/admin/session/start", async (req, reply) => {
+    if (!config.adminToken) return reply.code(503).send({ error: "admin routes disabled — set ADMIN_TOKEN" });
+    if (!safeEqual(bearer(req), config.adminToken)) return reply.code(401).send({ error: "unauthorized" });
+    return startSession();
+  });
+
+  app.get("/admin/session/status", async (req, reply) => {
+    if (!config.adminToken) return reply.code(503).send({ error: "admin routes disabled — set ADMIN_TOKEN" });
+    if (!safeEqual(bearer(req), config.adminToken)) return reply.code(401).send({ error: "unauthorized" });
+    const st = await getSessionStatus();
+    return { ...st, lastEvent: lastEvent() };
+  });
+
+  // QR is a pairing secret (scanning it = owning the WhatsApp identity): no-store,
+  // never logged, held only in this response body — never persisted.
+  app.get("/admin/session/qr", async (req, reply) => {
+    if (!config.adminToken) return reply.code(503).send({ error: "admin routes disabled — set ADMIN_TOKEN" });
+    if (!safeEqual(bearer(req), config.adminToken)) return reply.code(401).send({ error: "unauthorized" });
+    reply.header("Cache-Control", "no-store");
+    return getQr();
+  });
+
+  app.post("/admin/session/stop", async (req, reply) => {
+    if (!config.adminToken) return reply.code(503).send({ error: "admin routes disabled — set ADMIN_TOKEN" });
+    if (!safeEqual(bearer(req), config.adminToken)) return reply.code(401).send({ error: "unauthorized" });
+    return stopSession();
+  });
+
+  app.post("/admin/session/logout", async (req, reply) => {
+    if (!config.adminToken) return reply.code(503).send({ error: "admin routes disabled — set ADMIN_TOKEN" });
+    if (!safeEqual(bearer(req), config.adminToken)) return reply.code(401).send({ error: "unauthorized" });
+    return logoutSession();
+  });
+
+  app.post("/admin/session/restart", async (req, reply) => {
+    if (!config.adminToken) return reply.code(503).send({ error: "admin routes disabled — set ADMIN_TOKEN" });
+    if (!safeEqual(bearer(req), config.adminToken)) return reply.code(401).send({ error: "unauthorized" });
+    return restartSession();
+  });
+
+  // Admin: group registry — read/full-replace-write. ADMIN_TOKEN-gated, same fail-closed
+  // pattern as every other admin route. Validation + atomic write live in groups.ts.
+  app.get("/admin/groups", async (req, reply) => {
+    if (!config.adminToken) return reply.code(503).send({ error: "admin routes disabled — set ADMIN_TOKEN" });
+    if (!safeEqual(bearer(req), config.adminToken)) return reply.code(401).send({ error: "unauthorized" });
+    return groupsSnapshot();
+  });
+
+  app.put<{ Body: { groups?: unknown } }>("/admin/groups", async (req, reply) => {
+    if (!config.adminToken) return reply.code(503).send({ error: "admin routes disabled — set ADMIN_TOKEN" });
+    if (!safeEqual(bearer(req), config.adminToken)) return reply.code(401).send({ error: "unauthorized" });
+    const err = await writeGroups(req.body?.groups);
+    if (err) return reply.code(400).send({ error: err.error, ...(err.field ? { field: err.field } : {}) });
+    return groupsSnapshot();
+  });
+
+  // Admin: safe config snapshot + editable fields (ONLY {postToGroups, managementGroupId}
+  // are writable — everything else is read-only, per design doc §2.3).
+  app.get("/admin/config", async (req, reply) => {
+    if (!config.adminToken) return reply.code(503).send({ error: "admin routes disabled — set ADMIN_TOKEN" });
+    if (!safeEqual(bearer(req), config.adminToken)) return reply.code(401).send({ error: "unauthorized" });
+    return configFields();
+  });
+
+  app.put<{ Body: { postToGroups?: unknown; managementGroupId?: unknown } }>("/admin/config", async (req, reply) => {
+    if (!config.adminToken) return reply.code(503).send({ error: "admin routes disabled — set ADMIN_TOKEN" });
+    if (!safeEqual(bearer(req), config.adminToken)) return reply.code(401).send({ error: "unauthorized" });
+    const body = req.body ?? {};
+    if ("postToGroups" in body) {
+      if (typeof body.postToGroups !== "boolean") {
+        return reply.code(400).send({ error: "postToGroups must be a boolean", field: "postToGroups" });
+      }
+      setPostToGroups(body.postToGroups);
+    }
+    if ("managementGroupId" in body) {
+      if (typeof body.managementGroupId !== "string") {
+        return reply.code(400).send({ error: "managementGroupId must be a string", field: "managementGroupId" });
+      }
+      const err = await setManagementGroupId(body.managementGroupId);
+      if (err) return reply.code(400).send({ error: err.error, field: err.field ?? "managementGroupId" });
+    }
+    return configFields();
+  });
+
+  // Admin: read-only chat viewer + logs for the ERP's WA/TG Bot page. Same fail-closed
+  // ADMIN_TOKEN pattern as every other admin route above.
+  app.get<{ Querystring: { limit?: string } }>("/admin/chats", async (req, reply) => {
+    if (!config.adminToken) return reply.code(503).send({ error: "admin routes disabled — set ADMIN_TOKEN" });
+    if (!safeEqual(bearer(req), config.adminToken)) return reply.code(401).send({ error: "unauthorized" });
+    const limit = Math.max(1, Math.min(Number(req.query.limit ?? 100) || 100, 1000));
+    return listChats(limit);
+  });
+
+  app.get<{ Params: { chatId: string }; Querystring: { limit?: string } }>(
+    "/admin/chats/:chatId/messages",
+    async (req, reply) => {
+      if (!config.adminToken) return reply.code(503).send({ error: "admin routes disabled — set ADMIN_TOKEN" });
+      if (!safeEqual(bearer(req), config.adminToken)) return reply.code(401).send({ error: "unauthorized" });
+      const limit = Math.max(1, Math.min(Number(req.query.limit ?? 100) || 100, 1000));
+      const result = await chatMessages(req.params.chatId, limit);
+      if (!result.ok) return reply.code(result.status).send({ error: result.error });
+      return { chatId: result.chatId, messages: result.messages };
+    },
+  );
+
+  // Session status transitions (ring buffer, oldest-first — same order session-state.ts
+  // keeps internally) for the ERP's session-history panel.
+  app.get("/admin/session/events", async (req, reply) => {
+    if (!config.adminToken) return reply.code(503).send({ error: "admin routes disabled — set ADMIN_TOKEN" });
+    if (!safeEqual(bearer(req), config.adminToken)) return reply.code(401).send({ error: "unauthorized" });
+    return { events: transitions() };
+  });
+
   return app;
+}
+
+/** GET/PUT /admin/config shape (mirrors nest's ConfigField): read-only descriptive fields
+ *  plus the two editable safe fields. Recomputed on every call — never cached, since
+ *  managementGroupId/monitoredCount depend on the live (hot-reloadable) registry. */
+function configFields(): {
+  fields: Array<{ key: string; value: unknown; editable: boolean; type: "text" | "bool" | "number" }>;
+} {
+  const snapshot = groupsSnapshot();
+  return {
+    fields: [
+      { key: "wahaSession", value: config.wahaSession, editable: false, type: "text" },
+      { key: "botName", value: config.botName, editable: false, type: "text" },
+      { key: "postToGroups", value: postToGroupsEnabled(), editable: true, type: "bool" },
+      { key: "managementGroupId", value: snapshot.managementGroupId, editable: true, type: "text" },
+      {
+        key: "monitoredCount",
+        value: snapshot.groups.filter((g) => !g.isManagement).length,
+        editable: false,
+        type: "number",
+      },
+    ],
+  };
 }
 
 async function start(): Promise<void> {
   const app = buildApp();
   try {
+    if (ensureGroupsSeed()) {
+      app.log.info(`[groups] seeded ${config.groupsFile} from ${config.groupsSeedFile} (first boot)`);
+    }
     await initStore();
     await app.listen({ port: config.port, host: config.host });
+    // If the session is already paired (survives restart), learn the bot's own JID now so real
+    // @mentions trigger without waiting for the next WORKING event. Best-effort, never blocks boot.
+    void refreshSelfJid().catch(() => {});
     startScheduler(new SurfaceRouter());
     // Queue active -> the dedicated media-worker process consumes; here we only reconcile.
     startMediaWorker(queueEnabled() ? config.mediaReconcileSeconds : config.mediaPollSeconds);

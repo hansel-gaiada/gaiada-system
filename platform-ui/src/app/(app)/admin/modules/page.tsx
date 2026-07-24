@@ -17,7 +17,7 @@ import { toggleModuleAction, createFieldAction, deleteFieldAction } from "./acti
 const KNOWN_MODULES = ["agency"];
 
 // The D17 custom-field targets.
-const ENTITY_TYPES = ["project", "task", "agency_campaign"] as const;
+const ENTITY_TYPES = ["project", "task", "pm_task", "agency_campaign"] as const;
 
 const SUBTITLE =
   "Per-company module enablement and D17 custom-field definitions for projects, tasks and agency campaigns.";

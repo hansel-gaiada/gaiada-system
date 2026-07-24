@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { writeFileSync, mkdirSync, rmSync } from "node:fs";
 import { config } from "./config";
 import { resetRegistryCache } from "./groups";
+import { setPostToGroups } from "./safety/post-toggle";
 import type { StoredMessage } from "./store";
 
 const messagesByChat: Record<string, StoredMessage[]> = {};
@@ -62,6 +63,7 @@ describe("runDigests (registry-driven delivery)", () => {
     config.scheduleStateFile = `${DIR}/state.json`;
     config.managementGroupId = "";
     config.postToGroups = false;
+    setPostToGroups(false); // A2: runtime toggle, independent of config.postToGroups after boot
     setupRegistry();
     messagesByChat["site@g.us"] = [m("site@g.us", "poured the slab")];
     messagesByChat["office@g.us"] = [m("office@g.us", "invoices sent")];
@@ -127,5 +129,24 @@ describe("runDigests (registry-driven delivery)", () => {
     const res = await runDigests(gw, "evening");
     expect(res.perGroup.map((g) => g.chatId).sort()).toEqual(["office@g.us", "random@g.us", "site@g.us"]);
     expect(sent.some((s) => s.chatId === "envmgmt@g.us")).toBe(true);
+  });
+
+  it("A2: in trial mode (no registry), the postToGroups runtime toggle gates per-group posting", async () => {
+    config.groupsFile = `${DIR}/missing.yaml`;
+    config.managementGroupId = "envmgmt@g.us";
+    resetRegistryCache();
+
+    setPostToGroups(false);
+    const off = await runDigests(gw, "noon");
+    expect(off.perGroup.length).toBeGreaterThan(0);
+    expect(sent.some((s) => s.chatId === "site@g.us" || s.chatId === "office@g.us" || s.chatId === "random@g.us")).toBe(false);
+
+    sent = [];
+    setPostToGroups(true);
+    const on = await runDigests(gw, "evening");
+    expect(on.perGroup.length).toBeGreaterThan(0);
+    expect(sent.some((s) => s.chatId === "site@g.us")).toBe(true);
+    expect(sent.some((s) => s.chatId === "office@g.us")).toBe(true);
+    expect(sent.some((s) => s.chatId === "random@g.us")).toBe(true);
   });
 });

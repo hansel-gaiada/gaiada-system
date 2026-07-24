@@ -1,7 +1,14 @@
 // Live bindings: models via the AI Gateway, tools via the MCP hub (OBO envelope).
 // The agent process holds NO provider keys and NO database access — by construction.
 import "dotenv/config";
+import { AsyncLocalStorage } from "node:async_hooks";
 import type { AgentDeps, Envelope } from "./agent";
+
+// Per-goal tenant context: the runner wraps each goal's execution in `tenantContext.run(tenantId, …)`
+// so completions are attributed to the triggering tenant for the Gateway's existing per-tenant daily
+// cap (design §3.5.4 — the cap already EXISTS; this only feeds `x-tenant-id`). Concurrency-safe (unlike
+// a module-level variable) when AGENT_MAX_CONCURRENT_GOALS > 1.
+export const tenantContext = new AsyncLocalStorage<string>();
 
 const config = {
   gatewayUrl: process.env.GATEWAY_URL ?? "http://localhost:3002",
@@ -15,9 +22,14 @@ const config = {
 let lastServedProvider: string | undefined;
 
 async function complete(prompt: string): Promise<string> {
+  const tenantId = tenantContext.getStore();
   const res = await fetch(`${config.gatewayUrl}/complete`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${config.gatewayToken}` },
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${config.gatewayToken}`,
+      ...(tenantId ? { "x-tenant-id": tenantId } : {}),
+    },
     body: JSON.stringify({ prompt }),
   });
   if (!res.ok) throw new Error(`gateway ${res.status}`);

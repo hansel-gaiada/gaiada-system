@@ -4,13 +4,15 @@
 // events still flow through the existing normalize()/normalizeTelegram() text path.
 import { normalize } from "../waha";
 import { normalizeTelegram, tgChatId } from "../telegram";
+import { config } from "../config";
 import type { InboundMessage } from "../waha";
 
 export type InboundEvent =
   | { kind: "message"; message: InboundMessage }
   | { kind: "button"; chatId: string; senderId: string; token: string; messageId: string; ts: number }
   | { kind: "reaction"; chatId: string; senderId: string; emoji: string; messageId: string; ts: number }
-  | { kind: "member"; chatId: string; userId: string; change: "joined" | "left"; ts: number };
+  | { kind: "member"; chatId: string; userId: string; change: "joined" | "left"; ts: number }
+  | { kind: "session"; session: string; status: string; ts: number };
 
 /** WAHA → InboundEvent. Message/media events wrap the existing normalize(); other event
  *  types (reaction, group participant change) map to their own variants. */
@@ -21,6 +23,21 @@ export function normalizeWahaEvent(event: unknown): InboundEvent | null {
   if (e.event === "message") {
     const m = normalize(event);
     return m ? { kind: "message", message: m } : null;
+  }
+
+  // Session lifecycle (compose already subscribes WHATSAPP_HOOK_EVENTS to this — was
+  // silently dropped until now). Tolerate both `payload.status` (NOWEB) and
+  // `payload.body?.status` (seen on some WEBJS builds) shapes.
+  if (e.event === "session.status") {
+    const p = e.payload ?? {};
+    const status = String(p.status ?? p.body?.status ?? "");
+    if (!status) return null;
+    return {
+      kind: "session",
+      session: String(p.name ?? p.session ?? config.wahaSession),
+      status,
+      ts: p.timestamp ? Number(p.timestamp) * 1000 : Date.now(),
+    };
   }
 
   if (e.event === "message.reaction" || e.event === "message.reaction.v2") {

@@ -1,0 +1,35 @@
+# Search-marketing module (SM-03; docs/blueprints/seo-sem-design.md §11). resource_search_property
+# = the client web property (crawl/rank/GEO/analytics anchor). Every search handler passes
+# resource.attr = {module: "search", tenantId: <SERVED company>, ...} (SearchController), so a
+# materialized (search_staff|search_manager, company, <served>) grant lights up ONLY that served
+# company's search surface — same WSD-2 module_staff/module_manager linchpin as hr_case/hr_record.
+# No dedicated `search:property:*` permission exists (design §11's permission list bundles property
+# CRUD under `search:engagement:read|write`, matching the controller's shared authorize() call) —
+# Cerbos itself only ever sees the resource kind + action + derived role, so that bundling is purely
+# a module-registry/UI concern and does not change this policy's shape.
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: resource_search_property
+  importDerivedRoles: ["gaiada_scopes"]
+  variables:
+    import: ["gaiada_common"]
+  rules:
+    - actions: ["*"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["platform_admin"]
+    # Owner (group_executive) is a global role — full oversight everywhere (design §11 "owner").
+    - actions: ["read", "create", "update", "delete"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["group_executive"]
+      condition: { match: { expr: "variables.notLow" } }
+    # Search staff / manager (served-company grant) + the served company's own admin: baseline set.
+    - actions: ["read", "create", "update"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["module_staff", "module_manager", "company_admin"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    # Destructive: manager + company admin only (NOT plain staff/member).
+    - actions: ["delete"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["module_manager", "company_admin"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }

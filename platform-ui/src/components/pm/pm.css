@@ -14,18 +14,37 @@
 .pm-tab--active { color: var(--text-primary); border-bottom-color: var(--erp-accent); font-weight: 700; }
 
 /* ---- kanban board ---- */
-.pm-board { display: grid; grid-template-columns: repeat(4, minmax(220px, 1fr)); gap: 14px; align-items: start; }
-/* Division/person swimlane view (WSUX-7) can have an arbitrary lane count, so
-   it auto-fits instead of the fixed 4-up Status board. */
-.pm-board--lanes { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
-.pm-col { border: 0.5px solid var(--erp-hairline); background: var(--surface-card); min-height: 120px; display: flex; flex-direction: column; }
-.pm-col__head { display: flex; align-items: center; justify-content: space-between; padding: 11px 13px; border-bottom: 0.5px solid var(--erp-hairline-soft); }
+/* Horizontal-scroll flex layout (P1-02): fixes clipping at any column count —
+   columns are fixed-width and the board scrolls inside its own container
+   instead of squeezing/clipping the page. */
+.pm-board-scroll { overflow-x: auto; padding-bottom: 4px; }
+.pm-board { display: flex; gap: 14px; align-items: start; min-width: min-content; }
+.pm-col { flex: 0 0 280px; width: 280px; border: 0.5px solid var(--erp-hairline); background: var(--surface-card); min-height: 120px; display: flex; flex-direction: column; }
+.pm-col__head { display: flex; align-items: center; justify-content: space-between; padding: 11px 13px; border-bottom: 0.5px solid var(--erp-hairline-soft); position: sticky; top: 0; background: var(--surface-card); z-index: 1; }
 .pm-col__title { font: 700 10px var(--font-body); letter-spacing: 0.1em; text-transform: uppercase; color: var(--erp-ink-60); }
 .pm-col__count { font: 700 10px var(--font-body); color: var(--erp-ink-50); }
 .pm-col__body { padding: 10px; display: flex; flex-direction: column; gap: 10px; flex: 1 1 auto; transition: background 0.2s var(--erp-ease); }
 .pm-col__body--drop { background: rgba(110, 90, 67, 0.06); }
-.pm-card { border: 0.5px solid var(--erp-hairline); border-left-width: 2px; background: var(--surface-card); padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; cursor: grab; text-decoration: none; transition: background 0.2s var(--erp-ease); }
+.pm-card { border: 0.5px solid var(--erp-hairline); border-left-width: 2px; background: var(--surface-card); padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; cursor: grab; text-decoration: none; transition: background 0.2s var(--erp-ease), opacity 0.15s var(--erp-ease); }
 .pm-card:hover { background: rgba(110, 90, 67, 0.04); }
+.pm-card--dragging { opacity: 0.4; }
+/* Move trigger sits beside the card link (not nested inside the <a>); hidden until
+   keyboard focus lands anywhere in the wrapper or on the button itself (P1-03 §9 a11y). */
+.pm-card-wrap { position: relative; }
+.pm-card__move {
+  position: absolute; top: 6px; right: 6px; z-index: 2;
+  font: 700 9px var(--font-body); letter-spacing: 0.04em; text-transform: uppercase;
+  color: var(--erp-ink-60); background: var(--surface-card); border: 0.5px solid var(--erp-hairline);
+  padding: 3px 6px; cursor: pointer; opacity: 0; pointer-events: none;
+  transition: opacity 0.15s var(--erp-ease);
+}
+.pm-card-wrap:focus-within .pm-card__move,
+.pm-card__move:focus-visible { opacity: 1; pointer-events: auto; }
+.pm-card__subs { font: 700 10px var(--font-body); color: var(--erp-ink-50); }
+.pm-due { font: 700 10px var(--font-body); letter-spacing: 0.02em; white-space: nowrap; }
+.pm-due--risk { color: var(--dept-risk, #B5622F); }
+.pm-due--soon { color: var(--brand-color-primary, var(--erp-accent)); }
+.pm-due--quiet { color: var(--erp-ink-50); }
 .pm-card--p-high { border-left-color: #B5622F; }
 .pm-card--p-urgent { border-left-color: #B5622F; }
 .pm-card--p-normal { border-left-color: var(--erp-hairline); }
@@ -61,7 +80,7 @@
 .pm-doc:hover { border-color: var(--erp-accent); color: var(--erp-accent); }
 
 /* ---- gantt / timeline ---- */
-.pm-gantt { display: flex; flex-direction: column; gap: 8px; min-width: 560px; }
+.pm-gantt { display: flex; flex-direction: column; gap: 8px; min-width: 560px; position: relative; }
 .pm-gantt__axis { display: flex; justify-content: space-between; font: 700 10px var(--font-body); letter-spacing: 0.06em; text-transform: uppercase; color: var(--erp-ink-50); padding-left: 200px; }
 .pm-gantt__row { display: grid; grid-template-columns: 200px 1fr; align-items: center; gap: 12px; }
 .pm-gantt__label { font: 400 13px var(--font-body); color: var(--text-primary); text-decoration: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -73,11 +92,276 @@
 .pm-gantt__bar--todo { background: #A39174; }
 .pm-gantt__bar--dashed { border: 1px dashed rgba(244, 241, 234, 0.7); }
 
+/* P1-04 — interactive dept Gantt */
+.pm-gantt__bar { transition: opacity 0.15s var(--erp-ease); }
+.pm-gantt__bar[role="button"] { cursor: grab; }
+.pm-gantt__bar[role="button"]:active { cursor: grabbing; }
+.pm-gantt__bar--dragging { opacity: 0.5; }
+.pm-gantt__bar--linksrc { outline: 2px solid var(--erp-accent); outline-offset: 1px; }
+/* in-bar progress fill: same colour as the bar, darkened; sits behind the % text */
+.pm-gantt__fill { position: absolute; left: 0; top: 0; bottom: 0; background: inherit; filter: brightness(0.75); pointer-events: none; }
+.pm-gantt__pct { position: relative; z-index: 1; }
+/* edge resize handles */
+.pm-gantt__handle { position: absolute; top: 0; bottom: 0; width: 7px; z-index: 2; cursor: ew-resize; }
+.pm-gantt__handle--start { left: 0; }
+.pm-gantt__handle--end { right: 0; }
+/* dependency-draw end ball (round: it's a connector affordance) */
+.pm-gantt__ball { position: absolute; right: -6px; top: 50%; transform: translateY(-50%); width: 11px; height: 11px; border-radius: 50%; border: 0.5px solid var(--erp-accent); background: var(--surface-card); padding: 0; z-index: 3; cursor: crosshair; opacity: 0; transition: opacity 0.15s var(--erp-ease); }
+.pm-gantt__bar:hover .pm-gantt__ball, .pm-gantt__bar:focus-within .pm-gantt__ball, .pm-gantt__ball:focus-visible { opacity: 1; }
+/* live reschedule tooltip */
+.pm-gantt__tip { position: absolute; top: -17px; font: 700 9px var(--font-body); letter-spacing: 0.02em; color: var(--text-primary); background: var(--surface-card); border: 0.5px solid var(--erp-hairline); padding: 1px 5px; white-space: nowrap; z-index: 6; pointer-events: none; }
+
+/* milestone diamonds lane + dashed guidelines */
+.pm-gantt__msrow { display: grid; grid-template-columns: 200px 1fr; gap: 12px; align-items: center; }
+.pm-gantt__mslabel { font: 700 10px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--erp-ink-50); text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pm-gantt__mstrack { position: relative; height: 12px; }
+.pm-gantt__milestone { position: absolute; top: 1px; width: 8px; height: 8px; background: var(--erp-accent); transform: translateX(-4px) rotate(45deg); border: 0.5px solid var(--surface-card); }
+.pm-gantt__guides { position: absolute; left: 212px; right: 0; top: 0; bottom: 0; pointer-events: none; z-index: 0; }
+.pm-gantt__guide { position: absolute; top: 0; bottom: 0; width: 0; border-left: 1px dashed var(--erp-hairline); }
+
+/* collapsible group headers */
+.pm-gantt__group { display: flex; flex-direction: column; gap: 8px; }
+.pm-gantt__group-head { position: sticky; top: 0; z-index: 7; display: flex; align-items: center; gap: 8px; width: 100%; padding: 7px 4px; background: var(--surface-card); border: 0; border-bottom: 0.5px solid var(--erp-hairline-soft); font: 700 11px var(--font-body); color: var(--text-primary); cursor: pointer; text-align: left; }
+.pm-gantt__group-head:hover { color: var(--erp-accent); }
+.pm-gantt__group-head--static { cursor: default; }
+.pm-gantt__group-head--static:hover { color: var(--text-primary); }
+.pm-gantt__disc { flex: 0 0 12px; color: var(--erp-ink-50); }
+.pm-gantt__group-label { flex: 0 0 auto; }
+.pm-gantt__group-count { font: 700 10px var(--font-body); color: var(--erp-ink-50); }
+.pm-gantt__group-note { font: 400 11px var(--font-body); color: var(--erp-ink-50); margin-left: 8px; }
+.pm-gantt__group--empty { opacity: 0.8; }
+
+/* dependency lines overlay */
+.pm-gantt__deps { position: absolute; left: 0; top: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; overflow: visible; }
+
+/* P2-08 — shift-multiselect: outline only (never replaces the status colour). */
+.pm-gantt__bar--selected { box-shadow: inset 0 0 0 2px var(--erp-accent); }
+
+/* P2-08 — burndown overlay */
+.pm-gantt__bdtoggle { display: flex; justify-content: flex-end; margin-bottom: 8px; }
+.pm-gantt__bdrow { display: grid; grid-template-columns: 200px 1fr; gap: 12px; align-items: center; animation: erp-toast 0.18s var(--erp-ease); }
+.pm-gantt__bdlabel { font: 700 10px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--erp-ink-50); text-align: right; white-space: nowrap; }
+.pm-gantt__bdtrack { position: relative; height: 48px; border: 0.5px solid var(--erp-hairline-soft); background: rgba(26, 25, 22, 0.02); }
+.pm-gantt__bdsvg { width: 100%; height: 100%; display: block; }
+.pm-gantt__bdline { fill: none; stroke-width: 1.6; vector-effect: non-scaling-stroke; }
+.pm-gantt__bdline--ideal { stroke: var(--erp-ink-50); stroke-dasharray: 4 3; }
+.pm-gantt__bdline--actual { stroke: var(--erp-accent); }
+.pm-gantt__bdlegend { display: flex; gap: 16px; margin: 4px 0 0 212px; font: 400 10px var(--font-body); color: var(--erp-ink-60); animation: erp-toast 0.18s var(--erp-ease); }
+.pm-gantt__bdlegend-dot { display: inline-block; width: 8px; height: 8px; margin-right: 5px; vertical-align: middle; }
+.pm-gantt__bdlegend-dot--ideal { background: var(--erp-ink-50); }
+.pm-gantt__bdlegend-dot--actual { background: var(--erp-accent); }
+
+@media (prefers-reduced-motion: reduce) {
+  .pm-gantt__bar, .pm-gantt__ball, .pm-gantt__tip, .pm-grid__cell, .pm-gantt__bdrow, .pm-gantt__bdlegend { transition: none; animation: none; }
+}
+
 /* ---- dependencies ---- */
 .pm-deps { display: flex; flex-direction: column; gap: 8px; }
 .pm-dep { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 10px; border: 0.5px solid var(--erp-hairline); }
 .pm-dep__title { font: 400 13px var(--font-body); color: var(--text-primary); }
 .pm-blocked-chip { font: 700 9px var(--font-body); letter-spacing: 0.06em; text-transform: uppercase; color: #B5622F; border: 0.5px solid #B5622F; padding: 2px 6px; }
 
-@media (max-width: 1000px) { .pm-board { grid-template-columns: repeat(2, 1fr); } }
-@media (max-width: 620px) { .pm-board { grid-template-columns: 1fr; } }
+/* ---- board error toast + a11y live region (P1-03) ---- */
+.pm-board__toast { margin: 0 0 10px; font: 700 12px var(--font-body); color: var(--erp-accent); border: 0.5px solid var(--erp-accent); background: var(--surface-card); padding: 8px 12px; animation: erp-toast 0.18s var(--erp-ease); }
+.pm-sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+
+/* ---- tags (P2-02, design spec §6) ---- */
+/* One class, per-instance tone via two CSS vars (onLight/onDark hex — see
+   TagChip.tsx + tagColors.ts for the AA verification). Plain surfaces (the
+   overwhelming majority — board cards, list rows, filter bars) use the
+   onLight value; nesting under `.lux-card--dark` (the system's one opt-in
+   dark-card surface, e.g. lux-card--dark) flips to onDark so contrast holds
+   on both. */
+.pm-tag {
+  display: inline-flex; align-items: center; font: 700 10px var(--font-body); letter-spacing: 0.02em;
+  padding: 2px 8px; border: 0.5px solid currentColor; color: var(--pm-tag-onlight); background: transparent;
+  white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis;
+}
+.lux-card--dark .pm-tag { color: var(--pm-tag-ondark); }
+/* Toggled-ON state (task-detail picker): an opaque fill using the tone's
+   onDark hex + fixed ink text — a fill reads correctly regardless of the
+   picker's own ambient card, so it does NOT flip under .lux-card--dark. */
+.pm-tag--selected { color: #1A1916; background: var(--pm-tag-ondark); border-color: var(--pm-tag-ondark); }
+.lux-card--dark .pm-tag--selected { color: #1A1916; }
+.pm-tags-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.pm-card__tags { display: flex; flex-wrap: wrap; gap: 5px; }
+/* toggle-chip button wrapper (TagEditor) — reset button chrome so the inner
+   TagChip renders unchanged; focus ring on the chip itself, not the button box. */
+button.pm-tag--btn { border: 0; background: transparent; padding: 0; margin: 0; cursor: pointer; }
+button.pm-tag--btn:disabled { cursor: default; opacity: 0.55; }
+button.pm-tag--btn:focus-visible .pm-tag { outline: 2px solid var(--erp-accent); outline-offset: 2px; }
+.pm-tags-new { display: inline-flex; align-items: center; gap: 6px; }
+.pm-tagmgr { display: flex; flex-direction: column; gap: 12px; border: 0.5px solid var(--erp-hairline); padding: 14px; margin-top: 8px; }
+.pm-tagmgr__list { display: flex; flex-direction: column; gap: 8px; }
+.pm-tagmgr__row { display: flex; align-items: center; gap: 8px; }
+.pm-tagmgr__row .lux-field__control { flex: 1 1 auto; }
+.pm-tagmgr__confirm { display: inline-flex; align-items: center; gap: 8px; font: 400 12px var(--font-body); color: var(--erp-accent); white-space: nowrap; }
+.pm-tagmgr__new { display: flex; align-items: center; gap: 8px; }
+.pm-tagmgr__new .lux-field__control { flex: 1 1 auto; }
+.pm-tagmgr__empty { margin: 0; font: 400 13px var(--font-body); color: var(--erp-ink-50); }
+.pm-tagmgr__msg { margin: 0; font: 400 12px var(--font-body); color: var(--erp-accent); }
+
+/* ---- tag filter checkboxes (P2-02) ---- */
+/* Deliberately NOT nested in `.lux-filters__field` — that class's `input`
+   descendant rule styles text/select controls (border-bottom, min-width:150px)
+   which would mangle a checkbox. Own wrapper, own reset. */
+.pm-tagfilter { display: flex; flex-direction: column; gap: 6px; }
+.pm-tagfilter__label { font: 700 10px var(--font-body); letter-spacing: 0.1em; text-transform: uppercase; color: var(--erp-ink-50); }
+.pm-tagfilter__options { display: flex; flex-wrap: wrap; gap: 10px; }
+.pm-tagfilter__opt { display: inline-flex; align-items: center; gap: 6px; font: 400 13px var(--font-body); color: var(--text-primary); cursor: pointer; }
+.pm-tagfilter__opt input[type="checkbox"] { width: 14px; height: 14px; min-width: 0; border: 0; padding: 0; accent-color: var(--erp-accent); cursor: pointer; }
+
+/* ---- shared color swatch picker (P2-02 tags; P2-05 custom statuses reuse) ---- */
+.pm-swatch-wrap { position: relative; display: inline-block; }
+.pm-swatch-trigger { width: 22px; height: 22px; padding: 0; border: 0.5px solid var(--erp-hairline); background: var(--surface-card); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
+.pm-swatch-trigger__dot { width: 13px; height: 13px; background: var(--pm-swatch-hex); }
+.pm-swatch-pop { position: absolute; top: 26px; left: 0; z-index: 60; display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; padding: 8px; background: var(--surface-card); border: 0.5px solid var(--erp-hairline); box-shadow: none; animation: erp-toast 0.18s var(--erp-ease); }
+.pm-swatch { width: 27px; height: 27px; padding: 0; border: 0.5px solid var(--erp-hairline); background: transparent; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+.pm-swatch__dot { width: 16px; height: 16px; background: var(--pm-swatch-hex); }
+.pm-swatch--active { border-color: var(--text-primary); border-width: 1.5px; }
+.pm-swatch:hover { opacity: 0.85; }
+.pm-swatch:focus-visible, .pm-swatch-trigger:focus-visible { outline: 2px solid var(--erp-accent); outline-offset: 2px; }
+
+/* ---- board drop/move popovers (P1-03) — anchored variant of .erp-usermenu__pop ---- */
+.pm-dropmenu { position: fixed; min-width: 190px; max-width: 240px; background: var(--surface-card); border: 0.5px solid var(--erp-hairline); display: flex; flex-direction: column; z-index: 80; box-shadow: none; animation: erp-toast 0.18s var(--erp-ease); max-height: 70vh; overflow-y: auto; }
+.pm-dropmenu__item { text-align: left; padding: 9px 12px; font: 400 13px var(--font-body); color: var(--text-primary); background: transparent; border: 0; border-bottom: 0.5px solid var(--erp-hairline-soft); cursor: pointer; }
+.pm-dropmenu__item:last-child { border-bottom: 0; }
+.pm-dropmenu__item:hover, .pm-dropmenu__item:focus-visible { background: rgba(110, 90, 67, 0.06); }
+/* P2-09 — keyboard "⇅ Move" menu's two axis sections (BoardGrid: Status + Division/Assignee). */
+.pm-dropmenu__group-label { padding: 8px 12px 4px; font: 700 9px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--erp-ink-50); background: var(--surface-card); }
+.pm-dropmenu__select-label { display: flex; flex-direction: column; gap: 6px; padding: 12px; font: 700 10px var(--font-body); letter-spacing: 0.06em; text-transform: uppercase; color: var(--erp-ink-60); }
+.pm-dropmenu__select { font: 400 13px var(--font-body); padding: 6px 8px; border: 0.5px solid var(--erp-hairline); background: var(--surface-card); color: var(--text-primary); }
+
+/* ---- custom statuses (P2-05, design spec §7) ---- */
+/* Column-head status-colour dot — only rendered on CUSTOMIZED projects (Board's
+   `colorColumns`), so default/un-edited boards stay pixel-identical. */
+.pm-col__title { display: inline-flex; align-items: center; gap: 7px; }
+.pm-col__dot { width: 8px; height: 8px; flex: 0 0 8px; border-radius: 50%; }
+/* WIP over-limit (§2): rust head border + count colour; the drop is NEVER blocked. */
+.pm-col__head--over { border-bottom-color: var(--dept-risk, #B5622F); box-shadow: inset 0 2px 0 var(--dept-risk, #B5622F); }
+.pm-col__head--over .pm-col__count { color: var(--dept-risk, #B5622F); }
+
+/* status editor (⚙ Edit statuses) — AssigneeEditor-style inline reveal */
+.pm-statusmgr { display: flex; flex-direction: column; gap: 12px; border: 0.5px solid var(--erp-hairline); padding: 14px; margin-top: 4px; flex: 1 1 320px; max-width: 640px; }
+.pm-statusmgr__list { display: flex; flex-direction: column; gap: 6px; }
+.pm-statusmgr__row { display: flex; align-items: center; gap: 8px; padding: 4px 0; border-bottom: 0.5px solid var(--erp-hairline-soft); }
+.pm-statusmgr__row:last-child { border-bottom: 0; }
+.pm-statusmgr__handle { color: var(--erp-ink-50); cursor: grab; font: 700 12px var(--font-body); letter-spacing: -2px; user-select: none; }
+.pm-statusmgr__reorder { display: inline-flex; flex-direction: column; gap: 1px; }
+.pm-statusmgr__nudge { font: 700 9px var(--font-body); line-height: 1; padding: 2px 4px; border: 0.5px solid var(--erp-hairline); background: var(--surface-card); color: var(--erp-ink-60); cursor: pointer; }
+.pm-statusmgr__nudge:disabled { opacity: 0.4; cursor: default; }
+.pm-statusmgr__nudge:focus-visible { outline: 2px solid var(--erp-accent); outline-offset: 1px; }
+.pm-statusmgr__label { flex: 1 1 auto; min-width: 90px; }
+.pm-statusmgr__flags { display: inline-flex; gap: 4px; }
+.pm-statusmgr__flag { font: 700 9px var(--font-body); letter-spacing: 0.06em; text-transform: uppercase; padding: 3px 7px; border: 0.5px solid var(--erp-hairline); background: transparent; color: var(--erp-ink-50); cursor: pointer; }
+.pm-statusmgr__flag--on { color: #f4f1ea; background: var(--erp-accent); border-color: var(--erp-accent); }
+.pm-statusmgr__flag:disabled { opacity: 0.55; cursor: default; }
+.pm-statusmgr__flag:focus-visible { outline: 2px solid var(--erp-accent); outline-offset: 1px; }
+.pm-statusmgr__wip { width: 58px; flex: 0 0 58px; }
+.pm-statusmgr__confirm { display: inline-flex; align-items: center; gap: 6px; font: 400 12px var(--font-body); color: var(--erp-accent); white-space: nowrap; flex-wrap: wrap; }
+.pm-statusmgr__del { flex: 0 0 auto; }
+.pm-statusmgr__new { display: flex; align-items: center; gap: 8px; }
+.pm-statusmgr__new .lux-field__control { flex: 1 1 auto; }
+
+/* ---- true 2-axis swimlane grid (P2-09, design spec §8) ---- */
+/* Same "scrolls inside its own container, never the page body" contract as `.pm-board-scroll`
+   (§2), but BOTH axes: `overflow: auto` (not just -x) since the sticky row-label column also
+   needs vertical scroll to keep working with many rows. */
+.pm-grid-scroll { overflow: auto; max-height: 72vh; padding-bottom: 4px; }
+.pm-grid { display: grid; gap: 10px; align-items: start; min-width: min-content; }
+/* Frozen top-left corner: sticky on BOTH axes, highest z so it stays above both the column
+   heads (which are only top-sticky) and the row heads (only left-sticky) as they cross under it. */
+.pm-grid__corner { position: sticky; top: 0; left: 0; z-index: 3; background: var(--surface-card); }
+.pm-grid__colhead {
+  position: sticky; top: 0; z-index: 2; background: var(--surface-card);
+  border: 0.5px solid var(--erp-hairline); padding: 11px 13px;
+  font: 700 10px var(--font-body); letter-spacing: 0.1em; text-transform: uppercase; color: var(--erp-ink-60);
+  display: inline-flex; align-items: center; gap: 7px;
+}
+.pm-grid__rowhead {
+  position: sticky; left: 0; z-index: 1; background: var(--surface-card);
+  border: 0.5px solid var(--erp-hairline); padding: 11px 13px; min-width: 160px;
+  font: 700 12px var(--font-body); color: var(--text-primary); display: flex; align-items: center;
+}
+.pm-grid__cell { border: 0.5px solid var(--erp-hairline-soft); background: var(--surface-card); min-height: 56px; padding: 10px; display: flex; flex-direction: column; gap: 10px; transition: background 0.2s var(--erp-ease); }
+.pm-grid__cell--drop { background: rgba(110, 90, 67, 0.06); }
+/* §8.4 — empty cells render compactly, not as bloated blank columns. */
+.pm-grid__cell--empty { min-height: 14px; padding: 4px; border-style: dashed; opacity: 0.55; }
+
+/* ---- Charts view (P3-06): cumulative flow / burndown / tag breakdown ---- */
+.pm-chart { display: flex; flex-direction: column; gap: 10px; }
+.pm-chart__legend { display: flex; flex-wrap: wrap; gap: 14px; font: 400 12px var(--font-body); color: var(--erp-ink-60); }
+.pm-chart__legend-item { display: inline-flex; align-items: center; gap: 6px; }
+.pm-chart__swatch { display: inline-block; width: 9px; height: 9px; flex: 0 0 9px; }
+.pm-chart__swatch--line { width: 12px; height: 2px; flex: 0 0 12px; }
+.pm-chart__plot { position: relative; height: 220px; }
+.pm-chart__svg { width: 100%; height: 100%; display: block; cursor: crosshair; }
+.pm-chart__grid { stroke: var(--erp-hairline-soft); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.pm-chart__crosshair { stroke: var(--erp-ink-50); stroke-width: 1; vector-effect: non-scaling-stroke; pointer-events: none; }
+.pm-chart__tooltip {
+  position: absolute; top: 6px; transform: translateX(-50%);
+  min-width: 130px; background: var(--surface-card); border: 0.5px solid var(--erp-hairline);
+  padding: 8px 10px; font: 400 11px var(--font-body); color: var(--text-primary);
+  pointer-events: none; z-index: 4; white-space: nowrap;
+}
+.pm-chart__tooltip-date { font: 700 10px var(--font-body); letter-spacing: 0.06em; text-transform: uppercase; color: var(--erp-ink-50); margin-bottom: 5px; }
+.pm-chart__tooltip-row { display: flex; align-items: center; gap: 7px; justify-content: space-between; padding: 1px 0; }
+.pm-chart__tooltip-row strong { font-weight: 700; margin-left: 10px; }
+.pm-chart__tooltip-key { display: inline-block; width: 8px; height: 8px; flex: 0 0 8px; }
+.pm-chart__data { margin-top: 2px; }
+.pm-chart__data summary { cursor: pointer; font: 700 11px var(--font-body); letter-spacing: 0.06em; text-transform: uppercase; color: var(--erp-ink-50); }
+.pm-chart__data summary:hover { color: var(--text-primary); }
+.pm-chart__data > .lux-table { margin-top: 10px; }
+
+/* tag breakdown — ranked horizontal bars, hairline rows, square (0-radius) ends */
+.pm-tagbars { display: flex; flex-direction: column; }
+.pm-tagbar { display: grid; grid-template-columns: 140px 1fr 80px; align-items: center; gap: 12px; padding: 7px 0; border-bottom: 0.5px solid var(--erp-hairline-soft); }
+.pm-tagbar:last-child { border-bottom: 0; }
+.pm-tagbar__label { font: 400 13px var(--font-body); color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pm-tagbar__track { height: 16px; background: rgba(26, 25, 22, 0.05); }
+.pm-tagbar__fill { height: 100%; background: var(--pm-tagbar-onlight, var(--erp-ink-50)); }
+.lux-card--dark .pm-tagbar__fill { background: var(--pm-tagbar-ondark, var(--erp-ink-50)); }
+.pm-tagbar__fill--untagged { background: var(--erp-ink-50); }
+.pm-tagbar__val { font: 700 11px var(--font-body); color: var(--erp-ink-60); text-align: right; white-space: nowrap; }
+
+@media (prefers-reduced-motion: reduce) {
+  .pm-chart__crosshair, .pm-chart__tooltip { transition: none; }
+}
+
+/* task-detail status select (P2-05) */
+.pm-statussel { display: inline-flex; align-items: center; gap: 8px; }
+.pm-statussel__select { font: 400 13px var(--font-body); padding: 4px 8px; border: 0.5px solid var(--erp-hairline); background: var(--surface-card); color: var(--text-primary); }
+.pm-statussel__select:focus-visible { outline: 2px solid var(--erp-accent); outline-offset: 1px; }
+
+/* ---- comment reactions (P3-09) ---- */
+.pm-rx-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; }
+.pm-rx-chip {
+  display: inline-flex; align-items: center; gap: 5px; font: 400 11px var(--font-body); line-height: 1.5;
+  padding: 2px 7px; border: 0.5px solid var(--erp-hairline); background: var(--surface-card);
+  color: var(--text-primary); cursor: pointer;
+}
+.pm-rx-chip:hover, .pm-rx-chip:focus-visible { border-color: var(--erp-accent); }
+.pm-rx-chip--mine { border-color: var(--erp-accent); background: rgba(181, 98, 47, 0.12); color: var(--erp-accent); }
+.pm-rx-chip__count { font-weight: 700; }
+.pm-rx-add-wrap { position: relative; display: inline-block; }
+.pm-rx-add {
+  width: 22px; height: 22px; padding: 0; display: inline-flex; align-items: center; justify-content: center;
+  border: 0.5px solid var(--erp-hairline); background: var(--surface-card); color: var(--erp-ink-60);
+  cursor: pointer; font: 700 13px var(--font-body); line-height: 1;
+}
+.pm-rx-add:hover, .pm-rx-add:focus-visible { border-color: var(--erp-accent); color: var(--erp-accent); }
+.pm-rx-pop {
+  position: absolute; top: 26px; left: 0; z-index: 60; display: grid; grid-template-columns: repeat(4, 1fr);
+  gap: 4px; padding: 8px; background: var(--surface-card); border: 0.5px solid var(--erp-hairline);
+  box-shadow: none; animation: erp-toast 0.18s var(--erp-ease); max-width: min(200px, calc(100vw - 32px));
+}
+.pm-rx-pop__item {
+  width: 28px; height: 28px; padding: 0; border: 0.5px solid var(--erp-hairline); background: transparent;
+  cursor: pointer; font-size: 15px; display: flex; align-items: center; justify-content: center;
+}
+.pm-rx-pop__item:hover, .pm-rx-pop__item:focus-visible { border-color: var(--erp-accent); background: rgba(181, 98, 47, 0.08); }
+.pm-rx-pop__item--mine { border-color: var(--erp-accent); background: rgba(181, 98, 47, 0.12); }
+
+/* ---- follow toggle (P3-09) ---- */
+.pm-follow-glyph { margin-right: 5px; font-size: 13px; }
+.pm-follow-meta { font: 400 11px var(--font-body); color: var(--erp-ink-50); white-space: nowrap; }

@@ -139,13 +139,115 @@ per the 2026-07-17 route inventory (confirm UI has been repointed off the in-mem
 - `GET/POST /api/:t/pm/projects/:id/milestones`, `PATCH …/:mid`
 - `GET/POST /api/:t/pm/projects/:id/docs`, `GET/PATCH …/:docId`
 - `GET/POST /api/:t/pm/tasks/:id/time` (time logs)
+- **BUILT (P2-01, 2026-07-24):** `GET/POST /api/:t/pm/projects/:id/tags`, `PATCH/DELETE …/:tagId`
+  — `Tag = {id, label, color}`; `color` is a closed 8-slug set (`bronze|champagne|olive|slate|clay|
+  moss|dust|ink`, stored as the slug not a hex — the UI owns the swatch→hex mapping). Manage-gated
+  (leads/admins) like milestones/docs. `DELETE` 409s `{inUse: <count>}` if any task in the project
+  references the tag; `?force=1` strips the tag from every referencing task then deletes it.
+  `PATCH /api/:t/pm/tasks/:id` now also accepts `tags: string[]` (rejects ids outside the task's own
+  project's tag registry) and every task read response now includes `tags: string[]`. Migration
+  `0036_pm_tags.sql` (table `pm_project_tags`, FORCE RLS; `pm_tasks.tags uuid[] DEFAULT '{}'`).
+- **BUILT (P2-04, 2026-07-24):** `GET/POST /api/:t/pm/projects/:id/statuses`, `PATCH/DELETE …/:sid`
+  — `ProjectStatus = {id, label, color, isDone, isBlocked, wipLimit?, position}`, per-project ordered
+  workflow. Manage-gated (`pm.manage`). A project that never opens the editor **reads back 4
+  synthesized defaults** (`todo|in_progress|blocked|done` at today's labels/colors) — no rows are
+  written until the first status-editor write **materializes** them (`ensureMaterialized`). `POST`
+  derives the id by slugifying the label (unique-suffixed). `DELETE` → **400 `{inUse: <count>}`** if
+  any task references the status and no `?moveTo=<sid>` is given; with `?moveTo=<sid>` it reassigns
+  those tasks then soft-deletes. `PmProject` GET responses now include `statuses: ProjectStatus[]`.
+  Task create/`PATCH` **validate `status`** against the project's effective status set (unknown or
+  cross-project ids → 400). **ENGINE FLAGS:** all server-side done/blocked semantics (progress↔done
+  coupling on PATCH, the AI-tracker, `confirm`) derive from `isDone`/`isBlocked`, not the literal id,
+  so a renamed done status (e.g. `shipped`) still couples. Migration `0038_pm_project_statuses.sql`
+  (table `pm_project_statuses`, PK `(tenant_id, project_id, id)`, FORCE RLS; drops the legacy
+  `pm_tasks.status` CHECK — column stays `text`, zero row rewrites).
+- **BUILT (P3-01, 2026-07-24):** `POST /api/:t/pm/tasks` now also accepts `subtasks: string[]`
+  (→ `[{id,title,done:false}]`) and `tags: string[]` (same cross-project-registry validation as
+  `PATCH /api/:t/pm/tasks/:id` — a tag id outside this task's own project's `pm_project_tags` →
+  400). `POST /api/:t/pm/tasks/:id/duplicate` → `{id}` (create-gated like `POST …/tasks`): copies
+  title (+" (copy)"), description, priority, tags, subtasks (ids regenerated, `done` reset to
+  false), estimate, milestone, assignee (assignee gets a fresh assignment notification pointing
+  at the copy), dates, recurrence; resets `status` to the project's first-by-position **NON-done**
+  status via `effectiveStatuses`' `isDone` FLAG (never the literal `"todo"` — verified with a
+  project where the literal `todo` status is itself flagged done) and `progress` to 0; drops
+  comments/time-entries/suggestions/`dependsOn` (never copied, never referenced — `depends_on`
+  keeps its `'{}'` column default on the copy).
+  **`GET/POST /api/:t/pm/templates[?kind=task|doc]`, `PATCH/DELETE …/:id`** — tenant-scoped (not
+  project-scoped) reusable templates, manage-gated like tags/milestones/docs
+  (`authorize({kind:"pm_task",tenantId},"manage")`). `Template = {id, kind: "task"|"doc", name,
+  payload, updatedAt}`; `kind` is immutable post-creation (`PATCH` validates `payload` against the
+  EXISTING row's kind, read server-side, never re-derived from the request body). Payload shape
+  per kind, rejected (400) if it doesn't match: `task` = `{title, description?, priority?,
+  estimateMinutes?, subtasks?: string[], tagLabels?: string[]}` (`tagLabels` are free-text labels,
+  not registry ids — templates aren't project-scoped so there is no tag registry to validate
+  against; resolving them into real project tags is an **apply-template** feature, not yet built);
+  `doc` = `{title, body}`. Migration `0041_pm_templates.sql` (table `pm_templates`, FORCE RLS off
+  the 0025 `app_current_tenants()` helper).
+- **BUILT (P3-02, 2026-07-24):** `POST /api/:t/pm/projects/:projectId/duplicate {name}` → `{id}`
+  (manage-gated: `authorize({kind:"pm_project",tenantId,id:projectId},"manage")`). Deep-clones a
+  project + its structure in ONE tenant-scoped transaction: base `projects` row (name from input,
+  `status` reset to `active`, NO due date, owner/`pm_project_meta` NOT copied; keeps
+  `department_id`/`client_id`/`is_internal`/`custom_fields`), `pm_project_statuses` copied VERBATIM
+  (same per-project slug ids; an unmaterialized/default project copies zero rows and the clone reads
+  the same 4 synthesized defaults), `pm_project_tags` with FRESH uuids, `pm_milestones` with fresh
+  ids (`status` reset to `open`, dates kept), `pm_docs` (author = duplicating user), and every task.
+  Tasks follow P3-01 copy semantics EXCEPT: assignee CLEARED, `status` reset to the clone's
+  first-by-position NON-done status (via `effectiveStatuses`' `isDone` FLAG), `progress` 0, subtasks
+  reset (fresh ids, `done:false`), **tags remapped** through the tag map, **milestone_id remapped**
+  through the milestone map, and (SECOND pass, once every new task id is known) **`depends_on`
+  remapped** through the task map with any id that didn't copy DROPPED. Task titles kept verbatim
+  (the PROJECT is the copy). No source-project id survives anywhere in the copy;
+  comments/time-entries/suggestions/`recurrence_spawned_from` not carried. Emits
+  `pm.project.duplicated`. No new migration (existing tables).
 - `GET /api/:t/pm/tasks/:id/suggestions`, `POST /api/:t/pm/tasks/:id/tracker/run`,
   `POST /api/:t/pm/suggestions/:id/confirm|dismiss`
 - Task comments reuse `GET/POST /api/:t/comments?entityType=task&entityId=`.
+- **BUILT (P3-08, 2026-07-24):** `GET /api/:t/pm/tasks/:id/followers` → `[{id,name}]`,
+  `POST`/`DELETE /api/:t/pm/tasks/:id/follow` (no body — the followed row is ALWAYS
+  `user_id = principal`, never client-supplied; read-gated, since following is a self-scoped
+  preference, not a privileged action). Migration `0043_pm_task_followers_comment_reactions.sql`
+  adds `pm_task_followers` (FORCE RLS off the 0025 `app_current_tenants()` helper). Follow is
+  idempotent (`ON CONFLICT DO NOTHING`); both endpoints 404 on an unknown/foreign (RLS-hidden)
+  task id. **Reactions** (`src/core/collab.controller.ts`): `POST /api/:t/comments/:commentId/reactions
+  {emoji}` (comment-`create`-gated; 404 if the comment is gone/foreign; emoji is a closed set
+  `👍❤️🎉👀✅💡🙏🔥` — off-set → 400; idempotent add via the table's own PK
+  `(tenant_id,comment_id,user_id,emoji)`), `DELETE …/reactions/:emoji` (self-row delete only —
+  `user_id` is always the caller, so it is structurally impossible to delete another user's
+  reaction through this endpoint). `GET /api/:t/comments` gained an **additive**
+  `reactions: [{emoji,count,mine}]` field per comment (viewer-scoped `mine`); every other field/
+  shape is unchanged so existing comment consumers are unaffected. Same table
+  (`comment_reactions`, migration 0043).
+  **Notification fan-out (both endpoints above feed it):** in `patchTask`, when the task's status
+  actually changes, every follower gets ONE `type:"task_update"` notification (title `“<task>”
+  moved to “<status label>”`, `href:/tasks/:id`); in `createComment` for `entityType==='task'`,
+  followers join the existing mention/assignee notify fan-out. **Dedup contract:** recipients from
+  mentions ∪ assignee ∪ followers are collected into a single `Set` per event so nobody gets two
+  notifications for one event (mentions win the single call when a recipient is both mentioned and
+  a follower/assignee; the newly-reassigned assignee wins over a same-call status-change follower
+  notification). `notify()` already auto-skips the actor (`recipientId === actorId`), verified —
+  no separate actor-skip was needed.
 - **Poly-assignee** `{kind:person|department|division, refId, refName, responsibleId, responsibleName}`;
   units come from the org structure. **Unify with the base task model** (§4) — today they are split.
 - Emit `pm.task.created|updated`, `pm.tracker.run`, `pm.suggestion.confirmed`. The AI Tracker should run
   as the WS8 PM specialist agent (Gateway model + Knowledge/D9 docs); the UI renders its output.
+- **BUILT (P3-10, 2026-07-24):** doc version history — append-only, DOC-scoped (not project-scoped)
+  routes: `GET /api/:t/pm/docs/:docId/versions` → META only `[{version, authorId, authorName,
+  createdAt}]` (no title/body; read-gated), `GET /api/:t/pm/docs/:docId/versions/:v` → full
+  `{version, title, body, authorName, createdAt}` (read-gated, 404 on an unknown version or a
+  gone/foreign doc), `POST /api/:t/pm/docs/:docId/versions/:v/restore` → sets the doc to version
+  `v`'s content AND appends a brand-new version authored by the restorer (manage-gated, never
+  rewrites any existing version row). Since these routes carry no `projectId`, authz resolves the
+  doc's `project_id` from the (tenant-scoped, RLS-filtered) doc row first, then gates on
+  `{kind:"pm_project", id: projectId}` exactly like `createDoc`/`patchDoc`. **Version-on-write:**
+  `createDoc` writes version 1; `patchDoc` row-locks the doc (`SELECT … FOR UPDATE`) and appends
+  `MAX(version)+1` authored by the patcher ONLY when title and/or body actually changed — a true
+  no-op PATCH (both fields omitted or resubmitted identical) appends nothing. The row lock
+  serializes concurrent writers on the same doc so two racing PATCH/restore calls can never compute
+  the same next version number (`UNIQUE(tenant_id, doc_id, version)` is the hard backstop).
+  `getDoc`/`listDocs` gained an additive `version` field (current/max version number, `COALESCE`d to
+  1 for any pre-migration doc with no version rows yet — synth-on-read, not a backfill DML).
+  Migration `0044_pm_doc_versions.sql` (table `pm_doc_versions`, FORCE RLS off the 0025
+  `app_current_tenants()` helper).
 
 ## 6. IT: devices & n8n — `lib/it.ts`  — **ALL ✅ BUILT**
 **See [`memory/it-device-contract`].** All present per the route inventory: `GET/POST /api/:t/it/devices`,
@@ -158,9 +260,55 @@ backend-only (UI reads) and is also present.
 `admin/admin-systems.controller.ts` + `admin/intelligence.controller.ts` now exist:
 - ✅ `GET /api/admin/:system/status`, ✅ `GET /api/admin/:system/config` for `system ∈
   {bot,gateway,hub,agents,knowledge,automation}`. **⛔ `PUT /api/admin/:system/config` is NOT in the
-  route inventory — config remains read-only; the write side is still pending.**
+  route inventory for gateway/hub/agents/knowledge/automation — config remains read-only for those;
+  the write side is still pending.** **✅ `system=bot` is the one exception (A4, 2026-07-24):**
+  `admin/admin-systems.controller.ts`'s `GET /api/admin/bot/config` now proxies the bot's own
+  live config fields (editable:true for `postToGroups`/`managementGroupId`) instead of the honest
+  url/tokenConfigured-only descriptor, and `bot`'s status `detail` gained a `session` field.
 - ✅ `GET /api/admin/gateway/egress-audit`, ✅ `GET /api/admin/hub/tools`,
   ✅ `GET /api/:t/agents/goals`, ✅ `GET /api/:t/knowledge/sources` (+ ✅ `POST …/:id/review`).
+- **✅ NEW (B3, `erp-whatsapp-and-agent-runtime-e2e.md` §3.3) — real agent-runner proxy,
+  replacing the old hardcoded `[]`/"CLI/library, no live status" stubs.**
+  `config.services.agents = {url: AGENTS_URL, token: AGENT_RUNNER_TOKEN}`;
+  `admin/admin-systems.controller.ts`'s `probeStatus("agents")`/`connectionConfig("agents")` now
+  hit the runner's real `GET /health` (no more special-cased "not an HTTP service" note — status
+  `detail.agents`/`detail.writeAgents` feed the UI's agent-select).
+  `admin/intelligence.controller.ts`:
+  | Method | Path | Gate | Notes |
+  |---|---|---|---|
+  | GET | `/api/:t/agents/goals` | `authorize(activity read)` (unchanged) | Runner `GET /goals?tenant=:t` reshaped to the UI `AgentGoal` (`budgetSpent=modelCalls+toolCalls`, `budgetTotal` from `budget`, `fanOut`) + `{agent,createdAt,endedAt,errorKind,approvalId}`. `[]` when `AGENTS_URL` unset/unreachable |
+  | GET | `/api/:t/agents/goals/:goalId` | `authorize(activity read)` | Runner detail (tenant-pinned), same reshape + `blackboard`/`runs`. 404 when unconfigured/unreachable/unknown |
+  | GET | `/api/:t/agents/runs/:runId` | **`isElevated`** (shared `admin/elevated.ts`) | Runner run incl. step transcript (tenant-pinned). Elevated-only — a transcript can carry tool output fetched under the *triggering* user's authority |
+  | POST | `/api/:t/agents/goals` | **`isElevated`** | Body `{goal,agent?}`. (1) idempotently upserts the **platform self-link** `identity_links(provider='platform', external_id=userId, user_id=userId)` via `ON CONFLICT (provider, external_id) DO NOTHING`, both sides pinned server-side from `req.principal.userId` — never from the body; (2) calls runner `POST /goals` with `envelope={provider:'platform', externalId:userId}`, `requestedBy=userId` → `202 {id,status}` passthrough. `503` when `AGENTS_URL` unset/unreachable |
+- **✅ NEW (A4, `erp-whatsapp-and-agent-runtime-e2e.md` §2.4) — `admin/bot-admin.controller.ts`**,
+  `@Controller("api/admin/bot")`, `isElevated`-gated (shared with admin-systems via the extracted
+  `admin/elevated.ts`), proxying the bot's own ADMIN_TOKEN-gated `/admin/*` (WhatsApp go-live
+  self-service — session lifecycle, group registry, safe config write). Fail-soft: bot not
+  configured → 404 `{error}`; unreachable/non-2xx → 502 `{error}`; the bot's own validation 400
+  `{error,field?}` is surfaced verbatim (the shared `HttpErrorFilter` now forwards an optional
+  `field` alongside `error`). This is what makes `updateBotConfig`'s existing `PUT
+  /api/admin/bot/config {key,value}` stub (previously 404) real, and unblocks the `/systems/bot`
+  Connect-WhatsApp UI (§2.5 of the design doc, not yet built):
+  | Method | Path | Notes |
+  |---|---|---|
+  | POST | `/api/admin/bot/session/start` | 200 `{session,status,engine}` |
+  | GET | `/api/admin/bot/session/status` | 200 `{session,status,engine,me,lastEvent}` |
+  | GET | `/api/admin/bot/session/qr` | 200 `{qr:"data:image/png;base64,…"\|null,status}`, `Cache-Control: no-store` |
+  | POST | `/api/admin/bot/session/{stop,logout,restart}` | 200 `{session,status}` |
+  | GET/PUT | `/api/admin/bot/groups` | `{registryActive,groups,discovered,managementGroupId}`; PUT `{groups:[…]}`, 400 on non-array before forwarding, else bot's own field-level 400 passthrough |
+  | PUT | `/api/admin/bot/config` | body `{key,value}`; key allow-list `{postToGroups,managementGroupId}`, else 400 |
+  (No `GET /api/admin/bot/config` here by design — that read path stays on the generic
+  `admin/admin-systems.controller.ts` route above.)
+- **✅ BUILT — read-only chat viewer + logs for the WA/TG Bot page** (bot `chat-admin.ts` +
+  `store.listChats`, nest `admin/bot-admin.controller.ts`). Same `isElevated` gate / fail-soft
+  `botCall` contract as the rest of this controller; content is already decrypted +
+  PII-scrubbed at ingest by the bot's store, so these routes add no new PII handling:
+  | Method | Path | Notes |
+  |---|---|---|
+  | GET | `/api/admin/bot/chats?limit=` | `{chats:[{chatId,kind:"group"\|"dm",surface:"whatsapp"\|"telegram",name,messageCount,lastActivityTs,lastPreview}]}`, sorted by `lastActivityTs` desc |
+  | GET | `/api/admin/bot/chats/:chatId/messages?limit=` | `{chatId,messages:[{ts,senderId,senderName,text,fromBot,mediaMime?,mediaStatus?,mediaText?}]}`, oldest→newest (thread order); `chatId` is URL-encoded (handles `111@g.us`, `628@c.us`, `tg:-1001`); bot's own 404 (unknown chat) surfaced verbatim |
+  | GET | `/api/admin/bot/session/events` | `{events:[{status,ts}]}` — the session-state transitions ring buffer, oldest first |
+  | GET | `/api/admin/bot/actions/audit?limit=` | Proxies the bot's existing `/admin/actions/audit` (no new bot route) — same shape as before, now reachable through nest for the Logs tab |
 
 ## 8. Backend surfaces with no UI/`lib/*` consumer yet
 Found in the 2026-07-17 route inventory but not referenced anywhere in this contract doc (no
@@ -424,3 +572,35 @@ list every user's claude row in a tenant at once (the team roster). Reuses
 - Optional ops/QA seed: `npm run seed:claude-seats [companyName]` (default `Gaia Digital Agency`) —
   maps the first company member's seat, maps+unmaps the second (leaves a revoked row on hand), prints
   the team roster count. Distinct from WSUX-10's DEMO_MODE frontend fixtures.
+
+## 13. Creative module — Studio · Generation · DAM (CR-*, design `blueprints/creative-design.md`) — shapes canonical in `lib/creative.ts`
+
+Existing Image-Studio persistence is **BUILT**; the expansion (generation/edit/upscale/video via the
+Creative Render Gateway + the shared DAM) is **PENDING** per the v1.0 design. New surface lives under
+`/api/:t/modules/creative/*`; the legacy `/api/:t/creative/assets` path is preserved as a **stable alias**.
+
+- ✅ **BUILT** — `GET/POST /api/:t/creative/assets`, `GET /api/:t/creative/assets/:id/content`,
+  `.../:id/original`, `DELETE .../:id`, `PATCH .../:id` (training-set curation). Image Studio grading persistence
+  (migrations `0031`/`0032`). Kept working; the module surface below supersedes it going forward.
+- ⛔ **PENDING (CR-02/12)** — `GET/POST /api/:t/modules/creative/assets`, `GET .../assets/:id/versions`,
+  `POST .../assets/:id/versions`. Asset + version stack (kind/source/rights/`license_class`/`reuse_status`/
+  provenance/checksum/phash/CLIP embedding/caption). RLS third-wall `app_module_allowed('creative')`.
+- ⛔ **PENDING (CR-12)** — `GET/POST /api/:t/modules/creative/collections`, `.../brand-kits`. Many-to-many
+  collections; a brand kit is a typed collection (logo/palette/font slots).
+- ⛔ **PENDING (CR-16)** — `GET /api/:t/modules/creative/search?q=&similar_to=&kind=&reuse_status=`. Keyword +
+  **CLIP visual/semantic** nearest-neighbour (pgvector) + dedup; cross-dept discovery surface (SMM/SEO/WebDesk
+  consume it). Returns rights-gated, reuse-approved assets by default.
+- ⛔ **PENDING (CR-08/10/13/22/24)** — `POST /api/:t/modules/creative/jobs` (enqueue a typed render:
+  upscale/generate/edit/t2v/i2v), `GET .../jobs`, `GET .../jobs/:id` (state machine: `queued`/`awaiting-approval`/
+  `running`/`succeeded`/`failed`/`cancelled`). Spend-gated via WS4 (one-shot payload-hash approvalId); metered
+  in `creative_usage_ledger`. Backed by `render-gateway-go`.
+- ⛔ **PENDING (CR-06/14)** — `GET /api/:t/modules/creative/scopes`, `PATCH .../scopes/:id`. Per-client caps +
+  premium (FLUX/commercial-video) opt-in tiers; feeds the fail-closed stop-loss (image $200 / video $300 envelopes).
+- ⛔ **PENDING (CR-11)** — `GET /api/:t/modules/creative/ledger`. Per-client render cost/usage ledger with
+  `requester_module` attribution (SMM D-9 generative-image credits book here once, attributed).
+- ⛔ **PENDING (CR-20)** — `POST /api/:t/modules/creative/renditions/sign` → signed expiring imgproxy URL
+  (per-network crop presets shared with SMM/SEO/WebDesk). **QA gate:** no open proxy; tampered/expired/unsigned refused.
+- 🔒 **Internal (not UI):** `POST /api/internal/creative/render-callback` — idempotent by `job_id`, per-job
+  callback token (+ optional mTLS); gateway → platform-nest terminal-state transitions only.
+- **Cross-dept note:** SMM/SEO/WebDesk pull **approved** assets + imgproxy renditions via `search` +
+  `renditions/sign`; reuse is gated by `reuse_status` (WS4 "approve for reuse" gate), not raw asset access.

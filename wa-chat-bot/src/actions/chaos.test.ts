@@ -47,6 +47,7 @@ describe("chaos: duplicate delivery is idempotent", () => {
     setActionsEnabled(true);
     config.defaultTenantId = "co-1";
     config.intentRoutingEnabled = false; // isolate command path
+    config.replyMaxAgeMs = 0; // disable the backlog/stale-message guard (fixtures use ts:1)
     calls.length = 0;
     saved.length = 0;
     sentButtons.length = 0;
@@ -61,7 +62,7 @@ describe("chaos: duplicate delivery is idempotent", () => {
     const ev: InboundEvent = {
       kind: "message",
       message: { chatId: "g@g.us", senderId: "u@c.us", senderName: "U", waMessageId: "MID-1", ts: 1,
-        text: "/task create proj-1 Pour slab", isGroup: true, fromMe: false, replyToBot: false, media: null },
+        text: "/task create proj-1 Pour slab", isGroup: true, fromMe: false, replyToBot: false, mentionedJids: [], media: null },
     };
     await handleEvent(gw as any, ev);
     await handleEvent(gw as any, ev); // webhook redelivery — dropped by dedup
@@ -74,7 +75,7 @@ describe("chaos: duplicate delivery is idempotent", () => {
     const cmd: InboundEvent = {
       kind: "message",
       message: { chatId: "g@g.us", senderId: "u@c.us", senderName: "U", waMessageId: "MID-2", ts: 1,
-        text: "/task create proj-1 Pour slab", isGroup: true, fromMe: false, replyToBot: false, media: null },
+        text: "/task create proj-1 Pour slab", isGroup: true, fromMe: false, replyToBot: false, mentionedJids: [], media: null },
     };
     await handleEvent(gw as any, cmd);
     const token = pending("g@g.us", "u@c.us")!.token;

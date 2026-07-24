@@ -87,6 +87,7 @@ const PROJECTS: Record<string, unknown[]> = {
   ],
   "co-agency": [
     { id: "p-web-1", name: "Client site redesign", status: "active", client_id: "cl-1", is_internal: false, owner_id: "u-pm", department_id: "dept-1", due_date: "2026-07-20", custom_fields: { phase: "build" } },
+    { id: "p-web-2", name: "Mobile app revamp", status: "active", client_id: "cl-3", is_internal: false, owner_id: "u-dev", department_id: "dept-1", due_date: "2026-08-10", custom_fields: { phase: "build" } },
     { id: "p-seo-1", name: "SEO audit — Q3", status: "active", client_id: "cl-2", is_internal: false, owner_id: "u-pm", department_id: "dept-3", due_date: "2026-08-01", custom_fields: { phase: "discovery" } },
     { id: "p-int-1", name: "Internal brand refresh", status: "completed", client_id: null, is_internal: true, owner_id: DEMO_USER_ID, department_id: "dept-2", due_date: "2026-06-01", custom_fields: {} },
   ],
@@ -97,6 +98,7 @@ const PROJECT_DETAIL_EXTRA: Record<string, { client_name: string | null; owner_n
   "p-hr-1": { client_name: null, owner_name: "Clement Hansel", start_date: "2026-05-01" },
   "p-fin-1": { client_name: null, owner_name: "Rina Wibawa", start_date: "2026-04-01" },
   "p-web-1": { client_name: "Northwind Traders", owner_name: "Dewi Santoso", start_date: "2026-06-01" },
+  "p-web-2": { client_name: "Lumen Studio", owner_name: "Made Putra", start_date: "2026-07-01" },
   "p-seo-1": { client_name: "Cedar Group", owner_name: "Dewi Santoso", start_date: "2026-07-01" },
   "p-int-1": { client_name: null, owner_name: "Clement Hansel", start_date: "2026-03-01" },
 };
@@ -116,6 +118,11 @@ const TASKS: Record<string, unknown[]> = {
   "p-seo-1": [
     { id: "t-6", title: "Keyword gap analysis", status: "todo", priority: "normal", assignee_id: DEMO_USER_ID, due_date: "2026-07-18", project_id: "p-seo-1", project_name: "SEO audit — Q3" },
   ],
+  "p-web-2": [
+    { id: "t-7", title: "Set up navigation shell", status: "done", priority: "normal", assignee_id: "u-dev", due_date: "2026-07-20", project_id: "p-web-2", project_name: "Mobile app revamp" },
+    { id: "t-8", title: "Build offline sync", status: "in_progress", priority: "high", assignee_id: "u-dev", due_date: "2026-08-01", project_id: "p-web-2", project_name: "Mobile app revamp" },
+    { id: "t-9", title: "Push notifications spike", status: "todo", priority: "normal", assignee_id: DEMO_USER_ID, due_date: "2026-08-05", project_id: "p-web-2", project_name: "Mobile app revamp" },
+  ],
   "p-int-1": [],
 };
 const ALL_TASKS = Object.values(TASKS).flat();
@@ -134,6 +141,7 @@ const CUSTOM_FIELDS: Record<string, unknown[]> = {
     { key: "tier", label: "Account tier", data_type: "select", options: ["a", "b", "c"], required: false },
   ],
   task: [{ key: "severity", label: "Severity", data_type: "select", options: ["low", "high"], required: false }],
+  pm_task: [{ key: "channel", label: "Channel", data_type: "select", options: ["email", "phone", "in_person"], required: false }],
   agency_campaign: [{ key: "channel", label: "Channel", data_type: "text", options: [], required: false }],
 };
 

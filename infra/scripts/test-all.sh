@@ -16,6 +16,18 @@ for proj in wa-chat-bot mcp-hub platform-nest ai-agents; do
   npm test
 done
 
+# P3-12: platform-ui build gate (tsc + vitest passed while `next build` broke on a server-only
+# import reaching a client component and routes 500'd — `next build` is the real gate for that).
+# DEMO_MODE=1 so no backend is needed. Playwright smoke check is optional locally (not run here
+# by default — needs a browser install); CI runs it. To run it yourself:
+#   cd platform-ui && DEMO_MODE=1 npx playwright test --project=smoke --grep @smoke
+echo "=== platform-ui ==="
+cd "$ROOT/platform-ui"
+[ -d node_modules ] || npm ci
+npm run typecheck
+npm test
+DEMO_MODE=1 npm run build
+
 # ai-gateway is the Go service (ai-gateway-go/); it replaced the retired Node gateway.
 echo "=== ai-gateway-go ==="
 cd "$ROOT/ai-gateway-go"
