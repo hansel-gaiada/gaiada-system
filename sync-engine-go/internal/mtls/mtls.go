@@ -46,7 +46,26 @@ func NewClient(caCertPath, clientCertPath, clientKeyPath string) (*http.Client, 
 			MinVersion:   tls.VersionTLS12,
 		},
 	}
-	return &http.Client{Transport: otelhttp.NewTransport(base)}, nil
+	return &http.Client{Transport: &tracedTransport{RoundTripper: otelhttp.NewTransport(base), base: base}}, nil
+}
+
+// tracedTransport keeps the base *http.Transport reachable behind the otelhttp wrapper, which
+// exposes no accessor of its own. Request handling is unchanged — RoundTrip still goes through
+// otelhttp, so traceparent propagation and client spans behave exactly as before.
+type tracedTransport struct {
+	http.RoundTripper
+	base *http.Transport
+}
+
+// BaseTransport returns the underlying *http.Transport of a client built by NewClient, or nil
+// for any other client. Callers that need to adjust TLS/dial behaviour (notably tests pinning a
+// dialer to a httptest listener) must go through this instead of type-asserting Transport to
+// *http.Transport — that assertion panics now that the transport is wrapped for tracing.
+func BaseTransport(c *http.Client) *http.Transport {
+	if tt, ok := c.Transport.(*tracedTransport); ok {
+		return tt.base
+	}
+	return nil
 }
 
 // ServerTLSConfig requires a client cert signed by the CA whose CN is in allowedCNs. An empty

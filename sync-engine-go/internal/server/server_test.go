@@ -91,7 +91,7 @@ func mtlsHarness(t *testing.T, centralPool *pgxpool.Pool, nodeCN string) (url st
 	if err != nil {
 		t.Fatal(err)
 	}
-	tr := client.Transport.(*http.Transport)
+	tr := mtls.BaseTransport(client)
 	tr.TLSClientConfig.ServerName = "central"
 	addr := ts.Listener.Addr().String()
 	tr.DialContext = func(ctx context.Context, network, _ string) (net.Conn, error) {

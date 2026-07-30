@@ -13,7 +13,8 @@
     "seed:search": "node dist/seed/search.js",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "lint:withtenants": "node scripts/lint-withtenants.mjs"
+    "lint:withtenants": "node scripts/lint-withtenants.mjs",
+    "lint:migration-rls": "node scripts/lint-migration-rls.mjs"
   },
   "dependencies": {
     "@fastify/multipart": "^8.3.1",

@@ -17,7 +17,7 @@ import (
 // cert against the DNS name it was issued for (its CN), matching how a node reaches central by
 // hostname in production.
 func pinDialer(client *http.Client, serverName, realAddr string) {
-	tr := client.Transport.(*http.Transport)
+	tr := BaseTransport(client)
 	tr.TLSClientConfig.ServerName = serverName
 	tr.DialContext = func(ctx context.Context, network, _ string) (net.Conn, error) {
 		return (&net.Dialer{}).DialContext(ctx, network, realAddr)
