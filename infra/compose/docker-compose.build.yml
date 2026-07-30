@@ -1,0 +1,52 @@
+# Local build override — restores `build:` for the eleven first-party services.
+#
+# `docker-compose.vps.yml` pins every service to a signed GHCR image so the VPS
+# NEVER compiles on the production box (see docs/blueprints/deployment-strategy.md).
+# That is wrong for local development, where you want to run the code in your
+# working tree. Layer this file on top to build from source instead:
+#
+#   docker compose -f docker-compose.vps.yml -f docker-compose.local.yml \
+#                  -f docker-compose.build.yml up -d --build
+#
+# Because each service keeps its `image:` key from the base file, the locally
+# built image is TAGGED with the same GHCR name. That is deliberate: `docker
+# compose up` (no --build) then reuses your local build instead of pulling, and
+# a later `docker compose pull` cleanly replaces it with the released one.
+#
+# Order matters — this file must come AFTER docker-compose.vps.yml.
+
+services:
+  ai-gateway:
+    build: ../../ai-gateway-go
+
+  platform:
+    build: ../../platform-nest
+
+  sync-central:
+    build: ../../sync-engine-go
+
+  search-crawl:
+    build: ../../search-crawl-go
+
+  platform-ui:
+    build: ../../platform-ui
+
+  knowledge:
+    build:
+      context: ../../ai-agents
+
+  agent-runner:
+    build:
+      context: ../../ai-agents
+
+  mcp-hub:
+    build: ../../mcp-hub
+
+  mcp-hub-central:
+    build: ../../mcp-hub
+
+  bot:
+    build: ../../wa-chat-bot
+
+  bot-media-worker:
+    build: ../../wa-chat-bot

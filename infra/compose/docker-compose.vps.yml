@@ -112,7 +112,7 @@ services:
   # TLS is OFF here so the plain-HTTP contract callers speak keeps working; switch
   # GATEWAY_TLS_MODE to permissive/enforced once callers are enrolled with client certs.
   ai-gateway:
-    build: ../../ai-gateway-go
+    image: ghcr.io/${GHCR_OWNER:-hansel-gaiada}/gaiada-ai-gateway-go:${GAIADA_TAG:-latest}
     restart: unless-stopped
     environment:
       # GATEWAY_PORT defaults to 3002 in config.go — left unset so callers need no URL change.
@@ -191,7 +191,7 @@ services:
       - ../../platform-nest/cerbos/policies:/policies:ro
 
   platform:
-    build: ../../platform-nest
+    image: ghcr.io/${GHCR_OWNER:-hansel-gaiada}/gaiada-platform-nest:${GAIADA_TAG:-latest}
     restart: unless-stopped
     environment:
       PLATFORM_SERVICE_TOKEN: ${PLATFORM_SERVICE_TOKEN:?}
@@ -336,7 +336,7 @@ services:
   #     -cn central -out-cert /app/data/sync.crt -out-key /app/data/sync.key
   # then issue each site node's client cert (CN = its NODE_ID) and add it to site_subscriptions.
   sync-central:
-    build: ../../sync-engine-go
+    image: ghcr.io/${GHCR_OWNER:-hansel-gaiada}/gaiada-sync-engine-go:${GAIADA_TAG:-latest}
     restart: unless-stopped
     environment:
       SYNC_MODE: central
@@ -371,7 +371,7 @@ services:
   # run may reach are resolved at dispatch from that tenant's own search_properties row (SM-07
   # egress guard, internal/egress). No inbound ports (Zone A egress-only, design §05 table).
   search-crawl:
-    build: ../../search-crawl-go
+    image: ghcr.io/${GHCR_OWNER:-hansel-gaiada}/gaiada-search-crawl-go:${GAIADA_TAG:-latest}
     restart: "no"
     profiles: ["jobs"] # never starts with a plain `up -d`; run explicitly per crawl
     environment:
@@ -398,7 +398,7 @@ services:
         condition: service_healthy
 
   platform-ui:
-    build: ../../platform-ui
+    image: ghcr.io/${GHCR_OWNER:-hansel-gaiada}/gaiada-platform-ui:${GAIADA_TAG:-latest}
     restart: unless-stopped
     environment:
       PLATFORM_URL: http://platform:3004
@@ -423,8 +423,7 @@ services:
       - whisper-models:/root/.cache/huggingface
 
   knowledge:
-    build:
-      context: ../../ai-agents
+    image: ghcr.io/${GHCR_OWNER:-hansel-gaiada}/gaiada-ai-agents:${GAIADA_TAG:-latest}
     command: ["npx", "tsx", "src/knowledge/service.ts"]
     restart: unless-stopped
     environment:
@@ -455,8 +454,7 @@ services:
   # by platform-nest /api/:t/agents/* proxy. Tables (agent_goals / agent_runs) live in gaiada_knowledge
   # alongside the episodic store; no new DB/role needed.
   agent-runner:
-    build:
-      context: ../../ai-agents
+    image: ghcr.io/${GHCR_OWNER:-hansel-gaiada}/gaiada-ai-agents:${GAIADA_TAG:-latest}
     command: ["npx", "tsx", "src/runner/service.ts"]
     restart: unless-stopped
     environment:
@@ -477,7 +475,7 @@ services:
         condition: service_started
 
   mcp-hub:
-    build: ../../mcp-hub
+    image: ghcr.io/${GHCR_OWNER:-hansel-gaiada}/gaiada-mcp-hub:${GAIADA_TAG:-latest}
     restart: unless-stopped
     ports:
       - "127.0.0.1:3003:3003" # localhost-only; lets the standalone automation stack (n8n) reach the hub
@@ -526,7 +524,7 @@ services:
   # in a single-region v1 it points at the same platform. Not published (reach it via the internal
   # network / an enrolled mTLS peer). Give it a real second-site platform URL when one exists.
   mcp-hub-central:
-    build: ../../mcp-hub
+    image: ghcr.io/${GHCR_OWNER:-hansel-gaiada}/gaiada-mcp-hub:${GAIADA_TAG:-latest}
     restart: unless-stopped
     profiles: ["central"] # only starts with `--profile central`
     environment:
@@ -551,7 +549,7 @@ services:
         condition: service_started
 
   bot:
-    build: ../../wa-chat-bot
+    image: ghcr.io/${GHCR_OWNER:-hansel-gaiada}/gaiada-wa-chat-bot:${GAIADA_TAG:-latest}
     restart: unless-stopped
     environment:
       WEBHOOK_SECRET: ${WEBHOOK_SECRET:?}
@@ -589,7 +587,7 @@ services:
         condition: service_started
 
   bot-media-worker:
-    build: ../../wa-chat-bot
+    image: ghcr.io/${GHCR_OWNER:-hansel-gaiada}/gaiada-wa-chat-bot:${GAIADA_TAG:-latest}
     command: ["npx", "tsx", "src/media-worker.ts"]
     restart: unless-stopped
     environment:

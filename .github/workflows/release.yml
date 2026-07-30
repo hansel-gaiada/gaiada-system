@@ -39,6 +39,7 @@ jobs:
           - ai-agents
           - ai-gateway-go
           - sync-engine-go
+          - search-crawl-go
           - platform-nest
           - platform-ui
     env:
@@ -89,3 +90,13 @@ jobs:
           subject-name: ${{ env.IMAGE }}
           subject-digest: ${{ steps.build.outputs.digest }}
           push-to-registry: true
+
+  # The single deploy point: once EVERY component is built, signed and attested, hand the
+  # tag to deploy.yml. `git push --tags` is therefore the whole release-and-deploy action.
+  # Deploy is still independently runnable (workflow_dispatch) for rollback.
+  deploy:
+    needs: build-sign
+    uses: ./.github/workflows/deploy.yml
+    with:
+      tag: ${{ github.event.inputs.tag || github.ref_name }}
+    secrets: inherit

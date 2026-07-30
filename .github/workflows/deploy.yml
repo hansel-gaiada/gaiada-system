@@ -1,0 +1,186 @@
+# Single-point deploy to the VPS. Consumes the SIGNED images published by release.yml —
+# the production box never compiles anything (see docs/blueprints/deployment-strategy.md).
+#
+# Two entry points:
+#   1. Automatic — release.yml calls this via `workflow_call` once every image is built,
+#      signed and attested. So `git push --tags` is the whole deploy.
+#   2. Manual — `workflow_dispatch` with a tag. This is also the ROLLBACK path:
+#      run it with the previous tag and the stack re-pins in seconds, no rebuild.
+#
+# Order is deliberate: verify signatures -> BACKUP -> pull -> migrate -> up -> health.
+# Migrations only ever run after a successful backup, and a failed health check
+# automatically re-pins the previously deployed tag.
+#
+# Required repo secrets: VPS_HOST, VPS_USER, VPS_SSH_KEY, VPS_SSH_KNOWN_HOSTS
+# Required repo variable: DEPLOY_DIR (absolute path of the checkout on the VPS)
+name: deploy
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: "Image tag to deploy"
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Image tag to deploy (use a previous tag to roll back)"
+        required: true
+        type: string
+
+# Never let two deploys race the same box. Do NOT cancel in progress — a half-applied
+# migration is worse than a queued deploy.
+concurrency:
+  group: deploy-vps
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: read
+  id-token: write # cosign verification
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      TAG: ${{ inputs.tag }}
+      OWNER: ${{ github.repository_owner }}
+      DEPLOY_DIR: ${{ vars.DEPLOY_DIR }}
+      COMPONENTS: >-
+        wa-chat-bot mcp-hub ai-agents ai-gateway-go sync-engine-go
+        search-crawl-go platform-nest platform-ui
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      # Refuse to deploy anything that isn't the artifact our own release workflow signed.
+      # This is the step that makes the WS10 supply-chain work actually load-bearing.
+      - name: Verify image signatures
+        run: |
+          set -euo pipefail
+          for c in $COMPONENTS; do
+            img="ghcr.io/${OWNER}/gaiada-${c}:${TAG}"
+            echo "::group::verify $img"
+            cosign verify "$img" \
+              --certificate-identity-regexp "https://github.com/${OWNER}/.+/.github/workflows/release.yml@.+" \
+              --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+              > /dev/null
+            echo "OK $img"
+            echo "::endgroup::"
+          done
+
+      - name: Set up SSH
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          # Pinned host key — never StrictHostKeyChecking=no on a deploy path.
+          printf '%s\n' "${{ secrets.VPS_SSH_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+          cat >> ~/.ssh/config <<EOF
+          Host vps
+            HostName ${{ secrets.VPS_HOST }}
+            User ${{ secrets.VPS_USER }}
+            IdentityFile ~/.ssh/id_deploy
+            IdentitiesOnly yes
+          EOF
+          chmod 600 ~/.ssh/config
+
+      # Ship compose + scripts only. The VPS keeps its own .env (secrets never leave the box)
+      # and never needs application source, since it no longer builds.
+      - name: Sync compose files and scripts
+        run: |
+          set -euo pipefail
+          ssh vps "mkdir -p '${DEPLOY_DIR}/infra/compose' '${DEPLOY_DIR}/infra/scripts' '${DEPLOY_DIR}/infra/observability'"
+          scp infra/compose/*.yml vps:"${DEPLOY_DIR}/infra/compose/"
+          scp infra/scripts/*.sh vps:"${DEPLOY_DIR}/infra/scripts/"
+          rsync -az -e ssh infra/observability/ vps:"${DEPLOY_DIR}/infra/observability/"
+          ssh vps "chmod +x '${DEPLOY_DIR}/infra/scripts/'*.sh"
+
+      - name: Record currently deployed tag
+        id: prev
+        run: |
+          set -euo pipefail
+          prev="$(ssh vps "cat '${DEPLOY_DIR}/.deployed-tag' 2>/dev/null || true")"
+          echo "tag=${prev}" >> "$GITHUB_OUTPUT"
+          echo "Previously deployed: ${prev:-<none>}"
+
+      - name: Authenticate the VPS to GHCR
+        run: |
+          set -euo pipefail
+          # Short-lived job token — no long-lived registry PAT is stored on the box.
+          echo '${{ secrets.GITHUB_TOKEN }}' \
+            | ssh vps "docker login ghcr.io -u '${{ github.actor }}' --password-stdin"
+
+      - name: Backup databases (gate for migrations)
+        run: ssh vps "cd '${DEPLOY_DIR}' && ./infra/scripts/backup.sh"
+
+      - name: Pull images
+        run: |
+          set -euo pipefail
+          ssh vps "cd '${DEPLOY_DIR}/infra/compose' && GAIADA_TAG='${TAG}' GHCR_OWNER='${OWNER}' \
+            docker compose -f docker-compose.vps.yml pull"
+
+      # Migrations run from the newly pulled platform image, as platform_owner
+      # (MIGRATE_DATABASE_URL), before any service starts on the new schema.
+      - name: Run migrations
+        run: |
+          set -euo pipefail
+          ssh vps "cd '${DEPLOY_DIR}/infra/compose' && GAIADA_TAG='${TAG}' GHCR_OWNER='${OWNER}' \
+            docker compose -f docker-compose.vps.yml run --rm --no-deps platform node dist/db/migrate.js"
+
+      - name: Start services
+        run: |
+          set -euo pipefail
+          ssh vps "cd '${DEPLOY_DIR}/infra/compose' && GAIADA_TAG='${TAG}' GHCR_OWNER='${OWNER}' \
+            docker compose -f docker-compose.vps.yml up -d --no-build --remove-orphans"
+
+      - name: Wait for health
+        id: health
+        run: |
+          set -euo pipefail
+          ssh vps "cd '${DEPLOY_DIR}/infra/compose' && GAIADA_TAG='${TAG}' GHCR_OWNER='${OWNER}' bash -s" <<'REMOTE'
+          set -euo pipefail
+          C="docker compose -f docker-compose.vps.yml"
+          for i in $(seq 1 60); do
+            # Any container that declares a healthcheck and is not yet healthy, or has exited.
+            bad="$($C ps --format '{{.Service}} {{.State}} {{.Health}}' \
+                   | awk '$2!="running" || ($3!="" && $3!="healthy") {print $1}')"
+            if [ -z "$bad" ]; then echo "all services healthy"; exit 0; fi
+            echo "waiting on: $(echo $bad | tr '\n' ' ')"
+            sleep 5
+          done
+          echo "TIMED OUT waiting for: $bad"
+          $C ps
+          exit 1
+          REMOTE
+
+      - name: Record deployed tag
+        run: ssh vps "echo '${TAG}' > '${DEPLOY_DIR}/.deployed-tag'"
+
+      # Automatic rollback: re-pin the previous tag. Images are already on the box,
+      # so this is a container restart, not a rebuild. Schema is NOT rolled back —
+      # migrations are forward-only by design; the backup above is the escape hatch.
+      - name: Roll back on failure
+        if: failure() && steps.prev.outputs.tag != ''
+        run: |
+          set -euo pipefail
+          echo "::error::Deploy of ${TAG} failed — rolling back to ${{ steps.prev.outputs.tag }}"
+          ssh vps "cd '${DEPLOY_DIR}/infra/compose' && GAIADA_TAG='${{ steps.prev.outputs.tag }}' GHCR_OWNER='${OWNER}' \
+            docker compose -f docker-compose.vps.yml up -d --no-build --remove-orphans"
+          echo "::warning::Rolled back to ${{ steps.prev.outputs.tag }}. Schema was NOT reverted — check migrations."
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### Deploy \`${TAG}\`"
+            echo ""
+            echo "- Previous tag: \`${{ steps.prev.outputs.tag || 'none' }}\`"
+            echo "- Result: **${{ job.status }}**"
+          } >> "$GITHUB_STEP_SUMMARY"

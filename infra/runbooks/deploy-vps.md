@@ -6,12 +6,20 @@ idle `sync-central` (waits on a real second site). Only WAHA's dashboard, Keyclo
 console (both localhost-bound), and the UI (`:3005`) are reachable; everything else is
 box-internal.
 
+> **The VPS no longer builds anything.** Every first-party service is pinned to a signed
+> GHCR image (`GAIADA_TAG`), and routine deploys are one command — `git push --tags` — run
+> by `.github/workflows/deploy.yml`. See `../../docs/blueprints/deployment-strategy.md`.
+> What follows is the **one-time bootstrap** and the **manual/break-glass** path.
+
 ## Prerequisites
 
 - Ubuntu/Debian VPS with Docker + the compose plugin (`curl -fsSL https://get.docker.com | sh`).
-- The `gaiada-system` folder on the box (git clone or rsync).
+- The `gaiada-system` folder on the box — but only `infra/` is needed now; CI rsyncs compose
+  files and scripts on every deploy. No application source, no Go/Node toolchain.
 - Nothing needs to be publicly reachable. Telegram uses outbound long-polling; WAHA's
   dashboard binds to localhost (reach it with `ssh -L 3000:localhost:3000 user@vps`).
+- `docker login ghcr.io` works on the box (CI re-authenticates per deploy with a
+  short-lived job token; images are private because the repo is private).
 
 ## First deploy
 
@@ -20,9 +28,21 @@ cd gaiada-system/infra/compose
 cp .env.example .env            # fill in: openssl rand -hex 16 for every token/password
                                 # (UI_SESSION_SECRET is REQUIRED — compose aborts if it's blank)
 cp groups.example.yaml groups.yaml   # edit once you know the real group ids
-docker compose -f docker-compose.vps.yml up -d --build
-docker compose -f docker-compose.vps.yml ps    # everything Up?
+
+export GAIADA_TAG=v0.6.0        # the release you want; must exist in GHCR
+docker compose -f docker-compose.vps.yml pull
+docker compose -f docker-compose.vps.yml run --rm --no-deps platform node dist/db/migrate.js
+docker compose -f docker-compose.vps.yml up -d --no-build
+docker compose -f docker-compose.vps.yml ps    # everything Up + healthy?
 docker compose -f docker-compose.vps.yml logs -f bot   # watch it come up
+```
+
+To build from your working tree instead (local dev, or a box with no registry access),
+layer the build override — this is the ONLY supported way to compile from source:
+
+```bash
+docker compose -f docker-compose.vps.yml -f docker-compose.local.yml \
+               -f docker-compose.build.yml up -d --build
 ```
 
 Keycloak imports the `gaiada` realm from `keycloak/gaiada-realm.json` on first boot, but the
@@ -38,9 +58,29 @@ Then per surface:
 
 ## Update to a new version
 
+**Normal path — one point, from your laptop:**
+
 ```bash
-cd gaiada-system && git pull
-cd infra/compose && docker compose -f docker-compose.vps.yml up -d --build
+git tag v0.6.1 && git push --tags
+```
+
+That builds + signs every image, then `deploy.yml` backs up the databases, pulls, migrates,
+starts, and health-checks the box. Watch it in the Actions tab. Nothing to do on the VPS.
+
+**Rollback:** re-run the `deploy` workflow with the previous tag (Actions → deploy → Run
+workflow). Images are already on the box, so this is a container restart, not a rebuild.
+Schema is *not* reverted — migrations are forward-only; the pre-deploy backup is the
+escape hatch.
+
+**Break-glass (CI unavailable), on the box:**
+
+```bash
+cd gaiada-system/infra/compose
+export GAIADA_TAG=v0.6.1
+../scripts/backup.sh
+docker compose -f docker-compose.vps.yml pull
+docker compose -f docker-compose.vps.yml run --rm --no-deps platform node dist/db/migrate.js
+docker compose -f docker-compose.vps.yml up -d --no-build
 ```
 
 ## Backups (nightly)
