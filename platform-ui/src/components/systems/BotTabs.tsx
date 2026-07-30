@@ -12,10 +12,11 @@ import "./systems.css";
 // Inactive tabs are unmounted (not just CSS-hidden): this is what actually
 // stops ChatsTab/LogsTab's polling when their tab isn't selected — there is
 // no separate "is tab active" flag to keep in sync with the DOM.
-export type BotTabKey = "connect" | "chats" | "groups" | "logs" | "config";
+export type BotTabKey = "connect" | "controls" | "chats" | "groups" | "logs" | "config";
 
 const TABS: { key: BotTabKey; label: string }[] = [
   { key: "connect", label: "Connect" },
+  { key: "controls", label: "Controls" },
   { key: "chats", label: "Chats" },
   { key: "groups", label: "Groups" },
   { key: "logs", label: "Logs" },

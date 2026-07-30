@@ -14,9 +14,10 @@ import { WhatsAppConnect } from "@/components/systems/WhatsAppConnect";
 import { GroupRegistry, type BotGroupsSnapshot } from "@/components/systems/GroupRegistry";
 import { ChatsTab } from "@/components/systems/ChatsTab";
 import { LogsTab } from "@/components/systems/LogsTab";
+import { ControlsTab } from "@/components/systems/ControlsTab";
 import { BotTabs } from "@/components/systems/BotTabs";
 import { updateBotConfig } from "./actions";
-import { updateBotGroups } from "./group-actions";
+import { updateBotGroups, updateIgnoredGroups } from "./group-actions";
 import { startBotSession, stopBotSession, restartBotSession, logoutBotSession } from "./session-actions";
 
 // Server-side load for the Group registry surface (A6, doc §2.3/2.4). Fails
@@ -88,8 +89,16 @@ export default async function BotSystemPage() {
               logoutAction={logoutBotSession}
             />
           }
+          controls={<ControlsTab elevated={elevated} />}
           chats={<ChatsTab elevated={elevated} />}
-          groups={<GroupRegistry elevated={elevated} initial={groups} action={updateBotGroups} />}
+          groups={
+            <GroupRegistry
+              elevated={elevated}
+              initial={groups}
+              action={updateBotGroups}
+              ignoreAction={updateIgnoredGroups}
+            />
+          }
           logs={<LogsTab elevated={elevated} />}
           config={
             <>

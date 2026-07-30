@@ -19,7 +19,7 @@ function json(body: ChatsPoll, status = 200) {
   return NextResponse.json(body, { status, headers: { "Cache-Control": "no-store" } });
 }
 
-export async function GET() {
+export async function GET(req: Request) {
   const userId = await getSessionUserId();
   if (!userId) return json({ chats: null, error: "Session expired — sign in again." }, 401);
 
@@ -30,8 +30,15 @@ export async function GET() {
     return json({ chats: null, error: "Chat viewer is limited to superadmins/owners." }, 403);
   }
 
+  // `q`/`kind` are additive (Chats-tab search box + group/DM filter) — forwarded verbatim,
+  // omitted when absent so an unfiltered request looks exactly as it did before.
+  const url = new URL(req.url);
+  const q = url.searchParams.get("q") ?? undefined;
+  const kindRaw = url.searchParams.get("kind");
+  const kind = kindRaw === "group" || kindRaw === "dm" ? kindRaw : undefined;
+
   try {
-    const snapshot = await getBotChats(userId);
+    const snapshot = await getBotChats(userId, { q, kind });
     return json({ chats: snapshot?.chats ?? [] });
   } catch (e) {
     return json({ chats: null, error: e instanceof PlatformError ? e.message : "bot admin unreachable" });

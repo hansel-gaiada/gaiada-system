@@ -41,6 +41,13 @@ export function ConfigField({
     );
   }
 
+  // Field always renders its own leading blank option (value="") ahead of whatever list it's
+  // given, with `placeholder` as that option's label. When the source already supplied its own
+  // blank-value entry (e.g. the bot's explicit "None" for clearing managementGroupId), use its
+  // label as that placeholder and drop it from the list instead of stacking two empty rows.
+  const blankOption = field.optionItems?.find((o) => o.value === "");
+  const optionItems = blankOption ? field.optionItems?.filter((o) => o.value !== "") : field.optionItems;
+
   return (
     <form action={formAction} className="sys-config-field">
       <input type="hidden" name="kind" value={field.kind} />
@@ -50,6 +57,8 @@ export function ConfigField({
         type={FIELD_TYPE[field.kind]}
         defaultValue={field.value}
         options={field.options}
+        optionItems={optionItems}
+        placeholder={blankOption?.label}
       />
       <Button type="submit" size="sm" disabled={pending}>
         {pending ? "Saving…" : "Save"}

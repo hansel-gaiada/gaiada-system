@@ -42,3 +42,37 @@ export async function updateBotGroups(groups: BotGroupConfig[]): Promise<GroupsA
   revalidatePath("/systems/bot");
   return { ok: true };
 }
+
+// Agent 4 addition: the ignore-list mutation for GroupRegistry's "Ignored groups" section
+// (`PUT /admin/groups/ignored` on the bot, proxied at platform-nest's
+// `api/admin/bot/groups/ignored`). Full-replace by id list — same convention as
+// `updateBotGroups` above (isElevated re-check is cosmetic/defense-in-depth; the bot/nest
+// enforce it for real), kept as a separate action because it's a separate payload/endpoint,
+// not a restructure of the existing one.
+export async function updateIgnoredGroups(ids: string[]): Promise<GroupsActionState> {
+  const userId = await getSessionUserId();
+  if (!userId) return { ok: false, error: "Session expired — sign in again." };
+
+  const me = await getMe(userId).catch(() => null);
+  if (!me || !isElevated(me)) {
+    return { ok: false, error: "Group registry edits are limited to superadmins/owners." };
+  }
+
+  try {
+    await platformFetch("/api/admin/bot/groups/ignored", userId, {
+      method: "PUT",
+      body: JSON.stringify({ ids }),
+    });
+  } catch (e) {
+    if (e instanceof PlatformError) {
+      if (e.status === 502 || e.status === 404) {
+        return { ok: false, error: "The bot isn't reachable right now — try again shortly." };
+      }
+      return { ok: false, error: e.message, field: e.field };
+    }
+    throw e;
+  }
+
+  revalidatePath("/systems/bot");
+  return { ok: true };
+}

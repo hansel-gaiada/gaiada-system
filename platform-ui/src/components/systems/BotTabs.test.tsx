@@ -22,6 +22,7 @@ describe("BotTabs", () => {
     render(
       <BotTabs
         connect={<div>connect-content</div>}
+        controls={<div>controls-content</div>}
         chats={<div>chats-content</div>}
         groups={<div>groups-content</div>}
         logs={<div>logs-content</div>}
@@ -38,6 +39,7 @@ describe("BotTabs", () => {
     render(
       <BotTabs
         connect={<div>connect-content</div>}
+        controls={<div>controls-content</div>}
         chats={<div>chats-content</div>}
         groups={<div>groups-content</div>}
         logs={<div>logs-content</div>}
@@ -53,6 +55,7 @@ describe("BotTabs", () => {
     render(
       <BotTabs
         connect={<div>connect-content</div>}
+        controls={<div>controls-content</div>}
         chats={<div>chats-content</div>}
         groups={<div>groups-content</div>}
         logs={<div>logs-content</div>}
@@ -62,10 +65,27 @@ describe("BotTabs", () => {
     expect(screen.getByText("connect-content")).toBeInTheDocument();
   });
 
+  it("honors ?tab=controls for the Controls tab", () => {
+    searchParams = new URLSearchParams("tab=controls");
+    render(
+      <BotTabs
+        connect={<div>connect-content</div>}
+        controls={<div>controls-content</div>}
+        chats={<div>chats-content</div>}
+        groups={<div>groups-content</div>}
+        logs={<div>logs-content</div>}
+        config={<div>config-content</div>}
+      />,
+    );
+    expect(screen.getByText("controls-content")).toBeInTheDocument();
+    expect(screen.queryByText("connect-content")).not.toBeInTheDocument();
+  });
+
   it("clicking a tab unmounts the previous content and syncs the URL query", () => {
     render(
       <BotTabs
         connect={<div>connect-content</div>}
+        controls={<div>controls-content</div>}
         chats={<div>chats-content</div>}
         groups={<div>groups-content</div>}
         logs={<div>logs-content</div>}

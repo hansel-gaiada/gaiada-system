@@ -2,8 +2,11 @@
 import { useCallback, useEffect, useState } from "react";
 import { Card, Button, Toast, StatusBadge, Eyebrow } from "@/components/ui";
 import { EmptyNote } from "./EmptyNote";
+import { Paginator, usePagination } from "./Paginator";
+import { useDebouncedValue } from "./useDebouncedValue";
 import { formatRelativeTime } from "@/lib/timeFormat";
 import "./systems.css";
+import "@/components/forms/forms.css";
 
 // Logs tab: session-events timeline + the action-audit table (frozen nest
 // contract `/api/admin/bot/session/events` + `/api/admin/bot/actions/audit`),
@@ -11,7 +14,12 @@ import "./systems.css";
 // mount (elevated-gated) with a manual Refresh button — these are
 // low-churn diagnostic logs, not something that needs a standing poll like
 // the Chats tab's live thread.
+//
+// Both lists are client-side searched + paginated (30/page) below: the fetch above already
+// returns the full set in one response, so this is purely a "what's rendered" concern — no new
+// request, no backend change.
 const HIGHLIGHT_STATUSES = new Set(["FAILED", "STOPPED"]);
+const PAGE_SIZE = 30;
 
 interface BotSessionEvent {
   status: string;
@@ -63,6 +71,27 @@ export function LogsTab({ elevated }: { elevated: boolean }) {
     fetchAudit();
   }, [elevated, fetchEvents, fetchAudit]);
 
+  // -- Session events: search + pagination. --
+  const [eventsQueryInput, setEventsQueryInput] = useState("");
+  const eventsQuery = useDebouncedValue(eventsQueryInput, 300);
+  const trimmedEventsQuery = eventsQuery.trim().toLowerCase();
+  // Contract returns oldest-first; the UI shows newest-first.
+  const newestFirst = events ? [...events].reverse() : null;
+  const filteredEvents = trimmedEventsQuery
+    ? (newestFirst ?? []).filter((ev) => ev.status.toLowerCase().includes(trimmedEventsQuery))
+    : (newestFirst ?? []);
+  const eventsPaging = usePagination(filteredEvents, PAGE_SIZE, trimmedEventsQuery);
+
+  // -- Action audit: search + pagination. --
+  const [auditQueryInput, setAuditQueryInput] = useState("");
+  const auditQuery = useDebouncedValue(auditQueryInput, 300);
+  const trimmedAuditQuery = auditQuery.trim().toLowerCase();
+  const auditCols = audit ? auditColumns(audit.entries) : [];
+  const filteredAuditEntries = trimmedAuditQuery
+    ? (audit?.entries ?? []).filter((row) => rowSearchText(row, auditCols).includes(trimmedAuditQuery))
+    : (audit?.entries ?? []);
+  const auditPaging = usePagination(filteredAuditEntries, PAGE_SIZE, trimmedAuditQuery);
+
   if (!elevated) {
     return (
       <Card title="Logs">
@@ -76,10 +105,6 @@ export function LogsTab({ elevated }: { elevated: boolean }) {
     fetchAudit();
   }
 
-  // Contract returns oldest-first; the UI shows newest-first.
-  const newestFirst = events ? [...events].reverse() : null;
-  const cols = audit ? auditColumns(audit.entries) : [];
-
   return (
     <>
       <Card
@@ -91,53 +116,132 @@ export function LogsTab({ elevated }: { elevated: boolean }) {
         }
       >
         {eventsError && <Toast message={eventsError} />}
-        {newestFirst == null ? (
+        {newestFirst == null && eventsError ? (
+          // Same trap as the Chats thread: a failed fetch leaves the list null, and without
+          // this branch the panel claims to be loading forever.
+          <EmptyNote>Session events couldn&apos;t be loaded — see the error above, then Refresh.</EmptyNote>
+        ) : newestFirst == null ? (
           <EmptyNote>Loading session events…</EmptyNote>
         ) : newestFirst.length === 0 ? (
           <EmptyNote>No session events recorded yet.</EmptyNote>
         ) : (
-          <ul className="bot-event-list">
-            {newestFirst.map((ev, i) => (
-              <li
-                key={`${ev.ts}-${i}`}
-                className={`bot-event-list__item${HIGHLIGHT_STATUSES.has(ev.status) ? " bot-event-list__item--alert" : ""}`}
-              >
-                <StatusBadge label={ev.status} />
-                <span className="bot-event-list__time">{formatRelativeTime(ev.ts)}</span>
-              </li>
-            ))}
-          </ul>
+          <>
+            <div className="sys-searchable__toolbar">
+              <label className="sys-searchable__label">
+                <Eyebrow style={{ fontSize: 10, opacity: 0.6 }}>Search session events</Eyebrow>
+                <input
+                  type="search"
+                  className="lux-field__control"
+                  aria-label="Search session events"
+                  placeholder="Filter by status…"
+                  value={eventsQueryInput}
+                  onChange={(e) => setEventsQueryInput(e.target.value)}
+                />
+              </label>
+              <span className="sys-searchable__count">
+                {trimmedEventsQuery ? `${filteredEvents.length} of ${newestFirst.length}` : `${newestFirst.length}`}
+              </span>
+            </div>
+            {filteredEvents.length === 0 ? (
+              <EmptyNote>No session events match &ldquo;{eventsQuery.trim()}&rdquo;.</EmptyNote>
+            ) : (
+              <>
+                <ul className="bot-event-list">
+                  {eventsPaging.pageItems.map((ev, i) => (
+                    <li
+                      key={`${ev.ts}-${i}`}
+                      className={`bot-event-list__item${HIGHLIGHT_STATUSES.has(ev.status) ? " bot-event-list__item--alert" : ""}`}
+                    >
+                      <StatusBadge label={ev.status} />
+                      <span className="bot-event-list__time">{formatRelativeTime(ev.ts)}</span>
+                    </li>
+                  ))}
+                </ul>
+                <Paginator
+                  page={eventsPaging.page}
+                  pageCount={eventsPaging.pageCount}
+                  rangeStart={eventsPaging.rangeStart}
+                  rangeEnd={eventsPaging.rangeEnd}
+                  total={eventsPaging.total}
+                  onPageChange={eventsPaging.setPage}
+                />
+              </>
+            )}
+          </>
         )}
       </Card>
 
       <div style={{ marginTop: 20 }}>
         <Card title="Action audit">
           {auditError && <Toast message={auditError} />}
-          {audit == null ? (
+          {audit == null && auditError ? (
+            <EmptyNote>The action audit couldn&apos;t be loaded — see the error above, then Refresh.</EmptyNote>
+          ) : audit == null ? (
             <EmptyNote>Loading the action audit…</EmptyNote>
           ) : !audit.enabled ? (
             <EmptyNote>Action audit logging isn&apos;t enabled for this bot.</EmptyNote>
           ) : audit.entries.length === 0 ? (
-            <EmptyNote>No audited actions yet.</EmptyNote>
+            /* An empty audit is the normal state, not a fault — say what would fill it so it
+               doesn't read as a broken panel. */
+            <EmptyNote>
+              No audited actions yet. Entries appear when someone asks the bot to perform an
+              action (adding or removing a group member, promoting an admin, renaming a group) —
+              including attempts that are denied or need step-up. Ordinary messages and digests
+              aren&apos;t audited here.
+            </EmptyNote>
           ) : (
-            <div className="lux-table" style={{ ["--lux-tcols" as string]: cols.map(() => "1fr").join(" ") }}>
-              <div className="lux-table__head">
-                {cols.map((c) => (
-                  <Eyebrow key={c} style={{ fontSize: 10, opacity: 0.5 }}>
-                    {c}
-                  </Eyebrow>
-                ))}
+            <>
+              <div className="sys-searchable__toolbar">
+                <label className="sys-searchable__label">
+                  <Eyebrow style={{ fontSize: 10, opacity: 0.6 }}>Search action audit</Eyebrow>
+                  <input
+                    type="search"
+                    className="lux-field__control"
+                    aria-label="Search action audit"
+                    placeholder="Filter across every column…"
+                    value={auditQueryInput}
+                    onChange={(e) => setAuditQueryInput(e.target.value)}
+                  />
+                </label>
+                <span className="sys-searchable__count">
+                  {trimmedAuditQuery
+                    ? `${filteredAuditEntries.length} of ${audit.entries.length}`
+                    : `${audit.entries.length}`}
+                </span>
               </div>
-              {audit.entries.map((row, i) => (
-                <div className="lux-table__row" key={i}>
-                  {cols.map((c) => (
-                    <span key={c} style={{ font: "400 13px var(--font-body)" }}>
-                      {stringifyCell(row[c])}
-                    </span>
-                  ))}
-                </div>
-              ))}
-            </div>
+              {filteredAuditEntries.length === 0 ? (
+                <EmptyNote>No audit entries match &ldquo;{auditQuery.trim()}&rdquo;.</EmptyNote>
+              ) : (
+                <>
+                  <div className="lux-table" style={{ ["--lux-tcols" as string]: auditCols.map(() => "1fr").join(" ") }}>
+                    <div className="lux-table__head">
+                      {auditCols.map((c) => (
+                        <Eyebrow key={c} style={{ fontSize: 10, opacity: 0.5 }}>
+                          {c}
+                        </Eyebrow>
+                      ))}
+                    </div>
+                    {auditPaging.pageItems.map((row, i) => (
+                      <div className="lux-table__row" key={i}>
+                        {auditCols.map((c) => (
+                          <span key={c} style={{ font: "400 13px var(--font-body)" }}>
+                            {stringifyCell(row[c])}
+                          </span>
+                        ))}
+                      </div>
+                    ))}
+                  </div>
+                  <Paginator
+                    page={auditPaging.page}
+                    pageCount={auditPaging.pageCount}
+                    rangeStart={auditPaging.rangeStart}
+                    rangeEnd={auditPaging.rangeEnd}
+                    total={auditPaging.total}
+                    onPageChange={auditPaging.setPage}
+                  />
+                </>
+              )}
+            </>
           )}
         </Card>
       </div>
@@ -162,4 +266,13 @@ function stringifyCell(v: unknown): string {
   } catch {
     return String(v);
   }
+}
+
+// Full-row haystack for the action-audit search box — every column's stringified value, lowercased
+// and joined, so a search for a name/action/id matches regardless of which column it lives in.
+function rowSearchText(row: BotActionAuditEntry, cols: string[]): string {
+  return cols
+    .map((c) => stringifyCell(row[c]))
+    .join(" ")
+    .toLowerCase();
 }

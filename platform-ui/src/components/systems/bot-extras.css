@@ -1,0 +1,69 @@
+/* Agent 4 lane (Groups ignore + Chats depth) — new CSS only, kept out of systems.css on purpose
+   (that file belongs to the Controls-tab build this same round). Matches the existing `.bot-*`/
+   `.sys-*`/`.lux-*` hairline vocabulary: 0 radius, no shadow, hairline borders, opacity hovers. */
+
+/* Groups tab — monitored vs ignored explainer + the ignored-list section. */
+.groups-explain {
+  margin: 0 0 16px;
+  font: 400 13px/1.55 var(--font-body);
+  color: var(--erp-ink-50);
+}
+.groups-explain strong { color: var(--text-primary); }
+
+.groups-ignored__head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.groups-ignored-list { margin: 8px 0 0; padding: 0; list-style: none; display: flex; flex-direction: column; }
+.groups-ignored-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 0.5px solid var(--erp-hairline-soft);
+  gap: 12px;
+}
+.groups-ignored-row:last-child { border-bottom: none; }
+.groups-ignored-row__name { font: 400 13px var(--font-body); color: var(--text-primary); }
+
+/* Discovered-row action pair (Add / Ignore) — both one-click, opposite intents. */
+.groups-discovered-row__actions { display: flex; align-items: center; gap: 6px; }
+
+/* Chats tab — search/filter toolbar. Two clearly separate groups so "search chats" (filters the
+   left-pane list) is never mistaken for "search messages" (a cross-chat content search whose
+   results are a distinct list, not the chat list). */
+.bot-chats-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px;
+  margin-bottom: 14px;
+  padding-bottom: 14px;
+  border-bottom: 0.5px solid var(--erp-hairline);
+}
+.bot-search-group { display: flex; flex-direction: column; gap: 6px; flex: 1 1 260px; min-width: 220px; }
+.bot-search-group__row { display: flex; gap: 10px; align-items: center; }
+.bot-search-group__row .lux-field__control { flex: 1 1 auto; }
+.bot-search-group--messages { flex-basis: 320px; }
+
+.bot-message-search-results { margin-bottom: 16px; }
+.bot-search-result-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; border: 0.5px solid var(--erp-hairline); max-height: 260px; overflow-y: auto; }
+.bot-search-result {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  width: 100%;
+  text-align: left;
+  padding: 10px 14px;
+  background: none;
+  border: none;
+  border-bottom: 0.5px solid var(--erp-hairline-soft);
+  cursor: pointer;
+  font-family: var(--font-body);
+  transition: background 0.15s ease;
+}
+.bot-search-result:last-child { border-bottom: none; }
+.bot-search-result:hover { background: rgba(110, 90, 67, 0.05); }
+.bot-search-result__chat { font: 700 12px var(--font-body); color: var(--erp-accent); }
+.bot-search-result__meta { font: 400 11px var(--font-body); color: var(--erp-ink-50); }
+.bot-search-result__text { font: 400 13px/1.4 var(--font-body); color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Thread "load older" control — sits above the oldest visible bubble, hidden once the response's
+   `hasMore` says there's nothing further back. */
+.bot-load-older { display: flex; justify-content: center; padding-bottom: 12px; }

@@ -13,6 +13,30 @@
 .sys-status-card__uptime { font: 400 13px var(--font-body); color: var(--erp-ink-50); }
 .sys-status-card__counters { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; margin-top: 16px; }
 
+/* Audit/registry filter chips. Links, not buttons — a filtered console view stays server-rendered
+   and shareable, and the row degrades to plain navigation without JS. */
+.sys-filter-row { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.sys-filter { display: inline-flex; align-items: center; padding: 5px 10px; font: 600 11px var(--font-body); letter-spacing: 0.04em; text-transform: uppercase; color: var(--erp-ink-50); border: 0.5px solid var(--erp-hairline); text-decoration: none; transition: color 0.15s ease, border-color 0.15s ease; }
+.sys-filter:hover { color: var(--text-primary); }
+.sys-filter--active { color: var(--erp-accent); border-color: var(--erp-accent); }
+
+/* Definition-style block used for policy rules and scope matrices. */
+.sys-scope-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; }
+.sys-scope-list__item { padding: 12px 0; border-bottom: 0.5px solid var(--erp-hairline-soft); }
+.sys-scope-list__item:last-child { border-bottom: none; }
+.sys-scope-list__name { font: 700 13px var(--font-body); color: var(--text-primary); }
+.sys-scope-list__tools { margin: 6px 0 0; font: 400 12px/1.6 var(--font-body); color: var(--erp-ink-50); word-break: break-word; }
+
+/* Warning band — a real operational problem the operator must act on (bridge backlog, dead
+   letters). Reuses the bot registry-warning treatment so the whole console speaks one language. */
+.sys-alert-band { margin: 0 0 16px; padding: 12px 14px; border: 0.5px solid rgba(181, 98, 47, 0.45); background: rgba(181, 98, 47, 0.07); font: 400 13px/1.55 var(--font-body); color: var(--text-primary); }
+
+/* One editable config row + its revert affordance, kept on one line so the override state reads as
+   belonging to the field rather than floating beside it. */
+.sys-config-row { display: flex; align-items: flex-end; flex-wrap: wrap; gap: 10px; margin-bottom: 14px; }
+.sys-config-row:last-child { margin-bottom: 0; }
+.sys-config-row .sys-config-field { margin-bottom: 0; }
+
 .sys-config-field { display: flex; align-items: flex-end; gap: 10px; margin-bottom: 14px; }
 .sys-config-field:last-child { margin-bottom: 0; }
 
@@ -61,3 +85,31 @@
 .bot-event-list__item:last-child { border-bottom: none; }
 .bot-event-list__item--alert { background: rgba(181, 98, 47, 0.06); }
 .bot-event-list__time { font: 400 12px var(--font-body); color: var(--erp-ink-50); }
+
+/* Shared client-side pagination control (Paginator.tsx) — quiet, text-first, no pager-of-buttons.
+   Renders nothing when there's only one page (see the component), so it never appears as a
+   permanent fixture under a short list. */
+.lux-paginator { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; margin-top: 14px; padding-top: 14px; border-top: 0.5px solid var(--erp-hairline-soft); }
+.lux-paginator__range { font: 400 12px var(--font-body); color: var(--erp-ink-50); }
+.lux-paginator__controls { display: flex; align-items: center; gap: 12px; }
+.lux-paginator__page { font: 700 11px var(--font-body); letter-spacing: 0.04em; color: var(--text-primary); }
+.lux-paginator__btn { background: none; border: 0.5px solid var(--erp-hairline); color: var(--text-primary); font: 600 11px var(--font-body); letter-spacing: 0.06em; text-transform: uppercase; padding: 6px 12px; cursor: pointer; transition: border-color 0.15s ease, opacity 0.15s ease; }
+.lux-paginator__btn:hover:not(:disabled) { border-color: var(--erp-accent); color: var(--erp-accent); }
+.lux-paginator__btn:disabled { opacity: 0.35; cursor: default; }
+
+/* Shared search+paginate list wrapper (SearchableTable.tsx) — the toolbar sits above the table it
+   filters, count on the right so "search matched 4 of 40" reads as one fact, not two. */
+.sys-searchable__toolbar { display: flex; align-items: flex-end; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 14px; }
+.sys-searchable__label { display: flex; flex-direction: column; gap: 6px; flex: 1 1 260px; min-width: 200px; }
+.sys-searchable__count { font: 400 12px var(--font-body); color: var(--erp-ink-50); white-space: nowrap; }
+
+/* Groups tab — mode-switch warning shown before the FIRST registry entry is saved (turning the
+   registry on stops ingestion for every group not listed). */
+.bot-registry-warning {
+  margin: 0 0 16px;
+  padding: 12px 14px;
+  border: 0.5px solid rgba(181, 98, 47, 0.45);
+  background: rgba(181, 98, 47, 0.07);
+  font: 400 13px/1.55 var(--font-body);
+  color: var(--text-primary);
+}
