@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { writeFileSync, mkdirSync } from "node:fs";
+import { writeFileSync, mkdirSync, rmSync } from "node:fs";
 import { config } from "./config";
-import { resetRegistryCache } from "./groups";
+import { resetRegistryCache, setIgnored, discoveredGroups } from "./groups";
 import { isTriggered, respond, handleInbound } from "./bot";
 import { setSelfJid, resetSessionState } from "./session-state";
 import { resetDedup } from "./safety/dedup";
@@ -90,6 +90,10 @@ describe("handleInbound with the group registry active", () => {
       "data/test-bot/groups.yaml",
       `groups:\n  - id: "listed@g.us"\n    name: Listed\n    optIn: true\n`,
     );
+    // Discovery + ignore-list persist next to the groups file; clear both so "first sighting"
+    // and ignore-state assertions aren't satisfied by a previous run's file.
+    rmSync("data/test-bot/discovered-groups.json", { force: true });
+    rmSync("data/test-bot/ignored-groups.json", { force: true });
     config.groupsFile = "data/test-bot/groups.yaml";
     resetRegistryCache();
   });
@@ -121,6 +125,55 @@ describe("handleInbound with the group registry active", () => {
     await handleInbound(gw, dup); // webhook redelivery
     expect(sent).toEqual(["pong"]); // replied exactly once
     expect(saved.length).toBe(2); // inbound + reply stored once
+  });
+
+  it("1a: an ignored LISTED group is dropped in registry mode — never stored, but still discovered", async () => {
+    setIgnored("listed@g.us", true);
+    await handleInbound(gw, msg({ chatId: "listed@g.us", text: "/ping" }));
+    expect(saved.length).toBe(0);
+    expect(sent.length).toBe(0);
+    // Still visible/un-ignorable: noteDiscovered() ran before the ignore gate.
+    expect(discoveredGroups().map((g) => g.id)).toContain("listed@g.us");
+  });
+
+  it("1a: un-ignoring restores normal (registry-gated) ingestion", async () => {
+    setIgnored("listed@g.us", true);
+    await handleInbound(gw, msg({ chatId: "listed@g.us", waMessageId: "a", text: "/ping" }));
+    expect(saved.length).toBe(0);
+
+    setIgnored("listed@g.us", false);
+    await handleInbound(gw, msg({ chatId: "listed@g.us", waMessageId: "b", text: "/ping" }));
+    expect(saved.length).toBe(2); // inbound + reply
+    expect(sent).toEqual(["pong"]);
+  });
+});
+
+describe("handleInbound with the ignore list, trial mode (no registry)", () => {
+  const sent: string[] = [];
+  const gw: WhatsAppGateway = { sendText: async (_c, t) => void sent.push(t) };
+
+  beforeEach(() => {
+    saved.length = 0;
+    sent.length = 0;
+    resetDedup();
+    mkdirSync("data/test-bot", { recursive: true });
+    rmSync("data/test-bot/ignored-groups.json", { force: true });
+    config.groupsFile = "data/test-bot/missing-registry.yaml"; // no file -> registry inactive
+    resetRegistryCache();
+  });
+
+  it("1a: an ignored group is dropped even with no registry (trial mode monitors everything else)", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    setIgnored("blocked@g.us", true);
+    await handleInbound(gw, msg({ chatId: "blocked@g.us", waMessageId: "trial-1", text: "/ping" }));
+    expect(saved.length).toBe(0);
+    expect(sent.length).toBe(0);
+
+    // A DIFFERENT (non-ignored) group is still ingested normally in trial mode.
+    await handleInbound(gw, msg({ chatId: "open@g.us", waMessageId: "trial-2", text: "/ping" }));
+    expect(saved.length).toBe(2);
+    expect(sent).toEqual(["pong"]);
+    warn.mockRestore();
   });
 });
 

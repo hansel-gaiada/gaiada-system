@@ -43,6 +43,27 @@ export const config = {
   // First-boot seed for the (now writable) groups file: if groupsFile is absent and this
   // exists, it's copied into place once at boot (A2 / design doc §2.6). Empty -> no seeding.
   groupsSeedFile: process.env.GROUPS_SEED_FILE ?? "",
+  // Where the digest DELIVERY TARGET is persisted. Deliberately NOT the group registry: writing
+  // it there used to create a registry entry, which flipped the bot out of trial mode into
+  // registry mode with zero monitored groups — silently stopping ingestion for every group.
+  // Empty -> derived as <dirname(groupsFile)>/digest-target.json.
+  digestTargetFile: process.env.DIGEST_TARGET_FILE ?? "",
+  // Where auto-discovery persists the groups the bot has seen but that aren't in the
+  // registry yet (so the ERP's "discovered groups" list survives a restart). Empty ->
+  // derived as <dirname(groupsFile)>/discovered-groups.json, i.e. it follows the groups
+  // registry onto the writable data volume without a second env var to keep in sync.
+  discoveredGroupsFile: process.env.DISCOVERED_GROUPS_FILE ?? "",
+  // Where the ignore list persists (1a: "monitor everything except these" — orthogonal to the
+  // registry mode). Empty -> derived as <dirname(groupsFile)>/ignored-groups.json, same
+  // co-location convention as discoveredGroupsFile.
+  ignoredGroupsFile: process.env.IGNORED_GROUPS_FILE ?? "",
+  // Digest run history (1b): last 50 runs, counts/status only — no message text, no digest
+  // body (keeps PII out of a long-lived file).
+  digestHistoryFile: process.env.DIGEST_HISTORY_FILE ?? "data/digest-history.json",
+  // Where the session-status timeline is persisted. WAHA only emits `session.status` on a
+  // CHANGE, so a long-lived WORKING session produces no events — without this file the Logs
+  // tab and /health go blank/"unknown" after every bot restart.
+  sessionEventsFile: process.env.SESSION_EVENTS_FILE ?? "data/session-events.json",
   // Where the scheduler persists last-run timestamps (gap-safe windows).
   scheduleStateFile: process.env.SCHEDULE_STATE_FILE ?? "data/schedule.json",
   // File store location (used when DATABASE_URL is unset).
@@ -101,6 +122,45 @@ export const config = {
   intentRoutingEnabled: (process.env.INTENT_ROUTING ?? "true").toLowerCase() !== "false",
   // Minimum model confidence to propose an action; below this we ask a clarifying question.
   intentConfidenceThreshold: Number(process.env.INTENT_CONFIDENCE ?? 0.7),
+  // Abuse/ban protection (2026-07-29 hardening). Per-(chatId,senderId) reply budget guarding
+  // the plain reply path (mentions/commands/Q&A) — mirrors executor.ts's "medium" action risk
+  // tier (capacity 8, refill 0.1/s = 6/min sustained) so a single sender's burst is bounded to
+  // 8 instant replies then throttled, without affecting other people mentioning the bot in the
+  // same busy group (budget is per-sender, not per-chat).
+  replyBudgetCapacity: Number(process.env.REPLY_BUDGET_CAPACITY ?? 8),
+  replyBudgetRefillPerSec: Number(process.env.REPLY_BUDGET_REFILL_PER_SEC ?? 0.1),
+  // Loop guard: minimum normalized-text length considered for burst/echo detection (short
+  // common phrases like "ok"/"yes" are extremely common between real humans and must never
+  // trip a loop heuristic). Burst = N-or-more identical-text inbound messages in one chat
+  // within the window; echo = inbound text matching one of the bot's own recent replies.
+  loopGuardMinTextLen: Number(process.env.LOOP_GUARD_MIN_TEXT_LEN ?? 24),
+  loopGuardBurstWindowMs: Number(process.env.LOOP_GUARD_BURST_WINDOW_MS ?? 15_000),
+  loopGuardBurstCount: Number(process.env.LOOP_GUARD_BURST_COUNT ?? 3),
+  loopGuardEchoWindowMs: Number(process.env.LOOP_GUARD_ECHO_WINDOW_MS ?? 120_000),
+  // Global outbound ceiling: last-resort brake across ALL chats/surfaces combined (distinct
+  // from the per-sender reply budget above). Generous enough for real daily volume (digests
+  // to ~a dozen groups twice a day + organic Q&A/action traffic) but bounded well below
+  // anything that could look like bulk/spam behavior to WhatsApp.
+  outboundCeilingPerMinCapacity: Number(process.env.OUTBOUND_CEILING_PER_MIN ?? 30),
+  outboundCeilingPerHourCapacity: Number(process.env.OUTBOUND_CEILING_PER_HOUR ?? 300),
+  // Global outbound halt: manual operator emergency-stop for ALL outbound sends (separate from
+  // the actions-only kill-switch above). Default off; an admin route to flip it at runtime is
+  // a follow-up for server.ts (Agent A) — see the hardening report.
+  outboundHaltDefault: (process.env.OUTBOUND_HALT ?? "false").toLowerCase() === "true",
+  // Durable inbound intake (WA operability hardening, Agent A): every normalized webhook
+  // event is written here BEFORE the webhook ACKs, so a crash after the ACK can never lose
+  // a message — a reconciler (boot + periodic) replays anything left "pending". FileStore
+  // fallback when DATABASE_URL is unset (same convention as messagesFile).
+  inboundEventsFile: process.env.INBOUND_EVENTS_FILE ?? "data/inbound-events.json",
+  // Periodic reconciler sweep interval (seconds) — mirrors mediaReconcileSeconds. Runs
+  // regardless of Redis (this path has no optional-queue mode; the store IS the durability
+  // guarantee, so it must never depend on Redis being up).
+  intakeReconcileSeconds: Number(process.env.INTAKE_RECONCILE_SECONDS ?? 120),
+  // A "pending" row must be at least this old before the periodic sweep retries it — avoids
+  // racing the normal inline processing of a row that is still legitimately in flight
+  // (e.g. an AI-gateway reply taking a few seconds). The boot reconciler ignores this (a
+  // fresh process start has no in-flight rows of its own to race against).
+  intakeReconcileMinAgeMs: Number(process.env.INTAKE_RECONCILE_MIN_AGE_MS ?? 60_000),
 };
 
 export const aiEnabled = config.geminiApiKey.length > 0;

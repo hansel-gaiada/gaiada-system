@@ -9,7 +9,7 @@
 // degrades to a status/qr result rather than throwing, so route handlers never need to
 // wrap these in try/catch.
 import { config } from "./config";
-import { setSelfJid } from "./session-state";
+import { setSelfJid, observeStatus } from "./session-state";
 
 export interface SessionStatus {
   session: string;
@@ -67,11 +67,19 @@ export async function getSessionStatus(): Promise<SessionStatus> {
   try {
     const res = await fetch(`${baseUrl()}/api/sessions/${encodeURIComponent(s)}`, { headers: headers(false) });
     if (!res.ok) {
-      return { session: s, status: res.status === 404 ? "STOPPED" : "unreachable", engine: null, me: null };
+      const status = res.status === 404 ? "STOPPED" : "unreachable";
+      observeStatus(status);
+      return { session: s, status, engine: null, me: null };
     }
     const data = await safeJson(res);
-    return { session: s, status: String(data?.status ?? "unknown"), engine: engineOf(data), me: meOf(data) };
+    const status = String(data?.status ?? "unknown");
+    // Feed every REST read into the timeline. WAHA's `session.status` webhook only fires on a
+    // CHANGE, so without this a session that was already WORKING before the bot booted is never
+    // recorded at all. De-duplicated inside observeStatus, so polling can't spam the ring.
+    observeStatus(status);
+    return { session: s, status, engine: engineOf(data), me: meOf(data) };
   } catch {
+    observeStatus("unreachable");
     return { session: s, status: "unreachable", engine: null, me: null };
   }
 }

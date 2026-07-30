@@ -46,6 +46,11 @@ describe("phase 1 end-to-end", () => {
     // and disable the backlog/stale guard (fixtures use fixed timestamps).
     config.dmReplyPolicy = "all";
     config.replyMaxAgeMs = 0;
+    // The store is mocked and scheduleStateFile is pinned below: this suite is meant to run on
+    // the FILE fallback. schedule-state switches to Postgres whenever config.databaseUrl is set,
+    // so leaving it ambient makes the suite pass or fail on whatever DATABASE_URL the developer
+    // happens to have in .env. Pin it off.
+    config.databaseUrl = "";
     rmSync(DIR, { recursive: true, force: true });
     mkdirSync(DIR, { recursive: true });
     writeFileSync(

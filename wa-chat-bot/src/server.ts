@@ -9,19 +9,24 @@ import { TelegramGateway, startTelegramPoller } from "./telegram";
 import { normalizeWahaEvent, normalizeTelegramEvent } from "./gateway/events";
 import { SurfaceRouter } from "./surface";
 import { handleInbound, handleEvent } from "./bot";
+import { recordInbound, processRecorded, reconcileInbound, startIntakeReconciler } from "./intake";
 import { summarizeChat } from "./summarize";
-import { getMessages } from "./store";
-import { runDigests, startScheduler } from "./schedule";
+import { getMessages, getMessagesPage } from "./store";
+import { runDigests, startScheduler, startDigestRun } from "./schedule";
 import { actionsEnabled, setActionsEnabled } from "./safety/kill-switch";
 import { postToGroupsEnabled, setPostToGroups } from "./safety/post-toggle";
 import { readActionAudit } from "./safety/audit";
 import { startMediaWorker } from "./media";
 import { queueEnabled } from "./media-queue";
-import { initStore } from "./store";
+import { initStore, getPendingMedia } from "./store";
 import { startSession, getSessionStatus, getQr, stopSession, logoutSession, restartSession, refreshSelfJid } from "./waha-admin";
-import { lastEvent, lastKnownStatus, transitions } from "./session-state";
-import { groupsSnapshot, writeGroups, setManagementGroupId, ensureGroupsSeed } from "./groups";
-import { listChats, chatMessages } from "./chat-admin";
+import { lastEvent, lastKnownStatus, transitions, loadSessionEvents } from "./session-state";
+import { groupsSnapshot, writeGroups, setManagementGroupId, ensureGroupsSeed, writeIgnoredGroups } from "./groups";
+import { backfillDiscoveredNames } from "./group-names";
+import { listChats, chatMessages, searchAllChats, isValidChatId, type ChatKind } from "./chat-admin";
+import { digestHistory } from "./digest-history";
+import { nextRuns } from "./next-run";
+import { listSkills } from "./skills";
 import type { Slot } from "./window";
 
 /** Constant-time string comparison (avoids timing side-channels on token checks). */
@@ -32,7 +37,8 @@ function safeEqual(a: string, b: string): boolean {
   return timingSafeEqual(ab, bb);
 }
 
-const CHAT_ID_RE = /^([0-9]+@(g\.us|c\.us)|tg:-?[0-9]+)$/;
+// Chat-id validation lives in chat-admin.ts (isValidChatId) — a second copy here drifted out of
+// sync and rejected the @lid DMs the NOWEB engine produces.
 
 /** Webhook is authorized only if a secret is configured AND matches (fail-closed). */
 function webhookAuthorized(req: FastifyRequest): boolean {
@@ -63,10 +69,21 @@ export function buildApp(gateway: WhatsAppGateway = new SurfaceRouter()): Fastif
       return reply.code(401).send({ error: "unauthorized" });
     }
     const event = normalizeWahaEvent(req.body);
-    reply.code(200).send({ received: true });
-    if (event) {
-      handleEvent(gateway, event).catch((e) => app.log.error(e, "handleEvent failed"));
+    if (!event) {
+      // Not a usable event (status@broadcast, an unsupported type) — nothing to persist or lose.
+      return reply.code(200).send({ received: true });
     }
+    // PERSIST -> ACK -> process. Answering 200 before the event is durable meant a crash in the
+    // gap lost the message forever (WAHA never redelivers a 200). If we cannot persist, we must
+    // NOT claim receipt: a 503 makes WAHA retry, which is the whole point.
+    const id = await recordInbound(event);
+    if (!id) {
+      return reply.code(503).send({ error: "intake unavailable — retry" });
+    }
+    reply.code(200).send({ received: true });
+    // Now safe to process detached: the durable row survives a death here and the reconciler
+    // replays it. processRecorded settles the row and never throws.
+    void processRecorded(gateway, id, event);
   });
 
   // Telegram fallback surface: Bot API webhook. Fail-closed on Telegram's secret-token
@@ -78,10 +95,14 @@ export function buildApp(gateway: WhatsAppGateway = new SurfaceRouter()): Fastif
       return reply.code(401).send({ error: "unauthorized" });
     }
     const event = normalizeTelegramEvent(req.body);
-    reply.code(200).send({ received: true });
-    if (event) {
-      handleEvent(new TelegramGateway(), event).catch((e) => app.log.error(e, "telegram handleEvent failed"));
+    if (!event) return reply.code(200).send({ received: true });
+    // Same persist-then-ACK contract as the WAHA webhook above. Telegram also retries on non-2xx.
+    const id = await recordInbound(event);
+    if (!id) {
+      return reply.code(503).send({ error: "intake unavailable — retry" });
     }
+    reply.code(200).send({ received: true });
+    void processRecorded(new TelegramGateway(), id, event);
   });
 
   // Admin: manually trigger a digest (stands in for the 12:00/18:00 scheduler).
@@ -94,7 +115,7 @@ export function buildApp(gateway: WhatsAppGateway = new SurfaceRouter()): Fastif
       return reply.code(401).send({ error: "unauthorized" });
     }
     const { chatId } = req.params;
-    if (!CHAT_ID_RE.test(chatId)) {
+    if (!isValidChatId(chatId)) {
       return reply.code(400).send({ error: "invalid chatId" });
     }
     const msgs = await getMessages(chatId);
@@ -113,6 +134,50 @@ export function buildApp(gateway: WhatsAppGateway = new SurfaceRouter()): Fastif
     const { slot } = req.params;
     if (slot !== "noon" && slot !== "evening") return reply.code(400).send({ error: "slot must be noon|evening" });
     return runDigests(gateway, slot as Slot);
+  });
+
+  // Admin: ASYNC digest trigger. A real run takes ~90s (11 groups, each summarized through the
+  // AI gateway) — too long for the nest proxy's HTTP budget, which was returning a false "502
+  // bot admin unreachable" while the run actually completed fine seconds later. This route never
+  // awaits the run: it starts it (startDigestRun, schedule.ts) and answers 202 immediately with
+  // something the caller can correlate against the digest-history table (the source of truth for
+  // the outcome). 409 if this slot already has a run in flight — two concurrent runs of the same
+  // slot would double-post every group. The existing synchronous /run-digests/:slot above is left
+  // untouched: it's what the n8n digest-fanout automation calls directly (BOT_ADMIN_TOKEN).
+  app.post<{ Params: { slot: string } }>("/admin/digests/run/:slot", async (req, reply) => {
+    if (!config.adminToken) return reply.code(503).send({ error: "admin routes disabled — set ADMIN_TOKEN" });
+    if (!safeEqual(bearer(req), config.adminToken)) return reply.code(401).send({ error: "unauthorized" });
+    const { slot } = req.params;
+    if (slot !== "noon" && slot !== "evening") return reply.code(400).send({ error: "slot must be noon|evening" });
+    const { started } = startDigestRun(gateway, slot as Slot);
+    if (!started) {
+      return reply.code(409).send({ error: `a ${slot} digest run is already in progress`, slot });
+    }
+    return reply.code(202).send({ started: true, slot, startedAt: Date.now() });
+  });
+
+  // Admin: read-only digest PREVIEW — generates the digest text for one chat's most recent
+  // messages WITHOUT sending anything (no gateway.sendText call anywhere in this route; that is
+  // the whole point). Lets an operator check what a digest will say before it ever reaches
+  // WhatsApp. Reuses the same summarizeChat() the real digest run uses, over the last `limit`
+  // stored messages for that chat (getMessagesPage — same "last N, oldest->newest" contract the
+  // chat viewer already uses), filtering out the bot's own messages the same way runDigests does.
+  // Deliberately NOT persisted anywhere (digest bodies never land in the history file — that
+  // file stays counts-only by design) and never logged.
+  const PREVIEW_DEFAULT_LIMIT = 300;
+  const PREVIEW_MAX_LIMIT = 2000;
+  app.get<{ Querystring: { chatId?: string; limit?: string } }>("/admin/digests/preview", async (req, reply) => {
+    if (!config.adminToken) return reply.code(503).send({ error: "admin routes disabled — set ADMIN_TOKEN" });
+    if (!safeEqual(bearer(req), config.adminToken)) return reply.code(401).send({ error: "unauthorized" });
+    const chatId = req.query.chatId ?? "";
+    if (!isValidChatId(chatId)) return reply.code(400).send({ error: "invalid chatId" });
+    const limit = Math.max(1, Math.min(Number(req.query.limit ?? PREVIEW_DEFAULT_LIMIT) || PREVIEW_DEFAULT_LIMIT, PREVIEW_MAX_LIMIT));
+    const msgs = (await getMessagesPage(chatId, { limit })).filter((m) => !m.fromBot);
+    if (msgs.length === 0) {
+      return reply.code(404).send({ error: "unknown chat (no stored messages)" });
+    }
+    const digest = await summarizeChat(msgs);
+    return { chatId, digest };
   });
 
   // Admin: the action kill-switch (incident response) — flip ALL mutating actions off/on at
@@ -183,6 +248,9 @@ export function buildApp(gateway: WhatsAppGateway = new SurfaceRouter()): Fastif
   app.get("/admin/groups", async (req, reply) => {
     if (!config.adminToken) return reply.code(503).send({ error: "admin routes disabled — set ADMIN_TOKEN" });
     if (!safeEqual(bearer(req), config.adminToken)) return reply.code(401).send({ error: "unauthorized" });
+    // Late-bind subjects for any nameless discovered group before answering, so the ERP's
+    // Groups tab shows real names on first load. Best-effort: failures leave the JID.
+    await backfillDiscoveredNames().catch(() => 0);
     return groupsSnapshot();
   });
 
@@ -190,6 +258,17 @@ export function buildApp(gateway: WhatsAppGateway = new SurfaceRouter()): Fastif
     if (!config.adminToken) return reply.code(503).send({ error: "admin routes disabled — set ADMIN_TOKEN" });
     if (!safeEqual(bearer(req), config.adminToken)) return reply.code(401).send({ error: "unauthorized" });
     const err = await writeGroups(req.body?.groups);
+    if (err) return reply.code(400).send({ error: err.error, ...(err.field ? { field: err.field } : {}) });
+    return groupsSnapshot();
+  });
+
+  // Admin: 1a ignore list — full-replace, same validation/atomic-write/fail-closed pattern
+  // as /admin/groups. An ignored group is dropped from ingestion + digests in BOTH registry
+  // modes (see groups.ts/bot.ts/schedule.ts); un-ignoring is just omitting the id next PUT.
+  app.put<{ Body: { ids?: unknown } }>("/admin/groups/ignored", async (req, reply) => {
+    if (!config.adminToken) return reply.code(503).send({ error: "admin routes disabled — set ADMIN_TOKEN" });
+    if (!safeEqual(bearer(req), config.adminToken)) return reply.code(401).send({ error: "unauthorized" });
+    const err = await writeIgnoredGroups(req.body?.ids);
     if (err) return reply.code(400).send({ error: err.error, ...(err.field ? { field: err.field } : {}) });
     return groupsSnapshot();
   });
@@ -223,25 +302,79 @@ export function buildApp(gateway: WhatsAppGateway = new SurfaceRouter()): Fastif
   });
 
   // Admin: read-only chat viewer + logs for the ERP's WA/TG Bot page. Same fail-closed
-  // ADMIN_TOKEN pattern as every other admin route above.
-  app.get<{ Querystring: { limit?: string } }>("/admin/chats", async (req, reply) => {
+  // ADMIN_TOKEN pattern as every other admin route above. 1e: `q`/`kind` filter the list.
+  app.get<{ Querystring: { limit?: string; q?: string; kind?: string } }>("/admin/chats", async (req, reply) => {
     if (!config.adminToken) return reply.code(503).send({ error: "admin routes disabled — set ADMIN_TOKEN" });
     if (!safeEqual(bearer(req), config.adminToken)) return reply.code(401).send({ error: "unauthorized" });
     const limit = Math.max(1, Math.min(Number(req.query.limit ?? 100) || 100, 1000));
-    return listChats(limit);
+    const kind: ChatKind | undefined = req.query.kind === "group" || req.query.kind === "dm" ? req.query.kind : undefined;
+    return listChats(limit, { q: req.query.q, kind });
   });
 
-  app.get<{ Params: { chatId: string }; Querystring: { limit?: string } }>(
+  // 1e: `beforeTs` pages backwards; a malformed value is ignored (fail-soft) rather than 400ing.
+  app.get<{ Params: { chatId: string }; Querystring: { limit?: string; beforeTs?: string } }>(
     "/admin/chats/:chatId/messages",
     async (req, reply) => {
       if (!config.adminToken) return reply.code(503).send({ error: "admin routes disabled — set ADMIN_TOKEN" });
       if (!safeEqual(bearer(req), config.adminToken)) return reply.code(401).send({ error: "unauthorized" });
       const limit = Math.max(1, Math.min(Number(req.query.limit ?? 100) || 100, 1000));
-      const result = await chatMessages(req.params.chatId, limit);
+      const rawBeforeTs = Number(req.query.beforeTs);
+      const beforeTs = req.query.beforeTs !== undefined && Number.isFinite(rawBeforeTs) ? rawBeforeTs : undefined;
+      const result = await chatMessages(req.params.chatId, limit, beforeTs);
       if (!result.ok) return reply.code(result.status).send({ error: result.error });
-      return { chatId: result.chatId, messages: result.messages };
+      return { chatId: result.chatId, messages: result.messages, hasMore: result.hasMore };
     },
   );
+
+  // 1e: message search across every stored chat. Empty/whitespace q -> {results: []} (the
+  // store contract, not a special case here) rather than a 400 — a blank search box is a
+  // normal UI state, not an error.
+  app.get<{ Querystring: { q?: string; limit?: string } }>("/admin/search", async (req, reply) => {
+    if (!config.adminToken) return reply.code(503).send({ error: "admin routes disabled — set ADMIN_TOKEN" });
+    if (!safeEqual(bearer(req), config.adminToken)) return reply.code(401).send({ error: "unauthorized" });
+    const limit = Math.max(1, Math.min(Number(req.query.limit ?? 20) || 20, 200));
+    return searchAllChats(req.query.q ?? "", limit);
+  });
+
+  // 1b: digest run history + next scheduled run per slot.
+  app.get<{ Querystring: { limit?: string } }>("/admin/digests", async (req, reply) => {
+    if (!config.adminToken) return reply.code(503).send({ error: "admin routes disabled — set ADMIN_TOKEN" });
+    if (!safeEqual(bearer(req), config.adminToken)) return reply.code(401).send({ error: "unauthorized" });
+    const limit = Math.max(1, Math.min(Number(req.query.limit ?? 50) || 50, 50));
+    return {
+      history: digestHistory(limit),
+      nextRun: nextRuns(Date.now(), config.scheduleTimezone),
+      timezone: config.scheduleTimezone,
+    };
+  });
+
+  // 1c: read-only skills catalog — what the bot answers, for an operator who hasn't read the code.
+  app.get("/admin/skills", async (req, reply) => {
+    if (!config.adminToken) return reply.code(503).send({ error: "admin routes disabled — set ADMIN_TOKEN" });
+    if (!safeEqual(bearer(req), config.adminToken)) return reply.code(401).send({ error: "unauthorized" });
+    return {
+      commandPrefix: config.commandPrefix,
+      botMention: config.botMention,
+      skills: listSkills().map((s) => ({ name: s.name, description: s.description })),
+    };
+  });
+
+  // 1d: media-queue health — counts only, never media refs or text. `limit` here is a health-
+  // check cap (10k), not a UI page size: PgStore's getPendingMedia sorts ts ASC so this is the
+  // exact oldest-first set; FileStore's is insertion-order, so with a genuinely enormous
+  // backlog the true oldest could theoretically fall outside the cap — an edge case dwarfed
+  // by the fact that a backlog anywhere near 10k pending items is already an incident.
+  const MEDIA_STATUS_LIMIT = 10_000;
+  app.get("/admin/media/status", async (req, reply) => {
+    if (!config.adminToken) return reply.code(503).send({ error: "admin routes disabled — set ADMIN_TOKEN" });
+    if (!safeEqual(bearer(req), config.adminToken)) return reply.code(401).send({ error: "unauthorized" });
+    const pending = await getPendingMedia(MEDIA_STATUS_LIMIT);
+    return {
+      queueEnabled: queueEnabled(),
+      pending: pending.length,
+      oldestPendingTs: pending.length > 0 ? Math.min(...pending.map((m) => m.ts)) : null,
+    };
+  });
 
   // Session status transitions (ring buffer, oldest-first — same order session-state.ts
   // keeps internally) for the ERP's session-history panel.
@@ -254,11 +387,71 @@ export function buildApp(gateway: WhatsAppGateway = new SurfaceRouter()): Fastif
   return app;
 }
 
+/** The one field whose raw value (a WhatsApp group JID like `120363...@g.us`) is unreadable and
+ *  easy to mistype — the operator picks a group by name instead. Only this function decides
+ *  between the two representations; the route/write path above never widens.
+ *
+ *  - Registry has groups: a "select" with an explicit "None" (-> "") option — clearing the
+ *    management group is a supported operation (falls back to MANAGEMENT_GROUP_ID) and must
+ *    stay reachable from the dropdown, not just the text box it replaces.
+ *  - Current value not among the registry's groups (env-only fallback, or a JID set before the
+ *    registry existed): appended as its own option rather than silently dropped, so the operator
+ *    always sees what's actually in effect and never loses it just by opening the picker.
+ *  - Registry is EMPTY (trial mode — the common case right now): there is nothing to choose
+ *    from, and a select with only "None" would hide whatever value is already set. Stay a text
+ *    field so the current value stays visible/editable rather than presenting a dead-end select.
+ */
+function managementGroupField(snapshot: ReturnType<typeof groupsSnapshot>): {
+  key: string;
+  value: unknown;
+  editable: boolean;
+  type: "text" | "select";
+  optionItems?: Array<{ value: string; label: string }>;
+} {
+  const current = snapshot.managementGroupId;
+  const optionItems: Array<{ value: string; label: string }> = [{ value: "", label: "None" }];
+  for (const g of snapshot.groups) optionItems.push({ value: g.id, label: g.name || g.id });
+
+  // Also offer AUTO-DISCOVERED groups, not just registry entries. The registry is empty in trial
+  // mode — the common case — and restricting the dropdown to it left an operator typing raw JIDs
+  // into a text box, which is the whole problem this field was meant to solve. A management group
+  // is a DELIVERY target that is never ingested, and setManagementGroupId() already creates a
+  // registry entry for an id it doesn't know, so any visible group is a legitimate choice.
+  // (`snapshot.discovered` already excludes ignored groups.)
+  const known = new Set(snapshot.groups.map((g) => g.id));
+  for (const d of snapshot.discovered) {
+    if (known.has(d.id)) continue;
+    known.add(d.id);
+    optionItems.push({ value: d.id, label: d.name ? `${d.name} (discovered)` : `${d.id} (discovered)` });
+  }
+
+  // Fall back to free text unless there is at least one REAL group to pick. A select built from
+  // nothing but "None" + the already-configured value offers no choice while REMOVING the ability
+  // to type an id — strictly worse than the text box it replaced.
+  const hasRealChoice = optionItems.length > 1;
+  if (!hasRealChoice) {
+    return { key: "managementGroupId", value: current, editable: true, type: "text" };
+  }
+
+  // Never silently drop a configured value (e.g. one set via MANAGEMENT_GROUP_ID before the bot
+  // ever saw the group) — it must stay selected and selectable.
+  if (current && !known.has(current)) {
+    optionItems.push({ value: current, label: `${current} (not in registry)` });
+  }
+  return { key: "managementGroupId", value: current, editable: true, type: "select", optionItems };
+}
+
 /** GET/PUT /admin/config shape (mirrors nest's ConfigField): read-only descriptive fields
  *  plus the two editable safe fields. Recomputed on every call — never cached, since
  *  managementGroupId/monitoredCount depend on the live (hot-reloadable) registry. */
 function configFields(): {
-  fields: Array<{ key: string; value: unknown; editable: boolean; type: "text" | "bool" | "number" }>;
+  fields: Array<{
+    key: string;
+    value: unknown;
+    editable: boolean;
+    type: "text" | "bool" | "number" | "select";
+    optionItems?: Array<{ value: string; label: string }>;
+  }>;
 } {
   const snapshot = groupsSnapshot();
   return {
@@ -266,7 +459,7 @@ function configFields(): {
       { key: "wahaSession", value: config.wahaSession, editable: false, type: "text" },
       { key: "botName", value: config.botName, editable: false, type: "text" },
       { key: "postToGroups", value: postToGroupsEnabled(), editable: true, type: "bool" },
-      { key: "managementGroupId", value: snapshot.managementGroupId, editable: true, type: "text" },
+      managementGroupField(snapshot),
       {
         key: "monitoredCount",
         value: snapshot.groups.filter((g) => !g.isManagement).length,
@@ -283,14 +476,25 @@ async function start(): Promise<void> {
     if (ensureGroupsSeed()) {
       app.log.info(`[groups] seeded ${config.groupsFile} from ${config.groupsSeedFile} (first boot)`);
     }
+    // Restore the session timeline before anything can append to it, so a restart doesn't
+    // blank the Logs tab / report session "unknown" on /health.
+    loadSessionEvents();
     await initStore();
+    // Crash recovery: replay anything a previous run persisted but never finished. minAge 0 —
+    // a fresh process has no in-flight work of its own, so every pending row is orphaned.
+    const replayed = await reconcileInbound(new SurfaceRouter(), 0).catch(() => 0);
+    if (replayed > 0) app.log.warn(`[intake] replayed ${replayed} orphaned inbound event(s) at boot`);
     await app.listen({ port: config.port, host: config.host });
     // If the session is already paired (survives restart), learn the bot's own JID now so real
-    // @mentions trigger without waiting for the next WORKING event. Best-effort, never blocks boot.
+    // @mentions trigger without waiting for the next WORKING event. Best-effort, never blocks
+    // boot. This also seeds the current status into the timeline (getSessionStatus observes it).
     void refreshSelfJid().catch(() => {});
     startScheduler(new SurfaceRouter());
     // Queue active -> the dedicated media-worker process consumes; here we only reconcile.
     startMediaWorker(queueEnabled() ? config.mediaReconcileSeconds : config.mediaPollSeconds);
+    // Intake reconciler: catches a row whose inline processing died AFTER boot (the boot sweep
+    // above only covers the previous run). Store-backed, so it works even with Redis down.
+    startIntakeReconciler(new SurfaceRouter());
     // Telegram intake: long-polling needs no public URL — preferred for local/trial runs.
     // If TELEGRAM_WEBHOOK_SECRET is set we assume a webhook is registered instead.
     if (config.telegramBotToken && !config.telegramWebhookSecret) {

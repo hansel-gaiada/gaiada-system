@@ -1,6 +1,7 @@
 import { scrub } from "./scrub";
 import { resolvePrincipal, isAllowed, denialMessage } from "./principal";
-import { loadGroups, isMonitored, noteDiscovered } from "./groups";
+import { loadGroups, isMonitored, noteDiscovered, isIgnored } from "./groups";
+import { ensureGroupName } from "./group-names";
 import { saveMessage, getMessages } from "./store";
 import { answerQuestion } from "./summarize";
 import { registerBuiltins, routeCommand, listSkills } from "./skills";
@@ -12,6 +13,8 @@ import { emitDiscovery } from "./discovery";
 import { enqueueMedia } from "./media-queue";
 import { seenBefore, dedupKey } from "./safety/dedup";
 import { sendWithRetry } from "./safety/outbound";
+import { checkReplyBudget } from "./safety/reply-budget";
+import { isLoopSuppressed } from "./safety/loop-guard";
 import { config } from "./config";
 import { handleSessionEvent, getSelfJid } from "./session-state";
 import { refreshSelfJid } from "./waha-admin";
@@ -95,7 +98,18 @@ export async function handleInbound(gw: WhatsAppGateway, inbound: InboundMessage
   if (inbound.waMessageId && seenBefore(dedupKey(surface, inbound.waMessageId))) return;
   // Surface EVERY group the bot sees (even in trial mode with no registry) so the ERP monitor
   // can list them for the operator to formalize. Dedup'd by id inside noteDiscovered.
-  if (inbound.isGroup) noteDiscovered(inbound.chatId);
+  if (inbound.isGroup) {
+    noteDiscovered(inbound.chatId);
+    // The webhook has no group subject (only the sender's push name), so resolve it from
+    // WAHA out-of-band. Fire-and-forget + no-op when already known: never blocks the reply.
+    void ensureGroupName(inbound.chatId).catch(() => {});
+  }
+  // 1a: the ignore list drops a group in BOTH modes, ahead of the registry gate — an
+  // ignored group is never stored, even in trial mode (where the registry gate below is a
+  // no-op). It was still noteDiscovered()'d above, so it stays visible/un-ignorable.
+  if (inbound.isGroup && isIgnored(inbound.chatId)) {
+    return;
+  }
   // Registry active -> only listed groups are ingested; unlisted ones are dropped (observable via
   // the discovered list above), never persisted. DMs and registry-inactive mode pass through.
   if (inbound.isGroup && loadGroups() !== null && !isMonitored(inbound.chatId)) {
@@ -125,6 +139,17 @@ export async function handleInbound(gw: WhatsAppGateway, inbound: InboundMessage
   // without an explicit trigger, since a "yes"/"1" reply is a plain group message.
   if (await tryConfirmByReply(gw, inbound, clean)) return;
   if (!isTriggered(inbound, clean)) return;
+  // Loop guard (abuse/ban protection): a bot<->bot or echo loop must never be engaged —
+  // refusing to reply is the only correct response (the message is already stored above, so
+  // it still counts for digests/history). Logs once per chat internally; PII-free.
+  if (isLoopSuppressed(inbound.chatId, clean)) return;
+  // Per-(chat,sender) reply budget: bounds a single sender's burst on the reply path (the
+  // only prior protection here was `fromMe`). Exhaustion is SILENT on purpose — a "slow down"
+  // reply would itself be outbound traffic and could itself contribute to a flood. Scoped to
+  // the engage-and-reply pipeline (Q&A/skills + action propose/confirm/intent below); a
+  // pending confirmation ("yes"/"no" via tryConfirmByReply above) is exempt — it's a single,
+  // bounded, user-initiated exchange already governed by the action executor's own rate limit.
+  if (!checkReplyBudget(inbound.chatId, inbound.senderId)) return;
   emitDiscovery({
     ts: Date.now(),
     surface: inbound.chatId.startsWith("tg:") ? "telegram" : "whatsapp",

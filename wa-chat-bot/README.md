@@ -16,6 +16,15 @@ identifiers, stores them, and answers questions / posts project-status digests u
 - **Group registry**: copy `config/groups.example.yaml` to `config/groups.yaml` to monitor only
   listed groups (hot-reloads). Unlisted groups are logged once and dropped. Without the file,
   every group the bot is in is monitored (trial mode).
+- **Auto-discovery**: every group the bot sees is recorded (JID + first-seen) for the ERP's
+  "discovered groups" list, persisted to `discovered-groups.json` next to the groups file
+  (override with `DISCOVERED_GROUPS_FILE`) so the list survives a restart. Group *subjects* are
+  not in WAHA's webhook payload, so they're fetched from WAHA separately and filled in on the
+  next message or the next `GET /admin/groups` read; until then the JID is shown.
+- **Session timeline**: WAHA status transitions are kept in a 20-entry ring, persisted to
+  `data/session-events.json` (`SESSION_EVENTS_FILE`) and restored at boot. WAHA only pushes
+  `session.status` on a *change*, so the current status is also seeded from WAHA at boot and on
+  every `/admin/session/status` read (de-duplicated — polling never spams the timeline).
 - **Scrubs** card numbers (PAN) and labelled national IDs (KTP) before storing.
 - Stores messages (sender identity encrypted) to a JSON file, or Postgres when `DATABASE_URL` is set.
 - Responds when addressed: in a group via `/command`, `@bot`, or replying to the bot; in a DM always.

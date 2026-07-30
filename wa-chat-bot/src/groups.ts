@@ -7,9 +7,9 @@
 // writeGroups() validates + atomically writes (tmp file + rename) so a crash mid-write
 // never corrupts the file the hot-reload watcher is reading; ensureGroupsSeed() copies a
 // read-only seed file into place on first boot when the writable file doesn't exist yet.
-import { readFileSync, statSync, existsSync, mkdirSync, copyFileSync } from "node:fs";
+import { readFileSync, statSync, existsSync, mkdirSync, copyFileSync, writeFileSync, renameSync } from "node:fs";
 import { writeFile, rename, mkdir } from "node:fs/promises";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
 import { parse, stringify } from "yaml";
 import { config } from "./config";
 
@@ -40,17 +40,252 @@ interface Cache {
   groups: GroupConfig[];
 }
 
-const GROUP_ID_RE = /^\d+@g\.us$/;
+const GROUP_ID_RE = /^\d+(-\d+)?@g\.us$/;
+
+/**
+ * A DIGEST DELIVERY TARGET may be a group OR a direct chat — the management "group" is only ever
+ * sent to, never ingested, so restricting it to `@g.us` needlessly blocked the most useful and
+ * lowest-risk setup: deliver the digest to the operator's own number (WhatsApp's "message
+ * yourself"), where it can be read without posting into any real group.
+ *   <digits>[-<digits>]@g.us   group (incl. legacy hyphenated ids)
+ *   <digits>@c.us / @lid       direct chat (a person, or the bot's own number)
+ *   tg:<numeric>               Telegram chat (digests route by chatId prefix via SurfaceRouter)
+ * A MONITORED entry still must be a real group — only the delivery target is widened.
+ */
+const MGMT_TARGET_RE = /^(\d+(-\d+)?@(g\.us|c\.us|lid)|tg:-?\d+)$/;
 const MAX_NAME_LEN = 200;
 const MAX_CATEGORY_LEN = 64;
 const MAX_GROUPS = 500;
+/** Cap on the persisted discovery list; oldest-first eviction keeps the file bounded. */
+const MAX_DISCOVERED = 500;
 
 let cache: Cache | null = null;
 const discovered = new Map<string, DiscoveredGroup>();
+let discoveredLoaded = false;
+
+/** 1a: ignore list — a chatId in here is dropped before storage in BOTH registry modes.
+ *  Kept as its own persisted set (not a boolean on DiscoveredGroup) because a full-replace
+ *  PUT can name ids the bot has never seen (an operator pre-blocking a known group id), and
+ *  because ignoring must never mutate the discovery record's firstSeenAt/name. */
+interface IgnoredEntry {
+  id: string;
+  ignoredAt: number;
+}
+const ignored = new Map<string, IgnoredEntry>();
+let ignoredLoaded = false;
+/** Cap on the persisted ignore list; oldest-first eviction keeps the file bounded. */
+const MAX_IGNORED = 500;
 
 export function resetRegistryCache(): void {
   cache = null;
   discovered.clear();
+  ignored.clear();
+  // Not a wipe: the next read re-hydrates from the persisted file (which is keyed off
+  // config.groupsFile, so tests pointing at a temp dir still start empty).
+  discoveredLoaded = false;
+  ignoredLoaded = false;
+  digestTargetLoaded = false;
+  digestTargetValue = "";
+}
+
+/** Where the digest delivery target is persisted — explicit env, else alongside the groups file. */
+function digestTargetFile(): string {
+  return config.digestTargetFile || join(dirname(config.groupsFile), "digest-target.json");
+}
+
+let digestTargetValue = "";
+let digestTargetLoaded = false;
+
+function loadDigestTarget(): void {
+  if (digestTargetLoaded) return;
+  digestTargetLoaded = true;
+  try {
+    const raw = JSON.parse(readFileSync(digestTargetFile(), "utf8")) as { target?: unknown };
+    digestTargetValue = typeof raw?.target === "string" ? raw.target : "";
+  } catch {
+    digestTargetValue = "";
+  }
+}
+
+/**
+ * The standalone digest delivery target, or "" when unset.
+ *
+ * This exists because the target used to be stored as a `isManagement` row in the group registry.
+ * Creating that row made `loadGroups()` non-null, which flips the bot from trial mode (ingest every
+ * group) into registry mode (ingest ONLY listed groups) — with zero monitored groups, so it
+ * silently stopped storing everything. Choosing where a digest is DELIVERED must never change what
+ * the bot READS.
+ */
+export function digestTarget(): string {
+  loadDigestTarget();
+  return digestTargetValue;
+}
+
+/** Atomically persist the delivery target (tmp + rename). Best-effort, like the sibling stores. */
+function persistDigestTarget(): void {
+  const path = digestTargetFile();
+  try {
+    mkdirSync(dirname(path), { recursive: true });
+    const tmp = `${path}.tmp-${process.pid}`;
+    writeFileSync(tmp, `${JSON.stringify({ target: digestTargetValue }, null, 2)}\n`, "utf8");
+    renameSync(tmp, path);
+  } catch (err) {
+    console.warn(`[groups] could not persist the digest target to ${path}: ${(err as Error).message}`);
+  }
+}
+
+/** Where the discovery list is persisted — explicit env, else alongside the groups file. */
+function discoveredFile(): string {
+  return config.discoveredGroupsFile || join(dirname(config.groupsFile), "discovered-groups.json");
+}
+
+/** Where the ignore list is persisted — explicit env, else alongside the groups file. */
+function ignoredFile(): string {
+  return config.ignoredGroupsFile || join(dirname(config.groupsFile), "ignored-groups.json");
+}
+
+/** Hydrate the in-memory ignore set from disk once per (reset) cycle. A missing or corrupt
+ *  file is not an error — the ignore list simply starts empty and rewrites it. */
+function loadIgnored(): void {
+  if (ignoredLoaded) return;
+  ignoredLoaded = true;
+  let raw: { ids?: Array<Record<string, unknown>> } | null = null;
+  try {
+    raw = JSON.parse(readFileSync(ignoredFile(), "utf8"));
+  } catch {
+    return;
+  }
+  for (const e of raw?.ids ?? []) {
+    const id = String(e?.id ?? "");
+    if (!id) continue;
+    ignored.set(id, { id, ignoredAt: Number(e?.ignoredAt) || Date.now() });
+  }
+}
+
+/** Atomically persist the ignore list (tmp + rename). Best-effort: a read-only volume
+ *  degrades to in-memory-only ignoring rather than breaking the inbound path. */
+function persistIgnored(): void {
+  const path = ignoredFile();
+  try {
+    if (ignored.size > MAX_IGNORED) {
+      const oldest = [...ignored.values()]
+        .sort((a, b) => a.ignoredAt - b.ignoredAt)
+        .slice(0, ignored.size - MAX_IGNORED);
+      for (const e of oldest) ignored.delete(e.id);
+    }
+    mkdirSync(dirname(path), { recursive: true });
+    const tmp = `${path}.tmp-${process.pid}`;
+    writeFileSync(tmp, `${JSON.stringify({ ids: [...ignored.values()] }, null, 2)}\n`, "utf8");
+    renameSync(tmp, path);
+  } catch (err) {
+    console.warn(`[groups] could not persist ignored groups to ${path}: ${(err as Error).message}`);
+  }
+}
+
+/** Is this chatId on the ignore list? Checked before storage in every mode (bot.ts) and
+ *  before digest delivery in trial mode (schedule.ts). */
+export function isIgnored(chatId: string): boolean {
+  loadIgnored();
+  return ignored.has(chatId);
+}
+
+/** Toggle a single id. Returns true iff the set actually changed (idempotent no-ops return
+ *  false, mirroring setDiscoveredName's convention). */
+export function setIgnored(chatId: string, ignoredFlag: boolean): boolean {
+  loadIgnored();
+  if (ignoredFlag) {
+    if (ignored.has(chatId)) return false;
+    ignored.set(chatId, { id: chatId, ignoredAt: Date.now() });
+  } else {
+    if (!ignored.has(chatId)) return false;
+    ignored.delete(chatId);
+  }
+  persistIgnored();
+  return true;
+}
+
+/** Currently-ignored groups, shaped like DiscoveredGroup so the ERP can render them in the
+ *  same list component as "discovered" — name/firstSeenAt come from the discovery record
+ *  when known (the common case: you can only ignore what you've seen), else the registry
+ *  name, else the bare id; firstSeenAt falls back to when it was ignored. */
+export function ignoredGroups(): DiscoveredGroup[] {
+  loadIgnored();
+  loadDiscovered();
+  const registryName = (id: string) => (loadGroups() ?? []).find((g) => g.id === id)?.name;
+  return [...ignored.values()].map((e) => {
+    const d = discovered.get(e.id);
+    if (d) return d;
+    return { id: e.id, name: registryName(e.id) ?? "", firstSeenAt: e.ignoredAt };
+  });
+}
+
+/** Validate then atomically full-replace the ignore list (same shape/semantics as
+ *  writeGroups): each id must match the group-id regex; previously-ignored ids keep their
+ *  original ignoredAt so re-saving the same set is idempotent. Never throws. */
+export async function writeIgnoredGroups(ids: unknown): Promise<WriteGroupsError | null> {
+  if (!Array.isArray(ids)) return { error: "ids must be an array", field: "ids" };
+  if (ids.length > MAX_GROUPS) return { error: `too many ids (max ${MAX_GROUPS})`, field: "ids" };
+
+  const normalized: string[] = [];
+  for (let i = 0; i < ids.length; i++) {
+    const id = String(ids[i] ?? "");
+    if (!GROUP_ID_RE.test(id)) {
+      return { error: `invalid group id: "${id}" (expected "<digits>@g.us")`, field: `ids[${i}]` };
+    }
+    normalized.push(id);
+  }
+
+  loadIgnored();
+  const prev = new Map(ignored);
+  ignored.clear();
+  const now = Date.now();
+  for (const id of new Set(normalized)) {
+    ignored.set(id, prev.get(id) ?? { id, ignoredAt: now });
+  }
+  persistIgnored();
+  return null;
+}
+
+/** Hydrate the in-memory discovery map from disk once per (reset) cycle. A missing or
+ *  corrupt file is not an error — discovery simply starts empty and rewrites it. */
+function loadDiscovered(): void {
+  if (discoveredLoaded) return;
+  discoveredLoaded = true;
+  let raw: { groups?: Array<Record<string, unknown>> } | null = null;
+  try {
+    raw = JSON.parse(readFileSync(discoveredFile(), "utf8"));
+  } catch {
+    return;
+  }
+  for (const g of raw?.groups ?? []) {
+    const id = String(g?.id ?? "");
+    if (!id) continue;
+    discovered.set(id, {
+      id,
+      name: String(g?.name ?? "").slice(0, MAX_NAME_LEN),
+      firstSeenAt: Number(g?.firstSeenAt) || Date.now(),
+    });
+  }
+}
+
+/** Atomically persist the discovery list (tmp + rename). Best-effort: a read-only volume
+ *  degrades to in-memory-only discovery rather than breaking the inbound path. */
+function persistDiscovered(): void {
+  const path = discoveredFile();
+  try {
+    if (discovered.size > MAX_DISCOVERED) {
+      const oldest = [...discovered.values()]
+        .sort((a, b) => a.firstSeenAt - b.firstSeenAt)
+        .slice(0, discovered.size - MAX_DISCOVERED);
+      for (const g of oldest) discovered.delete(g.id);
+    }
+    mkdirSync(dirname(path), { recursive: true });
+    const tmp = `${path}.tmp-${process.pid}`;
+    writeFileSync(tmp, `${JSON.stringify({ groups: [...discovered.values()] }, null, 2)}\n`, "utf8");
+    renameSync(tmp, path);
+  } catch (err) {
+    console.warn(`[groups] could not persist discovered groups to ${path}: ${(err as Error).message}`);
+  }
 }
 
 /** All configured groups, or null when no groups file exists (registry inactive). */
@@ -88,13 +323,27 @@ export function isMonitored(chatId: string): boolean {
 }
 
 /** Registry management group, falling back to MANAGEMENT_GROUP_ID when inactive/unset. */
+/** Digest delivery target, in precedence order: a registry row explicitly flagged isManagement
+ *  (the Groups tab's per-row radio) > the standalone target (Config tab / API) > MANAGEMENT_GROUP_ID. */
 export function managementGroupId(): string {
   const fromFile = (loadGroups() ?? []).find((g) => g.isManagement)?.id;
-  return fromFile ?? config.managementGroupId;
+  if (fromFile) return fromFile;
+  return digestTarget() || config.managementGroupId;
 }
 
+/**
+ * Display name for a group: the registry entry first (the operator's own label), then the
+ * subject auto-discovered from WAHA, and only then the bare JID.
+ *
+ * The discovery fallback matters because the registry is usually EMPTY (trial mode monitors
+ * every group), which used to make the ERP's Chats tab — and digest headers — show raw
+ * "1203...@g.us" ids for groups the Groups tab was already naming correctly.
+ */
 export function groupName(chatId: string): string {
-  return (loadGroups() ?? []).find((g) => g.id === chatId)?.name ?? chatId;
+  const fromRegistry = (loadGroups() ?? []).find((g) => g.id === chatId)?.name;
+  if (fromRegistry) return fromRegistry;
+  loadDiscovered();
+  return discovered.get(chatId)?.name || chatId;
 }
 
 export function groupCategory(chatId: string): string {
@@ -111,16 +360,39 @@ export function groupOptIn(chatId: string): boolean {
  * first time this group is noted.
  */
 export function noteDiscovered(chatId: string, name = ""): boolean {
-  if (discovered.has(chatId)) return false;
-  discovered.set(chatId, { id: chatId, name, firstSeenAt: Date.now() });
+  loadDiscovered();
+  const known = discovered.get(chatId);
+  if (known) {
+    // Already seen (possibly in an earlier process): only ever fill in a missing name.
+    if (name && !known.name) setDiscoveredName(chatId, name);
+    return false;
+  }
+  discovered.set(chatId, { id: chatId, name: name.slice(0, MAX_NAME_LEN), firstSeenAt: Date.now() });
+  persistDiscovered();
   console.warn(
     `[groups] discovered unlisted group ${chatId}${name ? ` (“${name}”)` : ""} — not monitored; add it to ${config.groupsFile} to enable`,
   );
   return true;
 }
 
+/**
+ * Late-bind a discovered group's display name. The WAHA `message` webhook carries the
+ * SENDER's push name, never the group subject, so names arrive out-of-band (group-names.ts)
+ * after the group was first noted. Returns true iff a name was actually written.
+ */
+export function setDiscoveredName(chatId: string, name: string): boolean {
+  loadDiscovered();
+  const known = discovered.get(chatId);
+  const clean = name.trim().slice(0, MAX_NAME_LEN);
+  if (!known || !clean || known.name === clean) return false;
+  discovered.set(chatId, { ...known, name: clean });
+  persistDiscovered();
+  return true;
+}
+
 /** Groups noted via noteDiscovered but not (yet) in the monitored registry. */
 export function discoveredGroups(): DiscoveredGroup[] {
+  loadDiscovered();
   return [...discovered.values()];
 }
 
@@ -137,8 +409,16 @@ function validateGroups(groups: unknown): WriteGroupsError | { ok: true; groups:
   for (let i = 0; i < groups.length; i++) {
     const g = (groups[i] ?? {}) as Partial<GroupConfig>;
     const id = String(g.id ?? "");
-    if (!GROUP_ID_RE.test(id)) {
-      return { error: `invalid group id: "${id}" (expected "<digits>@g.us")`, field: `groups[${i}].id` };
+    // The management entry is a delivery target (send-only, never ingested), so it may be a direct
+    // chat — e.g. the operator's own number. Everything else is ingested and must be a real group.
+    const isMgmt = Boolean(g.isManagement);
+    if (!(isMgmt ? MGMT_TARGET_RE : GROUP_ID_RE).test(id)) {
+      return {
+        error: isMgmt
+          ? `invalid digest target: "${id}" (expected a group "<digits>@g.us" or a chat "<digits>@c.us")`
+          : `invalid group id: "${id}" (expected "<digits>@g.us")`,
+        field: `groups[${i}].id`,
+      };
     }
     if (seenIds.has(id)) {
       return { error: `duplicate group id: "${id}"`, field: `groups[${i}].id` };
@@ -193,33 +473,48 @@ export async function writeGroups(groups: unknown): Promise<WriteGroupsError | n
  */
 export async function setManagementGroupId(id: string): Promise<WriteGroupsError | null> {
   const trimmed = id.trim();
-  if (trimmed && !GROUP_ID_RE.test(trimmed)) {
-    return { error: `invalid group id: "${trimmed}" (expected "<digits>@g.us")`, field: "managementGroupId" };
+  if (trimmed && !MGMT_TARGET_RE.test(trimmed)) {
+    return {
+      error: `invalid digest target: "${trimmed}" (expected a group "<digits>@g.us" or a chat "<digits>@c.us")`,
+      field: "managementGroupId",
+    };
   }
 
-  const current = (loadGroups() ?? []).map((g) => ({ ...g, isManagement: false }));
-  if (trimmed) {
-    const idx = current.findIndex((g) => g.id === trimmed);
-    if (idx >= 0) {
-      current[idx] = { ...current[idx], isManagement: true };
-    } else {
-      current.push({ id: trimmed, name: trimmed, category: "general", optIn: false, isManagement: true });
-    }
+  // Store the target in its OWN file. This used to push a row into the group registry, which made
+  // `loadGroups()` non-null and flipped the bot from trial mode into registry mode with zero
+  // monitored groups — silently dropping every group message. Setting a DELIVERY target must never
+  // change what the bot READS.
+  loadDigestTarget();
+  digestTargetValue = trimmed;
+  persistDigestTarget();
+
+  // Keep the two sources from disagreeing: a registry row flagged isManagement takes precedence in
+  // managementGroupId(), so clear any such flag here. Only rewrite an EXISTING registry — never
+  // create one, which is the mode-flip this function just stopped causing.
+  const existing = loadGroups();
+  if (existing?.some((g) => g.isManagement)) {
+    return writeGroups(existing.map((g) => ({ ...g, isManagement: false })));
   }
-  return writeGroups(current);
+  return null;
 }
 
-/** Snapshot shape for GET/PUT /admin/groups (design doc §2.3). */
+/** Snapshot shape for GET/PUT /admin/groups (design doc §2.3). 1a: `ignored` lists the
+ *  currently-ignored groups; `discovered` excludes them (an ignored group still stops
+ *  showing up as "needs a decision" once the operator has made one). */
 export function groupsSnapshot(): {
   registryActive: boolean;
   groups: GroupConfig[];
   discovered: DiscoveredGroup[];
+  ignored: DiscoveredGroup[];
   managementGroupId: string;
 } {
+  const ignoredList = ignoredGroups();
+  const ignoredIds = new Set(ignoredList.map((g) => g.id));
   return {
     registryActive: loadGroups() !== null,
     groups: loadGroups() ?? [],
-    discovered: discoveredGroups(),
+    discovered: discoveredGroups().filter((g) => !ignoredIds.has(g.id)),
+    ignored: ignoredList,
     managementGroupId: managementGroupId(),
   };
 }

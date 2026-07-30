@@ -19,3 +19,21 @@ export async function decodeSender(enc: Ciphertext | null): Promise<{ senderId: 
     return { senderId: "[erased]", senderName: "[erased]" };
   }
 }
+
+/** Generic encrypt-on-write for the durable inbound-intake log (Agent A). Same two-axis
+ *  envelope as encodeSender — `subjectId` is the person the event is about, `entityId` is the
+ *  chat — so a right-to-erasure/divestiture key destruction shreds intake rows exactly like it
+ *  shreds messages. `payload` is any JSON-serializable value (a normalized InboundEvent). */
+export async function encodePayload(subjectId: string, entityId: string, payload: unknown): Promise<Ciphertext> {
+  return encryptField(subjectId || "unknown", entityId || "unknown", JSON.stringify(payload));
+}
+
+/** Decrypt-on-read counterpart. Returns null if the key was destroyed (crypto-shred) or the
+ *  ciphertext is otherwise unrecoverable — callers must treat that as "gone", not retry it. */
+export async function decodePayload<T = unknown>(enc: Ciphertext): Promise<T | null> {
+  try {
+    return JSON.parse(await decryptField(enc)) as T;
+  } catch {
+    return null;
+  }
+}

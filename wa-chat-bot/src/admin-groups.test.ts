@@ -5,7 +5,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdirSync, rmSync } from "node:fs";
 import { buildApp } from "./server";
 import { config } from "./config";
-import { resetRegistryCache } from "./groups";
+import { resetRegistryCache, noteDiscovered } from "./groups";
 import { resetPostToGroups } from "./safety/post-toggle";
 
 const gw = { sendText: async () => {} };
@@ -62,6 +62,7 @@ describe("admin groups + config routes", () => {
       registryActive: false,
       groups: [],
       discovered: [],
+      ignored: [],
       managementGroupId: "envmgmt@g.us",
     });
     await app.close();
@@ -140,6 +141,100 @@ describe("admin groups + config routes", () => {
     await app.close();
   });
 
+  it("GET /admin/config: managementGroupId stays a text field when there is NOTHING to choose (no registry, no discovered groups) — an empty select would be a dead end", async () => {
+    const app = buildApp(gw as any);
+    const res = await app.inject({ method: "GET", url: "/admin/config", headers: { authorization: "Bearer sekret" } });
+    const fields = (
+      res.json() as { fields: Array<{ key: string; type: string; value: unknown; optionItems?: unknown }> }
+    ).fields;
+    const mgmt = fields.find((f) => f.key === "managementGroupId");
+    expect(mgmt?.type).toBe("text");
+    expect(mgmt?.value).toBe("envmgmt@g.us");
+    expect(mgmt?.optionItems).toBeUndefined();
+    await app.close();
+  });
+
+  it("GET /admin/config: managementGroupId offers DISCOVERED groups too, so trial mode (empty registry) still gets a dropdown", async () => {
+    // The registry is empty in trial mode — the normal state — so restricting the dropdown to
+    // registry entries left an operator typing raw JIDs, which is what the select was meant to fix.
+    // A management group is a delivery target that is never ingested, so any visible group qualifies.
+    noteDiscovered("120363000000000001@g.us", "Ops Room");
+    noteDiscovered("120363000000000002@g.us"); // nameless -> labelled by id
+    const app = buildApp(gw as any);
+    const res = await app.inject({ method: "GET", url: "/admin/config", headers: { authorization: "Bearer sekret" } });
+    const fields = (
+      res.json() as { fields: Array<{ key: string; type: string; optionItems?: Array<{ value: string; label: string }> }> }
+    ).fields;
+    const mgmt = fields.find((f) => f.key === "managementGroupId");
+    expect(mgmt?.type).toBe("select");
+    const labels = mgmt?.optionItems?.map((o) => o.label) ?? [];
+    expect(labels).toContain("None");
+    expect(labels).toContain("Ops Room (discovered)");
+    expect(labels).toContain("120363000000000002@g.us (discovered)");
+    // The env-configured value is still selectable rather than being dropped.
+    expect(mgmt?.optionItems?.some((o) => o.value === "envmgmt@g.us")).toBe(true);
+    await app.close();
+  });
+
+  it("GET /admin/config: managementGroupId becomes a labelled select once the registry has groups, with an explicit None option", async () => {
+    const app = buildApp(gw as any);
+    await app.inject({
+      method: "PUT",
+      url: "/admin/groups",
+      headers: { authorization: "Bearer sekret" },
+      payload: {
+        groups: [
+          { id: "111@g.us", name: "Site A", category: "construction", optIn: true },
+          { id: "999@g.us", name: "Mgmt Group", isManagement: true },
+        ],
+      },
+    });
+    const res = await app.inject({ method: "GET", url: "/admin/config", headers: { authorization: "Bearer sekret" } });
+    const fields = (
+      res.json() as {
+        fields: Array<{ key: string; type: string; value: unknown; optionItems?: Array<{ value: string; label: string }> }>;
+      }
+    ).fields;
+    const mgmt = fields.find((f) => f.key === "managementGroupId");
+    expect(mgmt?.type).toBe("select");
+    expect(mgmt?.value).toBe("999@g.us");
+    expect(mgmt?.optionItems).toEqual([
+      { value: "", label: "None" },
+      { value: "111@g.us", label: "Site A" },
+      { value: "999@g.us", label: "Mgmt Group" },
+    ]);
+    await app.close();
+  });
+
+  it("GET /admin/config: a management group set before the registry existed (env-only) is never dropped from the select", async () => {
+    const app = buildApp(gw as any);
+    // The registry gets groups, but none of them is the env-configured management group —
+    // the real-world "set via MANAGEMENT_GROUP_ID, registry populated later" state.
+    await app.inject({
+      method: "PUT",
+      url: "/admin/groups",
+      headers: { authorization: "Bearer sekret" },
+      payload: {
+        groups: [{ id: "111@g.us", name: "Site A", category: "construction", optIn: true }],
+      },
+    });
+    const res = await app.inject({ method: "GET", url: "/admin/config", headers: { authorization: "Bearer sekret" } });
+    const fields = (
+      res.json() as {
+        fields: Array<{ key: string; type: string; value: unknown; optionItems?: Array<{ value: string; label: string }> }>;
+      }
+    ).fields;
+    const mgmt = fields.find((f) => f.key === "managementGroupId");
+    expect(mgmt?.type).toBe("select");
+    expect(mgmt?.value).toBe("envmgmt@g.us");
+    expect(mgmt?.optionItems).toEqual([
+      { value: "", label: "None" },
+      { value: "111@g.us", label: "Site A" },
+      { value: "envmgmt@g.us", label: "envmgmt@g.us (not in registry)" },
+    ]);
+    await app.close();
+  });
+
   it("PUT /admin/config: only postToGroups/managementGroupId are writable; postToGroups flips the toggle", async () => {
     const app = buildApp(gw as any);
     const res = await app.inject({
@@ -154,7 +249,7 @@ describe("admin groups + config routes", () => {
     await app.close();
   });
 
-  it("PUT /admin/config: managementGroupId rewrites the registry (adds a minimal entry when unknown)", async () => {
+  it("PUT /admin/config: managementGroupId takes effect WITHOUT creating a registry (would have stopped ingestion)", async () => {
     const app = buildApp(gw as any);
     const res = await app.inject({
       method: "PUT",
@@ -166,9 +261,13 @@ describe("admin groups + config routes", () => {
     const fields = (res.json() as { fields: Array<{ key: string; value: unknown }> }).fields;
     expect(fields.find((f) => f.key === "managementGroupId")?.value).toBe("555@g.us");
 
+    // Setting a DELIVERY target must not change what the bot READS: writing it into the registry
+    // used to activate registry mode with zero monitored groups, silently dropping every message.
     const groupsRes = await app.inject({ method: "GET", url: "/admin/groups", headers: { authorization: "Bearer sekret" } });
-    const groupsBody = groupsRes.json() as { groups: Array<{ id: string; isManagement: boolean }> };
-    expect(groupsBody.groups.find((g) => g.id === "555@g.us")).toMatchObject({ isManagement: true });
+    const groupsBody = groupsRes.json() as { registryActive: boolean; groups: unknown[]; managementGroupId: string };
+    expect(groupsBody.registryActive).toBe(false); // still trial mode
+    expect(groupsBody.groups).toEqual([]);
+    expect(groupsBody.managementGroupId).toBe("555@g.us");
     await app.close();
   });
 

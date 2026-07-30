@@ -104,3 +104,80 @@ describe("FileStore.listChats", () => {
     expect(chats.map((c) => c.chatId)).toEqual(["new@g.us", "mid@g.us"]);
   });
 });
+
+describe("FileStore.searchMessages (1e)", () => {
+  let store: FileStore;
+  const now = Date.now();
+
+  beforeEach(() => {
+    rmSync(DIR, { recursive: true, force: true });
+    store = new FileStore(`${DIR}/messages.json`);
+  });
+  afterAll(() => rmSync(DIR, { recursive: true, force: true }));
+
+  it("case-insensitive substring match across all chats, newest-first", async () => {
+    await store.saveMessage(m({ chatId: "a@g.us", waMessageId: "1", ts: now - 3000, text: "poured the SLAB today" }));
+    await store.saveMessage(m({ chatId: "b@c.us", waMessageId: "2", ts: now - 1000, text: "slab inspection passed" }));
+    await store.saveMessage(m({ chatId: "a@g.us", waMessageId: "3", ts: now - 2000, text: "unrelated chatter" }));
+
+    const hits = await store.searchMessages("slab", 10);
+    expect(hits.map((h) => h.waMessageId)).toEqual(["2", "1"]); // newest first
+  });
+
+  it("empty or whitespace-only query returns []", async () => {
+    await store.saveMessage(m({ waMessageId: "1", text: "hello" }));
+    expect(await store.searchMessages("", 10)).toEqual([]);
+    expect(await store.searchMessages("   ", 10)).toEqual([]);
+  });
+
+  it("respects `limit`", async () => {
+    for (let i = 0; i < 5; i++) {
+      await store.saveMessage(m({ waMessageId: `w${i}`, ts: now - i * 1000, text: "match me" }));
+    }
+    expect(await store.searchMessages("match", 2)).toHaveLength(2);
+  });
+
+  it("no match returns []", async () => {
+    await store.saveMessage(m({ waMessageId: "1", text: "hello" }));
+    expect(await store.searchMessages("nonexistent-term", 10)).toEqual([]);
+  });
+});
+
+describe("FileStore.getMessagesPage (1e: backwards paging)", () => {
+  let store: FileStore;
+  const now = Date.now();
+
+  beforeEach(() => {
+    rmSync(DIR, { recursive: true, force: true });
+    store = new FileStore(`${DIR}/messages.json`);
+  });
+  afterAll(() => rmSync(DIR, { recursive: true, force: true }));
+
+  it("without beforeTs, returns the newest `limit` messages, oldest -> newest", async () => {
+    await store.saveMessage(m({ waMessageId: "1", ts: now - 3000, text: "first" }));
+    await store.saveMessage(m({ waMessageId: "2", ts: now - 2000, text: "second" }));
+    await store.saveMessage(m({ waMessageId: "3", ts: now - 1000, text: "third" }));
+
+    const page = await store.getMessagesPage("g@g.us", { limit: 2 });
+    expect(page.map((p) => p.text)).toEqual(["second", "third"]);
+  });
+
+  it("with beforeTs, returns the newest `limit` messages strictly older than it", async () => {
+    await store.saveMessage(m({ waMessageId: "1", ts: now - 3000, text: "first" }));
+    await store.saveMessage(m({ waMessageId: "2", ts: now - 2000, text: "second" }));
+    await store.saveMessage(m({ waMessageId: "3", ts: now - 1000, text: "third" }));
+
+    const page = await store.getMessagesPage("g@g.us", { limit: 10, beforeTs: now - 1000 });
+    expect(page.map((p) => p.text)).toEqual(["first", "second"]); // "third" excluded (not strictly older)
+  });
+
+  it("a beforeTs at or before the oldest message returns []", async () => {
+    await store.saveMessage(m({ waMessageId: "1", ts: now - 1000, text: "only" }));
+    expect(await store.getMessagesPage("g@g.us", { limit: 10, beforeTs: now - 1000 })).toEqual([]);
+  });
+
+  it("an unknown chatId returns []", async () => {
+    await store.saveMessage(m({ chatId: "known@g.us", waMessageId: "1" }));
+    expect(await store.getMessagesPage("unknown@g.us", { limit: 10 })).toEqual([]);
+  });
+});

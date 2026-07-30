@@ -1,3 +1,4 @@
+import type { ChatGateway } from "./gateway/contract";
 import { describe, it, expect, vi } from "vitest";
 import { normalizeTelegram, TelegramGateway } from "./telegram";
 
@@ -105,9 +106,12 @@ describe("Telegram adapter (Task 3.6)", () => {
   it("SurfaceRouter sends tg: chats via Telegram and the rest via WAHA", async () => {
     const { SurfaceRouter } = await import("./surface");
     const sent: string[] = [];
+    // SurfaceRouter now implements the FULL ChatGateway (it delegates reply/media/react/... too),
+    // but this test only exercises sendText ROUTING, so minimal stubs are cast deliberately
+    // rather than stubbing a dozen unused methods.
     const router = new SurfaceRouter(
-      { sendText: async (c) => void sent.push(`wa:${c}`) },
-      { sendText: async (c) => void sent.push(`telegram:${c}`) },
+      { sendText: async (c: string) => void sent.push(`wa:${c}`) } as unknown as ChatGateway,
+      { sendText: async (c: string) => void sent.push(`telegram:${c}`) } as unknown as ChatGateway,
     );
     await router.sendText("tg:123", "x");
     await router.sendText("456@g.us", "x");

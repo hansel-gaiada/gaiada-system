@@ -10,11 +10,16 @@ import {
   groupName,
   noteDiscovered,
   discoveredGroups,
+  setDiscoveredName,
   resetRegistryCache,
   writeGroups,
   setManagementGroupId,
   groupsSnapshot,
   ensureGroupsSeed,
+  isIgnored,
+  setIgnored,
+  ignoredGroups,
+  writeIgnoredGroups,
 } from "./groups";
 
 const DIR = "data/test-groups";
@@ -44,6 +49,8 @@ function writeYaml(content: string, mtimeSec: number): void {
 describe("group registry", () => {
   beforeEach(() => {
     config.groupsFile = FILE;
+    // Discovery now persists next to the groups file — drop it so each test starts clean.
+    rmSync(join(DIR, "discovered-groups.json"), { force: true });
     resetRegistryCache();
   });
   afterAll(() => rmSync(DIR, { recursive: true, force: true }));
@@ -100,6 +107,55 @@ describe("group registry", () => {
     expect(typeof found[0]?.firstSeenAt).toBe("number");
     warn.mockRestore();
   });
+
+  it("groupName falls back to the discovered subject before the bare JID", () => {
+    writeYaml(YAML, 1_000_008);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    expect(groupName("111@g.us")).toBe("Site A — Construction"); // registry wins
+    expect(groupName("555@g.us")).toBe("555@g.us"); // unknown -> JID
+
+    noteDiscovered("555@g.us", "Warehouse Ops");
+    expect(groupName("555@g.us")).toBe("Warehouse Ops"); // discovery fills the gap
+
+    // A registry entry still overrides discovery (it's the operator's own label).
+    noteDiscovered("111@g.us", "Upstream Name");
+    expect(groupName("111@g.us")).toBe("Site A — Construction");
+    warn.mockRestore();
+  });
+
+  it("persists discovered groups so the list survives a restart", () => {
+    writeYaml(YAML, 1_000_006);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    noteDiscovered("777@g.us");
+    const persisted = join(DIR, "discovered-groups.json");
+    expect(existsSync(persisted)).toBe(true);
+
+    // Simulate a process restart: in-memory map cleared, file left in place.
+    resetRegistryCache();
+    const found = discoveredGroups();
+    expect(found.map((g) => g.id)).toEqual(["777@g.us"]);
+    // ...and it is NOT re-announced as new after the restart.
+    expect(noteDiscovered("777@g.us")).toBe(false);
+    warn.mockRestore();
+  });
+
+  it("setDiscoveredName late-binds a subject onto an already-discovered group", () => {
+    writeYaml(YAML, 1_000_007);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    noteDiscovered("888@g.us"); // webhook only ever gives us the JID
+    expect(discoveredGroups()[0]?.name).toBe("");
+
+    expect(setDiscoveredName("888@g.us", "  Ops Room  ")).toBe(true);
+    expect(discoveredGroups()[0]?.name).toBe("Ops Room");
+    expect(setDiscoveredName("888@g.us", "Ops Room")).toBe(false); // idempotent
+    expect(setDiscoveredName("888@g.us", "   ")).toBe(false); // never blank an existing name
+    expect(setDiscoveredName("unknown@g.us", "Nope")).toBe(false); // only known groups
+
+    resetRegistryCache();
+    expect(discoveredGroups()[0]?.name).toBe("Ops Room"); // the name persisted too
+    warn.mockRestore();
+  });
 });
 
 describe("writeGroups (A2 full-replace, validation + atomic write + hot-reload)", () => {
@@ -117,10 +173,59 @@ describe("writeGroups (A2 full-replace, validation + atomic write + hot-reload)"
     expect(err?.field).toBe("groups[0].id");
   });
 
-  it("rejects a plain WhatsApp DM id (c.us) — only g.us groups are valid", async () => {
+  it("rejects a plain WhatsApp DM id (c.us) for a MONITORED entry — only g.us groups are ingested", async () => {
     const err = await writeGroups([{ id: "123@c.us", name: "Not a group" }]);
     expect(err).not.toBeNull();
     expect(err?.field).toBe("groups[0].id");
+  });
+
+  it("ACCEPTS a direct chat as the management entry — a digest target is send-only, never ingested", async () => {
+    // The most useful (and lowest-risk) setup: deliver the digest to the operator's own number
+    // instead of posting into a real group. Blocking @c.us here made that impossible.
+    for (const target of ["628111546034@c.us", "54202772525222@lid", "628123894471-1606911325@g.us"]) {
+      const err = await writeGroups([
+        { id: "111@g.us", name: "Site A" },
+        { id: target, name: "Digest target", isManagement: true },
+      ]);
+      expect(err, `target ${target} should be accepted`).toBeNull();
+      expect(managementGroupId()).toBe(target);
+      // ...and it is NOT monitored: the bot must never ingest its own delivery target.
+      expect(monitoredGroups().map((g) => g.id)).toEqual(["111@g.us"]);
+    }
+  });
+
+  it("setManagementGroupId accepts a direct chat and still rejects junk", async () => {
+    expect(await setManagementGroupId("628111546034@c.us")).toBeNull();
+    expect(managementGroupId()).toBe("628111546034@c.us");
+
+    const bad = await setManagementGroupId("not-a-chat");
+    expect(bad).not.toBeNull();
+    expect(bad?.field).toBe("managementGroupId");
+    expect(bad?.error).toMatch(/invalid digest target/i);
+  });
+
+  it("setting a delivery target must NOT activate the registry (it used to stop ALL ingestion)", async () => {
+    // The bug this pins: writing the target as a registry row made loadGroups() non-null, which
+    // flips the bot from trial mode (ingest every group) to registry mode (ingest only listed
+    // groups) with ZERO monitored groups — so the bot silently stored nothing at all.
+    expect(loadGroups()).toBeNull(); // trial mode, no registry file
+
+    expect(await setManagementGroupId("628111546034@c.us")).toBeNull();
+
+    expect(loadGroups()).toBeNull(); // STILL trial mode — no registry was created
+    expect(managementGroupId()).toBe("628111546034@c.us"); // ...and the target took effect
+    expect(isMonitored("anything@g.us")).toBe(false);
+    expect(monitoredGroups()).toEqual([]);
+  });
+
+  it("the target survives a restart and a registry isManagement row still wins", async () => {
+    await setManagementGroupId("628111546034@c.us");
+    resetRegistryCache();
+    expect(managementGroupId()).toBe("628111546034@c.us"); // re-read from its own file
+
+    // An explicit registry row (the Groups tab radio) takes precedence over the standalone target.
+    await writeGroups([{ id: "999@g.us", name: "Mgmt group", isManagement: true }]);
+    expect(managementGroupId()).toBe("999@g.us");
   });
 
   it("rejects two management groups", async () => {
@@ -200,7 +305,11 @@ describe("setManagementGroupId (A2 rewrite semantics)", () => {
   });
   afterAll(() => rmSync(DIR, { recursive: true, force: true }));
 
-  it("sets isManagement on a known group and clears it elsewhere", async () => {
+  // CONTRACT CHANGE (deliberate): setManagementGroupId no longer writes the registry. It used to
+  // add/flag a row, which made loadGroups() non-null and flipped the bot from trial mode into
+  // registry mode — with zero monitored groups, silently ending ALL ingestion. The target now lives
+  // in its own file; a registry isManagement row (set via the Groups tab) still takes precedence.
+  it("takes effect WITHOUT adding a registry row, and clears any existing isManagement flag", async () => {
     await writeGroups([
       { id: "1@g.us", name: "A", isManagement: true },
       { id: "2@g.us", name: "B" },
@@ -208,18 +317,24 @@ describe("setManagementGroupId (A2 rewrite semantics)", () => {
     const err = await setManagementGroupId("2@g.us");
     expect(err).toBeNull();
     const groups = loadGroups() ?? [];
-    expect(groups.find((g) => g.id === "1@g.us")?.isManagement).toBe(false);
-    expect(groups.find((g) => g.id === "2@g.us")?.isManagement).toBe(true);
+    // The stale flag is cleared so the two sources cannot disagree...
+    expect(groups.every((g) => !g.isManagement)).toBe(true);
+    // ...no row was added or removed...
+    expect(groups.map((g) => g.id)).toEqual(["1@g.us", "2@g.us"]);
+    // ...and the target is in effect.
     expect(managementGroupId()).toBe("2@g.us");
   });
 
-  it("adds a minimal entry when the id is unknown to the registry", async () => {
+  it("an id unknown to the registry does NOT get a registry entry invented for it", async () => {
     await writeGroups([{ id: "1@g.us", name: "A" }]);
     const err = await setManagementGroupId("999@g.us");
     expect(err).toBeNull();
     const groups = loadGroups() ?? [];
-    expect(groups.find((g) => g.id === "999@g.us")).toMatchObject({ isManagement: true });
-    expect(managementGroupId()).toBe("999@g.us");
+    expect(groups.map((g) => g.id)).toEqual(["1@g.us"]); // unchanged — no phantom entry
+    expect(groups.some((g) => g.isManagement)).toBe(false);
+    expect(managementGroupId()).toBe("999@g.us"); // still delivered there
+    // Crucially, monitoring is untouched: 1@g.us is still the only monitored group.
+    expect(monitoredGroups().map((g) => g.id)).toEqual(["1@g.us"]);
   });
 
   it("empty string clears isManagement everywhere and falls back to the env id", async () => {
@@ -294,5 +409,116 @@ describe("ensureGroupsSeed (A2 first-boot seed-copy)", () => {
     config.groupsSeedFile = SEED_FILE; // never written in this test
     expect(ensureGroupsSeed()).toBe(false);
     expect(existsSync(FILE)).toBe(false);
+  });
+});
+
+describe("ignore list (1a: monitor everything except these)", () => {
+  beforeEach(() => {
+    config.groupsFile = FILE;
+    rmSync(DIR, { recursive: true, force: true });
+    resetRegistryCache();
+  });
+  afterAll(() => rmSync(DIR, { recursive: true, force: true }));
+
+  it("isIgnored is false for a group never mentioned", () => {
+    expect(isIgnored("never-seen@g.us")).toBe(false);
+  });
+
+  it("setIgnored toggles and is idempotent (returns false on a no-op)", () => {
+    expect(setIgnored("111@g.us", true)).toBe(true);
+    expect(isIgnored("111@g.us")).toBe(true);
+    expect(setIgnored("111@g.us", true)).toBe(false); // already ignored -> no-op
+    expect(setIgnored("111@g.us", false)).toBe(true);
+    expect(isIgnored("111@g.us")).toBe(false);
+    expect(setIgnored("111@g.us", false)).toBe(false); // already un-ignored -> no-op
+  });
+
+  it("ignoredGroups() prefers the discovered name, falling back to the registry name, then the bare id", () => {
+    writeYaml(YAML, 2_000_001);
+    noteDiscovered("disc@g.us", "Discovered Name");
+    setIgnored("disc@g.us", true); // has a discovery record -> uses its name
+    setIgnored("111@g.us", true); // no discovery record, but IS in the registry -> registry name
+    setIgnored("bare@g.us", true); // neither -> bare id
+
+    const byId = Object.fromEntries(ignoredGroups().map((g) => [g.id, g.name]));
+    expect(byId["disc@g.us"]).toBe("Discovered Name");
+    expect(byId["111@g.us"]).toBe("Site A — Construction");
+    expect(byId["bare@g.us"]).toBe("");
+  });
+
+  it("groupsSnapshot(): discovered excludes ignored entries, ignored lists them", () => {
+    noteDiscovered("keep@g.us", "Keep");
+    noteDiscovered("drop@g.us", "Drop");
+    setIgnored("drop@g.us", true);
+
+    const snap = groupsSnapshot();
+    expect(snap.discovered.map((g) => g.id)).toEqual(["keep@g.us"]);
+    expect(snap.ignored.map((g) => g.id)).toEqual(["drop@g.us"]);
+  });
+
+  it("persists across a restart (cache reset)", () => {
+    setIgnored("777@g.us", true);
+    resetRegistryCache();
+    expect(isIgnored("777@g.us")).toBe(true);
+    expect(ignoredGroups().map((g) => g.id)).toEqual(["777@g.us"]);
+  });
+
+  describe("writeIgnoredGroups (full-replace)", () => {
+    it("rejects a non-array body", async () => {
+      const err = await writeIgnoredGroups({ not: "an array" });
+      expect(err).not.toBeNull();
+      expect(err?.field).toBe("ids");
+    });
+
+    it("rejects a malformed group id with a field-level error", async () => {
+      const err = await writeIgnoredGroups(["not-a-group-id"]);
+      expect(err).not.toBeNull();
+      expect(err?.error).toMatch(/invalid group id/i);
+      expect(err?.field).toBe("ids[0]");
+    });
+
+    it("rejects more than 500 ids", async () => {
+      const many = Array.from({ length: 501 }, (_, i) => `${i}@g.us`);
+      const err = await writeIgnoredGroups(many);
+      expect(err).not.toBeNull();
+      expect(err?.field).toBe("ids");
+    });
+
+    it("does not mutate state on a validation failure", async () => {
+      await writeIgnoredGroups(["1@g.us"]);
+      const before = ignoredGroups().map((g) => g.id);
+      await writeIgnoredGroups(["bad-id"]);
+      expect(ignoredGroups().map((g) => g.id)).toEqual(before);
+    });
+
+    it("full-replaces the set: a previously-ignored id not in the new list is un-ignored", async () => {
+      expect(await writeIgnoredGroups(["1@g.us", "2@g.us"])).toBeNull();
+      expect(isIgnored("1@g.us")).toBe(true);
+      expect(isIgnored("2@g.us")).toBe(true);
+
+      expect(await writeIgnoredGroups(["2@g.us"])).toBeNull();
+      expect(isIgnored("1@g.us")).toBe(false); // dropped from the replace -> un-ignored
+      expect(isIgnored("2@g.us")).toBe(true);
+    });
+
+    it("an empty array un-ignores everything", async () => {
+      await writeIgnoredGroups(["1@g.us"]);
+      expect(await writeIgnoredGroups([])).toBeNull();
+      expect(ignoredGroups()).toEqual([]);
+    });
+
+    it("preserves the original ignoredAt (firstSeenAt in the response) across a re-save of the same set", async () => {
+      await writeIgnoredGroups(["1@g.us"]);
+      const first = ignoredGroups()[0]?.firstSeenAt;
+      await new Promise((r) => setTimeout(r, 5));
+      await writeIgnoredGroups(["1@g.us"]);
+      expect(ignoredGroups()[0]?.firstSeenAt).toBe(first);
+    });
+
+    it("returned groupsSnapshot() reflects the write immediately", async () => {
+      const err = await writeIgnoredGroups(["9@g.us"]);
+      expect(err).toBeNull();
+      expect(groupsSnapshot().ignored.map((g) => g.id)).toEqual(["9@g.us"]);
+    });
   });
 });

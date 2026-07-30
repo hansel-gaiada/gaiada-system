@@ -13,8 +13,41 @@ function getPool(): Pool {
   return pool;
 }
 
-async function ensureTables(): Promise<void> {
-  await getPool().query(`
+/**
+ * Create the scheduler tables ONCE, as the OWNER — mirroring PgStore.init().
+ *
+ * This used to run its DDL on the runtime pool, which is the restricted `bot_app` role under the
+ * owner/runtime split. That role has no rights on schema public, so every digest — the 12:00/18:00
+ * cron included, not just a manual run — died with `permission denied for schema public` (42501)
+ * before it summarized anything. `ALTER DEFAULT PRIVILEGES FOR ROLE bot_owner` (infra/db/init-bot.sh)
+ * grants bot_app its DML on whatever the owner creates, so creating as owner is all that's needed.
+ *
+ * Memoized: loadLastRun/claimSlot call this on every digest, and a short-lived owner pool per call
+ * would be pure waste. A failure is NOT cached — the next call retries.
+ */
+let tablesReady: Promise<void> | null = null;
+
+function ensureTables(): Promise<void> {
+  if (!tablesReady) {
+    tablesReady = createTables().catch((err) => {
+      tablesReady = null; // don't cache a failure
+      throw err;
+    });
+  }
+  return tablesReady;
+}
+
+/** Test seam: forget the memoized DDL so a suite can point at a different database. */
+export function resetScheduleStateTables(): void {
+  tablesReady = null;
+}
+
+async function createTables(): Promise<void> {
+  // In dev (no migrate DSN) owner==runtime, so fall back to the runtime pool.
+  const ddlUrl = config.migrateDatabaseUrl;
+  const ddlPool = ddlUrl ? new Pool({ connectionString: ddlUrl }) : getPool();
+  try {
+    await ddlPool.query(`
     CREATE TABLE IF NOT EXISTS schedule_state (
       tenant_id text NOT NULL DEFAULT 'trial',
       slot text NOT NULL,
@@ -41,6 +74,10 @@ async function ensureTables(): Promise<void> {
       USING (tenant_id = ANY(string_to_array(current_setting('app.current_tenant_ids', true), ',')))
       WITH CHECK (tenant_id = ANY(string_to_array(current_setting('app.current_tenant_ids', true), ',')));
   `);
+  } finally {
+    // Only close the pool we created; never the shared runtime one.
+    if (ddlPool !== getPool()) await ddlPool.end();
+  }
 }
 
 // ---- file fallback ----

@@ -4,7 +4,9 @@
 // /admin/session/status wiring end to end through the real webhook path.
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { buildApp } from "./server";
+import { rmSync, mkdirSync } from "node:fs";
 import { config } from "./config";
+import { resetStoreForTest } from "./store";
 import { resetSessionState } from "./session-state";
 
 const gw = { sendText: async () => {} };
@@ -28,11 +30,23 @@ const SESSION_ROUTES: Array<["GET" | "POST", string]> = [
   ["POST", "/admin/session/restart"],
 ];
 
+const INTAKE_DIR = "data/test-admin-session";
+
 describe("admin session routes", () => {
   beforeEach(() => {
     config.adminToken = "sekret";
     config.wahaUrl = "http://waha.test";
     config.wahaSession = "default";
+    // This suite drives a REAL webhook through the whole pipeline, which now persists the event
+    // before ACKing (durable intake). Pin it to a temp file store: against the ambient
+    // DATABASE_URL it would try to INSERT into inbound_events in a DB where nothing has run
+    // PgStore.init(), and the webhook would (correctly) answer 503 instead of 200.
+    config.databaseUrl = "";
+    config.messagesFile = `${INTAKE_DIR}/messages.json`;
+    config.inboundEventsFile = `${INTAKE_DIR}/inbound-events.json`;
+    rmSync(INTAKE_DIR, { recursive: true, force: true });
+    mkdirSync(INTAKE_DIR, { recursive: true });
+    resetStoreForTest();
     resetSessionState();
   });
 

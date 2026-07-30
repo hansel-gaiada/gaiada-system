@@ -47,6 +47,8 @@ describe("phase 2 end-to-end: voice note → scrubbed transcript → digest", ()
     writeFileSync(`${DIR}/groups.yaml`, `groups:\n  - id: "site@g.us"\n    name: Site A\n    optIn: false\n`);
     config.groupsFile = `${DIR}/groups.yaml`;
     config.scheduleStateFile = `${DIR}/state.json`;
+    // File fallback, not Postgres — see the note in phase1.e2e.test.ts.
+    config.databaseUrl = "";
     config.managementGroupId = "mgmt@g.us";
     resetRegistryCache();
     vi.stubGlobal(

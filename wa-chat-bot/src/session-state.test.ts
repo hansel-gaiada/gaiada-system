@@ -1,4 +1,7 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterAll, vi } from "vitest";
+import { rmSync, existsSync } from "node:fs";
+import { join } from "node:path";
+import { config } from "./config";
 import {
   recordSessionEvent,
   handleSessionEvent,
@@ -6,13 +9,21 @@ import {
   lastKnownStatus,
   transitions,
   resetSessionState,
+  observeStatus,
+  loadSessionEvents,
 } from "./session-state";
 import type { InboundEvent } from "./gateway/events";
 
+const DIR = "data/test-session-state";
+const FILE = join(DIR, "session-events.json");
+
 describe("session-state", () => {
   beforeEach(() => {
+    config.sessionEventsFile = FILE;
+    rmSync(DIR, { recursive: true, force: true });
     resetSessionState();
   });
+  afterAll(() => rmSync(DIR, { recursive: true, force: true }));
 
   it("starts unknown with no events recorded", () => {
     expect(lastKnownStatus()).toBe("unknown");
@@ -84,5 +95,49 @@ describe("session-state", () => {
     handleSessionEvent(ev);
     expect(lastKnownStatus()).toBe("WORKING");
     expect(lastEvent()).toEqual({ status: "WORKING", ts: 5 });
+  });
+
+  it("persists the timeline and restores it on the next boot", () => {
+    recordSessionEvent("STARTING", 100);
+    recordSessionEvent("WORKING", 200);
+    expect(existsSync(FILE)).toBe(true);
+
+    // Simulate a restart: process memory gone, file left behind.
+    resetSessionState();
+    expect(transitions()).toEqual([]); // nothing until the boot hook runs
+    loadSessionEvents();
+
+    expect(transitions()).toEqual([
+      { status: "STARTING", ts: 100 },
+      { status: "WORKING", ts: 200 },
+    ]);
+    expect(lastKnownStatus()).toBe("WORKING");
+  });
+
+  it("loadSessionEvents on a missing or corrupt file leaves state empty (no throw)", () => {
+    expect(() => loadSessionEvents()).not.toThrow();
+    expect(lastKnownStatus()).toBe("unknown");
+  });
+
+  it("observeStatus records a polled status once, then de-duplicates it", () => {
+    // The gap this closes: WAHA only pushes `session.status` on a CHANGE, so a session that was
+    // already WORKING before boot never produces a webhook event.
+    expect(observeStatus("WORKING", 10)).toBe(true);
+    expect(lastKnownStatus()).toBe("WORKING");
+    expect(observeStatus("WORKING", 20)).toBe(false); // ERP polling must not spam the ring
+    expect(observeStatus("WORKING", 30)).toBe(false);
+    expect(transitions()).toEqual([{ status: "WORKING", ts: 10 }]);
+
+    expect(observeStatus("STOPPED", 40)).toBe(true); // a real change is still recorded
+    expect(transitions()).toHaveLength(2);
+  });
+
+  it("observeStatus never lets a WAHA outage overwrite the last known status", () => {
+    observeStatus("WORKING", 10);
+    expect(observeStatus("unreachable", 20)).toBe(false);
+    expect(observeStatus("unknown", 30)).toBe(false);
+    expect(observeStatus("", 40)).toBe(false);
+    expect(lastKnownStatus()).toBe("WORKING");
+    expect(transitions()).toHaveLength(1);
   });
 });
