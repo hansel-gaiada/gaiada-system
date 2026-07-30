@@ -7,6 +7,9 @@ import { getProject, listComments, listFiles, getFieldDefs } from "@/lib/entitie
 import { postEntityComment, attachFileAction, deleteFileAction } from "@/lib/collabActions";
 import { CommentThread } from "@/components/pm/CommentThread";
 import { Attachments } from "@/components/Attachments";
+import { listRecordings, STATUS_LABEL, formatDuration } from "@/lib/meetings";
+import { RecordControls } from "@/components/meetings/RecordControls";
+import { formatDateTime } from "@/lib/format";
 import {
   getPmProject, listPmTasks, listMilestones, listDocs, assignableUnits, listTags,
   groupByStatus, computeTimeline, openDependencies, resolveTags, parseTagFilterParam,
@@ -92,7 +95,7 @@ export async function ProjectWorkspaceView({
   const tenant = await getActiveTenant(me);
   if (!tenant) notFound();
 
-  const [pm, base, tasks, milestones, docs, assignable, comments, files, tags, taskCustomFieldDefs] = await Promise.all([
+  const [pm, base, tasks, milestones, docs, assignable, comments, files, tags, taskCustomFieldDefs, meetings] = await Promise.all([
     getPmProject(userId, tenant, projectId),
     getProject(userId, tenant, projectId).catch(() => null),
     listPmTasks(userId, tenant, projectId),
@@ -103,6 +106,10 @@ export async function ProjectWorkspaceView({
     listFiles(userId, tenant, "project", projectId),
     listTags(userId, tenant, projectId),
     getFieldDefs(userId, tenant, "pm_task"),
+    // WD-07: recordings started from THIS project workspace (client/project context plumbed
+    // straight into `RecordControls` below) — verifies the capture edge end-to-end from a
+    // project's own page, not just the standalone /meetings registry.
+    listRecordings(userId, tenant, { projectId }),
   ]);
   // Burndown overlay (P2-08, design spec §4 phase-2) — only fetched when the Timeline or Charts
   // tab is actually being rendered, same lazy pattern as everything else view-scoped on this page.
@@ -371,6 +378,29 @@ export async function ProjectWorkspaceView({
         </Card>
         <Card title="Discussion">
           <CommentThread comments={comments} post={postEntityComment.bind(null, "project", projectId)} />
+        </Card>
+      </div>
+
+      {/* WD-07 (Web Dev Phase 1 §12) — capture a briefing straight from this project so it lands
+          scoped (`projectId` + this project's own `client_id`), and shows here once recorded —
+          the client/project-workspace half of the capture-edge context plumbing. */}
+      <div style={{ marginTop: 20 }}>
+        <Card title={`Meetings${meetings.length ? ` · ${meetings.length}` : ""}`}>
+          <RecordControls projectId={projectId} clientId={base?.client_id ?? undefined} />
+          {meetings.length > 0 && (
+            <div style={{ marginTop: 18 }}>
+              <HairlineTable
+                columns={[{ label: "Meeting" }, { label: "Status" }, { label: "Length" }, { label: "Recorded", align: "right" }]}
+                rows={meetings.map((r) => [
+                  <Link key="t" href={`/meetings/${r.id}`} style={{ color: "inherit", fontWeight: 600 }}>{r.title ?? r.meeting_id}</Link>,
+                  <StatusBadge key="s" label={STATUS_LABEL[r.status] ?? r.status} />,
+                  formatDuration(r.duration_sec),
+                  formatDateTime(r.created_at),
+                ])}
+                tcols="2fr 1fr .8fr 1fr"
+              />
+            </div>
+          )}
         </Card>
       </div>
     </>

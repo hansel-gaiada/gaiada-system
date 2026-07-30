@@ -15,6 +15,7 @@ import { validateCustomFields } from "../../core/custom-fields";
 import { emitEvent } from "../../events/outbox.service";
 import { AuthGuard } from "../../auth/guards";
 import { ModuleEnabledGuard } from "../module-enabled.guard";
+import { allocateTaskSeq, deriveUniqueShortCode, displayCode } from "../../core/project-short-codes";
 
 type Assignee = {
   kind: "person" | "department" | "division";
@@ -258,12 +259,18 @@ function validWipLimit(v: unknown): number | null {
 }
 
 // Full PmTask projection (dates as YYYY-MM-DD text; loggedMinutes summed from time_entries).
+// WD-28: shortCode/seq come from the joined project + the task's own column; displayCode is
+// computed server-side (CODE-SEQ, e.g. "WEB-142") so every consumer reads one canonical string
+// rather than re-deriving the "-" join in N places. Either half can be null (a project that
+// somehow predates the 0050 backfill, or a task created outside the allocator) — displayCode is
+// null in that case rather than a malformed partial string.
 const TASK_SELECT = `
   SELECT t.id, t.project_id AS "projectId", p.name AS "projectName", t.title, t.description,
          t.status, t.priority, t.progress, t.assignee, t.subtasks, t.milestone_id AS "milestoneId",
          to_char(t.start_date, 'YYYY-MM-DD') AS "startDate", to_char(t.due_date, 'YYYY-MM-DD') AS "dueDate",
          t.estimate_minutes AS "estimateMinutes", t.depends_on AS "dependsOn", t.tags, t.custom_fields AS "customFields", t.updated_at AS "updatedAt",
-         t.recurrence,
+         t.recurrence, p.short_code AS "projectShortCode", t.seq,
+         CASE WHEN p.short_code IS NOT NULL AND t.seq IS NOT NULL THEN p.short_code || '-' || t.seq ELSE NULL END AS "displayCode",
          COALESCE((SELECT SUM(minutes) FROM time_entries te WHERE te.pm_task_id = t.id AND te.deleted_at IS NULL), 0)::int AS "loggedMinutes"
   FROM pm_tasks t JOIN projects p ON p.id = t.project_id
   WHERE t.deleted_at IS NULL`;
@@ -274,6 +281,7 @@ interface TaskRow {
   milestoneId: string | null; startDate: string | null; dueDate: string | null;
   estimateMinutes: number | null; dependsOn: string[]; tags: string[]; customFields: Record<string, unknown>; updatedAt: string | null; loggedMinutes: number;
   recurrence: TaskRecurrence | null;
+  projectShortCode: string | null; seq: number | null; displayCode: string | null;
 }
 
 interface TagRow { id: string; label: string; color: string; }
@@ -373,8 +381,8 @@ export class PmController {
   async getProject(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("projectId") projectId: string) {
     await authorize(req.principal, { kind: "pm_project", tenantId, id: projectId }, "read");
     return withTenants([tenantId], async (c) => {
-      const proj = await c.query<{ name: string; status: string; dueDate: string | null }>(
-        `SELECT name, status, to_char(due_date, 'YYYY-MM-DD') AS "dueDate" FROM projects WHERE id = $1 AND deleted_at IS NULL`,
+      const proj = await c.query<{ name: string; status: string; dueDate: string | null; shortCode: string | null }>(
+        `SELECT name, status, to_char(due_date, 'YYYY-MM-DD') AS "dueDate", short_code AS "shortCode" FROM projects WHERE id = $1 AND deleted_at IS NULL`,
         [projectId],
       );
       if (!proj.rows[0]) throw new NotFoundException("project not found");
@@ -394,6 +402,7 @@ export class PmController {
         id: projectId,
         name: proj.rows[0].name,
         status: proj.rows[0].status,
+        shortCode: proj.rows[0].shortCode,
         progress: Math.round(Number(agg.rows[0].avg_progress ?? 0)),
         owner: meta.rows[0]?.owner ?? null,
         dueDate: proj.rows[0].dueDate,
@@ -521,13 +530,17 @@ export class PmController {
         );
         if (valid.rows.length !== uniqTags.length) throw new BadRequestException("one or more tag ids are not in this task's project tag registry");
       }
+      // WD-28: atomic per-project seq allocation — see project-short-codes.ts / migration 0050
+      // for why this single UPDATE...RETURNING (not a read-then-write) is the concurrency-correct
+      // mechanism. Same connection/transaction as the INSERT below, so the row lock covers both.
+      const seq = await allocateTaskSeq(c, b.projectId!);
       await c.query(
-        `INSERT INTO pm_tasks (id, tenant_id, project_id, title, description, status, priority, progress, assignee, milestone_id, start_date, due_date, estimate_minutes, custom_fields, recurrence, subtasks, tags, origin_site)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::date, $12::date, $13, $14, $15, $16, $17, $18)`,
+        `INSERT INTO pm_tasks (id, tenant_id, project_id, title, description, status, priority, progress, assignee, milestone_id, start_date, due_date, estimate_minutes, custom_fields, recurrence, subtasks, tags, seq, origin_site)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::date, $12::date, $13, $14, $15, $16, $17, $18, $19)`,
         [id, tenantId, b.projectId, title, b.description ?? "", status, b.priority ?? "normal", progress,
          assignee ? JSON.stringify(assignee) : null, b.milestoneId || null, b.startDate || null, b.dueDate || null,
          b.estimateMinutes ?? null, JSON.stringify(customFields), recurrence ? JSON.stringify(recurrence) : null,
-         JSON.stringify(subtasks), uniqTags, config.originSite],
+         JSON.stringify(subtasks), uniqTags, seq, config.originSite],
       );
       await emitEvent(c, tenantId, "pm_task", id, "pm.task.created", { title, projectId: b.projectId });
     });
@@ -733,16 +746,17 @@ export class PmController {
             const orderedStatuses = [...statuses].sort((a, z) => a.position - z.position);
             const firstNonDone = orderedStatuses.find((s) => !s.isDone) ?? orderedStatuses[0];
             const resetSubtasks = subtasks.map((s) => ({ ...s, done: false }));
+            const childSeq = await allocateTaskSeq(c, task.projectId); // WD-28: a spawned occurrence is a real new task
             await c.query(
-              `INSERT INTO pm_tasks (id, tenant_id, project_id, title, description, status, priority, assignee, milestone_id, start_date, due_date, estimate_minutes, subtasks, tags, custom_fields, recurrence, recurrence_spawned_from, origin_site)
-               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::date,$11::date,$12,$13,$14,$15,$16,$17,$18)`,
+              `INSERT INTO pm_tasks (id, tenant_id, project_id, title, description, status, priority, assignee, milestone_id, start_date, due_date, estimate_minutes, subtasks, tags, custom_fields, recurrence, recurrence_spawned_from, seq, origin_site)
+               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::date,$11::date,$12,$13,$14,$15,$16,$17,$18,$19)`,
               [
                 childId, tenantId, task.projectId, finalTitle, finalDescription,
                 firstNonDone?.id ?? "todo", finalPriority,
                 assignee ? JSON.stringify(assignee) : null, finalMilestoneId,
                 next.startDate, next.dueDate, finalEstimateMinutes,
                 JSON.stringify(resetSubtasks), tags, JSON.stringify(customFields),
-                JSON.stringify(recurrence), taskId, config.originSite,
+                JSON.stringify(recurrence), taskId, childSeq, config.originSite,
               ],
             );
             await emitEvent(c, tenantId, "pm_task", childId, "pm.task.spawned", { parentId: taskId, dueDate: next.dueDate });
@@ -870,16 +884,17 @@ export class PmController {
       const firstNonDone = statuses.find((s) => !s.isDone) ?? statuses[0];
       const resetSubtasks = (Array.isArray(task.subtasks) ? (task.subtasks as { title: string }[]) : [])
         .map((s) => ({ id: newId(), title: s.title, done: false }));
+      const seq = await allocateTaskSeq(c, task.projectId); // WD-28: a duplicate is a new task, gets its own seq (never copies the source's)
       await c.query(
-        `INSERT INTO pm_tasks (id, tenant_id, project_id, title, description, status, priority, progress, assignee, milestone_id, start_date, due_date, estimate_minutes, custom_fields, recurrence, subtasks, tags, origin_site)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::date, $12::date, $13, $14, $15, $16, $17, $18)`,
+        `INSERT INTO pm_tasks (id, tenant_id, project_id, title, description, status, priority, progress, assignee, milestone_id, start_date, due_date, estimate_minutes, custom_fields, recurrence, subtasks, tags, seq, origin_site)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::date, $12::date, $13, $14, $15, $16, $17, $18, $19)`,
         [
           id, tenantId, task.projectId, `${task.title} (copy)`, task.description,
           firstNonDone?.id ?? "todo", task.priority, 0,
           task.assignee ? JSON.stringify(task.assignee) : null, task.milestoneId,
           task.startDate, task.dueDate, task.estimateMinutes,
           JSON.stringify(task.customFields ?? {}), task.recurrence ? JSON.stringify(task.recurrence) : null,
-          JSON.stringify(resetSubtasks), task.tags ?? [], config.originSite,
+          JSON.stringify(resetSubtasks), task.tags ?? [], seq, config.originSite,
         ],
       );
       // Comments/time/suggestions/dependsOn are deliberately dropped: not copied, not referenced
@@ -931,10 +946,14 @@ export class PmController {
       //    Structural identity (client, internal flag, department, D17 custom-field values) is kept —
       //    none of those are source-PROJECT ids, so carrying them leaks nothing. (`projects` has no
       //    description column in this schema; department_id is the only descriptive field to carry.)
+      //    WD-28: the clone is a brand-new project — gets its OWN derived short_code (never the
+      //    source's), and its task_seq counter starts at 0 (the DEFAULT), so cloned tasks (pass 6
+      //    below) get fresh seq numbers 1..N rather than inheriting the source's.
+      const shortCode = await deriveUniqueShortCode(c, tenantId, name);
       await c.query(
-        `INSERT INTO projects (id, tenant_id, client_id, is_internal, name, status, department_id, custom_fields, origin_site)
-         VALUES ($1, $2, $3, $4, $5, 'active', $6, $7, $8)`,
-        [newProjectId, tenantId, s.clientId, s.isInternal, name, s.departmentId, JSON.stringify(s.customFields ?? {}), config.originSite],
+        `INSERT INTO projects (id, tenant_id, client_id, is_internal, name, status, department_id, custom_fields, short_code, origin_site)
+         VALUES ($1, $2, $3, $4, $5, 'active', $6, $7, $8, $9)`,
+        [newProjectId, tenantId, s.clientId, s.isInternal, name, s.departmentId, JSON.stringify(s.customFields ?? {}), shortCode, config.originSite],
       );
 
       // 2) Statuses — copied VERBATIM (same slug ids; per-project scoped, so reuse is safe). Only
@@ -1007,15 +1026,18 @@ export class PmController {
           .map((sub) => ({ id: newId(), title: sub.title, done: false }));
         const remappedTags = (t.tags ?? []).map((tg) => tagMap.get(tg)).filter((x): x is string => !!x);
         const remappedMilestone = t.milestoneId ? (msMap.get(t.milestoneId) ?? null) : null;
+        // WD-28: each cloned task gets a FRESH seq off the clone's own counter (started at 0
+        // above) — never the source task's seq, which belongs to the source project's sequence.
+        const seq = await allocateTaskSeq(c, newProjectId);
         await c.query(
-          `INSERT INTO pm_tasks (id, tenant_id, project_id, title, description, status, priority, progress, assignee, milestone_id, start_date, due_date, estimate_minutes, custom_fields, recurrence, subtasks, tags, origin_site)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, 0, NULL, $8, $9::date, $10::date, $11, $12, $13, $14, $15, $16)`,
+          `INSERT INTO pm_tasks (id, tenant_id, project_id, title, description, status, priority, progress, assignee, milestone_id, start_date, due_date, estimate_minutes, custom_fields, recurrence, subtasks, tags, seq, origin_site)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, 0, NULL, $8, $9::date, $10::date, $11, $12, $13, $14, $15, $16, $17)`,
           [
             nid, tenantId, newProjectId, t.title, t.description,
             firstNonDone?.id ?? "todo", t.priority, remappedMilestone,
             t.startDate, t.dueDate, t.estimateMinutes,
             JSON.stringify(t.customFields ?? {}), t.recurrence ? JSON.stringify(t.recurrence) : null,
-            JSON.stringify(resetSubtasks), remappedTags, config.originSite,
+            JSON.stringify(resetSubtasks), remappedTags, seq, config.originSite,
           ],
         );
       }

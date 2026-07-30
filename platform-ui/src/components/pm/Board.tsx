@@ -581,7 +581,11 @@ function Card({
         onDragStart={(e) => { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", task.id); onDragStart(task.id); }}
         onDragEnd={() => onDragEnd?.()}
       >
-        <span className="pm-card__title">{task.recurrence ? "↻ " : ""}{task.title}</span>
+        <span className="pm-card__title">
+          {task.recurrence ? "↻ " : ""}
+          {task.displayCode && <span className="pm-card__code">{task.displayCode}</span>}
+          {task.title}
+        </span>
         {tags.length > 0 && (
           <div className="pm-card__tags">
             {tags.map((tg) => <TagChip key={tg.id} label={tg.label} color={tg.color} />)}

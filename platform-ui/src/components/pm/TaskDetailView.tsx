@@ -136,7 +136,7 @@ export async function TaskDetailView({
     <>
       <PageHeader
         eyebrow="Task"
-        title={titleWithRecurrenceGlyph(task)}
+        title={task.displayCode ? `${task.displayCode} · ${titleWithRecurrenceGlyph(task)}` : titleWithRecurrenceGlyph(task)}
         subtitle={task.projectName}
         breadcrumbs={[{ label: backLabel, href: backHref }, { label: task.title }]}
         actions={

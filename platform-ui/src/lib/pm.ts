@@ -213,6 +213,13 @@ export interface PmTask {
   customFields: Record<string, unknown>; // D17 custom fields, entityType "pm_task" (P2-03)
   updatedAt: string | null;
   recurrence: TaskRecurrence | null; // P2-06, design spec §8
+  // WD-28: per-project short-code + atomic per-project seq. `projectShortCode` is the parent
+  // project's code (same value as `PmProject.shortCode`, joined here for convenience);
+  // `displayCode` is the server-computed "CODE-SEQ" form (e.g. "WEB-142") — null if either half
+  // is missing (a task created outside the allocator, or a project predating the backfill).
+  projectShortCode: string | null;
+  seq: number | null;
+  displayCode: string | null;
 }
 
 export interface TimeLog {
@@ -243,6 +250,7 @@ export interface PmProject {
   id: string;
   name: string;
   status: string;
+  shortCode: string | null; // WD-28: unique per tenant, derived on creation + backfilled for legacy rows
   progress: number;
   owner: Assignee | null;
   dueDate: string | null;

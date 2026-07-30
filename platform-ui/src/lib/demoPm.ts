@@ -54,15 +54,48 @@ const unit = (kind: "department" | "division", refId: string, refName: string, r
 });
 const sub = (id: string, title: string, done: boolean): Subtask => ({ id, title, done });
 
-interface ProjectMeta { id: string; name: string; status: string; owner: Assignee | null; dueDate: string | null }
+// WD-28: `shortCode` mirrors the real backend's per-tenant unique code (derived the same way —
+// first 3-4 uppercase alnum chars of the name); `taskSeq` is this demo project's own counter,
+// mirroring `projects.task_seq` — the SAME single-counter-per-project shape as the real atomic
+// allocator, just without genuine concurrency in a single-process demo store.
+interface ProjectMeta { id: string; name: string; status: string; owner: Assignee | null; dueDate: string | null; shortCode: string | null; taskSeq: number }
 
 // ---- seed state ----
 const projects: ProjectMeta[] = [
-  { id: "p-web-1", name: "Client site redesign", status: "active", owner: person("u-pm"), dueDate: "2026-07-20" },
-  { id: "p-web-2", name: "Mobile app revamp", status: "active", owner: person("u-dev"), dueDate: "2026-08-10" },
-  { id: "p-seo-1", name: "SEO audit — Q3", status: "active", owner: person("u-pm"), dueDate: "2026-08-01" },
-  { id: "p-int-1", name: "Internal brand refresh", status: "completed", owner: person("demo-hansel"), dueDate: "2026-06-01" },
+  { id: "p-web-1", name: "Client site redesign", status: "active", owner: person("u-pm"), dueDate: "2026-07-20", shortCode: "CLIE", taskSeq: 0 },
+  { id: "p-web-2", name: "Mobile app revamp", status: "active", owner: person("u-dev"), dueDate: "2026-08-10", shortCode: "MOBI", taskSeq: 0 },
+  { id: "p-seo-1", name: "SEO audit — Q3", status: "active", owner: person("u-pm"), dueDate: "2026-08-01", shortCode: "SEOA", taskSeq: 0 },
+  { id: "p-int-1", name: "Internal brand refresh", status: "completed", owner: person("demo-hansel"), dueDate: "2026-06-01", shortCode: "INTE", taskSeq: 0 },
 ];
+
+// Atomic in the real backend (UPDATE...RETURNING under a row lock); the demo store is single-
+// process/single-request so a simple increment is equivalent here — same per-project counter
+// SHAPE, just without genuine concurrency to prove.
+function nextTaskSeq(projectId: string): number {
+  const proj = projects.find((p) => p.id === projectId);
+  if (!proj) return 0; // an auto-vivified/unknown project (see projOne handler) has no counter yet
+  proj.taskSeq += 1;
+  return proj.taskSeq;
+}
+function taskDisplayCode(projectId: string, taskSeq: number | null): { projectShortCode: string | null; seq: number | null; displayCode: string | null } {
+  const shortCode = projects.find((p) => p.id === projectId)?.shortCode ?? null;
+  return { projectShortCode: shortCode, seq: taskSeq, displayCode: shortCode != null && taskSeq != null ? `${shortCode}-${taskSeq}` : null };
+}
+// Same derivation as the real backend's project-short-codes.ts (WD-28): first 3-4 uppercase alnum
+// chars of the name, padded/PRJ-fallback, numeric-suffixed on collision against every OTHER demo
+// project (this store has no per-tenant split — it's all one demo tenant).
+function deriveDemoShortCode(name: string): string {
+  let base = name.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 4);
+  if (base.length < 3) base = base.padEnd(3, "X");
+  if (base === "") base = "PRJ";
+  let candidate = base;
+  let n = 1;
+  while (projects.some((p) => p.shortCode === candidate)) {
+    n += 1;
+    candidate = `${base}${n}`;
+  }
+  return candidate;
+}
 
 let tasks: PmTask[] = [
   mkTask("t-4", "p-web-1", "Wire homepage hero", "in_progress", "high", person("u-dev"), [sub("s1", "Hero layout", true), sub("s2", "Responsive pass", true), sub("s3", "Final copy", false)], "m-1", "2026-07-08", "Build the homepage hero section from the approved mockup.", "2026-07-02", 480, ["t-web-a"]),
@@ -242,7 +275,8 @@ const KNOWLEDGE: Record<string, { title: string; ref: string }[]> = {
 function mkTask(id: string, projectId: string, title: string, status: TaskStatus, priority: Priority, assignee: Assignee | null, subtasks: Subtask[], milestoneId: string | null, dueDate: string | null, description: string, startDate: string | null = null, estimateMinutes: number | null = null, dependsOn: string[] = [], customFields: Record<string, unknown> = {}, recurrence: TaskRecurrence | null = null): PmTask {
   const projectName = projects.find((p) => p.id === projectId)?.name ?? projectId;
   const progress = subtasks.length > 0 ? taskProgressFromSubtasks(subtasks) : status === "done" ? 100 : status === "in_progress" ? 40 : 0;
-  return { id, projectId, projectName, title, description, status, priority, progress, assignee, subtasks, milestoneId, startDate, dueDate, estimateMinutes, loggedMinutes: 0, dependsOn, tags: [], customFields, updatedAt: "2026-07-15T09:00:00Z", recurrence };
+  const codes = taskDisplayCode(projectId, nextTaskSeq(projectId)); // WD-28: allocate this project's next seq
+  return { id, projectId, projectName, title, description, status, priority, progress, assignee, subtasks, milestoneId, startDate, dueDate, estimateMinutes, loggedMinutes: 0, dependsOn, tags: [], customFields, updatedAt: "2026-07-15T09:00:00Z", recurrence, ...codes };
 }
 
 // Roll seeded time logs into each task's loggedMinutes.
@@ -258,7 +292,7 @@ function projectView(p: ProjectMeta): PmProject {
   const pts = tasks.filter((t) => t.projectId === p.id);
   const progress = pts.length ? Math.round(pts.reduce((n, t) => n + t.progress, 0) / pts.length) : 0;
   return {
-    id: p.id, name: p.name, status: p.status, progress, owner: p.owner, dueDate: p.dueDate,
+    id: p.id, name: p.name, status: p.status, shortCode: p.shortCode, progress, owner: p.owner, dueDate: p.dueDate,
     milestones: milestones.filter((m) => m.projectId === p.id),
     docCount: docs.filter((d) => d.projectId === p.id).length,
     taskCount: pts.length,
@@ -657,8 +691,9 @@ export function pmDemo(method: string, p: string, search: URLSearchParams, body?
     const newName = typeof b.name === "string" ? b.name.trim() : orig.name;
     if (!newName) return { status: 400, json: { error: "Project name is required." } };
     const newId = nextId("p");
-    // Create the new project meta
-    const newProj: ProjectMeta = { id: newId, name: newName, status: "active", owner: null, dueDate: null };
+    // Create the new project meta — WD-28: the clone gets its OWN fresh derived short_code
+    // (never the source's) and its task counter starts at 0, matching the real backend.
+    const newProj: ProjectMeta = { id: newId, name: newName, status: "active", owner: null, dueDate: null, shortCode: deriveDemoShortCode(newName), taskSeq: 0 };
     projects.push(newProj);
     // Copy statuses (per-project registry)
     const origStatuses = statusStore[orig.id];
@@ -708,6 +743,9 @@ export function pmDemo(method: string, p: string, search: URLSearchParams, body?
         tags: origTask.tags.map((tid) => tagIdMap.get(tid) ?? tid).filter((tid) => tagIdMap.has(tid)),
         milestoneId: origTask.milestoneId ? msIdMap.get(origTask.milestoneId) ?? null : null,
         updatedAt: stamp(),
+        // WD-28: FRESH seq off the clone's own counter (started at 0 above) — never the source
+        // task's seq/displayCode, which belong to the source project's own sequence.
+        ...taskDisplayCode(newId, nextTaskSeq(newId)),
       };
       tasks.push(copiedTask);
     }
@@ -718,7 +756,7 @@ export function pmDemo(method: string, p: string, search: URLSearchParams, body?
     let proj = projects.find((x) => x.id === projOne[1]);
     // Auto-vivify a project the PM store hasn't seen (e.g. one created via the
     // base /projects flow) so the workspace always has somewhere to land.
-    if (!proj) { proj = { id: projOne[1], name: "Project", status: "active", owner: null, dueDate: null }; projects.push(proj); }
+    if (!proj) { proj = { id: projOne[1], name: "Project", status: "active", owner: null, dueDate: null, shortCode: deriveDemoShortCode("Project"), taskSeq: 0 }; projects.push(proj); }
     if (m === "PATCH") {
       const b = parse(body);
       if (b.owner !== undefined) proj.owner = (b.owner as Assignee) || null;
@@ -779,6 +817,7 @@ export function pmDemo(method: string, p: string, search: URLSearchParams, body?
       tags: [...orig.tags],
       customFields: { ...orig.customFields },
       updatedAt: stamp(),
+      ...taskDisplayCode(orig.projectId, nextTaskSeq(orig.projectId)), // WD-28: fresh seq, never the source's
     };
     tasks.push(copy);
     return { status: 201, json: { id: copy.id } };
@@ -904,6 +943,7 @@ function patchTask(t: PmTask, b: Record<string, unknown>): { id: string; dueDate
     subtasks: t.subtasks.map((s) => ({ ...s, done: false })), milestoneId: t.milestoneId,
     startDate: next.startDate, dueDate: next.dueDate, estimateMinutes: t.estimateMinutes, loggedMinutes: 0,
     dependsOn: [], tags: [...t.tags], customFields: { ...t.customFields }, updatedAt: stamp(), recurrence: t.recurrence,
+    ...taskDisplayCode(t.projectId, nextTaskSeq(t.projectId)), // WD-28: a spawned occurrence is a real new task
   };
   tasks.push(child);
   spawnedChildren.push({ parentId: t.id, dueDate: next.dueDate });

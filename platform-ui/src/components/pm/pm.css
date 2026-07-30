@@ -50,6 +50,8 @@
 .pm-card--p-normal { border-left-color: var(--erp-hairline); }
 .pm-card--p-low { border-left-color: var(--erp-hairline-soft); }
 .pm-card__title { font: 400 13px var(--font-body); color: var(--text-primary); }
+/* WD-28: the CODE-SEQ short-code badge (e.g. "WEB-142") prefixing a task's title on the board card. */
+.pm-card__code { font: 700 10px var(--font-mono, monospace); letter-spacing: 0.03em; color: var(--erp-ink-50); margin-right: 6px; }
 .pm-card__meta { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .pm-chip { font: 700 9px var(--font-body); letter-spacing: 0.06em; text-transform: uppercase; color: var(--erp-ink-50); border: 0.5px solid var(--erp-hairline); padding: 2px 6px; }
 .pm-who { font: 400 11px var(--font-body); color: var(--erp-ink-60); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

@@ -13,7 +13,8 @@ function task(p: Partial<PmTask> & Pick<PmTask, "id" | "title">): PmTask {
     projectId: "p-1", projectName: "Project", description: "", status: "todo",
     priority: "normal", progress: 0, assignee: null, subtasks: [], milestoneId: null,
     startDate: null, dueDate: null, estimateMinutes: null, loggedMinutes: 0,
-    dependsOn: [], tags: [], customFields: {}, updatedAt: null, recurrence: null, ...p,
+    dependsOn: [], tags: [], customFields: {}, updatedAt: null, recurrence: null,
+    projectShortCode: null, seq: null, displayCode: null, ...p,
   };
 }
 
