@@ -73,7 +73,7 @@ func newTestServer(t *testing.T, cfg config.Config, c *chain.Chain) *httptest.Se
 		cfg.AuditFile = t.TempDir() + "/audit.jsonl"
 	}
 	chains := Chains{LLM: c, Media: c, Embed: c}
-	return httptest.NewServer(NewServer(cfg, chains, budget.NewBudget(cfg.DailyCallCap, cfg.PerTenantDailyCallCap), nil, metrics.New()))
+	return httptest.NewServer(NewServer(cfg, chains, budget.NewBudget(cfg.DailyCallCap, cfg.PerTenantDailyCallCap), nil, metrics.New(), nil))
 }
 
 func latestAuditRow(t *testing.T, srv *httptest.Server, token string) map[string]any {
@@ -105,7 +105,7 @@ func testServer(t *testing.T, token string) *httptest.Server {
 		Embed: chain.NewChain([]providers.Provider{echo}, 3, 60_000, time.Now),
 	}
 	// classifier nil: contract parity with the Node gateway (no model-assisted DLP by default).
-	return httptest.NewServer(NewServer(cfg, chains, budget.NewBudget(cfg.DailyCallCap, cfg.PerTenantDailyCallCap), nil, metrics.New()))
+	return httptest.NewServer(NewServer(cfg, chains, budget.NewBudget(cfg.DailyCallCap, cfg.PerTenantDailyCallCap), nil, metrics.New(), nil))
 }
 
 func postJSON(t *testing.T, srv *httptest.Server, path, token string, body map[string]any) *http.Response {
@@ -161,6 +161,122 @@ func TestEgressAuditRequiresAuthAndReturnsEntries(t *testing.T) {
 	}
 	if _, ok := rows[0]["capability"]; !ok {
 		t.Fatalf("expected audit rows to carry a capability field, got %v", rows[0])
+	}
+}
+
+// Admin console read: bearer-gated like /egress-audit, reports the chain in ORDER with breaker
+// state, and never leaks a provider credential (only keyConfigured presence).
+func TestAdminConfigRequiresAuthAndReportsChainOrderWithoutSecrets(t *testing.T) {
+	t.Setenv("GEMINI_API_KEY", "")
+	srv := testServer(t, "secret")
+	defer srv.Close()
+
+	res, err := http.Get(srv.URL + "/admin/config")
+	if err != nil || res.StatusCode != 401 {
+		t.Fatalf("expected 401 without token, got %v %v", res, err)
+	}
+	res.Body.Close()
+
+	req, _ := http.NewRequest("GET", srv.URL+"/admin/config", nil)
+	req.Header.Set("Authorization", "Bearer secret")
+	res, err = http.DefaultClient.Do(req)
+	if err != nil || res.StatusCode != 200 {
+		t.Fatalf("expected 200 with token, got %v %v", res, err)
+	}
+	raw, _ := io.ReadAll(res.Body)
+	res.Body.Close()
+
+	// The bearer token itself must never round-trip into the config body (it is a secret too).
+	if strings.Contains(string(raw), "secret") {
+		t.Fatalf("admin/config leaked a secret value: %s", raw)
+	}
+
+	var body struct {
+		Chains map[string]struct {
+			Order     []string `json:"order"`
+			Providers []struct {
+				Name     string `json:"name"`
+				Position int    `json:"position"`
+				State    string `json:"state"`
+			} `json:"providers"`
+		} `json:"chains"`
+		Providers []struct {
+			Name          string `json:"name"`
+			KeyConfigured bool   `json:"keyConfigured"`
+		} `json:"providers"`
+		Budget struct {
+			Cap     int            `json:"cap"`
+			Tenants map[string]int `json:"tenants"`
+		} `json:"budget"`
+		Reliability map[string]int `json:"reliability"`
+		Security    map[string]any `json:"security"`
+		Topology    map[string]any `json:"topology"`
+	}
+	if err := json.Unmarshal(raw, &body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	llm, ok := body.Chains["llm"]
+	if !ok || len(llm.Providers) == 0 {
+		t.Fatalf("expected an llm chain report, got %s", raw)
+	}
+	if llm.Providers[0].Position != 1 || llm.Providers[0].State == "" {
+		t.Fatalf("expected positioned+stated providers, got %+v", llm.Providers[0])
+	}
+	if body.Budget.Cap != 1000 {
+		t.Fatalf("expected the configured daily cap, got %d", body.Budget.Cap)
+	}
+	if body.Reliability["breakerThreshold"] != 3 {
+		t.Fatalf("expected the breaker threshold, got %v", body.Reliability)
+	}
+	if _, ok := body.Security["tlsMode"]; !ok {
+		t.Fatalf("expected a security posture block, got %v", body.Security)
+	}
+	if _, ok := body.Topology["mode"]; !ok {
+		t.Fatalf("expected a topology block, got %v", body.Topology)
+	}
+	// A key-requiring provider with no env key must report absence, not omit itself.
+	found := false
+	for _, p := range body.Providers {
+		if p.Name == "gemini" {
+			found = true
+			if p.KeyConfigured {
+				t.Fatalf("expected gemini keyConfigured=false with no key set")
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("expected gemini in the provider config report, got %s", raw)
+	}
+}
+
+// Per-tenant spend must be attributable — the whole point of the breakdown over State().
+func TestAdminConfigBudgetBreaksDownPerTenant(t *testing.T) {
+	srv := testServer(t, "secret")
+	defer srv.Close()
+
+	req, _ := http.NewRequest("POST", srv.URL+"/complete", strings.NewReader(`{"prompt":"hi"}`))
+	req.Header.Set("Authorization", "Bearer secret")
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("x-tenant-id", "acme")
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("complete: %v", err)
+	}
+	res.Body.Close()
+
+	req, _ = http.NewRequest("GET", srv.URL+"/admin/config", nil)
+	req.Header.Set("Authorization", "Bearer secret")
+	res, _ = http.DefaultClient.Do(req)
+	var body struct {
+		Budget struct {
+			Used    int            `json:"used"`
+			Tenants map[string]int `json:"tenants"`
+		} `json:"budget"`
+	}
+	json.NewDecoder(res.Body).Decode(&body)
+	res.Body.Close()
+	if body.Budget.Tenants["acme"] != 1 || body.Budget.Used < 1 {
+		t.Fatalf("expected acme=1 spend in the breakdown, got %+v", body.Budget)
 	}
 }
 

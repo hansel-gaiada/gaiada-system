@@ -12,8 +12,10 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
+	"gaiada/ai-gateway-go/internal/adminconfig"
 	"gaiada/ai-gateway-go/internal/audit"
 	"gaiada/ai-gateway-go/internal/budget"
 	"gaiada/ai-gateway-go/internal/chain"
@@ -25,6 +27,56 @@ import (
 
 type Chains struct {
 	LLM, Media, Embed *chain.Chain
+}
+
+// Admin wires the config-WRITE path. Nil disables PUT /admin/config entirely (the route isn't
+// registered, so it 404s and the console reports writes as unavailable) — that is the shape tests
+// and any embedder that doesn't want a mutable gateway get by default.
+type Admin struct {
+	Store *adminconfig.Store
+	// BuildProviders resolves an ordered list of provider NAMES into provider objects, using the
+	// same registry + topology rules the boot path used. Supplied by main so the server package
+	// doesn't need to know how providers are constructed.
+	BuildProviders func(names []string) []providers.Provider
+	// KnownProviders is the set a chain write may name. Validated before anything is applied so an
+	// unknown name is a 400 rather than a silently shortened chain.
+	KnownProviders []string
+}
+
+// runtimeTuning holds the settings that live OUTSIDE the chain/budget objects but are still
+// runtime-writable, so handlers read the current value rather than the boot-time config copy.
+type runtimeTuning struct {
+	mu                sync.Mutex
+	providerTimeoutMs int
+	dlpClassifierOn   bool
+}
+
+func (r *runtimeTuning) timeout() time.Duration {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	ms := r.providerTimeoutMs
+	if ms <= 0 {
+		ms = 60_000
+	}
+	return time.Duration(ms) * time.Millisecond
+}
+
+func (r *runtimeTuning) setTimeout(ms int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.providerTimeoutMs = ms
+}
+
+func (r *runtimeTuning) classifierOn() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.dlpClassifierOn
+}
+
+func (r *runtimeTuning) setClassifierOn(on bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.dlpClassifierOn = on
 }
 
 func writeJSON(w http.ResponseWriter, status int, body any) {
@@ -55,18 +107,6 @@ func tenantOf(r *http.Request) string {
 
 func strPtr(s string) *string { return &s }
 
-// providerTimeout resolves the per-attempt provider budget (B5: gateway reliability).
-// cfg.ProviderTimeoutMs<=0 (unset — e.g. a test-constructed config.Config{} that didn't go
-// through config.Load()) falls back to the same 60s default Load() uses, so a missing/zero
-// value never collapses into an instantly-expired context.WithTimeout.
-func providerTimeout(cfg config.Config) time.Duration {
-	ms := cfg.ProviderTimeoutMs
-	if ms <= 0 {
-		ms = 60_000
-	}
-	return time.Duration(ms) * time.Millisecond
-}
-
 // classifierReachable does a short benign classify to report a health signal, guarded by
 // its own short timeout so a slow/hung classifier never blocks /health.
 func classifierReachable(classifier *dlp.Classifier) bool {
@@ -79,8 +119,62 @@ func classifierReachable(classifier *dlp.Classifier) bool {
 	return err == nil
 }
 
-func NewServer(cfg config.Config, chains Chains, b *budget.Budget, classifier *dlp.Classifier, inst *metrics.Instruments) *http.ServeMux {
+// providerCfg is one provider's static configuration as the admin console sees it: which model it
+// would use and whether a credential is present. The credential VALUE is never included — this is
+// the gateway's one hard rule (it is the only component that holds provider keys).
+type providerCfg struct {
+	Name          string `json:"name"`
+	Model         string `json:"model,omitempty"`
+	Endpoint      string `json:"endpoint,omitempty"`
+	KeyRequired   bool   `json:"keyRequired"`
+	KeyConfigured bool   `json:"keyConfigured"`
+	// SiteExcluded: this provider holds a cloud credential, so "site" topology drops it from every
+	// chain and forwards to central instead (spec §4) — the console must explain that absence.
+	SiteExcluded bool `json:"siteExcluded"`
+}
+
+// chainReport pairs a capability's configured order (what the env asked for) with the live
+// per-provider breaker report (what the chain actually built) — they can differ, e.g. an unknown
+// name in the env, or a cloud provider dropped by "site" topology. Nil-safe.
+// `order` is the LIVE order (which a console reorder changes), `envOrder` is what the env asked for
+// at boot. They diverge after a runtime reorder, and an operator needs to see both — otherwise a
+// persisted override looks like the env value and a stale env looks like it took effect.
+func chainReport(envOrder []string, c *chain.Chain) map[string]any {
+	out := map[string]any{"order": envOrder, "envOrder": envOrder, "providers": []chain.ProviderReport{}}
+	if c != nil {
+		out["order"] = c.Names()
+		out["providers"] = c.Report()
+	}
+	return out
+}
+
+func providerConfigReport(cfg config.Config) []providerCfg {
+	site := cfg.TopologyMode == "site"
+	return []providerCfg{
+		{Name: "ollama", Model: cfg.OllamaModel, Endpoint: cfg.OllamaURL, KeyRequired: false, KeyConfigured: cfg.OllamaURL != ""},
+		{Name: "whisper", Model: cfg.WhisperModel, Endpoint: cfg.WhisperURL, KeyRequired: false, KeyConfigured: cfg.WhisperURL != ""},
+		{Name: "openai", Model: cfg.OpenAIModel, Endpoint: cfg.OpenAIBaseURL, KeyRequired: true, KeyConfigured: cfg.OpenAIAPIKey != "", SiteExcluded: site},
+		{Name: "gemini", Model: cfg.GeminiModel, KeyRequired: true, KeyConfigured: cfg.GeminiAPIKey != "", SiteExcluded: site},
+		{Name: "claude", Model: cfg.AnthropicModel, KeyRequired: true, KeyConfigured: cfg.AnthropicAPIKey != "", SiteExcluded: site},
+		// Always-present chain terminator: keyless, so the chain can never fail closed on config alone.
+		{Name: "echo", KeyRequired: false, KeyConfigured: true},
+	}
+}
+
+func NewServer(cfg config.Config, chains Chains, b *budget.Budget, classifier *dlp.Classifier, inst *metrics.Instruments, admin *Admin) *http.ServeMux {
 	mux := http.NewServeMux()
+
+	// Boot values seed the runtime tuning; a persisted override has already been folded into cfg by
+	// main before this point, so the two never disagree at startup.
+	rt := &runtimeTuning{providerTimeoutMs: cfg.ProviderTimeoutMs, dlpClassifierOn: cfg.DLPClassifierEnabled}
+	// activeClassifier gates on BOTH "a classifier exists" and "it's currently switched on", so the
+	// runtime toggle is real rather than cosmetic.
+	activeClassifier := func() *dlp.Classifier {
+		if classifier == nil || !rt.classifierOn() {
+			return nil
+		}
+		return classifier
+	}
 
 	// emit writes one egress-audit row AND mirrors it as a WS9 metric, keeping the two in lockstep
 	// (the audit stays the source of truth; the metric is a derived signal). Every former
@@ -100,8 +194,8 @@ func NewServer(cfg config.Config, chains Chains, b *budget.Budget, classifier *d
 			"providers": map[string]any{"llm": chains.LLM.State(), "media": chains.Media.State()},
 			"budget":    b.State(time.Now()),
 		}
-		if classifier != nil {
-			body["classifierReachable"] = classifierReachable(classifier)
+		if c := activeClassifier(); c != nil {
+			body["classifierReachable"] = classifierReachable(c)
 		}
 		writeJSON(w, 200, body)
 	})
@@ -126,6 +220,232 @@ func NewServer(cfg config.Config, chains Chains, b *budget.Budget, classifier *d
 		}
 		writeJSON(w, 200, rows)
 	})
+
+	// Read-only operational config for the platform admin console (bearer-gated, like /egress-audit).
+	// Reports the failover order + breaker state per capability chain, the budget breakdown incl.
+	// per-tenant spend, and the security/topology posture. Provider CREDENTIALS are never returned —
+	// only whether one is present (`keyConfigured`), matching the console's secret-presence contract.
+	mux.HandleFunc("GET /admin/config", func(w http.ResponseWriter, r *http.Request) {
+		if !authorized(r, cfg.GatewayToken) {
+			writeErr(w, 401, "unauthorized")
+			return
+		}
+		threshold, cooldownMs := chains.LLM.Settings()
+		// writableKeys tells the console which fields to render as EDITABLE. It is empty when writes
+		// aren't wired, so the console shows a read-only page instead of offering a save that 404s.
+		writableKeys := []string{}
+		overridden := map[string]bool{}
+		if admin != nil && admin.Store != nil {
+			writableKeys = adminconfig.WritableKeys
+			ov := admin.Store.Get()
+			overridden = map[string]bool{
+				"dailyCallCap":          ov.DailyCallCap != nil,
+				"perTenantDailyCallCap": ov.PerTenantDailyCallCap != nil,
+				"breakerThreshold":      ov.BreakerThreshold != nil,
+				"breakerCooldownMs":     ov.BreakerCooldownMs != nil,
+				"providerTimeoutMs":     ov.ProviderTimeoutMs != nil,
+				"dlpClassifierEnabled":  ov.DLPClassifierEnabled != nil,
+				"llmChain":              len(ov.LLMChain) > 0,
+				"mediaChain":            len(ov.MediaChain) > 0,
+				"embedChain":            len(ov.EmbedChain) > 0,
+			}
+		}
+		writeJSON(w, 200, map[string]any{
+			"writableKeys": writableKeys,
+			// Which values are console overrides rather than env — an operator debugging "why isn't my
+			// env change taking effect" needs to see that an override is shadowing it.
+			"overriddenKeys": overridden,
+			"chains": map[string]any{
+				"llm":   chainReport(cfg.LLMChain, chains.LLM),
+				"media": chainReport(cfg.MediaChain, chains.Media),
+				"embed": chainReport(cfg.EmbedChain, chains.Embed),
+			},
+			"providers": providerConfigReport(cfg),
+			"budget":    b.Breakdown(time.Now()),
+			"reliability": map[string]any{
+				"breakerThreshold":  threshold,
+				"breakerCooldownMs": cooldownMs,
+				"providerTimeoutMs": rt.timeout().Milliseconds(),
+			},
+			"security": map[string]any{
+				"tlsMode":         cfg.TLSMode,
+				"egressAllowlist": cfg.EgressAllowlist,
+				// LIVE toggle state, not the boot env value — the two differ after a console write.
+				"dlpClassifierEnabled": rt.classifierOn(),
+				"dlpClassifierModel":   cfg.DLPClassifierModel,
+				"classifierReachable":  classifierReachable(activeClassifier()),
+				"auditFile":            cfg.AuditFile,
+			},
+			"topology": map[string]any{
+				"mode":              cfg.TopologyMode,
+				"centralConfigured": cfg.CentralURL != "",
+				"drBurstCap":        cfg.DRBurstCap,
+				"drDurationMinutes": cfg.DRDurationMin,
+				"mediaMaxBytes":     cfg.MediaMaxBytes,
+			},
+		})
+	})
+
+	// Config WRITES for the admin console (bearer-gated). One key per call — the console edits a
+	// single field at a time, and a per-key call means a rejected value can never leave a partially
+	// applied batch behind.
+	//
+	// Only adminconfig.WritableKeys are accepted; provider credentials, the egress allowlist, the
+	// internal TLS mode and the topology are NOT runtime-writable (see the adminconfig package
+	// comment). Every accepted write is validated, applied to the live objects, AND persisted, in
+	// that order — so a persist failure is reported rather than leaving the running state ahead of
+	// the file.
+	if admin != nil && admin.Store != nil {
+		mux.HandleFunc("PUT /admin/config", func(w http.ResponseWriter, r *http.Request) {
+			if !authorized(r, cfg.GatewayToken) {
+				writeErr(w, 401, "unauthorized")
+				return
+			}
+			var body struct {
+				Key   string `json:"key"`
+				Value any    `json:"value"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				writeErr(w, 400, "invalid JSON body")
+				return
+			}
+			key := strings.TrimSpace(body.Key)
+			if key == "" {
+				writeErr(w, 400, "key required")
+				return
+			}
+			if !adminconfig.IsWritable(key) {
+				writeErr(w, 400, fmt.Sprintf("%s is not runtime-writable (env + restart only)", key))
+				return
+			}
+			// Enabling the classifier is only meaningful if one was constructed at boot; say so
+			// plainly instead of accepting a write that could never take effect.
+			if key == "dlpClassifierEnabled" && classifier == nil {
+				writeErr(w, 409, "no DLP classifier is loaded in this process — set DLP_CLASSIFIER_MODEL and restart")
+				return
+			}
+
+			applied, err := admin.Store.Set(key, body.Value, admin.KnownProviders)
+			if err != nil {
+				writeErr(w, 400, err.Error())
+				return
+			}
+
+			// Apply to the live objects. Each branch reads the freshly-normalized value from the
+			// store rather than the raw request, so what runs is exactly what was persisted.
+			ov := admin.Store.Get()
+			switch key {
+			case "dailyCallCap", "perTenantDailyCallCap":
+				daily, perTenant := 0, 0
+				if ov.DailyCallCap != nil {
+					daily = *ov.DailyCallCap
+				}
+				if ov.PerTenantDailyCallCap != nil {
+					perTenant = *ov.PerTenantDailyCallCap
+				}
+				b.SetCaps(daily, perTenant)
+			case "breakerThreshold", "breakerCooldownMs":
+				threshold, cooldown := 0, 0
+				if ov.BreakerThreshold != nil {
+					threshold = *ov.BreakerThreshold
+				}
+				if ov.BreakerCooldownMs != nil {
+					cooldown = *ov.BreakerCooldownMs
+				}
+				// The breaker is per-chain, so a retune applies to all three or the console would be
+				// reporting one chain's tuning as if it were global (which /admin/config does).
+				for _, c := range []*chain.Chain{chains.LLM, chains.Media, chains.Embed} {
+					if c != nil {
+						c.SetSettings(threshold, cooldown)
+					}
+				}
+			case "providerTimeoutMs":
+				if ov.ProviderTimeoutMs != nil {
+					rt.setTimeout(*ov.ProviderTimeoutMs)
+				}
+			case "dlpClassifierEnabled":
+				if ov.DLPClassifierEnabled != nil {
+					rt.setClassifierOn(*ov.DLPClassifierEnabled)
+				}
+			case "llmChain", "mediaChain", "embedChain":
+				if admin.BuildProviders == nil {
+					writeErr(w, 501, "chain reordering isn't wired in this process")
+					return
+				}
+				target, names := chains.LLM, ov.LLMChain
+				if key == "mediaChain" {
+					target, names = chains.Media, ov.MediaChain
+				} else if key == "embedChain" {
+					target, names = chains.Embed, ov.EmbedChain
+				}
+				if target == nil {
+					writeErr(w, 409, fmt.Sprintf("%s is not active in this process", key))
+					return
+				}
+				built := admin.BuildProviders(names)
+				if len(built) == 0 {
+					writeErr(w, 400, "that order resolves to no usable providers")
+					return
+				}
+				target.SetProviders(built)
+				// Echo the order that actually took effect: buildProviders appends the echo
+				// terminator (and, in site topology, central-forward), so it can differ from the ask.
+				applied = target.Names()
+			}
+
+			writeJSON(w, 200, map[string]any{"ok": true, "key": key, "applied": applied})
+		})
+
+		// Revert one key to its env value (removes the override + re-applies the boot config).
+		// Without this, a console write would be permanently sticky: the override file would keep
+		// shadowing the env even after the env was corrected, with no way back short of editing JSON
+		// on the box.
+		mux.HandleFunc("DELETE /admin/config", func(w http.ResponseWriter, r *http.Request) {
+			if !authorized(r, cfg.GatewayToken) {
+				writeErr(w, 401, "unauthorized")
+				return
+			}
+			key := strings.TrimSpace(r.URL.Query().Get("key"))
+			if key == "" {
+				writeErr(w, 400, "key required")
+				return
+			}
+			if err := admin.Store.Clear(key); err != nil {
+				writeErr(w, 400, err.Error())
+				return
+			}
+			// Re-apply the ENV value for that key so the revert is live, not restart-deferred.
+			switch key {
+			case "dailyCallCap", "perTenantDailyCallCap":
+				b.SetCaps(cfg.DailyCallCap, cfg.PerTenantDailyCallCap)
+			case "breakerThreshold", "breakerCooldownMs":
+				for _, c := range []*chain.Chain{chains.LLM, chains.Media, chains.Embed} {
+					if c != nil {
+						c.SetSettings(cfg.BreakerThreshold, cfg.BreakerCooldownMs)
+					}
+				}
+			case "providerTimeoutMs":
+				rt.setTimeout(cfg.ProviderTimeoutMs)
+			case "dlpClassifierEnabled":
+				rt.setClassifierOn(cfg.DLPClassifierEnabled)
+			case "llmChain", "mediaChain", "embedChain":
+				if admin.BuildProviders != nil {
+					target, names := chains.LLM, cfg.LLMChain
+					if key == "mediaChain" {
+						target, names = chains.Media, cfg.MediaChain
+					} else if key == "embedChain" {
+						target, names = chains.Embed, cfg.EmbedChain
+					}
+					if target != nil {
+						if built := admin.BuildProviders(names); len(built) > 0 {
+							target.SetProviders(built)
+						}
+					}
+				}
+			}
+			writeJSON(w, 200, map[string]any{"ok": true, "key": key, "revertedToEnv": true})
+		})
+	}
 
 	// WS9 D15 — declare/resolve a failover to (un)lock the bounded DR-burst budget. Bearer-gated.
 	// Body: {"enable":true,"durationMinutes":720}. durationMinutes optional (defaults to config).
@@ -179,8 +499,8 @@ func NewServer(cfg config.Config, chains Chains, b *budget.Budget, classifier *d
 			writeErr(w, 503, err.Error())
 			return
 		}
-		if classifier != nil {
-			if allowed, cerr := classifier.Classify(r.Context(), result.Clean); cerr != nil || !allowed {
+		if c := activeClassifier(); c != nil {
+			if allowed, cerr := c.Classify(r.Context(), result.Clean); cerr != nil || !allowed {
 				emit(r.Context(), audit.EgressAudit{TS: started.UnixMilli(), Capability: "llm", OK: false, Blocked: "dlp", Redactions: len(result.Redactions), LatencyMs: time.Since(started).Milliseconds()})
 				msg := "DLP classifier blocked this request"
 				if cerr != nil {
@@ -195,7 +515,7 @@ func NewServer(cfg config.Config, chains Chains, b *budget.Budget, classifier *d
 			// across the whole failover chain: a hung provider costs at most one
 			// PROVIDER_TIMEOUT_MS before failing over, and a client disconnect (r.Context()
 			// canceled) still cancels the in-flight upstream call immediately (B5).
-			ctx, cancel := context.WithTimeout(r.Context(), providerTimeout(cfg))
+			ctx, cancel := context.WithTimeout(r.Context(), rt.timeout())
 			defer cancel()
 			return p.Complete(ctx, result.Clean)
 		})
@@ -233,7 +553,7 @@ func NewServer(cfg config.Config, chains Chains, b *budget.Budget, classifier *d
 			return
 		}
 		text, provider, taxonomy, err := chain.Run(chains.Media, r.Context(), func(p providers.Provider) (string, error) {
-			ctx, cancel := context.WithTimeout(r.Context(), providerTimeout(cfg))
+			ctx, cancel := context.WithTimeout(r.Context(), rt.timeout())
 			defer cancel()
 			return p.Media(ctx, body.Base64, body.Mime)
 		})
@@ -280,7 +600,7 @@ func NewServer(cfg config.Config, chains Chains, b *budget.Budget, classifier *d
 			return
 		}
 		embedding, provider, taxonomy, err := chain.Run(chains.Embed, r.Context(), func(p providers.Provider) ([]float64, error) {
-			ctx, cancel := context.WithTimeout(r.Context(), providerTimeout(cfg))
+			ctx, cancel := context.WithTimeout(r.Context(), rt.timeout())
 			defer cancel()
 			return p.Embed(ctx, result.Clean)
 		})
@@ -317,8 +637,8 @@ func NewServer(cfg config.Config, chains Chains, b *budget.Budget, classifier *d
 			writeErr(w, 503, err.Error())
 			return
 		}
-		if classifier != nil {
-			if allowed, cerr := classifier.Classify(r.Context(), result.Clean); cerr != nil || !allowed {
+		if c := activeClassifier(); c != nil {
+			if allowed, cerr := c.Classify(r.Context(), result.Clean); cerr != nil || !allowed {
 				writeErr(w, 503, "DLP classifier blocked this request")
 				return
 			}

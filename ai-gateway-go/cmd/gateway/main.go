@@ -14,6 +14,7 @@ import (
 	"os"
 	"time"
 
+	"gaiada/ai-gateway-go/internal/adminconfig"
 	"gaiada/ai-gateway-go/internal/budget"
 	"gaiada/ai-gateway-go/internal/chain"
 	"gaiada/ai-gateway-go/internal/config"
@@ -28,7 +29,15 @@ import (
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
-func buildChain(names []string, cfg config.Config, client *http.Client) *chain.Chain {
+// KNOWN_PROVIDERS is the set a runtime chain-reorder may name (the registry below, plus the always-
+// appended echo terminator). Exposed to the admin write path so an unknown name is rejected with a
+// clear message instead of silently shortening the chain.
+var knownProviders = []string{"whisper", "ollama", "openai", "gemini", "claude", "echo"}
+
+// buildProviderList is buildChain's provider-resolution half, split out so the admin config-write
+// path can rebuild a chain's provider list at runtime using the SAME registry + topology rules the
+// boot path used (site-mode exclusions, central-forward, echo terminator).
+func buildProviderList(names []string, cfg config.Config, client *http.Client) []providers.Provider {
 	registry := map[string]providers.Provider{
 		"whisper": providers.NewWhisperProvider(cfg.WhisperURL, cfg.WhisperModel, client),
 		"ollama":  providers.NewOllamaProvider(cfg.OllamaURL, cfg.OllamaModel, cfg.OllamaEmbedModel, client),
@@ -49,7 +58,11 @@ func buildChain(names []string, cfg config.Config, client *http.Client) *chain.C
 		list = append(list, providers.NewCentralForwardProvider(cfg.CentralURL, cfg.GatewayToken, client))
 	}
 	list = append(list, providers.NewEchoProvider())
-	return chain.NewChain(list, cfg.BreakerThreshold, cfg.BreakerCooldownMs, time.Now)
+	return list
+}
+
+func buildChain(names []string, cfg config.Config, client *http.Client) *chain.Chain {
+	return chain.NewChain(buildProviderList(names, cfg, client), cfg.BreakerThreshold, cfg.BreakerCooldownMs, time.Now)
 }
 
 // loadOrCreateCA reads the internal CA from disk if present, else generates and persists it.
@@ -94,6 +107,25 @@ func main() {
 	// upstream call becomes a client span. otelhttp is a no-op passthrough when OTEL is disabled.
 	client := &http.Client{Transport: otelhttp.NewTransport(transport)}
 
+	// Admin config overrides (console writes) are folded onto the env BEFORE anything is built, so a
+	// persisted override is in force from the very first request rather than only after a console read.
+	// A corrupt/unreadable override file is logged loudly and ignored — the gateway must still boot on
+	// its env, but a silent config reset would be worse than a noisy one.
+	overridesPath := os.Getenv("GATEWAY_ADMIN_OVERRIDES_FILE")
+	if overridesPath == "" {
+		overridesPath = "data/admin-overrides.json"
+	}
+	overrideStore, err := adminconfig.Load(overridesPath)
+	if err != nil {
+		log.Printf("admin overrides NOT applied (%v) — running on env config", err)
+	}
+	ov := overrideStore.Get()
+	cfg.DailyCallCap, cfg.PerTenantDailyCallCap, cfg.BreakerThreshold, cfg.BreakerCooldownMs,
+		cfg.ProviderTimeoutMs, cfg.DLPClassifierEnabled, cfg.LLMChain, cfg.MediaChain, cfg.EmbedChain =
+		adminconfig.Apply(ov, cfg.DailyCallCap, cfg.PerTenantDailyCallCap, cfg.BreakerThreshold,
+			cfg.BreakerCooldownMs, cfg.ProviderTimeoutMs, cfg.DLPClassifierEnabled,
+			cfg.LLMChain, cfg.MediaChain, cfg.EmbedChain)
+
 	chains := server.Chains{
 		LLM:   buildChain(cfg.LLMChain, cfg, client),
 		Media: buildChain(cfg.MediaChain, cfg, client),
@@ -105,10 +137,11 @@ func main() {
 		log.Printf("DR-burst budget unlocked at boot: +%d calls for %d min", cfg.DRBurstCap, cfg.DRDurationMin)
 	}
 
-	var classifier *dlp.Classifier
-	if cfg.DLPClassifierEnabled {
-		classifier = dlp.NewClassifier(cfg.OllamaURL, cfg.DLPClassifierModel, cfg.DLPClassifierTimeoutMs, client)
-	}
+	// The classifier object is now ALWAYS constructed (it is just a struct + HTTP client — building it
+	// makes no calls), and whether it RUNS is a runtime flag inside the server. That is what makes the
+	// console's `dlpClassifierEnabled` toggle real: previously a nil classifier meant the toggle could
+	// never be switched on without a restart.
+	classifier := dlp.NewClassifier(cfg.OllamaURL, cfg.DLPClassifierModel, cfg.DLPClassifierTimeoutMs, client)
 
 	inst := metrics.New()
 	// Mirror the live cost budget as observable gauges (cost/tokens/tenants + DR-mode).
@@ -117,8 +150,16 @@ func main() {
 		return metrics.BudgetSnapshot{Used: used, Cap: cap, Tenants: tenants, PerTenantCap: perTenantCap, DRMode: b.DRModeActive(time.Now())}
 	})
 
+	admin := &server.Admin{
+		Store:          overrideStore,
+		KnownProviders: knownProviders,
+		// Reordering rebuilds from the same registry the boot path used, so site-mode exclusions and
+		// the echo terminator apply to a runtime reorder exactly as they do at boot.
+		BuildProviders: func(names []string) []providers.Provider { return buildProviderList(names, cfg, client) },
+	}
+
 	// Wrap the router so every inbound request extracts traceparent and gets a server span.
-	var handler http.Handler = otelhttp.NewHandler(server.NewServer(cfg, chains, b, classifier, inst), "gateway")
+	var handler http.Handler = otelhttp.NewHandler(server.NewServer(cfg, chains, b, classifier, inst, admin), "gateway")
 	addr := fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)
 	log.Printf("Gaiada AI Gateway (Go) on %s — llm: %v, media: %v, auth: %v, cap: %d/day, tls: %s, topology: %s, classifier: %v",
 		addr, cfg.LLMChain, cfg.MediaChain, cfg.GatewayToken != "", cfg.DailyCallCap, cfg.TLSMode, cfg.TopologyMode, cfg.DLPClassifierEnabled)

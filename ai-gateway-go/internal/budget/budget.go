@@ -26,6 +26,21 @@ func NewBudget(dailyCap, perTenantCap int) *Budget {
 	return &Budget{dailyCap: dailyCap, perTenantCap: perTenantCap, tenantCounts: map[string]int{}}
 }
 
+// SetCaps retunes the steady caps at runtime (admin config write). A non-positive value leaves that
+// cap untouched so a caller can change one without restating the other. Today's COUNTERS are
+// deliberately preserved: lowering the cap below current spend must degrade immediately rather than
+// hand out a fresh allowance, and raising it must not retroactively forgive spend.
+func (b *Budget) SetCaps(dailyCap, perTenantCap int) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if dailyCap > 0 {
+		b.dailyCap = dailyCap
+	}
+	if perTenantCap > 0 {
+		b.perTenantCap = perTenantCap
+	}
+}
+
 // EnableDR unlocks the DR-burst allowance for dur, adding burstCap to the effective daily global cap.
 // Idempotent: re-declaring extends the window. now is injected (same clock the rest of Budget uses).
 func (b *Budget) EnableDR(now time.Time, dur time.Duration, burstCap int) {
@@ -98,6 +113,47 @@ func (b *Budget) Take(tenant string, now time.Time) (bool, string) {
 func (b *Budget) State(now time.Time) map[string]any {
 	used, cap, tenants, perTenantCap := b.Snapshot(now)
 	return map[string]any{"used": used, "cap": cap, "tenants": tenants, "perTenantCap": perTenantCap}
+}
+
+// Breakdown is the admin-console view of the budget: the same numbers State() reports plus the
+// per-tenant spend map and the DR-burst window, so the console can show WHO is burning the cap
+// and whether a failover burst is currently unlocked. Read-only; never mutates counters.
+type Breakdown struct {
+	Day          string         `json:"day"`
+	Used         int            `json:"used"`
+	Cap          int            `json:"cap"`
+	EffectiveCap int            `json:"effectiveCap"`
+	PerTenantCap int            `json:"perTenantCap"`
+	Tenants      map[string]int `json:"tenants"`
+	DRActive     bool           `json:"drActive"`
+	DRBurstCap   int            `json:"drBurstCap"`
+	DRUntil      string         `json:"drUntil,omitempty"`
+}
+
+func (b *Budget) Breakdown(now time.Time) Breakdown {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	out := Breakdown{
+		Day:          today(now),
+		Cap:          b.dailyCap,
+		EffectiveCap: b.effectiveCap(now),
+		PerTenantCap: b.perTenantCap,
+		Tenants:      map[string]int{},
+		DRActive:     b.drActive(now),
+		DRBurstCap:   b.drBurstCap,
+	}
+	// Counters belong to b.day; once the day has rolled they are stale and read as zero (same
+	// rule Snapshot uses) rather than being attributed to today.
+	if today(now) == b.day {
+		out.Used = b.globalCount
+		for t, n := range b.tenantCounts {
+			out.Tenants[t] = n
+		}
+	}
+	if !b.drUntil.IsZero() {
+		out.DRUntil = b.drUntil.UTC().Format(time.RFC3339)
+	}
+	return out
 }
 
 // Snapshot is the typed view of State — WS9 metrics read this to mirror the budget as gauges
