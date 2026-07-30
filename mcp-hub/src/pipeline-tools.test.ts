@@ -18,9 +18,49 @@ describe("WS11 pipeline hub tools", () => {
   afterEach(() => vi.restoreAllMocks());
 
   it("registers the pipeline + extraction tools", () => {
-    for (const n of ["llm.extract", "pipeline.createRun", "pipeline.updateStage", "pipeline.openGate", "pipeline.getRun", "pipeline.listGates"]) {
+    for (const n of ["llm.extract", "pipeline.createRun", "pipeline.updateStage", "pipeline.updateRun", "pipeline.openGate", "pipeline.getRun", "pipeline.listGates", "meeting.recordingContext"]) {
       expect(getTool(n)).toBeDefined();
     }
+  });
+
+  describe("meeting.recordingContext (F-1: dispatcher client-context recovery)", () => {
+    it("finds the matching row by meetingId and returns its client/project ids", async () => {
+      vi.stubGlobal(
+        "fetch",
+        mockFetch(200, [
+          { id: "rec-1", meeting_id: "mtg-other", client_id: "cl-other", project_id: null },
+          { id: "rec-2", meeting_id: "mtg-9", client_id: "cl-42", project_id: "proj-7" },
+        ]),
+      );
+      const out = await getTool("meeting.recordingContext")!.handler({ tenantId: "co-1", meetingId: "mtg-9" }, principal);
+      expect(JSON.parse(out)).toEqual({ clientId: "cl-42", projectId: "proj-7", pipelineRunId: null });
+    });
+
+    // WD-08-R2: the dispatcher's dedupe branch reuses this same read to answer "which run did this
+    // re-posted meetingId already link to" — proving the pipelineRunId passthrough is real, not just
+    // shaped right.
+    it("returns the already-linked pipeline run id when the row has one (WD-08-R2 dedupe lookup)", async () => {
+      vi.stubGlobal(
+        "fetch",
+        mockFetch(200, [{ id: "rec-9", meeting_id: "mtg-dup", client_id: "cl-1", project_id: null, pipeline_run_id: "run-abc" }]),
+      );
+      const out = await getTool("meeting.recordingContext")!.handler({ tenantId: "co-1", meetingId: "mtg-dup" }, principal);
+      expect(JSON.parse(out)).toEqual({ clientId: "cl-1", projectId: null, pipelineRunId: "run-abc" });
+    });
+
+    it("returns nulls when no recording row matches (e.g. a raw pasted-transcript test) — no regression", async () => {
+      vi.stubGlobal("fetch", mockFetch(200, [{ id: "rec-1", meeting_id: "mtg-other", client_id: "cl-other", project_id: null }]));
+      const out = await getTool("meeting.recordingContext")!.handler({ tenantId: "co-1", meetingId: "mtg-does-not-exist" }, principal);
+      expect(JSON.parse(out)).toEqual({ clientId: null, projectId: null, pipelineRunId: null });
+    });
+
+    it("returns nulls without calling the platform when meetingId is empty", async () => {
+      const spy = mockFetch(200, []);
+      vi.stubGlobal("fetch", spy);
+      const out = await getTool("meeting.recordingContext")!.handler({ tenantId: "co-1", meetingId: "" }, principal);
+      expect(JSON.parse(out)).toEqual({ clientId: null, projectId: null, pipelineRunId: null });
+      expect(spy).not.toHaveBeenCalled();
+    });
   });
 
   it("the mutating pipeline tools are LOW-impact writes (auto-run; the real work is gated downstream)", () => {
@@ -47,6 +87,19 @@ describe("WS11 pipeline hub tools", () => {
     expect(init.method).toBe("POST");
     expect((init.headers as Record<string, string>)["x-obo-external-id"]).toBe("wf:mtg-dispatcher");
     expect(JSON.parse(init.body).sourceMeetingId).toBe("mtg-9");
+  });
+
+  it("pipeline.updateRun PATCHes the run status (WD-05: park a run blocked)", async () => {
+    const spy = mockFetch(200, { id: "run-1", status: "blocked" });
+    vi.stubGlobal("fetch", spy);
+    const out = await getTool("pipeline.updateRun")!.handler({ tenantId: "co-1", runId: "run-1", status: "blocked" }, principal);
+    expect(JSON.parse(out)).toEqual({ id: "run-1", status: "blocked" });
+    const [url, init] = (spy as any).mock.calls[0];
+    expect(url).toContain("/api/co-1/pipeline/runs/run-1");
+    expect(init.method).toBe("PATCH");
+    expect(JSON.parse(init.body).status).toBe("blocked");
+    expect(getTool("pipeline.updateRun")!.write).toBe(true);
+    expect(getTool("pipeline.updateRun")!.impact).toBe("low");
   });
 
   it("pipeline.updateStage PATCHes the stage", async () => {
@@ -106,6 +159,11 @@ describe("WS11 pipeline hub tools", () => {
   it("the WS11 workflows are scoped to exactly their pipeline tools (deny-by-default)", () => {
     expect(AUTOMATION_ALLOWLIST["wf:mtg-dispatcher"]).toContain("llm.extract");
     expect(AUTOMATION_ALLOWLIST["wf:mtg-dispatcher"]).toContain("pipeline.createRun");
+    expect(AUTOMATION_ALLOWLIST["wf:mtg-dispatcher"]).toContain("meeting.recordingContext");
+    // F-1: no OTHER workflow gets read access to the meeting_recordings registry via this tool.
+    expect(AUTOMATION_ALLOWLIST["wf:delivery"]).not.toContain("meeting.recordingContext");
+    expect(AUTOMATION_ALLOWLIST["wf:scope"]).not.toContain("meeting.recordingContext");
+    expect(AUTOMATION_ALLOWLIST["wf:report"]).not.toContain("meeting.recordingContext");
     expect(AUTOMATION_ALLOWLIST["wf:delivery"]).toContain("pipeline.openGate");
     // n8n never decides a gate: no workflow is scoped to a decide/sign tool (none exists on the hub).
     for (const scope of Object.values(AUTOMATION_ALLOWLIST)) {

@@ -60,6 +60,47 @@ const EXTRACT_KINDS: Record<string, string> = {
 };
 
 export function registerPipelineTools(): void {
+  // ---- F-1 fix: recover client/project context the frozen dispatcher webhook cannot carry ----
+  // The meeting-bot seam (WS11 §8) is frozen at { v, meetingId, tenantId, title, transcript } — no
+  // clientId/projectId. But `meeting_recordings` (the capture-edge registry) DOES carry both, and
+  // `pipeline.createRun` DOES accept clientId ("drives client-portal scoping") — it was simply never
+  // read out of the row and forwarded. Rather than widen the frozen contract, the dispatcher now
+  // looks the row up by the same meetingId it already has, via this READ tool over the EXISTING
+  // `GET /:tenantId/meetings/recordings` registry endpoint (unmodified — no platform-nest change).
+  // Recordings not created through the registry (e.g. a raw pasted-transcript test POST) simply have
+  // no matching row, so this degrades to { clientId: null, projectId: null } — no regression.
+  registerTool({
+    name: "meeting.recordingContext",
+    description:
+      "Look up the client/project context (and any pipeline run already linked) recorded on a meeting_recordings row by the bot's stable meetingId. Returns { clientId, projectId, pipelineRunId } (all null if no matching recording row exists, or if no run is linked yet).",
+    minAssurance: "low",
+    inputSchema: {
+      type: "object",
+      properties: {
+        tenantId: { type: "string" },
+        meetingId: { type: "string" },
+      },
+      required: ["tenantId", "meetingId"],
+    },
+    handler: async (args, principal) => {
+      const meetingId = String(args.meetingId ?? "");
+      if (!meetingId) return JSON.stringify({ clientId: null, projectId: null, pipelineRunId: null });
+      const raw = await platformGet(`/api/${String(args.tenantId)}/meetings/recordings`, principal);
+      let rows: Array<{ meeting_id?: string; client_id?: string | null; project_id?: string | null; pipeline_run_id?: string | null }> = [];
+      try {
+        rows = JSON.parse(raw);
+      } catch {
+        rows = [];
+      }
+      const row = rows.find((r) => r.meeting_id === meetingId);
+      // WD-08-R2: dedupe responses on the dispatcher's webhook need the ALREADY-linked run id so a
+      // re-posted meetingId doesn't come back with runId:null (cosmetic today because
+      // meeting_recordings.pipeline_run_id is COALESCE-preserved, but the caller couldn't previously
+      // learn which run it collided with).
+      return JSON.stringify({ clientId: row?.client_id ?? null, projectId: row?.project_id ?? null, pipelineRunId: row?.pipeline_run_id ?? null });
+    },
+  });
+
   // ---- Meeting extraction (AI, Gateway-wrapped) ----
   registerTool({
     name: "llm.extract",
@@ -166,6 +207,28 @@ export function registerPipelineTools(): void {
     handler: (args, principal) =>
       platformSend("POST", `/api/${String(args.tenantId)}/pipeline/runs/${String(args.runId)}/stages`, {
         track: args.track, name: args.name, status: args.status, artifactRef: args.artifactRef, confidence: args.confidence,
+      }, principal),
+  });
+
+  registerTool({
+    name: "pipeline.updateRun",
+    description:
+      "Update a pipeline run's status (WD-05: parks a run 'blocked' once the bounded revise loop's escalation fires, so a later retrigger stops re-evaluating it). Emits pipeline.run.updated.",
+    minAssurance: "low",
+    write: true,
+    impact: "low", // same tier as pipeline.createRun/updateStage — orchestration state only
+    inputSchema: {
+      type: "object",
+      properties: {
+        tenantId: { type: "string" },
+        runId: { type: "string" },
+        status: { type: "string", enum: ["extracting", "delivery_active", "report_done", "scope_pending", "complete", "blocked"] },
+      },
+      required: ["tenantId", "runId"],
+    },
+    handler: (args, principal) =>
+      platformSend("PATCH", `/api/${String(args.tenantId)}/pipeline/runs/${String(args.runId)}`, {
+        status: args.status,
       }, principal),
   });
 

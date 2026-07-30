@@ -5,6 +5,7 @@ import { registerCoreTools } from "./tools";
 import { registerPlatformTools } from "./platform-tools";
 import { registerPlatformWriteTools } from "./platform-write-tools";
 import { registerModuleTools } from "./module-tools";
+import { registerWorkActivityTools } from "./work-activity-tools";
 import { AUTOMATION_ALLOWLIST } from "./automation-policy";
 import type { Principal } from "./principal";
 
@@ -29,6 +30,7 @@ describe("automation scoped service accounts + write gate (WS4 §3)", () => {
     registerCoreTools();
     registerPlatformTools();
     registerPlatformWriteTools();
+    registerWorkActivityTools();
     await registerModuleTools(moduleDefsFetch);
   });
 
@@ -63,6 +65,27 @@ describe("automation scoped service accounts + write gate (WS4 §3)", () => {
     expect(authorize(wf("wf:task-sla"), "approvals.request").allow).toBe(true);
     // A read-only workflow is NOT scoped for it.
     expect(authorize(wf("wf:stale-approval-chaser"), "approvals.request").allow).toBe(false);
+  });
+
+  // WD-26: the two new per-workflow accounts are scoped to exactly their own tools — invisible to
+  // every other wf:* account, and to each other's tools too (per-flow scoping doctrine).
+  it("wf:wd-digests is scoped to its own tools only (invisible to wf:wd-stale-nag's tools)", () => {
+    const p = wf("wf:wd-digests");
+    const visible = visibleTools(p).map((t) => t.name).sort();
+    expect(visible).toEqual(["llm.summarize", "notify", "projects.get", "workActivity.feed", "workActivity.relink"].sort());
+    expect(authorize(p, "workActivity.staleTasks").allow).toBe(false);
+  });
+
+  it("wf:wd-stale-nag is scoped to its own tools only (invisible to wf:wd-digests' tools)", () => {
+    const p = wf("wf:wd-stale-nag");
+    const visible = visibleTools(p).map((t) => t.name).sort();
+    expect(visible).toEqual(["notify", "workActivity.staleTasks"].sort());
+    expect(authorize(p, "workActivity.feed").allow).toBe(false);
+    expect(authorize(p, "workActivity.relink").allow).toBe(false);
+  });
+
+  it("workActivity.relink is a LOW-impact write for wf:wd-digests (auto-runs, no medium+ write anywhere)", () => {
+    expect(authorize(wf("wf:wd-digests"), "workActivity.relink").allow).toBe(true);
   });
 
   it("does NOT grant humans automation scoping (a low human keeps normal visibility)", () => {

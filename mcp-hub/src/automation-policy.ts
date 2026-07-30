@@ -30,10 +30,36 @@ export const AUTOMATION_ALLOWLIST: Record<string, readonly string[]> = {
   "wf:inbound-lead-intake": ["tasks.create"],
   // WS11 meeting-to-delivery pipeline. n8n opens gates + advances stages (all LOW writes) and
   // extracts artifacts; it NEVER decides a gate or records a signature (those are human/UI actions).
-  "wf:mtg-dispatcher": ["media.transcribe", "llm.summarize", "llm.extract", "pipeline.createRun", "pipeline.updateStage", "notify"],
-  "wf:delivery": ["pipeline.getRun", "pipeline.createStage", "pipeline.updateStage", "pipeline.openGate", "design.prototype", "code.scaffold", "github.repoStatus", "deploy.staging", "deploy.production", "notify", "approvals.request"],
+  // meeting.recordingContext (F-1): reads the meeting_recordings row's client/project context by
+  // meetingId so pipeline.createRun can populate clientId — the frozen webhook contract cannot
+  // carry it directly.
+  "wf:mtg-dispatcher": ["media.transcribe", "llm.summarize", "llm.extract", "meeting.recordingContext", "pipeline.createRun", "pipeline.updateStage", "notify"],
+  // pipeline.updateRun (WD-05): parks a run 'blocked' once the bounded revise loop escalates.
+  "wf:delivery": ["pipeline.getRun", "pipeline.createStage", "pipeline.updateStage", "pipeline.updateRun", "pipeline.openGate", "design.prototype", "code.scaffold", "github.repoStatus", "deploy.staging", "deploy.production", "notify", "approvals.request"],
   "wf:scope": ["pipeline.getRun", "pipeline.openGate", "notify"],
-  "wf:report": ["pipeline.getRun", "pipeline.updateStage", "notify"],
+  // pm.createDoc / pm.createTask (WD-06, D-4): the report-track sink — a PM doc + review task
+  // under the run's project, scoped to wf:report ONLY (invisible to wf:scope/wf:delivery/etc).
+  "wf:report": ["pipeline.getRun", "pipeline.updateStage", "pm.createDoc", "pm.createTask", "notify"],
+  // SM-15 n8n flows batch 1 (search-marketing scheduled pulls). search.pullRanks is write:true +
+  // impact:'medium' (design §07/D-5: spending money is a mutation) but is a genuinely REAL,
+  // hub-callable binding (unlike keywordResearch/runAudit/ingestRankResults below, which are
+  // scaffolded for a platform-side gap this workflow set does not fix -- see
+  // automation/workflows/sm-keyword-refresh.json and sm-rank-collect.json's own meta.description).
+  // Listed here anyway so the allow-list entry is ready the moment index.ts wires them, without a
+  // second hub deploy.
+  // approvals.request is required: search.pullRanks is write:true+impact:'medium' (spending
+  // money is a mutation, D14), so every unattended call the D14 gate does not refuse outright
+  // (see minAssurance note above -- it currently refuses ALL of them) would otherwise need to
+  // suspend into a human approval rather than fail outright.
+  "wf:sm-rank-pull": ["search.listEngagements", "search.rankSummary", "search.pullRanks", "approvals.request"],
+  "wf:sm-keyword-refresh": ["search.listEngagements", "search.keywordResearch"],
+  "wf:sm-rank-collect": ["search.ingestRankResults"],
+  // WD-26: per-person/project activity digests (daily 17:00 + weekly Fri) over work_activity.
+  // projects.get resolves a project's owner (poly-assignee) as the project-digest notify target.
+  // workActivity.relink is the LD-16 deterministic relink sweep, called once weekly from this flow.
+  "wf:wd-digests": ["workActivity.feed", "projects.get", "llm.summarize", "notify", "workActivity.relink"],
+  // WD-26: stale-task nag (no work_activity in N=5 days -> assignee; >=2N -> also project owner).
+  "wf:wd-stale-nag": ["workActivity.staleTasks", "notify"],
 };
 
 /** An automation (n8n workflow) principal? Its scope comes from AUTOMATION_ALLOWLIST, not assurance. */
