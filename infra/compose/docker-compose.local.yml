@@ -13,3 +13,35 @@ services:
   platform:
     ports:
       - "127.0.0.1:3004:3004"
+  # Cerbos on the host: platform-nest's suites authorize against a live Cerbos, and a portless
+  # Cerbos fails every check (dev note in CLAUDE.md). Set CERBOS_URL=http://localhost:3592.
+  cerbos:
+    ports:
+      - "127.0.0.1:3592:3592"
+      - "127.0.0.1:3593:3593"
+  # The bot's isolated Postgres on the host, for wa-chat-bot's DB-backed suites. Point
+  # DATABASE_URL_TEST at a DEDICATED database on it, never the live store:
+  #   docker exec gaiada-pg-bot-1 psql -U postgres -c "CREATE DATABASE gaiada_bot_test"
+  pg-bot:
+    ports:
+      - "127.0.0.1:55434:5432"
+  # Disposable Redis for platform-nest's event/HR/search suites (REDIS_URL_TEST). It MUST be
+  # separate from the live `redis` service: n8n-bridge.integration.test.ts calls FLUSHALL, which
+  # would wipe the running event backbone. No volume — state is meant to be thrown away.
+  redis-test:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:56380:6379"
+
+  # TEMPORARY INCIDENT GUARD (2026-07-29). WhatsApp is currently refusing this number/IP's pairing
+  # registration (see the note on the waha image pin in docker-compose.vps.yml). With
+  # WHATSAPP_RESTART_ALL_SESSIONS=True — the VPS default, and normally the RIGHT default because it
+  # re-pairs automatically after a reboot — every `up -d waha` immediately resumes a ~2s
+  # registration retry storm, which is precisely the pattern that earns a longer block. Held off
+  # here so restarts stay quiet while the throttle clears.
+  # REVERT THIS (delete the block) once a QR scan succeeds, or the bot will NOT auto-recover its
+  # session after a host reboot.
+  waha:
+    environment:
+      WHATSAPP_RESTART_ALL_SESSIONS: "False"

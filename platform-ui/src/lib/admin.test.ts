@@ -8,6 +8,17 @@ import {
   getBotChatMessages,
   getBotSessionEvents,
   getBotActionAudit,
+  getEgressAudit,
+  getGatewayDetail,
+  getHubDetail,
+  getHubAudit,
+  getWorkflowExecutions,
+  getBridgeHealth,
+  setDrMode,
+  setGatewayConfig,
+  revertGatewayConfig,
+  setWorkflowActive,
+  replayBridgeStream,
   type SystemStatus,
 } from "./admin";
 import type { Me } from "./platform";
@@ -260,5 +271,189 @@ describe("bot chats/logs readers", () => {
       vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ error: "nope" }), { status: 403 })));
       expect(await getBotActionAudit("u1")).toBeNull();
     });
+  });
+});
+
+describe("systems-console readers (gateway/hub/automation detail)", () => {
+  beforeEach(() => {
+    process.env.PLATFORM_URL = "http://p.test";
+    process.env.PLATFORM_SERVICE_TOKEN = "t";
+  });
+
+  it("getEgressAudit passes the filter through as query params", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      expect(String(url)).toBe(
+        "http://p.test/api/admin/gateway/egress-audit?limit=200&capability=llm&decision=dlp",
+      );
+      return new Response(JSON.stringify([]), { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    await getEgressAudit("u1", { limit: 200, capability: "llm", decision: "dlp" });
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it("getEgressAudit defaults to limit=100 with no filter", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      expect(String(url)).toBe("http://p.test/api/admin/gateway/egress-audit?limit=100");
+      return new Response(JSON.stringify([]), { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    await getEgressAudit("u1");
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it("getGatewayDetail returns the chain report and degrades to null when absent", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({ chains: { llm: { order: ["ollama"], providers: [{ name: "ollama", position: 1, state: "ok", available: true }] } } }),
+          { status: 200 },
+        ),
+      ),
+    );
+    const d = await getGatewayDetail("u1");
+    expect(d?.chains?.llm?.providers?.[0].name).toBe("ollama");
+
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ error: "nope" }), { status: 404 })));
+    expect(await getGatewayDetail("u1")).toBeNull();
+  });
+
+  it("getHubDetail / getHubAudit degrade to null / [] when the hub isn't connected", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ error: "nope" }), { status: 404 })));
+    expect(await getHubDetail("u1")).toBeNull();
+    expect(await getHubAudit("u1")).toEqual([]);
+  });
+
+  it("getWorkflowExecutions / getBridgeHealth degrade gracefully", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ error: "forbidden" }), { status: 403 })));
+    expect(await getWorkflowExecutions("u1")).toEqual([]);
+    expect(await getBridgeHealth("u1")).toBeNull();
+  });
+
+  describe("setDrMode", () => {
+    it("refuses a non-elevated caller without any round-trip", async () => {
+      const fetchMock = vi.fn();
+      vi.stubGlobal("fetch", fetchMock);
+      const res = await setDrMode("u1", meWith("employee"), { enable: true });
+      expect(res.ok).toBe(false);
+      expect(res.error).toContain("permission");
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it("POSTs enable + duration for an elevated caller and echoes the resulting mode", async () => {
+      const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+        expect(String(url)).toBe("http://p.test/api/admin/gateway/dr-mode");
+        expect(init?.method).toBe("POST");
+        expect(JSON.parse(String(init?.body))).toEqual({ enable: true, durationMinutes: 60 });
+        return new Response(JSON.stringify({ drMode: true }), { status: 200 });
+      });
+      vi.stubGlobal("fetch", fetchMock);
+      const res = await setDrMode("u1", meWith("platform_admin"), { enable: true, durationMinutes: 60 });
+      expect(res).toEqual({ ok: true, drMode: true });
+    });
+
+    it("omits durationMinutes when not supplied (gateway applies its configured default)", async () => {
+      const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+        expect(JSON.parse(String(init?.body))).toEqual({ enable: false });
+        return new Response(JSON.stringify({ drMode: false }), { status: 200 });
+      });
+      vi.stubGlobal("fetch", fetchMock);
+      expect(await setDrMode("u1", meWith("platform_admin"), { enable: false })).toEqual({ ok: true, drMode: false });
+    });
+
+    it("reports a friendly message when the gateway isn't connected", async () => {
+      vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ error: "not found" }), { status: 404 })));
+      const res = await setDrMode("u1", meWith("platform_admin"), { enable: true });
+      expect(res.ok).toBe(false);
+      expect(res.error).toContain("isn't available");
+    });
+  });
+});
+
+describe("systems-console writes (config, workflows, bridge replay)", () => {
+  beforeEach(() => {
+    process.env.PLATFORM_URL = "http://p.test";
+    process.env.PLATFORM_SERVICE_TOKEN = "t";
+  });
+
+  it("setGatewayConfig PUTs {key,value} and echoes what the gateway applied", async () => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      expect(String(url)).toBe("http://p.test/api/admin/gateway/config");
+      expect(init?.method).toBe("PUT");
+      expect(JSON.parse(String(init?.body))).toEqual({ key: "dailyCallCap", value: 500 });
+      return new Response(JSON.stringify({ ok: true, key: "dailyCallCap", applied: 500 }), { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const res = await setGatewayConfig("u1", meWith("platform_admin"), "dailyCallCap", 500);
+    expect(res.ok).toBe(true);
+    expect(res.applied).toBe(500);
+  });
+
+  // The service owns validation; its message must reach the operator verbatim rather than being
+  // replaced by a generic failure string.
+  it("surfaces the gateway's own rejection message on a 400", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({ error: "dailyCallCap must be between 1 and 10000000" }), { status: 400 })),
+    );
+    const res = await setGatewayConfig("u1", meWith("platform_admin"), "dailyCallCap", 0);
+    expect(res.ok).toBe(false);
+    expect(res.error).toContain("between 1 and 10000000");
+  });
+
+  it("reports a missing write route as unavailable rather than an error to fix in the form", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ error: "nope" }), { status: 404 })));
+    const res = await setGatewayConfig("u1", meWith("platform_admin"), "dailyCallCap", 5);
+    expect(res.error).toContain("no config-write route");
+  });
+
+  it("refuses every write for a non-elevated caller without a round-trip", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const me = meWith("employee");
+    expect((await setGatewayConfig("u1", me, "dailyCallCap", 5)).ok).toBe(false);
+    expect((await revertGatewayConfig("u1", me, "dailyCallCap")).ok).toBe(false);
+    expect((await setWorkflowActive("u1", me, "wf1", false)).ok).toBe(false);
+    expect((await replayBridgeStream("u1", me, "client")).ok).toBe(false);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("revertGatewayConfig DELETEs with the key as a query param", async () => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      expect(String(url)).toBe("http://p.test/api/admin/gateway/config?key=llmChain");
+      expect(init?.method).toBe("DELETE");
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    expect((await revertGatewayConfig("u1", meWith("platform_admin"), "llmChain")).ok).toBe(true);
+  });
+
+  it("setWorkflowActive picks the activate/deactivate path and returns n8n's resulting state", async () => {
+    const seen: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        seen.push(String(url));
+        // "/activate", not "activate" — the latter also matches "deactivate".
+        return new Response(JSON.stringify({ id: "wf1", active: String(url).endsWith("/activate") }), { status: 200 });
+      }),
+    );
+    const me = meWith("platform_admin");
+    expect((await setWorkflowActive("u1", me, "wf1", false)).active).toBe(false);
+    expect((await setWorkflowActive("u1", me, "wf1", true)).active).toBe(true);
+    expect(seen[0]).toBe("http://p.test/api/admin/automation/workflows/wf1/deactivate");
+    expect(seen[1]).toBe("http://p.test/api/admin/automation/workflows/wf1/activate");
+  });
+
+  it("replayBridgeStream URL-encodes the stream and returns the requeued count", async () => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      expect(String(url)).toBe("http://p.test/api/admin/automation/bridge/org_structure/replay");
+      expect(init?.method).toBe("POST");
+      return new Response(JSON.stringify({ entityType: "org_structure", replayed: 3, remaining: 0 }), { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const res = await replayBridgeStream("u1", meWith("platform_admin"), "org_structure");
+    expect(res).toMatchObject({ ok: true, replayed: 3, remaining: 0 });
   });
 });

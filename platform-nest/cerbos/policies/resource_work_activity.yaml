@@ -9,6 +9,19 @@ resourcePolicy:
     - actions: ["*"]
       effect: EFFECT_ALLOW
       derivedRoles: ["platform_admin"]
+    # WD-20-R1 (2026-07-30): group_executive (owner) is a GLOBAL cross-company role, so it gets its own
+    # rule gated on `notLow` only — deliberately NOT `inTenant`, which requires the resource's tenant to
+    # be in principal.companies and therefore never holds for a global exec grant. Mirrors the sibling
+    # resource_integration_connection.yaml exactly. Why this was needed: derived roles do NOT cascade
+    # (each is gated on an explicit grant of its own name, see derived_roles.yaml), so an owner whose
+    # only grant is `group_executive` matched NO rule here and could not read the work-activity feed for
+    # any company — contradicting the dept-console design, whose exec-facing Home KPIs and cross-company
+    # "Waiting on me" rail both read this feed. Read-only: ingest stays company_admin-only below, since
+    # exec is an oversight role, not a service principal.
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["group_executive"]
+      condition: { match: { expr: "variables.notLow" } }
     # Reading the evidence trail is member-level (the whole team references it, mirrors activity/
     # meeting_recording read).
     - actions: ["read"]

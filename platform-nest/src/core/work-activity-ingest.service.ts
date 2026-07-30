@@ -59,7 +59,7 @@ export interface WorkActivityIngestResult {
 
 /** Controller-boundary I/O: resolve everything the pure linker needs, scoped to this tenant's RLS
  *  session. Never guesses — only uuids/hints this tenant actually owns end up in the context. */
-async function buildLinkerContext(
+export async function buildLinkerContext(
   client: PoolClient,
   payload: Record<string, unknown>,
   scanText: string,
@@ -105,7 +105,7 @@ async function buildLinkerContext(
   return { knownIds, taskProject, projectDepartment, actorPerson: {} };
 }
 
-async function insertLinks(client: PoolClient, tenantId: string, activityId: string, links: WorkActivityLink[]): Promise<void> {
+export async function insertLinks(client: PoolClient, tenantId: string, activityId: string, links: WorkActivityLink[]): Promise<void> {
   for (const link of links) {
     await client.query(
       `INSERT INTO work_activity_links (id, tenant_id, activity_id, target_kind, target_id, confidence, rule)
@@ -155,5 +155,44 @@ export async function ingestWorkActivity(tenantId: string, input: WorkActivityIn
       });
     }
     return { row, links, deduped: !row.inserted };
+  });
+}
+
+export interface RelinkResult {
+  scanned: number;
+  relinked: number;
+  linksAdded: number;
+}
+
+/** WD-26 deterministic relink sweep (LD-16): re-runs the pure `deriveLinks` engine over
+ *  work_activity rows that currently have ZERO links, in a bounded batch ordered oldest-first.
+ *  Idempotent by construction — a row is only ever selected while it has no links, so a second
+ *  run over the same window (no new zero-link rows) always returns { scanned: 0, relinked: 0,
+ *  linksAdded: 0 }. AI-suggested linking is explicitly out of v1 (deterministic rules only, same
+ *  engine the synchronous ingest path uses). */
+export async function relinkZeroLinkActivities(tenantId: string, limit = 100): Promise<RelinkResult> {
+  return withTenants([tenantId], async (c) => {
+    const rows = await c.query<WorkActivityDbRow>(
+      `SELECT wa.id, wa.tenant_id, wa.source, wa.source_ref, wa.actor_user_id, wa.actor_external, wa.verb,
+              wa.object_kind, wa.object_ref, wa.title, wa.payload, wa.occurred_at, wa.origin_site, wa.created_at
+       FROM work_activity wa
+       WHERE NOT EXISTS (SELECT 1 FROM work_activity_links l WHERE l.activity_id = wa.id)
+       ORDER BY wa.created_at ASC
+       LIMIT $1`,
+      [limit],
+    );
+    let relinked = 0;
+    let linksAdded = 0;
+    for (const row of rows.rows) {
+      const scanText = row.title ?? "";
+      const ctx = await buildLinkerContext(c, row.payload ?? {}, scanText);
+      const links = deriveLinks({ source: row.source, payload: row.payload ?? {}, text: scanText }, ctx);
+      if (links.length) {
+        await insertLinks(c, tenantId, row.id, links);
+        relinked++;
+        linksAdded += links.length;
+      }
+    }
+    return { scanned: rows.rows.length, relinked, linksAdded };
   });
 }

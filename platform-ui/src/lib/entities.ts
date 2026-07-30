@@ -18,6 +18,8 @@ export interface Project {
   department_id: string | null;
   due_date: string | null;
   custom_fields: Record<string, unknown>;
+  // WD-28: unique per tenant, derived on creation + backfilled for legacy rows.
+  shortCode: string | null;
 }
 export interface ProjectDetail extends Project {
   client_name: string | null;

@@ -13,13 +13,19 @@ export async function login(_prev: { error: string } | null, formData: FormData)
   const returnTo = safeReturn(String(formData.get("return") ?? "/"));
   if (!email) return { error: "Enter your email to continue." };
 
-  // TEMP DEMO MODE — see lib/demoFixtures.ts. Select between two demo identities:
+  // TEMP DEMO MODE — see lib/demoFixtures.ts. Select between three demo identities:
+  // • "seo-staff@gaiada.com" (or email containing "seo-staff") → search_staff tier, scoped to
+  //   dept-3/co-agency only (SM-38 QA-flagged gap: exercises negative-permission rendering —
+  //   search.scope.write=false — in the SEO console; see demoFixtures.ts's header note on it)
   // • "gede@gaiada.com" or email containing "ic" → IC tier (Queue+Agenda Home)
   // • any other email → manager tier (Command Center Home)
-  // Inert unless DEMO_MODE=1 is set locally.
+  // Inert unless DEMO_MODE=1 is set locally. Checked BEFORE the "ic" substring test since neither
+  // "seo-staff" nor "seo-staff@gaiada.com" contains "ic", but order still matters for clarity.
   if (process.env.DEMO_MODE === "1") {
-    const isIC = email === "gede@gaiada.com" || email.toLowerCase().includes("ic");
-    const userId = isIC ? "gede-ic" : "demo-hansel";
+    const lower = email.toLowerCase();
+    const isSearchStaff = lower === "seo-staff@gaiada.com" || lower.includes("seo-staff");
+    const isIC = email === "gede@gaiada.com" || lower.includes("ic");
+    const userId = isSearchStaff ? "seo-staff" : isIC ? "gede-ic" : "demo-hansel";
     const jar = await cookies();
     jar.set(SESSION_COOKIE, sealSession(userId), {
       httpOnly: true,

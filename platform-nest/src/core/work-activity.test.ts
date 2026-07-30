@@ -177,4 +177,96 @@ describe.skipIf(!TEST_URL)("work-activity ingest/read API (P1-04)", () => {
     expect(rows.rows.every((r: { object_kind: string }) => ["file", "doc", "deliverable"].includes(r.object_kind))).toBe(true);
     expect(rows.rows.length).toBeGreaterThanOrEqual(1);
   });
+
+  // ---- WD-26: stale-tasks (wd-stale-nag's data source) + the deterministic relink sweep (LD-16) ----
+  describe("WD-26: stale-tasks + relink sweep", () => {
+    let staleProjectId: string;
+    let staleTaskId: string;
+    let staleAssignee: string;
+    let projectOwner: string;
+
+    it("seed: a stale task (assignee, backdated, no activity) under a project with an owner", async () => {
+      staleAssignee = await createUser("stale-assignee@work-activity.test");
+      projectOwner = await createUser("stale-owner@work-activity.test");
+      await addMembership(co, staleAssignee);
+      await addMembership(co, projectOwner);
+      await grantRole(staleAssignee, await createRole("member"), "company", co);
+      await grantRole(projectOwner, await createRole("manager"), "company", co);
+
+      staleProjectId = await createProject(co, "Stale project");
+      staleTaskId = await createPmTask(co, staleProjectId, "Forgotten task");
+      await withTenants([co], (c) =>
+        c.query(
+          `UPDATE pm_tasks SET assignee = $2, created_at = now() - interval '30 days' WHERE id = $1`,
+          [
+            staleTaskId,
+            JSON.stringify({ kind: "person", refId: staleAssignee, refName: "Stale Assignee", responsibleId: staleAssignee, responsibleName: "Stale Assignee" }),
+          ],
+        ),
+      );
+      await withTenants([co], (c) =>
+        c.query(
+          `INSERT INTO pm_project_meta (tenant_id, project_id, owner, origin_site) VALUES ($1, $2, $3, 'central')
+           ON CONFLICT (tenant_id, project_id) DO UPDATE SET owner = EXCLUDED.owner`,
+          [
+            co, staleProjectId,
+            JSON.stringify({ kind: "person", refId: projectOwner, refName: "Project Owner", responsibleId: projectOwner, responsibleName: "Project Owner" }),
+          ],
+        ),
+      );
+    });
+
+    it("stale-tasks(days=5) surfaces it with assignee + project-owner ids, daysStale past the 2N=10 escalation line", async () => {
+      const r = await app.inject({ method: "GET", url: `/api/${co}/work-activity/stale-tasks?days=5`, headers: asUser(member) });
+      expect(r.statusCode).toBe(200);
+      const row = r.json().find((t: { taskId: string }) => t.taskId === staleTaskId);
+      expect(row).toBeTruthy();
+      expect(row.assigneeUserId).toBe(staleAssignee);
+      expect(row.projectOwnerUserId).toBe(projectOwner);
+      expect(row.daysStale).toBeGreaterThanOrEqual(10); // >= 2*N: wd-stale-nag's escalation branch fires
+    });
+
+    it("a task with recent activity is NOT reported stale", async () => {
+      // `taskId` (top-level fixture) has real activity ingested moments ago in this same suite.
+      const r = await app.inject({ method: "GET", url: `/api/${co}/work-activity/stale-tasks?days=5`, headers: asUser(member) });
+      expect(r.json().map((t: { taskId: string }) => t.taskId)).not.toContain(taskId);
+    });
+
+    it("stale-tasks is member-level, not admin-only (200 for a plain member)", async () => {
+      expect((await app.inject({ method: "GET", url: `/api/${co}/work-activity/stale-tasks`, headers: asUser(member) })).statusCode).toBe(200);
+    });
+
+    it("relink sweep links a deliberately-unlinked row, and re-running is idempotent", async () => {
+      // A manual activity with no structured hint and no scannable uuid in its title -> zero links.
+      const post = await app.inject({
+        method: "POST", url: `/api/${co}/work-activity`, headers: asUser(admin),
+        payload: { source: "manual", sourceRef: "unlinked-1", verb: "noted", objectKind: "deliverable", objectRef: "d3", title: "Free text, no hints" },
+      });
+      expect(post.json().links).toEqual([]);
+      const unlinkedId = post.json().id;
+
+      // Retroactively give it a resolvable hint the original ingest call never carried (simulates a
+      // linker miss / a payload whose linkable id only became known later).
+      await adminPool().query(`UPDATE work_activity SET payload = $2 WHERE id = $1`, [unlinkedId, JSON.stringify({ taskId: staleTaskId })]);
+
+      const relink1 = await app.inject({ method: "POST", url: `/api/${co}/work-activity/relink`, headers: asUser(admin) });
+      expect(relink1.statusCode).toBe(200);
+      expect(relink1.json().relinked).toBeGreaterThanOrEqual(1);
+
+      const linkedAfter1 = await adminPool().query(`SELECT target_kind, target_id FROM work_activity_links WHERE activity_id = $1`, [unlinkedId]);
+      expect(linkedAfter1.rows.map((l: { target_kind: string; target_id: string }) => `${l.target_kind}:${l.target_id}`)).toContain(`pm_task:${staleTaskId}`);
+      const countAfter1 = linkedAfter1.rowCount;
+
+      // Idempotency: the row now HAS links, so it's no longer a zero-link candidate — a second
+      // sweep over the same tenant must add nothing further to it (no double-linking, no churn).
+      const relink2 = await app.inject({ method: "POST", url: `/api/${co}/work-activity/relink`, headers: asUser(admin) });
+      expect(relink2.statusCode).toBe(200);
+      const linkedAfter2 = await adminPool().query(`SELECT count(*)::int AS n FROM work_activity_links WHERE activity_id = $1`, [unlinkedId]);
+      expect(linkedAfter2.rows[0].n).toBe(countAfter1);
+    });
+
+    it("relink is admin/service-only (403 for a plain member)", async () => {
+      expect((await app.inject({ method: "POST", url: `/api/${co}/work-activity/relink`, headers: asUser(member) })).statusCode).toBe(403);
+    });
+  });
 });

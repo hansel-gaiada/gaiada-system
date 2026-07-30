@@ -21,7 +21,12 @@ import type { FastifyRequest } from "fastify";
 import { withTenants } from "../db";
 import { authorize } from "./http";
 import { AuthGuard } from "../auth/guards";
-import { ingestWorkActivity, WORK_ACTIVITY_SOURCES as SOURCES, type WorkActivityDbRow } from "./work-activity-ingest.service";
+import {
+  ingestWorkActivity,
+  relinkZeroLinkActivities,
+  WORK_ACTIVITY_SOURCES as SOURCES,
+  type WorkActivityDbRow,
+} from "./work-activity-ingest.service";
 
 interface IngestBody {
   source?: string;
@@ -117,6 +122,73 @@ export class WorkActivityController {
       createdAt: a.created_at,
       links: linksByActivity.get(a.id) ?? [],
     }));
+  }
+
+  // WD-26: open pm_tasks with no linked work_activity in the last N days (default 5, 1..90). Feeds
+  // the wd-stale-nag flow (nag the assignee at N days; also notify the project owner at 2N —
+  // computed by the caller off the returned daysStale, so this stays a pure read). Read-tier
+  // mirrors the base feed (member+) since it derives from the same work_activity/work_activity_links
+  // surface, just re-shaped around pm_tasks.
+  @Get(":tenantId/work-activity/stale-tasks")
+  async staleTasks(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Query("days") daysQ?: string) {
+    await authorize(req.principal, { kind: "work_activity", tenantId }, "read");
+    const days = Math.max(1, Math.min(Number(daysQ ?? 5) || 5, 90));
+
+    const rows = await withTenants([tenantId], (c) =>
+      c.query<{
+        task_id: string;
+        title: string;
+        project_id: string;
+        project_name: string;
+        assignee_user_id: string | null;
+        assignee_name: string | null;
+        project_owner_user_id: string | null;
+        project_owner_name: string | null;
+        reference_at: string;
+      }>(
+        `SELECT t.id AS task_id, t.title, t.project_id, p.name AS project_name,
+                t.assignee->>'responsibleId' AS assignee_user_id, t.assignee->>'responsibleName' AS assignee_name,
+                pm.owner->>'responsibleId' AS project_owner_user_id, pm.owner->>'responsibleName' AS project_owner_name,
+                COALESCE(la.last_activity, t.created_at) AS reference_at
+         FROM pm_tasks t
+         JOIN projects p ON p.id = t.project_id AND p.deleted_at IS NULL
+         LEFT JOIN pm_project_meta pm ON pm.tenant_id = t.tenant_id AND pm.project_id = t.project_id
+         LEFT JOIN LATERAL (
+           SELECT MAX(wa.occurred_at) AS last_activity
+           FROM work_activity_links l
+           JOIN work_activity wa ON wa.id = l.activity_id
+           WHERE l.target_kind = 'pm_task' AND l.target_id = t.id::text
+         ) la ON true
+         WHERE t.tenant_id = $1 AND t.deleted_at IS NULL AND t.status <> 'done'
+           AND COALESCE(la.last_activity, t.created_at) < now() - make_interval(days => $2::int)
+         ORDER BY reference_at ASC
+         LIMIT 200`,
+        [tenantId, days],
+      ),
+    );
+
+    const now = Date.now();
+    return rows.rows.map((r) => ({
+      taskId: r.task_id,
+      title: r.title,
+      projectId: r.project_id,
+      projectName: r.project_name,
+      assigneeUserId: r.assignee_user_id,
+      assigneeName: r.assignee_name,
+      projectOwnerUserId: r.project_owner_user_id,
+      projectOwnerName: r.project_owner_name,
+      daysStale: Math.floor((now - new Date(r.reference_at).getTime()) / 86_400_000),
+    }));
+  }
+
+  // WD-26 deterministic relink sweep (LD-16): admin/service-only (same "create" tier as ingest —
+  // this mutates work_activity_links). Idempotent: only rows with zero links are ever selected.
+  @Post(":tenantId/work-activity/relink")
+  @HttpCode(200)
+  async relink(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Query("limit") limitQ?: string) {
+    await authorize(req.principal, { kind: "work_activity", tenantId }, "create");
+    const limit = Math.max(1, Math.min(Number(limitQ ?? 100) || 100, 500));
+    return relinkZeroLinkActivities(tenantId, limit);
   }
 
   // Idempotent ingest — the WSUX-15 outbox consumer + one-shot backfill (and, meanwhile, any admin/

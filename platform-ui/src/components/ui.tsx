@@ -84,7 +84,9 @@ export function StatusBadge({ label }: { label: string }) {
 }
 
 export function KpiTile({ label, value, delta, deltaUp, foot }: {
-  label: string; value: string; delta?: string; deltaUp?: boolean; foot?: string;
+  // `value` accepts ReactNode (not just string) so a caller can ride a badge (e.g. SM-38's
+  // SimulatedBadge) alongside the figure — every existing string call site is unaffected.
+  label: string; value: ReactNode; delta?: string; deltaUp?: boolean; foot?: string;
 }) {
   return (
     <div className="lux-kpi">

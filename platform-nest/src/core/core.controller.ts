@@ -12,6 +12,7 @@ import { validateCustomFields } from "./custom-fields";
 import { recomputeRollups } from "../rollups/engine";
 import { AuthGuard } from "../auth/guards";
 import { getServiceScopes } from "./service-scopes";
+import { deriveUniqueShortCode } from "./project-short-codes";
 
 @Controller("api")
 @UseGuards(AuthGuard)
@@ -97,7 +98,7 @@ export class CoreController {
   async projects(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string) {
     await authorize(req.principal, { kind: "project", tenantId }, "read");
     const rows = await withTenants([tenantId], (c) =>
-      c.query(`SELECT id, name, status, client_id, is_internal, owner_id, due_date, custom_fields, department_id
+      c.query(`SELECT id, name, status, client_id, is_internal, owner_id, due_date, custom_fields, department_id, short_code AS "shortCode"
                FROM projects WHERE deleted_at IS NULL ORDER BY created_at DESC`),
     );
     return rows.rows;
@@ -122,10 +123,14 @@ export class CoreController {
     await withTenants([tenantId], async (c) => {
       const cfError = await validateCustomFields(c, tenantId, "project", customFields);
       if (cfError) throw new BadRequestException(cfError);
+      // WD-28: every new project gets a unique short_code up front (not just the 0050 backfill's
+      // one-time pass over pre-existing rows) so pm_tasks created under it can always display
+      // CODE-SEQ. `projects_short_code_uidx` is the hard backstop if this probe ever loses a race.
+      const shortCode = await deriveUniqueShortCode(c, tenantId, name);
       await c.query(
-        `INSERT INTO projects (id, tenant_id, name, client_id, owner_id, custom_fields, department_id, origin_site)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-        [id, tenantId, name, clientId ?? null, req.principal.userId, JSON.stringify(customFields), departmentId ?? null, config.originSite],
+        `INSERT INTO projects (id, tenant_id, name, client_id, owner_id, custom_fields, department_id, short_code, origin_site)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+        [id, tenantId, name, clientId ?? null, req.principal.userId, JSON.stringify(customFields), departmentId ?? null, shortCode, config.originSite],
       );
     });
     await writeActivity(tenantId, req.principal.userId, "created", "project", id, { name });

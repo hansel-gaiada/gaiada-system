@@ -66,6 +66,44 @@ export async function platformFetch<T>(path: string, userId: string, init: Reque
   return (await res.json()) as T;
 }
 
+// WD-07 (Part A, WD-04 frontend): multipart uploader for the in-ERP audio-upload path
+// (`POST /api/:t/meetings/recordings/:id/audio`). Deliberately separate from platformFetch:
+// that helper always forces `content-type: application/json` whenever a body is present,
+// which would corrupt a multipart body's boundary. This omits any content-type header so
+// fetch/undici sets `multipart/form-data; boundary=…` itself from the FormData instance.
+// Same auth-header resolution as platformFetch (OIDC session first, dev bearer+x-user-id
+// fallback); callers are expected to handle DEMO_MODE themselves (a real binary upload has
+// no meaningful demo fixture path — see meetingsActions.ts).
+export async function platformUpload<T>(path: string, userId: string, form: FormData): Promise<T> {
+  const base = process.env.PLATFORM_URL ?? "http://localhost:3004";
+  let authHeaders: Record<string, string>;
+  let oidc: { accessToken: string } | null = null;
+  try {
+    const { getSession } = await import("./session-server");
+    const s = await getSession();
+    if (s?.mode === "oidc") oidc = { accessToken: s.accessToken };
+  } catch {
+    oidc = null;
+  }
+  if (oidc) {
+    authHeaders = { authorization: `Bearer ${oidc.accessToken}` };
+  } else {
+    authHeaders = { authorization: `Bearer ${process.env.PLATFORM_SERVICE_TOKEN ?? ""}`, "x-user-id": userId };
+  }
+  const res = await fetch(`${base}${path}`, { method: "POST", headers: authHeaders, body: form, cache: "no-store" });
+  if (!res.ok) {
+    let msg = `platform ${res.status}`;
+    let field: string | undefined;
+    try {
+      const body = (await res.json()) as { error?: string; field?: string };
+      msg = body.error ?? msg;
+      field = body.field;
+    } catch { /* keep default */ }
+    throw new PlatformError(res.status, msg, field);
+  }
+  return (await res.json()) as T;
+}
+
 // A served-company grant materialized by the ORG-6 reconciler for a shared-service
 // unit (e.g. an HR staffer placed in a provider company's HR department, serving
 // one or more target companies for a given module). `[]` whenever

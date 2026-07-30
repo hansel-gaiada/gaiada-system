@@ -161,6 +161,67 @@ test("department Activity tab filters by project and person", async ({ page }) =
   await expect(page.getByText("Task: Wire homepage hero")).toBeVisible();
 });
 
+test("pipeline list links a run into its workspace (client-linked, pending client gate)", async ({ page }) => {
+  await page.goto("/pipeline");
+  await expect(page.getByRole("heading", { level: 1 })).toContainText(/delivery pipeline/i);
+  await page.getByRole("link", { name: "Northwind — site redesign kickoff" }).click();
+  await page.waitForURL(/\/pipeline\/run-demo-1$/);
+  await expect(page.getByRole("heading", { level: 1 })).toContainText(/northwind/i);
+
+  // Plain-language blockage — the scope sign-off is the pending (client) beat.
+  await expect(page.getByText(/waiting on the client: scope sign-off/i)).toBeVisible();
+
+  // Links: the source meeting resolves to a real /meetings/[id] link; the client is named (not a
+  // dead link — staff can't open the client's own portal from here, so it's informational).
+  await expect(page.getByRole("link", { name: "Northwind — site redesign kickoff" })).toHaveAttribute("href", "/meetings/rec-demo-1");
+  await expect(page.getByText(/tracked in their project portal/i)).toBeVisible();
+
+  // All three tracks render with their done stages, confidence, and rendered markdown artifacts.
+  await expect(page.getByText(/prd extract.*done.*90%/i)).toBeVisible();
+  await expect(page.getByRole("heading", { name: /site redesign PRD/i })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /scope agreement/i })).toBeVisible();
+
+  // Gate history: the decided prd_sign + the pending scope_signoff both show, correctly labeled.
+  await expect(page.getByText(/prd sign-off \(client\)/i)).toBeVisible();
+  await expect(page.getByText(/waiting on client/i)).toBeVisible();
+});
+
+test("pipeline workspace degrades cleanly with no client linked and decides its own internal gate", async ({ page }) => {
+  await page.goto("/pipeline/run-demo-2");
+  await expect(page.getByRole("heading", { level: 1 })).toContainText(/mobile app revamp/i);
+
+  // KNOWN GAP teach-state: client_id is null on this demo run (mirrors the live dispatcher gap).
+  await expect(page.getByText(/no client is linked to this run yet/i)).toBeVisible();
+  await expect(page.getByText(/no source meeting linked/i)).toBeVisible();
+
+  // Both un-drafted stages (scope + report) degrade to the empty note, not a blank/broken panel.
+  await expect(page.getByText(/no artifact for this stage yet/i)).toHaveCount(2);
+
+  // The pending PM review is an INTERNAL gate — the workspace itself can decide it (elevated user).
+  await expect(page.getByText(/waiting on internal review: pm review/i)).toBeVisible();
+  await page.getByRole("button", { name: "Approve" }).click();
+  await expect(page.getByText(/in progress — no gate is currently open/i)).toBeVisible();
+  await expect(page.getByRole("button", { name: "Approve" })).toHaveCount(0);
+});
+
+test("PRD Studio run rows deep-link into the pipeline workspace", async ({ page }) => {
+  await switchToAgency(page);
+  await page.goto("/departments/dept-1/prd");
+  await expect(page.getByRole("heading", { level: 1 })).toContainText(/web dev/i);
+  await expect(page.getByRole("heading", { name: /prd runs/i })).toBeVisible();
+  await page.getByRole("link", { name: "Mobile app revamp — discovery" }).click();
+  await page.waitForURL(/\/pipeline\/run-demo-2$/);
+  await expect(page.getByRole("heading", { level: 1 })).toContainText(/mobile app revamp/i);
+});
+
+test("a meeting recording links to its ingested pipeline run", async ({ page }) => {
+  await page.goto("/meetings/rec-demo-1");
+  await expect(page.getByRole("heading", { level: 1 })).toContainText(/northwind/i);
+  await page.getByRole("link", { name: /open run workspace/i }).click();
+  await page.waitForURL(/\/pipeline\/run-demo-1$/);
+  await expect(page.getByRole("heading", { level: 1 })).toContainText(/northwind/i);
+});
+
 test("sign out returns to login", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("button", { name: /clement hansel/i }).click();

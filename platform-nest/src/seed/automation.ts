@@ -32,6 +32,12 @@ export const AUTOMATION_ACCOUNTS: ReadonlyArray<{ workflowId: string; role: stri
   { workflowId: "wf:delivery", role: "manager", email: "automation+delivery@gaiada.system", name: "Automation — Delivery track" },
   { workflowId: "wf:scope", role: "manager", email: "automation+scope@gaiada.system", name: "Automation — Scope agreement track" },
   { workflowId: "wf:report", role: "manager", email: "automation+report@gaiada.system", name: "Automation — Report track" },
+  // WD-26: digests read work_activity (member+) + notify (manager+) + workActivity.relink, which is
+  // gated to the SAME admin/service tier as work_activity's ingest ("create") — company_admin is the
+  // minimum role that covers all three.
+  { workflowId: "wf:wd-digests", role: "company_admin", email: "automation+wd-digests@gaiada.system", name: "Automation — WD digests" },
+  // WD-26: stale-nag only reads work_activity (member+) and notifies (manager+) — manager covers both.
+  { workflowId: "wf:wd-stale-nag", role: "manager", email: "automation+wd-stale-nag@gaiada.system", name: "Automation — WD stale-task nag" },
 ];
 
 async function existingLink(externalId: string): Promise<boolean> {

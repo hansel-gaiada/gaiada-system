@@ -5,11 +5,14 @@ import { getActiveTenant } from "@/lib/tenant";
 import { can } from "@/lib/rbac";
 import { getClient, listDeliverables } from "@/lib/entities";
 import { deleteClientForm } from "@/lib/clientWorkActions";
+import { listRecordings, STATUS_LABEL, formatDuration } from "@/lib/meetings";
+import { RecordControls } from "@/components/meetings/RecordControls";
 import { PageHeader } from "@/components/PageHeader";
 import { Card, HairlineTable, StatusBadge } from "@/components/ui";
 import { DescriptionList } from "@/components/DescriptionList";
 import { EmptyNote } from "@/components/systems/EmptyNote";
-import { formatDate } from "@/lib/format";
+import { formatDate, formatDateTime } from "@/lib/format";
+import Link from "next/link";
 
 type Params = Promise<{ clientId: string }>;
 
@@ -24,6 +27,9 @@ export default async function ClientDetailPage({ params }: { params: Params }) {
   const client = await getClient(userId, tenant, clientId);
   if (!client) notFound();
   const deliverables = (await listDeliverables(userId, tenant)).filter((d) => d.client_id === clientId);
+  // WD-07 (Web Dev Phase 1 §12) — recordings scoped to this client, plus RecordControls with
+  // clientId pre-filled: the client-workspace half of the capture-edge context plumbing.
+  const meetings = await listRecordings(userId, tenant, { clientId });
   const canManage = can(me, "pm.manage", tenant);
   const del = deleteClientForm.bind(null, clientId);
 
@@ -51,6 +57,25 @@ export default async function ClientDetailPage({ params }: { params: Params }) {
               rows={deliverables.map((d) => [d.name, <StatusBadge key="s" label={d.status} />, formatDate(d.due_date)])}
               tcols="2fr 1fr 1fr"
             />
+          )}
+        </Card>
+      </div>
+      <div style={{ marginTop: 20 }}>
+        <Card title={`Meetings${meetings.length ? ` · ${meetings.length}` : ""}`}>
+          <RecordControls clientId={clientId} />
+          {meetings.length > 0 && (
+            <div style={{ marginTop: 18 }}>
+              <HairlineTable
+                columns={[{ label: "Meeting" }, { label: "Status" }, { label: "Length" }, { label: "Recorded", align: "right" }]}
+                rows={meetings.map((r) => [
+                  <Link key="t" href={`/meetings/${r.id}`} style={{ color: "inherit", fontWeight: 600 }}>{r.title ?? r.meeting_id}</Link>,
+                  <StatusBadge key="s" label={STATUS_LABEL[r.status] ?? r.status} />,
+                  formatDuration(r.duration_sec),
+                  formatDateTime(r.created_at),
+                ])}
+                tcols="2fr 1fr .8fr 1fr"
+              />
+            </div>
           )}
         </Card>
       </div>

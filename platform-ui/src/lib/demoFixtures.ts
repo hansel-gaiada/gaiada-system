@@ -7,6 +7,7 @@ import "server-only";
 
 import { pmDemo, allTrackerNotifications, pmTasksForUser } from "./demoPm";
 import { meetingsDemo } from "./demoMeetings";
+import { pipelineDemo } from "./demoPipeline";
 
 export interface DemoResult {
   status: number;
@@ -15,6 +16,16 @@ export interface DemoResult {
 
 const DEMO_USER_ID = "demo-hansel";
 const DEMO_USER_IC_ID = "gede-ic";  // IC (Individual Contributor) tier — member role only
+// SM-38 (QA-flagged gap, tracker §4j item 1): a `search_staff`-only demo identity scoped to
+// `dept-3` (SEO). Before this, the only IC-tier demo identity (`gede-ic`, plain `member`) had NO
+// search-module grant at all, so negative-permission rendering inside the SEO console
+// (`search.manage=false` / `search.scope.write=false`) could not be driven in a browser under
+// DEMO_MODE. `search_staff` grants `search.view`+`search.manage` but NOT `search.scope.write`
+// (rbac.ts ROLE_CAPS) — so this identity exercises ScopeEditor's gated state (disabled inputs, no
+// Save) live. It does NOT exercise AuditFindingsPanel/KeywordWorkbench's canManage=false gate
+// (search_staff HAS search.manage) — that half is still only provable with the existing `member`
+// identity, once it can reach dept-3 at all (see the login-mapping + org-structure note below).
+const DEMO_USER_SEARCH_STAFF_ID = "seo-staff";
 
 let demoSeq = 1000;
 const demoId = (p: string) => `${p}-${++demoSeq}`;
@@ -66,6 +77,22 @@ const ME_IC = {
   ],
 };
 
+// search_staff-tier identity (SM-38), same company as dept-3 (SEO) so the department itself is
+// reachable — `rbac.ts`'s `can()` has no department-level granularity (a company-scoped grant
+// covers every department in it), so "scoped to dept-3" means "a member of dept-3's company,
+// co-agency, with a search-module role and nothing else" — mirrors `hr_staff`'s existing pattern.
+const ME_SEARCH_STAFF = {
+  userId: DEMO_USER_SEARCH_STAFF_ID,
+  name: "Nyoman Ari",
+  email: "seo-staff@gaiada.com",
+  title: "SEO Specialist",
+  assurance: "high",
+  companies: [{ id: "co-agency", name: "Gaia Digital Agency", type: "agency" }],
+  roles: [
+    { role: "search_staff", scopeType: "company", scopeId: "co-agency" },
+  ],
+};
+
 const MEMBERS: Record<string, { user_id: string; name: string; email: string; title: string | null }[]> = {
   "co-holding": [
     { user_id: DEMO_USER_ID, name: "Clement Hansel", email: "hansel@gaiada.com", title: "AI Manager" },
@@ -74,22 +101,25 @@ const MEMBERS: Record<string, { user_id: string; name: string; email: string; ti
   "co-agency": [
     { user_id: DEMO_USER_ID, name: "Clement Hansel", email: "hansel@gaiada.com", title: "AI Manager" },
     { user_id: DEMO_USER_IC_ID, name: "Gede Kusuma", email: "gede@gaiada.com", title: "Frontend Developer" },
+    { user_id: DEMO_USER_SEARCH_STAFF_ID, name: "Nyoman Ari", email: "seo-staff@gaiada.com", title: "SEO Specialist" },
     { user_id: "u-pm", name: "Dewi Santoso", email: "dewi@gaiada.com", title: "Account Manager" },
     { user_id: "u-dev", name: "Made Putra", email: "made@gaiada.com", title: "Web Developer" },
   ],
   "co-resort": [{ user_id: DEMO_USER_ID, name: "Clement Hansel", email: "hansel@gaiada.com", title: "AI Manager" }],
 };
 
+// WD-28: `shortCode` mirrors the real backend's per-tenant unique per-project code (same
+// derivation the real store + `demoPm.ts` use — first 3-4 uppercase alnum chars of the name).
 const PROJECTS: Record<string, unknown[]> = {
   "co-holding": [
-    { id: "p-hr-1", name: "HR system rollout", status: "active", client_id: null, is_internal: true, owner_id: DEMO_USER_ID, department_id: null, due_date: "2026-08-15", custom_fields: {} },
-    { id: "p-fin-1", name: "FY26 budget review", status: "on_hold", client_id: null, is_internal: true, owner_id: "u-finance", department_id: null, due_date: "2026-07-30", custom_fields: {} },
+    { id: "p-hr-1", name: "HR system rollout", status: "active", client_id: null, is_internal: true, owner_id: DEMO_USER_ID, department_id: null, due_date: "2026-08-15", custom_fields: {}, shortCode: "HRSY" },
+    { id: "p-fin-1", name: "FY26 budget review", status: "on_hold", client_id: null, is_internal: true, owner_id: "u-finance", department_id: null, due_date: "2026-07-30", custom_fields: {}, shortCode: "FY26" },
   ],
   "co-agency": [
-    { id: "p-web-1", name: "Client site redesign", status: "active", client_id: "cl-1", is_internal: false, owner_id: "u-pm", department_id: "dept-1", due_date: "2026-07-20", custom_fields: { phase: "build" } },
-    { id: "p-web-2", name: "Mobile app revamp", status: "active", client_id: "cl-3", is_internal: false, owner_id: "u-dev", department_id: "dept-1", due_date: "2026-08-10", custom_fields: { phase: "build" } },
-    { id: "p-seo-1", name: "SEO audit — Q3", status: "active", client_id: "cl-2", is_internal: false, owner_id: "u-pm", department_id: "dept-3", due_date: "2026-08-01", custom_fields: { phase: "discovery" } },
-    { id: "p-int-1", name: "Internal brand refresh", status: "completed", client_id: null, is_internal: true, owner_id: DEMO_USER_ID, department_id: "dept-2", due_date: "2026-06-01", custom_fields: {} },
+    { id: "p-web-1", name: "Client site redesign", status: "active", client_id: "cl-1", is_internal: false, owner_id: "u-pm", department_id: "dept-1", due_date: "2026-07-20", custom_fields: { phase: "build" }, shortCode: "CLIE" },
+    { id: "p-web-2", name: "Mobile app revamp", status: "active", client_id: "cl-3", is_internal: false, owner_id: "u-dev", department_id: "dept-1", due_date: "2026-08-10", custom_fields: { phase: "build" }, shortCode: "MOBI" },
+    { id: "p-seo-1", name: "SEO audit — Q3", status: "active", client_id: "cl-2", is_internal: false, owner_id: "u-pm", department_id: "dept-3", due_date: "2026-08-01", custom_fields: { phase: "discovery" }, shortCode: "SEOA" },
+    { id: "p-int-1", name: "Internal brand refresh", status: "completed", client_id: null, is_internal: true, owner_id: DEMO_USER_ID, department_id: "dept-2", due_date: "2026-06-01", custom_fields: {}, shortCode: "INTE" },
   ],
   "co-resort": [],
 };
@@ -237,27 +267,180 @@ const SYSTEM_CONFIG: Record<string, unknown[]> = {
     { key: "digestSchedule", label: "Digest schedule (cron)", value: "0 12,18 * * *", kind: "text", editable: true },
     { key: "waSessionKey", label: "WhatsApp session key", value: true, kind: "secretPresence", editable: false },
   ],
+  // Gateway/hub/automation mirror the real projections nest builds from each service's own admin
+  // surface (see platform-nest admin-systems.controller.ts gatewayConfigFields/hubConfigFields/
+  // automationConfigFields) — not an invented shape.
   gateway: [
-    { key: "providers", label: "Provider chain", value: "ollama,gemini,claude", kind: "text", editable: true },
-    { key: "dailyCostCap", label: "Daily cost cap (USD)", value: 50, kind: "number", editable: true },
-    { key: "dlpEnabled", label: "DLP scrubbing", value: true, kind: "boolean", editable: true },
-    { key: "openaiApiKey", label: "OpenAI API key", value: false, kind: "secretPresence", editable: false },
-    { key: "anthropicApiKey", label: "Anthropic API key", value: true, kind: "secretPresence", editable: false },
+    { key: "providers", label: "LLM failover chain", value: ["ollama", "gemini", "claude"], kind: "text", editable: false },
+    { key: "llmChain", label: "LLM failover chain (order)", value: "ollama, gemini, claude", kind: "text", editable: true },
+    { key: "mediaChain", label: "Media failover chain", value: "whisper, gemini", kind: "text", editable: true },
+    { key: "dailyCallCap", label: "Daily call cap (global)", value: 2000, kind: "number", editable: true },
+    { key: "perTenantDailyCallCap", label: "Daily call cap (per tenant)", value: 1000, kind: "number", editable: true },
+    { key: "breakerThreshold", label: "Circuit-breaker threshold", value: 3, kind: "number", editable: true },
+    { key: "dlpClassifierEnabled", label: "Model-assisted DLP classifier", value: true, kind: "boolean", editable: true },
+    // Security boundary + topology are env-only, so they stay read-only here too.
+    { key: "tlsMode", label: "Internal TLS mode", value: "permissive", kind: "text", editable: false },
+    { key: "topologyMode", label: "Topology", value: "central", kind: "text", editable: false },
+    { key: "tokenConfigured", label: "Auth token configured", value: true, kind: "secretPresence", editable: false },
   ],
-  hub: [{ key: "visibilityPolicy", label: "Tool visibility policy", value: "per-principal", kind: "text", editable: false }],
+  hub: [
+    { key: "policyEngine", label: "Authorization engine", value: "cerbos", kind: "text", editable: false },
+    { key: "denyByDefault", label: "Deny by default", value: true, kind: "boolean", editable: false },
+    { key: "rateLimitPerMin", label: "Rate limit — per principal (calls/min)", value: 120, kind: "number", editable: false },
+    { key: "tlsMode", label: "mTLS mode", value: "permissive", kind: "text", editable: false },
+    { key: "topology", label: "Topology", value: "central", kind: "text", editable: false },
+    { key: "serviceAuthConfigured", label: "Service token configured", value: true, kind: "secretPresence", editable: false },
+  ],
   agents: [],
   knowledge: [],
-  automation: [],
+  automation: [
+    { key: "n8nUrl", label: "n8n URL", value: "https://n8n.internal.gaiada.com", kind: "text", editable: false },
+    { key: "apiKeyConfigured", label: "Public-API key configured", value: true, kind: "secretPresence", editable: false },
+    { key: "bridgeEnabled", label: "Event bridge enabled", value: true, kind: "boolean", editable: false },
+    { key: "bridgeEvents", label: "Bridged event types", value: "org_structure.updated, client.created", kind: "text", editable: false },
+    { key: "bridgeMaxRetries", label: "Dead-letter after N retries", value: 5, kind: "number", editable: false },
+  ],
 };
 
 const EGRESS_AUDIT = [
-  { time: "2026-07-05T09:00:00Z", provider: "gemini", decision: "allowed", detail: "chat completion" },
-  { time: "2026-07-05T08:50:00Z", provider: "claude", decision: "allowed", detail: "summarize" },
+  { time: "2026-07-05T09:00:00Z", provider: "gemini", decision: "allow", detail: "llm 412ms", capability: "llm", ok: true, blocked: null, redactions: 0, latencyMs: 412 },
+  { time: "2026-07-05T08:55:00Z", provider: null, decision: "blocked:dlp", detail: "llm redactions=2", capability: "llm", ok: false, blocked: "dlp", redactions: 2, latencyMs: 18 },
+  { time: "2026-07-05T08:50:00Z", provider: "claude", decision: "allow", detail: "llm 980ms", capability: "llm", ok: true, blocked: null, redactions: 1, latencyMs: 980 },
+  { time: "2026-07-05T08:41:00Z", provider: null, decision: "blocked:budget", detail: "media", capability: "media", ok: false, blocked: "budget", redactions: 0, latencyMs: 3 },
 ];
+
+// Mirrors ai-gateway-go GET /admin/config (proxied by nest as /api/admin/gateway/detail).
+const GATEWAY_DETAIL = {
+  chains: {
+    llm: {
+      order: ["ollama", "gemini", "claude"],
+      providers: [
+        { name: "ollama", position: 1, state: "ok", available: true, consecutiveFails: 0, rateLimited: false },
+        { name: "gemini", position: 2, state: "open", available: true, consecutiveFails: 0, rateLimited: true, openUntil: "2026-07-05T09:05:00Z" },
+        { name: "claude", position: 3, state: "ok", available: true, consecutiveFails: 1, rateLimited: false },
+        { name: "echo", position: 4, state: "ok", available: true },
+      ],
+    },
+    media: {
+      order: ["whisper", "gemini"],
+      providers: [
+        { name: "whisper", position: 1, state: "unconfigured", available: false },
+        { name: "gemini", position: 2, state: "open", available: true, rateLimited: true },
+        { name: "echo", position: 3, state: "ok", available: true },
+      ],
+    },
+    embed: { order: ["ollama"], providers: [{ name: "ollama", position: 1, state: "ok", available: true }] },
+  },
+  providers: [
+    { name: "ollama", model: "llama3.2", endpoint: "http://ollama:11434", keyRequired: false, keyConfigured: true },
+    { name: "whisper", model: "Systran/faster-whisper-small", keyRequired: false, keyConfigured: false },
+    { name: "gemini", model: "gemini-1.5-flash", keyRequired: true, keyConfigured: true },
+    { name: "claude", model: "claude-haiku-4-5-20251001", keyRequired: true, keyConfigured: true },
+    { name: "echo", keyRequired: false, keyConfigured: true },
+  ],
+  budget: {
+    day: "2026-07-05",
+    used: 318,
+    cap: 2000,
+    effectiveCap: 2000,
+    perTenantCap: 1000,
+    tenants: { "co-agency": 244, "co-resort": 74 },
+    drActive: false,
+    drBurstCap: 2000,
+  },
+  reliability: { breakerThreshold: 3, breakerCooldownMs: 60000, providerTimeoutMs: 60000 },
+  security: {
+    tlsMode: "permissive",
+    egressAllowlist: ["generativelanguage.googleapis.com", "api.anthropic.com"],
+    dlpClassifierEnabled: true,
+    dlpClassifierModel: "llama3.2",
+    classifierReachable: true,
+    auditFile: "data/egress-audit.jsonl",
+  },
+  topology: { mode: "central", centralConfigured: false, drBurstCap: 2000, drDurationMinutes: 1440, mediaMaxBytes: 15728640 },
+  // Mirrors the gateway's own allowlist: only these keys are runtime-writable (credentials, egress
+  // allowlist, TLS mode and topology stay env+restart).
+  writableKeys: [
+    "dailyCallCap",
+    "perTenantDailyCallCap",
+    "breakerThreshold",
+    "breakerCooldownMs",
+    "providerTimeoutMs",
+    "dlpClassifierEnabled",
+    "llmChain",
+    "mediaChain",
+    "embedChain",
+  ],
+  // One key shown as a live override so the demo exercises the "override" badge + Revert control.
+  overriddenKeys: { dailyCallCap: true },
+};
+
 const HUB_TOOLS = [
-  { name: "projects.list", description: "List the tenant's projects with status", minAssurance: "low" },
-  { name: "agency.pendingApprovals", description: "Approvals waiting for a decision", minAssurance: "low" },
+  { name: "whoami", description: "Report the calling principal", minAssurance: "anonymous", write: false, impact: null, source: "core" },
+  { name: "projects.list", description: "List the tenant's projects with status", minAssurance: "low", write: false, impact: null, source: "platform-read" },
+  { name: "agency.pendingApprovals", description: "Approvals waiting for a decision", minAssurance: "low", write: false, impact: null, source: "platform-read" },
+  { name: "tasks.create", description: "Create a task in a project", minAssurance: "verified", write: true, impact: "low", source: "platform-write" },
+  { name: "deploy.production", description: "Trigger a production deploy", minAssurance: "verified", write: true, impact: "high", source: "delivery" },
+  { name: "automation.listWorkflows", description: "List n8n workflows", minAssurance: "verified", write: false, impact: null, source: "module" },
 ];
+
+// Mirrors mcp-hub GET /admin/info (proxied by nest as /api/admin/hub/detail).
+const HUB_DETAIL = {
+  policy: {
+    engine: "cerbos",
+    cerbosConfigured: true,
+    denyByDefault: true,
+    assuranceRanks: ["anonymous", "low", "verified"],
+    automationWriteGate:
+      "unattended automation runs LOW-impact writes only; medium/high/unclassified writes suspend for human approval",
+    revocationCheck: true,
+    revocationTtlMs: 60000,
+  },
+  rateLimit: { perPrincipalPerMin: 120, perPrincipalBurst: 40, perServiceTokenPerMin: 1200, perServiceTokenBurst: 400 },
+  transport: { tlsMode: "permissive", peerAllowlist: ["bot", "ai-agents", "n8n", "platform"], topology: "central", serviceAuthConfigured: true },
+  tools: { total: 6, bySource: { core: 1, "platform-read": 2, "platform-write": 1, delivery: 1, module: 1 } },
+  resources: [
+    { uriTemplate: "gaiada://{tenantId}/projects", name: "Projects", description: "All projects in a company you belong to.", mimeType: "application/json" },
+    { uriTemplate: "gaiada://{tenantId}/client/{clientId}", name: "Client", description: "One client's detail.", mimeType: "application/json" },
+  ],
+  prompts: [
+    { name: "summarize-project-status", description: "Summarize a project's status for a management update.", arguments: [{ name: "projectName", description: "The project name", required: true }, { name: "details", description: "Recent notes", required: true }] },
+    { name: "draft-client-update", description: "Draft a client-facing progress update.", arguments: [{ name: "clientName", description: "The client name", required: true }] },
+  ],
+  workflowScopes: [
+    { workflow: "wf:summarize-via-mcp", tools: ["llm.summarize"] },
+    { workflow: "wf:task-sla", tools: ["tasks.list", "tasks.update", "approvals.request"] },
+    { workflow: "wf:new-client-seed", tools: ["projects.create", "tasks.create", "notify", "approvals.request"] },
+  ],
+  upstreams: { gatewayConfigured: true, platformConfigured: true, knowledgeConfigured: true },
+};
+
+const HUB_AUDIT = [
+  { ts: 1_752_000_600_000, tool: "tasks.update", principal: { provider: "n8n", externalId: "wf:task-sla", assurance: "verified" }, decision: "allow", ok: true },
+  { ts: 1_752_000_300_000, tool: "deploy.production", principal: { provider: "n8n", externalId: "wf:delivery", assurance: "verified" }, decision: "deny", reason: "suspend: deploy.production is a high-impact write; automation requires human approval" },
+  { ts: 1_752_000_000_000, tool: "projects.list", principal: { provider: "telegram", externalId: "tg:8891", assurance: "low" }, decision: "allow", ok: true },
+  { ts: 1_751_999_400_000, tool: "tasks.create", principal: { provider: "telegram", externalId: "tg:8891", assurance: "low" }, decision: "deny", reason: "denied: tasks.create requires verified assurance; caller has low (step up on a verified surface)" },
+];
+
+const WORKFLOW_EXECUTIONS = [
+  { id: "ex-9", workflowId: "wf1", workflowName: "summarize-via-mcp", status: "success", mode: "trigger", startedAt: "2026-07-05T06:00:00Z", stoppedAt: "2026-07-05T06:00:04Z", durationMs: 4000 },
+  { id: "ex-8", workflowId: "wf3", workflowName: "task-sla", status: "error", mode: "trigger", startedAt: "2026-07-05T05:30:00Z", stoppedAt: "2026-07-05T05:30:02Z", durationMs: 2100 },
+  { id: "ex-7", workflowId: "wf1", workflowName: "summarize-via-mcp", status: "success", mode: "manual", startedAt: "2026-07-04T18:00:00Z", stoppedAt: "2026-07-04T18:00:03Z", durationMs: 3200 },
+];
+
+const BRIDGE_HEALTH = {
+  enabled: true,
+  webhookConfigured: true,
+  secretConfigured: true,
+  events: ["org_structure.updated", "client.created", "deliverable.status_changed"],
+  maxRetries: 5,
+  timeoutMs: 5000,
+  streams: [
+    { entityType: "client", stream: "events:client", backlog: 0, deadLetter: 0, oldestPendingMs: null },
+    { entityType: "deliverable", stream: "events:deliverable", backlog: 3, deadLetter: 1, oldestPendingMs: 194000 },
+    { entityType: "org_structure", stream: "events:org_structure", backlog: 0, deadLetter: 0, oldestPendingMs: null },
+  ],
+};
 const AGENT_GOALS: Record<string, unknown[]> = {
   "co-agency": [
     { id: "g-1", goal: "Chase overdue approvals", status: "running", budgetSpent: 0.42, budgetTotal: 2, fanOut: 2 },
@@ -605,6 +788,459 @@ const N8N_WORKFLOWS: Record<string, Record<string, unknown>> = {
   },
 };
 
+// SM-29 — demo store for the engagement scope editor, so a PUT in a demo session actually
+// persists. NOT a plain module-level object like the ENGAGEMENTS/CLIENTS consts above: Next.js
+// compiles a Server Action's own route chunk separately from the page's RSC render chunk, and in
+// this app's build (standalone output) the two can end up with SEPARATE instances of this module
+// — a plain in-memory object mutated by the PUT (which runs inside the action chunk) was silently
+// invisible to the very next page render's GET (running in the page chunk), so a save appeared to
+// revert the instant `router.refresh()` re-rendered the page. Backing the store with a small JSON
+// file in the OS temp dir sidesteps that: any chunk that reads/writes it goes through the
+// filesystem, which is shared regardless of how many module instances exist. This is demo-only
+// scaffolding — the real backend has exactly one Postgres row, so this constraint doesn't apply
+// there. Seeded from the same two engagements as ENGAGEMENTS above: sm-eng-1 has a real starting
+// scope + budget, sm-eng-2 starts with none (the "—" case is preserved by simply not seeding a
+// cost-projection response for it below).
+import { readFileSync, writeFileSync } from "fs";
+import { tmpdir } from "os";
+import { join } from "path";
+
+type ScopeStoreEntry = { scopePreset: string | null; toolScope: Record<string, unknown>; providerBudgetUsd: number | null };
+type ScopeStore = Record<string, ScopeStoreEntry>;
+
+const SCOPE_STORE_PATH = join(tmpdir(), "gaiada-demo-search-scope.json");
+const SCOPE_STORE_SEED: ScopeStore = {
+  "sm-eng-1": {
+    scopePreset: null,
+    toolScope: { rank: { enabled: true, cadence: "weekly", maxKeywords: 50 }, volume: { enabled: true }, backlinks: { enabled: false } },
+    providerBudgetUsd: 150,
+  },
+  "sm-eng-2": { scopePreset: null, toolScope: {}, providerBudgetUsd: null },
+};
+
+function loadScopeStore(): ScopeStore {
+  try {
+    return JSON.parse(readFileSync(SCOPE_STORE_PATH, "utf8")) as ScopeStore;
+  } catch {
+    writeFileSync(SCOPE_STORE_PATH, JSON.stringify(SCOPE_STORE_SEED));
+    return JSON.parse(JSON.stringify(SCOPE_STORE_SEED)) as ScopeStore;
+  }
+}
+
+function saveScopeStore(store: ScopeStore): void {
+  writeFileSync(SCOPE_STORE_PATH, JSON.stringify(store));
+}
+
+// Mirrors platform-nest scope-presets.ts SEEDED_PRESETS — seeding data only, applied on a demo
+// PUT that names a preset. Kept minimal (matches the same three presets, same shapes) rather than
+// imported, since demoFixtures.ts cannot reach across into platform-nest.
+const DEMO_SCOPE_PRESETS: Record<string, Record<string, unknown>> = {
+  light: {
+    rank: { enabled: false }, volume: { enabled: false }, backlinks: { enabled: false }, ai_visibility: { enabled: false },
+    audit_technical: { enabled: true, cadence: "monthly" }, audit_cwv: { enabled: true, cadence: "monthly" }, sem_sync: { enabled: false, mode: "manual" },
+  },
+  standard: {
+    rank: { enabled: true, cadence: "weekly", maxKeywords: 50 }, volume: { enabled: true }, backlinks: { enabled: false },
+    ai_visibility: { enabled: true, cadence: "weekly" }, audit_technical: { enabled: true, cadence: "weekly" }, audit_cwv: { enabled: true },
+    sem_sync: { enabled: false, mode: "manual" },
+  },
+  heavy: {
+    rank: { enabled: true, cadence: "daily", maxKeywords: 200 }, volume: { enabled: true }, backlinks: { enabled: true, cadence: "monthly" },
+    ai_visibility: { enabled: true, cadence: "weekly" }, audit_technical: { enabled: true, cadence: "weekly" }, audit_cwv: { enabled: true, cadence: "weekly" },
+    sem_sync: { enabled: true, mode: "manual" },
+  },
+};
+
+// Demo-only per-item unit cost table — NOT the real estimateCostUsd, purely so the scope editor
+// has something to preview against with no backend running. $/item chosen so 'standard's rank
+// toggle (50 items/weekly) lands on the same $10/mo the original SM-11 fixture used.
+const DEMO_UNIT_COST_USD: Record<string, number> = { rank: 0.05, volume: 0.1, suggestions: 0.02, backlinks: 3, ai_visibility: 0.5 };
+const DEMO_TOGGLE_OP: Record<string, string> = { rank: "serp", volume: "volume", suggestions: "suggestions", backlinks: "backlinks", ai_visibility: "ai_visibility" };
+
+function demoRunsPerMonth(cadence: unknown): number {
+  if (cadence === "daily") return 30;
+  if (cadence === "weekly") return 30 / 7;
+  if (cadence === "monthly") return 1;
+  return 1;
+}
+
+// SM-38: mirror the real backend's per-dispatch mode stamp (`providers/simulation.ts` +
+// `projectMonthlyCost` in `providers/dispatch.ts`) — in `simulate` mode EVERY row is stamped
+// simulated, in `live` mode none are (pre-SM-36 there is exactly one platform-default provider per
+// op kind, so one projection can never straddle both — see registry.ts's `resolveProvider`). The
+// "realistic mix — some simulated rows, some not" this ticket's AC asks for is exercised ACROSS the
+// two seeded engagements rather than fabricated within one, since making a single response straddle
+// both modes would demo a shape the real backend cannot produce today (a divergent claim, not a
+// realistic one): `sm-eng-1` demos SIMULATE (chip present on every enabled row + the header
+// statement), `sm-eng-2` demos LIVE (chip absent) — so both states are reachable in one demo pass.
+function demoProviderMode(engagementId: string): "live" | "simulate" {
+  return engagementId === "sm-eng-1" ? "simulate" : "live";
+}
+
+function demoProjectMonthlyCost(toolScope: Record<string, unknown>, engagementId: string) {
+  const providerMode = demoProviderMode(engagementId);
+  const perTool = Object.entries(DEMO_TOGGLE_OP).map(([tool, opKind]) => {
+    const toggle = (toolScope[tool] ?? {}) as Record<string, unknown>;
+    const enabled = toggle.enabled === true;
+    const cadence = typeof toggle.cadence === "string" ? toggle.cadence : null;
+    const items = tool === "backlinks" ? 1 : (typeof toggle.maxKeywords === "number" ? toggle.maxKeywords : (typeof toggle.maxQueries === "number" ? toggle.maxQueries : 50));
+    const runs = demoRunsPerMonth(cadence);
+    const costPerRun = DEMO_UNIT_COST_USD[tool] * items;
+    const projected = enabled ? costPerRun * runs : 0;
+    return {
+      tool, opKind, enabled, cadence, runsPerMonth: Number(runs.toFixed(4)), itemsPerRun: items,
+      // Real numbers, not strings — the real controller's ProjectedToolCost wraps these in
+      // Number(...toFixed(6)) (providers/dispatch.ts); an earlier revision of this fixture left
+      // them as .toFixed() STRINGS, which formatUsd tolerates but which drifted from the real
+      // contract's actual type (exactly the class of fixture-vs-backend gap this module warns about).
+      costPerRunUsd: Number(costPerRun.toFixed(6)), projectedMonthlyUsd: Number(projected.toFixed(6)),
+      provider: "dataforseo", simulated: providerMode === "simulate",
+    };
+  });
+  const total = perTool.reduce((s, t) => s + t.projectedMonthlyUsd, 0);
+  return { engagementId, perTool, totalMonthlyUsd: Number(total.toFixed(6)), providerMode };
+}
+
+// SM-12 — file-backed demo stores for Site Audit + Keywords, same rationale as the SM-29 scope
+// store just above (a plain module-level object mutated by a POST/PATCH running in the server-
+// action chunk is invisible to a GET running in the page-render chunk in this app's build — see
+// that store's header note). Field names mirror the REAL controller response shapes exactly
+// (search.controller.ts's listAudits/listAuditFindings/listKeywordSets/listKeywords SELECT lists,
+// verified against the same controller this ticket's fetchers were built against) — not the demo's
+// own invented shape, per this ticket's own warning about how a fixture that agrees with a wrong
+// assumption hides the bug instead of catching it.
+const AUDIT_STORE_PATH = join(tmpdir(), "gaiada-demo-search-audits.json");
+const KEYWORD_STORE_PATH = join(tmpdir(), "gaiada-demo-search-keywords.json");
+
+interface DemoAuditFinding {
+  id: string; auditId: string; code: string; severity: string; category: string; message: string;
+  urlCount: number; sampleUrls: string[]; status: string; firstSeenAuditId: string | null;
+  lastSeenAuditId: string | null; createdAt: string;
+}
+interface DemoAudit {
+  id: string; propertyId: string; kind: string; source: string; status: string; score: string;
+  summary: Record<string, number>; startedAt: string; completedAt: string; createdAt: string;
+}
+interface AuditStore { audits: DemoAudit[]; findings: DemoAuditFinding[] }
+
+const AUDIT_STORE_SEED: AuditStore = {
+  audits: [
+    {
+      id: "sm-audit-1", propertyId: "sm-prop-1", kind: "technical", source: "crawler", status: "completed",
+      score: "72", summary: { critical: 1, high: 1, medium: 2, low: 0, info: 0 },
+      startedAt: "2026-07-20T02:00:00Z", completedAt: "2026-07-20T02:04:00Z", createdAt: "2026-07-20T02:04:00Z",
+    },
+  ],
+  findings: [
+    {
+      id: "sm-finding-1", auditId: "sm-audit-1", code: "server_error", severity: "critical", category: "availability",
+      message: "Server error (500)", urlCount: 2, sampleUrls: ["https://cedargroup.example.com/checkout", "https://cedargroup.example.com/api/quote"],
+      status: "open", firstSeenAuditId: "sm-audit-1", lastSeenAuditId: "sm-audit-1", createdAt: "2026-07-20T02:04:00Z",
+    },
+    {
+      id: "sm-finding-2", auditId: "sm-audit-1", code: "client_error", severity: "high", category: "availability",
+      message: "Client error (403)", urlCount: 1, sampleUrls: ["https://cedargroup.example.com/members"],
+      status: "open", firstSeenAuditId: "sm-audit-1", lastSeenAuditId: "sm-audit-1", createdAt: "2026-07-20T02:04:00Z",
+    },
+    {
+      id: "sm-finding-3", auditId: "sm-audit-1", code: "missing_title", severity: "medium", category: "content",
+      message: "Page has no <title>", urlCount: 4, sampleUrls: ["https://cedargroup.example.com/blog/draft-1", "https://cedargroup.example.com/blog/draft-2"],
+      status: "open", firstSeenAuditId: "sm-audit-1", lastSeenAuditId: "sm-audit-1", createdAt: "2026-07-20T02:04:00Z",
+    },
+    {
+      id: "sm-finding-4", auditId: "sm-audit-1", code: "broken_link", severity: "medium", category: "availability",
+      message: "Page not found (404)", urlCount: 3, sampleUrls: ["https://cedargroup.example.com/old-promo"],
+      status: "fixed", firstSeenAuditId: "sm-audit-1", lastSeenAuditId: "sm-audit-1", createdAt: "2026-07-20T02:04:00Z",
+    },
+  ],
+};
+
+function loadAuditStore(): AuditStore {
+  try {
+    return JSON.parse(readFileSync(AUDIT_STORE_PATH, "utf8")) as AuditStore;
+  } catch {
+    writeFileSync(AUDIT_STORE_PATH, JSON.stringify(AUDIT_STORE_SEED));
+    return JSON.parse(JSON.stringify(AUDIT_STORE_SEED)) as AuditStore;
+  }
+}
+
+function saveAuditStore(store: AuditStore): void {
+  writeFileSync(AUDIT_STORE_PATH, JSON.stringify(store));
+}
+
+interface DemoKeywordSet { id: string; engagementId: string; name: string; source: string; createdAt: string }
+interface DemoKeyword {
+  id: string; setId: string; keyword: string; locale: string; intent: string | null;
+  clusterId: string | null; clusterLabel: string | null; volume: number | null;
+  difficulty: string | null; cpcUsd: string | null; isTracked: boolean; hasEmbedding: boolean; createdAt: string;
+}
+interface KeywordStore { sets: DemoKeywordSet[]; keywords: DemoKeyword[] }
+
+// Deliberately covers all THREE volume states (`keywordVolumeState`'s header note in
+// searchMarketingShared.ts): sm-eng-1's `volume` scope toggle is enabled in SCOPE_STORE_SEED above,
+// so "seo audit tools" (a real pulled number) exercises 'value' and "technical seo checklist" (never
+// pulled) exercises 'unpulled'; sm-eng-2's toggle is off, so "ai overview optimization" exercises
+// 'disabled' regardless of the raw (null) volume underneath it.
+const KEYWORD_STORE_SEED: KeywordStore = {
+  sets: [
+    { id: "sm-set-1", engagementId: "sm-eng-1", name: "Core service pages", source: "client", createdAt: "2026-07-18T00:00:00Z" },
+    { id: "sm-set-2", engagementId: "sm-eng-2", name: "GEO pilot terms", source: "research", createdAt: "2026-07-19T00:00:00Z" },
+  ],
+  keywords: [
+    {
+      id: "sm-kw-1", setId: "sm-set-1", keyword: "seo audit tools", locale: "id-ID", intent: "commercial",
+      clusterId: "sm-cluster-1", clusterLabel: "SEO tooling", volume: 210, difficulty: "42.50", cpcUsd: "3.750000",
+      isTracked: true, hasEmbedding: true, createdAt: "2026-07-18T00:05:00Z",
+    },
+    {
+      id: "sm-kw-2", setId: "sm-set-1", keyword: "seo audit checklist", locale: "id-ID", intent: "commercial",
+      clusterId: "sm-cluster-1", clusterLabel: "SEO tooling", volume: 140, difficulty: "38.00", cpcUsd: "2.900000",
+      isTracked: false, hasEmbedding: true, createdAt: "2026-07-18T00:05:00Z",
+    },
+    {
+      id: "sm-kw-3", setId: "sm-set-1", keyword: "technical seo checklist", locale: "id-ID", intent: null,
+      clusterId: null, clusterLabel: null, volume: null, difficulty: null, cpcUsd: null,
+      isTracked: false, hasEmbedding: false, createdAt: "2026-07-18T00:05:00Z",
+    },
+    {
+      id: "sm-kw-4", setId: "sm-set-2", keyword: "ai overview optimization", locale: "id-ID", intent: null,
+      clusterId: null, clusterLabel: null, volume: null, difficulty: null, cpcUsd: null,
+      isTracked: false, hasEmbedding: false, createdAt: "2026-07-19T00:05:00Z",
+    },
+  ],
+};
+
+function loadKeywordStore(): KeywordStore {
+  try {
+    return JSON.parse(readFileSync(KEYWORD_STORE_PATH, "utf8")) as KeywordStore;
+  } catch {
+    writeFileSync(KEYWORD_STORE_PATH, JSON.stringify(KEYWORD_STORE_SEED));
+    return JSON.parse(JSON.stringify(KEYWORD_STORE_SEED)) as KeywordStore;
+  }
+}
+
+function saveKeywordStore(store: KeywordStore): void {
+  writeFileSync(KEYWORD_STORE_PATH, JSON.stringify(store));
+}
+
+// SM-47 — file-backed demo store for SEM (campaigns/ad groups/ads/negatives/change proposals). Same
+// file-backed rationale as the audit/keyword stores just above (a POST running in the server-action
+// chunk must be visible to a GET running in the page-render chunk — see the SM-29 scope store's
+// header note earlier in this file for the fuller explanation). Field names mirror
+// search.controller.ts's SEM SELECT lists exactly, INCLUDING `created_at`/`updated_at` staying
+// unaliased (snake_case) — see searchMarketingShared.ts's header note on why that one detail matters
+// here specifically.
+const SEM_STORE_PATH = join(tmpdir(), "gaiada-demo-search-sem.json");
+
+interface DemoCampaign {
+  id: string; engagementId: string; platform: string; externalId: string | null; name: string;
+  objective: string | null; status: string; budgetMinor: number | null; currency: string | null;
+  bidStrategy: string | null; targetCpaMinor: number | null; targetRoas: number | null;
+  customFields: Record<string, unknown>; created_at: string; updated_at: string;
+}
+interface DemoAdGroup {
+  id: string; campaignId: string; name: string; clusterId: string | null; externalId: string | null;
+  created_at: string; updated_at: string;
+}
+interface DemoAd {
+  id: string; adGroupId: string; headlines: string[]; descriptions: string[]; finalUrl: string | null;
+  status: string; aiGenerated: boolean; created_at: string; updated_at: string;
+}
+interface DemoNegative {
+  id: string; campaignId: string; adGroupId: string | null; term: string; matchType: string;
+  source: string; status: string; created_at: string; updated_at: string;
+}
+interface DemoChangeProposal {
+  id: string; campaignId: string; kind: string; payload: Record<string, unknown>; status: string;
+  mode: string; approvalId: string | null; exportFileId: string | null; proposedBy: string | null;
+  approvedBy: string | null; appliedBy: string | null; appliedAt: string | null;
+  created_at: string; updated_at: string;
+}
+interface SemStore {
+  campaigns: DemoCampaign[]; adGroups: DemoAdGroup[]; ads: DemoAd[];
+  negatives: DemoNegative[]; changeProposals: DemoChangeProposal[];
+}
+
+// sm-campaign-1 is the "already generated" campaign — pre-seeded WITHOUT provenance on its ad
+// groups, deliberately: `GET campaigns/:id/ad-groups` on the real backend never carries provenance
+// (only the generate-plan RESPONSE does — see `PlannedAdGroupResult`'s header note), so faking it
+// onto the persisted read here would misrepresent what a real deployment can show. The mixed real/
+// simulated/unpulled/two-provider breakdown is instead exercised live by actually calling
+// "Generate plan" in the browser (see the generate-plan handler below), which is the one moment the
+// real system can show it too. sm-campaign-2 is the genuine "nothing planned yet" empty case: draft
+// status, zero ad groups/negatives/proposals.
+const SEM_STORE_SEED: SemStore = {
+  campaigns: [
+    {
+      id: "sm-campaign-1", engagementId: "sm-eng-1", platform: "google_ads", externalId: null,
+      name: "Cedar Group — Core Services Search", objective: "leads", status: "proposed",
+      budgetMinor: 500000, currency: "USD", bidStrategy: "maximize_conversions", targetCpaMinor: 8000,
+      targetRoas: 4.5, customFields: {}, created_at: "2026-07-22T09:00:00Z", updated_at: "2026-07-24T11:00:00Z",
+    },
+    {
+      id: "sm-campaign-2", engagementId: "sm-eng-1", platform: "google_ads", externalId: null,
+      name: "Cedar Group — Brand (manual draft)", objective: null, status: "draft",
+      budgetMinor: null, currency: null, bidStrategy: null, targetCpaMinor: null, targetRoas: null,
+      customFields: {}, created_at: "2026-07-25T09:00:00Z", updated_at: "2026-07-25T09:00:00Z",
+    },
+  ],
+  adGroups: [
+    { id: "sm-ag-1", campaignId: "sm-campaign-1", name: "SEO tooling — core", clusterId: "sm-cluster-1", externalId: null, created_at: "2026-07-22T09:01:00Z", updated_at: "2026-07-22T09:01:00Z" },
+    { id: "sm-ag-2", campaignId: "sm-campaign-1", name: "Consulting — mixed vendors", clusterId: "sm-cluster-2", externalId: null, created_at: "2026-07-22T09:02:00Z", updated_at: "2026-07-22T09:02:00Z" },
+    { id: "sm-ag-3", campaignId: "sm-campaign-1", name: "Emerging terms", clusterId: "sm-cluster-3", externalId: null, created_at: "2026-07-22T09:03:00Z", updated_at: "2026-07-22T09:03:00Z" },
+  ],
+  // Covers all three AD_STATUSES_WRITABLE states + both aiGenerated values on one ad group.
+  ads: [
+    { id: "sm-ad-1", adGroupId: "sm-ag-1", headlines: ["SEO Audit Tools", "Free Site Crawl", "Fix Technical SEO Fast"], descriptions: ["Run a full technical audit in minutes.", "Trusted by 200+ agencies."], finalUrl: "https://cedargroup.example.com/tools", status: "approved", aiGenerated: true, created_at: "2026-07-22T09:10:00Z", updated_at: "2026-07-23T10:00:00Z" },
+    { id: "sm-ad-2", adGroupId: "sm-ag-1", headlines: ["SEO Checklist 2026", "Step-by-Step Audit Guide"], descriptions: ["Download the checklist our team uses.", "No signup required."], finalUrl: null, status: "draft", aiGenerated: false, created_at: "2026-07-23T09:00:00Z", updated_at: "2026-07-23T09:00:00Z" },
+    { id: "sm-ad-3", adGroupId: "sm-ag-1", headlines: ["Cheap SEO Tools", "SEO On A Budget"], descriptions: ["Off-brief draft — rejected."], finalUrl: null, status: "rejected", aiGenerated: true, created_at: "2026-07-23T09:05:00Z", updated_at: "2026-07-23T09:20:00Z" },
+  ],
+  // Covers all three NEGATIVE_STATUSES_WRITABLE states + both sources (manual/ai).
+  negatives: [
+    { id: "sm-neg-1", campaignId: "sm-campaign-1", adGroupId: null, term: "free", matchType: "broad", source: "manual", status: "approved", created_at: "2026-07-22T09:30:00Z", updated_at: "2026-07-23T09:00:00Z" },
+    { id: "sm-neg-2", campaignId: "sm-campaign-1", adGroupId: null, term: "jobs", matchType: "phrase", source: "ai", status: "proposed", created_at: "2026-07-24T09:00:00Z", updated_at: "2026-07-24T09:00:00Z" },
+    { id: "sm-neg-3", campaignId: "sm-campaign-1", adGroupId: null, term: "diy", matchType: "exact", source: "ai", status: "dismissed", created_at: "2026-07-24T09:01:00Z", updated_at: "2026-07-24T09:15:00Z" },
+  ],
+  // Covers all three reachable CHANGE_PROPOSAL_TRANSITIONS states — 'applied' deliberately absent,
+  // matching the backend's own refusal to ever let this console reach it.
+  changeProposals: [
+    { id: "sm-cp-1", campaignId: "sm-campaign-1", kind: "budget", payload: { newBudgetMinor: 750000 }, status: "approved", mode: "manual", approvalId: null, exportFileId: null, proposedBy: DEMO_USER_ID, approvedBy: DEMO_USER_ID, appliedBy: null, appliedAt: null, created_at: "2026-07-23T12:00:00Z", updated_at: "2026-07-23T13:00:00Z" },
+    { id: "sm-cp-2", campaignId: "sm-campaign-1", kind: "pause", payload: { reason: "budget review" }, status: "proposed", mode: "manual", approvalId: null, exportFileId: null, proposedBy: DEMO_USER_ID, approvedBy: null, appliedBy: null, appliedAt: null, created_at: "2026-07-25T09:00:00Z", updated_at: "2026-07-25T09:00:00Z" },
+    { id: "sm-cp-3", campaignId: "sm-campaign-1", kind: "bid", payload: { bidStrategy: "target_roas" }, status: "dismissed", mode: "manual", approvalId: null, exportFileId: null, proposedBy: DEMO_USER_ID, approvedBy: null, appliedBy: null, appliedAt: null, created_at: "2026-07-22T14:00:00Z", updated_at: "2026-07-22T15:00:00Z" },
+  ],
+};
+
+function loadSemStore(): SemStore {
+  try {
+    return JSON.parse(readFileSync(SEM_STORE_PATH, "utf8")) as SemStore;
+  } catch {
+    writeFileSync(SEM_STORE_PATH, JSON.stringify(SEM_STORE_SEED));
+    return JSON.parse(JSON.stringify(SEM_STORE_SEED)) as SemStore;
+  }
+}
+
+function saveSemStore(store: SemStore): void {
+  writeFileSync(SEM_STORE_PATH, JSON.stringify(store));
+}
+
+// Demo cap mirrors config.search.maxKeywordsPerSet's default (SEARCH_MAX_KEYWORDS_PER_SET, SM-32) —
+// kept a literal rather than imported since demoFixtures.ts cannot reach across into platform-nest.
+const DEMO_MAX_KEYWORDS_PER_SET = 1000;
+
+// Minimal CSV/paste parser for the demo path only — one keyword per line, optional ", locale"
+// suffix, blank lines and duplicate (keyword,locale) pairs against the EXISTING set dropped. Not a
+// full mirror of keyword-import.ts's quoted-field CSV handling (that parser's edge cases are the
+// real backend's job to get right); this exists only so the demo import box has something to do.
+/** Thrown when the demo import text ends inside an open quoted field — mirrors the backend's
+ *  UnterminatedQuoteError, which the controller turns into a 400. */
+class DemoUnterminatedQuoteError extends Error {
+  constructor() {
+    super('unterminated quoted field in keyword import CSV (a " was opened but never closed)');
+    this.name = "DemoUnterminatedQuoteError";
+  }
+}
+
+/** Quote-aware CSV tokenizer over the WHOLE input, so a quoted field may contain a comma or an
+ *  embedded newline without being corrupted. Deliberately duplicated from platform-nest's
+ *  `modules/search/keyword-import.ts` `parseCsvRows` — these are separate projects and cannot share
+ *  code — so it MUST be kept in step with that file.
+ *
+ *  Why it exists: this shim previously did `text.split("\n")` then `line.split(",")`, i.e. the exact
+ *  pre-SM-32 pipeline the backend already fixed. Importing `"comma, in quotes" widget` in DEMO_MODE
+ *  silently mis-split into keyword `"comma` with the rest as a locale — no crash, no error, just a
+ *  confident wrong answer. A fixture that is wrong in a way the product is not makes DEMO_MODE QA
+ *  produce false negatives about the product, which is worse than having no fixture. */
+function parseDemoCsvRows(raw: string): string[][] {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let field = "";
+  let inQuotes = false;
+  let i = 0;
+
+  const endField = () => {
+    row.push(field);
+    field = "";
+  };
+  const endRow = () => {
+    endField();
+    rows.push(row);
+    row = [];
+  };
+
+  while (i < raw.length) {
+    const ch = raw[i];
+    if (inQuotes) {
+      if (ch === '"') {
+        if (raw[i + 1] === '"') {
+          field += '"';
+          i += 2;
+          continue;
+        }
+        inQuotes = false;
+        i++;
+        continue;
+      }
+      field += ch;
+      i++;
+      continue;
+    }
+    if (ch === '"' && field === "") {
+      inQuotes = true;
+      i++;
+      continue;
+    }
+    if (ch === ",") {
+      endField();
+      i++;
+      continue;
+    }
+    if (ch === "\r" && raw[i + 1] === "\n") {
+      endRow();
+      i += 2;
+      continue;
+    }
+    if (ch === "\n") {
+      endRow();
+      i++;
+      continue;
+    }
+    field += ch;
+    i++;
+  }
+  if (inQuotes) throw new DemoUnterminatedQuoteError();
+  if (field.length > 0 || row.length > 0) endRow();
+  return rows;
+}
+
+/** Mirrors platform-nest `parseKeywordImport`: optional `keyword` header row, per-row locale
+ *  fallback, and (keyword.toLowerCase(), locale) dedupe keeping first occurrence. The header and
+ *  dedupe behaviours were also missing here before, not just the quoting. */
+function parseDemoKeywordImport(text: string): { keyword: string; locale: string }[] {
+  const rows = parseDemoCsvRows(text).filter((cols) => cols.some((c) => c.trim().length > 0));
+  if (rows.length === 0) return [];
+
+  let start = 0;
+  if (rows[0].map((c) => c.trim().toLowerCase())[0] === "keyword") start = 1;
+
+  const out: { keyword: string; locale: string }[] = [];
+  const seen = new Set<string>();
+  for (let i = start; i < rows.length; i++) {
+    const cols = rows[i];
+    const keyword = (cols[0] ?? "").trim();
+    if (!keyword) continue;
+    const locale = (cols[1] !== undefined ? cols[1].trim() : "") || "id-ID";
+    const dedupeKey = `${keyword.toLowerCase()}|${locale}`;
+    if (seen.has(dedupeKey)) continue;
+    seen.add(dedupeKey);
+    out.push({ keyword, locale });
+  }
+  return out;
+}
+
+function genDemoId(prefix: string): string {
+  return `${prefix}-${Date.now()}-${Math.floor(Math.random() * 1_000_000)}`;
+}
+
 function tenantFromPath(pathname: string): string | null {
   const m = pathname.match(/^\/api\/([^/]+)\//);
   return m ? m[1] : null;
@@ -616,7 +1252,9 @@ function ok(json: unknown): DemoResult {
 
 // Resolve the current demo identity based on the logged-in userId.
 function getCurrentDemoIdentity(userId: string) {
-  return userId === DEMO_USER_IC_ID ? ME_IC : ME;
+  if (userId === DEMO_USER_SEARCH_STAFF_ID) return ME_SEARCH_STAFF;
+  if (userId === DEMO_USER_IC_ID) return ME_IC;
+  return ME;
 }
 
 export function getDemoResponse(method: string, fullPath: string, userId: string = DEMO_USER_ID, body?: string): DemoResult {
@@ -631,6 +1269,10 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
   // Meeting-recordings registry (WS11 capture edge) — stateful store (lib/demoMeetings.ts).
   const meetings = meetingsDemo(method, p, url.searchParams, body);
   if (meetings) return meetings;
+
+  // Delivery pipeline runs/stages/gates (WD-02 run workspace) — stateful store (lib/demoPipeline.ts).
+  const pipeline = pipelineDemo(method, p, url.searchParams, body);
+  if (pipeline) return pipeline;
 
   const currentIdentity = getCurrentDemoIdentity(userId);
 
@@ -993,8 +1635,34 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
     if (m === "PUT") return ok({ ok: true });
     return ok({ fields: SYSTEM_CONFIG[configMatch[1]] ?? [] });
   }
-  if (p === "/api/admin/gateway/egress-audit") return ok(EGRESS_AUDIT);
+  if (p === "/api/admin/gateway/egress-audit") {
+    // Mirror the backend's filtering so the demo's filter chips behave like the real console.
+    const decision = url.searchParams.get("decision");
+    const capability = url.searchParams.get("capability");
+    let rows = EGRESS_AUDIT as Array<{ ok: boolean; blocked: string | null; capability: string }>;
+    if (capability) rows = rows.filter((r) => r.capability === capability);
+    if (decision === "allow") rows = rows.filter((r) => r.ok);
+    else if (decision === "blocked") rows = rows.filter((r) => !r.ok);
+    else if (decision) rows = rows.filter((r) => r.blocked === decision);
+    return ok(rows);
+  }
+  if (p === "/api/admin/gateway/detail") return ok(GATEWAY_DETAIL);
+  if (p === "/api/admin/gateway/config" && (m === "PUT" || m === "DELETE")) {
+    return ok({ ok: true, key: "demo", applied: "demo", revertedToEnv: m === "DELETE" });
+  }
+  const wfToggle = p.match(/^\/api\/admin\/automation\/workflows\/([^/]+)\/(activate|deactivate)$/);
+  if (wfToggle && m === "POST") return ok({ id: wfToggle[1], active: wfToggle[2] === "activate" });
+  const replay = p.match(/^\/api\/admin\/automation\/bridge\/([^/]+)\/replay$/);
+  if (replay && m === "POST") {
+    const stream = BRIDGE_HEALTH.streams.find((x) => x.entityType === replay[1]);
+    return ok({ entityType: replay[1], replayed: stream?.deadLetter ?? 0, remaining: 0 });
+  }
+  if (p === "/api/admin/gateway/dr-mode" && m === "POST") return ok({ drMode: true, budget: GATEWAY_DETAIL.budget });
   if (p === "/api/admin/hub/tools") return ok(HUB_TOOLS);
+  if (p === "/api/admin/hub/detail") return ok(HUB_DETAIL);
+  if (p === "/api/admin/hub/audit") return ok(HUB_AUDIT);
+  if (p === "/api/admin/automation/executions") return ok(WORKFLOW_EXECUTIONS);
+  if (p === "/api/admin/automation/bridge") return ok(BRIDGE_HEALTH);
   const goalsMatch = p.match(/^\/api\/([^/]+)\/agents\/goals$/);
   if (goalsMatch) return ok(AGENT_GOALS[goalsMatch[1]] ?? []);
   const sourcesMatch = p.match(/^\/api\/([^/]+)\/knowledge\/sources$/);
@@ -1204,6 +1872,628 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
     else if (owner.startsWith("user:")) { const uid = owner.slice(5); rows = rows.filter((c) => c.ownerId === uid); }
     // owner === "team": every claude row in the tenant, no further filter.
     return ok(rows.map(toSeatRow));
+  }
+
+  // Search-marketing (SEO console, SM-11 + SM-29) — properties/engagements/scope/cost-projection
+  // are BUILT endpoints (SM-01/02/04); everything else on this base path (audits, keywords,
+  // rankings, briefs, ai-visibility, sem/*) is intentionally left unmatched so those tabs render
+  // their real BackendPending state, per lib/searchMarketing.ts's own comment. Added because the
+  // generic GET fallback below returns `ok([])` for EVERY unmatched path — correct for a list
+  // endpoint, but wrong for a singular-resource GET (engagements/:id, engagements/:id/scope,
+  // engagements/:id/cost-projection): an array is truthy, so the `if (!engagement) notFound()`
+  // guard in the engagement detail page never fires and the page crashes trying to render
+  // `engagement.status` (undefined) through StatusBadge. Two engagements are seeded to exercise
+  // both KPI states the page must distinguish: sm-eng-1 has a real persisted cost-projection
+  // (money fields as STRINGS, matching Postgres `numeric` — formatUsd must coerce them, not
+  // crash); sm-eng-2 deliberately has NONE (404s), so its projected-cost KPI must render "—",
+  // never "$0.00" — SM-29's scope editor must still be usable on it (toggle it on, preview a
+  // what-if price), it just never gets a PERSISTED projection in this fixture. Scope/budget reads
+  // for both engagements come from the file-backed scope store (loadScopeStore/saveScopeStore
+  // above) the PUT actually writes.
+  const smBase = /^\/api\/([^/]+)\/modules\/search\//;
+  if (smBase.test(p)) {
+    if (p.match(/\/modules\/search\/properties$/) && m === "GET") {
+      return ok([
+        {
+          id: "sm-prop-1", clientId: "cl-2", domain: "cedargroup.example.com",
+          siteUrl: "https://cedargroup.example.com", targets: {}, umamiSiteId: null,
+          verifiedAt: "2026-07-01T00:00:00Z", status: "verified", createdAt: "2026-06-01T00:00:00Z",
+        },
+      ]);
+    }
+    if (p.match(/\/modules\/search\/engagements$/) && m === "GET") {
+      const scopeStore = loadScopeStore();
+      return ok([
+        {
+          id: "sm-eng-1", clientId: "cl-2", propertyId: "sm-prop-1", projectId: "p-seo-1",
+          name: "Cedar Group — Q3 SEO", scopePreset: scopeStore["sm-eng-1"].scopePreset, status: "active",
+          providerBudgetUsd: scopeStore["sm-eng-1"].providerBudgetUsd,
+          toolScope: scopeStore["sm-eng-1"].toolScope,
+          startsOn: "2026-07-01", endsOn: null, createdAt: "2026-07-01T00:00:00Z",
+        },
+        {
+          id: "sm-eng-2", clientId: "cl-2", propertyId: "sm-prop-1", projectId: null,
+          name: "Cedar Group — GEO pilot", scopePreset: scopeStore["sm-eng-2"].scopePreset, status: "draft",
+          providerBudgetUsd: scopeStore["sm-eng-2"].providerBudgetUsd, toolScope: scopeStore["sm-eng-2"].toolScope,
+          startsOn: null, endsOn: null, createdAt: "2026-07-10T00:00:00Z",
+        },
+      ]);
+    }
+    const engDetail = p.match(/\/modules\/search\/engagements\/([^/]+)$/);
+    if (engDetail && m === "GET") {
+      const store = loadScopeStore()[engDetail[1]];
+      if (engDetail[1] === "sm-eng-1" && store) {
+        return ok({
+          id: "sm-eng-1", clientId: "cl-2", propertyId: "sm-prop-1", projectId: "p-seo-1",
+          name: "Cedar Group — Q3 SEO", scopePreset: store.scopePreset, status: "active",
+          providerBudgetUsd: store.providerBudgetUsd, toolScope: store.toolScope,
+          startsOn: "2026-07-01", endsOn: null, createdAt: "2026-07-01T00:00:00Z",
+        });
+      }
+      if (engDetail[1] === "sm-eng-2" && store) {
+        return ok({
+          id: "sm-eng-2", clientId: "cl-2", propertyId: "sm-prop-1", projectId: null,
+          name: "Cedar Group — GEO pilot", scopePreset: store.scopePreset, status: "draft",
+          providerBudgetUsd: store.providerBudgetUsd, toolScope: store.toolScope,
+          startsOn: null, endsOn: null, createdAt: "2026-07-10T00:00:00Z",
+        });
+      }
+      return { status: 404, json: { error: "engagement not found" } };
+    }
+    const scopeMatch = p.match(/\/modules\/search\/engagements\/([^/]+)\/scope$/);
+    if (scopeMatch && m === "GET") {
+      const store = loadScopeStore()[scopeMatch[1]];
+      if (!store) return { status: 404, json: { error: "engagement not found" } };
+      // The real contract's envelope (search.controller.ts's getEngagementScope) — a bare toggle
+      // map would silently break the scope editor's `scope.toolScope` read (see EngagementScope's
+      // header note in lib/searchMarketing.ts).
+      return ok({ scopePreset: store.scopePreset, toolScope: store.toolScope, providerBudgetUsd: store.providerBudgetUsd });
+    }
+    if (scopeMatch && m === "PUT") {
+      const scopeStore = loadScopeStore();
+      const store = scopeStore[scopeMatch[1]];
+      if (!store) return { status: 404, json: { error: "engagement not found" } };
+      const b = JSON.parse(body || "{}") as { scopePreset?: string; toolScope?: Record<string, unknown>; providerBudgetUsd?: number };
+      const seeded = b.scopePreset && b.scopePreset !== "custom" ? DEMO_SCOPE_PRESETS[b.scopePreset] : undefined;
+      const nextToolScope = seeded ?? b.toolScope;
+      if (nextToolScope === undefined && b.scopePreset === undefined) {
+        return { status: 400, json: { error: "scopePreset and/or toolScope required" } };
+      }
+      if (b.scopePreset !== undefined) store.scopePreset = b.scopePreset;
+      if (nextToolScope !== undefined) store.toolScope = JSON.parse(JSON.stringify(nextToolScope));
+      if (b.providerBudgetUsd !== undefined) store.providerBudgetUsd = b.providerBudgetUsd;
+      saveScopeStore(scopeStore);
+      return ok({ id: scopeMatch[1], scopePreset: b.scopePreset ?? null, toolScope: nextToolScope ?? null });
+    }
+    const projMatch = p.match(/\/modules\/search\/engagements\/([^/]+)\/cost-projection$/);
+    if (projMatch && m === "GET") {
+      const id = projMatch[1];
+      const store = loadScopeStore()[id];
+      if (!store) return { status: 404, json: { error: "engagement not found" } };
+      const toolScopeParam = url.searchParams.get("toolScope");
+      if (toolScopeParam !== null) {
+        // What-if: price a CANDIDATE scope without touching the store — exercises the scope
+        // editor's live preview, including on sm-eng-2 (which never gets a PERSISTED projection).
+        let candidate: Record<string, unknown>;
+        try {
+          candidate = JSON.parse(toolScopeParam);
+        } catch {
+          return { status: 400, json: { error: "toolScope must be a JSON object" } };
+        }
+        const budget = store.providerBudgetUsd ?? 10;
+        const projection = demoProjectMonthlyCost(candidate, id);
+        return ok({ ...projection, whatIf: true, providerBudgetUsd: budget, overBudget: Number(projection.totalMonthlyUsd) > budget });
+      }
+      // Persisted: sm-eng-2 is the deliberate "no projection yet" test case (SM-29 ticket) — kept
+      // 404ing regardless of any scope the editor has saved to it, so the KPI's "—" state stays
+      // exercisable.
+      if (id === "sm-eng-2") return { status: 404, json: { error: "no cost projection yet" } };
+      const budget = store.providerBudgetUsd ?? 10;
+      const projection = demoProjectMonthlyCost(store.toolScope, id);
+      return ok({ ...projection, whatIf: false, providerBudgetUsd: budget, overBudget: Number(projection.totalMonthlyUsd) > budget });
+    }
+    // ── Ledger / cost surface (SM-17) ───────────────────────────────────────────────────────────
+    // Static (read-only, no PUT/POST on this route) — deliberately a MIX of real + simulated rows
+    // on sm-eng-1, per the ticket's own instruction: a fixture where every row is one mode proves
+    // nothing about the per-row chip's PRESENCE and ABSENCE both being exercisable. sm-eng-2 is kept
+    // a genuine, honest EMPTY state (zero rows) — the primary live state today, since
+    // `search_provider_calls` stays empty in every real env until SM-14/15/16 land a dispatch caller
+    // (tracker note). The two engagements together exercise both states a real deploy can show.
+    const ledgerMatch = p.match(/\/modules\/search\/engagements\/([^/]+)\/ledger$/);
+    if (ledgerMatch && m === "GET") {
+      const id = ledgerMatch[1];
+      if (id === "sm-eng-1") {
+        return ok({
+          engagementId: id,
+          providerMode: "live",
+          costToServeUsd: 0.006,
+          currentModeRowCount: 2,
+          simulatedHistoryExcludedUsd: 0.42,
+          rows: [
+            {
+              id: "ledger-1", provider: "dataforseo", endpoint: "serp.google.organic.task_post",
+              items: 10, costUsd: 0.006, cacheHit: false, status: "completed", simulated: false,
+              createdAt: "2026-07-28T09:12:00Z",
+            },
+            {
+              id: "ledger-2", provider: "dataforseo", endpoint: "serp.google.organic.task_post",
+              items: 10, costUsd: 0, cacheHit: true, status: "completed", simulated: false,
+              createdAt: "2026-07-27T14:03:00Z",
+            },
+            // A historical row from a period the platform ran in `simulate` mode — kept, badged
+            // forever (design addendum §A4.4), and it must still carry ITS OWN chip even though
+            // `providerMode` above is `live` right now.
+            {
+              id: "ledger-3", provider: "semrush", endpoint: "keywords.volume",
+              items: 50, costUsd: 0.42, cacheHit: false, status: "completed", simulated: true,
+              createdAt: "2026-07-10T08:00:00Z",
+            },
+            {
+              id: "ledger-4", provider: "dataforseo", endpoint: "serp.google.organic.task_post",
+              items: 1, costUsd: 0, cacheHit: false, status: "failed", simulated: false,
+              createdAt: "2026-07-26T11:47:00Z",
+            },
+          ],
+        });
+      }
+      if (id === "sm-eng-2") {
+        return ok({
+          engagementId: id, providerMode: "live", costToServeUsd: 0,
+          currentModeRowCount: 0, simulatedHistoryExcludedUsd: null, rows: [],
+        });
+      }
+      return { status: 404, json: { error: "engagement not found" } };
+    }
+
+    if (p.match(/\/modules\/search\/kpi-targets$/) && m === "GET") return ok([]);
+
+    // ── Site Audit (SM-08, wired up per SM-12) ──────────────────────────────────────────────────
+    if (p.match(/\/modules\/search\/audits$/) && m === "GET") {
+      const propertyId = url.searchParams.get("propertyId");
+      const { audits } = loadAuditStore();
+      const rows = propertyId ? audits.filter((a) => a.propertyId === propertyId) : audits;
+      return ok(rows.map(({ id, propertyId: pid, kind, source, status, score, summary, startedAt, completedAt, createdAt }) => (
+        { id, propertyId: pid, kind, source, status, score, summary, startedAt, completedAt, createdAt }
+      )));
+    }
+    const findingsMatch = p.match(/\/modules\/search\/audits\/([^/]+)\/findings$/);
+    if (findingsMatch && m === "GET") {
+      const { findings } = loadAuditStore();
+      return ok(findings.filter((f) => f.auditId === findingsMatch[1]));
+    }
+    const triageMatch = p.match(/\/modules\/search\/findings\/([^/]+)$/);
+    if (triageMatch && m === "PATCH") {
+      const store = loadAuditStore();
+      const finding = store.findings.find((f) => f.id === triageMatch[1]);
+      if (!finding) return { status: 404, json: { error: "finding not found" } };
+      const b = JSON.parse(body || "{}") as { status?: string };
+      if (!b.status || !["open", "fixed", "ignored"].includes(b.status)) {
+        return { status: 400, json: { error: "status must be open|fixed|ignored" } };
+      }
+      finding.status = b.status;
+      saveAuditStore(store);
+      return ok({ id: finding.id, status: finding.status });
+    }
+
+    // ── Keywords (SM-09, wired up per SM-12) ────────────────────────────────────────────────────
+    if (p.match(/\/modules\/search\/keyword-sets$/) && m === "GET") {
+      const engagementId = url.searchParams.get("engagementId");
+      const { sets } = loadKeywordStore();
+      return ok(engagementId ? sets.filter((s) => s.engagementId === engagementId) : sets);
+    }
+    if (p.match(/\/modules\/search\/keyword-sets$/) && m === "POST") {
+      const b = JSON.parse(body || "{}") as { engagementId?: string; name?: string; source?: string };
+      if (!b.engagementId || !b.name) return { status: 400, json: { error: "engagementId and name required" } };
+      const store = loadKeywordStore();
+      const id = genDemoId("sm-set");
+      store.sets.push({ id, engagementId: b.engagementId, name: b.name, source: b.source ?? "client", createdAt: new Date().toISOString() });
+      saveKeywordStore(store);
+      return { status: 201, json: { id } };
+    }
+    const kwListMatch = p.match(/\/modules\/search\/keyword-sets\/([^/]+)\/keywords$/);
+    if (kwListMatch && m === "GET") {
+      const { keywords } = loadKeywordStore();
+      return ok(
+        keywords.filter((k) => k.setId === kwListMatch[1]).map(({ id, keyword, locale, intent, clusterId, clusterLabel, volume, difficulty, cpcUsd, isTracked, hasEmbedding, createdAt }) => (
+          { id, keyword, locale, intent, clusterId, clusterLabel, volume, difficulty, cpcUsd, isTracked, hasEmbedding, createdAt }
+        )),
+      );
+    }
+    const importMatch = p.match(/\/modules\/search\/keyword-sets\/([^/]+)\/import$/);
+    if (importMatch && m === "POST") {
+      const b = JSON.parse(body || "{}") as { text?: string; locale?: string };
+      if (!b.text || !b.text.trim()) return { status: 400, json: { error: "text required (CSV or one keyword per line)" } };
+      let rows: { keyword: string; locale: string }[];
+      try {
+        rows = parseDemoKeywordImport(b.text);
+      } catch (e) {
+        // An unterminated quote is a 400 on the real controller too — reject rather than mangle.
+        return { status: 400, json: { error: e instanceof Error ? e.message : "malformed keyword import text" } };
+      }
+      if (rows.length === 0) return { status: 400, json: { error: "no importable keyword rows found in text" } };
+      const store = loadKeywordStore();
+      const setId = importMatch[1];
+      if (!store.sets.some((s) => s.id === setId)) return { status: 404, json: { error: "keyword set not found" } };
+      const existing = store.keywords.filter((k) => k.setId === setId);
+      // SM-32: reject an over-cap import outright — never silently truncate. Real message shape
+      // mirrors search.controller.ts's importKeywords 400 text exactly, so a caller reading this
+      // error in demo mode sees the same words the live backend would show.
+      if (existing.length + rows.length > DEMO_MAX_KEYWORDS_PER_SET) {
+        return {
+          status: 400,
+          json: {
+            error: `import would bring this set to ${existing.length + rows.length} keywords, exceeding the ` +
+              `${DEMO_MAX_KEYWORDS_PER_SET}-keyword cap (currently ${existing.length}, submitting ${rows.length})`,
+          },
+        };
+      }
+      let imported = 0;
+      for (const row of rows) {
+        if (existing.some((k) => k.keyword === row.keyword && k.locale === row.locale)) continue;
+        store.keywords.push({
+          id: genDemoId("sm-kw"), setId, keyword: row.keyword, locale: row.locale, intent: null,
+          clusterId: null, clusterLabel: null, volume: null, difficulty: null, cpcUsd: null,
+          isTracked: false, hasEmbedding: false, createdAt: new Date().toISOString(),
+        });
+        imported++;
+      }
+      saveKeywordStore(store);
+      return ok({ imported, submitted: rows.length, duplicates: rows.length - imported });
+    }
+    const embedMatch = p.match(/\/modules\/search\/keyword-sets\/([^/]+)\/embed$/);
+    if (embedMatch && m === "POST") {
+      const store = loadKeywordStore();
+      const setId = embedMatch[1];
+      if (!store.sets.some((s) => s.id === setId)) return { status: 404, json: { error: "keyword set not found" } };
+      let embedded = 0;
+      for (const k of store.keywords) {
+        if (k.setId === setId && !k.hasEmbedding) { k.hasEmbedding = true; embedded++; }
+      }
+      saveKeywordStore(store);
+      return ok({ mode: "array", embedded });
+    }
+    const clusterMatch = p.match(/\/modules\/search\/keyword-sets\/([^/]+)\/cluster$/);
+    if (clusterMatch && m === "POST") {
+      const store = loadKeywordStore();
+      const setId = clusterMatch[1];
+      if (!store.sets.some((s) => s.id === setId)) return { status: 404, json: { error: "keyword set not found" } };
+      const members = store.keywords.filter((k) => k.setId === setId);
+      const embedded = members.filter((k) => k.hasEmbedding);
+      const skipped = members.length - embedded.length;
+      // Demo-only "clustering": one cluster per DISTINCT leading word among embedded keywords — not
+      // a stand-in for the real cosine/greedy partition (clustering.ts), just enough structure to
+      // exercise the "clusters + intent labels" view with more than one cluster when the seed data
+      // supports it.
+      const byFirstWord = new Map<string, DemoKeyword[]>();
+      for (const k of embedded) {
+        const key = k.keyword.split(" ")[0];
+        const list = byFirstWord.get(key) ?? [];
+        list.push(k);
+        byFirstWord.set(key, list);
+      }
+      const clusters = [...byFirstWord.entries()].map(([key, list]) => {
+        const clusterId = list[0].clusterId ?? genDemoId("sm-cluster");
+        const label = list[0].clusterLabel ?? `${key} — keywords`;
+        const intent = list[0].intent ?? "commercial";
+        for (const k of list) { k.clusterId = clusterId; k.clusterLabel = label; k.intent = k.intent ?? intent; }
+        return { clusterId, label, intent, size: list.length, keywordIds: list.map((k) => k.id) };
+      });
+      saveKeywordStore(store);
+      return ok({ mode: "array", clusters, skipped });
+    }
+
+    // ── SEM: campaigns / ad groups / ads / negatives / change proposals (SM-18 backend; SM-47
+    // console). Route shapes mirror search.controller.ts's SEM section exactly (§4i discipline).
+    const genPlanMatch = p.match(/\/modules\/search\/engagements\/([^/]+)\/campaigns\/generate-plan$/);
+    if (genPlanMatch && m === "POST") {
+      const b = JSON.parse(body || "{}") as { keywordSetId?: string; name?: string; platform?: string };
+      if (!b.keywordSetId || !b.name) return { status: 400, json: { error: "keywordSetId and name required" } };
+      const store = loadSemStore();
+      const campaignId = genDemoId("sm-campaign");
+      const now = new Date().toISOString();
+      store.campaigns.push({
+        id: campaignId, engagementId: genPlanMatch[1], platform: b.platform ?? "google_ads", externalId: null,
+        name: b.name, objective: null, status: "draft", budgetMinor: null, currency: null, bidStrategy: null,
+        targetCpaMinor: null, targetRoas: null, customFields: {}, created_at: now, updated_at: now,
+      });
+      // Fixed, deliberately MIXED provenance — the real backend computes this from
+      // search_keywords.metrics_provider/metrics_simulated per keyword (SM-18's `buildCampaignPlan`);
+      // the demo fabricates the SAME three-state shape directly on the response rather than deriving
+      // it from KEYWORD_STORE (which SM-14 owns and does not carry those columns yet — see
+      // KeywordWorkbench's own note on why no chip renders on keyword volume today). Two DISTINCT
+      // providers (dataforseo, ahrefs) are present so "listed distinctly, never blended" is visibly
+      // true, and one ad group is entirely unpulled so all three states are reachable in one plan.
+      const planAdGroups = [
+        {
+          name: "Core services — real data", intent: "commercial", keywordCount: 6,
+          keywordSample: ["seo audit tools", "seo audit checklist", "technical seo checklist"],
+          provenance: { providers: ["dataforseo"], simulatedCount: 0, realCount: 6, unpulledCount: 0 },
+        },
+        {
+          name: "Consulting — mixed vendors", intent: "commercial", keywordCount: 5,
+          keywordSample: ["local seo services", "seo consultant", "enterprise seo platform"],
+          provenance: { providers: ["ahrefs", "dataforseo"], simulatedCount: 2, realCount: 2, unpulledCount: 1 },
+        },
+        {
+          name: "Emerging — not yet pulled", intent: "informational", keywordCount: 3,
+          keywordSample: ["ai overview optimization", "geo for local business"],
+          provenance: { providers: [], simulatedCount: 0, realCount: 0, unpulledCount: 3 },
+        },
+      ];
+      const adGroups = planAdGroups.map((g) => {
+        const adGroupId = genDemoId("sm-ag");
+        const clusterId = genDemoId("sm-cluster");
+        store.adGroups.push({ id: adGroupId, campaignId, name: g.name, clusterId, externalId: null, created_at: now, updated_at: now });
+        return {
+          id: adGroupId, clusterId, name: g.name, intent: g.intent,
+          keywordCount: g.keywordCount, keywordSample: g.keywordSample, provenance: g.provenance,
+        };
+      });
+      saveSemStore(store);
+      return {
+        status: 201,
+        json: { id: campaignId, keywordSetId: b.keywordSetId, adGroups, totalClusteredKeywords: 14, unclusteredSkipped: 0 },
+      };
+    }
+
+    const campaignsMatch = p.match(/\/modules\/search\/engagements\/([^/]+)\/campaigns$/);
+    if (campaignsMatch && m === "GET") {
+      const store = loadSemStore();
+      const status = url.searchParams.get("status");
+      let rows = store.campaigns.filter((c) => c.engagementId === campaignsMatch[1]);
+      if (status) rows = rows.filter((c) => c.status === status);
+      return ok(rows);
+    }
+    if (campaignsMatch && m === "POST") {
+      const b = JSON.parse(body || "{}") as { name?: string; platform?: string; objective?: string; budgetMinor?: number; currency?: string };
+      if (!b.name) return { status: 400, json: { error: "name required" } };
+      const store = loadSemStore();
+      const id = genDemoId("sm-campaign");
+      const now = new Date().toISOString();
+      store.campaigns.push({
+        id, engagementId: campaignsMatch[1], platform: b.platform ?? "google_ads", externalId: null,
+        name: b.name, objective: b.objective ?? null, status: "draft", budgetMinor: b.budgetMinor ?? null,
+        currency: b.currency ?? null, bidStrategy: null, targetCpaMinor: null, targetRoas: null,
+        customFields: {}, created_at: now, updated_at: now,
+      });
+      saveSemStore(store);
+      return { status: 201, json: { id } };
+    }
+
+    const campaignMatch = p.match(/\/modules\/search\/campaigns\/([^/]+)$/);
+    if (campaignMatch && m === "GET") {
+      const store = loadSemStore();
+      const c = store.campaigns.find((x) => x.id === campaignMatch[1]);
+      if (!c) return { status: 404, json: { error: "campaign not found" } };
+      return ok(c);
+    }
+    if (campaignMatch && m === "PATCH") {
+      const b = JSON.parse(body || "{}") as Record<string, unknown>;
+      if (b.status && !["draft", "proposed"].includes(b.status as string)) {
+        return { status: 400, json: { error: "status can only be set to draft|proposed here — live states require a live-ads sync (SM-20/25/26)" } };
+      }
+      const store = loadSemStore();
+      const c = store.campaigns.find((x) => x.id === campaignMatch[1]);
+      if (!c) return { status: 404, json: { error: "campaign not found" } };
+      Object.assign(c, b, { updated_at: new Date().toISOString() });
+      saveSemStore(store);
+      return ok({ id: c.id });
+    }
+    if (campaignMatch && m === "DELETE") {
+      const store = loadSemStore();
+      const before = store.campaigns.length;
+      store.campaigns = store.campaigns.filter((x) => x.id !== campaignMatch[1]);
+      if (store.campaigns.length === before) return { status: 404, json: { error: "campaign not found" } };
+      saveSemStore(store);
+      return ok({ ok: true });
+    }
+
+    const adGroupsMatch = p.match(/\/modules\/search\/campaigns\/([^/]+)\/ad-groups$/);
+    if (adGroupsMatch && m === "GET") {
+      const store = loadSemStore();
+      return ok(store.adGroups.filter((g) => g.campaignId === adGroupsMatch[1]));
+    }
+    if (adGroupsMatch && m === "POST") {
+      const b = JSON.parse(body || "{}") as { name?: string; clusterId?: string };
+      if (!b.name) return { status: 400, json: { error: "name required" } };
+      const store = loadSemStore();
+      const id = genDemoId("sm-ag");
+      const now = new Date().toISOString();
+      store.adGroups.push({ id, campaignId: adGroupsMatch[1], name: b.name, clusterId: b.clusterId ?? null, externalId: null, created_at: now, updated_at: now });
+      saveSemStore(store);
+      return { status: 201, json: { id } };
+    }
+
+    const adGroupMatch = p.match(/\/modules\/search\/ad-groups\/([^/]+)$/);
+    if (adGroupMatch && m === "GET") {
+      const store = loadSemStore();
+      const g = store.adGroups.find((x) => x.id === adGroupMatch[1]);
+      if (!g) return { status: 404, json: { error: "ad group not found" } };
+      return ok(g);
+    }
+    if (adGroupMatch && m === "DELETE") {
+      const store = loadSemStore();
+      const before = store.adGroups.length;
+      store.adGroups = store.adGroups.filter((x) => x.id !== adGroupMatch[1]);
+      if (store.adGroups.length === before) return { status: 404, json: { error: "ad group not found" } };
+      saveSemStore(store);
+      return ok({ ok: true });
+    }
+
+    const adsMatch = p.match(/\/modules\/search\/ad-groups\/([^/]+)\/ads$/);
+    if (adsMatch && m === "GET") {
+      const store = loadSemStore();
+      return ok(store.ads.filter((a) => a.adGroupId === adsMatch[1]));
+    }
+    if (adsMatch && m === "POST") {
+      const b = JSON.parse(body || "{}") as { headlines?: unknown[]; descriptions?: unknown[]; finalUrl?: string };
+      const headlines = Array.isArray(b.headlines) ? b.headlines.filter((h): h is string => typeof h === "string" && h.trim().length > 0) : [];
+      const descriptions = Array.isArray(b.descriptions) ? b.descriptions.filter((d): d is string => typeof d === "string" && d.trim().length > 0) : [];
+      if (headlines.length === 0 || descriptions.length === 0) return { status: 400, json: { error: "at least one headline and one description required" } };
+      const store = loadSemStore();
+      const id = genDemoId("sm-ad");
+      const now = new Date().toISOString();
+      store.ads.push({ id, adGroupId: adsMatch[1], headlines, descriptions, finalUrl: b.finalUrl ?? null, status: "draft", aiGenerated: false, created_at: now, updated_at: now });
+      saveSemStore(store);
+      return { status: 201, json: { id } };
+    }
+    const draftAdMatch = p.match(/\/modules\/search\/ad-groups\/([^/]+)\/ads\/draft$/);
+    if (draftAdMatch && m === "POST") {
+      const store = loadSemStore();
+      const adGroup = store.adGroups.find((g) => g.id === draftAdMatch[1]);
+      if (!adGroup) return { status: 404, json: { error: "ad group not found" } };
+      const id = genDemoId("sm-ad");
+      const now = new Date().toISOString();
+      const headlines = [`${adGroup.name} — Explore Options`, "Trusted By Growing Teams", "Get Started Today"];
+      const descriptions = ["AI-drafted from this ad group's clustered keywords.", "Review before approving — nothing publishes automatically."];
+      store.ads.push({ id, adGroupId: draftAdMatch[1], headlines, descriptions, finalUrl: null, status: "draft", aiGenerated: true, created_at: now, updated_at: now });
+      saveSemStore(store);
+      return { status: 201, json: { id, headlines, descriptions, draftedVia: "ai", model: "demo-mode" } };
+    }
+
+    const adMatch = p.match(/\/modules\/search\/ads\/([^/]+)$/);
+    if (adMatch && m === "PATCH") {
+      const b = JSON.parse(body || "{}") as { status?: string };
+      if (b.status && !["draft", "approved", "rejected"].includes(b.status)) {
+        return { status: 400, json: { error: "status must be draft|approved|rejected here — 'live' is set only by a live-ads sync" } };
+      }
+      const store = loadSemStore();
+      const a = store.ads.find((x) => x.id === adMatch[1]);
+      if (!a) return { status: 404, json: { error: "ad not found" } };
+      if (b.status) a.status = b.status;
+      a.updated_at = new Date().toISOString();
+      saveSemStore(store);
+      return ok({ id: a.id });
+    }
+    if (adMatch && m === "DELETE") {
+      const store = loadSemStore();
+      const before = store.ads.length;
+      store.ads = store.ads.filter((x) => x.id !== adMatch[1]);
+      if (store.ads.length === before) return { status: 404, json: { error: "ad not found" } };
+      saveSemStore(store);
+      return ok({ ok: true });
+    }
+
+    const negativesMatch = p.match(/\/modules\/search\/campaigns\/([^/]+)\/negatives$/);
+    if (negativesMatch && m === "GET") {
+      const store = loadSemStore();
+      const status = url.searchParams.get("status");
+      let rows = store.negatives.filter((n) => n.campaignId === negativesMatch[1]);
+      if (status) rows = rows.filter((n) => n.status === status);
+      return ok(rows);
+    }
+    if (negativesMatch && m === "POST") {
+      const b = JSON.parse(body || "{}") as { term?: string; matchType?: string; adGroupId?: string };
+      const term = b.term?.trim();
+      if (!term) return { status: 400, json: { error: "term required" } };
+      const store = loadSemStore();
+      const id = genDemoId("sm-neg");
+      const now = new Date().toISOString();
+      store.negatives.push({ id, campaignId: negativesMatch[1], adGroupId: b.adGroupId ?? null, term, matchType: b.matchType ?? "exact", source: "manual", status: "proposed", created_at: now, updated_at: now });
+      saveSemStore(store);
+      return { status: 201, json: { id } };
+    }
+    const proposeMatch = p.match(/\/modules\/search\/campaigns\/([^/]+)\/negatives\/propose$/);
+    if (proposeMatch && m === "POST") {
+      const b = JSON.parse(body || "{}") as { text?: string };
+      const terms = [...new Set((b.text ?? "").split("\n").map((t) => t.trim()).filter(Boolean))];
+      if (terms.length === 0) return { status: 400, json: { error: "terms or text required (one search term per line, or a terms array)" } };
+      const store = loadSemStore();
+      const now = new Date().toISOString();
+      const ids: string[] = [];
+      for (const term of terms) {
+        const id = genDemoId("sm-neg");
+        store.negatives.push({ id, campaignId: proposeMatch[1], adGroupId: null, term, matchType: "broad", source: "ai", status: "proposed", created_at: now, updated_at: now });
+        ids.push(id);
+      }
+      saveSemStore(store);
+      return ok({
+        proposed: ids.length, submitted: terms.length,
+        candidates: terms.map((term) => ({ term, matchType: "broad", reason: "demo classification — not a real AI call" })),
+        draftedVia: "ai", model: "demo-mode",
+      });
+    }
+
+    const negativeMatch = p.match(/\/modules\/search\/negatives\/([^/]+)$/);
+    if (negativeMatch && m === "PATCH") {
+      const b = JSON.parse(body || "{}") as { status?: string; matchType?: string };
+      if (b.status && !["proposed", "approved", "dismissed"].includes(b.status)) {
+        return { status: 400, json: { error: "status can only be set to proposed|approved|dismissed here — 'applied' is stamped only by the manual/api execution flow (SM-30/21)" } };
+      }
+      const store = loadSemStore();
+      const n = store.negatives.find((x) => x.id === negativeMatch[1]);
+      if (!n) return { status: 404, json: { error: "negative not found" } };
+      if (b.status) n.status = b.status;
+      if (b.matchType) n.matchType = b.matchType;
+      n.updated_at = new Date().toISOString();
+      saveSemStore(store);
+      return ok({ id: n.id });
+    }
+    if (negativeMatch && m === "DELETE") {
+      const store = loadSemStore();
+      const before = store.negatives.length;
+      store.negatives = store.negatives.filter((x) => x.id !== negativeMatch[1]);
+      if (store.negatives.length === before) return { status: 404, json: { error: "negative not found" } };
+      saveSemStore(store);
+      return ok({ ok: true });
+    }
+
+    const changeProposalsMatch = p.match(/\/modules\/search\/campaigns\/([^/]+)\/change-proposals$/);
+    if (changeProposalsMatch && m === "GET") {
+      const store = loadSemStore();
+      const status = url.searchParams.get("status");
+      let rows = store.changeProposals.filter((cp) => cp.campaignId === changeProposalsMatch[1]);
+      if (status) rows = rows.filter((cp) => cp.status === status);
+      return ok(rows);
+    }
+    if (changeProposalsMatch && m === "POST") {
+      const b = JSON.parse(body || "{}") as { kind?: string; payload?: Record<string, unknown>; mode?: string };
+      if (!b.kind) return { status: 400, json: { error: "kind must be one of launch|pause|budget|bid|negatives_batch|ads_batch" } };
+      if (!b.payload || typeof b.payload !== "object" || Array.isArray(b.payload)) return { status: 400, json: { error: "payload required (the exact intended change, as an object)" } };
+      const store = loadSemStore();
+      const id = genDemoId("sm-cp");
+      const now = new Date().toISOString();
+      store.changeProposals.push({
+        id, campaignId: changeProposalsMatch[1], kind: b.kind, payload: b.payload, status: "proposed",
+        mode: b.mode ?? "manual", approvalId: null, exportFileId: null, proposedBy: DEMO_USER_ID,
+        approvedBy: null, appliedBy: null, appliedAt: null, created_at: now, updated_at: now,
+      });
+      saveSemStore(store);
+      return { status: 201, json: { id } };
+    }
+
+    const changeProposalMatch = p.match(/\/modules\/search\/change-proposals\/([^/]+)$/);
+    if (changeProposalMatch && m === "GET") {
+      const store = loadSemStore();
+      const cp = store.changeProposals.find((x) => x.id === changeProposalMatch[1]);
+      if (!cp) return { status: 404, json: { error: "change proposal not found" } };
+      return ok(cp);
+    }
+    if (changeProposalMatch && m === "PATCH") {
+      const b = JSON.parse(body || "{}") as { status?: string };
+      if (b.status === "applied") {
+        return { status: 400, json: { error: "'applied' cannot be set here — it is stamped only by the manual mark-applied flow (SM-30) or api-mode execution (SM-21)" } };
+      }
+      const store = loadSemStore();
+      const cp = store.changeProposals.find((x) => x.id === changeProposalMatch[1]);
+      if (!cp) return { status: 404, json: { error: "change proposal not found" } };
+      const transitions: Record<string, string[]> = { proposed: ["approved", "dismissed"], approved: ["dismissed"], dismissed: [], applied: [] };
+      if (b.status && !(transitions[cp.status] ?? []).includes(b.status)) {
+        return { status: 400, json: { error: `cannot move a '${cp.status}' proposal to '${b.status}'` } };
+      }
+      if (b.status) {
+        cp.status = b.status;
+        if (b.status === "approved") cp.approvedBy = DEMO_USER_ID;
+      }
+      cp.updated_at = new Date().toISOString();
+      saveSemStore(store);
+      return ok({ id: cp.id });
+    }
+
+    // Anything else under /modules/search/* (rankings, briefs, ai-visibility, pacing/metrics-daily)
+    // is deliberately left unhandled so it falls through to the 404 default just below — those tabs
+    // are NOT BUILT and must show BackendPending, not a demo-faked "empty" list.
+    if (m === "GET") return { status: 404, json: { error: "not implemented in demo fixtures" } };
   }
 
   // Anything else (comments, files, notifications, clients, deliverables,

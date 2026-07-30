@@ -70,6 +70,16 @@ services:
     # Pinned (never :latest — a floating tag can shift engine/payload behavior under you, an
     # error the aire project hit). NOWEB variant = Baileys engine, no Chromium (lighter). Bump
     # deliberately. Since 2026.6.1 all former Plus features ship in this free Core image.
+    # 2026-07-29: tried bumping to noweb-2026.7.1 to fix a re-pair failure — it did NOT help, so the
+    # pin is back on the version that demonstrably paired and ran WORKING earlier the same day.
+    # Symptom (identical on BOTH versions): creds cleared, then Baileys logs `not logged in,
+    # attempting registration...` -> `Error: Connection Failure`, retrying every ~2s, so WhatsApp
+    # refuses the registration handshake and no QR is ever issued. Network was ruled out
+    # (wss://web.whatsapp.com/ws/chat opens fine from inside this container; an earlier "unreachable"
+    # reading was a false negative from wget lacking CA certs in this image). Remaining explanation
+    # is an upstream WhatsApp-side throttle/block on the number or egress IP, most likely earned by
+    # a ~2s reconnect storm during the Docker Desktop outage. Fix = wait it out with the session
+    # STOPPED (retrying extends it). Don't re-bump on a hunch: 2026.7.1 was tested and ruled out.
     image: devlikeapro/waha:noweb-2026.6.2
     restart: unless-stopped
     ports:
@@ -137,6 +147,12 @@ services:
       # Model-assisted DLP classifier stays opt-in; enable only where Ollama is reachable.
       DLP_CLASSIFIER_ENABLED: ${DLP_CLASSIFIER_ENABLED:-false}
       EGRESS_ALLOWLIST: generativelanguage.googleapis.com,api.anthropic.com,ollama.com,whisper,host.docker.internal
+      # WA-hardening D: telemetry is a BASE default (not only the observability.yml overlay) so it
+      # survives a plain `up -d --build ai-gateway` with vps+local files only. Fail-soft (WS9): a
+      # no-op unless OTEL_ENABLED is truthy; unreachable collector just drops spans, never crashes.
+      OTEL_ENABLED: ${OTEL_ENABLED:-0}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4318}
+      OTEL_SERVICE_NAME: ai-gateway
     volumes:
       - gateway-data:/app/data # egress audit (JSONL)
 
@@ -203,6 +219,13 @@ services:
       # Agent runner (B2) — enables /api/:t/agents/* endpoints
       AGENTS_URL: http://agent-runner:3006
       AGENT_RUNNER_TOKEN: ${AGENT_RUNNER_TOKEN:-}
+      # WD-04 (Web Dev Phase 1): in-ERP audio upload -> server-side transcription. Calls the
+      # whisper container DIRECTLY (same container ai-gateway's MEDIA_CHAIN uses) — never via
+      # ai-gateway-go — because meeting-length audio would exceed the gateway's ~2.5-min
+      # per-call timeout. Empty WHISPER_URL => the upload endpoint refuses cleanly.
+      WHISPER_URL: http://whisper:8000
+      WHISPER_MODEL: ${WHISPER_MODEL:-Systran/faster-whisper-small}
+      MEETING_AUDIO_MAX_BYTES: ${MEETING_AUDIO_MAX_BYTES:-209715200}
       # Automation is the separate `gaiada-automation` n8n stack; set these only if n8n is
       # reachable from this network. AUTOMATION_API_KEY is an n8n Public-API key → the
       # Systems→Automation console then lists real workflows + last-run.
@@ -213,6 +236,56 @@ services:
       N8N_WEBHOOK_BASE_URL: ${N8N_WEBHOOK_BASE_URL:-}
       N8N_BRIDGE_SECRET: ${N8N_BRIDGE_SECRET:-}
       N8N_BRIDGE_EVENTS: ${N8N_BRIDGE_EVENTS:-}
+      # DEF-1 (2026-07-30): the ingest proxy waits on the dispatcher, which does real AI work inline
+      # (MOM + 3 extractions + a recording-context read) measured at 15-23s. This was never forwarded
+      # to the container, so it silently used the old 5s code default and EVERY ingest returned
+      # dispatcher_unreachable — the run completed server-side but the recording never flipped to
+      # `ingested` nor linked pipeline_run_id, breaking the capture->run chain.
+      N8N_BRIDGE_TIMEOUT_MS: ${N8N_BRIDGE_TIMEOUT_MS:-30000}
+      # Search-marketing (SM-05/SM-06). All optional: with DATAFORSEO_* unset the paid driver is
+      # not registered and every paid search capability fails closed, while the $0 pillars
+      # (crawler audits, keyword clustering, AI drafts) keep working. ONE shared deposit pool —
+      # never per-client keys. Keep the queue on 'standard' ($0.0006/SERP vs Live's $0.002).
+      DATAFORSEO_LOGIN: ${DATAFORSEO_LOGIN:-}
+      DATAFORSEO_PASSWORD: ${DATAFORSEO_PASSWORD:-}
+      DATAFORSEO_QUEUE: ${DATAFORSEO_QUEUE:-standard}
+      # SM-33/34/35 (tracker §6): "live" (default) registers real vendor drivers per their own
+      # credentials below; "simulate" registers synthetic drivers instead, so dev/staging demos the
+      # department at $0 real spend without empty tables.
+      SEARCH_PROVIDER_MODE: ${SEARCH_PROVIDER_MODE:-live}
+      # SM-48 (tracker §6s): a PLATFORM-LEVEL, tenant-agnostic portfolio-domain list (comma-separated),
+      # folded into simulate mode's SERP candidate pool ONLY — never read by the live drivers. Fixes
+      # the gap where a simulated rank-pull always returned position: null. Deliberately NOT per-tenant
+      # (search_data_cache is shared, no-RLS market data — D-4). Unset (default) => today's simulated
+      # SERP, byte for byte.
+      SEARCH_SIMULATION_PORTFOLIO_DOMAINS: ${SEARCH_SIMULATION_PORTFOLIO_DOMAINS:-}
+      # Semrush Analytics API v3 (SM-34). Empty SEMRUSH_API_KEY => not registered, independently of
+      # the other two vendors' own credential checks. Design addendum §A3.3/§A7 OQ-9 (BINDING): the
+      # plan price/allowance are UNVERIFIED owner-supplied facts (read off the Semrush account
+      # console) — BOTH must be positive or the driver does NOT register even with the key set.
+      SEMRUSH_API_KEY: ${SEMRUSH_API_KEY:-}
+      SEMRUSH_BASE_URL: ${SEMRUSH_BASE_URL:-https://api.semrush.com}
+      SEMRUSH_DATABASE: ${SEMRUSH_DATABASE:-us}
+      SEMRUSH_MONTHLY_PLAN_PRICE_USD: ${SEMRUSH_MONTHLY_PLAN_PRICE_USD:-}
+      SEMRUSH_MONTHLY_UNIT_ALLOWANCE: ${SEMRUSH_MONTHLY_UNIT_ALLOWANCE:-}
+      # Ahrefs API v3 (SM-35). Empty AHREFS_API_KEY => not registered, independently of the other two
+      # vendors' own credential checks. AHREFS_RANK_TRACKER_PROJECT_ID only gates the 'serp'
+      # capability (Ahrefs's SERP Overview needs a pre-existing Rank Tracker project); unset refuses
+      # that one capability cleanly, no effect on volume/difficulty/backlinks/competitors. Design
+      # addendum §A3.3/§A7 OQ-10 (BINDING): the API-tier price/allowance are UNVERIFIED owner-supplied
+      # facts — BOTH must be positive or the driver does NOT register even with the key set.
+      AHREFS_API_KEY: ${AHREFS_API_KEY:-}
+      AHREFS_BASE_URL: ${AHREFS_BASE_URL:-https://api.ahrefs.com/v3}
+      AHREFS_COUNTRY: ${AHREFS_COUNTRY:-us}
+      AHREFS_RANK_TRACKER_PROJECT_ID: ${AHREFS_RANK_TRACKER_PROJECT_ID:-}
+      AHREFS_MONTHLY_API_TIER_PRICE_USD: ${AHREFS_MONTHLY_API_TIER_PRICE_USD:-}
+      AHREFS_MONTHLY_UNIT_ALLOWANCE: ${AHREFS_MONTHLY_UNIT_ALLOWANCE:-}
+      SEARCH_GLOBAL_MONTHLY_CAP_USD: ${SEARCH_GLOBAL_MONTHLY_CAP_USD:-150}
+      SEARCH_TENANT_MONTHLY_CAP_USD: ${SEARCH_TENANT_MONTHLY_CAP_USD:-}
+      SEARCH_BUDGET_WARN_RATIO: ${SEARCH_BUDGET_WARN_RATIO:-0.8}
+      SEARCH_PILLAR_SEO: ${SEARCH_PILLAR_SEO:-1}
+      SEARCH_PILLAR_SEM: ${SEARCH_PILLAR_SEM:-1}
+      SEARCH_PILLAR_GEO: ${SEARCH_PILLAR_GEO:-1}
       N8N_BRIDGE_ENTITY_TYPES: ${N8N_BRIDGE_ENTITY_TYPES:-}
       # Event → knowledge-graph bridge (WS8 Step E). Forwards business events on these entity streams
       # to the knowledge service /graph/ingest (reuses KNOWLEDGE_URL/TOKEN above). Off unless set.
@@ -220,8 +293,23 @@ services:
       # ORG-6 release train (WSD-8 go-live 2026-07-22): shared-service assignments + reconciler.
       # Dark by default (empty/unset -> off); "1"/"true" flips the whole train on.
       SERVICE_ASSIGNMENTS_ENABLED: ${SERVICE_ASSIGNMENTS_ENABLED:-}
+      # WA-hardening D: base telemetry default (see ai-gateway comment above for rationale).
+      OTEL_ENABLED: ${OTEL_ENABLED:-0}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4318}
+      OTEL_SERVICE_NAME: platform
     volumes:
       - platform-files:/data/files
+    # SM-45: gives depends_on: condition: service_healthy something to attach to. GET /health is
+    # the same root probe the admin console + mcp-hub's module-tools bootstrap already hit; node:22
+    # -alpine ships busybox wget so no extra package is needed in the image. Use 127.0.0.1, NOT
+    # localhost — busybox wget resolves localhost to ::1 first and the app only binds 0.0.0.0
+    # (IPv4), so "localhost" gets a false-negative "connection refused" from inside the container.
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3004/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
     depends_on:
       postgres:
         condition: service_healthy
@@ -229,6 +317,12 @@ services:
       cerbos:
         condition: service_started
       redis:
+        condition: service_started
+      # WD-04: platform calls whisper directly for in-ERP audio uploads. No healthcheck defined
+      # on the whisper image (first request downloads its model, so "healthy" isn't meaningful at
+      # boot) — service_started is enough; the upload path itself tolerates whisper being briefly
+      # unready (retry action on failure).
+      whisper:
         condition: service_started
 
   # Sync engine (WS1 T2) — CENTRAL role. Serves push/pull over mTLS to remote site nodes and runs
@@ -256,9 +350,49 @@ services:
       # Empty = accept any CA-signed node (the site_subscriptions ACL is then the sole tenant
       # gate); set to a comma list of node CNs to also pin an allowlist.
       SYNC_ALLOWED_CNS: ${SYNC_ALLOWED_CNS:-}
+      # WA-hardening D: base telemetry default (see ai-gateway comment above for rationale).
+      OTEL_ENABLED: ${OTEL_ENABLED:-0}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4318}
+      OTEL_SERVICE_NAME: sync-engine
     volumes:
       - sync-data:/app/data
       - gateway-data:/gateway-ca:ro # reuse the gateway's persisted internal CA
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # SM-07 crawl worker (search-crawl-go). Job-mode by design (one container run = one crawl of one
+  # registered+verified search_properties row, then exit) — NOT part of the always-on stack, so
+  # profile-gated + restart:"no" like sync-central's spirit but without the "unless-stopped" server
+  # lifecycle. Dispatch a crawl with:
+  #   docker compose -f docker-compose.vps.yml --profile jobs run --rm \
+  #     -e TENANT_ID=<company uuid> -e PROPERTY_ID=<search_properties uuid> search-crawl
+  # Egress is fully closed by default: it has no allowlist of its own baked in — the ONLY hosts a
+  # run may reach are resolved at dispatch from that tenant's own search_properties row (SM-07
+  # egress guard, internal/egress). No inbound ports (Zone A egress-only, design §05 table).
+  search-crawl:
+    build: ../../search-crawl-go
+    restart: "no"
+    profiles: ["jobs"] # never starts with a plain `up -d`; run explicitly per crawl
+    environment:
+      # Runtime = platform_app (NOBYPASSRLS) — identical runtime privilege to platform-nest
+      # itself; the crawl worker gets no elevated DB grant.
+      DATABASE_URL: postgres://platform_app:${PLATFORM_APP_PASSWORD:?}@postgres:5432/gaiada_platform
+      # Deliberately `:-` (empty default), NOT `:?`. Compose validates interpolation for EVERY
+      # service in the file regardless of active profile, so a `:?` here made *every* compose
+      # command on this project fail ("required variable TENANT_ID is missing") even though
+      # search-crawl is profile-gated and never started by `up -d` — it blocked routine
+      # `up -d`/`build`/`ps` on the whole stack. The enforcement is not lost: cmd/crawl/main.go's
+      # requireEnv() exits with "missing required env TENANT_ID" on an empty value, which is the
+      # correct place for it — the run fails fast, and unrelated commands keep working.
+      TENANT_ID: "${TENANT_ID:-}" # set per run: docker compose --profile jobs run -e TENANT_ID=<company uuid> …
+      PROPERTY_ID: "${PROPERTY_ID:-}" # set per run: -e PROPERTY_ID=<search_properties uuid>
+      AUDIT_LOG_PATH: /app/data/egress-audit.jsonl
+      REPORT_PATH: /app/data/report.json
+      MAX_PAGES: ${SEARCH_CRAWL_MAX_PAGES:-25}
+      MIN_HOST_GAP_MS: ${SEARCH_CRAWL_MIN_HOST_GAP_MS:-1000}
+    volumes:
+      - search-crawl-data:/app/data
     depends_on:
       postgres:
         condition: service_healthy
@@ -277,7 +411,8 @@ services:
     ports:
       - "3005:3005"
     depends_on:
-      - platform
+      platform:
+        condition: service_healthy
 
   # Self-hosted transcription (5a.3) — CPU image; audio transcribes locally, never
   # leaving the box. First request downloads the model into the volume (be patient).
@@ -301,11 +436,17 @@ services:
       PLATFORM_SERVICE_TOKEN: ${PLATFORM_SERVICE_TOKEN:?}
       GATEWAY_URL: http://ai-gateway:3002
       GATEWAY_TOKEN: ${GATEWAY_TOKEN:?}
+      # WA-hardening D: base telemetry default (see ai-gateway comment above for rationale).
+      OTEL_ENABLED: ${OTEL_ENABLED:-0}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4318}
+      OTEL_SERVICE_NAME: knowledge
     depends_on:
       postgres:
         condition: service_healthy
+      # SM-45: knowledge calls platform's API right away (module contract reads); wait for the real
+      # healthcheck, not just "container process started", to close the same boot-order race.
       platform:
-        condition: service_started
+        condition: service_healthy
       ai-gateway:
         condition: service_started
 
@@ -361,12 +502,24 @@ services:
       GITHUB_ORG: ${GITHUB_ORG:-}
       DEPLOY_STAGING_URL: ${DEPLOY_STAGING_URL:-}
       DEPLOY_STAGING_TOKEN: ${DEPLOY_STAGING_TOKEN:-}
+      # WA-hardening D: base telemetry default (see ai-gateway comment above for rationale).
+      OTEL_ENABLED: ${OTEL_ENABLED:-0}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4318}
+      OTEL_SERVICE_NAME: mcp-hub
     volumes:
       - hub-data:/app/data # tool audit
+    # SM-45: this closes the boot-order half of the fix — condition: service_healthy on platform
+    # means the hub's FIRST module-tools fetch (at boot) usually just succeeds instead of needing a
+    # retry. It is deliberately NOT the whole fix: a platform restart after the hub is already up
+    # can't be helped by any depends_on ordering, which is why module-tools.ts also self-heals via
+    # startModuleToolsBootstrap()'s retry-with-backoff + periodic re-fetch.
     depends_on:
-      - ai-gateway
-      - platform
-      - cerbos
+      ai-gateway:
+        condition: service_started
+      platform:
+        condition: service_healthy
+      cerbos:
+        condition: service_started
 
   # Central hub (WS2 §7): SAME codebase, HUB_TOPOLOGY=central — adds cross-company/management tools
   # (real rollup.metrics over the platform's D12 /rollups read). Idle-but-defined like sync-central;
@@ -390,9 +543,12 @@ services:
     volumes:
       - hub-central-data:/app/data
     depends_on:
-      - ai-gateway
-      - platform
-      - cerbos
+      ai-gateway:
+        condition: service_started
+      platform:
+        condition: service_healthy
+      cerbos:
+        condition: service_started
 
   bot:
     build: ../../wa-chat-bot
@@ -417,6 +573,13 @@ services:
       # Group Registry surface writes /app/data/groups.yaml. To pre-seed instead, drop a real
       # groups.yaml next to this compose file and set GROUPS_SEED_FILE to a read-only mount of it.
       GROUPS_FILE: /app/data/groups.yaml
+      # WA-hardening D: base telemetry default (see ai-gateway comment above for rationale) — this is
+      # the exact gap the 2026-07-29 incident review found: OTEL_ENABLED had silently fallen off the
+      # bot after a plain `up -d --build bot` (vps+local only) recreated it without the observability
+      # overlay. Baking the default into the base file means it can no longer be forgotten.
+      OTEL_ENABLED: ${OTEL_ENABLED:-0}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4318}
+      OTEL_SERVICE_NAME: wa-chat-bot
     volumes:
       - bot-data:/app/data # LocalKms keys + schedule state + discovery + groups registry (EXCLUDE keys.json from backups!)
     depends_on:
@@ -438,6 +601,10 @@ services:
       MIGRATE_DATABASE_URL: postgres://bot_owner:${BOT_OWNER_PASSWORD:?}@pg-bot:5432/gaiada_bot
       REDIS_URL: redis://redis-bot:6379
       MEDIA_WORKER_CONCURRENCY: ${MEDIA_WORKER_CONCURRENCY:-2}
+      # WA-hardening D: base telemetry default (see ai-gateway comment above for rationale).
+      OTEL_ENABLED: ${OTEL_ENABLED:-0}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4318}
+      OTEL_SERVICE_NAME: bot-media-worker
     volumes:
       - bot-data:/app/data
     depends_on:
@@ -460,3 +627,4 @@ volumes:
   bot-data:
   platform-files:
   sync-data:
+  search-crawl-data:
