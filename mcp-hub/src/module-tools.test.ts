@@ -133,9 +133,11 @@ describe("module-tools aggregation (WS2 §6)", () => {
             { name: "search.listEngagements", description: "list engagements", minAssurance: "low", method: "GET", pathTemplate: "/api/:tenantId/modules/search/engagements", inputSchema: { type: "object", properties: {} } },
           ],
         };
-      }) as unknown as typeof fetch;
+      });
 
-      startModuleToolsBootstrap(fetchImpl);
+      // Cast at the call site, not the declaration — casting the binding itself erased the
+      // vi.Mock type and made `fetchImpl.mock` below a type error.
+      startModuleToolsBootstrap(fetchImpl as unknown as typeof fetch);
       await vi.advanceTimersByTimeAsync(0); // let the first (immediate) attempt settle
       expect(fetchImpl).toHaveBeenCalledTimes(1);
       expect(moduleToolsStatus().registered).toBe(0);

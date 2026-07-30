@@ -77,6 +77,12 @@ jobs:
       # file outside the sanctioned reconciler/allowlist passes a multi-tenant or computed
       # (non-single-element) tenant array. See scripts/lint-withtenants.mjs for the rationale.
       - run: npm run lint:withtenants
+      # Migration-backfill RLS lint (2026-07-30 audit): fails a NEW migration whose UPDATE /
+      # DELETE / INSERT...SELECT touches a FORCE-RLS table without setting app.current_tenant_ids
+      # first — the exact silent-zero-rows shape 0050_pm_short_codes.sql shipped with (fixed by
+      # 0051). Pure static analysis, no DB needed, so it fails at authoring/PR time rather than
+      # only showing up as bad data after a real deploy. See scripts/lint-migration-rls.mjs.
+      - run: npm run lint:migration-rls
       - run: npm test
         env:
           DATABASE_URL_TEST: postgres://postgres:postgres@localhost:5432/postgres
@@ -171,6 +177,9 @@ jobs:
         run: npx playwright test --project=smoke --grep @smoke
         env:
           DEMO_MODE: "1"
+          # src/lib/session.ts throws when this is unset, so the Playwright webServer never
+          # booted and every test failed as a waitForURL timeout. CI-only dummy value.
+          SESSION_SECRET: ci-smoke-secret-not-a-real-key
 
   # WS9 observability config-lint: promtool (rules + scrape), amtool (alertmanager, env-rendered),
   # and a YAML/JSON parse fallback. otelcol validate is skipped in CI (large binary); the collector

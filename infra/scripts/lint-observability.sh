@@ -33,7 +33,9 @@ if have amtool && have envsubst; then
   tmp="$(mktemp -d)"
   cp -r "$OBS/alertmanager/templates" "$tmp/templates"
   # Provide harmless defaults so type-checked fields (chat_id int, URLs) validate.
-  ALERT_CHAT_ID=0 SMTP_SMARTHOST=mail.example.com:587 SMTP_FROM=a@example.com \
+  # ALERT_CHAT_ID must be NON-ZERO: Alertmanager's telegram_config treats a 0 chat_id as unset
+  # and rejects the file with "missing chat_id on telegram_config".
+  ALERT_CHAT_ID=123456 SMTP_SMARTHOST=mail.example.com:587 SMTP_FROM=a@example.com \
   SMTP_USERNAME=u SMTP_PASSWORD=p ALERT_EMAIL_TO=a@example.com \
   TELEGRAM_BOT_TOKEN=x ALERT_WEBHOOK_URL=http://example.com/h DEADMANSSWITCH_URL=http://example.com/p \
     envsubst < "$OBS/alertmanager/alertmanager.yml" \

@@ -1,8 +1,11 @@
 # Local test-build scratch (Smart App Control workaround — see run-tests.sh)
 .gotmp/
-# Issued certs / CA material — never commit
-data/
-certs/
+# Issued certs / CA material — never commit.
+# ANCHORED (leading slash) on purpose: these mean the component-root runtime dirs ONLY.
+# Unanchored `certs/` also matched `internal/certs/` — the Go SOURCE package — which silently
+# kept it out of every clean checkout and broke `go build` in CI and in the release image.
+/data/
+/certs/
 *.pem
 *.crt
 *.key
