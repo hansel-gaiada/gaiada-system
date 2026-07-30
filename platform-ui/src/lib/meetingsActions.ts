@@ -4,8 +4,9 @@
 // meeting"), so these require only an authenticated session + active company. Ingest PROXIES the
 // frozen contract server-side (the platform holds N8N_BRIDGE_SECRET) — the browser never sees it.
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { getSessionUserId } from "./session-server";
-import { getMe, platformFetch, PlatformError, type Me } from "./platform";
+import { getMe, platformFetch, platformUpload, PlatformError, type Me } from "./platform";
 import { getActiveTenant } from "./tenant";
 
 export type MeetingResult = { ok: boolean; error?: string; id?: string; runId?: string | null; reason?: string };
@@ -113,4 +114,120 @@ export async function markDriveAction(_prev: MeetingResult | null, formData: For
   } catch (e) {
     return fail(e);
   }
+}
+
+// ---- WD-04/WD-07 (Web Dev Phase 1 §12) — in-ERP audio upload, no capture-helper required ----
+// The whole point of this path: someone without the desktop capture-helper installed can still
+// get a browser recording/file transcribed, by uploading the audio file directly. The backend
+// (`MeetingRecordingsController.uploadAudio`) validates size/type synchronously and answers 202
+// `{status:"transcribing"}` immediately; transcription runs as a detached job against the whisper
+// container and flips the row to `transcribed` or `failed` — the UI polls (see
+// `AudioUploadForm.tsx`) rather than blocking this action on the transcription itself.
+export type AudioUploadResult = MeetingResult & { audioRef?: string | null };
+
+export async function uploadAudioAction(_prev: AudioUploadResult | null, formData: FormData): Promise<AudioUploadResult> {
+  const c = await ctx();
+  if ("error" in c) return { ok: false, error: c.error };
+  const id = String(formData.get("id") ?? "");
+  const file = formData.get("file");
+  if (!id) return { ok: false, error: "recording id required." };
+  if (!(file instanceof File) || file.size === 0) return { ok: false, error: "Choose an audio file first." };
+  try {
+    if (process.env.DEMO_MODE === "1") {
+      const { demoUploadAudio } = await import("./demoMeetings");
+      const r = demoUploadAudio(id, file.name, file.size);
+      if (r.status >= 300) {
+        const j = r.json as { error?: string };
+        return { ok: false, error: j.error ?? `demo ${r.status}` };
+      }
+      revalidatePath("/meetings");
+      revalidatePath(`/meetings/${id}`);
+      const j = r.json as { status: string; audioRef: string };
+      return { ok: true, id, audioRef: j.audioRef };
+    }
+    const form = new FormData();
+    form.append("file", file, file.name);
+    const r = await platformUpload<{ id: string; status: string; audioRef: string }>(
+      `/api/${c.tenant}/meetings/recordings/${id}/audio`,
+      c.userId,
+      form,
+    );
+    revalidatePath("/meetings");
+    revalidatePath(`/meetings/${id}`);
+    return { ok: true, id, audioRef: r.audioRef };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+/** Retry a failed upload-path transcription — reuses the already-uploaded audio, no re-upload. */
+export async function retryAudioAction(_prev: AudioUploadResult | null, formData: FormData): Promise<AudioUploadResult> {
+  const c = await ctx();
+  if ("error" in c) return { ok: false, error: c.error };
+  const id = String(formData.get("id") ?? "");
+  if (!id) return { ok: false, error: "recording id required." };
+  try {
+    if (process.env.DEMO_MODE === "1") {
+      const { demoRetryAudio } = await import("./demoMeetings");
+      const r = demoRetryAudio(id);
+      if (r.status >= 300) {
+        const j = r.json as { error?: string };
+        return { ok: false, error: j.error ?? `demo ${r.status}` };
+      }
+      revalidatePath("/meetings");
+      revalidatePath(`/meetings/${id}`);
+      return { ok: true, id };
+    }
+    await platformFetch(`/api/${c.tenant}/meetings/recordings/${id}/audio/retry`, c.userId, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+    revalidatePath("/meetings");
+    revalidatePath(`/meetings/${id}`);
+    return { ok: true, id };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+/** WD-07: the `RecordControls` combined path — no recording row exists yet, so "upload an audio
+ *  file" here means register-then-upload in one step, then land on the detail page (where
+ *  `AudioUploadForm` takes over the transcribing→transcribed/failed poll). Kept separate from
+ *  `uploadAudioAction` (which assumes an existing row from the detail page) because the two forms
+ *  have genuinely different inputs (title/client/project vs an existing id). */
+export async function registerAndUploadAudioAction(_prev: MeetingResult | null, formData: FormData): Promise<MeetingResult> {
+  const c = await ctx();
+  if ("error" in c) return { ok: false, error: c.error };
+  const file = formData.get("file");
+  if (!(file instanceof File) || file.size === 0) return { ok: false, error: "Choose an audio file first." };
+  const title = String(formData.get("title") ?? "").trim();
+  const clientId = String(formData.get("clientId") ?? "") || undefined;
+  const projectId = String(formData.get("projectId") ?? "") || undefined;
+
+  let id: string;
+  try {
+    const started = await platformFetch<{ id: string }>(`/api/${c.tenant}/meetings/recordings/start`, c.userId, {
+      method: "POST",
+      body: JSON.stringify({ title: title || undefined, kind: "audio", clientId, projectId }),
+    });
+    id = started.id;
+  } catch (e) {
+    return fail(e);
+  }
+
+  try {
+    if (process.env.DEMO_MODE === "1") {
+      const { demoUploadAudio } = await import("./demoMeetings");
+      demoUploadAudio(id, file.name, file.size);
+    } else {
+      const form = new FormData();
+      form.append("file", file, file.name);
+      await platformUpload(`/api/${c.tenant}/meetings/recordings/${id}/audio`, c.userId, form);
+    }
+  } catch {
+    // Even if the upload itself failed validation, the recording row now exists — land on its
+    // detail page where AudioUploadForm surfaces the error and lets them try again directly.
+  }
+  revalidatePath("/meetings");
+  redirect(`/meetings/${id}`);
 }

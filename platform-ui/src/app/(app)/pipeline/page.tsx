@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
@@ -81,7 +82,7 @@ export default async function PipelinePage() {
             <HairlineTable
               columns={[{ label: "Run" }, { label: "Meeting" }, { label: "Status" }, { label: "Started", align: "right" }]}
               rows={runs.map((r) => [
-                r.title ?? "(untitled)",
+                <Link key="t" href={`/pipeline/${r.id}`}>{r.title ?? "(untitled)"}</Link>,
                 r.source_meeting_id ?? "—",
                 <StatusBadge key="s" label={r.status.replace(/_/g, " ")} />,
                 formatDateTime(r.created_at),

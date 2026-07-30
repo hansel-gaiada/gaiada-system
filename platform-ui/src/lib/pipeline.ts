@@ -5,30 +5,39 @@ import "server-only";
 // pattern as lib/pm.ts / lib/it.ts. Client-facing gates live in the separate client portal; this
 // module surfaces the INTERNAL side (runs across the three tracks + the internal review inbox).
 //
+// WD-02 (Web Dev Phase 1): adds the per-run workspace reads (`/pipeline/[runId]`) — the run-detail
+// shape already carried everything needed (stages incl. artifact_ref/confidence, gates, scope
+// signoffs, client_id); this module just widens the types to match the controller's real SELECTs
+// and adds pure helpers (blockage text, stage grouping/labels) so the page stays thin.
+//
 // BFF CONTRACT (implemented in platform-nest):
-//   GET  /api/:t/pipeline/runs                 -> PipelineRun[]
-//   GET  /api/:t/pipeline/runs/:id             -> PipelineRunDetail
+//   GET  /api/:t/pipeline/runs                 -> PipelineRun[]        (list — no client_id column)
+//   GET  /api/:t/pipeline/runs/:id             -> PipelineRunDetail    (detail — includes client_id)
 //   GET  /api/:t/pipeline/gates?status=&actorSide=&kind=  -> PipelineGate[]
 //   POST /api/:t/pipeline/gates/:id/decide     -> { id, status, decision }   (see pipelineActions)
 import { platformFetch, PlatformError } from "./platform";
 
 export type RunStatus = "extracting" | "delivery_active" | "report_done" | "scope_pending" | "complete" | "blocked";
 export type GateKind = "prd_review" | "prd_sign" | "pm_review" | "customer_feedback" | "pm_approval" | "scope_signoff";
+export type Track = "delivery" | "report" | "scope";
 
 export interface PipelineRun {
   id: string;
   title: string | null;
   status: RunStatus;
   source_meeting_id: string | null;
+  mom_ref: string | null;
   created_at: string;
+  updated_at: string;
 }
 export interface PipelineStage {
   id: string;
-  track: "delivery" | "report" | "scope";
+  track: Track;
   name: string;
   status: "pending" | "running" | "awaiting_gate" | "done" | "failed";
   artifact_ref: string | null;
   confidence: number | null;
+  updated_at: string;
 }
 export interface PipelineGate {
   id: string;
@@ -39,9 +48,14 @@ export interface PipelineGate {
   status: "pending" | "decided";
   decision: string | null;
   note: string | null;
+  decided_by: string | null;
+  decided_at: string | null;
   created_at: string;
 }
+// The run-detail SELECT also returns client_id (the run-workspace needs it for the meeting/portal
+// links; the list SELECT deliberately does not carry it — see the controller's two queries).
 export interface PipelineRunDetail extends PipelineRun {
+  client_id: string | null;
   stages: PipelineStage[];
   gates: PipelineGate[];
   scopeSignoffs: Array<{ party: string; signer_name: string | null; signed_at: string }>;
@@ -55,6 +69,25 @@ export const GATE_LABEL: Record<GateKind, string> = {
   pm_approval: "PM approval",
   scope_signoff: "Scope sign-off",
 };
+
+export const TRACK_LABEL: Record<Track, string> = {
+  delivery: "Delivery",
+  report: "Report",
+  scope: "Scope",
+};
+// Rendering order for the three-track workspace layout (stable regardless of stage insertion order).
+export const TRACK_ORDER: Track[] = ["delivery", "scope", "report"];
+
+// Stage `name` values are workflow-defined slugs (prd_extract, scope_extract, claude_design, …), not
+// an enum we control here — humanize generically, with the small set of known acronyms spelled out.
+const STAGE_ACRONYMS = new Set(["prd", "qa", "cta", "seo"]);
+export function humanizeStageName(name: string): string {
+  return name
+    .split("_")
+    .filter(Boolean)
+    .map((w) => (STAGE_ACRONYMS.has(w.toLowerCase()) ? w.toUpperCase() : w[0].toUpperCase() + w.slice(1)))
+    .join(" ");
+}
 
 async function safe<T>(p: Promise<T>, fallback: T): Promise<T> {
   try {
@@ -76,4 +109,50 @@ export async function getPipelineRun(userId: string, tenant: string, runId: stri
 /** The internal review inbox: pending gates the client does NOT own (pm_review / pm_approval / prd_review). */
 export async function listInternalPendingGates(userId: string, tenant: string): Promise<PipelineGate[]> {
   return safe(platformFetch<PipelineGate[]>(`/api/${tenant}/pipeline/gates?status=pending&actorSide=internal`, userId), []);
+}
+
+// ---- Pure helpers for the run workspace (WD-02) — no fetch, easy to unit test ----
+
+/** Stages grouped by track, in TRACK_ORDER, each track's stages kept in the backend's chronological
+ *  (created_at ASC) order. A track with no stages yet still gets an (empty) entry. */
+export function groupStagesByTrack(stages: PipelineStage[]): Record<Track, PipelineStage[]> {
+  const grouped: Record<Track, PipelineStage[]> = { delivery: [], report: [], scope: [] };
+  for (const s of stages) grouped[s.track]?.push(s);
+  return grouped;
+}
+
+// WD-03 (D-3) — the SAME client-sign-gate-by-track convention pipeline.controller.ts's updateStage
+// enforces server-side. Kept here ONLY so the workspace can show a "locked after signature" state
+// without round-tripping a doomed PATCH first; the 409 from the backend remains the real boundary
+// (this is UI convenience, not an authority — editStageArtifactAction still lets the backend decide).
+// `report` has no entry: the report artifact is internal-only, never client-signed, never locked.
+const CLIENT_SIGN_GATE_KIND_BY_TRACK: Partial<Record<Track, GateKind[]>> = {
+  delivery: ["prd_sign", "customer_feedback"],
+  scope: ["scope_signoff"],
+};
+
+/** Mirrors PipelineController.updateStage's D-3 lock check (see that file's comment for why
+ *  "stage.status === 'done'" is deliberately NOT also a trigger). */
+export function isStageLocked(stage: Pick<PipelineStage, "track">, gates: PipelineGate[]): boolean {
+  const kinds = CLIENT_SIGN_GATE_KIND_BY_TRACK[stage.track];
+  if (!kinds || kinds.length === 0) return false;
+  return gates.some((g) => g.actor_side === "client" && g.status === "decided" && kinds.includes(g.kind));
+}
+
+/** Plain-language "what's blocking this run right now", for staff (mirrors the client-portal's
+ *  `currentBlockage`, PortalController, but surfaces BOTH actor sides — staff need to know whether
+ *  they or the client are the ones holding it up). Gates arrive created_at-ascending from the
+ *  backend, so the first pending one is the earliest-opened — the "pending beat". */
+export function describeBlockage(
+  run: { status: RunStatus },
+  gates: PipelineGate[],
+): { text: string; pendingGate: PipelineGate | null } {
+  const pending = gates.find((g) => g.status === "pending") ?? null;
+  if (pending) {
+    const who = pending.actor_side === "client" ? "the client" : "internal review";
+    return { text: `Waiting on ${who}: ${GATE_LABEL[pending.kind] ?? pending.kind}`, pendingGate: pending };
+  }
+  if (run.status === "blocked") return { text: "Blocked — needs internal follow-up before it can continue.", pendingGate: null };
+  if (run.status === "complete") return { text: "Complete — nothing outstanding.", pendingGate: null };
+  return { text: "In progress — no gate is currently open.", pendingGate: null };
 }

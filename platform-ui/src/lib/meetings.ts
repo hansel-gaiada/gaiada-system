@@ -15,6 +15,10 @@ import "server-only";
 //   POST /api/:t/meetings/recordings/:id/drive     -> { id, driveStatus }
 //   GET  /api/:t/meetings/recordings?status=&clientId=&projectId=  -> MeetingRecording[]
 //   GET  /api/:t/meetings/recordings/:id           -> MeetingRecordingDetail
+//   -- WD-04/WD-07 (Web Dev Phase 1 §12): the in-ERP audio-upload fallback (no capture-helper
+//      required) — used when meetingsActions.ts's uploadAudioAction/retryAudioAction are called:
+//   POST /api/:t/meetings/recordings/:id/audio (multipart, field "file") -> 202 { id, status:"transcribing", audioRef }
+//   POST /api/:t/meetings/recordings/:id/audio/retry                    -> 202 { id, status:"transcribing" }
 import { platformFetch, PlatformError } from "./platform";
 
 export type RecordingStatus = "recording" | "recorded" | "transcribing" | "transcribed" | "ingested" | "failed";
@@ -45,6 +49,9 @@ export interface MeetingRecordingDetail extends MeetingRecording {
   transcript: string | null;
   transcript_ref: string | null;
   drive_file_id: string | null;
+  // WD-04: set once an in-ERP audio upload has landed (files.id); stays null on the
+  // helper-driven local-whisper path (that path never uploads audio through this route).
+  audio_ref: string | null;
 }
 
 export const STATUS_LABEL: Record<RecordingStatus, string> = {
@@ -87,6 +94,17 @@ export async function listRecordings(
 
 export async function getRecording(userId: string, tenant: string, id: string): Promise<MeetingRecordingDetail | null> {
   return safe(platformFetch<MeetingRecordingDetail>(`/api/${tenant}/meetings/recordings/${id}`, userId), null);
+}
+
+/** WD-02: resolve a run's `source_meeting_id` (the dispatcher's meetingId, NOT a recording row id —
+ *  see MeetingRecordingsController.ingest, which posts `row.meeting_id`) back to its recording, so
+ *  the pipeline run workspace can link to `/meetings/[id]`. There is no by-meetingId read on the
+ *  registry endpoint; the volume here is small (WS11 usage), so scanning the existing list is the
+ *  right-sized fix rather than a new backend query. Returns null if no recording matches (e.g. a
+ *  run entered without a captured meeting). */
+export async function findRecordingByMeetingId(userId: string, tenant: string, meetingId: string): Promise<MeetingRecording | null> {
+  const rows = await listRecordings(userId, tenant);
+  return rows.find((r) => r.meeting_id === meetingId) ?? null;
 }
 
 /** Human-friendly duration (e.g. "1h 02m", "8m 30s"). */

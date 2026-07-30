@@ -10,9 +10,17 @@ resourcePolicy:
       effect: EFFECT_ALLOW
       derivedRoles: ["platform_admin"]
     # Automation accounts advance stages (running -> awaiting_gate -> done) as the workflow progresses.
-    - actions: ["create", "update"]
+    - actions: ["create"]
       effect: EFFECT_ALLOW
       derivedRoles: ["company_admin", "manager", "member"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    # WD-03 (D-3): stage PATCH now also carries human artifact edits (PRD/Scope/Report text), so
+    # "update" is elevated + automation-tier only — automation accounts authenticate at "manager"
+    # tier (seedAutomationAccounts), never "member", so workflows are unaffected. A plain "member"
+    # role is denied per the D-3 AC ("non-elevated member denied").
+    - actions: ["update"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin", "manager", "group_executive"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }
     - actions: ["read"]
       effect: EFFECT_ALLOW

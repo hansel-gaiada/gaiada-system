@@ -135,6 +135,31 @@ describe.skipIf(!TEST_URL)("meeting-to-delivery pipeline surface (WS11 §4B)", (
     expect(ev.rowCount).toBe(1);
   });
 
+  it("WD-05: wf:delivery can park a run 'blocked' (revise-budget escalation); cross-tenant denied; invalid status is 400", async () => {
+    const bad = await app.inject({ method: "PATCH", url: `/api/${co}/pipeline/runs/${runId}`, headers: asWorkflow("wf:delivery"), payload: { status: "bogus" } });
+    expect(bad.statusCode).toBe(400);
+
+    // Same posture as create/update elsewhere on this resource (Cerbos grants company_admin/
+    // manager/member — the low-privilege automation posture); the isolation boundary that
+    // matters is tenancy, exercised at the bottom of this file for the same run/company.
+    const otherTenant = await app.inject({ method: "PATCH", url: `/api/${other}/pipeline/runs/${runId}`, headers: asUser(otherAdmin), payload: { status: "blocked" } });
+    expect(otherTenant.statusCode).toBe(404);
+
+    const r = await app.inject({ method: "PATCH", url: `/api/${co}/pipeline/runs/${runId}`, headers: asWorkflow("wf:delivery"), payload: { status: "blocked" } });
+    expect(r.statusCode).toBe(200);
+    expect(r.json()).toMatchObject({ id: runId, status: "blocked" });
+
+    const get = await app.inject({ method: "GET", url: `/api/${co}/pipeline/runs/${runId}`, headers: asUser(admin) });
+    expect(get.json().status).toBe("blocked");
+
+    const ev = await adminPool().query(`SELECT 1 FROM outbox_events WHERE entity_id = $1 AND event_type = 'pipeline.run.updated'`, [runId]);
+    expect(ev.rowCount).toBe(1);
+
+    // Restore to 'extracting' so the remaining tests in this file (scope sign-off etc.) proceed normally.
+    const restore = await app.inject({ method: "PATCH", url: `/api/${co}/pipeline/runs/${runId}`, headers: asWorkflow("wf:delivery"), payload: { status: "extracting" } });
+    expect(restore.statusCode).toBe(200);
+  });
+
   it("opens the PRD-sign client gate; member cannot decide, admin signs, second decide is 404", async () => {
     const opened = await app.inject({
       method: "POST",
@@ -203,5 +228,135 @@ describe.skipIf(!TEST_URL)("meeting-to-delivery pipeline surface (WS11 §4B)", (
     expect((await app.inject({ method: "POST", url: `/api/${co}/pipeline/gates`, headers: asWorkflow("wf:delivery"), payload: { runId, kind: "bogus", actorSide: "client" } })).statusCode).toBe(400);
     expect((await app.inject({ method: "POST", url: `/api/${co}/pipeline/gates`, headers: asWorkflow("wf:delivery"), payload: { runId, kind: "prd_sign", actorSide: "sideways" } })).statusCode).toBe(400);
     expect((await app.inject({ method: "POST", url: `/api/${co}/pipeline/runs/${runId}/stages`, headers: asWorkflow("wf:delivery"), payload: { track: "nope", name: "x" } })).statusCode).toBe(400);
+  });
+
+  // WD-03 (D-3) — the artifact signature lock. Fresh run per test (own stage/gate) so these don't
+  // disturb the shared `runId` fixture's state from earlier tests in this file.
+  describe("WD-03: artifact signature lock (D-3)", () => {
+    it("edit-before-sign persists (and is what a later read returns) — this is the feature; a non-elevated member is denied outright", async () => {
+      const created = await app.inject({
+        method: "POST",
+        url: `/api/${co}/pipeline/runs`,
+        headers: asWorkflow("wf:mtg-dispatcher"),
+        payload: {
+          sourceMeetingId: "mtg-wd03-edit",
+          stages: [{ track: "delivery", name: "prd_extract", status: "done", artifactRef: "# Draft PRD v1", confidence: 0.8 }],
+        },
+      });
+      expect(created.statusCode).toBe(201);
+      const wdRunId = created.json().id;
+      const detail = await app.inject({ method: "GET", url: `/api/${co}/pipeline/runs/${wdRunId}`, headers: asUser(admin) });
+      const stageId = detail.json().stages[0].id;
+      expect(detail.json().stages[0].status).toBe("done"); // already 'done' at extraction — proves 'done' alone can't be the lock trigger
+
+      // A plain member is denied (Cerbos: pipeline_stage.update no longer grants "member" — WD-03).
+      const memberTry = await app.inject({
+        method: "PATCH", url: `/api/${co}/pipeline/stages/${stageId}`, headers: asUser(member), payload: { artifactRef: "member forgery attempt" },
+      });
+      expect(memberTry.statusCode).toBe(403);
+
+      // The elevated human edits BEFORE any client sign gate exists — the D-3 feature, even though
+      // the stage is already 'done' (mirrors the real "Acme Coffee kickoff" run's exact shape).
+      const edited = await app.inject({
+        method: "PATCH", url: `/api/${co}/pipeline/stages/${stageId}`, headers: asUser(admin), payload: { artifactRef: "# Draft PRD v2 — revised scope" },
+      });
+      expect(edited.statusCode).toBe(200);
+
+      const afterEdit = await app.inject({ method: "GET", url: `/api/${co}/pipeline/runs/${wdRunId}`, headers: asUser(admin) });
+      expect(afterEdit.json().stages[0].artifact_ref).toBe("# Draft PRD v2 — revised scope");
+
+      // Provenance: writeActivity + pipeline.stage.updated, specifically for this edit.
+      const activity = await adminPool().query(
+        `SELECT metadata FROM activities WHERE target_entity_type = 'pipeline_stage' AND target_entity_id = $1 AND verb = 'edited'`,
+        [stageId],
+      );
+      expect(activity.rowCount).toBe(1);
+      expect(activity.rows[0].metadata).toMatchObject({ artifactEdited: true });
+      const events = await adminPool().query(
+        `SELECT payload FROM outbox_events WHERE entity_id = $1 AND event_type = 'pipeline.stage.updated' AND (payload->>'artifactEdited')::boolean = true`,
+        [stageId],
+      );
+      expect(events.rowCount).toBe(1);
+
+      // Now open + decide the client PRD-sign gate for this stage's track (delivery), native route.
+      const gate = await app.inject({ method: "POST", url: `/api/${co}/pipeline/gates`, headers: asWorkflow("wf:delivery"), payload: { runId: wdRunId, kind: "prd_sign", actorSide: "client" } });
+      expect(gate.statusCode).toBe(201);
+      const gateId = gate.json().id;
+      const signed = await app.inject({ method: "POST", url: `/api/${co}/pipeline/gates/${gateId}/decide`, headers: asUser(admin), payload: { decision: "signed" } });
+      expect(signed.statusCode).toBe(200);
+
+      // Edit-after-signed is refused — even the SAME elevated caller who could edit a moment ago.
+      const lockedTry = await app.inject({
+        method: "PATCH", url: `/api/${co}/pipeline/stages/${stageId}`, headers: asUser(admin), payload: { artifactRef: "forged after sign" },
+      });
+      expect(lockedTry.statusCode).toBe(409);
+
+      // Status-only transitions (no artifactRef) are NOT locked — automation can still advance state.
+      const statusOnly = await app.inject({
+        method: "PATCH", url: `/api/${co}/pipeline/stages/${stageId}`, headers: asWorkflow("wf:delivery"), payload: { confidence: 0.95 },
+      });
+      expect(statusOnly.statusCode).toBe(200);
+
+      // The record still holds exactly what was signed — not the forgery attempt.
+      const finalRead = await app.inject({ method: "GET", url: `/api/${co}/pipeline/runs/${wdRunId}`, headers: asUser(admin) });
+      expect(finalRead.json().stages[0].artifact_ref).toBe("# Draft PRD v2 — revised scope");
+    });
+
+    it("the SAME 409 fires when the gate was decided via the generic approvals/:id/decide façade path — no bypass", async () => {
+      const created = await app.inject({
+        method: "POST",
+        url: `/api/${co}/pipeline/runs`,
+        headers: asWorkflow("wf:mtg-dispatcher"),
+        payload: {
+          sourceMeetingId: "mtg-wd03-facade",
+          stages: [{ track: "scope", name: "scope_extract", status: "done", artifactRef: "## Scope v1", confidence: 0.85 }],
+        },
+      });
+      expect(created.statusCode).toBe(201);
+      const wdRunId2 = created.json().id;
+      const detail = await app.inject({ method: "GET", url: `/api/${co}/pipeline/runs/${wdRunId2}`, headers: asUser(admin) });
+      const stageId = detail.json().stages[0].id;
+
+      // Editable before sign, exactly as the native-route test proves — sanity check on this fixture too.
+      const preSign = await app.inject({ method: "PATCH", url: `/api/${co}/pipeline/stages/${stageId}`, headers: asUser(admin), payload: { artifactRef: "## Scope v2" } });
+      expect(preSign.statusCode).toBe(200);
+
+      const gate = await app.inject({ method: "POST", url: `/api/${co}/pipeline/gates`, headers: asWorkflow("wf:scope"), payload: { runId: wdRunId2, kind: "scope_signoff", actorSide: "client" } });
+      expect(gate.statusCode).toBe(201);
+      const gateId = gate.json().id;
+
+      // Decide it through the GENERIC façade (POST /approvals/:id/decide, origin=pipeline) — NOT the
+      // native /pipeline/gates/:id/decide route. Same underlying pipeline_gates row either way.
+      const decide = await app.inject({
+        method: "POST", url: `/api/${co}/approvals/${gateId}/decide`, headers: asUser(admin),
+        payload: { origin: "pipeline", decision: "signed" },
+      });
+      expect(decide.statusCode).toBe(200);
+
+      const lockedTry = await app.inject({
+        method: "PATCH", url: `/api/${co}/pipeline/stages/${stageId}`, headers: asUser(admin), payload: { artifactRef: "forged via the facade path" },
+      });
+      expect(lockedTry.statusCode).toBe(409);
+
+      const finalRead = await app.inject({ method: "GET", url: `/api/${co}/pipeline/runs/${wdRunId2}`, headers: asUser(admin) });
+      expect(finalRead.json().stages[0].artifact_ref).toBe("## Scope v2");
+    });
+
+    it("the report track never locks (no client ever signs it) and stages with no client gate at all stay editable", async () => {
+      const created = await app.inject({
+        method: "POST",
+        url: `/api/${co}/pipeline/runs`,
+        headers: asWorkflow("wf:mtg-dispatcher"),
+        payload: {
+          sourceMeetingId: "mtg-wd03-report",
+          stages: [{ track: "report", name: "report_extract", status: "done", artifactRef: "internal notes v1", confidence: 0.8 }],
+        },
+      });
+      const wdRunId3 = created.json().id;
+      const detail = await app.inject({ method: "GET", url: `/api/${co}/pipeline/runs/${wdRunId3}`, headers: asUser(admin) });
+      const stageId = detail.json().stages[0].id;
+      const edited = await app.inject({ method: "PATCH", url: `/api/${co}/pipeline/stages/${stageId}`, headers: asUser(admin), payload: { artifactRef: "internal notes v2" } });
+      expect(edited.statusCode).toBe(200);
+    });
   });
 });

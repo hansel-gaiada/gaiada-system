@@ -4,6 +4,7 @@ import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
 import { listRecordings, STATUS_LABEL, DRIVE_LABEL, formatDuration } from "@/lib/meetings";
+import { listPipelineRuns } from "@/lib/pipeline";
 import { RecordControls } from "@/components/meetings/RecordControls";
 import { Card, Eyebrow, HairlineTable, StatusBadge } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
@@ -22,6 +23,11 @@ export default async function MeetingsPage() {
     return <Card><EmptyNote>Select a company to see its meeting recordings.</EmptyNote></Card>;
   }
   const recordings = await listRecordings(userId, tenant);
+  // WD-07: run-status chips — the recording's own status only says "in pipeline"; resolve the
+  // linked run's actual delivery status too, so the registry answers "what's happening with it
+  // now" without a click-through. Cheap: one extra list call, not per-row.
+  const runs = recordings.some((r) => r.pipeline_run_id) ? await listPipelineRuns(userId, tenant) : [];
+  const runStatusById = new Map(runs.map((r) => [r.id, r.status]));
 
   return (
     <>
@@ -45,18 +51,25 @@ export default async function MeetingsPage() {
             <EmptyNote>No recordings yet. Start one above — or register an externally-made recording.</EmptyNote>
           ) : (
             <HairlineTable
-              columns={[{ label: "Meeting" }, { label: "Kind" }, { label: "Status" }, { label: "Drive" }, { label: "Length" }, { label: "Recorded", align: "right" }]}
+              columns={[{ label: "Meeting" }, { label: "Kind" }, { label: "Status" }, { label: "Run" }, { label: "Drive" }, { label: "Length" }, { label: "Recorded", align: "right" }]}
               rows={recordings.map((r) => [
                 <Link key="t" href={`/meetings/${r.id}`} style={{ color: "inherit", fontWeight: 600 }}>
                   {r.title ?? r.meeting_id}
                 </Link>,
                 r.kind === "video" ? "🎥 A/V" : "🎙️ Audio",
                 <StatusBadge key="s" label={STATUS_LABEL[r.status] ?? r.status} />,
+                r.pipeline_run_id ? (
+                  <Link key="r" href={`/pipeline/${r.pipeline_run_id}`} style={{ color: "inherit" }}>
+                    <StatusBadge label={(runStatusById.get(r.pipeline_run_id) ?? "unknown").replace(/_/g, " ")} />
+                  </Link>
+                ) : (
+                  <span key="r" style={{ font: "400 13px var(--font-body)", color: "rgba(26,25,22,.35)" }}>—</span>
+                ),
                 <StatusBadge key="d" label={DRIVE_LABEL[r.drive_status] ?? r.drive_status} />,
                 formatDuration(r.duration_sec),
                 formatDateTime(r.created_at),
               ])}
-              tcols="2fr .8fr 1fr 1.1fr .8fr 1fr"
+              tcols="1.8fr .7fr .9fr 1fr 1fr .8fr 1fr"
             />
           )}
         </Card>

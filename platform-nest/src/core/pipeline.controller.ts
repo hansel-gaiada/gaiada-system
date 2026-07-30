@@ -8,7 +8,7 @@
 // Auth mirrors the automation-approvals surface: automation accounts (member/manager) create + advance;
 // elevated humans read; company_admin/group_executive decide/sign. Client-originated decisions
 // (prd_sign, customer_feedback, scope) arrive through the portal BFF in WS11 build item 4.
-import { BadRequestException, Body, Controller, Get, HttpCode, NotFoundException, Param, Patch, Post, Query, Req, UseGuards } from "@nestjs/common";
+import { BadRequestException, Body, ConflictException, Controller, Get, HttpCode, NotFoundException, Param, Patch, Post, Query, Req, UseGuards } from "@nestjs/common";
 import type { FastifyRequest } from "fastify";
 import { newId, withTenants } from "../db";
 import { config } from "../config";
@@ -23,6 +23,18 @@ const GATE_KINDS = new Set(["prd_review", "prd_sign", "pm_review", "customer_fee
 const ACTOR_SIDES = new Set(["internal", "client"]);
 const DECISIONS = new Set(["approved", "changes_requested", "rejected", "signed"]);
 const REQUIRED_SCOPE_PARTIES = ["provider", "client"] as const;
+
+// WD-03 (D-3, webdev-design.md §07/§14) — a stage's CLIENT sign gate, keyed by track. No FK links a
+// gate to a stage today: pipeline_gates.stage_id is optional and, in the shipped fan-out workflow,
+// is always left null (verified against the live "Acme Coffee kickoff" run — see WD-03 evidence).
+// Gates are therefore matched to the stage(s) whose artifact they govern by (run_id, track), the
+// SAME convention PortalController.currentBlockage() already uses to word "waiting on your PRD
+// signature" / "waiting on your Scope signature". `report` deliberately has no entry: the report
+// artifact is internal-only (§07 — no client ever signs it), so it can never lock under D-3.
+const CLIENT_SIGN_GATE_KIND_BY_TRACK: Partial<Record<string, string[]>> = {
+  delivery: ["prd_sign", "customer_feedback"],
+  scope: ["scope_signoff"],
+};
 
 @Controller("api")
 @UseGuards(AuthGuard)
@@ -68,6 +80,34 @@ export class PipelineController {
       await emitEvent(c, tenantId, "pipeline_run", id, "pipeline.run.created", { sourceMeetingId: sourceMeetingId ?? null, title: title ?? null });
       return { id, deduped: false };
     });
+  }
+
+  // WD-05: the bounded revise loop's escalation path needs to durably PARK a run once the
+  // revise budget (N=3) is exhausted, so a later unrelated gate.decided/scope.signed retrigger
+  // does not keep re-evaluating (and re-escalating) it. `status` is the only field this endpoint
+  // owns — stage/gate transitions stay on their own PATCH surfaces.
+  @Patch(":tenantId/pipeline/runs/:runId")
+  async updateRun(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Param("runId") runId: string,
+    @Body() body: { status?: string },
+  ) {
+    if (body?.status !== undefined && !RUN_STATUS.has(body.status)) throw new BadRequestException("invalid run status");
+    await authorize(req.principal, { kind: "pipeline_run", id: runId, tenantId }, "update");
+    const updated = await withTenants([tenantId], async (c) => {
+      const res = await c.query<{ status: string }>(
+        `UPDATE pipeline_runs SET status = COALESCE($2, status), updated_at = now()
+         WHERE id = $1 AND deleted_at IS NULL RETURNING status`,
+        [runId, body?.status ?? null],
+      );
+      if (res.rowCount === 0) return null;
+      await emitEvent(c, tenantId, "pipeline_run", runId, "pipeline.run.updated", { status: res.rows[0].status });
+      return res.rows[0];
+    });
+    if (!updated) throw new NotFoundException("run not found");
+    await writeActivity(tenantId, req.principal.userId, "updated", "pipeline_run", runId, { status: updated.status });
+    return { id: runId, status: updated.status };
   }
 
   @Get(":tenantId/pipeline/runs")
@@ -139,6 +179,16 @@ export class PipelineController {
     return { id };
   }
 
+  // WD-03 (D-3): this PATCH now carries two kinds of caller — automation advancing stage status
+  // (`pending -> running -> awaiting_gate -> done`), and a human editing the drafted artifact text
+  // in the run workspace. Only the SECOND kind is subject to the signature lock: `body.artifactRef`
+  // present is what marks a call as an "artifact edit" (vs. a bare status/confidence transition).
+  // The lock itself is deliberately ONE condition (client sign gate decided), not two — see the
+  // CLIENT_SIGN_GATE_KIND_BY_TRACK comment + WD-03 evidence for why "stage.status === 'done'" is NOT
+  // also an OR-trigger here: extraction lands every stage at 'done' the instant its content exists,
+  // long before any client has seen a sign gate, so locking on 'done' would make "editable until
+  // signed" (D-3's entire point) unreachable for every ingested run — falsified directly against the
+  // live "Acme Coffee kickoff" run this ticket tests against (all 3 stages already 'done').
   @Patch(":tenantId/pipeline/stages/:id")
   async updateStage(
     @Req() req: FastifyRequest,
@@ -148,7 +198,28 @@ export class PipelineController {
   ) {
     if (body?.status !== undefined && !STAGE_STATUS.has(body.status)) throw new BadRequestException("invalid stage status");
     await authorize(req.principal, { kind: "pipeline_stage", id, tenantId }, "update");
-    const updated = await withTenants([tenantId], async (c) => {
+    const editingArtifact = body?.artifactRef !== undefined;
+    const result = await withTenants([tenantId], async (c) => {
+      const stage = await c.query<{ run_id: string; track: string }>(
+        `SELECT run_id, track FROM pipeline_stages WHERE id = $1`,
+        [id],
+      );
+      if (!stage.rows[0]) return { outcome: "not_found" as const };
+      const { run_id: runId, track } = stage.rows[0];
+
+      if (editingArtifact) {
+        const clientKinds = CLIENT_SIGN_GATE_KIND_BY_TRACK[track];
+        if (clientKinds && clientKinds.length > 0) {
+          const decided = await c.query(
+            `SELECT 1 FROM pipeline_gates
+             WHERE run_id = $1 AND actor_side = 'client' AND status = 'decided'
+               AND kind = ANY($2) AND deleted_at IS NULL LIMIT 1`,
+            [runId, clientKinds],
+          );
+          if (decided.rows[0]) return { outcome: "locked" as const };
+        }
+      }
+
       const res = await c.query<{ run_id: string; track: string; name: string; status: string }>(
         `UPDATE pipeline_stages SET
            status = COALESCE($2, status),
@@ -158,15 +229,22 @@ export class PipelineController {
          WHERE id = $1 RETURNING run_id, track, name, status`,
         [id, body?.status ?? null, body?.artifactRef ?? null, body?.confidence ?? null],
       );
-      if (res.rowCount === 0) return null;
       const row = res.rows[0];
       await emitEvent(c, tenantId, "pipeline_stage", id, "pipeline.stage.updated", {
-        runId: row.run_id, track: row.track, name: row.name, status: row.status,
+        runId: row.run_id, track: row.track, name: row.name, status: row.status, artifactEdited: editingArtifact,
       });
-      return row;
+      return { outcome: "ok" as const, row };
     });
-    if (!updated) throw new NotFoundException("stage not found");
-    return { id, status: updated.status };
+    if (result.outcome === "not_found") throw new NotFoundException("stage not found");
+    if (result.outcome === "locked") {
+      throw new ConflictException("artifact is locked — the client has already signed this stage");
+    }
+    // Edit provenance (WD-03 AC): every successful PATCH — status transition or artifact edit —
+    // gets a writeActivity row, same pattern as the rest of this controller's write paths.
+    await writeActivity(tenantId, req.principal.userId, editingArtifact ? "edited" : "updated", "pipeline_stage", id, {
+      runId: result.row.run_id, track: result.row.track, name: result.row.name, status: result.row.status, artifactEdited: editingArtifact,
+    });
+    return { id, status: result.row.status };
   }
 
   // ---- Gates (human-in-the-loop) ----

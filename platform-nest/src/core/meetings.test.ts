@@ -3,7 +3,7 @@
 // read is member-level (the whole team references recordings); a rival tenant sees nothing. Ingest is
 // fail-soft when the n8n bridge is unconfigured (the test env has none) — it never invents a run.
 // Mirrors pipeline.test.ts.
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from "vitest";
 import type { NestFastifyApplication } from "@nestjs/platform-fastify";
 import { config } from "../config";
 import { buildApp } from "../main";
@@ -14,6 +14,57 @@ import { createCompany, createUser, addMembership, createRole, grantRole } from 
 
 const svc = { authorization: "Bearer svc-token" };
 const asUser = (id: string) => ({ ...svc, "x-user-id": id });
+
+// ---- WD-04 test helpers: build a raw multipart/form-data body (single "file" part) so
+// app.inject can exercise the real @fastify/multipart parser, and poll the detail GET for the
+// async transcription job's status flip instead of an arbitrary sleep. ----
+function multipartBody(filename: string, contentType: string, data: Buffer): { body: Buffer; contentType: string } {
+  const boundary = `----gaiadaTest${Math.random().toString(16).slice(2)}`;
+  const head = `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${filename}"\r\nContent-Type: ${contentType}\r\n\r\n`;
+  const tail = `\r\n--${boundary}--\r\n`;
+  return { body: Buffer.concat([Buffer.from(head, "utf8"), data, Buffer.from(tail, "utf8")]), contentType: `multipart/form-data; boundary=${boundary}` };
+}
+
+// Captured at module load, BEFORE any test stubs global.fetch — Cerbos's own client (and the
+// ingest proxy's fetchWithTimeout) also call the process-global `fetch`, so a naive blanket stub
+// would silently break every authorize() call in these tests too (it did, the first time this
+// was written: it manifested as spurious 403s/500s on requests that never even reach whisper).
+// Every mock below therefore ROUTES on the URL and falls through to the real fetch for anything
+// that isn't the whisper endpoint.
+const REAL_FETCH: typeof fetch = globalThis.fetch;
+
+function routedWhisperFetch(whisperHandler: () => Promise<unknown>) {
+  return vi.fn(async (input: unknown, init?: RequestInit) => {
+    const url = typeof input === "string" ? input : String((input as { url?: string })?.url ?? input);
+    if (url.startsWith(config.whisper.url)) return whisperHandler();
+    return REAL_FETCH(input as RequestInfo, init);
+  }) as unknown as typeof fetch;
+}
+
+function mockWhisperOk(text: string) {
+  return routedWhisperFetch(async () => ({ ok: true, status: 200, json: async () => ({ text }), text: async () => "" }));
+}
+function mockWhisperDown() {
+  return routedWhisperFetch(async () => { throw new Error("connect ECONNREFUSED 127.0.0.1:8000"); });
+}
+
+async function waitForStatus(
+  app: NestFastifyApplication,
+  url: string,
+  headers: Record<string, string>,
+  want: string[],
+  timeoutMs = 3000,
+): Promise<Record<string, unknown>> {
+  const start = Date.now();
+  let last: Record<string, unknown> = {};
+  while (Date.now() - start < timeoutMs) {
+    const r = await app.inject({ method: "GET", url, headers });
+    last = r.json();
+    if (want.includes(last.status as string)) return last;
+    await new Promise((res) => setTimeout(res, 25));
+  }
+  throw new Error(`status did not reach [${want.join(",")}] within ${timeoutMs}ms; last=${JSON.stringify(last)}`);
+}
 
 describe.skipIf(!TEST_URL)("meeting-recordings registry + ingest proxy (WS11 capture edge)", () => {
   let app: NestFastifyApplication;
@@ -158,5 +209,253 @@ describe.skipIf(!TEST_URL)("meeting-recordings registry + ingest proxy (WS11 cap
   it("rejects invalid kind / status (400)", async () => {
     expect((await app.inject({ method: "POST", url: `/api/${co}/meetings/recordings/start`, headers: asUser(member), payload: { kind: "hologram" } })).statusCode).toBe(400);
     expect((await app.inject({ method: "PATCH", url: `/api/${co}/meetings/recordings/${id}`, headers: asUser(member), payload: { status: "teleporting" } })).statusCode).toBe(400);
+  });
+
+  // ---- WD-26 relink sweep (DEF-1 fix): the since-fixed 5s ingest-proxy timeout meant a window
+  // where every /ingest call returned dispatcher_unreachable client-side WITHOUT updating the row,
+  // even though the dispatcher had already run pipeline.createRun server-side. Reconstruct that
+  // exact orphan shape (a recording stuck pre-ingested + a real pipeline_runs row keyed by the same
+  // meeting_id) and prove the sweep reconciles it, then prove a second run is a true no-op.
+  describe("WD-26 relink sweep (DEF-1: orphaned recordings from the fixed 5s ingest-proxy timeout)", () => {
+    let orphanId: string;
+    let orphanMeetingId: string;
+    let runId: string;
+
+    it("seed: an orphaned recording (stuck 'transcribed', no pipeline_run_id) + its real pipeline run", async () => {
+      const start = await app.inject({
+        method: "POST",
+        url: `/api/${co}/meetings/recordings/start`,
+        headers: asUser(member),
+        payload: { title: "DEF-1 orphan", kind: "audio" },
+      });
+      orphanId = start.json().id;
+      orphanMeetingId = start.json().meetingId;
+      await app.inject({
+        method: "POST",
+        url: `/api/${co}/meetings/recordings/${orphanId}/transcript`,
+        headers: asUser(member),
+        payload: { text: "Orphaned by the old 5s timeout — the dispatcher actually finished." },
+      });
+      // The dispatcher's real, synchronous side effect that the timed-out client never learned about.
+      const run = await app.inject({
+        method: "POST",
+        url: `/api/${co}/pipeline/runs`,
+        headers: asUser(member),
+        payload: { sourceMeetingId: orphanMeetingId, title: "DEF-1 orphan run" },
+      });
+      expect(run.statusCode).toBe(201);
+      runId = run.json().id;
+
+      // BEFORE: confirm the orphan shape for real (not asserted from memory).
+      const before = await adminPool().query(
+        `SELECT status, pipeline_run_id FROM meeting_recordings WHERE id = $1`,
+        [orphanId],
+      );
+      expect(before.rows[0]).toMatchObject({ status: "transcribed", pipeline_run_id: null });
+    });
+
+    it("sweep links the orphan to its real run (AFTER)", async () => {
+      const r = await app.inject({ method: "POST", url: `/api/${co}/meetings/recordings/relink-orphans`, headers: asUser(admin) });
+      expect(r.statusCode).toBe(200);
+      expect(r.json().relinked).toBeGreaterThanOrEqual(1);
+      expect(r.json().linkedIds).toContain(orphanId);
+
+      const after = await adminPool().query(
+        `SELECT status, pipeline_run_id FROM meeting_recordings WHERE id = $1`,
+        [orphanId],
+      );
+      expect(after.rows[0]).toMatchObject({ status: "ingested", pipeline_run_id: runId });
+    });
+
+    it("running the sweep again is idempotent (no double-linking, no churn)", async () => {
+      const r = await app.inject({ method: "POST", url: `/api/${co}/meetings/recordings/relink-orphans`, headers: asUser(admin) });
+      expect(r.statusCode).toBe(200);
+      expect(r.json().linkedIds).not.toContain(orphanId); // already ingested -> no longer a candidate
+      const still = await adminPool().query(
+        `SELECT status, pipeline_run_id FROM meeting_recordings WHERE id = $1`,
+        [orphanId],
+      );
+      expect(still.rows[0]).toMatchObject({ status: "ingested", pipeline_run_id: runId }); // unchanged
+    });
+
+    it("a member (not admin) cannot run the sweep (403 — admin/service-only)", async () => {
+      const r = await app.inject({ method: "POST", url: `/api/${co}/meetings/recordings/relink-orphans`, headers: asUser(member) });
+      expect(r.statusCode).toBe(403);
+    });
+  });
+
+  // ---- WD-04: in-ERP audio upload (no helper required) -> async server-side transcription ----
+  // `id` above went through the LOCAL-WHISPER (helper) path only — it never gets an audio_ref,
+  // which is exactly the regression proof this section closes with. Every test here mints its
+  // own fresh recording via "start" so it doesn't disturb that helper-path fixture's state.
+  describe("WD-04: in-ERP audio upload -> server-side transcription", () => {
+    let audioId: string;
+
+    beforeEach(() => {
+      config.whisper.url = "http://whisper-test:8000";
+      config.whisper.model = "Systran/faster-whisper-small";
+    });
+    afterEach(() => {
+      vi.restoreAllMocks();
+      vi.unstubAllGlobals();
+      config.whisper.url = "";
+    });
+
+    it("an .m4a upload becomes a transcript with no helper installed (whisper mocked ok)", async () => {
+      const startR = await app.inject({
+        method: "POST",
+        url: `/api/${co}/meetings/recordings/start`,
+        headers: asUser(member),
+        payload: { title: "Upload-only client call", kind: "audio" },
+      });
+      expect(startR.statusCode).toBe(201);
+      audioId = startR.json().id;
+
+      vi.stubGlobal("fetch", mockWhisperOk("Client wants a rebrand via upload. No helper installed."));
+      const { body, contentType } = multipartBody("meeting.m4a", "audio/mp4", Buffer.from("fake-m4a-bytes-not-real-audio"));
+      const up = await app.inject({
+        method: "POST",
+        url: `/api/${co}/meetings/recordings/${audioId}/audio`,
+        headers: { ...asUser(member), "content-type": contentType },
+        payload: body,
+      });
+      expect(up.statusCode).toBe(202);
+      expect(up.json()).toMatchObject({ id: audioId, status: "transcribing" });
+      expect(up.json().audioRef).toBeTruthy();
+
+      const done = await waitForStatus(app, `/api/${co}/meetings/recordings/${audioId}`, asUser(member), ["transcribed", "failed"]);
+      expect(done.status).toBe("transcribed");
+      expect(done.transcript).toContain("rebrand via upload");
+      expect(done.audio_ref).toBe(up.json().audioRef);
+
+      const ev = await adminPool().query(
+        `SELECT event_type FROM outbox_events WHERE entity_id = $1 AND event_type IN ('meeting.recording.audio_uploaded','meeting.recording.transcribed') ORDER BY created_at`,
+        [audioId],
+      );
+      expect(ev.rows.map((row: { event_type: string }) => row.event_type)).toEqual(
+        expect.arrayContaining(["meeting.recording.audio_uploaded", "meeting.recording.transcribed"]),
+      );
+
+      // Proves the upload-path transcript is just as ingestable as the helper path's (still
+      // fail-soft 200/bridge_not_configured in the test env, never the "no transcript" 400 —
+      // that 400 is exactly what would fire if the audio itself, not the transcript, were what
+      // this endpoint fed forward, which is the §03 trust-zone rule this ticket must not break).
+      const ingest = await app.inject({ method: "POST", url: `/api/${co}/meetings/recordings/${audioId}/ingest`, headers: asUser(member) });
+      expect(ingest.statusCode).toBe(200);
+      expect(ingest.json()).toMatchObject({ ok: false, reason: "bridge_not_configured" });
+    });
+
+    it("rejects a wrong-type upload (e.g. an image) with 400, no state change", async () => {
+      const startR = await app.inject({ method: "POST", url: `/api/${co}/meetings/recordings/start`, headers: asUser(member), payload: { title: "Wrong-type test", kind: "audio" } });
+      const wrongId = startR.json().id;
+      const { body, contentType } = multipartBody("selfie.png", "image/png", Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a]));
+      const r = await app.inject({
+        method: "POST",
+        url: `/api/${co}/meetings/recordings/${wrongId}/audio`,
+        headers: { ...asUser(member), "content-type": contentType },
+        payload: body,
+      });
+      expect(r.statusCode).toBe(400);
+      const row = await adminPool().query(`SELECT status, audio_ref FROM meeting_recordings WHERE id = $1`, [wrongId]);
+      expect(row.rows[0].status).toBe("recording");
+      expect(row.rows[0].audio_ref).toBeNull();
+    });
+
+    it("whisper-down flips the recording to failed, and retry succeeds once whisper recovers", async () => {
+      const startR = await app.inject({ method: "POST", url: `/api/${co}/meetings/recordings/start`, headers: asUser(member), payload: { title: "Whisper-down test", kind: "audio" } });
+      const failId = startR.json().id;
+
+      vi.stubGlobal("fetch", mockWhisperDown());
+      const { body, contentType } = multipartBody("meeting.mp3", "audio/mpeg", Buffer.from("fake-mp3-bytes"));
+      const up = await app.inject({
+        method: "POST",
+        url: `/api/${co}/meetings/recordings/${failId}/audio`,
+        headers: { ...asUser(member), "content-type": contentType },
+        payload: body,
+      });
+      expect(up.statusCode).toBe(202); // upload itself succeeds — only the async transcription fails
+
+      const failed = await waitForStatus(app, `/api/${co}/meetings/recordings/${failId}`, asUser(member), ["transcribed", "failed"]);
+      expect(failed.status).toBe("failed");
+      const failEv = await adminPool().query(
+        `SELECT 1 FROM outbox_events WHERE entity_id = $1 AND event_type = 'meeting.recording.transcription_failed'`,
+        [failId],
+      );
+      expect(failEv.rowCount).toBe(1);
+
+      // Whisper recovers; retry re-uses the already-stored audio (no re-upload needed).
+      vi.stubGlobal("fetch", mockWhisperOk("Recovered transcript after whisper came back."));
+      const retry = await app.inject({ method: "POST", url: `/api/${co}/meetings/recordings/${failId}/audio/retry`, headers: asUser(member) });
+      expect(retry.statusCode).toBe(202);
+      expect(retry.json()).toMatchObject({ id: failId, status: "transcribing" });
+
+      const recovered = await waitForStatus(app, `/api/${co}/meetings/recordings/${failId}`, asUser(member), ["transcribed", "failed"]);
+      expect(recovered.status).toBe("transcribed");
+      expect(recovered.transcript).toContain("Recovered transcript");
+    });
+
+    it("retry is refused once already transcribed (400)", async () => {
+      const r = await app.inject({ method: "POST", url: `/api/${co}/meetings/recordings/${audioId}/audio/retry`, headers: asUser(member) });
+      expect(r.statusCode).toBe(400);
+    });
+
+    it("retry is refused for a recording with no uploaded audio at all (400)", async () => {
+      // `id` (outer scope) only ever went through the local-whisper/helper path — audio_ref is null.
+      const r = await app.inject({ method: "POST", url: `/api/${co}/meetings/recordings/${id}/audio/retry`, headers: asUser(member) });
+      expect(r.statusCode).toBe(400);
+    });
+
+    it("tenant isolation: a rival admin cannot upload against another tenant's recording (404)", async () => {
+      const { body, contentType } = multipartBody("x.mp3", "audio/mpeg", Buffer.from("bytes"));
+      const r = await app.inject({
+        method: "POST",
+        url: `/api/${other}/meetings/recordings/${audioId}/audio`,
+        headers: { ...asUser(otherAdmin), "content-type": contentType },
+        payload: body,
+      });
+      expect(r.statusCode).toBe(404);
+    });
+
+    it("regression: the helper's local-whisper path is untouched by the audio_ref column (stays null)", async () => {
+      const row = await adminPool().query(`SELECT status, audio_ref, transcript FROM meeting_recordings WHERE id = $1`, [id]);
+      expect(row.rows[0].audio_ref).toBeNull();
+      expect(row.rows[0].status).toBe("transcribed");
+      expect(row.rows[0].transcript).toContain("rebrand");
+    });
+  });
+
+  // Oversized-upload proof needs the REAL configured byte cap (baked into the multipart plugin
+  // at app-build time, main.ts), not a mocked check — so this uses its OWN small-cap app instance
+  // rather than the shared `app` above (which was built against the full 200MB default; allocating
+  // a 200MB+ buffer just to exceed it in every CI run is wasteful). Same DB, same fixtures.
+  describe("WD-04: oversized upload is refused at the configured byte cap", () => {
+    let smallCapApp: NestFastifyApplication;
+    const originalMaxBytes = config.meetingAudio.maxBytes;
+
+    beforeAll(async () => {
+      config.meetingAudio.maxBytes = 1024; // 1KB cap for this suite only
+      smallCapApp = await buildApp();
+    });
+    afterAll(async () => {
+      await smallCapApp.close();
+      config.meetingAudio.maxBytes = originalMaxBytes;
+    });
+
+    it("refuses an upload over the cap (400) without ever entering transcribing", async () => {
+      const startR = await app.inject({ method: "POST", url: `/api/${co}/meetings/recordings/start`, headers: asUser(member), payload: { title: "Oversized test", kind: "audio" } });
+      const bigId = startR.json().id;
+      const big = Buffer.alloc(2048, 1); // 2KB > the 1KB cap this suite configured
+      const { body, contentType } = multipartBody("huge.wav", "audio/wav", big);
+      const r = await smallCapApp.inject({
+        method: "POST",
+        url: `/api/${co}/meetings/recordings/${bigId}/audio`,
+        headers: { ...asUser(member), "content-type": contentType },
+        payload: body,
+      });
+      expect(r.statusCode).toBe(400);
+      const row = await adminPool().query(`SELECT status, audio_ref FROM meeting_recordings WHERE id = $1`, [bigId]);
+      expect(row.rows[0].status).toBe("recording");
+      expect(row.rows[0].audio_ref).toBeNull();
+    });
   });
 });

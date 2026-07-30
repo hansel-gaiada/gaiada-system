@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { redirect, notFound } from "next/navigation";
 import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
@@ -7,6 +8,7 @@ import { RecordingWorkbench } from "@/components/meetings/RecordingWorkbench";
 import { Card, Eyebrow, StatusBadge } from "@/components/ui";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { formatDateTime } from "@/lib/format";
+import type { ReactNode } from "react";
 
 function mb(bytes: number | null): string {
   if (!bytes || bytes <= 0) return "—";
@@ -25,13 +27,15 @@ export default async function MeetingDetailPage({ params }: { params: Promise<{ 
   const rec = await getRecording(userId, tenant, id);
   if (!rec) notFound();
 
-  const meta: [string, string][] = [
+  const meta: [string, ReactNode][] = [
     ["Kind", rec.kind === "video" ? "Audio + Video" : "Audio"],
     ["Meeting ID", rec.meeting_id],
     ["Length", formatDuration(rec.duration_sec)],
     ["Size", mb(rec.size_bytes)],
     ["Started", rec.started_at ? formatDateTime(rec.started_at) : "—"],
     ["Local file", rec.local_hint ?? "—"],
+    // WD-02: once ingested, the recording carries the pipeline run id — link straight into its workspace.
+    ["Pipeline run", rec.pipeline_run_id ? <Link href={`/pipeline/${rec.pipeline_run_id}`}>Open run workspace →</Link> : "Not ingested yet"],
   ];
 
   return (

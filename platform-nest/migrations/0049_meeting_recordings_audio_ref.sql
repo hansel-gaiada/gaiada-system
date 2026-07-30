@@ -1,0 +1,11 @@
+-- WD-04 (Web Dev Phase 1 design §04/§12): in-ERP audio upload -> server-side transcription.
+-- Purely additive: meeting_recordings (0023) already has 'transcribing'/'transcribed'/'failed'
+-- in its status CHECK (the ingest-proxy/local-whisper path already uses all three), so this
+-- migration adds exactly the one column the browser-upload path needs — a pointer to the
+-- uploaded audio's `files` row (0009). Nullable: the capture-helper's local-whisper path never
+-- sets it (audio never leaves the operator machine on that path — only the transcript crosses).
+--
+-- No RLS change: meeting_recordings stays core (plain tenant wall per design D-2 — it is
+-- cross-department infrastructure, not a webdev-private surface) and already has FORCE RLS from
+-- 0023; a nullable additive column does not touch that policy.
+ALTER TABLE meeting_recordings ADD COLUMN IF NOT EXISTS audio_ref uuid REFERENCES files(id);

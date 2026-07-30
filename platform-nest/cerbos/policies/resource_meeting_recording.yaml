@@ -21,3 +21,10 @@ resourcePolicy:
       effect: EFFECT_ALLOW
       derivedRoles: ["company_admin", "manager", "member", "team_lead"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    # WD-26 (DEF-1 relink sweep): admin/service-only, mirrors resource_work_activity.yaml's ingest
+    # tier — this is a bulk reconciliation action over the whole registry, not an everyday staff
+    # action on "my" recording.
+    - actions: ["relink"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }

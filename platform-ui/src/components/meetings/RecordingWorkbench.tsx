@@ -1,8 +1,9 @@
 "use client";
 import { useActionState } from "react";
 import Link from "next/link";
-import { setTranscriptAction, ingestAction, markDriveAction, type MeetingResult } from "@/lib/meetingsActions";
+import { setTranscriptAction, ingestAction, markDriveAction, uploadAudioAction, retryAudioAction, type MeetingResult } from "@/lib/meetingsActions";
 import type { MeetingRecordingDetail } from "@/lib/meetings";
+import { AudioUploadForm } from "./AudioUploadForm";
 
 // WS11 capture edge — the per-recording workbench on the detail page: add/replace the transcript,
 // ingest it into the delivery pipeline (proxied server-side), and record the Drive-sync nudge/result.
@@ -89,6 +90,19 @@ function DriveForm({ rec }: { rec: MeetingRecordingDetail }) {
 export function RecordingWorkbench({ rec }: { rec: MeetingRecordingDetail }) {
   return (
     <div style={{ display: "grid", gap: 22 }}>
+      {/* WD-04/WD-07 (Part A) — the in-ERP upload fallback, no capture-helper required. Always
+          available (someone can switch to it even after registering via the helper path), but it
+          is the ONLY way to get a transcript for a recording nobody's helper ever attached to. */}
+      <section>
+        <h3 style={{ margin: "0 0 10px", font: "600 14px var(--font-display)" }}>Server-side transcription</h3>
+        <AudioUploadForm
+          recordingId={rec.id}
+          initialStatus={rec.status}
+          hasAudioRef={!!rec.audio_ref}
+          uploadAction={uploadAudioAction}
+          retryAction={retryAudioAction}
+        />
+      </section>
       <section>
         <h3 style={{ margin: "0 0 10px", font: "600 14px var(--font-display)" }}>Transcript</h3>
         <TranscriptForm rec={rec} />
