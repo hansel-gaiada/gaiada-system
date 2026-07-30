@@ -118,7 +118,12 @@ Components are **separate standalone projects — not a shared-package monorepo.
   this is what blocks the built-but-placeholder UI Systems/Intelligence/Admin sections. (2) other
   verticals. **The sync engine is now BUILT** — see the `sync-engine-go/` bullet below.
   **Dev infra note:** Cerbos must run with published ports (`-p 3592:3592 -p 3593:3593`) — a
-  portless container fails all authz.
+  portless container fails all authz. **This is now wired into compose** (2026-07-27): bring the
+  stack up with BOTH files — `docker compose -f infra/compose/docker-compose.vps.yml -f
+  infra/compose/docker-compose.local.yml up -d` — and the override publishes Cerbos, `platform`
+  (:3004, needed by the host-run UI), `mcp-hub`, `pg-bot` (:55434) and a disposable `redis-test`
+  (:56380) on loopback. Using the VPS file ALONE removes those published ports from any container
+  it recreates (it silently unpublished platform:3004 once — the UI then can't reach the backend).
 - **sync-engine-go/** (WS1 T2) — **BUILT 2026-07-14.** Cross-site reconciliation: one Go binary
   runs central (serves push/pull over mTLS) or site (push→pull→GC ticker), reconciling the shared
   `outbox_events` log with HLC ordering, declarative per-field conflict resolution (status/money →

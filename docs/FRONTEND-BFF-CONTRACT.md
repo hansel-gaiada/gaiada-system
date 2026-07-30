@@ -199,6 +199,42 @@ per the 2026-07-17 route inventory (confirm UI has been repointed off the in-mem
   (the PROJECT is the copy). No source-project id survives anywhere in the copy;
   comments/time-entries/suggestions/`recurrence_spawned_from` not carried. Emits
   `pm.project.duplicated`. No new migration (existing tables).
+- **DEV-VERIFIED (WD-28, 2026-07-30):** per-project short-codes (OQ-7 default). `projects` gains
+  `short_code text` (`UNIQUE(tenant_id, short_code) WHERE deleted_at IS NULL AND short_code IS NOT
+  NULL`, derived on creation — first 3-4 uppercase alnum chars of the name, numeric-suffixed on
+  collision — via `deriveUniqueShortCode()` in NEW `src/core/project-short-codes.ts`, wired into
+  both project-creation call sites: `POST /api/:t/projects` (`core.controller.ts`) and `POST
+  /api/:t/pm/projects/:id/duplicate`) and `task_seq integer NOT NULL DEFAULT 0` (the per-project
+  atomic counter). `pm_tasks` gains `seq integer` (`UNIQUE(tenant_id, project_id, seq) WHERE seq
+  IS NOT NULL`). **Atomicity mechanism:** a single `UPDATE projects SET task_seq = task_seq + 1
+  WHERE id = $1 RETURNING task_seq` (`allocateTaskSeq()`) inside the same transaction as the
+  `pm_tasks` INSERT — the UPDATE's row lock is held for the transaction's duration, so a second
+  concurrent allocation on the same project blocks until the first commits; proven under 30
+  genuinely concurrent live HTTP requests (`Promise.all`/parallel curl, not sequential) yielding
+  exactly 30 distinct gapless seq values, zero duplicates. Every `pm_tasks` INSERT path allocates
+  through it: `POST /api/:t/pm/tasks`, `POST …/tasks/:id/duplicate`, the recurrence-spawn child
+  insert in `PATCH …/tasks/:id`, and each task copied by `POST …/projects/:id/duplicate` (which
+  also derives the clone a FRESH short_code, never the source's, and its counter restarts at 0).
+  `GET`/list responses for `pm_tasks` (`TASK_SELECT`) now carry `projectShortCode`, `seq`, and a
+  server-computed `displayCode` (`"CODE-SEQ"`, e.g. `"WEB-142"`, null if either half is missing);
+  `PmProject` GET responses and the base `GET /api/:t/projects` list carry `shortCode`. Backfill
+  for pre-existing rows ships as **two** migrations: `0050_pm_short_codes.sql` (schema + an
+  owner-run backfill DO block) and a same-day follow-up `0051_pm_short_codes_backfill_fix.sql` —
+  **0050's backfill silently touched zero rows on live verification**: migrations run as
+  `platform_owner`, which does NOT have `BYPASSRLS` (2026-07-15 DB-topology role split), and
+  `projects`/`pm_tasks` carry FORCE ROW LEVEL SECURITY, so an owner-run backfill with no
+  `app.current_tenant_ids` GUC set sees zero rows under RLS (no error, ledger still records
+  "applied" because the DDL half succeeds) — 0051 wraps the same backfill logic per-tenant
+  (`PERFORM set_config('app.current_tenant_ids', <company id>, true)` before touching each
+  tenant's rows), verified idempotent (re-run directly against `platform_owner`, bypassing the
+  ledger, three times running — zero rows changed after the first). Cross-tenant isolation
+  verified live: two different tenants derived the identical literal code text with zero
+  collision (uniqueness is `(tenant_id, short_code)`, never global). No Cerbos policy changes (no
+  new action; existing `pm_project`/`pm_task`/`project` create/manage/read cover the new
+  columns). `platform-ui`: `lib/pm.ts` (`PmTask.projectShortCode/seq/displayCode`,
+  `PmProject.shortCode`), `lib/entities.ts` (`Project.shortCode`), board card + task detail
+  header render `displayCode`; `demoPm.ts`/`demoFixtures.ts` synthesize the same shape
+  (per-project counter + derived code) for DEMO_MODE parity.
 - `GET /api/:t/pm/tasks/:id/suggestions`, `POST /api/:t/pm/tasks/:id/tracker/run`,
   `POST /api/:t/pm/suggestions/:id/confirm|dismiss`
 - Task comments reuse `GET/POST /api/:t/comments?entityType=task&entityId=`.
@@ -267,6 +303,41 @@ backend-only (UI reads) and is also present.
   url/tokenConfigured-only descriptor, and `bot`'s status `detail` gained a `session` field.
 - ✅ `GET /api/admin/gateway/egress-audit`, ✅ `GET /api/admin/hub/tools`,
   ✅ `GET /api/:t/agents/goals`, ✅ `GET /api/:t/knowledge/sources` (+ ✅ `POST …/:id/review`).
+- **✅ NEW (systems-console depth pass, 2026-07-27) — the gateway/hub/automation consoles were
+  rendering a `/health` reshape plus a two-row `{url, tokenConfigured}` descriptor while the
+  services themselves held far more. `GET /api/admin/:system/config` now returns a REAL projection
+  for `gateway`/`hub`/`automation` (chain order, caps, breaker tuning, TLS/topology/DLP posture;
+  policy engine, rate limits, peer allowlist; n8n + event-bridge posture), always with the honest
+  connection descriptor appended and every secret still `kind:"secretPresence"`. New routes:**
+  | Method | Path | Gate | Notes |
+  |---|---|---|---|
+  | GET | `/api/admin/gateway/detail` | `isElevated` | Proxies **new** ai-gateway-go `GET /admin/config`: per-capability chain in FAILOVER ORDER + live breaker state (`ok`/`open`/`unconfigured`, `rateLimited`, `openUntil`), provider inventory w/ `keyConfigured` presence only, budget breakdown **incl. per-tenant spend**, reliability tuning, security + topology posture. `null` when unreachable |
+  | POST | `/api/admin/gateway/dr-mode` | `isElevated` | Body `{enable, durationMinutes?}` → gateway `POST /admin/dr-mode` (WS9 D15). Proxied so the gateway token never reaches the browser. Raises the daily cap → platform-admin/owner only |
+  | GET | `/api/admin/gateway/egress-audit` | `isElevated` | **Extended:** `?limit&provider&capability&decision` (`decision` = `allow`\|`blocked`\|a specific block reason). Rows now carry structured `{capability, ok, blocked, redactions, latencyMs}` alongside the legacy `{time, provider, decision, detail}` |
+  | GET | `/api/admin/hub/detail` | `isElevated` | Proxies **new** mcp-hub `GET /admin/info`: policy engine (**Cerbos vs in-code fallback**), deny-by-default, assurance ranks, the D14 automation write gate, revocation, rate limits (per principal + per service token), mTLS mode/peer allowlist/topology, tool counts by source, **Resources + Prompts** (the two primitives the console never showed), and the per-workflow `AUTOMATION_ALLOWLIST` scope matrix |
+  | GET | `/api/admin/hub/audit` | `isElevated` | Proxies **new** mcp-hub `GET /audit`: the §8 tool-call decision trail (principal, tool, allow/deny, reason), newest-first. It was written to JSONL and readable nowhere |
+  | GET | `/api/admin/hub/tools` | `isElevated` | **Extended:** each row now carries `source` (`core`/`platform-read`/`platform-write`/`pipeline`/`delivery`/`module`) |
+  | GET | `/api/admin/automation/executions` | `isItOrElevated` | n8n run history, newest-first, with `workflowId` resolved to a name + `durationMs`. Previously fetched and discarded except one "last run" cell |
+  | GET | `/api/admin/automation/bridge` | `isItOrElevated` | Event→n8n bridge health (`events/bridge-health.ts`): per watched stream `backlog`/`deadLetter`/`oldestPendingMs`, plus the bridged event allow-list and retry/timeout config. A stalled bridge silently stops every event-triggered workflow; this is the only surface that shows it |
+- **✅ NEW (write levers, 2026-07-27) — the consoles gained the actions that were previously
+  read-only-by-omission. Every write is `isElevated` (platform_admin / group_executive) and proxied,
+  so no service token ever reaches the browser:**
+  | Method | Path | Gate | Notes |
+  |---|---|---|---|
+  | PUT | `/api/admin/gateway/config` | `isElevated` | Body `{key,value}` → gateway `PUT /admin/config`. **The gateway owns the allowlist + bounds + persistence**; this proxy re-throws its 4xx VERBATIM (400 bounds/type, 400 non-writable key, 409 "can't take effect") so a rejected value explains itself instead of becoming a generic 502. Writable: `dailyCallCap`, `perTenantDailyCallCap`, `breakerThreshold`, `breakerCooldownMs`, `providerTimeoutMs`, `dlpClassifierEnabled`, `llmChain`/`mediaChain`/`embedChain`. **NOT writable (env + restart): provider credentials, egress allowlist, TLS mode, topology** — a console session must not widen the gateway's own security boundary |
+  | DELETE | `/api/admin/gateway/config?key=` | `isElevated` | Drops the override → the key reverts to its env value, **live**, not restart-deferred. Without it a console write is permanently sticky (the override file keeps shadowing a corrected env) |
+  | POST | `/api/admin/automation/workflows/:id/activate\|deactivate` | **`isElevated`** (NOT `isItOrElevated`) | n8n Public API `POST /workflows/:id/{activate,deactivate}`; returns n8n's own resulting `{id,active}` rather than assuming the requested state. Deliberately a NARROWER gate than the read-only canvas: deactivating silently stops business automation |
+  | POST | `/api/admin/automation/bridge/:entityType/replay` | `isElevated` | Moves dead-lettered entries back onto the source stream so the bridge redelivers them (`replayBridgeDeadLetters`). Re-adds BEFORE deleting (a crash duplicates — which the at-least-once bridge + n8n's envelope-id dedupe handle — rather than dropping). The stream name must be one the bridge actually watches, so an arbitrary Redis key can't be targeted |
+
+  `GET /api/admin/gateway/config` now sets `editable` per field from the gateway's own
+  `writableKeys`, and `GET .../detail` carries `writableKeys` + `overriddenKeys` — so an older
+  gateway with no write route yields a fully read-only page automatically, and a value that is a
+  console override rather than the env value says so.
+
+  **Deliberately NOT built — n8n execution retry.** n8n's Public API has no execution-retry route
+  (retry lives on its internal `/rest` surface, which needs a browser session). Replaying the
+  triggering EVENT is the sanctioned equivalent and is both more correct (re-runs from the real
+  input instead of resuming a half-finished run) and available for every event-triggered flow.
 - **✅ NEW (B3, `erp-whatsapp-and-agent-runtime-e2e.md` §3.3) — real agent-runner proxy,
   replacing the old hardcoded `[]`/"CLI/library, no live status" stubs.**
   `config.services.agents = {url: AGENTS_URL, token: AGENT_RUNNER_TOKEN}`;
@@ -322,8 +393,10 @@ in code, flagged only for "no frontend wired" rather than "backend pending":
 | ✅ (no UI) | POST/GET | `/api/:t/automation-approvals[/:id/decide]` | `core/automation-approvals.controller.ts` — WS4 automation-suspension surface; distinct from `/modules/agency/approvals`. |
 | ✅ (no UI) | GET | `/mcp/tool-defs` | `modules/mcp-tools.controller.ts` (`@Controller("mcp")`) — consumed by MCP Hub, not platform-ui. |
 | ✅ (no UI) | POST | `/principal/resolve`, `/identity/enroll/start`, `/identity/enroll/confirm` | `identity/identity.controller.ts` — root-level, not under `/api`; OBO/D4 enrollment, service-to-service. |
-| ✅ (no UI) | GET/POST | `/api/:t/portal/runs[/:runId]`, POST `/gates/:id/decide`, POST `/runs/:runId/scope-sign` | `core/portal.controller.ts` — likely the WS11 delivery-pipeline client portal surface. |
-| ✅ (no UI) | POST/GET/PATCH | `/api/:t/pipeline/runs[/:runId][/stages]`, `/pipeline/stages/:id`, `/pipeline/gates[/:id/decide]`, `/pipeline/runs/:runId/scope-signoffs` | `core/pipeline.controller.ts` — likely the WS11 meeting→MOM→PRD/Report/Scope pipeline (see `memory/ws11-delivery-pipeline-plan`). |
+| ✅ **STALE "no UI" tag — now consumed** | GET/POST | `/api/:t/portal/runs[/:runId]`, POST `/gates/:id/decide`, POST `/runs/:runId/scope-sign` | `core/portal.controller.ts` — the client portal (`/portal`, `lib/portal.ts`). WD-03 (Web Dev Phase 1 §12, D-3): the sign view now renders the LATEST stage artifact (`ArtifactMarkdown`) above the sign/feedback action for the gate it governs — "what a client signs must be what they see." Full doc sweep for this row + neighbors is WD-07's ticket, not redone here. |
+| ✅ **STALE "no UI" tag — now consumed** | POST/GET/PATCH | `/api/:t/pipeline/runs[/:runId][/stages]`, `/pipeline/stages/:id`, `/pipeline/gates[/:id/decide]`, `/pipeline/runs/:runId/scope-signoffs` | `core/pipeline.controller.ts` — the WS11 meeting→MOM→PRD/Report/Scope pipeline; consumed by the run workspace (`/pipeline/[runId]`, WD-02, `lib/pipeline.ts`). **WD-03 (D-3) delta:** `PATCH /pipeline/stages/:id` with `artifactRef` present is now a signature-locked EDIT — 409 once the stage's client sign gate (matched by track: `delivery`→`prd_sign`/`customer_feedback`, `scope`→`scope_signoff`; `report` never locks) is `decided`, via ANY path that decides it (native route or the generic `/approvals/:id/decide` façade, since both write the same `pipeline_gates` row); Cerbos `pipeline_stage.update` narrowed to `company_admin`/`manager`/`group_executive` (plain `member` now denied — was previously granted, a widening this ticket closed); every edit gets a `writeActivity` row + `pipeline.stage.updated` event (`artifactEdited:true`). Deliberately does NOT also lock on `stage.status === 'done'` — extraction lands stages `done` immediately, before any client sign gate exists, so that would make editing unreachable for every ingested run (falsified against the live "Acme Coffee kickoff" run — see WD-03 evidence). Workspace edit UI: `pl-edit` details/form in `pipeline/[runId]/page.tsx` (`isStageLocked` in `lib/pipeline.ts` mirrors the backend rule for the "locked" badge; the backend 409 remains the real authority). |
+| ✅ **STALE "no UI" tag — now consumed** | POST/PATCH/GET | `/api/:t/meetings/recordings/start`, `PATCH /:id`, `POST /:id/transcript`, `POST /:id/ingest`, `POST /:id/drive`, `GET /`, `GET /:id` | `core/meetings.controller.ts` — WS11 capture-edge registry (helper-driven: record → local whisper → register → transcript → ingest proxy, `N8N_BRIDGE_SECRET` stays server-side). Consumed by `lib/meetings.ts`/`lib/meetingsActions.ts`, the `/meetings` registry + `/meetings/[id]` detail/workbench, and the PRD Studio tab (`departments/[deptId]/prd`, `RecordControls`). **WD-07 (Web Dev Phase 1 §12) additions:** `/meetings`'s table gained a "Run" column resolving the linked `pipeline_runs.status` (not just the recording's own `status`) via one extra `listPipelineRuns` call; PRD Studio's "Source meeting" cell is now a link back to `/meetings/[id]` when the run's `source_meeting_id` resolves to a known recording (`listRecordings` cross-referenced by `meeting_id`, mirroring WD-02's reverse lookup in `lib/meetings.ts`'s `findRecordingByMeetingId`). `RecordControls` also gained optional `clientId`/`projectId` props (hidden fields feeding the existing `/start` body, unchanged contract) — wired into the project workspace (`ProjectWorkspaceView.tsx`'s new "Meetings" card) and the client detail page, each showing its own scoped `GET .../recordings?clientId=`/`?projectId=` list. **Verified end-to-end (not just "should work"):** a recording started from a project page carries that project's `client_id` + the `projectId` itself on the `meeting_recordings` row, and — since another agent's fix to `mtg-dispatcher.json` (WD-01 finding F-1) now forwards `clientId` into `pipeline.createRun` — an ingested run from that recording carries a non-null `pipeline_runs.client_id` too (DB-probed, see WD-07 evidence; this ticket verified the chain, it did not touch the dispatcher). |
+| ✅ **STALE "no UI" tag — now consumed** | POST | `/api/:t/meetings/recordings/:id/audio` (multipart, field `file`) → 202 `{id,status:"transcribing",audioRef}`; `/:id/audio/retry` → 202 `{id,status:"transcribing"}` | WD-04 (Web Dev Phase 1 §12) — `core/meetings.controller.ts`. In-ERP audio upload with no helper required: size cap (`MEETING_AUDIO_MAX_BYTES`, default 200MB) + audio-type allowlist enforced at upload; async job calls the whisper container's `/v1/audio/transcriptions` DIRECTLY (not via ai-gateway-go — bypasses its ~2.5-min timeout); flips `transcribing→transcribed` or `→failed` (retryable via the second route, reusing the stored audio — no re-upload). Additive `meeting_recordings.audio_ref` column (migration `0049`); the helper's local-whisper contract (`start`/`transcript` above) is unchanged. **WD-07 (2026-07-30, Part A) landed the frontend** — WD-04's own AC ("an `.m4a` uploaded in the browser becomes a transcript") had only ever been curl-verified; a real gap, not a doc staleness. `AudioUploadForm.tsx` (mounted on `/meetings/[id]`'s workbench) uploads via a new `platformUpload()` helper in `lib/platform.ts` (deliberately separate from `platformFetch` — that helper always forces `content-type: application/json`, which would corrupt a multipart boundary) and polls a new route-handler, `GET /api/meetings/:id/status`, on a 2.5s interval that self-terminates once status reaches `transcribed`/`failed`/`ingested` — the same poll-until-terminal shape as `WhatsAppConnect.tsx`'s bot-session poll. `RecordControls` gained a register-then-upload combined path (`registerAndUploadAudioAction`) for the case where no recording row exists yet — it starts one, uploads into it, then redirects to `/meetings/[id]` where `AudioUploadForm` takes over. DEMO_MODE equivalent: `demoUploadAudio`/`demoRetryAudio` in `demoMeetings.ts` (a filename containing "fail" simulates a whisper-down failure, since demo mode has no real whisper container to fail against). |
 
 ---
 
@@ -427,20 +500,22 @@ From `docs/superpowers/specs/2026-07-20-hr-module-design.md`. Module key `'hr'`;
 - **⬜ PENDING (WSD-5):** `/hr`, `/hr/leave`, `/hr/attendance`, `/hr/onboarding` UI + `lib/hr.ts` +
   `rbac.ts` `hr.view`/`hr.manage` caps. Backend is UI-ready — every route above is live now.
 
-## 11. Work-activity / evidence model (P1-04, Web-Dev Phase 1) — `src/core/work-activity.controller.ts` — **BACKEND ✅ BUILT (no UI/`lib/activity.ts` consumer yet — P1-05 wires the feed)**
+## 11. Work-activity / evidence model (P1-04, Web-Dev Phase 1) — `src/core/work-activity.controller.ts` — **BACKEND ✅ BUILT, UI ✅ WIRED (`platform-ui/src/lib/activity.ts` — reconciled 2026-07-30, WD-20)**
 
-**BACKEND-FIRST** (unlike most of this doc): this is a NEW core (not module-gated) normalized
-activity/evidence model — schema + a synchronous ingest/read API + a pure auto-link engine. There is
-no `lib/activity.ts` on the frontend yet; **the shapes below ARE the canonical contract** — when the
-UI is built, export `WorkActivityRow` in `platform-ui/src/lib/activity.ts` matching this shape
-verbatim (per the ticket's own naming). Migration `0030_work_activity.sql`. Deliberately **not**
-named `activities`/`audit` — those are the pre-existing flat audit table
-(`core.controller.ts GET /api/:t/activity`), untouched by this work.
+**Corrected 2026-07-30 (WD-20 QA gate):** this section previously said "no UI consumer yet" — that
+is stale. `platform-ui/src/lib/activity.ts` exports `WorkActivityRow` matching the shape below
+verbatim and is consumed by the department Home (`(app)/departments/[deptId]/page.tsx`) and the
+Activity tab (`(app)/departments/[deptId]/activity/page.tsx`), with `demoFixtures.ts` entries for
+DEMO_MODE. Migration `0030_work_activity.sql`. Deliberately **not** named `activities`/`audit` —
+those are the pre-existing flat audit table (`core.controller.ts GET /api/:t/activity`), untouched
+by this work.
 
-**Scope note:** this ticket (P1-04) builds the schema + this API + the linker + Cerbos only. The
-**outbox consumer** that drives ingestion automatically off pm/pipeline/github/drive events, and the
-**historical backfill**, are **P1-05 (separate ticket, not yet built)** — until it lands, this API
-has no automatic writers; a human, script, or admin tool must POST activities explicitly.
+**Scope note:** P1-04 built the schema + this API + the linker + Cerbos. The **outbox consumer**
+that drives ingestion automatically off pm/pipeline/meeting/pipeline_run events
+(`src/events/work-activity-consumer.ts`), plus the **historical backfill**
+(`src/core/work-activity-backfill.ts`), landed as **WSUX-15 (ex-P1-05)** — this is no longer a gap;
+the feed has live automatic writers today, redelivery-safe (dedupe by outbox id, dead-letter after
+`DEAD_LETTER_MAX_RETRIES`).
 
 - ✅ `GET /api/:t/work-activity?deptId=&projectId=&personId=&since=&limit=` → `WorkActivityRow[]`
   (member-level read; `deptId`/`projectId`/`personId` filter via a join on `work_activity_links`;
@@ -483,14 +558,43 @@ has no automatic writers; a human, script, or admin tool must POST activities ex
   company_admin; create = company_admin/platform_admin only). Policy-parity tests added to
   `src/rbac/cerbos.test.ts` (5 new cases, live-Cerbos-gated like the rest of that file).
 
-## 12. Connections subsystem / integration credential vault (WSUX-14, ex-P1-08) — `src/core/integrations.controller.ts` — **BACKEND ✅ BUILT (vault + core API; no UI/`lib/connections.ts` consumer yet — WSUX-16 wires it)**
+**WD-26 additions (2026-07-30) — `wd-digests`/`wd-stale-nag` n8n automation data seams. No UI
+consumer yet; these back the digest/nag flows only.**
+- ✅ `GET /api/:t/work-activity/stale-tasks?days=N` (member-level read, same tier as the base
+  feed) → open `pm_tasks` (`status <> 'done'`) with no linked `work_activity` in the last N days
+  (default 5, 1..90):
+  ```ts
+  { taskId: string; title: string; projectId: string; projectName: string;
+    assigneeUserId: string|null; assigneeName: string|null;
+    projectOwnerUserId: string|null; projectOwnerName: string|null; daysStale: number }[]
+  ```
+  `daysStale` is computed server-side off `COALESCE(last linked activity, task.created_at)` so the
+  caller (wd-stale-nag) can bucket N vs 2N escalation with one call, no logic of its own.
+- ✅ `POST /api/:t/work-activity/relink?limit=N` → `{scanned, relinked, linksAdded}`. **Admin/
+  service-principal only** (same `work_activity:create` tier as ingest). Deterministic relink
+  sweep (LD-16): re-runs the pure `deriveLinks` engine over rows with ZERO links (bounded batch,
+  default 100, oldest-first). Idempotent by construction — a row is only ever selected while it
+  has no links.
+- **Not part of this API surface, but shipped alongside it (same ticket):** `POST
+  /api/:t/meetings/recordings/relink-orphans` (`src/core/meetings.controller.ts`) — a SEPARATE,
+  narrower DEF-1 reconciliation sweep for `meeting_recordings` rows orphaned by the (now-fixed)
+  5s ingest-proxy timeout: matches `meeting_recordings.meeting_id` ↔ `pipeline_runs.source_meeting_id`
+  and flips the recording to `ingested` + sets `pipeline_run_id` where a real run already exists.
+  Admin/service-only (new Cerbos action `relink` on `meeting_recording`, company_admin tier).
 
-**BACKEND-FIRST.** A NEW core (not module-gated) subsystem: the single place a person or a company
-links an external provider (`github`|`google_drive`|`claude`) to the ERP, plus the **at-rest
-credential vault** for that link's OAuth/API tokens. Migration `0033_integration_connections.sql`
-(FORCE RLS, tenant-scoped — connections are **per-company** in v1; a person re-links per company).
-When the UI is built, export `ConnectionRow` in `platform-ui/src/lib/connections.ts` matching the
-response shape below verbatim.
+## 12. Connections subsystem / integration credential vault (WSUX-14, ex-P1-08) — `src/core/integrations.controller.ts` — **BACKEND ✅ BUILT, UI ✅ WIRED (`platform-ui/src/lib/connections.ts` — reconciled 2026-07-30, WD-20)**
+
+**Corrected 2026-07-30 (WD-20 QA gate):** this section previously said "no UI consumer yet" — that
+is stale. `platform-ui/src/lib/connections.ts` exports `ConnectionRow` matching the shape below
+verbatim; the Connections tab (`(app)/departments/[deptId]/connections/`), `ConnectionsPanel.tsx`,
+and `TeamConnectionsGrid.tsx` (WSUX-16) consume it live. A NEW core (not module-gated) subsystem:
+the single place a person or a company links an external provider (`github`|`google_drive`|`claude`)
+to the ERP, plus the **at-rest credential vault** for that link's OAuth/API tokens. Migration
+`0033_integration_connections.sql` (FORCE RLS, tenant-scoped — connections are **per-company** in
+v1; a person re-links per company). Note: the original ticket plan (decision #6 in
+`web-dev-phase1-tickets.md`) named this migration `0031`; it actually landed as `0031_creative_assets.sql`/
+`0032_creative_assets_training.sql` went first (a concurrent program claimed those numbers first), so
+integration_connections is `0033` — reconciled in the ticket plan doc alongside this fix.
 
 **Vault + token non-exposure (security-critical — the WSUX-12 gate probes this):** tokens are sealed
 with app-layer **AES-256-GCM** (`src/core/secret-box.ts`, `enc:v1:<iv>:<tag>:<data>`, key from env
@@ -535,7 +639,7 @@ for the Phase-2 OAuth callbacks that ride this foundation.
   (`member`/`viewer`/`team_lead` gated by the shared `owns` variable); company rows + others' rows =
   `company_admin`/`manager`/`group_executive`/`platform_admin`.
 
-### 12a. C1 Claude seat registry (WSUX-17, ex-P1-10) — `src/core/claude-seats.{controller,service}.ts` — **BACKEND ✅ BUILT (no UI consumer yet — WSUX-16/17's FE half is not built)**
+### 12a. C1 Claude seat registry (WSUX-17, ex-P1-10) — `src/core/claude-seats.{controller,service}.ts` — **BACKEND ✅ BUILT, UI ✅ WIRED (`platform-ui/src/lib/claudeSeats.ts` — reconciled 2026-07-30, WD-20)**
 
 A thin, provider-scoped projection over §12's vault — **NO new table, NO new secret path**. A "seat"
 IS an `integration_connections` row with `owner_kind='user'` and `provider='claude'`; this API just
@@ -604,3 +708,144 @@ Creative Render Gateway + the shared DAM) is **PENDING** per the v1.0 design. Ne
   callback token (+ optional mTLS); gateway → platform-nest terminal-state transitions only.
 - **Cross-dept note:** SMM/SEO/WebDesk pull **approved** assets + imgproxy renditions via `search` +
   `renditions/sign`; reuse is gated by `reuse_status` (WS4 "approve for reuse" gate), not raw asset access.
+
+---
+
+## 14. search-marketing module — SEO · SEM · GEO (SM-*, design `blueprints/seo-sem-design.md`) — shapes canonical in `lib/searchMarketing.ts`
+
+Mounted at `/api/:t/modules/search/*` (`modules/search/search.controller.ts`). Consumer is the **SEO
+department console** (`/departments/seo/*`, SM-11). Naming trap: the UI client is
+**`lib/searchMarketing.ts`** — `lib/search.ts` is the unrelated app-wide global-search helper.
+
+**✅ BUILT (SM-01/02/04 — the console renders these for real):**
+
+- `GET/POST properties` · `GET/PATCH/DELETE properties/:id` → `SearchProperty`
+- `GET/POST engagements` · `GET/PATCH/DELETE engagements/:id` → `SearchEngagement`
+- `GET/PUT engagements/:id/scope` → `ToolScopeConfig` (D-11 per-engagement tool scope)
+- `GET engagements/:id/cost-projection` → `CostProjection` (priced by SM-04 `estimateCostUsd`)
+- `GET/POST kpi-targets` · `GET/PATCH/DELETE kpi-targets/:id` → `SearchKpiTarget`
+
+**SM-33 (simulation provenance) — additive fields on an existing shape, no new endpoint.**
+`CostProjection` now also carries `providerMode: "live" | "simulate"` (state it once in the
+engagement header) and, per row, `perTool[].simulated: boolean` (render the `SIMULATED` chip — it is
+per-tool because provider selection is per-capability, so one toggle can be simulated while another
+is live). `search_provider_calls`/`search_data_cache` carry `simulated` too (migration 0047), but
+there is still no ledger-listing endpoint (see SM-17 below) — so `cost-projection` is the ONLY
+provenance-carrying response the console can read today. **SM-38 badges it** (ScopeEditor's per-tool
+grid + total, the engagement header's mode statement) — verified against `providers/dispatch.ts`'s
+`ProjectedToolCost`/`projectMonthlyCost` and `search.controller.ts`'s `getEngagementCostProjection`.
+
+**Gap SM-38 found, left unbadged rather than faked:** `search_keywords` (the Keywords tab's
+`volume`/`difficulty` columns) has NO provenance column at all — no `metrics_provider`, no
+`metrics_simulated`. The three snapshot tables a future rankings/backlinks/ai-visibility tab would
+read (`search_rank_snapshots`/`search_backlink_snapshots`/`search_ai_visibility`) are one step
+further: they carry `provider` + a nullable `provider_call_id`, but **still no `simulated` column**.
+All four columns land together in **migration 0048, owned by SM-36 (not started)**. Until then: no
+chip, no claim either way on any of these four surfaces — a `simulated` field read from a row that
+doesn't have one is `undefined` (falsy), which would silently render every synthetic value as real,
+the exact failure this whole ticket exists to prevent. **SM-36/SM-14/15/16 implementers:** badge
+these the same way `cost-projection` is badged today once 0048 selects the columns; until it does,
+the platform-mode statement (`ProviderModeStatement`, `components/search/SimulatedBadge.tsx`) is the
+honest fallback for "is this data simulated" on any surface that goes live ahead of 0048 — in
+simulate mode every freshly-pulled row is synthetic by construction (boot-time mutual exclusion means
+a live instance can't create one), so the mode statement alone is still truthful even with no per-row
+column yet.
+
+Note for **SM-17**: its ledger/usage read surfaces MUST select and expose `simulated`, or a demo
+month's synthetic dollars will render as real client spend.
+
+**✅ BUILT (SM-18 — SEM planning objects; NO live side-effects, matching the ticket's own scope):**
+
+Real paths (the pre-SM-18 rows above listed speculative `sem/...` placeholders — these are the
+actual routes `search.controller.ts` mounts):
+
+- `GET/POST engagements/:id/campaigns` · `GET/PATCH/DELETE campaigns/:id` → `SearchCampaign`.
+  Campaign `status` is writable ONLY as `draft|proposed` here — `live|paused|ended` mirror a real ad
+  account and are out of this ticket's reach (SM-20/25/26).
+- `POST engagements/:id/campaigns/generate-plan` — the cluster→plan generator: builds one campaign
+  + one ad group per keyword cluster from an already-clustered keyword set (SM-09). Each returned ad
+  group carries a `provenance: {providers, simulatedCount, realCount, unpulledCount}` block — the
+  keyword-metric provenance flow-through the standing rule requires (§A2/§A4.7): providers are listed
+  separately, never blended into one figure.
+- `GET/POST campaigns/:id/ad-groups` · `GET/PATCH/DELETE ad-groups/:id` → `SearchAdGroup`.
+- `GET/POST ad-groups/:id/ads` · `PATCH/DELETE ads/:id` → `SearchAd`. `status` writable only as
+  `draft|approved|rejected` (`live` is sync-only).
+- `POST ad-groups/:id/ads/draft` — AI RSA draft (Hermes via ai-gateway-go), grounded in the ad
+  group's own cluster keywords; always persists `status:'draft', aiGenerated:true`.
+- `GET/POST campaigns/:id/negatives` · `PATCH/DELETE negatives/:id` → `SearchNegative`. `status`
+  writable only as `proposed|approved|dismissed` (`applied` is SM-30/21's job).
+- `POST campaigns/:id/negatives/propose` — AI negative-keyword classification over
+  HUMAN-SUBMITTED search terms (`{terms:[...]}` or `{text:"one per line"}` — no live search-term
+  sync exists yet, that is SM-20's job). Fallback on a gateway outage is deliberately an EMPTY
+  candidate list, never a fabricated rule-based judgment.
+- `GET/POST campaigns/:id/change-proposals` · `GET change-proposals/:id` · `PATCH
+  change-proposals/:id` → `SearchChangeProposal`. This ticket only reaches
+  `proposed → approved | dismissed`; `applied` is refused everywhere here (400) — SM-30 (manual
+  mark-applied) and SM-21 (api-mode, one-shot WS4 approval) own that transition exclusively.
+  `payload`/`mode` are editable only while `status='proposed'` (payload is hash-matched at approval,
+  design §04).
+
+**✅ BUILT (SM-16 — backlinks + GEO/AI-visibility pulls; real routes, not the speculative
+`rankings/pull`-style paths the PENDING table below still lists for SM-14):**
+
+- `POST engagements/:id/backlinks-pull` → one dispatch for the engagement's own property (0034: an
+  engagement has exactly one). Response + the persisted `search_backlink_snapshots` row both carry
+  `provider`/`simulated` stamped from `DispatchResult.simulated` (never re-derived from the platform
+  mode), plus `lostSpike`/`previousBacklinks` (aggregate-delta detection — `new_links`/`lost_links`
+  stay honestly `[]`, no per-link sample exists in the provider abstraction to store).
+- `GET properties/:id/backlinks` → raw history, newest first, `{totals, newLinks, lostLinks,
+  provider, simulated}` per row — **badge, not filter** (every row keeps its own truth across a mode
+  flip; there is no aggregate/COUNT reader over this table yet, which would need the opposite,
+  mode-filtered treatment per §A4.7).
+- `POST engagements/:id/ai-visibility-pull` → body `{queries?: string[]}` OVERRIDES the engagement's
+  own `tool_scope.ai_visibility.queries`; omit it to pull the scope-configured list (scope-driven,
+  same D-11 rule SM-15's flows lean on). One query can return several rows (one per engine — brand
+  mentioned/cited across ChatGPT/AI-Overview/Gemini/Claude/Perplexity), each stamped with the SAME
+  dispatch's provenance and a `changed` flag (did brandMentioned/cited flip vs. the immediately-prior
+  row for that exact engine+query). **DataForSEO has no fallback for this capability (§A2)** — a
+  scope-disabled or unresolvable-provider refusal shows up per-query as `{status:"skipped",
+  reason:"scope_disabled"|...}` inside the batch response (HTTP 200; same shape as SM-14's
+  rank-pull/metrics-pull batches), not a 4xx.
+- `GET properties/:id/ai-visibility` → raw history, optional `?engine=&query=` filters, same
+  badge-not-filter shape as backlinks.
+- Both pulls are `resource_search_audit` (design §11's own kind for
+  "audits/findings/backlinks/ai-visibility") actioned as `create`/`read` — that policy has no
+  dedicated "research" action the way `resource_search_keyword` does, and §12's own button-matrix
+  gates these two on "budget stop-loss" only, not a named extra permission.
+- **No Backlinks tab exists yet** (uiManifest still lists only Rankings/AI Visibility under
+  Optimize) — `search.backlinks.lost_spike` is therefore a real, ledgered producer with no wired
+  notification (SM-13's own note explicitly punted that call to whoever built this pull; a
+  wrong-but-plausible href was judged worse than none). `search.ai_visibility.changed` IS wired
+  (SM-13, real producer now landed) since the AI Visibility tab already exists.
+- Provider ledger rows (`search_provider_calls`) for both ops carry `simulated` + `provider`
+  exactly like every other SM-04 dispatch; a scope refusal is ALSO ledgered (`recordBlocked`,
+  status `failed`, endpoint suffixed `.scope_disabled`) — verified live against the seeded "Bali
+  Beach SEO" engagement (`ai_visibility` starts `enabled:false` in the seed on purpose, to make the
+  refusal path demonstrable before an operator flips it on).
+
+**⏳ PENDING — each console tab renders `BackendPending` naming its owner until these land:**
+
+| Endpoint(s) | Tab | Owner |
+|---|---|---|
+| `POST audits`, `GET audits`, `GET audits/:id/findings`, `PATCH findings/:id` | Site Audit | SM-07 (crawlers) + SM-08 (ingest/triage) |
+| `GET/POST keywords`, `POST keywords/cluster`, `GET clusters` | Keywords | SM-09 |
+| `POST rankings/pull`, `GET rankings?keywordId&from&to` | Rankings | SM-14 🔵 |
+| `GET/POST briefs`, `POST briefs/:id/draft` | Content Briefs | SM-10 |
+| Ads-Editor-ready export + mark-applied on an approved change proposal | Ads Studio | SM-30 |
+| dual-mode (manual/api) picker + api-mode execute (`applyNegatives`/`setBudget`/`launchCampaign`) | Ads Studio | SM-19/21/26 |
+| a live search-term LISTING (negatives CRUD + AI-propose are BUILT, SM-18 above — there is just nothing to list yet) | Search Terms | SM-20 |
+| `GET sem/pacing`, `POST sem/metrics-daily/import` | Pacing | SM-18 (metrics-daily CSV/bridge) + SM-22 |
+| `GET/POST reports`, `POST reports/:id/approve\|deliver` | Reports | SM-22 |
+| ledger / usage read surfaces (engagement + tenant MTD spend, threshold events) | Engagements, Pacing | SM-17 |
+
+🔵 = metered provider capability: gated on BOTH the DataForSEO deposit (OQ-2) **and** the
+engagement's own tool-scope toggle. An absent toggle counts as OFF and dispatch refuses naming it —
+the console renders absent and explicitly-disabled identically, because the backend treats them the same.
+
+**Permissions** (already mirrored in `lib/rbac.ts`, authoritative in Cerbos): `search.view` ·
+`search.manage` (draft-only baseline = `search_staff`) · elevated `search.scope.write` ·
+`search.campaign.launch` · `search.report.approve` · `search.ledger.admin` (= `search_manager`).
+
+**Connections gap:** the SEO console's Connections tab still shows only GitHub + Drive. Google
+Search Console / GA4 / Google Ads connection entries need the OAuth work in **SM-25**, which is
+gated on a Google OAuth client — deliberately not stubbed in SM-11.

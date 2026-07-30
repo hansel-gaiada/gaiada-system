@@ -50,12 +50,29 @@ Web Dev
 
 ### Department-specific "craft" group (the differentiator)
 
-| Dept       | Craft group label | Sub-tabs                                   | Status |
-|------------|-------------------|--------------------------------------------|--------|
-| **Web Dev**| **Build**         | PRD Studio · Repositories · Deliverables   | migrate now |
-| **Creatives** | **Studio**     | Image Studio · Asset Library               | migrate now (split today's single studio page into two sub-tabs) |
-| **SEO**    | **Optimize**      | Site Audit · Keywords · Rankings · Content Briefs | design now, build next |
-| **SMM**    | **Publish**       | Calendar · Composer · Inbox · Analytics    | design now, build next |
+**SUPERSEDED (2026-07-23, D-10):** The SEO entry below was **previously sketched as a single
+"Optimize" craft group**. Owner decision D-10 ratified a three-craft-group structure instead
+(§08 of `docs/blueprints/seo-sem-design.md`): SEM cannot honestly fit inside four SEO sub-tabs,
+so Accounts/Optimize/Campaigns are primary-strip divisions. The template structure (`DeptTabs`
+supports N groups) remains the same; only the SEO console topology changed.
+
+| Dept       | Craft group(s)                             | Sub-tabs                                   | Status |
+|------------|--------------------------------------------|--------------------------------------------|--------|
+| **Web Dev**| **Build**                                  | PRD Studio · Repositories · Deliverables   | migrate now |
+| **Creatives** | **Studio**                            | Image Studio · Asset Library               | migrate now (split today's single studio page into two sub-tabs) |
+| **SEO**    | **Accounts** / **Optimize** / **Campaigns** | *See below (ratified by D-10)*              | design now, build next |
+| **SMM**    | **Publish**                                | Calendar · Composer · Inbox · Analytics    | design now, build next |
+
+#### SEO console craft groups (D-10 ratified; §08 source of truth)
+
+| Group      | Sub-tabs under `/departments/seo/`             |
+|------------|------------------------------------------------|
+| **Accounts** | Engagements · Reports |
+| **Optimize** | Site Audit · Keywords · Rankings · Content Briefs · AI Visibility |
+| **Campaigns** | Planner · Ads Studio · Search Terms · Pacing |
+
+All three groups sit in the primary strip (alongside the universal Home · Work · Connections spine).
+Routes are BUILT (SM-11); `DeptTabs` supports N groups structurally.
 
 Result: Web Dev goes from **9 flat tabs → 4 groups**; Creatives gains the Work spine +
 Connections and a cleaner Studio; every future dept follows the same shape.

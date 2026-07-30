@@ -42,7 +42,9 @@ the console redesign as the reusable department template, and the Claude C1 seat
    plus a one-shot backfill from the existing `activities` table (verbs created/updated on
    task/project) so the feed is populated on day one. Redis-gated start in `main.ts`.
 6. **F1 lives in core too:** `src/core/integrations.controller.ts|service.ts` + `src/core/secret-box.ts`.
-   Migration `0031_integration_connections.sql`:
+   Migration `0031_integration_connections.sql` **[RECONCILED 2026-07-30, WD-20: landed as
+   `0033_integration_connections.sql` — a concurrent program (creative assets) claimed `0031`/`0032`
+   first at merge time; this is the actual disk/DB state, not a defect]**:
    - `integration_connections(id, tenant_id, owner_kind CHECK IN ('user','company'), owner_id uuid, provider CHECK IN ('github','google_drive','claude'), external_account text, scopes text[] DEFAULT '{}', status CHECK IN ('unconfigured','pending','linked','error','revoked') DEFAULT 'unconfigured', access_token_enc text, refresh_token_enc text, token_expires_at timestamptz, token_key_version text, meta jsonb DEFAULT '{}', created_by uuid, created_at, updated_at, deleted_at, origin_site, UNIQUE(tenant_id, owner_kind, owner_id, provider))`, FORCE RLS.
    - Rows are **tenant-scoped** (RLS-consistent); a person re-links per company in v1 (flagged below).
 7. **Token crypto (new — platform-nest has NO crypto util today):** app-layer **AES-256-GCM** in
@@ -111,6 +113,13 @@ P1-04 → {P1-05, P1-07 feed} · P1-08 → {P1-09, P1-10} · all → P1-11.
 | P1-09 | Connections UI + Repositories/Deliverables empty states + profile card | medior | Sonnet·medium (seat default) | `lib/connections.ts` (NEW, `ConnectionRow`); Connections tab (my connections + team status grid + admin mapping, RBAC-gated via `lib/rbac.ts`); Repositories/Deliverables teach empty-states w/ "Connect" CTA → Connections; connections card on `people/[userId]`; `demoFixtures.ts` | P1-06, P1-08 | Create/edit/revoke own connection works live; team grid shows per-member × provider status; empty states render pre-connection exactly per P1-02; non-admin cannot see admin mapping; e2e. | inline-verify |
 | P1-10 | C1 Claude seat registry + launcher wiring | medior | Sonnet·medium (seat default) | Seat mapping UI (inside Connections tab admin surface: person → Code seat email + Design login, decision #9); `LauncherRow` renders "opens as <seat>" for Claude Code/Claude/Claude Design when mapped, "Map your seat" CTA when not; optional seed script for the current team | P1-08, P1-09 (P1-06 for LauncherRow) | Person→seat mapping persists as provider='claude' rows and survives reload; launchers show the signed-in person's seat identity; unmapped state teaches; ERP can list who holds seats (team grid shows it). | inline-verify |
 | P1-11 | Phase-1 QA gate | qa | Sonnet·medium (seat default) | Evidence-driven pass: cross-tenant RLS probes on `work_activity`/`work_activity_links`/`integration_connections`; token non-exposure sweep (every integrations response); Cerbos matrix (member/manager/company_admin/exec × own/other/company rows); consumer redelivery idempotency; full console e2e walk (all tabs + rail, DEMO_MODE and live); contract-doc conformance (§4 dept_id, §11, §12) | all | Written evidence per check attached; zero critical findings open; regressions filed as tickets, not fixed ad-hoc. | — (is the gate) |
+
+**P1-11 status — DEV-VERIFIED 2026-07-30 as WD-20.** Full evidence trail:
+`docs/superpowers/plans/2026-07-30-wd20-evidence.md`. One regression filed and left open (not
+fixed, per QA doctrine): `work_activity` has no `group_executive`/exec Cerbos carve-out (unlike
+`integration_connection`, which explicitly grants exec full CRUD) — an exec cannot read the
+work-activity feed for any company. Everything else in the gate is green; see the evidence doc for
+the full per-check verdict table.
 
 **Model discipline check:** 1 Opus tag out of 11 tickets (P1-08 opus·medium); everything else seat
 default per the agent-army-standard. Escalate any ticket to the architect ONLY if it must deviate

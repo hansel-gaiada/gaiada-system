@@ -125,9 +125,22 @@ Platform = product, spine = process, console = cockpit — separate concerns, wi
 - **Two WS11 tails are genuinely unbuilt** (bounded revise loop; prod-gate node wiring in
   `pipeline-delivery.json`) — backend tools exist (`deploy.production` shipped 2026-07-22,
   fail-closed); the n8n JSON edit needs a live stack. Phase-1 ticket WD-05.
-- **The running dev stack is STALE** relative to the repo (predates `0018+` per the
-  `ui-backend-wiring` memory); the gateway runs keyless (echo mode ⇒ `confidence:null` PRDs).
-  Phase-1 ticket WD-01 is the redeploy + real-AI wiring + live re-drive.
+- ~~**The running dev stack is STALE**~~ → **RESOLVED 2026-07-29 (WD-01 DEV-VERIFIED).** Both
+  halves of this claim were already false by the time WD-01 ran: the stack had been refreshed to
+  ledger head (`0048`, 50/50 applied) that morning by a concurrent search/SEO session, and the
+  gateway was **not** keyless — Ollama Cloud was already wired through the `openai` provider
+  (`LLM_CHAIN=openai,ollama,gemini,claude`, `deepseek-v4-flash`), which is the user's standing
+  decision to share one dev brain with the WhatsApp bot. The live re-drive returned
+  **`prdConfidence 0.9`** with a substantively correct PRD, so the `confidence:null` echo-mode
+  failure mode is closed. **WD-01 changed zero code.** Evidence:
+  [`../superpowers/plans/2026-07-29-wd01-evidence.md`](../superpowers/plans/2026-07-29-wd01-evidence.md).
+  Standing caveat: that key is shared + weekly-rate-limited, so PRD quality is dev-grade until a
+  dedicated key lands — it must not become a hard prod dependency.
+- **NEW defect found by WD-01 (owner WD-07, promoted to required):** the dispatcher **drops client
+  context**. `meeting_recordings` carries `client_id`/`project_id` and `pipeline.createRun` accepts
+  `clientId`, but `mtg-dispatcher.json` never passes it → `pipeline_runs.client_id` is NULL →
+  **ingested runs are invisible to the client portal**. §12's WD-07 line ("start already accepts
+  it — verify end-to-end") assumed this path worked; it does not.
 
 ### Non-goals (v1)
 
@@ -218,13 +231,17 @@ Follows the WebDesk zone doctrine; this subsystem's exposure is **client-facing 
   `webdev` third wall onto them would break siblings by construction. Only **dept-private new
   surfaces** (estimates, rate cards, change requests, QA runs, contract snapshots) go behind the
   module wall.
-- **Migration numbering — stated assumption:** the ledger runs through
-  `0040_pm_progress_snapshots.sql` as of 2026-07-24, so this module's block assumes
-  **`0041_module_webdev.sql`**. Per [`migrations/README.md`](../../platform-nest/migrations/README.md)
-  rule 5 the first webdev ticket takes next-unused at merge time, coordinating with SMM-01 and
-  CR-01. **⚠ Flag for the Creative program:** creative-design D-13's `0036+` assumption is
-  consumed (0036–0040 drawn by PM tickets) — CR-01 must rebase; noted here so neither program is
-  surprised.
+- **Migration numbering — ⚠ CORRECTED 2026-07-30 (verified against disk AND the live DB).** The
+  original v1.0 assumption (`0041_module_webdev.sql`, ledger ending at `0040`) is **STALE — `0041`
+  is consumed.** Actual allocation: **`0041`–`0044` → PM** (templates · progress-snapshot status
+  counts · task followers/comment reactions · doc versions); **`0045`–`0048` → search/SEO** (audit
+  ingest · AI drafts · provider simulation · capability provenance). Live ledger head =
+  `0048_search_capability_provenance.sql`, 50/50 applied. **The webdev module migration therefore
+  takes `0049`+**, per [`migrations/README.md`](../../platform-nest/migrations/README.md) rule 5
+  (next-unused at merge time), coordinating with SMM-01 and CR-01. **⚠ Flag for the Creative
+  program:** creative-design D-13's `0036+` assumption is now stale by **thirteen** numbers — CR-01
+  must rebase off `0049+` as well. Never trust a blueprint's stated number: verify the ledger
+  before writing DDL (see the `migration-ledger-state` note).
 - Money: integer **minor units** (`*_minor bigint` + `currency`), matching invoices/rollups
   (`money_minor`) — never floats.
 
@@ -459,6 +476,14 @@ and deploys are fail-closed/gated; the scaffolder can only compose the pinned bl
 3. **NEW — artifact signature lock (D-3):** a stage's artifact becomes immutable once its client
    sign gate is decided (WD-03). Editing before signature is a feature; editing after would forge
    what the client signed — refused with 409 at the controller, not policy.
+   **⚠ AC CORRECTED 2026-07-30 (WD-03 DEV-VERIFIED).** §12's WD-03 wording — lock when "the stage's
+   client sign gate is decided **or the stage is `done`**" — is **wrong as written** and was NOT
+   implemented. Extraction lands *every* stage at `done` immediately (verified on the live "Acme
+   Coffee kickoff" run: all 3 stages `done` while the gate was still pending), so the `or done` arm
+   would make artifact editing unreachable for every ingested run — the exact opposite of D-3's
+   rationale. **Shipped rule: gate-decided only, matched by track** — `delivery`→`prd_sign`/
+   `customer_feedback`, `scope`→`scope_signoff`, `report`→**never locks** (internal-only artifact,
+   never client-signed). Proven live incl. the generic `decide` **façade path** (no bypass).
 4. **NEW — QA gate rule (D-9):** `deploy.staging` requires the latest `webdev_qa_runs` for the
    ref to be `passed`, or an explicit PM override recorded on the gate. `deploy.production`
    additionally keeps its WS4-shaped `pm_approval` (prod) beat — shipped tooling.
@@ -731,7 +756,7 @@ on both, portal as role-gated dashboard, repo creation manual (2026-07-16).
 | D-9 | **QA harness is a repo-side CI composite** (Playwright E2E/visual + axe + Lighthouse budgets + Unlighthouse) reporting via signed webhook into `webdev_qa_runs`; **staging Submission requires green-or-explicit-override** | Locked decision 5 ("full, nothing deferred") operationalized from parts the estate already runs; results must live in Zone A where gates and the console are |
 | D-10 | **Specialist maturation preserves tool contracts:** `design.prototype`/`code.scaffold` keep their names + job-shaped results while internals move to async agent-runner goals with callbacks | The n8n delivery workflow (36 nodes, live-verified) does not change shape; async was the WS11 plan's declared target all along |
 | D-11 | **GitHub webhook receiver lands in core, not the module** (like the connections vault) | Work-detection is every-department infrastructure (integrations plan's F1/F2 doctrine); SEO/SMM consoles consume the same feed |
-| D-12 | **Migration block assumption `0041+`** (ledger through 0040 as of 2026-07-24); first webdev ticket takes next-unused, coordinating with SMM-01/CR-01. **Flagged:** creative D-13's `0036+` is consumed — CR-01 rebases | Ledger truth today; README rule 5 handles the race; saying it out loud prevents three programs colliding on numbers |
+| D-12 | ~~**Migration block assumption `0041+`**~~ → **CORRECTED 2026-07-30: the block is `0049+`.** `0041`–`0044` went to PM and `0045`–`0048` to search/SEO; live head is `0048`. First webdev ticket takes next-unused, coordinating with SMM-01/CR-01 (creative D-13's `0036+` is now stale by 13 — CR-01 rebases off `0049+`) | Ledger truth today; README rule 5 handles the race. **The original assumption going stale within six days is the lesson:** three concurrent department programs each reserved numbers from the same block, so the number must be re-verified against the live ledger at ticket time, never inherited from a doc |
 | D-13 | **Capture-helper packaging deviation stands** (local Node app now; Tauri/tray + signing = Phase-5 hardening) | The shipped shape is contract-identical to the plan's helper; repackaging now is churn with no capability gain; SAC/signing constraints are documented |
 
 ---
