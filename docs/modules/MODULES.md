@@ -37,7 +37,7 @@ version and add a `CHANGELOG.md` entry on every notable module change.
 | ai-agents | `0.4.0` | PROTOTYPED | WS8 | 2026-07 |
 | hermes-gateway | `0.2.0` | PROTOTYPED | WS3 | 2026-07 |
 | capture-helper | `0.2.0` | IN PROGRESS | WS11 | 2026-07 |
-| webdev | `0.8.0` | IN PROGRESS | Web Dev | 2026-07-30 |
+| webdev | `0.8.1` | IN PROGRESS | Web Dev | 2026-07-30 |
 | webdesk | `0.0.0` | PLANNED | Web Dev | 2026-07-23 |
 | search-marketing | `0.2.0` | IN PROGRESS | SEO | 2026-07-28 |
 | social-media | `0.0.0` | PLANNED | Social Media | 2026-07-23 |
@@ -238,7 +238,7 @@ headless. **Known gaps:** dev-only convenience; not in production.
 feeds the meeting→MOM→PRD delivery pipeline. **Known gaps:** pipeline tails in progress; not in production.
 **Future plans:** complete the delivery pipeline (MOM→PRD/report/scope) → prod.
 
-## webdev — Delivery Rail · Cockpit · `0.8.0` · IN PROGRESS
+## webdev — Delivery Rail · Cockpit · `0.8.1` · IN PROGRESS
 
 **Design:** [`../blueprints/webdev-design.md`](../blueprints/webdev-design.md) (§12 has the ticket
 ledger); Phase-3 ticket plan:
