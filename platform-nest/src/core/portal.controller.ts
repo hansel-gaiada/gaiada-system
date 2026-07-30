@@ -15,6 +15,7 @@ import { config } from "../config";
 import { authorize, writeActivity } from "./http";
 import { emitEvent } from "../events/outbox.service";
 import { AuthGuard } from "../auth/guards";
+import { lockPipelineRun } from "./pipeline-lock";
 import type { PoolClient } from "pg";
 
 const CLIENT_DECISIONS = new Set(["signed", "approved", "changes_requested"]);
@@ -125,6 +126,23 @@ export class PortalController {
     await authorize(req.principal, { kind: "portal", tenantId }, "decide");
     const decided = await withTenants([tenantId], async (c) => {
       const clientId = await this.callerClientId(c, req.principal);
+      // WD-29 (DEF-2): this is the CLIENT-side twin of PipelineController.decideGate and it is where
+      // BOTH of DEF-2's triggering decisions actually land in production — `prd_sign` and
+      // `customer_feedback` are client gates, decided here through the portal. Locking only the
+      // internal controller would have left the real-world race fully alive, so this path takes the
+      // SAME per-run advisory lock (same namespace + key) — one shared lock space is what makes a
+      // portal decision and an automation stage-create mutually exclusive on one run.
+      // Addressed by gate id, so read the immutable run key first, then lock, then run the original
+      // ownership-checked UPDATE unchanged (its `status = 'pending'` predicate stays authoritative and
+      // is now evaluated under the lock).
+      const owner = await c.query<{ run_id: string }>(
+        `SELECT g.run_id FROM pipeline_gates g JOIN pipeline_runs r ON g.run_id = r.id
+         WHERE g.id = $1 AND r.client_id = $2 AND g.actor_side = 'client' AND g.deleted_at IS NULL
+           AND r.deleted_at IS NULL`,
+        [id, clientId],
+      );
+      if (!owner.rows[0]) return null;
+      await lockPipelineRun(c, owner.rows[0].run_id);
       // The gate must be a CLIENT-side gate on a run this client owns, and still pending.
       const res = await c.query<{ run_id: string; kind: string }>(
         `UPDATE pipeline_gates g SET status = 'decided', decision = $2, note = COALESCE($3, note),
@@ -156,10 +174,14 @@ export class PortalController {
     await authorize(req.principal, { kind: "portal", tenantId }, "sign");
     const result = await withTenants([tenantId], async (c) => {
       const clientId = await this.callerClientId(c, req.principal);
+      // WD-29 (DEF-2): the client-side scope sign-off — the second of the two events whose near-
+      // simultaneous arrival with `prd_sign` produced the duplicate design stages. Same per-run lock
+      // as every other transition, taken before the party set is read.
+      await lockPipelineRun(c, runId);
       const run = await c.query(`SELECT 1 FROM pipeline_runs WHERE id = $1 AND client_id = $2 AND deleted_at IS NULL`, [runId, clientId]);
       if (!run.rows[0]) throw new NotFoundException("run not found");
       // The client always signs the 'client' party. ON CONFLICT keeps it idempotent.
-      await c.query(
+      const ins = await c.query(
         `INSERT INTO scope_signoffs (id, tenant_id, run_id, gate_id, party, signer, signer_name, signature_ref, origin_site)
          VALUES ($1, $2, $3, $4, 'client', $5, $6, $7, $8) ON CONFLICT (run_id, party) DO NOTHING`,
         [newId(), tenantId, runId, body?.gateId ?? null, req.principal.userId, body?.signerName ?? null, body?.signatureRef ?? null, config.originSite],
@@ -167,7 +189,10 @@ export class PortalController {
       const parties = await c.query<{ party: string }>(`SELECT party FROM scope_signoffs WHERE run_id = $1`, [runId]);
       const have = new Set(parties.rows.map((r) => r.party));
       const complete = REQUIRED_SCOPE_PARTIES.every((p) => have.has(p));
-      if (complete) {
+      // WD-29: emit on the TRANSITION to complete only — a client re-signing an already-complete run
+      // must not announce `scope.signed` again and start another delivery execution. Mirrors the same
+      // change in PipelineController.recordScopeSignoff; see that comment for the full rationale.
+      if (complete && ins.rowCount === 1) {
         if (body?.gateId) {
           await c.query(
             `UPDATE pipeline_gates SET status = 'decided', decision = 'signed', decided_by = $2, decided_at = now(), updated_at = now()

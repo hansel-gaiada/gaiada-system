@@ -10,11 +10,13 @@
 // (prd_sign, customer_feedback, scope) arrive through the portal BFF in WS11 build item 4.
 import { BadRequestException, Body, ConflictException, Controller, Get, HttpCode, NotFoundException, Param, Patch, Post, Query, Req, UseGuards } from "@nestjs/common";
 import type { FastifyRequest } from "fastify";
+import type { PoolClient } from "pg";
 import { newId, withTenants } from "../db";
 import { config } from "../config";
 import { authorize, writeActivity } from "./http";
 import { emitEvent } from "../events/outbox.service";
 import { AuthGuard } from "../auth/guards";
+import { lockPipelineRun } from "./pipeline-lock";
 
 const TRACKS = new Set(["delivery", "report", "scope"]);
 const RUN_STATUS = new Set(["extracting", "delivery_active", "report_done", "scope_pending", "complete", "blocked"]);
@@ -35,6 +37,77 @@ const CLIENT_SIGN_GATE_KIND_BY_TRACK: Partial<Record<string, string[]>> = {
   delivery: ["prd_sign", "customer_feedback"],
   scope: ["scope_signoff"],
 };
+
+// WD-29 (DEF-2) — stage IDENTITY classes. Read pipeline-lock.ts first for the defect and the lock
+// scope; this is the other half of the fix (the precondition re-check the lock makes atomic).
+//
+// SINGLE_SHOT: names the state machine creates EXACTLY ONCE per run. `prd_extract`/`report_extract`/
+// `scope_extract` are written once by `createRun` from the extraction flow; `claude_code`, `staging`
+// and `production` are each guarded in `Load + decide` by a bare existence test (`!code`, `!staging`,
+// `!prodStage`). Every one of those tests is a read-then-write window with the same shape as the
+// observed `!design` race, so all six are guarded identically here. A second create is a stale-
+// snapshot retrigger, never an intent — it resolves to the existing row.
+const SINGLE_SHOT_STAGE_NAMES = new Set(["prd_extract", "report_extract", "scope_extract", "claude_code", "staging", "production"]);
+
+// REVISABLE: `claude_design` is the ONE name that is legitimately repeated — WD-05's bounded revise
+// loop creates a NEW design row per revision (WD-08 §1.6 proves a run correctly holding rev 1 + rev
+// 2). So "more than one design exists" is NOT the defect signal and must never be treated as one; a
+// blanket uniqueness rule on this name would break the revise loop, which is precisely why the
+// partial unique index in migration 0052 deliberately does NOT cover it.
+//
+// What separates a legitimate revision from a raced duplicate is CAUSAL, not structural: a revision
+// is only justified by a fresh `changes_requested` on the CURRENT head design. That is exactly the
+// precondition `Load + decide` itself evaluates —
+//   `cfd = gof('customer_feedback', design.id); ... cfd.decision === 'changes_requested' -> revise_design`
+// — so this re-asserts the workflow's own rule server-side, where it can be evaluated under the run
+// lock instead of against a snapshot read seconds earlier in n8n:
+//   - no design yet                                   -> allow (the initial `release_design`)
+//   - head design HAS a decided changes_requested cfd -> allow (a genuine revision; that gate is
+//     attached to the head design, so the next revision needs its OWN new changes_requested)
+//   - anything else                                   -> SUPPRESS: the workflow would not have
+//     chosen to create a design in this state, so this caller is acting on a consumed snapshot.
+// Note the loser is resolved to the CURRENT HEAD design, not to its own would-be row: `Load + decide`
+// always operates on `designs[designs.length - 1]`, so the head is the row the pipeline continues
+// with, and pointing the loser at it keeps its follow-up gate-open on the live lineage (where
+// `openGate`'s own duplicate-pending guard then absorbs it).
+const REVISABLE_STAGE_NAME = "claude_design";
+
+/** WD-29: decide whether a stage create is a genuine transition or a raced/stale-snapshot repeat.
+ *  MUST be called with the run's advisory lock already held (see lockPipelineRun) — evaluated
+ *  without it, both racers pass and the duplicate survives.
+ *  Returns the existing row's id when the create should be suppressed, else null. */
+async function existingStageForRepeatedCreate(
+  c: PoolClient,
+  runId: string,
+  track: string,
+  name: string,
+): Promise<string | null> {
+  if (SINGLE_SHOT_STAGE_NAMES.has(name)) {
+    const existing = await c.query<{ id: string }>(
+      `SELECT id FROM pipeline_stages WHERE run_id = $1 AND track = $2 AND name = $3
+       ORDER BY created_at ASC, id ASC LIMIT 1`,
+      [runId, track, name],
+    );
+    return existing.rows[0]?.id ?? null;
+  }
+  if (name === REVISABLE_STAGE_NAME) {
+    const head = await c.query<{ id: string }>(
+      `SELECT id FROM pipeline_stages WHERE run_id = $1 AND track = $2 AND name = $3
+       ORDER BY created_at DESC, id DESC LIMIT 1`,
+      [runId, track, name],
+    );
+    const headId = head.rows[0]?.id;
+    if (!headId) return null; // no design yet -> the initial release is always allowed
+    const revisionJustified = await c.query(
+      `SELECT 1 FROM pipeline_gates
+       WHERE run_id = $1 AND stage_id = $2 AND kind = 'customer_feedback'
+         AND status = 'decided' AND decision = 'changes_requested' AND deleted_at IS NULL LIMIT 1`,
+      [runId, headId],
+    );
+    return revisionJustified.rows[0] ? null : headId;
+  }
+  return null; // an unrecognised (human-authored) stage name is never auto-deduped
+}
 
 @Controller("api")
 @UseGuards(AuthGuard)
@@ -71,6 +144,13 @@ export class PipelineController {
         [id, tenantId, sourceMeetingId ?? null, title ?? null, momRef ?? null, status, clientId ?? null, req.principal.userId, config.originSite],
       );
       for (const s of stages) {
+        // WD-29: the same identity guard as createStage. No lock is needed here (the run id was just
+        // minted, so no concurrent transaction can address this run yet), but the guard still matters:
+        // it sees rows inserted by EARLIER iterations of this very loop, so a caller that passes the
+        // same single-shot stage twice in one payload resolves to one row instead of hitting migration
+        // 0052's unique index as a 500. This is the only other INSERT into pipeline_stages.
+        const existingId = await existingStageForRepeatedCreate(c, id, s.track!, s.name!);
+        if (existingId) continue;
         await c.query(
           `INSERT INTO pipeline_stages (id, tenant_id, run_id, track, name, status, artifact_ref, confidence, origin_site)
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
@@ -96,6 +176,11 @@ export class PipelineController {
     if (body?.status !== undefined && !RUN_STATUS.has(body.status)) throw new BadRequestException("invalid run status");
     await authorize(req.principal, { kind: "pipeline_run", id: runId, tenantId }, "update");
     const updated = await withTenants([tenantId], async (c) => {
+      // WD-29: WD-05's escalation parks the run 'blocked' HERE, and `Load + decide` short-circuits on
+      // `run.status === 'blocked'`. That makes this write part of the same state machine, so it takes
+      // the same run lock: a park must not interleave with a concurrent decider that already read the
+      // run as un-parked and is about to create another design behind it.
+      await lockPipelineRun(c, runId);
       const res = await c.query<{ status: string }>(
         `UPDATE pipeline_runs SET status = COALESCE($2, status), updated_at = now()
          WHERE id = $1 AND deleted_at IS NULL RETURNING status`,
@@ -167,16 +252,26 @@ export class PipelineController {
     if (!STAGE_STATUS.has(status)) throw new BadRequestException("invalid stage status");
     await authorize(req.principal, { kind: "pipeline_stage", tenantId }, "create");
     const id = newId();
-    await withTenants([tenantId], async (c) => {
+    // WD-29 (DEF-2): the run lock is taken BEFORE the existence/precondition read, so this handler's
+    // read-then-insert is atomic against a concurrent decider acting on the same run. Without the
+    // lock the two racers interleave between the SELECT and the INSERT and both insert.
+    const created = await withTenants([tenantId], async (c) => {
+      await lockPipelineRun(c, runId);
       const run = await c.query(`SELECT 1 FROM pipeline_runs WHERE id = $1 AND deleted_at IS NULL`, [runId]);
       if (!run.rows[0]) throw new NotFoundException("run not found");
+      const existingId = await existingStageForRepeatedCreate(c, runId, track, name);
+      if (existingId) return { id: existingId, deduped: true as const };
       await c.query(
         `INSERT INTO pipeline_stages (id, tenant_id, run_id, track, name, status, artifact_ref, confidence, origin_site)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
         [id, tenantId, runId, track, name, status, artifactRef ?? null, confidence ?? null, config.originSite],
       );
+      return { id, deduped: false as const };
     });
-    return { id };
+    // `deduped` mirrors createRun's existing shape: the caller (an n8n node) gets a usable stage id
+    // either way and stays on the live lineage, so a suppressed duplicate is a no-op, not an error
+    // the workflow would have to handle. Deliberately still 201 — same as createRun's dedupe branch.
+    return created.deduped ? { id: created.id, deduped: true } : { id: created.id };
   }
 
   // WD-03 (D-3): this PATCH now carries two kinds of caller — automation advancing stage status
@@ -200,6 +295,14 @@ export class PipelineController {
     await authorize(req.principal, { kind: "pipeline_stage", id, tenantId }, "update");
     const editingArtifact = body?.artifactRef !== undefined;
     const result = await withTenants([tenantId], async (c) => {
+      // WD-29: this handler is addressed by STAGE id, so the run key has to be read before the lock
+      // can be taken. `pipeline_stages.run_id` is immutable, so that one read is safe stale; the
+      // WD-03 signature-lock check below is then (re-)evaluated under the lock, which is what makes
+      // "is this artifact already signed?" a decision that a concurrent gate-decide cannot slip past.
+      const owner = await c.query<{ run_id: string }>(`SELECT run_id FROM pipeline_stages WHERE id = $1`, [id]);
+      if (!owner.rows[0]) return { outcome: "not_found" as const };
+      await lockPipelineRun(c, owner.rows[0].run_id);
+
       const stage = await c.query<{ run_id: string; track: string }>(
         `SELECT run_id, track FROM pipeline_stages WHERE id = $1`,
         [id],
@@ -261,16 +364,38 @@ export class PipelineController {
     if (!actorSide || !ACTOR_SIDES.has(actorSide)) throw new BadRequestException("actorSide must be internal|client");
     await authorize(req.principal, { kind: "pipeline_gate", tenantId }, "create");
     const id = newId();
-    await withTenants([tenantId], async (c) => {
+    const opened = await withTenants([tenantId], async (c) => {
+      await lockPipelineRun(c, runId);
       const run = await c.query(`SELECT 1 FROM pipeline_runs WHERE id = $1 AND deleted_at IS NULL`, [runId]);
       if (!run.rows[0]) throw new NotFoundException("run not found");
+      // WD-29 (DEF-2): gate-opens race exactly like stage-creates — every `open_gate` branch in
+      // `Load + decide` is guarded by a snapshot existence test (`!has('customer_feedback', design.id)`),
+      // so two retriggers open the same beat twice. A duplicate PENDING gate is worse than cosmetic:
+      // `gof()` resolves a beat by taking the LAST gate of that kind for the stage, so once a human
+      // decides the older twin the newer one stays pending and the run STALLS at that beat forever.
+      // Identity is (run, stage, kind, actor_side) among PENDING rows only — `IS NOT DISTINCT FROM`
+      // because stage_id is legitimately NULL for run-level gates (prd_sign, scope_signoff), and NULL
+      // = NULL must count as the same gate there. A DECIDED gate never suppresses a new one: the
+      // revise loop reopens `pm_review` on each new revision, which is a different stage_id anyway.
+      const dup = await c.query<{ id: string }>(
+        `SELECT id FROM pipeline_gates
+         WHERE run_id = $1 AND stage_id IS NOT DISTINCT FROM $2 AND kind = $3 AND actor_side = $4
+           AND status = 'pending' AND deleted_at IS NULL
+         ORDER BY created_at ASC, id ASC LIMIT 1`,
+        [runId, stageId ?? null, kind, actorSide],
+      );
+      if (dup.rows[0]) return { id: dup.rows[0].id, deduped: true as const };
       await c.query(
         `INSERT INTO pipeline_gates (id, tenant_id, run_id, stage_id, kind, actor_side, note, opened_by, origin_site)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
         [id, tenantId, runId, stageId ?? null, kind, actorSide, note ?? null, req.principal.userId, config.originSite],
       );
       await emitEvent(c, tenantId, "pipeline_gate", id, "pipeline.gate.opened", { runId, kind, actorSide });
+      return { id, deduped: false as const };
     });
+    // No activity row (and no event, above) for a suppressed duplicate — nothing was opened, and a
+    // phantom "opened" would misreport the audit trail as if a second beat had really been created.
+    if (opened.deduped) return { id: opened.id, status: "pending", deduped: true };
     await writeActivity(tenantId, req.principal.userId, "opened", "pipeline_gate", id, { runId, kind, actorSide });
     return { id, status: "pending" };
   }
@@ -312,6 +437,16 @@ export class PipelineController {
     if (!decision || !DECISIONS.has(decision)) throw new BadRequestException("decision must be approved|changes_requested|rejected|signed");
     await authorize(req.principal, { kind: "pipeline_gate", id, tenantId }, "decide");
     const decided = await withTenants([tenantId], async (c) => {
+      // WD-29: addressed by GATE id, so read the (immutable) run key first, then lock, then run the
+      // original UPDATE unchanged. The UPDATE's own `status = 'pending'` predicate stays the
+      // authoritative guard — re-evaluated under the lock now, so two concurrent deciders on one gate
+      // resolve to exactly one winner and the loser still gets the existing "already decided" 404.
+      const owner = await c.query<{ run_id: string }>(
+        `SELECT run_id FROM pipeline_gates WHERE id = $1 AND deleted_at IS NULL`,
+        [id],
+      );
+      if (!owner.rows[0]) return null;
+      await lockPipelineRun(c, owner.rows[0].run_id);
       const res = await c.query<{ run_id: string; kind: string; actor_side: string }>(
         `UPDATE pipeline_gates SET status = 'decided', decision = $2, note = COALESCE($3, note),
            decided_by = $4, decided_at = now(), updated_at = now()
@@ -344,10 +479,16 @@ export class PipelineController {
     if (!party) throw new BadRequestException("party required");
     await authorize(req.principal, { kind: "scope_signoff", tenantId }, "create");
     const result = await withTenants([tenantId], async (c) => {
+      // WD-29: `scope.signed` is one of DEF-2's two triggering events, and this handler decides
+      // whether to emit it by COUNTING the parties it just read — a textbook read-then-write window.
+      // Under the run lock, two parties signing simultaneously can no longer both observe
+      // "complete" and emit `scope.signed` twice (which would start two delivery executions from a
+      // single sign-off, the exact fan-out that produced the duplicate design stages).
+      await lockPipelineRun(c, runId);
       const run = await c.query(`SELECT 1 FROM pipeline_runs WHERE id = $1 AND deleted_at IS NULL`, [runId]);
       if (!run.rows[0]) throw new NotFoundException("run not found");
       // One signature per party (unique (run_id, party)); a re-file is a no-op, not a 500.
-      await c.query(
+      const ins = await c.query(
         `INSERT INTO scope_signoffs (id, tenant_id, run_id, gate_id, party, signer, signer_name, signature_ref, origin_site)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
          ON CONFLICT (run_id, party) DO NOTHING`,
@@ -356,7 +497,14 @@ export class PipelineController {
       const parties = await c.query<{ party: string }>(`SELECT party FROM scope_signoffs WHERE run_id = $1`, [runId]);
       const have = new Set(parties.rows.map((r) => r.party));
       const complete = REQUIRED_SCOPE_PARTIES.every((p) => have.has(p));
-      if (complete) {
+      // WD-29: emit on the TRANSITION to complete, not on every call made while complete. The
+      // ON CONFLICT above makes a re-filed signature a row-level no-op, but the old code still
+      // recomputed `complete` and re-emitted `scope.signed` — so re-signing an already-complete run
+      // started a fresh delivery execution from nothing, feeding DEF-2's fan-out. `rowCount === 0`
+      // means this party had already signed, so nothing transitioned and there is nothing to announce.
+      // The response still reports the true current `complete`/`parties`, unchanged.
+      const justCompleted = complete && ins.rowCount === 1;
+      if (justCompleted) {
         // Both parties signed: close the linked scope gate (if any) and announce it for the delivery
         // track's hard gate (which waits on prd_sign AND scope.signed).
         if (gateId) {

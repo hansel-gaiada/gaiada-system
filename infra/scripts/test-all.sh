@@ -13,6 +13,8 @@ for proj in wa-chat-bot mcp-hub platform-nest ai-agents; do
   npm run typecheck
   # A1: withTenants() tenant-scoping lint — platform-nest only (the choke-point it guards).
   [ "$proj" = "platform-nest" ] && npm run lint:withtenants
+  # 2026-07-30 migration-backfill RLS lint — platform-nest only (it owns migrations/).
+  [ "$proj" = "platform-nest" ] && npm run lint:migration-rls
   npm test
 done
 

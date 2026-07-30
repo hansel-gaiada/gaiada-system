@@ -287,6 +287,6 @@ function main() {
   );
 }
 
-if (import.meta.url === `file://${process.argv[1].replace(/\\/g, "/")}` || import.meta.url === `file:///${process.argv[1].replace(/\\/g, "/")}`) {
-  main();
-}
+const invokedDirectly =
+  typeof process.argv[1] === "string" && import.meta.url.endsWith(process.argv[1].replace(/\\/g, "/").split("/").pop());
+if (invokedDirectly) main();
