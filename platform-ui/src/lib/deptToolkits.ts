@@ -164,16 +164,77 @@ const CREATIVES: DeptToolkit = {
   ],
 };
 
-// ── SEO & SMM — DESIGNED, NOT YET BUILT (Phase B) ────────────────────────────
-// The template intentionally leaves room for these. They reuse the Home / Work /
-// Connections spine unchanged; only their craft group is new. Do NOT add them to
-// TOOLKITS until their craft-group pages exist (a toolkit pointing at missing
-// routes would 404). Planned craft groups:
-//   SEO  → "Optimize": Site Audit · Keywords · Rankings · Content Briefs
-//   SMM  → "Publish":  Calendar · Composer · Inbox · Analytics
+// ── SEO — search marketing (SEO · SEM · GEO) ─────────────────────────────────
+// SM-11. Three craft groups rather than one, ratified by the owner as D-10
+// (seo-sem-design.md §08): SEM genuinely cannot fit inside four SEO sub-tabs, so
+// Accounts / Optimize / Campaigns each get their own primary-strip division. The
+// universal Home · Work · Connections spine is inherited unchanged.
+//
+// Tabs whose backend has not landed render the BackendPending banner rather than
+// an empty table — see lib/searchMarketing.ts for exactly which endpoints exist
+// today (properties, engagements + scope + cost-projection + ledger, kpi-targets)
+// and which tickets own the rest. "Cost Ledger" (SM-17) IS built — the first UI
+// onto the money ledger; see components/search/CostLedgerPanel.tsx for the
+// binding "cost to serve (standard rates)" language.
+const SEO: DeptToolkit = {
+  slug: "seo",
+  label: "SEO",
+  mission: "Search marketing — organic (SEO), AI answers (GEO), and paid search (SEM).",
+  groups: [
+    HOME_GROUP,
+    WORK_GROUP,
+    {
+      key: "accounts",
+      label: "Accounts",
+      icon: "wallet",
+      tabs: [
+        { key: "engagements", label: "Engagements", path: "engagements", icon: "wallet", blurb: "Client engagements, their tool scope, and provider budgets." },
+        { key: "ledger", label: "Cost Ledger", path: "ledger", icon: "wallet", blurb: "Cost-to-serve at standard rates, per provider call." },
+        { key: "reports", label: "Reports", path: "reports", icon: "box", blurb: "Monthly client reports — draft, approve, deliver." },
+      ],
+    },
+    {
+      key: "optimize",
+      label: "Optimize",
+      icon: "pulse",
+      tabs: [
+        { key: "audit", label: "Site Audit", path: "audit", icon: "pulse", blurb: "Crawl a property and triage technical findings." },
+        { key: "keywords", label: "Keywords", path: "keywords", icon: "search", blurb: "Import, cluster and tag keywords by intent." },
+        { key: "rankings", label: "Rankings", path: "rankings", icon: "pulse", blurb: "Tracked positions over time, drops, and SERP features." },
+        { key: "briefs", label: "Content Briefs", path: "briefs", icon: "box", blurb: "AI-drafted briefs grounded in your own crawl + keyword data." },
+        { key: "ai-visibility", label: "AI Visibility", path: "ai-visibility", icon: "agents", blurb: "How often AI answers cite this brand (GEO/AEO)." },
+      ],
+    },
+    {
+      key: "campaigns",
+      label: "Campaigns",
+      icon: "finance",
+      tabs: [
+        { key: "planner", label: "Planner", path: "planner", icon: "finance", blurb: "Turn keyword clusters into a campaign plan." },
+        { key: "ads", label: "Ads Studio", path: "ads", icon: "box", blurb: "Draft responsive search ads and review change proposals." },
+        { key: "search-terms", label: "Search Terms", path: "search-terms", icon: "search", blurb: "Search-term sweeps and negative-keyword proposals." },
+        { key: "pacing", label: "Pacing", path: "pacing", icon: "wallet", blurb: "Budget pacing against month-to-date ad spend." },
+      ],
+    },
+    CONNECTIONS_GROUP,
+  ],
+  launchers: [
+    { key: "gsc", label: "Search Console", desc: "Impressions, clicks, and indexing.", url: "https://search.google.com/search-console", glyph: "◎" },
+    { key: "ga4", label: "Analytics (GA4)", desc: "Traffic and conversions.", url: "https://analytics.google.com", glyph: "▨" },
+    { key: "google-ads", label: "Google Ads", desc: "Campaigns, budgets, and search terms.", url: "https://ads.google.com", glyph: "◈" },
+    { key: "looker", label: "Looker Studio", desc: "Client-facing dashboards.", url: "https://lookerstudio.google.com", glyph: "▤" },
+    { key: "claude", label: "Claude", desc: "Draft copy, briefs, and narratives.", url: "https://claude.ai/new", glyph: "✳" },
+  ],
+};
+
+// ── SMM — DESIGNED, NOT YET BUILT (Phase B) ──────────────────────────────────
+// Reuses the Home / Work / Connections spine unchanged; only its craft group is
+// new. Do NOT add it to TOOLKITS until its craft-group pages exist (a toolkit
+// pointing at missing routes would 404). Planned craft group:
+//   SMM → "Publish": Calendar · Composer · Inbox · Analytics
 // See docs/superpowers/plans/2026-07-23-dept-console-ia-redesign.md §2 & §6.
 
-const TOOLKITS: DeptToolkit[] = [WEB_DEV, CREATIVES];
+const TOOLKITS: DeptToolkit[] = [WEB_DEV, CREATIVES, SEO];
 
 // The generic toolkit for departments without a bespoke build-out yet. Renders
 // the exact same Home shell as a bespoke department's Home group — just without

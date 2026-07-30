@@ -31,19 +31,49 @@ describe("toolkitFor", () => {
     expect(deptTabs(tk).some((t) => t.path === "tools")).toBe(false);
     expect(tk.launchers.length).toBeGreaterThan(0);
   });
+  // SMM is the fallback case now that SEO is built (SM-11). Kept pointed at a
+  // genuinely unbuilt department rather than deleted — the generic shell is what
+  // every department gets before its craft group exists, so it needs a guard.
   it("falls back to a generic Home-only toolkit for unbuilt departments", () => {
-    const tk = toolkitFor("SEO");
-    expect(tk.slug).toBe("seo");
+    const tk = toolkitFor("SMM");
+    expect(tk.slug).toBe("smm");
     expect(tk.groups.map((g) => g.key)).toEqual(["home"]);
     expect(deptTabs(tk).map((t) => t.key)).toEqual(["home"]);
     expect(tk.launchers).toEqual([]);
+  });
+
+  // SEO (SM-11) is the first three-craft-group console: D-10 ratified Accounts /
+  // Optimize / Campaigns as separate primary-strip divisions because SEM cannot
+  // honestly fit inside four SEO sub-tabs.
+  it("gives SEO the Home · Work · Accounts · Optimize · Campaigns · Connections spine", () => {
+    const tk = toolkitFor("SEO");
+    expect(tk.slug).toBe("seo");
+    expect(tk.groups.map((g) => g.key)).toEqual([
+      "home", "work", "accounts", "optimize", "campaigns", "connections",
+    ]);
+    expect(tk.launchers.length).toBeGreaterThan(0);
+  });
+
+  // Every tab a toolkit advertises must have a real route, or the console links
+  // people at a 404. These are the paths SM-11 created.
+  it("advertises only SEO tab paths that exist as routes", () => {
+    const paths = deptTabs(toolkitFor("SEO")).map((t) => t.path);
+    expect(paths).toEqual([
+      "", // Home
+      "projects", "board", "timeline", "charts", "activity", // Work (generic)
+      "engagements", "ledger", "reports",
+      "audit", "keywords", "rankings", "briefs", "ai-visibility",
+      "planner", "ads", "search-terms", "pacing",
+      "connections",
+    ]);
   });
 });
 
 describe("hasBespokeToolkit", () => {
   it("is true only for departments with a built-out toolkit", () => {
     expect(hasBespokeToolkit("Web Dev")).toBe(true);
-    expect(hasBespokeToolkit("SEO")).toBe(false);
+    expect(hasBespokeToolkit("SEO")).toBe(true);
+    expect(hasBespokeToolkit("SMM")).toBe(false);
   });
 });
 

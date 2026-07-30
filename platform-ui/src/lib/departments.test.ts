@@ -22,7 +22,7 @@ const task = (over: Partial<PmTask>): PmTask => ({
   id: "t", projectId: "p", projectName: "P", title: "T", description: "", status: "todo",
   priority: "normal", progress: 0, assignee: null, subtasks: [], milestoneId: null,
   startDate: null, dueDate: null, estimateMinutes: null, loggedMinutes: 0, dependsOn: [], tags: [], customFields: {}, updatedAt: null,
-  recurrence: null,
+  recurrence: null, projectShortCode: null, seq: null, displayCode: null,
   ...over,
 });
 
