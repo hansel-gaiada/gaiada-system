@@ -2,7 +2,7 @@
   "id": "ws11fanout000001",
   "name": "WS11 fan-out (on pipeline.run.created -> scope sign-off + report route)",
   "meta": {
-    "description": "WS11 build items 5 + 10. The event->n8n bridge POSTs pipeline.run.created to /webhook/ev/pipeline.run.created (a webhook path is unique in n8n, so the scope + report tracks that both react to run.created share ONE workflow; least privilege is preserved per call via the OBO id on each node). SCOPE track (as wf:scope): open the client-side scope_signoff gate + notify the PM to counter-sign. REPORT track (as wf:report): route the extracted report to the internal process — a STUB (in-app notify) until that process is designed (WS11 plan §10). The DELIVERY track does NOT trigger here — it waits on prd_sign + scope.signed (see pipeline-delivery.json). Env: N8N_BRIDGE_SECRET, HUB_SERVICE_TOKEN, NOTIFY_USER_ID. Bridge must forward pipeline.run.created over the pipeline_run stream."
+    "description": "WS11 build items 5 + 10. The event->n8n bridge POSTs pipeline.run.created to /webhook/ev/pipeline.run.created (a webhook path is unique in n8n, so the scope + report tracks that both react to run.created share ONE workflow; least privilege is preserved per call via the OBO id on each node). SCOPE track (as wf:scope): open the client-side scope_signoff gate + notify the PM to counter-sign. REPORT track (as wf:report, WD-06 report sink v1 / D-4): pipeline.getRun to read the report_extract stage's artifact, pm.createDoc under WEBDEV_REPORT_PROJECT_ID with that content, then pm.createTask ('Review meeting report') assigned to NOTIFY_USER_ID — the assignment itself raises the platform's own bell notification (no separate notify call). pm.createDoc/pm.createTask are allowlisted to wf:report ONLY (automation-policy.ts) — no other workflow identity may call them. The DELIVERY track does NOT trigger here — it waits on prd_sign + scope.signed (see pipeline-delivery.json). Env: N8N_BRIDGE_SECRET, HUB_SERVICE_TOKEN, NOTIFY_USER_ID, WEBDEV_REPORT_PROJECT_ID. Bridge must forward pipeline.run.created over the pipeline_run stream."
   },
   "nodes": [
     {
@@ -228,7 +228,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", id: 3, method: \"tools/call\", params: { name: \"notify\", arguments: { tenantId: $json.tenantId, recipientId: $env.NOTIFY_USER_ID, type: \"report_ready_internal\", payload: { runId: $json.runId, note: \"STUB sink — wire the real internal process here\" } } } }) }}",
+        "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", id: 3, method: \"tools/call\", params: { name: \"pipeline.getRun\", arguments: { tenantId: $json.tenantId, runId: $json.runId } } }) }}",
         "options": {
           "response": {
             "response": {
@@ -237,12 +237,164 @@
           }
         }
       },
-      "name": "REPORT: route to internal (STUB, wf:report)",
+      "name": "REPORT: pipeline.getRun (wf:report)",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
         1540,
         60
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json.data ?? $input.first().json.body ?? '';\nconst line = String(raw).split('\\n').find((l) => l.startsWith('data:')) ?? '';\nconst rpc = JSON.parse(line.slice(5).trim());\nif (rpc.result?.isError) throw new Error(rpc.result.content?.[0]?.text ?? 'pipeline.getRun failed');\nconst run = JSON.parse(rpc.result?.content?.[0]?.text ?? '{}');\nconst v = $('After scope').first().json;\nconst reportStage = (run.stages ?? []).find((s) => s.track === 'report');\nif (!reportStage || !reportStage.artifact_ref) {\n  // No report track on this run (e.g. a manual/partial createRun) — nothing to sink. Not an error.\n  return [{ json: { ...v, hasReport: false } }];\n}\nreturn [{ json: { ...v, hasReport: true, reportContent: reportStage.artifact_ref, title: run.title || 'Meeting report' } }];"
+      },
+      "name": "Parse run + report stage",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1760,
+        60
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "has-report",
+              "leftValue": "={{ $json.hasReport }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Has report track?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1980,
+        60
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://mcp-hub:3003/mcp",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.HUB_SERVICE_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json, text/event-stream"
+            },
+            {
+              "name": "x-obo-provider",
+              "value": "n8n"
+            },
+            {
+              "name": "x-obo-external-id",
+              "value": "wf:report"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", id: 4, method: \"tools/call\", params: { name: \"pm.createDoc\", arguments: { tenantId: $json.tenantId, projectId: $env.WEBDEV_REPORT_PROJECT_ID, title: `Meeting report: ${$json.title}`, body: $json.reportContent } } }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "name": "REPORT: pm.createDoc (wf:report, D-4)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2200,
+        -20
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json.data ?? $input.first().json.body ?? '';\nconst line = String(raw).split('\\n').find((l) => l.startsWith('data:')) ?? '';\nconst rpc = JSON.parse(line.slice(5).trim());\nif (rpc.result?.isError) throw new Error(rpc.result.content?.[0]?.text ?? 'pm.createDoc failed');\nconst doc = JSON.parse(rpc.result?.content?.[0]?.text ?? '{}');\nconst v = $('Parse run + report stage').first().json;\nreturn [{ json: { ...v, docId: doc.id } }];"
+      },
+      "name": "Parse doc",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2420,
+        -20
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://mcp-hub:3003/mcp",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.HUB_SERVICE_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json, text/event-stream"
+            },
+            {
+              "name": "x-obo-provider",
+              "value": "n8n"
+            },
+            {
+              "name": "x-obo-external-id",
+              "value": "wf:report"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", id: 5, method: \"tools/call\", params: { name: \"pm.createTask\", arguments: { tenantId: $json.tenantId, projectId: $env.WEBDEV_REPORT_PROJECT_ID, title: `Review meeting report: ${$json.title}`, description: `Auto-filed by the meeting pipeline (run ${$json.runId}). Report doc: ${$json.docId}.`, assigneeUserId: $env.NOTIFY_USER_ID } } }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "name": "REPORT: pm.createTask (wf:report, D-4, bell via assignment)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2640,
+        -20
       ]
     },
     {
@@ -254,7 +406,7 @@
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
       "position": [
-        1760,
+        2860,
         60
       ]
     }
@@ -337,14 +489,76 @@
       "main": [
         [
           {
-            "node": "REPORT: route to internal (STUB, wf:report)",
+            "node": "REPORT: pipeline.getRun (wf:report)",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "REPORT: route to internal (STUB, wf:report)": {
+    "REPORT: pipeline.getRun (wf:report)": {
+      "main": [
+        [
+          {
+            "node": "Parse run + report stage",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse run + report stage": {
+      "main": [
+        [
+          {
+            "node": "Has report track?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has report track?": {
+      "main": [
+        [
+          {
+            "node": "REPORT: pm.createDoc (wf:report, D-4)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond (done)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "REPORT: pm.createDoc (wf:report, D-4)": {
+      "main": [
+        [
+          {
+            "node": "Parse doc",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse doc": {
+      "main": [
+        [
+          {
+            "node": "REPORT: pm.createTask (wf:report, D-4, bell via assignment)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "REPORT: pm.createTask (wf:report, D-4, bell via assignment)": {
       "main": [
         [
           {

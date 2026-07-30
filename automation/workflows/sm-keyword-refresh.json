@@ -1,0 +1,75 @@
+{
+  "id": "smkeywordref0001",
+  "name": "sm-keyword-refresh (CRON, SM-15 batch 1) -- BLOCKED, see meta",
+  "meta": {
+    "description": "AUTHORED BUT NOT RUNNABLE TODAY -- do not activate. Intended to mirror sm-rank-pull.json for the keyword-metrics (volume/difficulty/cpc) pull design doc §10 names 'sm-keyword-refresh', calling search.keywordResearch for tracked sets, cadence from tool_scope.volume.cadence. BLOCKED on a platform-side gap this ticket is not authorized to fix (platform-nest is off limits per SM-15 file ownership): modules/search/index.ts's 'search.keywordResearch' mcpTools entry has no method/pathTemplate, so mcp-hub's module-tools.ts skips it at registration ('a def with no pathTemplate is informational-only and is skipped -- not callable') -- confirmed live against the running stack 2026-07-30 (GET /mcp/tool-defs shows method:'-' path:'-' for this tool, vs. a real binding for search.pullRanks). The REAL landed route for this action is 'POST /api/:tenantId/modules/search/keyword-sets/:id/metrics-pull' (rank.ts's pullMetricsForKeywords, controller-wired, live-proven per tracker §6s) -- but it is SET-scoped, not engagement-scoped, and there is no MCP tool (real or stub) to enumerate a keyword set's id from an engagement id either. So closing this gap is a contract decision, not a one-line fix: does the real binding take {tenantId, engagementId} (mirroring pullRanks and resolving all sets under the engagement server-side, the shape this file assumes below) or {tenantId, setId} (matching the route as it exists today, needing a new list-keyword-sets tool first)? That decision belongs to whoever owns index.ts next (or the architect) -- reported, not invented, here. This file is left in the repo as the ready-to-wire shape once that lands; DO NOT import/activate it until then -- every tools/call in it will fail with 'unknown tool' (hub-side, before it ever reaches the platform)."
+  },
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            { "field": "days", "daysInterval": 1, "triggerAtHour": 3, "triggerAtMinute": 0 }
+          ]
+        }
+      },
+      "name": "Daily 03:00 (checks monthly cadence itself)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "// BLOCKED SCAFFOLD -- see workflow meta.description. This mirrors sm-rank-pull.json's\n// due-check shape for tool_scope.volume, EXCEPT there is no real signal to check a 'last\n// fetched' timestamp against (no listing tool exposes search_keywords.metrics_fetched_at as a\n// rollup), so this uses workflowStaticData as a STAND-IN only -- explicitly NOT the shipped\n// idempotency story (n8n-local memory is exactly the anti-pattern SM-15's own rules warn\n// against relying on). Once the platform exposes a real per-engagement 'last metrics pull'\n// signal, replace this with the same platform-truth pattern sm-rank-pull.json uses.\nconst hubUrl = 'http://mcp-hub:3003/mcp';\nconst tenantId = $env.AGENCY_TENANT_ID;\nconst workflowId = 'wf:sm-keyword-refresh';\n\nconst callTool = async (name, args) => {\n  const res = await this.helpers.httpRequest({\n    method: 'POST',\n    url: hubUrl,\n    headers: {\n      Authorization: `Bearer ${$env.HUB_SERVICE_TOKEN}`,\n      'Content-Type': 'application/json',\n      Accept: 'application/json, text/event-stream',\n      'x-obo-provider': 'n8n',\n      'x-obo-external-id': workflowId,\n    },\n    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } }),\n  });\n  const raw = typeof res === 'string' ? res : (res?.data ?? res?.body ?? JSON.stringify(res));\n  const line = String(raw).split('\\n').find((l) => l.startsWith('data:')) ?? '';\n  if (!line) throw new Error(`${name}: no SSE data line in hub reply: ${String(raw).slice(0, 200)}`);\n  const rpc = JSON.parse(line.slice(5).trim());\n  if (rpc.result?.isError) throw new Error(rpc.result.content?.[0]?.text ?? `${name} failed`);\n  return JSON.parse(rpc.result?.content?.[0]?.text ?? 'null');\n};\n\nconst CADENCE_DAYS = { daily: 1, weekly: 7, monthly: 30 };\nconst store = $getWorkflowStaticData('global');\nstore.lastAttempt = store.lastAttempt || {};\n\nconst engagements = await callTool('search.listEngagements', { tenantId });\nconst candidates = (Array.isArray(engagements) ? engagements : [])\n  .filter((e) => e.status === 'active')\n  .filter((e) => e.toolScope?.volume?.enabled === true);\n\nconst due = [];\nfor (const eng of candidates) {\n  const cadence = eng.toolScope?.volume?.cadence ?? 'monthly';\n  const intervalDays = CADENCE_DAYS[cadence] ?? CADENCE_DAYS.monthly;\n  const lastAt = store.lastAttempt[eng.id];\n  const ageDays = lastAt ? (Date.now() - lastAt) / 86400000 : Infinity;\n  if (ageDays >= intervalDays) due.push({ json: { tenantId, engagementId: eng.id, cadence } });\n}\nreturn due;"
+      },
+      "name": "Compute due engagements (stand-in due-check)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [220, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://mcp-hub:3003/mcp",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{ $env.HUB_SERVICE_TOKEN }}" },
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "Accept", "value": "application/json, text/event-stream" },
+            { "name": "x-obo-provider", "value": "n8n" },
+            { "name": "x-obo-external-id", "value": "wf:sm-keyword-refresh" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", id: 1, method: \"tools/call\", params: { name: \"search.keywordResearch\", arguments: { tenantId: $json.tenantId, engagementId: $json.engagementId } } }) }}",
+        "options": {
+          "response": { "response": { "responseFormat": "text" } }
+        }
+      },
+      "name": "MCP search.keywordResearch (WILL FAIL: tool not hub-registered)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [440, 0],
+      "retryOnFail": false
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// No aggressive retry on failure (SM-50 posture, same as sm-rank-pull.json): the next\n// scheduled tick is the only retry. On success, remember the attempt time in static data (the\n// stand-in due-check above reads it) -- again, a scaffold behavior, not the target idempotency\n// story once a real platform signal exists.\nconst due = $('Compute due engagements (stand-in due-check)').item.json;\nconst raw = $input.item.json.data ?? $input.item.json.body ?? '';\nconst line = String(raw).split('\\n').find((l) => l.startsWith('data:')) ?? '';\nlet result;\nif (!line) { result = { ok: false, error: 'no SSE data line in hub reply' }; }\nelse {\n  const rpc = JSON.parse(line.slice(5).trim());\n  if (rpc.result?.isError) result = { ok: false, error: rpc.result.content?.[0]?.text ?? 'search.keywordResearch failed (expected -- tool not registered yet)' };\n  else { const store = $getWorkflowStaticData('global'); store.lastAttempt = store.lastAttempt || {}; store.lastAttempt[due.engagementId] = Date.now(); result = { ok: true, ...JSON.parse(rpc.result?.content?.[0]?.text ?? '{}') }; }\n}\nreturn [{ json: { ...due, ...result } }];"
+      },
+      "name": "Log outcome",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [660, 0]
+    }
+  ],
+  "connections": {
+    "Daily 03:00 (checks monthly cadence itself)": { "main": [[{ "node": "Compute due engagements (stand-in due-check)", "type": "main", "index": 0 }]] },
+    "Compute due engagements (stand-in due-check)": { "main": [[{ "node": "MCP search.keywordResearch (WILL FAIL: tool not hub-registered)", "type": "main", "index": 0 }]] },
+    "MCP search.keywordResearch (WILL FAIL: tool not hub-registered)": { "main": [[{ "node": "Log outcome", "type": "main", "index": 0 }]] }
+  },
+  "settings": {},
+  "pinData": {}
+}

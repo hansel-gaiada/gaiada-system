@@ -50,12 +50,18 @@ services:
       INTAKE_PROJECT_ID: ${INTAKE_PROJECT_ID:-}
       # task-sla: project whose tasks are swept for SLA breaches (single-project v1).
       SLA_PROJECT_ID: ${SLA_PROJECT_ID:-}
+      # pipeline-fanout REPORT branch (WD-06): project the meeting-report doc + review task land
+      # under (pipeline_runs has no project_id column yet — see automation/.env.example).
+      WEBDEV_REPORT_PROJECT_ID: ${WEBDEV_REPORT_PROJECT_ID:-}
       # digest-fanout (kept out of the hub allow-list; talks to the bot admin API directly).
       BOT_URL: ${BOT_URL:-}
       BOT_ADMIN_TOKEN: ${BOT_ADMIN_TOKEN:-}
       # on-inbound-lead webhook ingest — fail-closed: stays off unless explicitly enabled.
       INGEST_ENABLED: ${INGEST_ENABLED:-false}
       INGEST_SECRET: ${INGEST_SECRET:-}
+      # sm-rank-collect (SM-15 batch 1, NOT YET RUNNABLE — see workflows/sm-rank-collect.json's
+      # own meta.description for the platform-side gap it is blocked on).
+      SEARCH_CALLBACK_SECRET: ${SEARCH_CALLBACK_SECRET:-}
     # Standalone: resolve the workflows' hardcoded http://mcp-hub:3003 to a hub on the host.
     # (On the VPS stack n8n shares the network and mcp-hub resolves natively; this is harmless there.)
     extra_hosts:

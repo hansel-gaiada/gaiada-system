@@ -2,7 +2,7 @@
   "id": "ws11delivery0001",
   "name": "WS11 delivery track (hard gate -> design -> 3-beat -> revise loop -> Claude Code -> staging -> prod)",
   "meta": {
-    "description": "WS11 build item 8 (full) + tails. Stateless event-driven delivery state machine; state lives in the DB. Triggers ev/pipeline.gate.decided + ev/scope.signed. Path: hard gate (prd_sign+scope) -> design.prototype -> claude_design -> pm_review(b1) -> customer_feedback(b2) -> [changes_requested => BOUNDED REVISE LOOP: regenerate prototype from feedback -> new claude_design revision -> reopen b1, up to 3 designs then escalate to PM] -> pm_approval(b3) -> release_code (repoStatus gate) -> web-dev review -> deploy.staging -> staging stage + notify -> client staging sign-off (customer_feedback on staging) -> pm_approval (prod) -> deploy.production -> production stage + notify. github.repoStatus/deploy.staging/deploy.production fail SOFT. All actions OBO as wf:delivery. Env: N8N_BRIDGE_SECRET, HUB_SERVICE_TOKEN, NOTIFY_USER_ID; hub creds GITHUB_TOKEN/GITHUB_ORG/DEPLOY_STAGING_URL/DEPLOY_PRODUCTION_URL."
+    "description": "WS11 build item 8 (full) + tails. Stateless event-driven delivery state machine; state lives in the DB. Triggers ev/pipeline.gate.decided + ev/scope.signed. Path: hard gate (prd_sign+scope) -> design.prototype -> claude_design -> pm_review(b1) -> customer_feedback(b2) -> [changes_requested => BOUNDED REVISE LOOP: regenerate prototype from feedback -> new claude_design revision -> reopen b1, up to 3 designs then escalate to PM AND park the run 'blocked' (WD-05) so a later retrigger stops re-evaluating it] -> pm_approval(b3) -> release_code (repoStatus gate) -> web-dev review -> deploy.staging -> staging stage + notify -> client staging sign-off (customer_feedback on staging) -> pm_approval (prod) -> deploy.production -> production stage + notify. A run already 'blocked' short-circuits to noop on any retrigger (WD-05). github.repoStatus/deploy.staging/deploy.production fail SOFT. All actions OBO as wf:delivery. Env: N8N_BRIDGE_SECRET, HUB_SERVICE_TOKEN, NOTIFY_USER_ID; hub creds GITHUB_TOKEN/GITHUB_ORG/DEPLOY_STAGING_URL/DEPLOY_PRODUCTION_URL."
   },
   "nodes": [
     {
@@ -109,7 +109,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const raw = $input.first().json.data ?? $input.first().json.body ?? '';\nconst line = String(raw).split('\\n').find((l) => l.startsWith('data:')) ?? '';\nconst rpc = JSON.parse(line.slice(5).trim());\nif (rpc.result?.isError) throw new Error(rpc.result.content?.[0]?.text ?? 'getRun failed');\nconst run = JSON.parse(rpc.result?.content?.[0]?.text ?? '{}');\nconst stages = run.stages||[], gates = run.gates||[], signoffs = run.scopeSignoffs||[];\nconst prdSigned = gates.some(g=>g.kind==='prd_sign'&&g.decision==='signed');\nconst scopeSigned = (signoffs.some(s=>s.party==='provider')&&signoffs.some(s=>s.party==='client'))||gates.some(g=>g.kind==='scope_signoff'&&g.decision==='signed');\nconst designs = stages.filter(s=>s.name==='claude_design'); const design = designs[designs.length-1];\nconst code = stages.find(s=>s.name==='claude_code'); const staging = stages.find(s=>s.name==='staging'); const prodStage = stages.find(s=>s.name==='production');\nconst MAX_DESIGNS = 3;\nconst gof=(kind,sid)=>gates.filter(g=>g.kind===kind&&g.stage_id===sid).sort((a,b)=>a.created_at<b.created_at?-1:1).pop();\nconst ok=g=>g&&g.status==='decided'&&g.decision==='approved';\nconst has=(kind,sid)=>gates.some(g=>g.kind===kind&&g.stage_id===sid);\nconst prd=(stages.find(s=>s.name==='prd_extract')||{}).artifact_ref||'';\nconst slug=String(run.title||('run-'+run.id)).toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'').slice(0,40);\nlet action='noop',nextKind='',nextActor='',stageId='',note='';\nif(prdSigned&&scopeSigned){\n  if(!design){action='release_design';}\n  else {\n    const cfd=gof('customer_feedback',design.id);\n    if(ok(gof('pm_review',design.id))&&!has('customer_feedback',design.id)){action='open_gate';nextKind='customer_feedback';nextActor='client';stageId=design.id;note='Submission beat 2 — client feedback';}\n    else if(cfd&&cfd.status==='decided'&&cfd.decision==='changes_requested'){ if(designs.length<MAX_DESIGNS){action='revise_design';note=cfd.note||'';} else {action='escalate_revise';note=cfd.note||'';} }\n    else if(ok(cfd)&&!has('pm_approval',design.id)){action='open_gate';nextKind='pm_approval';nextActor='internal';stageId=design.id;note='Submission beat 3 — PM approval';}\n    else if(ok(gof('pm_approval',design.id))&&!code){action='release_code';}\n    else if(code&&ok(gof('pm_review',code.id))&&!staging){action='deploy';}\n    else if(staging&&ok(gof('customer_feedback',staging.id))&&!has('pm_approval',staging.id)){action='open_gate';nextKind='pm_approval';nextActor='internal';stageId=staging.id;note='Production approval';}\n    else if(staging&&ok(gof('pm_approval',staging.id))&&!prodStage){action='deploy_prod';}\n  }\n}\nconst proto=(design||{}).artifact_ref||'';\nreturn [{ json: { tenantId: run.tenant_id, runId: run.id, action, nextKind, nextActor, stageId, note, prd, proto, slug } }];"
+        "jsCode": "const raw = $input.first().json.data ?? $input.first().json.body ?? '';\nconst line = String(raw).split('\\n').find((l) => l.startsWith('data:')) ?? '';\nconst rpc = JSON.parse(line.slice(5).trim());\nif (rpc.result?.isError) throw new Error(rpc.result.content?.[0]?.text ?? 'getRun failed');\nconst run = JSON.parse(rpc.result?.content?.[0]?.text ?? '{}');\nconst stages = run.stages||[], gates = run.gates||[], signoffs = run.scopeSignoffs||[];\nconst prdSigned = gates.some(g=>g.kind==='prd_sign'&&g.decision==='signed');\nconst scopeSigned = (signoffs.some(s=>s.party==='provider')&&signoffs.some(s=>s.party==='client'))||gates.some(g=>g.kind==='scope_signoff'&&g.decision==='signed');\nconst designs = stages.filter(s=>s.name==='claude_design'); const design = designs[designs.length-1];\nconst code = stages.find(s=>s.name==='claude_code'); const staging = stages.find(s=>s.name==='staging'); const prodStage = stages.find(s=>s.name==='production');\nconst MAX_DESIGNS = 3;\nconst gof=(kind,sid)=>gates.filter(g=>g.kind===kind&&g.stage_id===sid).sort((a,b)=>a.created_at<b.created_at?-1:1).pop();\nconst ok=g=>g&&g.status==='decided'&&g.decision==='approved';\nconst has=(kind,sid)=>gates.some(g=>g.kind===kind&&g.stage_id===sid);\nconst prd=(stages.find(s=>s.name==='prd_extract')||{}).artifact_ref||'';\nconst slug=String(run.title||('run-'+run.id)).toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'').slice(0,40);\nlet action='noop',nextKind='',nextActor='',stageId='',note='';\n// WD-05: a run already parked 'blocked' (revise-budget exhausted) short-circuits to noop on any\n// later retrigger (a second gate.decided/scope.signed on the same run must not re-escalate it).\nif(run.status==='blocked'){ /* noop */ }\nelse if(prdSigned&&scopeSigned){\n  if(!design){action='release_design';}\n  else {\n    const cfd=gof('customer_feedback',design.id);\n    if(ok(gof('pm_review',design.id))&&!has('customer_feedback',design.id)){action='open_gate';nextKind='customer_feedback';nextActor='client';stageId=design.id;note='Submission beat 2 — client feedback';}\n    else if(cfd&&cfd.status==='decided'&&cfd.decision==='changes_requested'){ if(designs.length<MAX_DESIGNS){action='revise_design';note=cfd.note||'';} else {action='escalate_revise';note=cfd.note||'';} }\n    else if(ok(cfd)&&!has('pm_approval',design.id)){action='open_gate';nextKind='pm_approval';nextActor='internal';stageId=design.id;note='Submission beat 3 — PM approval';}\n    else if(ok(gof('pm_approval',design.id))&&!code){action='release_code';}\n    else if(code&&ok(gof('pm_review',code.id))&&!staging){action='deploy';}\n    else if(staging&&ok(gof('customer_feedback',staging.id))&&!has('pm_approval',staging.id)){action='open_gate';nextKind='pm_approval';nextActor='internal';stageId=staging.id;note='Production approval';}\n    else if(staging&&ok(gof('pm_approval',staging.id))&&!prodStage){action='deploy_prod';}\n  }\n}\nconst proto=(design||{}).artifact_ref||'';\nreturn [{ json: { tenantId: run.tenant_id, runId: run.id, action, nextKind, nextActor, stageId, note, prd, proto, slug } }];"
       },
       "name": "Load + decide",
       "type": "n8n-nodes-base.code",
@@ -1373,8 +1373,68 @@
     },
     {
       "parameters": {
+        "method": "POST",
+        "url": "http://mcp-hub:3003/mcp",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.HUB_SERVICE_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json, text/event-stream"
+            },
+            {
+              "name": "x-obo-provider",
+              "value": "n8n"
+            },
+            {
+              "name": "x-obo-external-id",
+              "value": "wf:delivery"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", id: 22, method: \"tools/call\", params: { name: \"pipeline.updateRun\", arguments: { tenantId: $('Load + decide').first().json.tenantId, runId: $('Load + decide').first().json.runId, status: \"blocked\" } } }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "name": "MCP updateRun blocked (WD-05)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1410,
+        820
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json.data ?? $input.first().json.body ?? '';\nconst line = String(raw).split('\\n').find((l) => l.startsWith('data:')) ?? '';\nconst rpc = JSON.parse(line.slice(5).trim());\nif (rpc.result?.isError) throw new Error(rpc.result.content?.[0]?.text ?? 'pipeline.updateRun (blocked) failed');\nreturn [{ json: {} }];"
+      },
+      "name": "Parse blocked",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1460,
+        820
+      ]
+    },
+    {
+      "parameters": {
         "respondWith": "json",
-        "responseBody": "={{ JSON.stringify({ ok:true, action:'escalated_revise', runId:$('Load + decide').first().json.runId }) }}"
+        "responseBody": "={{ JSON.stringify({ ok:true, action:'escalated_revise', runId:$('Load + decide').first().json.runId, blocked:true }) }}"
       },
       "name": "Respond (escalated)",
       "type": "n8n-nodes-base.respondToWebhook",
@@ -1466,7 +1526,7 @@
     },
     {
       "parameters": {
-        "jsCode": "let raw = $input.first().json.data ?? $input.first().json.body ?? '';\nconst line = String(raw).split('\\n').find((l) => l.startsWith('data:')) ?? '';\nconst rpc = JSON.parse(line.slice(5).trim());\nlet ok3=false, reason='';\ntry{ if(rpc.result?.isError){reason=rpc.result.content?.[0]?.text||'prod deploy failed';} else { ok3=true; } }catch(e){ reason='prod deploy not configured'; }\nconst d=$('Load + decide').first().json;\nreturn [{ json: { tenantId:d.tenantId, runId:d.runId, ok3, reason, status: ok3?'done':'failed' } }];"
+        "jsCode": "let raw = $input.first().json.data ?? $input.first().json.body ?? '';\nconst line = String(raw).split('\\n').find((l) => l.startsWith('data:')) ?? '';\nconst rpc = JSON.parse(line.slice(5).trim());\nlet ok3=false, reason='';\ntry{ if(rpc.result?.isError){reason=rpc.result.content?.[0]?.text||'prod deploy failed';} else { ok3=true; } }catch(e){ reason='prod deploy not configured'; }\n// DEF-3: the D14 write gate ALWAYS suspends an automation-initiated deploy.production call\n// (impact:high) before the tool's own handler runs -- that suspend is NOT a genuine deploy\n// failure (config/dispatch), so route it to a WS4 approval (approvals.request) instead of the\n// fail-soft 'production' stage write, which stays reserved for genuine failures.\nconst suspended = !ok3 && /^suspend:/.test(reason);\nconst d=$('Load + decide').first().json;\nreturn [{ json: { tenantId:d.tenantId, runId:d.runId, ok3, reason, suspended, status: ok3?'done':'failed', repo:d.slug } }];"
       },
       "name": "Prod result",
       "type": "n8n-nodes-base.code",
@@ -1474,6 +1534,111 @@
       "position": [
         1520,
         1020
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "Suspended (D14)?",
+              "leftValue": "={{ $json.suspended }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Suspended (D14)?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1740,
+        1140
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://mcp-hub:3003/mcp",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.HUB_SERVICE_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json, text/event-stream"
+            },
+            {
+              "name": "x-obo-provider",
+              "value": "n8n"
+            },
+            {
+              "name": "x-obo-external-id",
+              "value": "wf:delivery"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", id: 23, method: \"tools/call\", params: { name: \"approvals.request\", arguments: { tenantId: $json.tenantId, workflowId: \"wf:delivery\", toolName: \"deploy.production\", toolArgs: { repo: $json.repo, ref: \"main\", runId: $json.runId }, impact: \"high\", reason: $json.reason } } }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "name": "MCP approvals.request (prod deploy)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1960,
+        1140
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json.data ?? $input.first().json.body ?? '';\nconst line = String(raw).split('\\n').find((l) => l.startsWith('data:')) ?? '';\nconst rpc = JSON.parse(line.slice(5).trim());\nif (rpc.result?.isError) throw new Error(rpc.result.content?.[0]?.text ?? 'approvals.request failed');\nlet a={};try{a=JSON.parse(rpc.result?.content?.[0]?.text??'{}')}catch{}\nconst pr=$('Prod result').first().json;\nreturn [{ json: { tenantId:pr.tenantId, runId:pr.runId, approvalId:a.id ?? null } }];"
+      },
+      "name": "Parse approval (prod deploy)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2180,
+        1140
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok:true, action:'deploy_prod_suspended', runId:$json.runId, approvalId:$json.approvalId }) }}"
+      },
+      "name": "Respond (prod suspended)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        2400,
+        1140
       ]
     },
     {
@@ -2101,6 +2266,28 @@
       "main": [
         [
           {
+            "node": "MCP updateRun blocked (WD-05)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MCP updateRun blocked (WD-05)": {
+      "main": [
+        [
+          {
+            "node": "Parse blocked",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse blocked": {
+      "main": [
+        [
+          {
             "node": "Respond (escalated)",
             "type": "main",
             "index": 0
@@ -2141,7 +2328,47 @@
       "main": [
         [
           {
+            "node": "Suspended (D14)?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Suspended (D14)?": {
+      "main": [
+        [
+          {
+            "node": "MCP approvals.request (prod deploy)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
             "node": "MCP createStage production",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MCP approvals.request (prod deploy)": {
+      "main": [
+        [
+          {
+            "node": "Parse approval (prod deploy)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse approval (prod deploy)": {
+      "main": [
+        [
+          {
+            "node": "Respond (prod suspended)",
             "type": "main",
             "index": 0
           }

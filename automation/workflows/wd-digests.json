@@ -1,0 +1,278 @@
+{
+  "id": "wswddigests00001",
+  "name": "wd-digests (CRON)",
+  "meta": {
+    "description": "WD-26. Daily 17:00 (1-day window) + weekly Friday 17:00 (7-day window) per-person and per-project activity digests over the work_activity spine — DISTINCT from the existing task-sla.json (due-date SLA escalation on core tasks) and digest-fanout.json (WA-bot digests). Read (workActivity.feed) -> group by person/project -> llm.summarize (one call per grouped person/project, never per activity row) -> notify (in-app only). The weekly trigger ALSO fires one workActivity.relink call (LD-16's deterministic relink sweep) so drift in auto-linking self-heals on a schedule, not just at ingest time. Every action is append/notify-only (LOW impact, DEF-3: no medium+ write anywhere in this flow). Scoped identity wf:wd-digests -> [workActivity.feed, projects.get, llm.summarize, notify, workActivity.relink]. Env: HUB_SERVICE_TOKEN, AGENCY_TENANT_ID."
+  },
+  "nodes": [
+    {
+      "parameters": { "rule": { "interval": [{ "field": "cronExpression", "expression": "0 17 * * *" }] } },
+      "name": "Daily 17:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, -240]
+    },
+    {
+      "parameters": { "jsCode": "return [{ json: { period: 'daily', sinceDays: 1 } }];" },
+      "name": "Tag daily",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [220, -240]
+    },
+    {
+      "parameters": { "rule": { "interval": [{ "field": "cronExpression", "expression": "0 17 * * 5" }] } },
+      "name": "Weekly Fri 17:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 240]
+    },
+    {
+      "parameters": { "jsCode": "return [{ json: { period: 'weekly', sinceDays: 7 } }];" },
+      "name": "Tag weekly",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [220, 240]
+    },
+    {
+      "parameters": {
+        "jsCode": "const days = $json.sinceDays;\nconst since = new Date(Date.now() - days * 86400000).toISOString();\nreturn [{ json: { period: $json.period, since } }];"
+      },
+      "name": "Compute since",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [440, -60]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://mcp-hub:3003/mcp",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{ $env.HUB_SERVICE_TOKEN }}" },
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "Accept", "value": "application/json, text/event-stream" },
+            { "name": "x-obo-provider", "value": "n8n" },
+            { "name": "x-obo-external-id", "value": "wf:wd-digests" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", id: 1, method: \"tools/call\", params: { name: \"workActivity.feed\", arguments: { tenantId: $env.AGENCY_TENANT_ID, since: $json.since, limit: 200 } } }) }}",
+        "options": { "response": { "response": { "responseFormat": "text" } } }
+      },
+      "name": "MCP workActivity.feed",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [660, -60]
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json.data ?? $input.first().json.body ?? '';\nconst line = String(raw).split('\\n').find((l) => l.startsWith('data:')) ?? '';\nconst rpc = JSON.parse(line.slice(5).trim());\nif (rpc.result?.isError) throw new Error(rpc.result.content?.[0]?.text ?? 'workActivity.feed error');\nconst rows = JSON.parse(rpc.result?.content?.[0]?.text ?? '[]');\nconst period = $('Compute since').first().json.period;\nif (!Array.isArray(rows) || rows.length === 0) return []; // nothing to digest -> stop\n\nconst personGroups = {};\nconst projectGroups = {};\nfor (const r of rows) {\n  if (r.actorUserId) (personGroups[r.actorUserId] = personGroups[r.actorUserId] || []).push(r);\n  const links = Array.isArray(r.links) ? r.links : [];\n  for (const l of links) {\n    if (l.targetKind === 'project') (projectGroups[l.targetId] = projectGroups[l.targetId] || []).push(r);\n  }\n}\nconst items = [];\nfor (const [id, activities] of Object.entries(personGroups)) items.push({ kind: 'person', id, activities, period });\nfor (const [id, activities] of Object.entries(projectGroups)) items.push({ kind: 'project', id, activities, period });\nreturn items.map((it) => ({ json: it }));"
+      },
+      "name": "Parse feed + group (skip if empty)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [880, -60]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "typeValidation": "loose", "version": 2 },
+          "conditions": [
+            { "id": "is-project", "leftValue": "={{ $json.kind }}", "rightValue": "project", "operator": { "type": "string", "operation": "equals" } }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Is project?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [1100, -60]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://mcp-hub:3003/mcp",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{ $env.HUB_SERVICE_TOKEN }}" },
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "Accept", "value": "application/json, text/event-stream" },
+            { "name": "x-obo-provider", "value": "n8n" },
+            { "name": "x-obo-external-id", "value": "wf:wd-digests" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", id: 2, method: \"tools/call\", params: { name: \"projects.get\", arguments: { tenantId: $env.AGENCY_TENANT_ID, projectId: $json.id } } }) }}",
+        "options": { "response": { "response": { "responseFormat": "text" } } }
+      },
+      "name": "MCP projects.get",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1320, -220],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// NOTE: '.item' (pairedItem-resolved), NOT '.first()' -- 'Is project?' fans out into two\n// branches that reconverge later, so 'Build summary text' below runs ONCE PER BRANCH (a separate\n// run per branch, not one batched call). '.first()' blindly grabs run-index 0 regardless of which\n// branch produced the item currently in flight, which is wrong whenever the other branch's run\n// happens to be recorded first (found live: it crashed downstream when the project branch's\n// zero-item run landed at index 0). '.item' follows the actual pairedItem lineage of THIS item.\nconst prev = $('Is project?').item.json;\nlet project = {};\ntry {\n  const raw = $input.first().json.data ?? $input.first().json.body ?? '';\n  const line = String(raw).split('\\n').find((l) => l.startsWith('data:')) ?? '';\n  const rpc = JSON.parse(line.slice(5).trim());\n  if (!rpc.result?.isError) project = JSON.parse(rpc.result?.content?.[0]?.text ?? '{}');\n} catch { project = {}; }\nconst recipientId = project.owner?.responsibleId ?? null;\nconst label = project.name ?? prev.id;\nreturn [{ json: { ...prev, recipientId, label } }];"
+      },
+      "name": "Parse owner (may be null)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1540, -220]
+    },
+    {
+      "parameters": {
+        "jsCode": "const prev = $json;\nreturn [{ json: { ...prev, recipientId: prev.id, label: prev.id } }];"
+      },
+      "name": "Set recipient (person)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1320, 60]
+    },
+    {
+      "parameters": {
+        "jsCode": "const it = $json;\nif (!it.recipientId) return []; // e.g. a project with no owner set -- no one to notify\nconst lines = (it.activities || []).map((a) => `- [${a.source}] ${a.verb} ${a.objectKind}${a.title ? `: ${a.title}` : ''} (${a.occurredAt})`);\nconst text = `${it.kind === 'project' ? 'Project' : 'Person'} activity digest (${it.period}) for ${it.label} — ${it.activities.length} item(s):\\n${lines.join('\\n')}`;\nreturn [{ json: { kind: it.kind, id: it.id, period: it.period, recipientId: it.recipientId, label: it.label, count: it.activities.length, text } }];"
+      },
+      "name": "Build summary text (skip if no recipient)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1760, -60]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://mcp-hub:3003/mcp",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{ $env.HUB_SERVICE_TOKEN }}" },
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "Accept", "value": "application/json, text/event-stream" },
+            { "name": "x-obo-provider", "value": "n8n" },
+            { "name": "x-obo-external-id", "value": "wf:wd-digests" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", id: 3, method: \"tools/call\", params: { name: \"llm.summarize\", arguments: { text: $json.text } } }) }}",
+        "options": { "response": { "response": { "responseFormat": "text" } } }
+      },
+      "name": "MCP llm.summarize",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1980, -60]
+    },
+    {
+      "parameters": {
+        "jsCode": "// '.item' not '.first()' -- same multi-run fan-in reason as 'Parse owner (may be null)' above.\nconst raw = $input.first().json.data ?? $input.first().json.body ?? '';\nconst line = String(raw).split('\\n').find((l) => l.startsWith('data:')) ?? '';\nconst rpc = JSON.parse(line.slice(5).trim());\nif (rpc.result?.isError) throw new Error(rpc.result.content?.[0]?.text ?? 'llm.summarize error');\nconst summary = rpc.result?.content?.[0]?.text ?? '';\nconst prev = $('Build summary text (skip if no recipient)').item.json;\nreturn [{ json: { ...prev, summary } }];"
+      },
+      "name": "Parse summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2200, -60]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://mcp-hub:3003/mcp",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{ $env.HUB_SERVICE_TOKEN }}" },
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "Accept", "value": "application/json, text/event-stream" },
+            { "name": "x-obo-provider", "value": "n8n" },
+            { "name": "x-obo-external-id", "value": "wf:wd-digests" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", id: 4, method: \"tools/call\", params: { name: \"notify\", arguments: { tenantId: $env.AGENCY_TENANT_ID, recipientId: $json.recipientId, type: ($json.kind === 'project' ? 'wd_digest_project' : 'wd_digest_person'), payload: { period: $json.period, count: $json.count, label: $json.label, summary: $json.summary } } } }) }}",
+        "options": { "response": { "response": { "responseFormat": "text" } } }
+      },
+      "name": "MCP notify",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2420, -60]
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json.data ?? $input.first().json.body ?? '';\nconst line = String(raw).split('\\n').find((l) => l.startsWith('data:')) ?? '';\nconst rpc = JSON.parse(line.slice(5).trim());\nif (rpc.result?.isError) throw new Error(rpc.result.content?.[0]?.text ?? 'notify failed');\nreturn [{ json: { ok: true } }];"
+      },
+      "name": "Parse notify result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2640, -60]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://mcp-hub:3003/mcp",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{ $env.HUB_SERVICE_TOKEN }}" },
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "Accept", "value": "application/json, text/event-stream" },
+            { "name": "x-obo-provider", "value": "n8n" },
+            { "name": "x-obo-external-id", "value": "wf:wd-digests" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", id: 5, method: \"tools/call\", params: { name: \"workActivity.relink\", arguments: { tenantId: $env.AGENCY_TENANT_ID, limit: 100 } } }) }}",
+        "options": { "response": { "response": { "responseFormat": "text" } } }
+      },
+      "name": "MCP workActivity.relink (weekly only)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [440, 400]
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json.data ?? $input.first().json.body ?? '';\nconst line = String(raw).split('\\n').find((l) => l.startsWith('data:')) ?? '';\nconst rpc = JSON.parse(line.slice(5).trim());\nif (rpc.result?.isError) throw new Error(rpc.result.content?.[0]?.text ?? 'workActivity.relink failed');\nconst result = JSON.parse(rpc.result?.content?.[0]?.text ?? '{}');\nreturn [{ json: result }];"
+      },
+      "name": "Parse relink result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [660, 400]
+    }
+  ],
+  "connections": {
+    "Daily 17:00": { "main": [[{ "node": "Tag daily", "type": "main", "index": 0 }]] },
+    "Tag daily": { "main": [[{ "node": "Compute since", "type": "main", "index": 0 }]] },
+    "Weekly Fri 17:00": { "main": [[{ "node": "Tag weekly", "type": "main", "index": 0 }]] },
+    "Tag weekly": {
+      "main": [
+        [
+          { "node": "Compute since", "type": "main", "index": 0 },
+          { "node": "MCP workActivity.relink (weekly only)", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "MCP workActivity.relink (weekly only)": { "main": [[{ "node": "Parse relink result", "type": "main", "index": 0 }]] },
+    "Compute since": { "main": [[{ "node": "MCP workActivity.feed", "type": "main", "index": 0 }]] },
+    "MCP workActivity.feed": { "main": [[{ "node": "Parse feed + group (skip if empty)", "type": "main", "index": 0 }]] },
+    "Parse feed + group (skip if empty)": { "main": [[{ "node": "Is project?", "type": "main", "index": 0 }]] },
+    "Is project?": {
+      "main": [
+        [{ "node": "MCP projects.get", "type": "main", "index": 0 }],
+        [{ "node": "Set recipient (person)", "type": "main", "index": 0 }]
+      ]
+    },
+    "MCP projects.get": { "main": [[{ "node": "Parse owner (may be null)", "type": "main", "index": 0 }]] },
+    "Parse owner (may be null)": { "main": [[{ "node": "Build summary text (skip if no recipient)", "type": "main", "index": 0 }]] },
+    "Set recipient (person)": { "main": [[{ "node": "Build summary text (skip if no recipient)", "type": "main", "index": 0 }]] },
+    "Build summary text (skip if no recipient)": { "main": [[{ "node": "MCP llm.summarize", "type": "main", "index": 0 }]] },
+    "MCP llm.summarize": { "main": [[{ "node": "Parse summary", "type": "main", "index": 0 }]] },
+    "Parse summary": { "main": [[{ "node": "MCP notify", "type": "main", "index": 0 }]] },
+    "MCP notify": { "main": [[{ "node": "Parse notify result", "type": "main", "index": 0 }]] }
+  },
+  "settings": {},
+  "pinData": {}
+}
