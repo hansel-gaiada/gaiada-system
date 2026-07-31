@@ -192,6 +192,14 @@ services:
       KC_DB_URL: jdbc:postgresql://${PG_HOST:-postgres}:5432/gaiada_keycloak
       KC_DB_USERNAME: keycloak
       KC_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD:?}
+      # Behind nginx: Keycloak must build absolute URLs (issuer, auth endpoint, redirects) for the
+      # PUBLIC host, not the container. Without KC_PROXY_HEADERS it trusts its own socket and mints
+      # http://localhost URLs that the browser cannot follow and the platform will not accept.
+      # Mounted at /idp, NOT /auth — the UI already owns /auth/callback and /auth/login, so /auth
+      # would shadow the app's own OIDC routes.
+      KC_HOSTNAME: ${KC_HOSTNAME:-}
+      KC_HTTP_RELATIVE_PATH: ${KC_HTTP_RELATIVE_PATH:-/}
+      KC_PROXY_HEADERS: ${KC_PROXY_HEADERS:-}
     ports:
       - "127.0.0.1:8080:8080"
     volumes:
@@ -219,9 +227,12 @@ services:
       DATABASE_URL: postgres://platform_app:${PLATFORM_APP_PASSWORD:?}@${PG_HOST:-postgres}:5432/gaiada_platform
       MIGRATE_DATABASE_URL: postgres://platform_owner:${PLATFORM_OWNER_PASSWORD:?}@${PG_HOST:-postgres}:5432/gaiada_platform
       AUTH_MODE: ${PLATFORM_AUTH_MODE:-dev}
-      OIDC_ISSUER: http://keycloak:8080/realms/gaiada
-      OIDC_JWKS_URI: http://keycloak:8080/realms/gaiada/protocol/openid-connect/certs
-      OIDC_AUDIENCE: gaiada-platform
+      # ISSUER must match the `iss` claim the IdP actually stamps, which is the PUBLIC url once
+      # Keycloak sits behind a reverse proxy. JWKS stays INTERNAL so token verification never
+      # hairpins out through nginx and back. Splitting them is deliberate, not an inconsistency.
+      OIDC_ISSUER: ${OIDC_ISSUER:-http://keycloak:8080/realms/gaiada}
+      OIDC_JWKS_URI: ${OIDC_JWKS_URI:-http://keycloak:8080/realms/gaiada/protocol/openid-connect/certs}
+      OIDC_AUDIENCE: ${OIDC_AUDIENCE:-gaiada-platform}
       CERBOS_URL: http://cerbos:3592
       # 5c.4 file store — persistent volume so attachments survive restarts.
       FILES_DIR: /data/files
@@ -433,6 +444,14 @@ services:
       # actually serves it (writes 409 while off).
       SERVICE_ASSIGNMENTS_ENABLED: ${SERVICE_ASSIGNMENTS_ENABLED:-}
       APP_VERSION: ${APP_VERSION:-}
+      # OIDC (authorization-code + PKCE, public client — no secret).
+      # AUTH_URL is BROWSER-facing so it must be the public host; TOKEN_URL is a server-to-server
+      # call from this container, so it stays internal. Mixing those up is the classic failure:
+      # the redirect works, then the code exchange dies on DNS or a proxy loop.
+      OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-gaiada-ui}
+      OIDC_AUTH_URL: ${OIDC_AUTH_URL:-}
+      OIDC_TOKEN_URL: ${OIDC_TOKEN_URL:-}
+      OIDC_REDIRECT_URI: ${OIDC_REDIRECT_URI:-}
     ports:
       - "3005:3005"
     depends_on:
