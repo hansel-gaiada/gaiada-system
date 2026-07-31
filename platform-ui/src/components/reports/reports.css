@@ -1,0 +1,87 @@
+/* Report viewer chrome (TR-16) — the non-chart pieces around the kit:
+   header, period selector, warnings banner, comparison chip, highlights,
+   narrative. Pulls in the chart kit's token scope so this chrome reads as
+   ONE surface with the charts beneath it, light/dark/print alike. */
+@import "../reports/charts/charts.css";
+
+/* `.rc-viz` (charts.css) already fills its own surface + text color — this
+   just widens the gap/padding for the top-level page composition. */
+.rc-page { gap: 20px; padding: 24px; }
+
+/* ---- header ---- */
+.rc-header { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.rc-header__scope { font-family: var(--font-display); font-weight: 700; font-size: 24px; color: var(--rc-text-primary); margin: 0; }
+.rc-header__meta { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; font: 400 12px var(--font-body); color: var(--rc-text-secondary); }
+.rc-header__seal { font: 700 9px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; padding: 2px 7px; border: 0.5px solid var(--rc-axis); }
+.rc-header__seal--sealed { color: var(--rc-good); border-color: var(--rc-good); }
+.rc-header__seal--adhoc { color: var(--rc-warning); border-color: var(--rc-warning); }
+.rc-comparison-chip { font: 400 12px var(--font-body); color: var(--rc-text-muted); white-space: nowrap; }
+
+/* ---- warnings banner ---- */
+.rc-warnings { display: flex; flex-direction: column; gap: 6px; }
+.rc-warning {
+  display: flex; align-items: flex-start; gap: 8px; font: 400 12px var(--font-body);
+  padding: 8px 12px; border: 0.5px solid var(--rc-axis); background: var(--rc-surface); color: var(--rc-text-primary);
+}
+.rc-warning--risk { border-color: var(--rc-serious); }
+.rc-warning__glyph {
+  flex: 0 0 auto; width: 15px; height: 15px; display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 50%; font: 700 10px var(--font-body); color: var(--rc-surface); background: var(--rc-text-muted);
+}
+.rc-warning--risk .rc-warning__glyph { background: var(--rc-serious); }
+
+/* ---- period selector ---- */
+.rc-period { position: relative; display: flex; flex-direction: column; }
+.rc-period__kinds { display: inline-flex; gap: 2px; border: 0.5px solid var(--rc-axis); width: max-content; }
+.rc-period__kind { font: 400 12px var(--font-body); color: var(--rc-text-secondary); background: transparent; border: 0; padding: 7px 14px; cursor: pointer; }
+.rc-period__kind:hover { background: rgba(110, 90, 67, 0.06); }
+.rc-period__kind--active { color: var(--rc-text-primary); font-weight: 700; background: rgba(110, 90, 67, 0.08); }
+.rc-period__kind:focus-visible { outline: 2px solid var(--rc-focus); outline-offset: -2px; }
+
+.rc-period__pop {
+  position: absolute; top: calc(100% + 6px); left: 0; z-index: 40; min-width: 260px;
+  background: var(--rc-surface); border: 0.5px solid var(--rc-axis); padding: 10px 0;
+  display: flex; flex-direction: column;
+}
+.rc-period__presets { display: flex; flex-direction: column; }
+.rc-period__preset {
+  display: flex; align-items: center; gap: 8px; text-align: left; font: 400 13px var(--font-body);
+  color: var(--rc-text-primary); background: transparent; border: 0; padding: 8px 14px; cursor: pointer;
+}
+.rc-period__preset:hover { background: rgba(110, 90, 67, 0.06); }
+.rc-period__preset-check { width: 16px; font-weight: 700; color: var(--rc-focus); }
+.rc-period__preset--active { font-weight: 700; }
+.rc-period__custom {
+  display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px; padding: 10px 14px 0;
+  margin-top: 6px; border-top: 0.5px solid var(--rc-grid);
+}
+.rc-period__field { display: flex; flex-direction: column; gap: 3px; font: 700 10px var(--font-body); letter-spacing: 0.06em; text-transform: uppercase; color: var(--rc-text-muted); }
+.rc-period__field input { font: 400 13px var(--font-body); padding: 5px 6px; border: 0.5px solid var(--rc-axis); background: var(--rc-surface); color: var(--rc-text-primary); }
+.rc-period__apply { font: 700 12px var(--font-body); padding: 6px 14px; border: 0.5px solid var(--rc-text-primary); background: var(--rc-text-primary); color: var(--rc-surface); cursor: pointer; }
+.rc-period__apply:disabled { opacity: 0.45; cursor: default; }
+.rc-period__error { margin: 8px 14px 0; font: 400 11px var(--font-body); color: var(--rc-critical); }
+
+/* ---- highlights ---- */
+.rc-highlights { display: flex; flex-direction: column; gap: 8px; }
+.rc-highlight { display: flex; align-items: flex-start; gap: 8px; font: 400 13px var(--font-body); color: var(--rc-text-primary); padding: 8px 0; border-bottom: 0.5px solid var(--rc-grid); }
+.rc-highlight:last-child { border-bottom: 0; }
+.rc-highlight__badge { flex: 0 0 auto; font: 700 8px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; padding: 2px 6px; border: 0.5px solid var(--rc-axis); color: var(--rc-text-muted); }
+.rc-highlight--risk .rc-highlight__badge, .rc-highlight--anomaly .rc-highlight__badge { color: var(--rc-serious); border-color: var(--rc-serious); }
+.rc-highlight--achievement .rc-highlight__badge { color: var(--rc-good); border-color: var(--rc-good); }
+.rc-highlight--compliance .rc-highlight__badge { color: var(--rc-warning); border-color: var(--rc-warning); }
+
+/* ---- narrative ---- */
+.rc-narrative { font: 400 14px/1.6 var(--font-body); color: var(--rc-text-primary); }
+.rc-narrative__source { display: block; margin-top: 8px; font: 400 10px var(--font-body); letter-spacing: 0.06em; text-transform: uppercase; color: var(--rc-text-muted); }
+
+/* ---- revision note (TR-17) ---- */
+.rc-revision { display: flex; flex-direction: column; gap: 8px; }
+.rc-revision__row { display: flex; align-items: center; gap: 8px; }
+.rc-revision__label { font: 700 10px var(--font-body); letter-spacing: 0.06em; text-transform: uppercase; color: var(--rc-text-muted); }
+.rc-revision__select { font: 400 13px var(--font-body); padding: 5px 8px; border: 0.5px solid var(--rc-axis); background: var(--rc-surface); color: var(--rc-text-primary); }
+.rc-revision__select:disabled { opacity: 0.7; }
+
+/* ---- generic chart-section shell reused by the auto-composed viewer ---- */
+.rc-section { display: flex; flex-direction: column; gap: 10px; padding: 18px; border: 0.5px solid var(--rc-axis); background: var(--rc-surface); }
+.rc-section__title { margin: 0; font-family: var(--font-display); font-weight: 700; font-size: 18px; color: var(--rc-text-primary); }
+.rc-sections-grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); }

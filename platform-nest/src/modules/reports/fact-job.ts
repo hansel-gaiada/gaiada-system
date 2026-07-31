@@ -497,8 +497,23 @@ export interface OrgNodeLike {
  *
  *  Pure, and deliberately a different function from dept-resolution.ts's `deriveBlobPlacements`
  *  (which maps PERSONS to units) — this one maps UNITS to departments. Same blob, different index. */
-export function deriveUnitDepartments(root: OrgNodeLike | null | undefined): Record<string, string> {
+// TR-37 (found by TR-13): `company_org_structure.structure` is stored WRAPPED as `{root: OrgNode}` —
+// see sanitizeStructure() in admin/company-admin.controller.ts, which is the only writer. Both callers
+// here previously passed the wrapper straight in, so `node.kind` was undefined at the top level and the
+// walk terminated with an EMPTY map: division -> parent-department rolling silently no-op'd against
+// every real org blob, and any person placed under a DIVISION got no department attribution at all.
+// It passed tests only because the fixtures were written in the bare-root shape, encoding the bug.
+// Unwrapping HERE (rather than at the two call sites) makes it structurally impossible to reintroduce,
+// and tolerating both shapes keeps any legacy/seeded bare-root row working.
+export function deriveUnitDepartments(
+  structureOrRoot: OrgNodeLike | { root?: OrgNodeLike | null } | null | undefined,
+): Record<string, string> {
   const out: Record<string, string> = {};
+  const maybeWrapped = structureOrRoot as { root?: OrgNodeLike | null } | null | undefined;
+  const root: OrgNodeLike | null | undefined =
+    maybeWrapped && typeof maybeWrapped === "object" && "root" in maybeWrapped
+      ? maybeWrapped.root
+      : (structureOrRoot as OrgNodeLike | null | undefined);
   if (!root) return out;
   const walk = (node: OrgNodeLike, inheritedDepartment: string | null): void => {
     let departmentForSubtree = inheritedDepartment;
@@ -959,6 +974,27 @@ export async function writeFactSlice(
  *     DELETE+INSERT slice — that slice is derived data, a check-in is a person's own record.
  *   - `expectedCheckinUsers` (pure) decides expectation from calendar + holidays + APPROVED leave
  *     + attendance + employment, so a leave day never counts as a miss. */
+/** Read + normalize a tenant's `report_work_calendars` row (falling back to the Mon-Fri/no-holiday
+ *  default for a tenant that never configured one — §5.3's expected() must still produce an
+ *  answer, not throw, for a fresh tenant). Extracted (TR-09) so the nightly hook here and the
+ *  LIVE check-in endpoints (`checkins.controller.ts`'s today/compliance/pending-reminders reads)
+ *  share exactly one parsing of the jsonb `holidays` shape rather than two copies drifting apart. */
+export async function loadWorkCalendar(c: PoolClient, tenantId: string): Promise<WorkCalendar> {
+  const cal = await c.query<{ working_days: number[]; holidays: unknown; workday_minutes: number }>(
+    `SELECT working_days, holidays, workday_minutes FROM report_work_calendars WHERE tenant_id = $1`,
+    [tenantId],
+  );
+  const calendarRow = cal.rows[0];
+  const holidayList = Array.isArray(calendarRow?.holidays) ? (calendarRow.holidays as Array<{ date?: string } | string>) : [];
+  return calendarRow
+    ? {
+        workingDays: calendarRow.working_days ?? DEFAULT_WORK_CALENDAR.workingDays,
+        holidays: holidayList.map((h) => (typeof h === "string" ? h : h?.date ?? "")).filter((d) => d.length > 0),
+        workdayMinutes: calendarRow.workday_minutes ?? DEFAULT_WORK_CALENDAR.workdayMinutes,
+      }
+    : DEFAULT_WORK_CALENDAR;
+}
+
 export async function writeAutoMissedCheckins(
   c: PoolClient,
   tenantId: string,
@@ -967,19 +1003,7 @@ export async function writeAutoMissedCheckins(
 ): Promise<number> {
   if (!(factDate < today)) return 0;
 
-  const cal = await c.query<{ working_days: number[]; holidays: unknown; workday_minutes: number }>(
-    `SELECT working_days, holidays, workday_minutes FROM report_work_calendars WHERE tenant_id = $1`,
-    [tenantId],
-  );
-  const calendarRow = cal.rows[0];
-  const holidayList = Array.isArray(calendarRow?.holidays) ? (calendarRow.holidays as Array<{ date?: string } | string>) : [];
-  const calendar: WorkCalendar = calendarRow
-    ? {
-        workingDays: calendarRow.working_days ?? DEFAULT_WORK_CALENDAR.workingDays,
-        holidays: holidayList.map((h) => (typeof h === "string" ? h : h?.date ?? "")).filter((d) => d.length > 0),
-        workdayMinutes: calendarRow.workday_minutes ?? DEFAULT_WORK_CALENDAR.workdayMinutes,
-      }
-    : DEFAULT_WORK_CALENDAR;
+  const calendar = await loadWorkCalendar(c, tenantId);
 
   const employed = await c.query<{ user_id: string }>(
     `SELECT DISTINCT user_id FROM org_unit_memberships

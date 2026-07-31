@@ -548,6 +548,22 @@ export const config = {
     entityTypes: (process.env.GRAPH_BRIDGE_ENTITY_TYPES ?? "").split(",").map((s) => s.trim()).filter(Boolean),
     timeoutMs: Number(process.env.GRAPH_BRIDGE_TIMEOUT_MS ?? 5000),
   },
+  // TR-21 (tracker/reporting §6.3) — the report-renderer sidecar (TR-19) this platform calls to
+  // turn a one-shot `jobToken` URL into PDF bytes. Same fail-soft convention as every other
+  // optional downstream in this file: any of the three unset -> the pdf export path refuses with
+  // a clear 503 rather than half-attempting a call with an empty token or an empty target origin
+  // (report-pdf-export.ts's own guard restates this at the point of enforcement). `url` is
+  // report-renderer's OWN address (`http://report-renderer:3007` in compose); `token` is the
+  // SAME `RENDERER_TOKEN` the sidecar's own auth.ts checks; `platformUiInternalUrl` is embedded
+  // into the URL handed to the sidecar (`{platformUiInternalUrl}/print/reports/{jobToken}`) —
+  // it MUST be byte-identical to the sidecar's own `PLATFORM_UI_INTERNAL_URL` (its `isAllowedRenderUrl`
+  // same-origin check), so both read the SAME env var name deliberately.
+  reportRenderer: {
+    url: process.env.REPORT_RENDERER_URL ?? "",
+    token: process.env.RENDERER_TOKEN ?? "",
+    platformUiInternalUrl: process.env.PLATFORM_UI_INTERNAL_URL ?? "",
+    timeoutMs: Number(process.env.REPORT_RENDERER_TIMEOUT_MS ?? 30000),
+  },
 };
 
 /** The bridge is fully configured (all four knobs present) and may start. */

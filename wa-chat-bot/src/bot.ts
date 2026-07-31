@@ -9,6 +9,7 @@ import { registerBusinessActions } from "./actions/builtins";
 import { registerGroupAdminActions } from "./actions/group-admin";
 import { listActions } from "./actions/registry";
 import { dispatchActionCommand, dispatchIntent, tryConfirmByReply, handleButton, isActionCommand } from "./actions/dispatch";
+import { tryCheckinReply } from "./checkin";
 import { emitDiscovery } from "./discovery";
 import { enqueueMedia } from "./media-queue";
 import { seenBefore, dedupKey } from "./safety/dedup";
@@ -138,6 +139,10 @@ export async function handleInbound(gw: WhatsAppGateway, inbound: InboundMessage
   // A pending confirmation from this user takes precedence over normal handling — even
   // without an explicit trigger, since a "yes"/"1" reply is a plain group message.
   if (await tryConfirmByReply(gw, inbound, clean)) return;
+  // TR-11: same precedence for a pending check-in reminder reply — a DM reply to the bot's own
+  // proactive reminder must land as the check-in even when dmReplyPolicy would otherwise never
+  // trigger a reply (default "off"), since the person is replying to something the bot itself sent.
+  if (await tryCheckinReply(gw, inbound, clean)) return;
   if (!isTriggered(inbound, clean)) return;
   // Loop guard (abuse/ban protection): a bot<->bot or echo loop must never be engaged —
   // refusing to reply is the only correct response (the message is already stored above, so

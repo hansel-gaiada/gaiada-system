@@ -27,6 +27,8 @@ import { listChats, chatMessages, searchAllChats, isValidChatId, type ChatKind }
 import { digestHistory } from "./digest-history";
 import { nextRuns } from "./next-run";
 import { listSkills } from "./skills";
+import { composeCheckinReminder } from "./checkin";
+import { HubDeniedError } from "./hub";
 import type { Slot } from "./window";
 
 /** Constant-time string comparison (avoids timing side-channels on token checks). */
@@ -178,6 +180,35 @@ export function buildApp(gateway: WhatsAppGateway = new SurfaceRouter()): Fastif
     }
     const digest = await summarizeChat(msgs);
     return { chatId, digest };
+  });
+
+  // Admin: TR-11's minimal check-in reminder notify. n8n's reports-eod-reminder flow calls this
+  // ONCE per WA-linked pending user (chatId resolved from GET /checkins/pending-reminders'
+  // additive `waExternalId` field — for a WA DM the external_id IS the chat id, waha.ts sets
+  // InboundMessage.chatId := senderId for a 1:1 chat). Deliberately minimal: this route does NOT
+  // accept arbitrary text — it only knows how to compose and remember ONE thing (today's check-in
+  // reminder), so it can never become a generic "send whatever text n8n hands it" relay. The bot —
+  // never n8n — fetches the prefill (as the recipient's OWN OBO envelope, same D4 pattern /projects
+  // and /know already use) and never asserts whose identity this is; it only relays what the
+  // platform's own OBO resolution already decided. Idempotent by construction: composeCheckinReminder
+  // no-ops (sends nothing) when the day is already submitted, so a retried/re-driven n8n run can
+  // never double-nag someone who already checked in.
+  app.post<{ Body: { tenantId?: string; chatId?: string } }>("/admin/notify", async (req, reply) => {
+    if (!config.adminToken) return reply.code(503).send({ error: "admin routes disabled — set ADMIN_TOKEN" });
+    if (!safeEqual(bearer(req), config.adminToken)) return reply.code(401).send({ error: "unauthorized" });
+    const { tenantId, chatId } = req.body ?? {};
+    if (!tenantId || !chatId) return reply.code(400).send({ error: "tenantId and chatId required" });
+    if (!isValidChatId(chatId)) return reply.code(400).send({ error: "invalid chatId" });
+    if (!config.hubServiceToken) return reply.code(503).send({ error: "notify unavailable — HUB_SERVICE_TOKEN unset" });
+    try {
+      const text = await composeCheckinReminder(tenantId, chatId, config.checkinReminderTtlMs);
+      if (text === null) return reply.code(200).send({ sent: false, reason: "already submitted" });
+      await gateway.sendText(chatId, text);
+      return { sent: true, chatId };
+    } catch (err) {
+      if (err instanceof HubDeniedError) return reply.code(403).send({ error: "denied", detail: err.message });
+      return reply.code(502).send({ error: `notify failed: ${(err as Error).message}` });
+    }
   });
 
   // Admin: the action kill-switch (incident response) — flip ALL mutating actions off/on at

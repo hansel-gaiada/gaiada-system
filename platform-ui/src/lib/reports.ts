@@ -327,3 +327,29 @@ export const REPORT_MAX_CUSTOM_DAYS = 400;
 export function dayCountOf(startIso: string, endIso: string): number {
   return Math.round((new Date(`${endIso}T00:00:00Z`).getTime() - new Date(`${startIso}T00:00:00Z`).getTime()) / DAY_MS) + 1;
 }
+
+// =====================================================================
+// TR-20 — the print-artifact provenance mark (§6.3 + §15's 2026-07-30
+// amendment). Deliberately mirrors platform-nest's `report-export.ts`
+// `bannerText()` byte-for-byte (same two branches, same punctuation, same
+// "unknown" fallback) so the PDF and the XLSX/CSV TR-18 already ships say
+// the IDENTICAL thing about the SAME document — the ticket's own acceptance
+// bar ("match its wording so the two artifacts agree"). Duplicated rather
+// than imported: platform-nest and platform-ui are separate deployable
+// projects with no shared package (see the repo's CLAUDE.md), so every
+// cross-service contract in this codebase is duplicated-and-tested, never
+// imported across the boundary. `sealHash` is NOT part of `ReportHeader`
+// (report-export.ts's own comment: it lives on `report_periods.seal_hash`,
+// looked up separately) — a caller that has it (the real print-payload
+// endpoint, once TR-21 ships) passes it through; a caller that doesn't
+// renders "unknown" rather than crashing, exactly like the exporter.
+export function printProvenanceMark(
+  header: Pick<ReportHeader, "sealed" | "revision" | "generatedAt">,
+  sealHash?: string,
+): string {
+  if (header.sealed) {
+    const prefix = sealHash ? sealHash.slice(0, 12) : "unknown";
+    return `SEALED · rev ${header.revision ?? 0} · ${prefix}`;
+  }
+  return `AD HOC · UNSEALED · as of ${header.generatedAt}`;
+}

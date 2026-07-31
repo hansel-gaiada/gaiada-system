@@ -8,6 +8,10 @@ const SERIES_COLORS = [
   "var(--rc-series-1)", "var(--rc-series-2)", "var(--rc-series-3)", "var(--rc-series-4)",
   "var(--rc-series-5)", "var(--rc-series-6)", "var(--rc-series-7)", "var(--rc-series-8)",
 ];
+// Percentage height on a flex item is unreliable across browsers even with a
+// definite-height flex container (a well-known flexbox gotcha) — compute the
+// bar's height in real pixels against this fixed plot height instead.
+const PLOT_HEIGHT = 200;
 
 function fmtVal(v: number | null, unit: string): string {
   if (v === null) return "—";
@@ -48,7 +52,7 @@ export function GroupedBars({ title, unit: unitOverride, ...input }: BarsInput &
       <div className="rc-scroll">
         <div
           role="img" aria-label={`${title}: grouped bar chart by ${data.seriesLabels.join(", ")}`}
-          style={{ display: "flex", gap: 14, alignItems: "flex-end", height: 200, minWidth: Math.max(320, data.groups.length * 44), position: "relative", borderBottom: "1px solid var(--rc-axis)" }}
+          style={{ display: "flex", gap: 14, alignItems: "flex-end", height: PLOT_HEIGHT, minWidth: Math.max(320, data.groups.length * 44), position: "relative", borderBottom: "1px solid var(--rc-axis)" }}
         >
           {data.groups.map((g, gi) => (
             <div key={g.categoryKey} role="group" aria-label={g.categoryLabel} style={{ display: "flex", gap: 2, alignItems: "flex-end", flex: "0 0 auto" }}>
@@ -61,7 +65,7 @@ export function GroupedBars({ title, unit: unitOverride, ...input }: BarsInput &
                     type="button"
                     className={`rc-hit${isHover ? " rc-mark--lift" : ""}`}
                     style={{
-                      width: 16, height: `${Math.max(pct, v === null ? 0 : 1)}%`, minHeight: v === null ? 0 : 2,
+                      width: 16, height: Math.max((pct / 100) * PLOT_HEIGHT, v === null ? 0 : 2),
                       background: v === null ? "transparent" : SERIES_COLORS[si % SERIES_COLORS.length],
                       border: 0, borderRadius: "4px 4px 0 0", cursor: v === null ? "default" : "pointer", padding: 0,
                     }}

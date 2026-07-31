@@ -33,7 +33,13 @@ export async function syncMetricDefinitions(): Promise<void> {
   });
 }
 
-async function upsertRows(tenantId: string, module: string, period: string, rows: RollupRow[]): Promise<void> {
+/** Exported (TR-15): the tracker/reporting program's seal service calls this DIRECTLY — same
+ *  idempotent upsert on (tenant, module, metric_key, period, dimensions) the nightly
+ *  `recomputeRollups` loop uses for every module — so sealing a calendar period never grows a
+ *  second, differently-shaped writer of `rollup_metrics`. Custom ranges never call this (§0057
+ *  rule 3): the seal service rejects `period_kind='custom'` with 422 before this could ever run
+ *  for one. */
+export async function upsertRows(tenantId: string, module: string, period: string, rows: RollupRow[]): Promise<void> {
   const asOf = new Date();
   await withTenants([tenantId], async (c) => {
     for (const r of rows) {

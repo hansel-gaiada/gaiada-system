@@ -38,6 +38,18 @@ export const AUTOMATION_ACCOUNTS: ReadonlyArray<{ workflowId: string; role: stri
   { workflowId: "wf:wd-digests", role: "company_admin", email: "automation+wd-digests@gaiada.system", name: "Automation — WD digests" },
   // WD-26: stale-nag only reads work_activity (member+) and notifies (manager+) — manager covers both.
   { workflowId: "wf:wd-stale-nag", role: "manager", email: "automation+wd-stale-nag@gaiada.system", name: "Automation — WD stale-task nag" },
+  // TR-11: the three reports/check-in flows. All three call platform-nest DIRECTLY for their main
+  // read/write (bypassing the hub — `facts/recompute` is deliberately never an MCP tool per §9.2,
+  // and the two checkin service reads are ops/service-tier, not agent-callable either),
+  // authenticated with the platform's own PLATFORM_SERVICE_TOKEN. company_admin is the MINIMUM
+  // role that satisfies every Cerbos check each flow makes: `report_admin`'s recompute
+  // (nightly-facts), `checkin`'s pending_reminders + missed_by_unit (eod-reminder /
+  // morning-escalation) — see resource_report_admin.yaml / resource_checkin.yaml. All three ALSO
+  // call the hub's `notify` tool (dead-letter alert / in-app fallback / per-lead escalation
+  // respectively), which needs the matching mcp-hub AUTOMATION_ALLOWLIST entry (automation-policy.ts).
+  { workflowId: "wf:reports-nightly-facts", role: "company_admin", email: "automation+reports-nightly-facts@gaiada.system", name: "Automation — Reports nightly facts" },
+  { workflowId: "wf:reports-eod-reminder", role: "company_admin", email: "automation+reports-eod-reminder@gaiada.system", name: "Automation — Check-in EOD reminder" },
+  { workflowId: "wf:reports-morning-escalation", role: "company_admin", email: "automation+reports-morning-escalation@gaiada.system", name: "Automation — Check-in morning escalation" },
 ];
 
 async function existingLink(externalId: string): Promise<boolean> {

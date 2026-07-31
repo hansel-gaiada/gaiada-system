@@ -1,0 +1,105 @@
+# TR-09 — the mandatory EOD check-in subsystem (Blueprint §5.3, §8's `resource_checkin` row).
+# Actions: `submit` (POST /checkins), `read` (GET /checkins/today, /checkins history, /compliance),
+# `excuse` (POST /checkins/:id/excuse), `pending_reminders` (GET /checkins/pending-reminders,
+# the n8n-facing internal read, TR-11), `missed_by_unit` (GET /checkins/missed-yesterday, TR-11's
+# escalation-flow read — same service/admin tier as pending_reminders, kept a separate action name
+# only so the audit trail distinguishes the two n8n reads).
+#
+# `submit` is SELF ONLY, and it is the one action in this whole program where that must be
+# airtight: `checkins.controller.ts` NEVER reads a subject id off the request body for submit — it
+# is always `req.principal.userId`, so `request.resource.attr.subjectUserId` handed to Cerbos here
+# is always the caller's own id, never client-chosen. The `member` rule below still requires the
+# equality check explicitly (defense in depth, and it is what makes an OBO/MCP principal submitting
+# on behalf of someone else fail here too, not just in the controller).
+#
+# `read`/`excuse` admit a `manager` grant, but Cerbos has NO primitive for "manager of THIS specific
+# org unit" — `manager` (derived_roles.yaml) is scoped at company/project, not at an arbitrary org
+# node. So this policy grants the COARSE tier (any manager grant in this tenant) and
+# `checkins.controller.ts` narrows it the rest of the way in-app to the caller's own current unit
+# (computed server-side from `org_unit_memberships`, never from a client-supplied query param) —
+# see that file's header for the full reasoning. Flagged for TR-25 (Cerbos parity-matrix ticket):
+# if a unit-scoped derived role is ever added for another ticket, this policy should adopt it too.
+#
+# `pending_reminders` is the one action §8 calls "service/admin" rather than naming a tier — kept
+# narrow (company_admin/platform_admin only, no exec/HR/manager) because it exists for the n8n
+# reminder flow (TR-11) to poll, not for a human console.
+#
+# Deliberately ABSENT: a "served-dept" (provider lead, company A→B) rule. §8 names that tier for
+# checkin read/excuse, but every other cross-company view in this program is served exclusively
+# through the D12 rollup/aggregate path (§8 hard rule 3: person-grain data outside your own line is
+# structurally unreachable), and no report-document/rollup path for check-ins exists yet (TR-13+).
+# Approximating it here would mean either a real cross-tenant person-grain leak or a silently
+# wrong under-scope; left unimplemented and documented rather than faked. Also NOT modelled: HR's
+# fine-grained staff-vs-manager split (`module_staff` vs `module_manager` with module='hr') is
+# collapsed into one line below because §8 does not distinguish HR sub-roles for check-ins the way
+# resource_hr_case.yaml distinguishes them for hr_case's destructive actions — both tiers get the
+# full "HR-appraisal role" column here.
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: checkin
+  importDerivedRoles: ["gaiada_scopes"]
+  variables:
+    import: ["gaiada_common"]
+  rules:
+    - actions: ["*"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["platform_admin"]
+
+    # Self-submit: subjectUserId MUST equal the principal (guarded with has() so a handler that
+    # forgot to set it fails CLOSED, not open — same discipline as resource_hr_case.yaml's
+    # subject-self rule).
+    - actions: ["submit"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["member"]
+      condition:
+        match:
+          expr: >-
+            variables.inTenant && variables.notLow &&
+            has(request.resource.attr.subjectUserId) &&
+            request.resource.attr.subjectUserId == request.principal.id
+
+    # Self-read: same self-only shape as submit, for GET /checkins/today and a self history query.
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["member"]
+      condition:
+        match:
+          expr: >-
+            variables.inTenant && variables.notLow &&
+            has(request.resource.attr.subjectUserId) &&
+            request.resource.attr.subjectUserId == request.principal.id
+
+    # Exec group (global, cross-company by design — same shape as every other exec rule in this
+    # program, e.g. resource_report_admin.yaml): full read + excuse.
+    - actions: ["read", "excuse"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["group_executive"]
+      condition: { match: { expr: "variables.notLow" } }
+
+    # HR ("HR-appraisal role" per §8): full read + excuse, company-wide (HR is legitimately
+    # whole-company scope, same posture as resource_hr_case.yaml's module_staff/module_manager).
+    - actions: ["read", "excuse"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["module_staff", "module_manager"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow && request.resource.attr.module == \"hr\"" } }
+
+    # The served company's own admin: full read + excuse within its own tenant.
+    - actions: ["read", "excuse"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+
+    # Dept lead ("own unit" per §8) — COARSE gate only; see the file header. The controller narrows
+    # this to the caller's own current org unit before returning any row.
+    - actions: ["read", "excuse"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["manager"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+
+    # n8n reminder + escalation flows (TR-11's internal reads, §8 "service/admin"): company_admin
+    # only — no exec/HR/manager, these are ops polling surfaces, not a console.
+    - actions: ["pending_reminders", "missed_by_unit"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }

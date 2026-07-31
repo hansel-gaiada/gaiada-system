@@ -34,6 +34,10 @@ import { reportsModule } from "./modules/reports";
 import { createDataForSeoProviderFromConfig } from "./modules/search/providers/dataforseo";
 import { createSemrushProviderFromConfig } from "./modules/search/providers/semrush";
 import { createAhrefsProviderFromConfig } from "./modules/search/providers/ahrefs";
+import { registerLiveAdsExecutor } from "./modules/search/sem-apply";
+import {
+  assertAdsWriteModeBootSafe, googleAdsLiveExecutor, resolveSearchAdsWriteMode,
+} from "./modules/search/sem-executor-google-ads";
 // SM-33's simulation tier (tracker §6), owned and landed by a concurrent agent this same wave —
 // SM-34 owns registering it here, not building it. isSimulatedProvider is the structural provenance
 // check (design addendum §A4.3) used below to make mode/driver mutual exclusion a BOOT ERROR.
@@ -248,6 +252,21 @@ async function bootstrap(): Promise<void> {
       // eslint-disable-next-line no-console
       console.log("[search] Ahrefs credentials not configured — Ahrefs search-data capabilities are disabled");
     }
+
+    // ── SM-26 / addendum §A12.6: the Ads WRITE mode, deliberately separate from the DATA vendor mode ──
+    // Registered unconditionally: registration only makes a live executor AVAILABLE, it does not make
+    // it reachable. `resolveAdsExecutor(resolveSearchAdsWriteMode())` decides that per request, and in
+    // `simulate` it always returns the simulator even when a live executor exists (SM-21's rule: a
+    // control that cannot do the thing must not report that it did).
+    //
+    // The boot assertion is the counterpart: `SEARCH_ADS_WRITE_MODE=live` with no live executor is an
+    // unfinished deployment, and refusing at boot is the only place it can be refused honestly — a
+    // runtime refusal would surface as a failed client ad change after an approval had already been
+    // spent (§A4.3/§A10.4: mode/driver mutual exclusion is a boot error, not a warning).
+    registerLiveAdsExecutor(googleAdsLiveExecutor);
+    assertAdsWriteModeBootSafe(resolveSearchAdsWriteMode(), true);
+    // eslint-disable-next-line no-console
+    console.log(`[search] Ads write mode: ${resolveSearchAdsWriteMode()} (SEARCH_ADS_WRITE_MODE)`);
   }
   registerCoreRollupProvider(coreTaskRollups);
   registerCoreRollupProvider(clientWorkRollups);
@@ -264,7 +283,13 @@ async function bootstrap(): Promise<void> {
     // modules/search/index.ts are forward-looking (no producer yet, see notifications.ts's file
     // header) — their entity-type stream names aren't known until those producers land, so they're
     // not added here to avoid guessing a stream name that turns out wrong.
-    startConsumerLoop(["deliverable", "user", "automation_approval", "search_engagement", "search_audit", "search_property"]);
+    // SM-26 wiring note: `search_change_proposal` is added because SM-21 is now a REAL producer on
+    // that entity type (`search.campaign.applied`, emitted for every terminal outcome) and SM-73
+    // registered its notification handler. Without the stream listed here the handler is registered
+    // but never invoked — the event would be written to the outbox, relayed, and read by nobody, so
+    // `partial`/`indeterminate` outcomes would silently notify no one. That is precisely the failure
+    // this list's own comment above warns about, now that the producer exists.
+    startConsumerLoop(["deliverable", "user", "automation_approval", "search_engagement", "search_audit", "search_property", "search_change_proposal"]);
     // ORG-6 service-assignment reconciler (A7): outbox-driven, own consumer group. Only when the
     // release-train flag is on — dark by default so assignments stay dormant metadata.
     if (config.serviceAssignmentsEnabled) {

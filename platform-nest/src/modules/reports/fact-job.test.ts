@@ -437,6 +437,33 @@ describe("TR-07 deriveUnitDepartments (org-blob roll-up)", () => {
     });
   });
 
+  // TR-37 (defect found by TR-13): the REAL stored shape is `{root: OrgNode}` — sanitizeStructure()
+  // in admin/company-admin.controller.ts is the only writer of company_org_structure.structure and it
+  // always wraps. Every test above uses the BARE-root shape, which is why the wrapper bug survived:
+  // the fixtures encoded it. This test uses the shape production actually stores, so a regression to
+  // passing the wrapper straight through fails loudly here instead of silently returning {} and
+  // dropping department attribution for everyone placed under a division.
+  it("accepts the REAL stored {root} wrapper shape, not just a bare root node", () => {
+    const wrapped = {
+      root: {
+        id: "co",
+        kind: "company",
+        children: [
+          {
+            id: "d-webdev",
+            kind: "department",
+            children: [{ id: "div-frontend", kind: "division", children: [] }],
+          },
+        ],
+      },
+    };
+    const map = deriveUnitDepartments(wrapped);
+    expect(map, "the {root} wrapper must be unwrapped — an empty map here means division→department rolling silently no-ops against every real org blob").toEqual({
+      "d-webdev": "d-webdev",
+      "div-frontend": "d-webdev",
+    });
+  });
+
   it("a division with no department ancestor maps to itself (never null — the dept slice keeps the row)", () => {
     const map = deriveUnitDepartments({ id: "co", kind: "company", children: [{ id: "div-orphan", kind: "division", children: [] }] });
     expect(map["div-orphan"]).toBe("div-orphan");

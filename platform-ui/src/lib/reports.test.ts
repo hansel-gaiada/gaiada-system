@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   bucketGranularityFor, bucketKeyFor, bucketSeries, bucketSeriesWithParts, formatDateRange, comparisonLabel,
-  buildPresetRanges, dayCountOf, REPORT_MAX_CUSTOM_DAYS,
+  buildPresetRanges, dayCountOf, REPORT_MAX_CUSTOM_DAYS, printProvenanceMark,
   type ReportSeries,
 } from "./reports";
 
@@ -171,5 +171,23 @@ describe("dayCountOf / REPORT_MAX_CUSTOM_DAYS", () => {
   });
   it("mirrors the server's 400-day ceiling (§6.2 range_too_large)", () => {
     expect(REPORT_MAX_CUSTOM_DAYS).toBe(400);
+  });
+});
+
+// TR-20 — mirrors platform-nest's report-export.ts `report-export.test.ts` cases exactly (same
+// inputs, same expected strings) so a change to either side that breaks the PDF/XLSX wording
+// parity fails a test on BOTH sides, not just the one someone happened to edit.
+describe("printProvenanceMark — §6.3 / §15's mandatory PDF/XLSX provenance mark", () => {
+  it("an UNSEALED document ALWAYS carries the AD HOC mark, with the generatedAt timestamp", () => {
+    const header = { sealed: false as const, generatedAt: "2026-07-31T12:00:00.000Z" };
+    expect(printProvenanceMark(header)).toBe("AD HOC · UNSEALED · as of 2026-07-31T12:00:00.000Z");
+  });
+  it("a SEALED document carries SEALED · rev N · <hash prefix>, never AD HOC", () => {
+    const header = { sealed: true as const, revision: 2, generatedAt: "2026-07-31T12:00:00.000Z" };
+    expect(printProvenanceMark(header, "abcdef0123456789")).toBe("SEALED · rev 2 · abcdef012345");
+  });
+  it("a sealed document with no sealHash supplied renders 'unknown' rather than crashing", () => {
+    const header = { sealed: true as const, generatedAt: "2026-07-31T12:00:00.000Z" };
+    expect(printProvenanceMark(header)).toBe("SEALED · rev 0 · unknown");
   });
 });

@@ -4,30 +4,13 @@ import type { PointerEvent as ReactPointerEvent } from "react";
 import type { ReportSeries } from "@/lib/reports";
 import { bucketSeriesWithParts, type BucketedSeriesDetailed } from "@/lib/reports";
 import { ChartDataFallback } from "./ChartDataFallback";
+import { nearestIndex, pointerPct, fmtDate } from "./chartHover";
 import "./charts.css";
 
 const SERIES_COLORS = [
   "var(--rc-series-1)", "var(--rc-series-2)", "var(--rc-series-3)", "var(--rc-series-4)",
   "var(--rc-series-5)", "var(--rc-series-6)", "var(--rc-series-7)", "var(--rc-series-8)",
 ];
-
-function fmtDate(iso: string): string {
-  return new Date(`${iso}T00:00:00Z`).toLocaleDateString("en-GB", { day: "2-digit", month: "short", timeZone: "UTC" });
-}
-
-function nearestIndex(xs: number[], pct: number): number {
-  let best = 0;
-  let bestDist = Infinity;
-  xs.forEach((x, i) => {
-    const d = Math.abs(x - pct);
-    if (d < bestDist) { bestDist = d; best = i; }
-  });
-  return best;
-}
-function pointerPct(e: ReactPointerEvent<SVGSVGElement>): number {
-  const rect = e.currentTarget.getBoundingClientRect();
-  return ((e.clientX - rect.left) / Math.max(1, rect.width)) * 100;
-}
 
 // Line/area trend chart(s) sharing one date axis. Consumes `ReportSeries[]`
 // directly (§7's "no adapter layer") plus `dayCount` (from `header.dayCount`)

@@ -1,0 +1,77 @@
+# TR-15 — the tracker/reporting program's seal/amend/pin surface authz, for:
+#   GET  /api/:tenantId/reports/periods[?kind&from&to]  ·  GET .../periods/:id       (action: view)
+#   POST /api/:tenantId/reports/periods/:id/seal                                    (action: seal)
+#   POST /api/:tenantId/reports/periods/:id/amend {reason}                          (action: amend)
+#   POST /api/:tenantId/reports/periods/pin {start, end, label}                     (action: pin)
+#
+# §8's authoritative matrix names a "seal / amend period" row: Self ⛔ · Dept lead (own unit) ⛔ ·
+# Exec group ✅ · HR-appraisal role ⛔ · served-dept ⛔ — i.e. `company_admin` + `group_executive`
+# ONLY, with `manager`/`team_lead` (the "dept lead" column) explicitly EXCLUDED. This is the SAME
+# shape as `resource_report_admin.yaml`'s `recompute` action and is modelled on it directly: a
+# lead who can seal/amend a window can move numbers that feed their own team's appraisal inputs.
+# §6.2's endpoint table calls this tier "`reports.seal` (exec/lead)" — read literally against §8
+# that would look like a contradiction (dept lead is ⛔ on the matrix row), but "lead" there means
+# the COMPANY's own admin (`company_admin`, i.e. the tenant's lead), not a per-department
+# manager/team_lead grant. `pin` (§0057 rule 4: "a privileged, labelled, low-volume act") is gated
+# identically to seal/amend, not to the broader read tier — a pinned custom range is an archive
+# act, not a routine query.
+#
+# `view` (the two GET routes) is deliberately BROADER than seal/amend/pin: it exposes only period
+# METADATA (kind/dates/status/revision/label), never a document's numbers, so it is granted to
+# every tier `resource_report_document.yaml` grants for the read surface, `member`/self included —
+# the report viewer's own revision picker must resolve whether ITS OWN scope's period is sealed
+# regardless of who is looking at it, and a period's sealed/open status is not itself sensitive.
+#
+# KNOWN APPROXIMATION carried from `resource_report_document.yaml`/TR-25's open item: `manager`/
+# `team_lead` here (the `view` tier) read every period in their company-scoped grant, not only
+# their own unit's, for the same reason (no per-org-node grant scope exists). Not tightened here
+# per the brief — flagged for TR-25, not solved by this ticket.
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: report_period
+  importDerivedRoles: ["gaiada_scopes"]
+  variables:
+    import: ["gaiada_common"]
+  rules:
+    - actions: ["*"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["platform_admin"]
+
+    # Exec group (global, cross-company by design — same shape as every other exec rule in this
+    # program, e.g. resource_report_admin.yaml / resource_checkin.yaml): view + seal + amend + pin.
+    - actions: ["view", "seal", "amend", "pin"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["group_executive"]
+      condition: { match: { expr: "variables.notLow" } }
+
+    # The tenant's own admin ("lead" in §6.2's shorthand — see header note): view + seal + amend +
+    # pin, bounded to its own company.
+    - actions: ["view", "seal", "amend", "pin"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+
+    # HR-appraisal role: view only (appraisal auto-inputs need to know whether a covering period
+    # is sealed) — never seal/amend/pin, matching §8's "HR-appraisal role ⛔" cell on that row.
+    - actions: ["view"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["hr_people_ops"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+
+    # Dept lead tier: view only — the exact §8 "⛔" on seal/amend for this column, so no seal/amend/
+    # pin action is listed here. See the file header's KNOWN APPROXIMATION note on unit scoping.
+    - actions: ["view"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["manager", "team_lead"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+
+    # Self: view only — a plain member's own report viewer needs to resolve sealed/open state for
+    # its own scope's period. No self-only ownerId/subjectUserId narrowing exists at the PERIOD
+    # level (a period is a tenant-wide concept, not scoped to one person) — the controller passes
+    # no id-owning attribute for `view`, so this is a coarse tenant-wide metadata read, consistent
+    # with the metadata (not document contents) being the only thing exposed.
+    - actions: ["view"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["member"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }

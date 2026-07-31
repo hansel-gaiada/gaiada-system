@@ -37,7 +37,11 @@ import { ClientsController } from "./modules/clients/clients.controller";
 import { HrController } from "./modules/hr/hr.controller";
 import { SearchController } from "./modules/search/search.controller";
 import { SearchGoogleOauthCallbackController } from "./modules/search/search-google-oauth.controller";
+import { SearchGoogleAdsController } from "./modules/search/search-google-ads.controller";
+import { SearchReportsController } from "./modules/search/search-reports.controller";
 import { ReportsController } from "./modules/reports/reports.controller";
+import { CheckinsController } from "./modules/reports/checkins.controller"; // TR-09
+import { PrintPayloadController } from "./modules/reports/print-payload.controller"; // TR-21
 import { McpToolsController } from "./modules/mcp-tools.controller";
 
 @Module({
@@ -52,9 +56,25 @@ import { McpToolsController } from "./modules/mcp-tools.controller";
     // `api/:tenantId/modules/search` prefix. Registered as its own controller, mounted at the fixed
     // path `api/search/google/oauth/callback`.
     SearchGoogleOauthCallbackController,
+    // SM-25c: Ads read-binding routes (account link + pull + history reader), on its OWN controller
+    // class rather than SearchController's — SM-21 owns that file's edit surface concurrently this
+    // wave (approve-execute-replay routes). Shares SearchController's exact route prefix; Nest allows
+    // multiple controller classes on one prefix as long as no individual route path collides (it
+    // doesn't — see search-google-ads.controller.ts's own header).
+    SearchGoogleAdsController,
+    // SM-22: report review/approve/preview/deliver lifecycle, on its OWN controller class — same
+    // reason as SearchGoogleAdsController above (SM-21 owns search.controller.ts's edit surface this
+    // wave; SM-10 already added its own reports GET/POST section there). Shares SearchController's
+    // exact route prefix; no individual route path collides (search-reports.controller.ts's own header).
+    SearchReportsController,
     // TR-07: reports admin/ops surface (facts recompute). §6.2 routes it at /api/:t/reports/*,
     // not /api/:t/modules/reports/*, so it is listed with the verticals but mounts top-level.
     ReportsController,
+    // TR-09: check-in subsystem, /api/:t/checkins/* (own top-level prefix, own controller class).
+    CheckinsController,
+    // TR-21: the internal, token-only PDF payload fetch — root-level, no `/api` prefix, no
+    // guards (identity.controller.ts's precedent). See print-payload.controller.ts's own header.
+    PrintPayloadController,
     // MCP tool-def aggregation for the hub (WS2 §6).
     McpToolsController,
   ],

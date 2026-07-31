@@ -1,0 +1,106 @@
+{
+  "name": "reports-nightly-facts (CRON)",
+  "meta": {
+    "description": "TR-11, Blueprint §10 flow 1. Daily 02:00: rebuild the fact fabric for D-2..D-1 (a 2-day window absorbs late time-entry/activity edits) via POST facts/recompute, which ALSO writes auto_missed check-ins for D-1 and is idempotent (recompute the same window twice -> byte-identical rows, proven by fact-job.db.test.ts) -- safe to re-drive on any retry. `facts/recompute` is deliberately NEVER an MCP tool (Blueprint §9.2: 'recompute (ops)' is explicitly excluded), so this flow calls platform-nest DIRECTLY with the platform's own PLATFORM_SERVICE_TOKEN under the OBO identity wf:reports-nightly-facts (seed:automation grants it company_admin, the minimum role resource_report_admin.yaml's `recompute` action allows for this ops path) -- it makes NO mcp-hub call and needs no hub allow-list entry. On failure: the HTTP node retries x3 (built-in retryOnFail), then the error branch raises an IN-APP notification via the hub's `notify` tool (no ntfy reachable from n8n's own docker network in this deployment -- see automation/README.md's note on why this substitutes for a direct ntfy post). Env: PLATFORM_URL, PLATFORM_SERVICE_TOKEN, AGENCY_TENANT_ID, HUB_SERVICE_TOKEN, NOTIFY_USER_ID."
+  },
+  "nodes": [
+    {
+      "parameters": { "rule": { "interval": [{ "field": "cronExpression", "expression": "0 2 * * *" }] } },
+      "name": "Daily 02:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "// D-2..D-1 as plain YYYY-MM-DD (UTC), matching platform-nest's own addDaysIso/todayIso convention.\nfunction addDays(iso, n) {\n  const d = new Date(`${iso}T00:00:00.000Z`);\n  d.setUTCDate(d.getUTCDate() + n);\n  return d.toISOString().slice(0, 10);\n}\nconst today = new Date().toISOString().slice(0, 10);\nreturn [{ json: { from: addDays(today, -2), to: addDays(today, -1) } }];"
+      },
+      "name": "Compute D-2..D-1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [220, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.PLATFORM_URL }}/api/{{ $env.AGENCY_TENANT_ID }}/reports/facts/recompute",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{ $env.PLATFORM_SERVICE_TOKEN }}" },
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "x-obo-provider", "value": "n8n" },
+            { "name": "x-obo-external-id", "value": "wf:reports-nightly-facts" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ from: $json.from, to: $json.to }) }}",
+        "options": {}
+      },
+      "name": "POST facts/recompute",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [440, 0],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Success: nothing to notify -- a clean recompute is silent, same posture as every other\n// clear-on-success flow in this repo (compliance-gate-nag/stale-approval-chaser).\nconst body = $input.first().json.body ?? $input.first().json;\nreturn [{ json: { ok: true, jobRunId: body.jobRunId ?? null, days: body.days ?? null } }];"
+      },
+      "name": "Parse result (success)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [660, -120]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Dead-letter payload for the error branch -- retries (x3) already exhausted at this point.\nconst err = $input.first().json.error ?? $input.first().json;\nreturn [{ json: { from: $('Compute D-2..D-1').first().json.from, to: $('Compute D-2..D-1').first().json.to, error: String(err?.message ?? err) } }];"
+      },
+      "name": "Build dead-letter payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [660, 120]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://mcp-hub:3003/mcp",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{ $env.HUB_SERVICE_TOKEN }}" },
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "Accept", "value": "application/json, text/event-stream" },
+            { "name": "x-obo-provider", "value": "n8n" },
+            { "name": "x-obo-external-id", "value": "wf:reports-nightly-facts" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", id: 1, method: \"tools/call\", params: { name: \"notify\", arguments: { tenantId: $env.AGENCY_TENANT_ID, recipientId: $env.NOTIFY_USER_ID, type: \"reports_nightly_facts_failed\", payload: { from: $json.from, to: $json.to, error: $json.error } } } }) }}",
+        "options": { "response": { "response": { "responseFormat": "text" } } }
+      },
+      "name": "MCP notify (dead-letter)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [880, 120]
+    }
+  ],
+  "connections": {
+    "Daily 02:00": { "main": [[{ "node": "Compute D-2..D-1", "type": "main", "index": 0 }]] },
+    "Compute D-2..D-1": { "main": [[{ "node": "POST facts/recompute", "type": "main", "index": 0 }]] },
+    "POST facts/recompute": {
+      "main": [
+        [{ "node": "Parse result (success)", "type": "main", "index": 0 }],
+        [{ "node": "Build dead-letter payload", "type": "main", "index": 0 }]
+      ]
+    },
+    "Build dead-letter payload": { "main": [[{ "node": "MCP notify (dead-letter)", "type": "main", "index": 0 }]] }
+  },
+  "settings": {},
+  "pinData": {}
+}

@@ -133,3 +133,18 @@ derivedRoles:
               g.role == (request.resource.attr.module + "_manager") && (
                 g.scopeType == "global" ||
                 (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+
+    # TR-13 (tracker/reporting §8's "HR-appraisal role" column). Reuses the EXISTING hr_staff/
+    # hr_manager grant names (resource_hr_case.yaml's precedent) rather than minting a new
+    # "hr_appraisal" role the platform has no seed/grant path for yet — appraisal data is HR-grade
+    # sensitive per the design doc, so HR's existing staff/manager tier is the correct interim
+    # owner. Flagged for TR-25 (the Cerbos parity-matrix ticket) to confirm or replace once the
+    # appraisal engine (TR-24) defines its own resource kind.
+    - name: hr_people_ops
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.grants.exists(g, (g.role == "hr_staff" || g.role == "hr_manager") && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))

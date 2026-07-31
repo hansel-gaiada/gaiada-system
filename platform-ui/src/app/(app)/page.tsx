@@ -7,12 +7,16 @@ import { accessibleCompanies, isManagerTier } from "@/lib/rbac";
 import { getMyWorkQueue } from "@/lib/queue";
 import { getActivity, weeklyThroughput } from "@/lib/data";
 import { myPlacement } from "@/lib/departments";
+import { getCheckinCardData } from "@/lib/checkins-data";
+import { submitCheckin } from "@/lib/checkinActions";
 import { Eyebrow } from "@/components/ui";
 import { ScopePill } from "@/components/scope/ScopePill";
 import { EnvelopeBanner } from "@/components/scope/EnvelopeBanner";
+import { BackendPending } from "@/components/BackendPending";
 import type { QueueFilter } from "@/components/dashboard/FilterChips";
 import { CommandCenterHome } from "@/components/dashboard/CommandCenterHome";
 import { QueueAgendaHome } from "@/components/dashboard/QueueAgendaHome";
+import { CheckinCard } from "@/components/dashboard/CheckinCard";
 import { decideQueueItem } from "./actions";
 
 function timeOfDay(): string {
@@ -44,10 +48,11 @@ export default async function Dashboard({ searchParams }: { searchParams: Search
   const scope = rawScope && companies.some((c) => c.id === rawScope) ? rawScope : "all";
   const filter = parseFilter(rawFilter);
 
-  const [queue, placement, activity] = await Promise.all([
+  const [queue, placement, activity, checkinData] = await Promise.all([
     getMyWorkQueue(me, userId, companies),
     tenantId ? myPlacement(userId, tenantId, userId).catch(() => null) : Promise.resolve(null),
     tenantId ? getActivity(userId, tenantId) : Promise.resolve([]),
+    tenantId ? getCheckinCardData(tenantId, userId) : Promise.resolve(null),
   ]);
 
   // Scope=one company: filter the queue, no envelope banner (UX-2 §4.3 — the
@@ -94,6 +99,25 @@ export default async function Dashboard({ searchParams }: { searchParams: Search
       </div>
 
       {scope === "all" && <EnvelopeBanner companies={queue.companies} />}
+
+      {/* TR-10 — the mandatory EOD check-in, on My Work (its natural home): scope-independent
+          (a check-in is about the person, not a company filter) and shown to every tier, manager
+          or IC alike, ahead of the role-split queue below. */}
+      {tenantId && (
+        checkinData ? (
+          <CheckinCard
+            tenantId={tenantId}
+            today={checkinData.today}
+            selfCompliance={checkinData.selfCompliance}
+            submitAction={submitCheckin}
+          />
+        ) : (
+          <BackendPending
+            what="Today's check-in card needs the check-in endpoints."
+            contract="GET/POST /api/:t/checkins, GET /api/:t/checkins/today"
+          />
+        )
+      )}
 
       {manager ? (
         <CommandCenterHome

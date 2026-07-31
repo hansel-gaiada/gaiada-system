@@ -1,0 +1,151 @@
+/* TR-20 — print stylesheet for `/print/reports/[jobToken]`. This is the ONE stylesheet the
+   `report-renderer` sidecar's Chromium ever loads for this route: no app shell, no nav, no
+   interactive chrome — see the route's own header comment for why this route deliberately lives
+   OUTSIDE the `(app)` route group. Everything here is scoped under `.tr20-print` (never a bare
+   `html`/`body`/`:root` selector) so importing this file can never leak a rule onto any OTHER route
+   that happens to share a bundle chunk with this one — the same discipline `reports.css`/
+   `charts.css` already follow with their `.rc-*` prefix.
+
+   Lifts docs/blueprints/render-pdf.js's print technique (per the ticket's explicit instruction to
+   reuse it rather than rediscover it): force exact colors, drop reading-measure width caps, keep
+   atomic blocks whole across a page break. What's genuinely new here (render-pdf.js never needed
+   it — its pages are plain static HTML, no chart kit):
+
+   - The chart kit (TR-16's charts.css) ALREADY ships its own `@media print { .rc-viz {...} }`
+     branch — forced light palette + `.rc-scroll{overflow:visible}` for wide charts — because it
+     was written for exactly this ticket ("TR-20 renders these SAME components through print.css;
+     this rule set means they already work there without rebuilding"). This file does not duplicate
+     that; it only re-asserts the SAME forced-light values with `!important`, scoped to `.tr20-print
+     .rc-viz`, as a defensive backstop: `charts.css`'s dark-mode branches select on
+     `:root[data-theme="dark"]`/`:not([data-theme="light"])`, which have HIGHER CSS specificity than
+     a plain `.rc-viz` print rule — so if a site-wide dark-theme toggle ever lands (tracked in the
+     UI-polish work split) and somehow stamps `data-theme="dark"` on `:root` while this route is
+     being rendered, the print branch would LOSE that specificity fight without `!important` here.
+     Today nothing in the codebase sets `data-theme` at all (confirmed absent — see charts.css's own
+     comment), so this is insurance against a future regression, not a fix to a bug that exists yet.
+   - `.tr20-mark` — the §6.3 / §15 provenance banner (`AD HOC · UNSEALED · as of <ts>` /
+     `SEALED · rev N · <hash prefix>`). TR-19's sidecar (already shipped, `report-renderer/src/
+     server.ts`) calls `page.pdf()` with a BLANK `headerTemplate` and a generic, document-agnostic
+     `footerTemplate` (page numbers only) — it has no channel for per-document text, and extending
+     that channel is TR-19/TR-21's call, not this ticket's file scope. So the mark is rendered as
+     ordinary page content, styled to read as an unmissable banner at the very top of the document
+     (guaranteed on page 1 — the same "once, prominently" bar TR-18's XLSX meets by putting it in
+     cell A1) AND given `position: fixed` so it repeats on every PAGE Chromium's print pagination
+     produces from a `position: fixed` element — verified against a real multi-page PDF render (see
+     the ticket report); if a future Chromium/Playwright version stops replicating fixed elements
+     per page, the page-1 banner still satisfies the bar on its own. */
+
+.tr20-print, .tr20-print * {
+  print-color-adjust: exact;
+  -webkit-print-color-adjust: exact;
+}
+
+.tr20-print {
+  background: #ffffff;
+  color: #0b0b0b;
+  min-height: 100vh;
+  box-sizing: border-box;
+}
+.tr20-print *, .tr20-print *::before, .tr20-print *::after { box-sizing: border-box; }
+
+/* No animation/motion in a document that only ever exists as a single static PDF frame. */
+.tr20-print, .tr20-print * {
+  animation: none !important;
+  transition: none !important;
+}
+
+/* ---- the provenance banner (in-flow on page 1; fixed so it repeats on every page — see header) */
+.tr20-mark {
+  position: fixed;
+  left: 0;
+  right: 0;
+  z-index: 1000;
+  padding: 6px 14px;
+  font: 700 10px/1.4 var(--font-body, system-ui, sans-serif);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  text-align: center;
+}
+.tr20-mark--top { top: 0; }
+.tr20-mark--bottom { bottom: 0; }
+.tr20-mark--adhoc { background: #fab219; color: #241a00; border-bottom: 1px solid #241a00; }
+.tr20-mark--bottom.tr20-mark--adhoc { border-top: 1px solid #241a00; border-bottom: 0; }
+.tr20-mark--sealed { background: #0ca30c; color: #ffffff; }
+
+/* The fixed banner overlays page content unless the content itself makes room — a bare
+   `position: fixed` element does not push anything else down. */
+.tr20-print__body { padding-top: 30px; padding-bottom: 26px; }
+
+.tr20-print__scope { padding: 0 24px 24px; }
+
+/* ---- refusal page (missing/invalid/expired/burned jobToken, or an unreachable/malformed
+   upstream — §6.3: "never a partial report and never a crash") ---- */
+.tr20-refusal {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  min-height: 60vh;
+  padding: 48px 24px;
+  text-align: center;
+}
+.tr20-refusal__title {
+  font-family: var(--font-display, serif);
+  font-weight: 700;
+  font-size: 22px;
+  margin: 0;
+}
+.tr20-refusal__body {
+  font: 400 14px/1.6 var(--font-body, system-ui, sans-serif);
+  color: #52514e;
+  max-width: 480px;
+  margin: 0;
+}
+
+/* ---- reading-measure width cap: drop it for print (render-pdf.js's technique) — the on-screen
+   `.rc-page`/`.rc-section` shells have no such cap today, but `.tr20-print__scope`'s own max-width
+   (if this page ever grows one) must never survive into print. Written as a standing rule, not
+   reactively, so a later on-screen layout change can't silently reintroduce clipped print width. */
+@media print {
+  .tr20-print, .tr20-print__scope, .tr20-print__body {
+    max-width: none !important;
+  }
+
+  /* Keep an atomic card/section whole across a page break where practical — mirrors render-pdf.js's
+     `.plate{break-inside:avoid}`. Headings never start a page orphaned from their content. */
+  .tr20-print .rc-kpi,
+  .tr20-print .rc-section,
+  .tr20-print .rc-highlight,
+  .tr20-print .rc-warning {
+    break-inside: avoid;
+  }
+  .tr20-print .rc-section__title,
+  .tr20-print .rc-header__scope {
+    break-after: avoid;
+  }
+  /* A wide table is allowed to split across pages (it has no natural "whole" size) — only its
+     header row must not separate from at least one data row. */
+  .tr20-print .rc-rtable__head {
+    break-after: avoid;
+  }
+
+  /* Defensive re-assertion of charts.css's own forced-light print palette — see the file header
+     comment on why `!important` is needed here and nowhere in charts.css itself. */
+  .tr20-print .rc-viz {
+    color-scheme: light !important;
+    --rc-surface: #fcfcfb !important;
+    --rc-text-primary: #0b0b0b !important;
+    --rc-text-secondary: #52514e !important;
+    --rc-text-muted: #898781 !important;
+    --rc-grid: #e1e0d9 !important;
+    --rc-axis: #c3c2b7 !important;
+    --rc-tooltip-bg: #fcfcfb !important;
+    --rc-tooltip-border: rgba(11, 11, 11, 0.1) !important;
+    --rc-series-1: #2a78d6 !important; --rc-series-2: #eb6834 !important; --rc-series-3: #1baf7a !important;
+    --rc-series-4: #eda100 !important; --rc-series-5: #e87ba4 !important; --rc-series-6: #008300 !important;
+    --rc-series-7: #4a3aa7 !important; --rc-series-8: #e34948 !important;
+    --rc-good: #0ca30c !important; --rc-warning: #fab219 !important; --rc-serious: #ec835a !important;
+    --rc-critical: #d03b3b !important; --rc-delta-up-good: #006300 !important;
+  }
+}

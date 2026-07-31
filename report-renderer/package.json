@@ -1,0 +1,27 @@
+{
+  "name": "gaiada-report-renderer",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Gaiada report-renderer sidecar (tracker/reporting TR-19) — the only image in the estate carrying Chromium; renders an internal platform-ui print route to print-grade PDF via Playwright.",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "start": "tsx src/server.ts",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "express": "^4.21.0",
+    "playwright": "1.61.1"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/node": "^22.9.0",
+    "@types/supertest": "^6.0.2",
+    "supertest": "^7.0.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.5"
+  }
+}

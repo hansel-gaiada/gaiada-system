@@ -1,0 +1,78 @@
+{
+  "name": "reports-morning-escalation (CRON)",
+  "meta": {
+    "description": "TR-11, Blueprint §10 flow 3. Daily 09:00: GET checkins/missed-yesterday (no `date` -> defaults to YESTERDAY server-side) direct-to-platform under wf:reports-morning-escalation (company_admin). The read groups yesterday's auto_missed check-ins by UNIT and resolves each unit's own lead(s) server-side ('whoever holds manager AND is a current member of that same unit' -- checkins.controller.ts's missedYesterday, the same in-app narrowing TR-09 already applies elsewhere, since no per-org-node manager-grant Cerbos primitive exists yet). This flow does ZERO grouping/routing logic itself -- it only fans out ONE in-app notification per (unit, lead) pair the platform already resolved, which is what keeps this 'the right lead, never a broadcast': a unit with no resolvable lead is skipped here, not escalated to someone outside it. A day with no misses returns `byUnit: []` and this flow delivers nothing (same quiet-by-construction shape as the eod-reminder flow). Env: PLATFORM_URL, PLATFORM_SERVICE_TOKEN, AGENCY_TENANT_ID, HUB_SERVICE_TOKEN."
+  },
+  "nodes": [
+    {
+      "parameters": { "rule": { "interval": [{ "field": "cronExpression", "expression": "0 9 * * *" }] } },
+      "name": "Daily 09:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.PLATFORM_URL }}/api/{{ $env.AGENCY_TENANT_ID }}/checkins/missed-yesterday",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{ $env.PLATFORM_SERVICE_TOKEN }}" },
+            { "name": "x-obo-provider", "value": "n8n" },
+            { "name": "x-obo-external-id", "value": "wf:reports-morning-escalation" }
+          ]
+        },
+        "options": {}
+      },
+      "name": "GET missed-yesterday",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [220, 0],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "jsCode": "// One item per (unit, lead) that actually has BOTH a miss and a resolvable lead. A unit whose\n// leadUserIds is empty (no manager placed inside that unit -- the open architectural gap the\n// endpoint itself documents) is skipped here, never escalated to a lead outside it.\nconst body = $input.first().json.body ?? $input.first().json;\nconst date = body.date;\nconst byUnit = Array.isArray(body.byUnit) ? body.byUnit : [];\nconst out = [];\nfor (const u of byUnit) {\n  if (!u.missedUserIds?.length || !u.leadUserIds?.length) continue;\n  for (const leadUserId of u.leadUserIds) {\n    out.push({ json: { tenantId: $env.AGENCY_TENANT_ID, recipientId: leadUserId, unitNodeId: u.unitNodeId, count: u.missedUserIds.length, date } });\n  }\n}\nreturn out;"
+      },
+      "name": "Fan out per (unit, lead)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [440, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://mcp-hub:3003/mcp",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{ $env.HUB_SERVICE_TOKEN }}" },
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "Accept", "value": "application/json, text/event-stream" },
+            { "name": "x-obo-provider", "value": "n8n" },
+            { "name": "x-obo-external-id", "value": "wf:reports-morning-escalation" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", id: 1, method: \"tools/call\", params: { name: \"notify\", arguments: { tenantId: $json.tenantId, recipientId: $json.recipientId, type: \"checkin_missed_escalation\", payload: { unitNodeId: $json.unitNodeId, count: $json.count, date: $json.date } } } }) }}",
+        "options": { "response": { "response": { "responseFormat": "text" } } }
+      },
+      "name": "MCP notify (lead, in-app)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [660, 0],
+      "onError": "continueRegularOutput"
+    }
+  ],
+  "connections": {
+    "Daily 09:00": { "main": [[{ "node": "GET missed-yesterday", "type": "main", "index": 0 }]] },
+    "GET missed-yesterday": { "main": [[{ "node": "Fan out per (unit, lead)", "type": "main", "index": 0 }]] },
+    "Fan out per (unit, lead)": { "main": [[{ "node": "MCP notify (lead, in-app)", "type": "main", "index": 0 }]] }
+  },
+  "settings": {},
+  "pinData": {}
+}

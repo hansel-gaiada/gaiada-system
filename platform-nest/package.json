@@ -28,6 +28,7 @@
     "@opentelemetry/sdk-metrics": "^2.9.0",
     "@opentelemetry/sdk-node": "^0.220.0",
     "dotenv": "^16.4.5",
+    "exceljs": "^4.4.0",
     "ioredis": "^5.11.1",
     "jose": "^6.2.3",
     "pg": "^8.13.1",

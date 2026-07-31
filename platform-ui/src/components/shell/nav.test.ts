@@ -8,12 +8,15 @@ const base: Me = {
 };
 
 describe("navFor (RBAC-gated visibility)", () => {
-  it("member sees Workspace/Organization/Departments/Business/Intelligence/Systems but no Settings, no Rollups", () => {
+  it("member sees Workspace/Organization/Departments/Business/Reports/Intelligence/Systems but no Settings, no Rollups", () => {
     const groups = navFor({ ...base, roles: [{ role: "member", scopeType: "company", scopeId: "c1" }] });
     const labels = groups.map((g) => g.label);
-    expect(labels).toEqual(["Workspace", "Organization", "Departments", "Business", "Intelligence", "Systems"]);
+    expect(labels).toEqual(["Workspace", "Organization", "Departments", "Business", "Reports", "Intelligence", "Systems"]);
     const business = groups.find((g) => g.label === "Business")!;
     expect(business.items.map((i) => i.label)).not.toContain("Rollups");
+    // TR-17: a plain member always sees the self/scoped grain reports, never the exec-only Company one.
+    const reports = groups.find((g) => g.label === "Reports")!;
+    expect(reports.items.map((i) => i.label)).toEqual(["My Report", "Project Reports", "Department Reports"]);
     // Companies moved into the Organization Overview; Organization = Overview only.
     const org = groups.find((g) => g.label === "Organization")!;
     expect(org.items.map((i) => i.label)).toEqual(["Overview"]);
@@ -41,6 +44,9 @@ describe("navFor (RBAC-gated visibility)", () => {
     expect(groups.flatMap((g) => g.items).some((i) => i.label === "Settings" && i.href === "/admin")).toBe(true);
     const business = groups.find((g) => g.label === "Business")!;
     expect(business.items.map((i) => i.label)).toContain("Rollups");
+    // Same `rollups.view` grant also unlocks the exec-only Company Report (§8: company-grain = exec-only).
+    const reports = groups.find((g) => g.label === "Reports")!;
+    expect(reports.items.map((i) => i.label)).toContain("Company Report");
   });
 });
 

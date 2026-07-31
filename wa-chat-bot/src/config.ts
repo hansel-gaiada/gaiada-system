@@ -161,6 +161,11 @@ export const config = {
   // (e.g. an AI-gateway reply taking a few seconds). The boot reconciler ignores this (a
   // fresh process start has no in-flight rows of its own to race against).
   intakeReconcileMinAgeMs: Number(process.env.INTAKE_RECONCILE_MIN_AGE_MS ?? 60_000),
+  // TR-11: how long a check-in reminder's "awaiting reply" state survives before it's abandoned
+  // (checkin-reminder.ts). Default 12h comfortably covers 17:30 reminder -> any reply that evening
+  // or early the next morning, while expiring well before the NEXT day's 17:30 reminder — so a
+  // stale, unanswered reminder can never be mistaken for a reply to a newer one.
+  checkinReminderTtlMs: Number(process.env.CHECKIN_REMINDER_TTL_MS ?? 12 * 60 * 60 * 1000),
 };
 
 export const aiEnabled = config.geminiApiKey.length > 0;

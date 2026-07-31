@@ -477,6 +477,38 @@ services:
       platform:
         condition: service_healthy
 
+  # TR-19 (tracker/reporting §6.3) — report-renderer sidecar. The ONLY image in the estate
+  # carrying Chromium (Playwright); platform-ui's own image stays browser-free (Next standalone).
+  # Renders an internal platform-ui print route (TR-20) to print-grade PDF for report exports
+  # (TR-21 mints the one-shot jobToken URL this service is handed). Internal network ONLY — no
+  # published port here by design; holds no tenant credential, only the shared RENDERER_TOKEN.
+  # Origin-locked to PLATFORM_UI_INTERNAL_URL (src/auth.ts's isAllowedRenderUrl) so a leaked
+  # token cannot turn this into an SSRF proxy against the internal network — the same discipline
+  # as ai-gateway-go's DialContext egress allowlist / search-crawl-go's egress guard.
+  # CAVEAT: Docker build unverified in this dev env (no Docker) — validate on a Docker host before
+  # deploy, same caveat already carried by ai-gateway-go/render-gateway-go. See
+  # infra/runbooks/deploy-vps.md.
+  report-renderer:
+    image: ghcr.io/${GHCR_OWNER:-hansel-gaiada}/gaiada-report-renderer:${GAIADA_TAG:-latest}
+    restart: unless-stopped
+    environment:
+      RENDERER_TOKEN: ${RENDERER_TOKEN:?}
+      # TR-20/21 are not built yet; this points at platform-ui's internal (unpublished-outside-
+      # the-network) origin so the render/SSRF guard has a real value to lock against today, even
+      # though nothing serves a real /print/reports/:jobToken route until TR-20 lands.
+      PLATFORM_UI_INTERNAL_URL: ${PLATFORM_UI_INTERNAL_URL:-http://platform-ui:3005}
+    healthcheck:
+      # node is guaranteed present (it's the runtime); avoids relying on curl/wget being in the
+      # Playwright base image.
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3007/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+    depends_on:
+      platform-ui:
+        condition: service_started
+
   # Self-hosted transcription (5a.3) — CPU image; audio transcribes locally, never
   # leaving the box. First request downloads the model into the volume (be patient).
   # PROFILE whisper — omit to transcribe elsewhere (e.g. a local workstation). Platform's

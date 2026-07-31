@@ -1,0 +1,124 @@
+{
+  "name": "reports-eod-reminder (CRON)",
+  "meta": {
+    "description": "TR-11, Blueprint §10 flow 2. Daily 17:30: GET checkins/pending-reminders (no `date` -> defaults to TODAY server-side, in REPORTS_TZ) direct-to-platform under wf:reports-eod-reminder (company_admin). §5.3's false-negative guard means this list is ALREADY filtered by construction -- a holiday/leave day returns `pending: []` and this flow delivers NOTHING (asserted by platform-nest's own checkins.controller tests). For each pending person WITH a verified WA link (`hasWaLink` + the additive `waExternalId` field): the BOT's `/admin/notify` fetches their OWN prefill (as their OWN OBO envelope, D4) and remembers the pending reply -- see wa-chat-bot/src/checkin.ts. For each pending person WITHOUT one: an in-app notification via the hub's `notify` tool (Blueprint §10: 'others: in-app notification'). Idempotent/re-drivable: composeCheckinReminder on the bot side no-ops (sent:false) if the day is already submitted by the time this re-drives, and the platform read itself has no side effects. Env: PLATFORM_URL, PLATFORM_SERVICE_TOKEN, AGENCY_TENANT_ID, BOT_URL, BOT_ADMIN_TOKEN, HUB_SERVICE_TOKEN."
+  },
+  "nodes": [
+    {
+      "parameters": { "rule": { "interval": [{ "field": "cronExpression", "expression": "30 17 * * *" }] } },
+      "name": "Daily 17:30",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.PLATFORM_URL }}/api/{{ $env.AGENCY_TENANT_ID }}/checkins/pending-reminders",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{ $env.PLATFORM_SERVICE_TOKEN }}" },
+            { "name": "x-obo-provider", "value": "n8n" },
+            { "name": "x-obo-external-id", "value": "wf:reports-eod-reminder" }
+          ]
+        },
+        "options": {}
+      },
+      "name": "GET pending-reminders",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [220, 0],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "jsCode": "// Split into one item per pending person, tagged by delivery channel. Quiet-on-holiday/leave is\n// structural here: an empty `pending` array (§5.3's guard already filtered it) yields ZERO items,\n// so nothing downstream fires -- there is nothing to special-case.\nconst body = $input.first().json.body ?? $input.first().json;\nconst date = body.date;\nconst pending = Array.isArray(body.pending) ? body.pending : [];\nreturn pending.map((p) => ({\n  json: p.hasWaLink && p.waExternalId\n    ? { channel: 'wa', tenantId: $env.AGENCY_TENANT_ID, chatId: p.waExternalId, userId: p.userId, date }\n    : { channel: 'inapp', tenantId: $env.AGENCY_TENANT_ID, recipientId: p.userId, date },\n}));"
+      },
+      "name": "Split by channel",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [440, 0]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "typeValidation": "loose", "version": 2 },
+          "conditions": [
+            {
+              "id": "is-wa",
+              "leftValue": "={{ $json.channel }}",
+              "rightValue": "wa",
+              "operator": { "type": "string", "operation": "equals" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "WA-linked?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [660, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.BOT_URL }}/admin/notify",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [{ "name": "Authorization", "value": "=Bearer {{ $env.BOT_ADMIN_TOKEN }}" }]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ tenantId: $json.tenantId, chatId: $json.chatId }) }}",
+        "options": {}
+      },
+      "name": "Bot: /admin/notify (WA)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [880, -100],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://mcp-hub:3003/mcp",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{ $env.HUB_SERVICE_TOKEN }}" },
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "Accept", "value": "application/json, text/event-stream" },
+            { "name": "x-obo-provider", "value": "n8n" },
+            { "name": "x-obo-external-id", "value": "wf:reports-eod-reminder" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", id: 1, method: \"tools/call\", params: { name: \"notify\", arguments: { tenantId: $json.tenantId, recipientId: $json.recipientId, type: \"checkin_reminder\", payload: { date: $json.date } } } }) }}",
+        "options": { "response": { "response": { "responseFormat": "text" } } }
+      },
+      "name": "MCP notify (in-app)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [880, 100],
+      "onError": "continueRegularOutput"
+    }
+  ],
+  "connections": {
+    "Daily 17:30": { "main": [[{ "node": "GET pending-reminders", "type": "main", "index": 0 }]] },
+    "GET pending-reminders": { "main": [[{ "node": "Split by channel", "type": "main", "index": 0 }]] },
+    "Split by channel": { "main": [[{ "node": "WA-linked?", "type": "main", "index": 0 }]] },
+    "WA-linked?": {
+      "main": [
+        [{ "node": "Bot: /admin/notify (WA)", "type": "main", "index": 0 }],
+        [{ "node": "MCP notify (in-app)", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": {},
+  "pinData": {}
+}

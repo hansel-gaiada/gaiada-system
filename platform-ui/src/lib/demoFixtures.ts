@@ -8,6 +8,8 @@ import "server-only";
 import { pmDemo, allTrackerNotifications, pmTasksForUser } from "./demoPm";
 import { meetingsDemo } from "./demoMeetings";
 import { pipelineDemo } from "./demoPipeline";
+import { reportsDemo } from "./demoReports";
+import { checkinsDemo } from "./demoCheckins";
 
 export interface DemoResult {
   status: number;
@@ -1198,6 +1200,86 @@ function saveSemStore(store: SemStore): void {
   writeFileSync(SEM_STORE_PATH, JSON.stringify(store));
 }
 
+// SM-22 — client-facing reports demo store. Same file-backed rationale as the SEM store above.
+const REPORTS_STORE_PATH = join(tmpdir(), "gaiada-demo-search-reports.json");
+
+interface DemoKpiTarget { metric: string; target: number; direction: string }
+interface DemoReport {
+  id: string; engagementId: string; period: string | null; kind: string; status: string;
+  metrics: { rankTop10: number; criticalFindingsOpen: number; kpiTargets: DemoKpiTarget[] };
+  narrativeMd: string | null; fileId: string | null; deliverableId: string | null;
+  approvedBy: string | null; approvedAt: string | null; deliveredAt: string | null;
+  created_at: string; updated_at: string;
+  /** Demo-only tag (not a real search_reports column) driving demoReportPreview's honesty banner —
+   *  see that function's own header note on why the preview is deliberately NOT the real renderer. */
+  demoSimulated?: "none" | "mixed" | "all";
+}
+interface ReportsStore { reports: DemoReport[] }
+
+// sm-report-1 demos the FULL delivered lifecycle against REAL (non-simulated) data, with a linked
+// deliverable (sm-eng-1 carries `projectId: "p-seo-1"`, so delivery would create one for real too —
+// see the deliver handler below). sm-report-2 demos in_review with a MIXED real/simulated banner —
+// sm-eng-1's own rank data is seeded under simulate mode (DEMO_ENGAGEMENT_PROVIDER_MODE), so a real
+// deployment reading this same engagement would show the identical mixed disclosure honestly.
+const REPORTS_STORE_SEED: ReportsStore = {
+  reports: [
+    {
+      id: "sm-report-1", engagementId: "sm-eng-1", period: "2026-06", kind: "monthly", status: "delivered",
+      metrics: { rankTop10: 4, criticalFindingsOpen: 1, kpiTargets: [{ metric: "organic_sessions", target: 5000, direction: "up" }] },
+      narrativeMd: "## June 2026\nOrganic visibility improved steadily this month, with four tracked keywords now ranking top-10. One critical technical finding remains open and is prioritized for July.",
+      fileId: "demo-file-report-1", deliverableId: "dl-3",
+      approvedBy: DEMO_USER_ID, approvedAt: "2026-07-02T10:00:00Z", deliveredAt: "2026-07-02T10:05:00Z",
+      created_at: "2026-07-01T09:00:00Z", updated_at: "2026-07-02T10:05:00Z", demoSimulated: "none",
+    },
+    {
+      id: "sm-report-2", engagementId: "sm-eng-1", period: "2026-07", kind: "monthly", status: "in_review",
+      metrics: { rankTop10: 6, criticalFindingsOpen: 0, kpiTargets: [{ metric: "organic_sessions", target: 5000, direction: "up" }] },
+      narrativeMd: "## July 2026 (draft)\nRankings continue trending up — six keywords now sit in the top 10. No open critical findings remain. Some figures in this draft come from the platform's simulate-mode rank data and are marked accordingly below.",
+      fileId: null, deliverableId: null, approvedBy: null, approvedAt: null, deliveredAt: null,
+      created_at: "2026-07-29T09:00:00Z", updated_at: "2026-07-29T09:00:00Z", demoSimulated: "mixed",
+    },
+  ],
+};
+
+function loadReportsStore(): ReportsStore {
+  try {
+    return JSON.parse(readFileSync(REPORTS_STORE_PATH, "utf8")) as ReportsStore;
+  } catch {
+    writeFileSync(REPORTS_STORE_PATH, JSON.stringify(REPORTS_STORE_SEED));
+    return JSON.parse(JSON.stringify(REPORTS_STORE_SEED)) as ReportsStore;
+  }
+}
+
+function saveReportsStore(store: ReportsStore): void {
+  writeFileSync(REPORTS_STORE_PATH, JSON.stringify(store));
+}
+
+/** A DELIBERATELY SIMPLIFIED stand-in for platform-nest's `renderReportMarkdown` (reports.ts) — this
+ *  UI project cannot import a platform-nest module, so this exists only to prove the console's
+ *  preview pane renders something structurally shaped like the real thing (banner placement, honesty
+ *  language), same posture as every other demo fixture here (static/derived, never production logic).
+ *  A newly-drafted (non-seeded) report has no `demoSimulated` tag and renders as fully real. */
+function demoReportPreview(row: DemoReport): { markdown: string; anySimulated: boolean; allSimulated: boolean; filename: string } {
+  const tag = row.demoSimulated ?? "none";
+  const anySimulated = tag !== "none";
+  const allSimulated = tag === "all";
+  const lines: string[] = [`# Cedar Group — ${row.kind} report — ${row.period ?? "—"}`, ""];
+  if (allSimulated) {
+    lines.push("> ⚠️ **SIMULATED DATA.** Every figure in this report was produced by the platform's simulate/demo mode.", "");
+  } else if (anySimulated) {
+    lines.push("> ⚠️ **MIXED DATA.** Some figures below are marked **[SIMULATED]** — those are demo/test values, not real performance.", "");
+  }
+  lines.push("## Summary", row.narrativeMd?.trim() || "_No narrative drafted._", "");
+  lines.push("## Search rankings", `- Keywords currently ranking top-10: **${row.metrics.rankTop10}**${anySimulated ? " **[SIMULATED]**" : ""}`, "");
+  lines.push("## Technical audits", `- Open critical findings: **${row.metrics.criticalFindingsOpen}**`, "");
+  lines.push("---", `_Report id ${row.id}. Rendered as Markdown — a formatted PDF layer is not yet built (platform gap, tracked separately)._`);
+  const periodSlug = (row.period ?? "period").replace(/[^a-zA-Z0-9-]/g, "");
+  return {
+    markdown: lines.join("\n"), anySimulated, allSimulated,
+    filename: `seo-report-${row.kind}-${periodSlug}-${row.id.slice(0, 8)}${anySimulated ? "-SIMULATED" : ""}.md`,
+  };
+}
+
 // Demo cap mirrors config.search.maxKeywordsPerSet's default (SEARCH_MAX_KEYWORDS_PER_SET, SM-32) —
 // kept a literal rather than imported since demoFixtures.ts cannot reach across into platform-nest.
 const DEMO_MAX_KEYWORDS_PER_SET = 1000;
@@ -1518,6 +1600,14 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
   // Delivery pipeline runs/stages/gates (WD-02 run workspace) — stateful store (lib/demoPipeline.ts).
   const pipeline = pipelineDemo(method, p, url.searchParams, body);
   if (pipeline) return pipeline;
+
+  // Tracker/reporting grain documents (TR-17) — stateless per-request fixtures (lib/demoReports.ts).
+  const reports = reportsDemo(method, p, url.searchParams, body, userId);
+  if (reports) return reports;
+
+  // Check-in subsystem (TR-10/TR-38) — stateful in-memory store (lib/demoCheckins.ts).
+  const checkins = checkinsDemo(method, p, url.searchParams, body, userId);
+  if (checkins) return checkins;
 
   const currentIdentity = getCurrentDemoIdentity(userId);
 
@@ -3164,6 +3254,109 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
       if (endDate) rows = rows.filter((r) => r.date <= endDate);
       rows = rows.slice().sort((a, b2) => (a.date < b2.date ? 1 : -1)).slice(0, limit);
       return ok(rows);
+    }
+
+    // SM-22 — client-facing reports. File-backed store (same rationale as the SEM/keyword stores
+    // above: a POST/PATCH in a server-action chunk must be visible to a GET in the page-render
+    // chunk). sm-report-1 demos the FULL delivered lifecycle (real data, a linked deliverable via
+    // sm-eng-1's own p-seo-1 project — see ENGAGEMENTS above); sm-report-2 demos the in_review state
+    // with a MIXED real/simulated banner, so the honesty disclosure is reachable without a live
+    // backend. Preview markdown here is a SEPARATE, deliberately simplified rendering (not a call
+    // into reports.ts's renderReportMarkdown, which is a platform-nest-only module this UI project
+    // cannot import) — it exists only to prove the console's preview pane renders SOMETHING
+    // structurally shaped like the real markdown, same posture as every other demo fixture in this
+    // file (static/derived data, never the production code path).
+    const reportsListMatch = p.match(/\/modules\/search\/engagements\/([^/]+)\/reports$/);
+    if (reportsListMatch && m === "GET") {
+      const engagementId = reportsListMatch[1];
+      const rows = loadReportsStore().reports.filter((r) => r.engagementId === engagementId)
+        .slice().sort((a, b2) => (a.created_at < b2.created_at ? 1 : -1));
+      return ok(rows);
+    }
+    if (reportsListMatch && m === "POST") {
+      const engagementId = reportsListMatch[1];
+      if (!DEMO_ENGAGEMENT_PROPERTY[engagementId]) return { status: 404, json: { error: "engagement not found" } };
+      const b = JSON.parse(body || "{}") as { period?: string; kind?: string };
+      if (!b.period) return { status: 400, json: { error: "period required" } };
+      const kind = b.kind ?? "monthly";
+      const store = loadReportsStore();
+      const existing = store.reports.find((r) => r.engagementId === engagementId && r.period === b.period && r.kind === kind);
+      if (existing && existing.status !== "draft") {
+        return { status: 400, json: { error: `report ${existing.id} is already '${existing.status}' — cannot re-draft past 'draft'` } };
+      }
+      const now = new Date().toISOString();
+      const narrativeMd = `## ${b.period} summary (demo draft)\n- Keywords ranking top-10: 5\n- Open critical audit findings: 0`;
+      if (existing) {
+        existing.narrativeMd = narrativeMd; existing.updated_at = now;
+      } else {
+        store.reports.push({
+          id: genDemoId("sm-report"), engagementId, period: b.period, kind, status: "draft",
+          metrics: { rankTop10: 5, criticalFindingsOpen: 0, kpiTargets: [] },
+          narrativeMd, fileId: null, deliverableId: null, approvedBy: null, approvedAt: null, deliveredAt: null,
+          created_at: now, updated_at: now,
+        });
+      }
+      saveReportsStore(store);
+      const row = store.reports.find((r) => r.engagementId === engagementId && r.period === b.period && r.kind === kind)!;
+      return { status: 201, json: { id: row.id, engagementId, period: b.period, kind, status: "draft", metrics: row.metrics, narrativeMd, draftedVia: "fallback", model: null } };
+    }
+    const reportDetailMatch = p.match(/\/modules\/search\/reports\/([^/]+)$/);
+    if (reportDetailMatch && m === "GET") {
+      const row = loadReportsStore().reports.find((r) => r.id === reportDetailMatch[1]);
+      if (!row) return { status: 404, json: { error: "report not found" } };
+      return ok(row);
+    }
+    if (reportDetailMatch && m === "PATCH") {
+      const store = loadReportsStore();
+      const row = store.reports.find((r) => r.id === reportDetailMatch[1]);
+      if (!row) return { status: 404, json: { error: "report not found" } };
+      const b = JSON.parse(body || "{}") as { narrativeMd?: string; status?: string };
+      if (b.status !== undefined) {
+        if (b.status === "in_review") {
+          if (row.status !== "draft") return { status: 400, json: { error: `cannot submit for review from '${row.status}'` } };
+          row.status = "in_review";
+        } else if (b.status === "draft") {
+          if (row.status !== "in_review") return { status: 400, json: { error: `cannot send back to draft from '${row.status}'` } };
+          row.status = "draft";
+        } else {
+          return { status: 400, json: { error: "status must be 'in_review' or 'draft'" } };
+        }
+      }
+      if (b.narrativeMd !== undefined) row.narrativeMd = b.narrativeMd;
+      row.updated_at = new Date().toISOString();
+      saveReportsStore(store);
+      return ok({ id: row.id, status: row.status });
+    }
+    const reportApproveMatch = p.match(/\/modules\/search\/reports\/([^/]+)\/approve$/);
+    if (reportApproveMatch && m === "POST") {
+      const store = loadReportsStore();
+      const row = store.reports.find((r) => r.id === reportApproveMatch[1]);
+      if (!row) return { status: 404, json: { error: "report not found" } };
+      if (row.status !== "in_review") return { status: 400, json: { error: `cannot approve a '${row.status}' report — approval requires status='in_review'` } };
+      row.status = "approved"; row.approvedBy = DEMO_USER_ID; row.approvedAt = new Date().toISOString(); row.updated_at = row.approvedAt;
+      saveReportsStore(store);
+      return ok({ id: row.id, status: "approved" });
+    }
+    const reportPreviewMatch = p.match(/\/modules\/search\/reports\/([^/]+)\/preview$/);
+    if (reportPreviewMatch && m === "GET") {
+      const row = loadReportsStore().reports.find((r) => r.id === reportPreviewMatch[1]);
+      if (!row) return { status: 404, json: { error: "report not found" } };
+      return ok(demoReportPreview(row));
+    }
+    const reportDeliverMatch = p.match(/\/modules\/search\/reports\/([^/]+)\/deliver$/);
+    if (reportDeliverMatch && m === "POST") {
+      const store = loadReportsStore();
+      const row = store.reports.find((r) => r.id === reportDeliverMatch[1]);
+      if (!row) return { status: 404, json: { error: "report not found" } };
+      if (row.status !== "approved") return { status: 400, json: { error: `cannot deliver a '${row.status}' report — delivery requires status='approved'` } };
+      const preview = demoReportPreview(row);
+      row.status = "delivered"; row.fileId = genDemoId("demo-file"); row.deliverableId = genDemoId("dl");
+      row.deliveredAt = new Date().toISOString(); row.updated_at = row.deliveredAt;
+      saveReportsStore(store);
+      return ok({
+        id: row.id, status: "delivered", fileId: row.fileId, filename: preview.filename,
+        deliverableId: row.deliverableId, anySimulated: preview.anySimulated, allSimulated: preview.allSimulated,
+      });
     }
 
     // Anything else under /modules/search/* (briefs, ai-visibility, pacing/metrics-daily) is

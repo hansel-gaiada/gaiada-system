@@ -177,9 +177,11 @@ describe.skipIf(!TEST_URL)("TR-08 report-rollups (live PG + RLS)", () => {
   describe("§5.4 regression: discipline.overdue_open does not multiply over a multi-day range", () => {
     const END = "2026-07-20";
     let overdueTask: string;
+    let bob: string; // TR-36: the post-reassignment owner
 
     beforeAll(async () => {
       overdueTask = newId();
+      bob = await createUser("bob@tr36.test");
       await withTenants([co], (c) =>
         c.query(
           `INSERT INTO pm_tasks (id, tenant_id, project_id, title, due_date, origin_site)
@@ -189,11 +191,64 @@ describe.skipIf(!TEST_URL)("TR-08 report-rollups (live PG + RLS)", () => {
       );
       await withTenants([co], (c) =>
         c.query(
-          `INSERT INTO pm_task_assignees (id, tenant_id, task_id, role, assignee_kind, assignee_ref, user_id, origin_site)
-           VALUES ($1,$2,$3,'owner','person',$4,$5,'central')`,
+          // valid_from MUST be explicit: the column's DEFAULT is CURRENT_DATE (the suite's real
+          // wall-clock date), which is AFTER every fixed historical date this file uses — so relying
+          // on the default makes the as-of join in computeOverdueOpen match nothing and every
+          // attribution assertion below silently reads as "unattributed". Same trap TR-34 hit in
+          // fact-job.db.test.ts.
+          `INSERT INTO pm_task_assignees (id, tenant_id, task_id, role, assignee_kind, assignee_ref, user_id, valid_from, origin_site)
+           VALUES ($1,$2,$3,'owner','person',$4,$5,'2026-01-01'::date,'central')`,
           [newId(), co, overdueTask, alice, alice],
         ),
       );
+    });
+
+    // TR-36: the joins in computeOverdueOpen are as-of-dated. Before that, a task reassigned across
+    // days had MULTIPLE owner rows and the LEFT JOIN emitted one output row per historical owner —
+    // each counted again — so a single overdue task reported as 2, 3, N. It inflates silently and
+    // upward, which is the failure class this program keeps producing.
+    it("a task REASSIGNED across days is counted ONCE, not once per historical owner", async () => {
+      const period = formatPeriodRange(END, END);
+
+      // Close alice's interval the day before END and open bob's on END — a real transfer, the same
+      // close-yesterday/open-today shape pm.controller.ts's applyRoleTransition writes.
+      await withTenants([co], async (c) => {
+        await c.query(
+          `UPDATE pm_task_assignees SET valid_to = $1::date
+             WHERE tenant_id = $2 AND task_id = $3 AND role = 'owner' AND valid_to IS NULL`,
+          ["2026-07-19", co, overdueTask],
+        );
+        await c.query(
+          `INSERT INTO pm_task_assignees (id, tenant_id, task_id, role, assignee_kind, assignee_ref, user_id, valid_from, origin_site)
+           VALUES ($1,$2,$3,'owner','person',$4,$5,$6::date,'central')`,
+          [newId(), co, overdueTask, bob, bob, END],
+        );
+      });
+
+      await recomputeRollups(co, period);
+      const rows = await metricRows(period, "discipline.overdue_open");
+
+      const company = rows.find((r) => Object.keys(r.dimensions).length === 0);
+      expect(company, "company-grain overdue_open row must exist").toBeTruthy();
+      // ONE overdue task exists. Two historical owner rows must not make it two.
+      expect(Number(company!.numerator)).toBe(1);
+
+      // And it is credited to the owner AS OF the range end (bob), not the historical one (alice).
+      const bobRow = rows.find((r) => r.dimensions.userId === bob);
+      const aliceRow = rows.find((r) => r.dimensions.userId === alice);
+      expect(bobRow, "the as-of-END owner (bob) must be credited").toBeTruthy();
+      expect(Number(bobRow!.numerator)).toBe(1);
+      expect(aliceRow, "the CLOSED historical owner (alice) must not be credited at END").toBeFalsy();
+
+      // Restore the fixture for any later test in this describe block.
+      await withTenants([co], async (c) => {
+        await c.query(`DELETE FROM pm_task_assignees WHERE tenant_id = $1 AND task_id = $2 AND user_id = $3`, [co, overdueTask, bob]);
+        await c.query(
+          `UPDATE pm_task_assignees SET valid_to = NULL
+             WHERE tenant_id = $1 AND task_id = $2 AND role = 'owner' AND user_id = $3`,
+          [co, overdueTask, alice],
+        );
+      });
     });
 
     it("a 1-day period and a 30-day period ending on the SAME date report the IDENTICAL count", async () => {

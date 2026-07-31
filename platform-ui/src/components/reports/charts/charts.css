@@ -137,11 +137,30 @@
   }
   .rc-viz, .rc-viz * { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
   .rc-tooltip, .rc-crosshair { display: none !important; }
+  /* Un-scrolling a wide chart isn't enough on its own — every scroll-container
+     child carries an inline `min-width` (sized for on-screen legibility at a
+     wide day/bucket count) that, once overflow stops clipping it, draws right
+     off the edge of the card instead of shrinking to fit the page. `!important`
+     on a real stylesheet rule is one of the few things that beats an inline
+     style, so this is the one clean way to override it without threading a
+     print-mode prop through every chart. TR-20 owns the final "how does a
+     very-wide chart paginate in the PDF" call — this just keeps the kit from
+     visibly breaking its own card in the meantime. */
   .rc-scroll { overflow: visible !important; }
+  .rc-scroll > * { min-width: 0 !important; }
 }
 
-/* ---- shared chart shell ---- */
-.rc-viz { display: flex; flex-direction: column; gap: 10px; }
+/* ---- shared chart shell ----
+   Every component in the kit renders into a `.rc-viz` root — establishing the
+   surface fill + text color HERE (not just leaving them as unused custom
+   properties) means a chart dropped anywhere, wrapped in a card or bare, is
+   self-consistent in dark mode: its own text always sits on its own matching
+   background, never on whatever plane happens to be behind it. (Caught by
+   rendering the kit in dark mode during TR-16's own QA pass — a chart used
+   standalone, outside a `.rc-section`/`.lux-card`, otherwise renders
+   light-flipped text on the still-light page plane behind it, since the site
+   has no dark theme of its own yet.) */
+.rc-viz { display: flex; flex-direction: column; gap: 10px; background: var(--rc-surface); color: var(--rc-text-primary); }
 .rc-legend { display: flex; flex-wrap: wrap; gap: 14px; font: 400 12px var(--font-body); color: var(--rc-text-secondary); }
 .rc-legend__item { display: inline-flex; align-items: center; gap: 6px; }
 .rc-legend__swatch { display: inline-block; width: 9px; height: 9px; flex: 0 0 9px; }
@@ -236,6 +255,14 @@
   font: 700 10px var(--font-body); color: var(--rc-text-primary);
 }
 .rc-cohort__ticks { display: flex; justify-content: space-between; font: 400 10px var(--font-body); color: var(--rc-text-muted); }
+
+/* ---- plain ReportTable renderer (ReportTableView) ---- */
+.rc-rtable { display: flex; flex-direction: column; min-width: 0; font: 400 13px var(--font-body); color: var(--rc-text-primary); }
+.rc-rtable__head, .rc-rtable__row { display: grid; grid-template-columns: var(--rc-rtable-cols, 1fr); gap: 8px; padding: 8px 0; }
+.rc-rtable__head { font: 700 10px var(--font-body); letter-spacing: 0.06em; text-transform: uppercase; color: var(--rc-text-muted); border-bottom: 0.5px solid var(--rc-axis); }
+.rc-rtable__row { border-bottom: 0.5px solid var(--rc-grid); }
+.rc-rtable__row--total { font-weight: 700; border-bottom: 0; border-top: 0.5px solid var(--rc-axis); }
+.rc-rtable__cell--right { justify-self: end; text-align: right; }
 
 @media (prefers-reduced-motion: reduce) {
   .rc-crosshair, .rc-tooltip, .rc-mark--lift { transition: none; }

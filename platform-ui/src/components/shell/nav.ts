@@ -54,6 +54,16 @@ export function navFor(me: Me, tenantId?: string | null, departments: { id: stri
     ] },
     { label: "Departments", items: deptItems },
     { label: "Business", items: business },
+    // TR-17: the tracker/reporting program's grain report pages. Person/project/department are
+    // always listed (§8 lets everyone read at least their own person-grain document; the BFF is
+    // the real authority for project/department scoping) — Company is nav-gated by `rollups.view`
+    // the same way the existing Rollups link is, since §8 makes company-grain exec-only.
+    { label: "Reports", items: [
+      { label: "My Report", href: "/reports/person", icon: "pulse" },
+      { label: "Project Reports", href: "/reports/project", icon: "pulse" },
+      { label: "Department Reports", href: "/reports/department", icon: "pulse" },
+      ...(can(me, "rollups.view") ? [{ label: "Company Report", href: "/reports/company", icon: "pulse" } as NavItem] : []),
+    ] },
     { label: "Intelligence", items: [
       { label: "Knowledge", href: "/knowledge", icon: "box" },
       { label: "AI Agents", href: "/agents", icon: "agents" },

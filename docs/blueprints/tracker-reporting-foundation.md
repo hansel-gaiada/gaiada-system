@@ -1089,7 +1089,14 @@ mcpTools: [
     inputSchema: { type: "object", properties: { tenantId: {type:"string"} }, required: ["tenantId"] } },
   { name: "checkin.submit",
     description: "Submit the acting user's end-of-day check-in (summary + optional blockers). Acts only as the OBO user.",
-    minAssurance: "verified", method: "POST", pathTemplate: "/api/:tenantId/checkins",
+    // CORRECTED 2026-07-31 (TR-11): was `"verified"` — which is UNREACHABLE for this exact flow.
+    // mcp-hub's mintPrincipal() can never mint "verified" from a chat envelope (see
+    // mcp-hub/src/principal.ts:23 — "verified principals will come from the platform IdP, never from
+    // an envelope"), so the literal spec would have silently broken the WhatsApp check-in loop this
+    // same section describes three lines later. The real bar is unchanged and is enforced where it
+    // belongs — self-only + a D4-verified identity link, in the platform, proven by forgery-denial
+    // tests. Matches the convention every other module tool here already uses.
+    minAssurance: "low", method: "POST", pathTemplate: "/api/:tenantId/checkins",
     write: true, impact: "low",
     inputSchema: { type: "object", properties: { tenantId:{type:"string"}, summary:{type:"string"},
                     blockers:{type:"string"}, date:{type:"string"} }, required: ["tenantId","summary"] } },
@@ -1308,7 +1315,7 @@ File paths are repo-relative to `gaiada-system/`.
   both departments in the same proportion as their fact-sourced metrics; a test asserts the two families
   agree on the split date.
 
-### P2 — check-ins (4 tickets)
+### P2 — check-ins (5 tickets, incl. TR-38/TR-39)
 
 - **TR-09 · check-in endpoints + prefill + auto-missed** — `senior-be`. Files:
   `src/modules/reports/checkins.controller.ts`, prefill composer (live same-day derive),
@@ -1328,6 +1335,17 @@ File paths are repo-relative to `gaiada-system/`.
 - **TR-12 · compliance adversarial QA** — `qa`. Deps: TR-09..11. ⚡
   Done when: false-negative hunt passes — leave/holiday/transfer/new-hire/offboarded cases all
   produce correct expected(); OBO cannot submit for another user (Cerbos denial pinned).
+
+- **TR-39 · self may read their OWN compliance row** — `senior-be`. **NEW 2026-07-31, disclosed by TR-10
+  (§15).** `GET /checkins/compliance` is structurally self-⛔, so a person cannot see the official
+  compliance number that feeds their appraisal (metric #18 is appraisal-SAFE). TR-10 had to compute a
+  second, divergent self-formula in `platform-ui/src/lib/checkins.ts`. Files:
+  `src/modules/reports/checkins.controller.ts` (+ the Cerbos `checkin` policy: self ⊆ compliance scope for
+  own row only), then DELETE the divergent FE formula and repoint `CheckinCard`/`PersonCharts` at the
+  official grid. Deps: TR-09, TR-10. Fold into **TR-25**'s authz pass.
+  Done when: a person reads their own compliance row and it is **numerically identical** to what their lead
+  sees for them (assert equality, not merely that both return a number); a person still cannot read anyone
+  else's row; the FE has exactly ONE compliance formula.
 
 ### P3 — report documents + viewer + charts (6 tickets)
 
@@ -1454,7 +1472,7 @@ File paths are repo-relative to `gaiada-system/`.
   `CHANGELOG.md` bumps as phases land, `FRONTEND-BFF-CONTRACT.md` §15 status flips, demo seed
   extension (`npm run seed:agency` gains check-ins/facts). Deps: trailing each phase.
 
-**Totals:** P0=**8** · P1=**5** · P2=4 · P3=6 · P4=4 · P5=4 · P6=4 → **35 tickets** (TR-31/32/33 added during P0, TR-34/TR-35 during P1 — every one uncovered by a landed ticket rather than by design review; see §15), 3 Opus-tagged
+**Totals:** P0=**8** · P1=**5** · P2=**6** · P3=6 · P4=4 · P5=4 · P6=4 → **39 tickets** (TR-31/32/33 added during P0, TR-34/TR-35 during P1, TR-36/37 fixed inline during P1/P3, TR-38/39 during P2/P3 — every one uncovered by a landed ticket rather than by design review; see §15), 3 Opus-tagged
 (TR-01 opus·medium, TR-07 opus·medium, TR-25 opus·high), 12 ⚡ QA-gated.
 
 ---
@@ -1638,6 +1656,273 @@ with no tenant GUC set catches it. `lint:migration-rls` does **not** catch this 
 is on the *source* side (`pm_tasks`). **Every migration in this program that backfills must ship that
 NOBYPASSRLS-role test.** Also settled by TR-01: soft-deleted tasks ARE backfilled (attribution history
 should survive archiving), so **reporting queries must filter `pm_tasks.deleted_at` themselves**.
+
+**2026-07-31 (TR-19 landed — `report-renderer` 0.1.0 DEV-VERIFIED) · and an ESTATE-WIDE assumption was
+overturned: DOCKER IS AVAILABLE in this dev environment.**
+New standalone component `report-renderer/` (Node+Express+Playwright, ~85 lines of service + an auth/SSRF
+guard), on `mcr.microsoft.com/playwright:v1.61.1-noble` with `playwright` pinned to **exact** `1.61.1`
+(no caret — it must match the browser build baked into the base image), running as non-root `pwuser`.
+Wired into all three compose files (internal-only in vps, dev port 3007 in local), the CI unit-test matrix,
+the release image build/sign/SBOM/SLSA matrix, and `deploy.yml`'s cosign-verify list. Print technique lifted
+from `docs/blueprints/render-pdf.js` as instructed.
+
+- **⚡ THE FINDING THAT MATTERS BEYOND THIS TICKET: Docker Desktop *was* available, contradicting both my
+  brief and this estate's standing "no Docker in the dev env" caveat.** So TR-19 did not stop at unit
+  tests — it **built the image, ran the container, and produced a genuine PDF** (`PDF document, version
+  1.4, 1 page(s)`, 12,348 bytes) via real `chromium.launch()` → `page.pdf()`, then verified the full
+  auth/SSRF matrix **through the compose-managed container**: 401 no token · 401 wrong token · **403
+  disallowed origin** · 200+PDF allowed origin. Compose config validated across all three files (20
+  services). Containers and the dummy `.env` torn down afterward.
+  **Estate-wide consequence:** `ai-gateway-go`, `render-gateway-go` and others carry an unverified-
+  docker-build caveat premised on Docker being unavailable here. **That premise is stale — those caveats
+  can now be closed by actually building.** This belongs to whoever owns infra, not to this program, but
+  it is the single most reusable thing this ticket produced.
+- **The SSRF guard is the right shape.** This service renders whatever URL it is handed, so
+  `isAllowedRenderUrl` enforces same-origin against `PLATFORM_UI_INTERNAL_URL` — a leaked `RENDERER_TOKEN`
+  therefore cannot turn it into an arbitrary-URL fetcher on the internal network. Verified live (403), not
+  merely unit-tested.
+- **Honest gap, correctly stated:** only Docker Desktop was exercised, never the real Linux VPS, so both
+  the runbook and `MODULES.md` flag "re-confirm health on the actual VPS" as outstanding. `0.1.0
+  DEV-VERIFIED` is the correct status per the house vocabulary — exercised end-to-end on the local stack,
+  explicitly **not** production-verified.
+
+**2026-07-31 (TR-18 + TR-11 landed) · export + the WA check-in loop; ONE blueprint contract corrected.**
+TR-18: `report-export.ts` + the export/status/download endpoints, `exceljs` ratified (MIT, server-only,
+zero attributable advisories) — **272 reports-module tests**. TR-11: the two check-in MCP tools, a minimal
+`POST /admin/notify` on the bot, three n8n flows, and a new `GET /checkins/missed-yesterday` —
+**274 reports-module tests · wa-chat-bot 480/480 · mcp-hub 106/106**, `tsc` clean across all three.
+
+- **⚠ BLUEPRINT BUG CORRECTED · §9.2's `checkin.submit: minAssurance: "verified"` was UNREACHABLE.**
+  Verified at source: `mcp-hub/src/principal.ts:23` — *"verified principals will come from the platform
+  IdP — never from an envelope."* So the literal spec would have **silently broken the exact WhatsApp
+  check-in loop §9.2 describes three lines later**: every chat-originated submit would have failed the
+  rank check. Shipped as `"low"`, matching the convention every other module tool here uses, with the real
+  bar enforced where it belongs — **self-only + a D4-verified identity link, in the platform**. Not a
+  security relaxation: TR-11 proved it with forgery-denial tests (a body-supplied `userId`/`subjectUserId`
+  is ignored; an unverified link gets 400; two identities never cross-attribute). §9.2 is corrected inline.
+  **The lesson: an assurance tier written into a contract without checking what the minting layer can
+  actually produce is a spec that fails closed on its own happy path.**
+- **TR-18's security improvement beyond spec:** it re-authorizes on **status and download**, not only at
+  create, using the identical `authorizeReportDocumentRead` a document read uses — so access revoked
+  *after* generation is caught at download. Also: percent values export **0–100 uniformly** (stated in the
+  `Provenance` sheet, so a spreadsheet user doing arithmetic knows which they hold), PDF returns an
+  explicit 400 rather than silently downgrading, and 10k rows export in **316ms** against a 5s bar.
+- **TR-18 workarounds to revisit if the export surface grows** (both disclosed, neither hidden): generation
+  is **synchronous** because no job table exists and migrations were off-limits — `status` is typed as a
+  literal union so PDF can add `queued`/`processing`/`failed` without reshaping; and `grain`/`scopeRef` are
+  **encoded into the storage key** because `files` has no metadata column and department scopeRefs
+  (`'d-hr'`) aren't UUIDs. Round-trip tested, but it is a workaround, not a design.
+- **TR-11's disclosed limits:** the bot's pending-reminder state is **in-memory**, so a restart drops
+  in-flight reminders (a late "ok" falls through to normal Q&A rather than erroring); `missed-yesterday`
+  assumes a lead is a member of the unit they lead — a lead placed outside their unit is **skipped rather
+  than broadcast**, which is the correct failure direction. The literal WA round trip was **NOT** driven
+  (the live containers run pre-built GHCR images, so source changes need a rebuild) and the n8n flows are
+  **structure-validated but not fired** — stated plainly, matching this repo's own `mtg-dispatcher.json`
+  precedent. **TR-12 should close the "authored but unexercised" gap where it can.**
+- The other four §9.2 MCP tools (`reports.getDocument`/`listPeriods`/`getMetrics`/`getCompliance`) remain
+  unregistered — that is **TR-28**'s surface, correctly out of TR-11's scope.
+
+**2026-07-31 (TR-15 landed — ⚡ gate PASSED) · SEALING WORKS. P3 substantially complete.**
+`report-seal.ts` + `report-periods.ts` + the §6.2 period/seal/amend/pin routes + the sealed-read branch
+inserted **before** TR-13's live path (builder not forked). **214 reports-module tests green**, `tsc` clean
+under `modules/reports`, `lint:withtenants` clean (185 files) — verified independently by the architect
+after the agent hit a usage cap on its final check.
+
+Every acceptance bar is pinned by a *named* test, and it closed two bypasses that were not specified:
+- **`?revision=` to a NONEXISTENT revision → 404, never a silent fallback to another revision.** A silent
+  fallback would have let an appraisal cite "revision 3" while reading revision 1's numbers.
+- **`amend` on a non-sealed period → 409**, so "amended" can never describe a period that was never sealed.
+Also pinned: seal → docs at revision 0 across all four grains · **post-seal task completion changes the
+LIVE view but NOT the sealed document** (the ticket's whole point) · double-seal → 409 · `seal_hash`
+recomputes and matches · amend → re-seal writes revision 1 **keeping revision 0's rows** · `?revision=0`
+returns the pre-edit numbers · **rule 2: sealing a `period_kind='custom'` row → 422 with the exact
+message, never a silent skip** · rule 4: pin idempotent on the exact range · a plain member is DENIED
+seal/amend/pin (403) but CAN view periods.
+
+**Consequence: the two accepted limitations are now contained.** `overdue_open` reading today's state, and
+any post-hoc drift, can no longer reach a sealed period. **Sealing is available before the first appraisal
+period, which is what TR-14's warning required.**
+
+**2026-07-31 (TR-10 + TR-38 landed) · check-ins are usable; ONE fairness gap found (TR-39).**
+`CheckinCard` on My Work with four distinct branches (excused / submitted / not-expected / confirm-and-edit),
+the compliance heatmap wired onto the person report via TR-16's existing `CalendarHeatmap`, stateful
+DEMO_MODE fixtures seeding all four states. **836/836 platform-ui tests**, `next build` clean, Playwright
+light+dark across both a manager and an IC identity.
+- **Interaction count MEASURED, not estimated:** accept the draft as-is = **1** interaction; edit then
+  submit = **2**; with the optional blockers field = **3** ceiling. Asserted directly in tests, so the
+  ≤30s requirement is defended by the test suite rather than by intent.
+- **⚠ TR-39 (NEW — fairness, not plumbing): a person cannot see their own official compliance number.**
+  `GET /checkins/compliance` is structurally self-⛔ (TR-09's own comment says so), so TR-10 had to compute
+  self-compliance from the history endpoint with a **deliberately different formula**, documented at length
+  in `lib/checkins.ts`. That divergence is the honest workaround, but the underlying policy is wrong for
+  this program: **metric #18 `checkin_compliance` is appraisal-SAFE and feeds an appraisal axis.** A subject
+  who will be judged on a number must be able to see *that* number, not a second computation of it — the
+  same principle as §11's transparency stance and the appraisal acknowledgement trail. **Fix: permit self
+  to read their OWN row from `/checkins/compliance` (self ⊆ scope), then delete the divergent FE formula.**
+  Route through TR-25's authz pass. Until then, two different compliance numbers for one person can exist.
+- Caught before shipping: a demo seed whose fixed calendar offsets could land missed/excused days on a
+  weekend depending on the real wall-clock date, silently skipping the state it meant to seed — fixed to
+  assign by position among *working* days. Also found a live environment trap: `.env.local` had
+  `DEMO_MODE=` blank while a real backend was up on :3004, silently defeating DEMO_MODE; it set it for the
+  run and **restored the original value byte-for-byte** after.
+
+**2026-07-31 (TR-17 landed) · THE REPORTS ARE VISIBLE.** Four grain routes under
+`platform-ui/src/app/(app)/reports/{person,project,department,company}`, a typed BFF client
+(`lib/reports-data.ts`), per-grain chart compositions over TR-16's kit, DEMO_MODE fixtures for all four
+grains, and a gated "Reports" nav group. **806/806 platform-ui tests** (up from 768), `tsc` clean,
+`next build` clean, and a **Playwright light+dark pass** across every state: sealed-vs-live, all five
+warning flags, the comparison chip, `pointInTime`/`distinctOver` badges, the 403 branch per grain, the
+422 range-too-large, and a custom range with week-bucketed axis.
+
+- **Ruling 1 (screenshot, don't just build clean) paid for itself immediately — three real bugs a green
+  build passed:**
+  1. **A percent-unit bug in TR-16's `ReportTableView` that affects the REAL backend, not just demo:**
+     percent columns rendered the raw fraction (`0.86`) while `KpiTiles` a few rows above rendered `86%`.
+     Two different numbers for the same value on one page. Fixed with a unit-aware `formatCell`.
+  2. **Demo calendar-range bug:** `periodKind=month|week` with only `start` (the default request shape)
+     resolved to a **1-day** range, so every chart read "not enough history". Fixed by mirroring the real
+     backend's `resolveCalendarRange`, with a regression test. Worth noting the shape of this one — the
+     demo layer diverging from the backend's range resolution is the same class as the org-blob fixture
+     bug (TR-37): **a stand-in for another module's behaviour, written from assumption rather than from
+     that module's code.**
+  3. Demo narrative embedded a lowercased company name mid-sentence, unlike the real backend's shape.
+- **Tooling gotcha recorded for TR-20's print work:** the app shell scrolls inside `main.erp-main`, not
+  `document.body`, so a naive Playwright full-page screenshot **silently truncates**. Strip the inner
+  overflow before shooting.
+- **Honest omissions (each degraded, none stubbed as an empty frame):** the person-grain check-in
+  `CalendarHeatmap` is unwired because compliance lives behind `GET /checkins/compliance` — which **TR-09
+  has since shipped**, so this is now a small closable gap (logged as **TR-38**), not a blocker. The
+  revision picker renders `BackendPending` because `GET /reports/periods` has no controller route yet —
+  **that is TR-15's**, landing next. Burndown/CFD, workload-by-person, status/tag donut, milestone table,
+  capacity-vs-logged, cross-dept area and the unattributed-bucket tile are all absent from the live
+  document (TR-13's disclosed subset) and were correctly omitted rather than framed empty.
+
+**2026-07-31 (TR-13 + TR-14 landed) · reports are readable; ONE live-data defect fixed inline (TR-37).**
+TR-13 shipped `report-document.ts` (the backend mirror of TR-16's FE contract, field-for-field),
+`document-builder.ts`, the three §6.2 read endpoints, `resource_report_document.yaml` + an `hr_people_ops`
+derived role — **184 reports-module tests green**. TR-14 shipped `0067_report_periods_documents.sql`
+(23/23) — note the number: the doc said `0057`, the README guessed `0058`; the real head had moved to
+`0066` via concurrent search-marketing work. **The additivity proof HOLDS:** a custom range equal to a
+calendar month, and to a calendar week, returns byte-identical KPI values/numerators/denominators.
+
+- **⚠ TR-37 (fixed inline by the architect): `deriveUnitDepartments()` was reading the org blob at the
+  WRONG NESTING LEVEL, so department roll-up silently returned an EMPTY map against all real data.**
+  `company_org_structure.structure` is stored **wrapped** as `{root: OrgNode}` —
+  `sanitizeStructure()` (`admin/company-admin.controller.ts`) is its only writer and always wraps. But
+  `fact-job.ts:872` and `report-rollups.ts:363` passed the **wrapper** into a function expecting a root
+  node, so `node.kind`/`node.children` were `undefined`, the walk terminated immediately, and
+  **division → parent-department rolling no-op'd entirely: anyone placed under a DIVISION got no
+  department attribution at all.** Since the estate's org charts are departments-containing-divisions,
+  that is most of the workforce. **It passed every test because the fixtures were written in the
+  bare-root shape — they encoded the bug.** Fixed by unwrapping inside `deriveUnitDepartments` (tolerating
+  both shapes, so legacy/seeded bare-root rows still work) rather than at the two call sites, which makes
+  reintroduction structurally impossible; plus a test using the **real stored shape** that fails loudly on
+  regression. Verified: 184/184 module tests, `tsc` clean.
+  **The lesson is the important part: a fixture written from the same misreading as the code cannot
+  catch that misreading.** Where a test fixture stands in for data written by another module, derive its
+  shape from that module's WRITER, not from the reader under test. Applies to TR-17/TR-24 next.
+- **TR-13's two disclosed limitations, both accepted:** §7's per-grain chart table is a **useful subset**,
+  not exhaustive (burndown/CFD reuse and task-level contribution detail deferred, documented in-file) —
+  **TR-17 should close the gap it needs rather than assume every named chart exists**; and Cerbos
+  department/project "own unit" scoping is **approximate** for the same reason TR-09 hit (no per-org-node
+  grant scope exists), so `manager`/`team_lead` read every unit in their company-scoped grant. Never a
+  cross-tenant leak, but broader than §8's literal text — **this is now the SECOND ticket to hit it, which
+  makes it a pattern, not an exception. TR-25 must settle it.**
+- TR-13 also fixed a narration honesty bug in its own work: an empty period narrated "Completed 0 tasks,
+  0 minutes logged" instead of "No activity recorded" — it gated on KPI *presence* rather than *value*.
+
+**2026-07-31 (TR-09 landed) · check-ins live; ONE architectural gap to route to TR-25.**
+Six §6.2 endpoints + a live-derived prefill (from today's `time_entries` + `work_activity`, so the flow
+is confirm-and-edit) + the `checkin` Cerbos kind. **163 tests green** across the reports module.
+
+- **⚠ ARCHITECTURAL GAP · there is no unit-scoped authz primitive anywhere in this codebase.** Cerbos's
+  `manager` is company/project-scoped only; "manager of *this specific org unit*" does not exist as a
+  grant. TR-09 therefore grants the **coarse** tier in `resource_checkin.yaml` and **narrows it in-app**
+  to the caller's own current `org_unit_memberships` unit — server-computed, never trusting a
+  client-supplied `unit`/`userId` (tested: a dept lead reads/excuses same-unit colleagues, is denied
+  outside their unit **even when passing a wider `unit` query param**). This is the honest available
+  answer, but note what it costs: **for the unit boundary, Cerbos is no longer the sole authority — the
+  application is.** That is a deviation from this estate's "Cerbos is authoritative" principle and it
+  will recur on every unit-scoped read in P3/P5 (department-grain documents, appraisal packs). **TR-25
+  must decide deliberately:** either accept in-app narrowing as the pattern and test it as a first-class
+  boundary, or introduce a real unit-scoped derived role. Do not let it be settled by accident, one
+  controller at a time.
+- **Correctly declined:** the §8 "served-dept (provider lead, company A→B)" tier for check-ins is **not
+  implemented**. Every other cross-company view in this program goes through the D12 aggregate/rollup
+  path, and no such path exists for check-ins yet — approximating it risked a real cross-tenant
+  person-grain leak. Left unimplemented and documented rather than faked. Revisit when TR-13's document
+  path can carry it.
+- **My ticket scoping was stale:** the `auto_missed` fact-job hook (`expectedCheckinUsers`,
+  `writeAutoMissedCheckins`, `DEFAULT_WORK_CALENDAR`) **was already shipped by TR-07** under a
+  "TR-09's substrate" header, including the pinned leave-never-missed / holiday-and-weekend-produce-
+  nothing / today-never-missed / re-run-doesn't-clobber-a-submitted-row tests. TR-09 reused it and only
+  factored out its calendar parser so the live endpoints and the nightly job share one implementation —
+  the right call. Lesson for the remaining tickets: **check what the previous ticket actually shipped
+  before rebuilding from the ticket text.**
+
+**2026-07-31 (TR-16 landed) · the chart kit + viewer exist; three rulings.** `platform-ui/src/lib/reports.ts`
+(the canonical `ReportDocument` contract + pure bucketing), the full §7 chart kit, and `ReportViewer` +
+`PeriodSelector` (Daily/Weekly/Monthly/Custom + presets) — **768 platform-ui tests green, `next build`
+clean (59 routes)**. §6.1 transcribed verbatim; it was internally consistent as written.
+
+- **RULING · `ReportUnit`'s `"text"` member is valid for `ReportTable` COLUMNS ONLY, never for a
+  `ReportKpi` or `ReportSeries`.** TR-16 flagged that `ReportKpi.value: number` is unconditional even
+  when `unit === "text"` — underspecified rather than wrong, since no registry metric uses `text`. This
+  is the resolution: a KPI and a series are numeric by definition (they carry n/d and get charted); only
+  a table cell may be textual. **TR-13 must not emit a `text`-united KPI.**
+- **`CohortBand`'s prop shape is PROVISIONAL** — no §6.1 type exists for appraisal cohort data because
+  that is **TR-24's contract to define**. TR-24/TR-26 must confirm or replace it rather than assume it.
+- **Two real browser bugs its own visual QA caught, which no unit test would have:** (1) percentage
+  heights on flex items silently collapsed bars to ~2px in a real browser; (2) print's
+  `overflow: visible` let wide charts draw outside their card. Both fixed. **Generalise this:** the chart
+  kit needs a rendered-pixel check, not only a DOM assertion — TR-17 and TR-20 must screenshot, not just
+  build clean.
+- **Pre-existing defect found, outside this program's scope:** the shared `HairlineTable` in
+  `platform-ui/src/components/ui.tsx` is **not dark-safe** — it would render invisible in dark mode. TR-16
+  correctly built a local `ReportTableView` rather than propagate the bug. This affects every surface
+  using `HairlineTable`, so it belongs to the UI-polish/dark-theme work split, not here.
+- **Small known gap:** honest `n/d` ratio tooltips are wired on `TrendLine` but not `GroupedBars`/
+  `StackedBars`. No §7 per-grain chart needs it today, but §7 states the rule generally — **TR-17 closes
+  it** if it puts a ratio series on a bar chart.
+
+**2026-07-31 · P1 COMPLETE (5/5) — TR-34 closed the as-of-ownership gap; TR-36 closed the regression
+it introduced.** TR-34 shipped `0063_pm_task_assignee_intervals.sql` (184/184 tests): `valid_from`/
+`valid_to` on `pm_task_assignees`, the two partial-unique indexes replaced by ONE
+`pm_task_assignees_no_overlap` EXCLUDE (btree_gist) scoped `(tenant, task, role)` — which yields both
+"no overlap" and "at most one open row" from a single constraint — `syncTaskAssignees` rewritten from
+DELETE+INSERT to a four-case close/open state machine, and the fact job's owner/`task_role` joins now
+resolve **as-of the fact date**. Acceptance proven the hard way: complete a task on a past day,
+reassign it through a **real PATCH**, recompute the past slice, assert byte-identical and still credited
+to the ORIGINAL owner — with a companion test proving today's slice reflects the NEW owner.
+
+- **TR-34's delegated design call, accepted:** intervals apply to **owner/responsible only**, not
+  contributor. Contributor credit flows from `time_entries.entry_date` (already dated), and the one
+  place the contributor role fed an as-of decision (`minutes_contributed`'s `task_role`) now resolves
+  owner/responsible as-of the entry date and falls back to contributor by *existence*. Sound: adding
+  intervals to a role whose credit is already date-carried would be ceremony.
+- **Deliberate deviation from 0055's precedent, and it is the right one:** interval closes land on
+  `today-1`, never `today`, so a task reassigned twice in one day cannot self-collide with the EXCLUDE
+  constraint.
+- **⚠ TR-36 (done inline by the architect, same day): the regression TR-34 flagged but could not fix.**
+  `computeOverdueOpen` (metric #20) LEFT JOINed `pm_task_assignees` on `role` with **no date filter** —
+  so once a task had multiple historical owner rows, the join emitted one output row per historical
+  owner × responsible pair and **each was counted again**, silently inflating overdue counts upward.
+  TR-34 correctly declined to touch the file (TR-35 held it) and flagged it instead. Fixed with
+  **as-of-`end` joins** rather than the suggested `valid_to IS NULL`: #20 is *defined* as evaluated at
+  range end, and the new EXCLUDE constraint guarantees at most one row per role matches any date, so
+  as-of is both more correct and single-valued. Regression test added (reassign across the range end →
+  count is 1, credited to the as-of-end owner, historical owner not credited).
+- **A fixture trap this exposed, worth generalising:** `report-rollups.db.test.ts` inserted assignee
+  rows relying on `valid_from`'s `DEFAULT CURRENT_DATE`. That default is the suite's real wall-clock
+  date, which is **later than every fixed historical date these tests use** — so an as-of join matches
+  nothing and attribution assertions silently read as "unattributed" rather than failing loudly. TR-34
+  hit the identical trap in `fact-job.db.test.ts`. **Any test seeding an interval row MUST pass
+  `valid_from` explicitly.**
+- **A Postgres gotcha TR-34 documented, worth keeping:** a single statement using
+  `CASE WHEN kind='person' THEN ref::uuid::text ELSE ref::text END` still fails
+  `invalid input syntax for type uuid` on a department ref, because the extended protocol fixes **one
+  type per parameter for the whole statement** regardless of which branch executes. Branch in
+  TypeScript with two statement texts instead. Caught by a test, not by review.
 
 **2026-07-31 (TR-08 landed, `0057_report_metric_seeds.sql`) · rulings + accepted limitations.**
 21 metrics seeded (#20 as `'last'`, #22 `seeded:false`), the 3 additive counters added by `ALTER TABLE`
@@ -1861,3 +2146,70 @@ re-litigate it:
    **TR-14 must not be deferred past the first period the business intends to appraise on**, and
    TR-29's reconciliation should assert a sealed document does not drift when a task is reassigned
    afterwards.
+
+**2026-07-31 (TR-15 landed) · the seal/amend/pin service + all five endpoints; 214 reports-module
+tests green (184 pre-existing + 30 new), incl. the whole `report-seal.db.test.ts` acceptance
+suite.** Files: `src/modules/reports/report-periods.ts` (list/get/pin + the calendar lazy-backstop
+writer), `src/modules/reports/report-seal.ts` (the seal/amend orchestration + `computeSealHash` +
+`fetchSealedDocument`), the five endpoints added to `reports.controller.ts` (`GET periods`,
+`GET periods/:id`, `POST periods/pin`, `POST periods/:id/seal`, `POST periods/:id/amend`) + the
+sealed-read branch in `getDocument`, `cerbos/policies/resource_report_period.yaml`, and `export`
+added to `src/rollups/engine.ts`'s existing `upsertRows` (reused directly, no second writer of
+`rollup_metrics`). Every acceptance criterion pinned: seal -> stored docs at revision N; a post-seal
+task edit changes the LIVE view but NOT the sealed document (the ticket's whole point); amend
+requires a reason + notifies exec/leads + a re-seal writes revision N+1 KEEPING N; seal_hash
+verifies over the stored document set; double-seal -> 409; `?revision=` returns the pinned
+revision, not the latest (and a nonexistent revision -> 404, never a silent fallback); custom-range
+rule 2 (422, exact message, never a silent skip) and rule 4 (pin idempotent on the exact range,
+still appraisal-barred).
+
+- **Two real bugs this ticket's own test suite caught before they could ship, both worth
+  generalising:**
+  1. **A concurrency bug in the seal fan-out itself.** The first implementation built every
+     in-scope (grain, scopeRef) document via `Promise.all`. When the sealed range includes TODAY
+     (a live-stack "today" is 2026-07-31, which sits inside a July-2026 seal target — not an edge
+     case, the ordinary one), EVERY parallel `buildReportDocument` call independently re-runs
+     document-builder.ts's own `ensureTodayFresh` lazy-backstop against the SAME (tenant,
+     fact_date) slice, and two overlapping transactions racing a DELETE+INSERT on that slice
+     collide with `duplicate key value violates unique constraint "report_work_facts_pkey"`. Fixed
+     by building the documents SEQUENTIALLY instead (a `for...of`, not `Promise.all`) — costs some
+     wall-clock time (every call after the first re-derives an already-correct slice) but is
+     correct for any period whose range reaches today, not only wholly-historical ones. **Any
+     future caller that fans out multiple `buildReportDocument`/`ensureTodayFresh`-touching calls
+     over the same tenant must sequence them, the same "sequence shared-state calls" discipline
+     TR-08 already established for a single `PoolClient`, just one level up.**
+  2. **`seal_hash` computed over JS object key-insertion order does not survive a jsonb round-trip.**
+     `report_documents.document` is a `jsonb` column; Postgres's jsonb storage does not preserve
+     the original key order, so re-`SELECT`ing a just-stored document and recomputing the hash
+     over it (exactly what "seal_hash verifies" requires, and exactly what an auditor would do
+     months later) produced a DIFFERENT hash than the one stored at seal time — a hash that could
+     never actually verify anything, on the one feature whose entire job is tamper-evidence. Fixed
+     with a deep-canonical stringify (object keys sorted at every level, array order preserved)
+     before hashing. **Any hash/checksum computed over a value that will round-trip through
+     Postgres `jsonb` (or any other key-reordering store) must canonicalize key order first —
+     hashing the in-memory JS object's own insertion order is not sufficient**, and a test that
+     only hashes the in-memory object right after building it (never re-reading it from storage)
+     would not have caught this.
+- **Design call this ticket had to make that the doc left open (not a schema/contract decision, so
+  not escalated):** §6.2 has no `POST /periods` to create a calendar row ahead of sealing it, yet
+  `POST /periods/:id/seal` acts on an existing `report_periods.id`. Resolved by making
+  `GET /reports/periods?kind&from&to` the provisioning point — it auto-vivifies every candidate
+  calendar period in range via an idempotent `INSERT ... ON CONFLICT DO NOTHING` against 0067's
+  `report_periods_calendar_uq` partial index, so its returned ids are stable and ready for `/seal`.
+  This is the SAME "lazy idempotent upsert-on-read" shape `ensureTodayFresh` already uses one file
+  over — not a new house pattern, an application of the existing one. `period_kind='custom'` rows
+  are never auto-vivified this way (rule 1's "only pin writes those" is honored exactly).
+- **Scoping decisions recorded, not schema calls:** (1) in-scope (grain, scopeRef) enumeration for
+  sealing reuses the EXACT rows `GET /reports/overview` already derives, never a second
+  independently-written membership walk; (2) department-grain sealing covers the entity's OWN view
+  only — a `servedTenant` provider slice (§3.2) is never separately sealed and a document read for
+  one always falls through to live compute regardless of the period's seal state, exactly like
+  TR-13 left its own chart subset deliberately not exhaustive.
+- **`amended` is NOT treated as "still servable from storage."** Between `/amend` and the
+  subsequent re-seal, a document read for that period degrades to LIVE compute (same as `open`),
+  not the stale pre-amend `sealed` snapshot — presenting an amended (known-to-be-wrong) revision
+  under `header.sealed:true` would claim an authority the record no longer has. Only `status ===
+  'sealed'` serves stored storage; `open` and `amended` both fall through.
+- **Standing approximation NOT solved here (flagged, not fixed):** `resource_report_period.yaml`'s
+  `view` tier inherits the same `manager`/`team_lead` company-wide (not per-unit) scoping every
+  other resource in this program has — TR-25's open item, not made worse, not resolved.

@@ -53,6 +53,16 @@ export const AUTOMATION_ALLOWLIST: Record<string, readonly string[]> = {
   "wf:wd-digests": ["workActivity.feed", "projects.get", "llm.summarize", "notify", "workActivity.relink"],
   // WD-26: stale-task nag (no work_activity in N=5 days -> assignee; >=2N -> also project owner).
   "wf:wd-stale-nag": ["workActivity.staleTasks", "notify"],
+  // TR-11: the three reports/check-in flows. All three call platform-nest's checkin service reads
+  // (pending-reminders / missed-yesterday) and `facts/recompute` DIRECTLY with the platform's own
+  // service token (never through the hub — recompute is deliberately not an MCP tool, §9.2), so
+  // the ONLY hub tool call any of them makes is `notify` — in-app fallback for a non-WA user
+  // (eod-reminder), per-lead escalation (morning-escalation), or a dead-letter alert after 3
+  // exhausted retries (nightly-facts; no ntfy egress from n8n's own docker network in this
+  // deployment, see automation/README.md).
+  "wf:reports-nightly-facts": ["notify"],
+  "wf:reports-eod-reminder": ["notify"],
+  "wf:reports-morning-escalation": ["notify"],
 };
 
 /** An automation (n8n workflow) principal? Its scope comes from AUTOMATION_ALLOWLIST, not assurance. */
