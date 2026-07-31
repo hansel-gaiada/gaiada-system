@@ -129,14 +129,33 @@ jobs:
 
       # Ship compose + scripts only. The VPS keeps its own .env (secrets never leave the box)
       # and never needs application source, since it no longer builds.
-      - name: Sync compose files and scripts
+      # Ships compose + scripts + every path the compose files BIND-MOUNT. Missing a mount source
+      # does not fail loudly: Docker silently creates an empty DIRECTORY in its place, so Postgres
+      # skips an "init script" that is really a folder (leaving roles uncreated -> auth failures
+      # that look like a bad password), and Cerbos crash-loops on a config it cannot find.
+      # Keep this list in sync with the `- ../../` and `- ./` volume entries in the compose files.
+      - name: Sync compose files, scripts and mounted config
         run: |
           set -euo pipefail
-          ssh vps "mkdir -p '${DEPLOY_DIR}/infra/compose' '${DEPLOY_DIR}/infra/scripts' '${DEPLOY_DIR}/infra/observability'"
+          ssh vps "mkdir -p '${DEPLOY_DIR}/infra/compose' '${DEPLOY_DIR}/infra/scripts' \
+                            '${DEPLOY_DIR}/infra/observability' '${DEPLOY_DIR}/infra/db' \
+                            '${DEPLOY_DIR}/platform-nest/cerbos'"
           scp infra/compose/*.yml vps:"${DEPLOY_DIR}/infra/compose/"
           scp infra/scripts/*.sh vps:"${DEPLOY_DIR}/infra/scripts/"
+          scp infra/db/*.sh vps:"${DEPLOY_DIR}/infra/db/"
           rsync -az -e ssh infra/observability/ vps:"${DEPLOY_DIR}/infra/observability/"
-          ssh vps "chmod +x '${DEPLOY_DIR}/infra/scripts/'*.sh"
+          # Cerbos config + versioned policy repo (bind-mounted read-only at /config and /policies).
+          rsync -az -e ssh platform-nest/cerbos/ vps:"${DEPLOY_DIR}/platform-nest/cerbos/"
+          # Keycloak realm import (bind-mounted at /opt/keycloak/data/import).
+          if [ -d infra/compose/keycloak ]; then
+            rsync -az -e ssh infra/compose/keycloak/ vps:"${DEPLOY_DIR}/infra/compose/keycloak/"
+          fi
+          ssh vps "chmod +x '${DEPLOY_DIR}/infra/scripts/'*.sh '${DEPLOY_DIR}/infra/db/'*.sh"
+          # Fail loudly here rather than let Docker paper over a missing mount with an empty dir.
+          ssh vps "test -f '${DEPLOY_DIR}/infra/db/init-bot.sh' \
+                && test -f '${DEPLOY_DIR}/infra/db/init-cluster.sh' \
+                && test -f '${DEPLOY_DIR}/platform-nest/cerbos/cerbos.yaml' \
+                || { echo 'mounted config missing after sync'; exit 1; }"
 
       - name: Record currently deployed tag
         id: prev
