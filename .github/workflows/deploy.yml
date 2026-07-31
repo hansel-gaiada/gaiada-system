@@ -82,6 +82,17 @@ jobs:
       - name: Install cosign
         uses: sigstore/cosign-installer@v3
 
+      # cosign reads the Docker keychain, and GHCR packages are PRIVATE by default, so verifying
+      # below fails with "UNAUTHORIZED: authentication required" without this. The job's
+      # `packages: read` permission grants the right, but nothing was exchanging it for a token
+      # on the RUNNER — the later GHCR login targets the VPS, not here.
+      - name: Authenticate the runner to GHCR (for cosign)
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
       # Refuse to deploy anything that isn't the artifact our own release workflow signed.
       # This is the step that makes the WS10 supply-chain work actually load-bearing.
       - name: Verify image signatures

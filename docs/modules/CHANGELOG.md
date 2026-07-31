@@ -14,7 +14,7 @@ local stack). None of these mean "production-done".
 Every cut app version and the exact module manifest it contains, so any deployed build can be
 reconstructed from this table alone. Format defined in [`VERSIONING.md`](./VERSIONING.md).
 
-### `Alpha 01.002.0001a` — 2026-07-31 — first deployable build
+### `Alpha 01.002.0001b` — 2026-07-31 — first deployable build
 
 Cut to bring the trial stack up on **gda-aicenter** (the Hermes/DeepSeek box). Baseline manifest,
 so the module-reference counter starts at `0001`.
