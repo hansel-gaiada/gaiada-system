@@ -27,9 +27,26 @@ COMPOSE="$(dirname "$0")/../compose/docker-compose.vps.yml"
 # Compose project is `gaiada` (see the compose `name:`), so the volume is prefixed.
 WAHA_VOLUME="${WAHA_VOLUME:-gaiada_waha-sessions}"
 
+# PG_HOST set (and not the compose service name) means the core cluster lives on the HOST, not in
+# compose — the gda-aicenter topology, where Postgres is shared with other projects. There is no
+# container to `exec` into, so dump straight from the host cluster as the postgres superuser via
+# peer auth. The bot instance stays containerized either way and keeps the compose path.
+CORE_ON_HOST=false
+case "${PG_HOST:-postgres}" in postgres|"") ;; *) CORE_ON_HOST=true ;; esac
+
 dump() { # <compose-service> <db>
   OUT="$BACKUP_DIR/$2-$STAMP.sql.gz"
-  docker compose -f "$COMPOSE" exec -T "$1" pg_dump -U postgres "$2" | gzip > "$OUT"
+  if [ "$1" = "postgres" ] && [ "$CORE_ON_HOST" = true ]; then
+    sudo -n -u postgres pg_dump "$2" | gzip > "$OUT"
+  else
+    # Skip cleanly when the service isn't part of the active profile set (e.g. pg-bot with the
+    # `bot` profile off) — a missing optional lane must not fail the backup that gates migrations.
+    if ! docker compose -f "$COMPOSE" ps --status running --format '{{.Service}}' 2>/dev/null | grep -qx "$1"; then
+      echo "backup SKIPPED: service $1 not running (profile off?)" >&2
+      return 0
+    fi
+    docker compose -f "$COMPOSE" exec -T "$1" pg_dump -U postgres "$2" | gzip > "$OUT"
+  fi
   echo "backup ok: $OUT"
 }
 

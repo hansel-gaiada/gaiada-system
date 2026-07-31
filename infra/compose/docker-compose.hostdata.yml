@@ -1,0 +1,68 @@
+# Host-data overlay — run the stack against a Postgres/Redis/Ollama that live on the HOST
+# instead of in compose. Used by the gda-aicenter trial box, where the data tier is deliberately
+# centralized on the host so other projects (webdesk, …) can share one cluster.
+#
+#   docker compose -f docker-compose.vps.yml -f docker-compose.hostdata.yml \
+#     --profile bot --profile auth up -d
+#
+# Note there is NO `--profile data`: omitting it is what keeps the containerized postgres/redis
+# out of the project. Because those services are then undefined, every `depends_on` that named
+# them must be re-declared here — compose rejects a dependency on a profile-disabled service
+# ("depends on undefined service"). `!override` replaces the base map instead of merging into it.
+#
+# The connection strings themselves are NOT duplicated here: the base file reads
+# ${PG_HOST} / ${REDIS_URL}, so .env alone repoints them. Set in .env:
+#   PG_HOST=host.docker.internal
+#   REDIS_URL=redis://:<password>@host.docker.internal:6379
+#
+# host.docker.internal resolves to the docker0 bridge (172.17.0.1) from EVERY compose network,
+# so one extra_hosts entry works regardless of which bridge a service lands on.
+
+x-hostgw: &hostgw
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
+
+services:
+  platform:
+    <<: *hostgw
+    # Base depended on postgres + cerbos + redis + whisper. postgres/redis are on the host now
+    # and whisper runs on a workstation (PROFILE whisper omitted), leaving cerbos.
+    depends_on: !override
+      cerbos:
+        condition: service_started
+
+  keycloak:
+    <<: *hostgw
+    depends_on: !reset {}
+
+  knowledge:
+    <<: *hostgw
+    depends_on: !override
+      platform:
+        condition: service_healthy
+      ai-gateway:
+        condition: service_started
+
+  agent-runner:
+    <<: *hostgw
+    depends_on: !override
+      ai-gateway:
+        condition: service_started
+      mcp-hub:
+        condition: service_started
+
+  # PROFILE jobs — only runs on demand, but it also named postgres.
+  search-crawl:
+    <<: *hostgw
+    depends_on: !reset {}
+
+  # Needs the host for BOTH the Ollama embedding endpoint and the Hermes shim
+  # (GATEWAY_CENTRAL_URL) that serves as the stack's brain.
+  ai-gateway:
+    <<: *hostgw
+
+  mcp-hub:
+    <<: *hostgw
+
+  platform-ui:
+    <<: *hostgw

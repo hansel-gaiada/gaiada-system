@@ -1,0 +1,5 @@
+# Shell scripts are scp'd to the VPS by .github/workflows/deploy.yml and executed with /bin/sh.
+# A stray \r makes dash fail with a misleading "Syntax error: newline unexpected", which reads
+# like a code bug rather than an encoding one. core.autocrlf already keeps the index at LF for
+# anyone using the default Windows setup; this makes it explicit and independent of local config.
+*.sh text eol=lf

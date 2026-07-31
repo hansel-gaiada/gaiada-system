@@ -48,6 +48,13 @@ jobs:
       TAG: ${{ inputs.tag }}
       OWNER: ${{ github.repository_owner }}
       DEPLOY_DIR: ${{ vars.DEPLOY_DIR }}
+      # Which compose files the box runs. Default = the self-contained VPS stack. The
+      # gda-aicenter trial adds the host-data overlay (Postgres/Redis/Ollama live on the host)
+      # by setting COMPOSE_FILES to include docker-compose.hostdata.yml.
+      COMPOSE_FILES: ${{ vars.COMPOSE_FILES || '-f docker-compose.vps.yml' }}
+      # Optional lanes, comma-separated (data,bot,auth,multisite,whisper,jobs). Docker Compose
+      # reads COMPOSE_PROFILES natively, so this needs no --profile flags. Empty = core only.
+      COMPOSE_PROFILES: ${{ vars.COMPOSE_PROFILES || '' }}
       COMPONENTS: >-
         wa-chat-bot mcp-hub ai-agents ai-gateway-go sync-engine-go
         search-crawl-go platform-nest platform-ui
@@ -117,14 +124,16 @@ jobs:
           echo '${{ secrets.GITHUB_TOKEN }}' \
             | ssh vps "docker login ghcr.io -u '${{ github.actor }}' --password-stdin"
 
+      # PG_HOST is read from the box's own .env so backup.sh knows whether the core cluster is a
+      # container to exec into or a host cluster to dump directly.
       - name: Backup databases (gate for migrations)
-        run: ssh vps "cd '${DEPLOY_DIR}' && ./infra/scripts/backup.sh"
+        run: ssh vps "cd '${DEPLOY_DIR}' && set -a && . ./infra/compose/.env && set +a && ./infra/scripts/backup.sh"
 
       - name: Pull images
         run: |
           set -euo pipefail
           ssh vps "cd '${DEPLOY_DIR}/infra/compose' && GAIADA_TAG='${TAG}' GHCR_OWNER='${OWNER}' \
-            docker compose -f docker-compose.vps.yml pull"
+            COMPOSE_PROFILES='${COMPOSE_PROFILES}' docker compose ${COMPOSE_FILES} pull"
 
       # Migrations run from the newly pulled platform image, as platform_owner
       # (MIGRATE_DATABASE_URL), before any service starts on the new schema.
@@ -132,21 +141,22 @@ jobs:
         run: |
           set -euo pipefail
           ssh vps "cd '${DEPLOY_DIR}/infra/compose' && GAIADA_TAG='${TAG}' GHCR_OWNER='${OWNER}' \
-            docker compose -f docker-compose.vps.yml run --rm --no-deps platform node dist/db/migrate.js"
+            COMPOSE_PROFILES='${COMPOSE_PROFILES}' docker compose ${COMPOSE_FILES} run --rm --no-deps platform node dist/db/migrate.js"
 
       - name: Start services
         run: |
           set -euo pipefail
           ssh vps "cd '${DEPLOY_DIR}/infra/compose' && GAIADA_TAG='${TAG}' GHCR_OWNER='${OWNER}' \
-            docker compose -f docker-compose.vps.yml up -d --no-build --remove-orphans"
+            COMPOSE_PROFILES='${COMPOSE_PROFILES}' docker compose ${COMPOSE_FILES} up -d --no-build --remove-orphans"
 
       - name: Wait for health
         id: health
         run: |
           set -euo pipefail
-          ssh vps "cd '${DEPLOY_DIR}/infra/compose' && GAIADA_TAG='${TAG}' GHCR_OWNER='${OWNER}' bash -s" <<'REMOTE'
+          ssh vps "cd '${DEPLOY_DIR}/infra/compose' && GAIADA_TAG='${TAG}' GHCR_OWNER='${OWNER}' \
+            COMPOSE_PROFILES='${COMPOSE_PROFILES}' COMPOSE_FILES='${COMPOSE_FILES}' bash -s" <<'REMOTE'
           set -euo pipefail
-          C="docker compose -f docker-compose.vps.yml"
+          C="docker compose ${COMPOSE_FILES}"
           for i in $(seq 1 60); do
             # Any container that declares a healthcheck and is not yet healthy, or has exited.
             bad="$($C ps --format '{{.Service}} {{.State}} {{.Health}}' \
@@ -172,7 +182,7 @@ jobs:
           set -euo pipefail
           echo "::error::Deploy of ${TAG} failed — rolling back to ${{ steps.prev.outputs.tag }}"
           ssh vps "cd '${DEPLOY_DIR}/infra/compose' && GAIADA_TAG='${{ steps.prev.outputs.tag }}' GHCR_OWNER='${OWNER}' \
-            docker compose -f docker-compose.vps.yml up -d --no-build --remove-orphans"
+            COMPOSE_PROFILES='${COMPOSE_PROFILES}' docker compose ${COMPOSE_FILES} up -d --no-build --remove-orphans"
           echo "::warning::Rolled back to ${{ steps.prev.outputs.tag }}. Schema was NOT reverted — check migrations."
 
       - name: Summary

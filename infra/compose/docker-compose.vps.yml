@@ -6,7 +6,9 @@
 name: gaiada
 
 services:
+  # PROFILE data — omit to use an EXTERNAL Postgres (set PG_HOST). See runbooks/deploy-vps.md.
   postgres:
+    profiles: [data]
     image: postgres:17-alpine
     restart: unless-stopped
     environment:
@@ -34,6 +36,7 @@ services:
 
   # Isolated instance for the WhatsApp bot's PII/crypto-shred store (DB topology plan Phase E).
   pg-bot:
+    profiles: [bot]
     image: postgres:17-alpine
     restart: unless-stopped
     environment:
@@ -51,7 +54,9 @@ services:
       retries: 20
 
   # Core Redis — platform event backbone (Redis Streams relay/consumer + dead-letter).
+  # PROFILE data — omit to use an EXTERNAL Redis (set REDIS_URL).
   redis:
+    profiles: [data]
     image: redis:7-alpine
     restart: unless-stopped
     command: ["redis-server", "--appendonly", "yes"]
@@ -60,6 +65,7 @@ services:
 
   # Bot Redis — BullMQ media queue, isolated with the bot's data plane (DB topology plan Phase F).
   redis-bot:
+    profiles: [bot]
     image: redis:7-alpine
     restart: unless-stopped
     command: ["redis-server", "--appendonly", "yes"]
@@ -81,6 +87,7 @@ services:
     # a ~2s reconnect storm during the Docker Desktop outage. Fix = wait it out with the session
     # STOPPED (retrying extends it). Don't re-bump on a hunch: 2026.7.1 was tested and ruled out.
     image: devlikeapro/waha:noweb-2026.6.2
+    profiles: [bot]
     restart: unless-stopped
     ports:
       - "127.0.0.1:3000:3000" # dashboard via SSH tunnel only; never public
@@ -139,11 +146,23 @@ services:
       # Media chain: openai vision handles images; audio (and anything non-image) fails over to
       # whisper for transcription, then gemini. openai auto-skips when its key is unset.
       MEDIA_CHAIN: ${MEDIA_CHAIN:-openai,whisper,gemini}
+      # Embeddings are a SEPARATE chain from generation. `ollama` is a local provider, so site mode
+      # keeps it (only cloud providers get stripped) — which is how the trial box embeds locally
+      # while all generation goes to Hermes. nomic-embed-text emits 768 dims, matching the
+      # vector(768) column in platform migration 0034_module_search.sql.
+      EMBED_CHAIN: ${EMBED_CHAIN:-ollama,gemini}
+      OLLAMA_EMBED_MODEL: ${OLLAMA_EMBED_MODEL:-nomic-embed-text}
       WHISPER_URL: http://whisper:8000
       WHISPER_MODEL: ${WHISPER_MODEL:-Systran/faster-whisper-small}
       GATEWAY_DAILY_CALL_CAP: ${GATEWAY_DAILY_CALL_CAP:-2000}
       GATEWAY_TLS_MODE: "off"
-      GATEWAY_TOPOLOGY_MODE: central
+      # `central` = this box holds the cloud keys. Set `site` to hold NO model key locally: the
+      # provider list then drops gemini/claude/openai and auto-appends central-forward, which POSTs
+      # the Gateway contract (/complete, /media) to GATEWAY_CENTRAL_URL. On the gda-aicenter trial
+      # that URL is the hermes-gateway shim, making the local Hermes agent the stack's brain while
+      # DLP, the daily cost cap, the egress audit and failover all stay here.
+      GATEWAY_TOPOLOGY_MODE: ${GATEWAY_TOPOLOGY_MODE:-central}
+      GATEWAY_CENTRAL_URL: ${GATEWAY_CENTRAL_URL:-}
       # Model-assisted DLP classifier stays opt-in; enable only where Ollama is reachable.
       DLP_CLASSIFIER_ENABLED: ${DLP_CLASSIFIER_ENABLED:-false}
       EGRESS_ALLOWLIST: generativelanguage.googleapis.com,api.anthropic.com,ollama.com,whisper,host.docker.internal
@@ -161,6 +180,7 @@ services:
   # up with the core instance. Kept on start-dev for the trial (no TLS/hostname setup); a prod
   # deploy should move to `start` (KC_HOSTNAME + TLS) — see the plan's deploy notes.
   keycloak:
+    profiles: [auth]
     image: quay.io/keycloak/keycloak:26.0
     restart: unless-stopped
     command: ["start-dev", "--import-realm"]
@@ -169,7 +189,7 @@ services:
       KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?}
       KC_HEALTH_ENABLED: "true"
       KC_DB: postgres
-      KC_DB_URL: jdbc:postgresql://postgres:5432/gaiada_keycloak
+      KC_DB_URL: jdbc:postgresql://${PG_HOST:-postgres}:5432/gaiada_keycloak
       KC_DB_USERNAME: keycloak
       KC_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD:?}
     ports:
@@ -196,8 +216,8 @@ services:
     environment:
       PLATFORM_SERVICE_TOKEN: ${PLATFORM_SERVICE_TOKEN:?}
       # Runtime = restricted platform_app; migrations/grants run as platform_owner (MIGRATE_DATABASE_URL).
-      DATABASE_URL: postgres://platform_app:${PLATFORM_APP_PASSWORD:?}@postgres:5432/gaiada_platform
-      MIGRATE_DATABASE_URL: postgres://platform_owner:${PLATFORM_OWNER_PASSWORD:?}@postgres:5432/gaiada_platform
+      DATABASE_URL: postgres://platform_app:${PLATFORM_APP_PASSWORD:?}@${PG_HOST:-postgres}:5432/gaiada_platform
+      MIGRATE_DATABASE_URL: postgres://platform_owner:${PLATFORM_OWNER_PASSWORD:?}@${PG_HOST:-postgres}:5432/gaiada_platform
       AUTH_MODE: ${PLATFORM_AUTH_MODE:-dev}
       OIDC_ISSUER: http://keycloak:8080/realms/gaiada
       OIDC_JWKS_URI: http://keycloak:8080/realms/gaiada/protocol/openid-connect/certs
@@ -205,7 +225,7 @@ services:
       CERBOS_URL: http://cerbos:3592
       # 5c.4 file store — persistent volume so attachments survive restarts.
       FILES_DIR: /data/files
-      REDIS_URL: redis://redis:6379
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
       # Admin/Systems console aggregator (Phase C) — read-only probes of each downstream
       # service. All fail-soft: an unset URL just reports "not configured" in the console.
       GATEWAY_URL: http://ai-gateway:3002
@@ -336,13 +356,14 @@ services:
   #     -cn central -out-cert /app/data/sync.crt -out-key /app/data/sync.key
   # then issue each site node's client cert (CN = its NODE_ID) and add it to site_subscriptions.
   sync-central:
+    profiles: [multisite]
     image: ghcr.io/${GHCR_OWNER:-hansel-gaiada}/gaiada-sync-engine-go:${GAIADA_TAG:-latest}
     restart: unless-stopped
     environment:
       SYNC_MODE: central
       NODE_ID: central
       # Runtime = restricted sync_app (scoped to the sync footprint; DENIED platform-internal tables).
-      DATABASE_URL: postgres://sync_app:${SYNC_APP_PASSWORD:?}@postgres:5432/gaiada_platform
+      DATABASE_URL: postgres://sync_app:${SYNC_APP_PASSWORD:?}@${PG_HOST:-postgres}:5432/gaiada_platform
       SYNC_LISTEN_ADDR: 0.0.0.0:3013
       SYNC_CA_CERT: /gateway-ca/ca-cert.pem
       SYNC_CERT: /app/data/sync.crt
@@ -377,7 +398,7 @@ services:
     environment:
       # Runtime = platform_app (NOBYPASSRLS) — identical runtime privilege to platform-nest
       # itself; the crawl worker gets no elevated DB grant.
-      DATABASE_URL: postgres://platform_app:${PLATFORM_APP_PASSWORD:?}@postgres:5432/gaiada_platform
+      DATABASE_URL: postgres://platform_app:${PLATFORM_APP_PASSWORD:?}@${PG_HOST:-postgres}:5432/gaiada_platform
       # Deliberately `:-` (empty default), NOT `:?`. Compose validates interpolation for EVERY
       # service in the file regardless of active profile, so a `:?` here made *every* compose
       # command on this project fail ("required variable TENANT_ID is missing") even though
@@ -416,7 +437,10 @@ services:
 
   # Self-hosted transcription (5a.3) — CPU image; audio transcribes locally, never
   # leaving the box. First request downloads the model into the volume (be patient).
+  # PROFILE whisper — omit to transcribe elsewhere (e.g. a local workstation). Platform's
+  # WHISPER_URL then points nowhere and the upload endpoint refuses cleanly by design.
   whisper:
+    profiles: [whisper]
     image: fedirz/faster-whisper-server:latest-cpu
     restart: unless-stopped
     volumes:
@@ -429,8 +453,8 @@ services:
     environment:
       KNOWLEDGE_SERVICE_TOKEN: ${KNOWLEDGE_SERVICE_TOKEN:?}
       # Runtime = knowledge_app; schema DDL runs as knowledge_owner (MIGRATE_DATABASE_URL).
-      KNOWLEDGE_DATABASE_URL: postgres://knowledge_app:${KNOWLEDGE_APP_PASSWORD:?}@postgres:5432/gaiada_knowledge
-      MIGRATE_DATABASE_URL: postgres://knowledge_owner:${KNOWLEDGE_OWNER_PASSWORD:?}@postgres:5432/gaiada_knowledge
+      KNOWLEDGE_DATABASE_URL: postgres://knowledge_app:${KNOWLEDGE_APP_PASSWORD:?}@${PG_HOST:-postgres}:5432/gaiada_knowledge
+      MIGRATE_DATABASE_URL: postgres://knowledge_owner:${KNOWLEDGE_OWNER_PASSWORD:?}@${PG_HOST:-postgres}:5432/gaiada_knowledge
       PLATFORM_URL: http://platform:3004
       PLATFORM_SERVICE_TOKEN: ${PLATFORM_SERVICE_TOKEN:?}
       GATEWAY_URL: http://ai-gateway:3002
@@ -460,8 +484,8 @@ services:
     environment:
       AGENT_RUNNER_TOKEN: ${AGENT_RUNNER_TOKEN:?}
       # Runtime = knowledge_app (same as knowledge service); DDL runs as knowledge_owner.
-      AGENTS_DATABASE_URL: postgres://knowledge_app:${KNOWLEDGE_APP_PASSWORD:?}@postgres:5432/gaiada_knowledge
-      MIGRATE_DATABASE_URL: postgres://knowledge_owner:${KNOWLEDGE_OWNER_PASSWORD:?}@postgres:5432/gaiada_knowledge
+      AGENTS_DATABASE_URL: postgres://knowledge_app:${KNOWLEDGE_APP_PASSWORD:?}@${PG_HOST:-postgres}:5432/gaiada_knowledge
+      MIGRATE_DATABASE_URL: postgres://knowledge_owner:${KNOWLEDGE_OWNER_PASSWORD:?}@${PG_HOST:-postgres}:5432/gaiada_knowledge
       GATEWAY_URL: http://ai-gateway:3002
       GATEWAY_TOKEN: ${GATEWAY_TOKEN:?}
       HUB_URL: http://mcp-hub:3003
@@ -524,9 +548,9 @@ services:
   # in a single-region v1 it points at the same platform. Not published (reach it via the internal
   # network / an enrolled mTLS peer). Give it a real second-site platform URL when one exists.
   mcp-hub-central:
+    profiles: [multisite]
     image: ghcr.io/${GHCR_OWNER:-hansel-gaiada}/gaiada-mcp-hub:${GAIADA_TAG:-latest}
     restart: unless-stopped
-    profiles: ["central"] # only starts with `--profile central`
     environment:
       HUB_SERVICE_TOKEN: ${HUB_SERVICE_TOKEN:?}
       GATEWAY_URL: http://ai-gateway:3002
@@ -549,6 +573,7 @@ services:
         condition: service_started
 
   bot:
+    profiles: [bot]
     image: ghcr.io/${GHCR_OWNER:-hansel-gaiada}/gaiada-wa-chat-bot:${GAIADA_TAG:-latest}
     restart: unless-stopped
     environment:
@@ -587,6 +612,7 @@ services:
         condition: service_started
 
   bot-media-worker:
+    profiles: [bot]
     image: ghcr.io/${GHCR_OWNER:-hansel-gaiada}/gaiada-wa-chat-bot:${GAIADA_TAG:-latest}
     command: ["npx", "tsx", "src/media-worker.ts"]
     restart: unless-stopped
