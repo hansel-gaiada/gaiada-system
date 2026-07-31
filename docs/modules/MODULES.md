@@ -53,7 +53,7 @@ versions below; the running build reports it at `GET /health`.
 | creative | `0.1.0` | PROTOTYPED | Creative | 2026-07 |
 | render-gateway-go | `0.0.0` | PLANNED | Creative | 2026-07-23 |
 | reports | `0.1.0` | IN PROGRESS | Cross-cutting | 2026-07-30 |
-| report-renderer | `0.0.0` | PLANNED | Cross-cutting | 2026-07-30 |
+| report-renderer | `0.1.0` | DEV-VERIFIED | Cross-cutting | 2026-07-31 |
 
 ---
 
@@ -159,7 +159,7 @@ end-to-end on a live Docker stack** (2026-07-15).
 **What exists (dev):** full VPS Docker Compose stack, per-component Dockerfiles, local CI (`test-all.sh`),
 GH Actions (inert until the repo is standalone), crypto-shred-safe backups, supply-chain pipeline
 (SBOM + cosign + SLSA).
-**0.7.1 (WAHA pin 2026.6.2 → 2026.7.2):** deliberate, still-pinned bump to pick up the NOWEB
+**0.5.3 (WAHA pin 2026.6.2 → 2026.7.2):** deliberate, still-pinned bump to pick up the NOWEB
 "WhatsApp Web version compatibility" fix in 2026.7.2 and stay current with WA protocol drift.
 Explicitly **not** a retry of the ruled-out 2026.7.1 (see `docs/runbooks/wa-ban-recovery.md`).
 Validated by `docker compose config` only — **re-pair is UNPROVEN**; no live QR scan was possible.
@@ -339,14 +339,17 @@ SM-54/SM-56/SM-59/SM-61/SM-25b (all LANDED); an echo-validation standing rule wa
 addendum A1.6/A1.7) and audited across all three vendor drivers (§6be); SM-30 (manual apply/export
 twin) and SM-20 (search-terms sync, migration `0062`) are DEV-VERIFIED with their own ⚡ gates still
 owed; SM-63 (collect-scope fix) LANDED; SM-64 (GSC/GA4 response-window enforcement) and
-SM-66/67/69 (driver fail-open hardening) are DEV-VERIFIED, gates owed. **Not clean:** SM-68/70 (the
-DataForSEO billing-identity fix) were DEV-VERIFIED with the tree fully green (§6bj), then an
-orchestrator `git checkout` destroyed the uncommitted `providers/dataforseo.ts`, reverting that
-work in one file — a rebuild is in flight (tracker §6bk); do not treat SM-67/68/69/70 as clean
-until it reports and a fresh gate runs. SM-19's frontend (dual-mode apply picker) is real, committed
-and wired but was never given a ticket-scoped verification pass (tracker §6bk). None of this moves
-the module's overall status past `IN PROGRESS` — real-vendor-account fidelity remains unproven and
-the money-path driver is mid-rebuild.
+SM-66/67/69 (driver fail-open hardening) are DEV-VERIFIED, gates owed. **An orchestrator incident,
+recovered:** SM-68/70 (the DataForSEO billing-identity fix) were DEV-VERIFIED with the tree fully
+green (§6bj), then an orchestrator `git checkout` destroyed the uncommitted `providers/dataforseo.ts`
+— also briefly reverting SM-56's already-LANDED `fetchSerpByTaskId` in the same file — and a rebuild
+**recovered it in full** (tracker §6bk: `tsc` clean, `dataforseo.test.ts` 48/48, full tree 895/4
+skipped zero reds, six sha256-verified mutation probes). SM-56 stays LANDED unaffected;
+SM-67/68/69/70 still owe their ⚡/QA gates, now against the recovered code. SM-19's frontend
+(dual-mode apply picker) is real, committed and wired but was never given a ticket-scoped
+verification pass (tracker §6bl). None of this moves the module's overall status past
+`IN PROGRESS` — real-vendor-account fidelity remains unproven and the SM-67/68/69/70/30/20/64/66
+gates are still owed.
 
 **State at 0.3.0 (2026-07-30, superseded above).** P0 and P1 are closed and gated. All three divisions are visible in the
 `seo` console (Accounts / Optimize / Campaigns), and the department **demos end to end at $0 vendor spend**
@@ -411,22 +414,34 @@ predicate on reconciliation (SM-59) — **cleared their bundled ⚡ gate and are
 still owe QA gates. GA4/GSC read paths are built (SM-25b LANDED, migration `0061`); Ads read (SM-25c)
 is still TODO. SEM apply/report/scheduler: SM-30 (manual apply/export) and SM-20 (search-terms
 sync) are DEV-VERIFIED, gates owed; SM-19 (dual-mode picker UI) has real committed frontend work
-with no ticket-scoped verification (tracker §6bk); SM-21 (api-mode execute), SM-22 (reports) remain
+with no ticket-scoped verification (tracker §6bl); SM-21 (api-mode execute), SM-22 (reports) remain
 TODO; SM-54's platform-side scheduler is **LANDED** (§6bc). A new hardening wave (SM-63/64/66-70)
-closed an echo-validation gap across all three vendor drivers — **SM-68/70 are mid-rebuild** after
-an orchestrator accidentally reverted uncommitted work in `providers/dataforseo.ts` (tracker §6bk);
-do not treat that driver as clean until the rebuild reports and a fresh gate runs. Real-vendor-
-account fidelity (billing units, error inventories) remains unproven — no capability has run
-against a funded account (OQ-2/9/10/11).
+closed an echo-validation gap across all three vendor drivers. **An orchestrator `git checkout`
+accidentally destroyed the uncommitted `providers/dataforseo.ts` (SM-67/68/69/70's file, plus
+SM-56's already-LANDED code in passing) — a rebuild RECOVERED it in full** (tracker §6bk: `tsc`
+clean, `dataforseo.test.ts` 48/48, full tree 895/4 skipped zero reds, six sha256-verified mutation
+probes). SM-56 unaffected/still LANDED; SM-67/68/69/70 still owe their ⚡/QA gates, now against the
+recovered code. Real-vendor-account fidelity (billing units, error inventories) remains unproven —
+no capability has run against a funded account (OQ-2/9/10/11).
 
 **Running state + full ledger:**
 [`../blueprints/seo-sem-execution-tracker.md`](../blueprints/seo-sem-execution-tracker.md) (§0 state
-at a glance, §1 per-ticket ledger, §6au for the latest architect rulings).
-**Next (tracker §6x.4, authoritative order):** the bundled ⚡ QA gate (SM-54/56/59/61) → SM-14
-remainder/SM-17/SM-47/SM-48/SM-49 owed gates → SM-15 ∥ SM-16 → SM-51/SM-30 → SM-19/SM-20 → SM-21 ⚡
-→ SM-25a ⚡ → SM-25b → SM-25c → SM-26/SM-22 → SM-23 (this reconciliation) → SM-24. Decision-gated
-extras stay parked: Umami (OQ-5), Semrush premium connector (superseded permanently by the SM-34
-HTTP driver, OQ-3 no longer gates anything).
+at a glance, §1 per-ticket ledger, §6bk for the recovery, §6bl for this reconcile).
+**Next, updated 2026-07-31 (SM-23; supersedes the §6x.4 line below — the bundled gate it names has
+since PASSED, SM-15 was retired, and SM-23 itself is executing this pass):** owed ⚡/QA gates in
+some order (SM-67/68/69/70 against the now-recovered driver, SM-30, SM-20, SM-64, SM-66,
+SM-14 remainder/SM-17/SM-47/SM-48/SM-49) → a ticket-scoped verification pass for SM-19 → SM-21 ⚡
+(api-mode execute) → SM-25c (Ads read) → SM-26/SM-22 → SM-24. Decision-gated extras stay parked:
+Umami (OQ-5), Semrush premium connector (superseded permanently by the SM-34 HTTP driver, OQ-3 no
+longer gates anything).
+
+<details><summary>Superseded 2026-07-30 "Next" line (kept for history)</summary>
+
+the bundled ⚡ QA gate (SM-54/56/59/61) → SM-14 remainder/SM-17/SM-47/SM-48/SM-49 owed gates →
+SM-15 ∥ SM-16 → SM-51/SM-30 → SM-19/SM-20 → SM-21 ⚡ → SM-25a ⚡ → SM-25b → SM-25c → SM-26/SM-22 →
+SM-23 (this reconciliation) → SM-24.
+
+</details>
 
 ## social-media — SMM · Organic Publishing · `0.0.0` · PLANNED
 
@@ -530,15 +545,42 @@ Owner-takes-all outcome attribution + listed contributors, so company totals nev
 additions, 12 QA-gated). P0 is complete; P1 is mid-flight (TR-07 landed, TR-08 next — it owns the 21
 metric seeds, the `RollupProvider` and the module-contract registration this module still lacks).
 
-## report-renderer — Print/PDF Sidecar · `0.0.0` · PLANNED
+## report-renderer — Print/PDF Sidecar · `0.1.0` · DEV-VERIFIED
 
-**What exists:** design only — [`../blueprints/tracker-reporting-foundation.md`](../blueprints/tracker-reporting-foundation.md) §6.3.
-No code.
-A small Node + Playwright sidecar (the only image in the estate carrying Chromium — platform-ui's Next
-standalone image stays browser-free) that renders a sealed `ReportDocument` to print-grade PDF:
-`POST /render` behind a shared `RENDERER_TOKEN`, driving the platform-ui print route via a **one-shot,
-5-min-TTL, single-document `jobToken`** so no tenant credential ever reaches the renderer. Internal network
-only. `docs/blueprints/render-pdf.js` is the working in-repo precedent for the print-CSS technique.
-**Future plans:** built under `TR-18`/`TR-19`; ⚡ QA gate on the one-shot token path (auth bypass by
-construction); container build unverified in this dev env — validate on a Docker host before deploy (same
-caveat as ai-gateway-go / render-gateway-go).
+**What exists (TR-19, `devops`, 2026-07-31):** the standalone `report-renderer/` component — a
+~90-line Node + Express + Playwright service (the only image in the estate carrying Chromium;
+platform-ui's Next standalone image stays browser-free by design). `GET /health` (no auth) and
+`POST /render {url}` behind `Authorization: Bearer RENDERER_TOKEN` — `chromium.launch()` →
+`page.goto(url, {waitUntil:'networkidle'})` → `page.pdf({format:'A4', printBackground:true, ...
+headerTemplate/footerTemplate with page numbers})`, lifting the print-CSS/PDF technique straight
+from the working in-repo precedent `docs/blueprints/render-pdf.js` (exact-color printing,
+footer page numbers) rather than rediscovering it. **SSRF guard (`src/auth.ts`,
+`isAllowedRenderUrl`):** every `url` must be same-origin with `PLATFORM_UI_INTERNAL_URL` — this
+service fetches whatever URL it is handed, so a leaked `RENDERER_TOKEN` cannot turn it into a
+proxy against the internal network (mirrors ai-gateway-go's `DialContext` egress allowlist /
+search-crawl-go's egress guard). Compose service added to `infra/compose/docker-compose.vps.yml`
+(internal-only, no published port, healthcheck via `node -e fetch(...)` since curl/wget aren't
+guaranteed in the Playwright base image), `docker-compose.local.yml` (dev-only published port
+3007) and `docker-compose.build.yml`; `.env.example` gained `RENDERER_TOKEN` +
+`PLATFORM_UI_INTERNAL_URL`; CI gained a `report-renderer` entry in both the `ci.yml` unit-test
+matrix and the `release.yml` / `deploy.yml` image-build-and-verify list.
+**Verified (2026-07-31):** `npm run typecheck` and `npm test` both green (14 tests — incl. the
+acceptance-criteria check that a token-less `POST /render` returns 401). Docker **was** available
+in this session (Docker Desktop, Windows/Linux-VM backend) so the container was actually built and
+run, not just assumed: `docker build .` succeeds; `docker run` and, separately,
+`docker compose -f docker-compose.vps.yml -f docker-compose.local.yml -f docker-compose.build.yml
+up --no-deps report-renderer` both came up **healthy**; a real `POST /render` against an
+allowed-origin URL made Chromium actually launch, navigate, and return a genuine PDF
+(`file` reported `PDF document, version 1.4, 1 page(s)`, 12KB); token-less → 401, wrong-token →
+401, disallowed-origin → 403 all confirmed against the live container; `docker compose config`
+validated cleanly across all three compose files with `report-renderer` in the service list.
+Exact commands + output logged in `docs/modules/CHANGELOG.md`.
+**NOT verified:** a real deploy to the production Linux VPS (only Docker Desktop was available
+here) — re-confirm health there before relying on it in production, per
+`infra/runbooks/deploy-vps.md`. TR-20/TR-21 aren't built, so no real report renders through the
+whole pipeline yet — only this sidecar's own contract (auth, SSRF guard, PDF render) is proven.
+**Future plans:** TR-20 (`senior-fe`) builds the platform-ui print route this sidecar targets;
+TR-21 (`senior-be`) builds the one-shot, 5-min-TTL, single-document `jobToken` orchestration that
+mints the URLs this service is handed — until then `PLATFORM_UI_INTERNAL_URL` points at a real
+origin but no route actually serves `/print/reports/:jobToken`. ⚡ QA gate on the TR-21 token path
+(auth bypass by construction) once it lands.

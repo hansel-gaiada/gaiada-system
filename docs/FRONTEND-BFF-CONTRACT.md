@@ -1105,10 +1105,10 @@ this wave adds the routes. **Every response below is `GoogleConnectionView` — 
 |---|---|---|
 | `POST audits`, `GET audits`, `GET audits/:id/findings`, `PATCH findings/:id` | Site Audit | SM-07 (crawlers) + SM-08 (ingest/triage) |
 | `GET/POST keywords`, `POST keywords/cluster`, `GET clusters` | Keywords | SM-09 |
-| — (backend BUILT, see SM-14 above; `/departments/[deptId]/rankings/page.tsx` is still a `PendingCapability` placeholder — no console UI wired yet) | Rankings | SM-14 (UI build, unclaimed) |
+| ~~backend BUILT, see SM-14 above; `/departments/[deptId]/rankings/page.tsx` is still a `PendingCapability` placeholder — no console UI wired yet~~ **STALE, corrected 2026-07-31 (SM-23, tracker §6bk/§6bd):** the Rankings tab is a real, live-wired console surface — `RankingsPanel` + `PaidActionGate` render real rank snapshots, driven twice (`DEMO_MODE` and live `:3004`, tracker §6bd). Removed from PENDING. | — | — |
 | `GET/POST briefs`, `POST briefs/:id/draft` | Content Briefs | SM-10 |
-| — (backend BUILT, see SM-30 above; the manual-mode HALF of the dual-mode picker — no console UI wired yet) | Ads Studio | SM-19 (UI build, unclaimed) |
-| api-mode picker half + api-mode execute (`applyNegatives`/`setBudget`/`launchCampaign`) | Ads Studio | SM-19/21/26 |
+| ~~backend BUILT, see SM-30 above; the manual-mode HALF of the dual-mode picker — no console UI wired yet~~ **STALE, corrected 2026-07-31 (SM-23, tracker §6bk):** the manual-mode twin is live-wired — `ApplyProposalTwins.tsx` (in `ChangeProposalsPanel`) renders per approved/applied change proposal on the planner page, with `PaidActionGate.tsx` covering the metered-pull disclosure on Rankings. Committed, self-labelled SM-19 in both files' headers; no ticket-scoped gate has run against them (tracker §6bk). Removed from PENDING for the manual half. | — | — |
+| api-mode execute (`applyNegatives`/`setBudget`/`launchCampaign`) — the API-mode twin still renders honestly-disabled pending SM-21's executor | Ads Studio | SM-21/26 |
 | `GET sem/pacing`, `POST sem/metrics-daily/import` (campaign-level metrics-daily bridge — the OTHER half of SM-20's design-doc line; the search-terms half is BUILT, see SM-20 above) | Pacing | SM-18 (metrics-daily CSV/bridge) + SM-22 |
 | `GET/POST reports`, `POST reports/:id/approve\|deliver` | Reports | SM-22 |
 | tenant-level MTD spend + threshold-event reads (no such endpoint exists; only `GET engagements/:id/ledger` is built — see SM-17 below) | Pacing | SM-17 (tenant-scope remainder) / SM-22 |
