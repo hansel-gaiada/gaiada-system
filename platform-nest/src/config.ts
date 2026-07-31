@@ -196,6 +196,13 @@ export const config = {
   pmBurndownSnapshotEnabled:
     process.env.PM_BURNDOWN_SNAPSHOT_ENABLED === "1" || process.env.PM_BURNDOWN_SNAPSHOT_ENABLED === "true",
   pmBurndownSnapshotIntervalMs: Number(process.env.PM_BURNDOWN_SNAPSHOT_INTERVAL_MS ?? 24 * 3600 * 1000),
+  // TR-07 (tracker/reporting §6.2's REPORTS_TZ, OQ-1): the IANA zone that decides which calendar
+  // DAY a `work_activity.occurred_at` timestamp belongs to when the fact job buckets it into
+  // `report_work_facts.fact_date`. It must be a single deploy-wide answer rather than the caller's
+  // local zone, or the same event lands on different days for different readers and a day's
+  // company total stops being reproducible. UTC by default — matching dept-resolution.ts's
+  // todayIso() and every other calendar-day comparison in the program.
+  reportsTz: process.env.REPORTS_TZ ?? "UTC",
   // Downstream service endpoints the admin/systems console aggregates (Phase C). All
   // read-only; empty URL -> that system reports "not configured" (fail-soft, never fake).
   services: {
@@ -327,6 +334,29 @@ export const config = {
     // design (see clustering.ts's embedKeywordSet/clusterKeywordSet doc comments) replaces the
     // single all-or-nothing transaction for these two routes.
     maxKeywordsPerSet: Number(process.env.SEARCH_MAX_KEYWORDS_PER_SET ?? 1000),
+    // SM-56's collect-edge shared secret, moved here from its interim parse site in
+    // search.controller.ts (that ticket read `process.env` directly because this file was held by a
+    // concurrent agent, and reported the key rather than smuggling it — this is the promised move).
+    //
+    // **Deliberately NOT routed through moneyEnv/numericEnv**: those exist to refuse an
+    // uninterpretable MONEY value at boot, because a silently-inert cap leaves spend unbounded. A
+    // secret has the opposite failure shape — an empty secret does not weaken the control, it makes
+    // the route refuse EVERY request (search.controller.ts's `assertCallbackSecret`). So unset is
+    // fail-CLOSED here, and there is nothing to validate at boot: any non-empty string is a
+    // syntactically valid secret, and we must not compare against a value we have "corrected".
+    //
+    // Left as a plain string with an empty default so the fail-closed branch stays reachable and
+    // testable. Do not "improve" this into a throw-if-unset: it is unset in every environment today
+    // (SM-55 deleted the only consumer), and booting the whole platform down over an unused
+    // integration secret would be a fail-open of a different kind — an operator would remove the
+    // check to get the stack up.
+    callbackSecret: process.env.SEARCH_CALLBACK_SECRET ?? "",
+    // SM-20's search-terms ingest secret. DELIBERATELY a SECOND secret, not a reuse of the one above:
+    // that guards a paid-vendor postback (DataForSEO), this guards a script running inside the client's
+    // own Google Ads account. They are two different external trust boundaries, and one shared value
+    // would mean a compromise of either grants both. Same fail-closed-when-unset reasoning as above
+    // applies verbatim, including the "do not improve this into a throw-if-unset" warning.
+    semCallbackSecret: process.env.SEARCH_SEM_CALLBACK_SECRET ?? "",
     // DataForSEO server-side credentials (HTTP Basic; ONE shared deposit pool across all clients —
     // never per-client keys, per foundation §8a lever 5). Empty => driver not registered.
     dataforseo: {
@@ -387,6 +417,26 @@ export const config = {
       monthlyApiTierPriceUsd: ahrefsMonthlyApiTierPriceUsd,
       monthlyApiTierUnitAllowance: ahrefsMonthlyApiTierUnitAllowance,
     },
+    // SM-54 (tracker §6ad Ruling 1 / addendum §A13.2) — the platform-side pull scheduler
+    // (modules/search/pull-scheduler.ts). DARK BY DEFAULT, and here that is a money control rather
+    // than a convention: this is the one loop in the platform that spends VENDOR MONEY with no human
+    // in the request path, so it must never start itself in a dev environment, a test run, or a fresh
+    // deployment where nobody has set per-engagement budgets yet. Same env-flag shape as
+    // PM_BURNDOWN_SNAPSHOT_ENABLED / SERVICE_ASSIGNMENTS_ENABLED.
+    schedulerEnabled:
+      process.env.SEARCH_SCHEDULER_ENABLED === "1" || process.env.SEARCH_SCHEDULER_ENABLED === "true",
+    // How often DUE-NESS IS RE-ASKED — NOT how often a pull happens. Cadence is derived per
+    // engagement from `tool_scope.<tool>.cadence` vs that tool's last capture-or-attempt, so shrinking
+    // this interval cannot increase spend; it only reduces how late a due pull fires. Default 1h.
+    //
+    // Routed through numericEnv (not a raw `Number(...)`, unlike the burndown/drift intervals) for a
+    // reason specific to this job: `Number("1 hour")` is NaN, `setTimeout(fn, NaN)` fires IMMEDIATELY,
+    // and an immediately-rescheduling loop over a money path is a hot loop that re-asks due-ness
+    // thousands of times a second. The cadence gate means it still would not over-spend, but it would
+    // hammer Postgres, and a typo must not be able to do that silently. `min: 1000` refuses a
+    // sub-second interval outright while leaving dev tuning available (numericEnv's bound is
+    // EXCLUSIVE — `n > min` — so anything at or below 1000ms is refused at boot).
+    schedulerIntervalMs: numericEnv("SEARCH_SCHEDULER_INTERVAL_MS", { default: 3600 * 1000, min: 1000 }),
     // Per-pillar kill switches (design §12 SM-06). Default ON — they are an operator brake for an
     // incident (a provider misbehaving, a cost surprise), not a rollout gate. A disabled pillar
     // refuses at the same fail-closed choke-point as an unregistered provider.
@@ -394,6 +444,60 @@ export const config = {
       seo: (process.env.SEARCH_PILLAR_SEO ?? "1") !== "0",
       sem: (process.env.SEARCH_PILLAR_SEM ?? "1") !== "0",
       geo: (process.env.SEARCH_PILLAR_GEO ?? "1") !== "0",
+    },
+    // ── SM-51 / SM-25a · GOOGLE CLIENT-ACCOUNT SURFACES (GSC / GA4 / Ads) ─────────────────────────
+    // Design addendum §A12 (binding): these are a THIRD EGRESS CLASS, not vendor market data.
+    // client-private + $0-API-billed + per-client-OAuth, so they do NOT ride SearchDataProvider /
+    // dispatchProviderOp (there is no money to meter) and they NEVER touch search_data_cache (no-RLS
+    // shared market data by design — a client's own Search Console rows there would be a cross-tenant
+    // leak BY CONSTRUCTION, not by bug). The bounding resource is Google QUOTA, not dollars.
+    //
+    // FAIL-CLOSED, like every other optional downstream in this file: with clientId/clientSecret/
+    // redirectUri unset there is no partially-working Google surface — googleOAuthConfigured() is
+    // false and every OAuth entry point throws GoogleOAuthNotConfiguredError, which
+    // GoogleOAuthErrorFilter maps to an honest 503 (modules/search/google/errors.ts). That mapping is
+    // deliberate and not optional: this module has now twice shipped a plain Error that escaped as a
+    // body-less 500 (SM-53's ProviderDispatchError, SM-57's GatewayNotConfiguredError).
+    //
+    // ENDPOINT SEAMS EXIST SO THE FLOW IS EXERCISABLE WITHOUT A GOOGLE OAUTH CLIENT (§A12.3): the
+    // authorize/token/revoke URLs are pointed at the local Keycloak realm (the machine path — real
+    // authorization-code + PKCE + rotation + RFC-7009 on real sockets) or at SM-51's in-process
+    // google sandbox in tests. §A10.4's private-host boot guard EXTENDS to these seams in live mode
+    // (assertLiveGoogleEndpointsAreNotPrivate, called from main.ts's live branch) so a deployed
+    // "live" stack cannot silently be pointed at a dev issuer.
+    //
+    // WHAT NO LOCAL SETUP CAN PROVE — SM-41G's staging clauses, restated here because this config
+    // block is where an operator forms their expectations: Google's consent screen, incremental
+    // consent and scope-grant semantics; refresh-token longevity under the OAuth app's publish status
+    // (Testing-mode refresh tokens expire in 7 days); Google-side revocation; quota/429 behaviour;
+    // the Ads developer-token approval + MCC/login-customer-id semantics; and whether real Google
+    // accepts our serialized requests at all.
+    google: {
+      clientId: process.env.GOOGLE_OAUTH_CLIENT_ID ?? "",
+      clientSecret: process.env.GOOGLE_OAUTH_CLIENT_SECRET ?? "",
+      // The ONE registered redirect URI. Deliberately tenant-agnostic: real Google requires EXACT
+      // registered redirect URIs (no wildcards), so a per-tenant callback path would need one
+      // registration per company. The tenant travels in the signed `state` instead (oauth-state.ts).
+      redirectUri: process.env.GOOGLE_OAUTH_REDIRECT_URI ?? "",
+      authorizeUrl: process.env.GOOGLE_OAUTH_AUTHORIZE_URL ?? "https://accounts.google.com/o/oauth2/v2/auth",
+      tokenUrl: process.env.GOOGLE_OAUTH_TOKEN_URL ?? "https://oauth2.googleapis.com/token",
+      // RFC 7009 revocation endpoint (Google's own documented spelling of it).
+      revokeUrl: process.env.GOOGLE_OAUTH_REVOKE_URL ?? "https://oauth2.googleapis.com/revoke",
+      searchConsoleBaseUrl: process.env.GOOGLE_SEARCH_CONSOLE_BASE_URL ?? "https://searchconsole.googleapis.com",
+      analyticsDataBaseUrl: process.env.GOOGLE_ANALYTICS_DATA_BASE_URL ?? "https://analyticsdata.googleapis.com",
+      adsBaseUrl: process.env.GOOGLE_ADS_BASE_URL ?? "https://googleads.googleapis.com",
+      // Ads-only extras. UNVERIFIED plan/approval facts (SM-41G): a developer token must be approved
+      // by Google before it works at all, and login-customer-id/MCC semantics are unrehearsable
+      // locally. Empty => the Ads surface refuses rather than half-working (SM-25c's own AC).
+      adsDeveloperToken: process.env.GOOGLE_ADS_DEVELOPER_TOKEN ?? "",
+      adsLoginCustomerId: process.env.GOOGLE_ADS_LOGIN_CUSTOMER_ID ?? "",
+      adsApiVersion: process.env.GOOGLE_ADS_API_VERSION ?? "v18",
+      // How long an in-flight authorization request stays redeemable. Short on purpose: the row holds
+      // a PKCE verifier, and a stale authorize link is a liability, not a convenience.
+      stateTtlSeconds: Number(process.env.GOOGLE_OAUTH_STATE_TTL_SECONDS ?? 600),
+      // Refresh this many seconds BEFORE the stored expiry, so a call never races its own token.
+      refreshSkewSeconds: Number(process.env.GOOGLE_OAUTH_REFRESH_SKEW_SECONDS ?? 120),
+      timeoutMs: Number(process.env.GOOGLE_OAUTH_TIMEOUT_MS ?? 15000),
     },
   },
   // WD-04 (Web Dev Phase 1 §12) — in-ERP audio upload -> server-side transcription. Calls the
@@ -455,4 +559,15 @@ export function n8nBridgeEnabled(): boolean {
 /** The graph bridge may start: a reachable knowledge service + at least one entity stream to watch. */
 export function graphBridgeEnabled(): boolean {
   return !!(config.services.knowledge.url && config.services.knowledge.token && config.graphBridge.entityTypes.length);
+}
+
+/** SM-25a — the Google OAuth client is fully configured and an authorization-code round trip is even
+ *  attemptable. All THREE knobs are required: a client id without a secret cannot complete the token
+ *  exchange for a confidential client, and without a registered redirect URI the authorize request is
+ *  refused by the issuer anyway. Anything less is "unconfigured", not "partly working" — callers turn
+ *  a false here into GoogleOAuthNotConfiguredError -> 503, never a half-attempt against a phantom
+ *  endpoint (the same fail-closed convention as the keyless vendor-driver path). */
+export function googleOAuthConfigured(): boolean {
+  const g = config.search.google;
+  return !!(g.clientId && g.clientSecret && g.redirectUri);
 }

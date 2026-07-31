@@ -201,6 +201,7 @@ const SEO: DeptToolkit = {
         { key: "audit", label: "Site Audit", path: "audit", icon: "pulse", blurb: "Crawl a property and triage technical findings." },
         { key: "keywords", label: "Keywords", path: "keywords", icon: "search", blurb: "Import, cluster and tag keywords by intent." },
         { key: "rankings", label: "Rankings", path: "rankings", icon: "pulse", blurb: "Tracked positions over time, drops, and SERP features." },
+        { key: "gsc-ga4", label: "Search Console & GA4", path: "gsc-ga4", icon: "search", blurb: "Clicks, impressions, sessions, and conversions pulled from the client's own Google account — $0 to the shared deposit." },
         { key: "briefs", label: "Content Briefs", path: "briefs", icon: "box", blurb: "AI-drafted briefs grounded in your own crawl + keyword data." },
         { key: "ai-visibility", label: "AI Visibility", path: "ai-visibility", icon: "agents", blurb: "How often AI answers cite this brand (GEO/AEO)." },
       ],

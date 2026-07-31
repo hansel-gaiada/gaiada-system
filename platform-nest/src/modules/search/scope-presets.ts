@@ -31,7 +31,15 @@ const SEEDED_PRESETS: Record<Exclude<ScopePreset, "custom">, ToolScopeShape> = {
   },
   standard: {
     rank: { enabled: true, cadence: "weekly", maxKeywords: 50 },
-    volume: { enabled: true },
+    // SM-61 (tracker §6au Ruling 1 clause 2, binding): `volume` used to ship cadence-LESS —
+    // `enabled: true` with no `cadence` key — which the pull scheduler (SM-54) was defaulting to
+    // weekly-conservative while the cost projection had ALWAYS priced it as one on-demand
+    // refresh/month. That is the SM-61 defect itself: a cadence-less enabled tool was scheduled ~4x
+    // more often than the panel showed. `cadence: "monthly"` fixes this by SCHEDULING it at exactly
+    // the rate it was already being priced at (`runsPerMonth("monthly") === 1`, identical to the old
+    // absent-default) — zero change to the number any human has ever seen, and it matches the
+    // vendor's own monthly volume-data update cycle (a weekly pull would re-buy unchanged data).
+    volume: { enabled: true, cadence: "monthly" },
     backlinks: { enabled: false },
     ai_visibility: { enabled: true, cadence: "weekly" },
     audit_technical: { enabled: true, cadence: "weekly" },
@@ -40,7 +48,8 @@ const SEEDED_PRESETS: Record<Exclude<ScopePreset, "custom">, ToolScopeShape> = {
   },
   heavy: {
     rank: { enabled: true, cadence: "daily", maxKeywords: 200 },
-    volume: { enabled: true },
+    // Same SM-61 fix as 'standard' above, same price-identity proof.
+    volume: { enabled: true, cadence: "monthly" },
     backlinks: { enabled: true, cadence: "monthly" },
     ai_visibility: { enabled: true, cadence: "weekly" },
     audit_technical: { enabled: true, cadence: "weekly" },

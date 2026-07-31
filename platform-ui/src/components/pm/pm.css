@@ -167,6 +167,17 @@
 .pm-board__toast { margin: 0 0 10px; font: 700 12px var(--font-body); color: var(--erp-accent); border: 0.5px solid var(--erp-accent); background: var(--surface-card); padding: 8px 12px; animation: erp-toast 0.18s var(--erp-ease); }
 .pm-sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 
+/* ---- contributors (TR-32) ---- */
+/* Owner vs. contributor must read as two different KINDS of person, not one
+   list of interchangeable avatars — owner-takes-all attribution (tracker-
+   reporting §3.1) makes the distinction load-bearing: a contributor's hours
+   count, but only the owner is credited with the task's outcome. */
+.pm-contributors__label { font-size: 10px; opacity: 0.6; display: block; margin-bottom: 6px; }
+.pm-contributor { display: flex; align-items: center; gap: 8px; padding: 6px 0; font: 400 13px var(--font-body); color: var(--text-primary); }
+.pm-contributor__dot { width: 8px; height: 8px; border-radius: 50%; background: var(--erp-ink-40, #999); flex: none; }
+.pm-contributor--owner { font-weight: 700; }
+.pm-contributor__dot--owner { background: var(--erp-accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--erp-accent) 20%, transparent); }
+
 /* ---- tags (P2-02, design spec §6) ---- */
 /* One class, per-instance tone via two CSS vars (onLight/onDark hex — see
    TagChip.tsx + tagColors.ts for the AA verification). Plain surfaces (the

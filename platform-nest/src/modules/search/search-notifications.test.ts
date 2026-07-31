@@ -32,6 +32,7 @@ import {
   handleReportDelivered,
   handleCampaignProposed,
   handleAiVisibilityChanged,
+  handleIncurredCost,
 } from "./notifications";
 import type { OutboxEvent } from "../../events/types";
 
@@ -421,5 +422,113 @@ describe.skipIf(!TEST_URL || !REDIS_TEST_URL)("search module notifications (SM-1
       c.query(`SELECT 1 FROM notifications WHERE payload->>'sourceEventId' = 'qa-cross-campaign-1'`),
     );
     expect(anyRow.rows.length).toBe(0);
+  });
+
+  // ── SM-50 (addendum §A11.2 #11) — the incurred-cost bell ─────────────────────────────────────────
+  // "Repeated incurred failures must reach a human, not only the sums." The producer (the compensating
+  // write in providers/dispatch.ts) is proven in providers/incurred-cost.test.ts; this is the CONSUMER
+  // half: owner resolution, href, dedupe, cross-tenant isolation, and the TEXT-SAFETY rule.
+  it("SM-50: search.provider.incurred_cost notifies the engagement owner, and never renders the money figure", async () => {
+    const engId = newId();
+    await withTenants(
+      [A],
+      (c) => c.query(
+        `INSERT INTO search_engagements (id, tenant_id, client_id, property_id, name, tool_scope, provider_budget_usd, status, owner_id)
+         VALUES ($1,$2,$3,$4,$5,'{}',$6,'active',$7)`,
+        [engId, A, clientA, propertyId, "SM-50 incurred-cost engagement", 10, uA],
+      ),
+      { modules: ["search"] },
+    );
+
+    const event: OutboxEvent = {
+      id: "sm50-incurred-1", tenantId: A, entityType: "search_engagement", entityId: engId,
+      eventType: "search.provider.incurred_cost",
+      payload: {
+        ledgerId: newId(), provider: "dataforseo", endpoint: "dataforseo.serp",
+        costUsd: 0.0006, vendorRef: "task-abc", items: 1, correlationId: null, simulated: false,
+      },
+      originSite: "central", schemaVersion: 1, createdAt: new Date().toISOString(),
+    };
+    await handleIncurredCost(event);
+
+    const notifs = await notificationsFor(A, uA, "search.provider.incurred_cost");
+    const mine = notifs.filter((p) => p.sourceEventId === "sm50-incurred-1");
+    expect(mine).toHaveLength(1);
+    // Deep-links to the engagement, where SM-17's cost surface lives. Deliberately NOT a `/ledger`
+    // route: the uiManifest has no such tab, and SM-13's rule is that a wrong-but-plausible href is
+    // worse than a broad-but-correct one.
+    expect(mine[0].href).toBe(`/departments/seo/engagements/${engId}`);
+    // Real money with nothing to show for it, and the repeat case is a burn in progress.
+    expect(mine[0].severity).toBe("critical");
+
+    // TEXT SAFETY (SM-13's binding rule, and this event is where it bites hardest): the payload carries
+    // costUsd, and no dollar figure may appear in the prose a human reads. Provider spend is
+    // standard-rate accounting, not cash (§A3), and a bell line quoting a number is the first place
+    // someone would read it as cash. The money belongs on the ledger surface the href points at.
+    // Title/body live INSIDE the notifications payload (that table carries no title/body columns —
+    // checked against the DDL, not against a TS interface, per §4i discipline).
+    const text = await withTenants([A], (c) =>
+      c.query<{ title: string | null; body: string | null }>(
+        `SELECT payload->>'title' AS title, payload->>'body' AS body
+           FROM notifications WHERE payload->>'sourceEventId' = 'sm50-incurred-1'`,
+      ),
+    );
+    expect(text.rows).toHaveLength(1);
+    const prose = `${text.rows[0].title ?? ""} ${text.rows[0].body ?? ""}`;
+    // The load-bearing assertion: NO money figure in the prose. A notification body cannot carry the
+    // simulated/real provenance badge the ledger surfaces attach to a figure, so a bare amount here
+    // would be an unlabelled money claim (SM-50 probe P8 pins this).
+    expect(prose).not.toMatch(/\$|0\.0006|\d+\.\d{2,}/);
+    // SM-60 widened the wording from "…returned no data" to "…produced no usable data", because
+    // `incurred` gained a second cause: the vendor charged AND delivered, but our own post-success
+    // write failed and the rollback discarded the payload. "no data" became literally false for that
+    // case, and a notification that misstates the cause sends an operator to the vendor's console
+    // hunting a fault that is on our side.
+    //
+    // Asserting the two facts an operator must act on — a CHARGE happened, and nothing USABLE was
+    // kept — rather than one brittle phrase. The previous `/no data/i` pinned wording that had to
+    // change, which is why it failed here rather than catching a defect: a copy assertion should
+    // pin the CLAIM, not the sentence, or it turns every honest rewording into a red build.
+    expect(prose).toMatch(/charge/i);
+    expect(prose).toMatch(/no usable data|no data/i);
+
+    // Dedupe on the outbox event id, exactly like every other handler here: a Redis redelivery whose
+    // earlier attempt threw after notify() succeeded must not double-notify.
+    await handleIncurredCost(event);
+    const after = (await notificationsFor(A, uA, "search.provider.incurred_cost"))
+      .filter((p) => p.sourceEventId === "sm50-incurred-1");
+    expect(after).toHaveLength(1);
+  });
+
+  it("SM-50: an incurred_cost event whose engagementId belongs to another tenant notifies nobody", async () => {
+    // A cost event is engagement-scoped, and engagementOwner is RLS-scoped to [tenantId] — so an
+    // entityId from tenant C, presented under tenantId A, resolves no owner at all.
+    const cProp3 = newId();
+    await withTenants([C], (c) =>
+      c.query(
+        `INSERT INTO search_properties (id, tenant_id, client_id, domain, site_url) VALUES ($1,$2,$3,$4,$5)`,
+        [cProp3, C, clientC, "c-incurred.example.com", "https://c-incurred.example.com"],
+      ), { modules: ["search"] });
+    const cEng = newId();
+    await withTenants([C], (c) =>
+      c.query(
+        `INSERT INTO search_engagements (id, tenant_id, client_id, property_id, name, tool_scope, provider_budget_usd, status, owner_id)
+         VALUES ($1,$2,$3,$4,$5,'{}',$6,'active',$7)`,
+        [cEng, C, clientC, cProp3, "SM-50 C-only engagement", 10, uC],
+      ), { modules: ["search"] });
+
+    await handleIncurredCost({
+      id: "sm50-cross-1", tenantId: A, entityType: "search_engagement", entityId: cEng,
+      eventType: "search.provider.incurred_cost",
+      payload: { provider: "dataforseo", costUsd: 0.0006, vendorRef: "task-x" },
+      originSite: "central", schemaVersion: 1, createdAt: new Date().toISOString(),
+    });
+
+    const anyRow = await withTenants([A], (c) =>
+      c.query(`SELECT 1 FROM notifications WHERE payload->>'sourceEventId' = 'sm50-cross-1'`),
+    );
+    expect(anyRow.rows.length).toBe(0);
+    const cRows = await notificationsFor(C, uC, "search.provider.incurred_cost");
+    expect(cRows.every((p) => p.sourceEventId !== "sm50-cross-1")).toBe(true);
   });
 });

@@ -9,12 +9,32 @@ running state of the build** — update it as tickets land; the design doc does 
 - Mobilization: `/army`, discussion-first, **1–2 agent concurrency cap** (agent-army standard).
 - ⚡ = contract-touching → **QA gate + architect design-review on the diff**, mandatory.
 
-**Last audited:** 2026-07-30 — the owed ⚡ architect half for **SM-40/42/18 is discharged (§6x —
-all three LANDED)**, the SM-08/10/13 gates cleared (**§6y** — P1 fully LANDED, **M2 REACHED**),
-and the money path has one open P0-class ticket: **SM-50** (incurred-cost rows, §6x.2 + addendum
-§A11) — **must land before OQ-11 funds DataForSEO**. Google surfaces are construction-unblocked
-(§6x.3 + §A12, SM-25 decomposed). **§6x.4 is the authoritative dev-completion order**; addendum
-is at A1.5 (§A11 incurred cost · §A12 Google).
+**Last audited:** 2026-07-31 (SM-23, this pass) — since the 2026-07-30 note below (kept for
+history), the bundled ⚡ gate (§6bc) PASSED **SM-54/SM-56/SM-59/SM-61/SM-25b** (all now LANDED) and
+the echo-validation class (§A14) was opened, audited (§6be) and mostly closed: **SM-30** and
+**SM-20** are DEV-VERIFIED with their own ⚡ gates still owed (§6ba/§6bg); **SM-63** LANDED (§6bb);
+**SM-64** DEV-VERIFIED, gate owed (§6bf); **SM-66/SM-67/SM-69** DEV-VERIFIED, gates owed (§6bh);
+**SM-68/SM-70** — implemented and ruled on (§6bi/§6bj: "the tree is green, 894/4 skipped"), **then
+an orchestrator `git checkout` destroyed the uncommitted `providers/dataforseo.ts`, reverting
+SM-67/68/69/70's work in that one file; a rebuild is in flight** — see §6bk. Do not read SM-70 (or
+67/68/69, which live in the same file) as clean until the rebuild reports and a fresh gate runs.
+**SM-19** has real, committed, wired frontend work (`PaidActionGate`/`ApplyProposalTwins`) that was
+never given a §6 narrative or a ticket-scoped gate — its row is corrected from a stale bare `TODO`
+to reflect that, without promoting it to DEV-VERIFIED (see §6bk). The at-ticket-creation-row rule
+(adopted §6au) was **breached again** for SM-66…69 (fixed in §6bi, itself the second occurrence in
+one programme) — recorded here per SM-23's own regression case. Money path: **SM-50 LANDED**
+(§6ak→§6ar). Google surfaces under construction (§6x.3 + §A12). **§6x.4 is the authoritative
+dev-completion order**; addendum is at A1.7 (was A1.5 — bumped with the provider addendum).
+
+<details><summary>2026-07-30 audit note (superseded above, kept for history)</summary>
+
+the owed ⚡ architect half for **SM-40/42/18 is discharged (§6x — all three LANDED)**, the
+SM-08/10/13 gates cleared (**§6y** — P1 fully LANDED, **M2 REACHED**), and the money path has one
+open P0-class ticket: **SM-50** (incurred-cost rows, §6x.2 + addendum §A11) — **must land before
+OQ-11 funds DataForSEO**. Google surfaces are construction-unblocked (§6x.3 + §A12, SM-25
+decomposed).
+
+</details>
 
 ---
 
@@ -105,9 +125,9 @@ Inherited ACs + build order + concurrency pairs: §6j. SM-46 runs first.)*
 
 | # | State | Note |
 |---|---|---|
-| SM-14 | **IN FLIGHT — partially discharged (§6s), remainder + ⚡ gate owed** | Live-proven 2026-07-29 (§6s): first real traffic through `dispatchProviderOp`, rank + metrics pulls stamping provider/simulated atomically; callback route wired (`controller:1234`). Still owed: DB-backed integration tests, stamp mutation probes (`DispatchResult.simulated` substitution ⇒ red), `listKeywords` SELECT widening + BFF types/fixtures (§4i), the SM-50 callback interlock (§A11.1.4), ⚡ gate re-verifying SM-46a/b on real rows. senior-be · default. |
-| SM-15 | TODO | Deps SM-05, SM-08, **SM-14** (∥ blessing withdrawn, §A9.8). n8n flows batch 1 — mode-blind, zero platform routes, scope-driven cadence (§6j). senior-integrator · default. |
-| SM-16 | TODO | Deps SM-05, SM-11, SM-14 (pattern reuse). Backlinks + GEO/AI-visibility; same stamp/badge/filter duties transposed (§6j). medior · default. |
+| SM-14 | **LANDED** (remainder discharged §6af 2026-07-30; ⚡ gate PASS §6ak) *(state corrected §6au — this row predated §6af/§6ak)* | Live-proven 2026-07-29 (§6s): first real traffic through `dispatchProviderOp`, rank + metrics pulls stamping provider/simulated atomically; callback route wired (`controller:1234`). The four §6s-owed items (DB-backed integration tests, stamp mutation probes, `listKeywords` SELECT widening + BFF types/fixtures, SM-50 callback interlock) all discharged per §6af. |
+| SM-15 | **RETIRED → SM-54 + SM-55** (§6ad Ruling 1; automation must never trigger a paid pull). Flows deleted by SM-55 (§6ag). | Deps SM-05, SM-08, **SM-14** (∥ blessing withdrawn, §A9.8). n8n flows batch 1 — mode-blind, zero platform routes, scope-driven cadence (§6j). senior-integrator · default. |
+| SM-16 | **LANDED** (⚡ gate PASS 2026-07-30, §6ak; DEV-VERIFIED §6aa) | Deps SM-05, SM-11, SM-14 (pattern reuse). Backlinks + GEO/AI-visibility; same stamp/badge/filter duties transposed (§6j). medior · default. |
 | SM-17 | **IN FLIGHT — AC discharged 2026-07-29 (§6n), QA gate owed (§6x.4 step 2)** | First money-ledger surface landed: binding "cost-to-serve (standard rates)" language, verbatim cash legend, per-row chips from the row's own flag, empty-vs-zero as two code paths, reconciliation caption (§6n). Inherits one SM-50 legend line + status-union widening (§A11.2 #6). medior · default. |
 
 ### P3 — SEM + reports
@@ -115,12 +135,12 @@ Inherited ACs + build order + concurrency pairs: §6j. SM-46 runs first.)*
 | # | State | Note |
 |---|---|---|
 | SM-18 | **LANDED** (⚡ gate: QA PASS §6r 2026-07-29 + architect APPROVE §6x.1 2026-07-30) | `sem-plan.ts` (cluster→plan generator, pure), `sem-drafts.ts` (RSA + negative AI drafts, pure), new SEM routes on `search.controller.ts` (campaigns/ad-groups/ads/negatives/change-proposals CRUD + generate-plan + AI-draft endpoints), `search-sem.test.ts`/`sem-plan.test.ts`/`sem-drafts.test.ts` (41 new tests). No migration — all columns already existed (0034/0048). No live side-effects: campaign/ad/negative/change-proposal statuses are restricted at the app layer to their ERP-side draft states; a change proposal can reach `approved`/`dismissed` here but `applied` is refused everywhere (400) — SM-30/21 own it. Keyword-metric provenance (0048 `metrics_provider`/`metrics_simulated`) flows into the generated plan as a per-ad-group `{providers, simulatedCount, realCount, unpulledCount}` block, never blended (§A2). See §6l for the close-out record. |
-| SM-30 | TODO | Dep SM-18. Manual-apply/export twin — ships without any OAuth. |
-| SM-19 | TODO | Deps SM-18, SM-30, SM-11. Dual-mode picker per action. |
-| SM-20 | TODO | Dep SM-18. Signed webhook, idempotent upsert. |
+| SM-30 | **IN FLIGHT — DEV-VERIFIED §6ba, gate owed** (row said TODO; fixed §6bc — the §6au reconcile class) | Dep SM-18. Manual-apply/export twin — ships without any OAuth. Ads-Editor CSV + `apply_manual` door, §6ba. |
+| SM-19 | **IN FLIGHT — code + tests committed, no §6 ticket record, no gate** (row said bare TODO; corrected §6bk, SM-23) | Deps SM-18, SM-30, SM-11. Dual-mode picker per action: `PaidActionGate.tsx`/`.test.tsx` (metered-pull pre-commit disclosure) + `ApplyProposalTwins.tsx`/`.test.tsx` (SEM manual/api execution twins) + `ChangeProposalsPanel.tsx`, wired live into `/departments/[deptId]/rankings` and `/departments/[deptId]/planner/[campaignId]`. Evidenced only by the app-release CHANGELOG entry (`platform-ui 0.6.5→0.7.0`, "729 tests green" at cut time) and disk — **not** by a §6 narrative or a ticket-scoped verification pass; `FRONTEND-BFF-CONTRACT.md` still listed it "unclaimed" (fixed, §6bk). Manual twin is fully live (SM-30's backend); API twin honestly renders disabled pending SM-21. Not upgraded to DEV-VERIFIED — no one has run its AC against this ticket number. |
+| SM-20 | **IN FLIGHT — DEV-VERIFIED §6bg, gate owed** | Search-terms callback + reader; second secret (`SEARCH_SEM_CALLBACK_SECRET`, distinct trust boundary); schema idempotency (migration **0062**, row_hash); two-level SM-63-class scope resolution; forced-race proof with negative control. Campaign-metrics half + Ads Script artifact still PENDING. |
 | SM-21 ⚡ | TODO | Deps SM-18, SM-03. **opus·high** — approve-execute-replay; a bypass is unacceptable. |
 | SM-22 | TODO | Deps SM-10, SM-17, SM-18. |
-| SM-23 | TODO | Docs/registration reconcile. **Partly owed already** — see SM-00. |
+| SM-23 | **LANDED (this pass, 2026-07-31, §6bk)** | Docs/registration reconcile. Fixed: SM-19's row (bare `TODO` → committed-but-unnarrated), SM-70/68/67/69's rows (added the accidental-revert + rebuild-in-flight caveat), the "Last audited" banner, MODULES.md's stale "what exists" paragraph + migration list (0061/0062 missing) + version bump, `FRONTEND-BFF-CONTRACT.md`'s two stale PENDING rows (Rankings/Ads Studio UI, both actually wired), and a CHANGELOG entry for today. **Confirmed a second occurrence of the at-creation-row rule breach** (SM-66…69 landed §6be with no §1 rows, fixed only at §6bi) — the standing rule (adopted §6au after its first breach) is not holding on its own; recorded here as SM-23's own regression case per the ticket's own instruction. **Not run:** the search suites (docs-only pass per this ticket's scope this time; SM-00 already covered the SM-03 suite verification). junior · seat default. |
 | SM-24 | TODO | Dep all. Flips the module toward `DEV-VERIFIED`. |
 
 ### P4 — Live-ads automation (committed)
@@ -129,6 +149,40 @@ Inherited ACs + build order + concurrency pairs: §6j. SM-46 runs first.)*
 |---|---|---|
 | SM-25 ⚡ | **DECOMPOSED → SM-25a/b/c (§6x.3, addendum §A12) — construction UNBLOCKED** | SM-25a OAuth core (senior-be · **opus·medium** ⚡, after SM-51) → SM-25b GSC+GA4 read ingestion (medior · default) → SM-25c Ads read binding (senior-be · default). Dev acceptance vs the SM-51 sandbox + local Keycloak; the Google OAuth client gates only **SM-41G** staging acceptance. |
 | SM-26 | **CODE UNBLOCKED after SM-21 + SM-25c** (§6x.3) | Executor builds against SM-51's mutate fixtures through SM-21's one-shot path; the real-account push AC is staging (SM-41G, test account). senior-integrator · default. |
+
+### P5 — hardening + Google (SM-50…SM-61, created 2026-07-29/30)
+
+*Added 2026-07-30: these twelve were tracked only in the narrative sections (§6x–§6at) and had **no
+ledger rows** — the table meant to be the running state was missing a third of the programme. That is
+the SM-23 doc-reconcile debt showing up in the one place it is most costly.*
+
+| # | State | Note |
+|---|---|---|
+| SM-50 | **LANDED** (⚡ QA §6ak FAILED it → fixed by SM-60 → PASS §6ar) | `incurred` ledger status + compensating write outside the rolled-back txn. Migration `0053`. All four money sums are status-blind, so incurred burn binds every tier with zero query changes — and the shape pins forbid adding a status predicate. |
+| SM-51 | **LANDED** (⚡ gate PASS §6ar) | Google-surface sandbox + `google/` module (8 files), migration `0060`. Real-Keycloak OAuth flows verified by me 4/4 (§6ar). |
+| SM-52 | **LANDED** (§6z, verified by me) | The money-env guard extended to **every** cap/price/ratio — my own §6r fix had covered one variable of nine. `reservationFraction` no longer silently substitutes 0.5. |
+| SM-53 | **LANDED** (⚡ gate PASS §6ak; architect RATIFIED §6ad Ruling 2) | Typed dispatch refusals → honest HTTP (409/503, never 500) + `code` discriminator. Was a message-less 500. |
+| SM-54 | **LANDED** (⚡ architect half §6au · QA half PASS §6av · bundled-gate regression PASS §6bc) | Platform-side pull scheduler — the department's first cadence. Off by default (a money control, not a convention). Found the refusal-swallowing defect (hazard 5) and SM-61. All six §6at deviations ratified in §6au. |
+| SM-55 | **LANDED** (§6ag) | Retired SM-15's blocked flows, incl. a comment instructing a future agent to lower `minAssurance`. Allow-list entries removed **and** a deny-by-default regression test added. |
+| SM-56 | **LANDED** (⚡ gate §6bc: FAILED on wrong-engagement scope → fixed by SM-63 §6bb → discharged §6bc; the SM-50→SM-60 pattern) | Collect edge: `fetchSerpByTaskId` with the posting half structurally absent from the call graph. Secret-authed, idempotent, `incurred → completed` reconciliation. Closed a live double-charge. |
+| SM-57 | **LANDED** (§6ae) | `GatewayNotConfiguredError` → 503; BFF contract records `{ error, field?, code? }`. Plus the **registration pin** (correct-but-unwired is indistinguishable from absent). |
+| SM-58 | **LANDED** (⚡ gate PASS §6aq/§6ar) | App-wide last-resort filter. Gate found a **hostile `.message` getter crashing the filter itself** — no response at all, worse than the bug it fixed. |
+| SM-59 | **LANDED** (⚡ gate PASS §6bc) | `provider` predicate on the `vendor_ref` reconciliation lookup. No index change, correctly — it was a correctness bug, not a performance one. |
+| SM-60 | **LANDED** (⚡ gate PASS §6ar) | Compensation keyed on *whether the vendor was charged*, not on the thrown class — so it covers `writeCache`, `insertLedgerRow`, the true-up **and** a failed COMMIT. |
+| SM-61 ⚡ | **LANDED** (DEV-VERIFIED §6ax · ⚡ gate PASS §6bc, live-verified on `:3004` incl. rejected-PUT byte-identity) | RULED §6au: absent cadence = **on-demand** — the scheduler never selects it (new `on_demand` tick outcome; `DEFAULT_CADENCE_DAYS` deleted; §6ad spec item 2's weekly-conservative clause SUPERSEDED). `standard`/`heavy` presets seed `volume.cadence: "monthly"` (price-identical to what the panel always displayed). Projection keeps `default: 1` as the labeled on-demand estimate (`ProjectedToolCost.scheduled` + UI est. label). Scope PUT gains cadence enum validation. Shared no-default parser `modules/search/cadence.ts` so the two call sites cannot drift again. |
+| SM-62 (new §6au) | **PARKED — owner timing** (supersedes §A13.7's SM-56-timing question) | Scheduler Standard-queue economics: short `pollAttempts` + postback reliance for `sched:` pulls ONLY (manual keeps long-poll) + a $0 collect sweep (`fetchSerpByTaskId`) over stale `posted`/`incurred` sched rows at tick start; fail-back to long-poll when the postback edge is unconfigured. Gates in order: bundled ⚡ gate PASS → n8n postback relay rebuilt → staging + funded key (§6an's three vendor facts). senior-be · **opus·medium** at unpark (pending-state money semantics). |
+| SM-63 (new §6bc, from SM-56's gate FAIL) | **LANDED** (DEV-VERIFIED + mutation-probed §6bb; architect half APPROVE §6bc) | Collect edge scope check: `findLedgerRowByVendorRef` returns the row's own `engagement_id`/`property_id`; `ledgerRowScopeMatches` compared by the caller, refusal keeps the no-oracle shape. Also gave the toothless redelivery test teeth (`collectDelayMs`; lock removal now red 1/27). senior-be · seat default. |
+| SM-64 (new §6bc) | **IN FLIGHT — DEV-VERIFIED §6bf, ⚡ gate owed** | Response-window enforcement (§6bc Ruling 1) implemented: shared `isRowDateWithinWindow` in `freshness.ts`, GSC `rowsOutsideRangeSkipped`/`rowsOverLimitSkipped` (+ stop-paging on over-full page), GA4 twin post-normalization; the gate's red test green with its attack half unmodified. medior · seat default · ⚡ (additive contract fields). |
+| SM-65 (new §6bc) | **Discharged §6be** (read-only audit, no code — no gate applicable) | Echo-validation sweep (§A14 axis #6). Output: SM-66…SM-69 + the SM-68 precedence question ruled §6bi. Its "before billing" remedy wording for finding #2 is corrected by §6bi Ruling 1 (record ≠ accept). |
+| SM-66 (new §6be) | **IN FLIGHT — DEV-VERIFIED §6bh, gate owed** (money-path) | Ahrefs true-up guard → `Number.isFinite(units) && units > 0`; `trueUpHeaderMalformedCount`; exact-0 treated malformed; sandbox harness widened to express malformed headers. Lives in `ahrefs.ts`, not the file affected by the §6bk revert. senior-be · seat default. |
+| SM-67 (new §6be) | **IN FLIGHT — DEV-VERIFIED §6bh, gate owed; ⚠️ see §6bk** | `task_get` identity echo: `task.id !== ref.id` → refuse-as-not-found (byte-identical message), checked before status branches. Exposed the 8-red fixture-truthfulness cascade (id-blind mocks — fixed §6bh, no assertion changed). **Lives in `providers/dataforseo.ts`, the file an orchestrator `git checkout` reverted after §6bj (§6bk); a rebuild is in flight.** Current disk state shows the implementation present but not re-verified by this pass. senior-be · seat default. |
+| SM-68 (new §6be) | **IN FLIGHT — bound DEV-VERIFIED §6bh; disposition RULED §6bi → amended by SM-70; ⚠️ see §6bk** | `postSerpTasks`: loop bounded to `Math.min(tasks.length, reqs.length)` (billing exploit closed, mutation-probed ×3); keyword-echo precedence ruled §6bi — record the money, refuse the data on canonical mismatch. **Same `providers/dataforseo.ts` revert as SM-67/69/70 — see §6bk; rebuild in flight, not re-verified by this pass.** senior-be · seat default. |
+| SM-69 (new §6be) | **IN FLIGHT — DEV-VERIFIED §6bh, gate owed; ⚠️ see §6bk** | Backlinks `target`: requested value returned, never the vendor's echo; `backlinksTargetMismatchCount` diagnostic. Matches Semrush/Ahrefs. **Same `providers/dataforseo.ts` revert as SM-67/68/70 — see §6bk; rebuild in flight, not re-verified by this pass.** senior-be · seat default. |
+| SM-70 (new §6bi) | **IN FLIGHT — DEV-VERIFIED §6bj ("the tree is green," 894/4 skipped), then reverted by an orchestrator `git checkout` error and a rebuild is in flight — see §6bk. Do not read as clean.** | SM-68 disposition amendment per §6bi: canonical compare + refuse-data/record-charge (throw after all charges recorded); `ACCEPTED()` fixture request-aware; AC4 rewritten as the bound's dispatch probe; driver twin + mismatch case; negative controls per the sharpened Ruling 5. senior-be · seat default. |
+
+| SM-25a | **LANDED (service, ⚡ gate PASS §6ar) + HTTP surface DEV-VERIFIED, gate owed (§6as)** | OAuth core: PKCE, exchange, rotation, RFC-7009 revoke, existing vault. Callback is tenant-agnostic by necessity; its authority is the signed single-use state + a Cerbos check **before** the exchange + `created_by` binding (closes login-CSRF). |
+| SM-25b | **LANDED** (DEV-VERIFIED §6ay · gate PASS §6bc **with one residual → SM-64**; its red test stands until SM-64 lands) | GSC + GA4 reads, migration `0061`. Freshness clamped not flagged (§6ay); the response-side half of that guarantee is SM-64 (§6bc Ruling 1). |
+| SM-25c | **TODO** | Google Ads read path. Writes stay under SM-21 + WS4. |
 
 ### Decision-gated — do not mobilize
 
@@ -3282,3 +3336,2759 @@ but does not dedupe the charge.
 
 **Status: IN PROGRESS.** Not DEV-VERIFIED: the shipped flow imported cleanly but has never executed to
 completion, blocked upstream by the assurance question above.
+
+---
+
+## 6ad · Architect rulings — §6ac assurance question, SM-53 ratification, SM-15's contract gaps (2026-07-30, binding)
+
+Full design reasoning + the amendments in **addendum §A13** (which supersedes the affected clauses
+of design §07/D-5/§09/§10). This section carries the tracker-side dispositions and ticket specs.
+
+### Ruling 1 — automation must NOT be able to trigger paid pulls; the refusal in §6ac is ratified
+
+The block SM-15 hit is the security model working, not an authoring oversight. `minAssurance:
+'verified'` on every search write tool follows the verified hr/pm/automation-console convention; the
+tools automation can reach are cheap and reversible; a paid pull is neither. **No mechanism may give
+n8n a path to vendor spend** — not a lowered gate, not a verified service principal (it would break
+`principal.ts`'s IdP-only rule AND still hit the D14 medium-impact suspend: two weakened controls),
+not per-run WS4 approvals (no re-drive exists — re-verified in `automation-approvals.controller.ts`
+today — and daily per-engagement approvals for pre-authorized spend train rubber-stamping).
+
+**The cadence loop moves into platform-nest as a module scheduler job (SM-54).** The standing human
+authorization is the engagement's `tool_scope` (toggle + cadence) + budget cap under
+`search:scope:write`; enforcement stays at the unchanged dispatch choke-point; the ledger records
+`requested_by NULL` + `correlationId 'sched:<tool>'`. Precedent: `startReconcileLoop`/
+`startDriftSweepLoop`/`startBurndownSnapshotLoop` + `automation-policy.ts`'s own `wf:digest-fanout`
+exception. **This amends the "n8n orchestrates, MCP accesses" backbone rule explicitly** (recurring
+in-module cadence work = platform job; n8n keeps glue/event-reactive/webhook-edge work; hard rule:
+no allow-list may ever include a money-spending tool) — owner ratification requested, addendum
+§A13.7. The design's own contradiction (§07 declares paid pulls `impact:'medium'` "so automation
+routes through the D14 gate" while the same section's convention makes them unreachable by
+automation) is resolved in favour of the assurance gate: **`impact:'medium'` stays** as the tool's
+risk classification (agent-surface gating + console display), not as an automation entry path.
+
+### Ruling 2 — SM-53 RATIFIED as-is; one more instance of the same class found; one platform ticket
+
+409 (`scope_disabled`/`budget_exceeded`) and 503 (the five unavailability codes + unmapped-default)
+ratified; 422 and 402 rejected on RFC-9110 grounds (§A13.4). Mapping verified exhaustive against the
+`ProviderDispatchError` code union. `code` in the body is an API-contract addition and gets a
+FRONTEND-BFF-CONTRACT Conventions entry (SM-57). Filter placement (search-owned file, global
+registration, type-scoped catch) correct as-is; do not generalize the mapping. **Verified new
+instance of the identical bug class:** `GatewayNotConfiguredError` escapes
+`POST keyword-sets/:id/embed`/`cluster` as a message-less 500 (uncaught in the embed loop; the
+controller maps only `KeywordSetTooLargeError`; AI-draft routes are clean — they fall back).
+**Platform finding:** no other module has typed plain-Error domain exceptions (swept — all six live
+in search/app-guard), but the floor gap is structural: any uncaught plain Error anywhere returns a
+500 with no `{ error }` body → SM-58, app-wide last-resort filter.
+
+### Ruling 3 — one gap real (resolved by retiring the tool), the rest deliberate deferrals
+
+- `search.keywordResearch` / `search.runAudit` unbound: **deliberate**, documented per-tool in
+  `index.ts` and skip-by-design in `module-tools.ts` (informational-only defs are never advertised,
+  so nothing appears broken to any caller). Bindings stay with their owners — research/suggestions
+  route (on SM-05's driver) and SM-07 respectively. No new tickets.
+- `search.ingestRankResults`: **real inconsistency — retire the tool.** Vendor-postback relay is a
+  service edge, not an agent action. Replacement shape = SM-56 (parked): secret-authenticated
+  callback + SM-05's task-id re-fetch so a collect never re-charges. `wf:sm-rank-collect` allow-list
+  entry removed now (SM-55). No MCP tool for audit-ingest either — same service-edge class, not a
+  gap; recorded so it is not re-filed.
+
+### Ticket specs
+
+**SM-54 · platform-side search pull scheduler (recasts SM-15's cadence loops) — senior-be ·
+`opus·medium` (unattended-money loop: multi-tenant iteration, overlap semantics, failure
+containment — a wrong cheap pass spends real money silently) · ⚡ QA gate mandatory (money path) ·
+deps: none hard (simulate mode suffices for dev).**
+1. Chained-setTimeout loop (reconcile/burndown precedent), dark by default behind
+   `SEARCH_SCHEDULER_ENABLED` + interval env, started in `main.ts` bootstrap, `stop()` for tests.
+2. Per tenant-with-search-enabled × active engagement × tool ∈ {rank, keyword-metrics refresh,
+   backlinks, ai_visibility}: due-ness derived in the MODULE (design §10's "the module filters" now
+   literally true) from `tool_scope.<tool>.cadence` vs the platform's own last-capture timestamp —
+   port `sm-rank-pull.json`'s semantics (daily=1/weekly=7/monthly=30; absent/unknown cadence
+   defaults weekly-conservative). An engagement with the toggle off is not selected at all (no
+   dispatch, no refusal row).
+3. Dispatch ONLY via the existing module functions (`pullRanksForEngagement`,
+   `pullMetricsForKeywords`, `pullBacklinksForProperty`, ai-visibility pull) — the full
+   scope/pillar/budget/ledger choke-point applies unchanged; no new dispatch path.
+4. Attribution: `requested_by NULL` + `correlationId 'sched:<tool>'` on every scheduler-initiated
+   ledger row; one `work_activity` row per engagement-tick with attempted/pulled/skipped/failed.
+5. Zero retry (SM-15's ruling preserved verbatim): failed/refused ticks are not retried; the next
+   tick re-derives due-ness. A mid-sweep refusal never aborts other engagements.
+6. Overlap: the loop is serial with itself; the manual-pull-races-scheduler case remains serialized
+   (not deduped) by `dispatchProviderOp`'s advisory lock — documented, parity with today.
+7. Done when (QA drives live, simulate mode): seeded engagement with rank cadence `daily` + stale
+   last capture → ONE enabled tick produces exactly one ledgered pull batch + snapshot rows; an
+   immediate second tick is a no-op; toggling the tool off makes the next tick skip with zero rows.
+
+**SM-55 · retire the blocked SM-15 surface + countermand the embedded directive — junior · seat
+default · deps: none (same wave as SM-54).**
+Remove `wf:sm-rank-pull`/`wf:sm-keyword-refresh`/`wf:sm-rank-collect` from `AUTOMATION_ALLOWLIST`
+(+ tests); DELETE the three workflow JSONs — `sm-rank-pull.json`'s `meta.description` instructs a
+future agent to lower `minAssurance`, which is countermanded and must leave the repo; fix the
+`index.ts:124` comment (strike "routes through the D14 automation-write gate", cite §A13);
+automation README "Deferred flows" → scheduled pulls are SM-54, collect edge is SM-56; annotate
+`SEARCH_CALLBACK_SECRET` env entries "reserved for SM-56 — consumed by nothing yet". Done when hub
++ platform suites are green and `sm-rank-pull|sm-keyword-refresh|sm-rank-collect|ingestRankResults`
+greps hit only tracker/addendum history.
+
+**SM-56 · Standard-queue collect edge — senior-be · seat default · PARKED (owner call, §A13.7) ·
+deps SM-05 task-id re-fetch + funded key (staging).**
+Provider gains task-id-keyed authoritative fetch; `rank-pulls/callback` authenticates the n8n relay
+via `SEARCH_CALLBACK_SECRET` (constant-time compare) and stops re-running the paid dispatch. Done
+when exactly ONE cost-bearing ledger row exists across post+collect, and a forged/replayed callback
+cannot cause a charge (idempotent by taskId).
+
+**SM-57 · SM-53 bookkeeping + the gateway instance — junior · seat default.**
+FRONTEND-BFF-CONTRACT Conventions line (`{ error, field?, code? }`, clients tolerate additional
+keys) + one-liner for the search single-subject 409/503 semantics; map `GatewayNotConfiguredError`
+→ 503 `{ error, code:"gateway_not_configured" }` on embed/cluster (extend the SM-53 filter or map
+at call sites — implementer's choice, contract fixed). Done when a gateway-less env returns the 503
+with the actionable body (mutation-probe the mapping) and the AI-draft fallback routes still return
+200-with-fallback.
+
+**SM-58 · app-wide last-resort exception filter — senior-be · seat default · not concurrent with
+SM-54 (both touch `main.ts`).**
+`@Catch()`-all fallback: 500 `{ error: "internal error" }` for any unmapped throwable — never
+leaking `err.message` — with stack + route logged server-side; tests pin that `HttpErrorFilter` and
+`ProviderDispatchErrorFilter` still win for their types (Nest filter precedence is
+registration-order-sensitive), and grep-first for any test pinning the bare-500 shape (the §6ab
+lesson: changing a contract means finding every pin).
+
+**Order:** SM-55 ∥ SM-57 (cheap, parallel) → SM-54 (⚡ QA-gated) → SM-58 · SM-56 parked.
+**Owner questions:** §A13.7 (backbone-rule ratification; SM-56 timing).
+
+---
+
+## 6ae · SM-57 · **DEV-VERIFIED** — plus a registration pin the filters were missing
+
+Verified by me (its agent stopped before writing a report, so all of this is my own verification):
+`tsc` clean · both filter suites green · registration pin **mutation-probed**.
+
+**Item 1 — `GatewayNotConfiguredError` no longer escapes as a message-less 500.** New sibling filter
+`modules/search/gateway-not-configured-error.filter.ts` (`@Catch(GatewayNotConfiguredError)` → **503**,
+`code: "gateway_not_configured"`, message preserved), registered in `main.ts` alongside the other two.
+A sibling file rather than a second `@Catch` type on SM-53's filter — the reasoning recorded in its own
+header is that it keeps each file's `@Catch` legible as "this file maps exactly this error family",
+which I agree with. Verified live at the code: status 503, code present, `exception.message` forwarded.
+
+**Item 2 — contract entry landed:** `docs/FRONTEND-BFF-CONTRACT.md:56` now documents the app-wide error
+body as `{ error, field?, code? }` with `code` marked additive and optional, so existing `.error`
+readers are unaffected.
+
+### The gap I found and closed — neither filter proved it was WIRED
+
+Every test in both suites instantiates the filter and calls `.catch()` directly. That proves the
+**mapping** and says nothing about whether Nest ever routes an error to it. So either filter could be
+deleted from `main.ts`'s `useGlobalFilters(...)` and **every assertion would still pass** while
+production silently reverted to the exact message-less 500 these two tickets exist to remove.
+
+This is the sixth appearance of one pattern in this module — a guard whose removal changes nothing
+observable: §4d's catch-to-0, §6d's shape pin anchoring a table *name*, §6f's count that only warned,
+§6r's inert remedy, §6z's one-variable fix, and now a filter that is correct but possibly unwired.
+**Correct-but-unreachable is indistinguishable from absent**, and only a test that fails on the wiring
+edit can tell them apart.
+
+Added a static registration pin asserting all three filters appear **inside the
+`useGlobalFilters(...)` call** — anchored to the call, not to the identifier, since a bare import would
+otherwise satisfy a naive `includes()` while the filter stayed unwired. Plus a pin that there is exactly
+**one** `useGlobalFilters` call, because a second one relying on append-semantics would make the full
+filter set unreviewable at a glance.
+
+**Mutation-probed:** deleting `new GatewayNotConfiguredErrorFilter(),` from `main.ts` turns the pin red
+(1 of 11); `main.ts` restored byte-identical. The crudeness of a text assertion is deliberate — it fails
+loudly on the one edit that matters and is immune to how Nest resolves filters internally.
+
+---
+
+## 6af · SM-14 remainder · **DEV-VERIFIED** (all four owed items discharged)
+
+Verified by me: `search-rank.test.ts` + `rank.test.ts` → **31 tests green** · platform-ui `tsc` clean and
+**67 files / 645 tests** (exact baseline match, so the fixture/type changes regressed nothing) ·
+`lint:withtenants` clean (141 files). Agent-observed platform-nest **111 files / 1321 tests green**;
+I am deferring my own full-suite number until SM-50 stops writing files.
+
+**1 · The integration test file.** New `search-rank.test.ts` — live Postgres + real HTTP, structurally
+mirroring SM-16's equivalent. 15 tests: rank-pull happy path with provenance atomic to payload, scope
+refusal, drop/no-drop detection, **mid-batch budget refusal leaving already-pulled rows intact**;
+metrics-pull happy path verified *through* `listKeywords`, "absent stays absent", and a live re-pull
+overwriting previously-simulated metrics atomically; the **n8n completion callback** (AC5) plus its
+cross-linkage 400; badge-not-filter on a mixed snapshot read; and honest `null`/`false` provenance for a
+never-pulled keyword.
+
+**2 · The mutation probe — the item that mattered, and it was actually run.** Probes for *both* writers
+(snapshot AC1 and keyword-metrics AC2), following SM-16's template: a simulated driver registered while
+`config.search.providerMode` says `"live"` must still stamp `simulated=true`. It then proved they bite —
+substituting `config.search.providerMode === "simulate"` for `result.simulated`/`dispatch.simulated`
+turned **exactly 2 red, 13 green**, the identical two probes and nothing else; reverted from backup,
+15/15 green, `tsc` clean either side. That is the AC-1 law from 0048's column comments now enforced
+rather than asserted.
+
+**3 · AC 4 — and it checked the code instead of the record.** `listKeywords` had **already** been
+widened by the interrupted agent before the faults (`metrics_provider AS "metricsProvider",
+metrics_simulated AS "metricsSimulated"`) — discovered by reading the live SELECT rather than trusting
+the stale BFF interface, which is precisely the §4i discipline. What was genuinely still owed was the
+platform-ui half, now done in one diff: `SearchKeyword` types, `DemoKeyword` + seed data (pulled →
+`semrush`/`true`, never-pulled → `null`/`false`), the demo handler's field projection, the import
+handler literal, and the test factory.
+
+**4 · Contract doc corrected, including an overclaim it declined to make.** §14 gained a real
+"BUILT (SM-14)" block (it had still described speculative `rankings/pull` paths) and the stale
+"0048 owned by SM-36, not started" paragraph was fixed. It also found the Rankings **console tab** is
+still a `PendingCapability` placeholder with a stale contract string — and rather than marking the row
+BUILT because the backend was done, it **narrowed the row to say exactly that** and fixed the
+placeholder's route names. A Rankings UI page remains unclaimed and needs its own ticket.
+
+**Honest notes it volunteered:** no live re-drive (the existing evidence stands and `rank.ts` /
+`search.controller.ts` are byte-identical to what it found — only tests and BFF types changed); and one
+transient full-suite flake in its own file plus SM-50's in-flight `incurred-cost.test.ts`, both clean on
+immediate rerun, correctly attributed to infra rather than to the diff.
+
+Also worth recording: it hit a `UNIQUE(tenant_id, client_id, domain)` collision while authoring, and
+resolved it by **dropping an assertion that was not the point of that test** rather than contorting the
+fixture to beat the constraint. That is the right instinct — a test bent around a constraint tends to
+stop testing what it claims.
+
+**Owed:** the ⚡ QA gate on SM-14 (deliberately left to a separate agent).
+
+---
+
+## 6ag · SM-55 · **DEV-VERIFIED** — the countermanded directive is out of the repo
+
+Verified by me: mcp-hub `tsc` clean · **16 files / 106 tests green** (baseline 105, +1 — no coverage
+lost) · the three workflow JSONs confirmed gone from `automation/workflows/` (12 legitimate flows
+remain).
+
+**The hazard is removed.** `sm-rank-pull.json` carried a `meta` comment instructing a future agent to
+lower `minAssurance` so the flow would work — a directive the §6ad ruling countermanded. It is now out
+of the working tree (git history keeps it if anyone needs to look). That was the point of this ticket:
+a stale instruction embedded in a file is how a refused security decision gets quietly implemented
+months later by someone with no context, and no amount of tracker prose prevents it while the file says
+otherwise.
+
+**The right instinct on the allow-list.** No existing test referenced the three `wf:sm-*` ids, so
+deleting the entries broke nothing — and rather than leave it there, it **added** a regression test
+proving those ids are now *unknown and therefore denied by default*. That is the difference between
+removing an allow-list entry and proving the deny path covers what the entry used to cover. The block
+was replaced with a comment recording the retirement and the new hard rule: **no allow-list may ever
+give n8n a path to a money-spending tool.**
+
+**`SEARCH_CALLBACK_SECRET` annotated, not deleted**, in both `automation/.env.example` and
+`automation/docker-compose.yml`: *"Reserved for SM-56 — consumed by nothing yet… do not wire this up
+believing something already reads it, and do not remove it believing it is dead."* Exactly the right
+treatment for a var in that state — the two opposite mistakes are equally easy and equally costly.
+
+**README** trimmed to one line recording that recurring search cadence is a platform job (SM-54,
+`tool_scope`-authorized) and the collect edge is SM-56 (parked), so the next reader does not re-file the
+same idea. A stale `HUB_SERVICE_TOKEN` aside was removed with it.
+
+**Leftover purged by me:** the inactive n8n row `smrankpull000001` was still in the live `gaiada_n8n`
+database — deleting a JSON from the repo does not remove an imported workflow. It could not fire
+(`active = f`), but it encoded the superseded design and referenced tools it is now permanently
+forbidden from calling, so leaving it there is an invitation to activate it. Deleted; 0 `sm-rank`
+workflows remain.
+
+**Still owed (correctly declined, not forgotten):** `modules/search/index.ts:124`'s comment still says
+paid pulls are `impact:'medium'` so they "route through the D14 automation-write gate" — the claim
+§A13.6 supersedes. SM-50 owns that file right now; the fix is mine once it lands.
+
+---
+
+## 6ah · SM-50 · **DEV-VERIFIED** — the last known money-path hole is closed
+
+Verified by me: full suite **112 files / 1335 tests green** (`--maxWorkers=4`; baseline 105/1206) ·
+`lint:withtenants` clean (143 files) · migration `0053` applied in the live DB with the CHECK now
+`('posted','completed','failed','incurred')`, `vendor_ref` present, and **0 incurred rows remaining**
+(its live-proof state was cleaned up after itself).
+
+**Migration numbering:** it took `0053`, not the `0049` I specified — because `0049`–`0052` were
+consumed by *other sessions* mid-flight and are already applied. It checked `schema_migrations` and
+`migrations/README.md` (rule 2: next unused; rule 4: never rename an applied file) rather than
+following my stale instruction, and documented the discrepancy in the file header. Correct call; my
+number would have collided with a live ledger row.
+
+**The compensating write** is `runCriticalSectionWithSpendCompensation()` — a wrapper *around* the
+critical section, so the catch runs after ROLLBACK has released the advisory locks. Two properties
+matter and both are probe-verified: the caller still receives **`err.cause`**, the original typed
+provider error (the internal envelope deliberately is **not** a `ProviderDispatchError`, so SM-53's
+filter and every pre-existing error assertion are untouched); and the §4d guards nest — a failing
+audit write becomes a span event while the provider error still wins.
+
+**The status-blind claim: independently verified, not trusted.** It enumerated every SQL statement
+touching `search_provider_calls` and read each one. All four money sums plus the exec rollup carry no
+status predicate; only `trueUpLedgerOnConnection` is status-aware, deliberately. **Zero query changes
+were needed** — so incurred burn binds all four budget tiers and the exec rollup for free. Pinned two
+ways: mechanically (neither exported SQL constant may contain `status`/`FILTER`/`CASE`) and
+behaviourally (all four statuses sum together on the exact arithmetic a tier performs).
+
+**Driver channel:** a second accumulator on SM-42's existing ALS store, with **separate fields** from
+`totalUsd`/`observed` — because `takeActualCostUsd`'s clear-on-read would otherwise destroy the money
+record. That is probe P7, and it is a subtle one. `recordActualCostUsd` also feeds it, so **Ahrefs
+composes for free and neither vendor driver needed an edit**.
+
+**It found the §6w defect one layer deeper.** `dataforseo.ts`'s `postSerpTasks` threw on the first
+rejected task *while mapping*, so a mixed accept/reject response abandoned the whole scope **with a real
+charge unrecorded**. Reordered, and pinned by two probes (P5 restore the original order → 2 red; P6
+record every task rather than only accepted ones → 4 red).
+
+### Nine mutation probes, every one red — and one caught a weak pin of its own
+
+P1 delete the compensating write → **10 red**. P2/P2b add a status predicate to a money sum → **3 red
+each**, including the headline. P3 remove the secondary-failure guard → 1. P4 throw the envelope instead
+of `err.cause` → 2. P5/P6 the `postSerpTasks` ordering → 2 and 4. P7 share one accumulator → 1. P8 a
+money figure in the bell prose → 1.
+
+**P4 is the one to remember.** On first run it produced only *one* failure, because
+`ProviderFailedAfterSpendError`'s message quotes its cause — so every `rejects.toThrow(/still queued/)`
+still matched *while the envelope leaked to callers*. **A message assertion is not an identity
+assertion.** AC1 now checks identity directly and the probe fails correctly. It also rejected its own
+first P3 attempt as a syntax error rather than banking the red result — the discipline being that a
+probe must fail for the intended reason.
+
+### The live proof included a causal control, which is what makes it evidence
+
+Baseline pull → MTD `$1.36907`. Five incurred rows written through the real `recordIncurred` under
+`platform_app` + RLS. **SM-17's endpoint then read `$51.36907` with zero controller change**, statuses
+rendering verbatim. The same pull → **all 25 keywords `skipped / budget_exceeded`**, event naming
+`tier=engagement, capUsd=50, monthToDateUsd=51.36907`. Then the control: delete *only* the incurred rows
+→ MTD back to `$1.36907` → the same pull proceeds, 25 pulled. **The refusal was caused by the incurred
+burn alone**, not by anything else that changed.
+
+A nuance it caught: its first refusal attempt used `backlinks-pull` and *succeeded*, because a cache hit
+returns before the budget gate and so costs $0. Correct behaviour — `rank-pull`'s `bypassCache` is the
+right instrument. Worth keeping: a "budget test" that hits cache proves nothing.
+
+### 🔴 Finding to route — the rank callback RE-POSTS and is charged again
+
+`search.controller.ts:1250`'s callback re-runs the same dispatch path a manual pull uses, which for the
+DataForSEO Standard queue means a fresh `task_post` — **charged a second time**, violating §A11.1.4's
+"task_get only". Its own comment admits it dispatches "rather than a free fetch-by-task-id". Closing it
+needs a driver-side fetch-by-task-id **and** a controller change; SM-50 correctly left the seam
+documented rather than editing another agent's files. **This is SM-56's core** and it is a live
+double-charge, so SM-56 should not stay parked past the DataForSEO deposit.
+
+**Owed:** `senior-db` eyes on `0053` at the gate; SM-17's `platform-ui` half (status union + legend
+line) — the backend needs nothing, proven live.
+
+### ⚠️ Repo-wide typecheck is transiently RED — and it is not this program's work
+
+`src/admin/company-admin.controller.ts(119,13): Cannot find name 'sweepMemberships'` — exactly one
+error, **zero in `modules/search`**. That file's mtime is one minute before I checked: **another session
+is mid-refactor in it** (calling a function it has not added yet). Not ours, not mine to touch, and
+recorded here only so a later reader does not attribute it to SM-50. My own earlier full typecheck this
+session was clean, which dates the breakage precisely.
+
+---
+
+## 6ai · senior-db review of `0053` — **APPROVE**; closes the owed DB gate; one latent issue → SM-59
+
+The SM-50 spec owed `senior-db` eyes on this DDL and had not had them. Verdict **APPROVE**, no new
+migration required. Spot-verified by me against the live schema: the three indexes exist exactly as
+described, and `findIncurredByVendorRef` matches on `vendor_ref` + `status` with **no provider
+predicate** (`ledger.ts:407`) — the basis of SM-59 below.
+
+**CHECK widening — safe, and drop+recreate was forced rather than a style deviation.** Postgres has no
+`ALTER CONSTRAINT … CHECK`, so widening a CHECK body can only be expressed as drop+add; both statements
+run inside `migrate.ts`'s single per-file transaction, so there is **no window with the column
+unconstrained**. Widening strictly enlarges the accepted set, so all 75 live rows (71 `posted` / 2
+`completed` / 2 `failed`) satisfy it trivially. It also checked whether an alternative convention was
+being bypassed — `grep NOT VALID` across `migrations/` returns zero, so there is none to bypass.
+
+**Backfill — genuinely nothing, and verified the right way.** `0053` contains **no DML at all** (only
+`ALTER TABLE`, `CREATE INDEX`, `COMMENT ON`), so this repo's recorded 0050-class hazard — a backfill
+silently affecting zero rows because the owner role lacks `BYPASSRLS` with the tenant GUC unset —
+**cannot manifest**. Crucially it confirmed the lint's pass is *meaningful rather than incidental*: it
+read the whole file and established there were zero DML events for the scanner to evaluate, rather than
+treating a green lint as proof. `status`'s default remains `'posted'`, so no future insert can be
+silently misclassified as `incurred`.
+
+**RLS untouched** — `relforcerowsecurity = t`, policy byte-identical to 0034, zero policy statements in
+the migration. Estate lint: 57 migrations scanned, and it ran the lint's own `SELFTEST=1` (5/5, 0050
+correctly flagged) to confirm the tool still detects what it claims to.
+
+**Indexes judged against real query shapes, not accepted on sight.** `ix_..._vendor_ref` (partial, `WHERE
+vendor_ref IS NOT NULL`) serves the reconciliation lookup and is not redundant with 0034's ledger index
+(different leading column). `advanceIncurredToCompleted` needs nothing new — the PK covers it.
+`ix_..._incurred` is **forward-provisioned for SM-41's sweep** and currently exercised by no landed
+query — flagged as such, with the precedent named (0047 and 0048 ship the same cheap partial indexes
+ahead of their consumers). It also correctly declined to fix the pre-existing gap that the three money
+sums are unindexed against `date_trunc(created_at)`/`simulated`: that is a 0034/0047-era issue already
+noted in `ledger.ts`, and folding a performance fix into an additive schema ticket would be scope creep.
+
+### Two notes recorded rather than dropped
+
+1. **Rollout scale (non-blocking):** `ADD CONSTRAINT … CHECK` validates every row under the statement's
+   lock. Instant at 75 rows; a future CHECK widening on this append-only hot-path table should consider
+   `NOT VALID` + `VALIDATE CONSTRAINT`.
+2. **→ SM-59 (new, tier `senior-be`):** `findIncurredByVendorRef` matches `vendor_ref` + `status` with
+   **no `provider` predicate**, so a cross-vendor `vendor_ref` collision *within one tenant* would
+   reconcile against the wrong provider's row. Low risk today — only DataForSEO stamps `vendor_ref`, and
+   its task ids are vendor-generated near-UUIDs — and §A11.1.4's ruling does not scope reconciliation by
+   provider either, so this is an **accepted shape, not a schema defect**. It becomes real the moment a
+   second provider's callback wires into the same lookup, which is SM-56's territory. Fix is a
+   `(vendor_ref, provider)` composite predicate in `ledger.ts` — an application change, not DDL.
+   **Sequence it before or with SM-56.**
+
+**Numbering confirmed intact:** `schema_migrations` runs 0045→0054 contiguous, no gap, no duplicate;
+`0053` is registered in `searchModule.migrations`. Note `0055_org_unit_memberships.sql` exists as a file
+but is unapplied — **another session's**, unrelated.
+
+### ⚠️ Infra: Postgres dropped into recovery again mid-wave
+
+Two agents running full suites concurrently at `--maxWorkers=4` exhausted shared memory and the container
+entered `the database system is in recovery mode` — the same event as earlier in this program. I **waited
+for its own recovery** rather than restarting it (a restart would destroy other agents' in-flight test
+databases and the evidence of what happened); it came back on its own. Standing guidance holds: this box
+tolerates roughly one full-suite run at a time. **Two concurrent agents each running the whole suite is
+above its ceiling**, and that is a scheduling constraint on how many verification-heavy agents I mobilize
+together — not a product defect.
+
+---
+
+## 6aj · SM-58 · **DEV-VERIFIED** — the structural floor under SM-53 and SM-57
+
+Its agent stopped without a report (waiting on a background run), so everything here is my own
+verification: `src/last-resort-exception.filter.ts` + a 9KB test file; all four filters registered in the
+single `useGlobalFilters(...)` call; **26 tests green** across the three filter suites; `tsc` clean apart
+from the unrelated other-session error.
+
+**What it closes.** Twice a plain `Error` reached clients as a **body-less 500** (SM-53's typed refusals,
+SM-57's gateway error), each fixed with a targeted filter. The floor underneath both: `HttpErrorFilter`
+is `@Catch(HttpException)`, so **any** uncaught error produced a 500 whose body did not match the
+app-wide `{ error }` contract the UI and the WhatsApp bot read via `.error`. An unexpected fault did not
+merely fail — it failed in a shape callers cannot parse.
+
+### The ordering insight, which is the part most likely to be got wrong
+
+`@Catch()` with **no argument** matches every thrown value. The subtlety is where it goes: Nest resolves
+via `Array.prototype.find` over its internal list, and **the LAST argument passed to
+`useGlobalFilters(...)` is checked FIRST**. So an unconditional filter must be the **first** argument to
+be consulted **last**. It is placed first, with the reasoning in its header — and a pin asserts it is
+"the FIRST argument, not merely present".
+
+**I probed that pin rather than trusting it:** moving `LastResortExceptionFilter` to the end of the
+argument list turns the suite **red**; `main.ts` restored byte-identical. Without that pin, a future
+reorder — the most natural-looking edit in the world, appending a new filter to the list — would
+silently shadow all three type-scoped filters and undo SM-53, SM-57 and the module's whole
+refusal-mapping effort in one line.
+
+### The leak posture is the right trade
+
+The ticket's real risk was fixing an unparseable body by creating an information disclosure. It did not:
+**the client always receives a fixed, context-free string — never `exception.message`, never a stack.**
+That distinction is argued explicitly in the header: SM-53/57 map refusals *we authored*, whose message
+contents are known safe and deliberately actionable; this filter catches faults of unknown provenance,
+where a message may carry a connection string, a token or a header. The real fault name/message/stack
+plus the failing route go server-side only — onto the active OTel span when one exists (WS9's HTTP
+auto-instrumentation) **and** unconditionally to stderr, on the stated reasoning that a fault visible only
+on a span disappears whenever tracing is off.
+
+**Its tests prove the leak posture with hostile fixtures**, which is the right way round: the message
+fixture contains a fake connection string (`postgres://admin:s3cr3t@10.0.0.9/db`), a password
+(`hunter2`) and an API-key-shaped token (`sk-live-abc123`), and the assertions are that **none** appears
+in the response body. A test that merely checked "status is 500 and body has an `error` key" would have
+passed a filter that echoed the raw message.
+
+**Owed:** nothing on this ticket. It composes with the registration pin rather than weakening it — the
+pin now covers all four filters plus the ordering constraint.
+
+---
+
+## 6ak · ⚡ QA gate — SM-14 / SM-16 / SM-53 / SM-57 **PASS**; **SM-50 FAIL** → SM-60
+
+QA-observed: 36 files / 585 tests green (scoped, `--maxWorkers=2` after the Postgres incident) ·
+zero `tsc` errors in `modules/search` · `lint:withtenants` OK (144 files) · `0053` confirmed live.
+Its probes ran only in isolated `qa1450_*` databases, auto-dropped — nothing to clean in shared state.
+
+### 🔴 The finding — verified by me at the code before acting
+
+`runCriticalSectionWithSpendCompensation` (`dispatch.ts:297`) compensates **only** for
+`ProviderFailedAfterSpendError`, which covers a rejection from `invokeProvider`. But the callback
+continues **after** `invokeProvider` succeeds — `writeCache(...)` then `insertLedgerRow(...)` on the same
+connection in the same transaction (`dispatch.ts:566-571`). If either throws, the transaction rolls back
+exactly as a provider rejection would, but the thrown value is a **plain DB error**, so the `instanceof`
+guard rethrows it with **no compensating write**.
+
+So: the vendor was charged **and delivered data**, and **nothing is recorded — not even a `posted` row.**
+Money spent, invisible to all four budget tiers and the exec rollup. The same fail-open class SM-50
+exists to close, **one step later in the same function**.
+
+**Why SM-50's nine probes missed it, and this is the transferable lesson:** every one of them attacks the
+**provider-call boundary**. None attacks the **post-success write boundary**. A probe suite can be
+rigorous, exhaustive within its frame, and still share one blind spot with the design it tests — because
+the author chose the probes from the same mental model that produced the code. That is an argument for
+adversarial review by someone who did not write it, not for more probes by the author.
+
+Reproduced live with **two independent triggers** (ledger-insert failure and cache-write failure), each
+yielding zero rows for a confirmed delivered charge. Durable repro landed at
+`providers/qa-adversarial-sm50-14-16-53.test.ts`.
+
+**QA declined to fix it, and was right to.** A correct fix needs the recorded-charge signal to survive
+past `withActualCostCapture`'s closed scope — a design change, not a wider catch — and it judged that
+rushing the highest-stakes file in the module against a thinning budget was the wrong trade. Routed as
+**SM-60** (`senior-be` · opus), now in flight, with the phantom-row hazard stated explicitly: compensation
+that fires without a real charge would refuse genuine client work for money never spent, which is as
+damaging as the missing row and harder to explain.
+
+### The double-charge now has a durable repro, and a completeness check
+
+§6ah's callback defect confirmed: `rank-pulls/callback` calls the same `pullRankForKeyword` a manual pull
+uses, so a genuine vendor postback triggers a fresh `task_post` — **charged twice for data already paid
+for.** Reproduced at function level: two calls for one vendor task id → two `task_post` requests, two
+cost-bearing rows.
+
+It also checked whether the shape recurs: grepped **all 25 POST routes** plus `n8n-bridge.ts` and
+`graph-bridge.ts`, and `rank-pulls/callback` is the module's only vendor-postback-shaped route. **One
+instance, not a pattern** — that negative result is worth as much as the repro, because it bounds SM-56.
+
+### Attacks that held (the adversarial ledger)
+
+Status-blind money SQL **independently re-derived** by reading each statement, not trusting §6ah's table;
+`trueUpLedger*` confirmed `posted`-only by construction so it cannot touch an `incurred` row. The
+compensating write cannot double-write per dispatch, and cannot fire when the vendor was *not* charged
+(pre-engagement and transport-level failures write zero rows). `err.cause` traced hop by hop — no
+`finally` replaces it, the outer catch does not rewrap, and AC1 asserts by **identity, not message**
+(the §6ah P4 lesson, checked rather than assumed). `advanceIncurredToCompleted` is RLS-scoped, so a forged
+postback quoting another tenant's `vendor_ref` cannot reach the row at all — foreclosed, not merely
+filtered. SM-14/16 provenance verified by reading each `INSERT` directly: `simulated`/`provider`/
+`provider_call_id` stamped in the same statement as the payload in all three writers, and mid-batch
+refusal never rolls back prior rows.
+
+**SM-53/57 mapping proven exhaustive the right way:** it swept **every** `extends Error` class in
+`modules/search` (6 total) and accounted for each — filter-mapped, controller-mapped to 400, or caught
+inline — rather than only checking the ones the tickets named. None escapes unmapped.
+
+### Infra, now diagnosed rather than just observed
+
+The Postgres WAL-recovery crash has a cause: **`/dev/shm` is 64MB** in this Docker Desktop config. That is
+a real resource ceiling, not a product defect and not a mystery. It waited ~5 min for self-recovery rather
+than restarting (which would destroy other agents' test databases). **Devops debt:** raise the container's
+shm size, or the box tolerates roughly one full-suite run at a time — which is now a hard scheduling
+constraint on concurrent verification-heavy agents.
+
+---
+
+## 6al · SM-60 · **DEV-VERIFIED** — the spend-compensation gap is closed; **SM-50 now PASSES**
+
+Verified by me: `tsc` **zero errors repo-wide** · `lint:withtenants` clean (145 files) ·
+`src/modules/search` **36 files / 595 tests green**, every file reporting a non-zero count.
+
+### The fix carries data, not a wider rule
+
+Widening the `instanceof` guard would have produced "a catch with a rule and no data" — at the point a DB
+error surfaces, `withActualCostCapture`'s scope has closed and the recorded-charge figure is gone. Two
+changes instead:
+
+- `withActualCostCapture` now returns **`incurredUsd`** on the **success** path, read *inside* the
+  callback while the ALS store still exists.
+- `dispatchProviderOp` owns a per-dispatch **`LiabilityHolder`**; the critical-section callback writes
+  `{chargedUsd, vendorRefs}` the instant `invokeProvider` resolves with a charge — **before
+  `writeCache`**, the first statement that can fail. The catch then asks *"was the vendor charged?"* from
+  the envelope **or** the holder, and **never from the error's type**.
+
+That last point is the design insight: keying compensation on *what happened to the money* rather than *on
+which class was thrown* is why the fix covers strictly more than the reported repro — `writeCache`,
+`insertLedgerRow`, the SM-42 true-up, **and a failed COMMIT** all now compensate. A wider `instanceof`
+would have fixed the two paths QA demonstrated and left the others.
+
+Amount recorded is the **driver-confirmed charge**, not the estimate.
+
+### Status ruling: widen `incurred`'s prose, add no status — with all 14 consumers enumerated
+
+Data *was* delivered here, so §A11's "no data delivered" wording no longer fits. But the rollback discarded
+the payload, the cache row and the ledger row together while the caller got an error — so **the platform
+retains exactly as little as in SM-50's shape**, and every §A11.2 disposition is therefore unchanged. It
+walked all fourteen rather than asserting equivalence. A distinct status would need a CHECK widening, a
+design gate and a BFF change, and would give **no consumer different behaviour**.
+
+Distinguishability lands where every other reason already lives: the `endpoint` suffix
+**`.incurred_write_failed`** vs `.incurred_no_data`, plus `dataDelivered` on the event. No status
+predicate added anywhere; `failed ⇒ cost 0` preserved; the write stays outside the rolled-back transaction.
+
+### Five mutation probes, all red — and S3 reproduced P4's lesson exactly
+
+S1 restore the narrow guard → **6 red** (both flipped repros). S2 delete the phantom-row guard → **5 red**,
+and revealingly those included **four pre-existing** money properties (SM-50's AC2/AC2b/AC4b and SM-04's
+rollback pin), so that one line is load-bearing well beyond its own test. S3 wrap instead of rethrow →
+4 red. S4 delete the liability handoff → 6 red. S5 zero `incurredUsd` on the success path → 8 red.
+
+**S3 is the one to remember.** Two of its own new tests assert by *message*
+(`toThrow(/connection terminated/)`) and stayed **green** under a wrapper, because the envelope quotes its
+cause. Only the identity assertions caught the leak. That is the third time in this program that a
+message assertion has masked an identity defect (§6ah P4, §6ak's check, here) — **a message assertion is
+not an identity assertion**, and on an error path it is close to worthless.
+
+### Live evidence, with its limit stated rather than blurred
+
+Against the running DB under `platform_app` + RLS: MTD `$1.384070` → one `incurred` row with
+`endpoint='dataforseo.serp.incurred_write_failed'` → both real MTD query shapes read **`$1.384670`** →
+deleted only that row → back to `$1.384070`, 0 incurred rows left. Cleaned up.
+
+**Honest limit:** the compensating write cannot be made to *fire* on this stack — simulate mode is on,
+DataForSEO is unfunded, and no simulator calls the charge channel (grep-confirmed), **by design** per
+§A11.1.5. So the live proof is the **consumer** half; the write itself is proven against live Postgres in
+the suite with real RLS, a real ROLLBACK and a real driver over a scripted socket. A true live positive
+needs the funded deposit or a sandbox extension.
+
+### Follow-up I closed immediately
+
+`notifications.ts`'s title read *"A provider charged for a call that returned no data"* — now literally
+false for the new cause, and a notification that misstates the cause **sends an operator to the vendor's
+console hunting a fault that is on our side**. Widened to *"A provider charge produced no usable data"*.
+Deliberately one wording rather than branching on `dataDelivered`: the operator's actionable facts are
+identical (money left, nothing usable kept), and the two causes are already distinguishable in the ledger
+`endpoint`. A title is the wrong place for a distinction that changes nothing about what to do next.
+
+**And a test pinned the old phrase, which I hit despite grepping** — I searched for the wrong substring.
+Same mistake as §6ab, one layer subtler. Fixed by asserting the two **claims** (a charge happened; nothing
+usable was kept) instead of one brittle phrase: `/charge/i` + `/no usable data|no data/i`. **A copy
+assertion should pin the claim, not the sentence**, or every honest rewording becomes a red build — the
+old `/no data/i` failed here without catching any defect.
+
+### Residual, documented not hidden
+
+If the transaction actually **COMMITTED** and the fault arose strictly after COMMIT (in practice a pool
+double-release), this catch writes an `incurred` row duplicating a committed `posted` row.
+Indistinguishable from outside `runInCacheCriticalSection`, so recording is the **fail-closed** side of the
+trade and SM-41 reconciles it. Closing it is a small `cache.ts` change (report whether COMMIT succeeded) —
+outside SM-60's ownership.
+
+**Considered and rejected, correctly:** writing the delivered payload to cache outside the doomed
+transaction. It contradicts §A11.2 #10's no-cache-row pin and adds a payload write on an error path — a new
+fail-open surface with no ledger row to explain it. That is a design gate, not an implementer's call.
+
+### Owed elsewhere
+Addendum **§A11.1.2** still says "no data was delivered" — architect's to amend (SM-60 widened only
+`ledger.ts`'s prose). SM-17's legend line should mention both shapes. SM-56's double-charge repro remains
+deliberately asserting the defect.
+
+---
+
+## 6am · Owner directive 2026-07-30 — build everything; only real-credential VERIFICATION defers
+
+**"All that require real API will have to defer until we are in staging."** Recorded as standing policy,
+because it settles a question that has now been mis-answered twice in this programme:
+
+- The **$50 DataForSEO deposit** was treated as blocking P2 *construction* until §A1 split building from
+  proving. It never blocked building.
+- **"Needs a Google OAuth client"** was treated by me as blocking SM-25 entirely, in the staging-readiness
+  audit. It only blocks *verification*: the OAuth flow, token vault, refresh/revocation and the three API
+  clients are all buildable and testable against a local issuer plus a fixture sandbox.
+
+**The rule going forward:** a missing credential defers the *acceptance clause*, never the *ticket*. Every
+ticket therefore carries its real-vendor clause in SM-41 (vendors) or SM-41G (Google), and nothing else
+waits. Anyone tempted to mark a ticket blocked on a credential should first ask which specific clause
+actually needs it — the answer is usually one AC, not the work.
+
+**Corollary worth stating:** this raises the standing risk that a green harness gets mistaken for a working
+integration, which is why §A10's sentence is binding and repeated in §A12: *a green sandbox is a validated
+client of our own model of the vendor, not a validated integration.* The sandboxes are fixture-file-driven
+precisely so staging's first real captures become fixture corrections rather than a rewrite.
+
+### Ledger and status-doc drift corrected while auditing (2026-07-30)
+
+- **SM-16's row still read `TODO`** although it is DEV-VERIFIED (§6aa) and PASSED its ⚡ gate (§6ak).
+- **SM-15's row still read `TODO`** although §6ad retired it into SM-54 + SM-55 and SM-55 deleted its flows.
+- **`docs/modules/MODULES.md` was two days stale** at `0.2.0 · 2026-07-28`, still describing SM-11 as "IN
+  FLIGHT" and P1 as "not built". Now `0.3.0 · 2026-07-30`, stating what is actually built and gated, that
+  the department demos end to end at $0 vendor spend, that **nine gates found seven fail-opens on the money
+  path — every one the same shape, a guard that looked configured and enforced nothing** — and precisely
+  why the module is **not** yet `DEV-VERIFIED`.
+
+Recorded because the drift is itself a finding: SM-23 owns doc reconciliation and has not run, so status
+docs have been narrating a state two days behind the code. A stale status doc is worse than none — it is
+read as current.
+
+---
+
+## 6an · SM-56 + SM-59 · **DEV-VERIFIED** — the last two known money-path defects are closed
+
+Verified by me: `tsc` **zero errors repo-wide** · `lint:withtenants` OK (166 files) ·
+the three proof suites **37/37 green** · agent-observed scoped module run **36 files / 607 tests**
+(baseline 595, +12).
+
+### SM-56 — the collect edge, and why the trivial delegation *is* the fix
+
+`fetchSerpByTaskId?(ref)` is a new **optional** interface member, implemented in `dataforseo.ts` as
+one-line delegation to the existing private `fetchOneSerp` (`task_get`, bounded 40602 poll).
+
+The insight worth keeping: **the defect was never in how a result is fetched.** `fetchSerpResults` is
+only reachable through `invokeProvider`, which calls `postSerpTasks` immediately before it — and on the
+Standard queue **`task_post` is the billing point**. So the collect path is the retrieval half with the
+posting half **structurally absent from the call graph**, not skipped by a flag a future edit can flip.
+An interface member is also what makes §A11.1.4's "`task_get` only" *enforceable* rather than
+aspirational. It is deliberately invoked **outside** `withActualCostCapture`, so a stray
+`recordIncurredCostUsd` added later is a documented no-op rather than a phantom cost-bearing row.
+
+**Authentication is additive — nothing was weakened**, which was an explicit instruction. The route keeps
+`AuthGuard`, `ModuleEnabledGuard`, the `withTenants` choke-point, RLS and its Cerbos check; on top sits a
+required secret header compared with `timingSafeEqual`, **checked first** — before body validation, Cerbos
+or any DB read — because otherwise the route is an id-probing oracle for anyone holding only the service
+token. Missing and wrong secrets return **one identical 401**, so the edge cannot be probed for whether a
+secret is even configured. Unset secret ⇒ refuses everything: SM-55 deleted the only consumer, so there is
+nothing to break, and the alternative default is the classic fail-open where a forgotten env var disarms
+the control.
+
+**Idempotency needed no DDL — the key was already in the schema.** The original charge's row carries
+`vendor_ref = <task id>` (0053) and `search_rank_snapshots.provider_call_id` FKs to it, so "already
+collected?" is exactly *a snapshot attributed to this ledger row*. Check and insert share one transaction
+under a task-id-scoped advisory lock in its own namespace, so simultaneous redeliveries serialize rather
+than race. Three replay outcomes, each cheap: already-collected → `200 {status:"duplicate"}` with **no
+vendor request at all**; forged/unknown task id → `404` before any socket (RLS forecloses cross-tenant
+probing rather than filtering it); bad secret → `401`, nothing read. The `200` on duplicate is deliberate —
+telling a correctly-behaving at-least-once vendor it failed invites a retry loop over a final outcome.
+
+**It reasoned about the choke-point rather than around it.** The collect does not route through
+`dispatchProviderOp`, because that choke-point's invariant is "no other path to **spend**" and it is
+precisely the thing that cannot retrieve without buying. But it still enforces the **pillar and scope**
+gates by *importing* the choke-point's own `isToggleEnabled`/`OP_SCOPE_TOGGLE` rather than reimplementing
+them — so the free path cannot drift into being the lenient one. Only the budget cascade is skipped, since
+refusing a $0 retrieval against a spend ceiling would forfeit data already paid for.
+
+**SM-50/SM-60 undisturbed:** all four money sums and both pinned SQL constants byte-identical, zero
+`status`/`FILTER`/`CASE`. A collect writes **no ledger row at all** — not a $0 `completed`, not a `failed`
+(`recordBlocked` exists to surface a refused *spend* attempt, and a collect is not one). Its only ledger
+effect is advancing `incurred → completed` in the **same transaction** as the snapshot, so no reader can
+see a snapshot claiming data for a row that simultaneously says nothing was retained.
+
+### SM-59 — provider predicate added, and correctly no index change
+
+`findIncurredByVendorRef` gains a `provider` argument and `AND provider = $2`; the compiler found all five
+call sites, and the new `findLedgerRowByVendorRef` carries the predicate **from birth** — SM-56 is the
+second stamping path that makes a collision expressible, so both readers had to be scoped or the fix is
+half-applied.
+
+**No index change, and the reasoning is right:** `vendor_ref` remains the leading, near-unique column, so
+the seek returns about one row and `provider`/`status` recheck on a handful of heap tuples. Adding a key
+column that eliminates essentially zero tuples would cost write amplification on an append-only hot path.
+It also named the direction of the original risk correctly — the missing predicate was a **correctness**
+bug, not a performance one, so an index would never have fixed it.
+
+### Five mutation probes, all red — and P1 is the one that matters
+
+P1 restore the paid pair → **3 red**, including both sandbox **transport** proofs. That is the probe that
+proves the money assertion has teeth: a `costUsd === 0` assertion would have stayed **green** under P1,
+because a driver that posts *and* misprices also reports $0. Only counting requests at the transport layer
+catches it. P2 remove the SM-59 predicate → 1 red, precisely the collision test. P3 remove idempotency →
+4 red, including the concurrent-redelivery race. P4 remove the secret check → 2. P5 remove the
+unknown-task admission check → 1.
+
+### Two intermediate failures, both diagnosed rather than waved off
+
+An `egress-inventory` failure naming the concurrent agent's brand-new `google/api-client.ts` and
+`google/token-endpoint-client.ts` — that test asserts by **set equality**, so it correctly flagged files
+written mid-run and **self-resolved** once their `APPROVED_EGRESS` entries landed. And one
+`search-ai-drafts` failure that passes **8/8 in isolation**, on a run that took >10 min versus 126 s
+earlier — load flake, consistent with the 64MB `/dev/shm` ceiling. Neither attributed to the diff.
+
+### Owed / routed
+
+1. **Config key for me to move:** `config.search.callbackSecret` ← `SEARCH_CALLBACK_SECRET`. It reads
+   `process.env` at the point of use because `config.ts` belongs to the concurrent integrator; the read is
+   per-request so the move is behaviour-neutral. Documented in situ.
+2. **Deferred to a funded account** — only real-vendor verification: that a real postback's task id matches
+   what `task_post` returned, that a real `task_get` for an already-retrieved task is genuinely uncharged,
+   and DataForSEO's real retry semantics. §A10's caveat holds: the sandbox validates our mechanics, never a
+   vendor fact.
+3. **⚠️ Design observation deserving an architect ruling.** Because a Standard-queue dispatch posts *and*
+   polls to completion in one call, a postback for a successfully-pulled task is **always** `duplicate` —
+   the platform already holds the data. So the `collected` path fires only where a purchase exists whose
+   data we do not hold (poll exhausted → `incurred`, or a `posted` row with no snapshot). The edge's
+   near-term value is therefore **SM-50 reconciliation**; its larger value is that it *unlocks* the cheaper
+   economics the addendum wants — a short-`pollAttempts` pull that relies on postbacks instead of holding a
+   connection open. SM-54-adjacent; not an implementer's call.
+
+---
+
+## 6ao · SM-51 + SM-25a (service layer) · **DEV-VERIFIED** — Google OAuth core + sandbox
+
+Verified by me: `tsc` **zero errors** · `lint:withtenants` OK (166 files) · full suite
+**125 files / 1594 tests passed**, 1 file / 4 tests skipped **by design** (the Keycloak-gated file,
+which runs only under `KEYCLOAK_OAUTH_TEST=1`).
+
+`src/modules/search/google/` — 8 files. Placement was not a preference: §A12.1 rules it verbatim, and
+putting a client-private credential path under `src/integrations/` would have moved it **outside the
+directory whose egress inventory is pinned by exact-set equality** (§6e). Only two files carry a network
+primitive. Sandbox is a separate `startGoogleSandbox()` rather than a branch in `startVendorSandbox()`,
+for a reason worth keeping: the latter *requires* three market-data vendors' credentials, and a Search
+Console test has no business supplying a DataForSEO login. Same directory, same lifecycle contract, same
+fixture discipline — the pattern extended, not the function overloaded.
+
+### It exercised the flows against a real IdP, not only its own fixtures
+
+Auth-code + PKCE S256, token exchange, refresh **with rotation** (a 3-hop chain), and RFC-7009 revoke
+were all driven against **real Keycloak** — real login-form POST, real cookies — alongside the sandbox.
+The revoke case is the one that matters: it proved the **non-Google branch with client auth against the
+party that actually enforces RFC 7009 §2.1**. A fixture cannot tell you that; only something that
+implements the spec can. Provisioning script is idempotent (run twice: `created`, then `updated`).
+
+**Vault: the existing one.** `integration_connections` (0033) through core's own accessors,
+`owner_kind='client'` — the values 0035 already widened the CHECKs for. Asserted `enc:v1:` ciphertext with
+no plaintext token or `eyJ` surviving into the columns. One declared deviation: it reads
+`refresh_token_enc` inside the module because core exports `readAccessToken` with no refresh sibling and
+that file was not its to change — TODO documented in-file rather than a second vault invented.
+
+**Constraints asserted, not argued:** a test drives a GSC query and then asserts `search_data_cache`
+count **0** and `search_provider_calls` count **0** — the two things §A12 forbids, checked as behaviour.
+New table is FORCE-RLS with 0034's byte-identical policy shape, `simulated` from day one, sealed PKCE
+verifier, single-use `consumed_at`. It also confirmed `lint-migration-rls`'s green is **meaningful** (the
+file is CREATE-only, nothing to backfill) and noted that `src/db/rls.test.ts`'s sweep is **dynamic** over
+`pg_class`, so the new table is covered independently of its own tests.
+
+**12 mutation probes, 12 red:** rotation persistence, single-use state, state HMAC, CSRF principal
+binding, fail-closed-unconfigured, refresh-on-401, issuer revocation, boot-guard call site,
+`invalid_grant`→409, filter registration, fixture marker sweep, egress pin.
+
+### One finding it fixed en route, and the reasoning is the valuable part
+
+A revoked grant surfaced as **502 `google_token_endpoint_error`**. Wrong — `invalid_grant` on refresh is
+exactly what a user revoking access in their Google account produces, *and* what a Testing-mode app's
+7-day refresh expiry produces. **A 502 sends an operator to debug the network when the fix is a
+re-link.** Now **409 `grant_invalid`**, with the row marked `error` and **tokens kept** — a read path must
+not be able to shred a credential on one transient issuer fault.
+
+### Owed — SM-25a's HTTP surface is NOT built
+
+Routes belong on `search.controller.ts`, which was held by the concurrent SM-56/SM-59 agent. The seam is
+defined (`startAuthorization` / `completeAuthorization` / `list` / `refresh` / `revoke` /
+`bindPropertyConnection`, all masked-view returning) with a suggested route shape. One design point in it
+is worth preserving: the OAuth callback is **tenant-agnostic on purpose** — real Google permits no
+wildcard redirect URIs, so the tenant must travel inside the signed state rather than the path.
+
+**Also owed:** the UI Connections tab must render `issuerHost` whenever `issuerIsGoogle` is false
+(§A12.3's honesty rule — the field is already on every view). SM-25b/c are now assembly: the sandbox
+serves GSC/GA4/Ads and `api-client.ts` hands them parsed envelopes; response *interpretation* and the
+perf-table migration are theirs, with senior-db eyes.
+
+**Defers to SM-41G** (stated in every file header, both sandbox test files, the env block and the
+runbook): consent screen, incremental consent and what a Google scope *string* actually grants,
+Testing-mode's 7-day refresh expiry, Google-side revocation semantics, quota/429 + `Retry-After`, the Ads
+developer token + MCC, and whether real Google accepts our serialized requests at all.
+
+---
+
+## 6ap · Two items I owed, closed — and a mistake worth recording
+
+**`SEARCH_CALLBACK_SECRET` moved into `config.ts`** as `config.search.callbackSecret`. SM-56 had read
+`process.env` at the point of use as a **declared** interim (config.ts was held by another agent) and
+reported the key rather than smuggling it — the right call, and this is the promised move.
+
+**My first attempt broke 9 tests, and the reason is instructive.** SM-56's comment said the read was
+per-request "so the migration to config is a pure move with no behaviour change". That is true of the
+*call site* but not of the *value*: `config` is evaluated at **module load**, so tests that mutate
+`process.env.SEARCH_CALLBACK_SECRET` after import stopped having any effect. The move froze exactly the
+property the comment was protecting.
+
+Fixed by pointing the tests at `config.search.callbackSecret` — which is also the established house
+pattern (`search-provider-pulls.test.ts` sets `config.search.providerMode` the same way). **The claims are
+untouched**: valid secret accepted, wrong secret 401, unset secret refuses everything; only the mechanism
+for expressing "configured" changed. And I probed that the tests still bite — hardcoding the configured
+value in the controller turns **9 red**, so they exercise the real check rather than a stub.
+
+Deliberately **not** routed through `moneyEnv`/`numericEnv`: those refuse an uninterpretable **money**
+value at boot because a silently-inert cap leaves spend unbounded. A secret has the opposite failure
+shape — empty does not weaken the control, it makes the route refuse **every** request. So unset is
+fail-closed here and there is nothing to validate: any non-empty string is a syntactically valid secret,
+and we must not compare against a value we have "corrected". A throw-if-unset would be a fail-open of a
+different kind, since it is unset in every environment today and an operator would remove the check to
+get the stack up.
+
+**`migrations/README.md`: `0060` recorded as TAKEN**, next unused `0061`, with SM-51's reasoning for
+skipping past the TR reservation rather than drawing `0058`/`0059` down (avoiding a third rebase-in-flight
+for an already-rebased program). Added a standing note: **twice this session I briefed an agent with a
+stale migration number** (`0049` when 0049–0052 were applied; `0057` when it had been consumed mid-ticket).
+Both agents checked `schema_migrations` **and** the README instead of trusting me, which is the only reason
+neither collided with a live ledger row. **An instruction naming a number is a hint, not a fact.**
+
+---
+
+## 6aq · ⚡ SM-58 gate · **PASS** after a defect strictly worse than the bug it was fixing
+
+Verified by me: all three last-resort filter suites **22/22 green**, and I probed the new guard —
+replacing `toSafeFault(exception)` with a raw cast makes the hostile-getter test **crash outright**
+rather than fail cleanly, which is itself the proof that the guard is load-bearing. File restored
+byte-identical.
+
+### The defect — a filter that crashes cannot send a response at all
+
+`last-resort-exception.filter.ts` dereferenced `exception.name`/`.message`/`.stack` directly whenever
+`exception instanceof Error`. An `Error` whose `.message` **getter throws**
+(`Object.defineProperty(err, "message", { get() { throw … } })`) crashed **inside `catch()` itself**.
+
+Because this is the last filter in the chain, that crash means **no HTTP response is sent at all** —
+strictly worse than the body-less 500 the ticket exists to remove. The ticket's own tests used hostile
+*values*; this attack used a hostile *accessor*, which is a different thing, and the distinction is the
+finding: SM-58's fixtures proved a malicious string cannot reach the client, and said nothing about
+whether reading it is safe.
+
+**Fixed** with `toSafeFault()`: `.name`/`.message`/`.stack` each read behind their own try/catch, then a
+fresh inert `Error` is built **before** anything — `console.error`, the OTel span — touches it. A hostile
+getter can now degrade what gets *logged* but cannot crash the handler.
+
+### The attack ledger, published because the holds matter as much as the break
+
+Thrown plain string · non-`Error` with hostile `toString()` · `Error` with an attacker-content
+`.message` getter (held — reaches the log, never the client, which is correct) · circular-reference
+object · `Error` subclass with attacker-controlled `.name` · `throw null` / `throw undefined`: **all
+held, before and after.** Only the throwing-getter case broke.
+
+**It re-derived the ordering result independently rather than re-running the shipped test** — a
+from-scratch probe with a brand-new `RangeError` subclass and two brand-new filter classes, deliberately
+not reusing the shipped fixtures, reproducing that a catch-all first argument yields correct precedence
+and a catch-all last argument shadows everything. That is the right instinct: the existing test could
+have been passing for a reason peculiar to its own shapes.
+
+**Family sweep, exhaustive:** every `extends Error` under `src/modules/search/**` traced and accounted
+for. Confirmed all four type-scoped filters use class-based `@Catch(X)` so Nest resolves by `instanceof`
+— **not forgeable by a shape-alike object**, which is worth knowing explicitly. `ProviderFailedAfterSpendError`
+verified never to escape `dispatch.ts` (it always unwraps to `.cause`), and `PrivateGoogleEndpointError`
+confirmed boot-time-only, unreachable from any request path.
+
+### Adjacent gap found → routed, not fixed here
+
+`POST campaigns/:id/negatives/propose` (`search.controller.ts:~2997`) calls `parseKeywordImport` with
+**no try/catch**, while its sibling at ~1046 catches `UnterminatedQuoteError` and returns a 400 with a
+comment saying exactly why. So an unterminated-quote CSV to the second endpoint returns a **500** — a
+caller-input error reported as a server fault.
+
+Routed to the agent holding `search.controller.ts` with two instructions worth recording: **the backstop
+existing is not the fix** (SM-58 makes it a tidy 500 rather than a body-less one, which is not the same
+as an honest 400), and **sweep for further call sites** — this gap exists because a fix was applied at one
+site and not swept, the same shape as §6z's one-variable money guard and §6al's message-vs-identity
+assertion. A negative result bounds the problem and is worth reporting too.
+
+No DB writes during this pass — all probes in-memory, nothing to clean up.
+
+---
+
+## 6ar · ⚡ Gate — SM-51/SM-25a-service + SM-58 + SM-60 · **ALL PASS**
+
+Verified by me: the `google/` suites **54 passed** (+4 Keycloak-gated, below), the three last-resort
+filter suites **22/22**, and the gate's own additions green. `tsc` clean.
+
+**The gate stated its own scope honestly**, which is why its verdicts are worth something: SM-60 it
+attacked personally end-to-end; SM-58 it re-ran and re-verified from the artifacts on disk after its
+sub-agent's chat summary never returned; SM-51 it spot-checked the two highest-stakes structural claims
+from source rather than accepting a summary. **And it named the one thing it had not verified** — SM-51's
+Keycloak-gated and race tests — instead of letting a sub-agent's report stand as its own.
+
+### I closed that stated gap myself
+
+The Keycloak file is gated on `KEYCLOAK_OAUTH_TEST=1` **and** a real `GOOGLE_DEV_CLIENT_SECRET`, so it had
+been reporting as "skipped by design" without anyone running it. I fetched the `google-dev` client secret
+from the live Keycloak admin API and ran it: **4/4 pass** — a real authorization-code + PKCE round trip
+(consent → code → exchange → sealed in the existing vault) and a **three-hop refresh-rotation chain**,
+which can only pass if each rotation was genuinely persisted. So the OAuth machine path is now verified by
+execution, not by report. Recipe for the next person: `KEYCLOAK_OAUTH_TEST=1` plus the secret from
+`GET /admin/realms/gaiada/clients?clientId=google-dev` → `/client-secret`.
+
+### SM-60 — the phantom-row inverse, which is what I asked for
+
+Four new adversarial tests, all HELD:
+
+- **The exact-`$0` boundary.** The existing test only proved "driver never calls `recordIncurredCostUsd`
+  at all ⇒ no row". This one builds a driver that **explicitly calls it with `0`** — so
+  `incurredObserved` is *true* with `usd = 0`, a materially different path through the ALS store — then
+  forces a post-success fault. Zero rows; `recordIncurred` never even called. The `> 0` guard holds **at**
+  the boundary, not merely away from it.
+- **The never-invoked boundary.** A real budget breach against a driver that *would* record a charge: the
+  vendor transport was never touched (`requests.length === 0`), only the cost-0 `failed` row exists. So the
+  liability holder is not even a candidate until `invokeProvider` genuinely runs — a future reordering bug
+  would have to move the holder-read outside real dispatch to manufacture a phantom.
+- **The true-up statement**, which no existing test had failed — every prior probe failed `writeCache` or
+  `insertLedgerRow`, never the *third* post-success statement (reachable only for a driver implementing
+  `takeActualCostUsd`, i.e. never DataForSEO). Held: exactly one `incurred` row at the **charge**, not the
+  never-committed "actual".
+- **The declared residual, reproduced on purpose** — let the transaction genuinely COMMIT then throw. Real,
+  and **bounded to exactly 2 rows** (one `posted`, one `incurred`); every other fault site yields 1 or 0.
+  That is the honest trade the header claims, not a wider hole.
+
+**It also named a standing property rather than filing it as a defect**, which is the right call: the
+framework boundary is airtight, and the one residual trust boundary is **driver honesty about *when* it
+reports a charge**. It read both shipped drivers to confirm neither reports speculatively — DataForSEO only
+after parsing per-task `status_code` for accepted tasks, Ahrefs only after parsing the real units header.
+No runtime guard can fence that, so it belongs in the design's "confirmably" discipline, not in a test.
+
+### SM-51 — the two §A12 prohibitions verified as absence, from source
+
+Grepped `google/*.ts`: **zero** writes to `search_data_cache` and **zero** `dispatchProviderOp` call sites —
+only comments citing the rules. Migration `0060` read directly: `ENABLE` + **`FORCE` ROW LEVEL SECURITY**
+with the byte-identical `search_*` policy shape, not a weaker bespoke one. Its sub-agent's attack table
+(forged state, one-byte-tampered HMAC, replay after consumption via direct DB write, a concurrent race on a
+single-use state resolving atomically at the DB rather than via a JS mutex, cross-tenant completion
+collapsing into forgery, hostile token-endpoint responses never leaking `client_secret`/tokens) reported all
+HELD; the race and RLS files are in the suite I ran.
+
+### SM-58 — see §6aq
+
+Same finding, independently re-verified here: the hostile-`.message`-getter crash, fixed via `toSafeFault()`.
+This gate additionally re-swept every `extends Error` root under `src/modules/search/**` itself and traced
+each one, confirming **nothing reaches the last-resort filter by accident** — everything that gets there is
+genuinely unclassified.
+
+**Cleanup:** SM-60's new tests run inside the per-file throwaway database; the filter suites touch no
+Postgres. Nothing left behind.
+
+---
+
+## 6as · SM-25a HTTP surface · **DEV-VERIFIED** — the Google OAuth surface is complete
+
+Verified by me: `tsc` clean · `lint:withtenants` OK (168 files) · the new controller suite + the SEM
+regression **32/32 green** · agent-observed scoped module run **42 files / 710 tests** (1 file / 4 tests
+skipped — the Keycloak-gated file, which I ran separately at 4/4, §6ar).
+
+Six routes: authorize · the tenant-agnostic callback · list/get connections · refresh · revoke · bind a
+property to a connection. **No new Cerbos policy file** — `resource_search_property`'s existing
+`read`/`update` reused throughout, as ruled.
+
+### It added defence the brief did not ask for, in the one place that needed it
+
+The callback cannot be tenant-scoped (real Google permits no wildcard redirect URIs), so its authority is
+the signed state rather than the usual `:tenantId` + Cerbos + RLS chain. Rather than accept that as
+sufficient, it layered:
+
+signature verify (HMAC over stateId+tenantId, `timingSafeEqual`) → **a Cerbos check scoped to the
+now-trusted tenant, run *before* the token exchange** → atomic single-use consume
+(`consumed_at IS NULL` UPDATE) → **`created_by` must equal `req.principal.userId`**.
+
+That last clause closes **login-CSRF** — an attacker who lures a victim into completing *their* OAuth
+flow. And running Cerbos before the exchange matters: authorizing after would already have spent the code
+and created the grant. Neither was in the brief; both are correct.
+
+**Structural note worth keeping:** the callback lives in its own controller
+(`search-google-oauth.controller.ts`) because `SearchController`'s `@Controller()` prefix bakes in
+`:tenantId` — a tenant-agnostic route **cannot** be a method on it. It carries `AuthGuard` but not
+`ModuleEnabledGuard`, which structurally cannot run without a tenant. Registering it required
+`app.module.ts`, one file outside its stated ownership — **declared loudly rather than slipped in**, which
+is exactly the instruction.
+
+### Masked views asserted as absence
+
+The suite string-scans **every** response body — authorize, callback, list, get, refresh, revoke, bind —
+for `enc:v1:`, `accessToken`, `refreshToken`, `codeVerifier` and their snake_case variants. Asserting the
+absence of secrets at the serializing boundary is the right place for that check; trusting the service
+layer to have masked them would leave the assertion one refactor away from meaningless.
+
+**Four mutation probes, all red when removed:** the callback's defence-in-depth Cerbos check (403 → 200 for
+a revoked role), `assertUuid` on the get route (400 → raw Postgres 500), the property-belongs-to-client
+cross-check, and the bind route's connection-belongs-to-property's-client check.
+
+### The routed CSV gap — fixed, and the sweep produced a negative result worth recording
+
+`proposeNegatives` now catches `UnterminatedQuoteError` and returns a 400 matching its sibling's shape and
+message, with a regression test and a mutation probe. **It swept for other call sites as instructed:
+exactly one other exists (`importKeywords`, already guarded) and no third.** It also swept the module's
+other typed-error throwers (`KeywordSetTooLargeError`, `NoClusteredKeywordsError`) — both already caught.
+That bounded negative result is the useful half: the "fixed one site, never swept" pattern that produced
+this gap is now closed for this parser rather than merely patched at the reported instance.
+
+### A flake it diagnosed rather than retried
+
+One signature-corruption test was intermittently green: flipping the **last** character of a 32-byte
+HMAC's base64url encoding can land on **ignored padding bits**, so the "corrupted" signature still verified.
+A genuinely sharp catch — the test was asserting tamper-detection while sometimes not tampering at all, and
+a retry-until-green would have preserved a test that proved nothing.
+
+**Owed:** the UI Connections tab must render `issuerHost` when `issuerIsGoogle` is false (§A12.3), recorded
+PENDING in the contract doc. Real-Google acceptance remains SM-41G.
+
+---
+
+## 6at · SM-54 · **DEV-VERIFIED** (⚡ gate owed) — the department has a cadence, and a real defect surfaced
+
+Verified by me: `tsc` clean · `lint:withtenants` OK (168 files) · `pull-scheduler.test.ts` +
+the registration pin **43/43 green** · agent-observed scoped run **42 files / 710 tests**.
+
+`pull-scheduler.ts` + `main.ts` start block + two config keys. No endpoints, so no contract change;
+`search.controller.ts` and `providers/*` untouched.
+
+**Off by default, and it argued why that is a money control rather than a convention:** its precedents
+(`startBurndownSnapshotLoop`, `startDriftSweepLoop`) are dark because starting them is a *performance*
+opt-in; for this loop the flag answers "does this environment spend vendor money unattended". Chained
+`setTimeout`, never `setInterval`, so a slow sweep cannot overlap itself. Interval parsed through
+`numericEnv` **specifically** so a typo throws at boot rather than becoming `setTimeout(…, NaN)` — a hot
+loop on the money path.
+
+**Cadence is derived, with no schedule in the file.** `lastRunAt = GREATEST(last capture, last scheduler
+attempt)`, the attempt half read from `search_provider_calls` filtered to `correlation_id = 'sched:<tool>'`
+and deliberately **status-blind** — the question is "did we attempt this window", not "did it work".
+**No early-fire tolerance**, on the reasoning that a grace window would let a daily tool fire 31× a month
+instead of 30; under-running is the safe direction.
+
+### The defect its own tests caught — hazard 5, exactly
+
+`pullRanksForEngagement` / `pullMetricsForKeywords` / `pullAiVisibilityForProperty` **swallow** a
+choke-point refusal into per-item `skipped` outcomes carrying `reason = err.code`, rather than throwing.
+That is correct for a human caller. For an unattended loop it meant a tick where **every** keyword was
+refused for `budget_exceeded` returned `pulled: 0, skipped: N` **and no exception** — and its first
+implementation logged that as `dispatched`. A scheduler that reports success while spending nothing, or
+that cannot tell "refused" from "done", is precisely the "wrong cheap pass" the ticket named as its
+hazard. `classifyBatch()` now lifts the code back out; only `pullBacklinksForProperty` throws, which is why
+both shapes are handled. **It was invisible until the budget test failed** — a good argument for writing
+the refusal test before believing the happy path.
+
+**Zero retry, adopted from SM-15 and hardened.** SM-15 was a daily cron so "next tick" was a day away;
+this loop polls hourly, and capture-only due-ness would re-attempt a *failing* engagement every hour — an
+eager retry by the back door, on a queue where `task_post` is charged at post. Including the scheduler's own
+last attempt makes a refused tick consume its cadence window exactly as a success does. Stated exception:
+`PillarDisabledError` writes no ledger row so it does **not** consume a window — correct, an operator brake
+costs nothing to re-ask.
+
+**Overlap:** a session-scoped `pg_try_advisory_lock` in its own namespace, held across the whole sweep,
+non-blocking so a second sweep returns `skippedLocked` having walked zero tenants. Proven with a real
+`Promise.all` race under a 400ms provider delay → one winner, **1 vendor call / 1 ledger row / 1 snapshot**.
+It explicitly **declined to claim** that sequential-tick ordering protects concurrent sweeps — both read
+due-ness before either commits, so the lock is the only thing between them, which is what probe P3 attacks.
+
+**Attribution verified in the database, not in the return value:** `requested_by = NULL` +
+`correlationId = 'sched:<tool>'` on every scheduler row including refusals; no invented service user; no
+`override: true` anywhere in the file. Plus one activity row per acting tick only — an hourly poll would
+otherwise flood the feed.
+
+**Six mutation probes, all red:** always-due (8), drop the toggle gate (11), lock always granted (1 —
+exactly the two-winners case), drop the last-attempt half of `lastRunAt` (1 — the zero-retry leg), wrong
+`correlationId` (3), stop truncating to the scope limit (3).
+
+### 🔴 SM-61 (new) — the projection and the scheduler disagree about an absent cadence
+
+**Verified by me at the code.** `providers/dispatch.ts:807`'s `runsPerMonth()` defaults an **absent**
+cadence to **1 run/month**; SM-54's spec binds it to weekly-conservative (**~4.3**). So a tool enabled with
+no explicit cadence — e.g. the `standard` preset's `volume` — is **scheduled ~4× more often than the scope
+panel priced it**. The four budget tiers still bound total spend, so this is projection *accuracy*, not
+unbounded spend — but it is the same family this programme keeps closing: **a surface showing a human a
+number the system will not honour.**
+
+My recommendation for the ruling, which the architect should confirm or overturn: **refuse to schedule a
+tool with no explicit cadence.** An absent cadence is not a configuration, it is an omission, and having an
+unattended loop spend money on an omission is the same shape as an inert guard. Aligning the two defaults
+either way leaves a human's displayed price differing from behaviour in one direction or the other; refusing
+makes the omission visible and costs nothing. Touches `providers/*` and the scope presets, so it is an
+architect call, not the implementer's.
+
+### Other findings it declared rather than deviating silently
+
+- **Spec said `work_activity`; it used `activities`** — the table the manual pull routes use, so scheduled
+  and manual pulls land in one feed. `work_activity` is outbox-fed and keyed for external work-detection, a
+  different surface. Flagged in case the spec meant it literally.
+- **Scheduler-only narrowing it chose:** requires `search_properties.status = 'active'`, which the manual
+  routes do not — buying data unattended for a paused property is waste, and a human can still pull manually.
+- Two engagements sharing one property share rank/backlinks/GEO cadence windows, since those tables are
+  property-keyed. Deliberate: the second engagement's pull would buy data the first already paid for.
+- `.env.example` entries for the two new keys still owed (file held elsewhere this wave).
+
+**On §6an's long-poll question it kept long polls and gave the right reason:** short-polling needs a
+`providers/*` change it does not own, would make every scheduled pull depend on a PARKED webhook edge whose
+only consumer SM-55 deleted, and would convert a synchronous outcome into pending state — **re-opening the
+`incurred`-orphan class SM-50/SM-60 just closed.** It recorded that the scheduler is nonetheless the natural
+first consumer of that cheaper economics, precisely because unlike a human waiting on an HTTP response it
+does not care about latency. Unparking SM-56 for it is a design call.
+
+**Unverified, stated:** no live-vendor run (MockSearchProvider on live Postgres); the advisory lock is proven
+cross-*session* but never cross-*container*; `main.ts`'s start block is verified by `tsc` + the registration
+pin only, the loop itself driven directly in tests.
+
+---
+
+## 6au · Architect rulings — SM-61 (absent cadence) + the ⚡ architect half of SM-54's gate (2026-07-30, binding)
+
+### Ruling 1 — SM-61: an absent cadence means ON-DEMAND; the scheduler never runs it
+
+**The maintainer's recommendation is CONFIRMED, on stronger grounds than it claimed.** The scope
+editor already names the empty cadence: `ScopeEditor.tsx`'s cadence select renders `""` as
+**"on-demand"** (its CADENCE_OPTIONS row). So `enabled: true` with no cadence is not an omission —
+it is a configuration the UI has been promising all along: *available for manual pulls, never
+scheduled*. The projection's `default: 1` comment says the same ("on-demand pulls … one
+refresh/mo"). The odd one out was SM-54's spec clause "absent/unknown cadence defaults
+weekly-conservative" (§6ad ticket spec item 2). **That clause was this seat's own, and it is
+SUPERSEDED**: it turned a switch labeled on-demand into unattended weekly spend. §A13.2's
+authorization artifact is "toggle + cadence"; half an artifact authorizes nothing. Binding:
+
+1. **Scheduler:** a cadence-less enabled tool is never selected. New `ToolTickOutcome.status:
+   "on_demand"` — behaves like `disabled` (no dispatch, no ledger row, no activity row; counted in
+   `SweepResult`). `DEFAULT_CADENCE_DAYS` is deleted; there is no default.
+2. **Presets — the actual defect surface, and what it becomes.** Verified: `standard.volume` AND
+   `heavy.volume` both ship `{ enabled: true }` with no cadence (`scope-presets.ts`; §6at named only
+   `standard`). They are not left manual-only — design §10's `sm-keyword-refresh` row intended a
+   scheduled metrics refresh — they gain **`cadence: "monthly"`**: (a) it matches the vendor's own
+   monthly volume-data update cycle (weekly would re-buy unchanged data), and (b) it prices
+   IDENTICALLY to what the panel has always displayed (`runsPerMonth("monthly") === 1 === the old
+   absent-default`), so no human ever saw a different number. `light` untouched (all paid tools
+   off). **Zero behaviour regression:** `SEARCH_SCHEDULER_ENABLED` has never been set outside tests,
+   so no engagement has ever had a scheduled volume pull to lose; existing cadence-less engagements
+   simply become what their panel already said (on-demand). Raising an existing engagement to
+   monthly is a per-engagement human edit in the scope editor — their price to accept — NOT a data
+   migration.
+3. **The projection's `default: 1` is legitimate and stays** — as the *on-demand usage estimate*
+   (also the only possible reading for `suggestions`, which is deliberately unschedulable). The two
+   readings coexist by being **labeled as two things**: `ProjectedToolCost` gains
+   `scheduled: boolean` (server-derived: enabled ∧ cadence present ∧ tool ∈ `SCHEDULED_TOOLS`), and
+   the scope panel's cost cell renders enabled non-scheduled rows as an estimate ("on-demand est."),
+   per §6aa's no-unlabelled-figures rule. SM-17's surfaces inherit the same field.
+4. **Junk cadence is foreclosed at the door.** Verified: the scope PUT validates nothing about
+   cadence today — the API accepts `"fortnightly"`. It gains enum validation
+   (`daily|weekly|monthly|null/absent`, 400 naming the field). The scheduler stays fail-closed
+   regardless: junk parses to on-demand, never to a guessed schedule — a typo must not buy anything.
+5. **Shared helper — YES, shaped so drift is structural, not disciplinary.** New leaf module
+   `modules/search/cadence.ts`: `type Cadence = "daily"|"weekly"|"monthly"`,
+   `parseCadence(unknown): Cadence | null` (null = on-demand; junk → null), `cadenceDays(Cadence)`,
+   `scheduledRunsPerMonth(Cadence)`, `ON_DEMAND_ESTIMATE_RUNS_PER_MONTH = 1`. The load-bearing
+   property: **the parser has no default path** — it returns a type whose `null` every caller must
+   handle explicitly, so "absent" can never again silently collapse into someone's convenient number
+   (§6ab's two-normalizations lesson, institutionalized). Honest scope: this unifies the two
+   platform-nest call sites (dispatch projection + scheduler) — the pair that diverged. platform-ui
+   cannot import it (separate projects, no monorepo); its mirrors in `searchMarketingShared.ts` /
+   `demoFixtures.ts` stay mirrors held by cross-repo pin tests (the existing preset-pin pattern).
+   NOTE: the UI preset copy is live-load-bearing, not display-only — the editor's preset picker
+   seeds the grid client-side before the PUT — so both repos' preset edits must land in the same
+   wave or the two seeding paths write different scopes.
+
+### Ruling 2 — ⚡ architect half of SM-54's gate: **APPROVE**; every declared deviation ratified
+
+- **Off-by-default + guard placement — APPROVE.** The flag answers "does this environment spend
+  vendor money unattended", which is a control, not a convention; caller-gating in `main.ts`
+  matches the three-loop precedent and the registration pin covers the wiring. `numericEnv`
+  boot-throw on the interval and the 1000ms floor are right. The two `.env.example` entries §6at
+  still owes fold into the SM-61 build ticket.
+- **Cadence derivation, status-blind attempt half — APPROVE, with the matrix made explicit**
+  (verified against `dispatch.ts`): window consumption = "the attempt left a ledger artifact".
+  Rows that consume: real dispatches (`posted`/`completed`/`incurred`) and $0 `recordBlocked`
+  refusals (`scope_disabled` mid-tick race — next tick deselects; `budget_exceeded` — sticky by
+  nature, retrying hourly is pure spam; `*_ceiling_unavailable` where the audit INSERT succeeded).
+  Refusals that write no row and therefore re-ask next tick: `pillar_disabled` (stated exception)
+  and `no_capable_provider` (`resolveProvider` throws with no `recordBlocked` — config gap
+  self-heals on fix). So the feared "a transient refusal costs a whole window" is narrower than
+  posed: the genuinely transient refusal classes do NOT consume a window. The one over-conservative
+  cell — an MTD-sum read fault whose audit write succeeded — is **accepted**: bounded to one
+  window, self-healing, and excluding it would take endpoint-suffix string predicates in a second
+  place, the exact drift class this same wave closes. Also accepted and recorded so nobody files it
+  later: a budget refusal near month-end consumes a window across the rollover (up to cadence−1
+  days dark after the cap resets) — under-running is the safe direction.
+- **Advisory lock — APPROVE; the declared cross-container limit is evidence-scope, not mechanism.**
+  Namespace `0x53430003` verified collision-free repo-wide (the only non-test
+  `pg_try_advisory_lock` caller). Advisory locks live server-side: N containers sharing one primary
+  serialize identically to the proven two-sessions race, so **no distributed lock is needed** —
+  CLOSED by reasoning. Two real deployment constraints recorded instead: (a) the scheduler's pool
+  must speak directly to the primary — a transaction-pooling pgbouncer would break session-scoped
+  locks; (b) multi-instance is safe by construction (alternating sweeps are cadence-idempotent), so
+  enabling the flag on exactly one instance profile is hygiene, not a correctness requirement.
+- **`activities` over `work_activity` — the deviation is CONFIRMED; spec item 4's wording is
+  amended.** One human feed with the manual pull routes (same `writeActivity` helper, verified it
+  targets `activities`); `work_activity` is the outbox-consumer-fed person-grain evidence fabric
+  (`UNIQUE(tenant_id, source, source_ref)`, the tracker-reporting substrate) — hourly null-actor
+  system rows would pollute person-grain rollups and need synthetic source_refs. If reporting ever
+  wants scheduled-pull signals, the shape is an outbox event, not direct writes.
+- **Scheduler-only narrowing (`search_properties.status = 'active'`) — APPROVE.** Unattended spend
+  on a paused property is waste; a human can still pull manually. Shared property ⇒ shared
+  rank/backlinks/GEO windows — APPROVE (the second pull would re-buy data the first paid for;
+  volume correctly stays engagement-keyed via its own capture stamp). Two accepted asymmetries,
+  recorded: the attempt half is engagement-scoped, so the charge lands on whichever sharing
+  engagement's tick fires first; and a budget-refused engagement's data can still arrive via the
+  sibling engagement's budget — same tenant, same property, acceptable.
+- **Long polls — RATIFIED.** Switching would re-open the `incurred`-orphan class SM-50/SM-60 closed
+  and would depend on a webhook edge SM-55 correctly deleted; not the implementer's to own. On
+  §6at's unparking question: **SM-56 as ticketed (the collect edge) is not the thing to unpark — it
+  is already DEV-VERIFIED (§6an).** The remaining economics become **SM-62 (new, PARKED)** below.
+
+### Tickets out of these rulings
+
+**SM-61 · absent-cadence semantics + shared parser — senior-be · seat default · verified in the
+bundled ⚡ gate below.** Files: NEW `platform-nest/src/modules/search/cadence.ts`;
+`pull-scheduler.ts` (consume the parser; `on_demand` outcome; delete `DEFAULT_CADENCE_DAYS` and the
+local `cadenceDays`); `providers/dispatch.ts` (`runsPerMonth` via the parser;
+`ProjectedToolCost.scheduled`); `scope-presets.ts` (volume → monthly in standard+heavy);
+`search.controller.ts` (scope PUT cadence enum validation); `.env.example` ×2 (the two SM-54 keys,
+SM-06 precedent); platform-ui `searchMarketingShared.ts` + `demoFixtures.ts` (preset mirrors +
+`scheduled` + runs-per-month parity) + `ScopeEditor.tsx` (on-demand est. label on the cost cell);
+pin tests both repos. Done when: (a) a cadence-less enabled tool ticks `on_demand` — no dispatch,
+no ledger row, no activity row — and the treat-null-as-weekly mutation probe goes red; (b) scope
+PUT with `cadence: "fortnightly"` → 400 naming the field, null/absent accepted; (c) projection for
+volume-with-monthly equals the figure the old absent-default displayed (regression pin), every
+enabled cadence-less row carries `scheduled: false` and renders the est. label, `suggestions` is
+always `scheduled: false`; (d) all preset copies agree cross-repo (pin), and no second cadence
+normalization survives in platform-nest (grep).
+
+**Bundled ⚡ QA gate (the owed one) — qa · seat default.** Covers **SM-54 + SM-56 + SM-59 + SM-61**:
+§6ad's SM-54 item-7 ACs, SM-61's ACs above, a re-run of SM-56's replay/idempotency probes and the
+P3 concurrent-sweep race. SM-56/SM-59 ride along because no gate section ever named them (§6ar
+gated SM-51/25a-service/58/60 only) — the §1 rows claiming LANDED were wrong and are corrected
+this section.
+
+**SM-62 · scheduler Standard-queue economics — senior-be · opus·medium at unpark (pending-state
+money semantics) · PARKED, owner timing (this supersedes §A13.7's SM-56-timing question).**
+Scheduler-originated serp pulls flip to short `pollAttempts` + postback reliance — scheduler ONLY;
+manual pulls keep the interactive long poll. Includes the piece §6an item 3 implies but nothing
+drives today: a $0 collect sweep (`fetchSerpByTaskId`) over stale `posted`/`incurred` rows with
+`sched:` correlation ids at the start of each tick — free by construction, so zero-retry is
+undisturbed, and it generalizes SM-50 reconciliation. Fail-back to long-poll whenever the postback
+edge is unconfigured (fail closed to the PROVEN economics). Gates, in order: bundled ⚡ gate PASS →
+n8n postback relay rebuilt (SM-55 deleted the old one, correctly) → staging + funded key for the
+three vendor facts §6an deferred.
+
+### Ledger corrections applied to §1 (verified against the narrative before editing)
+
+SM-14 → LANDED (remainder discharged §6af, ⚡ PASS §6ak; the row predated both) · SM-53 note gains
+its §6ak PASS citation · **SM-56 + SM-59 LANDED → IN FLIGHT** (DEV-VERIFIED §6an but never gated —
+the legend says LANDED requires the gate) · SM-54 row records this section's architect-half APPROVE
+· SM-61 row → RULED/specced · SM-62 row added · SM-23 row → PULLED FORWARD.
+
+**SM-23 is pulled forward — junior · seat default, run before the next build wave.** The P5 ledger
+gap, the stale SM-14 row and the SM-56/59 mislabels are all the same debt: reconcile §1 vs the
+narrative sections, MODULES.md search section vs registry row, CHANGELOG, and the stale comments
+already swept into it (§6p). Two standing rules adopted with it: **every new SM-xx gets its §1 row
+at creation**, and **a gate section must name every ticket it covers** (SM-56/59 fell through
+§6an's bundling).
+
+**Open for the owner:** (1) SM-62 timing — park until the funded key/staging, or schedule
+immediately after the bundled gate; (2) the preset change (standard/heavy volume → monthly) is
+ruled on price-identity grounds — flag if a monthly auto-refresh for volume is NOT wanted as the
+seeded default, since it makes design §10's scheduled metrics refresh real for new engagements.
+
+---
+
+## 6av · ⚡ QA gate — SM-54 · **PASS** (the QA half; architect half is §6au)
+
+Verified by me: both scheduler suites **43/43 green** (SM-54's own 28 + the gate's 15) · `pull-scheduler.ts`
+confirmed byte-identical after every probe was reverted · `tsc` clean · `lint:withtenants` OK (168 files).
+It reproduced §6at's baseline **first** (42 files / 710 tests, 1 file / 4 skipped) before adding anything —
+so its own delta is attributable rather than blended into a moving number.
+
+### It attacked where SM-54's own six probes could not
+
+SM-54's probes attacked its own decision logic. This gate went after the **seam between the loop and the
+module functions it calls**, which is where SM-54's one real defect had lived:
+
+- **`classifyBatch` on a mixed batch** — one pulled, one refused → correctly `dispatched` with
+  `detail: "partial: budget_exceeded"`, both ledger rows attributed, window still consumed.
+- **A pure-failure batch** (plain Error, no refusal code) → `failed`, not `dispatched`/`refused`; zero
+  ledger rows (the fault precedes any charge point); and genuinely retried next sweep — **no false
+  zero-retry lockout**, which is the trap of making a refused tick consume its window.
+- **The outer catch's own discriminator** on the backlinks path, which has no internal try/catch and is
+  therefore a *different* code path from rank/volume/GEO — mutation B proved nothing else covers it.
+- **An all-`absent` metrics batch** → `dispatched`, because money was spent even though nothing updated.
+  Verifying the file's own documented intentional call rather than assuming it.
+
+**Time attacked properly:** clock backwards and a many-month future `lastRunAt` (never due); cadence casing
+and whitespace (`"Daily"`, `" daily "`) falling to the safe 7-day default and **never** to `daily`; and a
+**31-day-month walk** simulating 31×24h of hourly polling, confirming a daily tool fires exactly 31 times
+and never 32 — the concrete form of SM-54's "no early-fire tolerance" claim.
+
+**Multi-tenancy:** a disabled-module tenant **sandwiched between two enabled ones** — neighbours dispatch
+normally and the disabled tenant is *invisible* to the sweep rather than skipped-with-a-trace. And
+cross-tenant RLS foreclosure proven by literal-ID query across all three tables.
+
+**`PillarDisabledError` across three consecutive sweeps:** zero ledger rows each time, status stays
+`refused` (never drifting to `not_due` or `dispatched`), and flipping the pillar on dispatches immediately —
+proving the brake genuinely never consumed a window, which was the one exception SM-54 declared.
+
+### The best thing in this report is a finding about its own test
+
+Its first `stop()`/lock probe inferred "released" from whether a **second sweep** could acquire the lock.
+That is an unreliable witness: pg-pool can hand the *same physical connection* to the next caller, and
+Postgres session-scoped advisory locks are **re-entrant within one session** — so the second sweep succeeds
+either because the lock was released *or* because the same session is trivially re-acquiring its own
+still-held lock. **Under mutation D it gave a false PASS.** Rewritten to query `pg_locks` directly by
+`(classid, objid)`, which is true regardless of which connection asks; then re-verified green on real code
+and red under mutation D.
+
+That is exactly the blind-spot class §6ak identified — *a probe suite can be exhaustive within its frame and
+still share an assumption with what it tests* — found this time **in the gate's own instrument**. A test
+that passes for the wrong reason is worse than a missing one, and the only thing that surfaced it was
+mutation-probing the test itself rather than trusting a green result.
+
+**Four mutations, all red:** gut `classifyBatch` → 7 · drop the outer `instanceof` → 1 (precisely the
+backlinks path, nothing else) · short-circuit the module-enabled gate → 2 · remove the advisory-unlock from
+`finally` → 1, after the false-negative above was fixed.
+
+**Unverified, carried forward unchanged:** no live-vendor run; the lock is now proven cross-*session* via
+`pg_locks` but still never cross-*container*; SM-61 remains architect-owned and unaffected.
+
+**Cleanup:** none needed — per-file disposable databases keyed by `TEST_DB_PREFIX` + file-path hash.
+
+---
+
+## 6aw · SM-23 doc reconcile · **IN PROGRESS** — plus a live-infra fact worth acting on
+
+Docs-only, no source touched. Fixed four real staleness defects, each with the check cited:
+
+- **`MODULES.md` was self-contradicting.** The registry row and opening paragraph were current (I had
+  updated them), but the "What exists / Known gaps / Next" block **beneath** them was a 2026-07-27
+  snapshot claiming P0 "partially landed", SM-04 "awaiting gate", "no crawlers", "no console" — directly
+  contradicting the paragraph immediately above. Rewritten against code. Worth noting the shape: I updated
+  the *top* of that section two days ago and never read to the bottom, so the file disagreed with itself.
+- **`FRONTEND-BFF-CONTRACT.md` §14** listed SM-17's ledger surface as wholly unbuilt while
+  `search.controller.ts:852` implements it and a live page consumes it. Moved to BUILT (with the
+  gate-owed caveat) and the PENDING row **narrowed to what is genuinely missing** — a tenant-scope MTD read
+  and a threshold-event listing, established by grepping for those routes and finding none. Narrowing rather
+  than deleting is the right move: an over-broad PENDING row hides the real remaining work.
+- **`CHANGELOG.md`** was a day behind — no entry for the SM-50 fail → SM-60 fix → pass cycle, or
+  SM-51/52/53/55/58/60. Added, including this pass's own doc fixes so the changelog does not go stale on
+  day one.
+- **`.env.example` ×2** gained `SEARCH_SCHEDULER_ENABLED` / `SEARCH_SCHEDULER_INTERVAL_MS`, documented as a
+  **money control** — the flag answers "does this environment spend vendor money unattended" — not a
+  performance toggle.
+
+### What it declined to do, correctly
+
+- **The tracker itself needed no edit.** It diffed §1 against §6au's own correction note *before* touching
+  anything and found the SM-56/SM-59 → IN FLIGHT correction already applied. It then re-verified the legend
+  against every ⚡ row rather than stopping there, and found no further rows in that shape. Verifying and
+  not editing is a real outcome; editing to look busy would have been worse.
+- **§4j's out-of-order position: confirmed, not renumbered.** ~150+ citations use the current letters, so a
+  renumber is a large high-risk edit nobody asked for. Reported instead.
+- **SM-02/SM-03 marked UNVERIFIED rather than relabelled.** Their rows cite suite counts rather than naming
+  a QA-gate-and-architect-review pair the way SM-01/04/11 do. It could not establish whether that predates
+  the ⚡ convention being formalised or is a genuine legend violation, and **said so** instead of guessing in
+  either direction. That is the correct handling of an ambiguous record.
+- It also noted the repo's migration runner is `readdirSync().sort()`-based, so "verify it is in the module's
+  `migrations` array" does not map to how migrations actually apply here — it verified by file presence plus
+  `schema_migrations` instead. Worth recording, because I have twice instructed agents to check that array.
+
+### 🔴 The live dev database is behind the migration files — verified by me
+
+```
+schema_migrations tops out at 0054_pm_task_assignees.sql
+files on disk: 0055_org_unit_memberships · 0056_module_reports_core · 0057_report_metric_seeds
+               0060_search_google_oauth_states · 0061_search_google_performance
+information_schema: search_google_oauth_states  →  DOES NOT EXIST
+```
+
+So **the running platform would fail on every Google OAuth route** — SM-51/SM-25a's surface has tables in
+code and not in the database it is pointed at. SM-25b has meanwhile written `0061`.
+
+**I deliberately did not apply them, and the reason is the point:** `0055`–`0057` belong to **other sessions**
+(org-unit memberships, the reports module, metric seeds). The runner applies the whole directory in sorted
+order, so there is no way to apply `0060` without also applying three migrations whose authors have not
+declared them ready. Applying another session's DDL to the shared dev database on their behalf is their call,
+not mine — and the concrete cost of waiting is small: simulate-mode SEO work is unaffected, and SM-25b's
+tests run against per-file throwaway databases, so only **live-stack** Google verification is blocked.
+
+**Action for the next redeploy:** run `migrate()` with both `DATABASE_URL` (platform_app) **and**
+`MIGRATE_DATABASE_URL` (platform_owner) — app-role alone fails with "permission denied for schema public"
+(§6l). Confirm the other sessions' 0055–0057 are ready first.
+
+---
+
+## 6ax · SM-61 · **DEV-VERIFIED** — cadence unified; the two normalizations can no longer drift
+
+Verified by me, **after both concurrent agents released the shared files**, so this number is attributable:
+platform-nest `src/modules/search` **48 files / 780 tests passed**, 1 file / 4 skipped (Keycloak-gated, by
+design) · platform-ui **658 tests passed** · `tsc` clean in **both** projects · `lint:withtenants` OK
+(172 files). Both baselines rose because SM-25b's Google work lands in the same scope.
+
+### The helper's shape is the whole ticket
+
+`modules/search/cadence.ts`: `parseCadence(unknown): Cadence | null` with **no default branch** — absent,
+`null`, wrong case, whitespace and junk all return `null`. And the crucial half: `cadenceDays` and
+`scheduledRunsPerMonth` accept a **real `Cadence` only**, so **no null branch exists for a caller to
+accidentally feed "absent" into**. That is what makes the fix structural rather than disciplinary: the type
+system now forces every caller to decide what absent means, where previously two callers each quietly chose
+a different convenient number (1/month vs ~4.3/month).
+
+It also moved `SCHEDULED_TOOLS` here to break a `pull-scheduler.ts` ↔ `providers/dispatch.ts` **circular
+import** while keeping one source both files read — a real design constraint, solved rather than worked
+around with a duplicate list, which would have recreated the exact drift class this ticket closes.
+
+### The five clauses
+
+New `ToolTickOutcome.status: "on_demand"` at Gate 1.5, immediately after the disabled-toggle gate: enabled
+with no real cadence behaves like `disabled` — no dispatch, no ledger row, no activity row — and is counted
+in `SweepResult.onDemand`. `DEFAULT_CADENCE_DAYS` deleted. `runsPerMonth` now derives from `parseCadence`.
+`ProjectedToolCost.scheduled` server-derived. `standard.volume` and `heavy.volume` gain `cadence: "monthly"`;
+`light` untouched. The scope PUT gains enum validation returning a 400 **naming the field**, while
+absent/null stays accepted — because absent is a valid configuration ("on-demand"), which was the finding
+that started this ticket.
+
+**Both required probes confirmed, then reverted:** mutating Gate 1.5 to `cadence ?? "weekly"` turned all four
+new `on_demand` tests red; mutating `scheduledRunsPerMonth("monthly")` from 1 to 2 turned **both** price pins
+red across `dispatch.test.ts` and `scope-presets.test.ts`. The second is the one that matters — it is what
+proves the preset change is genuinely price-identical to what the panel always displayed, rather than merely
+asserted to be.
+
+### The cross-repo half landed in the same wave, as required
+
+`searchMarketingShared.ts` (preset seeds + `CostProjectionTool.scheduled` + `onDemandEstimateLabel()`),
+`demoFixtures.ts` (mirrored seeds, `scheduled` derivation, **and a demo-side cadence validator so the fake
+PUT rejects the same junk the real one does**), and `ScopeEditor.tsx` rendering "· on-demand est." beside an
+enabled non-scheduled row's price.
+
+That demo-side validator matters more than it looks: §4i records three drift bugs caused by fixtures that
+agreed with a wrong assumption, and §6ab found a demo parser silently regressed to a pre-fix version. A
+fixture that accepts input the real API refuses is the same defect wearing different clothes — it makes
+DEMO_MODE QA produce false negatives about shipped code.
+
+**Why the mirrors had to ship together:** the preset picker seeds `tool_scope` **client-side, before the
+PUT**. Shipping the backend validation alone would have made a user picking `standard` seed a shape the API
+then rejected. Separate projects, no shared package, so the mirrors stay pin-tested mirrors.
+
+---
+
+## 6ay · SM-25b · **DEV-VERIFIED** — Search Console + GA4; the department can finally read its own data
+
+Verified by me: the combined run in §6ax (**48 files / 780 tests**, 4 skipped by design) includes its four
+files at the counts it reported · `tsc` clean · `lint:withtenants` OK (172 files) ·
+**`lint:migration-rls` OK (61 migrations)** · `0061` confirmed to carry **three** `NOT NULL DEFAULT false`
+provenance/sampling columns and **two** `FORCE ROW LEVEL SECURITY` statements.
+
+Six routes; the largest functional gap in the department is closed. Migration `0061`, registered in the
+module's array, whose header argues its own numbering and its choice of hash-vs-tuple UNIQUE per table.
+
+### Grain chosen deliberately in *both* directions
+
+**GSC at full grain** — property × date × query × page × device — because coarsening would destroy the
+query→page→device comparison the surface exists for, and Google's own UI reports at that grain. Volume is
+bounded in the **ingest layer, not the schema**: Google's documented 5k/request ceiling respected, ≤4 pages
+per pull, `country`/`searchAppearance` deliberately omitted as later extensions. **GA4 deliberately coarser**
+— property × date × channel_group — trading away event/page detail because GA4's dimension space explodes
+combinatorially and the ask was channel attribution, not a warehouse. Coarser where coarser is right is a
+better answer than uniform fidelity.
+
+### Freshness is CLAMPED, not flagged — and that is the stronger design
+
+`clampEndDateToFreshnessLag()` pulls the end date back to `today − lag` (GSC 3d, GA4 2d) **before any
+request is built**, so a partial day is never fetched and never persisted. **There is no partial row anywhere
+to mislabel** — which beats flagging one, since a flag can be ignored downstream while an absent row cannot.
+The clamp is disclosed on every response (`requestedEndDate`, `effectiveEndDate`, `clampedForFreshness`,
+`freshnessLagDays`), so the caller is told what it did rather than silently given less than it asked for.
+
+Row limits: pagination stops on a short page; hitting the page cap **while the last page was still full**
+sets `truncated: true` — never a silent under-report. GA4 **sampling** is read from the response's
+report-level metadata and denormalized onto **every row that pull wrote**, in the *same* INSERT as the
+values, plus surfaced on the outcome. A sampled figure is therefore labelled at the row, not averaged into
+something clean-looking.
+
+### Two self-critical findings — both are the sharpest kind
+
+1. **Its 4-way `Promise.all` race test passed even with the naive check-then-insert anti-pattern
+   substituted.** Natural timing on this machine simply never collided. It only failed once the window was
+   *artificially widened* (75 ms between SELECT and INSERT), producing a real Postgres `23505`; the same
+   widened window was then re-run against the real `ON CONFLICT` code and survived cleanly. **So the standing
+   concurrent test was not the proof — the widened-window experiment was.** This generalizes SM-08's lesson
+   one level deeper: a *sequential* test proves less than it looks, and a *concurrent test that never
+   collides* proves nothing at all while looking like the strongest evidence in the file. It raised the
+   standing test from 4 to 20 callers to improve — explicitly not guarantee — natural collision odds, and
+   recorded the distinction in the test comments.
+2. **A real bug in its own fixtures, caught by mutation-probing rather than by a red build.** Its
+   `deterministicRows` calls supplied a 1-element subject against a 4-dimension request, so those pulls
+   silently produced **zero** rows — and the `simulated` provenance probe still passed in a full sequential
+   run, because it was reading **a stale row left by an earlier test in the same file**. A provenance probe
+   passing on a neighbour's data is precisely the "sequential proves less than it looks" class, arriving in
+   the instrument rather than the product. Fixed all four call sites and re-verified the probe **in isolation**
+   so it now passes on its own pull.
+
+**Four mutation probes, all genuinely red then reverted:** the `simulated` stamp on GSC and on GA4, the
+`sampled` stamp, and the idempotency constraint (with the widened window above).
+
+**The two §A12 prohibitions asserted as behaviour**, not commentary: pulls driven — including over real HTTP
+via `app.inject` — then `search_data_cache` count **0** and `search_provider_calls` count **0**, in separate
+assertions. Neither table has a ledger FK; Google is correctly a third egress class with no money to meter.
+
+**Defers to SM-41G, stated:** real GSC/GA4 response shapes, quota/429 behaviour, whether the 3d/2d lags are
+real (documented, not observed), real sampling/thresholding semantics, and whether Google's device enum
+matches. And it **declined to attempt any `:3004` verification** because `0055`–`0061` are unapplied on the
+live dev database — reported as blocked rather than worked around, which is the correct handling.
+
+---
+
+## 6az · Live stack unblocked — migrations `0055`–`0061` applied, platform redeployed (2026-07-30)
+
+Owner authorized applying the pending migrations, including the three belonging to other sessions.
+
+**Safety check before touching anything:** scanned all five for destructive DDL — `DROP TABLE`,
+`DROP COLUMN`, `TRUNCATE`, `DELETE FROM`, `ALTER COLUMN … TYPE`. **Zero in all five.** Two carry seed
+`INSERT`s (0055, 0057), which is the backfill-DML class `lint-migration-rls` guards, and that lint passes
+across 61 migrations. Took a `pg_dump` inside the container first and recorded row counts.
+
+**Applied** with both `DATABASE_URL` (platform_app) and `MIGRATE_DATABASE_URL` (platform_owner) — app-role
+alone fails with "permission denied for schema public" (§6l). Chain now ends at `0061`; `0055`, `0056`,
+`0057`, `0060`, `0061` all recorded.
+
+**Verified after:** `search_google_oauth_states`, `search_gsc_performance` and `search_ga4_metrics` all exist
+and all carry `simulated`. **Row counts identical before and after** — engagements 1, keywords 25, ledger 75,
+snapshots 56. Nothing lost.
+
+### The redeploy had a trap worth recording
+
+`docker compose build platform` reported **"No services to build"** and the container was *not* recreated —
+it stayed 7 hours old while appearing to succeed. Cause: **another session changed `platform` from a local
+`build:` to a GHCR `image:`** as part of the deployment-pipeline work (memory `deployment-pipeline`:
+"prod no longer builds"). So the build command had nothing to build, and `up -d` saw no config change and
+left the old container running.
+
+**This is the "looks like it worked" failure mode applied to a deploy.** Two commands both exited 0 while
+achieving nothing, and only `docker ps` showing `Up 7 hours` gave it away. Fixed **without editing the compose
+file another session owns**: built the image directly under the tag compose expects
+(`docker build -t ghcr.io/hansel-gaiada/gaiada-platform-nest:latest platform-nest/`) then
+`up -d --no-deps --force-recreate platform`. Recreated, healthy, `:3004` still published.
+
+**Standing note for the next redeploy:** `platform` is now an **image-based** service. `compose build platform`
+is a no-op and will silently lie. Either build+tag as above, or pull a published image.
+
+### Live verification — the unblock is real
+
+```
+GET …/modules/search/google/connections        → HTTP 200 []      (needs 0060)
+GET …/properties/:id/gsc-performance           → HTTP 200 []      (needs 0061)
+```
+
+Both previously would have failed on a missing table. Empty arrays are the correct answer — the tables exist,
+RLS applies, and no connections or performance rows have been created yet.
+
+**Regression check on the pre-existing surfaces, and it caught SM-61 working end to end:**
+
+```
+cost-projection → providerMode simulate · total $6.360928
+  rank→dataforseo scheduled=true · volume→semrush scheduled=true
+  suggestions→dataforseo scheduled=FALSE · backlinks→ahrefs scheduled=true · ai_visibility→dataforseo scheduled=true
+ledger        → 75 rows · costToServe $1.38407 · mode simulate
+```
+
+`suggestions` is the **only** `scheduled: false` — exactly right, since it is the one tool deliberately
+unschedulable, and it proves SM-61's server-derived flag is live rather than merely unit-tested. Per-capability
+routing across all three vendors is intact, and the ledger's 75 rows survived the migration.
+
+---
+
+## 6ba · SM-30 · **DEV-VERIFIED** — the manual apply/export twin, no OAuth required
+
+Verified by me: `tsc` clean · its two suites **43/43** (17 pure + 26 e2e against live PG/Cerbos/Redis) ·
+agent-observed module scope 826 passed / 4 skipped across 52 files. **No migration** — 0034 already had
+`export_file_id`, `applied_by`, `applied_at` and `'applied'` in the CHECK; only the *app-level* door was
+closed, and this opens exactly one route through it.
+
+Two routes: `POST change-proposals/:id/export` (Cerbos `update`, requires `status IN ('approved','applied')`
+and `mode='manual'`, writes a real Ads-Editor CSV through the existing `files`/`storage()` path and links
+`export_file_id`) and `POST change-proposals/:id/mark-applied` (Cerbos **`apply_manual`** — elevated, matching
+`search:campaign:launch`'s existing policy scope, **no policy file touched**).
+
+### The format was established, not invented — and one rejection is the best decision in the ticket
+
+It fetched Google's own Ads Editor documentation and confirmed the real column names
+(`Campaign`, `Campaign daily budget`, `Ad group`, `Keyword`, `Headline 1..15`,
+`Description line 1..4`, `Final URL`, `Path 1/2`, the `Negative`/`Campaign negative` prefix). Where Google
+gives no canonical string it recorded **five named assumptions** in the file header rather than silently
+choosing — match-type-suffixed negative criterion types, new-keyword default match type, Target ROAS unit,
+new-ad status mapping, blank Paths.
+
+**It rejected putting the provenance notice in a leading comment row**, because Ads Editor treats row 0 as
+the header — a prepended line would silently shift the real header into the data. That is precisely the
+"looks right, imports wrong" failure the brief warned about, avoided by reasoning about the actual consumer
+rather than about what reads nicely. Provenance instead travels three independent channels: the API
+response's `provenance` object, a **`-SIMULATED` filename suffix**, and a per-row trailing `Notes` column.
+Only `launch` proposals are data-informed, so only those can be tainted — it scoped the marker to where the
+risk actually is.
+
+### The door is narrow, and provably still shut everywhere else
+
+One route, one elevated Cerbos action (`apply_manual`, never `update`), one precondition, one audit line via
+`writeActivity`, plus cascade of `search_negatives → applied` / `search_ads → live` for the referenced ids.
+**The generic `PATCH change-proposals/:id` is unchanged and still refuses `'applied'` — regression-tested
+explicitly.** That test is what lets a future reader tell a deliberate door from a hole, which was the
+condition I set for opening it at all.
+
+**Idempotency in two layers:** an app-level status check catches sequential double-calls (400), and a
+compare-and-swap `UPDATE … WHERE status='approved'` closes genuine concurrency (404) — the same idiom
+`updateChangeProposal` already uses. Proven with a live `Promise.all`: exactly one 200 and exactly one
+`applied_by` stamp.
+
+### One reported failure was a concurrent artifact, not a regression
+
+It observed 1 failing file, `providers/qa-adversarial-sm56-collect-boundary.test.ts`, and correctly declined
+to touch it as out of its ownership. **That file no longer exists** — it was the bundled-gate agent mid-write
+while SM-30's run was in flight. Verified by me: the file is absent, `tsc` is clean, and SM-30's own suites
+are 43/43. Recorded because "1 pre-existing failure" and "another agent's half-written test" look identical
+in a run summary, and only checking the file's existence distinguishes them.
+
+**Unverified, honestly:** not driven against `:3004`. Its reasoning was that the container runs a compiled
+image with no source mount, so it would need a rebuild of the shared dev stack that other agents are using —
+out of scope for a senior-be ticket without being asked. Correct call; the DB/RLS/Cerbos/storage paths were
+exercised against the same real infrastructure via the suite.
+
+---
+
+## 6bb · SM-63 · **DEV-VERIFIED** — the collect-scope defect closed, and the toothless test given teeth
+
+Verified by me (its agent hit the session limit just after finishing, so all of this is my own
+verification): `tsc` clean · the SM-56 repro + `search-rank.test.ts` **31/31 green** · both guards
+mutation-probed by me, `rank.ts` restored byte-identical each time.
+
+### Defect 1 — same-tenant, wrong-engagement collect
+
+`findLedgerRowByVendorRef` now returns the row's **own** `engagement_id`/`property_id`, and
+`ledgerRowScopeMatches` is a shared comparison rather than a hand-written check per call site (SM-62's
+planned sweep would be the second).
+
+**The design decision worth keeping is what it did *not* do:** the scope is returned **as data for the
+caller to judge**, deliberately not pushed into the `WHERE` clause. Its own reasoning: a lookup that filtered
+on the expected scope would return `null` for "wrong engagement", making it indistinguishable *in the query*
+from "no such task at all" — and it would silently break `incurred-cost.test.ts`'s provider-collision probe,
+which looks a row up with **no engagement in hand**. The two answers are conflated **for the caller** on
+purpose (no oracle), but that is a property of the *refusal*, not of the query. `ledgerRowScopeMatches`
+returns a bare boolean for the same reason: the information needed to build a finer message is never
+produced, so it cannot leak.
+
+It also noticed the nullability is real rather than a loophole — 0034 declares both columns nullable because a
+non-property-bound op (a `volume` pull) legitimately logs `property_id IS NULL` — and handled that explicitly
+rather than treating "unknown" as "fine".
+
+**Probed by me:** neutering the check (`false && !ledgerRowScopeMatches(...)`) turns the wrong-scope attack
+**red** (1 of 4).
+
+### Defect 2 — the instrument, and the fix is a lesson written into the code
+
+`MockSearchProvider.fetchSerpByTaskId` deliberately does **not** call `tick()` — correctly, because a collect
+issues no billable work and must not advance `dispatchCount`, which other tests read as "a paid call
+happened". But `delayMs` lives *inside* `tick()`, so a collect-race test setting `mock.delayMs` was setting a
+field the collect path never reads. **Its window was zero-width and the test passed whether or not the
+advisory lock existed.**
+
+Fixed with a separate `collectDelayMs` knob — two knobs because the two counters are separate, which is the
+same reasoning applied consistently rather than a second mechanism. And its comment carries the general rule
+forward: *a test that sets a delay should also assert the window was really open (elapsed ≥ the delay),
+because a timing instrument that silently stops working is exactly the defect this field was added to fix.*
+
+**Probed by me:** removing the `pg_advisory_xact_lock` now turns `search-rank.test.ts` **red** (1 of 27).
+Before this ticket, the same mutation left it green. The lock was always load-bearing; the test is now the
+thing that proves it.
+
+**This is the third instrument-level defect in this programme** — after §6av's session-reentrant lock probe
+(false PASS because pg-pool reuses connections) and §6ay's provenance probe passing on a neighbouring test's
+stale row. All three share one shape: **the test could not fail, and nothing about reading it revealed that.**
+Only mutating the thing it claimed to guard exposed it. That is now three data points for the standing
+practice the architect is being asked to rule on: a serialization or timing test must ship with evidence it
+fails when its guard is removed.
+
+---
+
+## 6bc · ⚡ Bundled gate record (§6au's owed gate) + architect rulings — freshness remedy, echo-validation class, negative-control rule (2026-07-31, binding)
+
+Architect section. Covers, by name (§6au standing rule): **SM-54 · SM-56 · SM-59 · SM-61 · SM-25b**
+(the gate) and **SM-63** (the architect half of its review). Rulings first — they unblock implementers;
+the record and ledger corrections follow.
+
+### Ruling 1 — the freshness residual: **REJECT at the ingest boundary** — skip before the UPSERT, count it, disclose it. Never flag; never silent.
+
+A returned row whose own `date` lies outside `[startDate, effectiveEndDate]` is **not persisted**,
+is **counted** in a new outcome field (`rowsOutsideRangeSkipped`), and the pull otherwise succeeds
+for its in-window rows. Binding, with the reasons in force order:
+
+1. **Rejection is the only remedy consistent with the design already ratified.** §6ay/0061 chose
+   clamping over flagging precisely so that *no partial row exists for any reader to mis-render*;
+   0061 deliberately has no partial/freshness column, and its header argues why. Flagging now would
+   relitigate that ratified choice at first contact with stress: it needs the schema column 0061
+   refused, it creates the second partial-data state every current and future reader
+   (`topGscQueries`, report layer, UI) must remember to check — the exact discipline-burden the
+   design rejected — and a flagged row still enters any aggregate whose author forgets the
+   predicate. The way to keep "no partial row exists" when the vendor sends one anyway is to not
+   persist it.
+2. **This is not even a new pattern — it is the files' own `malformedRowsSkipped` pattern extended
+   by one validity predicate.** Both clients already skip-count-disclose a row whose keys don't
+   carry date/query/page ("skipped, never invented (§4i), and counted so it is visible"). An
+   out-of-window date is the same epistemic class: a response row that cannot be trusted as a
+   settled fact.
+3. **"Discards data Google chose to send" dissolves on inspection.** (a) Inside the lag window the
+   data is, by the vendor's own documentation, provisional — it is not good data being thrown away,
+   it is exactly the misleading number this module exists to never write. (b) Nothing is lost:
+   the idempotent UPSERT means the next pull fetches that date once it exits the window. Rejection
+   costs at most `lagDays` of latency on an unsettled figure — **deferral, not destruction** —
+   while flagging costs a permanent second data state. (c) An out-of-range row has three possible
+   causes — vendor date-filter bug, our request-construction bug, clock skew — and under all three
+   the row's provenance is suspect; persisting suspect data unlabelled is the §4d class.
+4. **Silent dropping — the gate is right, it is forbidden.** The module's standing discipline is
+   that nothing is silently substituted or swallowed (the clamp discloses, truncation discloses,
+   malformed rows are counted). The counter IS the disclosure, and it is the actionable half of
+   what flagging would have bought: an operator learns *that* out-of-window rows arrived (a vendor
+   anomaly, exactly the signal SM-41G wants), without the row's contents being shown anywhere they
+   could be read as settled truth. One server-side log line with the count and the offending
+   min/max dates covers forensics; the performance table never does.
+5. **Both bounds, row-granular, shared helper.** Check `startDate ≤ date ≤ effectiveEndDate` — a
+   row *before* the window is equally unrequested (it would silently widen the window backwards).
+   Row-granular skip, not whole-pull failure: one stray vendor row must not destroy an otherwise
+   valid pull or turn a data-quality anomaly into an availability incident. The predicate lives as
+   a pure helper beside the clamp in `freshness.ts` — the clamp's own "shared arithmetic, per-client
+   constants" argument applies verbatim, so GSC and GA4 cannot drift.
+6. **A useful side effect, recorded:** ISO string comparison makes the window check a positional-
+   integrity tripwire for slot 0 — a query string or a `2026/07/30`-shaped value in the date
+   position fails the bounds and lands in the same counter, skipped rather than persisted.
+
+The gate's red test already encodes this remedy: it throws on the *presence* of the in-window row
+regardless of any flag, and its final assertion (`every row ≤ effectiveEndDate`) passes exactly
+when rejection is implemented. **SM-64 needs to add only the disclosure assertions and the GA4
+twin — the gate's artifact is the acceptance test.**
+
+### Ruling 2 — GA4 owes the identical check; `sampled` does not cover it
+
+**Yes on GA4, and the axes are orthogonal.** `sampled` says "these figures are extrapolated from a
+subset of sessions" — an *estimation* fact read from report metadata. Freshness says "this calendar
+day had not finished settling" — a *completeness* fact about the row's own date. A GA4 response can
+carry an unsampled row dated today: `sampled = false`, and fully misleading. GA4's grain
+(date × channel_group) UPSERT-heals later exactly like GSC's, with the same interim
+looks-like-a-collapse lie; and GA4's 2-day lag constant is the *less* certain of the two ("roughly
+the current processing day"), so the vendor-honours-the-range assumption is thinner there, not
+thicker. Same shared helper; the check runs **after** the `YYYYMMDD → ISO` normalization, on the
+value that would be persisted. Honest scope: the check enforces *"the vendor honoured what we
+asked"* — it does not and cannot validate the lag constants themselves (clamp and check derive from
+the same constant); whether 3d/2d are the real settling windows stays SM-41G's.
+
+### Ruling 3 — it is a CLASS. Standing rule: **echo-validation**, written into the addendum as §A14 (binding)
+
+**"Any constraint or identity a request carries must be re-verified on the response before
+persistence; violations are counted and disclosed, never silently absorbed, never persisted
+unlabelled."** Grounding is §A10.5's own doctrine: a green sandbox validates our code against *our
+model* of the vendor — so a constraint enforced only outbound is enforced only in our model, and
+every invariant we claim of persisted data ("no partial rows", "at most N rows", "this row belongs
+to this engagement") is a vendor-trust assumption in disguise until the response side enforces it.
+Echo-validation converts an unverifiable vendor fact into an enforced local invariant — after
+SM-64, "no partial row is persisted" holds *unconditionally*, vendor honest or not.
+
+The inventory, verified in code this session:
+
+| # | Request-side constraint | Response-side today | Disposition |
+|---|---|---|---|
+| 1 | GSC/GA4 date window (`startDate`/`effectiveEndDate`) | **trusted** — nothing checks a returned row's date | **SM-64** (Ruling 1) |
+| 2 | GSC `rowLimit` per page | **trusted** — an over-full page is parsed and persisted whole, defeating the ingest-layer volume bound (`gsc-client.ts`'s own stated promise) and breaking the `startRow = page × rowLimit` offset arithmetic | **SM-64**, secondary AC: slice at `rowLimit` before the parse loop, count excess (`rowsOverLimitSkipped`), stop paging, `truncated: true` (offsets are meaningless past an over-full page) |
+| 3 | GSC positional `keys[]` (dimension order) | partially — `parseRow` null-checks; slot 0 gains the Ruling-1 tripwire | covered by #1; residual stays a documented positional-trust fact (SM-41G) |
+| 4 | GA4 dimension/metric order | **already echo-validated** — parsing indexes the response's own `dimensionHeaders`/`metricHeaders`, not assumed positions | none — **the exemplar**; name it in §A14 so the next driver copies it |
+| 5 | Collect identity: taskId → ledger row's own engagement/property vs the caller's claim | closed by **SM-63** (§6bb) — same class, identity axis | landed |
+| 6 | Paid-driver response identity (does a `task_get` result echo the posted task's keyword/engine/location, and do we compare? Ahrefs true-up header units; Semrush volume keyword echo) | **unaudited** | **SM-65** audit sweep |
+
+**The rule's honest limit, stated so it doesn't over-promise:** echo-validation checks what IS in
+the response against what was asked. It cannot check the completeness of what *isn't* sent — a
+vendor that under-returns (a short page that lies) is undetectable from our side; that stays a
+vendor fact for SM-41G's reconciliation. GA4 sends no row limit, so there is nothing to echo on
+axis #2 there. Scope: vendor-boundary ingest paths (paid providers + the third egress class) —
+not a tax on every internal API.
+
+### Ruling 4 — the gate's verdicts are RATIFIED, and the FAIL/residual line is now a stated principle
+
+The gate was right that the freshness residual is **not a FAIL against any stated AC**: SM-25b's
+clause ("a partial day must not read as a drop to zero") is discharged by the clamp for every
+partial day that exists *in our model of the vendor*, no AC clause asked for response validation,
+and §A10.5 ratifies exactly that scope for dev acceptance. It was equally right to FAIL SM-56. The
+line between them, binding for future gates:
+
+> **A gate FAILS on a defect reachable within our own declared contract; a finding reachable only
+> through an external party violating *its* contract is a residual → ticket, never a FAIL.**
+
+SM-56's defect needed no vendor misbehaviour — same tenant, ordinary confused caller, money
+misattributed: FAIL. SM-25b's needs Google to violate its own documented range filtering: residual,
+ticketed (SM-64), left visibly red. Note for the record: §6ay's sentence "there is no partial row
+anywhere to mislabel" was conditional on the vendor honouring the request and is **amended by this
+section** (SM-64 also updates `freshness.ts`'s header to state the response-side half). The gate
+leaving the test red was correct for the interval between finding and ruling; now that the remedy
+is ruled, **SM-64 is the first ticket of the next wave** — until it lands, every suite run cites
+"expected red: `qa-adversarial-sm25b-freshness.test.ts` (SM-64)" so the baseline stays attributable.
+
+### Ruling 5 — standing practice ADOPTED: the **negative-control rule** for guard tests
+
+Three instances of the instrument being the defect, one shape (§6bb states it exactly): §6av's lock
+probe (false witness — same pooled session re-acquires its own lock), §6ay's race and provenance
+probes (natural timing never collided; assertion fed by a neighbour's stale row), §6bb's zero-width
+collect window (`delayMs` lived in `tick()`, which the collect path correctly never calls). In all
+three *the test could not fail, and reading it revealed nothing* — each shared a hidden assumption
+with the thing it guarded. Binding, scoped to the class with the 3-for-3 record — tests whose
+subject is a concurrency/serialization/idempotency guard (advisory lock, unique constraint, CAS,
+single-flight, redelivery suppression):
+
+1. **Negative control at the gate:** the test is evidence only when shown **red with the guard
+   removed/neutered and green restored**, and the gate record names the mutation. A guard test that
+   has never failed without its guard proves nothing while looking like the strongest line in the file.
+2. **Independent witness:** the assertion must not share substrate with the mechanism under test —
+   `pg_locks` by `(classid, objid)`, not re-acquisition success; exactly-one-winner from N
+   genuinely-overlapping callers, not absence-of-error; row-state before/after, not the guard's own
+   return value.
+3. **Instruments self-assert:** an injected delay/latch/widened window must assert it actually
+   engaged (elapsed ≥ delay — SM-63's fix comment, promoted to rule), so a dead lever is loud
+   instead of silently narrowing the race window to zero.
+
+This binds gates going forward; no retroactive sweep — the three known instances are fixed, and the
+rule's cost lands exactly where the false confidence was being minted.
+
+### ⚡ Gate record — the bundled owed gate (§6au), verdicts by ticket
+
+- **SM-54 — PASS** (regression only; its own QA gate was §6av, architect half §6au). With §6av +
+  §6au both discharged: **LANDED**.
+- **SM-59 — PASS.** Provider-predicate collision probes green; no index change, as ruled. **LANDED.**
+- **SM-61 — PASS, live-verified on `:3004`** — including that a rejected scope PUT
+  (`cadence: "fortnightly"` → 400 naming the field) leaves the engagement **byte-identical**, and
+  §6az's live projection shows `suggestions` as the only `scheduled: false`. **LANDED.**
+- **SM-25b — PASS with one residual** (Ruling 1/4; → SM-64, red test standing until it lands).
+  **LANDED** — the residual is a new ticket against a vendor-trust assumption, not an AC breach.
+- **SM-56 — FAIL → fixed by SM-63 → discharged. LANDED.** The fail: `collectRankForTask` resolved
+  the paid row by `(tenant, provider, vendor_ref)` and never compared that row's own
+  `engagement_id`/`property_id` against the caller's — a same-tenant wrong-engagement callback
+  wrote the snapshot under the wrong property and advanced another engagement's `incurred` charge;
+  RLS forecloses the cross-tenant case and structurally cannot see this one. The enabling detail:
+  `findLedgerRowByVendorRef` did not even return engagement/property, so the check could not have
+  been written without widening the query. Discharge evidence (§6bb, verified + mutation-probed by
+  the maintainer): wrong-scope attack red 1-of-4 under a neutered check; the bundled gate's
+  remaining SM-56 battery (replay/idempotency/secret/$0/admission) had already PASSed. Precedent:
+  the SM-50 §6ak FAIL → SM-60 → PASS pattern.
+
+**Second finding, equal in weight (gate's own):** the shipped "SIMULTANEOUS redeliveries" test had
+no teeth — `MockSearchProvider.fetchSerpByTaskId` never calls `tick()` (correctly — a collect must
+not advance `dispatchCount`), but `delayMs` lived inside `tick()`, so the forced delay had zero
+effect and the test stayed green **with the advisory lock disabled**. The lock was load-bearing;
+the test asserting it was not. Fixed under SM-63 (separate `collectDelayMs`, §6bb); removing the
+lock now turns `search-rank.test.ts` red 1-of-27. This is instance three behind Ruling 5.
+
+### SM-63 — architect design-review half: **APPROVE** (QA substance: bundled-gate battery + §6bb probes; inline-verify rule applies to a two-function diff)
+
+Ratified specifically: **returning the row's scope as data for the caller to judge rather than
+filtering in the `WHERE` clause** — a filtering lookup would make "wrong engagement" and "no such
+task" indistinguishable *in the query* and would break `incurred-cost.test.ts`'s no-engagement-in-hand
+collision probe; the refusal (not the query) keeps the two conflated for the caller, so no
+same-tenant id-probing oracle is created (`UnknownVendorTaskError` either way), and
+`ledgerRowScopeMatches` returning a bare boolean means the finer-grained message can never be built.
+Also ratified: explicit handling of 0034's legitimately-nullable `property_id` (a `volume` row) as
+"unknown ≠ fine", and the two-knob mock (`collectDelayMs` beside `delayMs`) because the two counters
+mean different things — the same reasoning that created the gap, applied consistently to close it.
+
+### Tickets out of these rulings
+
+**SM-64 · response-window enforcement (the freshness residual) — medior · seat default · ⚡
+(additive outcome fields) · FIRST ticket of the next wave (it un-reds the suite).** Files:
+`google/freshness.ts` (shared pure window predicate + header amended to state the response-side
+half), `google/gsc-client.ts` (window skip+count before the UPSERT; the axis-#2 page-cap echo:
+slice at `rowLimit`, `rowsOverLimitSkipped`, stop paging, `truncated: true`), `google/ga4-client.ts`
+(same window check after date normalization), both outcome interfaces + controller passthrough +
+platform-ui type mirrors (additive), `qa-adversarial-sm25b-freshness.test.ts` (goes green as
+written; add disclosure asserts) + a GA4 twin. Done when: (a) the gate's red test is green
+unmodified in its attack half, with `rowsOutsideRangeSkipped === 1` asserted, and a mutation
+removing the window check turns it red (negative control, Ruling 5); (b) GA4 twin proves the same
+on a seeded today-row incl. `sampled` remaining orthogonal; (c) an over-full GSC page persists
+exactly `rowLimit` rows, counts the excess, sets `truncated: true`, stops paging (mutation-probed);
+(d) outcome fields flow to the BFF types additively, both repos `tsc` clean; (e) in-window pulls
+byte-identical outcomes except the new zero-valued counters (regression pin).
+
+**SM-65 · echo-validation audit sweep (axis #6) — medior · seat default · read-only, no ⚡.**
+Apply §A14's checklist to `providers/dataforseo.ts`, `semrush.ts`, `ahrefs.ts` + the SM-49 sandbox:
+for every request-side constraint/identity (posted task keyword/engine/location vs `task_get`
+result; Ahrefs true-up header units; Semrush volume keyword echo), record enforced/trusted/N-A with
+file:line, in a tracker section. Output is verdicts + micro-tickets for gaps — **no code**. Done
+when the §A14 table's axis-#6 row can be replaced by per-driver dispositions.
+
+**Not ticketed, deliberately:** no retroactive negative-control sweep (Ruling 5 binds gates going
+forward); no flag column anywhere (Ruling 1 forecloses it — do not re-propose via SM-22's report
+layer).
+
+### Ledger corrections applied to §1 (each verified against the cited section before editing)
+
+SM-54 → LANDED (§6au + §6av + §6bc regression) · SM-56 → LANDED (FAIL §6bc → SM-63 §6bb →
+discharged §6bc) · SM-59 → LANDED (PASS §6bc) · SM-61 → LANDED (§6ax + PASS §6bc live) ·
+SM-25b → LANDED (§6ay + PASS-with-residual §6bc; residual → SM-64) · SM-63 row added → LANDED
+(§6bb + architect half §6bc) · SM-64/SM-65 rows added at creation (§6au standing rule) ·
+SM-30 → IN FLIGHT (DEV-VERIFIED §6ba; its row still said TODO — the §6au reconcile class, fixed
+while touching the table).
+
+**Open for the owner:** none new. SM-62's timing question (§6au) stands; SM-64's page-cap echo
+slightly changes over-full-page behaviour from "persist everything the vendor sent" to "persist
+what was asked for" — flag only if someone believes over-delivery should be kept, which Ruling 3
+argues against.
+
+---
+
+## 6bd · The four UI gaps · **DEV-VERIFIED** — the department finally has surfaces a client can look at
+
+`tsc` clean · `vitest` **709/709 across 71 files** (baseline 658/68, so **51 new**) · `next build` green with both
+new routes in the manifest · and — the part that matters — driven **twice**, once in `DEMO_MODE=1` and once
+against the **live backend** on `:3004` at migrations 0061.
+
+**Live evidence, not fixtures:** Rankings renders 25 real keywords at real positions (7.0 / 5.0 / 4.0 / 1.0 /
+6.0) alongside honest `— (not found)` rows, every one SIMULATED-badged because the platform is in simulate
+mode. GSC/GA4 reads **"No Search Console/GA4 data pulled yet"** against the genuinely-empty live tables —
+the empty state proven against real emptiness rather than a fixture that mimics it. Connections lists real
+clients with "No accounts connected yet." Zero console errors on any page in either mode.
+
+Two judgement calls worth keeping:
+
+- **Freshness and sampling render inline, next to the numbers they describe — never only in a footnote.**
+  `clampedForFreshness` / `effectiveEndDate` / `truncated` / per-row `sampled` sit against their own figures.
+  A disclosure the reader must scroll away from to find is the same lie the clamp was built to prevent.
+- **`annotateRankDrops` mirrors `rank.ts`'s `isRankDrop` exactly** rather than inventing a second definition
+  of "dropped" — the drift-bug class that bit this programme three times in one day.
+
+It also **verified every field against `search.controller.ts`'s actual SELECT** (§4i), re-checking after the
+interruption and confirming SM-63 touched only `collectRankForTask`/`ledger.ts`, not the read paths — and it
+did not touch `platform-nest`, correctly, since it did not own it this wave.
+
+**SM-17's legend now names both `incurred` shapes**: charged-and-delivered-nothing, and SM-60's
+charged-delivered-then-our-own-write-failed. Both end "never $0". No new `actual`/`cash` instance introduced
+(§A3).
+
+**Flagged, not fixed** (correctly — out of scope): a pre-existing React duplicate-key warning on
+`pipeline:gt-2-pmreview` in the "Waiting on me" rail, and real-Google acceptance, which is still SM-41G.
+
+---
+
+## 6be · SM-65 · echo-validation audit sweep (axis #6, §A14) — read-only, no code
+
+**Method, stated so the verdicts below can be checked:** read `dataforseo.ts`, `semrush.ts`, `ahrefs.ts`,
+`dispatch.ts`'s `invokeProvider`, `rank.ts`'s `pullMetricsForKeywords`, `cache.ts`'s write path, and
+`testing/vendor-sandbox/server.ts` line-by-line — never inferred from `types.ts`'s interfaces. Where a
+scenario mattered on JS semantics rather than doctrine (the DataForSEO/Ahrefs empty-header question),
+it was run: `node -e 'Number(""), Number("   ")'` → both **`0`**, not `NaN`. Every "GAP" below cites the
+exact absence of a check; every "GUARDED" cites the code that constitutes the check. Nothing here is a
+FAIL — per §6bc Ruling 4, every finding below requires either a vendor behaving out of its own documented
+contract, or (for the one exception noted) is a defect reachable with an ordinary, non-adversarial response
+— that one is called out explicitly as such.
+
+### DataForSEO (`providers/dataforseo.ts`)
+
+1. **Task identity echo — GAP.** `fetchOneSerp` (lines 265–298, used by both `fetchSerpResults` and
+   SM-56's `fetchSerpByTaskId`) does `const task = res.tasks?.[0]` after `GET
+   /v3/serp/google/organic/task_get/advanced/${ref.id}` and never compares `task.id === ref.id`. Concrete
+   violation: a vendor response (proxy replay, LB glitch, or a genuine vendor bug) whose `tasks[0].id`
+   differs from the requested id is accepted as-is; its items are persisted as `ref.keyword`'s SERP
+   snapshot. This is the SM-63/SM-56 shape (§6bb/§6bc) recurring at the vendor boundary instead of our own
+   DB — same class, one hop further out. **Confirmed unverified, not verified-absent:** no test in
+   `dataforseo.test.ts` or `dataforseo.sandbox.test.ts` asserts `task.id`, and the sandbox server
+   (`server.ts:237–256`) derives `taskId` deterministically from the posted keyword and always echoes that
+   same id back — it is **structurally incapable of emitting a mismatch**, so a green sandbox run is
+   silent on this axis by construction (exactly §A10.5's warning, not a coincidence). Remedy per §A14.2:
+   **refuse-as-not-found** (identity axis) — reject if `task.id !== ref.id`, one shape with "task not
+   found", no finer message.
+2. **Row/task cap on `postSerpTasks` — GAP, and it is billing-adjacent.** Lines 195–212: `for (let i = 0;
+   i < tasks.length; i++)` iterates the **response's** length, pairing by position against `reqs[i]`, with
+   no check that `tasks.length === reqs.length`. Concrete violation: if the vendor's `tasks` array is ever
+   longer than what was posted, indices beyond `reqs.length - 1` read `reqs[i]?.keyword ?? ""` — `undefined`
+   falls back to `""` — and if that extra task's `status_code < 40000` it is pushed into `accepted` and
+   **`recordIncurredCostUsd` is called for it** (line 211): a real charge would be recorded against a task
+   this platform never asked for, labelled with an empty keyword. Reachable-within-our-contract framing
+   (§6bc Ruling 4): this does not require the vendor to violate ITS contract in any deep sense — a
+   duplicated array entry from any intermediary is enough — so this is the sharper of the two DataForSEO
+   findings. The partial mitigation already present: an accepted task's keyword is read from
+   `t.data?.keyword` FIRST (line 206), which is itself an unverified vendor-echo of the keyword (not
+   compared against `reqs[i].keyword` either) but does reduce reliance on position when the vendor happens
+   to include it. Remedy: **skip + count + disclose** — persist/bill only the first `reqs.length` accepted
+   entries positionally-paired-and-bounds-checked, or (stronger) require `t.data.keyword ===
+   reqs[i].keyword` before billing and count/disclose the rest as `tasksUnmatchedSkipped`.
+3. **Keyword-volume echo (`getKeywordMetrics`, lines 302–327) — GUARDED.** `byKeyword = new Map(rows.map(r
+   => [String(r.keyword ?? ""), r]))`, then the returned array is built by `kws.map(k =>
+   byKeyword.get(k.keyword))` — iterating the **request** list, never the response rows. This is already
+   the item-3/item-4 remedy: a vendor row for a keyword we didn't ask for is never looked up and therefore
+   never persisted, and the output array can never exceed `kws.length` regardless of how many rows the
+   vendor sends. Honest limit stated per §A14.3: if the vendor's own `keyword` field lies (says "our"
+   keyword while the underlying numbers are for something else), this pattern cannot detect it — there is
+   no independent signal to check the echo against.
+4. **Backlink target identity (`getBacklinkSummary`, lines 330–342) — GAP.** `target: r?.target ?? target`
+   prefers the **vendor's own returned** `target` field over the requested one, with no comparison between
+   them. Concrete violation: if `r.target` differs from the requested `target` (vendor bug, or the sandbox
+   fixture's own field — currently always echoed correctly, `server.ts:280–296`, so untested either way),
+   the persisted/displayed `BacklinkSummary.target` shows the vendor's string while the cache key (built
+   from `op.query` in `dispatch.ts:243`) still correctly reflects the request — so the row is filed under
+   the right key but can **display** a mismatched label. Lower severity than #1/#2 (no double-billing, no
+   cross-engagement leak) but the same class. Remedy: skip the mismatch (persist `target` = the requested
+   value, never the vendor's), count and disclose a `targetMismatchDetected` flag rather than silently
+   adopting the vendor's string.
+5. **`getAiVisibility` — N/A, not a gap.** The result is always labelled `query: q.query` (our own
+   request value); no vendor-echoed identity field is parsed at all, so there is nothing to check against
+   and nothing being silently trusted either. Same honest limit as #3: if the vendor answered about a
+   different query, there is no signal in the response shape this driver reads that could reveal it.
+6. **True-up header — N/A, confirmed absent, not a gap.** `estimateCostUsd`'s own doc comment (line
+   372–375) and the absence of any `takeActualCostUsd` method are consistent with the file's stated
+   reasoning: DataForSEO bills one flat published price per call with no per-response actual-cost signal,
+   so no true-up is implemented and none is silently missing.
+
+### Semrush (`providers/semrush.ts`)
+
+1. **SERP task/identity — N/A for a vendor task id (synchronous, no queue), but the driver asks for no
+   echo signal at all.** `postSerpTasks` (lines 210–240) requests `export_columns: "Po,Ur,Dn"` for
+   `phrase_organic` — no `Ph` (phrase/keyword) column, so Semrush's response carries **no keyword field to
+   check identity against even if the driver wanted to**. The result is unconditionally labelled
+   `keyword: r.keyword` (our own request value). This is narrower than DataForSEO's finding: it is not an
+   unchecked signal, it is a **signal never requested**, and the fix is in our own control (add `Ph` to
+   `export_columns`, then compare) — closer to "our own contract, we could tighten it" than a vendor-trust
+   residual.
+2. **Volume keyword echo (`getKeywordMetrics`, lines 258–278) — GUARDED,** identical shape to DataForSEO's
+   #3: `byKeyword = new Map(rows.map(r => [r.Ph, r]))`, keyed by the vendor's own returned `Ph` column,
+   then `kws.map(k => byKeyword.get(k.keyword))` iterates the **request**. Same honest limit as
+   DataForSEO's #3 applies (a lying `Ph` field is undetectable).
+3. **Backlink target identity (`getBacklinkSummary`, lines 281–296) — same "no echo signal requested"
+   shape as #1.** `export_columns: "ascore,total,domains_num"` never asks Semrush to return the target/
+   domain at all, and the returned object always uses our own `target` (line 291, never a vendor field) —
+   safer than DataForSEO's #4 in one sense (never adopts a possibly-wrong vendor label) but for the same
+   reason as #1, there is no signal available to verify the response is actually about the requested
+   domain.
+4. **True-up header — N/A, confirmed absent by grep, not merely unverified.** No `headers`,
+   `takeActualCostUsd`, or `recordActualCostUsd` reference anywhere in `semrush.ts`. The file's own comment
+   (lines 313–320) states this is a researched, stated limitation ("NOT VERIFIED for Semrush's classic
+   Analytics API... no confirmed per-response header"), not a silent gap — and because no header-parsing
+   code exists at all, the DataForSEO/Ahrefs empty-string coercion bug (below) has no Semrush counterpart:
+   there is nothing here that could degrade to `$0`, because nothing here reads a response header for cost
+   at all.
+
+### Ahrefs (`providers/ahrefs.ts`) — the true-up axis, and the sharpest finding of the sweep
+
+1. **True-up header unit — GAP, and demonstrably a fail-open-$0 shape (not merely inferred).** Lines
+   242–248:
+   ```
+   const actualHeader = res.headers?.get?.("x-api-units-cost-total-actual");
+   if (actualHeader !== null && actualHeader !== undefined) {
+     const units = Number(actualHeader);
+     if (!Number.isNaN(units) && this.opts.costPerUnitUsd > 0) {
+       recordActualCostUsd(units * this.opts.costPerUnitUsd);
+     }
+   }
+   ```
+   Confirmed by running `node -e 'Number(""), Number("   ")'`: **both evaluate to `0`, not `NaN`.** So a
+   header present-but-empty (or whitespace-only) — from a misbehaving proxy, a vendor edge case, a gateway
+   normalizing an absent value to an empty string rather than omitting the header — passes the
+   `!== null && !== undefined` test, produces `units = 0`, passes `!Number.isNaN(0)` (true), and calls
+   `recordActualCostUsd(0)`: a genuine **`$0` true-up is recorded** for a call that was truly billed a
+   nonzero amount, exactly the "seven times" fail-open shape the brief named. Two further unchecked cases
+   in the same lines: **negative** values (`Number("-5") = -5`, confirmed) would record a negative
+   correction with no floor, and **non-finite** values (`Number("Infinity") = Infinity`) would record an
+   unbounded one — neither `Number.isFinite` nor a positivity check gates this, only `Number.isNaN`.
+   **Distinguishing verified from inferred:** the JS coercion behavior is confirmed by direct execution,
+   not assumed from the type signature (`res.headers.get()` is typed `string | null`, which said nothing
+   about this). **Distinguishing reachable-within-contract from vendor-misbehavior (§6bc Ruling 4):** this
+   does NOT require Ahrefs to violate anything it documents — an empty-but-present header is a plausible
+   intermediary artifact, independent of vendor intent — so this reads closer to **our own missing input
+   validation** than a residual, and is the one finding in this sweep I'd flag as ticket-worthy on that
+   basis alone. **Confirmed untested, not merely absent-by-omission:** `AhrefsTrueUpScript.statsUnits`/
+   `ratingUnits` (`server.ts:75–79`) are typed `number`, and the sandbox only ever emits the header via
+   `String(script.statsUnits)` (line 429) when a test configures a numeric value, or omits it entirely
+   otherwise (line 429's ternary) — the harness's own API **cannot express** "header present but empty or
+   malformed," so no amount of sandbox-driven testing would have caught this; it would need a raw
+   `fetch`-level test bypassing the harness helper. Remedy per §A14.2: this is a *data* validity check, not
+   an identity check — **skip + count + disclose**: treat a header that parses to a non-finite or
+   non-positive number the same as "absent" (do not call `recordActualCostUsd` at all), and count/disclose
+   a `trueUpHeaderMalformed` occurrence distinctly from "no true-up available", because the two mean
+   different things (the second is expected for every op without a response header at all; the first is a
+   vendor/intermediary anomaly SM-41G would want to see).
+2. **Backlink identity (`getBacklinkSummary`, lines 338–358) — same "no echoed identity to check" shape as
+   Semrush's #3.** Neither `/site-explorer/backlinks-stats` nor `/site-explorer/domain-rating` responses
+   are parsed for a target/domain field (only `metrics.live`/`live_refdomains`/`domain_rating.domain_rating`
+   are read); `target` in the returned object is always the request's own value (line 353). Whether Ahrefs's
+   real response even echoes a domain field is **unconfirmed** — the file's own header comment (lines
+   27–33) already flags the wrapper-key shape itself as an unverified assumption research-pass gap, which
+   this audit did not re-verify (out of scope: no live credentials, no doc refetch performed this pass).
+3. **SERP identity (`postSerpTasks`/`fetchSerpResults`, lines 256–312) — same shape as #2.** No vendor task
+   id (synchronous call, our own `ahrefs-serp-N` bookkeeping id), and the parsed `positions` array is never
+   checked against a keyword field — same open question as DataForSEO's wrapper-key note: unconfirmed
+   whether Ahrefs's serp-overview response even carries an echoable keyword.
+4. **Keyword-volume echo (`getKeywordMetrics`, lines 315–335) — GUARDED,** identical Map-then-iterate-over-
+   request pattern as the other two drivers. Same honest limit.
+5. **Row cap — N/A across all three drivers for the ops actually reachable today.** `dispatch.ts`'s
+   `invokeProvider` (lines 237–241) calls every driver's `getKeywordMetrics` with **exactly one keyword per
+   op** (`op.query`), confirmed the only production call site (`rank.ts:607–611`, sequential, one dispatch
+   per tracked keyword — never a true N-keyword batch dispatch). The batch-safe Map pattern in all three
+   drivers is real and correctly defensive, but is currently exercised only at `kws.length === 1` in
+   production; a genuine N-keyword bulk pull does not exist in this codebase today to audit against a live
+   N>1 case. **A downstream consequence worth naming, one layer past this ticket's file scope:**
+   `rank.ts:624` does `const metrics = (dispatch.payload as KeywordMetrics[])[0]` with no
+   `metrics.keyword === kw.keyword` assertion at that call site — currently safe only because the driver's
+   own Map-then-iterate construction guarantees index 0 corresponds to the single requested keyword. This
+   is a documented-but-unenforced invariant, not a live bug: it would silently stop holding only if a
+   driver's `getKeywordMetrics` implementation changed shape, and nothing today assets against that
+   regression at the consumer.
+
+### Vendor sandbox (`testing/vendor-sandbox/server.ts`) and fixtures
+
+The sandbox is faithful to §A10's own limits, restated concretely here rather than just cited: it derives
+DataForSEO task ids and echoed keywords deterministically from the request (`taskIdFor`, `server.ts:217–
+231`), always echoes the requested `target` in backlinks fixtures (`server.ts:280–296`), and can only ever
+emit a well-typed numeric Ahrefs true-up header or omit it entirely (§ahrefs finding #1). **None of the
+three §A14 gaps found above (DataForSEO #1/#2, Ahrefs #1) can be reproduced through the harness's own
+configuration API** — proving them would require a raw-socket test that bypasses `startVendorSandbox`'s
+typed helpers, which is exactly the position §A10.5 predicts: a green sandbox validates conformity to our
+own model, and every gap this sweep found is a case where nothing in that model was ever asked to be wrong.
+
+### Verdict per driver
+
+- **DataForSEO: two real gaps** — task/identity echo unverified on `task_get` (both the direct fetch and
+  SM-56's collect path), and an unbounded response-array iteration on `postSerpTasks` that can bill for an
+  unrequested task. One guarded axis (keyword-volume echo) confirmed. One lower-severity display-only
+  identity gap (backlinks target).
+- **Semrush: no gaps requiring code change, but two identity signals were never requested from the vendor
+  in the first place** (SERP keyword, backlinks target) — narrower than "unchecked", since there is
+  nothing in the current request shape to check against. Keyword-volume echo confirmed guarded. True-up
+  confirmed absent by design, not a silent gap.
+- **Ahrefs: one demonstrable, ticket-worthy gap** (the true-up header's `Number("")===0` fail-open path,
+  plus unchecked negative/non-finite values) and two unconfirmed-signal identity questions matching
+  Semrush's shape. Keyword-volume echo confirmed guarded.
+
+### Micro-tickets proposed (no code written; tiered per the agent-army standard)
+
+- **SM-66 · Ahrefs true-up header hardening — junior · seat default.** `ahrefs.ts`'s `call()` (lines
+  242–248): reject a parsed `units` that is `NaN`, non-finite, or `<= 0` the same way a missing header is
+  already handled (no `recordActualCostUsd` call), and add a distinct counter/log line
+  (`trueUpHeaderMalformed`) so the anomaly is visible to SM-41G rather than silently absorbed as "no
+  true-up this call". AC: a header value of `""`, `"   "`, `"-5"`, and `"Infinity"` each leave the ledger's
+  true-up untouched (pre-existing estimate stands) and each increments the malformed counter exactly once;
+  a well-formed positive numeric header is unaffected (regression pin); negative-control per §6bc Ruling 5
+  is not required (this is a data-validity check, not a concurrency/serialization guard).
+- **SM-67 · DataForSEO task_get identity echo — medior · seat default.** `dataforseo.ts`'s `fetchOneSerp`
+  (shared by `fetchSerpResults` and SM-56's `fetchSerpByTaskId`): refuse-as-not-found (§A14.2, no oracle)
+  when the response's own `tasks[0].id` (if the field is present — confirm via a live doc check first,
+  since this audit did not re-verify whether DataForSEO's `task_get` response actually echoes `id` on every
+  status, only that the sandbox always does) does not match the requested `ref.id`. AC: a sandbox-injected
+  mismatched id (a new harness capability, since today's harness cannot express one) throws the same
+  "task not found"-shaped error as a genuinely-unknown id, indistinguishable to the caller; the existing
+  40602/4xxxx/ready paths are unchanged (regression pin).
+- **SM-68 · DataForSEO postSerpTasks response-array bound — medior · seat default · ⚡ (billing-adjacent,
+  touches `recordIncurredCostUsd`).** Bound the `tasks` iteration to `reqs.length`, and require the
+  accepted task's `data.keyword` (when present) to equal `reqs[i].keyword` before it is counted as accepted
+  and billed; anything beyond `reqs.length` or failing the keyword match is skipped, counted
+  (`tasksUnmatchedSkipped`), and disclosed — never billed. AC: a sandbox response artificially widened to
+  `reqs.length + 1` tasks (new harness capability) results in exactly `reqs.length` `recordIncurredCostUsd`
+  calls, never more; the skipped-count is asserted; the existing accepted/rejected split for an in-bounds
+  mixed response is unchanged (regression pin, since this is money-path code per §4d).
+- **SM-69 · DataForSEO backlinks target identity — junior · seat default.** `getBacklinkSummary`: stop
+  preferring `r?.target` over the requested `target` — return the requested value unconditionally (as
+  Semrush's and Ahrefs's own drivers already do) and, if `r.target` is present and differs, count/disclose
+  a `targetMismatchDetected` flag rather than silently adopting the vendor's string. AC: a sandbox fixture
+  seeded with a deliberately different echoed target (new harness capability) still persists/returns the
+  REQUESTED target, with the mismatch flag set; the unmismatched case is byte-identical to today
+  (regression pin).
+- **Not ticketed, deliberately:** Semrush's and Ahrefs's "no echo signal requested" findings
+  (SERP keyword, backlinks target) — adding `Ph`/domain-echo columns to widen what can be checked is a
+  request-shape change with its own cost/field-count implications (Ahrefs specifically bills per selected
+  field, `AHREFS_RATES.keywordsOverviewPerFieldUnits`), so it is a product/cost trade-off for the owner or
+  an architect ruling, not a mechanical fix — flagged here as an open question, not a ticket. The
+  wrapper-key/echo-field uncertainty in Ahrefs's own header comment (unconfirmed whether backlinks/serp
+  responses carry an echoable identity field at all) is unchanged by this audit and stays SM-41G's to
+  confirm against real vendor responses, per §A14.3's own honest limit.
+
+### What this audit could not establish
+
+Whether DataForSEO's `task_get` response ever omits or varies its own `id` field in practice (only the
+sandbox's always-consistent behavior was inspected); whether Ahrefs's real (non-simulated) backlinks-stats/
+domain-rating/serp-overview responses carry any target/keyword-identifying field at all (the file's own
+header already flags the wrapper-key shape as unconfirmed, and this pass did not re-fetch vendor docs); and
+whether a genuine N>1 keyword-volume bulk pull exists anywhere outside `providers/` that this sweep did not
+search (the file-scope given was `providers/*` + the sandbox; a repo-wide search for other callers of
+`getKeywordMetrics` was run and found none, but a future bulk-volume feature is exactly what would make the
+already-guarded Map pattern load-bearing rather than currently-unexercised).
+
+### 6be.1 · My independent confirmation of the two sharpest SM-65 findings
+
+I re-derived both from the code rather than accepting the audit's word, because both sit on the money path.
+
+**Ahrefs true-up (`ahrefs.ts:242-247`) — CONFIRMED, and it is the eighth fail-open of the same shape.**
+The guard reads `if (!Number.isNaN(units) && costPerUnitUsd > 0)`, which *looks* like validation. But
+`Number("")` and `Number("  ")` are **`0`, not `NaN`** — I ran it. So an empty or whitespace
+`x-api-units-cost-total-actual` sails past the NaN check and records a **$0 true-up over a real charge**.
+`Number("-5")` → `-5` and `Number("1e999")` → `Infinity` pass it too.
+
+This is precisely §6r's lesson repeating at a different site: **a guard that reads as enforcement and enforces
+nothing, because the value it rejects is not the value it actually receives.** And it is worse than no true-up:
+absent the header we keep the estimate, whereas this *overwrites* the estimate with zero, so every tier of the
+five-tier cascade under-counts real spend. `Number.isFinite` + a non-negative bound is the correct predicate,
+not `!Number.isNaN`.
+
+**DataForSEO task-count bound (`dataforseo.ts:198`) — CONFIRMED.** The loop is `for (i = 0; i < tasks.length;
+i++)` over the *response*, while the request side is `reqs`. An over-long response is iterated, accepted and
+billed. The audit's find is right, and the adjacent line makes it sharper than reported: **`accepted.push({
+keyword: t.data?.keyword ?? reqs[i]?.keyword ?? "" })` prefers the *vendor's* echoed keyword over the one we
+asked for** — so for an unrequested extra task, `reqs[i]` is `undefined` and the row is named entirely by the
+vendor. That is echo-*trust* where §A14 requires echo-*validation*.
+
+The audit's discipline was right where it mattered: it labelled the Ahrefs case **untestable via existing
+fixtures** (the sandbox harness types the header as `number`, so it structurally cannot inject a malformed
+one) instead of claiming a passing test, and it separated inferred-but-unconfirmed claims — e.g. whether the
+real Ahrefs API echoes an identity field at all — from verified ones. It also recorded the axis it found
+**guarded** (keyword-volume echo, via a Map-then-iterate-over-request pattern), so absence is distinguishable
+from omission.
+
+---
+
+## 6bf · SM-64 · **DEV-VERIFIED** — the echo-validation ruling implemented, and the red gate test discharged honestly
+
+The predicate is where the ruling put it, in `google/freshness.ts` beside the clamp:
+
+```ts
+export function isRowDateWithinWindow(date, startDate, effectiveEndDate) {
+  return date >= startDate && date <= effectiveEndDate;
+}
+```
+
+Plain ISO string comparison — the same "shared arithmetic, per-client constants" argument that placed the
+clamp there. It also **amended the file header** rather than leaving §6ay's old unconditional "no partial row
+anywhere" claim standing next to code that now makes it conditional.
+
+**GSC** gained `rowsOutsideRangeSkipped` and `rowsOverLimitSkipped`. One decision beyond the brief is right and
+worth keeping: on an over-full page it slices to `rowLimit` *before* the parse loop **and stops paging**,
+because **offsets are meaningless past an over-full page** — verified `pagesFetched === 1` even with
+`maxPages: 4`. Continuing to page would have compounded a vendor's error into a request storm.
+
+**GA4** runs the identical check **after** the `YYYYMMDD → ISO` normalization, on the converted value, never
+the raw `20260710` shape. Orthogonality to sampling is asserted directly rather than argued: the twin test uses
+an **unsampled** response and still rejects the out-of-window row — `sampled: false` and misleading at once,
+which is exactly why the architect ruled the check owed on GA4.
+
+**The gate's red test is green on the fix, with its attack half unmodified** — only additive disclosure
+assertions appended, its residual-detection `throw` untouched. That was the acceptance condition.
+
+### Negative-control probes — three runs, the new standing practice's first real exercise
+
+1. GSC window check neutered → **2/15 red** (the gate's attack + the new GSC test)
+2. Restored; then GSC window + GA4 window + GSC page-cap slice neutered **together** → **3/25 red**, each
+   failing on the counter or row-count assertion it exists to prove
+3. All restored → clean
+
+Observed: `tsc` clean · `lint:withtenants` **173 files** · the `google/` subtree **92 passed, 4 skipped**
+(the 4 are the pre-existing keycloak-env-gated file).
+
+### The fourth instrument-level defect, and it caught its own
+
+Its first GA4 test filtered only on `channel_group`, so it **read rows left by earlier tests in the same file
+sharing the `propertyId`** — it would have passed on a neighbour's data. This is **§6ay's exact failure mode
+recurring**, and the agent found it in its own work and scoped the query to the dates it seeds. Four instances
+now; the negative-control rule is earning its place.
+
+### Not rounded up
+
+It explicitly refused to claim a clean **full** `src/modules/search` run: Postgres dropped into WAL recovery
+mid-session under four-agent `/dev/shm` pressure. It did **not** restart the container (correct — that would
+destroy the other agents' test databases) and reported the subtree it owns as green in isolation while naming
+the wider run as unobserved. That is the right shape for a partial result.
+
+---
+
+## 6bg · SM-20 · **DEV-VERIFIED** — the search-terms ingest, plus two follow-ups I closed myself
+
+`POST /api/:t/modules/search/search-terms/callback` (webhook) and
+`GET /api/:t/modules/search/campaigns/:id/search-terms` (reader — closes a PENDING line in the BFF contract).
+Auth ordering follows SM-56 exactly: **secret first** (constant-time, fail-closed when unset) → pure body
+validation, which throws before any DB touch → `assertUuid` → Cerbos → **two-level** SM-63-class scope
+resolution (the campaign's own `engagement_id` vs the claimed one; each ad group's own `campaign_id` vs this
+batch's) → atomic upsert, all inside one `withTenants` transaction.
+
+**A second secret, deliberately** (`SEARCH_SEM_CALLBACK_SECRET`): the existing one guards a paid-vendor
+postback, this guards a script inside the *client's own* Ads account. Two external trust boundaries; one shared
+value would mean compromising either grants both.
+
+**Idempotency is schema-level**: `UNIQUE(tenant_id, campaign_id, row_hash)` (migration **0062**), hash rather
+than a tuple because `term` is unbounded caller text — SM-08's precedent, correctly distinguished from
+SM-25b's bounded-taxonomy shape. The forced-race proof is the best-constructed one in this programme so far:
+a test-only `INGEST_RACE_DELAY_MS` widens the admission→write window so two identical requests genuinely
+collide, **plus a negative control** — a hand-written naive check-then-insert competitor run against the same
+live constraint under the same window, verified to throw a real Postgres `23505`. That proves the window is
+real *and* that `ON CONFLICT`, not merely "a constraint exists", is what makes production safe.
+
+Every admission failure — unknown campaign, wrong-engagement campaign, wrong-campaign ad group — throws one
+`SearchTermScopeError` → one 404, proven by **whole-body equality**, so the edge is not an id-existence oracle.
+It correctly takes no `dispatchProviderOp` path and writes no `search_provider_calls` row (asserted, not
+assumed), and labels `cost_minor` as the client's own Google Ads spend — never our metered cost, never summable
+with `cost_usd` (§A3).
+
+It also correctly attributed the only reds in the tree to `providers/*` — a concurrent agent's in-flight work —
+verifying via `git status --porcelain` across **three** independent fresh test databases rather than guessing.
+
+### The two follow-ups it flagged, closed by me
+
+**1 — the `process.env` interim, and the trap inside it.** SM-20 read the secret from `process.env` because
+`config.ts` was outside its ownership, and flagged the move. I moved it to `config.search.semCallbackSecret`
+and updated all four test sites — **because `config` is evaluated once at module load, so leaving the tests
+mutating `process.env` would have left the controller reading `""` forever while the suite stayed green.**
+That is the same mistake that cost nine tests earlier in this programme (§6r-era), and the recurrence is now a
+comment in both files rather than folklore.
+
+**2 — the fail-closed test passed for the wrong reason.** It unset the secret *and* presented an **empty**
+header, so the 401 was produced by the compare, not by the fail-closed branch — it would have stayed green if
+that branch were deleted. Fixed to present the **correct** secret against an unconfigured server, so only
+fail-closed can produce the 401.
+
+Verified by me after both changes: `tsc` clean (excluding a concurrent agent's uncommitted
+`vendor-sandbox/server.ts` errors) · **27/27 green** · and the strengthened test **mutation-probed with the
+realistic fail-open shape** — `if (configured && !secretEquals(...))`, i.e. skip the check when unconfigured,
+rather than merely deleting a clause — which turns it **red at 1 of 27**. `search.controller.ts` confirmed
+byte-identical to its pre-probe state afterwards via `diff -q`.
+
+**This is the fifth instrument-level finding today**, and the first where the test passed for a *plausible*
+wrong reason rather than an accidental one. Worth noting for the negative-control rule: probing by deleting a
+clause would have shown nothing here — only mutating it into the shape a real developer would actually write
+exposed it.
+
+**Still PENDING:** the campaign-level `search_campaign_metrics_daily` half of SM-20's design line (out of this
+ticket's scope, recorded in the contract doc), and the Ads Script artifact itself.
+
+---
+
+## 6bh · SM-66…SM-69 · the driver fail-opens closed — and one **live design question** the fix exposed
+
+**SM-66 (Ahrefs true-up) — DEV-VERIFIED.** Guard is now `Number.isFinite(units) && units > 0`. The
+missing-vs-malformed split is the right call and matches `moneyEnv`'s house precedent: an **absent** header
+leaves the estimate standing (nothing to count); a **present-but-unusable** one is a *different fact* — counted
+in `trueUpHeaderMalformedCount`, logged, never applied to the ledger. It also treats an exact `0` as malformed
+rather than "confirmed $0 charge", consistent with the never-$0-on-the-money-path convention. It widened the
+sandbox harness (`statsUnits`/`ratingUnits` → `number | string`), closing the untestability the audit flagged.
+**Probe:** reverting to `!Number.isNaN` turns **6 of 7** malformed cases red — and it correctly explains the
+7th, `"NaN"`, staying green under either guard. 44/44 unit, 7/7 sandbox over a real socket.
+
+**SM-67 (task_get identity echo) — DEV-VERIFIED**, using SM-63's refuse-as-not-found shape with a message
+byte-identical to a genuinely-unknown id, placed **before** the status-code branches so nothing else of an
+untrusted response is read.
+
+**SM-69 (backlinks target) — DEV-VERIFIED.** Returns the requested `target`, never the vendor's echo — matching
+what Semrush and Ahrefs already do.
+
+**Semrush — recorded limitation, not a fix.** Confirmed from the code that the SERP keyword and backlinks
+target columns are **never requested** (`export_columns` omits them), so there is nothing in the response to
+validate. It correctly declined to manufacture a check against a field we don't receive, and left the
+request-widening as an owner cost decision.
+
+### The fixture-truthfulness cascade — 8 reds, and what they actually meant
+
+The agent refused to edit two files it didn't own and escalated. It was right to, and its diagnosis held up:
+both files' `dfs()` mocks returned a **static canned `task_get` body regardless of which id the URL requested**
+— `STILL_QUEUED` hardcoded `id: "t"`, and one test reused `DELIVERED("cb-task")` to answer a poll for the
+distinct `"cb-task-2"`. **No real vendor answers a poll for one task with another task's identity.** The
+fixtures were always lying; SM-67 merely made the lie visible.
+
+I made both mocks id-aware (`taskGet` may now be a function of the requested path) — **a truthfulness fix, not
+a softening: no assertion changed.** That took **8 reds down to 1**.
+
+### The survivor is a genuine design question, not a fixture bug — OPEN, for the architect
+
+`incurred-cost.test.ts` **AC4** posts a serp op (so `reqs.length === 1`) against a fixture returning **two**
+tasks — `ok-1` accepted, `bad-1` rejected `40501`. SM-68's bound `Math.min(tasks.length, reqs.length)` stops at
+the first, so **the rejection is never seen and never throws.** The test still pins the §6w ordering property
+(the accepted charge recorded *before* the rejection throws), which is now unexercised.
+
+I am not resolving this myself, because two things collide and both are contract-level:
+
+1. **The fixture is also unrealistic** — a 1-task post does not return 2 tasks. So "fix the fixture" may be
+   right again. But the realistic version (post 2, get 2) is not reachable through `dispatchProviderOp`, whose
+   serp op is single-keyword. The AC4 property may not be expressible at this layer at all any more.
+2. **SM-68's disposition may be wrong, and the reason it changed is the concern.** Its first implementation
+   *rejected* on keyword mismatch; it softened to count-and-accept **because 19 tests failed on the
+   `ACCEPTED()` fixture's hardcoded `keyword: "kw"`.** That is production behaviour changed to accommodate an
+   incorrect fixture — the tail wagging the dog. And on the merits it may cut against the doctrine: **§A14's
+   remedy for *identity* is refuse-as-not-found; count-and-disclose is the remedy for *data*.** A keyword is
+   arguably identity, and naming a row with our requested keyword while the vendor says it crawled a different
+   one risks persisting keyword A's SERP under keyword B — precisely the mislabelled-row outcome §6ay and §A14
+   exist to prevent. The bound is unambiguously right; the **precedence** is the open question.
+
+**Also flagged honestly by SM-19:** it ran a blanket `taskkill /F /IM node.exe` and killed another agent's dev
+server on :3005. No ticket lost work (all agents had reported), but it is a real cross-agent hazard worth a
+standing note: kill by PID, never by image name, when agents share a box.
+
+---
+
+## 6bi · Architect rulings — SM-68's echo precedence (record the money, refuse the data), AC4's relocation, Ruling 5 sharpened (2026-07-31, binding)
+
+### Ruling 1 — keyword echo mismatch: **the question conflates two axes; split them.** Charge recording is UPHELD; data admission is OVERRULED to refuse.
+
+The disposition space was argued as bill-vs-reject, and both the audit and the implementer inherited
+that frame — my own §6be remedy text seeded it ("require `t.data.keyword === reqs[i].keyword`
+**before billing**"), and it is wrong on the vendor's own mechanics: **`task_post` charges at
+enqueue.** Whether we record the charge is not a lever we hold; the ledger's job is truth about
+liability, not approval of it. Decomposed, the answer is clean:
+
+1. **Money — record ALWAYS, unchanged.** Every in-bounds, vendor-ACCEPTED task records its charge
+   (`recordIncurredCostUsd(perTask, t.id)`), echo-clean or not. The vendor enqueued and charged it;
+   refusing to record would re-open the SM-50 orphan class (real spend the ledger denies).
+   §A11.1.5's over-statement worry does not apply — enqueued IS charged in the vendor's model; only
+   per-task **rejections** stay unrecorded. Ids are vendor-authoritative and pairing-independent, so
+   recording by `t.id` is correct even when pairing is suspect. The implementer's "the request is
+   what makes billing legitimate" is upheld — for exactly this half.
+2. **Naming — requested value, never the vendor's echo. Unchanged** (SM-69's shape, already right).
+3. **Data admission — OVERRULED: a canonical echo mismatch refuses the data path.** The mismatched
+   task is NOT returned as a `TaskRef` — no `task_get`, no snapshot — and after the loop completes
+   (all charges recorded first), the call **throws naming the echo mismatch**, distinct from a
+   task-rejection message. The keyword is *identity* here, not data: the snapshot is FILED by it,
+   and per-keyword rank history, `rank.dropped` alerts and client reports key on it. Naming a row
+   with keyword A while the vendor states it crawled keyword B is §6ay's mislabelled-row outcome
+   with money attached — and the counter mitigates nothing downstream: it is instance-cumulative
+   and row-invisible; no reader of the snapshot can see it.
+
+**The discriminator, stated once so the next case doesn't relitigate it:** a violated *data*
+constraint (an out-of-window GSC row) impeaches **only that row** — skip it, keep the pull. A
+violated *identity/pairing* constraint impeaches **the addressing scheme**: `postSerpTasks` pairs
+response to request **by position**, and if the echo disagrees at position `i`, every position
+after `i` is equally suspect (one inserted or reordered entry misaligns the whole tail). Positional
+trust is all-or-nothing — which is why the remedy is record-everything-then-throw, not per-task
+skip-and-continue. Through `dispatchProviderOp` the serp op posts one keyword, so in practice the
+"batch" is one task and the throw is a single-task refusal.
+
+**Why refusal is not "throwing away purchased data":** the recorded charge lands as an `incurred`
+row via the §A11 machinery this driver already uses (record → throw), with `vendor_ref = t.id` —
+"money spent, data not in hand, nothing invented" is the *designed* home for exactly this state.
+SM-56's collect edge is the designed retrieval once identity is resolved (operator checks the
+vendor console; SM-67's id check guards the retrieval). The asymmetry mirrors §6bc Ruling 1
+transposed onto money: refusal costs a later collect or a ~$0.0006 re-post; acceptance risks
+keyword B's SERP feeding keyword A's rank history and a false `rank.dropped` alert a client acts
+on. On the money path the expensive direction is the lie, not the re-buy.
+
+**Canonicalize before comparing — this is what makes strict-compare survivable.** Trim + Unicode
+NFC + lowercase + collapse internal whitespace, both sides, as a small named export (the next
+echo-bearing driver reuses it). Vendors restate keywords (case, whitespace) without meaning a
+different task — a raw-only variance is the benign case: **accept, keep the existing counter as
+the diagnostic**. A canonical mismatch is a different word — identity break, refuse per #3. Absent
+echo (`t.data?.keyword` undefined) is no signal, not a mismatch: accept (the bound already handles
+phantom tails). Accepted residual, recorded: two tracked keywords differing only by case/whitespace
+could mask a swap — Google's own query processing is case-insensitive, so their SERPs coincide;
+not guarded.
+
+**Chain of custody, so no one adds a redundant check:** with the echo verified at post and SM-67's
+`task.id === ref.id` at get, keyword↔id↔snapshot is verified end to end. No keyword re-check is
+owed at the `task_get` hop.
+
+### Ruling 2 — the causal order was the defect: **fixture-driven softening is a named, forbidden anti-pattern**
+
+The first implementation had the right disposition and was softened because **19 tests failed on a
+fixture hardcoding `data: { keyword: "kw" }`** — production behaviour changed to green a fixture
+that lies (no real vendor acks keyword X for a posted Y; it is the same lie class as the id-blind
+`dfs()` mocks whose truthfulness fix cleared 7 of 8 reds in §6bh, and the same §4i circularity §A10.5
+warns about). Standing rule: **when a test disagrees with ruled production behaviour, the fixture is
+interrogated first, and production is never weakened to accommodate a fixture that could not occur
+against the real counterparty.** The fix here is the same one §6bh already applied twice: make
+`ACCEPTED()` echo the *posted* keyword (request-body-aware, like the id-aware `taskGet`), and the 19
+greens return honestly. Distinguish the legitimate case: rewriting a test because the *ruled spec*
+changed (AC4 below) is not softening — the §6bh anti-pattern is specifically production yielding to
+an impossible fixture.
+
+### Ruling 3 — AC4: the ordering property is neither moot nor in need of relocation — **it is already relocated**; the dispatch-layer test is repurposed as the bound's probe
+
+Verified in code: `dataforseo.test.ts:401` ("a rejected task in a MIXED response does not stop the
+accepted task's charge from being recorded") is the driver-direct twin — posts 2, receives 2 mixed,
+asserts the accepted charge recorded (`out.usd` = one rate), `refs = ["acc-1"]`, rejection
+propagates. It is realistic (`reqs.length === tasks.length`), it survives the bound, and it pins
+§6w/§A11.1.3's record-before-throw exactly where the property lives: **in the driver**, the only
+layer where a mixed response is expressible now that dispatch's serp op is single-keyword.
+
+The dispatch-layer AC4 (post 1, fixture returns 2) is a fixture no vendor produces — but it is
+precisely the adversarial shape the bound exists for, so it is not deleted: **its assertions flip
+from trusting the phantom to proving the defense.** Rewritten AC4 pins, at dispatch grain: exactly
+ONE charge (`vendor_ref = "ok-1"`), the phantom rejection unreachable — **no** `/task rejected/`
+throw — and `tasksUnmatchedSkippedCount === 1`. Its old red was correct behaviour; its old
+assertion encoded trust in a response tail, which is the defect SM-68 closed. The P5 mutation note
+updates with it: reverting the bound to `tasks.length` must turn the rewritten AC4 red; restoring
+throw-before-record must turn the driver twin red.
+
+Ordering property extended by Ruling 1, and pinned at the driver: **every charge the vendor's ack
+implies — accepted tasks in-bounds, echo-clean or echo-mismatched — is recorded before ANY throw,
+rejection or mismatch.** The driver twin grows a mismatch case: post 2, echoes swapped → both
+charges recorded, zero refs, throw names the echo mismatch.
+
+### Ruling 4 — Ruling 5 is SHARPENED: the negative control must be the **plausible defect**, and a deletion-probe that stays green is a finding, not a pass
+
+§6bg is the decisive instance: deleting `!configured ||` still yields a 401 (the compare against
+the empty expected value refuses anyway) — a **green deletion-probe that proves nothing**, an
+equivalent mutant. Only mutating the guard into the shape a developer would actually write —
+`if (configured && !secretEquals(...))`, skip-the-check-when-unconfigured — went red, and only
+after the test's *input* changed to the one case that distinguishes the branches (the correct
+secret against an unconfigured server). §6bc Ruling 5 clause 1 is amended:
+
+1. **The mutation must be the plausible defect** — the fail-open a person would introduce:
+   skip-check-when-unconfigured, check-then-insert instead of `ON CONFLICT` (§6bg's race test
+   already models this correctly), lock removed, bound reverted to the response's length, `??`
+   default restored. Syntactic deletion is admissible only when it IS the plausible defect.
+2. **A deletion-probe that stays green is itself a finding** — either the clause is dead code or
+   the test's inputs cannot distinguish the guard. Determine which before counting anything;
+   never count an equivalent-mutant green as negative-control evidence.
+3. Clauses 2 (independent witness) and 3 (instruments self-assert) stand unchanged.
+
+Instance count now **five** (§6av, §6ay, §6bb, §6bf's GA4 neighbour-row, §6bg's wrong-reason 401) —
+the two post-adoption ones were caught *by applying the practice*, which is the practice earning
+its keep, not failing.
+
+### Ticket out of these rulings
+
+**SM-70 · SM-68 disposition amendment — senior-be · seat default · holds the remaining red, FIRST
+of the next wave.** Files: `providers/dataforseo.ts` (canonicalizer export; mismatch → refuse data
+path, record-then-throw after the loop; dead `?? vendorKeyword ?? ""` in-bounds fallback removed),
+`providers/dataforseo.test.ts` (ACCEPTED() echoes the posted keyword request-body-aware; driver
+twin + mismatch case; normalization-variance case stays accepted), `providers/incurred-cost.test.ts`
+(AC4 rewritten per Ruling 3; probe-inventory note updated). Done when: (a) driver twin green
+(record-before-throw), its mismatch extension green (both charges recorded, zero refs, mismatch
+named), and the rewritten AC4 green (one charge, no throw, `tasksUnmatchedSkippedCount === 1`) —
+zero reds in `providers/*`; (b) negative controls per the sharpened rule, each named: bound →
+`tasks.length` turns AC4-rewritten red; canonical compare → raw compare turns the
+normalization-variance case red; mismatch-check skipped (`false &&`) turns the swap case red;
+throw-before-record turns the driver twin red; (c) a raw-only echo variance still accepts and only
+increments the counter; absent echo accepts silently; (d) charge for a refused-data task lands as
+an `incurred` row with `vendor_ref` = the task id (asserted through dispatch, the §A11 path).
+
+### Ledger corrections applied to §1
+
+SM-66/67/68/69 had **no §1 rows** — the §6au at-creation rule breached again in the same session
+that pulled SM-23 forward; rows added now (SM-23's sweep should treat this as its regression case).
+SM-68 row records: bound LANDED-quality, disposition amended by SM-70 (this section). SM-64 →
+DEV-VERIFIED §6bf, gate owed · SM-65 → discharged §6be (read-only; its output is SM-66…69 + this
+ruling) · SM-20 → DEV-VERIFIED §6bg (migration 0062), gate owed.
+
+**Open for the owner:** none new. The Semrush request-widening (`Ph`/target columns, §6bh) remains
+the one echo-validation gap that is a cost decision rather than a code defect — it stays with the
+owner.
+
+---
+
+## 6bj · SM-70 · **DEV-VERIFIED** — the tree is green, and no production behaviour was softened to get there
+
+Verified by me independently after its report: `tsc` clean · `vitest run src/modules/search --maxWorkers=2`
+→ **894 passed / 4 skipped · 53 files passed / 1 skipped · zero reds**. The 4 skips are the pre-existing
+keycloak-env-gated file. **The programme has no known red.**
+
+**The three canonicalization outcomes are three, not two** — the distinction the architect said would collapse
+under pressure if not built explicitly:
+
+- **Raw-only variance** (differs as a string, equal after `canonicalizeEchoValue` — trim + NFC + lowercase +
+  collapse, now a named export): accepted, named by the **requested** keyword, counted as the sole diagnostic.
+- **Canonical mismatch**: the id still enters `chargeableTaskIds` (money recorded) but is excluded from
+  `accepted` (no `TaskRef`), with an `identityMismatch` message deliberately distinct from a rejection message.
+- **Absent echo**: no comparison at all. Not a mismatch — no signal is not a violation.
+
+**The money/data split is structural, not conditional.** `chargeableTaskIds` and `accepted` are separate arrays
+built in one pass; the charge-recording loop runs **once, after the full loop, before either throw**. That makes
+"record the money, refuse the data" a property of the shape rather than of remembering to order two statements
+correctly.
+
+**AC4 repurposed exactly as ruled**: fixture kept (1 posted, 2 returned) — it *is* the bound's adversarial
+shape — assertions flipped to prove the defence: resolves `posted` with **no throw**, one ledger row
+`vendor_ref = "ok-1"`, `tasksUnmatchedSkippedCount === 1`.
+
+**And the anti-pattern was avoided the right way round.** `ACCEPTED(ids)` is now request-aware in both files —
+it echoes `reqs[i]?.keyword` instead of a static `"kw"`, with `dfs()` parsing `init.body`, mirroring the
+id-aware `taskGet` pattern. **That is what kept ~19 tests green: a truthful fixture, not a weakened driver.**
+The same 19 greens that previously justified softening now hold with the strict behaviour in place, which is
+the clearest possible demonstration that §6bi Ruling 2 was right.
+
+### Four probes, all plausible-defect shaped per the sharpened rule, all with hash-verified restores
+
+1. bound → `tasks.length` → rewritten AC4 red
+2. canonical → raw compare → the normalization-variance case red
+3. mismatch check → `false && (…)` → **both** the swap case and the pre-existing genuine-mismatch case red
+4. throw moved **before** recording → **both** the rejection-ordering twin and the new mismatch twin red (`+0`
+   instead of the expected charge)
+
+Each file restored and verified byte-identical by **`sha256sum` before and after**, not by eye — the strongest
+restore evidence any ticket in this programme has produced.
+
+### Flagged honestly, and one of them I then closed
+
+It marked **identity-throw precedence over rejection-throw** as its own ordering judgment with **no test
+exercising both together** — labelling it unverified-*by-test* while distinguishing that from
+unverified-*by-reasoning*. I added that test (§6bj.1). It also declined to add a sandbox-level keyword-mismatch
+marker, correctly noting the real sandbox echoes keywords truthfully so no sandbox test was at risk — recorded
+as possible future hardening, not claimed.
+
+---
+
+## 6bk · SM-23 (docs/registration reconcile) — the §6bj tree, an orchestrator `git checkout` accident, SM-19's uncredited frontend, and the ledger sweep
+
+**What happened, stated plainly, because a future reader needs the sequence, not just the current
+state.** After §6bj recorded the tree fully green (894 passed / 4 skipped, zero reds, `providers/*`
+included), the orchestrator ran a destructive `git checkout` and **destroyed the uncommitted
+`providers/dataforseo.ts`** — the single file carrying SM-67/68/69/70's implementation
+(`canonicalizeEchoValue`, the `task.id !== ref.id` refusal, the `Math.min(tasks.length,
+reqs.length)` bound, the money/data split). A rebuild agent was mobilized against the surviving
+test files (which were not touched by the checkout) and, per the orchestrator, is **in flight**.
+
+**What this pass could establish from disk, without running the suites (docs-only scope; running a
+DB-touching vitest file mid-rebuild risks exactly the cross-agent DB-reset hazard §0 warns about,
+so this reconcile did not run one):**
+
+- `git status` shows exactly **one** modified file in the whole repo:
+  `platform-nest/src/modules/search/providers/dataforseo.ts` (1 line changed, uncommitted). Every
+  other file the SM-66…70 wave touched, including all three test files, is clean against `HEAD`.
+- **The committed `HEAD` version of `dataforseo.ts` already contains the SM-70 implementation** —
+  `canonicalizeEchoValue`, `chargeableTaskIds`, `identityMismatchMessage`, the record-then-throw
+  shape — nearly verbatim to §6bj's description. The one committed defect: the canonical-mismatch
+  branch reads `if (false && canonicalizeEchoValue(vendorKeyword) === canonicalizeEchoValue(...))`
+  — a `false &&` guard that unconditionally disables the raw-only-variance acceptance path (every
+  echo mismatch, canonical or not, would be treated as a hard identity break). This is exactly the
+  shape of a **negative-control probe** (§6bc/§6bi Ruling 5's own "mutate into the plausible defect"
+  practice) that was never reverted — not the file being emptied or rolled back to a pre-SM-67
+  state.
+- **The one uncommitted line removes that `false &&`,** restoring the canonical-mismatch/raw-variance
+  split exactly as §6bj describes it.
+- So: the rebuild-in-flight, as of this pass, looks like **one line from done**, not a ground-up
+  redo — but this reconcile did **not** run the suite, did not confirm `tsc`, and did not confirm
+  the negative-control probes still fail the right way. **This is an observation about disk state,
+  not a verification.** Do not read this section as re-establishing SM-67/68/69/70 as DEV-VERIFIED —
+  that status stands or falls on the rebuild agent's own report plus a fresh gate.
+- **Recorded per the user's instruction, without upgrading or writing off:** SM-67/68/69/70 are
+  *implemented*, were *reverted by orchestrator error* (evidenced: the file was uncommitted and the
+  checkout is a destructive op per this repo's own git-safety protocol), and a *rebuild is in
+  flight* (evidenced: the near-complete state above). None of the three is claimed clean.
+
+### SM-19 — real, committed, wired frontend work with no ticket-scoped record at all
+
+Separately from the revert incident: the "known drift" brief for this reconcile claimed SM-19
+"landed DEV-VERIFIED" citing `PaidActionGate`/`ApplyProposalTwins` and "729 UI tests." **That
+specific claim has no §6 citation anywhere in this tracker** — grepped for `PaidActionGate`,
+`ApplyProposalTwins`, and `729`, zero matches outside this section. Per this ticket's own
+discipline (verify before writing, don't promote an unevidenced claim), the row is **not** set to
+DEV-VERIFIED.
+
+What IS verifiable from disk: `platform-ui/src/components/search/PaidActionGate.tsx` (+ `.test.tsx`,
+9 tests) and `ApplyProposalTwins.tsx` (+ `.test.tsx`, 7 tests) exist, are committed at `HEAD`, both
+carry file-header comments self-identifying as SM-19, and are wired live into
+`/departments/[deptId]/rankings/page.tsx` (`PaidActionGate` on the rank-pull projection) and the
+planner page (`ChangeProposalsPanel` renders `ApplyProposalTwins` per approved/applied proposal).
+The "729 tests green" figure is real but belongs to `CHANGELOG.md`'s **app-release** entry
+(`Alpha 01.001.0001a`, platform-ui `0.6.5→0.7.0`) — a whole-repo test count at a release cut, not a
+per-ticket AC verification. `docs/FRONTEND-BFF-CONTRACT.md`'s PENDING table still called both the
+Rankings and Ads Studio console UI "unclaimed" — stale against the same evidence; fixed by this
+pass (see below). **Net: SM-19's row moves from a plainly-wrong bare `TODO` to `IN FLIGHT`, not to
+DEV-VERIFIED** — the work is real, but no one has run its AC against this ticket number, and that
+gap is itself worth naming: a feature can be built and shipped in a release cut while its own
+ticket's ledger row never learns about it.
+
+### The at-creation-row rule, breached a second time
+
+§6au adopted two standing rules after SM-56/59 fell through a bundling gap: every new ticket gets
+its §1 row **at creation**, and a gate section must **name every ticket it covers**. §6bi records
+that SM-66/67/68/69 breached the first rule again — created in §6be with no §1 rows until §6bi
+noticed. **That breach happened in the same session that pulled SM-23 forward to fix exactly this
+class of drift.** The rule is not self-enforcing from a single adoption; it needs a mechanical
+check (e.g., a `/army` mobilization step that refuses to open a new SM-xx without a §1 row already
+present) rather than relying on the next agent's diligence. Recorded here, not fixed in tooling —
+that is outside this ticket's docs-only scope.
+
+### Migration ledger
+
+`migrations/` on disk runs through **`0063_pm_task_assignee_intervals.sql`** (a PM ticket, not
+search) — one past the `0062_search_search_terms.sql` (SM-20) this reconcile's brief called "head."
+Within search-marketing's own numbers, `0060`/`0061`/`0062` (SM-51/25b/20) are all present and
+correctly cited elsewhere in this tracker; the only correction needed was in `MODULES.md`, which
+still enumerated only through `0060` (see below). No doc in this tracker claimed a *platform-wide*
+migration head, so nothing here needed correcting on that specific point — but "head=0062" is not
+accurate for the platform as a whole as of 2026-07-31 and should not be repeated as such.
+
+### Files touched by this pass
+
+`docs/blueprints/seo-sem-execution-tracker.md` (this file — banner, SM-19/23/66-70 rows, this
+section), `docs/modules/MODULES.md` (search-marketing section + registry row), `docs/modules/CHANGELOG.md`
+(new dated entry), `docs/FRONTEND-BFF-CONTRACT.md` (two PENDING rows). No `.ts` file touched, no git
+history-rewriting command run, consistent with this ticket's constraints.
+
+---
+
+## 6bk · Orchestrator error — `dataforseo.ts` destroyed and rebuilt · **RECOVERED**
+
+**What I did.** Mutation-probing a test I had just added, I restored the file with `git checkout -- <path>`
+instead of the `cp`-from-`/tmp` pattern every other probe in this programme used. The working tree is entirely
+uncommitted, so that reverted `providers/dataforseo.ts` to commit `2d64fc2` and **discarded SM-67, SM-68, SM-69
+and SM-70's implementation**. I compounded it by chaining the restore behind `2>/dev/null`, which hid the
+failure until I checked the file. The probe itself was valid and its finding (1 red of 48) stood.
+
+**My damage assessment was also incomplete.** I scoped the loss to the four tickets. The rebuild found a
+**fifth** casualty: `fetchSerpByTaskId` — SM-56's collect surface — had been added to this same file and went
+with it. I had verified `ahrefs.ts`, the sandbox harness and every test file were intact, and they were; I did
+not think to ask what *else* had ever been added to the one file I broke. **"Which tickets touched this file?"
+is the question, not "which tickets was I probing?"** The rebuild restored it as the one-line delegation §6an
+specifies, correctly flagging it as outside its brief rather than folding it in silently.
+
+**Recovered in full.** `tsc` clean · `lint:withtenants` 174 files · `dataforseo.test.ts` **48/48** (verified by
+me) · full tree **895 passed / 4 skipped, zero reds**, run twice by the rebuild and spot-checked by me.
+
+**Six mutation probes**, all plausible-defect shaped, each restore `sha256sum`-verified byte-identical — the
+same hash confirmed **seven times** across the sequence. Notably probe 3 (mismatch flagging disabled) went red
+in **3** places and probe 4 (throw moved before recording) in **3**, so the guards are held by more than one
+test each.
+
+**Why the loss was recoverable, and the standing lesson.** The tests lived in a *different* file, so the
+contract survived and the rebuild had an exact oracle rather than a description. That was luck, not design:
+**nothing in this repository is committed.** The identical slip in a file whose tests share its fate would have
+been unrecoverable. Two changes follow, and the first is already done:
+
+1. A working-tree snapshot now exists outside the repo (scratchpad `wip-snapshot-1102.tar.gz`, 6.2MB, covering
+   `platform-nest/src`, `migrations`, `platform-ui/src` and the blueprints).
+2. **Destructive git commands are banned in every brief** — `checkout`/`restore`/`reset`/`stash`. Probes use
+   `cp` to `/tmp` and restore with `cp`, verified by `sha256sum`. This is now stated in all live briefs.
+
+Committing this work to a branch remains **an owner decision, not taken** — it is the real fix for the exposure
+above, and the snapshot is a stopgap, not a substitute.

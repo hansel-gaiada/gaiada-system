@@ -251,6 +251,45 @@ describe.skipIf(!TEST_URL)("SM-49 Ahrefs — live driver over the vendor sandbox
     }
   });
 
+  // ── SM-66 (tracker §6be.1/§6bc, design addendum §A14.2) — the malformed true-up header, over a REAL
+  // socket and a REAL Postgres ledger row, using the string-widened AhrefsTrueUpScript (SM-66 also
+  // widened `statsUnits`/`ratingUnits` from `number` to `number | string` for exactly this purpose —
+  // a purely numeric field cannot express an empty/whitespace/non-finite header string).
+  it("AC 8 + SM-66: an EMPTY x-api-units-cost-total-actual header leaves the ledger row at its ESTIMATE, "
+    + "never a fabricated $0 — over a real socket, real Postgres", async () => {
+    try {
+      const driver = createAhrefsProviderFromConfig()!;
+      registerProvider(driver);
+      const target = uniqueTarget("sm66-malformed");
+      sandbox.seedAhrefsBacklinks(target, { live: 1, live_refdomains: 1, domain_rating: 5 });
+      // statsUnits="" — a header that arrives present-but-empty; ratingUnits stays unset (absent header
+      // on that call), so only ONE of the two parallel calls carries the anomaly.
+      sandbox.configureAhrefsTrueUp(target, { statsUnits: "" });
+      const eng = await makeEngagement({ backlinks: { enabled: true }, provider: { default: "ahrefs" } });
+
+      const expectedEstimate = (AHREFS_RATES.backlinksStatsBaseUnits + AHREFS_RATES.domainRatingBaseUnits) * RATE;
+      const result = await dispatchProviderOp({ tenantId: tenant, engagementId: eng, propertyId, op: { kind: "backlinks", query: target }, requestedBy: userId });
+
+      // No true-up applied at all (the malformed header AND the absent one both contribute nothing) —
+      // dispatch.ts only advances a row's status to "completed" when `actualCostUsd !== undefined`
+      // (a real correction applied); a malformed header must leave this exactly as "no correction was
+      // ever offered" reads today: status stays "posted", cost stays at the pre-dispatch ESTIMATE,
+      // never a fabricated $0 AND never a false "completed" implying a correction that never happened.
+      expect(result.status).toBe("posted");
+      expect(result.costUsd).toBeCloseTo(expectedEstimate, 9);
+      expect(result.costUsd).toBeGreaterThan(0); // the concrete "never $0" assertion
+
+      const rows = await ledgerRow(eng);
+      expect(rows).toHaveLength(1);
+      expect(rows[0].status).toBe("posted");
+      expect(Number(rows[0].cost_usd)).toBeCloseTo(expectedEstimate, 5);
+      expect(Number(rows[0].cost_usd)).toBeGreaterThan(0);
+      expect(driver.getTrueUpHeaderMalformedCount()).toBeGreaterThanOrEqual(1);
+    } finally {
+      restoreConfig();
+    }
+  });
+
   it("vendor-error-inside (non-2xx) on backlinks propagates as a typed failure, with NO ledger row surviving "
     + "the rolled-back transaction (pinned as current dispatch semantics, not redesigned)", async () => {
     try {

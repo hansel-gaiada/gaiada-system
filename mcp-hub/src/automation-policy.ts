@@ -40,20 +40,13 @@ export const AUTOMATION_ALLOWLIST: Record<string, readonly string[]> = {
   // pm.createDoc / pm.createTask (WD-06, D-4): the report-track sink — a PM doc + review task
   // under the run's project, scoped to wf:report ONLY (invisible to wf:scope/wf:delivery/etc).
   "wf:report": ["pipeline.getRun", "pipeline.updateStage", "pm.createDoc", "pm.createTask", "notify"],
-  // SM-15 n8n flows batch 1 (search-marketing scheduled pulls). search.pullRanks is write:true +
-  // impact:'medium' (design §07/D-5: spending money is a mutation) but is a genuinely REAL,
-  // hub-callable binding (unlike keywordResearch/runAudit/ingestRankResults below, which are
-  // scaffolded for a platform-side gap this workflow set does not fix -- see
-  // automation/workflows/sm-keyword-refresh.json and sm-rank-collect.json's own meta.description).
-  // Listed here anyway so the allow-list entry is ready the moment index.ts wires them, without a
-  // second hub deploy.
-  // approvals.request is required: search.pullRanks is write:true+impact:'medium' (spending
-  // money is a mutation, D14), so every unattended call the D14 gate does not refuse outright
-  // (see minAssurance note above -- it currently refuses ALL of them) would otherwise need to
-  // suspend into a human approval rather than fail outright.
-  "wf:sm-rank-pull": ["search.listEngagements", "search.rankSummary", "search.pullRanks", "approvals.request"],
-  "wf:sm-keyword-refresh": ["search.listEngagements", "search.keywordResearch"],
-  "wf:sm-rank-collect": ["search.ingestRankResults"],
+  // SM-15's search-marketing scheduled-pull entries (wf:sm-rank-pull / wf:sm-keyword-refresh /
+  // wf:sm-rank-collect) are RETIRED (SM-55, architect ruling §6ad/A13): no allow-list entry may
+  // ever give n8n a path to a money-spending tool, full stop. The recurring cadence loop is a
+  // platform-side scheduler job instead (SM-54) — the engagement's own `tool_scope` (toggle +
+  // cadence + budget cap), written by a verified human under `search:scope:write`, is the
+  // standing authorization; enforcement stays at the unchanged dispatch choke-point. Do not
+  // re-add a search.* write tool here for any n8n workflow.
   // WD-26: per-person/project activity digests (daily 17:00 + weekly Fri) over work_activity.
   // projects.get resolves a project's owner (poly-assignee) as the project-digest notify target.
   // workActivity.relink is the LD-16 deterministic relink sweep, called once weekly from this flow.

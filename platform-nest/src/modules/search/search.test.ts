@@ -243,6 +243,38 @@ describe.skipIf(!TEST_URL)("search module (SM-02)", () => {
     expect(customBody.toolScope).toEqual({ rank: { enabled: true, cadence: "monthly", maxKeywords: 5 } });
   });
 
+  // SM-61 (tracker §6au Ruling 1 clause 4, binding): the scope PUT used to validate nothing about
+  // cadence — this same payload shape was accepted before this ticket. Now it 400s naming the field,
+  // and null/absent (the on-demand configuration) is still accepted, with nothing persisted by the
+  // rejected call.
+  it("PUT .../scope 400s an invalid cadence naming the field, and leaves the persisted scope untouched", async () => {
+    const before = await app.inject({ method: "GET", url: `/api/${A}/modules/search/engagements/${engagementId}/scope`, headers: asUser(uA) });
+    const beforeToolScope = (before.json() as { toolScope: Record<string, unknown> }).toolScope;
+
+    const bad = await app.inject({
+      method: "PUT", url: `/api/${A}/modules/search/engagements/${engagementId}/scope`, headers: asUser(uA),
+      payload: { scopePreset: "custom", toolScope: { rank: { enabled: true, cadence: "fortnightly" } } },
+    });
+    expect(bad.statusCode).toBe(400);
+    expect(bad.json().error).toMatch(/tool_scope\.rank\.cadence/);
+    expect(bad.json().error).toMatch(/daily\|weekly\|monthly/);
+
+    const after = await app.inject({ method: "GET", url: `/api/${A}/modules/search/engagements/${engagementId}/scope`, headers: asUser(uA) });
+    expect((after.json() as { toolScope: Record<string, unknown> }).toolScope).toEqual(beforeToolScope);
+  });
+
+  it("PUT .../scope ACCEPTS an explicit null cadence — the on-demand configuration, never an error", async () => {
+    const res = await app.inject({
+      method: "PUT", url: `/api/${A}/modules/search/engagements/${engagementId}/scope`, headers: asUser(uA),
+      payload: { scopePreset: "custom", toolScope: { backlinks: { enabled: true, cadence: null } } },
+    });
+    expect(res.statusCode).toBe(200);
+    const scope = await app.inject({ method: "GET", url: `/api/${A}/modules/search/engagements/${engagementId}/scope`, headers: asUser(uA) });
+    expect((scope.json() as { toolScope: Record<string, unknown> }).toolScope).toEqual({
+      backlinks: { enabled: true, cadence: null },
+    });
+  });
+
   it("also updates providerBudgetUsd via the scope endpoint", async () => {
     const res = await app.inject({
       method: "PUT", url: `/api/${A}/modules/search/engagements/${engagementId}/scope`, headers: asUser(uA),

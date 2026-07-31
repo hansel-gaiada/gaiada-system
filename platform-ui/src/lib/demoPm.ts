@@ -113,6 +113,10 @@ let tasks: PmTask[] = [
   mkTask("t-web2-b", "p-web-2", "Build offline sync", "in_progress", "high", person("u-dev"), [sub("s1", "Local cache", true), sub("s2", "Conflict resolution", false)], "m-4", "2026-08-01", "Ship offline-first data sync for the mobile client.", "2026-07-18", 480, ["t-web2-a"]),
   mkTask("t-web2-c", "p-web-2", "Push notifications spike", "todo", "normal", person("demo-hansel"), [], "m-4", "2026-08-05", "Spike push notification delivery + opt-in flow.", "2026-07-22", 180, []),
 ];
+// TR-32: seed one task with a real contributor (owner u-dev stays outcome-credited;
+// demo-hansel logged hours here but isn't the owner) so the demo shows the populated,
+// visually-distinct owner-vs-contributor state out of the box, not just the empty one.
+tasks.find((t) => t.id === "t-4")!.contributors = [{ userId: "demo-hansel", name: MEMBERS["demo-hansel"] }];
 
 // ---- tags (P2-02) ----
 // Per-project registry — `Tag` itself carries no projectId (see lib/pm.ts), so
@@ -276,7 +280,11 @@ function mkTask(id: string, projectId: string, title: string, status: TaskStatus
   const projectName = projects.find((p) => p.id === projectId)?.name ?? projectId;
   const progress = subtasks.length > 0 ? taskProgressFromSubtasks(subtasks) : status === "done" ? 100 : status === "in_progress" ? 40 : 0;
   const codes = taskDisplayCode(projectId, nextTaskSeq(projectId)); // WD-28: allocate this project's next seq
-  return { id, projectId, projectName, title, description, status, priority, progress, assignee, subtasks, milestoneId, startDate, dueDate, estimateMinutes, loggedMinutes: 0, dependsOn, tags: [], customFields, updatedAt: "2026-07-15T09:00:00Z", recurrence, ...codes };
+  // TR-32: seeded with an empty list (never omitted) — DEMO_MODE always has the
+  // TR-02 column, matching a real (non-stale) backend. The `undefined` degrade
+  // path (Contributors.tsx) is exercised by unit tests against a bare PmTask
+  // literal that omits the field entirely, not by this fixture store.
+  return { id, projectId, projectName, title, description, status, priority, progress, assignee, subtasks, milestoneId, startDate, dueDate, estimateMinutes, loggedMinutes: 0, dependsOn, tags: [], customFields, updatedAt: "2026-07-15T09:00:00Z", recurrence, contributors: [], ...codes };
 }
 
 // Roll seeded time logs into each task's loggedMinutes.
@@ -817,6 +825,7 @@ export function pmDemo(method: string, p: string, search: URLSearchParams, body?
       tags: [...orig.tags],
       customFields: { ...orig.customFields },
       updatedAt: stamp(),
+      contributors: [], // TR-32/backend pm.controller.ts: contributors are deliberately NOT copied
       ...taskDisplayCode(orig.projectId, nextTaskSeq(orig.projectId)), // WD-28: fresh seq, never the source's
     };
     tasks.push(copy);
@@ -905,6 +914,22 @@ function patchTask(t: PmTask, b: Record<string, unknown>): { id: string; dueDate
     if (s) s.done = !s.done;
   }
   if (typeof b.removeSubtask === "string") t.subtasks = t.subtasks.filter((x) => x.id !== b.removeSubtask);
+  // ---- contributors (TR-02 backend §3.1, TR-32 FE wiring) — zero or more PERSONS,
+  // logged-hours only, never outcome-credited. Mirrors pm.controller.ts's ops exactly:
+  // `addContributor` validates the id is a known demo member (its "active tenant
+  // member" check), is idempotent (no duplicate row), and `removeContributor` is a
+  // plain filter. `t.contributors` is always an array in this store (mkTask seeds
+  // `[]`) — the `undefined`-degrade path is a pure-UI concern, not a store concern.
+  if (typeof b.addContributor === "string" && b.addContributor && MEMBERS[b.addContributor]) {
+    const uid = b.addContributor;
+    t.contributors ??= [];
+    if (!t.contributors.some((c) => c.userId === uid)) {
+      t.contributors.push({ userId: uid, name: MEMBERS[uid] });
+    }
+  }
+  if (typeof b.removeContributor === "string") {
+    t.contributors = (t.contributors ?? []).filter((c) => c.userId !== b.removeContributor);
+  }
   if (Array.isArray(b.tags)) t.tags = b.tags as string[]; // already validated by the caller
   // Custom fields (P2-03, D17 framework reuse): the real backend validates against
   // the tenant's registry; demoPm can't import demoFixtures' CUSTOM_FIELDS (one-way
@@ -943,6 +968,7 @@ function patchTask(t: PmTask, b: Record<string, unknown>): { id: string; dueDate
     subtasks: t.subtasks.map((s) => ({ ...s, done: false })), milestoneId: t.milestoneId,
     startDate: next.startDate, dueDate: next.dueDate, estimateMinutes: t.estimateMinutes, loggedMinutes: 0,
     dependsOn: [], tags: [...t.tags], customFields: { ...t.customFields }, updatedAt: stamp(), recurrence: t.recurrence,
+    contributors: [], // TR-32: a spawned occurrence starts with no contributors, same as duplicate
     ...taskDisplayCode(t.projectId, nextTaskSeq(t.projectId)), // WD-28: a spawned occurrence is a real new task
   };
   tasks.push(child);

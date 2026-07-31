@@ -62,7 +62,7 @@ describe("toolkitFor", () => {
       "", // Home
       "projects", "board", "timeline", "charts", "activity", // Work (generic)
       "engagements", "ledger", "reports",
-      "audit", "keywords", "rankings", "briefs", "ai-visibility",
+      "audit", "keywords", "rankings", "gsc-ga4", "briefs", "ai-visibility",
       "planner", "ads", "search-terms", "pacing",
       "connections",
     ]);

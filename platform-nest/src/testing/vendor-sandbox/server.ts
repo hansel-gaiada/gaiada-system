@@ -65,6 +65,18 @@ export const DFS_TASK_REJECTED_MARKER = "sm49-task-error";
 export const DFS_ENVELOPE_ERROR_MARKER = "sm49-envelope-error";
 export const SEMRUSH_ERROR_MARKER = "sm49-error";
 export const AHREFS_ERROR_MARKER = "sm49-error";
+// SM-67 (tracker §6be/§6bc, §A14.2 refuse-as-not-found) — a keyword containing this marker gets its
+// task_get answer echoed back under a DIFFERENT `id` than the one task_post minted and the driver
+// requested. Deterministic ids alone (taskIdFor) can never express this: the sandbox otherwise ALWAYS
+// echoes the id it was asked for, which is exactly why the audit called this axis untestable via the
+// existing harness — proving dataforseo.ts's identity check needs a harness that can lie about it.
+export const DFS_TASK_ID_MISMATCH_MARKER = "sm67-id-mismatch";
+// SM-68 (tracker §6be/§6bc, billing-adjacent) — a task_post request containing a keyword with this
+// marker gets ONE extra, wholly UNREQUESTED task appended to the response's `tasks` array — modelling
+// a vendor/intermediary response longer than what was posted (a duplicated array entry, a proxy
+// replay). Structurally impossible to express by seeding a single row/keyword, since the whole point
+// is a response entry with NO corresponding request entry at all.
+export const DFS_EXTRA_TASK_MARKER = "sm68-extra-task";
 
 export interface VendorSandboxCredentials {
   dataforseo: { login: string; password: string };
@@ -73,10 +85,19 @@ export interface VendorSandboxCredentials {
 }
 
 export interface AhrefsTrueUpScript {
-  /** x-api-units-cost-total-actual to set on the backlinks-stats response for this target. */
-  statsUnits?: number;
-  /** x-api-units-cost-total-actual to set on the domain-rating response for this target. */
-  ratingUnits?: number;
+  /** x-api-units-cost-total-actual to set on the backlinks-stats response for this target.
+   *
+   *  SM-66 (tracker §6be.1/§6bc): widened from `number` to `number | string` so a test can inject the
+   *  exact vendor/intermediary anomaly this ticket's driver fix guards against — an empty, whitespace,
+   *  negative, or non-finite header STRING — which a purely numeric field structurally cannot express
+   *  (`Number` can't hold `""` or `"   "`). `String(...)` in the handler below is a no-op for an
+   *  already-string value, so every existing numeric caller is unaffected byte-for-byte. This is
+   *  exactly the harness-is-the-gap class §6be.1/§A10.5 names: a green sandbox run had validated our
+   *  code against our own model of the vendor, and the model itself couldn't say "malformed". */
+  statsUnits?: number | string;
+  /** x-api-units-cost-total-actual to set on the domain-rating response for this target. Same SM-66
+   *  widening as `statsUnits` above. */
+  ratingUnits?: number | string;
   /** Artificial delay (ms) before the domain-rating response resolves, for this target — lets a test
    *  force two concurrent getBacklinkSummary() calls' internal HTTP calls to interleave (AC 8's
    *  concurrency proof), the same technique ahrefs.test.ts's own racing test uses. */
@@ -99,7 +120,11 @@ export interface VendorSandbox {
   seedDfsVolumeRow(keyword: string, row: KeywordVolumeRow): void;
   seedAhrefsVolumeRow(keyword: string, row: KeywordsExplorerRow): void;
   /** Seed the row a backlinks pull returns for one target. */
-  seedDfsBacklinks(target: string, row: { backlinks: number; referring_domains: number; rank: number }): void;
+  /** `row.target`, when provided, is echoed back INSTEAD of the requested target — SM-69's harness
+   *  widening for a vendor-echo-identity mismatch (see `dfsBacklinks`'s own doc comment above). Omit
+   *  it (the default, every existing caller) to keep today's byte-for-byte behaviour: the requested
+   *  target echoed correctly. */
+  seedDfsBacklinks(target: string, row: { target?: string; backlinks: number; referring_domains: number; rank: number }): void;
   seedAhrefsBacklinks(target: string, row: { live: number; live_refdomains: number; domain_rating: number }): void;
   /** Semrush fixtures are rendered TEXT, not structured rows (the vendor's own wire format) — seed
    *  the exact line(s) a given phrase/target should return. Falls back to the shared fixture
@@ -157,6 +182,10 @@ interface DfsTaskState {
   readyAfterPolls: number;
   neverReady: boolean;
   rejected: boolean;
+  /** SM-67 — when true, the ready task_get answer's `id` field is a DIFFERENT string than the taskId
+   *  this state is keyed by (and than the id the driver originally requested), modelling a vendor/
+   *  intermediary echoing the wrong task under the id we asked for. */
+  idMismatch: boolean;
 }
 
 /** Deterministic (djb2), never random — the sandbox must behave identically across two consecutive
@@ -186,7 +215,13 @@ export async function startVendorSandbox(creds: VendorSandboxCredentials): Promi
   let semrushPhraseThese: string | undefined;
 
   const dfsVolumeRows = new Map<string, KeywordVolumeRow>();
-  const dfsBacklinks = new Map<string, { backlinks: number; referring_domains: number; rank: number }>();
+  // SM-69 (tracker §6be/§6bc) — `target` is OPTIONAL and, when seeded, deliberately DIFFERENT from the
+  // key this row is stored under: the handler below spreads `seeded` AFTER the request's own `target`
+  // (`{ target, ...seeded }`), so a seeded `target` field wins and echoes a MISMATCHED value — the
+  // vendor-echo-identity anomaly dataforseo.ts's getBacklinkSummary fix must not adopt. Without this
+  // seeding capability the sandbox always echoes the requested target correctly (line below's default
+  // has no `target` key at all), which is exactly why this axis was unverifiable via the harness before.
+  const dfsBacklinks = new Map<string, { target?: string; backlinks: number; referring_domains: number; rank: number }>();
   const ahrefsVolumeRows = new Map<string, KeywordsExplorerRow>();
   const ahrefsBacklinks = new Map<string, { live: number; live_refdomains: number; domain_rating: number }>();
 
@@ -218,7 +253,7 @@ export async function startVendorSandbox(creds: VendorSandboxCredentials): Promi
         const keyword = String(r.keyword);
         const taskId = taskIdFor(keyword);
         if (keyword.includes(DFS_TASK_REJECTED_MARKER)) {
-          dfsTasks.set(taskId, { keyword, pollsSeen: 0, readyAfterPolls: 0, neverReady: false, rejected: true });
+          dfsTasks.set(taskId, { keyword, pollsSeen: 0, readyAfterPolls: 0, neverReady: false, rejected: true, idMismatch: false });
           return taskRejectedEntry({ taskId });
         }
         dfsTasks.set(taskId, {
@@ -227,9 +262,21 @@ export async function startVendorSandbox(creds: VendorSandboxCredentials): Promi
           readyAfterPolls: keyword.includes(DFS_NEVER_READY_MARKER) ? Number.POSITIVE_INFINITY : isLive ? 0 : 2,
           neverReady: keyword.includes(DFS_NEVER_READY_MARKER),
           rejected: false,
+          idMismatch: keyword.includes(DFS_TASK_ID_MISMATCH_MARKER),
         });
         return taskCreatedEntry({ taskId, keyword });
       });
+      // SM-68 — one keyword in the batch carrying this marker is enough to make the sandbox append a
+      // WHOLLY UNREQUESTED extra task to the response, modelling a vendor/intermediary response longer
+      // than what was posted. The phantom task is a real, retrievable task_get state (so a driver that
+      // (wrongly) tried to collect it wouldn't hit a 404 and mask the real bug) — it is simply not one
+      // of `reqs`.
+      if (reqs.some((r) => typeof r.keyword === "string" && r.keyword.includes(DFS_EXTRA_TASK_MARKER))) {
+        const phantomKeyword = `sm68-phantom-unrequested-task-${tasks.length}`;
+        const phantomId = taskIdFor(phantomKeyword);
+        dfsTasks.set(phantomId, { keyword: phantomKeyword, pollsSeen: 0, readyAfterPolls: 0, neverReady: false, rejected: false, idMismatch: false });
+        tasks.push(taskCreatedEntry({ taskId: phantomId, keyword: phantomKeyword }));
+      }
       sendJson(res, 200, { status_code: 20000, status_message: "Ok.", tasks });
       return;
     }
@@ -252,7 +299,12 @@ export async function startVendorSandbox(creds: VendorSandboxCredentials): Promi
         sendJson(res, 200, { status_code: 20000, status_message: "Ok.", tasks: [taskPendingEntry({ taskId })] });
         return;
       }
-      sendJson(res, 200, { status_code: 20000, status_message: "Ok.", tasks: [taskReadyEntry({ taskId, keyword: state.keyword })] });
+      // SM-67 — echo a DIFFERENT id than the one just looked up by when idMismatch was scripted at
+      // task_post time. The lookup above still succeeds (real DFS would also route by the URL's
+      // path-segment id, then return whatever it thinks that task is) — only the response BODY's own
+      // `id` field lies, which is the one field dataforseo.ts's fix must catch.
+      const readyId = state.idMismatch ? `${taskId}-vendor-swapped` : taskId;
+      sendJson(res, 200, { status_code: 20000, status_message: "Ok.", tasks: [taskReadyEntry({ taskId: readyId, keyword: state.keyword })] });
       return;
     }
 

@@ -20,6 +20,7 @@
 // paths and item counts reach the ledger/spans.
 import { config } from "../../../config";
 import {
+  recordIncurredCostUsd,
   type AiVisibilityQuery,
   type AiVisibilityResult,
   type BacklinkSummary,
@@ -32,6 +33,15 @@ import {
   type SerpResult,
   type TaskRef,
 } from "./types";
+
+// ── SM-70 (tracker §6bi, design addendum §A14.5) — canonicalize an echoed value before comparing it
+// against what was requested. Trim + Unicode NFC + lowercase + collapse internal whitespace: vendors
+// restate keywords (case, whitespace) without meaning a different task, and this is what makes a
+// strict compare survivable — a RAW-only variance is benign vendor restatement, a CANONICAL mismatch
+// is a different identity. Named export because the next echo-bearing driver reuses it (§6bi).
+export function canonicalizeEchoValue(value: string): string {
+  return value.trim().normalize("NFC").toLowerCase().replace(/\s+/g, " ");
+}
 
 // ── Published rate table (foundation §8a, DataForSEO 2026) ──────────────────────────────────────────
 // SERP:          Standard $0.0006/task · Live $0.002/task
@@ -95,6 +105,35 @@ export class DataForSeoProvider implements SearchDataProvider {
   private readonly opts: Required<Omit<DataForSeoOptions, "fetchImpl" | "sleepImpl">> &
     Pick<DataForSeoOptions, "fetchImpl" | "sleepImpl">;
 
+  // ── SM-68/SM-70 diagnostic counters (design addendum §A14.2 skip+count+disclose) ──────────────────
+  // Cumulative for the life of this instance, read via the getters below — the same pattern ahrefs.ts
+  // uses for trueUpHeaderMalformedCount, so a test or a future SM-41G surface reads these directly off
+  // the driver rather than through a second parallel counter that could drift.
+
+  /** SM-68 — an in-bounds-response entry beyond `reqs.length` (an unrequested phantom the vendor's own
+   *  response length would have trusted). Skipped, never billed. */
+  private tasksUnmatchedSkippedCount = 0;
+  getTasksUnmatchedSkippedCount(): number {
+    return this.tasksUnmatchedSkippedCount;
+  }
+
+  /** SM-68/SM-70 — the vendor's `data.keyword` echo differed from the raw string we requested, for an
+   *  in-bounds ACCEPTED task. Counted whenever the raw strings differ, regardless of whether
+   *  `canonicalizeEchoValue` later judges the difference benign (raw-only variance, still accepted) or
+   *  a genuine identity break (canonical mismatch, refused — see postSerpTasks). */
+  private keywordEchoMismatchCount = 0;
+  getKeywordEchoMismatchCount(): number {
+    return this.keywordEchoMismatchCount;
+  }
+
+  /** SM-69 — the backlinks vendor echoed a `target` different from the one requested. The requested
+   *  value is always what's returned; this counter is the disclosure that the vendor's own string
+   *  disagreed. */
+  private backlinksTargetMismatchCount = 0;
+  getBacklinksTargetMismatchCount(): number {
+    return this.backlinksTargetMismatchCount;
+  }
+
   constructor(opts: DataForSeoOptions) {
     this.opts = {
       pollAttempts: 10,
@@ -153,18 +192,109 @@ export class DataForSeoProvider implements SearchDataProvider {
     const res = await this.call<unknown>(path, body);
     assertOk(res, "serp task_post");
 
-    return (res.tasks ?? []).map((t, i) => {
+    const tasks = res.tasks ?? [];
+    // SM-68 (tracker §6be/§6bh, design addendum §A14.2) — bound the loop to the SMALLER of the two
+    // lengths, NEVER the response's own length: an over-long response is an unrequested phantom tail,
+    // skipped and counted, never billed.
+    const bound = Math.min(tasks.length, reqs.length);
+    if (tasks.length > bound) {
+      this.tasksUnmatchedSkippedCount += tasks.length - bound;
+    }
+
+    // SM-70 (tracker §6bi, design addendum §A14.5) — money and data are built as TWO SEPARATE ARRAYS
+    // in ONE pass, so "record the money, refuse the data" is a property of the shape rather than of
+    // remembering to order two statements correctly. `chargeableTaskIds` holds every in-bounds
+    // VENDOR-ACCEPTED task's id (echo-clean or canonically mismatched — the vendor enqueued and
+    // charged it either way); `accepted` holds only the TaskRefs this call actually returns, which
+    // EXCLUDES a canonical identity mismatch.
+    const chargeableTaskIds: string[] = [];
+    const accepted: TaskRef[] = [];
+    let rejectionMessage: string | undefined;
+    let identityMismatchMessage: string | undefined;
+
+    for (let i = 0; i < bound; i++) {
+      const t = tasks[i];
       if (t.status_code >= 40000) {
-        throw new Error(`dataforseo serp task rejected: ${t.status_code} ${t.status_message ?? ""}`.trim());
+        // Vendor-side rejection: task_post only charges what it enqueues, so a rejected task is never
+        // charged — simply excluded from chargeableTaskIds. Keep the FIRST rejection's message, but
+        // keep scanning: every remaining accepted task's charge must still be recorded (§6bi Ruling 1/3).
+        if (!rejectionMessage) {
+          rejectionMessage = `dataforseo serp task rejected: ${t.status_code} ${t.status_message ?? ""}`.trim();
+        }
+        continue;
       }
-      return { id: t.id, keyword: (t.data?.keyword as string) ?? reqs[i]?.keyword ?? "" };
-    });
+
+      // Vendor ACCEPTED (enqueued) this task — charged unconditionally, echo-clean or not
+      // (§A14.5 Money: "every charge the vendor's acknowledgement implies is recorded").
+      chargeableTaskIds.push(t.id);
+
+      const vendorKeyword = t.data?.keyword as string | undefined;
+      if (vendorKeyword === undefined) {
+        // No echo at all — no signal, not a mismatch (§6bi Ruling 1). Positional trust, unchanged
+        // pre-existing fallback.
+        accepted.push({ id: t.id, keyword: reqs[i].keyword });
+        continue;
+      }
+      if (vendorKeyword === reqs[i].keyword) {
+        // Byte-identical echo — the ordinary path, untouched.
+        accepted.push({ id: t.id, keyword: reqs[i].keyword });
+        continue;
+      }
+
+      // The raw strings differ — counted regardless of what canonicalizing decides below (this
+      // counter's meaning: "the vendor's echo did not match verbatim").
+      this.keywordEchoMismatchCount++;
+      if (canonicalizeEchoValue(vendorKeyword) === canonicalizeEchoValue(reqs[i].keyword)) {
+        // Raw-only variance (case/whitespace/NFC) — vendor restatement, not identity. Accept, named
+        // from the REQUESTED keyword, never the vendor's (§6bi Ruling 1 naming precedence, SM-69's shape).
+        accepted.push({ id: t.id, keyword: reqs[i].keyword });
+        continue;
+      }
+
+      // Canonical mismatch — a DIFFERENT identity. §A14.5: refuse the data path (no TaskRef); the
+      // charge above already stands. Keep the FIRST mismatch message, keep scanning so every
+      // remaining in-bounds task's charge is still recorded before the throw below.
+      if (!identityMismatchMessage) {
+        identityMismatchMessage =
+          `dataforseo serp task keyword echo mismatch: requested "${reqs[i].keyword}", vendor echoed "${vendorKeyword}"`;
+      }
+    }
+
+    // §A14.5 / §6bi Ruling 3: every charge the vendor's acknowledgement implies is recorded ONCE,
+    // after the full loop, BEFORE either throw below — never interleaved with the throws, so "record
+    // the money" can never be skipped by an early return.
+    const perTaskRate = this.opts.queue === "live" ? DFS_RATES.serpLivePerTask : DFS_RATES.serpStandardPerTask;
+    for (const id of chargeableTaskIds) {
+      recordIncurredCostUsd(perTaskRate, id);
+    }
+
+    // Precedence (§6bi, binding): an identity mismatch impeaches the WHOLE positional addressing
+    // scheme; a rejection impeaches only one task. The more severe fact is reported first.
+    if (identityMismatchMessage) {
+      throw new Error(identityMismatchMessage);
+    }
+    if (rejectionMessage) {
+      throw new Error(rejectionMessage);
+    }
+
+    return accepted;
   }
 
   async fetchSerpResults(refs: TaskRef[]): Promise<SerpResult[]> {
     const out: SerpResult[] = [];
     for (const ref of refs) out.push(await this.fetchOneSerp(ref));
     return out;
+  }
+
+  /** SM-56 (design addendum §A11.1.4, tracker §6an) — THE COLLECT SURFACE. A one-line delegation to
+   *  the existing private `fetchOneSerp` (task_get, bounded 40602 poll): the collect path is the
+   *  retrieval half with the posting half structurally absent from the call graph — there is no
+   *  `postSerpTasks` call anywhere on this path, so no new vendor charge can ever be created here, and
+   *  no `recordIncurredCostUsd` call exists in this method either (the money was already declared at
+   *  the ORIGINAL post's billing point; a second declaration here would double-count it). SM-67's id
+   *  check inside `fetchOneSerp` protects this path too, for free. */
+  async fetchSerpByTaskId(ref: TaskRef): Promise<SerpResult> {
+    return this.fetchOneSerp(ref);
   }
 
   private async fetchOneSerp(ref: TaskRef): Promise<SerpResult> {
@@ -174,6 +304,13 @@ export class DataForSeoProvider implements SearchDataProvider {
       const res = await this.call<{ items?: unknown[] }>(`/v3/serp/google/organic/task_get/advanced/${ref.id}`);
       assertOk(res, "serp task_get");
       const task = res.tasks?.[0];
+      // SM-67 (tracker §6be/§6bc, design addendum §A14.2 refuse-as-not-found) — the response's OWN id
+      // must match what we asked for, checked BEFORE anything else about an untrusted response is
+      // read (before the 40602/status-code branches below). Byte-identical to a genuinely-unknown id
+      // so a caller cannot use this edge as an id-existence oracle.
+      if (task && task.id !== ref.id) {
+        throw new Error(`dataforseo serp task_get failed: 40400 Task Not Found.`);
+      }
       // 40602 = "task in queue" — the expected Standard-queue answer until the crawl completes.
       if (task && task.status_code === 40602) {
         await this.sleep(this.opts.pollIntervalMs);
@@ -238,8 +375,14 @@ export class DataForSeoProvider implements SearchDataProvider {
     }>("/v3/backlinks/summary/live", [{ target, internal_list_limit: 1, backlinks_status_type: "live" }]);
     assertOk(res, "backlinks summary");
     const r = res.tasks?.[0]?.result?.[0];
+    // SM-69 (tracker §6be/§6bc, design addendum §A14.2 skip+count+disclose) — ALWAYS return the
+    // REQUESTED target, never the vendor's echo. A present-and-differing echo is counted/disclosed
+    // rather than silently adopted.
+    if (r?.target !== undefined && r.target !== target) {
+      this.backlinksTargetMismatchCount++;
+    }
     return {
-      target: r?.target ?? target,
+      target,
       backlinks: r?.backlinks ?? 0,
       refDomains: r?.referring_domains ?? 0,
       authorityScore: r?.rank,

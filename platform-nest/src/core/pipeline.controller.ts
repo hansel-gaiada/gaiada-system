@@ -157,7 +157,8 @@ export class PipelineController {
           [newId(), tenantId, id, s.track, s.name, s.status ?? "pending", s.artifactRef ?? null, s.confidence ?? null, config.originSite],
         );
       }
-      await emitEvent(c, tenantId, "pipeline_run", id, "pipeline.run.created", { sourceMeetingId: sourceMeetingId ?? null, title: title ?? null });
+      // TR-31: actorId -> work_activity.actor_user_id + an EXACT person link (work-activity-linker.ts rule a).
+      await emitEvent(c, tenantId, "pipeline_run", id, "pipeline.run.created", { sourceMeetingId: sourceMeetingId ?? null, title: title ?? null, actorId: req.principal.userId });
       return { id, deduped: false };
     });
   }
@@ -187,7 +188,8 @@ export class PipelineController {
         [runId, body?.status ?? null],
       );
       if (res.rowCount === 0) return null;
-      await emitEvent(c, tenantId, "pipeline_run", runId, "pipeline.run.updated", { status: res.rows[0].status });
+      // TR-31: actorId -> work_activity.actor_user_id + an EXACT person link.
+      await emitEvent(c, tenantId, "pipeline_run", runId, "pipeline.run.updated", { status: res.rows[0].status, actorId: req.principal.userId });
       return res.rows[0];
     });
     if (!updated) throw new NotFoundException("run not found");

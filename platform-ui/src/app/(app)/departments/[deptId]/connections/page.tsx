@@ -4,12 +4,16 @@ import { getMe } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
 import { can } from "@/lib/rbac";
 import { getDepartment } from "@/lib/departments";
+import { toolkitFor } from "@/lib/deptToolkits";
 import { listConnections, findConnection } from "@/lib/connections";
 import { listClaudeSeats, mySeat } from "@/lib/claudeSeats";
+import { listClients } from "@/lib/entities";
+import { listGoogleConnections, listProperties } from "@/lib/searchMarketing";
 import { Card } from "@/components/ui";
 import { TeachState } from "@/components/departments/TeachState";
 import { ConnectionsPanel } from "@/components/departments/ConnectionsPanel";
 import { TeamConnectionsGrid, type TeamConnectionRow } from "@/components/departments/TeamConnectionsGrid";
+import { GoogleConnectionsPanel } from "@/components/search/GoogleConnectionsPanel";
 import "@/components/departments/departments.css";
 import {
   connectAction, updateConnectionAction, revokeConnectionAction,
@@ -17,6 +21,9 @@ import {
 } from "./actions";
 
 type Params = Promise<{ deptId: string }>;
+// Next 15: searchParams is async — carries the Google OAuth callback's coarse outcome flag
+// (app/api/search/google/callback/route.ts's own redirect).
+type SearchParams = Promise<{ googleOAuth?: string; googleOAuthDetail?: string }>;
 
 // Connections — GitHub / Google Drive / Claude-seat links (F1 §12, C1 §12a).
 // "My connections" is self-service and person-scoped (not department-scoped
@@ -27,7 +34,7 @@ type Params = Promise<{ deptId: string }>;
 // Every read degrades on its own (WSUX-6's `unavailable` convention) so a
 // pre-redeploy 404 on the running backend renders a clean banner + empty
 // "not connected" rows instead of crashing the tab.
-export default async function DepartmentConnectionsPage({ params }: { params: Params }) {
+export default async function DepartmentConnectionsPage({ params, searchParams }: { params: Params; searchParams: SearchParams }) {
   const userId = await getSessionUserId();
   if (!userId) redirect("/login");
   const me = await getMe(userId);
@@ -39,6 +46,8 @@ export default async function DepartmentConnectionsPage({ params }: { params: Pa
   if (!dept) notFound();
 
   const isAdmin = can(me, "company.manage", tenant);
+  const isSeo = toolkitFor(dept.name).slug === "seo";
+  const sp = await searchParams;
 
   const [myConnections, mySeats] = await Promise.all([
     listConnections(userId, tenant, { owner: "me" }),
@@ -76,6 +85,17 @@ export default async function DepartmentConnectionsPage({ params }: { params: Pa
   const unmapSeat = unmapSeatAction.bind(null, tenant, deptId);
   const adminMapSeat = adminMapSeatAction.bind(null, tenant, deptId);
 
+  // SM-25a — Google (Search Console/GA4/Ads) connections, SEO department only (the "Connections gap"
+  // FRONTEND-BFF-CONTRACT.md §14 records: "the SEO console's Connections tab still shows only GitHub
+  // + Drive"). Company-level, not person-level, unlike the GitHub/Drive rows above — a Google
+  // connection belongs to a CLIENT (`clientId`), not the logged-in user, so it is fetched once for
+  // the whole tenant rather than per-person. `can("search.manage")` gates the write half only; every
+  // signed-in member of this department can still SEE which accounts are linked.
+  const canManageGoogle = can(me, "search.manage", tenant);
+  const [googleConnections, searchClients, searchProperties] = isSeo
+    ? await Promise.all([listGoogleConnections(userId, tenant), listClients(userId, tenant), listProperties(userId, tenant)])
+    : [[], [], []];
+
   return (
     <>
       <Card title="My connections">
@@ -108,6 +128,21 @@ export default async function DepartmentConnectionsPage({ params }: { params: Pa
           ) : (
             <TeamConnectionsGrid rows={teamRows} onMapSeat={adminMapSeat} />
           )}
+        </Card>
+      )}
+
+      {isSeo && (
+        <Card title="Google (Search Console / GA4 / Ads)" style={{ marginTop: 16 }}>
+          <GoogleConnectionsPanel
+            tenantId={tenant}
+            returnPath={`/departments/${deptId}/connections`}
+            connections={googleConnections}
+            clients={searchClients.map((c) => ({ id: c.id, name: c.name }))}
+            properties={searchProperties.map((p) => ({ id: p.id, domain: p.domain, clientId: p.clientId }))}
+            canManage={canManageGoogle}
+            oauthStatus={sp.googleOAuth}
+            oauthDetail={sp.googleOAuthDetail}
+          />
         </Card>
       )}
     </>

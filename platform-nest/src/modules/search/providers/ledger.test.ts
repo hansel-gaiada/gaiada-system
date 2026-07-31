@@ -220,6 +220,47 @@ describe("PROVIDER_MTD_QUERY_SQL shape — the SM-40 provider-tier cross-tenant 
   });
 });
 
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+// SM-50 (design addendum §A11.2 #1-#5) — THE STATUS-BLINDNESS PROHIBITION, pinned MECHANICALLY.
+//
+// The whole ruling rests on one verified fact: every money sum over search_provider_calls is
+// status-blind, so a row recording "the vendor charged us and delivered nothing" binds every budget
+// tier and the exec rollup with ZERO changes to any query. That property is free to acquire and
+// trivially easy to destroy — one plausible-looking "AND status <> 'incurred'" added by someone
+// tidying up a ceiling, and real deposit burn silently stops counting against the cap that exists to
+// bound it. It would review as a cleanup and behave as a fail-open.
+//
+// The §A11.2 disposition is explicit that the pinned shapes "must NOT gain a status predicate" and
+// that the pin should block it MECHANICALLY, not by prose. These tests are that block for the two
+// exported constants; incurred-cost.test.ts's AC3/AC3c pin the same property behaviourally, on the
+// arithmetic a budget tier actually performs, for sumMonthToDate (which builds its SQL at runtime and
+// so has no constant to anchor).
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+describe("SM-50 — the money sums must stay STATUS-BLIND (addendum §A11.2)", () => {
+  for (const [name, sql] of [
+    ["GLOBAL_MTD_QUERY_SQL", GLOBAL_MTD_QUERY_SQL],
+    ["PROVIDER_MTD_QUERY_SQL", PROVIDER_MTD_QUERY_SQL],
+  ] as const) {
+    it(`${name} carries NO status predicate — incurred spend must never be exempt from a ceiling`, () => {
+      // Any mention of the column at all, in any position, is the tripwire: there is no legitimate
+      // reason for a month-to-date money aggregate to know about status, and a narrower assertion
+      // (e.g. only "status <>") would miss `status IN (...)`, `status = 'posted'`, a FILTER clause, or
+      // a CASE expression that reaches the same fail-open by another route.
+      expect(sql).not.toMatch(/\bstatus\b/i);
+      // Nor may the amount itself be made conditional — same fail-open, different syntax.
+      expect(sql).not.toMatch(/\b(FILTER|CASE)\b/i);
+    });
+  }
+
+  it("the placeholder count is still exactly what each query declares — no smuggled extra predicate", () => {
+    // A new predicate cannot arrive without a new bound parameter (interpolation is already forbidden
+    // by the tests above), so pinning the parameter count catches the addition even if a future author
+    // names the column something this file does not blocklist.
+    expect(GLOBAL_MTD_QUERY_SQL.match(/\$\d+/g)).toEqual(["$1"]);
+    expect(PROVIDER_MTD_QUERY_SQL.match(/\$\d+/g)).toEqual(["$1", "$2"]);
+  });
+});
+
 describe.skipIf(!TEST_URL)("sumProviderMonthToDate — filtering + mode + TTL cache (SM-40)", () => {
   let tenant: string;
 

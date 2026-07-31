@@ -137,6 +137,37 @@ export interface SearchDataProvider {
   getKeywordMetrics(kws: KeywordQuery[]): Promise<KeywordMetrics[]>;
   getBacklinkSummary(target: string): Promise<BacklinkSummary>;
   getAiVisibility(q: AiVisibilityQuery): Promise<AiVisibilityResult[]>;
+  /** SM-56 (addendum §A11.1.4) — THE COLLECT SURFACE. Retrieve a task's result BY ITS TASK ID, for a
+   *  task THIS PLATFORM ALREADY PAID FOR at post time.
+   *
+   *  Why it is a separate method rather than a reuse of `fetchSerpResults`: the two differ in exactly
+   *  the property that matters. `fetchSerpResults` is only ever reachable through
+   *  `invokeProvider`, which calls `postSerpTasks` FIRST — so every path that can retrieve a SERP
+   *  today also enqueues (and, on the DataForSEO Standard queue, PAYS for) a brand-new task. That is
+   *  correct for a pull and catastrophic for a collect: a genuine vendor postback arriving for a task
+   *  we already bought would trigger a second `task_post` and be charged twice for the same data
+   *  (tracker §6ah/§6ak, reproduced at the transport layer). §A11.1.4's ruling is literal —
+   *  **`task_get` only** — and an interface member is how that becomes enforceable rather than
+   *  aspirational: the collect edge can reach ONLY this method, which has no posting step to reach.
+   *
+   *  THE CONTRACT EVERY IMPLEMENTATION MUST KEEP, and it is a money contract, not a style note:
+   *    1. It MUST NOT enqueue, post, or otherwise create billable vendor work. Zero new charges.
+   *    2. It MUST NOT call `recordIncurredCostUsd`/`recordActualCostUsd`. There is no charge to
+   *       declare — the money was declared at the billing point of the ORIGINAL post — and declaring
+   *       one here would write a second cost-bearing row for a single vendor charge, double-counting
+   *       real money into all four budget tiers and the exec rollup.
+   *    3. It MAY retry/poll, because polling a completed task is free on every vendor whose queue
+   *       model charges at post.
+   *  Prove property 1 by counting requests at the TRANSPORT layer (dataforseo.sandbox.test.ts does
+   *  exactly this over real sockets), never by asserting that a returned cost was 0 — a cost of 0 is
+   *  also what a driver that posted and mispriced would report.
+   *
+   *  OPTIONAL, and the absence is meaningful rather than a hole to paper over: a vendor with no
+   *  asynchronous queue has no task id to collect against, so there is nothing for it to implement.
+   *  The collect edge REFUSES fail-closed when the resolved driver does not implement this (it cannot
+   *  fall back to the dispatch path — falling back is precisely the defect), and refusing costs
+   *  nothing. Never provide a phantom default. */
+  fetchSerpByTaskId?(ref: TaskRef): Promise<SerpResult>;
   estimateCostUsd(op: ProviderOp): number;
   /** SM-42 (design addendum §A8.7, tracker §6j step 3) — the OPTIONAL post-call true-up surface.
    *  `estimateCostUsd` is a pure, PRE-dispatch function with no access to a response, so a vendor
@@ -167,6 +198,25 @@ export interface SearchDataProvider {
   takeActualCostUsd?(): number | undefined;
 }
 
+// ── SM-50 — the INCURRED-cost channel a driver reports its billing point on (addendum §A11.1.3) ─────
+//
+// There is no interface member for this, and that omission is the ruling, not an oversight: "a billing
+// point is an EVENT WITH AN AMOUNT, not a static method property". A driver cannot usefully declare
+// "my task_post is billable" up front — what matters is that a specific post was ACCEPTED, how many
+// tasks it accepted, and what the vendor's published rate for that queue is. So the declaration is a
+// CALL, made by the driver at the instant the vendor confirmably charges:
+//
+//     recordIncurredCostUsd(usd, vendorRef?)   // see below
+//
+// Only the driver knows its vendor's billing point (dataforseo.ts records at parsed `task_post`
+// acceptance; prepaid vendors would record per served 2xx). This is deliberately a SECOND CHANNEL on
+// SM-42's existing per-dispatch AsyncLocalStorage store rather than an overload of
+// `takeActualCostUsd`: a CORRECTION signal ("the estimate was wrong, here is the real figure") and a
+// LIABILITY signal ("we owe this money whatever happens next") mean different things, and collapsing
+// two meanings onto one reader is the §6r class of defect. `recordActualCostUsd` IMPLIES incurred — a
+// vendor-confirmed actual charge is by definition an incurred charge — so Ahrefs's existing capture
+// feeds both channels with no second call site to drift out of sync.
+
 // ── Typed refusals from the dispatch choke-point (all fail-closed) ─────────────────────────────────
 export class ProviderDispatchError extends Error {
   constructor(
@@ -177,7 +227,15 @@ export class ProviderDispatchError extends Error {
       | "no_capable_provider"
       | "unknown_provider"
       | "global_ceiling_unavailable"
-      | "provider_ceiling_unavailable",
+      | "provider_ceiling_unavailable"
+      // SM-56 — the resolved driver has no `fetchSerpByTaskId`, so a task this platform already paid
+      // for cannot be collected without re-posting it. Refused, never downgraded to the dispatch
+      // path: the whole ticket is that a collect must not spend money. Unmapped in
+      // provider-dispatch-error.filter.ts ON PURPOSE — that file's documented default for a new
+      // refusal code is 503, which is the same status its four "capability unavailable in this
+      // deployment" codes already carry, and is the right answer here (nothing the caller can change,
+      // not a crash). Pinned by a test so the default is relied on knowingly, not by accident.
+      | "collect_unsupported",
     message: string,
   ) {
     super(message);
@@ -284,6 +342,72 @@ export class NoCapableProviderError extends ProviderDispatchError {
   }
 }
 
+/** SM-56 (addendum §A11.1.4) — the collect edge resolved a driver that cannot fetch a paid task by its
+ *  id (no `fetchSerpByTaskId`, see the interface member's contract). Refused rather than falling back
+ *  to `postSerpTasks` + `fetchSerpResults`, because that fallback IS the double-charge this ticket
+ *  exists to close: it would buy the same data a second time. A refusal costs nothing; the original
+ *  charge stays recorded exactly as it is, and SM-41's reconciliation still sees it. */
+export class CollectUnsupportedError extends ProviderDispatchError {
+  constructor(readonly provider: string) {
+    super(
+      "collect_unsupported",
+      `provider '${provider}' cannot collect a completed task by id (no task-id-keyed fetch), and re-posting a paid task is forbidden`,
+    );
+    this.name = "CollectUnsupportedError";
+  }
+}
+
+/** SM-56 — a postback quoted a vendor task id this tenant has no ledger row for, so there is no
+ *  evidence THIS platform ever paid for it. Refused BEFORE any vendor call, which is what makes the
+ *  edge cheap to attack and pointless to forge: a forged or replayed-with-garbage postback costs a
+ *  ledger lookup and nothing else — no socket to the vendor, no row, no money.
+ *
+ *  The lookup is RLS-scoped (see ledger.findLedgerRowByVendorRef), so this also forecloses the
+ *  cross-tenant shape: a caller authenticated for tenant A quoting tenant B's task id gets THIS error,
+ *  not tenant B's data. Foreclosed by construction, not filtered.
+ *
+ *  A NARROW, HONEST FALSE POSITIVE, stated rather than hidden: the vendor could in principle postback
+ *  before our own dispatch transaction has COMMITTED the `posted` row that stamps this `vendor_ref`.
+ *  The collect then refuses a legitimate task. At-least-once postback delivery is the vendor norm, so
+ *  the retry succeeds; and DataForSEO's Standard queue takes minutes to crawl, so the window is
+ *  theoretical rather than operational. Refusing is the correct direction anyway — a collect that
+ *  trusted an unknown task id would be writing vendor-supplied data into a client's record on nothing
+ *  but the caller's word. */
+export class UnknownVendorTaskError extends Error {
+  constructor(readonly provider: string, readonly taskId: string) {
+    super(`no ledger record of a paid '${provider}' task with this id for this tenant`);
+    this.name = "UnknownVendorTaskError";
+  }
+}
+
+/** SM-50 (addendum §A11.1.3) — an INTERNAL envelope, not a refusal. `withActualCostCapture` throws
+ *  this when the wrapped provider call rejected AFTER the driver had already recorded an incurred
+ *  charge, so that dispatch.ts can tell "failed, nothing spent" (roll back, no row — still correct)
+ *  apart from "failed, money already gone" (roll back AND write a compensating `incurred` row outside
+ *  the rolled-back transaction).
+ *
+ *  DELIBERATELY NOT a ProviderDispatchError, and it deliberately carries no new refusal `code`: this
+ *  class must never reach a caller of dispatchProviderOp. dispatch.ts catches it, performs the
+ *  compensating write, and rethrows `cause` — the ORIGINAL typed provider error, byte-for-byte — so
+ *  every existing caller, the ProviderDispatchError HTTP filter, and every existing test assertion on
+ *  a provider error message keep their exact previous behaviour. The compensating write is
+ *  bookkeeping; it is not, and must never become, a replacement for the failure the caller asked
+ *  about. If you ever find yourself widening the refusal-code union for this, stop: that would mean
+ *  the envelope has started escaping. */
+export class ProviderFailedAfterSpendError extends Error {
+  constructor(
+    readonly cause: unknown,
+    readonly incurredUsd: number,
+    readonly vendorRefs: string[],
+  ) {
+    super(
+      `search-provider call failed AFTER the vendor was charged $${incurredUsd.toFixed(6)}: ` +
+      `${cause instanceof Error ? cause.message : String(cause)}`,
+    );
+    this.name = "ProviderFailedAfterSpendError";
+  }
+}
+
 // ── SM-42 — the concurrency-safe true-up capture mechanism (design addendum §A8.7) ─────────────────
 //
 // This replaces the shape that created the hazard in the first place: ahrefs.ts previously held a
@@ -305,7 +429,37 @@ export class NoCapableProviderError extends ProviderDispatchError {
 // with its OWN store object, which the first op's code can neither see nor write to. No shared
 // mutable state ever crosses an op boundary; isolation is a property of the async context, not of
 // discipline the driver author has to get right by hand.
-const actualCostCaptureStorage = new AsyncLocalStorage<{ totalUsd: number; observed: boolean }>();
+//
+// SM-50 (addendum §A11.1.3) adds a SECOND CHANNEL to this same store, not a second store: one store
+// per dispatch, two independent accumulators.
+//   * totalUsd/observed — SM-42's CORRECTION channel, read-AND-CLEARED by a driver's
+//     takeActualCostUsd() at the end of a SUCCESSFUL call.
+//   * incurredUsd/incurredObserved/vendorRefs — SM-50's LIABILITY channel, read by
+//     withActualCostCapture itself on BOTH paths: on success to stamp `vendor_ref` on the posted row,
+//     and on failure to decide whether a compensating `incurred` row is owed.
+//
+// SM-60 (tracker §6ak) — the LIABILITY CHANNEL'S AMOUNT NOW LEAVES THE SCOPE ON THE SUCCESS PATH TOO.
+// SM-50 let the amount escape only inside ProviderFailedAfterSpendError, i.e. only when the provider
+// call itself rejected. But a dispatch can be charged, delivered, and STILL lose the money record: the
+// critical-section callback continues after this wrapper resolves (writeCache -> insertLedgerRow, same
+// transaction), and a throw there rolls the transaction back exactly like a provider rejection while
+// this scope — and with it every trace of the charge — is already gone. So the success return carries
+// `incurredUsd` alongside `vendorRefs`: the amount, not just the refs, is what a compensating write
+// needs, and the ONLY place it can still be read is inside this `run()` callback. Everything after that
+// point is dispatch.ts's job (see its SpendLiability handoff); this file's job is simply to stop being
+// the place where the number dies.
+// They are separate fields precisely so takeActualCostUsd()'s clear-on-read cannot destroy the
+// liability record: a driver reads the correction channel, the framework reads the liability channel,
+// and neither can consume the other's value. Both inherit the same isolation-by-construction the
+// SM-42 analysis above establishes — a concurrent, unrelated dispatch against the same provider
+// singleton runs under its own run() invocation with its own store object.
+const actualCostCaptureStorage = new AsyncLocalStorage<{
+  totalUsd: number;
+  observed: boolean;
+  incurredUsd: number;
+  incurredObserved: boolean;
+  vendorRefs: string[];
+}>();
 
 /** Run `fn` — dispatch.ts's ONE invokeProvider() call for a real dispatch — inside a fresh capture
  *  scope, then, still INSIDE that scope (before this async function's own promise settles), ask the
@@ -313,16 +467,58 @@ const actualCostCaptureStorage = new AsyncLocalStorage<{ totalUsd: number; obser
  *  `run()` callback is what makes the read-back correct: calling it after this promise has already
  *  resolved would observe no active store at all (ALS context does not survive past the callback that
  *  established it). A provider with no `takeActualCostUsd` method (DataForSEO, every simulator)
- *  simply yields `actualCostUsd: undefined` — a missing capability, never a placeholder $0. */
+ *  simply yields `actualCostUsd: undefined` — a missing capability, never a placeholder $0.
+ *
+ *  SM-50 (addendum §A11.1.3) — this function is now ALSO the failure boundary:
+ *
+ *  * On SUCCESS it additionally returns `vendorRefs`, so dispatch stamps the vendor's own id (the
+ *    DataForSEO task id) onto the successful ledger row — one column, both paths (§A11.1.4) — and
+ *    (SM-60) `incurredUsd`, the liability channel's AMOUNT, because the post-success writes that follow
+ *    this call can still fail and lose the row, and the amount is unreachable once this scope closes.
+ *    `0` means "the driver reported no confirmable charge for this call" and is the same signal the
+ *    rejection path treats as "nothing owed" — never a placeholder for an unknown charge.
+ *  * On REJECTION it inspects the liability channel BEFORE the scope closes. When the driver recorded
+ *    nothing, the rejection is re-thrown UNTOUCHED and today's behaviour is preserved byte-for-byte
+ *    (the transaction rolls back, no row is written — still exactly right, because the vendor was
+ *    never engaged). When the driver DID record a charge, the rejection is wrapped in
+ *    `ProviderFailedAfterSpendError` so dispatch.ts can compensate outside the doomed transaction.
+ *    The wrapper is unwrapped there and never reaches a caller — see that class's own doc comment.
+ *
+ *  Reading the store inside the catch, INSIDE `run()`, is load-bearing for the same reason the
+ *  success-path read is: after this promise settles there is no active store to read, so a liability
+ *  recorded by the driver would be silently lost — which is the entire defect this ticket closes,
+ *  reintroduced one layer up. */
 export async function withActualCostCapture<T>(
   provider: SearchDataProvider,
   fn: () => Promise<T>,
-): Promise<{ result: T; actualCostUsd: number | undefined }> {
-  return actualCostCaptureStorage.run({ totalUsd: 0, observed: false }, async () => {
-    const result = await fn();
-    const actualCostUsd = provider.takeActualCostUsd?.();
-    return { result, actualCostUsd };
-  });
+): Promise<{ result: T; actualCostUsd: number | undefined; vendorRefs: string[]; incurredUsd: number }> {
+  return actualCostCaptureStorage.run(
+    { totalUsd: 0, observed: false, incurredUsd: 0, incurredObserved: false, vendorRefs: [] },
+    async () => {
+      let result: T;
+      try {
+        result = await fn();
+      } catch (err) {
+        const incurred = peekCapturedIncurred();
+        // `> 0` rather than `incurredObserved`, on purpose: a driver that recorded a $0 charge has
+        // told us the vendor was engaged for nothing billable, and a $0 incurred row would be noise
+        // in the ledger AND a $0 row on the money path (the §A9.5 degenerate-input class). Nothing
+        // recorded and nothing owed take the identical, unchanged path.
+        if (incurred.usd > 0) {
+          throw new ProviderFailedAfterSpendError(err, incurred.usd, incurred.vendorRefs);
+        }
+        throw err;
+      }
+      const actualCostUsd = provider.takeActualCostUsd?.();
+      // SM-60: read the liability channel ONCE, after the driver has consumed its own correction
+      // channel, and return BOTH halves. peekCapturedIncurred is non-clearing precisely so this read
+      // and the catch-path read above cannot destroy each other's value (see its doc comment) — and
+      // note this read must stay INSIDE the run() callback for the same reason that one does: after
+      // this promise settles there is no active store, so the amount would be silently lost.
+      const incurred = peekCapturedIncurred();
+      return { result, actualCostUsd, vendorRefs: incurred.vendorRefs, incurredUsd: incurred.usd };
+    },
+  );
 }
 
 /** Called by a driver's internal HTTP layer (ahrefs.ts's `call()`) the instant a response reports a
@@ -339,6 +535,55 @@ export function recordActualCostUsd(usd: number): void {
   if (!store) return;
   store.totalUsd += usd;
   store.observed = true;
+  // SM-50 (§A11.1.3): "recordActualCostUsd IMPLIES incurred." A vendor-confirmed ACTUAL charge is by
+  // definition an INCURRED charge, so the liability channel is fed here rather than requiring every
+  // true-up-capable driver to make a second, parallel call it could forget or drift on. Composed, not
+  // duplicated — this line is why ahrefs.ts needed no edit for this ticket and still produces a
+  // correct incurred row if its op fails after a priced response.
+  store.incurredUsd += usd;
+  store.incurredObserved = true;
+}
+
+/** SM-50 (addendum §A11.1.3) — called by a driver at the exact moment its vendor CONFIRMABLY charges,
+ *  with the amount in USD (the driver owns its own rate table; this module carries no vendor pricing
+ *  knowledge) and, where the vendor exposes one, that call's vendor-side id.
+ *
+ *  "Confirmably" is the whole discipline, and it is deliberately conservative. Record at a PARSED
+ *  VENDOR ACKNOWLEDGEMENT — DataForSEO's `task_post` response listing accepted tasks — never
+ *  optimistically before the request, and never on an ambiguous outcome such as a timeout or an
+ *  aborted socket where whether the vendor charged is genuinely unknowable. Ambiguous cases therefore
+ *  UNDER-record (§A11.1.5): the residue is bounded to cents per op, and SM-41's ledger-vs-console
+ *  reconciliation with its >=20% tripwire is the designed catch for it. Over-recording would be worse
+ *  in kind, not just in degree — it would refuse real clients for money nobody was charged.
+ *
+ *  ADDITIVE, like `recordActualCostUsd`: one op can fan out into several billable vendor calls and the
+ *  liability is their SUM, never whichever response was parsed last. `vendorRef` is appended in call
+ *  order.
+ *
+ *  A call made OUTSIDE any `withActualCostCapture()` scope (a driver unit test invoking an HTTP method
+ *  directly) is a harmless, documented no-op — recording is bookkeeping, never a precondition for the
+ *  vendor call's own correctness. Simulators never call this at all: their dollars are synthetic, so a
+ *  rollback loses nothing real and no `incurred` row can be produced by simulated traffic (§A11.1.5). */
+export function recordIncurredCostUsd(usd: number, vendorRef?: string): void {
+  const store = actualCostCaptureStorage.getStore();
+  if (!store) return;
+  store.incurredUsd += usd;
+  store.incurredObserved = true;
+  if (vendorRef) store.vendorRefs.push(vendorRef);
+}
+
+/** Read the liability channel WITHOUT clearing it. Non-clearing on purpose, and it is the opposite
+ *  choice from `takeCapturedActualCostUsd` below for a reason: the correction channel is consumed
+ *  once by the driver, whereas the liability channel is read by the FRAMEWORK on both the success and
+ *  the failure path within a single scope, and a clear-on-read here would mean whichever read
+ *  happened first silently erased the money record. The store dies with its `run()` scope regardless,
+ *  so there is nothing to leak into a later dispatch. Not exported: only withActualCostCapture (in
+ *  this file) has any business reading it — a driver reporting a charge and then reading back the
+ *  running total would be building exactly the shared-mutable-state coupling the ALS design forbids. */
+function peekCapturedIncurred(): { usd: number; vendorRefs: string[] } {
+  const store = actualCostCaptureStorage.getStore();
+  if (!store || !store.incurredObserved) return { usd: 0, vendorRefs: [] };
+  return { usd: store.incurredUsd, vendorRefs: [...store.vendorRefs] };
 }
 
 /** The read-AND-CLEAR half a driver's `takeActualCostUsd()` implementation calls (see ahrefs.ts).

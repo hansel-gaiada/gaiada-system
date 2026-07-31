@@ -101,3 +101,95 @@ describe("SM-53 · dispatch refusals map to HTTP, never to a bare 500", () => {
     }
   });
 });
+
+// ── Registration pin (added by the session lead, SM-53/SM-57) ────────────────────────────────────
+// Every test above instantiates the filter and calls `.catch()` directly, which proves the MAPPING but
+// says nothing about whether Nest ever routes an error to it. So a filter could be deleted from
+// `main.ts`'s `useGlobalFilters(...)` and every assertion above would still pass while production
+// reverted to the exact message-less 500 these tickets exist to remove.
+//
+// That is not hypothetical here: SM-49's equivalent static pin on the base-URL boot guard caught two
+// real bugs, and this module has now met the "guard whose removal changes nothing observable" pattern
+// five times (§4d catch-to-0, §6d shape pin anchoring a name, §6f count that only warned, §6r inert
+// remedy, §6z one-variable fix). A wiring gap is the same shape: the code looks handled.
+//
+// A static text assertion is deliberately crude, and that is the point — it fails loudly on the one
+// edit that matters (removing the registration) and is immune to how Nest resolves filters internally.
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
+describe("SM-53/SM-57/SM-58/SM-25a · the filters are actually REGISTERED, not merely correct", () => {
+  const mainTs = readFileSync(join(__dirname, "..", "..", "main.ts"), "utf8");
+
+  it.each([
+    "HttpErrorFilter",
+    "ProviderDispatchErrorFilter",
+    "GatewayNotConfiguredErrorFilter",
+    // SM-58: the app-wide last-resort backstop must be extended into THIS pin, not given a separate
+    // one — a second independent pin could pass while the real useGlobalFilters call in main.ts drops
+    // one of the other three, since nothing would then cross-check them against each other.
+    "LastResortExceptionFilter",
+    // SM-25a: the Google-surface error family (modules/search/google/errors.ts +
+    // google-oauth-error.filter.ts) joins the SAME pin, for the identical reason SM-58 gave. This is
+    // the THIRD time this module has shipped a plain Error that escaped as a message-less 500
+    // (SM-53's ProviderDispatchError, SM-57's GatewayNotConfiguredError), and LastResortExceptionFilter
+    // is a floor, not a mapping — it cannot know that "Google OAuth is not configured" is a 503
+    // deployment state while "this callback does not verify" is a 400. Unwiring this filter would
+    // silently collapse every Google refusal onto the generic backstop's status, and every
+    // direct-`.catch()` unit test in google-oauth-error.filter.test.ts would stay green.
+    "GoogleOAuthErrorFilter",
+  ])("%s is passed to useGlobalFilters in main.ts", (filterName) => {
+    // Anchored to the call itself, not merely to the identifier appearing somewhere in the file —
+    // an import alone would otherwise satisfy a naive `includes()` while the filter stayed unwired.
+    const call = mainTs.slice(mainTs.indexOf("useGlobalFilters("));
+    const args = call.slice(0, call.indexOf(");") + 1);
+    expect(args).toContain(`new ${filterName}(`);
+  });
+
+  it("all five are registered in ONE useGlobalFilters call — a second call would REPLACE, not add", () => {
+    // Nest's useGlobalFilters appends, but relying on that across two call sites is a trap worth
+    // foreclosing: keeping them in one call makes the full set reviewable at a glance.
+    // (Count went four -> five with SM-25a's GoogleOAuthErrorFilter; the assertion below is on the
+    // number of CALLS, which must stay 1 no matter how many filters the one call carries.)
+    const occurrences = mainTs.split("useGlobalFilters(").length - 1;
+    expect(occurrences).toBe(1);
+  });
+
+  it("SM-25a · the registered set is EXACTLY the five known filters — a sixth must be a deliberate edit here", () => {
+    // Exact-set equality, the same discipline as the egress-inventory allowlist and ledger.ts's SQL
+    // shape pins. The it.each above proves each expected filter is PRESENT; without this, a filter
+    // added to main.ts but never reasoned about here would ship unreviewed — and the ORDER hazard
+    // below (an unconditional @Catch() must be first) is exactly the kind of thing a silently-added
+    // sixth filter can break.
+    const call = mainTs.slice(mainTs.indexOf("useGlobalFilters("));
+    const args = call.slice(0, call.indexOf(");") + 1);
+    const registered = [...args.matchAll(/new (\w+)\(/g)].map((m) => m[1]);
+    expect(registered).toEqual([
+      // Order is asserted too: LastResortExceptionFilter FIRST (Nest reverses the array, so it is
+      // checked LAST — see the next test for why that is load-bearing rather than cosmetic).
+      "LastResortExceptionFilter",
+      "HttpErrorFilter",
+      "ProviderDispatchErrorFilter",
+      "GatewayNotConfiguredErrorFilter",
+      "GoogleOAuthErrorFilter",
+    ]);
+  });
+
+  it("SM-58 · LastResortExceptionFilter is the FIRST argument, not merely present", () => {
+    // Presence alone is not the AC here the way it is for the other three: this filter's `@Catch()`
+    // matches every thrown value unconditionally, and Nest's RouterExceptionFilters reverses the
+    // useGlobalFilters(...) argument list before resolving a match (last-resort-exception.filter.
+    // test.ts proves this empirically against a real app). So if it were appended LAST instead of
+    // FIRST, this same static includes()-style pin would still pass while the filter silently
+    // shadowed HttpErrorFilter/ProviderDispatchErrorFilter/GatewayNotConfiguredErrorFilter for every
+    // request in production — the exact "correct but unwired" failure mode this whole pin exists to
+    // catch, just one level deeper (correct AND wired, but wired in the one position that breaks
+    // everything else).
+    const call = mainTs.slice(mainTs.indexOf("useGlobalFilters("));
+    const args = call.slice(0, call.indexOf(");") + 1);
+    const firstArgStart = args.indexOf("new ");
+    expect(args.slice(firstArgStart, firstArgStart + "new LastResortExceptionFilter(".length)).toBe(
+      "new LastResortExceptionFilter(",
+    );
+  });
+});

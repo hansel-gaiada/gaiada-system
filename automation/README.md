@@ -81,9 +81,10 @@ as **container env vars** (`$env.<NAME>`), all pre-wired through `.env` → comp
 nothing to hand-edit in the UI — just fill the values in `.env` and `docker compose up -d`:
 `HUB_SERVICE_TOKEN`, `AGENCY_TENANT_ID`, `N8N_BRIDGE_SECRET`, `NOTIFY_WEBHOOK_URL`,
 `NOTIFY_USER_ID`, `INTAKE_PROJECT_ID`, `SLA_PROJECT_ID`, `BOT_URL`, `BOT_ADMIN_TOKEN`,
-`INGEST_ENABLED`, `INGEST_SECRET`, `SEARCH_CALLBACK_SECRET` (see `.env.example` for what each drives).
-`sm-rank-pull` reuses `HUB_SERVICE_TOKEN`/`AGENCY_TENANT_ID` only — no new env var, but see
-"Deferred flows" below before importing it (currently blocked on a platform-nest fix).
+`INGEST_ENABLED`, `INGEST_SECRET`, `SEARCH_CALLBACK_SECRET` (see `.env.example` for what each drives;
+`SEARCH_CALLBACK_SECRET` is **now consumed** by the platform's search rank-pull collect edge (SM-56) and
+is **required** to use it — the route refuses every request while the value is empty. Set the same value
+in the platform's own env).
 
 | File | Trigger | Does | Scoped identity |
 |---|---|---|---|
@@ -98,9 +99,6 @@ nothing to hand-edit in the UI — just fill the values in `.env` and `docker co
 | `mtg-dispatcher.json` | `POST /webhook/mtg/recording-complete` (bridge secret, dedupe on `meetingId`) | **WS11** meeting → `llm.summarize` (MOM) → 3 separate `llm.extract` passes (prd/report/scope) → `pipeline.createRun` with all three stages populated. Fan-out to delivery/report/scope is event-driven via `pipeline.run.created`. **WD-08-R1:** a bad/missing bridge secret now short-circuits to an explicit `401 {"error":"unauthorized"}` (no detail leakage) via a `Secret bad?` gate, instead of relying on n8n's default 200-on-uncaught-throw behavior — 0 rows are created either way. **WD-08-R2:** the dedupe branch now calls `meeting.recordingContext` (already allow-listed for this workflow) to echo the ALREADY-linked `runId` alongside `deduped:true`, instead of `runId:null` — best-effort (falls back to `null` if the meetingId never went through the `meeting_recordings` registry, e.g. a raw pasted-transcript test). | `wf:mtg-dispatcher` |
 | `pipeline-fanout.json` | event bridge `POST /webhook/ev/pipeline.run.created` | **WS11** scope track: open the client `scope_signoff` gate + notify PM (`wf:scope`); report track: route to internal process — STUB in-app notify (`wf:report`). | `wf:scope`, `wf:report` |
 | `pipeline-delivery.json` | event bridge `ev/pipeline.gate.decided` + `ev/scope.signed` | **WS11** delivery spine: on PRD signed **AND** scope signed → `design.prototype` → add `claude_design` stage → open first Submission (`pm_review`) → notify PM. (v1 spine; code/deploy/3-beat/revise are the documented extension.) **DEF-3 (2026-07-30):** `deploy.production` is impact:`high`, so the D14 write gate ALWAYS suspends it for the automation principal (`wf:delivery`) regardless of upstream pipeline-gate approvals — that suspend is now routed to `approvals.request` (a real WS4 `automation_approvals` row, `origin:'automation'`, `tool_name:'deploy.production'`) instead of silently dead-ending into the fail-soft `production` stage write. The fail-soft path (write `production`=`failed` + notify) is unchanged and still fires for genuine (non-suspend) dispatch failures. **Known boundary, unchanged by this fix:** approving the WS4 row does NOT itself re-drive the deploy — there is no generic "resume a D14-suspended automation write" mechanism in this codebase (confirmed live: deciding the approval leaves the run with no `production` stage). The only existing precedent for resuming after an `automation_approval.decided` event is HR's bespoke `leave-decision.ts` handler, which mutates its own domain row directly rather than replaying a suspended hub tool call — building a generic equivalent for `deploy.production` is a Temporal/durable-callback-class design decision (see the impact-gate note above: "v1 records + decides; it does not auto-resume the approved call"), not wiring, and is left to the architect. | `wf:delivery` |
-| `sm-rank-pull.json` | CRON daily 02:00; due-check reads each engagement's `tool_scope.rank.cadence` against its property's own last rank-snapshot capture time (via the real `search.rankSummary` tool) — never a hardcoded schedule | **SM-15 batch 1** (search marketing): if due, hub `search.pullRanks` (SM-14; posts a DataForSEO Standard-queue task through the scope/budget/pillar choke-point). Suspend-aware: a D14 `suspend:` reply routes to `approvals.request` rather than failing. **⚠️ Authored, import-tested via `n8n execute`, but NOT runnable against the current platform build** — `search.pullRanks` is `minAssurance:'verified'` in `modules/search/index.ts`, and every automation (n8n) principal is minted `assurance:'low'` by construction, so the hub denies the call before the allow-list/impact-gate is even consulted (confirmed live: `denied: search.pullRanks requires verified assurance; caller has low`). See the SM-15 ticket report for the full analysis and the one-line platform-nest fix needed. | `wf:sm-rank-pull` |
-| `sm-keyword-refresh.json` | CRON daily tick; would read `tool_scope.volume.cadence` (monthly by default) | **SM-15 batch 1** scaffold for the keyword-metrics pull (SM-14's real `keyword-sets/:id/metrics-pull` route). **BLOCKED, do not activate** — `search.keywordResearch` has no `pathTemplate` in `index.ts` at all (mcp-hub's module-tools.ts skips defs with no pathTemplate at registration, so the tool isn't even callable), and the real route is keyword-**set**-scoped with no MCP tool to enumerate a set id from an engagement id either — a contract decision, not a one-line fix. See its own `meta.description`. | `wf:sm-keyword-refresh` |
-| `sm-rank-collect.json` | webhook `POST /webhook/search/rank-pull-callback` (dedicated `SEARCH_CALLBACK_SECRET`, dedupe on taskId) | **SM-15 batch 1** seam for the DataForSEO Standard-queue postback → SM-14's real `rank-pulls/callback` route. The receiver (secret check + dedupe) is real and independently exercised. **BLOCKED, do not activate** — no MCP tool binds to that route at all (design doc's own `search.ingestRankResults` name doesn't exist in `index.ts`, not even as a stub), and a genuine DataForSEO postback carries only a task id, not the `{engagementId,propertyId,keywordId}` the real route requires — the task-id correlation step is unsolved anywhere in the platform. See its own `meta.description`. | `wf:sm-rank-collect` |
 
 Every hub call is a raw JSON-RPC `tools/call` (the hub is stateless — no handshake; replies are
 SSE-framed and parsed by a Code node) carrying the workflow's OBO identity headers. Adding a
@@ -139,21 +137,16 @@ externally.
   (Gate 1: DPIA/LIA/notices in `legal/`); inbound-lead ingestion must not run until legal sign-off
   **and** the day-one technical gate are both green. The flow is built + scoped (`wf:inbound-lead-intake`
   → `tasks.create` into `INTAKE_PROJECT_ID`); flip `INGEST_ENABLED=true` only after Gate 1 clears.
-- **`sm-rank-pull`** (SM-15 batch 1) — blocked on a platform-nest fix, not an infra dependency:
-  `search.pullRanks`'s `minAssurance:'verified'` in `modules/search/index.ts` makes it structurally
-  unreachable by ANY n8n automation principal (every OBO envelope mints `assurance:'low'` —
-  `mcp-hub/src/principal.ts`: "'verified' principals will come from the platform IdP... never from
-  an envelope"). Confirmed live 2026-07-30: `denied: search.pullRanks requires verified assurance;
-  caller has low`. Every other automation-reachable write tool in this hub
-  (`projects.create`/`tasks.create`/`tasks.update`/`notify`/`pipeline.*`) is `minAssurance:'low'` —
-  this looks like an authoring oversight on the SM-14/16/18 `search.*` mcpTools entries, since
-  `index.ts`'s own comment says paid pulls are `impact:'medium'` specifically so they route through
-  the D14 *automation* write gate, which presupposes automation can reach them. **Activate once
-  platform-nest lowers `search.pullRanks`'s `minAssurance` to `'low'`** (and, ideally, the same fix
-  applied to `search.pullBacklinks`/`pullAiVisibility`/`keywordResearch` for the rest of the P2
-  batch) — a one-line-per-tool change outside this ticket's file ownership.
-- **`sm-keyword-refresh`, `sm-rank-collect`** (SM-15 batch 1) — each blocked on its own compound
-  platform-side gap; see the flow table above and each file's `meta.description`. Do not activate.
+- **Recurring search-marketing pull cadence (formerly SM-15's `sm-rank-pull`/`sm-keyword-refresh`/
+  `sm-rank-collect`) — RETIRED, not deferred.** Architect ruling (tracker §6ad/A13, 2026-07-30):
+  automation must never be able to trigger a paid vendor pull through any mechanism, so lowering
+  `search.pullRanks`'s `minAssurance` was refused. Recurring cadence work now lives entirely in
+  **SM-54**, a platform-side module scheduler job in `platform-nest` (precedent:
+  `startReconcileLoop`/`startDriftSweepLoop`/`startBurndownSnapshotLoop`) — the engagement's own
+  `tool_scope` (toggle + cadence + budget cap), written by a verified human under
+  `search:scope:write`, is the standing authorization; the vendor-postback collect edge is SM-56
+  (parked). The three workflow JSONs and their `AUTOMATION_ALLOWLIST` entries are deleted, not kept
+  for reference — git history has them if anyone needs to look. Do not re-file this as an n8n flow.
 
 ## Event → n8n bridge (business-event triggers)
 

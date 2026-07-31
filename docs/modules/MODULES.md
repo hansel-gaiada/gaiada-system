@@ -23,7 +23,8 @@ version and add a `CHANGELOG.md` entry on every notable module change.
 
 ## App version
 
-**`Alpha 01.003.0002a`** — see [`VERSIONING.md`](./VERSIONING.md) for the format, and
+**`Alpha 01.004.0005a`** — see [`VERSIONING.md`](./VERSIONING.md) for the format, and
+
 [`/VERSION`](../../VERSION) for the machine-readable source. The app version composes the module
 versions below; the running build reports it at `GET /health`.
 
@@ -33,25 +34,25 @@ versions below; the running build reports it at `GET /health`.
 
 | Module | Ver | Status | Workstream | Since |
 |---|---|---|---|---|
-| platform-nest | `0.6.4` | PROTOTYPED | WS1 | 2026-07 |
-| platform-ui | `0.6.6` | PROTOTYPED | WS5 | 2026-07 |
+| platform-nest | `0.7.1` | PROTOTYPED | WS1 | 2026-07 |
+| platform-ui | `0.7.1` | PROTOTYPED | WS5 | 2026-07 |
 | ai-gateway-go | `0.13.0` | PROTOTYPED | WS3 | 2026-07 |
-| mcp-hub | `0.9.0` | PROTOTYPED | WS2 | 2026-07 |
+| mcp-hub | `0.9.1` | PROTOTYPED | WS2 | 2026-07 |
 | sync-engine-go | `0.7.0` | PROTOTYPED | WS1 | 2026-07 |
-| automation (n8n) | `0.4.0` | DEV-VERIFIED | WS4 | 2026-07 |
+| automation (n8n) | `0.4.1` | DEV-VERIFIED | WS4 | 2026-07 |
 | observability | `0.6.0` | DEV-VERIFIED | WS9 | 2026-07 |
-| infra | `0.6.0` | PROTOTYPED | WS10 | 2026-07 |
+| infra | `0.7.0` | PROTOTYPED | WS10 | 2026-07 |
 | wa-chat-bot | `0.9.1` | PROTOTYPED | WS5 | 2026-07 |
 | ai-agents | `0.4.0` | PROTOTYPED | WS8 | 2026-07 |
 | hermes-gateway | `0.2.0` | PROTOTYPED | WS3 | 2026-07 |
 | capture-helper | `0.2.0` | IN PROGRESS | WS11 | 2026-07 |
 | webdev | `0.8.1` | IN PROGRESS | Web Dev | 2026-07-30 |
 | webdesk | `0.0.0` | PLANNED | Web Dev | 2026-07-23 |
-| search-marketing | `0.2.0` | IN PROGRESS | SEO | 2026-07-28 |
+| search-marketing | `0.4.0` | IN PROGRESS | SEO | 2026-07-31 |
 | social-media | `0.0.0` | PLANNED | Social Media | 2026-07-23 |
 | creative | `0.1.0` | PROTOTYPED | Creative | 2026-07 |
 | render-gateway-go | `0.0.0` | PLANNED | Creative | 2026-07-23 |
-| reports | `0.0.0` | PLANNED | Cross-cutting | 2026-07-30 |
+| reports | `0.1.0` | IN PROGRESS | Cross-cutting | 2026-07-30 |
 | report-renderer | `0.0.0` | PLANNED | Cross-cutting | 2026-07-30 |
 
 ---
@@ -327,19 +328,49 @@ one-rail contract-snapshot scaffolder) activates once webdesk's own P3 codegen l
 **Future plans:** phased build P1 Foundation → P2 Forms+Mail → P3 Contract/codegen → P4 ERP control+envs →
 P5 AI+approvals → P6 WordPress headless.
 
-## search-marketing — SEO · SEM · GEO · `0.2.0` · IN PROGRESS
+## search-marketing — SEO · SEM · GEO · `0.4.0` · IN PROGRESS
 
-**State at 0.2.0 (2026-07-28).** P0 is closed (**M1**): schema + RLS, module contract + Cerbos policy,
-the provider/dispatch money path, the DataForSEO driver and its config/kill-switches all landed behind
-one ⚡ gate. That gate found and closed a **fail-OPEN** — the platform-wide spend ceiling silently
-disabled itself when its month-to-date aggregate threw, which on default config was the only
-platform-wide cap. The `seo` department console (SM-11) is IN FLIGHT: 12 routes, real data on the
-engagement surfaces, honest "backend pending" states elsewhere; its architect review rejected a first
-pass for backend/frontend contract drift (money field typed as a number but delivered as a string;
-cost-projection field names wrong) — fixed and re-verified. **Not yet DEV-VERIFIED:** P1 data work
-(crawlers, keywords, briefs) is not built, so the console has little to show yet; the metered provider
-path is proven only against a mock and a driver-level HTTP fake, never a real paid pull (deposit gated,
-OQ-2). Running state + ticket ledger: [`../blueprints/seo-sem-execution-tracker.md`](../blueprints/seo-sem-execution-tracker.md).
+**State at 0.4.0 (2026-07-31, SM-23 reconcile).** Since 0.3.0: the bundled ⚡ gate (§6bc) PASSED
+SM-54/SM-56/SM-59/SM-61/SM-25b (all LANDED); an echo-validation standing rule was adopted (§A14,
+addendum A1.6/A1.7) and audited across all three vendor drivers (§6be); SM-30 (manual apply/export
+twin) and SM-20 (search-terms sync, migration `0062`) are DEV-VERIFIED with their own ⚡ gates still
+owed; SM-63 (collect-scope fix) LANDED; SM-64 (GSC/GA4 response-window enforcement) and
+SM-66/67/69 (driver fail-open hardening) are DEV-VERIFIED, gates owed. **Not clean:** SM-68/70 (the
+DataForSEO billing-identity fix) were DEV-VERIFIED with the tree fully green (§6bj), then an
+orchestrator `git checkout` destroyed the uncommitted `providers/dataforseo.ts`, reverting that
+work in one file — a rebuild is in flight (tracker §6bk); do not treat SM-67/68/69/70 as clean
+until it reports and a fresh gate runs. SM-19's frontend (dual-mode apply picker) is real, committed
+and wired but was never given a ticket-scoped verification pass (tracker §6bk). None of this moves
+the module's overall status past `IN PROGRESS` — real-vendor-account fidelity remains unproven and
+the money-path driver is mid-rebuild.
+
+**State at 0.3.0 (2026-07-30, superseded above).** P0 and P1 are closed and gated. All three divisions are visible in the
+`seo` console (Accounts / Optimize / Campaigns), and the department **demos end to end at $0 vendor spend**
+via a deterministic simulation mode that flows through the real metered dispatch path.
+
+**Built and gated since 0.2.0:** three vendor drivers behind one `SearchDataProvider` (DataForSEO, Semrush,
+Ahrefs) with per-capability routing; simulation mode with provenance stamped in the database, not just the
+UI; rank tracking, audit ingest, keyword clustering, AI drafts, backlinks and GEO/AI-visibility data paths;
+the cost ledger surface; SEM planning objects plus a SEM console; and a vendor-envelope sandbox that runs
+the real drivers over real sockets against fixture files, so the staging cutover is a fixture swap rather
+than a rewrite.
+
+**The money path is the most-scrutinised code in the module.** Five ordered stop-loss tiers
+(engagement → tenant → provider → global, plus a pillar kill switch), fail-closed at every gate, with an
+`incurred` ledger status recording a vendor charge that delivered nothing so burned money cannot hide from
+the ceilings. Nine gates found **seven** fail-opens here, every one of the same shape — a guard that looked
+configured and enforced nothing: a `catch` degrading to `$0`, a shape pin anchoring a table name instead of
+a structure, a count that only warned, a remedy that was inert, a config fix covering one variable of nine,
+a filter that was correct but possibly unwired, and a compensating write that missed the post-success write
+boundary. Each is now pinned by a mutation probe that fails when the guard is removed.
+
+**Not yet DEV-VERIFIED, and precisely why:** no capability has ever run against a real vendor account
+(OQ-9/OQ-10/OQ-11 — plan facts and a deposit are the owner's), so envelope fidelity, error inventories and
+billing units are unproven; Search Console and GA4 are not built (SM-51/SM-25, no Google OAuth client); the
+SEM apply path, reports and the platform-side scheduler are not built (SM-19/20/21/22/30, SM-54); and two
+known bounded defects must land before any vendor is funded — a callback double-charge (SM-56) and a missing
+provider predicate on reconciliation (SM-59), both with live repros. Running state + ticket ledger:
+[`../blueprints/seo-sem-execution-tracker.md`](../blueprints/seo-sem-execution-tracker.md).
 
 **Design (unchanged):** [`../blueprints/seo-sem-foundation.md`](../blueprints/seo-sem-foundation.md)
 (research + locked cost model) and [`../blueprints/seo-sem-design.md`](../blueprints/seo-sem-design.md)
@@ -352,41 +383,46 @@ $0-API audit work; AI is local-Hermes-first via the gateway; live-site/live-spen
 (~Rp 20M/mo for 100 clients @ 22k).
 **Owner-ratified 2026-07-23:** dept name SEO; dual-mode SEM; no-RLS shared cache; per-engagement tool-scope config.
 
-**What exists (dev):** P0 partially landed — SM-01 (migrations `0034`/`0035`: 18 `search_*` tenant tables
-under third-wall FORCE-RLS + the no-RLS `search_data_cache`, dual-mode embedding column, additive
-`integration_connections` widen), SM-02 (`src/modules/search/` ModuleContract, `api/:t/modules/search`,
-18 `search.*` mcpTools, property/engagement/kpi CRUD, tool-scope endpoints + presets), and SM-03
-(7 `resource_search_*` Cerbos policies + derived-roles wiring + `platform-ui/src/lib/rbac.ts` capability
-mirror). **Verified 2026-07-27:** the four search suites run 60/60 green against live Postgres + live
-Cerbos (49 executable policies), including the full SM-03 parity matrix — owner/manager/member/served-dept
-with the `launch`/`apply_manual`/`apply_negatives`/`set_budget`/`approve`/`deliver`/`set_scope`/`admin`
-denials and the cross-tenant and low-assurance cases.
+**What exists (dev), superseding the paragraph below that used to sit here:** the paragraph that
+follows described the 2026-07-27 P0-in-progress state (SM-04/05/06 "awaiting gate", "no crawlers",
+"no console") and was left uncorrected through three landings — it is the exact "stale doc read as
+current" failure mode this registry warns about. **Reconciled 2026-07-30 against code and the
+tracker (SM-23):** P0 (SM-01…06) and P1 (SM-07…13, SM-29) are both **LANDED and gate-cleared**
+(tracker §0/§1). `src/modules/search/` now has 20+ modules incl. real crawler ingestion
+(`search-crawl-go/`, SM-07), keyword clustering + AI drafts (SM-09/10), the `seo` platform-ui
+console (SM-11/12/29), and the notifications wiring (SM-13) — none of which existed when the
+paragraph below was written. `lint:withtenants`'s `ledger.ts` allowlist entry (SM-04) was
+**RATIFIED** at the P0 gate (tracker §4d), not left pending. Migrations through `0053`
+(`search_provider_incurred_cost`), `0060` (`search_google_oauth_states`), `0061`
+(`search_google_performance`, SM-25b) and `0062` (`search_search_terms`, SM-20) are applied
+(corrected 2026-07-31, SM-23 — this paragraph previously stopped at `0060`); `0058`/`0059` are a
+deliberate reservation for the `reports` module, not a gap (tracker §6ap). The platform-nest
+migration chain as a whole runs one further, to `0063` (a PM ticket, not search) — do not read
+`0062` as the platform-wide head.
 
-**SM-04, SM-05 and SM-06 discharged their ACs on 2026-07-27 and await the ⚡ QA + architect gate.**
-SM-04: the `SearchDataProvider` abstraction, capability registry + per-engagement selection cascade,
-shared no-RLS cache with advisory-lock single-flight, metering ledger with true-up, the ordered
-scope→engagement→tenant→global stop-loss, **37 dispatch tests**, and the `GET
-engagements/:id/cost-projection` endpoint (what-if pricing + over-budget flag). SM-05: the real
-DataForSEO driver (Standard-queue post/poll, keyword metrics, backlinks, AI visibility, §8a rate
-table) with **25 mock-server tests** — no network or credentials required. SM-06: credentials +
-per-pillar kill switches + keyless bootstrap + env docs in three places. Search suites **125/125**;
-`tsc` and `lint:withtenants` clean.
+**Known real gaps, current as of 2026-07-31 (tracker §0/§1, corrected by SM-23):** the two live
+money-path defects noted at 0.3.0 — a callback double-charge (SM-56) and a missing `provider`
+predicate on reconciliation (SM-59) — **cleared their bundled ⚡ gate and are LANDED** (tracker
+§6bc; this paragraph previously said "gate owed," which was stale). SM-14's remainder and SM-17
+still owe QA gates. GA4/GSC read paths are built (SM-25b LANDED, migration `0061`); Ads read (SM-25c)
+is still TODO. SEM apply/report/scheduler: SM-30 (manual apply/export) and SM-20 (search-terms
+sync) are DEV-VERIFIED, gates owed; SM-19 (dual-mode picker UI) has real committed frontend work
+with no ticket-scoped verification (tracker §6bk); SM-21 (api-mode execute), SM-22 (reports) remain
+TODO; SM-54's platform-side scheduler is **LANDED** (§6bc). A new hardening wave (SM-63/64/66-70)
+closed an echo-validation gap across all three vendor drivers — **SM-68/70 are mid-rebuild** after
+an orchestrator accidentally reverted uncommitted work in `providers/dataforseo.ts` (tracker §6bk);
+do not treat that driver as clean until the rebuild reports and a fresh gate runs. Real-vendor-
+account fidelity (billing units, error inventories) remains unproven — no capability has run
+against a funded account (OQ-2/9/10/11).
 
-**Keyless is a first-class mode:** with no DataForSEO credentials the paid driver is never
-registered, every paid capability fails closed, and the $0 pillars (crawler audits, keyword
-clustering, AI drafts) are unaffected — which is what makes the P1-before-P2 order real.
-
-**Known gaps:** SM-04's `lint:withtenants` allowlist entry for the platform-wide spend ceiling is
-**pending architect ratification**. SM-05's real-data pull is gated on the $50 DataForSEO deposit.
-No crawlers (SM-07), no `seo` console in platform-ui (SM-11). Unrelated pre-existing failure
-elsewhere in the repo suite: `admin/bot-admin.test.ts` chat-thread proxy.
-
-**Running state + sequenced plan:** [`../blueprints/seo-sem-execution-tracker.md`](../blueprints/seo-sem-execution-tracker.md)
-(SM-00…SM-30 ledger, 12-step order, M1–M5 milestones, blocker table).
-**Next:** SM-04 close-out → SM-06 ∥ SM-05 (M1) → P1 crawlers/keywords/AI/console (M2 — the whole
-department demos at $0 provider spend, no external gate). Then P2 paid data (gated on the $50 DataForSEO
-deposit) → P3 SEM + reports + manual-apply → P4 live-ads OAuth writes. Decision-gated extras: Umami
-(OQ-5), Semrush premium driver (OQ-3).
+**Running state + full ledger:**
+[`../blueprints/seo-sem-execution-tracker.md`](../blueprints/seo-sem-execution-tracker.md) (§0 state
+at a glance, §1 per-ticket ledger, §6au for the latest architect rulings).
+**Next (tracker §6x.4, authoritative order):** the bundled ⚡ QA gate (SM-54/56/59/61) → SM-14
+remainder/SM-17/SM-47/SM-48/SM-49 owed gates → SM-15 ∥ SM-16 → SM-51/SM-30 → SM-19/SM-20 → SM-21 ⚡
+→ SM-25a ⚡ → SM-25b → SM-25c → SM-26/SM-22 → SM-23 (this reconciliation) → SM-24. Decision-gated
+extras stay parked: Umami (OQ-5), Semrush premium connector (superseded permanently by the SM-34
+HTTP driver, OQ-3 no longer gates anything).
 
 ## social-media — SMM · Organic Publishing · `0.0.0` · PLANNED
 
@@ -456,10 +492,20 @@ rows; the gateway is Zone A egress-only.
 **Future plans:** built under the `creative` P1–P4 tickets (CR-* — design §12); container-build verification
 on a Docker host before deploy (same caveat as ai-gateway-go).
 
-## reports — Work Tracker · Reports · Appraisal · `0.0.0` · PLANNED
+## reports — Work Tracker · Reports · Appraisal · `0.1.0` · IN PROGRESS
 
-**What exists:** design only — [`../blueprints/tracker-reporting-foundation.md`](../blueprints/tracker-reporting-foundation.md).
-No code, no migrations.
+**Design:** [`../blueprints/tracker-reporting-foundation.md`](../blueprints/tracker-reporting-foundation.md).
+**What exists (dev, P0 + the first P1 ticket):** the substrate blockers are closed and the fact fabric
+computes. Migrations `0054` (`pm_task_assignees`, relational owner/responsible/contributor + JSONB
+backfill + dual-write), `0055` (`org_unit_memberships`, as-of-date intervals with a `btree_gist`
+non-overlap EXCLUDE), `0056` (`report_work_calendars` / `report_checkins` / `report_work_facts`
+behind the `reports` third wall). Code: `src/core/dept-resolution.ts` (pure precedence ①–④ + provider
+stamp + org-blob membership sweeper), the pm→`work_activity` outbox consumer with real actor
+propagation, and **`src/modules/reports/fact-job.ts` + `POST /api/:t/reports/facts/recompute`** — the
+nightly/backfill fact job (owner-takes-all attribution, Σperson ≤ Σunit = company, idempotent
+DELETE+INSERT slices, §5.3 leave-aware `auto_missed` check-ins). Still absent: the metric seeds +
+RollupProvider (TR-08), every read endpoint, the `ReportDocument` builder, the viewer/charts, XLSX/PDF
+export and the whole appraisal layer.
 A **multi-grain reporting layer over the existing tracker** — the PM module (`0018`, `0036`–`0044`) already
 IS the task tracker; this program adds the grain fabric and the report/appraisal layer it lacks. One atomic
 fact grain (`person × project × day`); department / company / week / month are additive rollups, ratios always
@@ -474,10 +520,11 @@ feeds the web viewer, the exporters, the AI narrative and the MCP tools — no s
 recompute live; management + appraisal reads come from a **sealed** period-close snapshot. Mandatory per-person
 EOD check-ins (compliance measured against the HR working calendar so leave is not a false negative);
 manager-weighted blended appraisals with mandatory human commentary and an append-only acknowledgement trail.
-Migrations `0050`–`0055`. Owner-takes-all outcome attribution + listed contributors, so company totals never
-double-count.
-**Future plans:** built under the P0–P6 `TR-*` tickets (design §12, 30 tickets, 12 QA-gated); P0 gates
-everything downstream.
+Migrations `0054`–`0059` (rebased +4 from the doc's original `0050`–`0055` — see the blueprint's §15).
+Owner-takes-all outcome attribution + listed contributors, so company totals never double-count.
+**Future plans:** built under the P0–P6 `TR-*` tickets (design §12, 33 tickets after the three P0
+additions, 12 QA-gated). P0 is complete; P1 is mid-flight (TR-07 landed, TR-08 next — it owns the 21
+metric seeds, the `RollupProvider` and the module-contract registration this module still lacks).
 
 ## report-renderer — Print/PDF Sidecar · `0.0.0` · PLANNED
 

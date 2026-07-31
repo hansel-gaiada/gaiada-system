@@ -53,6 +53,16 @@ trust the tables below, not the paragraph above.
 - **Status semantics the UI relies on:** `404`/`405` → "not built yet" (readers fall back to empty;
   writers report "pending"). `403` → "not authorized" (readers surface a limited-access state — do
   **not** 404 an unauthorized read). `2xx` → success.
+- **Error body shape:** `{ error, field?, code? }`. `code` (SM-53/SM-57) is a machine-readable
+  discriminator some error bodies now carry alongside the human-readable `error` string — e.g. the
+  search module's typed refusals (`scope_disabled`, `budget_exceeded`, `pillar_disabled`,
+  `no_capable_provider`, `gateway_not_configured`, …) on 409/503 responses. **Additive and optional:**
+  existing callers that only read `.error` are unaffected; a caller may branch on `code` instead of
+  string-matching `error` once an area is known to send it, but must not assume every error body has
+  one. Search's single-subject dispatch/gateway refusals: `scope_disabled`/`budget_exceeded` → 409
+  (well-formed request, engagement config forbids it — the operator changes the config); everything
+  else in that family (`pillar_disabled`, ceiling/provider unavailability, `gateway_not_configured`)
+  → 503 (a deployment state, not a caller error, not a crash).
 - **Events (audit + notifications):** writes SHOULD emit domain events onto the existing outbox/event
   backbone so they appear in `/admin/audit` and the notifications bell. Event names are noted per area.
 - **Legend:** ✅ BUILT (endpoint exists) · 🟡 PARTIAL · ⛔ PENDING (UI ready, backend TODO).
@@ -284,6 +294,22 @@ per the 2026-07-17 route inventory (confirm UI has been repointed off the in-mem
   1 for any pre-migration doc with no version rows yet — synth-on-read, not a backfill DML).
   Migration `0044_pm_doc_versions.sql` (table `pm_doc_versions`, FORCE RLS off the 0025
   `app_current_tenants()` helper).
+- **BUILT (TR-02, 2026-07-30 — tracker/reporting program, see
+  `docs/blueprints/tracker-reporting-foundation.md` §3.1/§12/§15):** task GET responses (`GET
+  /api/:t/pm/tasks/:id`, `GET …/projects/:id/tasks`, `GET …/tasks?assignee=me`) gained an additive
+  `contributors: {userId, name}[]` field (`[]` when none — old FE builds simply ignore the extra
+  key). `PATCH /api/:t/pm/tasks/:id` gained `addContributor`/`removeContributor` ops (a user id;
+  same op-style as `addSubtask`) — a mere `pm.update`-level member can call these (not
+  manage-gated like reassigning `assignee`); the target must be a UUID and an active member of the
+  tenant (400 otherwise); re-adding/removing an absent contributor is a no-op, never an error.
+  Contributors are **never outcome-credited** and are **not** copied by `duplicate`/`duplicateTask`.
+  Underneath, every path that writes the `assignee` blob (`createTask`, `patchTask` reassignment,
+  the recurrence-spawn child insert, `duplicateTask`) now ALSO writes migration `0054`'s
+  `pm_task_assignees` owner/responsible rows in the SAME transaction (dual-write; the blob stays
+  the byte-unchanged FE wire format — no existing response field changed shape). A write-time
+  drift-guard hook (`assigneeDrift`/`logAssigneeDriftIfAny` in `pm.controller.ts`) compares blob↔rows
+  after every dual-write and logs `[PM-ASSIGNEE-DRIFT]` on a mismatch (TR-07 will wire the nightly
+  per-tenant sweep). No new migration in this ticket (schema is TR-01's `0054_pm_task_assignees.sql`).
 
 ## 6. IT: devices & n8n — `lib/it.ts`  — **ALL ✅ BUILT**
 **See [`memory/it-device-contract`].** All present per the route inventory: `GET/POST /api/:t/it/devices`,
@@ -517,6 +543,22 @@ that drives ingestion automatically off pm/pipeline/meeting/pipeline_run events
 the feed has live automatic writers today, redelivery-safe (dedupe by outbox id, dead-letter after
 `DEAD_LETTER_MAX_RETRIES`).
 
+**TR-05 additions (2026-07-30, tracker/reporting program §3.4):** the consumer now also covers
+`pm_doc` (create/update/restore, `objectKind: 'doc'` — surfaces via `deliverable_evidence`) and
+`pm.task.commented` (comments on a genuine `pm_tasks` row only — a comment on a non-PM "task"
+never mints a bogus `source='pm'` row; guarded in `collab.controller.ts`). Task status-change verbs
+are now **completed / reopened / status_changed**, derived from the `is_done` FLAG that
+`pm.controller.ts`'s `patchTask` already computes via `effectiveStatuses()` (never a literal status
+id — a renamed/custom done status still counts; carried through the outbox payload as
+`wasDone`/`isDoneNow`/`statusChanged` so the consumer never re-derives is_done-ness itself). A patch
+with no status edge still falls back to the generic `updated` verb. Historical `pm_doc` activity is
+backfilled the same way pm_task/pm_project already were; historical comment activity is **not**
+backfilled (flagged, not silently skipped — see `work-activity-backfill.ts`'s header) because
+`writeActivity`'s "commented" rows are filed under whatever `entityType` the caller passed (e.g.
+`"task"`, shared across subsystems), so telling a PM comment apart from a non-PM one pre-go-live
+would need a join this backfill doesn't do; comment evidence starts from this ticket's live
+consumer forward only.
+
 - ✅ `GET /api/:t/work-activity?deptId=&projectId=&personId=&since=&limit=` → `WorkActivityRow[]`
   (member-level read; `deptId`/`projectId`/`personId` filter via a join on `work_activity_links`;
   `since` is an ISO timestamp lower bound on `occurredAt`; `limit` default 100, max 500).
@@ -735,21 +777,18 @@ provenance-carrying response the console can read today. **SM-38 badges it** (Sc
 grid + total, the engagement header's mode statement) — verified against `providers/dispatch.ts`'s
 `ProjectedToolCost`/`projectMonthlyCost` and `search.controller.ts`'s `getEngagementCostProjection`.
 
-**Gap SM-38 found, left unbadged rather than faked:** `search_keywords` (the Keywords tab's
-`volume`/`difficulty` columns) has NO provenance column at all — no `metrics_provider`, no
-`metrics_simulated`. The three snapshot tables a future rankings/backlinks/ai-visibility tab would
-read (`search_rank_snapshots`/`search_backlink_snapshots`/`search_ai_visibility`) are one step
-further: they carry `provider` + a nullable `provider_call_id`, but **still no `simulated` column**.
-All four columns land together in **migration 0048, owned by SM-36 (not started)**. Until then: no
-chip, no claim either way on any of these four surfaces — a `simulated` field read from a row that
-doesn't have one is `undefined` (falsy), which would silently render every synthetic value as real,
-the exact failure this whole ticket exists to prevent. **SM-36/SM-14/15/16 implementers:** badge
-these the same way `cost-projection` is badged today once 0048 selects the columns; until it does,
-the platform-mode statement (`ProviderModeStatement`, `components/search/SimulatedBadge.tsx`) is the
-honest fallback for "is this data simulated" on any surface that goes live ahead of 0048 — in
-simulate mode every freshly-pulled row is synthetic by construction (boot-time mutual exclusion means
-a live instance can't create one), so the mode statement alone is still truthful even with no per-row
-column yet.
+**Gap SM-38 found (superseded — migration 0048 landed, SM-14 discharged the Keywords-tab half):**
+`search_keywords` originally had NO provenance column at all — no `metrics_provider`, no
+`metrics_simulated` — and the three snapshot tables carried `provider` + a nullable
+`provider_call_id` but no `simulated` column. All four columns landed together in **migration 0048**.
+`listKeywords` (`search.controller.ts`) now selects `metrics_provider AS "metricsProvider",
+metrics_simulated AS "metricsSimulated"` alongside `volume`/`difficulty`/`cpc_usd` — SM-14's own AC4 —
+and `platform-ui`'s `SearchKeyword` interface (`lib/searchMarketingShared.ts`) + demo fixtures
+(`lib/demoFixtures.ts`) carry the same two fields, verified against that exact SELECT. `metricsProvider`
+is `null` until a metrics-pull ever runs for that keyword (never a guessed vendor); `metricsSimulated`
+is a real boolean (0048: `NOT NULL DEFAULT false`), never absent. `search_rank_snapshots.simulated` is
+SM-14's own stamp (below); `search_backlink_snapshots`/`search_ai_visibility.simulated` are SM-16's
+(BUILT, see further down this section).
 
 Note for **SM-17**: its ledger/usage read surfaces MUST select and expose `simulated`, or a demo
 month's synthetic dollars will render as real client spend.
@@ -775,9 +814,10 @@ actual routes `search.controller.ts` mounts):
 - `GET/POST campaigns/:id/negatives` · `PATCH/DELETE negatives/:id` → `SearchNegative`. `status`
   writable only as `proposed|approved|dismissed` (`applied` is SM-30/21's job).
 - `POST campaigns/:id/negatives/propose` — AI negative-keyword classification over
-  HUMAN-SUBMITTED search terms (`{terms:[...]}` or `{text:"one per line"}` — no live search-term
-  sync exists yet, that is SM-20's job). Fallback on a gateway outage is deliberately an EMPTY
-  candidate list, never a fabricated rule-based judgment.
+  HUMAN-SUBMITTED search terms only (`{terms:[...]}` or `{text:"one per line"}`) — it does NOT yet
+  read the synced `search_term_metrics_daily` rows SM-20 (below) now persists; wiring an AI negative
+  sweep to the SYNCED terms (rather than a human paste) is SM-22's job, not this route's. Fallback on
+  a gateway outage is deliberately an EMPTY candidate list, never a fabricated rule-based judgment.
 - `GET/POST campaigns/:id/change-proposals` · `GET change-proposals/:id` · `PATCH
   change-proposals/:id` → `SearchChangeProposal`. This ticket only reaches
   `proposed → approved | dismissed`; `applied` is refused everywhere here (400) — SM-30 (manual
@@ -785,8 +825,144 @@ actual routes `search.controller.ts` mounts):
   `payload`/`mode` are editable only while `status='proposed'` (payload is hash-matched at approval,
   design §04).
 
-**✅ BUILT (SM-16 — backlinks + GEO/AI-visibility pulls; real routes, not the speculative
-`rankings/pull`-style paths the PENDING table below still lists for SM-14):**
+**✅ BUILT (SM-30 — the manual-apply/export twin; D-8's zero-OAuth manual half, ships without SM-25's
+Google client):**
+
+- `POST change-proposals/:id/export` → `{fileId, filename, contentType:"text/csv", byteSize,
+  provenance}`. Requires `status IN ('approved','applied')` (re-exporting an already-applied proposal
+  is allowed — a harmless re-download) AND `mode='manual'` (an `mode='api'` proposal is refused; it
+  executes exclusively via SM-21's one-shot approval path — this route never calls a vendor). Builds
+  a real, researched Ads-Editor-importable CSV per `kind` (`launch`→Keywords shape,
+  `pause`/`budget`/`bid`→Campaigns shape, `negatives_batch`→negative-keywords shape,
+  `ads_batch`→RSA shape — see `sem-export.ts`'s file header for the exact Google-doc-sourced column
+  names and the 5 explicitly-named format assumptions where confidence ran out). Persists the CSV as
+  a `files` row and links it via `search_change_proposals.export_file_id`. `budget`/`bid` read from
+  `payload` first, falling back to the campaign's own stored fields; `negatives_batch`/`ads_batch`
+  require `payload.ids: string[]` (the specific negative/ad rows this batch covers — an ads_batch ad
+  must already be `status='approved'`, never silently skipped). **Honesty on the one data-informed
+  kind (`launch`, built from provider-metric-bearing keyword clusters):** the response's `provenance`
+  (`{providers, simulatedCount, realCount, unpulledCount}`, never blended, same shape as SM-18's plan
+  generator), the `filename` (`-SIMULATED` suffix whenever any row is simulated), and a **per-row
+  trailing "Notes" column** in the CSV itself all carry the marker — never a leading comment row
+  (which would risk Ads Editor reading it as a shifted header). Cerbos action `update` (baseline
+  tier — exporting has no live side effect).
+- `POST change-proposals/:id/mark-applied` → body `{note?: string}` → `{id, status:"applied"}`. **The
+  one new door to `status='applied'`** — narrow by construction: one route, one elevated Cerbos action
+  (`apply_manual`, matching `search:campaign:launch`'s declared scope — module_manager/company_admin/
+  group_executive only, no Cerbos policy file changed by this ticket), one precondition
+  (`status='approved'` AND `mode='manual'`), one audit trail. The generic `PATCH change-proposals/:id`
+  above still refuses `'applied'` unconditionally — unchanged, regression-tested. Idempotent: a
+  sequential double-call is refused 400 (already-applied), a genuine concurrent collision is refused
+  404 via a compare-and-swap `UPDATE ... WHERE status='approved'` (the same idiom the PATCH route
+  uses) — no code path can double-record. Cascades `search_negatives.status→'applied'` /
+  `search_ads.status→'live'` for the rows named in `payload.ids` (design §04) — campaign-level kinds
+  (`launch`/`pause`/`budget`/`bid`) deliberately do NOT touch `search_campaigns` here (that mirrors
+  the campaign PATCH route's own pre-existing rule: live/paused/ended require a real live-ads sync,
+  SM-20/25/26 — a human's self-report is not the same authority as a read-back from the account).
+  **Deliberately NOT an MCP tool** (an automation principal cannot self-attest a human's live-platform
+  action) — `search.exportProposal` IS a real MCP-tool binding now (`method`/`pathTemplate` on the
+  module contract), `search.applyNegatives`/`setBudget`/`launchCampaign` remain SM-21/26's stubs.
+
+**✅ BUILT (SM-20 — search-terms sync; the search-terms HALF of the ticket only — the
+`search_campaign_metrics_daily` bridge is still not built, see the PENDING row below):**
+
+- `POST search-terms/callback` → body `{engagementId, campaignId, rows:[{adGroupId, date, term,
+  matchType?, impressions?, clicks?, costMinor?, currency?, conversions?, convValueMinor?}]}` →
+  `{status:"ingested", campaignId, simulated, rowsReceived, rowsUpserted}`. A signed webhook, NOT an
+  ordinary console route — authenticated by a shared secret header
+  (`x-gaiada-search-sem-callback-secret`, env `SEARCH_SEM_CALLBACK_SECRET`), checked FIRST, before any
+  body validation, Cerbos check, or database read. **Deliberately a DIFFERENT secret from
+  `SEARCH_CALLBACK_SECRET`** (the DataForSEO collect edge's own, SM-56) — two different external
+  trust boundaries (a paid-vendor postback vs. a Google Ads Script running inside a client's own
+  account), never sharing one secret. Fail-closed when unconfigured (an unset secret refuses EVERY
+  request, same as SM-56's edge). Every request whose `campaignId` does not resolve to a campaign
+  under the claimed `engagementId`, or whose `adGroupId` does not resolve to an ad group under that
+  campaign, is refused with the SAME 404 (`SearchTermScopeError`) as a campaign that does not exist at
+  all — the SM-63 admission-check class, applied on this edge from day one rather than discovered by a
+  gate. **Not a paid pull**: never routes through `dispatchProviderOp`, writes no `search_provider_calls`
+  row — `costMinor` on an ingested row is the CLIENT's OWN real Google Ads spend, self-reported by
+  their account, never our metered provider cost (design addendum §A3 money-language rule). Idempotent
+  via a schema-level `UNIQUE (tenant_id, campaign_id, row_hash)` (migration 0062) — `row_hash` is a
+  server-computed sha256 over the canonical tuple (SM-08's precedent, chosen over a tuple UNIQUE
+  because `term` is unbounded caller text) — enforced via `INSERT ... ON CONFLICT ... DO UPDATE`, so a
+  redelivered or partially-overlapping batch never duplicates rows, proven under a genuinely forced
+  concurrent race (see `sem-search-terms.test.ts`). `simulated` stamped from
+  `config.search.providerMode` at write time (§A4.7 — this edge has neither a `DispatchResult` nor a
+  per-connection OAuth issuer flag to draw the flag from).
+- `GET campaigns/:id/search-terms?adGroupId=&startDate=&endDate=` → the persisted rows (newest date
+  first), each carrying its own `simulated` badge — the "Search Terms" tab's read surface (this row
+  used to say "no live search-term LISTING exists yet"; it now does).
+- **Still not built** (see the PENDING table below): a `search_campaign_metrics_daily` ingest route —
+  SM-20's design-doc line also names a campaign-level metrics-daily bridge; this ticket's brief scoped
+  it to the search-terms half only, and that table has no writer yet.
+
+**✅ BUILT (SM-14 — rank tracking; real routes, not the speculative `rankings/pull`-style paths an
+earlier draft of this doc's own PENDING table used to list):**
+
+- `POST engagements/:id/rank-pull` → body `{keywordIds?: string[]}` (omit for every `is_tracked=true`
+  keyword under the engagement). Sequential per-keyword dispatch (`kind:"serp"`, tool-scope toggle
+  `rank`); a mid-batch scope/budget/pillar refusal stops the loop but never rolls back already-pulled
+  keywords — remaining ones report `{status:"skipped", reason:<code>}` inside the batch response
+  (HTTP 200), same shape as SM-16's pulls. Each pulled result + the persisted `search_rank_snapshots`
+  row carry `position` (nullable — the tracked property genuinely not found in that SERP is honest,
+  never an error), `rankedUrl`, `provider`/`simulated` stamped from `DispatchResult.simulated` (never
+  re-derived from the platform mode or the nullable `provider_call_id` FK), and `dropped` +
+  `previousPosition` (a found→worse or found→not-found regression vs. the immediately-prior snapshot
+  emits `search.rank.dropped`; first-ever pulls and not-found→not-found never do).
+- `POST keyword-sets/:id/metrics-pull` → body `{keywordIds?: string[]}` (omit for every keyword in
+  the set). Same sequential/hard-stop shape, dispatching `kind:"volume"` (tool-scope toggle
+  `volume`). `search_keywords.volume`/`difficulty`/`cpc_usd` + `metrics_provider`/`metrics_simulated`
+  are all written in ONE UPDATE (provenance can never disagree with the value it sits on). A keyword
+  absent from the provider's response is left completely untouched — "absent stays absent," never a
+  re-stamp with no new value.
+- `POST rank-pulls/callback` → body `{engagementId, propertyId, keywordId, taskId}` — the
+  Standard-queue **COLLECT** edge n8n's DataForSEO postback bridge hits (**BUILT**, SM-56; the
+  postback itself carries only a task id and is never trusted as data). **A collect costs nothing:**
+  it retrieves a task this platform already paid for at post time via a task-id-keyed fetch
+  (`task_get` only) and writes **no** ledger row. It does not route through the dispatch choke-point
+  (which cannot retrieve without re-posting — that was the SM-56 double charge), but still enforces
+  the **pillar** and **scope** gates; only the budget cascade is skipped, because there is no
+  purchase to price. n8n gets no bypass.
+  - **`taskId` is REQUIRED** (it was optional pre-SM-56, used only as a correlation id): a collect
+    with no task id has nothing to collect.
+  - **Auth:** every existing wall is unchanged (service/IdP token, module gate, tenant scope, RLS,
+    Cerbos `research`) **plus** a required `x-gaiada-search-callback-secret` header compared in
+    constant time against `SEARCH_CALLBACK_SECRET`. **Fail-closed:** with that env unset the route
+    refuses every request. `401 {error}` for a missing *or* wrong secret — deliberately
+    indistinguishable, so the edge is not an oracle.
+  - **Responses:** `200 {keywordId, keyword, status, position, rankedUrl, provider, simulated,
+    dropped, previousPosition, taskId, reconciledIncurred}` where `status` is `"collected"` (one new
+    snapshot, attributed to the original paid call) or `"duplicate"`. **Postbacks are at-least-once,
+    so redelivery is normal and idempotent:** the same task id arriving again returns
+    `status:"duplicate"` with **200** (the platform holds the data — a retrying vendor must not be
+    told it failed) and writes no second snapshot and no second ledger row.
+    `reconciledIncurred: true` means this collect closed out a charge previously written off as
+    `incurred`, advancing that row to `completed` **at the same cost** (never a second row).
+  - **Refusals:** `400` bad/missing ids or missing `taskId`, or `keywordId`↔`engagementId`↔
+    `propertyId` linkage mismatch · `401` secret · `404` no ledger record of a paid task with that id
+    for this tenant (refused *before* any vendor call, so a forged postback cannot cause spend or
+    even a vendor round-trip) · `409 {code:"scope_disabled"}` · `503
+    {code:"pillar_disabled"|"collect_unsupported"}` (`collect_unsupported` = the resolved driver has
+    no task-id fetch; refused rather than downgraded to a paid re-post).
+- `GET properties/:id/rank-snapshots` → optional `?keywordId=&engine=&device=&limit=`, raw history
+  newest-first, **badge, not filter** — every row keeps its own `provider`/`simulated` truth across a
+  mode flip (there is no aggregate/COUNT reader over this table in the console yet).
+- `GET keyword-sets/:id/keywords` (`listKeywords`, pre-existing SM-09 route) widened to also select
+  `metricsProvider`/`metricsSimulated` (see the "Gap SM-38 found" note above) — SM-14's AC4.
+- Both pulls are `resource_search_keyword` actioned as `research` (a paid-pull action distinct from
+  plain `read`/`update`, per that policy's own header comment); the callback route is `research`
+  scoped to the specific `keywordId`.
+- DB-backed integration coverage: `platform-nest/src/modules/search/search-rank.test.ts` (live
+  Postgres + real HTTP, mirrors SM-16's `search-provider-pulls.test.ts`) — happy path, the
+  **mutation probe** proving both writers stamp from `DispatchResult.simulated` and not
+  `config.search.providerMode` (swapping the source turns exactly those 2 tests red, all others
+  green — verified by temporarily making that exact substitution and reverting), drop/no-drop
+  detection, mid-batch refusal leaving already-pulled rows intact, "absent stays absent," a live
+  re-pull overwriting previously-simulated metrics atomically, the callback route (happy path +
+  cross-linkage 400), and the badge-not-filter reader.
+
+**✅ BUILT (SM-16 — backlinks + GEO/AI-visibility pulls; real routes, mirroring SM-14's shape
+above):**
 
 - `POST engagements/:id/backlinks-pull` → one dispatch for the engagement's own property (0034: an
   engagement has exactly one). Response + the persisted `search_backlink_snapshots` row both carry
@@ -823,20 +999,119 @@ actual routes `search.controller.ts` mounts):
   Beach SEO" engagement (`ai_visibility` starts `enabled:false` in the seed on purpose, to make the
   refusal path demonstrable before an operator flips it on).
 
+**✅ BUILT (SM-17 — engagement ledger read surface; tracker §6n. AC discharged, ⚡ QA gate still
+owed — code is real and UI-wired, verified against `search.controller.ts`, not yet gate-cleared):**
+
+- `GET engagements/:id/ledger` → `EngagementLedger` — up to 200 most-recent `search_provider_calls`
+  rows (each carrying its own `provider`/`simulated`, never re-derived from platform mode),
+  current-mode month-to-date `costToServeUsd` (via the shared `sumMonthToDate` the budget stop-loss
+  itself reads), a separate `simulatedHistoryExcludedUsd` for the other mode's MTD figure (never
+  blended in), and `currentModeRowCount` so a real $0.00 (rows exist, summed to zero) reads
+  differently from no rows at all. Consumed by `platform-ui/src/lib/searchMarketing.ts`'s
+  `getEngagementLedger` and rendered by `CostLedgerPanel.tsx` on the
+  `/departments/[deptId]/ledger` page (**this is now live UI, not a `BackendPending` stub**).
+  Language is ticket-binding: "cost-to-serve (standard rates)", never "spend"/"cash"/"actual" (the
+  word "actual" is forbidden on this endpoint's figures until SM-42/SM-41 land).
+- **Not built:** any tenant-scope (cross-engagement) MTD read or a threshold-event listing — see
+  the PENDING table below.
+
+**✅ BUILT (SM-25a — Google OAuth core, HTTP surface; design addendum §A12, tracker §6ao/§6ap):**
+GSC/GA4/Ads per-client credential links. The service layer (`modules/search/google/oauth.ts` +
+`oauth-state.ts`) is DEV-VERIFIED against the SM-51 sandbox and a real Keycloak IdP (tracker §6ao);
+this wave adds the routes. **Every response below is `GoogleConnectionView` — token material and
+`enc:v1:` ciphertext are STRUCTURALLY ABSENT, asserted at the HTTP boundary in
+`search-google-oauth.controller.test.ts`, never just trusted from the service layer.**
+
+- `POST :t/modules/search/google/connections/:provider/authorize` → body
+  `{clientId, propertyId?, scopes?, loginHint?}` → `{authorizeUrl, state, expiresAt, issuerHost,
+  simulated, scopes}`. `:provider` ∈ `google_search_console|google_analytics|google_ads` (400
+  otherwise). Validates `clientId` belongs to the tenant and, if `propertyId` is given, that it
+  belongs to `clientId` (same cross-client-mix-up guard `createEngagement` uses) — both 400.
+  Cerbos `resource_search_property` + `update`.
+- `GET api/search/google/oauth/callback` → query `code, state, provider` (or `error` +
+  `error_description` on the user declining consent at the issuer — a clean, non-throwing
+  `200 {status:"denied", error, errorDescription}`, not an exception). **Deliberately
+  tenant-agnostic — no `:tenantId` in the path.** Real Google permits no wildcard `redirect_uri`,
+  so a per-tenant callback path is impossible; the tenant travels inside the signed `state`
+  instead (`gs1.<stateId>.<tenantId>.<HMAC>`). Lives on its own controller
+  (`search-google-oauth.controller.ts`, registered in `app.module.ts`), NOT on `SearchController`,
+  because that controller's `@Controller()` prefix bakes `:tenantId` into every route.
+  - **Auth shape, stated because it is the one route that cannot use the usual chain:**
+    `AuthGuard` applies (it does not require `:tenantId`), but `ModuleEnabledGuard("search")`
+    structurally cannot (it reads `req.params.tenantId` directly) and is not applied — the
+    module-sliced RLS wall still fires deep inside `consumeAuthorizationState`, so a tenant
+    without `search` enabled reads/writes zero rows regardless. Google's own redirect is a bare
+    browser navigation that cannot carry an Authorization header — the URL registered as
+    Google's `redirect_uri` is therefore a fixed page the FRONT END owns (UI-wiring, out of this
+    contract), which calls this endpoint as an ordinary authenticated BFF request, passing
+    `provider` from its own flow context (Google's redirect never carries it).
+  - **What stops a forged or replayed callback:** (1) `parseStateToken` recomputes the state's
+    HMAC over the canonical (stateId, tenantId) pair — a tampered signature OR a spliced tenant
+    segment both fail `timingSafeEqual` before any DB read, 400. (2) `consumeAuthorizationState`'s
+    single atomic `UPDATE … WHERE consumed_at IS NULL … RETURNING` makes a second presentation of
+    the same state match zero rows — replay is refused, 400. (3) the state's `created_by` must
+    equal the calling principal (`req.principal.userId`) — closes login-CSRF. (4) **added by this
+    route, defense-in-depth, not present in the service layer**: once the signature verifies (so
+    the state's `tenantId` claim is trustworthy), an ordinary Cerbos check
+    (`resource_search_property` + `update`, scoped to that tenant) runs BEFORE the exchange — a
+    principal whose `search` role was revoked after starting but before completing the flow is
+    refused (403) rather than allowed to finish a link the platform would no longer let them
+    start.
+  - Returns the masked `GoogleConnectionView` on success.
+- `GET :t/modules/search/google/connections?clientId=` → `GoogleConnectionView[]`. Cerbos
+  `resource_search_property` + `read`.
+- `GET :t/modules/search/google/connections/:id` → `GoogleConnectionView` or 404.
+- `POST :t/modules/search/google/connections/:id/refresh` → forces a refresh (`force:true`),
+  returns the refreshed masked view. Cerbos `update`.
+- `POST :t/modules/search/google/connections/:id/revoke` → RFC-7009 revoke at the issuer, then a
+  local soft-revoke regardless of the issuer's own response → `{connection, issuerRevoked,
+  issuerStatus}`. Cerbos `update`.
+- `PUT :t/modules/search/properties/:propertyId/google-connection/:provider` → body
+  `{connectionId: string|null}` → `{propertyId, provider, connectionId}`. Binds/unbinds a
+  connection to a property's `gsc_connection_id`/`ga4_connection_id`/`ads_connection_id` (0034).
+  Adds ONE guard the service function (`bindPropertyConnection`) does not itself make: the
+  connection's owning client must match the property's client (400 otherwise) — the service
+  function only resolves both ids through the tenant, not against each other. Cerbos
+  `resource_search_property` + `update`, scoped to `propertyId`.
+- **§A12.3's honesty rule, surfaced:** every view above carries `issuerHost` (string) and
+  `issuerIsGoogle` (boolean). **The Connections tab MUST render `issuerHost` whenever
+  `issuerIsGoogle` is `false`** — a dev/sandbox-issued connection must be readable as one at a
+  glance. This is still owed on the UI side (SM-11's Connections tab shows only GitHub + Drive).
+- Errors are the `GoogleSurfaceError` family (`modules/search/google/errors.ts`), mapped by the
+  globally-registered `GoogleOAuthErrorFilter` to `{error, code, detail?}` (SM-53/SM-57's contract
+  shape): `503 google_oauth_not_configured` (deployment state), `400
+  google_oauth_invalid_state` (forged/expired/replayed/mismatched callback — deliberately coarse,
+  never distinguishes WHY), `502 google_token_endpoint_error` / `502 google_api_error` (issuer
+  refused), `409 google_connection_not_linked` (dead connection — re-link, don't retry).
+- DB-backed integration coverage: `search-google-oauth.controller.test.ts` (live Postgres + real
+  Cerbos, not mocked, + the SM-51 sandbox over real sockets) — the full authorize→consent→
+  callback→exchange→seal chain over every route, unknown provider, missing-Cerbos-permission (real
+  Cerbos denial), unauthenticated callback (401), forged signature, spliced-tenant signature,
+  replay, cross-tenant connection isolation (404, not a leak), both HTTP-layer ownership guards,
+  Google's `error=access_denied` outcome, and a malformed-id sweep across every id-shaped param —
+  plus a string-scan assertion (`enc:v1:`/`accessToken`/`refreshToken`/etc.) that no response body
+  anywhere in the chain ever carries secret material. 4 mutation probes (the callback's
+  defense-in-depth Cerbos check, an `assertUuid` guard, and both ownership cross-checks), all red
+  when removed.
+- **Defers to SM-41G** (unchanged from the service layer's own header): Google's consent screen,
+  incremental consent/scope-grant semantics, Testing-mode's 7-day refresh-token expiry,
+  Google-side revocation behaviour, quota/429, the Ads developer token + MCC, and whether real
+  Google accepts our serialized requests at all. **A green run of this surface is a validated
+  client of our own model of Google, not a validated Google integration.**
+
 **⏳ PENDING — each console tab renders `BackendPending` naming its owner until these land:**
 
 | Endpoint(s) | Tab | Owner |
 |---|---|---|
 | `POST audits`, `GET audits`, `GET audits/:id/findings`, `PATCH findings/:id` | Site Audit | SM-07 (crawlers) + SM-08 (ingest/triage) |
 | `GET/POST keywords`, `POST keywords/cluster`, `GET clusters` | Keywords | SM-09 |
-| `POST rankings/pull`, `GET rankings?keywordId&from&to` | Rankings | SM-14 🔵 |
+| — (backend BUILT, see SM-14 above; `/departments/[deptId]/rankings/page.tsx` is still a `PendingCapability` placeholder — no console UI wired yet) | Rankings | SM-14 (UI build, unclaimed) |
 | `GET/POST briefs`, `POST briefs/:id/draft` | Content Briefs | SM-10 |
-| Ads-Editor-ready export + mark-applied on an approved change proposal | Ads Studio | SM-30 |
-| dual-mode (manual/api) picker + api-mode execute (`applyNegatives`/`setBudget`/`launchCampaign`) | Ads Studio | SM-19/21/26 |
-| a live search-term LISTING (negatives CRUD + AI-propose are BUILT, SM-18 above — there is just nothing to list yet) | Search Terms | SM-20 |
-| `GET sem/pacing`, `POST sem/metrics-daily/import` | Pacing | SM-18 (metrics-daily CSV/bridge) + SM-22 |
+| — (backend BUILT, see SM-30 above; the manual-mode HALF of the dual-mode picker — no console UI wired yet) | Ads Studio | SM-19 (UI build, unclaimed) |
+| api-mode picker half + api-mode execute (`applyNegatives`/`setBudget`/`launchCampaign`) | Ads Studio | SM-19/21/26 |
+| `GET sem/pacing`, `POST sem/metrics-daily/import` (campaign-level metrics-daily bridge — the OTHER half of SM-20's design-doc line; the search-terms half is BUILT, see SM-20 above) | Pacing | SM-18 (metrics-daily CSV/bridge) + SM-22 |
 | `GET/POST reports`, `POST reports/:id/approve\|deliver` | Reports | SM-22 |
-| ledger / usage read surfaces (engagement + tenant MTD spend, threshold events) | Engagements, Pacing | SM-17 |
+| tenant-level MTD spend + threshold-event reads (no such endpoint exists; only `GET engagements/:id/ledger` is built — see SM-17 below) | Pacing | SM-17 (tenant-scope remainder) / SM-22 |
 
 🔵 = metered provider capability: gated on BOTH the DataForSEO deposit (OQ-2) **and** the
 engagement's own tool-scope toggle. An absent toggle counts as OFF and dispatch refuses naming it —
@@ -846,6 +1121,9 @@ the console renders absent and explicitly-disabled identically, because the back
 `search.manage` (draft-only baseline = `search_staff`) · elevated `search.scope.write` ·
 `search.campaign.launch` · `search.report.approve` · `search.ledger.admin` (= `search_manager`).
 
-**Connections gap:** the SEO console's Connections tab still shows only GitHub + Drive. Google
-Search Console / GA4 / Google Ads connection entries need the OAuth work in **SM-25**, which is
-gated on a Google OAuth client — deliberately not stubbed in SM-11.
+**Connections gap:** the SEO console's Connections tab still shows only GitHub + Drive. The
+backend side (SM-25a, above) is now built and DEV-VERIFIED against a sandbox/Keycloak issuer —
+Google Search Console / GA4 / Google Ads connection entries just need the UI wired to the routes
+in the SM-25a section above (deliberately not stubbed in SM-11). **Real Google acceptance is still
+gated on a Google OAuth client (SM-41G)** — construction is unblocked, only staging/production
+verification is not.

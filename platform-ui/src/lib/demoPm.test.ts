@@ -79,6 +79,39 @@ describe("demoPm stateful flow", () => {
   });
 });
 
+// ---- TR-32 (backend TR-02) — task contributors ----
+describe("demoPm contributors", () => {
+  it("adds a contributor idempotently, then removes them", () => {
+    const created = json<{ id: string }>(call("POST", `/api/${T}/pm/tasks`, { projectId: "p-web-1", title: "Contrib task" }));
+    let task = json<PmTask>(call("GET", `/api/${T}/pm/tasks/${created.id}`));
+    expect(task.contributors).toEqual([]); // seeded present-but-empty, never omitted, in DEMO_MODE
+
+    call("PATCH", `/api/${T}/pm/tasks/${created.id}`, { addContributor: "u-dev" });
+    call("PATCH", `/api/${T}/pm/tasks/${created.id}`, { addContributor: "u-dev" }); // idempotent, no dup row
+    task = json<PmTask>(call("GET", `/api/${T}/pm/tasks/${created.id}`));
+    expect(task.contributors).toEqual([{ userId: "u-dev", name: "Made Putra" }]);
+
+    call("PATCH", `/api/${T}/pm/tasks/${created.id}`, { removeContributor: "u-dev" });
+    task = json<PmTask>(call("GET", `/api/${T}/pm/tasks/${created.id}`));
+    expect(task.contributors).toEqual([]);
+  });
+
+  it("ignores an unknown user id (mirrors the backend's active-member check)", () => {
+    const created = json<{ id: string }>(call("POST", `/api/${T}/pm/tasks`, { projectId: "p-web-1", title: "Contrib guard" }));
+    call("PATCH", `/api/${T}/pm/tasks/${created.id}`, { addContributor: "not-a-real-user" });
+    const task = json<PmTask>(call("GET", `/api/${T}/pm/tasks/${created.id}`));
+    expect(task.contributors).toEqual([]);
+  });
+
+  it("does NOT copy contributors on duplicate (matches pm.controller.ts)", () => {
+    const orig = json<{ id: string }>(call("POST", `/api/${T}/pm/tasks`, { projectId: "p-web-1", title: "Contrib source" }));
+    call("PATCH", `/api/${T}/pm/tasks/${orig.id}`, { addContributor: "u-dev" });
+    const dup = json<{ id: string }>(call("POST", `/api/${T}/pm/tasks/${orig.id}/duplicate`, {}));
+    const dupTask = json<PmTask>(call("GET", `/api/${T}/pm/tasks/${dup.id}`));
+    expect(dupTask.contributors).toEqual([]);
+  });
+});
+
 // ---- P2-02 tags — per-project registry ----
 describe("demoPm tags", () => {
   it("creates, lists, and renames a tag scoped to its project", () => {

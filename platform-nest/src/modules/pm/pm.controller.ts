@@ -16,6 +16,7 @@ import { emitEvent } from "../../events/outbox.service";
 import { AuthGuard } from "../../auth/guards";
 import { ModuleEnabledGuard } from "../module-enabled.guard";
 import { allocateTaskSeq, deriveUniqueShortCode, displayCode } from "../../core/project-short-codes";
+import { todayIso, addDaysIso } from "../../core/dept-resolution";
 
 type Assignee = {
   kind: "person" | "department" | "division";
@@ -24,6 +25,11 @@ type Assignee = {
   responsibleId: string;
   responsibleName: string;
 } | null;
+
+// TR-02 (§3.1) — a task's contributors: zero or more PERSONS, listed with logged hours, never
+// outcome-credited. Read-only shape on task GET (joined off pm_task_assignees role='contributor');
+// written only via the addContributor/removeContributor PATCH ops below.
+interface Contributor { userId: string; name: string }
 
 const PRIORITIES = new Set(["low", "normal", "high", "urgent"]);
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -271,7 +277,12 @@ const TASK_SELECT = `
          t.estimate_minutes AS "estimateMinutes", t.depends_on AS "dependsOn", t.tags, t.custom_fields AS "customFields", t.updated_at AS "updatedAt",
          t.recurrence, p.short_code AS "projectShortCode", t.seq,
          CASE WHEN p.short_code IS NOT NULL AND t.seq IS NOT NULL THEN p.short_code || '-' || t.seq ELSE NULL END AS "displayCode",
-         COALESCE((SELECT SUM(minutes) FROM time_entries te WHERE te.pm_task_id = t.id AND te.deleted_at IS NULL), 0)::int AS "loggedMinutes"
+         COALESCE((SELECT SUM(minutes) FROM time_entries te WHERE te.pm_task_id = t.id AND te.deleted_at IS NULL), 0)::int AS "loggedMinutes",
+         COALESCE((
+           SELECT json_agg(json_build_object('userId', pta.user_id, 'name', u.name) ORDER BY u.name)
+           FROM pm_task_assignees pta JOIN users u ON u.id = pta.user_id
+           WHERE pta.tenant_id = t.tenant_id AND pta.task_id = t.id AND pta.role = 'contributor'
+         ), '[]'::json) AS "contributors"
   FROM pm_tasks t JOIN projects p ON p.id = t.project_id
   WHERE t.deleted_at IS NULL`;
 
@@ -282,6 +293,7 @@ interface TaskRow {
   estimateMinutes: number | null; dependsOn: string[]; tags: string[]; customFields: Record<string, unknown>; updatedAt: string | null; loggedMinutes: number;
   recurrence: TaskRecurrence | null;
   projectShortCode: string | null; seq: number | null; displayCode: string | null;
+  contributors: Contributor[]; // TR-02 — additive; joined off pm_task_assignees, never the blob
 }
 
 interface TagRow { id: string; label: string; color: string; }
@@ -307,6 +319,304 @@ function validAssignee(a: unknown): Assignee {
     responsibleId: r.responsibleId,
     responsibleName: typeof r.responsibleName === "string" ? r.responsibleName : r.responsibleId,
   };
+}
+
+// ---------------- TR-02/TR-34 — pm_task_assignees dual-write (§3.1, migrations 0054/0063) ----------------
+// Every PM write path that sets/updates the `assignee` JSONB blob calls this in the SAME
+// `withTenants` transaction as the blob write itself (never a separate connection/transaction) —
+// a partial write (blob without rows, or vice versa) is structurally impossible: either both
+// halves commit together or an error rolls the WHOLE transaction back, blob included.
+//
+// TR-01/TR-02 hard constraints honoured here (§15 amendment log rulings, not preference):
+//  (1) person rows pass `ref::uuid::text` — NEVER the raw blob string — as assignee_ref, so it is
+//      byte-identical to `user_id::text` no matter how the blob's string happened to be cased. A
+//      malformed or unknown ref fails LOUDLY at this INSERT (uuid-parse error or FK violation) and
+//      rolls back the entire task write, by design.
+//  (2) `origin_site` is passed explicitly from `config.originSite` on every insert — never left to
+//      the column's `DEFAULT 'central'`.
+//  (4) unit-owned tasks (kind department/division) never get an invented person row: assignee_kind
+//      stays the unit kind, user_id stays NULL. The responsible row (if any) is the ONLY
+//      person-grain row for a unit-owned task.
+//
+// TR-34 (0063, §15 ①): owner/responsible are now TIME-AWARE — a reassignment must CLOSE the old
+// interval and OPEN a new one, never DELETE+INSERT (which would erase the fact that the old value
+// was ever true, letting a recomputed PAST fact slice silently move to the new owner). Point (3) of
+// the TR-01 list above ("respected by DELETING the existing rows first, then INSERTing") is
+// SUPERSEDED by this ticket for owner/responsible specifically — see the four-case transition below,
+// which achieves the same "never transiently violate the invariant" property through the EXCLUDE
+// constraint (0063) instead of through delete-then-insert ordering.
+//
+// Contributors are NOT touched here — they are a separate, additive capability with their own
+// add/removeContributor lifecycle (below), never implied by the owner/responsible blob, and
+// deliberately NOT interval-tracked (see 0063's design-judgement header comment for why).
+type AssigneeKindDb = "person" | "department" | "division";
+interface RoleTarget { kind: AssigneeKindDb; ref: string; userId: string | null }
+
+/** What the blob says role's value SHOULD be, or null when the role should have no open row.
+ *  Person refs are canonicalized (lowercased) HERE, not just at the SQL boundary: the "same value
+ *  as what's already open" comparison in applyRoleTransition below compares `target.ref` directly
+ *  against the STORED (already-canonical) `assignee_ref`, so a same-self dedup or a same-value skip
+ *  must not be defeated by a harmless case difference in the incoming blob (TR-01 hard constraint 1,
+ *  restated for the interval-aware write path). The `::uuid::text` cast at every actual INSERT/
+ *  UPDATE below is kept as the AUTHORITATIVE, format-VALIDATING canonicalization (fails loudly on a
+ *  malformed ref) — this lowercase is a cheap pre-comparison normalization, not a replacement for it. */
+function ownerTarget(assignee: Assignee): RoleTarget | null {
+  if (!assignee) return null;
+  if (assignee.kind === "person") {
+    const ref = assignee.refId.toLowerCase();
+    return { kind: "person", ref, userId: ref };
+  }
+  return { kind: assignee.kind, ref: assignee.refId, userId: null };
+}
+function responsibleTarget(assignee: Assignee): RoleTarget | null {
+  if (!assignee || !assignee.responsibleId) return null;
+  const ref = assignee.responsibleId.toLowerCase();
+  // Same-self dedup mirrors the 0054 backfill's rule: a person owner who IS the responsible gets no
+  // separate responsible row (pm-task-assignees.test.ts case 1 / pm-dual-write.test.ts). Compared
+  // case-INsensitively (both lowercased) so a harmless case difference between refId/responsibleId
+  // never manufactures a phantom separate responsible row.
+  if (assignee.kind === "person" && assignee.refId.toLowerCase() === ref) return null;
+  return { kind: "person", ref, userId: ref };
+}
+
+/** The ONE open row for (tenant, task, role), if any. The 0063 EXCLUDE constraint guarantees there
+ *  is at most one — this SELECT never needs to disambiguate multiple candidates. */
+async function openRoleRow(
+  c: PoolClient,
+  tenantId: string,
+  taskId: string,
+  role: "owner" | "responsible",
+): Promise<{ id: string; assigneeKind: string; assigneeRef: string; validFrom: string } | null> {
+  const r = await c.query<{ id: string; assignee_kind: string; assignee_ref: string; valid_from: string }>(
+    `SELECT id, assignee_kind, assignee_ref, valid_from::text AS valid_from FROM pm_task_assignees
+      WHERE tenant_id = $1 AND task_id = $2 AND role = $3 AND valid_to IS NULL`,
+    [tenantId, taskId, role],
+  );
+  const row = r.rows[0];
+  return row ? { id: row.id, assigneeKind: row.assignee_kind, assigneeRef: row.assignee_ref, validFrom: row.valid_from } : null;
+}
+
+/** Apply ONE role's (owner or responsible) close/open transition for a single task, inside the
+ *  caller's transaction. `today` is passed in (not defaulted) so it is computed exactly once per
+ *  syncTaskAssignees call, matching diffMembershipSweep's pattern in core/dept-resolution.ts.
+ *
+ *  Four cases (never a fifth — this is deliberately exhaustive, mirrors diffMembershipSweep's
+ *  add/amend/transfer/remove shape for the unit axis):
+ *   - no existing open row, a target is wanted           -> INSERT a fresh open row (valid_from=today)
+ *   - existing open row, target is null (role removed)   -> opened TODAY: DELETE outright (never
+ *                                                             represented a day boundary beyond
+ *                                                             today, nothing to preserve); opened
+ *                                                             EARLIER: close it (valid_to = today-1)
+ *   - existing open row, target DIFFERS                  -> opened TODAY: UPDATE in place (amend,
+ *                                                             same as diffMembershipSweep's "amend");
+ *                                                             opened EARLIER: close (valid_to =
+ *                                                             today-1) + INSERT a new open row
+ *   - existing open row, target is IDENTICAL              -> no-op (preserves valid_from/updated_at,
+ *                                                             avoids churning history on every save)
+ *
+ *  Closing always uses `today - 1`, NEVER `today` (unlike diffMembershipSweep's "remove" case,
+ *  which closes at `today` for org memberships) — a deliberate, documented deviation from the 0055
+ *  precedent. Reason: org-structure edits are rare (one sweep per PUT), but a task's assignee can
+ *  realistically be changed more than once on the SAME day. If "remove" closed at `today` and a
+ *  LATER call the same day opened a fresh row for that role, the fresh row's range (starting today)
+ *  would overlap the just-closed row (also covering today) and the EXCLUDE constraint would reject
+ *  it. Always closing at `today - 1` keeps `today` permanently free for whatever this-or-a-later
+ *  same-day call needs to open, and the "opened today -> delete/amend instead of close" branches
+ *  above mean a row is NEVER closed with `valid_to = today` in the first place — so this file never
+ *  produces the state the org-membership convention relies on being rare. */
+/** INSERT one fresh open interval. Deliberately TWO DIFFERENT statement texts branched IN
+ *  TYPESCRIPT (mirroring the original 0054 dual-write's own person-vs-unit split), NOT a single
+ *  statement with a SQL-side `CASE WHEN $n = 'person' THEN ...::uuid::text ELSE ... END`: Postgres's
+ *  extended-query-protocol parameter typing fixes ONE type per parameter for the WHOLE statement,
+ *  inferred from ANY of its occurrences — so a bind parameter used as both `$5::uuid::text` and
+ *  `$5::text` in the same query gets typed as `uuid` throughout, and a unit ref like
+ *  "dept-engineering" then fails `invalid input syntax for type uuid` even on the branch that would
+ *  never have executed. Confirmed the hard way (pm-dual-write.test.ts's department-owner case) —
+ *  branching in JS is the only reliable fix, not a style preference. */
+async function insertOpenRow(
+  c: PoolClient,
+  tenantId: string,
+  taskId: string,
+  role: "owner" | "responsible",
+  target: RoleTarget,
+  actorUserId: string | null,
+  validFrom: string,
+): Promise<void> {
+  const cols =
+    "tenant_id, task_id, role, assignee_kind, assignee_ref, user_id, created_by, origin_site, valid_from, valid_to";
+  if (target.kind === "person") {
+    // `$5::uuid::text` validates format + normalizes case (deviation (1)), fails loudly on a
+    // malformed/unknown ref (uuid-parse error here, or the user_id FK violation just after).
+    await c.query(
+      `INSERT INTO pm_task_assignees (${cols})
+       VALUES ($1, $2, $3, 'person', $4::uuid::text, $4::uuid, $5, $6, $7::date, NULL)`,
+      [tenantId, taskId, role, target.ref, actorUserId, config.originSite, validFrom],
+    );
+  } else {
+    // A unit ref (department/division) is an arbitrary org-node string, NEVER a valid uuid — no
+    // cast, user_id stays NULL (deviation (4)).
+    await c.query(
+      `INSERT INTO pm_task_assignees (${cols})
+       VALUES ($1, $2, $3, $4, $5::text, NULL, $6, $7, $8::date, NULL)`,
+      [tenantId, taskId, role, target.kind, target.ref, actorUserId, config.originSite, validFrom],
+    );
+  }
+}
+
+/** UPDATE an existing row's VALUE in place (the "amend" case — see applyRoleTransition). Same
+ *  JS-side kind branch as insertOpenRow, for the identical Postgres parameter-typing reason. */
+async function amendRow(c: PoolClient, rowId: string, target: RoleTarget, actorUserId: string | null): Promise<void> {
+  if (target.kind === "person") {
+    await c.query(
+      `UPDATE pm_task_assignees
+          SET assignee_kind = 'person', assignee_ref = $2::uuid::text, user_id = $2::uuid,
+              created_by = $3, origin_site = $4, updated_at = now()
+        WHERE id = $1`,
+      [rowId, target.ref, actorUserId, config.originSite],
+    );
+  } else {
+    await c.query(
+      `UPDATE pm_task_assignees
+          SET assignee_kind = $2, assignee_ref = $3::text, user_id = NULL,
+              created_by = $4, origin_site = $5, updated_at = now()
+        WHERE id = $1`,
+      [rowId, target.kind, target.ref, actorUserId, config.originSite],
+    );
+  }
+}
+
+async function applyRoleTransition(
+  c: PoolClient,
+  tenantId: string,
+  taskId: string,
+  role: "owner" | "responsible",
+  target: RoleTarget | null,
+  actorUserId: string | null,
+  today: string,
+): Promise<void> {
+  const existing = await openRoleRow(c, tenantId, taskId, role);
+
+  if (!existing) {
+    if (!target) return; // nothing open, nothing wanted -> true no-op
+    await insertOpenRow(c, tenantId, taskId, role, target, actorUserId, today);
+    return;
+  }
+
+  const sameValue = existing.assigneeKind === target?.kind && existing.assigneeRef === target?.ref;
+  if (sameValue) return; // identical to what's already open -> no-op, don't churn history
+
+  const openedToday = existing.validFrom === today;
+
+  if (!target) {
+    // role removed
+    if (openedToday) {
+      await c.query(`DELETE FROM pm_task_assignees WHERE id = $1`, [existing.id]);
+    } else {
+      await c.query(
+        `UPDATE pm_task_assignees SET valid_to = $2::date, updated_at = now() WHERE id = $1`,
+        [existing.id, addDaysIso(today, -1)],
+      );
+    }
+    return;
+  }
+
+  if (openedToday) {
+    // amend the row opened earlier today in place — never close+reopen on the same valid_from,
+    // which would try to set valid_to one day BEFORE valid_from and violate the valid_range CHECK.
+    // origin_site IS re-stamped here (unlike the close-only path below): an amend replaces the
+    // row's actual VALUE with a new true one, exactly like an INSERT establishing a fresh value —
+    // ruling (2)'s "explicit config.originSite on every write that establishes a value" applies to
+    // it the same way. A mere close (ending an interval's validity, not changing what it once was)
+    // does not re-stamp origin_site, on purpose.
+    await amendRow(c, existing.id, target, actorUserId);
+    return;
+  }
+
+  // genuine transfer: close yesterday, open a new interval today.
+  await c.query(
+    `UPDATE pm_task_assignees SET valid_to = $2::date, updated_at = now() WHERE id = $1`,
+    [existing.id, addDaysIso(today, -1)],
+  );
+  await insertOpenRow(c, tenantId, taskId, role, target, actorUserId, today);
+}
+
+async function syncTaskAssignees(
+  c: PoolClient,
+  tenantId: string,
+  taskId: string,
+  assignee: Assignee,
+  actorUserId: string | null,
+): Promise<void> {
+  const today = todayIso();
+  await applyRoleTransition(c, tenantId, taskId, "owner", ownerTarget(assignee), actorUserId, today);
+  await applyRoleTransition(c, tenantId, taskId, "responsible", responsibleTarget(assignee), actorUserId, today);
+}
+
+export interface AssigneeDriftResult {
+  taskId: string;
+  drift: boolean;
+  blobOwnerKind: string | null;
+  blobOwnerRef: string | null;
+  blobResponsibleRef: string | null;
+  rowOwnerKind: string | null;
+  rowOwnerRef: string | null;
+  rowResponsibleRef: string | null;
+}
+
+// TR-02 drift guard (§3.1 point 5 — the write-time HOOK; TR-07 wires this into a nightly
+// per-tenant sweep, same shape as the ORG-7 service-reconciler's sweepDriftAndOrphans /
+// startDriftSweepLoop). Re-derives the row-side owner/responsible refs from pm_task_assignees and
+// compares them against the CURRENT pm_tasks.assignee blob for one task, inside the SAME
+// transaction as the write that just happened. Read-only; never mutates. In a correctly-functioning
+// dual-write this never reports drift — it exists so a future edit that breaks the invariant is
+// caught the moment it happens, not months later at appraisal time.
+export async function assigneeDrift(c: PoolClient, tenantId: string, taskId: string): Promise<AssigneeDriftResult> {
+  const taskRow = await c.query<{ assignee: Assignee }>(
+    `SELECT assignee FROM pm_tasks WHERE id = $1 AND tenant_id = $2`,
+    [taskId, tenantId],
+  );
+  const blob = taskRow.rows[0]?.assignee ?? null;
+
+  // TR-34: scope to the OPEN row only — the blob reflects CURRENT state, and closed historical
+  // intervals now coexist beside it (0063). `valid_to IS NULL` picks exactly the row that competes
+  // with the blob; the 0063 EXCLUDE constraint guarantees there is at most one per role.
+  const rows = await c.query<{ role: string; assignee_kind: string; assignee_ref: string }>(
+    `SELECT role, assignee_kind, assignee_ref FROM pm_task_assignees
+      WHERE tenant_id = $1 AND task_id = $2 AND role IN ('owner','responsible') AND valid_to IS NULL`,
+    [tenantId, taskId],
+  );
+  const ownerRow = rows.rows.find((r) => r.role === "owner") ?? null;
+  const responsibleRow = rows.rows.find((r) => r.role === "responsible") ?? null;
+
+  const blobOwnerKind = blob?.kind ?? null;
+  // person refs are compared canonically (lowercased) — the row side is ALWAYS canonical
+  // (cast through ::uuid::text at write time), so a case-only difference in the blob must not
+  // read as drift.
+  const blobOwnerRef = blob ? (blob.kind === "person" ? blob.refId.toLowerCase() : blob.refId) : null;
+  const blobResponsibleRef = blob?.responsibleId ? blob.responsibleId.toLowerCase() : null;
+
+  const rowOwnerKind = ownerRow?.assignee_kind ?? null;
+  const rowOwnerRef = ownerRow?.assignee_ref ?? null;
+  // Same-self dedup mirrors syncTaskAssignees: a person-owner who IS the responsible has no
+  // separate responsible row, so the effective row-side responsible ref falls back to the owner's.
+  const rowResponsibleRef = responsibleRow?.assignee_ref ?? (ownerRow?.assignee_kind === "person" ? ownerRow.assignee_ref : null);
+
+  const drift = blobOwnerKind !== rowOwnerKind || blobOwnerRef !== rowOwnerRef || blobResponsibleRef !== rowResponsibleRef;
+
+  return { taskId, drift, blobOwnerKind, blobOwnerRef, blobResponsibleRef, rowOwnerKind, rowOwnerRef, rowResponsibleRef };
+}
+
+// Logs (never throws) when assigneeDrift finds a mismatch — called right after every dual-write so
+// a regression surfaces immediately as a greppable log line, matching the codebase's existing
+// drift-sweep convention (see reconcile-consumer.ts's "[SERVICE-DRIFT-SWEEP]"). A drift guard that
+// could itself fail the request it's guarding would be worse than no guard, so this never throws.
+export async function logAssigneeDriftIfAny(c: PoolClient, tenantId: string, taskId: string): Promise<AssigneeDriftResult> {
+  const result = await assigneeDrift(c, tenantId, taskId);
+  if (result.drift) {
+    // eslint-disable-next-line no-console
+    console.warn("[PM-ASSIGNEE-DRIFT] reports.assignee_drift", result);
+  }
+  return result;
 }
 
 async function fetchTask(c: PoolClient, id: string): Promise<TaskRow | undefined> {
@@ -440,7 +750,9 @@ export class PmController {
           [tenantId, projectId, owner ? JSON.stringify(owner) : null, config.originSite],
         );
       }
-      await emitEvent(c, tenantId, "pm_project", projectId, "pm.project.updated", { status: b?.status ?? null });
+      // TR-31: actorId is a structured link hint (work-activity-linker.ts rule a, hint:actorId)
+      // AND the source of the outbox consumer's actor_user_id — see that file's header.
+      await emitEvent(c, tenantId, "pm_project", projectId, "pm.project.updated", { status: b?.status ?? null, actorId: req.principal.userId });
     });
     await writeActivity(tenantId, req.principal.userId, "updated", "pm_project", projectId);
     return { ok: true };
@@ -542,7 +854,14 @@ export class PmController {
          b.estimateMinutes ?? null, JSON.stringify(customFields), recurrence ? JSON.stringify(recurrence) : null,
          JSON.stringify(subtasks), uniqTags, seq, config.originSite],
       );
-      await emitEvent(c, tenantId, "pm_task", id, "pm.task.created", { title, projectId: b.projectId });
+      // TR-02 dual-write: same transaction as the INSERT above, so blob+rows commit or roll back
+      // together — a malformed/unknown person ref fails loudly here and the whole task creation
+      // (including the blob) is rolled back, never a partial write.
+      await syncTaskAssignees(c, tenantId, id, assignee, req.principal.userId);
+      await logAssigneeDriftIfAny(c, tenantId, id);
+      // TR-31: actorId (structured hint -> work-activity-linker.ts rule a "hint:actorId" -> an
+      // EXACT person link; also becomes the outbox consumer's actor_user_id).
+      await emitEvent(c, tenantId, "pm_task", id, "pm.task.created", { title, projectId: b.projectId, actorId: req.principal.userId });
     });
     if (assignee?.responsibleId) {
       await notify(tenantId, assignee.responsibleId, req.principal.userId, "assignment", {
@@ -610,6 +929,32 @@ export class PmController {
         if (!dependsOn.includes(b.addDependency)) dependsOn.push(b.addDependency);
       }
       if (typeof b.removeDependency === "string") dependsOn = dependsOn.filter((d) => d !== b.removeDependency);
+
+      // ---- contributors (TR-02, §3.1): zero or more PERSONS, never outcome-credited. Same
+      // op-style as addSubtask/addDependency. Writes pm_task_assignees directly (contributors
+      // have no blob representation — they are a NEW capability, not read-through from the blob).
+      if (typeof b.addContributor === "string") {
+        const uid = b.addContributor;
+        if (!UUID_RE.test(uid)) throw new BadRequestException("addContributor must be a user id");
+        const member = await c.query(
+          `SELECT 1 FROM company_memberships WHERE user_id = $1 AND deleted_at IS NULL AND status = 'active'`,
+          [uid],
+        );
+        if (!member.rows[0]) throw new BadRequestException("addContributor must be an active member of this tenant");
+        await c.query(
+          `INSERT INTO pm_task_assignees (tenant_id, task_id, role, assignee_kind, assignee_ref, user_id, created_by, origin_site)
+           VALUES ($1, $2, 'contributor', 'person', $3::uuid::text, $3::uuid, $4, $5)
+           ON CONFLICT ON CONSTRAINT ux_pm_task_assignees_row DO NOTHING`,
+          [tenantId, taskId, uid, req.principal.userId, config.originSite],
+        );
+      }
+      if (typeof b.removeContributor === "string") {
+        if (!UUID_RE.test(b.removeContributor)) throw new BadRequestException("removeContributor must be a user id");
+        await c.query(
+          `DELETE FROM pm_task_assignees WHERE tenant_id = $1 AND task_id = $2 AND role = 'contributor' AND user_id = $3`,
+          [tenantId, taskId, b.removeContributor],
+        );
+      }
 
       // ---- tags (P2-01): every id must belong to THIS TASK'S PROJECT'S tag registry ----
       if (Array.isArray(b.tags)) {
@@ -724,7 +1069,22 @@ export class PmController {
           hasRecurrenceField, recurrence ? JSON.stringify(recurrence) : null,
         ],
       );
-      await emitEvent(c, tenantId, "pm_task", taskId, "pm.task.updated", { status });
+      // TR-02 dual-write: only when THIS patch actually touched the assignee (managing) — the
+      // same transaction as the UPDATE above, so a malformed/unknown ref rolls back the whole
+      // PATCH, blob included, never a partial write.
+      if (managing) {
+        await syncTaskAssignees(c, tenantId, taskId, assignee, req.principal.userId);
+        await logAssigneeDriftIfAny(c, tenantId, taskId);
+      }
+      // TR-05: carry the FLAG-DRIVEN completion facts (wasDone/isDoneNow, already computed above
+      // via effectiveStatuses()'s is_done FLAG — never a literal status id) so the work-activity
+      // outbox consumer can classify completed/reopened/status_changed without re-deriving
+      // is_done-ness itself (there must be exactly one place that decides is_done-ness).
+      // TR-31: actorId propagates the patching user into work_activity.actor_user_id + mints an
+      // EXACT person link (work-activity-linker.ts rule a).
+      await emitEvent(c, tenantId, "pm_task", taskId, "pm.task.updated", {
+        status, statusChanged: status !== task.status, wasDone, isDoneNow, actorId: req.principal.userId,
+      });
 
       // ---- recurring-task spawn (P2-06, design spec §8) ----
       // Fires ONLY on the not-done→done edge, so re-PATCHing an already-done task
@@ -759,7 +1119,15 @@ export class PmController {
                 JSON.stringify(recurrence), taskId, childSeq, config.originSite,
               ],
             );
-            await emitEvent(c, tenantId, "pm_task", childId, "pm.task.spawned", { parentId: taskId, dueDate: next.dueDate });
+            // TR-02 dual-write: the spawned child carries the same assignee as its parent's
+            // final (post-patch) value — same transaction as the INSERT above.
+            await syncTaskAssignees(c, tenantId, childId, assignee, req.principal.userId);
+            await logAssigneeDriftIfAny(c, tenantId, childId);
+            // TR-31: deliberately NO actorId here — a recurrence auto-spawn is a system-derived
+            // side effect of the completing PATCH above (which DOES carry its own actorId), not a
+            // distinct action this task's assignee/spawner "did"; actorExternal names the origin
+            // instead of misattributing it to whoever happened to complete the parent.
+            await emitEvent(c, tenantId, "pm_task", childId, "pm.task.spawned", { parentId: taskId, dueDate: next.dueDate, actorExternal: "pm:recurrence-engine" });
             spawnedResult = { id: childId, dueDate: next.dueDate };
           }
         }
@@ -812,7 +1180,8 @@ export class PmController {
       if (res.rowCount === 0) throw new NotFoundException("task not found");
       // Drop this task from any other task's dependency list.
       await c.query(`UPDATE pm_tasks SET depends_on = array_remove(depends_on, $1) WHERE $1 = ANY(depends_on)`, [taskId]);
-      await emitEvent(c, tenantId, "pm_task", taskId, "pm.task.deleted", {});
+      // TR-31: actorId -> work_activity.actor_user_id + an EXACT person link.
+      await emitEvent(c, tenantId, "pm_task", taskId, "pm.task.deleted", { actorId: req.principal.userId });
     });
     await writeActivity(tenantId, req.principal.userId, "deleted", "pm_task", taskId);
     return { ok: true };
@@ -897,9 +1266,15 @@ export class PmController {
           JSON.stringify(resetSubtasks), task.tags ?? [], seq, config.originSite,
         ],
       );
+      // TR-02 dual-write: the copy carries the SOURCE task's owner/responsible (matching the
+      // blob copy above). Contributors are deliberately NOT copied — same "comments/time/
+      // suggestions dropped" policy as everything else this duplicate doesn't carry.
+      await syncTaskAssignees(c, tenantId, id, task.assignee, req.principal.userId);
+      await logAssigneeDriftIfAny(c, tenantId, id);
       // Comments/time/suggestions/dependsOn are deliberately dropped: not copied, not referenced
       // (depends_on defaults to '{}' — the INSERT above never sets it).
-      await emitEvent(c, tenantId, "pm_task", id, "pm.task.duplicated", { sourceTaskId: taskId, projectId: task.projectId });
+      // TR-31: actorId -> work_activity.actor_user_id + an EXACT person link.
+      await emitEvent(c, tenantId, "pm_task", id, "pm.task.duplicated", { sourceTaskId: taskId, projectId: task.projectId, actorId: req.principal.userId });
       return task;
     });
     if (source.assignee?.responsibleId) {
@@ -918,7 +1293,9 @@ export class PmController {
   // id ever survives into the copy: each task's tags are rewritten through the tag map, its milestone_id
   // through the milestone map, and (in a SECOND pass, once every new task id is known) its depends_on
   // through the task map with any id that didn't copy DROPPED. Owner/pm_project_meta, task assignees,
-  // comments, time logs and tracker suggestions are deliberately NOT carried.
+  // comments, time logs and tracker suggestions are deliberately NOT carried. TR-02: since every
+  // cloned task's `assignee` blob is NULL (below), no pm_task_assignees rows are written for them
+  // either — there is nothing for syncTaskAssignees to do, so it is deliberately not called here.
   @Post(":tenantId/pm/projects/:projectId/duplicate")
   @HttpCode(201)
   async duplicateProject(
@@ -1052,7 +1429,8 @@ export class PmController {
         }
       }
 
-      await emitEvent(c, tenantId, "pm_project", newProjectId, "pm.project.duplicated", { sourceProjectId: projectId, name });
+      // TR-31: actorId -> work_activity.actor_user_id + an EXACT person link.
+      await emitEvent(c, tenantId, "pm_project", newProjectId, "pm.project.duplicated", { sourceProjectId: projectId, name, actorId: req.principal.userId });
     });
     await writeActivity(tenantId, req.principal.userId, "created", "pm_project", newProjectId, { duplicatedFrom: projectId, name });
     return { id: newProjectId };
@@ -1490,6 +1868,13 @@ export class PmController {
       );
       // P3-10: the creation write IS version 1 — every doc's history starts here.
       await appendDocVersion(c, tenantId, id, 1, title, body, req.principal.userId);
+      // TR-05: pm->work_activity evidence feed. object_kind 'doc' (not 'pm_doc') so this activity
+      // also surfaces via the deliverable_evidence view (migration 0030 filters object_kind IN
+      // ('file','doc','deliverable')); projectId is a structured link hint (work-activity-linker.ts
+      // rule a) so the auto-linker resolves project + department without a DB lookup.
+      // TR-31: actorId is the SAME rule-a hint mechanism for the authoring user -> an EXACT
+      // person link, and doubles as the outbox consumer's actor_user_id.
+      await emitEvent(c, tenantId, "pm_doc", id, "pm.doc.created", { docId: id, title, projectId, actorId: req.principal.userId });
     });
     await writeActivity(tenantId, req.principal.userId, "created", "pm_doc", id, { title });
     return { id };
@@ -1535,6 +1920,10 @@ export class PmController {
         [docId, projectId, nextTitle, nextBody],
       );
       await appendDocVersion(c, tenantId, docId, null, nextTitle, nextBody, req.principal.userId);
+      // TR-05: emitted only on a genuine change (this line is unreachable on the no-op `return`
+      // above), so a resubmitted-identical PATCH never mints a bogus "updated" evidence row.
+      // TR-31: actorId -> work_activity.actor_user_id + an EXACT person link.
+      await emitEvent(c, tenantId, "pm_doc", docId, "pm.doc.updated", { docId, title: nextTitle, projectId, actorId: req.principal.userId });
     });
     await writeActivity(tenantId, req.principal.userId, "updated", "pm_doc", docId);
     return { ok: true };
@@ -1597,6 +1986,8 @@ export class PmController {
         [docId, projectId, title, body],
       );
       await appendDocVersion(c, tenantId, docId, null, title, body, req.principal.userId);
+      // TR-31: actorId -> work_activity.actor_user_id + an EXACT person link.
+      await emitEvent(c, tenantId, "pm_doc", docId, "pm.doc.restored", { docId, title, projectId, toVersion: version, actorId: req.principal.userId });
     });
     await writeActivity(tenantId, req.principal.userId, "restored", "pm_doc", docId, { toVersion: version });
     return { ok: true };
@@ -1667,7 +2058,10 @@ export class PmController {
          VALUES ($1, $2, NULL, 'task', $3, $4, $5)`,
         [newId(), tenantId, taskId, `AI Tracker: ${rationale}`, config.originSite],
       );
-      await emitEvent(c, tenantId, "pm_task", taskId, "pm.tracker.run", { suggestions: suggestions.length });
+      // TR-31: deliberately NO actorId — the tracker's authored comment above is itself
+      // author_id NULL (system/AI), so attributing the run to whoever clicked "run tracker"
+      // would misrepresent their comment/collaboration count with an AI-authored action.
+      await emitEvent(c, tenantId, "pm_task", taskId, "pm.tracker.run", { suggestions: suggestions.length, actorExternal: "pm:ai-tracker" });
       return { suggestions, delivered, responsibleId: task.assignee?.responsibleId ?? null };
     });
     // Notify the person in charge that the tracker delivered an update.
@@ -1713,7 +2107,8 @@ export class PmController {
         );
       }
       await c.query(`UPDATE pm_suggestions SET status = 'applied', updated_at = now() WHERE id = $1`, [suggestionId]);
-      await emitEvent(c, tenantId, "pm_task", s.task_id, "pm.suggestion.confirmed", { suggestionId, kind: s.kind });
+      // TR-31: confirming a suggestion IS a genuine human decision on the task -> actorId propagates.
+      await emitEvent(c, tenantId, "pm_task", s.task_id, "pm.suggestion.confirmed", { suggestionId, kind: s.kind, actorId: req.principal.userId });
     });
     await writeActivity(tenantId, req.principal.userId, "suggestion.confirmed", "pm_suggestion", suggestionId);
     return { ok: true };

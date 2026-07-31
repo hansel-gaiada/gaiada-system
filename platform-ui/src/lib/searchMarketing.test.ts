@@ -9,6 +9,7 @@ import {
   isProjectionOverBudget,
   isScopePreset,
   SCOPE_PRESET_SEEDS,
+  onDemandEstimateLabel,
   numberOrDash,
   groupFindingsBySeverity,
   groupKeywordsByCluster,
@@ -20,10 +21,19 @@ import {
   AD_STATUSES_WRITABLE,
   NEGATIVE_STATUSES_WRITABLE,
   CHANGE_PROPOSAL_TRANSITIONS,
+  annotateRankDrops,
+  formatPosition,
+  formatCtr,
+  formatGoogleMetric,
+  freshnessDisclosure,
+  issuerDisclosure,
+  isGoogleProvider,
+  COST_TO_SERVE_LEGEND,
   type ToolScopeConfig,
   type AuditFinding,
   type SearchKeyword,
   type CostProjectionTool,
+  type RankSnapshot,
 } from "./searchMarketing";
 
 // Pure-helper tests only — no network. skipUnavailable/platformFetch (the
@@ -182,6 +192,15 @@ describe("SCOPE_PRESET_SEEDS", () => {
     expect(SCOPE_PRESET_SEEDS.standard.backlinks).toEqual({ enabled: false });
   });
 
+  // SM-61 (tracker §6au Ruling 1 clause 2): volume now ships `cadence: "monthly"` in BOTH standard
+  // and heavy — the cross-repo pin this ticket's own cross-repo constraint names explicitly (the
+  // preset picker seeds tool_scope client-side BEFORE the PUT, so this file's shape and
+  // platform-nest scope-presets.ts's shape must never disagree).
+  it("SM-61: standard AND heavy seed volume with cadence:'monthly' — the price-identical fix for the cadence-less defect", () => {
+    expect(SCOPE_PRESET_SEEDS.standard.volume).toEqual({ enabled: true, cadence: "monthly" });
+    expect(SCOPE_PRESET_SEEDS.heavy.volume).toEqual({ enabled: true, cadence: "monthly" });
+  });
+
   it("heavy enables backlinks and doubles rank's cap over standard", () => {
     expect(SCOPE_PRESET_SEEDS.heavy.backlinks).toEqual({ enabled: true, cadence: "monthly" });
     expect(SCOPE_PRESET_SEEDS.heavy.rank).toEqual({ enabled: true, cadence: "daily", maxKeywords: 200 });
@@ -192,6 +211,21 @@ describe("SCOPE_PRESET_SEEDS", () => {
     expect(SCOPE_PRESET_SEEDS.light.volume).toEqual({ enabled: false });
     expect(SCOPE_PRESET_SEEDS.light.ai_visibility).toEqual({ enabled: false });
     expect(SCOPE_PRESET_SEEDS.light.audit_technical).toEqual({ enabled: true, cadence: "monthly" });
+  });
+});
+
+describe("onDemandEstimateLabel (SM-61, §6au Ruling 1 clause 3)", () => {
+  it("labels an ENABLED, NOT-scheduled row as an on-demand estimate", () => {
+    expect(onDemandEstimateLabel(true, false)).toBe("on-demand est.");
+  });
+
+  it("renders nothing for a truly scheduled row — the number IS what will run, no caveat needed", () => {
+    expect(onDemandEstimateLabel(true, true)).toBeNull();
+  });
+
+  it("renders nothing for a disabled row regardless of the scheduled flag", () => {
+    expect(onDemandEstimateLabel(false, false)).toBeNull();
+    expect(onDemandEstimateLabel(false, true)).toBeNull();
   });
 });
 
@@ -273,8 +307,8 @@ describe("groupFindingsBySeverity", () => {
 function makeKeyword(overrides: Partial<SearchKeyword>): SearchKeyword {
   return {
     id: "k-1", keyword: "seo tools", locale: "id-ID", intent: null, clusterId: null, clusterLabel: null,
-    volume: null, difficulty: null, cpcUsd: null, isTracked: false, hasEmbedding: false,
-    createdAt: "2026-01-01T00:00:00Z", ...overrides,
+    volume: null, difficulty: null, cpcUsd: null, metricsProvider: null, metricsSimulated: false,
+    isTracked: false, hasEmbedding: false, createdAt: "2026-01-01T00:00:00Z", ...overrides,
   };
 }
 
@@ -353,7 +387,7 @@ function makeProjectedTool(overrides: Partial<CostProjectionTool>): CostProjecti
   return {
     tool: "rank", opKind: "serp", enabled: true, cadence: "weekly", runsPerMonth: 4.29,
     itemsPerRun: 50, costPerRunUsd: 2.5, projectedMonthlyUsd: 10.71, provider: "dataforseo",
-    simulated: false, ...overrides,
+    simulated: false, scheduled: true, ...overrides,
   };
 }
 
@@ -473,5 +507,191 @@ describe("CHANGE_PROPOSAL_TRANSITIONS", () => {
   it("a dismissed or applied proposal has no further reachable transition", () => {
     expect(CHANGE_PROPOSAL_TRANSITIONS.dismissed).toEqual([]);
     expect(CHANGE_PROPOSAL_TRANSITIONS.applied).toEqual([]);
+  });
+});
+
+// SM-14's Rankings tab — pinning the three-state provenance render and the "— never 0" position
+// convention against the pure helper the panel derives its badge from (annotateRankDrops), never
+// against a fixture that could quietly disagree with rank.ts's own isRankDrop.
+describe("annotateRankDrops", () => {
+  const base = (over: Partial<RankSnapshot>): RankSnapshot => ({
+    id: "s1", keywordId: "k1", keyword: "seo tools", engine: "google", device: "desktop",
+    locationCode: null, capturedAt: "2026-07-20T00:00:00Z", position: 5, rankedUrl: null,
+    serpFeatures: null, provider: "dataforseo", simulated: false, ...over,
+  });
+
+  it("a found -> worse position is a drop, with the correct previousPosition", () => {
+    const rows = [
+      base({ id: "s1", capturedAt: "2026-07-20T00:00:00Z", position: 5 }),
+      base({ id: "s2", capturedAt: "2026-07-27T00:00:00Z", position: 9 }),
+    ];
+    const out = annotateRankDrops(rows);
+    expect(out.find((r) => r.id === "s2")).toMatchObject({ dropped: true, previousPosition: 5 });
+    expect(out.find((r) => r.id === "s1")).toMatchObject({ dropped: false, previousPosition: null });
+  });
+
+  it("a found -> not-found is a drop (previousPosition carried, position now null)", () => {
+    const rows = [
+      base({ id: "s1", capturedAt: "2026-07-20T00:00:00Z", position: 3 }),
+      base({ id: "s2", capturedAt: "2026-07-27T00:00:00Z", position: null }),
+    ];
+    const out = annotateRankDrops(rows);
+    expect(out.find((r) => r.id === "s2")).toMatchObject({ dropped: true, previousPosition: 3 });
+  });
+
+  it("a first-ever capture is never a drop, even with position null", () => {
+    const out = annotateRankDrops([base({ id: "s1", position: null })]);
+    expect(out[0]).toMatchObject({ dropped: false, previousPosition: null });
+  });
+
+  it("not-found -> not-found across two captures is never a drop", () => {
+    const rows = [
+      base({ id: "s1", capturedAt: "2026-07-20T00:00:00Z", position: null }),
+      base({ id: "s2", capturedAt: "2026-07-27T00:00:00Z", position: null }),
+    ];
+    const out = annotateRankDrops(rows);
+    expect(out.find((r) => r.id === "s2")).toMatchObject({ dropped: false, previousPosition: null });
+  });
+
+  it("a found -> BETTER position is never a drop", () => {
+    const rows = [
+      base({ id: "s1", capturedAt: "2026-07-20T00:00:00Z", position: 9 }),
+      base({ id: "s2", capturedAt: "2026-07-27T00:00:00Z", position: 4 }),
+    ];
+    const out = annotateRankDrops(rows);
+    expect(out.find((r) => r.id === "s2")).toMatchObject({ dropped: false, previousPosition: 9 });
+  });
+
+  it("groups are scoped to (keywordId, engine, device) — a different keyword never contaminates another's drop calc", () => {
+    const rows = [
+      base({ id: "s1", keywordId: "k1", capturedAt: "2026-07-20T00:00:00Z", position: 3 }),
+      base({ id: "s2", keywordId: "k2", capturedAt: "2026-07-27T00:00:00Z", position: 9 }),
+    ];
+    const out = annotateRankDrops(rows);
+    expect(out.find((r) => r.id === "s2")).toMatchObject({ dropped: false, previousPosition: null });
+  });
+
+  it("sorts by capturedAt internally — an out-of-order input array still computes the right delta", () => {
+    const rows = [
+      base({ id: "s2", capturedAt: "2026-07-27T00:00:00Z", position: 9 }),
+      base({ id: "s1", capturedAt: "2026-07-20T00:00:00Z", position: 5 }),
+    ];
+    const out = annotateRankDrops(rows);
+    expect(out.find((r) => r.id === "s2")).toMatchObject({ dropped: true, previousPosition: 5 });
+  });
+});
+
+describe("formatPosition", () => {
+  it("renders one decimal place for a real number", () => {
+    expect(formatPosition(9)).toBe("9.0");
+    expect(formatPosition(9.14)).toBe("9.1");
+  });
+  it("renders '—', never '0', for null/undefined/non-numeric — position 0 does not exist", () => {
+    expect(formatPosition(null)).toBe("—");
+    expect(formatPosition(undefined)).toBe("—");
+    expect(formatPosition("not-a-number")).toBe("—");
+    expect(formatPosition(null)).not.toBe("0");
+  });
+  it("coerces a numeric(9,2) STRING from an uncast column, same defensive contract as formatUsd", () => {
+    expect(formatPosition("9.10")).toBe("9.1");
+  });
+});
+
+describe("formatCtr", () => {
+  it("renders GSC's fraction (0..1) as a percentage", () => {
+    expect(formatCtr(0.0429)).toBe("4.3%");
+  });
+  it("renders '—', never '0%', for an absent value", () => {
+    expect(formatCtr(null)).toBe("—");
+    expect(formatCtr(undefined)).toBe("—");
+    expect(formatCtr(null)).not.toBe("0%");
+  });
+  it("a genuine zero CTR renders as 0.0% — a real answer, not absence", () => {
+    expect(formatCtr(0)).toBe("0.0%");
+  });
+});
+
+describe("formatGoogleMetric", () => {
+  it("coerces a numeric-typed STRING (GA4 conversions/totalRevenue over the wire)", () => {
+    expect(formatGoogleMetric("12.00")).toBe("12");
+  });
+  it("renders '—' for a null totalRevenue — 'no revenue configured' is not '0'", () => {
+    expect(formatGoogleMetric(null)).toBe("—");
+    expect(formatGoogleMetric(null)).not.toBe("0");
+  });
+});
+
+// §6ay's crux: a chart that silently plots a clamped range as "today" reintroduces the lie the
+// backend went to trouble to prevent. This pins the disclosure text always names the effective end
+// date AND always states the clamp fact, even when false (never a silent "nothing to say" case).
+describe("freshnessDisclosure", () => {
+  it("states the clamp when it happened, naming the lag", () => {
+    const text = freshnessDisclosure({ effectiveEndDate: "2026-07-27", clampedForFreshness: true, freshnessLagDays: 3 });
+    expect(text).toContain("2026-07-27");
+    expect(text).toContain("3-day");
+    expect(text.toLowerCase()).toContain("pulled back");
+  });
+  it("still states the effective end date and the (false) clamp fact when no clamp happened", () => {
+    const text = freshnessDisclosure({ effectiveEndDate: "2026-07-20", clampedForFreshness: false, freshnessLagDays: 2 });
+    expect(text).toContain("2026-07-20");
+    expect(text).toContain("no clamp needed");
+  });
+});
+
+// §A12.3's honesty rule: the Connections surface MUST render issuerHost whenever issuerIsGoogle is
+// false. Pinned against the pure helper both GoogleConnectionsPanel and any future surface reuse, so
+// the wording can never drift between call sites.
+describe("issuerDisclosure", () => {
+  it("discloses the issuer host when issuerIsGoogle is false — the non-Google case", () => {
+    const text = issuerDisclosure({ issuerHost: "keycloak.gaiada.local:8443", issuerIsGoogle: false });
+    expect(text).not.toBeNull();
+    expect(text).toContain("keycloak.gaiada.local:8443");
+  });
+  it("discloses nothing when the issuer really is Google — presence AND absence must both be exercisable", () => {
+    expect(issuerDisclosure({ issuerHost: "accounts.google.com", issuerIsGoogle: true })).toBeNull();
+  });
+  it("a non-Google issuer with an unknown host still discloses something, never silently nothing", () => {
+    const text = issuerDisclosure({ issuerHost: null, issuerIsGoogle: false });
+    expect(text).not.toBeNull();
+    expect(text!.toLowerCase()).toContain("unknown");
+  });
+});
+
+describe("isGoogleProvider", () => {
+  it("accepts exactly the three real providers", () => {
+    expect(isGoogleProvider("google_search_console")).toBe(true);
+    expect(isGoogleProvider("google_analytics")).toBe(true);
+    expect(isGoogleProvider("google_ads")).toBe(true);
+  });
+  it("rejects junk, absent, and non-string values", () => {
+    expect(isGoogleProvider("google_drive")).toBe(false);
+    expect(isGoogleProvider(undefined)).toBe(false);
+    expect(isGoogleProvider(123)).toBe(false);
+  });
+});
+
+// SM-17's legend (§6al: "SM-17's legend line should mention both shapes") — the two DISTINCT
+// incurred causes (no data delivered at all; delivered but this platform's own write then failed)
+// must both be present, and the binding money-language rules must still hold across the addition.
+describe("COST_TO_SERVE_LEGEND (SM-60/§6al — both incurred shapes)", () => {
+  it("mentions the vendor being charged", () => {
+    expect(COST_TO_SERVE_LEGEND.toLowerCase()).toContain("charged");
+  });
+  it("mentions BOTH incurred shapes — delivered nothing, and delivered-but-our-write-failed", () => {
+    expect(COST_TO_SERVE_LEGEND.toLowerCase()).toContain("delivered nothing");
+    expect(COST_TO_SERVE_LEGEND.toLowerCase()).toMatch(/own write.*failed/);
+  });
+  it("never claims a zero cost for an incurred row", () => {
+    expect(COST_TO_SERVE_LEGEND).toContain("never $0");
+  });
+  it("the new 'incurred' sentence introduces no new 'actual'/'cash' instance — those stay confined to the pre-existing standing sentence (CostLedgerPanel.test.tsx pins THAT sentence verbatim)", () => {
+    const incurredSentence = COST_TO_SERVE_LEGEND.slice(COST_TO_SERVE_LEGEND.indexOf('A row marked "incurred"'));
+    expect(incurredSentence.toLowerCase()).not.toMatch(/\bactual\b/);
+    expect(incurredSentence.toLowerCase()).not.toMatch(/\bcash\b/);
+  });
+  it("forbidden word 'actual' never sits next to a figure — this legend's own money vocabulary is 'cost to serve', not '$0'/'never'", () => {
+    // The house rule for a NEW money sentence: no bare "$0" claimed as a real value (the ticket's
+    // own "— never 0" rule) — the only "$0" text here is inside the negation "never $0".
+    expect(COST_TO_SERVE_LEGEND).not.toMatch(/is \$0\b/);
   });
 });

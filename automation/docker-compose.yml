@@ -59,8 +59,9 @@ services:
       # on-inbound-lead webhook ingest — fail-closed: stays off unless explicitly enabled.
       INGEST_ENABLED: ${INGEST_ENABLED:-false}
       INGEST_SECRET: ${INGEST_SECRET:-}
-      # sm-rank-collect (SM-15 batch 1, NOT YET RUNNABLE — see workflows/sm-rank-collect.json's
-      # own meta.description for the platform-side gap it is blocked on).
+      # Reserved for SM-56 (Standard-queue collect edge) — consumed by nothing yet. SM-15's
+      # sm-rank-collect workflow (the only prior consumer) was retired by SM-55 (architect
+      # ruling, tracker §6ad/A13). SM-56 is PARKED — do not remove this believing it is dead.
       SEARCH_CALLBACK_SECRET: ${SEARCH_CALLBACK_SECRET:-}
     # Standalone: resolve the workflows' hardcoded http://mcp-hub:3003 to a hub on the host.
     # (On the VPS stack n8n shares the network and mcp-hub resolves natively; this is harmless there.)

@@ -1,7 +1,14 @@
-// WSUX-15 (ex-P1-05) — the outbox-driven consumer that makes the built P1-04 `work_activity` feed
-// LIVE: a DEDICATED consumer group ("work-activity"), independent of the module-dispatch group in
-// consumer.service.ts and the reconciler group in reconcile-consumer.ts, over the streams a
-// department's activity actually happens on: pm_task, pm_project, meeting_recording, pipeline_run.
+// WSUX-15 (ex-P1-05 / TR-05) — the outbox-driven consumer that makes the built P1-04 `work_activity`
+// feed LIVE: a DEDICATED consumer group ("work-activity"), independent of the module-dispatch group
+// in consumer.service.ts and the reconciler group in reconcile-consumer.ts, over the streams a
+// department's activity actually happens on: pm_task, pm_project, pm_doc, meeting_recording,
+// pipeline_run.
+//
+// TR-05 additions on top of the original WSUX-15 build: pm_doc (doc create/update/restore,
+// pm.controller.ts) and comment events (pm.task.commented, emitted onto the EXISTING pm_task
+// stream by collab.controller.ts, guarded there to only fire when the commented entity is a real
+// pm_tasks row) — plus is_done-FLAG-derived verb classification for task status changes (see
+// deriveVerb below): completed/reopened/status_changed, never a literal status id.
 // Mirrors reconcile-consumer.ts's shape exactly (own group/consumer name, XAUTOCLAIM + XREADGROUP,
 // ack-only-on-success, delivery-count-gated dead-letter) — see that file's header for why a
 // dedicated group is the right shape (every group gets its own copy of every entry + its own retry
@@ -16,15 +23,24 @@
 // minting a duplicate. `work_activity.created` is only emitted on the row's first insert (see the
 // ingest core), so a replay never double-fires downstream automation either.
 //
-// KNOWN LIMITATION (flagged, not silently absorbed): the outbox event payloads emitted today by
-// pm.controller.ts / meetings.controller.ts / pipeline.controller.ts do not carry the acting
-// user's id (that's captured separately, per-call, in the flat `activities` audit table via
-// writeActivity() — see http.ts). So actorUserId is left null on every consumer-derived
-// work_activity row; the ActivityFeed contract (activityLabel/actorLabel in
-// platform-ui/src/lib/activity.ts) already renders a null actor gracefully (no crash, just an
-// unattributed line). Wiring actor identity through emitEvent's payload is a natural follow-up but
-// is a change to five existing emit call sites outside this ticket's scope — flagged as a
-// deviation, not fixed here.
+// TR-31 (closed the KNOWN LIMITATION formerly documented here): pm.controller.ts /
+// collab.controller.ts / meetings.controller.ts / pipeline.controller.ts now attach the acting
+// user's id onto the outbox payload as `actorId` (the SAME structured-hint key
+// work-activity-linker.ts's rule (a) already looked for — see migration 0030's payload column
+// comment: "raw source payload + structured link hints (taskId/projectId/actorId)"). This
+// consumer reads it generically off the RAW event payload (actorUserIdOf, below) — never off a
+// mapper's reshaped payload — so every current and future entityType mapper picks it up for free
+// without needing its own actor-extraction logic. Folded into both the dedicated actor_user_id
+// column AND the ingest payload (so the linker's exact person-link rule actually fires; it
+// existed since P1-04 but had nothing to read until now).
+//
+// Deliberately still null for genuinely system/AI-originated entries — the controllers simply
+// never attach actorId at the emit site for those (recurrence auto-spawn, the AI Tracker run, an
+// async transcription job with no request principal, an admin reconciliation sweep over other
+// people's recordings): see each call site's own TR-31 comment. Never guessed, never defaulted.
+// Also tolerant of events already in flight / already relayed before this ticket landed — those
+// simply have no `actorId` key at all, so actorUserIdOf returns null exactly as the old hardcoded
+// `null` did (no consumer crash, no special-casing needed for the backlog).
 import { hostname } from "os";
 import { randomBytes } from "crypto";
 import { recordDeadLetter, recordEventConsumed, recordProcessingLag } from "../metrics";
@@ -38,7 +54,7 @@ const GROUP = "work-activity";
 // two platform instances must register as distinct consumers so XREADGROUP ">" fans each entry out
 // to exactly one of them instead of splitting one consumer's pending set across both.
 const CONSUMER = `work-activity-${hostname()}-${process.pid}-${randomBytes(4).toString("hex")}`;
-export const WORK_ACTIVITY_STREAMS = ["pm_task", "pm_project", "meeting_recording", "pipeline_run"];
+export const WORK_ACTIVITY_STREAMS = ["pm_task", "pm_project", "pm_doc", "meeting_recording", "pipeline_run"];
 export const DEAD_LETTER_MAX_RETRIES = 5;
 // Unlike reconcile-consumer.ts's 60s guard (which exists to prevent two instances racing a
 // non-idempotent multi-step teardown), min-idle-time 0 is safe HERE: ingestWorkActivity's every
@@ -113,10 +129,40 @@ async function mapPmProject(tenantId: string, event: OutboxEvent): Promise<Mappe
   return { source: "pm", objectKind: "project", title: row.rows[0]?.name ?? null, payload: { projectId: event.entityId } };
 }
 
+/** pm_doc (TR-05) — created/updated/restored events already carry {title, projectId} in the
+ *  outbox payload (pm.controller.ts's doc handlers pass them explicitly), so the DB fallback below
+ *  is defensive only (mirrors mapPmTask's NULL-tolerant convention) and is never expected to fire
+ *  in practice. object_kind is 'doc' (not 'pm_doc') so this activity also surfaces via the
+ *  deliverable_evidence view (migration 0030 filters object_kind IN ('file','doc','deliverable')). */
+async function mapPmDoc(tenantId: string, event: OutboxEvent): Promise<Mapped> {
+  let title = typeof event.payload.title === "string" ? event.payload.title : null;
+  let projectId = typeof event.payload.projectId === "string" ? event.payload.projectId : undefined;
+  if (title === null || projectId === undefined) {
+    const row = await withTenants([tenantId], (c) =>
+      c.query<{ title: string; project_id: string }>(`SELECT title, project_id FROM pm_docs WHERE id = $1`, [event.entityId]),
+    );
+    if (row.rows[0]) {
+      title = title ?? row.rows[0].title;
+      projectId = projectId ?? row.rows[0].project_id;
+    }
+  }
+  return {
+    source: "pm",
+    objectKind: "doc",
+    title,
+    payload: { docId: event.entityId, ...(projectId ? { projectId } : {}) },
+  };
+}
+
 /** meeting_recording — sourced as "system" (an automated capture/ingest pipeline step, not a
  *  person's manual PM action; see the migration header's "system-generated rows" category). Title
  *  and the optional project hint (so auto-linking can chain meeting -> project -> department) come
- *  from meeting_recordings, since none of its outbox payloads carry a title. */
+ *  from meeting_recordings, since none of its outbox payloads carry a title.
+ *  TR-31 note: `source: "system"` here is the work_activity CATEGORY bucket, a separate concept
+ *  from actor attribution — meetings.controller.ts still attaches a real `actorId` to the
+ *  per-request lifecycle events (start/update/transcript/upload/ingest/drive), so these rows CAN
+ *  carry a genuine actor_user_id even while bucketed "system". Only the truly principal-less
+ *  events (the detached transcription job, the admin relink sweep) stay actor-less. */
 async function mapMeetingRecording(tenantId: string, event: OutboxEvent): Promise<Mapped> {
   const row = await withTenants([tenantId], (c) =>
     c.query<{ title: string | null; project_id: string | null }>(
@@ -144,9 +190,44 @@ async function mapPipelineRun(_tenantId: string, event: OutboxEvent): Promise<Ma
 const MAPPERS: Record<string, (tenantId: string, event: OutboxEvent) => Promise<Mapped>> = {
   pm_task: mapPmTask,
   pm_project: mapPmProject,
+  pm_doc: mapPmDoc,
   meeting_recording: mapMeetingRecording,
   pipeline_run: mapPipelineRun,
 };
+
+/** pm.task.updated carries FLAG-DRIVEN completion facts (statusChanged/wasDone/isDoneNow)
+ *  precomputed by pm.controller.ts's patchTask via effectiveStatuses()'s is_done FLAG — never a
+ *  literal status id (0040/§3.2 discipline: a renamed or custom "done" status must still count).
+ *  This consumer REUSES those booleans rather than re-deriving is_done itself, so there is exactly
+ *  one place in the codebase that decides is_done-ness. A patch that didn't change status at all
+ *  (statusChanged !== true) falls through to the generic eventType-tail verb below, same as every
+ *  other stream/eventType this consumer handles. */
+function deriveVerb(event: OutboxEvent): string {
+  if (event.entityType === "pm_task" && event.eventType === "pm.task.updated" && event.payload.statusChanged === true) {
+    const wasDone = event.payload.wasDone === true;
+    const isDoneNow = event.payload.isDoneNow === true;
+    if (isDoneNow && !wasDone) return "completed";
+    if (wasDone && !isDoneNow) return "reopened";
+    return "status_changed";
+  }
+  return event.eventType.includes(".") ? event.eventType.slice(event.eventType.lastIndexOf(".") + 1) : event.eventType;
+}
+
+/** TR-31 — the acting user id, read generically off the RAW outbox payload (never the mapper's
+ *  reshaped one, so this works for every entityType without per-mapper plumbing). Only a
+ *  non-empty string is honored; anything else (absent, non-string, an in-flight pre-TR-31 event)
+ *  is "no known actor" — never guessed. */
+function actorUserIdOf(event: OutboxEvent): string | null {
+  const v = event.payload.actorId;
+  return typeof v === "string" && v.length > 0 ? v : null;
+}
+
+/** Same shape for the external-actor tag some system/service call sites attach (e.g.
+ *  "pm:recurrence-engine", "whisper-worker") instead of a platform user id. */
+function actorExternalOf(event: OutboxEvent): string | null {
+  const v = event.payload.actorExternal;
+  return typeof v === "string" && v.length > 0 ? v : null;
+}
 
 /** Route one outbox entry to a work_activity row. An entityType/eventType this consumer doesn't
  *  map is a silent no-op (still ACKed) — mirrors reconcile-consumer.ts's dispatch() convention for
@@ -155,18 +236,26 @@ export async function dispatchWorkActivity(event: OutboxEvent): Promise<void> {
   const mapper = MAPPERS[event.entityType];
   if (!mapper) return;
   const mapped = await mapper(event.tenantId, event);
-  const verb = event.eventType.includes(".") ? event.eventType.slice(event.eventType.lastIndexOf(".") + 1) : event.eventType;
+  const verb = deriveVerb(event);
+  // TR-31: fold the propagated actor into BOTH the dedicated actor_user_id column (below) and the
+  // ingest payload — ingestWorkActivity hands `payload` straight to the pure linker (deriveLinks),
+  // whose rule (a) reads payload.actorId to mint an EXACT person link (work-activity-linker.ts).
+  // Mappers above build `mapped.payload` from scratch (taskId/projectId hints, no actorId), so it
+  // has to be merged in here rather than relying on any mapper to carry it through.
+  const actorUserId = actorUserIdOf(event);
+  const payload = actorUserId ? { ...mapped.payload, actorId: actorUserId } : mapped.payload;
   const input: WorkActivityIngestInput = {
     source: mapped.source,
     // The outbox event's OWN id is the idempotency key — stable across every redelivery of this
     // SAME entry, so a crash-and-retry or an XAUTOCLAIM reclaim always upserts, never duplicates.
     sourceRef: event.id,
-    actorUserId: null,
+    actorUserId,
+    actorExternal: actorUserId ? null : actorExternalOf(event),
     verb,
     objectKind: mapped.objectKind,
     objectRef: event.entityId,
     title: mapped.title,
-    payload: mapped.payload,
+    payload,
     occurredAt: event.createdAt,
   };
   await ingestWorkActivity(event.tenantId, input);

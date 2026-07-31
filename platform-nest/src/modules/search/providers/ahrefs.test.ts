@@ -248,6 +248,70 @@ describe("SM-35 Ahrefs driver — capabilities against a mock server", () => {
     expect(p.takeActualCostUsd()).toBeUndefined();
   });
 
+  // ── SM-66 (tracker §6be.1/§6bc, design addendum §A14.2) — malformed true-up header hardening ─────
+  // The defect: `!Number.isNaN(units)` LOOKS like validation but is not one, because `Number("")` and
+  // `Number("   ")` coerce to 0, not NaN. Confirmed directly, not assumed:
+  it("confirms the underlying JS coercion the defect rests on — Number('') and Number('   ') are 0, not NaN", () => {
+    expect(Number("")).toBe(0);
+    expect(Number("   ")).toBe(0);
+    expect(Number.isNaN(Number(""))).toBe(false);
+    expect(Number("-5")).toBe(-5);
+    expect(Number("Infinity")).toBe(Infinity);
+  });
+
+  it.each(["", "   ", "-5", "Infinity", "-Infinity", "NaN", "0"])(
+    "SM-66: a malformed x-api-units-cost-total-actual header (%j) leaves the true-up UNAPPLIED — pre-existing estimate stands, never $0",
+    async (malformed) => {
+      const { p } = provider(
+        {
+          "/site-explorer/backlinks-stats": { metrics: { live: 1, live_refdomains: 1 } },
+          "/site-explorer/domain-rating": { domain_rating: { domain_rating: 5 } },
+        },
+        {},
+        { "/site-explorer/domain-rating": { "x-api-units-cost-total-actual": malformed } },
+      );
+      const before = p.getTrueUpHeaderMalformedCount();
+      const { actualCostUsd } = await withActualCostCapture(p, () => p.getBacklinkSummary(`malformed-${malformed}.example`));
+      // No correction applied at all — dispatch.ts's contract is "undefined = no correction
+      // available", identical to a response with no header whatsoever. A regression back to the old
+      // guard would instead report `0` here (a fabricated true-up), which fails this exact assertion.
+      expect(actualCostUsd).toBeUndefined();
+      // Counted exactly once — the anomaly is disclosed, not silently absorbed as "no true-up this call".
+      expect(p.getTrueUpHeaderMalformedCount()).toBe(before + 1);
+    },
+  );
+
+  it("SM-66: a well-formed positive numeric header is UNAFFECTED by the tightened guard (regression pin)", async () => {
+    const { p } = provider(
+      {
+        "/site-explorer/backlinks-stats": { metrics: { live: 1, live_refdomains: 1 } },
+        "/site-explorer/domain-rating": { domain_rating: { domain_rating: 5 } },
+      },
+      {},
+      { "/site-explorer/domain-rating": { "x-api-units-cost-total-actual": "37" } },
+    );
+    const before = p.getTrueUpHeaderMalformedCount();
+    const { actualCostUsd } = await withActualCostCapture(p, () => p.getBacklinkSummary("wellformed.example"));
+    expect(actualCostUsd).toBeCloseTo(37 * TEST_RATE_USD_PER_UNIT, 9);
+    expect(p.getTrueUpHeaderMalformedCount()).toBe(before); // no anomaly counted for a good header
+  });
+
+  // ── SM-66 mutation probe (§6bc Ruling 5 does not strictly require a negative control for a
+  // data-validity check rather than a concurrency guard, but the brief asked for one and it is cheap
+  // and direct here): reproduce the EXACT old predicate inline and show it fails what the fixed
+  // predicate passes, proving the two are behaviourally different rather than a cosmetic rewrite.
+  it("SM-66 mutation probe: the OLD guard (!Number.isNaN(units)) would have recorded a fabricated $0/$negative/$Infinity true-up for every malformed case above", () => {
+    const oldGuardPasses = (raw: string) => !Number.isNaN(Number(raw));
+    const newGuardPasses = (raw: string) => Number.isFinite(Number(raw)) && Number(raw) > 0;
+    for (const malformed of ["", "   ", "-5", "Infinity", "-Infinity", "0"]) {
+      expect(oldGuardPasses(malformed)).toBe(true); // the old code would have proceeded to record
+      expect(newGuardPasses(malformed)).toBe(false); // the new code correctly refuses
+    }
+    // And the new guard still accepts a genuine positive figure, exactly like the old one did.
+    expect(newGuardPasses("37")).toBe(true);
+    expect(oldGuardPasses("37")).toBe(true);
+  });
+
   // ── SM-42 named hazard — the concurrency proof (tracker §6j step 3) ───────────────────────────────
   // getBacklinkSummary issues TWO calls in parallel for ONE op. The hazard: a naive capture (an
   // instance-level "last write wins" field) would, the moment a SECOND, unrelated dispatch races

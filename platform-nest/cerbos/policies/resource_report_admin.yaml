@@ -1,0 +1,43 @@
+# TR-07 — the `reports.admin` authz tier of the tracker/reporting program (design §8's last matrix
+# row: "facts recompute / calendars — Self ⛔ · Dept lead ⛔ · Exec group ✅ · HR-appraisal ⛔ ·
+# served-dept ⛔"). Today its only action is `recompute` on
+# POST /api/:tenantId/reports/facts/recompute; TR-06's calendar-config writes will land here too.
+#
+# Why a NEW resource kind rather than reuse: §8 introduces resource_report_document /
+# report_period / checkin / appraisal for the READ + seal + person-axis surfaces, none of which
+# describes "re-derive the fact fabric". The closest existing analogue is
+# resource_rollup_recompute.yaml (a system-of-record recompute, admin/ops-gated) and this file is
+# deliberately modelled on it — but tightened to §8's matrix: `manager` (the dept lead) is
+# EXCLUDED, because a lead who can trigger a re-derivation of a whole window can move numbers that
+# feed their own team's appraisal inputs. Exec + company admin + platform admin only.
+#
+# NOTE for TR-25 (⚡ the Cerbos policy-matrix parity ticket): fold this kind into the parity matrix
+# alongside the four §8 kinds; it was added here because the TR-07 endpoint cannot ship ungated and
+# an unlisted resource kind is denied by default (fail-closed), i.e. the endpoint would be 403 for
+# everyone including a group executive.
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: report_admin
+  importDerivedRoles: ["gaiada_scopes"]
+  variables:
+    import: ["gaiada_common"]
+  rules:
+    - actions: ["*"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["platform_admin"]
+    # group_executive is a GLOBAL cross-company role, so it is gated on `notLow` only — NOT
+    # `inTenant`, which requires the resource's tenant to be in principal.companies and therefore
+    # never holds for a global exec grant. Same shape and same reasoning as
+    # resource_work_activity.yaml's exec rule (derived roles do not cascade).
+    - actions: ["recompute"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["group_executive"]
+      condition: { match: { expr: "variables.notLow" } }
+    # The company's own admin may re-derive its own company's facts (ops path: an n8n nightly flow
+    # runs under a company_admin service principal). Bounded to that tenant, and never low-assurance
+    # — a chat-session principal must not be able to trigger a window recompute.
+    - actions: ["recompute"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }

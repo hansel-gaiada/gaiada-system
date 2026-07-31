@@ -45,6 +45,20 @@
 //   POST          campaigns/:id/negatives/propose         -> NegativesProposalResponse (write; AI)
 //   GET           campaigns/:id/change-proposals          -> SearchChangeProposal[] (?status=)
 //   GET/PATCH     change-proposals/:id                    -> SearchChangeProposal (write; never 'applied')
+//   POST          change-proposals/:id/export             -> ChangeProposalExportResult (write; SM-30, manual mode only)
+//   POST          change-proposals/:id/mark-applied       -> MarkAppliedResult (write; SM-30, elevated `search.campaign.launch`)
+//   POST          engagements/:id/rank-pull                -> RankPullBatchResult (write; SM-14, metered)
+//   POST          keyword-sets/:id/metrics-pull            -> MetricsPullBatchResult (write; SM-14, metered)
+//   GET           properties/:id/rank-snapshots            -> RankSnapshot[] (badge, not filter)
+//   GET/POST      google/connections[/:provider/authorize] -> GoogleConnectionView[] / StartedGoogleAuthorization (SM-25a)
+//   GET           google/connections/:id                   -> GoogleConnectionView
+//   POST          google/connections/:id/refresh|revoke    -> GoogleConnectionView / GoogleRevokeResult (write)
+//   PUT           properties/:id/google-connection/:provider -> {propertyId,provider,connectionId} (write)
+//   POST          engagements/:id/gsc-pull|ga4-pull        -> GscPullOutcome / Ga4PullOutcome (write; SM-25b, $0)
+//   GET           properties/:id/gsc-performance           -> GscPerformanceRow[] (badge, not filter)
+//   GET           properties/:id/gsc-performance/top-queries -> GscTopQueryRow[] (aggregate, real-only default)
+//   GET           properties/:id/ga4-metrics                -> Ga4MetricsRow[] (badge, not filter)
+//   POST          engagements/:id/gsc-keyword-import        -> GscKeywordImportResult (write; reads OUR OWN GSC rows)
 // There is NO ingest-a-new-audit / run-a-crawl route consumed here — POST audits INGESTS an
 // already-produced crawler Report (SM-07's job), it does not trigger one; search-crawl-go is a
 // separate, out-of-scope service for this module. There is also NO `GET .../clusters` route —
@@ -53,17 +67,31 @@
 //
 // NOT BUILT YET — the tabs that need these render the BackendPending banner
 // rather than an empty table that would read as real (empty) data:
-//   rankings (SM-14) · content briefs (SM-10) · ai-visibility (SM-16) · pacing/metrics-daily (SM-22)
-//   the dual-mode apply picker + manual export + live search-term sync (SM-19/SM-30/SM-20/SM-21)
-// The ledger/cost surface (SM-17) IS built — see `getEngagementLedger` below. SEM read/safe-write
-// surfaces (SM-47, this ticket) ARE built for campaigns/ad-groups/ads/negatives/change-proposals —
-// everything EXCEPT actually applying a change to a live ad account, which stays out of scope.
+//   content briefs (SM-10) · backlinks + ai-visibility CONSOLE TABS (SM-16's backend landed;
+//   no UI page reads it yet — same PendingCapability gap Rankings had before SM-14's UI) ·
+//   pacing/metrics-daily (SM-22) · live search-term sync (SM-20) · api-mode execution (SM-21)
+// Rankings (SM-14) and Google connections + GSC/GA4 (SM-25a/SM-25b) ARE now built and wired — see the
+// fetchers above and RankingsPanel.tsx/GoogleConnectionsPanel.tsx/GscGa4Panel.tsx. The ledger/cost
+// surface (SM-17) IS built — see `getEngagementLedger` below. SEM read/safe-write surfaces (SM-47)
+// ARE built for campaigns/ad-groups/ads/negatives/change-proposals. SM-19 (this ticket) adds:
+//   (a) `PaidActionGate` — a pre-commit disclosure (resolved provider, per-run cost ESTIMATE never
+//       "actual", real-vs-SIMULATED, engagement-budget projection) wrapping the Rankings tab's
+//       metered "Pull ranks now" action, sourced from the SAME `cost-projection` endpoint SM-29's
+//       scope editor already reads — no second cost formula (ticket's own binding rule).
+//   (b) the manual-mode dual-mode twin for SEM change proposals: `exportChangeProposal` +
+//       `markChangeProposalApplied` (SM-30's backend routes) wired into `ChangeProposalsPanel` via
+//       `ApplyProposalTwins`, plus a mode picker (manual/api) at proposal-creation time. The
+//       AUTOMATED (api) twin renders as an honestly-disabled state — SM-21 (its executor) is still
+//       TODO, so an api-mode proposal has NO path to 'applied' from this console today, and the UI
+//       says so rather than offering a control that would do nothing.
 import { platformFetch, PlatformError } from "@/lib/platform";
 import type {
   SearchProperty, SearchEngagement, EngagementScope, CostProjection, SearchKpiTarget, ToolScopeConfig,
   SearchAudit, AuditFinding, SearchKeywordSet, SearchKeyword, EngagementLedger,
   SearchCampaign, SearchAdGroup, SearchAd, SearchNegative, SearchChangeProposal,
   CampaignPlanResult, RsaDraftResponse, NegativesProposalResponse,
+  RankSnapshot, GoogleConnectionView,
+  GscPerformanceRow, GscTopQueryRow, Ga4MetricsRow,
 } from "./searchMarketingShared";
 
 export * from "./searchMarketingShared";
@@ -206,3 +234,83 @@ export const listChangeProposals = async (u: string, t: string, campaignId: stri
       [],
     ),
   );
+
+// SM-19: re-read a single change proposal authoritatively — used by the download-proxy route
+// (app/api/search/change-proposals/[id]/export-file) to resolve the CURRENT `exportFileId` server-
+// side rather than trust a client-supplied one, same "re-read authoritatively rather than trust the
+// echo" convention `saveEngagementScope` already uses for the scope PUT.
+export const getChangeProposal = async (u: string, t: string, id: string) =>
+  asObject<SearchChangeProposal>(await skipUnavailable(platformFetch<unknown>(`${base(t)}/change-proposals/${id}`, u), null));
+
+// ── Rank tracking (SM-14) ──────────────────────────────────────────────────────
+// Raw history — BADGE, not filter (search.controller.ts's own comment): every row keeps its own
+// provider/simulated truth across a mode flip, so this never mode-filters.
+export const listRankSnapshots = async (
+  u: string, t: string, propertyId: string,
+  params?: { keywordId?: string; engine?: string; device?: string; limit?: number },
+) => {
+  const qs = new URLSearchParams();
+  if (params?.keywordId) qs.set("keywordId", params.keywordId);
+  if (params?.engine) qs.set("engine", params.engine);
+  if (params?.device) qs.set("device", params.device);
+  if (params?.limit) qs.set("limit", String(params.limit));
+  const suffix = qs.toString() ? `?${qs.toString()}` : "";
+  return asArray<RankSnapshot>(await skipUnavailable(platformFetch<unknown>(`${base(t)}/properties/${propertyId}/rank-snapshots${suffix}`, u), []));
+};
+
+// ── Google OAuth connections (SM-25a) ───────────────────────────────────────────
+// Every response is the masked GoogleConnectionView — token material is structurally absent at the
+// HTTP boundary (search-google-oauth.controller.test.ts asserts this by string-scan; this client
+// trusts that boundary, it does not re-check it).
+export const listGoogleConnections = async (u: string, t: string, clientId?: string) =>
+  asArray<GoogleConnectionView>(
+    await skipUnavailable(platformFetch<unknown>(`${base(t)}/google/connections${clientId ? `?clientId=${encodeURIComponent(clientId)}` : ""}`, u), []),
+  );
+
+export const getGoogleConnection = async (u: string, t: string, id: string) =>
+  asObject<GoogleConnectionView>(await skipUnavailable(platformFetch<unknown>(`${base(t)}/google/connections/${id}`, u), null));
+
+// ── GSC + GA4 read ingestion (SM-25b) ───────────────────────────────────────────
+// Raw history readers — BADGE, not filter, same disposition as rank snapshots above (search.
+// controller.ts's own comment on listGscPerformance/listGa4Metrics).
+export const listGscPerformance = async (
+  u: string, t: string, propertyId: string,
+  params?: { startDate?: string; endDate?: string; query?: string; limit?: number },
+) => {
+  const qs = new URLSearchParams();
+  if (params?.startDate) qs.set("startDate", params.startDate);
+  if (params?.endDate) qs.set("endDate", params.endDate);
+  if (params?.query) qs.set("query", params.query);
+  if (params?.limit) qs.set("limit", String(params.limit));
+  const suffix = qs.toString() ? `?${qs.toString()}` : "";
+  return asArray<GscPerformanceRow>(await skipUnavailable(platformFetch<unknown>(`${base(t)}/properties/${propertyId}/gsc-performance${suffix}`, u), []));
+};
+
+// AGGREGATE reader — FILTERED to real data by default (search.controller.ts's own comment on
+// topGscQueries: blending simulated demo rows into a "top queries" total that could feed a real
+// keyword-import decision would be the exact class of lie this module keeps closing). `startDate`/
+// `endDate` are REQUIRED by the controller (400 otherwise) — this fetcher does not default them, the
+// caller must supply an explicit range.
+export const listTopGscQueries = async (
+  u: string, t: string, propertyId: string,
+  params: { startDate: string; endDate: string; limit?: number; includeSimulated?: boolean },
+) => {
+  const qs = new URLSearchParams({ startDate: params.startDate, endDate: params.endDate });
+  if (params.limit) qs.set("limit", String(params.limit));
+  if (params.includeSimulated) qs.set("includeSimulated", "1");
+  return asArray<GscTopQueryRow>(
+    await skipUnavailable(platformFetch<unknown>(`${base(t)}/properties/${propertyId}/gsc-performance/top-queries?${qs.toString()}`, u), []),
+  );
+};
+
+export const listGa4Metrics = async (
+  u: string, t: string, propertyId: string,
+  params?: { startDate?: string; endDate?: string; limit?: number },
+) => {
+  const qs = new URLSearchParams();
+  if (params?.startDate) qs.set("startDate", params.startDate);
+  if (params?.endDate) qs.set("endDate", params.endDate);
+  if (params?.limit) qs.set("limit", String(params.limit));
+  const suffix = qs.toString() ? `?${qs.toString()}` : "";
+  return asArray<Ga4MetricsRow>(await skipUnavailable(platformFetch<unknown>(`${base(t)}/properties/${propertyId}/ga4-metrics${suffix}`, u), []));
+};

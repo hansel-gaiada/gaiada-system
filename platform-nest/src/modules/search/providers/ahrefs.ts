@@ -192,6 +192,20 @@ export class AhrefsProvider implements SearchDataProvider {
    *  (or even sum two calls belonging to the SAME op) once more than one dispatch could be in flight
    *  against this singleton. `estimateCostUsd` itself is unaffected — it stays pure/synchronous. */
 
+  /** SM-66 (tracker §6be.1/§6bc, design addendum §A14.2 skip+count+disclose) — a
+   *  `x-api-units-cost-total-actual` header that arrived but could not be trusted as a real figure
+   *  (empty/whitespace, negative, or non-finite). Counted rather than silently absorbed, so the
+   *  anomaly is visible to SM-41G's reconciliation instead of being indistinguishable from "no
+   *  true-up available" — see `call()` below for the guard and why this is a DIFFERENT fact from a
+   *  missing header. Cumulative for the life of this instance, read via the getter below. */
+  private trueUpHeaderMalformedCount = 0;
+
+  /** Read-only accessor — a test or a future admin/SM-41G surface reads this directly off the driver
+   *  rather than through a second parallel counter that could drift from the one `call()` increments. */
+  getTrueUpHeaderMalformedCount(): number {
+    return this.trueUpHeaderMalformedCount;
+  }
+
   constructor(opts: AhrefsOptions) {
     this.opts = opts;
     const base: Capability[] = ["backlinks", "volume", "difficulty", "competitors"];
@@ -242,8 +256,48 @@ export class AhrefsProvider implements SearchDataProvider {
       const actualHeader = res.headers?.get?.("x-api-units-cost-total-actual");
       if (actualHeader !== null && actualHeader !== undefined) {
         const units = Number(actualHeader);
-        if (!Number.isNaN(units) && this.opts.costPerUnitUsd > 0) {
-          recordActualCostUsd(units * this.opts.costPerUnitUsd);
+        // SM-66 (tracker §6be.1/§6bc, design addendum §A14.2) — the guard this replaces was
+        // `!Number.isNaN(units)`, which LOOKS like validation but is not one: `Number("")` and
+        // `Number("   ")` coerce to `0`, not `NaN` (confirmed by direct execution, not inferred from
+        // the type signature — `res.headers.get()` is typed `string | null`, which says nothing about
+        // this coercion). So a header that arrived present-but-empty (a misbehaving proxy, a gateway
+        // normalizing an absent value to `""` rather than omitting the header) sailed past the old
+        // check, produced `units = 0`, and called `recordActualCostUsd(0)` — a genuine $0 true-up
+        // recorded OVER a call that was truly billed a nonzero amount. That is WORSE than no true-up
+        // at all: absent the header the pre-existing ESTIMATE stands (never $0), whereas the old code
+        // OVERWROTE that estimate with zero, under-counting real spend on every tier of the five-tier
+        // budget cascade. `Number("-5")` (-5) and `Number("Infinity")`/`Number("1e999")` (Infinity)
+        // passed the old guard too — no floor, no finite bound.
+        //
+        // The missing-vs-malformed distinction this fix makes deliberately (config.ts's `moneyEnv`/
+        // `planFactEnv` is the house precedent for treating these as different facts, not the same
+        // "unconfigured" bucket): an ABSENT header is the expected shape for a call whose response
+        // carries no per-call cost signal at all — nothing to count, nothing to disclose, the
+        // estimate simply stands, exactly as before this ticket. A PRESENT-but-unusable header is a
+        // vendor/intermediary ANOMALY — SM-41G would want to see it — so it is counted
+        // (`trueUpHeaderMalformedCount`) and logged, but still never applied to the ledger: a value
+        // this driver cannot trust must never silently become either "no correction" (indistinguishable
+        // from the absent case, hiding the anomaly) or a fabricated number.
+        //
+        // `Number.isFinite(units) && units > 0` — not `!Number.isNaN(units)` — is the correct
+        // predicate: it excludes NaN, +/-Infinity, negative values, AND exactly zero. Zero is
+        // deliberately treated as malformed here too (not "a confirmed $0 charge"), matching this
+        // codebase's pervasive B1/§4d convention that a $0 figure is never trustworthy on the money
+        // path (types.ts's own `recordIncurredCostUsd`/`withActualCostCapture` treat an exactly-zero
+        // incurred amount as "nothing to record" for the identical reason — a $0 row is noise on a
+        // path where "unset" and "zero" must stay distinguishable).
+        if (Number.isFinite(units) && units > 0) {
+          if (this.opts.costPerUnitUsd > 0) recordActualCostUsd(units * this.opts.costPerUnitUsd);
+        } else {
+          this.trueUpHeaderMalformedCount++;
+          // Visible to an operator/SM-41G without needing a new admin surface — never the response
+          // body (this driver's standing discipline elsewhere in this file), just the header's own
+          // unusable value and this instance's running count of the anomaly.
+          console.warn(
+            `[ahrefs] x-api-units-cost-total-actual header present but unusable ("${actualHeader}") — ` +
+              `true-up NOT applied this call (pre-existing estimate stands); ` +
+              `trueUpHeaderMalformedCount=${this.trueUpHeaderMalformedCount}`,
+          );
         }
       }
       return (await res.json()) as T;
