@@ -1,0 +1,32 @@
+# Hermes exposed as an MCP server — lets other agents call Hermes conversations as tools.
+#
+# NOT enabled by default, for two reasons:
+#   1. `hermes mcp serve` speaks MCP over stdio, so as a plain systemd service it has no client
+#      attached and nothing to talk to. It is useful when a client spawns it, or behind a
+#      stdio->HTTP bridge. Enable it only once there is a concrete consumer.
+#   2. The direction we actually want first is the OPPOSITE one: Hermes calling OUR MCP Hub, so
+#      Zedano can act on ERP data. That needs no unit at all:
+#          sudo -u azlan hermes mcp add gaiada --url http://127.0.0.1:3003/mcp
+#
+# Kept here so the option is documented rather than rediscovered.
+[Unit]
+Description=Hermes as an MCP server (expose conversations to other agents)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=azlan
+Group=azlan
+WorkingDirectory=/home/azlan
+Environment=HOME=/home/azlan
+Environment=PATH=/home/azlan/.local/bin:/usr/local/bin:/usr/bin:/bin
+
+ExecStart=/home/azlan/.local/bin/hermes mcp serve
+Restart=on-failure
+RestartSec=10s
+
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

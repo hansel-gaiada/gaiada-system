@@ -21,18 +21,26 @@ version and add a `CHANGELOG.md` entry on every notable module change.
 
 ---
 
+## App version
+
+**`Alpha 01.002.0001a`** — see [`VERSIONING.md`](./VERSIONING.md) for the format, and
+[`/VERSION`](../../VERSION) for the machine-readable source. The app version composes the module
+versions below; the running build reports it at `GET /health`.
+
+---
+
 ## Registry (at a glance)
 
 | Module | Ver | Status | Workstream | Since |
 |---|---|---|---|---|
-| platform-nest | `0.6.3` | PROTOTYPED | WS1 | 2026-07 |
+| platform-nest | `0.6.4` | PROTOTYPED | WS1 | 2026-07 |
 | platform-ui | `0.6.5` | PROTOTYPED | WS5 | 2026-07 |
 | ai-gateway-go | `0.13.0` | PROTOTYPED | WS3 | 2026-07 |
 | mcp-hub | `0.9.0` | PROTOTYPED | WS2 | 2026-07 |
 | sync-engine-go | `0.7.0` | PROTOTYPED | WS1 | 2026-07 |
 | automation (n8n) | `0.4.0` | DEV-VERIFIED | WS4 | 2026-07 |
 | observability | `0.6.0` | DEV-VERIFIED | WS9 | 2026-07 |
-| infra | `0.5.2` | PROTOTYPED | WS10 | 2026-07 |
+| infra | `0.6.0` | PROTOTYPED | WS10 | 2026-07 |
 | wa-chat-bot | `0.9.1` | PROTOTYPED | WS5 | 2026-07 |
 | ai-agents | `0.4.0` | PROTOTYPED | WS8 | 2026-07 |
 | hermes-gateway | `0.2.0` | PROTOTYPED | WS3 | 2026-07 |

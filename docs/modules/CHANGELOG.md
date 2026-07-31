@@ -9,6 +9,47 @@ local stack). None of these mean "production-done".
 
 ---
 
+## App release log
+
+Every cut app version and the exact module manifest it contains, so any deployed build can be
+reconstructed from this table alone. Format defined in [`VERSIONING.md`](./VERSIONING.md).
+
+### `Alpha 01.002.0001a` — 2026-07-31 — first deployable build
+
+Cut to bring the trial stack up on **gda-aicenter** (the Hermes/DeepSeek box). Baseline manifest,
+so the module-reference counter starts at `0001`.
+
+| Module | Ver | Module | Ver |
+|---|---|---|---|
+| platform-nest | `0.6.4` ↑ | wa-chat-bot | `0.9.1` |
+| platform-ui | `0.6.5` | ai-agents | `0.4.0` |
+| ai-gateway-go | `0.13.0` | hermes-gateway | `0.2.0` |
+| mcp-hub | `0.9.0` | capture-helper | `0.2.0` |
+| sync-engine-go | `0.7.0` | webdev | `0.8.1` |
+| automation (n8n) | `0.4.0` | search-marketing | `0.2.0` |
+| observability | `0.6.0` | infra | `0.6.0` ↑ |
+
+- **infra `0.5.2 → 0.6.0`** — compose profile lanes (`data`/`bot`/`auth`/`multisite`/`whisper`) and
+  the host-data overlay for gda-aicenter, where Postgres+pgvector, Redis and Ollama live on the
+  host so other projects can share one cluster. `GATEWAY_TOPOLOGY_MODE` was hardcoded to `central`
+  and silently ignored its env var — now honoured, with `GATEWAY_CENTRAL_URL`, which is the switch
+  that routes all generation through the Hermes shim. `EMBED_CHAIN`/`OLLAMA_EMBED_MODEL` declared
+  (previously absent) so embeddings resolve to nomic-embed-text at 768 dims, matching `vector(768)`.
+  Deploy pipeline parameterized by compose file + profiles. Hermes systemd units added.
+- **platform-nest `0.6.3 → 0.6.4`** — `GET /health` reports the app version.
+
+**Why `002` and not `001`:** `001` was cut twice (`0001a`, `0001b`) and produced no deployable
+image both times. The app release counter never reuses a number, so those attempts keep `001` and
+this cut takes `002` — the history stays honest about what was tried.
+
+**What this deliberately EXCLUDES:** the in-flight search-marketing (Google OAuth/GSC/GA4,
+provider layer) and reports work, plus migrations `0053`–`0063`. Those seats were writing
+continuously, and two cuts in a row captured a file mid-edit — a type error, then a syntax error.
+Neither was a defect in their work; both were snapshot artifacts. That work lands as its own cut
+once the seats are done, which is exactly what the versioning scheme is for.
+
+---
+
 ## Program log — module additions
 
 | Date | Event |

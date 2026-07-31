@@ -1,0 +1,44 @@
+# Gateway-contract shim: makes the local Hermes agent the brain of the gaiada stack.
+# Runs AS azlan because it shells out to `hermes`, which needs azlan's HOME (/opt/hermes-zen is
+# 0700 azlan) and ~/.local/bin on PATH. The shim code itself is ours and lives outside that tree.
+#
+# ai-gateway (site topology) forwards /complete and /media here via GATEWAY_CENTRAL_URL.
+[Unit]
+Description=gaiada hermes-gateway shim (Hermes as the stack brain)
+Documentation=file:///opt/hermes-gateway/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=azlan
+Group=azlan
+WorkingDirectory=/opt/hermes-gateway
+
+# Loopback only. Containers reach it as host.docker.internal:3009 (the docker0 bridge);
+# binding 0.0.0.0 would expose an unauthenticated-by-default agent to the whole box.
+Environment=HOST=127.0.0.1
+Environment=PORT=3009
+Environment=HOME=/home/azlan
+Environment=PATH=/home/azlan/.local/bin:/usr/local/bin:/usr/bin:/bin
+# Isolated scratch dir so Hermes' tool use never touches the repo or /opt/hermes-zen.
+Environment=HERMES_CWD=/opt/hermes-gateway/work
+# Agent runs are slow (full tool/memory loop, not a raw completion).
+Environment=HERMES_TIMEOUT_MS=240000
+Environment=HERMES_MEDIA_TIMEOUT_MS=600000
+# GATEWAY_TOKEN — must equal ai-gateway's. Kept out of this file so the unit is committable.
+EnvironmentFile=/etc/gaiada/hermes-gateway.env
+
+ExecStart=/usr/bin/env node server.mjs
+Restart=on-failure
+RestartSec=5s
+
+# The shim only needs to run hermes and write its scratch dir.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=read-only
+ReadWritePaths=/opt/hermes-gateway/work /home/azlan/.hermes
+
+[Install]
+WantedBy=multi-user.target
