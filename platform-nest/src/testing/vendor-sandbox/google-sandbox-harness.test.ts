@@ -509,13 +509,18 @@ describe("SM-51 · the three data surfaces (auth strictness + required fields + 
     expect(body.fieldMask).toContain("metrics.cost_micros");
   });
 
-  it("the Ads MUTATE envelope is served for SM-26's future code — and SM-25a's own client refuses to send one", async () => {
-    // Served (SM-51's spec calls for read + mutate envelopes)…
+  it("the Ads MUTATE envelope is served for SM-26's code — and SM-25a's own client refuses to send one", async () => {
+    // SM-26 (§6bp Ruling 6) replaced SM-51's fixed single-result stub with one result per operation,
+    // and made an empty `operations` a 400 the way the real API does — so this now sends a real
+    // one-operation batch. Empty-operations rejection is covered by its own SM-26 case.
     const res = await fetch(`${sb.origin}/v18/customers/1234567890/campaigns:mutate`, {
-      method: "POST", headers: { ...auth(), "content-type": "application/json" }, body: JSON.stringify({ operations: [] }),
+      method: "POST", headers: { ...auth(), "content-type": "application/json" },
+      body: JSON.stringify({ operations: [{ update: { resourceName: "customers/1234567890/campaigns/1" } }] }),
     });
     expect(res.status).toBe(200);
-    expect(((await res.json()) as { results: Array<{ resourceName: string }> }).results[0].resourceName).toContain("/campaigns/");
+    const results = ((await res.json()) as { results: Array<{ resourceName: string }> }).results;
+    expect(results).toHaveLength(1); // one result per operation, in order
+    expect(results[0].resourceName).toContain("/campaigns/");
     // …and structurally unreachable from this ticket's client: see api-client.ts's assertReadOnlyPath,
     // pinned in google-api-client.sandbox.test.ts. Ads writes stay under SM-21 + WS4 (§A12.1/D-8).
   });
