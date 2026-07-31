@@ -155,13 +155,17 @@ export class AdsWriteModeBootError extends Error {}
 /**
  * `live` with no registered executor must abort startup, never silently simulate and never merely
  * log (tracker §6bp Ruling 3.1). Pure and synchronous — trivially unit-testable without booting the
- * whole app. WIRING this into `main.ts`'s bootstrap (calling this right after
- * `registerLiveAdsExecutor(googleAdsLiveExecutor)`, both against `resolveSearchAdsWriteMode()`) is
- * `main.ts`'s file, explicitly out of this ticket's ownership — reported to the architect as a
- * required follow-up, not performed here. Until that wiring lands, `search.controller.ts`'s own
- * `resolveAdsExecutor` call (sem-apply.ts's existing seam) still keys off `config.search.providerMode`
- * exactly as it does today (0062's ratified interim, tracker §6bp Ruling 3's own opening line) — this
- * function documents and tests the INTENDED boot behaviour, it does not yet gate the running server.
+ * whole app.
+ *
+ * WIRED (tracker §6bv/§6bv.1, SM-75): `main.ts`'s `wireSearchProviderModeAndAdsWriteMode()` calls
+ * `registerLiveAdsExecutor(googleAdsLiveExecutor)` immediately followed by this function against
+ * `resolveSearchAdsWriteMode()`, both at that function's top level — deliberately OUTSIDE the
+ * `SEARCH_PROVIDER_MODE` if/else, and unconditional on every boot. (SM-24's gate caught an earlier
+ * revision of that call site nested inside the `SEARCH_PROVIDER_MODE === "live"` branch, which let
+ * `SEARCH_PROVIDER_MODE=simulate` skip both the registration and this assertion — the exact
+ * simulated-data-with-live-ad-writes combination §A12.6 calls legitimate, silently unguarded. Fixed;
+ * `sm75-search-boot-wiring.test.ts` pins the placement so a regression back into a mode branch goes
+ * red.) This function now genuinely gates the running server, not merely the intended behaviour.
  */
 export function assertAdsWriteModeBootSafe(writeMode: "simulate" | "live", hasLiveExecutorRegistered: boolean): void {
   if (writeMode === "live" && !hasLiveExecutorRegistered) {

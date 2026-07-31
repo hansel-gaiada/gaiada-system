@@ -123,23 +123,26 @@ export async function buildApp(): Promise<NestFastifyApplication> {
   return app;
 }
 
-async function bootstrap(): Promise<void> {
-  // Same startup sequence the Fastify server ran: migrate, register compiled-in modules +
-  // core rollup providers, sync the governed metric registry, then serve.
-  await migrate();
-  // Seed the HLC from the greatest clock this origin_site has already committed, so a restart
-  // never mints an HLC that regresses (sync-engine-revision §2, D3 #4).
-  await seedClockFromDb(getPool());
-  registerModule(agencyModule);
-  registerModule(pmModule);
-  registerModule(itModule);
-  registerModule(billingModule);
-  registerModule(clientsModule);
-  registerModule(knowledgeModule);
-  registerModule(automationConsoleModule);
-  registerModule(hrModule);
-  registerModule(searchModule);
-  registerModule(reportsModule);
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+// SM-75 (tracker §6bv/§6bv.1) — this whole function is bootstrap()'s search provider-mode +
+// ads-write-mode wiring, extracted VERBATIM (not re-implemented) out of its call site so a boot-
+// wiring smoke test can invoke the exact function bootstrap() calls, instead of a copy of its
+// ordering. The SM-24 gate's finding was that `registerLiveAdsExecutor` + `assertAdsWriteModeBootSafe`
+// had been nested inside the `SEARCH_PROVIDER_MODE === "live"` branch below while a comment claimed
+// the registration was unconditional — this function's SHAPE (the two SM-26 lines sitting at this
+// function's top level, after the if/else, never inside either branch) is the fix; a test that
+// re-nests them and goes red is what makes that fix durable.
+//
+// `providerMode`/`adsWriteMode` default to the real config/env reads bootstrap() used inline before
+// this extraction, so calling this with no argument reproduces that exact behaviour — the parameters
+// exist ONLY so a test can drive every mode cross-product directly, without reloading config.ts (a
+// module-scope object computed once at import time) per case.
+export function wireSearchProviderModeAndAdsWriteMode(
+  modes: { providerMode?: "simulate" | "live"; adsWriteMode?: "simulate" | "live" } = {},
+): void {
+  const providerMode = modes.providerMode ?? config.search.providerMode;
+  const adsWriteMode = modes.adsWriteMode ?? resolveSearchAdsWriteMode();
+
   // SM-06/SM-34/SM-35 — provider bootstrap registration (tracker §6, design addendum §A3/§A4.3).
   //
   // `providerMode: "simulate"` registers SM-33's synthetic drivers INSTEAD of any live vendor
@@ -166,13 +169,13 @@ async function bootstrap(): Promise<void> {
     if (isSimulatedProvider(p as never) !== expectSimulated) {
       throw new Error(
         `[search] BOOT ERROR: provider '${p.key}' has simulated=${isSimulatedProvider(p as never)} while ` +
-          `SEARCH_PROVIDER_MODE=${config.search.providerMode} — mode/driver mutual exclusion violated ` +
+          `SEARCH_PROVIDER_MODE=${providerMode} — mode/driver mutual exclusion violated ` +
           "(design addendum §A4.3: this must abort startup, not degrade to a warning)",
       );
     }
   };
 
-  if (config.search.providerMode === "simulate") {
+  if (providerMode === "simulate") {
     for (const sim of createSimulationProviders()) {
       assertProvenance(sim, true);
       registerProvider(sim);
@@ -252,22 +255,51 @@ async function bootstrap(): Promise<void> {
       // eslint-disable-next-line no-console
       console.log("[search] Ahrefs credentials not configured — Ahrefs search-data capabilities are disabled");
     }
-
-    // ── SM-26 / addendum §A12.6: the Ads WRITE mode, deliberately separate from the DATA vendor mode ──
-    // Registered unconditionally: registration only makes a live executor AVAILABLE, it does not make
-    // it reachable. `resolveAdsExecutor(resolveSearchAdsWriteMode())` decides that per request, and in
-    // `simulate` it always returns the simulator even when a live executor exists (SM-21's rule: a
-    // control that cannot do the thing must not report that it did).
-    //
-    // The boot assertion is the counterpart: `SEARCH_ADS_WRITE_MODE=live` with no live executor is an
-    // unfinished deployment, and refusing at boot is the only place it can be refused honestly — a
-    // runtime refusal would surface as a failed client ad change after an approval had already been
-    // spent (§A4.3/§A10.4: mode/driver mutual exclusion is a boot error, not a warning).
-    registerLiveAdsExecutor(googleAdsLiveExecutor);
-    assertAdsWriteModeBootSafe(resolveSearchAdsWriteMode(), true);
-    // eslint-disable-next-line no-console
-    console.log(`[search] Ads write mode: ${resolveSearchAdsWriteMode()} (SEARCH_ADS_WRITE_MODE)`);
   }
+
+  // ── SM-26 / addendum §A12.6: the Ads WRITE mode, deliberately separate from the DATA vendor mode ──
+  // ⚠️ DELIBERATELY OUTSIDE the SEARCH_PROVIDER_MODE if/else above. The SM-24 gate found this block
+  // originally nested in the `live` branch, where my own comment claimed it ran "unconditionally"
+  // while the placement meant `SEARCH_PROVIDER_MODE=simulate` skipped BOTH the registration and the
+  // boot assertion. That is the department's signature defect verbatim — a guard that reads as
+  // enforced and enforces nothing — and the escaping combination is one the addendum itself calls
+  // legitimate: simulated DATA with live AD WRITES. It booted silently and failed at request time
+  // with `NoLiveExecutorError`, i.e. after the one-shot approval had already been spent, which is
+  // precisely the outcome Ruling 3.1 exists to forbid. Keep these two lines at function scope; do
+  // not move them back inside a mode branch.
+  //
+  // Registration only makes a live executor AVAILABLE, never reachable:
+  // `resolveAdsExecutor(resolveSearchAdsWriteMode())` decides per request, and in `simulate` it
+  // always returns the simulator even when a live executor exists (SM-21: a control that cannot do
+  // the thing must not report that it did). The boot assertion is the counterpart —
+  // `SEARCH_ADS_WRITE_MODE=live` with no live executor is an unfinished deployment, and boot is the
+  // only place that can be refused honestly (§A4.3/§A10.4: a boot error, not a warning).
+  registerLiveAdsExecutor(googleAdsLiveExecutor);
+  assertAdsWriteModeBootSafe(adsWriteMode, true);
+  // eslint-disable-next-line no-console
+  console.log(`[search] Ads write mode: ${adsWriteMode} (SEARCH_ADS_WRITE_MODE)`);
+}
+
+async function bootstrap(): Promise<void> {
+  // Same startup sequence the Fastify server ran: migrate, register compiled-in modules +
+  // core rollup providers, sync the governed metric registry, then serve.
+  await migrate();
+  // Seed the HLC from the greatest clock this origin_site has already committed, so a restart
+  // never mints an HLC that regresses (sync-engine-revision §2, D3 #4).
+  await seedClockFromDb(getPool());
+  registerModule(agencyModule);
+  registerModule(pmModule);
+  registerModule(itModule);
+  registerModule(billingModule);
+  registerModule(clientsModule);
+  registerModule(knowledgeModule);
+  registerModule(automationConsoleModule);
+  registerModule(hrModule);
+  registerModule(searchModule);
+  registerModule(reportsModule);
+  // SM-75: the search provider-mode + ads-write-mode boot wiring — see wireSearchProviderModeAndAdsWriteMode's
+  // own header above `bootstrap()` for why this is a single unconditional call rather than inline code.
+  wireSearchProviderModeAndAdsWriteMode();
   registerCoreRollupProvider(coreTaskRollups);
   registerCoreRollupProvider(clientWorkRollups);
   await syncMetricDefinitions();

@@ -7049,3 +7049,62 @@ Vendor keys (DataForSEO login/password; Semrush and Ahrefs each needing **both**
 price/allowance pair or the driver refuses to register); the Google OAuth client and the **review-gated** Ads
 developer token; and a provisioned box with `deploy.yml`/GHCR secrets. The documented redeploy path is already
 correct — it simply has nothing to point at.
+
+---
+
+## 6bx · SM-75 · **DEV-VERIFIED** — boot wiring is now executed by a test, and the defect class is confirmed platform-wide
+
+Verified by me: `tsc` clean · one unconditional call at `main.ts:302` · `src/modules/search`
+**1061 passed / 4 skipped, zero reds** — exactly the 1056 baseline **+ its 5**, the arithmetic that shows nothing
+else moved.
+
+### It drove the real path, which was the whole requirement
+
+It extracted `bootstrap()`'s search block into `export function wireSearchProviderModeAndAdsWriteMode(modes = {})`
+and calls it from `bootstrap()`. The **only** change to the extracted body is threading `providerMode`/
+`adsWriteMode` in as parameters, defaulting to the identical reads used inline before — necessary because
+`config` is a module-scope object computed once at import, so a test cannot re-derive it per env value. It
+confirmed by `diff` that nothing else changed: no reordering, no logic edits.
+
+**The assertion it chose is the part that shows real understanding.** "Did not throw" would have been worthless —
+**the original defect did not throw either.** Instead it asserts that `resolveAdsExecutor("live")` resolves to
+the actual `googleAdsLiveExecutor`, through the real production seam in `sem-apply.ts`, proving
+`registerLiveAdsExecutor` genuinely *ran* for every provider mode. A test that only checked for absence of an
+exception would have passed against the bug it exists to catch.
+
+All four §A12.6 cross-products green, plus a fifth pinning the **no-argument production call shape** — so the
+test cannot pass while `bootstrap()` calls it differently.
+
+### The negative control, and why its partial red is the correct result
+
+Re-nesting the three lines inside the `providerMode === "live"` branch — **the literal original defect** —
+turned **2 of 5** red: both `providerMode=simulate` rows. The two `live×*` rows stayed green **correctly**, since
+that regression shape only ever broke the simulate branch. It said so explicitly rather than reporting "2 of 5"
+as a partial success. Restored `cp`-from-backup, `sha256sum`-verified (`e5cf20bc…`), `tsc` and 5/5 re-confirmed.
+
+### The platform-wide finding — sharper than the question I asked
+
+I asked whether other services' boot checks are tested. The precise answer is better than a yes/no:
+
+- **`assertLiveVendorBaseUrlsAreNotPrivate` (SM-49) and `assertLiveGoogleEndpointsAreNotPrivate` (SM-51)** each
+  have a pure unit test **and** a static text-pin test that `readFileSync`s `main.ts` and asserts the call
+  appears inside the live branch. Real protection, but **narrower in a specific way: a text pin cannot detect a
+  call that is textually present but unreachable, and it fundamentally cannot express "must be OUTSIDE every
+  branch"** — only "must be inside branch X." That is exactly the invariant SM-24's finding required, so the
+  existing instrument could not have caught this bug even if pointed at it.
+- **`assertProvenance`** — the mode/driver mutual-exclusion closure sitting a few lines above — has **neither**.
+  It is an unexported closure appearing in zero test files.
+
+**SM-75's test is the first runtime execution of any of these four boot guards' real call sites.** It correctly
+did not widen its fix, and ran the three existing pin files standalone (**44 tests green**) to prove its
+extraction had not disturbed their exact-text anchors — a check most seats would have skipped, and precisely the
+one an extraction refactor endangers.
+
+**For the architect:** the text-pin-vs-runtime gap is a platform-wide instrument weakness, not a search issue.
+Every service in this estate does boot-time mode/driver mutual exclusion (§A4.3/§A10.4 mandates it), and
+`assertProvenance` is untested in any form. Worth a ruling on whether the `wireX()`-extraction pattern becomes
+the house standard for boot wiring.
+
+**Caveat it stated rather than papered over:** its 2552-pass full-tree run completed *before* the devops
+migration to head 0069, and it did not re-run afterwards. I re-ran `src/modules/search` post-migration (1061
+green, above) and have a full-tree run in flight to close the rest.
