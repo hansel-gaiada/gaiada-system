@@ -1099,6 +1099,69 @@ this wave adds the routes. **Every response below is `GoogleConnectionView` — 
   Google accepts our serialized requests at all. **A green run of this surface is a validated
   client of our own model of Google, not a validated Google integration.**
 
+## 15. Reports module — Work Tracker · Reports · Appraisal (TR-* tracker program)
+
+[Design: `../blueprints/tracker-reporting-foundation.md`](../blueprints/tracker-reporting-foundation.md)
+
+### 15a. Reports surface — documents, periods, exports — `modules/reports/reports.controller.ts`
+
+| Status | Method | Path | Notes |
+|---|---|---|---|
+| ✅ | POST | `/api/:t/reports/facts/recompute` | `{from, to}` (YYYY-MM-DD dates, inclusive). Idempotent backfill/recompute of `report_work_facts` over the window. Validates window ≤400 days; 422 if larger. Returns `{from, to, days, factRows, autoMissedCheckins, driftFindings, jobRunId}`. Authz: `report_admin` role. |
+| ✅ | GET | `/api/:t/reports/document` | Query: `grain` (person\|project\|department\|company), `scopeRef`, `periodKind` (day\|week\|month\|custom), `start` (YYYY-MM-DD), `end` (optional, required when `periodKind=custom`), `servedTenant` (optional, department-grain only), `revision` (optional pin). Returns `ReportDocument` JSON (§6.1). Sealed calendar periods serve stored document; custom/open periods compute live. Authz: per-grain matrix (§8). |
+| ✅ | GET | `/api/:t/reports/overview` | Query: `grain`, `periodKind`, `start`, `end`. Returns `{periodKind, start, end, scopes:[{scopeRef, scopeName, kpis:[]}]}` (console landing, headline KPIs per scope). Authz: per-grain read. |
+| ✅ | GET | `/api/:t/reports/metrics` | Query: `metricKey`, `grain` (optional), `from` (YYYY-MM-DD), `to`. Returns raw governed-metric series (power users/MCP). Calendar periods and custom ranges both read live from `report_work_facts`. Authz: per-grain read. |
+| ✅ | GET | `/api/:t/reports/periods` | Query: `kind` (day\|week\|month\|custom, optional), `from`, `to`. Lists report periods and seal status. Calendar kinds auto-vivify; customs list only existing rows. Authz: `report_period` read. |
+| ✅ | GET | `/api/:t/reports/periods/:id` | One period's seal state + revision. Authz: `report_period` read. |
+| ✅ | POST | `/api/:t/reports/periods/pin` | `{start, end, label}` (all required). Creates/idempotently re-labels a `period_kind='custom'` row. Never sealed, never appraisal-admissible. Authz: `report_period` pin. |
+| ✅ | POST | `/api/:t/reports/periods/:id/seal` | Seal a calendar period (idempotent-once-open; 409 if already sealed; 422 if `period_kind='custom'`). Authz: `report_period` seal. |
+| ✅ | POST | `/api/:t/reports/periods/:id/amend` | `{reason}` (required). Flags sealed period `amended` + audits. Actual re-seal (revision+1) happens via subsequent `/seal` call. Authz: `report_period` amend. |
+| ✅ | POST | `/api/:t/reports/export` | `{grain, scopeRef, periodKind, start, end?, format}` → `{id, status, filename}`. Format: pdf\|xlsx\|csv. Synchronous: builds, renders, persists to storage. Unmarked (unsealed/custom) exports carry `AD HOC · UNSEALED` marking on the artifact. Authz: same as document read. |
+| ✅ | GET | `/api/:t/reports/exports/:jobId` | Export job status (always `"completed"` today). |
+| ✅ | GET | `/api/:t/reports/exports/:jobId/download` | Download export bytes. Validates authorization every time (stored `storage_key` re-derives the scope and re-runs the same Cerbos check). |
+
+### 15b. Check-ins surface — daily end-of-day submissions — `modules/reports/checkins.controller.ts`
+
+| Status | Method | Path | Notes |
+|---|---|---|---|
+| ✅ | GET | `/api/:t/checkins/today` | Returns `{expected, alreadySubmitted, draft}`. Draft is live-prefilled from today's activity/time. Authz: self only. |
+| ✅ | POST | `/api/:t/checkins` | `{date?, summary, blockers?}` → checkin row. `summary` required, non-empty. Authz: self only (subject == principal, enforced). Emits `checkin.created` event. |
+| ✅ | GET | `/api/:t/checkins` | Query: `userId`, `from`, `to`. History (self; manager for own unit; HR-appraisal role). Authz: per-grain matrix (§8). |
+| ✅ | GET | `/api/:t/checkins/compliance` | Query: `unit`, `periodKind`, `start`, `end` (optional, required when `periodKind=custom`). Compliance grid (expected/submitted/missed/excused). Authz: lead/exec/HR or self-for-own-row (TR-39). |
+| ✅ | POST | `/api/:t/checkins/:id/excuse` | `{reason}` → audited excuse. Authz: lead (own unit)/HR. |
+| ✅ | GET | `/api/:t/checkins/pending-reminders` | Query: `date`. Internal for n8n: expected-but-missing list + WA identity link presence. Authz: service/admin. |
+
+### 15c. Appraisals surface — manager scoring + acknowledgement — `modules/reports/appraisals.controller.ts`
+
+| Status | Method | Path | Notes |
+|---|---|---|---|
+| ✅ | POST | `/api/:t/appraisals/cycles` | `{name, startsAt, endsAt, weights:{delivery,quality,effort,collaboration}, roleWeights}` → cycle. Authz: `HR-appraisal` role. |
+| ✅ | GET | `/api/:t/appraisals/cycles` | List cycles. Authz: `HR-appraisal` or elevated. |
+| ✅ | GET | `/api/:t/appraisals/cycles/:id` | Cycle detail + weights. Authz: HR-appraisal. |
+| ✅ | PATCH | `/api/:t/appraisals/cycles/:id` | `{weights?, roleWeights?, status?}`. Authz: HR-appraisal. |
+| ✅ | POST | `/api/:t/appraisals/cycles/:id/generate` | Generate per-subject appraisals from sealed calendar periods covering the cycle range. 409 if any period unsealed; 422 if any covering period is `period_kind='custom'`. Authz: HR-appraisal. |
+| ✅ | GET | `/api/:t/appraisals` | Query: `cycleId`, `subjectId`. Appraisal list + pinned sealed person-doc(s). Authz: per-grain matrix (self/manager/HR/exec, §8). |
+| ✅ | GET | `/api/:t/appraisals/:id` | Appraisal pack read. Authz: per-grain matrix. |
+| ✅ | GET | `/api/:t/appraisals/mine` | Self's appraisals (status ≥ submitted). Authz: self only. |
+| ✅ | PATCH | `/api/:t/appraisals/:id` | Manager scores + notes + commentary (draft only). Commentary ≥50 chars; justification required if score deviates >±1 band from auto-inputs. Authz: manager-of-subject. |
+| ✅ | POST | `/api/:t/appraisals/:id/submit` | Validates commentary + justifications → status `submitted`, notifies subject. Authz: manager-of-subject. |
+| ✅ | POST | `/api/:t/appraisals/:id/ack` | `{action:"acknowledged"|"disputed", comment?}` → appends to immutable ack trail. Authz: subject only. |
+| ✅ | POST | `/api/:t/appraisals/:id/finalize` | HR closes (post-ack or post-dispute-resolution) → appends `finalized` ack row. Authz: HR-appraisal. |
+
+### 15d. Internal (non-tenant path, sidecar-only) — `modules/reports/print-payload.controller.ts`
+
+| Status | Method | Path | Notes |
+|---|---|---|---|
+| ✅ | GET | `/internal/reports/print-payload/:jobToken` | One-shot, 5-min-TTL token (minted at export time, burned on read). Returns JSON payload for the PDF renderer; validates token + burns it + re-authorizes the same grain/scope the export was created under. Consumed by the Next print route (`platform-ui/src/app/print/reports/[jobToken]`). Authz: token validates; re-checks document read (standing ruling 1). |
+
+**Known gaps & deferrals:**
+- **No appraisal UI** (TR-26 not built). Package read/write endpoints exist; employee acknowledgement surface does not. Backend appraisal engine is DEV-VERIFIED with 50+ tests; no integration tests against the UI yet.
+- ~~**Report viewer/charts** (TR-16/TR-17 not built) … stubs rendering `BackendPending`.~~ **FALSE — corrected 2026-07-31 by the architect. TR-16 and TR-17 both LANDED.** The chart kit (`platform-ui/src/components/reports/charts/`, zero external deps), `ReportViewer`, `PeriodSelector` (Daily/Weekly/Monthly/**Custom range** + presets), `WarningsBanner`, per-grain compositions (`GrainCharts.tsx`) and **all four real routes** at `platform-ui/src/app/(app)/reports/{person,project,department,company}` exist and render live documents — range in the URL, 403 limited-access branch, DEMO_MODE fixtures. **862 platform-ui tests green**, `next build` clean, light/dark verified by Playwright screenshot. Verified on disk before this correction.
+- ~~**Print route + print CSS** (TR-20 not built) … does not exist.~~ **FALSE — corrected 2026-07-31 by the architect. TR-20 LANDED:** `platform-ui/src/app/print/reports/[jobToken]/` + `print.css`, session-less, rendering the SAME viewer components, with real multi-page PDFs produced and inspected. **Genuinely outstanding:** the live `mint → sidecar → real print route → PDF` hop has not been driven end to end (owned by TR-29).
+- ⚠ **Why these two rows were wrong matters more than the rows:** they were written from the blueprint's ticket list rather than from the filesystem. **A contract doc that declares an existing surface "not built" is worse than a gap** — it invites someone to rebuild it. Verify UI claims with `ls` against `platform-ui/src/app/`, not against a ticket's status.
+- ~~**Retroactive leave must retract stale check-in rows** (TR-41)…~~ **DEV-VERIFIED 2026-08-01.** `writeAutoMissedCheckins` (`modules/reports/fact-job.ts`) now runs a RETRACTION pass every time it recomputes a past day's slice: any stored `auto_missed` row no longer in the freshly-derived `expectedCheckinUsers()` set (leave approved late, a holiday/calendar change, or a membership correction) is DELETED — never a `submitted` or `excused` row, those survive untouched — and audited via `activities` (`checkin.auto_missed_retracted`, carrying subject/date/prior status/cause). No new endpoint, no new status value; `GET /checkins` history and `GET /checkins/compliance` now agree once the next recompute runs (the window until then is real but bounded, not a permanent gap). A sealed period's stored `kpis` are unaffected by construction (the pass never touches `report_work_facts`/`rollup_metrics`/`report_documents`) — pinned directly against a sealed period. New tests: `fact-job.test.ts` (pure `checkinRetractionCause`), `fact-job.db.test.ts`, `checkins.controller.db.test.ts`, `report-seal.db.test.ts`; 552/552 reports-module tests green.
+- **Production deployment** is untouched. All endpoints work against live Postgres, Cerbos, Redis; code is DEV-VERIFIED with 400+ tests; there is **no deployed build**.
+
 **⏳ PENDING — each console tab renders `BackendPending` naming its owner until these land:**
 
 | Endpoint(s) | Tab | Owner |

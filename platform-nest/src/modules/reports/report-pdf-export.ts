@@ -66,10 +66,12 @@ import type { ReportDocument, ReportGrain } from "./report-document";
 /** §6.3: "one-shot, 5-min-TTL jobToken". */
 export const PRINT_JOB_TOKEN_TTL_SECONDS = 5 * 60;
 
-const REDIS_KEY_PREFIX = "reports:printjob:";
+// Exported so a test can force-expire a minted token via the REAL Redis TTL mechanism
+// (`getRedis().pexpire(printJobRedisKey(token), 1)`) rather than reimplementing/mocking expiry.
+export const PRINT_JOB_REDIS_KEY_PREFIX = "reports:printjob:";
 
-function redisKey(token: string): string {
-  return `${REDIS_KEY_PREFIX}${token}`;
+export function printJobRedisKey(token: string): string {
+  return `${PRINT_JOB_REDIS_KEY_PREFIX}${token}`;
 }
 
 /** The one-shot token's Redis value: the FULLY resolved, ALREADY-authorized document, not an id
@@ -108,7 +110,7 @@ export function generateJobToken(): string {
 export async function mintPrintJobToken(input: MintPrintJobInput): Promise<string> {
   const token = generateJobToken();
   const record: PrintJobPayload = { ...input, originSite: config.originSite, mintedAt: new Date().toISOString() };
-  await getRedis().set(redisKey(token), JSON.stringify(record), "EX", PRINT_JOB_TOKEN_TTL_SECONDS);
+  await getRedis().set(printJobRedisKey(token), JSON.stringify(record), "EX", PRINT_JOB_TOKEN_TTL_SECONDS);
   return token;
 }
 
@@ -124,7 +126,7 @@ export async function mintPrintJobToken(input: MintPrintJobInput): Promise<strin
  *  principal on the payload route to re-check against, by design (requirement 2). */
 export async function burnPrintJobToken(token: string): Promise<PrintJobPayload | null> {
   if (!token) return null;
-  const raw = await getRedis().getdel(redisKey(token));
+  const raw = await getRedis().getdel(printJobRedisKey(token));
   if (!raw) return null;
   try {
     return JSON.parse(raw) as PrintJobPayload;

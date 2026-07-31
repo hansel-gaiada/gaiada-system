@@ -334,6 +334,15 @@ services:
       # Event → knowledge-graph bridge (WS8 Step E). Forwards business events on these entity streams
       # to the knowledge service /graph/ingest (reuses KNOWLEDGE_URL/TOKEN above). Off unless set.
       GRAPH_BRIDGE_ENTITY_TYPES: ${GRAPH_BRIDGE_ENTITY_TYPES:-}
+      # TR-21 (tracker/reporting §6.3) — the PDF export path's call to the `report-renderer`
+      # sidecar. RENDERER_TOKEN is the SAME shared bearer token that service's own env carries
+      # below (report-renderer's auth.ts checks it too) — one shared secret, not two independently
+      # rotated ones. PLATFORM_UI_INTERNAL_URL must be byte-identical to report-renderer's own copy
+      # (its same-origin/SSRF guard compares against it). Any of the three unset -> the pdf export
+      # endpoint refuses with an honest 503 rather than half-attempting the call (config.ts).
+      REPORT_RENDERER_URL: ${REPORT_RENDERER_URL:-http://report-renderer:3007}
+      RENDERER_TOKEN: ${RENDERER_TOKEN:?}
+      PLATFORM_UI_INTERNAL_URL: ${PLATFORM_UI_INTERNAL_URL:-http://platform-ui:3005}
       # ORG-6 release train (WSD-8 go-live 2026-07-22): shared-service assignments + reconciler.
       # Dark by default (empty/unset -> off); "1"/"true" flips the whole train on.
       SERVICE_ASSIGNMENTS_ENABLED: ${SERVICE_ASSIGNMENTS_ENABLED:-}

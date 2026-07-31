@@ -2,12 +2,16 @@ import "server-only";
 // ⚠ TEST FIXTURE — NOT PART OF THE REAL CONTRACT. ⚠
 //
 // TR-21 (senior-be, platform-nest: one-shot `jobToken` minting +
-// `GET /internal/reports/print-payload/:jobToken`) has not been built yet — this ticket (TR-20) is
-// frontend-only and must not build the backend it depends on. This file exists SOLELY so the print
-// route (`app/print/reports/[jobToken]/page.tsx`) can be exercised end-to-end — rendered, screenshotted,
-// and turned into an actual PDF via Playwright — before that endpoint exists, per the ticket's own
-// instruction ("You may need a local stub to exercise rendering; if so, make it obviously a test
-// fixture and say so").
+// `GET /internal/reports/print-payload/:jobToken`) is a separate seat's ticket — this ticket
+// (TR-20) is frontend-only and must not build or depend on that backend running. TR-21 landed
+// concurrently with this one (verified by reading `print-payload.controller.ts` directly — see
+// `reports-print-data.ts`'s contract note), but exercising this route against a REAL running
+// platform-nest + Redis instance was deliberately not attempted here, to avoid touching a
+// concurrently-modified backend working tree. This file exists so the print route
+// (`app/print/reports/[jobToken]/page.tsx`) can still be rendered, screenshotted, and turned into
+// an actual PDF via Playwright without that live dependency, per the ticket's own instruction
+// ("You may need a local stub to exercise rendering; if so, make it obviously a test fixture and
+// say so").
 //
 // Reached ONLY from `reports-print-data.ts::getPrintPayload` when `process.env.PRINT_STUB === "1"`
 // — off (and therefore inert) in every normal dev/build/prod invocation. It deliberately reuses

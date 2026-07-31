@@ -23,7 +23,9 @@ describe.skipIf(!TEST_URL)("automation service accounts (WS4 §3)", () => {
     config.serviceToken = "svc-token";
     resetModules();
     resetCoreRollupProviders();
-    co = await createCompany("Gaiada Creative"); // the name the seed looks up (id passed directly here)
+    // "reports" enabled so TR-22's periods/overview endpoints (ModuleEnabledGuard) aren't 404 —
+    // the name is what the seed looks up (id passed directly here).
+    co = await createCompany("Gaiada Creative", ["reports"]);
     const created = await seedAutomationAccounts(co);
     expect(created).toBeGreaterThan(0);
     // Idempotent: a second run creates nothing.
@@ -63,5 +65,55 @@ describe.skipIf(!TEST_URL)("automation service accounts (WS4 §3)", () => {
       method: "GET", url: `/api/${co}/tasks`, headers: asWorkflow("wf:task-sla"),
     });
     expect(r.statusCode).toBe(200);
+  });
+
+  // TR-22: the two P4 seal/generate/deliver flows. company_admin must resolve to a real principal
+  // against the EXACT endpoints those flows call — `report_period.view/seal` and
+  // `report_document.read_department` (via `overview`) — proving the seeded role is sufficient,
+  // not merely present.
+  it("wf:reports-weekly-seal (company_admin role) can list+seal report periods and read overview", async () => {
+    const list = await app.inject({
+      method: "GET", url: `/api/${co}/reports/periods?kind=week&from=2026-01-05&to=2026-01-05`,
+      headers: asWorkflow("wf:reports-weekly-seal"),
+    });
+    expect(list.statusCode).toBe(200);
+    const period = list.json().periods[0];
+    expect(period).toBeTruthy();
+
+    const seal = await app.inject({
+      method: "POST", url: `/api/${co}/reports/periods/${period.id}/seal`,
+      headers: asWorkflow("wf:reports-weekly-seal"),
+    });
+    expect(seal.statusCode).toBe(200);
+
+    // Idempotent re-drive: a second seal call on the same period is 409, not a 403/500 — proves
+    // the flow's own "409 = success-already-done" handling has a real status to branch on.
+    const reseal = await app.inject({
+      method: "POST", url: `/api/${co}/reports/periods/${period.id}/seal`,
+      headers: asWorkflow("wf:reports-weekly-seal"),
+    });
+    expect(reseal.statusCode).toBe(409);
+
+    const overview = await app.inject({
+      method: "GET", url: `/api/${co}/reports/overview?grain=department&periodKind=week&start=2026-01-05`,
+      headers: asWorkflow("wf:reports-weekly-seal"),
+    });
+    expect(overview.statusCode).toBe(200);
+  });
+
+  it("wf:reports-monthly-seal (company_admin role) can list+seal report periods", async () => {
+    const list = await app.inject({
+      method: "GET", url: `/api/${co}/reports/periods?kind=month&from=2026-01-01&to=2026-01-01`,
+      headers: asWorkflow("wf:reports-monthly-seal"),
+    });
+    expect(list.statusCode).toBe(200);
+    const period = list.json().periods[0];
+    expect(period).toBeTruthy();
+
+    const seal = await app.inject({
+      method: "POST", url: `/api/${co}/reports/periods/${period.id}/seal`,
+      headers: asWorkflow("wf:reports-monthly-seal"),
+    });
+    expect(seal.statusCode).toBe(200);
   });
 });

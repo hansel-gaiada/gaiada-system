@@ -9,6 +9,7 @@
 import { describe, it, expect } from "vitest";
 import {
   attributePerson,
+  checkinRetractionCause,
   computeFactRows,
   dateRange,
   deriveUnitDepartments,
@@ -550,5 +551,41 @@ describe("TR-07 §5.3 expectedCheckinUsers (leave/holiday/weekend never count as
   it("isoDayOfWeek is ISO (Mon=1 … Sun=7)", () => {
     expect(isoDayOfWeek("2026-07-13")).toBe(1); // Monday
     expect(isoDayOfWeek("2026-07-19")).toBe(7); // Sunday
+  });
+});
+
+// TR-41 (§15, found by TR-12's QA gate): `checkinRetractionCause` names WHY a stale `auto_missed`
+// row's underlying day is no longer expected — one case per term of the SAME `expectedCheckinUsers`
+// predicate above, so a retraction's audit entry always points at a real, provable reason.
+describe("TR-41 checkinRetractionCause (labels the retraction, never decides it)", () => {
+  const base = { date: "2026-07-15", calendar: DEFAULT_WORK_CALENDAR, employed: true, approvedLeave: false, attendanceOff: false };
+
+  it("a non-working weekday wins over every person-level fact", () => {
+    expect(
+      checkinRetractionCause({ ...base, date: "2026-07-18", employed: false, approvedLeave: true, attendanceOff: true }),
+    ).toBe("non_working_day"); // Saturday
+  });
+
+  it("a configured holiday wins over every person-level fact (but not over a non-working day)", () => {
+    expect(
+      checkinRetractionCause({
+        ...base,
+        calendar: { ...DEFAULT_WORK_CALENDAR, holidays: ["2026-07-15"] },
+        employed: false,
+        approvedLeave: true,
+      }),
+    ).toBe("holiday");
+  });
+
+  it("no longer employed as-of the date (a membership correction)", () => {
+    expect(checkinRetractionCause({ ...base, employed: false })).toBe("not_employed");
+  });
+
+  it("approved leave, on an otherwise-normal working day", () => {
+    expect(checkinRetractionCause({ ...base, approvedLeave: true })).toBe("approved_leave");
+  });
+
+  it("hr_attendance leave|absent, when leave isn't the reason", () => {
+    expect(checkinRetractionCause({ ...base, attendanceOff: true })).toBe("attendance_off");
   });
 });

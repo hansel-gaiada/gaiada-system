@@ -68,6 +68,15 @@ import { getCalendarPeriod, getPeriodById, listPeriods, pinCustomPeriod } from "
 import { CUSTOM_SEAL_REJECT_MESSAGE, amendPeriod, fetchSealedDocument, sealPeriod } from "./report-seal";
 import { EXPORT_FORMATS, exportContentType, exportFilename, exportStorageKey, parseExportStorageKey, renderExport, type ExportFormat } from "./report-export";
 import { PdfRendererNotConfiguredError, mintPrintJobToken, renderPdfViaSidecar } from "./report-pdf-export";
+import {
+  PERSON_SCOPE_MODULES,
+  assertPersonInLedScope,
+  assertUnitInLedScope,
+  loadLedUnitScope,
+  loadUnitByUser,
+  requiresUnitNarrowing,
+  todayIsoInTz,
+} from "./person-scope";
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const GRAINS = new Set(["person", "project", "department", "company"]);
@@ -130,7 +139,20 @@ function resolveScopeRefForGrain(grain: ReportGrain, scopeRefRaw: string | undef
 /** THE authz check for a document read (§8's per-grain matrix) — the SAME check a `GET document`
  *  call makes. Standing ruling 1: an export must never widen access, so this is the ONE place the
  *  `report_document` Cerbos resource shape is built; `getDocument` and both export endpoints
- *  (create + status/download) all call this, never a parallel, looser check. */
+ *  (create + status/download) all call this, never a parallel, looser check.
+ *
+ *  ⚡ TR-25 — BOTH HALVES OF THE BOUNDARY NOW LIVE HERE. Until TR-25 this function was Cerbos-only,
+ *  and because Cerbos cannot express "manager of THIS org unit" (person-scope.ts's header explains
+ *  why that is a substrate fact, not an omission), **a bare company-scoped `manager` grant could read
+ *  the complete person-grain report document of EVERY employee in the tenant** — §8 says "own unit's
+ *  members", §11 principle 3 says "never peers, never other departments". The second half — the
+ *  person-axis narrowing — is now applied unconditionally right here, so it cannot be forgotten by a
+ *  caller: every read path (document, export create, export status, export download) goes through this
+ *  one function.
+ *
+ *  Cost when no narrowing applies (exec / HR / company_admin / self / project member): ZERO extra
+ *  queries — `requiresUnitNarrowing` is a pure check over `principal.roles` and short-circuits before
+ *  any transaction is opened. */
 async function authorizeReportDocumentRead(principal: Principal, tenantId: string, grain: ReportGrain, scopeRef: string): Promise<void> {
   await authorize(
     principal,
@@ -144,6 +166,23 @@ async function authorizeReportDocumentRead(principal: Principal, tenantId: strin
       teamId: grain === "department" ? scopeRef : undefined,
     },
     `read_${grain}`,
+  );
+
+  // Second wall on the person axis (§8's "own unit" columns). Only the `unit_scoped` tier is affected.
+  if (!requiresUnitNarrowing(principal, tenantId)) return;
+  if (grain !== "person" && grain !== "department") {
+    // `company` is denied to this tier by Cerbos outright; `project` is already bounded by
+    // gaiada_scopes' own project-scope grant cascade, which IS a real Cerbos-expressible scope.
+    return;
+  }
+  const asOf = todayIsoInTz(config.reportsTz);
+  await withTenants(
+    [tenantId],
+    async (c) => {
+      if (grain === "person") await assertPersonInLedScope(c, tenantId, principal, scopeRef, asOf);
+      else await assertUnitInLedScope(c, tenantId, principal, scopeRef, asOf);
+    },
+    { modules: PERSON_SCOPE_MODULES },
   );
 }
 
@@ -254,6 +293,9 @@ export class ReportsController {
       days: result.days,
       factRows: result.factRows,
       autoMissedCheckins: result.autoMissed,
+      // TR-41: stale auto_missed rows this recompute retracted (leave approved late, a
+      // holiday/calendar change, or a membership correction) — additive field, nothing removed.
+      autoMissedRetracted: result.autoMissedRetracted,
       driftFindings: result.driftFindings,
       jobRunId: result.jobRunId,
     };
@@ -323,7 +365,7 @@ export class ReportsController {
     }
 
     const rows = await computeReportRangeRows(tenantId, s, e);
-    const scopeRefs = [
+    let scopeRefs = [
       ...new Set(
         rows
           .filter((r) => rowGrainShape(r.dimensions ?? {}) === grain)
@@ -333,6 +375,31 @@ export class ReportsController {
           }),
       ),
     ];
+
+    // ⚡ TR-25 — the LISTING form of the same hole `authorizeReportDocumentRead` closed. Cerbos allows
+    // a `manager` grant `read_person`/`read_department` for `overview` (there is no single scope, so
+    // `member`'s `owns` condition fails closed but the coarse manager tier does not), which meant this
+    // endpoint returned headline KPIs for EVERY person in the tenant to any dept lead. Narrowed to the
+    // caller's led unit subtree, filtering the ALREADY-COMPUTED scope list rather than re-deriving it —
+    // so a lead's headline numbers for a person are byte-identical to that person's own (TR-39's bar).
+    if (requiresUnitNarrowing(req.principal, tenantId) && (grain === "person" || grain === "department")) {
+      const asOf = todayIsoInTz(config.reportsTz);
+      scopeRefs = await withTenants(
+        [tenantId],
+        async (c) => {
+          const scope = await loadLedUnitScope(c, tenantId, req.principal.userId, asOf);
+          if (scope.size === 0) return []; // leads no unit ⇒ nothing in scope, never "everything"
+          if (grain === "department") return scopeRefs.filter((ref) => scope.has(ref));
+          const unitByUser = await loadUnitByUser(c, tenantId, scopeRefs, asOf);
+          return scopeRefs.filter((ref) => {
+            const unit = unitByUser.get(ref);
+            return !!unit && scope.has(unit);
+          });
+        },
+        { modules: PERSON_SCOPE_MODULES },
+      );
+    }
+
     const names = await resolveScopeNamesBulk(tenantId, grain as Exclude<ReportGrain, "company">, scopeRefs);
     return {
       periodKind,
@@ -370,7 +437,32 @@ export class ReportsController {
     await authorize(req.principal, { kind: "report_document", tenantId, module: "reports" }, `read_${grain ?? "company"}`);
 
     const rows = await computeReportRangeRows(tenantId, from, to);
-    const filtered = rows.filter((r) => (!metricKey || r.metricKey === metricKey) && (!grain || rowGrainShape(r.dimensions ?? {}) === grain));
+    let filtered = rows.filter((r) => (!metricKey || r.metricKey === metricKey) && (!grain || rowGrainShape(r.dimensions ?? {}) === grain));
+
+    // ⚡ TR-25 — the RAW form of the same hole. This endpoint returns governed-metric rows carrying
+    // `dimensions.userId` / `dimensions.unit`, i.e. person-grain numbers without the document chrome,
+    // and it is the surface TR-28 will expose over MCP. `grain=undefined` authorizes as `read_company`
+    // and is therefore already denied to a dept lead; `grain=person`/`department` reached this tier
+    // unnarrowed. Same led-subtree filter as `overview`, applied to the same as-of date.
+    if (requiresUnitNarrowing(req.principal, tenantId) && (grain === "person" || grain === "department")) {
+      const asOf = todayIsoInTz(config.reportsTz);
+      filtered = await withTenants(
+        [tenantId],
+        async (c) => {
+          const scope = await loadLedUnitScope(c, tenantId, req.principal.userId, asOf);
+          if (scope.size === 0) return [];
+          if (grain === "department") return filtered.filter((r) => scope.has(String((r.dimensions ?? {}).unit ?? "")));
+          const userIds = [...new Set(filtered.map((r) => String((r.dimensions ?? {}).userId ?? "")).filter((u) => u.length > 0))];
+          const unitByUser = await loadUnitByUser(c, tenantId, userIds, asOf);
+          return filtered.filter((r) => {
+            const unit = unitByUser.get(String((r.dimensions ?? {}).userId ?? ""));
+            return !!unit && scope.has(unit);
+          });
+        },
+        { modules: PERSON_SCOPE_MODULES },
+      );
+    }
+
     return filtered.map((r) => ({ metricKey: r.metricKey, numerator: r.numerator, denominator: r.denominator ?? null, dimensions: r.dimensions ?? {} }));
   }
 
@@ -564,20 +656,23 @@ export class ReportsController {
   /** TR-21's pdf branch: mint a one-shot token for the ALREADY-authorized, ALREADY-built `doc`
    *  (never re-resolved from raw params on the other side of the sidecar call — see
    *  report-pdf-export.ts's header for the full security-requirement walkthrough), hand the
-   *  sidecar a URL containing only that token, and return the PDF bytes it renders. Not
-   *  configured (`config.reportRenderer.{url,token,platformUiInternalUrl}` any one empty) or a
-   *  failed render both surface as a 503 — the same fail-soft convention as the rest of this
-   *  file's admin-probe/service-token integrations, never a silent downgrade to a different
-   *  format. */
+   *  sidecar a URL containing only that token, and return the PDF bytes it renders.
+   *
+   *  Every failure mode here — the sidecar not configured, Redis not configured/unreachable (so
+   *  `mintPrintJobToken` itself throws — a mistake TR-21's first draft made by only wrapping the
+   *  sidecar call, not the mint, in this try/catch), a non-2xx sidecar response, or a network
+   *  failure — surfaces as an honest 503, the same fail-soft convention as the rest of this file's
+   *  admin-probe/service-token integrations, never a silent downgrade to a different format and
+   *  never a body-less 500. Checked BEFORE minting (not after) so a misconfigured renderer never
+   *  spends a Redis write on a token nothing will ever fetch. */
   private async renderPdfExportBytes(tenantId: string, grain: ReportGrain, scopeRef: string, doc: ReportDocument, sealHash: string | undefined): Promise<Buffer> {
-    const jobToken = await mintPrintJobToken({ tenantId, grain, scopeRef, document: doc, sealHash });
+    const { url, token, platformUiInternalUrl, timeoutMs } = config.reportRenderer;
+    if (!url || !token || !platformUiInternalUrl) {
+      throw new ServiceUnavailableException({ message: "pdf export is not configured", field: "format" });
+    }
     try {
-      return await renderPdfViaSidecar(jobToken, {
-        rendererUrl: config.reportRenderer.url,
-        rendererToken: config.reportRenderer.token,
-        platformUiInternalUrl: config.reportRenderer.platformUiInternalUrl,
-        timeoutMs: config.reportRenderer.timeoutMs,
-      });
+      const jobToken = await mintPrintJobToken({ tenantId, grain, scopeRef, document: doc, sealHash });
+      return await renderPdfViaSidecar(jobToken, { rendererUrl: url, rendererToken: token, platformUiInternalUrl, timeoutMs });
     } catch (err) {
       if (err instanceof PdfRendererNotConfiguredError) {
         throw new ServiceUnavailableException({ message: "pdf export is not configured", field: "format" });

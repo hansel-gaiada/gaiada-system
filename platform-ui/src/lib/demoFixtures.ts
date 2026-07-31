@@ -10,6 +10,7 @@ import { meetingsDemo } from "./demoMeetings";
 import { pipelineDemo } from "./demoPipeline";
 import { reportsDemo } from "./demoReports";
 import { checkinsDemo } from "./demoCheckins";
+import { appraisalsDemo } from "./demoAppraisals";
 
 export interface DemoResult {
   status: number;
@@ -1608,6 +1609,10 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
   // Check-in subsystem (TR-10/TR-38) — stateful in-memory store (lib/demoCheckins.ts).
   const checkins = checkinsDemo(method, p, url.searchParams, body, userId);
   if (checkins) return checkins;
+
+  // Appraisal subsystem (TR-26) — stateful in-memory store (lib/demoAppraisals.ts).
+  const appraisals = appraisalsDemo(method, p, url.searchParams, body, userId);
+  if (appraisals) return appraisals;
 
   const currentIdentity = getCurrentDemoIdentity(userId);
 

@@ -23,7 +23,7 @@ import { newId, withTenants } from "../../db";
 import { initTestDb, teardownTestDb, TEST_URL } from "../../testing/setup";
 import { addMembership, createCompany, createProject, createRole, createUser, grantRole } from "../../testing/fixtures";
 import { syncMetricDefinitions } from "../../rollups/engine";
-import { recomputeFactWindow } from "./fact-job";
+import { recomputeFactSlice, recomputeFactWindow } from "./fact-job";
 import { formatPeriodRange } from "./metrics";
 import { computeSealHash, CUSTOM_SEAL_REJECT_MESSAGE, type SealedDocumentEntry } from "./report-seal";
 import type { ReportDocument } from "./report-document";
@@ -355,5 +355,87 @@ describe.skipIf(!TEST_URL)("TR-15 seal/amend/pin (live PG + RLS + Cerbos)", () =
     expect((await seal(fake)).statusCode).toBe(404);
     expect((await amend(fake, "reason")).statusCode).toBe(404);
     expect((await getPeriod(fake)).statusCode).toBe(404);
+  });
+
+  // ═══════════════════════════ TR-41 (§15, hard bar 2) — sealing is the immutability boundary ═══
+  //
+  // A fresh calendar month, self-contained and independent of the sequential July story above:
+  // seal a period that contains a stale `auto_missed` row, THEN retract it via the next nightly
+  // recompute, and prove the sealed document's stored kpis are byte-identical. Sealing already
+  // freezes `report_documents` at seal time (§0057) and the retraction pass never touches
+  // `report_work_facts` / `rollup_metrics` / `report_documents` — this test proves that holds for
+  // real, not just by construction.
+  it("TR-41: retracting a stale auto_missed row does NOT alter an already-sealed period's stored kpis", async () => {
+    // A month safely in the PAST relative to the real wall clock (writeAutoMissedCheckins refuses
+    // to touch today-or-future days, §5.3's own guard) and untouched by any earlier test in this
+    // file — July is the sequential seal/amend/re-seal story above, August/September/October are
+    // only ever vivified/pinned, never sealed.
+    const day = "2026-06-05"; // Friday, an ordinary working day
+    const monthStart = "2026-06-01";
+    const monthEnd = "2026-06-30";
+
+    // Alice was expected on `day` (default Mon-Fri calendar, no leave on record yet) and never
+    // submitted -- simulate exactly what a prior nightly run would have written.
+    const staleId = newId();
+    await withTenants(
+      [co],
+      (c) =>
+        c.query(
+          `INSERT INTO report_checkins (id, tenant_id, user_id, checkin_date, status, source, origin_site)
+           VALUES ($1,$2,$3,$4::date,'auto_missed','system','central')`,
+          [staleId, co, alice, day],
+        ),
+      { modules: ["reports", "pm", "hr"] },
+    );
+
+    // Freshen the whole month (mirrors real nightly runs over June) before sealing.
+    await recomputeFactWindow(co, monthStart, monthEnd);
+
+    const list = (await getPeriods("month", monthStart, monthStart)).json().periods as Array<{ id: string }>;
+    const juneId = list[0].id;
+    const sealRes = await seal(juneId);
+    expect(sealRes.statusCode).toBe(200);
+
+    const sealedBefore = (await doc({ grain: "person", scopeRef: alice, periodKind: "month", start: "2026-06-16" })).json() as ReportDocument;
+    expect(sealedBefore.header.sealed).toBe(true);
+    expect(sealedBefore.header.revision).toBe(0);
+
+    // Retroactive leave approval covering the stale day, then the next nightly recompute retracts it.
+    await withTenants(
+      [co],
+      (c) =>
+        c.query(
+          `INSERT INTO hr_leave_requests (tenant_id, subject_user_id, leave_type, starts_on, ends_on, minutes, status)
+           VALUES ($1,$2,'vacation',$3::date,$3::date,480,'approved')`,
+          [co, alice, day],
+        ),
+      { modules: ["reports", "pm", "hr"] },
+    );
+    const sliceResult = await recomputeFactSlice(co, day);
+    expect(sliceResult.autoMissedRetracted).toBeGreaterThanOrEqual(1);
+
+    // The raw row is GONE -- retracted, not merely relabeled.
+    const rowAfter = await withTenants(
+      [co],
+      (c) => c.query(`SELECT 1 FROM report_checkins WHERE tenant_id=$1 AND user_id=$2 AND checkin_date=$3::date`, [co, alice, day]),
+      { modules: ["reports", "pm", "hr"] },
+    );
+    expect(rowAfter.rows).toHaveLength(0);
+
+    // Audited.
+    const audit = await withTenants([co], (c) =>
+      c.query<{ metadata: Record<string, unknown> }>(
+        `SELECT metadata FROM activities WHERE tenant_id=$1 AND verb='checkin.auto_missed_retracted' AND target_entity_id=$2`,
+        [co, staleId],
+      ),
+    );
+    expect(audit.rows).toHaveLength(1);
+    expect(audit.rows[0].metadata).toMatchObject({ subjectUserId: alice, date: day, priorStatus: "auto_missed", cause: "approved_leave" });
+
+    // THE BAR: re-reading the SAME sealed revision returns BYTE-IDENTICAL kpis. Sealing is the
+    // immutability boundary -- a live/history correction never reaches through it.
+    const sealedAfter = (await doc({ grain: "person", scopeRef: alice, periodKind: "month", start: "2026-06-16" })).json() as ReportDocument;
+    expect(sealedAfter.header.revision).toBe(0); // no re-seal happened
+    expect(sealedAfter.kpis).toEqual(sealedBefore.kpis); // THE bar: byte-identical, per the ticket
   });
 });

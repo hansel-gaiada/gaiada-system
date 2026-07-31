@@ -131,4 +131,23 @@ describe("getPrintPayload — the print route's ONLY data source (§6.3)", () =>
     expect(payload.document.header.sealed).toBe(false);
     expect(fetchSpy).not.toHaveBeenCalled();
   });
+
+  // TR-40: the stub branch precedes the real fetch, so a stray PRINT_STUB=1 in a deployed env would
+  // render FABRICATED numbers into a real executive PDF — a wrong report that looks right. It must
+  // refuse loudly in production rather than silently serve the fixture.
+  it("PRINT_STUB=1 is REFUSED in production — never serves fixture data as a real report", async () => {
+    process.env.PRINT_STUB = "1";
+    const originalNodeEnv = process.env.NODE_ENV;
+    const fetchSpy = vi.fn();
+    global.fetch = fetchSpy as unknown as typeof fetch;
+    try {
+      // NODE_ENV is read-only in some TS setups; assign through a cast so this stays a real check.
+      (process.env as Record<string, string>).NODE_ENV = "production";
+      await expect(getPrintPayload("stub-person-unsealed")).rejects.toThrow(/PRINT_STUB/);
+      // and it must not have silently fallen through to a live fetch either
+      expect(fetchSpy).not.toHaveBeenCalled();
+    } finally {
+      (process.env as Record<string, string | undefined>).NODE_ENV = originalNodeEnv;
+    }
+  });
 });

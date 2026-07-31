@@ -11,7 +11,11 @@ import { withGlobal, closePool } from "../db";
 import { migrate } from "../db/migrate";
 import { createUser, addMembership, createRole, grantRole, linkIdentity } from "../testing/fixtures";
 
-const AGENCY_NAME = "Gaiada Creative";
+// Must match the company `seed:agency` actually creates (seed/agency.ts). These drifted apart —
+// the old literal "Gaiada Creative" matched no row, so findAgencyTenant() returned null and this
+// seed exited 1 before creating a single service account, leaving every workflow anonymous.
+// Overridable for non-default tenants: AGENCY_NAME=... tsx src/seed/automation.ts
+const AGENCY_NAME = process.env.AGENCY_NAME ?? "Gaia Digital Agency";
 
 // Each account's role is the MINIMUM its workflow's tools need (verified against the Cerbos
 // resource policies): read approvals -> member; read+update tasks -> member; create project/task
@@ -50,6 +54,16 @@ export const AUTOMATION_ACCOUNTS: ReadonlyArray<{ workflowId: string; role: stri
   { workflowId: "wf:reports-nightly-facts", role: "company_admin", email: "automation+reports-nightly-facts@gaiada.system", name: "Automation — Reports nightly facts" },
   { workflowId: "wf:reports-eod-reminder", role: "company_admin", email: "automation+reports-eod-reminder@gaiada.system", name: "Automation — Check-in EOD reminder" },
   { workflowId: "wf:reports-morning-escalation", role: "company_admin", email: "automation+reports-morning-escalation@gaiada.system", name: "Automation — Check-in morning escalation" },
+  // TR-22: the two P4 seal/generate/deliver flows (§10 flows 4/5). Same reasoning as TR-11's
+  // three accounts above — company_admin is the MINIMUM role that satisfies every Cerbos check
+  // either flow makes: `report_period`'s `view`/`seal` (resource_report_period.yaml) and
+  // `report_document`'s `read_department`/`read_company` (resource_report_document.yaml, via the
+  // `overview` listing and the `export` create endpoint both flows call to render PDFs). Neither
+  // flow calls `amend` or `pin` — no broader grant is needed. Both also call the hub's `notify`
+  // tool (dead-letter alert on a genuine seal/render failure), matching the mcp-hub
+  // AUTOMATION_ALLOWLIST entries (automation-policy.ts).
+  { workflowId: "wf:reports-weekly-seal", role: "company_admin", email: "automation+reports-weekly-seal@gaiada.system", name: "Automation — Reports weekly seal" },
+  { workflowId: "wf:reports-monthly-seal", role: "company_admin", email: "automation+reports-monthly-seal@gaiada.system", name: "Automation — Reports monthly seal" },
 ];
 
 async function existingLink(externalId: string): Promise<boolean> {

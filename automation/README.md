@@ -82,7 +82,7 @@ nothing to hand-edit in the UI — just fill the values in `.env` and `docker co
 `HUB_SERVICE_TOKEN`, `AGENCY_TENANT_ID`, `N8N_BRIDGE_SECRET`, `NOTIFY_WEBHOOK_URL`,
 `NOTIFY_USER_ID`, `INTAKE_PROJECT_ID`, `SLA_PROJECT_ID`, `BOT_URL`, `BOT_ADMIN_TOKEN`,
 `INGEST_ENABLED`, `INGEST_SECRET`, `SEARCH_CALLBACK_SECRET`, `PLATFORM_URL`,
-`PLATFORM_SERVICE_TOKEN` (see `.env.example` for what each drives;
+`PLATFORM_SERVICE_TOKEN`, `REPORTS_NOTIFY_USER_IDS` (see `.env.example` for what each drives;
 `SEARCH_CALLBACK_SECRET` is **now consumed** by the platform's search rank-pull collect edge (SM-56) and
 is **required** to use it — the route refuses every request while the value is empty. Set the same value
 in the platform's own env).
@@ -103,6 +103,8 @@ in the platform's own env).
 | `reports-nightly-facts.json` | CRON daily 02:00 | **TR-11** (tracker/reporting §10 flow 1). `POST facts/recompute {from:D-2, to:D-1}` **DIRECT to platform-nest** (not the hub — recompute is deliberately never an MCP tool, §9.2) under its own `PLATFORM_SERVICE_TOKEN`; idempotent (recompute the same window twice → byte-identical rows). Retries ×3 (native `retryOnFail`), then dead-letters an in-app notification via hub `notify` (no ntfy reachable from n8n's own docker network in this deployment — see the note below). | `wf:reports-nightly-facts` |
 | `reports-eod-reminder.json` | CRON daily 17:30 | **TR-11** (§10 flow 2). `GET checkins/pending-reminders` **DIRECT to platform-nest** (also not an MCP tool — service/admin tier, not agent-callable) → for each pending person with a verified WA link (the additive `waExternalId` field), the **bot's** `POST /admin/notify` fetches THEIR OWN prefill (D4 OBO, never asserted) and awaits their reply; everyone else gets an in-app notification (hub `notify`). §5.3's guard means a holiday/leave day returns `pending: []` and this flow delivers **nothing** — quiet by construction, not a special case in this workflow. | `wf:reports-eod-reminder` |
 | `reports-morning-escalation.json` | CRON daily 09:00 | **TR-11** (§10 flow 3). `GET checkins/missed-yesterday` **DIRECT to platform-nest** — the platform (not this workflow) groups yesterday's misses by unit and resolves each unit's own lead server-side (no per-org-node Cerbos primitive exists, so it narrows in-app the same way TR-09 already does elsewhere); this flow only fans out one hub `notify` per (unit, lead) pair the platform already resolved. A unit with no resolvable lead is skipped, never broadcast to someone outside it. | `wf:reports-morning-escalation` |
+| `reports-weekly-seal.json` | CRON Mon 06:00 | **TR-22** (§10 flow 4). Seals the prior ISO week (`GET periods?kind=week` to vivify → `POST periods/:id/seal`, both **DIRECT to platform-nest**), then for every department + the company scope (`GET overview?grain=department`), renders a PDF via `POST reports/export {format:'pdf'}` (the same TR-19/TR-21 sidecar path), then hub `notify`s the configured `REPORTS_NOTIFY_USER_IDS` with links into the sealed viewer. **Never calls anything AI-shaped** — TR-15's `sealPeriod` already builds every document's narrative (fail-soft by construction, `document-builder.ts`'s `buildNarrative` never throws) as part of the ONE atomic seal call. **Idempotent via recheck, not error-parsing:** a `409` from `POST seal` is followed by `GET periods/:id`; if `status==='sealed'` this flow treats it as success-already-done (the ticket's own instruction) and continues into render+notify — only a period still `open` after the recheck is a real failure. Per-scope export failures are isolated (one department's render error doesn't block the others or the company PDF) and summarized in the notify body rather than dead-lettering the whole run. | `wf:reports-weekly-seal` |
+| `reports-monthly-seal.json` | CRON 1st 06:00 | **TR-22** (§10 flow 5). Identical shape to `reports-weekly-seal.json` for the prior calendar month. **Does NOT wire** the §10 line "when an appraisal cycle covers that month: pre-generate `auto_inputs` refresh notice to HR" — TR-24 (the appraisal engine) has no landed read endpoint for "does a cycle cover this date" as of this ticket, and inventing that contract while TR-24 is actively in-flight in the same module risks a collision the amendment log already warns about. See the flow's own `meta.description` and "Deferred flows" below. | `wf:reports-monthly-seal` |
 
 Every hub call is a raw JSON-RPC `tools/call` (the hub is stateless — no handshake; replies are
 SSE-framed and parsed by a Code node) carrying the workflow's OBO identity headers. Adding a
@@ -154,6 +156,64 @@ repo already substitutes an in-app notification via the hub's `notify` tool for 
 (see "Notifications" above — `NOTIFY_WEBHOOK_URL` itself is optional/unused today), so the
 dead-letter branch follows that same established convention rather than introduce a new one.
 
+## TR-22's seal/generate/deliver flows (P4, §10 flows 4/5)
+
+`reports-weekly-seal` / `reports-monthly-seal` extend the same direct-to-platform pattern above to
+the two remaining §10 flows: `GET reports/periods` (vivify), `POST reports/periods/:id/seal`,
+`GET reports/overview`, and `POST reports/export` are ALL direct platform-nest calls under
+`PLATFORM_SERVICE_TOKEN` — none of `seal`/`amend`/`recompute` are MCP tools (§9.2 excludes them by
+name: "exec ceremony, humans in the ERP"), and `overview`/`export` are ordinary Cerbos-gated reads
+the `company_admin` service role already has. **The only hub tool call either flow makes is
+`notify`.**
+
+- **No separate "AI narrative" step exists in either flow, by design.** `POST periods/:id/seal`
+  (`report-seal.ts`) already builds every in-scope (grain, scopeRef) document — narrative included
+  — as ONE atomic call; `document-builder.ts`'s `buildNarrative` is a pure function that can never
+  throw, so the seal call is fail-soft for the narrative today (deterministic template) and stays
+  fail-soft once TR-27 lands the real ai-gateway-go hook (same function, same never-throws
+  contract, per TR-27's own "Done when": "gateway outage → deterministic fallback, never throws").
+  There was nothing for these flows to orchestrate between "seal" and "render PDF" — the documents
+  already exist the moment `seal` returns 200 (or the 409 recheck confirms `sealed`).
+- **Idempotency is proven by re-reading the resource, not by parsing the seal call's error body.**
+  A `409` from `POST .../seal` is followed by `GET .../periods/:id`; `status==='sealed'` is treated
+  as success-already-done (this ticket's own instruction: "treat 409 as success-already-done, not
+  as a failure to alert on") regardless of who won the race — this flow's own earlier run, a human
+  sealing from the UI, or a genuinely concurrent trigger all converge the same way. Only a period
+  that is STILL open after the recheck reaches the dead-letter branch.
+- **Per-scope PDF rendering is fault-isolated.** `POST reports/export` runs once per (grain,
+  scopeRef) — n8n processes each item through the node independently, so one department's render
+  failure (e.g. a `report-renderer` sidecar hiccup) is captured and summarized in the notify body
+  rather than blocking the other departments' or the company's PDF.
+- **Notify recipients are a static, configured list (`REPORTS_NOTIFY_USER_IDS`), not a live Cerbos
+  role query — a disclosed scoping decision, not a hidden shortcut.** `report-seal.ts`'s own
+  `notifyExecsAndLeads` (used today only by `amend`) resolves every `company_admin`/
+  `group_executive` grant covering the tenant, but that resolution has no HTTP-callable surface —
+  it is a private helper inside a file this ticket's brief explicitly forbids touching (another
+  seat is actively building the appraisal engine in the same module). Standing up a NEW read
+  endpoint to expose it was considered and rejected: it would either duplicate
+  `notifyExecsAndLeads`' query in a second place or require editing `report-seal.ts`/
+  `checkins.controller.ts` directly, both off-limits for this ticket, and the brief's own guidance
+  is to keep the platform-nest footprint to `src/seed/automation.ts` unless genuinely unavoidable.
+  A configured recipient list is the SAME shape three already-shipped flows in this file already
+  use (`stale-approval-chaser`/`compliance-gate-nag`/`on-org-updated-notify`'s `NOTIFY_USER_ID`),
+  so this is precedent, not invention. Follow-up: once TR-25 (the Cerbos parity-matrix ticket)
+  or a future ticket exposes a real "who administers this tenant's reports" read, repoint these two
+  flows at it and retire the env var.
+- **The notification links into the sealed document; it never carries a metric value.** The
+  `href` is `/reports?periodId=<id>&grain=<grain>&scopeRef=<scopeRef>` — the exact shape
+  `report-seal.ts`'s own `amend` notify already uses (`href: /reports?periodId=${periodId}`) — so a
+  recipient clicks through into the RBAC-gated viewer rather than receiving a person-grain number
+  in a notification payload (§11).
+- **The monthly flow's HR/appraisal-cycle branch is a disclosed, deliberate gap, not a missed
+  requirement.** §10's flow 5 also asks for "when an appraisal cycle covers that month: pre-generate
+  `auto_inputs` refresh notice to HR". As of this ticket, `report_appraisal_cycles` (TR-23,
+  migration `0068`) is a bare schema table with no application-code reader anywhere — TR-24 (the
+  appraisal engine + endpoints) is a DIFFERENT, actively in-progress ticket in this exact module,
+  and inventing a "does a cycle cover this date" endpoint contract unilaterally while that ticket is
+  mid-flight is exactly the kind of collision this program's own amendment log (§15) repeatedly
+  flags as costly. See `reports-monthly-seal.json`'s own `meta.description` for the wire-up
+  instructions once TR-24 ships its read surface.
+
 ## Notifications (internal, no external channel)
 
 The notify flows (`stale-approval-chaser`, `compliance-gate-nag`, `on-org-updated-notify`) raise
@@ -167,6 +227,12 @@ externally.
 
 ## Deferred flows (off by design — activate when their dependency exists)
 
+- **`reports-monthly-seal`'s HR/appraisal-cycle notice** — §10 flow 5 asks for a pre-generate
+  `auto_inputs` refresh notice to HR "when an appraisal cycle covers that month". Not wired: TR-24
+  (the appraisal engine) has not landed a read endpoint for "does a cycle cover this date" as of
+  this ticket, and it is a DIFFERENT, actively in-progress ticket in the same module — see the
+  dedicated "TR-22's seal/generate/deliver flows" section above and the flow JSON's own
+  `meta.description` for the exact wire-up once that endpoint exists.
 - **`digest-fanout`** — needs the **wa-chat-bot** running: it calls the bot's admin API
   (`BOT_URL` + `BOT_ADMIN_TOKEN`) to trigger the categorized 12:00/18:00 digest sweep to WhatsApp/
   Telegram groups. This is inherently a bot function (chat-group delivery), not something the

@@ -52,7 +52,7 @@ versions below; the running build reports it at `GET /health`.
 | social-media | `0.0.0` | PLANNED | Social Media | 2026-07-23 |
 | creative | `0.1.0` | PROTOTYPED | Creative | 2026-07 |
 | render-gateway-go | `0.0.0` | PLANNED | Creative | 2026-07-23 |
-| reports | `0.1.0` | IN PROGRESS | Cross-cutting | 2026-07-30 |
+| reports | `0.3.0` | PROTOTYPED | Cross-cutting | 2026-07-31 |
 | report-renderer | `0.1.0` | DEV-VERIFIED | Cross-cutting | 2026-07-31 |
 
 ---
@@ -511,39 +511,70 @@ rows; the gateway is Zone A egress-only.
 **Future plans:** built under the `creative` P1–P4 tickets (CR-* — design §12); container-build verification
 on a Docker host before deploy (same caveat as ai-gateway-go).
 
-## reports — Work Tracker · Reports · Appraisal · `0.1.0` · IN PROGRESS
+## reports — Work Tracker · Reports · Appraisal · `0.3.0` · PROTOTYPED
 
 **Design:** [`../blueprints/tracker-reporting-foundation.md`](../blueprints/tracker-reporting-foundation.md).
-**What exists (dev, P0 + the first P1 ticket):** the substrate blockers are closed and the fact fabric
-computes. Migrations `0054` (`pm_task_assignees`, relational owner/responsible/contributor + JSONB
-backfill + dual-write), `0055` (`org_unit_memberships`, as-of-date intervals with a `btree_gist`
-non-overlap EXCLUDE), `0056` (`report_work_calendars` / `report_checkins` / `report_work_facts`
-behind the `reports` third wall). Code: `src/core/dept-resolution.ts` (pure precedence ①–④ + provider
-stamp + org-blob membership sweeper), the pm→`work_activity` outbox consumer with real actor
-propagation, and **`src/modules/reports/fact-job.ts` + `POST /api/:t/reports/facts/recompute`** — the
-nightly/backfill fact job (owner-takes-all attribution, Σperson ≤ Σunit = company, idempotent
-DELETE+INSERT slices, §5.3 leave-aware `auto_missed` check-ins). Still absent: the metric seeds +
-RollupProvider (TR-08), every read endpoint, the `ReportDocument` builder, the viewer/charts, XLSX/PDF
-export and the whole appraisal layer.
-A **multi-grain reporting layer over the existing tracker** — the PM module (`0018`, `0036`–`0044`) already
-IS the task tracker; this program adds the grain fabric and the report/appraisal layer it lacks. One atomic
-fact grain (`person × project × day`); department / company / week / month are additive rollups, ratios always
-stored numerator+denominator (never average-of-averages). Consumes the substrate that already exists rather
-than duplicating it: `work_activity` + `work_activity_links` (`0030` — already 4-grain: pm_task/project/person/
-department), `metric_definitions` + `rollup_metrics` (the governed metric registry), `pm_progress_snapshots`
-(`0040`), `time_entries`. Closes three verified substrate blockers first: `pm_tasks.assignee` becomes a
-relational `pm_task_assignees` (the single unindexed JSONB blob cannot carry trustworthy person-grain SQL),
-department membership becomes **time-aware** (`org_unit_memberships`, as-of-date — a dept transfer must never
-rewrite history), and the estate gains its first chart/XLSX/PDF layer. One typed **`ReportDocument`** contract
-feeds the web viewer, the exporters, the AI narrative and the MCP tools — no second rendering path. Ops reads
-recompute live; management + appraisal reads come from a **sealed** period-close snapshot. Mandatory per-person
-EOD check-ins (compliance measured against the HR working calendar so leave is not a false negative);
-manager-weighted blended appraisals with mandatory human commentary and an append-only acknowledgement trail.
-Migrations `0054`–`0059` (rebased +4 from the doc's original `0050`–`0055` — see the blueprint's §15).
-Owner-takes-all outcome attribution + listed contributors, so company totals never double-count.
-**Future plans:** built under the P0–P6 `TR-*` tickets (design §12, 33 tickets after the three P0
-additions, 12 QA-gated). P0 is complete; P1 is mid-flight (TR-07 landed, TR-08 next — it owns the 21
-metric seeds, the `RollupProvider` and the module-contract registration this module still lacks).
+
+**What exists (dev-verified + prototyped, P0–P6 mostly complete as of 2026-07-31):**
+
+**P0–P2 (substrate, facts, check-ins) — COMPLETE:**
+- Substrate blockers closed: `pm_task_assignees` (relational with as-of-date intervals), 
+  `org_unit_memberships` (as-of-date), work-activity consumer with real actor propagation.
+- **Fact fabric (DEV-VERIFIED, 403+ tests):** `src/modules/reports/fact-job.ts` nightly/backfill 
+  compute, owner-takes-all attribution, Σperson ≤ Σunit = company reconciliation, idempotent 
+  DELETE+INSERT slices, §5.3 leave-aware `auto_missed` check-ins.
+- **Metrics + rollups (DEV-VERIFIED):** 21 metric seeds (`metrics.ts` catalog, `appraisalSafe` flags), 
+  `RollupProvider` registered in `index.ts`, module-contract aggregated in the hub.
+- **Check-ins (endpoints built):** `GET/POST /api/:t/checkins*`, compliance grid, excuse path, 
+  pending-reminders for n8n (WA digest loop).
+
+**P3–P4 (documents, exports, PDF) — COMPLETE (backend AND frontend):**
+- **Documents (endpoints built):** `GET /api/:t/reports/document|overview|metrics`, live compute + 
+  sealed-period storage, range validation (custom ranges ≤400 days), provider view (served-company slices).
+- **Periods (endpoints built):** `GET /api/:t/reports/periods*`, pin/seal/amend, audit trail.
+- **Exports (DEV-VERIFIED):** PDF sidecar (`report-renderer`, Playwright-based, 14 tests green), 
+  XLSX/CSV service (`exceljs`), synchronous render-and-persist, unsealed-range `AD HOC` marking, 
+  one-shot token auth on the print route.
+- **Report UI (PROTOTYPED, verified in a real browser):** the inline-SVG chart kit
+  (`platform-ui/src/components/reports/charts/` — KpiTiles/TrendLine/Grouped+StackedBars/Donut/
+  CalendarHeatmap/Burndown/CumulativeFlow/CohortBand/DeltaChip, zero external deps so the CSP holds) +
+  `ReportViewer` + `PeriodSelector` (Daily/Weekly/Monthly/**Custom range** + presets) + `WarningsBanner`,
+  and **all four grain routes** at `platform-ui/src/app/(app)/reports/{person,project,department,company}`
+  with the range in the URL (shareable/bookmarkable), a 403 limited-access branch and DEMO_MODE fixtures.
+  **862 platform-ui tests green**, `next build` clean; light/dark/print verified by Playwright screenshot,
+  which caught 3 defects a green build had passed.
+- **Print route (PROTOTYPED):** `platform-ui/src/app/print/reports/[jobToken]/` + `print.css` — session-less,
+  renders the SAME viewer components (no second rendering path), `AD HOC · UNSEALED` / `SEALED · rev N`
+  provenance repeating on every page, **real multi-page PDFs rendered and inspected** across four grains ×
+  sealed/unsealed.
+- **Gaps:** nothing UI-side in P3/P4. The live `mint → sidecar → real print route → PDF` hop has **not** been
+  driven end to end (TR-20 and TR-21 each verified the shared contract by reading the other's source rather
+  than touching a concurrently-modified tree) — owned by TR-29.
+
+**P5–P6 (appraisal, MCP) — ENDPOINTS + TOOLS BUILT, NO UI:**
+- **Appraisal engine (built, 50+ tests):** cycles, generate from sealed periods, manager scoring 
+  (justified deviations ±1 band), subject ack trail (append-only), finalize.
+- **Appraisal endpoints:** `POST/GET /api/:t/appraisals/cycles|generate|*`, manager pack read, 
+  subject `/mine` view, ack/dispute/finalize actions.
+- **MCP tools (DEV-VERIFIED, all 6 registered):** `reports.getDocument`, `reports.listPeriods`, 
+  `reports.getMetrics`, `reports.getCompliance`, `checkin.getToday`, `checkin.submit` 
+  (hub integration + WA loop working).
+- **Gap:** appraisal UI does not exist (employee acknowledgement surface, manager scoring pack, 
+  cycle admin console missing). Endpoints are live and tested.
+
+**Known gaps & deferrals:**
+- **Report viewer + chart kit (TR-16/TR-17):** endpoints built, UI stubs only.
+- **Appraisal UI (TR-26):** engine complete; no manager scoring screen, employee ack flow, or cycle console.
+- **Print route (TR-20):** sidecar running, `/print/reports/[jobToken]` route does not exist.
+- **Retroactive leave (TR-41):** compliance grid self-heals; stored check-in history diverges (marked known gap).
+- **Production deployment:** entirely untouched. All endpoints verified against live Postgres + Cerbos + Redis; 
+  code is DEV-VERIFIED with 400+ tests; no deployed build exists.
+
+**Migrations:** `0054` (assignees), `0055` (memberships), `0056` (calendars/checkins/facts), 
+`0057` (metric seeds), `0067` (periods/documents), `0068` (appraisals). 
+
+**Future plans:** UI buildout (appraisal + viewer + print route) → production validation → close final gaps 
+(retroactive leave, custom-range appraisal-generate explicitly 422ed).
 
 ## report-renderer — Print/PDF Sidecar · `0.1.0` · DEV-VERIFIED
 

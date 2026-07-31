@@ -11,12 +11,16 @@ describe("navFor (RBAC-gated visibility)", () => {
   it("member sees Workspace/Organization/Departments/Business/Reports/Intelligence/Systems but no Settings, no Rollups", () => {
     const groups = navFor({ ...base, roles: [{ role: "member", scopeType: "company", scopeId: "c1" }] });
     const labels = groups.map((g) => g.label);
-    expect(labels).toEqual(["Workspace", "Organization", "Departments", "Business", "Reports", "Intelligence", "Systems"]);
+    expect(labels).toEqual(["Workspace", "Organization", "Departments", "Business", "Reports", "Appraisals", "Intelligence", "Systems"]);
     const business = groups.find((g) => g.label === "Business")!;
     expect(business.items.map((i) => i.label)).not.toContain("Rollups");
     // TR-17: a plain member always sees the self/scoped grain reports, never the exec-only Company one.
     const reports = groups.find((g) => g.label === "Reports")!;
     expect(reports.items.map((i) => i.label)).toEqual(["My Report", "Project Reports", "Department Reports"]);
+    // TR-26: a plain member always sees their own appraisal history (self-service, no capability
+    // gates it — same reasoning as check-ins) but never the manager/HR consoles.
+    const appraisals = groups.find((g) => g.label === "Appraisals")!;
+    expect(appraisals.items.map((i) => i.label)).toEqual(["My Appraisals"]);
     // Companies moved into the Organization Overview; Organization = Overview only.
     const org = groups.find((g) => g.label === "Organization")!;
     expect(org.items.map((i) => i.label)).toEqual(["Overview"]);
@@ -47,6 +51,9 @@ describe("navFor (RBAC-gated visibility)", () => {
     // Same `rollups.view` grant also unlocks the exec-only Company Report (§8: company-grain = exec-only).
     const reports = groups.find((g) => g.label === "Reports")!;
     expect(reports.items.map((i) => i.label)).toContain("Company Report");
+    // platform_admin holds every appraisal capability — both the manager/HR console and cycle admin.
+    const appraisals = groups.find((g) => g.label === "Appraisals")!;
+    expect(appraisals.items.map((i) => i.label)).toEqual(["My Appraisals", "Team Appraisals", "Appraisal Cycles"]);
   });
 });
 

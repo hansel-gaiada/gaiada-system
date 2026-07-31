@@ -18,7 +18,14 @@ export type Role =
   | "member"           // baseline access
   | "it_admin" | "it_manager" | "it"  // IT operators
   | "hr_staff" | "hr_manager" // HR module derived roles (WSD-2 module_staff/module_manager, string-composed from grants — see hr module design §2.1). Company-scoped; may be reconciler-materialized onto a SERVED company (Me.serviceScopes) when the grant rides a service assignment.
-  | "search_staff" | "search_manager"; // search-marketing (SEO/SEM/GEO) module derived roles (SM-03; same WSD-2 module_staff/module_manager linchpin as HR — string-composed from grants, resource.attr.module === "search"). Company-scoped; may be reconciler-materialized onto a SERVED company.
+  | "search_staff" | "search_manager" // search-marketing (SEO/SEM/GEO) module derived roles (SM-03; same WSD-2 module_staff/module_manager linchpin as HR — string-composed from grants, resource.attr.module === "search"). Company-scoped; may be reconciler-materialized onto a SERVED company.
+  // TR-25 — §8's fifth column (served-dept provider tier). Same WSD-2 module_staff/module_manager
+  // linchpin, `resource.attr.module === "reports"`. Reconciler-materialized onto a SERVED company for
+  // the members of a providing unit, and ONLY while the assignment is status='active'.
+  // ⚠ These roles are NOT SEEDED in the platform yet (0026 seeds only the hr_* pair, and
+  // `service-reconciler.ts` no-ops on an unseeded module role) — so this tier is currently inert in
+  // production. Mirrored here so the UI is ready and the intent is recorded, not because it is live.
+  | "reports_staff" | "reports_manager";
 
 export type Capability =
   | "admin.access"       // /admin/* (users, identity, modules, compliance, audit)
@@ -37,7 +44,28 @@ export type Capability =
   | "search.scope.write" // set an engagement's tool-scope config + provider budget cap (D-11; Cerbos action `set_scope`, elevated-only)
   | "search.campaign.launch" // mark a manual-mode change proposal applied OR execute an api-mode one (Cerbos actions `launch`/`apply_manual`/`apply_negatives`/`set_budget`, elevated-only)
   | "search.report.approve"  // approve + deliver an engagement report (Cerbos actions `approve`/`deliver`, elevated-only)
-  | "search.ledger.admin";   // override a provider budget stop-loss cap (Cerbos action `admin` on resource_search_ledger, elevated-only)
+  | "search.ledger.admin"    // override a provider budget stop-loss cap (Cerbos action `admin` on resource_search_ledger, elevated-only)
+  // ─────────── TR-25: the tracker/reporting program (§8's matrix). Mirrors, never decides. ───────────
+  // ⚠ READ THIS BEFORE USING ANY `reports.*` CAPABILITY FOR ANYTHING BUT RENDERING.
+  // These capabilities answer "should the UI OFFER this?", never "may this user SEE this person?". The
+  // person axis — WHICH people/units a dept lead reaches — is deliberately ABSENT from this file and
+  // cannot be expressed here: it depends on `org_unit_memberships` + the org tree as of a date, which
+  // the browser does not have and must never be trusted to evaluate. That boundary lives in
+  // `platform-nest/src/modules/reports/person-scope.ts` and is enforced server-side on every read (403
+  // — the UI renders a limited-access state). So `reports.person.view` means "this role reads person
+  // documents AT ALL", not "this user reads THAT person". Gate a nav item on it; never a data decision.
+  | "reports.person.view"      // person-grain report documents (Cerbos `read_person`) — SERVER narrows to the caller's line
+  | "reports.project.view"     // project-grain (Cerbos `read_project`)
+  | "reports.department.view"  // department-grain (Cerbos `read_department`) — SERVER narrows to the led unit subtree
+  | "reports.company.view"     // company-grain (Cerbos `read_company`) — exec/company_admin ONLY; §8 excludes dept lead AND HR ("person data yes, company strategy no")
+  | "reports.period.seal"      // seal / amend / pin a period (Cerbos `seal`/`amend`/`pin` on report_period) — exec/company_admin only; dept lead ⛔
+  | "reports.facts.admin"      // rebuild the fact fabric (Cerbos `recompute` on report_admin) — exec/company_admin only; a lead who re-derives a window moves their own team's appraisal inputs
+  | "reports.ops.poll"         // the n8n reminder/escalation reads (Cerbos `pending_reminders`/`missed_by_unit`) — company_admin ONLY, not a human console
+  | "checkin.read"             // read others' check-in history + the compliance grid (Cerbos `read`) — SERVER narrows to the caller's line
+  | "checkin.excuse"           // excuse a missed day (Cerbos `excuse`) — rewrites an appraisal-SAFE metric, so hr_manager not hr_staff
+  | "appraisal.read"           // read appraisal packs beyond one's own (Cerbos `read`)
+  | "appraisal.score"          // write/submit scores (Cerbos `write`/`submit`) — the ASSIGNED manager only; server narrows to manager_user_id
+  | "appraisal.cycle.admin";   // cycle CRUD + generate + finalize (Cerbos `cycle_admin`/`finalize`) — hr_manager ONLY (TR-25 finding ②)
 
 // What each role grants (within its own scope). Order/duplication is harmless.
 const ALL: Capability[] = [
@@ -45,7 +73,24 @@ const ALL: Capability[] = [
   "rollups.view", "pm.manage", "it.manage", "approvals.decide", "knowledge.review",
   "hr.view", "hr.manage",
   "search.view", "search.manage", "search.scope.write", "search.campaign.launch", "search.report.approve", "search.ledger.admin",
+  "reports.person.view", "reports.project.view", "reports.department.view", "reports.company.view",
+  "reports.period.seal", "reports.facts.admin", "reports.ops.poll",
+  "checkin.read", "checkin.excuse",
+  "appraisal.read", "appraisal.score", "appraisal.cycle.admin",
 ];
+
+// TR-25 — the §8 tiers as capability bundles, so each role below reads as one line rather than a
+// 12-item list, and a drift between two roles that should share a tier is visible.
+//
+// `group_executive` is in ALL above (owner tier, unrestricted). The three bundles here cover the
+// columns §8 actually distinguishes:
+//   REPORT_READS      — the per-grain document reads shared by dept-lead and BOTH HR tiers.
+//   EXEC_ONLY_REPORTS — company grain + seal/amend + facts recompute. §8 excludes dept lead from all
+//                       three; HR too. `company_admin` holds them as the tenant's own administrator.
+//   HR_OPS            — the ACTING HR tier (hr_manager). See finding ② below.
+const REPORT_READS: Capability[] = ["reports.person.view", "reports.project.view", "reports.department.view"];
+const EXEC_ONLY_REPORTS: Capability[] = ["reports.company.view", "reports.period.seal", "reports.facts.admin"];
+const HR_OPS: Capability[] = ["checkin.excuse", "appraisal.cycle.admin"];
 export const ROLE_CAPS: Record<Role, Capability[]> = {
   platform_admin: ALL,
   group_executive: ALL,
@@ -53,19 +98,49 @@ export const ROLE_CAPS: Record<Role, Capability[]> = {
     "admin.access", "company.manage", "org.edit", "people.directory", "pm.manage", "it.manage", "approvals.decide", "knowledge.review",
     "hr.view", "hr.manage",
     "search.view", "search.manage", "search.scope.write", "search.campaign.launch", "search.report.approve", "search.ledger.admin",
+    // The tenant's own administrator holds the exec-only reporting tier within its company (§8's
+    // company-grain / seal / recompute rows read "exec"; resource_report_period.yaml's header
+    // establishes that §6.2's "lead" there means the COMPANY's lead, not a per-department manager).
+    ...REPORT_READS, ...EXEC_ONLY_REPORTS, "reports.ops.poll", "checkin.read", "checkin.excuse", "appraisal.read",
   ],
-  manager: ["pm.manage", "approvals.decide", "people.directory"],
+  // §8's "Dept lead (own unit)" column. Reads person/project/department — NEVER company grain, NEVER
+  // seal/amend, NEVER facts recompute, NEVER the n8n ops polls, NEVER cycle admin. May score the
+  // appraisals they are ASSIGNED (the server narrows to `manager_user_id`; this only decides whether
+  // the scoring UI renders at all).
+  manager: [
+    "pm.manage", "approvals.decide", "people.directory",
+    ...REPORT_READS, "checkin.read", "checkin.excuse", "appraisal.read", "appraisal.score",
+  ],
+  // A plain member's own report, own check-in and own appraisal are NOT capabilities — they are
+  // self-service, gated server-side by `ownerId`/`subjectUserId == principal.id` (§11 principle 2:
+  // "nothing about you that you cannot read"). Adding a capability for them here would imply the UI
+  // decides, and would have to be granted to everyone, which tells a gating check nothing.
   member: [],
   it_admin: ["it.manage", "company.manage"],
   it_manager: ["it.manage"],
   it: ["it.manage"],
-  hr_staff: ["hr.view"],
-  hr_manager: ["hr.view", "hr.manage"],
+  // ⚠ TR-25 finding ② — THE HR SPLIT, mirrored. `hr_staff` is the BASELINE read tier and `hr_manager`
+  // the ACTING tier, exactly as this file already modelled `hr.view` vs `hr.manage`. TR-13's Cerbos
+  // derived role had collapsed them (`hr_people_ops` == hr_staff OR hr_manager), which handed
+  // appraisal cycle admin + finalize + every appraisal pack to HR rank-and-file — including, via the
+  // service reconciler, on SERVED companies they do not work for. Cerbos is now split
+  // (`hr_people_reader` vs `hr_people_ops`) and this mirror matches it: `hr_staff` reads person-grain
+  // reports and check-in history (that IS `hr.view`-shaped work) but holds NO appraisal capability and
+  // cannot excuse a missed day (which rewrites an appraisal-SAFE metric).
+  hr_staff: ["hr.view", ...REPORT_READS, "checkin.read"],
+  hr_manager: ["hr.view", "hr.manage", ...REPORT_READS, "checkin.read", "appraisal.read", ...HR_OPS],
   // search_staff = Cerbos module_staff (draft-only baseline: read/create/update, propose_change,
   // research/run — never launch/set_scope/approve/admin). search_manager = module_manager (adds
   // the elevated actions). Mirrors hr_staff/hr_manager's split exactly (SM-03).
   search_staff: ["search.view", "search.manage"],
   search_manager: ["search.view", "search.manage", "search.scope.write", "search.campaign.launch", "search.report.approve", "search.ledger.admin"],
+  // §8's served-dept column: department + project grain ONLY. Deliberately NO `reports.person.view`
+  // — §8's person-grain cell for this column ("only persons acting under the assignment, via the
+  // provider view") is NOT enforceable, because no endpoint can bound a person read that way, so
+  // granting it would expose ARBITRARY served-company persons. Cerbos denies it; this mirrors that.
+  // Also no company grain, no appraisals, no check-ins, no seal, no recompute (§8: all ⛔).
+  reports_staff: ["reports.department.view", "reports.project.view"],
+  reports_manager: ["reports.department.view", "reports.project.view"],
 };
 
 type Grant = Me["roles"][number];

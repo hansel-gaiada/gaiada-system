@@ -19,6 +19,7 @@ import { config } from "../../config";
 import { initTestDb, teardownTestDb, adminPool, TEST_URL } from "../../testing/setup";
 import { addMembership, createCompany, createProject, createRole, createUser, grantRole, linkIdentity } from "../../testing/fixtures";
 import { todayIso, addDaysIso } from "../../core/dept-resolution";
+import { recomputeFactSlice } from "./fact-job";
 
 const svc = { authorization: "Bearer svc-token" };
 const asUser = (id: string) => ({ ...svc, "x-user-id": id });
@@ -199,6 +200,37 @@ describe.skipIf(!TEST_URL)("TR-09 checkins.controller (live PG + RLS + Cerbos)",
       expect(latest.rows[0].summary).toBe("Second pass: also fixed the flaky test.");
     });
 
+    // TR-12 adversarial: race two concurrent submits at the table's own UNIQUE(tenant,user,date)
+    // key. The handler is check-then-act (SELECT existing -> branch INSERT/UPDATE), which is NOT
+    // atomic -- two concurrent first-submits for the same brand-new (user, date) can both see "no
+    // existing row" and both attempt a bare INSERT, so this proves whether the second one crashes
+    // with an unhandled 23505 (500) instead of converging to exactly one row.
+    it("two concurrent first-submits for the same (user, date) converge to exactly ONE row, never a 500 or a duplicate", async () => {
+      const racer = await createUser("racer@tr09.test");
+      await addMembership(co, racer);
+      await grantRole(racer, await createRole("member"), "company", co);
+      await withTenants([co], (c) =>
+        c.query(
+          `INSERT INTO org_unit_memberships (id, tenant_id, user_id, unit_node_id, is_primary, valid_from, source, origin_site)
+           VALUES ($1,$2,$3,'d-seo',true,'2020-01-01','manual','central')`,
+          [newId(), co, racer],
+        ),
+      );
+
+      const [r1, r2] = await Promise.all([
+        post(asUser(racer), "/checkins", { summary: "Racer attempt A." }),
+        post(asUser(racer), "/checkins", { summary: "Racer attempt B." }),
+      ]);
+      // Neither concurrent submit may surface as an unhandled server error.
+      expect([r1.statusCode, r2.statusCode].every((s) => s === 200)).toBe(true);
+
+      const rows = await adminPool().query(
+        `SELECT id, summary FROM report_checkins WHERE tenant_id=$1 AND user_id=$2 AND checkin_date=$3::date`,
+        [co, racer, today],
+      );
+      expect(rows.rows).toHaveLength(1); // exactly one row survived the race, whichever won
+    });
+
     it("accepts an explicit source value (records TR-11's future wa/mcp/system callers honestly)", async () => {
       const r = await post(asUser(carol), "/checkins", { summary: "Reviewed designs.", source: "wa" });
       expect(r.json().source).toBe("wa");
@@ -274,8 +306,40 @@ describe.skipIf(!TEST_URL)("TR-09 checkins.controller (live PG + RLS + Cerbos)",
   // ═════════════════════════ GET /checkins/compliance ═════════════════════════
 
   describe("GET /checkins/compliance", () => {
-    it("self (plain member) is DENIED -- §8: compliance is lead/exec/HR, never self", async () => {
+    // TR-39 (2026-07-31, §15 fairness fix): metric #18 checkin_compliance is appraisal-SAFE and
+    // feeds an appraisal axis, so a person who will be judged on it must be able to see THAT
+    // number, not a second, divergent client-side computation (TR-10's disclosed workaround). Self
+    // ⊆ scope, own row only — the assertion bar is EQUALITY against what a lead/HR sees for them,
+    // not merely "also returns a number".
+    it("self (plain member) may now read their OWN compliance row -- self ⊆ scope, own row only", async () => {
       const r = await get(asUser(bob), `/checkins/compliance?periodKind=day&start=${today}`);
+      expect(r.statusCode).toBe(200);
+      expect(r.json().rows).toHaveLength(1);
+      expect(r.json().rows[0].userId).toBe(bob);
+      expect(r.json().unit).toBeNull(); // never the client-supplied/derived unit -- just "my own row"
+    });
+
+    it("self's own read is NUMERICALLY IDENTICAL to what their dept lead sees for them (the equality bar, not merely a number)", async () => {
+      const selfRead = await get(asUser(bob), `/checkins/compliance?periodKind=day&start=${today}`);
+      const leadRead = await get(asUser(lead), `/checkins/compliance?periodKind=day&start=${today}`);
+      const selfRow = selfRead.json().rows[0];
+      const leadRow = leadRead.json().rows.find((x: { userId: string }) => x.userId === bob);
+      expect(leadRow).toBeTruthy();
+      expect(selfRow).toEqual(leadRow); // exact equality: expectedDays/submittedDays/missedDays/excusedDays/complianceRate all match
+    });
+
+    it("self still cannot read anyone else's row, and a client-supplied `unit` param cannot widen it", async () => {
+      const r = await get(asUser(bob), `/checkins/compliance?periodKind=day&start=${today}&unit=d-web`);
+      expect(r.statusCode).toBe(200);
+      const userIds = r.json().rows.map((x: { userId: string }) => x.userId);
+      expect(userIds).toEqual([bob]); // never carol, never anyone else, regardless of the unit param
+    });
+
+    it("an ANONYMOUS principal (unverified OBO envelope, userId:null) fails closed, not open", async () => {
+      // AuthGuard resolves an unknown/unverified OBO envelope to ANONYMOUS (userId:null) rather
+      // than 401ing outright (D4) -- the self-fallback path must not mistake "no user id" for
+      // "grant self access", which would be a null-check bypass.
+      const r = await get({ authorization: "Bearer svc-token", "x-obo-provider": "whatsapp", "x-obo-external-id": "unknown-external-id" }, `/checkins/compliance?periodKind=day&start=${today}`);
       expect(r.statusCode).toBe(403);
     });
 
@@ -317,6 +381,115 @@ describe.skipIf(!TEST_URL)("TR-09 checkins.controller (live PG + RLS + Cerbos)",
       const r = await get(asUser(admin), `/checkins/compliance?periodKind=day&start=${today}`);
       const rows: Array<{ userId: string }> = r.json().rows;
       expect(rows.find((x) => x.userId === wendy)).toBeUndefined();
+    });
+
+    // TR-12 adversarial: a leave request in a NON-approved state (pending/rejected) must NOT be
+    // treated as an excuse -- the false-negative guard reads `status = 'approved'` only, and this
+    // proves it doesn't over-apply and silently hide a real miss behind an unapproved request.
+    it("a PENDING (not yet approved) leave request does NOT exclude the person -- they still count as expected/missed", async () => {
+      const pending = await createUser("pending-leave@tr09.test");
+      await addMembership(co, pending);
+      await withTenants([co], (c) =>
+        c.query(
+          `INSERT INTO org_unit_memberships (id, tenant_id, user_id, unit_node_id, is_primary, valid_from, source, origin_site)
+           VALUES ($1,$2,$3,'d-seo',true,'2020-01-01','manual','central')`,
+          [newId(), co, pending],
+        ),
+      );
+      await withScopes((c) =>
+        c.query(
+          `INSERT INTO hr_leave_requests (tenant_id, subject_user_id, leave_type, starts_on, ends_on, minutes, status)
+           VALUES ($1,$2,'vacation',$3::date,$3::date,480,'pending')`,
+          [co, pending, today],
+        ),
+      );
+      const r = await get(asUser(admin), `/checkins/compliance?periodKind=day&start=${today}`);
+      const rows: Array<{ userId: string; expectedDays: number; missedDays: number }> = r.json().rows;
+      const row = rows.find((x) => x.userId === pending);
+      expect(row).toBeDefined(); // NOT excluded -- unapproved leave is not a real excuse
+      expect(row!.expectedDays).toBe(1);
+      expect(row!.missedDays).toBe(1); // never submitted, not on APPROVED leave -> counts as missed
+    });
+
+    // TR-12 adversarial (2026-07-31): retroactive leave approval. §5.3 promises a leave day never
+    // GENERATES an auto_missed row, but says nothing about a row the nightly job ALREADY wrote
+    // before the leave was approved. This proves what actually happens on both read paths that
+    // matter, and — TR-41 (§15) — that the gap is a bounded WINDOW (until the next nightly
+    // recompute), not a permanent one:
+    //   (a) the compliance GRID (the appraisal-safe metric, #18) self-heals -- it re-derives
+    //       expected() fresh from CURRENT `hr_leave_requests` on every read, so a person now on
+    //       approved leave is excluded from `expectedDays`/`missedDays` entirely for that date,
+    //       regardless of what is physically stored in `report_checkins`.
+    //   (b) the raw HISTORY endpoint (GET /checkins, what a manager/HR reads per-person) does NOT
+    //       self-heal on its OWN — it returns the row's stored `status` verbatim, so immediately
+    //       after the retroactive approval it still reports 'auto_missed'. TR-41 closes this: the
+    //       NEXT nightly recompute (`writeAutoMissedCheckins`'s retraction pass) DELETES the stale
+    //       row using the exact same expected() derivation, audits it, and the two paths agree.
+    it("retroactive leave approval: the raw history is briefly stale, then the next recompute retracts it and both paths AGREE", async () => {
+      const retro = await createUser("retro-leave@tr09.test");
+      await addMembership(co, retro);
+      await withTenants([co], (c) =>
+        c.query(
+          `INSERT INTO org_unit_memberships (id, tenant_id, user_id, unit_node_id, is_primary, valid_from, source, origin_site)
+           VALUES ($1,$2,$3,'d-seo',true,'2020-01-01','manual','central')`,
+          [newId(), co, retro],
+        ),
+      );
+      // Simulate what the nightly job would have written BEFORE any leave request existed.
+      const retroId = newId();
+      await withScopes((c) =>
+        c.query(
+          `INSERT INTO report_checkins (id, tenant_id, user_id, checkin_date, status, source, origin_site)
+           VALUES ($1,$2,$3,$4::date,'auto_missed','system','central')`,
+          [retroId, co, retro, yesterday],
+        ),
+      );
+      // NOW the leave gets approved, retroactively, covering that same already-missed day.
+      await withScopes((c) =>
+        c.query(
+          `INSERT INTO hr_leave_requests (tenant_id, subject_user_id, leave_type, starts_on, ends_on, minutes, status)
+           VALUES ($1,$2,'vacation',$3::date,$3::date,480,'approved')`,
+          [co, retro, yesterday],
+        ),
+      );
+
+      // (a) compliance grid: self-heals -- retro is excluded entirely for yesterday.
+      const grid = await get(asUser(admin), `/checkins/compliance?periodKind=day&start=${yesterday}`);
+      expect(grid.statusCode).toBe(200);
+      const gridRows: Array<{ userId: string }> = grid.json().rows;
+      expect(gridRows.find((x) => x.userId === retro)).toBeUndefined();
+
+      // (b) raw history: STILL reports 'auto_missed' immediately after the approval -- the WINDOW
+      // TR-41 exists to close, not a permanent gap.
+      const hist = await get(asUser(admin), `/checkins?userId=${retro}&from=${yesterday}&to=${yesterday}`);
+      expect(hist.statusCode).toBe(200);
+      const histRow = hist.json().checkins.find((x: { date: string }) => x.date === yesterday);
+      expect(histRow).toBeDefined();
+      expect(histRow.status).toBe("auto_missed");
+
+      // (c) TR-41's fix: the next nightly recompute (a real call into the SAME job the nightly
+      // cron would make, not a new surface) retracts the stale row via the exact expected()
+      // derivation it already computes, and audits WHY.
+      const result = await recomputeFactSlice(co, yesterday);
+      expect(result.autoMissedRetracted).toBeGreaterThanOrEqual(1);
+
+      // Raw history now agrees with the grid: no row at all for that day (== not_expected).
+      const histAfter = await get(asUser(admin), `/checkins?userId=${retro}&from=${yesterday}&to=${yesterday}`);
+      expect(histAfter.statusCode).toBe(200);
+      expect(histAfter.json().checkins.find((x: { date: string }) => x.date === yesterday)).toBeUndefined();
+
+      // Still audited-not-silent.
+      const audit = await adminPool().query<{ metadata: Record<string, unknown> }>(
+        `SELECT metadata FROM activities WHERE tenant_id=$1 AND verb='checkin.auto_missed_retracted' AND target_entity_id=$2`,
+        [co, retroId],
+      );
+      expect(audit.rows).toHaveLength(1);
+      expect(audit.rows[0].metadata).toMatchObject({
+        subjectUserId: retro,
+        date: yesterday,
+        priorStatus: "auto_missed",
+        cause: "approved_leave",
+      });
     });
   });
 

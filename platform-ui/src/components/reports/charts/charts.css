@@ -223,6 +223,13 @@
   color: var(--rc-text-secondary); border: 0.5px solid var(--rc-axis); padding: 1px 5px; white-space: nowrap;
 }
 .rc-kpi__badge--unsafe { color: var(--rc-serious); border-color: var(--rc-serious); }
+/* Appraisal cohort-band badge (TR-26) — the same fixed, never-themed status ramp KpiTiles reserves
+   for good/warning/serious/critical, keyed off the 1-5 band so it stays a single source of truth
+   between the badge and the distribution-strip marker below rather than two inline color maps. */
+.rc-kpi__badge--band[data-band="1"] { color: var(--rc-critical); border-color: var(--rc-critical); }
+.rc-kpi__badge--band[data-band="2"] { color: var(--rc-serious); border-color: var(--rc-serious); }
+.rc-kpi__badge--band[data-band="3"] { color: var(--rc-warning); border-color: var(--rc-warning); }
+.rc-kpi__badge--band[data-band="4"], .rc-kpi__badge--band[data-band="5"] { color: var(--rc-good); border-color: var(--rc-good); }
 
 /* ---- delta chip ---- */
 .rc-delta { display: inline-flex; align-items: center; gap: 4px; font: 700 11px var(--font-body); white-space: nowrap; }
@@ -232,7 +239,20 @@
 
 /* ---- bars (grouped / stacked) ---- */
 .rc-bar { rx: 0; } /* square baseline join; rounding applied per-mark via path, see components */
-.rc-bar-group__cat-label { font: 400 10px var(--font-body); fill: var(--rc-text-muted); }
+/* TR-20 fix — genuinely broken, on-screen AND in print, not print-only: `GroupedBars`/`StackedBars`
+   give each category label a narrow fixed width (20px in StackedBars, ~16-20px in GroupedBars) sized
+   for a short date tick ("01 Jul", which wraps cleanly at its own space onto two lines). A CATEGORY
+   axis (`kind="category"`, e.g. `evidence_by_source`) instead carries whatever label the document
+   provides verbatim (`document-builder.ts` uses the raw `activity_by_source` key: "task_comment",
+   "time_entry", ...) with no space to wrap at — default `overflow-wrap` only breaks at whitespace, so
+   the label renders as ONE unbroken line that overflows its 20px box on both sides and visually
+   collides with its neighbors. Found by actually rendering a print PDF (TR-20's ruling 1): the same
+   overlap is present on the live `/reports/*` pages too (confirmed from the component's own code —
+   this rule has no media-print gate), so it belongs here, not in TR-20's print-only stylesheet.
+   `overflow-wrap: anywhere` lets an unbreakable label wrap mid-word onto multiple lines within its
+   own box instead of spilling into its neighbor — strictly better on screen (replaces an overlapping,
+   illegible label with a readable stacked one) and the fix this PDF needed to be legible at all. */
+.rc-bar-group__cat-label { font: 400 10px var(--font-body); fill: var(--rc-text-muted); overflow-wrap: anywhere; }
 
 /* ---- donut ---- */
 .rc-donut__center-label { font: 700 10px var(--font-body); fill: var(--rc-text-muted); letter-spacing: 0.05em; text-transform: uppercase; }
@@ -250,6 +270,10 @@
 .rc-cohort { display: flex; flex-direction: column; gap: 6px; }
 .rc-cohort__track { position: relative; height: 28px; background: var(--rc-grid); }
 .rc-cohort__marker { position: absolute; top: -6px; width: 2px; height: 40px; background: var(--rc-series-1); }
+.rc-cohort__marker[data-band="1"] { background: var(--rc-critical); }
+.rc-cohort__marker[data-band="2"] { background: var(--rc-serious); }
+.rc-cohort__marker[data-band="3"] { background: var(--rc-warning); }
+.rc-cohort__marker[data-band="4"], .rc-cohort__marker[data-band="5"] { background: var(--rc-good); }
 .rc-cohort__marker-label {
   position: absolute; top: -26px; transform: translateX(-50%); white-space: nowrap;
   font: 700 10px var(--font-body); color: var(--rc-text-primary);

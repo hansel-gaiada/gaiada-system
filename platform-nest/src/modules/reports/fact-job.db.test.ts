@@ -790,6 +790,188 @@ describe.skipIf(!TEST_URL)("TR-07 fact job + recompute endpoint (live PG + RLS +
     });
   });
 
+  // ═════════════════════════ TR-41 — retracting a stale auto_missed row ═════════════════════
+  //
+  // §15 (found by TR-12's adversarial QA gate): the compliance grid self-heals by re-deriving
+  // expected() fresh on every read, but a STORED `auto_missed` row from a PRIOR nightly run does
+  // not — so a manager/HR reading the raw history (GET /checkins) sees a miss the appraisal-safe
+  // metric (#18) no longer counts. `writeAutoMissedCheckins` now runs a RETRACTION pass, reusing
+  // the exact expected() derivation it already computes, every time it runs for a past day.
+  describe("TR-41 — retracting a stale auto_missed row", () => {
+    const RETRO_DAY = "2026-06-10"; // a Wednesday; untouched by any other test's fixtures in this file
+    let retroLeave: string;
+    let retroSubmitted: string;
+    let retroExcused: string;
+    let leaveStaleId: string;
+    let submittedId: string;
+    let excusedId: string;
+
+    async function staleAutoMissed(userId: string, date: string): Promise<string> {
+      const id = newId();
+      await withScopes(co, (c) =>
+        c.query(
+          `INSERT INTO report_checkins (id, tenant_id, user_id, checkin_date, status, source, origin_site)
+           VALUES ($1,$2,$3,$4::date,'auto_missed','system','central')`,
+          [id, co, userId, date],
+        ),
+      );
+      return id;
+    }
+
+    const checkinRow = async (userId: string, date: string) =>
+      (
+        await adminPool().query<{ id: string; status: string }>(
+          `SELECT id, status FROM report_checkins WHERE tenant_id=$1 AND user_id=$2 AND checkin_date=$3::date`,
+          [co, userId, date],
+        )
+      ).rows[0] as { id: string; status: string } | undefined;
+
+    const retractionAudit = async (checkinId: string) =>
+      (
+        await adminPool().query<{ metadata: Record<string, unknown> }>(
+          `SELECT metadata FROM activities WHERE tenant_id=$1 AND verb='checkin.auto_missed_retracted' AND target_entity_id=$2`,
+          [co, checkinId],
+        )
+      ).rows;
+
+    beforeAll(async () => {
+      retroLeave = await createUser("retro-leave@tr41.test");
+      retroSubmitted = await createUser("retro-submitted@tr41.test");
+      retroExcused = await createUser("retro-excused@tr41.test");
+      for (const u of [retroLeave, retroSubmitted, retroExcused]) await openMembership(co, u, "d-seo");
+
+      leaveStaleId = await staleAutoMissed(retroLeave, RETRO_DAY);
+      // A REAL submission and a manager EXCUSE, both stored for the same day retroLeave's leave
+      // covers, on TWO OTHER users — these must survive every recompute untouched (hard bar 1).
+      submittedId = newId();
+      await withScopes(co, (c) =>
+        c.query(
+          `INSERT INTO report_checkins (id, tenant_id, user_id, checkin_date, status, summary, submitted_at, source, origin_site)
+           VALUES ($1,$2,$3,$4::date,'submitted','shipped it','2026-06-10T18:00:00Z','ui','central')`,
+          [submittedId, co, retroSubmitted, RETRO_DAY],
+        ),
+      );
+      excusedId = newId();
+      await withScopes(co, (c) =>
+        c.query(
+          `INSERT INTO report_checkins (id, tenant_id, user_id, checkin_date, status, excused_reason, source, origin_site)
+           VALUES ($1,$2,$3,$4::date,'excused','sick day','system','central')`,
+          [excusedId, co, retroExcused, RETRO_DAY],
+        ),
+      );
+      // Retroactively approve leave covering RETRO_DAY for ALL THREE users — the same excluding
+      // fact now applies to the submitted/excused users too, so hard bar 1 is a real test: the
+      // retraction pass must skip them ONLY because of their status, not because they're unaffected.
+      for (const u of [retroLeave, retroSubmitted, retroExcused]) {
+        await withScopes(co, (c) =>
+          c.query(
+            `INSERT INTO hr_leave_requests (tenant_id, subject_user_id, leave_type, starts_on, ends_on, minutes, status)
+             VALUES ($1,$2,'vacation',$3::date,$3::date,480,'approved')`,
+            [co, u, RETRO_DAY],
+          ),
+        );
+      }
+    });
+
+    it("before the next recompute: the stale row is still there — this is the defect's WINDOW, not a permanent gap", async () => {
+      expect((await checkinRow(retroLeave, RETRO_DAY))!.status).toBe("auto_missed");
+    });
+
+    it("the next recompute retracts the stale auto_missed row and audits WHY", async () => {
+      const result = await recomputeFactSlice(co, RETRO_DAY);
+      expect(result.autoMissedRetracted).toBeGreaterThanOrEqual(1);
+
+      // "no row" IS `not_expected` in this model — retraction DELETES, it does not relabel.
+      expect(await checkinRow(retroLeave, RETRO_DAY)).toBeUndefined();
+
+      const audit = await retractionAudit(leaveStaleId);
+      expect(audit).toHaveLength(1);
+      expect(audit[0].metadata).toMatchObject({
+        subjectUserId: retroLeave,
+        date: RETRO_DAY,
+        priorStatus: "auto_missed",
+        cause: "approved_leave",
+      });
+    });
+
+    it("hard bar 1: a SUBMITTED row on the SAME now-not-expected day survives UNTOUCHED", async () => {
+      const row = await checkinRow(retroSubmitted, RETRO_DAY);
+      expect(row).toBeDefined();
+      expect(row!.status).toBe("submitted");
+      expect(await retractionAudit(submittedId)).toHaveLength(0);
+    });
+
+    it("hard bar 1: an EXCUSED row on the SAME now-not-expected day survives UNTOUCHED", async () => {
+      const row = await checkinRow(retroExcused, RETRO_DAY);
+      expect(row).toBeDefined();
+      expect(row!.status).toBe("excused");
+      expect(await retractionAudit(excusedId)).toHaveLength(0);
+    });
+
+    it("hard bar 3: the compliance grid and the raw history now AGREE for the retracted user (both asserted, not just one)", async () => {
+      // The grid (self-heals since before this ticket, §15): retroLeave is excluded entirely for
+      // RETRO_DAY because it re-derives expected() fresh from current hr_leave_requests.
+      const grid = await app.inject({
+        method: "GET",
+        url: `/api/${co}/checkins/compliance?periodKind=day&start=${RETRO_DAY}`,
+        headers: asUser(admin),
+      });
+      expect(grid.statusCode).toBe(200);
+      const gridRows: Array<{ userId: string }> = grid.json().rows;
+      expect(gridRows.find((r) => r.userId === retroLeave)).toBeUndefined();
+
+      // The raw history (the defect's own read path, TR-12 §15): now agrees — no row at all for
+      // that day, which is what "not_expected" looks like everywhere else in this model.
+      const hist = await app.inject({
+        method: "GET",
+        url: `/api/${co}/checkins?userId=${retroLeave}&from=${RETRO_DAY}&to=${RETRO_DAY}`,
+        headers: asUser(admin),
+      });
+      expect(hist.statusCode).toBe(200);
+      const histRow = hist.json().checkins.find((x: { date: string }) => x.date === RETRO_DAY);
+      expect(histRow).toBeUndefined();
+    });
+
+    it("hard bar 4: idempotent — recomputing the SAME day again retracts nothing further", async () => {
+      const second = await recomputeFactSlice(co, RETRO_DAY);
+      expect(second.autoMissedRetracted).toBe(0);
+      expect(await checkinRow(retroLeave, RETRO_DAY)).toBeUndefined();
+      // No second audit entry — one retraction, one audit row, forever.
+      expect(await retractionAudit(leaveStaleId)).toHaveLength(1);
+      // The submitted/excused rows are still exactly as they were.
+      expect((await checkinRow(retroSubmitted, RETRO_DAY))!.status).toBe("submitted");
+      expect((await checkinRow(retroExcused, RETRO_DAY))!.status).toBe("excused");
+    });
+
+    it("a holiday/calendar change retracts EVERY stale auto_missed row for that day, not just leave cases", async () => {
+      const holidayUser = await createUser("retro-holiday@tr41.test");
+      await openMembership(co, holidayUser, "d-seo");
+      const day = "2026-06-11"; // Thursday, otherwise a normal working day per this tenant's calendar
+      const staleId = await staleAutoMissed(holidayUser, day);
+
+      await withScopes(co, (c) =>
+        c.query(
+          `UPDATE report_work_calendars SET holidays = holidays || $2::jsonb WHERE tenant_id = $1`,
+          [co, JSON.stringify([{ date: day, label: "Ad-hoc company holiday" }])],
+        ),
+      );
+
+      const result = await recomputeFactSlice(co, day);
+      expect(result.autoMissedRetracted).toBeGreaterThanOrEqual(1);
+      expect(await checkinRow(holidayUser, day)).toBeUndefined();
+      const audit = await retractionAudit(staleId);
+      expect(audit[0].metadata).toMatchObject({ cause: "holiday" });
+
+      // Revert the calendar so it does not leak into any later test in this file.
+      await withScopes(co, (c) =>
+        c.query(
+          `UPDATE report_work_calendars SET holidays = $2::jsonb WHERE tenant_id = $1`,
+          [co, JSON.stringify([{ date: "2026-07-17", label: "Company day" }])],
+        ),
+      );
+    });
+  });
+
   // ═════════════════════════ endpoint: authz + validation ═════════════════════════
 
   describe("POST /api/:t/reports/facts/recompute", () => {

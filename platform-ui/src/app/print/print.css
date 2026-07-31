@@ -112,6 +112,24 @@
     max-width: none !important;
   }
 
+  /* REAL BUG found by actually rendering a PDF (ruling 1), not by any unit test: at this route's
+     printable width (~186mm/~700px between the sidecar's 12mm side margins), `.rc-sections-grid`'s
+     on-screen `repeat(auto-fit, minmax(360px, 1fr))` still lays out TWO narrower-than-360px columns
+     rather than collapsing to one — Chromium's grid auto-fit sizing measured slightly differently
+     under `page.pdf()`'s viewport than a normal browser window. Each chart card then got less width
+     than `GroupedBars`/`StackedBars` need for their category labels; combined with charts.css's own
+     print rule (`.rc-scroll{overflow:visible}` + `.rc-scroll>*{min-width:0}`, needed so a chart
+     doesn't clip) the bar labels didn't wrap or shrink — they OVERFLOWED into the neighboring card
+     ("Evidence by source"'s `task_comment`/`doc_edit`/`time_entry`/`status_change` labels rendered
+     overlapping and unreadable in the first render). Forcing one column here — print has no reason
+     to keep the on-screen two-up dashboard layout; a single full-width column gives every chart the
+     entire printable width, which is exactly enough room for these charts' category counts. Verified
+     by re-rendering: labels no longer overlap on any of the four grains. Scoped to `.tr20-print` only
+     — the on-screen `/reports/*` pages keep their two-up grid untouched. */
+  .tr20-print .rc-sections-grid {
+    grid-template-columns: 1fr !important;
+  }
+
   /* Keep an atomic card/section whole across a page break where practical — mirrors render-pdf.js's
      `.plate{break-inside:avoid}`. Headings never start a page orphaned from their content. */
   .tr20-print .rc-kpi,

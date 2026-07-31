@@ -77,12 +77,33 @@ resourcePolicy:
       derivedRoles: ["group_executive"]
       condition: { match: { expr: "variables.notLow" } }
 
-    # HR ("HR-appraisal role" per §8): full read + excuse, company-wide (HR is legitimately
-    # whole-company scope, same posture as resource_hr_case.yaml's module_staff/module_manager).
-    - actions: ["read", "excuse"]
+    # ═══════════ §8's "HR-appraisal role" column — SPLIT BY TR-25 (finding ②) ═══════════
+    # TR-09 expressed this tier as `module_staff`/`module_manager` + `module == "hr"`, which resolves
+    # to the SAME two grant names (`hr_staff`/`hr_manager`) as `hr_people_*` — two spellings of one
+    # tier, and the reason the HR boundary drifted between this file and resource_appraisal.yaml.
+    # Consolidated onto the `hr_people_*` derived roles so there is exactly ONE spelling estate-wide,
+    # and split by sensitivity:
+    #
+    #   read   → hr_people_reader (hr_staff OR hr_manager). Reading check-in history/compliance is
+    #            `hr.view`-shaped baseline HR work.
+    #   excuse → hr_people_ops (hr_manager ONLY). An excuse REWRITES a person's compliance record,
+    #            and metric #18 `checkin_compliance` is appraisal-SAFE (§5) — i.e. this write moves a
+    #            number that feeds an appraisal axis. That is an acting-tier decision, not a baseline
+    #            one, and it is exactly the class of grant the finding-② audit found had leaked to
+    #            every reconciler-materialized `hr_staff` holder on a served company.
+    #
+    # A side benefit worth stating: these rules no longer depend on the caller remembering to pass
+    # `module: "hr"` on a `checkin` resource (an attribute-reuse trick that was orthogonal to the
+    # actual module-sliced RLS wall). A handler that omits it no longer silently loses the HR tier.
+    - actions: ["read"]
       effect: EFFECT_ALLOW
-      derivedRoles: ["module_staff", "module_manager"]
-      condition: { match: { expr: "variables.inTenant && variables.notLow && request.resource.attr.module == \"hr\"" } }
+      derivedRoles: ["hr_people_reader"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+
+    - actions: ["excuse"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["hr_people_ops"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
 
     # The served company's own admin: full read + excuse within its own tenant.
     - actions: ["read", "excuse"]
@@ -97,8 +118,28 @@ resourcePolicy:
       derivedRoles: ["manager"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }
 
-    # n8n reminder + escalation flows (TR-11's internal reads, §8 "service/admin"): company_admin
-    # only — no exec/HR/manager, these are ops polling surfaces, not a console.
+    # ═══════════ TR-25 finding ③: `missed_by_unit` REVIEWED against §8 — VERDICT: KEEP AS IS ═══════
+    # `missed_by_unit` (TR-11's `GET /checkins/missed-yesterday`) was added to satisfy an endpoint and
+    # had never been reviewed against §8. §8 names no row for it, so TR-25 assessed it on its own
+    # terms and the existing scoping is CORRECT — recorded here so the next reader does not
+    # re-litigate it:
+    #
+    #  · Both actions return PERSON-GRAIN data spanning the whole tenant (who missed, grouped by
+    #    unit), so they sit at the top of §8's sensitivity ordering and must NOT be widened to the
+    #    dept-lead tier. `company_admin` is the tightest tier that can legitimately hold a
+    #    tenant-wide ops view, and it is the tier the n8n service accounts actually run as (TR-22
+    #    provisioned two scoped service accounts against exactly this pattern).
+    #  · `manager` is EXCLUDED and must stay excluded. A `unit_scoped` caller has no business
+    #    receiving the whole tenant's miss list, and unlike the `read` action there is no in-app
+    #    narrowing on this route to fall back on — `missed-yesterday` returns EVERY unit's group by
+    #    construction (that is its purpose: it is the input to a fan-out, not a console read).
+    #  · `group_executive` is also excluded, deliberately. An exec CAN see all of this through
+    #    `read`/`compliance`, which is the console path with the in-app narrowing and the audit trail
+    #    attached; these two are ops POLLING surfaces and keeping them admin-only means a
+    #    high-frequency automated poll never runs under a human oversight grant.
+    #  · `notLow` matters more here than almost anywhere else in this file: these are the routes a
+    #    chat-surface principal could most plausibly reach, and a tenant-wide miss list is exactly
+    #    the "person-grain data outside your line" §8 hard rule 3 forbids.
     - actions: ["pending_reminders", "missed_by_unit"]
       effect: EFFECT_ALLOW
       derivedRoles: ["company_admin"]

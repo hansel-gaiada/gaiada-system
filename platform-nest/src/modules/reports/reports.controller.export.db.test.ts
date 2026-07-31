@@ -13,7 +13,10 @@
 //   * standing ruling 1 — a plain member is DENIED an export of a scope they cannot read (403),
 //     identically to a document read, and a member CAN export their OWN person-grain scope;
 //   * an unknown/foreign jobId (wrong tenant) -> 404, never a cross-tenant leak;
-//   * format validation: "pdf" is rejected today (400), not silently downgraded.
+//   * format validation: an unrecognized format -> 400; "pdf" is a REAL format (TR-21) that
+//     refuses with an honest 503 when this suite's app instance has no report-renderer configured
+//     (never a silent downgrade to another format) — the real sidecar round trip itself is
+//     covered in reports.controller.export.pdf.db.test.ts.
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import type { NestFastifyApplication } from "@nestjs/platform-fastify";
 import ExcelJS from "exceljs";
@@ -176,8 +179,14 @@ describe.skipIf(!TEST_URL)("TR-18 export service (live PG + Cerbos)", () => {
 
   // ═══════════════════════════════ authz — standing ruling 1 ═══════════════════════════════
 
-  it("format='pdf' is rejected today (400), not silently downgraded", async () => {
+  it("format='pdf' is accepted as a real format now (TR-21), but refuses with an honest 503 rather than a silent downgrade when this suite's app instance has no report-renderer configured (REPORT_RENDERER_URL/RENDERER_TOKEN/PLATFORM_UI_INTERNAL_URL are all unset here — the real sidecar round trip is covered end to end, with those three actually configured, in reports.controller.export.pdf.db.test.ts)", async () => {
     const r = await createExport({ grain: "person", scopeRef: alice, periodKind: "custom", start: "2026-07-01", end: "2026-07-05", format: "pdf" });
+    expect(r.statusCode).toBe(503);
+    expect(r.json().error).toContain("not configured");
+  });
+
+  it("an unrecognized format (not xlsx/csv/pdf) -> 400", async () => {
+    const r = await createExport({ grain: "person", scopeRef: alice, periodKind: "custom", start: "2026-07-01", end: "2026-07-05", format: "docx" });
     expect(r.statusCode).toBe(400);
   });
 

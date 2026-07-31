@@ -71,6 +71,12 @@ services:
       # hub's own least-privilege tool allow-list. Handle with equal care to HUB_SERVICE_TOKEN.
       PLATFORM_URL: ${PLATFORM_URL:-http://platform:3004}
       PLATFORM_SERVICE_TOKEN: ${PLATFORM_SERVICE_TOKEN:-}
+      # TR-22: reports-weekly-seal / reports-monthly-seal's notify targets. A static, comma-
+      # separated list of platform user ids (the "reports stakeholders" — exec + whoever should
+      # see sealed dept/company packs), the SAME shape NOTIFY_USER_ID already uses elsewhere in
+      # this file, deliberately NOT a live Cerbos role query (see automation/README.md's TR-22
+      # section for why). Empty = both flows still seal+render, they just fan out zero notifies.
+      REPORTS_NOTIFY_USER_IDS: ${REPORTS_NOTIFY_USER_IDS:-}
     # Standalone: resolve the workflows' hardcoded http://mcp-hub:3003 / bot / platform hostnames
     # to their published host ports. (On the VPS stack n8n shares the network and they resolve
     # natively; this is harmless there.) BOT_URL already resolves via that same env var, not a

@@ -391,8 +391,21 @@ export const REPORT_METRICS: readonly ReportMetricDef[] = [
     grains: ["person", "department", "company"],
     appraisalSafe: false,
     seeded: false,
+    // ⚠ MCP REACHABILITY (TR-43, §15 2026-08-01): `seeded: false` here is not merely a storage
+    // detail — it means this metric is STRUCTURALLY ABSENT from `GET /reports/metrics` and
+    // therefore from the `reports.getMetrics` MCP tool, because both read `computeReportRangeRows`
+    // (document-builder.ts's `computeRangeRows`), which walks `rollup_metrics`-shaped rows built
+    // from `report_work_facts` counters only — #22 never has one. It is ONLY ever produced inside
+    // `buildKpis()` (document-builder.ts), which special-cases this exact `metricKey` before the
+    // generic row lookup and feeds it from a separate `sourceDiversity` param, not `rows`. Concretely:
+    // an agent calling `reports.getMetrics` with `metricKey: "evidence.source_diversity"` gets an
+    // EMPTY array, not an error and not a value — call `reports.getDocument` instead and read the
+    // `evidence.source_diversity` entry out of the returned `ReportDocument.kpis` (it carries
+    // `distinctOver: true`). This is the ONLY entry in this catalog with `seeded: false`; if a future
+    // metric is ever added with `seeded: false`, it inherits the identical gap and needs the same
+    // callout in `reports.getMetrics`'s tool description (src/modules/reports/index.ts).
     description:
-      "COUNT(DISTINCT source) unioned over the range — NOT the sum of daily distinct counts (Mon {pm}, Tue {github} → 2, not the sum of two 1s). No `aggregation_rule` expresses a distinct-union and 'max' is wrong, not merely imprecise, so this is never written to metric_definitions; it is computed read-time as a key-union over report_work_facts.activity_by_source and carried as a ReportKpi with distinctOver:true",
+      "COUNT(DISTINCT source) unioned over the range — NOT the sum of daily distinct counts (Mon {pm}, Tue {github} → 2, not the sum of two 1s). No `aggregation_rule` expresses a distinct-union and 'max' is wrong, not merely imprecise, so this is never written to metric_definitions; it is computed read-time as a key-union over report_work_facts.activity_by_source and carried as a ReportKpi with distinctOver:true. NOT reachable via GET /reports/metrics or the reports.getMetrics MCP tool (see reports.getDocument instead) — this row's absence from rollup_metrics/report_work_facts-derived rows is structural, not a bug.",
   },
 ];
 

@@ -87,7 +87,7 @@
 import { randomUUID } from "node:crypto";
 import { v5 as uuidv5 } from "uuid";
 import type { PoolClient } from "pg";
-import { withGlobal, withTenants } from "../../db";
+import { newId, withGlobal, withTenants } from "../../db";
 import { config } from "../../config";
 import { isModuleEnabled } from "../registry";
 import { logAssigneeDriftIfAny } from "../pm/pm.controller";
@@ -995,13 +995,119 @@ export async function loadWorkCalendar(c: PoolClient, tenantId: string): Promise
     : DEFAULT_WORK_CALENDAR;
 }
 
+/** TR-41 (§15, found by TR-12's QA gate): the four reasons a `checkinRetractionCause` can name.
+ *  All four fall straight out of `expectedCheckinUsers`' own predicate (§5.3) — this type invents
+ *  no new rule, it just labels which term of that predicate flipped. */
+export type CheckinRetractionCause = "non_working_day" | "holiday" | "not_employed" | "approved_leave" | "attendance_off";
+
+/** PURE: given the same day-level (calendar) and person-level (employment/leave/attendance)
+ *  inputs `expectedCheckinUsers` itself consults, name WHY one specific user is no longer
+ *  expected on `date`. Used only to LABEL a retraction's audit entry — the decision of WHETHER to
+ *  retract is "this user is absent from `expectedCheckinUsers`' current output", computed once per
+ *  day by the caller, never re-derived per user here. Priority mirrors `expectedCheckinUsers`' own
+ *  short-circuit order: a day-level exclusion (non-working day, then holiday) always wins over a
+ *  person-level one, because on such a day NOBODY was expected, employed or not. */
+export function checkinRetractionCause(input: {
+  date: string;
+  calendar: WorkCalendar;
+  employed: boolean;
+  approvedLeave: boolean;
+  attendanceOff: boolean;
+}): CheckinRetractionCause {
+  if (!input.calendar.workingDays.includes(isoDayOfWeek(input.date))) return "non_working_day";
+  if (input.calendar.holidays.includes(input.date)) return "holiday";
+  if (!input.employed) return "not_employed";
+  if (input.approvedLeave) return "approved_leave";
+  return "attendance_off";
+}
+
+/** TR-41's retraction pass — the natural INVERSE of the write below, using the exact same
+ *  derivation rather than a second, divergent one (the architect's ruling, §15).
+ *
+ *  An `auto_missed` row is a machine INFERENCE from incomplete information ("nobody had submitted
+ *  and nothing excused it as of last night"), not a human statement. Once leave is approved
+ *  retroactively — or a holiday is added, a calendar changes, or a membership correction moves the
+ *  day out of someone's employment window — that inference is simply WRONG, and correcting a wrong
+ *  inference is not rewriting history; leaving it wrong is, and the wrong version is the one that
+ *  reaches an appraisal conversation (metric #18 is appraisal-SAFE).
+ *
+ *  Retracts by DELETING the row: "no row" already means `not_expected` in this model
+ *  (`buildComplianceGrid` and `demoCheckins.ts` both rely on that semantic, TR-12 confirmed it), so
+ *  the state converges to exactly what it would have been had the excluding fact been true when
+ *  the nightly job first ran — genuine idempotent convergence, not a fourth status (the CHECK
+ *  constraint stays `('submitted','auto_missed','excused')`, no DDL needed).
+ *
+ *  ONLY EVER touches `status = 'auto_missed'` — the query below hard-filters to it, so a
+ *  `submitted` row (a real human action) or an `excused` row (a manager's decision) can never be
+ *  retracted here, full stop. Every retraction is audited via `activities` (subject, date, prior
+ *  status, cause) — the audit is what makes "one number everywhere" honest rather than a silent
+ *  overwrite. Never touches `report_work_facts`, `rollup_metrics`, or `report_documents` — a
+ *  sealed period's frozen numbers are therefore untouched by construction, not by a special case. */
+async function retractStaleAutoMissedCheckins(
+  c: PoolClient,
+  tenantId: string,
+  factDate: string,
+  ctx: {
+    calendar: WorkCalendar;
+    employedIds: Set<string>;
+    leaveIds: Set<string>;
+    attendanceIds: Set<string>;
+    expected: Set<string>;
+  },
+): Promise<number> {
+  const stale = await c.query<{ id: string; user_id: string }>(
+    `SELECT id, user_id FROM report_checkins
+      WHERE tenant_id = $1 AND checkin_date = $2::date AND status = 'auto_missed'`,
+    [tenantId, factDate],
+  );
+  const toRetract = stale.rows.filter((row) => !ctx.expected.has(row.user_id));
+  for (const row of toRetract) {
+    const cause = checkinRetractionCause({
+      date: factDate,
+      calendar: ctx.calendar,
+      employed: ctx.employedIds.has(row.user_id),
+      approvedLeave: ctx.leaveIds.has(row.user_id),
+      attendanceOff: ctx.attendanceIds.has(row.user_id),
+    });
+    // DELETE (not an UPDATE to some other status) — see the header comment above for why that is
+    // convergence, not data loss. Scoped by id AND tenant AND the 'auto_missed' status again here
+    // (belt-and-braces against a status change racing this same transaction) so this statement can
+    // never touch a 'submitted' or 'excused' row even if the SELECT above were somehow stale.
+    await c.query(
+      `DELETE FROM report_checkins WHERE id = $1 AND tenant_id = $2 AND status = 'auto_missed'`,
+      [row.id, tenantId],
+    );
+    await c.query(
+      `INSERT INTO activities (id, tenant_id, actor_id, verb, target_entity_type, target_entity_id, metadata, origin_site)
+       VALUES ($1, $2, NULL, 'checkin.auto_missed_retracted', 'report_checkin', $3, $4::jsonb, $5)`,
+      [
+        newId(),
+        tenantId,
+        row.id,
+        JSON.stringify({ subjectUserId: row.user_id, date: factDate, priorStatus: "auto_missed", cause }),
+        config.originSite,
+      ],
+    );
+  }
+  return toRetract.length;
+}
+
+export interface AutoMissedCheckinsResult {
+  /** New `auto_missed` rows written for expected-but-missing days. */
+  written: number;
+  /** TR-41: stale `auto_missed` rows retracted because the person is no longer in the current
+   *  expected() set for this day (leave approved late, a holiday/calendar change, or a membership
+   *  correction). */
+  retracted: number;
+}
+
 export async function writeAutoMissedCheckins(
   c: PoolClient,
   tenantId: string,
   factDate: string,
   today: string,
-): Promise<number> {
-  if (!(factDate < today)) return 0;
+): Promise<AutoMissedCheckinsResult> {
+  if (!(factDate < today)) return { written: 0, retracted: 0 };
 
   const calendar = await loadWorkCalendar(c, tenantId);
 
@@ -1011,7 +1117,6 @@ export async function writeAutoMissedCheckins(
         AND valid_from <= $2::date AND (valid_to IS NULL OR valid_to >= $2::date)`,
     [tenantId, factDate],
   );
-  if (employed.rows.length === 0) return 0;
 
   const leave = await c.query<{ subject_user_id: string }>(
     `SELECT DISTINCT subject_user_id FROM hr_leave_requests
@@ -1025,27 +1130,46 @@ export async function writeAutoMissedCheckins(
     [tenantId, factDate],
   );
 
+  const employedIds = employed.rows.map((r) => r.user_id);
+  const leaveIds = leave.rows.map((r) => r.subject_user_id);
+  const attendanceIds = attendance.rows.map((r) => r.subject_user_id);
+
   const expected = expectedCheckinUsers({
     date: factDate,
     calendar,
-    employed: employed.rows.map((r) => r.user_id),
-    approvedLeave: leave.rows.map((r) => r.subject_user_id),
-    attendanceOff: attendance.rows.map((r) => r.subject_user_id),
+    employed: employedIds,
+    approvedLeave: leaveIds,
+    attendanceOff: attendanceIds,
   });
-  if (expected.length === 0) return 0;
 
-  const { rowCount } = await c.query(
-    `INSERT INTO report_checkins (tenant_id, user_id, checkin_date, status, source, origin_site)
-     SELECT $1, u, $2::date, 'auto_missed', 'system', $4
-       FROM unnest($3::uuid[]) AS u
-      WHERE NOT EXISTS (
-        SELECT 1 FROM report_checkins rc
-         WHERE rc.tenant_id = $1 AND rc.user_id = u AND rc.checkin_date = $2::date
-      )
-     ON CONFLICT (tenant_id, user_id, checkin_date) DO NOTHING`,
-    [tenantId, factDate, expected, config.originSite],
-  );
-  return rowCount ?? 0;
+  let written = 0;
+  if (expected.length > 0) {
+    const { rowCount } = await c.query(
+      `INSERT INTO report_checkins (tenant_id, user_id, checkin_date, status, source, origin_site)
+       SELECT $1, u, $2::date, 'auto_missed', 'system', $4
+         FROM unnest($3::uuid[]) AS u
+        WHERE NOT EXISTS (
+          SELECT 1 FROM report_checkins rc
+           WHERE rc.tenant_id = $1 AND rc.user_id = u AND rc.checkin_date = $2::date
+        )
+       ON CONFLICT (tenant_id, user_id, checkin_date) DO NOTHING`,
+      [tenantId, factDate, expected, config.originSite],
+    );
+    written = rowCount ?? 0;
+  }
+
+  // TR-41: the retraction pass runs EVERY time this function runs (not gated behind `expected.length
+  // > 0` above) — a day that is now a holiday/weekend for everyone still needs every one of
+  // yesterday's stale auto_missed rows cleared, and that is exactly the `expected.length === 0` case.
+  const retracted = await retractStaleAutoMissedCheckins(c, tenantId, factDate, {
+    calendar,
+    employedIds: new Set(employedIds),
+    leaveIds: new Set(leaveIds),
+    attendanceIds: new Set(attendanceIds),
+    expected: new Set(expected),
+  });
+
+  return { written, retracted };
 }
 
 // ═══════════════════════════════ I/O EDGE — the drift sweep (§3.1 point 5) ═══════════════════
@@ -1073,6 +1197,8 @@ export interface SliceResult {
   factDate: string;
   factRows: number;
   autoMissed: number;
+  /** TR-41: stale `auto_missed` rows retracted this run (see `retractStaleAutoMissedCheckins`). */
+  autoMissedRetracted: number;
   driftFindings: number;
   keyConflicts: number;
   jobRunId: string;
@@ -1109,9 +1235,9 @@ export async function recomputeFactSlice(tenantId: string, factDate: string, opt
         console.warn("[REPORT-FACT-JOB] reports.fact_key_conflict", { tenantId, factDate, keyConflicts });
       }
       const factRows = await writeFactSlice(c, tenantId, factDate, rows, jobRunId);
-      const autoMissed = await writeAutoMissedCheckins(c, tenantId, factDate, today);
+      const { written: autoMissed, retracted: autoMissedRetracted } = await writeAutoMissedCheckins(c, tenantId, factDate, today);
       const driftFindings = await sweepAssigneeDrift(c, tenantId, inputs.tasks.map((t) => t.taskId));
-      return { tenantId, factDate, factRows, autoMissed, driftFindings, keyConflicts, jobRunId };
+      return { tenantId, factDate, factRows, autoMissed, autoMissedRetracted, driftFindings, keyConflicts, jobRunId };
     },
     { modules: [...REPORT_JOB_MODULES] },
   );
@@ -1132,6 +1258,8 @@ export interface WindowResult {
   days: number;
   factRows: number;
   autoMissed: number;
+  /** TR-41: total stale `auto_missed` rows retracted across the window. */
+  autoMissedRetracted: number;
   driftFindings: number;
   jobRunId: string;
   slices: SliceResult[];
@@ -1160,6 +1288,7 @@ export async function recomputeFactWindow(
     days: slices.length,
     factRows: slices.reduce((n, s) => n + s.factRows, 0),
     autoMissed: slices.reduce((n, s) => n + s.autoMissed, 0),
+    autoMissedRetracted: slices.reduce((n, s) => n + s.autoMissedRetracted, 0),
     driftFindings: slices.reduce((n, s) => n + s.driftFindings, 0),
     jobRunId,
     slices,

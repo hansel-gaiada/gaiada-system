@@ -439,6 +439,25 @@ describe.skipIf(!TEST_URL)("service-assignment reconciler (ORG-6)", () => {
     expect(await grantsFor(s.u1, C)).toEqual([{ role: "hr_manager", managed: true }]);
   });
 
+  it("TR-42: materializes reports_manager/reports_staff for module_key='reports' (previously a silent skip)", async () => {
+    // Before migration 0069, `moduleRoleId(c, 'reports', kind)` returned NULL — 0026 block (E)
+    // seeded only the hr_staff/hr_manager pair — and the caller's `if (!rid) { skipped.push(userId);
+    // continue; }` meant every real service_assignments row with module_key='reports' silently
+    // dropped its grants: `granted` stayed 0, everyone landed in `skipped`, no error anywhere. This
+    // is the reconciler-level proof that seeding the two global roles actually fixes that, using the
+    // SAME scenario/assertions shape as the hr-module test above (module_key='hr' by default).
+    const s = await scenario("reports42");
+    const B = s.targets[0];
+    const asg = await createAssignment(s.unitId, s.A, B, { lead: s.u1, module: "reports", createdBy: actor });
+
+    const r = await reconcileAssignment(asg, s.A);
+    expect(r?.granted).toBe(3);
+    expect(r?.skipped).toEqual([]);
+    expect(await grantsFor(s.u1, B)).toEqual([{ role: "reports_manager", managed: true }]);
+    expect(await grantsFor(s.u2, B)).toEqual([{ role: "reports_staff", managed: true }]);
+    expect(await grantsFor(s.u3, B)).toEqual([{ role: "reports_staff", managed: true }]);
+  });
+
   it("flag OFF ⇒ reconciler is a no-op (release-train dark default)", async () => {
     const s = await scenario("flagoff");
     const B = s.targets[0];

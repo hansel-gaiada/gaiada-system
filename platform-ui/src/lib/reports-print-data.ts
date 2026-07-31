@@ -14,12 +14,21 @@ import "server-only";
 // that was never there.
 //
 // ⚠ CONTRACT NOTE (scope boundary): the endpoint this module calls — `/internal/reports/print-
-// payload/:jobToken` — is TR-21's (senior-be, platform-nest), NOT YET BUILT as of this ticket. This
-// file is written against §6.3's documented contract (mint → one-shot → burn-on-read) and every
-// non-2xx / network failure / malformed body degrades to `PrintTokenError`, never a throw the
-// caller has to guess about and never a partial document. `PRINT_STUB` (below) is a clearly-marked
-// local test fixture for exercising the print route's rendering before TR-21 lands — it is NOT part
-// of the real contract and must not be relied on past that point.
+// payload/:jobToken` — is TR-21's (senior-be, platform-nest). It landed concurrently with this
+// ticket (a parallel session's `print-payload.controller.ts` + `report-pdf-export.ts` — this file
+// does not touch or depend on that work having built successfully, per this ticket's platform-nest
+// boundary). Confirmed by reading that source directly: the response body is exactly
+// `{ document: ReportDocument, sealHash: string | null }`, and EVERY refusal case (token never
+// existed, expired past its 5-min TTL, or already burned by an earlier read — `burnPrintJobToken`
+// is a Redis `GETDEL`, so all three collapse to the same `null`) answers a uniform `401`, never a
+// distinguishing status. This module's `not_found`/`expired`/404/410 branches below are therefore
+// broader than what the real backend will ever actually send (only 401 fires in practice) —
+// deliberately kept as defensive handling rather than narrowed to exactly-401, since the print
+// route treats every `PrintTokenError` identically regardless of `.reason` (see the page's own
+// catch block) and a slightly-different future error shape costs nothing to already tolerate.
+// `PRINT_STUB` (below) is a clearly-marked local test fixture for exercising this route's
+// rendering without depending on a live platform-nest/Redis instance — it is NOT part of the real
+// contract and is never reached unless explicitly opted into.
 import type { ReportDocument } from "./reports";
 
 /** The shape TR-21's endpoint is expected to answer with: the already-authorized `ReportDocument`
@@ -59,7 +68,18 @@ export async function getPrintPayload(jobToken: string): Promise<PrintPayload> {
     throw new PrintTokenError("missing", "no jobToken supplied");
   }
 
+  // TR-40 (architect hardening): the stub check sits BEFORE the real fetch, so a stray PRINT_STUB=1
+  // in a deployed environment would render FABRICATED numbers into a real, printed, executive-facing
+  // PDF — strictly worse than an error, because a wrong report that looks right gets circulated and
+  // acted on. Belt-and-braces: the fixture is additionally inert unless NODE_ENV is non-production,
+  // so enabling it in prod fails loudly (an undifferentiated refusal) instead of silently lying.
   if (process.env.PRINT_STUB === "1") {
+    if (process.env.NODE_ENV === "production") {
+      throw new PrintTokenError(
+        "upstream_error",
+        "PRINT_STUB is a dev-only fixture and is refused in production — unset it",
+      );
+    }
     const { getStubPrintPayload } = await import("./reports-print-stub");
     return getStubPrintPayload(jobToken);
   }

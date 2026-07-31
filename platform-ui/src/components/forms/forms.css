@@ -11,6 +11,15 @@
   font: 400 14px var(--font-body);
   color: var(--text-primary);
   transition: border-color 0.28s var(--erp-ease);
+  /* TR-26 fix, found by actually rendering the appraisal scoring form in a browser (ruling 1):
+     every existing call site sits inside `.lux-form-grid` (CSS GRID), whose default
+     `justify-items: stretch` happens to also stretch replaced form controls (input/textarea) to
+     fill the column — but CSS Flexbox's `align-items: stretch` does NOT do the same for replaced
+     elements (textarea/input/select), so a `.lux-field` used directly inside a plain flex column
+     (no grid) collapses its textarea to the browser's intrinsic ~20-column width. Explicit
+     `width: 100%` makes every `.lux-field__control` correct in BOTH container types instead of
+     depending on which layout mode happened to paper over the gap. */
+  width: 100%;
 }
 .lux-field__control:focus { border-bottom-color: var(--erp-accent); }
 .lux-field__control--textarea { resize: vertical; min-height: 72px; font-family: var(--font-body); }

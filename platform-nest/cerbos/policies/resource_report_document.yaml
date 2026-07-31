@@ -1,32 +1,61 @@
-# TR-13 — the tracker/reporting program's read-surface authz (design §8's per-grain matrix), for
-# `GET /api/:tenantId/reports/{document,overview,metrics}`. §8 names FOUR resource kinds
-# (report_document / report_period / checkin / appraisal); this file is the FIRST of those four —
-# report_period (seal/amend, TR-15) and checkin/appraisal (TR-09/TR-11/TR-24) are separate tickets'
-# resource kinds and are NOT added here.
+# TR-13, CONSOLIDATED + CORRECTED BY TR-25 — the tracker/reporting read surface's authz
+# (design §8's per-grain matrix), for `GET /api/:tenantId/reports/{document,overview,metrics}` and
+# TR-18/TR-21's `POST /reports/export` + `GET /reports/exports/:jobId[/download]` (which reuse the
+# IDENTICAL check via `authorizeReportDocumentRead` — standing ruling 1: an export must never widen
+# access).
 #
-# Why one action PER GRAIN rather than a single "read" + a resource.attr.grain condition: the
-# shared `Resource` type (src/rbac/cerbos.ts) has no `grain` attribute (kind/id/tenantId/ownerId/
-# projectId/teamId/module/subjectUserId only), and §8's matrix genuinely differs per grain — most
-# sharply, company-grain is EXEC-ONLY (no dept-lead, no HR-appraisal, no served-dept row at all),
-# which a single shared "read" action could only express with a brittle attribute smuggled through
-# one of the existing fields. Four explicit actions make the matrix legible in the policy itself.
+# ══════════════════ ONE ACTION PER GRAIN (TR-13's choice, reviewed and KEPT) ══════════════════
+# The shared `Resource` type (src/rbac/cerbos.ts) has no `grain` attribute, and §8's matrix genuinely
+# differs per grain — most sharply, company-grain is EXEC-ONLY (no dept lead, no HR, no served-dept
+# row at all). Four explicit actions make the matrix legible in the policy itself instead of smuggling
+# a grain through `teamId`. Confirmed correct; unchanged.
 #
-# reports.controller.ts calls the SAME action for both the single-scope `document` read and the
-# multi-scope `overview` listing — deliberately: `overview`'s caller never sets `ownerId`/
-# `projectId`/`teamId` (there IS no single scope), so `member`'s `variables.owns` condition (which
-# requires `has(resource.attr.ownerId)`) correctly fails CLOSED for a listing request, while
-# manager/company_admin/exec/hr_people_ops (gated on `inTenant` only, not `owns`) are unaffected —
-# no second policy needed to express "a plain member cannot list everyone's report".
+# `overview` (the multi-scope listing) calls the SAME action as a single-scope `document` read and
+# deliberately sets NO `ownerId`/`projectId`/`teamId` — so `member`'s `owns` condition (which requires
+# `has(resource.attr.ownerId)`) fails CLOSED for a listing, while the broader tiers (gated on
+# `inTenant`, not `owns`) are unaffected. No second policy needed to express "a plain member cannot
+# list everyone's report".
 #
-# KNOWN APPROXIMATION, flagged for TR-25 (the Cerbos parity-matrix ticket) rather than silently
-# assumed correct: §8's "dept lead (own unit)" / "project member" columns are approximated here by
-# the existing `manager`/`member` derived roles' COMPANY/PROJECT-scoped grants (gaiada_scopes has
-# no per-org-unit grant scope — org nodes are a free-form JSONB tree, 0029, not a grantable entity
-# today). A company-scoped `manager` grant therefore reads every unit's report in that company, not
-# only their own — broader than the design's literal "own unit only", never narrower (fails toward
-# more access within the SAME tenant boundary, never a cross-tenant leak). Tightening this to true
-# per-unit scoping needs either a new grant scopeType or a resource-side "is this scopeRef within
-# the grant-holder's unit subtree" check this ticket does not implement.
+# ══════════════════ ⚠ THE HOLE TR-25 CLOSED — READ THIS BEFORE WIDENING ANY RULE ══════════════════
+# TR-13's version of this file granted `manager`/`team_lead` `read_person` and `read_department` on
+# `inTenant && notLow` alone, and `reports.controller.ts` applied NO in-app narrowing whatsoever. Net
+# effect, live from TR-13 until TR-25: **any principal holding a bare company-scoped `manager` grant
+# could read the complete person-grain report document — every KPI, every appraisal band input — of
+# EVERY employee in the tenant.** §8 says "own unit's members"; §11 principle 3 says "never peers,
+# never other departments". The policy was not wrong in isolation (Cerbos cannot express "manager of
+# THIS org unit" — see person-scope.ts's header for why that is a substrate fact, not an omission);
+# what was missing was the second half of the pattern.
+#
+# The tier granted below is therefore COARSE BY DESIGN, and it is only half of the boundary:
+#   Cerbos (this file)        decides WHICH TIER may attempt WHICH GRAIN.
+#   person-scope.ts          decides WHICH PEOPLE / WHICH UNITS a `unit_scoped` tier then reaches.
+# `authorizeReportDocumentRead` calls this policy and then `assertPersonInLedScope` /
+# `assertUnitInLedScope` unconditionally. Neither half is optional. A future ticket adding a new read
+# endpoint MUST go through that same helper — do not re-implement either half.
+#
+# ══════════════════ §8's fifth column (served-dept, provider lead A→B) — HONEST SCOPE ══════════════
+# IMPLEMENTED: `read_department` + `read_project` for a reconciler-materialized `reports_manager` /
+# `reports_staff` grant scoped to the SERVED company (§8: "own provider unit incl. served slice" /
+# "projects under the assignment"). The ACTIVE-assignment requirement is enforced by TWO independent
+# gates, neither of them a condition in this file: `service-reconciler.ts` materializes these grants
+# ONLY while `status='active'` ("anything else — proposed/suspended/revoked — ⇒ EMPTY"), and
+# `ModuleEnabledGuard('reports')` + `isModuleEnabled()` additionally require an `status='active'` row
+# for the surface to exist at all. Suspending the edge revokes the grant AND darkens the surface,
+# while (per §15's TR-04 ruling) leaving the person's own department history untouched.
+#
+# NOT IMPLEMENTED, and §8 has been corrected rather than left claiming it: §8's person-grain
+# served-dept cell ("✅ ONLY persons acting under the active assignment, via the rollup/provider
+# view"). There is no endpoint that can bound a person-grain read to "persons under the assignment" —
+# `servedTenant` is valid ONLY for `grain=department` (reports.controller.ts), the provider view reads
+# `{unit, servedTenant}` off the `provider_*` columns via the D12 rollup path, and
+# `report_work_facts` has no `unit_tenant_id` column at all (§15 TR-07 finding ⑦), so a foreign unit
+# is identifiable only while the provider stamp is set. Granting `read_person` to this tier would
+# therefore not deliver "persons under the assignment" — it would deliver ARBITRARY B persons, which
+# is precisely what that cell forbids and what §8 hard rule 3 exists to prevent. Left unimplemented
+# and documented, the same call TR-09 made for check-ins, for the same reason.
+#
+# NOT IMPLEMENTED, deliberately: `read_company` for the served tier (§8: ⛔) — a provider never reads
+# the served company's whole-company strategy numbers.
 apiVersion: api.cerbos.dev/v1
 resourcePolicy:
   version: default
@@ -39,35 +68,52 @@ resourcePolicy:
       effect: EFFECT_ALLOW
       derivedRoles: ["platform_admin"]
 
-    # Group executive (global, cross-company): every grain, including company (§8: exec is the
-    # ONLY column with a checkmark on the company-grain row).
+    # Group executive (global, cross-company): every grain, including company (§8: exec is the ONLY
+    # column with a checkmark on the company-grain row). Gated on `notLow` only — NOT `inTenant`,
+    # which requires the resource's tenant to be in principal.companies and therefore never holds for
+    # a global exec grant (derived roles do not cascade). Same shape as every other exec rule here.
     - actions: ["read_person", "read_project", "read_department", "read_company"]
       effect: EFFECT_ALLOW
       derivedRoles: ["group_executive"]
       condition: { match: { expr: "variables.notLow" } }
 
-    # Company admin: same tenant, every grain incl. company (the company's own admin can see its
-    # own company-wide numbers — §8 has no row that forbids this, only cross-tenant/served-dept
-    # access is restricted at company grain).
+    # The tenant's own admin: every grain incl. company. §8 restricts the company-grain row against
+    # dept-lead/HR/served-dept, not against the company's own administrator.
     - actions: ["read_person", "read_project", "read_department", "read_company"]
       effect: EFFECT_ALLOW
       derivedRoles: ["company_admin"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }
 
-    # HR-appraisal role (§8 column): person/project/department reads (appraisal auto-inputs draw
-    # on all three), but NOT company-grain — "person data yes, company strategy no" (§8's exact
-    # wording for this column).
+    # §8's "HR-appraisal role" column — the BASELINE HR read tier (hr_staff OR hr_manager; see
+    # derived_roles.yaml's split note). Person/project/department (appraisal auto-inputs draw on all
+    # three), but NOT company-grain: §8's exact wording for this column is "person data yes, company
+    # strategy no".
     - actions: ["read_person", "read_project", "read_department"]
       effect: EFFECT_ALLOW
-      derivedRoles: ["hr_people_ops"]
+      derivedRoles: ["hr_people_reader"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }
 
-    # Dept lead / manager tier: person/project/department, NOT company (§8: dept lead is EXCLUDED
-    # from the company-grain row). See the file header's KNOWN APPROXIMATION note on unit scoping.
+    # §8's "Dept lead (own unit)" column. COARSE — person-scope.ts narrows `read_person` to the
+    # subject's as-of unit being inside this caller's led unit SUBTREE, and `read_department` to the
+    # requested unit being inside it. Excluded from company-grain per §8.
     - actions: ["read_person", "read_project", "read_department"]
       effect: EFFECT_ALLOW
       derivedRoles: ["manager", "team_lead"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+
+    # §8's fifth column — the served-dept provider tier (see the header for the two ACTIVE gates and
+    # for why `read_person`/`read_company` are deliberately absent). `module` is pinned to "reports"
+    # so an unrelated module's served grant (e.g. `hr_staff` riding an HR assignment) cannot light up
+    # this surface: module_staff/module_manager string-compose the role name from
+    # `resource.attr.module`, and every caller here passes `module: "reports"`.
+    - actions: ["read_department", "read_project"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["module_staff", "module_manager"]
+      condition:
+        match:
+          expr: >-
+            variables.inTenant && variables.notLow &&
+            request.resource.attr.module == "reports"
 
     # Project member: project-grain read for a project they hold a grant on (gaiada_scopes' own
     # project-scope cascade — see derived_roles.yaml's `member` definition).
@@ -76,9 +122,10 @@ resourcePolicy:
       derivedRoles: ["member"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }
 
-    # Self: person-grain read of ONE's own document only. `owns` requires
-    # `has(resource.attr.ownerId)`, so an `overview` listing call (which never sets ownerId) fails
-    # this condition closed rather than silently granting a broad list.
+    # Self: person-grain read of ONE's own document only (§11 principle 2 — "nothing about you that
+    # you cannot read"). `owns` requires `has(resource.attr.ownerId)`, so an `overview` listing call
+    # (which never sets ownerId) fails this condition closed rather than silently granting a broad
+    # list.
     - actions: ["read_person"]
       effect: EFFECT_ALLOW
       derivedRoles: ["member"]

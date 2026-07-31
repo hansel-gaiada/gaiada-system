@@ -67,6 +67,7 @@ import { authorize, writeActivity } from "../../core/http";
 import { addDaysIso } from "../../core/dept-resolution";
 import { newId, withGlobal, withTenants } from "../../db";
 import { config } from "../../config";
+import { check } from "../../rbac/cerbos";
 import type { Principal } from "../../rbac/principal";
 import { ModuleEnabledGuard } from "../module-enabled.guard";
 import {
@@ -75,6 +76,15 @@ import {
   loadWorkCalendar,
   type WorkCalendar,
 } from "./fact-job";
+import {
+  assertPersonInLedScope,
+  loadLedUnitScope,
+  loadUnitByUser,
+  requiresUnitNarrowing,
+  resolveSubjectUnit,
+  sliceRowsToUnitScope,
+  todayIsoInTz,
+} from "./person-scope";
 
 /** The exact triple fact-job.ts declares (`REPORT_JOB_MODULES`): `reports` for the report_* third
  *  wall, `hr` for the leave/attendance false-negative guard, `pm` for forward-compat visibility.
@@ -95,12 +105,12 @@ function assertDate(value: string | undefined, field: string): string {
 /** 'YYYY-MM-DD' for "today" in the deployment's `REPORTS_TZ` (Blueprint §6.2/OQ-1) — NOT
  *  `todayIso()` (dept-resolution.ts), which is UTC-only and exists for the org-structure PUT
  *  path's different "calendar day" convention. Check-ins are user-facing and must agree with the
- *  zone the rest of the reporting surface reads/writes in. `en-CA` is the one built-in
- *  `Intl.DateTimeFormat` locale that formats as `YYYY-MM-DD`, so no manual re-assembly of
- *  year/month/day parts (and no risk of a locale silently reordering them) is needed. */
-export function todayIsoInTz(tz: string, now: Date = new Date()): string {
-  return new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit" }).format(now);
-}
+ *  zone the rest of the reporting surface reads/writes in.
+ *
+ *  TR-25: the implementation MOVED to `person-scope.ts` (the person-axis boundary module) and is
+ *  re-exported here unchanged, so the boundary and this surface can never disagree about what day it
+ *  is. Existing importers of `todayIsoInTz` from this file are unaffected. */
+export { todayIsoInTz };
 
 // ═══════════════════════════════ PURE CORE — the prefill composer ═══════════════════════════════
 // House pattern (fact-job.ts, dept-resolution.ts): gather is I/O, compose is pure, so the <30s
@@ -314,32 +324,22 @@ async function isExpectedToday(c: PoolClient, tenantId: string, userId: string, 
   }).length > 0;
 }
 
-async function ownCurrentUnit(c: PoolClient, tenantId: string, userId: string, date: string): Promise<string | null> {
-  const { rows } = await c.query<{ unit_node_id: string }>(
-    `SELECT unit_node_id FROM org_unit_memberships
-      WHERE tenant_id = $1 AND user_id = $2 AND is_primary
-        AND valid_from <= $3::date AND (valid_to IS NULL OR valid_to >= $3::date)
-      LIMIT 1`,
-    [tenantId, userId, date],
-  );
-  return rows[0]?.unit_node_id ?? null;
-}
-
-/** Does this principal hold ONLY the coarse `manager` grant in this tenant — i.e. none of the
- *  broader tiers (platform_admin/group_executive/company_admin/hr staff-or-manager) that already
- *  see the whole company? Read directly off `principal.roles` (server-assembled from `user_roles`
- *  at auth time — never client input), the same shape Cerbos's derived roles evaluate. Used ONLY
- *  to decide whether to apply the in-app own-unit narrowing described in this file's header; it is
- *  never itself an authorization decision (Cerbos's `authorize()` call already gated the request). */
-function isManagerTierOnly(principal: Principal, tenantId: string): boolean {
-  const has = (role: string, extra?: (g: Principal["roles"][number]) => boolean) =>
-    principal.roles.some((g) => g.role === role && (g.scopeType === "global" || (g.scopeType === "company" && g.scopeId === tenantId)) && (!extra || extra(g)));
-  const broad = has("platform_admin") || has("group_executive") || has("company_admin") || has("hr_staff") || has("hr_manager");
-  const manager = principal.roles.some(
-    (g) => g.role === "manager" && (g.scopeType === "global" || (g.scopeType === "company" && g.scopeId === tenantId) || g.scopeType === "project"),
-  );
-  return manager && !broad;
-}
+// TR-25: `ownCurrentUnit` and `isManagerTierOnly` LIVED HERE and are GONE — replaced by
+// `person-scope.ts`'s `loadLedUnitScope` / `requiresUnitNarrowing`. Both were correct-ish in
+// isolation and wrong as a pattern:
+//
+//  · `isManagerTierOnly` was one of THREE hand-rolled tier detectors (appraisals.controller.ts had
+//    two more) and they disagreed — this one counted `hr_staff` as broad but ignored `team_lead`
+//    entirely, so a `team_lead`-only principal fell through to `self_only` here and to the coarse
+//    manager tier there. One boundary, one implementation, is the whole point of §15 finding ①.
+//  · `ownCurrentUnit` compared the caller's unit to the subject's for EXACT EQUALITY, which is wrong
+//    for the org shape this estate runs. TR-37 established that the charts are
+//    departments-containing-divisions and that a person resolves to their NEAREST dept/division
+//    ancestor — so a department lead placed at `'d-web'` whose reports sit in `'dv-frontend'` matched
+//    NOBODY and saw an empty grid. `loadLedUnitScope` resolves the led unit SUBTREE instead, which is
+//    what §8's "own unit's members" actually means. With no org blob present it degrades to exactly
+//    the old exact-equality behaviour, so this is a strict widening only where the tree says so and
+//    never a widening beyond the tenant.
 
 // ═══════════════════════════════ PURE CORE — the compliance grid ═══════════════════════════════
 
@@ -555,39 +555,41 @@ export class CheckinsController {
         const prefill = composeCheckinPrefill(gathered);
         const edited = summary !== prefill.summaryText.trim();
 
-        const existing = await c.query<{ id: string; status: string }>(
-          `SELECT id, status FROM report_checkins WHERE tenant_id = $1 AND user_id = $2 AND checkin_date = $3::date`,
-          [tenantId, userId, date],
+        // TR-12 (adversarial QA finding): this used to be a SELECT-then-branch (read existing,
+        // then either UPDATE or a bare INSERT). That is NOT atomic — two concurrent first-submits
+        // for the same brand-new (tenant, user, date) could both see "no existing row" and both
+        // attempt the INSERT branch, so the loser crashed with an unhandled 23505 (duplicate key on
+        // the table's own UNIQUE(tenant_id,user_id,checkin_date)), surfacing as a bare 500 instead
+        // of converging to one row the way "one-per-day" promises. A single atomic
+        // INSERT ... ON CONFLICT DO UPDATE closes the race: whichever request's insert loses the
+        // race simply becomes the conflict branch's UPDATE instead of crashing. The excused-day
+        // guard moves into the UPDATE's WHERE clause for the same reason — checking it in a
+        // separate SELECT first would just move the TOCTOU window rather than close it.
+        const id = newId();
+        const upserted = await c.query<{ id: string }>(
+          `INSERT INTO report_checkins
+             (id, tenant_id, user_id, checkin_date, status, summary, blockers, prefill, edited, source, submitted_at, origin_site)
+           VALUES ($1,$2,$3,$4::date,'submitted',$5,$6,$7::jsonb,$8,$9,now(),$10)
+           ON CONFLICT (tenant_id, user_id, checkin_date) DO UPDATE
+             SET status = 'submitted', summary = EXCLUDED.summary, blockers = EXCLUDED.blockers,
+                 prefill = EXCLUDED.prefill, edited = EXCLUDED.edited, source = EXCLUDED.source,
+                 submitted_at = now(), updated_at = now()
+             WHERE report_checkins.status <> 'excused'
+           RETURNING id`,
+          // Ruling: origin_site has NO column default (§15) — always pass config.originSite explicitly.
+          [id, tenantId, userId, date, summary, blockers, JSON.stringify(prefill), edited, source, config.originSite],
         );
-        const prior = existing.rows[0];
-        if (prior?.status === "excused") {
+        if (upserted.rowCount === 0) {
+          // The conflict existed AND the WHERE clause blocked it -- the only way that happens is
+          // the pre-existing row's status was 'excused'. Same audited-day protection as before,
+          // just enforced atomically instead of via a preceding SELECT.
           throw new ConflictException("this day was already excused — ask your manager/HR to reopen it");
         }
+        const finalId = upserted.rows[0].id;
 
-        let id: string;
-        if (prior) {
-          id = prior.id;
-          await c.query(
-            `UPDATE report_checkins
-                SET status = 'submitted', summary = $3, blockers = $4, prefill = $5::jsonb,
-                    edited = $6, source = $7, submitted_at = now(), updated_at = now()
-              WHERE id = $1 AND tenant_id = $2`,
-            [id, tenantId, summary, blockers, JSON.stringify(prefill), edited, source],
-          );
-        } else {
-          id = newId();
-          await c.query(
-            `INSERT INTO report_checkins
-               (id, tenant_id, user_id, checkin_date, status, summary, blockers, prefill, edited, source, submitted_at, origin_site)
-             VALUES ($1,$2,$3,$4::date,'submitted',$5,$6,$7::jsonb,$8,$9,now(),$10)`,
-            // Ruling: origin_site has NO column default (§15) — always pass config.originSite explicitly.
-            [id, tenantId, userId, date, summary, blockers, JSON.stringify(prefill), edited, source, config.originSite],
-          );
-        }
+        await writeActivity(tenantId, userId, "submitted", "report_checkin", finalId, { date, edited, source });
 
-        await writeActivity(tenantId, userId, "submitted", "report_checkin", id, { date, edited, source });
-
-        return { id, date, status: "submitted", summary, blockers, edited, source };
+        return { id: finalId, date, status: "submitted", summary, blockers, edited, source };
       },
       { modules: CHECKIN_MODULES },
     );
@@ -622,12 +624,9 @@ export class CheckinsController {
     return withTenants(
       [tenantId],
       async (c) => {
-        if (subjectUserId !== principal.userId && isManagerTierOnly(principal, tenantId)) {
-          const today = todayIsoInTz(tz);
-          const mine = principal.userId ? await ownCurrentUnit(c, tenantId, principal.userId, today) : null;
-          const theirs = await ownCurrentUnit(c, tenantId, subjectUserId, today);
-          if (!mine || mine !== theirs) throw new ForbiddenException("outside your unit");
-        }
+        // TR-25: ONE shared boundary (person-scope.ts). Self always passes; a `unit_scoped` caller is
+        // narrowed to their led unit SUBTREE; every broader tier is unaffected. 403, never 404.
+        await assertPersonInLedScope(c, tenantId, principal, subjectUserId, todayIsoInTz(tz));
         const rows = await c.query<{
           id: string; checkin_date: string; status: string; summary: string; blockers: string | null;
           edited: boolean; source: string; submitted_at: string | null; excused_reason: string | null;
@@ -653,9 +652,18 @@ export class CheckinsController {
     );
   }
 
-  /** `GET /checkins/compliance?unit&periodKind&start[&end]` — the grid. Self (`member`) is
-   *  structurally excluded: Cerbos's self rule requires `subjectUserId`, which this action never
-   *  sets, so only lead/exec/HR/admin tiers can ever pass — matching §8's "self ⛔" cell exactly. */
+  /** `GET /checkins/compliance?unit&periodKind&start[&end]` — the grid.
+   *
+   *  TR-39 (2026-07-31, fairness fix — §15): metric #18 `checkin_compliance` is appraisal-SAFE and
+   *  feeds an appraisal axis, so a person who will be judged on this number must be able to see
+   *  THAT number, not compute a second, divergent formula client-side (TR-10's disclosed
+   *  workaround, `platform-ui/lib/checkins.ts`). Self is therefore now permitted to read their OWN
+   *  row — self ⊆ scope, own row only, never anyone else's — via the SAME `member` self-rule
+   *  `resource_checkin.yaml` already grants for `GET /checkins/today` (subjectUserId ==
+   *  principal.id); no Cerbos policy change was needed. The broader lead/exec/HR/admin tier (§8's
+   *  original "self ⛔" cell — which was about the FULL GRID, not one's own row within it) is tried
+   *  FIRST via a non-throwing `check()` so a lead/exec/HR caller's existing full-grid behaviour is
+   *  completely unchanged; only a caller with NO broader tier falls through to the self path. */
   @Get("compliance")
   async compliance(
     @Req() req: FastifyRequest,
@@ -666,7 +674,16 @@ export class CheckinsController {
     @Query("end") endParam: string | undefined,
   ) {
     const principal = req.principal;
-    await authorize(principal, { kind: "checkin", tenantId, module: "hr" }, "read");
+    const broad = await check(principal, { kind: "checkin", tenantId, module: "hr" }, "read");
+    let selfOnly = false;
+    if (!broad.allow) {
+      if (!principal.userId) throw new ForbiddenException(`not authorized: ${broad.reason}`);
+      // Reuses the EXISTING `member` self rule (subjectUserId == principal.id) — self ⊆ scope, own
+      // row only. Throws (and audits) a real 403 if even this narrower self-check fails, e.g. a
+      // low-assurance session.
+      await authorize(principal, { kind: "checkin", tenantId, subjectUserId: principal.userId }, "read");
+      selfOnly = true;
+    }
 
     const { from, to } = resolveCheckinPeriod(periodKindParam, startParam, endParam);
     assertRangeWithinCeiling(from, to);
@@ -676,13 +693,34 @@ export class CheckinsController {
       [tenantId],
       async (c) => {
         let unitFilter: string | null = unitParam ?? null;
-        if (isManagerTierOnly(principal, tenantId)) {
-          // Never trust the client-supplied `unit` param for this tier — override with the
-          // caller's OWN unit, server-computed. A bare manager grant with no resolvable unit sees
-          // an empty grid rather than an error (there is simply nothing in scope for them).
-          const today = todayIsoInTz(tz);
-          unitFilter = principal.userId ? await ownCurrentUnit(c, tenantId, principal.userId, today) : null;
-          if (!unitFilter) return { from, to, unit: null, rows: [] };
+        // TR-25: the led unit SUBTREE for a `unit_scoped` caller, or `null` for every other tier.
+        // Applied as a post-compute SLICE (below) rather than as `unitFilter`, for the same reason
+        // TR-39's self path slices: the per-user tally is independent of which other users are in the
+        // grid, so computing company-wide and slicing is EXACT, and it guarantees a lead's number for
+        // a person is byte-identical to that person's own number. A `Set` is also why this cannot be
+        // expressed through `unitFilter` (a single string) — a department lead's scope is their
+        // department AND every division under it, not one node.
+        let ledScope: Set<string> | null = null;
+        // The `unit` field this endpoint echoes back stays MEANINGFUL for a narrowed caller: it is the
+        // caller's OWN primary unit — the ROOT of the subtree they are seeing — server-computed and
+        // never the client-supplied `unit` param. (The scope itself is a set and cannot be echoed as
+        // one string; the root is the honest, stable answer, and it keeps TR-09's original
+        // "server-computed, NOT the client param" contract and its test intact.)
+        let unitEcho: string | null = null;
+        if (selfOnly) {
+          // Self ⊆ scope, own row only: NEVER trust unitParam here — the grid is computed
+          // company-wide (unitFilter:null, identical to what a lead/HR caller with no unit filter
+          // would see), then sliced to exactly the caller's own row below.
+          unitFilter = null;
+        } else if (requiresUnitNarrowing(principal, tenantId)) {
+          // Never trust the client-supplied `unit` param for this tier — it is discarded and replaced
+          // by the server-computed led subtree. A lead with no resolvable unit sees an EMPTY grid
+          // rather than an error or (catastrophically) an unfiltered one.
+          unitFilter = null;
+          const asOf = todayIsoInTz(tz);
+          ledScope = await loadLedUnitScope(c, tenantId, principal.userId, asOf);
+          if (ledScope.size === 0) return { from, to, unit: null, rows: [] };
+          unitEcho = principal.userId ? await resolveSubjectUnit(c, tenantId, principal.userId, asOf) : null;
         }
 
         const calendar = await loadWorkCalendar(c, tenantId);
@@ -720,6 +758,20 @@ export class CheckinsController {
           checkins: checkins.rows.map((r) => ({ userId: r.user_id, date: r.checkin_date, status: r.status as ComplianceInputRow["status"] })),
           unitFilter,
         });
+        if (selfOnly) {
+          // Slice down to exactly the caller's own row — self ⊆ scope, own row only, never
+          // anyone else's. `rows` was computed with unitFilter:null (the whole tenant), so this is
+          // a pure filter of an already-correct grid, not a re-derivation.
+          return { from, to, unit: null, rows: rows.filter((r) => r.userId === principal.userId) };
+        }
+        if (ledScope) {
+          // TR-25: slice to the caller's led unit subtree, resolved as-of today (the same
+          // current-line-of-sight anchor every other person-axis narrowing uses — see
+          // person-scope.ts's `todayIsoInTz` note on why not the range end).
+          const unitByUser = await loadUnitByUser(c, tenantId, rows.map((r) => r.userId), todayIsoInTz(tz));
+          const scoped = sliceRowsToUnitScope(rows, unitByUser, ledScope, (r) => r.userId);
+          return { from, to, unit: unitEcho, rows: scoped };
+        }
         return { from, to, unit: unitFilter, rows };
       },
       { modules: CHECKIN_MODULES },
@@ -753,12 +805,8 @@ export class CheckinsController {
 
         await authorize(principal, { kind: "checkin", tenantId, subjectUserId: row.user_id, id, module: "hr" }, "excuse");
 
-        if (isManagerTierOnly(principal, tenantId)) {
-          const today = todayIsoInTz(config.reportsTz);
-          const mine = principal.userId ? await ownCurrentUnit(c, tenantId, principal.userId, today) : null;
-          const theirs = await ownCurrentUnit(c, tenantId, row.user_id, today);
-          if (!mine || mine !== theirs) throw new ForbiddenException("outside your unit");
-        }
+        // TR-25: same shared boundary as the history read above.
+        await assertPersonInLedScope(c, tenantId, principal, row.user_id, todayIsoInTz(config.reportsTz));
 
         if (row.status === "submitted") {
           throw new ConflictException("cannot excuse a day that was already submitted");

@@ -95,7 +95,7 @@ const unit = (kind: string, refId: string, refName: string, respId: string, resp
 export async function seedAgency(): Promise<SeededAgency> {
   // ---- Holding + member companies ----
   const holdingId = await ensureCompany(HOLDING_NAME, [], "holding", null);
-  const tenantId = await ensureCompany(AGENCY_NAME, ["agency", "hr"], "agency", holdingId);
+  const tenantId = await ensureCompany(AGENCY_NAME, ["agency", "hr", "reports"], "agency", holdingId);
   const resortId = await ensureCompany(RESORT_NAME, [], "resort", holdingId);
 
   // ---- People ----
@@ -193,6 +193,7 @@ export async function seedAgency(): Promise<SeededAgency> {
   await seedFiles(tenantId, projects[0]);
   await seedIdentityAndNotifications(tenantId, users);
   await seedComplianceAndFields(tenantId);
+  await seedCheckinsAndFacts(tenantId, users);
   await seedResort(resortId, users);
 
   return { tenantId, holdingId, resortId, users, clients, projects, campaignId, intakeProjectId };
@@ -372,6 +373,61 @@ async function seedComplianceAndFields(tenantId: string) {
         VALUES ($1,$2,'project','phase','Phase','text',false,$3),($4,$2,'task','severity','Severity','text',false,$3)`, [newId(), tenantId, site(), newId()]);
     }
   });
+}
+
+// ---- Check-ins + work-facts (reports surfaces) ----
+async function seedCheckinsAndFacts(tenantId: string, u: Record<string, string>) {
+  // Seed check-ins: a few submitted entries over the past 3 days so the reports
+  // surfaces have non-empty data. Idempotent: skip if any checkins exist.
+  const hasCheckins = await count(tenantId, "report_checkins");
+  if (hasCheckins === 0) {
+    // report_checkins is a reports-module-owned table (WSD-4/HR design §2.4): its tenant_isolation
+    // policy additionally requires app_module_allowed('reports'), which only the modules-declaring
+    // form of withTenants sets (companies.enabled_modules is unrelated to this GUC). work_activity
+    // below is a core, non-module-gated table, so declaring the "reports" scope for this whole
+    // transaction is harmless to it.
+    await withTenants(
+      [tenantId],
+      async (c) => {
+      const today = new Date();
+      const days = [-3, -2, -1, 0]; // 3 days ago through today
+      const checkInUsers = [u.pm, u.designer, u.copy];
+
+      for (const dayOffset of days) {
+        const checkInDate = new Date(today);
+        checkInDate.setDate(checkInDate.getDate() + dayOffset);
+        const dateStr = checkInDate.toISOString().split('T')[0];
+
+        for (const userId of checkInUsers) {
+          // Insert one check-in per user per day
+          await c.query(
+            `INSERT INTO report_checkins (tenant_id,user_id,checkin_date,summary,source,origin_site,status)
+             VALUES ($1,$2,$3,'Completed assigned tasks and participated in standups','ui',$4,'submitted')
+             ON CONFLICT (tenant_id,user_id,checkin_date) DO NOTHING`,
+            [tenantId, userId, dateStr, site()]);
+        }
+      }
+
+      // Seed minimal work_activity so the fact job has something to process into work_facts.
+      // These become facts when the nightly job (or admin recompute) runs.
+      const pmTasks = await c.query<{ id: string }>(
+        `SELECT id FROM pm_tasks WHERE tenant_id=$1 LIMIT 2`, [tenantId]);
+      if (pmTasks.rows.length > 0) {
+        // Create a couple of task-completion activities for the fact grain
+        for (let i = 0; i < pmTasks.rows.length; i++) {
+          const taskId = pmTasks.rows[i].id;
+          const userId = [u.pm, u.designer][i % 2];
+          await c.query(
+            `INSERT INTO work_activity (tenant_id,source,source_ref,actor_user_id,verb,object_kind,object_ref,title,payload,origin_site)
+             VALUES ($1,'pm',$2,$3,'completed','pm_task',$4,'Task completed','{}',$5)
+             ON CONFLICT (tenant_id,source,source_ref) DO NOTHING`,
+            [tenantId, `pm-task-${taskId}-completed-${i}`, userId, taskId, site()]);
+        }
+      }
+      },
+      { modules: ["reports"] },
+    );
+  }
 }
 
 // ---- Sanur Resort: light data so switching shows a distinct company ----

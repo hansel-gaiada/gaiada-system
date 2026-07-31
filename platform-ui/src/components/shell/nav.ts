@@ -64,6 +64,14 @@ export function navFor(me: Me, tenantId?: string | null, departments: { id: stri
       { label: "Department Reports", href: "/reports/department", icon: "pulse" },
       ...(can(me, "rollups.view") ? [{ label: "Company Report", href: "/reports/company", icon: "pulse" } as NavItem] : []),
     ] },
+    // TR-26: `/appraisals/mine` is self-service (every principal reads their own record, always —
+    // same reasoning as check-ins, no capability gates it). The other two rows are capability-gated
+    // per the TR-25 rbac.ts mirror: manager/HR scoring console, then HR-only cycle administration.
+    { label: "Appraisals", items: [
+      { label: "My Appraisals", href: "/appraisals/mine", icon: "check" },
+      ...(can(me, "appraisal.score", tenantId) || can(me, "appraisal.read", tenantId) ? [{ label: "Team Appraisals", href: "/appraisals", icon: "check" } as NavItem] : []),
+      ...(can(me, "appraisal.cycle.admin", tenantId) ? [{ label: "Appraisal Cycles", href: "/appraisals/cycles", icon: "check" } as NavItem] : []),
+    ] },
     { label: "Intelligence", items: [
       { label: "Knowledge", href: "/knowledge", icon: "box" },
       { label: "AI Agents", href: "/agents", icon: "agents" },

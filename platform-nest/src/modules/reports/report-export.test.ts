@@ -12,10 +12,13 @@ import {
   classifyKpi,
   decodeScopeRefSegment,
   encodeScopeRefSegment,
+  EXPORT_FORMATS,
   exportContentType,
+  exportFileExtension,
   exportFilename,
   exportStorageKey,
   parseExportStorageKey,
+  pdfProvenanceTag,
   provenanceRows,
   renderExport,
   scaleForUnit,
@@ -180,6 +183,47 @@ describe("filename/content-type", () => {
   it("filename is derived from grain/scope/range, never containing PII-adjacent separators unsafely", () => {
     const name = exportFilename(baseDoc(), "xlsx");
     expect(name).toMatch(/^person-alice-2026-07-01-to-2026-07-15\.xlsx$/);
+  });
+});
+
+describe("TR-21 — pdf added as a real format (§6.3), never reshaping xlsx/csv", () => {
+  it("EXPORT_FORMATS/exportFileExtension/exportContentType all recognize pdf", () => {
+    expect(EXPORT_FORMATS.has("pdf")).toBe(true);
+    expect(exportFileExtension("pdf")).toBe("pdf");
+    expect(exportContentType("pdf")).toBe("application/pdf");
+  });
+
+  it("renderExport refuses to handle pdf itself — that byte-rendering happens over the network, in report-pdf-export.ts, never here", async () => {
+    await expect(renderExport(baseDoc(), "pdf")).rejects.toThrow(/report-pdf-export/);
+  });
+
+  describe("pdfProvenanceTag — the AD HOC/SEALED mark's filename-safe form (⚡ must never be absent)", () => {
+    it("unsealed -> 'adhoc-unsealed'", () => {
+      expect(pdfProvenanceTag(baseDoc({ sealed: false }))).toBe("adhoc-unsealed");
+    });
+    it("sealed -> 'sealed-rev<N>-<8-char hash prefix>'", () => {
+      const doc = baseDoc({ sealed: true, revision: 3 });
+      expect(pdfProvenanceTag(doc, { sealHash: "abcdef1234567890" })).toBe("sealed-rev3-abcdef12");
+    });
+    it("sealed with no sealHash supplied (defensive — should not happen for a genuinely sealed doc) -> 'unknown', never a crash", () => {
+      const doc = baseDoc({ sealed: true, revision: 0 });
+      expect(pdfProvenanceTag(doc)).toBe("sealed-rev0-unknown");
+    });
+  });
+
+  describe("exportFilename(doc, 'pdf') carries the provenance tag; xlsx/csv are BYTE-FOR-BYTE unchanged", () => {
+    it("pdf filename embeds 'adhoc-unsealed' for an unsealed document", () => {
+      const name = exportFilename(baseDoc(), "pdf");
+      expect(name).toBe("person-alice-2026-07-01-to-2026-07-15-adhoc-unsealed.pdf");
+    });
+    it("pdf filename embeds the sealed tag with the real hash prefix for a sealed document", () => {
+      const doc = baseDoc({ sealed: true, revision: 0 });
+      const name = exportFilename(doc, "pdf", { sealHash: "cafebabe12345678" });
+      expect(name).toBe("person-alice-2026-07-01-to-2026-07-15-sealed-rev0-cafebabe.pdf");
+    });
+    it("xlsx filename is IDENTICAL to before pdf existed — no regression from adding the third format", () => {
+      expect(exportFilename(baseDoc(), "xlsx")).toBe("person-alice-2026-07-01-to-2026-07-15.xlsx");
+    });
   });
 });
 

@@ -1,0 +1,117 @@
+# TR-24 — the appraisal engine's authz surface (design §8's "appraisal" row + its own dedicated
+# note: "the full §8 appraisal matrix is TR-25's; ship what you need and flag the boundaries").
+# This file ships the MINIMUM working policy so TR-24's endpoints are not silent-deny for everyone
+# (a new Cerbos policy file needs a `docker restart gaiada-cerbos-1` to be picked up through the
+# Windows bind mount — see the project's own standing note on this). TR-25 owns the FULL parity
+# matrix (cross-tenant/OBO/low-assurance denial sweep) for all four §8 resource kinds; this file
+# only needs to be CORRECT for the tiers §8 actually names, not exhaustively adversarial-tested.
+#
+# Actions, mapped 1:1 to appraisals.controller.ts's endpoints:
+#   cycle_admin      — cycle CRUD (create/list/get/patch) + generate.    HR-appraisal role ONLY.
+#   finalize         — POST .../:id/finalize.                            HR-appraisal role ONLY.
+#   read             — GET .../cycles* (view), GET appraisals/:id, /mine, listing.
+#   write            — PATCH .../:id scores/commentary.                  Assigned manager ONLY.
+#   confirm_evidence — PATCH .../:id {confirmEvidence:true} (§15's re-confirm-after-amend path,
+#                      not "scores" — deliberately its OWN action so HR can perform it without
+#                      also gaining score-write access, matching §8's "HR: cycle admin, not
+#                      scores" literally).                    Assigned manager OR HR-appraisal role.
+#   submit           — POST .../:id/submit.                              Assigned manager ONLY.
+#   ack              — POST .../:id/ack.                                 Subject ONLY.
+#
+# §8's matrix, applied:
+#   Self:            read (own, status >= submitted — narrowed IN-APP, since Cerbos has no
+#                     resource-status attribute here) + ack. NEVER write/submit/cycle_admin/finalize.
+#   Dept lead (own subjects): read + write + submit. Cerbos grants the COARSE company-scoped
+#                     `manager`/`team_lead` tier (the SAME "no per-org-node grant scope exists"
+#                     approximation resource_report_document.yaml/resource_checkin.yaml already
+#                     carry — flagged there, restated here, not solved by this ticket) — but unlike
+#                     those two, `report_appraisals.manager_user_id` is a REAL per-row column
+#                     assigned at generate time, so appraisals.controller.ts narrows write/submit to
+#                     an EXACT `manager_user_id == principal.id` match, not merely "some manager
+#                     grant in this company". This is STRONGER than the org-unit-approximation
+#                     precedent, not weaker — worth TR-25 revisiting the older two policies against
+#                     this file's shape.
+#   Exec group:       read-only. Never write/submit/ack/cycle_admin/finalize (§8: "exec read-only").
+#   HR-appraisal role: cycle_admin + finalize + read. NEVER write/submit ("cycle admin, not
+#                     scores" — §8's exact wording) and NEVER ack (that is the subject's own act).
+#   Served-dept:      NOT implemented (§8: "⛔ v1 — served-company appraisals stay with the served
+#                     company's chain, OQ-4"). No rule grants it here, matching checkin/report_
+#                     document's identical v1 boundary for the same reason (no cross-tenant
+#                     person-grain path exists for this data).
+#
+# Deliberately absent from every rule below: any grant reachable via `mcp_tool`/OBO alone without
+# also passing this SAME policy — appraisal is EXCLUDED from `ModuleContract.mcpTools` entirely
+# (§9.2, standing ruling): an agent must never touch a performance record. This file does not need
+# to defend against an MCP principal specifically; there is no tool that reaches it to defend against.
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: appraisal
+  importDerivedRoles: ["gaiada_scopes"]
+  variables:
+    import: ["gaiada_common"]
+  rules:
+    - actions: ["*"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["platform_admin"]
+
+    # ═══════════ §8's "HR-appraisal role" column — TIGHTENED BY TR-25 (finding ②) ═══════════
+    # `hr_people_ops` now resolves to `hr_manager` ONLY, not (hr_staff OR hr_manager) as TR-13 shipped
+    # it. Nothing in this file's rule text changed; the DERIVED ROLE was narrowed, which is why this
+    # is the right place to make the fix once rather than in four policies. See derived_roles.yaml for
+    # the full finding — in short: `hr_staff` is reconciler-materialized onto a SERVED company for
+    # every member of a providing HR unit, so the old definition handed `cycle_admin` + `finalize` +
+    # every appraisal pack in that company to HR rank-and-file who do not work there.
+    #
+    # ⚠ `hr_people_reader` (the hr_staff-inclusive baseline tier) is DELIBERATELY NOT GRANTED ANY
+    # ACTION IN THIS FILE, and must not be added. Appraisal data is categorically more sensitive than
+    # general HR module access; that distinction is the entire content of finding ②. A baseline HR
+    # reader still reaches person-grain REPORT documents (resource_report_document.yaml) and check-in
+    # history — the auto-input evidence — just not the appraisal record built on top of it.
+    #
+    # cycle_admin + finalize + read + confirm_evidence; NEVER write/submit ("cycle admin, not scores"
+    # — §8's exact wording) or ack (that is the subject's own act).
+    - actions: ["cycle_admin", "finalize", "read", "confirm_evidence"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["hr_people_ops"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+
+    # Exec group (global, cross-company by design, same shape as every other exec rule in this
+    # program): read-only. Never write/submit/ack/cycle_admin/finalize.
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["group_executive"]
+      condition: { match: { expr: "variables.notLow" } }
+
+    # Dept lead tier — COARSE company-scoped gate only (see file header on the known
+    # approximation); appraisals.controller.ts narrows read (to the caller's own assigned
+    # subjects) and write/submit (to an EXACT manager_user_id match on the specific row) the rest
+    # of the way, server-side, never from a client-supplied id.
+    - actions: ["read", "write", "submit", "confirm_evidence"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["manager", "team_lead"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+
+    # Self: read own appraisal (narrowed in-app to status >= submitted — a draft is manager-only,
+    # never shown to its subject) + ack/dispute. Guarded with has() so a handler that forgot to set
+    # subjectUserId fails CLOSED, same discipline as resource_checkin.yaml/resource_hr_case.yaml's
+    # identical self-rule shape.
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["member"]
+      condition:
+        match:
+          expr: >-
+            variables.inTenant && variables.notLow &&
+            has(request.resource.attr.subjectUserId) &&
+            request.resource.attr.subjectUserId == request.principal.id
+
+    - actions: ["ack"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["member"]
+      condition:
+        match:
+          expr: >-
+            variables.inTenant && variables.notLow &&
+            has(request.resource.attr.subjectUserId) &&
+            request.resource.attr.subjectUserId == request.principal.id

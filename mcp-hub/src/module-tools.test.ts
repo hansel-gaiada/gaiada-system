@@ -112,6 +112,92 @@ describe("module-tools aggregation (WS2 §6)", () => {
     expect(s.lastSuccessAt).not.toBeNull();
   });
 
+  // TR-28 (platform-nest reports module) — these defs need real HTTP query-string filters
+  // (grain/scopeRef/periodKind/start/end, kind/from/to, metricKey/grain/from/to) on a GET route
+  // that has NO :param slot for them (the routes are fixed: /reports/document, /reports/periods,
+  // /reports/metrics). Every OTHER GET module tool registered anywhere in the codebase needs
+  // nothing beyond a literal path segment (:tenantId or similar) — this is the first one that
+  // doesn't, and it is what exposed the fact that callPlatform() has NO query-string path at all
+  // for GET (see this file's `substitutes path params and sends the remaining args as the body for
+  // writes` test above: unused GET args are simply absent from the asserted URL). TR-28 worked
+  // around it, WITHOUT changing this file, by embedding the filters as a `?key=:key` query string
+  // directly inside pathTemplate — fillPath()'s regex substitution has no path/query distinction,
+  // so it honors that literally. These tests prove the mechanism actually produces the correct,
+  // fully-encoded request through the REAL registerModuleTools()/callPlatform() code path (not a
+  // reimplementation), for both a plain filtered GET and a periodKind='custom' range — the two
+  // shapes platform-nest's own reports-mcp-tools.db.test.ts relies on this file behaving like.
+  describe("GET tools whose filters live in the query string (TR-28 pathTemplate technique)", () => {
+    it("fills EVERY :token in the template — including ones after '?' — and drops nothing", async () => {
+      const defsFetch = vi.fn(async () => ({
+        ok: true,
+        status: 200,
+        json: async () => [
+          {
+            name: "reports.getDocument",
+            description: "fetch a report document",
+            minAssurance: "low",
+            method: "GET",
+            pathTemplate: "/api/:tenantId/reports/document?grain=:grain&scopeRef=:scopeRef&periodKind=:periodKind&start=:start&end=:end",
+            inputSchema: {
+              type: "object",
+              properties: {
+                tenantId: { type: "string" }, grain: { type: "string" }, scopeRef: { type: "string" },
+                periodKind: { type: "string" }, start: { type: "string" }, end: { type: "string" },
+              },
+              required: ["tenantId", "grain", "scopeRef", "periodKind", "start", "end"],
+            },
+          },
+        ],
+      })) as unknown as typeof fetch;
+
+      const n = await registerModuleTools(defsFetch);
+      expect(n).toBe(1);
+      const tool = getTool("reports.getDocument")!;
+
+      const callFetch = vi.fn(async (url: string) => {
+        // Every filter arrived as a real query param — none silently dropped — and dates/ids are
+        // correctly percent-encoded by the SAME fillPath() the tenantId path segment uses.
+        expect(url).toBe(
+          "http://platform.test/api/tenant-9/reports/document?grain=person&scopeRef=user-1&periodKind=custom&start=2026-01-01&end=2026-01-31",
+        );
+        return { ok: true, status: 200, json: async () => ({ header: { periodKind: "custom" } }) };
+      });
+      vi.stubGlobal("fetch", callFetch);
+      const out = await tool.handler(
+        { tenantId: "tenant-9", grain: "person", scopeRef: "user-1", periodKind: "custom", start: "2026-01-01", end: "2026-01-31" },
+        principal,
+      );
+      vi.unstubAllGlobals();
+      expect(out).toContain("custom");
+    });
+
+    it("throws rather than silently omitting a filter when the tool omits a token the pathTemplate declares", async () => {
+      const defsFetch = vi.fn(async () => ({
+        ok: true,
+        status: 200,
+        json: async () => [
+          {
+            name: "reports.listPeriods",
+            description: "list periods",
+            minAssurance: "low",
+            method: "GET",
+            pathTemplate: "/api/:tenantId/reports/periods?kind=:kind&from=:from&to=:to",
+            inputSchema: { type: "object", properties: {}, required: ["tenantId", "kind", "from", "to"] },
+          },
+        ],
+      })) as unknown as typeof fetch;
+      await registerModuleTools(defsFetch);
+      const tool = getTool("reports.listPeriods")!;
+
+      // No fetch stub needed — a missing token must fail BEFORE any network call, never send a
+      // request with a literal "undefined" or an empty query value that the platform might
+      // misinterpret as "no filter" when the caller actually meant to filter.
+      await expect(tool.handler({ tenantId: "tenant-9", kind: "day", from: "2026-01-01" }, principal)).rejects.toThrow(
+        /missing path parameter: to/,
+      );
+    });
+  });
+
   describe("startModuleToolsBootstrap (self-heal loop)", () => {
     afterEach(() => {
       stopModuleToolsBootstrap();

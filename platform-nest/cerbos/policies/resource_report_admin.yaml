@@ -11,10 +11,28 @@
 # EXCLUDED, because a lead who can trigger a re-derivation of a whole window can move numbers that
 # feed their own team's appraisal inputs. Exec + company admin + platform admin only.
 #
-# NOTE for TR-25 (⚡ the Cerbos policy-matrix parity ticket): fold this kind into the parity matrix
-# alongside the four §8 kinds; it was added here because the TR-07 endpoint cannot ship ungated and
-# an unlisted resource kind is denied by default (fail-closed), i.e. the endpoint would be 403 for
-# everyone including a group executive.
+# ══════════════ TR-25 finding ③: REVIEWED AGAINST §8 — VERDICT: CORRECT AS SHIPPED ══════════════
+# TR-07 added this kind under time pressure (an unlisted resource kind is denied by default, so the
+# endpoint would have been 403 for everyone including a group executive) and flagged it for TR-25 to
+# fold into the parity matrix. Done — it is now covered by `reports-cerbos.test.ts`'s matrix. The
+# audit against §8's last row ("facts recompute / calendars — Self ⛔ · Dept lead ⛔ · Exec ✅ ·
+# HR-appraisal ⛔ · served-dept ⛔") found NO discrepancy. Recorded explicitly so it is not
+# re-litigated:
+#   · `manager`/`team_lead` EXCLUDED — matches §8's "Dept lead ⛔". TR-07's reasoning is sound and
+#     worth restating: a lead who can re-derive a window can move the numbers feeding their own team's
+#     appraisal inputs. This is also the ONE person-axis-adjacent surface where in-app narrowing would
+#     NOT help — a recompute is tenant-wide by construction, so there is no per-unit slice to narrow
+#     to. Excluding the tier outright is the only correct answer.
+#   · `hr_people_ops`/`hr_people_reader` EXCLUDED — matches §8's "HR-appraisal ⛔". HR consumes the
+#     fact fabric; it does not get to rebuild it.
+#   · Served-dept tier EXCLUDED (`module_staff`/`module_manager` appear nowhere here) — matches §8's
+#     "served-dept ⛔". A provider must never trigger a recompute in the served company.
+#   · `company_admin` + `group_executive` + `platform_admin` only, all `notLow`. §8's "Exec ✅", plus
+#     the tenant's own admin under the same reading of "lead" that resource_report_period.yaml's
+#     header establishes for seal/amend.
+# The `calendars` half of §8's row ("facts recompute / calendars") still has no endpoint (TR-06's
+# calendar-config writes never landed a route). When it does, it belongs on THIS kind with THIS tier —
+# not a fifth resource.
 apiVersion: api.cerbos.dev/v1
 resourcePolicy:
   version: default

@@ -1,0 +1,340 @@
+{
+  "name": "reports-monthly-seal (CRON)",
+  "meta": {
+    "description": "TR-22, Blueprint §10 flow 5. 1st 06:00: seal the prior calendar month -> render dept+company PDFs via the report-renderer sidecar -> notify the configured reports stakeholders with links. Identical shape to reports-weekly-seal.json (same file's header explains: calendar-only by construction, narrative fail-soft already lives inside TR-15's sealPeriod/document-builder.ts so this flow never calls anything AI-shaped itself, idempotent-via-recheck rather than parsing the seal call's error body, per-scope export isolation, static REPORTS_NOTIFY_USER_IDS recipient list, link-not-numbers notify body) -- see that file's `meta.description` for the full reasoning, not repeated here. The ONE thing this ticket's brief adds beyond the weekly flow -- 'when an appraisal cycle covers that month: pre-generate auto_inputs refresh notice to HR' -- is DELIBERATELY NOT WIRED in this file. TR-24 (the appraisal engine + endpoints) is a DIFFERENT, actively-in-progress ticket in this exact module right now, and as of this ticket's implementation there is no landed read surface anywhere (no appraisals.controller.ts, no 'does a cycle cover this date' endpoint) for this flow to call -- report_appraisal_cycles exists as a bare schema table (TR-23/migration 0068) with no application-code reader yet. Inventing that endpoint's contract unilaterally, while the ticket that owns it is mid-flight, risks exactly the kind of contract collision this program's own §15 amendment log repeatedly flags as costly to unwind. This is a genuine, disclosed dependency gap -- not a shortcut -- kept inert the same way this repo's own `on-inbound-lead`/`digest-fanout` flows are documented as deferred pending a dependency that does not exist yet (see automation/README.md's 'Deferred flows' section and its new TR-22 follow-up note). WIRE IT once TR-24 ships its read endpoint: add one more branch after 'Sealed ok?' that calls it with this flow's own periodStart/periodEnd, and on a covering cycle, hub `notify` the HR service tier (a role, not a hardcoded id) with a body naming the cycle -- never inline the auto_inputs values themselves. Env: PLATFORM_URL, PLATFORM_SERVICE_TOKEN, AGENCY_TENANT_ID, HUB_SERVICE_TOKEN, REPORTS_NOTIFY_USER_IDS."
+  },
+  "nodes": [
+    {
+      "parameters": { "rule": { "interval": [{ "field": "cronExpression", "expression": "0 6 1 * *" }] } },
+      "name": "1st 06:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "// The prior FULL calendar month, computed relative to TODAY (not assumed to already be the\n// 1st) via document-builder.ts's own month-start arithmetic -- robust to a manual off-schedule\n// test-trigger the same way reports-weekly-seal.json's equivalent node is.\nconst today = new Date().toISOString().slice(0, 10);\nconst d = new Date(`${today.slice(0, 7)}-01T00:00:00.000Z`);\nd.setUTCMonth(d.getUTCMonth() - 1);\nconst start = `${d.toISOString().slice(0, 7)}-01`;\nreturn [{ json: { start } }];"
+      },
+      "name": "Compute prior month",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [220, 0]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.PLATFORM_URL }}/api/{{ $env.AGENCY_TENANT_ID }}/reports/periods?kind=month&from={{ $json.start }}&to={{ $json.start }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{ $env.PLATFORM_SERVICE_TOKEN }}" },
+            { "name": "x-obo-provider", "value": "n8n" },
+            { "name": "x-obo-external-id", "value": "wf:reports-monthly-seal" }
+          ]
+        },
+        "options": {}
+      },
+      "name": "GET/vivify month period",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [440, 0],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// GET /reports/periods?kind=month&from=X&to=X ALWAYS vivifies+returns exactly one row for a\n// single-month-start range (report-periods.ts's enumerateCalendarStarts, month case).\nconst body = $input.first().json.body ?? $input.first().json;\nconst period = body.periods[0];\nreturn [{ json: { periodId: period.id, periodStart: period.periodStart, periodEnd: period.periodEnd } }];"
+      },
+      "name": "Extract period",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [660, -120]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.PLATFORM_URL }}/api/{{ $env.AGENCY_TENANT_ID }}/reports/periods/{{ $json.periodId }}/seal",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{ $env.PLATFORM_SERVICE_TOKEN }}" },
+            { "name": "x-obo-provider", "value": "n8n" },
+            { "name": "x-obo-external-id", "value": "wf:reports-monthly-seal" }
+          ]
+        },
+        "options": {}
+      },
+      "name": "POST seal period",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [880, -180],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { ok: true, periodId: $('Extract period').first().json.periodId, periodStart: $('Extract period').first().json.periodStart, periodEnd: $('Extract period').first().json.periodEnd } }];"
+      },
+      "name": "Seal outcome (sealed now)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1100, -260]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.PLATFORM_URL }}/api/{{ $env.AGENCY_TENANT_ID }}/reports/periods/{{ $('Extract period').first().json.periodId }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{ $env.PLATFORM_SERVICE_TOKEN }}" },
+            { "name": "x-obo-provider", "value": "n8n" },
+            { "name": "x-obo-external-id", "value": "wf:reports-monthly-seal" }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Recheck period (after seal error)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1100, -60],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Idempotency check (same reasoning as reports-weekly-seal.json's identical node): ask the\n// resource's real state rather than parse the failed seal call's error body.\nconst body = $input.first().json.body ?? $input.first().json;\nconst ex = $('Extract period').first().json;\nif (body.status === 'sealed') {\n  return [{ json: { ok: true, periodId: ex.periodId, periodStart: ex.periodStart, periodEnd: ex.periodEnd } }];\n}\nreturn [{ json: { ok: false, periodId: ex.periodId, status: body.status, reason: 'seal call failed and period is still ' + body.status } }];"
+      },
+      "name": "Seal outcome (recheck)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1320, -60]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "typeValidation": "loose", "version": 2 },
+          "conditions": [
+            { "id": "sealed-ok", "leftValue": "={{ $json.ok }}", "rightValue": true, "operator": { "type": "boolean", "operation": "true", "singleValue": true } }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Sealed ok?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [1540, -160]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.PLATFORM_URL }}/api/{{ $env.AGENCY_TENANT_ID }}/reports/overview?grain=department&periodKind=month&start={{ $json.periodStart }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{ $env.PLATFORM_SERVICE_TOKEN }}" },
+            { "name": "x-obo-provider", "value": "n8n" },
+            { "name": "x-obo-external-id", "value": "wf:reports-monthly-seal" }
+          ]
+        },
+        "options": {}
+      },
+      "name": "GET overview (departments)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1760, -260],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $input.first().json.body ?? $input.first().json;\nconst sealCtx = $('Sealed ok?').first().json;\nconst deptScopes = (body.scopes || []).map((s) => ({ grain: 'department', scopeRef: s.scopeRef, scopeName: s.scopeName }));\nconst all = [...deptScopes, { grain: 'company', scopeRef: $env.AGENCY_TENANT_ID, scopeName: 'Company' }];\nreturn all.map((s) => ({ json: { ...s, periodId: sealCtx.periodId, periodStart: sealCtx.periodStart, periodEnd: sealCtx.periodEnd } }));"
+      },
+      "name": "Build scope list (dept+company)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1980, -260]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.PLATFORM_URL }}/api/{{ $env.AGENCY_TENANT_ID }}/reports/export",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{ $env.PLATFORM_SERVICE_TOKEN }}" },
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "x-obo-provider", "value": "n8n" },
+            { "name": "x-obo-external-id", "value": "wf:reports-monthly-seal" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ grain: $json.grain, scopeRef: $json.scopeRef, periodKind: 'month', start: $json.periodStart, format: 'pdf' }) }}",
+        "options": {}
+      },
+      "name": "POST export (pdf, per scope)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2200, -260],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const j = $json;\nreturn [{ json: { ok: true, grain: j.grain, scopeRef: j.scopeRef, scopeName: j.scopeName, href: `/reports?periodId=${j.periodId}&grain=${j.grain}&scopeRef=${j.scopeRef}` } }];"
+      },
+      "name": "Mark export success",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2420, -340]
+    },
+    {
+      "parameters": {
+        "jsCode": "const j = $json;\nconst err = j.error ?? j;\nreturn [{ json: { ok: false, grain: j.grain, scopeRef: j.scopeRef, scopeName: j.scopeName, error: String(err?.message ?? err) } }];"
+      },
+      "name": "Mark export failure",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2420, -160]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all().map((i) => i.json);\nconst links = items.filter((i) => i.ok);\nconst failures = items.filter((i) => !i.ok);\nconst sealCtx = $('Sealed ok?').first().json;\nreturn [{ json: { periodId: sealCtx.periodId, periodStart: sealCtx.periodStart, periodEnd: sealCtx.periodEnd, links, failures } }];"
+      },
+      "name": "Aggregate export results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2640, -260]
+    },
+    {
+      "parameters": {
+        "jsCode": "const summary = $json;\nconst ids = String($env.REPORTS_NOTIFY_USER_IDS || '').split(',').map((s) => s.trim()).filter(Boolean);\nreturn ids.map((recipientId) => ({\n  json: {\n    tenantId: $env.AGENCY_TENANT_ID,\n    recipientId,\n    type: 'reports_monthly_sealed',\n    periodId: summary.periodId,\n    periodStart: summary.periodStart,\n    periodEnd: summary.periodEnd,\n    links: summary.links,\n    failureCount: summary.failures.length,\n  },\n}));"
+      },
+      "name": "Fan out recipients",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2860, -260]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://mcp-hub:3003/mcp",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{ $env.HUB_SERVICE_TOKEN }}" },
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "Accept", "value": "application/json, text/event-stream" },
+            { "name": "x-obo-provider", "value": "n8n" },
+            { "name": "x-obo-external-id", "value": "wf:reports-monthly-seal" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", id: 1, method: \"tools/call\", params: { name: \"notify\", arguments: { tenantId: $json.tenantId, recipientId: $json.recipientId, type: $json.type, payload: { title: 'Monthly reports sealed', href: `/reports?periodId=${$json.periodId}`, body: `Month of ${$json.periodStart}: ${$json.links.length} report(s) sealed and rendered.` + ($json.failureCount ? ` ${$json.failureCount} scope(s) failed to render -- check the automation console.` : ''), entityType: 'report_period', entityId: $json.periodId, severity: $json.failureCount ? 'warning' : 'info', links: $json.links } } } }) }}",
+        "options": { "response": { "response": { "responseFormat": "text" } } }
+      },
+      "name": "MCP notify (leads/exec)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [3080, -260],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const j = $input.first().json;\nconst err = j.error ?? j;\nreturn [{ json: { start: $('Compute prior month').first().json.start, reason: j.reason ?? String(err?.message ?? err) } }];"
+      },
+      "name": "Build dead-letter payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1760, 160]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://mcp-hub:3003/mcp",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{ $env.HUB_SERVICE_TOKEN }}" },
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "Accept", "value": "application/json, text/event-stream" },
+            { "name": "x-obo-provider", "value": "n8n" },
+            { "name": "x-obo-external-id", "value": "wf:reports-monthly-seal" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", id: 1, method: \"tools/call\", params: { name: \"notify\", arguments: { tenantId: $env.AGENCY_TENANT_ID, recipientId: $env.NOTIFY_USER_ID, type: \"reports_monthly_seal_failed\", payload: { start: $json.start, error: $json.reason } } } }) }}",
+        "options": { "response": { "response": { "responseFormat": "text" } } }
+      },
+      "name": "MCP notify (dead-letter)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1980, 160]
+    }
+  ],
+  "connections": {
+    "1st 06:00": { "main": [[{ "node": "Compute prior month", "type": "main", "index": 0 }]] },
+    "Compute prior month": { "main": [[{ "node": "GET/vivify month period", "type": "main", "index": 0 }]] },
+    "GET/vivify month period": {
+      "main": [
+        [{ "node": "Extract period", "type": "main", "index": 0 }],
+        [{ "node": "Build dead-letter payload", "type": "main", "index": 0 }]
+      ]
+    },
+    "Extract period": { "main": [[{ "node": "POST seal period", "type": "main", "index": 0 }]] },
+    "POST seal period": {
+      "main": [
+        [{ "node": "Seal outcome (sealed now)", "type": "main", "index": 0 }],
+        [{ "node": "Recheck period (after seal error)", "type": "main", "index": 0 }]
+      ]
+    },
+    "Recheck period (after seal error)": {
+      "main": [
+        [{ "node": "Seal outcome (recheck)", "type": "main", "index": 0 }],
+        [{ "node": "Build dead-letter payload", "type": "main", "index": 0 }]
+      ]
+    },
+    "Seal outcome (sealed now)": { "main": [[{ "node": "Sealed ok?", "type": "main", "index": 0 }]] },
+    "Seal outcome (recheck)": { "main": [[{ "node": "Sealed ok?", "type": "main", "index": 0 }]] },
+    "Sealed ok?": {
+      "main": [
+        [{ "node": "GET overview (departments)", "type": "main", "index": 0 }],
+        [{ "node": "Build dead-letter payload", "type": "main", "index": 0 }]
+      ]
+    },
+    "GET overview (departments)": {
+      "main": [
+        [{ "node": "Build scope list (dept+company)", "type": "main", "index": 0 }],
+        [{ "node": "Build dead-letter payload", "type": "main", "index": 0 }]
+      ]
+    },
+    "Build scope list (dept+company)": { "main": [[{ "node": "POST export (pdf, per scope)", "type": "main", "index": 0 }]] },
+    "POST export (pdf, per scope)": {
+      "main": [
+        [{ "node": "Mark export success", "type": "main", "index": 0 }],
+        [{ "node": "Mark export failure", "type": "main", "index": 0 }]
+      ]
+    },
+    "Mark export success": { "main": [[{ "node": "Aggregate export results", "type": "main", "index": 0 }]] },
+    "Mark export failure": { "main": [[{ "node": "Aggregate export results", "type": "main", "index": 0 }]] },
+    "Aggregate export results": { "main": [[{ "node": "Fan out recipients", "type": "main", "index": 0 }]] },
+    "Fan out recipients": { "main": [[{ "node": "MCP notify (leads/exec)", "type": "main", "index": 0 }]] },
+    "Build dead-letter payload": { "main": [[{ "node": "MCP notify (dead-letter)", "type": "main", "index": 0 }]] }
+  },
+  "settings": {},
+  "pinData": {}
+}

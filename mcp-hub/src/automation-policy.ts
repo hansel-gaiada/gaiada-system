@@ -63,6 +63,19 @@ export const AUTOMATION_ALLOWLIST: Record<string, readonly string[]> = {
   "wf:reports-nightly-facts": ["notify"],
   "wf:reports-eod-reminder": ["notify"],
   "wf:reports-morning-escalation": ["notify"],
+  // TR-22: the two P4 seal/generate/deliver flows (Blueprint §10 flows 4/5). Both call
+  // platform-nest DIRECTLY for everything that actually does work — `GET/POST .../periods`,
+  // `POST .../periods/:id/seal`, `GET .../reports/overview`, `POST .../reports/export` are all
+  // either service/ops-tier reads or exec-only writes gated by Cerbos' `report_period`/
+  // `report_document` policies, none of them MCP tools (§9.2 explicitly excludes seal/amend and
+  // recompute from the tool surface — the SAME reasoning TR-11 already applied to
+  // facts/recompute). The ONLY hub tool call either flow makes is `notify` — one in-app
+  // notification per configured reports stakeholder (`REPORTS_NOTIFY_USER_IDS`) once a period's
+  // documents+PDFs are generated, or a dead-letter alert if sealing/rendering genuinely failed
+  // (never for an idempotent 409-already-sealed, which both flows treat as success — see
+  // automation/README.md).
+  "wf:reports-weekly-seal": ["notify"],
+  "wf:reports-monthly-seal": ["notify"],
 };
 
 /** An automation (n8n workflow) principal? Its scope comes from AUTOMATION_ALLOWLIST, not assurance. */

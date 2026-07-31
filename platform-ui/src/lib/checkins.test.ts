@@ -100,5 +100,46 @@ describe("checkins — pure helpers (TR-10/TR-38)", () => {
       const history = [entry("2026-07-02", "auto_missed"), entry("2026-07-01", "submitted")];
       expect(summarizeSelfCompliance(history).currentStreak).toBe(0);
     });
+
+    // TR-12 adversarial (TR-39's fairness gap, quantified): the backend's OFFICIAL §18 grid
+    // (`buildComplianceGrid` in checkins.controller.ts) computes complianceRate as
+    // submitted / expectedDays, where expectedDays counts EVERY expected day including excused
+    // ones. This FE formula deliberately excludes excused days from the denominator entirely
+    // (submitted / (submitted + missed)). Both are legitimate for their own stated purpose, but
+    // §18 is appraisal-SAFE and a subject cannot read that official number for themselves (TR-39) —
+    // so this is the ONLY number they ever see. This test builds one realistic month of history and
+    // computes what the backend's own formula WOULD produce for the identical rows, to put a
+    // concrete magnitude on the divergence the header comment already flags qualitatively.
+    it("QUANTIFIED: for one realistic month, the self formula and the official §18 formula diverge by double digits (percentage points)", () => {
+      // 20 expected days total: 15 submitted, 3 auto_missed, 2 excused -- a plausible month for
+      // someone who took two forgiven half-days and slipped three times.
+      const history: CheckinHistoryEntry[] = [
+        ...Array.from({ length: 15 }, (_, i) => entry(`2026-06-${String(i + 1).padStart(2, "0")}`, "submitted")),
+        ...Array.from({ length: 3 }, (_, i) => entry(`2026-06-${String(i + 16).padStart(2, "0")}`, "auto_missed")),
+        ...Array.from({ length: 2 }, (_, i) => entry(`2026-06-${String(i + 19).padStart(2, "0")}`, "excused")),
+      ];
+      const expectedDays = history.length; // 20 -- every row here IS an expected day by construction
+      const submitted = history.filter((h) => h.status === "submitted").length; // 15
+
+      // The backend's OWN formula (checkins.controller.ts: buildComplianceGrid),
+      // reproduced verbatim from its source rather than re-imported (cross-repo, no shared package):
+      //   complianceRate = submittedDays / expectedDays
+      const officialRate = submitted / expectedDays; // 15/20 = 0.75
+
+      // The FE's self formula (summarizeSelfCompliance, this file):
+      const selfSummary = summarizeSelfCompliance(history);
+      const selfRate = selfSummary.rate!; // 15/(15+3) = 0.8333...
+
+      expect(officialRate).toBeCloseTo(0.75, 4);
+      expect(selfRate).toBeCloseTo(15 / 18, 4);
+
+      // The magnitude: this one person would see 83% for the very metric (#18, appraisal-SAFE)
+      // their lead's screen shows as 75% -- an 8+ percentage-point gap for the IDENTICAL underlying
+      // rows, entirely from which formula happens to run. Neither number is "wrong" in isolation;
+      // having two different numbers for one person on an appraisal-safe metric is the defect.
+      const divergencePercentagePoints = Math.abs(selfRate - officialRate) * 100;
+      expect(divergencePercentagePoints).toBeGreaterThan(8); // ~8.33 points in this realistic case
+      expect(divergencePercentagePoints).toBeLessThan(9);
+    });
   });
 });

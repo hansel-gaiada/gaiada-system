@@ -7,6 +7,11 @@
 //   'low'     — unverified link or unknown external identity: no company data at all.
 import { withGlobal, withTenants } from "../db";
 
+/** Local copy (2 lines, zero deps) rather than importing `isUuidShaped` from `core/dept-resolution.ts`:
+ *  this file is the authz substrate and must not gain a dependency on a domain module. See
+ *  `auditDecision` below for why a uuid shape-check is needed at all. */
+const UUID_RE = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+
 export type Assurance = "low" | "linked" | "high";
 
 export interface RoleGrant {
@@ -91,6 +96,27 @@ export async function auditDecision(
   reason: string,
 ): Promise<void> {
   if (!tenantId) return; // global-scope decisions have no tenant feed (logged by caller)
+
+  // ⚠ TR-25 BUG FIX (pre-existing, found by the person-axis parity suite). `activities
+  // .target_entity_id` is `uuid` (0001_core.sql:212), but not every resource id in this codebase is a
+  // uuid: an org-unit node id is FREE-FORM TEXT by the 0029 convention (`'d-web'`, `'d-hr'`), and
+  // `reports.controller.ts`'s `authorizeReportDocumentRead` passes the department-grain `scopeRef`
+  // straight through as `resource.id`. So a DENIED department-grain report read raised
+  // `invalid input syntax for type uuid: "d-web"` INSIDE this audit write and surfaced as a bare
+  // **500**, not the 403 the caller must get — violating the BFF convention (§8 hard rule 2: an
+  // unauthorized read is 403, never 404, and certainly never a server error the UI cannot render a
+  // limited-access state for). It went unnoticed because no test had ever asserted a DENIED
+  // department-grain read; every existing case used a uuid scopeRef or was allowed.
+  //
+  // Fixed HERE rather than at the call site because the defect is generic — any resource kind whose id
+  // is not a uuid has the same failure mode on denial, and dropping `resource.id` at the call site
+  // would change what Cerbos's `manager`/`member` project-scope conditions match on
+  // (`g.scopeId == request.resource.attr.id`). Nothing is lost: a non-uuid id is preserved verbatim in
+  // `metadata.resourceId`, so the audit trail still names the exact resource that was denied.
+  const uuidId = resourceId !== null && UUID_RE.test(resourceId) ? resourceId : null;
+  const detail: Record<string, unknown> = { action, reason };
+  if (resourceId !== null && uuidId === null) detail.resourceId = resourceId;
+
   await withTenants([tenantId], (c) =>
     c.query(
       `INSERT INTO activities (id, tenant_id, actor_id, verb, target_entity_type, target_entity_id, metadata, origin_site)
@@ -100,8 +126,8 @@ export async function auditDecision(
         p.userId,
         allow ? "authz.allow" : "authz.deny",
         resourceKind,
-        resourceId,
-        JSON.stringify({ action, reason }),
+        uuidId,
+        JSON.stringify(detail),
       ],
     ),
   );

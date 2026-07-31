@@ -1,0 +1,101 @@
+/* Appraisal surfaces (TR-26). Pulls in the chart kit's token scope so this reads as ONE surface
+   with the rest of the reports program, light/dark alike (same convention as reports.css). */
+@import "../charts/charts.css";
+
+.rc-appr-page { display: flex; flex-direction: column; gap: 20px; padding: 24px; }
+
+/* ---- action buttons — dark-safe, found by actually rendering the scoring form in dark mode
+   (ruling 1): the site-wide `.lux-btn--ghost` (ui.css) hardcodes `color: var(--text-primary)` +
+   a black-based low-opacity border with no dark step, so a "Save draft" button placed on this
+   kit's dark `.rc-viz` surface rendered near-invisible (near-black text/border on near-black
+   background). Mirrors `.rc-period__apply`'s already-dark-safe pattern (PeriodSelector, TR-16/17):
+   built entirely from `--rc-*` tokens, which DO have a dark step, instead of the site-wide
+   `--text-primary`/`--erp-accent` tokens, which don't. Use these (not `.lux-btn`) for any button
+   rendered inside `.rc-viz`. */
+.rc-appr-btn { font: 700 11px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; padding: 8px 14px; cursor: pointer; transition: opacity 0.2s var(--erp-ease, ease); }
+.rc-appr-btn:disabled { opacity: 0.4; cursor: default; }
+.rc-appr-btn--solid { background: var(--rc-text-primary); color: var(--rc-surface); border: 0.5px solid var(--rc-text-primary); }
+.rc-appr-btn--solid:hover:not(:disabled) { opacity: 0.7; }
+.rc-appr-btn--ghost { background: transparent; color: var(--rc-text-primary); border: 0.5px solid var(--rc-axis); }
+.rc-appr-btn--ghost:hover:not(:disabled) { background: rgba(110, 90, 67, 0.08); }
+
+/* ---- header ---- */
+.rc-appr-head { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.rc-appr-head__title { font-family: var(--font-display); font-weight: 700; font-size: 22px; color: var(--rc-text-primary); margin: 0; }
+.rc-appr-head__meta { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; font: 400 12px var(--font-body); color: var(--rc-text-secondary); margin-top: 4px; }
+
+/* ---- honesty banners (evidence-stale / small-cohort context) — never a dismissed toast ---- */
+.rc-appr-banner { display: flex; align-items: flex-start; gap: 8px; font: 400 13px/1.5 var(--font-body); padding: 12px 14px; border: 0.5px solid var(--rc-serious); background: var(--rc-surface); color: var(--rc-text-primary); }
+.rc-appr-banner__glyph { flex: 0 0 auto; width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; font: 700 11px var(--font-body); color: var(--rc-surface); background: var(--rc-serious); }
+
+/* ---- composite + axis table ---- */
+.rc-appr-composite { display: flex; align-items: baseline; gap: 10px; }
+.rc-appr-composite__value { font: 700 32px var(--font-body); color: var(--rc-text-primary); }
+.rc-appr-composite__label { font: 700 10px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--rc-text-muted); }
+
+.rc-appr-axes { display: flex; flex-direction: column; gap: 10px; }
+.rc-appr-axis { display: flex; flex-direction: column; gap: 6px; padding: 14px; border: 0.5px solid var(--rc-axis); background: var(--rc-surface); }
+.rc-appr-axis__row { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.rc-appr-axis__name { font: 700 13px var(--font-body); color: var(--rc-text-primary); }
+.rc-appr-axis__weight { font: 400 11px var(--font-body); color: var(--rc-text-muted); }
+.rc-appr-axis__scores { display: flex; align-items: center; gap: 14px; font: 400 12px var(--font-body); color: var(--rc-text-secondary); }
+.rc-appr-axis__score-value { font: 700 16px var(--font-body); color: var(--rc-text-primary); }
+.rc-appr-axis__deviation { font: 700 10px var(--font-body); letter-spacing: 0.06em; text-transform: uppercase; color: var(--rc-serious); }
+.rc-appr-axis__note { font: 400 12px/1.5 var(--font-body); color: var(--rc-text-secondary); padding-top: 4px; border-top: 0.5px solid var(--rc-grid); }
+
+/* ---- axis picker (manager scoring form) ---- */
+.rc-appr-picker { display: inline-flex; gap: 4px; }
+.rc-appr-picker__btn {
+  width: 30px; height: 30px; font: 700 13px var(--font-body); border: 0.5px solid var(--rc-axis);
+  background: var(--rc-surface); color: var(--rc-text-secondary); cursor: pointer;
+}
+.rc-appr-picker__btn:hover { background: rgba(110, 90, 67, 0.08); }
+.rc-appr-picker__btn--active { background: var(--rc-focus); border-color: var(--rc-focus); color: var(--rc-surface); }
+.rc-appr-picker__btn:focus-visible { outline: 2px solid var(--rc-focus); outline-offset: 1px; }
+
+/* ---- commentary ---- */
+.rc-appr-commentary { font: 400 14px/1.6 var(--font-body); color: var(--rc-text-primary); white-space: pre-wrap; }
+.rc-appr-commentary--empty { color: var(--rc-text-muted); font-style: italic; }
+.rc-appr-charcount { font: 400 11px var(--font-body); color: var(--rc-text-muted); }
+.rc-appr-charcount--short { color: var(--rc-serious); font-weight: 700; }
+
+/* ---- ack trail (append-only — no edit affordance ever) ---- */
+.rc-appr-acks { display: flex; flex-direction: column; gap: 8px; }
+.rc-appr-ack { display: flex; flex-direction: column; gap: 2px; padding: 10px 0; border-bottom: 0.5px solid var(--rc-grid); }
+.rc-appr-ack:last-child { border-bottom: 0; }
+.rc-appr-ack__row { display: flex; align-items: center; gap: 8px; font: 400 12px var(--font-body); color: var(--rc-text-secondary); }
+.rc-appr-ack__action { font: 700 10px var(--font-body); letter-spacing: 0.06em; text-transform: uppercase; padding: 1px 6px; border: 0.5px solid var(--rc-axis); }
+.rc-appr-ack__action--disputed { color: var(--rc-serious); border-color: var(--rc-serious); }
+.rc-appr-ack__action--acknowledged, .rc-appr-ack__action--finalized { color: var(--rc-good); border-color: var(--rc-good); }
+.rc-appr-ack__comment { font: 400 13px/1.5 var(--font-body); color: var(--rc-text-primary); }
+
+/* ---- pre-submit validation checklist ---- */
+.rc-appr-checklist { display: flex; flex-direction: column; gap: 6px; padding: 12px 14px; border: 0.5px solid var(--rc-axis); background: var(--rc-surface); }
+.rc-appr-checklist__item { display: flex; align-items: center; gap: 8px; font: 400 12px var(--font-body); }
+.rc-appr-checklist__item--ok { color: var(--rc-good); }
+.rc-appr-checklist__item--pending { color: var(--rc-serious); }
+.rc-appr-checklist__glyph { width: 14px; text-align: center; font-weight: 700; }
+
+/* ---- cycle console ---- */
+.rc-appr-cycle-list { display: flex; flex-direction: column; gap: 10px; }
+.rc-appr-cycle-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px; border: 0.5px solid var(--rc-axis); background: var(--rc-surface); }
+.rc-appr-cycle-row__name { font: 700 14px var(--font-body); color: var(--rc-text-primary); }
+.rc-appr-cycle-row__meta { font: 400 12px var(--font-body); color: var(--rc-text-muted); }
+
+.rc-appr-weights { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+
+/* ---- TR-44: the evidence-stale badge on the /appraisals LIST page ----
+   Deliberately NOT scoped under .rc-viz: the list page is an ordinary app page and never enters the
+   chart-kit scope, so it cannot inherit --rc-* tokens. The colours below therefore resolve against the
+   app palette with a hard fallback, so this badge can never silently render as plain text the way its
+   predecessor did (TR-29's finding). Same "serious" signal as .rc-appr-banner on the detail page. */
+.rc-appr-stale-badge {
+  flex: 0 0 auto;
+  font: 700 10px var(--font-body);
+  letter-spacing: 0.08em;
+  padding: 3px 7px;
+  border: 0.5px solid var(--rc-serious, #8c2f1f);
+  color: var(--rc-serious, #8c2f1f);
+  background: color-mix(in srgb, var(--rc-serious, #8c2f1f) 8%, transparent);
+  white-space: nowrap;
+}

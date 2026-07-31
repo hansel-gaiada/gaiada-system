@@ -134,13 +134,55 @@ derivedRoles:
                 g.scopeType == "global" ||
                 (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
 
-    # TR-13 (tracker/reporting §8's "HR-appraisal role" column). Reuses the EXISTING hr_staff/
-    # hr_manager grant names (resource_hr_case.yaml's precedent) rather than minting a new
-    # "hr_appraisal" role the platform has no seed/grant path for yet — appraisal data is HR-grade
-    # sensitive per the design doc, so HR's existing staff/manager tier is the correct interim
-    # owner. Flagged for TR-25 (the Cerbos parity-matrix ticket) to confirm or replace once the
-    # appraisal engine (TR-24) defines its own resource kind.
+    # ══════════════════ §8's "HR-appraisal role" column — SPLIT IN TWO by TR-25 ══════════════════
+    #
+    # TR-13 introduced ONE derived role, `hr_people_ops` == (hr_staff OR hr_manager), and flagged the
+    # reuse for TR-25 to "confirm or replace". TR-25 AUDITED IT AND IT OVER-GRANTED. The finding, and
+    # why it is not theoretical:
+    #
+    #   `hr_staff` is not a hand-picked appraisal role. `service-reconciler.ts` MATERIALIZES
+    #   `<module>_staff` scoped to a SERVED company for EVERY member of a providing unit's subtree
+    #   (0026 A12: "_manager to the lead, _staff to the rest"). So the moment company A's HR
+    #   department serves company B under a service assignment, every rank-and-file member of A's HR
+    #   unit held `hr_staff` on B — and, through the old single derived role, `cycle_admin` +
+    #   `finalize` on B's appraisals plus every person's appraisal pack in B. An HR assistant whose
+    #   whole legitimate job is filing leave requests could read and finalize the performance record
+    #   of everyone in a company they do not work for.
+    #
+    #   The estate ALREADY draws this line everywhere else and TR-13's reuse crossed it:
+    #   `platform-ui/src/lib/rbac.ts` grants `hr_staff → ["hr.view"]` (read-only) and
+    #   `hr_manager → ["hr.view","hr.manage"]` (acting), and `resource_hr_case.yaml` distinguishes the
+    #   two for hr_case's destructive actions. Appraisal data is strictly MORE sensitive than general
+    #   HR module access, so collapsing the tiers there and nowhere else was backwards.
+    #
+    # Ruling: two derived roles, so the reuse survives where it is correct (reading person-grain
+    # reports IS `hr.view`-shaped work) and is withdrawn where it is not (appraisals, and excusing a
+    # check-in — which moves an appraisal-SAFE metric, §5 metric #18).
+    #
+    #   hr_people_ops    = hr_manager ONLY.  The ACTING HR tier: appraisal cycle_admin/finalize/read/
+    #                      confirm_evidence, check-in `excuse`.
+    #   hr_people_reader = hr_staff OR hr_manager.  The BASELINE HR read tier: person/project/
+    #                      department report documents, check-in `read`, period `view`. NEVER
+    #                      appraisal, NEVER excuse.
+    #
+    # Still deliberately NOT a new `hr_appraisal` role name: the platform has no seed or grant path
+    # for one (0026 seeds only hr_staff/hr_manager), so minting it would produce a policy nobody can
+    # ever satisfy — the same "unreachable tier written into a contract" defect §15 recorded for
+    # `checkin.submit`'s `minAssurance: "verified"`. If a dedicated appraisal role is ever seeded,
+    # `hr_people_ops` is the ONE line to change.
     - name: hr_people_ops
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.grants.exists(g, g.role == "hr_manager" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+
+    # The baseline HR read tier (see the block above). `hr_manager` is included so every rule that
+    # admits the reader tier automatically admits the acting tier too — a policy must never have to
+    # list both, which is how the two spellings drifted apart in the first place.
+    - name: hr_people_reader
       parentRoles: ["user"]
       condition:
         match:

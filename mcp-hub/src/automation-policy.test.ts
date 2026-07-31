@@ -101,6 +101,19 @@ describe("automation scoped service accounts + write gate (WS4 §3)", () => {
     expect(authorize(wf("wf:wd-digests"), "workActivity.relink").allow).toBe(true);
   });
 
+  // TR-22: the two P4 seal/generate/deliver flows are scoped to ONLY `notify` — everything else
+  // they do (seal/overview/export) is a direct-to-platform call, never a hub tool, same shape as
+  // TR-11's three reads/writes above.
+  it("wf:reports-weekly-seal and wf:reports-monthly-seal are scoped to notify ONLY", () => {
+    for (const id of ["wf:reports-weekly-seal", "wf:reports-monthly-seal"]) {
+      const p = wf(id);
+      const visible = visibleTools(p).map((t) => t.name).sort();
+      expect(visible).toEqual(["notify"]);
+      expect(authorize(p, "notify").allow).toBe(true);
+      expect(authorize(p, "reports.getDocument").allow).toBe(false);
+    }
+  });
+
   it("does NOT grant humans automation scoping (a low human keeps normal visibility)", () => {
     const human: Principal = { provider: "whatsapp", externalId: "628110@c.us", assurance: "low" };
     const names = visibleTools(human).map((t) => t.name);

@@ -19,6 +19,19 @@
 // Custom ranges never reach step 2 — rejected with 422 before any of this runs (§0057 rule 2),
 // so rollup_metrics is untouched for them too (rule 3), for free, by construction.
 //
+// ─────────────────────────────── TR-27 · AI narrative, layered on step 2 only (§9.1/§15) ────────
+// `buildReportDocument` already returns a DETERMINISTIC `narrative` (document-builder.ts's
+// `buildNarrative`, TR-13, unchanged by this ticket). Right here — and ONLY here, never in
+// `buildReportDocument` itself — this file tries ONE `completeViaGateway` call per (grain,
+// scopeRef) to upgrade that narrative to AI prose, via the pure `narrative.ts` module (prompt
+// build + parse, zero I/O of its own; see its header for the fail-soft/hallucinated-numeral
+// contract). This is deliberate and load-bearing: sealing is the ONLY place the reports module
+// ever calls the gateway, so a live/ops document read (an open period, or any GET on a sealed one)
+// never triggers AI spend or latency (§9.1: "live/ops reads default to deterministic"). Any
+// failure — gateway unconfigured/down/timeout, or `narrative.ts`'s own guards rejecting the
+// completion — falls straight back to the SAME deterministic narrative `buildReportDocument`
+// already computed; nothing about the rest of this function's contract or atomicity changes.
+//
 // ─────────────────────────────── SCOPING DECISIONS RECORDED HERE (none are schema/contract calls) ─
 // 1. In-scope (grain, scopeRef) enumeration reuses the EXACT rows `GET /reports/overview` already
 //    derives (`computeReportRangeRows` + `rowGrainShape`) — "everyone/everything with a rollup row
@@ -39,6 +52,8 @@ import { notify, writeActivity, type NotificationPayload } from "../../core/http
 import { emitEvent } from "../../events/outbox.service";
 import { recomputeFactWindow } from "./fact-job";
 import { buildReportDocument, computeReportRangeRows, rowGrainShape } from "./document-builder";
+import { buildGroundingFacts, buildNarrativePrompt, parseNarrative } from "./narrative";
+import { completeViaGateway, type GatewayCallOptions } from "../search/providers/gateway-client";
 import { upsertRows as upsertRollupRows } from "../../rollups/engine";
 import { formatPeriodRange } from "./metrics";
 import { getPeriodById, PERIOD_COLUMNS, type PeriodRow } from "./report-periods";
@@ -137,8 +152,10 @@ export type SealResult = { ok: true; period: PeriodRow; documentCount: number } 
 
 /** The whole seal flow (file header). `actorUserId` is null for the n8n schedule/system seal
  *  (§0057's `sealed_by` column comment) — `report_periods.sealed_by` and the outbox `emitEvent`
- *  actor both tolerate that. */
-export async function sealPeriod(tenantId: string, periodId: string, actorUserId: string | null): Promise<SealResult> {
+ *  actor both tolerate that. `gatewayOpts` is TEST-ONLY (mirrors `providers/gateway-client.ts`'s
+ *  own `GatewayCallOptions` escape hatch): production callers (reports.controller.ts) never pass
+ *  it, so `completeViaGateway` always resolves the real configured gateway from `config`. */
+export async function sealPeriod(tenantId: string, periodId: string, actorUserId: string | null, gatewayOpts?: GatewayCallOptions): Promise<SealResult> {
   const period = await getPeriodById(tenantId, periodId);
   if (!period) return { ok: false, reason: "not_found" };
   // §0057 rule 2: a required acceptance criterion, never a silent skip. Checked BEFORE any work
@@ -170,6 +187,23 @@ export async function sealPeriod(tenantId: string, periodId: string, actorUserId
   const documents: SealedDocumentEntry[] = [];
   for (const { grain, scopeRef } of scopes) {
     const doc = await buildReportDocument({ tenantId, grain, scopeRef, periodKind: period.periodKind, start, end });
+
+    // TR-27: try to upgrade doc.narrative (deterministic) to AI prose. ONE completeViaGateway
+    // call, caught here (never inside narrative.ts — that file makes no I/O of its own, same
+    // split as search/ai-drafts.ts + search.controller.ts). Any failure -> completionText stays
+    // null -> parseNarrative falls back to `doc.narrative` unchanged, never throws.
+    const facts = buildGroundingFacts(doc);
+    let completionText: string | null = null;
+    let model: string | null = null;
+    try {
+      const completion = await completeViaGateway(buildNarrativePrompt(facts), gatewayOpts);
+      completionText = completion.text;
+      model = completion.provider ?? null;
+    } catch {
+      completionText = null; // gateway unconfigured/down/timeout — fall through, never throw
+    }
+    const narrative = parseNarrative(completionText, model, facts, doc.narrative);
+
     const sealedDoc: ReportDocument = {
       ...doc,
       header: {
@@ -179,6 +213,7 @@ export async function sealPeriod(tenantId: string, periodId: string, actorUserId
         revision: nextRevision,
         ...(period.label ? { customLabel: period.label } : {}),
       },
+      narrative,
     };
     documents.push({ grain, scopeRef, document: sealedDoc });
   }

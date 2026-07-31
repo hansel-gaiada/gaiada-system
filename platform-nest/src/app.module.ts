@@ -41,6 +41,7 @@ import { SearchGoogleAdsController } from "./modules/search/search-google-ads.co
 import { SearchReportsController } from "./modules/search/search-reports.controller";
 import { ReportsController } from "./modules/reports/reports.controller";
 import { CheckinsController } from "./modules/reports/checkins.controller"; // TR-09
+import { AppraisalsController } from "./modules/reports/appraisals.controller"; // TR-24
 import { PrintPayloadController } from "./modules/reports/print-payload.controller"; // TR-21
 import { McpToolsController } from "./modules/mcp-tools.controller";
 
@@ -72,6 +73,10 @@ import { McpToolsController } from "./modules/mcp-tools.controller";
     ReportsController,
     // TR-09: check-in subsystem, /api/:t/checkins/* (own top-level prefix, own controller class).
     CheckinsController,
+    // TR-24: appraisal engine, /api/:t/appraisals/* (own top-level prefix, own controller class —
+    // deliberately NEVER registered in ModuleContract.mcpTools, §9.2/standing ruling: appraisal
+    // read/write must never be reachable by an agent).
+    AppraisalsController,
     // TR-21: the internal, token-only PDF payload fetch — root-level, no `/api` prefix, no
     // guards (identity.controller.ts's precedent). See print-payload.controller.ts's own header.
     PrintPayloadController,

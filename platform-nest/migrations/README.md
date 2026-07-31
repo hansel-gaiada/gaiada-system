@@ -147,3 +147,36 @@ at it, run `node dist/db/migrate.js`, confirm the ordered `applied:` list and ex
    `0066`** — and the lesson from the near-collision above is the one rule 5 already states: when two
    agents work one module in the same session, `ls migrations/` at the moment you write DDL is the
    only authority. A number in a ticket brief was stale for BOTH of these tickets.
+
+   **2026-07-31 update (TR-14, `report_periods`/`report_documents`) — `0067` TAKEN; TR-23's `0058`
+   reservation confirmed still orphaned.** TR-14 shipped as `0067_report_periods_documents.sql`
+   (search-marketing had already taken `0060`-`0066` by the time it landed). `0058`/`0059` remain
+   the two deliberately-unfilled reserved gaps (0058 for TR-23/appraisal tables, not yet implemented
+   at that point; 0059 already consumed by TR-08 as `0057`) — **do NOT fill them.**
+
+   **2026-07-31 update (TR-23, appraisal tables) — `0068` TAKEN.** `ls migrations | sort | tail` at
+   implementation time showed the real head as `0067_report_periods_documents.sql` (TR-14, landed)
+   with `0068` genuinely free — no further rebase needed. TR-23 shipped as
+   `0068_report_appraisals.sql`: `report_appraisal_cycles`, `report_appraisals`,
+   `report_appraisal_acks`, all three under the same 'reports' module third wall as
+   0056/0057/0067. `0058`/`0059` remain the two permanently-orphaned reservation gaps for this
+   program (0058 was this ticket's original doc-reserved number, drawn down past before TR-23
+   executed; 0059 was consumed by TR-08 as `0057`) — **still do NOT fill them; they are dead
+   numbers now, kept only as a record of how the program's reservation table drifted.** Registered
+   in `src/modules/reports/index.ts`'s `migrations` array. **Next unused is `0069`** — re-verify
+   with `ls migrations | sort | tail` before trusting that, exactly as every entry in this log has
+   had to.
+
+   **2026-08-01 update (TR-42, `reports_staff`/`reports_manager` global roles) — `0069` TAKEN.**
+   `ls migrations | sort | tail` at implementation time showed the real head as
+   `0068_report_appraisals.sql` with `0069` genuinely free — no rebase needed. TR-42 shipped as
+   `0069_report_module_roles.sql`: seeds the two global (`company_id IS NULL`) roles
+   `reports_staff`/`reports_manager` that `cerbos/policies/resource_report_document.yaml`'s
+   `module_staff`/`module_manager` derived roles and `service-reconciler.ts`'s `moduleRoleId()` have
+   been waiting on since TR-25 — 0026 block (E) seeded only the `hr_*` pair, so every real
+   `module_key='reports'` service assignment reconciled to a silent skip (no grant, no error) until
+   now. Same `NOT EXISTS`-guarded idiom as 0026 block (E), reused deliberately. No Cerbos policy
+   edit, no `rbac.ts` edit — the policy already spells the role names generically. `0058`/`0059`
+   remain the two permanently-orphaned reservation gaps for this program — still do NOT fill them.
+   Registered in `src/modules/reports/index.ts`'s `migrations` array. **Next unused is `0070`** —
+   re-verify with `ls migrations | sort | tail` before trusting that.

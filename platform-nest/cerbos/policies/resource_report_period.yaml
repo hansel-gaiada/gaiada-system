@@ -52,11 +52,16 @@ resourcePolicy:
       derivedRoles: ["company_admin"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }
 
-    # HR-appraisal role: view only (appraisal auto-inputs need to know whether a covering period
-    # is sealed) — never seal/amend/pin, matching §8's "HR-appraisal role ⛔" cell on that row.
+    # HR-appraisal role: view only (appraisal auto-inputs need to know whether a covering period is
+    # sealed) — never seal/amend/pin, matching §8's "HR-appraisal role ⛔" cell on that row.
+    # TR-25: switched from `hr_people_ops` to `hr_people_reader` because `hr_people_ops` was narrowed
+    # to `hr_manager` only (finding ②) and a period's sealed/open STATUS is metadata, not person data
+    # — this rule's own header already argues it "is not itself sensitive" and grants it down to
+    # `member`. Keeping baseline HR out of it would have been an accidental tightening, not a real
+    # boundary. `hr_people_reader` includes `hr_manager`, so the acting tier is unaffected.
     - actions: ["view"]
       effect: EFFECT_ALLOW
-      derivedRoles: ["hr_people_ops"]
+      derivedRoles: ["hr_people_reader"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }
 
     # Dept lead tier: view only — the exact §8 "⛔" on seal/amend for this column, so no seal/amend/
