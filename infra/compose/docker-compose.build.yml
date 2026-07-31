@@ -50,3 +50,6 @@ services:
 
   bot-media-worker:
     build: ../../wa-chat-bot
+
+  report-renderer:
+    build: ../../report-renderer

@@ -15,8 +15,13 @@ jobs:
       fail-fast: false
       matrix:
         # platform-nest has its own job below (it needs Postgres + Cerbos to actually run its
-        # suite). These three run standalone; their DB-backed suites self-skip without a test DB.
-        project: [wa-chat-bot, mcp-hub, ai-agents]
+        # suite). These run standalone; their DB-backed suites self-skip without a test DB.
+        # report-renderer (TR-19): its auth-gate tests (incl. the token-less-request-\>401
+        # acceptance check) run against the plain Express app and need no Postgres/Chromium —
+        # `npm ci` here will attempt Playwright's own browser download, which is expected to
+        # succeed on GitHub-hosted runners (network egress allowed) even though it's unverified
+        # in this offline dev environment.
+        project: [wa-chat-bot, mcp-hub, ai-agents, report-renderer]
     defaults:
       run:
         working-directory: ${{ matrix.project }}

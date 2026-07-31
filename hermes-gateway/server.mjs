@@ -26,8 +26,12 @@ const CFG = {
   // Must match the bot's GATEWAY_TOKEN. Empty disables auth (dev only).
   token: process.env.GATEWAY_TOKEN ?? "",
   hermesBin: process.env.HERMES_BIN ?? "hermes",
-  model: process.env.HERMES_MODEL ?? "gemma-mm",
-  provider: process.env.HERMES_PROVIDER ?? "ollama",
+  // UNSET means "use whatever Hermes itself is configured for" — the shim omits -m/--provider
+  // entirely rather than guessing. On a box where Hermes runs deepseek with a Gemini fallback,
+  // forcing a local ollama model here would both pick a model that isn't installed AND defeat
+  // the operator's fallback chain. Set these only to deliberately override Hermes.
+  model: process.env.HERMES_MODEL ?? "",
+  provider: process.env.HERMES_PROVIDER ?? "",
   timeoutMs: Number(process.env.HERMES_TIMEOUT_MS ?? 240_000),
   // Vision/media runs are much slower on the iGPU (observed ~4-5 min for a first image).
   mediaTimeoutMs: Number(process.env.HERMES_MEDIA_TIMEOUT_MS ?? 600_000),
@@ -84,9 +88,15 @@ const extForMime = (mime = "") => {
 function runHermes(prompt, image) {
   // Image input requires `hermes chat --image` (decorated output, slower); text uses `-z` (clean).
   const isChat = Boolean(image);
+  // Only pass -m/--provider when explicitly configured; otherwise Hermes uses its own default
+  // (and its own fallback chain), which is what we want when someone else owns that config.
+  const modelArgs = [
+    ...(CFG.model ? ["-m", CFG.model] : []),
+    ...(CFG.provider ? ["--provider", CFG.provider] : []),
+  ];
   const args = isChat
-    ? ["chat", "-q", prompt, "--image", image, "-m", CFG.model, "--provider", CFG.provider, ...CFG.extraArgs]
-    : ["-z", prompt, "-m", CFG.model, "--provider", CFG.provider, ...CFG.extraArgs];
+    ? ["chat", "-q", prompt, "--image", image, ...modelArgs, ...CFG.extraArgs]
+    : ["-z", prompt, ...modelArgs, ...CFG.extraArgs];
   const timeout = isChat ? CFG.mediaTimeoutMs : CFG.timeoutMs;
   return new Promise((resolve, reject) => {
     execFile(
@@ -208,7 +218,8 @@ await mkdir(CFG.cwd, { recursive: true });
 server.listen(CFG.port, CFG.host, () => {
   console.log(
     `hermes-gateway listening on http://${CFG.host}:${CFG.port}  ` +
-      `(brain=hermes model=${CFG.model} provider=${CFG.provider} auth=${CFG.token ? "on" : "off"})`
+      `(brain=hermes model=${CFG.model || "<hermes default>"} ` +
+      `provider=${CFG.provider || "<hermes default>"} auth=${CFG.token ? "on" : "off"})`
   );
   console.log(`  agent cwd: ${CFG.cwd}`);
 });

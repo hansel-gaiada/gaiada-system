@@ -15,12 +15,23 @@ User=azlan
 Group=azlan
 WorkingDirectory=/opt/hermes-gateway
 
-# Loopback only. Containers reach it as host.docker.internal:3009 (the docker0 bridge);
-# binding 0.0.0.0 would expose an unauthenticated-by-default agent to the whole box.
-Environment=HOST=127.0.0.1
+# Must bind beyond loopback: containers reach the host as 172.17.0.1 (the docker0 bridge), so a
+# 127.0.0.1 bind gives them "connection refused" and ai-gateway silently degrades to its `echo`
+# terminator -- a working-looking stack that answers nothing. Same treatment as the host Postgres,
+# Redis and Ollama. Safe because the shim is fail-closed on a bearer token (verified: 401 without
+# one) and the GCP firewall admits only 22/80/443, so :3009 is never externally reachable.
+Environment=HOST=0.0.0.0
 Environment=PORT=3009
 Environment=HOME=/home/azlan
-Environment=PATH=/home/azlan/.local/bin:/usr/local/bin:/usr/bin:/bin
+# REQUIRED. Hermes' real state (provider config, skills, memory, credentials) lives in
+# /opt/hermes-zen, not ~/.hermes — azlan's interactive shell exports this. Without it a systemd
+# run silently falls back to the empty ~/.hermes and every completion fails with
+# "No inference provider configured", which reads like a broken install rather than a missing var.
+Environment=HERMES_HOME=/opt/hermes-zen
+# System node (apt nodejs 18.x), NOT azlan's nvm build. The shim is our service; pinning it to
+# another account's nvm would break it silently the day azlan changes node versions. `hermes`
+# itself still comes from azlan's ~/.local/bin (a symlink into /opt/hermes-zen's venv).
+Environment=PATH=/usr/local/bin:/usr/bin:/bin:/home/azlan/.local/bin
 # Isolated scratch dir so Hermes' tool use never touches the repo or /opt/hermes-zen.
 Environment=HERMES_CWD=/opt/hermes-gateway/work
 # Agent runs are slow (full tool/memory loop, not a raw completion).
@@ -29,7 +40,7 @@ Environment=HERMES_MEDIA_TIMEOUT_MS=600000
 # GATEWAY_TOKEN — must equal ai-gateway's. Kept out of this file so the unit is committable.
 EnvironmentFile=/etc/gaiada/hermes-gateway.env
 
-ExecStart=/usr/bin/env node server.mjs
+ExecStart=/usr/bin/node server.mjs
 Restart=on-failure
 RestartSec=5s
 

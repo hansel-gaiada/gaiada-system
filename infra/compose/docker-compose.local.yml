@@ -34,6 +34,12 @@ services:
     ports:
       - "127.0.0.1:56380:6379"
 
+  # TR-19: publish report-renderer on the host for local `POST /render` smoke checks (curl-able
+  # from the host during dev/QA). Internal-only in the committed VPS compose by design.
+  report-renderer:
+    ports:
+      - "127.0.0.1:3007:3007"
+
   # TEMPORARY INCIDENT GUARD (2026-07-29). WhatsApp is currently refusing this number/IP's pairing
   # registration (see the note on the waha image pin in docker-compose.vps.yml). With
   # WHATSAPP_RESTART_ALL_SESSIONS=True — the VPS default, and normally the RIGHT default because it

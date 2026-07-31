@@ -57,7 +57,7 @@ jobs:
       COMPOSE_PROFILES: ${{ vars.COMPOSE_PROFILES || '' }}
       COMPONENTS: >-
         wa-chat-bot mcp-hub ai-agents ai-gateway-go sync-engine-go
-        search-crawl-go platform-nest platform-ui
+        search-crawl-go platform-nest platform-ui report-renderer
     steps:
       - uses: actions/checkout@v4
 

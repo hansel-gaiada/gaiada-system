@@ -63,6 +63,17 @@ and can be run standalone (`node dist/db/migrate.js`).
    hit (see the entry immediately above for the first) — the pattern is structural, not
    accidental: multiple sessions add migrations concurrently, so ONLY `ls`, never a doc or this
    file's own reservation table, is authoritative at the moment you actually write DDL.
+   **2026-07-31 update (TR-14, `report_periods`/`report_documents`) — `0058`–`0066` are ALL
+   unavailable, most of them TAKEN, two deliberately UNFILLED.** `ls migrations | sort | tail` at
+   implementation time showed the real head as `0063_pm_task_assignee_intervals.sql` (TR-34),
+   `0064_search_change_executions.sql` (SM-21), `0065_search_campaign_metrics_provenance.sql`
+   (SM-25c), `0066_search_ads_execution_manifest.sql` (a further concurrent search-marketing
+   migration). `0058`/`0059` remain the two reserved gaps for TR-23 (appraisal tables, not yet
+   implemented) and TR-08 (already landed as `0057`, per the entry above) respectively — per rule
+   3/the doc's own instruction, **do NOT fill 0058/0059**; they stay orphaned reservations, not
+   free slots. TR-14 shipped as **`0067_report_periods_documents.sql`**. **Next unused is `0068`**
+   — re-verify with `ls migrations | sort | tail` before trusting that, exactly as every entry in
+   this log has had to.
 3. **Duplicate prefixes are FORBIDDEN going forward.** Two files must never share a numeric prefix.
    (See the grandfather clause for the two historical exceptions.)
 4. **Never rename, renumber, edit, or delete a migration that has been applied to any database.**
@@ -122,3 +133,17 @@ at it, run `node dist/db/migrate.js`, confirm the ordered `applied:` list and ex
    NOT filled. TR-34 shipped as `0063_pm_task_assignee_intervals.sql` (validity intervals on
    `pm_task_assignees`' owner/responsible roles — the ownership-axis counterpart to `0055`'s
    unit-axis history-rewrite fix). **Next unused is `0064`.**
+
+   **2026-07-31 update (SM-21 + SM-25c, search-marketing) — `0064` and `0065` are TAKEN.** Two
+   concurrent sessions on the same module, and they DID collide once: SM-25c drafted its file as
+   `0064` while SM-21 was writing `0064_search_change_executions.sql`. Caught before either was
+   applied anywhere (no `schema_migrations` row existed for either), and SM-25c renamed to `0065`.
+   `0058`/`0059` remain reserved for TR-23/TR-14 and were again deliberately NOT filled.
+   - `0064_search_change_executions.sql` (SM-21) — the api-mode change-proposal execution record;
+     `UNIQUE (approval_id)` is the one-shot consumption of the WS4 approval.
+   - `0065_search_campaign_metrics_provenance.sql` (SM-25c) — additive `simulated`/`connection_id`
+     provenance columns on `search_campaign_metrics_daily`.
+   Both are registered in `src/modules/search/index.ts`'s `migrations` array. **Next unused is
+   `0066`** — and the lesson from the near-collision above is the one rule 5 already states: when two
+   agents work one module in the same session, `ls migrations/` at the moment you write DDL is the
+   only authority. A number in a ticket brief was stale for BOTH of these tickets.

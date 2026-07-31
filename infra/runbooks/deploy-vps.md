@@ -115,7 +115,35 @@ $C http://mcp-hub:3003/health
 $C http://platform:3004/health
 $C http://knowledge:3005/health
 $C http://platform-ui:3005/         # UI is also published on the host at :3005
+$C http://report-renderer:3007/health   # TR-19 sidecar; internal-network only, no published port
 ```
+
+Auth-gate smoke check (TR-19 acceptance criterion — a token-less request must 401; run from a
+container on the same compose network, since `report-renderer` has no published port):
+
+```bash
+docker compose -f docker-compose.vps.yml exec -T platform \
+  wget -qO- --header="Content-Type: application/json" \
+  --post-data='{"url":"http://platform-ui:3005/"}' http://report-renderer:3007/render
+# expect: HTTP 401 (busybox wget prints the body on error with -qO- but exits non-zero;
+# check the response body / use curl -i from a debug shell if you need the status line)
+```
+
+## Known caveats — builds unverified in this dev environment
+
+No Docker is available in the day-to-day dev environment these components were authored in.
+**Validate the following on a real Docker host before any deploy that includes them** — do not
+assume a passing local `npm test`/`go test` means the container builds or runs:
+
+- `ai-gateway-go` — `docker build` and `docker compose config` never run against Docker locally.
+- `render-gateway-go` — planned; same caveat will apply once it's built.
+- **`report-renderer` (TR-19)** — this one is the exception: Docker Desktop WAS available when it
+  was built, so its image build, healthcheck, auth/SSRF gates, and a real
+  `chromium.launch()` → `page.pdf()` render were all verified (2026-07-31; exact commands +
+  output in `docs/modules/CHANGELOG.md`'s report-renderer entry, incl. `docker compose ps`
+  showing it `(healthy)`). **What's still unverified is a real deploy to the production Linux
+  VPS** (Docker Desktop's Linux-VM backend on Windows was the only host used) — re-run the health
+  checks above against the actual VPS the first time this service ships there.
 
 ## Security notes
 
@@ -123,3 +151,6 @@ $C http://platform-ui:3005/         # UI is also published on the host at :3005
 - Provider keys exist only in the `ai-gateway` service env (D8).
 - OpenBao replaces the file-based LocalKms before real-data ingestion (checklist 0.4) — it
   belongs on a SEPARATE VPS from this stack, per the day-one spec.
+- `report-renderer` (TR-19) holds only the shared `RENDERER_TOKEN`, never a tenant credential, and
+  is origin-locked to `PLATFORM_UI_INTERNAL_URL` (`report-renderer/src/auth.ts`) so a leaked token
+  cannot be used to make it fetch arbitrary internal or external hosts.

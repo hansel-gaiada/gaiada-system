@@ -63,10 +63,21 @@ services:
       # sm-rank-collect workflow (the only prior consumer) was retired by SM-55 (architect
       # ruling, tracker §6ad/A13). SM-56 is PARKED — do not remove this believing it is dead.
       SEARCH_CALLBACK_SECRET: ${SEARCH_CALLBACK_SECRET:-}
-    # Standalone: resolve the workflows' hardcoded http://mcp-hub:3003 to a hub on the host.
-    # (On the VPS stack n8n shares the network and mcp-hub resolves natively; this is harmless there.)
+      # TR-11: the three reports/check-in flows call platform-nest DIRECTLY (facts/recompute and
+      # the two checkin service reads are deliberately NOT MCP tools, §9.2) with the platform's OWN
+      # service token — the SAME shared secret mcp-hub itself holds as PLATFORM_SERVICE_TOKEN, not a
+      # new credential class, but note the blast radius: a direct platform call is bounded ONLY by
+      # Cerbos + the service account's role (seed:automation grants company_admin), not by the
+      # hub's own least-privilege tool allow-list. Handle with equal care to HUB_SERVICE_TOKEN.
+      PLATFORM_URL: ${PLATFORM_URL:-http://platform:3004}
+      PLATFORM_SERVICE_TOKEN: ${PLATFORM_SERVICE_TOKEN:-}
+    # Standalone: resolve the workflows' hardcoded http://mcp-hub:3003 / bot / platform hostnames
+    # to their published host ports. (On the VPS stack n8n shares the network and they resolve
+    # natively; this is harmless there.) BOT_URL already resolves via that same env var, not a
+    # hostname, since the bot has no fixed compose service name assumption in the existing flows.
     extra_hosts:
       - "mcp-hub:host-gateway"
+      - "platform:host-gateway"
     volumes:
       - n8n-data:/home/node/.n8n
 
