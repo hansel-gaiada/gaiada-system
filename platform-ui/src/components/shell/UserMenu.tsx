@@ -49,7 +49,7 @@ export function UserMenu({ name, secondary, initials }: { name: string; secondar
         <div className="erp-side__avatar">{initials}</div>
         <div style={{ minWidth: 0, lineHeight: 1.25, textAlign: "left" }}>
           <div style={{ font: "700 13px var(--font-body)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{name}</div>
-          <div style={{ font: "400 11px var(--font-body)", color: "rgba(26,25,22,.55)" }}>{secondary}</div>
+          <div style={{ font: "400 11px var(--font-body)", color: "var(--ink-subtle)" }}>{secondary}</div>
         </div>
       </button>
     </div>

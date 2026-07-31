@@ -129,12 +129,12 @@ export default async function EngagementDetailPage({ params }: { params: Params 
         <div
           role="alert"
           style={{
-            border: "0.5px solid var(--erp-hairline)", borderLeft: "3px solid var(--erp-danger, #B5622F)",
-            background: "rgba(181,98,47,.06)", padding: "12px 14px", marginTop: 16,
+            border: "0.5px solid var(--erp-hairline)", borderLeft: "3px solid var(--erp-danger, var(--status-critical))",
+            background: "color-mix(in srgb, var(--status-critical) 6%, transparent)", padding: "12px 14px", marginTop: 16,
             font: "400 13px/1.6 var(--font-body)", color: "var(--erp-ink-60)",
           }}
         >
-          <strong style={{ color: "var(--erp-danger, #B5622F)" }}>Over budget:</strong> the configured
+          <strong style={{ color: "var(--erp-danger, var(--status-critical-fg))" }}>Over budget:</strong> the configured
           scope is projected to exceed this engagement&apos;s provider budget ({formatUsd(engagement.providerBudgetUsd)}/mo).
           Pulls will be refused by the stop-loss once the cap is reached this period, even for toggles that
           are switched on.

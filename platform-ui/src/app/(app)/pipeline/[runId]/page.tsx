@@ -83,7 +83,7 @@ export default async function PipelineRunPage({ params }: { params: Promise<{ ru
         <h1 style={{ margin: "6px 0 0", fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 30, lineHeight: 1.1 }}>
           {run.title ?? "Untitled run"}
         </h1>
-        <p style={{ margin: "8px 0 0", font: "400 13px var(--font-body)", color: "rgba(26,25,22,.55)" }}>
+        <p style={{ margin: "8px 0 0", font: "400 13px var(--font-body)", color: "var(--ink-subtle)" }}>
           Started {formatDateTime(run.created_at)} · last updated {formatDateTime(run.updated_at)}
         </p>
       </div>
@@ -223,7 +223,7 @@ function GateRow({ gate, runId, mayDecide, onDecide }: {
           {GATE_LABEL[gate.kind] ?? gate.kind}
           <span style={{ marginLeft: 8 }}><StatusBadge label={gate.actor_side === "client" ? "client" : "internal"} /></span>
         </div>
-        <div style={{ font: "400 13px/1.4 var(--font-body)", color: "rgba(26,25,22,.55)" }}>
+        <div style={{ font: "400 13px/1.4 var(--font-body)", color: "var(--ink-subtle)" }}>
           {gate.status === "pending"
             ? `Opened ${formatDateTime(gate.created_at)}`
             : `${gate.decision ?? "decided"} ${gate.decided_at ? `· ${formatDateTime(gate.decided_at)}` : ""}`}

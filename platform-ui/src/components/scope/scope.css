@@ -13,15 +13,15 @@
   font: 700 9px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--erp-ink-50);
 }
 .scope-pill__value { font: 400 13px var(--font-body); color: var(--text-primary); }
-.scope-pill__menu {
+.scope-pill__menu { box-shadow: var(--elev-overlay);
   position: absolute; top: calc(100% + 4px); left: 0; z-index: 10; min-width: 220px;
-  border: 0.5px solid var(--erp-hairline); background: var(--surface-card); max-height: 320px; overflow: auto;
+  border: 0.5px solid var(--erp-hairline); background: var(--surface-raised); max-height: 320px; overflow: auto;
 }
 .scope-pill__item {
   display: block; padding: 8px 12px; font: 400 13px var(--font-body); color: var(--text-primary);
   text-decoration: none; border-bottom: 0.5px solid var(--erp-hairline-soft);
 }
-.scope-pill__item:hover { background: rgba(110, 90, 67, 0.06); }
+.scope-pill__item:hover { background: var(--tint-hover); }
 .scope-pill__item--active { color: var(--erp-accent); font-weight: 700; }
 
 .scope-envelope { margin: 0 0 16px; }

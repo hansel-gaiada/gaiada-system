@@ -1,13 +1,13 @@
 .dash-grid { display: grid; gap: 20px; grid-template-columns: 1.7fr 1fr; grid-template-areas: "kpi kpi" "chart tasks" "table activity"; }
 .dash-kpis { grid-area: kpi; display: grid; gap: 20px; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); }
-.dash-approval { padding: 13px 0; border-top: 0.5px solid rgba(26, 25, 22, 0.1); display: flex; gap: 12px; align-items: flex-start; }
+.dash-approval { padding: 13px 0; border-top: 0.5px solid var(--line-soft); display: flex; gap: 12px; align-items: flex-start; }
 .dash-approval__title { font: 400 14px/1.35 var(--font-body); color: var(--text-primary); }
-.dash-approval__meta { font: 400 12px var(--font-body); color: rgba(26, 25, 22, 0.55); margin-top: 3px; }
+.dash-approval__meta { font: 400 12px var(--font-body); color: var(--ink-subtle); margin-top: 3px; }
 .dash-approval__actions { display: flex; gap: 6px; }
-.dash-approval__btn { width: 26px; height: 26px; border: 0.5px solid rgba(26, 25, 22, 0.3); background: transparent; color: var(--text-primary); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
-.dash-approval__btn--solid { border-color: var(--erp-accent); background: var(--erp-accent); color: #f4f1ea; }
+.dash-approval__btn { width: 26px; height: 26px; border: 0.5px solid var(--line-control); background: transparent; color: var(--text-primary); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
+.dash-approval__btn--solid { border-color: var(--erp-accent); background: var(--erp-accent); color: var(--text-on-accent); }
 .dash-empty { padding: 26px 0; text-align: center; }
-.dash-empty p { font: 400 13px var(--font-body); color: rgba(26, 25, 22, 0.55); margin-top: 6px; }
+.dash-empty p { font: 400 13px var(--font-body); color: var(--ink-subtle); margin-top: 6px; }
 .dash-pending-chip { font: 700 11px var(--font-body); letter-spacing: 0.06em; color: var(--erp-accent); border: 0.5px solid var(--erp-accent); padding: 4px 9px; }
 .dash-activity-row { display: flex; gap: 12px; padding-bottom: 16px; }
 .dash-activity-dot { display: flex; flex-direction: column; align-items: center; }
@@ -17,29 +17,29 @@
 
 /* ---- UX-2 §1: role-differentiated Home (WSUX-5) ---- */
 
-.needs-me-queue__row { display: flex; align-items: flex-start; gap: 12px; padding: 13px 0; border-top: 0.5px solid rgba(26, 25, 22, 0.1); }
+.needs-me-queue__row { display: flex; align-items: flex-start; gap: 12px; padding: 13px 0; border-top: 0.5px solid var(--line-soft); }
 .needs-me-queue__dot { width: 8px; height: 8px; border-radius: 50%; margin-top: 6px; flex-shrink: 0; }
-/* Risk-colour discipline (WSUX-11 Major-1 fix): rust (#B5622F) is the app's
+/* Risk-colour discipline (WSUX-11 Major-1 fix): rust (--status-critical) is the app's
    one alarm colour, reserved for the most urgent band. `urgencyBand()`
    (lib/queueUrgency.ts) maps pending approvals/gates AND already-overdue
    tasks to "now" — those get the alarm colour. "today" (due today, not yet
    late) gets the calm bronze the rest of the app uses for in-flight/attention
    states (matches Notifications' warning tier). "soon" stays neutral grey. */
-.needs-me-queue__dot--now { background: #B5622F; }
-.needs-me-queue__dot--today { background: var(--erp-accent, #6E5A43); }
-.needs-me-queue__dot--soon { background: rgba(26, 25, 22, 0.28); }
+.needs-me-queue__dot--now { background: var(--status-critical); }
+.needs-me-queue__dot--today { background: var(--erp-accent, var(--accent)); }
+.needs-me-queue__dot--soon { background: var(--status-neutral); }
 .needs-me-queue__body { min-width: 0; flex: 1; }
 .needs-me-queue__line { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
 .needs-me-queue__type { font: 700 9px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--erp-ink-50); }
 .needs-me-queue__title { font: 400 14px/1.35 var(--font-body); color: var(--text-primary); }
 .needs-me-queue__title-link { color: inherit; text-decoration: none; }
 .needs-me-queue__title-link:hover { text-decoration: underline; }
-.needs-me-queue__meta { font: 400 12px var(--font-body); color: rgba(26, 25, 22, 0.55); margin-top: 3px; }
+.needs-me-queue__meta { font: 400 12px var(--font-body); color: var(--ink-subtle); margin-top: 3px; }
 .needs-me-queue__actions { display: flex; gap: 6px; flex-shrink: 0; }
 
 .filter-chips { display: flex; flex-wrap: wrap; gap: 8px; }
 .filter-chip { display: inline-flex; align-items: center; gap: 8px; border: 0.5px solid var(--erp-hairline); padding: 8px 14px; text-decoration: none; color: var(--text-primary); background: var(--surface-card); }
-.filter-chip:hover { background: rgba(110, 90, 67, 0.06); }
+.filter-chip:hover { background: var(--tint-hover); }
 .filter-chip--active { border-color: var(--erp-accent); color: var(--erp-accent); }
 .filter-chip__label { font: 400 12px var(--font-body); }
 .filter-chip__count { font: 700 12px var(--font-body); }
@@ -55,10 +55,10 @@
 .today-agenda__bucket { margin-bottom: 18px; }
 .today-agenda__heading { display: block; margin-bottom: 8px; }
 .today-agenda__list { list-style: none; margin: 0; padding: 0; }
-.today-agenda__item { font: 400 13px/1.5 var(--font-body); color: var(--text-primary); padding: 6px 0; border-top: 0.5px solid rgba(26, 25, 22, 0.08); }
+.today-agenda__item { font: 400 13px/1.5 var(--font-body); color: var(--text-primary); padding: 6px 0; border-top: 0.5px solid var(--line-soft); }
 .today-agenda__link { color: inherit; text-decoration: none; }
 .today-agenda__link:hover { text-decoration: underline; }
-.today-agenda__meta { color: rgba(26, 25, 22, 0.5); }
+.today-agenda__meta { color: var(--ink-subtle); }
 
 .throughput-sparkline { text-align: right; }
 

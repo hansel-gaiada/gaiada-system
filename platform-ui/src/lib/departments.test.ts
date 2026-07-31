@@ -13,9 +13,9 @@ const NOW = new Date("2026-07-22T12:00:00Z");
 
 // A project that renamed Done→Shipped (isDone) and Blocked→Stuck (isBlocked)
 // with non-legacy ids — the KPI/health/rail math must key off the FLAGS.
-const SHIPPED: ProjectStatus = { id: "s-ship", label: "Shipped", color: "#4B7A5A", isDone: true, isBlocked: false, position: 3 };
-const STUCK: ProjectStatus = { id: "s-stuck", label: "Stuck", color: "#B5622F", isDone: false, isBlocked: true, position: 2 };
-const DOING: ProjectStatus = { id: "s-doing", label: "Doing", color: "#6E5A43", isDone: false, isBlocked: false, position: 1 };
+const SHIPPED: ProjectStatus = { id: "s-ship", label: "Shipped", color: "var(--status-ok-fg)", isDone: true, isBlocked: false, position: 3 };
+const STUCK: ProjectStatus = { id: "s-stuck", label: "Stuck", color: "var(--status-critical-fg)", isDone: false, isBlocked: true, position: 2 };
+const DOING: ProjectStatus = { id: "s-doing", label: "Doing", color: "var(--accent)", isDone: false, isBlocked: false, position: 1 };
 const CUSTOM_STATUSES: Record<string, ProjectStatus[]> = { pc: [DOING, STUCK, SHIPPED] };
 
 const task = (over: Partial<PmTask>): PmTask => ({

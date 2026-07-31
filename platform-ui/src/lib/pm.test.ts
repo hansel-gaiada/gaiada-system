@@ -16,10 +16,10 @@ import {
 // "Blocked" to "Stuck" (still isBlocked), with fresh non-legacy ids — the exact
 // shape the flag-driven refactor must handle correctly (P2-05 acceptance).
 const CUSTOM: ProjectStatus[] = [
-  { id: "s-back",  label: "Backlog",     color: "#A39174", isDone: false, isBlocked: false, position: 0 },
-  { id: "s-doing", label: "Doing",       color: "#6E5A43", isDone: false, isBlocked: false, position: 1 },
-  { id: "s-stuck", label: "Stuck",       color: "#B5622F", isDone: false, isBlocked: true,  position: 2 },
-  { id: "s-ship",  label: "Shipped",     color: "#4B7A5A", isDone: true,  isBlocked: false, position: 3 },
+  { id: "s-back",  label: "Backlog",     color: "var(--status-idle-fg)", isDone: false, isBlocked: false, position: 0 },
+  { id: "s-doing", label: "Doing",       color: "var(--accent)", isDone: false, isBlocked: false, position: 1 },
+  { id: "s-stuck", label: "Stuck",       color: "var(--status-critical-fg)", isDone: false, isBlocked: true,  position: 2 },
+  { id: "s-ship",  label: "Shipped",     color: "var(--status-ok-fg)", isDone: true,  isBlocked: false, position: 3 },
 ];
 
 const sub = (done: boolean): Subtask => ({ id: Math.random().toString(36), title: "s", done });
@@ -64,10 +64,10 @@ describe("groupByStatus", () => {
     expect(cols.map((c) => c.key)).toEqual(["s-back", "s-doing", "s-stuck", "s-ship"]);
     expect(cols.map((c) => c.label)).toEqual(["Backlog", "Doing", "Stuck", "Shipped"]);
     expect(cols[3].tasks.map((t) => t.id)).toEqual(["a"]);
-    expect(cols[0].color).toBe("#A39174");
+    expect(cols[0].color).toBe("var(--status-idle-fg)");
   });
   it("carries a status's wipLimit onto its column and keeps an unknown-status task in a trailing column", () => {
-    const withWip: ProjectStatus[] = [{ id: "todo", label: "To do", color: "#A39174", isDone: false, isBlocked: false, position: 0, wipLimit: 2 }];
+    const withWip: ProjectStatus[] = [{ id: "todo", label: "To do", color: "var(--status-idle-fg)", isDone: false, isBlocked: false, position: 0, wipLimit: 2 }];
     const cols = groupByStatus([task({ id: "a", status: "todo" }), task({ id: "orphan", status: "ghost" })], withWip);
     expect(cols[0].wipLimit).toBe(2);
     expect(cols.at(-1)?.tasks.map((t) => t.id)).toEqual(["orphan"]); // never dropped
@@ -173,13 +173,13 @@ describe("union-by-label status columns (dept board, D-4)", () => {
   // ids, plus a label unique to one project.
   const statusesByProject: Record<string, ProjectStatus[]> = {
     p1: [
-      { id: "p1-todo", label: "To do", color: "#A39174", isDone: false, isBlocked: false, position: 0 },
-      { id: "p1-done", label: "Done", color: "#4B7A5A", isDone: true, isBlocked: false, position: 1 },
+      { id: "p1-todo", label: "To do", color: "var(--status-idle-fg)", isDone: false, isBlocked: false, position: 0 },
+      { id: "p1-done", label: "Done", color: "var(--status-ok-fg)", isDone: true, isBlocked: false, position: 1 },
     ],
     p2: [
-      { id: "p2-todo", label: "To do", color: "#A39174", isDone: false, isBlocked: false, position: 0 },
-      { id: "p2-rev", label: "Review", color: "#6E5A43", isDone: false, isBlocked: false, position: 1 },
-      { id: "p2-done", label: "Done", color: "#4B7A5A", isDone: true, isBlocked: false, position: 2 },
+      { id: "p2-todo", label: "To do", color: "var(--status-idle-fg)", isDone: false, isBlocked: false, position: 0 },
+      { id: "p2-rev", label: "Review", color: "var(--accent)", isDone: false, isBlocked: false, position: 1 },
+      { id: "p2-done", label: "Done", color: "var(--status-ok-fg)", isDone: true, isBlocked: false, position: 2 },
     ],
   };
   it("distinctStatusLabels dedups shared labels and orders by average position", () => {
@@ -460,8 +460,8 @@ describe("aggregateBurndown", () => {
 
 describe("aggregateFlow", () => {
   const STATUS_A: ProjectStatus[] = [
-    { id: "todo", label: "To do", color: "#A39174", isDone: false, isBlocked: false, position: 0 },
-    { id: "done", label: "Done", color: "#4B7A5A", isDone: true, isBlocked: false, position: 1 },
+    { id: "todo", label: "To do", color: "var(--status-idle-fg)", isDone: false, isBlocked: false, position: 0 },
+    { id: "done", label: "Done", color: "var(--status-ok-fg)", isDone: true, isBlocked: false, position: 1 },
   ];
   // Project B renamed "Done" -> its OWN id, but the SAME label — must merge into one band.
   const STATUS_B: ProjectStatus[] = [
@@ -482,8 +482,8 @@ describe("aggregateFlow", () => {
       { points: [], statuses: STATUS_A },
       { points: [], statuses: STATUS_B },
     ]);
-    expect(merged.statuses.find((s) => s.label === "To do")?.color).toBe("#A39174");
-    expect(merged.statuses.find((s) => s.label === "Done")?.color).toBe("#4B7A5A");
+    expect(merged.statuses.find((s) => s.label === "To do")?.color).toBe("var(--status-idle-fg)");
+    expect(merged.statuses.find((s) => s.label === "Done")?.color).toBe("var(--status-ok-fg)");
   });
 
   it("a date present in only some projects' series still sums whatever exists that day", () => {

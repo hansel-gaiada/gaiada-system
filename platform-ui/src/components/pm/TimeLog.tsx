@@ -28,7 +28,7 @@ export function TimeLog({ logs, loggedMinutes, estimateMinutes, billableMinutes,
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       <div style={{ display: "flex", gap: 20, flexWrap: "wrap", alignItems: "baseline" }}>
-        <span style={{ font: "700 18px var(--font-display)", color: overEstimate ? "#B5622F" : "var(--text-primary)" }}>
+        <span style={{ font: "700 18px var(--font-display)", color: overEstimate ? "var(--status-critical-fg)" : "var(--text-primary)" }}>
           {hrs(loggedMinutes)}{estimateMinutes != null ? ` / ${hrs(estimateMinutes)}` : ""}
         </span>
         <span style={{ font: "400 12px var(--font-body)", color: "var(--erp-ink-50)" }}>

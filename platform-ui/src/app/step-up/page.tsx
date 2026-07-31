@@ -41,13 +41,13 @@ export default async function StepUpPage({ searchParams }: { searchParams: SP })
           A stronger sign-in is needed
         </h1>
 
-        <p style={{ margin: 0, font: "400 14px/1.6 var(--font-body)", color: "rgba(26,25,22,.68)" }}>
+        <p style={{ margin: 0, font: "400 14px/1.6 var(--font-body)", color: "var(--ink-muted)" }}>
           The action you requested touches company data or changes records. Chat sessions
           (WhatsApp / Telegram) are low-assurance, so we need you to complete a full sign-in
           before continuing. Once verified, you&apos;ll be returned to where you left off.
         </p>
 
-        <div style={{ border: "0.5px solid var(--erp-hairline-soft)", padding: "12px 14px", background: "rgba(110,90,67,.04)" }}>
+        <div style={{ border: "0.5px solid var(--erp-hairline-soft)", padding: "12px 14px", background: "var(--tint-hover)" }}>
           <Eyebrow style={{ fontSize: 10, opacity: 0.6 }}>Returning to</Eyebrow>
           <div style={{ font: "400 13px var(--font-body)", color: "var(--text-primary)", marginTop: 4, wordBreak: "break-all" }}>{returnTo}</div>
         </div>

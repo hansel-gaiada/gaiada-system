@@ -21,7 +21,7 @@ export default async function RollupsPage({ searchParams }: { searchParams: Prom
         <>
           <PageHeader eyebrow="Business" title="Rollups" subtitle="Cross-company metrics across the D & A Syrowatka group." />
           <Card>
-            <p style={{ margin: 0, font: "400 14px/1.5 var(--font-body)", color: "rgba(26,25,22,.62)" }}>
+            <p style={{ margin: 0, font: "400 14px/1.5 var(--font-body)", color: "var(--ink-muted)" }}>
               This view is limited to group executives.
             </p>
           </Card>
@@ -50,7 +50,7 @@ export default async function RollupsPage({ searchParams }: { searchParams: Prom
       />
       {groups.length === 0 ? (
         <Card>
-          <p style={{ margin: 0, font: "400 14px/1.5 var(--font-body)", color: "rgba(26,25,22,.62)" }}>
+          <p style={{ margin: 0, font: "400 14px/1.5 var(--font-body)", color: "var(--ink-muted)" }}>
             No rollup metrics for this period yet — try recomputing a company below once figures are ready.
           </p>
         </Card>

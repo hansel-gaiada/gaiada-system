@@ -34,7 +34,7 @@ export default async function AdminUsersPage() {
         <>
           <PageHeader eyebrow="Settings" title="Users & Roles" subtitle="Members, access grants and session control." />
           <Card>
-            <p style={{ margin: 0, font: "400 14px/1.5 var(--font-body)", color: "rgba(26,25,22,.62)" }}>
+            <p style={{ margin: 0, font: "400 14px/1.5 var(--font-body)", color: "var(--ink-muted)" }}>
               This page is limited to administrators.
             </p>
           </Card>

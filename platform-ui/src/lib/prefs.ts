@@ -5,17 +5,21 @@ import { cookies } from "next/headers";
 
 export type Density = "comfortable" | "compact";
 export type Width = "standard" | "wide";
+/** "auto" follows prefers-color-scheme; the other two pin the theme. */
+export type Theme = "auto" | "light" | "dark";
 
 export interface Prefs {
   density: Density;
   width: Width;
+  theme: Theme;
 }
 
-export const DEFAULT_PREFS: Prefs = { density: "comfortable", width: "standard" };
+export const DEFAULT_PREFS: Prefs = { density: "comfortable", width: "standard", theme: "auto" };
 const COOKIE = "gaiada_prefs";
 
 const DENSITIES: Density[] = ["comfortable", "compact"];
 const WIDTHS: Width[] = ["standard", "wide"];
+const THEMES: Theme[] = ["auto", "light", "dark"];
 
 export async function getPrefs(): Promise<Prefs> {
   const jar = await cookies();
@@ -26,6 +30,7 @@ export async function getPrefs(): Promise<Prefs> {
     return {
       density: DENSITIES.includes(parsed.density as Density) ? (parsed.density as Density) : DEFAULT_PREFS.density,
       width: WIDTHS.includes(parsed.width as Width) ? (parsed.width as Width) : DEFAULT_PREFS.width,
+      theme: THEMES.includes(parsed.theme as Theme) ? (parsed.theme as Theme) : DEFAULT_PREFS.theme,
     };
   } catch {
     return DEFAULT_PREFS;

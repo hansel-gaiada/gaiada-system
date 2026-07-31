@@ -102,7 +102,7 @@ export function GeneratePlanForm({
         </Button>
       </div>
       {error && (
-        <p role="alert" style={{ font: "400 12px var(--font-body)", color: "var(--erp-danger, #B5622F)", marginTop: 8 }}>
+        <p role="alert" style={{ font: "400 12px var(--font-body)", color: "var(--erp-danger, var(--status-critical-fg))", marginTop: 8 }}>
           {error}
         </p>
       )}

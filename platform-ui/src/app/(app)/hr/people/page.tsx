@@ -29,7 +29,7 @@ export default async function HRPeoplePage() {
   if (!can(me, "people.directory", tenant) && !isElevated(me)) {
     return (
       <Card>
-        <p style={{ margin: 0, font: "400 14px/1.5 var(--font-body)", color: "rgba(26,25,22,.62)" }}>
+        <p style={{ margin: 0, font: "400 14px/1.5 var(--font-body)", color: "var(--ink-muted)" }}>
           The people directory is limited to owners and administrators. You can still open your own profile from the account menu.
         </p>
       </Card>

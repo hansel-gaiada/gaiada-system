@@ -28,7 +28,7 @@ export function RecordControls({ clientId, projectId }: { clientId?: string; pro
         <input
           name="title"
           placeholder="Meeting title (e.g. Northwind — kickoff)"
-          style={{ padding: "10px 12px", border: "1px solid rgba(26,25,22,.14)", borderRadius: 10, font: "400 14px var(--font-body)" }}
+          style={{ padding: "10px 12px", border: "1px solid var(--line)", borderRadius: 10, font: "400 14px var(--font-body)" }}
         />
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
           <button type="submit" name="kind" value="audio" className="btn btn-primary" disabled={pending} style={{ fontSize: 14 }}>
@@ -39,14 +39,14 @@ export function RecordControls({ clientId, projectId }: { clientId?: string; pro
           </button>
         </div>
         {state?.ok && (
-          <p style={{ margin: 0, font: "400 13px var(--font-body)", color: "rgba(26,25,22,.6)" }}>
+          <p style={{ margin: 0, font: "400 13px var(--font-body)", color: "var(--ink-muted)" }}>
             Recording registered. The capture helper will attach the local file; then add its transcript below.
           </p>
         )}
         {state?.error && (
           <p style={{ margin: 0, font: "400 13px var(--font-body)", color: "var(--erp-accent)", opacity: 0.85 }}>{state.error}</p>
         )}
-        <p style={{ margin: "2px 0 0", font: "400 12px/1.5 var(--font-body)", color: "rgba(26,25,22,.45)" }}>
+        <p style={{ margin: "2px 0 0", font: "400 12px/1.5 var(--font-body)", color: "var(--ink-subtle)" }}>
           Local-first: the recording is saved on your machine and transcribed locally — only the transcript
           text is sent to the pipeline. You&rsquo;ll be reminded to sync the media to the company Drive.
         </p>
@@ -75,7 +75,7 @@ export function RecordControls({ clientId, projectId }: { clientId?: string; pro
           <input
             name="title"
             placeholder="Meeting title (optional)"
-            style={{ padding: "10px 12px", border: "1px solid rgba(26,25,22,.14)", borderRadius: 10, font: "400 14px var(--font-body)" }}
+            style={{ padding: "10px 12px", border: "1px solid var(--line)", borderRadius: 10, font: "400 14px var(--font-body)" }}
           />
           <input
             type="file"

@@ -2,16 +2,28 @@
    Luxury Minimalist Design System — Color System  ·  3-Tier Design Tokens
    ---------------------------------------------------------------------
    TIER 1  Primitives  — raw, immutable reference values
-   TIER 2  Brand        — the FIVE editable brand variables (live panel)
+   TIER 2  Brand        — the editable brand variables (live panel)
    TIER 3  Semantic     — purpose-driven aliases consumed by components
 
    The system is color-agnostic at its core: every component reads only
    the semantic aliases, which in turn resolve to the editable brand
    variables. Re-point the brand layer and the whole system re-renders.
    Append your own --brand-* variables below without breaking hierarchy.
+
+   RULES FOR COMPONENT AUTHORS
+   1. Never write a raw hex or rgba() in a component. If the color you
+      need has no token, add a Tier-3 alias here — that is the only way
+      dark mode and contrast stay correct in one place.
+   2. Status color comes in two flavours per tier: `--status-x` is the
+      GRAPHIC value (dots, bars, borders, fills — WCAG 1.4.11, 3:1) and
+      `--status-x-fg` is the TEXT value (darkened to clear 4.5:1 on the
+      page surface). Using the graphic value as a label color fails AA.
+   3. Text ink comes from the --ink-* ramp, never from an ad-hoc alpha.
    ===================================================================== */
 
 :root {
+  color-scheme: light;
+
   /* ---- TIER 1 · Primitives ---------------------------------------- */
   --primitive-off-white:   #F4F1EA;  /* premium warm linen          */
   --primitive-off-black:   #1A1916;  /* matte editorial near-black  */
@@ -19,6 +31,28 @@
   --primitive-champagne:   #A39174;  /* secondary highlight         */
   --primitive-paper:       #FBFAF6;  /* raised card surface         */
   --primitive-line:        #1A1916;  /* hairline reference          */
+
+  /* Status primitives. `rust` was already the app's de-facto alarm color
+     (18 hardcoded uses before tokenisation) so it is promoted, not replaced. */
+  --primitive-rust:        #B5622F;  /* alarm / critical / overdue     */
+  --primitive-sage:        #4B7A5A;  /* healthy / done / positive      */
+  --primitive-azure:       #3E7CB1;  /* informational / neutral-cool   */
+  --primitive-amber:       #9C6F1F;  /* caution / simulated / seeded   */
+  --primitive-crimson:     #B3261E;  /* destructive                    */
+
+  /* Dark-theme primitives — same hue families, lifted for a dark surface.
+     Warm near-blacks (not blue-black) so the editorial identity survives. */
+  --primitive-ink-page:       #14120E;  /* dark page canvas            */
+  --primitive-ink-card:       #1D1B16;  /* dark card surface           */
+  --primitive-ink-raised:     #26231D;  /* dark overlay / menu surface */
+  --primitive-bone:           #E8E3D6;  /* dark-theme text (dimmed to cut glare) */
+  --primitive-bronze-lift:    #C9A87C;  /* accent, legible on dark     */
+  --primitive-champagne-lift: #B8A585;
+  --primitive-rust-lift:      #E0834A;
+  --primitive-sage-lift:      #6FB088;
+  --primitive-azure-lift:     #7FB2E0;
+  --primitive-amber-lift:     #D6A63C;
+  --primitive-crimson-lift:   #E5675C;
 
   /* ---- TIER 2 · Brand (EDITABLE — wired to the live token panel) -- */
   --brand-color-primary:   var(--primitive-bronze);     /* accents, buttons, signature */
@@ -29,16 +63,220 @@
   --brand-logo-source:     none; /* @kind other */                  /* image url() set via panel */
 
   /* ---- TIER 3 · Semantic aliases (consumed by all components) ----- */
+
+  /* Surfaces. `inverse` is the deliberate contrast panel (toasts, dark
+     cards, org-chart holding boxes) — it inverts in dark mode too, where
+     it becomes a LIFTED surface rather than a darker one. */
   --surface-page:     var(--brand-color-bg);
   --surface-card:     var(--primitive-paper);
+  --surface-raised:   #FFFDF8;                        /* menus, popovers, dropdowns */
+  --surface-chrome:   var(--brand-color-bg);          /* sidebar + top bar          */
+  --surface-inverse:  var(--primitive-off-black);
+  --text-on-inverse:  var(--primitive-off-white);
+
+  /* Text that lives on --surface-inverse (toasts, dark cards, org-chart
+     holding boxes). Separate ramp: the inverse panel stays dark in BOTH
+     themes, so these must not follow the --ink-* flip. */
+  --ink-on-inverse:       rgb(244 241 234 / 0.86);
+  --ink-on-inverse-muted: rgb(244 241 234 / 0.62);  /* was 0.55 → 3.9:1 on #1A1916 */
+  --accent-on-inverse:    #D8C9A3;                  /* links/actions on the dark panel */
+
+  /* Neutral washes — untinted fills for tracks, skeletons, code blocks.
+     Distinct from --tint-* which are accent-tinted (hover/selection). */
+  --wash:        rgb(26 25 22 / 0.05);
+  --wash-strong: rgb(26 25 22 / 0.09);
+
   --text-primary:     var(--brand-color-text-dark);
   --text-on-accent:   var(--brand-color-bg);
   --accent:           var(--brand-color-primary);
   --accent-secondary: var(--brand-color-secondary);
   --hairline:         var(--brand-color-text-dark);
 
+  /* Ink ramp — the ONLY source of text color. Alphas are chosen so every
+     tier clears WCAG AA (4.5:1) on --surface-page; `faint` is the sole
+     exception and is reserved for non-informational glyphs (em-dash
+     placeholders, disabled affordances) that carry no meaning alone. */
+  --ink-strong: rgb(26 25 22);            /* 16.9:1 — headings, primary text */
+  --ink-body:   rgb(26 25 22 / 0.86);     /* 11.0:1 — long-form body         */
+  --ink-muted:  rgb(26 25 22 / 0.70);     /*  6.2:1 — secondary/meta text    */
+  --ink-subtle: rgb(26 25 22 / 0.62);     /*  4.6:1 — small caps labels      */
+  --ink-faint:  rgb(26 25 22 / 0.45);     /*  3.3:1 — decorative only        */
+
+  /* Structure. `--line-control` is the interactive-boundary tier: input
+     underlines, select borders, ghost-button outlines. WCAG 1.4.11 wants
+     3:1 for those, which the decorative hairlines below deliberately miss. */
+  --line-control: rgb(26 25 22 / 0.55);   /* 3.7:1 — form control borders */
+  --line-strong:  rgb(26 25 22 / 0.30);   /* emphasis dividers            */
+  --line:         rgb(26 25 22 / 0.16);   /* default hairline             */
+  --line-soft:    rgb(26 25 22 / 0.10);   /* nested / inner hairline      */
+
+  /* Accent washes — derived from --accent so re-branding carries them. */
+  --tint-hover:  color-mix(in srgb, var(--accent) 6%, transparent);
+  --tint-active: color-mix(in srgb, var(--accent) 10%, transparent);
+
+  /* Status — graphic value (3:1, for dots/bars/borders/fills) … */
+  --status-critical: var(--primitive-rust);
+  --status-ok:       var(--primitive-sage);
+  --status-info:     var(--primitive-azure);
+  --status-warning:  var(--primitive-amber);
+  --status-danger:   var(--primitive-crimson);
+  --status-progress: var(--accent);            /* in-flight / open / pending  */
+  --status-idle:     var(--accent-secondary);  /* draft / archived / inactive */
+  --status-neutral:  rgb(26 25 22 / 0.28);     /* unranked / not-yet-due      */
+
+  /* … and text value (4.5:1 on --surface-page). Darker than the graphic
+     tier; the graphic values above all land between 2.7:1 and 4.0:1. */
+  --status-critical-fg: #A0511F;  /* 5.1:1 */
+  --status-ok-fg:       #3C6449;  /* 6.0:1 */
+  --status-info-fg:     #2F6390;  /* 5.7:1 */
+  --status-warning-fg:  #8A5E13;  /* 5.1:1 */
+  --status-danger-fg:   var(--primitive-crimson); /* 5.8:1 — already passes */
+  --status-progress-fg: var(--accent);            /* 5.9:1 — already passes */
+  --status-idle-fg:     #77664B;  /* 5.0:1 — champagne is 2.7:1, unusable as text */
+
+  /* Status washes — tinted backgrounds for banners and chips. */
+  --status-critical-bg:   color-mix(in srgb, var(--status-critical) 10%, transparent);
+  --status-critical-line: color-mix(in srgb, var(--status-critical) 40%, transparent);
+  --status-warning-bg:    color-mix(in srgb, var(--status-warning) 10%, transparent);
+  --status-ok-bg:         color-mix(in srgb, var(--status-ok) 10%, transparent);
+  --status-info-bg:       color-mix(in srgb, var(--status-info) 10%, transparent);
+
+  /* Elevation. The page stays flat by design (0 radius, hairlines only);
+     this single tier exists ONLY for layers that float above it, so a
+     dropdown is distinguishable from the content behind it. */
+  --elev-overlay: 0 6px 18px -8px rgb(26 25 22 / 0.28), 0 1px 2px rgb(26 25 22 / 0.10);
+  --scrim: rgb(26 25 22 / 0.40);
+
   /* Opacity rhythm — used for hover fades, captions, icon rest state */
   --opacity-muted:    0.60; /* @kind other */   /* captions, ©, icon rest   */
   --opacity-fade:     0.55; /* @kind other */   /* button hover fade clamp  */
   --opacity-hairline: 0.18; /* @kind other */   /* hairline over light bg   */
+}
+
+/* =====================================================================
+   DARK THEME
+   ---------------------------------------------------------------------
+   Only Tier-2 brand vars and the Tier-3 values that cannot be derived
+   are re-pointed; every component inherits the flip for free. The block
+   is duplicated because CSS cannot union a media query with an attribute
+   selector — KEEP THE TWO BLOCKS IN SYNC (tokens.test.ts enforces it).
+     · auto   → follows prefers-color-scheme (no data-theme attribute)
+     · light  → pinned light, even if the OS is dark
+     · dark   → pinned dark, even if the OS is light
+   ===================================================================== */
+
+@media (prefers-color-scheme: dark) {
+  html:not([data-theme="light"]) {
+    color-scheme: dark;
+
+    --brand-color-primary:   var(--primitive-bronze-lift);
+    --brand-color-secondary: var(--primitive-champagne-lift);
+    --brand-color-bg:        var(--primitive-ink-page);
+    --brand-color-text-dark: var(--primitive-bone);
+
+    --surface-card:     var(--primitive-ink-card);
+    --surface-raised:   var(--primitive-ink-raised);
+    --surface-chrome:   #100E0A;   /* chrome recedes below the content canvas */
+    --surface-inverse:  #2E2A22;
+    --text-on-inverse:  var(--primitive-off-white);
+    --wash:        rgb(232 227 214 / 0.06);
+    --wash-strong: rgb(232 227 214 / 0.10);
+    /* The accent is now light, so text sitting ON it must be dark. */
+    --text-on-accent:   var(--primitive-off-black);
+
+    --ink-strong: rgb(232 227 214);
+    --ink-body:   rgb(232 227 214 / 0.84);
+    --ink-muted:  rgb(232 227 214 / 0.68);
+    --ink-subtle: rgb(232 227 214 / 0.58);
+    --ink-faint:  rgb(232 227 214 / 0.40);
+
+    --line-control: rgb(232 227 214 / 0.48);
+    --line-strong:  rgb(232 227 214 / 0.26);
+    --line:         rgb(232 227 214 / 0.14);
+    --line-soft:    rgb(232 227 214 / 0.09);
+
+    --tint-hover:  color-mix(in srgb, var(--accent) 10%, transparent);
+    --tint-active: color-mix(in srgb, var(--accent) 16%, transparent);
+
+    --status-critical: var(--primitive-rust-lift);
+    --status-ok:       var(--primitive-sage-lift);
+    --status-info:     var(--primitive-azure-lift);
+    --status-warning:  var(--primitive-amber-lift);
+    --status-danger:   var(--primitive-crimson-lift);
+    --status-neutral:  rgb(232 227 214 / 0.26);
+
+    /* On a dark surface the lifted graphic values already clear 4.5:1, so
+       text and graphic tiers converge — no separate darkened -fg needed. */
+    --status-critical-fg: var(--primitive-rust-lift);
+    --status-ok-fg:       var(--primitive-sage-lift);
+    --status-info-fg:     var(--primitive-azure-lift);
+    --status-warning-fg:  var(--primitive-amber-lift);
+    --status-danger-fg:   var(--primitive-crimson-lift);
+    --status-idle-fg:     var(--primitive-champagne-lift);
+
+    --status-critical-bg:   color-mix(in srgb, var(--status-critical) 16%, transparent);
+    --status-critical-line: color-mix(in srgb, var(--status-critical) 45%, transparent);
+    --status-warning-bg:    color-mix(in srgb, var(--status-warning) 16%, transparent);
+    --status-ok-bg:         color-mix(in srgb, var(--status-ok) 16%, transparent);
+    --status-info-bg:       color-mix(in srgb, var(--status-info) 16%, transparent);
+
+    --elev-overlay: 0 10px 28px -10px rgb(0 0 0 / 0.70), 0 1px 2px rgb(0 0 0 / 0.40);
+    --scrim: rgb(0 0 0 / 0.60);
+  }
+}
+
+/* KEEP IN SYNC with the @media block above. */
+html[data-theme="dark"] {
+  color-scheme: dark;
+
+  --brand-color-primary:   var(--primitive-bronze-lift);
+  --brand-color-secondary: var(--primitive-champagne-lift);
+  --brand-color-bg:        var(--primitive-ink-page);
+  --brand-color-text-dark: var(--primitive-bone);
+
+  --surface-card:     var(--primitive-ink-card);
+  --surface-raised:   var(--primitive-ink-raised);
+  --surface-chrome:   #100E0A;   /* chrome recedes below the content canvas */
+  --surface-inverse:  #2E2A22;
+  --text-on-inverse:  var(--primitive-off-white);
+  --text-on-accent:   var(--primitive-off-black);
+  --wash:        rgb(232 227 214 / 0.06);
+  --wash-strong: rgb(232 227 214 / 0.10);
+
+  --ink-strong: rgb(232 227 214);
+  --ink-body:   rgb(232 227 214 / 0.84);
+  --ink-muted:  rgb(232 227 214 / 0.68);
+  --ink-subtle: rgb(232 227 214 / 0.58);
+  --ink-faint:  rgb(232 227 214 / 0.40);
+
+  --line-control: rgb(232 227 214 / 0.48);
+  --line-strong:  rgb(232 227 214 / 0.26);
+  --line:         rgb(232 227 214 / 0.14);
+  --line-soft:    rgb(232 227 214 / 0.09);
+
+  --tint-hover:  color-mix(in srgb, var(--accent) 10%, transparent);
+  --tint-active: color-mix(in srgb, var(--accent) 16%, transparent);
+
+  --status-critical: var(--primitive-rust-lift);
+  --status-ok:       var(--primitive-sage-lift);
+  --status-info:     var(--primitive-azure-lift);
+  --status-warning:  var(--primitive-amber-lift);
+  --status-danger:   var(--primitive-crimson-lift);
+  --status-neutral:  rgb(232 227 214 / 0.26);
+
+  --status-critical-fg: var(--primitive-rust-lift);
+  --status-ok-fg:       var(--primitive-sage-lift);
+  --status-info-fg:     var(--primitive-azure-lift);
+  --status-warning-fg:  var(--primitive-amber-lift);
+  --status-danger-fg:   var(--primitive-crimson-lift);
+  --status-idle-fg:     var(--primitive-champagne-lift);
+
+  --status-critical-bg:   color-mix(in srgb, var(--status-critical) 16%, transparent);
+  --status-critical-line: color-mix(in srgb, var(--status-critical) 45%, transparent);
+  --status-warning-bg:    color-mix(in srgb, var(--status-warning) 16%, transparent);
+  --status-ok-bg:         color-mix(in srgb, var(--status-ok) 16%, transparent);
+  --status-info-bg:       color-mix(in srgb, var(--status-info) 16%, transparent);
+
+  --elev-overlay: 0 10px 28px -10px rgb(0 0 0 / 0.70), 0 1px 2px rgb(0 0 0 / 0.40);
+  --scrim: rgb(0 0 0 / 0.60);
 }

@@ -4,6 +4,7 @@ import { listNotifications } from "@/lib/entities";
 import { Icon } from "./icons";
 import { Eyebrow } from "@/components/ui";
 import { NewMenu } from "./NewMenu";
+import { NavToggle } from "./NavToggle";
 import { can } from "@/lib/rbac";
 
 export async function TopBar({ me, tenantId, moduleLabel }: { me: Me; tenantId: string | null; moduleLabel: string }) {
@@ -27,6 +28,7 @@ export async function TopBar({ me, tenantId, moduleLabel }: { me: Me; tenantId: 
 
   return (
     <header className="erp-top">
+      <NavToggle />
       <div className="erp-top__meta">
         <Eyebrow style={{ color: "var(--erp-accent)" }}>{moduleLabel}</Eyebrow>
         <span className="erp-top__divider" />

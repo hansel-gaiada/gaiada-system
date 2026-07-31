@@ -22,8 +22,8 @@ export function CostTierBadge({ tier }: { tier: CostTier }) {
         font: "600 10px var(--font-body)", letterSpacing: "0.08em", textTransform: "uppercase",
         padding: "2px 7px", borderRadius: 2, whiteSpace: "nowrap",
         border: "0.5px solid var(--erp-hairline)",
-        background: free ? "rgba(58,122,84,.08)" : "rgba(58,98,158,.08)",
-        color: free ? "var(--erp-ok, #3a7a54)" : "var(--erp-info, #3a629e)",
+        background: free ? "color-mix(in srgb, var(--status-ok) 8%, transparent)" : "color-mix(in srgb, var(--status-info) 8%, transparent)",
+        color: free ? "var(--erp-ok, var(--status-ok-fg))" : "var(--erp-info, var(--status-info-fg))",
       }}
     >
       <span aria-hidden="true">{free ? "●" : "◆"}</span>

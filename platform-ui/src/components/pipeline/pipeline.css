@@ -2,9 +2,9 @@
    no framework, matches the rest of the design system (var(--erp-*) tokens, 0 radius, hairlines). */
 
 .pl-chip-row { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
-.pl-chip { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; font: 500 12px/1 var(--font-body); border-radius: 999px; background: rgba(26, 25, 22, 0.06); color: var(--text-primary); }
-.pl-chip--done { background: rgba(75, 122, 90, 0.14); color: #3c5c47; }
-.pl-chip--failed { background: rgba(181, 98, 47, 0.14); color: #8a4a25; }
+.pl-chip { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; font: 500 12px/1 var(--font-body); border-radius: 999px; background: var(--wash); color: var(--text-primary); }
+.pl-chip--done { background: color-mix(in srgb, var(--status-ok) 14%, transparent); color: var(--status-ok-fg); }
+.pl-chip--failed { background: color-mix(in srgb, var(--status-critical) 14%, transparent); color: var(--status-critical-fg); }
 .pl-chip__confidence { opacity: 0.65; }
 
 .pl-stage { padding: 14px 0; border-top: 0.5px solid var(--erp-hairline-soft); }
@@ -13,7 +13,7 @@
 .pl-stage__name { font: 700 13px var(--font-body); color: var(--text-primary); }
 .pl-stage__meta { font: 400 12px var(--font-body); color: var(--erp-ink-50); }
 
-.pl-blockage { padding: 12px 14px; border-radius: 12px; background: rgba(184, 142, 47, 0.08); border: 1px solid rgba(184, 142, 47, 0.25); margin-bottom: 20px; font: 500 14px/1.45 var(--font-body); }
+.pl-blockage { padding: 12px 14px; border-radius: 12px; background: color-mix(in srgb, var(--status-warning) 8%, transparent); border: 1px solid color-mix(in srgb, var(--status-warning) 30%, transparent); margin-bottom: 20px; font: 500 14px/1.45 var(--font-body); }
 
 .pl-link-row { display: flex; flex-direction: column; gap: 8px; }
 .pl-link-row__item { font: 400 13px/1.5 var(--font-body); color: var(--text-primary); }
@@ -31,8 +31,8 @@
 .pl-md ul, .pl-md ol { margin: 0 0 10px; padding-left: 20px; }
 .pl-md li { margin-bottom: 4px; }
 .pl-md__quote { margin: 0 0 10px; padding: 2px 0 2px 12px; border-left: 2px solid var(--erp-hairline); color: var(--erp-ink-50); }
-.pl-md__pre { margin: 0 0 10px; padding: 10px 12px; background: rgba(26, 25, 22, 0.04); overflow-x: auto; font: 400 12px/1.5 var(--font-mono, monospace); }
-.pl-md__code { padding: 1px 5px; background: rgba(26, 25, 22, 0.06); font: 400 12px var(--font-mono, monospace); }
+.pl-md__pre { margin: 0 0 10px; padding: 10px 12px; background: var(--wash); overflow-x: auto; font: 400 12px/1.5 var(--font-mono, monospace); }
+.pl-md__code { padding: 1px 5px; background: var(--wash); font: 400 12px var(--font-mono, monospace); }
 .pl-md__hr { border: none; border-top: 0.5px solid var(--erp-hairline); margin: 14px 0; }
 
 /* WD-03 (D-3) — the artifact edit affordance + its locked-after-signature state. */

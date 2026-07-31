@@ -26,7 +26,7 @@ export function PageHeader({ eyebrow, title, subtitle, actions, breadcrumbs }: {
           {title}
         </h1>
         {subtitle && (
-          <p style={{ margin: "9px 0 0", font: "400 15px/1.5 var(--font-body)", color: "rgba(26,25,22,.62)", maxWidth: 560 }}>
+          <p style={{ margin: "9px 0 0", font: "400 15px/1.5 var(--font-body)", color: "var(--ink-muted)", maxWidth: 560 }}>
             {subtitle}
           </p>
         )}

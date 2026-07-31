@@ -1,9 +1,9 @@
 import "./systems.css";
 
 const COLORS = {
-  online: "#4B7A5A",
-  down: "#B5622F",
-  unknown: "#A39174",
+  online: "var(--status-ok-fg)",
+  down: "var(--status-critical-fg)",
+  unknown: "var(--status-idle-fg)",
 } as const;
 
 export function StatusDot({ ok }: { ok: boolean | null }) {

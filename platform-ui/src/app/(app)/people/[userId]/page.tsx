@@ -50,7 +50,7 @@ export default async function EmployeePage({ params }: { params: Params }) {
     return shell(
       "Person",
       <Card>
-        <p style={{ margin: 0, font: "400 14px/1.5 var(--font-body)", color: "rgba(26,25,22,.62)" }}>
+        <p style={{ margin: 0, font: "400 14px/1.5 var(--font-body)", color: "var(--ink-muted)" }}>
           You can only view your own profile. This page is otherwise limited to owners and administrators.
         </p>
       </Card>,

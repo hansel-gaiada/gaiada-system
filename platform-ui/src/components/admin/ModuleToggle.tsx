@@ -30,7 +30,7 @@ export function ModuleToggle({
         justifyContent: "space-between",
         gap: 12,
         padding: "12px 0",
-        borderBottom: "0.5px solid rgba(26,25,22,.12)",
+        borderBottom: "0.5px solid var(--line-soft)",
       }}
     >
       <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>

@@ -35,7 +35,7 @@ export default async function MeetingsPage() {
         <Breadcrumbs items={[{ label: "Home", href: "/" }, { label: "Meetings" }]} />
         <Eyebrow style={{ color: "var(--erp-accent)", marginBottom: 8, display: "block" }}>Delivery</Eyebrow>
         <h1 style={{ margin: 0, fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 34, lineHeight: 1.1 }}>Meeting Recordings</h1>
-        <p style={{ margin: "9px 0 0", font: "400 15px/1.5 var(--font-body)", color: "rgba(26,25,22,.62)", maxWidth: 640 }}>
+        <p style={{ margin: "9px 0 0", font: "400 15px/1.5 var(--font-body)", color: "var(--ink-muted)", maxWidth: 640 }}>
           Record a client meeting, transcribe it locally, and start the delivery pipeline — all from here.
           Recordings are saved on your machine first and synced to the company Drive so the whole team can reference them.
         </p>
@@ -63,7 +63,7 @@ export default async function MeetingsPage() {
                     <StatusBadge label={(runStatusById.get(r.pipeline_run_id) ?? "unknown").replace(/_/g, " ")} />
                   </Link>
                 ) : (
-                  <span key="r" style={{ font: "400 13px var(--font-body)", color: "rgba(26,25,22,.35)" }}>—</span>
+                  <span key="r" style={{ font: "400 13px var(--font-body)", color: "var(--ink-faint)" }}>—</span>
                 ),
                 <StatusBadge key="d" label={DRIVE_LABEL[r.drive_status] ?? r.drive_status} />,
                 formatDuration(r.duration_sec),

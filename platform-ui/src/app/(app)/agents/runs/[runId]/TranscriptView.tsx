@@ -21,7 +21,7 @@ export function TranscriptView({ steps }: { steps: AgentStep[] }) {
         <li
           key={i}
           style={{
-            border: "1px solid rgba(26,25,22,.12)",
+            border: "1px solid var(--line-soft)",
             borderRadius: 8,
             padding: "10px 14px",
           }}
@@ -34,7 +34,7 @@ export function TranscriptView({ steps }: { steps: AgentStep[] }) {
               font: "700 10px var(--font-body)",
               letterSpacing: ".04em",
               textTransform: "uppercase",
-              color: step.kind === "tool" ? "var(--erp-accent)" : "rgba(26,25,22,.55)",
+              color: step.kind === "tool" ? "var(--erp-accent)" : "var(--ink-subtle)",
               marginBottom: 6,
             }}
           >
