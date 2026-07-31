@@ -25,9 +25,9 @@
 // referenced row through the SAME tenant+module-scoped connection `c` the mutation runs in, so a
 // cross-tenant id resolves to zero rows (rejected with 400) before it ever reaches the INSERT/UPDATE.
 import {
-  BadRequestException, Body, Controller, Delete, Get, HttpCode, NotFoundException, Param, Patch, Post, Put, Query, Req, UnauthorizedException, UseGuards,
+  BadRequestException, Body, ConflictException, Controller, Delete, Get, HttpCode, NotFoundException, Param, Patch, Post, Put, Query, Req, Res, UnauthorizedException, UseGuards,
 } from "@nestjs/common";
-import type { FastifyRequest } from "fastify";
+import type { FastifyReply, FastifyRequest } from "fastify";
 import type { PoolClient } from "pg";
 import { newId, withTenants } from "../../db";
 import { config } from "../../config";
@@ -109,6 +109,26 @@ import {
   adGroupScopeMatches, campaignScopeMatches, computeSearchTermRowHash, INGEST_RACE_DELAY_MS,
   SearchTermScopeError, validateSearchTermBatch,
 } from "./sem-search-terms";
+// SM-21 — the api-mode (AUTOMATED twin) execution path (design §04/§07/§12 SM-21, D-6/D-8).
+// sem-apply.ts is pure: the content hash an approval is bound to, the proposal -> operations
+// translation, the executor seam (simulate/live resolution), and the echo-validation +
+// outcome-classification step. THIS controller owns every DB read/write, the Cerbos call, the WS4
+// approval linkage and — critically — the transaction boundaries that make the claim atomic and the
+// settlement durable. See sem-apply.ts's file header for the four failure modes and where each is
+// closed, and for why NO automatic resume-on-decision exists (D14, project memory
+// `d14-no-resume-gap`) — the caller re-drives.
+import {
+  APPLY_RACE_DELAY_MS, ApplyInputError, buildChangeOperations, cerbosActionForKind,
+  hashChangeProposalContent, isApplyKind, NoLiveExecutorError, reconcileExecution, resolveAdsExecutor,
+  toolNameForKind,
+  type ApplyAdFact, type ApplyKind, type ApplyLaunchKeywordFact, type ApplyNegativeFact,
+  type ChangeOperation, type ExecutorReport,
+} from "./sem-apply";
+// SM-26 / §A12.6: the Ads write-mode switch. Read through this accessor (which reads `process.env`
+// per call) rather than `config` — `config` evaluates once at module load, so a test mutating the env
+// after import would silently stop exercising the real switch. That mistake cost nine tests earlier
+// in this programme, and this resolver's own unit tests depend on the per-call read.
+import { resolveSearchAdsWriteMode } from "./sem-executor-google-ads";
 
 const PROPERTY_STATUSES = new Set(["active", "paused", "archived"]);
 const ENGAGEMENT_STATUSES = new Set(["draft", "active", "paused", "closed"]);
@@ -156,6 +176,22 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 function assertUuid(value: string, label: string): void {
   if (typeof value !== "string" || !UUID_RE.test(value)) throw new BadRequestException(`${label} must be a valid id`);
 }
+
+// SM-21: Postgres unique-violation SQLSTATE. Same narrow shape custom-fields.controller.ts and
+// service-assignments.controller.ts already use — a specific code, never a blanket catch, so a
+// connection error or a constraint we did not anticipate still surfaces instead of being reported as
+// "already consumed". This is the only place the api-execution replay guard's index violation is
+// translated into an HTTP status.
+function isUniqueViolation(err: unknown): boolean {
+  return (err as { code?: string } | null)?.code === "23505";
+}
+
+// SM-21: ONE message for "this approved change has already been executed", used by BOTH layers that
+// can detect it — the pre-read status check (the ordinary sequential retry) and the UNIQUE
+// (approval_id) constraint (the genuinely concurrent case, and any outcome that left the proposal
+// 'approved'). Deliberately shared so an operator never has to work out which layer answered them.
+const APPLY_REPLAY_REFUSED =
+  "this proposal's approval has already been consumed — an api-mode execution runs exactly once. Read the execution record for its outcome; if the change is still wanted, create a new proposal.";
 
 // SM-25a: the closed provider set, checked BEFORE it reaches any query — same discipline as
 // assertUuid above, applied to a path/body value instead of an id shape.
@@ -291,6 +327,40 @@ async function changeProposalFullRow(c: PoolClient, proposalId: string): Promise
   );
   const row = r.rows[0];
   return row ? { campaignId: row.campaign_id, kind: row.kind, status: row.status, mode: row.mode, payload: row.payload ?? {} } : null;
+}
+
+// SM-21 — the api-execution read. Adds `approvalId` (0034's WS4 link) to what changeProposalFullRow
+// already returns, for the same reason THAT helper exists as a separate function rather than a
+// widened changeProposalRow: no other caller needs the approval column, and widening a shared helper
+// for one route's needs is the incidental coupling this file's per-domain-helper convention avoids.
+//
+// `approval_id` is read HERE, from the proposal's own row, and nowhere else. That is the whole
+// no-bypass property: the caller supplies only the route params, so there is no request field that
+// could point execution at a different approval.
+interface ChangeProposalApplyRow {
+  campaignId: string;
+  kind: string;
+  status: string;
+  mode: string;
+  payload: Record<string, unknown>;
+  approvalId: string | null;
+}
+async function changeProposalApplyRow(c: PoolClient, proposalId: string): Promise<ChangeProposalApplyRow | null> {
+  const r = await c.query<{
+    campaign_id: string; kind: string; status: string; mode: string;
+    payload: Record<string, unknown>; approval_id: string | null;
+  }>(
+    `SELECT campaign_id, kind, status, mode, payload, approval_id
+       FROM search_change_proposals WHERE id = $1 AND deleted_at IS NULL`,
+    [proposalId],
+  );
+  const row = r.rows[0];
+  return row
+    ? {
+      campaignId: row.campaign_id, kind: row.kind, status: row.status, mode: row.mode,
+      payload: row.payload ?? {}, approvalId: row.approval_id,
+    }
+    : null;
 }
 
 async function campaignFactsRow(
@@ -3606,15 +3676,32 @@ export class SearchController {
     if (!campaign) throw new NotFoundException("campaign not found");
     await authorize(req.principal, { kind: "resource_search_campaign", id, tenantId, module: "search" }, "read");
     const params: unknown[] = [id];
-    const clauses = ["campaign_id = $1", "deleted_at IS NULL"];
-    if (status) { params.push(status); clauses.push(`status = $${params.length}`); }
+    // SM-21: qualified with `p.` because the SELECT below joins the execution table — an unqualified
+    // `status`/`deleted_at` would be ambiguous the moment a second relation carries the same column.
+    const clauses = ["p.campaign_id = $1", "p.deleted_at IS NULL"];
+    if (status) { params.push(status); clauses.push(`p.status = $${params.length}`); }
     const rows = await withTenants(
       [tenantId],
       (c) => c.query(
-        `SELECT id, campaign_id AS "campaignId", kind, payload, status, mode, approval_id AS "approvalId",
-                export_file_id AS "exportFileId", proposed_by AS "proposedBy", approved_by AS "approvedBy",
-                applied_by AS "appliedBy", applied_at AS "appliedAt", created_at, updated_at
-         FROM search_change_proposals WHERE ${clauses.join(" AND ")} ORDER BY created_at DESC LIMIT 500`,
+        // SM-21 (additive): the latest api-execution's id/status/simulated flag, so a console row can
+        // render what actually happened instead of inferring it from `status`. Load-bearing for the
+        // outcomes that deliberately do NOT move the proposal's own status — 'partial' and
+        // 'indeterminate' both leave it 'approved', and without these fields those two are
+        // indistinguishable from never-attempted. LEFT JOIN LATERAL so a proposal with no execution
+        // (every manual-mode one, and every api one before its first attempt) still returns its row
+        // with NULLs, never disappears.
+        `SELECT p.id, p.campaign_id AS "campaignId", p.kind, p.payload, p.status, p.mode,
+                p.approval_id AS "approvalId", p.export_file_id AS "exportFileId",
+                p.proposed_by AS "proposedBy", p.approved_by AS "approvedBy",
+                p.applied_by AS "appliedBy", p.applied_at AS "appliedAt", p.created_at, p.updated_at,
+                x.id AS "executionId", x.status AS "executionStatus", x.simulated AS "executionSimulated"
+         FROM search_change_proposals p
+         LEFT JOIN LATERAL (
+           SELECT e.id, e.status, e.simulated FROM search_change_executions e
+            WHERE e.proposal_id = p.id ORDER BY e.created_at DESC LIMIT 1
+         ) x ON true
+         WHERE ${clauses.join(" AND ")}
+         ORDER BY p.created_at DESC LIMIT 500`,
         params,
       ),
       { modules: ["search"] },
@@ -3664,10 +3751,19 @@ export class SearchController {
     const row = await withTenants(
       [tenantId],
       (c) => c.query(
-        `SELECT id, campaign_id AS "campaignId", kind, payload, status, mode, approval_id AS "approvalId",
-                export_file_id AS "exportFileId", proposed_by AS "proposedBy", approved_by AS "approvedBy",
-                applied_by AS "appliedBy", applied_at AS "appliedAt", created_at, updated_at
-         FROM search_change_proposals WHERE id = $1 AND deleted_at IS NULL`,
+        // SM-21 (additive): same latest-execution fields as the list route — see its comment for why
+        // 'partial'/'indeterminate' are otherwise indistinguishable from never-attempted.
+        `SELECT p.id, p.campaign_id AS "campaignId", p.kind, p.payload, p.status, p.mode,
+                p.approval_id AS "approvalId", p.export_file_id AS "exportFileId",
+                p.proposed_by AS "proposedBy", p.approved_by AS "approvedBy",
+                p.applied_by AS "appliedBy", p.applied_at AS "appliedAt", p.created_at, p.updated_at,
+                x.id AS "executionId", x.status AS "executionStatus", x.simulated AS "executionSimulated"
+         FROM search_change_proposals p
+         LEFT JOIN LATERAL (
+           SELECT e.id, e.status, e.simulated FROM search_change_executions e
+            WHERE e.proposal_id = p.id ORDER BY e.created_at DESC LIMIT 1
+         ) x ON true
+         WHERE p.id = $1 AND p.deleted_at IS NULL`,
         [id],
       ),
       { modules: ["search"] },
@@ -3966,6 +4062,525 @@ export class SearchController {
     if (!applied) throw new NotFoundException("change proposal not found, not mode='manual'/'approved', or was already applied concurrently");
     await writeActivity(tenantId, req.principal.userId, "marked_applied", "search_change_proposal", id, { kind: proposal.kind, note });
     return { id, status: "applied" as const };
+  }
+
+  // ==================================================== SEM: API-MODE EXECUTION (SM-21) ==========
+  // design §04/§07/§12 SM-21 · decisions D-6 ("api-mode executions require one-shot approved
+  // approvalId — humans included") and D-8 (the dual-mode twins). THE automated twin: the ONE route
+  // that executes a change against a client's live advertising account.
+  //
+  // ── THE FLOW, AND WHY IT IS ONE ROUTE CALLED TWICE ────────────────────────────────────────────────
+  //   call 1, no approval yet  -> 202. An automation_approvals row is filed (WS4's EXISTING
+  //                               suspension surface, not a parallel concept) and its id is written
+  //                               onto the proposal. NOTHING is executed.
+  //   a human decides it       -> the EXISTING POST /api/:t/automation-approvals/:id/decide, or the
+  //                               unified /api/approvals-decide façade. Untouched by this ticket.
+  //   call 2, approved         -> the approval is CONSUMED (one-shot) and the change executes once.
+  //   call 3+                  -> 409. The consumption is a UNIQUE constraint, not a flag.
+  //
+  // Deciding the approval executes NOTHING by itself. That is D14's known no-resume gap (project
+  // memory `d14-no-resume-gap`; migration 0014's own header defers resumption to Temporal), and this
+  // ticket deliberately does NOT close it here nor pretend it is closed: design §07 chose exactly
+  // this shape ("the approved row is the authorization artifact"), and re-drive-by-the-caller is
+  // SAFER than a decided-event handler, because a live ad-account change then happens only while a
+  // human is actually driving. This is precisely why no `automation_approval.decided` eventHandler is
+  // registered for this path, unlike HR's leave flow (modules/hr/leave-decision.ts) — that handler
+  // moves an internal row; this would spend a client's money with nobody present.
+  //
+  // ── HOW A BYPASS IS PREVENTED (four walls, all derived from stored state) ─────────────────────────
+  //   1. Cerbos, on an action derived from the proposal's OWN kind (never from the body):
+  //      launch/apply_negatives/set_budget — all three already elevated-only in SM-03's
+  //      resource_search_campaign.yaml. NO policy file is touched by this ticket.
+  //   2. The approval linkage comes from `search_change_proposals.approval_id`, read from the row.
+  //      The request carries no approval id, no hash, no mode, no override of any kind — there is
+  //      nothing to tamper with. This matters concretely: POST /api/:t/automation-approvals lets any
+  //      member-tier principal file an approval row with arbitrary `tool_args`, so an implementation
+  //      that FOUND its approval by matching tool_args would be forgeable. One that follows the
+  //      proposal's own column is not: only the suspend step below writes it, and only while NULL.
+  //   3. Content binding: the hash stored in the approval at mint time must equal the hash
+  //      recomputed from the live proposal row now. An absent stored hash FAILS CLOSED.
+  //   4. Replay: `UNIQUE (approval_id)` on search_change_executions (0064). Inserting the execution
+  //      row IS claiming the approval, and it happens BEFORE the executor is called. No ON CONFLICT
+  //      — a second execution must be refused, never absorbed.
+  //
+  // A NOTE ON SEPARATION OF DUTIES, because it is a property rather than an accident: the Cerbos
+  // action gating wall 1 is granted to module_manager, while `decide` on automation_approval is
+  // granted only to company_admin/group_executive (resource_automation_approval.yaml). So the search
+  // manager who requests an execution cannot approve their own request. That is D-6's real content.
+  //
+  // ── NOT A PAID PULL (§A3 money language) ──────────────────────────────────────────────────────────
+  // No data vendor is dispatched, nothing routes through `dispatchProviderOp`, no
+  // `search_provider_calls` row is written, and no budget/stop-loss tier is consulted. The money this
+  // route moves is the CLIENT's own advertising budget, inside their own ad account — a different
+  // figure from anything this module meters for itself, and it must never be summed with `cost_usd`.
+  @Post("change-proposals/:id/apply-api")
+  async applyChangeProposalViaApi(
+    @Req() req: FastifyRequest,
+    @Res() reply: FastifyReply,
+    @Param("tenantId") tenantId: string,
+    @Param("id") id: string,
+  ) {
+    assertUuid(id, "change proposal id");
+    const proposal = await withTenants([tenantId], (c) => changeProposalApplyRow(c, id), { modules: ["search"] });
+    if (!proposal) throw new NotFoundException("change proposal not found");
+    if (!isApplyKind(proposal.kind)) {
+      // Unreachable through any route in this file (0034's CHECK plus CHANGE_PROPOSAL_KINDS bound it
+      // at creation) — refused rather than assumed, because the kind selects both the Cerbos action
+      // and the operation set, and a kind we cannot classify must not fall through to a default.
+      throw new BadRequestException(`change proposal kind '${proposal.kind}' cannot be executed via the api path`);
+    }
+    const kind: ApplyKind = proposal.kind;
+    await authorize(
+      req.principal, { kind: "resource_search_campaign", id, tenantId, module: "search" }, cerbosActionForKind(kind),
+    );
+    if (proposal.mode !== "api") {
+      throw new BadRequestException("this proposal is mode='manual' — it applies through the export/mark-applied twin (SM-30), never through the api path");
+    }
+    // A mode='api' proposal reaches 'applied' ONLY through a fully-applied execution of this route
+    // (SM-30's mark-applied refuses api mode; the generic PATCH refuses 'applied' outright). So this
+    // IS the replay case, and it answers with the SAME status and message the constraint-level refusal
+    // below produces. Two codes for one condition would be a worse bug than the inconsistency looks:
+    // an operator retrying a request must not have to know WHICH layer caught them to know they are
+    // looking at an already-executed change. (A `partial`/`indeterminate` outcome leaves the proposal
+    // 'approved', so that replay lands on the UNIQUE constraint instead — same answer either way.)
+    if (proposal.status === "applied") throw new ConflictException(APPLY_REPLAY_REFUSED);
+    if (proposal.status !== "approved") {
+      throw new BadRequestException(`cannot execute a '${proposal.status}' proposal — it must be 'approved' first`);
+    }
+
+    const payloadHash = hashChangeProposalContent(kind, proposal.mode, proposal.payload);
+
+    // ── STEP 1 · SUSPEND (no approval on file yet) ─────────────────────────────────────────────────
+    // Reuses WS4's automation_approvals store — the SAME table, the SAME decide endpoint, the SAME
+    // Cerbos policy the n8n/agent suspensions use. Nothing parallel is invented.
+    //
+    // origin='automation', NOT a new 'search' origin. That choice is deliberate and was the harder
+    // call, so the reasoning is recorded: the unified inbox reads automation_approvals with
+    // `WHERE origin = ANY($1)` over a CLOSED taxonomy (core/approvals.controller.ts + approvals-
+    // urgency.ts ORIGIN_BASE_WEIGHT + platform-ui's isApprovalOrigin/originCounts). A row carrying an
+    // unlisted origin would be invisible in the inbox and would compute `undefined + ageBonus` = NaN
+    // for its urgency — i.e. inventing an origin here produces an approval nobody can see or decide,
+    // in files this ticket does not own. 'automation' is also the honest classification on the
+    // design's own terms: D-6 holds a human console caller to the automation standard precisely
+    // because this is the AUTOMATED twin. `tool_name` records WHICH high-impact tool (design §07's
+    // table) and `tool_args` records the proposal, so the row is never ambiguous about its source.
+    if (!proposal.approvalId) {
+      const approvalId = newId();
+      const toolName = toolNameForKind(kind);
+      const reason =
+        `Execute api-mode change proposal (${kind}) against the live ad account for campaign ${proposal.campaignId}. ` +
+        `One-shot: approving authorizes exactly one execution of payload hash ${payloadHash.slice(0, 12)}…`;
+      const minted = await withTenants(
+        [tenantId],
+        async (c) => {
+          await c.query(
+            `INSERT INTO automation_approvals
+               (id, tenant_id, workflow_id, tool_name, tool_args, impact, reason, requested_by, origin, agent_name, origin_site)
+             VALUES ($1,$2,$3,$4,$5,'high',$6,$7,'automation',NULL,$8)`,
+            [
+              approvalId, tenantId, `search:change-proposal:${id}`, toolName,
+              JSON.stringify({
+                proposalId: id, campaignId: proposal.campaignId, kind, mode: "api",
+                // THE content binding, computed server-side and stored with the decision.
+                payloadHash,
+                // Consumed by the unified inbox as `subjectHref` — the decider lands on the proposal.
+                href: `/departments/seo/planner/${proposal.campaignId}`,
+              }),
+              reason, req.principal.userId, config.originSite,
+            ],
+          );
+          // Compare-and-swap on approval_id IS NULL: two concurrent first-calls cannot both attach.
+          // The loser's approval row is left un-referenced (pending, decidable but unusable) rather
+          // than deleted — a spurious pending row is a visible, harmless artifact, whereas deleting
+          // an approvals row from inside another module's write path is a precedent worth refusing.
+          const upd = await c.query(
+            `UPDATE search_change_proposals SET approval_id = $2, updated_at = now()
+               WHERE id = $1 AND deleted_at IS NULL AND status = 'approved' AND mode = 'api' AND approval_id IS NULL`,
+            [id, approvalId],
+          );
+          return upd.rowCount === 1;
+        },
+        { modules: ["search"] },
+      );
+      if (!minted) {
+        // Another request attached first (or the proposal moved out from under us). Never execute on
+        // this path — re-drive and the branch below will read whatever is actually on file.
+        throw new ConflictException("this proposal's approval was created concurrently — re-read the proposal and retry");
+      }
+      await writeActivity(tenantId, req.principal.userId, "suspended", "search_change_proposal", id, {
+        kind, approvalId, toolName, payloadHash, impact: "high",
+      });
+      reply.status(202).send({
+        id, outcome: "suspended" as const, approvalId, payloadHash, kind,
+        message: "Nothing was executed. A high-impact approval was filed in the approvals inbox; once a company admin or owner approves it, call this endpoint again to execute exactly once.",
+      });
+      return;
+    }
+
+    // ── STEP 2 · READ THE DECISION (stored state only) ─────────────────────────────────────────────
+    const approval = await withTenants(
+      [tenantId],
+      (c) => c.query<{ status: string; tool_args: Record<string, unknown> | null }>(
+        `SELECT status, tool_args FROM automation_approvals WHERE id = $1 AND deleted_at IS NULL`,
+        [proposal.approvalId],
+      ),
+      { modules: ["search"] },
+    );
+    const decision = approval.rows[0];
+    if (!decision) {
+      // The referenced approval is gone/invisible (another tenant, soft-deleted). FAIL CLOSED: an
+      // unresolvable authorization is not an absent one.
+      throw new BadRequestException("this proposal's approval record could not be read — execution refused");
+    }
+    if (decision.status === "pending") {
+      reply.status(202).send({
+        id, outcome: "awaiting_approval" as const, approvalId: proposal.approvalId, kind,
+        message: "Nothing was executed. The approval for this proposal is still pending a human decision.",
+      });
+      return;
+    }
+    if (decision.status !== "approved") {
+      throw new BadRequestException(
+        `this proposal's approval was '${decision.status}' — it can never execute. Create a new change proposal if the change is still wanted (a decided approval is never re-decided).`,
+      );
+    }
+
+    // ── STEP 3 · CONTENT BINDING ───────────────────────────────────────────────────────────────────
+    // The hash the human approved vs the hash of what would execute NOW. Note the shape of the
+    // guard: a MISSING stored hash is refused, not skipped. That is the fail-open a developer would
+    // plausibly write (`if (storedHash && storedHash !== payloadHash)`) and it is the one this
+    // ticket's mutation probes target, because an approval with no hash is exactly what a forged or
+    // hand-crafted approvals row looks like.
+    const storedHash = typeof decision.tool_args?.payloadHash === "string" ? decision.tool_args.payloadHash : null;
+    if (!storedHash) {
+      throw new BadRequestException("this proposal's approval carries no payload hash — execution refused (the approval cannot be bound to what it approved)");
+    }
+    if (storedHash !== payloadHash) {
+      throw new BadRequestException(
+        "the proposal's content changed since it was approved (payload hash mismatch) — execution refused. Approval does not survive an edit of what it approved.",
+      );
+    }
+    // Defence in depth: the approval must also NAME this proposal. Redundant today (we arrived via
+    // the proposal's own approval_id) — kept because it is the assertion that would catch a future
+    // route wiring approval_id from anywhere else, and it costs one comparison.
+    if (decision.tool_args?.proposalId !== id) {
+      throw new BadRequestException("this proposal's approval refers to a different proposal — execution refused");
+    }
+
+    // ── STEP 4 · RESOLVE OPERATIONS + THE EXECUTOR (before any claim is made) ──────────────────────
+    // Everything that can legitimately 400 happens BEFORE the approval is spent: an unexecutable
+    // payload or a missing live executor must not consume the one-shot approval, because that would
+    // make a fixable input error terminal for the proposal.
+    let operations: ChangeOperation[];
+    try {
+      operations = await withTenants(
+        [tenantId],
+        async (c) => {
+          const camp = await c.query<{
+            name: string; platform: string; budget_minor: string | null; currency: string | null;
+            bid_strategy: string | null; target_cpa_minor: string | null; target_roas: string | null;
+          }>(
+            `SELECT name, platform, budget_minor, currency, bid_strategy, target_cpa_minor, target_roas
+               FROM search_campaigns WHERE id = $1 AND deleted_at IS NULL`,
+            [proposal.campaignId],
+          );
+          const c0 = camp.rows[0];
+          if (!c0) throw new ApplyInputError("campaign for this proposal no longer exists");
+          const campaign = {
+            id: proposal.campaignId, name: c0.name, platform: c0.platform,
+            budgetMinor: c0.budget_minor === null ? null : Number(c0.budget_minor),
+            currency: c0.currency, bidStrategy: c0.bid_strategy,
+            targetCpaMinor: c0.target_cpa_minor === null ? null : Number(c0.target_cpa_minor),
+            targetRoas: c0.target_roas === null ? null : Number(c0.target_roas),
+          };
+          const ids = Array.isArray(proposal.payload.ids)
+            ? proposal.payload.ids.filter((v): v is string => typeof v === "string")
+            : [];
+
+          if (kind === "launch") {
+            // Same JOIN as the manual export's launch branch, plus the keyword id — the operation
+            // `ref` must be OUR OWN row id (sem-apply.ts's ChangeOperation doc: a positional ref
+            // makes the echo check tautological).
+            const kwRes = await c.query<{ id: string; keyword: string; ad_group_name: string }>(
+              `SELECT k.id, k.keyword, ag.name AS ad_group_name
+                 FROM search_ad_groups ag
+                 JOIN search_keywords k ON k.cluster_id = ag.cluster_id AND k.deleted_at IS NULL
+                WHERE ag.campaign_id = $1 AND ag.deleted_at IS NULL AND ag.cluster_id IS NOT NULL
+                ORDER BY ag.name ASC, k.keyword ASC`,
+              [proposal.campaignId],
+            );
+            const launchKeywords: ApplyLaunchKeywordFact[] = kwRes.rows.map((r) => ({
+              keywordId: r.id, keyword: r.keyword, adGroupName: r.ad_group_name,
+            }));
+            return buildChangeOperations(kind, { campaign, payload: proposal.payload, launchKeywords });
+          }
+          if (kind === "negatives_batch") {
+            if (ids.length === 0) throw new ApplyInputError("payload.ids (the negative-keyword row ids this batch covers) is required");
+            const negRes = await c.query<{ id: string; term: string; match_type: string; ad_group_name: string | null }>(
+              `SELECT n.id, n.term, n.match_type, ag.name AS ad_group_name
+                 FROM search_negatives n
+                 LEFT JOIN search_ad_groups ag ON ag.id = n.ad_group_id
+                WHERE n.id = ANY($1::uuid[]) AND n.campaign_id = $2 AND n.deleted_at IS NULL
+                  AND n.status <> 'dismissed'
+                ORDER BY n.term ASC`,
+              [ids, proposal.campaignId],
+            );
+            // Refused, never silently narrowed: if any referenced id did not resolve inside this
+            // campaign, the batch executing would be a DIFFERENT batch from the one approved.
+            if (negRes.rows.length !== ids.length) {
+              throw new ApplyInputError("payload.ids does not resolve one-to-one to live negatives in this campaign — refusing to execute a narrower batch than the one approved");
+            }
+            const negatives: ApplyNegativeFact[] = negRes.rows.map((r) => ({
+              id: r.id, term: r.term, matchType: r.match_type, adGroupName: r.ad_group_name,
+            }));
+            return buildChangeOperations(kind, { campaign, payload: proposal.payload, negatives });
+          }
+          if (kind === "ads_batch") {
+            if (ids.length === 0) throw new ApplyInputError("payload.ids (the ad row ids this batch covers) is required");
+            const adRes = await c.query<{
+              id: string; ad_group_name: string; headlines: string[]; descriptions: string[];
+              final_url: string | null; status: string;
+            }>(
+              `SELECT a.id, ag.name AS ad_group_name, a.headlines, a.descriptions, a.final_url, a.status
+                 FROM search_ads a
+                 JOIN search_ad_groups ag ON ag.id = a.ad_group_id
+                WHERE a.id = ANY($1::uuid[]) AND ag.campaign_id = $2 AND a.deleted_at IS NULL
+                ORDER BY a.id ASC`,
+              [ids, proposal.campaignId],
+            );
+            if (adRes.rows.length !== ids.length) {
+              throw new ApplyInputError("payload.ids does not resolve one-to-one to ads in this campaign — refusing to execute a narrower batch than the one approved");
+            }
+            if (adRes.rows.some((r) => r.status !== "approved")) {
+              throw new ApplyInputError("every ad in an ads_batch execution must be status='approved' first — draft/rejected ads are refused, never silently skipped");
+            }
+            if (adRes.rows.some((r) => r.headlines.length > RSA_MAX_HEADLINES || r.descriptions.length > RSA_MAX_DESCRIPTIONS)) {
+              throw new ApplyInputError(`an ad exceeds the ${RSA_MAX_HEADLINES}-headline/${RSA_MAX_DESCRIPTIONS}-description limit — fix it before executing, never silently truncated`);
+            }
+            const ads: ApplyAdFact[] = adRes.rows.map((r) => ({
+              id: r.id, adGroupName: r.ad_group_name, headlines: r.headlines,
+              descriptions: r.descriptions, finalUrl: r.final_url,
+            }));
+            return buildChangeOperations(kind, { campaign, payload: proposal.payload, ads });
+          }
+          // pause / budget / bid — campaign-level single-operation kinds.
+          return buildChangeOperations(kind, { campaign, payload: proposal.payload });
+        },
+        { modules: ["search"] },
+      );
+    } catch (err) {
+      if (err instanceof ApplyInputError) throw new BadRequestException(err.message);
+      throw err;
+    }
+
+    let executor;
+    try {
+      // SM-26 / addendum §A12.6: the Ads WRITE mode is its own switch, deliberately NOT
+      // `config.search.providerMode` — that one describes the DATA vendors, and conflating them would
+      // mean "simulated keyword data" and "simulated ad writes" could never be set independently.
+      // SM-21 shipped `providerMode` here as a declared interim; this completes the split.
+      executor = resolveAdsExecutor(resolveSearchAdsWriteMode());
+    } catch (err) {
+      // No live executor registered (SM-26). A refusal, never a silent simulation — a control that
+      // cannot do the thing must not report that it did.
+      if (err instanceof NoLiveExecutorError) throw new BadRequestException(err.message);
+      throw err;
+    }
+
+    // ── STEP 5 · CLAIM (the one-shot consumption) ──────────────────────────────────────────────────
+    // The INSERT is the claim. It commits BEFORE the executor is called, so the ad account can never
+    // be touched by a request that had not already won the race at the index. A duplicate loses on
+    // UNIQUE (approval_id) with a 23505 -> 409. There is no ON CONFLICT and no application-level
+    // pre-check standing in for the constraint.
+    const executionId = newId();
+    if (APPLY_RACE_DELAY_MS.value > 0) {
+      // Test-only widening of the admission->claim window (§6ay: a race that never collides proves
+      // nothing). Production runs at 0; this branch is unreachable there.
+      await new Promise((r) => setTimeout(r, APPLY_RACE_DELAY_MS.value));
+    }
+    try {
+      await withTenants(
+        [tenantId],
+        (c) => c.query(
+          `INSERT INTO search_change_executions
+             (id, tenant_id, proposal_id, campaign_id, approval_id, kind, mode, payload_hash, status,
+              changes_total, provider, simulated, executed_by, origin_site)
+           VALUES ($1,$2,$3,$4,$5,$6,'api',$7,'dispatched',$8,NULL,$9,$10,$11)`,
+          [
+            executionId, tenantId, id, proposal.campaignId, proposal.approvalId, kind, payloadHash,
+            operations.length, executor.expectSimulated, req.principal.userId, config.originSite,
+          ],
+        ),
+        { modules: ["search"] },
+      );
+    } catch (err) {
+      if (isUniqueViolation(err)) throw new ConflictException(APPLY_REPLAY_REFUSED);
+      throw err;
+    }
+
+    // ── STEP 6 · EXECUTE (outside every transaction) ───────────────────────────────────────────────
+    // Never inside an open transaction: a network call holding a pooled connection through a BEGIN is
+    // the pool-exhaustion class this module already learned from (config.maxKeywordsPerSet's comment).
+    let report: ExecutorReport | null = null;
+    let executorError: string | null = null;
+    try {
+      report = await executor.executor({
+        tenantId, proposalId: id, campaignId: proposal.campaignId, kind, operations,
+      });
+    } catch (err) {
+      executorError = err instanceof Error ? err.message.slice(0, 1000) : "executor threw a non-Error value";
+    }
+
+    // ── STEP 7 · SETTLE (record everything, THEN refuse if the record is unattributable) ───────────
+    // §A14.5's money/data split, transposed: here "the money" is the live side effect, which may
+    // already exist by the time we get here. So everything we know is COMMITTED first; only then is
+    // an unattributable outcome raised as an error. Withholding the record to "reject" the execution
+    // would be the SM-50 orphan class in its most expensive form — a live ad-account change with no
+    // local trace.
+    if (!report) {
+      // The executor threw: nothing came back at all. Recorded as 'failed' (zero applied) rather
+      // than 'indeterminate' — a throw is the executor saying it did not act. That distinction is
+      // the executor's contract, and SM-26 must honour it: throw only when nothing was sent.
+      await withTenants(
+        [tenantId],
+        (c) => c.query(
+          `UPDATE search_change_executions
+              SET status = 'failed', error = $2, finished_at = now(), updated_at = now()
+            WHERE id = $1 AND status = 'dispatched'`,
+          [executionId, executorError],
+        ),
+        { modules: ["search"] },
+      );
+      await writeActivity(tenantId, req.principal.userId, "api_execution_failed", "search_change_proposal", id, {
+        kind, executionId, approvalId: proposal.approvalId, error: executorError,
+      });
+      throw new BadRequestException(`api execution failed before any change was applied: ${executorError}`);
+    }
+
+    const outcome = reconcileExecution(operations, report, executor.expectSimulated);
+    await withTenants(
+      [tenantId],
+      async (c) => {
+        await c.query(
+          `UPDATE search_change_executions
+              SET status = $2, changes_applied = $3, changes_failed = $4, changes_unknown = $5,
+                  per_change = $6, echo_violations = $7, provider = $8, simulated = $9,
+                  finished_at = now(), updated_at = now()
+            WHERE id = $1 AND status = 'dispatched'`,
+          [
+            executionId, outcome.status, outcome.changesApplied, outcome.changesFailed, outcome.changesUnknown,
+            JSON.stringify(outcome.perChange), JSON.stringify(outcome.echoViolations),
+            report.provider.slice(0, 100), report.simulated,
+          ],
+        );
+        // The proposal reaches 'applied' ONLY on a fully-applied execution. A partial or
+        // indeterminate outcome deliberately leaves it 'approved-with-an-execution-on-record': it
+        // must not read as done, and it must not read as never-attempted either. It is also not
+        // re-executable (approval_id is set, so the suspend branch never mints a second approval, and
+        // the claim would lose on UNIQUE) — the remedy for a partial is a NEW proposal covering the
+        // remainder, never a blind re-run of this one.
+        if (outcome.status === "applied") {
+          await c.query(
+            `UPDATE search_change_proposals
+                SET status = 'applied', applied_by = $2, applied_at = now(), updated_at = now()
+              WHERE id = $1 AND deleted_at IS NULL AND status = 'approved'`,
+            [id, req.principal.userId],
+          );
+        }
+        // Cascade onto EXACTLY the rows the response said applied — never the whole batch. Empty by
+        // construction when the outcome is indeterminate (sem-apply.ts suppresses attribution there).
+        const appliedNegativeIds = outcome.perChange
+          .filter((p) => p.outcome === "applied" && p.entityType === "search_negative")
+          .map((p) => p.entityId);
+        const appliedAdIds = outcome.perChange
+          .filter((p) => p.outcome === "applied" && p.entityType === "search_ad")
+          .map((p) => p.entityId);
+        if (appliedNegativeIds.length > 0) {
+          await c.query(
+            `UPDATE search_negatives SET status = 'applied', updated_at = now()
+              WHERE id = ANY($1::uuid[]) AND campaign_id = $2 AND deleted_at IS NULL AND status <> 'dismissed'`,
+            [appliedNegativeIds, proposal.campaignId],
+          );
+        }
+        if (appliedAdIds.length > 0) {
+          await c.query(
+            `UPDATE search_ads SET status = 'live', updated_at = now()
+               FROM search_ad_groups ag
+              WHERE search_ads.id = ANY($1::uuid[]) AND search_ads.ad_group_id = ag.id
+                AND ag.campaign_id = $2 AND search_ads.deleted_at IS NULL AND search_ads.status = 'approved'`,
+            [appliedAdIds, proposal.campaignId],
+          );
+        }
+        // Campaign-level kinds (launch/pause/budget/bid) deliberately do NOT move
+        // search_campaigns.status here — the same boundary updateCampaign and SM-30's mark-applied
+        // already hold: a live campaign state belongs to a read-back from the actual ad account
+        // (SM-25c), not to our own write's optimism.
+        await emitEvent(c, tenantId, "search_change_proposal", id, "search.campaign.applied", {
+          campaignId: proposal.campaignId, kind, executionId, status: outcome.status,
+          changesTotal: outcome.changesTotal, changesApplied: outcome.changesApplied,
+          changesFailed: outcome.changesFailed, changesUnknown: outcome.changesUnknown,
+          simulated: report.simulated, provider: report.provider,
+        });
+      },
+      { modules: ["search"] },
+    );
+    await writeActivity(tenantId, req.principal.userId, `api_execution_${outcome.status}`, "search_change_proposal", id, {
+      kind, executionId, approvalId: proposal.approvalId, payloadHash,
+      changesTotal: outcome.changesTotal, changesApplied: outcome.changesApplied,
+      changesFailed: outcome.changesFailed, changesUnknown: outcome.changesUnknown,
+      simulated: report.simulated, provider: report.provider,
+      echoViolations: outcome.echoViolations,
+    });
+
+    if (outcome.status === "indeterminate") {
+      // Recorded above, refused here (§A14.5 record-then-throw). The identity of the response could
+      // not be reconciled, so we will not tell the caller WHICH changes applied — and a 502 is the
+      // honest code: the failure is the counterparty's answer, not the request.
+      reply.status(502).send({
+        id, outcome: "indeterminate" as const, executionId,
+        changesTotal: outcome.changesTotal, echoViolations: outcome.echoViolations,
+        message: "The executor's response could not be matched to what was sent. Changes may exist in the ad account; this platform refuses to say which. The approval is spent — investigate the account directly, then raise a new proposal for whatever remains.",
+      });
+      return;
+    }
+    reply.status(200).send({
+      id, outcome: outcome.status, executionId,
+      changesTotal: outcome.changesTotal, changesApplied: outcome.changesApplied,
+      changesFailed: outcome.changesFailed,
+      simulated: report.simulated, provider: report.provider,
+      proposalStatus: outcome.status === "applied" ? "applied" : "approved",
+      perChange: outcome.perChange,
+    });
+  }
+
+  // The execution record(s) for a proposal — the evidence behind a 'partial'/'indeterminate' outcome,
+  // and what the console's automated twin renders instead of a status guess. Baseline `read` action:
+  // reading an outcome is not executing one.
+  @Get("change-proposals/:id/executions")
+  async listChangeProposalExecutions(
+    @Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("id") id: string,
+  ) {
+    assertUuid(id, "change proposal id");
+    const proposal = await withTenants([tenantId], (c) => changeProposalApplyRow(c, id), { modules: ["search"] });
+    if (!proposal) throw new NotFoundException("change proposal not found");
+    await authorize(req.principal, { kind: "resource_search_campaign", id, tenantId, module: "search" }, "read");
+    const rows = await withTenants(
+      [tenantId],
+      (c) => c.query(
+        `SELECT id, proposal_id AS "proposalId", campaign_id AS "campaignId", approval_id AS "approvalId",
+                kind, mode, payload_hash AS "payloadHash", status,
+                changes_total AS "changesTotal", changes_applied AS "changesApplied",
+                changes_failed AS "changesFailed", changes_unknown AS "changesUnknown",
+                per_change AS "perChange", echo_violations AS "echoViolations",
+                provider, simulated, error, executed_by AS "executedBy",
+                created_at AS "createdAt", finished_at AS "finishedAt"
+           FROM search_change_executions
+          WHERE proposal_id = $1 ORDER BY created_at DESC LIMIT 50`,
+        [id],
+      ),
+      { modules: ["search"] },
+    );
+    return rows.rows;
   }
 
   // ============================================================== SEM: SEARCH-TERMS SYNC (SM-20) ==

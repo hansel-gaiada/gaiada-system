@@ -18,6 +18,7 @@ import {
   handleAuditRegression,
   handleBudgetOverspend,
   handleBudgetThreshold,
+  handleCampaignApplied,
   handleCampaignProposed,
   handleIncurredCost,
   handleRankDropped,
@@ -126,6 +127,21 @@ export const searchModule: ModuleContract = {
     // SM-20 (design §12): search-terms sync — the Ads-Scripts webhook's per-term daily table.
     // Registered here AT WRITE TIME, same standing lesson as every comment immediately above.
     "0062_search_search_terms.sql",
+    // SM-21 (design §07, D-6): the api-mode execution record — UNIQUE (approval_id) is the one-shot
+    // consumption of the WS4 approval. Registered here AT WRITE TIME, same standing lesson as every
+    // comment immediately above (0047's omission from this array is this module's own repeated bug).
+    "0064_search_change_executions.sql",
+    // SM-25c (addendum §A12): additive `simulated`/`connection_id` provenance columns on
+    // search_campaign_metrics_daily for the Ads OAuth read pull. Registered here by the SM-21 agent
+    // at the coordinator's request because this file was held by that ticket — the FILE exists on
+    // disk (verified by `ls migrations/` at write time), and an unregistered migration simply never
+    // runs, which is 0047's standing lesson repeated one entry above.
+    "0065_search_campaign_metrics_provenance.sql",
+    // SM-26 (tracker §6bp Ruling 6): the pre-send Google Ads mutate operation manifest — written
+    // before any Ads mutate HTTP call so positional response parsing has something of ours (not the
+    // vendor's) to be paired against. Registered here AT WRITE TIME, same standing lesson as every
+    // comment immediately above (0047's omission from this array is this module's own repeated bug).
+    "0066_search_ads_execution_manifest.sql",
   ],
   permissions: [
     { key: "search:engagement:read", description: "View search-marketing engagements/properties/KPI targets" },
@@ -340,28 +356,50 @@ export const searchModule: ModuleContract = {
       pathTemplate: "/api/:tenantId/modules/search/change-proposals/:proposalId/export",
       inputSchema: { type: "object", properties: { tenantId: { type: "string" }, proposalId: { type: "string" } }, required: ["tenantId", "proposalId"] },
     },
+    // SM-21: all three now have REAL method/pathTemplate bindings onto the ONE api-execution route
+    // (`POST change-proposals/:proposalId/apply-api`). Three tool names, one route, deliberately:
+    // design §07's tool table names the three by risk class, and the route derives BOTH its Cerbos
+    // action and its operation set from the proposal's own `kind` — a caller cannot pick which
+    // semantics apply by choosing a tool name, so three routes would be three ways to reach one
+    // guard rather than three guards. `sem-apply.ts`'s `toolNameForKind` is the same mapping in
+    // reverse, and it is what gets recorded on the WS4 approval row so a human deciding it in the
+    // inbox sees which declared high-impact tool they are authorizing.
+    //
+    // impact:'high' is unchanged and, per addendum §A13.6, is a RISK CLASSIFICATION — not a claim
+    // that automation can enter here. An automation principal is minted `assurance:'low'` by
+    // construction (mcp-hub/src/principal.ts) and `permits()` checks assurance BEFORE impact, so a
+    // `verified` write tool is refused outright. The suspension these tools describe is filed by the
+    // ROUTE itself (against `automation_approvals`, WS4's existing store) rather than by the hub
+    // gate — which is why the route suspends identically for a human console caller: D-6 holds
+    // humans to the automation standard on this path.
     {
       name: "search.applyNegatives",
-      description: "Execute an approved api-mode negatives-batch change proposal against the live ad account (stub — real execution lands with SM-21/SM-26, ALWAYS suspends to WS4)",
+      description: "Execute an approved api-mode negatives-batch change proposal against the live ad account — suspends into WS4 on first call, executes exactly once when the approval is consumed (SM-21; real binding, live push lands with SM-26)",
       minAssurance: "verified",
       write: true,
       impact: "high",
+      method: "POST",
+      pathTemplate: "/api/:tenantId/modules/search/change-proposals/:proposalId/apply-api",
       inputSchema: { type: "object", properties: { tenantId: { type: "string" }, proposalId: { type: "string" } }, required: ["tenantId", "proposalId"] },
     },
     {
       name: "search.setBudget",
-      description: "Execute an approved api-mode budget/bid change proposal against the live ad account (stub — real execution lands with SM-21/SM-26, ALWAYS suspends to WS4)",
+      description: "Execute an approved api-mode budget change proposal against the live ad account — suspends into WS4 on first call, executes exactly once when the approval is consumed (SM-21; real binding, live push lands with SM-26)",
       minAssurance: "verified",
       write: true,
       impact: "high",
+      method: "POST",
+      pathTemplate: "/api/:tenantId/modules/search/change-proposals/:proposalId/apply-api",
       inputSchema: { type: "object", properties: { tenantId: { type: "string" }, proposalId: { type: "string" } }, required: ["tenantId", "proposalId"] },
     },
     {
       name: "search.launchCampaign",
-      description: "Execute an approved api-mode campaign-launch change proposal against the live ad account (stub — real execution lands with SM-21/SM-26, ALWAYS suspends to WS4)",
+      description: "Execute an approved api-mode launch/pause/bid/ads-batch change proposal against the live ad account — suspends into WS4 on first call, executes exactly once when the approval is consumed (SM-21; real binding, live push lands with SM-26)",
       minAssurance: "verified",
       write: true,
       impact: "high",
+      method: "POST",
+      pathTemplate: "/api/:tenantId/modules/search/change-proposals/:proposalId/apply-api",
       inputSchema: { type: "object", properties: { tenantId: { type: "string" }, proposalId: { type: "string" } }, required: ["tenantId", "proposalId"] },
     },
     {
@@ -406,6 +444,10 @@ export const searchModule: ModuleContract = {
     "search.report.ready_for_review": handleReportReady,
     "search.report.delivered": handleReportDelivered,
     "search.campaign.proposed": handleCampaignProposed,
+    // SM-73 (§6bp Ruling 2): all four terminal outcomes (applied/partial/failed/indeterminate)
+    // wired here because partial and indeterminate are the ones an operator must not miss.
+    // Producer: search.controller.ts applyProposalApi.
+    "search.campaign.applied": handleCampaignApplied,
     "search.ai_visibility.changed": handleAiVisibilityChanged,
   },
   // routes: served by SearchController in the NestJS port.

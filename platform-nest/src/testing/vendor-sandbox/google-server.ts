@@ -85,6 +85,15 @@ export const GOOGLE_SANDBOX_DENY_SCOPE_MARKER = "sm51-deny";
 export const GOOGLE_SANDBOX_QUOTA_MARKER = "sm51-quota";
 /** Force a surface to answer 404 NOT_FOUND for an unknown site/property/customer. */
 export const GOOGLE_SANDBOX_NOTFOUND_MARKER = "sm51-notfound";
+/** SM-26 (tracker §6bp Ruling 6) — put this in a mutate operation's JSON body (e.g. a keyword `text`)
+ *  to make that PARTICULAR operation's result carry no `resourceName`, with a `partialFailureError`
+ *  attached to the response — models Ruling 6.3's PER-ROW failure inside an otherwise correctly-sized
+ *  response (never an addressing failure: the result COUNT still matches the operation count). */
+export const GOOGLE_SANDBOX_ADS_MUTATE_ROW_FAIL_MARKER = "sm51-ads-row-fail";
+/** SM-26 — put this in ANY mutate operation's JSON body to make the WHOLE response for that call come
+ *  back with one FEWER result than operations sent — models Ruling 6.3's count/shape mismatch, which
+ *  impeaches the whole execution's addressing (never a per-row concern). */
+export const GOOGLE_SANDBOX_ADS_MUTATE_COUNT_MISMATCH_MARKER = "sm51-ads-count-mismatch";
 
 export interface GoogleSandboxOptions {
   clientId: string;
@@ -603,12 +612,59 @@ export async function startGoogleSandbox(opts: GoogleSandboxOptions): Promise<Go
     if (mutate && (req.method ?? "GET") === "POST") {
       bump("ads:mutate");
       if (!requireLiveBearer(req, res, "ads:mutate")) return;
-      // Served ONLY so SM-26's executor can be built against an envelope once SM-21 + SM-25c land
-      // (§6x.3 item 5). No code in SM-25a calls this, and api-client.ts refuses a mutate-shaped path
-      // outright — Ads writes are governed by SM-21's approve-execute-replay + WS4 one-shot approval
-      // regardless of transport (§A12.1/D-8).
+      const customerId = decodeURIComponent(mutate[1]);
+      if (markerRefusal(res, customerId, "ads:mutate")) return;
       const resource = mutate[2];
-      sendJson(res, 200, adsMutateBody({ resourceNames: [`customers/${decodeURIComponent(mutate[1])}/${resource}/1`] }));
+
+      let body: Record<string, unknown> = {};
+      try {
+        const raw = (await readBody(req)).toString("utf8");
+        body = raw ? (JSON.parse(raw) as Record<string, unknown>) : {};
+      } catch {
+        sendJson(res, 400, apiErrorBody(400, "INVALID_ARGUMENT", "request body is not valid JSON"));
+        return;
+      }
+      const operations = Array.isArray(body.operations) ? (body.operations as unknown[]) : [];
+      if (operations.length === 0) {
+        bump("ads:mutate_missing_operations");
+        sendJson(res, 400, apiErrorBody(400, "INVALID_ARGUMENT", "operations is required and must be non-empty"));
+        return;
+      }
+
+      // SM-26 (tracker §6bp Ruling 6) — echo ONE result per operation IN ORDER by default (the
+      // documented vendor contract this executor's positional pairing depends on), rather than the
+      // fixed single-result stub SM-51 originally shipped: a real multi-operation batch's count MUST
+      // match for a driver's positional-pairing happy path to be exercisable over real sockets at all.
+      let rowFailIndex = -1;
+      let mismatch = false;
+      operations.forEach((raw, i) => {
+        const s = JSON.stringify(raw);
+        if (rowFailIndex === -1 && s.includes(GOOGLE_SANDBOX_ADS_MUTATE_ROW_FAIL_MARKER)) rowFailIndex = i;
+        if (s.includes(GOOGLE_SANDBOX_ADS_MUTATE_COUNT_MISMATCH_MARKER)) mismatch = true;
+      });
+
+      const results = operations.map((_, i) =>
+        i === rowFailIndex
+          ? { resourceName: null }
+          : { resourceName: `customers/${customerId}/${resource}/${i + 1}` },
+      );
+      if (mismatch) {
+        // Models Ruling 6.3's count/shape mismatch: one FEWER result than operations sent. Dropping
+        // the LAST one (rather than always index 0) so a test can also assert the mismatch is detected
+        // regardless of which end of the array is short.
+        results.pop();
+        bump("ads:mutate_count_mismatch");
+      }
+      if (rowFailIndex !== -1) bump("ads:mutate_row_fail");
+
+      sendJson(
+        res,
+        200,
+        adsMutateBody({
+          results,
+          partialFailure: rowFailIndex !== -1 ? { code: 3, message: "one or more operations failed" } : null,
+        }),
+      );
       return;
     }
 

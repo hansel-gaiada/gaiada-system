@@ -1,14 +1,15 @@
 # Search-Marketing Design Addendum — Multi-Vendor Providers, Simulation Mode, Cost Model v2
 
 > **Status:** Ratified design addendum to [`seo-sem-design.md`](./seo-sem-design.md) v1.1.
-> **Version:** A1.7 · **Date:** 2026-07-31 (A1.0/A1.1 2026-07-29; A1.1 adds §A8, the SM-33/34/35 ⚡
+> **Version:** A1.8 · **Date:** 2026-07-31 (A1.0/A1.1 2026-07-29; A1.1 adds §A8, the SM-33/34/35 ⚡
 > gate amendments; A1.2 adds §A9, the SM-36/44 ⚡ gate amendments + P2 readiness — §A4.7 widened to
 > pre-existing readers, two of my own claims corrected, one QA-caught tier-4 breach ratified fixed;
 > A1.3 adds §A10, the vendor-sandbox provenance ruling + SM-49 + SM-41 amendment;
 > A1.4 adds §A11, the incurred-cost ledger ruling — SM-50, with the binding consumer enumeration;
 > A1.5 adds §A12, the Google client-account surfaces ruling — SM-51 + the SM-25 decomposition;
 > A1.6 adds §A14, echo-validation — the response-vs-request standing rule, tracker §6bc;
-> A1.7 adds §A14.5, identity mismatch at a billing point — record the money, refuse the data, tracker §6bi)
+> A1.7 adds §A14.5, identity mismatch at a billing point — record the money, refuse the data, tracker §6bi;
+> A1.8 generalises §A14.5 to writes + adds §A12.6, the Ads write-mode split — tracker §6bp)
 > · **Author:** System Architect (Claude)
 > **Trigger:** owner directive 2026-07-29 (tracker §6): (1) no live vendor API until staging —
 > dev/demo runs a deterministic simulation; (2) three data vendors (Semrush + Ahrefs already paid,
@@ -980,6 +981,22 @@ Google, not a validated Google integration.**
 Full ticket specs (SM-51, SM-25a/b/c, SM-41G — tiers, deps, ACs, build-order slots): tracker
 **§6x.3/§6x.4**.
 
+### A12.6 · Ads write-mode split — bound before it is reachable (tracker §6bp Ruling 3)
+
+`SEARCH_PROVIDER_MODE` describes **data vendors**. The SM-21 apply edge reuses it as its mode
+source as a ratified interim (0062's precedent; no live executor exists, so one mode cannot lie).
+When SM-26 registers a live executor, the write edge gets its own switch:
+
+- **`SEARCH_ADS_WRITE_MODE`** (`simulate` | `live`, default `simulate`), independent of the data
+  mode — "may this environment touch a real ad account" and "are data vendors live" are independent
+  deployment facts (funded-data-key staging with no real ad account is a legitimate configuration).
+  `live` with no registered executor refuses at boot (§A4.3/§A10.4 style). The executor-report ×
+  mode cross-check (mismatch ⇒ `indeterminate`) carries over against the new mode.
+- **Forbidden cross-product:** a live executor refuses a proposal whose payload derives from
+  simulated keyword data (checkable via the SM-18 plan's per-ad-group provenance block, which
+  travels into the proposal). Real client money over fabricated metrics is §A2's never-blend rule
+  at the write edge; the remedy is regenerating the plan from real pulls — no override flag.
+
 ---
 
 ## §A13 · Automation and the money path — the assurance ruling (2026-07-30, binding)
@@ -1207,6 +1224,21 @@ either a money lie or a data lie:
 - **Fixture-truthfulness corollary (tracker §6bi Ruling 2):** production behaviour is never
   weakened to green a fixture that cannot occur against the real counterparty — mocks echo what
   was actually posted (request-aware), or they are the defect.
+
+**Generalised to WRITES (tracker §6bp Ruling 4; instance: SM-21's Ads apply, §6bn):**
+
+- The pairing discriminator applies to **mutate responses**: an unknown/duplicate/missing operation
+  ref impeaches the addressing scheme of the whole response — attribution is refused
+  (`indeterminate`, a first-class terminal status never rounded into `partial`/`failed`) and any
+  dependent-row cascade is suppressed.
+- **Refs must carry identity, never position** (`opType#ourRowId`): a positional ref makes the echo
+  check tautological. Reads validate the vendor's echo; writes must first give the vendor something
+  non-positional to echo — or, where the vendor echoes nothing (Google Ads mutate), the pairing
+  authority is a locally-persisted **pre-send op manifest** parsed strictly positionally, with any
+  count/shape mismatch ⇒ `indeterminate`-all (tracker §6bp Ruling 6).
+- **Record-before-raise:** on an indeterminate write outcome the row is written BEFORE the error is
+  raised — for a write, that row is the only local trace of a possibly-executed remote change;
+  withholding it is the SM-50 orphan class with live side effects instead of money.
 
 ---
 

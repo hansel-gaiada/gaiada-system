@@ -92,6 +92,7 @@ import type {
   CampaignPlanResult, RsaDraftResponse, NegativesProposalResponse,
   RankSnapshot, GoogleConnectionView,
   GscPerformanceRow, GscTopQueryRow, Ga4MetricsRow,
+  SearchReport, ReportRenderPreview,
 } from "./searchMarketingShared";
 
 export * from "./searchMarketingShared";
@@ -314,3 +315,17 @@ export const listGa4Metrics = async (
   const suffix = qs.toString() ? `?${qs.toString()}` : "";
   return asArray<Ga4MetricsRow>(await skipUnavailable(platformFetch<unknown>(`${base(t)}/properties/${propertyId}/ga4-metrics${suffix}`, u), []));
 };
+
+// ── Client-facing reports (SM-22; SM-10 built listReports/getReport on search.controller.ts,
+//    SM-22 adds the review/approve/preview/deliver routes on the separate search-reports.controller.ts —
+//    both share this module's one route prefix, so no fetcher here needs to know which file answers it) ─
+export const listReports = async (u: string, t: string, engagementId: string) =>
+  asArray<SearchReport>(await skipUnavailable(platformFetch<unknown>(`${base(t)}/engagements/${engagementId}/reports`, u), []));
+
+export const getReport = async (u: string, t: string, id: string) =>
+  asObject<SearchReport>(await skipUnavailable(platformFetch<unknown>(`${base(t)}/reports/${id}`, u), null));
+
+/** Read-only render preview (SM-22) — never writes a file/status. `null` (404/403) means the console
+ *  must render "preview unavailable" rather than a stale/guessed markdown body. */
+export const previewReport = async (u: string, t: string, id: string) =>
+  asObject<ReportRenderPreview>(await skipUnavailable(platformFetch<unknown>(`${base(t)}/reports/${id}/preview`, u), null));

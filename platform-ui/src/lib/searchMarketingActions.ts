@@ -27,6 +27,7 @@ import {
   type GoogleProvider, type GoogleConnectionView, type StartedGoogleAuthorization, type GoogleRevokeResult,
   type GscPullOutcome, type Ga4PullOutcome, type GscKeywordImportResult,
   type ChangeProposalExportResult, type MarkAppliedResult,
+  type SearchReport, type DeliverReportResult,
 } from "./searchMarketingShared";
 
 async function ctx(tenantOverride?: string): Promise<{ userId: string; tenant: string; me: Me } | { error: string }> {
@@ -894,6 +895,115 @@ export async function importGscKeywords(
       { method: "POST", body: JSON.stringify(body) },
     );
     revalidatePath(`/departments/[deptId]/keywords`, "page");
+    return { ok: true, result };
+  } catch (e) {
+    if (e instanceof PlatformError) return { ok: false, error: e.message };
+    throw e;
+  }
+}
+
+// ── Client-facing reports (SM-22; deps SM-10 [data/draft], SM-17, SM-18) ────────────────────────────
+// Lifecycle: draft -[submit]-> in_review -[approve]-> approved -[deliver]-> delivered. Edit/submit/
+// send-back gate on the SAME baseline `search.manage` permission every other draft-shaped write in
+// this module uses; approve/deliver gate on the elevated `search.report.approve` capability (mirrors
+// Cerbos's own `approve`/`deliver` actions, both restricted to module_manager/company_admin/
+// group_executive/platform_admin by resource_search_report.yaml — module_staff is refused server-side
+// regardless of what this file's own gate says, per the standing "UI gate is a hint, Cerbos is the
+// wall" rule stated at the top of this file).
+export type DraftReportResult = { ok: boolean; error?: string; report?: SearchReport & { narrativeMd: string } };
+
+/** SM-10's own write route (`POST engagements/:id/reports`) — re-drafting an EXISTING draft for the
+ *  same engagement+period+kind updates it in place; anything past 'draft' refuses (400) rather than
+ *  silently overwriting a report already under review. */
+export async function draftReport(
+  tenantId: string, engagementId: string, body: { period: string; kind?: string },
+): Promise<DraftReportResult> {
+  const c = await ctx(tenantId);
+  if ("error" in c) return { ok: false, error: c.error };
+  if (!can(c.me, "search.manage", c.tenant)) return { ok: false, error: "You don't have the search.manage permission." };
+  try {
+    const report = await platformFetch<SearchReport & { narrativeMd: string }>(
+      `/api/${c.tenant}/modules/search/engagements/${engagementId}/reports`,
+      c.userId,
+      { method: "POST", body: JSON.stringify(body) },
+    );
+    revalidatePath(`/departments/[deptId]/reports`, "page");
+    return { ok: true, report };
+  } catch (e) {
+    if (e instanceof PlatformError) return { ok: false, error: e.message };
+    throw e;
+  }
+}
+
+export type ReportStatusResult = { ok: boolean; error?: string; report?: SearchReport };
+
+async function patchReportStatus(
+  tenantId: string, reportId: string, body: { narrativeMd?: string; status?: string },
+): Promise<ReportStatusResult> {
+  const c = await ctx(tenantId);
+  if ("error" in c) return { ok: false, error: c.error };
+  if (!can(c.me, "search.manage", c.tenant)) return { ok: false, error: "You don't have the search.manage permission." };
+  try {
+    await platformFetch(`/api/${c.tenant}/modules/search/reports/${reportId}`, c.userId, {
+      method: "PATCH", body: JSON.stringify(body),
+    });
+  } catch (e) {
+    if (e instanceof PlatformError) return { ok: false, error: e.message };
+    throw e;
+  }
+  revalidatePath(`/departments/[deptId]/reports`, "page");
+  // Re-read authoritatively rather than trust the PATCH echo (saveEngagementScope's own convention,
+  // above) — the PATCH response is `{id,status}` only, not the full row.
+  const { getReport } = await import("./searchMarketing");
+  const report = await getReport(c.userId, c.tenant, reportId);
+  return { ok: true, report: report ?? undefined };
+}
+
+/** Edits the narrative while draft/in_review, without changing status. */
+export async function editReportNarrative(tenantId: string, reportId: string, narrativeMd: string): Promise<ReportStatusResult> {
+  return patchReportStatus(tenantId, reportId, { narrativeMd });
+}
+
+/** draft -> in_review. Emits `search.report.ready_for_review` server-side. */
+export async function submitReportForReview(tenantId: string, reportId: string): Promise<ReportStatusResult> {
+  return patchReportStatus(tenantId, reportId, { status: "in_review" });
+}
+
+/** in_review -> draft (a reviewer sending it back for rework). */
+export async function sendReportBackToDraft(tenantId: string, reportId: string): Promise<ReportStatusResult> {
+  return patchReportStatus(tenantId, reportId, { status: "draft" });
+}
+
+/** in_review -> approved. Elevated: Cerbos `approve` action (module_manager/company_admin/
+ *  group_executive/platform_admin only). */
+export async function approveReport(tenantId: string, reportId: string): Promise<ReportStatusResult> {
+  const c = await ctx(tenantId);
+  if ("error" in c) return { ok: false, error: c.error };
+  if (!can(c.me, "search.report.approve", c.tenant)) return { ok: false, error: "You don't have the search.report.approve permission." };
+  try {
+    await platformFetch(`/api/${c.tenant}/modules/search/reports/${reportId}/approve`, c.userId, { method: "POST" });
+  } catch (e) {
+    if (e instanceof PlatformError) return { ok: false, error: e.message };
+    throw e;
+  }
+  revalidatePath(`/departments/[deptId]/reports`, "page");
+  const { getReport } = await import("./searchMarketing");
+  const report = await getReport(c.userId, c.tenant, reportId);
+  return { ok: true, report: report ?? undefined };
+}
+
+export type DeliverReportActionResult = { ok: boolean; error?: string; result?: DeliverReportResult };
+
+/** approved -> delivered: renders the client-facing artifact, files it, best-effort links a
+ *  deliverable, emits `search.report.delivered`. Elevated: same `search.report.approve` capability as
+ *  approve above (Cerbos's `deliver` action carries the identical tier). */
+export async function deliverReport(tenantId: string, reportId: string): Promise<DeliverReportActionResult> {
+  const c = await ctx(tenantId);
+  if ("error" in c) return { ok: false, error: c.error };
+  if (!can(c.me, "search.report.approve", c.tenant)) return { ok: false, error: "You don't have the search.report.approve permission." };
+  try {
+    const result = await platformFetch<DeliverReportResult>(`/api/${c.tenant}/modules/search/reports/${reportId}/deliver`, c.userId, { method: "POST" });
+    revalidatePath(`/departments/[deptId]/reports`, "page");
     return { ok: true, result };
   } catch (e) {
     if (e instanceof PlatformError) return { ok: false, error: e.message };

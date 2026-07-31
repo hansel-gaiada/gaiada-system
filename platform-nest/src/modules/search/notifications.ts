@@ -316,3 +316,75 @@ export async function handleAiVisibilityChanged(event: OutboxEvent): Promise<voi
     });
   }
 }
+
+// ── search.campaign.applied (SM-21; real producer: search.controller.ts applyProposalApi) ──────────
+//
+// SM-73 (§6bp Ruling 2): notification mapping for proposal execution outcomes. All four terminal
+// statuses (`applied`, `partial`, `failed`, `indeterminate`) are wired here because `partial` and
+// `indeterminate` are precisely the ones an operator must not miss. The distinction between
+// `partial` (some changes applied and some did not; we know exactly which) and `failed` (nothing
+// applied) must be unmissable in the text — conflating them would hide the fact that a live ad
+// account may have been half-modified.
+//
+// The distinction between `failed` (nothing applied, we know the reason) and `indeterminate`
+// (we cannot tell whether anything applied; changes may exist in the account) is equally critical:
+// `indeterminate` is a statement of ignorance about a live account, not a statement that nothing
+// happened.
+//
+// TEXT SAFETY (same rule as SM-13): every title/body is hand-written and fixed; `simulated: true`
+// is unmissable (the platform is in simulate mode today, so a notification that reads as though a
+// real ad change happened would train the operator to ignore the distinction later, when it is
+// real).
+export async function handleCampaignApplied(event: OutboxEvent): Promise<void> {
+  const p = event.payload as { campaignId?: string; status?: string; simulated?: boolean };
+  const campaignId = p.campaignId;
+  if (!campaignId) return;
+  const ownerId = await campaignEngagementOwner(event.tenantId, campaignId);
+  const status = p.status;
+  const isSimulated = p.simulated === true;
+
+  let title: string;
+  let body: string | undefined;
+  let severity: NonNullable<NotificationPayload["severity"]>;
+
+  if (status === "applied") {
+    title = isSimulated
+      ? "Campaign changes applied (simulation mode)"
+      : "Campaign changes applied";
+    body = isSimulated ? "This was a test — no live ad account was modified." : undefined;
+    severity = "info";
+  } else if (status === "partial") {
+    title = isSimulated
+      ? "Some campaign changes applied (simulation mode)"
+      : "Some campaign changes applied";
+    body = isSimulated
+      ? "Some changes succeeded and some failed in simulation. Review the execution details to decide what to do next."
+      : "Some changes succeeded and some failed. Review the execution details to decide what to do next.";
+    severity = "warning";
+  } else if (status === "failed") {
+    title = isSimulated
+      ? "Campaign changes failed (simulation mode)"
+      : "Campaign changes failed";
+    body = isSimulated
+      ? "All changes were rejected in simulation."
+      : "All changes were rejected. Review the execution details for the reason.";
+    severity = "critical";
+  } else if (status === "indeterminate") {
+    title = isSimulated
+      ? "Campaign change outcome unclear (simulation mode)"
+      : "Campaign change outcome unclear";
+    body = isSimulated
+      ? "The platform cannot determine which changes, if any, were made in simulation. This is a platform error, not a normal state."
+      : "The platform cannot determine which changes, if any, were made in your ad account. Changes may exist; investigate the account directly and raise a new proposal for whatever remains.";
+    severity = "critical";
+  } else {
+    return; // Unknown status
+  }
+
+  await notifyOnce(event.tenantId, ownerId, "search.campaign.applied", event.id, {
+    title,
+    body,
+    severity,
+    entityType: "search_change_proposal", entityId: event.entityId, href: HREF.ads,
+  });
+}

@@ -281,3 +281,89 @@ export async function adsSearch<T = unknown>(args: {
     fetchImpl: args.fetchImpl,
   });
 }
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+// Google Ads MUTATE — the deliberately separate WRITE transport (SM-26; design addendum §A12.6 /
+// §A14.5 "generalised to writes"; tracker §6bp Ruling 6)
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+// `assertReadOnlyPath` above is a STRUCTURAL guard and is not loosened by one character to accommodate
+// this function — this is instead a second, deliberately-named function that never calls
+// `googleAuthorizedRequest` (so the `:mutate` tripwire never even runs against it). It is reachable
+// from exactly one place in production: SM-26's registered live `AdsExecutor`
+// (`../sem-executor-google-ads.ts`), itself only invoked through SM-21's approve-execute-replay +
+// WS4 one-shot approval (§A12.1/D-8) — never through any read path, never through a route this file's
+// own callers would reach by accident.
+//
+// WHY ONE RETRY ON A CLEAN 401 IS STILL SAFE FOR A WRITE (unlike a retry-on-anything-else): a 401
+// means the request never got past authentication — nothing reached Google's execution layer, so
+// nothing can have been double-applied by refreshing the token and resending. What must NEVER happen
+// is retrying a request whose OUTCOME is unknown (timeout, aborted mid-flight, a 5xx after the request
+// was plausibly received) — those are left entirely to the caller's manifest-based reconciliation
+// (§6bp Ruling 6: a count/shape mismatch, which a request that got no answer at all trivially
+// produces, becomes `indeterminate`-all). This function never resends on anything but a clean 401.
+//
+// WHY THIS RETURNS THE RAW STATUS/BODY INSTEAD OF THROWING ON A NON-2XX (unlike
+// `googleAuthorizedRequest`, which throws `GoogleApiError`): the caller's positional-pairing
+// reconciliation needs to see the actual response SHAPE even when it is not a 2xx — Ads is documented
+// to be able to answer with `partialFailureError` inside an otherwise-200 body, and a rejected mutate
+// call is itself part of what "count/shape mismatch" means (§A14.5's pairing discriminator). Throwing
+// here would collapse every non-2xx into one generic error and hide the shape from the reconciler.
+export interface AdsMutateHttpResult<T = unknown> {
+  status: number;
+  data: T | null;
+  refreshed: boolean;
+}
+
+export async function googleAdsMutateRequest<T = unknown>(args: {
+  tenantId: string;
+  connectionId: string;
+  /** The full `/v{n}/customers/{customerId}/{resource}:mutate` path — already built by the caller
+   *  (`sem-executor-google-ads.ts` owns the per-resource-type routing; this file owns transport only). */
+  path: string;
+  body: unknown;
+  fetchImpl?: FetchImpl;
+}): Promise<AdsMutateHttpResult<T>> {
+  const req: AuthorizedRequest = {
+    tenantId: args.tenantId,
+    connectionId: args.connectionId,
+    surface: "ads",
+    path: args.path,
+    method: "POST",
+    body: args.body,
+    fetchImpl: args.fetchImpl,
+  };
+  const fetchImpl = req.fetchImpl ?? fetch;
+
+  const first = await getAccessToken(req.tenantId, req.connectionId, { fetchImpl });
+  let refreshed = first.refreshed;
+  let res = await send(req, first.accessToken, fetchImpl);
+
+  if (res.status === 401) {
+    // Same "the surface wins" reasoning as googleAuthorizedRequest's identical branch: our stored
+    // expiry said the token was fine and Google disagreed, so force a renewal and try exactly once
+    // more — safe here because a 401 means nothing was sent to the mutate RPC itself.
+    const renewed = await getAccessToken(req.tenantId, req.connectionId, { force: true, fetchImpl });
+    refreshed = true;
+    res = await send(req, renewed.accessToken, fetchImpl);
+  }
+
+  if (res.status === 401) {
+    // Still unauthenticated after a forced refresh: the connection itself is not usable, and — same
+    // as the read path — nothing was sent, so throwing here is the executor's "nothing was sent"
+    // contract, not a violation of it.
+    throw new GoogleConnectionNotLinkedError(req.connectionId, "no_access_token");
+  }
+
+  let data: T | null = null;
+  if (res.text) {
+    try {
+      data = JSON.parse(res.text) as T;
+    } catch {
+      // Non-JSON body on a mutate response is itself a shape fact the caller's reconciliation must
+      // see (it will read as `data: null`, which fails the caller's own results-array shape check) —
+      // never thrown away as a generic error the way the read helper's non-JSON branch does.
+      data = null;
+    }
+  }
+  return { status: res.status, data, refreshed };
+}

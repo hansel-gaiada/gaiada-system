@@ -1163,6 +1163,76 @@ export function formatGoogleMetric(n: unknown): string {
   return numberOrDash(n);
 }
 
+// ── Client-facing reports (SM-22; design §12; deps SM-10 [data/draft], SM-17 [usage/legend], SM-18
+//    [SEM/Ads]) ─────────────────────────────────────────────────────────────────────────────────────
+// Field names verified against `search.controller.ts`'s SM-10 `listReports`/`getReport`/
+// `draftReportNarrative` SELECTs + response construction, and against the NEW
+// `search-reports.controller.ts` (SM-22)'s PATCH/approve/preview/deliver routes (§4i discipline).
+// Lifecycle: draft -[submit]-> in_review -[approve]-> approved -[deliver]-> delivered. A report
+// LEAVES THE BUILDING once delivered — see `ReportRenderPreview`'s own note on why the honesty
+// banner/disclosures must render BESIDE the numbers, never only in a page-level footnote.
+export const REPORT_STATUSES = ["draft", "in_review", "approved", "delivered"] as const;
+export type ReportStatus = (typeof REPORT_STATUSES)[number];
+
+export interface ReportKpiTargetFact {
+  metric: string;
+  target: number;
+  direction: string;
+}
+
+/** The frozen snapshot SM-10's `draftReportNarrative` computes at draft time — `search_reports.
+ *  metrics` verbatim. Never recomputed/redefined client-side. */
+export interface ReportFrozenMetrics {
+  rankTop10: number;
+  criticalFindingsOpen: number;
+  kpiTargets: ReportKpiTargetFact[];
+}
+
+export interface SearchReport {
+  id: string;
+  engagementId: string;
+  period: string | null;
+  kind: string;
+  status: ReportStatus | string;
+  metrics: ReportFrozenMetrics;
+  narrativeMd: string | null;
+  fileId: string | null;
+  deliverableId: string | null;
+  approvedBy: string | null;
+  approvedAt: string | null;
+  deliveredAt: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** `GET reports/:id/preview`'s response (SM-22, read-only — never writes a file/status). The SAME
+ *  shape `POST reports/:id/deliver` renders from internally, so a reviewer previewing this is looking
+ *  at exactly what will be filed/delivered, not an approximation of it. */
+export interface ReportRenderPreview {
+  markdown: string;
+  /** True when ANY rendered figure is simulated. The console must show the mixed/all-simulated
+   *  banner state whenever this is true — never render the markdown as though it were a plain,
+   *  already-safe document (the markdown itself already carries the banner inline; this flag is for
+   *  a console-level indicator alongside the raw text, e.g. a status chip). */
+  anySimulated: boolean;
+  /** True only when EVERY rendered figure is simulated — the strongest disclosure state. */
+  allSimulated: boolean;
+  filename: string;
+}
+
+/** `POST reports/:id/deliver`'s response (SM-22). `deliverableId` is `null` — not an error — when
+ *  the underlying engagement carries no `project_id` (search_engagements.project_id is nullable);
+ *  delivery is never blocked on the PM-side deliverable link existing. */
+export interface DeliverReportResult {
+  id: string;
+  status: "delivered";
+  fileId: string;
+  filename: string;
+  deliverableId: string | null;
+  anySimulated: boolean;
+  allSimulated: boolean;
+}
+
 /** The freshness-lag disclosure line — one sentence, reused everywhere a pulled range is shown, so
  *  the wording can't drift between the GSC and GA4 halves of the page. Always states BOTH the
  *  effective end date and whether a clamp happened; never omits the clamp fact even when it is

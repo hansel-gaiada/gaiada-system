@@ -33,6 +33,7 @@ import {
   handleCampaignProposed,
   handleAiVisibilityChanged,
   handleIncurredCost,
+  handleCampaignApplied,
 } from "./notifications";
 import type { OutboxEvent } from "../../events/types";
 
@@ -530,5 +531,257 @@ describe.skipIf(!TEST_URL || !REDIS_TEST_URL)("search module notifications (SM-1
     expect(anyRow.rows.length).toBe(0);
     const cRows = await notificationsFor(C, uC, "search.provider.incurred_cost");
     expect(cRows.every((p) => p.sourceEventId !== "sm50-cross-1")).toBe(true);
+  });
+
+  // ── SM-73: search.campaign.applied notification mapping ─────────────────────────────────────────
+  // All four terminal outcomes (applied, partial, failed, indeterminate) emitted by SM-21's
+  // reconcileExecution, wired here with status-distinct copy per the ruling. Text safety rule:
+  // simulated must be unmissable, and indeterminate must be clearly distinguished from failed.
+  it("SM-73: search.campaign.applied 'applied' outcome notifies the campaign's engagement owner with simulation mark", async () => {
+    const engId = newId();
+    const propId = newId();
+    await withTenants(
+      [A],
+      (c) => c.query(
+        `INSERT INTO search_properties (id, tenant_id, client_id, domain, site_url) VALUES ($1,$2,$3,$4,$5)`,
+        [propId, A, clientA, "sm73-applied.example.com", "https://sm73-applied.example.com"],
+      ),
+      { modules: ["search"] },
+    );
+    await withTenants(
+      [A],
+      (c) => c.query(
+        `INSERT INTO search_engagements (id, tenant_id, client_id, property_id, name, tool_scope, provider_budget_usd, status, owner_id)
+         VALUES ($1,$2,$3,$4,$5,'{}',$6,'active',$7)`,
+        [engId, A, clientA, propId, "SM-73 applied test", 100, uA],
+      ),
+      { modules: ["search"] },
+    );
+    const campaignId = newId();
+    await withTenants(
+      [A],
+      (c) => c.query(
+        `INSERT INTO search_campaigns (id, tenant_id, engagement_id, platform, name, status)
+         VALUES ($1,$2,$3,'google_ads',$4,'proposed')`,
+        [campaignId, A, engId, "SM-73 test campaign"],
+      ),
+      { modules: ["search"] },
+    );
+
+    const proposalId = newId();
+    await handleCampaignApplied({
+      id: "sm73-applied-1", tenantId: A, entityType: "search_change_proposal", entityId: proposalId,
+      eventType: "search.campaign.applied", payload: { campaignId, status: "applied", simulated: true },
+      originSite: "central", schemaVersion: 1, createdAt: new Date().toISOString(),
+    });
+
+    const notifs = await notificationsFor(A, uA, "search.campaign.applied");
+    const mine = notifs.filter((p) => p.sourceEventId === "sm73-applied-1");
+    expect(mine).toHaveLength(1);
+    expect(mine[0].href).toBe("/departments/seo/ads");
+    expect(mine[0].severity).toBe("info");
+    const text = await withTenants([A], (c) =>
+      c.query<{ title: string | null; body: string | null }>(
+        `SELECT payload->>'title' AS title, payload->>'body' AS body
+           FROM notifications WHERE payload->>'sourceEventId' = 'sm73-applied-1'`,
+      ),
+    );
+    expect(text.rows[0].title).toMatch(/simulation mode/i);
+    expect(text.rows[0].body).toMatch(/test/i);
+  });
+
+  it("SM-73: search.campaign.applied 'partial' outcome signals some success and some failure", async () => {
+    const engId = newId();
+    const propId = newId();
+    await withTenants(
+      [A],
+      (c) => c.query(
+        `INSERT INTO search_properties (id, tenant_id, client_id, domain, site_url) VALUES ($1,$2,$3,$4,$5)`,
+        [propId, A, clientA, "sm73-partial.example.com", "https://sm73-partial.example.com"],
+      ),
+      { modules: ["search"] },
+    );
+    await withTenants(
+      [A],
+      (c) => c.query(
+        `INSERT INTO search_engagements (id, tenant_id, client_id, property_id, name, tool_scope, provider_budget_usd, status, owner_id)
+         VALUES ($1,$2,$3,$4,$5,'{}',$6,'active',$7)`,
+        [engId, A, clientA, propId, "SM-73 partial test", 100, uA],
+      ),
+      { modules: ["search"] },
+    );
+    const campaignId = newId();
+    await withTenants(
+      [A],
+      (c) => c.query(
+        `INSERT INTO search_campaigns (id, tenant_id, engagement_id, platform, name, status)
+         VALUES ($1,$2,$3,'google_ads',$4,'proposed')`,
+        [campaignId, A, engId, "SM-73 partial campaign"],
+      ),
+      { modules: ["search"] },
+    );
+
+    const proposalId = newId();
+    await handleCampaignApplied({
+      id: "sm73-partial-1", tenantId: A, entityType: "search_change_proposal", entityId: proposalId,
+      eventType: "search.campaign.applied", payload: { campaignId, status: "partial", simulated: true },
+      originSite: "central", schemaVersion: 1, createdAt: new Date().toISOString(),
+    });
+
+    const notifs = await notificationsFor(A, uA, "search.campaign.applied");
+    const mine = notifs.filter((p) => p.sourceEventId === "sm73-partial-1");
+    expect(mine).toHaveLength(1);
+    expect(mine[0].severity).toBe("warning");
+    const text = await withTenants([A], (c) =>
+      c.query<{ title: string | null; body: string | null }>(
+        `SELECT payload->>'title' AS title, payload->>'body' AS body
+           FROM notifications WHERE payload->>'sourceEventId' = 'sm73-partial-1'`,
+      ),
+    );
+    expect(text.rows[0].title).toMatch(/some.*applied/i);
+    expect(text.rows[0].body).toMatch(/succeeded.*failed|failed.*succeeded/i);
+  });
+
+  it("SM-73: search.campaign.applied 'failed' outcome signals nothing applied", async () => {
+    const engId = newId();
+    const propId = newId();
+    await withTenants(
+      [A],
+      (c) => c.query(
+        `INSERT INTO search_properties (id, tenant_id, client_id, domain, site_url) VALUES ($1,$2,$3,$4,$5)`,
+        [propId, A, clientA, "sm73-failed.example.com", "https://sm73-failed.example.com"],
+      ),
+      { modules: ["search"] },
+    );
+    await withTenants(
+      [A],
+      (c) => c.query(
+        `INSERT INTO search_engagements (id, tenant_id, client_id, property_id, name, tool_scope, provider_budget_usd, status, owner_id)
+         VALUES ($1,$2,$3,$4,$5,'{}',$6,'active',$7)`,
+        [engId, A, clientA, propId, "SM-73 failed test", 100, uA],
+      ),
+      { modules: ["search"] },
+    );
+    const campaignId = newId();
+    await withTenants(
+      [A],
+      (c) => c.query(
+        `INSERT INTO search_campaigns (id, tenant_id, engagement_id, platform, name, status)
+         VALUES ($1,$2,$3,'google_ads',$4,'proposed')`,
+        [campaignId, A, engId, "SM-73 failed campaign"],
+      ),
+      { modules: ["search"] },
+    );
+
+    const proposalId = newId();
+    await handleCampaignApplied({
+      id: "sm73-failed-1", tenantId: A, entityType: "search_change_proposal", entityId: proposalId,
+      eventType: "search.campaign.applied", payload: { campaignId, status: "failed", simulated: false },
+      originSite: "central", schemaVersion: 1, createdAt: new Date().toISOString(),
+    });
+
+    const notifs = await notificationsFor(A, uA, "search.campaign.applied");
+    const mine = notifs.filter((p) => p.sourceEventId === "sm73-failed-1");
+    expect(mine).toHaveLength(1);
+    expect(mine[0].severity).toBe("critical");
+    const text = await withTenants([A], (c) =>
+      c.query<{ title: string | null; body: string | null }>(
+        `SELECT payload->>'title' AS title, payload->>'body' AS body
+           FROM notifications WHERE payload->>'sourceEventId' = 'sm73-failed-1'`,
+      ),
+    );
+    expect(text.rows[0].title).toMatch(/failed/i);
+    expect(text.rows[0].title).not.toMatch(/simulation/i);
+  });
+
+  it("SM-73: search.campaign.applied 'indeterminate' outcome signals outcome unclear (distinct from failed)", async () => {
+    const engId = newId();
+    const propId = newId();
+    await withTenants(
+      [A],
+      (c) => c.query(
+        `INSERT INTO search_properties (id, tenant_id, client_id, domain, site_url) VALUES ($1,$2,$3,$4,$5)`,
+        [propId, A, clientA, "sm73-indeterminate.example.com", "https://sm73-indeterminate.example.com"],
+      ),
+      { modules: ["search"] },
+    );
+    await withTenants(
+      [A],
+      (c) => c.query(
+        `INSERT INTO search_engagements (id, tenant_id, client_id, property_id, name, tool_scope, provider_budget_usd, status, owner_id)
+         VALUES ($1,$2,$3,$4,$5,'{}',$6,'active',$7)`,
+        [engId, A, clientA, propId, "SM-73 indeterminate test", 100, uA],
+      ),
+      { modules: ["search"] },
+    );
+    const campaignId = newId();
+    await withTenants(
+      [A],
+      (c) => c.query(
+        `INSERT INTO search_campaigns (id, tenant_id, engagement_id, platform, name, status)
+         VALUES ($1,$2,$3,'google_ads',$4,'proposed')`,
+        [campaignId, A, engId, "SM-73 indeterminate campaign"],
+      ),
+      { modules: ["search"] },
+    );
+
+    const proposalId = newId();
+    await handleCampaignApplied({
+      id: "sm73-indeterminate-1", tenantId: A, entityType: "search_change_proposal", entityId: proposalId,
+      eventType: "search.campaign.applied", payload: { campaignId, status: "indeterminate", simulated: false },
+      originSite: "central", schemaVersion: 1, createdAt: new Date().toISOString(),
+    });
+
+    const notifs = await notificationsFor(A, uA, "search.campaign.applied");
+    const mine = notifs.filter((p) => p.sourceEventId === "sm73-indeterminate-1");
+    expect(mine).toHaveLength(1);
+    expect(mine[0].severity).toBe("critical");
+    const text = await withTenants([A], (c) =>
+      c.query<{ title: string | null; body: string | null }>(
+        `SELECT payload->>'title' AS title, payload->>'body' AS body
+           FROM notifications WHERE payload->>'sourceEventId' = 'sm73-indeterminate-1'`,
+      ),
+    );
+    // indeterminate must be clearly distinguished from failed — it's about uncertainty, not refusal
+    expect(text.rows[0].title).toMatch(/unclear|cannot determine/i);
+    expect(text.rows[0].body).toMatch(/account|may exist/i);
+  });
+
+  it("SM-73: cross-tenant isolation: campaign.applied with campaignId from another tenant notifies nobody", async () => {
+    const cProp = newId();
+    await withTenants([C], (c) =>
+      c.query(
+        `INSERT INTO search_properties (id, tenant_id, client_id, domain, site_url) VALUES ($1,$2,$3,$4,$5)`,
+        [cProp, C, clientC, "c-campaign-applied.example.com", "https://c-campaign-applied.example.com"],
+      ), { modules: ["search"] });
+    const cEngId = newId();
+    await withTenants([C], (c) =>
+      c.query(
+        `INSERT INTO search_engagements (id, tenant_id, client_id, property_id, name, tool_scope, provider_budget_usd, status, owner_id)
+         VALUES ($1,$2,$3,$4,$5,'{}',$6,'active',$7)`,
+        [cEngId, C, clientC, cProp, "SM-73 C-only engagement", 100, uC],
+      ), { modules: ["search"] });
+    const cCampaignId = newId();
+    await withTenants([C], (c) =>
+      c.query(
+        `INSERT INTO search_campaigns (id, tenant_id, engagement_id, platform, name, status)
+         VALUES ($1,$2,$3,'google_ads',$4,'proposed')`,
+        [cCampaignId, C, cEngId, "SM-73 C-only campaign"],
+      ), { modules: ["search"] });
+
+    // Cross-tenant event: tenantId=A but campaignId belongs to C. campaignEngagementOwner is RLS-scoped,
+    // so it resolves no owner under the wrong tenant.
+    await handleCampaignApplied({
+      id: "sm73-cross-1", tenantId: A, entityType: "search_change_proposal", entityId: newId(),
+      eventType: "search.campaign.applied", payload: { campaignId: cCampaignId, status: "applied", simulated: true },
+      originSite: "central", schemaVersion: 1, createdAt: new Date().toISOString(),
+    });
+
+    const cNotifs = await notificationsFor(C, uC, "search.campaign.applied");
+    expect(cNotifs.every((p) => p.sourceEventId !== "sm73-cross-1")).toBe(true);
+    const anyRow = await withTenants([A], (c) =>
+      c.query(`SELECT 1 FROM notifications WHERE payload->>'sourceEventId' = 'sm73-cross-1'`),
+    );
+    expect(anyRow.rows.length).toBe(0);
   });
 });

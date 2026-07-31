@@ -130,12 +130,48 @@ export class GoogleApiError extends GoogleSurfaceError {
  *  binding on it, which is a request-shape problem ("you asked me to pull for a property with nothing
  *  bound"), not a missing-resource one. */
 export class GooglePropertyNotBoundError extends GoogleSurfaceError {
-  constructor(propertyId: string, surface: "google_search_console" | "google_analytics") {
+  constructor(propertyId: string, surface: "google_search_console" | "google_analytics" | "google_ads") {
+    const label = surface === "google_search_console" ? "Search Console" : surface === "google_analytics" ? "GA4" : "Ads";
+    super(400, "google_property_not_bound", `property has no ${label} connection bound — link one first`, {
+      propertyId,
+      surface,
+    });
+  }
+}
+
+/** SM-25c — the property HAS an Ads connection bound, but that connection has no Ads customer
+ *  (account) id linked yet (`integration_connections.external_account` is NULL). Deliberately a
+ *  DIFFERENT class from `GooglePropertyNotBoundError`: that one means "link a connection to this
+ *  property at all"; this one means "the connection exists and is usable, but nobody has told us
+ *  WHICH Ads account under it to query" — a distinct request-shape gap the Connections-tab UI and a
+ *  future ingestion caller need to tell apart (one says "authorize Google", the other says "set the
+ *  account id"). 400, same reasoning as GooglePropertyNotBoundError: the resource exists, what is
+ *  missing is a binding on it. */
+export class GoogleAdsCustomerNotLinkedError extends GoogleSurfaceError {
+  constructor(connectionId: string) {
     super(
       400,
-      "google_property_not_bound",
-      `property has no ${surface === "google_search_console" ? "Search Console" : "GA4"} connection bound — link one first`,
-      { propertyId, surface },
+      "google_ads_customer_not_linked",
+      "this Google Ads connection has no customer (account) id linked — link one first " +
+        "(PUT .../google/connections/:id/ads-account)",
+      { connectionId },
+    );
+  }
+}
+
+/** SM-25c — FAIL-CLOSED: no Ads pull may even be attempted without an approved developer token
+ *  (config.search.google.adsDeveloperToken). Mirrors GoogleOAuthNotConfiguredError's reasoning
+ *  exactly, transposed to the one Ads-only prerequisite: a real Ads call is refused by Google outright
+ *  without one (UNVERIFIED — SM-41G — but the config seam's own comment already states the AC this
+ *  error implements: "empty => the Ads surface refuses rather than half-working"). A deployment
+ *  state, never a caller error and never a crash — checked BEFORE any DB read or network call. */
+export class GoogleAdsNotConfiguredError extends GoogleSurfaceError {
+  constructor() {
+    super(
+      503,
+      "google_ads_not_configured",
+      "Google Ads is not configured: set GOOGLE_ADS_DEVELOPER_TOKEN (a Google-approved developer " +
+        "token) before pulling Ads data. No Ads read can be attempted until it is set.",
     );
   }
 }

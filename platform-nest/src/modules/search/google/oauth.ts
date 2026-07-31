@@ -535,7 +535,26 @@ const PROPERTY_BINDING_COLUMN: Record<GoogleProvider, "gsc_connection_id" | "ga4
 
 /** Resolve a property's connection id for one surface — the read SM-25b/SM-25c ingestion starts from.
  *  Returns null when unbound, which those tickets must treat as "not configured for this client", never
- *  as an excuse to fall back to some other tenant's connection. */
+ *  as an excuse to fall back to some other tenant's connection.
+ *
+ *  SM-72 (tracker §6bo.1): this is the FOURTH site of the SM-63 shape (§6bb) — resolve a row by one key,
+ *  never verify the row's OWN scope. gsc-client.ts and ga4-client.ts each resolve a connection id through
+ *  this function and then use that connection WITHOUT checking its own `.provider` against the surface
+ *  they are about to pull (ads-client.ts already carries that guard locally — SM-25c). Rather than add
+ *  the same guard at each of those two call sites (and leave a future third reader to forget it, exactly
+ *  as these two did), the check is hoisted HERE: the JOIN below requires the resolved connection's own
+ *  `provider` column to equal the surface being asked for. A stale or wrongly-bound column (the gap
+ *  SM-71 closed at WRITE time in `bindPropertyConnection`, but which a pre-existing stale row or a future
+ *  write path bypassing that function could still produce) now fails the JOIN and falls out through the
+ *  exact same "0 rows" branch as a genuinely unbound property — there is no separate mismatch branch to
+ *  build an oracle from; both cases return `null` from the SAME query, and callers already throw the SAME
+ *  `GooglePropertyNotBoundError(propertyId, provider)` for `null` (§A14.5: refuse-as-not-found, no
+ *  oracle). This is safe to hoist because every production caller of this function already supplies a
+ *  concrete surface to resolve FOR (gsc-client.ts/ga4-client.ts/ads-client.ts each pass their own fixed
+ *  provider literal) — unlike `getGoogleConnection`/`getAccessToken`, which are also called with no
+ *  surface in view at all (`refreshConnection`, the connections-tab route) and so cannot carry this
+ *  check themselves without breaking those callers. ads-client.ts's OWN guard (line ~272) stays — this
+ *  hoist is defence in depth on top of it, not a replacement (do not remove either). */
 export async function resolvePropertyConnection(
   tenantId: string,
   propertyId: string,
@@ -546,8 +565,12 @@ export async function resolvePropertyConnection(
     [tenantId],
     (c) =>
       c.query<{ connection_id: string | null }>(
-        `SELECT ${col} AS connection_id FROM search_properties WHERE id = $1 AND deleted_at IS NULL`,
-        [propertyId],
+        `SELECT sp.${col} AS connection_id
+           FROM search_properties sp
+           JOIN integration_connections ic
+             ON ic.id = sp.${col} AND ic.provider = $2 AND ic.deleted_at IS NULL
+          WHERE sp.id = $1 AND sp.deleted_at IS NULL`,
+        [propertyId, provider],
       ),
     { modules: ["search"] },
   );
@@ -557,7 +580,18 @@ export async function resolvePropertyConnection(
 /** Bind a connection to a property. Both rows are resolved through the SAME tenant+module-scoped
  *  connection, so a property id from another tenant matches zero rows and the UPDATE is a no-op rather
  *  than an FK-accepted cross-tenant write (the FK-tenant-validation hazard search.controller.ts's
- *  header documents: FK checks run as the table owner, OUTSIDE RLS). */
+ *  header documents: FK checks run as the table owner, OUTSIDE RLS).
+ *
+ *  SM-71 (tracker §6bm.1): this is the THIRD site of the SM-63 shape (§6bb) — resolve a row by one key,
+ *  never verify the row's OWN scope. A connection was resolved by `id` alone and bound into whichever
+ *  surface column the caller named, without checking that the connection's own `.provider` matches that
+ *  surface — so a Search Console connection could be bound into the Ads column (or vice versa). The
+ *  existence check below now also checks provider, and a mismatch is folded into the SAME "0 rows"
+ *  outcome as a genuinely nonexistent connection: per addendum §A14.5, the identity disposition here is
+ *  refuse-as-not-found with NO ORACLE — this function's boolean return already collapses both cases into
+ *  a single `false`, and callers (this route's own `if (!bound) throw new NotFoundException(...)`) must
+ *  not be able to tell "wrong provider" apart from "no such connection". Do NOT split this into a
+ *  separate error/branch — that would reintroduce the oracle this fix exists to close. */
 export async function bindPropertyConnection(
   tenantId: string,
   propertyId: string,
@@ -569,11 +603,12 @@ export async function bindPropertyConnection(
     [tenantId],
     async (c) => {
       if (connectionId) {
-        const owned = await c.query(
-          `SELECT 1 FROM integration_connections WHERE id = $1 AND deleted_at IS NULL`,
+        const owned = await c.query<{ provider: string }>(
+          `SELECT provider FROM integration_connections WHERE id = $1 AND deleted_at IS NULL`,
           [connectionId],
         );
-        if (owned.rowCount === 0) return 0;
+        const row = owned.rows[0];
+        if (!row || row.provider !== provider) return 0;
       }
       const upd = await c.query(
         `UPDATE search_properties SET ${col} = $2, updated_at = now() WHERE id = $1 AND deleted_at IS NULL`,
