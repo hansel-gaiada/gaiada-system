@@ -347,6 +347,22 @@ describe.skipIf(!TEST_URL)("search-marketing SEM domain (SM-18)", () => {
       });
       expect(overCap.statusCode).toBe(400);
     });
+
+    // The QA-flagged gap: this endpoint's `text` branch called parseKeywordImport with no try/catch,
+    // unlike its sibling at keyword-sets/:id/import — an unterminated quoted field fell through
+    // uncaught and returned a generic 500 instead of a 400 naming the problem. Same fix, same shape.
+    it("proposeNegatives maps an unterminated-quote `text` payload to a 400 naming the problem, not a 500", async () => {
+      const campRes = await app.inject({
+        method: "POST", url: `/api/${A}/modules/search/engagements/${engagementId}/campaigns`, headers: asUser(uA), payload: { name: "negatives quote-guard campaign" },
+      });
+      const campaignId = campRes.json().id as string;
+      const res = await app.inject({
+        method: "POST", url: `/api/${A}/modules/search/campaigns/${campaignId}/negatives/propose`, headers: asUser(uA),
+        payload: { text: '"unterminated' },
+      });
+      expect(res.statusCode).toBe(400);
+      expect((res.json() as { error?: string }).error ?? res.body).toMatch(/unterminated quoted field/i);
+    });
   });
 
   // ─────────────────────────────────────────── Cross-tenant -> 404 ──────────────────────────────────

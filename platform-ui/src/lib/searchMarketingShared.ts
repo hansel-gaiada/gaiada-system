@@ -117,7 +117,14 @@ export const SCOPE_PRESET_SEEDS: Record<Exclude<ScopePreset, "custom">, ToolScop
   },
   standard: {
     rank: { enabled: true, cadence: "weekly", maxKeywords: 50 },
-    volume: { enabled: true },
+    // SM-61 (tracker §6au Ruling 1 clause 2, binding — mirrors platform-nest scope-presets.ts's own
+    // header note verbatim): `volume` used to ship cadence-LESS. The platform-side pull scheduler
+    // (SM-54) was defaulting that absence to weekly-conservative while the cost projection had
+    // ALWAYS priced it as one on-demand refresh/month — a cadence-less enabled tool was scheduled
+    // ~4x more often than this panel showed. `cadence: "monthly"` fixes this by scheduling it at
+    // EXACTLY the rate it was already priced at (price-identical, zero change to any number a human
+    // has ever seen here) and matches the vendor's own monthly volume-data cycle.
+    volume: { enabled: true, cadence: "monthly" },
     backlinks: { enabled: false },
     ai_visibility: { enabled: true, cadence: "weekly" },
     audit_technical: { enabled: true, cadence: "weekly" },
@@ -126,7 +133,8 @@ export const SCOPE_PRESET_SEEDS: Record<Exclude<ScopePreset, "custom">, ToolScop
   },
   heavy: {
     rank: { enabled: true, cadence: "daily", maxKeywords: 200 },
-    volume: { enabled: true },
+    // Same SM-61 fix as 'standard' above, same price-identity reasoning.
+    volume: { enabled: true, cadence: "monthly" },
     backlinks: { enabled: true, cadence: "monthly" },
     ai_visibility: { enabled: true, cadence: "weekly" },
     audit_technical: { enabled: true, cadence: "weekly" },
@@ -169,7 +177,26 @@ export interface CostProjectionTool {
    *  (SM-36's future per-capability cascade can put a live driver next to a simulated one in the
    *  same grid) — a single page-level flag would then be a lie about half the grid. */
   simulated: boolean;
+  /** SM-61 (tracker §6au Ruling 1 clause 3) — SERVER-DERIVED, never re-computed here: `true` only
+   *  when the platform-side pull scheduler will actually select this row unattended (enabled, a real
+   *  cadence present, and the tool is one of the four SM-54 reassigned from n8n). `false` means
+   *  `projectedMonthlyUsd` is the ON-DEMAND USAGE ESTIMATE — a real, legitimate number, but nothing
+   *  will dispatch it on its own. The scope panel must render an enabled `scheduled: false` row with
+   *  its own "on-demand est." label (`onDemandEstimateLabel` below) rather than letting it look like
+   *  a schedule — the exact pre-SM-61 ambiguity that let a human be shown one number while the
+   *  scheduler (once it existed) ran a different one. */
+  scheduled: boolean;
   note?: string;
+}
+
+/** The scope panel's cost-cell label for an ENABLED, non-scheduled row (§6au Ruling 1 clause 3's
+ *  "on-demand est." requirement, per §6aa's no-unlabelled-figures rule). Returns `null` for a
+ *  disabled row (nothing to label — the cell already renders at reduced opacity) or a truly
+ *  scheduled one (no estimate caveat needed: the number IS what will run). Takes the plain
+ *  booleans rather than the whole `CostProjectionTool` so a caller previewing a not-yet-saved toggle
+ *  (which may not have a priced row yet) can still ask the question. */
+export function onDemandEstimateLabel(enabled: boolean, scheduled: boolean): string | null {
+  return enabled && !scheduled ? "on-demand est." : null;
 }
 
 export interface CostProjection {
@@ -205,17 +232,31 @@ export function anyEnabledToolSimulated(perTool: CostProjectionTool[]): boolean 
 // renders until SM-42's true-up + SM-41's reconciliation exist (an Ahrefs row today is a
 // conservative UPPER BOUND with no downward correction, so "actual" would overclaim precision the
 // data does not have).
+// SM-60 (tracker §6al, closed): a THIRD row status, `incurred`, joined `posted`/`completed`/`failed`
+// on migration 0053 — "the vendor was engaged and confirmably charged, and the platform kept nothing
+// usable". §6al's own follow-up ("SM-17's legend line should mention both shapes") is discharged in
+// the third sentence below: TWO distinct causes both land on `incurred`, and an operator reading the
+// word needs both, not just the first one this module originally shipped with —
+//   1. the vendor delivered nothing at all (a poll exhausted, a task never completed at the vendor); or
+//   2. the vendor DID deliver, but this platform's OWN write (cache/ledger/COMMIT) failed after the
+//      charge landed — the money is spent identically either way.
+// Collapsing that second cause into "no data" would be a false claim about where the fault sits; the
+// legend states the shared consequence (money left, nothing kept) without picking a culprit for either
+// row, exactly like `notifications.ts`'s own widened title ("A provider charge produced no usable
+// data" — tracker §6al) says nothing more specific than the ledger itself can support.
 export const COST_TO_SERVE_LEGEND =
   "Prepaid vendors (Semrush, Ahrefs) bill API units against fixed subscriptions — figures are " +
   "amortized standard rates, not invoices. Actual cash = fixed subscriptions + DataForSEO " +
-  "pay-as-you-go (for DataForSEO, cost-to-serve ≈ cash). Cache hits are free.";
+  "pay-as-you-go (for DataForSEO, cost-to-serve ≈ cash). Cache hits are free. A row marked " +
+  "\"incurred\" means the vendor was charged and either delivered nothing, or delivered data this " +
+  "platform's own write then failed to keep — cost to serve either way, never $0.";
 
 /** One `search_provider_calls` row. `simulated` + `provider` are carried on EVERY row (AC1) — the
  *  per-row chip renders from THIS flag, never from the platform's current mode, because a
  *  historical row must keep badging its own truth after a mode flip (design addendum §A4.4).
- *  `status` is the raw column value ('posted'|'completed'|'failed') and must render VERBATIM — a
- *  console that silently relabels a `failed` refusal row would hide a blocked-attempt from the one
- *  surface built to show it. */
+ *  `status` is the raw column value ('posted'|'completed'|'failed'|'incurred', 0053) and must render
+ *  VERBATIM — a console that silently relabels a `failed`/`incurred` row would hide a blocked or
+ *  money-losing attempt from the one surface built to show it. */
 export interface LedgerRow {
   id: string;
   provider: string;
@@ -484,6 +525,66 @@ export interface SearchChangeProposal {
   updated_at: string;
 }
 
+// ── SM-19: the dual-mode picker (design §12; addendum §A2/§A3/§A4) ──────────────────────────────
+// Two SEPARATE "dual-mode" concepts live in this module and must never be conflated:
+//   (1) SEM change-proposal EXECUTION mode ('manual' export+mark-applied vs 'api' one-shot push,
+//       design §04/§07) — the human picks it when proposing a change (createChangeProposal's own
+//       `mode` field, already accepted by the backend since SM-18).
+//   (2) Per-CAPABILITY data-PROVIDER resolution for a metered pull (rank/volume/backlinks/
+//       ai_visibility/suggestions — SM-36's cascade, addendum §A2) — which vendor serves a paid
+//       pull, whether it is real or simulated (§A4), and what it is projected to cost (§A3).
+// This ticket builds the pre-commit disclosure for BOTH: `PaidActionGate` (see that component) for
+// (2), and the export/mark-applied wiring in `ChangeProposalsPanel`/`ApplyProposalTwins` for (1).
+
+/** §A2's ruling, transcribed from platform-nest `config.ts`'s `capabilityPreference` (verified
+ *  2026-07-31, re-check before trusting if that file changes): `serp` and `ai_visibility` are
+ *  seeded as LENGTH-1 lists with NO env override (SM-46d hardcoded them) — "no fallback... a
+ *  snapshot from a different vendor has different product semantics than a live capture", refuse
+ *  rather than substitute. Every other paid capability (`volume`/`suggestions`/`backlinks`) has a
+ *  multi-entry preference list. This module has NO endpoint exposing preference-list LENGTH or the
+ *  candidate vendor set (search.controller.ts never serializes `config.search.capabilityPreference`
+ *  anywhere) — so this Set is the one and only place this fact is asserted, and it must never be
+ *  used to render a fabricated list of "the other providers" (that would be inventing data the
+ *  backend never sent, exactly the drift class this module warns about repeatedly). Its ONLY
+ *  legitimate use: deciding whether to show a disabled, reasoned single-choice picker (this set) or
+ *  to say plainly that no override affordance exists here yet (every other tool) — never to draw a
+ *  dropdown of alternatives this file did not get from the backend.
+ *  Keyed by the SCOPE TOGGLE name (`search_engagements.tool_scope`'s tool key), not the op-kind —
+ *  `rank` (toggle) resolves to op-kind `serp`, per `providers/dispatch.ts`'s `TOGGLE_OP`. */
+export const SINGLE_PROVIDER_TOOLS: ReadonlySet<string> = new Set(["rank", "ai_visibility"]);
+
+/** One line, reused everywhere a single-provider capability needs to explain why its picker is a
+ *  disabled, reasoned fact rather than a dropdown of one (ticket honesty rule #3: "a disabled
+ *  picker with a reason beats a dropdown of one"). */
+export function singleProviderReason(provider: string | null): string {
+  return provider
+    ? `DataForSEO is the only provider this capability may use (design addendum §A2) — a different ` +
+        `vendor's data here would carry different product semantics (a database snapshot vs a live ` +
+        `capture), so this never substitutes. If DataForSEO is unavailable, the pull refuses rather ` +
+        `than falling back to another vendor.`
+    : `DataForSEO is the only provider this capability may use (design addendum §A2), and it is ` +
+        `currently unavailable — see the reason above. This never falls back to another vendor.`;
+}
+
+/** `POST change-proposals/:id/export`'s response (SM-30). Field names verified directly against
+ *  `search.controller.ts`'s `exportChangeProposal` return statement (§4i discipline) — `provenance`
+ *  is `null` for every kind except `launch` (the only kind built from keyword metrics; see
+ *  `sem-export.ts`'s own header note) and reuses `KeywordProvenanceSummary` verbatim rather than a
+ *  second shape, so a rendered provenance chip here can share code with the Planner's. */
+export interface ChangeProposalExportResult {
+  fileId: string;
+  filename: string;
+  contentType: string;
+  byteSize: number;
+  provenance: KeywordProvenanceSummary | null;
+}
+
+/** `POST change-proposals/:id/mark-applied`'s response (SM-30). */
+export interface MarkAppliedResult {
+  id: string;
+  status: "applied";
+}
+
 /** `generateCampaignPlan`'s per-ad-group provenance block (`sem-plan.ts`'s `KeywordProvenanceSummary`,
  *  computed by `buildCampaignPlan`). THE binding provenance surface for this ticket (§A2/§A4.7): a
  *  plan built partly from simulated keyword volumes must never present as though built from real
@@ -638,12 +739,15 @@ export interface SearchKeywordSet {
 export const INTENTS = ["informational", "commercial", "transactional", "navigational"] as const;
 export type Intent = (typeof INTENTS)[number];
 
-// SM-38: `listKeywords`'s SELECT (search.controller.ts) has NO provenance columns — no
-// `metrics_provider`, no `metrics_simulated`. Those need migration 0048 (owned by SM-36, not
-// started); `search_keywords` doesn't even carry them today, so this interface must NOT invent
-// them. That means `SIMULATED`/vendor-label rendering on `volume`/`difficulty` below is a genuine
-// backend gap, not a UI oversight — no chip, no claim either way (BackendPending discipline), until
-// SM-36 lands the columns and the controller selects them.
+// SM-14 (tracker §6j AC4 / §6s "still owed"): migration 0048 landed the provenance columns and
+// search.controller.ts's listKeywords SELECT now widens to expose them —
+//   `metrics_provider AS "metricsProvider", metrics_simulated AS "metricsSimulated"`
+// (verified directly against that SELECT, platform-nest/src/modules/search/search.controller.ts,
+// listKeywords — not against a fixture, per this file's own §4i discipline). SM-38's prior note
+// above (superseded) said this was a genuine backend gap; it no longer is. `metricsSimulated` is
+// NOT nullable (0048: `NOT NULL DEFAULT false`) — a never-pulled keyword reads `metricsProvider:
+// null, metricsSimulated: false`, never `null`/`undefined` for the flag itself. A vendor-sourced
+// `volume`/`difficulty`/`cpcUsd` must never render without checking these two alongside it.
 export interface SearchKeyword {
   id: string;
   keyword: string;
@@ -660,6 +764,14 @@ export interface SearchKeyword {
   difficulty: string | number | null;
   /** `numeric(12,6)` -> string over the wire; this one IS money — use `formatUsd`. */
   cpcUsd: string | number | null;
+  /** Which `SearchDataProvider` produced the CURRENT volume/difficulty/cpcUsd values. `null` = no
+   *  metrics pulled yet for this keyword — stays `null`, never defaulted to a guessed vendor
+   *  (0048's own column-comment law). */
+  metricsProvider: string | null;
+  /** `true` = the current metric values were produced by a SIMULATED provider (or while
+   *  `config.search.providerMode = simulate`). NOT NULL DEFAULT false (0048) — always a real
+   *  boolean, never absent, even for a keyword with no metrics pulled yet. */
+  metricsSimulated: boolean;
   isTracked: boolean;
   hasEmbedding: boolean;
   createdAt: string;
@@ -752,4 +864,313 @@ export function formatVolume(volume: number | null | undefined): string {
   const digits = Math.abs(Math.trunc(volume)).toString();
   const grouped = digits.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
   return negative ? `-${grouped}` : grouped;
+}
+
+// ── Rank tracking (SM-14; tracker §6af/§6au — the Rankings console tab, unclaimed until now) ────────
+// Field names verified against `search.controller.ts`'s `listRankSnapshots`/`pullRanks`/
+// `pullKeywordMetrics` SELECTs + response construction (§4i discipline), and against
+// `rank.ts`'s `RankPullOutcome`/`MetricsPullOutcome`/batch-result shapes — never against a guess at
+// what a rank tracker "should" return.
+export interface RankSnapshot {
+  id: string;
+  keywordId: string;
+  keyword: string;
+  engine: string;
+  device: string;
+  locationCode: number | null;
+  capturedAt: string;
+  /** Nullable — the property genuinely not found in that SERP capture. Honest, never an error and
+   *  never coerced to a number (rank.ts's own `findPropertyPosition` header note). Render "—", not
+   *  "0" or "not ranked" dressed up as a number. */
+  position: number | null;
+  rankedUrl: string | null;
+  serpFeatures: Record<string, unknown> | null;
+  /** Stamped from `DispatchResult.simulated` at capture time — never re-derived from the platform's
+   *  current mode, so a historical snapshot keeps badging its own truth after a mode flip (badge, not
+   *  filter — same disposition as the ledger's per-row chip). */
+  provider: string | null;
+  simulated: boolean;
+}
+
+export type RankPullRowStatus = "pulled" | "skipped" | "failed";
+export interface RankPullOutcomeRow {
+  keywordId: string;
+  keyword: string;
+  status: RankPullRowStatus;
+  position?: number | null;
+  rankedUrl?: string | null;
+  provider?: string;
+  simulated?: boolean;
+  /** A found→worse or found→not-found regression vs. the immediately-prior snapshot. Absent on a
+   *  first-ever pull or a not-found→not-found repeat — those have nothing to regress FROM. */
+  dropped?: boolean;
+  previousPosition?: number | null;
+  /** Present on `skipped`/`failed` rows only — the choke-point's refusal code (a mid-batch scope/
+   *  budget/pillar stop) or the per-keyword error message. Never swallowed into a generic label. */
+  reason?: string;
+}
+export interface RankPullBatchResult {
+  engagementId: string;
+  propertyId: string;
+  attempted: number;
+  pulled: number;
+  skipped: number;
+  failed: number;
+  results: RankPullOutcomeRow[];
+}
+
+export type MetricsPullRowStatus = "updated" | "absent" | "skipped" | "failed";
+export interface MetricsPullOutcomeRow {
+  keywordId: string;
+  keyword: string;
+  status: MetricsPullRowStatus;
+  volume?: number | null;
+  difficulty?: number | null;
+  cpcUsd?: number | null;
+  provider?: string;
+  simulated?: boolean;
+  reason?: string;
+}
+export interface MetricsPullBatchResult {
+  attempted: number;
+  updated: number;
+  absent: number;
+  skipped: number;
+  failed: number;
+  results: MetricsPullOutcomeRow[];
+}
+
+/** Derives `dropped`/`previousPosition` for a RAW history list, client-side — the list endpoint
+ *  (`GET properties/:id/rank-snapshots`) returns undecorated rows (badge-not-filter, no computed
+ *  delta), unlike the PULL response which already carries `dropped` for the row it just wrote. This
+ *  mirrors `rank.ts`'s own `isRankDrop` exactly (found→worse, or found→not-found; a first-ever
+ *  capture or a not-found→not-found repeat is never a drop) so the panel's read-path badge and the
+ *  backend's write-path badge can never disagree about what counts as a regression. Snapshots are
+ *  grouped by (keywordId, engine, device) — a drop is only meaningful within the SAME tracked
+ *  combination — and compared against the immediately-PRIOR capture by `capturedAt`, regardless of
+ *  the array's incoming order. */
+export function annotateRankDrops(
+  snapshots: RankSnapshot[],
+): (RankSnapshot & { dropped: boolean; previousPosition: number | null })[] {
+  const byGroup = new Map<string, RankSnapshot[]>();
+  for (const s of snapshots) {
+    const key = `${s.keywordId}|${s.engine}|${s.device}`;
+    const list = byGroup.get(key) ?? [];
+    list.push(s);
+    byGroup.set(key, list);
+  }
+  const decorated = new Map<string, { dropped: boolean; previousPosition: number | null }>();
+  for (const list of byGroup.values()) {
+    const sorted = [...list].sort((a, b) => (a.capturedAt < b.capturedAt ? -1 : a.capturedAt > b.capturedAt ? 1 : 0));
+    for (let i = 0; i < sorted.length; i++) {
+      const prev = i > 0 ? sorted[i - 1] : null;
+      const previousPosition = prev ? prev.position : null;
+      const dropped = previousPosition !== null && (sorted[i].position === null || sorted[i].position! > previousPosition);
+      decorated.set(sorted[i].id, { dropped, previousPosition });
+    }
+  }
+  return snapshots.map((s) => ({ ...s, ...(decorated.get(s.id) ?? { dropped: false, previousPosition: null }) }));
+}
+
+/** 1-based average position formatter (`numeric(9,2)` on the wire — a float per Google's own shape,
+ *  and possibly a STRING if a future reader forgets to cast it — same defensive coercion as
+ *  `formatUsd`). Renders one decimal place; "—" for null/absent/non-numeric, never "0" (position 0
+ *  does not exist — SERP ranks start at 1). */
+export function formatPosition(n: unknown): string {
+  if (n === null || n === undefined || n === "") return "—";
+  const v = typeof n === "number" ? n : Number(n);
+  if (!Number.isFinite(v)) return "—";
+  return v.toFixed(1);
+}
+
+// ── Google OAuth connections (SM-25a; design addendum §A12, tracker §6ao/§6as) ───────────────────────
+// Field names verified against `google/oauth.ts`'s `GoogleConnectionView`/`StartedAuthorization`/
+// `RevokeResult` and `search.controller.ts`'s Google-connection routes — the masked view is the ONLY
+// shape any of these routes ever return; token material is structurally absent, never trusted to be
+// masked by this file.
+export type GoogleProvider = "google_search_console" | "google_analytics" | "google_ads";
+export const GOOGLE_PROVIDER_VALUES: readonly GoogleProvider[] = ["google_search_console", "google_analytics", "google_ads"];
+export const GOOGLE_PROVIDER_LABEL: Record<GoogleProvider, string> = {
+  google_search_console: "Search Console",
+  google_analytics: "Analytics (GA4)",
+  google_ads: "Google Ads",
+};
+export function isGoogleProvider(v: unknown): v is GoogleProvider {
+  return typeof v === "string" && (GOOGLE_PROVIDER_VALUES as readonly string[]).includes(v);
+}
+
+/** The masked connection shape every Google-connection route returns (`google/oauth.ts`'s own
+ *  `GoogleConnectionView`). §A12.3's honesty rule lives on the last two fields: `issuerHost` is the
+ *  host that ACTUALLY issued these tokens, and `issuerIsGoogle` says whether that host is really
+ *  Google. **The Connections surface MUST render `issuerHost` whenever `issuerIsGoogle` is false** —
+ *  a dev/sandbox-issued connection (local Keycloak's `google-dev` realm client, or the SM-51 sandbox)
+ *  must be readable as one at a glance, never indistinguishable from a real Google link. */
+export interface GoogleConnectionView {
+  id: string;
+  provider: GoogleProvider;
+  clientId: string;
+  status: string;
+  hasToken: boolean;
+  hasRefreshToken: boolean;
+  tokenExpiresAt: string | null;
+  scopes: string[];
+  externalAccount: string | null;
+  issuerHost: string | null;
+  issuerIsGoogle: boolean;
+}
+
+export interface StartedGoogleAuthorization {
+  authorizeUrl: string;
+  state: string;
+  expiresAt: string;
+  issuerHost: string;
+  simulated: boolean;
+  scopes: string[];
+}
+
+export interface GoogleRevokeResult {
+  connection: GoogleConnectionView;
+  issuerRevoked: boolean;
+  issuerStatus: string | number | null;
+}
+
+/** Renders the non-Google-issuer disclosure text (§A12.3) — a single helper so the exact wording
+ *  can't drift between the connections list and any detail view that also needs it. Returns `null`
+ *  when the issuer IS Google (nothing to disclose) or the host is genuinely unknown (still `null` —
+ *  an absent host is not itself a lie, it just has nothing to show). */
+export function issuerDisclosure(conn: Pick<GoogleConnectionView, "issuerHost" | "issuerIsGoogle">): string | null {
+  if (conn.issuerIsGoogle) return null;
+  return conn.issuerHost ? `Non-Google issuer: ${conn.issuerHost}` : "Non-Google issuer (host unknown)";
+}
+
+// ── GSC + GA4 read ingestion (SM-25b; design addendum §A12, tracker §6ay) ────────────────────────────
+// Field names verified against `google/gsc-client.ts`'s `GscPullOutcome`/`GscTopQuery` and
+// `google/ga4-client.ts`'s `Ga4PullOutcome`, plus `search.controller.ts`'s `listGscPerformance`/
+// `listGa4Metrics` SELECTs (§4i discipline). GSC lags 2-3 days and GA4 samples large reports — the
+// freshness/sampling fields below exist ONLY because a chart that silently plots a clamped range as
+// "today", or a sampled figure that looks exact, would reintroduce exactly the lie this backend went
+// to trouble to prevent. Neither table has a `simulated` derived from platform mode: it is stamped
+// from the owning CONNECTION's `issuerIsGoogle` flag (§A12.2 "audience, not label"), so a row's own
+// chip is the only trustworthy provenance signal — never inferred from anything else on the page.
+export interface GscPerformanceRow {
+  id: string;
+  date: string;
+  query: string;
+  page: string;
+  device: string;
+  clicks: number;
+  impressions: number;
+  /** Google's own unit: a FRACTION (0..1), never a percentage. `numeric(9,6)` on the wire — may
+   *  arrive as a string if unc cast; coerce before formatting. */
+  ctr: number | string | null;
+  /** 1-based average position, a float. `numeric(9,2)` on the wire. */
+  position: number | string | null;
+  simulated: boolean;
+  fetchedAt: string;
+}
+
+export interface GscTopQueryRow {
+  query: string;
+  clicks: number;
+  impressions: number;
+  ctr: number | null;
+  position: number | null;
+}
+
+export interface GscPullOutcome {
+  propertyId: string;
+  status: "pulled";
+  startDate: string;
+  /** What the caller asked for. Compare against `effectiveEndDate` to know whether a clamp happened —
+   *  never assume the two match. */
+  requestedEndDate: string;
+  /** What was ACTUALLY requested from Google, after the freshness-lag clamp. This is the honest end
+   *  of the returned data — render THIS as the range end, never `requestedEndDate`. */
+  effectiveEndDate: string;
+  /** true iff the requested end date reached into the freshness-lag window and was pulled back. Must
+   *  be surfaced next to the date range it describes, not buried in a footnote. */
+  clampedForFreshness: boolean;
+  freshnessLagDays: number;
+  rowsUpserted: number;
+  malformedRowsSkipped: number;
+  pagesFetched: number;
+  /** True iff the page-count safety cap was hit while the last page was still full — more data may
+   *  exist that this pull did not fetch. A caller reading `truncated: true` knows `rowsUpserted` is a
+   *  FLOOR, not a complete count; must render as a visible caveat, never silently. */
+  truncated: boolean;
+  provider: "google_search_console";
+  connectionId: string;
+  simulated: boolean;
+}
+
+export interface Ga4MetricsRow {
+  id: string;
+  date: string;
+  channelGroup: string;
+  sessions: number;
+  engagedSessions: number;
+  /** `numeric(14,2)` on the wire — may arrive as a string. */
+  conversions: number | string;
+  /** Nullable: absent unless the property has ecommerce/revenue events configured — "no revenue
+   *  configured" and "zero revenue this period" are different facts and must render differently. */
+  totalRevenue: number | string | null;
+  /** REPORT-level GA4 fact denormalized onto every row of the response that produced it. A sampled
+   *  figure is an ESTIMATE, not an exact count — must render distinguishably at the row, not only in
+   *  a page-level footnote. */
+  sampled: boolean;
+  simulated: boolean;
+  fetchedAt: string;
+}
+
+export interface Ga4PullOutcome {
+  propertyId: string;
+  status: "pulled";
+  startDate: string;
+  requestedEndDate: string;
+  effectiveEndDate: string;
+  clampedForFreshness: boolean;
+  freshnessLagDays: number;
+  rowsUpserted: number;
+  malformedRowsSkipped: number;
+  sampled: boolean;
+  provider: "google_analytics";
+  connectionId: string;
+  simulated: boolean;
+}
+
+export interface GscKeywordImportResult {
+  setId: string;
+  imported: number;
+  submitted: number;
+  considered: number;
+  duplicates: number;
+}
+
+/** GSC's CTR fraction (0..1) as a percentage string — "—" for null/absent/non-numeric, never "0%"
+ *  for an absent value (that would be a claim, not honest absence — the house "— never 0" rule). */
+export function formatCtr(n: unknown): string {
+  if (n === null || n === undefined || n === "") return "—";
+  const v = typeof n === "number" ? n : Number(n);
+  if (!Number.isFinite(v)) return "—";
+  return `${(v * 100).toFixed(1)}%`;
+}
+
+/** Plain count formatter for a GA4/GSC metric that may arrive as a `numeric`-typed STRING
+ *  (conversions/totalRevenue) — same null/NaN-safe contract as `numberOrDash`, kept as its own named
+ *  export here so a caller reads intent ("this is a Google metric") rather than reusing a generic
+ *  helper by coincidence. */
+export function formatGoogleMetric(n: unknown): string {
+  return numberOrDash(n);
+}
+
+/** The freshness-lag disclosure line — one sentence, reused everywhere a pulled range is shown, so
+ *  the wording can't drift between the GSC and GA4 halves of the page. Always states BOTH the
+ *  effective end date and whether a clamp happened; never omits the clamp fact even when it is
+ *  `false` (the whole point is that "not clamped" is itself informative, not merely the quiet case). */
+export function freshnessDisclosure(args: { effectiveEndDate: string; clampedForFreshness: boolean; freshnessLagDays: number }): string {
+  return args.clampedForFreshness
+    ? `Data through ${args.effectiveEndDate} — the requested end date fell inside Google's own ` +
+        `${args.freshnessLagDays}-day freshness lag, so the range was pulled back to the last day ` +
+        `Google can answer for; a partial day was never requested.`
+    : `Data through ${args.effectiveEndDate} (no clamp needed — outside the ${args.freshnessLagDays}-day freshness-lag window).`;
 }

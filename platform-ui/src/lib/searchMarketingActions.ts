@@ -5,6 +5,8 @@
 // (design §11) is the real boundary, and it is enforced server-side by platform-nest
 // regardless of what this file does.
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
+import { cookies } from "next/headers";
 import { getSessionUserId } from "./session-server";
 import { getMe, platformFetch, PlatformError, type Me } from "./platform";
 import { getActiveTenant } from "./tenant";
@@ -17,9 +19,14 @@ import {
   type CostProjection,
   type EngagementScope,
 } from "./searchMarketing";
-import type {
-  AuditTriageStatus, KeywordImportResult, KeywordEmbedResult, KeywordClusterResult,
-  CampaignPlanResult, RsaDraftResponse, NegativesProposalResponse,
+import {
+  isGoogleProvider,
+  type AuditTriageStatus, type KeywordImportResult, type KeywordEmbedResult, type KeywordClusterResult,
+  type CampaignPlanResult, type RsaDraftResponse, type NegativesProposalResponse,
+  type RankPullBatchResult, type MetricsPullBatchResult,
+  type GoogleProvider, type GoogleConnectionView, type StartedGoogleAuthorization, type GoogleRevokeResult,
+  type GscPullOutcome, type Ga4PullOutcome, type GscKeywordImportResult,
+  type ChangeProposalExportResult, type MarkAppliedResult,
 } from "./searchMarketingShared";
 
 async function ctx(tenantOverride?: string): Promise<{ userId: string; tenant: string; me: Me } | { error: string }> {
@@ -563,6 +570,331 @@ export async function updateChangeProposalStatus(
     );
     revalidatePath(`/departments/[deptId]/planner/${campaignId}`, "page");
     return { ok: true, id: res.id };
+  } catch (e) {
+    if (e instanceof PlatformError) return { ok: false, error: e.message };
+    throw e;
+  }
+}
+
+// ── SM-19: the manual-mode dual-mode twin (SM-30's backend routes) ───────────────────────────────
+// Neither action is gated on `search.campaign.launch` UNIFORMLY: `export` has no live side effect
+// (it never mutates the proposal's status — search.controller.ts's own comment: "the same risk tier
+// as editing/proposing a change"), so it stays on the baseline `search.manage` gate every other
+// campaign-domain write in this file uses. `mark-applied` is the ONE elevated action — it is the
+// door to `status='applied'`, gated on `search.campaign.launch` (Cerbos `apply_manual`), matching
+// the backend's own elevated Cerbos action for that route exactly.
+export type ExportChangeProposalResult = { ok: boolean; error?: string; result?: ChangeProposalExportResult };
+
+/** Turns an approved, mode='manual' change proposal into an Ads-Editor-ready CSV `files` artifact.
+ *  Re-exporting is harmless (the backend allows it on 'approved' AND 'applied', for a re-download) —
+ *  this action never assumes the proposal hasn't already been exported once. */
+export async function exportChangeProposal(
+  tenantId: string, campaignId: string, proposalId: string,
+): Promise<ExportChangeProposalResult> {
+  const c = await ctx(tenantId);
+  if ("error" in c) return { ok: false, error: c.error };
+  if (!can(c.me, "search.manage", c.tenant)) return { ok: false, error: "You don't have the search.manage permission." };
+  try {
+    const result = await platformFetch<ChangeProposalExportResult>(
+      `/api/${c.tenant}/modules/search/change-proposals/${proposalId}/export`,
+      c.userId,
+      { method: "POST", body: JSON.stringify({}) },
+    );
+    revalidatePath(`/departments/[deptId]/planner/${campaignId}`, "page");
+    return { ok: true, result };
+  } catch (e) {
+    if (e instanceof PlatformError) return { ok: false, error: e.message };
+    throw e;
+  }
+}
+
+export type MarkChangeProposalAppliedResult = { ok: boolean; error?: string; result?: MarkAppliedResult };
+
+/** The one door to `status='applied'` this console offers — a human attestation that they applied
+ *  the exported change by hand in the ad platform, permission-gated on `search.campaign.launch`
+ *  (Cerbos `apply_manual`, elevated). Refuses (surfaced verbatim) for an api-mode proposal or one
+ *  not currently 'approved' — the backend's own precondition, never re-derived or loosened here. */
+export async function markChangeProposalApplied(
+  tenantId: string, campaignId: string, proposalId: string, note?: string,
+): Promise<MarkChangeProposalAppliedResult> {
+  const c = await ctx(tenantId);
+  if ("error" in c) return { ok: false, error: c.error };
+  if (!can(c.me, "search.campaign.launch", c.tenant)) {
+    return { ok: false, error: "You don't have the search.campaign.launch permission." };
+  }
+  try {
+    const result = await platformFetch<MarkAppliedResult>(
+      `/api/${c.tenant}/modules/search/change-proposals/${proposalId}/mark-applied`,
+      c.userId,
+      { method: "POST", body: JSON.stringify({ note }) },
+    );
+    revalidatePath(`/departments/[deptId]/planner/${campaignId}`, "page");
+    return { ok: true, result };
+  } catch (e) {
+    if (e instanceof PlatformError) return { ok: false, error: e.message };
+    throw e;
+  }
+}
+
+// ── Rank tracking (SM-14) — the Rankings tab's writes ─────────────────────────────────────────────
+// Gated on `search.manage` — same baseline capability as every other draft/pull write in this
+// file (search.controller.ts actions both routes as `resource_search_keyword` + `research`, a
+// distinct Cerbos action from plain read/update, but this console has no finer-grained RBAC
+// capability than `search.manage` for "trigger a metered pull", matching KeywordWorkbench's own
+// import/embed/cluster gate).
+export type PullRanksResult = { ok: boolean; error?: string; result?: RankPullBatchResult };
+
+export async function pullRanks(
+  tenantId: string, engagementId: string, keywordIds?: string[],
+): Promise<PullRanksResult> {
+  const c = await ctx(tenantId);
+  if ("error" in c) return { ok: false, error: c.error };
+  if (!can(c.me, "search.manage", c.tenant)) return { ok: false, error: "You don't have the search.manage permission." };
+  try {
+    const result = await platformFetch<RankPullBatchResult>(
+      `/api/${c.tenant}/modules/search/engagements/${engagementId}/rank-pull`,
+      c.userId,
+      { method: "POST", body: JSON.stringify({ keywordIds }) },
+    );
+    revalidatePath(`/departments/[deptId]/rankings`, "page");
+    return { ok: true, result };
+  } catch (e) {
+    if (e instanceof PlatformError) return { ok: false, error: e.message };
+    throw e;
+  }
+}
+
+export type PullKeywordMetricsResult = { ok: boolean; error?: string; result?: MetricsPullBatchResult };
+
+/** Volume/difficulty/CPC refresh for a keyword SET (not the engagement) — mirrors
+ *  `search.controller.ts`'s own resource split (`POST keyword-sets/:id/metrics-pull`). Reused by
+ *  both the Rankings tab (a "refresh volume too" convenience) and the Keywords tab. */
+export async function pullKeywordMetrics(
+  tenantId: string, setId: string, keywordIds?: string[],
+): Promise<PullKeywordMetricsResult> {
+  const c = await ctx(tenantId);
+  if ("error" in c) return { ok: false, error: c.error };
+  if (!can(c.me, "search.manage", c.tenant)) return { ok: false, error: "You don't have the search.manage permission." };
+  try {
+    const result = await platformFetch<MetricsPullBatchResult>(
+      `/api/${c.tenant}/modules/search/keyword-sets/${setId}/metrics-pull`,
+      c.userId,
+      { method: "POST", body: JSON.stringify({ keywordIds }) },
+    );
+    revalidatePath(`/departments/[deptId]/rankings`, "page");
+    revalidatePath(`/departments/[deptId]/keywords`, "page");
+    return { ok: true, result };
+  } catch (e) {
+    if (e instanceof PlatformError) return { ok: false, error: e.message };
+    throw e;
+  }
+}
+
+// ── Google OAuth connections (SM-25a) — the Connections tab's Google section ─────────────────────
+// `search.manage` gates every write below (starting/refreshing/revoking/binding a connection),
+// matching this file's own "same baseline capability as drafting properties/engagements" convention
+// — Cerbos's real gate is `resource_search_property` + `update`, elevated no further than that.
+const GOOGLE_OAUTH_PENDING_COOKIE = "sm_google_oauth_pending";
+
+export type StartGoogleAuthResult = { ok: boolean; error?: string };
+
+/** Starts a Google OAuth flow and REDIRECTS the browser to the issuer's consent page (real Google,
+ *  or the local Keycloak/SM-51 sandbox issuer in dev). `redirect()` throws internally (Next.js's own
+ *  mechanism) — a caller only ever sees this function "return" on the ERROR path, never on success.
+ *
+ *  `provider` AND `returnPath` are stashed in a short-lived, httpOnly cookie because the issuer's own
+ *  redirect back to our callback page (Google's real behaviour: a bare browser navigation, only
+ *  `code`/`state`/`error` in the query — no way to carry a custom param) cannot tell the callback
+ *  which of GSC/GA4/Ads this was for, or which department's Connections tab to return the operator
+ *  to (search-google-oauth.controller.ts's own header note: "provider from its own client-side flow
+ *  context — Google's redirect never carries it"). The signed `state` param carries the TENANT, not
+ *  the provider or a UI route (oauth-state.ts's own design), so this cookie is the flow context the
+ *  front end alone is responsible for remembering. 10-minute TTL matches the backend's own state TTL
+ *  (`GOOGLE_OAUTH_STATE_TTL_SECONDS`, default 600) — the cookie and the state it accompanies expire
+ *  together, so a stale cookie can never outlive the state it is paired with. */
+export async function startGoogleAuthorization(
+  tenantId: string, provider: GoogleProvider, clientId: string, propertyId: string | undefined, returnPath: string,
+): Promise<StartGoogleAuthResult> {
+  const c = await ctx(tenantId);
+  if ("error" in c) return { ok: false, error: c.error };
+  if (!can(c.me, "search.manage", c.tenant)) return { ok: false, error: "You don't have the search.manage permission." };
+  let started: StartedGoogleAuthorization;
+  try {
+    started = await platformFetch<StartedGoogleAuthorization>(
+      `/api/${c.tenant}/modules/search/google/connections/${provider}/authorize`,
+      c.userId,
+      { method: "POST", body: JSON.stringify({ clientId, propertyId }) },
+    );
+  } catch (e) {
+    if (e instanceof PlatformError) return { ok: false, error: e.message };
+    throw e;
+  }
+  const jar = await cookies();
+  jar.set(GOOGLE_OAUTH_PENDING_COOKIE, JSON.stringify({ provider, returnPath }), {
+    httpOnly: true, sameSite: "lax", path: "/", maxAge: 600,
+    secure: process.env.NODE_ENV === "production",
+  });
+  redirect(started.authorizeUrl);
+}
+
+export interface GoogleOAuthPending {
+  provider: GoogleProvider;
+  returnPath: string;
+}
+
+/** Reads (and clears) the {provider, returnPath} stashed by `startGoogleAuthorization` above —
+ *  called by the callback route handler (`app/api/search/google/callback/route.ts`) once the issuer
+ *  redirects back. A missing/malformed cookie (expired, or the browser arrived here with no flow in
+ *  progress — a bookmarked or replayed URL) is reported as `null`, never guessed at; the caller must
+ *  fall back to a safe default return path rather than trust an absent value. */
+export async function consumeGoogleOAuthPending(): Promise<GoogleOAuthPending | null> {
+  const jar = await cookies();
+  const raw = jar.get(GOOGLE_OAUTH_PENDING_COOKIE)?.value;
+  jar.delete(GOOGLE_OAUTH_PENDING_COOKIE);
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as { provider?: string; returnPath?: string };
+    if (!isGoogleProvider(parsed.provider) || typeof parsed.returnPath !== "string" || !parsed.returnPath.startsWith("/")) return null;
+    return { provider: parsed.provider, returnPath: parsed.returnPath };
+  } catch {
+    return null;
+  }
+}
+
+export type GoogleConnectionMutateResult = { ok: boolean; error?: string; connection?: GoogleConnectionView };
+
+export async function refreshGoogleConnection(tenantId: string, connectionId: string): Promise<GoogleConnectionMutateResult> {
+  const c = await ctx(tenantId);
+  if ("error" in c) return { ok: false, error: c.error };
+  if (!can(c.me, "search.manage", c.tenant)) return { ok: false, error: "You don't have the search.manage permission." };
+  try {
+    const connection = await platformFetch<GoogleConnectionView>(
+      `/api/${c.tenant}/modules/search/google/connections/${connectionId}/refresh`,
+      c.userId,
+      { method: "POST", body: JSON.stringify({}) },
+    );
+    revalidatePath(`/departments/[deptId]/connections`, "page");
+    return { ok: true, connection };
+  } catch (e) {
+    if (e instanceof PlatformError) return { ok: false, error: e.message };
+    throw e;
+  }
+}
+
+export type RevokeGoogleConnectionResult = { ok: boolean; error?: string; result?: GoogleRevokeResult };
+
+export async function revokeGoogleConnection(tenantId: string, connectionId: string): Promise<RevokeGoogleConnectionResult> {
+  const c = await ctx(tenantId);
+  if ("error" in c) return { ok: false, error: c.error };
+  if (!can(c.me, "search.manage", c.tenant)) return { ok: false, error: "You don't have the search.manage permission." };
+  try {
+    const result = await platformFetch<GoogleRevokeResult>(
+      `/api/${c.tenant}/modules/search/google/connections/${connectionId}/revoke`,
+      c.userId,
+      { method: "POST", body: JSON.stringify({}) },
+    );
+    revalidatePath(`/departments/[deptId]/connections`, "page");
+    return { ok: true, result };
+  } catch (e) {
+    if (e instanceof PlatformError) return { ok: false, error: e.message };
+    throw e;
+  }
+}
+
+export type BindGoogleConnectionResult = { ok: boolean; error?: string };
+
+export async function bindGoogleConnection(
+  tenantId: string, propertyId: string, provider: GoogleProvider, connectionId: string | null,
+): Promise<BindGoogleConnectionResult> {
+  const c = await ctx(tenantId);
+  if ("error" in c) return { ok: false, error: c.error };
+  if (!can(c.me, "search.manage", c.tenant)) return { ok: false, error: "You don't have the search.manage permission." };
+  try {
+    await platformFetch(
+      `/api/${c.tenant}/modules/search/properties/${propertyId}/google-connection/${provider}`,
+      c.userId,
+      { method: "PUT", body: JSON.stringify({ connectionId }) },
+    );
+    revalidatePath(`/departments/[deptId]/connections`, "page");
+    revalidatePath(`/departments/[deptId]/gsc-ga4`, "page");
+    return { ok: true };
+  } catch (e) {
+    if (e instanceof PlatformError) return { ok: false, error: e.message };
+    throw e;
+  }
+}
+
+// ── GSC + GA4 read ingestion (SM-25b) — the Search Console & GA4 tab's pulls ──────────────────────
+// $0 to the shared vendor deposit (§A12.1: a third egress class, client-private OAuth) — gated on
+// `search.manage` anyway, same as every other console-triggered write, because it is still a genuine
+// write against a client's own Google account and against our own tables.
+export type PullGscResult = { ok: boolean; error?: string; result?: GscPullOutcome };
+
+export async function pullGscPerformance(
+  tenantId: string, engagementId: string, body?: { startDate?: string; endDate?: string; rowLimit?: number; maxPages?: number },
+): Promise<PullGscResult> {
+  const c = await ctx(tenantId);
+  if ("error" in c) return { ok: false, error: c.error };
+  if (!can(c.me, "search.manage", c.tenant)) return { ok: false, error: "You don't have the search.manage permission." };
+  try {
+    const result = await platformFetch<GscPullOutcome>(
+      `/api/${c.tenant}/modules/search/engagements/${engagementId}/gsc-pull`,
+      c.userId,
+      { method: "POST", body: JSON.stringify(body ?? {}) },
+    );
+    revalidatePath(`/departments/[deptId]/gsc-ga4`, "page");
+    return { ok: true, result };
+  } catch (e) {
+    if (e instanceof PlatformError) return { ok: false, error: e.message };
+    throw e;
+  }
+}
+
+export type PullGa4Result = { ok: boolean; error?: string; result?: Ga4PullOutcome };
+
+export async function pullGa4Metrics(
+  tenantId: string, engagementId: string, body: { ga4PropertyId: string; startDate?: string; endDate?: string },
+): Promise<PullGa4Result> {
+  const c = await ctx(tenantId);
+  if ("error" in c) return { ok: false, error: c.error };
+  if (!can(c.me, "search.manage", c.tenant)) return { ok: false, error: "You don't have the search.manage permission." };
+  if (!body.ga4PropertyId.trim()) return { ok: false, error: "GA4 property id required." };
+  try {
+    const result = await platformFetch<Ga4PullOutcome>(
+      `/api/${c.tenant}/modules/search/engagements/${engagementId}/ga4-pull`,
+      c.userId,
+      { method: "POST", body: JSON.stringify(body) },
+    );
+    revalidatePath(`/departments/[deptId]/gsc-ga4`, "page");
+    return { ok: true, result };
+  } catch (e) {
+    if (e instanceof PlatformError) return { ok: false, error: e.message };
+    throw e;
+  }
+}
+
+export type ImportGscKeywordsResult = { ok: boolean; error?: string; result?: GscKeywordImportResult };
+
+/** Seeds a keyword set from our OWN already-persisted GSC rows (never a fresh Google call —
+ *  search.controller.ts's own comment: "importing keywords is not itself a reason to re-pull").
+ *  `includeSimulated` is NOT exposed here and always omitted (defaults false server-side) — this
+ *  console never lets a write path pull demo/sandbox rows into a client's real keyword set, per the
+ *  controller's own "data pollution, not merely a misleading number" warning. */
+export async function importGscKeywords(
+  tenantId: string, engagementId: string,
+  body: { setId?: string; name?: string; startDate: string; endDate: string; minClicks?: number; limit?: number; locale?: string },
+): Promise<ImportGscKeywordsResult> {
+  const c = await ctx(tenantId);
+  if ("error" in c) return { ok: false, error: c.error };
+  if (!can(c.me, "search.manage", c.tenant)) return { ok: false, error: "You don't have the search.manage permission." };
+  try {
+    const result = await platformFetch<GscKeywordImportResult>(
+      `/api/${c.tenant}/modules/search/engagements/${engagementId}/gsc-keyword-import`,
+      c.userId,
+      { method: "POST", body: JSON.stringify(body) },
+    );
+    revalidatePath(`/departments/[deptId]/keywords`, "page");
+    return { ok: true, result };
   } catch (e) {
     if (e instanceof PlatformError) return { ok: false, error: e.message };
     throw e;

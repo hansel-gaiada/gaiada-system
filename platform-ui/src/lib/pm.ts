@@ -138,6 +138,14 @@ export interface Assignee {
 
 export interface Subtask { id: string; title: string; done: boolean }
 
+// ---- contributors (TR-02, tracker-reporting-foundation.md §3.1) ----
+// ADDITIVE ONLY: zero or more persons logged against a task, listed with hours, never
+// outcome-credited. This does NOT change `Assignee` — the blob stays the FE wire format for
+// owner/responsible; contributors are a brand-new, separate array read off the relational
+// pm_task_assignees substrate (migration 0054). Absent/omitted on a stale backend, same
+// degrade-gracefully convention as `Follower`/`reactions` below.
+export interface Contributor { userId: string; name: string }
+
 // ---- recurrence (P2-06, design spec §8) ----
 // The constants/type live in the client-safe `pmRecurrence` module (this file is
 // `server-only`, but the client NewTaskForm needs the values); re-exported here
@@ -220,6 +228,8 @@ export interface PmTask {
   projectShortCode: string | null;
   seq: number | null;
   displayCode: string | null;
+  // TR-02: additive, optional so existing fixtures/demo data/older backends need no changes.
+  contributors?: Contributor[];
 }
 
 export interface TimeLog {

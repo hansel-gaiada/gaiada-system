@@ -34,6 +34,11 @@
 //
 // COVERAGE — the 10 §09 event types, and why each is (or is not) wired:
 //   search.provider.budget_threshold  -> wired (real producer: providers/dispatch.ts)
+//   search.provider.incurred_cost     -> wired (SM-50, addendum §A11.2 #11; real producer:
+//                                        providers/dispatch.ts's compensating write). NOT one of the
+//                                        original ten §09 types — added by the SM-50 ruling, because a
+//                                        vendor charge that delivered nothing is otherwise visible only
+//                                        as a number in a sum nobody is watching.
 //   search.audit.completed            -> wired (real producer: search.controller.ts ingestAudit)
 //   search.audit.regression           -> wired (real producer: search.controller.ts ingestAudit)
 //   search.rank.dropped               -> wired (real producer: rank.ts's pullRankForKeyword, SM-14 —
@@ -152,6 +157,54 @@ export async function handleBudgetThreshold(event: OutboxEvent): Promise<void> {
   const severity: NonNullable<NotificationPayload["severity"]> = level === "blocked" ? "critical" : "warning";
   await notifyOnce(event.tenantId, ownerId, "search.provider.budget_threshold", event.id, {
     title, severity, entityType: "search_engagement", entityId: engagementId, href: HREF.engagement(engagementId),
+  });
+}
+
+// ── search.provider.incurred_cost (SM-50; real producer: providers/dispatch.ts) ─────────────────────
+//
+// §A11.2 #11: "Repeated incurred failures must reach a human, not only the sums." A charge that bought
+// nothing is invisible in the console's normal reading — it raises cost-to-serve without producing a
+// rank row, an audit, or anything else an operator would go looking at — and by the time the stop-loss
+// refuses a pull, deposit has already been burned. So this is the one signal that pushes.
+//
+// TEXT SAFETY (SM-13's rule, and it bites hardest here): the payload carries `costUsd`, and it is
+// DELIBERATELY NOT interpolated into the title or body. Provider spend is an opaque ledger field whose
+// precision this ticket must not imply in prose, and a bell line quoting a dollar figure would be the
+// first place someone reads a standard-rate accounting number as cash. The money lives in the ledger
+// surface the href points at, where SM-17's binding "cost to serve (standard rates)" language frames
+// it.
+//
+// HREF: the engagement page, not a `/ledger` route. The uiManifest's allowed tab set has no ledger tab
+// — SM-17's cost surface lives inside engagement detail — and SM-13's own rule is that a
+// wrong-but-plausible href is worse than a broad-but-correct one.
+export async function handleIncurredCost(event: OutboxEvent): Promise<void> {
+  const engagementId = event.entityId;
+  const ownerId = await engagementOwner(event.tenantId, engagementId);
+  await notifyOnce(event.tenantId, ownerId, "search.provider.incurred_cost", event.id, {
+    // "charged" and "nothing usable retained" are the two facts an operator has to act on;
+    // `severity: critical` because this is real money with nothing to show for it, and because the
+    // repeat case (the one the ruling names) is a burn in progress.
+    //
+    // SM-60 widened the wording. The old title — "…a call that returned no data" — was written when
+    // `incurred` had exactly one cause (the vendor charged and delivered nothing). SM-60 added a second:
+    // the vendor charged AND delivered, but our own post-success write failed and the rollback discarded
+    // the payload along with the cache and ledger rows. In that case "returned no data" is literally
+    // false, and a notification that misstates the cause sends an operator to the vendor's console
+    // looking for a fault that is on our side.
+    //
+    // Deliberately ONE wording rather than branching on the event's `dataDelivered` flag: from the
+    // operator's position the actionable facts are identical — money left, nothing usable was kept — and
+    // both causes are already distinguishable where every other reason lives, in the ledger row's
+    // `endpoint` suffix (`.incurred_no_data` vs `.incurred_write_failed`) and on the event payload. A
+    // title is the wrong place to encode a distinction that changes nothing about what to do next.
+    //
+    // The money figure stays OUT of the prose (pinned by SM-50's probe P8): these bodies carry no
+    // amounts, because a figure in a notification cannot carry the simulated/real provenance badge the
+    // ledger surfaces attach to it.
+    title: "A provider charge produced no usable data",
+    body: "The cost is recorded in the engagement's provider ledger and counts toward its budget.",
+    severity: "critical",
+    entityType: "search_engagement", entityId: engagementId, href: HREF.engagement(engagementId),
   });
 }
 

@@ -52,6 +52,19 @@ describe("automation scoped service accounts + write gate (WS4 §3)", () => {
     if (!d.allow) expect(d.reason).toMatch(/not scoped/);
   });
 
+  // SM-55 (architect ruling §6ad/A13): SM-15's search-marketing allow-list entries are retired —
+  // no allow-list may ever give n8n a path to a money-spending tool. These ids must stay unknown
+  // (deny-by-default), proving the general rule rather than a hardcoded exception for search.
+  it("SM-55: the retired search-marketing workflow ids are unknown, not scoped to anything", () => {
+    for (const id of ["wf:sm-rank-pull", "wf:sm-keyword-refresh", "wf:sm-rank-collect"]) {
+      const p = wf(id);
+      expect(visibleTools(p)).toHaveLength(0);
+      const d = authorize(p, "llm.summarize");
+      expect(d.allow).toBe(false);
+      if (!d.allow) expect(d.reason).toMatch(/not scoped/);
+    }
+  });
+
   it("allows a LOW-impact write for a scoped workflow (auto)", () => {
     const p = wf("wf:new-client-seed"); // scoped to projects.create + tasks.create (both low)
     expect(authorize(p, "projects.create").allow).toBe(true);

@@ -816,6 +816,20 @@ const SCOPE_STORE_SEED: ScopeStore = {
     providerBudgetUsd: 150,
   },
   "sm-eng-2": { scopePreset: null, toolScope: {}, providerBudgetUsd: null },
+  // SM-19 (ticket's own instruction): "one seed exercises the awkward states together" — a
+  // single-provider capability (rank/serp — SINGLE_PROVIDER_TOOLS), a provider with no key
+  // (backlinks, enabled but keyless-disabled — see demoProjectMonthlyCost's DEMO_UNAVAILABLE_TOOLS
+  // below), a simulated action (demoProviderMode returns 'simulate' for this id too), and an action
+  // a budget tier would refuse (providerBudgetUsd set well below rank's own projected cost, so
+  // `overBudget` is true from real arithmetic — never hardcoded independent of the projection).
+  "sm-eng-3": {
+    scopePreset: null,
+    toolScope: {
+      rank: { enabled: true, cadence: "weekly", maxKeywords: 50 },
+      backlinks: { enabled: true, cadence: "monthly" },
+    },
+    providerBudgetUsd: 5,
+  },
 };
 
 function loadScopeStore(): ScopeStore {
@@ -834,34 +848,58 @@ function saveScopeStore(store: ScopeStore): void {
 // Mirrors platform-nest scope-presets.ts SEEDED_PRESETS — seeding data only, applied on a demo
 // PUT that names a preset. Kept minimal (matches the same three presets, same shapes) rather than
 // imported, since demoFixtures.ts cannot reach across into platform-nest.
+//
+// SM-61 (tracker §6au Ruling 1 clause 2, binding): `standard`/`heavy`'s `volume` gains
+// `cadence: "monthly"` — mirrors platform-nest scope-presets.ts's own change verbatim (see that
+// file's header note for the price-identity reasoning: `demoRunsPerMonth("monthly") === 1`, the
+// SAME figure the pre-SM-61 cadence-less shape already priced).
 const DEMO_SCOPE_PRESETS: Record<string, Record<string, unknown>> = {
   light: {
     rank: { enabled: false }, volume: { enabled: false }, backlinks: { enabled: false }, ai_visibility: { enabled: false },
     audit_technical: { enabled: true, cadence: "monthly" }, audit_cwv: { enabled: true, cadence: "monthly" }, sem_sync: { enabled: false, mode: "manual" },
   },
   standard: {
-    rank: { enabled: true, cadence: "weekly", maxKeywords: 50 }, volume: { enabled: true }, backlinks: { enabled: false },
+    rank: { enabled: true, cadence: "weekly", maxKeywords: 50 }, volume: { enabled: true, cadence: "monthly" }, backlinks: { enabled: false },
     ai_visibility: { enabled: true, cadence: "weekly" }, audit_technical: { enabled: true, cadence: "weekly" }, audit_cwv: { enabled: true },
     sem_sync: { enabled: false, mode: "manual" },
   },
   heavy: {
-    rank: { enabled: true, cadence: "daily", maxKeywords: 200 }, volume: { enabled: true }, backlinks: { enabled: true, cadence: "monthly" },
+    rank: { enabled: true, cadence: "daily", maxKeywords: 200 }, volume: { enabled: true, cadence: "monthly" }, backlinks: { enabled: true, cadence: "monthly" },
     ai_visibility: { enabled: true, cadence: "weekly" }, audit_technical: { enabled: true, cadence: "weekly" }, audit_cwv: { enabled: true, cadence: "weekly" },
     sem_sync: { enabled: true, mode: "manual" },
   },
 };
+
+// SM-61 (§6au clause 4): mirrors search.controller.ts's `validateToolScopeCadence` — the demo PUT
+// must 400 the same junk the real backend now refuses, so a demo-mode user editing the scope panel
+// sees the same behaviour a real backend would give. Absent/null is always accepted (on-demand).
+const DEMO_VALID_CADENCES = new Set(["daily", "weekly", "monthly"]);
+function demoValidateToolScopeCadence(toolScope: Record<string, unknown>): string | null {
+  for (const [tool, raw] of Object.entries(toolScope)) {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue;
+    const cadence = (raw as Record<string, unknown>).cadence;
+    if (cadence === undefined || cadence === null) continue;
+    if (typeof cadence !== "string" || !DEMO_VALID_CADENCES.has(cadence)) {
+      return `tool_scope.${tool}.cadence must be one of daily|weekly|monthly, or absent/null`;
+    }
+  }
+  return null;
+}
 
 // Demo-only per-item unit cost table — NOT the real estimateCostUsd, purely so the scope editor
 // has something to preview against with no backend running. $/item chosen so 'standard's rank
 // toggle (50 items/weekly) lands on the same $10/mo the original SM-11 fixture used.
 const DEMO_UNIT_COST_USD: Record<string, number> = { rank: 0.05, volume: 0.1, suggestions: 0.02, backlinks: 3, ai_visibility: 0.5 };
 const DEMO_TOGGLE_OP: Record<string, string> = { rank: "serp", volume: "volume", suggestions: "suggestions", backlinks: "backlinks", ai_visibility: "ai_visibility" };
+// SM-61 (§6au clause 3): mirrors pull-scheduler.ts's SCHEDULED_TOOLS — `suggestions` is deliberately
+// absent (no scheduled flow was ever specced for it).
+const DEMO_SCHEDULED_TOOLS = new Set(["rank", "volume", "backlinks", "ai_visibility"]);
 
 function demoRunsPerMonth(cadence: unknown): number {
   if (cadence === "daily") return 30;
   if (cadence === "weekly") return 30 / 7;
   if (cadence === "monthly") return 1;
-  return 1;
+  return 1; // absent/junk => the on-demand usage estimate (ON_DEMAND_ESTIMATE_RUNS_PER_MONTH), never a schedule
 }
 
 // SM-38: mirror the real backend's per-dispatch mode stamp (`providers/simulation.ts` +
@@ -874,27 +912,46 @@ function demoRunsPerMonth(cadence: unknown): number {
 // realistic one): `sm-eng-1` demos SIMULATE (chip present on every enabled row + the header
 // statement), `sm-eng-2` demos LIVE (chip absent) — so both states are reachable in one demo pass.
 function demoProviderMode(engagementId: string): "live" | "simulate" {
-  return engagementId === "sm-eng-1" ? "simulate" : "live";
+  return engagementId === "sm-eng-1" || engagementId === "sm-eng-3" ? "simulate" : "live";
 }
+
+// SM-19 — "a provider with no key" exercised on `sm-eng-3` only, so `sm-eng-1`'s existing
+// (previously-verified) shape is untouched. Mirrors the real `resolveProvider`/`projectMonthlyCost`
+// behaviour on a resolution failure exactly: `provider: null`, `costPerRunUsd/projectedMonthlyUsd`
+// STAY 0 (never invented), and `note` carries the same wording `NoCapableProviderError` would —
+// PaidActionGate's own honesty rule #4 ("unavailable != free") is what a caller must render from
+// this, not a special-cased demo-only field.
+const DEMO_UNAVAILABLE_TOOLS: Record<string, ReadonlySet<string>> = {
+  "sm-eng-3": new Set(["backlinks"]),
+};
 
 function demoProjectMonthlyCost(toolScope: Record<string, unknown>, engagementId: string) {
   const providerMode = demoProviderMode(engagementId);
+  const unavailable = DEMO_UNAVAILABLE_TOOLS[engagementId] ?? new Set<string>();
   const perTool = Object.entries(DEMO_TOGGLE_OP).map(([tool, opKind]) => {
     const toggle = (toolScope[tool] ?? {}) as Record<string, unknown>;
     const enabled = toggle.enabled === true;
-    const cadence = typeof toggle.cadence === "string" ? toggle.cadence : null;
+    // SM-61 (§6au clause 3): junk/absent both collapse to null here too — mirrors `parseCadence`'s
+    // no-default parse, never echoing a typo back as though it were a real cadence.
+    const rawCadence = typeof toggle.cadence === "string" ? toggle.cadence : null;
+    const cadence = rawCadence !== null && DEMO_VALID_CADENCES.has(rawCadence) ? rawCadence : null;
     const items = tool === "backlinks" ? 1 : (typeof toggle.maxKeywords === "number" ? toggle.maxKeywords : (typeof toggle.maxQueries === "number" ? toggle.maxQueries : 50));
     const runs = demoRunsPerMonth(cadence);
-    const costPerRun = DEMO_UNIT_COST_USD[tool] * items;
-    const projected = enabled ? costPerRun * runs : 0;
+    // Mirrors the real `ProjectedToolCost.scheduled` derivation exactly: enabled ∧ real cadence ∧
+    // tool ∈ the scheduled set. `suggestions` can never be true (not in DEMO_SCHEDULED_TOOLS).
+    const scheduled = enabled && cadence !== null && DEMO_SCHEDULED_TOOLS.has(tool);
+    const isUnavailable = enabled && unavailable.has(tool);
+    const costPerRun = isUnavailable ? 0 : DEMO_UNIT_COST_USD[tool] * items;
+    const projected = enabled && !isUnavailable ? costPerRun * runs : 0;
     return {
-      tool, opKind, enabled, cadence, runsPerMonth: Number(runs.toFixed(4)), itemsPerRun: items,
+      tool, opKind, enabled, cadence, scheduled, runsPerMonth: Number(runs.toFixed(4)), itemsPerRun: items,
       // Real numbers, not strings — the real controller's ProjectedToolCost wraps these in
       // Number(...toFixed(6)) (providers/dispatch.ts); an earlier revision of this fixture left
       // them as .toFixed() STRINGS, which formatUsd tolerates but which drifted from the real
       // contract's actual type (exactly the class of fixture-vs-backend gap this module warns about).
       costPerRunUsd: Number(costPerRun.toFixed(6)), projectedMonthlyUsd: Number(projected.toFixed(6)),
-      provider: "dataforseo", simulated: providerMode === "simulate",
+      provider: isUnavailable ? null : "dataforseo", simulated: providerMode === "simulate",
+      note: isUnavailable ? "no provider available to estimate (NoCapableProviderError: no capable provider registered for backlinks)" : undefined,
     };
   });
   const total = perTool.reduce((s, t) => s + t.projectedMonthlyUsd, 0);
@@ -972,7 +1029,12 @@ interface DemoKeywordSet { id: string; engagementId: string; name: string; sourc
 interface DemoKeyword {
   id: string; setId: string; keyword: string; locale: string; intent: string | null;
   clusterId: string | null; clusterLabel: string | null; volume: number | null;
-  difficulty: string | null; cpcUsd: string | null; isTracked: boolean; hasEmbedding: boolean; createdAt: string;
+  difficulty: string | null; cpcUsd: string | null;
+  // SM-14 (tracker §6j AC4): mirrors search_keywords' 0048 columns — metricsProvider is nullable
+  // (no pull yet = null, never a guessed vendor), metricsSimulated is a real boolean (0048's `NOT
+  // NULL DEFAULT false`), never absent even for a never-pulled keyword.
+  metricsProvider: string | null; metricsSimulated: boolean;
+  isTracked: boolean; hasEmbedding: boolean; createdAt: string;
 }
 interface KeywordStore { sets: DemoKeywordSet[]; keywords: DemoKeyword[] }
 
@@ -980,7 +1042,10 @@ interface KeywordStore { sets: DemoKeywordSet[]; keywords: DemoKeyword[] }
 // searchMarketingShared.ts): sm-eng-1's `volume` scope toggle is enabled in SCOPE_STORE_SEED above,
 // so "seo audit tools" (a real pulled number) exercises 'value' and "technical seo checklist" (never
 // pulled) exercises 'unpulled'; sm-eng-2's toggle is off, so "ai overview optimization" exercises
-// 'disabled' regardless of the raw (null) volume underneath it.
+// 'disabled' regardless of the raw (null) volume underneath it. Provenance (metricsProvider/
+// metricsSimulated) tracks the same split: a pulled volume carries 'semrush'/true (§A2's default
+// vendor for volume/difficulty, matching SM-46c's real seed stamp), a never-pulled one carries
+// null/false — never invented, per SM-14's own AC4.
 const KEYWORD_STORE_SEED: KeywordStore = {
   sets: [
     { id: "sm-set-1", engagementId: "sm-eng-1", name: "Core service pages", source: "client", createdAt: "2026-07-18T00:00:00Z" },
@@ -990,21 +1055,25 @@ const KEYWORD_STORE_SEED: KeywordStore = {
     {
       id: "sm-kw-1", setId: "sm-set-1", keyword: "seo audit tools", locale: "id-ID", intent: "commercial",
       clusterId: "sm-cluster-1", clusterLabel: "SEO tooling", volume: 210, difficulty: "42.50", cpcUsd: "3.750000",
+      metricsProvider: "semrush", metricsSimulated: true,
       isTracked: true, hasEmbedding: true, createdAt: "2026-07-18T00:05:00Z",
     },
     {
       id: "sm-kw-2", setId: "sm-set-1", keyword: "seo audit checklist", locale: "id-ID", intent: "commercial",
       clusterId: "sm-cluster-1", clusterLabel: "SEO tooling", volume: 140, difficulty: "38.00", cpcUsd: "2.900000",
+      metricsProvider: "semrush", metricsSimulated: true,
       isTracked: false, hasEmbedding: true, createdAt: "2026-07-18T00:05:00Z",
     },
     {
       id: "sm-kw-3", setId: "sm-set-1", keyword: "technical seo checklist", locale: "id-ID", intent: null,
       clusterId: null, clusterLabel: null, volume: null, difficulty: null, cpcUsd: null,
+      metricsProvider: null, metricsSimulated: false,
       isTracked: false, hasEmbedding: false, createdAt: "2026-07-18T00:05:00Z",
     },
     {
       id: "sm-kw-4", setId: "sm-set-2", keyword: "ai overview optimization", locale: "id-ID", intent: null,
       clusterId: null, clusterLabel: null, volume: null, difficulty: null, cpcUsd: null,
+      metricsProvider: null, metricsSimulated: false,
       isTracked: false, hasEmbedding: false, createdAt: "2026-07-19T00:05:00Z",
     },
   ],
@@ -1101,12 +1170,18 @@ const SEM_STORE_SEED: SemStore = {
     { id: "sm-neg-2", campaignId: "sm-campaign-1", adGroupId: null, term: "jobs", matchType: "phrase", source: "ai", status: "proposed", created_at: "2026-07-24T09:00:00Z", updated_at: "2026-07-24T09:00:00Z" },
     { id: "sm-neg-3", campaignId: "sm-campaign-1", adGroupId: null, term: "diy", matchType: "exact", source: "ai", status: "dismissed", created_at: "2026-07-24T09:01:00Z", updated_at: "2026-07-24T09:15:00Z" },
   ],
-  // Covers all three reachable CHANGE_PROPOSAL_TRANSITIONS states — 'applied' deliberately absent,
-  // matching the backend's own refusal to ever let this console reach it.
+  // SM-19: 'applied' is NO LONGER absent — the manual mark-applied door (SM-30) is now wired in
+  // demo mode too (see the export/mark-applied handlers below), so sm-cp-1 stays interactively
+  // reachable (approved/manual — Export then Mark as applied) and sm-cp-4/sm-cp-5 seed the two
+  // states that would otherwise need clicking through: an already-APPLIED manual proposal (re-
+  // download + "Applied by/at" render without any action), and an approved API-MODE proposal (the
+  // automated twin's honest "no executor yet" disclosure, SM-21 not built).
   changeProposals: [
     { id: "sm-cp-1", campaignId: "sm-campaign-1", kind: "budget", payload: { newBudgetMinor: 750000 }, status: "approved", mode: "manual", approvalId: null, exportFileId: null, proposedBy: DEMO_USER_ID, approvedBy: DEMO_USER_ID, appliedBy: null, appliedAt: null, created_at: "2026-07-23T12:00:00Z", updated_at: "2026-07-23T13:00:00Z" },
     { id: "sm-cp-2", campaignId: "sm-campaign-1", kind: "pause", payload: { reason: "budget review" }, status: "proposed", mode: "manual", approvalId: null, exportFileId: null, proposedBy: DEMO_USER_ID, approvedBy: null, appliedBy: null, appliedAt: null, created_at: "2026-07-25T09:00:00Z", updated_at: "2026-07-25T09:00:00Z" },
     { id: "sm-cp-3", campaignId: "sm-campaign-1", kind: "bid", payload: { bidStrategy: "target_roas" }, status: "dismissed", mode: "manual", approvalId: null, exportFileId: null, proposedBy: DEMO_USER_ID, approvedBy: null, appliedBy: null, appliedAt: null, created_at: "2026-07-22T14:00:00Z", updated_at: "2026-07-22T15:00:00Z" },
+    { id: "sm-cp-4", campaignId: "sm-campaign-1", kind: "pause", payload: {}, status: "applied", mode: "manual", approvalId: null, exportFileId: "sm-file-cp4", proposedBy: DEMO_USER_ID, approvedBy: DEMO_USER_ID, appliedBy: DEMO_USER_ID, appliedAt: "2026-07-26T10:00:00Z", created_at: "2026-07-25T18:00:00Z", updated_at: "2026-07-26T10:00:00Z" },
+    { id: "sm-cp-5", campaignId: "sm-campaign-1", kind: "budget", payload: { newBudgetMinor: 600000 }, status: "approved", mode: "api", approvalId: null, exportFileId: null, proposedBy: DEMO_USER_ID, approvedBy: DEMO_USER_ID, appliedBy: null, appliedAt: null, created_at: "2026-07-27T09:00:00Z", updated_at: "2026-07-27T09:30:00Z" },
   ],
 };
 
@@ -1240,6 +1315,176 @@ function parseDemoKeywordImport(text: string): { keyword: string; locale: string
 function genDemoId(prefix: string): string {
   return `${prefix}-${Date.now()}-${Math.floor(Math.random() * 1_000_000)}`;
 }
+
+// SM-14 — file-backed demo store for rank snapshots (Rankings tab, unclaimed until this ticket).
+// Same file-backed rationale as SCOPE_STORE/AUDIT_STORE/KEYWORD_STORE above. Field names mirror
+// `search.controller.ts`'s `listRankSnapshots` SELECT exactly (§4i discipline). Seeded with the
+// HARD cases the ticket calls out rather than a uniformly clean run: a real (non-simulated) capture,
+// a simulated one, a `dropped` regression, and a genuine not-found (`position: null`) — a fixture
+// where every row is clean proves nothing about the three-state provenance render or the "—" convention.
+interface DemoRankSnapshot {
+  id: string; propertyId: string; keywordId: string; keyword: string; engine: string; device: string;
+  locationCode: number | null; capturedAt: string; position: number | null; rankedUrl: string | null;
+  serpFeatures: Record<string, unknown>; provider: string | null; simulated: boolean;
+}
+interface RankStore { snapshots: DemoRankSnapshot[] }
+const RANK_STORE_PATH = join(tmpdir(), "gaiada-demo-search-ranks.json");
+// keywordId/keyword pairs match KEYWORD_STORE_SEED's sm-set-1 rows exactly (sm-kw-1/2/3, the same
+// three the Keywords tab already seeds) — a mismatched keyword TEXT here would be the exact
+// fixture-vs-fixture drift §4i warns about, just within this file instead of against the controller.
+const RANK_STORE_SEED: RankStore = {
+  snapshots: [
+    {
+      id: "sm-rank-1", propertyId: "sm-prop-1", keywordId: "sm-kw-1", keyword: "seo audit tools",
+      engine: "google", device: "desktop", locationCode: 2360, capturedAt: "2026-07-22T03:00:00Z",
+      position: 9, rankedUrl: "https://cedargroup.example.com/tools", serpFeatures: { peopleAlsoAsk: true },
+      provider: "dataforseo", simulated: false,
+    },
+    // The regression this ticket's "dropped" state exists for — same keyword, later capture, worse
+    // position (9 -> 14). The Rankings panel derives `dropped` client-side from the two most recent
+    // captures per (keywordId, engine, device), mirroring rank.ts's own isRankDrop() logic, since the
+    // list endpoint returns raw history rather than a pre-computed delta.
+    {
+      id: "sm-rank-2", propertyId: "sm-prop-1", keywordId: "sm-kw-1", keyword: "seo audit tools",
+      engine: "google", device: "desktop", locationCode: 2360, capturedAt: "2026-07-29T03:00:00Z",
+      position: 14, rankedUrl: "https://cedargroup.example.com/tools", serpFeatures: { peopleAlsoAsk: true },
+      provider: "dataforseo", simulated: false,
+    },
+    // A SIMULATED capture for a different keyword — badge, not filter: this row must keep its own
+    // chip regardless of the platform's current mode (design addendum §A4.4).
+    {
+      id: "sm-rank-3", propertyId: "sm-prop-1", keywordId: "sm-kw-2", keyword: "seo audit checklist",
+      engine: "google", device: "desktop", locationCode: 2360, capturedAt: "2026-07-29T03:05:00Z",
+      position: 3, rankedUrl: "https://cedargroup.example.com/checklist", serpFeatures: {},
+      provider: "dataforseo", simulated: true,
+    },
+    // Genuinely NOT FOUND — `position: null` is an honest capture outcome, never an error and never
+    // coerced to a number (rank.ts's own findPropertyPosition header note). Must render "—", not "0".
+    {
+      id: "sm-rank-4", propertyId: "sm-prop-1", keywordId: "sm-kw-3", keyword: "technical seo checklist",
+      engine: "google", device: "mobile", locationCode: 2360, capturedAt: "2026-07-29T03:10:00Z",
+      position: null, rankedUrl: null, serpFeatures: {}, provider: "dataforseo", simulated: false,
+    },
+  ],
+};
+
+function loadRankStore(): RankStore {
+  try {
+    return JSON.parse(readFileSync(RANK_STORE_PATH, "utf8")) as RankStore;
+  } catch {
+    writeFileSync(RANK_STORE_PATH, JSON.stringify(RANK_STORE_SEED));
+    return JSON.parse(JSON.stringify(RANK_STORE_SEED)) as RankStore;
+  }
+}
+function saveRankStore(store: RankStore): void {
+  writeFileSync(RANK_STORE_PATH, JSON.stringify(store));
+}
+
+// SM-25a/SM-25b — file-backed demo store for Google connections + GSC/GA4 performance rows (the
+// Connections tab's Google section, and the Search Console & GA4 tab). §A12.3's honesty rule is the
+// reason TWO connections are seeded rather than one: `conn-google-1` is a REAL Google issuer
+// (`issuerIsGoogle: true` — nothing extra to disclose) and `conn-google-2` is a NON-Google issuer
+// (the local Keycloak `google-dev` sandbox realm this program actually tests against, per tracker
+// §6ao) — `issuerIsGoogle: false`, so its `issuerHost` MUST render on the Connections tab. A fixture
+// where every connection is real-Google would prove nothing about that rule.
+interface DemoGoogleConnection {
+  id: string; provider: "google_search_console" | "google_analytics" | "google_ads"; clientId: string;
+  status: string; hasToken: boolean; hasRefreshToken: boolean; tokenExpiresAt: string | null;
+  scopes: string[]; externalAccount: string | null; issuerHost: string | null; issuerIsGoogle: boolean;
+}
+interface GoogleStore {
+  connections: DemoGoogleConnection[];
+  // propertyId -> provider -> connectionId|null (mirrors search_properties.gsc_connection_id/
+  // ga4_connection_id/ads_connection_id, 0034).
+  bindings: Record<string, Record<string, string | null>>;
+}
+const GOOGLE_STORE_PATH = join(tmpdir(), "gaiada-demo-search-google.json");
+const GOOGLE_STORE_SEED: GoogleStore = {
+  connections: [
+    {
+      id: "conn-google-1", provider: "google_search_console", clientId: "cl-2", status: "linked",
+      hasToken: true, hasRefreshToken: true, tokenExpiresAt: "2026-08-30T00:00:00Z",
+      scopes: ["https://www.googleapis.com/auth/webmasters.readonly"],
+      externalAccount: "seo@cedargroup.example.com", issuerHost: "accounts.google.com", issuerIsGoogle: true,
+    },
+    {
+      id: "conn-google-2", provider: "google_analytics", clientId: "cl-2", status: "linked",
+      hasToken: true, hasRefreshToken: true, tokenExpiresAt: "2026-08-30T00:00:00Z",
+      scopes: ["https://www.googleapis.com/auth/analytics.readonly"],
+      externalAccount: "dev-sandbox@cedargroup.example.com",
+      // §A12.3's honesty rule, exercised: this connection was NOT issued by Google — a local
+      // Keycloak `google-dev` realm client stood in for it (tracker §6ao's own live-test issuer).
+      issuerHost: "keycloak.gaiada.local:8443", issuerIsGoogle: false,
+    },
+  ],
+  bindings: { "sm-prop-1": { google_search_console: "conn-google-1", google_analytics: "conn-google-2", google_ads: null } },
+};
+
+function loadGoogleStore(): GoogleStore {
+  try {
+    return JSON.parse(readFileSync(GOOGLE_STORE_PATH, "utf8")) as GoogleStore;
+  } catch {
+    writeFileSync(GOOGLE_STORE_PATH, JSON.stringify(GOOGLE_STORE_SEED));
+    return JSON.parse(JSON.stringify(GOOGLE_STORE_SEED)) as GoogleStore;
+  }
+}
+function saveGoogleStore(store: GoogleStore): void {
+  writeFileSync(GOOGLE_STORE_PATH, JSON.stringify(store));
+}
+
+// GSC/GA4 performance rows. Seeded ONLY under sm-eng-1's property/connections — sm-eng-2 stays
+// genuinely empty (no connection bound, zero rows), the SAME two-engagement "has data / genuinely
+// empty" split every other surface in this module uses (ledger, cost-projection) — because the
+// live backend's own primary state today is exactly that: tables exist, nothing has been pulled yet.
+// A fixture where everything is populated would prove nothing about the empty-state rendering the
+// ticket requires ("no data pulled yet", never a flat chart of zeros).
+interface DemoGscRow {
+  id: string; propertyId: string; date: string; query: string; page: string; device: string;
+  clicks: number; impressions: number; ctr: number; position: number; simulated: boolean; fetchedAt: string;
+}
+interface DemoGa4Row {
+  id: string; propertyId: string; date: string; channelGroup: string; sessions: number;
+  engagedSessions: number; conversions: number; totalRevenue: number | null; sampled: boolean;
+  simulated: boolean; fetchedAt: string;
+}
+interface GooglePerfStore { gsc: DemoGscRow[]; ga4: DemoGa4Row[] }
+const GOOGLE_PERF_STORE_PATH = join(tmpdir(), "gaiada-demo-search-google-perf.json");
+const GOOGLE_PERF_STORE_SEED: GooglePerfStore = {
+  gsc: [
+    { id: "gsc-1", propertyId: "sm-prop-1", date: "2026-07-26", query: "seo tools", page: "https://cedargroup.example.com/tools", device: "DESKTOP", clicks: 42, impressions: 980, ctr: 0.0429, position: 8.3, simulated: false, fetchedAt: "2026-07-29T04:00:00Z" },
+    { id: "gsc-2", propertyId: "sm-prop-1", date: "2026-07-26", query: "content marketing agency", page: "https://cedargroup.example.com/blog", device: "MOBILE", clicks: 11, impressions: 305, ctr: 0.0361, position: 15.7, simulated: false, fetchedAt: "2026-07-29T04:00:00Z" },
+    // A SIMULATED row from a mode-flipped period — badge, not filter, kept forever.
+    { id: "gsc-3", propertyId: "sm-prop-1", date: "2026-07-20", query: "cedar group reviews", page: "https://cedargroup.example.com/", device: "DESKTOP", clicks: 5, impressions: 60, ctr: 0.0833, position: 3.1, simulated: true, fetchedAt: "2026-07-21T04:00:00Z" },
+  ],
+  ga4: [
+    { id: "ga4-1", propertyId: "sm-prop-1", date: "2026-07-26", channelGroup: "Organic Search", sessions: 340, engagedSessions: 210, conversions: 12, totalRevenue: 480.5, sampled: false, simulated: false, fetchedAt: "2026-07-29T04:05:00Z" },
+    // The SAMPLED row this ticket's freshness/sampling AC exists for — must render distinguishably
+    // from the unsampled row above, never averaged into one clean-looking figure.
+    { id: "ga4-2", propertyId: "sm-prop-1", date: "2026-07-26", channelGroup: "Paid Search", sessions: 96, engagedSessions: 40, conversions: 3, totalRevenue: 150, sampled: true, simulated: false, fetchedAt: "2026-07-29T04:05:00Z" },
+    { id: "ga4-3", propertyId: "sm-prop-1", date: "2026-07-26", channelGroup: "Direct", sessions: 58, engagedSessions: 30, conversions: 1, totalRevenue: null, sampled: false, simulated: false, fetchedAt: "2026-07-29T04:05:00Z" },
+  ],
+};
+
+function loadGooglePerfStore(): GooglePerfStore {
+  try {
+    return JSON.parse(readFileSync(GOOGLE_PERF_STORE_PATH, "utf8")) as GooglePerfStore;
+  } catch {
+    writeFileSync(GOOGLE_PERF_STORE_PATH, JSON.stringify(GOOGLE_PERF_STORE_SEED));
+    return JSON.parse(JSON.stringify(GOOGLE_PERF_STORE_SEED)) as GooglePerfStore;
+  }
+}
+function saveGooglePerfStore(store: GooglePerfStore): void {
+  writeFileSync(GOOGLE_PERF_STORE_PATH, JSON.stringify(store));
+}
+
+// engagementId -> propertyId, kept in exactly one place so the pull/read handlers below never
+// disagree with the engagement fixtures further down this file about which property an engagement
+// resolves to (0034: an engagement has exactly one property).
+const DEMO_ENGAGEMENT_PROPERTY: Record<string, string> = { "sm-eng-1": "sm-prop-1", "sm-eng-2": "sm-prop-1", "sm-eng-3": "sm-prop-1" };
+// Only sm-eng-1 demos a bound Google connection — sm-eng-2 stays the genuinely-empty case (see the
+// GooglePerfStore seed comment above), so a gsc-pull/ga4-pull against it must refuse exactly the way
+// the real backend refuses an unbound property (GooglePropertyNotBoundError, 400 google_property_not_bound).
+const DEMO_ENGAGEMENT_HAS_GOOGLE_CONNECTION: Record<string, boolean> = { "sm-eng-1": true, "sm-eng-2": false };
 
 function tenantFromPath(pathname: string): string | null {
   const m = pathname.match(/^\/api\/([^/]+)\//);
@@ -1874,6 +2119,50 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
     return ok(rows.map(toSeatRow));
   }
 
+  // SM-25a — the tenant-agnostic Google OAuth callback (search-google-oauth.controller.ts's real
+  // mount: `GET api/search/google/oauth/callback`, deliberately WITHOUT `:tenantId` or
+  // `/modules/search/` — real Google permits no wildcard redirect_uri, so the tenant travels inside
+  // the signed `state` instead of the path). It therefore cannot be matched by the `smBase` regex
+  // below and is checked first, on the raw pathname. The front-end route handler
+  // (`app/api/search/google/callback/route.ts`) calls this with `code`/`state`/`provider` (and
+  // `error`/`error_description` on a declined consent) exactly as it would call the real backend —
+  // this demo handler plays the role of "the issuer said yes" so the SAME redirect-then-callback
+  // code path is exercised in both DEMO_MODE and against a live backend.
+  if (p === "/api/search/google/oauth/callback" && m === "GET") {
+    const error = url.searchParams.get("error");
+    if (error) return ok({ status: "denied", error, errorDescription: url.searchParams.get("error_description") });
+    const code = url.searchParams.get("code");
+    const state = url.searchParams.get("state");
+    const provider = url.searchParams.get("provider");
+    if (!code || !state) return { status: 400, json: { error: "code and state are required (or error, if declined)" } };
+    if (!provider || !["google_search_console", "google_analytics", "google_ads"].includes(provider)) {
+      return { status: 400, json: { error: "provider must be one of google_search_console|google_analytics|google_ads" } };
+    }
+    // Demo `state` shape (see the authorize handler below): "demo-state.<clientId>.<propertyId|_>".
+    const parts = state.split(".");
+    const clientId = parts[1] ?? "cl-2";
+    const propertyId = parts[2] && parts[2] !== "_" ? parts[2] : null;
+    const store = loadGoogleStore();
+    const conn: DemoGoogleConnection = {
+      id: genDemoId("conn-google"), provider: provider as DemoGoogleConnection["provider"], clientId,
+      status: "linked", hasToken: true, hasRefreshToken: true,
+      tokenExpiresAt: new Date(Date.now() + 3600_000).toISOString(),
+      scopes: ["https://www.googleapis.com/auth/webmasters.readonly"],
+      externalAccount: "demo-connect@cedargroup.example.com",
+      // A freshly-started demo flow always completes through OUR OWN sandboxed callback, never
+      // Google's real one — issuerIsGoogle: false is the honest answer, exactly like the seeded
+      // conn-google-2 above. A "Connect" click in DEMO_MODE therefore always demonstrates §A12.3's
+      // disclosure rule, never accidentally the real-Google (nothing-to-disclose) branch.
+      issuerHost: "demo.gaiada.local", issuerIsGoogle: false,
+    };
+    store.connections.push(conn);
+    if (propertyId) {
+      store.bindings[propertyId] = { ...(store.bindings[propertyId] ?? {}), [provider]: conn.id };
+    }
+    saveGoogleStore(store);
+    return ok(conn);
+  }
+
   // Search-marketing (SEO console, SM-11 + SM-29) — properties/engagements/scope/cost-projection
   // are BUILT endpoints (SM-01/02/04); everything else on this base path (audits, keywords,
   // rankings, briefs, ai-visibility, sem/*) is intentionally left unmatched so those tabs render
@@ -1917,6 +2206,12 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
           providerBudgetUsd: scopeStore["sm-eng-2"].providerBudgetUsd, toolScope: scopeStore["sm-eng-2"].toolScope,
           startsOn: null, endsOn: null, createdAt: "2026-07-10T00:00:00Z",
         },
+        {
+          id: "sm-eng-3", clientId: "cl-2", propertyId: "sm-prop-1", projectId: null,
+          name: "Cedar Group — Budget stress test", scopePreset: scopeStore["sm-eng-3"].scopePreset, status: "active",
+          providerBudgetUsd: scopeStore["sm-eng-3"].providerBudgetUsd, toolScope: scopeStore["sm-eng-3"].toolScope,
+          startsOn: "2026-07-20", endsOn: null, createdAt: "2026-07-20T00:00:00Z",
+        },
       ]);
     }
     const engDetail = p.match(/\/modules\/search\/engagements\/([^/]+)$/);
@@ -1936,6 +2231,14 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
           name: "Cedar Group — GEO pilot", scopePreset: store.scopePreset, status: "draft",
           providerBudgetUsd: store.providerBudgetUsd, toolScope: store.toolScope,
           startsOn: null, endsOn: null, createdAt: "2026-07-10T00:00:00Z",
+        });
+      }
+      if (engDetail[1] === "sm-eng-3" && store) {
+        return ok({
+          id: "sm-eng-3", clientId: "cl-2", propertyId: "sm-prop-1", projectId: null,
+          name: "Cedar Group — Budget stress test", scopePreset: store.scopePreset, status: "active",
+          providerBudgetUsd: store.providerBudgetUsd, toolScope: store.toolScope,
+          startsOn: "2026-07-20", endsOn: null, createdAt: "2026-07-20T00:00:00Z",
         });
       }
       return { status: 404, json: { error: "engagement not found" } };
@@ -1958,6 +2261,12 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
       const nextToolScope = seeded ?? b.toolScope;
       if (nextToolScope === undefined && b.scopePreset === undefined) {
         return { status: 400, json: { error: "scopePreset and/or toolScope required" } };
+      }
+      // SM-61 (§6au clause 4): mirrors search.controller.ts's cadence enum validation — see
+      // demoValidateToolScopeCadence's header note.
+      if (nextToolScope !== undefined) {
+        const cadenceError = demoValidateToolScopeCadence(nextToolScope);
+        if (cadenceError) return { status: 400, json: { error: cadenceError } };
       }
       if (b.scopePreset !== undefined) store.scopePreset = b.scopePreset;
       if (nextToolScope !== undefined) store.toolScope = JSON.parse(JSON.stringify(nextToolScope));
@@ -2094,8 +2403,8 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
     if (kwListMatch && m === "GET") {
       const { keywords } = loadKeywordStore();
       return ok(
-        keywords.filter((k) => k.setId === kwListMatch[1]).map(({ id, keyword, locale, intent, clusterId, clusterLabel, volume, difficulty, cpcUsd, isTracked, hasEmbedding, createdAt }) => (
-          { id, keyword, locale, intent, clusterId, clusterLabel, volume, difficulty, cpcUsd, isTracked, hasEmbedding, createdAt }
+        keywords.filter((k) => k.setId === kwListMatch[1]).map(({ id, keyword, locale, intent, clusterId, clusterLabel, volume, difficulty, cpcUsd, metricsProvider, metricsSimulated, isTracked, hasEmbedding, createdAt }) => (
+          { id, keyword, locale, intent, clusterId, clusterLabel, volume, difficulty, cpcUsd, metricsProvider, metricsSimulated, isTracked, hasEmbedding, createdAt }
         )),
       );
     }
@@ -2133,6 +2442,10 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
         store.keywords.push({
           id: genDemoId("sm-kw"), setId, keyword: row.keyword, locale: row.locale, intent: null,
           clusterId: null, clusterLabel: null, volume: null, difficulty: null, cpcUsd: null,
+          // mode-inherent (tracker §6j's reader inventory): keyword import writes keyword/locale
+          // only — metrics stay NULL/false, the same honest "not pulled" state as the real backend's
+          // import INSERT (search.controller.ts's importKeywords never touches metric columns).
+          metricsProvider: null, metricsSimulated: false,
           isTracked: false, hasEmbedding: false, createdAt: new Date().toISOString(),
         });
         imported++;
@@ -2490,9 +2803,374 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
       return ok({ id: cp.id });
     }
 
-    // Anything else under /modules/search/* (rankings, briefs, ai-visibility, pacing/metrics-daily)
-    // is deliberately left unhandled so it falls through to the 404 default just below — those tabs
-    // are NOT BUILT and must show BackendPending, not a demo-faked "empty" list.
+    // ── SM-19: the manual-mode dual-mode twin (SM-30's backend routes) ─────────────────────────────
+    // Mirrors search.controller.ts's own preconditions and error text (§4i discipline extended to
+    // the demo dispatcher) so a demo session sees the SAME refusals a live backend would give.
+    const exportMatch = p.match(/\/modules\/search\/change-proposals\/([^/]+)\/export$/);
+    if (exportMatch && m === "POST") {
+      const store = loadSemStore();
+      const cp = store.changeProposals.find((x) => x.id === exportMatch[1]);
+      if (!cp) return { status: 404, json: { error: "change proposal not found" } };
+      if (cp.status !== "approved" && cp.status !== "applied") {
+        return { status: 400, json: { error: `cannot export a '${cp.status}' proposal — export requires status='approved' (or 'applied', for a re-download)` } };
+      }
+      if (cp.mode !== "manual") {
+        return { status: 400, json: { error: "this proposal is mode='api' — manual export is not available for it; it executes via the one-shot approval path (SM-21)" } };
+      }
+      // Only a 'launch' proposal is built from keyword metrics (sem-export.ts's own rule) — every
+      // other kind carries no provenance, `null`, matching the real backend exactly. This demo
+      // fixture does not attempt to derive a real per-cluster breakdown (SEM_STORE_SEED's ad groups
+      // aren't linked to KEYWORD_STORE's clusters) — a fixed, clearly-mixed shape is used instead,
+      // same "demo-only... not a stand-in for the real" convention as `demoProjectMonthlyCost`.
+      const provenance = cp.kind === "launch"
+        ? { providers: ["dataforseo", "ahrefs"], simulatedCount: 2, realCount: 3, unpulledCount: 1 }
+        : null;
+      const fileId = cp.exportFileId ?? genDemoId("sm-file");
+      cp.exportFileId = fileId;
+      cp.updated_at = new Date().toISOString();
+      saveSemStore(store);
+      const simulated = (provenance?.simulatedCount ?? 0) > 0;
+      return {
+        status: 201,
+        json: {
+          fileId, filename: `sem-${cp.kind}-${cp.id}${simulated ? "-SIMULATED" : ""}.csv`,
+          contentType: "text/csv", byteSize: 256, provenance,
+        },
+      };
+    }
+    const markAppliedMatch = p.match(/\/modules\/search\/change-proposals\/([^/]+)\/mark-applied$/);
+    if (markAppliedMatch && m === "POST") {
+      const store = loadSemStore();
+      const cp = store.changeProposals.find((x) => x.id === markAppliedMatch[1]);
+      if (!cp) return { status: 404, json: { error: "change proposal not found" } };
+      if (cp.mode !== "manual") {
+        return { status: 400, json: { error: "this proposal is mode='api' — mark-applied is not available for it; it executes via the one-shot approval path (SM-21)" } };
+      }
+      if (cp.status !== "approved") {
+        return { status: 400, json: { error: `cannot mark a '${cp.status}' proposal applied — it must be 'approved' first` } };
+      }
+      cp.status = "applied";
+      cp.appliedBy = DEMO_USER_ID;
+      cp.appliedAt = new Date().toISOString();
+      cp.updated_at = cp.appliedAt;
+      // Cascade, same as the real backend: negatives_batch/ads_batch stamp the referenced rows.
+      const ids = Array.isArray(cp.payload.ids) ? (cp.payload.ids as unknown[]).filter((v): v is string => typeof v === "string") : [];
+      if (cp.kind === "negatives_batch" && ids.length > 0) {
+        for (const n of store.negatives) if (ids.includes(n.id) && n.status !== "dismissed") n.status = "applied";
+      } else if (cp.kind === "ads_batch" && ids.length > 0) {
+        for (const a of store.ads) if (ids.includes(a.id) && a.status === "approved") a.status = "live";
+      }
+      saveSemStore(store);
+      return ok({ id: cp.id, status: "applied" as const });
+    }
+
+    // ── Rank tracking (SM-14) — the Rankings tab ──────────────────────────────────────────────────
+    const rankPullMatch = p.match(/\/modules\/search\/engagements\/([^/]+)\/rank-pull$/);
+    if (rankPullMatch && m === "POST") {
+      const engagementId = rankPullMatch[1];
+      const propertyId = DEMO_ENGAGEMENT_PROPERTY[engagementId];
+      if (!propertyId) return { status: 404, json: { error: "engagement not found" } };
+      const b = JSON.parse(body || "{}") as { keywordIds?: string[] };
+      const { keywords } = loadKeywordStore();
+      const engagementSetIds = new Set(loadKeywordStore().sets.filter((s) => s.engagementId === engagementId).map((s) => s.id));
+      let tracked = keywords.filter((k) => engagementSetIds.has(k.setId) && k.isTracked);
+      if (b.keywordIds?.length) tracked = tracked.filter((k) => b.keywordIds!.includes(k.id));
+      const rankStore = loadRankStore();
+      const results = tracked.map((k) => {
+        const prior = rankStore.snapshots
+          .filter((s) => s.keywordId === k.id && s.propertyId === propertyId)
+          .sort((a, b2) => (a.capturedAt < b2.capturedAt ? 1 : -1))[0];
+        // Deterministic demo "capture": nudge the prior position by 1 (or start at 6) — enough to
+        // demonstrate a live re-pull without a real vendor call, never a random number (this module's
+        // own standing rule: a demo figure must be reproducible, not merely plausible-looking).
+        const position = prior?.position != null ? Math.max(1, prior.position - 1) : 6;
+        const snap: DemoRankSnapshot = {
+          id: genDemoId("sm-rank"), propertyId, keywordId: k.id, keyword: k.keyword,
+          engine: "google", device: "desktop", locationCode: 2360, capturedAt: new Date().toISOString(),
+          position, rankedUrl: "https://cedargroup.example.com/tools", serpFeatures: {},
+          provider: "dataforseo", simulated: demoProviderMode(engagementId) === "simulate",
+        };
+        rankStore.snapshots.push(snap);
+        const dropped = prior ? (prior.position !== null && (position === null || position > prior.position)) : false;
+        return { keywordId: k.id, keyword: k.keyword, status: "pulled" as const, position, rankedUrl: snap.rankedUrl, provider: snap.provider, simulated: snap.simulated, dropped, previousPosition: prior?.position ?? null };
+      });
+      saveRankStore(rankStore);
+      return ok({ engagementId, propertyId, attempted: tracked.length, pulled: results.length, skipped: 0, failed: 0, results });
+    }
+    const metricsPullMatch = p.match(/\/modules\/search\/keyword-sets\/([^/]+)\/metrics-pull$/);
+    if (metricsPullMatch && m === "POST") {
+      const setId = metricsPullMatch[1];
+      const store = loadKeywordStore();
+      if (!store.sets.some((s) => s.id === setId)) return { status: 404, json: { error: "keyword set not found" } };
+      const b = JSON.parse(body || "{}") as { keywordIds?: string[] };
+      let members = store.keywords.filter((k) => k.setId === setId);
+      if (b.keywordIds?.length) members = members.filter((k) => b.keywordIds!.includes(k.id));
+      const engagementId = store.sets.find((s) => s.id === setId)!.engagementId;
+      const simulated = demoProviderMode(engagementId) === "simulate";
+      const results = members.map((k) => {
+        // Absent stays absent (AC3): a keyword with no volume ever pulled deterministically returns
+        // "absent" here rather than fabricating a first value — matches rank.ts's own AC3 disposition
+        // for a provider response with nothing for that query.
+        if (k.volume === null && k.hasEmbedding === false && k.difficulty === null) {
+          return { keywordId: k.id, keyword: k.keyword, status: "absent" as const };
+        }
+        const volume = (k.volume ?? 100) + 10;
+        k.volume = volume; k.difficulty = String((Number(k.difficulty ?? "30") + 1).toFixed(2)); k.cpcUsd = k.cpcUsd ?? "2.500000";
+        k.metricsProvider = "semrush"; k.metricsSimulated = simulated;
+        return { keywordId: k.id, keyword: k.keyword, status: "updated" as const, volume, difficulty: Number(k.difficulty), cpcUsd: Number(k.cpcUsd), provider: "semrush", simulated };
+      });
+      saveKeywordStore(store);
+      const updated = results.filter((r) => r.status === "updated").length;
+      const absent = results.filter((r) => r.status === "absent").length;
+      return ok({ attempted: members.length, updated, absent, skipped: 0, failed: 0, results });
+    }
+    const rankSnapshotsMatch = p.match(/\/modules\/search\/properties\/([^/]+)\/rank-snapshots$/);
+    if (rankSnapshotsMatch && m === "GET") {
+      const propertyId = rankSnapshotsMatch[1];
+      const keywordId = url.searchParams.get("keywordId");
+      const engine = url.searchParams.get("engine");
+      const device = url.searchParams.get("device");
+      const limit = Math.min(Math.max(Number(url.searchParams.get("limit")) || 200, 1), 2000);
+      let rows = loadRankStore().snapshots.filter((s) => s.propertyId === propertyId);
+      if (keywordId) rows = rows.filter((s) => s.keywordId === keywordId);
+      if (engine) rows = rows.filter((s) => s.engine === engine);
+      if (device) rows = rows.filter((s) => s.device === device);
+      rows = rows.slice().sort((a, b2) => (a.capturedAt < b2.capturedAt ? 1 : -1)).slice(0, limit);
+      return ok(rows);
+    }
+
+    // ── Google OAuth connections (SM-25a) — the Connections tab's Google section ──────────────────
+    const googleAuthorizeMatch = p.match(/\/modules\/search\/google\/connections\/([^/]+)\/authorize$/);
+    if (googleAuthorizeMatch && m === "POST") {
+      const provider = googleAuthorizeMatch[1];
+      if (!["google_search_console", "google_analytics", "google_ads"].includes(provider)) {
+        return { status: 400, json: { error: "provider must be one of google_search_console|google_analytics|google_ads" } };
+      }
+      const b = JSON.parse(body || "{}") as { clientId?: string; propertyId?: string };
+      if (!b.clientId) return { status: 400, json: { error: "clientId required" } };
+      // Demo state is a PLAIN token, not signed — DEMO_MODE has no vault/HMAC key and this is not the
+      // security surface under test here (search-google-oauth.controller.test.ts covers the real
+      // signed-state attack surface against the live backend). The shape carries just enough for the
+      // demo callback above to know which client/property to attach the new connection to.
+      const state = `demo-state.${b.clientId}.${b.propertyId ?? "_"}`;
+      return ok({
+        authorizeUrl: `/api/search/google/callback?code=demo-code&state=${encodeURIComponent(state)}&provider=${provider}`,
+        state, expiresAt: new Date(Date.now() + 600_000).toISOString(),
+        issuerHost: "demo.gaiada.local", simulated: true,
+        scopes: ["https://www.googleapis.com/auth/webmasters.readonly"],
+      });
+    }
+    if (p.match(/\/modules\/search\/google\/connections$/) && m === "GET") {
+      const clientId = url.searchParams.get("clientId");
+      // A revoked connection is NOT filtered out — `status` renders verbatim (matches the ledger's
+      // own convention), so an operator can still see the dead link and re-connect rather than have
+      // it vanish as though it never existed.
+      const rows = loadGoogleStore().connections;
+      return ok(clientId ? rows.filter((c) => c.clientId === clientId) : rows);
+    }
+    // `$`-anchored, so this never matches the `/authorize`, `/refresh` or `/revoke` sub-paths above.
+    const googleConnGetMatch = p.match(/\/modules\/search\/google\/connections\/([^/]+)$/);
+    if (googleConnGetMatch && m === "GET") {
+      const conn = loadGoogleStore().connections.find((c) => c.id === googleConnGetMatch[1]);
+      if (!conn) return { status: 404, json: { error: "connection not found" } };
+      return ok(conn);
+    }
+    const googleRefreshMatch = p.match(/\/modules\/search\/google\/connections\/([^/]+)\/refresh$/);
+    if (googleRefreshMatch && m === "POST") {
+      const store = loadGoogleStore();
+      const conn = store.connections.find((c) => c.id === googleRefreshMatch[1]);
+      if (!conn) return { status: 404, json: { error: "connection not found" } };
+      if (conn.status === "revoked" || !conn.hasRefreshToken) {
+        return { status: 409, json: { error: "the Google connection is not usable (revoked) — re-link it to continue", code: "google_connection_not_linked" } };
+      }
+      conn.tokenExpiresAt = new Date(Date.now() + 3600_000).toISOString();
+      saveGoogleStore(store);
+      return ok(conn);
+    }
+    const googleRevokeMatch = p.match(/\/modules\/search\/google\/connections\/([^/]+)\/revoke$/);
+    if (googleRevokeMatch && m === "POST") {
+      const store = loadGoogleStore();
+      const conn = store.connections.find((c) => c.id === googleRevokeMatch[1]);
+      if (!conn) return { status: 404, json: { error: "connection not found" } };
+      conn.status = "revoked"; conn.hasToken = false; conn.hasRefreshToken = false; conn.tokenExpiresAt = null;
+      saveGoogleStore(store);
+      return ok({ connection: conn, issuerRevoked: conn.issuerIsGoogle, issuerStatus: 200 });
+    }
+    const googleBindMatch = p.match(/\/modules\/search\/properties\/([^/]+)\/google-connection\/([^/]+)$/);
+    if (googleBindMatch && m === "PUT") {
+      const [, propertyId, provider] = googleBindMatch;
+      const b = JSON.parse(body || "{}") as { connectionId?: string | null };
+      const store = loadGoogleStore();
+      if (b.connectionId && !store.connections.some((c) => c.id === b.connectionId)) {
+        return { status: 404, json: { error: "connectionId not found in this tenant" } };
+      }
+      store.bindings[propertyId] = { ...(store.bindings[propertyId] ?? {}), [provider]: b.connectionId ?? null };
+      saveGoogleStore(store);
+      return ok({ propertyId, provider, connectionId: b.connectionId ?? null });
+    }
+
+    // ── GSC + GA4 read ingestion (SM-25b) — the Search Console & GA4 tab ─────────────────────────
+    const gscPullMatch = p.match(/\/modules\/search\/engagements\/([^/]+)\/gsc-pull$/);
+    if (gscPullMatch && m === "POST") {
+      const engagementId = gscPullMatch[1];
+      const propertyId = DEMO_ENGAGEMENT_PROPERTY[engagementId];
+      if (!propertyId) return { status: 404, json: { error: "engagement not found" } };
+      if (!DEMO_ENGAGEMENT_HAS_GOOGLE_CONNECTION[engagementId]) {
+        return { status: 400, json: { error: "property has no Search Console connection bound — link one first", code: "google_property_not_bound" } };
+      }
+      const b = JSON.parse(body || "{}") as { startDate?: string; endDate?: string; rowLimit?: number; maxPages?: number };
+      // Same clamp semantics as gsc-client.ts: an end date inside the 3-day freshness lag is pulled
+      // back, disclosed rather than silently substituted. Demo "today" fixed at the fixture's own
+      // seed date rather than the real clock, so the disclosure is reproducible across a session.
+      const today = new Date("2026-07-30T00:00:00Z");
+      const lagBoundary = new Date(today.getTime() - 3 * 86400_000).toISOString().slice(0, 10);
+      const requestedEndDate = b.endDate ?? today.toISOString().slice(0, 10);
+      const clamped = requestedEndDate > lagBoundary;
+      const effectiveEndDate = clamped ? lagBoundary : requestedEndDate;
+      const startDate = b.startDate ?? new Date(today.getTime() - 10 * 86400_000).toISOString().slice(0, 10);
+      const store = loadGooglePerfStore();
+      const gStore = loadGoogleStore();
+      const conn = gStore.connections.find((c) => c.id === gStore.bindings[propertyId]?.google_search_console);
+      const simulated = conn ? !conn.issuerIsGoogle : true;
+      const row: DemoGscRow = {
+        id: genDemoId("gsc"), propertyId, date: effectiveEndDate, query: "seo tools",
+        page: "https://cedargroup.example.com/tools", device: "DESKTOP", clicks: 7, impressions: 150,
+        ctr: 0.0467, position: 9.1, simulated, fetchedAt: new Date().toISOString(),
+      };
+      store.gsc.push(row);
+      saveGooglePerfStore(store);
+      return ok({
+        propertyId, status: "pulled", startDate, requestedEndDate, effectiveEndDate,
+        clampedForFreshness: clamped, freshnessLagDays: 3, rowsUpserted: 1, malformedRowsSkipped: 0,
+        // Demo also demonstrates the truncation disclosure: a maxPages:1 request against >1 "page" of
+        // demo data reports truncated:true, exactly like hitting GSC_DEFAULT_MAX_PAGES for real.
+        pagesFetched: b.maxPages ?? 1, truncated: (b.maxPages ?? 4) === 1,
+        provider: "google_search_console", connectionId: conn?.id ?? "conn-google-1", simulated,
+      });
+    }
+    const ga4PullMatch = p.match(/\/modules\/search\/engagements\/([^/]+)\/ga4-pull$/);
+    if (ga4PullMatch && m === "POST") {
+      const engagementId = ga4PullMatch[1];
+      const propertyId = DEMO_ENGAGEMENT_PROPERTY[engagementId];
+      if (!propertyId) return { status: 404, json: { error: "engagement not found" } };
+      if (!DEMO_ENGAGEMENT_HAS_GOOGLE_CONNECTION[engagementId]) {
+        return { status: 400, json: { error: "property has no GA4 connection bound — link one first", code: "google_property_not_bound" } };
+      }
+      const b = JSON.parse(body || "{}") as { ga4PropertyId?: string; startDate?: string; endDate?: string };
+      if (!b.ga4PropertyId) return { status: 400, json: { error: "ga4PropertyId required" } };
+      const today = new Date("2026-07-30T00:00:00Z");
+      const lagBoundary = new Date(today.getTime() - 2 * 86400_000).toISOString().slice(0, 10);
+      const requestedEndDate = b.endDate ?? today.toISOString().slice(0, 10);
+      const clamped = requestedEndDate > lagBoundary;
+      const effectiveEndDate = clamped ? lagBoundary : requestedEndDate;
+      const startDate = b.startDate ?? new Date(today.getTime() - 9 * 86400_000).toISOString().slice(0, 10);
+      const gStore = loadGoogleStore();
+      const conn = gStore.connections.find((c) => c.id === gStore.bindings[propertyId]?.google_analytics);
+      const simulated = conn ? !conn.issuerIsGoogle : true;
+      // Every pull's ENTIRE response is sampled or not together (a report-level GA4 fact) — this demo
+      // pull deterministically reports sampled:true so the tab's per-row sampling disclosure is always
+      // reachable from a fresh pull, not only from the pre-seeded ga4-2 row.
+      const store = loadGooglePerfStore();
+      const row: DemoGa4Row = {
+        id: genDemoId("ga4"), propertyId, date: effectiveEndDate, channelGroup: "Organic Search",
+        sessions: 120, engagedSessions: 80, conversions: 4, totalRevenue: 90, sampled: true,
+        simulated, fetchedAt: new Date().toISOString(),
+      };
+      store.ga4.push(row);
+      saveGooglePerfStore(store);
+      return ok({
+        propertyId, status: "pulled", startDate, requestedEndDate, effectiveEndDate,
+        clampedForFreshness: clamped, freshnessLagDays: 2, rowsUpserted: 1, malformedRowsSkipped: 0,
+        sampled: true, provider: "google_analytics", connectionId: conn?.id ?? "conn-google-2", simulated,
+      });
+    }
+    const gscListMatch = p.match(/\/modules\/search\/properties\/([^/]+)\/gsc-performance$/);
+    if (gscListMatch && m === "GET") {
+      const propertyId = gscListMatch[1];
+      const startDate = url.searchParams.get("startDate");
+      const endDate = url.searchParams.get("endDate");
+      const queryFilter = url.searchParams.get("query");
+      const limit = Math.min(Math.max(Number(url.searchParams.get("limit")) || 500, 1), 5000);
+      let rows = loadGooglePerfStore().gsc.filter((r) => r.propertyId === propertyId);
+      if (startDate) rows = rows.filter((r) => r.date >= startDate);
+      if (endDate) rows = rows.filter((r) => r.date <= endDate);
+      if (queryFilter) rows = rows.filter((r) => r.query === queryFilter);
+      rows = rows.slice().sort((a, b2) => (a.date < b2.date ? 1 : a.date > b2.date ? -1 : b2.clicks - a.clicks)).slice(0, limit);
+      return ok(rows);
+    }
+    const gscTopQueriesMatch = p.match(/\/modules\/search\/properties\/([^/]+)\/gsc-performance\/top-queries$/);
+    if (gscTopQueriesMatch && m === "GET") {
+      const propertyId = gscTopQueriesMatch[1];
+      const startDate = url.searchParams.get("startDate");
+      const endDate = url.searchParams.get("endDate");
+      if (!startDate || !endDate) return { status: 400, json: { error: "startDate and endDate required" } };
+      const includeSimulated = url.searchParams.get("includeSimulated") === "1" || url.searchParams.get("includeSimulated") === "true";
+      const limit = Math.min(Math.max(Number(url.searchParams.get("limit")) || 100, 1), 1000);
+      const rows = loadGooglePerfStore().gsc.filter((r) => r.propertyId === propertyId && r.date >= startDate && r.date <= endDate && (includeSimulated || !r.simulated));
+      const byQuery = new Map<string, { clicks: number; impressions: number; posWeighted: number }>();
+      for (const r of rows) {
+        const agg = byQuery.get(r.query) ?? { clicks: 0, impressions: 0, posWeighted: 0 };
+        agg.clicks += r.clicks; agg.impressions += r.impressions; agg.posWeighted += r.position * r.impressions;
+        byQuery.set(r.query, agg);
+      }
+      const out = [...byQuery.entries()]
+        .map(([query, a]) => ({ query, clicks: a.clicks, impressions: a.impressions, ctr: a.impressions > 0 ? a.clicks / a.impressions : null, position: a.impressions > 0 ? a.posWeighted / a.impressions : null }))
+        .sort((a, b2) => b2.clicks - a.clicks)
+        .slice(0, limit);
+      return ok(out);
+    }
+    const gscKeywordImportMatch = p.match(/\/modules\/search\/engagements\/([^/]+)\/gsc-keyword-import$/);
+    if (gscKeywordImportMatch && m === "POST") {
+      const engagementId = gscKeywordImportMatch[1];
+      const propertyId = DEMO_ENGAGEMENT_PROPERTY[engagementId];
+      if (!propertyId) return { status: 404, json: { error: "engagement not found" } };
+      const b = JSON.parse(body || "{}") as { setId?: string; name?: string; startDate?: string; endDate?: string; minClicks?: number; limit?: number; locale?: string };
+      if (!b.startDate || !b.endDate) return { status: 400, json: { error: "startDate and endDate required" } };
+      const rows = loadGooglePerfStore().gsc.filter((r) => r.propertyId === propertyId && r.date >= b.startDate! && r.date <= b.endDate! && !r.simulated);
+      const minClicks = b.minClicks ?? 0;
+      const candidates = [...new Set(rows.filter((r) => r.clicks >= minClicks).map((r) => r.query))];
+      const kwStore = loadKeywordStore();
+      let setId = b.setId ?? null;
+      if (setId && !kwStore.sets.some((s) => s.id === setId && s.engagementId === engagementId)) {
+        return { status: 400, json: { error: "setId does not belong to engagementId" } };
+      }
+      if (!setId) {
+        setId = genDemoId("sm-set");
+        kwStore.sets.push({ id: setId, engagementId, name: b.name || `GSC import ${b.startDate}..${b.endDate}`, source: "gsc", createdAt: new Date().toISOString() });
+      }
+      const existing = kwStore.keywords.filter((k) => k.setId === setId);
+      const locale = b.locale || "id-ID";
+      let imported = 0;
+      for (const query of candidates) {
+        if (existing.some((k) => k.keyword.toLowerCase() === query.toLowerCase() && k.locale === locale)) continue;
+        kwStore.keywords.push({
+          id: genDemoId("sm-kw"), setId, keyword: query, locale, intent: null, clusterId: null, clusterLabel: null,
+          volume: null, difficulty: null, cpcUsd: null, metricsProvider: null, metricsSimulated: false,
+          isTracked: false, hasEmbedding: false, createdAt: new Date().toISOString(),
+        });
+        imported++;
+      }
+      saveKeywordStore(kwStore);
+      return ok({ setId, imported, submitted: candidates.length, considered: rows.length, duplicates: candidates.length - imported });
+    }
+    const ga4ListMatch = p.match(/\/modules\/search\/properties\/([^/]+)\/ga4-metrics$/);
+    if (ga4ListMatch && m === "GET") {
+      const propertyId = ga4ListMatch[1];
+      const startDate = url.searchParams.get("startDate");
+      const endDate = url.searchParams.get("endDate");
+      const limit = Math.min(Math.max(Number(url.searchParams.get("limit")) || 500, 1), 5000);
+      let rows = loadGooglePerfStore().ga4.filter((r) => r.propertyId === propertyId);
+      if (startDate) rows = rows.filter((r) => r.date >= startDate);
+      if (endDate) rows = rows.filter((r) => r.date <= endDate);
+      rows = rows.slice().sort((a, b2) => (a.date < b2.date ? 1 : -1)).slice(0, limit);
+      return ok(rows);
+    }
+
+    // Anything else under /modules/search/* (briefs, ai-visibility, pacing/metrics-daily) is
+    // deliberately left unhandled so it falls through to the 404 default just below — those tabs
+    // are NOT BUILT and must show BackendPending, not a demo-faked "empty" list. Rankings (SM-14)
+    // and the Google connections/GSC/GA4 routes (SM-25a/SM-25b) are handled above, now that both are
+    // real, wired tabs.
     if (m === "GET") return { status: 404, json: { error: "not implemented in demo fixtures" } };
   }
 

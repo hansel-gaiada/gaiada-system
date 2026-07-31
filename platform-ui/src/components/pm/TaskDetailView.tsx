@@ -16,6 +16,7 @@ import {
   runTracker, confirmSuggestion, dismissSuggestion, addDependency, removeDependency, logTime, deleteTaskAction,
   setTaskTags, createTag, updateTaskCustomFields, setTaskStatus, undoRecurrenceSpawn,
   duplicateTaskAction, saveTaskAsTemplateAction, followTask, unfollowTask, addReaction, removeReaction,
+  addContributor, removeContributor,
 } from "@/lib/pmActions";
 import { StatusSelect } from "@/components/pm/StatusSelect";
 import { PageHeader } from "@/components/PageHeader";
@@ -28,6 +29,7 @@ import { AssigneeEditor } from "@/components/pm/AssigneeEditor";
 import { TrackerPanel } from "@/components/pm/TrackerPanel";
 import { CommentThread, FollowToggle } from "@/components/pm/CommentThread";
 import { Dependencies } from "@/components/pm/Dependencies";
+import { Contributors } from "@/components/pm/Contributors";
 import { TimeLog } from "@/components/pm/TimeLog";
 import { TagEditor } from "@/components/pm/TagEditor";
 import { TaskCustomFields } from "@/components/pm/TaskCustomFields";
@@ -213,6 +215,20 @@ export async function TaskDetailView({
               <AssigneeEditor label={task.assignee ? "Reassign" : "Assign"} assignable={assignable} current={task.assignee} save={setAssignee.bind(null, task.id)} />
             </div>
           )}
+        </Card>
+      </div>
+
+      <div style={{ marginTop: 20 }}>
+        <Card title="Contributors">
+          <Contributors
+            contributors={task.contributors}
+            ownerId={responsibleId}
+            ownerName={task.assignee?.responsibleName}
+            candidates={assignable.members}
+            canEdit={canEdit}
+            add={addContributor.bind(null, task.id)}
+            remove={removeContributor.bind(null, task.id)}
+          />
         </Card>
       </div>
 

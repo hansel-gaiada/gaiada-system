@@ -1,12 +1,14 @@
 # Search-Marketing Design Addendum — Multi-Vendor Providers, Simulation Mode, Cost Model v2
 
 > **Status:** Ratified design addendum to [`seo-sem-design.md`](./seo-sem-design.md) v1.1.
-> **Version:** A1.5 · **Date:** 2026-07-30 (A1.0/A1.1 2026-07-29; A1.1 adds §A8, the SM-33/34/35 ⚡
+> **Version:** A1.7 · **Date:** 2026-07-31 (A1.0/A1.1 2026-07-29; A1.1 adds §A8, the SM-33/34/35 ⚡
 > gate amendments; A1.2 adds §A9, the SM-36/44 ⚡ gate amendments + P2 readiness — §A4.7 widened to
 > pre-existing readers, two of my own claims corrected, one QA-caught tier-4 breach ratified fixed;
 > A1.3 adds §A10, the vendor-sandbox provenance ruling + SM-49 + SM-41 amendment;
 > A1.4 adds §A11, the incurred-cost ledger ruling — SM-50, with the binding consumer enumeration;
-> A1.5 adds §A12, the Google client-account surfaces ruling — SM-51 + the SM-25 decomposition)
+> A1.5 adds §A12, the Google client-account surfaces ruling — SM-51 + the SM-25 decomposition;
+> A1.6 adds §A14, echo-validation — the response-vs-request standing rule, tracker §6bc;
+> A1.7 adds §A14.5, identity mismatch at a billing point — record the money, refuse the data, tracker §6bi)
 > · **Author:** System Architect (Claude)
 > **Trigger:** owner directive 2026-07-29 (tracker §6): (1) no live vendor API until staging —
 > dev/demo runs a deterministic simulation; (2) three data vendors (Semrush + Ahrefs already paid,
@@ -977,6 +979,234 @@ Google, not a validated Google integration.**
 
 Full ticket specs (SM-51, SM-25a/b/c, SM-41G — tiers, deps, ACs, build-order slots): tracker
 **§6x.3/§6x.4**.
+
+---
+
+## §A13 · Automation and the money path — the assurance ruling (2026-07-30, binding)
+
+Rules on tracker §6ac (SM-15's block), §6aa (SM-53's status mapping), and SM-15's two contract
+gaps. Full ticket specs in tracker **§6ad**.
+
+### A13.1 · The confirmed mechanics (all verified in code 2026-07-30)
+
+Every `search.*` write tool is `minAssurance:'verified'` (`modules/search/index.ts`, matching the
+hr/pm/automation-console write-tool convention — verified, not assumed). Every n8n principal is
+minted `assurance:'low'` by construction (`mcp-hub/src/principal.ts`: *"verified principals will
+come from the platform IdP — never from an envelope"*). `permits()`/`authorize()`
+(`mcp-hub/src/policy.ts`) check assurance **before** the allow-list and before the D14 impact gate.
+Net: **no n8n workflow can reach any search write tool**, and the D14 suspend path §07 describes
+for paid pulls is unreachable for automation — §07's sentence "automation principals route through
+the D14 gate" and the same section's `minAssurance:'verified'` convention are mutually exclusive.
+Separately verified today: D14 approval-decide records + emits but **does not re-drive** the
+approved call (`core/automation-approvals.controller.ts` header + body); the WSD-4 per-module
+decided-event seam exists (HR's `applyLeaveDecision`) but nothing search-side subscribes.
+
+### A13.2 · The ruling — automation never spends; scheduled pulls are a platform module job
+
+**SM-15's proposed fix (lower `minAssurance` per tool) is REFUSED — the maintainer's refusal is
+ratified on the merits.** The convention is deliberate and uniform; the tools automation can reach
+are cheap and reversible; a paid pull is neither. The assurance gate is the control that keeps
+chat-surface envelopes away from vendor spend, and it is placed correctly.
+
+**Automation (n8n) must not be able to trigger paid pulls — through any mechanism.** The cadence
+loop was never automation-shaped work: it is recurring in-module work executing configuration a
+verified human already set. It moves into **platform-nest as a module scheduler job** (SM-54),
+following the repo's own precedent (`startReconcileLoop`, `startDriftSweepLoop`,
+`startBurndownSnapshotLoop` — dark-by-default env-gated chained-setTimeout loops in `main.ts`; plus
+`automation-policy.ts`'s recorded `wf:digest-fanout` exception: a service-job trigger needs no hub
+scope).
+
+**The standing authorization artifact is the engagement's scope config**: tool toggle + cadence +
+budget cap, settable only under `search:scope:write` (verified human, Cerbos-gated). Enforcement
+stays at the dispatch choke-point — scope, pillar kill-switch, budget stop-loss, ledger, advisory
+lock — which the scheduler enters through the SAME module functions the routes call. This is §07's
+own "the approved row is the authorization artifact" pattern transposed to recurring spend: the
+approved **config** authorizes, the budget cap bounds, the ledger audits, the toggle revokes.
+Attribution: scheduler-initiated ledger rows record `requested_by = NULL` +
+`correlationId 'sched:<tool>'` (amends §07's "requested_by = the OBO automation user").
+
+**`impact:'medium'` on paid pulls STAYS.** It is retained as the tool's risk classification —
+recorded into `automation_approvals` rows, displayed in the admin console, and load-bearing for the
+agent surface (WS8 agent writes gate on impact, origin `'agent'`) — but it is **no longer claimed
+as an automation entry path**. §07/D-5's rationale column is amended accordingly; the
+`index.ts:124` comment clause "routes through the D14 automation-write gate" is struck (SM-55).
+
+**Backbone-rule amendment — explicit, not by implication.** "n8n orchestrates, MCP accesses"
+continues to govern how automation reaches platform data: n8n keeps cross-system glue, event-reactive
+flows (outbox → n8n bridge), and webhook edges. It is **amended** with two clauses: (1) recurring
+in-module cadence work whose only job is invoking module logic on module-owned configuration is a
+platform module job, not an n8n flow — design §10's `sm-rank-pull`, `sm-keyword-refresh`,
+`sm-backlink-snapshot`, `sm-ai-visibility` rows are reassigned to SM-54 accordingly; (2) **hard
+rule: no n8n workflow may ever be allow-listed for a tool that spends vendor money** — paid-pull
+tools stay `minAssurance:'verified'`, and the assurance gate is the enforcing control. This
+amendment needs the owner's nod (§A13.7) because §09 records the original rule as a design
+commitment.
+
+### A13.3 · Rejected alternatives (recorded so they are not re-proposed)
+
+- **Verified service principal for n8n** — violates `principal.ts`'s constitutional line (verified
+  only from the platform IdP, never from an envelope), and even with it the D14 impact gate would
+  still suspend every medium write from an automation principal — so it requires TWO weakened
+  controls on the money path to avoid writing one loop. If WS4's target-state RBAC-minted
+  short-lived creds + Temporal land, revisit; not now, and never as an envelope change.
+- **WS4 approval per run** — non-functional today (no re-drive, verified §A13.1), and wrong-shaped
+  even if built: a human approval on every routine daily tick for spend the human already authorized
+  via scope config is duplicate authorization that trains rubber-stamping and degrades the approvals
+  surface for the decisions that need it. Per-run approval remains the right shape for
+  **exceptional** spend only (the existing `search:provider:admin` cap-override path).
+
+### A13.4 · SM-53 ratification — status mapping is an API-contract addition (Ruling 2)
+
+- **409 for `scope_disabled`/`budget_exceeded` — RATIFIED.** RFC 9110 409 is "conflict with the
+  current state of the target resource, resolvable by the user, resubmittable" — exactly a refusal
+  the operator fixes by changing the engagement's own config. **422 rejected** (the request content
+  is well-formed; the conflict is resource state). **402 rejected** (would be the codebase's only
+  402, no client branches on it, and its real-world semantics are provider-billing; the `code`
+  discriminator already separates budget from scope).
+- **503 for the five unavailability codes, unmapped-future-code → 503, never 500 — RATIFIED.**
+  Verified exhaustive: the `ProviderDispatchError` code union (`providers/types.ts`) is exactly the
+  seven mapped codes. Reserving 500 for genuine faults is ratified as the module's contract.
+- **`code` in the error body — RATIFIED as an additive contract extension, and it DOES need a
+  contract entry:** FRONTEND-BFF-CONTRACT gains a Conventions line — error bodies are
+  `{ error: string, field?: string, code?: string }`, clients must tolerate additional keys, `code`
+  is a stable machine discriminator (SM-57).
+- **Placement — correct as-is.** The filter file lives in `modules/search/` (it catches a
+  search-owned type) and is registered globally in `main.ts` (the type can escape any search
+  controller); `@Catch(ProviderDispatchError)` gives it zero cross-module blast radius. Do NOT
+  generalize the search mapping app-wide.
+- **The latent class is real, with one more verified instance in the same module:**
+  `GatewayNotConfiguredError` escapes `POST keyword-sets/:id/embed` and `/cluster` uncaught
+  (`clustering.ts` embed loop; the controller maps only `KeywordSetTooLargeError`) → the same
+  message-less 500 that SM-53 fixed, discarding a deliberately actionable message (SM-57). The
+  AI-draft routes are NOT affected (verified: they wrap the gateway call with a deterministic
+  fallback). Platform-wide sweep: the only plain-Error domain classes in `platform-nest/src` are
+  the six in the search module/app guard; other modules throw `HttpException` directly — no
+  cross-module instance exists today, but the structural floor gap is platform-level: any future
+  uncaught plain Error surfaces as a 500 with no `{ error }` body, breaking UI/bot `.error` parity.
+  **Platform finding → SM-58** (app-wide last-resort filter; 500 `{error:"internal error"}`, stack
+  logged server-side, never leaking internals, with tests pinning that the two specific filters
+  still win).
+
+### A13.5 · SM-15's two contract gaps (Ruling 3)
+
+- **`search.keywordResearch` / `search.runAudit` missing `method`/`pathTemplate` — DELIBERATE
+  DEFERRALS, not defects.** `index.ts`'s own comment documents the stub protocol per tool, and
+  `module-tools.ts` skips non-`pathTemplate` defs by design (informational-only; the hub advertises
+  nothing it can't call, so no caller sees a broken tool). Human paths to the underlying
+  capabilities exist today (`keyword-sets/:id/metrics-pull`; `POST audits` ingest). Bindings land
+  with their owners: `keywordResearch` → the ticket that builds the research/suggestions route (on
+  SM-05's driver); `runAudit` → SM-07 (the crawl job trigger — a `run`, distinct from SM-08's
+  ingest `create`). Reaffirmed; no new tickets.
+- **`search.ingestRankResults` — a REAL contract inconsistency, resolved by RETIRING the tool, not
+  building it.** A vendor-postback relay is service-to-service data delivery, not an agent action —
+  it should never be an MCP tool. Amended shape (SM-56, parked): n8n stays the webhook edge
+  (INGEST_SECRET precedent), relaying task-id-only postbacks to the platform callback route
+  authenticated by `SEARCH_CALLBACK_SECRET` (an env that exists today and is consumed by NOTHING
+  platform-side — dangling until SM-56); the route switches from "re-run the paid dispatch" (today's
+  documented limitation: a second charge per callback) to SM-05's unbuilt task-id-keyed
+  authoritative re-fetch (free — the result was paid for at post time). Design §10's
+  `sm-rank-collect` row is amended; the dead `wf:sm-rank-collect` allow-list entry is removed now
+  (SM-55). **No MCP tool for SM-08's audit-ingest either — not a gap:** crawler→platform report
+  delivery is the same service-edge class; recorded so it is not re-filed.
+
+### A13.6 · What this supersedes
+
+§07's "automation principals route through the D14 gate…" sentence and D-5's rationale clause
+(as automation-entry claims) · §10's four scheduled-pull flow rows (reassigned to SM-54; the
+`sm-rank-collect` row re-specced per A13.5) · §09's automation row gains the A13.2 amendment ·
+tracker §6ac's open question (this section answers it). `sm-rank-pull.json`'s `meta.description`
+instruction to lower `minAssurance` is **countermanded** and must leave the repo (SM-55) — a
+committed directive that contradicts a binding ruling is a live hazard to future agents.
+
+### A13.7 · Owner decisions this ruling needs
+
+1. **Ratify the backbone-rule amendment** (A13.2) — recommended; it is a clarification with in-repo
+   precedent, but §09 records the original rule as a commitment, so it is the owner's to amend.
+2. **SM-56 timing** — the Standard-queue collect edge is the cheaper rank-pull economics; it stays
+   PARKED until wanted (needs the funded DataForSEO deposit + staging). Approve parking, or pull it
+   forward.
+
+---
+
+## §A14 · Echo-validation — validate the response against the constraint you asked for (2026-07-31, binding; tracker §6bc)
+
+**Trigger:** the §6bc gate found `pullGscPerformanceForProperty` correctly clamping the *requested*
+end date to the freshness-lag boundary while persisting a *returned* row dated inside the window,
+unflagged — and SM-63 (§6bb) had just closed the same defect on the identity axis (a collect
+trusting the caller's engagement claim over the ledger row's own). Two instances, one shape, so the
+rule is written down before the next driver (SM-25c, SM-62) is built.
+
+### A14.1 · The rule
+
+**Any constraint or identity an outbound request carries — date range, row/volume bound, filter,
+task/engagement identity — must be re-verified on the response before persistence. Violations are
+skipped (never persisted), counted, and disclosed on the outcome; identity mismatches are refused
+in the same shape as "not found" (no oracle). Nothing is ever silently absorbed.**
+
+Doctrine, from §A10.5: a green sandbox validates our code against **our own model of the vendor**.
+A constraint enforced only outbound is therefore enforced only in our model — every invariant
+claimed of persisted data ("no partial rows", "at most N rows", "this row belongs to this
+engagement") is a vendor-trust assumption in disguise until the response side enforces it.
+Echo-validation converts an unverifiable vendor fact into an enforced local invariant that holds
+whether or not the vendor behaves.
+
+### A14.2 · Disposition pattern (rejected alternatives recorded, tracker §6bc Ruling 1)
+
+- **Skip + count + disclose** for out-of-contract *data* rows — the `malformedRowsSkipped` pattern
+  extended by one validity predicate. The counter is the operator-visible signal; contents never
+  reach a table any surface reads. Loss is bounded deferral (the idempotent UPSERT re-fetches once
+  the fact settles), never destruction.
+- **Refuse-as-not-found** for *identity* mismatches (SM-63's shape): the scope comes back as data
+  for the caller to judge, is compared outside the `WHERE` clause, and the refusal conflates
+  "wrong scope" with "no such row" so no probing oracle exists.
+- **Flagging is foreclosed** — it re-opens the schema column 0061 refused, creates a second
+  partial-data state every reader must remember to check, and a forgotten predicate silently blends
+  the flagged row anyway. **Silent dropping is foreclosed** — it hides the vendor-anomaly signal
+  SM-41G exists to observe. **Whole-pull failure is foreclosed** — one stray row must not convert a
+  data-quality anomaly into an availability incident.
+
+### A14.3 · Honest limits
+
+Echo-validation checks what IS in the response against what was asked. It cannot detect
+under-return (a short page that lies about completeness) — that stays a vendor fact for SM-41G's
+ledger/console reconciliation. It does not validate our own constants (a wrong lag-day figure skews
+clamp and check together). Scope: vendor-boundary ingest paths — the paid providers and the §A12
+third egress class — not a tax on internal APIs.
+
+### A14.4 · Instance inventory (as of 2026-07-31; dispositions in tracker §6bc Ruling 3)
+
+GSC/GA4 date window + GSC page-cap echo → **SM-64** · GA4 header-indexed parsing is **already the
+exemplar** (parses via the response's own `dimensionHeaders`/`metricHeaders` — copy this in new
+drivers, never positional trust) · collect identity → **SM-63, landed** · paid-driver response
+identity (task echo, true-up header units, volume keyword echo) → **SM-65 audit**. Every new driver
+ticket inherits echo-validation as an AC-generator: enumerate the request's constraints; each one
+is either response-checked or a named, deliberate trust with an SM-41-class verification owner.
+
+### A14.5 · Identity mismatch at a billing point — record the money, refuse the data (tracker §6bi, binding)
+
+When the mismatched artifact is one the vendor has **already charged for** (DFS `task_post` charges
+at enqueue), the identity remedy splits across two orthogonal axes — conflating them produces
+either a money lie or a data lie:
+
+- **Money:** every charge the vendor's acknowledgement implies is **recorded unconditionally**
+  (`vendor_ref` = the vendor's own id — ids are pairing-independent), echo-clean or not, BEFORE any
+  throw. The ledger states liability truth; withholding a record to "reject" a task re-opens the
+  SM-50 orphan class. Only vendor-side *rejections* (not charged) stay unrecorded.
+- **Data:** a canonical identity mismatch refuses the data path — the artifact is never returned,
+  fetched, or persisted; the call throws after all charges are recorded. The charge lands as an
+  `incurred` row ("money spent, data not in hand"), retrievable later via the collect edge once
+  identity is resolved. Refusal is a bounded re-buy; acceptance is a mislabelled row feeding
+  another key's history — on the money path the expensive direction is the lie, not the re-buy.
+- **Pairing discriminator:** a violated *data* constraint impeaches one row (skip it, keep the
+  pull); a violated *identity* constraint on a **positionally-paired** response impeaches the
+  addressing scheme — every later position is equally suspect, so the remedy is
+  record-everything-then-throw, never skip-and-continue.
+- **Canonicalize before comparing** (trim + NFC + lowercase + collapse whitespace): raw-only
+  variance is vendor restatement — accept and count; canonical mismatch is a different identity —
+  refuse. Absent echo is no signal, not a mismatch.
+- **Fixture-truthfulness corollary (tracker §6bi Ruling 2):** production behaviour is never
+  weakened to green a fixture that cannot occur against the real counterparty — mocks echo what
+  was actually posted (request-aware), or they are the defect.
 
 ---
 

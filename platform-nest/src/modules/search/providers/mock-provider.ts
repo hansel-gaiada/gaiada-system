@@ -65,6 +65,41 @@ export class MockSearchProvider implements SearchDataProvider {
     }));
   }
 
+  /** SM-56 — the collect surface (types.ts's `fetchSerpByTaskId` contract), so the module's shared test
+   *  driver can exercise the collect edge.
+   *
+   *  Two properties are modelled on purpose, and both are the ones a collect test needs to be able to
+   *  distinguish. It does NOT call `tick()`, mirroring the real driver: a collect issues no billable
+   *  vendor work, so it must not advance the dispatch counter that other tests read as "a network-shaped
+   *  paid call happened" — a collect that bumped `dispatchCount` would make the counter mean two
+   *  different things and quietly weaken every single-flight assertion that reads it. And `collectCount`
+   *  is separate, so a test can assert a collect DID reach the driver without conflating it with a pull. */
+  collectCount = 0;
+
+  /** SM-63 — the collect path's OWN artificial latency, and the reason it had to exist.
+   *
+   *  `delayMs` above lives inside `tick()`, which `fetchSerpByTaskId` deliberately does not call (see the
+   *  paragraph above — a collect must never advance `dispatchCount`). The consequence went unnoticed for a
+   *  release: a collect-race test setting `mock.delayMs` was setting a field the collect path never reads,
+   *  so its "window" was zero-width and the test passed whether or not the task-scoped advisory lock
+   *  existed at all. The QA gate proved it by deleting the lock and watching the test stay GREEN.
+   *
+   *  So the two knobs are separate because the two counters are separate — that is the same reasoning
+   *  applied consistently, not a second mechanism. A collect race widens THIS one; nothing here ticks.
+   *  A test that sets it should also assert the window was really open (elapsed >= the delay), because a
+   *  timing instrument that silently stops working is exactly the defect this field was added to fix. */
+  collectDelayMs = 0;
+
+  async fetchSerpByTaskId(ref: TaskRef): Promise<SerpResult> {
+    this.collectCount += 1;
+    if (this.collectDelayMs > 0) await new Promise((r) => setTimeout(r, this.collectDelayMs));
+    return {
+      keyword: ref.keyword,
+      items: [{ position: 1, url: "https://example.com/", title: `Mock collected result for ${ref.keyword}` }],
+      serpFeatures: { ai_overview: false, featured_snippet: true },
+    };
+  }
+
   async getKeywordMetrics(kws: KeywordQuery[]): Promise<KeywordMetrics[]> {
     await this.tick();
     return kws.map((k) => ({

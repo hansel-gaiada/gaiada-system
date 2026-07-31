@@ -354,6 +354,24 @@ export async function removeDependency(taskId: string, blockerId: string): Promi
   return r;
 }
 
+// ---- contributors (TR-02 backend, TR-32 FE wiring, §3.1) ----
+// Member-level, NOT `pm.manage` — TR-02 deliberately gated addContributor/
+// removeContributor on the `update` action (adding/removing yourself or a
+// teammate as a logged-hours contributor is collaboration, not task
+// management), same boundary as addSubtask/toggleSubtask above. No `cap` is
+// passed to `send`, matching that convention exactly.
+export async function addContributor(taskId: string, userId: string): Promise<PmResult> {
+  if (!userId) return { ok: false, error: "Pick a person." };
+  const r = await send(`/pm/tasks/${taskId}`, "PATCH", { addContributor: userId });
+  revalTask(taskId);
+  return r;
+}
+export async function removeContributor(taskId: string, userId: string): Promise<PmResult> {
+  const r = await send(`/pm/tasks/${taskId}`, "PATCH", { removeContributor: userId });
+  revalTask(taskId);
+  return r;
+}
+
 // ---- time tracking ----
 export async function logTime(taskId: string, formData: FormData): Promise<PmResult> {
   const userId = await getSessionUserId();

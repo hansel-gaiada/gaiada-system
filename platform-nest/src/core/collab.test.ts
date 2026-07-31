@@ -2,18 +2,26 @@
 // assignment (task PATCH), mention (@ in a comment), and comment-on-assigned-work. A user
 // sees only their own inbox; self-notification is skipped.
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import Redis from "ioredis";
 import type { NestFastifyApplication } from "@nestjs/platform-fastify";
 import { config } from "../config";
 import { buildApp } from "../main";
 import { resetModules } from "../modules/registry";
 import { resetCoreRollupProviders } from "../rollups/engine";
-import { initTestDb, teardownTestDb, TEST_URL } from "../testing/setup";
+import { newId, withTenants } from "../db";
+import { relayBatch } from "../events/relay";
+import { consumeWorkActivityOnce } from "../events/work-activity-consumer";
+import { setRedis, closeRedis } from "../events/redis";
+import { initTestDb, teardownTestDb, adminPool, TEST_URL } from "../testing/setup";
 import { createCompany, createUser, addMembership, createRole, grantRole, createProject, createTask } from "../testing/fixtures";
+
+const REDIS_TEST_URL = process.env.REDIS_URL_TEST ?? "";
 
 type Notif = { id: string; type: string; payload: { entityId?: string } };
 
-describe.skipIf(!TEST_URL)("collaboration: comments + notifications", () => {
+describe.skipIf(!TEST_URL || !REDIS_TEST_URL)("collaboration: comments + notifications", () => {
   let app: NestFastifyApplication;
+  let redis: Redis;
   let co: string;
   let manager: string, member: string, assignee: string, viewer: string;
   let projectId: string, taskId: string;
@@ -25,6 +33,8 @@ describe.skipIf(!TEST_URL)("collaboration: comments + notifications", () => {
   beforeAll(async () => {
     await initTestDb();
     config.serviceToken = "svc-token";
+    redis = new Redis(REDIS_TEST_URL);
+    setRedis(redis);
     resetModules();
     resetCoreRollupProviders();
 
@@ -45,6 +55,7 @@ describe.skipIf(!TEST_URL)("collaboration: comments + notifications", () => {
   });
   afterAll(async () => {
     await app.close();
+    await closeRedis();
     await teardownTestDb();
   });
 
@@ -211,6 +222,62 @@ describe.skipIf(!TEST_URL)("collaboration: comments + notifications", () => {
         method: "POST", url: `/api/${rivalCo}/comments/${reactCommentId}/reactions`, headers: asUser(rivalUser), payload: { emoji: "👀" },
       });
       expect(forged.statusCode).toBe(404);
+    });
+  });
+
+  // ---------------- TR-05: pm.task.commented -> work_activity evidence ----------------
+  describe("comment -> pm work_activity evidence (TR-05)", () => {
+    it("commenting on a genuine pm_tasks row emits pm.task.commented, landing as a work_activity row", async () => {
+      const pmTaskId = newId();
+      await withTenants([co], (c) =>
+        c.query(`INSERT INTO pm_tasks (id, tenant_id, project_id, title, origin_site) VALUES ($1, $2, $3, $4, 'central')`, [
+          pmTaskId, co, projectId, "A real PM task",
+        ]),
+      );
+
+      const r = await app.inject({
+        method: "POST", url: `/api/${co}/comments`,
+        headers: asUser(member), payload: { entityType: "task", entityId: pmTaskId, body: "Nice work on this PM task" },
+      });
+      expect(r.statusCode).toBe(201);
+
+      await relayBatch(100);
+      const handled = await consumeWorkActivityOnce("pm_task");
+      expect(handled).toBe(1);
+
+      const row = await adminPool().query(
+        `SELECT id, source, verb, object_kind, object_ref, actor_user_id FROM work_activity WHERE object_ref = $1 AND verb = 'commented'`,
+        [pmTaskId],
+      );
+      expect(row.rows[0]).toMatchObject({
+        source: "pm", verb: "commented", object_kind: "pm_task", object_ref: pmTaskId,
+        // TR-31: the commenting user's id propagates through the outbox payload into
+        // actor_user_id — this is what the person-grain comments_authored metric reads; before
+        // TR-31 this was hardcoded null on every consumer-derived row.
+        actor_user_id: member,
+      });
+
+      // TR-31: the propagated actorId is a structured hint (work-activity-linker.ts rule a), so
+      // it mints an EXACT person link, not a uuid_scan inference.
+      const personLink = await adminPool().query(
+        `SELECT target_id, confidence, rule FROM work_activity_links WHERE activity_id = $1 AND target_kind = 'person'`,
+        [row.rows[0].id],
+      );
+      expect(personLink.rows).toEqual([{ target_id: member, confidence: "exact", rule: "hint:actorId" }]);
+    });
+
+    it("commenting on the base `tasks` table's task (NOT a pm_tasks row) never mints a bogus source='pm' work_activity row", async () => {
+      // `taskId` (module-level fixture) is a base `tasks` row (createTask), never inserted into
+      // pm_tasks — the comment guard in collab.controller.ts must skip emitting entirely.
+      await app.inject({
+        method: "POST", url: `/api/${co}/comments`,
+        headers: asUser(member), payload: { entityType: "task", entityId: taskId, body: "comment on a non-PM task" },
+      });
+      await relayBatch(100);
+      await consumeWorkActivityOnce("pm_task"); // no-op if nothing was ever emitted for this id
+
+      const row = await adminPool().query(`SELECT count(*)::int AS n FROM work_activity WHERE object_ref = $1`, [taskId]);
+      expect(row.rows[0].n).toBe(0);
     });
   });
 });

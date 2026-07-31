@@ -28,6 +28,7 @@ import {
   formatUsd,
   isToggleEnabled,
   isProjectionOverBudget,
+  onDemandEstimateLabel,
   patchToolScope,
   toggleLimit,
   type ToolScopeConfig,
@@ -220,6 +221,20 @@ export function ScopeEditor({
                   sourced at all (see anyEnabledToolSimulated's header note). */}
               {projected && enabled && <ProviderLabel provider={projected.provider} />}
               {projected && enabled && projected.simulated && <SimulatedBadge />}
+              {/* SM-61 (§6au Ruling 1 clause 3): an enabled row that is NOT scheduled prices the
+                  on-demand usage estimate, not a promise the scheduler will ever run it — labelled
+                  per §6aa's no-unlabelled-figures rule, exactly like the SIMULATED chip beside it. */}
+              {projected && onDemandEstimateLabel(enabled, projected.scheduled) && (
+                <span
+                  style={{
+                    font: "600 10px var(--font-body)", letterSpacing: "0.04em",
+                    color: "var(--erp-ink-60)", marginLeft: 6, whiteSpace: "nowrap",
+                  }}
+                  title="This toggle has no cadence, so it is never picked up by the unattended pull scheduler — it prices one manual/on-demand pull per month. Set a cadence to make it a real schedule."
+                >
+                  · {onDemandEstimateLabel(enabled, projected.scheduled)}
+                </span>
+              )}
             </span>,
           ];
         })}

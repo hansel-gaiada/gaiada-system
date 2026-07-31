@@ -4,15 +4,21 @@
 // work_activity.created), and a permanently-failing handler dead-letters after
 // DEAD_LETTER_MAX_RETRIES (mirrors consumer.service.test.ts / reconcile-consumer's own coverage
 // shape for the analogous groups).
+//
+// TR-05 additions: pm_doc events, pm.task.commented (comment evidence), and the is_done-FLAG-
+// derived verb classification (completed/reopened/status_changed) for task status changes —
+// including a CUSTOM, non-literal-"done" status id, to prove the discipline never string-matches
+// a status id (0040/§3.2). Plus a direct, Redis-independent duplicate-delivery proof.
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import Redis from "ioredis";
 import { withTenants } from "../db";
 import { emitEvent } from "./outbox.service";
 import { relayBatch } from "./relay";
-import { consumeWorkActivityOnce, WORK_ACTIVITY_STREAMS } from "./work-activity-consumer";
+import { consumeWorkActivityOnce, dispatchWorkActivity, WORK_ACTIVITY_STREAMS } from "./work-activity-consumer";
+import type { OutboxEvent } from "./types";
 import { setRedis, closeRedis } from "./redis";
 import { initTestDb, teardownTestDb, adminPool, TEST_URL } from "../testing/setup";
-import { createCompany, createProject } from "../testing/fixtures";
+import { createCompany, createProject, createUser, addMembership } from "../testing/fixtures";
 import { newId } from "../db";
 
 const REDIS_TEST_URL = process.env.REDIS_URL_TEST ?? "";
@@ -181,7 +187,6 @@ describe.skipIf(!TEST_URL || !REDIS_TEST_URL)("work-activity outbox consumer (WS
     // since every entry on `events:pm_task` IS entityType pm_task) is covered structurally by
     // dispatchWorkActivity's `if (!mapper) return;` guard — asserted directly here as a unit check
     // rather than needing to fabricate a 5th real stream.
-    const { dispatchWorkActivity } = await import("./work-activity-consumer");
     await expect(
       dispatchWorkActivity({
         id: newId(), tenantId: co, entityType: "some_unrelated_stream", entityId: newId(),
@@ -189,5 +194,302 @@ describe.skipIf(!TEST_URL || !REDIS_TEST_URL)("work-activity outbox consumer (WS
         createdAt: new Date().toISOString(),
       }),
     ).resolves.toBeUndefined();
+  });
+
+  // ---------------- TR-05 additions ----------------
+
+  it("pm.doc.created lands as a work_activity row with object_kind 'doc', linked to its project", async () => {
+    const projectId = await createProject(co, "Docs Project");
+    const docId = newId();
+    await withTenants([co], (c) =>
+      c.query(`INSERT INTO pm_docs (id, tenant_id, project_id, title, body, origin_site) VALUES ($1, $2, $3, $4, $5, 'central')`, [
+        docId, co, projectId, "Brief v1", "content",
+      ]),
+    );
+    await withTenants([co], (c) =>
+      emitEvent(c, co, "pm_doc", docId, "pm.doc.created", { docId, title: "Brief v1", projectId }),
+    );
+    await relayBatch(100);
+
+    const handled = await consumeWorkActivityOnce("pm_doc");
+    expect(handled).toBe(1);
+
+    const row = await adminPool().query(
+      `SELECT source, verb, object_kind, title FROM work_activity WHERE object_ref = $1`,
+      [docId],
+    );
+    expect(row.rows[0]).toMatchObject({ source: "pm", verb: "created", object_kind: "doc", title: "Brief v1" });
+
+    const activityId = (await adminPool().query(`SELECT id FROM work_activity WHERE object_ref = $1`, [docId])).rows[0].id;
+    const links = await adminPool().query(`SELECT target_kind, target_id FROM work_activity_links WHERE activity_id = $1`, [activityId]);
+    expect(links.rows.map((l: { target_kind: string; target_id: string }) => `${l.target_kind}:${l.target_id}`)).toEqual(
+      expect.arrayContaining([`project:${projectId}`]),
+    );
+  });
+
+  it("pm.doc.updated (no title in payload) falls back to a DB lookup for the title", async () => {
+    const projectId = await createProject(co, "Docs Project 2");
+    const docId = newId();
+    await withTenants([co], (c) =>
+      c.query(`INSERT INTO pm_docs (id, tenant_id, project_id, title, body, origin_site) VALUES ($1, $2, $3, $4, $5, 'central')`, [
+        docId, co, projectId, "Brief v2", "content",
+      ]),
+    );
+    await withTenants([co], (c) => emitEvent(c, co, "pm_doc", docId, "pm.doc.updated", {}));
+    await relayBatch(100);
+
+    const handled = await consumeWorkActivityOnce("pm_doc");
+    expect(handled).toBe(1);
+    const row = await adminPool().query(`SELECT verb, object_kind, title FROM work_activity WHERE object_ref = $1`, [docId]);
+    expect(row.rows[0]).toMatchObject({ verb: "updated", object_kind: "doc", title: "Brief v2" });
+  });
+
+  it("pm.task.commented (comment on a real pm_task) lands as verb='commented', linked to project + department", async () => {
+    const projectId = await createProject(co, "Comment Thread Project");
+    await setDepartment(co, projectId, "d-seo");
+    const taskId = await createPmTask(co, projectId, "Write the outline");
+    const commentId = newId();
+    await withTenants([co], (c) =>
+      emitEvent(c, co, "pm_task", taskId, "pm.task.commented", { taskId, projectId, commentId }),
+    );
+    await relayBatch(100);
+
+    const handled = await consumeWorkActivityOnce("pm_task");
+    expect(handled).toBe(1);
+
+    const rows = await adminPool().query(
+      `SELECT source, verb, object_kind, object_ref FROM work_activity WHERE object_ref = $1 AND verb = 'commented'`,
+      [taskId],
+    );
+    expect(rows.rows[0]).toMatchObject({ source: "pm", verb: "commented", object_kind: "pm_task", object_ref: taskId });
+
+    const activityId = rows.rows[0] ? (await adminPool().query(
+      `SELECT id FROM work_activity WHERE object_ref = $1 AND verb = 'commented'`, [taskId],
+    )).rows[0].id : null;
+    const links = await adminPool().query(`SELECT target_kind, target_id FROM work_activity_links WHERE activity_id = $1`, [activityId]);
+    const kinds = links.rows.map((l: { target_kind: string; target_id: string }) => `${l.target_kind}:${l.target_id}`);
+    expect(kinds).toEqual(expect.arrayContaining([`project:${projectId}`, `department:d-seo`]));
+  });
+
+  // ---- is_done-FLAG-derived verb classification (never a literal status id) ----
+
+  it("statusChanged + isDoneNow (true) + wasDone (false) derives verb 'completed' — CUSTOM status id, not literally 'done'", async () => {
+    const projectId = await createProject(co, "Flag Discipline Project A");
+    const taskId = await createPmTask(co, projectId, "Ship the release");
+    await withTenants([co], (c) =>
+      emitEvent(c, co, "pm_task", taskId, "pm.task.updated", {
+        status: "shipped-42", // deliberately NOT the literal id "done"
+        statusChanged: true, wasDone: false, isDoneNow: true,
+      }),
+    );
+    await relayBatch(100);
+    await consumeWorkActivityOnce("pm_task");
+
+    const row = await adminPool().query(`SELECT verb FROM work_activity WHERE object_ref = $1 AND verb <> 'created'`, [taskId]);
+    expect(row.rows[0].verb).toBe("completed");
+  });
+
+  it("statusChanged + wasDone (true) + isDoneNow (false) derives verb 'reopened'", async () => {
+    const projectId = await createProject(co, "Flag Discipline Project B");
+    const taskId = await createPmTask(co, projectId, "Reopen me");
+    await withTenants([co], (c) =>
+      emitEvent(c, co, "pm_task", taskId, "pm.task.updated", {
+        status: "in_progress", statusChanged: true, wasDone: true, isDoneNow: false,
+      }),
+    );
+    await relayBatch(100);
+    await consumeWorkActivityOnce("pm_task");
+
+    const row = await adminPool().query(`SELECT verb FROM work_activity WHERE object_ref = $1 AND verb <> 'created'`, [taskId]);
+    expect(row.rows[0].verb).toBe("reopened");
+  });
+
+  it("statusChanged with neither wasDone nor isDoneNow set derives verb 'status_changed' (a not-done -> not-done move)", async () => {
+    const projectId = await createProject(co, "Flag Discipline Project C");
+    const taskId = await createPmTask(co, projectId, "Move between non-done columns");
+    await withTenants([co], (c) =>
+      emitEvent(c, co, "pm_task", taskId, "pm.task.updated", {
+        status: "blocked", statusChanged: true, wasDone: false, isDoneNow: false,
+      }),
+    );
+    await relayBatch(100);
+    await consumeWorkActivityOnce("pm_task");
+
+    const row = await adminPool().query(`SELECT verb FROM work_activity WHERE object_ref = $1 AND verb <> 'created'`, [taskId]);
+    expect(row.rows[0].verb).toBe("status_changed");
+  });
+
+  it("a patch with statusChanged=false (no status edge) falls back to the generic verb 'updated'", async () => {
+    const projectId = await createProject(co, "Flag Discipline Project D");
+    const taskId = await createPmTask(co, projectId, "Just rename me");
+    await withTenants([co], (c) =>
+      emitEvent(c, co, "pm_task", taskId, "pm.task.updated", {
+        status: "todo", statusChanged: false, wasDone: false, isDoneNow: false,
+      }),
+    );
+    await relayBatch(100);
+    await consumeWorkActivityOnce("pm_task");
+
+    const row = await adminPool().query(`SELECT verb FROM work_activity WHERE object_ref = $1 AND verb <> 'created'`, [taskId]);
+    expect(row.rows[0].verb).toBe("updated");
+  });
+
+  // ---- Direct duplicate-delivery proof (Redis-independent) ----
+
+  it("delivering the identical event twice through dispatchWorkActivity inserts zero additional rows", async () => {
+    const projectId = await createProject(co, "Direct Idempotency Project");
+    const taskId = await createPmTask(co, projectId, "Direct dispatch idempotency");
+    const event: OutboxEvent = {
+      id: newId(), // this IS the (tenant, source, source_ref) idempotency key
+      tenantId: co, entityType: "pm_task", entityId: taskId, eventType: "pm.task.created",
+      payload: { title: "Direct dispatch idempotency", projectId }, originSite: "central",
+      schemaVersion: 1, createdAt: new Date().toISOString(),
+    };
+
+    await dispatchWorkActivity(event); // first delivery
+    const first = await adminPool().query(`SELECT count(*)::int AS n FROM work_activity WHERE object_ref = $1`, [taskId]);
+    expect(first.rows[0].n).toBe(1);
+
+    await dispatchWorkActivity(event); // SAME event object, delivered again (simulates at-least-once redelivery)
+    const second = await adminPool().query(`SELECT count(*)::int AS n FROM work_activity WHERE object_ref = $1`, [taskId]);
+    expect(second.rows[0].n).toBe(1); // zero additional rows
+
+    const created = await adminPool().query(
+      `SELECT count(*)::int AS n FROM outbox_events WHERE entity_type = 'work_activity' AND event_type = 'work_activity.created' AND entity_id = (SELECT id FROM work_activity WHERE object_ref = $1)`,
+      [taskId],
+    );
+    expect(created.rows[0].n).toBe(1); // no duplicate downstream domain event either
+  });
+
+  // ---------------- TR-31: outbox actor propagation ----------------
+  // Closes the NEW BLOCKER TR-05 uncovered (§3.4 of the tracker-reporting blueprint): before this,
+  // work-activity-consumer.ts hardcoded actorUserId: null on every row, so person-grain
+  // comments_authored/docs_updated/link_rate would compute as empty/zero SILENTLY. These prove the
+  // fix end to end: real actor_user_id on the row, an EXACT (not uuid_scan) person link from the
+  // hint:actorId rule, and — the actual failure mode this ticket exists to close — a specific,
+  // non-zero, per-person count that matches what each person really did.
+
+  it("pm.task.commented carries payload.actorId -> work_activity.actor_user_id + an EXACT person link (hint:actorId, not uuid_scan)", async () => {
+    const projectId = await createProject(co, "TR-31 Actor Project");
+    const taskId = await createPmTask(co, projectId, "Actor-carrying task");
+    const author = await createUser(`tr31-author-${newId()}@example.com`, "TR-31 Author");
+    await addMembership(co, author);
+    const commentId = newId();
+    await withTenants([co], (c) =>
+      emitEvent(c, co, "pm_task", taskId, "pm.task.commented", { taskId, projectId, commentId, actorId: author }),
+    );
+    await relayBatch(100);
+    const handled = await consumeWorkActivityOnce("pm_task");
+    expect(handled).toBe(1);
+
+    const row = await adminPool().query(
+      `SELECT id, actor_user_id, actor_external FROM work_activity WHERE object_ref = $1 AND verb = 'commented'`,
+      [taskId],
+    );
+    expect(row.rows[0]).toMatchObject({ actor_user_id: author, actor_external: null });
+
+    const links = await adminPool().query(
+      `SELECT target_kind, target_id, confidence, rule FROM work_activity_links WHERE activity_id = $1 AND target_kind = 'person'`,
+      [row.rows[0].id],
+    );
+    expect(links.rows).toEqual([{ target_kind: "person", target_id: author, confidence: "exact", rule: "hint:actorId" }]);
+  });
+
+  it("pm.task.spawned (a system-derived recurrence auto-spawn) keeps actor_user_id NULL and tags actor_external instead of guessing at a person", async () => {
+    const projectId = await createProject(co, "TR-31 System Project");
+    const parentId = await createPmTask(co, projectId, "Recurring parent");
+    const childId = await createPmTask(co, projectId, "Recurring child");
+    await withTenants([co], (c) =>
+      emitEvent(c, co, "pm_task", childId, "pm.task.spawned", { parentId, dueDate: "2026-08-01", actorExternal: "pm:recurrence-engine" }),
+    );
+    await relayBatch(100);
+    await consumeWorkActivityOnce("pm_task");
+
+    const row = await adminPool().query(
+      `SELECT actor_user_id, actor_external FROM work_activity WHERE object_ref = $1 AND verb = 'spawned'`,
+      [childId],
+    );
+    expect(row.rows[0]).toMatchObject({ actor_user_id: null, actor_external: "pm:recurrence-engine" });
+  });
+
+  it("events already stored/in-flight without an actorId hint still ingest cleanly (backward compatible with the pre-TR-31 outbox)", async () => {
+    const projectId = await createProject(co, "TR-31 Back-compat Project");
+    const taskId = await createPmTask(co, projectId, "No-hint legacy event");
+    // No actorId at all in the payload — exactly what every pre-TR-31 emitted event looked like.
+    await withTenants([co], (c) => emitEvent(c, co, "pm_task", taskId, "pm.task.created", { title: "No-hint legacy event", projectId }));
+    await relayBatch(100);
+    await expect(consumeWorkActivityOnce("pm_task")).resolves.toBe(1);
+
+    const row = await adminPool().query(`SELECT actor_user_id, actor_external FROM work_activity WHERE object_ref = $1`, [taskId]);
+    expect(row.rows[0]).toMatchObject({ actor_user_id: null, actor_external: null });
+  });
+
+  it("acceptance bar: a person-grain comments/docs count over a seeded day is a SPECIFIC non-zero number equal to what each person actually did", async () => {
+    const projectId = await createProject(co, "TR-31 Person Grain Project");
+    const personA = await createUser(`tr31-person-a-${newId()}@example.com`, "Person A");
+    const personB = await createUser(`tr31-person-b-${newId()}@example.com`, "Person B");
+    await addMembership(co, personA);
+    await addMembership(co, personB);
+
+    // Person A: 3 comments + 1 doc update. Person B: 2 comments. Plus one genuinely-unattributed
+    // system doc event (no actorId at all) thrown in to prove it is EXCLUDED, never misattributed
+    // to whoever happens to be "closest" (e.g. the doc's other editor).
+    const taskA = await createPmTask(co, projectId, "A's task");
+    const taskB = await createPmTask(co, projectId, "B's task");
+    const docA = newId();
+    await withTenants([co], (c) =>
+      c.query(`INSERT INTO pm_docs (id, tenant_id, project_id, title, body, origin_site) VALUES ($1,$2,$3,$4,$5,'central')`, [
+        docA, co, projectId, "A's doc", "content",
+      ]),
+    );
+
+    for (let i = 0; i < 3; i++) {
+      await withTenants([co], (c) =>
+        emitEvent(c, co, "pm_task", taskA, "pm.task.commented", { taskId: taskA, projectId, commentId: newId(), actorId: personA }),
+      );
+    }
+    for (let i = 0; i < 2; i++) {
+      await withTenants([co], (c) =>
+        emitEvent(c, co, "pm_task", taskB, "pm.task.commented", { taskId: taskB, projectId, commentId: newId(), actorId: personB }),
+      );
+    }
+    await withTenants([co], (c) =>
+      emitEvent(c, co, "pm_doc", docA, "pm.doc.updated", { docId: docA, title: "A's doc", projectId, actorId: personA }),
+    );
+    await withTenants([co], (c) =>
+      emitEvent(c, co, "pm_doc", docA, "pm.doc.restored", { docId: docA, title: "A's doc", projectId, toVersion: 1 }),
+    );
+
+    await relayBatch(100);
+    const handledTask = await consumeWorkActivityOnce("pm_task"); // 3 (A) + 2 (B) comments
+    const handledDoc = await consumeWorkActivityOnce("pm_doc"); // updated + restored
+    expect(handledTask).toBe(5);
+    expect(handledDoc).toBe(2);
+
+    const commentsByActor = await adminPool().query<{ actor_user_id: string; n: number }>(
+      `SELECT actor_user_id, count(*)::int AS n FROM work_activity
+       WHERE tenant_id = $1 AND verb = 'commented' AND actor_user_id IS NOT NULL
+       GROUP BY actor_user_id`,
+      [co],
+    );
+    const byActor: Record<string, number> = {};
+    for (const r of commentsByActor.rows) byActor[r.actor_user_id] = Number(r.n);
+    expect(byActor[personA]).toBe(3); // exact match to the 3 comments A actually posted — never a silent 0
+    expect(byActor[personB]).toBe(2); // exact match to the 2 comments B actually posted
+
+    const docsByActor = await adminPool().query<{ actor_user_id: string; n: number }>(
+      `SELECT actor_user_id, count(*)::int AS n FROM work_activity
+       WHERE tenant_id = $1 AND object_kind = 'doc' AND actor_user_id = $2
+       GROUP BY actor_user_id`,
+      [co, personA],
+    );
+    expect(docsByActor.rows).toEqual([{ actor_user_id: personA, n: 1 }]); // only the actorId-carrying update
+
+    // The genuinely-system row (pm.doc.restored, no actorId attached) exists but stays unattributed.
+    const unattributed = await adminPool().query(
+      `SELECT actor_user_id FROM work_activity WHERE object_ref = $1 AND verb = 'restored'`,
+      [docA],
+    );
+    expect(unattributed.rows[0].actor_user_id).toBeNull();
   });
 });

@@ -3,6 +3,7 @@
 // lives in search.test.ts.
 import { describe, it, expect } from "vitest";
 import { isScopePreset, seedToolScope, SCOPE_PRESET_VALUES } from "./scope-presets";
+import { ON_DEMAND_ESTIMATE_RUNS_PER_MONTH, scheduledRunsPerMonth } from "./cadence";
 
 describe("scope-presets (SM-02)", () => {
   it("isScopePreset accepts exactly the 4 documented values", () => {
@@ -28,11 +29,13 @@ describe("scope-presets (SM-02)", () => {
     expect(s.sem_sync).toEqual({ enabled: false, mode: "manual" });
   });
 
-  it("'standard' matches the design §04 illustrative shape exactly", () => {
+  it("'standard' matches the design §04 illustrative shape, plus SM-61's volume cadence", () => {
     const s = seedToolScope("standard")!;
     expect(s).toEqual({
       rank: { enabled: true, cadence: "weekly", maxKeywords: 50 },
-      volume: { enabled: true },
+      // SM-61 (§6au Ruling 1 clause 2): volume gains `cadence: "monthly"` — see scope-presets.ts's
+      // own header note on this toggle for the price-identity reasoning.
+      volume: { enabled: true, cadence: "monthly" },
       backlinks: { enabled: false },
       ai_visibility: { enabled: true, cadence: "weekly" },
       audit_technical: { enabled: true, cadence: "weekly" },
@@ -51,6 +54,23 @@ describe("scope-presets (SM-02)", () => {
     }
     expect(heavy.backlinks).toEqual({ enabled: true, cadence: "monthly" });
     expect(heavy.rank).toMatchObject({ enabled: true, cadence: "daily" });
+    expect(heavy.volume).toEqual({ enabled: true, cadence: "monthly" });
+  });
+
+  it("SM-61 (§6au) PRICE-REGRESSION PIN: standard/heavy's volume — now cadence:'monthly' — prices IDENTICALLY to the pre-SM-61 shape (enabled, no cadence at all)", () => {
+    // This is the exact defect SM-61 closes: `volume` used to ship with NO cadence key, which
+    // `providers/dispatch.ts`'s projection had always priced as one on-demand refresh/month
+    // (`ON_DEMAND_ESTIMATE_RUNS_PER_MONTH`) while the scheduler defaulted the SAME absence to
+    // weekly. `cadence: "monthly"` schedules it at exactly the rate it was already priced at
+    // (`scheduledRunsPerMonth("monthly") === 1 === ON_DEMAND_ESTIMATE_RUNS_PER_MONTH`) — asserted
+    // here directly against the imported constants so a future edit to either side of that equality
+    // fails this pin instead of silently re-opening SM-61.
+    expect(scheduledRunsPerMonth("monthly")).toBe(ON_DEMAND_ESTIMATE_RUNS_PER_MONTH);
+    for (const preset of ["standard", "heavy"] as const) {
+      const volume = seedToolScope(preset)!.volume as { enabled: boolean; cadence: string };
+      expect(volume.enabled).toBe(true);
+      expect(volume.cadence).toBe("monthly");
+    }
   });
 
   it("no preset ships a 'provider' override (Semrush is still decision-gated, OQ-3)", () => {

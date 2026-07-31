@@ -25,10 +25,10 @@
 > 5. **Period selector = daily / weekly / monthly AND a user-chosen arbitrary date range
 >    (2026-07-30).** Custom ranges are a first-class read across all four grains including
 >    export. They are LIVE-COMPUTED and never sealed / never appraisal-admissible / never
->    rollup-persisted (§0053 custom semantics, §5.4, §6.2).
+>    rollup-persisted (§0057 custom semantics, §5.4, §6.2).
 >
 > **📌 ARCHITECT DECISIONS in this doc (flag to owner if disputed):**
-> - **Migration range is `0050–0055`**, not 0048+ — `0048`/`0049` were consumed by search/meeting
+> - **Migration range is `0054–0059`** (REBASED 2026-07-30, see §15) — the doc originally said 0048+, then 0050–0055; both were overtaken by concurrent work
 >   work after the briefing was written (verified against `platform-nest/migrations/`).
 > - Module key **`reports`**, tables `report_*`, mounted at `/api/:t/reports|checkins|appraisals`
 >   (pm-style paths, not `/modules/reports` — this is a platform-wide surface, not a dept vertical).
@@ -105,7 +105,7 @@ is the only genuinely new work.
 |---|---|---|
 | Repsona-parity tasks, milestones, custom statuses (`is_done`/`is_blocked` flags), tags, custom fields, burndown, CFD, templates, followers, docs+versions, AI-tracker | `platform-nest/src/modules/pm/pm.controller.ts` (migrations 0018, 0036–0044) | THE tracker. Facts derive from it; done-ness ALWAYS via the effective status set's `is_done` flag, never a literal status id (0040 discipline, everywhere in this design) |
 | 4-grain evidence fabric: `work_activity` (source pm\|pipeline\|github\|google_drive\|claude\|manual\|system, `UNIQUE(tenant_id,source,source_ref)`), `work_activity_links` (`target_kind ∈ pm_task\|project\|person\|department`, confidence, rule), `deliverable_evidence` view, auto-linker | `migrations/0030_work_activity.sql`, `src/core/work-activity-linker.ts` | The evidence + collaboration + cross-source measures. Fact job consumes it; TR-05 closes the pm→activity gap (§3.4) |
-| Governed metric substrate: `metric_definitions` + `rollup_metrics(module, metric_key, period, numerator, denominator, currency, dimensions jsonb, as_of)`, idempotent upsert, `ratio_of_sums`, per-module `RollupProvider` under its own module scope | `platform-nest/src/rollups/engine.ts` | ALL rollup numbers live here. The `reports` module registers a RollupProvider + ~22 metric seeds (§5). D12: this stays the ONLY cross-company read path — the shared-service provider view rides it |
+| Governed metric substrate: `metric_definitions` + `rollup_metrics(module, metric_key, period, numerator, denominator, currency, dimensions jsonb, as_of)`, idempotent upsert, `ratio_of_sums`, per-module `RollupProvider` under its own module scope | `platform-nest/src/rollups/engine.ts` | ALL rollup numbers live here. The `reports` module registers a RollupProvider + 21 metric seeds (§5; a 22nd metric is read-time derived — §5.4). D12: this stays the ONLY cross-company read path — the shared-service provider view rides it |
 | Project progress snapshots + status counts, nightly job + lazy upsert-on-read backstop | `0040`/`0042`, `pm/burndown-job.ts` | Project-grain flow/burndown series come straight from snapshots; the lazy-backstop pattern is copied for report reads |
 | `time_entries` (user, task, project NOT NULL, minutes, billable, entry_date; `pm_task_id` since 0018) | 0001 + 0018 | Effort measures. Already day-grained — joins the fact grain directly |
 | Org tree blob (`company_org_structure`, OrgNode {id, kind, assigneeId, children}) + lazily-anchored `org_units` + `service_assignments` (provider dept serving another company, `lead_user_id`) | 0011, 0026 | Unit identity + the cross-company dept reality. §3.2 adds the missing *time-aware membership*; the blob stays authoritative for structure |
@@ -120,9 +120,9 @@ is the only genuinely new work.
 | Cerbos authoritative + `lib/rbac.ts` UI mirror; exec-only-read precedent = rollups page 403 branch | platform | §8 policy matrix; UI capabilities mirrored |
 | HR module: `hr_leave_requests` (approved leave), `hr_attendance` (present\|remote\|absent\|leave), third-wall `'hr'` scope | 0028 | Check-in compliance inputs. NOTE: 0028 has **no calendar table** → `report_work_calendars` is new (§4.1). Cross-module reads declare BOTH scopes: `withTenants(t, {modules:['reports','hr']})` |
 
-**New (this program only):** relational task assignees (0050) · as-of org-unit memberships (0051) ·
-work calendar + check-ins + daily facts (0052) · period seals + report documents (0053) · appraisal
-tables (0054) · metric seeds (0055) · fact job + attribution engine · `ReportDocument` contract +
+**New (this program only):** relational task assignees (0054) · as-of org-unit memberships (0055) ·
+work calendar + check-ins + daily facts (0056) · period seals + report documents (0057) · appraisal
+tables (0058) · metric seeds (0059) · fact job + attribution engine · `ReportDocument` contract +
 viewer + chart kit · exports (XLSX/CSV + PDF sidecar) · check-in flow (UI/WA/MCP) · appraisal
 engine + UI · AI narrative · 6 MCP tools · 5 n8n flows.
 
@@ -135,7 +135,7 @@ engine + UI · AI narrative · 6 MCP tools · 5 n8n flows.
 Today: `{kind: person|department|division, refId, refName, responsibleId, responsibleName}`
 (FE type `Assignee`, `platform-ui/src/lib/pm.ts:130`). No multi-assignee; a dept-assigned task has
 no person; person-grain SQL over JSONB is not trustworthy. **Fix: relational `pm_task_assignees`
-(migration 0050) with strict dual-write and read-through compatibility.**
+(migration 0054) with strict dual-write and read-through compatibility.**
 
 **Roles (closed set):**
 - `owner` — exactly ONE per task (partial unique index). The outcome-credit target. May be a
@@ -146,7 +146,7 @@ no person; person-grain SQL over JSONB is not trustworthy. **Fix: relational `pm
   outcome-credited.
 
 **Migration + compatibility strategy (explicit):**
-1. **0050 creates the table and backfills** from the JSONB in one pass: for each `pm_tasks` row
+1. **0054 creates the table and backfills** from the JSONB in one pass: for each `pm_tasks` row
    with a non-null blob → insert `owner` row (`assignee_kind`/`assignee_ref` from `kind`/`refId`)
    + `responsible` row when `responsibleId` differs from a person-owner's ref.
    `ON CONFLICT DO NOTHING` → the backfill is idempotent and re-runnable.
@@ -187,7 +187,7 @@ one attributed unit** (or the explicit `unattributed` bucket):
 
 ### 3.2 Blocker 2 — no department on tasks/time; dept resolution is FE-only and not time-aware
 
-**Fix: server-side, as-of-date resolution off a new `org_unit_memberships` table (0051).**
+**Fix: server-side, as-of-date resolution off a new `org_unit_memberships` table (0055).**
 
 - One row per (person, unit) validity interval: `valid_from`/`valid_to date` (`NULL` = current),
   `is_primary` (exactly one open primary per person — a person who transfers departments gets the
@@ -229,8 +229,33 @@ server-side so PDF/XLSX/CSV all render from the same sealed `ReportDocument`.
 
 ### 3.4 The P1-05 outbox consumer — reporting NEEDS it (verdict)
 
-Activity ingest is currently **synchronous-API only**; the outbox→`work_activity` consumer was
-never built. Verdict: **required (ticket TR-05).** Person-grain delivery facts (completed,
+> **⚠ CORRECTED 2026-07-30 when TR-05 was implemented — this section's premise was WRONG.** The
+> consumer was **not** unbuilt: a real one shipped earlier as `WSUX-15` (ex-P1-05) in
+> `src/events/work-activity-consumer.ts`, covering the `pm_task` / `pm_project` /
+> `meeting_recording` / `pipeline_run` streams with a dedicated consumer group, working idempotency
+> and a dead-letter path — plus a historical backfill utility (`src/core/work-activity-backfill.ts`).
+> TR-05's real scope turned out to be closing its *gaps*: no comment or doc coverage, and verbs were
+> a naive `eventType`-tail split that never distinguished completed / reopened / status_changed by
+> the `is_done` flag. Those are now closed. **Consequence for §13 risk 2: the history gap is
+> narrower than stated** — pm_task/pm_project activity has been accruing already and the backfill
+> utility can reconstruct more, so "the first sealed month is the first appraisal-grade month" is
+> pessimistic rather than strictly true. Re-measure actual `work_activity` coverage before telling
+> anyone their history starts now.
+>
+> **⛔ NEW BLOCKER this uncovered (ticket TR-31, gates the collaboration + evidence axes):**
+> `work-activity-consumer.ts:215` sets **`actorUserId: null` on every consumer-derived row** —
+> outbox payloads simply do not carry the acting user's id (it is captured separately in the flat
+> `activities` audit table via `writeActivity()`). So activity-derived **person**-grain measures
+> (`comments_authored` #16, `docs_updated` #17, `link_rate` #21, `source_diversity` #22, and
+> `activity_events` at person grain) would compute as **empty/zero — silently, with no error**, and
+> the auto-linker cannot mint `target_kind='person'` links either. Delivery and effort metrics are
+> unaffected (they come from `pm_task_assignees` + `time_entries.user_id`), but **collaboration is
+> one of the four appraisal axes**, so this is not cosmetic. Fix = propagate the acting user id into
+> the pm/meeting/pipeline outbox payloads and map it in the consumer (TR-31, P0/P1 boundary,
+> **blocks TR-07**). Do NOT build the fact job on the assumption that person attribution works.
+
+Activity ingest was believed to be **synchronous-API only** with the outbox→`work_activity` consumer
+never built. Verdict at design time: **required (ticket TR-05).** Person-grain delivery facts (completed,
 reopened, status-entered/exited) need a **dated, append-only** record; deriving them from mutable
 `pm_tasks` state cannot be recomputed or backfilled honestly. The consumer subscribes to the
 existing event backbone (`src/events/`, the same relay the n8n bridge uses), maps pm domain events
@@ -244,21 +269,29 @@ first sealed month is the first trustworthy month.
 
 ---
 
-## 4. Schema — new tables, full DDL (migrations 0050–0055)
+## 4. Schema — new tables, full DDL (migrations 0054–0059)
+
+> **The numbers below are INDICATIVE, not reservations.** `0054`–`0056` are landed and fixed. For
+> everything after, **claim the next free number at implementation time** (§15 process rule) — tickets
+> are not executing in the doc's original order, and another session is adding migrations concurrently.
+> The runner (`src/db/migrate.ts`) tracks applied files by name and applies any unapplied file in
+> sorted order, so a lower number added later still applies correctly — but keep numbering aligned with
+> *execution* order anyway, so the ledger reads chronologically. Record every deviation in
+> `platform-nest/migrations/README.md`.
 
 Conventions applied to every table: `tenant_id uuid NOT NULL REFERENCES companies(id)` · FORCE RLS
 · policy composed from `app_current_tenants()` (+ `app_module_allowed('reports')` for `report_*`
-tables, byte-identical DO-loop per 0028) · `origin_site text NOT NULL DEFAULT 'central'` ·
+tables, byte-identical DO-loop per 0028) · `origin_site text NOT NULL` with NO default (0055-0059; see the §15 ruling — a default silently mislabels site-originated rows as central) ·
 `*_node_id text` columns carry org-node ids with **no FK** (0029) · timestamps · runtime DML
 grants via the owner's `ALTER DEFAULT PRIVILEGES` + external `RUNTIME_GRANTS_SQL` pass (0028
 header) — no in-migration GRANTs. Every table has a literal `tenant_id`, so the `rls.test.ts`
 FORCE-RLS sweep covers all of them; the third wall additionally gets its own dedicated
 scope-declaration test per the 0028 precedent (right-tenant WITHOUT `reports` scope → zero rows).
 
-### 0050 — `pm_task_assignees` (PM substrate; plain tenant policy like other `pm_*` tables)
+### 0054 — `pm_task_assignees` (PM substrate; plain tenant policy like other `pm_*` tables)
 
 ```sql
--- 0050_pm_task_assignees.sql — Blocker 1: relational assignees beside the JSONB blob (dual-write).
+-- 0054_pm_task_assignees.sql — Blocker 1: relational assignees beside the JSONB blob (dual-write).
 CREATE TABLE pm_task_assignees (
   id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id     uuid NOT NULL REFERENCES companies(id),
@@ -268,7 +301,7 @@ CREATE TABLE pm_task_assignees (
   assignee_ref  text NOT NULL,                 -- user_id when person; org-node id when unit (NO FK)
   user_id       uuid REFERENCES users(id),     -- resolved person (NULL for unit rows)
   created_by    uuid REFERENCES users(id),
-  origin_site   text NOT NULL DEFAULT 'central',
+  origin_site   text NOT NULL,                    -- NO default (§15 ruling)
   created_at    timestamptz NOT NULL DEFAULT now(),
   CHECK ( (assignee_kind = 'person') = (user_id IS NOT NULL) ),
   CHECK ( role IN ('responsible','contributor')  -- responsible/contributor are always persons
@@ -286,10 +319,10 @@ CREATE INDEX ix_pm_task_assignees_unit   ON pm_task_assignees (tenant_id, assign
 -- Backfill from pm_tasks.assignee JSONB (owner + responsible rows), ON CONFLICT DO NOTHING.
 ```
 
-### 0051 — `org_unit_memberships` (org core; plain tenant policy like `org_units`)
+### 0055 — `org_unit_memberships` (org core; plain tenant policy like `org_units`)
 
 ```sql
--- 0051_org_unit_memberships.sql — Blocker 2: time-aware person↔unit membership (as-of resolution).
+-- 0055_org_unit_memberships.sql — Blocker 2: time-aware person↔unit membership (as-of resolution).
 CREATE EXTENSION IF NOT EXISTS btree_gist;
 CREATE TABLE org_unit_memberships (
   id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -300,7 +333,7 @@ CREATE TABLE org_unit_memberships (
   valid_from   date NOT NULL,
   valid_to     date,                            -- NULL = open/current
   source       text NOT NULL DEFAULT 'org_blob' CHECK (source IN ('org_blob','manual','backfill')),
-  origin_site  text NOT NULL DEFAULT 'central',
+  origin_site  text NOT NULL,                    -- NO default (§15 ruling)
   created_by   uuid REFERENCES users(id),
   created_at   timestamptz NOT NULL DEFAULT now(),
   CHECK (valid_to IS NULL OR valid_to >= valid_from),
@@ -315,10 +348,10 @@ CREATE INDEX ix_oum_unit ON org_unit_memberships (tenant_id, unit_node_id) WHERE
 -- currently placed in the org blob, valid_from = least(company.created_at::date, first evidence).
 ```
 
-### 0052 — `report_work_calendars`, `report_checkins`, `report_work_facts` (third wall `'reports'`)
+### 0056 — `report_work_calendars`, `report_checkins`, `report_work_facts` (third wall `'reports'`)
 
 ```sql
--- 0052_module_reports_core.sql — calendar, mandatory check-ins, the atomic fact grain.
+-- 0056_module_reports_core.sql — calendar, mandatory check-ins, the atomic fact grain.
 CREATE TABLE report_work_calendars (
   id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id    uuid NOT NULL REFERENCES companies(id),
@@ -326,7 +359,7 @@ CREATE TABLE report_work_calendars (
   holidays     jsonb NOT NULL DEFAULT '[]',            -- [{date:'2026-08-17', label:'Independence Day'}]
   workday_minutes int NOT NULL DEFAULT 480,            -- matches hr leave day=480 convention
   updated_by   uuid REFERENCES users(id),
-  origin_site  text NOT NULL DEFAULT 'central',
+  origin_site  text NOT NULL,                    -- NO default (§15 ruling)
   created_at   timestamptz NOT NULL DEFAULT now(),
   updated_at   timestamptz NOT NULL DEFAULT now(),
   UNIQUE (tenant_id)                                   -- one per tenant v1; per-unit deferred (§13)
@@ -346,7 +379,7 @@ CREATE TABLE report_checkins (
   submitted_at timestamptz,
   excused_reason text,                        -- set by manager/HR on 'excused'
   excused_by   uuid REFERENCES users(id),
-  origin_site  text NOT NULL DEFAULT 'central',
+  origin_site  text NOT NULL,                    -- NO default (§15 ruling)
   created_at   timestamptz NOT NULL DEFAULT now(),
   updated_at   timestamptz NOT NULL DEFAULT now(),
   UNIQUE (tenant_id, user_id, checkin_date)
@@ -380,7 +413,7 @@ CREATE TABLE report_work_facts (
   activity_by_source         jsonb NOT NULL DEFAULT '{}',-- {"pm":4,"github":7,...}
   computed_at  timestamptz NOT NULL DEFAULT now(),
   job_run_id   uuid,                                     -- which fact-job run wrote this row
-  origin_site  text NOT NULL DEFAULT 'central',
+  origin_site  text NOT NULL,                    -- NO default (§15 ruling)
   UNIQUE NULLS NOT DISTINCT (tenant_id, fact_date, user_id, project_id, unit_node_id)
 );
 CREATE INDEX ix_rwf_person ON report_work_facts (tenant_id, user_id, fact_date);
@@ -399,14 +432,15 @@ DELETE-then-INSERT in one transaction — deterministic re-derivation from appen
 safe** over historical dates. On-time flags join `pm_tasks.due_date` at compute time (mutable —
 acceptable for ops; the seal freezes it for appraisal).
 
-### 0053 — `report_periods`, `report_documents` (third wall)
+### 0057 — `report_periods`, `report_documents` (third wall)
 
 ```sql
--- 0053_report_periods_documents.sql — sealing + the stored ReportDocument.
+-- 0057_report_periods_documents.sql — sealing + the stored ReportDocument.
 CREATE TABLE report_periods (
   id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id    uuid NOT NULL REFERENCES companies(id),
-  period_kind  text NOT NULL CHECK (period_kind IN ('day','week','month')),
+  period_kind  text NOT NULL CHECK (period_kind IN ('day','week','month','custom')),
+  label        text,                           -- human label; REQUIRED for pinned 'custom' rows
   period_start date NOT NULL,
   period_end   date NOT NULL CHECK (period_end >= period_start),
   status       text NOT NULL DEFAULT 'open' CHECK (status IN ('open','sealed','amended')),
@@ -415,11 +449,20 @@ CREATE TABLE report_periods (
   sealed_by    uuid REFERENCES users(id),      -- NULL when sealed by the n8n schedule (system)
   amend_reason text,                           -- last amendment reason (full trail in audit events)
   seal_hash    text,                           -- sha256 over the period's document set (tamper check)
-  origin_site  text NOT NULL DEFAULT 'central',
+  origin_site  text NOT NULL,                    -- NO default (§15 ruling)
   created_at   timestamptz NOT NULL DEFAULT now(),
   updated_at   timestamptz NOT NULL DEFAULT now(),
-  UNIQUE (tenant_id, period_kind, period_start)
+  -- Calendar periods keep the exact one-row-per-start guarantee. A PARTIAL unique index is required
+  -- rather than a plain UNIQUE: two different user-chosen custom ranges may legitimately share a
+  -- start date (Jan 1–Jan 31 and Jan 1–Mar 31 are different reports), which a plain
+  -- UNIQUE(tenant, kind, start) would reject.
+  CONSTRAINT report_periods_custom_needs_label CHECK (period_kind <> 'custom' OR label IS NOT NULL)
 );
+CREATE UNIQUE INDEX report_periods_calendar_uq ON report_periods (tenant_id, period_kind, period_start)
+  WHERE period_kind <> 'custom';
+-- Pinned customs dedupe on the EXACT range instead, so re-pinning the same window is idempotent.
+CREATE UNIQUE INDEX report_periods_custom_uq ON report_periods (tenant_id, period_start, period_end)
+  WHERE period_kind = 'custom';
 
 CREATE TABLE report_documents (
   id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -431,12 +474,12 @@ CREATE TABLE report_documents (
   document     jsonb NOT NULL,                 -- the full ReportDocument (§6.1)
   narrative_source text NOT NULL DEFAULT 'deterministic'
     CHECK (narrative_source IN ('ai','deterministic')),
-  origin_site  text NOT NULL DEFAULT 'central',
+  origin_site  text NOT NULL,                    -- NO default (§15 ruling)
   created_at   timestamptz NOT NULL DEFAULT now(),
   UNIQUE (tenant_id, period_id, revision, grain, scope_ref)
 );
 CREATE INDEX ix_report_documents_scope ON report_documents (tenant_id, grain, scope_ref, created_at DESC);
--- Same third-wall DO-loop as 0052. Sealed rows are IMMUTABLE by convention: no UPDATE path exists
+-- Same third-wall DO-loop as 0056. Sealed rows are IMMUTABLE by convention: no UPDATE path exists
 -- in the service; amendment writes a NEW revision. (Enforcing immutability via a trigger is
 -- deliberately skipped v1 — the service is the only writer; revisit if a second writer appears.)
 ```
@@ -452,10 +495,35 @@ exec/leads → explicit re-seal writes revision+1 alongside the old rows (nothin
 appraisal referencing the amended revision is flagged `evidence_stale` and requires manager
 re-confirm (§4.5) — an appraisal number can never drift silently.
 
-### 0054 — appraisal tables (third wall)
+**Custom-range semantics (2026-07-30 amendment) — four rules, all load-bearing:**
+
+1. **Transient by default, no row.** A user-chosen range is computed from `report_work_facts` on
+   read, returned, and forgotten. It creates **no** `report_periods` row — otherwise the table fills
+   with throwaway rows from every date-picker fiddle. The only writer of `period_kind='custom'` rows
+   is the explicit **pin** endpoint (§6.2).
+2. **Never sealed, never appraisal-admissible.** `POST …/periods/:id/seal` and
+   `POST …/appraisals/cycles/:id/generate` **reject `period_kind='custom'` with a 422** and an
+   explicit message ("custom ranges are ad-hoc reads; appraisal requires a sealed calendar period").
+   A silent skip is forbidden — it would let an appraisal quietly rest on unsealed numbers, which is
+   exactly what the sealing invariant exists to prevent. This is a required acceptance criterion on
+   TR-13 (seal) and TR-24 (appraisal generate), and a ⚡QA assertion.
+3. **Never persisted to `rollup_metrics`.** That table's key is
+   `(tenant, module, metric_key, period, dimensions)`; an unbounded set of user-chosen ranges would
+   bloat the governed registry with rows nobody can aggregate. Only calendar periods (day/week/month)
+   upsert there. Custom ranges read the fact table directly — which is safe precisely because the
+   atomic grain is per-day and additive.
+4. **Pinning is the archive path.** `POST /api/:t/reports/periods/pin {start, end, label}` (exec/lead,
+   `reports.seal`) creates a labelled `period_kind='custom'` row that CAN be snapshotted into
+   `report_documents` and exported as a stable, re-openable artifact — for the cases that genuinely
+   need archiving (a board pack for a campaign window; a quarter, before quarterly seals exist).
+   A pinned custom is still **barred from appraisal** by rule 2. Recommended: pinning is deliberately
+   a privileged, labelled, low-volume act — if pinned customs ever start being used as the routine
+   read path, that is the signal to add a real quarterly/annual calendar kind instead.
+
+### 0058 — appraisal tables (third wall)
 
 ```sql
--- 0054_report_appraisals.sql — blended, manager-weighted appraisal + acknowledgement trail.
+-- 0058_report_appraisals.sql — blended, manager-weighted appraisal + acknowledgement trail.
 CREATE TABLE report_appraisal_cycles (
   id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id    uuid NOT NULL REFERENCES companies(id),
@@ -467,7 +535,7 @@ CREATE TABLE report_appraisal_cycles (
     '{"delivery":0.35,"quality":0.30,"effort":0.10,"collaboration":0.25}',
   role_weights jsonb NOT NULL DEFAULT '{}',    -- {"senior_dev":{"delivery":0.40,...}, ...}
   created_by   uuid NOT NULL REFERENCES users(id),
-  origin_site  text NOT NULL DEFAULT 'central',
+  origin_site  text NOT NULL,                    -- NO default (§15 ruling)
   created_at   timestamptz NOT NULL DEFAULT now(),
   updated_at   timestamptz NOT NULL DEFAULT now()
 );
@@ -489,7 +557,7 @@ CREATE TABLE report_appraisals (
     CHECK (status IN ('draft','submitted','acknowledged','disputed','finalized')),
   submitted_at    timestamptz,
   finalized_at    timestamptz,
-  origin_site     text NOT NULL DEFAULT 'central',
+  origin_site     text NOT NULL,                    -- NO default (§15 ruling)
   created_at      timestamptz NOT NULL DEFAULT now(),
   updated_at      timestamptz NOT NULL DEFAULT now(),
   CHECK (status = 'draft' OR (commentary IS NOT NULL AND length(btrim(commentary)) >= 50)),
@@ -503,19 +571,23 @@ CREATE TABLE report_appraisal_acks (      -- append-only employee trail; no UPDA
   actor_user_id uuid NOT NULL REFERENCES users(id),
   action       text NOT NULL CHECK (action IN ('acknowledged','disputed','comment','reopened','finalized')),
   comment      text,
-  origin_site  text NOT NULL DEFAULT 'central',
+  origin_site  text NOT NULL,                    -- NO default (§15 ruling)
   created_at   timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX ix_appraisal_acks ON report_appraisal_acks (tenant_id, appraisal_id, created_at);
 -- Same third-wall DO-loop.
 ```
 
-### 0055 — metric seeds
+### 0059 — metric seeds
 
-`INSERT ... ON CONFLICT DO NOTHING` into `metric_definitions` for the §5 registry (module
-`reports`, `aggregation_rule` per row — sums and `ratio_of_sums` only). Appraisal-safety is **not**
-a `metric_definitions` column (no altering shared substrate): it lives in the module's TS catalog
-(`src/modules/reports/metrics.ts`), the single source that both seeds 0055 and drives
+`INSERT ... ON CONFLICT DO NOTHING` into `metric_definitions` for the §5 registry — **21 rows**
+(module `reports`), `aggregation_rule` per row drawn ONLY from the existing CHECK vocabulary
+`('sum','ratio_of_sums','max','last')` (`0001_core.sql:83`): mostly `sum` / `ratio_of_sums`, plus
+`'last'` for #20 (point-in-time). Metric #22 is **not seeded** (read-time derived — §5.4). This
+migration does **not** widen that CHECK; every other module's rollup consumers read the same column.
+Appraisal-safety is likewise **not** a `metric_definitions` column
+(no altering shared substrate): it lives in the module's TS catalog
+(`src/modules/reports/metrics.ts`), the single source that both seeds 0059 and drives
 `ReportKpi.appraisalSafe`.
 
 ---
@@ -532,7 +604,7 @@ a `metric_definitions` column (no altering shared substrate): it lives in the mo
 3. **ONE typed `ReportDocument`** (§6.1) consumed by the web viewer, the PDF print route, the XLSX
    exporter, the AI narrative prompt AND the MCP tools. There is no second rendering path — the PDF
    is the print route rendering the *same* React viewer components.
-4. **Ops reads recompute live; management + appraisal reads are sealed** (§ 0053 above). Sealing,
+4. **Ops reads recompute live; management + appraisal reads are sealed** (§ 0057 above). Sealing,
    amendment, and audit are first-class; appraisals pin `(period_id, revision)`.
 5. **Backfill + idempotency:** the fact job is `(tenant, date)`-sliced DELETE+INSERT in one
    transaction over append-only inputs; re-running any slice any number of times converges.
@@ -545,13 +617,16 @@ a `metric_definitions` column (no altering shared substrate): it lives in the mo
 
 ---
 
-## 5. The metric registry (~22 metrics)
+## 5. The metric registry (22 metrics — 21 seeded + 1 read-time derived)
 
 All seeded as `metric_definitions` rows (module `reports`), computed by the module's
 `RollupProvider` from `report_work_facts` (+ snapshots + check-ins), upserted idempotently into
 `rollup_metrics` with `dimensions` per grain. Grains: **P**erson `{userId}` · **J** project
 `{projectId}` · **D** department `{unit}` (+ `{unit, servedTenant}` provider view) · **C** company
-`{}`. Periods: day/week/month.
+`{}`. Periods: day/week/month **persist** to `rollup_metrics`; user-chosen **custom ranges compute
+live from `report_work_facts` and never persist** (§0057 custom semantics rule 3). Either way the
+arithmetic is identical — see **§5.4** for the per-metric additivity class that makes an arbitrary
+range correct.
 
 **⚠ appraisal-unsafe** = never appears in an appraisal pack or feeds an auto-score; ops/context
 only. Rationale in §5.2.
@@ -577,12 +652,62 @@ only. Rationale in §5.2.
 | 17 | `collab.docs_updated` | collaboration | count | sum | Σ `docs_updated` / — | P J D | ⚠ unsafe raw; pack shows cohort band only |
 | 18 | `discipline.checkin_compliance` | discipline | percent | ratio_of_sums | Σ submitted / Σ expected (calendar+leave-aware) | P D C | ✅ safe (it measures the discipline itself) |
 | 19 | `discipline.time_logging_coverage` | discipline | percent | ratio_of_sums | Σ days with ≥1 entry / Σ expected working days | P D C | ✅ safe (hygiene, not volume) |
-| 20 | `discipline.overdue_open` | discipline | count | sum | Σ open tasks past due at as_of / — | P J D C | ⚠ unsafe raw (load-dependent); pack shows trend only |
+| 20 | `discipline.overdue_open` | discipline | count | **`last`** (NOT `sum` — see §5.4) | open tasks past due, evaluated at range END / — | P J D C | ⚠ unsafe raw (load-dependent); pack shows trend only |
 | 21 | `evidence.link_rate` | evidence | percent | ratio_of_sums | Σ `activity_linked_exact` / Σ `activity_events` | P D C | ⚠ unsafe (measures the linker, not the person) |
-| 22 | `evidence.source_diversity` | evidence | count | sum (max-agg in doc) | distinct active sources per period / — | P D C | ⚠ unsafe (context: where evidence comes from) |
+| 22 | `evidence.source_diversity` | evidence | count | **NOT SEEDED — document-derived** (see §5.4) | COUNT(DISTINCT source) unioned over the range / — | P D C | ⚠ unsafe (context: where evidence comes from) |
 
 Nine appraisal-safe metrics feed the four appraisal axes; the other thirteen exist for ops truth
 and report richness. `currency` is unused (no money metrics — payroll is a non-goal).
+
+### 5.4 Range additivity — every metric classified (2026-07-30 amendment)
+
+An arbitrary user-chosen range has an arbitrary day count and arbitrary partial weeks/months, so it
+is where the average-of-averages failure (invariant 2) actually bites. Every metric is therefore
+classified into exactly one of three classes, and **the class dictates the range query**:
+
+| Class | Rule over ANY range (calendar or custom) | Metrics |
+|---|---|---|
+| **A · additive** | `Σ` the daily measure over `[start, end]`. Range length is irrelevant. | 1, 2, 6, 11, 15, 16, 17 |
+| **R · ratio** | Recompute `Σ numerator / Σ denominator` over the range. **Never** the mean of the daily ratios. Where the denominator is *days* (7, 8, 10, 14, 19), it is **days-in-range** — computed from the range, not assumed to be 7 or 30. | 3, 4, 5, 7, 8, 9, 10, 12, 13, 14, 18, 19, 21 |
+| **N · non-additive** | Cannot be derived from daily aggregates at all. Must recompute from underlying rows, or be refused for the range. | **20, 22** |
+
+**Two defects this audit surfaced — they affect week and month too, not only custom ranges:**
+
+**⚠ Substrate constraint that bounds the fix (verified 2026-07-30):**
+`metric_definitions.aggregation_rule` carries `CHECK (aggregation_rule IN ('sum','ratio_of_sums',
+'max','last'))` — [`0001_core.sql:83`](../../platform-nest/migrations/0001_core.sql). That vocabulary
+is fixed, shared across every module, and this program does **not** alter it (same principle that
+keeps `appraisalSafe` out of the shared table). So each non-additive metric must either map onto an
+existing rule or not be seeded at all:
+
+- **#20 `discipline.overdue_open` is point-in-time, not additive.** It counts open tasks past due
+  *at an instant*. Summing it across a 30-day period counts the same still-overdue task 30 times and
+  reports a wildly inflated number. Correct behaviour: evaluate it **as of the range's end date** and
+  render it as a trend line over the range rather than a single summed KPI. Its `aggregation_rule` is
+  therefore **`'last'`** — an exact fit within the existing vocabulary, no substrate change needed
+  (was mistakenly written as an invented `point_in_time` rule, which would have failed the CHECK and
+  broken migration 0059). TR-08 asserts a multi-day range does not multiply it.
+- **#22 `evidence.source_diversity` is a distinct-count, not a sum.** `COUNT(DISTINCT source)` over a
+  range is not the sum of daily distinct counts (a person using `pm` every day for 30 days is
+  diversity 1, not 30). No existing `aggregation_rule` expresses a distinct-union — and `'max'` is
+  wrong, not merely imprecise (Mon `{pm}`, Tue `{github}` → max daily distinct = 1, true distinct = 2).
+  Resolution: **#22 is NOT seeded into `metric_definitions`.** It is computed at document-build time
+  as a key-union over `report_work_facts.activity_by_source` (the JSONB column supports it directly)
+  and carried as a `ReportKpi` with `distinctOver: true`. **0059 therefore seeds 21 metrics, not 22**,
+  and the module's TS catalog marks #22 `seeded: false`. Rationale: a derived read-time stat is a far
+  smaller change than widening an enum that every other module's rollup consumers switch on.
+
+Both are cheap to get right and expensive to notice later, because each fails *upward* — a bigger,
+more flattering-looking number that no one questions. `ReportKpi` for class **N** metrics carries an
+explicit `pointInTime: true` / `distinctOver: true` marker so the viewer and the XLSX exporter label
+them rather than letting a reader assume they are period totals.
+
+**Percentiles stay deferred, with a constraint attached.** `report_work_facts` deliberately stores
+additive counters only, so cycle-time p50/p85 genuinely cannot be computed from it at any range —
+which is why §13 defers that metric wave. The constraint for whoever picks it up: percentiles must
+be computed from a **per-completion row store** (one row per completed task with its duration), never
+from daily aggregates and never by averaging daily percentiles. A "p85 of the daily p85s" is not a
+p85 of anything.
 
 ### 5.2 Anti-gaming design (explicit, per locked decision 3)
 
@@ -614,7 +739,7 @@ Defenses, in order of load-bearing-ness:
 7. **Acknowledgement trail:** the subject sees the SAME pack the manager sees (§11), and
    `disputed` is a first-class status routed to HR — gaming *by managers* has a counterparty.
 8. **Sealing:** scores are computed against a pinned `(period, revision)` — retro-editing tasks
-   after the period cannot move an appraisal number (§0053).
+   after the period cannot move an appraisal number (§0057).
 
 ### 5.3 Check-in compliance — the false-negative guard (locked decision 2)
 
@@ -634,7 +759,7 @@ loses nothing. Computation declares `{modules:['reports','hr']}` — the HR thir
 
 ```ts
 export type ReportGrain = "person" | "project" | "department" | "company";
-export type ReportPeriodKind = "day" | "week" | "month";
+export type ReportPeriodKind = "day" | "week" | "month" | "custom";
 export type ReportUnit = "count" | "minutes" | "percent" | "score" | "text";
 
 export interface ReportHeader {
@@ -645,12 +770,29 @@ export interface ReportHeader {
   periodKind: ReportPeriodKind;
   periodStart: string;         // ISO date (inclusive)
   periodEnd: string;           // ISO date (inclusive)
+  dayCount: number;            // inclusive days in range — the denominator for every per-day ratio (§5.4)
+  periodLabel: string;         // display: "16 Jul 2026" | "Week 29 2026" | "July 2026" | "16 Jul – 3 Aug 2026"
+  customLabel?: string;        // pinned custom ranges only (report_periods.label)
   generatedAt: string;         // ISO datetime
   sealed: boolean;
-  periodId?: string;           // present when sealed
+  periodId?: string;           // present when sealed OR pinned
   revision?: number;           // present when sealed
-  comparison?: { periodStart: string; periodEnd: string }; // prior period for deltas
+  // Comparison baseline. For a custom range this is the IMMEDIATELY PRECEDING EQUAL-LENGTH window
+  // ([start − dayCount, start − 1]) — "previous period" is otherwise ambiguous for an arbitrary span.
+  comparison?: { periodStart: string; periodEnd: string; dayCount: number };
   providerView?: { servedTenantId: string; servedTenantName: string }; // shared-service slice
+  // Honesty flags — set at build time, rendered by the viewer AND carried onto every export (§6.3).
+  // A user-chosen range will straddle these constantly; silence here would be a lie of omission.
+  warnings?: {
+    adHoc?: boolean;           // custom range: unsealed, not the authoritative record
+    partialPeriod?: boolean;   // range cuts across an incomplete week/month
+    endsInFuture?: boolean;    // periodEnd > today — trailing days have no data yet
+    precedesFactHistory?: {    // range starts before TR-05 consumer go-live (§13 risk 2)
+      firstFactDate: string;   // person-grain facts do not exist before this date
+      affectedDays: number;
+    };
+    spansMembershipChange?: boolean; // a subject moved unit mid-range (§3.2) — dept totals split
+  };
 }
 
 export interface ReportKpi {
@@ -663,6 +805,10 @@ export interface ReportKpi {
   delta?: number;              // vs comparison period, same unit (percent-point for ratios)
   direction?: "up_good" | "down_good" | "neutral";
   appraisalSafe: boolean;
+  // §5.4 class markers for the two non-additive metrics. The viewer and the XLSX exporter MUST
+  // label these — without it a reader assumes any KPI on a 30-day report is a 30-day total.
+  pointInTime?: boolean;       // #20: evaluated at range end, not summed across it
+  distinctOver?: boolean;      // #22: distinct union across the range, not summed
 }
 
 export interface ReportSeriesPoint { t: string; v: number | null } // t = ISO date; null = no data (never 0-faked)
@@ -722,14 +868,22 @@ included) · AI narrative prompt (§9.1) · MCP `reports.getDocument` (returns t
 
 | Method + path | Purpose | Authz (§8) |
 |---|---|---|
-| `GET /api/:t/reports/document?grain&scopeRef&periodKind&start` | THE read. Sealed period → stored document (latest revision, `?revision=` to pin); open period → live compute (lazy-backstop pattern) | per-grain matrix |
-| `GET /api/:t/reports/overview?grain&periodKind` | list of scopes + headline KPIs for the grain (console landing) | per-grain matrix |
+| `GET /api/:t/reports/document?grain&scopeRef&periodKind&start[&end]` | THE read. Sealed period → stored document (latest revision, `?revision=` to pin); open period → live compute (lazy-backstop pattern). `periodKind=custom` **requires `end`** and always computes live | per-grain matrix |
+| `GET /api/:t/reports/overview?grain&periodKind&start[&end]` | list of scopes + headline KPIs for the grain (console landing) | per-grain matrix |
+| `POST /api/:t/reports/periods/pin {start, end, label}` | archive a user-chosen range as a labelled, snapshottable `period_kind='custom'` row (idempotent on the exact range). Still barred from appraisal | `reports.seal` (exec/lead) |
 | `GET /api/:t/reports/periods?kind&from&to` · `GET …/periods/:id` | seal states + revisions | view |
-| `POST /api/:t/reports/periods/:id/seal` | explicit seal (idempotent; 409 if sealed) | `reports.seal` (exec/lead) |
+| `POST /api/:t/reports/periods/:id/seal` | explicit seal (idempotent; 409 if sealed). **422 if `period_kind='custom'`** — ad-hoc ranges are never sealed (§0057 rule 2) | `reports.seal` (exec/lead) |
 | `POST /api/:t/reports/periods/:id/amend {reason}` | flag amended + audit + notify; re-seal via `/seal` → revision+1 | `reports.seal` |
-| `POST /api/:t/reports/export {grain, scopeRef, periodKind, start, format: "pdf"\|"xlsx"\|"csv"}` | creates export job → `{jobId}`; `GET …/exports/:jobId` → status + download. PDF via sidecar (§6.3) | same as document read |
+| `POST /api/:t/reports/export {grain, scopeRef, periodKind, start, end?, format: "pdf"\|"xlsx"\|"csv"}` | creates export job → `{jobId}`; `GET …/exports/:jobId` → status + download. PDF via sidecar (§6.3). An unsealed/custom range is exported with the `AD HOC · UNSEALED` mark (§6.3) | same as document read |
 | `POST /api/:t/reports/facts/recompute {from, to}` | idempotent backfill window (admin/ops) | `reports.admin` |
-| `GET /api/:t/reports/metrics?metricKey&grain&from&to` | raw rollup series (power users/MCP) | per-grain matrix |
+| `GET /api/:t/reports/metrics?metricKey&grain&from&to` | raw series (power users/MCP). Calendar periods read `rollup_metrics`; an arbitrary `from`/`to` reads `report_work_facts` directly (§0057 rule 3) | per-grain matrix |
+
+**Range validation (applies to every endpoint above that accepts `start`/`end`):** `end >= start`
+(else 400); `end` required when `periodKind=custom` (else 400); `periodKind=custom` with a span
+**> 400 days → 422** with `{error:"range_too_large", maxDays:400}` — an unbounded user-chosen range
+is a trivial DoS on the fact scan, and 400 days covers "a year plus a comparison tail" which is the
+real ceiling of a management pack. For non-custom kinds, `end` is ignored and derived from `start`.
+`start`/`end` are interpreted in `REPORTS_TZ` (OQ-1), never in the caller's local zone.
 
 **Check-ins — `checkins.controller.ts`:**
 
@@ -738,7 +892,7 @@ included) · AI narrative prompt (§9.1) · MCP `reports.getDocument` (returns t
 | `GET /api/:t/checkins/today` | `{expected, alreadySubmitted, draft}` — draft prefilled live from today's activity/time (<30s flow) | self |
 | `POST /api/:t/checkins {date?, summary, blockers?}` | submit/confirm (today or yesterday-until-cutoff); records `edited`, `source` | self |
 | `GET /api/:t/checkins?userId&from&to` | history (self; manager for own unit; HR) | matrix |
-| `GET /api/:t/checkins/compliance?unit&periodKind&start` | compliance grid (expected/submitted/missed/excused) | lead/exec/HR |
+| `GET /api/:t/checkins/compliance?unit&periodKind&start[&end]` | compliance grid (expected/submitted/missed/excused); `custom` ranges supported on the same validation rules | lead/exec/HR |
 | `POST /api/:t/checkins/:id/excuse {reason}` | manager/HR excuse (audited) | lead/HR |
 | `GET /api/:t/checkins/pending-reminders?date` | internal for n8n: expected-but-missing list (+ WA identity link presence) | service/admin |
 
@@ -747,7 +901,7 @@ included) · AI narrative prompt (§9.1) · MCP `reports.getDocument` (returns t
 | Method + path | Purpose | Authz |
 |---|---|---|
 | `GET/POST /api/:t/appraisals/cycles` · `GET/PATCH …/:id` | cycle CRUD (weights, role weights, open/close) | HR-appraisal |
-| `POST /api/:t/appraisals/cycles/:id/generate` | generate per-subject appraisals: freeze weights + `auto_inputs` from SEALED periods covering the cycle range (409 if unsealed) | HR-appraisal |
+| `POST /api/:t/appraisals/cycles/:id/generate` | generate per-subject appraisals: freeze weights + `auto_inputs` from SEALED **calendar** periods covering the cycle range (409 if unsealed; **422 if any covering period is `period_kind='custom'`** — never a silent skip, §0057 rule 2) | HR-appraisal |
 | `GET /api/:t/appraisals?cycleId&subjectId` · `GET …/:id` | pack read: appraisal + pinned sealed person-doc(s) | matrix (self/manager/HR/exec) |
 | `PATCH /api/:t/appraisals/:id` | manager scores + notes + commentary (draft only) | manager-of-subject |
 | `POST /api/:t/appraisals/:id/submit` | validates: commentary ≥50, per-axis note when \|manager−auto\| > 1 band → status `submitted`, notify subject | manager-of-subject |
@@ -763,7 +917,16 @@ non-`/api` app-level route precedent (session revoke).
 
 - **CSV/XLSX:** platform-nest export service; `exceljs` (OQ-2). Sheets: `KPIs` (metric, value,
   numerator, denominator, delta), one sheet per `ReportTable`, `Series` (long format). Ratios
-  export n/d columns — a spreadsheet user can re-aggregate without average-of-averages.
+  export n/d columns — a spreadsheet user can re-aggregate without average-of-averages. The `KPIs`
+  sheet carries a **class column** (`additive` / `ratio` / `point-in-time` / `distinct`) per §5.4, so
+  a spreadsheet user re-summing a point-in-time metric across rows is warned in the artifact itself.
+- **Ad-hoc marking (required, 2026-07-30 amendment):** any export of an **unsealed** period — which
+  every transient custom range is by definition — is marked **on the artifact**: `AD HOC · UNSEALED ·
+  as of <timestamp>` in the PDF `headerTemplate`/`footerTemplate` and in an `A1` banner cell plus a
+  `Provenance` sheet in the XLSX, alongside the range and any `header.warnings` from §6.1. Rationale:
+  this pack's whole audience is higher management, and a printed ad-hoc range is indistinguishable
+  from the sealed record once it leaves the screen. Sealed exports instead carry
+  `SEALED · rev N · <seal_hash prefix>`. ⚡ QA asserts the mark cannot be absent on an unsealed export.
 - **PDF (the sidecar):** new compose service `report-renderer` — Node service on the
   `mcr.microsoft.com/playwright:v1.61.1-*` base image (pin to the repo's `@playwright/test
   ^1.61.1`), ~80 lines: `POST /render {url}` + `Authorization: Bearer RENDERER_TOKEN` →
@@ -816,10 +979,30 @@ shapes) · `CohortBand` (appraisal: subject marker on the role-cohort distributi
 
 | Grain | Charts (from the one document) |
 |---|---|
-| **Person** (day/week/month) | KPI tiles (safe metrics + denominators) · activity trend line (events by day) · time-by-project donut · on-time vs completed grouped bars · check-in `CalendarHeatmap` · contributions table (contributor minutes on others' tasks) · evidence-by-source stacked bars |
+| **Person** (any period kind) | KPI tiles (safe metrics + denominators) · activity trend line (events by day) · time-by-project donut · on-time vs completed grouped bars · check-in `CalendarHeatmap` · contributions table (contributor minutes on others' tasks) · evidence-by-source stacked bars |
 | **Project** | Burndown + CFD (reused pm shapes) · throughput weighted bars · workload-by-person stacked bars · status/tag distribution donut · milestone table (due vs done) · reopen-rate trend · overdue table w/ task refs |
 | **Department** | throughput + on-time trend lines · capacity vs logged area (utilization, ops-only) · per-person table with sparkline column (small multiples) · project portfolio table (health = on-time × reopen) · **served-companies split** (stacked bars per `servedTenant` — the shared-service view) · compliance heatmap |
 | **Company** | dept-comparison grouped bars (throughput weighted, on-time, compliance) · cross-dept stacked area over time · unattributed-bucket tile (kept visible on purpose — it measures fabric health) · top risks/anomalies table (highlights) · exec KPI wall with deltas |
+
+**Period selector + arbitrary ranges (2026-07-30 amendment).** Every grain's report surface carries
+one shared control: **Daily · Weekly · Monthly · Custom range**, where Custom opens a date-range
+picker (`start`/`end`, inclusive, `REPORTS_TZ`). The same chart set serves all four kinds — nothing
+is period-specific, because the document contract is period-agnostic. Requirements the kit must meet:
+
+- **X-axis bucketing scales to `header.dayCount`** — daily ticks up to ~45 days, weekly buckets to
+  ~26 weeks, monthly beyond. A 400-day range must NOT render 400 points: it renders ~13 monthly
+  buckets. Bucketing is a *display* transform over the daily series; the underlying numbers are never
+  re-aggregated in the browser (that is the server's job, per §5.4).
+- **Honesty chrome is not optional.** `header.warnings` renders as a banner above the charts —
+  ad-hoc/unsealed, partial period, ends-in-future (trailing null gap, never zero-faked),
+  pre-fact-history (with the affected day count), mid-range unit change. The `TrendLine` null-gap
+  discipline already covers future days; the banner explains *why* the gap is there.
+- **Comparison chip** shows the preceding equal-length window explicitly (`vs 16 Jun – 4 Jul`), not a
+  bare "vs previous period" — for an arbitrary span the label must state what it compared against.
+- **Preset shortcuts** on the picker (Last 7 / 30 / 90 days · This quarter · Last quarter · Year to
+  date) — these are ordinary custom ranges, not new period kinds, which is what keeps quarterly and
+  YTD reporting available without adding calendar machinery. If quarterly seals are later required
+  for appraisal, that is a new calendar kind, not a preset (§0057 rule 4).
 
 ---
 
@@ -877,27 +1060,29 @@ reads default to deterministic (no per-page-view AI spend).
 ```ts
 mcpTools: [
   { name: "reports.getDocument",
-    description: "Fetch a person/project/department/company work report (ReportDocument JSON) for a day/week/month period",
+    description: "Fetch a person/project/department/company work report (ReportDocument JSON) for a day, week, month, or an arbitrary custom date range. For periodKind='custom', 'end' is REQUIRED and the range is computed live (unsealed, not appraisal-admissible); max span 400 days.",
     minAssurance: "low", method: "GET",
     pathTemplate: "/api/:tenantId/reports/document",
     inputSchema: { type: "object",
       properties: { tenantId: {type:"string"}, grain: {enum:["person","project","department","company"]},
-                    scopeRef: {type:"string"}, periodKind: {enum:["day","week","month"]}, start: {type:"string"} },
+                    scopeRef: {type:"string"}, periodKind: {enum:["day","week","month","custom"]},
+                    start: {type:"string", description:"ISO date, inclusive"},
+                    end: {type:"string", description:"ISO date, inclusive — REQUIRED when periodKind='custom', ignored otherwise"} },
       required: ["tenantId","grain","scopeRef","periodKind","start"] } },
   { name: "reports.listPeriods",
-    description: "List report periods and their seal status/revisions",
+    description: "List report periods and their seal status/revisions (kind: day|week|month|custom — 'custom' rows are pinned ad-hoc ranges and are never appraisal-admissible)",
     minAssurance: "low", method: "GET", pathTemplate: "/api/:tenantId/reports/periods",
-    inputSchema: { type: "object", properties: { tenantId: {type:"string"}, kind: {type:"string"} }, required: ["tenantId"] } },
+    inputSchema: { type: "object", properties: { tenantId: {type:"string"}, kind: {enum:["day","week","month","custom"]} }, required: ["tenantId"] } },
   { name: "reports.getMetrics",
-    description: "Query governed rollup metric series (numerator/denominator) by metric key and grain",
+    description: "Query a governed metric series (numerator/denominator) by metric key and grain over an arbitrary from/to window. Ratios must be read as numerator/denominator — never average the returned ratios across points (see the metric's additivity class).",
     minAssurance: "low", method: "GET", pathTemplate: "/api/:tenantId/reports/metrics",
     inputSchema: { type: "object", properties: { tenantId:{type:"string"}, metricKey:{type:"string"},
                     grain:{type:"string"}, from:{type:"string"}, to:{type:"string"} }, required: ["tenantId","metricKey"] } },
   { name: "reports.getCompliance",
-    description: "Check-in compliance grid for a unit and period (expected/submitted/missed/excused)",
+    description: "Check-in compliance grid for a unit over a day/week/month period or a custom date range (expected/submitted/missed/excused)",
     minAssurance: "verified", method: "GET", pathTemplate: "/api/:tenantId/checkins/compliance",
     inputSchema: { type: "object", properties: { tenantId:{type:"string"}, unit:{type:"string"},
-                    periodKind:{type:"string"}, start:{type:"string"} }, required: ["tenantId"] } },
+                    periodKind:{enum:["day","week","month","custom"]}, start:{type:"string"}, end:{type:"string"} }, required: ["tenantId"] } },
   { name: "checkin.getToday",
     description: "Get today's end-of-day check-in draft for the acting user (prefilled from their derived activity)",
     minAssurance: "low", method: "GET", pathTemplate: "/api/:tenantId/checkins/today",
@@ -938,6 +1123,10 @@ Five flows (naming per existing automation conventions), all idempotent, all re-
 
 Backstops (no cron in platform-nest, 0040 pattern): a document read for an unsealed past period
 lazily computes on read; a seal is only ever explicit (n8n or human) — never implicit.
+**Scheduled seals are calendar-only.** No flow ever seals or pins a custom range — a user-chosen
+range exists only as a live read (or a deliberate human pin, §0057 rule 4), so there is nothing for
+a schedule to close. The nightly fact job is what makes every arbitrary range answerable: it keeps
+the daily grain complete, and any range is then a query, not a job.
 Timezone: all "day" boundaries use ONE deployment-level `REPORTS_TZ` (recommend `Asia/Jakarta`)
 v1; per-tenant timezones are deferred (§13, OQ-1).
 
@@ -981,12 +1170,12 @@ untagged runs on seat default. ⚡ = mandatory QA gate (RLS / Cerbos / migration
 paths). Concurrency cap 1–2 per the standard; order within a phase is the dependency order.
 File paths are repo-relative to `gaiada-system/`.
 
-### P0 — substrate blockers (5 tickets)
+### P0 — substrate blockers (8 tickets) — ✅ **ALL 7 ORIGINAL TICKETS LANDED 2026-07-30** (TR-33 added at the end of the phase; see §15)
 
-- **TR-01 · 0050 relational assignees + backfill** — `senior-db` · **opus·medium** (migration with
+- **TR-01 · 0054 relational assignees + backfill** — `senior-db` · **opus·medium** (migration with
   real data-integrity risk: live-JSONB→relational backfill, partial-unique owner/responsible
   invariants; a wrong backfill silently corrupts every downstream attribution — cheap-then-escalate
-  would waste a full re-run). Files: `platform-nest/migrations/0050_pm_task_assignees.sql`,
+  would waste a full re-run). Files: `platform-nest/migrations/0054_pm_task_assignees.sql`,
   `platform-nest/test/` RLS + backfill tests. Deps: none. ⚡
   Done when: table + constraints exist; backfill is idempotent (run twice → identical rows);
   every seeded task's blob round-trips to owner/responsible rows; FORCE-RLS sweep green.
@@ -996,8 +1185,8 @@ File paths are repo-relative to `gaiada-system/`.
   Done when: every assignee-writing path writes blob+rows in one tx; task GET carries
   `contributors[]`; PATCH add/removeContributor ops work; existing pm suite green byte-unchanged
   on old fields; drift-guard hook emits on mismatch.
-- **TR-03 · 0051 org_unit_memberships** — `senior-db`. Files:
-  `platform-nest/migrations/0051_org_unit_memberships.sql`, tests. Deps: none. ⚡
+- **TR-03 · 0055 org_unit_memberships** — `senior-db`. Files:
+  `platform-nest/migrations/0055_org_unit_memberships.sql`, tests. Deps: none. ⚡
   Done when: EXCLUDE non-overlap proven by test (insert overlapping primary → rejected); backfill
   creates one open primary per placed person; RLS sweep green.
 - **TR-04 · server dept resolution + membership sweeper** — `senior-be`. Files:
@@ -1012,26 +1201,112 @@ File paths are repo-relative to `gaiada-system/`.
   (`source='pm'`, `source_ref=event id`); duplicate delivery inserts zero (idempotency key);
   done-ness derived from `is_done` flag; dead-letter path covered.
 
-### P1 — fact fabric + metrics (3 tickets)
+- **TR-31 · outbox actor propagation** — `senior-be`. **NEW 2026-07-30, uncovered by TR-05.** Files:
+  the outbox `emitEvent` call sites in `pm.controller.ts` / `collab.controller.ts` /
+  `meetings.controller.ts` / `pipeline.controller.ts` (payload gains the acting user id),
+  `src/events/work-activity-consumer.ts` (map it to `actorUserId` instead of hardcoded `null`),
+  `src/core/work-activity-linker.ts` (verify the `hint:actorId` rule then mints
+  `target_kind='person'` links). Deps: TR-05. **BLOCKS TR-07.** ⚡
+  Done when: a consumer-derived `work_activity` row carries the real `actor_user_id` for task, comment
+  and doc events; the linker produces a `person` link with `confidence='exact'` from the hint (not a
+  uuid-scan inference); a person-grain count of comments/docs over a seeded day is NON-ZERO and equals
+  the number of actions that person actually took (the failure mode is a silent zero, so the test must
+  assert a specific positive number, never just "no error"); events whose actor genuinely is a system
+  or service still write `actor_user_id IS NULL` + `actor_external` and are excluded from person
+  attribution rather than misattributed.
 
-- **TR-06 · 0052 calendars/check-ins/facts + third wall** — `senior-db`. Files:
-  `0052_module_reports_core.sql`, dedicated third-wall test (right tenant WITHOUT `reports` scope
+- **TR-32 · contributors FE wiring (PM console)** — `medior`. **NEW 2026-07-30, disclosed by TR-02.**
+  TR-02 shipped the backend contributors surface (`contributors[]` on task reads,
+  `addContributor`/`removeContributor` PATCH ops) and the additive `Contributor` type in
+  `platform-ui/src/lib/pm.ts`, but deliberately stopped at the type — there is **no fetch wrapper and
+  no UI**, so the capability is invisible to users today. Files: `platform-ui/src/lib/pmActions.ts`
+  (the two action wrappers), the task-detail surface in the PM console (contributor list + add/remove),
+  DEMO_MODE equivalents in `lib/demoPm.ts`. Deps: TR-02.
+  Done when: a task-detail view lists contributors and can add/remove one; the `update`-gated (not
+  `manage`-gated) permission boundary is respected in the UI; DEMO_MODE renders it backend-free; owner
+  vs contributor is visually distinct, since owner-takes-all attribution means the distinction is
+  load-bearing, not decorative.
+
+- **TR-33 · exact person links on BACKFILLED activity** — `junior`. **NEW 2026-07-30, disclosed by
+  TR-31.** `src/core/work-activity-backfill.ts` (the historical `activities`-table backfill tool)
+  already sets `actorUserId` correctly from `activities.actor_id` — that was never broken — but its
+  `hintPayload()` does not put `actorId` into the ingest payload, so backfilled rows get the right
+  `actor_user_id` COLUMN while the linker can only reach them by uuid-scan (`confidence='inferred'`)
+  or not at all. Consequence: historical person-grain **evidence/collaboration** links are weaker than
+  live ones, which matters because this backfill is exactly what narrows the §13 risk-2 history gap.
+  Files: `src/core/work-activity-backfill.ts` (+ its test). Deps: TR-31.
+  Done when: a backfilled row whose `activities.actor_id` is known mints a `target_kind='person'` link
+  with `confidence='exact'` and `rule='hint:actorId'`, matching the live consumer path; rows with a
+  genuinely unknown actor still produce no person link rather than a guessed one.
+
+### P1 — fact fabric + metrics (5 tickets, incl. TR-34/TR-35) — TR-06 + TR-07 ✅ **LANDED 2026-07-30** (see §15); TR-08 next
+
+- **TR-06 · 0056 calendars/check-ins/facts + third wall** — `senior-db`. Files:
+  `0056_module_reports_core.sql`, dedicated third-wall test (right tenant WITHOUT `reports` scope
   → zero rows). Deps: none. ⚡
 - **TR-07 · nightly fact job + attribution engine** — `senior-be` · **opus·medium** (the
   correctness heart: owner-takes-all attribution with the unit/person split, no-double-count
   identities, idempotent DELETE+INSERT slices, cross-module `{reports,pm,hr}` scopes — a subtle
   join bug here silently corrupts company totals and only the reconciliation test would catch it
   months later). Files: `platform-nest/src/modules/reports/fact-job.ts`, `recompute` endpoint.
-  Deps: TR-01..06. ⚡
+  Deps: TR-01..06. ⚡ ✅ **LANDED 2026-07-30** — `fact-job.ts` + the endpoint + a new Cerbos kind
+  `report_admin`; 31 pure + 26 live-PG/Cerbos tests. Two substrate findings TR-08 must absorb (metric
+  #3's missing denominator counter, §6.2's 422 body shape) are recorded in §15.
   Done when: recompute any (tenant, date) twice → byte-identical rows; §3.1 attribution table
   cases each pinned by a test (person-owner / unit-owner+responsible / unit-only / none);
   Σperson ≤ Σunit = company on seeded data; backfill over 60 historical days completes and
   converges.
-- **TR-08 · 0055 metric seeds + RollupProvider** — `senior-be`. Files:
-  `0055_report_metric_seeds.sql`, `src/modules/reports/metrics.ts` (catalog incl. appraisalSafe),
+- **TR-08 · 0059 metric seeds + RollupProvider** — `senior-be`. Files:
+  `0059_report_metric_seeds.sql`, `src/modules/reports/metrics.ts` (catalog incl. appraisalSafe),
   provider registration in the module contract. Deps: TR-07.
-  Done when: all §5 metrics upsert idempotently into `rollup_metrics` with correct n/d and
+  Done when: all 21 SEEDED §5 metrics upsert idempotently into `rollup_metrics` with correct n/d and
   dimensions per grain; `ratio_of_sums` verified against a hand-computed week.
+  **+ Range additivity (§5.4) — the TS catalog carries an explicit class (`additive` / `ratio` /
+  `point_in_time` / `distinct_over_range`) per metric. NOTE the split: that class is a *catalog* field
+  only; the SEEDED `metric_definitions.aggregation_rule` must stay inside the existing
+  `('sum','ratio_of_sums','max','last')` CHECK (0001_core.sql:83) — #20 seeds as `'last'`, and #22 is
+  `seeded: false` (read-time derived, §5.4). Seeding an invented rule value fails the CHECK and breaks
+  the migration. The two non-additive metrics are proven
+  correct over a multi-day range: `discipline.overdue_open` (#20) evaluates at range END and a
+  30-day range does NOT multiply it by ~30 (regression test — it fails upward, so it needs an
+  explicit assertion), and `evidence.source_diversity` (#22) is a distinct union over the range, not
+  a sum of daily distincts. Every day-denominated ratio divides by actual days-in-range, asserted on
+  a deliberately awkward span (e.g. 11 days crossing a month boundary).**
+
+- **TR-34 · as-of TASK OWNERSHIP (`pm_task_assignees` validity intervals)** — `senior-db` + `senior-be`
+  · **NEW 2026-07-30, escalated by TR-07 — a real design gap, see §15 ①.** Today `pm_task_assignees`
+  has no validity interval, so recomputing any past slice credits whoever owns the task **today**:
+  reassign in September and August's numbers move. This is the same history-rewrite that
+  `org_unit_memberships` closed for the *unit* axis, left open on the *ownership* axis. Files:
+  a migration adding `valid_from`/`valid_to` (+ the `EXCLUDE`/partial-unique treatment TR-03 used for
+  the one-open-row invariant), the dual-write in `pm.controller.ts` (close the old row, open the new
+  one, rather than DELETE+INSERT), and as-of owner resolution in
+  `src/modules/reports/fact-job.ts`. Deps: TR-01, TR-02, TR-07. **Sequence BEFORE P5 (appraisal).** ⚡
+  Done when: reassigning a task does NOT change a recomputed prior-day fact row; the as-of resolver
+  mirrors `resolveMembershipAsOf`'s semantics; the one-open-owner invariant is DB-enforced, not
+  code-enforced; a backfill opens one interval per existing row dated from the task's creation.
+
+- **TR-35 · per-day department for the discipline/effort metrics** — `senior-be`. **NEW 2026-07-31,
+  disclosed by TR-08 (§15).** #14 `capacity_utilization`, #18 `checkin_compliance` and #19
+  `time_logging_coverage` resolve the department ONCE as-of range-end, because their sources
+  (calendars, check-ins) carry no department — while every fact-sourced metric splits per-day. A
+  mid-month transfer therefore makes two metric families on the SAME report disagree about where
+  someone worked. Files: `src/modules/reports/report-rollups.ts` (resolve per-day via the existing pure
+  `resolveMembershipAsOf`). Deps: TR-08. ✅ **DEV-VERIFIED 2026-07-31** — `computeCalendarMetrics`'s
+  department-grain bucketing (checkin_compliance/time_logging_coverage/capacity_utilization) now
+  resolves via `resolveMembershipAsOf` per (user, day) instead of once at range-end; person/company
+  grain untouched (never depended on department). New DB suite (`report-rollups.db.test.ts`, "TR-35"
+  describe block) seeds a mid-week transfer and asserts the fact-sourced `effort.minutes_logged`
+  (department grain) and the calendar-sourced `discipline.time_logging_coverage` land on the SAME
+  per-department day counts, with the two departments' day-shares summing to the full range. Full
+  `src/modules/reports/` suite green (84 tests incl. the 5 new TR-35 cases) except
+  `fact-job.db.test.ts` (7 failing) — confirmed pre-existing/unrelated: fails identically in
+  isolation, caused by TR-34's in-flight `pm_task_assignees` interval migration
+  (`0063_pm_task_assignee_intervals.sql`, untracked) landing concurrently in the same working tree,
+  not by this ticket's diff (scoped to `report-rollups.ts` + its test file only).
+  Done when: a person transferring mid-range has their check-in compliance and utilization SPLIT across
+  both departments in the same proportion as their fact-sourced metrics; a test asserts the two families
+  agree on the split date.
 
 ### P2 — check-ins (4 tickets)
 
@@ -1059,28 +1334,50 @@ File paths are repo-relative to `gaiada-system/`.
 - **TR-13 · ReportDocument builder (live path)** — `senior-be`. Files:
   `src/modules/reports/document-builder.ts`, `reports.controller.ts` (document/overview/metrics).
   Deps: TR-07, TR-08.
-  Done when: all four grains × three period kinds build from facts/rollups/snapshots; ratios carry
-  n/d; comparison deltas correct across month boundaries; provider view slices by servedTenant.
-- **TR-14 · 0053 periods/documents** — `senior-db`. Files: `0053_report_periods_documents.sql` +
+  Done when: all four grains × **four** period kinds (day/week/month/**custom**) build from facts/
+  rollups/snapshots; ratios carry n/d; comparison deltas correct across month boundaries; provider
+  view slices by servedTenant.
+  **+ Custom ranges (2026-07-30 amendment): `periodKind=custom` requires `end`, computes live from
+  `report_work_facts` (never touches `rollup_metrics`, §0057 rule 3), sets `header.dayCount` +
+  `periodLabel` + every applicable `header.warnings` flag, and compares against the immediately
+  preceding equal-length window. Range validation per §6.2 (`end >= start` → 400; > 400 days → 422
+  `range_too_large`). Asserted: a custom range exactly equal to a calendar month yields numbers
+  IDENTICAL to that month's sealed document (the additivity proof), and a range with zero facts
+  returns an empty-but-valid document rather than an error.**
+- **TR-14 · 0057 periods/documents** — `senior-db`. Files: `0057_report_periods_documents.sql` +
   third-wall test. Deps: TR-06. ⚡
 - **TR-15 · sealing / amend / audit** — `senior-be`. Files: seal service + endpoints + outbox
   events. Deps: TR-13, TR-14. ⚡
   Done when: seal → stored docs at revision N; post-seal task edit changes live view but NOT the
   sealed document (pinned test); amend requires reason, notifies, re-seal writes N+1 keeping N;
   seal_hash verifies; double-seal → 409.
+  **+ Custom-range bars (§0057 rule 2): sealing a `period_kind='custom'` row → 422 with the explicit
+  message, never a silent skip (⚡QA asserts this specific bypass). Also owns the `periods/pin`
+  endpoint (rule 4): labelled, idempotent on the exact range, snapshottable, still appraisal-barred.**
 - **TR-16 · chart kit + viewer design** — `senior-uiux` (load the `dataviz` skill first —
   binding). Files: `platform-ui/src/components/reports/charts/*`, viewer layout. Deps: TR-13
   shapes (can start from the §6.1 contract).
   Done when: all §7 components render from document JSON alone; light/dark + print CSS verified;
   aria/data-table fallback present; zero external deps (CSP holds).
+  **+ The Daily/Weekly/Monthly/Custom period selector with a date-range picker + presets (Last 7/30/
+  90 · This & last quarter · YTD), x-axis bucketing that scales to `header.dayCount` (a 400-day range
+  renders ~13 monthly buckets, NOT 400 points), the `header.warnings` banner, and a comparison chip
+  naming the actual baseline window ("vs 16 Jun – 4 Jul"), plus the `pointInTime`/`distinctOver` KPI
+  labels from §5.4.**
 - **TR-17 · grain report pages + wiring** — `senior-fe`. Files: report routes per grain,
   `lib/reports.ts`. Deps: TR-13, TR-16.
   Done when: person/project/department/company pages render live + sealed states, revision picker,
   403 limited-access branch (rollups precedent), `BackendPending` for absent periods.
+  **+ The period selector is wired on all four grain pages with the range in the URL (shareable/
+  bookmarkable `?periodKind=custom&start=&end=`), and the 422 `range_too_large` renders as a usable
+  message ("narrow the range — max 400 days"), not a crash.**
 - **TR-18 · XLSX/CSV export service** — `medior`. Files: export service (`exceljs`), export
   endpoints. Deps: TR-13; OQ-2 ratified.
   Done when: XLSX sheets match §6.3; n/d columns present; 10k-row table exports under 5s;
   CSV matches DataTable conventions.
+  **+ The §5.4 class column on the `KPIs` sheet, and the `AD HOC · UNSEALED · as of <ts>` A1 banner +
+  `Provenance` sheet on any unsealed/custom-range export (⚡ asserted present — an unsealed export
+  that looks sealed is the failure mode that matters, since these packs get printed and circulated).**
 
 ### P4 — PDF + delivery (4 tickets)
 
@@ -1105,7 +1402,7 @@ File paths are repo-relative to `gaiada-system/`.
 
 ### P5 — appraisal (4 tickets)
 
-- **TR-23 · 0054 appraisal tables** — `senior-db`. Files: `0054_report_appraisals.sql` +
+- **TR-23 · 0058 appraisal tables** — `senior-db`. Files: `0058_report_appraisals.sql` +
   third-wall test + ack-append-only test. Deps: TR-14. ⚡
 - **TR-24 · appraisal engine + endpoints** — `senior-be`. Files:
   `src/modules/reports/appraisals.controller.ts` + engine (cohort percentile bands, weight
@@ -1114,6 +1411,9 @@ File paths are repo-relative to `gaiada-system/`.
   Done when: generate freezes weights+auto_inputs from sealed periods only (unsealed → 409);
   submit rejects commentary <50 chars and unjustified >±1-band deviations; ack trail append-only;
   amend of a pinned revision flips `evidence.stale` and blocks finalize until re-confirm.
+  **+ Generate rejects a `period_kind='custom'` covering period with 422 (§0057 rule 2) — an
+  appraisal must never rest on an ad-hoc range, and a silent skip would be worse than a hard failure
+  because it would produce a plausible-looking pack from the wrong evidence (⚡QA asserts it).**
 - **TR-25 · Cerbos policy set + rbac mirror** — `senior-be` · **opus·high** (subtle
   authz/tenancy: four resources × the §8 matrix incl. the cross-company served-dept derived role
   over `service_assignments`, the self-vs-manager-vs-HR person-data boundaries, and the OBO
@@ -1137,15 +1437,24 @@ File paths are repo-relative to `gaiada-system/`.
   (ModuleContract + §9.2 mcpTools), hub tool-defs test. Deps: TR-09, TR-13.
   Done when: hub aggregates the 6 tools; `checkin.submit` acts only as the OBO user; no appraisal
   or seal tool present; Cerbos parity on tool paths.
+  **+ The range params are in the tool schemas (`periodKind` incl. `custom`, `end`) so an agent can
+  ask for an arbitrary window, and the `reports.getMetrics` description states the ratio rule — an
+  agent averaging returned ratios is the same average-of-averages defect at the far end of the pipe.
+  The `periods/pin` write is deliberately NOT exposed over MCP (an agent should not be minting
+  archived management artifacts).**
 - **TR-29 · program reconciliation gate** — `qa`. Deps: all. ⚡ (the merge gate for the program)
   Done when: on a seeded multi-dept + shared-service dataset: Σperson ≤ Σdept == company with the
   unattributed bucket explicit; transfer mid-month attributes each half correctly; sealed-number
   immutability under post-hoc edits; PDF/XLSX/web/MCP all serve identical numbers for one document.
+  **+ Range equivalence proof: a custom range spanning exactly one calendar month returns numbers
+  identical to that month's sealed document, and a custom range spanning exactly 7 days matches the
+  corresponding weekly document — across all four grains. If those don't match, the additivity
+  invariant is broken somewhere and every arbitrary range in the product is quietly wrong.**
 - **TR-30 · docs + seed + registry sweep** — `junior` (Haiku). Files: `docs/modules/MODULES.md` +
   `CHANGELOG.md` bumps as phases land, `FRONTEND-BFF-CONTRACT.md` §15 status flips, demo seed
   extension (`npm run seed:agency` gains check-ins/facts). Deps: trailing each phase.
 
-**Totals:** P0=5 · P1=3 · P2=4 · P3=6 · P4=4 · P5=4 · P6=4 → **30 tickets**, 3 Opus-tagged
+**Totals:** P0=**8** · P1=**5** · P2=4 · P3=6 · P4=4 · P5=4 · P6=4 → **35 tickets** (TR-31/32/33 added during P0, TR-34/TR-35 during P1 — every one uncovered by a landed ticket rather than by design review; see §15), 3 Opus-tagged
 (TR-01 opus·medium, TR-07 opus·medium, TR-25 opus·high), 12 ⚡ QA-gated.
 
 ---
@@ -1158,17 +1467,26 @@ File paths are repo-relative to `gaiada-system/`.
 2. **Pre-TR-05 history gap:** person-grain completion facts start at consumer go-live; project
    grain backfills from 0040/0042 snapshots. First sealed month = first appraisal-grade month.
    Communicated in-product on any pre-go-live period.
-3. **Membership backfill approximation:** pre-adoption facts resolve to the person's *current*
+3. **A custom range straddles the honesty edges more often than a calendar period does** — partial
+   weeks/months, future end dates, pre-TR-05 start dates, and mid-range unit transfers. Mitigated by
+   the mandatory `header.warnings` flags (§6.1) rendered as viewer chrome AND carried onto exports;
+   the residual risk is a user ignoring the banner. Accepted: the alternative (refusing such ranges)
+   would make the feature useless for exactly the exploratory questions it exists to answer.
+4. **Membership backfill approximation:** pre-adoption facts resolve to the person's *current*
    unit (§3.2). Amendable via manual membership rows; disclosed on affected sealed documents.
-4. **Dual-write drift** (blob vs rows): mitigated by same-tx writes + the nightly drift guard;
+5. **Dual-write drift** (blob vs rows): mitigated by same-tx writes + the nightly drift guard;
    the authority flip is deferred until a zero-drift period is observed.
-5. **`UNIQUE NULLS NOT DISTINCT`** requires PG15+ — assert the Postgres version in migration 0052
+6. **`UNIQUE NULLS NOT DISTINCT`** requires PG15+ — assert the Postgres version in migration 0056
    (fail loud, not subtle).
-6. **On-time flag uses due date at compute time** — a due-date edit before the seal shifts it;
+7. **On-time flag uses due date at compute time** — a due-date edit before the seal shifts it;
    after the seal it cannot. Accepted and documented; per-completion due-date snapshots would need
    event payload enrichment (deferred).
-7. **Suite cost:** schema-per-file harness (~7 min full run) grows with the new suites — keep the
+8. **Suite cost:** schema-per-file harness (~7 min full run) grows with the new suites — keep the
    module's suites lean; the reconciliation gate (TR-29) is one file, not many.
+9. **Unbounded range scans:** the 400-day cap (§6.2) bounds the worst case, but a 400-day
+   company-grain read still scans every person×project row for that window. Mitigation is the
+   existing `ix_rwf_*` index set plus bucketed aggregation in SQL; if it proves slow in practice the
+   answer is a materialized monthly pre-aggregate, NOT raising the cap.
 
 **Deliberately deferred (out of v1):**
 - Per-unit / per-person calendars and per-tenant timezones (one tenant calendar + one deployment
@@ -1177,7 +1495,14 @@ File paths are repo-relative to `gaiada-system/`.
 - Appraisal calibration across managers (cross-cohort normalization meetings) — process, then
   maybe tooling.
 - Cycle-time / blocked-dwell metrics needing full status-history reconstruction (needs TR-05 data
-  accumulated first; add in a later metric wave).
+  accumulated first; add in a later metric wave). **Constraint for whoever picks this up (§5.4):
+  percentiles MUST be computed from a per-completion row store — one row per completed task with its
+  duration — never from `report_work_facts` daily aggregates and never by averaging daily
+  percentiles. "p85 of the daily p85s" is not a p85 of anything.**
+- **Quarterly / annual as real calendar kinds.** Covered for v1 by custom-range presets (This
+  quarter / YTD), which are live and exportable but never sealed. If quarterly *appraisal* cycles are
+  wanted (OQ-3 currently recommends monthly), a `'quarter'` `period_kind` + a quarterly seal flow is
+  the correct addition — not a pinned custom (§0057 rule 4).
 - Served-company appraisal visibility for provider leads (OQ-4).
 - Client-facing report delivery + branding (WS11/SM-22 territory).
 - Trigger-enforced immutability on sealed rows (service-only writer v1; revisit on second writer).
@@ -1212,3 +1537,327 @@ File paths are repo-relative to `gaiada-system/`.
 - Mobilize via `/army` per [[agent-army-standard]] (discussion-first; 1–2 concurrency; QA gates ⚡
   as marked). Build order: P0 → P1 → P2 ∥ P3 → P4 → P5 → P6, with TR-05 free to run parallel
   inside P0 and TR-16/TR-19 free to start early on contract stubs.
+
+---
+
+## 15. Amendment log
+
+**2026-07-30 · custom date ranges (owner requirement).** The period model was `day|week|month`
+only; the owner requires **daily / weekly / monthly AND a user-chosen arbitrary date range** as a
+first-class read across all four grains, including export. Changed:
+
+- **§0057 DDL** — `period_kind` gains `'custom'` + a `label` column (required for custom rows). The
+  plain `UNIQUE(tenant, kind, start)` is replaced by **two partial unique indexes**, because two
+  different custom ranges may legitimately share a start date (`Jan 1–Jan 31` vs `Jan 1–Mar 31`),
+  which the old key would have rejected: calendar rows keep exact one-row-per-start, pinned customs
+  dedupe on the exact range.
+- **§0057 semantics** — four rules added: transient customs create no row; customs are never sealed
+  and never appraisal-admissible (422, never a silent skip); customs never persist to
+  `rollup_metrics` (an unbounded range set would bloat the governed registry); pinning is the
+  deliberate, privileged archive path.
+- **§5.4 NEW · range additivity** — every metric classified additive / ratio / non-additive. **This
+  audit found two real defects that affect week and month too, not just custom ranges:** #20
+  `discipline.overdue_open` is point-in-time and would have been multiplied by the day count when
+  summed over a period (a 30-day report showing ~30× the true overdue count), and #22
+  `evidence.source_diversity` is a distinct-count that is not the sum of daily distinct counts. Both
+  fail *upward* — a bigger, more flattering number nobody questions — so both now carry explicit
+  aggregation rules, `ReportKpi` markers, and regression assertions on TR-08.
+- **§6.1 contract** — `periodKind` gains `'custom'`; header gains `dayCount`, `periodLabel`,
+  `customLabel`, an equal-length-preceding-window `comparison`, and a `warnings` block
+  (ad-hoc / partial-period / ends-in-future / precedes-fact-history / spans-membership-change).
+  `ReportKpi` gains `pointInTime` / `distinctOver`.
+- **§6.2 endpoints** — `end` param across document/overview/export/compliance; new
+  `POST /reports/periods/pin`; explicit validation block (400 on bad range, **422 `range_too_large`
+  past 400 days** — an unbounded user-chosen range is a trivial DoS on the fact scan); seal and
+  appraisal-generate documented as rejecting customs.
+- **§6.3 exports** — an unsealed/custom export is marked **on the artifact** (`AD HOC · UNSEALED ·
+  as of <ts>` in the PDF header/footer, A1 banner + `Provenance` sheet in XLSX), because this pack's
+  audience is management and a printed ad-hoc range is otherwise indistinguishable from the sealed
+  record. XLSX `KPIs` sheet gains the §5.4 class column.
+- **§7 charts** — the Daily/Weekly/Monthly/Custom selector + range picker with presets (Last 7/30/90,
+  this & last quarter, YTD), `dayCount`-scaled x-axis bucketing (400 days → ~13 monthly buckets, not
+  400 points), warnings banner, and a comparison chip naming the actual baseline window.
+- **§9.2 MCP** — range params in the tool schemas so agents can query arbitrary windows; the ratio
+  rule stated in `reports.getMetrics`'s description; `periods/pin` deliberately not exposed.
+- **§10 scheduling** — scheduled seals are calendar-only; the nightly fact job is what makes any
+  arbitrary range answerable as a query rather than a job.
+- **§12 tickets** — folded into existing tickets (TR-08, TR-13, TR-15, TR-16, TR-17, TR-18, TR-24,
+  TR-28, TR-29) rather than adding a phase. **Ticket count unchanged at 30**; TR-13 and TR-16 gain
+  the most scope. Quarterly/annual as real calendar kinds noted as deferred (presets cover v1).
+
+**2026-07-30 (TR-01 landed) · migration range REBASED +4, and three DDL defects fixed in flight.**
+
+`0050`–`0053` were consumed by concurrent work (`pm_short_codes`, its backfill fix,
+`pipeline_stage_idempotency`, `search_provider_incurred_cost`) while this doc was being written, so
+the block rebased: **TR-01 shipped as `0054_pm_task_assignees.sql`** and the range is now
+**0054–0059** (TR-03 → `0055`, TR-06 → `0056`, TR-14 → `0057`, TR-23 → `0058`, TR-08 → `0059`).
+Every §4 heading, DDL comment and ticket reference in this doc was renumbered accordingly.
+
+> **⚠ PROCESS RULE for every remaining migration ticket:** another session is adding migrations to
+> this repo concurrently. **Claim your number at implementation time** (`ls platform-nest/migrations
+> | tail -1`), do NOT trust the number written in this doc — it was already overtaken twice. If it
+> has moved again, take the next free number, ship, and record the rebase in
+> `platform-nest/migrations/README.md` as TR-01 did.
+
+Defects TR-01 found in this doc's own §4 DDL, all fixed in the shipped migration:
+
+1. **The backfill as specified would ABORT the migration on live data.** `validAssignee()`
+   (`pm.controller.ts:297`) only checks that `refId`/`responsibleId` are non-empty *strings* — never
+   that they are UUIDs or reference a real user. A person-kind blob with a non-UUID `refId` raises
+   invalid-input-syntax; a UUID absent from `users` raises an FK violation; either kills the whole
+   transaction. The shipped backfill resolves person refs defensively (UUID-shaped **and** present in
+   `users`), skips what it cannot represent, and reports the skip count — never inventing a person.
+2. **Missing tenant guard on the FK.** The doc specified `task_id uuid REFERENCES pm_tasks(id)`.
+   FK checks bypass row security on the referenced table, so that form accepts a row whose
+   `tenant_id` is tenant A while its `task_id` belongs to tenant B — and no RLS-scoped SELECT could
+   ever surface it. On the substrate every outcome credit and appraisal number derives from, that is
+   cross-tenant attribution smuggling. Replaced with a composite FK
+   `(task_id, tenant_id) → pm_tasks(id, tenant_id)`, exactly as `0027` closed this class on
+   `service_assignments.unit_id`, which required an additive `UNIQUE (id, tenant_id)` on `pm_tasks`
+   (cannot fail on existing data — `id` is already the PK). **Apply this same composite-FK form to
+   every remaining table in this program that references a tenant-scoped parent.**
+3. **Dual-representation drift was unconstrained** — a person row's `assignee_ref` and `user_id`
+   could disagree, the exact failure the table exists to eliminate. Now a CHECK.
+
+**`origin_site` inconsistency — settled here (TR-01 asked).** The pm_* precedent
+(0036/0038/0040/0041/0043/0044) declares `origin_site text NOT NULL` with **no default**, forcing the
+app to pass `config.originSite`; this doc had written `DEFAULT 'central'` on all six of its tables. A
+default is wrong under the sync engine's site/central topology — a site-originated row silently
+mislabels itself as central. **Ruling: `0055`–`0059` declare `origin_site text NOT NULL` with NO
+default.** `0054` keeps its default harmlessly (its only writer, the backfill, inherits `origin_site`
+from the parent task), but **TR-02's dual-write MUST pass `config.originSite` explicitly** rather than
+relying on it.
+
+**A harness trap TR-01 proved, which every later migration ticket must respect.** `initTestDb()` runs
+`migrate()` as the **superuser**, which bypasses RLS — so a backfill that silently no-ops in
+production still passes a normal test run. TR-01 verified this by mutating its own migration into the
+0050 failure mode: **11 of 12 tests still passed**, including the round-trip and idempotency tests.
+Only a test that re-executes the migration's own SQL through the app's NOSUPERUSER/NOBYPASSRLS role
+with no tenant GUC set catches it. `lint:migration-rls` does **not** catch this file either — its
+`createdHere` carve-out skips DML whose *target* is created in the same migration, but the risk here
+is on the *source* side (`pm_tasks`). **Every migration in this program that backfills must ship that
+NOBYPASSRLS-role test.** Also settled by TR-01: soft-deleted tasks ARE backfilled (attribution history
+should survive archiving), so **reporting queries must filter `pm_tasks.deleted_at` themselves**.
+
+**2026-07-31 (TR-08 landed, `0057_report_metric_seeds.sql`) · rulings + accepted limitations.**
+21 metrics seeded (#20 as `'last'`, #22 `seeded:false`), the 3 additive counters added by `ALTER TABLE`
+and populated by the fact job, provider registered, 79 reports-module tests green.
+
+- **RULING · metric #12 `effort.billable_share` is `appraisalSafe: false`.** §5's table showed 10 ✅
+  while the prose said "nine appraisal-safe" — my own inconsistency. TR-08 resolved it by marking #12
+  unsafe because §5 qualified it "safe at D/C; caution at P" and **appraisal packs are person-grain**,
+  which makes the count exactly 9. **Confirmed.** A person's billable share is a function of what work
+  they were handed, not how well they did it — scoring someone on it rewards whoever assigns the
+  billable work.
+- **ACCEPTED LIMITATION · #20 `overdue_open` over a PAST range reads today's task state** (there is no
+  task-state history table), so it is exact only when the range end is today. Combined with §15 ①'s
+  as-of-ownership gap, this is a second reason **sealing (TR-14) is the mechanism that makes historical
+  reports trustworthy** — an unsealed historical report is honest about *volume* but not about
+  *point-in-time state*. TR-13 must not present #20 on a past unsealed range without the
+  `header.warnings` chrome.
+- **⚠ INCONSISTENCY TO CLOSE · #14/#18/#19 resolve department once as-of range-END, not per-day.**
+  `report_work_facts` stores `department_node_id` **per day** (TR-07/TR-04), but these three metrics are
+  sourced from calendars/check-ins, which carry no department, so TR-08 resolved the unit once at range
+  end. Consequence: a person who transfers mid-month has their whole month's check-in compliance and
+  utilization attributed to the NEW department, while their fact-sourced metrics split correctly at the
+  transfer date — **two metric families on the same report disagreeing about where someone worked.**
+  The fix is cheap and the machinery exists (`resolveMembershipAsOf`, already pure and tested): resolve
+  per-day. Logged as **TR-35**; not a blocker for P2/P3, but it must land before any appraisal uses the
+  discipline axis.
+- Also accepted: #5 `milestone_hit_rate` reads "currently-done-and-due-in-range" (no `completed_at` on
+  `pm_milestones`) so it is not provably *on-time*; #7/#8/#10 read `is_done`/`is_blocked` at compute
+  time and apply them uniformly across a snapshot range. Both are documented in code.
+- **Bug TR-08 caught in its own work, worth remembering:** its first `compute()` ran four functions
+  concurrently over ONE shared `PoolClient` — the deprecated concurrent-`client.query()` pattern that
+  `pg` warns about. Fixed by sequencing the shared-client calls. Any future provider that fans out must
+  either sequence on a shared client or take its own connection.
+
+**2026-07-30 (TR-07 landed) · ARCHITECT RULINGS on the five findings it escalated.**
+
+**① The as-of OWNERSHIP hole — accepted as a real design gap, now ticket TR-34.** This design closed
+history-rewriting for *department membership* (`org_unit_memberships` with `valid_from`/`valid_to`) but
+left the identical hole open for *task ownership*: `pm_task_assignees` has no validity interval, so
+recomputing a past slice credits whoever owns the task **today**. Reassign a task in September and
+August's recomputed numbers move with it. That is precisely the failure the as-of membership table
+exists to prevent, and I missed it — the two axes needed the same treatment and only one got it.
+- **Mitigation that already exists:** sealing (§0057). A sealed period is frozen, so this can only
+  affect *unsealed* history. **Consequence: TR-14 (sealing) must NOT slip past the first period the
+  business intends to appraise on.** That reorders nothing today, but it removes TR-14's slack.
+- **Real fix: TR-34** — `valid_from`/`valid_to` on `pm_task_assignees` + as-of owner resolution in the
+  fact job, mirroring what TR-03/TR-04 did for units. Sequence it **before P5 (appraisal)**; it is not
+  required to make P1–P4 correct for current-state reporting.
+- **TR-29 must assert** a sealed document does not drift after a reassignment.
+
+**② Metric #3's denominator is not computable from the landed grain — RULING: add the counters, do not
+dilute the metric.** §5 defines `delivery.on_time_rate` as Σ on-time / Σ completed-**with-due-date**,
+but `report_work_facts` has no such counter. Redefining the denominator as `tasks_completed` (the
+tempting shortcut) would silently dilute the rate with tasks that never had a due date — a team that
+sets few due dates would score *better*, which inverts the metric's meaning. **TR-08 adds the missing
+additive counters** (`tasks_completed_with_due_date`, and the equivalent for #13
+`effort.estimate_accuracy`) to `report_work_facts` via an additive `ALTER TABLE` in its own migration,
+and the fact job populates them. They are additive counts, so this respects invariant 1 — this is the
+grain being completed, not violated.
+
+**③ §6.2's structured 422 body cannot ship as written — RULING: keep the flat shape.**
+`src/http-error.filter.ts` flattens every error to `{error, field?}`. Do **not** widen that shared
+filter for one endpoint — it is a global contract every controller depends on. Ship
+`{error:"range_too_large", field:"to"}` (as TR-07 did) and **mirror `maxDays` as a frontend constant**.
+TR-13 and TR-16 hit the same wall; this ruling covers them too.
+
+**④ New Cerbos kind `report_admin`** — §8's recompute row named no resource kind, and an unlisted kind
+is **denied by default**, so the endpoint would have 403'd for everyone. TR-07 added
+`cerbos/policies/resource_report_admin.yaml`, correctly tighter than `rollup_recompute` (`manager`
+excluded per §8). **TR-25 must fold it into the parity matrix.**
+
+**⑤ Foreign units are only partially identifiable — constraint for TR-13.** A foreign unit's
+`department_node_id` is carried **unrolled** (rolling it would need a cross-tenant org-blob read), and
+`report_work_facts` has no `unit_tenant_id` — so a foreign unit is identifiable only while the provider
+stamp is set, i.e. **not** when the service edge is suspended. **TR-13's department-grain reads must not
+assume every `unit_node_id` is local.** Related documented boundary (pinned by test): a person in a
+company with no service edge of any status is not discoverable and falls to precedence ③ — reading a
+stranger tenant's org tree would be a D5 violation, so this is correct, not a bug.
+
+**2026-07-30 · P0 COMPLETE (all 7 tickets landed and verified).** TR-01 (`0054` relational assignees
++ backfill) · TR-02 (dual-write + contributors API, 116/116 PM tests) · TR-03 (`0055` as-of
+memberships, `btree_gist` proven against the real role split) · TR-04 (pure `dept-resolution.ts` +
+org-PUT membership sweeper, full suite 114 files/1382 tests) · TR-05 (outbox consumer gaps: comments,
+docs, `is_done`-flag verbs) · TR-31 (actor propagation, 148/148) · TR-32 (contributors FE, 654/654).
+**Both blockers this program exists to close are closed:** person-grain attribution has a relational,
+indexable home, and department membership is time-aware so a transfer cannot rewrite history.
+
+**Three tickets were ADDED during P0, each uncovered by a landed ticket rather than by design review**
+— TR-31 (null-actor silent zero), TR-32 (contributors had no UI), TR-33 (backfilled rows get no exact
+person link). Worth noting as a pattern: every one is a *silent-wrong-answer* class defect, invisible
+to typecheck and to green tests. Expect P1–P6 to surface more of the same, and keep budgeting for it.
+
+**TR-31's deliberate non-attributions (do not "fix" these).** Not every event has a human actor, and
+inventing one is worse than leaving it null: `pm.task.spawned` (recurrence auto-spawn) is tagged
+`actorExternal: 'pm:recurrence-engine'`, `pm.tracker.run` (AI-authored comment) `'pm:ai-tracker'`, and
+meetings' async post-transcription + admin relink-sweep emits stay actor-less. Attributing those to
+whoever last clicked a button would credit a person for machine work — in an appraisal pack. The fact
+job (TR-07) must therefore treat `actor_user_id IS NULL` as *excluded from person attribution*, never
+as a row to guess an owner for.
+
+**2026-07-30 (TR-04 landed) · RULING: cross-company placement vs the provider stamp.** TR-04 asked
+whether precedence ② should resolve a person's unit when they are placed in another company's org blob
+with **no ACTIVE `service_assignments` row** — §3.2 gated only the *stamp* on an active assignment, not
+the base resolution. **Confirmed: TR-04's literal reading is correct and stands.** The two things
+answer different questions. The org blob says where a person *actually sits* — that is their home unit
+regardless of any commercial relationship, and their work must still roll up somewhere rather than
+falling into the unattributed bucket. `service_assignments` governs whether one company's unit is
+operating a module **for another company**, which is exactly what the provider *stamp*
+(`provider_tenant_id` / `provider_unit_node_id`) represents — so that, and only that, requires an
+ACTIVE edge. A suspended or revoked assignment must therefore stop the served-company provider view
+without orphaning the person's own department numbers. Do not "fix" this later by falling through to
+③/④ when an assignment is inactive; that would silently move a person's history between departments
+when a commercial edge is suspended, which is precisely the history-rewriting the as-of membership
+table exists to prevent.
+
+**2026-07-30 (later, soundness pass) · substrate-constraint correction.** Verifying the amendment
+against the code found that the two new aggregation rules it invented (`point_in_time`,
+`distinct_over_range`) would have **violated `metric_definitions.aggregation_rule`'s CHECK**
+(`0001_core.sql:83` allows only `sum | ratio_of_sums | max | last`) and thus **failed migration 0059
+at apply time**. Corrected: #20 seeds as **`'last'`** (an exact semantic fit already in the
+vocabulary) and #22 is **not seeded at all** — it becomes a read-time derived `ReportKpi`
+(`distinctOver: true`), because no allowed rule expresses a distinct-union and `'max'` is wrong
+rather than merely imprecise. The seeded count is therefore **21**, the range-class stays a TS-catalog
+field, and the shared CHECK is left untouched. Also verified in the same pass: Postgres is
+**17**-alpine (`UNIQUE NULLS NOT DISTINCT` and built-in `gen_random_uuid` both fine), HR migration
+0028 genuinely has **no** working-calendar table (only `hr_leave_requests` / `hr_attendance`), and
+migrations 0048/0049 are indeed consumed. **~~Open verification item~~ → CLOSED by TR-03 (2026-07-30):** `btree_gist` was untested ground (no
+migration in this repo had ever run `CREATE EXTENSION`). TR-03 proved it against the **real role
+split**, not the superuser harness which would have proven nothing: a fresh database owned by
+`platform_owner` (NOSUPERUSER, NOBYPASSRLS), `migrate` run as that role → **all 55 migrations applied
+clean, `btree_gist 1.7` installed, EXCLUDE constraint + FORCE RLS present, re-migrate a clean
+no-op.** The extension's `trusted` flag (PG13+) plus `platform_owner` owning the database (hence
+`public`, on PG17's `pg_database_owner` model) is sufficient. **No superuser escalation needed, no
+design change.**
+
+**2026-07-30 (TR-07 landed) · the fact fabric computes; two substrate findings TR-08 must absorb.**
+
+`src/modules/reports/fact-job.ts` + `POST /api/:t/reports/facts/recompute` ship the atomic grain.
+Decisions taken in flight, each recorded here because a later ticket would otherwise have to
+re-litigate it:
+
+1. **Fact row ids are DETERMINISTIC (uuid v5 over the row's own UNIQUE key), not `newId()`/uuid v7.**
+   The acceptance bar is "recompute twice → byte-identical rows"; with a v7 id the id column changes
+   on every nightly run, so "byte-identical" could only ever be asserted on a subset of columns and
+   any downstream reference to a fact id would break nightly. `computed_at` and `job_run_id` are the
+   two deliberate exceptions — invariant 5 requires `job_run_id` to identify the run that wrote the
+   row, so a stable one would defeat its only purpose. The idempotency test asserts BOTH halves
+   (everything else identical, those two moved), because a second run that silently no-op'ed would
+   also have passed a plain equality check.
+2. **⚠ METRIC #3 IS NOT COMPUTABLE FROM THE LANDED GRAIN — TR-08 decides.** §5 specifies
+   `delivery.on_time_rate` = Σ on-time / Σ **completed-with-due-date**, but `report_work_facts` (0056)
+   carries `tasks_completed` and `tasks_completed_on_time` and **no `tasks_completed_with_due_date`
+   counter** — so the specified denominator does not exist, and it cannot be derived from the two
+   that do. The job stores the honest numerator (completed with a due date, on or before it) and
+   counts a due-date-less task in `tasks_completed` but in NEITHER on-time nor late. TR-08's options
+   are exactly two: (a) add the missing additive counter in its own migration (0059) and have the job
+   populate it — the correct fix, and cheap while nothing has been sealed yet; or (b) redefine the
+   metric's denominator as Σ `tasks_completed`, which silently DILUTES the rate for any team that
+   doesn't set due dates and therefore fails *downward* rather than upward. Do not seed #3 against
+   `tasks_completed` without recording that choice here. The same shape of gap affects #13
+   (`estimate_accuracy` wants Σ estimates of completed tasks that have BOTH an estimate and actual
+   minutes; the grain has `estimate_minutes_completed` and `minutes_logged` on separate axes).
+3. **§6.2's structured 422 body cannot ship as written.** `src/http-error.filter.ts` reshapes EVERY
+   `HttpException` to `{error}` (+ an optional `field`) for Fastify-core contract parity, so
+   `{error:"range_too_large", maxDays:400}` reaches the wire as `{error:"Unprocessable Entity
+   Exception"}`. TR-07 ships `{error:"range_too_large", field:"to"}` — the machine-readable code is
+   preserved verbatim and `field` names the offending input, both existing conventions. **TR-13/TR-16
+   hit the identical wall** on the read endpoints' 422; either widen the shared filter (a
+   cross-cutting contract change, needs the architect) or mirror `maxDays` as a FE constant. Not
+   TR-07's call to make unilaterally.
+4. **New Cerbos kind `report_admin` (action `recompute`).** §8's "facts recompute / calendars" row had
+   no resource kind among the four the design names, and an unlisted kind is denied by default — the
+   endpoint would have been 403 for everyone including a group executive. Modelled on
+   `resource_rollup_recompute.yaml` but TIGHTENED to §8's matrix: `manager` (dept lead) is excluded,
+   because a lead who can re-derive a window can move numbers feeding their own team's appraisal
+   inputs. **TR-25 must fold this kind into the parity matrix.**
+5. **Deliberate attribution axes, so no later ticket "fixes" them into a double-count.** Task OUTCOME
+   measures (`tasks_completed*`, `estimate_minutes_completed`, `tasks_reopened`, `tasks_created`) use
+   owner-takes-all off `pm_task_assignees`. EFFORT (`minutes_*`) resolves on the LOGGING person's own
+   as-of unit — precedence ②, never ① — because using the owner-unit rule there would move a
+   shared-service person's hours into the served company's department and erase the provider stamp
+   §3.2 requires for exactly that case. EVIDENCE (`comments_authored`, `docs_updated`,
+   `activity_*`) resolves on the ACTOR. A same-day complete→reopen→complete ping-pong counts as ONE
+   completion and ONE reopen (per-day booleans, not event counts), so a status ping-pong cannot
+   inflate throughput.
+6. **Cross-company resolution has a BOUNDARY, and it is not a bug.** Provider tenants are discovered
+   only through `service_assignments` read from the served side (0026's `sa_select` allows either
+   side), unfiltered by status per the TR-04 ruling — so a suspended/revoked/proposed edge still
+   resolves the person's own unit. A person sitting in a company with **no edge of any status** is
+   not discoverable at all and falls to ③; reading a stranger company's org tree from this tenant's
+   scope would be a D5 violation. Pinned by test.
+7. **`department_node_id` is not rolled for a FOREIGN unit.** Rolling a division to its ancestor
+   department needs that tenant's own `company_org_structure`, which this slice's single-tenant
+   transaction cannot read. A cross-company unit is therefore carried through unrolled. Safe for the
+   surfaces that read it (the provider view reads `{unit, servedTenant}` off the `provider_*` columns
+   via the rollup engine, the D12-sanctioned path), but note the related gap: `report_work_facts` has
+   **no `unit_tenant_id` column**, so a row whose `unit_node_id` belongs to another tenant is only
+   identifiable as foreign when the provider stamp is set — i.e. not when the edge is suspended.
+   TR-13's department-grain reads must not assume every `unit_node_id` is a node in the reading
+   tenant's own tree.
+8. **The job is n8n-driven, not timer-driven** (§10: platform-nest gains no scheduler). `main.ts` is
+   untouched; `runNightlyFactJob()` exists as the ops/CLI entry point and gates each tenant on
+   `isModuleEnabled(tenant,'reports')`.
+9. **Dev-env note.** Cerbos runs with `watchForChanges: true`, but a NEW policy file added under a
+   Windows Docker bind mount is not picked up by the watcher — `docker restart gaiada-cerbos-1` is
+   required locally, or every check against the new kind silently returns `EFFECT_DENY`.
+10. **⚠ ATTRIBUTION IS CURRENT-STATE, NOT AS-OF — the one history-rewrite this program has NOT closed.**
+   `org_unit_memberships` made the DEPARTMENT axis time-aware, but `pm_task_assignees` has no
+   validity interval: it is mutable current state. So recomputing a historical slice attributes that
+   day's completions to whoever owns the task **today**, not whoever owned it when it completed.
+   Reassign a finished task next month and a re-run of last month's slice silently moves that
+   completion to the new owner — the exact class of defect the as-of membership table exists to
+   prevent, on a different axis. Not fixable inside TR-07: the history does not exist in the
+   substrate to read. Three things bound it, and whoever picks this up should know which: (a)
+   **sealing is the real mitigation** — §0057 + §5.2 point 8 already rule that appraisal numbers come
+   from a pinned `(period, revision)` snapshot, so a post-seal reassignment cannot move an appraisal
+   score; (b) the exposure is therefore the window between the event and the period seal, plus any
+   ops/live read of an unsealed past period; (c) closing it properly means giving
+   `pm_task_assignees` `valid_from`/`valid_to` the way `org_unit_memberships` has them, and having
+   the job resolve the owner as-of `fact_date` — a schema + dual-write change, i.e. its own ticket.
+   **TR-14 must not be deferred past the first period the business intends to appraise on**, and
+   TR-29's reconciliation should assert a sealed document does not drift when a task is reassigned
+   afterwards.

@@ -19,6 +19,7 @@ import {
   handleBudgetOverspend,
   handleBudgetThreshold,
   handleCampaignProposed,
+  handleIncurredCost,
   handleRankDropped,
   handleReportDelivered,
   handleReportReady,
@@ -64,6 +65,14 @@ const searchRollups: RollupProvider = {
     // formerly-simulated environment, whose synthetic history must not be counted as cash; and a
     // simulate-mode instance is a demo throughout, where reporting the simulated total is the
     // useful and honest answer.
+    //
+    // SM-50 (addendum §A11.2 #5) — STATUS-BLIND ON PURPOSE, stated so no future reader "fixes" it:
+    // this sum has no status predicate, so it INCLUDES `incurred` rows — charges a vendor made for
+    // calls that returned no data. That inclusion is CORRECT: this metric is cost-to-serve, and a
+    // charge that bought nothing is still a cost. Excluding it would under-report real spend to the
+    // exec rollup, which is the one surface least able to sanity-check the figure. If you want to see
+    // work delivered rather than money spent, count `completed` rows on a DIFFERENT metric (§A11.2 #12
+    // carries that standing note into SM-22) — do not narrow this one.
     const providerCost = await client.query<{ n: string }>(
       `SELECT COALESCE(sum(cost_usd), 0) AS n FROM search_provider_calls
         WHERE date_trunc('month', created_at) = date_trunc('month', $1::date)
@@ -103,6 +112,20 @@ export const searchModule: ModuleContract = {
     "0034_module_search.sql", "0035_integration_connections_search_providers.sql",
     "0045_search_audit_ingest.sql", "0046_search_ai_drafts.sql",
     "0047_search_provider_simulation.sql", "0048_search_capability_provenance.sql",
+    // SM-50 (addendum §A11): `incurred` status + `vendor_ref`. Listed here at write time on purpose —
+    // 0047 was omitted from this array and had to be fixed after the fact.
+    "0053_search_provider_incurred_cost.sql",
+    // SM-25a (addendum §A12): in-flight Google authorization requests (sealed PKCE verifier,
+    // single-use). Registered here at write time for the same reason 0053 says so — 0047's omission
+    // from this array had to be fixed after the fact.
+    "0060_search_google_oauth_states.sql",
+    // SM-25b (addendum §A12): GSC Search Analytics + GA4 runReport performance tables. Registered
+    // here AT WRITE TIME, for the identical reason the two comments immediately above say so — 0047's
+    // omission from this array is this module's own repeated lesson, not a one-off.
+    "0061_search_google_performance.sql",
+    // SM-20 (design §12): search-terms sync — the Ads-Scripts webhook's per-term daily table.
+    // Registered here AT WRITE TIME, same standing lesson as every comment immediately above.
+    "0062_search_search_terms.sql",
   ],
   permissions: [
     { key: "search:engagement:read", description: "View search-marketing engagements/properties/KPI targets" },
@@ -127,8 +150,23 @@ export const searchModule: ModuleContract = {
   // every other tool below is a genuine informational stub: the shape mcp-hub aggregates today so
   // `/mcp/tool-defs` lists `search.*` now, with method/pathTemplate added by the ticket that
   // implements its handler (noted per tool). Paid pulls are write:true+impact:'medium' EVEN
-  // THOUGH they're semantically reads (design §07/D-5 — spending money is a mutation, routes
-  // through the D14 automation-write gate); live-account mutations are always impact:'high'.
+  // THOUGH they're semantically reads (design §07/D-5 — spending money is a mutation);
+  // live-account mutations are always impact:'high'.
+  //
+  // ⚠️ CORRECTED per addendum §A13.6 (tracker §6ad): this comment used to add "routes through the
+  // D14 automation-write gate", and that clause is SUPERSEDED. It was never true and it was
+  // actively misleading, because `impact` is never reached for an n8n caller: every automation
+  // principal is minted `assurance: "low"` by construction (mcp-hub/src/principal.ts), and
+  // `permits()` checks assurance BEFORE both the allow-list and the impact gate — so a `verified`
+  // write tool is refused outright, long before `impact` is consulted.
+  //
+  // The stale clause did real harm: an agent read it as licence to lower `minAssurance` so an n8n
+  // flow could reach a paid pull, and left that instruction in a workflow file for the next agent
+  // (removed by SM-55). `impact:'medium'` REMAINS — as risk classification for agent-surface
+  // gating, approvals rows and console display — but it is NOT a claim that automation can enter
+  // here. **Automation must never trigger a paid pull**; recurring cadence is a platform-side
+  // scheduler job (SM-54) authorized by the human-written `tool_scope`, and no allow-list may ever
+  // include a money-spending tool.
   mcpTools: [
     {
       name: "search.listEngagements",
@@ -287,11 +325,19 @@ export const searchModule: ModuleContract = {
       },
     },
     {
+      // SM-30: real binding. Exports an APPROVED, mode='manual' change proposal as an Ads-Editor-
+      // ready CSV `files` artifact (no live side effect — the manual-mode twin only; an api-mode
+      // proposal is refused here and executes exclusively via SM-21's one-shot approvalId path).
+      // Marking a proposal applied ("a human attests they applied it by hand") is DELIBERATELY NOT
+      // an MCP tool at all — see search.controller.ts's markChangeProposalApplied for why an
+      // automation principal self-attesting a human action would be a lie-generator, not a shortcut.
       name: "search.exportProposal",
-      description: "Export an approved change proposal as an Ads-Editor-ready artifact (manual-mode twin; no live side effect; stub — real logic lands with SM-30)",
+      description: "Export an approved, manual-mode change proposal as an Ads-Editor-ready CSV artifact (no live side effect, SM-30; real binding)",
       minAssurance: "verified",
       write: true,
       impact: "low",
+      method: "POST",
+      pathTemplate: "/api/:tenantId/modules/search/change-proposals/:proposalId/export",
       inputSchema: { type: "object", properties: { tenantId: { type: "string" }, proposalId: { type: "string" } }, required: ["tenantId", "proposalId"] },
     },
     {
@@ -350,6 +396,9 @@ export const searchModule: ModuleContract = {
   // (search.backlinks.lost_spike) deliberately left unwired (no Backlinks tab exists yet).
   eventHandlers: {
     "search.provider.budget_threshold": handleBudgetThreshold,
+    // SM-50 (addendum §A11.2 #11): a vendor charge that delivered no data must reach a human, not only
+    // the budget sums. Producer: providers/dispatch.ts's compensating write.
+    "search.provider.incurred_cost": handleIncurredCost,
     "search.audit.completed": handleAuditCompleted,
     "search.audit.regression": handleAuditRegression,
     "search.rank.dropped": handleRankDropped,

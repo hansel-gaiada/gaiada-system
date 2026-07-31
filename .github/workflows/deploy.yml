@@ -61,6 +61,24 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # /VERSION is the single source of truth for the app version (docs/modules/VERSIONING.md).
+      # The tag must be its lowercased, hyphenated form — a mismatch means someone tagged without
+      # bumping, which would deploy a build that misreports itself on GET /health.
+      - name: Resolve and verify app version
+        id: version
+        run: |
+          set -euo pipefail
+          APP_VERSION="$(tr -d '\r' < VERSION | head -1 | xargs)"
+          expected="$(echo "$APP_VERSION" | tr '[:upper:] ' '[:lower:]-')"
+          echo "VERSION file : $APP_VERSION"
+          echo "expected tag : $expected"
+          echo "actual tag   : $TAG"
+          if [ "$TAG" != "$expected" ]; then
+            echo "::error::Tag '$TAG' does not match /VERSION ('$APP_VERSION' => '$expected'). Bump /VERSION or retag."
+            exit 1
+          fi
+          echo "app_version=$APP_VERSION" >> "$GITHUB_OUTPUT"
+
       - name: Install cosign
         uses: sigstore/cosign-installer@v3
 
@@ -132,7 +150,7 @@ jobs:
       - name: Pull images
         run: |
           set -euo pipefail
-          ssh vps "cd '${DEPLOY_DIR}/infra/compose' && GAIADA_TAG='${TAG}' GHCR_OWNER='${OWNER}' \
+          ssh vps "cd '${DEPLOY_DIR}/infra/compose' && GAIADA_TAG='${TAG}' GHCR_OWNER='${OWNER}' APP_VERSION='${{ steps.version.outputs.app_version }}' \
             COMPOSE_PROFILES='${COMPOSE_PROFILES}' docker compose ${COMPOSE_FILES} pull"
 
       # Migrations run from the newly pulled platform image, as platform_owner
@@ -140,20 +158,20 @@ jobs:
       - name: Run migrations
         run: |
           set -euo pipefail
-          ssh vps "cd '${DEPLOY_DIR}/infra/compose' && GAIADA_TAG='${TAG}' GHCR_OWNER='${OWNER}' \
+          ssh vps "cd '${DEPLOY_DIR}/infra/compose' && GAIADA_TAG='${TAG}' GHCR_OWNER='${OWNER}' APP_VERSION='${{ steps.version.outputs.app_version }}' \
             COMPOSE_PROFILES='${COMPOSE_PROFILES}' docker compose ${COMPOSE_FILES} run --rm --no-deps platform node dist/db/migrate.js"
 
       - name: Start services
         run: |
           set -euo pipefail
-          ssh vps "cd '${DEPLOY_DIR}/infra/compose' && GAIADA_TAG='${TAG}' GHCR_OWNER='${OWNER}' \
+          ssh vps "cd '${DEPLOY_DIR}/infra/compose' && GAIADA_TAG='${TAG}' GHCR_OWNER='${OWNER}' APP_VERSION='${{ steps.version.outputs.app_version }}' \
             COMPOSE_PROFILES='${COMPOSE_PROFILES}' docker compose ${COMPOSE_FILES} up -d --no-build --remove-orphans"
 
       - name: Wait for health
         id: health
         run: |
           set -euo pipefail
-          ssh vps "cd '${DEPLOY_DIR}/infra/compose' && GAIADA_TAG='${TAG}' GHCR_OWNER='${OWNER}' \
+          ssh vps "cd '${DEPLOY_DIR}/infra/compose' && GAIADA_TAG='${TAG}' GHCR_OWNER='${OWNER}' APP_VERSION='${{ steps.version.outputs.app_version }}' \
             COMPOSE_PROFILES='${COMPOSE_PROFILES}' COMPOSE_FILES='${COMPOSE_FILES}' bash -s" <<'REMOTE'
           set -euo pipefail
           C="docker compose ${COMPOSE_FILES}"

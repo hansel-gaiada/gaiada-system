@@ -38,6 +38,41 @@ realm and clients (below), then flip `PLATFORM_AUTH_MODE=oidc` and restart the p
 re-run them against a fresh Keycloak to reproduce. A realm-export JSON can be dropped in
 `infra/compose/keycloak/` for `--import-realm` on first boot once finalized.
 
+## The `google-dev` client — a local OAuth issuer for the search module (SM-51, addendum §A12.3)
+
+The search-marketing department reaches Google Search Console / GA4 / Ads by **per-client OAuth**.
+Obtaining a Google OAuth client gates **acceptance** (SM-41G), not construction — the whole
+authorization-code + PKCE machine path is exercisable against this realm.
+
+```bash
+# idempotent; prints the GOOGLE_OAUTH_* values to paste into platform-nest/.env
+KEYCLOAK_ADMIN_PASSWORD=<admin pw> python infra/compose/keycloak/provision-google-dev-client.py
+```
+
+It creates a **confidential** client (`google-dev`) with authorization-code flow, **PKCE S256
+required**, one exactly-registered redirect URI (no wildcard — matching Google's own rule), refresh
+tokens, and RFC-7009 revocation. Then set `SEARCH_ALLOW_PRIVATE_GOOGLE_ENDPOINT=1`: in live mode the
+platform **refuses to boot** when a Google endpoint names a private/loopback host, because such a stack
+would seal credential-vault rows and stamp them `linked` from an issuer that is not Google. Setting the
+flag is the deliberate local opt-in; it is a lexical accident guard, not an authz control.
+
+Users come from `provision-dev-users.py` (password `Passw0rd!`). Drive the flow end to end with
+`KEYCLOAK_OAUTH_TEST=1 GOOGLE_DEV_CLIENT_SECRET=<secret> npx vitest run
+src/modules/search/google/google-oauth-keycloak.test.ts` — it performs a real login form POST, a real
+refresh-rotation chain, and a real client-authenticated revoke.
+
+> **A green round trip here validates our OAuth machinery against a real issuer. It does NOT validate
+> the Google integration.** Keycloak cannot rehearse Google's consent screen, incremental consent or
+> scope semantics; refresh-token longevity under an app's publish status (a Testing-mode Google app's
+> refresh tokens expire in **7 days**); Google-side revocation; quota/429 behaviour; or the Ads
+> developer-token approval and MCC/login-customer-id semantics. Those are **SM-41G**
+> (`docs/blueprints/seo-sem-execution-tracker.md` §6x.3).
+
+Gotcha worth knowing before you edit the script: Keycloak stores `CLIENT.DESCRIPTION` as
+`varchar(255)`, and a longer value fails the admin POST as an opaque **HTTP 500 `unknown_error`** —
+diagnosable only from `docker logs gaiada-keycloak-1`. Same field-length class as the realm-import
+comment-field fix.
+
 ## Auth-mode cutover
 
 `AUTH_MODE=dev` (x-user-id header) is for local/tests only. Set `PLATFORM_AUTH_MODE=oidc`

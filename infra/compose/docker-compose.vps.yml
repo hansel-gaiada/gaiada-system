@@ -317,6 +317,9 @@ services:
       OTEL_ENABLED: ${OTEL_ENABLED:-0}
       OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4318}
       OTEL_SERVICE_NAME: platform
+      # App version (docs/modules/VERSIONING.md), surfaced by GET /health. deploy.yml sets this
+      # from /VERSION so a running box can always be asked what it is.
+      APP_VERSION: ${APP_VERSION:-}
     volumes:
       - platform-files:/data/files
     # SM-45: gives depends_on: condition: service_healthy something to attach to. GET /health is
@@ -429,6 +432,7 @@ services:
       # SERVICE_ASSIGNMENTS_ENABLED so the Connect-service UI surfaces only when the backend
       # actually serves it (writes 409 while off).
       SERVICE_ASSIGNMENTS_ENABLED: ${SERVICE_ASSIGNMENTS_ENABLED:-}
+      APP_VERSION: ${APP_VERSION:-}
     ports:
       - "3005:3005"
     depends_on:

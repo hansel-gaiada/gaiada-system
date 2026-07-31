@@ -39,6 +39,30 @@ and can be run standalone (`node dist/db/migrate.js`).
    Per rule 5, **ORG-10's `module_hr` migration is rebased to `0028_module_hr.sql`** (not `0027` as
    previously recorded here). Whoever picks up ORG-10 next: use `0028`, and check this file again
    first in case a later ticket has since drawn that down too.
+   **2026-07-30 update (tracker/reporting program, TR-01):** the tracker/reporting design doc
+   (`docs/blueprints/tracker-reporting-foundation.md` §4) reserved **0050–0055** off a then-current
+   ledger head of 0049. All four of 0050–0053 were consumed out of band before TR-01 executed
+   (`0050_pm_short_codes.sql`, `0051_pm_short_codes_backfill_fix.sql`,
+   `0052_pipeline_stage_idempotency.sql`, `0053_search_provider_incurred_cost.sql`). Per rules 3+5
+   the whole program block is therefore **rebased by +4 to 0054–0059**: TR-01 `pm_task_assignees`
+   = `0054` (**merged**), TR-03 `org_unit_memberships` = `0055`, TR-06 reports core = `0056`,
+   `report_periods`/`report_documents` = `0057`, appraisal tables = `0058`, metric seeds = `0059`.
+   The design doc's §4 headings still say 0050–0055 and have NOT been rewritten — treat this file,
+   not the doc, as authoritative for numbers, and re-check it before writing DDL in case a later
+   ticket has drawn one of 0055–0059 down too.
+   **2026-07-30 update (TR-08, metric seeds).** The reservation table above assigns `0057` to
+   TR-14 (`report_periods`/`report_documents`), `0058` to TR-23 (appraisal tables), and `0059` to
+   TR-08 (metric seeds). TR-08 executed FIRST in this session's actual timeline — TR-14/TR-23 have
+   not been implemented yet — so per rule 5 ("coordinate numbers across parallel tickets... the
+   second to merge bumps to the following free slot") and the design doc's own §15 PROCESS RULE,
+   TR-08 re-checked `ls migrations | tail` at implementation time, found head = `0056_module_
+   reports_core.sql` with **`0057` still free**, and took it: **TR-08 shipped as
+   `0057_report_metric_seeds.sql`**, NOT `0059`. Whoever implements TR-14 next: `0057` is now
+   TAKEN — re-run `ls migrations | tail` and take the next genuinely free number (likely `0058`,
+   but verify; TR-23 may have landed first). This is the second rebase-in-flight this program has
+   hit (see the entry immediately above for the first) — the pattern is structural, not
+   accidental: multiple sessions add migrations concurrently, so ONLY `ls`, never a doc or this
+   file's own reservation table, is authoritative at the moment you actually write DDL.
 3. **Duplicate prefixes are FORBIDDEN going forward.** Two files must never share a numeric prefix.
    (See the grandfather clause for the two historical exceptions.)
 4. **Never rename, renumber, edit, or delete a migration that has been applied to any database.**
@@ -77,3 +101,24 @@ Accepting the ordering is ledger-safe, requires no stateful surgery on the dev D
 
 Verification is repeatable: create a fresh DB owned by `platform_owner`, point `MIGRATE_DATABASE_URL`
 at it, run `node dist/db/migrate.js`, confirm the ordered `applied:` list and exit 0, then drop it.
+
+   **2026-07-30 update (SM-51, search Google OAuth) — `0060` is TAKEN.** The search-marketing
+   programme landed `0060_search_google_oauth_states.sql` and it is applied. It deliberately skipped
+   past the TR reservation rather than drawing `0058`/`0059` down: those two are still reserved for
+   TR-23 (appraisal tables) and — per the TR-08 note above — the reservation block, so taking the
+   **first slot beyond the reservation** avoids a third rebase-in-flight for a program that has
+   already been rebased once. **Next unused is `0061`.**
+
+   Standing note for anyone about to write DDL, learned the hard way twice this session: two
+   different search tickets were briefed with a stale number by their own coordinator (`0049` when
+   `0049`–`0052` were already applied; `0057` when it had been consumed mid-ticket). Both agents
+   checked `schema_migrations` **and** this file instead of trusting the instruction, which is the
+   only reason neither collided with a live ledger row. **Re-check both immediately before writing —
+   an instruction naming a number is a hint, not a fact.**
+
+   **2026-07-31 update (TR-34, as-of task ownership) — `0063` is TAKEN.** `ls migrations | tail`
+   showed head files through `0057_report_metric_seeds.sql` plus `0060`–`0062` (search-marketing,
+   landed per the note above). `0058`/`0059` remain reserved for TR-23/TR-14 and were deliberately
+   NOT filled. TR-34 shipped as `0063_pm_task_assignee_intervals.sql` (validity intervals on
+   `pm_task_assignees`' owner/responsible roles — the ownership-axis counterpart to `0055`'s
+   unit-axis history-rewrite fix). **Next unused is `0064`.**

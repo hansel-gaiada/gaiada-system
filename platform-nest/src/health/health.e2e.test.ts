@@ -20,4 +20,13 @@ describe("health (nest port stage 1)", () => {
     expect(body.ok).toBe(true);
     expect(Array.isArray(body.modules)).toBe(true);
   });
+
+  // docs/modules/VERSIONING.md: the deployed build must be able to state its own app version.
+  // Unset reports "unknown" rather than a stale default, so a mis-wired deploy is visible.
+  it("GET /health reports the app version", async () => {
+    const res = await app.inject({ method: "GET", url: "/health" });
+    const body = res.json() as { version: string };
+    expect(typeof body.version).toBe("string");
+    expect(body.version).toBe(process.env.APP_VERSION?.trim() || "unknown");
+  });
 });

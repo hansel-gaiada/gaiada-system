@@ -25,23 +25,26 @@
 // referenced row through the SAME tenant+module-scoped connection `c` the mutation runs in, so a
 // cross-tenant id resolves to zero rows (rejected with 400) before it ever reaches the INSERT/UPDATE.
 import {
-  BadRequestException, Body, Controller, Delete, Get, HttpCode, NotFoundException, Param, Patch, Post, Put, Query, Req, UseGuards,
+  BadRequestException, Body, Controller, Delete, Get, HttpCode, NotFoundException, Param, Patch, Post, Put, Query, Req, UnauthorizedException, UseGuards,
 } from "@nestjs/common";
 import type { FastifyRequest } from "fastify";
 import type { PoolClient } from "pg";
 import { newId, withTenants } from "../../db";
 import { config } from "../../config";
 import { authorize, writeActivity } from "../../core/http";
+import { secretEquals } from "../../core/secret-box";
 import { validateCustomFields } from "../../core/custom-fields";
 import { emitEvent } from "../../events/outbox.service";
 import { AuthGuard } from "../../auth/guards";
 import { ModuleEnabledGuard } from "../module-enabled.guard";
 import { isScopePreset, seedToolScope, type ScopePreset } from "./scope-presets";
+import { isCadence } from "./cadence";
 import { projectMonthlyCost } from "./providers/dispatch";
 import { moneyOrNull, sumMonthToDate } from "./providers/ledger";
 import { parseKeywordImport } from "./keyword-import";
 import { clusterKeywordSet, embedKeywordSet, INTENTS, KeywordSetTooLargeError } from "./clustering";
-import { pullMetricsForKeywords, pullRankForKeyword, pullRanksForEngagement } from "./rank";
+import { collectRankForTask, pullMetricsForKeywords, pullRankForKeyword, pullRanksForEngagement } from "./rank";
+import { UnknownVendorTaskError } from "./providers/types";
 import { pullBacklinksForProperty } from "./backlinks";
 import { pullAiVisibilityForProperty } from "./ai-visibility";
 import {
@@ -62,6 +65,50 @@ import {
   buildNegativesProposalPrompt, buildRsaDraftPrompt, MAX_NEGATIVE_TERMS, MAX_RSA_KEYWORDS,
   NEGATIVE_MATCH_TYPES, parseNegativesProposal, parseRsaDraft, type RsaKeywordFact,
 } from "./sem-drafts";
+// SM-30 — the manual-apply/export twin (design §04/§07/§08/§12 SM-30; D-8). sem-export.ts is pure
+// (CSV building + the launch-only provenance summary); this controller owns every DB read/write and
+// the `files`/storage side effect. See sem-export.ts's own header for the researched Ads Editor CSV
+// shapes, the named format assumptions, and why the honesty/provenance marker rides three channels
+// (API response, filename, per-row Notes column) instead of a leading CSV comment row.
+import {
+  buildAdsBatchExport, buildBidExport, buildBudgetExport, buildLaunchExport, buildNegativesBatchExport, buildPauseExport,
+  ExportInputError, RSA_MAX_DESCRIPTIONS, RSA_MAX_HEADLINES,
+  type AdFact, type AdsEditorExport, type BidFacts, type BudgetFacts, type CampaignFacts, type ChangeProposalExportKind,
+  type LaunchKeywordFact, type NegativeFact,
+} from "./sem-export";
+import { storage } from "../../core/storage";
+// SM-25a — the HTTP surface over google/oauth.ts's service layer (design addendum §A12; tracker
+// §6ao "owed"). Every function imported here returns a MASKED view (GoogleConnectionView / the
+// { connection, issuerRevoked, issuerStatus } revoke shape) — token material is structurally absent
+// from all of them, never re-widened by anything in this file. `completeAuthorization` is NOT
+// imported here: the OAuth callback cannot be a route on THIS controller (its @Controller() prefix
+// is `api/:tenantId/modules/search`, and Google's redirect_uri must be ONE fixed, non-templated URL)
+// — it lives on `SearchGoogleOauthCallbackController` (search-google-oauth.controller.ts), registered
+// separately in app.module.ts. Every GoogleSurfaceError these can throw (not-configured, invalid
+// state, issuer refusal, connection-not-linked) is mapped by the globally-registered
+// GoogleOAuthErrorFilter — no catch/rethrow needed for them here, unlike the rank-pulls/callback
+// route above which must translate a non-GoogleSurfaceError (UnknownVendorTaskError).
+import {
+  startAuthorization, listGoogleConnections, getGoogleConnection, refreshConnection,
+  revokeGoogleConnection, bindPropertyConnection,
+} from "./google/oauth";
+import { isGoogleProvider, type GoogleProvider } from "./google/oauth-state";
+// SM-25b — GSC + GA4 read ingestion (design addendum §A12; tracker §6ao/§6x.3 item 5). Pure assembly
+// over SM-25a's OAuth core: pullGscPerformanceForProperty/pullGa4MetricsForProperty do the response
+// interpretation + idempotent persistence (google/{gsc,ga4}-client.ts); this controller only resolves
+// ids, authorizes, and returns their outcome — the same layering rank.ts/backlinks.ts already
+// established for the vendor pulls, transposed onto the THIRD egress class (never dispatchProviderOp,
+// never search_data_cache — see gsc-client.ts's own header).
+import { pullGscPerformanceForProperty, topGscQueries } from "./google/gsc-client";
+import { pullGa4MetricsForProperty } from "./google/ga4-client";
+// SM-20 — search-terms sync (design §12 SM-20). sem-search-terms.ts is pure (validation, the
+// idempotency hash, the two SM-63-class scope predicates); this controller owns every DB read/write,
+// the shared-secret check, and the admission-check ordering — same layering as search-audit.ts/
+// sem-plan.ts/sem-export.ts.
+import {
+  adGroupScopeMatches, campaignScopeMatches, computeSearchTermRowHash, INGEST_RACE_DELAY_MS,
+  SearchTermScopeError, validateSearchTermBatch,
+} from "./sem-search-terms";
 
 const PROPERTY_STATUSES = new Set(["active", "paused", "archived"]);
 const ENGAGEMENT_STATUSES = new Set(["draft", "active", "paused", "closed"]);
@@ -110,8 +157,95 @@ function assertUuid(value: string, label: string): void {
   if (typeof value !== "string" || !UUID_RE.test(value)) throw new BadRequestException(`${label} must be a valid id`);
 }
 
+// SM-25a: the closed provider set, checked BEFORE it reaches any query — same discipline as
+// assertUuid above, applied to a path/body value instead of an id shape.
+function assertGoogleProvider(value: string): GoogleProvider {
+  if (!isGoogleProvider(value)) {
+    throw new BadRequestException("provider must be one of google_search_console|google_analytics|google_ads");
+  }
+  return value;
+}
+
 function isFiniteOrNull(v: unknown): v is number | null {
   return v === null || (typeof v === "number" && Number.isFinite(v));
+}
+
+// ── SM-56: what authenticates the vendor-postback collect edge ──────────────────────────────────────
+//
+// The header name is the one `automation/.env.example` already specifies for this env, chosen there
+// deliberately NOT to reuse `N8N_BRIDGE_SECRET` (the internal event-bridge secret) — a relay carrying
+// an EXTERNAL vendor's postback sits at a different trust boundary than internal event traffic, and
+// sharing one secret across both would mean a compromise of either grants both.
+const SEARCH_CALLBACK_SECRET_HEADER = "x-gaiada-search-callback-secret";
+
+/** SM-56 — the SECOND factor on the collect edge, and the emphasis on *second* is the point.
+ *
+ *  This does NOT replace anything. The route keeps `AuthGuard` (so a caller must still present a valid
+ *  service token or IdP token), `ModuleEnabledGuard("search")`, the `withTenants` tenant choke-point,
+ *  module-sliced RLS, and its Cerbos `research` authorization — all unchanged. This is an ADDITIONAL
+ *  shared-secret check on top, because the collect edge is the one route in this module driven by a
+ *  RELAY of an external vendor's postback rather than by a human action, and the standing ruling
+ *  (§6ad Ruling 1 / §A13) is that automation reaching search must be held to a stricter bar, never a
+ *  looser one. Removing any pre-existing wall to "make the secret the auth" would be a weakening
+ *  dressed as a change of mechanism.
+ *
+ *  FAIL-CLOSED WHEN UNCONFIGURED, and this is a real behaviour change worth stating plainly: with
+ *  `SEARCH_CALLBACK_SECRET` unset — which is every environment today — this route now refuses EVERY
+ *  request. Nothing in the repo calls it (SM-55 deleted the `sm-rank-collect` workflow and removed its
+ *  allow-list entry), so there is no live consumer to break; and the alternative default — "no secret
+ *  configured means skip the check" — is the classic fail-open, where forgetting an env var silently
+ *  disarms the control. An unconfigured secret is an unfinished deployment, not permission.
+ *
+ *  CONSTANT-TIME comparison via `core/secret-box`'s `secretEquals`, which length-checks and then uses
+ *  `timingSafeEqual`, so neither a length nor a byte position leaks through response timing. A missing
+ *  header takes the same path as a wrong one: one 401 with one message, so the response cannot be used
+ *  to distinguish "not configured" from "wrong value" from "absent".
+ *
+ *  Parsed in `src/config.ts` as `config.search.callbackSecret`, like every other env in this codebase.
+ *  (SM-56 read `process.env` here as a declared interim, because `config.ts` was held by a concurrent
+ *  agent that wave; moved by the session lead once it was free. The read stays per-request rather than
+ *  captured at module load, so a test can exercise the REAL check instead of bypassing it, and so
+ *  changing the env in a test does not require re-importing the module.) */
+function assertCallbackSecret(req: FastifyRequest): void {
+  const configured = config.search.callbackSecret;
+  const raw = req.headers[SEARCH_CALLBACK_SECRET_HEADER];
+  const presented = Array.isArray(raw) ? (raw[0] ?? "") : (raw ?? "");
+  if (!configured || !secretEquals(presented, configured)) {
+    throw new UnauthorizedException("invalid or missing search callback secret");
+  }
+}
+
+// ── SM-20: the search-terms webhook's OWN shared secret, DELIBERATELY DISTINCT from ─────────────────
+// `SEARCH_CALLBACK_SECRET` above. That secret guards the DataForSEO collect edge (a paid-vendor
+// postback trust boundary); this one guards an Ads-Script export running inside a CLIENT'S OWN
+// Google Ads account (a different external trust boundary entirely) — sharing one secret across both
+// would mean a compromise of either grants both, the exact reasoning SM-56's own file header gives
+// for not reusing `N8N_BRIDGE_SECRET` on the FIRST edge, transposed one level further here.
+const SEARCH_SEM_CALLBACK_SECRET_HEADER = "x-gaiada-search-sem-callback-secret";
+
+/** Same shape as `assertCallbackSecret` in every respect that matters: constant-time compare via
+ *  `secretEquals` (length-check then `timingSafeEqual`); a missing header takes the SAME path as a
+ *  wrong one (one 401, one message, so the response cannot distinguish "not configured" from "wrong
+ *  value" from "absent"); and FAIL-CLOSED when unconfigured — an unset `SEARCH_SEM_CALLBACK_SECRET`
+ *  refuses EVERY request, never skips the check, for the identical reason `assertCallbackSecret`
+ *  states: an unconfigured secret is an unfinished deployment, not permission.
+ *
+ *  Read through `config.search.semCallbackSecret` (the house pattern), NOT `process.env`. SM-20 shipped
+ *  this as a declared `process.env` interim because config.ts was outside its file ownership; the move
+ *  was completed immediately afterwards. Note for anyone tempted to reverse it: `config` is evaluated
+ *  once at module load, so a test that mutates `process.env` after import would silently stop
+ *  exercising this check while still passing — that exact mistake cost nine tests earlier in this
+ *  programme. Assign to `config.search.semCallbackSecret` in tests, as the SM-56 suites do.
+ *
+ *  Still read per-request rather than captured at module load, for the same reason
+ *  `assertCallbackSecret` does: a test can exercise the REAL check instead of bypassing it. */
+function assertSemCallbackSecret(req: FastifyRequest): void {
+  const configured = config.search.semCallbackSecret ?? "";
+  const raw = req.headers[SEARCH_SEM_CALLBACK_SECRET_HEADER];
+  const presented = Array.isArray(raw) ? (raw[0] ?? "") : (raw ?? "");
+  if (!configured || !secretEquals(presented, configured)) {
+    throw new UnauthorizedException("invalid or missing search-terms callback secret");
+  }
 }
 
 async function campaignRow(c: PoolClient, campaignId: string): Promise<{ engagementId: string } | null> {
@@ -136,6 +270,45 @@ async function changeProposalRow(c: PoolClient, proposalId: string): Promise<{ c
     [proposalId],
   );
   return r.rows[0] ? { campaignId: r.rows[0].campaign_id, status: r.rows[0].status } : null;
+}
+
+// SM-30 — the fuller read both the export and mark-applied routes need (kind/mode/payload on top of
+// changeProposalRow's campaignId/status). A separate helper rather than widening changeProposalRow:
+// every OTHER caller of changeProposalRow only ever needed the two fields it already returns, and
+// widening a shared helper's shape for one ticket's two routes is exactly the kind of incidental
+// coupling this codebase's per-domain helper convention avoids.
+interface ChangeProposalFullRow {
+  campaignId: string;
+  kind: string;
+  status: string;
+  mode: string;
+  payload: Record<string, unknown>;
+}
+async function changeProposalFullRow(c: PoolClient, proposalId: string): Promise<ChangeProposalFullRow | null> {
+  const r = await c.query<{ campaign_id: string; kind: string; status: string; mode: string; payload: Record<string, unknown> }>(
+    `SELECT campaign_id, kind, status, mode, payload FROM search_change_proposals WHERE id = $1 AND deleted_at IS NULL`,
+    [proposalId],
+  );
+  const row = r.rows[0];
+  return row ? { campaignId: row.campaign_id, kind: row.kind, status: row.status, mode: row.mode, payload: row.payload ?? {} } : null;
+}
+
+async function campaignFactsRow(
+  c: PoolClient, campaignId: string,
+): Promise<{ name: string; budgetMinor: number | null; currency: string | null; bidStrategy: string | null; targetCpaMinor: number | null; targetRoas: number | null } | null> {
+  const r = await c.query<{
+    name: string; budget_minor: string | null; currency: string | null;
+    bid_strategy: string | null; target_cpa_minor: string | null; target_roas: string | null;
+  }>(
+    `SELECT name, budget_minor, currency, bid_strategy, target_cpa_minor, target_roas FROM search_campaigns WHERE id = $1 AND deleted_at IS NULL`,
+    [campaignId],
+  );
+  const row = r.rows[0];
+  if (!row) return null;
+  return {
+    name: row.name, budgetMinor: moneyOrNull(row.budget_minor), currency: row.currency,
+    bidStrategy: row.bid_strategy, targetCpaMinor: moneyOrNull(row.target_cpa_minor), targetRoas: moneyOrNull(row.target_roas),
+  };
 }
 
 // ─────────────────────────────────────────── FK tenant-validation helpers ───────────────────────────
@@ -166,6 +339,17 @@ async function propertyDomainRow(c: PoolClient, propertyId: string): Promise<{ d
     [propertyId],
   );
   return r.rows[0] ? { domain: r.rows[0].domain } : null;
+}
+
+// SM-25b: the property fact gsc-client.ts needs to issue a Search Console query — the registered
+// `site_url` (a URL-prefix or `sc-domain:` property, api-client.ts's own documented shape), distinct
+// from propertyDomainRow's bare registrable domain rank.ts matches SERP results against.
+async function propertySiteUrlRow(c: PoolClient, propertyId: string): Promise<{ siteUrl: string } | null> {
+  const r = await c.query<{ site_url: string }>(
+    `SELECT site_url FROM search_properties WHERE id = $1 AND deleted_at IS NULL`,
+    [propertyId],
+  );
+  return r.rows[0] ? { siteUrl: r.rows[0].site_url } : null;
 }
 
 async function engagementRow(c: PoolClient, engagementId: string): Promise<{ clientId: string; propertyId: string } | null> {
@@ -253,6 +437,31 @@ async function reportRow(c: PoolClient, reportId: string): Promise<{ engagementI
     [reportId],
   );
   return r.rows[0] ? { engagementId: r.rows[0].engagement_id } : null;
+}
+
+// SM-61 (tracker §6au Ruling 1, clause 4 — binding): the scope PUT validated nothing about cadence
+// before this — the API accepted `"fortnightly"`, `"every-tuesday"`, anything. This is the door: a
+// `cadence` key that is present and not null/undefined must be exactly daily|weekly|monthly, 400
+// naming the OFFENDING FIELD so a hand-edited scope's typo is diagnosable rather than a blanket
+// rejection. Absent or explicit `null` is always accepted — that is D-11's on-demand configuration,
+// never an error. Runs over the EFFECTIVE next `tool_scope` (preset-seeded shapes are valid by
+// construction, so validating them too costs nothing and keeps this the ONE gate).
+//
+// This is deliberately a HARDER wall than `parseCadence` (`modules/search/cadence.ts`): that parser
+// is permissive on purpose (junk -> null = on-demand, never a thrown error, so the scheduler and the
+// projection stay fail-closed even against data written before this validation existed). This
+// function REJECTS the same junk at the write boundary instead of silently letting it in — the two
+// together are defense in depth, not a duplicate normalization: `isCadence` is the ONE enum check
+// both share, imported from `cadence.ts`, so the two can never disagree about what counts as valid.
+function validateToolScopeCadence(toolScope: Record<string, unknown>): void {
+  for (const [tool, raw] of Object.entries(toolScope)) {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue;
+    const cadence = (raw as Record<string, unknown>).cadence;
+    if (cadence === undefined || cadence === null) continue;
+    if (!isCadence(cadence)) {
+      throw new BadRequestException(`tool_scope.${tool}.cadence must be one of daily|weekly|monthly, or absent/null`);
+    }
+  }
 }
 
 @Controller("api/:tenantId/modules/search")
@@ -370,6 +579,392 @@ export class SearchController {
     if (res.rowCount === 0) throw new NotFoundException("property not found");
     await writeActivity(tenantId, req.principal.userId, "deleted", "search_property", id, {});
     return { ok: true };
+  }
+
+  // ===================================================== SM-25a: GOOGLE OAUTH CONNECTIONS ========
+  // GSC/GA4/Ads per-client credential links (design addendum §A12; tracker §6ao "owed" — the service
+  // layer, google/oauth.ts, is DEV-VERIFIED; these are its HTTP routes). Cerbos kind is
+  // `resource_search_property` (§A12's own ruling: "no new Cerbos policy file is needed") — `read`
+  // for the list/get routes below, `update` for everything that starts or changes a connection's
+  // state, exactly like updateProperty's own action choice above. THE CALLBACK IS NOT HERE — see the
+  // import comment at the top of this file and search-google-oauth.controller.ts.
+  @Post("google/connections/:provider/authorize")
+  @HttpCode(200)
+  async startGoogleAuthorization(
+    @Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("provider") provider: string,
+    @Body() body: { clientId?: string; propertyId?: string; scopes?: string[]; loginHint?: string },
+  ) {
+    const googleProvider = assertGoogleProvider(provider);
+    const { clientId } = body ?? {};
+    if (!clientId) throw new BadRequestException("clientId required");
+    assertUuid(clientId, "clientId");
+    if (body?.propertyId !== undefined) assertUuid(body.propertyId, "propertyId");
+    if (
+      body?.scopes !== undefined &&
+      (!Array.isArray(body.scopes) || body.scopes.length === 0 || !body.scopes.every((s) => typeof s === "string" && s.length > 0))
+    ) {
+      throw new BadRequestException("scopes must be a non-empty array of non-empty strings");
+    }
+    await authorize(req.principal, { kind: "resource_search_property", tenantId, module: "search" }, "update");
+
+    await withTenants(
+      [tenantId],
+      async (c) => {
+        if (!(await clientExists(c, clientId))) throw new BadRequestException("clientId not found in this tenant");
+        if (body?.propertyId) {
+          const property = await propertyRow(c, body.propertyId);
+          if (!property) throw new BadRequestException("propertyId not found in this tenant");
+          // Same cross-client-mix-up guard createEngagement uses above: a Google connection minted
+          // for clientId A must not be pointed at a property owned by client B.
+          if (property.clientId !== clientId) throw new BadRequestException("propertyId does not belong to clientId");
+        }
+      },
+      { modules: ["search"] },
+    );
+
+    const started = await startAuthorization({
+      tenantId, clientId, propertyId: body?.propertyId ?? null, provider: googleProvider,
+      scopes: body?.scopes, createdBy: req.principal.userId, loginHint: body?.loginHint ?? null,
+    });
+    // Logged against the CLIENT id, not a made-up connection id: no connection or state-row uuid is
+    // fit for `activities.target_entity_id` (uuid-typed) at this point — the signed `state` token is
+    // not a uuid, and completeAuthorization has not run yet.
+    await writeActivity(tenantId, req.principal.userId, "google_oauth_started", "client", clientId, {
+      provider: googleProvider, propertyId: body?.propertyId ?? null,
+    });
+    return started;
+  }
+
+  @Get("google/connections")
+  async listGoogleConnectionsRoute(
+    @Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Query("clientId") clientId?: string,
+  ) {
+    if (clientId !== undefined) assertUuid(clientId, "clientId");
+    await authorize(req.principal, { kind: "resource_search_property", tenantId, module: "search" }, "read");
+    return listGoogleConnections(tenantId, clientId);
+  }
+
+  @Get("google/connections/:id")
+  async getGoogleConnectionRoute(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("id") id: string) {
+    assertUuid(id, "id");
+    await authorize(req.principal, { kind: "resource_search_property", tenantId, module: "search" }, "read");
+    const row = await getGoogleConnection(tenantId, id);
+    if (!row) throw new NotFoundException("connection not found");
+    return row;
+  }
+
+  @Post("google/connections/:id/refresh")
+  @HttpCode(200)
+  async refreshGoogleConnectionRoute(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("id") id: string) {
+    assertUuid(id, "id");
+    await authorize(req.principal, { kind: "resource_search_property", tenantId, module: "search" }, "update");
+    const view = await refreshConnection(tenantId, id);
+    await writeActivity(tenantId, req.principal.userId, "google_oauth_refreshed", "search_google_connection", id, {
+      provider: view.provider,
+    });
+    return view;
+  }
+
+  @Post("google/connections/:id/revoke")
+  @HttpCode(200)
+  async revokeGoogleConnectionRoute(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("id") id: string) {
+    assertUuid(id, "id");
+    await authorize(req.principal, { kind: "resource_search_property", tenantId, module: "search" }, "update");
+    const result = await revokeGoogleConnection(tenantId, id);
+    await writeActivity(tenantId, req.principal.userId, "google_oauth_revoked", "search_google_connection", id, {
+      provider: result.connection.provider, issuerRevoked: result.issuerRevoked, issuerStatus: result.issuerStatus,
+    });
+    return result;
+  }
+
+  // `bindPropertyConnection` (google/oauth.ts) resolves BOTH ids through the SAME tenant+module-
+  // scoped connection and no-ops (returns false) if either is out of tenant — the FK-tenant-
+  // validation hazard this file's header documents. It does NOT check that the connection's owning
+  // CLIENT matches the property's client (oauth.ts has no such cross-check: its own auto-bind inside
+  // completeAuthorization only ever binds the connection it JUST created for that exact
+  // clientId+propertyId pair, so the mismatch this closes cannot arise there). An HTTP caller
+  // choosing an arbitrary connectionId is a more adversarial position, so this route adds that one
+  // extra guard rather than trusting the service function's weaker invariant.
+  @Put("properties/:propertyId/google-connection/:provider")
+  @HttpCode(200)
+  async bindGooglePropertyConnection(
+    @Req() req: FastifyRequest, @Param("tenantId") tenantId: string,
+    @Param("propertyId") propertyId: string, @Param("provider") provider: string,
+    @Body() body: { connectionId?: string | null },
+  ) {
+    assertUuid(propertyId, "propertyId");
+    const googleProvider = assertGoogleProvider(provider);
+    const connectionId = body?.connectionId ?? null;
+    if (connectionId !== null) assertUuid(connectionId, "connectionId");
+    await authorize(req.principal, { kind: "resource_search_property", id: propertyId, tenantId, module: "search" }, "update");
+
+    if (connectionId !== null) {
+      const [conn, property] = await Promise.all([
+        getGoogleConnection(tenantId, connectionId),
+        withTenants([tenantId], (c) => propertyRow(c, propertyId), { modules: ["search"] }),
+      ]);
+      if (!conn) throw new NotFoundException("connectionId not found in this tenant");
+      if (!property) throw new NotFoundException("property not found in this tenant");
+      if (conn.clientId !== property.clientId) {
+        throw new BadRequestException("connectionId does not belong to the property's client");
+      }
+    }
+
+    const bound = await bindPropertyConnection(tenantId, propertyId, googleProvider, connectionId);
+    if (!bound) throw new NotFoundException("property not found in this tenant");
+    await writeActivity(tenantId, req.principal.userId, "google_connection_bound", "search_property", propertyId, {
+      provider: googleProvider, connectionId,
+    });
+    return { propertyId, provider: googleProvider, connectionId };
+  }
+
+  // ===================================================== SM-25b: GSC + GA4 READ INGESTION =========
+  // Design addendum §A12 (binding); tracker §6ao "owed" / §6x.3 item 5. Response INTERPRETATION +
+  // idempotent persistence live in google/{gsc,ga4}-client.ts — everything below resolves ids,
+  // authorizes, and echoes their outcome. Cerbos kind stays `resource_search_property` (§A12's own
+  // ruling that no new policy file is needed, already established by SM-25a's connection routes just
+  // above): `update` for a PULL (a genuinely new write, same choice as startGoogleAuthorization) and
+  // `read` for every history/aggregate GET. THIS TICKET ADDS NO N8N-REACHABLE ROUTE and no scheduler
+  // wiring — every route here is triggered by an authenticated human/service caller only (the ticket's
+  // own "scope-driven ingestion, flows own zero routes" framing, §A9.8).
+  @Post("engagements/:id/gsc-pull")
+  @HttpCode(200)
+  async pullGscPerformance(
+    @Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("id") id: string,
+    @Body() body: { startDate?: string; endDate?: string; rowLimit?: number; maxPages?: number },
+  ) {
+    await authorize(req.principal, { kind: "resource_search_property", tenantId, module: "search" }, "update");
+    const ctx = await withTenants(
+      [tenantId],
+      async (c) => {
+        const eng = await engagementRow(c, id);
+        if (!eng) throw new NotFoundException("engagement not found");
+        const site = await propertySiteUrlRow(c, eng.propertyId);
+        if (!site) throw new NotFoundException("property not found");
+        return { propertyId: eng.propertyId, siteUrl: site.siteUrl };
+      },
+      { modules: ["search"] },
+    );
+    const outcome = await pullGscPerformanceForProperty({
+      tenantId, propertyId: ctx.propertyId, siteUrl: ctx.siteUrl,
+      startDate: body?.startDate, endDate: body?.endDate, rowLimit: body?.rowLimit, maxPages: body?.maxPages,
+    });
+    await writeActivity(tenantId, req.principal.userId, "gsc_pull", "search_property", ctx.propertyId, {
+      rowsUpserted: outcome.rowsUpserted, pagesFetched: outcome.pagesFetched, truncated: outcome.truncated,
+      startDate: outcome.startDate, effectiveEndDate: outcome.effectiveEndDate,
+    });
+    return outcome;
+  }
+
+  @Post("engagements/:id/ga4-pull")
+  @HttpCode(200)
+  async pullGa4Metrics(
+    @Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("id") id: string,
+    @Body() body: { ga4PropertyId?: string; startDate?: string; endDate?: string },
+  ) {
+    if (!body?.ga4PropertyId) throw new BadRequestException("ga4PropertyId required");
+    await authorize(req.principal, { kind: "resource_search_property", tenantId, module: "search" }, "update");
+    const propertyId = await withTenants(
+      [tenantId],
+      async (c) => {
+        const eng = await engagementRow(c, id);
+        if (!eng) throw new NotFoundException("engagement not found");
+        return eng.propertyId;
+      },
+      { modules: ["search"] },
+    );
+    const outcome = await pullGa4MetricsForProperty({
+      tenantId, propertyId, ga4PropertyId: body.ga4PropertyId,
+      startDate: body?.startDate, endDate: body?.endDate,
+    });
+    await writeActivity(tenantId, req.principal.userId, "ga4_pull", "search_property", propertyId, {
+      rowsUpserted: outcome.rowsUpserted, sampled: outcome.sampled,
+      startDate: outcome.startDate, effectiveEndDate: outcome.effectiveEndDate,
+    });
+    return outcome;
+  }
+
+  // Raw history readers — BADGE, not filter (AC per listRankSnapshots/listBacklinks's own established
+  // shape just above): every row already carries its OWN `simulated` flag for the console to render,
+  // so filtering here would make half a property's real capture history silently vanish the moment a
+  // dev/demo connection coexists with a real one. §A4.7 disposition, stated as this comment.
+  @Get("properties/:id/gsc-performance")
+  async listGscPerformance(
+    @Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("id") id: string,
+    @Query("startDate") startDate?: string, @Query("endDate") endDate?: string,
+    @Query("query") queryFilter?: string, @Query("limit") limitParam?: string,
+  ) {
+    await authorize(req.principal, { kind: "resource_search_property", tenantId, module: "search" }, "read");
+    const limit = Math.min(Math.max(Number(limitParam) || 500, 1), 5000);
+    const rows = await withTenants(
+      [tenantId],
+      async (c) => {
+        if (!(await propertyRow(c, id))) throw new NotFoundException("property not found");
+        const params: unknown[] = [id];
+        const clauses = ["property_id = $1"];
+        if (startDate) { params.push(startDate); clauses.push(`date >= $${params.length}`); }
+        if (endDate) { params.push(endDate); clauses.push(`date <= $${params.length}`); }
+        if (queryFilter) { params.push(queryFilter); clauses.push(`query = $${params.length}`); }
+        params.push(limit);
+        return c.query(
+          `SELECT id, date, query, page, device, clicks, impressions, ctr, position,
+                  simulated, fetched_at AS "fetchedAt"
+             FROM search_gsc_performance
+            WHERE ${clauses.join(" AND ")}
+            ORDER BY date DESC, clicks DESC LIMIT $${params.length}`,
+          params,
+        );
+      },
+      { modules: ["search"] },
+    );
+    return rows.rows;
+  }
+
+  // AGGREGATE reader — FILTERED to real data by default (§A4.7 disposition, gsc-client.ts's own
+  // header on topGscQueries names the reasoning: an aggregate sums across rows, so blending simulated
+  // demo rows into it would be the §4d class this module keeps closing). `includeSimulated=1` is the
+  // explicit, named override for a dev/demo view.
+  @Get("properties/:id/gsc-performance/top-queries")
+  async listTopGscQueries(
+    @Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("id") id: string,
+    @Query("startDate") startDate?: string, @Query("endDate") endDate?: string,
+    @Query("limit") limitParam?: string, @Query("includeSimulated") includeSimulatedParam?: string,
+  ) {
+    if (!startDate || !endDate) throw new BadRequestException("startDate and endDate required");
+    await authorize(req.principal, { kind: "resource_search_property", tenantId, module: "search" }, "read");
+    await withTenants(
+      [tenantId],
+      async (c) => {
+        if (!(await propertyRow(c, id))) throw new NotFoundException("property not found");
+      },
+      { modules: ["search"] },
+    );
+    return topGscQueries({
+      tenantId, propertyId: id, startDate, endDate,
+      limit: limitParam ? Number(limitParam) : undefined,
+      includeSimulated: includeSimulatedParam === "1" || includeSimulatedParam === "true",
+    });
+  }
+
+  // GSC-sourced keyword import (design §12 SM-09's `source='gsc'` column, 0034) — reads OUR OWN
+  // already-persisted search_gsc_performance rows (never a fresh Google call: importing keywords is
+  // not itself a reason to re-pull) and seeds a keyword set from the top queries in a date range. Same
+  // Cerbos kind/action as importKeywords above (`resource_search_keyword`, `create`) — this is a
+  // second way to populate the same table, not a different authorization surface.
+  //
+  // `includeSimulated` DEFAULTS TO FALSE, same disposition as topGscQueries' own default and for a
+  // reason slightly sharper than that reader's: this route does not just DISPLAY an aggregate, it
+  // WRITES fabricated query strings into a client's real keyword set if the flag is misused — data
+  // pollution, not merely a misleading number. A caller driving a dev/demo connection (this ticket's
+  // own tests included) must say so explicitly.
+  @Post("engagements/:id/gsc-keyword-import")
+  @HttpCode(200)
+  async importGscKeywords(
+    @Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("id") id: string,
+    @Body() body: { setId?: string; name?: string; startDate?: string; endDate?: string; minClicks?: number; limit?: number; locale?: string; includeSimulated?: boolean },
+  ) {
+    if (!body?.startDate || !body?.endDate) throw new BadRequestException("startDate and endDate required");
+    if (body.setId !== undefined) assertUuid(body.setId, "setId");
+    await authorize(req.principal, { kind: "resource_search_keyword", tenantId, module: "search" }, "create");
+
+    const propertyId = await withTenants(
+      [tenantId],
+      async (c) => {
+        const eng = await engagementRow(c, id);
+        if (!eng) throw new NotFoundException("engagement not found");
+        return eng.propertyId;
+      },
+      { modules: ["search"] },
+    );
+
+    const candidates = await topGscQueries({
+      tenantId, propertyId, startDate: body.startDate, endDate: body.endDate,
+      limit: body.limit, includeSimulated: body.includeSimulated === true,
+    });
+    const minClicks = body.minClicks ?? 0;
+    const filtered = candidates.filter((q) => q.clicks >= minClicks);
+    const locale = body.locale || "id-ID";
+
+    const result = await withTenants(
+      [tenantId],
+      async (c) => {
+        let setId = body.setId ?? null;
+        if (setId) {
+          const set = await keywordSetRow(c, setId);
+          if (!set || set.engagementId !== id) throw new BadRequestException("setId does not belong to engagementId");
+        } else {
+          setId = newId();
+          await c.query(
+            `INSERT INTO search_keyword_sets (id, tenant_id, engagement_id, name, source, origin_site)
+             VALUES ($1,$2,$3,$4,'gsc',$5)`,
+            [setId, tenantId, id, body.name || `GSC import ${body.startDate}..${body.endDate}`, config.originSite],
+          );
+        }
+        const capRow = await c.query<{ count: string }>(
+          `SELECT COUNT(*)::int AS count FROM search_keywords WHERE set_id = $1 AND deleted_at IS NULL`,
+          [setId],
+        );
+        const existingCount = Number(capRow.rows[0]?.count ?? 0);
+        if (existingCount + filtered.length > config.search.maxKeywordsPerSet) {
+          throw new BadRequestException(
+            `import would bring this set to ${existingCount + filtered.length} keywords, exceeding the ` +
+              `${config.search.maxKeywordsPerSet}-keyword cap (currently ${existingCount}, submitting ${filtered.length})`,
+          );
+        }
+        let imported = 0;
+        for (const q of filtered) {
+          if (!q.query) continue; // GSC's own "(not set)" / empty query is not an importable keyword
+          const r = await c.query(
+            `INSERT INTO search_keywords (id, tenant_id, set_id, keyword, locale, origin_site)
+             VALUES ($1,$2,$3,$4,$5,$6)
+             ON CONFLICT (tenant_id, set_id, keyword, locale) DO NOTHING`,
+            [newId(), tenantId, setId, q.query, locale, config.originSite],
+          );
+          if (r.rowCount) imported++;
+        }
+        if (imported > 0) {
+          await emitEvent(c, tenantId, "search_keyword_set", setId, "search.keywords.imported", {
+            imported, submitted: filtered.length, source: "gsc",
+          });
+        }
+        return { setId, imported, submitted: filtered.length, considered: candidates.length, duplicates: filtered.length - imported };
+      },
+      { modules: ["search"] },
+    );
+    await writeActivity(tenantId, req.principal.userId, "gsc_keyword_import", "search_keyword_set", result.setId, result);
+    return result;
+  }
+
+  @Get("properties/:id/ga4-metrics")
+  async listGa4Metrics(
+    @Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("id") id: string,
+    @Query("startDate") startDate?: string, @Query("endDate") endDate?: string,
+    @Query("limit") limitParam?: string,
+  ) {
+    await authorize(req.principal, { kind: "resource_search_property", tenantId, module: "search" }, "read");
+    const limit = Math.min(Math.max(Number(limitParam) || 500, 1), 5000);
+    const rows = await withTenants(
+      [tenantId],
+      async (c) => {
+        if (!(await propertyRow(c, id))) throw new NotFoundException("property not found");
+        const params: unknown[] = [id];
+        const clauses = ["property_id = $1"];
+        if (startDate) { params.push(startDate); clauses.push(`date >= $${params.length}`); }
+        if (endDate) { params.push(endDate); clauses.push(`date <= $${params.length}`); }
+        params.push(limit);
+        return c.query(
+          `SELECT id, date, channel_group AS "channelGroup", sessions,
+                  engaged_sessions AS "engagedSessions", conversions, total_revenue AS "totalRevenue",
+                  sampled, simulated, fetched_at AS "fetchedAt"
+             FROM search_ga4_metrics
+            WHERE ${clauses.join(" AND ")}
+            ORDER BY date DESC LIMIT $${params.length}`,
+          params,
+        );
+      },
+      { modules: ["search"] },
+    );
+    return rows.rows;
   }
 
   // ============================================================== ENGAGEMENTS =================
@@ -741,6 +1336,11 @@ export class SearchController {
     if (nextToolScope === undefined && preset === undefined) {
       throw new BadRequestException("scopePreset and/or toolScope required");
     }
+    // SM-61 (§6au Ruling 1 clause 4): junk cadence foreclosed at the door — see this file's
+    // `validateToolScopeCadence` header note. Runs on the EFFECTIVE next scope, whether it came from
+    // a preset seed (always valid) or the caller's own custom `toolScope` (where a typo used to
+    // reach the database untouched).
+    if (nextToolScope !== undefined) validateToolScopeCadence(nextToolScope);
 
     const sets: string[] = ["updated_at = now()"];
     const params: unknown[] = [id];
@@ -1238,24 +1838,59 @@ export class SearchController {
     return rows.rows;
   }
 
-  // Standard-queue completion callback (AC5: "the Standard-queue completion callback n8n will hit").
+  // ── SM-56 — the Standard-queue COLLECT edge (addendum §A11.1.4; tracker §6ad Ruling 3, §6ah/§6ak) ──
+  //
   // DataForSEO's own postback carries a TASK ID ONLY and is never trusted as data (design §02/§03,
   // dataforseo.ts's file header); n8n relays it into THIS platform route, which performs the actual
-  // authoritative work. LIMITATION, stated plainly: SearchDataProvider has no task-id-keyed re-fetch
-  // method (only postSerpTasks+fetchSerpResults as one bundled call, invokeProvider in dispatch.ts) —
-  // adding one is a providers/* change outside this ticket's file ownership. So this route re-runs
-  // the SAME single-keyword dispatch path a manual pull uses (still through every scope/budget/
-  // pillar gate — n8n gets no bypass), rather than a free fetch-by-task-id. search_rank_snapshots is
-  // append-only by design (0034), so a callback firing is a genuine new capture, not a duplicate.
+  // authoritative work.
+  //
+  // WHAT CHANGED, AND WHY IT WAS A MONEY BUG. This route used to call `pullRankForKeyword` — the same
+  // unit a MANUAL pull uses. For the DataForSEO Standard queue that means a fresh `task_post`, which is
+  // the BILLING POINT (~$0.0006/task, charged at post), so every genuine vendor postback bought the
+  // same SERP A SECOND TIME. QA reproduced it at the transport layer: two `task_post` requests and two
+  // cost-bearing ledger rows for one logical capture (§6ak). The old comment here recorded the cause
+  // accurately ("rather than a free fetch-by-task-id") and correctly declined to fix it across a file
+  // boundary; SM-56 owns both halves and closes it.
+  //
+  // It now calls `collectRankForTask`, which retrieves via `task_get` ONLY (no post exists in its call
+  // graph) and is idempotent by task id. Read rank.ts's SM-56 block for the full reasoning; the three
+  // facts a reader of THIS file needs:
+  //   * A collect COSTS NOTHING and writes NO ledger row. It does not route through
+  //     `dispatchProviderOp` — the choke-point cannot retrieve without posting, which is precisely the
+  //     defect — but it still enforces the PILLAR and SCOPE gates through the choke-point's own
+  //     helpers, so "n8n gets no bypass" survives the change. Only the BUDGET cascade is skipped, and
+  //     only because there is no purchase to price.
+  //   * AT-LEAST-ONCE DELIVERY IS HANDLED. A redelivered postback for an already-collected task returns
+  //     `status:"duplicate"` with a 200 and writes nothing — no second snapshot, no second ledger row.
+  //     200 rather than 4xx because the platform genuinely holds the data: a correctly-behaving vendor
+  //     retrying must not be told it failed.
+  //   * A collect for a charge SM-50/SM-60 wrote off as `incurred` advances that row to `completed` at
+  //     the SAME cost (§A11.1.4) — never a re-post, never a second cost-bearing row.
+  //
+  // AUTHENTICATION (see `assertCallbackSecret`): every pre-existing wall is unchanged — AuthGuard,
+  // ModuleEnabledGuard, the tenant choke-point, module-sliced RLS, and the Cerbos `research` check —
+  // and `SEARCH_CALLBACK_SECRET` is an ADDITIONAL required header on top, fail-closed when unset.
+  //
+  // `taskId` is now REQUIRED (it was optional, used only as a correlation id). That is a deliberate
+  // contract tightening recorded in docs/FRONTEND-BFF-CONTRACT.md: a collect without a task id has
+  // nothing to collect, and accepting one would leave no honest behaviour except re-posting.
   @Post("rank-pulls/callback")
   @HttpCode(200)
   async rankPullCallback(
     @Req() req: FastifyRequest, @Param("tenantId") tenantId: string,
     @Body() body: { engagementId?: string; propertyId?: string; keywordId?: string; taskId?: string },
   ) {
-    const { engagementId, propertyId, keywordId } = body ?? {};
+    // FIRST, before body validation, Cerbos, or any database read: an unauthenticated relay learns
+    // nothing about which ids exist. Checking the secret after a 400/404 would turn this route into an
+    // id-probing oracle for anyone holding only the service token.
+    assertCallbackSecret(req);
+
+    const { engagementId, propertyId, keywordId, taskId } = body ?? {};
     if (!engagementId || !propertyId || !keywordId) {
       throw new BadRequestException("engagementId, propertyId and keywordId required");
+    }
+    if (!taskId || typeof taskId !== "string") {
+      throw new BadRequestException("taskId required: a collect retrieves an already-paid vendor task by id");
     }
     assertUuid(engagementId, "engagementId");
     assertUuid(propertyId, "propertyId");
@@ -1278,12 +1913,25 @@ export class SearchController {
       { modules: ["search"] },
     );
 
-    const outcome = await pullRankForKeyword({
-      tenantId, engagementId, propertyId, propertyDomain: ctx.propertyDomain,
-      keyword: { keywordId, keyword: ctx.keyword.keyword, locale: ctx.keyword.locale },
-      requestedBy: req.principal.userId, correlationId: body.taskId ?? null,
-    });
-    return outcome;
+    try {
+      return await collectRankForTask({
+        tenantId, engagementId, propertyId, propertyDomain: ctx.propertyDomain,
+        keyword: { keywordId, keyword: ctx.keyword.keyword, locale: ctx.keyword.locale },
+        taskId,
+        requestedBy: req.principal.userId,
+      });
+    } catch (err) {
+      // Mapped explicitly rather than left to SM-58's last-resort filter, which would (correctly, for an
+      // unmapped throwable) return a body-less-detail 500 — the §6ad Ruling 2 class of defect, where a
+      // deliberate refusal reads to the caller as "the platform broke". 404 is the honest status: this
+      // tenant has no record of paying for that task, so from the caller's side the resource does not
+      // exist. The scope/pillar/collect-unsupported refusals are `ProviderDispatchError`s and are
+      // already mapped by the SM-53 filter, so they are deliberately NOT caught here.
+      if (err instanceof UnknownVendorTaskError) {
+        throw new NotFoundException(err.message);
+      }
+      throw err;
+    }
   }
 
   // ============================================== SM-16: BACKLINKS + GEO/AI-VISIBILITY ==========
@@ -2883,7 +3531,14 @@ export class SearchController {
     if (Array.isArray(body?.terms)) {
       terms = body.terms.filter((t): t is string => typeof t === "string" && t.trim().length > 0).map((t) => t.trim());
     } else if (typeof body?.text === "string" && body.text.trim()) {
-      terms = parseKeywordImport(body.text).map((r) => r.keyword);
+      try {
+        terms = parseKeywordImport(body.text).map((r) => r.keyword);
+      } catch (err) {
+        // SM-32 (same shape as importKeywords above): parseKeywordImport rejects an unterminated
+        // quoted field (UnterminatedQuoteError) instead of silently mangling it — surface that as a
+        // 400 naming the problem, not a 500.
+        throw new BadRequestException(err instanceof Error ? err.message : "invalid keyword import CSV");
+      }
     } else {
       terms = [];
     }
@@ -3073,5 +3728,413 @@ export class SearchController {
     if (res.rowCount === 0) throw new NotFoundException("change proposal not found or was modified concurrently");
     await writeActivity(tenantId, req.principal.userId, "updated", "search_change_proposal", id, body ?? {});
     return { id };
+  }
+
+  // ============================================================== SEM: MANUAL-APPLY EXPORT (SM-30) =
+  // design §04/§07/§08/§12 SM-30; D-8's manual twin. Turns an APPROVED, mode='manual' change proposal
+  // into an Ads-Editor-ready CSV `files` artifact and links it via export_file_id. Re-exporting is
+  // harmless (allowed on 'approved' and, for a re-download, 'applied' too) — it never mutates the
+  // proposal's status, only ever (re)writes the file + export_file_id.
+  //
+  // Cerbos action `update` (NOT `apply_manual`): exporting has no live side effect — it is the same
+  // risk tier as editing/proposing a change — so it stays at the baseline module_staff/module_manager/
+  // company_admin/group_executive tier, matching resource_search_campaign.yaml's existing rule for
+  // read/create/update/propose_change. `apply_manual` is reserved for markChangeProposalApplied below,
+  // the one action this ticket actually elevates.
+  //
+  // mode='manual' ONLY: an api-mode proposal executes exclusively through SM-21's one-shot approvalId
+  // path. Letting a human export-and-hand-apply an api-mode proposal would risk the same change being
+  // applied TWICE — once by hand from this CSV, once by the automated executor — which is exactly the
+  // "this must not become the live-write path" hazard this ticket was briefed to avoid.
+  @Post("change-proposals/:id/export")
+  @HttpCode(201)
+  async exportChangeProposal(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("id") id: string) {
+    assertUuid(id, "change proposal id");
+    const proposal = await withTenants([tenantId], (c) => changeProposalFullRow(c, id), { modules: ["search"] });
+    if (!proposal) throw new NotFoundException("change proposal not found");
+    await authorize(req.principal, { kind: "resource_search_campaign", id, tenantId, module: "search" }, "update");
+    if (proposal.status !== "approved" && proposal.status !== "applied") {
+      throw new BadRequestException(`cannot export a '${proposal.status}' proposal — export requires status='approved' (or 'applied', for a re-download)`);
+    }
+    if (proposal.mode !== "manual") {
+      throw new BadRequestException("this proposal is mode='api' — manual export is not available for it; it executes via the one-shot approval path (SM-21)");
+    }
+
+    const kind = proposal.kind as ChangeProposalExportKind;
+    const payload = proposal.payload;
+    let result: AdsEditorExport;
+    try {
+      result = await withTenants(
+        [tenantId],
+        async (c) => {
+          const campaignRow0 = await campaignFactsRow(c, proposal.campaignId);
+          if (!campaignRow0) throw new BadRequestException("campaign for this proposal no longer exists");
+          const campaign: CampaignFacts = { name: campaignRow0.name };
+
+          if (kind === "launch") {
+            const kwRes = await c.query<{ ad_group_name: string; keyword: string; metrics_provider: string | null; metrics_simulated: boolean }>(
+              `SELECT ag.name AS ad_group_name, k.keyword, k.metrics_provider, k.metrics_simulated
+                 FROM search_ad_groups ag
+                 JOIN search_keywords k ON k.cluster_id = ag.cluster_id AND k.deleted_at IS NULL
+                WHERE ag.campaign_id = $1 AND ag.deleted_at IS NULL AND ag.cluster_id IS NOT NULL
+                ORDER BY ag.name ASC, k.keyword ASC`,
+              [proposal.campaignId],
+            );
+            if (kwRes.rows.length === 0) throw new BadRequestException("no ad-group/keyword rows to export for this campaign yet");
+            const keywords: LaunchKeywordFact[] = kwRes.rows.map((r) => ({
+              adGroupName: r.ad_group_name, keyword: r.keyword,
+              metricsProvider: r.metrics_provider, metricsSimulated: r.metrics_simulated,
+            }));
+            return buildLaunchExport(campaign, id, keywords);
+          }
+          if (kind === "pause") return buildPauseExport(campaign, id);
+          if (kind === "budget") {
+            const budgetMinor = typeof payload.budgetMinor === "number" ? payload.budgetMinor : campaignRow0.budgetMinor;
+            const currency = typeof payload.currency === "string" ? payload.currency : campaignRow0.currency;
+            if (budgetMinor === null || !currency) {
+              throw new BadRequestException("budgetMinor+currency required — set them on the proposal payload or on the campaign itself first");
+            }
+            const facts: BudgetFacts = { budgetMinor, currency };
+            return buildBudgetExport(campaign, id, facts);
+          }
+          if (kind === "bid") {
+            const bidStrategy = typeof payload.bidStrategy === "string" ? payload.bidStrategy : campaignRow0.bidStrategy;
+            const targetCpaMinor = typeof payload.targetCpaMinor === "number" ? payload.targetCpaMinor : campaignRow0.targetCpaMinor;
+            const targetRoas = typeof payload.targetRoas === "number" ? payload.targetRoas : campaignRow0.targetRoas;
+            const facts: BidFacts = { bidStrategy: bidStrategy ?? null, targetCpaMinor: targetCpaMinor ?? null, targetRoas: targetRoas ?? null };
+            return buildBidExport(campaign, id, facts);
+          }
+          if (kind === "negatives_batch") {
+            const ids = Array.isArray(payload.ids) ? payload.ids.filter((v): v is string => typeof v === "string") : [];
+            if (ids.length === 0) throw new BadRequestException("payload.ids (the negative-keyword row ids this batch covers) is required to export a negatives_batch proposal");
+            const negRes = await c.query<{ ad_group_name: string | null; term: string; match_type: string }>(
+              `SELECT ag.name AS ad_group_name, n.term, n.match_type
+                 FROM search_negatives n
+                 LEFT JOIN search_ad_groups ag ON ag.id = n.ad_group_id
+                WHERE n.id = ANY($1::uuid[]) AND n.campaign_id = $2 AND n.deleted_at IS NULL`,
+              [ids, proposal.campaignId],
+            );
+            const negatives: NegativeFact[] = negRes.rows.map((r) => ({
+              adGroupName: r.ad_group_name, term: r.term, matchType: r.match_type as NegativeFact["matchType"],
+            }));
+            return buildNegativesBatchExport(campaign, id, negatives);
+          }
+          // ads_batch (the only remaining CHANGE_PROPOSAL_KINDS member).
+          const ids = Array.isArray(payload.ids) ? payload.ids.filter((v): v is string => typeof v === "string") : [];
+          if (ids.length === 0) throw new BadRequestException("payload.ids (the ad row ids this batch covers) is required to export an ads_batch proposal");
+          const adRes = await c.query<{ ad_group_name: string; headlines: string[]; descriptions: string[]; final_url: string | null; status: string }>(
+            `SELECT ag.name AS ad_group_name, a.headlines, a.descriptions, a.final_url, a.status
+               FROM search_ads a
+               JOIN search_ad_groups ag ON ag.id = a.ad_group_id
+              WHERE a.id = ANY($1::uuid[]) AND ag.campaign_id = $2 AND a.deleted_at IS NULL`,
+            [ids, proposal.campaignId],
+          );
+          if (adRes.rows.length === 0) throw new BadRequestException("none of payload.ids resolved to an ad in this campaign");
+          if (adRes.rows.some((r) => r.status !== "approved")) {
+            throw new BadRequestException("every ad in an ads_batch export must be status='approved' first — draft/rejected ads are refused, never silently skipped");
+          }
+          if (adRes.rows.some((r) => r.headlines.length > RSA_MAX_HEADLINES || r.descriptions.length > RSA_MAX_DESCRIPTIONS)) {
+            throw new BadRequestException(`an ad exceeds Ads Editor's own ${RSA_MAX_HEADLINES}-headline/${RSA_MAX_DESCRIPTIONS}-description limit — fix it before exporting, never silently truncated`);
+          }
+          const ads: AdFact[] = adRes.rows.map((r) => ({
+            adGroupName: r.ad_group_name, headlines: r.headlines, descriptions: r.descriptions, finalUrl: r.final_url,
+          }));
+          return buildAdsBatchExport(campaign, id, ads);
+        },
+        { modules: ["search"] },
+      );
+    } catch (err) {
+      if (err instanceof ExportInputError) throw new BadRequestException(err.message);
+      throw err;
+    }
+
+    const fileId = newId();
+    const storageKey = `${tenantId}/sem-exports/${fileId}`;
+    const bytes = Buffer.from(result.csv, "utf8");
+    await storage().put(storageKey, bytes);
+    await withTenants(
+      [tenantId],
+      async (c) => {
+        await c.query(
+          `INSERT INTO files (id, tenant_id, uploader_id, target_entity_type, target_entity_id, filename, content_type, byte_size, storage_key, scrubbed, origin_site)
+           VALUES ($1,$2,$3,'search_change_proposal',$4,$5,$6,$7,$8,false,$9)`,
+          [fileId, tenantId, req.principal.userId, id, result.filename, result.contentType, bytes.byteLength, storageKey, config.originSite],
+        );
+        await c.query(
+          `UPDATE search_change_proposals SET export_file_id = $2, updated_at = now() WHERE id = $1 AND deleted_at IS NULL`,
+          [id, fileId],
+        );
+      },
+      { modules: ["search"] },
+    );
+    await writeActivity(tenantId, req.principal.userId, "exported", "search_change_proposal", id, { fileId, kind, filename: result.filename });
+    return { fileId, filename: result.filename, contentType: result.contentType, byteSize: bytes.byteLength, provenance: result.provenance };
+  }
+
+  // ============================================================== SEM: MANUAL MARK-APPLIED (SM-30) =
+  // design §04/§07/§08/§12 SM-30; D-8's "manual mode records who applied it in the ad platform" —
+  // an explicit, permission-gated, audited HUMAN ATTESTATION, never an inferred state. This is the
+  // ONE new door to status='applied' (updateChangeProposal above refuses it unconditionally, and that
+  // refusal is unchanged by this ticket — see the mutation-probe test asserting exactly that).
+  //
+  // THE NARROW DOOR, spelled out because narrowness is the point (ticket hazard #1):
+  //   - one route (this one; no other path sets 'applied')
+  //   - one Cerbos action (`apply_manual` — NOT the `update` action every other campaign-domain
+  //     mutation uses, and NOT reachable via the generic PATCH above), pre-scoped by SM-03's
+  //     resource_search_campaign.yaml to module_manager/company_admin/group_executive only — exactly
+  //     `search:campaign:launch`'s declared coverage, no cerbos policy file changed by this ticket
+  //   - one precondition (status='approved' AND mode='manual' — never 'proposed'/'dismissed'/already
+  //     'applied', and never an api-mode proposal, which is SM-21's exclusive path)
+  //   - one audit trail (writeActivity, same as every other mutation in this file)
+  //
+  // IDEMPOTENCY (ticket hazard: "must not double-record... prefer a schema-level guarantee") — TWO
+  // layers, doing two different jobs:
+  //   1. The ordinary SEQUENTIAL case (a human double-clicks, or retries after a slow response) is
+  //      caught by the plain `proposal.status !== "approved"` check below: the second call's own
+  //      pre-fetch already sees the first call's committed 'applied' row and is refused with a 400
+  //      naming why. This is the path that fires almost every time this route is called twice.
+  //   2. The genuinely CONCURRENT case (two requests whose pre-fetches both land before either
+  //      commits) is where an application-level check-then-act would race. That path is closed by the
+  //      UPDATE below being guarded with `AND status = 'approved'` — the identical compare-and-swap
+  //      idiom updateChangeProposal already relies on, not a new pattern invented for this route.
+  //      Postgres serializes concurrent UPDATEs against the same row: the loser's UPDATE blocks on the
+  //      row lock, then — once the winner commits — re-evaluates ITS OWN WHERE clause against the
+  //      now-'applied' row and matches zero rows, so it is refused (404) rather than silently
+  //      re-applying. That is a real database guarantee (MVCC + row-level locking), not an
+  //      application-level check-then-act race dressed up as one — it is the backstop for exactly the
+  //      window layer 1 cannot see.
+  // Either way, the schema/DB is the final word: no code path can produce a second 'applied'
+  // transition, and the two layers together are what "prefer a schema-level guarantee" means here —
+  // layer 1 is a courtesy for the common case, layer 2 is the actual guarantee.
+  @Post("change-proposals/:id/mark-applied")
+  @HttpCode(200)
+  async markChangeProposalApplied(
+    @Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("id") id: string,
+    @Body() body: { note?: string },
+  ) {
+    assertUuid(id, "change proposal id");
+    const proposal = await withTenants([tenantId], (c) => changeProposalFullRow(c, id), { modules: ["search"] });
+    if (!proposal) throw new NotFoundException("change proposal not found");
+    await authorize(req.principal, { kind: "resource_search_campaign", id, tenantId, module: "search" }, "apply_manual");
+    if (proposal.mode !== "manual") {
+      throw new BadRequestException("this proposal is mode='api' — mark-applied is not available for it; it executes via the one-shot approval path (SM-21)");
+    }
+    if (proposal.status !== "approved") {
+      throw new BadRequestException(`cannot mark a '${proposal.status}' proposal applied — it must be 'approved' first`);
+    }
+
+    const note = typeof body?.note === "string" ? body.note.trim().slice(0, 1000) : null;
+    const cascadeIds = Array.isArray(proposal.payload.ids)
+      ? proposal.payload.ids.filter((v): v is string => typeof v === "string")
+      : [];
+
+    const applied = await withTenants(
+      [tenantId],
+      async (c) => {
+        const upd = await c.query(
+          `UPDATE search_change_proposals SET status = 'applied', applied_by = $2, applied_at = now(), updated_at = now()
+             WHERE id = $1 AND deleted_at IS NULL AND status = 'approved'`,
+          [id, req.principal.userId],
+        );
+        if (upd.rowCount === 0) return false;
+        // Cascade (design §04: "search_negatives.status='applied' and search_ads.status='live' are
+        // stamped by the proposal that carried them"). Campaign-level kinds (launch/pause/budget/bid)
+        // deliberately do NOT touch search_campaigns here — that mirrors updateCampaign's own existing
+        // rule (CAMPAIGN_STATUSES_WRITABLE excludes live/paused/ended: "live states require a live-ads
+        // sync", SM-20/25/26). A human's self-report that they applied a pause/budget/bid change by
+        // hand is not the same authority as a read-back from the actual ad account, and this ticket
+        // does not relitigate that pre-existing boundary.
+        if (proposal.kind === "negatives_batch" && cascadeIds.length > 0) {
+          await c.query(
+            `UPDATE search_negatives SET status = 'applied', updated_at = now()
+               WHERE id = ANY($1::uuid[]) AND campaign_id = $2 AND deleted_at IS NULL AND status != 'dismissed'`,
+            [cascadeIds, proposal.campaignId],
+          );
+        } else if (proposal.kind === "ads_batch" && cascadeIds.length > 0) {
+          await c.query(
+            `UPDATE search_ads SET status = 'live', updated_at = now()
+               FROM search_ad_groups ag
+              WHERE search_ads.id = ANY($1::uuid[]) AND search_ads.ad_group_id = ag.id AND ag.campaign_id = $2
+                AND search_ads.deleted_at IS NULL AND search_ads.status = 'approved'`,
+            [cascadeIds, proposal.campaignId],
+          );
+        }
+        return true;
+      },
+      { modules: ["search"] },
+    );
+    if (!applied) throw new NotFoundException("change proposal not found, not mode='manual'/'approved', or was already applied concurrently");
+    await writeActivity(tenantId, req.principal.userId, "marked_applied", "search_change_proposal", id, { kind: proposal.kind, note });
+    return { id, status: "applied" as const };
+  }
+
+  // ============================================================== SEM: SEARCH-TERMS SYNC (SM-20) ==
+  // design §12 SM-20: "Ads-Scripts read bridge: exporter template + signed n8n webhook -> metrics-
+  // daily + search terms". THIS ticket covers the search-terms half only (see migration 0062's file
+  // header) — the campaign-level `search_campaign_metrics_daily` bridge is a separate, not-yet-built
+  // ingest and is deliberately untouched here.
+  //
+  // NOT A PAID PULL (this ticket's own hazard 1): no vendor is dispatched, nothing routes through
+  // `dispatchProviderOp`, no `search_provider_calls` row is written. The Ads Script that POSTs here
+  // runs INSIDE the client's own Google Ads account and reports its own account's data; the ONLY
+  // things standing between "holds the shared secret" and "attaches data to a relationship that never
+  // authorized it" (SM-56's own defect class, fixed by SM-63, tracker §6bb) are the admission checks
+  // below — see sem-search-terms.ts's file header for the full two-level reasoning
+  // (campaignScopeMatches / adGroupScopeMatches) and why every failure maps to the SAME 404.
+  //
+  // AUTHENTICATION ORDER (mirrors rank-pulls/callback's own documented reasoning, verbatim): the
+  // secret is checked FIRST — before body validation, Cerbos, or any database read — because an
+  // unauthenticated relay must learn nothing about which ids exist. Checking it after a 400/404 would
+  // turn this route into an id-probing oracle for anyone holding only the service token.
+  @Post("search-terms/callback")
+  @HttpCode(200)
+  async searchTermsCallback(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Body() body: unknown) {
+    assertSemCallbackSecret(req);
+
+    let batch;
+    try {
+      batch = validateSearchTermBatch(body);
+    } catch (err) {
+      // Hostile/malformed input is ALWAYS a 400, never a 500 or a partial write (this ticket's own
+      // hazard 4) — validateSearchTermBatch throws BEFORE any DB connection is opened, SM-08's own
+      // discipline, cited by this ticket's instructions.
+      throw new BadRequestException(err instanceof Error ? err.message : "invalid search-term batch");
+    }
+    assertUuid(batch.engagementId, "engagementId");
+    assertUuid(batch.campaignId, "campaignId");
+    batch.rows.forEach((row, i) => assertUuid(row.adGroupId, `rows[${i}].adGroupId`));
+
+    await authorize(req.principal, { kind: "resource_search_campaign", id: batch.campaignId, tenantId, module: "search" }, "create");
+
+    // §A4.7: read fresh at the moment of THIS ingest, never cached, never re-derived later — this
+    // edge has neither a DispatchResult nor a per-connection OAuth issuer flag to draw provenance
+    // from (see sem-search-terms.ts's file header), so the platform-wide mode switch is the
+    // equivalent signal this module already uses for "is this producing real or demo data".
+    const simulated = config.search.providerMode === "simulate";
+
+    try {
+      const outcome = await withTenants(
+        [tenantId],
+        async (c) => {
+          // ── SM-63's class, level 1: the campaign's OWN engagement vs. what the payload claims ──────
+          const campaign = await campaignRow(c, batch.campaignId);
+          if (!campaign || !campaignScopeMatches(campaign, batch.engagementId)) throw new SearchTermScopeError();
+
+          // ── SM-63's class, level 2: every referenced ad group's OWN campaign vs. THIS campaign ─────
+          // Resolved and checked for EVERY distinct ad group BEFORE any write — an all-or-nothing gate,
+          // so a batch that references even one wrong-scope ad group writes nothing (hazard 4).
+          const distinctAdGroupIds = [...new Set(batch.rows.map((r) => r.adGroupId))];
+          const adGroups = await c.query<{ id: string; campaign_id: string }>(
+            `SELECT id, campaign_id FROM search_ad_groups WHERE id = ANY($1::uuid[]) AND deleted_at IS NULL`,
+            [distinctAdGroupIds],
+          );
+          const adGroupById = new Map(adGroups.rows.map((r) => [r.id, { campaignId: r.campaign_id }]));
+          for (const adGroupId of distinctAdGroupIds) {
+            const ag = adGroupById.get(adGroupId);
+            if (!ag || !adGroupScopeMatches(ag, batch.campaignId)) throw new SearchTermScopeError();
+          }
+
+          // TEST-ONLY widened window (sem-search-terms.ts) — always 0 in production. Exists so the
+          // idempotency guarantee below can be proven under a GENUINELY forced concurrent race rather
+          // than a hopeful Promise.all that might never actually collide (this ticket's own §6ay note).
+          if (INGEST_RACE_DELAY_MS > 0) await new Promise((resolve) => setTimeout(resolve, INGEST_RACE_DELAY_MS));
+
+          // ── THE UPSERT ITSELF — one INSERT...ON CONFLICT per row, all inside this one transaction ──
+          // (withTenants' own BEGIN/COMMIT/ROLLBACK). Schema-level guarantee, not application logic
+          // (this ticket's own instruction): the UNIQUE (tenant_id, campaign_id, row_hash) constraint
+          // (migration 0062) is what a concurrent redelivery race resolves against, atomically, at the
+          // index — never a check-then-insert window in this code. `simulated` re-stamped on conflict
+          // too (EXCLUDED.simulated), same discipline 0061's gsc-client.ts already established: the
+          // provenance travels with the payload it now describes, never left stale from a prior write.
+          let rowsUpserted = 0;
+          for (const row of batch.rows) {
+            const rowHash = computeSearchTermRowHash(batch.campaignId, row.adGroupId, row.date, row.term, row.matchType);
+            await c.query(
+              `INSERT INTO search_term_metrics_daily
+                 (id, tenant_id, campaign_id, ad_group_id, date, term, match_type, impressions, clicks,
+                  cost_minor, currency, conversions, conv_value_minor, row_hash, simulated, source, origin_site)
+               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,'ads_scripts',$16)
+               ON CONFLICT (tenant_id, campaign_id, row_hash) DO UPDATE SET
+                 impressions = EXCLUDED.impressions, clicks = EXCLUDED.clicks, cost_minor = EXCLUDED.cost_minor,
+                 currency = EXCLUDED.currency, conversions = EXCLUDED.conversions,
+                 conv_value_minor = EXCLUDED.conv_value_minor, simulated = EXCLUDED.simulated, updated_at = now()`,
+              [
+                newId(), tenantId, batch.campaignId, row.adGroupId, row.date, row.term, row.matchType,
+                row.impressions, row.clicks, row.costMinor, row.currency, row.conversions, row.convValueMinor,
+                rowHash, simulated, config.originSite,
+              ],
+            );
+            rowsUpserted++;
+          }
+          return { rowsReceived: batch.rows.length, rowsUpserted };
+        },
+        { modules: ["search"] },
+      );
+      await writeActivity(tenantId, req.principal.userId, "ingested", "search_campaign", batch.campaignId, {
+        rowsUpserted: outcome.rowsUpserted, simulated,
+      });
+      return { status: "ingested" as const, campaignId: batch.campaignId, simulated, ...outcome };
+    } catch (err) {
+      // SearchTermScopeError is the ONE admission-failure shape (campaign not found, engagement
+      // mismatch, ad group not found, ad group/campaign mismatch) — mapped here, deliberately NOT left
+      // to SM-58's last-resort filter, for the same reason rank-pulls/callback maps UnknownVendorTaskError
+      // itself: an unmapped throwable would 500 (§6ad Ruling 2's class of defect), where 404 is the
+      // honest status — from this caller's side, "no such campaign for this engagement" IS the truth.
+      if (err instanceof SearchTermScopeError) throw new NotFoundException(err.message);
+      throw err;
+    }
+  }
+
+  // Reader for the "Search Terms" console tab (already listed in the module's uiManifest) — discharges
+  // FRONTEND-BFF-CONTRACT.md's PENDING "live search-term LISTING" line. Plain tenant/campaign-scoped
+  // read, same three-wall shape as every other GET in this controller; no admission-check subtlety
+  // here since the campaign id is a route param already validated by campaignRow's existence check.
+  @Get("campaigns/:id/search-terms")
+  async listSearchTerms(
+    @Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("id") id: string,
+    @Query("adGroupId") adGroupId?: string, @Query("startDate") startDate?: string, @Query("endDate") endDate?: string,
+  ) {
+    assertUuid(id, "campaign id");
+    const campaign = await withTenants([tenantId], (c) => campaignRow(c, id), { modules: ["search"] });
+    if (!campaign) throw new NotFoundException("campaign not found");
+    await authorize(req.principal, { kind: "resource_search_campaign", id, tenantId, module: "search" }, "read");
+
+    const params: unknown[] = [id];
+    const clauses = ["campaign_id = $1"];
+    if (adGroupId) {
+      assertUuid(adGroupId, "adGroupId");
+      params.push(adGroupId);
+      clauses.push(`ad_group_id = $${params.length}`);
+    }
+    if (startDate) { params.push(startDate); clauses.push(`date >= $${params.length}`); }
+    if (endDate) { params.push(endDate); clauses.push(`date <= $${params.length}`); }
+
+    const rows = await withTenants(
+      [tenantId],
+      (c) => c.query<{
+        id: string; campaignId: string; adGroupId: string; date: string; term: string; matchType: string;
+        impressions: string; clicks: string; costMinor: string; currency: string | null;
+        conversions: string; convValueMinor: string; simulated: boolean; created_at: string; updated_at: string;
+      }>(
+        `SELECT id, campaign_id AS "campaignId", ad_group_id AS "adGroupId", date, term, match_type AS "matchType",
+                impressions, clicks, cost_minor AS "costMinor", currency, conversions,
+                conv_value_minor AS "convValueMinor", simulated, created_at, updated_at
+           FROM search_term_metrics_daily
+          WHERE ${clauses.join(" AND ")}
+          ORDER BY date DESC, term ASC LIMIT 1000`,
+        params,
+      ),
+      { modules: ["search"] },
+    );
+    // bigint columns come back as strings from node-postgres — normalized to numbers here, same
+    // convention as every count/sum aggregate elsewhere in this controller (e.g. `Number(active.rows[0].n)`).
+    return rows.rows.map((r) => ({
+      ...r,
+      impressions: Number(r.impressions),
+      clicks: Number(r.clicks),
+      costMinor: Number(r.costMinor),
+      convValueMinor: Number(r.convValueMinor),
+      conversions: moneyOrNull(r.conversions),
+    }));
   }
 }

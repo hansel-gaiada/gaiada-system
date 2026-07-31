@@ -7,6 +7,7 @@ import type { FastifyRequest } from "fastify";
 import { newId, withTenants } from "../db";
 import { config } from "../config";
 import { authorize, writeActivity, notify } from "./http";
+import { emitEvent } from "../events/outbox.service";
 import { AuthGuard } from "../auth/guards";
 
 // P3-08: closed reaction emoji set — matches the P3-09 frontend's fixed reaction bar and the
@@ -115,6 +116,28 @@ export class CollabController {
       throw new BadRequestException((err as Error).message);
     }
     await writeActivity(tenantId, actorId, "commented", entityType, entityId, { commentId: id });
+    // TR-05: pm->work_activity evidence feed. entityType "task" is shared across subsystems (see
+    // the pm_task_followers vs. `tasks` lookup below) — only emit onto the pm_task stream when
+    // entityId genuinely resolves to a live pm_tasks row, so a comment on a non-PM "task" never
+    // mints a bogus source='pm' activity row. Reuses the SAME "pm_task" stream the task lifecycle
+    // events already emit on (not a new stream) — the consumer's generic eventType-tail verb
+    // derivation naturally yields "commented" for "pm.task.commented", no special-casing needed.
+    if (entityType === "task") {
+      const pmTask = await withTenants([tenantId], (c) =>
+        c.query<{ project_id: string }>(`SELECT project_id FROM pm_tasks WHERE id = $1 AND deleted_at IS NULL`, [entityId]),
+      );
+      if (pmTask.rows[0]) {
+        // TR-31: actorId is the commenting user — the outbox consumer maps it straight into
+        // work_activity.actor_user_id (and work-activity-linker.ts rule a mints an EXACT person
+        // link from it), which is what the person-grain `comments_authored` metric reads. Without
+        // it this row's actor silently comes back null and the metric silently reads zero.
+        await withTenants([tenantId], (c) =>
+          emitEvent(c, tenantId, "pm_task", entityId, "pm.task.commented", {
+            taskId: entityId, projectId: pmTask.rows[0].project_id, commentId: id, actorId,
+          }),
+        );
+      }
+    }
     // Deep-link target for the notification bell (payload.href) — tasks resolve to their page.
     const href = entityType === "task" ? `/tasks/${entityId}` : undefined;
     // P3-08 fan-out dedup: mentions ∪ assignee ∪ followers collapse into ONE "already notified"

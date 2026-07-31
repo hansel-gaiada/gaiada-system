@@ -23,6 +23,7 @@ import { MockSearchProvider } from "./mock-provider";
 import { AhrefsProvider } from "./ahrefs";
 import { registerProvider, resetProviders, resolveProvider } from "./registry";
 import { dispatchProviderOp, evaluateBudget, projectMonthlyCost } from "./dispatch";
+import { ON_DEMAND_ESTIMATE_RUNS_PER_MONTH } from "../cadence";
 import { resetProviderMonthToDateCache, sumMonthToDate, trueUpLedger } from "./ledger";
 // Namespace import so the global-ceiling failure path can be forced with a spy (dispatch.ts calls
 // through the module object once SWC transpiles the ESM import).
@@ -205,6 +206,58 @@ describe("SM-04 projectMonthlyCost — the estimateCostUsd projection (SM-29's p
     const viaProjection = projectMonthlyCost({ rank: { enabled: true, cadence: "monthly", maxKeywords: 50 } })
       .perTool.find((t) => t.tool === "rank")!.costPerRunUsd;
     expect(viaProjection).toBeCloseTo(viaProvider, 9);
+  });
+
+  // ── SM-61 (tracker §6au Ruling 1, clauses 1+3) ────────────────────────────────────────────────
+  describe("SM-61 · `scheduled` + the no-default cadence parse", () => {
+    it("an enabled tool with an EXPLICIT real cadence, in SCHEDULED_TOOLS, is scheduled:true", () => {
+      const { perTool } = projectMonthlyCost({ rank: { enabled: true, cadence: "weekly" } });
+      expect(perTool.find((t) => t.tool === "rank")!.scheduled).toBe(true);
+    });
+
+    it("REQUIRED PROBE 1 (§6au): an enabled tool with NO cadence is scheduled:false and prices at the on-demand estimate — never the weekly-conservative figure the superseded SM-54 spec clause would have used", () => {
+      const { perTool } = projectMonthlyCost({ rank: { enabled: true } });
+      const rank = perTool.find((t) => t.tool === "rank")!;
+      expect(rank.scheduled).toBe(false);
+      expect(rank.cadence).toBeNull();
+      expect(rank.runsPerMonth).toBeCloseTo(ON_DEMAND_ESTIMATE_RUNS_PER_MONTH, 6);
+      // The property a "treat null as weekly" mutation would break: runsPerMonth must NOT be ~4.29.
+      expect(rank.runsPerMonth).not.toBeCloseTo(30 / 7, 1);
+    });
+
+    it("junk cadence parses to on-demand (scheduled:false), never to a guessed schedule", () => {
+      const { perTool } = projectMonthlyCost({ rank: { enabled: true, cadence: "fortnightly" } });
+      const rank = perTool.find((t) => t.tool === "rank")!;
+      expect(rank.scheduled).toBe(false);
+      expect(rank.cadence).toBeNull();
+      expect(rank.runsPerMonth).toBeCloseTo(ON_DEMAND_ESTIMATE_RUNS_PER_MONTH, 6);
+    });
+
+    it("a DISABLED tool is never scheduled regardless of cadence", () => {
+      const { perTool } = projectMonthlyCost({ rank: { enabled: false, cadence: "daily" } });
+      expect(perTool.find((t) => t.tool === "rank")!.scheduled).toBe(false);
+    });
+
+    it("'suggestions' can NEVER be scheduled:true — it has no scheduled flow, even with enabled+a real cadence set", () => {
+      const { perTool } = projectMonthlyCost({ suggestions: { enabled: true, cadence: "daily" } });
+      const suggestions = perTool.find((t) => t.tool === "suggestions")!;
+      expect(suggestions.enabled).toBe(true);
+      expect(suggestions.cadence).toBe("daily");
+      expect(suggestions.scheduled).toBe(false); // not in SCHEDULED_TOOLS — the whole point of clause 3
+    });
+
+    it("PRICE-REGRESSION PIN (§6au, REQUIRED PROBE 2): volume WITH cadence:'monthly' prices identically to the pre-SM-61 shape (enabled, no cadence)", () => {
+      const before = projectMonthlyCost({ volume: { enabled: true, maxKeywords: 50 } });
+      const after = projectMonthlyCost({ volume: { enabled: true, cadence: "monthly", maxKeywords: 50 } });
+      const b = before.perTool.find((t) => t.tool === "volume")!;
+      const a = after.perTool.find((t) => t.tool === "volume")!;
+      expect(a.runsPerMonth).toBe(b.runsPerMonth); // both 1
+      expect(a.costPerRunUsd).toBeCloseTo(b.costPerRunUsd, 9);
+      expect(a.projectedMonthlyUsd).toBeCloseTo(b.projectedMonthlyUsd, 9);
+      // The only thing that's allowed to change is the LABEL, never the number.
+      expect(b.scheduled).toBe(false);
+      expect(a.scheduled).toBe(true);
+    });
   });
 });
 

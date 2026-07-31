@@ -12,6 +12,11 @@ import { AppModule } from "./app.module";
 import { config, n8nBridgeEnabled, graphBridgeEnabled } from "./config";
 import { HttpErrorFilter } from "./http-error.filter";
 import { ProviderDispatchErrorFilter } from "./modules/search/provider-dispatch-error.filter";
+import { GatewayNotConfiguredErrorFilter } from "./modules/search/gateway-not-configured-error.filter";
+// SM-25a: the Google-surface error family (modules/search/google/errors.ts). Registered here for
+// exactly the reason SM-53/SM-57 had to be — an unmapped plain Error escapes as a body-less 500.
+import { GoogleOAuthErrorFilter } from "./modules/search/google/google-oauth-error.filter";
+import { LastResortExceptionFilter } from "./last-resort-exception.filter";
 import { migrate } from "./db/migrate";
 import { getPool } from "./db";
 import { seedClockFromDb } from "./events/hlc";
@@ -25,6 +30,7 @@ import { knowledgeModule } from "./modules/knowledge";
 import { automationConsoleModule } from "./modules/automation-console";
 import { hrModule } from "./modules/hr";
 import { searchModule } from "./modules/search";
+import { reportsModule } from "./modules/reports";
 import { createDataForSeoProviderFromConfig } from "./modules/search/providers/dataforseo";
 import { createSemrushProviderFromConfig } from "./modules/search/providers/semrush";
 import { createAhrefsProviderFromConfig } from "./modules/search/providers/ahrefs";
@@ -38,6 +44,15 @@ import { registerProvider } from "./modules/search/providers/registry";
 // its own header). registerProvider above already makes the simulate/live branches structurally
 // exclusive; this predicate is the SEPARATE guard against a live branch pointed at a private endpoint.
 import { assertLiveVendorBaseUrlsAreNotPrivate, SEARCH_ALLOW_PRIVATE_VENDOR_BASEURL_ENV } from "./search-vendor-baseurl-guard";
+// SM-51 (design addendum §A12.3) — the SAME guard extended to the Google endpoint seams. Separate
+// function + separate override env var because the two risks differ: a private vendor base URL mints
+// fabricated market data, a private Google issuer mints credential-vault rows that misrepresent a
+// client's own account. Reuses the one lexical predicate (see that file's header).
+import {
+  assertLiveGoogleEndpointsAreNotPrivate,
+  googleEndpointSeamsFromConfig,
+  ALLOW_PRIVATE_GOOGLE_ENDPOINT_ENV,
+} from "./modules/search/google/endpoint-guard";
 import { registerCoreRollupProvider, coreTaskRollups, syncMetricDefinitions } from "./rollups/engine";
 import { clientWorkRollups } from "./core/client-work";
 import { startRelayLoop } from "./events/relay";
@@ -48,6 +63,12 @@ import { startGraphBridgeLoop } from "./events/graph-bridge";
 import { startWorkActivityConsumerLoop } from "./events/work-activity-consumer";
 import { runWorkActivityBackfill } from "./core/work-activity-backfill";
 import { startBurndownSnapshotLoop } from "./modules/pm/burndown-job";
+// SM-54 (tracker §6ad Ruling 1 / addendum §A13.2) — the search department's cadence loop lives in the
+// platform, NOT in n8n: it executes configuration a verified human already set (each engagement's
+// `tool_scope` toggle + cadence + budget cap, written under `search:scope:write`), and every automation
+// principal is minted `assurance: "low"` by construction, so giving n8n a path to vendor spend would
+// have meant weakening two controls on the money path. Dark by default — see the config comment.
+import { startSearchPullSchedulerLoop } from "./modules/search/pull-scheduler";
 
 export async function buildApp(): Promise<NestFastifyApplication> {
   // Fastify logs are pino JSON with trace_id/span_id when OTEL is on, else stay off (unchanged
@@ -63,8 +84,32 @@ export async function buildApp(): Promise<NestFastifyApplication> {
   // SM-53: the search module's typed dispatch refusals are plain Errors, so HttpErrorFilter
   // (@Catch(HttpException)) never saw them and they surfaced as a message-less 500 — discarding the
   // human-actionable part these refusals exist for (which toggle to enable, which switch is off).
-  // Registered alongside, not instead: the two filters catch disjoint types.
-  app.useGlobalFilters(new HttpErrorFilter(), new ProviderDispatchErrorFilter());
+  // Registered alongside, not instead: the filters catch disjoint types.
+  // SM-57: same class of bug, one more instance — GatewayNotConfiguredError (providers/gateway-
+  // client.ts) escaped keyword-sets/:id/embed and /cluster as a message-less 500 too.
+  // SM-58: the structural floor under both — ANY other uncaught plain Error anywhere in the app
+  // still fell through to Nest's default handler (a body-less 500). LastResortExceptionFilter is the
+  // app-wide `@Catch()` backstop for every future instance of that class.
+  //
+  // ORDER IS NOT COSMETIC. Nest's ExceptionsHandler picks the first filter (of the list it holds)
+  // whose @Catch type matches, but `RouterExceptionFilters` REVERSES the array passed to this call
+  // before storing it — so the LAST argument below is checked FIRST, not last (proven empirically in
+  // last-resort-exception.filter.test.ts, which also demonstrates what happens if this is ever
+  // "tidied" to the end of the list: it silently shadows every other filter).
+  // LastResortExceptionFilter's @Catch() matches EVERY thrown value unconditionally, so it MUST be
+  // the FIRST argument — the reversal then puts it LAST in the checked order, genuinely last-resort.
+  // The three type-scoped filters below only ever match their own exception type, so their relative
+  // order among themselves does not matter.
+  // SM-25a: GoogleOAuthErrorFilter is the third type-scoped member of the same family of fixes. It
+  // catches the whole `GoogleSurfaceError` hierarchy and uses each error's OWN status/code, so a new
+  // Google refusal added later is mapped by construction rather than by remembering to edit a filter.
+  app.useGlobalFilters(
+    new LastResortExceptionFilter(),
+    new HttpErrorFilter(),
+    new ProviderDispatchErrorFilter(),
+    new GatewayNotConfiguredErrorFilter(),
+    new GoogleOAuthErrorFilter(),
+  );
   // WD-04: the one multipart consumer in the app (in-ERP meeting-audio upload). The size cap
   // is enforced HERE (busboy truncates + MeetingRecordingsController turns that into a clean 400)
   // as well as re-checked in the handler — belt and suspenders, matching files.controller.ts's
@@ -90,6 +135,7 @@ async function bootstrap(): Promise<void> {
   registerModule(automationConsoleModule);
   registerModule(hrModule);
   registerModule(searchModule);
+  registerModule(reportsModule);
   // SM-06/SM-34/SM-35 — provider bootstrap registration (tracker §6, design addendum §A3/§A4.3).
   //
   // `providerMode: "simulate"` registers SM-33's synthetic drivers INSTEAD of any live vendor
@@ -151,6 +197,15 @@ async function bootstrap(): Promise<void> {
         ahrefs: config.search.ahrefs.baseUrl,
       },
       process.env[SEARCH_ALLOW_PRIVATE_VENDOR_BASEURL_ENV] === "1",
+    );
+
+    // SM-51 (§A12.3) — the same refusal for the Google OAuth issuer + the three API base hosts. Runs
+    // in the live branch next to its vendor sibling, and for the analogous reason: a "live" stack
+    // pointed at Keycloak (or at SM-51's in-process sandbox) would seal tokens into
+    // integration_connections and stamp `linked` on rows that assert a client's real Google account.
+    assertLiveGoogleEndpointsAreNotPrivate(
+      googleEndpointSeamsFromConfig(),
+      process.env[ALLOW_PRIVATE_GOOGLE_ENDPOINT_ENV] === "1",
     );
 
     const dfs = createDataForSeoProviderFromConfig();
@@ -253,6 +308,20 @@ async function bootstrap(): Promise<void> {
     startBurndownSnapshotLoop(config.pmBurndownSnapshotIntervalMs);
     // eslint-disable-next-line no-console
     console.log(`burndown snapshot job on: every ${config.pmBurndownSnapshotIntervalMs}ms`);
+  }
+  // SM-54: the search pull scheduler. A plain Postgres sweep (no Redis dependency), so it sits outside
+  // the redisUrl gate above alongside the drift sweep and the burndown job — but unlike those two this
+  // one SPENDS VENDOR MONEY, so its flag is the hard gate rather than a performance opt-in. The
+  // interval only controls how often due-ness is re-asked; the cadence that decides whether anything is
+  // pulled is derived per engagement from `tool_scope`, never from this value.
+  if (config.search.schedulerEnabled) {
+    startSearchPullSchedulerLoop(config.search.schedulerIntervalMs);
+    // eslint-disable-next-line no-console
+    console.log(
+      `search pull scheduler on: re-deriving due-ness every ${config.search.schedulerIntervalMs}ms ` +
+        "(cadence, tool toggles and budget caps all come from each engagement's tool_scope; " +
+        "ledger attribution requested_by=NULL correlationId=sched:<tool>)",
+    );
   }
   const app = await buildApp();
   const port = Number(process.env.PLATFORM_PORT ?? 3004);

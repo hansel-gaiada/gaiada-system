@@ -60,6 +60,25 @@ const APPROVED_EGRESS: Record<string, string> = {
   "providers/dataforseo.ts": "vendor: DataForSEO (config.search.dataforseo.baseUrl)",
   "providers/semrush.ts": "vendor: Semrush (config.search.semrush.baseUrl)",
   "providers/ahrefs.ts": "vendor: Ahrefs (config.search.ahrefs.baseUrl)",
+  // ── SM-25a · THE THIRD EGRESS CLASS (design addendum §A12.1, binding) ─────────────────────────
+  // §A5's B-1 rule ("vendor SEO APIs only via SearchDataProvider through dispatchProviderOp")
+  // governs SHARED MARKET-DATA VENDORS: the dispatch choke-point exists because that spend is
+  // shared, metered and cached cross-tenant. Google client-account access differs on every axis
+  // that motivated B-1 — CLIENT-PRIVATE, $0-API-BILLED, PER-CLIENT-OAUTH — so §A12.1 rules it a
+  // THIRD class reached only via module-internal clients under google/, and amends THIS SET
+  // "deliberately, by exact filename". Two files, not a directory glob: a glob would silently
+  // absorb a third egress point added later, which is precisely the drift the exact-set-equality
+  // assertion below exists to prevent.
+  //
+  // What these two are NOT allowed to do, restated where a reviewer of this allowlist will read it:
+  // they never register as a `SearchDataProvider`, never route through `dispatchProviderOp` (there
+  // are no dollars to meter — inventing synthetic ones would pollute §A3's cost-to-serve meaning),
+  // never write a USD ledger row, and NEVER touch `search_data_cache` (no-RLS shared market data by
+  // design, D-4 — a client's own Search Console rows there would be a cross-tenant leak BY
+  // CONSTRUCTION). Google-derived rows live in tenant-scoped FORCE-RLS tables carrying `simulated`.
+  // The B-1 assertion below is unaffected: neither file calls any SearchDataProvider method.
+  "google/token-endpoint-client.ts": "Google OAuth issuer: token + RFC-7009 revocation (config.search.google) — §A12.1 third class, client-private, $0",
+  "google/api-client.ts": "Google data surfaces: Search Console / GA4 Data / Ads READ (config.search.google) — §A12.1 third class, client-private, $0",
 };
 
 /** Each approved egress file's OWN config namespace, and the namespaces it must NEVER reference —
@@ -72,13 +91,22 @@ const CONFIG_NAMESPACES = [
   "config.search.dataforseo",
   "config.search.semrush",
   "config.search.ahrefs",
+  "config.search.google",
 ];
+// The two google/ files SHARE `config.search.google` — deliberate, and it does not weaken the guard:
+// the assertion is that each approved file references its own namespace and NONE of the others, so
+// sharing one namespace still forbids either google file from reaching a vendor's or the gateway's
+// config (which is what "a second egress target" would look like), and still forbids any vendor driver
+// from reaching Google's. What it does not do is separate the OAuth issuer from the data surfaces, and
+// it should not: they are one credential and one quota.
 const OWN_NAMESPACE: Record<string, string> = {
   "providers/gateway-client.ts": "config.services.gateway",
   "knowledge-client.ts": "config.services.knowledge",
   "providers/dataforseo.ts": "config.search.dataforseo",
   "providers/semrush.ts": "config.search.semrush",
   "providers/ahrefs.ts": "config.search.ahrefs",
+  "google/token-endpoint-client.ts": "config.search.google",
+  "google/api-client.ts": "config.search.google",
 };
 
 interface Finding {
@@ -221,7 +249,9 @@ describe("search module egress inventory (SM-39, design addendum §A5)", () => {
   it("sanity: the scanner actually walked the expected file set (a scanner that finds nothing proves nothing)", () => {
     // Pin the production file count so a future file addition/removal is a deliberate, visible edit
     // to this test rather than a silent expansion of what "everything" means above.
-    expect(files.length).toBeGreaterThanOrEqual(19);
+    // Raised from 19 by SM-25a's google/ directory (7 files: errors, filter, endpoint-guard,
+    // google-hosts, oauth-state, oauth, token-endpoint-client, api-client).
+    expect(files.length).toBeGreaterThanOrEqual(26);
     for (const approved of Object.keys(APPROVED_EGRESS)) {
       expect(perFile.has(approved), `expected to find ${approved} under src/modules/search/`).toBe(true);
       expect(perFile.get(approved)!.network.length, `expected ${approved} to actually contain a network reference`).toBeGreaterThan(0);

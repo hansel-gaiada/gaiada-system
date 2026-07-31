@@ -92,7 +92,10 @@ async function runTranscriptionJob(tenantId: string, id: string, fileId: string,
         [id, text, fileId],
       );
       if (res.rowCount) {
-        await emitEvent(c, tenantId, "meeting_recording", id, "meeting.recording.transcribed", { chars: text.length, via: "upload" });
+        // TR-31: deliberately NO actorId — this fires from the detached transcription job
+        // (runTranscriptionJob), which has no request/principal in scope at all; actorExternal
+        // names the real (non-person) origin instead of guessing at an uploader.
+        await emitEvent(c, tenantId, "meeting_recording", id, "meeting.recording.transcribed", { chars: text.length, via: "upload", actorExternal: "whisper-worker" });
       }
     });
   } catch (err) {
@@ -104,7 +107,8 @@ async function runTranscriptionJob(tenantId: string, id: string, fileId: string,
         [id],
       );
       if (res.rowCount) {
-        await emitEvent(c, tenantId, "meeting_recording", id, "meeting.recording.transcription_failed", { reason });
+        // TR-31: same no-principal job context as the success path above.
+        await emitEvent(c, tenantId, "meeting_recording", id, "meeting.recording.transcription_failed", { reason, actorExternal: "whisper-worker" });
       }
     });
   }
@@ -140,7 +144,11 @@ export class MeetingRecordingsController {
          VALUES ($1, $2, $3, $4, $5, $6, $7, 'recording', now(), $8, $9)`,
         [id, tenantId, meetingId, clientId ?? null, projectId ?? null, title ?? null, kind, req.principal.userId, config.originSite],
       );
-      await emitEvent(c, tenantId, "meeting_recording", id, "meeting.recording.created", { meetingId, kind });
+      // TR-31: actorId is the registering user (a genuine per-request principal, unlike the
+      // async transcription job below, which has none). The consumer's mapMeetingRecording still
+      // buckets `source: "system"` (categorization, unrelated to actor attribution) — see that
+      // mapper's header comment.
+      await emitEvent(c, tenantId, "meeting_recording", id, "meeting.recording.created", { meetingId, kind, actorId: req.principal.userId });
       return { id, meetingId, deduped: false };
     });
     await writeActivity(tenantId, req.principal.userId, "started", "meeting_recording", result.id, { meetingId, kind });
@@ -171,7 +179,8 @@ export class MeetingRecordingsController {
         [id, body?.status ?? null, body?.title ?? null, body?.endedAt ?? null, body?.durationSec ?? null, body?.sizeBytes ?? null, body?.localHint ?? null],
       );
       if (res.rowCount === 0) return null;
-      await emitEvent(c, tenantId, "meeting_recording", id, "meeting.recording.updated", { status: res.rows[0].status });
+      // TR-31: actorId is the request principal.
+      await emitEvent(c, tenantId, "meeting_recording", id, "meeting.recording.updated", { status: res.rows[0].status, actorId: req.principal.userId });
       return res.rows[0];
     });
     if (!updated) throw new NotFoundException("recording not found");
@@ -199,7 +208,8 @@ export class MeetingRecordingsController {
         [id, text, body?.ref ?? null],
       );
       if (res.rowCount === 0) return null;
-      await emitEvent(c, tenantId, "meeting_recording", id, "meeting.recording.transcribed", { chars: text.length });
+      // TR-31: actorId is the request principal (manual transcript submission, not the async job).
+      await emitEvent(c, tenantId, "meeting_recording", id, "meeting.recording.transcribed", { chars: text.length, actorId: req.principal.userId });
       return res.rows[0];
     });
     if (!updated) throw new NotFoundException("recording not found");
@@ -255,7 +265,8 @@ export class MeetingRecordingsController {
         `UPDATE meeting_recordings SET audio_ref = $2, status = 'transcribing', updated_at = now() WHERE id = $1`,
         [id, fileId],
       );
-      await emitEvent(c, tenantId, "meeting_recording", id, "meeting.recording.audio_uploaded", { fileId, byteSize: buf.byteLength, contentType });
+      // TR-31: actorId is the uploading request principal.
+      await emitEvent(c, tenantId, "meeting_recording", id, "meeting.recording.audio_uploaded", { fileId, byteSize: buf.byteLength, contentType, actorId: req.principal.userId });
     });
     await writeActivity(tenantId, req.principal.userId, "uploaded_audio", "meeting_recording", id, { fileId, byteSize: buf.byteLength });
 
@@ -297,7 +308,8 @@ export class MeetingRecordingsController {
 
     await withTenants([tenantId], async (c) => {
       await c.query(`UPDATE meeting_recordings SET status = 'transcribing', updated_at = now() WHERE id = $1`, [id]);
-      await emitEvent(c, tenantId, "meeting_recording", id, "meeting.recording.transcription_retry", {});
+      // TR-31: actorId is the retrying request principal.
+      await emitEvent(c, tenantId, "meeting_recording", id, "meeting.recording.transcription_retry", { actorId: req.principal.userId });
     });
     await writeActivity(tenantId, req.principal.userId, "retried_transcription", "meeting_recording", id, { fileId: row.audio_ref });
 
@@ -339,8 +351,11 @@ export class MeetingRecordingsController {
           `UPDATE meeting_recordings SET status = 'ingested', pipeline_run_id = $2, updated_at = now() WHERE id = $1`,
           [o.id, runId],
         );
+        // TR-31: deliberately NO actorId — this is an admin/service reconciliation sweep over
+        // OTHER people's recordings (relinkOrphans, gated "relink"); attributing it to whoever
+        // happened to run the sweep would misattribute someone else's meeting work.
         await emitEvent(c, tenantId, "meeting_recording", o.id, "meeting.recording.ingested", {
-          runId, deduped: false, via: "relink_sweep",
+          runId, deduped: false, via: "relink_sweep", actorExternal: "pm:relink-sweep",
         });
         relinked++;
         linkedIds.push(o.id);
@@ -396,7 +411,8 @@ export class MeetingRecordingsController {
          WHERE id = $1`,
         [id, link],
       );
-      await emitEvent(c, tenantId, "meeting_recording", id, "meeting.recording.ingested", { runId: link, deduped: dispatch.deduped ?? false });
+      // TR-31: actorId is the request principal who triggered this ingest proxy call.
+      await emitEvent(c, tenantId, "meeting_recording", id, "meeting.recording.ingested", { runId: link, deduped: dispatch.deduped ?? false, actorId: req.principal.userId });
     });
     await writeActivity(tenantId, req.principal.userId, "ingested", "meeting_recording", id, { runId });
     return { ok: true, runId, deduped: dispatch.deduped ?? false };
@@ -425,7 +441,8 @@ export class MeetingRecordingsController {
         [id, status, body?.driveFileId ?? null, body?.driveLink ?? null],
       );
       if (res.rowCount === 0) return null;
-      await emitEvent(c, tenantId, "meeting_recording", id, "meeting.recording.drive", { driveStatus: status });
+      // TR-31: actorId is the request principal recording the Drive sync result.
+      await emitEvent(c, tenantId, "meeting_recording", id, "meeting.recording.drive", { driveStatus: status, actorId: req.principal.userId });
       return res.rows[0];
     });
     if (!updated) throw new NotFoundException("recording not found");

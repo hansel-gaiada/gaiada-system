@@ -8,12 +8,22 @@
 // creates a duplicate row or double-emits `work_activity.created`.
 //
 // SCOPE: only the `activities.target_entity_type` values this ticket's live stream list also
-// covers — pm_task, pm_project, meeting_recording — have a historical trail worth backfilling.
-// pipeline_run has NO writeActivity call under that entityType (its writeActivity calls are for
-// pipeline_gate/scope_signoff, both out of this ticket's scoped stream list — see
+// covers — pm_task, pm_project, pm_doc, meeting_recording — have a historical trail worth
+// backfilling. pipeline_run has NO writeActivity call under that entityType (its writeActivity
+// calls are for pipeline_gate/scope_signoff, both out of this ticket's scoped stream list — see
 // work-activity-consumer.ts's mapPipelineRun comment), so pipeline_run activity only starts
 // appearing from the live consumer forward; there is no historical pipeline_run backfill source.
 // This is a deliberate scope boundary, not an oversight — flagged in the ticket return.
+//
+// TR-05: pm_doc added — pm.controller.ts's doc handlers have always called writeActivity(...,
+// "pm_doc", docId, ...) (created/updated/restored), so that history predates this ticket's
+// pm.doc.* outbox events and is backfillable the same way pm_task/pm_project already were.
+// object_kind is 'doc' here to match the live consumer's mapPmDoc (surfaces via
+// deliverable_evidence). Comment history is DELIBERATELY NOT backfilled: writeActivity's
+// "commented" rows are filed under whatever entityType the caller passed (e.g. "task", shared
+// across subsystems — see collab.controller.ts), so a backfill would need to join against
+// pm_tasks to tell a PM comment apart from a non-PM one; flagged as a follow-up, not attempted
+// here — comment activity starts from this ticket's live consumer go-live forward only.
 import { withGlobal, withTenants } from "../db";
 import { ingestWorkActivity, type WorkActivityIngestInput } from "./work-activity-ingest.service";
 
@@ -22,6 +32,7 @@ type BackfillSource = "pm" | "system";
 const ENTITY_MAP: Record<string, { source: BackfillSource; objectKind: string }> = {
   pm_task: { source: "pm", objectKind: "pm_task" },
   pm_project: { source: "pm", objectKind: "project" },
+  pm_doc: { source: "pm", objectKind: "doc" },
   meeting_recording: { source: "system", objectKind: "meeting_recording" },
 };
 const ENTITY_TYPES = Object.keys(ENTITY_MAP);
@@ -52,13 +63,34 @@ async function fallbackTitle(tenantId: string, entityType: string, entityId: str
     const r = await withTenants([tenantId], (c) => c.query<{ title: string | null }>(`SELECT title FROM meeting_recordings WHERE id = $1`, [entityId]));
     return r.rows[0]?.title ?? null;
   }
+  if (entityType === "pm_doc") {
+    const r = await withTenants([tenantId], (c) => c.query<{ title: string }>(`SELECT title FROM pm_docs WHERE id = $1`, [entityId]));
+    return r.rows[0]?.title ?? null;
+  }
   return null;
 }
 
-function hintPayload(entityType: string, entityId: string): Record<string, unknown> {
+async function docProjectId(tenantId: string, docId: string): Promise<string | undefined> {
+  const r = await withTenants([tenantId], (c) => c.query<{ project_id: string }>(`SELECT project_id FROM pm_docs WHERE id = $1`, [docId]));
+  return r.rows[0]?.project_id;
+}
+
+async function hintPayload(tenantId: string, entityType: string, entityId: string): Promise<Record<string, unknown>> {
   if (entityType === "pm_task") return { taskId: entityId };
   if (entityType === "pm_project") return { projectId: entityId };
+  if (entityType === "pm_doc") {
+    const projectId = await docProjectId(tenantId, entityId);
+    return { docId: entityId, ...(projectId ? { projectId } : {}) };
+  }
   return {};
+}
+
+/** Fold the actor id into the payload if known, matching work-activity-consumer.ts's TR-31
+ *  pattern: the linker's rule (a) reads payload.actorId to mint exact person links. If the
+ *  actor is unknown (activities.actor_id is NULL — system/service actors), the payload carries
+ *  no actorId hint, and no person link is created. Never guessed or inferred. */
+function mergeActorIntoPayload(payload: Record<string, unknown>, actorUserId: string | null): Record<string, unknown> {
+  return actorUserId ? { ...payload, actorId: actorUserId } : payload;
 }
 
 /** Backfills one company's history; returns how many NEW work_activity rows this pass inserted
@@ -82,6 +114,13 @@ async function backfillTenant(tenantId: string): Promise<number> {
     const metaTitle = typeof row.metadata?.title === "string" ? (row.metadata.title as string) : null;
     const title = metaTitle ?? (await fallbackTitle(tenantId, row.target_entity_type, entityId));
 
+    // TR-33: fold the propagated actor into the ingest payload (matching work-activity-consumer.ts's
+    // dispatchWorkActivity) — ingestWorkActivity hands `payload` straight to the linker (deriveLinks),
+    // whose rule (a) reads payload.actorId to mint an EXACT person link. If actor_id is unknown
+    // (NULL — system/service actors), no actorId hint is added and no person link is created.
+    const hintPayloadResult = await hintPayload(tenantId, row.target_entity_type, entityId);
+    const payload = mergeActorIntoPayload(hintPayloadResult, row.actor_id);
+
     const input: WorkActivityIngestInput = {
       source: mapping.source,
       sourceRef: row.id,
@@ -90,7 +129,7 @@ async function backfillTenant(tenantId: string): Promise<number> {
       objectKind: mapping.objectKind,
       objectRef: entityId,
       title,
-      payload: hintPayload(row.target_entity_type, entityId),
+      payload,
       occurredAt: row.occurred_at,
     };
     const result = await ingestWorkActivity(tenantId, input);

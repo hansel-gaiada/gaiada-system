@@ -7,11 +7,52 @@
 // completion UPDATEs that same row to `completed` with the trued-up actual cost — never inserts a
 // second row. Cache hits are logged `completed`, cache_hit=true, cost 0 (savings visibility). A
 // budget/scope refusal is logged `failed`, cost 0 (blocked-state visibility).
+//
+// SM-50 (design addendum §A11) adds a FOURTH status, `incurred`, and with it the one property this
+// whole file must keep: EVERY MONEY SUM BELOW IS STATUS-BLIND. sumMonthToDate (the engagement and
+// tenant tiers), GLOBAL_MTD_QUERY_SQL (the platform ceiling) and PROVIDER_MTD_QUERY_SQL (the
+// per-provider ceiling) carry month + mode (+ engagement/provider) predicates and NO status
+// predicate — as does the `search.provider_cost.month` exec rollup in modules/search/index.ts. That
+// is not an accident to be tidied up: it is precisely why a vendor charge that delivered no data binds
+// every budget tier and the exec rollup with zero changes to any query. Adding "AND status <>
+// 'incurred'" anywhere here would silently exempt real deposit burn from the ceilings meant to bound
+// it — the §4d fail-open class, and forbidden without a design gate (§A11.2 #1-#5). The only
+// status-AWARE statement over this table is the generic true-up (`WHERE status = 'posted'`), which is
+// deliberate and pinned: correcting an estimate on a DELIVERED call and reconciling an ORPHANED charge
+// are different operations that keep different code paths (§A11.2 #7).
 import type { PoolClient } from "pg";
 import { newId, withGlobal, withTenants } from "../../../db";
 import { config } from "../../../config";
 
-export type LedgerStatus = "posted" | "completed" | "failed";
+/** SM-50 (addendum §A11.1.2) widens 0034's CHECK additively with `incurred` (migration 0053).
+ *
+ *  * `posted`    — dispatched; cost_usd is the pre-dispatch estimate.
+ *  * `completed` — delivered (a cache hit, or a row trued up to a vendor-reported actual).
+ *  * `failed`    — REFUSED, or failed BEFORE the vendor was engaged. INVARIANT, unchanged by SM-50
+ *                  and the reason `incurred` had to exist at all: `failed => cost_usd = 0`, always.
+ *  * `incurred`  — the vendor was engaged and confirmably CHARGED (standard-rate accounting, §A3) and
+ *                  the platform RETAINS NO DATA for the charge. cost_usd > 0. Written by
+ *                  recordIncurred() ONLY, in its own transaction, after the dispatch transaction has
+ *                  already rolled back.
+ *
+ *                  SM-60 widens the PROSE of this one status, deliberately, and nothing else — no new
+ *                  status, no CHECK change, no query change. §A11.1.2 wrote it as "no data was
+ *                  DELIVERED", which covers only the vendor-side non-delivery SM-50 found. The second
+ *                  shape (SM-60) is a charge whose data WAS delivered and whose own bookkeeping then
+ *                  failed: the rollback discards the payload, the cache row and the ledger row together,
+ *                  and the caller receives an error, so the platform retains exactly as little as in the
+ *                  first shape. Every §A11.2 disposition is therefore identical — the money counts in
+ *                  the status-blind sums, no deliverable/work row exists (§A11.2 #12: an incurred row is
+ *                  money, never output), `vendor_ref` reconciles it against the vendor console (#13), and
+ *                  the §A11.1.4 callback interlock can still advance it to `completed` at the SAME cost
+ *                  if the data is retrieved later. The two shapes are distinguished by the `endpoint`
+ *                  suffix (`.incurred_no_data` vs `.incurred_write_failed`) and by `dataDelivered` on the
+ *                  emitted event — the same reason-in-the-endpoint convention `.scope_disabled` /
+ *                  `.budget_blocked` / `.global_ceiling_unavailable` already use.
+ *
+ *  Encoding "charged but undelivered" as `failed` carrying cost was REJECTED by the ruling as an
+ *  implicit semantic every consumer would have to know about and nothing would enforce (§A11.3). */
+export type LedgerStatus = "posted" | "completed" | "failed" | "incurred";
 
 export interface LedgerInsert {
   tenantId: string;
@@ -32,6 +73,13 @@ export interface LedgerInsert {
    *  deliberately does NOT exclude these rows from its month-to-date sums: routing simulation through
    *  the real choke-point is the point, so a simulated pull must still be able to exhaust a budget. */
   simulated?: boolean;
+  /** SM-50 provenance for RECONCILIATION (0053, addendum §A11.1.4): the vendor's own id for this call
+   *  — DataForSEO's task id. Stamped on `incurred` rows AND on successful rows wherever the driver
+   *  exposes one (one column, both paths), because SM-41's staging reconciliation matches our ledger
+   *  against the vendor console's line items on exactly this key: an incurred row is the reconciling
+   *  entry for a console charge with no data row on our side. Absent (NULL) when the vendor exposes no
+   *  per-call id — never defaulted to a placeholder. */
+  vendorRef?: string | null;
 }
 
 /** Insert one ledger row on the given (already tenant+scope-bound) connection; returns its id. */
@@ -39,12 +87,12 @@ export async function insertLedgerRow(c: PoolClient, row: LedgerInsert): Promise
   const id = newId();
   await c.query(
     `INSERT INTO search_provider_calls
-       (id, tenant_id, engagement_id, property_id, provider, endpoint, items, cost_usd, cache_hit, status, requested_by, correlation_id, origin_site, simulated)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+       (id, tenant_id, engagement_id, property_id, provider, endpoint, items, cost_usd, cache_hit, status, requested_by, correlation_id, origin_site, simulated, vendor_ref)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
     [
       id, row.tenantId, row.engagementId, row.propertyId ?? null, row.provider, row.endpoint,
       row.items, row.costUsd, row.cacheHit, row.status, row.requestedBy, row.correlationId ?? null, config.originSite,
-      row.simulated ?? false,
+      row.simulated ?? false, row.vendorRef ?? null,
     ],
   );
   return id;
@@ -282,4 +330,252 @@ export async function recordBlocked(row: Omit<LedgerInsert, "status" | "costUsd"
     (c) => insertLedgerRow(c, { ...row, status: "failed", costUsd: 0, cacheHit: false }),
     { modules: ["search"] },
   );
+}
+
+/** SM-50 (design addendum §A11.1.1) — THE COMPENSATING WRITE. The vendor was engaged and confirmably
+ *  charged, and the dispatch transaction (cache write + ledger row, atomic under the advisory locks)
+ *  then rolled back and took any record of the charge with it — either because the call failed and
+ *  delivered nothing (SM-50) or because the post-delivery writes themselves failed (SM-60). This records
+ *  the charge in its OWN fresh, short transaction — the exact pattern `recordBlocked` above already
+ *  establishes for a refusal whose dispatch transaction is gone.
+ *
+ *  WHY OUTSIDE, and why there was no third option: nothing written inside a rolled-back transaction
+ *  can survive it, by definition. So the only candidates were this (write after the rollback) or
+ *  write-ahead intent rows (commit a `posted` row BEFORE invoking the provider). Write-ahead was
+ *  REJECTED for v1 (§A11.3): it dismantles SM-04's single-transaction atomicity, triples hot-path
+ *  transactions, and buys only a crash-mid-poll window whose loss is bounded to cents and is caught by
+ *  SM-41's monthly reconciliation. Its revisit trigger is recorded and binding: any driver whose
+ *  SINGLE-OP incurred cost can exceed ~$1 (e.g. a bulk task_post batch) gets write-ahead for that
+ *  driver before it ships.
+ *
+ *  The residual window this leaves is therefore stated rather than hidden: a process crash between the
+ *  vendor's charge and this INSERT loses the row. That is the accepted v1 bound.
+ *
+ *  `cacheHit: false` is structural, not a default — a cache hit costs nothing and cannot be incurred.
+ *  The CALLER (dispatch.ts) is responsible for wrapping this in the §4d secondary-failure guard so a
+ *  failing audit write can never replace the provider error the caller is owed. */
+export async function recordIncurred(
+  row: Omit<LedgerInsert, "status" | "cacheHit">,
+): Promise<string> {
+  return withTenants(
+    [row.tenantId],
+    (c) => insertLedgerRow(c, { ...row, status: "incurred", cacheHit: false }),
+    { modules: ["search"] },
+  );
+}
+
+/** SM-50 (addendum §A11.1.4) — the RECONCILIATION seam for the SM-14 Standard-queue callback path.
+ *
+ *  When a task we already wrote off as `incurred` completes late and the callback finally retrieves
+ *  its data, the honest bookkeeping is that ONE charge produced ONE row which has now delivered: the
+ *  row advances `incurred -> completed` AT THE SAME COST. It must never become a second cost-bearing
+ *  row for the same charge (that would double-count real money into every budget tier), and the
+ *  callback must never re-POST a paid task to get there — `task_get` only.
+ *
+ *  Deliberately NOT folded into trueUpLedger*(), which stays `posted`-only: correcting an ESTIMATE on a
+ *  delivered call and reconciling an ORPHANED charge are different operations, and this one changes no
+ *  money at all. There is no cost parameter here, by design — a caller cannot re-price a charge while
+ *  "reconciling" it.
+ *
+ *  Idempotent-ish in the same way as the true-up: only a row still in `incurred` advances, so a second
+ *  callback for the same task is a no-op rather than a corruption. Returns whether a row advanced.
+ *
+ *  ✅ SM-56 WIRED IT. The seam note that stood here (a landed callback that re-ran the paid dispatch,
+ *  because no driver-side task-id fetch existed) is discharged: `SearchDataProvider.fetchSerpByTaskId`
+ *  is the collect surface, `rank.ts`'s `collectRankForTask` is its one caller, and it advances an
+ *  `incurred` row through THIS function — never through a second dispatch, and never with a cost
+ *  argument, because there is none to pass. The §A11.1.4 interlock is now enforced end to end.
+ *
+ *  ON-CONNECTION VARIANT, and why the collect uses it: `advanceIncurredToCompletedOnConnection` below
+ *  runs the same UPDATE on a caller-supplied connection, so the collect can advance the row IN THE SAME
+ *  TRANSACTION as the rank snapshot it just persisted. That matters for one specific reason: those two
+ *  facts must become true together. A snapshot committed against a still-`incurred` row would claim the
+ *  platform holds data for a charge the ledger simultaneously says delivered nothing — a contradiction
+ *  a reader (or SM-41's reconciliation) would have to guess about. Atomic, so no such window exists.
+ *  Exactly the split `trueUpLedger`/`trueUpLedgerOnConnection` above already establishes, for the same
+ *  kind of reason. */
+export async function advanceIncurredToCompleted(tenantId: string, ledgerId: string): Promise<boolean> {
+  return withTenants(
+    [tenantId],
+    (c) => advanceIncurredToCompletedOnConnection(c, ledgerId),
+    { modules: ["search"] },
+  );
+}
+
+/** SM-56 — `advanceIncurredToCompleted` on a caller-supplied (already tenant+scope-bound) connection.
+ *  See that function's doc comment for the semantics; they are identical, including the two properties
+ *  that make this safe to call from a collect: there is NO cost parameter (a caller cannot re-price a
+ *  charge while "reconciling" it), and the `status = 'incurred'` guard makes a duplicate advance a
+ *  no-op rather than a corruption. Returns whether a row advanced. */
+export async function advanceIncurredToCompletedOnConnection(c: PoolClient, ledgerId: string): Promise<boolean> {
+  const res = await c.query(
+    `UPDATE search_provider_calls SET status = 'completed'
+       WHERE id = $1 AND status = 'incurred'`,
+    [ledgerId],
+  );
+  return (res.rowCount ?? 0) > 0;
+}
+
+/** SM-50 — find a written-off charge by the vendor's own id, so the collect edge (and SM-41's
+ *  reconciliation) can locate the row to advance without inventing a second one. Tenant-scoped: RLS on
+ *  the connection forecloses reaching another tenant's row even if a forged callback supplied its
+ *  vendor ref, which matters because a callback body is untrusted input by design (§02/§03 — a vendor
+ *  postback carries a task id and is never trusted as data).
+ *
+ *  Returns the newest matching incurred row, or null. Newest rather than "the one" because a retry
+ *  after an incurred failure legitimately produces two charges and two rows for the same subject
+ *  (§A11.2, enumerated: ledger equals vendor truth, no deduplication is attempted) — though with
+ *  DISTINCT vendor refs, so a same-ref pair should not arise.
+ *
+ *  ── SM-59 (tracker §6ai note 2) — THE PROVIDER PREDICATE, and why a `vendorRef` alone is not a key ──
+ *  This matched `vendor_ref` + `status` and NOTHING ELSE, which quietly assumed that a `vendor_ref`
+ *  value identifies a call. It does not: `vendor_ref` is whatever the VENDOR calls its own line item, so
+ *  it is unique only WITHIN a vendor's namespace. Two providers can mint the same string — and the
+ *  moment they do, a reconciliation for provider A can land on provider B's row inside the same tenant,
+ *  advancing the wrong charge and telling SM-41's console reconciliation that B's orphan was collected.
+ *  Wrong money attributed to the wrong vendor, silently, with a row that looks perfectly well-formed.
+ *
+ *  The senior-db review (§6ai) correctly classed this as an ACCEPTED SHAPE rather than a live defect,
+ *  because today only DataForSEO stamps `vendor_ref` at all and its task ids are vendor-generated
+ *  near-UUIDs — a collision needs a second stamping path to even be expressible. **SM-56 is that second
+ *  path**, which is why these two land in one diff: the collect edge is the first code that looks a row
+ *  up by vendor ref on the strength of a caller-supplied id, so the predicate stops being theoretical
+ *  the same day. Fixed as the review specified — a `(vendor_ref, provider)` composite predicate,
+ *  application-side, NO DDL.
+ *
+ *  INDEX JUDGEMENT (asked for explicitly, and the answer is "no change"): `ix_search_provider_calls_vendor_ref`
+ *  is a partial index on `(vendor_ref) WHERE vendor_ref IS NOT NULL` (0053). It still serves this query
+ *  well and needs no migration. `vendor_ref` remains the leading — and by far the most selective —
+ *  column: it is a near-unique vendor id, so the index seek returns approximately one row, and Postgres
+ *  then rechecks `provider` and `status` on that handful of heap tuples. Widening the index to
+ *  `(vendor_ref, provider)` would add a second key column that eliminates essentially zero extra tuples,
+ *  costing write amplification on an append-only hot-path table for no measurable read gain. Note also
+ *  which direction the risk ran: the missing predicate was a CORRECTNESS bug, never a performance one —
+ *  the index was already doing its job, it was the WHERE clause that under-specified the row. Adding an
+ *  index would not have fixed it, and this predicate does not need one. */
+export async function findIncurredByVendorRef(
+  tenantId: string,
+  provider: string,
+  vendorRef: string,
+): Promise<{ id: string; costUsd: number; provider: string } | null> {
+  const r = await withTenants(
+    [tenantId],
+    (c) => c.query<{ id: string; cost_usd: string; provider: string }>(
+      `SELECT id, cost_usd, provider FROM search_provider_calls
+        WHERE vendor_ref = $1 AND provider = $2 AND status = 'incurred'
+        ORDER BY created_at DESC LIMIT 1`,
+      [vendorRef, provider],
+    ),
+    { modules: ["search"] },
+  );
+  const row = r.rows[0];
+  return row ? { id: row.id, costUsd: Number(row.cost_usd), provider: row.provider } : null;
+}
+
+/** SM-56 — locate the PAID CALL a vendor postback refers to, whatever state its bookkeeping is in.
+ *
+ *  This is the collect edge's admission check, and it does two jobs at once. It finds the ledger row the
+ *  new snapshot must be attributed to (`provider_call_id`), and — because it is the ONLY way in — it is
+ *  what makes a forged or garbage task id cost nothing: no row means no vendor call is ever attempted,
+ *  so an attacker cannot use this edge to make us spend, or even to make us open a socket.
+ *
+ *  ── Status-agnostic ON PURPOSE, and this is NOT the forbidden kind of status blindness ──────────────
+ *  Deliberately DIFFERENT from `findIncurredByVendorRef` above, which is `incurred`-only. A postback can
+ *  legitimately arrive for a call in either bookkeeping state, and both must be collectable:
+ *    * `posted`   — the normal case. The post succeeded, the row records the charge at its estimate, and
+ *                   the data simply had not arrived yet. Collecting changes NO money and NO status.
+ *    * `incurred` — the post was charged and the dispatch then lost its record (SM-50/SM-60). Collecting
+ *                   retrieves what was paid for, so the row advances `incurred -> completed` at the SAME
+ *                   cost via `advanceIncurredToCompletedOnConnection` (§A11.1.4).
+ *    * `completed`/`failed` — returned, and the CALLER decides. It does not filter them out here because
+ *                   "no such task" and "that task's data is already collected" are different answers
+ *                   that deserve different handling, and a lookup that collapsed them would force the
+ *                   caller to guess.
+ *  To be unambiguous about the standing prohibition in this file's header: that rule forbids adding a
+ *  status predicate to a MONEY SUM, because it would exempt real spend from a ceiling. This is a
+ *  single-row lookup that sums nothing and gates no budget, so it is neither an instance of that rule nor
+ *  an exception to it. It is also, for the same reason, not a place a future edit should "optimize" by
+ *  filtering to `posted`: an `incurred` row is exactly the case §A11.1.4 was written for.
+ *
+ *  Provider-scoped from birth (SM-59's predicate — see above for why a `vendor_ref` alone is not a key),
+ *  tenant-scoped by RLS on the connection, newest-first for the same retry reason as `findIncurredByVendorRef`.
+ *
+ *  ── SM-63: it now also RETURNS THE ROW'S OWN SCOPE, and that widening is the whole fix ──────────────
+ *  Until SM-63 this selected `id, status, cost_usd, provider, simulated` and nothing else. The omission
+ *  had a consequence larger than a missing column: the collect edge physically COULD NOT compare the
+ *  resolved row's `engagement_id`/`property_id` against the caller-supplied ones, because the data was
+ *  never returned. So (tenant, provider, vendor_ref) was the entire admission test, and any engagement in
+ *  the tenant could present any other engagement's task id — RLS forecloses the cross-TENANT shape and is
+ *  structurally blind to the same-tenant one. `engagementId`/`propertyId` are now part of the contract so
+ *  the comparison is expressible; `ledgerRowScopeMatches` below is the comparison, shared rather than
+ *  re-hand-written at each call site (SM-62's planned collect sweep is the second one).
+ *
+ *  NOT a status predicate, NOT a money sum, and NOT scoped in SQL: this still selects one row by
+ *  (vendor_ref, provider) and sums nothing, so the file-header prohibition is untouched. The scope is
+ *  returned as DATA for the caller to judge, deliberately, rather than pushed into the WHERE clause —
+ *  a lookup that filtered on the expected scope would return `null` for "wrong engagement" and could no
+ *  longer tell a caller (or an operator reading a stack) apart from "no such task at all". The two answers
+ *  are the same to the CALLER on purpose (see rank.ts), which is a property of the refusal, not of the
+ *  query; conflating them here would also silently break `incurred-cost.test.ts`'s provider-collision
+ *  probe, which looks a row up with no engagement in hand. */
+export interface LedgerRowByVendorRef {
+  id: string;
+  status: LedgerStatus;
+  costUsd: number;
+  provider: string;
+  simulated: boolean;
+  /** The row's OWN scope — whose engagement and property actually paid for this vendor call. Nullable
+   *  because 0034 declares both columns nullable (a non-property-bound op such as a `volume` pull logs
+   *  a row with `property_id IS NULL`), never because "unknown means fine": see `ledgerRowScopeMatches`. */
+  engagementId: string | null;
+  propertyId: string | null;
+}
+
+export async function findLedgerRowByVendorRef(
+  tenantId: string,
+  provider: string,
+  vendorRef: string,
+): Promise<LedgerRowByVendorRef | null> {
+  const r = await withTenants(
+    [tenantId],
+    (c) => c.query<{
+      id: string; status: LedgerStatus; cost_usd: string; provider: string; simulated: boolean;
+      engagement_id: string | null; property_id: string | null;
+    }>(
+      `SELECT id, status, cost_usd, provider, simulated, engagement_id, property_id
+         FROM search_provider_calls
+        WHERE vendor_ref = $1 AND provider = $2
+        ORDER BY created_at DESC LIMIT 1`,
+      [vendorRef, provider],
+    ),
+    { modules: ["search"] },
+  );
+  const row = r.rows[0];
+  return row
+    ? {
+        id: row.id, status: row.status, costUsd: Number(row.cost_usd), provider: row.provider,
+        simulated: row.simulated, engagementId: row.engagement_id, propertyId: row.property_id,
+      }
+    : null;
+}
+
+/** SM-63 — does this paid ledger row actually belong to the engagement/property a caller is claiming it
+ *  for? The predicate a collect must satisfy before it may attribute anything to the row.
+ *
+ *  Exact equality on BOTH ids, and NULL on the row fails. That is the point rather than an oversight: a
+ *  row whose scope is unknown cannot be evidence that THIS engagement paid for anything, and a Standard-
+ *  queue SERP row always carries both ids (dispatch stamps them from the pull's own engagement/property).
+ *  A NULL therefore means the caller is quoting a task id belonging to some other kind of call entirely —
+ *  which is not a licence to proceed. Written as a shared predicate, not inline at the call site, for the
+ *  same reason SM-61 centralized cadence parsing: the second call site (SM-62's stale-row collect sweep)
+ *  must not be able to re-derive this rule slightly differently.
+ *
+ *  It answers only a boolean, and never which half disagreed — a caller-visible "engagement mismatch" vs
+ *  "property mismatch" distinction would be an oracle over other engagements' task ids, and the way to
+ *  not build one is to not produce the information. */
+export function ledgerRowScopeMatches(
+  row: Pick<LedgerRowByVendorRef, "engagementId" | "propertyId">,
+  expected: { engagementId: string; propertyId: string },
+): boolean {
+  return row.engagementId === expected.engagementId && row.propertyId === expected.propertyId;
 }

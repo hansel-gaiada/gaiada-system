@@ -19,13 +19,16 @@ import "@/components/departments/departments.css";
 type Params = Promise<{ deptId: string; campaignId: string }>;
 type SearchParams = Promise<{ adGroupId?: string }>;
 
-// Campaign detail (SM-47) — the drill-down from the Planner list. Ad groups, ads, negatives and
-// change proposals for ONE campaign all live here rather than as separate top-level tabs, because
-// every one of those objects is meaningless without a campaign to hang off — same "detail page holds
-// the sub-objects" shape the engagement detail page already uses for its scope editor. Nothing here
-// can reach a live ad account: campaign/ad/negative/change-proposal status writes are restricted to
-// their ERP-side draft states everywhere (SM-18's own constraint, enforced server-side), and
-// 'applied' is refused (400) regardless of what this page might try to send.
+// Campaign detail (SM-47, SM-19) — the drill-down from the Planner list. Ad groups, ads, negatives
+// and change proposals for ONE campaign all live here rather than as separate top-level tabs,
+// because every one of those objects is meaningless without a campaign to hang off — same "detail
+// page holds the sub-objects" shape the engagement detail page already uses for its scope editor.
+// The generic campaign/ad/negative/change-proposal PATCH paths still restrict every status write to
+// its ERP-side draft states (SM-18's own constraint, enforced server-side), and the generic
+// change-proposal PATCH still refuses 'applied' unconditionally. SM-19 adds the ONE real door past
+// that: `ChangeProposalsPanel` renders `ApplyProposalTwins` per approved/applied proposal, which
+// composes SM-30's `export`/`mark-applied` routes (manual twin, live) alongside an honestly-disabled
+// automated (api) twin (SM-21 not built yet) — see that component for the dual-mode picker itself.
 export default async function CampaignDetailPage({ params, searchParams }: { params: Params; searchParams: SearchParams }) {
   const userId = await getSessionUserId();
   if (!userId) redirect("/login");
@@ -42,6 +45,7 @@ export default async function CampaignDetailPage({ params, searchParams }: { par
 
   const sp = await searchParams;
   const canManage = can(me, "search.manage", tenant);
+  const canLaunch = can(me, "search.campaign.launch", tenant);
 
   const [adGroups, negatives, changeProposals] = await Promise.all([
     listAdGroups(userId, tenant, campaignId),
@@ -97,7 +101,7 @@ export default async function CampaignDetailPage({ params, searchParams }: { par
       </Card>
 
       <Card title="Change proposals">
-        <ChangeProposalsPanel tenantId={tenant} campaignId={campaignId} proposals={changeProposals} canManage={canManage} />
+        <ChangeProposalsPanel tenantId={tenant} campaignId={campaignId} proposals={changeProposals} canManage={canManage} canLaunch={canLaunch} />
       </Card>
 
       {!canManage && (
