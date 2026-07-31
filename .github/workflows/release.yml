@@ -14,7 +14,10 @@ name: release
 
 on:
   push:
-    tags: ["v*"]
+    # App-version tags (docs/modules/VERSIONING.md): the app version lowercased with spaces
+    # hyphenated, e.g. `Alpha 01.001.0001a` -> `alpha-01.001.0001a`. `v*` is kept for any
+    # pre-existing/ad-hoc tag. deploy.yml cross-checks the tag against /VERSION.
+    tags: ["v*", "alpha-*", "beta-*", "rc-*", "stable-*"]
   workflow_dispatch:
     inputs:
       tag:
