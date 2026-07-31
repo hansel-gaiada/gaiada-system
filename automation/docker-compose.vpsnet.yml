@@ -1,0 +1,16 @@
+# VPS overlay: join the running gaiada stack network so the workflows' hardcoded
+# http://mcp-hub:3003 / http://platform:3004 / http://bot:3001 hostnames resolve
+# natively via compose DNS. The base file's mcp-hub/platform -> host-gateway
+# entries MUST be dropped (!override): /etc/hosts wins over DNS, and neither
+# service publishes a host port, so keeping them would break every hub call.
+# host.docker.internal stays -- it is how we reach the host-run Postgres.
+services:
+  n8n:
+    extra_hosts: !override
+      - "host.docker.internal:host-gateway"
+    networks:
+      - gaiada_default
+
+networks:
+  gaiada_default:
+    external: true

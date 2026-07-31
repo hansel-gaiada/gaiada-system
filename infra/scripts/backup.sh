@@ -23,7 +23,14 @@ set -eu
 BACKUP_DIR="${BACKUP_DIR:-$HOME/gaiada-backups}"
 KEEP_DAYS="${KEEP_DAYS:-14}"
 STAMP="$(date +%Y%m%d-%H%M%S)"
-COMPOSE="$(dirname "$0")/../compose/docker-compose.vps.yml"
+# Compose file list, as ready-made `-f` flags (intentionally unquoted at use so multiple files
+# expand). Override when the deployment needs an overlay: on a host-Postgres box (gda-aicenter)
+# the base file ALONE is an invalid project — postgres/redis are profile-disabled there, so every
+# `depends_on` naming them fails resolution, `docker compose ps` errors out, and the running-check
+# below then matches nothing and "skips cleanly". That silently produced a backup set with NO
+# gaiada_bot dump while exiting 0. Pass both files to make the check real:
+#   COMPOSE_FILES="-f .../docker-compose.vps.yml -f .../docker-compose.hostdata.yml"
+COMPOSE_FILES="${COMPOSE_FILES:--f $(dirname "$0")/../compose/docker-compose.vps.yml}"
 # Compose project is `gaiada` (see the compose `name:`), so the volume is prefixed.
 WAHA_VOLUME="${WAHA_VOLUME:-gaiada_waha-sessions}"
 
@@ -41,11 +48,18 @@ dump() { # <compose-service> <db>
   else
     # Skip cleanly when the service isn't part of the active profile set (e.g. pg-bot with the
     # `bot` profile off) — a missing optional lane must not fail the backup that gates migrations.
-    if ! docker compose -f "$COMPOSE" ps --status running --format '{{.Service}}' 2>/dev/null | grep -qx "$1"; then
+    # Distinguish "this optional lane is off" (skip, fine) from "compose can't read the project
+    # at all" (FAIL loudly). The old code swallowed stderr and treated both as a clean skip, so a
+    # broken invocation reported success while backing up nothing.
+    if ! RUNNING="$(docker compose $COMPOSE_FILES ps --status running --format '{{.Service}}' 2>&1)"; then
+      echo "backup FAILED: cannot read compose project (service $1): $RUNNING" >&2
+      return 1
+    fi
+    if ! printf '%s\n' "$RUNNING" | grep -qx "$1"; then
       echo "backup SKIPPED: service $1 not running (profile off?)" >&2
       return 0
     fi
-    docker compose -f "$COMPOSE" exec -T "$1" pg_dump -U postgres "$2" | gzip > "$OUT"
+    docker compose $COMPOSE_FILES exec -T "$1" pg_dump -U postgres "$2" | gzip > "$OUT"
   fi
   echo "backup ok: $OUT"
 }
