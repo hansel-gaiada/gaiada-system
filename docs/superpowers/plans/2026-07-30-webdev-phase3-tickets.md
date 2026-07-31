@@ -1,5 +1,12 @@
 # Web Dev — Phase 3 Ticket Plan (external wiring)
 
+> ⚠️ **PARTIALLY SUPERSEDED (2026-08-01).** Waves 1–2 have LANDED (WD-28, WD-26, WD-29 —
+> all DEV-VERIFIED, see `docs/modules/CHANGELOG.md`). **WD-23A and LD-13 are superseded by
+> [`2026-08-01-wd23a-respec.md`](./2026-08-01-wd23a-respec.md)** — the SEO programme shipped a
+> complete, adversarially-verified Google OAuth core *after* this plan was written, so WD-23A
+> becomes a promote-to-core refactor (split WD-23A-1 / WD-23A-2) instead of a from-scratch build.
+> Do **not** implement LD-13's Redis-nonce state store. Everything else in this plan stands.
+
 **Status:** READY for /army — Waves 1–2 immediately (credential-free); Waves 3+ gated on owner
 actions (OQ-2 / OQ-9 / OQ-3, see "What blocks Phase 3") · **Date:** 2026-07-30 ·
 **Architect:** system-architect (Fable·max)
