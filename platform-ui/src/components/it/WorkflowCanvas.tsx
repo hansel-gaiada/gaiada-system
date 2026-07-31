@@ -64,7 +64,7 @@ export function WorkflowCanvas({ layout }: { layout: GraphLayout }) {
         <div className="it-canvas__inner" style={{ width, height, transform: `scale(${zoom})` }}>
           <svg className="it-edges" viewBox={`0 0 ${width} ${height}`} width={width} height={height} preserveAspectRatio="none">
             {edges.map((e, i) => (
-              <path key={i} d={path(e.from, e.to)} fill="none" stroke="var(--erp-accent, #6E5A43)" strokeWidth={1.3} strokeOpacity={0.55} />
+              <path key={i} d={path(e.from, e.to)} fill="none" stroke="var(--erp-accent, var(--accent))" strokeWidth={1.3} strokeOpacity={0.55} />
             ))}
           </svg>
           {placed.map((n) => (

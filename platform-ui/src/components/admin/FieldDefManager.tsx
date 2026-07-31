@@ -32,14 +32,14 @@ function FieldDefRow({
         justifyContent: "space-between",
         gap: 12,
         padding: "10px 0",
-        borderBottom: "0.5px solid rgba(26,25,22,.12)",
+        borderBottom: "0.5px solid var(--line-soft)",
       }}
     >
       <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
         <span style={{ font: "400 14px var(--font-body)", color: "var(--text-primary)" }}>
-          {def.label} <span style={{ color: "rgba(26,25,22,.45)", fontSize: 12 }}>({def.key})</span>
+          {def.label} <span style={{ color: "var(--ink-subtle)", fontSize: 12 }}>({def.key})</span>
         </span>
-        <span style={{ font: "400 12px var(--font-body)", color: "rgba(26,25,22,.5)" }}>
+        <span style={{ font: "400 12px var(--font-body)", color: "var(--ink-subtle)" }}>
           {def.data_type}
           {def.options?.length ? ` — ${def.options.join(", ")}` : ""}
         </span>
@@ -79,7 +79,7 @@ export function FieldDefManager({
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
       {defs.length === 0 ? (
-        <p style={{ margin: "4px 0 8px", font: "400 13px var(--font-body)", color: "rgba(26,25,22,.5)" }}>
+        <p style={{ margin: "4px 0 8px", font: "400 13px var(--font-body)", color: "var(--ink-subtle)" }}>
           No custom fields defined for {entityType} yet.
         </p>
       ) : (

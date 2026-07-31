@@ -72,7 +72,7 @@ export function AuditFindingsPanel({
   return (
     <div>
       {error && (
-        <p role="alert" style={{ font: "400 13px/1.6 var(--font-body)", color: "var(--erp-danger, #B5622F)", marginBottom: 12 }}>
+        <p role="alert" style={{ font: "400 13px/1.6 var(--font-body)", color: "var(--erp-danger, var(--status-critical-fg))", marginBottom: 12 }}>
           {error}
         </p>
       )}

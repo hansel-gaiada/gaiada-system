@@ -15,7 +15,7 @@ export function LoginForm({ returnTo }: { returnTo: string }) {
       <label style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         <Eyebrow style={{ fontSize: 10, opacity: 0.6 }}>Email</Eyebrow>
         <input name="email" type="email" autoComplete="email" required
-          style={{ border: "none", borderBottom: "0.5px solid rgba(26,25,22,.22)", background: "transparent", outline: "none", padding: "8px 2px", font: "400 14px var(--font-body)", color: "var(--text-primary)" }} />
+          style={{ border: "none", borderBottom: "0.5px solid var(--line-control)", background: "transparent", outline: "none", padding: "8px 2px", font: "400 14px var(--font-body)", color: "var(--text-primary)" }} />
       </label>
       {state?.error && <p style={{ margin: 0, font: "400 13px var(--font-body)", color: "var(--erp-accent)", opacity: 0.8 }}>{state.error}</p>}
       <Button type="submit" size="md" disabled={pending}>{pending ? "Signing in…" : "Sign in"}</Button>

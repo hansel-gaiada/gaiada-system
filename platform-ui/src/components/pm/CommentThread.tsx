@@ -226,7 +226,7 @@ export function FollowToggle({ me, followers, follow, unfollow }: FollowProps) {
         disabled={pending}
         aria-pressed={isFollowing}
       >
-        <span className="pm-follow-glyph" style={isFollowing ? { color: "#B5622F" } : undefined} aria-hidden>
+        <span className="pm-follow-glyph" style={isFollowing ? { color: "var(--status-critical-fg)" } : undefined} aria-hidden>
           {isFollowing ? "♥" : "♡"}
         </span>
         {isFollowing ? "Following" : "Follow"}

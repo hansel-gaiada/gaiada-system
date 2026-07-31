@@ -621,7 +621,7 @@ export function pmDemo(method: string, p: string, search: URLSearchParams, body?
       const st: ProjectStatus = {
         id: nextId("st"),
         label,
-        color: typeof b.color === "string" ? b.color : "#6E5A43",
+        color: typeof b.color === "string" ? b.color : "var(--accent)",
         isDone: Boolean(b.isDone),
         isBlocked: Boolean(b.isBlocked),
         wipLimit: typeof b.wipLimit === "number" ? b.wipLimit : undefined,

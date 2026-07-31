@@ -7,9 +7,9 @@ import {
 // ---- P3-06 Project Charts: pure helpers ----
 
 const STATUSES: ProjectStatus[] = [
-  { id: "todo", label: "To do", color: "#A39174", isDone: false, isBlocked: false, position: 0 },
-  { id: "in_progress", label: "In progress", color: "#6E5A43", isDone: false, isBlocked: false, position: 1 },
-  { id: "done", label: "Done", color: "#4B7A5A", isDone: true, isBlocked: false, position: 2 },
+  { id: "todo", label: "To do", color: "var(--status-idle-fg)", isDone: false, isBlocked: false, position: 0 },
+  { id: "in_progress", label: "In progress", color: "var(--accent)", isDone: false, isBlocked: false, position: 1 },
+  { id: "done", label: "Done", color: "var(--status-ok-fg)", isDone: true, isBlocked: false, position: 2 },
 ];
 
 const task = (over: Partial<PmTask>): PmTask => ({
@@ -44,7 +44,7 @@ describe("flowSeries", () => {
     const s = flowSeries(points, STATUSES);
     expect(s.bands.map((b) => b.statusId)).toEqual(["todo", "in_progress", "done"]);
     expect(s.bands.map((b) => b.label)).toEqual(["To do", "In progress", "Done"]);
-    expect(s.bands.map((b) => b.color)).toEqual(["#A39174", "#6E5A43", "#4B7A5A"]);
+    expect(s.bands.map((b) => b.color)).toEqual(["var(--status-idle-fg)", "var(--accent)", "var(--status-ok-fg)"]);
   });
 
   it("fills date gaps by carrying the last known snapshot forward", () => {

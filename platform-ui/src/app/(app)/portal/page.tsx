@@ -36,7 +36,7 @@ export default async function PortalPage() {
         <Breadcrumbs items={[{ label: "Home", href: "/" }, { label: "Project Portal" }]} />
         <Eyebrow style={{ color: "var(--erp-accent)", marginBottom: 8, display: "block" }}>Your projects</Eyebrow>
         <h1 style={{ margin: 0, fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 34, lineHeight: 1.1 }}>Project Portal</h1>
-        <p style={{ margin: "9px 0 0", font: "400 15px/1.5 var(--font-body)", color: "rgba(26,25,22,.62)", maxWidth: 620 }}>
+        <p style={{ margin: "9px 0 0", font: "400 15px/1.5 var(--font-body)", color: "var(--ink-muted)", maxWidth: 620 }}>
           Track your projects in real time. When something needs you — a signature or feedback — it shows up here.
         </p>
       </div>
@@ -51,7 +51,7 @@ export default async function PortalPage() {
             return (
               <Card key={r.id} title={r.title ?? "Project"} headerRight={<StatusBadge label={r.status.replace(/_/g, " ")} />}>
                 {/* Plain-language blockage banner — the transparency piece. */}
-                <div style={{ padding: "12px 14px", borderRadius: 12, background: "rgba(184,142,47,.08)", border: "1px solid rgba(184,142,47,.25)", marginBottom: 14, font: "500 14px/1.45 var(--font-body)" }}>
+                <div style={{ padding: "12px 14px", borderRadius: 12, background: "color-mix(in srgb, var(--status-warning) 8%, transparent)", border: "1px solid color-mix(in srgb, var(--status-warning) 30%, transparent)", marginBottom: 14, font: "500 14px/1.45 var(--font-body)" }}>
                   {r.currentBlockage}
                 </div>
 
@@ -61,7 +61,7 @@ export default async function PortalPage() {
                   const track = GATE_TRACK[g.kind];
                   const stage = track ? r.stages.find((s) => s.track === track) : undefined;
                   return (
-                    <div key={g.id} style={{ padding: "10px 0", borderTop: "1px solid rgba(26,25,22,.06)" }}>
+                    <div key={g.id} style={{ padding: "10px 0", borderTop: "1px solid var(--line-soft)" }}>
                       <div style={{ font: "400 14px/1.4 var(--font-body)", marginBottom: stage?.artifact_ref ? 10 : 0 }}>
                         {g.kind === "prd_sign" && "Please review and sign the PRD to start work."}
                         {g.kind === "scope_signoff" && "Please sign the Scope Agreement."}
@@ -69,7 +69,7 @@ export default async function PortalPage() {
                         {!["prd_sign", "scope_signoff", "customer_feedback"].includes(g.kind) && `Action: ${g.kind}`}
                       </div>
                       {stage?.artifact_ref && (
-                        <div style={{ padding: "10px 12px", background: "rgba(26,25,22,.03)", borderRadius: 8, marginBottom: 10 }}>
+                        <div style={{ padding: "10px 12px", background: "var(--wash)", borderRadius: 8, marginBottom: 10 }}>
                           <ArtifactMarkdown text={stage.artifact_ref} />
                         </div>
                       )}
@@ -100,7 +100,7 @@ export default async function PortalPage() {
                 {/* Progress: client-safe stages (report track already hidden by the BFF) */}
                 <div style={{ marginTop: 12, display: "flex", flexWrap: "wrap", gap: 8 }}>
                   {r.stages.map((s, i) => (
-                    <span key={i} style={{ font: "500 12px/1 var(--font-body)", padding: "6px 10px", borderRadius: 999, background: s.status === "done" ? "rgba(60,140,90,.12)" : "rgba(26,25,22,.06)" }}>
+                    <span key={i} style={{ font: "500 12px/1 var(--font-body)", padding: "6px 10px", borderRadius: 999, background: s.status === "done" ? "color-mix(in srgb, var(--status-ok) 12%, transparent)" : "var(--wash)" }}>
                       {s.name.replace(/_/g, " ")} · {s.status}
                     </span>
                   ))}

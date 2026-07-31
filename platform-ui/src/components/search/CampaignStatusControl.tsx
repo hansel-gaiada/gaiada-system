@@ -42,7 +42,7 @@ export function CampaignStatusControl({
       {status !== "draft" && (
         <Button variant="ghost" size="sm" disabled={pending} onClick={() => setStatus("draft")}>Back to draft</Button>
       )}
-      {error && <span style={{ font: "400 12px var(--font-body)", color: "var(--erp-danger, #B5622F)" }}>{error}</span>}
+      {error && <span style={{ font: "400 12px var(--font-body)", color: "var(--erp-danger, var(--status-critical-fg))" }}>{error}</span>}
     </div>
   );
 }

@@ -240,9 +240,9 @@ export function ScopeEditor({
         </span>
         {canWrite && (
           <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-            {error && <span style={{ font: "400 12px var(--font-body)", color: "var(--erp-danger, #B5622F)" }}>{error}</span>}
+            {error && <span style={{ font: "400 12px var(--font-body)", color: "var(--erp-danger, var(--status-critical-fg))" }}>{error}</span>}
             {!error && savedAt && !dirty && (
-              <span style={{ font: "400 12px var(--font-body)", color: "var(--erp-ok, #3a7a54)" }}>Saved</span>
+              <span style={{ font: "400 12px var(--font-body)", color: "var(--erp-ok, var(--status-ok-fg))" }}>Saved</span>
             )}
             <Button variant="solid" size="sm" onClick={save} disabled={!dirty || savePending}>
               {savePending ? "Saving…" : "Save scope"}
@@ -255,12 +255,12 @@ export function ScopeEditor({
         <div
           role="alert"
           style={{
-            border: "0.5px solid var(--erp-hairline)", borderLeft: "3px solid var(--erp-danger, #B5622F)",
-            background: "rgba(181,98,47,.06)", padding: "12px 14px", marginTop: 16,
+            border: "0.5px solid var(--erp-hairline)", borderLeft: "3px solid var(--erp-danger, var(--status-critical))",
+            background: "color-mix(in srgb, var(--status-critical) 6%, transparent)", padding: "12px 14px", marginTop: 16,
             font: "400 13px/1.6 var(--font-body)", color: "var(--erp-ink-60)",
           }}
         >
-          <strong style={{ color: "var(--erp-danger, #B5622F)" }}>Over budget:</strong> this configuration is
+          <strong style={{ color: "var(--erp-danger, var(--status-critical-fg))" }}>Over budget:</strong> this configuration is
           projected to exceed the {formatUsd(budget)}/mo cap. Pulls will be refused by the stop-loss once
           the cap is reached this period, even for toggles that are switched on.{" "}
           {dirty && <StatusBadge label="unsaved" />}

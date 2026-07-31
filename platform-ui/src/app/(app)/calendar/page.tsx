@@ -125,7 +125,7 @@ export default async function CalendarPage({ searchParams }: { searchParams: Sea
           {items.length === 0 ? (
             <Card><EmptyNote>Nothing scheduled. Due dates on tasks, deliverables and projects show up here.</EmptyNote></Card>
           ) : ORDER.filter((b) => buckets.has(b)).map((b) => (
-            <Card key={b} title={b} headerRight={<span style={{ font: "700 10px var(--font-body)", letterSpacing: ".08em", textTransform: "uppercase", color: b === "Overdue" ? "#B5622F" : "var(--erp-ink-50)" }}>{buckets.get(b)!.length}</span>}>
+            <Card key={b} title={b} headerRight={<span style={{ font: "700 10px var(--font-body)", letterSpacing: ".08em", textTransform: "uppercase", color: b === "Overdue" ? "var(--status-critical-fg)" : "var(--erp-ink-50)" }}>{buckets.get(b)!.length}</span>}>
               <div style={{ display: "flex", flexDirection: "column" }}>
                 {buckets.get(b)!.map((it, i) => (
                   <div key={i} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "9px 0", borderBottom: "0.5px solid var(--erp-hairline-soft)" }}>
@@ -152,7 +152,7 @@ export default async function CalendarPage({ searchParams }: { searchParams: Sea
               {workload.map(([who, n]) => (
                 <div key={who} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                   <div style={{ display: "flex", justifyContent: "space-between", font: "400 13px var(--font-body)" }}><span>{who}</span><span style={{ color: "var(--erp-ink-50)" }}>{n}</span></div>
-                  <span style={{ height: 6, background: "rgba(26,25,22,.08)", position: "relative" }}><span style={{ position: "absolute", inset: "0 auto 0 0", width: `${(n / maxLoad) * 100}%`, background: "var(--erp-accent)" }} /></span>
+                  <span style={{ height: 6, background: "var(--wash-strong)", position: "relative" }}><span style={{ position: "absolute", inset: "0 auto 0 0", width: `${(n / maxLoad) * 100}%`, background: "var(--erp-accent)" }} /></span>
                 </div>
               ))}
             </div>

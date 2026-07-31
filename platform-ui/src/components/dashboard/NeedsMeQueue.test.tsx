@@ -53,7 +53,7 @@ describe("NeedsMeQueue", () => {
     // "now" (approvals/gates, overdue tasks) must render the alarm-mapped
     // `--now` dot class; "today" (due today, not yet late) must render the
     // calm-mapped `--today` class. dashboard.css keys its one alarm colour
-    // (#B5622F) off `--now` — this locks the band→class wiring so a future
+    // (--status-critical) off `--now` — this locks the band→class wiring so a future
     // edit can't silently swap them without a red test.
     const { container, rerender } = render(
       <NeedsMeQueue

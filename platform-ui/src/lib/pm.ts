@@ -90,10 +90,10 @@ export interface ProjectStatus {
 // Hues match the old hardcoded Gantt bar colours (pm.css) exactly: todo
 // champagne, in_progress bronze (--erp-accent), blocked rust, done green.
 export const DEFAULT_STATUSES: ProjectStatus[] = [
-  { id: "todo",        label: "To do",       color: "#A39174", isDone: false, isBlocked: false, position: 0 },
-  { id: "in_progress", label: "In progress", color: "#6E5A43", isDone: false, isBlocked: false, position: 1 },
-  { id: "blocked",     label: "Blocked",     color: "#B5622F", isDone: false, isBlocked: true,  position: 2 },
-  { id: "done",        label: "Done",        color: "#4B7A5A", isDone: true,  isBlocked: false, position: 3 },
+  { id: "todo",        label: "To do",       color: "var(--status-idle-fg)", isDone: false, isBlocked: false, position: 0 },
+  { id: "in_progress", label: "In progress", color: "var(--accent)", isDone: false, isBlocked: false, position: 1 },
+  { id: "blocked",     label: "Blocked",     color: "var(--status-critical-fg)", isDone: false, isBlocked: true,  position: 2 },
+  { id: "done",        label: "Done",        color: "var(--status-ok-fg)", isDone: true,  isBlocked: false, position: 3 },
 ];
 export const synthDefaultStatuses = (): ProjectStatus[] => DEFAULT_STATUSES.map((s) => ({ ...s }));
 

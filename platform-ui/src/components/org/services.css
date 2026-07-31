@@ -12,7 +12,7 @@
 .svc-row__main { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .svc-row__label { font: 400 13px var(--font-body); color: var(--text-primary); flex: 1 1 auto; }
 .svc-row__module { font: 700 10px var(--font-body); letter-spacing: 0.06em; text-transform: uppercase; color: var(--erp-ink-50); }
-.svc-row__banner { margin: 0; font: 400 12px var(--font-body); color: var(--dept-risk, #B5622F); }
+.svc-row__banner { margin: 0; font: 400 12px var(--font-body); color: var(--dept-risk, var(--status-critical-fg)); }
 .svc-row__actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .svc-row__relink { display: inline-flex; align-items: center; gap: 6px; }
-.svc-row__error { margin: 0; font: 400 12px var(--font-body); color: var(--dept-risk, #B5622F); }
+.svc-row__error { margin: 0; font: 400 12px var(--font-body); color: var(--dept-risk, var(--status-critical-fg)); }

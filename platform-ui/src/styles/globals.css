@@ -3,18 +3,27 @@
 @import "./tokens/typography.css";
 @import "./tokens/spacing.css";
 
-/* Design-system hard rules: zero radius, no shadows, hairline borders, opacity hovers. */
+/* Design-system hard rules: zero radius, hairline borders, opacity hovers.
+   Shadows exist in exactly ONE place — --elev-overlay, for layers that float
+   above the page (menus, popovers, toasts). The page itself stays flat. */
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; background: var(--surface-page); color: var(--text-primary); font-family: var(--font-body); }
 button { font-family: inherit; }
 
+/* Compatibility aliases. Components were written against these names before
+   the ramp existed; they now resolve to the semantic tiers, so raising the
+   contrast of every small label in the app is a one-line change here.
+     --erp-ink-60 was 0.60 alpha → 4.45:1 (failed AA) → --ink-muted, 6.2:1
+     --erp-ink-50 was 0.50 alpha → 2.97:1 (failed AA) → --ink-subtle, 4.6:1
+   Prefer the --ink- and --line- tokens directly in new code. */
 :root {
   --erp-accent: var(--accent);
   --erp-accent2: var(--accent-secondary);
-  --erp-hairline: rgba(26, 25, 22, 0.14);
-  --erp-hairline-soft: rgba(26, 25, 22, 0.08);
-  --erp-ink-60: rgba(26, 25, 22, 0.6);
-  --erp-ink-50: rgba(26, 25, 22, 0.5);
+  --erp-hairline: var(--line);
+  --erp-hairline-soft: var(--line-soft);
+  --erp-ink-70: var(--ink-muted);
+  --erp-ink-60: var(--ink-muted);
+  --erp-ink-50: var(--ink-subtle);
   --erp-ease: cubic-bezier(0.22, 0.61, 0.36, 1);
 }
 
@@ -27,8 +36,16 @@ button { font-family: inherit; }
   text-transform: uppercase;
 }
 
+/* Tabular figures. Any number that shares a column with another number needs
+   this or the digits jitter and the column can't be scanned. Applied to the
+   table/KPI primitives by default; use the class for one-off numerals. */
+.tabular, .lux-table__cell--right, .lux-kpi__value, .lux-kpi__delta {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+}
+
 .erp-scroll::-webkit-scrollbar { width: 9px; height: 9px; }
-.erp-scroll::-webkit-scrollbar-thumb { background: rgba(26, 25, 22, 0.16); }
+.erp-scroll::-webkit-scrollbar-thumb { background: var(--line-strong); }
 .erp-scroll::-webkit-scrollbar-track { background: transparent; }
 
 .erp-quiet { opacity: 0.6; transition: opacity 0.28s var(--erp-ease); }
@@ -37,10 +54,12 @@ button { font-family: inherit; }
 @keyframes erp-fade { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 @keyframes erp-toast { from { opacity: 0; transform: translate(-50%, 10px); } to { opacity: 1; transform: translate(-50%, 0); } }
 
-:focus-visible { outline: 1px solid var(--erp-accent); outline-offset: 3px; }
+/* 2px at 2px offset: a 1px bronze hairline on the cream page was too faint to
+   locate at a glance, which is the entire job of a focus ring. */
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 /* Skip link — first focusable element; visually hidden until focused. */
-.skip-link { position: absolute; left: 12px; top: -48px; z-index: 300; background: var(--primitive-off-black); color: var(--primitive-off-white); padding: 10px 16px; font: 700 11px var(--font-body); letter-spacing: 0.14em; text-transform: uppercase; text-decoration: none; transition: top 0.18s var(--erp-ease); }
+.skip-link { position: absolute; left: 12px; top: -48px; z-index: 300; background: var(--surface-inverse); color: var(--text-on-inverse); padding: 10px 16px; font: 700 11px var(--font-body); letter-spacing: 0.14em; text-transform: uppercase; text-decoration: none; transition: top 0.18s var(--erp-ease); }
 .skip-link:focus { top: 12px; }
 
 /* Honour reduced-motion: disable the system's fades/shimmer/transitions. */
