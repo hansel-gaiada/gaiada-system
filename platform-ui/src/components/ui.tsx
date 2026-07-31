@@ -1,8 +1,13 @@
 import type { CSSProperties, ReactNode } from "react";
 import "./ui.css";
 
-export function Eyebrow({ children, style }: { children: ReactNode; style?: CSSProperties }) {
-  return <span className="type-eyebrow" style={style}>{children}</span>;
+// `className` exists so callers can reach the eyebrow from a stylesheet. Passing
+// layout through `style` instead — `style={{ display: "block" }}` was the old
+// idiom — makes the eyebrow unreachable from a media query, because an inline
+// declaration outranks any selector. That is what left the sidebar's section
+// labels rendering inside the collapsed mobile rail.
+export function Eyebrow({ children, style, className }: { children: ReactNode; style?: CSSProperties; className?: string }) {
+  return <span className={`type-eyebrow${className ? ` ${className}` : ""}`} style={style}>{children}</span>;
 }
 
 export function Card({ children, title, headerRight, dark, style }: {

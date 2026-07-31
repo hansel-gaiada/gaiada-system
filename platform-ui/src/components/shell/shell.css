@@ -26,7 +26,7 @@
 .sub-tabs { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; margin-bottom: 24px; padding: 12px 0 0; }
 .sub-tab { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; font: 500 12.5px var(--font-body); color: var(--erp-ink-50); text-decoration: none; border-radius: 999px; transition: color 0.15s ease, background 0.15s ease; }
 .sub-tab:hover { color: var(--text-primary); background: var(--tint-hover); }
-.sub-tab--active { color: var(--erp-accent); background: color-mix(in srgb, var(--status-critical) 10%, transparent); font-weight: 700; }
+.sub-tab--active { color: var(--erp-accent); background: var(--tint-active); font-weight: 700; }
 .sub-tab svg { opacity: 0.75; }
 
 .erp-side__user { border-top: 0.5px solid var(--line-soft); padding: 14px 16px; display: flex; align-items: center; gap: 12px; }
@@ -89,6 +89,17 @@
 .erp-app[data-density="compact"] .lux-table__row { padding-top: 8px; padding-bottom: 8px; }
 .erp-app[data-density="compact"] .erp-navbtn { padding-top: 7px; padding-bottom: 7px; }
 
+/* ---- Sidebar eyebrows (class-based so media queries can reach them) ---- */
+.erp-side__tagline { display: block; margin-top: 7px; opacity: 0.55; }
+.erp-side__grouplabel { display: block; padding: 22px 10px 10px; opacity: 0.4; font-size: 10px; }
+
+/* ---- Mobile navigation: burger + off-canvas drawer + scrim ----
+   Hidden above the drawer breakpoint, where the sidebar is a real grid column
+   and needs no control. */
+.erp-navtoggle { display: none; align-items: center; justify-content: center; width: 40px; height: 40px; margin-left: -8px; border: none; background: transparent; color: var(--ink-muted); cursor: pointer; }
+.erp-navtoggle:hover { color: var(--text-primary); }
+.erp-scrim { display: none; position: fixed; inset: 0; z-index: 90; border: none; padding: 0; background: var(--scrim); backdrop-filter: blur(var(--blur-overlay)); cursor: pointer; }
+
 /* ---- Responsive ---- */
 @media (max-width: 1024px) {
   .erp-app { grid-template-columns: 208px 1fr; }
@@ -96,21 +107,68 @@
   .erp-top { gap: 14px; padding: 0 18px; }
   .erp-top__search { max-width: 300px; }
 }
+
+/* Drawer breakpoint. The sidebar leaves the grid entirely rather than
+   collapsing to an icon rail: a 64px rail cost 16% of a 390px screen AND
+   dropped every label, which left five identically-drawn department icons
+   stacked with nothing to tell them apart. Off-canvas keeps the labels. */
 @media (max-width: 760px) {
-  .erp-app { grid-template-columns: 64px 1fr; grid-template-rows: 56px 1fr; }
-  .erp-side__nav .erp-navbtn { justify-content: center; gap: 0; padding-left: 10px; padding-right: 10px; }
-  .erp-side__nav .erp-navbtn span { display: none; }
-  .erp-side__nav .type-eyebrow { display: none; }
-  .erp-side__brand { padding: 16px 0; text-align: center; }
-  .erp-side__brand .erp-side__wordmark { font-size: 15px; letter-spacing: 0.04em; }
-  .erp-side__brand .type-eyebrow { display: none; }
-  .erp-usermenu__trigger { justify-content: center; padding: 12px 6px; }
-  .erp-usermenu__trigger > div:last-child { display: none; }
-  .erp-usermenu__pop { left: 8px; }
+  .erp-app { grid-template-columns: 1fr; grid-template-rows: 56px 1fr; grid-template-areas: "top" "main"; }
+  .erp-side {
+    position: fixed; top: 0; bottom: 0; left: 0; z-index: 100;
+    width: min(var(--drawer-width), 86vw);
+    box-shadow: var(--elev-overlay);
+    transform: translateX(-100%);
+    /* visibility keeps the closed drawer out of the tab order; delaying it by
+       the slide duration lets the close animation actually play. */
+    visibility: hidden;
+    transition: transform var(--dur-base) var(--erp-ease), visibility 0s linear var(--dur-base);
+  }
+  html[data-nav="open"] .erp-side {
+    transform: none;
+    visibility: visible;
+    transition: transform var(--dur-base) var(--erp-ease), visibility 0s;
+  }
+  /* The panel floats over the page, so the page behind it must not scroll. */
+  html[data-nav="open"] .erp-main { overflow: hidden; }
+  .erp-navtoggle, html[data-nav="open"] .erp-scrim { display: flex; }
   .erp-top__meta { display: none; }
   .erp-top__date { display: none; }
+  /* Side-by-side tag + sentence squeezes the sentence into a ~180px column;
+     stack them so the text gets the full width. */
+  .erp-special { flex-direction: column; align-items: flex-start; gap: 4px; padding-left: 14px; padding-right: 14px; }
 }
+
 @media (max-width: 520px) {
   .erp-top__search { max-width: none; }
   .erp-main__inner { padding: 18px 14px 28px; }
+}
+
+/* Touch input, at any width: the WCAG 2.5.8 floor is 24px and the practical
+   floor for a thumb is 44px. Keyed on pointer type rather than width so a
+   touch laptop gets it too, and so desktop density is untouched. */
+@media (pointer: coarse) {
+  .erp-navbtn { min-height: 44px; }
+  .erp-usermenu__item { min-height: 44px; display: flex; align-items: center; }
+  .erp-navtoggle { width: 44px; height: 44px; }
+  .erp-top__bell { min-width: 44px; min-height: 44px; }
+  .erp-new__btn { min-height: 44px; }
+  .erp-new__item { min-height: 44px; display: flex; align-items: center; }
+  .sec-tab, .sub-tab { min-height: 44px; }
+  /* Form controls. These are underline-only fields, so height comes from
+     padding alone and lands around 19–29px — under a thumb. */
+  .lux-btn--sm { min-height: 44px; }
+  .lux-field__control,
+  .lux-filters__field select,
+  .lux-filters__field input,
+  .dt__search input,
+  .erp-company__select,
+  .erp-top__search input { min-height: 44px; }
+  .lux-field__checkbox { width: 20px; height: 20px; }
+  /* Menu rows, sort controls and breadcrumb links are all real targets even
+     though they are drawn as text. */
+  .scope-pill__item, .scope-pill__summary { min-height: 44px; align-items: center; }
+  .dt__sort { min-height: 44px; }
+  .erp-crumb { padding: 6px 0; }
+  .filter-chip { min-height: 44px; }
 }

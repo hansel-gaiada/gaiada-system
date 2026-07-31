@@ -343,7 +343,7 @@ button.pm-tag--btn:focus-visible .pm-tag { outline: 2px solid var(--erp-accent);
   color: var(--text-primary); cursor: pointer;
 }
 .pm-rx-chip:hover, .pm-rx-chip:focus-visible { border-color: var(--erp-accent); }
-.pm-rx-chip--mine { border-color: var(--erp-accent); background: color-mix(in srgb, var(--status-critical) 12%, transparent); color: var(--erp-accent); }
+.pm-rx-chip--mine { border-color: var(--erp-accent); background: var(--tint-active); color: var(--erp-accent); }
 .pm-rx-chip__count { font-weight: 700; }
 .pm-rx-add-wrap { position: relative; display: inline-block; }
 .pm-rx-add {
@@ -362,7 +362,7 @@ button.pm-tag--btn:focus-visible .pm-tag { outline: 2px solid var(--erp-accent);
   cursor: pointer; font-size: 15px; display: flex; align-items: center; justify-content: center;
 }
 .pm-rx-pop__item:hover, .pm-rx-pop__item:focus-visible { border-color: var(--erp-accent); background: color-mix(in srgb, var(--status-critical) 8%, transparent); }
-.pm-rx-pop__item--mine { border-color: var(--erp-accent); background: color-mix(in srgb, var(--status-critical) 12%, transparent); }
+.pm-rx-pop__item--mine { border-color: var(--erp-accent); background: var(--tint-active); }
 
 /* ---- follow toggle (P3-09) ---- */
 .pm-follow-glyph { margin-right: 5px; font-size: 13px; }
