@@ -40,6 +40,7 @@ import {
   Query,
   Req,
   Res,
+  ServiceUnavailableException,
   UnprocessableEntityException,
   UseGuards,
 } from "@nestjs/common";
@@ -66,6 +67,7 @@ import type { ReportDocument, ReportGrain, ReportPeriodKind } from "./report-doc
 import { getCalendarPeriod, getPeriodById, listPeriods, pinCustomPeriod } from "./report-periods";
 import { CUSTOM_SEAL_REJECT_MESSAGE, amendPeriod, fetchSealedDocument, sealPeriod } from "./report-seal";
 import { EXPORT_FORMATS, exportContentType, exportFilename, exportStorageKey, parseExportStorageKey, renderExport, type ExportFormat } from "./report-export";
+import { PdfRendererNotConfiguredError, mintPrintJobToken, renderPdfViaSidecar } from "./report-pdf-export";
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const GRAINS = new Set(["person", "project", "department", "company"]);
@@ -475,22 +477,27 @@ export class ReportsController {
     return result.period;
   }
 
-  // ---------------- TR-18: XLSX/CSV export service (§6.3) ----------------
+  // ---------------- TR-18/TR-21: XLSX/CSV/PDF export service (§6.3) ----------------
   //
   // Storage: reuses the EXISTING files plumbing (`storage()` + the `files` table,
-  // core/storage.ts + core/files.controller.ts's own pattern) rather than a second path. The
-  // `files` table has no free-form metadata column, so the (grain, scopeRef) an export job was
-  // built for is recorded in its `storage_key` (see report-export.ts's `exportStorageKey`/
-  // `parseExportStorageKey`) and re-derived on every read — never trusted from an unverified
-  // client param — so `GET .../exports/:jobId` and its `/download` can re-run the IDENTICAL
-  // `authorizeReportDocumentRead` check the export was created under (standing ruling 1).
+  // core/storage.ts + core/files.controller.ts's own pattern) rather than a second path, for ALL
+  // THREE formats. The `files` table has no free-form metadata column, so the (grain, scopeRef) an
+  // export job was built for is recorded in its `storage_key` (see report-export.ts's
+  // `exportStorageKey`/`parseExportStorageKey`) and re-derived on every read — never trusted from
+  // an unverified client param — so `GET .../exports/:jobId` and its `/download` can re-run the
+  // IDENTICAL `authorizeReportDocumentRead` check the export was created under (standing ruling 1)
+  // regardless of which format was requested (this is why `loadExportJob`/`getExportStatus`/
+  // `downloadExport` below needed NO changes for PDF — they were already format-agnostic).
   //
-  // Job model: generation is SYNCHRONOUS (build + render + persist all happen inside the POST
-  // handler) because xlsx/csv assembly is well under the 5s bar even at 10k rows, and there is no
+  // Job model: xlsx/csv generation is SYNCHRONOUS (build + render + persist all happen inside the
+  // POST handler) because that assembly is well under the 5s bar even at 10k rows, and there is no
   // existing async-job table in this schema to poll against (migrations are out of scope for this
-  // ticket). `status` is therefore always `"completed"` today — the field exists, and is typed as
-  // a union, specifically so TR-19+'s PDF path (which DOES need an async sidecar round-trip, §6.3)
-  // can add `"queued"`/`"processing"`/`"failed"` later without reshaping this response.
+  // ticket). PDF is ALSO synchronous end-to-end from the caller's perspective (the sidecar round
+  // trip is awaited inline, bounded by `config.reportRenderer.timeoutMs`) even though it is the
+  // one format that actually leaves the process — TR-21 did not introduce a job table either, for
+  // the same reason TR-18 didn't. `status` stays typed as a literal union (always `"completed"`
+  // today) so a FUTURE async redesign can add `"queued"`/`"processing"`/`"failed"` without
+  // reshaping this response; it is not exercised by this ticket.
 
   @Post("export")
   @HttpCode(200)
@@ -504,13 +511,13 @@ export class ReportsController {
     const scopeRef = resolveScopeRefForGrain(grain, body?.scopeRef, tenantId);
     const format = body?.format;
     if (!format || !EXPORT_FORMATS.has(format)) {
-      // "pdf" is a real, named format in §6.3 but ships via the report-renderer sidecar (TR-19-21)
-      // — rejecting it here (rather than silently downgrading to xlsx) keeps the contract honest
-      // about what this ticket actually delivers.
-      throw new BadRequestException({ message: "format must be one of xlsx, csv (pdf is a separate sidecar path, not yet available)", field: "format" });
+      throw new BadRequestException({ message: "format must be one of xlsx, csv, pdf", field: "format" });
     }
 
     // Standing ruling 1: THE SAME check `GET document` makes — an export must never widen access.
+    // ⚡ TR-21 requirement 3 (mint after authorizing, never before): this line MUST run, and MUST
+    // succeed, before any jobToken is minted below — the pdf branch mints from the `doc` this
+    // authz call already cleared, never from raw request params re-resolved on the other side.
     await authorizeReportDocumentRead(req.principal, tenantId, grain, scopeRef);
 
     const doc = await fetchReportDocumentForRead(tenantId, grain, scopeRef, periodKind, s, e);
@@ -523,9 +530,13 @@ export class ReportsController {
       sealHash = period?.sealHash ?? undefined;
     }
 
+    const bytes =
+      format === "pdf"
+        ? await this.renderPdfExportBytes(tenantId, grain, scopeRef, doc, sealHash)
+        : await renderExport(doc, format as ExportFormat, { sealHash });
+
     const jobId = newId();
-    const bytes = await renderExport(doc, format as ExportFormat, { sealHash });
-    const filename = exportFilename(doc, format as ExportFormat);
+    const filename = exportFilename(doc, format as ExportFormat, { sealHash });
     const contentType = exportContentType(format as ExportFormat);
     const storageKey = exportStorageKey(tenantId, grain, scopeRef, jobId);
 
@@ -548,6 +559,31 @@ export class ReportsController {
     });
 
     return { jobId };
+  }
+
+  /** TR-21's pdf branch: mint a one-shot token for the ALREADY-authorized, ALREADY-built `doc`
+   *  (never re-resolved from raw params on the other side of the sidecar call — see
+   *  report-pdf-export.ts's header for the full security-requirement walkthrough), hand the
+   *  sidecar a URL containing only that token, and return the PDF bytes it renders. Not
+   *  configured (`config.reportRenderer.{url,token,platformUiInternalUrl}` any one empty) or a
+   *  failed render both surface as a 503 — the same fail-soft convention as the rest of this
+   *  file's admin-probe/service-token integrations, never a silent downgrade to a different
+   *  format. */
+  private async renderPdfExportBytes(tenantId: string, grain: ReportGrain, scopeRef: string, doc: ReportDocument, sealHash: string | undefined): Promise<Buffer> {
+    const jobToken = await mintPrintJobToken({ tenantId, grain, scopeRef, document: doc, sealHash });
+    try {
+      return await renderPdfViaSidecar(jobToken, {
+        rendererUrl: config.reportRenderer.url,
+        rendererToken: config.reportRenderer.token,
+        platformUiInternalUrl: config.reportRenderer.platformUiInternalUrl,
+        timeoutMs: config.reportRenderer.timeoutMs,
+      });
+    } catch (err) {
+      if (err instanceof PdfRendererNotConfiguredError) {
+        throw new ServiceUnavailableException({ message: "pdf export is not configured", field: "format" });
+      }
+      throw new ServiceUnavailableException({ message: `pdf render failed: ${(err as Error).message}`, field: "format" });
+    }
   }
 
   /** Resolves an export job row + re-derives (grain, scopeRef) from its `storage_key` — shared by
