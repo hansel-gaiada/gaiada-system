@@ -7108,3 +7108,18 @@ the house standard for boot wiring.
 **Caveat it stated rather than papered over:** its 2552-pass full-tree run completed *before* the devops
 migration to head 0069, and it did not re-run afterwards. I re-ran `src/modules/search` post-migration (1061
 green, above) and have a full-tree run in flight to close the rest.
+
+### 6bx.1 · Full tree re-verified post-migration — SM-75's caveat closed
+
+Run by me after the stack rebuild and the 0062→0069 migration, which is the state SM-75 could not cover:
+**2552 passed / 4 skipped · 177 files passed / 1 skipped · zero FAIL markers · exit 0** (646s, `--maxWorkers=2`).
+
+The count is **identical to SM-75's pre-migration run**, which is the useful part: eight migrations landed —
+including three that add columns to tables the search module reads — and **no test outcome changed**. That is
+evidence the migrations are genuinely additive, not merely evidence that the suite still runs.
+
+**SM-24's Finding 1 is therefore discharged**: the placement defect is fixed (§6bv) *and* now executed by a test
+whose negative control proves it bites (§6bx). Every dev-provable item the gate raised is closed. Returned to the
+gate for a re-verdict rather than self-promoted — the module's status is the gate's call, not the orchestrator's,
+and I am the author of both the defect and its fix here, which is precisely when self-certification is worth
+least.
