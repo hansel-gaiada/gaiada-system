@@ -3,8 +3,44 @@ import { useActionState } from "react";
 import { login } from "./actions";
 import { Eyebrow, Button } from "@/components/ui";
 
-export function LoginForm({ returnTo }: { returnTo: string }) {
+const SSO_ERRORS: Record<string, string> = {
+  sso: "That sign-in attempt expired. Please try again.",
+  token: "Couldn't complete sign-in with the identity provider.",
+  provision: "Signed in, but no matching account exists on this platform.",
+};
+
+export function LoginForm({
+  returnTo,
+  ssoOnly = false,
+  ssoError,
+}: {
+  returnTo: string;
+  ssoOnly?: boolean;
+  ssoError?: string;
+}) {
   const [state, action, pending] = useActionState(login, null);
+
+  // SSO-only: no email box at all. The dev-login server action is disabled in this mode, so
+  // showing the field would invite the one interaction guaranteed to fail.
+  if (ssoOnly) {
+    return (
+      <div style={{ width: 380, maxWidth: "calc(100vw - 40px)", background: "var(--surface-card)", border: "0.5px solid var(--erp-hairline)", padding: 40, display: "flex", flexDirection: "column", gap: 20 }}>
+        <div>
+          <div style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 28, letterSpacing: "0.14em" }}>SYROWATKA</div>
+          <Eyebrow style={{ opacity: 0.55, marginTop: 7, display: "block" }}>Operating Platform</Eyebrow>
+        </div>
+        {ssoError && (
+          <p style={{ margin: 0, font: "400 13px var(--font-body)", color: "var(--erp-accent)", opacity: 0.8 }}>
+            {SSO_ERRORS[ssoError] ?? "Sign-in failed. Please try again."}
+          </p>
+        )}
+        <a href={`/auth/login?return=${encodeURIComponent(returnTo)}`} style={{ textAlign: "center", textDecoration: "none", background: "var(--text-primary)", color: "var(--surface-card)", padding: "12px 12px", font: "500 13px var(--font-body)", letterSpacing: "0.04em" }}>
+          Sign in with SSO
+        </a>
+      </div>
+    );
+  }
+
   return (
     <form action={action} style={{ width: 380, maxWidth: "calc(100vw - 40px)", background: "var(--surface-card)", border: "0.5px solid var(--erp-hairline)", padding: 40, display: "flex", flexDirection: "column", gap: 20 }}>
       <div>

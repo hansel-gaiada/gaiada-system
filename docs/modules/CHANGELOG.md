@@ -14,6 +14,25 @@ local stack). None of these mean "production-done".
 Every cut app version and the exact module manifest it contains, so any deployed build can be
 reconstructed from this table alone. Format defined in [`VERSIONING.md`](./VERSIONING.md).
 
+### `Alpha 01.003.0002a` — 2026-07-31 — SSO-only login page
+
+One module bump (**platform-ui `0.6.5 → 0.6.6`**), so the module-reference counter moves to `0002`
+and the revision letter resets to `a`.
+
+The OIDC cutover left the login page showing the dev-login **email box as the primary action**,
+with SSO as a secondary link underneath. Under `AUTH_MODE=oidc` that email path is disabled
+server-side, so the most prominent control on the page was the one guaranteed to fail — reported
+as "login is not working" when SSO itself was healthy throughout.
+
+- `login/page.tsx` + `LoginForm.tsx` — under `AUTH_MODE=oidc`, render SSO alone and surface the
+  `?error=` reasons the callback already emits (`sso` / `token` / `provision`), which previously
+  went nowhere.
+- `auth/callback/route.ts` — build redirects from `PUBLIC_ORIGIN` rather than `req.url`. Behind a
+  proxy `req.url` resolves to the container's own bind address, so the callback sent authenticated
+  users to `https://<container-id>:3005/`. An nginx `proxy_redirect` was papering over it; the app
+  is now correct on its own and that rule becomes defence in depth instead of load-bearing.
+- compose — `AUTH_MODE` and `PUBLIC_ORIGIN` passed to platform-ui; neither was set before.
+
 ### `Alpha 01.002.0001b` — 2026-07-31 — first deployable build
 
 Cut to bring the trial stack up on **gda-aicenter** (the Hermes/DeepSeek box). Baseline manifest,

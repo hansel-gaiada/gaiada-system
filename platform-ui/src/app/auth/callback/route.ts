@@ -6,8 +6,16 @@ import { sealSession, encodeSession, SESSION_COOKIE } from "@/lib/session";
 // session cookie. On any failure, bounce back to /login with a reason.
 export const runtime = "nodejs";
 
+// Behind a reverse proxy, `req.url` is built from the server's own bind address, so redirects come
+// back as https://<container-id>:3005/ — an address that resolves only inside Docker. The user
+// authenticates successfully and is then sent nowhere, which presents as "login is broken".
+// PUBLIC_ORIGIN (e.g. https://erp.gaiada.online) pins redirects to the address the browser used.
+function origin(req: NextRequest): string {
+  return process.env.PUBLIC_ORIGIN?.replace(/\/$/, "") || new URL(req.url).origin;
+}
+
 function fail(req: NextRequest, reason: string) {
-  const res = NextResponse.redirect(new URL(`/login?error=${reason}`, req.url));
+  const res = NextResponse.redirect(new URL(`/login?error=${reason}`, origin(req)));
   res.cookies.set("oidc_pkce", "", { maxAge: 0, path: "/" });
   return res;
 }
@@ -50,7 +58,7 @@ export async function GET(req: NextRequest) {
   const sealed = sealSession(
     encodeSession({ mode: "oidc", userId, accessToken, refreshToken: tok.refresh_token ?? "", expiresAt }),
   );
-  const res = NextResponse.redirect(new URL("/", req.url));
+  const res = NextResponse.redirect(new URL("/", origin(req)));
   res.cookies.set(SESSION_COOKIE, sealed, {
     httpOnly: true,
     sameSite: "lax",

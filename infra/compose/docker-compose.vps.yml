@@ -452,6 +452,12 @@ services:
       OIDC_AUTH_URL: ${OIDC_AUTH_URL:-}
       OIDC_TOKEN_URL: ${OIDC_TOKEN_URL:-}
       OIDC_REDIRECT_URI: ${OIDC_REDIRECT_URI:-}
+      # Mirrors the platform's mode so the login page can hide the dev email box when it is
+      # disabled server-side — otherwise the page's primary action is the one that cannot work.
+      AUTH_MODE: ${PLATFORM_AUTH_MODE:-dev}
+      # The address the BROWSER used. Without it, redirects are built from the container's bind
+      # address and the OIDC callback lands on an unreachable host.
+      PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:-}
     ports:
       - "3005:3005"
     depends_on:
