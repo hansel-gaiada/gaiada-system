@@ -330,6 +330,34 @@ services:
       SEARCH_PILLAR_SEO: ${SEARCH_PILLAR_SEO:-1}
       SEARCH_PILLAR_SEM: ${SEARCH_PILLAR_SEM:-1}
       SEARCH_PILLAR_GEO: ${SEARCH_PILLAR_GEO:-1}
+      # ── Added 2026-08-01 (tracker §6bw): these were read by config.ts and documented in
+      # platform-nest/.env.example, but had NO passthrough here — so setting them in
+      # infra/compose/.env had ZERO effect on the container. Found while bringing the stack to
+      # latest for staging. This is the department's signature failure shape at the infra layer: an
+      # operator supplies a real credential, the plumbing silently drops it, and the platform reports
+      # the vendor as "not configured" — indistinguishable in every log and surface from a deliberate
+      # choice not to configure it. It would have been discovered by a human wondering why real
+      # Google keys changed nothing in staging.
+      #
+      # SM-25a/25c: the client-account Google surfaces (GSC/GA4/Ads). Empty => those capabilities
+      # refuse cleanly and no OAuth flow is offered; the platform never invents a connection.
+      GOOGLE_OAUTH_CLIENT_ID: ${GOOGLE_OAUTH_CLIENT_ID:-}
+      GOOGLE_OAUTH_CLIENT_SECRET: ${GOOGLE_OAUTH_CLIENT_SECRET:-}
+      GOOGLE_OAUTH_REDIRECT_URI: ${GOOGLE_OAUTH_REDIRECT_URI:-}
+      GOOGLE_ADS_DEVELOPER_TOKEN: ${GOOGLE_ADS_DEVELOPER_TOKEN:-}
+      GOOGLE_ADS_LOGIN_CUSTOMER_ID: ${GOOGLE_ADS_LOGIN_CUSTOMER_ID:-}
+      # SM-56 / SM-20: two SEPARATE external-callback secrets, deliberately not one. The first guards
+      # a paid-vendor postback (DataForSEO), the second a script inside the client's OWN Ads account
+      # — two different trust boundaries, so one shared value would mean compromising either grants
+      # both. Unset is FAIL-CLOSED at both edges (every request refused), never skip-the-check.
+      SEARCH_CALLBACK_SECRET: ${SEARCH_CALLBACK_SECRET:-}
+      SEARCH_SEM_CALLBACK_SECRET: ${SEARCH_SEM_CALLBACK_SECRET:-}
+      # SM-26 / addendum §A12.6 — the Ads WRITE mode, INDEPENDENT of SEARCH_PROVIDER_MODE above (that
+      # one governs where DATA comes from). Defaults to 'simulate' here and on any unrecognised value.
+      # 'live' additionally REFUSES TO BOOT without a registered live executor, so a half-finished
+      # staging cutover fails at startup rather than at the moment a client's approved ad change
+      # silently does nothing after its one-shot approval has already been spent.
+      SEARCH_ADS_WRITE_MODE: ${SEARCH_ADS_WRITE_MODE:-simulate}
       N8N_BRIDGE_ENTITY_TYPES: ${N8N_BRIDGE_ENTITY_TYPES:-}
       # Event → knowledge-graph bridge (WS8 Step E). Forwards business events on these entity streams
       # to the knowledge service /graph/ingest (reuses KNOWLEDGE_URL/TOKEN above). Off unless set.

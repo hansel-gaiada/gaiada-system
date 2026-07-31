@@ -6984,3 +6984,68 @@ class is platform-wide rather than search-specific.
 - It **hunted a sixth SM-63 site outside `google/` and reported verified-absent**, not merely unhunted.
 - It **pinned the full tool→`impact` map and mutation-probed it**, closing the gap I routed to it, and let my
   `deliverReport` reclassification stand on the merits rather than by default.
+
+---
+
+## 6bw · Stack brought to latest · **DEV-VERIFIED** — plus the infra fail-open that would have broken staging
+
+### What "the VPS" actually is — answered, not assumed
+**No reachable remote host exists for this stack.** `~/.ssh/config` holds `aire-vps`, `gda-ai01`, `gda-tunnel`
+and `gda-aicenter` — all other projects' boxes. The `git push --tags` → GHCR pipeline is real and committed but
+**has never had a target**. So "the VPS" today **is the local Docker stack**, which was brought to latest in
+full. Nothing was pushed, tagged or published.
+
+### Before-state, as facts
+The stack was **down**, not merely stale — `gaiada-postgres-1` and `gaiada-platform-1` were **Exited**. The
+platform image dated **2026-07-30 22:38**, the DB sat at **61 rows / head 0061**, and `infra/compose/.env`
+**did not exist at all**: the secrets that produced those containers are unrecoverable.
+
+### After
+New image **`2663c32e12e2`** built **2026-08-01 02:25**, proven by image ID *and* timestamp rather than by exit
+code — the `image:`-vs-`build:` no-op trap was worked around with a `docker-compose.build.yml` layer, and
+`0062`–`0069` were confirmed present *inside* the built artifact. **DB head now `0069`** (69 rows), which I
+verified independently. Backups were taken **first** — four non-empty gzips with real DDL, and the `pg-bot`
+skip was an honest profile-off skip, confirming `ef0c6bc`'s no-silent-empty-backup fix is live.
+
+**Routes now answer**: SM-19 export, SM-20 search-terms, SM-21 `apply-api`, SM-25c callback and SM-22 reports
+all return **401** — a real auth decision — where the stale image returned `Cannot POST`. That was the concrete
+staging blocker and it is closed.
+
+It also avoided the two known traps and one it found itself: it used a **session-only port override**
+(`postgres`→`:55436`, `cerbos`→`:3594/5`) rather than disturbing the concurrent agent's test containers, and
+**verified their `StartedAt` timestamps were unchanged afterwards** — proof of non-interference, not an
+assurance of it.
+
+### The finding that matters most for staging
+
+**Google, Ads and both callback secrets had NO passthrough in `docker-compose.vps.yml`'s `platform:`
+environment block** — while DataForSEO, Semrush and Ahrefs did. `config.ts` reads them and
+`platform-nest/.env.example` documents them, so everything *looked* configured: **setting a real Google
+credential in `infra/compose/.env` would have had zero effect on the container.**
+
+This is **the department's signature failure shape, one layer down in the infrastructure**: an operator supplies
+a real credential, the plumbing silently drops it, and the platform reports the vendor as *"not configured"* —
+**indistinguishable in every log and surface from a deliberate choice not to configure it** (the exact
+indistinguishability §A3.3's `planFactEnv` throws to prevent). It would not have been caught by a test. It would
+have been caught by a human in staging wondering why real keys changed nothing — after the keys had been
+obtained, which is the expensive moment.
+
+**Fixed by me** in both places: `docker-compose.vps.yml` gains `GOOGLE_OAUTH_CLIENT_ID`/`_SECRET`/
+`_REDIRECT_URI`, `GOOGLE_ADS_DEVELOPER_TOKEN`, `GOOGLE_ADS_LOGIN_CUSTOMER_ID`, `SEARCH_CALLBACK_SECRET`,
+`SEARCH_SEM_CALLBACK_SECRET` and `SEARCH_ADS_WRITE_MODE` (defaulting to `simulate`); `infra/compose/.env.example`
+gains the same keys with the lead-time warning that a Google Ads **developer token requires Google-side review**
+— a scheduling fact, not a copy-paste one. Verified: all three sampled vars render in the resolved
+`docker compose config`.
+
+### Flagged by the devops seat, on the record
+It **reset the Postgres role passwords** via OS-trust peer auth, because recreating the container left the roles
+holding secrets from the vanished `.env`. Credentials only, no data touched — and it flagged the unilateral call
+explicitly rather than burying it, which is the right instinct. `waha`/`bot`/`keycloak`/`n8n`/`mcp-hub`/
+`ai-gateway` were **not** started (out of scope, and Keycloak likely has the same lost-secret problem); the
+`platform-ui` container remains stale by design, since the UI runs on the host in dev.
+
+### Still owed before real-account verification
+Vendor keys (DataForSEO login/password; Semrush and Ahrefs each needing **both** a key *and* a positive
+price/allowance pair or the driver refuses to register); the Google OAuth client and the **review-gated** Ads
+developer token; and a provisioned box with `deploy.yml`/GHCR secrets. The documented redeploy path is already
+correct — it simply has nothing to point at.
