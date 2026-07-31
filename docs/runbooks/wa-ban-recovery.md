@@ -68,6 +68,13 @@ refused the registration handshake — then retried every ~2s.
   `/app/.sessions/noweb/default`), and a full container restart. Same failure each time.
 - *Client version.* Bumped `noweb-2026.6.2` → `noweb-2026.7.1` and the failure was byte-identical,
   so it is NOT a minimum-client-version rejection. Pin rolled back. **Do not re-bump on a hunch.**
+  <br>**Update 2026-07-31:** the pin is now `noweb-2026.7.2` — a *different* release from the
+  ruled-out 7.1, published 2026-07-29, whose changelog names a NOWEB "WhatsApp Web version
+  compatibility" fix. It was taken to stay current with WA protocol drift, **not** as a retry of
+  this diagnosis. The conclusion below is unchanged: if pairing still fails with the same
+  `Connection Failure` registration loop, it is the upstream block — stop the session and wait.
+  2026.7.x also adds `WAHA_NOWEB_WA_VERSION` / `WAHA_NOWEB_WA_VERSION_FORCE`, which pin the WA Web
+  protocol version without an image change if a future rejection *is* version-related.
 
 **Conclusion.** An upstream WhatsApp-side throttle/block on the number or egress IP. Most likely
 earned by a ~2s reconnect storm: when Docker Desktop stopped mid-day the session died and WAHA

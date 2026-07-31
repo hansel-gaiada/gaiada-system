@@ -76,17 +76,30 @@ services:
     # Pinned (never :latest — a floating tag can shift engine/payload behavior under you, an
     # error the aire project hit). NOWEB variant = Baileys engine, no Chromium (lighter). Bump
     # deliberately. Since 2026.6.1 all former Plus features ship in this free Core image.
-    # 2026-07-29: tried bumping to noweb-2026.7.1 to fix a re-pair failure — it did NOT help, so the
-    # pin is back on the version that demonstrably paired and ran WORKING earlier the same day.
-    # Symptom (identical on BOTH versions): creds cleared, then Baileys logs `not logged in,
-    # attempting registration...` -> `Error: Connection Failure`, retrying every ~2s, so WhatsApp
-    # refuses the registration handshake and no QR is ever issued. Network was ruled out
-    # (wss://web.whatsapp.com/ws/chat opens fine from inside this container; an earlier "unreachable"
-    # reading was a false negative from wget lacking CA certs in this image). Remaining explanation
-    # is an upstream WhatsApp-side throttle/block on the number or egress IP, most likely earned by
-    # a ~2s reconnect storm during the Docker Desktop outage. Fix = wait it out with the session
-    # STOPPED (retrying extends it). Don't re-bump on a hunch: 2026.7.1 was tested and ruled out.
-    image: devlikeapro/waha:noweb-2026.6.2
+    # 2026-07-29: tried bumping to noweb-2026.7.1 to fix a re-pair failure — it did NOT help; the
+    # failure was byte-identical, so it is NOT a minimum-client-version rejection. Symptom: creds
+    # cleared, then Baileys logs `not logged in, attempting registration...` -> `Error: Connection
+    # Failure`, retrying every ~2s, so WhatsApp refuses the registration handshake and no QR is ever
+    # issued. Network was ruled out (wss://web.whatsapp.com/ws/chat opens fine from inside this
+    # container; an earlier "unreachable" reading was a false negative from wget lacking CA certs in
+    # this image). Leading explanation remains an upstream WhatsApp-side throttle/block on the number
+    # or egress IP, earned by a ~2s reconnect storm during the Docker Desktop outage — see
+    # docs/runbooks/wa-ban-recovery.md. That is NOT fixed by any image bump.
+    #
+    # 2026-07-31: bumped 2026.6.2 -> 2026.7.2. This is NOT a re-test of the ruled-out 2026.7.1 —
+    # 2026.7.2 shipped 2026-07-29 (upstream, same day as our incident) and its changelog names a
+    # "WhatsApp Web version compatibility" fix in the NOWEB engine plus a timestamp/message-sorting
+    # fix, i.e. a distinct change from 7.1. Taken to stay current with WA-side protocol drift, which
+    # is the one thing a pinned Baileys build silently rots against. NOT verified against a live
+    # pairing yet (the number is still out of the loop; dev runs on the WAHA sim per
+    # docs/superpowers/plans/2026-07-29-waha-sim-dev-harness.md) — treat re-pair as UNPROVEN until a
+    # QR scan actually succeeds. If pairing still fails identically, the block theory stands: STOP
+    # the session and wait, do not bump again.
+    #
+    # Escape hatch added in 2026.7.x: WAHA_NOWEB_WA_VERSION / WAHA_NOWEB_WA_VERSION_FORCE pin or
+    # force the WhatsApp Web protocol version independently of the image, so a future WA-side
+    # version rejection can be worked around without a rebuild. Left unset (upstream default).
+    image: devlikeapro/waha:noweb-2026.7.2
     profiles: [bot]
     restart: unless-stopped
     ports:

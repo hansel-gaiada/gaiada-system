@@ -481,6 +481,27 @@ anywhere real.
 - **Next:** deploy to a real host; tune SLOs on prod traffic.
 
 ## infra
+### [0.7.1] — 2026-07-31 · IN PROGRESS (WAHA image bump 2026.6.2 → 2026.7.2)
+> Numbering note: this jumps from `0.5.2` because the registry table in `MODULES.md` was advanced
+> to `0.7.0` by the trial-deploy/nginx work without matching entries here. The table is the source
+> of truth, so this entry continues from it rather than from the last logged entry.
+- Bumped the pinned WAHA image `devlikeapro/waha:noweb-2026.6.2` → `noweb-2026.7.2` in
+  `infra/compose/docker-compose.vps.yml`. Deliberate bump, still pinned — never `:latest`.
+- **This is not a re-test of the ruled-out 2026.7.1.** The 2026-07-29 incident
+  (`docs/runbooks/wa-ban-recovery.md`) established that 7.1 failed byte-identically, so the re-pair
+  failure is not a minimum-client-version rejection. 2026.7.2 is a later release (published
+  2026-07-29) whose changelog names a NOWEB **"WhatsApp Web version compatibility"** fix plus a
+  message-timestamp/sorting fix. Taken to stay current with WA-side protocol drift — the one thing
+  a pinned Baileys build silently rots against.
+- **Status is IN PROGRESS, not DEV-VERIFIED.** Only `docker compose config` was validated (resolves
+  cleanly, all profiles). No live pairing was exercised: the number is still out of the loop and dev
+  runs against the WAHA sim. Re-pair remains **UNPROVEN** until a QR scan actually succeeds. If the
+  same `Connection Failure` registration loop recurs, the upstream-block conclusion stands — stop
+  the session and wait; do not bump again.
+- Noted the 2026.7.x escape hatch `WAHA_NOWEB_WA_VERSION` / `WAHA_NOWEB_WA_VERSION_FORCE` (pins the
+  WA Web protocol version without an image change). Left unset.
+- Docs updated to match: the ban-recovery runbook incident log and the WhatsApp e2e blueprint.
+
 ### [0.5.2] — 2026-07-28 · DEV-VERIFIED (platform-nest test harness: per-file database)
 - **The suite was untrustworthy, not the code.** Two root causes: (1) `initTestDb()` held a session advisory lock
   released only in `teardownTestDb()`, so a single failed `beforeAll` never released it and every later file blocked

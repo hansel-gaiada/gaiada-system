@@ -41,7 +41,7 @@ versions below; the running build reports it at `GET /health`.
 | sync-engine-go | `0.7.0` | PROTOTYPED | WS1 | 2026-07 |
 | automation (n8n) | `0.4.1` | DEV-VERIFIED | WS4 | 2026-07 |
 | observability | `0.6.0` | DEV-VERIFIED | WS9 | 2026-07 |
-| infra | `0.7.0` | PROTOTYPED | WS10 | 2026-07 |
+| infra | `0.7.1` | PROTOTYPED | WS10 | 2026-07 |
 | wa-chat-bot | `0.9.1` | PROTOTYPED | WS5 | 2026-07 |
 | ai-agents | `0.4.0` | PROTOTYPED | WS8 | 2026-07 |
 | hermes-gateway | `0.2.0` | PROTOTYPED | WS3 | 2026-07 |
@@ -154,11 +154,15 @@ end-to-end on a live Docker stack** (2026-07-15).
 **Known gaps:** filelog→Loki env-limited on Docker Desktop (works on Linux VPS); not deployed to prod.
 **Future plans:** deploy the stack to a real host → tune SLOs against prod traffic.
 
-## infra — Platform Engineering & Delivery · `0.5.2` · PROTOTYPED
+## infra — Platform Engineering & Delivery · `0.7.1` · PROTOTYPED
 
 **What exists (dev):** full VPS Docker Compose stack, per-component Dockerfiles, local CI (`test-all.sh`),
 GH Actions (inert until the repo is standalone), crypto-shred-safe backups, supply-chain pipeline
 (SBOM + cosign + SLSA).
+**0.7.1 (WAHA pin 2026.6.2 → 2026.7.2):** deliberate, still-pinned bump to pick up the NOWEB
+"WhatsApp Web version compatibility" fix in 2026.7.2 and stay current with WA protocol drift.
+Explicitly **not** a retry of the ruled-out 2026.7.1 (see `docs/runbooks/wa-ban-recovery.md`).
+Validated by `docker compose config` only — **re-pair is UNPROVEN**; no live QR scan was possible.
 **0.5.0 (Workstream A+B compose):** agent-runner service added to compose stack (`build: ../../ai-agents`, Fastify :3006,
 AGENT_RUNNER_TOKEN auth, gaiada_knowledge owner/app roles); wa-chat-bot environment wired for writable group registry
 (GROUPS_FILE: /app/data/groups.yaml, GROUPS_SEED_FILE: /app/config/groups.seed.yaml); bot-data volume added for registry + session state;

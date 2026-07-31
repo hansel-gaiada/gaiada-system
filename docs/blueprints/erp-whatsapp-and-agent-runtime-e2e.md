@@ -45,7 +45,7 @@ flowchart LR
     GRP["groups.ts (now writable)"]
   end
   RUNNER["agent-runner (NEW Fastify svc :3006)<br/>goal queue + goal/run store"]
-  WAHA["WAHA noweb-2026.6.2"]
+  WAHA["WAHA noweb-2026.7.2"]
   GW["ai-gateway :3002"]
   HUB["mcp-hub :3003"]
   KDB[("gaiada_knowledge<br/>agent_goals/agent_runs/agent_episodes")]
@@ -103,7 +103,7 @@ POST {WAHA_URL}/api/sessions
 Webhook config is NOT set per-session — the compose env (`WHATSAPP_HOOK_URL`,
 `WHATSAPP_HOOK_EVENTS`) already applies globally. Implementer must verify exact
 create/start/logout paths against the pinned image's Swagger (`localhost:3000`) —
-`devlikeapro/waha:noweb-2026.6.2` — and adjust only the *paths*, never the response contract
+`devlikeapro/waha:noweb-2026.7.2` — and adjust only the *paths*, never the response contract
 above.
 
 ### 2.2 Bot: session.status visibility (NEW `wa-chat-bot/src/session-state.ts`)
