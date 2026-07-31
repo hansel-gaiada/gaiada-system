@@ -36,7 +36,7 @@ function RoleGrantChip({
             background: "none",
             cursor: "pointer",
             font: "400 12px var(--font-body)",
-            color: "rgba(26,25,22,.45)",
+            color: "var(--ink-subtle)",
             padding: 0,
           }}
         >
@@ -76,7 +76,7 @@ export function RoleManager({
     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
         {currentRoles.length === 0 ? (
-          <span style={{ font: "400 13px var(--font-body)", color: "rgba(26,25,22,.5)" }}>No roles</span>
+          <span style={{ font: "400 13px var(--font-body)", color: "var(--ink-subtle)" }}>No roles</span>
         ) : (
           currentRoles.map((grant) => <RoleGrantChip key={grant.grantId} grant={grant} revoke={revoke} />)
         )}

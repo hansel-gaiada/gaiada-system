@@ -9,7 +9,7 @@ export function BackendPending({ what, contract }: { what: string; contract?: st
       style={{
         display: "flex", gap: 12, alignItems: "flex-start",
         border: "0.5px solid var(--erp-hairline)", borderLeft: "3px solid var(--erp-accent)",
-        background: "rgba(110,90,67,.05)", padding: "12px 14px", marginBottom: 16,
+        background: "var(--tint-hover)", padding: "12px 14px", marginBottom: 16,
       }}
     >
       <span aria-hidden="true" style={{ font: "700 11px var(--font-body)", letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--erp-accent)", whiteSpace: "nowrap", paddingTop: 1 }}>

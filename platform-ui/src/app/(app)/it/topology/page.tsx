@@ -8,10 +8,10 @@ import { EmptyNote } from "@/components/systems/EmptyNote";
 import { Topology } from "@/components/it/Topology";
 
 const LEGEND: { label: string; color: string; dim?: boolean }[] = [
-  { label: "Online", color: "#4B7A5A" },
-  { label: "Degraded", color: "#B5622F" },
-  { label: "Offline", color: "#B5622F", dim: true },
-  { label: "Unknown", color: "#A39174" },
+  { label: "Online", color: "var(--status-ok-fg)" },
+  { label: "Degraded", color: "var(--status-critical-fg)" },
+  { label: "Offline", color: "var(--status-critical-fg)", dim: true },
+  { label: "Unknown", color: "var(--status-idle-fg)" },
 ];
 
 export default async function TopologyPage() {

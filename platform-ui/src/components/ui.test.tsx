@@ -15,25 +15,25 @@ describe("ui primitives", () => {
     expect(screen.getByText("row")).toBeInTheDocument();
   });
 
-  it("statusColor maps known statuses and falls back to accent", () => {
-    expect(statusColor("Approved")).toBe("#4B7A5A");
-    expect(statusColor("Overdue")).toBe("#B5622F");
-    expect(statusColor("Anything else")).toBe("#6E5A43");
+  it("statusColor maps known statuses and falls back to the in-flight family", () => {
+    expect(statusColor("Approved")).toBe("var(--status-ok-fg)");
+    expect(statusColor("Overdue")).toBe("var(--status-critical-fg)");
+    expect(statusColor("Anything else")).toBe("var(--status-progress-fg)");
   });
 
   it("statusColor maps raw backend enums (lowercase/underscored)", () => {
-    expect(statusColor("active")).toBe("#4B7A5A");
-    expect(statusColor("in_progress")).toBe("#6E5A43");
-    expect(statusColor("on_hold")).toBe("#B5622F");
+    expect(statusColor("active")).toBe("var(--status-ok-fg)");
+    expect(statusColor("in_progress")).toBe("var(--status-progress-fg)");
+    expect(statusColor("on_hold")).toBe("var(--status-critical-fg)");
   });
 
   it("statusColor still works for the Title-Case prototype labels", () => {
-    expect(statusColor("Active")).toBe("#4B7A5A");
+    expect(statusColor("Active")).toBe("var(--status-ok-fg)");
   });
 
   it("statusColor maps secret-presence badge states", () => {
-    expect(statusColor("Configured")).toBe("#4B7A5A");
-    expect(statusColor("Absent")).toBe("#A39174");
+    expect(statusColor("Configured")).toBe("var(--status-ok-fg)");
+    expect(statusColor("Absent")).toBe("var(--status-idle-fg)");
   });
 
   it("humanizeStatus turns raw enums into a readable label", () => {

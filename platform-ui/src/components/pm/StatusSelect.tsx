@@ -26,7 +26,7 @@ export function StatusSelect({ current, statuses, canEdit, save, undoSpawn }: Pr
   const [msg, setMsg] = useState<string | null>(null);
   const [spawnToast, setSpawnToast] = useState<{ id: string; dueDate: string } | null>(null);
   const active = statuses.find((s) => s.id === current);
-  const color = active?.color ?? "#6E5A43";
+  const color = active?.color ?? "var(--accent)";
 
   function onChange(id: string) {
     if (id === current) return;

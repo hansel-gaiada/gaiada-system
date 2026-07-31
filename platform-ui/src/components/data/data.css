@@ -13,9 +13,9 @@
 .dt__sort:hover { color: var(--text-primary); }
 .dt__arrow { font-size: 8px; color: var(--erp-accent); width: 8px; }
 .dt__table thead th:not(:has(.dt__sort)) { font: 700 10px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--erp-ink-50); }
-.dt__table tbody td { padding: 10px 14px; border-bottom: 0.5px solid var(--erp-hairline-soft); color: var(--erp-ink-70, rgba(26,25,22,.72)); vertical-align: middle; }
+.dt__table tbody td { padding: 10px 14px; border-bottom: 0.5px solid var(--erp-hairline-soft); color: var(--erp-ink-70, var(--ink-muted)); vertical-align: middle; }
 .dt__table tbody tr:last-child td { border-bottom: none; }
-.dt__table tbody tr:hover td { background: rgba(110, 90, 67, 0.03); }
+.dt__table tbody tr:hover td { background: var(--tint-hover); }
 .dt--right { text-align: right; }
 .dt__link { color: var(--text-primary); text-decoration: none; }
 .dt__link:hover { color: var(--erp-accent); }

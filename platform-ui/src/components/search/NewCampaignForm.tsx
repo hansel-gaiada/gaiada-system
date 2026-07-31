@@ -65,7 +65,7 @@ export function NewCampaignForm({
       <Button variant="solid" size="sm" onClick={submit} disabled={pending}>
         {pending ? "Creating…" : "Create campaign"}
       </Button>
-      {error && <span style={{ font: "400 12px var(--font-body)", color: "var(--erp-danger, #B5622F)" }}>{error}</span>}
+      {error && <span style={{ font: "400 12px var(--font-body)", color: "var(--erp-danger, var(--status-critical-fg))" }}>{error}</span>}
     </div>
   );
 }

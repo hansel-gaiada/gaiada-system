@@ -146,8 +146,8 @@ export function KeywordWorkbench({
             Embed before cluster — clustering skips any keyword with no embedding yet and reports how
             many it skipped, rather than embedding them on the fly.
           </p>
-          {error && <p role="alert" style={{ font: "400 13px var(--font-body)", color: "var(--erp-danger, #B5622F)", marginTop: 8 }}>{error}</p>}
-          {!error && message && <p style={{ font: "400 13px var(--font-body)", color: "var(--erp-ok, #3a7a54)", marginTop: 8 }}>{message}</p>}
+          {error && <p role="alert" style={{ font: "400 13px var(--font-body)", color: "var(--erp-danger, var(--status-critical-fg))", marginTop: 8 }}>{error}</p>}
+          {!error && message && <p style={{ font: "400 13px var(--font-body)", color: "var(--erp-ok, var(--status-ok-fg))", marginTop: 8 }}>{message}</p>}
         </div>
       )}
 

@@ -11,8 +11,8 @@
      exist only for this surface: a single "signal" colour (risk) plus a
      positive alias, so every dept-console component reads risk the same way
      the rest of the system already does (matches ui.tsx STATUS_COLORS'
-     "at risk"/"blocked"/"overdue" = #B5622F — one colour, one meaning). */
-  --dept-risk: #B5622F;
+     "at risk"/"blocked"/"overdue" = --status-critical — one colour, one meaning). */
+  --dept-risk: var(--status-critical-fg);
   --dept-positive: var(--erp-accent);
   --dept-ring-track: var(--erp-hairline);
 }
@@ -217,7 +217,7 @@ a.dept-ring-card__name:hover { opacity: 0.6; }
   gap: 14px;
   padding: 16px;
   border: 0.5px solid var(--erp-hairline);
-  background: var(--erp-surface, #fff);
+  background: var(--surface-card);
   text-decoration: none;
   color: var(--text-primary);
   transition: border-color 0.15s ease, transform 0.1s ease;

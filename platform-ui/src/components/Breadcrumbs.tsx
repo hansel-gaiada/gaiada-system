@@ -12,7 +12,7 @@ export function Breadcrumbs({ items }: { items: Crumb[] }) {
         <span key={`${c.label}-${i}`} style={{ display: "inline-flex", alignItems: "center", gap: 7 }}>
           {i > 0 && <span aria-hidden="true" style={{ color: "var(--erp-ink-50)", fontSize: 12 }}>/</span>}
           {c.href && i < items.length - 1 ? (
-            <Link href={c.href} style={{ font: "400 12px var(--font-body)", color: "var(--erp-ink-60)", textDecoration: "none" }}>{c.label}</Link>
+            <Link href={c.href} className="erp-crumb" style={{ font: "400 12px var(--font-body)", color: "var(--erp-ink-60)", textDecoration: "none" }}>{c.label}</Link>
           ) : (
             <span style={{ font: "400 12px var(--font-body)", color: "var(--erp-ink-50)" }}>{c.label}</span>
           )}

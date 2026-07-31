@@ -73,7 +73,7 @@ export function AudioUploadForm({
 
   return (
     <div style={{ display: "grid", gap: 10 }}>
-      <p style={{ margin: 0, font: "400 13px/1.5 var(--font-body)", color: "rgba(26,25,22,.6)" }}>
+      <p style={{ margin: 0, font: "400 13px/1.5 var(--font-body)", color: "var(--ink-muted)" }}>
         No capture helper installed? Upload the recording file directly — it&rsquo;s transcribed on the
         server (no local whisper required).
       </p>
@@ -84,7 +84,7 @@ export function AudioUploadForm({
         </p>
       )}
       {isTranscribed && (
-        <p style={{ margin: 0, font: "500 13px var(--font-body)", color: "rgba(26,25,22,.7)" }}>
+        <p style={{ margin: 0, font: "500 13px var(--font-body)", color: "var(--ink-muted)" }}>
           ✓ Transcribed — see the transcript above.
         </p>
       )}

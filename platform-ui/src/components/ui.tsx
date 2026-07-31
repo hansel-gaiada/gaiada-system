@@ -1,8 +1,13 @@
 import type { CSSProperties, ReactNode } from "react";
 import "./ui.css";
 
-export function Eyebrow({ children, style }: { children: ReactNode; style?: CSSProperties }) {
-  return <span className="type-eyebrow" style={style}>{children}</span>;
+// `className` exists so callers can reach the eyebrow from a stylesheet. Passing
+// layout through `style` instead — `style={{ display: "block" }}` was the old
+// idiom — makes the eyebrow unreachable from a media query, because an inline
+// declaration outranks any selector. That is what left the sidebar's section
+// labels rendering inside the collapsed mobile rail.
+export function Eyebrow({ children, style, className }: { children: ReactNode; style?: CSSProperties; className?: string }) {
+  return <span className={`type-eyebrow${className ? ` ${className}` : ""}`} style={style}>{children}</span>;
 }
 
 export function Card({ children, title, headerRight, dark, style }: {
@@ -40,30 +45,45 @@ export function normalizeStatus(s: string): string {
   return s.toLowerCase().replace(/[_\s]+/g, " ").trim();
 }
 
-// Status→color map keyed on normalized strings. Covers both the original
+// Status→semantic family, keyed on normalized strings. Covers both the original
 // prototype labels and the raw backend enums used by the business pages
 // (projects/tasks/companies/campaigns/briefs).
-const STATUS_COLORS: Record<string, string> = {
-  // green — done/positive states
-  approved: "#4B7A5A", "on track": "#4B7A5A", paid: "#4B7A5A", active: "#4B7A5A", shipped: "#4B7A5A",
-  done: "#4B7A5A", completed: "#4B7A5A", "closed won": "#4B7A5A", configured: "#4B7A5A",
+//
+// The map stores a FAMILY, not a colour, because every status needs two colour
+// tiers that must never drift apart: the darkened text value (4.5:1 against the
+// page surface) and the lighter graphic value (3:1, for dots and bars). Storing
+// one hex per status is what let champagne — 2.7:1 — ship as label text.
+type StatusFamily = "ok" | "progress" | "idle" | "critical";
+const STATUS_FAMILY: Record<string, StatusFamily> = {
+  // sage — done/positive states
+  approved: "ok", "on track": "ok", paid: "ok", active: "ok", shipped: "ok",
+  done: "ok", completed: "ok", "closed won": "ok", configured: "ok",
   // bronze — in-flight/neutral states
-  open: "#6E5A43", pending: "#6E5A43", review: "#6E5A43", todo: "#6E5A43", "in progress": "#6E5A43",
-  proposal: "#6E5A43", negotiation: "#6E5A43", discovery: "#6E5A43",
+  open: "progress", pending: "progress", review: "progress", todo: "progress", "in progress": "progress",
+  proposal: "progress", negotiation: "progress", discovery: "progress",
   // champagne — inactive/unpublished states
-  draft: "#A39174", archived: "#A39174", absent: "#A39174",
+  draft: "idle", archived: "idle", absent: "idle",
   // rust — attention/negative states
-  "at risk": "#B5622F", overdue: "#B5622F", low: "#B5622F", critical: "#B5622F", blocked: "#B5622F",
-  "on hold": "#B5622F", rejected: "#B5622F", error: "#B5622F",
+  "at risk": "critical", overdue: "critical", low: "critical", critical: "critical", blocked: "critical",
+  "on hold": "critical", rejected: "critical", error: "critical",
   // ORG-13 service-assignment lifecycle states
-  proposed: "#6E5A43", suspended: "#A39174", orphaned: "#B5622F", revoked: "#B5622F",
+  proposed: "progress", suspended: "idle", orphaned: "critical", revoked: "critical",
   // F1/C1 connection/seat lifecycle states (unconfigured/pending/error/revoked
   // already covered above by draft/pending/at-risk-family aliases where they
   // overlap; only the two not already present are added here).
-  linked: "#4B7A5A", unconfigured: "#A39174",
+  linked: "ok", unconfigured: "idle",
 };
+function familyOf(s: string): StatusFamily {
+  return STATUS_FAMILY[normalizeStatus(s)] ?? "progress";
+}
+
+/** Text tier — for a status LABEL. Clears 4.5:1 on the page surface. */
 export function statusColor(s: string): string {
-  return STATUS_COLORS[normalizeStatus(s)] ?? "#6E5A43";
+  return `var(--status-${familyOf(s)}-fg)`;
+}
+/** Graphic tier — for dots, bars and borders, which only need 3:1. */
+export function statusGraphic(s: string): string {
+  return `var(--status-${familyOf(s)})`;
 }
 
 // "in_progress" -> "In progress", "on_hold" -> "On hold", "todo" -> "Todo".
@@ -74,10 +94,9 @@ export function humanizeStatus(s: string): string {
 }
 
 export function StatusBadge({ label }: { label: string }) {
-  const color = statusColor(label);
   return (
-    <span className="lux-badge" style={{ color }}>
-      <span className="lux-badge__dot" style={{ background: color }} />
+    <span className="lux-badge" style={{ color: statusColor(label) }}>
+      <span className="lux-badge__dot" style={{ background: statusGraphic(label) }} />
       {humanizeStatus(label)}
     </span>
   );
@@ -95,7 +114,7 @@ export function KpiTile({ label, value, delta, deltaUp, foot }: {
       {(delta || foot) && (
         <div className="lux-kpi__delta">
           {delta && (
-            <span style={{ color: deltaUp ? "var(--erp-accent)" : "rgba(26,25,22,.45)", fontWeight: 700 }}>
+            <span style={{ color: deltaUp ? "var(--erp-accent)" : "var(--ink-subtle)", fontWeight: 700 }}>
               {deltaUp ? "▲ " : "▼ "}{delta}
             </span>
           )}
@@ -125,7 +144,7 @@ export function HairlineTable({ columns, rows, tcols }: {
         <div className="lux-table__row" key={i}>
           {cells.map((cell, j) => (
             <span key={j} className={columns[j]?.align === "right" ? "lux-table__cell--right" : undefined}
-              style={{ font: j === 0 ? "400 14px var(--font-body)" : "400 13px var(--font-body)", color: j === 0 ? "var(--text-primary)" : "rgba(26,25,22,.65)" }}>
+              style={{ font: j === 0 ? "400 14px var(--font-body)" : "400 13px var(--font-body)", color: j === 0 ? "var(--text-primary)" : "var(--ink-muted)" }}>
               {cell}
             </span>
           ))}

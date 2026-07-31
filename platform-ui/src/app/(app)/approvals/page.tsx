@@ -89,7 +89,7 @@ export default async function ApprovalsPage({ searchParams }: { searchParams: Se
           <Breadcrumbs items={[{ label: "Home", href: "/" }, { label: "Approvals" }]} />
           <Eyebrow style={{ color: "var(--erp-accent)", marginBottom: 8, display: "block" }}>Workspace</Eyebrow>
           <h1 style={{ margin: 0, fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 34, lineHeight: 1.1 }}>Approvals</h1>
-          <p style={{ margin: "9px 0 0", font: "400 15px/1.5 var(--font-body)", color: "rgba(26,25,22,.62)", maxWidth: 560 }}>
+          <p style={{ margin: "9px 0 0", font: "400 15px/1.5 var(--font-body)", color: "var(--ink-muted)", maxWidth: 560 }}>
             Everything awaiting your decision, unified across agency, pipeline, HR, automation, and agent requests.
           </p>
         </div>

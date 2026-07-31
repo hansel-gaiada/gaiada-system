@@ -57,8 +57,8 @@ export default async function MeetingDetailPage({ params }: { params: Promise<{ 
           <dl style={{ display: "grid", gridTemplateColumns: "160px 1fr", gap: "10px 16px", margin: 0 }}>
             {meta.map(([k, v]) => (
               <div key={k} style={{ display: "contents" }}>
-                <dt style={{ font: "500 13px var(--font-body)", color: "rgba(26,25,22,.5)" }}>{k}</dt>
-                <dd style={{ margin: 0, font: "400 13px var(--font-body)", color: "rgba(26,25,22,.85)", wordBreak: "break-word" }}>{v}</dd>
+                <dt style={{ font: "500 13px var(--font-body)", color: "var(--ink-subtle)" }}>{k}</dt>
+                <dd style={{ margin: 0, font: "400 13px var(--font-body)", color: "var(--ink-body)", wordBreak: "break-word" }}>{v}</dd>
               </div>
             ))}
           </dl>

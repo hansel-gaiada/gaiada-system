@@ -17,14 +17,14 @@ type Filter = "all" | "unread" | Severity;
 // Next 15: searchParams is async.
 type SP = Promise<{ filter?: string }>;
 
-// Risk-colour discipline (WSUX-11 rule): rust (#B5622F) is the only-signal
+// Risk-colour discipline (WSUX-11 rule): rust (--status-critical) is the only-signal
 // color for real risk, so it's reserved for `critical`. `warning` gets the
 // same bronze the rest of the app uses for in-flight/attention states
 // (components/ui.tsx STATUS_COLORS); `info` (and legacy rows shipped before
 // WSUX-4, which never gained a severity) get no color treatment at all.
 const SEVERITY_COLOR: Record<Severity, string | undefined> = {
-  critical: "#B5622F",
-  warning: "#6E5A43",
+  critical: "var(--status-critical-fg)",
+  warning: "var(--accent)",
   info: undefined,
 };
 const SEVERITY_LABEL: Record<Severity, string> = { critical: "Critical", warning: "Warning", info: "Info" };
@@ -168,7 +168,7 @@ export default async function NotificationsPage({ searchParams }: { searchParams
                       borderRadius: "50%",
                       flexShrink: 0,
                       background: color ?? (isUnread ? "var(--erp-accent)" : "transparent"),
-                      border: color || isUnread ? "none" : "0.5px solid rgba(26,25,22,.25)",
+                      border: color || isUnread ? "none" : "0.5px solid var(--ink-faint)",
                     }}
                   />
                   <div style={{ minWidth: 0, flex: 1 }}>

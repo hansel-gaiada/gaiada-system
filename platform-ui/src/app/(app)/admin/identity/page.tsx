@@ -37,7 +37,7 @@ export default async function AdminIdentityPage() {
         <>
           <PageHeader eyebrow="Settings" title="Identity Links" subtitle={SUBTITLE} />
           <Card>
-            <p style={{ margin: 0, font: "400 14px/1.5 var(--font-body)", color: "rgba(26,25,22,.62)" }}>
+            <p style={{ margin: 0, font: "400 14px/1.5 var(--font-body)", color: "var(--ink-muted)" }}>
               This page is limited to administrators.
             </p>
           </Card>
@@ -72,7 +72,7 @@ export default async function AdminIdentityPage() {
           />
         )}
       </Card>
-      <p style={{ margin: "16px 2px 0", font: "400 13px/1.5 var(--font-body)", color: "rgba(26,25,22,.5)", maxWidth: 640 }}>
+      <p style={{ margin: "16px 2px 0", font: "400 13px/1.5 var(--font-body)", color: "var(--ink-subtle)", maxWidth: 640 }}>
         D4 note: identity links pair an external provider identity with a platform user. Verification requires
         dual-proof — a second, independent signal beyond the initial claim — before the link is trusted for
         sensitive actions. Unverified links can be unlinked but are never treated as trusted identity.

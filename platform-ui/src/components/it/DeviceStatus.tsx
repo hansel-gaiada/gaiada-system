@@ -4,10 +4,10 @@ import "./it.css";
 // Device status dot + label. The shared StatusBadge color map doesn't cover
 // online/offline/degraded, so IT uses its own small map.
 const COLORS: Record<Status, string> = {
-  online: "#4B7A5A",
-  degraded: "#B5622F",
-  offline: "#B5622F",
-  unknown: "#A39174",
+  online: "var(--status-ok-fg)",
+  degraded: "var(--status-critical-fg)",
+  offline: "var(--status-critical-fg)",
+  unknown: "var(--status-idle-fg)",
 };
 const LABELS: Record<Status, string> = {
   online: "Online",

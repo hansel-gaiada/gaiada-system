@@ -11,11 +11,11 @@ export function LineChart({ series, height = 180 }: { series: number[]; height?:
     <svg viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" style={{ width: "100%", height, display: "block" }}>
       {[0.25, 0.5, 0.75].map((g) => (
         <line key={g} x1={pad} x2={w - pad} y1={pad + g * (h - 2 * pad)} y2={pad + g * (h - 2 * pad)}
-          stroke="#1A1916" strokeWidth={0.5} strokeOpacity={0.09} />
+          stroke="var(--ink-strong)" strokeWidth={0.5} strokeOpacity={0.09} />
       ))}
-      <path d={area} fill="var(--erp-accent, #6E5A43)" fillOpacity={0.09} />
-      <path d={line} fill="none" stroke="var(--erp-accent, #6E5A43)" strokeWidth={1.6} />
-      <circle cx={xs(n - 1)} cy={ys(series[n - 1])} r={3.2} fill="var(--erp-accent, #6E5A43)" />
+      <path d={area} fill="var(--erp-accent, var(--accent))" fillOpacity={0.09} />
+      <path d={line} fill="none" stroke="var(--erp-accent, var(--accent))" strokeWidth={1.6} />
+      <circle cx={xs(n - 1)} cy={ys(series[n - 1])} r={3.2} fill="var(--erp-accent, var(--accent))" />
     </svg>
   );
 }

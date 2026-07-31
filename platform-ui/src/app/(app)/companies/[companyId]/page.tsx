@@ -31,7 +31,7 @@ export default async function CompanyDetailPage({ params }: { params: Promise<{ 
         <>
           <PageHeader eyebrow="Company" title="Company" />
           <Card>
-            <p style={{ margin: 0, font: "400 14px/1.5 var(--font-body)", color: "rgba(26,25,22,.62)" }}>
+            <p style={{ margin: 0, font: "400 14px/1.5 var(--font-body)", color: "var(--ink-muted)" }}>
               You don&apos;t have access to this in the current company.
             </p>
           </Card>

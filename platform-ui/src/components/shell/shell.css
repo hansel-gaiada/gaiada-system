@@ -1,16 +1,16 @@
 .erp-app { display: grid; grid-template-columns: 248px 1fr; grid-template-rows: 64px 1fr; grid-template-areas: "side top" "side main"; height: 100vh; width: 100%; background: var(--surface-page); font-family: var(--font-body); }
-.erp-side { grid-area: side; background: #f4f1ea; border-right: 0.5px solid var(--erp-hairline); display: flex; flex-direction: column; min-height: 0; }
-.erp-side__brand { display: block; padding: 22px 22px 16px; border-bottom: 0.5px solid rgba(26, 25, 22, 0.1); text-decoration: none; color: inherit; transition: background 0.2s var(--erp-ease); }
-.erp-side__brand:hover { background: rgba(110, 90, 67, 0.04); }
+.erp-side { grid-area: side; background: var(--surface-chrome); border-right: 0.5px solid var(--erp-hairline); display: flex; flex-direction: column; min-height: 0; }
+.erp-side__brand { display: block; padding: 22px 22px 16px; border-bottom: 0.5px solid var(--line-soft); text-decoration: none; color: inherit; transition: background 0.2s var(--erp-ease); }
+.erp-side__brand:hover { background: var(--tint-hover); }
 .erp-side__wordmark { font-family: var(--font-display); font-weight: 700; font-size: 22px; line-height: 1; letter-spacing: 0.14em; color: var(--text-primary); }
 /* Company scope block (moved from the top bar into the sidebar). */
-.erp-side__company { padding: 12px 16px; border-bottom: 0.5px solid rgba(26, 25, 22, 0.1); }
+.erp-side__company { padding: 12px 16px; border-bottom: 0.5px solid var(--line-soft); }
 .erp-side__company .erp-company__select, .erp-side__company .erp-company__name { max-width: 200px; white-space: normal; }
 .erp-side__division { font: 400 11px var(--font-body); color: var(--erp-ink-50); padding: 3px 12px 2px 39px; }
 .erp-side__nav { flex: 1; overflow-y: auto; padding: 14px 12px; min-height: 0; }
-.erp-navbtn { display: flex; align-items: center; gap: 11px; padding: 9px 12px 9px 14px; border: none; background: transparent; cursor: pointer; width: 100%; text-align: left; position: relative; color: rgba(26, 25, 22, 0.62); transition: background 0.2s var(--erp-ease); text-decoration: none; font: 400 14px var(--font-body); }
-.erp-navbtn:hover { background: rgba(110, 90, 67, 0.05); }
-.erp-navbtn--active { background: rgba(110, 90, 67, 0.06); color: var(--text-primary); font-weight: 700; }
+.erp-navbtn { display: flex; align-items: center; gap: 11px; padding: 9px 12px 9px 14px; border: none; background: transparent; cursor: pointer; width: 100%; text-align: left; position: relative; color: var(--ink-muted); transition: background 0.2s var(--erp-ease); text-decoration: none; font: 400 14px var(--font-body); }
+.erp-navbtn:hover { background: var(--tint-hover); }
+.erp-navbtn--active { background: var(--tint-hover); color: var(--text-primary); font-weight: 700; }
 .erp-navbtn--active::before { content: ""; position: absolute; left: 0; top: 8px; bottom: 8px; width: 2px; background: var(--erp-accent); }
 /* In-page section tabs (department / IT / HR / Settings consoles) */
 .sec-tabs { display: flex; gap: 2px; flex-wrap: wrap; border-bottom: 1px solid var(--erp-hairline); margin-bottom: 24px; }
@@ -25,39 +25,39 @@
 .sec-tabs:has(+ .sub-tabs) { margin-bottom: 0; }
 .sub-tabs { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; margin-bottom: 24px; padding: 12px 0 0; }
 .sub-tab { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; font: 500 12.5px var(--font-body); color: var(--erp-ink-50); text-decoration: none; border-radius: 999px; transition: color 0.15s ease, background 0.15s ease; }
-.sub-tab:hover { color: var(--text-primary); background: rgba(110, 90, 67, 0.05); }
-.sub-tab--active { color: var(--erp-accent); background: rgba(181, 98, 47, 0.1); font-weight: 700; }
+.sub-tab:hover { color: var(--text-primary); background: var(--tint-hover); }
+.sub-tab--active { color: var(--erp-accent); background: var(--tint-active); font-weight: 700; }
 .sub-tab svg { opacity: 0.75; }
 
-.erp-side__user { border-top: 0.5px solid rgba(26, 25, 22, 0.1); padding: 14px 16px; display: flex; align-items: center; gap: 12px; }
+.erp-side__user { border-top: 0.5px solid var(--line-soft); padding: 14px 16px; display: flex; align-items: center; gap: 12px; }
 .erp-usermenu { position: relative; }
-.erp-usermenu__trigger { width: 100%; background: transparent; border: none; border-top: 0.5px solid rgba(26, 25, 22, 0.1); cursor: pointer; color: var(--text-primary); font-family: var(--font-body); transition: background 0.2s var(--erp-ease); }
-.erp-usermenu__trigger:hover { background: rgba(110, 90, 67, 0.05); }
-.erp-usermenu__pop { position: absolute; left: 12px; right: 12px; min-width: 180px; bottom: calc(100% + 6px); background: var(--surface-card); border: 0.5px solid var(--erp-hairline); display: flex; flex-direction: column; z-index: 50; box-shadow: none; animation: erp-toast 0.18s var(--erp-ease); }
+.erp-usermenu__trigger { width: 100%; background: transparent; border: none; border-top: 0.5px solid var(--line-soft); cursor: pointer; color: var(--text-primary); font-family: var(--font-body); transition: background 0.2s var(--erp-ease); }
+.erp-usermenu__trigger:hover { background: var(--tint-hover); }
+.erp-usermenu__pop { position: absolute; left: 12px; right: 12px; min-width: 180px; bottom: calc(100% + 6px); background: var(--surface-raised); border: 0.5px solid var(--erp-hairline); display: flex; flex-direction: column; z-index: 50; box-shadow: var(--elev-overlay); animation: erp-toast 0.18s var(--erp-ease); }
 .erp-usermenu__item { display: block; width: 100%; text-align: left; background: transparent; border: none; cursor: pointer; padding: 11px 14px; font: 400 13px var(--font-body); color: var(--text-primary); text-decoration: none; transition: background 0.2s var(--erp-ease); }
 .erp-usermenu__item + .erp-usermenu__item, .erp-usermenu__pop form { border-top: 0.5px solid var(--erp-hairline-soft); }
-.erp-usermenu__item:hover { background: rgba(110, 90, 67, 0.06); }
+.erp-usermenu__item:hover { background: var(--tint-hover); }
 .erp-usermenu__item--danger { color: var(--erp-accent); }
-.erp-side__avatar { width: 36px; height: 36px; background: var(--erp-accent); color: #f4f1ea; display: flex; align-items: center; justify-content: center; font-family: var(--font-display); font-weight: 700; font-size: 15px; }
-.erp-top { grid-area: top; background: #f4f1ea; border-bottom: 0.5px solid var(--erp-hairline); display: flex; align-items: center; gap: 20px; padding: 0 26px; }
+.erp-side__avatar { width: 36px; height: 36px; background: var(--erp-accent); color: var(--text-on-accent); display: flex; align-items: center; justify-content: center; font-family: var(--font-display); font-weight: 700; font-size: 15px; }
+.erp-top { grid-area: top; background: var(--surface-chrome); border-bottom: 0.5px solid var(--erp-hairline); display: flex; align-items: center; gap: 20px; padding: 0 26px; }
 .erp-top__meta { display: flex; align-items: center; gap: 12px; min-width: 0; }
-.erp-top__divider { width: 0.5px; height: 16px; background: rgba(26, 25, 22, 0.2); }
+.erp-top__divider { width: 0.5px; height: 16px; background: var(--wash-strong); }
 .erp-top__date { font: 400 13px var(--font-body); color: var(--erp-ink-60); white-space: nowrap; }
-.erp-top__search { margin-left: 8px; flex: 1; max-width: 420px; display: flex; align-items: center; gap: 10px; border-bottom: 0.5px solid rgba(26, 25, 22, 0.22); padding: 8px 2px; }
+.erp-top__search { margin-left: 8px; flex: 1; max-width: 420px; display: flex; align-items: center; gap: 10px; border-bottom: 0.5px solid var(--line-control); padding: 8px 2px; }
 .erp-top__search input { border: none; background: transparent; outline: none; width: 100%; font: 400 14px var(--font-body); color: var(--text-primary); }
 .erp-top__actions { margin-left: auto; display: flex; align-items: center; gap: 18px; }
 .erp-top__bell { position: relative; display: inline-flex; align-items: center; justify-content: center; color: var(--erp-ink-60); transition: color 0.2s var(--erp-ease); }
 .erp-top__bell:hover { color: var(--text-primary); }
-.erp-top__badge { position: absolute; top: -6px; right: -8px; min-width: 15px; height: 15px; padding: 0 4px; background: var(--erp-accent); color: #f4f1ea; font: 700 9px var(--font-body); display: inline-flex; align-items: center; justify-content: center; }
+.erp-top__badge { position: absolute; top: -6px; right: -8px; min-width: 15px; height: 15px; padding: 0 4px; background: var(--erp-accent); color: var(--text-on-accent); font: 700 9px var(--font-body); display: inline-flex; align-items: center; justify-content: center; }
 .erp-main { grid-area: main; overflow-y: auto; min-height: 0; background: var(--surface-page); }
 .erp-main__inner { padding: 30px 32px 40px; max-width: 1180px; }
 /* ---- Global "+ New" menu ---- */
 .erp-new { position: relative; }
-.erp-new__btn { display: inline-flex; align-items: center; gap: 6px; border: 0.5px solid var(--erp-hairline); background: var(--erp-accent); color: #f4f1ea; padding: 7px 12px; font: 600 13px var(--font-body); cursor: pointer; }
+.erp-new__btn { display: inline-flex; align-items: center; gap: 6px; border: 0.5px solid var(--erp-hairline); background: var(--erp-accent); color: var(--text-on-accent); padding: 7px 12px; font: 600 13px var(--font-body); cursor: pointer; }
 .erp-new__btn:hover { opacity: 0.92; }
-.erp-new__menu { position: absolute; right: 0; top: calc(100% + 6px); min-width: 180px; background: var(--surface-card); border: 0.5px solid var(--erp-hairline); z-index: 40; display: flex; flex-direction: column; padding: 4px; }
+.erp-new__menu { box-shadow: var(--elev-overlay); position: absolute; right: 0; top: calc(100% + 6px); min-width: 180px; background: var(--surface-raised); border: 0.5px solid var(--erp-hairline); z-index: 40; display: flex; flex-direction: column; padding: 4px; }
 .erp-new__item { padding: 9px 12px; font: 400 13px var(--font-body); color: var(--text-primary); text-decoration: none; }
-.erp-new__item:hover { background: rgba(110,90,67,.06); }
+.erp-new__item:hover { background: var(--tint-hover); }
 
 /* ---- Company context (top-level tenant scope) ---- */
 .erp-company { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
@@ -68,10 +68,15 @@
 /* Served-company badge (ORG-13) — companies reached via a service assignment, not membership. */
 .erp-company__served-badge { font-size: 10px; opacity: 0.65; margin-left: 4px; white-space: nowrap; }
 
-/* ---- Special-access banner (shown while viewing across the holding) ---- */
-.erp-special { position: sticky; top: 0; z-index: 6; display: flex; align-items: baseline; gap: 12px; padding: 9px 32px; background: rgba(181, 98, 47, 0.1); border-bottom: 0.5px solid rgba(181, 98, 47, 0.4); }
+/* ---- Special-access banner (shown while viewing across the holding) ----
+   It is STICKY, so scrolled content passes underneath it: the background has
+   to be fully opaque or the page text bleeds through the banner. The tint is
+   therefore painted as a layer over an opaque page-surface base rather than
+   used as the background colour directly — that keeps both halves on existing
+   tokens, so it still flips with the theme. */
+.erp-special { position: sticky; top: 0; z-index: 6; display: flex; align-items: baseline; gap: 12px; padding: 9px 32px; background-color: var(--surface-page); background-image: linear-gradient(var(--status-critical-bg), var(--status-critical-bg)); border-bottom: 0.5px solid color-mix(in srgb, var(--status-critical) 40%, transparent); }
 .erp-special__tag { flex-shrink: 0; font: 700 10px var(--font-body); letter-spacing: 0.1em; text-transform: uppercase; color: var(--erp-accent); }
-.erp-special__text { font: 400 12.5px var(--font-body); color: var(--erp-ink-70, rgba(26, 25, 22, 0.7)); line-height: 1.4; }
+.erp-special__text { font: 400 12.5px var(--font-body); color: var(--erp-ink-70, var(--ink-muted)); line-height: 1.4; }
 .erp-special__text strong { font-weight: 700; color: var(--text-primary); }
 .erp-app[data-density="compact"] .erp-special { padding-top: 7px; padding-bottom: 7px; }
 
@@ -84,6 +89,17 @@
 .erp-app[data-density="compact"] .lux-table__row { padding-top: 8px; padding-bottom: 8px; }
 .erp-app[data-density="compact"] .erp-navbtn { padding-top: 7px; padding-bottom: 7px; }
 
+/* ---- Sidebar eyebrows (class-based so media queries can reach them) ---- */
+.erp-side__tagline { display: block; margin-top: 7px; opacity: 0.55; }
+.erp-side__grouplabel { display: block; padding: 22px 10px 10px; opacity: 0.4; font-size: 10px; }
+
+/* ---- Mobile navigation: burger + off-canvas drawer + scrim ----
+   Hidden above the drawer breakpoint, where the sidebar is a real grid column
+   and needs no control. */
+.erp-navtoggle { display: none; align-items: center; justify-content: center; width: 40px; height: 40px; margin-left: -8px; border: none; background: transparent; color: var(--ink-muted); cursor: pointer; }
+.erp-navtoggle:hover { color: var(--text-primary); }
+.erp-scrim { display: none; position: fixed; inset: 0; z-index: 90; border: none; padding: 0; background: var(--scrim); backdrop-filter: blur(var(--blur-overlay)); cursor: pointer; }
+
 /* ---- Responsive ---- */
 @media (max-width: 1024px) {
   .erp-app { grid-template-columns: 208px 1fr; }
@@ -91,21 +107,68 @@
   .erp-top { gap: 14px; padding: 0 18px; }
   .erp-top__search { max-width: 300px; }
 }
+
+/* Drawer breakpoint. The sidebar leaves the grid entirely rather than
+   collapsing to an icon rail: a 64px rail cost 16% of a 390px screen AND
+   dropped every label, which left five identically-drawn department icons
+   stacked with nothing to tell them apart. Off-canvas keeps the labels. */
 @media (max-width: 760px) {
-  .erp-app { grid-template-columns: 64px 1fr; grid-template-rows: 56px 1fr; }
-  .erp-side__nav .erp-navbtn { justify-content: center; gap: 0; padding-left: 10px; padding-right: 10px; }
-  .erp-side__nav .erp-navbtn span { display: none; }
-  .erp-side__nav .type-eyebrow { display: none; }
-  .erp-side__brand { padding: 16px 0; text-align: center; }
-  .erp-side__brand .erp-side__wordmark { font-size: 15px; letter-spacing: 0.04em; }
-  .erp-side__brand .type-eyebrow { display: none; }
-  .erp-usermenu__trigger { justify-content: center; padding: 12px 6px; }
-  .erp-usermenu__trigger > div:last-child { display: none; }
-  .erp-usermenu__pop { left: 8px; }
+  .erp-app { grid-template-columns: 1fr; grid-template-rows: 56px 1fr; grid-template-areas: "top" "main"; }
+  .erp-side {
+    position: fixed; top: 0; bottom: 0; left: 0; z-index: 100;
+    width: min(var(--drawer-width), 86vw);
+    box-shadow: var(--elev-overlay);
+    transform: translateX(-100%);
+    /* visibility keeps the closed drawer out of the tab order; delaying it by
+       the slide duration lets the close animation actually play. */
+    visibility: hidden;
+    transition: transform var(--dur-base) var(--erp-ease), visibility 0s linear var(--dur-base);
+  }
+  html[data-nav="open"] .erp-side {
+    transform: none;
+    visibility: visible;
+    transition: transform var(--dur-base) var(--erp-ease), visibility 0s;
+  }
+  /* The panel floats over the page, so the page behind it must not scroll. */
+  html[data-nav="open"] .erp-main { overflow: hidden; }
+  .erp-navtoggle, html[data-nav="open"] .erp-scrim { display: flex; }
   .erp-top__meta { display: none; }
   .erp-top__date { display: none; }
+  /* Side-by-side tag + sentence squeezes the sentence into a ~180px column;
+     stack them so the text gets the full width. */
+  .erp-special { flex-direction: column; align-items: flex-start; gap: 4px; padding-left: 14px; padding-right: 14px; }
 }
+
 @media (max-width: 520px) {
   .erp-top__search { max-width: none; }
   .erp-main__inner { padding: 18px 14px 28px; }
+}
+
+/* Touch input, at any width: the WCAG 2.5.8 floor is 24px and the practical
+   floor for a thumb is 44px. Keyed on pointer type rather than width so a
+   touch laptop gets it too, and so desktop density is untouched. */
+@media (pointer: coarse) {
+  .erp-navbtn { min-height: 44px; }
+  .erp-usermenu__item { min-height: 44px; display: flex; align-items: center; }
+  .erp-navtoggle { width: 44px; height: 44px; }
+  .erp-top__bell { min-width: 44px; min-height: 44px; }
+  .erp-new__btn { min-height: 44px; }
+  .erp-new__item { min-height: 44px; display: flex; align-items: center; }
+  .sec-tab, .sub-tab { min-height: 44px; }
+  /* Form controls. These are underline-only fields, so height comes from
+     padding alone and lands around 19–29px — under a thumb. */
+  .lux-btn--sm { min-height: 44px; }
+  .lux-field__control,
+  .lux-filters__field select,
+  .lux-filters__field input,
+  .dt__search input,
+  .erp-company__select,
+  .erp-top__search input { min-height: 44px; }
+  .lux-field__checkbox { width: 20px; height: 20px; }
+  /* Menu rows, sort controls and breadcrumb links are all real targets even
+     though they are drawn as text. */
+  .scope-pill__item, .scope-pill__summary { min-height: 44px; align-items: center; }
+  .dt__sort { min-height: 44px; }
+  .erp-crumb { padding: 6px 0; }
+  .filter-chip { min-height: 44px; }
 }

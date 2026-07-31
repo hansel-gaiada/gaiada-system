@@ -50,7 +50,7 @@ export default async function AccountPage() {
 
         <Card title="Companies">
           {me.companies.length === 0 ? (
-            <p style={{ margin: 0, font: "400 14px/1.5 var(--font-body)", color: "rgba(26,25,22,.6)" }}>
+            <p style={{ margin: 0, font: "400 14px/1.5 var(--font-body)", color: "var(--ink-muted)" }}>
               You are not a member of any company yet.
             </p>
           ) : (
@@ -90,6 +90,14 @@ export default async function AccountPage() {
                 <option value="wide">Wide</option>
               </select>
             </label>
+            <label className="lux-filters__field">
+              <span>Appearance</span>
+              <select name="theme" defaultValue={prefs.theme}>
+                <option value="auto">Match my device</option>
+                <option value="light">Light</option>
+                <option value="dark">Dark</option>
+              </select>
+            </label>
             <div className="lux-filters__actions">
               <button type="submit" className="lux-btn lux-btn--solid lux-btn--sm">Save</button>
             </div>
@@ -100,7 +108,7 @@ export default async function AccountPage() {
       <div style={{ marginTop: 20 }}>
         <Card title="Roles">
           {me.roles.length === 0 ? (
-            <p style={{ margin: 0, font: "400 14px/1.5 var(--font-body)", color: "rgba(26,25,22,.6)" }}>
+            <p style={{ margin: 0, font: "400 14px/1.5 var(--font-body)", color: "var(--ink-muted)" }}>
               No roles assigned. You have general access only.
             </p>
           ) : (

@@ -98,7 +98,7 @@ export function NegativesPanel({
   return (
     <div>
       {error && (
-        <p role="alert" style={{ font: "400 12px var(--font-body)", color: "var(--erp-danger, #B5622F)", marginBottom: 8 }}>
+        <p role="alert" style={{ font: "400 12px var(--font-body)", color: "var(--erp-danger, var(--status-critical-fg))", marginBottom: 8 }}>
           {error}
         </p>
       )}

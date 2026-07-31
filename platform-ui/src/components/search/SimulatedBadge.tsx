@@ -56,8 +56,8 @@ export function SimulatedBadge() {
         font: "600 10px var(--font-body)", letterSpacing: "0.08em", textTransform: "uppercase",
         padding: "2px 7px", borderRadius: 2, whiteSpace: "nowrap", marginLeft: 6,
         border: "0.5px solid var(--erp-hairline)",
-        background: "rgba(156,111,31,.1)",
-        color: "var(--erp-warn, #9c6f1f)",
+        background: "color-mix(in srgb, var(--status-warning) 10%, transparent)",
+        color: "var(--erp-warn, var(--status-warning-fg))",
       }}
     >
       <span aria-hidden="true">▲</span>
@@ -90,7 +90,7 @@ export function ProviderModeStatement({ mode }: { mode: ProviderMode | null }) {
       style={{
         display: "inline-flex", alignItems: "center", gap: 5,
         font: "600 11px var(--font-body)", letterSpacing: "0.04em",
-        color: simulated ? "var(--erp-warn, #9c6f1f)" : "var(--erp-ok, #3a7a54)",
+        color: simulated ? "var(--erp-warn, var(--status-warning-fg))" : "var(--erp-ok, var(--status-ok-fg))",
       }}
     >
       <span aria-hidden="true">{simulated ? "▲" : "●"}</span>

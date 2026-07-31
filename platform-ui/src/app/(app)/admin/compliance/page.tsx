@@ -37,7 +37,7 @@ export default async function AdminCompliancePage() {
         <>
           <PageHeader eyebrow="Settings" title="Compliance Gates" subtitle={SUBTITLE} />
           <Card>
-            <p style={{ margin: 0, font: "400 14px/1.5 var(--font-body)", color: "rgba(26,25,22,.62)" }}>
+            <p style={{ margin: 0, font: "400 14px/1.5 var(--font-body)", color: "var(--ink-muted)" }}>
               This page is limited to administrators.
             </p>
           </Card>
@@ -50,7 +50,7 @@ export default async function AdminCompliancePage() {
   return (
     <>
       <PageHeader eyebrow="Settings" title="Compliance Gates" subtitle={SUBTITLE} />
-      <p style={{ margin: "0 2px 16px", font: "400 13px/1.5 var(--font-body)", color: "rgba(26,25,22,.5)", maxWidth: 640 }}>
+      <p style={{ margin: "0 2px 16px", font: "400 13px/1.5 var(--font-body)", color: "var(--ink-subtle)", maxWidth: 640 }}>
         Real employee-data ingestion does not begin until every gate below is green — including the
         technical day-one gate (G.4: crypto-shred + scrubber) and the legal gates (G.1 lawful basis/DPIA/LIA,
         G.6 counsel engaged).
@@ -66,7 +66,7 @@ export default async function AdminCompliancePage() {
               title={`${gate.key} — ${gate.title}`}
             >
               <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                <p style={{ margin: 0, font: "400 13px/1.5 var(--font-body)", color: "rgba(26,25,22,.65)" }}>
+                <p style={{ margin: 0, font: "400 13px/1.5 var(--font-body)", color: "var(--ink-muted)" }}>
                   {gate.description}
                 </p>
                 {gate.evidence_url && (

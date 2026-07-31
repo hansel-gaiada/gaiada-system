@@ -4,7 +4,7 @@
 .lux-field { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 .lux-field__control {
   border: none;
-  border-bottom: 0.5px solid rgba(26, 25, 22, 0.22);
+  border-bottom: 0.5px solid var(--line-control);
   background: transparent;
   outline: none;
   padding: 8px 2px;

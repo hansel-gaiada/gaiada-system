@@ -7,7 +7,7 @@ import { AudioUploadForm } from "./AudioUploadForm";
 
 // WS11 capture edge — the per-recording workbench on the detail page: add/replace the transcript,
 // ingest it into the delivery pipeline (proxied server-side), and record the Drive-sync nudge/result.
-const noteStyle = { margin: 0, font: "400 13px/1.5 var(--font-body)", color: "rgba(26,25,22,.6)" } as const;
+const noteStyle = { margin: 0, font: "400 13px/1.5 var(--font-body)", color: "var(--ink-muted)" } as const;
 const errStyle = { margin: 0, font: "400 13px var(--font-body)", color: "var(--erp-accent)", opacity: 0.85 } as const;
 
 function TranscriptForm({ rec }: { rec: MeetingRecordingDetail }) {
@@ -20,7 +20,7 @@ function TranscriptForm({ rec }: { rec: MeetingRecordingDetail }) {
         defaultValue={rec.transcript ?? ""}
         rows={rec.transcript ? 10 : 6}
         placeholder="Paste the meeting transcript (.txt) here, or let the capture helper fill it from local whisper…"
-        style={{ padding: "10px 12px", border: "1px solid rgba(26,25,22,.14)", borderRadius: 10, font: "400 13px/1.55 var(--font-body)", resize: "vertical" }}
+        style={{ padding: "10px 12px", border: "1px solid var(--line)", borderRadius: 10, font: "400 13px/1.55 var(--font-body)", resize: "vertical" }}
       />
       <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
         <button type="submit" className="btn btn-primary" disabled={pending} style={{ fontSize: 13 }}>

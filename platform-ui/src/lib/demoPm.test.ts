@@ -195,7 +195,7 @@ describe("demoPm custom statuses", () => {
   });
 
   it("adds a 5th status (materializing the defaults first) and appends it in position", () => {
-    const created = json<{ id: string }>(call("POST", `/api/${T}/pm/projects/${P}/statuses`, { label: "Review", color: "#6E5A43", isDone: false, isBlocked: false }));
+    const created = json<{ id: string }>(call("POST", `/api/${T}/pm/projects/${P}/statuses`, { label: "Review", color: "var(--accent)", isDone: false, isBlocked: false }));
     expect(created.id).toBeTruthy();
     const rows = json<ProjectStatus[]>(call("GET", `/api/${T}/pm/projects/${P}/statuses`));
     expect(rows).toHaveLength(5);

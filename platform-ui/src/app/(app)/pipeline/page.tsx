@@ -39,7 +39,7 @@ export default async function PipelinePage() {
         <Breadcrumbs items={[{ label: "Home", href: "/" }, { label: "Delivery Pipeline" }]} />
         <Eyebrow style={{ color: "var(--erp-accent)", marginBottom: 8, display: "block" }}>Delivery</Eyebrow>
         <h1 style={{ margin: 0, fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 34, lineHeight: 1.1 }}>Delivery Pipeline</h1>
-        <p style={{ margin: "9px 0 0", font: "400 15px/1.5 var(--font-body)", color: "rgba(26,25,22,.62)", maxWidth: 620 }}>
+        <p style={{ margin: "9px 0 0", font: "400 15px/1.5 var(--font-body)", color: "var(--ink-muted)", maxWidth: 620 }}>
           Every meeting-to-delivery run and its three tracks (delivery · report · scope). Reviews awaiting your
           decision appear below; client sign-offs happen in the client portal.
         </p>
@@ -51,10 +51,10 @@ export default async function PipelinePage() {
         ) : (
           <div style={{ display: "grid", gap: 12 }}>
             {gates.map((g) => (
-              <div key={g.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, padding: "12px 14px", border: "1px solid rgba(26,25,22,.08)", borderRadius: 12 }}>
+              <div key={g.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, padding: "12px 14px", border: "1px solid var(--line-soft)", borderRadius: 12 }}>
                 <div>
                   <div style={{ fontFamily: "var(--font-display)", fontSize: 15 }}>{GATE_LABEL[g.kind] ?? g.kind}</div>
-                  <div style={{ font: "400 13px/1.4 var(--font-body)", color: "rgba(26,25,22,.55)" }}>
+                  <div style={{ font: "400 13px/1.4 var(--font-body)", color: "var(--ink-subtle)" }}>
                     Run {g.run_id.slice(0, 8)} · opened {formatDateTime(g.created_at)}
                     {g.note ? ` · ${g.note}` : ""}
                   </div>
