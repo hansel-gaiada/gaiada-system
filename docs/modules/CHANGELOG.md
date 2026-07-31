@@ -833,6 +833,32 @@ Built by a 4-agent parallel run against a frozen contract (`docs/superpowers/pla
 - Blueprint approved; no code. Phased plan P1–P6 (see BLUEPRINTS.md).
 
 ## search-marketing
+### [0.5.0] — 2026-08-01 · DEV-VERIFIED
+- **Promoted `IN PROGRESS` → `DEV-VERIFIED`** by the SM-24 final QA gate (tracker §6bu, re-verdict
+  §6by) after SM-19/20/21/22/25c/63–75 all landed with their own gates discharged.
+- **One dev-provable defect found and closed in this window:** `main.ts` wired
+  `registerLiveAdsExecutor`/`assertAdsWriteModeBootSafe` inside only the `SEARCH_PROVIDER_MODE=live`
+  branch (a stale comment claimed the registration ran "unconditionally"), so `simulate`-data +
+  `live`-ad-writes booted silently and would have failed at request time, after an approval had
+  already been spent — reproducible with two env vars, no vendor account. Fixed by hoisting both
+  calls to function scope outside the mode branch (§6bv) and made test-executable via an extracted
+  `wireSearchProviderModeAndAdsWriteMode()` that `bootstrap()` calls (SM-75, §6bx), so a boot-wiring
+  smoke test drives the real production call site instead of a copy of its ordering. The QA gate
+  independently re-derived the negative control (re-nesting the calls) and reproduced the exact
+  2-of-5-red symptom before restoring via `sha256sum`-verified `cp` (§6by).
+- **A related infra fail-open, found and fixed in the same window:** `docker-compose.vps.yml` had no
+  environment passthrough for `GOOGLE_OAUTH_*`, `GOOGLE_ADS_*`, or either callback secret — real
+  credentials set in `infra/compose/.env` would have had zero effect on the container while the
+  platform reported the vendor "not configured" (indistinguishable from a deliberate choice not to
+  configure it). Both `docker-compose.vps.yml` and `.env.example` fixed (§6bw).
+- Local stack brought to latest (image rebuilt, DB migration head `0061 → 0069`) and re-verified:
+  `src/modules/search` **1061 passed / 4 skipped, zero reds**; full platform tree **2552 passed /
+  4 skipped, zero FAIL markers**, identical count pre/post-migration (§6bw/§6bx.1).
+- Real-vendor-account fidelity (Google OAuth client, Ads developer token, DataForSEO/Semrush/Ahrefs
+  keys) remains deliberately unproven — staging-only per standing policy (SM-41G) — and is not a
+  condition of `DEV-VERIFIED`, which measures dev-stack end-to-end exercise, not production
+  readiness.
+
 ### [0.1.0] — 2026-07-23 · IN PROGRESS
 - **SM-01 landed** (migrations `0034_module_search.sql` + `0035_integration_connections_search_providers.sql`
   + `module-search-rls.test.ts`): 18 `search_*` tenant tables under third-wall FORCE-RLS + the no-RLS

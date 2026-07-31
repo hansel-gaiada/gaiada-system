@@ -48,7 +48,7 @@ versions below; the running build reports it at `GET /health`.
 | capture-helper | `0.2.0` | IN PROGRESS | WS11 | 2026-07 |
 | webdev | `0.8.1` | IN PROGRESS | Web Dev | 2026-07-30 |
 | webdesk | `0.0.0` | PLANNED | Web Dev | 2026-07-23 |
-| search-marketing | `0.4.0` | IN PROGRESS | SEO | 2026-07-31 |
+| search-marketing | `0.5.0` | DEV-VERIFIED | SEO | 2026-08-01 |
 | social-media | `0.0.0` | PLANNED | Social Media | 2026-07-23 |
 | creative | `0.1.0` | PROTOTYPED | Creative | 2026-07 |
 | render-gateway-go | `0.0.0` | PLANNED | Creative | 2026-07-23 |
@@ -332,7 +332,30 @@ one-rail contract-snapshot scaffolder) activates once webdesk's own P3 codegen l
 **Future plans:** phased build P1 Foundation → P2 Forms+Mail → P3 Contract/codegen → P4 ERP control+envs →
 P5 AI+approvals → P6 WordPress headless.
 
-## search-marketing — SEO · SEM · GEO · `0.4.0` · IN PROGRESS
+## search-marketing — SEO · SEM · GEO · `0.5.0` · DEV-VERIFIED
+
+**State at 0.5.0 (2026-08-01, SM-24 final QA gate, re-verdict §6bu/§6by).** Promoted from
+`IN PROGRESS` to `DEV-VERIFIED` — the vocabulary's own bar ("prototyped and exercised end-to-end
+on the local stack"), **not** production-readiness, which still requires real vendor credentials
+(SM-41G, staging-only per standing policy). Since 0.4.0: SM-19 (dual-mode apply picker), SM-20
+(search-terms sync), SM-21 ⚡ (approve-execute-replay, migration `0064`), SM-22 (client reports),
+SM-25c (Google Ads read path), SM-63/67/68/69/70/71/72 (the SM-63 "resolve-by-one-key" pattern
+closed at all five confirmed sites, migrations `0065`/`0066`), SM-73 (event-stream notification
+wiring), SM-74 (report-lifecycle MCP tools) all landed DEV-VERIFIED with their gates discharged.
+**The final gate (SM-24, tracker §6bu) found one dev-provable defect** — `main.ts`'s
+`SEARCH_ADS_WRITE_MODE` boot-safety assertion was wired inside only the `SEARCH_PROVIDER_MODE=live`
+branch, so `simulate`-data + `live`-ad-writes (a combination the design addendum itself calls
+legitimate) booted silently and would only have failed at request time, after a one-shot approval
+had already been spent — the department's signature fail-open shape, this time committed by the
+orchestrator while completing the ruling that forbids it. **Fixed (§6bv), made test-executable by
+SM-75's boot-wiring smoke test (§6bx), and independently re-verified by the gate itself** (own
+negative-control re-nest reproducing the exact 2-of-5-red symptom, restore `sha256sum`-confirmed) —
+see §6by for the re-verdict. A related infra fail-open was found and fixed in the same window:
+`docker-compose.vps.yml` had no environment passthrough for the Google/Ads credentials or either
+callback secret, so a real key would have had zero effect on the container (§6bw). Full
+`src/modules/search` suite: **1061 passed / 4 skipped, zero reds**; `tsc` clean; full platform tree
+**2552 passed / 4 skipped, zero FAIL markers** post-migration (head `0069`). Real-vendor-account
+fidelity remains unproven by design (SM-41G, staging-only) and is not a condition of this status.
 
 **State at 0.4.0 (2026-07-31, SM-23 reconcile).** Since 0.3.0: the bundled ⚡ gate (§6bc) PASSED
 SM-54/SM-56/SM-59/SM-61/SM-25b (all LANDED); an echo-validation standing rule was adopted (§A14,

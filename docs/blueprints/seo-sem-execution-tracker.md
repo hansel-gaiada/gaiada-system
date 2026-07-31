@@ -7123,3 +7123,105 @@ whose negative control proves it bites (§6bx). Every dev-provable item the gate
 gate for a re-verdict rather than self-promoted — the module's status is the gate's call, not the orchestrator's,
 and I am the author of both the defect and its fix here, which is precisely when self-certification is worth
 least.
+
+---
+
+## 6by · SM-24 re-verdict · **DEV-VERIFIED** — Finding 1 independently re-derived as fixed, not accepted on report
+
+I did not take §6bv/§6bx/§6bw on the orchestrator's word — the request itself named the reason not to
+(self-certification of one's own defect and fix), and this programme has already recorded the orchestrator
+confidently wrong once (§6br.1). Everything below is first-hand: I read the current code myself, ran the tests
+myself, and reproduced the negative control myself on a fresh `cp`/`sha256sum` cycle rather than re-running
+someone else's probe script.
+
+### Finding 1 — independently confirmed fixed
+
+Read `main.ts` directly: `registerLiveAdsExecutor(googleAdsLiveExecutor)` and
+`assertAdsWriteModeBootSafe(adsWriteMode, true)` now sit at `main.ts:277-278`, at the top level of the exported
+`wireSearchProviderModeAndAdsWriteMode()` function, **after** the `providerMode === "simulate"` if/else closes at
+line 258 — genuinely outside both branches, not merely relocated to a different spot inside one. `bootstrap()`
+calls it unconditionally with no arguments at `main.ts:302`.
+
+**I ran my own negative control, not the orchestrator's.** `cp`'d `main.ts` to `/tmp/main.ts.bak`
+(`sha256sum e5cf20bce7b5f7746bbf0d6d288870b3e7548105ae6acaeb830fc9414304ab09` — matching the hash §6bx already
+cited, corroborating rather than assuming it), then edited the live file myself: moved
+`registerLiveAdsExecutor`/`assertAdsWriteModeBootSafe` back inside the `else` (live-data) branch and deleted the
+function-scope copies, reproducing the exact original defect shape (a true re-nest, not a duplicate registration
+that would have masked the regression). Ran `sm75-search-boot-wiring.test.ts` alone:
+
+```
+✓ SEARCH_PROVIDER_MODE=live × SEARCH_ADS_WRITE_MODE=simulate ...
+✓ SEARCH_PROVIDER_MODE=live × SEARCH_ADS_WRITE_MODE=live ...
+✓ with no explicit modes (bootstrap()'s own call shape) ...
+✗ SEARCH_PROVIDER_MODE=simulate × SEARCH_ADS_WRITE_MODE=simulate ... → NoLiveExecutorError
+✗ SEARCH_PROVIDER_MODE=simulate × SEARCH_ADS_WRITE_MODE=live ... → NoLiveExecutorError
+Tests  2 failed | 3 passed (5)
+```
+
+**Exactly the 2-of-5-red, both `providerMode=simulate` rows, that §6bx reported.** Restored via `cp` from
+`/tmp/main.ts.bak`; `sha256sum` on the restored file matched the pre-probe hash exactly
+(`e5cf20bce7b5f7746bbf0d6d288870b3e7548105ae6acaeb830fc9414304ab09`), and re-ran the file clean (5/5) to confirm
+the restore didn't just look byte-identical but behaved identically. **Finding 1 is closed on independent
+evidence, not accepted on the strength of the report.**
+
+### The extraction's behaviour-preservation claim — checked by reading the actual diff, not the prose describing it
+
+`git diff a9ca3a3 de09de6 -- platform-nest/src/main.ts` (`a9ca3a3` is the exact commit state I gated originally,
+confirmed by `git show a9ca3a3:platform-nest/src/main.ts` still showing the two calls nested at the original
+defect's indentation). The diff is a mechanical extraction: the whole block moves into a new exported function;
+inside it, exactly three substitutions replace `config.search.providerMode`/`resolveSearchAdsWriteMode()` calls
+with the `providerMode`/`adsWriteMode` parameters (defaulting to those identical reads), the `if`/`else`
+structure is untouched, and the two SM-26 lines move from inside the closing brace of the branch to after it.
+No reordering, no new conditionals, no dropped log line. The "diff-verified, parameter-threading-only" claim
+holds on direct inspection, not merely on the claim itself.
+
+### The rest of the report, checked rather than assumed
+
+- **SM-75's test file** (`sm75-search-boot-wiring.test.ts`) — read in full. It genuinely drives
+  `wireSearchProviderModeAndAdsWriteMode`, the exact function `bootstrap()` calls, not a re-implementation of its
+  ordering. Its discriminating assertion is `resolveAdsExecutor("live").executor === googleAdsLiveExecutor`
+  through the real `sem-apply.ts` seam — correctly not "didn't throw," which the original defect also didn't do.
+  Ran it clean: **5/5 passed.**
+- **The infra fail-open** (`docker-compose.vps.yml`) — read commit `6348028`'s diff directly.
+  `GOOGLE_OAUTH_CLIENT_ID`/`_SECRET`/`_REDIRECT_URI`, `GOOGLE_ADS_DEVELOPER_TOKEN`,
+  `GOOGLE_ADS_LOGIN_CUSTOMER_ID`, `SEARCH_CALLBACK_SECRET`, `SEARCH_SEM_CALLBACK_SECRET` and
+  `SEARCH_ADS_WRITE_MODE` are genuinely added to the `platform:` service's environment block, matching the
+  claim exactly. This changes my staging-readiness assessment for the better: it closes a gap that would have
+  cost real time in staging discovering why real keys did nothing, and it was found and fixed without a live
+  vendor account, so it counts as dev-provable evidence rather than a deferred item.
+- **`assertProvenance` untested** — confirmed by grep: zero matches for `assertProvenance` in any `*.test.ts`
+  file, and the three genuine `readFileSync`-`main.ts` text-pin files (`endpoint-guard.test.ts`,
+  `provider-dispatch-error.filter.test.ts`, `search-vendor-baseurl-guard.test.ts`) exist but don't cover it.
+  I weigh this as a **real coverage gap, not a proven defect**: `assertProvenance` is called only inside the
+  branch matching its own expected value (`assertProvenance(sim, true)` only in the `simulate` branch,
+  `assertProvenance(dfs/semrush/ahrefs, false)` only in the `live` branch) — that is inherently
+  branch-conditional by what the check verifies, unlike the write-mode registration, which had no reason to be
+  branch-conditional at all and was anyway. It does not have the same "must be outside every branch" shape that
+  made Finding 1 possible, so I am not withholding the verdict for it. **Recorded as a residual for the
+  architect's platform-wide ruling** (§6bx's own ask — whether `wireX()`-extraction becomes the house standard
+  for boot wiring), not as a second Finding 1.
+- **Full suite, re-run by me, post-restore:** `tsc --noEmit` — clean, exit 0. `src/modules/search` —
+  **1061 passed / 4 skipped, zero reds**, matching §6bx's claimed arithmetic (1056 + 5) exactly. I did not
+  personally re-run the full 2552-test platform-wide tree (§6bx.1's number) — that is a ~10-minute run outside
+  this module's own scope and I have no specific reason to doubt a count the orchestrator ran twice with
+  identical results before and after the migration; noted as **unverified by me, not verified-absent**, the
+  same distinction this gate has held itself to throughout.
+
+### Re-verdict
+
+**`search-marketing` may be called DEV-VERIFIED.** SM-24's sole dev-provable finding is fixed at the code level
+(independently re-read), executed by a test with a negative control I personally reproduced (not merely
+re-read), and the fix's own extraction is behaviour-preserving on direct diff inspection. The infra fail-open
+found alongside it is real, fixed, and improves rather than weakens the staging-readiness picture. The one
+open item (`assertProvenance`'s test coverage) is a genuine residual worth an architect ruling but is not, on
+inspection, a second instance of Finding 1's shape, and does not meet this gate's own bar for withholding a
+verdict — a bar that has been used to withhold twice already in this programme and is not being loosened here
+to clear the phase.
+
+**`docs/modules/MODULES.md`** updated by me: `search-marketing` `0.4.0 IN PROGRESS` → **`0.5.0 DEV-VERIFIED`**,
+with a new `State at 0.5.0` paragraph naming this promotion, Finding 1, its fix, and the infra fail-open, and
+stating explicitly that real-vendor-account fidelity remains unproven by design (SM-41G) and is not a condition
+of this status. **`docs/modules/CHANGELOG.md`** gained the matching `[0.5.0]` entry.
+
+**Consolidated staging deferral list is unchanged from §6bu** — nothing in this re-verdict adds or removes a
+deferral; the module's promotion is a dev-stack-verification claim, explicitly not a production-readiness one.
