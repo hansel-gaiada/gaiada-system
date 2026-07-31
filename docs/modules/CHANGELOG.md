@@ -14,7 +14,28 @@ local stack). None of these mean "production-done".
 Every cut app version and the exact module manifest it contains, so any deployed build can be
 reconstructed from this table alone. Format defined in [`VERSIONING.md`](./VERSIONING.md).
 
-### `Alpha 01.001.0001a` — 2026-07-31 — first versioned build
+### `Alpha 01.001.0001b` — 2026-07-31 — re-cut (build fixes)
+
+Same module set as `0001a`, so the module-reference counter holds at `0001` and only the revision
+letter moves — exactly the case the letter exists for. `0001a` never produced a deployable image.
+
+Two failures in the `0001a` release run, both real:
+
+- **platform-nest image failed to build.** `dataforseo.ts(247,42) TS2345: 'string | undefined' not
+  assignable to 'string'`. `0001a` snapshotted that file mid-edit while the SEO seat was writing it;
+  the seat fixed it moments later. Root cause on our side was the **verification gate**: the cut was
+  checked with `tsc` against `tsconfig.json`, while the Dockerfile builds with `tsconfig.build.json`.
+  Cuts are now verified with the build config, which is what CI actually runs.
+- **SLSA provenance failed for all 8 components** — "Feature not available for user-owned private
+  repositories." `actions/attest-build-provenance` needs a public repo or an org plan. Made
+  non-blocking; the controls `deploy.yml` **enforces** (cosign keyless signature + attested SBOM)
+  both succeeded. This is a genuine reduction in supply-chain assurance, not a formality — remove
+  `continue-on-error` once the repo is org-owned.
+
+Registry note: the SEO/tracker seats added `search-marketing` and `reports` to the registry during
+this window, so the manifest below is now 20 modules rather than 14.
+
+### `Alpha 01.001.0001a` — 2026-07-31 — first versioned build (SUPERSEDED, no image)
 
 Baseline manifest. Cut to deploy the trial stack onto **gda-aicenter**, the new Hermes/DeepSeek
 box, and the first app version to exist at all.

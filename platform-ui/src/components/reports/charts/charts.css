@@ -1,0 +1,242 @@
+/* Report chart kit (TR-16) — dataviz-skill-governed tokens + mark specs.
+   Zero external deps: hand-rolled inline SVG only, no chart library, no CDN
+   fonts (the system's Inter/Cormorant are already self-hosted — see
+   styles/tokens/fonts.css). This file is the ONE place the kit's palette and
+   spacing constants live; every chart component below reads them by role.
+
+   GAP THIS FILE HAS TO CLOSE ITSELF: platform-ui has no site-wide dark theme
+   yet (confirmed absent — no `--surface-card`/`--text-primary` etc. carry a
+   dark value anywhere in styles/tokens/*; the PM console work noted the same
+   gap). Rather than block this ticket on that, the kit is SELF-CONTAINED: it
+   reuses the site's existing ink/surface tokens for chrome (so charts still
+   look native to the "luxury minimalist" system) and defines its own light/
+   dark step for the one thing the site has no validated version of — a
+   categorical hue ramp for series identity. Both a `prefers-color-scheme`
+   query and a `[data-theme]` override are wired now (the same dual mechanism
+   `dataviz`'s palette.md prescribes) so the kit lights up correctly the
+   INSTANT app-wide dark mode lands — nothing here needs revisiting then.
+   Today there is no in-app theme toggle to exercise the dark branch live;
+   verified instead by forcing `data-theme="dark"` (see TR-16 report).
+
+   Categorical hues are the `dataviz` skill's documented, pre-validated
+   default 8-hue palette (references/palette.md) — deliberately NOT the
+   site's existing TAG_COLOR_HEX (lib/tagColors.ts): that palette was
+   validated for WCAG *text* contrast only, at a muted desaturation chosen
+   for quiet tag chips, and would not clear the categorical chroma floor or
+   CVD separation checks a chart series needs. Swapping in a bespoke
+   bronze/champagne-family 8-hue ramp (properly re-validated with
+   scripts/validate_palette.js) is a reasonable follow-up if Gaiada wants
+   brand-matched chart hues later — nothing else in the kit would need to
+   change, per the skill's "swap the palette file" contract. */
+
+.rc-viz {
+  color-scheme: light;
+  --rc-surface: var(--surface-card);
+  --rc-text-primary: var(--text-primary);
+  --rc-text-secondary: var(--erp-ink-60);
+  --rc-text-muted: var(--erp-ink-50);
+  --rc-grid: var(--erp-hairline-soft);
+  --rc-axis: var(--erp-hairline);
+  --rc-tooltip-bg: var(--surface-card);
+  --rc-tooltip-border: var(--erp-hairline);
+  --rc-focus: var(--erp-accent);
+
+  /* categorical — fixed order, never cycled (dataviz color-formula.md check 1) */
+  --rc-series-1: #2a78d6; /* blue */
+  --rc-series-2: #eb6834; /* orange */
+  --rc-series-3: #1baf7a; /* aqua */
+  --rc-series-4: #eda100; /* yellow */
+  --rc-series-5: #e87ba4; /* magenta */
+  --rc-series-6: #008300; /* green */
+  --rc-series-7: #4a3aa7; /* violet */
+  --rc-series-8: #e34948; /* red */
+
+  /* status — fixed, reserved, never themed */
+  --rc-good: #0ca30c;
+  --rc-warning: #fab219;
+  --rc-serious: #ec835a;
+  --rc-critical: #d03b3b;
+  --rc-delta-up-good: #006300;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) .rc-viz {
+    color-scheme: dark;
+    --rc-surface: #1a1a19;
+    --rc-text-primary: #ffffff;
+    --rc-text-secondary: #c3c2b7;
+    --rc-text-muted: #898781;
+    --rc-grid: #2c2c2a;
+    --rc-axis: #383835;
+    --rc-tooltip-bg: #1a1a19;
+    --rc-tooltip-border: rgba(255, 255, 255, 0.1);
+    --rc-focus: #3987e5;
+
+    --rc-series-1: #3987e5;
+    --rc-series-2: #d95926;
+    --rc-series-3: #199e70;
+    --rc-series-4: #c98500;
+    --rc-series-5: #d55181;
+    --rc-series-6: #008300;
+    --rc-series-7: #9085e9;
+    --rc-series-8: #e66767;
+
+    --rc-good: #0ca30c;
+    --rc-warning: #fab219;
+    --rc-serious: #ec835a;
+    --rc-critical: #d03b3b;
+    --rc-delta-up-good: #0ca30c;
+  }
+}
+:root[data-theme="dark"] .rc-viz {
+  color-scheme: dark;
+  --rc-surface: #1a1a19;
+  --rc-text-primary: #ffffff;
+  --rc-text-secondary: #c3c2b7;
+  --rc-text-muted: #898781;
+  --rc-grid: #2c2c2a;
+  --rc-axis: #383835;
+  --rc-tooltip-bg: #1a1a19;
+  --rc-tooltip-border: rgba(255, 255, 255, 0.1);
+  --rc-focus: #3987e5;
+
+  --rc-series-1: #3987e5;
+  --rc-series-2: #d95926;
+  --rc-series-3: #199e70;
+  --rc-series-4: #c98500;
+  --rc-series-5: #d55181;
+  --rc-series-6: #008300;
+  --rc-series-7: #9085e9;
+  --rc-series-8: #e66767;
+
+  --rc-good: #0ca30c;
+  --rc-warning: #fab219;
+  --rc-serious: #ec835a;
+  --rc-critical: #d03b3b;
+  --rc-delta-up-good: #0ca30c;
+}
+
+/* print — light theme forced, exact colors, no interaction chrome (TR-20 renders
+   these SAME components through print.css; this rule set means they already work
+   there without rebuilding, per the TR-16 brief). */
+@media print {
+  .rc-viz {
+    color-scheme: light;
+    --rc-surface: #fcfcfb;
+    --rc-text-primary: #0b0b0b;
+    --rc-text-secondary: #52514e;
+    --rc-text-muted: #898781;
+    --rc-grid: #e1e0d9;
+    --rc-axis: #c3c2b7;
+    --rc-tooltip-bg: #fcfcfb;
+    --rc-tooltip-border: rgba(11, 11, 11, 0.1);
+    --rc-series-1: #2a78d6; --rc-series-2: #eb6834; --rc-series-3: #1baf7a; --rc-series-4: #eda100;
+    --rc-series-5: #e87ba4; --rc-series-6: #008300; --rc-series-7: #4a3aa7; --rc-series-8: #e34948;
+    --rc-good: #0ca30c; --rc-warning: #fab219; --rc-serious: #ec835a; --rc-critical: #d03b3b;
+    --rc-delta-up-good: #006300;
+  }
+  .rc-viz, .rc-viz * { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+  .rc-tooltip, .rc-crosshair { display: none !important; }
+  .rc-scroll { overflow: visible !important; }
+}
+
+/* ---- shared chart shell ---- */
+.rc-viz { display: flex; flex-direction: column; gap: 10px; }
+.rc-legend { display: flex; flex-wrap: wrap; gap: 14px; font: 400 12px var(--font-body); color: var(--rc-text-secondary); }
+.rc-legend__item { display: inline-flex; align-items: center; gap: 6px; }
+.rc-legend__swatch { display: inline-block; width: 9px; height: 9px; flex: 0 0 9px; }
+.rc-legend__swatch--line { width: 12px; height: 2px; flex: 0 0 12px; }
+
+/* wide charts scroll inside their OWN container — the page body must never
+   scroll horizontally (§7). */
+.rc-scroll { overflow-x: auto; padding-bottom: 2px; }
+
+.rc-plot { position: relative; height: 220px; }
+.rc-plot--short { height: 140px; }
+.rc-svg { width: 100%; height: 100%; display: block; }
+.rc-svg--hoverable { cursor: crosshair; }
+.rc-grid-line { stroke: var(--rc-grid); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.rc-axis-line { stroke: var(--rc-axis); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.rc-crosshair { stroke: var(--rc-text-muted); stroke-width: 1; vector-effect: non-scaling-stroke; pointer-events: none; }
+.rc-axis-label { font: 700 9px var(--font-body); fill: var(--rc-text-muted); letter-spacing: 0.04em; }
+.rc-value-label { font: 700 10px var(--font-body); fill: var(--rc-text-primary); }
+
+.rc-tooltip {
+  position: absolute; top: 6px; transform: translateX(-50%);
+  min-width: 130px; background: var(--rc-tooltip-bg); border: 0.5px solid var(--rc-tooltip-border);
+  padding: 8px 10px; font: 400 11px var(--font-body); color: var(--rc-text-primary);
+  pointer-events: none; z-index: 4; white-space: nowrap;
+}
+.rc-tooltip__head { font: 700 10px var(--font-body); letter-spacing: 0.06em; text-transform: uppercase; color: var(--rc-text-muted); margin-bottom: 5px; }
+.rc-tooltip__row { display: flex; align-items: center; gap: 10px; justify-content: space-between; padding: 1px 0; }
+.rc-tooltip__row strong { font-weight: 700; margin-left: 10px; }
+.rc-tooltip__key { display: inline-block; width: 8px; height: 8px; flex: 0 0 8px; }
+
+/* per-mark hover targets (bars, dots, cells) — the hit area is bigger than the
+   painted mark (interaction.md), never a pinpoint. */
+.rc-hit { fill: transparent; cursor: pointer; }
+.rc-hit:focus-visible { outline: none; }
+.rc-mark--lift { filter: brightness(1.08); }
+
+/* ---- visually-hidden data-table fallback (ChartDataFallback) ----
+   Always mounted (never a details/summary toggle that removes it from the a11y
+   tree) — screen-reader users reach the same numbers as sighted users without
+   an extra action, per the ticket's explicit ChartDataFallback contract. */
+.rc-fallback {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+}
+
+/* ---- KPI tiles ----
+   Deliberately sans (--font-body), never --font-display: dataviz's
+   marks-and-anatomy.md is explicit that a hero/stat-tile value in a serif
+   face reads as off-brand decoration — a real difference from the generic
+   `.lux-kpi__value` elsewhere in ui.css, which does use --font-display. */
+.rc-kpis { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
+.rc-kpi { background: var(--rc-surface); border: 0.5px solid var(--rc-axis); padding: 16px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.rc-kpi__label-row { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.rc-kpi__label { font: 700 10px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--rc-text-muted); }
+.rc-kpi__value { font: 700 28px var(--font-body); color: var(--rc-text-primary); line-height: 1.1; font-variant-numeric: proportional-nums; }
+.rc-kpi__foot { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font: 400 11px var(--font-body); color: var(--rc-text-secondary); }
+.rc-kpi__ratio { color: var(--rc-text-muted); }
+.rc-kpi__badge {
+  font: 700 8px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--rc-text-secondary); border: 0.5px solid var(--rc-axis); padding: 1px 5px; white-space: nowrap;
+}
+.rc-kpi__badge--unsafe { color: var(--rc-serious); border-color: var(--rc-serious); }
+
+/* ---- delta chip ---- */
+.rc-delta { display: inline-flex; align-items: center; gap: 4px; font: 700 11px var(--font-body); white-space: nowrap; }
+.rc-delta--up-good { color: var(--rc-delta-up-good); }
+.rc-delta--down-bad { color: var(--rc-critical); }
+.rc-delta--neutral { color: var(--rc-text-muted); }
+
+/* ---- bars (grouped / stacked) ---- */
+.rc-bar { rx: 0; } /* square baseline join; rounding applied per-mark via path, see components */
+.rc-bar-group__cat-label { font: 400 10px var(--font-body); fill: var(--rc-text-muted); }
+
+/* ---- donut ---- */
+.rc-donut__center-label { font: 700 10px var(--font-body); fill: var(--rc-text-muted); letter-spacing: 0.05em; text-transform: uppercase; }
+.rc-donut__center-value { font: 700 20px var(--font-body); fill: var(--rc-text-primary); }
+
+/* ---- calendar heatmap ---- */
+.rc-heatmap { display: flex; flex-direction: column; gap: 6px; }
+.rc-heatmap__grid { display: grid; grid-auto-flow: column; grid-template-rows: repeat(7, 1fr); gap: 3px; }
+.rc-heatmap__cell { width: 13px; height: 13px; border: 0.5px solid var(--rc-tooltip-border); cursor: pointer; }
+.rc-heatmap__cell:focus-visible { outline: 2px solid var(--rc-focus); outline-offset: 1px; }
+.rc-heatmap__legend { display: flex; align-items: center; gap: 6px; font: 400 11px var(--font-body); color: var(--rc-text-muted); }
+.rc-heatmap__swatch { width: 11px; height: 11px; border: 0.5px solid var(--rc-tooltip-border); }
+
+/* ---- cohort band ---- */
+.rc-cohort { display: flex; flex-direction: column; gap: 6px; }
+.rc-cohort__track { position: relative; height: 28px; background: var(--rc-grid); }
+.rc-cohort__marker { position: absolute; top: -6px; width: 2px; height: 40px; background: var(--rc-series-1); }
+.rc-cohort__marker-label {
+  position: absolute; top: -26px; transform: translateX(-50%); white-space: nowrap;
+  font: 700 10px var(--font-body); color: var(--rc-text-primary);
+}
+.rc-cohort__ticks { display: flex; justify-content: space-between; font: 400 10px var(--font-body); color: var(--rc-text-muted); }
+
+@media (prefers-reduced-motion: reduce) {
+  .rc-crosshair, .rc-tooltip, .rc-mark--lift { transition: none; }
+}

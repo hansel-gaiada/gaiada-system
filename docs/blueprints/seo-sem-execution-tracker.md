@@ -9,12 +9,32 @@ running state of the build** — update it as tickets land; the design doc does 
 - Mobilization: `/army`, discussion-first, **1–2 agent concurrency cap** (agent-army standard).
 - ⚡ = contract-touching → **QA gate + architect design-review on the diff**, mandatory.
 
-**Last audited:** 2026-07-30 — the owed ⚡ architect half for **SM-40/42/18 is discharged (§6x —
-all three LANDED)**, the SM-08/10/13 gates cleared (**§6y** — P1 fully LANDED, **M2 REACHED**),
-and the money path has one open P0-class ticket: **SM-50** (incurred-cost rows, §6x.2 + addendum
-§A11) — **must land before OQ-11 funds DataForSEO**. Google surfaces are construction-unblocked
-(§6x.3 + §A12, SM-25 decomposed). **§6x.4 is the authoritative dev-completion order**; addendum
-is at A1.5 (§A11 incurred cost · §A12 Google).
+**Last audited:** 2026-07-31 (SM-23, this pass) — since the 2026-07-30 note below (kept for
+history), the bundled ⚡ gate (§6bc) PASSED **SM-54/SM-56/SM-59/SM-61/SM-25b** (all now LANDED) and
+the echo-validation class (§A14) was opened, audited (§6be) and mostly closed: **SM-30** and
+**SM-20** are DEV-VERIFIED with their own ⚡ gates still owed (§6ba/§6bg); **SM-63** LANDED (§6bb);
+**SM-64** DEV-VERIFIED, gate owed (§6bf); **SM-66/SM-67/SM-69** DEV-VERIFIED, gates owed (§6bh);
+**SM-68/SM-70** — implemented and ruled on (§6bi/§6bj: "the tree is green, 894/4 skipped"), **then
+an orchestrator `git checkout` destroyed the uncommitted `providers/dataforseo.ts`, reverting
+SM-67/68/69/70's work in that one file; a rebuild is in flight** — see §6bk. Do not read SM-70 (or
+67/68/69, which live in the same file) as clean until the rebuild reports and a fresh gate runs.
+**SM-19** has real, committed, wired frontend work (`PaidActionGate`/`ApplyProposalTwins`) that was
+never given a §6 narrative or a ticket-scoped gate — its row is corrected from a stale bare `TODO`
+to reflect that, without promoting it to DEV-VERIFIED (see §6bk). The at-ticket-creation-row rule
+(adopted §6au) was **breached again** for SM-66…69 (fixed in §6bi, itself the second occurrence in
+one programme) — recorded here per SM-23's own regression case. Money path: **SM-50 LANDED**
+(§6ak→§6ar). Google surfaces under construction (§6x.3 + §A12). **§6x.4 is the authoritative
+dev-completion order**; addendum is at A1.7 (was A1.5 — bumped with the provider addendum).
+
+<details><summary>2026-07-30 audit note (superseded above, kept for history)</summary>
+
+the owed ⚡ architect half for **SM-40/42/18 is discharged (§6x — all three LANDED)**, the
+SM-08/10/13 gates cleared (**§6y** — P1 fully LANDED, **M2 REACHED**), and the money path has one
+open P0-class ticket: **SM-50** (incurred-cost rows, §6x.2 + addendum §A11) — **must land before
+OQ-11 funds DataForSEO**. Google surfaces are construction-unblocked (§6x.3 + §A12, SM-25
+decomposed).
+
+</details>
 
 ---
 
@@ -116,11 +136,11 @@ Inherited ACs + build order + concurrency pairs: §6j. SM-46 runs first.)*
 |---|---|---|
 | SM-18 | **LANDED** (⚡ gate: QA PASS §6r 2026-07-29 + architect APPROVE §6x.1 2026-07-30) | `sem-plan.ts` (cluster→plan generator, pure), `sem-drafts.ts` (RSA + negative AI drafts, pure), new SEM routes on `search.controller.ts` (campaigns/ad-groups/ads/negatives/change-proposals CRUD + generate-plan + AI-draft endpoints), `search-sem.test.ts`/`sem-plan.test.ts`/`sem-drafts.test.ts` (41 new tests). No migration — all columns already existed (0034/0048). No live side-effects: campaign/ad/negative/change-proposal statuses are restricted at the app layer to their ERP-side draft states; a change proposal can reach `approved`/`dismissed` here but `applied` is refused everywhere (400) — SM-30/21 own it. Keyword-metric provenance (0048 `metrics_provider`/`metrics_simulated`) flows into the generated plan as a per-ad-group `{providers, simulatedCount, realCount, unpulledCount}` block, never blended (§A2). See §6l for the close-out record. |
 | SM-30 | **IN FLIGHT — DEV-VERIFIED §6ba, gate owed** (row said TODO; fixed §6bc — the §6au reconcile class) | Dep SM-18. Manual-apply/export twin — ships without any OAuth. Ads-Editor CSV + `apply_manual` door, §6ba. |
-| SM-19 | TODO | Deps SM-18, SM-30, SM-11. Dual-mode picker per action. |
+| SM-19 | **IN FLIGHT — code + tests committed, no §6 ticket record, no gate** (row said bare TODO; corrected §6bk, SM-23) | Deps SM-18, SM-30, SM-11. Dual-mode picker per action: `PaidActionGate.tsx`/`.test.tsx` (metered-pull pre-commit disclosure) + `ApplyProposalTwins.tsx`/`.test.tsx` (SEM manual/api execution twins) + `ChangeProposalsPanel.tsx`, wired live into `/departments/[deptId]/rankings` and `/departments/[deptId]/planner/[campaignId]`. Evidenced only by the app-release CHANGELOG entry (`platform-ui 0.6.5→0.7.0`, "729 tests green" at cut time) and disk — **not** by a §6 narrative or a ticket-scoped verification pass; `FRONTEND-BFF-CONTRACT.md` still listed it "unclaimed" (fixed, §6bk). Manual twin is fully live (SM-30's backend); API twin honestly renders disabled pending SM-21. Not upgraded to DEV-VERIFIED — no one has run its AC against this ticket number. |
 | SM-20 | **IN FLIGHT — DEV-VERIFIED §6bg, gate owed** | Search-terms callback + reader; second secret (`SEARCH_SEM_CALLBACK_SECRET`, distinct trust boundary); schema idempotency (migration **0062**, row_hash); two-level SM-63-class scope resolution; forced-race proof with negative control. Campaign-metrics half + Ads Script artifact still PENDING. |
 | SM-21 ⚡ | TODO | Deps SM-18, SM-03. **opus·high** — approve-execute-replay; a bypass is unacceptable. |
 | SM-22 | TODO | Deps SM-10, SM-17, SM-18. |
-| SM-23 | **TODO — PULLED FORWARD (§6au): run before the next build wave** | Docs/registration reconcile. **Partly owed already** — see SM-00. §6au adds the §1-ledger-vs-narrative sweep (the SM-14/56/59 class) + two standing rules (ledger row at ticket creation; gate sections name every ticket they cover). junior · seat default. |
+| SM-23 | **LANDED (this pass, 2026-07-31, §6bk)** | Docs/registration reconcile. Fixed: SM-19's row (bare `TODO` → committed-but-unnarrated), SM-70/68/67/69's rows (added the accidental-revert + rebuild-in-flight caveat), the "Last audited" banner, MODULES.md's stale "what exists" paragraph + migration list (0061/0062 missing) + version bump, `FRONTEND-BFF-CONTRACT.md`'s two stale PENDING rows (Rankings/Ads Studio UI, both actually wired), and a CHANGELOG entry for today. **Confirmed a second occurrence of the at-creation-row rule breach** (SM-66…69 landed §6be with no §1 rows, fixed only at §6bi) — the standing rule (adopted §6au after its first breach) is not holding on its own; recorded here as SM-23's own regression case per the ticket's own instruction. **Not run:** the search suites (docs-only pass per this ticket's scope this time; SM-00 already covered the SM-03 suite verification). junior · seat default. |
 | SM-24 | TODO | Dep all. Flips the module toward `DEV-VERIFIED`. |
 
 ### P4 — Live-ads automation (committed)
@@ -154,11 +174,11 @@ the SM-23 doc-reconcile debt showing up in the one place it is most costly.*
 | SM-63 (new §6bc, from SM-56's gate FAIL) | **LANDED** (DEV-VERIFIED + mutation-probed §6bb; architect half APPROVE §6bc) | Collect edge scope check: `findLedgerRowByVendorRef` returns the row's own `engagement_id`/`property_id`; `ledgerRowScopeMatches` compared by the caller, refusal keeps the no-oracle shape. Also gave the toothless redelivery test teeth (`collectDelayMs`; lock removal now red 1/27). senior-be · seat default. |
 | SM-64 (new §6bc) | **IN FLIGHT — DEV-VERIFIED §6bf, ⚡ gate owed** | Response-window enforcement (§6bc Ruling 1) implemented: shared `isRowDateWithinWindow` in `freshness.ts`, GSC `rowsOutsideRangeSkipped`/`rowsOverLimitSkipped` (+ stop-paging on over-full page), GA4 twin post-normalization; the gate's red test green with its attack half unmodified. medior · seat default · ⚡ (additive contract fields). |
 | SM-65 (new §6bc) | **Discharged §6be** (read-only audit, no code — no gate applicable) | Echo-validation sweep (§A14 axis #6). Output: SM-66…SM-69 + the SM-68 precedence question ruled §6bi. Its "before billing" remedy wording for finding #2 is corrected by §6bi Ruling 1 (record ≠ accept). |
-| SM-66 (new §6be) | **IN FLIGHT — DEV-VERIFIED §6bh, gate owed** (money-path) | Ahrefs true-up guard → `Number.isFinite(units) && units > 0`; `trueUpHeaderMalformedCount`; exact-0 treated malformed; sandbox harness widened to express malformed headers. senior-be · seat default. |
-| SM-67 (new §6be) | **IN FLIGHT — DEV-VERIFIED §6bh, gate owed** | `task_get` identity echo: `task.id !== ref.id` → refuse-as-not-found (byte-identical message), checked before status branches. Exposed the 8-red fixture-truthfulness cascade (id-blind mocks — fixed §6bh, no assertion changed). senior-be · seat default. |
-| SM-68 (new §6be) | **IN FLIGHT — bound DEV-VERIFIED §6bh; disposition RULED §6bi → amended by SM-70** | `postSerpTasks`: loop bounded to `Math.min(tasks.length, reqs.length)` (billing exploit closed, mutation-probed ×3); keyword-echo precedence ruled §6bi — record the money, refuse the data on canonical mismatch. senior-be · seat default. |
-| SM-69 (new §6be) | **IN FLIGHT — DEV-VERIFIED §6bh, gate owed** | Backlinks `target`: requested value returned, never the vendor's echo; `backlinksTargetMismatchCount` diagnostic. Matches Semrush/Ahrefs. senior-be · seat default. |
-| SM-70 (new §6bi) | **TODO — holds the remaining red (`incurred-cost.test.ts` AC4), FIRST of next wave** | SM-68 disposition amendment per §6bi: canonical compare + refuse-data/record-charge (throw after all charges recorded); `ACCEPTED()` fixture request-aware; AC4 rewritten as the bound's dispatch probe; driver twin + mismatch case; negative controls per the sharpened Ruling 5. senior-be · seat default. |
+| SM-66 (new §6be) | **IN FLIGHT — DEV-VERIFIED §6bh, gate owed** (money-path) | Ahrefs true-up guard → `Number.isFinite(units) && units > 0`; `trueUpHeaderMalformedCount`; exact-0 treated malformed; sandbox harness widened to express malformed headers. Lives in `ahrefs.ts`, not the file affected by the §6bk revert. senior-be · seat default. |
+| SM-67 (new §6be) | **IN FLIGHT — DEV-VERIFIED §6bh, gate owed; ⚠️ see §6bk** | `task_get` identity echo: `task.id !== ref.id` → refuse-as-not-found (byte-identical message), checked before status branches. Exposed the 8-red fixture-truthfulness cascade (id-blind mocks — fixed §6bh, no assertion changed). **Lives in `providers/dataforseo.ts`, the file an orchestrator `git checkout` reverted after §6bj (§6bk); a rebuild is in flight.** Current disk state shows the implementation present but not re-verified by this pass. senior-be · seat default. |
+| SM-68 (new §6be) | **IN FLIGHT — bound DEV-VERIFIED §6bh; disposition RULED §6bi → amended by SM-70; ⚠️ see §6bk** | `postSerpTasks`: loop bounded to `Math.min(tasks.length, reqs.length)` (billing exploit closed, mutation-probed ×3); keyword-echo precedence ruled §6bi — record the money, refuse the data on canonical mismatch. **Same `providers/dataforseo.ts` revert as SM-67/69/70 — see §6bk; rebuild in flight, not re-verified by this pass.** senior-be · seat default. |
+| SM-69 (new §6be) | **IN FLIGHT — DEV-VERIFIED §6bh, gate owed; ⚠️ see §6bk** | Backlinks `target`: requested value returned, never the vendor's echo; `backlinksTargetMismatchCount` diagnostic. Matches Semrush/Ahrefs. **Same `providers/dataforseo.ts` revert as SM-67/68/70 — see §6bk; rebuild in flight, not re-verified by this pass.** senior-be · seat default. |
+| SM-70 (new §6bi) | **IN FLIGHT — DEV-VERIFIED §6bj ("the tree is green," 894/4 skipped), then reverted by an orchestrator `git checkout` error and a rebuild is in flight — see §6bk. Do not read as clean.** | SM-68 disposition amendment per §6bi: canonical compare + refuse-data/record-charge (throw after all charges recorded); `ACCEPTED()` fixture request-aware; AC4 rewritten as the bound's dispatch probe; driver twin + mismatch case; negative controls per the sharpened Ruling 5. senior-be · seat default. |
 
 | SM-25a | **LANDED (service, ⚡ gate PASS §6ar) + HTTP surface DEV-VERIFIED, gate owed (§6as)** | OAuth core: PKCE, exchange, rotation, RFC-7009 revoke, existing vault. Callback is tenant-agnostic by necessity; its authority is the signed single-use state + a Cerbos check **before** the exchange + `created_by` binding (closes login-CSRF). |
 | SM-25b | **LANDED** (DEV-VERIFIED §6ay · gate PASS §6bc **with one residual → SM-64**; its red test stands until SM-64 lands) | GSC + GA4 reads, migration `0061`. Freshness clamped not flagged (§6ay); the response-side half of that guarantee is SM-64 (§6bc Ruling 1). |
@@ -5943,3 +5963,132 @@ exercising both together** — labelling it unverified-*by-test* while distingui
 unverified-*by-reasoning*. I added that test (§6bj.1). It also declined to add a sandbox-level keyword-mismatch
 marker, correctly noting the real sandbox echoes keywords truthfully so no sandbox test was at risk — recorded
 as possible future hardening, not claimed.
+
+---
+
+## 6bk · SM-23 (docs/registration reconcile) — the §6bj tree, an orchestrator `git checkout` accident, SM-19's uncredited frontend, and the ledger sweep
+
+**What happened, stated plainly, because a future reader needs the sequence, not just the current
+state.** After §6bj recorded the tree fully green (894 passed / 4 skipped, zero reds, `providers/*`
+included), the orchestrator ran a destructive `git checkout` and **destroyed the uncommitted
+`providers/dataforseo.ts`** — the single file carrying SM-67/68/69/70's implementation
+(`canonicalizeEchoValue`, the `task.id !== ref.id` refusal, the `Math.min(tasks.length,
+reqs.length)` bound, the money/data split). A rebuild agent was mobilized against the surviving
+test files (which were not touched by the checkout) and, per the orchestrator, is **in flight**.
+
+**What this pass could establish from disk, without running the suites (docs-only scope; running a
+DB-touching vitest file mid-rebuild risks exactly the cross-agent DB-reset hazard §0 warns about,
+so this reconcile did not run one):**
+
+- `git status` shows exactly **one** modified file in the whole repo:
+  `platform-nest/src/modules/search/providers/dataforseo.ts` (1 line changed, uncommitted). Every
+  other file the SM-66…70 wave touched, including all three test files, is clean against `HEAD`.
+- **The committed `HEAD` version of `dataforseo.ts` already contains the SM-70 implementation** —
+  `canonicalizeEchoValue`, `chargeableTaskIds`, `identityMismatchMessage`, the record-then-throw
+  shape — nearly verbatim to §6bj's description. The one committed defect: the canonical-mismatch
+  branch reads `if (false && canonicalizeEchoValue(vendorKeyword) === canonicalizeEchoValue(...))`
+  — a `false &&` guard that unconditionally disables the raw-only-variance acceptance path (every
+  echo mismatch, canonical or not, would be treated as a hard identity break). This is exactly the
+  shape of a **negative-control probe** (§6bc/§6bi Ruling 5's own "mutate into the plausible defect"
+  practice) that was never reverted — not the file being emptied or rolled back to a pre-SM-67
+  state.
+- **The one uncommitted line removes that `false &&`,** restoring the canonical-mismatch/raw-variance
+  split exactly as §6bj describes it.
+- So: the rebuild-in-flight, as of this pass, looks like **one line from done**, not a ground-up
+  redo — but this reconcile did **not** run the suite, did not confirm `tsc`, and did not confirm
+  the negative-control probes still fail the right way. **This is an observation about disk state,
+  not a verification.** Do not read this section as re-establishing SM-67/68/69/70 as DEV-VERIFIED —
+  that status stands or falls on the rebuild agent's own report plus a fresh gate.
+- **Recorded per the user's instruction, without upgrading or writing off:** SM-67/68/69/70 are
+  *implemented*, were *reverted by orchestrator error* (evidenced: the file was uncommitted and the
+  checkout is a destructive op per this repo's own git-safety protocol), and a *rebuild is in
+  flight* (evidenced: the near-complete state above). None of the three is claimed clean.
+
+### SM-19 — real, committed, wired frontend work with no ticket-scoped record at all
+
+Separately from the revert incident: the "known drift" brief for this reconcile claimed SM-19
+"landed DEV-VERIFIED" citing `PaidActionGate`/`ApplyProposalTwins` and "729 UI tests." **That
+specific claim has no §6 citation anywhere in this tracker** — grepped for `PaidActionGate`,
+`ApplyProposalTwins`, and `729`, zero matches outside this section. Per this ticket's own
+discipline (verify before writing, don't promote an unevidenced claim), the row is **not** set to
+DEV-VERIFIED.
+
+What IS verifiable from disk: `platform-ui/src/components/search/PaidActionGate.tsx` (+ `.test.tsx`,
+9 tests) and `ApplyProposalTwins.tsx` (+ `.test.tsx`, 7 tests) exist, are committed at `HEAD`, both
+carry file-header comments self-identifying as SM-19, and are wired live into
+`/departments/[deptId]/rankings/page.tsx` (`PaidActionGate` on the rank-pull projection) and the
+planner page (`ChangeProposalsPanel` renders `ApplyProposalTwins` per approved/applied proposal).
+The "729 tests green" figure is real but belongs to `CHANGELOG.md`'s **app-release** entry
+(`Alpha 01.001.0001a`, platform-ui `0.6.5→0.7.0`) — a whole-repo test count at a release cut, not a
+per-ticket AC verification. `docs/FRONTEND-BFF-CONTRACT.md`'s PENDING table still called both the
+Rankings and Ads Studio console UI "unclaimed" — stale against the same evidence; fixed by this
+pass (see below). **Net: SM-19's row moves from a plainly-wrong bare `TODO` to `IN FLIGHT`, not to
+DEV-VERIFIED** — the work is real, but no one has run its AC against this ticket number, and that
+gap is itself worth naming: a feature can be built and shipped in a release cut while its own
+ticket's ledger row never learns about it.
+
+### The at-creation-row rule, breached a second time
+
+§6au adopted two standing rules after SM-56/59 fell through a bundling gap: every new ticket gets
+its §1 row **at creation**, and a gate section must **name every ticket it covers**. §6bi records
+that SM-66/67/68/69 breached the first rule again — created in §6be with no §1 rows until §6bi
+noticed. **That breach happened in the same session that pulled SM-23 forward to fix exactly this
+class of drift.** The rule is not self-enforcing from a single adoption; it needs a mechanical
+check (e.g., a `/army` mobilization step that refuses to open a new SM-xx without a §1 row already
+present) rather than relying on the next agent's diligence. Recorded here, not fixed in tooling —
+that is outside this ticket's docs-only scope.
+
+### Migration ledger
+
+`migrations/` on disk runs through **`0063_pm_task_assignee_intervals.sql`** (a PM ticket, not
+search) — one past the `0062_search_search_terms.sql` (SM-20) this reconcile's brief called "head."
+Within search-marketing's own numbers, `0060`/`0061`/`0062` (SM-51/25b/20) are all present and
+correctly cited elsewhere in this tracker; the only correction needed was in `MODULES.md`, which
+still enumerated only through `0060` (see below). No doc in this tracker claimed a *platform-wide*
+migration head, so nothing here needed correcting on that specific point — but "head=0062" is not
+accurate for the platform as a whole as of 2026-07-31 and should not be repeated as such.
+
+### Files touched by this pass
+
+`docs/blueprints/seo-sem-execution-tracker.md` (this file — banner, SM-19/23/66-70 rows, this
+section), `docs/modules/MODULES.md` (search-marketing section + registry row), `docs/modules/CHANGELOG.md`
+(new dated entry), `docs/FRONTEND-BFF-CONTRACT.md` (two PENDING rows). No `.ts` file touched, no git
+history-rewriting command run, consistent with this ticket's constraints.
+
+---
+
+## 6bk · Orchestrator error — `dataforseo.ts` destroyed and rebuilt · **RECOVERED**
+
+**What I did.** Mutation-probing a test I had just added, I restored the file with `git checkout -- <path>`
+instead of the `cp`-from-`/tmp` pattern every other probe in this programme used. The working tree is entirely
+uncommitted, so that reverted `providers/dataforseo.ts` to commit `2d64fc2` and **discarded SM-67, SM-68, SM-69
+and SM-70's implementation**. I compounded it by chaining the restore behind `2>/dev/null`, which hid the
+failure until I checked the file. The probe itself was valid and its finding (1 red of 48) stood.
+
+**My damage assessment was also incomplete.** I scoped the loss to the four tickets. The rebuild found a
+**fifth** casualty: `fetchSerpByTaskId` — SM-56's collect surface — had been added to this same file and went
+with it. I had verified `ahrefs.ts`, the sandbox harness and every test file were intact, and they were; I did
+not think to ask what *else* had ever been added to the one file I broke. **"Which tickets touched this file?"
+is the question, not "which tickets was I probing?"** The rebuild restored it as the one-line delegation §6an
+specifies, correctly flagging it as outside its brief rather than folding it in silently.
+
+**Recovered in full.** `tsc` clean · `lint:withtenants` 174 files · `dataforseo.test.ts` **48/48** (verified by
+me) · full tree **895 passed / 4 skipped, zero reds**, run twice by the rebuild and spot-checked by me.
+
+**Six mutation probes**, all plausible-defect shaped, each restore `sha256sum`-verified byte-identical — the
+same hash confirmed **seven times** across the sequence. Notably probe 3 (mismatch flagging disabled) went red
+in **3** places and probe 4 (throw moved before recording) in **3**, so the guards are held by more than one
+test each.
+
+**Why the loss was recoverable, and the standing lesson.** The tests lived in a *different* file, so the
+contract survived and the rebuild had an exact oracle rather than a description. That was luck, not design:
+**nothing in this repository is committed.** The identical slip in a file whose tests share its fate would have
+been unrecoverable. Two changes follow, and the first is already done:
+
+1. A working-tree snapshot now exists outside the repo (scratchpad `wip-snapshot-1102.tar.gz`, 6.2MB, covering
+   `platform-nest/src`, `migrations`, `platform-ui/src` and the blueprints).
+2. **Destructive git commands are banned in every brief** — `checkout`/`restore`/`reset`/`stash`. Probes use
+   `cp` to `/tmp` and restore with `cp`, verified by `sha256sum`. This is now stated in all live briefs.
+
+Committing this work to a branch remains **an owner decision, not taken** — it is the real fix for the exposure
+above, and the snapshot is a stopgap, not a substitute.

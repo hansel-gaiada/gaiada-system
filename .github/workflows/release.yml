@@ -87,8 +87,15 @@ jobs:
       - name: Attest SBOM to the image (keyless)
         run: cosign attest --yes --type spdxjson --predicate sbom.spdx.json ${{ env.IMAGE }}@${{ steps.build.outputs.digest }}
 
+      # GitHub refuses attestations on user-owned PRIVATE repos ("Feature not available for
+      # user-owned private repositories") — it needs a public repo or an org plan. Non-blocking
+      # until this repo moves to an organization, because the controls deploy.yml actually
+      # ENFORCES are the two above (cosign keyless signature + attested SBOM), and both succeed.
+      # Losing SLSA provenance is a real reduction in supply-chain assurance, not a formality:
+      # re-enable by removing continue-on-error the moment the repo is org-owned.
       - name: SLSA build provenance attestation
         uses: actions/attest-build-provenance@v1
+        continue-on-error: true
         with:
           subject-name: ${{ env.IMAGE }}
           subject-digest: ${{ steps.build.outputs.digest }}

@@ -23,7 +23,7 @@ version and add a `CHANGELOG.md` entry on every notable module change.
 
 ## App version
 
-**`Alpha 01.001.0001a`** — see [`VERSIONING.md`](./VERSIONING.md) for the format, and
+**`Alpha 01.001.0001b`** — see [`VERSIONING.md`](./VERSIONING.md) for the format, and
 [`/VERSION`](../../VERSION) for the machine-readable source. The app version composes the module
 versions below; the running build reports it at `GET /health`.
 
@@ -47,7 +47,7 @@ versions below; the running build reports it at `GET /health`.
 | capture-helper | `0.2.0` | IN PROGRESS | WS11 | 2026-07 |
 | webdev | `0.8.1` | IN PROGRESS | Web Dev | 2026-07-30 |
 | webdesk | `0.0.0` | PLANNED | Web Dev | 2026-07-23 |
-| search-marketing | `0.3.0` | IN PROGRESS | SEO | 2026-07-30 |
+| search-marketing | `0.4.0` | IN PROGRESS | SEO | 2026-07-31 |
 | social-media | `0.0.0` | PLANNED | Social Media | 2026-07-23 |
 | creative | `0.1.0` | PROTOTYPED | Creative | 2026-07 |
 | render-gateway-go | `0.0.0` | PLANNED | Creative | 2026-07-23 |
@@ -327,9 +327,23 @@ one-rail contract-snapshot scaffolder) activates once webdesk's own P3 codegen l
 **Future plans:** phased build P1 Foundation → P2 Forms+Mail → P3 Contract/codegen → P4 ERP control+envs →
 P5 AI+approvals → P6 WordPress headless.
 
-## search-marketing — SEO · SEM · GEO · `0.3.0` · IN PROGRESS
+## search-marketing — SEO · SEM · GEO · `0.4.0` · IN PROGRESS
 
-**State at 0.3.0 (2026-07-30).** P0 and P1 are closed and gated. All three divisions are visible in the
+**State at 0.4.0 (2026-07-31, SM-23 reconcile).** Since 0.3.0: the bundled ⚡ gate (§6bc) PASSED
+SM-54/SM-56/SM-59/SM-61/SM-25b (all LANDED); an echo-validation standing rule was adopted (§A14,
+addendum A1.6/A1.7) and audited across all three vendor drivers (§6be); SM-30 (manual apply/export
+twin) and SM-20 (search-terms sync, migration `0062`) are DEV-VERIFIED with their own ⚡ gates still
+owed; SM-63 (collect-scope fix) LANDED; SM-64 (GSC/GA4 response-window enforcement) and
+SM-66/67/69 (driver fail-open hardening) are DEV-VERIFIED, gates owed. **Not clean:** SM-68/70 (the
+DataForSEO billing-identity fix) were DEV-VERIFIED with the tree fully green (§6bj), then an
+orchestrator `git checkout` destroyed the uncommitted `providers/dataforseo.ts`, reverting that
+work in one file — a rebuild is in flight (tracker §6bk); do not treat SM-67/68/69/70 as clean
+until it reports and a fresh gate runs. SM-19's frontend (dual-mode apply picker) is real, committed
+and wired but was never given a ticket-scoped verification pass (tracker §6bk). None of this moves
+the module's overall status past `IN PROGRESS` — real-vendor-account fidelity remains unproven and
+the money-path driver is mid-rebuild.
+
+**State at 0.3.0 (2026-07-30, superseded above).** P0 and P1 are closed and gated. All three divisions are visible in the
 `seo` console (Accounts / Optimize / Campaigns), and the department **demos end to end at $0 vendor spend**
 via a deterministic simulation mode that flows through the real metered dispatch path.
 
@@ -378,17 +392,27 @@ tracker (SM-23):** P0 (SM-01…06) and P1 (SM-07…13, SM-29) are both **LANDED 
 console (SM-11/12/29), and the notifications wiring (SM-13) — none of which existed when the
 paragraph below was written. `lint:withtenants`'s `ledger.ts` allowlist entry (SM-04) was
 **RATIFIED** at the P0 gate (tracker §4d), not left pending. Migrations through `0053`
-(`search_provider_incurred_cost`) and `0060` (`search_google_oauth_states`) are applied; `0058`/
-`0059` are a deliberate reservation for the `reports` module, not a gap (tracker §6ap).
+(`search_provider_incurred_cost`), `0060` (`search_google_oauth_states`), `0061`
+(`search_google_performance`, SM-25b) and `0062` (`search_search_terms`, SM-20) are applied
+(corrected 2026-07-31, SM-23 — this paragraph previously stopped at `0060`); `0058`/`0059` are a
+deliberate reservation for the `reports` module, not a gap (tracker §6ap). The platform-nest
+migration chain as a whole runs one further, to `0063` (a PM ticket, not search) — do not read
+`0062` as the platform-wide head.
 
-**Known real gaps, current as of 2026-07-30 (tracker §0/§1):** two live money-path defects were
-open — a callback double-charge (SM-56) and a missing `provider` predicate on reconciliation
-(SM-59) — both are now **DEV-VERIFIED** but still owe their ⚡ QA gate (bundled with SM-54/SM-61,
-tracker §6au). SM-14's remainder and SM-17 owe QA gates. No Search Console/GA4/Ads read paths yet
-(SM-25b/25c TODO; SM-25a OAuth core landed). No SEM apply/report/scheduler builds yet (SM-19/20/21/
-22/30 TODO; SM-54's platform-side scheduler is DEV-VERIFIED, architect-half gate APPROVEd §6au, QA
-half owed). Real-vendor-account fidelity (billing units, error inventories) remains unproven — no
-capability has run against a funded account (OQ-2/9/10/11).
+**Known real gaps, current as of 2026-07-31 (tracker §0/§1, corrected by SM-23):** the two live
+money-path defects noted at 0.3.0 — a callback double-charge (SM-56) and a missing `provider`
+predicate on reconciliation (SM-59) — **cleared their bundled ⚡ gate and are LANDED** (tracker
+§6bc; this paragraph previously said "gate owed," which was stale). SM-14's remainder and SM-17
+still owe QA gates. GA4/GSC read paths are built (SM-25b LANDED, migration `0061`); Ads read (SM-25c)
+is still TODO. SEM apply/report/scheduler: SM-30 (manual apply/export) and SM-20 (search-terms
+sync) are DEV-VERIFIED, gates owed; SM-19 (dual-mode picker UI) has real committed frontend work
+with no ticket-scoped verification (tracker §6bk); SM-21 (api-mode execute), SM-22 (reports) remain
+TODO; SM-54's platform-side scheduler is **LANDED** (§6bc). A new hardening wave (SM-63/64/66-70)
+closed an echo-validation gap across all three vendor drivers — **SM-68/70 are mid-rebuild** after
+an orchestrator accidentally reverted uncommitted work in `providers/dataforseo.ts` (tracker §6bk);
+do not treat that driver as clean until the rebuild reports and a fresh gate runs. Real-vendor-
+account fidelity (billing units, error inventories) remains unproven — no capability has run
+against a funded account (OQ-2/9/10/11).
 
 **Running state + full ledger:**
 [`../blueprints/seo-sem-execution-tracker.md`](../blueprints/seo-sem-execution-tracker.md) (§0 state

@@ -568,8 +568,16 @@ async function computeOverdueOpen(client: PoolClient, tenantId: string, end: str
             o.assignee_kind AS owner_kind, o.user_id AS owner_user_id, r.user_id AS responsible_user_id
        FROM pm_tasks t
        JOIN projects p ON p.id = t.project_id AND p.tenant_id = t.tenant_id
+       -- TR-34/TR-36: owner+responsible are INTERVAL rows (migration 0063), so these joins MUST be
+       -- as-of-dated or a reassigned task multiplies (one output row per historical owner × responsible
+       -- pair, each counted again below -> silently inflated overdue counts). #20 is defined as
+       -- "evaluated at range END", so as-of `end` is both the correct semantics and single-valued:
+       -- pm_task_assignees_no_overlap (0063) forbids overlapping intervals per (task, role), so at most
+       -- one row per role can match any given date.
        LEFT JOIN pm_task_assignees o ON o.tenant_id = t.tenant_id AND o.task_id = t.id AND o.role = 'owner'
+            AND o.valid_from <= $2::date AND (o.valid_to IS NULL OR o.valid_to >= $2::date)
        LEFT JOIN pm_task_assignees r ON r.tenant_id = t.tenant_id AND r.task_id = t.id AND r.role = 'responsible'
+            AND r.valid_from <= $2::date AND (r.valid_to IS NULL OR r.valid_to >= $2::date)
       WHERE t.tenant_id = $1 AND t.deleted_at IS NULL AND t.due_date IS NOT NULL AND t.due_date < $2::date`,
     [tenantId, end],
   );

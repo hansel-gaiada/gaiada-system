@@ -244,7 +244,7 @@ export class DataForSeoProvider implements SearchDataProvider {
       // The raw strings differ — counted regardless of what canonicalizing decides below (this
       // counter's meaning: "the vendor's echo did not match verbatim").
       this.keywordEchoMismatchCount++;
-      if (false && canonicalizeEchoValue(vendorKeyword) === canonicalizeEchoValue(reqs[i].keyword)) {
+      if (canonicalizeEchoValue(vendorKeyword) === canonicalizeEchoValue(reqs[i].keyword)) {
         // Raw-only variance (case/whitespace/NFC) — vendor restatement, not identity. Accept, named
         // from the REQUESTED keyword, never the vendor's (§6bi Ruling 1 naming precedence, SM-69's shape).
         accepted.push({ id: t.id, keyword: reqs[i].keyword });
