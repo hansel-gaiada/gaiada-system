@@ -1,0 +1,29 @@
+# Hermes' own JSON-RPC/WebSocket backend — the interface its desktop app and remote clients speak.
+# Not required by the stack (ai-gateway uses the shim on :3009 instead), but useful for driving
+# Hermes directly during the trial and for any future client that wants the richer protocol.
+#
+# Bound to loopback deliberately. Per `hermes serve --help`, a public bind ALWAYS requires an auth
+# provider since the June 2026 hardening, and --insecure is a no-op. Reach it over an SSH tunnel:
+#   ssh -L 9119:127.0.0.1:9119 gda-aicenter
+[Unit]
+Description=Hermes backend server (JSON-RPC/WebSocket)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=azlan
+Group=azlan
+WorkingDirectory=/home/azlan
+Environment=HOME=/home/azlan
+Environment=PATH=/home/azlan/.local/bin:/usr/local/bin:/usr/bin:/bin
+
+# --skip-build: no npm in a non-interactive unit; serve the prebuilt web dist as-is.
+ExecStart=/home/azlan/.local/bin/hermes serve --host 127.0.0.1 --port 9119 --skip-build
+Restart=on-failure
+RestartSec=10s
+
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
