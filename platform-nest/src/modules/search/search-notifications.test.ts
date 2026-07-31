@@ -24,6 +24,7 @@ import { registerProvider, resetProviders } from "./providers/registry";
 import { dispatchProviderOp } from "./providers/dispatch";
 import { relayBatch } from "../../events/relay";
 import { consumeOnce } from "../../events/consumer.service";
+import { emitEvent } from "../../events/outbox.service";
 import {
   handleBudgetThreshold,
   handleRankDropped,
@@ -783,5 +784,69 @@ describe.skipIf(!TEST_URL || !REDIS_TEST_URL)("search module notifications (SM-1
       c.query(`SELECT 1 FROM notifications WHERE payload->>'sourceEventId' = 'sm73-cross-1'`),
     );
     expect(anyRow.rows.length).toBe(0);
+  });
+
+  // ── SM-24 QA gate: prove the actual wire, not the handler in isolation ─────────────────────────
+  // Every SM-73 test above calls handleCampaignApplied() directly — none of them exercise the real
+  // outbox -> Redis Streams -> EventConsumerService path. That path is exactly what the orchestrator's
+  // main.ts fix (adding "search_change_proposal" to startConsumerLoop's entityTypes) claims to have
+  // repaired, after finding the handler registered but the stream unlisted (so nothing would ever have
+  // read it). This test emits a REAL outbox row via emitEvent (the only write path into outbox_events,
+  // same call shape as search.controller.ts's applyProposalApi), relays it onto the real Redis stream via
+  // relayBatch, and drains it through consumeOnce("search_change_proposal") — the same entity type string
+  // main.ts now passes to startConsumerLoop. If that string were still missing (the pre-fix state), or if
+  // it were misspelled, or if the handler weren't registered in searchModule.eventHandlers under the exact
+  // event_type string emitEvent wrote, this test would time out with zero notifications rather than pass
+  // for an unrelated reason — it does not call handleCampaignApplied anywhere in its own body.
+  it("SM-24 gate: search.campaign.applied delivers a notification through the REAL outbox -> Redis -> consumer pipeline, not via a direct handler call", async () => {
+    const engId = newId();
+    const propId = newId();
+    await withTenants(
+      [A],
+      (c) => c.query(
+        `INSERT INTO search_properties (id, tenant_id, client_id, domain, site_url) VALUES ($1,$2,$3,$4,$5)`,
+        [propId, A, clientA, "sm24-gate-wiring.example.com", "https://sm24-gate-wiring.example.com"],
+      ),
+      { modules: ["search"] },
+    );
+    await withTenants(
+      [A],
+      (c) => c.query(
+        `INSERT INTO search_engagements (id, tenant_id, client_id, property_id, name, tool_scope, provider_budget_usd, status, owner_id)
+         VALUES ($1,$2,$3,$4,$5,'{}',$6,'active',$7)`,
+        [engId, A, clientA, propId, "SM-24 gate wiring test", 100, uA],
+      ),
+      { modules: ["search"] },
+    );
+    const campaignId = newId();
+    await withTenants(
+      [A],
+      (c) => c.query(
+        `INSERT INTO search_campaigns (id, tenant_id, engagement_id, platform, name, status)
+         VALUES ($1,$2,$3,'google_ads',$4,'proposed')`,
+        [campaignId, A, engId, "SM-24 gate wiring campaign"],
+      ),
+      { modules: ["search"] },
+    );
+
+    const proposalId = newId();
+    let outboxId = "";
+    await withTenants(
+      [A],
+      (c) => (async () => {
+        outboxId = await emitEvent(c, A, "search_change_proposal", proposalId, "search.campaign.applied", {
+          campaignId, status: "applied", simulated: true,
+        });
+      })(),
+      { modules: ["search"] },
+    );
+
+    // Real relay + real consumer, exactly the entityType string main.ts now lists.
+    await drainConsumer(["search_change_proposal"]);
+
+    const notifs = await notificationsFor(A, uA, "search.campaign.applied");
+    const mine = notifs.filter((p) => p.sourceEventId === outboxId);
+    expect(mine).toHaveLength(1);
+    expect(mine[0].href).toBe("/departments/seo/ads");
   });
 });

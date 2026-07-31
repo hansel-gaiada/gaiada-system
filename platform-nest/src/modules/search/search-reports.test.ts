@@ -303,8 +303,12 @@ describe.skipIf(!TEST_URL)("search-marketing client reports lifecycle (SM-22)", 
   });
 
   // ─────────────────────────────────────────── index.ts wiring sanity ─────────────────────────────
-  it("draftReport MCP tool (SM-10) still exists — this ticket adds no MCP tool of its own (index.ts is owned by SM-21 this wave; a search.deliverReport tool is a follow-up wiring gap, reported separately)", () => {
-    const tool = searchModule.mcpTools?.find((t) => t.name === "search.draftReport");
-    expect(tool).toBeDefined();
+  it("SM-10's draftReport + SM-74's review/approve/preview/deliver tools (editReport/approveReport/previewReport/deliverReport) are all registered in index.ts", () => {
+    const tools = ["search.draftReport", "search.editReport", "search.approveReport", "search.previewReport", "search.deliverReport"];
+    for (const toolName of tools) {
+      const tool = searchModule.mcpTools?.find((t) => t.name === toolName);
+      expect(tool).toBeDefined();
+      expect(tool?.name).toBe(toolName);
+    }
   });
 });

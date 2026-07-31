@@ -6662,3 +6662,325 @@ event handler, SM-21's own entries) and is the queue point for two more (SM-26's
 is the department's only real contention bottleneck. Nothing has been lost, but that is because the edits
 happened to be disjoint — **a single-owner-at-a-time discipline on registration files needs to be explicit, not
 assumed.**
+
+---
+
+## 6bt · SM-74 · report-lifecycle MCP tools registered — plus one classification I corrected
+
+Four tools added to `mcpTools`: `search.editReport` (Cerbos `update`), `search.approveReport` (`approve`),
+`search.previewReport` (`read`, `minAssurance:'low'` — correctly the only read-only one), `search.deliverReport`
+(`deliver`). It confirmed all four pre-existing entries intact — SM-25c's `0065`, SM-26's `0066`, and SM-73's
+`handleCampaignApplied` import **and** its `eventHandlers` line — which was the actual risk on a file four
+agents have now edited.
+
+It also grew `search.test.ts`'s tool-count assertion from 18 to 22 and **said so explicitly with the
+before/after**. That is the legitimate case: the contract genuinely grew, so the pin must move with it. The
+forbidden case is loosening an assertion to accommodate code that is wrong — a distinction worth keeping sharp,
+because the two look identical in a diff.
+
+### The correction: `search.deliverReport` was `impact:'low'`, now `'medium'`
+
+SM-74 classified all four alike. The other three are right; delivery is not. The file's own convention ties
+`'medium'` to **spending money** and `'high'` to **live-account mutations** — delivery is neither, which is
+presumably how it landed at `'low'` by elimination. But it is the one tool here whose effect **leaves the
+building**, and SM-22's entire design premise (§6bs) is that *once a client reads a report we cannot append a
+caveat*. A mistaken delivery is not undoable the way a mistaken draft edit is.
+
+`impact` exists precisely as the risk classification that agent-surface gating, approvals rows and console
+display read (§A13.6). **Classifying an unretractable outward-facing act identically to an internal draft edit
+makes that classification useless at the one point it matters most.** Raised to the architect for ratification
+of the widened rationale — *"outward-facing and unretractable"* as a **third** ground for medium impact,
+alongside spends-money and touches-a-live-account.
+
+Verified by me: `tsc` clean · `search.test.ts` + `search-reports.test.ts` **41/41**.
+
+**A gap I found while making the change and did not close myself:** **no test pins any tool's `impact` level.**
+The count is asserted, the names are asserted, but a tool's risk classification could be silently downgraded —
+including back to `'low'` — with the suite staying green. That is the department's recurring shape: *a guard
+that looks configured and is asserted by nothing.* Routed to the SM-24 gate rather than edited here, because
+that agent holds the test files this wave and a concurrent edit is how work gets lost.
+
+SM-74 reported its own status as "IN PROGRESS" while describing completed verification — inconsistent, but it
+under-claimed rather than over-claimed, which is the right direction to err.
+
+---
+
+## 6bu · SM-24 · **PASS-with-residuals** — the final QA gate; one boot-safety gap found, one class hunted and confirmed absent, one wiring claim independently proven
+
+**Scope of this pass:** the whole-module gate before `search-marketing` can be called DEV-VERIFIED. Read §1,
+§6bb–§6bt in full, the addendum's §A14/§A14.5/§A12.6, and `MODULES.md`'s entry. Ran the full `src/modules/search`
+suite, `tsc --noEmit` on `platform-nest`, `platform-ui`'s unit suite + `next build`, wrote and mutation-probed two
+new tests (one requested mid-gate by the orchestrator, one of my own), and dispatched one read-only sub-agent
+sweep for a sixth instance of the SM-63 pattern. Per standing policy, no real vendor account exists in dev — every
+finding below is either provable here or explicitly named a staging deferral; none of the deferrals below counted
+against the verdict.
+
+### Test evidence
+
+- `cd platform-nest && TEST_DB_PREFIX=sm24 ... npx vitest run src/modules/search --maxWorkers=2` — **first run:
+  1053 passed / 1 failed / 4 skipped**, the one red being `search.test.ts`'s hardcoded tool-count assertion
+  (18, pre-SM-74). The orchestrator then reported SM-74 landed with the count legitimately grown to 22 (§6bt) —
+  verified in code (`index.ts` now registers `editReport`/`approveReport`/`previewReport`/`deliverReport`,
+  `search.test.ts:89` now asserts 22 with its own before/after comment). **Second run, after SM-74 landed and my
+  own two additions: 1056 passed / 4 skipped, zero reds.** The 4 skips are the pre-existing keycloak-env-gated
+  file, unchanged.
+- `npx tsc --noEmit` in `platform-nest` — **clean, exit 0, zero output.** Cleaner than the brief's stated
+  baseline: the `src/modules/reports/document-builder.ts` error the brief told me to expect and not attribute
+  here was **not reproduced** — either fixed by the other programme since the brief was written, or transient.
+  Either way, verified-absent-today, stated as such rather than assumed.
+- `platform-ui`: unit suite **902 passed / 1 failed / 903 total across 94 files** (grown well past the stated
+  780/79 baseline from concurrent non-search work). The one red, `src/styles/tokens.test.ts` (hardcoded hex
+  colors in `charts/charts.css`), is **genuinely unrelated** — confirmed by running only `src/components/search`
+  and `src/app/departments/seo`: **87/87 green across 10 files**, and by inspection the failing file is a
+  cross-cutting design-token lint that never mentions search. Not attributed to this gate, same discipline as
+  the `tsc` note. `npx next build` — green, all routes in the manifest including the SEO department pages.
+
+### Finding 1 (FAIL-class, reachable in dev, no vendor account needed) — `SEARCH_ADS_WRITE_MODE`'s boot-safety gate is wired into only one of the two provider-mode branches
+
+`assertAdsWriteModeBootSafe` (and the `registerLiveAdsExecutor` call beside it) is called **exactly once** in
+`main.ts`, at lines 266–267, **inside the `else` branch of `if (config.search.providerMode === "simulate")`**
+(`main.ts:175` opens the `if`; the write-mode block sits at 256–269, inside the `live`-data `else`). The
+`simulate`-data branch (`main.ts:175–184`) never calls either. Concretely:
+
+1. Boot with `SEARCH_PROVIDER_MODE=simulate` (the dev/demo default, and per the addendum's **own** example —
+   §A12.6, "a funded-data-key staging environment with no real ad account yet is a legitimate configuration" —
+   an intentionally supported combination) **and** `SEARCH_ADS_WRITE_MODE=live`. The app boots cleanly: no live
+   executor is registered (`registerLiveAdsExecutor` never runs in this branch), and `assertAdsWriteModeBootSafe`
+   never runs either, so the exact condition it exists to catch — `live` with no registered executor — passes
+   through boot silently.
+2. The misconfiguration only surfaces later, at request time, when `search.controller.ts:4382`'s
+   `resolveAdsExecutor(resolveSearchAdsWriteMode())` finds `liveExecutor === null`
+   (`sem-apply.ts:439-485`) and throws `NoLiveExecutorError` — **exactly the failure mode Ruling 3.1's own
+   rationale names as unacceptable**: *"a runtime refusal would surface as a failed client ad change after an
+   approval had already been spent."* An operator who set the env var, requested and got an approval decided,
+   then hit this at execution time would have burned a real human approval cycle on a config error a boot check
+   was supposed to catch instantly.
+3. This is provable today with no vendor account: it is two env vars and a boot, confirmed by reading the code
+   path, not inferred. It is squarely **reachable within our own declared contract** (§6bc Ruling 4) — no vendor
+   misbehaviour is required — so it does not qualify for a staging deferral.
+4. **The documentation actively misleads on the current state**, which is how this survived review:
+   `sem-executor-google-ads.ts:155-164`'s own comment says wiring this into `main.ts` is "explicitly out of this
+   ticket's ownership... not performed here" and that `search.controller.ts`'s executor resolution "still keys
+   off `config.search.providerMode` exactly as it does today." Both clauses are **stale** — `main.ts` now calls
+   it (partially, per above) and `search.controller.ts:4382` already reads `resolveSearchAdsWriteMode()`, not
+   `config.search.providerMode`. This is the same self-contradicting-documentation shape §6bq.1 flagged in the
+   addendum's version header and §6a flagged in `MODULES.md` — a comment describing a past state that code has
+   since outgrown, read by the next agent as current truth.
+5. **Only unit tests of the pure function exist** (`sem-executor-google-ads.test.ts:468-494`,
+   `assertAdsWriteModeBootSafe("live", false)` etc., called directly). Nothing boots the real app with the two
+   env vars in this combination and asserts on the outcome — so the wiring gap was invisible to every green run
+   this programme has reported. I did not add that test myself: it requires exercising `main.ts`'s actual
+   bootstrap (a live `buildApp()` cycle with env vars set beforehand), which is a boot-order concern belonging to
+   whoever owns the fix, not a same-file mutation-probe I can safely bolt on without risking exactly the kind of
+   concurrent-edit collision §6bs.1/§6br.1 warn about on shared files.
+
+**Severity:** money/write-path, boot-safety class (§A4.3/§A10.4's own "must abort startup, not degrade to a
+warning" standard) — the class this programme has treated as P0 everywhere else it appeared. **Owner: senior-be**
+(main.ts bootstrap ordering, the same file SM-73 already flagged as a contention point). **Suggested fix shape:**
+call `registerLiveAdsExecutor` + `assertAdsWriteModeBootSafe(resolveSearchAdsWriteMode(), true)` unconditionally
+at module init, independent of the `providerMode` branch — matching the addendum's own stated design intent that
+the two modes are independent facts — and correct the stale comment in `sem-executor-google-ads.ts:155-164` in
+the same change so it stops asserting a past state as current. Not fixed by me: it is `main.ts` bootstrap logic,
+outside "test-only files and my own new tests," and is exactly the class of product-code fix this gate reports
+rather than performs.
+
+### Judgment on the orchestrator's own flagged deviation (config.ts fold-in)
+
+Separately from Finding 1: Ruling 3 said fold `SEARCH_ADS_WRITE_MODE` into `config.ts`; the orchestrator kept it
+as a per-call `process.env` read in `resolveSearchAdsWriteMode()`, reasoning that folding it into module-load-time
+`config` would break tests that mutate `process.env` per test. I checked `config.ts:280`
+(`providerMode: (process.env.SEARCH_PROVIDER_MODE ?? "live") === "simulate" ? ... `) — confirmed `config` **is**
+built once at import time, so the analogous `providerMode` field is genuinely frozen for the process's life, and
+folding `SEARCH_ADS_WRITE_MODE` in the same way would indeed require every existing test that sets
+`process.env.SEARCH_ADS_WRITE_MODE` mid-suite (`search-sem-apply.test.ts:675`) to instead mutate a live `config`
+object or add a reload seam neither `config.ts` nor any sibling module currently has. **The stated reasoning
+holds** — this is a real trade-off, not an excuse — but I do not think it is the more important gap here: in a
+real deployment `process.env` does not change without a restart either way (no live env-reload mechanism exists
+in this codebase), so the *practical* risk of the per-call read is low. **Finding 1 above is the sharper,
+provable consequence of the interim being incomplete — not the config.ts placement itself, but the fact that the
+boot-safety half of the design that placement was meant to serve is only half-wired.** I am not overruling the
+architect's Ruling 3 nor the orchestrator's deviation from it; I am reporting that the deviation's *cost* is
+smaller than the wiring gap it sits beside, and both should go to the same owner in the same pass.
+
+### The event-stream wiring — independently re-verified end-to-end, not trusted on the orchestrator's word
+
+The orchestrator flagged (correctly, per its own stated history of one prior wrong attribution in this
+programme) that it could not fully trust its own reasoning that adding `"search_change_proposal"` to
+`main.ts:292`'s `startConsumerLoop` array actually delivers a `search.campaign.applied` notification. I checked:
+**every existing SM-73 test** (`search-notifications.test.ts:540-786`) calls `handleCampaignApplied()` directly —
+none of them drive the real `emitEvent` → `relayBatch` → `consumeOnce` pipeline for this event type, unlike the
+file's own `search_audit`/`search_engagement` tests which do use `drainConsumer`. So the claim was **genuinely
+unverified by any existing test**, not merely unverified by me.
+
+I wrote and ran a new test (`search-notifications.test.ts`, added as part of this gate) that emits a real outbox
+row via `emitEvent(c, A, "search_change_proposal", proposalId, "search.campaign.applied", {...})` inside a real
+`withTenants` transaction, drains it through `drainConsumer(["search_change_proposal"])` (real `relayBatch` +
+real `consumeOnce`, the exact entity-type string `main.ts` now lists), and asserts a notification lands with the
+correct href. **Result: 15/15 passed, my test included** — the fix delivers end-to-end through the real pipeline,
+not merely through the handler called in isolation. **Negative control:** I then changed only the test's own
+`drainConsumer` argument to a wrong entity-type string (`"search_change_proposal_WRONG_NEGATIVE_CONTROL"`) and
+reran — **red, `expected [] to have a length of 1 but got +0`** — exactly the pre-fix failure mode (the stream
+nobody reads). Restored via `cp` from `/tmp` backup, `sha256sum` byte-identical before and after
+(`d2a27a9ac238b4b652f8994070e1db6d430a2b957550ad54b962bfdc55dcd4b6`). **Verdict: the orchestrator's fix is
+correct and now has a test with teeth that did not exist before.** File: `search-notifications.test.ts`, new test
+titled `"SM-24 gate: search.campaign.applied delivers a notification through the REAL outbox -> Redis -> consumer
+pipeline, not via a direct handler call"`.
+
+### The mid-gate finding routed to me (§6bt's impact-classification gap) — closed
+
+The orchestrator's §6bt correctly identified that no test pins any MCP tool's `impact` level, and specifically
+that its own correction (`search.deliverReport`: `'low'` → `'medium'`) could silently regress with the suite
+staying green. I verified the current code (`index.ts:389-403`) already carries `impact: "medium"` with the
+orchestrator's stated rationale in comment form, and added a test in `search.test.ts` pinning the **full**
+tool→impact map (not just `deliverReport`) — no-impact for every read-only tool, `'low'` for the eight
+draft/no-live-effect tools, `'medium'` for the four paid-pull tools plus `deliverReport`, `'high'` for the four
+live-mutation tools, and a closing loop asserting every `write:true` tool has exactly one of
+`low`/`medium`/`high` (so a tool that drifts to `impact: undefined` while still being a write tool is caught,
+which a per-tool allow-list alone would not catch). **Mutation probe:** downgraded `deliverReport` back to
+`'low'` — test went red with the message naming exactly what regressed
+(`"search.deliverReport: expected 'low' to be 'medium'"`); restored via `cp`/`sha256sum`
+(`868cd946657470d04af87a5ea9447c03824ae33d414381a925279e78592bf2b0`), reran full suite green (1056/4 skipped).
+
+**On the classification merits** (the orchestrator asked me to judge, not just implement): the widened rationale
+— "outward-facing and unretractable" as a third ground for `'medium'` alongside spends-money and
+touches-a-live-account — is sound and consistent with SM-22's own design premise (§6bs: a delivered report
+cannot be caveated after the fact). I do not think `'low'` was defensible once that premise is taken seriously:
+`impact` gates agent-surface exposure, and an internal draft edit (genuinely reversible, `editReport`,
+correctly `'low'`) is not in the same risk class as an act a client has already acted on. I endorse the
+orchestrator's correction; the architect ratification it is pending on is a documentation formality on the
+already-shipped classification, not an open behavioural question.
+
+### The SM-63-pattern sixth-site hunt — verified absent, not merely unhunted
+
+The brief asked me to hunt for a sixth site of "resolve a row by one key, never verify its own scope" outside
+`google/`. I dispatched a read-only Explore sweep across `sem-apply.ts`, `sem-executor-google-ads.ts`,
+`sem-export.ts`, `sem-plan.ts`, `sem-drafts.ts`, `search.controller.ts`, `search-reports.controller.ts`,
+`providers/dispatch.ts`, `providers/registry.ts`, and the smaller domain files, checking every single-key lookup
+against whether a *second*, caller-supplied id is ever trusted against the resolved row's own scope column
+without a check. **Result: no genuine sixth site.** Every chain traced resolves the next key from the
+**previously resolved row's own column**, never from a second caller-supplied id — and the one route that
+genuinely does take two ids (`createNegative`, campaign id from the route + ad-group id from the body) is already
+guarded (`search.controller.ts:3522-3524`, throws on `ag.campaignId !== id`). The `searchTermsCallback` route
+(`search.controller.ts:4604-4650`) is the SM-63 fix site itself (two-level check), not a new gap. I record this
+as **verified absent**, distinct from *unverified* — the sweep was systematic (every single-key lookup in the
+named files), not a sample, though it remains a single read-only pass and not a formal proof.
+
+### Money path, echo-validation, provenance, RLS — re-confirmed by the full green run, no new defect found
+
+I did not re-derive every claim in §6bb–§6bs from first principles (that would re-litigate work already
+architect-ruled and QA-gated section by section); I ran the full suite as the check that those claims still
+hold together, and it does: the five-tier stop-loss, `incurred` ledger, never-$0, the DFS/Ahrefs/Semrush
+echo-validation dispositions, SM-21's approve-execute-replay probes, and SM-22's `cost_usd`-never-appears pin all
+remain green at 1056/4 skipped with zero reds, on top of my own two new tests and their negative controls. I did
+not find a plausible-defect-shaped probe that the existing suite fails to catch in the time available for this
+pass; that is evidence of absence at the depth I tested, not a claim of exhaustive proof — five instrument-level
+defects were already found in this programme by exactly this kind of pass, so I do not treat a green run as
+closing the door on a sixth.
+
+### Claims from §6bb–§6bt I could not independently verify (stated as unverified, not verified-absent)
+
+- Whether DataForSEO's real (non-sandbox) `task_get` response ever omits or varies its own `id` field, and
+  whether Ahrefs's real backlinks/serp responses carry any echoable identity field at all (§6be's own stated
+  limit; SM-41G's to confirm).
+- Whether a real Google Ads mutate response ever does echo a per-operation identity beyond position (§6bp
+  Ruling 6's documented-not-observed staging question).
+- SM-25c's/SM-21's/SM-22's/SM-73's own probe counts and hash-verification claims for mutation probes I did not
+  personally rerun (I re-ran the full suite and my own two new probes; I did not independently reproduce every
+  prior ticket's individual mutation probe from scratch — that would mean re-deriving the whole programme's QA
+  history rather than gating the increment since the last gate).
+- Whether any stale, pre-SM-71/72 mis-bound Google connection rows already exist in a deployed database (SM-72's
+  own flagged gap — data repair, not code, and the live dev DB is still at migration 0061 regardless).
+
+### Consolidated staging deferral list (SM-41G)
+
+Real vendor credentials/OAuth clients/developer tokens for DataForSEO, Semrush, Ahrefs, Google (GSC/GA4/Ads);
+whether DataForSEO's `task_get` truly echoes `id` on every status and whether Ahrefs's real responses carry an
+echoable identity field (§6be); GAQL real response shapes, MCC/login-customer-id semantics, quota/429 behaviour,
+whether `ADS_FRESHNESS_LAG_DAYS=1` is accurate (§6bm); whether a real Ads mutate response echoes a per-operation
+ref beyond position (§6bp Ruling 6 — designed against now, confirmed later); the Ads Script artifact and the
+`sm-*` n8n flow JSON (§6bg/§6bs — nothing built yet, by design); PDF/branded report rendering (§6bs — a real
+platform gap, not vendor-gated, but explicitly out of scope for search-marketing); pre-existing stale Google
+connection bindings in any already-deployed database (§6bo.1/§6bq).
+
+### Verdict
+
+**PASS-with-residuals.** The module's own test suite is green (1056/4 skipped, zero reds, verified twice), `tsc`
+is clean, the UI builds and its search surfaces are fully green, the SM-63 pattern is confirmed closed at all
+known sites and a sixth-site hunt outside `google/` came back empty, and the orchestrator's two self-flagged
+uncertainties both resolved cleanly under independent test — the event-stream fix genuinely delivers end-to-end
+(proven, not trusted) and the config.ts deviation's stated reasoning holds even though I found a sharper, related
+gap beside it. That related gap — **Finding 1, `SEARCH_ADS_WRITE_MODE`'s boot-safety assertion wired into only
+the live-data branch of `main.ts`, plus a stale comment asserting the wiring doesn't exist when it partially
+does** — is real, reachable in dev with two env vars and no vendor account, sits on the write/money path this
+programme has treated as P0 everywhere else, and is not closed by anything already landed. It is why this is not
+a plain PASS.
+
+**Is `search-marketing` DEV-VERIFIED?** Not yet, on this gate's own finding, not on any prior section's. **What
+is owed:** Finding 1 fixed (unconditional boot wiring for `registerLiveAdsExecutor`/`assertAdsWriteModeBootSafe`,
+independent of `SEARCH_PROVIDER_MODE`, plus correcting `sem-executor-google-ads.ts:155-164`'s stale comment),
+QA-verified with a boot-level test (not just the existing pure-function unit tests) proving the
+`simulate`-data/`live`-write combination now refuses at boot rather than at request time — then the module can be
+promoted. Everything else this gate touched (event wiring, impact-classification pin, the sixth-site hunt) is
+closed. The several tickets still marked "gate owed" in §1 for architect/QA halves already discharged in
+§6bm–§6bt should have their §1 rows reconciled by whoever next touches §1 — not done here, to avoid editing
+another section's content per this ticket's own constraint.
+
+**Files touched by this pass:** `platform-nest/src/modules/search/search-notifications.test.ts` (new end-to-end
+event-wire test), `platform-nest/src/modules/search/search.test.ts` (new impact-classification-map pin test).
+No product code edited. `docs/blueprints/seo-sem-execution-tracker.md` (this section).
+
+---
+
+---
+
+## 6bv · SM-24's Finding 1 — **FIXED**, and it was my defect, of the exact shape this department was built to catch
+
+**The gate earned its keep by finding my own bug**, and it found it by *reading*, not by running — which is the
+whole point of the finding.
+
+`assertAdsWriteModeBootSafe` + `registerLiveAdsExecutor` were nested inside the
+`SEARCH_PROVIDER_MODE === "live"` branch, while **my own comment three lines above claimed the registration was
+"unconditional"**. So `SEARCH_PROVIDER_MODE=simulate` skipped **both** the registration and the boot assertion.
+The escaping combination — **simulated DATA with live AD WRITES** — is one the addendum itself calls legitimate
+(§A12.6), so this was not a corner: it booted silently and then failed at request time with
+`NoLiveExecutorError`, **after the one-shot approval had already been spent.** That is precisely the outcome
+Ruling 3.1 exists to forbid, and reproducible with two env vars and no vendor account.
+
+**This is the department's signature defect committed by the orchestrator**: *a guard that reads as enforced and
+enforces nothing.* Seven instances were found on the money path before this one, and I wrote the eighth while
+completing the wiring for the ruling that forbids it. The comment asserting "unconditional" is the aggravating
+part — a reader checking this would have been reassured by prose that the placement contradicted.
+
+**Fixed** by hoisting both calls to function scope, outside the mode branch, with the reason recorded in-place
+and an explicit instruction not to move them back. Verified: `tsc` clean · full tree **1056 passed / 4 skipped,
+zero reds**.
+
+### 6bv.1 · The residual this exposes — **SM-75** (new)
+
+**Nothing tests boot wiring.** `assertAdsWriteModeBootSafe` is pure and unit-tested; what was wrong was *where
+it was called from*, and no test in this platform executes `bootstrap()`. That is why five mutation probes,
+1056 tests and a full architect ruling did not catch it, and a careful human read did. Placement defects are
+invisible to a suite that never runs the wiring.
+
+**SM-75 — a boot-smoke test.** senior-be · seat default. Assert that the documented mode cross-products behave:
+`simulate`+`simulate` boots; `simulate`+**`live`** boots only with an executor registered and **refuses without
+one**; `live`+`live` likewise. Negative-control it by re-nesting the call inside the mode branch and confirming
+the test goes red — if it stays green the test is not exercising the wiring, which is the same instrument
+failure recorded five times in §6bb/§6av/§6ay/§6bg/§6bn.
+
+**Also worth ratifying beyond this department:** every service in this estate does mode/driver mutual-exclusion
+checks in `main.ts` at boot (§A4.3/§A10.4 mandate it), and if none of them are executed by tests, this defect
+class is platform-wide rather than search-specific.
+
+### 6bv.2 · What the gate did that is worth keeping as practice
+
+- It **re-verified my two self-reported items instead of trusting them**: it wrote a real outbox→relay→consumer
+  test for the event-stream fix, got it green, then **negative-controlled it red on a wrong entity-type string**
+  before restoring (sha256-verified). It did not take my reasoning as evidence — correctly, since I had already
+  been confidently wrong once (§6br.1).
+- It **could not reproduce** the `reports/document-builder.ts` error I told it to expect, and recorded that as
+  **verified-absent-today rather than assumed** — the distinction I have been asking every seat to make, applied
+  to a fact I supplied.
+- It **hunted a sixth SM-63 site outside `google/` and reported verified-absent**, not merely unhunted.
+- It **pinned the full tool→`impact` map and mutation-probed it**, closing the gap I routed to it, and let my
+  `deliverReport` reclassification stand on the merits rather than by default.

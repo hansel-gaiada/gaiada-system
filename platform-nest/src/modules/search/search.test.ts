@@ -86,7 +86,7 @@ describe.skipIf(!TEST_URL)("search module (SM-02)", () => {
     expect(res.statusCode).toBe(200);
     const defs = res.json() as Array<{ name: string; method?: string; pathTemplate?: string }>;
     const searchDefs = defs.filter((d) => d.name.startsWith("search."));
-    expect(searchDefs.length).toBe(18);
+    expect(searchDefs.length).toBe(22); // SM-10's draftReport (1) + SM-74's editReport/approveReport/previewReport/deliverReport (4) + SM-04/05/09/16/17/18/21/30 (13) = 18 base + 4 new
     const listEngagements = searchDefs.find((d) => d.name === "search.listEngagements");
     expect(listEngagements?.method).toBe("GET");
     expect(listEngagements?.pathTemplate).toBe("/api/:tenantId/modules/search/engagements");
@@ -94,6 +94,67 @@ describe.skipIf(!TEST_URL)("search module (SM-02)", () => {
     const applyNegatives = defs.find((d) => d.name === "search.applyNegatives") as { impact?: string; write?: boolean };
     expect(applyNegatives.write).toBe(true);
     expect(applyNegatives.impact).toBe("high");
+  });
+
+  // SM-24 gate: §6bt found that no test pins any tool's `impact` classification — the count and the
+  // names are asserted, but a tool could be silently downgraded (including search.deliverReport,
+  // just corrected 'low' -> 'medium' there) with this suite staying green. Pinning the FULL map, not
+  // just deliverReport, because the same silent-downgrade shape applies to every 'medium' (spends
+  // money) and 'high' (live-account mutation) tool equally — a single spot-check would leave 20 of
+  // 21 write tools unguarded against exactly this drift.
+  it("pins every search.* tool's impact classification — a silent downgrade must fail this test, not just deliverReport's", async () => {
+    const res = await app.inject({ method: "GET", url: "/mcp/tool-defs", headers: svc });
+    const defs = res.json() as Array<{ name: string; impact?: string; write?: boolean }>;
+    const byName = new Map(defs.filter((d) => d.name.startsWith("search.")).map((d) => [d.name, d]));
+
+    // Read-only / no-write tools carry no `impact` at all (impact is a write-risk classification).
+    const noImpact = [
+      "search.listEngagements", "search.rankSummary", "search.auditSummary", "search.ledgerSummary",
+      "search.previewReport",
+    ];
+    for (const name of noImpact) {
+      const tool = byName.get(name);
+      expect(tool, `${name} should be registered`).toBeDefined();
+      expect(tool?.write, `${name} should not be a write tool`).not.toBe(true);
+      expect(tool?.impact, `${name} should carry no impact classification`).toBeUndefined();
+    }
+
+    // 'low' — draft-only / no live side effect, and reversible before anyone outside acts on it.
+    const lowImpact = [
+      "search.runAudit", "search.clusterKeywords", "search.draftBrief", "search.proposeNegatives",
+      "search.draftReport", "search.editReport", "search.approveReport", "search.exportProposal",
+    ];
+    for (const name of lowImpact) {
+      expect(byName.get(name)?.impact, name).toBe("low");
+    }
+
+    // 'medium' — spends metered provider money, OR (search.deliverReport, §6bt) is outward-facing
+    // and unretractable: once a client has read a delivered report no caveat can be appended after
+    // the fact, which the orchestrator raised as a third ground for 'medium' alongside spends-money
+    // and touches-a-live-account, pending architect ratification of the widened rationale.
+    const mediumImpact = [
+      "search.keywordResearch", "search.pullRanks", "search.pullBacklinks", "search.pullAiVisibility",
+      "search.deliverReport",
+    ];
+    for (const name of mediumImpact) {
+      expect(byName.get(name)?.impact, name).toBe("medium");
+    }
+    // The specific correction this test exists to hold, stated on its own so a diff that reverts it
+    // fails on an assertion whose message names exactly what regressed.
+    expect(byName.get("search.deliverReport")?.impact, "search.deliverReport must not be downgraded to 'low' — SM-22's delivered reports are unretractable once a client reads them (§6bt)").toBe("medium");
+
+    // 'high' — a live-account mutation (design §07/D-6).
+    const highImpact = ["search.applyNegatives", "search.setBudget", "search.launchCampaign", "search.publishContent"];
+    for (const name of highImpact) {
+      expect(byName.get(name)?.impact, name).toBe("high");
+    }
+
+    // Every write tool is classified as exactly one of low/medium/high — no write tool silently
+    // drifts to `undefined` (which the no-impact branch above would otherwise wrongly accept as a
+    // read-only tool once `write` is also true).
+    for (const d of defs) {
+      if (d.write) expect(["low", "medium", "high"]).toContain(d.impact);
+    }
   });
 
   it("ModuleEnabledGuard 404s a tenant with 'search' NOT enabled (before Cerbos is ever consulted)", async () => {

@@ -341,6 +341,75 @@ export const searchModule: ModuleContract = {
       },
     },
     {
+      name: "search.editReport",
+      description: "Edit a report's narrative and/or status (submit for review, draft->in_review; send back, in_review->draft) — Cerbos update action, module_staff and up (SM-22)",
+      minAssurance: "verified",
+      write: true,
+      impact: "low",
+      method: "PATCH",
+      pathTemplate: "/api/:tenantId/modules/search/reports/:id",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tenantId: { type: "string" },
+          id: { type: "string" },
+          narrativeMd: { type: "string" },
+          status: { type: "string" },
+        },
+        required: ["tenantId", "id"],
+      },
+    },
+    {
+      name: "search.approveReport",
+      description: "Approve a report in review (in_review->approved, stamps approved_by/approved_at) — Cerbos approve action, module_manager and up (SM-22)",
+      minAssurance: "verified",
+      write: true,
+      impact: "low",
+      method: "POST",
+      pathTemplate: "/api/:tenantId/modules/search/reports/:id/approve",
+      inputSchema: {
+        type: "object",
+        properties: { tenantId: { type: "string" }, id: { type: "string" } },
+        required: ["tenantId", "id"],
+      },
+    },
+    {
+      name: "search.previewReport",
+      description: "Preview a report before approval — renders the client-facing document including honesty banner, read-only (no status/file write), Cerbos read action (SM-22)",
+      minAssurance: "low",
+      method: "GET",
+      pathTemplate: "/api/:tenantId/modules/search/reports/:id/preview",
+      inputSchema: {
+        type: "object",
+        properties: { tenantId: { type: "string" }, id: { type: "string" } },
+        required: ["tenantId", "id"],
+      },
+    },
+    {
+      name: "search.deliverReport",
+      description: "Deliver an approved report (approved->delivered, renders and persists artifact as a files row, creates deliverable link if project exists, emits search.report.delivered) — Cerbos deliver action, module_manager and up (SM-22)",
+      minAssurance: "verified",
+      // `impact:'medium'`, NOT 'low' — SM-74 registered this as 'low' alongside edit/approve/preview,
+      // and that understates it. The convention above ties 'medium' to spending money and 'high' to
+      // live-account mutations; delivery is neither, but it is the one tool here whose effect leaves
+      // the building. SM-22's entire design premise (§6bs) is that **once a client reads a report we
+      // cannot append a caveat** — so a mistaken delivery is not undoable in the way a mistaken draft
+      // edit is, and `impact` exists precisely as the risk classification that agent-surface gating,
+      // approvals rows and console display read. Classifying an unretractable outward-facing act the
+      // same as an internal draft edit would make that classification useless at the one point it
+      // matters. Raised by the orchestrator; flagged to the architect for ratification of the
+      // widened rationale ("outward-facing and unretractable" as a third medium-impact ground).
+      write: true,
+      impact: "medium",
+      method: "POST",
+      pathTemplate: "/api/:tenantId/modules/search/reports/:id/deliver",
+      inputSchema: {
+        type: "object",
+        properties: { tenantId: { type: "string" }, id: { type: "string" } },
+        required: ["tenantId", "id"],
+      },
+    },
+    {
       // SM-30: real binding. Exports an APPROVED, mode='manual' change proposal as an Ads-Editor-
       // ready CSV `files` artifact (no live side effect — the manual-mode twin only; an api-mode
       // proposal is refused here and executes exclusively via SM-21's one-shot approvalId path).
