@@ -46,8 +46,8 @@ export default async function TimesheetsPage() {
     <>
       <PageHeader eyebrow="Business" title="Timesheets" subtitle="Logged time across the company. Billable hours roll up for invoicing." />
       <div style={{ display: "grid", gap: 16, gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", marginBottom: 20 }}>
-        <KpiTile label="Total logged" value={hoursFromMinutes(totalMin)} foot={`${entries.length} entries`} />
-        <KpiTile label="Billable" value={hoursFromMinutes(billableMin)} foot={totalMin ? `${Math.round((billableMin / totalMin) * 100)}% of logged` : "—"} />
+        <KpiTile label="Total logged" value={hoursFromMinutes(totalMin)} foot={`${entries.length} entries`} hint="Every time entry in this company, for all time — not this week or this month. Logged by anyone, not only you." />
+        <KpiTile label="Billable" value={hoursFromMinutes(billableMin)} foot={totalMin ? `${Math.round((billableMin / totalMin) * 100)}% of logged` : "—"} hint="Time whose entry is flagged billable. This is what invoicing draws on; the flag is set per entry when the time is logged." />
         <KpiTile label="Non-billable" value={hoursFromMinutes(totalMin - billableMin)} />
       </div>
 
