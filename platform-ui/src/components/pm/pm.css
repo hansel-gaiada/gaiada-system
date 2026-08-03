@@ -378,3 +378,45 @@ button.pm-tag--btn:focus-visible .pm-tag { outline: 2px solid var(--erp-accent);
 /* ---- follow toggle (P3-09) ---- */
 .pm-follow-glyph { margin-right: 5px; font-size: 13px; }
 .pm-follow-meta { font: 400 11px var(--font-body); color: var(--erp-ink-50); white-space: nowrap; }
+
+/* ── Project workspace chrome ─────────────────────────────────────────────────
+   The header used to stack five rows before any content: breadcrumb, title, a
+   four-column grid of labelled property blocks, a full-width New-task form, then the tabs. These
+   rules collapse that to two: one meta line, one tabs+action row. */
+.pm-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+  padding-bottom: 14px;
+  margin-bottom: 14px;
+  border-bottom: 0.5px solid var(--erp-hairline-soft);
+  font: 400 13px var(--font-body);
+  color: var(--text-primary);
+}
+.pm-meta__item { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
+.pm-meta__label {
+  font: 700 9px var(--font-body);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--erp-ink-50);
+}
+.pm-meta__prog { width: 120px; }
+
+/* Tabs and the screen's one primary action share a row. */
+.pm-tabsrow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+
+/* Filters are settings: a quiet strip, not a bordered card competing with the board. */
+.pm-filterbar {
+  padding: 8px 0 10px;
+  margin-bottom: 14px;
+  border-bottom: 0.5px solid var(--erp-hairline-soft);
+}
+.pm-filterbar .lux-filters { margin: 0; }
