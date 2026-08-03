@@ -10,14 +10,28 @@ import {
   GATE_LABEL,
   TRACK_LABEL,
   TRACK_ORDER,
+  RUN_STATUSES,
+  ACTOR_SIDES,
+  ALL_GATE_KINDS,
+  SCOPE_PARTIES,
+  SCOPE_PARTY_LABEL,
   groupStagesByTrack,
   describeBlockage,
+  summarizeScopeSignoffs,
   humanizeStageName,
   isStageLocked,
   type PipelineGate,
   type PipelineStage,
+  type PipelineRunDetail,
 } from "@/lib/pipeline";
-import { decideGateAction, editStageArtifactAction } from "@/lib/pipelineActions";
+import {
+  decideGateAction,
+  editStageArtifactAction,
+  recordScopeSignoffAction,
+  updateRunStatusAction,
+  createStageAction,
+  openGateAction,
+} from "@/lib/pipelineActions";
 import { findRecordingByMeetingId } from "@/lib/meetings";
 import { getClient } from "@/lib/entities";
 import { Card, Eyebrow, StatusBadge } from "@/components/ui";
@@ -70,6 +84,26 @@ export default async function PipelineRunPage({ params }: { params: Promise<{ ru
   async function onEditArtifact(formData: FormData) {
     "use server";
     await editStageArtifactAction(formData);
+  }
+
+  async function onRecordScopeSignoff(formData: FormData) {
+    "use server";
+    await recordScopeSignoffAction(formData);
+  }
+
+  async function onUpdateStatus(formData: FormData) {
+    "use server";
+    await updateRunStatusAction(formData);
+  }
+
+  async function onCreateStage(formData: FormData) {
+    "use server";
+    await createStageAction(formData);
+  }
+
+  async function onOpenGate(formData: FormData) {
+    "use server";
+    await openGateAction(formData);
   }
 
   return (
@@ -131,6 +165,10 @@ export default async function PipelineRunPage({ params }: { params: Promise<{ ru
           )}
         </Card>
 
+        <Card title="Scope sign-off">
+          <ScopeSignoffPanel run={run} mayDecide={mayDecide} onRecord={onRecordScopeSignoff} />
+        </Card>
+
         <Card title="Tracks">
           <div style={{ display: "grid", gap: 26, gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))" }}>
             {TRACK_ORDER.map((track) => {
@@ -161,7 +199,114 @@ export default async function PipelineRunPage({ params }: { params: Promise<{ ru
           </div>
         </Card>
       </div>
+
+      {/* B3–B5 — run lifecycle recovery tools. Deliberately NOT a Card next to the routine
+          approve/edit controls above: these bypass automation (park a stuck run, add a beat by
+          hand, open a gate the workflow missed), so they're gated on the same elevated capability
+          but rendered collapsed, in a warning-toned box, so a manager has to choose to open it
+          rather than stumble into it while doing routine review. */}
+      {mayDecide && (
+        <details className="pl-recovery">
+          <summary className="pl-recovery__summary">Recovery tools — manual overrides for when automation didn&apos;t advance this run</summary>
+          <div className="pl-recovery__body">
+            <div className="pl-recovery__group">
+              <Eyebrow style={{ display: "block", marginBottom: 8 }}>Update run status</Eyebrow>
+              <p className="pl-recovery__hint">Park a stuck run, or unblock one once the underlying issue is resolved.</p>
+              <form action={onUpdateStatus} className="pl-recovery__form">
+                <input type="hidden" name="runId" value={run.id} />
+                <select name="status" defaultValue={run.status}>
+                  {RUN_STATUSES.map((s) => (
+                    <option key={s} value={s}>{s.replace(/_/g, " ")}</option>
+                  ))}
+                </select>
+                <button type="submit" className="btn">Update status</button>
+              </form>
+            </div>
+
+            <div className="pl-recovery__group">
+              <Eyebrow style={{ display: "block", marginBottom: 8 }}>Add a stage by hand</Eyebrow>
+              <p className="pl-recovery__hint">Create a beat automation didn&apos;t — use the same slug convention as the workflow (e.g. <code>manual_review</code>).</p>
+              <form action={onCreateStage} className="pl-recovery__form">
+                <input type="hidden" name="runId" value={run.id} />
+                <select name="track" defaultValue="delivery">
+                  {TRACK_ORDER.map((t) => (
+                    <option key={t} value={t}>{TRACK_LABEL[t]}</option>
+                  ))}
+                </select>
+                <input type="text" name="name" placeholder="stage name" required />
+                <button type="submit" className="btn">Add stage</button>
+              </form>
+            </div>
+
+            <div className="pl-recovery__group">
+              <Eyebrow style={{ display: "block", marginBottom: 8 }}>Open a gate manually</Eyebrow>
+              <p className="pl-recovery__hint">The only recovery when a workflow missed opening a review or sign-off beat.</p>
+              <form action={onOpenGate} className="pl-recovery__form">
+                <input type="hidden" name="runId" value={run.id} />
+                <select name="kind" defaultValue="pm_review">
+                  {ALL_GATE_KINDS.map((k) => (
+                    <option key={k} value={k}>{GATE_LABEL[k]}</option>
+                  ))}
+                </select>
+                <select name="actorSide" defaultValue="internal">
+                  {ACTOR_SIDES.map((s) => (
+                    <option key={s} value={s}>{s}</option>
+                  ))}
+                </select>
+                <input type="text" name="note" placeholder="Note (optional)" />
+                <button type="submit" className="btn">Open gate</button>
+              </form>
+            </div>
+          </div>
+        </details>
+      )}
     </>
+  );
+}
+
+// B1 — the scope dual-sign panel: who's signed, who's outstanding, and (elevated + agency not yet
+// signed) the form to record the agency's half. `summarizeScopeSignoffs` words `complete:false`
+// honestly ("waiting on the client") rather than letting the run look stuck once the agency signs.
+function ScopeSignoffPanel({ run, mayDecide, onRecord }: {
+  run: Pick<PipelineRunDetail, "id" | "scopeSignoffs">;
+  mayDecide: boolean;
+  onRecord: (formData: FormData) => Promise<void>;
+}) {
+  const summary = summarizeScopeSignoffs(run.scopeSignoffs);
+  const agencySigned = summary.signed.includes("provider");
+  return (
+    <div>
+      <p className="pl-scope__summary">{summary.text}</p>
+      <div className="pl-scope__parties">
+        {SCOPE_PARTIES.map((party) => {
+          const rec = run.scopeSignoffs.find((s) => s.party === party);
+          return (
+            <div key={party} className="pl-scope__party">
+              <span className="pl-scope__party-name">{SCOPE_PARTY_LABEL[party]}</span>
+              <StatusBadge label={rec ? "signed" : party === "client" ? "waiting on client" : "not yet signed"} />
+              {rec && (
+                <span className="pl-scope__meta">
+                  {rec.signer_name ? `${rec.signer_name} · ` : ""}{formatDateTime(rec.signed_at)}
+                </span>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      {mayDecide && !agencySigned && (
+        <form action={onRecord} className="pl-scope__form">
+          <input type="hidden" name="runId" value={run.id} />
+          <label className="pl-scope__field">
+            <span>Signer name (optional)</span>
+            <input type="text" name="signerName" placeholder="Who is signing for the agency?" />
+          </label>
+          <button type="submit" className="btn btn-primary" style={{ fontSize: 13, alignSelf: "flex-start" }}>Record agency sign-off</button>
+        </form>
+      )}
+      {!mayDecide && !agencySigned && (
+        <p className="pl-scope__meta">Recording the agency&apos;s sign-off requires manager-tier access.</p>
+      )}
+    </div>
   );
 }
 

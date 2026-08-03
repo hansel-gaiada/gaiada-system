@@ -35,6 +35,28 @@
 .pl-md__code { padding: 1px 5px; background: var(--wash); font: 400 12px var(--font-mono, monospace); }
 .pl-md__hr { border: none; border-top: 0.5px solid var(--erp-hairline); margin: 14px 0; }
 
+/* B1 — the scope dual-sign panel (run workspace). */
+.pl-scope__summary { margin: 0 0 12px; font: 500 14px/1.5 var(--font-body); color: var(--text-primary); }
+.pl-scope__parties { display: flex; flex-direction: column; gap: 10px; margin-bottom: 4px; }
+.pl-scope__party { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.pl-scope__party-name { font: 700 13px var(--font-body); min-width: 70px; }
+.pl-scope__meta { font: 400 12px var(--font-body); color: var(--erp-ink-50); }
+.pl-scope__form { display: flex; align-items: flex-end; gap: 12px; margin-top: 16px; flex-wrap: wrap; }
+.pl-scope__field { display: flex; flex-direction: column; gap: 6px; font: 700 10px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--erp-ink-50); }
+.pl-scope__field input { border: none; border-bottom: 0.5px solid var(--line-control); background: transparent; outline: none; padding: 7px 2px; min-width: 220px; font: 400 14px var(--font-body); letter-spacing: normal; text-transform: none; color: var(--text-primary); }
+.pl-scope__field input:focus-visible { border-bottom-color: var(--erp-accent); }
+
+/* B3–B5 — the collapsed recovery-tools box: intentionally NOT a Card, and warning-toned, so it
+   reads as a deliberate override path rather than a routine action sitting beside Approve/Edit. */
+.pl-recovery { margin-top: 28px; border: 0.5px solid color-mix(in srgb, var(--status-warning) 40%, transparent); border-radius: 12px; background: color-mix(in srgb, var(--status-warning) 5%, transparent); }
+.pl-recovery__summary { cursor: pointer; list-style: none; padding: 14px 18px; font: 700 12px var(--font-body); letter-spacing: 0.04em; color: var(--status-warning-fg); }
+.pl-recovery__summary::-webkit-details-marker { display: none; }
+.pl-recovery__body { display: grid; gap: 22px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); padding: 4px 18px 20px; border-top: 0.5px solid color-mix(in srgb, var(--status-warning) 30%, transparent); }
+.pl-recovery__group { padding-top: 14px; }
+.pl-recovery__hint { margin: 0 0 10px; font: 400 12px/1.5 var(--font-body); color: var(--erp-ink-50); }
+.pl-recovery__form { display: flex; flex-direction: column; gap: 8px; }
+.pl-recovery__form select, .pl-recovery__form input { border: 0.5px solid var(--erp-hairline); border-radius: 6px; padding: 8px 10px; font: 400 13px var(--font-body); background: transparent; color: var(--text-primary); }
+
 /* WD-03 (D-3) — the artifact edit affordance + its locked-after-signature state. */
 .pl-edit { margin-top: 10px; }
 .pl-edit__summary { cursor: pointer; font: 500 12px var(--font-body); color: var(--erp-accent); list-style: none; }

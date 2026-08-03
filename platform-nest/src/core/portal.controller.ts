@@ -16,10 +16,25 @@ import { authorize, writeActivity } from "./http";
 import { emitEvent } from "../events/outbox.service";
 import { AuthGuard } from "../auth/guards";
 import { lockPipelineRun } from "./pipeline-lock";
+import { notifyBestEffort, notifyScopeSignedBothSides, resolveClientRecipients } from "./client-notify";
 import type { PoolClient } from "pg";
 
 const CLIENT_DECISIONS = new Set(["signed", "approved", "changes_requested"]);
 const REQUIRED_SCOPE_PARTIES = ["provider", "client"] as const;
+
+// D-3 — "a client decides a gate -> notify the internal side": human-readable pieces for that
+// notification's title. Kept local (not exported from client-notify.ts) because it is display text for
+// ONE call site, not a recipient-resolution rule other callers would need.
+const GATE_KIND_LABEL: Partial<Record<string, string>> = {
+  prd_sign: "the PRD",
+  customer_feedback: "your feedback request",
+  scope_signoff: "the Scope Agreement",
+};
+function decisionVerb(decision: string): string {
+  if (decision === "signed") return "signed";
+  if (decision === "approved") return "approved";
+  return "requested changes on"; // changes_requested
+}
 
 /** Plain-language status the portal shows the client. Pending client gates win (they need the client). */
 function currentBlockage(
@@ -44,25 +59,88 @@ function currentBlockage(
 @UseGuards(AuthGuard)
 export class PortalController {
   /** Resolve the caller's client row for this tenant, or 403 if they are not a portal client. */
-  private async callerClientId(c: PoolClient, principal: { userId: string | null }): Promise<string> {
+  /** Every client this caller is a portal contact of.
+   *
+   *  ⚠ W0 GAP THIS CLOSES — the whole invite flow was unreachable without it. `client_contacts`
+   *  (migration 0072) is what the invite/accept flow writes; `clients.portal_user_id` is the older
+   *  single-contact column, and it is the ONLY thing this method used to read. So an invited contact
+   *  could accept, get a Keycloak account, receive the `client` role, gain the tenant via
+   *  principal.ts's client_contacts union, pass `resource_portal` authz — and then be refused right
+   *  here with "not a portal client". Everything upstream succeeded and the portal still showed
+   *  nothing. The W0 spec said the portal "resolves through this table instead"; that intent was
+   *  never implemented, which is exactly the kind of gap a design doc cannot catch.
+   *
+   *  Returns a SET, because D-1 made contacts many-per-client: one person can legitimately be a
+   *  stakeholder for two clients of the same agency.
+   *
+   *  The legacy `portal_user_id` lookup is UNIONed in rather than dropped: it still has live rows and
+   *  its own tests, and removing it here would be a silent access regression for anyone provisioned
+   *  the old way. It is retired by a later migration, not by this method. */
+  /** Convenience for the four read/write paths: the caller's client set plus their project
+   *  restriction (null = all projects). */
+  private async callerScope(
+    c: PoolClient,
+    principal: { userId: string | null },
+  ): Promise<{ clientIds: string[]; projectIds: string[] | null }> {
+    const clientIds = await this.callerClientIds(c, principal);
+    const projectIds = await this.allowedProjectIds(c, principal.userId as string, clientIds);
+    return { clientIds, projectIds };
+  }
+
+  private async callerClientIds(c: PoolClient, principal: { userId: string | null }): Promise<string[]> {
     if (!principal.userId) throw new ForbiddenException("not a portal client");
     const r = await c.query<{ id: string }>(
-      `SELECT id FROM clients WHERE portal_user_id = $1 AND deleted_at IS NULL`,
+      `SELECT cc.client_id AS id
+         FROM client_contacts cc
+        WHERE cc.user_id = $1 AND cc.status = 'active' AND cc.deleted_at IS NULL
+        UNION
+       SELECT cl.id FROM clients cl WHERE cl.portal_user_id = $1 AND cl.deleted_at IS NULL`,
       [principal.userId],
     );
-    if (!r.rows[0]) throw new ForbiddenException("not a portal client");
-    return r.rows[0].id;
+    const ids = r.rows.map((row) => row.id);
+    // A `revoked` or still-`invited` contact resolves to nothing and is refused here — status governs
+    // ACCESS, which is precisely the question this method asks.
+    if (!ids.length) throw new ForbiddenException("not a portal client");
+    return ids;
+  }
+
+  /** The projects this caller may see for a given client, or `null` meaning ALL of them.
+   *
+   *  D-1 allows a contact to be scoped to one project (`project_id`) or to the whole client
+   *  (`project_id IS NULL`). A client-wide row therefore WIDENS access and must win over any
+   *  narrower row — otherwise adding a project-scoped row to someone who already had client-wide
+   *  access would silently take access away. */
+  private async allowedProjectIds(
+    c: PoolClient,
+    userId: string,
+    clientIds: string[],
+  ): Promise<string[] | null> {
+    const r = await c.query<{ project_id: string | null; legacy: boolean }>(
+      `SELECT cc.project_id, false AS legacy
+         FROM client_contacts cc
+        WHERE cc.user_id = $1 AND cc.status = 'active' AND cc.deleted_at IS NULL
+          AND cc.client_id = ANY($2::uuid[])
+        UNION ALL
+       SELECT NULL::uuid AS project_id, true AS legacy
+         FROM clients cl WHERE cl.portal_user_id = $1 AND cl.deleted_at IS NULL`,
+      [userId, clientIds],
+    );
+    // Any client-wide grant (or the legacy whole-client scheme) => unrestricted.
+    if (r.rows.some((row) => row.project_id === null)) return null;
+    return r.rows.map((row) => row.project_id as string);
   }
 
   @Get(":tenantId/portal/runs")
   async listRuns(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string) {
     await authorize(req.principal, { kind: "portal", tenantId }, "read");
     return withTenants([tenantId], async (c) => {
-      const clientId = await this.callerClientId(c, req.principal);
+      const { clientIds, projectIds } = await this.callerScope(c, req.principal);
       const runs = await c.query<{ id: string; title: string; status: string }>(
         `SELECT id, title, status, created_at FROM pipeline_runs
-         WHERE client_id = $1 AND deleted_at IS NULL ORDER BY created_at DESC LIMIT 100`,
-        [clientId],
+         WHERE client_id = ANY($1::uuid[]) AND deleted_at IS NULL
+           AND ($2::uuid[] IS NULL OR project_id = ANY($2::uuid[]))
+         ORDER BY created_at DESC LIMIT 100`,
+        [clientIds, projectIds],
       );
       // Compute the blockage per run (client-side gates + non-report stages).
       const out = [];
@@ -83,10 +161,12 @@ export class PortalController {
   async getRun(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("runId") runId: string) {
     await authorize(req.principal, { kind: "portal", tenantId }, "read");
     return withTenants([tenantId], async (c) => {
-      const clientId = await this.callerClientId(c, req.principal);
+      const { clientIds, projectIds } = await this.callerScope(c, req.principal);
       const run = await c.query<{ id: string; title: string; status: string }>(
-        `SELECT id, title, status, created_at FROM pipeline_runs WHERE id = $1 AND client_id = $2 AND deleted_at IS NULL`,
-        [runId, clientId],
+        `SELECT id, title, status, created_at FROM pipeline_runs
+          WHERE id = $1 AND client_id = ANY($2::uuid[]) AND deleted_at IS NULL
+            AND ($3::uuid[] IS NULL OR project_id = ANY($3::uuid[]))`,
+        [runId, clientIds, projectIds],
       );
       if (!run.rows[0]) throw new NotFoundException("run not found"); // also the isolation boundary
       // Client-safe stages: hide the internal report track.
@@ -125,7 +205,7 @@ export class PortalController {
     if (!decision || !CLIENT_DECISIONS.has(decision)) throw new BadRequestException("decision must be signed|approved|changes_requested");
     await authorize(req.principal, { kind: "portal", tenantId }, "decide");
     const decided = await withTenants([tenantId], async (c) => {
-      const clientId = await this.callerClientId(c, req.principal);
+      const { clientIds, projectIds } = await this.callerScope(c, req.principal);
       // WD-29 (DEF-2): this is the CLIENT-side twin of PipelineController.decideGate and it is where
       // BOTH of DEF-2's triggering decisions actually land in production — `prd_sign` and
       // `customer_feedback` are client gates, decided here through the portal. Locking only the
@@ -137,21 +217,24 @@ export class PortalController {
       // is now evaluated under the lock).
       const owner = await c.query<{ run_id: string }>(
         `SELECT g.run_id FROM pipeline_gates g JOIN pipeline_runs r ON g.run_id = r.id
-         WHERE g.id = $1 AND r.client_id = $2 AND g.actor_side = 'client' AND g.deleted_at IS NULL
+         WHERE g.id = $1 AND r.client_id = ANY($2::uuid[]) AND g.actor_side = 'client' AND g.deleted_at IS NULL
            AND r.deleted_at IS NULL`,
-        [id, clientId],
+        [id, clientIds],
       );
       if (!owner.rows[0]) return null;
       await lockPipelineRun(c, owner.rows[0].run_id);
-      // The gate must be a CLIENT-side gate on a run this client owns, and still pending.
-      const res = await c.query<{ run_id: string; kind: string }>(
+      // The gate must be a CLIENT-side gate on a run this client owns, and still pending. Also returns
+      // the run's owner_id/created_by (r is already joined for the ownership check) — D-3's "a client
+      // decides a gate -> notify the internal side" needs exactly that pair and this is the one query
+      // that has both the gate and its run in scope under the lock.
+      const res = await c.query<{ run_id: string; kind: string; owner_id: string | null; created_by: string | null }>(
         `UPDATE pipeline_gates g SET status = 'decided', decision = $2, note = COALESCE($3, note),
            decided_by = $4, decided_at = now(), updated_at = now()
          FROM pipeline_runs r
-         WHERE g.id = $1 AND g.run_id = r.id AND r.client_id = $5
+         WHERE g.id = $1 AND g.run_id = r.id AND r.client_id = ANY($5::uuid[])
            AND g.actor_side = 'client' AND g.status = 'pending' AND g.deleted_at IS NULL
-         RETURNING g.run_id, g.kind`,
-        [id, decision, note ?? null, req.principal.userId, clientId],
+         RETURNING g.run_id, g.kind, r.owner_id, r.created_by`,
+        [id, decision, note ?? null, req.principal.userId, clientIds],
       );
       if (res.rowCount === 0) return null;
       const row = res.rows[0];
@@ -160,6 +243,19 @@ export class PortalController {
     });
     if (!decided) throw new NotFoundException("gate not found, not yours, or already decided");
     await writeActivity(tenantId, req.principal.userId, decision, "pipeline_gate", id, { runId: decided.run_id, kind: decided.kind, via: "portal" });
+    // D-3: notify the internal side — the run's owner, or its creator if no owner is assigned. Best-
+    // effort, AFTER the write stands: a notify() failure must not turn a decision the client already
+    // made into an error response.
+    const internalRecipient = decided.owner_id ?? decided.created_by;
+    if (internalRecipient) {
+      await notifyBestEffort(tenantId, req.principal.userId, [internalRecipient], "pipeline.gate.decided", {
+        title: `Client ${decisionVerb(decision)} ${GATE_KIND_LABEL[decided.kind] ?? "a gate"}`,
+        href: `/pipeline/${decided.run_id}`,
+        entityType: "pipeline_gate",
+        entityId: id,
+        severity: decision === "changes_requested" ? "warning" : "info",
+      });
+    }
     return { id, status: "decided", decision };
   }
 
@@ -173,12 +269,16 @@ export class PortalController {
   ) {
     await authorize(req.principal, { kind: "portal", tenantId }, "sign");
     const result = await withTenants([tenantId], async (c) => {
-      const clientId = await this.callerClientId(c, req.principal);
+      const { clientIds, projectIds } = await this.callerScope(c, req.principal);
       // WD-29 (DEF-2): the client-side scope sign-off — the second of the two events whose near-
       // simultaneous arrival with `prd_sign` produced the duplicate design stages. Same per-run lock
       // as every other transition, taken before the party set is read.
       await lockPipelineRun(c, runId);
-      const run = await c.query(`SELECT 1 FROM pipeline_runs WHERE id = $1 AND client_id = $2 AND deleted_at IS NULL`, [runId, clientId]);
+      const run = await c.query<{ project_id: string | null; owner_id: string | null; created_by: string | null; client_id: string | null }>(
+        `SELECT project_id, owner_id, created_by, client_id FROM pipeline_runs
+          WHERE id = $1 AND client_id = ANY($2::uuid[]) AND deleted_at IS NULL`,
+        [runId, clientIds],
+      );
       if (!run.rows[0]) throw new NotFoundException("run not found");
       // The client always signs the 'client' party. ON CONFLICT keeps it idempotent.
       const ins = await c.query(
@@ -202,9 +302,21 @@ export class PortalController {
         }
         await emitEvent(c, tenantId, "scope", runId, "scope.signed", { runId, parties: [...have] });
       }
-      return { complete, parties: [...have] };
+      // D-3: "scope.signed completes (both parties) -> notify both sides." Resolved on the same
+      // connection as the write, inside the transaction (a plain read); the notify() calls themselves
+      // are deferred until after the transaction commits, below. Mirrors
+      // PipelineController.recordScopeSignoff — see client-notify.ts's notifyScopeSignedBothSides doc.
+      const justCompleted = complete && ins.rowCount === 1;
+      const internalRecipient = justCompleted ? (run.rows[0].owner_id ?? run.rows[0].created_by) : null;
+      const clientRecipients = justCompleted
+        // The run's OWN client, not the caller's whole client set: a contact representing two clients
+        // must not cause the other client's contacts to be notified about this run.
+        ? await resolveClientRecipients(c, { clientId: run.rows[0].client_id, projectId: run.rows[0].project_id, kind: "general" })
+        : [];
+      return { complete, parties: [...have], internalRecipient, clientRecipients };
     });
     await writeActivity(tenantId, req.principal.userId, "signed", "scope_signoff", runId, { party: "client", via: "portal" });
-    return { runId, party: "client", ...result };
+    await notifyScopeSignedBothSides(tenantId, req.principal.userId, runId, result.internalRecipient, result.clientRecipients);
+    return { runId, party: "client", complete: result.complete, parties: result.parties };
   }
 }

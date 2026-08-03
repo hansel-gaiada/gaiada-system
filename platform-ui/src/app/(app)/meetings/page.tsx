@@ -3,18 +3,24 @@ import { redirect } from "next/navigation";
 import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
-import { listRecordings, STATUS_LABEL, DRIVE_LABEL, formatDuration } from "@/lib/meetings";
+import { listRecordings, STATUS_LABEL, DRIVE_LABEL, formatDuration, type RecordingStatus } from "@/lib/meetings";
 import { listPipelineRuns } from "@/lib/pipeline";
+import { listClients, listProjects } from "@/lib/entities";
 import { RecordControls } from "@/components/meetings/RecordControls";
 import { Card, Eyebrow, HairlineTable, StatusBadge } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { formatDateTime } from "@/lib/format";
 
+const RECORDING_STATUSES = Object.keys(STATUS_LABEL) as RecordingStatus[];
+
+// Next 15: searchParams is async.
+type SP = Promise<{ status?: string; clientId?: string; projectId?: string }>;
+
 // WS11 capture edge — meeting-recordings registry. Record a client meeting (audio / audio+video), then
 // every recording is referenceable by the team with its status, Drive state, and linked pipeline run.
 // Degrades gracefully (empty states) until the backend is deployed / the capture helper is installed.
-export default async function MeetingsPage() {
+export default async function MeetingsPage({ searchParams }: { searchParams: SP }) {
   const userId = await getSessionUserId();
   if (!userId) redirect("/login");
   const me = await getMe(userId);
@@ -22,7 +28,17 @@ export default async function MeetingsPage() {
   if (!tenant) {
     return <Card><EmptyNote>Select a company to see its meeting recordings.</EmptyNote></Card>;
   }
-  const recordings = await listRecordings(userId, tenant);
+  const { status, clientId, projectId } = await searchParams;
+
+  // C2: `listRecordings` has taken status/clientId/projectId since it was written
+  // (lib/meetings.ts:82-90) — this page just never passed them through. Client/project dropdowns
+  // are populated from the existing entity lists (already fetched elsewhere in the app; no new
+  // backend call shape).
+  const [recordings, clients, projects] = await Promise.all([
+    listRecordings(userId, tenant, { status: status || undefined, clientId: clientId || undefined, projectId: projectId || undefined }),
+    listClients(userId, tenant),
+    listProjects(userId, tenant).catch(() => []),
+  ]);
   // WD-07: run-status chips — the recording's own status only says "in pipeline"; resolve the
   // linked run's actual delivery status too, so the registry answers "what's happening with it
   // now" without a click-through. Cheap: one extra list call, not per-row.
@@ -46,9 +62,45 @@ export default async function MeetingsPage() {
       </Card>
 
       <div style={{ marginTop: 28 }}>
+        <Card style={{ marginBottom: 20 }}>
+          <form className="lux-filters" method="get" aria-label="Recording filters">
+            <label className="lux-filters__field">
+              <span>Status</span>
+              <select name="status" defaultValue={status ?? ""}>
+                <option value="">All</option>
+                {RECORDING_STATUSES.map((s) => (
+                  <option key={s} value={s}>{STATUS_LABEL[s]}</option>
+                ))}
+              </select>
+            </label>
+            <label className="lux-filters__field">
+              <span>Client</span>
+              <select name="clientId" defaultValue={clientId ?? ""}>
+                <option value="">All</option>
+                {clients.map((c) => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+            </label>
+            <label className="lux-filters__field">
+              <span>Project</span>
+              <select name="projectId" defaultValue={projectId ?? ""}>
+                <option value="">All</option>
+                {projects.map((p) => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
+              </select>
+            </label>
+            <div className="lux-filters__actions">
+              <button type="submit" className="lux-btn lux-btn--solid lux-btn--sm">Apply</button>
+              <a href="/meetings" className="lux-btn lux-btn--ghost lux-btn--sm">Reset</a>
+            </div>
+          </form>
+        </Card>
+
         <Card title="Recordings" headerRight={<span className="dash-pending-chip">{recordings.length}</span>}>
           {recordings.length === 0 ? (
-            <EmptyNote>No recordings yet. Start one above — or register an externally-made recording.</EmptyNote>
+            <EmptyNote>{status || clientId || projectId ? "No recordings match these filters." : "No recordings yet. Start one above — or register an externally-made recording."}</EmptyNote>
           ) : (
             <HairlineTable
               columns={[{ label: "Meeting" }, { label: "Kind" }, { label: "Status" }, { label: "Run" }, { label: "Drive" }, { label: "Length" }, { label: "Recorded", align: "right" }]}

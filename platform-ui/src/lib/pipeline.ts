@@ -11,15 +11,28 @@ import "server-only";
 // and adds pure helpers (blockage text, stage grouping/labels) so the page stays thin.
 //
 // BFF CONTRACT (implemented in platform-nest):
-//   GET  /api/:t/pipeline/runs                 -> PipelineRun[]        (list — no client_id column)
-//   GET  /api/:t/pipeline/runs/:id             -> PipelineRunDetail    (detail — includes client_id)
-//   GET  /api/:t/pipeline/gates?status=&actorSide=&kind=  -> PipelineGate[]
-//   POST /api/:t/pipeline/gates/:id/decide     -> { id, status, decision }   (see pipelineActions)
+//   GET   /api/:t/pipeline/runs?status=         -> PipelineRun[]        (list — no client_id column)
+//   GET   /api/:t/pipeline/runs/:id             -> PipelineRunDetail    (detail — includes client_id)
+//   PATCH /api/:t/pipeline/runs/:id             -> { id, status }       (status only — see pipelineActions)
+//   POST  /api/:t/pipeline/runs/:runId/stages   -> { id, deduped? }
+//   GET   /api/:t/pipeline/gates?status=&actorSide=&kind=  -> PipelineGate[]
+//   POST  /api/:t/pipeline/gates                -> { id, status, deduped? }
+//   POST  /api/:t/pipeline/gates/:id/decide     -> { id, status, decision }   (see pipelineActions)
+//   POST  /api/:t/pipeline/runs/:runId/scope-signoffs -> { runId, party, complete, parties }
 import { platformFetch, PlatformError } from "./platform";
 
 export type RunStatus = "extracting" | "delivery_active" | "report_done" | "scope_pending" | "complete" | "blocked";
 export type GateKind = "prd_review" | "prd_sign" | "pm_review" | "customer_feedback" | "pm_approval" | "scope_signoff";
 export type Track = "delivery" | "report" | "scope";
+export type ActorSide = "internal" | "client";
+export type ScopeParty = "provider" | "client";
+
+// Recovery-tool option lists (mirrors the controller's own validation sets — pipeline.controller.ts's
+// RUN_STATUS/GATE_KINDS/ACTOR_SIDES — so the manual-override forms in the run workspace offer exactly
+// what the backend will accept, nothing more).
+export const RUN_STATUSES: RunStatus[] = ["extracting", "delivery_active", "report_done", "scope_pending", "complete", "blocked"];
+export const ACTOR_SIDES: ActorSide[] = ["internal", "client"];
+export const ALL_GATE_KINDS: GateKind[] = ["prd_review", "prd_sign", "pm_review", "customer_feedback", "pm_approval", "scope_signoff"];
 
 export interface PipelineRun {
   id: string;
@@ -75,6 +88,14 @@ export const TRACK_LABEL: Record<Track, string> = {
   report: "Report",
   scope: "Scope",
 };
+
+// The scope dual-sign — pipeline.controller.ts's REQUIRED_SCOPE_PARTIES. "provider" is the agency's
+// own half (what the run workspace's sign-off form records); "client" arrives via the portal BFF.
+export const SCOPE_PARTIES: ScopeParty[] = ["provider", "client"];
+export const SCOPE_PARTY_LABEL: Record<ScopeParty, string> = {
+  provider: "Agency",
+  client: "Client",
+};
 // Rendering order for the three-track workspace layout (stable regardless of stage insertion order).
 export const TRACK_ORDER: Track[] = ["delivery", "scope", "report"];
 
@@ -98,8 +119,13 @@ async function safe<T>(p: Promise<T>, fallback: T): Promise<T> {
   }
 }
 
-export async function listPipelineRuns(userId: string, tenant: string): Promise<PipelineRun[]> {
-  return safe(platformFetch<PipelineRun[]>(`/api/${tenant}/pipeline/runs`, userId), []);
+// C1: the controller also accepts `status` (and `sourceMeetingId`, not surfaced here — that's the
+// hub's own lookup path). Passing no opts keeps every existing call site's behavior identical.
+export async function listPipelineRuns(userId: string, tenant: string, opts: { status?: string } = {}): Promise<PipelineRun[]> {
+  const q = new URLSearchParams();
+  if (opts.status) q.set("status", opts.status);
+  const qs = q.toString();
+  return safe(platformFetch<PipelineRun[]>(`/api/${tenant}/pipeline/runs${qs ? `?${qs}` : ""}`, userId), []);
 }
 
 export async function getPipelineRun(userId: string, tenant: string, runId: string): Promise<PipelineRunDetail | null> {
@@ -155,4 +181,27 @@ export function describeBlockage(
   if (run.status === "blocked") return { text: "Blocked — needs internal follow-up before it can continue.", pendingGate: null };
   if (run.status === "complete") return { text: "Complete — nothing outstanding.", pendingGate: null };
   return { text: "In progress — no gate is currently open.", pendingGate: null };
+}
+
+export interface ScopeSignoffSummary {
+  complete: boolean;
+  signed: ScopeParty[];
+  outstanding: ScopeParty[];
+  text: string;
+}
+
+// B1 — mirrors recordScopeSignoff's own `complete`/`parties` computation (REQUIRED_SCOPE_PARTIES),
+// so the workspace can word the state honestly the instant the agency's half lands: `complete:false`
+// with only "provider" signed reads as "waiting on the client to counter-sign", not as a stuck run.
+export function summarizeScopeSignoffs(scopeSignoffs: Array<{ party: string }>): ScopeSignoffSummary {
+  const have = new Set(scopeSignoffs.map((s) => s.party));
+  const signed = SCOPE_PARTIES.filter((p) => have.has(p));
+  const outstanding = SCOPE_PARTIES.filter((p) => !have.has(p));
+  const complete = outstanding.length === 0;
+  const text = complete
+    ? "Both parties have signed — the scope agreement is complete."
+    : signed.length === 0
+      ? "Neither party has signed the scope agreement yet."
+      : `Waiting on ${outstanding.map((p) => SCOPE_PARTY_LABEL[p]).join(", ")} to sign.`;
+  return { complete, signed, outstanding, text };
 }

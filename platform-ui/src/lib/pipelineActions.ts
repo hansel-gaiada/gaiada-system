@@ -75,3 +75,102 @@ export async function editStageArtifactAction(formData: FormData): Promise<Pipel
     throw e;
   }
 }
+
+// B1 (gap-assessment §B) — the agency's half of the scope dual-sign. Before this the app had no way
+// to record it at all (only a curl against the backend could); "party" is always "provider" here —
+// the client's own countersignature arrives through the separate portal BFF, never this action.
+// Gated the same as every other elevated pipeline write (`approvals.decide` == company_admin/manager/
+// group_executive), which now matches the backend's `scope_signoff.create` Cerbos rule exactly
+// (widened 2026-08-03 to include `manager` — see resource_scope_signoff.yaml).
+export async function recordScopeSignoffAction(formData: FormData): Promise<PipelineResult> {
+  const c = await ctx();
+  if ("error" in c) return { ok: false, error: c.error };
+  if (!can(c.me, "approvals.decide", c.tenant)) return { ok: false, error: "You don't have permission to record the agency's scope sign-off." };
+  const runId = String(formData.get("runId") ?? "");
+  const signerName = String(formData.get("signerName") ?? "").trim();
+  if (!runId) return { ok: false, error: "runId required." };
+  try {
+    await platformFetch(`/api/${c.tenant}/pipeline/runs/${runId}/scope-signoffs`, c.userId, {
+      method: "POST",
+      body: JSON.stringify({ party: "provider", signerName: signerName || undefined }),
+    });
+    revalidatePath("/pipeline");
+    revalidatePath(`/pipeline/${runId}`);
+    return { ok: true };
+  } catch (e) {
+    if (e instanceof PlatformError) return { ok: false, error: e.message };
+    throw e;
+  }
+}
+
+// B3 — a run-lifecycle recovery tool: park/unblock/re-status a stuck run by hand. Same elevated
+// gate as the rest of this file; the backend's own status enum is the real validation (a bad value
+// 400s and surfaces as a plain message rather than a raw platform error).
+export async function updateRunStatusAction(formData: FormData): Promise<PipelineResult> {
+  const c = await ctx();
+  if ("error" in c) return { ok: false, error: c.error };
+  if (!can(c.me, "approvals.decide", c.tenant)) return { ok: false, error: "You don't have permission to change a run's status." };
+  const runId = String(formData.get("runId") ?? "");
+  const status = String(formData.get("status") ?? "");
+  if (!runId || !status) return { ok: false, error: "runId and status required." };
+  try {
+    await platformFetch(`/api/${c.tenant}/pipeline/runs/${runId}`, c.userId, {
+      method: "PATCH",
+      body: JSON.stringify({ status }),
+    });
+    revalidatePath("/pipeline");
+    revalidatePath(`/pipeline/${runId}`);
+    return { ok: true };
+  } catch (e) {
+    if (e instanceof PlatformError) return { ok: false, error: e.message };
+    throw e;
+  }
+}
+
+// B4 — add a beat by hand when automation didn't create one. Recovery tool, same elevated gate.
+export async function createStageAction(formData: FormData): Promise<PipelineResult> {
+  const c = await ctx();
+  if ("error" in c) return { ok: false, error: c.error };
+  if (!can(c.me, "approvals.decide", c.tenant)) return { ok: false, error: "You don't have permission to add a stage." };
+  const runId = String(formData.get("runId") ?? "");
+  const track = String(formData.get("track") ?? "");
+  const name = String(formData.get("name") ?? "").trim();
+  if (!runId || !track || !name) return { ok: false, error: "runId, track and name required." };
+  try {
+    await platformFetch(`/api/${c.tenant}/pipeline/runs/${runId}/stages`, c.userId, {
+      method: "POST",
+      body: JSON.stringify({ track, name }),
+    });
+    revalidatePath("/pipeline");
+    revalidatePath(`/pipeline/${runId}`);
+    return { ok: true };
+  } catch (e) {
+    if (e instanceof PlatformError) return { ok: false, error: e.message };
+    throw e;
+  }
+}
+
+// B5 — open a review gate manually, the only recovery when a workflow missed one. Recovery tool,
+// same elevated gate.
+export async function openGateAction(formData: FormData): Promise<PipelineResult> {
+  const c = await ctx();
+  if ("error" in c) return { ok: false, error: c.error };
+  if (!can(c.me, "approvals.decide", c.tenant)) return { ok: false, error: "You don't have permission to open a gate." };
+  const runId = String(formData.get("runId") ?? "");
+  const kind = String(formData.get("kind") ?? "");
+  const actorSide = String(formData.get("actorSide") ?? "");
+  const note = String(formData.get("note") ?? "").trim();
+  if (!runId || !kind || !actorSide) return { ok: false, error: "runId, kind and actorSide required." };
+  try {
+    await platformFetch(`/api/${c.tenant}/pipeline/gates`, c.userId, {
+      method: "POST",
+      body: JSON.stringify({ runId, kind, actorSide, note: note || undefined }),
+    });
+    revalidatePath("/pipeline");
+    revalidatePath(`/pipeline/${runId}`);
+    return { ok: true };
+  } catch (e) {
+    if (e instanceof PlatformError) return { ok: false, error: e.message };
+    throw e;
+  }
+}

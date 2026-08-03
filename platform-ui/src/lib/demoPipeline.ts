@@ -130,6 +130,11 @@ const SCOPE_SIGNOFFS: Record<string, { party: string; signer_name: string | null
   "run-demo-2": [],
 };
 
+const REQUIRED_SCOPE_PARTIES = ["provider", "client"];
+let seq = 500;
+const nid = (p: string) => `${p}-${++seq}`;
+const now = () => new Date().toISOString();
+
 // WD-03 (D-3) — SAME convention as platform-nest's PipelineController.updateStage and
 // lib/pipeline.ts's isStageLocked: a stage locks once a DECIDED client gate of a matching kind
 // exists for its run/track. `report` has no entry (never client-signed, never locked).
@@ -186,6 +191,74 @@ export function pipelineDemo(method: string, p: string, params: URLSearchParams,
     if (actorSide) rows = rows.filter((g) => g.actor_side === actorSide);
     if (kind) rows = rows.filter((g) => g.kind === kind);
     return ok(rows);
+  }
+  // B5 — open a gate by hand (the run-workspace recovery form). Mirrors PipelineController.openGate's
+  // dedupe: a pending gate of the same (run, kind, actorSide) is returned instead of duplicated.
+  if (gatesM && m === "POST") {
+    const b = JSON.parse(body || "{}") as { runId?: string; stageId?: string; kind?: string; actorSide?: string; note?: string };
+    if (!b.runId) return { status: 400, json: { error: "runId required" } };
+    if (!b.kind) return { status: 400, json: { error: "invalid gate kind" } };
+    if (!b.actorSide) return { status: 400, json: { error: "actorSide must be internal|client" } };
+    if (!RUNS.find((r) => r.id === b.runId)) return { status: 404, json: { error: "run not found" } };
+    const dup = GATES.find(
+      (g) => g.run_id === b.runId && (g.stage_id ?? null) === (b.stageId ?? null) && g.kind === b.kind && g.actor_side === b.actorSide && g.status === "pending",
+    );
+    if (dup) return { status: 201, json: { id: dup.id, status: "pending", deduped: true } };
+    const gate: DemoGate = {
+      id: nid("gt"), run_id: b.runId, stage_id: b.stageId ?? null, kind: b.kind,
+      actor_side: b.actorSide as "internal" | "client", status: "pending", decision: null,
+      note: b.note ?? null, decided_by: null, decided_at: null, created_at: now(),
+    };
+    GATES.push(gate);
+    return { status: 201, json: { id: gate.id, status: "pending" } };
+  }
+
+  // B3 — park/unblock/re-status a run by hand (the run-workspace recovery form).
+  const runStatusM = p.match(/^\/api\/[^/]+\/pipeline\/runs\/([^/]+)$/);
+  if (runStatusM && m === "PATCH") {
+    const run = RUNS.find((r) => r.id === runStatusM[1]);
+    if (!run) return { status: 404, json: { error: "run not found" } };
+    const b = JSON.parse(body || "{}") as { status?: string };
+    if (b.status) run.status = b.status;
+    run.updated_at = now();
+    return ok({ id: run.id, status: run.status });
+  }
+
+  // B4 — add a beat by hand when automation didn't create one (the run-workspace recovery form).
+  const createStageM = p.match(/^\/api\/[^/]+\/pipeline\/runs\/([^/]+)\/stages$/);
+  if (createStageM && m === "POST") {
+    const run = RUNS.find((r) => r.id === createStageM[1]);
+    if (!run) return { status: 404, json: { error: "run not found" } };
+    const b = JSON.parse(body || "{}") as { track?: DemoStage["track"]; name?: string; status?: DemoStage["status"]; artifactRef?: string; confidence?: number };
+    if (!b.track) return { status: 400, json: { error: "track must be delivery|report|scope" } };
+    if (!b.name) return { status: 400, json: { error: "name required" } };
+    const stage: DemoStage = {
+      id: nid("stg"), run_id: run.id, track: b.track, name: b.name, status: b.status ?? "pending",
+      artifact_ref: b.artifactRef ?? null, confidence: b.confidence ?? null, updated_at: now(),
+    };
+    STAGES.push(stage);
+    return { status: 201, json: { id: stage.id } };
+  }
+
+  // B1 — the agency's half of the scope dual-sign. Mirrors recordScopeSignoff: one row per
+  // (run, party), a re-file is a no-op, `complete` reflects both parties having signed.
+  const scopeSignoffM = p.match(/^\/api\/[^/]+\/pipeline\/runs\/([^/]+)\/scope-signoffs$/);
+  if (scopeSignoffM && m === "POST") {
+    const run = RUNS.find((r) => r.id === scopeSignoffM[1]);
+    if (!run) return { status: 404, json: { error: "run not found" } };
+    const b = JSON.parse(body || "{}") as { party?: string; gateId?: string; signerName?: string; signatureRef?: string };
+    if (!b.party) return { status: 400, json: { error: "party required" } };
+    const list = SCOPE_SIGNOFFS[run.id] ?? (SCOPE_SIGNOFFS[run.id] = []);
+    if (!list.some((s) => s.party === b.party)) {
+      list.push({ party: b.party, signer_name: b.signerName ?? null, signed_at: now() });
+    }
+    const parties = list.map((s) => s.party);
+    const complete = REQUIRED_SCOPE_PARTIES.every((p2) => parties.includes(p2));
+    if (complete) {
+      const gate = GATES.find((g) => g.run_id === run.id && g.kind === "scope_signoff" && g.status === "pending");
+      if (gate) { gate.status = "decided"; gate.decision = "signed"; gate.decided_by = "demo-hansel"; gate.decided_at = now(); }
+    }
+    return { status: 201, json: { runId: run.id, party: b.party, complete, parties } };
   }
 
   const detailM = p.match(/^\/api\/[^/]+\/pipeline\/runs\/([^/]+)$/);

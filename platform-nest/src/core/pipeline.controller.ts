@@ -17,6 +17,7 @@ import { authorize, writeActivity } from "./http";
 import { emitEvent } from "../events/outbox.service";
 import { AuthGuard } from "../auth/guards";
 import { lockPipelineRun } from "./pipeline-lock";
+import { clientNotifyKindForGate, notifyBestEffort, notifyScopeSignedBothSides, resolveClientRecipients } from "./client-notify";
 
 const TRACKS = new Set(["delivery", "report", "scope"]);
 const RUN_STATUS = new Set(["extracting", "delivery_active", "report_done", "scope_pending", "complete", "blocked"]);
@@ -36,6 +37,19 @@ const REQUIRED_SCOPE_PARTIES = ["provider", "client"] as const;
 const CLIENT_SIGN_GATE_KIND_BY_TRACK: Partial<Record<string, string[]>> = {
   delivery: ["prd_sign", "customer_feedback"],
   scope: ["scope_signoff"],
+};
+
+// D-3 — the notification title shown to a client contact when a client-actionable gate opens on
+// their run. Deliberately NOT sent for a stage artifact simply landing (e.g. a stage flipping to
+// 'done' with a fresh artifactRef): the gate that follows it is the actionable event, and a separate
+// "your PRD draft is ready" notice ahead of "please sign your PRD" would be noise the client has to
+// read twice for one decision — the owner's own "three notifications that matter, not six that get
+// ignored" guidance. Falls back to a generic line for any client-side kind not listed (there is none
+// today per CLIENT_SIGN_GATE_KIND_BY_TRACK, but a future kind must not silently notify with `undefined`).
+const CLIENT_GATE_OPEN_TITLE: Partial<Record<string, string>> = {
+  prd_sign: "Your signature is needed on the PRD",
+  scope_signoff: "Your signature is needed on the Scope Agreement",
+  customer_feedback: "We'd like your feedback",
 };
 
 // WD-29 (DEF-2) — stage IDENTITY classes. Read pipeline-lock.ts first for the defect and the lock
@@ -382,7 +396,9 @@ export class PipelineController {
     const id = newId();
     const opened = await withTenants([tenantId], async (c) => {
       await lockPipelineRun(c, runId);
-      const run = await c.query(`SELECT 1 FROM pipeline_runs WHERE id = $1 AND deleted_at IS NULL`, [runId]);
+      const run = await c.query<{ client_id: string | null; project_id: string | null }>(
+        `SELECT client_id, project_id FROM pipeline_runs WHERE id = $1 AND deleted_at IS NULL`, [runId],
+      );
       if (!run.rows[0]) throw new NotFoundException("run not found");
       // WD-29 (DEF-2): gate-opens race exactly like stage-creates — every `open_gate` branch in
       // `Load + decide` is guarded by a snapshot existence test (`!has('customer_feedback', design.id)`),
@@ -400,19 +416,38 @@ export class PipelineController {
          ORDER BY created_at ASC, id ASC LIMIT 1`,
         [runId, stageId ?? null, kind, actorSide],
       );
-      if (dup.rows[0]) return { id: dup.rows[0].id, deduped: true as const };
+      if (dup.rows[0]) return { id: dup.rows[0].id, deduped: true as const, recipients: [] as string[] };
       await c.query(
         `INSERT INTO pipeline_gates (id, tenant_id, run_id, stage_id, kind, actor_side, note, opened_by, origin_site)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
         [id, tenantId, runId, stageId ?? null, kind, actorSide, note ?? null, req.principal.userId, config.originSite],
       );
       await emitEvent(c, tenantId, "pipeline_gate", id, "pipeline.gate.opened", { runId, kind, actorSide });
-      return { id, deduped: false as const };
+      // D-3: this is the "a client-actionable gate opens" trigger. Resolved on the SAME connection,
+      // inside the transaction, because it is a plain read (no write) — the actual notify() calls are
+      // deferred until after the transaction commits (see below), same as every other notify() call
+      // site in this file's siblings (collab.controller.ts, client-contacts.controller.ts).
+      const recipients = actorSide === "client"
+        ? await resolveClientRecipients(c, { clientId: run.rows[0].client_id, projectId: run.rows[0].project_id, kind: clientNotifyKindForGate(kind) })
+        : [];
+      return { id, deduped: false as const, recipients };
     });
     // No activity row (and no event, above) for a suppressed duplicate — nothing was opened, and a
-    // phantom "opened" would misreport the audit trail as if a second beat had really been created.
+    // phantom "opened" would misreport the audit trail as if a second beat had really been created; the
+    // client was already told about the original gate, so notifying again here would be a duplicate.
     if (opened.deduped) return { id: opened.id, status: "pending", deduped: true };
     await writeActivity(tenantId, req.principal.userId, "opened", "pipeline_gate", id, { runId, kind, actorSide });
+    // Best-effort, AFTER the write stands: a notify() failure here must not turn a real gate-open into
+    // a 500 the caller (an n8n workflow) might retry into a duplicate.
+    if (opened.recipients.length) {
+      await notifyBestEffort(tenantId, req.principal.userId, opened.recipients, "pipeline.gate.opened", {
+        title: CLIENT_GATE_OPEN_TITLE[kind] ?? "Action needed on your project",
+        href: "/portal",
+        entityType: "pipeline_gate",
+        entityId: id,
+        severity: clientNotifyKindForGate(kind) === "signature" ? "warning" : "info",
+      });
+    }
     return { id, status: "pending" };
   }
 
@@ -493,6 +528,15 @@ export class PipelineController {
   ) {
     const { party, gateId, signerName, signatureRef } = body ?? {};
     if (!party) throw new BadRequestException("party required");
+    // VALIDATE against the required set, not merely for truthiness. Found the hard way during a live
+    // server walk: `{party:"agency"}` was accepted, stored, and returned `complete:false` — which
+    // looked exactly like "correctly waiting on the client" while actually recording a signature that
+    // can NEVER satisfy `REQUIRED_SCOPE_PARTIES.every(...)`. A typo'd or well-meant-but-wrong party
+    // silently produces a run that can never complete its scope agreement, and nothing anywhere says
+    // so. The unique index is on (run_id, party), so the junk row also permanently occupies a slot.
+    if (!(REQUIRED_SCOPE_PARTIES as readonly string[]).includes(party)) {
+      throw new BadRequestException(`party must be one of ${REQUIRED_SCOPE_PARTIES.join("|")}`);
+    }
     await authorize(req.principal, { kind: "scope_signoff", tenantId }, "create");
     const result = await withTenants([tenantId], async (c) => {
       // WD-29: `scope.signed` is one of DEF-2's two triggering events, and this handler decides
@@ -501,7 +545,9 @@ export class PipelineController {
       // "complete" and emit `scope.signed` twice (which would start two delivery executions from a
       // single sign-off, the exact fan-out that produced the duplicate design stages).
       await lockPipelineRun(c, runId);
-      const run = await c.query(`SELECT 1 FROM pipeline_runs WHERE id = $1 AND deleted_at IS NULL`, [runId]);
+      const run = await c.query<{ client_id: string | null; project_id: string | null; owner_id: string | null; created_by: string | null }>(
+        `SELECT client_id, project_id, owner_id, created_by FROM pipeline_runs WHERE id = $1 AND deleted_at IS NULL`, [runId],
+      );
       if (!run.rows[0]) throw new NotFoundException("run not found");
       // One signature per party (unique (run_id, party)); a re-file is a no-op, not a 500.
       const ins = await c.query(
@@ -532,9 +578,18 @@ export class PipelineController {
         }
         await emitEvent(c, tenantId, "scope", runId, "scope.signed", { runId, parties: [...have] });
       }
-      return { complete, parties: [...have] };
+      // D-3: "scope.signed completes (both parties) -> notify both sides." Resolved on the same
+      // connection as the write, inside the transaction (a plain read); the notify() calls themselves
+      // are deferred until after the transaction commits, below.
+      const internalRecipient = justCompleted ? (run.rows[0].owner_id ?? run.rows[0].created_by) : null;
+      const clientRecipients = justCompleted
+        ? await resolveClientRecipients(c, { clientId: run.rows[0].client_id, projectId: run.rows[0].project_id, kind: "general" })
+        : [];
+      return { complete, parties: [...have], internalRecipient, clientRecipients };
     });
     await writeActivity(tenantId, req.principal.userId, "signed", "scope_signoff", runId, { party });
-    return { runId, party, ...result };
+    // Best-effort, AFTER the write stands (see client-notify.ts's notifyScopeSignedBothSides doc).
+    await notifyScopeSignedBothSides(tenantId, req.principal.userId, runId, result.internalRecipient, result.clientRecipients);
+    return { runId, party, complete: result.complete, parties: result.parties };
   }
 }

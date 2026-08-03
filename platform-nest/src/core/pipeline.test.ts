@@ -378,4 +378,54 @@ describe.skipIf(!TEST_URL)("meeting-to-delivery pipeline surface (WS11 §4B)", (
       expect(edited.statusCode).toBe(200);
     });
   });
+
+  // The junk-party defect, found on a live server walk rather than by reading the code: `party` was
+  // checked only for truthiness, so an arbitrary string was accepted and stored. The response then
+  // read `complete:false` — indistinguishable from a correct "waiting on the other party" — while the
+  // run could never complete, because the recorded party satisfies neither entry of
+  // REQUIRED_SCOPE_PARTIES. The unique index is on (run_id, party), so the junk row also permanently
+  // occupies a slot that the real party can no longer use under a different spelling.
+  describe("scope sign-off: party is validated, not merely present", () => {
+    it("refuses a party outside provider|client with a 400", async () => {
+      const r = await app.inject({
+        method: "POST",
+        url: `/api/${co}/pipeline/runs/${runId}/scope-signoffs`,
+        headers: asUser(admin),
+        payload: { party: "agency", signerName: "Someone" },
+      });
+      expect(r.statusCode).toBe(400);
+      expect(r.json().error).toMatch(/provider\|client/);
+    });
+
+    it("still accepts the two real parties, and only both together complete the run", async () => {
+      // Its OWN run: the shared `runId` already carries sign-offs from earlier tests, so reusing it
+      // would assert against whatever state those left behind rather than against this behaviour.
+      const created = await app.inject({
+        method: "POST",
+        url: `/api/${co}/pipeline/runs`,
+        headers: asUser(admin),
+        payload: { title: "party-validation run" },
+      });
+      expect(created.statusCode).toBe(201);
+      const freshRun = created.json().id;
+
+      const first = await app.inject({
+        method: "POST",
+        url: `/api/${co}/pipeline/runs/${freshRun}/scope-signoffs`,
+        headers: asUser(admin),
+        payload: { party: "provider", signerName: "Agency PM" },
+      });
+      expect(first.statusCode).toBe(201);
+      expect(first.json()).toMatchObject({ complete: false });
+
+      const second = await app.inject({
+        method: "POST",
+        url: `/api/${co}/pipeline/runs/${freshRun}/scope-signoffs`,
+        headers: asUser(admin),
+        payload: { party: "client", signerName: "Client Lead" },
+      });
+      expect(second.statusCode).toBe(201);
+      expect(second.json()).toMatchObject({ complete: true });
+    });
+  });
 });

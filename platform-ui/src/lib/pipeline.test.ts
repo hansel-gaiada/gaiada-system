@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { describeBlockage, groupStagesByTrack, humanizeStageName, isStageLocked, type PipelineGate, type PipelineStage } from "./pipeline";
+import { describeBlockage, groupStagesByTrack, humanizeStageName, isStageLocked, summarizeScopeSignoffs, type PipelineGate, type PipelineStage } from "./pipeline";
 
 function gate(over: Partial<PipelineGate>): PipelineGate {
   return {
@@ -93,5 +93,39 @@ describe("isStageLocked", () => {
       gate({ kind: "scope_signoff", actor_side: "client", status: "decided" }),
     ];
     expect(isStageLocked(report, gates)).toBe(false);
+  });
+});
+
+// B1 — mirrors PipelineController.recordScopeSignoff's own `complete`/`parties` computation
+// (REQUIRED_SCOPE_PARTIES = ["provider", "client"]), so a UI regression here would silently
+// misword the state a manager sees right after recording the agency's half.
+describe("summarizeScopeSignoffs", () => {
+  it("says neither party has signed when the list is empty", () => {
+    const out = summarizeScopeSignoffs([]);
+    expect(out.complete).toBe(false);
+    expect(out.signed).toEqual([]);
+    expect(out.outstanding).toEqual(["provider", "client"]);
+    expect(out.text).toMatch(/neither party/i);
+  });
+
+  it("reads as 'waiting on the client' once only the agency (provider) has signed — never 'stuck'", () => {
+    const out = summarizeScopeSignoffs([{ party: "provider" }]);
+    expect(out.complete).toBe(false);
+    expect(out.signed).toEqual(["provider"]);
+    expect(out.outstanding).toEqual(["client"]);
+    expect(out.text).toBe("Waiting on Client to sign.");
+  });
+
+  it("reads as 'waiting on the agency' if only the client has somehow signed first", () => {
+    const out = summarizeScopeSignoffs([{ party: "client" }]);
+    expect(out.outstanding).toEqual(["provider"]);
+    expect(out.text).toBe("Waiting on Agency to sign.");
+  });
+
+  it("is complete once both parties have signed", () => {
+    const out = summarizeScopeSignoffs([{ party: "provider" }, { party: "client" }]);
+    expect(out.complete).toBe(true);
+    expect(out.outstanding).toEqual([]);
+    expect(out.text).toMatch(/complete/i);
   });
 });
