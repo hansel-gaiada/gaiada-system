@@ -26,6 +26,10 @@ export const DEVICE_KINDS: DeviceKind[] =
 export type DeviceStatus = "online" | "offline" | "degraded" | "unknown";
 export const DEVICE_STATUSES: DeviceStatus[] = ["online", "offline", "degraded", "unknown"];
 
+export type DeviceClass = "infrastructure" | "managed" | "byod";
+export const DEVICE_CLASSES: DeviceClass[] = ["infrastructure", "managed", "byod"];
+export type DiscoverySource = "manual" | "unifi";
+
 export interface Device {
   id: string;
   name: string;
@@ -42,6 +46,38 @@ export interface Device {
   registeredAt?: string | null;
   uptimeSec?: number | null;
   labels?: string[];
+  // IT-01 network-discovery fields. Absent on a backend that predates migration 0071, so every
+  // consumer must treat them as optional rather than assuming a discovered estate.
+  discoverySource?: DiscoverySource;
+  deviceClass?: DeviceClass;
+  hostname?: string | null;
+  isWired?: boolean | null;
+  ssid?: string | null;
+  uplinkMac?: string | null;
+  uplinkPort?: number | null;
+  lastSeenAt?: string | null;
+  firstSeenAt?: string | null;
+}
+
+// ---- Topology (IT-05, server-computed) ----
+export interface DeviceLink {
+  childDeviceId: string;
+  parentDeviceId: string;
+  port: number | null;
+  medium: "wired" | "wireless" | "unknown";
+}
+export interface DiscoveryRun {
+  startedAt: string | null;
+  finishedAt: string | null;
+  ok: boolean;
+  devicesSeen: number;
+  byodCount: number;
+  error: string | null;
+}
+export interface TopologyResponse {
+  devices: Device[];
+  links: DeviceLink[];
+  lastRun: DiscoveryRun | null;
 }
 
 export type DeviceEventType = "registered" | "online" | "offline" | "degraded" | "alert" | "heartbeat";
@@ -85,8 +121,27 @@ async function skipUnavailable<T>(p: Promise<T>, fallback: T): Promise<T> {
 }
 
 // ---- Devices ----
-export const listDevices = (u: string, t: string) =>
-  skipUnavailable(platformFetch<Device[]>(`/api/${t}/it/devices`, u), [] as Device[]);
+export const listDevices = (u: string, t: string, q: { deviceClass?: string; q?: string } = {}) => {
+  const qs = new URLSearchParams({
+    ...(q.deviceClass ? { deviceClass: q.deviceClass } : {}),
+    ...(q.q ? { q: q.q } : {}),
+  }).toString();
+  return skipUnavailable(
+    platformFetch<Device[]>(`/api/${t}/it/devices${qs ? `?${qs}` : ""}`, u),
+    [] as Device[],
+  );
+};
+
+// Server-computed graph. Falls back to a devices-only shape so the page still renders (grouped, via
+// buildTopology) against a backend that predates the endpoint.
+export async function getTopology(u: string, t: string): Promise<TopologyResponse> {
+  try {
+    return await platformFetch<TopologyResponse>(`/api/${t}/it/topology`, u);
+  } catch (e) {
+    if (!(e instanceof PlatformError && (e.status === 404 || e.status === 403 || e.status === 405))) throw e;
+    return { devices: await listDevices(u, t), links: [], lastRun: null };
+  }
+}
 
 export async function getDevice(u: string, t: string, id: string): Promise<DeviceDetail | null> {
   try {
@@ -161,6 +216,113 @@ export function buildTopology(devices: Device[]): TopologySite[] {
           devices: devs.slice().sort((x, y) => x.name.localeCompare(y.name)),
         })),
     }));
+}
+
+// ---- Real topology graph (IT-06) ----
+export interface TopoNode {
+  device: Device;
+  medium: DeviceLink["medium"] | null;
+  port: number | null;
+  children: TopoNode[];
+}
+export interface TopoGraph {
+  roots: TopoNode[];
+  /** Devices with no uplink edge in either direction — normal on a first poll, and the home of
+   *  every hand-registered device (nothing reports an uplink for those). Shown in its own bucket
+   *  rather than silently omitted, so the map never hides part of the estate. */
+  unlinked: Device[];
+}
+
+/**
+ * Turn the flat (devices, links) pair into a forest. Replaces the old client-side buildTopology()
+ * regroup, which could only bucket rows by two free-text strings and had no way to express an
+ * uplink at all.
+ *
+ * Defensive against a link set that doesn't describe a clean tree: a child whose parent is missing
+ * from `devices` is treated as a root, and a cycle is broken rather than recursed into (each child
+ * has at most one parent by DB constraint, so only a ring could do it — but a ring would hang the
+ * render, so it is guarded explicitly).
+ */
+export function buildGraph(devices: Device[], links: DeviceLink[]): TopoGraph {
+  const byId = new Map(devices.map((d) => [d.id, d]));
+  const parentOf = new Map<string, DeviceLink>();
+  const childrenOf = new Map<string, DeviceLink[]>();
+  for (const l of links) {
+    if (!byId.has(l.childDeviceId) || !byId.has(l.parentDeviceId)) continue;
+    parentOf.set(l.childDeviceId, l);
+    const arr = childrenOf.get(l.parentDeviceId) ?? [];
+    arr.push(l);
+    childrenOf.set(l.parentDeviceId, arr);
+  }
+
+  const inGraph = new Set<string>();
+  for (const l of links) {
+    if (byId.has(l.childDeviceId) && byId.has(l.parentDeviceId)) {
+      inGraph.add(l.childDeviceId);
+      inGraph.add(l.parentDeviceId);
+    }
+  }
+
+  const build = (id: string, medium: DeviceLink["medium"] | null, port: number | null, seen: Set<string>): TopoNode => {
+    const kids = (childrenOf.get(id) ?? [])
+      .filter((l) => !seen.has(l.childDeviceId))
+      .sort((a, b) => (byId.get(a.childDeviceId)!.name).localeCompare(byId.get(b.childDeviceId)!.name));
+    const next = new Set(seen).add(id);
+    return {
+      device: byId.get(id)!,
+      medium,
+      port,
+      children: kids.map((l) => build(l.childDeviceId, l.medium, l.port, next)),
+    };
+  };
+
+  const roots = devices
+    .filter((d) => inGraph.has(d.id) && !parentOf.has(d.id))
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .map((d) => build(d.id, null, null, new Set<string>()));
+
+  const unlinked = devices
+    .filter((d) => !inGraph.has(d.id))
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  return { roots, unlinked };
+}
+
+/** Total devices in a forest — used to prove the graph accounts for every row it was given. */
+export function countNodes(nodes: TopoNode[]): number {
+  return nodes.reduce((n, node) => n + 1 + countNodes(node.children), 0);
+}
+
+/**
+ * Is the discovery feed stale? THE POINT: without this, a dead collector and an empty network render
+ * identically, and an operator reads silence as "all clear". No run at all is stale by definition.
+ */
+export function isDiscoveryStale(
+  run: DiscoveryRun | null,
+  now: Date = new Date(),
+  thresholdMs = 15 * 60 * 1000,
+): boolean {
+  if (!run) return true;
+  if (!run.ok) return true;
+  const stamp = run.finishedAt ?? run.startedAt;
+  if (!stamp) return true;
+  const t = new Date(stamp).getTime();
+  if (Number.isNaN(t)) return true;
+  return now.getTime() - t > thresholdMs;
+}
+
+/** "4 min ago" / "just now" / "never" — plain relative wording for the sync indicator. */
+export function describeLastSync(run: DiscoveryRun | null, now: Date = new Date()): string {
+  const stamp = run?.finishedAt ?? run?.startedAt;
+  if (!stamp) return "never";
+  const t = new Date(stamp).getTime();
+  if (Number.isNaN(t)) return "unknown";
+  const mins = Math.floor(Math.max(0, now.getTime() - t) / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins} min ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.floor(hrs / 24)}d ago`;
 }
 
 export interface GraphNode { name: string; type: string; x: number; y: number }

@@ -359,6 +359,48 @@ anywhere real.
 ---
 
 ## platform-nest
+### [0.9.0] — 2026-08-03 · PROTOTYPED (IT network discovery + the device write half)
+
+Migration `0071`. **The reported bug was not a bug.** "IT > Topology doesn't show all the devices in
+the network" — measured against the real office network the same day: SSID `GDA`, `10.10.0.0/22`,
+**~58 live hosts** behind a UniFi OS gateway at `10.10.0.1`. The ERP held **8 rows**, all hand-seeded
+fiction on a `10.0.x.x` range that does not exist here, and a codebase-wide grep for
+UniFi/SNMP/ARP/mDNS discovery returned **zero hits**. The feature never existed.
+
+- **The ERP cannot poll the controller — verified, not assumed.** `10.10.0.1` is RFC1918 behind office
+  NAT; `curl` from `gda-aicenter` returns HTTP `000`. Discovery is therefore a **push**:
+  `POST /api/:t/it/discovery/report`, fed by `it-site-collector` (**not built** — blocked on a
+  read-only UniFi API key and an always-on office host).
+- `GET /api/:t/it/topology` — server-computed `{ devices, links, lastRun }`. `lastRun` is load-bearing:
+  a **dead collector** and an **empty network** otherwise render identically.
+- `PATCH` + `DELETE /api/:t/it/devices/:id` — the edit/delete half `0019_it_devices.sql` and
+  `lib/it.ts` both promised and that was never built. `deleted_at` was filtered on by every query and
+  written by nothing, so devices were immortal.
+- **Status is now derived** from `last_seen_at` freshness (dark-by-default reaper). Nothing had ever
+  called the heartbeat endpoint, so every UI-registered device kept the DB default `unknown` forever
+  and rendered grey.
+- New tables `it_device_links` (resolved edges) + `it_discovery_runs` (audit/staleness), both
+  FORCE-RLS; the classify backfill is wrapped per tenant so it cannot silently no-op.
+
+Three measured facts drove the design: **MAC is not an identity** (~60% of observed MACs are
+randomized, so upserts key on UniFi's stable client id); **ICMP undercounts 5×** (12 of 58 hosts
+answer ping, so liveness comes from the controller's client table, never a probe); and **BYOD is
+counted, never stored** — ~25 of the 58 hosts are personal phones whose hostnames name staff outright,
+so persisting them would build a presence log of named employees, which CLAUDE.md forbids before legal
+Gate 1. Classification is recomputed server-side so a mis-set collector cannot launder them in.
+
+Discovered rows carry an `overrides` layer so an operator's correction survives the next poll instead
+of reverting ~5 minutes later. Seed fiction is now off by default (`SEED_DEMO_DEVICES=1`) and labelled
+`demo-fixture`.
+
+Deliberate deviation from the design doc: ingest authorizes on the existing Cerbos `create` action,
+not a new `discover` one — a new action is a silent DENY until Cerbos restarts, and `create` is
+already scoped to `company_admin`/`it_staff`.
+
+Verified: 34 IT tests (20 pure + 14 against live Postgres + Cerbos incl. `0071`); full suite
+2628 passed / 4 skipped / 0 failed; `tsc` clean; both migration lints clean. Carried forward: the live
+tenant's 8 seeded rows still need purging (per-tenant SQL in the design doc §12).
+
 ### [0.6.3] — 2026-07-27 · PROTOTYPED (systems-console write levers)
 - **NEW `PUT` + `DELETE /api/admin/gateway/config`** — proxies the gateway's new config-write route.
   The gateway owns validation/bounds/persistence; this layer re-throws its 4xx VERBATIM (400 bounds,
@@ -442,6 +484,27 @@ anywhere real.
 - **Unreleased / next:** identity writes, org-structure endpoints.
 
 ## platform-ui
+### [0.10.0] — 2026-08-03 · PROTOTYPED (real IT topology + device edit/remove)
+
+Pairs with platform-nest `0.8.0`.
+
+- **Topology** now draws the real graph — gateway → access point/switch → device — from the resolved
+  edge set, replacing a `buildTopology()` that could only regroup rows by two free-text strings and
+  had no way to express an uplink. Falls back to the old site→network grouping while no edges exist,
+  so today's view is unchanged until a collector reports.
+- A **sync banner** states the feed's age, host count and BYOD aggregate, and says plainly when
+  nothing has ever reported. Without it an operator reads silence as "all clear".
+- Devices with no resolved uplink get their own bucket rather than being omitted — hand-registered
+  devices never report one, so hiding them would make the map disagree with the device list.
+- **Device edit + remove** (neither existed). On a discovered row the collector-owned facts
+  (`ip`/`mac`/`hostname`/`status`) are hidden because the API rejects them; descriptive fields are
+  kept in an overrides layer and survive the next sync.
+- Devices tab gains search (name/hostname/IP/MAC), a class filter, a discovered-vs-manual badge, and a
+  50-row cap with "Show all" — the table was unusable at a real estate's ~58 rows.
+
+New `Device` fields are all optional, so the UI still renders against a backend without `0071`.
+Verified: 939 unit tests pass, `tsc` clean, `next build` green. Not driven in a browser.
+
 ### [0.6.5] — 2026-07-27 · PROTOTYPED (console write controls)
 - **Gateway config is editable** where the gateway says it is: new `OverridableConfigField` renders a
   save per writable key AND the one fact a plain form can't express — whether the value is a console

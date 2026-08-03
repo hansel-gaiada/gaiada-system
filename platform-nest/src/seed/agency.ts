@@ -274,12 +274,29 @@ async function seedPm(tenantId: string, projectId: string, u: Record<string, str
 }
 
 // ---- IT devices + events ----
+//
+// IT-07: THESE DEVICES ARE FICTION AND ARE NOW OFF BY DEFAULT.
+//
+// They were the direct cause of "IT > Topology doesn't show all the devices in the network": the
+// seed planted 8 invented devices at "Bali Office" on 10.0.0.x / 10.0.10.x / 10.0.20.x — an address
+// range that does not exist in the real office (measured 2026-08-03: 10.10.0.0/22, ~58 hosts, a
+// UniFi OS gateway at 10.10.0.1). Because it also modelled VLAN1/10/20 segmentation the real network
+// does not have, the page looked plausibly populated and correct while describing nothing real,
+// which is worse than an empty state: an empty map prompts a question, a fake one doesn't.
+//
+// Real inventory now comes from network discovery (POST /api/:t/it/discovery/report, fed by
+// it-site-collector). Set SEED_DEMO_DEVICES=1 to get the fixtures back for a demo or a screenshot.
+// Rows created this way are labelled 'demo-fixture' so they can be purged by an exact predicate
+// instead of by guessing which names look invented.
+const SEED_DEMO_DEVICES = process.env.SEED_DEMO_DEVICES === "1" || process.env.SEED_DEMO_DEVICES === "true";
+
 async function seedIt(tenantId: string, resortId: string) {
+  if (!SEED_DEMO_DEVICES) return;
   if (await count(tenantId, "it_devices") === 0) {
     await withTenants([tenantId], async (c) => {
       const dev = (name: string, kind: string, status: string, net: string, ip: string, hb: string, extra = "") =>
-        c.query(`INSERT INTO it_devices (id,tenant_id,name,kind,status,site,network,ip,vendor,heartbeats,last_heartbeat_at,uptime_sec,origin_site)
-          VALUES ($1,$2,$3,$4,$5,'Bali Office',$6,$7,$8,$9,now(),$10,$11) RETURNING id`,
+        c.query(`INSERT INTO it_devices (id,tenant_id,name,kind,status,site,network,ip,vendor,heartbeats,last_heartbeat_at,uptime_sec,origin_site,labels)
+          VALUES ($1,$2,$3,$4,$5,'Bali Office',$6,$7,$8,$9,now(),$10,$11,ARRAY['demo-fixture']) RETURNING id`,
           [newId(), tenantId, name, kind, status, net, ip, extra || "Generic", `{${hb}}`, 90000, site()]);
       await dev("Edge Router", "network", "online", "Core / VLAN1", "10.0.0.1", "100,100,100,100,100", "MikroTik");
       await dev("Core Switch", "network", "online", "Core / VLAN1", "10.0.0.2", "100,100,100,100,100", "UniFi");
@@ -296,8 +313,8 @@ async function seedIt(tenantId: string, resortId: string) {
     });
   }
   if (await count(resortId, "it_devices") === 0) {
-    await withTenants([resortId], (c) => c.query(`INSERT INTO it_devices (id,tenant_id,name,kind,status,site,network,ip,vendor,origin_site)
-      VALUES ($1,$2,'Lobby CCTV','cctv','online','Sanur Resort','CCTV','10.1.20.5','Hikvision',$3),($4,$2,'Front Desk PC','workstation','online','Sanur Resort','LAN','10.1.10.5','HP',$3)`,
+    await withTenants([resortId], (c) => c.query(`INSERT INTO it_devices (id,tenant_id,name,kind,status,site,network,ip,vendor,origin_site,labels)
+      VALUES ($1,$2,'Lobby CCTV','cctv','online','Sanur Resort','CCTV','10.1.20.5','Hikvision',$3,ARRAY['demo-fixture']),($4,$2,'Front Desk PC','workstation','online','Sanur Resort','LAN','10.1.10.5','HP',$3,ARRAY['demo-fixture'])`,
       [newId(), resortId, site(), newId()]));
   }
 }

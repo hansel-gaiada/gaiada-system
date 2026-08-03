@@ -6,10 +6,11 @@ import type { ModuleContract } from "../contract";
 
 export const itModule: ModuleContract = {
   key: "it",
-  migrations: ["0019_it_devices.sql"],
+  migrations: ["0019_it_devices.sql", "0071_it_network_discovery.sql"],
   permissions: [
     { key: "it:device:read", description: "View IT devices" },
     { key: "it:device:manage", description: "Register/edit devices, ingest heartbeats" },
+    { key: "it:discovery:report", description: "Push a network-discovery report (site collector)" },
   ],
   customFieldTargets: [],
   mcpTools: [

@@ -11,6 +11,9 @@ import { DescriptionList } from "@/components/DescriptionList";
 import { EmptyNote } from "@/components/systems/EmptyNote";
 import { LineChart } from "@/components/LineChart";
 import { DeviceStatus } from "@/components/it/DeviceStatus";
+import { DeviceEditor } from "@/components/it/DeviceEditor";
+import { canManageIT } from "@/components/shell/nav";
+import { updateDevice, deleteDevice } from "../actions";
 
 type Params = Promise<{ deviceId: string }>;
 
@@ -44,18 +47,25 @@ export default async function DeviceDetailPage({ params }: { params: Params }) {
   const device = await getDevice(userId, tenant, deviceId);
   if (!device) return shell("Device not found", <EmptyNote>No device with that id in this company.</EmptyNote>);
 
+  const canManage = canManageIT(me, tenant);
+  const discovered = device.discoverySource === "unifi";
+
   const identity = [
     { label: "Type", value: device.kind },
+    { label: "Source", value: discovered ? "network discovery" : "manually registered" },
+    { label: "Class", value: device.deviceClass ?? "—" },
+    { label: "Hostname", value: device.hostname ?? "—" },
     { label: "Vendor", value: device.vendor ?? "—" },
     { label: "Model", value: device.model ?? "—" },
     { label: "Firmware", value: device.firmware ?? "—" },
     { label: "IP address", value: device.ip ?? "—" },
     { label: "MAC", value: device.mac ?? "—" },
+    { label: "Connection", value: device.isWired == null ? "—" : device.isWired ? "wired" : `wireless${device.ssid ? ` · ${device.ssid}` : ""}` },
     { label: "Site", value: device.site ?? "—" },
     { label: "Network", value: device.network ?? "—" },
     { label: "Uptime", value: typeof device.uptimeSec === "number" ? formatUptime(device.uptimeSec) : "—" },
-    { label: "Last heartbeat", value: whenTime(device.lastHeartbeatAt) },
-    { label: "Registered", value: whenTime(device.registeredAt) },
+    { label: "Last seen", value: whenTime(device.lastSeenAt ?? device.lastHeartbeatAt) },
+    { label: "First seen", value: whenTime(device.firstSeenAt ?? device.registeredAt) },
   ];
 
   return (
@@ -67,6 +77,20 @@ export default async function DeviceDetailPage({ params }: { params: Params }) {
         breadcrumbs={[{ label: "IT", href: "/it" }, { label: "Devices", href: "/it/devices" }, { label: device.name }]}
         actions={<DeviceStatus status={device.status} />}
       />
+
+      {canManage && (
+        <div style={{ marginBottom: 20 }}>
+          <DeviceEditor
+            device={{
+              id: device.id, name: device.name, kind: device.kind, site: device.site, network: device.network,
+              ip: device.ip, mac: device.mac, vendor: device.vendor, model: device.model,
+              firmware: device.firmware, labels: device.labels, discoverySource: device.discoverySource,
+            }}
+            update={updateDevice}
+            remove={deleteDevice}
+          />
+        </div>
+      )}
 
       <div style={{ display: "grid", gap: 20, gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))" }}>
         <Card title="Identity">

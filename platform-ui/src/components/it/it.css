@@ -29,6 +29,41 @@
 .it-net__name { font: 700 10px var(--font-body); letter-spacing: 0.1em; text-transform: uppercase; color: var(--erp-ink-60); border-left: 2px solid var(--erp-accent); padding-left: 8px; }
 .it-net__devices { display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); }
 
+/* ---- real network topology tree (IT-06): gateway → AP/switch → client ----
+   Nested lists with CSS connector elbows. Chosen over an absolutely-positioned
+   canvas because the depth is small (3–4 tiers) and a tree stays legible and
+   keyboard-navigable at any width, with no JS layout pass. */
+.it-tree { list-style: none; margin: 0; padding: 0; }
+.it-tree .it-tree { margin-left: 22px; padding-left: 18px; border-left: 0.5px solid var(--erp-hairline); }
+.it-tree__item { position: relative; padding: 5px 0; }
+/* the elbow from the parent's vertical rule into this row */
+.it-tree .it-tree > .it-tree__item::before {
+  content: ""; position: absolute; left: -18px; top: 21px; width: 18px;
+  border-top: 0.5px solid var(--erp-hairline);
+}
+.it-tree__row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; text-decoration: none; padding: 6px 10px; border: 0.5px solid var(--erp-hairline); border-left-width: 2px; background: var(--surface-card); transition: background 0.2s var(--erp-ease); }
+.it-tree__row:hover { background: var(--tint-hover); }
+.it-tree__row--online { border-left-color: var(--status-ok); }
+.it-tree__row--degraded { border-left-color: var(--status-critical); }
+.it-tree__row--offline { border-left-color: var(--status-critical); opacity: 0.7; }
+.it-tree__row--unknown { border-left-color: var(--status-idle); }
+.it-tree__name { font: 400 13px var(--font-body); color: var(--text-primary); }
+.it-tree__meta { font: 700 9px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--erp-ink-50); }
+.it-tree__spacer { flex: 1 1 auto; }
+
+/* ---- small labels: discovery source, device class, link medium ---- */
+.it-badge { font: 700 9px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; padding: 2px 6px; border: 0.5px solid var(--erp-hairline); color: var(--erp-ink-60); white-space: nowrap; }
+.it-badge--discovered { border-color: var(--erp-accent); color: var(--erp-accent); }
+.it-badge--infrastructure { background: var(--surface-inverse); color: var(--text-on-inverse); border-color: transparent; }
+
+/* ---- discovery sync indicator / stale banner ----
+   Load-bearing, not decoration: without it a DEAD COLLECTOR and an EMPTY NETWORK
+   look identical, and an operator reads silence as "all clear". */
+.it-sync { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 10px 14px; border: 0.5px solid var(--erp-hairline); background: var(--surface-card); margin-bottom: 16px; font: 400 12px var(--font-body); color: var(--erp-ink-60); }
+.it-sync--stale { border-left: 2px solid var(--status-critical); }
+.it-sync--ok { border-left: 2px solid var(--status-ok); }
+.it-sync__label { font: 700 10px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--erp-ink-50); }
+
 /* ---- n8n workflow canvas ---- */
 .it-wf-wrap { display: grid; grid-template-columns: minmax(200px, 260px) 1fr; gap: 16px; align-items: start; }
 .it-wf-list { display: flex; flex-direction: column; gap: 2px; }
