@@ -14,6 +14,43 @@ local stack). None of these mean "production-done".
 Every cut app version and the exact module manifest it contains, so any deployed build can be
 reconstructed from this table alone. Format defined in [`VERSIONING.md`](./VERSIONING.md).
 
+### `Alpha 01.007.0025a` — 2026-08-03 — the ten identical "manager" options were ten real rows
+
+**Corrects the previous release.** `0024a` shipped a tenant-narrowed roles catalog and reported the
+duplicate-role-picker bug as fixed. It was not: that change was verified by `tsc` and unit tests,
+never against the live symptom. Re-checking the deployed build showed the picker still offering
+`manager` ten times, `company_admin` three times and `member` twice.
+
+The cause was not cross-company name collision at all. Every role in the table is GLOBAL
+(`company_id IS NULL`), and there were genuinely ten `manager` ROWS. `roles` has carried
+`UNIQUE (company_id, name)` since `0001`, which reads as though it protects this — but SQL treats
+NULLs as DISTINCT for uniqueness, so `(NULL, 'manager')` never collides with `(NULL, 'manager')`.
+Every global role has always been exempt from the constraint that appears to cover it.
+
+The inserter closed the loop: `createRole()` used `ON CONFLICT (company_id, name) DO NOTHING`, whose
+conflict target likewise never matched for a global role — so `DO NOTHING` never fired and each run
+of the re-runnable seed appended another row. Ten `manager` rows ≈ ten seed runs; the lower counts on
+`company_admin`/`member` just mean they joined the seed later.
+
+- Migration `0073` collapses the duplicates and adds `roles_global_name_uniq ON roles (name) WHERE
+  company_id IS NULL` — a partial index, which is what `0001` was reaching for.
+- **The dedupe repoints before it deletes.** `user_roles.role_id` and `role_permissions.role_id` are
+  `ON DELETE CASCADE`, so removing the losing rows first would have silently stripped every grant
+  held against them and still reported success.
+- `company_memberships.primary_role_id` is repointed per tenant under
+  `set_config('app.current_tenant_ids', …)`. The repo's own migration lint caught this: that table is
+  FORCE-RLS, migrations run as `platform_owner` (NOBYPASSRLS), so a bare `UPDATE` would have matched
+  ZERO rows and committed happily — the exact failure `0050` shipped and `0051` had to repair.
+- `createRole()` and `teams.controller.ts`'s check-then-insert now target the partial index, so the
+  seed stays idempotent and the previously-silent `team_lead` race resolves instead of duplicating.
+
+The `0024a` roles change is kept: narrowing the catalog to the active tenant is still correct for
+per-company roles, which the original constraint DOES protect. It was necessary and insufficient.
+
+| Module | | Why |
+|---|---|---|
+| platform-nest | `0.9.3 → 0.9.4` | migration `0073` (dedupe global roles + partial unique index); `createRole`/`team_lead` conflict targets corrected |
+
 ### `Alpha 01.006.0024a` — 2026-08-03 — the surfaces that reported something untrue
 
 Cut from a full audit of the live site: signed in as a real user and drove all 84 routes under both

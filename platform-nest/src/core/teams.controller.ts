@@ -8,13 +8,25 @@ import { config } from "../config";
 import { authorize, writeActivity } from "./http";
 import { AuthGuard } from "../auth/guards";
 
+// Check-then-insert on a global role name. Two concurrent first-ever calls both saw no row and both
+// inserted — which produced duplicate `team_lead` rows rather than an error, because 0001's
+// `UNIQUE (company_id, name)` does not constrain NULL company_id (SQL NULLs are distinct for
+// uniqueness). 0073 adds the partial unique index that closes that hole, which turns the same race
+// into a hard 23505 instead. So insert conflict-tolerantly and re-read: whoever loses the race gets
+// the winner's row, and the name is created exactly once either way.
 async function teamLeadRoleId(): Promise<string> {
   return withGlobal(async (c) => {
-    const found = await c.query<{ id: string }>(`SELECT id FROM roles WHERE name = 'team_lead' AND company_id IS NULL LIMIT 1`);
-    if (found.rows[0]) return found.rows[0].id;
     const id = newId();
-    await c.query(`INSERT INTO roles (id, company_id, name, description) VALUES ($1, NULL, 'team_lead', 'Team lead (scope: team)')`, [id]);
-    return id;
+    await c.query(
+      `INSERT INTO roles (id, company_id, name, description)
+       VALUES ($1, NULL, 'team_lead', 'Team lead (scope: team)')
+       ON CONFLICT (name) WHERE company_id IS NULL DO NOTHING`,
+      [id],
+    );
+    const found = await c.query<{ id: string }>(
+      `SELECT id FROM roles WHERE name = 'team_lead' AND company_id IS NULL LIMIT 1`,
+    );
+    return found.rows[0].id;
   });
 }
 
