@@ -112,6 +112,51 @@ async function projects(c: PoolClient, tenantId: string): Promise<IngestDocument
     .filter((d): d is IngestDocument => d !== null);
 }
 
+/** PM-console tasks. These live in `pm_tasks`, NOT the core `tasks` table below — the PM module has
+ *  its own richer row (description, progress, poly-assignee, milestone, tags) and is where day-to-day
+ *  work actually is. On the live box `tasks` held 0 rows while `pm_tasks` held the real backlog, so
+ *  indexing only the core table silently produced a task-free corpus. Both are indexed: they are
+ *  genuinely different records and a tenant may populate either.
+ *
+ *  `assignee` is a JSONB poly-assignee — work can be owned by a person, a division or a department,
+ *  with a separately named RESPONSIBLE human. Both names are rendered, because "who is doing this?"
+ *  and "who is accountable for it?" are different questions a colleague asks. */
+async function pmTasks(c: PoolClient, tenantId: string): Promise<IngestDocument[]> {
+  const { rows } = await c.query<Row>(
+    `SELECT t.id, t.title, t.description, t.status, t.priority, t.progress, t.assignee,
+            t.start_date, t.due_date, t.tags, p.name AS project_name, m.name AS milestone_name
+     FROM pm_tasks t
+     JOIN projects p ON p.id = t.project_id
+     LEFT JOIN pm_milestones m ON m.id = t.milestone_id
+     WHERE t.deleted_at IS NULL`,
+  );
+  return rows
+    .map((r) => {
+      const a = (r.assignee ?? {}) as Record<string, unknown>;
+      const tags = Array.isArray(r.tags) ? (r.tags as unknown[]).map(String).filter(Boolean) : [];
+      return doc(
+        tenantId,
+        `erp:pmtask:${str(r.id)}`,
+        `Task ${str(r.title)}`,
+        `Task: ${str(r.title)} (project ${str(r.project_name)})`,
+        renderFields([
+          ["Description", r.description],
+          ["Status", r.status],
+          ["Priority", r.priority],
+          ["Progress", r.progress === null || r.progress === undefined ? "" : `${str(r.progress)}%`],
+          ["Assigned to", a.refName ? `${str(a.refName)} (${str(a.kind) || "assignee"})` : ""],
+          ["Responsible", a.responsibleName],
+          ["Milestone", r.milestone_name],
+          ["Start date", date(r.start_date)],
+          ["Due date", date(r.due_date)],
+          ["Tags", tags.join(", ")],
+          ["Project", r.project_name],
+        ]),
+      );
+    })
+    .filter((d): d is IngestDocument => d !== null);
+}
+
 async function tasks(c: PoolClient, tenantId: string): Promise<IngestDocument[]> {
   const { rows } = await c.query<Row>(
     `SELECT t.id, t.title, t.status, t.priority, t.due_date, p.name AS project_name, u.name AS assignee_name
@@ -352,6 +397,7 @@ export async function buildErpDocuments(tenantId: string, extractText?: FileText
       out.push(...(await clients(c, tenantId)));
       out.push(...(await projects(c, tenantId)));
       out.push(...(await tasks(c, tenantId)));
+      out.push(...(await pmTasks(c, tenantId)));
       out.push(...(await deliverables(c, tenantId)));
       out.push(...(await meetings(c, tenantId)));
       out.push(...(await pmDocs(c, tenantId)));

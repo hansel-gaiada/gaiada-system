@@ -10,10 +10,11 @@ dist/
 .env.local
 .env.tmp
 .env.*.local
-
-# Local credential scratch files. NOT ignored before 2026-08-03, so a `git add -A` in this shared
-# working tree would have committed CREDENTIALS.local.md verbatim. Pattern, not just that one name,
-# because the next one will be called something slightly different.
+# Operator credential notes / local secret scratch files. BOTH sides of a 2026-08-03 merge added this
+# independently, which is itself the signal: anything matching *.local.md is a working copy of real
+# secrets (logins, API keys, reset runbooks). Before this, CREDENTIALS.local.md sat untracked but NOT
+# ignored in a shared working tree, so any `git add -A` would have committed it verbatim. Patterns, not
+# just the one filename, because the next such file will be called something slightly different.
 CREDENTIALS.local.md
 *.local.md
 *.secret

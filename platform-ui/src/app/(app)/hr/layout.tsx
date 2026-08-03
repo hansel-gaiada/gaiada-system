@@ -4,6 +4,8 @@ import { getMe } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
 import { PageHeader } from "@/components/PageHeader";
 import { SectionTabs, type SectionTab } from "@/components/shell/SectionTabs";
+import { isModuleOnForActiveCompany } from "@/lib/modules";
+import { ModuleDisabled } from "@/components/ModuleDisabled";
 
 // HR is a functional department, same console pattern as Web Dev / IT. Its tools:
 // the people directory and the company org structure. This layout owns the header
@@ -25,6 +27,10 @@ export default async function HRConsoleLayout({ children }: { children: React.Re
     ...(tenant ? [{ key: "org", label: "Org structure", href: `/companies/${tenant}/org`, icon: "inventory" as const }] : []),
   ];
 
+  // Every /api/:t/modules/hr/* route 404s while the module is off, so the tabs would lead to
+  // pages that render as "no leave requests / no cases" — the header stays, the tools do not.
+  const moduleOn = await isModuleOnForActiveCompany("hr");
+
   return (
     <>
       <PageHeader
@@ -33,8 +39,14 @@ export default async function HRConsoleLayout({ children }: { children: React.Re
         subtitle="People, roles and the company org structure."
         breadcrumbs={[{ label: "Organization", href: "/organization" }, { label: "Departments", href: "/departments" }, { label: "HR" }]}
       />
-      <SectionTabs tabs={tabs} />
-      {children}
+      {moduleOn ? (
+        <>
+          <SectionTabs tabs={tabs} />
+          {children}
+        </>
+      ) : (
+        <ModuleDisabled module="hr" label="HR" />
+      )}
     </>
   );
 }

@@ -268,6 +268,21 @@ export const config = {
     // AGENT_RUNNER_TOKEN gates every runner call, same convention as the other service tokens.
     agents: { url: process.env.AGENTS_URL ?? "", token: process.env.AGENT_RUNNER_TOKEN ?? "" },
   },
+  /**
+   * BROWSER-reachable n8n editor origin — deliberately NOT `services.automation.url`.
+   *
+   * That one is the in-cluster base (`http://n8n:5678`) the platform calls the Public API on: a
+   * hostname that resolves only inside the compose network. It was being handed to the UI as the
+   * "Open in n8n" link target, so the button was unclickable-by-design from any real browser while
+   * looking perfectly healthy in the console. Two different audiences, two different values.
+   *
+   * Deliberately OUTSIDE `services` — that object is indexed by system name
+   * (`config.services[system]`), so an extra key there would read as another probeable service.
+   *
+   * Empty by default: the UI hides the affordance when it is unset, which is strictly better than
+   * rendering a link that 404s. Trailing slash stripped so callers can append paths freely.
+   */
+  automationPublicUrl: (process.env.AUTOMATION_PUBLIC_URL ?? "").replace(/\/$/, ""),
   // Per-outbound-call timeout for the admin aggregator's probes (ms).
   adminProbeTimeoutMs: Number(process.env.ADMIN_PROBE_TIMEOUT_MS ?? 3000),
   // Search-marketing provider layer (SM-04, design §05/§11). The stop-loss caps + provider-

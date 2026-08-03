@@ -30,24 +30,57 @@ export async function createUser(email: string, name = email.split("@")[0], titl
   return id;
 }
 
-export async function addMembership(tenantId: string, userId: string): Promise<void> {
+/**
+ * `kind` defaults to the column default ('employee'). Pass 'service' for a NON-HUMAN principal —
+ * an n8n workflow's service account, a bot. It is what every people-shaped surface filters on
+ * (`GET /api/:t/members`, `GET /api/:t/users`), so a service account created without it is
+ * indistinguishable from staff: 17 automation accounts sat in the People directory and HR
+ * headcount read 36 instead of 19 for exactly this reason.
+ *
+ * NOT retroactive on an existing row — `ON CONFLICT DO NOTHING` deliberately leaves a membership
+ * that already exists alone, so re-running a seed never silently re-tags or re-activates one.
+ */
+export async function addMembership(
+  tenantId: string,
+  userId: string,
+  kind: "employee" | "service" = "employee",
+): Promise<void> {
   await withTenants([tenantId], (c) =>
     c.query(
-      `INSERT INTO company_memberships (id, tenant_id, user_id, origin_site) VALUES ($1, $2, $3, $4)
+      `INSERT INTO company_memberships (id, tenant_id, user_id, origin_site, kind) VALUES ($1, $2, $3, $4, $5)
        ON CONFLICT (tenant_id, user_id) DO NOTHING`,
-      [newId(), tenantId, userId, site()],
+      [newId(), tenantId, userId, site(), kind],
     ),
   );
 }
 
+/**
+ * Get-or-create a role. Used by the re-runnable seed (`src/seed/agency.ts`), so it MUST be
+ * idempotent for global roles as well as per-company ones.
+ *
+ * It was not. `ON CONFLICT (company_id, name)` infers the 0001 `UNIQUE (company_id, name)`
+ * constraint, and for a GLOBAL role `company_id` is NULL — which SQL treats as distinct from every
+ * other NULL for uniqueness. The conflict target therefore never matched, `DO NOTHING` never fired,
+ * and every call inserted another row. The live DB had accumulated 10 × `manager`, 3 ×
+ * `company_admin` and 2 × `member` this way — one per seed run — surfacing as ten identical options
+ * in the assign-role picker. Migration 0073 collapses them and adds the partial unique index this
+ * now targets, which is what makes the global branch actually conflict.
+ */
 export async function createRole(name: string, companyId: string | null = null): Promise<string> {
   const id = newId();
   await withGlobal((c) =>
-    c.query(
-      `INSERT INTO roles (id, company_id, name) VALUES ($1, $2, $3)
-       ON CONFLICT (company_id, name) DO NOTHING`,
-      [id, companyId, name],
-    ),
+    companyId === null
+      ? c.query(
+          // Matches 0073's `roles_global_name_uniq ON roles (name) WHERE company_id IS NULL`.
+          `INSERT INTO roles (id, company_id, name) VALUES ($1, NULL, $2)
+           ON CONFLICT (name) WHERE company_id IS NULL DO NOTHING`,
+          [id, name],
+        )
+      : c.query(
+          `INSERT INTO roles (id, company_id, name) VALUES ($1, $2, $3)
+           ON CONFLICT (company_id, name) DO NOTHING`,
+          [id, companyId, name],
+        ),
   );
   const { rows } = await withGlobal((c) =>
     c.query<{ id: string }>(`SELECT id FROM roles WHERE name = $1 AND company_id IS NOT DISTINCT FROM $2`, [

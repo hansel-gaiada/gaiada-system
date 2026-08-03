@@ -46,32 +46,66 @@ async function bumpSession(userId: string): Promise<void> {
 @Controller("api")
 @UseGuards(AuthGuard)
 export class AdminIdentityController {
-  // ---- Roles catalog (global; feeds the assign-role picker) ----
+  // ---- Roles catalog (feeds the assign-role picker) ----
+  //
+  // `tenantId` narrows the catalog to the global roles plus the ones belonging to that company.
+  // Without it the picker listed EVERY company's rows, and because per-company roles share their
+  // names across companies the operator saw "manager" ten times and "company_admin" three times
+  // with nothing to tell them apart — ten identical-looking options, nine of which grant a role
+  // row owned by a different company. Optional (not required) so the tenant-less catalog callers
+  // keep working; when passed, membership is checked so this cannot be used to enumerate the roles
+  // of a company the caller has nothing to do with.
   @Get("roles")
-  async roles(@Req() req: FastifyRequest) {
-    const elevated = req.principal.roles.some(
-      (r) =>
-        (r.role === "platform_admin" && r.scopeType === "global") ||
-        r.role === "company_admin" ||
-        r.role === "manager",
-    );
+  async roles(@Req() req: FastifyRequest, @Query("tenantId") tenantId?: string) {
+    const isPlatformAdmin = req.principal.roles.some((r) => r.role === "platform_admin" && r.scopeType === "global");
+    const elevated =
+      isPlatformAdmin || req.principal.roles.some((r) => r.role === "company_admin" || r.role === "manager");
     if (!elevated) throw new NotFoundException(); // no data leak; UI degrades on 404
+    if (tenantId && !isPlatformAdmin && !req.principal.companies.includes(tenantId)) {
+      throw new NotFoundException();
+    }
     const rows = await withGlobal((c) =>
-      c.query(`SELECT id, name, company_id FROM roles ORDER BY company_id NULLS FIRST, name`),
+      tenantId
+        ? c.query(
+            `SELECT id, name, company_id FROM roles
+             WHERE company_id IS NULL OR company_id = $1
+             ORDER BY company_id NULLS FIRST, name`,
+            [tenantId],
+          )
+        : c.query(`SELECT id, name, company_id FROM roles ORDER BY company_id NULLS FIRST, name`),
     );
     return rows.rows;
   }
 
   // ---- Users with their role grants ----
+  //
+  // Employee-only by DEFAULT, `?includeService=1` to opt in — the same convention
+  // `GET /api/:t/members` (core.controller) already uses, and for the same reason: a membership
+  // with kind='service' is not a person. Non-human principals are real `users` rows on purpose
+  // (an n8n workflow authenticates via its OBO envelope -> identity_link -> user -> Cerbos, so a
+  // workflow that is not a user cannot be authorized at all), which means every people-shaped
+  // surface has to filter them out explicitly. This endpoint did not, so the People directory
+  // listed 17 automation service accounts among 19 real staff and HR headcount read 36.
+  //
+  // Not filtered unconditionally, because the SAME endpoint backs Settings → Users & Roles, where
+  // an admin legitimately needs to see and revoke an automation account's grants. That page asks
+  // for them; the directory does not. `kind` is echoed either way so callers can badge.
   @Get(":tenantId/users")
-  async users(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string) {
+  async users(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Query("includeService") includeServiceRaw?: string,
+  ) {
     await authorize(req.principal, { kind: "user", tenantId }, "read");
+    const includeService = includeServiceRaw === "1";
     const members = await withTenants([tenantId], async (c) => {
       await c.query("SELECT set_config('app.principal_user_id', NULL, true)");
-      return c.query<{ id: string; name: string; email: string; title: string | null; status: string }>(
-        `SELECT u.id, u.name, u.email, u.title, u.status
+      return c.query<{ id: string; name: string; email: string; title: string | null; status: string; kind: string }>(
+        `SELECT u.id, u.name, u.email, u.title, u.status, m.kind
          FROM company_memberships m JOIN users u ON u.id = m.user_id
-         WHERE m.deleted_at IS NULL AND u.deleted_at IS NULL ORDER BY u.name`,
+         WHERE m.deleted_at IS NULL AND u.deleted_at IS NULL
+           ${includeService ? "" : "AND m.kind = 'employee'"}
+         ORDER BY u.name`,
       );
     });
     const ids = members.rows.map((m) => m.id);
@@ -98,6 +132,9 @@ export class AdminIdentityController {
       email: m.email,
       title: m.title,
       status: m.status,
+      // Echoed so an admin surface that opted in can badge the row instead of presenting a
+      // workflow's service account as a colleague.
+      isService: m.kind === "service",
       roles: (byUser.get(m.id) ?? []).map((g) => ({
         grantId: g.grantId,
         role: g.role,

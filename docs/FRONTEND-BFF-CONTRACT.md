@@ -117,6 +117,8 @@ pm.manage, it.manage, approvals.decide, knowledge.review`.
 | ✅ | GET/POST/PATCH/DELETE | `/api/:t/custom-fields[?entityType][/:id]` | → `FieldDef[]` | BUILT — all four methods present (`custom-fields.controller.ts`). |
 | ✅ | GET/PATCH | `/api/:t/compliance-gates[/:id]` | → `ComplianceGate[]` | BUILT (`company-admin.controller.ts`). PATCH persists status/evidence. |
 | ✅ | PATCH | `/api/:t/company/modules` | `{module,enabled}` → `{ok}` | BUILT. Enable/disable modules. |
+| ✅ | GET | `/api/module-catalog` | → `{key,label,paths}[]` | BUILT (`module-catalog.controller.ts`). Modules compiled into the running build; tenant-agnostic. The settings toggle list MUST come from here — deriving it from `enabled_modules` makes disabling one-way. |
+| ✅ | GET | `/api/:t/modules-enabled` | → `{tenantId,enabled[]}` | BUILT (same controller). Effective set = own `enabled_modules` ∪ active service assignments (`enabledModuleKeys`, the rule `ModuleEnabledGuard` enforces). Membership-gated; 403 without membership. Consumed by `lib/modules.ts` to render `ModuleDisabled` instead of an empty page. |
 | ✅ | GET | `/api/:t/audit?verb&actorId&entityType&since&until&limit` | → `AuditEntry[]` | BUILT (`admin-identity.controller.ts`). Filter/pagination richness of query params not verified from route inventory alone — confirm before closing the gap register. |
 
 ## 4. Work management — `lib/entities.ts`, `lib/data.ts`

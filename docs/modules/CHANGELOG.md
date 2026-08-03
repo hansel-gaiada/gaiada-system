@@ -14,77 +14,205 @@ local stack). None of these mean "production-done".
 Every cut app version and the exact module manifest it contains, so any deployed build can be
 reconstructed from this table alone. Format defined in [`VERSIONING.md`](./VERSIONING.md).
 
-### `Alpha 01.004.0007a` — 2026-08-03 — IT topology stops being fiction
+### `Alpha 01.008.0027a` — 2026-08-03 — a workflow is a principal, not a colleague
 
-Status: **PROTOTYPED.** The backend half is **DEV-VERIFIED** (34 IT tests green against live
-Postgres + Cerbos, incl. migration `0071`); the end-to-end claim is gated on `it-site-collector`,
-which is **not built** and is blocked on a UniFi API key.
+HR reported 36 people. 19 were people; **17 were n8n automation service accounts.**
 
-| Module | | Why |
-|---|---|---|
-| platform-nest | `0.8.0 → 0.9.0` | migration `0071`; discovery ingest + server-computed topology graph; the missing device `PATCH`/`DELETE`; derived status + stale reaper |
-| platform-ui | `0.9.0 → 0.10.0` | real topology tree (uplinks, not free-text groups); device edit/remove; search + class filter; discovered-vs-manual badges; stale-feed banner |
+Non-human principals are `users` rows on purpose — authorization is defined over principals, and
+`OBO envelope -> identity_links -> users -> user_roles -> Cerbos` is the only path to being
+authorized at all. (Proven the hard way the same day: five unseeded `wf:reports-*` accounts made
+every reports CRON fail `403 cerbos denied`.) The cost of that design is that "principal" and
+"person" are different sets, and every people-shaped surface has to know it.
 
-**The reported bug was not a bug.** "IT > Topology doesn't show all the devices in the network" —
-measured against the real office network the same day: SSID `GDA`, `10.10.0.0/22`, **~58 live hosts**
-behind a UniFi OS gateway at `10.10.0.1`. The ERP held **8 rows**, all hand-seeded fiction on a
-`10.0.x.x` range that does not exist here, and a codebase-wide grep for UniFi/SNMP/ARP/mDNS discovery
-returned **zero hits**. Topology could never have shown the network; the feature did not exist.
+`company_memberships.kind ('employee','service')` — added by `0026` for the shared-service
+reconciler — already existed for this, and `GET /api/:t/members` already filtered on it. Two gaps:
 
-Notable within the cut:
-- **The ERP cannot poll the controller — verified, not assumed.** `10.10.0.1` is RFC1918 behind office
-  NAT; `curl` from `gda-aicenter` returns HTTP `000`. Discovery must therefore be a **push** from an
-  office-side collector, which is why `POST /api/:t/it/discovery/report` exists instead of a poller.
-- **MAC is not a device identity.** ~60% of the observed MACs are randomized (private Wi-Fi), so
-  upserts key on UniFi's stable client id. Keying on MAC would have minted a new "device" on every
-  phone's address rotation.
-- **ICMP undercounts 5×** (12 of 58 hosts answer ping), so liveness comes from the controller's client
-  table and never from a probe.
-- **BYOD is counted, never stored.** ~25 of the 58 hosts are personal phones whose hostnames name
-  staff outright; persisting them would build a presence log of named employees, which CLAUDE.md
-  forbids before legal Gate 1. `device_class` classification is recomputed **server-side** so a
-  mis-set collector cannot launder them in.
-- **Registered devices were permanently "unknown".** Nothing ever called the heartbeat endpoint, so
-  every hand-added row kept the DB default forever and rendered grey. Status is now derived from
-  `last_seen_at` freshness, swept by a dark-by-default reaper.
-- **Edit and delete never existed** despite `0019_it_devices.sql` and `lib/it.ts` both promising
-  "register/edit"; `deleted_at` was filtered on by every query and written by nothing.
-- Discovered rows carry an `overrides` layer, so an operator's correction survives the next poll
-  instead of silently reverting ~5 minutes later.
-- The seed's fictional devices are now **off by default** (`SEED_DEMO_DEVICES=1`) and labelled
-  `demo-fixture`. A plausible-but-fake map is worse than an empty one: an empty map prompts a question.
+- **Nothing ever set it.** The seed calls `addMembership()`, which never passed `kind`, so all 17
+  accounts took the column default `'employee'`. Zero `service` rows existed. `addMembership()` now
+  takes `kind`, and the automation seed passes `'service'`.
+- **`GET /api/:t/users` had no filter at all** — and that, not `/members`, is what backs the People
+  directory and HR. Now employee-only by default with `?includeService=1` to opt in, matching the
+  `/members` convention. Settings → Users & Roles opts in and badges the row (that is where
+  automation grants get audited and revoked); the directory and HR take the default.
 
-Deliberate deviation from the design doc: the ingest endpoint authorizes on the existing Cerbos
-`create` action rather than a new `discover` one — a new action is a silent DENY until Cerbos is
-restarted, and `create` is already scoped to exactly `company_admin`/`it_staff`.
+Reconciler-safe: it only deletes rows that are `kind='service'` **AND** `managed_by IS NOT NULL`,
+and seeded automation memberships have `managed_by NULL`.
 
-Carried forward: `it-site-collector` unbuilt (needs a read-only UniFi API key + an always-on office
-host); the live tenant's 8 seeded rows still need purging on `gda-aicenter`; the office network is a
-single flat `/22` with no VLAN separation between workstations and personal phones — a networking
-change, tracked separately.
-
-### `Alpha 01.004.0006b` — 2026-08-03 — knowledge/RAG gets a two-tier corpus and something to retrieve
-
-> `0006a` was tagged but **never deployed**: its commit had swept two in-flight IT network-discovery
-> edits (whose module file was untracked) into `main.ts`/`config.ts`, so `build-sign (platform-nest)`
-> failed at `tsc -p tsconfig.build.json` and the deploy job was skipped. `0006b` is `0006a` with
-> those foreign hunks removed and the committed tree verified to compile in a clean worktree.
-
-
-Status: **PROTOTYPED** (unit- and store-verified; the live sweep on `gda-aicenter` is the DEV-VERIFIED gate).
-
-The D9 vector store had been correct and completely **empty** since it was built — `knowledge_chunks`
-held 0 rows on the server, so every `knowledge.search` returned nothing. Two things were missing: any
-ingestion pipeline, and any way to express "public company knowledge" at all (`store.search()`
-returned `[]` for any caller without a resolved tenant, so a lead or client could never be answered).
+Interim by design. Reusing `company_memberships.kind` overloads one column with two questions —
+*why is this principal in this company* vs *what kind of account is this* — and they are independent
+axes (a served-company HR manager is a human with `kind='service'`). The owner-approved target is
+`users.kind` with **four** kinds — `employee`, `client`, `automation`, `bot` — keeping `bot` distinct
+from `automation` because a Hermes persona's next action is not enumerable the way a pinned workflow
+allow-list is. Design + migration sketch: `docs/superpowers/specs/2026-08-03-principal-kinds-design.md`.
 
 | Module | | Why |
 |---|---|---|
-| ai-agents | `0.4.0 → 0.5.0` | D9.4 `audience` tier (`public`/`internal`) in the store + service; `/search` no longer requires an OBO envelope; fail-closed default |
+| platform-nest | `0.9.4 → 0.9.5` | `/users` employee-only + `?includeService=1` + `isService`; `addMembership(kind)`; automation seed tags `service` |
+| platform-ui | `0.10.3 → 0.10.4` | `listUsers(includeService)`; Users & Roles opts in and badges; directory/HR exclude |
+
+### `Alpha 01.007.0025a` — 2026-08-03 — the ten identical "manager" options were ten real rows
+
+**Corrects the previous release.** `0024a` shipped a tenant-narrowed roles catalog and reported the
+duplicate-role-picker bug as fixed. It was not: that change was verified by `tsc` and unit tests,
+never against the live symptom. Re-checking the deployed build showed the picker still offering
+`manager` ten times, `company_admin` three times and `member` twice.
+
+The cause was not cross-company name collision at all. Every role in the table is GLOBAL
+(`company_id IS NULL`), and there were genuinely ten `manager` ROWS. `roles` has carried
+`UNIQUE (company_id, name)` since `0001`, which reads as though it protects this — but SQL treats
+NULLs as DISTINCT for uniqueness, so `(NULL, 'manager')` never collides with `(NULL, 'manager')`.
+Every global role has always been exempt from the constraint that appears to cover it.
+
+The inserter closed the loop: `createRole()` used `ON CONFLICT (company_id, name) DO NOTHING`, whose
+conflict target likewise never matched for a global role — so `DO NOTHING` never fired and each run
+of the re-runnable seed appended another row. Ten `manager` rows ≈ ten seed runs; the lower counts on
+`company_admin`/`member` just mean they joined the seed later.
+
+- Migration `0073` collapses the duplicates and adds `roles_global_name_uniq ON roles (name) WHERE
+  company_id IS NULL` — a partial index, which is what `0001` was reaching for.
+- **The dedupe repoints before it deletes.** `user_roles.role_id` and `role_permissions.role_id` are
+  `ON DELETE CASCADE`, so removing the losing rows first would have silently stripped every grant
+  held against them and still reported success.
+- `company_memberships.primary_role_id` is repointed per tenant under
+  `set_config('app.current_tenant_ids', …)`. The repo's own migration lint caught this: that table is
+  FORCE-RLS, migrations run as `platform_owner` (NOBYPASSRLS), so a bare `UPDATE` would have matched
+  ZERO rows and committed happily — the exact failure `0050` shipped and `0051` had to repair.
+- `createRole()` and `teams.controller.ts`'s check-then-insert now target the partial index, so the
+  seed stays idempotent and the previously-silent `team_lead` race resolves instead of duplicating.
+
+The `0024a` roles change is kept: narrowing the catalog to the active tenant is still correct for
+per-company roles, which the original constraint DOES protect. It was necessary and insufficient.
+
+| Module | | Why |
+|---|---|---|
+| platform-nest | `0.9.3 → 0.9.4` | migration `0073` (dedupe global roles + partial unique index); `createRole`/`team_lead` conflict targets corrected |
+
+### `Alpha 01.006.0024a` — 2026-08-03 — the surfaces that reported something untrue
+
+Cut from a full audit of the live site: signed in as a real user and drove all 84 routes under both
+companies, so "empty because this tenant has no data" could be told apart from "broken". Every
+finding here is a surface that **claimed a state it was not in** — the failure mode that costs the
+most trust, because nothing looks wrong.
+
+The audit's own headline was config, not code: `enabled_modules` held `{agency, hr}` on Gaia and
+`{}` on Sanur, so eight compiled-in modules were dark. Enabling them (all 10 on Gaia, 9 on Sanur)
+lit up clients, billing, reports, appraisals, knowledge, IT and PM with real data — and cleared the
+stalled delivery pipeline as a side effect: the WS11 fan-out had been dying on
+`/api/:t/pm/projects/:id/docs 404`, which was the PM module being off, not a workflow bug.
+
+- **`Open in n8n` pointed into the compose network.** `detail.n8nUrl` was assigned from
+  `services.automation.url` — the in-cluster base (`http://n8n:5678`) the platform calls the Public
+  API on. The console reported the service healthy and listed its workflows while offering a link no
+  browser could follow. Split into `AUTOMATION_PUBLIC_URL`; absent ⇒ the UI hides the button.
+- **The roles picker offered ten identical options.** `GET /api/roles` returned every company's role
+  rows, and per-company roles share names, so `manager` appeared ten times with nothing to tell them
+  apart — nine of them granting a row owned by another company.
+- **HR contradicted itself on one screen.** The scope selector called every company "served" (an
+  elevated caller was folded in as a `home` grant) while the envelope beneath it reported those same
+  companies "not served".
+- **A task you just created vanished.** The default all-companies leg is assignee-scoped, so an
+  unassigned task was invisible with no affordance to reveal it.
+- **The calendar workload panel demanded a narrowed scope** while all-companies is the default — dead
+  for every visitor. Now breaks down by company instead.
+- **React #418 on three Systems consoles** — bare `toLocaleString()` renders in the container's UTC
+  server-side and the visitor's zone client-side, so React discarded the server HTML. Fixed with a
+  fixed-zone `formatTimestamp()`.
+- **Staff were told a client project was on its way to them.** The portal BFF 403s "not a portal
+  client" for any staff member; the reader folded that into an empty list.
+- **The platform read the bot's admin token from a different `.env` name than the bot** — it got an
+  empty token, every proxy call 401'd, and the console said "bot admin unreachable" as though the bot
+  were down.
+- **n8n was proxied on eight ERP root paths** (`/webhook`, `/form`, `/mcp` + variants) because
+  `N8N_WEBHOOK_URL` was the bare origin. Narrowed to `/n8n/` only; the first platform-ui route under
+  any of those names would otherwise have been silently answered by n8n.
+
+Also found and **not** fixed here, since neither is code: the n8n Public-API key held only the four
+read scopes (`workflow:activate` missing ⇒ the ACTIVATE button returned `Forbidden`), and its
+replacement was minted with all 72 — over-granted, on the rotation queue. And no client portal user
+is provisioned, so that surface is still unexercised end-to-end.
+
+Two corrections to the audit's own first pass, recorded because both were wrong in the same
+direction — assuming a missing endpoint: `/rollups` and the services API were probed on the wrong
+paths (`/api/rollups` is tenant-less; service assignments live under
+`/api/:t/org-structure/service-units`), and the client portal was never broken.
+
+| Module | | Why |
+|---|---|---|
+| platform-nest | `0.9.2 → 0.9.3` | tenant-narrowed roles catalog; `n8nUrl` split from the in-cluster base via `AUTOMATION_PUBLIC_URL` |
+| platform-ui | `0.10.2 → 0.10.3` | six honesty fixes: roles picker, HR scope, tasks empty state, calendar workload, hydration-safe timestamps, portal staff view |
+| infra | `0.7.3 → 0.7.4` | platform falls through to `ADMIN_TOKEN` for the bot proxy; n8n triggers no longer squat the ERP root; `AUTOMATION_PUBLIC_URL` wired; `*.local.md` ignored |
+
+### `Alpha 01.005.0021a` — 2026-08-03 — the module switch works in both directions
+
+First cut that carries the IT discovery work (`0.9.0`/`0.10.0`), which was committed but never
+tagged — `0015b`'s deploy died mid-`docker pull` on a `connection reset by peer` and auto-rolled back
+to `0015a`, so the box has been serving `0015a` while `/VERSION` claimed `0015b`.
+
+Reported as "I disabled a module to see the difference and now it's gone." Both halves were real:
+
+- **The toggle was one-way.** Settings → Modules & Fields rendered `union(["agency"], enabled_modules)`,
+  so disabling a module removed the key AND the row that offered to re-enable it. Recovery required
+  SQL. The list now comes from the compiled-in catalog.
+- **The company edit form silently stripped modules** — it knew only `agency` and sent that derived
+  set as `enabled_modules`, so renaming a company dropped `hr`/`reports`.
+- **A disabled module looked identical to an empty one.** Nothing outside the settings page read the
+  flag, so gated pages stayed clickable and returned nothing. They now say so, and say how to undo it.
+
+Found live on `gda-aicenter`: Gaia Digital Agency held `{agency}` where the seed grants
+`{agency, hr, reports}`. `hr` was restored by hand before this cut; **`reports` is deliberately still
+off** — the owner was mid-experiment with it.
+
+| Module | | Why |
+|---|---|---|
+| platform-nest | `0.8.1 → 0.9.2` | IT discovery + device writes (`0.9.0`, previously untagged); module catalog endpoint (`0.9.1`); `enabledModuleKeys` + per-tenant `modules-enabled` (`0.9.2`) |
+| platform-ui | `0.6.5 → 0.10.2` | real IT topology + device edit/remove (`0.10.0`, previously untagged); two-way module toggle (`0.10.1`); legible module-disabled state (`0.10.2`) |
+
+### `Alpha 01.005.0015b` — 2026-08-03 — index the tasks people actually use
+
+`0015a`'s first live sweep on `gda-aicenter` ingested 130 sources / 306 chunks with 0 errors, and
+the per-table counts matched the sources exactly (projects 5→5, pm_docs 1→1, meetings 3→3) — except
+tasks, which produced **nothing**. Not a silent no-op: the core `tasks` table genuinely holds 0 rows.
+The PM console writes `pm_tasks`, which held the real backlog of 6.
+
+So the corpus was task-free while looking healthy — exactly the failure the run summary is supposed
+to make visible, caught by reconciling its numbers against the source tables rather than trusting
+"0 errors".
+
+`pm_tasks` is now indexed alongside the core table (both are real, and a tenant may populate either),
+carrying the fields the PM row actually has: description, progress %, milestone, tags, and the JSONB
+poly-assignee — rendering BOTH the assigned party (which may be a person, division or department)
+and the named responsible human, because "who is doing this?" and "who is accountable?" are
+different questions.
+
+| Module | | Why |
+|---|---|---|
+| platform-nest | `0.8.0 → 0.8.1` | `pm_tasks` source builder in the knowledge ingester |
+
+### `Alpha 01.005.0015a` — 2026-08-03 — knowledge/RAG gets a two-tier corpus and something to retrieve
+
+Status: **PROTOTYPED** (unit- and store-verified; the live sweep on `gda-aicenter` is the
+DEV-VERIFIED gate).
+
+The D9 vector store had been correct and completely **empty** since it was built —
+`knowledge_chunks` held 0 rows on the server, so every `knowledge.search` returned nothing. It also
+had no way to express public company knowledge: `store.search()` returned `[]` for any caller
+without a resolved tenant, so a lead or client could never be answered at all.
+
+| Module | | Why |
+|---|---|---|
+| ai-agents | `0.4.0 → 0.5.0` | D9.4 `audience` tier (`public`/`internal`) in the store + service; `/search` no longer needs an OBO envelope; fail-closed default |
 | platform-nest | `0.7.1 → 0.8.0` | the ingestion module: gaiada.com crawler, ERP source builders, sweep scheduler, admin trigger/status endpoints |
 | mcp-hub | `0.9.1 → 0.9.2` | `knowledge.search` describes both tiers; `scope` now optional |
 | wa-chat-bot | `0.9.1 → 0.9.2` | `/know` no longer claims a verified identity is required for all results |
-| infra | `0.7.1 → 0.7.2` | `KNOWLEDGE_INGEST_*` wiring in the VPS compose |
+| infra | `0.7.2 → 0.7.3` | `KNOWLEDGE_INGEST_*` compose wiring |
+
+**Two tiers.** `public` is the gaiada.com corpus, world-readable with no identity at all — that is
+what lets an agent answer a lead or client who has no ERP account. `internal` is ERP content
+(clients, projects, tasks, deliverables, meeting transcripts, PM docs, latest-revision reports,
+files, org structure, people) under the unchanged D9.1 tenant pre-filter. The tier is a SQL
+disjunction whose internal branch self-disables on an empty tenant set, so an unauthorized chunk is
+never a ranking candidate, and `audience` fails closed — anything not literally `"public"` is
+internal, and the in-place column default can only narrow visibility on existing rows.
 
 Notable within the cut:
 - **Retirement is gated on a clean run.** The sweep deletes stored sources it did not re-ingest, but
@@ -92,12 +220,124 @@ Notable within the cut:
   identical to "everything was deleted upstream" and one bad run would wipe the corpus.
 - **Boilerplate is stripped by frequency, not by tag.** The live site's nav is not in a `<nav>`
   element, so tag-stripping alone put the whole menu in the first chunk of every page.
-- The store's D9 suite had **never actually run against pgvector** — its fixture embedder is 64-d
-  against a 768-d column, so it silently only exercised the array fallback. Fixed; 13/13 now pass on
-  real pgvector.
+- The store's D9 suite had **never actually run against pgvector** — a 64-d fixture embedder against
+  a 768-d column meant it silently only exercised the array fallback. Fixed; 13/13 now pass on real
+  pgvector against the server's own cluster.
+
+Dead tags, for the record: `alpha-01.004.0006a` never built (its commit swept in unrelated in-flight
+IT-discovery edits whose module file was untracked, breaking `tsc`), and `alpha-01.004.0006b` built
+but died at the same backup gate `0014b` fixes. Neither reached the server; this cut supersedes both
+and is rebased on `0014b`, so it carries that fix rather than a competing one.
 
 Known limits carried forward: PDF/DOCX bodies are metadata-only by design, and ACL sub-scoping stays
 unsafe while `scope` is caller-supplied (see `platform-nest/src/modules/knowledge/README.md`).
+
+### `Alpha 01.005.0014b` — 2026-08-03 — re-cut: the backup gate rejected its own compose project
+
+Identical module set to `0014a` (hence a letter bump, not a counter move — "a re-tag after a failed
+deploy" is exactly what the revision letter is for). `0014a` built and signed all 9 images
+successfully, then **`deploy` failed at the backup step, before pull/migrate/up — production was
+never touched** (containers stayed up 2–3 days; `erp.gaiada.online` served throughout).
+
+```
+backup FAILED: cannot read compose project (service pg-bot):
+service "platform" depends on undefined service "postgres": invalid compose project
+```
+
+`backup.sh` required its CALLER to pass the `hostdata` overlay, and the caller that matters most
+never did: `deploy.yml` has `COMPOSE_FILES` in its job env but does not forward it across the
+`ssh vps` that runs the script, so the box got the single-file default. On a host-Postgres box the
+base file alone is an invalid project. Because the backup is deliberately the **gate for
+migrations**, that is a hard stop for the whole deploy rather than a degraded backup.
+
+Sharp edge worth naming: it had backed up cleanly ten minutes earlier. `deploy.yml`'s rsync step
+runs **before** the backup, so the box was already holding the newer `vps.yml` when the backup ran
+— the failure needed the new compose file and the old call site together.
+
+- **Fix:** `backup.sh` now picks up `docker-compose.hostdata.yml` automatically whenever it sits
+  next to the base file, instead of relying on every call site to remember. An explicit
+  `COMPOSE_FILES` still wins. This also repairs the **nightly cron backup**, which had the same
+  defective invocation. Verified on gda-aicenter: all 5 databases + the WAHA volume, exit 0.
+- Folded into `infra 0.7.2` rather than opening `0.7.3`, since `0014a` shipped nothing — keeping
+  the module set identical is what makes the letter bump the honest description.
+
+**Rollback is broken for any release that ADDS a service** — flagged, not fixed here. The failure
+path ran `up -d` at the previous tag and died on
+`ghcr.io/hansel-gaiada/gaiada-report-renderer:alpha-01.004.0005a: not found`, because
+`report-renderer` did not exist at that tag. Harmless this time (nothing had changed, so there was
+nothing to undo), but a genuine deploy would have been left half-rolled-back. `deploy.yml`'s
+rollback needs to roll back only services present in the previous tag.
+
+### `Alpha 01.005.0014a` — 2026-08-03 — SUPERSEDED, no deployment (see 0014b above)
+
+Carries the tracker/multi-grain-reporting programme, the search-marketing SEM/Google-Ads work, the
+`report-renderer` sidecar, the in-ERP audio/video recorder, the webdev server fixes, and the n8n
+console at `/n8n/`. Ships migrations **0064–0069 + 0072** (the box is at 0063).
+
+> **Migration gap, flagged not fixed:** `0070` and `0071` do not exist in the repo at this commit —
+> `0072` was committed while they were still uncommitted in another seat's tree. The runner applies
+> unapplied files in filename order, so if `0070`/`0071` land later they will execute *after*
+> `0072` has already run. Harmless only if they are independent of it. Worth resolving before the
+> next cut rather than discovering it as a failed migration.
+
+**Counter derivation (`0005 → 0014`, +9; letter resets to `a`).** Counted as bump *steps* per rule 3
+("don't flatten it by batching bumps into one"), read from the `MODULES.md` registry:
+
+| Module | at `01.004.0005a` | now | steps |
+|---|---|---|---|
+| platform-ui | `0.7.1` | `0.9.0` | 2 |
+| reports | `0.1.0` | `0.3.1` | 3 |
+| infra | `0.7.0` | `0.7.2` | 2 |
+| search-marketing | `0.4.0` | `0.5.0` | 1 |
+| report-renderer | `0.0.0` | `0.1.0` | 1 |
+
+> **Rule-1 debt, recorded not papered over:** the counter had to be derived from the *registry*,
+> because the registry and this log have drifted. `platform-ui`'s newest entry here is `0.6.5`
+> (2026-07-27) though the registry says `0.9.0`, and `reports` had no section at all until this cut
+> opened one at `0.3.1`. The registry is the source of truth per the `infra 0.7.1` numbering note,
+> so the derivation follows it. Back-filling the missing entries is outstanding work; inventing
+> them from diffs would have been worse than admitting the gap.
+
+**`Alpha 01.004.0006a` — SUPERSEDED, no image.** A concurrent session cut and pushed that tag at
+`e901ab9` while this cut was being prepared. Its `release` run failed at
+`build-sign (platform-nest)`:
+
+```
+src/main.ts(72,38): error TS2307: Cannot find module './modules/it/discovery.service'
+```
+
+`main.ts` was committed carrying an import of `discovery.service`, but that file was still
+**untracked** in that seat's working tree — a commit referencing a file that was never committed.
+`ci` failed on the same commit for the same reason. `deploy` was skipped, so nothing reached the
+box. This is the **third** instance of the exact `001` post-mortem failure: snapshotting a tree
+another seat is mid-write on. The number is burned, never reused.
+
+Accordingly this cut was taken from **`9d65686`, the last commit with a green `ci`** — which
+excludes only `e901ab9` (the knowledge two-tier RAG corpus, plus the half-committed IT-discovery
+work). Nobody's uncommitted work was committed to unblock it.
+
+**Full manifest** (all 19 registry rows, so this build is reconstructible):
+
+| Module | Version | | Module | Version |
+|---|---|---|---|---|
+| platform-nest | `0.7.1` | | webdev | `0.8.1` |
+| platform-ui | `0.9.0` | | webdesk | `0.0.0` |
+| ai-gateway-go | `0.13.0` | | search-marketing | `0.5.0` |
+| mcp-hub | `0.9.1` | | social-media | `0.0.0` |
+| sync-engine-go | `0.7.0` | | creative | `0.1.0` |
+| observability | `0.6.0` | | render-gateway-go | `0.0.0` |
+| infra | `0.7.2` | | reports | `0.3.1` |
+| wa-chat-bot | `0.9.1` | | report-renderer | `0.1.0` |
+| ai-agents | `0.4.0` | | hermes-gateway | `0.2.0` |
+| capture-helper | `0.2.0` | | | |
+
+**Cut discipline.** Taken from a **frozen `git worktree`** (another seat held ~35 uncommitted files
+throughout), and `platform-nest` was verified with **`tsc -p tsconfig.build.json`** — the exact
+command the Dockerfile runs, and the exact command `01.004.0006a` died on — not `tsconfig.json`.
+
+**Known-unverified at cut time:** `platform-nest`'s live-service suite passed 2560/2560 against real
+Postgres/Cerbos/Redis on gda-aicenter, but the in-ERP recorder and the webdev server fixes came from
+a concurrent session and were not independently re-driven here.
 
 ### `Alpha 01.004.0005a` — 2026-07-31 — trial branch merged back to main
 
@@ -240,6 +480,7 @@ anywhere real.
 
 | Date | Event |
 |---|---|
+| 2026-08-03 | `release` **Merged `origin/main` (14 commits) and cut `Alpha 01.009.0028a`.** Both lines had bumped module versions independently, so the table is rebased on main's numbers (which carry other sessions' work) and only this wave's modules are bumped on top: `platform-nest 0.9.5 -> 0.10.0` (migration 0072, client contacts/invites/Keycloak provisioning, scheduling, client notify), `platform-ui 0.10.4 -> 0.11.0` (recorder, invite accept page, contacts + scheduling + participants panels), `mcp-hub 0.9.2 -> 0.9.3` (`pipeline.runBySourceMeeting`). Main's `infra 0.7.4` / `wa-chat-bot` / `ai-agents` dates are kept untouched — taking this branch's older rows would have silently reverted them. Two content conflicts were resolved to **main's** side after checking which was newer: `knowledge/ingest/erp-source.ts` and its README, because main carries `741ad4e fix(knowledge): index pm_tasks` that this branch predates, so keeping ours would have reverted that fix. |
 | 2026-08-03 | `webdev` **W1 — scheduling, participants, client notifications, pipeline lifecycle UI. `webdev 0.9.0` -> `0.10.0`, `platform-ui 0.10.0` -> `0.11.0`.** Makes D-3 walkable: a PM can now invite client contacts, schedule the meeting, and set who attends on both sides — all before anyone presses record. The client page reads in setup order (Client access -> Scheduled -> Meetings), which is the reframe rather than decoration. **Scheduling** (`POST .../recordings/schedule`, participants add/remove, `?scheduled=upcoming`) over migration 0072's columns, no DDL. `meeting_id` is minted through a shared `mintMeetingId()` that `start` also calls, so the two paths cannot drift — that id is the frozen dispatcher dedupe key. The hardcoded `STATUSES` set disagreed with the 0072 CHECK and is widened. `side` is derived server-side and never taken from the body, proven by tests that send the OPPOSITE side and assert the derivation wins. **Corrected the agent's `side` derivation**, which gated `client` on `status='active'`: a `client_contacts` row IS a PM's assertion of which side someone is on, while `status` answers whether they can log in yet. Gating on active mislabels a client as internal staff in exactly the pre-acceptance window D-3 exists for — and `internal` is the MORE privileged label, so an active-only check is conservative about naming and permissive about exposure. Now derived from presence; `revoked` still reads `client` because the column is denormalised so a historical attendee list stays truthful. **Client notifications** on four write paths (client gate opens, client decides, scope.signed completes) through one exported resolver: active-only, client-wide-or-matching-project, and signature requests restricted to `signer` contacts since a viewer asked to sign cannot act. Per-recipient try/catch, so a notify failure can never roll back a transition — asserted by forcing one. 🔴 **THE GAP THAT MADE W0 INERT, and no existing test could catch it:** `PortalController` resolved clients ONLY via the legacy `clients.portal_user_id`, which the invite flow never writes. A contact could accept, get a Keycloak account, receive the `client` role, gain the tenant via principal.ts's union, pass `resource_portal` authz — and then be refused with "not a portal client". Every step upstream reported success and the portal showed nothing. The W0 spec said the portal "resolves through this table instead"; that intent was never implemented, and the previous CHANGELOG entry's claim that W0 closed this root was overstated. Now resolves a SET of clients (D-1 made contacts many-per-client) from active `client_contacts` UNIONed with the legacy column — unioned, not replaced, since that column has live rows and its own tests. Project scoping is now enforced, and a client-wide row WIDENS access so adding a narrower row cannot take access away. 9 tests, all on the invite-flow configuration (no `portal_user_id`, no staff membership) that `portal.test.ts` never exercises. 🔴 **A defect the previous entry itself created and misreported:** `scope-signoffs` checked `party` only for truthiness, so the server walk's `party:"agency"` was stored and answered `complete:false` — indistinguishable from a correct "waiting on the client", which is how it was reported. "agency" satisfies neither entry of `REQUIRED_SCOPE_PARTIES ["provider","client"]`, so that run could never complete, and the unique index on `(run_id, party)` means the junk row permanently occupies a slot. Now validated with a 400. Found by an agent that read the live Cerbos policy instead of trusting the gap-assessment doc. 🟠 **`pipeline_runs.owner_id` was unwritable** — `createRun` never accepted it and `updateRun` took only `status`, so the column 0072 added was permanently NULL and every "notify the owner, else created_by" resolved to `created_by`. A column no code can set is indistinguishable from one that does not exist. Now settable on create and PATCH; `ownerId:null` clears it while omitting the key leaves it untouched (a `CASE` on key-presence, not a `COALESCE`, so a status-only park cannot silently unassign the PM). The owner must be ACTIVE STAFF, never a client contact, because `owner_id` is who INTERNAL notifications address. **UI:** agency scope sign-off (gap B1 — without it no scope agreement could complete from either side), run lifecycle recovery tools (collapsed and warning-toned, not beside routine controls), `/pipeline` and `/meetings` filters, and a client column resolved WITHOUT an API change or invented data (cross-referencing `source_meeting_id` against the recordings registry, showing "—" where a run has no traceable meeting). Scheduling surfaces two states a PM would otherwise learn too late: a scheduled time that passed while still `scheduled` ("Time passed — not recorded" — the capture never happened) and a client meeting with nobody from the client side attending. **An existing registration pin caught a 6th global filter** and was updated deliberately, as its own message demands — `LastResortExceptionFilter` stays FIRST because Nest reverses the argument list, pinned independently. **Timezone assumption stated, not left implicit:** `datetime-local` is zone-less and conversion happens server-side, so the platform and the PM are assumed to share a timezone; a multi-timezone agency needs an explicit offset, which is a contract change. Suites: platform-nest **2739 passed / 4 skipped / 0 failed** (full sweep), platform-ui **943/943**, `tsc` + `next build` + `lint:withtenants` + `lint:migration-rls` clean, both service images build. Cerbos `resource_client_contact` is DEPLOYED and proven live on gda-aicenter with both an allow and a deny. **Still PROTOTYPED:** the running server image predates all of this, so the live invite->accept->login and schedule->record walks have not been driven. **Known remaining:** the portal's N+1 and missing `/portal/[runId]` detail (C3/C5), run<->project navigation (C6), and automated invite email (W0 ships copy-the-link deliberately — there is no mail transport in this estate). |
 | 2026-08-03 | `webdev` **W0 — client engagement setup: contacts, magic-link invites, Keycloak provisioning, scheduling schema. `platform-ui 0.9.0` -> `0.10.0`, `webdev 0.8.1` -> `0.9.0`.** Closes the two structural roots the gap assessment found: `pipeline_runs` had no `project_id` (a recording started from a project workspace knew its project and the run it produced forgot it — the reason WD-06 needed a one-project-per-tenant env var), and `clients.portal_user_id` was written **only in test fixtures**, so the client half of every gate could never be countersigned in production. **Migration 0072:** `client_contacts` (many per client, `project_id NULL` = client-wide per D-1, signer/viewer capability because "on the same page" implies contacts who watch but must not sign, two partial uniques because UNIQUE treats NULLs as distinct), `client_invites`, `meeting_participants`, `pipeline_runs.project_id`/`owner_id`, scheduling on `meeting_recordings` (new `scheduled` status; rides the existing registry rather than a parallel calendar because that registry already mints the `meeting_id` the frozen dispatcher contract keys on), and the global **`client` role, which had never been seeded** despite two policies depending on it. **Design correction found by audit:** client contacts deliberately do NOT get a `company_memberships` row. Only 6 of 27 non-test queries over that table filter `kind`, so widening it would have needed a defensive filter at ~10 staff-listing sites and left every future site free to forget — a client contact appearing in `/people` and HR as an employee. Instead `rbac/principal.ts` unions `client_contacts` into `principal.companies` and `notify()` accepts them: two deliberate edits instead of ten defensive ones, and the leak becomes structurally impossible. Safe because of a VERIFIED property — `"user"`, the parent of the `client` derived role, is granted by **no** policy, and `derivedRoles: ["client"]` appears only in `resource_portal.yaml`. **`notify()` was silently dropping every client notification** (memberships-only check with a bare `return`) — exactly the failure D-3 exists to prevent, in its least detectable form. **Keycloak:** the platform's first Admin API integration. Real `gaiada-provisioner` service-account client created on the `gaiada` realm (manage-users + view-users only; boundary probed — creating a client 403, mapping `realm-admin` onto its own created user 403 and verifiably not sticking), then `keycloak-admin.ts` driven against the LIVE realm over HTTPS: create with `emailVerified:true` -> read-back -> setPassword -> disable -> enable -> exact-match guard -> cleanup. That flag is load-bearing: `provisionUser()` **throws** on a first login whose invited email is not IdP-verified, so A (provision) and C (magic link) are two halves of one flow, not alternatives — the clicked token is what makes the flag honest. Revocation DISABLES rather than deletes (the audit trail must survive; deleting the IdP identity orphans `idp_subject` so a re-invite could mint a second account) and only when it was the contact's LAST active engagement. **Invite token** reuses the shape and reasoning of the estate's Google OAuth state token, with its own published attack list: forgery/tenant-pivot (HMAC over both ids, compared before any DB read and over a CANONICAL re-encoding), replay (one atomic `UPDATE ... WHERE consumed_at IS NULL RETURNING`), wrong-address redemption (email bound at issue), leaked-DB redemption (only sha256 stored), indefinite validity (72h enforced INSIDE the consume predicate), cross-tenant read (FORCE RLS + the signed tenant being the only tenant opened). The tenant travels in the TOKEN, not the row: the accept route is tenant-agnostic and the table is FORCE-RLS, so reading the row to learn its own tenant is circular. **Three bugs caught by tests rather than inspection, all invisible to `tsc`:** (1) the accept route was **unreachable for every invite ever minted** — a real token is 146 chars and find-my-way's `maxParamLength` defaults to 100, so it 404'd at the raw router before Nest; fixed by moving the token into the request BODY rather than raising the ceiling, which also keeps a bearer-equivalent secret out of access/proxy logs, `Referer` and browser history. (2) `KeycloakNotConfiguredError` **and** `ClientInviteError` both extend `Error`, so every typed refusal surfaced as a generic 500 discarding `.status`/`.code`/`.missing` — a doc comment had asserted a filter that did not exist; new `ClientAccessErrorFilter` covers both (fifth instance of this bug class here). (3) a `"use server"` module may export only async functions, and a client component may `import type` from a server-only module but not value-import from it — two module splits `tsc` and vitest accept while `next build` rejects. **Cerbos:** new `resource_client_contact` (create/update/revoke at manager tier per D-2 so the PM who owns the engagement acts without an admin; `group_executive` gets its OWN rule gated on `notLow` only, never `inTenant`, per WD-20-R1), and `scope_signoff.create` widened to `manager` — a deliberate scope change, not a fix for the correct 403 a manager-tier automation account hit during the server walk. `team_lead` documented as a DEAD TIER on this kind (it needs a team-scoped grant matching `resource.teamId`, which client contacts have no concept of). **Deployed and proven live on gda-aicenter** (policies are bind-mounted server files): manager ALLOW / member DENY on create, and an exec who is a member of NO tenant still allowed — both an allow and a deny, because an unlisted kind is a silent DENY that reads like a logic bug. **UI:** public `/invite/[token]` page (middleware allowlist) that deliberately does not pre-validate the token — single-use means a check would spend it, and distinguishing valid from invalid would be the exact oracle the coarse API refusal denies — plus `ClientContactsPanel` on the client page, above Meetings because setup precedes capture. It surfaces "link not used yet" as a normal waiting state and warns when no contact can sign off, since a scope agreement would otherwise wait indefinitely. The invite link is shown ONCE and says so, because the API keeps only a hash. Suites: platform-nest **92/92** across the five W0 suites (invite tokens 19, contacts 14, keycloak-admin 18, Cerbos matrix 26, HTTP 17) plus meetings 30 and pipeline/race 32; mcp-hub 32; platform-ui **939/939**; `tsc` + `next build` + `lint:withtenants` + `lint:migration-rls` clean; both service images build. **Still PROTOTYPED, not DEV-VERIFIED:** the running server image predates this code, so the live invite->accept->login walk has not been driven; the server env, Cerbos policies and provisioner client are pre-staged and verified so a tag rollout should light it up. |
 | 2026-08-03 | `platform-ui` `0.8.0` → `0.9.0` · `platform-nest` **video recording works end to end — the gap in the audio-only recorder is closed.** The recorder shipped audio-only that morning for one reason: `isAllowedAudio` accepted no `video/*` container, so a browser video take would have been refused *after* the whole upload was sent. Rather than widen a validator on a guess, that was left as a stated gap. **The guess is now a measured fact.** **VERIFIED against the running `gaiada-whisper-1`** (`fedirz/faster-whisper-server`, which carries `/usr/bin/ffmpeg`): it demuxes a video container and transcribes its audio stream. The probe used a CONTROL, which is what makes it evidence — an opus-only `.webm` and a vp8+opus `.webm` built by ffmpeg from the SAME 3s audio track, differing only by the presence of a video stream, both returned HTTP 200 with the **identical transcript**; an h264+aac `.mp4` also decoded. Re-run recipe is in the code comment (POST to `http://whisper:8000/v1/audio/transcriptions` from inside the compose network — whisper publishes no host port — and prefix `MSYS_NO_PATHCONV=1` on Git Bash). **Backend:** `isAllowedAudio` → `classifyMedia` returning `'audio'|'video'|null`, adding `video/webm|mp4|quicktime|x-matroska|ogg|3gpp` + `.mov/.mkv/.ogv/.3gp/.m4v`; the generic-content-type extension fallback is unchanged (a plausible mimetype OR a recognised extension, never a spoofed name alone). Ambiguous `.webm`/`.mp4`/`.ogg` under a generic type resolve to **video**, the harmless direction — guessing audio on a real video refuses a valid upload, guessing video only permits a larger one. New `MEETING_VIDEO_MAX_BYTES` (default 500MB) beside the 200MB audio cap. **The subtle part, and the one that got its own test:** @fastify/multipart can register only ONE `fileSize` for the whole app, so `main.ts` now registers `maxUploadBytes()` = MAX(audio, video) and the **real cap is enforced per-kind in the handler**. Without that handler check, raising the plugin limit for video would have silently opened the audio path to 500MB uploads — an audio file sitting *between* the two caps sails past busboy, and before this change that case could not arise. Tested with a positive control: 2048 bytes is refused as audio and accepted as video under a 1KB/4KB test config, so the refusal is provably the per-kind cap and not just "2KB is too big". **Frontend:** `useMediaRecorder({ video })` requests the camera (720p `ideal`, never `exact` — an `exact` constraint turns an older webcam into OverconstrainedError, i.e. "recording is broken"), picks a video container, and caps bitrate at ~800 kbps video + 32 kbps audio so a 60-minute meeting lands near 220MB instead of the browser's multi-Mbps default force-stopping a meeting mid-sentence. Live mirrored `<video>` preview while recording (muted — an unmuted self-preview is an instant feedback howl) with a Paused overlay; the take plays back in a `<video>`, unmirrored because that is the real footage. `RecordControls` gains an Audio / Audio+Video radiogroup, **keyed** so switching modes mounts a fresh recorder rather than carrying a finished audio take into a video session and uploading the wrong medium. `RecordingWorkbench` follows the row's own `kind`, so an audio recording never raises a camera prompt it does not need. Upload `accept` and all user-facing copy now say audio *or* video. **A test-harness trap was hit and is now documented in place:** `routedWhisperFetch` matches on `url.startsWith(config.whisper.url)`, and in the byte-cap suite that config value is `""` — so `startsWith("")` matched EVERY url including Cerbos's own fetch, and `authorize()` began returning spurious 403s (then the stub leaked into the next test). This is exactly the failure that file's own header warns about; the fix is that the cap suite stubs nothing, because it asserts a 202 and never needs whisper. Verification: `platform-nest` **2555 passed / 1 failed / 4 skipped (178 files)** — the 1 failure is `src/modules/reports/report-seal.db.test.ts`'s seal-hash recomputation, **pre-existing and reports-owned**, confirmed by running it in isolation and by this change touching nothing under `modules/reports`. `meetings.test.ts` **27/27** against live PG + Cerbos (6 new: video/webm transcribes and keeps `content_type: video/webm` on the stored file, generic-type `.mov` classifies as video, and the three cap cases). `platform-ui` **928/928 across 95 files** (25 recorder tests, 6 new for video: camera constraint requested, video container + bitrate ceilings applied, preview stream exposed only for video and cleared before tracks die, audio takes never request video, the larger cap is used, and unsupported/blocked messaging names the camera). `tsc` clean both sides, `next build` green, `lint:withtenants` + `lint:migration-rls` clean. **Still not DEV-VERIFIED, same specific gap as the audio recorder:** the browser half runs against a faked `MediaRecorder` under jsdom, so no real camera or encoder has driven it. What IS now real rather than assumed is the whisper side. |
@@ -274,6 +515,98 @@ anywhere real.
 ---
 
 ## platform-nest
+### [0.9.3] — 2026-08-03 · PROTOTYPED (two endpoints that described the wrong world)
+- **`GET /api/roles` returned every company's role rows.** Per-company roles share their NAMES across
+  companies, so the assign-role picker rendered `manager` ten times and `company_admin` three times
+  with nothing to distinguish them — and nine of those ten grant a role row owned by a different
+  company. Now takes an optional `tenantId` and narrows to `company_id IS NULL OR company_id = $1`.
+  Optional, so tenant-less callers keep working; membership-checked when passed, so it cannot be used
+  to enumerate the roles of a company the caller has nothing to do with.
+- **`automation/status`'s `n8nUrl` was the in-cluster base.** The UI turns that field into the "Open
+  in n8n" link, so it was handing browsers `http://n8n:5678` — a name that resolves only inside the
+  compose network. The console reported the service healthy and listed its workflows the whole time,
+  which is why it went unnoticed. Split out `config.automationPublicUrl`
+  (`AUTOMATION_PUBLIC_URL`); `n8nUrl` is now that value, omitted when unset so the UI hides the
+  button rather than rendering a dead link, and the config panel shows both values labelled.
+  Deliberately NOT inside `config.services` — that object is indexed by system name, so an extra key
+  there would read as one more probeable service.
+
+Verified: `tsc --noEmit` clean; `admin-systems` suite 24 pass. The pre-existing `n8nUrl` assertion
+(`toContain("/n8n")`) had been passing only because this suite's `AUTOMATION_URL` happens to contain
+that substring — replaced with one that asserts the public origin is used, that it differs from the
+reported in-cluster base, and that the field is absent when unconfigured.
+
+### [0.9.2] — 2026-08-03 · PROTOTYPED (effective module set, one query)
+
+- `enabledModuleKeys(tenantId)` in `modules/registry.ts` — the SET form of the enablement rule
+  (`enabled_modules` UNION active `service_assignments`). **`isModuleEnabled` now delegates to it**,
+  so the OR-clause exists in exactly one query instead of two hand-written copies that can drift
+  (the failure mode being a served tenant authorized on one path and denied on another).
+- `GET /api/:tenantId/modules-enabled` — the effective set for one company. Membership-gated (403
+  without a membership or a global `platform_admin`), not `authorize()`d: it is metadata about which
+  surfaces exist, needed by every page a member can already open.
+- The rewritten query was diffed against the old per-key `EXISTS` form on the live `gda-aicenter`
+  database for all three companies — identical results, including the empty case (`{}` → no rows →
+  `[]`, so `isModuleEnabled` stays false).
+
+Verified: 8 unit tests (4 new, covering the membership branches with the registry mocked),
+`tsc --noEmit` clean. The DB-backed paths are covered by the hr/reports suites against live PG,
+which were **not** run — no local Postgres by standing decision.
+
+### [0.9.1] — 2026-08-03 · PROTOTYPED (module catalog endpoint)
+
+- `GET /api/module-catalog` (AuthGuard, no `authorize()`, deliberately **no** `ModuleEnabledGuard`) —
+  the modules **compiled into the running build**: key + `uiManifest[0].label` + owned paths. The
+  registry is a compile-time artifact, so this is tenant-agnostic; per-tenant enablement stays in
+  `isModuleEnabled()` at each module's controller. Gating the catalog on enablement would recreate the
+  very disappearing-row bug it exists to fix (see platform-ui `0.10.1`).
+- No migration, no schema change, no behaviour change to any existing route.
+
+Verified: 4 new unit tests, `tsc --noEmit` clean. The endpoint has **not** been driven at runtime —
+the deployed `alpha-01.005.0015a` image predates it.
+
+### [0.9.0] — 2026-08-03 · PROTOTYPED (IT network discovery + the device write half)
+
+Migration `0071`. **The reported bug was not a bug.** "IT > Topology doesn't show all the devices in
+the network" — measured against the real office network the same day: SSID `GDA`, `10.10.0.0/22`,
+**~58 live hosts** behind a UniFi OS gateway at `10.10.0.1`. The ERP held **8 rows**, all hand-seeded
+fiction on a `10.0.x.x` range that does not exist here, and a codebase-wide grep for
+UniFi/SNMP/ARP/mDNS discovery returned **zero hits**. The feature never existed.
+
+- **The ERP cannot poll the controller — verified, not assumed.** `10.10.0.1` is RFC1918 behind office
+  NAT; `curl` from `gda-aicenter` returns HTTP `000`. Discovery is therefore a **push**:
+  `POST /api/:t/it/discovery/report`, fed by `it-site-collector` (**not built** — blocked on a
+  read-only UniFi API key and an always-on office host).
+- `GET /api/:t/it/topology` — server-computed `{ devices, links, lastRun }`. `lastRun` is load-bearing:
+  a **dead collector** and an **empty network** otherwise render identically.
+- `PATCH` + `DELETE /api/:t/it/devices/:id` — the edit/delete half `0019_it_devices.sql` and
+  `lib/it.ts` both promised and that was never built. `deleted_at` was filtered on by every query and
+  written by nothing, so devices were immortal.
+- **Status is now derived** from `last_seen_at` freshness (dark-by-default reaper). Nothing had ever
+  called the heartbeat endpoint, so every UI-registered device kept the DB default `unknown` forever
+  and rendered grey.
+- New tables `it_device_links` (resolved edges) + `it_discovery_runs` (audit/staleness), both
+  FORCE-RLS; the classify backfill is wrapped per tenant so it cannot silently no-op.
+
+Three measured facts drove the design: **MAC is not an identity** (~60% of observed MACs are
+randomized, so upserts key on UniFi's stable client id); **ICMP undercounts 5×** (12 of 58 hosts
+answer ping, so liveness comes from the controller's client table, never a probe); and **BYOD is
+counted, never stored** — ~25 of the 58 hosts are personal phones whose hostnames name staff outright,
+so persisting them would build a presence log of named employees, which CLAUDE.md forbids before legal
+Gate 1. Classification is recomputed server-side so a mis-set collector cannot launder them in.
+
+Discovered rows carry an `overrides` layer so an operator's correction survives the next poll instead
+of reverting ~5 minutes later. Seed fiction is now off by default (`SEED_DEMO_DEVICES=1`) and labelled
+`demo-fixture`.
+
+Deliberate deviation from the design doc: ingest authorizes on the existing Cerbos `create` action,
+not a new `discover` one — a new action is a silent DENY until Cerbos restarts, and `create` is
+already scoped to `company_admin`/`it_staff`.
+
+Verified: 34 IT tests (20 pure + 14 against live Postgres + Cerbos incl. `0071`); full suite
+2628 passed / 4 skipped / 0 failed; `tsc` clean; both migration lints clean. Carried forward: the live
+tenant's 8 seeded rows still need purging (per-tenant SQL in the design doc §12).
+
 ### [0.6.3] — 2026-07-27 · PROTOTYPED (systems-console write levers)
 - **NEW `PUT` + `DELETE /api/admin/gateway/config`** — proxies the gateway's new config-write route.
   The gateway owns validation/bounds/persistence; this layer re-throws its 4xx VERBATIM (400 bounds,
@@ -357,6 +690,113 @@ anywhere real.
 - **Unreleased / next:** identity writes, org-structure endpoints.
 
 ## platform-ui
+### [0.10.3] — 2026-08-03 · PROTOTYPED (six surfaces that reported a state they were not in)
+Found by driving the live site as a signed-in user across all 84 routes under both companies. None of
+these threw; each one asserted something false, which is why they had survived.
+
+- **Roles picker** — passes the active tenant to `listRoles` so the catalog stops listing every
+  company's identically-named roles.
+- **HR scope** — the selector called every company "served" because an elevated caller was folded in
+  as a `home` grant, while the envelope directly beneath reported those same companies "not served".
+  Adds an explicit `elevated` reason, renames the option to "All companies in scope", and widens the
+  404 label to "HR not enabled or not served" (the backend returns 404 for both).
+- **Tasks** — the default all-companies leg is assignee-scoped, so a task you had just created
+  unassigned looked like it was never saved. The empty state now says the view shows only your own
+  tasks and links each company's "All tasks" view.
+- **Calendar workload** — refused to render without a narrowed scope, while all-companies IS the
+  default: dead for every visitor. A per-person split is meaningless there (the union is the caller's
+  own tasks), so it breaks the same rows down by company.
+- **Hydration** — React #418 on `/systems/gateway`, `/hub`, `/automation`. Bare `toLocaleString()`
+  formats in the container's zone server-side and the visitor's client-side, so the text differed and
+  React threw away the server HTML for that subtree. Adds `formatTimestamp()` on a fixed display zone
+  (`NEXT_PUBLIC_DISPLAY_TZ`, default `Asia/Singapore`, inlined at build so both sides agree) and moves
+  those call sites onto it; `formatDate`/`formatDateTime` pinned to the same zone.
+- **Client portal** — the BFF 403s "not a portal client" for any staff member, which the reader folded
+  into an empty list, so staff were told "once your kickoff is processed, your project appears here"
+  as though a project were on its way to them. The reader carries that distinction now.
+
+Verified: `tsc --noEmit` clean, `next build` green, 945 tests pass.
+
+### [0.10.2] — 2026-08-03 · PROTOTYPED (a disabled module now says so)
+
+Closes the mismatch `0.10.1` left open: nothing outside the settings page read `enabled_modules`, so
+a disabled module's pages stayed clickable and merely came back empty — **identical to a company
+that genuinely has no clients, no devices, no invoices**.
+
+- `lib/modules.ts` — `moduleGate()` / `isModuleOnForActiveCompany()` over
+  `GET /api/:t/modules-enabled`. **Fail-open on purpose:** a module reads as disabled ONLY when the
+  backend positively said so. Missing endpoint, error, odd payload shape, no active company → every
+  module passes, because a false "disabled" panel hides a working page, which is worse than the
+  empty-page problem being fixed. The shape check is deliberate (`Array.isArray`) rather than
+  `?? []` — coercing a generic empty-list response to "no modules" would dark every gated section.
+- `ModuleDisabled` panel + section layouts for `/agency`, `/clients`, `/billing`, `/hr`, `/it`,
+  `/knowledge`, `/reports`, `/appraisals`. It states that nothing was deleted and links to
+  Settings → Modules & Fields with the module key.
+- **The nav is deliberately NOT filtered.** Hiding the entry would repeat `0.10.1`'s bug in the other
+  direction — the surface disappears with no trace of why or how to get it back. The section is
+  reachable and explains itself.
+- **Gated only where the module actually owns the endpoints**, each verified against the controller's
+  guards. Explicitly NOT gated: `/projects` + `/tasks` (core `CoreController`, unguarded — the `pm`
+  module owns `/api/:t/pm/*`, so honouring its `uiManifest` claim of `/projects` would have hidden two
+  working pages from every company, none of which currently has `pm` on); `/systems/automation`
+  (`automation-console` is a documented non-per-tenant deviation — global admin console, no
+  `:tenantId` to gate on); `/deliverables` + `/timesheets` (core `client-work.controller`); `/search`
+  (global search, unrelated to the `search` module).
+- DEMO_MODE reports the full compiled-in set, so the backend-free tour is unchanged — without a
+  fixture the generic empty-list default would have darked half the app.
+
+Verified: **945 unit tests pass** (6 new for the gate's fail-open branches), `tsc` clean,
+`next build` green (66 pages). **Not driven in a browser** — the Playwright suite needs a local
+server on :3005, which standing policy says not to run here.
+
+### [0.10.1] — 2026-08-03 · PROTOTYPED (the module toggle was one-way)
+
+Pairs with platform-nest `0.9.1`. Reported as "I disabled a module to see the difference and now it's
+gone" — accurate. **Settings → Modules & Fields could turn a module off and never back on.**
+
+- The toggle list was `union(["agency"], company.enabled_modules)`. Disabling a module removes its key
+  from that array, so the row it was rendered from **disappeared with it** — every module except the
+  one hardcoded key was a one-way switch recoverable only by direct API/SQL write. The list now comes
+  from `GET /api/module-catalog` (all ten compiled-in modules), still unioned with `enabledModules` so
+  an enabled-but-no-longer-compiled key stays visible and removable. Falls back to a static list of
+  the ten keys on 404, so it works against a backend without the endpoint.
+- Each row now shows the module's real label and the nav paths it owns — disabling a module 404s those
+  routes via `ModuleEnabledGuard`, and the row previously said nothing about what would go dark.
+- **The company edit form was silently stripping modules.** `CompanyForm` knew only about `agency` and
+  its update action sent the derived set as `modules`, replacing `enabled_modules` — so editing a
+  company's *name* dropped `hr`/`reports`/etc. The field is now create-only; on edit the form shows the
+  current set read-only and `updateCompanyAction` omits `modules` entirely, leaving the backend's
+  `COALESCE($5, enabled_modules)` to preserve it.
+
+Live consequence of the old behaviour, found on `gda-aicenter`: Gaia Digital Agency held `{agency}`
+though the seed grants `{agency, hr, reports}`. `hr` was restored by direct SQL; **`reports` is still
+off**. The nav is gated by RBAC and never reads `enabled_modules`, so a disabled module's pages stay
+clickable and merely return empty — that mismatch is NOT fixed here.
+
+Verified: 939 unit tests pass, `tsc` clean, `next build` green. Not driven in a browser; the running
+image predates both changes.
+
+### [0.10.0] — 2026-08-03 · PROTOTYPED (real IT topology + device edit/remove)
+
+Pairs with platform-nest `0.8.0`.
+
+- **Topology** now draws the real graph — gateway → access point/switch → device — from the resolved
+  edge set, replacing a `buildTopology()` that could only regroup rows by two free-text strings and
+  had no way to express an uplink. Falls back to the old site→network grouping while no edges exist,
+  so today's view is unchanged until a collector reports.
+- A **sync banner** states the feed's age, host count and BYOD aggregate, and says plainly when
+  nothing has ever reported. Without it an operator reads silence as "all clear".
+- Devices with no resolved uplink get their own bucket rather than being omitted — hand-registered
+  devices never report one, so hiding them would make the map disagree with the device list.
+- **Device edit + remove** (neither existed). On a discovered row the collector-owned facts
+  (`ip`/`mac`/`hostname`/`status`) are hidden because the API rejects them; descriptive fields are
+  kept in an overrides layer and survive the next sync.
+- Devices tab gains search (name/hostname/IP/MAC), a class filter, a discovered-vs-manual badge, and a
+  50-row cap with "Show all" — the table was unusable at a real estate's ~58 rows.
+
+New `Device` fields are all optional, so the UI still renders against a backend without `0071`.
+Verified: 939 unit tests pass, `tsc` clean, `next build` green. Not driven in a browser.
+
 ### [0.6.5] — 2026-07-27 · PROTOTYPED (console write controls)
 - **Gateway config is editable** where the gateway says it is: new `OverridableConfigField` renders a
   save per writable key AND the one fact a plain form can't express — whether the value is a console
@@ -572,6 +1012,52 @@ anywhere real.
 - **Next:** deploy to a real host; tune SLOs on prod traffic.
 
 ## infra
+### [0.7.4] — 2026-08-03 · PROTOTYPED (one secret under two names; n8n squatting the ERP root)
+- **The platform read the bot's admin token from `${BOT_ADMIN_TOKEN}` while the bot read
+  `${ADMIN_TOKEN}`** — one shared secret, two `.env` names. A deployment that set only `ADMIN_TOKEN`
+  handed the platform an empty string, every bot-admin proxy call 401'd, and the Systems console
+  reported "bot admin unreachable" as though the bot were down (it was up and answering `/health` 200
+  throughout). Now `${BOT_ADMIN_TOKEN:-${ADMIN_TOKEN:-}}`, so one name suffices. Verified live: all
+  four admin routes went 401 → 200 and the console shows a real session state with event history.
+- **n8n was proxied on eight ERP top-level paths** — `/webhook`, `/form`, `/mcp` and their
+  `-test`/`-waiting` variants — because `N8N_WEBHOOK_URL` was the bare origin. The first platform-ui
+  route to land under any of those names would have been silently answered by n8n, presenting as a 404
+  on a page that demonstrably exists. Narrowed to the `/n8n/` prefix only (still outside the basic-auth
+  gate, which the event bridge requires since it acks 4xx as delivered). Verified safe first: all 8
+  registered webhooks are called in-cluster except `/ingest/lead`, which has never run.
+- **`AUTOMATION_PUBLIC_URL`** added, so the console's "Open in n8n" link stops being derived from the
+  in-cluster `AUTOMATION_URL`.
+- **`*.local.md` gitignored** for operator credential notes kept beside the code.
+
+Standing caveat, recorded because it bit this session: `deploy.yml` ships `infra/compose/*.yml`,
+scripts and mounted config — **not** host nginx and **not** `automation/.env`. Those two are manual
+(see `infra/nginx/README.md`).
+
+### [0.7.2] — 2026-08-03 · IN PROGRESS (CI reached the redis it was already running; deploy unblocked)
+- **`platform-nest` CI set `REDIS_URL`, but every suite reads `REDIS_URL_TEST`** (18 files). The
+  redis service container was running and being ignored, so **14 test files / 146 tests had never
+  once executed in CI** — they skipped themselves silently. Only visible because TR-29's preflight
+  deliberately converts that skip into a loud failure. Same URL, correct name. Un-skipping them
+  immediately surfaced a real bug — see `reports` 0.3.1.
+- `infra/scripts/wire-env.sh` — the one piece of the live box that was not reproducible from the
+  repo (it existed only as `~/gaiada/wire-automation.sh` on gda-aicenter). Generalised to a service
+  list + a `VERIFY` regex. Encodes two traps: `docker compose restart` does NOT re-read `.env`
+  (compose bakes the environment at container *create* time, so a restart re-runs the old
+  environment while looking like it worked — only a recreate re-reads the file), and the VPS
+  invocation needs `-f docker-compose.hostdata.yml --profile bot --profile auth` or postgres/redis
+  are profile-disabled and compose rejects the project. It reports explicitly when NONE of the
+  expected vars are present, because that is the signature of a missing compose passthrough rather
+  than an unset value — the shape that has now bitten four times (Google/Ads credentials,
+  `N8N_BRIDGE_TIMEOUT_MS`, `MEETING_VIDEO_MAX_BYTES`, `N8N_BRIDGE_ENTITY_TYPES`).
+- **Deploy unblocked.** `RENDERER_TOKEN` is `${RENDERER_TOKEN:?}` in `docker-compose.vps.yml`, so
+  its absence from the box's `.env` made `docker compose` refuse the ENTIRE project, not just the
+  new sidecar. Minted on gda-aicenter alongside `PLATFORM_UI_INTERNAL_URL` / `REPORT_RENDERER_URL`;
+  `docker compose config` now resolves against the live `.env` with no mandatory var missing.
+- Runbook: added a "changing a variable in `.env` on a running box" section, and **discharged the
+  `report-renderer` "unverified on the production Linux VPS" caveat** — built and exercised on
+  gda-aicenter itself (Docker 29.7.0, linux/amd64): a real 16 624-byte `%PDF-` from
+  `chromium.launch()` → `page.pdf()`, 403 on a foreign origin (SSRF guard), 401 without a token.
+
 ### [0.7.1] — 2026-07-31 · IN PROGRESS (WAHA image bump 2026.6.2 → 2026.7.2)
 > Numbering note: this jumps from `0.5.2` because the registry table in `MODULES.md` was advanced
 > to `0.7.0` by the trial-deploy/nginx work without matching entries here. The table is the source
@@ -647,6 +1133,37 @@ anywhere real.
 ### [0.4.0] — 2026-07-23 · PROTOTYPED
 - Baseline. VPS Compose stack, Dockerfiles, local CI, backups, supply-chain pipeline (SBOM/cosign/SLSA).
 - **Next:** first production deploy; GitOps; K8s/SPIFFE (target-state).
+
+## reports
+> Section opened 2026-08-03. The registry has carried a `reports` module since `0.1.0`, but no
+> section existed here, so `0.1.0 → 0.3.0` (the TR tracker/reporting programme) has no per-entry
+> history — rule 1 debt, recorded rather than back-filled from guesswork. Entries start at 0.3.1.
+
+### [0.3.1] — 2026-08-03 · PROTOTYPED (seal_hash could never be verified from storage)
+- **`computeSealHash()` hashed a string the stored `jsonb` can never reproduce, so `seal_hash`
+  NEVER verified.** `canonicalStringify` sorted keys (correct — jsonb does not preserve key order)
+  but did not drop `undefined`-valued keys the way `JSON.stringify` — the thing that actually
+  writes the column — does. `Object.keys()` lists such a key, and `JSON.stringify(undefined)`
+  returns the *value* `undefined`, which interpolates as the literal text `undefined`.
+  `computeHeaderWarnings` returns `undefined` whenever a period has no warnings, i.e. the common
+  case, so essentially every sealed period hashed as `..."warnings":undefined...` at seal time and
+  as nothing at all when read back.
+- **Why this mattered more than a red test:** `seal_hash` is the module's tamper evidence, and a
+  check that can never reproduce is indistinguishable from one that caught real tampering. It would
+  have read as "these sealed rows were altered" forever, on every period, with the rows intact.
+- Diagnosed by dumping both hash inputs and diffing: byte-identical for 606 characters, then
+  `"warnings":undefined` on one side and nothing on the other.
+- Also closed the same failure mode for values carrying `toJSON` (a `Date` would have hashed as
+  `{}` while storing an ISO string) — unreachable through `ReportDocument` today, one field away
+  from reachable. Applied to `narrative.ts`'s deliberate independent copy too, where the defect is
+  latent (nothing re-derives a `groundingHash` from storage yet), rather than leave a copy of
+  something known-broken.
+- Locked in with 4 DB-free tests asserting the invariant **over a JSON round-trip** rather than
+  against a frozen digest, so they keep holding if the canonical form is ever legitimately changed,
+  and so this class is catchable in 1 ms instead of only by a full live-Postgres run.
+- **Verified** against real Postgres 17 + Cerbos + Redis (throwaway containers on gda-aicenter
+  mirroring the CI job): **177 files / 2560 tests pass, 0 failures**. Before: 162 files, 1 failure,
+  14 skipped. Found only because `infra` 0.7.2 fixed the CI redis wiring that had been skipping it.
 
 ## report-renderer
 ### [0.1.0] — 2026-07-31 · DEV-VERIFIED (TR-19: sidecar service + compose + CI)

@@ -4,6 +4,7 @@ import { StatusBadge } from "@/components/ui";
 import { SearchableTable } from "./SearchableTable";
 import { ConnectionState } from "./ConnectionState";
 import { EmptyNote } from "./EmptyNote";
+import { formatTimestamp } from "@/lib/format";
 
 // The MCP Hub console's long lists (tool registry, decision audit, resource/prompt templates),
 // pulled out of the (server-component) hub page so they can carry client-side search +
@@ -73,7 +74,7 @@ export function HubAuditTable({ audit, hasUnfilteredEntries }: { audit: HubAudit
         <EmptyNote>{hasUnfilteredEntries ? "No entries match this filter." : "No tool calls have been decided yet."}</EmptyNote>
       }
       renderRow={(row, i) => [
-        row.ts ? new Date(row.ts).toLocaleString() : "—",
+        formatTimestamp(row.ts),
         row.tool,
         // Untrusted identifier from an external surface — rendered as an inert text child.
         `${row.principal?.provider ?? "?"}:${row.principal?.externalId ?? "?"}`,

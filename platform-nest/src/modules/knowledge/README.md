@@ -37,11 +37,16 @@ most pages, which is theme-independent in a way a CSS selector never is.
 
 | Family | Tables | `source_ref` |
 |---|---|---|
-| Client work | `clients`, `projects`, `tasks`, `deliverables` | `erp:client:<id>` etc. |
+| Client work | `clients`, `projects`, `tasks` **and `pm_tasks`**, `deliverables` | `erp:client:<id>`, `erp:pmtask:<id>` etc. |
 | Long-form | `meeting_recordings.transcript`, `pm_docs` | `erp:meeting:<id>`, `erp:pmdoc:<id>` |
 | Reports | `report_documents` (latest revision only) | `erp:report:<grain>:<scope>` |
 | Org & people | `company_org_structure`, `org_units`, `company_memberships` | `erp:org:<tenant>` etc. |
 | Files | `files` (+ extracted text) | `erp:file:<id>` |
+
+Tasks come from **two** tables. `pm_tasks` is the PM console's own richer row and is where
+day-to-day work actually lives — on the live box the core `tasks` table held 0 rows while
+`pm_tasks` held the real backlog, so indexing only the core table produced a silently task-free
+corpus. Both are indexed; they are different records and a tenant may populate either.
 
 Records are rendered as **labelled prose**, not raw values — an embedding of `"blocked"` is
 meaningless; `"Task: Migrate DNS / Status: blocked / Project: Acme Rebuild"` is answerable.

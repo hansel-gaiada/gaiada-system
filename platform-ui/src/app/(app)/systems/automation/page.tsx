@@ -17,6 +17,7 @@ import { WorkflowsTable, ExecutionsTable } from "@/components/systems/Automation
 import { SearchableTable } from "@/components/systems/SearchableTable";
 import { toggleWorkflow, replayDeadLetters } from "./actions";
 import "@/components/systems/systems.css";
+import { formatTimestamp } from "@/lib/format";
 
 interface WorkflowRow {
   name?: string;
@@ -119,7 +120,7 @@ export default async function AutomationSystemPage() {
                 renderRow={(w) => [
                   w.name ?? "—",
                   <StatusBadge key={`s-${w.name}`} label={w.status ?? "unknown"} />,
-                  w.lastRun ? new Date(w.lastRun).toLocaleString() : "—",
+                  formatTimestamp(w.lastRun),
                 ]}
               />
               <p className="sys-empty-note" style={{ marginTop: 12 }}>
@@ -233,7 +234,7 @@ export default async function AutomationSystemPage() {
                 { label: "Reason" },
               ]}
               rows={approvals.map((a) => [
-                new Date(a.created_at).toLocaleString(),
+                formatTimestamp(a.created_at),
                 a.origin,
                 a.agent_name ?? a.workflow_id,
                 a.tool_name,

@@ -100,7 +100,9 @@ export async function seedAutomationAccounts(tenantId: string): Promise<number> 
       userId = await createUser(acc.email, acc.name, "Automation service account");
       if (!linked) created++;
     }
-    await addMembership(tenantId, userId); // idempotent
+    // kind='service': these are workflows, not staff. Without it they take the column default
+    // 'employee' and every people-shaped surface counts them as colleagues.
+    await addMembership(tenantId, userId, "service"); // idempotent
     await grantRole(userId, await createRole(acc.role), "company", tenantId); // idempotent; ensures/upgrades role
     if (!linked) await linkIdentity(userId, "n8n", acc.workflowId, true); // verified -> AuthGuard mints a real principal
   }

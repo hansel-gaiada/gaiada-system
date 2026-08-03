@@ -26,7 +26,7 @@ export default async function InviteEmployeePage() {
     );
   }
 
-  const roles = (await listRoles(userId).catch(() => [])).map((r) => ({ id: r.id, name: r.name }));
+  const roles = (await listRoles(userId, tenant).catch(() => [])).map((r) => ({ id: r.id, name: r.name }));
 
   return (
     <>

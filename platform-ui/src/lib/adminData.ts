@@ -19,6 +19,8 @@ export interface UserRow {
   email: string;
   title: string | null;
   status: string;
+  /** True when this membership is kind='service' — a non-human principal (n8n workflow, bot). */
+  isService?: boolean;
   roles: { grantId: string; role: string; scopeType: string; scopeId: string | null }[];
 }
 
@@ -103,9 +105,12 @@ async function gracefulWrite(p: Promise<unknown>): Promise<AdminActionState> {
 }
 
 // ---- Users & Roles ----
-export async function listUsers(u: string, t: string): Promise<UserRow[]> {
+// Employee-only by default. Pass `includeService` from an admin surface that must see and revoke
+// automation accounts' grants (Settings → Users & Roles); the People directory takes the default,
+// because a service account is a principal, not a colleague.
+export async function listUsers(u: string, t: string, includeService = false): Promise<UserRow[]> {
   try {
-    return await platformFetch<UserRow[]>(`/api/${t}/users`, u);
+    return await platformFetch<UserRow[]>(`/api/${t}/users${includeService ? "?includeService=1" : ""}`, u);
   } catch (e) {
     if (!(e instanceof PlatformError && (e.status === 404 || e.status === 405))) throw e;
   }
@@ -120,7 +125,14 @@ export async function listUsers(u: string, t: string): Promise<UserRow[]> {
   }));
 }
 
-export const listRoles = (u: string) => skipMissing(platformFetch<RoleRow[]>(`/api/roles`, u), [] as RoleRow[]);
+// `tenantId` narrows the catalog to the global roles plus the active company's own. Pass it from
+// any per-company surface: per-company role rows share their NAMES across companies, so an
+// unnarrowed catalog renders one indistinguishable "manager" option per company in the group.
+export const listRoles = (u: string, tenantId?: string) =>
+  skipMissing(
+    platformFetch<RoleRow[]>(`/api/roles${tenantId ? `?tenantId=${encodeURIComponent(tenantId)}` : ""}`, u),
+    [] as RoleRow[],
+  );
 
 // Invite/onboard a person and edit their profile — BFF contract (backend TODO,
 // see docs/FRONTEND-BFF-CONTRACT.md):
@@ -169,6 +181,24 @@ export const unlinkIdentity = (u: string, t: string, id: string) =>
   gracefulWrite(platformFetch(`/api/${t}/identity-links/${id}`, u, { method: "DELETE" }));
 
 // ---- Modules ----
+// The catalog is the COMPILED-IN module list (GET /api/module-catalog), deliberately independent
+// of any company's enabled_modules: the settings page must keep showing a module's row after it
+// is disabled, or the toggle becomes one-way. Degrades to MODULE_CATALOG_FALLBACK on 404 so the
+// page still renders every key against an older backend that lacks the endpoint.
+export interface ModuleCatalogEntry {
+  key: string;
+  label: string;
+  paths: string[];
+}
+
+/** Mirrors main.ts's registerModule() calls — only used when the backend predates the endpoint. */
+export const MODULE_CATALOG_FALLBACK: ModuleCatalogEntry[] = [
+  "agency", "pm", "it", "billing", "clients", "knowledge", "automation-console", "hr", "search", "reports",
+].map((key) => ({ key, label: key, paths: [] }));
+
+export const listModuleCatalog = (u: string) =>
+  skipMissing(platformFetch<ModuleCatalogEntry[]>(`/api/module-catalog`, u), MODULE_CATALOG_FALLBACK);
+
 export const setModuleEnabled = (u: string, t: string, module: string, enabled: boolean) =>
   gracefulWrite(
     platformFetch(`/api/${t}/company/modules`, u, { method: "PATCH", body: JSON.stringify({ module, enabled }) }),

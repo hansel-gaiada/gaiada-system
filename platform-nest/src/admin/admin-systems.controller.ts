@@ -222,7 +222,15 @@ async function probeStatus(system: SystemKey): Promise<SystemStatus> {
       });
       // With a Public-API key we can list real workflows; without one the UI still degrades.
       const workflows = await listN8nWorkflows(base, config.services.automation.token);
-      return { ok: true, counters: { workflows: workflows.length }, detail: { url: base, n8nUrl: base, workflows } };
+      // `url` is the in-cluster base this probe just used; `n8nUrl` is what the UI turns into an
+      // "Open in n8n" link, so it MUST be the browser-reachable origin. They were the same value,
+      // which made the button point at http://n8n:5678 — unreachable from any browser. Omitted
+      // when unset so the UI hides the button instead of rendering a dead link.
+      return {
+        ok: true,
+        counters: { workflows: workflows.length },
+        detail: { url: base, n8nUrl: config.automationPublicUrl || undefined, workflows },
+      };
     }
     const h = (await getJson(`${base}${healthPath}`)) as Record<string, unknown>;
     if (system === "bot") {
@@ -433,7 +441,10 @@ function hubConfigFields(d: HubDetail): ConfigField[] {
 /** Project the n8n/bridge posture into ConfigField[]. */
 function automationConfigFields(base: string, apiKey: string, bridge: BridgeHealth): ConfigField[] {
   return [
-    field("n8nUrl", "n8n URL", base || "(not set)"),
+    // Both, labelled: they are different values for different callers and conflating them is
+    // exactly how the "Open in n8n" button ended up pointing into the compose network.
+    field("n8nUrl", "n8n URL (in-cluster, used by the platform)", base || "(not set)"),
+    field("n8nPublicUrl", "n8n editor URL (browser)", config.automationPublicUrl || "(not set)"),
     field("apiKeyConfigured", "Public-API key configured", !!apiKey, "secretPresence"),
     field("bridgeEnabled", "Event bridge enabled", bridge.enabled, "boolean"),
     field("bridgeWebhook", "Bridge webhook configured", bridge.webhookConfigured, "secretPresence"),
