@@ -14,6 +14,31 @@ local stack). None of these mean "production-done".
 Every cut app version and the exact module manifest it contains, so any deployed build can be
 reconstructed from this table alone. Format defined in [`VERSIONING.md`](./VERSIONING.md).
 
+### `Alpha 01.005.0021a` — 2026-08-03 — the module switch works in both directions
+
+First cut that carries the IT discovery work (`0.9.0`/`0.10.0`), which was committed but never
+tagged — `0015b`'s deploy died mid-`docker pull` on a `connection reset by peer` and auto-rolled back
+to `0015a`, so the box has been serving `0015a` while `/VERSION` claimed `0015b`.
+
+Reported as "I disabled a module to see the difference and now it's gone." Both halves were real:
+
+- **The toggle was one-way.** Settings → Modules & Fields rendered `union(["agency"], enabled_modules)`,
+  so disabling a module removed the key AND the row that offered to re-enable it. Recovery required
+  SQL. The list now comes from the compiled-in catalog.
+- **The company edit form silently stripped modules** — it knew only `agency` and sent that derived
+  set as `enabled_modules`, so renaming a company dropped `hr`/`reports`.
+- **A disabled module looked identical to an empty one.** Nothing outside the settings page read the
+  flag, so gated pages stayed clickable and returned nothing. They now say so, and say how to undo it.
+
+Found live on `gda-aicenter`: Gaia Digital Agency held `{agency}` where the seed grants
+`{agency, hr, reports}`. `hr` was restored by hand before this cut; **`reports` is deliberately still
+off** — the owner was mid-experiment with it.
+
+| Module | | Why |
+|---|---|---|
+| platform-nest | `0.8.1 → 0.9.2` | IT discovery + device writes (`0.9.0`, previously untagged); module catalog endpoint (`0.9.1`); `enabledModuleKeys` + per-tenant `modules-enabled` (`0.9.2`) |
+| platform-ui | `0.6.5 → 0.10.2` | real IT topology + device edit/remove (`0.10.0`, previously untagged); two-way module toggle (`0.10.1`); legible module-disabled state (`0.10.2`) |
+
 ### `Alpha 01.005.0015b` — 2026-08-03 — index the tasks people actually use
 
 `0015a`'s first live sweep on `gda-aicenter` ingested 130 sources / 306 chunks with 0 errors, and
@@ -359,6 +384,35 @@ anywhere real.
 ---
 
 ## platform-nest
+### [0.9.2] — 2026-08-03 · PROTOTYPED (effective module set, one query)
+
+- `enabledModuleKeys(tenantId)` in `modules/registry.ts` — the SET form of the enablement rule
+  (`enabled_modules` UNION active `service_assignments`). **`isModuleEnabled` now delegates to it**,
+  so the OR-clause exists in exactly one query instead of two hand-written copies that can drift
+  (the failure mode being a served tenant authorized on one path and denied on another).
+- `GET /api/:tenantId/modules-enabled` — the effective set for one company. Membership-gated (403
+  without a membership or a global `platform_admin`), not `authorize()`d: it is metadata about which
+  surfaces exist, needed by every page a member can already open.
+- The rewritten query was diffed against the old per-key `EXISTS` form on the live `gda-aicenter`
+  database for all three companies — identical results, including the empty case (`{}` → no rows →
+  `[]`, so `isModuleEnabled` stays false).
+
+Verified: 8 unit tests (4 new, covering the membership branches with the registry mocked),
+`tsc --noEmit` clean. The DB-backed paths are covered by the hr/reports suites against live PG,
+which were **not** run — no local Postgres by standing decision.
+
+### [0.9.1] — 2026-08-03 · PROTOTYPED (module catalog endpoint)
+
+- `GET /api/module-catalog` (AuthGuard, no `authorize()`, deliberately **no** `ModuleEnabledGuard`) —
+  the modules **compiled into the running build**: key + `uiManifest[0].label` + owned paths. The
+  registry is a compile-time artifact, so this is tenant-agnostic; per-tenant enablement stays in
+  `isModuleEnabled()` at each module's controller. Gating the catalog on enablement would recreate the
+  very disappearing-row bug it exists to fix (see platform-ui `0.10.1`).
+- No migration, no schema change, no behaviour change to any existing route.
+
+Verified: 4 new unit tests, `tsc --noEmit` clean. The endpoint has **not** been driven at runtime —
+the deployed `alpha-01.005.0015a` image predates it.
+
 ### [0.9.0] — 2026-08-03 · PROTOTYPED (IT network discovery + the device write half)
 
 Migration `0071`. **The reported bug was not a bug.** "IT > Topology doesn't show all the devices in
@@ -484,6 +538,65 @@ tenant's 8 seeded rows still need purging (per-tenant SQL in the design doc §12
 - **Unreleased / next:** identity writes, org-structure endpoints.
 
 ## platform-ui
+### [0.10.2] — 2026-08-03 · PROTOTYPED (a disabled module now says so)
+
+Closes the mismatch `0.10.1` left open: nothing outside the settings page read `enabled_modules`, so
+a disabled module's pages stayed clickable and merely came back empty — **identical to a company
+that genuinely has no clients, no devices, no invoices**.
+
+- `lib/modules.ts` — `moduleGate()` / `isModuleOnForActiveCompany()` over
+  `GET /api/:t/modules-enabled`. **Fail-open on purpose:** a module reads as disabled ONLY when the
+  backend positively said so. Missing endpoint, error, odd payload shape, no active company → every
+  module passes, because a false "disabled" panel hides a working page, which is worse than the
+  empty-page problem being fixed. The shape check is deliberate (`Array.isArray`) rather than
+  `?? []` — coercing a generic empty-list response to "no modules" would dark every gated section.
+- `ModuleDisabled` panel + section layouts for `/agency`, `/clients`, `/billing`, `/hr`, `/it`,
+  `/knowledge`, `/reports`, `/appraisals`. It states that nothing was deleted and links to
+  Settings → Modules & Fields with the module key.
+- **The nav is deliberately NOT filtered.** Hiding the entry would repeat `0.10.1`'s bug in the other
+  direction — the surface disappears with no trace of why or how to get it back. The section is
+  reachable and explains itself.
+- **Gated only where the module actually owns the endpoints**, each verified against the controller's
+  guards. Explicitly NOT gated: `/projects` + `/tasks` (core `CoreController`, unguarded — the `pm`
+  module owns `/api/:t/pm/*`, so honouring its `uiManifest` claim of `/projects` would have hidden two
+  working pages from every company, none of which currently has `pm` on); `/systems/automation`
+  (`automation-console` is a documented non-per-tenant deviation — global admin console, no
+  `:tenantId` to gate on); `/deliverables` + `/timesheets` (core `client-work.controller`); `/search`
+  (global search, unrelated to the `search` module).
+- DEMO_MODE reports the full compiled-in set, so the backend-free tour is unchanged — without a
+  fixture the generic empty-list default would have darked half the app.
+
+Verified: **945 unit tests pass** (6 new for the gate's fail-open branches), `tsc` clean,
+`next build` green (66 pages). **Not driven in a browser** — the Playwright suite needs a local
+server on :3005, which standing policy says not to run here.
+
+### [0.10.1] — 2026-08-03 · PROTOTYPED (the module toggle was one-way)
+
+Pairs with platform-nest `0.9.1`. Reported as "I disabled a module to see the difference and now it's
+gone" — accurate. **Settings → Modules & Fields could turn a module off and never back on.**
+
+- The toggle list was `union(["agency"], company.enabled_modules)`. Disabling a module removes its key
+  from that array, so the row it was rendered from **disappeared with it** — every module except the
+  one hardcoded key was a one-way switch recoverable only by direct API/SQL write. The list now comes
+  from `GET /api/module-catalog` (all ten compiled-in modules), still unioned with `enabledModules` so
+  an enabled-but-no-longer-compiled key stays visible and removable. Falls back to a static list of
+  the ten keys on 404, so it works against a backend without the endpoint.
+- Each row now shows the module's real label and the nav paths it owns — disabling a module 404s those
+  routes via `ModuleEnabledGuard`, and the row previously said nothing about what would go dark.
+- **The company edit form was silently stripping modules.** `CompanyForm` knew only about `agency` and
+  its update action sent the derived set as `modules`, replacing `enabled_modules` — so editing a
+  company's *name* dropped `hr`/`reports`/etc. The field is now create-only; on edit the form shows the
+  current set read-only and `updateCompanyAction` omits `modules` entirely, leaving the backend's
+  `COALESCE($5, enabled_modules)` to preserve it.
+
+Live consequence of the old behaviour, found on `gda-aicenter`: Gaia Digital Agency held `{agency}`
+though the seed grants `{agency, hr, reports}`. `hr` was restored by direct SQL; **`reports` is still
+off**. The nav is gated by RBAC and never reads `enabled_modules`, so a disabled module's pages stay
+clickable and merely return empty — that mismatch is NOT fixed here.
+
+Verified: 939 unit tests pass, `tsc` clean, `next build` green. Not driven in a browser; the running
+image predates both changes.
+
 ### [0.10.0] — 2026-08-03 · PROTOTYPED (real IT topology + device edit/remove)
 
 Pairs with platform-nest `0.8.0`.

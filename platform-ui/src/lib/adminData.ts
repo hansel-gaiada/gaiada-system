@@ -169,6 +169,24 @@ export const unlinkIdentity = (u: string, t: string, id: string) =>
   gracefulWrite(platformFetch(`/api/${t}/identity-links/${id}`, u, { method: "DELETE" }));
 
 // ---- Modules ----
+// The catalog is the COMPILED-IN module list (GET /api/module-catalog), deliberately independent
+// of any company's enabled_modules: the settings page must keep showing a module's row after it
+// is disabled, or the toggle becomes one-way. Degrades to MODULE_CATALOG_FALLBACK on 404 so the
+// page still renders every key against an older backend that lacks the endpoint.
+export interface ModuleCatalogEntry {
+  key: string;
+  label: string;
+  paths: string[];
+}
+
+/** Mirrors main.ts's registerModule() calls — only used when the backend predates the endpoint. */
+export const MODULE_CATALOG_FALLBACK: ModuleCatalogEntry[] = [
+  "agency", "pm", "it", "billing", "clients", "knowledge", "automation-console", "hr", "search", "reports",
+].map((key) => ({ key, label: key, paths: [] }));
+
+export const listModuleCatalog = (u: string) =>
+  skipMissing(platformFetch<ModuleCatalogEntry[]>(`/api/module-catalog`, u), MODULE_CATALOG_FALLBACK);
+
 export const setModuleEnabled = (u: string, t: string, module: string, enabled: boolean) =>
   gracefulWrite(
     platformFetch(`/api/${t}/company/modules`, u, { method: "PATCH", body: JSON.stringify({ module, enabled }) }),

@@ -32,10 +32,23 @@ export function CompanyForm({
         </select>
       </label>
       {company && <Field name="status" label="Status" type="select" options={["active", "suspended", "archived"]} defaultValue={company.status} />}
-      <label className="lux-field lux-field--checkbox">
-        <input type="checkbox" name="module_agency" className="lux-field__checkbox" defaultChecked={(company?.enabled_modules ?? []).includes("agency")} />
-        <Eyebrow style={{ fontSize: 10, opacity: 0.6 }}>Enable Agency module</Eyebrow>
-      </label>
+      {/* Modules are only settable at CREATE time here. On edit this form must not touch them:
+          it knows about `agency` alone, so submitting the checkbox set would silently strip every
+          other enabled module (hr, pm, reports, …) from the company. Editing goes through
+          Settings → Modules & Fields, which lists the full catalog one key at a time. */}
+      {company ? (
+        <div className="lux-field" style={{ gridColumn: "1 / -1" }}>
+          <Eyebrow style={{ fontSize: 10, opacity: 0.6 }}>Enabled modules</Eyebrow>
+          <p style={{ margin: 0, font: "400 13px/1.5 var(--font-body)", color: "var(--ink-muted)" }}>
+            {(company.enabled_modules ?? []).join(", ") || "None"} — change these in Settings → Modules &amp; Fields.
+          </p>
+        </div>
+      ) : (
+        <label className="lux-field lux-field--checkbox">
+          <input type="checkbox" name="module_agency" className="lux-field__checkbox" />
+          <Eyebrow style={{ fontSize: 10, opacity: 0.6 }}>Enable Agency module</Eyebrow>
+        </label>
+      )}
 
       {state?.error && (
         <p style={{ margin: 0, gridColumn: "1 / -1", font: "400 13px var(--font-body)", color: "var(--erp-accent)" }}>{state.error}</p>
@@ -43,8 +56,10 @@ export function CompanyForm({
       <div style={{ gridColumn: "1 / -1" }}>
         <Button type="submit" size="md" disabled={pending}>{pending ? "Saving…" : company ? "Save company" : "Create company"}</Button>
       </div>
-      {/* module set derived from checkboxes above; keep list in sync */}
-      <input type="hidden" name="knownModules" value={MODULES.join(",")} />
+      {/* Create-only: the module set is derived from the checkbox(es) above. Absent on edit, so
+          updateCompanyAction omits `modules` entirely and the backend's COALESCE keeps the
+          existing array. */}
+      {!company && <input type="hidden" name="knownModules" value={MODULES.join(",")} />}
     </form>
   );
 }

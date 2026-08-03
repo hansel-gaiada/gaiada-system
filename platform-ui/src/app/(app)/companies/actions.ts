@@ -57,7 +57,10 @@ export async function updateCompanyAction(companyId: string, _prev: CompanyFormS
       type: String(formData.get("type") ?? "") || null,
       parentCompanyId: String(formData.get("parentCompanyId") ?? "") || null,
       status: String(formData.get("status") ?? "") || undefined,
-      modules: readModules(formData),
+      // `modules` is deliberately NOT sent on update. This form only ever knew about `agency`,
+      // so sending its derived set replaced enabled_modules and silently dropped hr/pm/reports/…
+      // Omitting the key leaves the backend's COALESCE($5, enabled_modules) to keep the array;
+      // per-module changes belong to Settings → Modules & Fields (PATCH …/company/modules).
     });
   } catch (e) {
     if (e instanceof PlatformError) {

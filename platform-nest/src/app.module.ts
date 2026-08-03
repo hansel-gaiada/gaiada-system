@@ -44,6 +44,7 @@ import { CheckinsController } from "./modules/reports/checkins.controller"; // T
 import { AppraisalsController } from "./modules/reports/appraisals.controller"; // TR-24
 import { PrintPayloadController } from "./modules/reports/print-payload.controller"; // TR-21
 import { McpToolsController } from "./modules/mcp-tools.controller";
+import { ModuleCatalogController } from "./modules/module-catalog.controller";
 
 @Module({
   controllers: [
@@ -82,6 +83,9 @@ import { McpToolsController } from "./modules/mcp-tools.controller";
     PrintPayloadController,
     // MCP tool-def aggregation for the hub (WS2 §6).
     McpToolsController,
+    // Compiled-in module list for the settings UI (see the controller header for why it is
+    // NOT gated on per-tenant enablement).
+    ModuleCatalogController,
   ],
 })
 export class AppModule {}

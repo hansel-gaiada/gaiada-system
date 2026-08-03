@@ -9,14 +9,20 @@ export interface AdminActionState {
 
 // One module row: name + enabled/disabled badge + a toggle button. `action`
 // is already bound by the page to (module, nextEnabled) — it just needs
-// prev/formData to satisfy useActionState. Degrades gracefully (friendly
-// toast) until PATCH /api/:t/company/modules lands — see lib/adminData.ts.
+// prev/formData to satisfy useActionState. `label`/`paths` come from the
+// backend module catalog; `paths` are the nav routes this module owns, shown
+// so it's clear what disabling it will dark (their endpoints 404 immediately —
+// see platform-nest's ModuleEnabledGuard).
 export function ModuleToggle({
   module,
+  label,
+  paths,
   enabled,
   action,
 }: {
   module: string;
+  label?: string;
+  paths?: string[];
   enabled: boolean;
   action: (prev: AdminActionState | null, formData?: FormData) => Promise<AdminActionState>;
 }) {
@@ -34,8 +40,11 @@ export function ModuleToggle({
       }}
     >
       <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-        <Eyebrow style={{ fontSize: 10, opacity: 0.6 }}>Module</Eyebrow>
-        <span style={{ font: "400 14px var(--font-body)", color: "var(--text-primary)" }}>{module}</span>
+        <Eyebrow style={{ fontSize: 10, opacity: 0.6 }}>{module}</Eyebrow>
+        <span style={{ font: "400 14px var(--font-body)", color: "var(--text-primary)" }}>{label ?? module}</span>
+        {paths && paths.length > 0 && (
+          <span style={{ font: "400 12px var(--font-body)", color: "var(--ink-muted)" }}>{paths.join(" · ")}</span>
+        )}
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
         <StatusBadge label={enabled ? "Enabled" : "Disabled"} />

@@ -1696,6 +1696,23 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
   // survive reload, exercising the exact backend-ready flow).
   if (p.match(/^\/api\/[^/]+\/org-structure$/)) return { status: 404, json: { error: "org-structure endpoint not implemented" } };
 
+  // Module enablement: DEMO_MODE exists to browse every surface with no backend, so report the full
+  // compiled-in set — a demo company whose fixture has an empty enabled_modules would otherwise
+  // dark HR/Clients/Billing/Reports and make the tour look broken. Real gating is a live-backend
+  // concern (see lib/modules.ts).
+  if (p.match(/^\/api\/[^/]+\/modules-enabled$/)) {
+    return ok({
+      enabled: ["agency", "pm", "it", "billing", "clients", "knowledge", "automation-console", "hr", "search", "reports"],
+    });
+  }
+  if (p === "/api/module-catalog") {
+    return ok(
+      ["agency", "pm", "it", "billing", "clients", "knowledge", "automation-console", "hr", "search", "reports"].map(
+        (key) => ({ key, label: key, paths: [] }),
+      ),
+    );
+  }
+
   // ORG-13 service assignments. Real shapes (not the generic {id,ok:true}
   // catch-all further down) so the Connect-service dialog / /admin/services
   // page can be exercised end-to-end with DEMO_MODE=1 + SERVICE_ASSIGNMENTS_

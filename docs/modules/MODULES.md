@@ -23,7 +23,7 @@ version and add a `CHANGELOG.md` entry on every notable module change.
 
 ## App version
 
-**`Alpha 01.004.0005a`** — see [`VERSIONING.md`](./VERSIONING.md) for the format, and
+**`Alpha 01.005.0021a`** — see [`VERSIONING.md`](./VERSIONING.md) for the format, and
 
 [`/VERSION`](../../VERSION) for the machine-readable source. The app version composes the module
 versions below; the running build reports it at `GET /health`.
@@ -34,8 +34,8 @@ versions below; the running build reports it at `GET /health`.
 
 | Module | Ver | Status | Workstream | Since |
 |---|---|---|---|---|
-| platform-nest | `0.9.0` | PROTOTYPED | WS1 | 2026-08-03 |
-| platform-ui | `0.10.0` | PROTOTYPED | WS5 | 2026-08-03 |
+| platform-nest | `0.9.2` | PROTOTYPED | WS1 | 2026-08-03 |
+| platform-ui | `0.10.2` | PROTOTYPED | WS5 | 2026-08-03 |
 | ai-gateway-go | `0.13.0` | PROTOTYPED | WS3 | 2026-07 |
 | mcp-hub | `0.9.2` | PROTOTYPED | WS2 | 2026-08-03 |
 | sync-engine-go | `0.7.0` | PROTOTYPED | WS1 | 2026-07 |
