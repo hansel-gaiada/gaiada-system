@@ -41,7 +41,7 @@ versions below; the running build reports it at `GET /health`.
 | sync-engine-go | `0.7.0` | PROTOTYPED | WS1 | 2026-07 |
 | automation (n8n) | `0.4.1` | DEV-VERIFIED | WS4 | 2026-07 |
 | observability | `0.6.0` | DEV-VERIFIED | WS9 | 2026-07 |
-| infra | `0.7.1` | PROTOTYPED | WS10 | 2026-07 |
+| infra | `0.7.2` | PROTOTYPED | WS10 | 2026-08-03 |
 | wa-chat-bot | `0.9.1` | PROTOTYPED | WS5 | 2026-07 |
 | ai-agents | `0.4.0` | PROTOTYPED | WS8 | 2026-07 |
 | hermes-gateway | `0.2.0` | PROTOTYPED | WS3 | 2026-07 |
@@ -52,7 +52,7 @@ versions below; the running build reports it at `GET /health`.
 | social-media | `0.0.0` | PLANNED | Social Media | 2026-07-23 |
 | creative | `0.1.0` | PROTOTYPED | Creative | 2026-07 |
 | render-gateway-go | `0.0.0` | PLANNED | Creative | 2026-07-23 |
-| reports | `0.3.0` | PROTOTYPED | Cross-cutting | 2026-07-31 |
+| reports | `0.3.1` | PROTOTYPED | Cross-cutting | 2026-08-03 |
 | report-renderer | `0.1.0` | DEV-VERIFIED | Cross-cutting | 2026-07-31 |
 
 ---

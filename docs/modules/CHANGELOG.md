@@ -14,6 +14,77 @@ local stack). None of these mean "production-done".
 Every cut app version and the exact module manifest it contains, so any deployed build can be
 reconstructed from this table alone. Format defined in [`VERSIONING.md`](./VERSIONING.md).
 
+### `Alpha 01.005.0014a` — 2026-08-03 — tracker/reporting + search-marketing reach the box
+
+Carries the tracker/multi-grain-reporting programme, the search-marketing SEM/Google-Ads work, the
+`report-renderer` sidecar, the in-ERP audio/video recorder, the webdev server fixes, and the n8n
+console at `/n8n/`. Ships migrations **0064–0069 + 0072** (the box is at 0063).
+
+> **Migration gap, flagged not fixed:** `0070` and `0071` do not exist in the repo at this commit —
+> `0072` was committed while they were still uncommitted in another seat's tree. The runner applies
+> unapplied files in filename order, so if `0070`/`0071` land later they will execute *after*
+> `0072` has already run. Harmless only if they are independent of it. Worth resolving before the
+> next cut rather than discovering it as a failed migration.
+
+**Counter derivation (`0005 → 0014`, +9; letter resets to `a`).** Counted as bump *steps* per rule 3
+("don't flatten it by batching bumps into one"), read from the `MODULES.md` registry:
+
+| Module | at `01.004.0005a` | now | steps |
+|---|---|---|---|
+| platform-ui | `0.7.1` | `0.9.0` | 2 |
+| reports | `0.1.0` | `0.3.1` | 3 |
+| infra | `0.7.0` | `0.7.2` | 2 |
+| search-marketing | `0.4.0` | `0.5.0` | 1 |
+| report-renderer | `0.0.0` | `0.1.0` | 1 |
+
+> **Rule-1 debt, recorded not papered over:** the counter had to be derived from the *registry*,
+> because the registry and this log have drifted. `platform-ui`'s newest entry here is `0.6.5`
+> (2026-07-27) though the registry says `0.9.0`, and `reports` had no section at all until this cut
+> opened one at `0.3.1`. The registry is the source of truth per the `infra 0.7.1` numbering note,
+> so the derivation follows it. Back-filling the missing entries is outstanding work; inventing
+> them from diffs would have been worse than admitting the gap.
+
+**`Alpha 01.004.0006a` — SUPERSEDED, no image.** A concurrent session cut and pushed that tag at
+`e901ab9` while this cut was being prepared. Its `release` run failed at
+`build-sign (platform-nest)`:
+
+```
+src/main.ts(72,38): error TS2307: Cannot find module './modules/it/discovery.service'
+```
+
+`main.ts` was committed carrying an import of `discovery.service`, but that file was still
+**untracked** in that seat's working tree — a commit referencing a file that was never committed.
+`ci` failed on the same commit for the same reason. `deploy` was skipped, so nothing reached the
+box. This is the **third** instance of the exact `001` post-mortem failure: snapshotting a tree
+another seat is mid-write on. The number is burned, never reused.
+
+Accordingly this cut was taken from **`9d65686`, the last commit with a green `ci`** — which
+excludes only `e901ab9` (the knowledge two-tier RAG corpus, plus the half-committed IT-discovery
+work). Nobody's uncommitted work was committed to unblock it.
+
+**Full manifest** (all 19 registry rows, so this build is reconstructible):
+
+| Module | Version | | Module | Version |
+|---|---|---|---|---|
+| platform-nest | `0.7.1` | | webdev | `0.8.1` |
+| platform-ui | `0.9.0` | | webdesk | `0.0.0` |
+| ai-gateway-go | `0.13.0` | | search-marketing | `0.5.0` |
+| mcp-hub | `0.9.1` | | social-media | `0.0.0` |
+| sync-engine-go | `0.7.0` | | creative | `0.1.0` |
+| observability | `0.6.0` | | render-gateway-go | `0.0.0` |
+| infra | `0.7.2` | | reports | `0.3.1` |
+| wa-chat-bot | `0.9.1` | | report-renderer | `0.1.0` |
+| ai-agents | `0.4.0` | | hermes-gateway | `0.2.0` |
+| capture-helper | `0.2.0` | | | |
+
+**Cut discipline.** Taken from a **frozen `git worktree`** (another seat held ~35 uncommitted files
+throughout), and `platform-nest` was verified with **`tsc -p tsconfig.build.json`** — the exact
+command the Dockerfile runs, and the exact command `01.004.0006a` died on — not `tsconfig.json`.
+
+**Known-unverified at cut time:** `platform-nest`'s live-service suite passed 2560/2560 against real
+Postgres/Cerbos/Redis on gda-aicenter, but the in-ERP recorder and the webdev server fixes came from
+a concurrent session and were not independently re-driven here.
+
 ### `Alpha 01.004.0005a` — 2026-07-31 — trial branch merged back to main
 
 The `trial/alpha-cut` line and `main` rejoin. `main` carried the search-marketing and reports work;
@@ -485,6 +556,31 @@ anywhere real.
 - **Next:** deploy to a real host; tune SLOs on prod traffic.
 
 ## infra
+### [0.7.2] — 2026-08-03 · IN PROGRESS (CI reached the redis it was already running; deploy unblocked)
+- **`platform-nest` CI set `REDIS_URL`, but every suite reads `REDIS_URL_TEST`** (18 files). The
+  redis service container was running and being ignored, so **14 test files / 146 tests had never
+  once executed in CI** — they skipped themselves silently. Only visible because TR-29's preflight
+  deliberately converts that skip into a loud failure. Same URL, correct name. Un-skipping them
+  immediately surfaced a real bug — see `reports` 0.3.1.
+- `infra/scripts/wire-env.sh` — the one piece of the live box that was not reproducible from the
+  repo (it existed only as `~/gaiada/wire-automation.sh` on gda-aicenter). Generalised to a service
+  list + a `VERIFY` regex. Encodes two traps: `docker compose restart` does NOT re-read `.env`
+  (compose bakes the environment at container *create* time, so a restart re-runs the old
+  environment while looking like it worked — only a recreate re-reads the file), and the VPS
+  invocation needs `-f docker-compose.hostdata.yml --profile bot --profile auth` or postgres/redis
+  are profile-disabled and compose rejects the project. It reports explicitly when NONE of the
+  expected vars are present, because that is the signature of a missing compose passthrough rather
+  than an unset value — the shape that has now bitten four times (Google/Ads credentials,
+  `N8N_BRIDGE_TIMEOUT_MS`, `MEETING_VIDEO_MAX_BYTES`, `N8N_BRIDGE_ENTITY_TYPES`).
+- **Deploy unblocked.** `RENDERER_TOKEN` is `${RENDERER_TOKEN:?}` in `docker-compose.vps.yml`, so
+  its absence from the box's `.env` made `docker compose` refuse the ENTIRE project, not just the
+  new sidecar. Minted on gda-aicenter alongside `PLATFORM_UI_INTERNAL_URL` / `REPORT_RENDERER_URL`;
+  `docker compose config` now resolves against the live `.env` with no mandatory var missing.
+- Runbook: added a "changing a variable in `.env` on a running box" section, and **discharged the
+  `report-renderer` "unverified on the production Linux VPS" caveat** — built and exercised on
+  gda-aicenter itself (Docker 29.7.0, linux/amd64): a real 16 624-byte `%PDF-` from
+  `chromium.launch()` → `page.pdf()`, 403 on a foreign origin (SSRF guard), 401 without a token.
+
 ### [0.7.1] — 2026-07-31 · IN PROGRESS (WAHA image bump 2026.6.2 → 2026.7.2)
 > Numbering note: this jumps from `0.5.2` because the registry table in `MODULES.md` was advanced
 > to `0.7.0` by the trial-deploy/nginx work without matching entries here. The table is the source
@@ -560,6 +656,37 @@ anywhere real.
 ### [0.4.0] — 2026-07-23 · PROTOTYPED
 - Baseline. VPS Compose stack, Dockerfiles, local CI, backups, supply-chain pipeline (SBOM/cosign/SLSA).
 - **Next:** first production deploy; GitOps; K8s/SPIFFE (target-state).
+
+## reports
+> Section opened 2026-08-03. The registry has carried a `reports` module since `0.1.0`, but no
+> section existed here, so `0.1.0 → 0.3.0` (the TR tracker/reporting programme) has no per-entry
+> history — rule 1 debt, recorded rather than back-filled from guesswork. Entries start at 0.3.1.
+
+### [0.3.1] — 2026-08-03 · PROTOTYPED (seal_hash could never be verified from storage)
+- **`computeSealHash()` hashed a string the stored `jsonb` can never reproduce, so `seal_hash`
+  NEVER verified.** `canonicalStringify` sorted keys (correct — jsonb does not preserve key order)
+  but did not drop `undefined`-valued keys the way `JSON.stringify` — the thing that actually
+  writes the column — does. `Object.keys()` lists such a key, and `JSON.stringify(undefined)`
+  returns the *value* `undefined`, which interpolates as the literal text `undefined`.
+  `computeHeaderWarnings` returns `undefined` whenever a period has no warnings, i.e. the common
+  case, so essentially every sealed period hashed as `..."warnings":undefined...` at seal time and
+  as nothing at all when read back.
+- **Why this mattered more than a red test:** `seal_hash` is the module's tamper evidence, and a
+  check that can never reproduce is indistinguishable from one that caught real tampering. It would
+  have read as "these sealed rows were altered" forever, on every period, with the rows intact.
+- Diagnosed by dumping both hash inputs and diffing: byte-identical for 606 characters, then
+  `"warnings":undefined` on one side and nothing on the other.
+- Also closed the same failure mode for values carrying `toJSON` (a `Date` would have hashed as
+  `{}` while storing an ISO string) — unreachable through `ReportDocument` today, one field away
+  from reachable. Applied to `narrative.ts`'s deliberate independent copy too, where the defect is
+  latent (nothing re-derives a `groundingHash` from storage yet), rather than leave a copy of
+  something known-broken.
+- Locked in with 4 DB-free tests asserting the invariant **over a JSON round-trip** rather than
+  against a frozen digest, so they keep holding if the canonical form is ever legitimately changed,
+  and so this class is catchable in 1 ms instead of only by a full live-Postgres run.
+- **Verified** against real Postgres 17 + Cerbos + Redis (throwaway containers on gda-aicenter
+  mirroring the CI job): **177 files / 2560 tests pass, 0 failures**. Before: 162 files, 1 failure,
+  14 skipped. Found only because `infra` 0.7.2 fixed the CI redis wiring that had been skipping it.
 
 ## report-renderer
 ### [0.1.0] — 2026-07-31 · DEV-VERIFIED (TR-19: sidecar service + compose + CI)
