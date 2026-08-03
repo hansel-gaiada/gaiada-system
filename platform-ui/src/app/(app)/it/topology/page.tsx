@@ -21,7 +21,7 @@ export default async function TopologyPage() {
   const tenant = await getActiveTenant(me);
 
   if (!tenant) {
-    return <Card><EmptyNote>Select a company from the top bar.</EmptyNote></Card>;
+    return <EmptyNote>Select a company from the top bar.</EmptyNote>;
   }
 
   const devices = await listDevices(userId, tenant);
@@ -44,7 +44,7 @@ export default async function TopologyPage() {
       </div>
 
       {devices.length === 0 ? (
-        <Card><EmptyNote>No devices registered yet — nothing to map.</EmptyNote></Card>
+        <EmptyNote>No devices registered yet — nothing to map.</EmptyNote>
       ) : (
         <div className="erp-scroll" style={{ overflowX: "auto" }}>
           <Topology sites={sites} />

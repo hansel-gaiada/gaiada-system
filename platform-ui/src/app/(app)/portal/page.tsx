@@ -24,7 +24,7 @@ export default async function PortalPage() {
   if (!userId) redirect("/login");
   const me = await getMe(userId);
   const tenant = await getActiveTenant(me);
-  if (!tenant) return <Card><EmptyNote>No workspace selected.</EmptyNote></Card>;
+  if (!tenant) return <EmptyNote>No workspace selected.</EmptyNote>;
 
   const runs = await listPortalRuns(userId, tenant);
   // Pull detail for each run so we can render its client-side gates inline (small N for a client).
@@ -42,7 +42,7 @@ export default async function PortalPage() {
       </div>
 
       {runs.length === 0 ? (
-        <Card><EmptyNote>No projects yet. Once your kickoff is processed, your project appears here.</EmptyNote></Card>
+        <EmptyNote>No projects yet. Once your kickoff is processed, your project appears here.</EmptyNote>
       ) : (
         <div style={{ display: "grid", gap: 20 }}>
           {details.filter(Boolean).map((run) => {

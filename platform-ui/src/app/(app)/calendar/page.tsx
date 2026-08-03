@@ -167,7 +167,7 @@ export default async function CalendarPage({ searchParams }: { searchParams: Sea
       </div>
 
       {items.length === 0 ? (
-        <Card><EmptyNote>Nothing of yours is scheduled. Tasks assigned to you appear here once they have a date.</EmptyNote></Card>
+        <EmptyNote>Nothing of yours is scheduled. Tasks assigned to you appear here once they have a date.</EmptyNote>
       ) : view === "month" ? (
         <MonthView anchor={anchor} today={today} items={items} dayHref={dayHref} />
       ) : view === "week" ? (
@@ -189,7 +189,7 @@ export default async function CalendarPage({ searchParams }: { searchParams: Sea
           )}
         </Card>
       ) : (
-        <Card><EmptyNote>Nothing dated to lay on a timeline.</EmptyNote></Card>
+        <EmptyNote>Nothing dated to lay on a timeline.</EmptyNote>
       )}
     </>
   );

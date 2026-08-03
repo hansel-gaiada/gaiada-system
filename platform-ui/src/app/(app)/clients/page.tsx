@@ -40,7 +40,7 @@ export default async function ClientsPage() {
       {clients.length === 0 ? (
         <>
           <BackendPending what="No clients returned. Once the clients API is live they appear here." contract="GET /api/:t/clients" />
-          <Card><EmptyNote>No clients yet.</EmptyNote></Card>
+          <EmptyNote>No clients yet.</EmptyNote>
         </>
       ) : (
         <DataTable columns={COLUMNS} rows={rows} link={{ base: "/clients", idKey: "id", labelKey: "name" }} csvName="clients" pageSize={20} />

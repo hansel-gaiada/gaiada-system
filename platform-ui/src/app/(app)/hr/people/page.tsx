@@ -35,7 +35,7 @@ export default async function HRPeoplePage() {
       </Card>
     );
   }
-  if (!tenant) return <Card><EmptyNote>Select a company from the top bar.</EmptyNote></Card>;
+  if (!tenant) return <EmptyNote>Select a company from the top bar.</EmptyNote>;
 
   let people: UserRow[] = await listUsers(userId, tenant).catch(() => []);
   if (people.length === 0) {
@@ -62,7 +62,7 @@ export default async function HRPeoplePage() {
         </div>
       )}
       {people.length === 0 ? (
-        <Card><EmptyNote>No people found for this company.</EmptyNote></Card>
+        <EmptyNote>No people found for this company.</EmptyNote>
       ) : (
         <DataTable columns={COLUMNS} rows={rows} link={{ base: "/people", idKey: "id", labelKey: "name" }} csvName="people" pageSize={20} />
       )}

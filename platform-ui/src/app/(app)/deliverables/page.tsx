@@ -48,7 +48,7 @@ export default async function DeliverablesPage() {
         actions={can(me, "pm.manage", tenant) ? <Link href="/deliverables/new" className="lux-btn lux-btn--solid lux-btn--sm">New deliverable</Link> : undefined}
       />
       {deliverables.length === 0 ? (
-        <Card><EmptyNote>No deliverables yet.</EmptyNote></Card>
+        <EmptyNote>No deliverables yet.</EmptyNote>
       ) : (
         <DataTable columns={COLUMNS} rows={rows} csvName="deliverables" pageSize={20} />
       )}

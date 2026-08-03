@@ -30,7 +30,7 @@ export default async function HrLeavePage({ searchParams }: { searchParams: Sear
   if (!userId) redirect("/login");
   const me = await getMe(userId);
   const tenant = await getActiveTenant(me);
-  if (!tenant) return <Card><EmptyNote>Select a company from the top bar.</EmptyNote></Card>;
+  if (!tenant) return <EmptyNote>Select a company from the top bar.</EmptyNote>;
 
   const { company } = await searchParams;
   const scopeCompanies = hrScopeCompanies(me, tenant);

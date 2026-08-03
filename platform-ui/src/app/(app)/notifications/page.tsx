@@ -70,13 +70,11 @@ export default async function NotificationsPage({ searchParams }: { searchParams
     return (
       <>
         {header()}
-        <Card>
-          <EmptyNote>
+        <EmptyNote>
             {e instanceof PlatformError
               ? "Couldn't reach notifications right now. Try again shortly."
               : "Notifications are temporarily unavailable."}
           </EmptyNote>
-        </Card>
       </>
     );
   }

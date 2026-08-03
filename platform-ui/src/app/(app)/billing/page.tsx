@@ -58,7 +58,7 @@ export default async function BillingPage() {
       {invoices.length === 0 ? (
         <>
           <BackendPending what="No invoices returned." contract="GET /api/:t/invoices" />
-          <Card><EmptyNote>No invoices yet. Generate one from billable time.</EmptyNote></Card>
+          <EmptyNote>No invoices yet. Generate one from billable time.</EmptyNote>
         </>
       ) : (
         <DataTable columns={COLUMNS} rows={rows} link={{ base: "/billing", idKey: "id", labelKey: "clientName" }} csvName="invoices" pageSize={20} />

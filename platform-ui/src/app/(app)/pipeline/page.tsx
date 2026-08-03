@@ -20,7 +20,7 @@ export default async function PipelinePage() {
   const me = await getMe(userId);
   const tenant = await getActiveTenant(me);
   if (!tenant) {
-    return <Card><EmptyNote>Select a company to see its delivery pipeline.</EmptyNote></Card>;
+    return <EmptyNote>Select a company to see its delivery pipeline.</EmptyNote>;
   }
   const [runs, gates] = await Promise.all([
     listPipelineRuns(userId, tenant),

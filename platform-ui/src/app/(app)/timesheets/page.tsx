@@ -56,7 +56,7 @@ export default async function TimesheetsPage() {
       </Card>
 
       {entries.length === 0 ? (
-        <Card><EmptyNote>No time logged yet.</EmptyNote></Card>
+        <EmptyNote>No time logged yet.</EmptyNote>
       ) : (
         <DataTable columns={COLUMNS} rows={rows} csvName="timesheets" pageSize={20} />
       )}

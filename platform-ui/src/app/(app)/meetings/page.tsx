@@ -20,7 +20,7 @@ export default async function MeetingsPage() {
   const me = await getMe(userId);
   const tenant = await getActiveTenant(me);
   if (!tenant) {
-    return <Card><EmptyNote>Select a company to see its meeting recordings.</EmptyNote></Card>;
+    return <EmptyNote>Select a company to see its meeting recordings.</EmptyNote>;
   }
   const recordings = await listRecordings(userId, tenant);
   // WD-07: run-status chips — the recording's own status only says "in pipeline"; resolve the

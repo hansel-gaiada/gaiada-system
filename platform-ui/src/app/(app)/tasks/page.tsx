@@ -113,7 +113,7 @@ export default async function TasksPage({ searchParams }: { searchParams: Search
       )}
       {envelopeBanner}
       {rows.length === 0 ? (
-        <Card><EmptyNote>{scope === "all" ? "No tasks assigned to you across your companies." : mine ? "No tasks assigned to you." : "No tasks yet. Create one under a project."}</EmptyNote></Card>
+        <EmptyNote>{scope === "all" ? "No tasks assigned to you across your companies." : mine ? "No tasks assigned to you." : "No tasks yet. Create one under a project."}</EmptyNote>
       ) : (
         <DataTable columns={columns} rows={rows} link={{ base: "/tasks", idKey: "id", labelKey: "title" }} csvName="tasks" pageSize={25} />
       )}

@@ -240,7 +240,7 @@ export async function ProjectWorkspaceView({
 
       {view === "board" && (
         filteredTasks.length === 0 ? (
-          <Card><EmptyNote>{tasks.length === 0 ? "No tasks yet — create the first one above." : "No tasks match this tag filter."}</EmptyNote></Card>
+          <EmptyNote>{tasks.length === 0 ? "No tasks yet — create the first one above." : "No tasks match this tag filter."}</EmptyNote>
         ) : (
             <>
               {/* Unboxed: grouping is a setting, and a bordered card gave it the same weight as the
@@ -343,7 +343,7 @@ export async function ProjectWorkspaceView({
       {view === "milestones" && (
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
           <Card><MilestoneForm add={addMilestone.bind(null, projectId)} /></Card>
-          {milestones.length === 0 && <Card><EmptyNote>No milestones yet.</EmptyNote></Card>}
+          {milestones.length === 0 && <EmptyNote>No milestones yet.</EmptyNote>}
           {milestones.map((mst) => {
             const mtasks = tasks.filter((t) => t.milestoneId === mst.id);
             return (
@@ -369,7 +369,7 @@ export async function ProjectWorkspaceView({
       {view === "docs" && (
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
           <Card title="New doc"><DocEditor save={saveDoc.bind(null, projectId)} /></Card>
-          {docs.length === 0 && <Card><EmptyNote>No docs yet.</EmptyNote></Card>}
+          {docs.length === 0 && <EmptyNote>No docs yet.</EmptyNote>}
           {docs.map((d) => (
             <Card key={d.id} title={d.title} headerRight={<DocEditor doc={d} save={saveDoc.bind(null, projectId)} />}>
               <pre style={{ margin: 0, whiteSpace: "pre-wrap", font: "400 13px/1.6 var(--font-body)", color: "var(--text-primary)" }}>{d.body}</pre>
