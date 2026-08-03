@@ -84,10 +84,23 @@ export interface SealedDocumentEntry {
  *  Sorting keys first makes the hash immune to that round-trip, which is exactly what "seal_hash
  *  verifies over the period's document set [as read back from storage]" requires. */
 function canonicalStringify(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(canonicalStringify).join(",")}]`;
+  // `undefined` handling is the whole reason this is not a one-liner. JSON.stringify DROPS an
+  // undefined-valued object property when writing, but returns the JS value `undefined` when called
+  // on it directly — which template interpolation then renders as the literal text "undefined".
+  // So hashing a freshly-built document produced `{"delta":undefined,"value":3}` while the same
+  // document re-read from JSONB produced `{"value":3}`: different strings, different hash, and
+  // "seal_hash verifies" failed for every period whose documents carried any optional field left
+  // undefined. Tamper-evidence was therefore not merely wrong, it was inert.
+  //
+  // Both branches below now mirror JSON.stringify's own semantics: an undefined property is omitted,
+  // an undefined ARRAY element becomes null (arrays cannot have holes in JSON).
+  if (Array.isArray(value)) {
+    return `[${value.map((v) => (v === undefined ? "null" : canonicalStringify(v))).join(",")}]`;
+  }
   if (value !== null && typeof value === "object") {
-    const keys = Object.keys(value as Record<string, unknown>).sort();
-    return `{${keys.map((k) => `${JSON.stringify(k)}:${canonicalStringify((value as Record<string, unknown>)[k])}`).join(",")}}`;
+    const src = value as Record<string, unknown>;
+    const keys = Object.keys(src).filter((k) => src[k] !== undefined).sort();
+    return `{${keys.map((k) => `${JSON.stringify(k)}:${canonicalStringify(src[k])}`).join(",")}}`;
   }
   return JSON.stringify(value);
 }

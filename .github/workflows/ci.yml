@@ -93,6 +93,12 @@ jobs:
           DATABASE_URL_TEST: postgres://postgres:postgres@localhost:5432/postgres
           CERBOS_URL: http://localhost:3592
           REDIS_URL: redis://localhost:6379
+          # The suites read REDIS_URL_TEST, not REDIS_URL (reports PDF-export/print-token, HR
+          # WSD-7, org14 preflight, service-assignments, the work-activity dead-letter path).
+          # tr29-reconciliation.db.test.ts has a preflight that FAILS rather than skips when it is
+          # missing — its comment says it exists so nobody chases "18 misleading failures" again —
+          # so CI was walking into exactly the wall that preflight was written to prevent.
+          REDIS_URL_TEST: redis://localhost:6379
 
   # ai-gateway is the Go service (ai-gateway-go/); it replaced the retired Node gateway.
   gateway-go:
