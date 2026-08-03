@@ -403,7 +403,7 @@ export class MeetingRecordingsController {
     return withTenants([tenantId], async (c) => {
       const orphans = await c.query<{ id: string; meeting_id: string }>(
         `SELECT id, meeting_id FROM meeting_recordings
-         WHERE tenant_id = $1 AND deleted_at IS NULL AND pipeline_run_id IS NULL AND status <> 'ingested'`,
+         WHERE tenant_id = $1 AND deleted_at IS NULL AND pipeline_run_id IS NULL`,
         [tenantId],
       );
       let relinked = 0;

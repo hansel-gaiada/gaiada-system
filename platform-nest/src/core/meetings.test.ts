@@ -284,6 +284,91 @@ describe.skipIf(!TEST_URL)("meeting-recordings registry + ingest proxy (WS11 cap
     });
   });
 
+  // ---- E2 fix: the sweep's old predicate (`pipeline_run_id IS NULL AND status <> 'ingested'`)
+  // excluded the exact shape it exists to repair. A client-side ingest timeout can leave a
+  // recording at status='ingested' (set optimistically / by a partial response) while
+  // pipeline_run_id is still NULL, because the dispatcher's createRun landed server-side but the
+  // response never reached the row. `status <> 'ingested'` silently skipped that row forever.
+  // `pipeline_run_id IS NULL` alone is the correct — and sufficient — orphan test. Live proof on
+  // the server was `scanned 2, relinked 0` with a matching pipeline_runs row present.
+  describe("E2 relink sweep fix (status='ingested' orphans were excluded by the old predicate)", () => {
+    let ingestedOrphanId: string;
+    let ingestedOrphanMeetingId: string;
+    let ingestedRunId: string;
+    let deadEndId: string;
+
+    it("seed: a recording stuck 'ingested' with pipeline_run_id NULL, plus its real pipeline run", async () => {
+      const start = await app.inject({
+        method: "POST",
+        url: `/api/${co}/meetings/recordings/start`,
+        headers: asUser(member),
+        payload: { title: "E2 ingested-but-unlinked orphan", kind: "audio" },
+      });
+      ingestedOrphanId = start.json().id;
+      ingestedOrphanMeetingId = start.json().meetingId;
+
+      const run = await app.inject({
+        method: "POST",
+        url: `/api/${co}/pipeline/runs`,
+        headers: asUser(member),
+        payload: { sourceMeetingId: ingestedOrphanMeetingId, title: "E2 orphan run" },
+      });
+      expect(run.statusCode).toBe(201);
+      ingestedRunId = run.json().id;
+
+      // Force the exact buggy shape directly (the API itself never produces status='ingested'
+      // with pipeline_run_id still NULL — that combination only arises from the timed-out-response
+      // bug this sweep exists to repair).
+      await adminPool().query(
+        `UPDATE meeting_recordings SET status = 'ingested', pipeline_run_id = NULL WHERE id = $1`,
+        [ingestedOrphanId],
+      );
+      const before = await adminPool().query(
+        `SELECT status, pipeline_run_id FROM meeting_recordings WHERE id = $1`,
+        [ingestedOrphanId],
+      );
+      expect(before.rows[0]).toMatchObject({ status: "ingested", pipeline_run_id: null });
+    });
+
+    it("negative control: an unlinked recording with NO matching pipeline run", async () => {
+      const start = await app.inject({
+        method: "POST",
+        url: `/api/${co}/meetings/recordings/start`,
+        headers: asUser(member),
+        payload: { title: "E2 dead end — no run ever created", kind: "audio" },
+      });
+      deadEndId = start.json().id;
+      await adminPool().query(
+        `UPDATE meeting_recordings SET status = 'ingested', pipeline_run_id = NULL WHERE id = $1`,
+        [deadEndId],
+      );
+      const before = await adminPool().query(
+        `SELECT status, pipeline_run_id FROM meeting_recordings WHERE id = $1`,
+        [deadEndId],
+      );
+      expect(before.rows[0]).toMatchObject({ status: "ingested", pipeline_run_id: null });
+    });
+
+    it("sweep links the status='ingested' orphan to its real run, and leaves the dead end alone", async () => {
+      const r = await app.inject({ method: "POST", url: `/api/${co}/meetings/recordings/relink-orphans`, headers: asUser(admin) });
+      expect(r.statusCode).toBe(200);
+      expect(r.json().linkedIds).toContain(ingestedOrphanId);
+      expect(r.json().linkedIds).not.toContain(deadEndId); // no matching run -> must NOT be touched
+
+      const linked = await adminPool().query(
+        `SELECT status, pipeline_run_id FROM meeting_recordings WHERE id = $1`,
+        [ingestedOrphanId],
+      );
+      expect(linked.rows[0]).toMatchObject({ status: "ingested", pipeline_run_id: ingestedRunId });
+
+      const stillDead = await adminPool().query(
+        `SELECT status, pipeline_run_id FROM meeting_recordings WHERE id = $1`,
+        [deadEndId],
+      );
+      expect(stillDead.rows[0]).toMatchObject({ status: "ingested", pipeline_run_id: null }); // untouched, as it must be
+    });
+  });
+
   // ---- WD-04: in-ERP audio upload (no helper required) -> async server-side transcription ----
   // `id` above went through the LOCAL-WHISPER (helper) path only — it never gets an audio_ref,
   // which is exactly the regression proof this section closes with. Every test here mints its
