@@ -15,6 +15,7 @@ import "server-only";
 import type { Me } from "./platform";
 import { can } from "./rbac";
 import { getPendingApprovals, getMyTasks, type ApprovalItem, type TaskRow } from "./data";
+import { listAllPmTasks, type PmTask } from "./pm";
 import { listAutomationApprovals, type AutomationApproval } from "./automationApprovals";
 import { listInternalPendingGates, GATE_LABEL, type PipelineGate } from "./pipeline";
 import { listNotifications, type NotificationItem } from "./entities";
@@ -78,6 +79,31 @@ function fromGate(g: PipelineGate, company: { id: string; name: string }, decida
     href: `/pipeline/${g.run_id}`,
     createdAt: g.created_at,
     decidable,
+    urgencyScore: 0,
+  };
+}
+
+// PM tasks (`pm_tasks`) — the model every task the app creates actually lives in. The queue used to
+// read ONLY getMyTasks (GET /api/:t/tasks?assignee=me, the legacy flat `tasks` table), which returns
+// [] on live data, so an overdue PM task never reached "Needs you" at all. Both are read now: the
+// tables are distinct, so there is nothing to de-duplicate.
+//
+// KNOWN LIMIT: "done" is matched literally. A project that renamed its done status keeps the
+// isDone FLAG in its own status registry (lib/pm's statusFlags), which the queue does not load —
+// it is a cross-company fan-out and fetching a registry per project would multiply the request
+// count. A renamed done status therefore still shows here; the literal covers every default project.
+function fromPmTask(t: PmTask, company: { id: string; name: string }): QueueItem {
+  return {
+    id: `pmtask:${company.id}:${t.id}`,
+    type: "task",
+    title: t.title,
+    meta: t.projectName,
+    companyId: company.id,
+    company: company.name,
+    href: `/tasks/${t.id}`,
+    dueDate: t.dueDate,
+    createdAt: t.updatedAt ?? t.dueDate ?? new Date(0).toISOString(),
+    decidable: true,
     urgencyScore: 0,
   };
 }
@@ -150,11 +176,12 @@ export async function getMyWorkQueue(
     companies.map(async (c) => {
       try {
         const decidable = can(me, "approvals.decide", c.id);
-        const [approvals, automation, gates, tasks, notifications] = await Promise.all([
+        const [approvals, automation, gates, tasks, pmTasks, notifications] = await Promise.all([
           settle(getPendingApprovals(userId, [c])),
           settle(listAutomationApprovals(userId, c.id, { status: "pending" })),
           settle(listInternalPendingGates(userId, c.id)),
           settle(getMyTasks(userId, c.id)),
+          settle(listAllPmTasks(userId, c.id, { assignee: "me" })),
           settle(listNotifications(userId, c.id, true)),
         ]);
         const rows: QueueItem[] = [
@@ -162,6 +189,7 @@ export async function getMyWorkQueue(
           ...automation.map((a) => fromAutomation(a, c, decidable)),
           ...gates.map((g) => fromGate(g, c, decidable)),
           ...tasks.filter((t) => t.status !== "done").map((t) => fromTask(t, c)),
+          ...pmTasks.filter((t) => t.status !== "done").map((t) => fromPmTask(t, c)),
           ...notifications.filter(isMentionEligible).map((n) => fromMention(n, c)),
         ];
         return { company: c, ok: true, rows };
