@@ -69,7 +69,6 @@ import { startGraphBridgeLoop } from "./events/graph-bridge";
 import { startWorkActivityConsumerLoop } from "./events/work-activity-consumer";
 import { runWorkActivityBackfill } from "./core/work-activity-backfill";
 import { startBurndownSnapshotLoop } from "./modules/pm/burndown-job";
-import { startStaleReaperLoop } from "./modules/it/discovery.service";
 // SM-54 (tracker §6ad Ruling 1 / addendum §A13.2) — the search department's cadence loop lives in the
 // platform, NOT in n8n: it executes configuration a verified human already set (each engagement's
 // `tool_scope` toggle + cadence + budget cap, written under `search:scope:write`), and every automation
@@ -384,17 +383,6 @@ async function bootstrap(): Promise<void> {
     startBurndownSnapshotLoop(config.pmBurndownSnapshotIntervalMs);
     // eslint-disable-next-line no-console
     console.log(`burndown snapshot job on: every ${config.pmBurndownSnapshotIntervalMs}ms`);
-  }
-  // IT-03: the device stale reaper. A plain Postgres sweep (no Redis dependency), same dark-by-default
-  // pattern as the two above. It recomputes `status` from `last_seen_at` freshness, which is what makes
-  // "offline" mean anything at all: before this, a device that silently vanished kept displaying
-  // whatever status was last written, and a device registered through the UI sat at 'unknown' forever
-  // because nothing ever called the heartbeat endpoint. Only touches discovery_source='unifi' rows —
-  // hand-registered devices have no freshness signal to reason from and are left alone.
-  if (config.itDiscovery.reaperEnabled) {
-    startStaleReaperLoop(config.itDiscovery.reaperIntervalMs);
-    // eslint-disable-next-line no-console
-    console.log(`IT device stale reaper on: every ${config.itDiscovery.reaperIntervalMs}ms`);
   }
   // SM-54: the search pull scheduler. A plain Postgres sweep (no Redis dependency), so it sits outside
   // the redisUrl gate above alongside the drift sweep and the burndown job — but unlike those two this
