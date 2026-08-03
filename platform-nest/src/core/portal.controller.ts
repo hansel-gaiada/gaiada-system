@@ -1,7 +1,12 @@
 // WS11 build item 4 — client portal BFF. The client-facing surface (transparency + the client's own
-// sign-offs) is served here, SEPARATELY from the staff /api pipeline routes. A client authenticates
-// via the external client Keycloak realm (OIDC), auto-provisioned as a users row with a `client` role
-// scoped to the tenant, and linked to a clients row via clients.portal_user_id.
+// sign-offs) is served here, SEPARATELY from the staff /api pipeline routes.
+//
+// AUTH, corrected 2026-08-03 against the live server (this header used to describe a design that was
+// never built): a client authenticates against the SAME `gaiada` realm as staff, not an external client
+// realm. W0's invite accept provisions the Keycloak user, `provisionUser()` links it on first login, and
+// ownership resolves through `client_contacts` UNIONed with the legacy `clients.portal_user_id` — the
+// invite flow never writes that column. Driven end to end via the real PKCE flow: the client's token is
+// accepted, `/portal/runs` answers 200, and `/clients` + `/meetings/recordings` answer 403.
 //
 // Three isolation layers: RLS (tenant) + Cerbos (`client` role on `portal`) + this controller
 // (run.client_id must map to the caller's client — the "owned by caller" pattern). A client sees only
@@ -142,18 +147,52 @@ export class PortalController {
          ORDER BY created_at DESC LIMIT 100`,
         [clientIds, projectIds],
       );
-      // Compute the blockage per run (client-side gates + non-report stages).
-      const out = [];
-      for (const run of runs.rows) {
-        const stages = await c.query<{ status: string }>(
-          `SELECT status FROM pipeline_stages WHERE run_id = $1 AND track <> 'report'`, [run.id],
-        );
-        const gates = await c.query<{ kind: string; status: string }>(
-          `SELECT kind, status FROM pipeline_gates WHERE run_id = $1 AND actor_side = 'client' AND deleted_at IS NULL`, [run.id],
-        );
-        out.push({ id: run.id, title: run.title, status: run.status, currentBlockage: currentBlockage(run, stages.rows, gates.rows) });
-      }
-      return out;
+      // C3: blockage needs each run's stages + client gates, but fetched in TWO batched queries rather
+      // than two per run. The loop this replaces issued 2N+1 round trips — 201 for a full page — and
+      // the client portal is the one surface where that latency is paid by someone outside the company.
+      // Same filters as before (report track excluded, client-side undeleted gates only), so the
+      // grouping below is a transport change, not a semantic one.
+      if (!runs.rows.length) return [];
+      const runIds = runs.rows.map((r) => r.id);
+      const [allStages, allGates] = await Promise.all([
+        c.query<{ run_id: string; status: string }>(
+          `SELECT run_id, status FROM pipeline_stages WHERE run_id = ANY($1::uuid[]) AND track <> 'report'`,
+          [runIds],
+        ),
+        c.query<{ run_id: string; kind: string; status: string }>(
+          `SELECT run_id, kind, status FROM pipeline_gates
+            WHERE run_id = ANY($1::uuid[]) AND actor_side = 'client' AND deleted_at IS NULL`,
+          [runIds],
+        ),
+      ]);
+      const groupBy = <T extends { run_id: string }>(rows: T[]) => {
+        const m = new Map<string, T[]>();
+        for (const r of rows) {
+          const list = m.get(r.run_id);
+          if (list) list.push(r);
+          else m.set(r.run_id, [r]);
+        }
+        return m;
+      };
+      const stagesByRun = groupBy(allStages.rows);
+      const gatesByRun = groupBy(allGates.rows);
+      // `?? []` is load-bearing: a run with no stages or no client gates returns no rows at all, and
+      // the per-run loop passed an empty array in exactly that case. Passing `undefined` into
+      // currentBlockage() instead would throw on a brand-new run — the most common state in the portal.
+      return runs.rows.map((run) => {
+        const gates = gatesByRun.get(run.id) ?? [];
+        return {
+          id: run.id,
+          title: run.title,
+          status: run.status,
+          currentBlockage: currentBlockage(run, stagesByRun.get(run.id) ?? [], gates),
+          // C5: how many client decisions are outstanding on this run. Added so the list can badge
+          // "needs you" accurately WITHOUT the page fetching each run's detail — which is what it used
+          // to do (one HTTP call per run, four queries each). Free here: the batch above already holds
+          // every client-side gate, so this costs no extra query.
+          pendingActions: gates.filter((g) => g.status === "pending").length,
+        };
+      });
     });
   }
 

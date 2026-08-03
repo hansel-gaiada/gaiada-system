@@ -120,4 +120,42 @@ describe.skipIf(!TEST_URL)("client portal BFF (WS11 item 4)", () => {
     const ev = await adminPool().query(`SELECT 1 FROM outbox_events WHERE entity_id = $1 AND event_type = 'scope.signed'`, [runA]);
     expect(ev.rowCount).toBe(1);
   });
+
+  // C3 — the list used to issue two queries PER RUN to compute each blockage (2N+1 round trips, 201 on
+  // a full page), on the one surface whose latency is paid by someone outside the company. It is now two
+  // batched queries grouped in memory. These pin the behaviour that refactor could plausibly break.
+  describe("C3 batched run list", () => {
+    it("returns a run that has NO stages and NO gates instead of throwing", async () => {
+      // The regression risk in the rewrite: a run with neither returns no rows from either batch, so a
+      // Map lookup yields `undefined` where the old per-run loop always passed an empty array.
+      // currentBlockage() would throw on it — and a freshly created run is the most common portal state.
+      const bare = (await app.inject({
+        method: "POST", url: `/api/${co}/pipeline/runs`, headers: asUser(admin),
+        payload: { title: "Bare run", clientId: clientA },
+      })).json().id;
+      const r = await app.inject({ method: "GET", url: `/api/${co}/portal/runs`, headers: asUser(portalA) });
+      expect(r.statusCode).toBe(200);
+      const row = r.json().find((x: { id: string }) => x.id === bare);
+      expect(row).toBeTruthy();
+      expect(typeof row.currentBlockage).toBe("string");
+      expect(row.pendingActions).toBe(0);
+    });
+
+    it("counts pending client gates per run, and never mixes one run's gates into another", async () => {
+      // The other way grouping goes wrong: keying the batch incorrectly attributes every gate to every
+      // run. runA has a pending client prd_sign gate; the bare run above has none.
+      const r = await app.inject({ method: "GET", url: `/api/${co}/portal/runs`, headers: asUser(portalA) });
+      const rows: Array<{ id: string; title: string | null; pendingActions: number }> = r.json();
+      expect(rows.find((x) => x.id === runA)!.pendingActions).toBeGreaterThanOrEqual(1);
+      expect(rows.find((x) => x.title === "Bare run")!.pendingActions).toBe(0);
+    });
+
+    it("still isolates by client after batching — B's runs never appear in A's list", async () => {
+      // Batching changed WHICH rows are fetched in the second and third queries; the isolation boundary
+      // must still come from the first. Re-asserted here rather than trusted.
+      const r = await app.inject({ method: "GET", url: `/api/${co}/portal/runs`, headers: asUser(portalB) });
+      expect(r.statusCode).toBe(200);
+      expect(r.json().every((x: { id: string }) => x.id !== runA)).toBe(true);
+    });
+  });
 });

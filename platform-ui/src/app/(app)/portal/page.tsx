@@ -1,24 +1,24 @@
 import { redirect } from "next/navigation";
+import Link from "next/link";
 import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
-import { listPortalRuns, getPortalRun } from "@/lib/portal";
-import { portalDecideGate, portalScopeSign } from "@/lib/portalActions";
+import { listPortalRuns } from "@/lib/portal";
 import { Card, Eyebrow, StatusBadge } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { ArtifactMarkdown } from "@/components/pipeline/ArtifactMarkdown";
 import "@/components/pipeline/pipeline.css";
 
-// WD-03 (D-3) — "what a client signed must be what the record holds." So the sign view has to show
-// the client the ACTUAL artifact it's asking them to sign, not just a status chip. Kind -> track is
-// the same convention pipeline.controller.ts's updateStage lock uses to find "the stage this client
-// gate governs" (no stage_id FK on the shipped fan-out workflow's gates — see that file's comment).
-const GATE_TRACK: Record<string, string> = { prd_sign: "delivery", customer_feedback: "delivery", scope_signoff: "scope" };
-
-// WS11 client portal — a distinct client-facing DASHBOARD (same app, client-role-gated, its own login
-// realm in prod). Shows the client's projects, a plain-language "current blockage" banner, and their
-// own sign-offs (PRD, Scope Agreement) + feedback. Only calls the portal BFF, which enforces ownership.
+// WS11 client portal — the client-facing DASHBOARD (same app and the same `gaiada` Keycloak realm as
+// staff, gated by the `client` role). Shows the client's projects with a plain-language "current
+// blockage" line; documents and sign-offs live on the run page. Only calls the portal BFF, which
+// enforces ownership.
+//
+// C3/C5: this page used to fetch EVERY run's full detail (`getPortalRun` per run — one HTTP call each,
+// four queries behind each) and inline the artifacts and sign forms. It is now a summary over the
+// batched `/portal/runs`, which returns the blockage and a pending-action count in two queries total,
+// and `/portal/[runId]` is where a client reads and signs. Two wins in one change: the round trips stop
+// scaling with the number of projects, and a client can finally open a single project.
 export default async function PortalPage() {
   const userId = await getSessionUserId();
   if (!userId) redirect("/login");
@@ -27,8 +27,9 @@ export default async function PortalPage() {
   if (!tenant) return <Card><EmptyNote>No workspace selected.</EmptyNote></Card>;
 
   const { runs, isPortalClient } = await listPortalRuns(userId, tenant);
-  // Pull detail for each run so we can render its client-side gates inline (small N for a client).
-  const details = await Promise.all(runs.map((r) => getPortalRun(userId, tenant, r.id)));
+  // Runs needing the client first: a portal whose top card is settled work buries the one thing that
+  // is actually waiting on them.
+  const ordered = [...runs].sort((a, b) => (b.pendingActions ?? 0) - (a.pendingActions ?? 0));
 
   return (
     <>
@@ -57,70 +58,38 @@ export default async function PortalPage() {
           )}
         </Card>
       ) : (
-        <div style={{ display: "grid", gap: 20 }}>
-          {details.filter(Boolean).map((run) => {
-            const r = run!;
-            const pendingClientGates = r.gates.filter((g) => g.status === "pending");
-            return (
-              <Card key={r.id} title={r.title ?? "Project"} headerRight={<StatusBadge label={r.status.replace(/_/g, " ")} />}>
-                {/* Plain-language blockage banner — the transparency piece. */}
-                <div style={{ padding: "12px 14px", borderRadius: 12, background: "color-mix(in srgb, var(--status-warning) 8%, transparent)", border: "1px solid color-mix(in srgb, var(--status-warning) 30%, transparent)", marginBottom: 14, font: "500 14px/1.45 var(--font-body)" }}>
-                  {r.currentBlockage}
-                </div>
-
-                {/* Client actions on pending gates — the sign view renders the LATEST artifact for
-                    the stage this gate governs (D-3: what they sign must be what they see). */}
-                {pendingClientGates.map((g) => {
-                  const track = GATE_TRACK[g.kind];
-                  const stage = track ? r.stages.find((s) => s.track === track) : undefined;
-                  return (
-                    <div key={g.id} style={{ padding: "10px 0", borderTop: "1px solid var(--line-soft)" }}>
-                      <div style={{ font: "400 14px/1.4 var(--font-body)", marginBottom: stage?.artifact_ref ? 10 : 0 }}>
-                        {g.kind === "prd_sign" && "Please review and sign the PRD to start work."}
-                        {g.kind === "scope_signoff" && "Please sign the Scope Agreement."}
-                        {g.kind === "customer_feedback" && "Your feedback is requested on the latest work."}
-                        {!["prd_sign", "scope_signoff", "customer_feedback"].includes(g.kind) && `Action: ${g.kind}`}
-                      </div>
-                      {stage?.artifact_ref && (
-                        <div style={{ padding: "10px 12px", background: "var(--wash)", borderRadius: 8, marginBottom: 10 }}>
-                          <ArtifactMarkdown text={stage.artifact_ref} />
-                        </div>
-                      )}
-                      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-                        {g.kind === "scope_signoff" ? (
-                          <form action={portalScopeSign} style={{ display: "flex", gap: 8 }}>
-                            <input type="hidden" name="runId" value={r.id} />
-                            <input type="hidden" name="gateId" value={g.id} />
-                            <button type="submit" className="btn btn-primary" style={{ fontSize: 13 }}>Sign Scope Agreement</button>
-                          </form>
-                        ) : g.kind === "prd_sign" ? (
-                          <form action={portalDecideGate} style={{ display: "flex", gap: 8 }}>
-                            <input type="hidden" name="gateId" value={g.id} />
-                            <button type="submit" name="decision" value="signed" className="btn btn-primary" style={{ fontSize: 13 }}>Agree & sign PRD</button>
-                          </form>
-                        ) : (
-                          <form action={portalDecideGate} style={{ display: "flex", gap: 8 }}>
-                            <input type="hidden" name="gateId" value={g.id} />
-                            <button type="submit" name="decision" value="approved" className="btn btn-primary" style={{ fontSize: 13 }}>Looks good</button>
-                            <button type="submit" name="decision" value="changes_requested" className="btn" style={{ fontSize: 13 }}>Request changes</button>
-                          </form>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-
-                {/* Progress: client-safe stages (report track already hidden by the BFF) */}
-                <div style={{ marginTop: 12, display: "flex", flexWrap: "wrap", gap: 8 }}>
-                  {r.stages.map((s, i) => (
-                    <span key={i} style={{ font: "500 12px/1 var(--font-body)", padding: "6px 10px", borderRadius: 999, background: s.status === "done" ? "color-mix(in srgb, var(--status-ok) 12%, transparent)" : "var(--wash)" }}>
-                      {s.name.replace(/_/g, " ")} · {s.status}
-                    </span>
-                  ))}
-                </div>
-              </Card>
-            );
-          })}
+        <div style={{ display: "grid", gap: 16 }}>
+          {ordered.map((r) => (
+            <Card
+              key={r.id}
+              title={r.title ?? "Project"}
+              headerRight={<StatusBadge label={r.status.replace(/_/g, " ")} />}
+            >
+              <div style={{ padding: "12px 14px", borderRadius: 12, background: "color-mix(in srgb, var(--status-warning) 8%, transparent)", border: "1px solid color-mix(in srgb, var(--status-warning) 30%, transparent)", font: "500 14px/1.45 var(--font-body)" }}>
+                {r.currentBlockage}
+              </div>
+              <div style={{ display: "flex", gap: 12, alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", marginTop: 12 }}>
+                {/* Stated as a count, not a generic "action needed": a client with two signatures
+                    outstanding should not open the project expecting one. */}
+                {(r.pendingActions ?? 0) > 0 ? (
+                  <span style={{ font: "500 13px var(--font-body)", color: "var(--erp-accent)" }}>
+                    {r.pendingActions === 1 ? "1 thing needs you" : `${r.pendingActions} things need you`}
+                  </span>
+                ) : (
+                  <span style={{ font: "400 13px var(--font-body)", color: "var(--ink-subtle)" }}>
+                    Nothing needed from you right now
+                  </span>
+                )}
+                <Link
+                  href={`/portal/${r.id}`}
+                  className={(r.pendingActions ?? 0) > 0 ? "btn btn-primary" : "btn"}
+                  style={{ fontSize: 13, textDecoration: "none" }}
+                >
+                  {(r.pendingActions ?? 0) > 0 ? "Review & sign" : "Open project"}
+                </Link>
+              </div>
+            </Card>
+          ))}
         </div>
       )}
     </>

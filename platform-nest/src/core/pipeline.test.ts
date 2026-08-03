@@ -486,4 +486,92 @@ describe.skipIf(!TEST_URL)("meeting-to-delivery pipeline surface (WS11 §4B)", (
       expect(r.json().error).toMatch(/staff member/i);
     });
   });
+
+  // WD-30. The gap these cover was found on the LIVE server, not here: every pipeline_run on
+  // gda-aicenter had client_id NULL (5 of 5), because createRun has always accepted clientId while
+  // the n8n extraction flow never sent one. `/portal/runs` filters by the caller's client ids, so a
+  // correctly-invited, correctly-authorized contact still saw `[]` — the portal was structurally
+  // blind for a reason no test asserted, since every existing test passes clientId explicitly or
+  // never looks at it.
+  describe("WD-30 run inherits client/project from its source meeting", () => {
+    async function recording(meetingId: string, clientId: string | null, projectId: string | null) {
+      await withTenants([co], (c) =>
+        c.query(
+          `INSERT INTO meeting_recordings (id, tenant_id, meeting_id, client_id, project_id, title, origin_site)
+           VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+          [newId(), co, meetingId, clientId, projectId, "src", config.originSite],
+        ),
+      );
+    }
+    const runRow = (id: string) =>
+      withTenants([co], (c) =>
+        c.query<{ client_id: string | null; project_id: string | null }>(
+          `SELECT client_id, project_id FROM pipeline_runs WHERE id = $1`,
+          [id],
+        ),
+      ).then((r) => r.rows[0]);
+
+    it("fills client_id from the meeting when the caller omits it", async () => {
+      const cl = await createClient(co, "Inheriting Co");
+      await recording("mtg-inherit-1", cl, null);
+      const r = await app.inject({
+        method: "POST", url: `/api/${co}/pipeline/runs`, headers: asWorkflow("wf:mtg-dispatcher"),
+        payload: { sourceMeetingId: "mtg-inherit-1", title: "no clientId sent" },
+      });
+      expect(r.statusCode).toBe(201);
+      // Without the derivation this is null — which is exactly the live state that blinded the portal.
+      expect((await runRow(r.json().id))?.client_id).toBe(cl);
+    });
+
+    it("an explicit clientId still WINS over the meeting's", async () => {
+      // The derivation fills a gap; it must not override a caller that deliberately said otherwise.
+      const fromMeeting = await createClient(co, "Meeting Co");
+      const explicit = await createClient(co, "Explicit Co");
+      await recording("mtg-inherit-2", fromMeeting, null);
+      const r = await app.inject({
+        method: "POST", url: `/api/${co}/pipeline/runs`, headers: asWorkflow("wf:mtg-dispatcher"),
+        payload: { sourceMeetingId: "mtg-inherit-2", clientId: explicit },
+      });
+      expect(r.statusCode).toBe(201);
+      expect((await runRow(r.json().id))?.client_id).toBe(explicit);
+    });
+
+    it("leaves client_id null when the meeting has none, and never invents one", async () => {
+      await recording("mtg-inherit-3", null, null);
+      const r = await app.inject({
+        method: "POST", url: `/api/${co}/pipeline/runs`, headers: asWorkflow("wf:mtg-dispatcher"),
+        payload: { sourceMeetingId: "mtg-inherit-3" },
+      });
+      expect(r.statusCode).toBe(201);
+      const row = await runRow(r.json().id);
+      expect(row?.client_id).toBeNull();
+      expect(row?.project_id).toBeNull();
+    });
+
+    it("inherits project_id too — the link WD-06's single-project env var existed to work around", async () => {
+      const cl = await createClient(co, "Proj Co");
+      const proj = await withTenants([co], (c) =>
+        c.query<{ id: string }>(
+          `INSERT INTO projects (id, tenant_id, name, status, origin_site) VALUES ($1,$2,$3,'active',$4) RETURNING id`,
+          [newId(), co, "Inherited Project", config.originSite],
+        ),
+      ).then((r) => r.rows[0].id);
+      await recording("mtg-inherit-4", cl, proj);
+      const r = await app.inject({
+        method: "POST", url: `/api/${co}/pipeline/runs`, headers: asWorkflow("wf:mtg-dispatcher"),
+        payload: { sourceMeetingId: "mtg-inherit-4" },
+      });
+      expect(r.statusCode).toBe(201);
+      expect(await runRow(r.json().id)).toMatchObject({ client_id: cl, project_id: proj });
+    });
+
+    it("a run with no sourceMeetingId is untouched (no meeting to inherit from)", async () => {
+      const r = await app.inject({
+        method: "POST", url: `/api/${co}/pipeline/runs`, headers: asUser(admin),
+        payload: { title: "standalone" },
+      });
+      expect(r.statusCode).toBe(201);
+      expect((await runRow(r.json().id))?.client_id).toBeNull();
+    });
+  });
 });

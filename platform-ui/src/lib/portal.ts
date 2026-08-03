@@ -1,11 +1,16 @@
 import "server-only";
 // WS11 client portal — data layer for the CLIENT-facing dashboard (transparency + the client's own
 // sign-offs). Thin readers over the portal BFF (PortalController); the BFF enforces the `client` role +
-// per-run ownership (run.client_id -> clients.portal_user_id), so a staff user sees nothing here.
+// per-run ownership, so a staff user sees nothing here (verified live: a client token gets 200 on
+// /portal/runs and 403 on /clients and /meetings/recordings).
 // Degrades gracefully (empty/null) on 403/404 — same pattern as lib/pipeline.ts.
 //
-// PROD auth note: a client authenticates via the external client Keycloak realm; in dev they dev-login
-// as a `client`-role user linked to a clients row. Same dashboard, different login realm.
+// AUTH, corrected 2026-08-03: ownership resolves through `client_contacts` UNIONed with the legacy
+// `clients.portal_user_id`, not that column alone — W0 made contacts many-per-client (D-1), and the
+// invite flow never writes `portal_user_id`. A client authenticates against the SAME `gaiada` realm as
+// staff (not a separate realm, as this comment used to claim): the invite accept provisions a real
+// Keycloak user there, and `provisionUser()` links it on first login. Driven end to end on
+// gda-aicenter via the real PKCE flow.
 import { platformFetch, PlatformError } from "./platform";
 
 export interface PortalRun {
@@ -13,6 +18,9 @@ export interface PortalRun {
   title: string | null;
   status: string;
   currentBlockage: string;
+  /** Outstanding client decisions on this run. Optional because a server on an older tag does not
+   *  send it — the list then badges nothing rather than rendering `undefined`. */
+  pendingActions?: number;
 }
 export interface PortalGate {
   id: string;

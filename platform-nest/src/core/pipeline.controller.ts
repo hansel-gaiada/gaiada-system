@@ -172,11 +172,37 @@ export class PipelineController {
         );
         if (existing.rows[0]) return { id: existing.rows[0].id, deduped: true };
       }
+      // WD-30: inherit client/project from the source meeting when the caller did not say.
+      //
+      // `createRun` has always ACCEPTED clientId/projectId, and the n8n extraction flow has never
+      // passed them — so every run on gda-aicenter carried `client_id = NULL` (verified live: 5 of 5).
+      // That made the client portal structurally blind: `/portal/runs` filters by the caller's client
+      // ids, so it returned `[]` for a correctly-authorized contact and no amount of fixing invites,
+      // roles or Cerbos could ever have populated it. The recording ALREADY knows its client and
+      // project; only the hand-off dropped them.
+      //
+      // Derived here rather than by editing the workflow, because the workflow is an external artifact
+      // that can be re-imported or edited in the n8n UI, and a contract this load-bearing should not
+      // depend on every caller remembering. An explicit value in the body still WINS — this only fills
+      // a gap, so a caller deliberately creating an unattached run keeps that ability.
+      let derivedClientId = clientId ?? null;
+      let derivedProjectId = projectId ?? null;
+      if (sourceMeetingId && (derivedClientId === null || derivedProjectId === null)) {
+        const src = await c.query<{ client_id: string | null; project_id: string | null }>(
+          `SELECT client_id, project_id FROM meeting_recordings
+            WHERE meeting_id = $1 AND deleted_at IS NULL LIMIT 1`,
+          [sourceMeetingId],
+        );
+        if (src.rows[0]) {
+          derivedClientId = derivedClientId ?? src.rows[0].client_id;
+          derivedProjectId = derivedProjectId ?? src.rows[0].project_id;
+        }
+      }
       const id = newId();
       await c.query(
         `INSERT INTO pipeline_runs (id, tenant_id, source_meeting_id, title, mom_ref, status, client_id, project_id, owner_id, created_by, origin_site)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
-        [id, tenantId, sourceMeetingId ?? null, title ?? null, momRef ?? null, status, clientId ?? null, projectId ?? null, ownerId ? await this.assertOwnerIsStaff(c, ownerId) : null, req.principal.userId, config.originSite],
+        [id, tenantId, sourceMeetingId ?? null, title ?? null, momRef ?? null, status, derivedClientId, derivedProjectId, ownerId ? await this.assertOwnerIsStaff(c, ownerId) : null, req.principal.userId, config.originSite],
       );
       for (const s of stages) {
         // WD-29: the same identity guard as createStage. No lock is needed here (the run id was just
