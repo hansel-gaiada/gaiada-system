@@ -46,7 +46,7 @@ versions below; the running build reports it at `GET /health`.
 | ai-agents | `0.5.0` | PROTOTYPED | WS8 | 2026-07 |
 | hermes-gateway | `0.2.0` | PROTOTYPED | WS3 | 2026-07 |
 | capture-helper | `0.2.0` | IN PROGRESS | WS11 | 2026-07 |
-| webdev | `0.8.1` | IN PROGRESS | Web Dev | 2026-07-30 |
+| webdev | `0.9.0` | IN PROGRESS | Web Dev | 2026-08-03 |
 | webdesk | `0.0.0` | PLANNED | Web Dev | 2026-07-23 |
 | search-marketing | `0.5.0` | DEV-VERIFIED | SEO | 2026-08-01 |
 | social-media | `0.0.0` | PLANNED | Social Media | 2026-07-23 |
