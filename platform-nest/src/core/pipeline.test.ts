@@ -117,6 +117,25 @@ describe.skipIf(!TEST_URL)("meeting-to-delivery pipeline surface (WS11 §4B)", (
     expect(denied.statusCode).toBe(403);
   });
 
+  // E1 follow-up: this is what the hub's read-only `pipeline.runBySourceMeeting` tool fronts —
+  // the dispatcher's dedupe branch resolves the authoritative pipeline_runs.source_meeting_id
+  // link this way instead of via meeting_recordings.pipeline_run_id (circular, always null on a
+  // timed-out first attempt). Same "read" action as above -- manager (the automation tier) is
+  // already allowed; a plain member is still not.
+  it("GET pipeline/runs?sourceMeetingId filters to the exact match (the dedupe-resolution read)", async () => {
+    const hit = await app.inject({ method: "GET", url: `/api/${co}/pipeline/runs?sourceMeetingId=mtg-001`, headers: asWorkflow("wf:mtg-dispatcher") });
+    expect(hit.statusCode).toBe(200);
+    expect(hit.json()).toHaveLength(1);
+    expect(hit.json()[0]).toMatchObject({ id: runId, source_meeting_id: "mtg-001" });
+
+    const miss = await app.inject({ method: "GET", url: `/api/${co}/pipeline/runs?sourceMeetingId=mtg-does-not-exist`, headers: asWorkflow("wf:mtg-dispatcher") });
+    expect(miss.statusCode).toBe(200);
+    expect(miss.json()).toHaveLength(0);
+
+    const denied = await app.inject({ method: "GET", url: `/api/${co}/pipeline/runs?sourceMeetingId=mtg-001`, headers: asUser(member) });
+    expect(denied.statusCode).toBe(403);
+  });
+
   it("the workflow advances a stage and it emits pipeline.stage.updated", async () => {
     const stageId = (await app.inject({ method: "GET", url: `/api/${co}/pipeline/runs/${runId}`, headers: asUser(admin) }))
       .json().stages.find((s: { name: string }) => s.name === "prd_extract").id;

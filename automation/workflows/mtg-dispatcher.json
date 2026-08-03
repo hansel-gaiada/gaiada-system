@@ -143,7 +143,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", id: 6, method: \"tools/call\", params: { name: \"meeting.recordingContext\", arguments: { tenantId: $json.tenantId, meetingId: $json.meetingId } } }) }}",
+        "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", id: 6, method: \"tools/call\", params: { name: \"pipeline.runBySourceMeeting\", arguments: { tenantId: $json.tenantId, sourceMeetingId: $json.meetingId } } }) }}",
         "options": {
           "response": {
             "response": {
@@ -152,7 +152,7 @@
           }
         }
       },
-      "name": "MCP meeting.recordingContext (dedupe runId)",
+      "name": "MCP pipeline.runBySourceMeeting (dedupe runId)",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
@@ -163,7 +163,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// WD-08-R2: best-effort only. On a re-posted meetingId (n8n's own in-memory dedupe fired) look\n// up the run this recording ALREADY linked to, so the caller learns which run it collided with\n// instead of a bare runId:null. If this lookup itself errors (hub/platform hiccup, or no matching\n// recording row -- e.g. a raw pasted-transcript test that never went through the registry), still\n// answer deduped:true with runId:null rather than let a read-only lookup failure turn an honest\n// dedupe ack into a workflow error.\nlet runId = null;\ntry {\n  const raw = $input.first().json.data ?? $input.first().json.body ?? '';\n  const line = String(raw).split('\\n').find((l) => l.startsWith('data:')) ?? '';\n  const rpc = JSON.parse(line.slice(5).trim());\n  if (!rpc.result?.isError) {\n    const parsed = JSON.parse(rpc.result?.content?.[0]?.text ?? '{}');\n    runId = parsed.pipelineRunId ?? null;\n  }\n} catch { runId = null; }\nreturn [{ json: { runId } }];"
+        "jsCode": "// E1 fix (superseding an earlier attempt in this same ticket that was ALSO wrong -- see below):\n// on a re-posted meetingId (n8n's own in-memory dedupe fired, `store.seen` in the upstream Code\n// node) resolve whether a run ALREADY exists via the read-only pipeline.runBySourceMeeting tool,\n// which queries pipeline_runs.source_meeting_id directly -- the authoritative link set at run\n// creation. Deliberately NOT pipeline.createRun: `store.seen` is written on FIRST SIGHT of the\n// webhook post, before createRun ever runs on the main path, so dup===true means only \"this\n// workflow has seen this meetingId\", not \"a run exists for it\". If the first attempt's main path\n// failed AFTER the marker was set but BEFORE createRun ran, a retry landing here with a\n// create-capable call would find no source_meeting_id match and take the INSERT path -- minting\n// a phantom run with no momRef/stages/clientId and fanning out a scope-signoff gate for nothing.\n// A pure read cannot do that: on no match it just answers null. Best-effort only: if this lookup\n// itself errors (hub/platform hiccup, or no run created yet), still answer deduped:true with\n// runId:null rather than let a read-only lookup failure turn an honest dedupe ack into a\n// workflow error.\nlet runId = null;\ntry {\n  const raw = $input.first().json.data ?? $input.first().json.body ?? '';\n  const line = String(raw).split('\\n').find((l) => l.startsWith('data:')) ?? '';\n  const rpc = JSON.parse(line.slice(5).trim());\n  if (!rpc.result?.isError) {\n    const parsed = JSON.parse(rpc.result?.content?.[0]?.text ?? '{}');\n    runId = parsed.runId ?? null;\n  }\n} catch { runId = null; }\nreturn [{ json: { runId } }];"
       },
       "name": "Parse dedupe runId",
       "type": "n8n-nodes-base.code",
@@ -605,7 +605,7 @@
       "main": [
         [
           {
-            "node": "MCP meeting.recordingContext (dedupe runId)",
+            "node": "MCP pipeline.runBySourceMeeting (dedupe runId)",
             "type": "main",
             "index": 0
           }
@@ -619,7 +619,7 @@
         ]
       ]
     },
-    "MCP meeting.recordingContext (dedupe runId)": {
+    "MCP pipeline.runBySourceMeeting (dedupe runId)": {
       "main": [
         [
           {

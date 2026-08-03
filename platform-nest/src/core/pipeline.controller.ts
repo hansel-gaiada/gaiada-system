@@ -198,14 +198,28 @@ export class PipelineController {
   }
 
   @Get(":tenantId/pipeline/runs")
-  async listRuns(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Query("status") status?: string) {
+  async listRuns(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Query("status") status?: string,
+    // E1 follow-up: a narrow additive filter so the hub's read-only `pipeline.runBySourceMeeting`
+    // tool can resolve the authoritative pipeline_runs.source_meeting_id link (the same column
+    // pipeline.createRun's own dedupe SELECT already uses, and the same unique index —
+    // pipeline_runs_meeting_idx from migration 0017 — so this is an indexed lookup, not a scan).
+    // No schema change, no new authz surface: still gated by the existing "read" action below.
+    @Query("sourceMeetingId") sourceMeetingId?: string,
+  ) {
     await authorize(req.principal, { kind: "pipeline_run", tenantId }, "read");
+    const conditions = ["deleted_at IS NULL"];
+    const params: string[] = [];
+    if (status) { params.push(status); conditions.push(`status = $${params.length}`); }
+    if (sourceMeetingId) { params.push(sourceMeetingId); conditions.push(`source_meeting_id = $${params.length}`); }
     const rows = await withTenants([tenantId], (c) =>
       c.query(
         `SELECT id, source_meeting_id, title, mom_ref, status, created_by, created_at, updated_at
-         FROM pipeline_runs WHERE deleted_at IS NULL ${status ? "AND status = $1" : ""}
+         FROM pipeline_runs WHERE ${conditions.join(" AND ")}
          ORDER BY created_at DESC LIMIT 200`,
-        status ? [status] : [],
+        params,
       ),
     );
     return rows.rows;

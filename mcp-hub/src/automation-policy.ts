@@ -33,7 +33,10 @@ export const AUTOMATION_ALLOWLIST: Record<string, readonly string[]> = {
   // meeting.recordingContext (F-1): reads the meeting_recordings row's client/project context by
   // meetingId so pipeline.createRun can populate clientId — the frozen webhook contract cannot
   // carry it directly.
-  "wf:mtg-dispatcher": ["media.transcribe", "llm.summarize", "llm.extract", "meeting.recordingContext", "pipeline.createRun", "pipeline.updateStage", "notify"],
+  // pipeline.runBySourceMeeting (E1 fix): the dedupe branch's read-only run lookup, so a re-posted
+  // meetingId whose first attempt never actually created a run resolves to null instead of the
+  // dedupe branch calling createRun itself and minting a phantom run.
+  "wf:mtg-dispatcher": ["media.transcribe", "llm.summarize", "llm.extract", "meeting.recordingContext", "pipeline.runBySourceMeeting", "pipeline.createRun", "pipeline.updateStage", "notify"],
   // pipeline.updateRun (WD-05): parks a run 'blocked' once the bounded revise loop escalates.
   "wf:delivery": ["pipeline.getRun", "pipeline.createStage", "pipeline.updateStage", "pipeline.updateRun", "pipeline.openGate", "design.prototype", "code.scaffold", "github.repoStatus", "deploy.staging", "deploy.production", "notify", "approvals.request"],
   "wf:scope": ["pipeline.getRun", "pipeline.openGate", "notify"],

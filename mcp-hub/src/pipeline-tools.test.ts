@@ -18,9 +18,44 @@ describe("WS11 pipeline hub tools", () => {
   afterEach(() => vi.restoreAllMocks());
 
   it("registers the pipeline + extraction tools", () => {
-    for (const n of ["llm.extract", "pipeline.createRun", "pipeline.updateStage", "pipeline.updateRun", "pipeline.openGate", "pipeline.getRun", "pipeline.listGates", "meeting.recordingContext"]) {
+    for (const n of ["llm.extract", "pipeline.createRun", "pipeline.updateStage", "pipeline.updateRun", "pipeline.openGate", "pipeline.getRun", "pipeline.listGates", "meeting.recordingContext", "pipeline.runBySourceMeeting"]) {
       expect(getTool(n)).toBeDefined();
     }
+  });
+
+  // E1 fix: the dispatcher's dedupe branch must be able to ask "does a run already exist for this
+  // meetingId" WITHOUT any chance of creating one. This tool fronts GET /pipeline/runs?
+  // sourceMeetingId=... (the same pipeline_runs.source_meeting_id column createRun's own dedupe
+  // SELECT uses) and is read-only end to end.
+  describe("pipeline.runBySourceMeeting (E1: dedupe-branch read that cannot create anything)", () => {
+    it("is not a write tool", () => {
+      const t = getTool("pipeline.runBySourceMeeting")!;
+      expect(t.write).toBeUndefined();
+    });
+
+    it("returns the matching run's id when the platform finds one", async () => {
+      const spy = mockFetch(200, [{ id: "run-1", source_meeting_id: "mtg-001", title: "Acme kickoff" }]);
+      vi.stubGlobal("fetch", spy);
+      const out = await getTool("pipeline.runBySourceMeeting")!.handler({ tenantId: "co-1", sourceMeetingId: "mtg-001" }, principal);
+      expect(JSON.parse(out)).toEqual({ runId: "run-1" });
+      const [url, init] = (spy as any).mock.calls[0];
+      expect(url).toContain("/api/co-1/pipeline/runs?sourceMeetingId=mtg-001");
+      expect(init?.method).toBeUndefined(); // GET only — never a write
+    });
+
+    it("returns runId:null when no run has been created for this meetingId yet (no phantom-run risk)", async () => {
+      vi.stubGlobal("fetch", mockFetch(200, []));
+      const out = await getTool("pipeline.runBySourceMeeting")!.handler({ tenantId: "co-1", sourceMeetingId: "mtg-never-created" }, principal);
+      expect(JSON.parse(out)).toEqual({ runId: null });
+    });
+
+    it("returns runId:null without calling the platform when sourceMeetingId is empty", async () => {
+      const spy = mockFetch(200, []);
+      vi.stubGlobal("fetch", spy);
+      const out = await getTool("pipeline.runBySourceMeeting")!.handler({ tenantId: "co-1", sourceMeetingId: "" }, principal);
+      expect(JSON.parse(out)).toEqual({ runId: null });
+      expect(spy).not.toHaveBeenCalled();
+    });
   });
 
   describe("meeting.recordingContext (F-1: dispatcher client-context recovery)", () => {
@@ -160,6 +195,12 @@ describe("WS11 pipeline hub tools", () => {
     expect(AUTOMATION_ALLOWLIST["wf:mtg-dispatcher"]).toContain("llm.extract");
     expect(AUTOMATION_ALLOWLIST["wf:mtg-dispatcher"]).toContain("pipeline.createRun");
     expect(AUTOMATION_ALLOWLIST["wf:mtg-dispatcher"]).toContain("meeting.recordingContext");
+    expect(AUTOMATION_ALLOWLIST["wf:mtg-dispatcher"]).toContain("pipeline.runBySourceMeeting");
+    // E1: no OTHER workflow gets this dedupe-resolution read — it exists for the dispatcher's
+    // own retry/dedupe branch only.
+    expect(AUTOMATION_ALLOWLIST["wf:delivery"]).not.toContain("pipeline.runBySourceMeeting");
+    expect(AUTOMATION_ALLOWLIST["wf:scope"]).not.toContain("pipeline.runBySourceMeeting");
+    expect(AUTOMATION_ALLOWLIST["wf:report"]).not.toContain("pipeline.runBySourceMeeting");
     // F-1: no OTHER workflow gets read access to the meeting_recordings registry via this tool.
     expect(AUTOMATION_ALLOWLIST["wf:delivery"]).not.toContain("meeting.recordingContext");
     expect(AUTOMATION_ALLOWLIST["wf:scope"]).not.toContain("meeting.recordingContext");

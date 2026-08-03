@@ -101,6 +101,49 @@ export function registerPipelineTools(): void {
     },
   });
 
+  // ---- E1 fix (coordinator-directed correction) ----
+  // The dispatcher's dedupe branch (n8n's own in-memory "have I seen this meetingId" marker,
+  // set on FIRST SIGHT of a webhook post -- BEFORE any downstream work, including createRun)
+  // needs to answer "does a run already exist for this meetingId", NOT "create one if not".
+  // `pipeline.createRun` is the wrong tool for that branch even though its dedupe path resolves
+  // the same authoritative column: if the first attempt set the marker and then failed before
+  // ever creating a run (a hub hiccup, a failed extraction, etc.), a retry hitting the dedupe
+  // branch would take createRun's INSERT path and mint a phantom run with no momRef/stages/
+  // clientId -- and pipeline.run.created would fan out a scope-signoff gate for it. This tool is
+  // a PURE READ, incapable of creating anything, so that failure mode cannot happen through it:
+  // it fronts the same query pipeline.createRun's dedupe SELECT runs (`pipeline_runs WHERE
+  // source_meeting_id = $1`, via GET /pipeline/runs?sourceMeetingId=... on the existing
+  // pipeline_runs_meeting_idx), and returns null rather than ever inserting when nothing matches.
+  registerTool({
+    name: "pipeline.runBySourceMeeting",
+    description:
+      "Look up an existing pipeline run by the bot's stable meetingId (dedupe key), reading pipeline_runs.source_meeting_id -- the authoritative link set at run creation -- directly. Returns { runId } (null if no run has been created for this meetingId yet). Read-only: never creates or modifies anything, so it is safe to call from a branch that must not risk minting a duplicate/phantom run.",
+    minAssurance: "low",
+    inputSchema: {
+      type: "object",
+      properties: {
+        tenantId: { type: "string" },
+        sourceMeetingId: { type: "string" },
+      },
+      required: ["tenantId", "sourceMeetingId"],
+    },
+    handler: async (args, principal) => {
+      const sourceMeetingId = String(args.sourceMeetingId ?? "");
+      if (!sourceMeetingId) return JSON.stringify({ runId: null });
+      const raw = await platformGet(
+        `/api/${String(args.tenantId)}/pipeline/runs?sourceMeetingId=${encodeURIComponent(sourceMeetingId)}`,
+        principal,
+      );
+      let rows: Array<{ id?: string }> = [];
+      try {
+        rows = JSON.parse(raw);
+      } catch {
+        rows = [];
+      }
+      return JSON.stringify({ runId: rows[0]?.id ?? null });
+    },
+  });
+
   // ---- Meeting extraction (AI, Gateway-wrapped) ----
   registerTool({
     name: "llm.extract",
