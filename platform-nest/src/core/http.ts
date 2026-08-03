@@ -74,8 +74,26 @@ export async function notify(
 ): Promise<void> {
   if (!recipientId || recipientId === actorId) return;
   await withTenants([tenantId], async (c) => {
+    // The recipient must belong to this tenant — as staff/service (company_memberships) OR as an
+    // external client portal contact (client_contacts, W0).
+    //
+    // WHY THE SECOND BRANCH EXISTS: this check used to be memberships-only and returned SILENTLY on
+    // a miss — no error, no log. Client contacts are not company members, so **every** notification
+    // addressed to a client vanished without trace. That is the precise failure the "clients are
+    // notified and on the same page from the start" requirement exists to prevent, in its least
+    // detectable form: the send looks successful at every call site.
+    //
+    // Kept as an EXISTS union rather than two queries so a recipient is admitted by either identity
+    // without the caller having to know which kind of person it is addressing — every existing
+    // notify() call site keeps working unchanged, and client-facing events reach clients for free.
     const member = await c.query(
-      `SELECT 1 FROM company_memberships WHERE user_id = $1 AND deleted_at IS NULL AND status = 'active'`,
+      `SELECT 1 WHERE EXISTS (
+         SELECT 1 FROM company_memberships
+          WHERE user_id = $1 AND deleted_at IS NULL AND status = 'active'
+       ) OR EXISTS (
+         SELECT 1 FROM client_contacts
+          WHERE user_id = $1 AND deleted_at IS NULL AND status = 'active'
+       )`,
       [recipientId],
     );
     if (!member.rows[0]) return;

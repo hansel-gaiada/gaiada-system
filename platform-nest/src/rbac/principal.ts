@@ -49,13 +49,37 @@ export async function assemblePrincipal(userId: string, assurance: Assurance): P
 
   // Memberships are RLS-protected; the dedicated principal_lookup policy exposes only
   // the rows of the user being resolved, keyed on this transaction-local setting.
+  //
+  // W0 — the UNION with client_contacts is what gives an external client portal contact a tenant at
+  // all. `resource_portal.yaml` grants its actions to the `client` derived role gated on
+  // `variables.inTenant`, and inTenant is `resource.tenantId in principal.companies`, so without this
+  // a client authenticates fine and is then refused everything, with nothing to say why.
+  //
+  // WHY NOT A company_memberships ROW FOR CLIENTS (the alternative, deliberately rejected — see
+  // migration 0072's header): only 6 of 27 non-test queries over company_memberships filter `kind`,
+  // so putting clients there would have required a defensive filter at ~10 staff-listing sites and
+  // left every future site free to forget, with a client contact showing up in /people and HR as an
+  // employee. Keeping clients out of that table entirely makes the leak structurally impossible;
+  // this UNION and `notify()` are the only two places that deliberately look at both.
+  //
+  // Safe because "user" — the parent of the `client` derived role — is granted by NO resource policy:
+  // every grant in cerbos/policies names a concrete staff role or `client`, and derivedRoles:
+  // ["client"] appears only in resource_portal.yaml. A principal whose only grant is `client`
+  // therefore satisfies exactly one policy, so a tenant appearing here opens nothing else.
+  //
+  // client_contacts carries its own principal_lookup policy (0072 §7b) for the same reason
+  // company_memberships does: this read happens BEFORE any tenant context exists, so under
+  // tenant_isolation alone it would match zero rows.
   const companies = await withGlobal(async (c) => {
     await c.query("BEGIN");
     try {
       await c.query("SELECT set_config('app.principal_user_id', $1, true)", [userId]);
       const res = await c.query<{ tenant_id: string }>(
         `SELECT m.tenant_id FROM company_memberships m
-         WHERE m.user_id = $1 AND m.status = 'active' AND m.deleted_at IS NULL`,
+          WHERE m.user_id = $1 AND m.status = 'active' AND m.deleted_at IS NULL
+         UNION
+         SELECT cc.tenant_id FROM client_contacts cc
+          WHERE cc.user_id = $1 AND cc.status = 'active' AND cc.deleted_at IS NULL`,
         [userId],
       );
       await c.query("COMMIT");
