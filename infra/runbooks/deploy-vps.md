@@ -150,13 +150,14 @@ assume a passing local `npm test`/`go test` means the container builds or runs:
 
 - `ai-gateway-go` — `docker build` and `docker compose config` never run against Docker locally.
 - `render-gateway-go` — planned; same caveat will apply once it's built.
-- **`report-renderer` (TR-19)** — this one is the exception: Docker Desktop WAS available when it
-  was built, so its image build, healthcheck, auth/SSRF gates, and a real
-  `chromium.launch()` → `page.pdf()` render were all verified (2026-07-31; exact commands +
-  output in `docs/modules/CHANGELOG.md`'s report-renderer entry, incl. `docker compose ps`
-  showing it `(healthy)`). **What's still unverified is a real deploy to the production Linux
-  VPS** (Docker Desktop's Linux-VM backend on Windows was the only host used) — re-run the health
-  checks above against the actual VPS the first time this service ships there.
+- ~~**`report-renderer` (TR-19)**~~ — **CLEARED 2026-08-03 on the production VPS itself**
+  (`gda-aicenter`, Docker 29.7.0, linux/amd64). `docker build` of the pinned
+  `mcr.microsoft.com/playwright:v1.61.1-noble` image succeeded, and a container on the live
+  `gaiada_default` network returned: `/health` → `{"status":"ok"}`; an authorised render of
+  `http://platform-ui:3005/` → **200 `application/pdf`, 16 624 bytes starting `%PDF-`** (a real
+  `chromium.launch()` → `page.pdf()`, not a stub); a foreign origin → **403** (SSRF guard); no
+  token → **401**. Nothing about this image remains unverified on the target host. The earlier
+  Docker-Desktop-only verification is in `docs/modules/CHANGELOG.md`'s report-renderer entry.
 
 ## Security notes
 
