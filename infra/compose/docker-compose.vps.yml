@@ -298,6 +298,12 @@ services:
       # Systems→Automation console then lists real workflows + last-run.
       AUTOMATION_URL: ${AUTOMATION_URL:-}
       AUTOMATION_API_KEY: ${AUTOMATION_API_KEY:-}
+      # The BROWSER-reachable editor origin, for the console's "Open in n8n" link. NOT the same as
+      # AUTOMATION_URL: that one is in-cluster (http://n8n:5678) and resolves nowhere outside this
+      # network, so using it for the link gave a button no browser could follow. On gda-aicenter:
+      # https://erp.gaiada.online/n8n/ (must match N8N_EDITOR_BASE_URL in automation/.env). Leave
+      # empty and the UI hides the button rather than offering a dead link.
+      AUTOMATION_PUBLIC_URL: ${AUTOMATION_PUBLIC_URL:-}
       # Event → n8n bridge (WS4 §4). Off unless all four are set. N8N_BRIDGE_SECRET must match
       # the value the event workflows check. Only set N8N_WEBHOOK_BASE_URL if n8n is reachable.
       N8N_WEBHOOK_BASE_URL: ${N8N_WEBHOOK_BASE_URL:-}

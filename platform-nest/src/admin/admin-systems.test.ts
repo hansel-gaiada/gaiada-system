@@ -175,12 +175,43 @@ describe.skipIf(!TEST_URL)("admin systems aggregator (Phase C)", () => {
       detail?: { n8nUrl?: string; workflows?: Array<{ name: string; status: string; lastRun: string | null }> };
     };
     expect(r.ok).toBe(true);
-    expect(r.detail?.n8nUrl).toContain("/n8n");
     expect(r.counters?.workflows).toBe(2);
     const byName = Object.fromEntries((r.detail?.workflows ?? []).map((w) => [w.name, w]));
     expect(byName["summarize-via-mcp"]).toMatchObject({ status: "success", lastRun: "2026-07-15T00:00:00Z" });
     expect(byName["draft-flow"]).toMatchObject({ status: "inactive" }); // inactive workflow, no run
     config.services.automation = { url: config.services.automation.url, token: "" };
+  });
+
+  // n8nUrl is the UI's "Open in n8n" link target, so it must be the BROWSER-reachable origin and
+  // never the in-cluster base the probe itself used. It used to be assigned from
+  // services.automation.url (http://n8n:5678 in production) — a link no browser could follow, on a
+  // console that reported the service perfectly healthy. Asserting BOTH branches on purpose: the
+  // absent case is what makes the UI hide the affordance instead of rendering a dead link.
+  it("automation n8nUrl is the public editor origin, and absent when unconfigured", async () => {
+    const url = `/api/admin/automation/status`;
+    const read = async () =>
+      (await app.inject({ method: "GET", url, headers: asUser(admin) })).json() as {
+        ok: boolean;
+        detail?: { url?: string; n8nUrl?: string };
+      };
+
+    const priorPublic = config.automationPublicUrl;
+    const inCluster = config.services.automation.url;
+
+    config.automationPublicUrl = "https://erp.example.test/n8n";
+    const withPublic = await read();
+    expect(withPublic.ok).toBe(true);
+    expect(withPublic.detail?.n8nUrl).toBe("https://erp.example.test/n8n");
+    // The in-cluster base is still reported separately — they are different values, not aliases.
+    expect(withPublic.detail?.url).toBe(inCluster.replace(/\/$/, ""));
+    expect(withPublic.detail?.n8nUrl).not.toBe(withPublic.detail?.url);
+
+    config.automationPublicUrl = "";
+    const withoutPublic = await read();
+    expect(withoutPublic.ok).toBe(true);
+    expect(withoutPublic.detail?.n8nUrl).toBeUndefined();
+
+    config.automationPublicUrl = priorPublic;
   });
 
   it("status of an unreachable service is ok:false with an error, not a throw", async () => {
