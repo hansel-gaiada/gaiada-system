@@ -32,6 +32,25 @@ services:
       N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:?set N8N_ENCRYPTION_KEY in .env}
       # Public URL used to register webhook + form endpoints (event bridge posts here).
       N8N_WEBHOOK_URL: ${N8N_WEBHOOK_URL:-http://localhost:5678/}
+      # --- Public mount (reverse proxy) ---------------------------------------------------
+      # Defaults reproduce the localhost-only behaviour, so a plain `docker compose up` is
+      # unchanged. Set them in .env to publish n8n — see automation/.env.example for the
+      # exact values gda-aicenter uses.
+      #
+      # N8N_PATH mounts the editor under a subpath. It is only HALF implemented in 2.30.4 —
+      # n8n emits prefixed URLs but serves everything at its own root — so it REQUIRES a
+      # reverse proxy that strips the prefix. See infra/nginx/erp.gaiada.online.conf, which
+      # documents the exact failure modes. Leave it "/" for local use.
+      N8N_PATH: ${N8N_PATH:-/}
+      N8N_HOST: ${N8N_HOST:-localhost}
+      N8N_PROTOCOL: ${N8N_PROTOCOL:-http}
+      N8N_EDITOR_BASE_URL: ${N8N_EDITOR_BASE_URL:-http://localhost:5678/}
+      # Number of reverse proxies in front of n8n. Wrong value => n8n trusts a spoofable
+      # X-Forwarded-For and rate limiting / audit logs record the proxy IP.
+      N8N_PROXY_HOPS: ${N8N_PROXY_HOPS:-0}
+      # Session cookie requires HTTPS. Must stay false for plain-http local use, or the
+      # editor logs you straight back out after sign-in.
+      N8N_SECURE_COOKIE: ${N8N_SECURE_COOKIE:-false}
       # Pin former-default values that n8n warns will change in a future version.
       N8N_RUNNERS_TASK_TIMEOUT: "300"
       N8N_UNVERIFIED_PACKAGES_ENABLED: "true"
