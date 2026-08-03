@@ -270,6 +270,12 @@ services:
       WHISPER_URL: http://whisper:8000
       WHISPER_MODEL: ${WHISPER_MODEL:-Systran/faster-whisper-small}
       MEETING_AUDIO_MAX_BYTES: ${MEETING_AUDIO_MAX_BYTES:-209715200}
+      # Video recordings get their own, larger cap. THIS FORWARD IS THE POINT: setting the var in
+      # .env alone does nothing — compose only passes through what is listed here, and a missing
+      # row means the container sees an empty value and silently falls back to the code default.
+      # Verified empty in the running container on 2026-08-03 before this line existed. Same class
+      # as the N8N_BRIDGE_TIMEOUT_MS forward and the dropped Google/Ads credentials.
+      MEETING_VIDEO_MAX_BYTES: ${MEETING_VIDEO_MAX_BYTES:-524288000}
       # Automation is the separate `gaiada-automation` n8n stack; set these only if n8n is
       # reachable from this network. AUTOMATION_API_KEY is an n8n Public-API key → the
       # Systems→Automation console then lists real workflows + last-run.

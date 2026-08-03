@@ -168,3 +168,56 @@ assume a passing local `npm test`/`go test` means the container builds or runs:
 - `report-renderer` (TR-19) holds only the shared `RENDERER_TOKEN`, never a tenant credential, and
   is origin-locked to `PLATFORM_UI_INTERNAL_URL` (`report-renderer/src/auth.ts`) so a leaked token
   cannot be used to make it fetch arbitrary internal or external hosts.
+
+## Web Dev department — post-deploy checklist (learned on gda-aicenter, 2026-08-03)
+
+The delivery chain (record → transcribe → ingest → pipeline run → gates) needs three things the
+deploy does NOT do for you. All three shipped wrong to gda-aicenter and the department sat dead —
+extraction never ran, then ran but opened zero gates.
+
+1. **Start whisper — it is behind a compose profile, so a plain `up -d` skips it.**
+   `WHISPER_URL` still points at `http://whisper:8000`, so every server-side transcription fails
+   against a host that does not exist.
+   ```
+   docker compose -f docker-compose.vps.yml -f docker-compose.hostdata.yml      --profile whisper up -d whisper
+   ```
+   Verify (whisper publishes NO host port — call it from inside the network):
+   `docker exec gaiada-platform-1 node -e '...POST http://whisper:8000/v1/audio/transcriptions...'`
+   Measured throughput on a 2-vCPU box: **0.35× realtime** (21s per 60s of audio), so the 20-minute
+   `WHISPER_TIMEOUT_MS` covers roughly 57 minutes of audio. Do not extrapolate from a 3-second clip —
+   fixed per-request overhead dominates there and makes it look ~4× *slower* than realtime.
+
+2. **Set `N8N_BRIDGE_ENTITY_TYPES` or the event bridge never starts.** `n8nBridgeEnabled()` is
+   fail-closed on all four of base URL + secret + events + entityTypes. Empty ⇒ no bridge ⇒ every
+   EVENT-triggered flow is dark (WS11 fan-out and delivery track, `client.created` seeding,
+   org-structure notify) while CRON flows keep working, so the stack looks healthy and runs simply
+   never grow gates. Confirm from the log line, not from config:
+   `docker logs gaiada-platform-1 | grep "n8n bridge on:"` — absence of that line is the symptom.
+   Value: `pipeline_run,pipeline_gate,scope,client,org_structure` (note `scope.signed` is emitted
+   under `scope`, not `pipeline_run`).
+
+3. **Size `N8N_BRIDGE_TIMEOUT_MS` to the box, not to the default.** The dispatcher does four
+   sequential AI calls; measured round-trip on gda-aicenter is **31–40s** against a 30000 default, so
+   ingest threw `dispatcher_unreachable` *after the run had already been created* — leaving the
+   recording orphaned from a perfectly good run (the DEF-1 shape). 120000 is the value in use.
+   Measure it before trusting it: the local dev box does the same work in ~12s.
+
+**Reading the DB on the VPS:** `DATABASE_URL` uses `platform_app`, which is `NOBYPASSRLS`. Every
+FORCE-RLS table reads as **zero rows** unless you set the GUC first, and `reltuples` is `-1`, so it
+will not save you either:
+```sql
+select set_config('app.current_tenant_ids','<companyId>',false); select count(*) from clients;
+-- company_memberships keys on its own setting instead:
+select set_config('app.principal_user_id','<userId>',false);  select count(*) from company_memberships;
+```
+Skipping this reports an empty department that is actually populated.
+
+**Driving the API headlessly when `AUTH_MODE=oidc`:** the `x-user-id` dev path is closed and no
+Keycloak client has direct access grants (do **not** enable one on `gaiada-ui`). Use the OBO
+envelope — `Authorization: Bearer $PLATFORM_SERVICE_TOKEN` plus `x-obo-provider` /
+`x-obo-external-id` matching a **verified** `identity_links` row. That yields assurance `linked`,
+which satisfies `notLow`.
+
+**Still owner-gated:** `clients.portal_user_id` is unset for every client, so the client-side
+`scope_signoff` / review gates cannot be countersigned — a client portal identity is a business
+decision, not a deploy step. The agency half signs fine (`complete:false`, waiting on the client).
