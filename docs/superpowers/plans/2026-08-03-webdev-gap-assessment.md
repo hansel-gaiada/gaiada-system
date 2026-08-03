@@ -107,10 +107,10 @@ themselves are fine — it is the *surrounding* run lifecycle that has no contro
 |---|---|---|---|
 | C1 | 🟠 | `/pipeline` fetches **every** run with no filter, search or pagination | `lib/pipeline.ts:102` — bare `GET /pipeline/runs`; page passes nothing |
 | C2 | 🟠 | `/meetings` has no filter UI although the lib already supports it | `listRecordings` accepts `status`/`clientId`/`projectId` (`lib/meetings.ts:82-90`); `meetings/page.tsx:25` passes none |
-| C3 | 🟠 | The portal does **N+1 fetches** — lists all runs then calls `getPortalRun` for each | `portal/page.tsx:29-31` (`Promise.all` over every run). Fine at 3 runs, not at 300 |
-| C4 | 🟠 | The pipeline **list** has no client column, so you cannot see whose work a run is without opening it | `lib/pipeline.ts:14` states the list SELECT omits `client_id` |
-| C5 | 🟡 | No client-facing run **detail** route (`/portal/[runId]`) — everything is inline on one page | only `portal/page.tsx` exists |
-| C6 | 🟡 | No run→project / run→recording→project navigation anywhere (blocked by A1) | — |
+| C3 | ✅ FIXED 2026-08-04 (batched: 2 queries, + a free `pendingActions` count) | The portal did **N+1 fetches** — lists all runs then calls `getPortalRun` for each | `portal/page.tsx:29-31` (`Promise.all` over every run). Fine at 3 runs, not at 300 |
+| C4 | ✅ FIXED 2026-08-04 (list SELECT now carries `client_id`/`project_id`/`owner_id`) | The pipeline **list** had no client column, so you cannot see whose work a run is without opening it | `lib/pipeline.ts:14` states the list SELECT omits `client_id` |
+| C5 | ✅ FIXED 2026-08-04 (`/portal/[runId]` + shared `PortalGateActions`; the list is now a summary) | No client-facing run **detail** route — everything was inline on one page, and `getPortalRun`/`PortalRunDetail` were dead code | only `portal/page.tsx` existed |
+| C6 | ✅ FIXED 2026-08-04 (unblocked by W0's `project_id` + WD-30 populating it; both selects now carry it, run workspace links to the project) | No run→project / run→recording→project navigation anywhere | — |
 
 ---
 

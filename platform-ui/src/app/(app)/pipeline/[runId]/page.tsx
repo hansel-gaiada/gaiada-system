@@ -33,7 +33,7 @@ import {
   openGateAction,
 } from "@/lib/pipelineActions";
 import { findRecordingByMeetingId } from "@/lib/meetings";
-import { getClient } from "@/lib/entities";
+import { getClient, getProject } from "@/lib/entities";
 import { Card, Eyebrow, StatusBadge } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -71,10 +71,17 @@ export default async function PipelineRunPage({ params }: { params: Promise<{ ru
   // it against the registry (see findRecordingByMeetingId's doc comment for why there's no direct read).
   const recording = run.source_meeting_id ? await findRecordingByMeetingId(userId, tenant, run.source_meeting_id) : null;
 
-  // Client / portal link. KNOWN GAP (tracked, not fixed here): the n8n dispatcher currently drops
-  // client context on ingest, so client_id lands NULL on most runs — render a teach-state instead
-  // of a broken link when that's the case, rather than assuming every run has one.
+  // Client / portal link. The gap this used to warn about is FIXED (WD-30): createRun now derives
+  // client_id from the source meeting, and migration 0074 backfilled the runs written before it, so
+  // client_id is normally present. The null branch below stays — a run created directly, with no source
+  // meeting, legitimately has no client, and that is worth saying rather than assuming.
   const client = run.client_id ? await getClient(userId, tenant, run.client_id) : null;
+
+  // C6 — run -> project. This was listed as blocked because pipeline_runs had no project_id at all; W0
+  // added the column and WD-30 populates it, so the link is finally resolvable. Fetched in parallel with
+  // nothing else depending on it; a project deleted since the run was created resolves to null and gets
+  // the same honest treatment as a missing client.
+  const project = run.project_id ? await getProject(userId, tenant, run.project_id).catch(() => null) : null;
 
   async function onDecide(formData: FormData) {
     "use server";
@@ -146,8 +153,22 @@ export default async function PipelineRunPage({ params }: { params: Promise<{ ru
                   <>Client: unavailable (id {run.client_id} not found — check the company&apos;s client list)</>
                 )
               ) : (
-                <>No client is linked to this run yet, so it won&apos;t appear in any client portal. This is set from the meeting the run
-                {" "}started from; a run created before that link existed backfills once re-ingested.</>
+                <>No client is linked to this run, so it won&apos;t appear in any client portal. The client comes from the meeting the
+                {" "}run started from — a run created directly has none.</>
+              )}
+            </div>
+            {/* C6 — run -> project. The counterpart hop (run -> source meeting -> project) is the row
+                above; this is the direct one, which only became possible once runs carried project_id. */}
+            <div className="pl-link-row__item">
+              {run.project_id ? (
+                project ? (
+                  <>Project: <Link href={`/projects/${run.project_id}`}>{project.name}</Link></>
+                ) : (
+                  <>Project: unavailable (id {run.project_id} — it may have been deleted)</>
+                )
+              ) : (
+                <>No project is linked to this run. It is set from the meeting the run started from, so a
+                {" "}meeting recorded outside a project workspace produces a run with none.</>
               )}
             </div>
           </div>

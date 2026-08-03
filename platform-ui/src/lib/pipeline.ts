@@ -11,8 +11,8 @@ import "server-only";
 // and adds pure helpers (blockage text, stage grouping/labels) so the page stays thin.
 //
 // BFF CONTRACT (implemented in platform-nest):
-//   GET   /api/:t/pipeline/runs?status=         -> PipelineRun[]        (list — no client_id column)
-//   GET   /api/:t/pipeline/runs/:id             -> PipelineRunDetail    (detail — includes client_id)
+//   GET   /api/:t/pipeline/runs?status=         -> PipelineRun[]        (list — carries client_id + project_id since C4/C6)
+//   GET   /api/:t/pipeline/runs/:id             -> PipelineRunDetail    (detail — includes client_id + project_id)
 //   PATCH /api/:t/pipeline/runs/:id             -> { id, status }       (status only — see pipelineActions)
 //   POST  /api/:t/pipeline/runs/:runId/stages   -> { id, deduped? }
 //   GET   /api/:t/pipeline/gates?status=&actorSide=&kind=  -> PipelineGate[]
@@ -42,6 +42,12 @@ export interface PipelineRun {
   mom_ref: string | null;
   created_at: string;
   updated_at: string;
+  // C4/C6: the LIST select now carries these too, so the list can show whose work a run is and link
+  // to its project without cross-referencing the recordings registry. Optional because a server on an
+  // older tag omits them — the UI then renders no link rather than an empty one.
+  client_id?: string | null;
+  project_id?: string | null;
+  owner_id?: string | null;
 }
 export interface PipelineStage {
   id: string;
@@ -65,10 +71,11 @@ export interface PipelineGate {
   decided_at: string | null;
   created_at: string;
 }
-// The run-detail SELECT also returns client_id (the run-workspace needs it for the meeting/portal
-// links; the list SELECT deliberately does not carry it — see the controller's two queries).
+// Both SELECTs now carry client_id/project_id (C4/C6). The detail narrows them to required, since the
+// run-workspace links depend on them being present.
 export interface PipelineRunDetail extends PipelineRun {
   client_id: string | null;
+  project_id: string | null;
   stages: PipelineStage[];
   gates: PipelineGate[];
   scopeSignoffs: Array<{ party: string; signer_name: string | null; signed_at: string }>;

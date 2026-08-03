@@ -287,7 +287,11 @@ export class PipelineController {
     if (sourceMeetingId) { params.push(sourceMeetingId); conditions.push(`source_meeting_id = $${params.length}`); }
     const rows = await withTenants([tenantId], (c) =>
       c.query(
-        `SELECT id, source_meeting_id, title, mom_ref, status, created_by, created_at, updated_at
+        // C4/C6: client_id + project_id are selected here so the list can show WHOSE work a run is and
+        // link to it. Their absence is why `lib/pipeline.ts` had to cross-reference the recordings
+        // registry to render a client column, and why run->project navigation did not exist at all.
+        `SELECT id, source_meeting_id, title, mom_ref, status, client_id, project_id, owner_id,
+                created_by, created_at, updated_at
          FROM pipeline_runs WHERE ${conditions.join(" AND ")}
          ORDER BY created_at DESC LIMIT 200`,
         params,
@@ -301,7 +305,9 @@ export class PipelineController {
     await authorize(req.principal, { kind: "pipeline_run", tenantId }, "read");
     return withTenants([tenantId], async (c) => {
       const run = await c.query(
-        `SELECT id, tenant_id, source_meeting_id, title, mom_ref, status, client_id, created_by, created_at, updated_at
+        // C6: project_id added so the run workspace can link to the project this delivery belongs to.
+        `SELECT id, tenant_id, source_meeting_id, title, mom_ref, status, client_id, project_id, owner_id,
+                created_by, created_at, updated_at
          FROM pipeline_runs WHERE id = $1 AND deleted_at IS NULL`,
         [runId],
       );
