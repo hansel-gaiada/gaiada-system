@@ -14,6 +14,11 @@ Components are **separate standalone projects — not a shared-package monorepo.
 4. `docs/superpowers/specs/2026-07-04-INDEX-overview.md` — full architecture (21 specs).
 5. `docs/superpowers/specs/2026-07-05-adversarial-weakness-review.md` — the 63 verified findings (all resolved/parked).
 6. `docs/superpowers/plans/2026-07-05-phase-5-full-fidelity.md` — the **gap register** (spec→current→close-by); the live list of what remains, kept current.
+7. `docs/superpowers/plans/2026-08-03-agentic-native-erp-plan.md` — **OPEN; must be closed before
+   staging.** The readiness bar every department capability has to pass so the same capability works
+   under a human, under n8n, or under an agent — plus the measured per-department baseline. Agent /
+   persona integration itself is deferred and optional. Read it before adding a department
+   capability: retrofitting the bar costs more than building to it.
 
 ## Current status (2026-07-09)
 > **The backend moved fast after 07-05; this section + the full-fidelity register are the
