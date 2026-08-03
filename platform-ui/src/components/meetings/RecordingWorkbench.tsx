@@ -1,9 +1,11 @@
 "use client";
 import { useActionState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { setTranscriptAction, ingestAction, markDriveAction, uploadAudioAction, retryAudioAction, type MeetingResult } from "@/lib/meetingsActions";
 import type { MeetingRecordingDetail } from "@/lib/meetings";
 import { AudioUploadForm } from "./AudioUploadForm";
+import { LiveRecorder } from "./LiveRecorder";
 
 // WS11 capture edge — the per-recording workbench on the detail page: add/replace the transcript,
 // ingest it into the delivery pipeline (proxied server-side), and record the Drive-sync nudge/result.
@@ -88,8 +90,25 @@ function DriveForm({ rec }: { rec: MeetingRecordingDetail }) {
 }
 
 export function RecordingWorkbench({ rec }: { rec: MeetingRecordingDetail }) {
+  const router = useRouter();
   return (
     <div style={{ display: "grid", gap: 22 }}>
+      {/* Record straight into THIS recording — start/pause/resume/stop, play the take back, then
+          upload it. Hidden once a transcript exists: re-recording over a transcribed meeting would
+          be a destructive surprise, and the upload path below is the deliberate way to replace audio.
+          On success we refresh so `AudioUploadForm` re-mounts at `transcribing` and takes over the
+          poll — one poller, not two racing each other. */}
+      {!rec.transcript && (
+        <section>
+          <h3 style={{ margin: "0 0 10px", font: "600 14px var(--font-display)" }}>Record now</h3>
+          <LiveRecorder
+            mode="existing"
+            action={uploadAudioAction}
+            recordingId={rec.id}
+            onUploaded={() => router.refresh()}
+          />
+        </section>
+      )}
       {/* WD-04/WD-07 (Part A) — the in-ERP upload fallback, no capture-helper required. Always
           available (someone can switch to it even after registering via the helper path), but it
           is the ONLY way to get a transcript for a recording nobody's helper ever attached to. */}

@@ -1,6 +1,7 @@
 "use client";
 import { useActionState, useState } from "react";
 import { startRecordingAction, registerAndUploadAudioAction, type MeetingResult } from "@/lib/meetingsActions";
+import { LiveRecorder } from "./LiveRecorder";
 import "@/components/departments/departments.css";
 
 // WS11 capture edge — the two "kick off a recording" buttons in the ERP. The desktop capture-helper
@@ -22,7 +23,21 @@ export function RecordControls({ clientId, projectId }: { clientId?: string; pro
 
   return (
     <div style={{ display: "grid", gap: 18 }}>
+      {/* Record HERE, in the browser — start / pause / resume / stop, play the take back, then send
+          it down the server-side transcription path. This is the primary affordance now: the two
+          buttons below it only REGISTER a meeting for the desktop helper to attach to, which is a
+          different (and much less obvious) thing. */}
+      <div style={{ display: "grid", gap: 8 }}>
+        <h3 style={{ margin: 0, font: "600 14px var(--font-body)", color: "var(--ink)" }}>Record now</h3>
+        <LiveRecorder mode="register" action={registerAndUploadAudioAction} clientId={clientId} projectId={projectId} />
+      </div>
+
+      <hr style={{ border: 0, borderTop: "1px solid var(--line)", margin: 0 }} />
+
       <form action={formAction} style={{ display: "grid", gap: 12 }}>
+        <h3 style={{ margin: 0, font: "600 14px var(--font-body)", color: "var(--ink)" }}>
+          Or register a meeting for the desktop capture helper
+        </h3>
         {clientId && <input type="hidden" name="clientId" value={clientId} />}
         {projectId && <input type="hidden" name="projectId" value={projectId} />}
         <input
