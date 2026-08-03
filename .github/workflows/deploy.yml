@@ -221,11 +221,39 @@ jobs:
       - name: Record deployed tag
         run: ssh vps "echo '${TAG}' > '${DEPLOY_DIR}/.deployed-tag'"
 
+      # Retention. Nothing else prunes release images, and each deploy adds nine — one of them
+      # (report-renderer, a headless-Chrome image) is ~3.6GB. On 2026-08-03 that silently filled
+      # gda-aicenter's 49GB disk to 100%: eleven tags were resident, `docker system df` reported
+      # 21.9GB reclaimable, and the box could no longer write a single byte. The deploy that found
+      # it had ALREADY passed its health check and was undone by the one-line `.deployed-tag` write
+      # failing on the full disk.
+      #
+      # Keeps this tag and the previous one, because the previous tag is the rollback target and
+      # deleting it would turn a bad deploy into an outage. Everything older is re-pullable from
+      # GHCR, so this trades a slower rare rollback-to-ancient-tag for a disk that cannot fill.
+      # Non-fatal on purpose: housekeeping must never fail a healthy deploy — that is the exact
+      # class of bug the rollback condition below was changed to stop.
+      - name: Prune superseded images
+        if: always() && steps.health.outcome == 'success'
+        continue-on-error: true
+        run: |
+          ssh vps "KEEP='${TAG} ${{ steps.prev.outputs.tag }}'; \
+            for img in \$(docker images 'ghcr.io/${OWNER}/gaiada-*' --format '{{.Repository}}:{{.Tag}}'); do \
+              keep=no; for k in \$KEEP; do [ \"\${img##*:}\" = \"\$k\" ] && keep=yes; done; \
+              [ \"\$keep\" = no ] && docker rmi \"\$img\" >/dev/null 2>&1 && echo \"pruned \$img\"; \
+            done; df -h / | tail -1" || echo "::warning::image prune failed (non-fatal)"
+
       # Automatic rollback: re-pin the previous tag. Images are already on the box,
       # so this is a container restart, not a rebuild. Schema is NOT rolled back —
       # migrations are forward-only by design; the backup above is the escape hatch.
+      #
+      # Gated on the HEALTH step specifically, not on `failure()` alone. `failure()` fires for ANY
+      # earlier step, which on 2026-08-03 meant the trivial `.deployed-tag` write failing on a full
+      # disk rolled back a deploy whose services were already up and healthy — a bookkeeping error
+      # reverting a good release. If health never ran (backup/migrate/pull failed) its outcome is
+      # `skipped`, which is also not `success`, so those still roll back as before.
       - name: Roll back on failure
-        if: failure() && steps.prev.outputs.tag != ''
+        if: failure() && steps.health.outcome != 'success' && steps.prev.outputs.tag != ''
         run: |
           set -euo pipefail
           echo "::error::Deploy of ${TAG} failed — rolling back to ${{ steps.prev.outputs.tag }}"

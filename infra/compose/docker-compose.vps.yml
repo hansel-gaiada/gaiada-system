@@ -301,6 +301,17 @@ services:
       KEYCLOAK_ADMIN_REALM: ${KEYCLOAK_ADMIN_REALM:-gaiada}
       KEYCLOAK_ADMIN_CLIENT_ID: ${KEYCLOAK_ADMIN_CLIENT_ID:-gaiada-provisioner}
       KEYCLOAK_ADMIN_CLIENT_SECRET: ${KEYCLOAK_ADMIN_CLIENT_SECRET:-}
+      # The SAME omission again, and this one had been silently disabling THREE shipped features on
+      # this box: a 43-char value sat in .env while the container saw an empty string, because no row
+      # forwarded it. It signs W0 client-invite tokens (`core/client-invites.ts`), signs SEO's Google
+      # OAuth state tokens (`modules/search/google/oauth-state.ts`), and is the key `core/secret-box.ts`
+      # encrypts stored integration secrets with — so invites 503'd, and the OAuth/secret paths could
+      # never have worked in production either. Caught 2026-08-03 by the first live invite walk.
+      #
+      # Deliberately NOT `:?`. Absence already fails closed with a typed, specific refusal naming this
+      # variable, which is a better failure than refusing to start the whole stack on a box that does
+      # not use these features.
+      INTEGRATION_TOKEN_KEY: ${INTEGRATION_TOKEN_KEY:-}
       # Automation is the separate `gaiada-automation` n8n stack; set these only if n8n is
       # reachable from this network. AUTOMATION_API_KEY is an n8n Public-API key → the
       # Systems→Automation console then lists real workflows + last-run.
