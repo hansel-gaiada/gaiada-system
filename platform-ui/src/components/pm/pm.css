@@ -174,7 +174,7 @@
    count, but only the owner is credited with the task's outcome. */
 .pm-contributors__label { font-size: 10px; opacity: 0.6; display: block; margin-bottom: 6px; }
 .pm-contributor { display: flex; align-items: center; gap: 8px; padding: 6px 0; font: 400 13px var(--font-body); color: var(--text-primary); }
-.pm-contributor__dot { width: 8px; height: 8px; border-radius: 50%; background: var(--erp-ink-40, #999); flex: none; }
+.pm-contributor__dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ink-faint); flex: none; }
 .pm-contributor--owner { font-weight: 700; }
 .pm-contributor__dot--owner { background: var(--erp-accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--erp-accent) 20%, transparent); }
 
