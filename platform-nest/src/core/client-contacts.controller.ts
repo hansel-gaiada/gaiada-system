@@ -278,9 +278,30 @@ export class ClientContactsController {
 // of arrangement that silently loses its exemption — or silently loses the guard on its siblings.
 @Controller("api")
 export class ClientInviteAcceptController {
-  @Post("invites/:token/accept")
+  // ⚠ THE TOKEN TRAVELS IN THE BODY, NOT THE PATH. Two independent reasons, and the first one is a bug
+  // this route actually had:
+  //
+  //  1. ROUTING. A real token is `inv1.<b64url(uuid)>.<b64url(uuid)>.<b64url(32-byte hmac)>` = **146
+  //     characters**, measured. Fastify's router (find-my-way) refuses to match a `:param` segment
+  //     longer than `maxParamLength`, which defaults to **100** and is not overridden anywhere in
+  //     main.ts. As `POST invites/:token/accept` this route therefore 404'd at the raw router — before
+  //     Nest, DI or this controller were reached — for EVERY invite it has ever minted. The magic-link
+  //     flow was dead on arrival, and the symptom (a 404) looks nothing like the cause.
+  //     Raising maxParamLength would also work, but it just moves the ceiling: a longer tenant id or a
+  //     future token revision would silently re-break it.
+  //  2. SECRET HYGIENE. The token is bearer-equivalent — it grants account creation. In a URL it lands
+  //     in web-server access logs, proxy logs, `Referer` headers and browser history. A request body
+  //     does not get logged by default anywhere in this stack.
+  //
+  // The magic LINK still carries the token, because a link must: it points at the FRONT-END page
+  // `/invite/<token>` (what `invite.acceptPath` returns), and that page reads the token off its own URL
+  // and POSTs it here in the body. So the token is in a URL exactly once — in the user's browser — and
+  // never in ours.
+  @Post("invites/accept")
   @HttpCode(200)
-  async accept(@Param("token") token: string, @Body() body: { password?: string; name?: string }) {
+  async accept(@Body() body: { token?: string; password?: string; name?: string }) {
+    const token = String(body?.token ?? "");
+    if (!token) throw new BadRequestException("token is required");
     // Consumes the token atomically FIRST: single-use is enforced before any account work, so two
     // concurrent clicks cannot both provision.
     const invite = await consumeInvite(token);

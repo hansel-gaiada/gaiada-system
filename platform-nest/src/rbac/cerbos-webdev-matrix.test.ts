@@ -141,3 +141,112 @@ describe.skipIf(!live)("WD-20 Cerbos matrix — integration_connection (own/othe
     expect(await allow(p, ownRow, "read")).toBe(false);
   });
 });
+
+// W0-4 QA gate — resource_client_contact.yaml. Governance-action tier (create/update/revoke) is
+// company_admin/manager only, never member/team_lead/viewer; read is team-level (everyone delivering
+// the work needs to know who the client's stakeholders are). group_executive gets its OWN rule gated
+// on `notLow` ONLY, never `inTenant` — the WD-20-R1 lesson: `inTenant` is
+// `resource.tenantId in principal.companies`, which never holds for a global grant, so an exec who is
+// NOT a member of the tenant must still succeed here, or the separate rule is pointless.
+describe.skipIf(!live)("W0-4 Cerbos matrix — client_contact (governance tier vs read tier vs exec)", () => {
+  const cc: Resource = { kind: "client_contact", tenantId: T1 };
+  const ccT2: Resource = { kind: "client_contact", tenantId: T2 };
+
+  it("company_admin: create/update/revoke AND read allowed within their tenant", async () => {
+    const p = principal("company_admin", "company", T1);
+    for (const action of ["create", "update", "revoke", "read"]) {
+      expect(await allow(p, cc, action)).toBe(true);
+    }
+  });
+
+  it("manager: create/update/revoke AND read allowed within their tenant (D-2 ratification)", async () => {
+    const p = principal("manager", "company", T1);
+    for (const action of ["create", "update", "revoke", "read"]) {
+      expect(await allow(p, cc, action)).toBe(true);
+    }
+  });
+
+  it("member: read allowed (team-level), but create/update/revoke denied — inviting an external " +
+     "person is a governance action, never plain member", async () => {
+    const p = principal("member", "company", T1);
+    expect(await allow(p, cc, "read")).toBe(true);
+    for (const action of ["create", "update", "revoke"]) {
+      expect(await allow(p, cc, action)).toBe(false);
+    }
+  });
+
+  it("team_lead: listed in the read rule, but SAME dead-tier gap already documented for " +
+     "integration_connection above — team_lead's derived role needs a TEAM-scoped grant matching " +
+     "resource.attr.teamId (derived_roles.yaml:65-71), and client-contacts.controller.ts never sets " +
+     "teamId on this resource, so a company-scoped team_lead grant can never derive here even for " +
+     "read. Denied is the REAL behaviour, not the ticket's assumption — confirmed, not adjusted to fit.", async () => {
+    const p = principal("team_lead", "company", T1);
+    expect(await allow(p, cc, "read")).toBe(false);
+    for (const action of ["create", "update", "revoke"]) {
+      expect(await allow(p, cc, action)).toBe(false);
+    }
+  });
+
+  it("viewer: read allowed, create/update/revoke denied", async () => {
+    const p = principal("viewer", "company", T1);
+    expect(await allow(p, cc, "read")).toBe(true);
+    for (const action of ["create", "update", "revoke"]) {
+      expect(await allow(p, cc, action)).toBe(false);
+    }
+  });
+
+  it("company_admin of T1 is denied on T2's rows — cross-tenant deny for the tenant-scoped rules", async () => {
+    const p = principal("company_admin", "company", T1);
+    for (const action of ["create", "update", "revoke", "read"]) {
+      expect(await allow(p, ccT2, action)).toBe(false);
+    }
+  });
+
+  it("group_executive (global, gated on notLow ONLY): read AND create/update/revoke succeed even " +
+     "CROSS-COMPANY — for a tenant the exec is not a member of at all", async () => {
+    const execP: Principal = { userId: ME, assurance: "high", companies: [], roles: [{ role: "group_executive", scopeType: "global", scopeId: null }], sessionVersion: 1 };
+    // Not a member of T1 or T2 (companies: []) — proves the rule truly does not depend on inTenant.
+    for (const action of ["read", "create", "update", "revoke"]) {
+      expect(await allow(execP, cc, action)).toBe(true);
+      expect(await allow(execP, ccT2, action)).toBe(true);
+    }
+  });
+
+  it("group_executive at LOW assurance is denied (D4 ceiling applies even to the exec carve-out)", async () => {
+    const execLow: Principal = { userId: ME, assurance: "low", companies: [], roles: [{ role: "group_executive", scopeType: "global", scopeId: null }], sessionVersion: 1 };
+    expect(await allow(execLow, cc, "read")).toBe(false);
+    expect(await allow(execLow, cc, "create")).toBe(false);
+  });
+
+  it("everything is denied at assurance low, regardless of role", async () => {
+    for (const role of ["company_admin", "manager", "member", "team_lead", "viewer"]) {
+      const p: Principal = { userId: ME, assurance: "low", companies: [T1], roles: [{ role, scopeType: "company", scopeId: T1 }], sessionVersion: 1 };
+      for (const action of ["read", "create", "update", "revoke"]) {
+        expect(await allow(p, cc, action)).toBe(false);
+      }
+    }
+  });
+
+  it("platform_admin: full access regardless of tenant", async () => {
+    const p: Principal = { userId: ME, assurance: "high", companies: [], roles: [{ role: "platform_admin", scopeType: "global", scopeId: null }], sessionVersion: 1 };
+    expect(await allow(p, cc, "create")).toBe(true);
+    expect(await allow(p, ccT2, "create")).toBe(true);
+  });
+});
+
+// resource_scope_signoff.yaml was widened 2026-08-03 (D-2 ratification): `create` used to be
+// company_admin/exec only, and a `manager` calling it (e.g. the automation account `wf:scope`) was
+// correctly 403'd. This proves the widening landed: manager can now create a scope_signoff.
+describe.skipIf(!live)("W0-4 Cerbos matrix — scope_signoff.create now includes manager", () => {
+  const signoff: Resource = { kind: "scope_signoff", tenantId: T1 };
+
+  it("manager: create allowed (was company_admin/exec only before the D-2 widening)", async () => {
+    const p = principal("manager", "company", T1);
+    expect(await allow(p, signoff, "create")).toBe(true);
+  });
+
+  it("member: create still denied — a named accountable person signs, not any team member", async () => {
+    const p = principal("member", "company", T1);
+    expect(await allow(p, signoff, "create")).toBe(false);
+  });
+});

@@ -23,6 +23,12 @@ resourcePolicy:
     # Reading the contact list is team-level: anyone delivering the work needs to know who on the
     # client side is watching and who can sign. It exposes names/emails and a capability, never a
     # credential — `hasAccount`-style booleans only, exactly like the connections vault's `hasToken`.
+    # `team_lead` is listed for parity with the other resource policies, but note it is a DEAD TIER
+    # here and that is not an oversight to "fix" by editing this list: derived_roles.yaml's team_lead
+    # requires a TEAM-scoped grant matching `resource.attr.teamId`, and this resource never carries a
+    # teamId (client contacts belong to a client, not a team). The same structural gap is already
+    # documented for `integration_connection`. Leaving the name here keeps the grid uniform; a
+    # team-scoped read would need the resource to grow a teamId first.
     - actions: ["read"]
       effect: EFFECT_ALLOW
       derivedRoles: ["company_admin", "manager", "member", "team_lead", "viewer"]

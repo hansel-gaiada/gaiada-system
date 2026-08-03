@@ -17,6 +17,7 @@ import { GatewayNotConfiguredErrorFilter } from "./modules/search/gateway-not-co
 // SM-25a: the Google-surface error family (modules/search/google/errors.ts). Registered here for
 // exactly the reason SM-53/SM-57 had to be — an unmapped plain Error escapes as a body-less 500.
 import { GoogleOAuthErrorFilter } from "./modules/search/google/google-oauth-error.filter";
+import { ClientAccessErrorFilter } from "./core/client-access-error.filter";
 import { LastResortExceptionFilter } from "./last-resort-exception.filter";
 import { maxUploadBytes } from "./core/meetings.controller";
 import { migrate } from "./db/migrate";
@@ -116,6 +117,7 @@ export async function buildApp(): Promise<NestFastifyApplication> {
     new ProviderDispatchErrorFilter(),
     new GatewayNotConfiguredErrorFilter(),
     new GoogleOAuthErrorFilter(),
+    new ClientAccessErrorFilter(),
   );
   // WD-04: the one multipart consumer in the app (in-ERP meeting audio/video upload). The size cap
   // is enforced HERE (busboy truncates + MeetingRecordingsController turns that into a clean 400)
