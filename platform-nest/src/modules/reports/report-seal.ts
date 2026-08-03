@@ -82,12 +82,37 @@ export interface SealedDocumentEntry {
  *  key ordering than the JS object that was written — a plain `JSON.stringify` would hash the
  *  freshly-built and the round-tripped-through-Postgres copy of the IDENTICAL data differently.
  *  Sorting keys first makes the hash immune to that round-trip, which is exactly what "seal_hash
- *  verifies over the period's document set [as read back from storage]" requires. */
+ *  verifies over the period's document set [as read back from storage]" requires.
+ *
+ *  Sorting keys is NOT sufficient on its own, though — the round-trip also DROPS things, and this
+ *  function has to drop exactly the same ones or the hash still cannot be reproduced from storage:
+ *
+ *    - `undefined`-valued keys. `JSON.stringify` (which is what writes the jsonb) omits them
+ *      entirely; `Object.keys()` still lists them, and `JSON.stringify(undefined)` returns the
+ *      VALUE `undefined`, which template-interpolates as the literal text `undefined`. So a
+ *      document carrying `header.warnings: undefined` (computeHeaderWarnings returns undefined
+ *      whenever a period has no warnings — i.e. the common case) hashed as
+ *      `..."warnings":undefined...` at seal time and as nothing at all from storage. That made
+ *      seal_hash UNVERIFIABLE for essentially every sealed period: TR-15's own "seal_hash
+ *      verifies" test failed on it, and because a tamper check that never reproduces reads
+ *      identically to a tamper check that caught tampering, the failure mode was a permanent
+ *      false "these rows were altered".
+ *    - anything with a `toJSON()` (e.g. a `Date`). `JSON.stringify` uses it; the object branch
+ *      below would otherwise see no own enumerable keys and emit `{}`. Not currently reachable
+ *      (`generatedAt` is already an ISO string) but it is the identical failure mode one field
+ *      away, so it is closed here rather than left as a trap.
+ *
+ *  Array holes/`undefined` elements become `null`, again matching `JSON.stringify`. */
 function canonicalStringify(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(canonicalStringify).join(",")}]`;
+  if (Array.isArray(value)) return `[${value.map((v) => (v === undefined ? "null" : canonicalStringify(v))).join(",")}]`;
   if (value !== null && typeof value === "object") {
-    const keys = Object.keys(value as Record<string, unknown>).sort();
-    return `{${keys.map((k) => `${JSON.stringify(k)}:${canonicalStringify((value as Record<string, unknown>)[k])}`).join(",")}}`;
+    const toJSON = (value as { toJSON?: unknown }).toJSON;
+    if (typeof toJSON === "function") return canonicalStringify((toJSON as () => unknown).call(value));
+    const obj = value as Record<string, unknown>;
+    const keys = Object.keys(obj)
+      .filter((k) => obj[k] !== undefined)
+      .sort();
+    return `{${keys.map((k) => `${JSON.stringify(k)}:${canonicalStringify(obj[k])}`).join(",")}}`;
   }
   return JSON.stringify(value);
 }

@@ -115,12 +115,26 @@ export function buildGroundingFacts(doc: ReportDocument): NarrativeGroundingFact
  *  one hashes a whole SEALED-DOCUMENT SET for tamper evidence (a different job, a different input
  *  shape); this one hashes the much smaller grounding-fact payload for narrative PROVENANCE
  *  ("`groundingHash` is stored, so a narrative can be traced to the exact facts it was generated
- *  from"). No cross-file coupling is needed for two different jobs. */
+ *  from"). No cross-file coupling is needed for two different jobs.
+ *
+ *  Carries the same undefined-key / `toJSON` handling report-seal.ts's copy does, and for the same
+ *  reason: `Object.keys()` lists `undefined`-valued keys and `JSON.stringify(undefined)` returns
+ *  the VALUE `undefined`, which interpolates as the literal text `undefined` — so a grounding-fact
+ *  payload with an absent optional field hashed differently from a JSON round-trip of itself. That
+ *  bug was load-bearing in the seal copy (see its comment); here it is latent, because nothing
+ *  re-derives a groundingHash from the stored narrative today. Fixed in both so the "independent
+ *  copy" stays a copy of something CORRECT — a divergence here would surface later as narratives
+ *  that cannot be traced to their own facts. */
 function canonicalStringify(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(canonicalStringify).join(",")}]`;
+  if (Array.isArray(value)) return `[${value.map((v) => (v === undefined ? "null" : canonicalStringify(v))).join(",")}]`;
   if (value !== null && typeof value === "object") {
-    const keys = Object.keys(value as Record<string, unknown>).sort();
-    return `{${keys.map((k) => `${JSON.stringify(k)}:${canonicalStringify((value as Record<string, unknown>)[k])}`).join(",")}}`;
+    const toJSON = (value as { toJSON?: unknown }).toJSON;
+    if (typeof toJSON === "function") return canonicalStringify((toJSON as () => unknown).call(value));
+    const obj = value as Record<string, unknown>;
+    const keys = Object.keys(obj)
+      .filter((k) => obj[k] !== undefined)
+      .sort();
+    return `{${keys.map((k) => `${JSON.stringify(k)}:${canonicalStringify(obj[k])}`).join(",")}}`;
   }
   return JSON.stringify(value);
 }

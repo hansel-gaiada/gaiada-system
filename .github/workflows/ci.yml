@@ -93,6 +93,13 @@ jobs:
           DATABASE_URL_TEST: postgres://postgres:postgres@localhost:5432/postgres
           CERBOS_URL: http://localhost:3592
           REDIS_URL: redis://localhost:6379
+          # REDIS_URL_TEST is the name every suite in the repo actually reads (18 files:
+          # events/relay + consumer, collab, hr, service-assignments, the reports PDF-export
+          # and TR-29 suites, ...). REDIS_URL alone is read by nothing under test, so the
+          # redis service container above was running and being ignored, and the suites
+          # skipped themselves — silently, until TR-29's preflight turned that skip into a
+          # loud failure. Same URL, correct name; this is what un-skips them.
+          REDIS_URL_TEST: redis://localhost:6379
 
   # ai-gateway is the Go service (ai-gateway-go/); it replaced the retired Node gateway.
   gateway-go:
