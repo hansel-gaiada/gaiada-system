@@ -127,14 +127,35 @@ async function existingStageForRepeatedCreate(
 @UseGuards(AuthGuard)
 export class PipelineController {
   // ---- Runs ----
+  /** Validate a proposed run owner. Returns the id, or throws.
+   *
+   *  The owner must be STAFF of this tenant — a `company_memberships` row — and deliberately NOT a
+   *  client contact. `owner_id` is who INTERNAL notifications are addressed to (client-notify.ts
+   *  resolves "owner_id, else created_by" for the internal side), so accepting a client contact here
+   *  would quietly route internal-side messages to the client. Membership is also what makes the
+   *  notification deliverable at all.
+   *
+   *  Read through the tenant-scoped connection, so a userId from another tenant matches zero rows and
+   *  is refused rather than being accepted by an FK check — FK checks run as the table owner, OUTSIDE
+   *  RLS, and are not a tenancy control. */
+  private async assertOwnerIsStaff(c: PoolClient, ownerId: string): Promise<string> {
+    const r = await c.query(
+      `SELECT 1 FROM company_memberships
+        WHERE user_id = $1 AND status = 'active' AND deleted_at IS NULL LIMIT 1`,
+      [ownerId],
+    );
+    if (!r.rowCount) throw new BadRequestException("ownerId must be an active staff member of this tenant");
+    return ownerId;
+  }
+
   @Post(":tenantId/pipeline/runs")
   @HttpCode(201)
   async createRun(
     @Req() req: FastifyRequest,
     @Param("tenantId") tenantId: string,
-    @Body() body: { sourceMeetingId?: string; title?: string; momRef?: string; status?: string; clientId?: string; stages?: Array<{ track?: string; name?: string; status?: string; artifactRef?: string; confidence?: number }> },
+    @Body() body: { sourceMeetingId?: string; title?: string; momRef?: string; status?: string; clientId?: string; projectId?: string; ownerId?: string; stages?: Array<{ track?: string; name?: string; status?: string; artifactRef?: string; confidence?: number }> },
   ) {
-    const { sourceMeetingId, title, momRef, status = "extracting", clientId, stages = [] } = body ?? {};
+    const { sourceMeetingId, title, momRef, status = "extracting", clientId, projectId, ownerId, stages = [] } = body ?? {};
     if (!RUN_STATUS.has(status)) throw new BadRequestException("invalid run status");
     for (const s of stages) {
       if (!s.track || !TRACKS.has(s.track)) throw new BadRequestException("stage.track must be delivery|report|scope");
@@ -153,9 +174,9 @@ export class PipelineController {
       }
       const id = newId();
       await c.query(
-        `INSERT INTO pipeline_runs (id, tenant_id, source_meeting_id, title, mom_ref, status, client_id, created_by, origin_site)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-        [id, tenantId, sourceMeetingId ?? null, title ?? null, momRef ?? null, status, clientId ?? null, req.principal.userId, config.originSite],
+        `INSERT INTO pipeline_runs (id, tenant_id, source_meeting_id, title, mom_ref, status, client_id, project_id, owner_id, created_by, origin_site)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+        [id, tenantId, sourceMeetingId ?? null, title ?? null, momRef ?? null, status, clientId ?? null, projectId ?? null, ownerId ? await this.assertOwnerIsStaff(c, ownerId) : null, req.principal.userId, config.originSite],
       );
       for (const s of stages) {
         // WD-29: the same identity guard as createStage. No lock is needed here (the run id was just
@@ -186,7 +207,7 @@ export class PipelineController {
     @Req() req: FastifyRequest,
     @Param("tenantId") tenantId: string,
     @Param("runId") runId: string,
-    @Body() body: { status?: string },
+    @Body() body: { status?: string; ownerId?: string | null },
   ) {
     if (body?.status !== undefined && !RUN_STATUS.has(body.status)) throw new BadRequestException("invalid run status");
     await authorize(req.principal, { kind: "pipeline_run", id: runId, tenantId }, "update");
@@ -196,14 +217,24 @@ export class PipelineController {
       // the same run lock: a park must not interleave with a concurrent decider that already read the
       // run as un-parked and is about to create another design behind it.
       await lockPipelineRun(c, runId);
-      const res = await c.query<{ status: string }>(
-        `UPDATE pipeline_runs SET status = COALESCE($2, status), updated_at = now()
-         WHERE id = $1 AND deleted_at IS NULL RETURNING status`,
-        [runId, body?.status ?? null],
+      // `ownerId` joins `status` on this surface. WD-05's note said status was "the only field this
+      // endpoint owns", meaning stage/gate TRANSITIONS live on their own surfaces — run ownership is
+      // not a transition, it is a property of the run, so it belongs here rather than needing a third
+      // endpoint. Explicit `null` CLEARS the owner (unassign); omitting the key leaves it untouched,
+      // which is why this cannot be a bare COALESCE.
+      const ownerProvided = body !== undefined && body !== null && Object.prototype.hasOwnProperty.call(body, "ownerId");
+      const ownerValue = ownerProvided && body.ownerId ? await this.assertOwnerIsStaff(c, body.ownerId) : null;
+      const res = await c.query<{ status: string; owner_id: string | null }>(
+        `UPDATE pipeline_runs
+            SET status = COALESCE($2, status),
+                owner_id = CASE WHEN $4::boolean THEN $3::uuid ELSE owner_id END,
+                updated_at = now()
+         WHERE id = $1 AND deleted_at IS NULL RETURNING status, owner_id`,
+        [runId, body?.status ?? null, ownerValue, ownerProvided],
       );
       if (res.rowCount === 0) return null;
       // TR-31: actorId -> work_activity.actor_user_id + an EXACT person link.
-      await emitEvent(c, tenantId, "pipeline_run", runId, "pipeline.run.updated", { status: res.rows[0].status, actorId: req.principal.userId });
+      await emitEvent(c, tenantId, "pipeline_run", runId, "pipeline.run.updated", { status: res.rows[0].status, ownerId: res.rows[0].owner_id, actorId: req.principal.userId });
       return res.rows[0];
     });
     if (!updated) throw new NotFoundException("run not found");

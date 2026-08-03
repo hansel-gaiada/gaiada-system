@@ -6,10 +6,11 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import type { NestFastifyApplication } from "@nestjs/platform-fastify";
 import { config } from "../config";
 import { buildApp } from "../main";
+import { newId, withTenants } from "../db";
 import { resetModules } from "../modules/registry";
 import { resetCoreRollupProviders } from "../rollups/engine";
 import { initTestDb, teardownTestDb, adminPool, TEST_URL } from "../testing/setup";
-import { createCompany, createUser, addMembership, createRole, grantRole } from "../testing/fixtures";
+import { createCompany, createUser, addMembership, createRole, grantRole, createClient } from "../testing/fixtures";
 import { seedAutomationAccounts } from "../seed/automation";
 
 const svc = { authorization: "Bearer svc-token" };
@@ -426,6 +427,63 @@ describe.skipIf(!TEST_URL)("meeting-to-delivery pipeline surface (WS11 §4B)", (
       });
       expect(second.statusCode).toBe(201);
       expect(second.json()).toMatchObject({ complete: true });
+    });
+  });
+
+  // migration 0072 added pipeline_runs.owner_id and NOTHING could write it: createRun's body type
+  // never accepted it and updateRun took only `status`, so in production it was permanently NULL and
+  // every "notify the owner, else created_by" silently resolved to created_by. A column no code can
+  // set is indistinguishable from a column that does not exist.
+  describe("run owner: assignable, clearable, and staff-only", () => {
+    it("createRun accepts an ownerId and stores it", async () => {
+      const r = await app.inject({
+        method: "POST", url: `/api/${co}/pipeline/runs`, headers: asUser(admin),
+        payload: { title: "owned run", ownerId: admin },
+      });
+      expect(r.statusCode).toBe(201);
+      const row = await adminPool().query(`SELECT owner_id FROM pipeline_runs WHERE id = $1`, [r.json().id]);
+      expect(row.rows[0].owner_id).toBe(admin);
+    });
+
+    it("PATCH assigns an owner, and an explicit null CLEARS it while omitting the key leaves it alone", async () => {
+      const created = await app.inject({
+        method: "POST", url: `/api/${co}/pipeline/runs`, headers: asUser(admin), payload: { title: "reassign" },
+      });
+      const id = created.json().id;
+
+      await app.inject({ method: "PATCH", url: `/api/${co}/pipeline/runs/${id}`, headers: asUser(admin), payload: { ownerId: admin } });
+      let row = await adminPool().query(`SELECT owner_id FROM pipeline_runs WHERE id = $1`, [id]);
+      expect(row.rows[0].owner_id).toBe(admin);
+
+      // status-only update must NOT wipe the owner — the reason this is not a bare COALESCE.
+      await app.inject({ method: "PATCH", url: `/api/${co}/pipeline/runs/${id}`, headers: asUser(admin), payload: { status: "blocked" } });
+      row = await adminPool().query(`SELECT owner_id, status FROM pipeline_runs WHERE id = $1`, [id]);
+      expect(row.rows[0].owner_id).toBe(admin);
+      expect(row.rows[0].status).toBe("blocked");
+
+      // explicit null = unassign
+      await app.inject({ method: "PATCH", url: `/api/${co}/pipeline/runs/${id}`, headers: asUser(admin), payload: { ownerId: null } });
+      row = await adminPool().query(`SELECT owner_id FROM pipeline_runs WHERE id = $1`, [id]);
+      expect(row.rows[0].owner_id).toBeNull();
+    });
+
+    it("refuses a CLIENT CONTACT as owner — owner_id is who INTERNAL notifications go to", async () => {
+      // Accepting one here would quietly route internal-side messages to the client.
+      const clientUser = await createUser("owner-must-not-be-client@client.test");
+      const cl = await createClient(co, "Owner Guard Co");
+      await withTenants([co], (c) =>
+        c.query(
+          `INSERT INTO client_contacts (id, tenant_id, client_id, user_id, capability, status, origin_site)
+           VALUES ($1, $2, $3, $4, 'signer', 'active', $5)`,
+          [newId(), co, cl, clientUser, config.originSite],
+        ),
+      );
+      const r = await app.inject({
+        method: "POST", url: `/api/${co}/pipeline/runs`, headers: asUser(admin),
+        payload: { title: "bad owner", ownerId: clientUser },
+      });
+      expect(r.statusCode).toBe(400);
+      expect(r.json().error).toMatch(/staff member/i);
     });
   });
 });

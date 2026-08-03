@@ -1,5 +1,27 @@
 # Web Dev — real-data readiness gap assessment
 
+> ### ⚠️ PARTIALLY SUPERSEDED — read this before trusting any row below
+> Several of these gaps were **closed the same day this was written** (W0/W1, commits `ad10e85`
+> → `9176c49`). Two lines in particular were stale within hours and misled a reader:
+>
+> - **B1 / §E — `scope_signoff.create` "requires company_admin/group_executive, so the manager-tier
+>   automation account was rightly denied".** The policy was **widened to include `manager`** on
+>   2026-08-03 (owner decision D-2). An agent caught this by reading the live policy instead of this
+>   doc — do the same.
+> - **A3 — "`clients.portal_user_id` has no write path".** Still true of that column, but the portal
+>   now resolves through `client_contacts` (migration 0072), so the *gap* is closed by a different
+>   mechanism than this row implies.
+>
+> Also newly known and NOT in the rows below: the scope-signoff endpoint accepted an **arbitrary
+> `party` string** (only checked for truthiness), so a wrong value stored a signature that could never
+> satisfy `REQUIRED_SCOPE_PARTIES ["provider","client"]` — a run permanently unable to complete, with
+> `complete:false` reading exactly like a correct "waiting on the other party". Now validated.
+>
+> The **status table in the addendum and the CHANGELOG entry for 2026-08-03 are authoritative** over
+> this document. Kept as written otherwise, because the *reasoning* still holds and rewriting a
+> findings register after the fact loses the record of what was actually observed.
+
+
 **Date:** 2026-08-03 · **Purpose:** enumerate everything that stops the Web Dev department running on
 **real client data**, so the whole set can be closed in one wave.
 **Method:** read against current code + verified live on `gda-aicenter` (see
@@ -10,7 +32,11 @@ Every row cites evidence; nothing here is inferred from a doc.
 
 Proven live on the server 2026-08-03: capture → transcribe (local whisper, audio **and** video) →
 ingest → pipeline run + 3 extraction tracks (real MOM + a genuine PRD) → fan-out opens the client
-`scope_signoff` gate → agency records its half (`complete:false`, correctly waiting on the client).
+`scope_signoff` gate → agency records its half. ⚠️ **That last clause was WRONG as originally written**
+("`complete:false`, correctly waiting on the client"): the walk sent `party:"agency"`, which is not one
+of `REQUIRED_SCOPE_PARTIES ["provider","client"]`, so it recorded a signature counting for neither and
+the run could never complete. `complete:false` was indistinguishable from the correct waiting state,
+which is exactly how it fooled me. The endpoint now validates `party`.
 Client context flows onto the run (`client_id` set), so runs are portal-scoped. The client portal page
 itself is genuinely built — it lists the client's runs, **renders the actual artifact inline**, and has
 working decide / scope-sign forms.
