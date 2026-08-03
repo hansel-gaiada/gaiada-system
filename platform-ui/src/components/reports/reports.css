@@ -34,8 +34,8 @@
 .rc-period { position: relative; display: flex; flex-direction: column; }
 .rc-period__kinds { display: inline-flex; gap: 2px; border: 0.5px solid var(--rc-axis); width: max-content; }
 .rc-period__kind { font: 400 12px var(--font-body); color: var(--rc-text-secondary); background: transparent; border: 0; padding: 7px 14px; cursor: pointer; }
-.rc-period__kind:hover { background: rgba(110, 90, 67, 0.06); }
-.rc-period__kind--active { color: var(--rc-text-primary); font-weight: 700; background: rgba(110, 90, 67, 0.08); }
+.rc-period__kind:hover { background: color-mix(in srgb, var(--erp-accent) 6%, transparent); }
+.rc-period__kind--active { color: var(--rc-text-primary); font-weight: 700; background: color-mix(in srgb, var(--erp-accent) 8%, transparent); }
 .rc-period__kind:focus-visible { outline: 2px solid var(--rc-focus); outline-offset: -2px; }
 
 .rc-period__pop {
@@ -48,7 +48,7 @@
   display: flex; align-items: center; gap: 8px; text-align: left; font: 400 13px var(--font-body);
   color: var(--rc-text-primary); background: transparent; border: 0; padding: 8px 14px; cursor: pointer;
 }
-.rc-period__preset:hover { background: rgba(110, 90, 67, 0.06); }
+.rc-period__preset:hover { background: color-mix(in srgb, var(--erp-accent) 6%, transparent); }
 .rc-period__preset-check { width: 16px; font-weight: 700; color: var(--rc-focus); }
 .rc-period__preset--active { font-weight: 700; }
 .rc-period__custom {

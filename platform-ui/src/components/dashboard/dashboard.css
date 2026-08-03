@@ -66,7 +66,11 @@
 .checkin-card__prefill-note { margin: 0 0 14px; font: 400 12px/1.5 var(--font-body); color: var(--erp-ink-60); font-style: italic; }
 .checkin-card__form { display: flex; flex-direction: column; gap: 4px; }
 .checkin-card__actions { display: flex; gap: 10px; margin-top: 14px; }
-.checkin-card__error { margin: 10px 0 0; font: 400 13px var(--font-body); color: #B5622F; }
+/* #B5622F was --primitive-rust spelled out by hand, i.e. the GRAPHIC tier of the critical
+   ramp used as body text. --status-critical-fg is the text tier of that same ramp (#A0511F,
+   5.1:1 vs 4.4:1) and, unlike the literal, it carries a dark-mode value — matches how
+   org.css / services.css already colour an inline error. */
+.checkin-card__error { margin: 10px 0 0; font: 400 13px var(--font-body); color: var(--status-critical-fg); }
 .checkin-card__submitted-summary { margin: 0 0 8px; font: 400 14px/1.5 var(--font-body); color: var(--text-primary); }
 .checkin-card__note { margin: 0; font: 400 13px/1.5 var(--font-body); color: var(--erp-ink-60); }
 .checkin-card__pill { font: 700 10px var(--font-body); letter-spacing: 0.06em; text-transform: uppercase; padding: 4px 9px; border: 0.5px solid currentColor; }
