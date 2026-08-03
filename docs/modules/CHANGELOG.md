@@ -14,6 +14,59 @@ local stack). None of these mean "production-done".
 Every cut app version and the exact module manifest it contains, so any deployed build can be
 reconstructed from this table alone. Format defined in [`VERSIONING.md`](./VERSIONING.md).
 
+### `Alpha 01.010.0029a` — 2026-08-04 — the team's UI branch, consolidated (manifest recorded after the fact)
+
+Cut by a concurrent session for its client-portal fix. Recorded here because **the same cut also
+shipped the whole `reva/ui` consolidation**, which would otherwise appear in no release entry at all:
+merge `04459ef` is an ancestor of this cut, so reva's work is inside `platform-ui 0.12.0` rather than
+awaiting a version of its own. No second cut was made for it — the work is already versioned; only
+the record was missing.
+
+**Branch audit that produced it.** Of five remote branches only `reva/ui` still held unmerged work —
+15 commits, 79 files, 59 behind main. `fix/backup-silent-skip-and-n8n-overlay`, `zafir/ui`, `UI` and
+`trial/alpha-cut` were already absorbed. **Every remote branch is now `ahead=0`.** That branch never
+touched `VERSION` or `MODULES.md`, which is why its work arrived unversioned.
+
+**From `reva/ui`:** a token layer (`styles/tokens/`, 5 files) moving the chart palette out of
+component CSS, with light + both dark blocks and the parity test now covering chart colours, and 5
+hard-coded colours fixed — including `--erp-ink-40`, which was defined nowhere and had been silently
+rendering its `#999` fallback with no dark-mode value. `/calendar` rewritten (personal focus, real
+month/week/day grids, explicit "N of yours have no date — not shown here"). PM tasks in a slide-over;
+the Gantt no longer re-renders itself to death without a `groups` prop. Dashboard hierarchy, state-
+legible inputs, loading feedback, unboxed empty states, one-line page header, KPI tiles that explain
+the rule their label hides, a Settings → About page, and a component guide. Plus two real fixes:
+**My Work was blind to every PM task** (the queue read core `tasks` while the app writes `pm_tasks`,
+and never loaded `lib/pm`'s `statusFlags` — structurally empty while looking healthy), and
+**`seal_hash` verified nothing** (`canonicalStringify` mishandled `undefined`, so a freshly-built
+document and the same document re-read from JSONB hashed differently; a tamper check that never
+reproduces is indistinguishable from one that caught tampering). Main had fixed the seal bug
+independently — what reva adds is `report-seal.hash.test.ts`, the regression test it shipped without.
+
+**From the concurrent session:** the client portal could never have shown a client anything, plus
+migration `0074` backfilling `pipeline_runs.client_id` from the source meeting.
+
+Merge resolutions for the 10 conflicting files are in `04459ef`. Two worth repeating: `/calendar`
+took reva's side wholesale because the rewrite deletes a workload panel `0.10.3` had just repaired —
+the rewrite serves that fix's purpose better; and `report-seal.ts` kept main's implementation because
+it also closes the `toJSON()` case reva's did not, while keeping reva's test.
+
+Verified on the merge result rather than on either side: both `tsc` clean, `next build` green,
+**974 UI tests pass** (945 before — 29 new), CI green on main including the DB suites.
+
+| Module | | Why |
+|---|---|---|
+| platform-ui | `0.11.0 → 0.12.0` | reva/ui design-system pass + queue PM-task fix; concurrent session's portal fix |
+| platform-nest | `0.10.0 → 0.11.0` | concurrent session's portal/pipeline fix + `0074`; reva's `report-seal.hash.test.ts` |
+
+> **Ledger gaps, recorded rather than invented.** Rules 1 and 2 (every notable module change gets an
+> entry; every app version records its manifest) are currently unmet for several cuts, across both
+> sessions and including my own. Still owed: the **`Alpha 01.009.0028a`** app entry (webdev W0/W1 +
+> infra deploy fixes; it moved five modules against a counter that advanced by one); per-module
+> entries for **platform-ui `0.10.4`, `0.11.0`** and **platform-nest `0.9.5`, `0.10.0`** — `0.10.4`
+> and `0.9.5` are mine, from the `0027a` cut, where I bumped `MODULES.md` without writing the module
+> sections. Left for whoever holds the context on each rather than reconstructed from commit messages
+> here. Deployed tags are untouched; the consequence is only that counter gaps understate churn.
+
 ### `Alpha 01.008.0027a` — 2026-08-03 — a workflow is a principal, not a colleague
 
 HR reported 36 people. 19 were people; **17 were n8n automation service accounts.**
@@ -518,6 +571,23 @@ anywhere real.
 ---
 
 ## platform-nest
+### [0.11.0] — 2026-08-04 · PROTOTYPED (the regression test the seal-hash fix shipped without)
+Recorded after the fact for the `reva/ui` half of this version; the concurrent session's client-portal
+/ pipeline work and migration `0074` also land under it. See `Alpha 01.010.0029a`.
+
+- **`report-seal.hash.test.ts`**, from `reva/ui`. `canonicalStringify` mishandled `undefined`:
+  `JSON.stringify` omits an undefined-valued property when writing JSONB but returns the VALUE
+  `undefined` when called on it directly, which interpolates as the literal text `"undefined"`. So a
+  freshly-built document hashed as `..."warnings":undefined...` while the same document re-read from
+  storage hashed as nothing at all — `seal_hash` could never be reproduced, for essentially every
+  sealed period. Because a tamper check that never reproduces is indistinguishable from one that
+  caught tampering, the failure presented as a permanent false "these rows were altered".
+- Both branches had fixed the code independently and identically. **What this adds is the test**, not
+  the fix — the fix shipped unverified. Main's implementation was kept through the merge because it
+  additionally handles `toJSON()` (a `Date` would otherwise hash as `{}`), which reva's did not.
+
+> `0.9.5` and `0.10.0` have no entries — see the ledger-gaps note in `Alpha 01.010.0029a`.
+
 ### [0.9.3] — 2026-08-03 · PROTOTYPED (two endpoints that described the wrong world)
 - **`GET /api/roles` returned every company's role rows.** Per-company roles share their NAMES across
   companies, so the assign-role picker rendered `manager` ten times and `company_admin` three times
@@ -693,6 +763,35 @@ tenant's 8 seeded rows still need purging (per-tenant SQL in the design doc §12
 - **Unreleased / next:** identity writes, org-structure endpoints.
 
 ## platform-ui
+### [0.12.0] — 2026-08-04 · PROTOTYPED (design-system pass from `reva/ui`, plus the queue fix)
+Authored on `reva/ui` across 15 commits and consolidated in merge `04459ef`; that branch never
+versioned its own work, and the cut it landed in (`Alpha 01.010.0029a`) was made by a concurrent
+session for a different change, so this entry is written after the fact. Full context in that release
+entry. The concurrent session's own portal fix also lands under this same version.
+
+- **Token layer** (`styles/tokens/`, 5 files). The chart palette moves out of component CSS into
+  tokens — light, both dark blocks, and the print override side by side — so the existing parity test
+  now covers chart colours too. 5 hard-coded colours fixed, including `--erp-ink-40`, which was
+  defined nowhere in the codebase and had been silently rendering its `#999` fallback with no
+  dark-mode value.
+- **`/calendar` rewritten** — personal focus, real month/week/day grids, and an explicit "N of yours
+  have no date — not shown here" instead of quietly dropping undated items. This deletes the workload
+  panel `0.10.3` had just repaired; the rewrite serves that fix's purpose better.
+- **PM** — tasks open in a slide-over, the project workspace leads with the work, and the Gantt no
+  longer re-renders itself to death when handed no `groups` prop.
+- **`fix(queue)`: My Work was blind to every PM task.** The queue read the core `tasks` table while
+  the app writes `pm_tasks`, and never loaded `lib/pm`'s `statusFlags`, so it could not tell done from
+  open either. Structurally empty while looking healthy — the same class as `0015b`'s
+  knowledge-indexing miss.
+- Dashboard hierarchy with real tasks · state-legible form inputs · loading feedback where Next
+  showed none · empty states unboxed ("a sentence, not a boxed panel") · page header cut to one line ·
+  KPI tiles explain the rule their label hides · Settings → About reporting the deployed version ·
+  a component guide for the project.
+
+Verified on the merge result: `tsc` clean, `next build` green, 974 tests pass (945 before — 29 new).
+
+> `0.10.4` and `0.11.0` have no entries — see the ledger-gaps note in `Alpha 01.010.0029a`.
+
 ### [0.10.3] — 2026-08-03 · PROTOTYPED (six surfaces that reported a state they were not in)
 Found by driving the live site as a signed-in user across all 84 routes under both companies. None of
 these threw; each one asserted something false, which is why they had survived.
