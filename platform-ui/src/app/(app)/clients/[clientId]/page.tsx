@@ -8,6 +8,7 @@ import { deleteClientForm } from "@/lib/clientWorkActions";
 import { listRecordings, STATUS_LABEL, formatDuration } from "@/lib/meetings";
 import { RecordControls } from "@/components/meetings/RecordControls";
 import { ClientContactsPanel } from "@/components/clients/ClientContactsPanel";
+import { ScheduleMeetingPanel } from "@/components/meetings/ScheduleMeetingPanel";
 import { listClientContacts } from "@/lib/clientContacts";
 import { PageHeader } from "@/components/PageHeader";
 import { Card, HairlineTable, StatusBadge } from "@/components/ui";
@@ -36,6 +37,8 @@ export default async function ClientDetailPage({ params }: { params: Params }) {
   // meeting). Both reads degrade to [] rather than throwing, so one missing grant cannot take the
   // whole client page down.
   const contacts = await listClientContacts(userId, tenant, clientId);
+  // W1 (D-3): what is coming up for this client, server-filtered to future scheduled rows.
+  const upcoming = await listRecordings(userId, tenant, { clientId, scheduled: "upcoming" });
   const clientProjects = (await listProjects(userId, tenant).catch(() => []))
     .filter((p) => p.client_id === clientId)
     .map((p) => ({ id: p.id, name: p.name }));
@@ -77,6 +80,11 @@ export default async function ClientDetailPage({ params }: { params: Params }) {
             contacts={contacts}
             projects={clientProjects}
           />
+        </Card>
+      </div>
+      <div style={{ marginTop: 20 }}>
+        <Card title={`Scheduled${upcoming.length ? ` · ${upcoming.length}` : ""}`}>
+          <ScheduleMeetingPanel clientId={clientId} upcoming={upcoming} />
         </Card>
       </div>
       <div style={{ marginTop: 20 }}>

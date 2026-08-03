@@ -21,11 +21,15 @@ import "server-only";
 //   POST /api/:t/meetings/recordings/:id/audio/retry                    -> 202 { id, status:"transcribing" }
 import { platformFetch, PlatformError } from "./platform";
 
-export type RecordingStatus = "recording" | "recorded" | "transcribing" | "transcribed" | "ingested" | "failed";
+export type RecordingStatus = "scheduled" | "recording" | "recorded" | "transcribing" | "transcribed" | "ingested" | "failed";
 export type DriveStatus = "none" | "pending" | "uploading" | "synced" | "failed";
 export type RecordingKind = "audio" | "video";
 
 export interface MeetingRecording {
+  /** W1 (D-3): set when the meeting was SCHEDULED before it happened. Null for rows created at
+   *  record time by the older `start` path. */
+  scheduled_at?: string | null;
+  scheduled_by?: string | null;
   id: string;
   meeting_id: string;
   client_id: string | null;
@@ -52,9 +56,15 @@ export interface MeetingRecordingDetail extends MeetingRecording {
   // WD-04: set once an in-ERP audio upload has landed (files.id); stays null on the
   // helper-driven local-whisper path (that path never uploads audio through this route).
   audio_ref: string | null;
+  /** W1 (D-3): both sides' attendees. Returned by the detail read; `side` is derived server-side from
+   *  client_contacts and is a fact, not a field the UI may set. */
+  participants?: { user_id: string; side: "internal" | "client"; email: string | null; name: string | null }[];
 }
 
 export const STATUS_LABEL: Record<RecordingStatus, string> = {
+  // W1: the pre-recording state. A `Record<RecordingStatus, …>` is exhaustive, so widening the union
+  // without adding this key is a type error rather than a blank chip — which is the point.
+  scheduled: "scheduled",
   recording: "recording",
   recorded: "recorded",
   transcribing: "transcribing",
@@ -82,12 +92,15 @@ async function safe<T>(p: Promise<T>, fallback: T): Promise<T> {
 export async function listRecordings(
   userId: string,
   tenant: string,
-  opts: { status?: string; clientId?: string; projectId?: string } = {},
+  opts: { status?: string; clientId?: string; projectId?: string; scheduled?: "upcoming" } = {},
 ): Promise<MeetingRecording[]> {
   const q = new URLSearchParams();
   if (opts.status) q.set("status", opts.status);
   if (opts.clientId) q.set("clientId", opts.clientId);
   if (opts.projectId) q.set("projectId", opts.projectId);
+  // Server-side filter (status='scheduled' AND scheduled_at >= now(), soonest first) — not a
+  // client-side slice, so it stays correct as the registry grows.
+  if (opts.scheduled) q.set("scheduled", opts.scheduled);
   const qs = q.toString();
   return safe(platformFetch<MeetingRecording[]>(`/api/${tenant}/meetings/recordings${qs ? `?${qs}` : ""}`, userId), []);
 }

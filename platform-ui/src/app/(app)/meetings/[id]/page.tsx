@@ -5,6 +5,9 @@ import { getMe } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
 import { getRecording, STATUS_LABEL, DRIVE_LABEL, formatDuration } from "@/lib/meetings";
 import { RecordingWorkbench } from "@/components/meetings/RecordingWorkbench";
+import { ParticipantsPanel } from "@/components/meetings/ParticipantsPanel";
+import { listClientContacts } from "@/lib/clientContacts";
+import { listUsers } from "@/lib/adminData";
 import { Card, Eyebrow, StatusBadge } from "@/components/ui";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { formatDateTime } from "@/lib/format";
@@ -26,6 +29,24 @@ export default async function MeetingDetailPage({ params }: { params: Promise<{ 
   if (!tenant) redirect("/meetings");
   const rec = await getRecording(userId, tenant, id);
   if (!rec) notFound();
+
+  // W1 (D-3) — candidates for the participant picker. Both reads degrade to [] rather than throwing,
+  // so a missing grant costs this one panel and not the whole page. The API is the authority on which
+  // SIDE each person lands on; this list only decides who is offerable.
+  const staff = await listUsers(userId, tenant).catch(() => []);
+  const contacts = rec.client_id ? await listClientContacts(userId, tenant, rec.client_id) : [];
+  const candidates = [
+    ...staff
+      .filter((u) => u.status === "active")
+      .map((u) => ({ userId: u.id, label: u.name || u.email, hint: u.title || "our team" })),
+    // Only ACTIVE contacts are offered: an invited one has no account yet, so adding them as an
+    // attendee would promise a presence that cannot exist until they accept.
+    ...contacts
+      .filter((c) => c.status === "active")
+      .map((c) => ({ userId: c.userId, label: c.name || c.email, hint: "client" })),
+  ]
+    // A person can be both staff and a client contact in contrived cases; offer them once.
+    .filter((c, i, all) => all.findIndex((x) => x.userId === c.userId) === i);
 
   const meta: [string, ReactNode][] = [
     ["Kind", rec.kind === "video" ? "Audio + Video" : "Audio"],
@@ -53,6 +74,14 @@ export default async function MeetingDetailPage({ params }: { params: Promise<{ 
       </div>
 
       <div style={{ display: "grid", gap: 22, gridTemplateColumns: "minmax(0,1fr)" }}>
+        <Card title={`Participants${(rec.participants ?? []).length ? ` · ${(rec.participants ?? []).length}` : ""}`}>
+          <ParticipantsPanel
+            recordingId={rec.id}
+            clientId={rec.client_id}
+            participants={rec.participants ?? []}
+            candidates={candidates}
+          />
+        </Card>
         <Card title="Details">
           <dl style={{ display: "grid", gridTemplateColumns: "160px 1fr", gap: "10px 16px", margin: 0 }}>
             {meta.map(([k, v]) => (
