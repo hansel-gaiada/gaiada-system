@@ -10,3 +10,7 @@ dist/
 .env.local
 .env.tmp
 .env.*.local
+# Operator credential notes. Anything matching *.local.md is a working copy of real secrets:
+# logins, API keys, reset runbooks. Never committed, never in a PR, never in CI logs.
+*.local.md
+CREDENTIALS.local.md
