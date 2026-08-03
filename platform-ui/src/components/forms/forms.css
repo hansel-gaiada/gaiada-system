@@ -1,7 +1,26 @@
-/* Dynamic field forms — hairline-underline inputs, no radius/shadow, matches login page. */
+/* Form fields — hairline-underline controls, no radius, no shadow.
+   The underline treatment is the system's; what was missing was everything that tells a user what
+   state a field is in: a legible label, required vs optional, hover, focus, error, disabled, and a
+   caret on a select whose appearance:none made it look like a text input. Tokens only. */
+
 .lux-form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 20px; }
 
-.lux-field { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.lux-field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+
+/* 12px sentence case at full ink. Was 10px uppercase at 0.6 opacity — a caption treatment on the one
+   element that says what to type. */
+.lux-field__label {
+  font: 600 12px var(--font-body);
+  letter-spacing: 0.01em;
+  color: var(--text-primary);
+}
+/* Drawn, not in the DOM — see Field.tsx for why a text-node asterisk is a bug. */
+.lux-field__label--req::after {
+  content: "*";
+  color: var(--status-critical-fg);
+  margin-left: 3px;
+}
+
 .lux-field__control {
   border: none;
   border-bottom: 0.5px solid var(--line-control);
@@ -10,7 +29,7 @@
   padding: 8px 2px;
   font: 400 14px var(--font-body);
   color: var(--text-primary);
-  transition: border-color 0.28s var(--erp-ease);
+  transition: border-color 0.2s var(--erp-ease), background 0.2s var(--erp-ease);
   /* TR-26 fix, found by actually rendering the appraisal scoring form in a browser (ruling 1):
      every existing call site sits inside `.lux-form-grid` (CSS GRID), whose default
      `justify-items: stretch` happens to also stretch replaced form controls (input/textarea) to
@@ -21,9 +40,48 @@
      depending on which layout mode happened to paper over the gap. */
   width: 100%;
 }
-.lux-field__control:focus { border-bottom-color: var(--erp-accent); }
+.lux-field__control::placeholder { color: var(--ink-faint); }
+.lux-field__control:hover:not(:disabled) { border-bottom-color: var(--text-primary); }
+/* Focus is a state worth seeing across a 20-field form: the rule thickens to the accent and the
+   field takes a faint accent wash, so the active field is findable at a glance rather than only by
+   the caret. */
+.lux-field__control:focus {
+  border-bottom: 1.5px solid var(--erp-accent);
+  background: var(--tint-hover);
+}
 .lux-field__control--textarea { resize: vertical; min-height: 72px; font-family: var(--font-body); }
-select.lux-field__control { appearance: none; cursor: pointer; }
+.lux-field__control--error { border-bottom-color: var(--status-critical); }
+.lux-field__control:disabled { color: var(--ink-faint); cursor: not-allowed; }
 
-.lux-field--checkbox { flex-direction: row-reverse; justify-content: flex-end; align-items: center; gap: 10px; }
-.lux-field__checkbox { width: 14px; height: 14px; accent-color: var(--erp-accent); cursor: pointer; }
+/* Select: appearance:none removed the native caret, leaving it indistinguishable from a text input
+   until clicked. The wrapper draws one back with a CSS triangle — no asset, no data URI. */
+.lux-field__selectwrap { position: relative; display: block; }
+.lux-field__selectwrap::after {
+  content: "";
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  width: 0;
+  height: 0;
+  margin-top: -1px;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-top: 5px solid var(--ink-muted);
+  pointer-events: none;
+}
+select.lux-field__control { appearance: none; cursor: pointer; padding-right: 18px; }
+
+.lux-field__hint { font: 400 12px var(--font-body); color: var(--ink-muted); }
+.lux-field__error { font: 400 12px var(--font-body); color: var(--status-critical-fg); }
+
+.lux-field--checkbox { flex-direction: row; align-items: flex-start; gap: 10px; }
+.lux-field__checkbox {
+  width: 15px;
+  height: 15px;
+  margin-top: 1px;
+  flex: 0 0 auto;
+  accent-color: var(--erp-accent);
+  cursor: pointer;
+}
+.lux-field__checkbox-text { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.lux-field--disabled .lux-field__label { color: var(--ink-muted); }
