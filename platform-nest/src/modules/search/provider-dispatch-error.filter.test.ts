@@ -138,6 +138,15 @@ describe("SM-53/SM-57/SM-58/SM-25a · the filters are actually REGISTERED, not m
     // silently collapse every Google refusal onto the generic backstop's status, and every
     // direct-`.catch()` unit test in google-oauth-error.filter.test.ts would stay green.
     "GoogleOAuthErrorFilter",
+    // W0-4 (webdev client access). Sixth member, added DELIBERATELY here — which is the whole point of
+    // the exact-set pin below. It maps two families that both extend Error rather than HttpException:
+    // the Keycloak-admin family (503 not-configured / 409 user-exists / 502 admin error) and
+    // ClientInviteError (400, coarse by design). Before it existed, keycloak-admin.ts's header
+    // ASSERTED a filter that was never written, so every one of those refusals surfaced as
+    // LastResortExceptionFilter's generic 500 — discarding .status, .code and the missing-env list
+    // that is the entire value of the 503. Same bug class as SM-53 and SM-57: a doc comment claiming a
+    // mapping is not a mapping.
+    "ClientAccessErrorFilter",
   ])("%s is passed to useGlobalFilters in main.ts", (filterName) => {
     // Anchored to the call itself, not merely to the identifier appearing somewhere in the file —
     // an import alone would otherwise satisfy a naive `includes()` while the filter stayed unwired.
@@ -146,16 +155,17 @@ describe("SM-53/SM-57/SM-58/SM-25a · the filters are actually REGISTERED, not m
     expect(args).toContain(`new ${filterName}(`);
   });
 
-  it("all five are registered in ONE useGlobalFilters call — a second call would REPLACE, not add", () => {
+  it("all of them are registered in ONE useGlobalFilters call — a second call would REPLACE, not add", () => {
     // Nest's useGlobalFilters appends, but relying on that across two call sites is a trap worth
     // foreclosing: keeping them in one call makes the full set reviewable at a glance.
-    // (Count went four -> five with SM-25a's GoogleOAuthErrorFilter; the assertion below is on the
-    // number of CALLS, which must stay 1 no matter how many filters the one call carries.)
+    // (Count went four -> five with SM-25a's GoogleOAuthErrorFilter, then five -> six with W0-4's
+    // ClientAccessErrorFilter; the assertion below is on the number of CALLS, which must stay 1 no
+    // matter how many filters the one call carries.)
     const occurrences = mainTs.split("useGlobalFilters(").length - 1;
     expect(occurrences).toBe(1);
   });
 
-  it("SM-25a · the registered set is EXACTLY the five known filters — a sixth must be a deliberate edit here", () => {
+  it("the registered set is EXACTLY the known filters — adding one must be a deliberate edit here", () => {
     // Exact-set equality, the same discipline as the egress-inventory allowlist and ledger.ts's SQL
     // shape pins. The it.each above proves each expected filter is PRESENT; without this, a filter
     // added to main.ts but never reasoned about here would ship unreviewed — and the ORDER hazard
@@ -172,6 +182,10 @@ describe("SM-53/SM-57/SM-58/SM-25a · the filters are actually REGISTERED, not m
       "ProviderDispatchErrorFilter",
       "GatewayNotConfiguredErrorFilter",
       "GoogleOAuthErrorFilter",
+      // Type-scoped filters' order relative to EACH OTHER does not matter (their @Catch types are
+      // disjoint), so appending here is safe; what matters is that LastResortExceptionFilter stays
+      // FIRST, which the next test pins independently.
+      "ClientAccessErrorFilter",
     ]);
   });
 
