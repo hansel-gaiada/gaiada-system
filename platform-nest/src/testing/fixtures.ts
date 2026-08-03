@@ -30,12 +30,26 @@ export async function createUser(email: string, name = email.split("@")[0], titl
   return id;
 }
 
-export async function addMembership(tenantId: string, userId: string): Promise<void> {
+/**
+ * `kind` defaults to the column default ('employee'). Pass 'service' for a NON-HUMAN principal —
+ * an n8n workflow's service account, a bot. It is what every people-shaped surface filters on
+ * (`GET /api/:t/members`, `GET /api/:t/users`), so a service account created without it is
+ * indistinguishable from staff: 17 automation accounts sat in the People directory and HR
+ * headcount read 36 instead of 19 for exactly this reason.
+ *
+ * NOT retroactive on an existing row — `ON CONFLICT DO NOTHING` deliberately leaves a membership
+ * that already exists alone, so re-running a seed never silently re-tags or re-activates one.
+ */
+export async function addMembership(
+  tenantId: string,
+  userId: string,
+  kind: "employee" | "service" = "employee",
+): Promise<void> {
   await withTenants([tenantId], (c) =>
     c.query(
-      `INSERT INTO company_memberships (id, tenant_id, user_id, origin_site) VALUES ($1, $2, $3, $4)
+      `INSERT INTO company_memberships (id, tenant_id, user_id, origin_site, kind) VALUES ($1, $2, $3, $4, $5)
        ON CONFLICT (tenant_id, user_id) DO NOTHING`,
-      [newId(), tenantId, userId, site()],
+      [newId(), tenantId, userId, site(), kind],
     ),
   );
 }

@@ -19,6 +19,8 @@ export interface UserRow {
   email: string;
   title: string | null;
   status: string;
+  /** True when this membership is kind='service' — a non-human principal (n8n workflow, bot). */
+  isService?: boolean;
   roles: { grantId: string; role: string; scopeType: string; scopeId: string | null }[];
 }
 
@@ -103,9 +105,12 @@ async function gracefulWrite(p: Promise<unknown>): Promise<AdminActionState> {
 }
 
 // ---- Users & Roles ----
-export async function listUsers(u: string, t: string): Promise<UserRow[]> {
+// Employee-only by default. Pass `includeService` from an admin surface that must see and revoke
+// automation accounts' grants (Settings → Users & Roles); the People directory takes the default,
+// because a service account is a principal, not a colleague.
+export async function listUsers(u: string, t: string, includeService = false): Promise<UserRow[]> {
   try {
-    return await platformFetch<UserRow[]>(`/api/${t}/users`, u);
+    return await platformFetch<UserRow[]>(`/api/${t}/users${includeService ? "?includeService=1" : ""}`, u);
   } catch (e) {
     if (!(e instanceof PlatformError && (e.status === 404 || e.status === 405))) throw e;
   }

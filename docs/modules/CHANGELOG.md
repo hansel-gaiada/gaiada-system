@@ -14,6 +14,42 @@ local stack). None of these mean "production-done".
 Every cut app version and the exact module manifest it contains, so any deployed build can be
 reconstructed from this table alone. Format defined in [`VERSIONING.md`](./VERSIONING.md).
 
+### `Alpha 01.008.0027a` — 2026-08-03 — a workflow is a principal, not a colleague
+
+HR reported 36 people. 19 were people; **17 were n8n automation service accounts.**
+
+Non-human principals are `users` rows on purpose — authorization is defined over principals, and
+`OBO envelope -> identity_links -> users -> user_roles -> Cerbos` is the only path to being
+authorized at all. (Proven the hard way the same day: five unseeded `wf:reports-*` accounts made
+every reports CRON fail `403 cerbos denied`.) The cost of that design is that "principal" and
+"person" are different sets, and every people-shaped surface has to know it.
+
+`company_memberships.kind ('employee','service')` — added by `0026` for the shared-service
+reconciler — already existed for this, and `GET /api/:t/members` already filtered on it. Two gaps:
+
+- **Nothing ever set it.** The seed calls `addMembership()`, which never passed `kind`, so all 17
+  accounts took the column default `'employee'`. Zero `service` rows existed. `addMembership()` now
+  takes `kind`, and the automation seed passes `'service'`.
+- **`GET /api/:t/users` had no filter at all** — and that, not `/members`, is what backs the People
+  directory and HR. Now employee-only by default with `?includeService=1` to opt in, matching the
+  `/members` convention. Settings → Users & Roles opts in and badges the row (that is where
+  automation grants get audited and revoked); the directory and HR take the default.
+
+Reconciler-safe: it only deletes rows that are `kind='service'` **AND** `managed_by IS NOT NULL`,
+and seeded automation memberships have `managed_by NULL`.
+
+Interim by design. Reusing `company_memberships.kind` overloads one column with two questions —
+*why is this principal in this company* vs *what kind of account is this* — and they are independent
+axes (a served-company HR manager is a human with `kind='service'`). The owner-approved target is
+`users.kind` with **four** kinds — `employee`, `client`, `automation`, `bot` — keeping `bot` distinct
+from `automation` because a Hermes persona's next action is not enumerable the way a pinned workflow
+allow-list is. Design + migration sketch: `docs/superpowers/specs/2026-08-03-principal-kinds-design.md`.
+
+| Module | | Why |
+|---|---|---|
+| platform-nest | `0.9.4 → 0.9.5` | `/users` employee-only + `?includeService=1` + `isService`; `addMembership(kind)`; automation seed tags `service` |
+| platform-ui | `0.10.3 → 0.10.4` | `listUsers(includeService)`; Users & Roles opts in and badges; directory/HR exclude |
+
 ### `Alpha 01.007.0025a` — 2026-08-03 — the ten identical "manager" options were ten real rows
 
 **Corrects the previous release.** `0024a` shipped a tenant-narrowed roles catalog and reported the

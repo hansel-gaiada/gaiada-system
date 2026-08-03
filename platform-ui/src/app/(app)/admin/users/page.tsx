@@ -27,7 +27,10 @@ export default async function AdminUsersPage() {
 
   let users: Awaited<ReturnType<typeof listUsers>>;
   try {
-    users = tenant ? await listUsers(userId, tenant) : [];
+    // includeService: this is where an automation account's grants get audited and revoked, so
+    // hiding non-human principals here would hide exactly what needs governing. Badged below.
+    // The People directory takes the default and omits them.
+    users = tenant ? await listUsers(userId, tenant, true) : [];
   } catch (e) {
     if (e instanceof PlatformError && e.status === 403) {
       return (
@@ -61,7 +64,14 @@ export default async function AdminUsersPage() {
             tcols={TCOLS}
             columns={COLUMNS}
             rows={users.map((u) => [
-              u.name,
+              u.isService ? (
+                <span key={`${u.id}-name`} style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                  {u.name}
+                  <StatusBadge label="service" />
+                </span>
+              ) : (
+                u.name
+              ),
               u.email,
               u.title ?? "—",
               <StatusBadge key={`${u.id}-status`} label={u.status} />,
