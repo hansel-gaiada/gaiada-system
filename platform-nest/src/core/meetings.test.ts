@@ -7,10 +7,27 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } 
 import type { NestFastifyApplication } from "@nestjs/platform-fastify";
 import { config } from "../config";
 import { buildApp } from "../main";
+import { newId, withTenants } from "../db";
 import { resetModules } from "../modules/registry";
 import { resetCoreRollupProviders } from "../rollups/engine";
 import { initTestDb, teardownTestDb, adminPool, TEST_URL } from "../testing/setup";
-import { createCompany, createUser, addMembership, createRole, grantRole } from "../testing/fixtures";
+import { createCompany, createUser, addMembership, createRole, grantRole, createClient } from "../testing/fixtures";
+
+// ---- W0 (2026-08-03 engagement-setup spec) test helper: seed an ACTIVE client_contacts row
+// directly, mirroring client-invites.test.ts's `contactFor` but at status='active' — the status the
+// participants side-derivation reads (see meetings.controller.ts's addParticipant). Bypasses the
+// invite/accept flow entirely, which is out of scope here (that flow is client-contacts.test.ts's).
+async function activeClientContact(tenantId: string, clientId: string, userId: string): Promise<string> {
+  const id = newId();
+  await withTenants([tenantId], (c) =>
+    c.query(
+      `INSERT INTO client_contacts (id, tenant_id, client_id, user_id, capability, status, origin_site)
+       VALUES ($1, $2, $3, $4, 'viewer', 'active', $5)`,
+      [id, tenantId, clientId, userId, config.originSite],
+    ),
+  );
+  return id;
+}
 
 const svc = { authorization: "Bearer svc-token" };
 const asUser = (id: string) => ({ ...svc, "x-user-id": id });
@@ -657,6 +674,265 @@ describe.skipIf(!TEST_URL)("meeting-recordings registry + ingest proxy (WS11 cap
       const after = await row(id);
       expect(after.status).toBe("recording");
       expect(after.audio_ref).toBeNull();
+    });
+  });
+
+  // ---- W0 (2026-08-03 engagement-setup spec, D-3): scheduling + participants ----
+  // "Clients get access BEFORE the meeting starts" inverts the department's entry point: the row
+  // must exist, scoped to client/project/both sides' participants, at `schedule` time — not at
+  // `start` time. These tests prove (a) the scheduled row mints the SAME meeting-id shape `start`
+  // does, (b) the existing PATCH/transcribe/ingest chain is unbroken for a row that began scheduled
+  // rather than recording, and (c) `side` on a participant is derived server-side from
+  // `client_contacts`, never from whatever the request body claims.
+  describe("W0: meeting scheduling + participants", () => {
+    let clientId: string;
+    let clientUserId: string;
+
+    beforeAll(async () => {
+      clientId = await createClient(co, "Acme Corp");
+      clientUserId = await createUser("stakeholder@acme.test");
+      await activeClientContact(co, clientId, clientUserId);
+    });
+
+    it("schedule mints a mtg- meeting id (same shape as start) at status='scheduled'", async () => {
+      const scheduledAt = new Date(Date.now() + 3_600_000).toISOString();
+      const r = await app.inject({
+        method: "POST",
+        url: `/api/${co}/meetings/recordings/schedule`,
+        headers: asUser(member),
+        payload: { title: "Acme kickoff (scheduled)", kind: "video", clientId, scheduledAt },
+      });
+      expect(r.statusCode).toBe(201);
+      expect(r.json().meetingId).toMatch(/^mtg-/);
+      const row = await adminPool().query(
+        `SELECT status, scheduled_at, scheduled_by FROM meeting_recordings WHERE id = $1`,
+        [r.json().id],
+      );
+      expect(row.rows[0].status).toBe("scheduled");
+      expect(row.rows[0].scheduled_at).toBeTruthy();
+      expect(row.rows[0].scheduled_by).toBe(member);
+    });
+
+    it("rejects a missing scheduledAt (400)", async () => {
+      const r = await app.inject({
+        method: "POST",
+        url: `/api/${co}/meetings/recordings/schedule`,
+        headers: asUser(member),
+        payload: { title: "No date given" },
+      });
+      expect(r.statusCode).toBe(400);
+    });
+
+    it("rejects an invalid scheduledAt (400)", async () => {
+      const r = await app.inject({
+        method: "POST",
+        url: `/api/${co}/meetings/recordings/schedule`,
+        headers: asUser(member),
+        payload: { title: "Bad date", scheduledAt: "not-a-real-date" },
+      });
+      expect(r.statusCode).toBe(400);
+    });
+
+    describe("a scheduled row advances through the SAME chain as start (recording -> transcribed -> ingest)", () => {
+      let schedId: string;
+
+      it("seed: schedule a meeting", async () => {
+        const scheduledAt = new Date(Date.now() + 3_600_000).toISOString();
+        const r = await app.inject({
+          method: "POST",
+          url: `/api/${co}/meetings/recordings/schedule`,
+          headers: asUser(member),
+          payload: { title: "Advance-the-chain proof", scheduledAt },
+        });
+        expect(r.statusCode).toBe(201);
+        schedId = r.json().id;
+      });
+
+      it("advances scheduled -> recording via the existing PATCH path (recorder attaches)", async () => {
+        const before = await adminPool().query(`SELECT started_at FROM meeting_recordings WHERE id = $1`, [schedId]);
+        expect(before.rows[0].started_at).toBeNull();
+        const r = await app.inject({
+          method: "PATCH",
+          url: `/api/${co}/meetings/recordings/${schedId}`,
+          headers: asUser(member),
+          payload: { status: "recording" },
+        });
+        expect(r.statusCode).toBe(200);
+        expect(r.json()).toMatchObject({ status: "recording" });
+        // Attaching stamps started_at — this is the actual first moment of recording, distinct from
+        // the (earlier) moment it was scheduled.
+        const after = await adminPool().query(`SELECT started_at FROM meeting_recordings WHERE id = $1`, [schedId]);
+        expect(after.rows[0].started_at).not.toBeNull();
+      });
+
+      it("transcribe + ingest proceed exactly as for a start-registered recording", async () => {
+        const t = await app.inject({
+          method: "POST",
+          url: `/api/${co}/meetings/recordings/${schedId}/transcript`,
+          headers: asUser(member),
+          payload: { text: "Scheduled-then-recorded meeting transcript." },
+        });
+        expect(t.statusCode).toBe(200);
+        expect(t.json()).toMatchObject({ status: "transcribed" });
+        const ing = await app.inject({ method: "POST", url: `/api/${co}/meetings/recordings/${schedId}/ingest`, headers: asUser(member) });
+        expect(ing.statusCode).toBe(200);
+        // Same fail-soft shape the helper-path chain gets (test env has no n8n bridge) — proves
+        // ingest treats a scheduled-then-recorded row identically to a start-registered one.
+        expect(ing.json()).toMatchObject({ ok: false, reason: "bridge_not_configured" });
+      });
+    });
+
+    describe("participants: side is derived server-side, never taken from the body", () => {
+      let meetingRowId: string;
+
+      beforeAll(async () => {
+        const r = await app.inject({
+          method: "POST",
+          url: `/api/${co}/meetings/recordings/start`,
+          headers: asUser(member),
+          payload: { title: "Participants proof" },
+        });
+        meetingRowId = r.json().id;
+      });
+
+      it("a user with an ACTIVE client_contacts row is labeled 'client' even when the body claims 'internal'", async () => {
+        const r = await app.inject({
+          method: "POST",
+          url: `/api/${co}/meetings/recordings/${meetingRowId}/participants`,
+          headers: asUser(member),
+          payload: { userId: clientUserId, side: "internal" },
+        });
+        expect(r.statusCode).toBe(201);
+        expect(r.json()).toMatchObject({ userId: clientUserId, side: "client" });
+      });
+
+      it("an INVITED-but-not-yet-accepted contact is still 'client' — the D-3 window", async () => {
+        // `side` is derived from the PRESENCE of a client_contacts row, not from status='active'.
+        // A PM schedules a kickoff and adds the client's lead before they have clicked their invite;
+        // if that read 'internal', the participant list would be wrong at exactly the moment D-3
+        // exists for. `internal` is also the MORE privileged label, so an active-only check is
+        // conservative about naming and permissive about exposure — the wrong way round.
+        const invitedUser = await createUser("invited-participant@client.test");
+        await withTenants([co], (c) =>
+          c.query(
+            `INSERT INTO client_contacts (id, tenant_id, client_id, user_id, capability, status, origin_site)
+             VALUES ($1, $2, $3, $4, 'viewer', 'invited', $5)`,
+            [newId(), co, clientId, invitedUser, config.originSite],
+          ),
+        );
+        const r = await app.inject({
+          method: "POST",
+          url: `/api/${co}/meetings/recordings/${meetingRowId}/participants`,
+          headers: asUser(member),
+          payload: { userId: invitedUser, side: "internal" },
+        });
+        expect(r.statusCode).toBe(201);
+        expect(r.json()).toMatchObject({ userId: invitedUser, side: "client" });
+      });
+
+      it("a REVOKED contact is still 'client' — a historical attendee list must stay truthful", async () => {
+        // The column is deliberately denormalised so withdrawing access does not rewrite who attended.
+        const goneUser = await createUser("revoked-participant@client.test");
+        await withTenants([co], (c) =>
+          c.query(
+            `INSERT INTO client_contacts (id, tenant_id, client_id, user_id, capability, status, origin_site)
+             VALUES ($1, $2, $3, $4, 'signer', 'revoked', $5)`,
+            [newId(), co, clientId, goneUser, config.originSite],
+          ),
+        );
+        const r = await app.inject({
+          method: "POST",
+          url: `/api/${co}/meetings/recordings/${meetingRowId}/participants`,
+          headers: asUser(member),
+          payload: { userId: goneUser },
+        });
+        expect(r.statusCode).toBe(201);
+        expect(r.json()).toMatchObject({ userId: goneUser, side: "client" });
+      });
+
+      it("a staff member is labeled 'internal' even when the body claims 'client'", async () => {
+        const r = await app.inject({
+          method: "POST",
+          url: `/api/${co}/meetings/recordings/${meetingRowId}/participants`,
+          headers: asUser(member),
+          payload: { userId: member, side: "client" },
+        });
+        expect(r.statusCode).toBe(201);
+        expect(r.json()).toMatchObject({ userId: member, side: "internal" });
+      });
+
+      it("re-adding the same participant is idempotent, not a 500", async () => {
+        const r = await app.inject({
+          method: "POST",
+          url: `/api/${co}/meetings/recordings/${meetingRowId}/participants`,
+          headers: asUser(member),
+          payload: { userId: clientUserId },
+        });
+        expect(r.statusCode).toBe(201);
+        expect(r.json()).toMatchObject({ userId: clientUserId, side: "client" });
+        const rows = await adminPool().query(
+          `SELECT count(*) FROM meeting_participants WHERE recording_id = $1 AND user_id = $2`,
+          [meetingRowId, clientUserId],
+        );
+        expect(Number(rows.rows[0].count)).toBe(1);
+      });
+
+      it("detail GET includes the participant list with derived sides", async () => {
+        const r = await app.inject({ method: "GET", url: `/api/${co}/meetings/recordings/${meetingRowId}`, headers: asUser(member) });
+        expect(r.statusCode).toBe(200);
+        const sides = (r.json().participants as Array<{ user_id: string; side: string }>).map((p) => [p.user_id, p.side]);
+        expect(sides).toEqual(
+          expect.arrayContaining([[clientUserId, "client"], [member, "internal"]]),
+        );
+      });
+
+      it("removes a participant (DELETE)", async () => {
+        const r = await app.inject({
+          method: "DELETE",
+          url: `/api/${co}/meetings/recordings/${meetingRowId}/participants/${member}`,
+          headers: asUser(member),
+        });
+        expect(r.statusCode).toBe(200);
+        expect(r.json()).toMatchObject({ removed: true });
+        const rows = await adminPool().query(
+          `SELECT 1 FROM meeting_participants WHERE recording_id = $1 AND user_id = $2`,
+          [meetingRowId, member],
+        );
+        expect(rows.rowCount).toBe(0);
+      });
+
+      it("rival-tenant isolation: another tenant's admin cannot add or remove participants on this recording (404)", async () => {
+        const addR = await app.inject({
+          method: "POST",
+          url: `/api/${other}/meetings/recordings/${meetingRowId}/participants`,
+          headers: asUser(otherAdmin),
+          payload: { userId: otherAdmin },
+        });
+        expect(addR.statusCode).toBe(404);
+        const delR = await app.inject({
+          method: "DELETE",
+          url: `/api/${other}/meetings/recordings/${meetingRowId}/participants/${clientUserId}`,
+          headers: asUser(otherAdmin),
+        });
+        expect(delR.statusCode).toBe(404);
+        // Neither call touched the real (co-tenant) row.
+        const rows = await adminPool().query(
+          `SELECT 1 FROM meeting_participants WHERE recording_id = $1 AND user_id = $2`,
+          [meetingRowId, clientUserId],
+        );
+        expect(rows.rowCount).toBe(1);
+      });
+    });
+
+    it("?scheduled=upcoming lists only future 'scheduled' rows", async () => {
+      const r = await app.inject({ method: "GET", url: `/api/${co}/meetings/recordings?scheduled=upcoming`, headers: asUser(member) });
+      expect(r.statusCode).toBe(200);
+      const rows = r.json() as Array<{ status: string; scheduled_at: string | null }>;
+      expect(rows.length).toBeGreaterThanOrEqual(1);
+      for (const row of rows) {
+        expect(row.status).toBe("scheduled");
+        expect(row.scheduled_at).toBeTruthy();
+      }
     });
   });
 });

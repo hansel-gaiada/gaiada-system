@@ -10,7 +10,7 @@
 // Backbone rule holds: n8n orchestrates, this service holds the durable state + the outbound proxy.
 // Auth mirrors deliverable (any staff member registers "their" recording); read is member-level so the
 // whole team can reference recordings. Every state change emits a `meeting.recording.*` event.
-import { BadRequestException, Body, Controller, Get, HttpCode, NotFoundException, Param, Patch, Post, Query, Req, UseGuards } from "@nestjs/common";
+import { BadRequestException, Body, Controller, Delete, Get, HttpCode, NotFoundException, Param, Patch, Post, Query, Req, UseGuards } from "@nestjs/common";
 import type { FastifyRequest } from "fastify";
 import { newId, withTenants } from "../db";
 import { config } from "../config";
@@ -20,7 +20,18 @@ import { emitEvent } from "../events/outbox.service";
 import { AuthGuard } from "../auth/guards";
 
 const KINDS = new Set(["audio", "video"]);
-const STATUSES = new Set(["recording", "recorded", "transcribing", "transcribed", "ingested", "failed"]);
+// W0 (2026-08-03 engagement-setup spec, migration 0072): 'scheduled' is the pre-recording state —
+// a meeting row that exists before anyone presses record, per D-3. Widened here to match the DB
+// CHECK constraint (0072 §4); leaving this set behind the DB would make every scheduled row
+// unreachable through `update()`'s validation despite being perfectly legal in the database.
+const STATUSES = new Set(["scheduled", "recording", "recorded", "transcribing", "transcribed", "ingested", "failed"]);
+
+/** Mint the stable meeting id — the frozen-contract dedupe key `start` has always used. Both
+ *  `start` and `schedule` (W0) go through this ONE function so the two entry points can never
+ *  diverge in shape; a caller-supplied id is honoured as-is (helper retry / explicit id). */
+function mintMeetingId(explicit?: string): string {
+  return explicit ?? `mtg-${newId()}`;
+}
 
 type Row = {
   id: string;
@@ -187,7 +198,7 @@ export class MeetingRecordingsController {
     if (!KINDS.has(kind)) throw new BadRequestException("kind must be audio|video");
     await authorize(req.principal, { kind: "meeting_recording", tenantId }, "create");
     // Mint a stable meeting id (the frozen-contract dedupe key) unless the caller supplied one.
-    const meetingId = body?.meetingId ?? `mtg-${newId()}`;
+    const meetingId = mintMeetingId(body?.meetingId);
     const id = newId();
     const result = await withTenants([tenantId], async (c) => {
       // Idempotent start: a helper retry with the same meetingId returns the existing recording.
@@ -213,6 +224,47 @@ export class MeetingRecordingsController {
     return result;
   }
 
+  // ---- W0 (2026-08-03 engagement-setup spec, D-3): schedule BEFORE anyone presses record ----
+  // Creates the SAME registry row `start` does, just earlier in its life and at status='scheduled'
+  // instead of 'recording'. Mints the meeting id through the same `mintMeetingId` helper `start`
+  // uses, so the two entry points can never diverge on the frozen-contract dedupe key's shape. The
+  // recorder attaches to this row later via the existing PATCH path (see `update` below) — there is
+  // no separate "convert a scheduled meeting into a recording" endpoint.
+  @Post(":tenantId/meetings/recordings/schedule")
+  @HttpCode(201)
+  async schedule(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Body() body: { title?: string; kind?: string; clientId?: string; projectId?: string; scheduledAt?: string; meetingId?: string },
+  ) {
+    const { title, kind = "audio", clientId, projectId, scheduledAt } = body ?? {};
+    if (!KINDS.has(kind)) throw new BadRequestException("kind must be audio|video");
+    const scheduledDate = scheduledAt ? new Date(scheduledAt) : null;
+    if (!scheduledDate || Number.isNaN(scheduledDate.getTime())) {
+      throw new BadRequestException("scheduledAt must be a valid date/time");
+    }
+    // Same action as `start` uses (Cerbos's meeting_recording policy defines create/update/read/
+    // ingest/sync_drive/relink — no separate "schedule" action, and this ticket is not authorised
+    // to add one): scheduling is, authorization-wise, registering a new meeting row.
+    await authorize(req.principal, { kind: "meeting_recording", tenantId }, "create");
+    const meetingId = mintMeetingId(body?.meetingId);
+    const id = newId();
+    const result = await withTenants([tenantId], async (c) => {
+      await c.query(
+        `INSERT INTO meeting_recordings
+           (id, tenant_id, meeting_id, client_id, project_id, title, kind, status, scheduled_at, scheduled_by, created_by, origin_site)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, 'scheduled', $8, $9, $10, $11)`,
+        [id, tenantId, meetingId, clientId ?? null, projectId ?? null, title ?? null, kind, scheduledDate.toISOString(), req.principal.userId, req.principal.userId, config.originSite],
+      );
+      await emitEvent(c, tenantId, "meeting_recording", id, "meeting.recording.scheduled", {
+        meetingId, kind, scheduledAt: scheduledDate.toISOString(), actorId: req.principal.userId,
+      });
+      return { id, meetingId, scheduledAt: scheduledDate.toISOString() };
+    });
+    await writeActivity(tenantId, req.principal.userId, "scheduled", "meeting_recording", result.id, { meetingId, scheduledAt: result.scheduledAt });
+    return result;
+  }
+
   @Patch(":tenantId/meetings/recordings/:id")
   async update(
     @Req() req: FastifyRequest,
@@ -231,6 +283,11 @@ export class MeetingRecordingsController {
            duration_sec = COALESCE($5, duration_sec),
            size_bytes = COALESCE($6, size_bytes),
            local_hint = COALESCE($7, local_hint),
+           -- W0: the recorder attaching to a 'scheduled' row (D-3) is the FIRST moment recording
+           -- actually starts — start() stamps started_at at insert time, but a scheduled row was
+           -- inserted earlier with no started_at at all. Only fires when it is still unset, so every
+           -- pre-existing transition (which already has started_at from start()) is untouched.
+           started_at = CASE WHEN $2 = 'recording' AND started_at IS NULL THEN now() ELSE started_at END,
            updated_at = now()
          WHERE id = $1 AND deleted_at IS NULL
          RETURNING id, meeting_id, title, kind, status, transcript, pipeline_run_id, drive_status`,
@@ -517,6 +574,86 @@ export class MeetingRecordingsController {
     return { id, driveStatus: status };
   }
 
+  // ---- W0: participants — both sides of a scheduled/recorded meeting (D-3) ----
+  // `side` is ALWAYS derived server-side from `client_contacts`, NEVER taken from the request body:
+  // a caller (staff or otherwise) must not be able to mislabel a client contact as internal staff,
+  // or vice versa — that mislabelling is exactly what would let the wrong side see or sign something.
+  //
+  // DERIVED FROM PRESENCE, NOT FROM `status` — and the distinction matters twice over:
+  //   * `client_contacts` existing at all is a PM's deliberate assertion of WHICH SIDE this person is
+  //     on. `status` answers a different question: whether they can log in yet. Gating `side` on
+  //     `status='active'` conflates them, and gets the answer wrong in exactly the window D-3 exists
+  //     for — a PM schedules a kickoff and adds the client's lead BEFORE they have clicked their
+  //     invite, and the participant list calls them internal staff.
+  //   * `internal` is the MORE PRIVILEGED label. Anything that later branches on `side` (who sees an
+  //     internal-only note or artifact) would treat that client as staff. So an `active`-only check is
+  //     conservative about labelling and permissive about exposure, which is the wrong way round.
+  // A `revoked` contact still reads `client` too: they WERE the client, and this column is
+  // deliberately denormalised so a historical attendee list stays truthful after access is withdrawn.
+  @Post(":tenantId/meetings/recordings/:id/participants")
+  @HttpCode(201)
+  async addParticipant(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Param("id") id: string,
+    @Body() body: { userId?: string },
+  ) {
+    const userId = String(body?.userId ?? "").trim();
+    if (!userId) throw new BadRequestException("userId is required");
+    await authorize(req.principal, { kind: "meeting_recording", id, tenantId }, "update");
+    const result = await withTenants([tenantId], async (c) => {
+      const rec = await c.query(`SELECT id FROM meeting_recordings WHERE id = $1 AND deleted_at IS NULL`, [id]);
+      if (!rec.rowCount) return null;
+      const contact = await c.query(
+        `SELECT 1 FROM client_contacts WHERE tenant_id = $1 AND user_id = $2 AND deleted_at IS NULL LIMIT 1`,
+        [tenantId, userId],
+      );
+      const side = contact.rowCount ? "client" : "internal";
+      // Idempotent on the (tenant_id, recording_id, user_id) unique index: a re-add must not 500 —
+      // it re-derives `side` (in case the contact's status changed since the first add) rather than
+      // silently no-op'ing on a stale label.
+      const row = await c.query<{ id: string; side: string }>(
+        `INSERT INTO meeting_participants (id, tenant_id, recording_id, user_id, side, origin_site)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         ON CONFLICT (tenant_id, recording_id, user_id) DO UPDATE SET side = EXCLUDED.side
+         RETURNING id, side`,
+        [newId(), tenantId, id, userId, side, config.originSite],
+      );
+      await emitEvent(c, tenantId, "meeting_recording", id, "meeting.recording.participant_added", {
+        userId, side: row.rows[0].side, actorId: req.principal.userId,
+      });
+      return { id: row.rows[0].id, userId, side: row.rows[0].side };
+    });
+    if (!result) throw new NotFoundException("recording not found");
+    return result;
+  }
+
+  @Delete(":tenantId/meetings/recordings/:id/participants/:userId")
+  @HttpCode(200)
+  async removeParticipant(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Param("id") id: string,
+    @Param("userId") userId: string,
+  ) {
+    await authorize(req.principal, { kind: "meeting_recording", id, tenantId }, "update");
+    const result = await withTenants([tenantId], async (c) => {
+      const rec = await c.query(`SELECT id FROM meeting_recordings WHERE id = $1 AND deleted_at IS NULL`, [id]);
+      if (!rec.rowCount) return null;
+      const res = await c.query(
+        `DELETE FROM meeting_participants WHERE tenant_id = $1 AND recording_id = $2 AND user_id = $3`,
+        [tenantId, id, userId],
+      );
+      const removed = (res.rowCount ?? 0) > 0;
+      if (removed) {
+        await emitEvent(c, tenantId, "meeting_recording", id, "meeting.recording.participant_removed", { userId, actorId: req.principal.userId });
+      }
+      return { removed };
+    });
+    if (!result) throw new NotFoundException("recording not found");
+    return { id, userId, removed: result.removed };
+  }
+
   // ---- Registry reads ----
   @Get(":tenantId/meetings/recordings")
   async list(
@@ -525,6 +662,7 @@ export class MeetingRecordingsController {
     @Query("status") status?: string,
     @Query("clientId") clientId?: string,
     @Query("projectId") projectId?: string,
+    @Query("scheduled") scheduled?: string,
   ) {
     await authorize(req.principal, { kind: "meeting_recording", tenantId }, "read");
     const clauses: string[] = ["deleted_at IS NULL"];
@@ -532,11 +670,14 @@ export class MeetingRecordingsController {
     if (status) clauses.push(`status = $${args.push(status)}`);
     if (clientId) clauses.push(`client_id = $${args.push(clientId)}`);
     if (projectId) clauses.push(`project_id = $${args.push(projectId)}`);
+    // W0: "what's coming" — still 'scheduled' (not yet advanced to 'recording') and in the future.
+    if (scheduled === "upcoming") clauses.push(`status = 'scheduled' AND scheduled_at IS NOT NULL AND scheduled_at >= now()`);
+    const orderBy = scheduled === "upcoming" ? "scheduled_at ASC" : "created_at DESC";
     const rows = await withTenants([tenantId], (c) =>
       c.query(
-        `SELECT id, meeting_id, client_id, project_id, title, kind, status, started_at, ended_at,
+        `SELECT id, meeting_id, client_id, project_id, title, kind, status, scheduled_at, scheduled_by, started_at, ended_at,
                 duration_sec, size_bytes, drive_status, drive_link, pipeline_run_id, created_by, created_at, updated_at
-         FROM meeting_recordings WHERE ${clauses.join(" AND ")} ORDER BY created_at DESC LIMIT 200`,
+         FROM meeting_recordings WHERE ${clauses.join(" AND ")} ORDER BY ${orderBy} LIMIT 200`,
         args,
       ),
     );
@@ -548,15 +689,26 @@ export class MeetingRecordingsController {
     await authorize(req.principal, { kind: "meeting_recording", tenantId }, "read");
     const rows = await withTenants([tenantId], (c) =>
       c.query(
-        `SELECT id, meeting_id, client_id, project_id, title, kind, status, started_at, ended_at,
+        `SELECT id, meeting_id, client_id, project_id, title, kind, status, scheduled_at, scheduled_by, started_at, ended_at,
                 duration_sec, size_bytes, local_hint, transcript, transcript_ref, audio_ref, drive_status,
                 drive_file_id, drive_link, pipeline_run_id, created_by, created_at, updated_at
          FROM meeting_recordings WHERE id = $1 AND deleted_at IS NULL`,
         [id],
       ),
     );
-    if (!rows.rows[0]) throw new NotFoundException("recording not found");
-    return rows.rows[0];
+    const row = rows.rows[0];
+    if (!row) throw new NotFoundException("recording not found");
+    // W0: the participant list — the register D-3's "all parties trackable" is read from.
+    const participants = await withTenants([tenantId], (c) =>
+      c.query(
+        `SELECT mp.user_id, mp.side, mp.created_at, u.email, u.name
+         FROM meeting_participants mp JOIN users u ON u.id = mp.user_id
+         WHERE mp.recording_id = $1
+         ORDER BY mp.created_at`,
+        [id],
+      ),
+    );
+    return { ...row, participants: participants.rows };
   }
 }
 
