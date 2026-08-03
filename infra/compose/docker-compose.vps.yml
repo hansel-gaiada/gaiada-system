@@ -255,7 +255,11 @@ services:
       GATEWAY_URL: http://ai-gateway:3002
       GATEWAY_TOKEN: ${GATEWAY_TOKEN:-}
       BOT_URL: http://bot:3001
-      ADMIN_TOKEN: ${BOT_ADMIN_TOKEN:-}
+      # Same shared secret the bot service reads (see its ADMIN_TOKEN below). The two read
+      # DIFFERENT .env names, so a deployment that sets only ADMIN_TOKEN left this empty and
+      # every bot-admin proxy call 401'd — the console reported "bot admin unreachable" as if
+      # the bot were down. Fall through to ADMIN_TOKEN so one .env name is enough.
+      ADMIN_TOKEN: ${BOT_ADMIN_TOKEN:-${ADMIN_TOKEN:-}}
       HUB_URL: http://mcp-hub:3003
       HUB_SERVICE_TOKEN: ${HUB_SERVICE_TOKEN:-}
       KNOWLEDGE_URL: http://knowledge:3005
