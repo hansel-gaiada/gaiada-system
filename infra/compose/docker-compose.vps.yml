@@ -260,6 +260,19 @@ services:
       HUB_SERVICE_TOKEN: ${HUB_SERVICE_TOKEN:-}
       KNOWLEDGE_URL: http://knowledge:3005
       KNOWLEDGE_SERVICE_TOKEN: ${KNOWLEDGE_SERVICE_TOKEN:-}
+      # Knowledge (D9 RAG) corpus refresh. Off unless KNOWLEDGE_INGEST_ENABLED=1 — a fresh
+      # environment must not start crawling and embedding on first boot by accident.
+      #  PUBLIC tier  -> KNOWLEDGE_PUBLIC_SITES is an EGRESS ALLOWLIST (see ingest/web-source.ts);
+      #                  KNOWLEDGE_PUBLIC_TENANT_ID is only the company that OWNS those chunks, it
+      #                  does not restrict who may read them (audience='public' is world-readable).
+      #  INTERNAL tier -> every active company unless KNOWLEDGE_INTERNAL_TENANT_IDS narrows it.
+      KNOWLEDGE_INGEST_ENABLED: ${KNOWLEDGE_INGEST_ENABLED:-0}
+      KNOWLEDGE_INGEST_INTERVAL_MS: ${KNOWLEDGE_INGEST_INTERVAL_MS:-21600000}
+      KNOWLEDGE_PUBLIC_SITES: ${KNOWLEDGE_PUBLIC_SITES:-https://gaiada.com}
+      KNOWLEDGE_PUBLIC_TENANT_ID: ${KNOWLEDGE_PUBLIC_TENANT_ID:-}
+      KNOWLEDGE_PUBLIC_MAX_PAGES: ${KNOWLEDGE_PUBLIC_MAX_PAGES:-150}
+      KNOWLEDGE_INTERNAL_TENANT_IDS: ${KNOWLEDGE_INTERNAL_TENANT_IDS:-}
+      KNOWLEDGE_INDEX_FILE_CONTENTS: ${KNOWLEDGE_INDEX_FILE_CONTENTS:-1}
       # Agent runner (B2) — enables /api/:t/agents/* endpoints
       AGENTS_URL: http://agent-runner:3006
       AGENT_RUNNER_TOKEN: ${AGENT_RUNNER_TOKEN:-}

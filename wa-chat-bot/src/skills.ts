@@ -105,7 +105,10 @@ export function registerBuiltins(): void {
   });
   registerSkill({
     name: "know",
-    description: "search company knowledge/docs (needs a linked, verified identity)",
+    // D9.4: public company knowledge (the gaiada.com corpus) answers for ANYONE; internal project
+    // and work knowledge additionally requires a linked, verified identity. The knowledge service
+    // decides which tier this sender reaches — the bot never asserts it.
+    description: "search company knowledge/docs (internal results need a linked, verified identity)",
     handler: async ({ msg, args }) => {
       const question = args.trim();
       if (!question) return `Usage: ${config.commandPrefix}know <question>`;
@@ -119,7 +122,7 @@ export function registerBuiltins(): void {
         // results are already tenant/ACL pre-filtered to what this identity may see.
         const raw = await callHubTool("knowledge.search", { query: question, scope: msg.chatId }, envelope);
         const hits = JSON.parse(raw) as Array<{ text: string; sourceRef: string }>;
-        if (hits.length === 0) return "No matching company knowledge — nothing indexed for you yet, or nothing relevant.";
+        if (hits.length === 0) return "No matching company knowledge — nothing relevant is indexed, or the internal answer needs a linked, verified account.";
         const context = hits.map((h, i) => `[${i + 1}] ${h.text}`).join("\n");
         return complete(
           [
@@ -134,7 +137,7 @@ export function registerBuiltins(): void {
         );
       } catch (err) {
         if (err instanceof HubDeniedError) {
-          return "I can't search company knowledge for this chat identity. Ask an admin to link and verify your account.";
+          return "I can't search internal company knowledge for this chat identity. Ask an admin to link and verify your account.";
         }
         return `[knowledge search unavailable: ${(err as Error).message}]`;
       }

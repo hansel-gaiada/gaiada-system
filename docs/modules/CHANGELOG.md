@@ -14,6 +14,50 @@ local stack). None of these mean "production-done".
 Every cut app version and the exact module manifest it contains, so any deployed build can be
 reconstructed from this table alone. Format defined in [`VERSIONING.md`](./VERSIONING.md).
 
+### `Alpha 01.005.0015a` — 2026-08-03 — knowledge/RAG gets a two-tier corpus and something to retrieve
+
+Status: **PROTOTYPED** (unit- and store-verified; the live sweep on `gda-aicenter` is the
+DEV-VERIFIED gate).
+
+The D9 vector store had been correct and completely **empty** since it was built —
+`knowledge_chunks` held 0 rows on the server, so every `knowledge.search` returned nothing. It also
+had no way to express public company knowledge: `store.search()` returned `[]` for any caller
+without a resolved tenant, so a lead or client could never be answered at all.
+
+| Module | | Why |
+|---|---|---|
+| ai-agents | `0.4.0 → 0.5.0` | D9.4 `audience` tier (`public`/`internal`) in the store + service; `/search` no longer needs an OBO envelope; fail-closed default |
+| platform-nest | `0.7.1 → 0.8.0` | the ingestion module: gaiada.com crawler, ERP source builders, sweep scheduler, admin trigger/status endpoints |
+| mcp-hub | `0.9.1 → 0.9.2` | `knowledge.search` describes both tiers; `scope` now optional |
+| wa-chat-bot | `0.9.1 → 0.9.2` | `/know` no longer claims a verified identity is required for all results |
+| infra | `0.7.2 → 0.7.3` | `KNOWLEDGE_INGEST_*` compose wiring |
+
+**Two tiers.** `public` is the gaiada.com corpus, world-readable with no identity at all — that is
+what lets an agent answer a lead or client who has no ERP account. `internal` is ERP content
+(clients, projects, tasks, deliverables, meeting transcripts, PM docs, latest-revision reports,
+files, org structure, people) under the unchanged D9.1 tenant pre-filter. The tier is a SQL
+disjunction whose internal branch self-disables on an empty tenant set, so an unauthorized chunk is
+never a ranking candidate, and `audience` fails closed — anything not literally `"public"` is
+internal, and the in-place column default can only narrow visibility on existing rows.
+
+Notable within the cut:
+- **Retirement is gated on a clean run.** The sweep deletes stored sources it did not re-ingest, but
+  only if the build succeeded and produced something — otherwise a transient DB error would look
+  identical to "everything was deleted upstream" and one bad run would wipe the corpus.
+- **Boilerplate is stripped by frequency, not by tag.** The live site's nav is not in a `<nav>`
+  element, so tag-stripping alone put the whole menu in the first chunk of every page.
+- The store's D9 suite had **never actually run against pgvector** — a 64-d fixture embedder against
+  a 768-d column meant it silently only exercised the array fallback. Fixed; 13/13 now pass on real
+  pgvector against the server's own cluster.
+
+Dead tags, for the record: `alpha-01.004.0006a` never built (its commit swept in unrelated in-flight
+IT-discovery edits whose module file was untracked, breaking `tsc`), and `alpha-01.004.0006b` built
+but died at the same backup gate `0014b` fixes. Neither reached the server; this cut supersedes both
+and is rebased on `0014b`, so it carries that fix rather than a competing one.
+
+Known limits carried forward: PDF/DOCX bodies are metadata-only by design, and ACL sub-scoping stays
+unsafe while `scope` is caller-supplied (see `platform-nest/src/modules/knowledge/README.md`).
+
 ### `Alpha 01.005.0014b` — 2026-08-03 — re-cut: the backup gate rejected its own compose project
 
 Identical module set to `0014a` (hence a letter bump, not a counter move — "a re-tag after a failed

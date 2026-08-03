@@ -17,22 +17,33 @@ import { Pool } from "pg";
 
 export type Provenance = "human" | "agent" | "external";
 export type Trust = "trusted" | "untrusted";
+/** D9.4 audience tier. `internal` (the DEFAULT, and the only value the old schema could express)
+ *  keeps the full D9.1 contract: tenant pre-filter + ACL scope. `public` is company knowledge that
+ *  is deliberately world-readable — the gaiada.com marketing corpus — and is therefore retrievable
+ *  with NO resolved identity at all, so a lead/client on WhatsApp can be answered. Because `public`
+ *  is the ONLY way to escape the tenant pre-filter, it must never be inferred: it is opt-in per
+ *  ingest, the column defaults to `internal`, and only service-token'd internal pipelines can set it. */
+export type Audience = "public" | "internal";
 
 export interface IngestDoc {
   tenantId: string;
   sourceRef: string;
-  acl: string[]; // scopes allowed to read (empty = whole tenant)
+  acl: string[]; // scopes allowed to read (empty = whole tenant). Ignored when audience='public'.
   kind: "doc" | "memory";
   chunks: string[];
   provenance: Provenance;
   trust: Trust;
   confidence?: number; // 0..1
+  audience?: Audience; // default 'internal' — fail-closed
 }
 
 export interface SearchCtx {
-  tenantSet: string[]; // the caller's authorized-tenant-set (from the platform principal)
+  tenantSet: string[]; // the caller's authorized-tenant-set (from the platform principal); [] = unresolved
   scope: string; // e.g. group chat id / project scope
   topK?: number;
+  /** Restrict retrieval to the public tier even for a resolved caller. Used by surfaces that must
+   *  never leak internal knowledge regardless of who is asking (e.g. a public website widget). */
+  publicOnly?: boolean;
 }
 
 export interface Hit {
@@ -43,6 +54,7 @@ export interface Hit {
   provenance: Provenance;
   confidence: number;
   score: number;
+  audience: Audience;
 }
 
 export type Embedder = (text: string) => Promise<number[]>;
@@ -115,10 +127,15 @@ export class KnowledgeStore {
         trust text NOT NULL DEFAULT 'trusted',
         confidence real NOT NULL DEFAULT 1,
         quarantined boolean NOT NULL DEFAULT false,
+        audience text NOT NULL DEFAULT 'internal',
         created_at timestamptz NOT NULL DEFAULT now()
       );
+      -- Deployed stores predate the audience tier; add it in place. The DEFAULT backfills every
+      -- existing row to 'internal', so an upgrade can only ever narrow visibility, never widen it.
+      ALTER TABLE knowledge_chunks ADD COLUMN IF NOT EXISTS audience text NOT NULL DEFAULT 'internal';
       CREATE INDEX IF NOT EXISTS idx_knowledge_tenant ON knowledge_chunks (tenant_id, kind);
       CREATE INDEX IF NOT EXISTS idx_knowledge_source ON knowledge_chunks (source_ref);
+      CREATE INDEX IF NOT EXISTS idx_knowledge_public ON knowledge_chunks (audience) WHERE audience = 'public';
     `);
       if (this.pgvector) {
         // HNSW cosine index; ignore if the pgvector build is too old for HNSW (ivfflat would do).
@@ -135,6 +152,8 @@ export class KnowledgeStore {
   async ingest(doc: IngestDoc): Promise<number> {
     const quarantined = doc.trust === "untrusted"; // D9.3: never auto-promoted
     const confidence = doc.confidence ?? (doc.provenance === "agent" ? 0.6 : 1);
+    // D9.4: anything but an explicit 'public' is internal. A typo'd/absent audience must fail CLOSED.
+    const audience: Audience = doc.audience === "public" ? "public" : "internal";
     const client = await this.pool.connect();
     try {
       await client.query("BEGIN");
@@ -145,9 +164,9 @@ export class KnowledgeStore {
         const embParam = this.pgvector ? vectorLiteral(embedding) : embedding;
         const embPlaceholder = this.pgvector ? "$6::vector" : "$6";
         await client.query(
-          `INSERT INTO knowledge_chunks (tenant_id, source_ref, acl, kind, text, embedding, provenance, trust, confidence, quarantined)
-           VALUES ($1, $2, $3, $4, $5, ${embPlaceholder}, $7, $8, $9, $10)`,
-          [doc.tenantId, doc.sourceRef, doc.acl, doc.kind, text, embParam, doc.provenance, doc.trust, confidence, quarantined],
+          `INSERT INTO knowledge_chunks (tenant_id, source_ref, acl, kind, text, embedding, provenance, trust, confidence, quarantined, audience)
+           VALUES ($1, $2, $3, $4, $5, ${embPlaceholder}, $7, $8, $9, $10, $11)`,
+          [doc.tenantId, doc.sourceRef, doc.acl, doc.kind, text, embParam, doc.provenance, doc.trust, confidence, quarantined, audience],
         );
       }
       await client.query("COMMIT");
@@ -162,49 +181,67 @@ export class KnowledgeStore {
 
   /** D9.1: authorization pre-filter FIRST (SQL WHERE), ranking only over allowed candidates.
    *  Scoring is identical in both backends: cosine similarity × confidence × provenance factor
-   *  (agent-written down-weighted, D9.3). */
+   *  (agent-written down-weighted, D9.3).
+   *
+   *  D9.4 two-tier visibility. The predicate is a disjunction of exactly two branches:
+   *    public   — audience='public'; no tenant and no ACL condition, because this tier IS the
+   *               published company corpus. An unresolved caller (tenantSet=[]) reaches only this.
+   *    internal — UNCHANGED from D9.1: audience='internal' AND tenant_id ∈ authorized-set AND the
+   *               ACL scope matches. An empty tenantSet makes `= ANY('{}')` false, so this branch
+   *               self-disables for an unresolved caller — the old blanket early-return is no longer
+   *               needed and would now wrongly suppress the public tier.
+   *  Both branches stay inside the SQL WHERE, so a chunk the caller may not see is never a ranking
+   *  candidate — pgvector still never widens the candidate set. */
   async search(query: string, ctx: SearchCtx): Promise<Hit[]> {
-    if (ctx.tenantSet.length === 0) return []; // no authorized tenants → nothing, ever
     const topK = ctx.topK ?? 5;
+    const publicOnly = ctx.publicOnly === true;
     const q = await this.embed(query);
 
     if (this.pgvector) {
       // Ranking pushed into SQL over the pre-filtered set; HNSW index accelerates <=>.
       const { rows } = await this.pool.query<{
         tenant_id: string; source_ref: string; kind: string; text: string;
-        provenance: Provenance; confidence: number; score: string;
+        provenance: Provenance; confidence: number; audience: Audience; score: string;
       }>(
-        `SELECT tenant_id, source_ref, kind, text, provenance, confidence, score FROM (
-           SELECT tenant_id, source_ref, kind, text, provenance, confidence,
+        `SELECT tenant_id, source_ref, kind, text, provenance, confidence, audience, score FROM (
+           SELECT tenant_id, source_ref, kind, text, provenance, confidence, audience,
                   (1 - (embedding <=> $3::vector)) * confidence
                     * (CASE WHEN provenance = 'agent' THEN 0.8 ELSE 1 END) AS score
            FROM knowledge_chunks
-           WHERE tenant_id = ANY($1::uuid[]) AND (acl = '{}' OR $2 = ANY(acl)) AND NOT quarantined
+           WHERE NOT quarantined AND (
+                   audience = 'public'
+                   OR (NOT $5::boolean AND audience = 'internal'
+                       AND tenant_id = ANY($1::uuid[]) AND (acl = '{}' OR $2 = ANY(acl)))
+                 )
          ) ranked
          WHERE score > 0
          ORDER BY score DESC LIMIT $4`,
-        [ctx.tenantSet, ctx.scope, vectorLiteral(q), topK],
+        [ctx.tenantSet, ctx.scope, vectorLiteral(q), topK, publicOnly],
       );
       return rows.map((r) => ({
         tenantId: r.tenant_id, sourceRef: r.source_ref, kind: r.kind, text: r.text,
-        provenance: r.provenance, confidence: r.confidence, score: Number(r.score),
+        provenance: r.provenance, confidence: r.confidence, audience: r.audience, score: Number(r.score),
       }));
     }
 
     // Array fallback: pre-filter in SQL, cosine + rank in app.
     const { rows } = await this.pool.query<{
       tenant_id: string; source_ref: string; kind: string; text: string;
-      embedding: number[]; provenance: Provenance; confidence: number;
+      embedding: number[]; provenance: Provenance; confidence: number; audience: Audience;
     }>(
-      `SELECT tenant_id, source_ref, kind, text, embedding, provenance, confidence
+      `SELECT tenant_id, source_ref, kind, text, embedding, provenance, confidence, audience
        FROM knowledge_chunks
-       WHERE tenant_id = ANY($1::uuid[]) AND (acl = '{}' OR $2 = ANY(acl)) AND NOT quarantined`,
-      [ctx.tenantSet, ctx.scope],
+       WHERE NOT quarantined AND (
+               audience = 'public'
+               OR (NOT $3::boolean AND audience = 'internal'
+                   AND tenant_id = ANY($1::uuid[]) AND (acl = '{}' OR $2 = ANY(acl)))
+             )`,
+      [ctx.tenantSet, ctx.scope, publicOnly],
     );
     return rows
       .map((r) => ({
         tenantId: r.tenant_id, sourceRef: r.source_ref, kind: r.kind, text: r.text,
-        provenance: r.provenance, confidence: r.confidence,
+        provenance: r.provenance, confidence: r.confidence, audience: r.audience,
         score: cosine(q, r.embedding) * r.confidence * (r.provenance === "agent" ? 0.8 : 1),
       }))
       .filter((h) => h.score > 0)
@@ -215,14 +252,15 @@ export class KnowledgeStore {
   /** Distinct sources for a tenant set (admin console read). Aggregates chunks per
    *  source_ref with its latest provenance + a derived status. No chunk text leaves here. */
   async listSources(tenantSet: string[]): Promise<
-    { sourceRef: string; kind: string; chunks: number; provenance: Provenance; status: string; updatedAt: string }[]
+    { sourceRef: string; kind: string; chunks: number; provenance: Provenance; audience: Audience; status: string; updatedAt: string }[]
   > {
     if (tenantSet.length === 0) return [];
     const { rows } = await this.pool.query<{
-      source_ref: string; kind: string; chunks: string; provenance: Provenance; quarantined: boolean; updated_at: string;
+      source_ref: string; kind: string; chunks: string; provenance: Provenance; audience: Audience; quarantined: boolean; updated_at: string;
     }>(
       `SELECT source_ref, min(kind) AS kind, count(*)::int AS chunks,
               (array_agg(provenance ORDER BY created_at DESC))[1] AS provenance,
+              min(audience) AS audience,
               bool_and(quarantined) AS quarantined, max(source_hlc) AS updated_at
        FROM knowledge_chunks
        WHERE tenant_id = ANY($1::uuid[])
@@ -235,6 +273,7 @@ export class KnowledgeStore {
       kind: r.kind,
       chunks: Number(r.chunks),
       provenance: r.provenance,
+      audience: r.audience,
       status: r.quarantined ? "quarantined" : "indexed",
       updatedAt: r.updated_at,
     }));

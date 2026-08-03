@@ -9,7 +9,8 @@ import { NestFactory } from "@nestjs/core";
 import { FastifyAdapter, type NestFastifyApplication } from "@nestjs/platform-fastify";
 import multipart from "@fastify/multipart";
 import { AppModule } from "./app.module";
-import { config, n8nBridgeEnabled, graphBridgeEnabled } from "./config";
+import { config, n8nBridgeEnabled, graphBridgeEnabled, knowledgeIngestEnabled } from "./config";
+import { startKnowledgeIngestLoop } from "./modules/knowledge/ingest/scheduler";
 import { HttpErrorFilter } from "./http-error.filter";
 import { ProviderDispatchErrorFilter } from "./modules/search/provider-dispatch-error.filter";
 import { GatewayNotConfiguredErrorFilter } from "./modules/search/gateway-not-configured-error.filter";
@@ -355,6 +356,17 @@ async function bootstrap(): Promise<void> {
     startWorkActivityConsumerLoop();
     // eslint-disable-next-line no-console
     console.log("work-activity consumer on: streams [pm_task, pm_project, meeting_recording, pipeline_run]");
+  }
+  // Knowledge (D9 RAG) corpus refresh: mirrors gaiada.com into the PUBLIC tier and every company's
+  // ERP records into the INTERNAL tier, on an interval. Without this the vector store stays empty and
+  // every knowledge.search returns nothing. OUTSIDE the redisUrl gate — it is a plain Postgres read
+  // plus HTTP to the knowledge service, with no stream dependency.
+  if (knowledgeIngestEnabled()) {
+    startKnowledgeIngestLoop();
+    // eslint-disable-next-line no-console
+    console.log(
+      `knowledge ingest on: every ${Math.round(config.knowledgeIngest.intervalMs / 60000)}m; public sites [${config.knowledgeIngest.publicSites.join(", ")}]`,
+    );
   }
   // ORG-7 §3: nightly drift/orphan sweep. Deliberately OUTSIDE the redisUrl gate above — it's a
   // plain Postgres sweep (sweepDriftAndOrphans), not stream-driven — but still dark unless the
