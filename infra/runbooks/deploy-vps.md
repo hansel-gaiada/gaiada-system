@@ -83,6 +83,19 @@ docker compose -f docker-compose.vps.yml run --rm --no-deps platform node dist/d
 docker compose -f docker-compose.vps.yml up -d --no-build
 ```
 
+## Changing a variable in `.env` on a running box
+
+```bash
+./infra/scripts/wire-env.sh platform          # recreates + echoes the vars back
+VERIFY='RENDERER_TOKEN|REPORT_RENDERER_URL' ./infra/scripts/wire-env.sh platform
+```
+
+`docker compose restart` does **not** pick up an edited `.env` — compose bakes the environment
+at container *create* time, so a restart re-runs the old environment while looking like it
+worked. Only a recreate (`up -d --no-deps <svc>`) re-reads the file. The script also carries the
+non-obvious invocation the VPS needs (`-f docker-compose.hostdata.yml --profile bot --profile
+auth`); without those, postgres/redis are profile-disabled and compose rejects the project.
+
 ## Backups (nightly)
 
 ```bash
