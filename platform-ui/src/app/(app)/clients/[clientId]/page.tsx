@@ -3,10 +3,12 @@ import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
 import { can } from "@/lib/rbac";
-import { getClient, listDeliverables } from "@/lib/entities";
+import { getClient, listDeliverables, listProjects } from "@/lib/entities";
 import { deleteClientForm } from "@/lib/clientWorkActions";
 import { listRecordings, STATUS_LABEL, formatDuration } from "@/lib/meetings";
 import { RecordControls } from "@/components/meetings/RecordControls";
+import { ClientContactsPanel } from "@/components/clients/ClientContactsPanel";
+import { listClientContacts } from "@/lib/clientContacts";
 import { PageHeader } from "@/components/PageHeader";
 import { Card, HairlineTable, StatusBadge } from "@/components/ui";
 import { DescriptionList } from "@/components/DescriptionList";
@@ -30,6 +32,13 @@ export default async function ClientDetailPage({ params }: { params: Params }) {
   // WD-07 (Web Dev Phase 1 §12) — recordings scoped to this client, plus RecordControls with
   // clientId pre-filled: the client-workspace half of the capture-edge context plumbing.
   const meetings = await listRecordings(userId, tenant, { clientId });
+  // W0-5 — the external half of engagement setup (D-3: the client is present BEFORE the first
+  // meeting). Both reads degrade to [] rather than throwing, so one missing grant cannot take the
+  // whole client page down.
+  const contacts = await listClientContacts(userId, tenant, clientId);
+  const clientProjects = (await listProjects(userId, tenant).catch(() => []))
+    .filter((p) => p.client_id === clientId)
+    .map((p) => ({ id: p.id, name: p.name }));
   const canManage = can(me, "pm.manage", tenant);
   const del = deleteClientForm.bind(null, clientId);
 
@@ -58,6 +67,16 @@ export default async function ClientDetailPage({ params }: { params: Params }) {
               tcols="2fr 1fr 1fr"
             />
           )}
+        </Card>
+      </div>
+      <div style={{ marginTop: 20 }}>
+        <Card title={`Client access${contacts.length ? ` · ${contacts.length}` : ""}`}>
+          <ClientContactsPanel
+            clientId={clientId}
+            clientName={client.name}
+            contacts={contacts}
+            projects={clientProjects}
+          />
         </Card>
       </div>
       <div style={{ marginTop: 20 }}>

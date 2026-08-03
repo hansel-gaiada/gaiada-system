@@ -11,9 +11,14 @@ export function middleware(req: NextRequest) {
   // seeing a browser session. Gating it behind `hasSession` would 302 every render to /login and the
   // route's own token check (`reports-print-data.ts::getPrintPayload`) is what actually authorizes
   // the request, not this middleware.
+  // /invite is the W0-5 client-portal magic link. It MUST be public: the person arriving has no
+  // account yet — creating one is the entire purpose of the page — so gating it on `hasSession` would
+  // 302 every invited client to /login and the flow could never complete. As with /print, the route's
+  // own credential is what authorizes it: a single-use, HMAC-signed, email-bound, expiring invite
+  // token verified server-side (platform-nest client-invites.ts), not this middleware.
   const isPublic =
     pathname.startsWith("/login") || pathname.startsWith("/step-up") || pathname.startsWith("/auth") ||
-    pathname.startsWith("/print");
+    pathname.startsWith("/print") || pathname.startsWith("/invite");
   const hasSession = Boolean(req.cookies.get("gaiada_session")?.value);
   if (!isPublic && !hasSession) return NextResponse.redirect(new URL("/login", req.url));
   return NextResponse.next();
