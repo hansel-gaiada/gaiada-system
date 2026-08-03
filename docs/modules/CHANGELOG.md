@@ -14,6 +14,61 @@ local stack). None of these mean "production-done".
 Every cut app version and the exact module manifest it contains, so any deployed build can be
 reconstructed from this table alone. Format defined in [`VERSIONING.md`](./VERSIONING.md).
 
+### `Alpha 01.006.0024a` — 2026-08-03 — the surfaces that reported something untrue
+
+Cut from a full audit of the live site: signed in as a real user and drove all 84 routes under both
+companies, so "empty because this tenant has no data" could be told apart from "broken". Every
+finding here is a surface that **claimed a state it was not in** — the failure mode that costs the
+most trust, because nothing looks wrong.
+
+The audit's own headline was config, not code: `enabled_modules` held `{agency, hr}` on Gaia and
+`{}` on Sanur, so eight compiled-in modules were dark. Enabling them (all 10 on Gaia, 9 on Sanur)
+lit up clients, billing, reports, appraisals, knowledge, IT and PM with real data — and cleared the
+stalled delivery pipeline as a side effect: the WS11 fan-out had been dying on
+`/api/:t/pm/projects/:id/docs 404`, which was the PM module being off, not a workflow bug.
+
+- **`Open in n8n` pointed into the compose network.** `detail.n8nUrl` was assigned from
+  `services.automation.url` — the in-cluster base (`http://n8n:5678`) the platform calls the Public
+  API on. The console reported the service healthy and listed its workflows while offering a link no
+  browser could follow. Split into `AUTOMATION_PUBLIC_URL`; absent ⇒ the UI hides the button.
+- **The roles picker offered ten identical options.** `GET /api/roles` returned every company's role
+  rows, and per-company roles share names, so `manager` appeared ten times with nothing to tell them
+  apart — nine of them granting a row owned by another company.
+- **HR contradicted itself on one screen.** The scope selector called every company "served" (an
+  elevated caller was folded in as a `home` grant) while the envelope beneath it reported those same
+  companies "not served".
+- **A task you just created vanished.** The default all-companies leg is assignee-scoped, so an
+  unassigned task was invisible with no affordance to reveal it.
+- **The calendar workload panel demanded a narrowed scope** while all-companies is the default — dead
+  for every visitor. Now breaks down by company instead.
+- **React #418 on three Systems consoles** — bare `toLocaleString()` renders in the container's UTC
+  server-side and the visitor's zone client-side, so React discarded the server HTML. Fixed with a
+  fixed-zone `formatTimestamp()`.
+- **Staff were told a client project was on its way to them.** The portal BFF 403s "not a portal
+  client" for any staff member; the reader folded that into an empty list.
+- **The platform read the bot's admin token from a different `.env` name than the bot** — it got an
+  empty token, every proxy call 401'd, and the console said "bot admin unreachable" as though the bot
+  were down.
+- **n8n was proxied on eight ERP root paths** (`/webhook`, `/form`, `/mcp` + variants) because
+  `N8N_WEBHOOK_URL` was the bare origin. Narrowed to `/n8n/` only; the first platform-ui route under
+  any of those names would otherwise have been silently answered by n8n.
+
+Also found and **not** fixed here, since neither is code: the n8n Public-API key held only the four
+read scopes (`workflow:activate` missing ⇒ the ACTIVATE button returned `Forbidden`), and its
+replacement was minted with all 72 — over-granted, on the rotation queue. And no client portal user
+is provisioned, so that surface is still unexercised end-to-end.
+
+Two corrections to the audit's own first pass, recorded because both were wrong in the same
+direction — assuming a missing endpoint: `/rollups` and the services API were probed on the wrong
+paths (`/api/rollups` is tenant-less; service assignments live under
+`/api/:t/org-structure/service-units`), and the client portal was never broken.
+
+| Module | | Why |
+|---|---|---|
+| platform-nest | `0.9.2 → 0.9.3` | tenant-narrowed roles catalog; `n8nUrl` split from the in-cluster base via `AUTOMATION_PUBLIC_URL` |
+| platform-ui | `0.10.2 → 0.10.3` | six honesty fixes: roles picker, HR scope, tasks empty state, calendar workload, hydration-safe timestamps, portal staff view |
+| infra | `0.7.3 → 0.7.4` | platform falls through to `ADMIN_TOKEN` for the bot proxy; n8n triggers no longer squat the ERP root; `AUTOMATION_PUBLIC_URL` wired; `*.local.md` ignored |
+
 ### `Alpha 01.005.0021a` — 2026-08-03 — the module switch works in both directions
 
 First cut that carries the IT discovery work (`0.9.0`/`0.10.0`), which was committed but never
@@ -384,6 +439,27 @@ anywhere real.
 ---
 
 ## platform-nest
+### [0.9.3] — 2026-08-03 · PROTOTYPED (two endpoints that described the wrong world)
+- **`GET /api/roles` returned every company's role rows.** Per-company roles share their NAMES across
+  companies, so the assign-role picker rendered `manager` ten times and `company_admin` three times
+  with nothing to distinguish them — and nine of those ten grant a role row owned by a different
+  company. Now takes an optional `tenantId` and narrows to `company_id IS NULL OR company_id = $1`.
+  Optional, so tenant-less callers keep working; membership-checked when passed, so it cannot be used
+  to enumerate the roles of a company the caller has nothing to do with.
+- **`automation/status`'s `n8nUrl` was the in-cluster base.** The UI turns that field into the "Open
+  in n8n" link, so it was handing browsers `http://n8n:5678` — a name that resolves only inside the
+  compose network. The console reported the service healthy and listed its workflows the whole time,
+  which is why it went unnoticed. Split out `config.automationPublicUrl`
+  (`AUTOMATION_PUBLIC_URL`); `n8nUrl` is now that value, omitted when unset so the UI hides the
+  button rather than rendering a dead link, and the config panel shows both values labelled.
+  Deliberately NOT inside `config.services` — that object is indexed by system name, so an extra key
+  there would read as one more probeable service.
+
+Verified: `tsc --noEmit` clean; `admin-systems` suite 24 pass. The pre-existing `n8nUrl` assertion
+(`toContain("/n8n")`) had been passing only because this suite's `AUTOMATION_URL` happens to contain
+that substring — replaced with one that asserts the public origin is used, that it differs from the
+reported in-cluster base, and that the field is absent when unconfigured.
+
 ### [0.9.2] — 2026-08-03 · PROTOTYPED (effective module set, one query)
 
 - `enabledModuleKeys(tenantId)` in `modules/registry.ts` — the SET form of the enablement rule
@@ -538,6 +614,33 @@ tenant's 8 seeded rows still need purging (per-tenant SQL in the design doc §12
 - **Unreleased / next:** identity writes, org-structure endpoints.
 
 ## platform-ui
+### [0.10.3] — 2026-08-03 · PROTOTYPED (six surfaces that reported a state they were not in)
+Found by driving the live site as a signed-in user across all 84 routes under both companies. None of
+these threw; each one asserted something false, which is why they had survived.
+
+- **Roles picker** — passes the active tenant to `listRoles` so the catalog stops listing every
+  company's identically-named roles.
+- **HR scope** — the selector called every company "served" because an elevated caller was folded in
+  as a `home` grant, while the envelope directly beneath reported those same companies "not served".
+  Adds an explicit `elevated` reason, renames the option to "All companies in scope", and widens the
+  404 label to "HR not enabled or not served" (the backend returns 404 for both).
+- **Tasks** — the default all-companies leg is assignee-scoped, so a task you had just created
+  unassigned looked like it was never saved. The empty state now says the view shows only your own
+  tasks and links each company's "All tasks" view.
+- **Calendar workload** — refused to render without a narrowed scope, while all-companies IS the
+  default: dead for every visitor. A per-person split is meaningless there (the union is the caller's
+  own tasks), so it breaks the same rows down by company.
+- **Hydration** — React #418 on `/systems/gateway`, `/hub`, `/automation`. Bare `toLocaleString()`
+  formats in the container's zone server-side and the visitor's client-side, so the text differed and
+  React threw away the server HTML for that subtree. Adds `formatTimestamp()` on a fixed display zone
+  (`NEXT_PUBLIC_DISPLAY_TZ`, default `Asia/Singapore`, inlined at build so both sides agree) and moves
+  those call sites onto it; `formatDate`/`formatDateTime` pinned to the same zone.
+- **Client portal** — the BFF 403s "not a portal client" for any staff member, which the reader folded
+  into an empty list, so staff were told "once your kickoff is processed, your project appears here"
+  as though a project were on its way to them. The reader carries that distinction now.
+
+Verified: `tsc --noEmit` clean, `next build` green, 945 tests pass.
+
 ### [0.10.2] — 2026-08-03 · PROTOTYPED (a disabled module now says so)
 
 Closes the mismatch `0.10.1` left open: nothing outside the settings page read `enabled_modules`, so
@@ -833,6 +936,27 @@ Verified: 939 unit tests pass, `tsc` clean, `next build` green. Not driven in a 
 - **Next:** deploy to a real host; tune SLOs on prod traffic.
 
 ## infra
+### [0.7.4] — 2026-08-03 · PROTOTYPED (one secret under two names; n8n squatting the ERP root)
+- **The platform read the bot's admin token from `${BOT_ADMIN_TOKEN}` while the bot read
+  `${ADMIN_TOKEN}`** — one shared secret, two `.env` names. A deployment that set only `ADMIN_TOKEN`
+  handed the platform an empty string, every bot-admin proxy call 401'd, and the Systems console
+  reported "bot admin unreachable" as though the bot were down (it was up and answering `/health` 200
+  throughout). Now `${BOT_ADMIN_TOKEN:-${ADMIN_TOKEN:-}}`, so one name suffices. Verified live: all
+  four admin routes went 401 → 200 and the console shows a real session state with event history.
+- **n8n was proxied on eight ERP top-level paths** — `/webhook`, `/form`, `/mcp` and their
+  `-test`/`-waiting` variants — because `N8N_WEBHOOK_URL` was the bare origin. The first platform-ui
+  route to land under any of those names would have been silently answered by n8n, presenting as a 404
+  on a page that demonstrably exists. Narrowed to the `/n8n/` prefix only (still outside the basic-auth
+  gate, which the event bridge requires since it acks 4xx as delivered). Verified safe first: all 8
+  registered webhooks are called in-cluster except `/ingest/lead`, which has never run.
+- **`AUTOMATION_PUBLIC_URL`** added, so the console's "Open in n8n" link stops being derived from the
+  in-cluster `AUTOMATION_URL`.
+- **`*.local.md` gitignored** for operator credential notes kept beside the code.
+
+Standing caveat, recorded because it bit this session: `deploy.yml` ships `infra/compose/*.yml`,
+scripts and mounted config — **not** host nginx and **not** `automation/.env`. Those two are manual
+(see `infra/nginx/README.md`).
+
 ### [0.7.2] — 2026-08-03 · IN PROGRESS (CI reached the redis it was already running; deploy unblocked)
 - **`platform-nest` CI set `REDIS_URL`, but every suite reads `REDIS_URL_TEST`** (18 files). The
   redis service container was running and being ignored, so **14 test files / 146 tests had never
