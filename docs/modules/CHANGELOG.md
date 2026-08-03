@@ -14,6 +14,27 @@ local stack). None of these mean "production-done".
 Every cut app version and the exact module manifest it contains, so any deployed build can be
 reconstructed from this table alone. Format defined in [`VERSIONING.md`](./VERSIONING.md).
 
+### `Alpha 01.005.0015b` — 2026-08-03 — index the tasks people actually use
+
+`0015a`'s first live sweep on `gda-aicenter` ingested 130 sources / 306 chunks with 0 errors, and
+the per-table counts matched the sources exactly (projects 5→5, pm_docs 1→1, meetings 3→3) — except
+tasks, which produced **nothing**. Not a silent no-op: the core `tasks` table genuinely holds 0 rows.
+The PM console writes `pm_tasks`, which held the real backlog of 6.
+
+So the corpus was task-free while looking healthy — exactly the failure the run summary is supposed
+to make visible, caught by reconciling its numbers against the source tables rather than trusting
+"0 errors".
+
+`pm_tasks` is now indexed alongside the core table (both are real, and a tenant may populate either),
+carrying the fields the PM row actually has: description, progress %, milestone, tags, and the JSONB
+poly-assignee — rendering BOTH the assigned party (which may be a person, division or department)
+and the named responsible human, because "who is doing this?" and "who is accountable?" are
+different questions.
+
+| Module | | Why |
+|---|---|---|
+| platform-nest | `0.8.0 → 0.8.1` | `pm_tasks` source builder in the knowledge ingester |
+
 ### `Alpha 01.005.0015a` — 2026-08-03 — knowledge/RAG gets a two-tier corpus and something to retrieve
 
 Status: **PROTOTYPED** (unit- and store-verified; the live sweep on `gda-aicenter` is the
