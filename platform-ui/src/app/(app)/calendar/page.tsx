@@ -17,6 +17,7 @@ import { ScopePill } from "@/components/scope/ScopePill";
 import { EnvelopeBanner } from "@/components/scope/EnvelopeBanner";
 import { Gantt } from "@/components/pm/Gantt";
 import { DayView, MonthView, WeekView } from "@/components/calendar/CalendarGrid";
+import { PendingLink } from "@/components/PendingLink";
 import "@/components/calendar/calendar.css";
 
 // MY calendar — only the signed-in user's own work. This page used to widen to every task in the
@@ -137,7 +138,7 @@ export default async function CalendarPage({ searchParams }: { searchParams: Sea
       <div className="cal-bar">
         <span className="cal-tabs" role="tablist" aria-label="Calendar view">
           {CAL_VIEWS.map((v) => (
-            <Link
+            <PendingLink
               key={v}
               href={viewHref(v)}
               role="tab"
@@ -145,16 +146,16 @@ export default async function CalendarPage({ searchParams }: { searchParams: Sea
               className={`cal-tab${v === view ? " cal-tab--on" : ""}`}
             >
               {v}
-            </Link>
+            </PendingLink>
           ))}
         </span>
 
         {view !== "timeline" && (
           <>
             <span className="cal-nav">
-              <Link href={href({ date: shiftAnchor(anchor, view, -1) })} className="cal-nav__btn" aria-label={`Previous ${view}`}>←</Link>
-              <Link href={href({ date: today })} className="cal-nav__btn">Today</Link>
-              <Link href={href({ date: shiftAnchor(anchor, view, 1) })} className="cal-nav__btn" aria-label={`Next ${view}`}>→</Link>
+              <PendingLink href={href({ date: shiftAnchor(anchor, view, -1) })} className="cal-nav__btn" aria-label={`Previous ${view}`}>←</PendingLink>
+              <PendingLink href={href({ date: today })} className="cal-nav__btn">Today</PendingLink>
+              <PendingLink href={href({ date: shiftAnchor(anchor, view, 1) })} className="cal-nav__btn" aria-label={`Next ${view}`}>→</PendingLink>
             </span>
             <span className="cal-range">{rangeLabel(anchor, view)}</span>
           </>

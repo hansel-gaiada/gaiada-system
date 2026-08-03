@@ -7,6 +7,7 @@ import { getProject, listComments, listFiles, getFieldDefs } from "@/lib/entitie
 import { postEntityComment, attachFileAction, deleteFileAction } from "@/lib/collabActions";
 import { CommentThread } from "@/components/pm/CommentThread";
 import { Attachments } from "@/components/Attachments";
+import { PendingLink } from "@/components/PendingLink";
 import { listRecordings, STATUS_LABEL, formatDuration } from "@/lib/meetings";
 import { RecordControls } from "@/components/meetings/RecordControls";
 import { formatDateTime } from "@/lib/format";
@@ -163,8 +164,10 @@ export async function ProjectWorkspaceView({
   const taskHrefBase = backHref.startsWith("/departments/") ? `${basePath}/tasks` : undefined;
   const taskHref = (id: string) => (taskHrefBase ? `${taskHrefBase}/${id}` : `/tasks/${id}`);
 
+  // PendingLink, not Link: a ?view= change is not a segment change, so Next fires no loading.tsx
+  // and a tab click on a cold view looked like nothing happened. See components/PendingLink.tsx.
   const tab = (v: View, label: string) => (
-    <Link href={`${basePath}?view=${v}`} className={`pm-tab${view === v ? " pm-tab--active" : ""}`}>{label}</Link>
+    <PendingLink href={`${basePath}?view=${v}`} className={`pm-tab${view === v ? " pm-tab--active" : ""}`}>{label}</PendingLink>
   );
 
   return (
