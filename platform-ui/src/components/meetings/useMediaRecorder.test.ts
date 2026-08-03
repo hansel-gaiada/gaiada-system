@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { act, renderHook } from "@testing-library/react";
-import { useMediaRecorder, formatElapsed, formatBytes, MAX_RECORDING_BYTES } from "./useMediaRecorder";
+import {
+  useMediaRecorder, formatElapsed, formatBytes, MAX_RECORDING_BYTES, MAX_VIDEO_RECORDING_BYTES,
+} from "./useMediaRecorder";
 
 // jsdom implements NEITHER MediaRecorder NOR navigator.mediaDevices, so the browser side is faked
 // here. That is the point rather than a limitation: the things worth testing in this hook are its
@@ -29,7 +31,7 @@ type RecState = "inactive" | "recording" | "paused";
 /** Minimal MediaRecorder stand-in with the handful of behaviours the hook relies on. `emit()` is the
  *  test's lever for `ondataavailable`, standing in for the timeslice the real encoder would fire. */
 class FakeMediaRecorder {
-  static supported = new Set(["audio/webm;codecs=opus", "audio/webm"]);
+  static supported = new Set(["audio/webm;codecs=opus", "audio/webm", "video/webm;codecs=vp9,opus", "video/webm"]);
   static isTypeSupported(t: string) {
     return FakeMediaRecorder.supported.has(t);
   }
@@ -43,8 +45,10 @@ class FakeMediaRecorder {
   /** Set to false to model an engine whose MediaRecorder cannot pause. */
   pausable = true;
 
-  constructor(_stream: unknown, opts?: { mimeType?: string }) {
+  opts: { mimeType?: string; videoBitsPerSecond?: number; audioBitsPerSecond?: number } | undefined;
+  constructor(_stream: unknown, opts?: { mimeType?: string; videoBitsPerSecond?: number; audioBitsPerSecond?: number }) {
     this.mimeType = opts?.mimeType ?? "audio/webm";
+    this.opts = opts;
     FakeMediaRecorder.instances.push(this);
   }
   get last() {
@@ -408,6 +412,96 @@ describe("useMediaRecorder — blob identity", () => {
     unmount();
     expect(created.length).toBeGreaterThanOrEqual(2);
     expect(revoked.sort()).toEqual(created.sort());
+  });
+});
+
+describe("useMediaRecorder — video takes", () => {
+  it("requests the camera, picks a VIDEO container, and caps the bitrate", async () => {
+    const { result } = renderHook(() => useMediaRecorder({ video: true }));
+    await act(async () => {
+      await result.current.start();
+    });
+    expect(result.current.phase).toBe("recording");
+    expect(result.current.kind).toBe("video");
+
+    // A video constraint must be requested, or the camera is never opened.
+    const constraints = getUserMedia.mock.calls[0][0] as { audio: unknown; video?: unknown };
+    expect(constraints.video).toBeTruthy();
+    expect(constraints.audio).toBeTruthy();
+
+    // The chosen container must be a video one whose BARE type is in the backend's video allowlist.
+    expect(result.current.mimeType).toMatch(/^video\/webm/);
+    expect(result.current.fileName).toBe("meeting-recording.webm");
+
+    // Bitrate ceilings are the reason a 60-minute meeting fits under the cap at all; without them
+    // the browser's own multi-Mbps default force-stops a meeting partway through.
+    expect(rec().opts?.videoBitsPerSecond).toBeGreaterThan(0);
+    expect(rec().opts?.audioBitsPerSecond).toBeGreaterThan(0);
+  });
+
+  it("exposes the live stream for preview only while a video take is running", async () => {
+    const { result } = renderHook(() => useMediaRecorder({ video: true }));
+    expect(result.current.previewStream).toBeNull();
+    await act(async () => {
+      await result.current.start();
+    });
+    expect(result.current.previewStream).not.toBeNull();
+
+    // Cleared on stop, BEFORE the tracks die — a <video srcObject> left pointing at a stopped
+    // stream renders a frozen frame that reads as "still recording".
+    act(() => result.current.stop());
+    expect(result.current.previewStream).toBeNull();
+  });
+
+  it("never exposes a preview stream for an AUDIO take", async () => {
+    const { result } = renderHook(() => useMediaRecorder());
+    await act(async () => {
+      await result.current.start();
+    });
+    expect(result.current.kind).toBe("audio");
+    expect(result.current.previewStream).toBeNull();
+    const constraints = getUserMedia.mock.calls[0][0] as { video?: unknown };
+    // Asking for video on an audio take would raise a camera permission prompt for nothing.
+    expect(constraints.video).toBeUndefined();
+  });
+
+  it("uses the LARGER video cap, so a video take is not refused at the audio limit", async () => {
+    const { result } = renderHook(() => useMediaRecorder({ video: true }));
+    expect(result.current.maxBytes).toBe(MAX_VIDEO_RECORDING_BYTES);
+    expect(MAX_VIDEO_RECORDING_BYTES).toBeGreaterThan(MAX_RECORDING_BYTES);
+
+    await act(async () => {
+      await result.current.start();
+    });
+    // Comfortably past the AUDIO cap — a video take must keep going here, which is exactly what a
+    // single shared cap would have got wrong.
+    act(() => rec().emit(MAX_RECORDING_BYTES + 1));
+    expect(result.current.phase).toBe("recording");
+
+    act(() => rec().emit(MAX_VIDEO_RECORDING_BYTES));
+    expect(result.current.phase).toBe("review");
+    expect(result.current.error).toMatch(/500 MB/);
+    expect(result.current.blob).toBeInstanceOf(Blob);
+  });
+
+  it("reports unsupported when no VIDEO container is available, without blaming the mic", async () => {
+    FakeMediaRecorder.supported = new Set(["audio/webm"]); // audio works, video does not
+    const { result } = renderHook(() => useMediaRecorder({ video: true }));
+    await act(async () => {
+      await result.current.start();
+    });
+    expect(result.current.phase).toBe("unsupported");
+    expect(result.current.error).toMatch(/no video container/i);
+    FakeMediaRecorder.supported = new Set(["audio/webm;codecs=opus", "audio/webm", "video/webm;codecs=vp9,opus", "video/webm"]);
+  });
+
+  it("names BOTH devices when a video take is blocked", async () => {
+    const { result } = renderHook(() => useMediaRecorder({ video: true }));
+    getUserMedia.mockRejectedValueOnce(Object.assign(new Error("no"), { name: "NotAllowedError" }));
+    await act(async () => {
+      await result.current.start();
+    });
+    expect(result.current.error).toMatch(/camera or microphone/i);
   });
 });
 

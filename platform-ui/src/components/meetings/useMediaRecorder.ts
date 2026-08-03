@@ -6,13 +6,13 @@ import { useCallback, useEffect, useRef, useState } from "react";
 // REGISTERED a meeting row and waited for the desktop capture-helper to attach a file: there was no
 // way to actually record from the browser, and therefore nothing to pause, stop or play back.
 //
-// AUDIO ONLY, DELIBERATELY. The server-side transcription path validates the upload against
-// `ALLOWED_AUDIO_MIME` (platform-nest/src/core/meetings.controller.ts:42) which accepts `audio/webm`,
-// `audio/mp4`, `audio/ogg` … and does NOT accept any `video/*` container. A browser video recording
-// is `video/webm`, so it would be refused with "unsupported audio type" AFTER the whole upload had
-// been sent. Rather than widen a validation allowlist on a guess about what the whisper container
-// accepts, in-browser capture stays audio-only and video capture stays with the desktop helper —
-// which is what the ERP copy already told users. Revisit only with a verified whisper fact.
+// AUDIO **AND VIDEO**. Video was initially left out because the backend's upload validator accepted
+// no `video/*` container, so a browser video take would have been refused after the whole upload had
+// been sent. That has been closed at the source: `classifyMedia` now accepts video containers, and
+// the local faster-whisper container was VERIFIED to demux them (an opus-only webm and a vp8+opus
+// webm built from the same audio returned the identical transcript — see the note in
+// platform-nest/src/core/meetings.controller.ts). So one recorder serves both kinds, and the video
+// take is both the stored media artifact AND the transcription source — no separate audio pass.
 //
 // WHY A HOOK AND NOT COMPONENT STATE: three of the four hard parts here are lifecycle, not UI —
 // releasing the microphone, keeping an accurate paused-aware clock, and tearing down the analyser
@@ -22,13 +22,32 @@ import { useCallback, useEffect, useRef, useState } from "react";
 /** Container preference order. The first supported one wins; every entry's bare type (before `;`)
  *  is in the backend's audio allowlist, which is what makes the resulting upload acceptable —
  *  `isAllowedAudio` splits on `;` so the `codecs=` suffix is irrelevant to it. */
-const MIME_CANDIDATES = [
+const AUDIO_MIME_CANDIDATES = [
   "audio/webm;codecs=opus",
   "audio/webm",
   "audio/ogg;codecs=opus",
   "audio/ogg",
   "audio/mp4", // Safari
 ];
+
+/** Video container preference. VP9 first for size at a given quality, VP8 as the broad fallback,
+ *  `video/mp4` (h264+aac) for Safari — all three verified to transcribe. Every bare type here is in
+ *  the backend's video allowlist. */
+const VIDEO_MIME_CANDIDATES = [
+  "video/webm;codecs=vp9,opus",
+  "video/webm;codecs=vp8,opus",
+  "video/webm",
+  "video/mp4", // Safari
+];
+
+/** Bitrate ceilings for video takes. NOT cosmetic: the upload path buffers the whole file in memory
+ *  server-side, so the byte cap is a real constraint rather than a formality. At ~800 kbps video +
+ *  32 kbps audio a 60-minute meeting lands near 220 MB — comfortably inside the 500 MB video cap,
+ *  where letting the browser pick its own (often multi-Mbps) default would blow through it in
+ *  20 minutes and force-stop a meeting mid-sentence. 720p talking-head footage is fine at this rate.
+ */
+const VIDEO_BITS_PER_SECOND = 800_000;
+const AUDIO_BITS_PER_SECOND = 32_000;
 
 /** Extension per container, so the filename agrees with the bytes. This matters beyond tidiness:
  *  the backend accepts a GENERIC content-type (`application/octet-stream`) only when the EXTENSION
@@ -37,12 +56,18 @@ const EXT_BY_MIME: Record<string, string> = {
   "audio/webm": "webm",
   "audio/ogg": "ogg",
   "audio/mp4": "m4a",
+  "video/webm": "webm",
+  "video/mp4": "mp4",
 };
 
 /** Mirrors `MEETING_AUDIO_MAX_BYTES` (platform-nest config default 200 MB). Enforced client-side so a
  *  long recording fails EARLY and keeps its audio, instead of being discovered at the end of a
  *  200 MB upload that the server then rejects. */
 export const MAX_RECORDING_BYTES = 200 * 1024 * 1024;
+/** Mirrors `MEETING_VIDEO_MAX_BYTES` (platform-nest default 500 MB) — video gets its own, larger cap
+ *  on the server, so enforcing the audio number for a video take would refuse uploads the backend
+ *  would have accepted. */
+export const MAX_VIDEO_RECORDING_BYTES = 500 * 1024 * 1024;
 const WARN_AT_FRACTION = 0.9;
 
 /** How often the clock/level tick. 200ms is under the ~250ms at which a timer reads as laggy, while
@@ -67,8 +92,21 @@ export type RecorderPhase =
    *  container. Callers must fall back to file upload. */
   | "unsupported";
 
+export interface UseMediaRecorderOptions {
+  /** Capture the camera as well as the microphone. The resulting video is BOTH the stored media
+   *  artifact and the transcription source (the server's whisper demuxes it). */
+  video?: boolean;
+}
+
 export interface MediaRecorderApi {
   phase: RecorderPhase;
+  /** What this take is. Fixed by the `video` option, not negotiated. */
+  kind: "audio" | "video";
+  /** The live capture stream, for a `<video>` preview while recording. Null unless a video take is
+   *  in progress — an audio take has nothing to preview. */
+  previewStream: MediaStream | null;
+  /** The byte cap that applies to THIS take (audio and video caps differ). */
+  maxBytes: number;
   /** Capture time in ms, EXCLUDING paused stretches. */
   elapsedMs: number;
   /** Normalised 0..1 input level, for a liveness meter. 0 whenever not actively recording. */
@@ -97,9 +135,9 @@ export interface MediaRecorderApi {
   reset: () => void;
 }
 
-function pickMimeType(): string | null {
+function pickMimeType(video: boolean): string | null {
   if (typeof MediaRecorder === "undefined") return null;
-  for (const c of MIME_CANDIDATES) {
+  for (const c of video ? VIDEO_MIME_CANDIDATES : AUDIO_MIME_CANDIDATES) {
     try {
       if (MediaRecorder.isTypeSupported(c)) return c;
     } catch {
@@ -109,8 +147,11 @@ function pickMimeType(): string | null {
   return null;
 }
 
-export function useMediaRecorder(): MediaRecorderApi {
+export function useMediaRecorder(options: UseMediaRecorderOptions = {}): MediaRecorderApi {
+  const wantVideo = options.video === true;
+  const maxBytes = wantVideo ? MAX_VIDEO_RECORDING_BYTES : MAX_RECORDING_BYTES;
   const [phase, setPhase] = useState<RecorderPhase>("idle");
+  const [previewStream, setPreviewStream] = useState<MediaStream | null>(null);
   const [elapsedMs, setElapsedMs] = useState(0);
   const [level, setLevel] = useState(0);
   const [blob, setBlob] = useState<Blob | null>(null);
@@ -150,6 +191,9 @@ export function useMediaRecorder(): MediaRecorderApi {
     if (ctx && ctx.state !== "closed") void ctx.close().catch(() => {});
     const stream = streamRef.current;
     streamRef.current = null;
+    // Clear the preview BEFORE stopping tracks, so a `<video srcObject>` is never pointed at a dead
+    // stream (which renders as a frozen last frame that reads like the camera is still on).
+    setPreviewStream(null);
     stream?.getTracks().forEach((t) => t.stop());
     setLevel(0);
   }, []);
@@ -220,10 +264,14 @@ export function useMediaRecorder(): MediaRecorderApi {
       setPhase("unsupported");
       return;
     }
-    const mime = pickMimeType();
+    const mime = pickMimeType(wantVideo);
     if (!mime) {
       setPhase("unsupported");
-      setError("This browser has no audio container we can record to. Upload a file instead.");
+      setError(
+        wantVideo
+          ? "This browser has no video container we can record to. Try an audio-only recording, or upload a file."
+          : "This browser has no audio container we can record to. Upload a file instead.",
+      );
       return;
     }
 
@@ -234,15 +282,20 @@ export function useMediaRecorder(): MediaRecorderApi {
       // materially improves what whisper receives.
       stream = await navigator.mediaDevices.getUserMedia({
         audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+        // 720p is `ideal`, never `exact`: an `exact` constraint makes getUserMedia throw
+        // OverconstrainedError on a webcam that cannot hit it, which would turn "your camera is a bit
+        // old" into "recording is broken".
+        ...(wantVideo ? { video: { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 24 } } } : {}),
       });
     } catch (e) {
       // NotAllowedError (denied/dismissed) is the common case; NotFoundError means no input device.
       const name = (e as { name?: string })?.name ?? "";
+      const devices = wantVideo ? "camera or microphone" : "microphone";
       setPhase("denied");
       setError(
         name === "NotFoundError" || name === "OverconstrainedError"
-          ? "No microphone was found. Plug one in, or upload an audio file instead."
-          : "Microphone access was blocked. Allow it in your browser's site settings, or upload an audio file instead.",
+          ? `No ${devices} was found. Connect one, or upload a file instead.`
+          : `Access to your ${devices} was blocked. Allow it in your browser's site settings, or upload a file instead.`,
       );
       return;
     }
@@ -250,7 +303,12 @@ export function useMediaRecorder(): MediaRecorderApi {
 
     let rec: MediaRecorder;
     try {
-      rec = new MediaRecorder(stream, { mimeType: mime });
+      rec = new MediaRecorder(stream, {
+        mimeType: mime,
+        ...(wantVideo
+          ? { videoBitsPerSecond: VIDEO_BITS_PER_SECOND, audioBitsPerSecond: AUDIO_BITS_PER_SECOND }
+          : {}),
+      });
     } catch {
       teardownCapture();
       setPhase("unsupported");
@@ -274,10 +332,13 @@ export function useMediaRecorder(): MediaRecorderApi {
       chunksRef.current.push(ev.data);
       bytesRef.current += ev.data.size;
       setSizeBytes(bytesRef.current);
-      if (bytesRef.current >= MAX_RECORDING_BYTES && rec.state !== "inactive") {
+      if (bytesRef.current >= maxBytes && rec.state !== "inactive") {
         // Keep what we have — stopping preserves the take, and the user can still upload it.
         forcedStopRef.current = true;
-        setError("Recording hit the 200 MB size limit and was stopped. The audio so far has been kept.");
+        setError(
+          `Recording hit the ${Math.round(maxBytes / (1024 * 1024))} MB size limit and was stopped. ` +
+            "Everything recorded so far has been kept.",
+        );
         rec.stop();
       }
     };
@@ -314,10 +375,11 @@ export function useMediaRecorder(): MediaRecorderApi {
     }
 
     rec.start(TIMESLICE_MS);
+    if (wantVideo) setPreviewStream(stream);
     segmentStartRef.current = Date.now();
     setPhase("recording");
     startTick();
-  }, [finalise, startTick, teardownCapture]);
+  }, [finalise, maxBytes, startTick, teardownCapture, wantVideo]);
 
   const pause = useCallback(() => {
     const rec = recorderRef.current;
@@ -375,6 +437,9 @@ export function useMediaRecorder(): MediaRecorderApi {
 
   return {
     phase,
+    kind: wantVideo ? "video" : "audio",
+    previewStream,
+    maxBytes,
     elapsedMs,
     level,
     blob,
@@ -382,7 +447,7 @@ export function useMediaRecorder(): MediaRecorderApi {
     mimeType,
     sizeBytes,
     error,
-    nearSizeLimit: sizeBytes >= MAX_RECORDING_BYTES * WARN_AT_FRACTION,
+    nearSizeLimit: sizeBytes >= maxBytes * WARN_AT_FRACTION,
     canPause,
     fileName: `meeting-recording.${ext}`,
     start,

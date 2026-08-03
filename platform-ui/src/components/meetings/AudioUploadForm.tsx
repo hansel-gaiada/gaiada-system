@@ -74,8 +74,8 @@ export function AudioUploadForm({
   return (
     <div style={{ display: "grid", gap: 10 }}>
       <p style={{ margin: 0, font: "400 13px/1.5 var(--font-body)", color: "var(--ink-muted)" }}>
-        No capture helper installed? Upload the recording file directly — it&rsquo;s transcribed on the
-        server (no local whisper required).
+        No capture helper installed? Upload the recording file directly — audio or video, transcribed
+        on the server (no local whisper required). A video is transcribed from its audio track.
       </p>
 
       {isTranscribing && (
@@ -118,13 +118,13 @@ export function AudioUploadForm({
             ref={fileInputRef}
             type="file"
             name="file"
-            accept="audio/*,.m4a,.mp3,.mp4,.wav,.webm,.ogg,.flac,.aac"
+            accept="audio/*,video/*,.m4a,.mp3,.mp4,.wav,.webm,.ogg,.flac,.aac,.mov,.mkv,.3gp,.m4v"
             onChange={(e) => setFileName(e.target.files?.[0]?.name ?? "")}
             style={{ font: "400 13px var(--font-body)" }}
             required
           />
           <button type="submit" className="btn btn-primary" disabled={uploadPending || !fileName} style={{ fontSize: 13 }}>
-            {uploadPending ? "Uploading…" : isFailed ? "Upload a different file" : "Upload audio"}
+            {uploadPending ? "Uploading…" : isFailed ? "Upload a different file" : "Upload audio or video"}
           </button>
           {uploadState?.error && (
             <span style={{ font: "400 13px var(--font-body)", color: "var(--erp-accent)", opacity: 0.85 }}>{uploadState.error}</span>

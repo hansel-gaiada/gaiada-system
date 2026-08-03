@@ -17,6 +17,7 @@ import { GatewayNotConfiguredErrorFilter } from "./modules/search/gateway-not-co
 // exactly the reason SM-53/SM-57 had to be — an unmapped plain Error escapes as a body-less 500.
 import { GoogleOAuthErrorFilter } from "./modules/search/google/google-oauth-error.filter";
 import { LastResortExceptionFilter } from "./last-resort-exception.filter";
+import { maxUploadBytes } from "./core/meetings.controller";
 import { migrate } from "./db/migrate";
 import { getPool } from "./db";
 import { seedClockFromDb } from "./events/hlc";
@@ -114,11 +115,16 @@ export async function buildApp(): Promise<NestFastifyApplication> {
     new GatewayNotConfiguredErrorFilter(),
     new GoogleOAuthErrorFilter(),
   );
-  // WD-04: the one multipart consumer in the app (in-ERP meeting-audio upload). The size cap
+  // WD-04: the one multipart consumer in the app (in-ERP meeting audio/video upload). The size cap
   // is enforced HERE (busboy truncates + MeetingRecordingsController turns that into a clean 400)
   // as well as re-checked in the handler — belt and suspenders, matching files.controller.ts's
   // own explicit MAX_BYTES check on its base64 path.
-  await app.register(multipart, { limits: { fileSize: config.meetingAudio.maxBytes, files: 1 } });
+  //
+  // The registered number is `maxUploadBytes()` — the LARGER of the audio and video caps — because a
+  // plugin-level limit is one number for the whole app and cannot know a part's kind. The real,
+  // per-kind cap is applied in the handler once the mimetype/extension has been classified. Taking
+  // the audio cap here instead would silently truncate every video above it.
+  await app.register(multipart, { limits: { fileSize: maxUploadBytes(), files: 1 } });
   await app.init();
   return app;
 }

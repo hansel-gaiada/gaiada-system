@@ -518,6 +518,18 @@ export const config = {
   // comfortably above a multi-hour meeting compressed to a voice-quality .m4a/.mp3.
   meetingAudio: {
     maxBytes: Number(process.env.MEETING_AUDIO_MAX_BYTES ?? 200 * 1024 * 1024),
+    // Video takes its own, larger cap: the same meeting is an order of magnitude bigger with a
+    // picture attached. Default 500MB, which at the browser recorder's own bitrate ceiling
+    // (~800 kbps video + 32 kbps audio) is comfortably more than a 60-minute meeting.
+    //
+    // WHY THIS IS NOT SET TO SOMETHING HUGE, stated because the number looks arbitrary otherwise:
+    // the upload path buffers the WHOLE file in memory (`mp.toBuffer()`), and
+    // `transcribeWithWhisper` then makes a second copy for the multipart body it sends on — so peak
+    // RSS is roughly 2x the file. A multi-gigabyte cap here would turn one long recording into an
+    // OOM of the platform container. Raising it means streaming to storage first, which is a
+    // different change. Both caps are enforced per-kind in meetings.controller.ts, because the
+    // multipart plugin can register only ONE fileSize for the whole app.
+    maxVideoBytes: Number(process.env.MEETING_VIDEO_MAX_BYTES ?? 500 * 1024 * 1024),
   },
   // Event → n8n bridge (WS4 §4): forwards allow-listed event-backbone events to n8n webhooks
   // so automations can trigger on business events, not just CRON/webhook. Fail-closed: the

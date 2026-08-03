@@ -101,8 +101,12 @@ export function RecordingWorkbench({ rec }: { rec: MeetingRecordingDetail }) {
       {!rec.transcript && (
         <section>
           <h3 style={{ margin: "0 0 10px", font: "600 14px var(--font-display)" }}>Record now</h3>
+          {/* The medium follows the row's OWN `kind`, set when the meeting was registered — a
+              recording registered as "Audio + Video" records video here without the user re-picking,
+              and an audio one never asks for camera permission it does not need. */}
           <LiveRecorder
             mode="existing"
+            video={rec.kind === "video"}
             action={uploadAudioAction}
             recordingId={rec.id}
             onUploaded={() => router.refresh()}

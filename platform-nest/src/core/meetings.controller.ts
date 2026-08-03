@@ -43,15 +43,73 @@ const ALLOWED_AUDIO_MIME = new Set([
   "audio/mpeg", "audio/mp3", "audio/mp4", "audio/x-m4a", "audio/m4a", "audio/aac",
   "audio/wav", "audio/x-wav", "audio/wave", "audio/webm", "audio/ogg", "audio/flac", "audio/3gpp",
 ]);
-const ALLOWED_AUDIO_EXT = new Set(["m4a", "mp3", "mp4", "aac", "wav", "webm", "ogg", "oga", "flac", "3gp"]);
+const ALLOWED_AUDIO_EXT = new Set(["m4a", "mp3", "aac", "wav", "oga", "flac"]);
+
+// ---- Video containers, accepted for transcription as well as storage ----
+// VERIFIED, not assumed (2026-08-03, against the running `gaiada-whisper-1`): the local
+// `fedirz/faster-whisper-server` container demuxes a video container and transcribes its audio
+// stream. faster-whisper decodes through PyAV/ffmpeg (`/usr/bin/ffmpeg` is present in the image),
+// so it does not need a bare audio file.
+//
+// The probe used a CONTROL, which is what makes it evidence rather than a green light: one
+// opus-only `.webm` and one vp8+opus `.webm` built by ffmpeg from the SAME 3s audio track, so the
+// two files differ only by the presence of a video stream. Both returned HTTP 200 with the
+// IDENTICAL transcript — same audio in, same text out, one of them wrapped in video. An h264+aac
+// `.mp4` also decoded (200, and it heard the test tone). Re-run recipe: POST multipart to
+// `http://whisper:8000/v1/audio/transcriptions` from inside the compose network (whisper publishes
+// no host port) — e.g. `docker exec gaiada-platform-1 node …`; prefix `MSYS_NO_PATHCONV=1` on Git
+// Bash or the container path gets mangled into a Windows one.
+//
+// AND THE FAILURE MODE STAYS HONEST if a future image ever drops ffmpeg: `uploadAudio` stores the
+// file and sets `audio_ref` BEFORE `runTranscriptionJob` runs, and that job's catch flips the row to
+// `status='failed'` with the real reason while leaving the stored media intact — so the worst case
+// is a failed transcription with the video preserved and the existing retry button live, never a
+// lost recording and never a false success.
+const ALLOWED_VIDEO_MIME = new Set([
+  "video/webm", "video/mp4", "video/quicktime", "video/x-matroska", "video/ogg", "video/3gpp",
+]);
+const ALLOWED_VIDEO_EXT = new Set(["mov", "mkv", "ogv", "3gp", "m4v"]);
+
+/** Extensions that are legitimately ambiguous between the two kinds (a `.webm`/`.mp4` may hold
+ *  either). Classified by the mimetype when there is one; when the type is generic these fall to
+ *  the LARGER (video) cap, because guessing "audio" on an actual video would refuse a valid upload
+ *  while guessing "video" only allows a bigger one — the harmless direction. */
+const AMBIGUOUS_EXT = new Set(["webm", "mp4", "ogg"]);
+
 const GENERIC_CONTENT_TYPES = new Set(["application/octet-stream", ""]);
 
-function isAllowedAudio(contentType: string, filename: string): boolean {
+export type MediaKind = "audio" | "video";
+
+/** Classify an upload, or null to refuse it.
+ *
+ *  Unchanged from the audio-only predicate this replaces: a genuine `audio/*` (or now `video/*`)
+ *  mimetype is accepted outright, and the generic/empty-type case falls back to the extension — but
+ *  NEVER the reverse, so a spoofed name with an implausible type is still refused, and a bare `.exe`
+ *  is refused either way. */
+function classifyMedia(contentType: string, filename: string): MediaKind | null {
   const ct = (contentType || "").toLowerCase().split(";")[0].trim();
   const ext = (filename.split(".").pop() || "").toLowerCase();
-  if (ALLOWED_AUDIO_MIME.has(ct)) return true;
-  if (GENERIC_CONTENT_TYPES.has(ct) && ALLOWED_AUDIO_EXT.has(ext)) return true;
-  return false;
+  if (ALLOWED_AUDIO_MIME.has(ct)) return "audio";
+  if (ALLOWED_VIDEO_MIME.has(ct)) return "video";
+  if (GENERIC_CONTENT_TYPES.has(ct)) {
+    if (ALLOWED_AUDIO_EXT.has(ext)) return "audio";
+    if (ALLOWED_VIDEO_EXT.has(ext)) return "video";
+    if (AMBIGUOUS_EXT.has(ext)) return "video"; // see AMBIGUOUS_EXT
+  }
+  return null;
+}
+
+/** The applicable byte cap. Video gets its own, larger one; both are env-tunable. */
+function maxBytesFor(kind: MediaKind): number {
+  return kind === "video" ? config.meetingAudio.maxVideoBytes : config.meetingAudio.maxBytes;
+}
+
+/** The OUTER ceiling registered with @fastify/multipart, which can carry only one fileSize for the
+ *  whole app. Exported so main.ts and this controller cannot drift apart — if the registration used
+ *  the audio cap while video were allowed to be larger, every big video would be truncated into a
+ *  confusing 400 that named a cap it had not exceeded. */
+export function maxUploadBytes(): number {
+  return Math.max(config.meetingAudio.maxBytes, config.meetingAudio.maxVideoBytes);
 }
 
 /** Calls the whisper container's OpenAI-compatible endpoint DIRECTLY (not via ai-gateway-go) —
@@ -245,12 +303,22 @@ export class MeetingRecordingsController {
       // truncated at the registered fileSize limit (main.ts's `throwFileSizeLimit` default is
       // true) — surface it as the same clean 400 the rest of this controller uses for
       // validation failures, not a raw 413 plugin error.
-      throw new BadRequestException(`file exceeds the ${config.meetingAudio.maxBytes}-byte cap`);
+      // The registered limit is now the LARGER of the two caps (main.ts), so this message names it
+      // as the outer ceiling; the per-kind cap is enforced just below, once the kind is known.
+      throw new BadRequestException(`file exceeds the ${maxUploadBytes()}-byte cap`);
     }
     if (buf.byteLength === 0) throw new BadRequestException("empty file");
     const contentType = mp.mimetype || "application/octet-stream";
     const filename = mp.filename || "audio";
-    if (!isAllowedAudio(contentType, filename)) throw new BadRequestException(`unsupported audio type: ${contentType || filename}`);
+    const kind = classifyMedia(contentType, filename);
+    if (!kind) throw new BadRequestException(`unsupported audio/video type: ${contentType || filename}`);
+    // Per-kind cap. The multipart limit can only enforce ONE number for the whole app, so an audio
+    // upload between the audio cap and the (larger) video cap would otherwise sail past — the kind
+    // is not knowable until the part's headers have been read.
+    const kindCap = maxBytesFor(kind);
+    if (buf.byteLength > kindCap) {
+      throw new BadRequestException(`${kind} file exceeds the ${kindCap}-byte cap`);
+    }
 
     const fileId = newId();
     const storageKey = `${tenantId}/meeting-audio/${fileId}`;

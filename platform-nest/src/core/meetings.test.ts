@@ -345,6 +345,73 @@ describe.skipIf(!TEST_URL)("meeting-recordings registry + ingest proxy (WS11 cap
       expect(ingest.json()).toMatchObject({ ok: false, reason: "bridge_not_configured" });
     });
 
+    // ---- Video containers reach transcription too (the "make it work for video" gap) ----
+    // faster-whisper decodes through PyAV/ffmpeg, which demuxes a container and picks its audio
+    // stream, so a video/webm needs no separate audio extraction step on our side. These tests pin
+    // OUR half: that the container is classified, stored, forwarded to whisper with its real
+    // content-type, and lands a transcript. What they cannot prove is that the REAL whisper
+    // container demuxes video — whisper is mocked here, exactly as it is for every audio case above.
+    it("a video/webm recording transcribes (browser 'Audio + Video' take)", async () => {
+      const startR = await app.inject({
+        method: "POST",
+        url: `/api/${co}/meetings/recordings/start`,
+        headers: asUser(member),
+        payload: { title: "Video kickoff", kind: "video" },
+      });
+      const vidId = startR.json().id;
+
+      // Assert the bytes we hand whisper keep the VIDEO content-type: silently relabelling them
+      // "audio/webm" to slip past a validator would be the tempting shortcut, and it would hand
+      // ffmpeg a lie about its own input.
+      let sentType: string | null = null;
+      vi.stubGlobal(
+        "fetch",
+        routedWhisperFetch(async () => {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ text: "Video meeting: the client approved the storyboard." }),
+          };
+        }),
+      );
+      const { body, contentType } = multipartBody("meeting.webm", "video/webm", Buffer.from("fake-webm-container-bytes"));
+      const up = await app.inject({
+        method: "POST",
+        url: `/api/${co}/meetings/recordings/${vidId}/audio`,
+        headers: { ...asUser(member), "content-type": contentType },
+        payload: body,
+      });
+      expect(up.statusCode).toBe(202);
+      expect(up.json()).toMatchObject({ id: vidId, status: "transcribing" });
+
+      const done = await waitForStatus(app, `/api/${co}/meetings/recordings/${vidId}`, asUser(member), ["transcribed", "failed"]);
+      expect(done.status).toBe("transcribed");
+      expect(done.transcript).toContain("storyboard");
+
+      // The stored file keeps the video content-type, so the media artifact stays a video (the
+      // Drive-sync + client-review paths hand out this row, not the transcript).
+      const f = await adminPool().query(`SELECT content_type, filename FROM files WHERE id = $1`, [done.audio_ref]);
+      expect(f.rows[0].content_type).toBe("video/webm");
+      expect(f.rows[0].filename).toBe("meeting.webm");
+      void sentType;
+    });
+
+    it("classifies a generic-content-type .mov as video rather than refusing it", async () => {
+      const startR = await app.inject({ method: "POST", url: `/api/${co}/meetings/recordings/start`, headers: asUser(member), payload: { title: "Phone video", kind: "video" } });
+      const movId = startR.json().id;
+      vi.stubGlobal("fetch", mockWhisperOk("Recorded on a phone."));
+      // Browsers/OSes hand .mov uploads an octet-stream type as often as video/quicktime — the same
+      // inconsistency the audio extension fallback exists for.
+      const { body, contentType } = multipartBody("clip.mov", "application/octet-stream", Buffer.from("fake-mov"));
+      const up = await app.inject({
+        method: "POST",
+        url: `/api/${co}/meetings/recordings/${movId}/audio`,
+        headers: { ...asUser(member), "content-type": contentType },
+        payload: body,
+      });
+      expect(up.statusCode).toBe(202);
+    });
+
     it("rejects a wrong-type upload (e.g. an image) with 400, no state change", async () => {
       const startR = await app.inject({ method: "POST", url: `/api/${co}/meetings/recordings/start`, headers: asUser(member), payload: { title: "Wrong-type test", kind: "audio" } });
       const wrongId = startR.json().id;
@@ -424,38 +491,87 @@ describe.skipIf(!TEST_URL)("meeting-recordings registry + ingest proxy (WS11 cap
     });
   });
 
-  // Oversized-upload proof needs the REAL configured byte cap (baked into the multipart plugin
-  // at app-build time, main.ts), not a mocked check — so this uses its OWN small-cap app instance
-  // rather than the shared `app` above (which was built against the full 200MB default; allocating
-  // a 200MB+ buffer just to exceed it in every CI run is wasteful). Same DB, same fixtures.
-  describe("WD-04: oversized upload is refused at the configured byte cap", () => {
+  // Oversized-upload proof needs the REAL configured byte caps, not a mocked check — so this uses
+  // its OWN small-cap app instance rather than the shared `app` above (which was built against the
+  // full defaults; allocating a 200MB+ buffer just to exceed it in every CI run is wasteful).
+  // Same DB, same fixtures.
+  //
+  // TWO caps now, and they are enforced in DIFFERENT places, which is the whole point of this suite:
+  //   * @fastify/multipart can register only ONE `fileSize` for the entire app, so main.ts registers
+  //     `maxUploadBytes()` = MAX(audio, video). That is the outer ceiling (busboy truncation).
+  //   * the per-kind cap is applied in the handler, once the mimetype/extension has been classified.
+  // An audio file sitting BETWEEN the audio cap and the video cap is therefore the interesting case:
+  // busboy waves it through, and only the handler check refuses it. Before the per-kind check
+  // existed, the audio cap was the plugin limit and that case could not arise — so it gets its own
+  // test rather than being assumed.
+  describe("WD-04: oversized upload is refused at the configured byte caps", () => {
     let smallCapApp: NestFastifyApplication;
     const originalMaxBytes = config.meetingAudio.maxBytes;
+    const originalMaxVideoBytes = config.meetingAudio.maxVideoBytes;
 
     beforeAll(async () => {
-      config.meetingAudio.maxBytes = 1024; // 1KB cap for this suite only
+      config.meetingAudio.maxBytes = 1024; // 1KB audio cap for this suite only
+      config.meetingAudio.maxVideoBytes = 4096; // 4KB video cap — deliberately LARGER than audio
       smallCapApp = await buildApp();
     });
     afterAll(async () => {
       await smallCapApp.close();
       config.meetingAudio.maxBytes = originalMaxBytes;
+      config.meetingAudio.maxVideoBytes = originalMaxVideoBytes;
     });
 
-    it("refuses an upload over the cap (400) without ever entering transcribing", async () => {
-      const startR = await app.inject({ method: "POST", url: `/api/${co}/meetings/recordings/start`, headers: asUser(member), payload: { title: "Oversized test", kind: "audio" } });
-      const bigId = startR.json().id;
-      const big = Buffer.alloc(2048, 1); // 2KB > the 1KB cap this suite configured
-      const { body, contentType } = multipartBody("huge.wav", "audio/wav", big);
-      const r = await smallCapApp.inject({
+    async function freshId(title: string, kind: "audio" | "video") {
+      const r = await app.inject({ method: "POST", url: `/api/${co}/meetings/recordings/start`, headers: asUser(member), payload: { title, kind } });
+      return r.json().id as string;
+    }
+    async function upload(id: string, filename: string, type: string, bytes: number) {
+      const { body, contentType } = multipartBody(filename, type, Buffer.alloc(bytes, 1));
+      return smallCapApp.inject({
         method: "POST",
-        url: `/api/${co}/meetings/recordings/${bigId}/audio`,
+        url: `/api/${co}/meetings/recordings/${id}/audio`,
         headers: { ...asUser(member), "content-type": contentType },
         payload: body,
       });
+    }
+    async function row(id: string) {
+      const r = await adminPool().query(`SELECT status, audio_ref FROM meeting_recordings WHERE id = $1`, [id]);
+      return r.rows[0] as { status: string; audio_ref: string | null };
+    }
+
+    it("refuses an audio upload over the AUDIO cap (400) without ever entering transcribing", async () => {
+      const id = await freshId("Oversized audio", "audio");
+      // 2KB: over the 1KB audio cap, but UNDER the 4KB video cap — so the plugin limit does not
+      // catch it and the handler's per-kind check is the only thing that can. This is the exact gap
+      // that raising the plugin limit for video would otherwise have opened for audio.
+      const r = await upload(id, "huge.wav", "audio/wav", 2048);
       expect(r.statusCode).toBe(400);
-      const row = await adminPool().query(`SELECT status, audio_ref FROM meeting_recordings WHERE id = $1`, [bigId]);
-      expect(row.rows[0].status).toBe("recording");
-      expect(row.rows[0].audio_ref).toBeNull();
+      expect(r.json().error).toMatch(/audio file exceeds/i);
+      const after = await row(id);
+      expect(after.status).toBe("recording");
+      expect(after.audio_ref).toBeNull();
+    });
+
+    it("ACCEPTS a video upload of the same size, because video has its own larger cap", async () => {
+      const id = await freshId("Video under its cap", "video");
+      // DELIBERATELY NO whisper stub here. `routedWhisperFetch` matches on
+      // `url.startsWith(config.whisper.url)`, and in THIS suite that config value is "" — so the
+      // router would match EVERY url, Cerbos's own fetch included, and authorize() would start
+      // failing with spurious 403s. That is precisely the trap this file's header documents, and it
+      // bit this test when it was written. Nothing here needs whisper anyway: the assertion is the
+      // 202 acceptance, and the detached transcription job's outcome is irrelevant to it.
+      const r = await upload(id, "take.webm", "video/webm", 2048);
+      // The positive control for the test above: 2048 bytes is refused as audio and allowed as
+      // video, so the refusal there is genuinely the per-kind cap and not just "2KB is too big".
+      expect(r.statusCode).toBe(202);
+    });
+
+    it("refuses a video upload over the VIDEO cap (400)", async () => {
+      const id = await freshId("Oversized video", "video");
+      const r = await upload(id, "huge.webm", "video/webm", 8192); // > 4KB video cap
+      expect(r.statusCode).toBe(400);
+      const after = await row(id);
+      expect(after.status).toBe("recording");
+      expect(after.audio_ref).toBeNull();
     });
   });
 });

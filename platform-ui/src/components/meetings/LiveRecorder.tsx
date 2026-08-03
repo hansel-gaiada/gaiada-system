@@ -17,18 +17,24 @@ import { useMediaRecorder, formatElapsed, formatBytes } from "./useMediaRecorder
 //     action registers the meeting AND uploads in one step, then redirects to the detail page.
 //   * "existing" — a recording row is already on screen (/meetings/[id] workbench): upload into it.
 //
-// AUDIO ONLY — see the header of useMediaRecorder.ts: the backend's audio allowlist rejects every
-// `video/*` container, so an in-browser video take would be refused after the whole upload. Video
-// capture stays with the desktop helper.
+// AUDIO OR VIDEO. `video` requests the camera as well as the microphone, shows a live preview while
+// recording, and plays the take back in a `<video>`. The video file is BOTH the stored media artifact
+// and the transcription source — the local whisper container demuxes it (verified; see
+// platform-nest/src/core/meetings.controller.ts), so there is no separate audio extraction step.
 
-type RegisterMode = {
+type CommonProps = {
+  /** Record the camera too. Defaults to audio-only. */
+  video?: boolean;
+};
+
+type RegisterMode = CommonProps & {
   mode: "register";
   /** `registerAndUploadAudioAction` — registers then uploads, then redirects. */
   action: (prev: MeetingResult | null, formData: FormData) => Promise<MeetingResult>;
   clientId?: string;
   projectId?: string;
 };
-type ExistingMode = {
+type ExistingMode = CommonProps & {
   mode: "existing";
   /** `uploadAudioAction` — uploads into an existing row. */
   action: (prev: AudioUploadResult | null, formData: FormData) => Promise<AudioUploadResult>;
@@ -41,7 +47,8 @@ export type LiveRecorderProps = RegisterMode | ExistingMode;
 const DOT = "●";
 
 export function LiveRecorder(props: LiveRecorderProps) {
-  const r = useMediaRecorder();
+  const isVideo = props.video === true;
+  const r = useMediaRecorder({ video: isVideo });
   // One `useActionState` over whichever action this mode uses. Both action shapes are
   // `(prev, FormData) => Promise<{ok,error?}>`, so the union is safe to narrow to the common part.
   const [state, dispatch, pending] = useActionState<(MeetingResult & AudioUploadResult) | null, FormData>(
@@ -55,7 +62,11 @@ export function LiveRecorder(props: LiveRecorderProps) {
   const [submitted, setSubmitted] = useState(false);
 
   // ── Playback ────────────────────────────────────────────────────────────────────────────────────
-  const audioRef = useRef<HTMLAudioElement | null>(null);
+  // One ref for whichever element plays the take back — `<video>` and `<audio>` share the whole
+  // HTMLMediaElement API this component uses (play/pause/currentTime/duration), so the transport
+  // logic below is identical for both and does not branch.
+  const audioRef = useRef<HTMLMediaElement | null>(null);
+  const previewRef = useRef<HTMLVideoElement | null>(null);
   const [playing, setPlaying] = useState(false);
   const [position, setPosition] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -71,6 +82,14 @@ export function LiveRecorder(props: LiveRecorderProps) {
     if (props.mode === "existing" && state?.ok) props.onUploaded?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state]);
+
+  // `srcObject` is a property, not an attribute — React cannot set it via JSX, so it is assigned here.
+  useEffect(() => {
+    const el = previewRef.current;
+    if (!el) return;
+    el.srcObject = r.previewStream;
+    if (r.previewStream) void el.play().catch(() => {});
+  }, [r.previewStream]);
 
   /** MediaRecorder webm/ogg blobs commonly report `duration: Infinity` until the element has been
    *  seeked, which would make the scrubber unusable. The recorder's own paused-aware clock is an
@@ -97,7 +116,11 @@ export function LiveRecorder(props: LiveRecorderProps) {
     const fd = new FormData();
     // A File (not a bare Blob) so the multipart part carries a filename — the backend accepts a
     // generic content-type only when the EXTENSION is a known audio one.
-    fd.append("file", new File([r.blob], r.fileName, { type: r.blob.type || "audio/webm" }), r.fileName);
+    fd.append(
+      "file",
+      new File([r.blob], r.fileName, { type: r.blob.type || (isVideo ? "video/webm" : "audio/webm") }),
+      r.fileName,
+    );
     if (props.mode === "register") {
       if (title.trim()) fd.append("title", title.trim());
       if (props.clientId) fd.append("clientId", props.clientId);
@@ -118,6 +141,41 @@ export function LiveRecorder(props: LiveRecorderProps) {
 
   return (
     <div style={{ display: "grid", gap: 12 }}>
+      {/* ── Live camera preview (video takes only) ─────────────────────────────────────────────── */}
+      {isVideo && live && (
+        <div style={{ position: "relative", maxWidth: 420 }}>
+          {/* `muted` is REQUIRED, not a preference: an unmuted preview of your own microphone is an
+              instant feedback howl. `playsInline` keeps iOS from taking it fullscreen. */}
+          <video
+            ref={previewRef}
+            muted
+            playsInline
+            aria-label="Live camera preview"
+            style={{
+              width: "100%",
+              borderRadius: 10,
+              border: "1px solid var(--line)",
+              background: "var(--ink)",
+              // Mirrored like every other selfie preview — an unmirrored self-view reads as wrong.
+              // The RECORDING is not flipped; this is presentation only.
+              transform: "scaleX(-1)",
+              display: "block",
+            }}
+          />
+          {paused && (
+            <span
+              style={{
+                position: "absolute", inset: 0, display: "grid", placeItems: "center",
+                background: "color-mix(in srgb, var(--ink) 45%, transparent)",
+                borderRadius: 10, font: "600 13px var(--font-body)", color: "var(--paper)",
+              }}
+            >
+              Paused
+            </span>
+          )}
+        </div>
+      )}
+
       {/* ── Transport ───────────────────────────────────────────────────────────────────────── */}
       <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
         {!live && !reviewing && (
@@ -128,7 +186,9 @@ export function LiveRecorder(props: LiveRecorderProps) {
             disabled={r.phase === "requesting" || busy}
             style={{ fontSize: 14 }}
           >
-            {r.phase === "requesting" ? "Waiting for mic…" : "🎙️  Start recording"}
+            {r.phase === "requesting"
+              ? isVideo ? "Waiting for camera…" : "Waiting for mic…"
+              : isVideo ? "🎥  Start recording" : "🎙️  Start recording"}
           </button>
         )}
 
@@ -193,7 +253,8 @@ export function LiveRecorder(props: LiveRecorderProps) {
 
       {r.nearSizeLimit && live && (
         <p style={{ margin: 0, font: "400 12px var(--font-body)", color: "var(--erp-accent)" }} aria-live="polite">
-          Approaching the 200 MB limit — recording will stop automatically and keep what it has.
+          Approaching the {Math.round(r.maxBytes / (1024 * 1024))} MB limit — recording will stop
+          automatically and keep what it has.
         </p>
       )}
 
@@ -208,21 +269,42 @@ export function LiveRecorder(props: LiveRecorderProps) {
         <div style={{ display: "grid", gap: 10, padding: "12px 14px", border: "1px solid var(--line)", borderRadius: 10 }}>
           {/* Hidden native element drives playback; the visible controls below are ours so they
               match the rest of the console. `preload="metadata"` lets duration resolve early. */}
-          <audio
-            ref={audioRef}
-            src={r.blobUrl ?? undefined}
-            preload="metadata"
-            onPlay={() => setPlaying(true)}
-            onPause={() => setPlaying(false)}
-            onEnded={() => {
-              setPlaying(false);
-              setPosition(0);
-            }}
-            onTimeUpdate={(e) => setPosition(e.currentTarget.currentTime)}
-            onLoadedMetadata={(e) => setDuration(e.currentTarget.duration)}
-            onDurationChange={(e) => setDuration(e.currentTarget.duration)}
-            style={{ display: "none" }}
-          />
+          {isVideo ? (
+            // Visible for video: the whole point of a video take is seeing it back. NOT mirrored —
+            // this is the real recorded footage, unlike the selfie preview above.
+            <video
+              ref={(el) => { audioRef.current = el; }}
+              src={r.blobUrl ?? undefined}
+              preload="metadata"
+              playsInline
+              onPlay={() => setPlaying(true)}
+              onPause={() => setPlaying(false)}
+              onEnded={() => {
+                setPlaying(false);
+                setPosition(0);
+              }}
+              onTimeUpdate={(e) => setPosition(e.currentTarget.currentTime)}
+              onLoadedMetadata={(e) => setDuration(e.currentTarget.duration)}
+              onDurationChange={(e) => setDuration(e.currentTarget.duration)}
+              style={{ width: "100%", maxWidth: 420, borderRadius: 10, border: "1px solid var(--line)", background: "var(--ink)", display: "block" }}
+            />
+          ) : (
+            <audio
+              ref={(el) => { audioRef.current = el; }}
+              src={r.blobUrl ?? undefined}
+              preload="metadata"
+              onPlay={() => setPlaying(true)}
+              onPause={() => setPlaying(false)}
+              onEnded={() => {
+                setPlaying(false);
+                setPosition(0);
+              }}
+              onTimeUpdate={(e) => setPosition(e.currentTarget.currentTime)}
+              onLoadedMetadata={(e) => setDuration(e.currentTarget.duration)}
+              onDurationChange={(e) => setDuration(e.currentTarget.duration)}
+              style={{ display: "none" }}
+            />
+          )}
           <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
             <button
               type="button"
@@ -305,7 +387,7 @@ export function LiveRecorder(props: LiveRecorderProps) {
       {blocked && (
         <p style={{ margin: 0, font: "400 12px/1.5 var(--font-body)", color: "var(--ink-subtle)" }}>
           In-browser recording is unavailable here. Use the upload path below, or install the desktop
-          capture helper for local transcription and video.
+          capture helper.
         </p>
       )}
     </div>

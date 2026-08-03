@@ -20,6 +20,7 @@ export function RecordControls({ clientId, projectId }: { clientId?: string; pro
   const [uploadState, uploadFormAction, uploadPending] = useActionState<MeetingResult | null, FormData>(registerAndUploadAudioAction, null);
   const [fileName, setFileName] = useState("");
   const [showUpload, setShowUpload] = useState(false);
+  const [withVideo, setWithVideo] = useState(false);
 
   return (
     <div style={{ display: "grid", gap: 18 }}>
@@ -27,9 +28,45 @@ export function RecordControls({ clientId, projectId }: { clientId?: string; pro
           it down the server-side transcription path. This is the primary affordance now: the two
           buttons below it only REGISTER a meeting for the desktop helper to attach to, which is a
           different (and much less obvious) thing. */}
-      <div style={{ display: "grid", gap: 8 }}>
+      <div style={{ display: "grid", gap: 10 }}>
         <h3 style={{ margin: 0, font: "600 14px var(--font-body)", color: "var(--ink)" }}>Record now</h3>
-        <LiveRecorder mode="register" action={registerAndUploadAudioAction} clientId={clientId} projectId={projectId} />
+
+        {/* Audio vs video is chosen BEFORE starting, because it decides which devices are requested
+            (and therefore which permission prompt appears) — it cannot be switched mid-take. Radio
+            semantics via a group, so the choice is announced rather than implied by styling. */}
+        <div role="radiogroup" aria-label="What to record" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          {([
+            ["audio", "🎙️  Audio"],
+            ["video", "🎥  Audio + Video"],
+          ] as const).map(([value, label]) => {
+            const selected = (value === "video") === withVideo;
+            return (
+              <button
+                key={value}
+                type="button"
+                role="radio"
+                aria-checked={selected}
+                onClick={() => setWithVideo(value === "video")}
+                className={selected ? "btn btn-primary" : "btn"}
+                style={{ fontSize: 13 }}
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Keyed on the mode so switching audio<->video mounts a FRESH recorder: the alternative is
+            carrying a finished audio take into a video session, where "Save & transcribe" would
+            silently upload the wrong medium. */}
+        <LiveRecorder
+          key={withVideo ? "video" : "audio"}
+          mode="register"
+          video={withVideo}
+          action={registerAndUploadAudioAction}
+          clientId={clientId}
+          projectId={projectId}
+        />
       </div>
 
       <hr style={{ border: 0, borderTop: "1px solid var(--line)", margin: 0 }} />
@@ -62,8 +99,9 @@ export function RecordControls({ clientId, projectId }: { clientId?: string; pro
           <p style={{ margin: 0, font: "400 13px var(--font-body)", color: "var(--erp-accent)", opacity: 0.85 }}>{state.error}</p>
         )}
         <p style={{ margin: "2px 0 0", font: "400 12px/1.5 var(--font-body)", color: "var(--ink-subtle)" }}>
-          Local-first: the recording is saved on your machine and transcribed locally — only the transcript
-          text is sent to the pipeline. You&rsquo;ll be reminded to sync the media to the company Drive.
+          For the desktop capture helper only: it saves the recording on your machine and transcribes
+          it locally, then attaches it here. Use &ldquo;Record now&rdquo; above if you don&rsquo;t have
+          the helper installed &mdash; that records in this browser and transcribes on the server.
         </p>
       </form>
 
@@ -73,12 +111,13 @@ export function RecordControls({ clientId, projectId }: { clientId?: string; pro
         <span className="dept-teach__glyph" aria-hidden="true">☁️</span>
         <span className="dept-teach__title">No capture helper installed?</span>
         <span className="dept-teach__body">
-          Upload an audio file recorded elsewhere (phone, Zoom, etc.) — it&rsquo;s transcribed on the
-          server, no local whisper needed.
+          Upload an audio or video file recorded elsewhere (phone, Zoom, etc.) — it&rsquo;s transcribed
+          on the server, no local whisper needed. Video is transcribed from its audio track and kept as
+          the media artifact.
         </span>
         {!showUpload && (
           <button type="button" className="lux-btn lux-btn--ghost lux-btn--sm dept-teach__cta" onClick={() => setShowUpload(true)}>
-            Upload an audio file
+            Upload a file
           </button>
         )}
       </div>
@@ -95,7 +134,7 @@ export function RecordControls({ clientId, projectId }: { clientId?: string; pro
           <input
             type="file"
             name="file"
-            accept="audio/*,.m4a,.mp3,.mp4,.wav,.webm,.ogg,.flac,.aac"
+            accept="audio/*,video/*,.m4a,.mp3,.mp4,.wav,.webm,.ogg,.flac,.aac,.mov,.mkv,.3gp,.m4v"
             onChange={(e) => setFileName(e.target.files?.[0]?.name ?? "")}
             style={{ font: "400 13px var(--font-body)" }}
             required
