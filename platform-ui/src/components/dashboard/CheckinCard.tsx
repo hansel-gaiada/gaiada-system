@@ -1,5 +1,5 @@
 "use client";
-import { useState, useTransition } from "react";
+import { useState, useTransition, type ReactNode } from "react";
 import { Card } from "@/components/ui";
 import { Field } from "@/components/forms/Field";
 import type { CheckinToday, SelfComplianceSummary } from "@/lib/checkins";
@@ -56,24 +56,21 @@ export function CheckinCard({ tenantId, today, selfCompliance, submitAction }: {
   // §5.3, is never rendered as if it were a miss.
   if (today.existing?.status === "excused") {
     return (
-      <Card title="Today's check-in" headerRight={<span className="checkin-card__pill checkin-card__pill--quiet">Excused</span>} style={{ marginBottom: 20 }}>
-        <p className="checkin-card__note">Today was excused by your manager/HR — no submission needed.</p>
-        <ComplianceStrip s={selfCompliance} />
-      </Card>
+      <CheckinLine status="Excused" note="Excused by your manager or HR — nothing to submit." s={selfCompliance} />
     );
   }
 
   // State 2 of 4: already submitted (and not currently re-editing it).
   if (submitted && !editing) {
     return (
-      <Card title="Today's check-in" headerRight={<span className="checkin-card__pill checkin-card__pill--submitted">Submitted</span>} style={{ marginBottom: 20 }}>
-        <p className="checkin-card__submitted-summary">{submitted.summary}</p>
-        {submitted.blockers && <p className="checkin-card__note"><strong>Blockers:</strong> {submitted.blockers}</p>}
-        <div className="checkin-card__actions">
-          <button type="button" className="lux-btn lux-btn--ghost lux-btn--sm" onClick={() => setEditing(true)}>Edit</button>
-        </div>
-        <ComplianceStrip s={selfCompliance} />
-      </Card>
+      <CheckinLine
+        status="Submitted"
+        statusTone="submitted"
+        note={submitted.summary}
+        extra={submitted.blockers ? <span className="checkin-line__blockers"><strong>Blockers:</strong> {submitted.blockers}</span> : null}
+        s={selfCompliance}
+        action={<button type="button" className="checkin-line__action" onClick={() => setEditing(true)}>Edit</button>}
+      />
     );
   }
 
@@ -82,13 +79,12 @@ export function CheckinCard({ tenantId, today, selfCompliance, submitAction }: {
   // expected-ness), reachable via the explicit "Check in anyway" opt-in.
   if (!today.expected && !forceOpen) {
     return (
-      <Card title="Today's check-in" headerRight={<span className="checkin-card__pill checkin-card__pill--quiet">Not expected today</span>} style={{ marginBottom: 20 }}>
-        <p className="checkin-card__note">Not a working day, or you&rsquo;re on approved leave — nothing is due from you today.</p>
-        <div className="checkin-card__actions">
-          <button type="button" className="lux-btn lux-btn--ghost lux-btn--sm" onClick={() => setForceOpen(true)}>Check in anyway</button>
-        </div>
-        <ComplianceStrip s={selfCompliance} />
-      </Card>
+      <CheckinLine
+        status="Not expected today"
+        note="Not a working day, or you’re on approved leave."
+        s={selfCompliance}
+        action={<button type="button" className="checkin-line__action" onClick={() => setForceOpen(true)}>Check in anyway</button>}
+      />
     );
   }
 
@@ -121,6 +117,33 @@ export function CheckinCard({ tenantId, today, selfCompliance, submitAction }: {
       </form>
       <ComplianceStrip s={selfCompliance} />
     </Card>
+  );
+}
+
+// The three states that need nothing from you — excused, already submitted, not a working day —
+// render as ONE LINE, not a card.
+//
+// They used to be full cards in hero position, so the largest thing on the landing screen was
+// usually a panel announcing that nothing was due, while the item that actually needed the user sat
+// below it as a small unframed row. TR-10's placement (check-in above the queue, prompted every
+// working day) is preserved exactly: state 4 — a check-in that IS due — is still the card. Only the
+// idle states shrink, which is what makes the prompt itself stand out when it appears.
+function CheckinLine({ status, statusTone, note, extra, action, s }: {
+  status: string;
+  statusTone?: "submitted";
+  note: string;
+  extra?: ReactNode;
+  action?: ReactNode;
+  s: SelfComplianceSummary;
+}) {
+  return (
+    <div className="checkin-line">
+      <span className={`checkin-line__pill${statusTone === "submitted" ? " checkin-line__pill--submitted" : ""}`}>{status}</span>
+      <span className="checkin-line__note">{note}</span>
+      {extra}
+      {action}
+      <span className="checkin-line__compliance"><ComplianceStrip s={s} /></span>
+    </div>
   );
 }
 

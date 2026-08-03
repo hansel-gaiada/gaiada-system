@@ -16,6 +16,8 @@ import { BackendPending } from "@/components/BackendPending";
 import type { QueueFilter } from "@/components/dashboard/FilterChips";
 import { CommandCenterHome } from "@/components/dashboard/CommandCenterHome";
 import { QueueAgendaHome } from "@/components/dashboard/QueueAgendaHome";
+import { listMyTasks } from "@/lib/agenda";
+import type { QueueItem } from "@/lib/queueUrgency";
 import { CheckinCard } from "@/components/dashboard/CheckinCard";
 import { decideQueueItem } from "./actions";
 
@@ -48,17 +50,33 @@ export default async function Dashboard({ searchParams }: { searchParams: Search
   const scope = rawScope && companies.some((c) => c.id === rawScope) ? rawScope : "all";
   const filter = parseFilter(rawFilter);
 
-  const [queue, placement, activity, checkinData] = await Promise.all([
+  const [queue, placement, activity, checkinData, mine] = await Promise.all([
     getMyWorkQueue(me, userId, companies),
     tenantId ? myPlacement(userId, tenantId, userId).catch(() => null) : Promise.resolve(null),
     tenantId ? getActivity(userId, tenantId) : Promise.resolve([]),
     tenantId ? getCheckinCardData(tenantId, userId) : Promise.resolve(null),
+    // The agenda cannot come from the queue's own task leg: that reads
+    // GET /api/:t/tasks?assignee=me — the LEGACY flat `tasks` table — while every task the app
+    // actually creates lives in `pm_tasks`. On live data that endpoint returns [], so "Your work"
+    // rendered "Nothing scheduled" while the same user had four open PM tasks. /api/tasks/mine is
+    // the reader that spans both models (it is what /calendar uses), so the agenda uses it directly.
+    // NOTE: the queue's ranking still misses PM tasks entirely — an overdue PM task never reaches
+    // "Needs you". That is a deeper fix in lib/queue.ts (shared with the department rail and its
+    // tests) and is deliberately NOT smuggled in here.
+    listMyTasks(userId, { scope: "all" }).then((r) => r.envelope.items).catch(() => []),
   ]);
 
   // Scope=one company: filter the queue, no envelope banner (UX-2 §4.3 — the
   // envelope is an ALL-scope concern only). Scope=all: show everything the
   // fan-out returned, plus the banner if any company was excluded.
   const scopedItems = scope === "all" ? queue.items : queue.items.filter((i) => i.companyId === scope);
+  const agendaItems: QueueItem[] = mine
+    .filter((t) => t.status !== "done" && (scope === "all" || t.tenantId === scope))
+    .map((t) => ({
+      id: `mine:${t.id}`, type: "task" as const, title: t.title, companyId: t.tenantId,
+      company: t.company, href: t.href, dueDate: t.dueDate, createdAt: "", decidable: true,
+      urgencyScore: 0,
+    }));
   const manager = isManagerTier(me);
   const throughput = weeklyThroughput(activity);
 
@@ -126,9 +144,10 @@ export default async function Dashboard({ searchParams }: { searchParams: Search
           buildFilterHref={buildFilterHref}
           decide={decideQueueItem}
           throughput={throughput}
+          agendaItems={agendaItems}
         />
       ) : (
-        <QueueAgendaHome items={scopedItems} decide={decideQueueItem} />
+        <QueueAgendaHome items={scopedItems} decide={decideQueueItem} agendaItems={agendaItems} />
       )}
     </>
   );

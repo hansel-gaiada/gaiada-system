@@ -75,3 +75,54 @@
 .checkin-card__streak { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; padding-top: 14px; border-top: 0.5px solid var(--erp-hairline); }
 .checkin-card__streak-chip { font: 700 11px var(--font-body); color: var(--erp-accent); border: 0.5px solid var(--erp-accent); padding: 4px 10px; }
 .checkin-card__streak-chip--quiet { font-weight: 400; color: var(--erp-ink-60); border-color: var(--erp-hairline); }
+
+/* Idle check-in — one line, not a card (see CheckinLine in CheckinCard.tsx for why). Wraps rather
+   than truncating: the submitted summary is the user's own sentence and is worth reading. */
+.checkin-line {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 9px 0 11px;
+  margin-bottom: 16px;
+  border-bottom: 0.5px solid var(--erp-hairline-soft);
+  font: 400 13px var(--font-body);
+  color: var(--ink-muted);
+}
+.checkin-line__pill {
+  flex: 0 0 auto;
+  font: 700 9px var(--font-body);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--erp-ink-50);
+  border: 0.5px solid var(--erp-hairline);
+  padding: 3px 7px;
+}
+.checkin-line__pill--submitted { color: var(--status-ok-fg); border-color: var(--status-ok); }
+.checkin-line__note { color: var(--text-primary); }
+.checkin-line__blockers { color: var(--ink-muted); }
+.checkin-line__action {
+  border: none;
+  background: transparent;
+  padding: 0;
+  font: 400 13px var(--font-body);
+  color: var(--erp-accent);
+  cursor: pointer;
+  text-decoration: underline;
+}
+/* Compliance stays available but stops competing: it is history, not today's task. */
+.checkin-line__compliance { margin-left: auto; }
+.checkin-line__compliance .checkin-card__streak { margin: 0; }
+
+/* Command center: queue and agenda side by side — the same split the IC tier already uses — so the
+   right half carries work instead of whitespace. The manager view previously ended after the queue,
+   leaving most of the screen empty on a normal day. */
+.command-center__split {
+  display: grid;
+  grid-template-columns: 1.5fr 1fr;
+  gap: 26px;
+  align-items: start;
+}
+@media (max-width: 1000px) {
+  .command-center__split { grid-template-columns: 1fr; }
+}
