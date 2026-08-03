@@ -35,7 +35,7 @@ versions below; the running build reports it at `GET /health`.
 | Module | Ver | Status | Workstream | Since |
 |---|---|---|---|---|
 | platform-nest | `0.9.0` | PROTOTYPED | WS1 | 2026-07 |
-| platform-ui | `0.10.0` | PROTOTYPED | WS5 | 2026-07 |
+| platform-ui | `0.11.0` | PROTOTYPED | WS5 | 2026-07 |
 | ai-gateway-go | `0.13.0` | PROTOTYPED | WS3 | 2026-07 |
 | mcp-hub | `0.9.2` | PROTOTYPED | WS2 | 2026-07 |
 | sync-engine-go | `0.7.0` | PROTOTYPED | WS1 | 2026-07 |
@@ -46,7 +46,7 @@ versions below; the running build reports it at `GET /health`.
 | ai-agents | `0.5.0` | PROTOTYPED | WS8 | 2026-07 |
 | hermes-gateway | `0.2.0` | PROTOTYPED | WS3 | 2026-07 |
 | capture-helper | `0.2.0` | IN PROGRESS | WS11 | 2026-07 |
-| webdev | `0.9.0` | IN PROGRESS | Web Dev | 2026-08-03 |
+| webdev | `0.10.0` | IN PROGRESS | Web Dev | 2026-08-03 |
 | webdesk | `0.0.0` | PLANNED | Web Dev | 2026-07-23 |
 | search-marketing | `0.5.0` | DEV-VERIFIED | SEO | 2026-08-01 |
 | social-media | `0.0.0` | PLANNED | Social Media | 2026-07-23 |
