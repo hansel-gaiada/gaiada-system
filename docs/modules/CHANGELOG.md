@@ -14,7 +14,62 @@ local stack). None of these mean "production-done".
 Every cut app version and the exact module manifest it contains, so any deployed build can be
 reconstructed from this table alone. Format defined in [`VERSIONING.md`](./VERSIONING.md).
 
-### `Alpha 01.004.0006a` — 2026-08-03 — knowledge/RAG gets a two-tier corpus and something to retrieve
+### `Alpha 01.004.0007a` — 2026-08-03 — IT topology stops being fiction
+
+Status: **PROTOTYPED.** The backend half is **DEV-VERIFIED** (34 IT tests green against live
+Postgres + Cerbos, incl. migration `0071`); the end-to-end claim is gated on `it-site-collector`,
+which is **not built** and is blocked on a UniFi API key.
+
+| Module | | Why |
+|---|---|---|
+| platform-nest | `0.8.0 → 0.9.0` | migration `0071`; discovery ingest + server-computed topology graph; the missing device `PATCH`/`DELETE`; derived status + stale reaper |
+| platform-ui | `0.9.0 → 0.10.0` | real topology tree (uplinks, not free-text groups); device edit/remove; search + class filter; discovered-vs-manual badges; stale-feed banner |
+
+**The reported bug was not a bug.** "IT > Topology doesn't show all the devices in the network" —
+measured against the real office network the same day: SSID `GDA`, `10.10.0.0/22`, **~58 live hosts**
+behind a UniFi OS gateway at `10.10.0.1`. The ERP held **8 rows**, all hand-seeded fiction on a
+`10.0.x.x` range that does not exist here, and a codebase-wide grep for UniFi/SNMP/ARP/mDNS discovery
+returned **zero hits**. Topology could never have shown the network; the feature did not exist.
+
+Notable within the cut:
+- **The ERP cannot poll the controller — verified, not assumed.** `10.10.0.1` is RFC1918 behind office
+  NAT; `curl` from `gda-aicenter` returns HTTP `000`. Discovery must therefore be a **push** from an
+  office-side collector, which is why `POST /api/:t/it/discovery/report` exists instead of a poller.
+- **MAC is not a device identity.** ~60% of the observed MACs are randomized (private Wi-Fi), so
+  upserts key on UniFi's stable client id. Keying on MAC would have minted a new "device" on every
+  phone's address rotation.
+- **ICMP undercounts 5×** (12 of 58 hosts answer ping), so liveness comes from the controller's client
+  table and never from a probe.
+- **BYOD is counted, never stored.** ~25 of the 58 hosts are personal phones whose hostnames name
+  staff outright; persisting them would build a presence log of named employees, which CLAUDE.md
+  forbids before legal Gate 1. `device_class` classification is recomputed **server-side** so a
+  mis-set collector cannot launder them in.
+- **Registered devices were permanently "unknown".** Nothing ever called the heartbeat endpoint, so
+  every hand-added row kept the DB default forever and rendered grey. Status is now derived from
+  `last_seen_at` freshness, swept by a dark-by-default reaper.
+- **Edit and delete never existed** despite `0019_it_devices.sql` and `lib/it.ts` both promising
+  "register/edit"; `deleted_at` was filtered on by every query and written by nothing.
+- Discovered rows carry an `overrides` layer, so an operator's correction survives the next poll
+  instead of silently reverting ~5 minutes later.
+- The seed's fictional devices are now **off by default** (`SEED_DEMO_DEVICES=1`) and labelled
+  `demo-fixture`. A plausible-but-fake map is worse than an empty one: an empty map prompts a question.
+
+Deliberate deviation from the design doc: the ingest endpoint authorizes on the existing Cerbos
+`create` action rather than a new `discover` one — a new action is a silent DENY until Cerbos is
+restarted, and `create` is already scoped to exactly `company_admin`/`it_staff`.
+
+Carried forward: `it-site-collector` unbuilt (needs a read-only UniFi API key + an always-on office
+host); the live tenant's 8 seeded rows still need purging on `gda-aicenter`; the office network is a
+single flat `/22` with no VLAN separation between workstations and personal phones — a networking
+change, tracked separately.
+
+### `Alpha 01.004.0006b` — 2026-08-03 — knowledge/RAG gets a two-tier corpus and something to retrieve
+
+> `0006a` was tagged but **never deployed**: its commit had swept two in-flight IT network-discovery
+> edits (whose module file was untracked) into `main.ts`/`config.ts`, so `build-sign (platform-nest)`
+> failed at `tsc -p tsconfig.build.json` and the deploy job was skipped. `0006b` is `0006a` with
+> those foreign hunks removed and the committed tree verified to compile in a clean worktree.
+
 
 Status: **PROTOTYPED** (unit- and store-verified; the live sweep on `gda-aicenter` is the DEV-VERIFIED gate).
 
