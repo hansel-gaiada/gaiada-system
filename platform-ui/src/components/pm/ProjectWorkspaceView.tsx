@@ -7,6 +7,7 @@ import { getProject, listComments, listFiles, getFieldDefs } from "@/lib/entitie
 import { postEntityComment, attachFileAction, deleteFileAction } from "@/lib/collabActions";
 import { CommentThread } from "@/components/pm/CommentThread";
 import { Attachments } from "@/components/Attachments";
+import { PendingLink } from "@/components/PendingLink";
 import { listRecordings, STATUS_LABEL, formatDuration } from "@/lib/meetings";
 import { RecordControls } from "@/components/meetings/RecordControls";
 import { formatDateTime } from "@/lib/format";
@@ -54,7 +55,10 @@ import "@/components/pm/pm.css";
 // independently) since it isn't handed them as props.
 export type ProjectWorkspaceSearch = { view?: string; swimlane?: string; tags?: string | string[] };
 
-const VIEWS = ["board", "list", "timeline", "charts", "milestones", "docs"] as const;
+// "files", "discussion" and "meetings" are tabs, not always-rendered cards. They used to sit below
+// every view as three large panels — usually empty — so the page ended in dead weight and the board
+// above it had to compete for attention with an empty comment box.
+const VIEWS = ["board", "list", "timeline", "charts", "milestones", "docs", "files", "discussion", "meetings"] as const;
 type View = (typeof VIEWS)[number];
 
 // The project board only groups by axes that make sense scoped to ONE
@@ -160,8 +164,10 @@ export async function ProjectWorkspaceView({
   const taskHrefBase = backHref.startsWith("/departments/") ? `${basePath}/tasks` : undefined;
   const taskHref = (id: string) => (taskHrefBase ? `${taskHrefBase}/${id}` : `/tasks/${id}`);
 
+  // PendingLink, not Link: a ?view= change is not a segment change, so Next fires no loading.tsx
+  // and a tab click on a cold view looked like nothing happened. See components/PendingLink.tsx.
   const tab = (v: View, label: string) => (
-    <Link href={`${basePath}?view=${v}`} className={`pm-tab${view === v ? " pm-tab--active" : ""}`}>{label}</Link>
+    <PendingLink href={`${basePath}?view=${v}`} className={`pm-tab${view === v ? " pm-tab--active" : ""}`}>{label}</PendingLink>
   );
 
   return (
@@ -179,36 +185,38 @@ export async function ProjectWorkspaceView({
         }
       />
 
-      <div style={{ display: "grid", gap: 16, gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", marginBottom: 18, alignItems: "center" }}>
-        <div><span className="type-eyebrow" style={{ fontSize: 10, opacity: 0.5, display: "block", marginBottom: 6 }}>Status</span><StatusBadge label={status} /></div>
-        <div><span className="type-eyebrow" style={{ fontSize: 10, opacity: 0.5, display: "block", marginBottom: 6 }}>Progress</span><ProgressBar value={progress} /></div>
-        <div>
-          <span className="type-eyebrow" style={{ fontSize: 10, opacity: 0.5, display: "block", marginBottom: 6 }}>Owner</span>
-          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-            <span style={{ font: "400 14px var(--font-body)", color: "var(--text-primary)" }}>
-              {owner ? (owner.responsibleName || owner.refName) : "Unassigned"}
-              {owner && owner.kind !== "person" ? ` · ${owner.refName}` : ""}
-            </span>
-            <AssigneeEditor label={owner ? "Reassign" : "Assign owner"} assignable={assignable} current={owner} save={setProjectOwner.bind(null, projectId)} />
-          </div>
-        </div>
-        <div>
-          <span className="type-eyebrow" style={{ fontSize: 10, opacity: 0.5, display: "block", marginBottom: 6 }}>Tags</span>
+      {/* One line, not a four-column grid of labelled blocks. These are facts about the project, so
+          they read left to right at one size; the work below is what deserves the weight. */}
+      <div className="pm-meta">
+        <StatusBadge label={status} />
+        <span className="pm-meta__prog"><ProgressBar value={progress} /></span>
+        <span className="pm-meta__item">
+          <span className="pm-meta__label">Owner</span>
+          {owner ? (owner.responsibleName || owner.refName) : "Unassigned"}
+          {owner && owner.kind !== "person" ? ` · ${owner.refName}` : ""}
+          <AssigneeEditor label={owner ? "Reassign" : "Assign"} assignable={assignable} current={owner} save={setProjectOwner.bind(null, projectId)} />
+        </span>
+        <span className="pm-meta__item">
+          <span className="pm-meta__label">Tags</span>
           <TagManager tags={tags} create={createTag.bind(null, projectId)} update={updateTag.bind(null, projectId)} remove={deleteTag.bind(null, projectId)} />
-        </div>
+        </span>
       </div>
 
-      <NewTaskForm assignable={assignable} milestones={milestones} customFieldDefs={taskCustomFieldDefs} create={createPmTask.bind(null, projectId)} />
-
-      <div className="pm-tabs">
-        {tab("board", "Board")}{tab("list", "List")}{tab("timeline", "Timeline")}{tab("charts", "Charts")}{tab("milestones", "Milestones")}{tab("docs", "Docs")}
+      <div className="pm-tabsrow">
+        <div className="pm-tabs">
+          {tab("board", "Board")}{tab("list", "List")}{tab("timeline", "Timeline")}{tab("charts", "Charts")}{tab("milestones", "Milestones")}{tab("docs", "Docs")}
+          {tab("files", files.length ? `Files (${files.length})` : "Files")}
+          {tab("discussion", comments.length ? `Discussion (${comments.length})` : "Discussion")}
+          {tab("meetings", meetings.length ? `Meetings (${meetings.length})` : "Meetings")}
+        </div>
+        <NewTaskForm assignable={assignable} milestones={milestones} customFieldDefs={taskCustomFieldDefs} create={createPmTask.bind(null, projectId)} />
       </div>
 
       {/* Tag filter (P2-02, design spec §6/§9): a bookmarkable GET form, same
           pattern as the board's own swimlane control. Applies to Board/List/
           Timeline uniformly (Milestones/Docs aren't task-list views). */}
       {tags.length > 0 && (
-        <Card style={{ marginBottom: 16 }}>
+        <div className="pm-filterbar">
           <form className="lux-filters" method="get" aria-label="Filter by tag">
             <input type="hidden" name="view" value={view} />
             {swimlane !== "status" && <input type="hidden" name="swimlane" value={swimlane} />}
@@ -224,21 +232,23 @@ export async function ProjectWorkspaceView({
               </div>
             </div>
             <div className="lux-filters__actions">
-              <button type="submit" className="lux-btn lux-btn--solid lux-btn--sm">Apply</button>
+              <button type="submit" className="lux-btn lux-btn--ghost lux-btn--sm">Apply</button>
               {selectedTagIds.length > 0 && (
                 <a href={`${basePath}?view=${view}`} className="lux-btn lux-btn--ghost lux-btn--sm">Reset</a>
               )}
             </div>
           </form>
-        </Card>
+        </div>
       )}
 
       {view === "board" && (
         filteredTasks.length === 0 ? (
-          <Card><EmptyNote>{tasks.length === 0 ? "No tasks yet — create the first one above." : "No tasks match this tag filter."}</EmptyNote></Card>
+          <EmptyNote>{tasks.length === 0 ? "No tasks yet — create the first one above." : "No tasks match this tag filter."}</EmptyNote>
         ) : (
             <>
-              <Card style={{ marginBottom: 16 }}>
+              {/* Unboxed: grouping is a setting, and a bordered card gave it the same weight as the
+                  board itself. Apply stays because this is a server-rendered GET form. */}
+              <div className="pm-filterbar">
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>
                   <form className="lux-filters" method="get" aria-label="Board group-by">
                     <input type="hidden" name="view" value="board" />
@@ -249,7 +259,7 @@ export async function ProjectWorkspaceView({
                       </select>
                     </label>
                     <div className="lux-filters__actions">
-                      <button type="submit" className="lux-btn lux-btn--solid lux-btn--sm">Apply</button>
+                      <button type="submit" className="lux-btn lux-btn--ghost lux-btn--sm">Apply</button>
                       {swimlane !== "status" && (
                         <a href={`${basePath}?view=board`} className="lux-btn lux-btn--ghost lux-btn--sm">Reset</a>
                       )}
@@ -266,7 +276,7 @@ export async function ProjectWorkspaceView({
                     />
                   )}
                 </div>
-              </Card>
+              </div>
               {swimlane === "priority" ? (
                 <Board columns={priorityColumns(filteredTasks)} move={setTaskPriority} blockedIds={blockedIds} taskHrefBase={taskHrefBase} taskTags={taskTags} />
               ) : swimlane === "assignee" ? (
@@ -336,7 +346,7 @@ export async function ProjectWorkspaceView({
       {view === "milestones" && (
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
           <Card><MilestoneForm add={addMilestone.bind(null, projectId)} /></Card>
-          {milestones.length === 0 && <Card><EmptyNote>No milestones yet.</EmptyNote></Card>}
+          {milestones.length === 0 && <EmptyNote>No milestones yet.</EmptyNote>}
           {milestones.map((mst) => {
             const mtasks = tasks.filter((t) => t.milestoneId === mst.id);
             return (
@@ -362,7 +372,7 @@ export async function ProjectWorkspaceView({
       {view === "docs" && (
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
           <Card title="New doc"><DocEditor save={saveDoc.bind(null, projectId)} /></Card>
-          {docs.length === 0 && <Card><EmptyNote>No docs yet.</EmptyNote></Card>}
+          {docs.length === 0 && <EmptyNote>No docs yet.</EmptyNote>}
           {docs.map((d) => (
             <Card key={d.id} title={d.title} headerRight={<DocEditor doc={d} save={saveDoc.bind(null, projectId)} />}>
               <pre style={{ margin: 0, whiteSpace: "pre-wrap", font: "400 13px/1.6 var(--font-body)", color: "var(--text-primary)" }}>{d.body}</pre>
@@ -372,20 +382,18 @@ export async function ProjectWorkspaceView({
         </div>
       )}
 
-      <div style={{ marginTop: 24, display: "grid", gap: 20, gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))" }}>
-        <Card title={`Attachments${files.length ? ` · ${files.length}` : ""}`}>
-          <Attachments files={files} canEdit={true} attach={attachFileAction.bind(null, "project", projectId)} remove={deleteFileAction.bind(null, "project", projectId)} />
-        </Card>
-        <Card title="Discussion">
-          <CommentThread comments={comments} post={postEntityComment.bind(null, "project", projectId)} />
-        </Card>
-      </div>
+      {view === "files" && (
+        <Attachments files={files} canEdit={true} attach={attachFileAction.bind(null, "project", projectId)} remove={deleteFileAction.bind(null, "project", projectId)} />
+      )}
+
+      {view === "discussion" && (
+        <CommentThread comments={comments} post={postEntityComment.bind(null, "project", projectId)} />
+      )}
 
       {/* WD-07 (Web Dev Phase 1 §12) — capture a briefing straight from this project so it lands
-          scoped (`projectId` + this project's own `client_id`), and shows here once recorded —
-          the client/project-workspace half of the capture-edge context plumbing. */}
-      <div style={{ marginTop: 20 }}>
-        <Card title={`Meetings${meetings.length ? ` · ${meetings.length}` : ""}`}>
+          scoped (`projectId` + this project's own `client_id`), and shows here once recorded. */}
+      {view === "meetings" && (
+        <>
           <RecordControls projectId={projectId} clientId={base?.client_id ?? undefined} />
           {meetings.length > 0 && (
             <div style={{ marginTop: 18 }}>
@@ -401,8 +409,9 @@ export async function ProjectWorkspaceView({
               />
             </div>
           )}
-        </Card>
-      </div>
+        </>
+      )}
+
     </>
   );
 }

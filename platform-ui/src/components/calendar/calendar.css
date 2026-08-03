@@ -1,0 +1,178 @@
+/* Month / Week / Day grids. Tokens only — the guard test forbids colour literals in component CSS.
+   Grid lines are the system's 0.5px hairlines, so the calendar reads as ruled paper rather than a
+   boxed widget: one outer border, shared internal hairlines, zero radius, no shadows. */
+
+.cal-month {
+  border: 0.5px solid var(--erp-hairline);
+  border-bottom: none;
+}
+.cal-month__head,
+.cal-month__row {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+}
+.cal-month__wd {
+  padding: 8px 10px;
+  font-size: 10px;
+  opacity: 0.5;
+  border-bottom: 0.5px solid var(--erp-hairline);
+}
+.cal-month__wd + .cal-month__wd,
+.cal-cell + .cal-cell {
+  border-left: 0.5px solid var(--erp-hairline-soft);
+}
+
+.cal-cell {
+  min-height: 104px;
+  padding: 6px 7px 8px;
+  border-bottom: 0.5px solid var(--erp-hairline-soft);
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+/* Days from the neighbouring month stay visible but recede — losing them entirely breaks the week
+   rows, and greying them is how a reader knows the month boundary without counting. */
+.cal-cell--outside { opacity: 0.4; }
+.cal-cell--today { background: var(--wash-soft, var(--surface-card)); }
+
+.cal-cell__num {
+  align-self: flex-start;
+  font: 400 12px var(--font-body);
+  color: var(--erp-ink-60);
+  text-decoration: none;
+  padding: 1px 4px;
+}
+.cal-cell--today .cal-cell__num {
+  font-weight: 700;
+  color: var(--text-on-accent);
+  background: var(--erp-accent);
+}
+.cal-cell__num:hover { color: var(--text-primary); }
+.cal-cell--today .cal-cell__num:hover { color: var(--text-on-accent); }
+
+.cal-cell__items { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.cal-cell__more {
+  font: 400 11px var(--font-body);
+  color: var(--erp-ink-50);
+  text-decoration: none;
+}
+.cal-cell__more:hover { color: var(--text-primary); }
+
+/* One task. Flat, hairline-bounded, single line — a month cell holds three of these before it
+   spills to "+N more", so anything taller would push the grid out of shape. */
+.cal-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 6px;
+  border: 0.5px solid var(--erp-hairline);
+  background: var(--surface-card);
+  font: 400 12px var(--font-body);
+  color: var(--text-primary);
+  text-decoration: none;
+  min-width: 0;
+  opacity: 0.85;
+  transition: opacity 0.2s var(--erp-ease);
+}
+.cal-chip:hover { opacity: 1; }
+.cal-chip__dot {
+  flex: 0 0 auto;
+  width: 5px;
+  height: 5px;
+  background: var(--erp-accent);
+}
+.cal-chip__text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Overdue is the one place colour is spent here: it is the only state a reader must not miss. */
+.cal-chip--overdue { border-color: var(--status-critical); }
+.cal-chip--overdue .cal-chip__dot { background: var(--status-critical); }
+
+.cal-week {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  border: 0.5px solid var(--erp-hairline);
+}
+.cal-week__col { min-height: 220px; display: flex; flex-direction: column; min-width: 0; }
+.cal-week__col + .cal-week__col { border-left: 0.5px solid var(--erp-hairline-soft); }
+.cal-week__col--today { background: var(--wash-soft, var(--surface-card)); }
+.cal-week__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 9px 10px;
+  border-bottom: 0.5px solid var(--erp-hairline-soft);
+  text-decoration: none;
+  color: var(--erp-ink-60);
+}
+.cal-week__head:hover { color: var(--text-primary); }
+.cal-week__num { font: 700 15px var(--font-display); color: var(--text-primary); }
+.cal-week__items { padding: 8px; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.cal-week__empty { color: var(--erp-ink-50); font-size: 12px; }
+
+.cal-day { display: flex; flex-direction: column; }
+.cal-day__row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 0;
+  border-bottom: 0.5px solid var(--erp-hairline-soft);
+}
+.cal-day__title { font: 400 14px var(--font-body); color: var(--text-primary); text-decoration: none; }
+.cal-day__title:hover { text-decoration: underline; }
+.cal-day__meta {
+  margin-left: auto;
+  display: inline-flex;
+  gap: 10px;
+  font: 400 12px var(--font-body);
+  color: var(--erp-ink-50);
+  white-space: nowrap;
+}
+.cal-day__overdue { color: var(--status-critical-fg); font-weight: 700; }
+
+/* Toolbar: view tabs + date stepper + inline counts. */
+.cal-bar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+.cal-tabs { display: inline-flex; border: 0.5px solid var(--erp-hairline); }
+.cal-tab {
+  padding: 6px 13px;
+  font: 700 10px var(--font-body);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--erp-ink-60);
+  text-decoration: none;
+  transition: color 0.2s var(--erp-ease), background 0.2s var(--erp-ease);
+}
+.cal-tab + .cal-tab { border-left: 0.5px solid var(--erp-hairline); }
+.cal-tab:hover { color: var(--text-primary); }
+.cal-tab--on { background: var(--erp-accent); color: var(--text-on-accent); }
+.cal-tab--on:hover { color: var(--text-on-accent); }
+
+.cal-nav { display: inline-flex; align-items: center; gap: 6px; }
+.cal-nav__btn {
+  border: 0.5px solid var(--erp-hairline);
+  background: transparent;
+  color: var(--erp-ink-60);
+  font: 400 13px var(--font-body);
+  padding: 5px 10px;
+  text-decoration: none;
+  transition: color 0.2s var(--erp-ease);
+}
+.cal-nav__btn:hover { color: var(--text-primary); }
+.cal-range { font: 700 15px var(--font-display); color: var(--text-primary); min-width: 210px; }
+
+@media (max-width: 900px) {
+  /* Seven columns of chips is unreadable on a phone; the week becomes a day-per-row list and the
+     month grid keeps its shape but drops to numbers plus a count. */
+  .cal-week { grid-template-columns: 1fr; }
+  .cal-week__col + .cal-week__col { border-left: none; border-top: 0.5px solid var(--erp-hairline-soft); }
+  .cal-week__col { min-height: 0; }
+  .cal-cell { min-height: 74px; }
+  .cal-chip__text { display: none; }
+  .cal-range { min-width: 0; }
+}

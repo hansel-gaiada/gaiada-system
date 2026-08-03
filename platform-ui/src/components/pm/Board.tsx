@@ -591,7 +591,10 @@ function Card({
             {tags.map((tg) => <TagChip key={tg.id} label={tg.label} color={tg.color} />)}
           </div>
         )}
-        <ProgressBar value={task.progress} />
+        {/* A 0% bar on every untouched card is a row of identical empty rails that says nothing; the
+            column the card sits in already communicates "not started". The bar appears once there is
+            progress to show, and disappears again at 100% because the Done column says that. */}
+        {task.progress > 0 && task.progress < 100 && <ProgressBar value={task.progress} />}
         <div className="pm-card__meta">
           <span className="pm-who">{who}</span>
           {unitTag ? <span className="pm-chip">{unitTag}</span> : <span className="pm-chip">{task.priority}</span>}

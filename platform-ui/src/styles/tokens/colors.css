@@ -151,6 +151,43 @@
   --opacity-muted:    0.60; /* @kind other */   /* captions, ©, icon rest   */
   --opacity-fade:     0.55; /* @kind other */   /* button hover fade clamp  */
   --opacity-hairline: 0.18; /* @kind other */   /* hairline over light bg   */
+
+  /* ── Chart palette (--rc-*) ────────────────────────────────────────────────
+     Moved here from components/reports/charts/charts.css, which had grown a
+     second token layer of its own: raw hex declared outside this file means two
+     places to change a colour, and — the real cost — the dark-block parity test
+     below could not see them, so a series colour was free to differ between an
+     OS-dark user and one who pinned dark.
+
+     The chrome values alias the brand tokens (a chart's surface IS a card). The
+     eight series values are their own scale and stay literal on purpose: they
+     must be distinguishable from EACH OTHER, which is a different requirement
+     from the brand palette and cannot be derived from it. Consumers reference
+     var(--rc-*) only; the raw values live here, like every other colour. */
+  --rc-surface:        var(--surface-card);
+  --rc-text-primary:   var(--text-primary);
+  --rc-text-secondary: var(--erp-ink-60);
+  --rc-text-muted:     var(--erp-ink-50);
+  --rc-grid:           var(--erp-hairline-soft);
+  --rc-axis:           var(--erp-hairline);
+  --rc-tooltip-bg:     var(--surface-card);
+  --rc-tooltip-border: var(--erp-hairline);
+  --rc-focus:          var(--erp-accent);
+
+  --rc-series-1: #2a78d6; /* blue */
+  --rc-series-2: #eb6834; /* orange */
+  --rc-series-3: #1baf7a; /* aqua */
+  --rc-series-4: #eda100; /* yellow */
+  --rc-series-5: #e87ba4; /* magenta */
+  --rc-series-6: #008300; /* green */
+  --rc-series-7: #4a3aa7; /* violet */
+  --rc-series-8: #e34948; /* red */
+
+  --rc-good:          #0ca30c;
+  --rc-warning:       #fab219;
+  --rc-serious:       #ec835a;
+  --rc-critical:      #d03b3b;
+  --rc-delta-up-good: #006300;
 }
 
 /* =====================================================================
@@ -222,6 +259,33 @@
 
     --elev-overlay: 0 10px 28px -10px rgb(0 0 0 / 0.70), 0 1px 2px rgb(0 0 0 / 0.40);
     --scrim: rgb(0 0 0 / 0.60);
+
+    /* Chart palette — dark. Lifted series colours: the light-mode values are too dark to read
+       against an ink surface. Kept byte-identical between the two dark blocks below. */
+    --rc-surface:        #1a1a19;
+    --rc-text-primary:   #ffffff;
+    --rc-text-secondary: #c3c2b7;
+    --rc-text-muted:     #898781;
+    --rc-grid:           #2c2c2a;
+    --rc-axis:           #383835;
+    --rc-tooltip-bg:     #1a1a19;
+    --rc-tooltip-border: rgba(255, 255, 255, 0.1);
+    --rc-focus:          #3987e5;
+
+    --rc-series-1: #3987e5;
+    --rc-series-2: #d95926;
+    --rc-series-3: #199e70;
+    --rc-series-4: #c98500;
+    --rc-series-5: #d55181;
+    --rc-series-6: #008300;
+    --rc-series-7: #9085e9;
+    --rc-series-8: #e66767;
+
+    --rc-good:          #0ca30c;
+    --rc-warning:       #fab219;
+    --rc-serious:       #ec835a;
+    --rc-critical:      #d03b3b;
+    --rc-delta-up-good: #0ca30c;
   }
 }
 
@@ -279,4 +343,64 @@ html[data-theme="dark"] {
 
   --elev-overlay: 0 10px 28px -10px rgb(0 0 0 / 0.70), 0 1px 2px rgb(0 0 0 / 0.40);
   --scrim: rgb(0 0 0 / 0.60);
+
+  /* Chart palette — dark. Lifted series colours: the light-mode values are too dark to read
+     against an ink surface. Kept byte-identical between the two dark blocks below. */
+  --rc-surface:        #1a1a19;
+  --rc-text-primary:   #ffffff;
+  --rc-text-secondary: #c3c2b7;
+  --rc-text-muted:     #898781;
+  --rc-grid:           #2c2c2a;
+  --rc-axis:           #383835;
+  --rc-tooltip-bg:     #1a1a19;
+  --rc-tooltip-border: rgba(255, 255, 255, 0.1);
+  --rc-focus:          #3987e5;
+
+  --rc-series-1: #3987e5;
+  --rc-series-2: #d95926;
+  --rc-series-3: #199e70;
+  --rc-series-4: #c98500;
+  --rc-series-5: #d55181;
+  --rc-series-6: #008300;
+  --rc-series-7: #9085e9;
+  --rc-series-8: #e66767;
+
+  --rc-good:          #0ca30c;
+  --rc-warning:       #fab219;
+  --rc-serious:       #ec835a;
+  --rc-critical:      #d03b3b;
+  --rc-delta-up-good: #0ca30c;
+}
+
+/* Chart palette — print. Paper is always light, whatever theme the screen was in, so the dark
+   values above must be overridden for the printed report (TR-20 renders the same chart components
+   through the print route). Values are the light ones, kept literal here rather than aliased,
+   because the surrounding page tokens are not in play on paper. Declared at html level so it beats
+   whichever dark block was active on screen. */
+@media print {
+  html {
+    --rc-surface:        #fcfcfb;
+    --rc-text-primary:   #0b0b0b;
+    --rc-text-secondary: #52514e;
+    --rc-text-muted:     #898781;
+    --rc-grid:           #e1e0d9;
+    --rc-axis:           #c3c2b7;
+    --rc-tooltip-bg:     #fcfcfb;
+    --rc-tooltip-border: rgba(11, 11, 11, 0.1);
+
+    --rc-series-1: #2a78d6;
+    --rc-series-2: #eb6834;
+    --rc-series-3: #1baf7a;
+    --rc-series-4: #eda100;
+    --rc-series-5: #e87ba4;
+    --rc-series-6: #008300;
+    --rc-series-7: #4a3aa7;
+    --rc-series-8: #e34948;
+
+    --rc-good:          #0ca30c;
+    --rc-warning:       #fab219;
+    --rc-serious:       #ec835a;
+    --rc-critical:      #d03b3b;
+    --rc-delta-up-good: #006300;
+  }
 }

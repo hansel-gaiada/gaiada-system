@@ -26,7 +26,7 @@ export default async function HrCaseDetailPage({ params, searchParams }: {
   if (!userId) redirect("/login");
   const me = await getMe(userId);
   const tenant = await getActiveTenant(me);
-  if (!tenant) return <Card><EmptyNote>Select a company from the top bar.</EmptyNote></Card>;
+  if (!tenant) return <EmptyNote>Select a company from the top bar.</EmptyNote>;
 
   const { caseId } = await params;
   const { company } = await searchParams;
@@ -40,7 +40,7 @@ export default async function HrCaseDetailPage({ params, searchParams }: {
     return (
       <>
         <Breadcrumbs items={[{ label: "HR", href: "/hr" }, { label: "Cases", href: "/hr/cases" }, { label: "Not found" }]} />
-        <Card><EmptyNote>This case doesn&apos;t exist, or you don&apos;t have access to it.</EmptyNote></Card>
+        <EmptyNote>This case doesn&apos;t exist, or you don&apos;t have access to it.</EmptyNote>
       </>
     );
   }

@@ -67,9 +67,9 @@ export default async function HubSystemPage({
             <>
               <div className="sys-status-card__counters" style={{ marginTop: 0 }}>
                 <KpiTile label="Tools" value={String(tools.length)} foot={`${writeTools} write`} />
-                <KpiTile label="Decisions logged" value={String(audit.length)} foot={`${denies} denied`} />
-                <KpiTile label="Assurance floor" value={(policy.assuranceRanks ?? []).join(" < ") || "—"} />
-                <KpiTile label="Revocation (D11)" value={policy.revocationCheck ? "On" : "Off"} />
+                <KpiTile label="Decisions logged" value={String(audit.length)} foot={`${denies} denied`} hint="Authorization decisions in the hub’s audit trail — one row per tool call it was asked to allow. A count of the trail, not of distinct tools." />
+                <KpiTile label="Assurance floor" value={(policy.assuranceRanks ?? []).join(" < ") || "—"} hint="How strongly a caller must have proven who they are, ranked lowest to highest. A tool can demand a minimum rank, so a chat-linked identity is refused where a fully signed-in session is allowed." />
+                <KpiTile label="Revocation (D11)" value={policy.revocationCheck ? "On" : "Off"} hint="Whether every tool call re-checks that the caller’s access has not been revoked since it was granted. Off means a revoked user could still act until their session expires." />
               </div>
               <div style={{ marginTop: 18 }}>
                 <DescriptionList

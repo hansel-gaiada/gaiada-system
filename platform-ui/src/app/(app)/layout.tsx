@@ -6,7 +6,10 @@ import { getPrefs } from "@/lib/prefs";
 import { listDepartmentBriefs, type DeptBrief } from "@/lib/departments";
 import { Shell } from "@/components/shell/Shell";
 
-export default async function AppLayout({ children }: { children: React.ReactNode }) {
+// `drawer` is the parallel slot the intercepted task route renders into (see @drawer/). It sits
+// OUTSIDE <Shell>'s scroll container so the slide-over is positioned against the viewport rather
+// than the scrolled main column.
+export default async function AppLayout({ children, drawer }: { children: React.ReactNode; drawer: React.ReactNode }) {
   const userId = await getSessionUserId();
   if (!userId) redirect("/login");
   const me = await getMe(userId).catch(() => null);
@@ -18,8 +21,11 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     ? await listDepartmentBriefs(userId, tenantId).catch(() => [] as DeptBrief[])
     : [];
   return (
-    <Shell me={me} tenantId={tenantId} moduleLabel="My Workspace" prefs={prefs} departments={departments}>
-      {children}
-    </Shell>
+    <>
+      <Shell me={me} tenantId={tenantId} moduleLabel="My Workspace" prefs={prefs} departments={departments}>
+        {children}
+      </Shell>
+      {drawer}
+    </>
   );
 }

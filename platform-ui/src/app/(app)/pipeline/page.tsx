@@ -33,7 +33,7 @@ export default async function PipelinePage({ searchParams }: { searchParams: SP 
   const me = await getMe(userId);
   const tenant = await getActiveTenant(me);
   if (!tenant) {
-    return <Card><EmptyNote>Select a company to see its delivery pipeline.</EmptyNote></Card>;
+    return <EmptyNote>Select a company to see its delivery pipeline.</EmptyNote>;
   }
   const { status } = await searchParams;
 

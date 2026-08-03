@@ -52,13 +52,13 @@ export default async function BillingPage() {
       />
       <div style={{ display: "grid", gap: 16, gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", marginBottom: 20 }}>
         <KpiTile label="Invoices" value={String(invoices.length)} />
-        <KpiTile label="Outstanding" value={money(outstanding, cur)} foot="sent, unpaid" />
-        <KpiTile label="Paid" value={money(paid, cur)} />
+        <KpiTile label="Outstanding" value={money(outstanding, cur)} foot="sent, unpaid" hint="Total of invoices with status “sent”. Drafts are NOT counted — an unsent invoice is not money owed to you yet." />
+        <KpiTile label="Paid" value={money(paid, cur)} hint="Total of invoices marked paid. Neither figure includes drafts, so Outstanding + Paid can be less than the invoice list adds up to." />
       </div>
       {invoices.length === 0 ? (
         <>
           <BackendPending what="No invoices returned." contract="GET /api/:t/invoices" />
-          <Card><EmptyNote>No invoices yet. Generate one from billable time.</EmptyNote></Card>
+          <EmptyNote>No invoices yet. Generate one from billable time.</EmptyNote>
         </>
       ) : (
         <DataTable columns={COLUMNS} rows={rows} link={{ base: "/billing", idKey: "id", labelKey: "clientName" }} csvName="invoices" pageSize={20} />

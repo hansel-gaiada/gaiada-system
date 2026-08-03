@@ -118,13 +118,13 @@ export default async function GatewaySystemPage({
                   value={String(budget.used ?? 0)}
                   foot={capPct !== null ? `${capPct}% of the effective cap` : undefined}
                 />
-                <KpiTile label="Daily cap" value={String(budget.cap ?? "—")} />
+                <KpiTile label="Daily cap" value={String(budget.cap ?? "—")} hint="Provider CALLS allowed per day across the whole platform — not tokens, not currency. Set by GATEWAY_DAILY_CALL_CAP; the gateway refuses further calls once it is reached." />
                 <KpiTile
                   label="Effective cap"
                   value={String(budget.effectiveCap ?? budget.cap ?? "—")}
                   foot={budget.drActive ? "raised by DR burst" : undefined}
                 />
-                <KpiTile label="Per-tenant cap" value={String(budget.perTenantCap ?? "—")} />
+                <KpiTile label="Per-tenant cap" value={String(budget.perTenantCap ?? "—")} hint="Per-company share of the daily call budget, so one tenant cannot consume the platform ceiling alone. “—” means none is configured and only the platform cap applies." />
               </div>
               <div style={{ marginTop: 18 }}>
                 <GatewayTenantSpendTable tenantSpend={tenantSpend} perTenantCap={budget.perTenantCap} />

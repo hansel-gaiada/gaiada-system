@@ -14,7 +14,11 @@ export interface Prefs {
   theme: Theme;
 }
 
-export const DEFAULT_PREFS: Prefs = { density: "comfortable", width: "standard", theme: "auto" };
+// Width defaults to "wide" (no max-width): the suite is dominated by tables, boards and console
+// grids, which the 1180px reading measure squeezed into needless horizontal scrolling on a normal
+// desktop. "standard" stays available in Account -> Content width for anyone who prefers the
+// narrower measure for the prose-shaped pages.
+export const DEFAULT_PREFS: Prefs = { density: "comfortable", width: "wide", theme: "auto" };
 const COOKIE = "gaiada_prefs";
 
 const DENSITIES: Density[] = ["comfortable", "compact"];

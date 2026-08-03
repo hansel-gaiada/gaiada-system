@@ -49,9 +49,9 @@ export function Charts({ kpis, flow, burndownSeries, burndownOverlay, tagRows }:
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       <div style={{ display: "grid", gap: 16, gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))" }}>
-        <KpiTile label="Open" value={String(kpis.open)} />
+        <KpiTile label="Open" value={String(kpis.open)} hint="Tasks whose status this project does not mark as done. Counts every task in the project, ignoring any tag filter above." />
         <KpiTile label="Done" value={String(kpis.done)} />
-        <KpiTile label="Avg progress" value={`${kpis.avgProgress}%`} />
+        <KpiTile label="Avg progress" value={`${kpis.avgProgress}%`} hint="A flat mean of each task's own progress percentage — every task counts equally, whatever its size or estimate. Done tasks are included, so this rises as work closes." />
       </div>
       <Card title="Cumulative flow"><CumulativeFlowChart flow={flow} /></Card>
       <Card title="Burndown"><BurndownChart series={burndownSeries} overlay={burndownOverlay} /></Card>

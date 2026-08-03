@@ -65,7 +65,7 @@ export default async function ProjectsPage() {
         actions={<Link href="/projects/new" className="lux-btn lux-btn--solid lux-btn--sm">New project</Link>}
       />
       {projects.length === 0 ? (
-        <Card><EmptyNote>No projects yet. Create the first project to get started.</EmptyNote></Card>
+        <EmptyNote>No projects yet. Create the first project to get started.</EmptyNote>
       ) : (
         <DataTable columns={COLUMNS} rows={rows} link={{ base: "/projects", idKey: "id", labelKey: "name" }} csvName="projects" pageSize={20} />
       )}

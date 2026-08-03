@@ -2,6 +2,7 @@ import type { QueueItem } from "@/lib/queueUrgency";
 import { NeedsMeQueue } from "./NeedsMeQueue";
 import { FilterChips, type QueueFilter, type FilterChipDef } from "./FilterChips";
 import { ThroughputSparkline } from "./ThroughputSparkline";
+import { TodayAgenda } from "./TodayAgenda";
 import type { QueueDecideOrigin } from "@/app/(app)/actions";
 import "./dashboard.css";
 
@@ -44,26 +45,42 @@ export function applyQueueFilter(items: QueueItem[], filter: QueueFilter | undef
 // hero; KPI tiles are reborn as clickable filter chips over that same queue
 // (not static vanity numbers); a demoted sparkline keeps glance value
 // without leading.
-export function CommandCenterHome({ items, filter, buildFilterHref, decide, throughput, emptyText }: {
+export function CommandCenterHome({ items, filter, buildFilterHref, decide, throughput, emptyText, agendaItems }: {
   items: QueueItem[];
   filter: QueueFilter | undefined;
   buildFilterHref: (next: QueueFilter | undefined) => string;
   decide: Decide;
   throughput: number[];
   emptyText?: string;
+  /** The caller's own open tasks. Passed in rather than filtered out of `items`: the queue's task
+   *  leg reads the legacy `tasks` table and returns nothing on live data (see page.tsx). */
+  agendaItems?: QueueItem[];
 }) {
-  const chips = buildChips(items);
+  // A chip reading "Overdue 0" is a filter that leads to an empty list — it costs a scan and offers
+  // nothing. Only buckets with something in them are offered. The ACTIVE filter always survives,
+  // even at zero, or the chip you just clicked would vanish under you and strand you on a filtered
+  // view with no way back.
+  const chips = buildChips(items).filter((c) => c.count > 0 || c.key === filter);
   const filtered = applyQueueFilter(items, filter);
+  // Reusing the IC tier's agenda here means a manager whose queue is short still lands on something
+  // actionable instead of ~500px of blank page, which is what this screen used to show.
+  const agenda = agendaItems ?? items.filter((i) => i.type === "task");
   return (
     <div className="command-center">
       <div className="command-center__chips-row">
-        <FilterChips chips={chips} active={filter} buildHref={buildFilterHref} />
+        {chips.length > 0 && <FilterChips chips={chips} active={filter} buildHref={buildFilterHref} />}
         <ThroughputSparkline series={throughput} />
       </div>
-      <section>
-        <span className="type-eyebrow command-center__heading">Needs you</span>
-        <NeedsMeQueue items={filtered} decide={decide} emptyText={emptyText} />
-      </section>
+      <div className="command-center__split">
+        <section>
+          <span className="type-eyebrow command-center__heading">Needs you{items.length > 0 ? ` (${items.length})` : ""}</span>
+          <NeedsMeQueue items={filtered} decide={decide} emptyText={emptyText} />
+        </section>
+        <section>
+          <span className="type-eyebrow command-center__heading">Your work</span>
+          <TodayAgenda items={agenda} />
+        </section>
+      </div>
     </div>
   );
 }

@@ -23,7 +23,7 @@ export default async function ITOverviewPage() {
   const tenant = await getActiveTenant(me);
 
   if (!tenant) {
-    return <Card><EmptyNote>Select a company from the top bar.</EmptyNote></Card>;
+    return <EmptyNote>Select a company from the top bar.</EmptyNote>;
   }
 
   const [devices, events] = await Promise.all([

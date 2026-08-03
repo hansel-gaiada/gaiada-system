@@ -1,26 +1,48 @@
-/* Report chart kit (TR-16) — dataviz-skill-governed mark specs.
+/* Report chart kit (TR-16) — dataviz-skill-governed tokens + mark specs.
    Zero external deps: hand-rolled inline SVG only, no chart library, no CDN
    fonts (the system's Inter/Cormorant are already self-hosted — see
-   styles/tokens/fonts.css). This file holds the kit's spacing/typography/mark
-   constants; every chart component below reads the palette by role.
+   styles/tokens/fonts.css). This file is the ONE place the kit's palette and
+   spacing constants live; every chart component below reads them by role.
 
-   The PALETTE (light / dark / print) moved to styles/tokens/charts-kit.css on
-   2026-08-03 and is @imported below. It had to move because the token layer is the
-   only place a raw colour literal may appear (styles/tokens.test.ts's "components
-   never hardcode a colour literal" guard) — sitting under components/, the kit's own
-   palette read to that guard as forty-odd hardcoded violations, indistinguishable
-   from a component author sneaking a hex in. The declarations themselves are
-   unchanged; see that file's header for the dark-theme gap the kit closes itself, and
-   for why the categorical ramp is the dataviz default rather than the site's
-   TAG_COLOR_HEX. */
+   GAP THIS FILE HAS TO CLOSE ITSELF: platform-ui has no site-wide dark theme
+   yet (confirmed absent — no `--surface-card`/`--text-primary` etc. carry a
+   dark value anywhere in styles/tokens/*; the PM console work noted the same
+   gap). Rather than block this ticket on that, the kit is SELF-CONTAINED: it
+   reuses the site's existing ink/surface tokens for chrome (so charts still
+   look native to the "luxury minimalist" system) and defines its own light/
+   dark step for the one thing the site has no validated version of — a
+   categorical hue ramp for series identity. Both a `prefers-color-scheme`
+   query and a `[data-theme]` override are wired now (the same dual mechanism
+   `dataviz`'s palette.md prescribes) so the kit lights up correctly the
+   INSTANT app-wide dark mode lands — nothing here needs revisiting then.
+   Today there is no in-app theme toggle to exercise the dark branch live;
+   verified instead by forcing `data-theme="dark"` (see TR-16 report).
 
-@import "../../../styles/tokens/charts-kit.css";
+   Categorical hues are the `dataviz` skill's documented, pre-validated
+   default 8-hue palette (references/palette.md) — deliberately NOT the
+   site's existing TAG_COLOR_HEX (lib/tagColors.ts): that palette was
+   validated for WCAG *text* contrast only, at a muted desaturation chosen
+   for quiet tag chips, and would not clear the categorical chroma floor or
+   CVD separation checks a chart series needs. Swapping in a bespoke
+   bronze/champagne-family 8-hue ramp (properly re-validated with
+   scripts/validate_palette.js) is a reasonable follow-up if Gaiada wants
+   brand-matched chart hues later — nothing else in the kit would need to
+   change, per the skill's "swap the palette file" contract. */
 
-/* print — no interaction chrome (TR-20 renders these SAME components through print.css;
-   this rule set means they already work there without rebuilding, per the TR-16 brief).
-   The forced-light print PALETTE lives in styles/tokens/charts-kit.css next to the other
-   two themes, so all three stay side by side and comparable. */
+/* The --rc-* palette this kit consumes now lives in styles/tokens/colors.css (light, both dark
+   blocks, and the print override) — one token layer for the whole app, and the parity test there
+   covers chart colours too. This file only references them. */
+.rc-viz {
+  color-scheme: light;
+}
+
+/* print — light theme forced, exact colors, no interaction chrome (TR-20 renders
+   these SAME components through print.css; this rule set means they already work
+   there without rebuilding, per the TR-16 brief). */
 @media print {
+  .rc-viz {
+    color-scheme: light;
+  }
   .rc-viz, .rc-viz * { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
   .rc-tooltip, .rc-crosshair { display: none !important; }
   /* Un-scrolling a wide chart isn't enough on its own — every scroll-container

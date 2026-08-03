@@ -26,7 +26,7 @@ export default async function MeetingsPage({ searchParams }: { searchParams: SP 
   const me = await getMe(userId);
   const tenant = await getActiveTenant(me);
   if (!tenant) {
-    return <Card><EmptyNote>Select a company to see its meeting recordings.</EmptyNote></Card>;
+    return <EmptyNote>Select a company to see its meeting recordings.</EmptyNote>;
   }
   const { status, clientId, projectId } = await searchParams;
 

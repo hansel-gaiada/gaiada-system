@@ -36,7 +36,7 @@ export default async function WorkflowsPage({ searchParams }: { searchParams: Se
       </div>
 
       {workflows.length === 0 ? (
-        <Card><EmptyNote>No workflows found. The list appears once Automation is connected.</EmptyNote></Card>
+        <EmptyNote>No workflows found. The list appears once Automation is connected.</EmptyNote>
       ) : (
         <div className="it-wf-wrap">
           <Card title="Workflows" style={{ alignSelf: "start" }}>

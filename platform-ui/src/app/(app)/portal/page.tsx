@@ -24,7 +24,7 @@ export default async function PortalPage() {
   if (!userId) redirect("/login");
   const me = await getMe(userId);
   const tenant = await getActiveTenant(me);
-  if (!tenant) return <Card><EmptyNote>No workspace selected.</EmptyNote></Card>;
+  if (!tenant) return <EmptyNote>No workspace selected.</EmptyNote>;
 
   const { runs, isPortalClient } = await listPortalRuns(userId, tenant);
   // Pull detail for each run so we can render its client-side gates inline (small N for a client).
@@ -42,20 +42,18 @@ export default async function PortalPage() {
       </div>
 
       {runs.length === 0 ? (
-        <Card>
-          {isPortalClient ? (
-            <EmptyNote>No projects yet. Once your kickoff is processed, your project appears here.</EmptyNote>
-          ) : (
-            // Staff opening the client-facing view. Saying "once your kickoff is processed" here
-            // implied a project was on its way to THEM; this is a preview of a surface that only
-            // resolves against a client account.
-            <EmptyNote>
-              This is the client-facing portal. You&apos;re signed in as a staff member, so there is no
-              client account to resolve projects against — a client sees their own projects and
-              sign-offs here. Track delivery internally under Delivery Pipeline.
-            </EmptyNote>
-          )}
-        </Card>
+        // Unboxed per reva/ui's empty-state pass; the isPortalClient split stays. Telling a staff
+        // member "once your kickoff is processed" implied a project was on its way to THEM — this
+        // surface only ever resolves against a client account.
+        isPortalClient ? (
+          <EmptyNote>No projects yet. Once your kickoff is processed, your project appears here.</EmptyNote>
+        ) : (
+          <EmptyNote>
+            This is the client-facing portal. You&apos;re signed in as a staff member, so there is no
+            client account to resolve projects against — a client sees their own projects and
+            sign-offs here. Track delivery internally under Delivery Pipeline.
+          </EmptyNote>
+        )
       ) : (
         <div style={{ display: "grid", gap: 20 }}>
           {details.filter(Boolean).map((run) => {

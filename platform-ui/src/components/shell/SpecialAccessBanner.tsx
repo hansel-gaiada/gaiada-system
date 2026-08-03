@@ -10,9 +10,11 @@ export function SpecialAccessBanner({ unrestricted }: { unrestricted: boolean })
   return (
     <div className="erp-special" role="note">
       <span className="erp-special__tag">{unrestricted ? "Unrestricted access" : "Elevated access"}</span>
+      {/* Kept to one line: it appears on every page of every session for these accounts, so the
+          long form was three lines of repetition a day. The two facts that must land — the scope
+          of the access, and that it is recorded — both survive. */}
       <span className="erp-special__text">
-        You can view {unrestricted ? "and change" : ""} every company under the holding. This is special
-        access — all actions are <strong>monitored, logged, and reported</strong>.
+        Every company{unrestricted ? ", editable" : ""} — actions are <strong>logged and reported</strong>.
       </span>
     </div>
   );

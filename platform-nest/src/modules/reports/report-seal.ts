@@ -104,6 +104,10 @@ export interface SealedDocumentEntry {
  *
  *  Array holes/`undefined` elements become `null`, again matching `JSON.stringify`. */
 function canonicalStringify(value: unknown): string {
+  // Both branches mirror JSON.stringify's own semantics: an undefined property is omitted, an
+  // undefined ARRAY element becomes null (arrays cannot have holes in JSON). reva/ui fixed this
+  // independently and identically; kept this version because it also closes the toJSON() case the
+  // docblock above describes, which that one did not.
   if (Array.isArray(value)) return `[${value.map((v) => (v === undefined ? "null" : canonicalStringify(v))).join(",")}]`;
   if (value !== null && typeof value === "object") {
     const toJSON = (value as { toJSON?: unknown }).toJSON;

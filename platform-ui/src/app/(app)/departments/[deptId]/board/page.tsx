@@ -179,15 +179,13 @@ export default async function DepartmentBoardPage({ params, searchParams }: { pa
       )}
 
       {tagFilteredTasks.length === 0 ? (
-        <Card>
-          <EmptyNote>
+        <EmptyNote>
             {focusedTasks.length === 0
               ? (focus.mode === "dept"
                   ? `No work routed to this department yet. Tasks assigned to ${dept.name}, its divisions, or its people appear here.`
                   : `No work routed to ${focusLabel} yet.`)
               : "No tasks match this tag filter."}
           </EmptyNote>
-        </Card>
       ) : swimlane === "priority" ? (
         <Board columns={priorityColumns(tagFilteredTasks)} move={setTaskPriority} blockedIds={blockedIds} taskTags={taskTags} />
       ) : swimlane === "assignee" ? (
