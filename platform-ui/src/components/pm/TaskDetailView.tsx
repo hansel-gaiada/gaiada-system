@@ -21,7 +21,7 @@ import {
 import { StatusSelect } from "@/components/pm/StatusSelect";
 import { PageHeader } from "@/components/PageHeader";
 import { DescriptionList } from "@/components/DescriptionList";
-import { Card, StatusBadge } from "@/components/ui";
+import { StatusBadge } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
 import { ProgressControl } from "@/components/pm/ProgressControl";
 import { Subtasks } from "@/components/pm/Subtasks";
@@ -33,6 +33,8 @@ import { Contributors } from "@/components/pm/Contributors";
 import { TimeLog } from "@/components/pm/TimeLog";
 import { TagEditor } from "@/components/pm/TagEditor";
 import { TaskCustomFields } from "@/components/pm/TaskCustomFields";
+import { Prop, Section } from "@/components/pm/Section";
+import "./task-detail.css";
 
 // The full task detail body (extracted out of the standalone `/tasks/[taskId]`
 // route, P1-06, design spec §5) so it can be mounted BOTH there and nested
@@ -46,10 +48,15 @@ export async function TaskDetailView({
   taskId,
   backHref,
   backLabel,
+  chrome = "page",
 }: {
   taskId: string;
   backHref: string;
   backLabel: string;
+  /** "page" renders the standard PageHeader + breadcrumbs. "drawer" renders the compact heading the
+   *  slide-over needs (code · title · project, actions beneath) — the drawer shell owns the close
+   *  control and the scroll container, so the header here must not repeat them. */
+  chrome?: "page" | "drawer";
 }) {
   const userId = await getSessionUserId();
   if (!userId) redirect("/login");
@@ -103,24 +110,12 @@ export async function TaskDetailView({
     .map((o) => ({ id: o.id, title: o.title }));
   const time = timeSummary(timeLogs);
 
-  const meta: { label: string; value: ReactNode }[] = [
-    { label: "Project", value: <Link href={`/projects/${task.projectId}`}>{task.projectName}</Link> },
-    {
-      label: "Status",
-      value: (
-        <StatusSelect
-          current={task.status}
-          statuses={projectStatuses.map((s) => ({ id: s.id, label: s.label, color: s.color }))}
-          canEdit={canEdit}
-          save={setTaskStatus.bind(null, task.id)}
-          undoSpawn={task.recurrence ? undoRecurrenceSpawn.bind(null, task.projectId) : undefined}
-        />
-      ),
-    },
-    { label: "Priority", value: task.priority },
-    { label: "Due date", value: task.dueDate ?? "—" },
-  ];
   const responsibleId = task.assignee?.responsibleId;
+  const fmtMinutes = (m: number | null) => {
+    if (m === null || m === 0) return null;
+    const h = Math.floor(m / 60), r = m % 60;
+    return h > 0 ? `${h}h${r ? ` ${r}m` : ""}` : `${r}m`;
+  };
 
   // P3-03: "Save as template" captures the task's current fields (tags resolved
   // to plain labels — a template is tenant-wide, so it can't hold this
@@ -134,49 +129,51 @@ export async function TaskDetailView({
     tagLabels: resolveTags(task.tags, tagRegistry).map((tg) => tg.label),
   };
 
+  const heading = titleWithRecurrenceGlyph(task);
+  const actions = (
+    <>
+      <FollowToggle
+        me={{ id: userId, name: me.name }}
+        followers={followers}
+        follow={followTask.bind(null, task.id)}
+        unfollow={unfollowTask.bind(null, task.id)}
+      />
+      <Link href={`/tasks/${task.id}/edit`} className="lux-btn lux-btn--ghost lux-btn--sm">Edit</Link>
+      {canEdit && (
+        <form action={duplicateTaskAction.bind(null, task.id)}>
+          <button type="submit" className="lux-btn lux-btn--ghost lux-btn--sm">Duplicate</button>
+        </form>
+      )}
+      {canEdit && (
+        <form action={saveTaskAsTemplateAction.bind(null, templateInput)}>
+          <button type="submit" className="lux-btn lux-btn--ghost lux-btn--sm">Save as template</button>
+        </form>
+      )}
+      {canEdit && <form action={deleteTaskAction.bind(null, task.id, task.projectId)}><button type="submit" className="lux-btn lux-btn--ghost lux-btn--sm">Delete</button></form>}
+    </>
+  );
+
   return (
     <>
-      <PageHeader
-        eyebrow="Task"
-        title={task.displayCode ? `${task.displayCode} · ${titleWithRecurrenceGlyph(task)}` : titleWithRecurrenceGlyph(task)}
-        subtitle={task.projectName}
-        breadcrumbs={[{ label: backLabel, href: backHref }, { label: task.title }]}
-        actions={
-          <>
-            <FollowToggle
-              me={{ id: userId, name: me.name }}
-              followers={followers}
-              follow={followTask.bind(null, task.id)}
-              unfollow={unfollowTask.bind(null, task.id)}
-            />
-            <Link href={`/tasks/${task.id}/edit`} className="lux-btn lux-btn--ghost lux-btn--sm">Edit</Link>
-            {canEdit && (
-              <form action={duplicateTaskAction.bind(null, task.id)}>
-                <button type="submit" className="lux-btn lux-btn--ghost lux-btn--sm">Duplicate</button>
-              </form>
-            )}
-            {canEdit && (
-              <form action={saveTaskAsTemplateAction.bind(null, templateInput)}>
-                <button type="submit" className="lux-btn lux-btn--ghost lux-btn--sm">Save as template</button>
-              </form>
-            )}
-            {canEdit && <form action={deleteTaskAction.bind(null, task.id, task.projectId)}><button type="submit" className="lux-btn lux-btn--ghost lux-btn--sm">Delete</button></form>}
-          </>
-        }
-      />
-
-      <div style={{ margin: "0 0 16px" }}>
-        <TagEditor
-          registry={tagRegistry}
-          selected={task.tags}
-          canEdit={canEdit}
-          setTags={setTaskTags.bind(null, task.id)}
-          createTag={createTag.bind(null, task.projectId)}
+      {chrome === "page" ? (
+        <PageHeader
+          eyebrow="Task"
+          title={task.displayCode ? `${task.displayCode} · ${heading}` : heading}
+          breadcrumbs={[{ label: backLabel, href: backHref }, { label: task.title }]}
+          actions={actions}
         />
-      </div>
+      ) : (
+        <div className="pm-detail__head">
+          {task.displayCode && <span className="pm-detail__code">{task.displayCode}</span>}
+          <h1 className="pm-detail__title">{heading}</h1>
+          <Link href={`/projects/${task.projectId}`} className="pm-detail__project">{task.projectName}</Link>
+          <div className="pm-detail__actions">{actions}</div>
+        </div>
+      )}
 
+      {/* Blocked is the one thing that must interrupt: it explains why the work isn't moving. */}
       {openDeps.length > 0 && (
-        <p style={{ margin: "0 0 16px", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+        <p style={{ margin: "0 0 14px", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
           <span className="pm-blocked-chip">Blocked by {openDeps.length}</span>
           <span style={{ font: "400 13px var(--font-body)", color: "var(--erp-ink-60)" }}>
             Waiting on: {openDeps.map((d) => d.title).join(", ")}
@@ -184,124 +181,145 @@ export async function TaskDetailView({
         </p>
       )}
 
-      <div style={{ display: "grid", gap: 20, gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))" }}>
-        <Card title="Overview">
-          <DescriptionList items={meta} />
-          <div style={{ marginTop: 14 }}>
-            <span className="type-eyebrow" style={{ fontSize: 10, opacity: 0.5, display: "block", marginBottom: 8 }}>Progress</span>
-            <ProgressControl taskId={task.id} value={task.progress} canEdit={canEdit} save={setTaskProgress} />
-          </div>
-          {task.description && (
-            <p style={{ margin: "14px 0 0", font: "400 13px/1.6 var(--font-body)", color: "var(--text-primary)", whiteSpace: "pre-wrap" }}>{task.description}</p>
+      <div className="pm-detail">
+        {/* LEFT — the work itself, in the order someone reads it. */}
+        <div className="pm-detail__main">
+          <Section label="Description">
+            {task.description
+              ? <p className="pm-desc">{task.description}</p>
+              : <p className="pm-desc pm-desc--empty">No description yet.</p>}
+          </Section>
+
+          <Section
+            label="Subtasks"
+            count={task.subtasks.length ? `${task.subtasks.filter((s) => s.done).length}/${task.subtasks.length}` : undefined}
+          >
+            <Subtasks subtasks={task.subtasks} canEdit={canEdit} toggle={toggleSubtask.bind(null, task.id)} add={addSubtask.bind(null, task.id)} />
+          </Section>
+
+          {customFieldDefs.length > 0 && (
+            <Section label="Custom fields">
+              <TaskCustomFields
+                taskId={task.id}
+                defs={customFieldDefs}
+                values={task.customFields}
+                canEdit={canEdit}
+                save={updateTaskCustomFields}
+              />
+            </Section>
           )}
-        </Card>
 
-        <Card title="Assignee">
-          {task.assignee ? (
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              <div style={{ font: "400 14px var(--font-body)", color: "var(--text-primary)" }}>
-                {task.assignee.kind === "person" ? "Person" : task.assignee.kind === "department" ? "Department" : "Division"}: <b>{task.assignee.refName}</b>
-              </div>
-              <div style={{ font: "400 13px var(--font-body)", color: "var(--erp-ink-60)" }}>
-                In charge:{" "}
-                {responsibleId ? <Link href={`/people/${responsibleId}`}>{task.assignee.responsibleName}</Link> : "—"}
-              </div>
-            </div>
-          ) : (
-            <p style={{ margin: "0 0 12px", font: "400 13px var(--font-body)", color: "var(--erp-ink-50)" }}>Unassigned.</p>
-          )}
-          {canEdit && (
-            <div style={{ marginTop: 12 }}>
-              <AssigneeEditor label={task.assignee ? "Reassign" : "Assign"} assignable={assignable} current={task.assignee} save={setAssignee.bind(null, task.id)} />
-            </div>
-          )}
-        </Card>
-      </div>
+          <Section label="Attachments" count={files.length || undefined}>
+            <Attachments files={files} canEdit={canEdit} attach={attachFileAction.bind(null, "task", task.id)} remove={deleteFileAction.bind(null, "task", task.id)} />
+          </Section>
 
-      <div style={{ marginTop: 20 }}>
-        <Card title="Contributors">
-          <Contributors
-            contributors={task.contributors}
-            ownerId={responsibleId}
-            ownerName={task.assignee?.responsibleName}
-            candidates={assignable.members}
-            canEdit={canEdit}
-            add={addContributor.bind(null, task.id)}
-            remove={removeContributor.bind(null, task.id)}
-          />
-        </Card>
-      </div>
-
-      <div style={{ marginTop: 20 }}>
-        <Card title={`Subtasks${task.subtasks.length ? ` · ${task.subtasks.filter((s) => s.done).length}/${task.subtasks.length}` : ""}`}>
-          <Subtasks subtasks={task.subtasks} canEdit={canEdit} toggle={toggleSubtask.bind(null, task.id)} add={addSubtask.bind(null, task.id)} />
-        </Card>
-      </div>
-
-      {customFieldDefs.length > 0 && (
-        <div style={{ marginTop: 20 }}>
-          <Card title="Custom fields">
-            <TaskCustomFields
-              taskId={task.id}
-              defs={customFieldDefs}
-              values={task.customFields}
-              canEdit={canEdit}
-              save={updateTaskCustomFields}
+          <Section label="Comments & activity" count={comments.length || undefined}>
+            <CommentThread
+              comments={comments}
+              post={postTaskComment.bind(null, task.id)}
+              addReaction={addReaction}
+              removeReaction={removeReaction}
             />
-          </Card>
+          </Section>
         </div>
-      )}
 
-      <div style={{ marginTop: 20, display: "grid", gap: 20, gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))" }}>
-        <Card title="Dependencies">
-          <Dependencies
-            current={currentDeps}
-            options={depOptions}
-            canEdit={canEdit}
-            add={addDependency.bind(null, task.id)}
-            remove={removeDependency.bind(null, task.id)}
-          />
-        </Card>
-        <Card title="Time">
-          <TimeLog
-            logs={timeLogs}
-            loggedMinutes={task.loggedMinutes}
-            estimateMinutes={task.estimateMinutes}
-            billableMinutes={time.billable}
-            canEdit={canEdit}
-            log={logTime.bind(null, task.id)}
-          />
-        </Card>
-      </div>
+        {/* RIGHT — properties: one row per fact, so "what state is this in" is a single scan. */}
+        <aside className="pm-detail__side">
+          <div className="pm-props">
+            <Prop label="Status">
+              <StatusSelect
+                current={task.status}
+                statuses={projectStatuses.map((s) => ({ id: s.id, label: s.label, color: s.color }))}
+                canEdit={canEdit}
+                save={setTaskStatus.bind(null, task.id)}
+                undoSpawn={task.recurrence ? undoRecurrenceSpawn.bind(null, task.projectId) : undefined}
+              />
+            </Prop>
+            <Prop label="Assignee" muted={!task.assignee}>
+              {task.assignee ? (
+                <>
+                  {task.assignee.refName}
+                  {task.assignee.kind !== "person" && (
+                    <span style={{ color: "var(--erp-ink-50)" }}> · {task.assignee.kind}</span>
+                  )}
+                </>
+              ) : "Unassigned"}
+            </Prop>
+            {task.assignee && task.assignee.kind !== "person" && (
+              <Prop label="In charge">
+                {responsibleId ? <Link href={`/people/${responsibleId}`}>{task.assignee.responsibleName}</Link> : "—"}
+              </Prop>
+            )}
+            <Prop label="Priority">{task.priority}</Prop>
+            <Prop label="Start" muted={!task.startDate}>{task.startDate ?? "Not set"}</Prop>
+            <Prop label="Due" muted={!task.dueDate}>{task.dueDate ?? "Not set"}</Prop>
+            <Prop label="Estimate" muted={!task.estimateMinutes}>{fmtMinutes(task.estimateMinutes) ?? "Not set"}</Prop>
+            <Prop label="Logged" muted={!task.loggedMinutes}>{fmtMinutes(task.loggedMinutes) ?? "None"}</Prop>
+            <Prop label="Progress" stack>
+              <ProgressControl taskId={task.id} value={task.progress} canEdit={canEdit} save={setTaskProgress} />
+            </Prop>
+          </div>
 
-      <div style={{ marginTop: 20 }}>
-        <Card title="AI Tracker">
-          <TrackerPanel
-            taskId={task.id}
-            suggestions={suggestions}
-            canAct={canEdit}
-            run={runTracker}
-            confirm={confirmSuggestion.bind(null, task.id)}
-            dismiss={dismissSuggestion.bind(null, task.id)}
-          />
-        </Card>
-      </div>
+          {canEdit && (
+            <Section label={task.assignee ? "Reassign" : "Assign"}>
+              <AssigneeEditor label={task.assignee ? "Reassign" : "Assign"} assignable={assignable} current={task.assignee} save={setAssignee.bind(null, task.id)} />
+            </Section>
+          )}
 
-      <div style={{ marginTop: 20 }}>
-        <Card title={`Attachments${files.length ? ` · ${files.length}` : ""}`}>
-          <Attachments files={files} canEdit={canEdit} attach={attachFileAction.bind(null, "task", task.id)} remove={deleteFileAction.bind(null, "task", task.id)} />
-        </Card>
-      </div>
+          <Section label="Tags">
+            <TagEditor
+              registry={tagRegistry}
+              selected={task.tags}
+              canEdit={canEdit}
+              setTags={setTaskTags.bind(null, task.id)}
+              createTag={createTag.bind(null, task.projectId)}
+            />
+          </Section>
 
-      <div style={{ marginTop: 20 }}>
-        <Card title="Comments & activity">
-          <CommentThread
-            comments={comments}
-            post={postTaskComment.bind(null, task.id)}
-            addReaction={addReaction}
-            removeReaction={removeReaction}
-          />
-        </Card>
+          <Section label="Contributors">
+            <Contributors
+              contributors={task.contributors}
+              ownerId={responsibleId}
+              ownerName={task.assignee?.responsibleName}
+              candidates={assignable.members}
+              canEdit={canEdit}
+              add={addContributor.bind(null, task.id)}
+              remove={removeContributor.bind(null, task.id)}
+            />
+          </Section>
+
+          <Section label="Dependencies">
+            <Dependencies
+              current={currentDeps}
+              options={depOptions}
+              canEdit={canEdit}
+              add={addDependency.bind(null, task.id)}
+              remove={removeDependency.bind(null, task.id)}
+            />
+          </Section>
+
+          <Section label="Time">
+            <TimeLog
+              logs={timeLogs}
+              loggedMinutes={task.loggedMinutes}
+              estimateMinutes={task.estimateMinutes}
+              billableMinutes={time.billable}
+              canEdit={canEdit}
+              log={logTime.bind(null, task.id)}
+            />
+          </Section>
+
+          <Section label="AI Tracker">
+            <TrackerPanel
+              taskId={task.id}
+              suggestions={suggestions}
+              canAct={canEdit}
+              run={runTracker}
+              confirm={confirmSuggestion.bind(null, task.id)}
+              dismiss={dismissSuggestion.bind(null, task.id)}
+            />
+          </Section>
+        </aside>
       </div>
     </>
   );

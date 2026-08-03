@@ -34,7 +34,7 @@ export default async function DevicesPage({ searchParams }: { searchParams: Sear
   const canManage = canManageIT(me, tenant);
 
   if (!tenant) {
-    return <Card><EmptyNote>Select a company from the top bar.</EmptyNote></Card>;
+    return <EmptyNote>Select a company from the top bar.</EmptyNote>;
   }
 
   // Search + class filtering happen in the backend (indexed, and correct across the whole estate);

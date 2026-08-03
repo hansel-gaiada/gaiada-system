@@ -56,7 +56,7 @@ export default async function HrOnboardingPage({ searchParams }: { searchParams:
   if (!userId) redirect("/login");
   const me = await getMe(userId);
   const tenant = await getActiveTenant(me);
-  if (!tenant) return <Card><EmptyNote>Select a company from the top bar.</EmptyNote></Card>;
+  if (!tenant) return <EmptyNote>Select a company from the top bar.</EmptyNote>;
 
   const { company } = await searchParams;
   const scopeCompanies = hrScopeCompanies(me, tenant);
@@ -65,9 +65,7 @@ export default async function HrOnboardingPage({ searchParams }: { searchParams:
 
   if (scopeCompanies.length === 0) {
     return (
-      <Card>
-        <EmptyNote>Onboarding/offboarding checklists are visible to HR staff and managers. Your own checklist (if any) is on your employee page.</EmptyNote>
-      </Card>
+      <EmptyNote>Onboarding/offboarding checklists are visible to HR staff and managers. Your own checklist (if any) is on your employee page.</EmptyNote>
     );
   }
 
@@ -104,7 +102,7 @@ export default async function HrOnboardingPage({ searchParams }: { searchParams:
       )}
 
       {cases.length === 0 ? (
-        <Card><EmptyNote>No onboarding or offboarding checklists yet.</EmptyNote></Card>
+        <EmptyNote>No onboarding or offboarding checklists yet.</EmptyNote>
       ) : (
         <div style={{ display: "grid", gap: 16, gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", marginBottom: 24 }}>
           {HR_CASE_STATUSES.map((s) => (

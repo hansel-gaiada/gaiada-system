@@ -52,7 +52,7 @@ export default async function CompaniesPage() {
         actions={isElevated(me) ? <Link href="/companies/new" className="lux-btn lux-btn--solid lux-btn--sm">New company</Link> : undefined}
       />
       {companies.length === 0 ? (
-        <Card><EmptyNote>No companies yet. Companies will appear here once they are provisioned.</EmptyNote></Card>
+        <EmptyNote>No companies yet. Companies will appear here once they are provisioned.</EmptyNote>
       ) : (
         <DataTable columns={COLUMNS} rows={rows} link={{ base: "/companies", idKey: "id", labelKey: "name" }} csvName="companies" pageSize={20} />
       )}

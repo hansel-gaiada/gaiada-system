@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, useTransition } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import type {
   Timeline, TimelineBar, PmTask, GanttGroup, GanttGroupBy, MilestoneMarker, GanttDepEdge,
@@ -133,7 +133,16 @@ export function Gantt(props: GanttProps) {
   const { timeline, milestones, depEdges, interactive = false } = props;
   const canEdit = props.canEdit ?? interactive;
   const groupBy = props.groupBy ?? "flat";
-  const groups: GanttGroup[] = props.groups ?? [{ key: "__all", label: "", bars: timeline.bars }];
+  // MUST be memoized. `groups` is a dependency of the dependency-line useLayoutEffect below, which
+  // calls setLines() — so an inline fallback array (a fresh reference every render) produced
+  // render → effect → setState → render forever: "Maximum update depth exceeded", and the whole
+  // page fell to its error boundary. Callers that pass `groups` (the department Timeline) were
+  // unaffected because a prop from the server keeps its identity across client re-renders; the two
+  // call sites that rely on this fallback — the project workspace timeline and My calendar — did not.
+  const groups: GanttGroup[] = useMemo(
+    () => props.groups ?? [{ key: "__all", label: "", bars: timeline.bars }],
+    [props.groups, timeline.bars],
+  );
   const undatedGroups = props.undatedGroups ?? [];
   const grouped = groupBy !== "flat" || groups.length > 1 || undatedGroups.length > 0;
   const taskHref = (id: string) => (props.taskHrefBase ? `${props.taskHrefBase}/${id}` : `/tasks/${id}`);
@@ -174,7 +183,10 @@ export function Gantt(props: GanttProps) {
   const recomputeLines = useCallback(() => {
     const edges = depEdges ?? [];
     const container = containerRef.current;
-    if (!container || edges.length === 0) { setLines([]); return; }
+    // Bail out instead of storing a fresh empty array: with no dependencies to draw (every mount
+    // that passes no depEdges) an unconditional setLines([]) is a state change on every call, which
+    // re-triggers the effect that called it. Defence in depth behind the memoized `groups` above.
+    if (!container || edges.length === 0) { setLines((prev) => (prev.length === 0 ? prev : [])); return; }
     const box = container.getBoundingClientRect();
     const next: Line[] = [];
     for (const e of edges) {

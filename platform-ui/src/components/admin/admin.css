@@ -1,0 +1,14 @@
+/* Settings (/admin/*) layout.
+   The section is all wide tables — users×roles, identity links, field definitions, the audit
+   feed, the About service table — which the shell's 1180px reading measure squeezes into
+   horizontal scrolling for no benefit. Widen the page wrapper the same way the department
+   console's structurally-wide tabs do (:has on .erp-main__inner), so this is one mechanism in
+   the codebase rather than two. Independent of the user's width pref, exactly like
+   .dept-shell--full: the pref chooses a reading measure for prose-shaped pages, and these
+   aren't prose-shaped. */
+.admin-shell--full {
+  display: block;
+}
+.erp-main__inner:has(.admin-shell--full) {
+  max-width: none;
+}

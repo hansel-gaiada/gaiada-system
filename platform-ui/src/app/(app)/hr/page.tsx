@@ -18,7 +18,7 @@ export default async function HROverviewPage() {
   if (!userId) redirect("/login");
   const me = await getMe(userId);
   const tenant = await getActiveTenant(me);
-  if (!tenant) return <Card><EmptyNote>Select a company from the top bar.</EmptyNote></Card>;
+  if (!tenant) return <EmptyNote>Select a company from the top bar.</EmptyNote>;
 
   const scopeCompanies = hrScopeCompanies(me, tenant);
   const [members, depts, pendingLeave, openCases] = await Promise.all([

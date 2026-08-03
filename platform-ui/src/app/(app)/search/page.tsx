@@ -45,9 +45,9 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
       />
 
       {!q ? (
-        <Card><EmptyNote>Type at least two characters in the top bar to search.</EmptyNote></Card>
+        <EmptyNote>Type at least two characters in the top bar to search.</EmptyNote>
       ) : total === 0 ? (
-        <Card><EmptyNote>No matches. Try a different term, or switch company in the top bar.</EmptyNote></Card>
+        <EmptyNote>No matches. Try a different term, or switch company in the top bar.</EmptyNote>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
           {groups.map((g) => (

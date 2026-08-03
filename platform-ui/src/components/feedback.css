@@ -16,3 +16,20 @@
 @media (prefers-reduced-motion: reduce) {
   .fb-skeleton::after, .fb-skeleton-page, .fb-state { animation: none; }
 }
+
+/* Pending-navigation feedback for ?query= links (tabs, calendar stepper, scope pills). See
+   PendingLink.tsx: those are not segment changes, so no loading.tsx boundary ever fires and the
+   click otherwise produces no visible acknowledgement at all. */
+.fb-pending { display: inline-flex; align-items: center; gap: 6px; }
+.fb-pending__dot {
+  width: 5px;
+  height: 5px;
+  flex: 0 0 5px;
+  background: var(--erp-accent);
+  opacity: 0;
+  transition: opacity 0.12s var(--erp-ease);
+}
+.fb-pending--on { opacity: 0.6; }
+.fb-pending--on .fb-pending__dot { opacity: 1; animation: fb-pulse 0.9s ease-in-out infinite; }
+@keyframes fb-pulse { 50% { opacity: 0.25; } }
+.fb-sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }

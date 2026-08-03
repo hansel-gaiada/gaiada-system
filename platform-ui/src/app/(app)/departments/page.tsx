@@ -30,7 +30,7 @@ export default async function DepartmentsPage() {
         actions={can(me, "org.edit", tenant) ? <Link href={`/companies/${tenant}/org`} className="lux-btn lux-btn--ghost lux-btn--sm">Edit structure</Link> : undefined}
       />
       {depts.length === 0 ? (
-        <Card><EmptyNote>No departments yet. Add them in the org structure editor.</EmptyNote></Card>
+        <EmptyNote>No departments yet. Add them in the org structure editor.</EmptyNote>
       ) : (
         <div style={{ display: "grid", gap: 16, gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))" }}>
           {depts.map((d) => (

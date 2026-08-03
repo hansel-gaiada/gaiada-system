@@ -1,4 +1,5 @@
 import type { CSSProperties, ReactNode } from "react";
+import { InfoHint } from "./InfoHint";
 import "./ui.css";
 
 // `className` exists so callers can reach the eyebrow from a stylesheet. Passing
@@ -10,14 +11,22 @@ export function Eyebrow({ children, style, className }: { children: ReactNode; s
   return <span className={`type-eyebrow${className ? ` ${className}` : ""}`} style={style}>{children}</span>;
 }
 
-export function Card({ children, title, headerRight, dark, style }: {
+export function Card({ children, title, headerRight, dark, style, hint }: {
   children: ReactNode; title?: string; headerRight?: ReactNode; dark?: boolean; style?: CSSProperties;
+  /** Optional "?" beside the title explaining what the card shows. Omit when the title already
+   *  says it — a hint that repeats the heading is noise with an extra tab stop. */
+  hint?: ReactNode;
 }) {
   return (
     <section className={`lux-card${dark ? " lux-card--dark" : ""}`} style={style}>
       {(title || headerRight) && (
         <div className="lux-card__head">
-          {title ? <h3 className="lux-card__title">{title}</h3> : <span />}
+          {title ? (
+            <h3 className="lux-card__title">
+              {title}
+              {hint && <InfoHint label={title}>{hint}</InfoHint>}
+            </h3>
+          ) : <span />}
           {headerRight}
         </div>
       )}
@@ -102,14 +111,29 @@ export function StatusBadge({ label }: { label: string }) {
   );
 }
 
-export function KpiTile({ label, value, delta, deltaUp, foot }: {
+export function KpiTile({ label, value, delta, deltaUp, foot, hint }: {
   // `value` accepts ReactNode (not just string) so a caller can ride a badge (e.g. SM-38's
   // SimulatedBadge) alongside the figure — every existing string call site is unaffected.
   label: string; value: ReactNode; delta?: string; deltaUp?: boolean; foot?: string;
+  /** Optional "?" explaining what this figure counts. State the rule, not a restatement of the
+   *  label: "Tasks due within 7 days, overdue included" earns its place; "the due-soon count"
+   *  does not. */
+  hint?: ReactNode;
 }) {
   return (
     <div className="lux-kpi">
-      <Eyebrow style={{ fontSize: 10, opacity: 0.6 }}>{label}</Eyebrow>
+      {/* The hint sits OUTSIDE the Eyebrow on purpose: that element is faded to 0.6, and an
+          `opacity < 1` ancestor creates a stacking context — a popover nested inside it is trapped
+          below any positioned sibling (e.g. a sticky rail) whatever its z-index, and inherits the
+          fade. Siblings in a flex row avoid both. */}
+      {hint ? (
+        <span style={{ display: "flex", alignItems: "center" }}>
+          <Eyebrow style={{ fontSize: 10, opacity: 0.6 }}>{label}</Eyebrow>
+          <InfoHint label={label}>{hint}</InfoHint>
+        </span>
+      ) : (
+        <Eyebrow style={{ fontSize: 10, opacity: 0.6 }}>{label}</Eyebrow>
+      )}
       <div className="lux-kpi__value">{value}</div>
       {(delta || foot) && (
         <div className="lux-kpi__delta">
