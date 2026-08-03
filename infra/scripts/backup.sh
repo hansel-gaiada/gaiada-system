@@ -24,13 +24,29 @@ BACKUP_DIR="${BACKUP_DIR:-$HOME/gaiada-backups}"
 KEEP_DAYS="${KEEP_DAYS:-14}"
 STAMP="$(date +%Y%m%d-%H%M%S)"
 # Compose file list, as ready-made `-f` flags (intentionally unquoted at use so multiple files
-# expand). Override when the deployment needs an overlay: on a host-Postgres box (gda-aicenter)
-# the base file ALONE is an invalid project — postgres/redis are profile-disabled there, so every
-# `depends_on` naming them fails resolution, `docker compose ps` errors out, and the running-check
-# below then matches nothing and "skips cleanly". That silently produced a backup set with NO
-# gaiada_bot dump while exiting 0. Pass both files to make the check real:
-#   COMPOSE_FILES="-f .../docker-compose.vps.yml -f .../docker-compose.hostdata.yml"
-COMPOSE_FILES="${COMPOSE_FILES:--f $(dirname "$0")/../compose/docker-compose.vps.yml}"
+# expand). On a host-Postgres box (gda-aicenter) the base file ALONE is an invalid project —
+# postgres/redis are profile-disabled there, so every `depends_on` naming them fails resolution,
+# `docker compose ps` errors out, and the running-check below then matches nothing and "skips
+# cleanly". That silently produced a backup set with NO gaiada_bot dump while exiting 0.
+#
+# 2026-08-03: this used to require the CALLER to pass both files, and the caller that matters most
+# didn't. deploy.yml has COMPOSE_FILES in its job env but never forwarded it over the `ssh vps`
+# that runs this script, so the deploy got the single-file default and died at the backup gate —
+# `service "knowledge" depends on undefined service "postgres": invalid compose project` — which
+# is a HARD FAIL for the whole deploy, since the backup is deliberately the gate for migrations.
+# It surfaced only after deploy.yml's rsync step (which runs BEFORE the backup) put a newer
+# vps.yml on the box; the previous run had backed up fine minutes earlier against the older file.
+#
+# So the overlay is now picked up AUTOMATICALLY whenever it sits next to the base file, rather
+# than depending on every call site remembering. Explicitly setting COMPOSE_FILES still wins.
+_compose_dir="$(dirname "$0")/../compose"
+if [ -z "${COMPOSE_FILES:-}" ]; then
+  COMPOSE_FILES="-f $_compose_dir/docker-compose.vps.yml"
+  # hostdata = the host-Postgres topology. Present on gda-aicenter, absent on an all-in-compose
+  # box, and harmless to layer when the services it disables are the ones it also defines.
+  [ -f "$_compose_dir/docker-compose.hostdata.yml" ] &&
+    COMPOSE_FILES="$COMPOSE_FILES -f $_compose_dir/docker-compose.hostdata.yml"
+fi
 # Compose project is `gaiada` (see the compose `name:`), so the volume is prefixed.
 WAHA_VOLUME="${WAHA_VOLUME:-gaiada_waha-sessions}"
 

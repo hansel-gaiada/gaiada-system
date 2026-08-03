@@ -14,7 +14,43 @@ local stack). None of these mean "production-done".
 Every cut app version and the exact module manifest it contains, so any deployed build can be
 reconstructed from this table alone. Format defined in [`VERSIONING.md`](./VERSIONING.md).
 
-### `Alpha 01.005.0014a` — 2026-08-03 — tracker/reporting + search-marketing reach the box
+### `Alpha 01.005.0014b` — 2026-08-03 — re-cut: the backup gate rejected its own compose project
+
+Identical module set to `0014a` (hence a letter bump, not a counter move — "a re-tag after a failed
+deploy" is exactly what the revision letter is for). `0014a` built and signed all 9 images
+successfully, then **`deploy` failed at the backup step, before pull/migrate/up — production was
+never touched** (containers stayed up 2–3 days; `erp.gaiada.online` served throughout).
+
+```
+backup FAILED: cannot read compose project (service pg-bot):
+service "platform" depends on undefined service "postgres": invalid compose project
+```
+
+`backup.sh` required its CALLER to pass the `hostdata` overlay, and the caller that matters most
+never did: `deploy.yml` has `COMPOSE_FILES` in its job env but does not forward it across the
+`ssh vps` that runs the script, so the box got the single-file default. On a host-Postgres box the
+base file alone is an invalid project. Because the backup is deliberately the **gate for
+migrations**, that is a hard stop for the whole deploy rather than a degraded backup.
+
+Sharp edge worth naming: it had backed up cleanly ten minutes earlier. `deploy.yml`'s rsync step
+runs **before** the backup, so the box was already holding the newer `vps.yml` when the backup ran
+— the failure needed the new compose file and the old call site together.
+
+- **Fix:** `backup.sh` now picks up `docker-compose.hostdata.yml` automatically whenever it sits
+  next to the base file, instead of relying on every call site to remember. An explicit
+  `COMPOSE_FILES` still wins. This also repairs the **nightly cron backup**, which had the same
+  defective invocation. Verified on gda-aicenter: all 5 databases + the WAHA volume, exit 0.
+- Folded into `infra 0.7.2` rather than opening `0.7.3`, since `0014a` shipped nothing — keeping
+  the module set identical is what makes the letter bump the honest description.
+
+**Rollback is broken for any release that ADDS a service** — flagged, not fixed here. The failure
+path ran `up -d` at the previous tag and died on
+`ghcr.io/hansel-gaiada/gaiada-report-renderer:alpha-01.004.0005a: not found`, because
+`report-renderer` did not exist at that tag. Harmless this time (nothing had changed, so there was
+nothing to undo), but a genuine deploy would have been left half-rolled-back. `deploy.yml`'s
+rollback needs to roll back only services present in the previous tag.
+
+### `Alpha 01.005.0014a` — 2026-08-03 — SUPERSEDED, no deployment (see 0014b above)
 
 Carries the tracker/multi-grain-reporting programme, the search-marketing SEM/Google-Ads work, the
 `report-renderer` sidecar, the in-ERP audio/video recorder, the webdev server fixes, and the n8n
