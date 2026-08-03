@@ -318,6 +318,25 @@ per the 2026-07-17 route inventory (confirm UI has been repointed off the in-mem
 `admin/admin-systems.controller.ts`). Heartbeat ingest (`POST /api/:t/it/devices/:id/heartbeat`) is
 backend-only (UI reads) and is also present.
 
+**Extended 2026-08-03 (IT-02/03/05, migration `0071`)** — see
+`docs/superpowers/specs/2026-08-03-it-network-discovery-design.md`:
+- ✅ `PATCH /api/:t/it/devices/:id` — the edit half this section previously claimed as built via
+  "GET/POST". It never existed; a typo'd device was permanent. On a **discovered** row only the
+  descriptive fields are editable and they land in an `overrides` layer that survives the next poll;
+  collector-owned facts (`ip`/`mac`/`hostname`/`status`) are rejected with an explanatory 400.
+- ✅ `DELETE /api/:t/it/devices/:id` — soft delete. `deleted_at` had been filtered on by every query
+  since `0019` and written by nothing.
+- ✅ `GET /api/:t/it/topology` — server-computed graph (`{ devices, links, lastRun }`). The old
+  client-side `buildTopology()` grouped rows by two free-text strings and could not express an
+  uplink; `lastRun` is required so the UI can tell a **dead collector** from an **empty network**.
+- ✅ `POST /api/:t/it/discovery/report` — push ingest from `it-site-collector` (NOT YET BUILT). The
+  ERP cannot poll the office UniFi controller: it is RFC1918 behind NAT and unreachable from
+  `gda-aicenter` (verified, HTTP `000`).
+- ✅ `GET /api/:t/it/devices` now accepts `?q=` (name/hostname/IP/MAC) and `?deviceClass=`.
+- `Device` gained `discoverySource`, `deviceClass`, `hostname`, `isWired`, `ssid`, `uplinkMac`,
+  `uplinkPort`, `lastSeenAt`, `firstSeenAt` — all optional, so the UI still renders against an
+  older backend.
+
 ## 7. Systems & Intelligence consoles — `lib/admin.ts`  — **MOSTLY ✅ BUILT (one gap)**
 `admin/admin-systems.controller.ts` + `admin/intelligence.controller.ts` now exist:
 - ✅ `GET /api/admin/:system/status`, ✅ `GET /api/admin/:system/config` for `system ∈

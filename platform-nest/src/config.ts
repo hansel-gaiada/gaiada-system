@@ -203,6 +203,30 @@ export const config = {
   // company total stops being reproducible. UTC by default — matching dept-resolution.ts's
   // todayIso() and every other calendar-day comparison in the program.
   reportsTz: process.env.REPORTS_TZ ?? "UTC",
+  // IT-01/03 network discovery (docs/superpowers/specs/2026-08-03-it-network-discovery-design.md).
+  itDiscovery: {
+    // PRIVACY GATE, default DENY. ~25 of the 58 hosts observed on the office network are personal
+    // phones whose hostnames name staff outright (Ratihs-iPhone, A56-milik-Tini, ...). Persisting
+    // them with MAC + per-poll timestamps builds a presence log of named employees on their own
+    // devices, which CLAUDE.md forbids before legal Gate 1. When off (the default) the report
+    // endpoint counts BYOD clients and discards them without ever writing a row.
+    persistByod:
+      process.env.IT_DISCOVERY_PERSIST_BYOD === "1" || process.env.IT_DISCOVERY_PERSIST_BYOD === "true",
+    // Hostname patterns that mark a discovered client as a COMPANY asset ('managed'). Anything that
+    // matches none of these is 'byod' — default-deny, so a new unknown device is never persisted by
+    // accident. Comma-separated regexes; the defaults cover the observed corporate naming.
+    managedHostnamePatterns: (process.env.IT_DISCOVERY_MANAGED_PATTERNS ??
+      "^GDA-,^DESKTOP-,^LAPTOP-,^MSI\\.,^Dina\\.,^Laptop-").split(",").map((s) => s.trim()).filter(Boolean),
+    // Derived-status thresholds (IT-03). Sized off a 5-minute collector interval: a device seen
+    // within 2 intervals is online, within 6 it is degraded (missed polls), beyond that offline.
+    // NEVER probe with ICMP to decide this — only 12 of 58 real hosts answer ping.
+    onlineWindowMs: Number(process.env.IT_DISCOVERY_ONLINE_WINDOW_MS ?? 11 * 60 * 1000),
+    degradedWindowMs: Number(process.env.IT_DISCOVERY_DEGRADED_WINDOW_MS ?? 31 * 60 * 1000),
+    // The stale reaper. Fail-soft and OFF by default, like every other background sweep here.
+    reaperEnabled:
+      process.env.IT_DISCOVERY_REAPER_ENABLED === "1" || process.env.IT_DISCOVERY_REAPER_ENABLED === "true",
+    reaperIntervalMs: Number(process.env.IT_DISCOVERY_REAPER_INTERVAL_MS ?? 5 * 60 * 1000),
+  },
   // Downstream service endpoints the admin/systems console aggregates (Phase C). All
   // read-only; empty URL -> that system reports "not configured" (fail-soft, never fake).
   services: {
