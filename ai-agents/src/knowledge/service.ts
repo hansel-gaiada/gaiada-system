@@ -88,18 +88,40 @@ export function buildKnowledgeApp(
     if (!doc?.tenantId || !doc.sourceRef || !Array.isArray(doc.chunks) || doc.chunks.length === 0) {
       return reply.code(400).send({ error: "tenantId, sourceRef, chunks required" });
     }
-    const written = await store.ingest({ ...doc, acl: doc.acl ?? [], kind: doc.kind ?? "doc" });
+    // D9.4: the audience tier is opt-in and validated here. Any value other than the literal
+    // "public" — absent, misspelled, or hostile — resolves to 'internal', so a malformed ingest
+    // can only ever under-share.
+    const audience = doc.audience === "public" ? ("public" as const) : ("internal" as const);
+    const written = await store.ingest({ ...doc, acl: doc.acl ?? [], kind: doc.kind ?? "doc", audience });
     return { written };
   });
 
-  app.post<{ Body: { query?: string; scope?: string; topK?: number } }>("/search", async (req, reply) => {
+  // Two-tier retrieval (D9.4). An OBO envelope is OPTIONAL here: without one (or with one the
+  // platform can't resolve) the caller simply has an empty authorized-tenant-set, which the store's
+  // predicate reduces to the PUBLIC tier — that is how a lead or client with no ERP identity gets
+  // answered from the gaiada.com corpus while internal knowledge stays invisible. A resolver
+  // FAILURE degrades to the same public-only state rather than 500ing, so the marketing tier
+  // survives a platform outage; it can never widen access because the fallback set is empty.
+  app.post<{ Body: { query?: string; scope?: string; topK?: number; publicOnly?: boolean } }>("/search", async (req, reply) => {
     if (!authorized(req)) return reply.code(401).send({ error: "unauthorized" });
     const provider = String(req.headers["x-obo-provider"] ?? "");
     const externalId = String(req.headers["x-obo-external-id"] ?? "");
     const { query, scope } = req.body ?? {};
-    if (!query || !scope) return reply.code(400).send({ error: "query and scope required" });
-    const { tenantSet } = provider && externalId ? await resolveEnvelope(provider, externalId) : { tenantSet: [] };
-    const hits = await store.search(query, { tenantSet, scope, topK: req.body?.topK });
+    if (!query) return reply.code(400).send({ error: "query required" });
+    let tenantSet: string[] = [];
+    if (provider && externalId) {
+      try {
+        ({ tenantSet } = await resolveEnvelope(provider, externalId));
+      } catch (err) {
+        req.log.warn({ err }, "principal resolve failed — degrading to public-tier knowledge only");
+      }
+    }
+    const hits = await store.search(query, {
+      tenantSet,
+      scope: scope ?? "",
+      topK: req.body?.topK,
+      publicOnly: req.body?.publicOnly === true,
+    });
     return { hits };
   });
 

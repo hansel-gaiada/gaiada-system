@@ -9,10 +9,11 @@
 // of this controller.
 import { BadRequestException, Body, Controller, ForbiddenException, Get, HttpCode, HttpException, NotFoundException, Param, Post, Req, UnauthorizedException, UseGuards } from "@nestjs/common";
 import type { FastifyRequest } from "fastify";
-import { config } from "../config";
+import { config, knowledgeIngestEnabled } from "../config";
 import { authorize } from "../core/http";
 import { AuthGuard } from "../auth/guards";
 import { ModuleEnabledGuard } from "../modules/module-enabled.guard";
+import { lastIngestRun, runIngestSweep } from "../modules/knowledge/ingest/scheduler";
 import { isElevated } from "./elevated";
 import { newId, withGlobal } from "../db";
 
@@ -303,5 +304,33 @@ export class IntelligenceController {
     // Audit lives in the knowledge service (D9-owned); the source ref is not a platform uuid,
     // so we do not write it to the tenant activity feed here.
     return { ok: true };
+  }
+
+  // ---- knowledge ingestion (RAG corpus refresh) ----------------------------------------------
+  // The scheduled sweep is the normal path; these two exist so an operator can see whether the
+  // index is fresh and force a refresh after bulk-editing content, without waiting out the interval.
+
+  /** Last sweep's per-tier outcome (sources, chunks, retirements, errors) + whether one is running. */
+  @Get(":tenantId/knowledge/ingest/status")
+  @UseGuards(ModuleEnabledGuard("knowledge"))
+  async ingestStatus(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string) {
+    await authorize(req.principal, { kind: "knowledge_source", tenantId }, "read");
+    return { enabled: knowledgeIngestEnabled(), intervalMs: config.knowledgeIngest.intervalMs, ...lastIngestRun() };
+  }
+
+  /** Force a refresh. Elevated-only: a sweep re-embeds every chunk of every company, which is real
+   *  gateway load and a cross-company action — not something a single tenant's member should be able
+   *  to trigger at will. It returns as soon as the sweep is kicked off; poll the status route. */
+  @Post(":tenantId/knowledge/ingest/run")
+  @UseGuards(ModuleEnabledGuard("knowledge"))
+  @HttpCode(202)
+  async ingestRun(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string) {
+    await authorize(req.principal, { kind: "knowledge_source", tenantId }, "update");
+    if (!isElevated(req)) throw new ForbiddenException("knowledge ingest is a platform-wide action");
+    if (!knowledgeIngestEnabled()) throw new NotFoundException("knowledge ingest not configured");
+    // Fire-and-forget: a full sweep can run for minutes, far past any sane HTTP timeout. The
+    // scheduler's `running` gate makes a double-click a no-op rather than a second sweep.
+    void runIngestSweep().catch((err) => console.error("knowledge ingest (manual) failed", err));
+    return { ok: true, started: true };
   }
 }

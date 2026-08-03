@@ -9,7 +9,8 @@ import { NestFactory } from "@nestjs/core";
 import { FastifyAdapter, type NestFastifyApplication } from "@nestjs/platform-fastify";
 import multipart from "@fastify/multipart";
 import { AppModule } from "./app.module";
-import { config, n8nBridgeEnabled, graphBridgeEnabled } from "./config";
+import { config, n8nBridgeEnabled, graphBridgeEnabled, knowledgeIngestEnabled } from "./config";
+import { startKnowledgeIngestLoop } from "./modules/knowledge/ingest/scheduler";
 import { HttpErrorFilter } from "./http-error.filter";
 import { ProviderDispatchErrorFilter } from "./modules/search/provider-dispatch-error.filter";
 import { GatewayNotConfiguredErrorFilter } from "./modules/search/gateway-not-configured-error.filter";
@@ -68,6 +69,7 @@ import { startGraphBridgeLoop } from "./events/graph-bridge";
 import { startWorkActivityConsumerLoop } from "./events/work-activity-consumer";
 import { runWorkActivityBackfill } from "./core/work-activity-backfill";
 import { startBurndownSnapshotLoop } from "./modules/pm/burndown-job";
+import { startStaleReaperLoop } from "./modules/it/discovery.service";
 // SM-54 (tracker §6ad Ruling 1 / addendum §A13.2) — the search department's cadence loop lives in the
 // platform, NOT in n8n: it executes configuration a verified human already set (each engagement's
 // `tool_scope` toggle + cadence + budget cap, written under `search:scope:write`), and every automation
@@ -356,6 +358,17 @@ async function bootstrap(): Promise<void> {
     // eslint-disable-next-line no-console
     console.log("work-activity consumer on: streams [pm_task, pm_project, meeting_recording, pipeline_run]");
   }
+  // Knowledge (D9 RAG) corpus refresh: mirrors gaiada.com into the PUBLIC tier and every company's
+  // ERP records into the INTERNAL tier, on an interval. Without this the vector store stays empty and
+  // every knowledge.search returns nothing. OUTSIDE the redisUrl gate — it is a plain Postgres read
+  // plus HTTP to the knowledge service, with no stream dependency.
+  if (knowledgeIngestEnabled()) {
+    startKnowledgeIngestLoop();
+    // eslint-disable-next-line no-console
+    console.log(
+      `knowledge ingest on: every ${Math.round(config.knowledgeIngest.intervalMs / 60000)}m; public sites [${config.knowledgeIngest.publicSites.join(", ")}]`,
+    );
+  }
   // ORG-7 §3: nightly drift/orphan sweep. Deliberately OUTSIDE the redisUrl gate above — it's a
   // plain Postgres sweep (sweepDriftAndOrphans), not stream-driven — but still dark unless the
   // whole release-train flag is on.
@@ -371,6 +384,17 @@ async function bootstrap(): Promise<void> {
     startBurndownSnapshotLoop(config.pmBurndownSnapshotIntervalMs);
     // eslint-disable-next-line no-console
     console.log(`burndown snapshot job on: every ${config.pmBurndownSnapshotIntervalMs}ms`);
+  }
+  // IT-03: the device stale reaper. A plain Postgres sweep (no Redis dependency), same dark-by-default
+  // pattern as the two above. It recomputes `status` from `last_seen_at` freshness, which is what makes
+  // "offline" mean anything at all: before this, a device that silently vanished kept displaying
+  // whatever status was last written, and a device registered through the UI sat at 'unknown' forever
+  // because nothing ever called the heartbeat endpoint. Only touches discovery_source='unifi' rows —
+  // hand-registered devices have no freshness signal to reason from and are left alone.
+  if (config.itDiscovery.reaperEnabled) {
+    startStaleReaperLoop(config.itDiscovery.reaperIntervalMs);
+    // eslint-disable-next-line no-console
+    console.log(`IT device stale reaper on: every ${config.itDiscovery.reaperIntervalMs}ms`);
   }
   // SM-54: the search pull scheduler. A plain Postgres sweep (no Redis dependency), so it sits outside
   // the redisUrl gate above alongside the drift sweep and the burndown job — but unlike those two this

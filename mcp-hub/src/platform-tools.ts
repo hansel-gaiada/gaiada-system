@@ -171,12 +171,23 @@ export function registerPlatformTools(): void {
 
   registerTool({
     name: "knowledge.search",
-    description: "Search company knowledge/memory (WS8 store; results limited to what YOUR identity may see).",
+    description:
+      "Search company knowledge (WS8 RAG store). Returns two tiers, and each hit says which it is: " +
+      "`public` — published company information from gaiada.com, available to anyone; " +
+      "`internal` — projects, tasks, clients, meetings, reports, files, people and org structure, " +
+      "returned ONLY when your identity resolves to a company you belong to. Never assume an empty " +
+      "result means the fact does not exist — it may mean you are not authorized to see it.",
     minAssurance: "low", // the knowledge service resolves the envelope and pre-filters (D9)
     inputSchema: {
       type: "object",
-      properties: { query: { type: "string" }, scope: { type: "string", description: "Your current scope, e.g. group chat id" } },
-      required: ["query", "scope"],
+      properties: {
+        query: { type: "string" },
+        // Optional since D9.4: the public tier is not scope-gated, so a caller with no meaningful
+        // scope (an agent, a web widget) can search without inventing one.
+        scope: { type: "string", description: "Your current scope, e.g. group chat id. Optional; only narrows internal results." },
+        publicOnly: { type: "boolean", description: "Restrict to the public tier even if you are authorized for more." },
+      },
+      required: ["query"],
     },
     handler: async (args, principal) => {
       const res = await fetch(`${config.knowledgeUrl}/search`, {
@@ -187,7 +198,11 @@ export function registerPlatformTools(): void {
           "x-obo-provider": principal.provider,
           "x-obo-external-id": principal.externalId,
         },
-        body: JSON.stringify({ query: String(args.query ?? ""), scope: String(args.scope ?? "") }),
+        body: JSON.stringify({
+          query: String(args.query ?? ""),
+          scope: String(args.scope ?? ""),
+          ...(args.publicOnly === true ? { publicOnly: true } : {}),
+        }),
       });
       if (!res.ok) throw new Error(`knowledge /search ${res.status}`);
       return JSON.stringify(((await res.json()) as { hits: unknown[] }).hits);

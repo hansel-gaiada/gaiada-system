@@ -203,6 +203,30 @@ export const config = {
   // company total stops being reproducible. UTC by default — matching dept-resolution.ts's
   // todayIso() and every other calendar-day comparison in the program.
   reportsTz: process.env.REPORTS_TZ ?? "UTC",
+  // IT-01/03 network discovery (docs/superpowers/specs/2026-08-03-it-network-discovery-design.md).
+  itDiscovery: {
+    // PRIVACY GATE, default DENY. ~25 of the 58 hosts observed on the office network are personal
+    // phones whose hostnames name staff outright (Ratihs-iPhone, A56-milik-Tini, ...). Persisting
+    // them with MAC + per-poll timestamps builds a presence log of named employees on their own
+    // devices, which CLAUDE.md forbids before legal Gate 1. When off (the default) the report
+    // endpoint counts BYOD clients and discards them without ever writing a row.
+    persistByod:
+      process.env.IT_DISCOVERY_PERSIST_BYOD === "1" || process.env.IT_DISCOVERY_PERSIST_BYOD === "true",
+    // Hostname patterns that mark a discovered client as a COMPANY asset ('managed'). Anything that
+    // matches none of these is 'byod' — default-deny, so a new unknown device is never persisted by
+    // accident. Comma-separated regexes; the defaults cover the observed corporate naming.
+    managedHostnamePatterns: (process.env.IT_DISCOVERY_MANAGED_PATTERNS ??
+      "^GDA-,^DESKTOP-,^LAPTOP-,^MSI\\.,^Dina\\.,^Laptop-").split(",").map((s) => s.trim()).filter(Boolean),
+    // Derived-status thresholds (IT-03). Sized off a 5-minute collector interval: a device seen
+    // within 2 intervals is online, within 6 it is degraded (missed polls), beyond that offline.
+    // NEVER probe with ICMP to decide this — only 12 of 58 real hosts answer ping.
+    onlineWindowMs: Number(process.env.IT_DISCOVERY_ONLINE_WINDOW_MS ?? 11 * 60 * 1000),
+    degradedWindowMs: Number(process.env.IT_DISCOVERY_DEGRADED_WINDOW_MS ?? 31 * 60 * 1000),
+    // The stale reaper. Fail-soft and OFF by default, like every other background sweep here.
+    reaperEnabled:
+      process.env.IT_DISCOVERY_REAPER_ENABLED === "1" || process.env.IT_DISCOVERY_REAPER_ENABLED === "true",
+    reaperIntervalMs: Number(process.env.IT_DISCOVERY_REAPER_INTERVAL_MS ?? 5 * 60 * 1000),
+  },
   // Downstream service endpoints the admin/systems console aggregates (Phase C). All
   // read-only; empty URL -> that system reports "not configured" (fail-soft, never fake).
   services: {
@@ -576,6 +600,28 @@ export const config = {
     platformUiInternalUrl: process.env.PLATFORM_UI_INTERNAL_URL ?? "",
     timeoutMs: Number(process.env.REPORT_RENDERER_TIMEOUT_MS ?? 30000),
   },
+  // Knowledge (D9 RAG) ingestion — the two corpora the store is filled from.
+  //
+  // PUBLIC tier: our own marketing site, ingested as world-readable chunks so an agent can answer a
+  // lead with no ERP identity. `publicSites` is an EGRESS ALLOWLIST, not a hint: the fetcher refuses
+  // any URL — seed, sitemap entry, discovered link, or redirect target — whose host is not in it.
+  // Leave it at gaiada.com unless you have read the SSRF note at the top of ingest/web-source.ts.
+  // `publicTenantId` is only the owning company row for those chunks; it does NOT restrict who may
+  // read them (that is what audience='public' means).
+  //
+  // INTERNAL tier: ERP records for the listed tenants (empty = every active company), readable by
+  // that company's members only. Both tiers run on `intervalMs` and can be triggered on demand from
+  // the admin console. Fail-closed: with no knowledge URL/token configured, nothing runs at all.
+  knowledgeIngest: {
+    enabled: (process.env.KNOWLEDGE_INGEST_ENABLED ?? "") === "1",
+    intervalMs: Number(process.env.KNOWLEDGE_INGEST_INTERVAL_MS ?? 6 * 60 * 60 * 1000),
+    publicSites: (process.env.KNOWLEDGE_PUBLIC_SITES ?? "https://gaiada.com").split(",").map((s) => s.trim()).filter(Boolean),
+    publicTenantId: process.env.KNOWLEDGE_PUBLIC_TENANT_ID ?? "",
+    publicMaxPages: Number(process.env.KNOWLEDGE_PUBLIC_MAX_PAGES ?? 150),
+    internalTenantIds: (process.env.KNOWLEDGE_INTERNAL_TENANT_IDS ?? "").split(",").map((s) => s.trim()).filter(Boolean),
+    /** Index attached-file CONTENTS (text/spreadsheet only — see ingest/file-text.ts). */
+    indexFileContents: (process.env.KNOWLEDGE_INDEX_FILE_CONTENTS ?? "1") === "1",
+  },
 };
 
 /** The bridge is fully configured (all four knobs present) and may start. */
@@ -587,6 +633,12 @@ export function n8nBridgeEnabled(): boolean {
 /** The graph bridge may start: a reachable knowledge service + at least one entity stream to watch. */
 export function graphBridgeEnabled(): boolean {
   return !!(config.services.knowledge.url && config.services.knowledge.token && config.graphBridge.entityTypes.length);
+}
+
+/** Knowledge ingestion may run: explicitly enabled AND a reachable knowledge service. Requiring the
+ *  explicit flag keeps a fresh environment from crawling and embedding on first boot by accident. */
+export function knowledgeIngestEnabled(): boolean {
+  return !!(config.knowledgeIngest.enabled && config.services.knowledge.url && config.services.knowledge.token);
 }
 
 /** SM-25a — the Google OAuth client is fully configured and an authorization-code round trip is even
