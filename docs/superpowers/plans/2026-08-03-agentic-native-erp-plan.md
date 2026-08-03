@@ -74,7 +74,8 @@ Tool counts below are read/write per namespace, taken from the running hub.
 | **Creatives** | — (uses `image`/`vision`/`design` 1/0 each) | Generation seams only | Asset lifecycle not tool-reachable |
 | **Social media** | none | Module `0.0.0` PLANNED | Whole module |
 | **Web Dev** | `github` 1/1, `deploy` 0/2, `code` 1/0 | Real dev-loop coverage | Webdesk `0.0.0` PLANNED |
-| **GM / Operations** | — | Consoles render, no own capabilities | Define what these departments actually own |
+| **GM** | borrows `clients` 3/2, `projects` 2/1, `reports` 4/0; **`billing` none** | Owns the commercial spine | **Invoicing is not tool-reachable at all**; no cross-department aggregate tool |
+| **Operations** (Sanur) | — | Console renders, owns no capabilities | Scope still undefined — see open question |
 
 ## Goals per department
 
@@ -124,9 +125,10 @@ Each goal is "what must be true before staging". Ordered within each department 
 - Fact history starts 2026-08-03 — reports cannot be meaningfully evaluated before ~2 weeks of facts
   accumulate. Plan the eval cases for late dev, not now.
 
-### Clients / billing
-- `billing` namespace from scratch: invoice create/send/mark-paid, all impact-classified.
-- Client portal invite as a tool (pairs with W0-3's Keycloak provisioning).
+### Clients / billing — **owned by GM**, see the GM section for why this is top priority
+- `billing` namespace from scratch: invoice create/send/mark-paid, all impact-classified. Money moves
+  here, so this is the clearest place the D14 gate has to work before any automation touches it.
+- Client portal invite as a tool (pairs with W0-3's Keycloak provisioning, already built).
 
 ### Knowledge
 - Ingest trigger and quarantine decision as tools (currently read-only).
@@ -144,12 +146,36 @@ Each goal is "what must be true before staging". Ordered within each department 
   when it leaves `0.0.0`.
 
 ### Social Media
-- Module is `0.0.0` PLANNED. When it is built, build it to this bar from day one rather than
-  retrofitting — it is the only department with that luxury left.
+- Module is `0.0.0` PLANNED, **being built in a separate session.** It is the last department that can
+  be built TO this bar instead of retrofitted onto it — that option disappears the moment it ships,
+  so hand this document to whoever builds it before they start.
 
-### GM / Operations
-- **Open question:** these consoles render but own no capabilities. Decide whether they are
-  aggregate views over other departments or own real work. Until answered, the bar cannot be applied.
+### GM — the commercial spine (scope settled 2026-08-03)
+Owns **clients, projects, invoices** and the general-manager duties around them; **oversees** the other
+departments through aggregate views rather than owning their work. Two distinct halves, and they fail
+differently:
+
+- **Owned capabilities.** `clients` (3/2) and `projects` (2/1) have tools; **invoicing has no
+  namespace at all.** GM is therefore the department most damaged by the missing `billing` tools —
+  quote → invoice → send → chase → mark-paid is the one GM loop with zero automation surface, and
+  it is the loop with money in it. Build `billing` to the bar first, not last.
+- **Oversight views.** "Overview the departments" needs cross-department aggregation, and the only
+  general cross-tenant/cross-unit reader in the estate is the HR envelope fan-out (`fanOutHr`) plus
+  `reports` (4 read tools, 0 write). There is no generic aggregate tool. Decide deliberately whether
+  GM oversight is: (a) `reports` grains pointed at the GM scope — cheapest, reuses the sealed-period
+  machinery and gets honest partial-period warnings for free; or (b) a bespoke GM aggregate endpoint.
+  **Prefer (a)** — a second aggregation path will drift from the first, and reports already solves
+  time-awareness, which is the hard part.
+- Approvals already fan in correctly across agency/pipeline/HR/automation/agent, so the GM
+  decision queue needs no new mechanism — only scoping.
+- Criterion 5 (explicit refusal) matters more here than anywhere: a GM overview that silently omits a
+  department it cannot read looks identical to a department with no work. It must say which
+  departments are excluded and why — the envelope pattern already does this; reuse it.
+
+### Operations (Sanur Resort)
+- **Open question, still unanswered:** the console renders but owns no capabilities. Until its scope is
+  defined the bar cannot be applied. Sanur is a resort, not an agency, so it likely needs a different
+  capability set than the Gaia departments rather than a copy of one.
 
 ## Exit bar — what "closed before staging" means
 
