@@ -3,6 +3,7 @@ import { useActionState } from "react";
 import { Button, Card, StatusBadge, Toast } from "@/components/ui";
 import type { GatewayBudget } from "@/lib/admin";
 import "./systems.css";
+import { formatTimestamp } from "@/lib/format";
 
 export interface DrModeActionState {
   ok: boolean;
@@ -38,7 +39,7 @@ export function DrModeCard({
       <p className="sys-empty-note">
         {active
           ? `A declared failover is raising the global daily cap by ${drBurstCap ?? "—"} calls` +
-            (budget?.drUntil ? ` until ${new Date(budget.drUntil).toLocaleString()}.` : ".")
+            (budget?.drUntil ? ` until ${formatTimestamp(budget.drUntil)}.` : ".")
           : `Declaring a failover adds a bounded ${drBurstCap ?? "—"}-call allowance on top of the daily cap for ` +
             `${drDurationMinutes ?? "—"} minutes, so a real outage doesn't instantly degrade AI to placeholders.`}
       </p>

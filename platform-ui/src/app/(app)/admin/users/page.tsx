@@ -44,7 +44,7 @@ export default async function AdminUsersPage() {
     throw e;
   }
 
-  const roles = tenant ? await listRoles(userId) : [];
+  const roles = tenant ? await listRoles(userId, tenant) : [];
 
   return (
     <>

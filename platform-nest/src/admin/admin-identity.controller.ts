@@ -46,18 +46,33 @@ async function bumpSession(userId: string): Promise<void> {
 @Controller("api")
 @UseGuards(AuthGuard)
 export class AdminIdentityController {
-  // ---- Roles catalog (global; feeds the assign-role picker) ----
+  // ---- Roles catalog (feeds the assign-role picker) ----
+  //
+  // `tenantId` narrows the catalog to the global roles plus the ones belonging to that company.
+  // Without it the picker listed EVERY company's rows, and because per-company roles share their
+  // names across companies the operator saw "manager" ten times and "company_admin" three times
+  // with nothing to tell them apart — ten identical-looking options, nine of which grant a role
+  // row owned by a different company. Optional (not required) so the tenant-less catalog callers
+  // keep working; when passed, membership is checked so this cannot be used to enumerate the roles
+  // of a company the caller has nothing to do with.
   @Get("roles")
-  async roles(@Req() req: FastifyRequest) {
-    const elevated = req.principal.roles.some(
-      (r) =>
-        (r.role === "platform_admin" && r.scopeType === "global") ||
-        r.role === "company_admin" ||
-        r.role === "manager",
-    );
+  async roles(@Req() req: FastifyRequest, @Query("tenantId") tenantId?: string) {
+    const isPlatformAdmin = req.principal.roles.some((r) => r.role === "platform_admin" && r.scopeType === "global");
+    const elevated =
+      isPlatformAdmin || req.principal.roles.some((r) => r.role === "company_admin" || r.role === "manager");
     if (!elevated) throw new NotFoundException(); // no data leak; UI degrades on 404
+    if (tenantId && !isPlatformAdmin && !req.principal.companies.includes(tenantId)) {
+      throw new NotFoundException();
+    }
     const rows = await withGlobal((c) =>
-      c.query(`SELECT id, name, company_id FROM roles ORDER BY company_id NULLS FIRST, name`),
+      tenantId
+        ? c.query(
+            `SELECT id, name, company_id FROM roles
+             WHERE company_id IS NULL OR company_id = $1
+             ORDER BY company_id NULLS FIRST, name`,
+            [tenantId],
+          )
+        : c.query(`SELECT id, name, company_id FROM roles ORDER BY company_id NULLS FIRST, name`),
     );
     return rows.rows;
   }

@@ -195,15 +195,21 @@ export function checklistProgress(c: Pick<HrCase, "details">): { done: number; t
 // self-service (own leave/attendance/cases) is NOT gated by this — it always
 // works against the active tenant regardless of hr.view (design §2.2 `member`
 // self-service), so an empty result here only hides the team-facing surfaces.
-export interface HrScopeCompany { id: string; name: string; role: "home" | "staff" | "manager" }
+// `role` is WHY the company is in scope, not a permission level:
+//   home     — a real hr.view grant in that company
+//   staff/manager — an ORG-13 service assignment serving hr to it
+//   elevated — reachable only because the caller is platform_admin/group_executive.
+// "elevated" exists because conflating it with "home" made the selector claim every company in the
+// group was HR-served; the server then 404'd the ones where hr is off and the envelope underneath
+// said "not served" — the selector and the banner contradicting each other on the same screen.
+export interface HrScopeCompany { id: string; name: string; role: "home" | "staff" | "manager" | "elevated" }
 
 export function hrScopeCompanies(me: Me, tenant: string | null): HrScopeCompany[] {
   const map = new Map<string, HrScopeCompany>();
   const elevated = isElevated(me);
   for (const c of me.companies) {
-    if (elevated || can(me, "hr.view", c.id)) {
-      map.set(c.id, { id: c.id, name: c.name, role: "home" });
-    }
+    if (can(me, "hr.view", c.id)) map.set(c.id, { id: c.id, name: c.name, role: "home" });
+    else if (elevated) map.set(c.id, { id: c.id, name: c.name, role: "elevated" });
   }
   for (const s of me.serviceScopes ?? []) {
     if (s.module !== "hr") continue;
@@ -213,6 +219,8 @@ export function hrScopeCompanies(me: Me, tenant: string | null): HrScopeCompany[
     // A home grant + a service grant on the same company: keep "home" (it's
     // already a full member there) but note the higher of the two service roles.
     else if (existing.role === "staff" && role === "manager") existing.role = "manager";
+    // A real service assignment outranks bare elevation — it IS a served company.
+    else if (existing.role === "elevated") existing.role = role;
   }
   // Always surface the active tenant first when it's part of the reachable set
   // (predictable default before "all"), else in insertion order.

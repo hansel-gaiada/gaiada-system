@@ -120,7 +120,14 @@ export async function listUsers(u: string, t: string): Promise<UserRow[]> {
   }));
 }
 
-export const listRoles = (u: string) => skipMissing(platformFetch<RoleRow[]>(`/api/roles`, u), [] as RoleRow[]);
+// `tenantId` narrows the catalog to the global roles plus the active company's own. Pass it from
+// any per-company surface: per-company role rows share their NAMES across companies, so an
+// unnarrowed catalog renders one indistinguishable "manager" option per company in the group.
+export const listRoles = (u: string, tenantId?: string) =>
+  skipMissing(
+    platformFetch<RoleRow[]>(`/api/roles${tenantId ? `?tenantId=${encodeURIComponent(tenantId)}` : ""}`, u),
+    [] as RoleRow[],
+  );
 
 // Invite/onboard a person and edit their profile — BFF contract (backend TODO,
 // see docs/FRONTEND-BFF-CONTRACT.md):

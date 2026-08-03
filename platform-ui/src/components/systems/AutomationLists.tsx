@@ -4,6 +4,7 @@ import { StatusBadge } from "@/components/ui";
 import { ActionButton, type ActionState } from "./ActionButton";
 import { SearchableTable } from "./SearchableTable";
 import { EmptyNote } from "./EmptyNote";
+import { formatTimestamp } from "@/lib/format";
 
 // The Automation console's two long, potentially-unbounded lists (workflows, recent executions),
 // pulled out of the (server-component) page so they can carry client-side search + pagination
@@ -54,7 +55,7 @@ export function WorkflowsTable({
           <StatusBadge key={`s-${w.id}`} label={w.active ? "active" : "inactive"} />,
           run?.startedAt ? (
             <span key={`r-${w.id}`}>
-              {new Date(run.startedAt).toLocaleString()} · {run.status}
+              {formatTimestamp(run.startedAt)} · {run.status}
             </span>
           ) : (
             "never run"
@@ -104,7 +105,7 @@ export function ExecutionsTable({ executions }: { executions: ExecutionListItem[
         e.workflowName,
         <StatusBadge key={`e-${e.id}`} label={e.status} />,
         e.mode ?? "—",
-        e.startedAt ? new Date(e.startedAt).toLocaleString() : "—",
+        formatTimestamp(e.startedAt),
         e.durationMs != null ? `${(e.durationMs / 1000).toFixed(1)}s` : "—",
       ]}
     />

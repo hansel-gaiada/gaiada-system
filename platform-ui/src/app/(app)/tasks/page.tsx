@@ -113,7 +113,25 @@ export default async function TasksPage({ searchParams }: { searchParams: Search
       )}
       {envelopeBanner}
       {rows.length === 0 ? (
-        <Card><EmptyNote>{scope === "all" ? "No tasks assigned to you across your companies." : mine ? "No tasks assigned to you." : "No tasks yet. Create one under a project."}</EmptyNote></Card>
+        <Card>
+          {scope === "all" ? (
+            // The all-companies leg is assignee-scoped (`/api/tasks/mine` is the only
+            // cross-company reader that exists), so "nothing here" does NOT mean "no tasks".
+            // Say so and hand over the one-click narrowing that reveals them — otherwise a task
+            // you just created unassigned looks like it was never saved.
+            <>
+              <EmptyNote>
+                No tasks assigned to you across your companies. This view shows only your own
+                tasks — unassigned tasks and other people&apos;s live under a single company.
+              </EmptyNote>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 12 }}>
+                {companies.map((c) => tab(`All tasks in ${c.name}`, `/tasks?scope=${c.id}`, false))}
+              </div>
+            </>
+          ) : (
+            <EmptyNote>{mine ? "No tasks assigned to you." : "No tasks yet. Create one under a project."}</EmptyNote>
+          )}
+        </Card>
       ) : (
         <DataTable columns={columns} rows={rows} link={{ base: "/tasks", idKey: "id", labelKey: "title" }} csvName="tasks" pageSize={25} />
       )}

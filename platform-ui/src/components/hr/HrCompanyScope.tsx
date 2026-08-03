@@ -37,10 +37,13 @@ export function HrCompanyScope({ companies, value }: { companies: HrScopeCompany
         style={{ width: "auto", minWidth: 220 }}
         aria-label="Company scope"
       >
-        <option value="all">All served companies ({companies.length})</option>
+        {/* Not "served" — the set also holds companies reachable only via elevation, where HR may
+            be switched off entirely. Claiming they were served contradicted the envelope banner
+            right below, which reports those same companies as "not served". */}
+        <option value="all">All companies in scope ({companies.length})</option>
         {companies.map((c) => (
           <option key={c.id} value={c.id}>
-            {c.name}{c.role !== "home" ? ` · ${c.role}` : ""}
+            {c.name}{c.role === "home" ? "" : c.role === "elevated" ? " · via elevated access" : ` · ${c.role}`}
           </option>
         ))}
       </select>
@@ -48,8 +51,11 @@ export function HrCompanyScope({ companies, value }: { companies: HrScopeCompany
   );
 }
 
+// `not_served` is the fan-out's reading of a 404, which the backend returns BOTH when hr isn't
+// served to that company and when the hr module is switched off there. Saying only "not served"
+// sent operators hunting for a service assignment when the real answer was a disabled module.
 const REASON_LABEL: Record<string, string> = {
-  no_access: "no access", not_served: "not served", suspended: "suspended", error: "unavailable",
+  no_access: "no access", not_served: "HR not enabled or not served", suspended: "suspended", error: "unavailable",
 };
 
 // Renders nothing when every company is included — never a fixed-height banner

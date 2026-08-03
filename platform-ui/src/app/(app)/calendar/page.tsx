@@ -50,6 +50,8 @@ export default async function CalendarPage({ searchParams }: { searchParams: Sea
   let envelopeBanner: ReactNode = null;
   let workload: [string, number][] = [];
   let workloadNote: string | null = null;
+  // Per-person under one company; per-company across all of them (see the "all" branch).
+  let workloadTitle = "Workload — open tasks";
 
   if (scope === "all") {
     // Cross-company default (owner decision): the caller's own due tasks,
@@ -73,7 +75,19 @@ export default async function CalendarPage({ searchParams }: { searchParams: Sea
       for (const d of deliverables) if (d.due_date && d.status !== "done") items.push({ date: d.due_date, kind: "deliverable", title: d.name, status: d.status, company: activeName });
       for (const p of projects) if (p.due_date && p.status !== "completed" && p.status !== "archived") items.push({ date: p.due_date, kind: "project", title: p.name, href: `/projects/${p.id}`, status: p.status, company: activeName });
     }
-    workloadNote = "Workload needs a single company — narrow the scope pill above.";
+    // "all" is the DEFAULT scope, so a panel that only works under a narrowed scope was dead on
+    // arrival for every visitor. A per-person split is meaningless here anyway — the cross-company
+    // union is the caller's OWN tasks, so every bar would carry the caller's name. Break the same
+    // rows down by company instead: that is the question the all-companies view can actually answer.
+    const load = new Map<string, number>();
+    for (const t of envelope.items) {
+      if (t.status === "done") continue;
+      const key = t.company ?? "Unknown company";
+      load.set(key, (load.get(key) ?? 0) + 1);
+    }
+    workload = [...load.entries()].sort((a, b) => b[1] - a[1]);
+    workloadTitle = "Your open tasks — by company";
+    if (workload.length === 0) workloadNote = "You have no open tasks in any company.";
   } else {
     // Single-company scope — unchanged behavior (every task in the company,
     // not just the caller's own), resolved from the ScopePill's chosen
@@ -146,7 +160,7 @@ export default async function CalendarPage({ searchParams }: { searchParams: Sea
           ))}
         </div>
 
-        <Card title="Workload — open tasks">
+        <Card title={workloadTitle}>
           {workloadNote ? <EmptyNote>{workloadNote}</EmptyNote> : workload.length === 0 ? <EmptyNote>No open tasks.</EmptyNote> : (
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
               {workload.map(([who, n]) => (

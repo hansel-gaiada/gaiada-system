@@ -42,8 +42,25 @@ async function safe<T>(p: Promise<T>, fb: T): Promise<T> {
   }
 }
 
-export async function listPortalRuns(userId: string, tenant: string): Promise<PortalRun[]> {
-  return safe(platformFetch<PortalRun[]>(`/api/${tenant}/portal/runs`, userId), []);
+/**
+ * The caller's runs, plus WHY the list is empty when it is.
+ *
+ * The BFF answers 403 "not a portal client" for anyone with no `clients.portal_user_id` row — i.e.
+ * every staff member. Folding that into a plain `[]` made the page tell staff "once your kickoff is
+ * processed, your project appears here", as though a client project were pending for them. Keep the
+ * graceful degrade, but carry the distinction so the page can say which of the two it is.
+ */
+export async function listPortalRuns(
+  userId: string,
+  tenant: string,
+): Promise<{ runs: PortalRun[]; isPortalClient: boolean }> {
+  try {
+    return { runs: await platformFetch<PortalRun[]>(`/api/${tenant}/portal/runs`, userId), isPortalClient: true };
+  } catch (e) {
+    if (e instanceof PlatformError && e.status === 403) return { runs: [], isPortalClient: false };
+    if (e instanceof PlatformError && e.status === 404) return { runs: [], isPortalClient: true };
+    throw e;
+  }
 }
 
 export async function getPortalRun(userId: string, tenant: string, runId: string): Promise<PortalRunDetail | null> {

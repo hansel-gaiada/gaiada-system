@@ -2,6 +2,7 @@
 import { StatusBadge } from "@/components/ui";
 import { SearchableTable } from "./SearchableTable";
 import { EmptyNote } from "./EmptyNote";
+import { formatTimestamp } from "@/lib/format";
 
 // The AI Gateway console's long lists (provider inventory, egress audit, per-tenant spend), pulled
 // out of the (server-component) gateway page so they can carry client-side search + pagination
@@ -59,7 +60,7 @@ export function GatewayAuditTable({ audit, hasFilter }: { audit: GatewayAuditLis
         </EmptyNote>
       }
       renderRow={(row, i) => [
-        row.time ? new Date(row.time).toLocaleString() : "—",
+        formatTimestamp(row.time),
         row.capability ?? "—",
         row.provider ?? "—",
         <StatusBadge key={`decision-${i}`} label={row.decision ?? "unknown"} />,
