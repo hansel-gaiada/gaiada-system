@@ -10,3 +10,11 @@ dist/
 .env.local
 .env.tmp
 .env.*.local
+
+# Local credential scratch files. NOT ignored before 2026-08-03, so a `git add -A` in this shared
+# working tree would have committed CREDENTIALS.local.md verbatim. Pattern, not just that one name,
+# because the next one will be called something slightly different.
+CREDENTIALS.local.md
+*.local.md
+*.secret
+.secrets/
