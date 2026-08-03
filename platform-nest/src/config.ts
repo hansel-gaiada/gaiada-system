@@ -166,6 +166,28 @@ export const config = {
   oidcJwksUri:
     process.env.OIDC_JWKS_URI ?? "http://localhost:8080/realms/gaiada/protocol/openid-connect/certs",
   oidcAudience: process.env.OIDC_AUDIENCE ?? "gaiada-platform",
+  // W0-3 — Keycloak ADMIN access, used ONLY to provision client-portal contact accounts on invite
+  // acceptance. Deliberately separate from the oidc* keys above: those verify incoming tokens, this
+  // one CREATES users, and the two should never share a credential.
+  //
+  // FAIL-CLOSED like every other optional downstream in this file: any of the four unset =>
+  // keycloakAdminConfigured() is false and every provisioning entry point throws
+  // KeycloakNotConfiguredError, which maps to an honest 503 rather than half-creating an account.
+  //
+  // The client must be a CONFIDENTIAL SERVICE-ACCOUNT client holding realm-management:manage-users
+  // (+ view-users). Use a dedicated one -- `gaiada-provisioner` exists on the gaiada realm for
+  // exactly this -- never the master-realm admin, and never the gaiada-platform client whose
+  // audience the API itself trusts: a leaked provisioner secret should be able to manage users and
+  // nothing else. Verified boundary: it cannot create clients and cannot map realm-admin onto a user.
+  //
+  // baseUrl is the realm ROOT (no /realms/... suffix) -- note this deployment serves Keycloak under
+  // `/idp`, so internally that is http://keycloak:8080/idp, NOT /auth.
+  keycloakAdmin: {
+    baseUrl: process.env.KEYCLOAK_ADMIN_BASE_URL ?? "",
+    realm: process.env.KEYCLOAK_ADMIN_REALM ?? "gaiada",
+    clientId: process.env.KEYCLOAK_ADMIN_CLIENT_ID ?? "",
+    clientSecret: process.env.KEYCLOAK_ADMIN_CLIENT_SECRET ?? "",
+  },
   // Cerbos policy decision point (5b.4). The platform calls it for every authorization.
   cerbosUrl: process.env.CERBOS_URL ?? "http://localhost:3592",
   // File storage (5c.4). Local-first backend now (a directory on disk / mounted volume);

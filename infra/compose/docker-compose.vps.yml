@@ -289,6 +289,14 @@ services:
       # Verified empty in the running container on 2026-08-03 before this line existed. Same class
       # as the N8N_BRIDGE_TIMEOUT_MS forward and the dropped Google/Ads credentials.
       MEETING_VIDEO_MAX_BYTES: ${MEETING_VIDEO_MAX_BYTES:-524288000}
+      # W0-3 Keycloak admin (client-portal account provisioning). Forwarded here or the container
+      # sees nothing -- compose passes through only what is listed, which is how
+      # MEETING_VIDEO_MAX_BYTES arrived empty on the VPS despite being set in .env.
+      # Internal URL, so /idp on the compose network rather than the public host.
+      KEYCLOAK_ADMIN_BASE_URL: ${KEYCLOAK_ADMIN_BASE_URL:-http://keycloak:8080/idp}
+      KEYCLOAK_ADMIN_REALM: ${KEYCLOAK_ADMIN_REALM:-gaiada}
+      KEYCLOAK_ADMIN_CLIENT_ID: ${KEYCLOAK_ADMIN_CLIENT_ID:-gaiada-provisioner}
+      KEYCLOAK_ADMIN_CLIENT_SECRET: ${KEYCLOAK_ADMIN_CLIENT_SECRET:-}
       # Automation is the separate `gaiada-automation` n8n stack; set these only if n8n is
       # reachable from this network. AUTOMATION_API_KEY is an n8n Public-API key → the
       # Systems→Automation console then lists real workflows + last-run.
