@@ -30,9 +30,25 @@ import { authorize } from "../core/http";
 import { AuthGuard } from "../auth/guards";
 import { isElevated } from "./elevated";
 import { getBridgeHealth, replayBridgeDeadLetters, type BridgeHealth } from "../events/bridge-health";
+import { allModules } from "../modules/registry";
 
 type SystemKey = "bot" | "gateway" | "hub" | "agents" | "knowledge" | "automation";
 const SYSTEMS: SystemKey[] = ["bot", "gateway", "hub", "agents", "knowledge", "automation"];
+
+/** One downstream service's build identity, as IT reports it. `version: null` means the service
+ *  is reachable but exposes no version field — distinct from unreachable, which the UI renders
+ *  differently. Never inferred from the platform's own APP_VERSION. */
+export interface AboutService {
+  key: SystemKey;
+  reachable: boolean;
+  version: string | null;
+  note: string | null;
+}
+
+export interface AboutInfo {
+  app: { version: string; originSite: string; node: string; modules: string[] };
+  services: AboutService[];
+}
 
 interface SystemStatus {
   ok: boolean;
@@ -564,6 +580,46 @@ async function fetchHubDetail(): Promise<HubDetail | null> {
 @Controller("api/admin")
 @UseGuards(AuthGuard)
 export class AdminSystemsController {
+  // ---- Software information (docs/modules/VERSIONING.md) ----
+  // "What is actually running here?" Declared before :system/status only for readability — the
+  // paths differ in segment count, so there is no route ambiguity.
+  //
+  // The app version is NOT computed here: /VERSION is the single source, deploy.yml validates the
+  // git tag against it and passes it as APP_VERSION. This endpoint only REPORTS what the running
+  // process was given. Rule 5 of the doc ("if they disagree, the running app is wrong") is why
+  // each service's self-reported version is returned verbatim rather than being reconciled — the
+  // UI shows the disagreement instead of hiding it. A service that reports nothing is "unknown",
+  // never backfilled from the platform's own value.
+  @Get("about")
+  async about(@Req() req: FastifyRequest): Promise<AboutInfo> {
+    if (!isElevated(req)) throw new ForbiddenException("platform admin required");
+    const services = await Promise.all(
+      SYSTEMS.map(async (key): Promise<AboutService> => {
+        const svc = config.services[key];
+        if (!svc?.url) return { key, reachable: false, version: null, note: "not configured" };
+        const base = svc.url.replace(/\/$/, "");
+        try {
+          const h = (await getJson(`${base}${key === "automation" ? "/healthz" : "/health"}`, svc.token)) as
+            | Record<string, unknown>
+            | null;
+          const v = h && typeof h.version === "string" ? h.version.trim() : "";
+          return { key, reachable: true, version: v || null, note: v ? null : "does not report a version" };
+        } catch (e) {
+          return { key, reachable: false, version: null, note: (e as Error).message };
+        }
+      }),
+    );
+    return {
+      app: {
+        version: process.env.APP_VERSION?.trim() || "unknown",
+        originSite: config.originSite,
+        node: process.version,
+        modules: allModules().map((m) => m.key),
+      },
+      services,
+    };
+  }
+
   @Get(":system/status")
   async status(@Req() req: FastifyRequest, @Param("system") system: string): Promise<SystemStatus> {
     if (!isElevated(req)) throw new ForbiddenException("platform admin required");

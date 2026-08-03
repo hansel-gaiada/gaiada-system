@@ -1,4 +1,5 @@
 import { SectionTabs } from "@/components/shell/SectionTabs";
+import "@/components/admin/admin.css";
 
 // Settings (formerly "Admin"). Its sub-sections are in-page tabs here rather than
 // separate sidebar entries; each page renders its own header + content below.
@@ -11,13 +12,15 @@ const TABS = [
   { key: "services", label: "Services", href: "/admin/services", icon: "hub" as const },
   { key: "compliance", label: "Compliance", href: "/admin/compliance", icon: "check" as const },
   { key: "audit", label: "Audit", href: "/admin/audit", icon: "clock" as const },
+  // Software information: deployed app version + each service's reported build (VERSIONING.md).
+  { key: "about", label: "About", href: "/admin/about", icon: "pulse" as const },
 ];
 
 export default function SettingsLayout({ children }: { children: React.ReactNode }) {
   return (
-    <>
+    <div className="admin-shell--full">
       <SectionTabs tabs={TABS} />
       {children}
-    </>
+    </div>
   );
 }
