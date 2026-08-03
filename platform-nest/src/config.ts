@@ -182,6 +182,12 @@ export const config = {
   //
   // baseUrl is the realm ROOT (no /realms/... suffix) -- note this deployment serves Keycloak under
   // `/idp`, so internally that is http://keycloak:8080/idp, NOT /auth.
+  // W0-4 — client-portal invite links. TTL is short on purpose: the token grants ACCOUNT CREATION,
+  // not merely a read, so a stale link left in an inbox is a liability rather than a convenience.
+  // 72h is long enough for a client to act across a weekend.
+  clientInvites: {
+    ttlSeconds: Number(process.env.CLIENT_INVITE_TTL_SECONDS ?? 72 * 60 * 60),
+  },
   keycloakAdmin: {
     baseUrl: process.env.KEYCLOAK_ADMIN_BASE_URL ?? "",
     realm: process.env.KEYCLOAK_ADMIN_REALM ?? "gaiada",

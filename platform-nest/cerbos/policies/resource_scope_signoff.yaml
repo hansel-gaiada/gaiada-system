@@ -11,9 +11,17 @@ resourcePolicy:
       derivedRoles: ["platform_admin"]
     # Recording a party's scope-agreement signature is a governance action. Staff record it now;
     # the client's own countersignature arrives via the portal BFF (WS11 build item 4).
+    #
+    # `manager` added 2026-08-03 on the owner's explicit ratification (D-2): the PM owns the engagement
+    # and signs the agency half. Before this, `scope_signoff.create` was company_admin/exec only, which
+    # is why the automation account `wf:scope` (manager) was correctly refused during the server walk —
+    # that 403 was right policy, and this widening is a deliberate scope change, not a fix for it.
+    #
+    # Deliberately still NOT `member`/`team_lead`: signing a scope agreement commits the agency
+    # commercially, and the whole point of the dual-sign is that a named accountable person does it.
     - actions: ["create"]
       effect: EFFECT_ALLOW
-      derivedRoles: ["company_admin", "group_executive"]
+      derivedRoles: ["company_admin", "manager", "group_executive"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }
     - actions: ["read"]
       effect: EFFECT_ALLOW

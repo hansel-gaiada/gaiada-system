@@ -1,0 +1,38 @@
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: client_contact
+  importDerivedRoles: ["gaiada_scopes"]
+  variables:
+    import: ["gaiada_common"]
+  rules:
+    - actions: ["*"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["platform_admin"]
+
+    # Inviting an EXTERNAL person into a tenant is a governance action, so it is manager-tier and up —
+    # never plain `member`. `manager` is included on the owner's explicit ratification (D-2, 2026-08-03):
+    # "a PM delegates internally and starts the external setup", and the PM who owns the engagement is
+    # the person who actually knows who the client's stakeholders are. Requiring a company_admin for
+    # every contact would either bottleneck the PM or push admins into rubber-stamping.
+    - actions: ["create", "update", "revoke"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin", "manager"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+
+    # Reading the contact list is team-level: anyone delivering the work needs to know who on the
+    # client side is watching and who can sign. It exposes names/emails and a capability, never a
+    # credential — `hasAccount`-style booleans only, exactly like the connections vault's `hasToken`.
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin", "manager", "member", "team_lead", "viewer"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+
+    # A group executive is a GLOBAL cross-company role, so it gets its own rule gated on `notLow`
+    # ONLY — never `inTenant`. This is the WD-20-R1 lesson, learned the hard way: `inTenant` is
+    # `resource.tenantId in principal.companies`, which NEVER holds for a global grant, so folding the
+    # exec into a rule above would have silently granted them nothing while looking correct.
+    - actions: ["read", "create", "update", "revoke"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["group_executive"]
+      condition: { match: { expr: "variables.notLow" } }
