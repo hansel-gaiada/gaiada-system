@@ -69,6 +69,10 @@
   flex-direction: column;
   gap: 10px;
 }
+/* The hint button must NOT live inside this element: `opacity < 1` creates a stacking context, so
+   a popover nested in here is (a) trapped below the sticky rail no matter its z-index and (b)
+   dimmed to 0.6 along with the label. The row wrapper keeps them siblings instead. */
+.dept-kpi__labelrow { display: flex; align-items: center; }
 .dept-kpi__label { opacity: 0.6; font-size: 10px; }
 .dept-kpi__value { font-family: var(--font-display); font-weight: 700; font-size: 32px; line-height: 1; color: var(--text-primary); }
 .dept-kpi__value--attention { color: var(--dept-risk); }

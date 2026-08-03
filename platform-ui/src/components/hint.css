@@ -1,0 +1,67 @@
+/* "?" hint affordance + its floating panel. Tokens only — the guard test forbids colour literals
+   in component CSS, and the panel is the sanctioned --elev-overlay case (floating layer). */
+.erp-hint {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+
+/* Quiet until wanted: opacity-only hover, matching the system's .erp-quiet behaviour rather than
+   introducing a second interaction language. 20px box keeps the glyph optically small while still
+   giving a usable hit area; it grows to the 44px touch minimum on coarse pointers below. */
+.erp-hint__btn {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0.5px solid var(--erp-hairline);
+  background: transparent;
+  color: var(--ink-muted);
+  font: 700 10px var(--font-body);
+  line-height: 1;
+  cursor: help;
+  opacity: 0.55;
+  transition: opacity 0.2s var(--erp-ease), color 0.2s var(--erp-ease);
+}
+.erp-hint__btn:hover,
+.erp-hint__btn:focus-visible {
+  opacity: 1;
+  color: var(--text-primary);
+}
+
+.erp-hint__panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  z-index: 20;
+  width: max-content;
+  max-width: 280px;
+  padding: 10px 12px;
+  background: var(--surface-chrome);
+  border: 0.5px solid var(--erp-hairline);
+  box-shadow: var(--elev-overlay);
+  font: 400 12.5px/1.5 var(--font-body);
+  color: var(--ink-muted);
+  text-transform: none;
+  letter-spacing: normal;
+  animation: erp-fade 0.16s var(--erp-ease);
+}
+
+/* Near the right edge (last KPI tile, right-aligned card headers) the panel would overflow the
+   viewport; flip its anchor instead of introducing a positioning library. */
+.erp-hint--end .erp-hint__panel {
+  left: auto;
+  right: 0;
+}
+
+@media (pointer: coarse) {
+  .erp-hint__btn {
+    width: 44px;
+    height: 44px;
+    margin: -12px 0;
+  }
+}
