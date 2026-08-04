@@ -145,7 +145,7 @@ function moneyEnv(name: string): number | null {
 
 const dataforseoProviderMonthlyCapUsd = moneyEnv("DATAFORSEO_MONTHLY_CAP_USD");
 
-export const config = {
+const configBase = {
   port: Number(process.env.PLATFORM_PORT ?? 3004),
   host: process.env.HOST ?? "0.0.0.0",
   // Postgres. Connect as a NON-superuser NOBYPASSRLS role in any real deployment —
@@ -666,6 +666,17 @@ export const config = {
     indexFileContents: (process.env.KNOWLEDGE_INDEX_FILE_CONTENTS ?? "1") === "1",
   },
 };
+
+// WD-23A-1 — `config.google` is the CORE name for the Google OAuth settings, because the state machine
+// and token client moved out of `modules/search/` into `core/google-oauth/` and core must not reach into
+// a module's config namespace.
+//
+// It is the SAME OBJECT as `config.search.google`, not a copy: `Object.assign` returns its target, so
+// both paths alias one value and a test that mutates either (several do) still affects both. The old
+// path is kept rather than rewritten across every search call site — env var NAMES are unchanged too,
+// so no deployment has to learn anything new.
+export const config: typeof configBase & { google: typeof configBase.search.google } =
+  Object.assign(configBase, { google: configBase.search.google });
 
 /** The bridge is fully configured (all four knobs present) and may start. */
 export function n8nBridgeEnabled(): boolean {
