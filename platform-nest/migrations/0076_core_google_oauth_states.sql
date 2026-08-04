@@ -4,9 +4,16 @@
 -- Re-spec: docs/superpowers/plans/2026-08-01-wd23a-respec.md §4.2.
 --
 -- ── NUMBERING (rule 5, migrations/README.md) ───────────────────────────────────────────────────────
--- `ls migrations | sort | tail` at write time showed head = 0069_report_module_roles.sql (TR-42,
--- landed 2026-08-01), so 0070 is genuinely free. The webdev Phase-3 plan's "next unused is 0050"
--- is long stale — its own LD-1 says verify, never inherit, and the ledger drifted 20 slots since.
+-- Re-verified at LANDING time, not inherited: this file was authored as `0070` when the head was
+-- 0069_report_module_roles.sql, but it sat staged outside `migrations/` while five more landed. Head is
+-- now 0075_client_portal.sql, so this takes **0076**. Rule 5 is explicit that the second ticket to
+-- merge bumps, and the mail subsystem's plan had pencilled 0076 for its own core migration — its
+-- tickets say "build-time next-unused", so it re-verifies and moves to 0077. `0058`/`0059` remain the
+-- reports programme's permanently-orphaned reservation gaps, and `0070` is now one too: do NOT fill them.
+--
+-- It was parked outside the runner's directory on purpose, because the runner executes the WHOLE folder
+-- and this file DROPs `search_google_oauth_states` — landing it early would have taken search's OAuth
+-- flow down until the code move caught up. The code move is in the same commit as this rename.
 -- `0058`/`0059` remain the reports program's permanently-orphaned reservation gaps: do NOT fill them.
 --
 -- ── WHY A REPLACEMENT AND NOT AN ALTER + BACKFILL (the enabling observation) ───────────────────────

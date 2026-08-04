@@ -77,7 +77,16 @@ const APPROVED_EGRESS: Record<string, string> = {
   // design, D-4 — a client's own Search Console rows there would be a cross-tenant leak BY
   // CONSTRUCTION). Google-derived rows live in tenant-scoped FORCE-RLS tables carrying `simulated`.
   // The B-1 assertion below is unaffected: neither file calls any SearchDataProvider method.
-  "google/token-endpoint-client.ts": "Google OAuth issuer: token + RFC-7009 revocation (config.search.google) — §A12.1 third class, client-private, $0",
+  // WD-23A-1: `google/token-endpoint-client.ts` was HERE and is now a 4-line re-export shim with no
+  // network reference at all — the OAuth token + RFC-7009 revocation egress moved to
+  // `src/core/google-oauth/token-endpoint-client.ts`, outside this scanner's scope (production files
+  // under src/modules/search/). It is deliberately NOT re-listed here: this inventory answers "what in
+  // the SEARCH module talks outward", and the honest answer no longer includes it.
+  //
+  // The guarantee is not dropped, it MOVED with the code: `src/core/google-oauth/egress.test.ts` is the
+  // core-owned equivalent and pins the same two properties (that file is the only egress in
+  // core/google-oauth, and it references its own config namespace and no other). If you are here because
+  // you moved more network code out of search, do the same rather than deleting a row.
   "google/api-client.ts": "Google data surfaces: Search Console / GA4 Data / Ads READ (config.search.google) — §A12.1 third class, client-private, $0",
 };
 
@@ -105,7 +114,8 @@ const OWN_NAMESPACE: Record<string, string> = {
   "providers/dataforseo.ts": "config.search.dataforseo",
   "providers/semrush.ts": "config.search.semrush",
   "providers/ahrefs.ts": "config.search.ahrefs",
-  "google/token-endpoint-client.ts": "config.search.google",
+  // token-endpoint-client.ts: see the note in APPROVED_EGRESS — the file is now a shim and its config
+  // reference moved to core as `config.google` (the same object; config.ts aliases both names).
   "google/api-client.ts": "config.search.google",
 };
 

@@ -205,3 +205,91 @@ KEYCLOAK_OAUTH_TEST=1 GOOGLE_DEV_CLIENT_SECRET=google-dev-secret KC_URL=http://l
 lost: a green round trip validates OUR OAuth machinery against a real issuer that enforces PKCE and
 client authentication. It does **not** validate the Google integration — that still needs a real
 Google client (OQ-9 / SM-41G).
+
+---
+
+## 7 · Landed 2026-08-04 — what changed, and the one design correction
+
+The promotion is in. `google_oauth_states` is a core table (**migration 0076**, renumbered from the
+staged `0070` after re-verifying the head — five migrations landed while this sat parked), the state
+machine and token client live in `src/core/google-oauth/`, and the old paths are re-export shims so no
+search call site or probe assertion changed.
+
+### THE CORRECTION — the module gate needs BOTH halves, and the first draft only had one
+
+The re-spec said the per-row `module` column replaces `0060`'s hard-coded
+`app_module_allowed('search')`, and that the `{modules:['search']}` option on `withTenants` could
+therefore be dropped. **Dropping it broke every write immediately** — `new row violates row-level
+security policy` on every INSERT — and the reason is the important part:
+
+`app_module_allowed(mod)` (migration 0028) reads the **REQUEST-DECLARED `app.scopes` GUC**. It is *not*
+a lookup of which modules a company has enabled. So the row's `module` and the request's declared module
+scope must **MATCH**. The gate is a two-sided handshake, not a row property:
+
+- a surface that stamps `module:'search'` must keep declaring `{modules:['search']}` on every read and
+  write of its own rows — that is what makes 0060's wall byte-equivalent after the promotion;
+- a core surface stamps `module: null`, declares nothing, and its rows carry no module requirement.
+
+That is why `consumeAuthorizationState` takes `module` as an **expectation** rather than reading it off
+the row: the row cannot be read at all without declaring the scope first, which is the whole point. A
+caller declaring the wrong module (or none, for a module row) matches zero rows and receives the same
+coarse `unknown_or_expired` as a forged state — it must not be able to distinguish "exists but not
+mine" from "does not exist". One `moduleScope()` helper expresses the rule at all four call sites so
+they cannot drift.
+
+Worth stating plainly: the failure mode of getting this wrong in the *safe-looking* direction — dropping
+`module` from the ROW — is silent, and would have deleted search's third wall in a refactor. Getting it
+wrong the other way fails loudly on the first INSERT. The loud one is the one that happened.
+
+### A second consequence the type system caught
+
+Widening the provider union with `google_drive` meant `isGoogleProvider` started admitting it — and
+search's two request-boundary validators used that guard while their error messages promised only
+search's three providers. They would have silently accepted a Drive value. Both now use a new
+`isSearchGoogleProvider`, and search's provider-keyed records (`DEFAULT_SCOPES`,
+`PROPERTY_BINDING_COLUMN`) are keyed by `SearchGoogleProvider`, so a Drive provider can no longer reach
+a property-binding column even in principle. The search adapter also *proves* a consumed row is a
+search row rather than assuming it.
+
+### Evidence
+
+| Check | Result |
+|---|---|
+| Google suite, pre-refactor baseline | 120 passed / 4 skipped |
+| Google suite, post-refactor | **120 passed / 4 skipped — identical** |
+| Keycloak oracle (executing, not skipped) | **4 passed** — auth-code+PKCE · refresh WITH rotation · RFC-7009 revocation |
+| Module gate BOTH ways (new, `core/google-oauth/module-gate.db.test.ts`) | **5 passed** — core surface completes with no scope declared; the positive control proves a `module='search'` row is unreachable without the scope, and reachable with it; a *different* module does not work either |
+| Negative control on that gate | stamping `module: null` on the row (the "simplify it away" defect) **reds 3 of the 5**, so the gate is load-bearing, not decorative |
+| `tsc`, `lint:withtenants`, `lint:migration-rls` | clean |
+
+The two probe files were edited **only** as the amended AC permits: 8 + 6 table-identifier references,
+14 lines total, no assertion, probe or expected value touched. Neither names the state table's
+`client_id`/`property_id`, so no column edit was needed at all.
+
+### A third consequence: an egress-inventory row became a lie
+
+SM-39's `modules/search/egress-inventory.test.ts` listed `google/token-endpoint-client.ts` as approved
+outbound egress and asserted it referenced `config.search.google`. After the move that path is a 4-line
+shim: no network call, no config reference. Three of its assertions failed — correctly.
+
+Deleting the row would have quietly retired a security control during a refactor. Instead the guarantee
+**moved with the code**: new `core/google-oauth/egress.test.ts` pins the same two properties for
+`core/google-oauth/` (exactly one file originates outbound calls; it reads its own `config.google` and no
+foreign vendor namespace), and the search inventory now carries a comment saying where the egress went
+and what to do if more network code leaves the module.
+
+Worth recording because the new test caught a defect in ITSELF on first run: my detector matched only
+`fetch(`, and the token client actually does `const doFetch = fetchImpl ?? fetch` then calls `doFetch(...)`.
+It reported **zero** egress in the one file that has it — passing its own allowlist while proving nothing,
+the precise failure mode the suite exists to prevent. The "a stale allowlist row is a lie" assertion is
+what surfaced it; the detector now matches any callee ending in fetch/Fetch plus the `?? fetch` idiom, and
+strips `typeof fetch` so a type-only reference is not counted as an outbound call.
+
+### Still open (not in this ticket)
+
+- The **core callback controller** at `api/integrations/google/callback` and webdev's Drive surface
+  registration — that is WD-23A-2, which needs a real Google client (OQ-9). Search's own callback is
+  untouched and still serves its existing path.
+- One brief item was already done and its note is stale: §3 says `.env.example` lacks
+  `INTEGRATION_TOKEN_KEY` ("absent — verified"). It is present, and already documents that the key
+  derives the OAuth state signature.

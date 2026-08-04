@@ -34,7 +34,7 @@ versions below; the running build reports it at `GET /health`.
 
 | Module | Ver | Status | Workstream | Since |
 |---|---|---|---|---|
-| platform-nest | `0.12.2` | PROTOTYPED | WS1 | 2026-08-04 |
+| platform-nest | `0.13.0` | PROTOTYPED | WS1 | 2026-08-04 |
 | platform-ui | `0.15.1` | PROTOTYPED | WS5 | 2026-08-04 |
 | ai-gateway-go | `0.13.0` | PROTOTYPED | WS3 | 2026-07 |
 | mcp-hub | `0.9.3` | PROTOTYPED | WS2 | 2026-08-03 |
@@ -46,9 +46,9 @@ versions below; the running build reports it at `GET /health`.
 | ai-agents | `0.5.0` | PROTOTYPED | WS8 | 2026-08-03 |
 | hermes-gateway | `0.2.0` | PROTOTYPED | WS3 | 2026-07 |
 | capture-helper | `0.2.0` | IN PROGRESS | WS11 | 2026-07 |
-| webdev | `0.10.0` | IN PROGRESS | Web Dev | 2026-08-03 |
+| webdev | `0.11.0` | IN PROGRESS | Web Dev | 2026-08-04 |
 | webdesk | `0.0.0` | PLANNED | Web Dev | 2026-07-23 |
-| search-marketing | `0.5.0` | DEV-VERIFIED | SEO | 2026-08-01 |
+| search-marketing | `0.5.1` | DEV-VERIFIED | SEO | 2026-08-04 |
 | social-media | `0.0.0` | PLANNED | Social Media | 2026-07-23 |
 | creative | `0.1.0` | PROTOTYPED | Creative | 2026-07 |
 | render-gateway-go | `0.0.0` | PLANNED | Creative | 2026-07-23 |
@@ -342,9 +342,20 @@ artifact NOT re-rendered yet.
 
 ## mail — Zone A Email (platform-nest) · `0.0.0` · PLANNED
 
-**What exists:** design only, **v2 (owner revision 2026-08-04, same day as v1)** —
+**What exists:** design only, **v3 (2026-08-04 — third same-day revision: dev stage with zero
+external keys)** —
 [`../superpowers/specs/2026-08-04-zone-a-mail-design.md`](../superpowers/specs/2026-08-04-zone-a-mail-design.md)
 + re-cut ticket plan [`../superpowers/plans/2026-08-04-mail-subsystem-tickets.md`](../superpowers/plans/2026-08-04-mail-subsystem-tickets.md). No code; the ERP currently sends zero email.
+**v3 (owner directive):** nothing external blocks the dev stage. Dev provider = **Mailpit** sink
+(compose service on gda-aicenter, `mail-dev` profile, loopback-only UI); inbound is driven by a
+committed **adversarial fixture corpus** (kept permanently as the regression suite); every
+domain/link-base is env config with `*.gaiada.invalid` dev defaults (grep-gated — staging swap is
+env-only); magic links move up to W6 (SLO + real-user enablement stay staging-gated); Gmail dev
+scope = the `GmailClient` seam + fixture only (MAIL-16D) — the live wave is honestly flagged the
+program's **highest re-verification risk**. Relay/DNS/Brevo/Google all live in the design's
+**§15 Staging Reopen Register**, the single handover table for the staging stage (Q-V1–V9 folded
+in). **Status caveat (binding):** Mailpit/fixture evidence caps at DEV-VERIFIED; deliverability,
+inbox placement, and the M8 latency SLO stay UNVERIFIED until the reopen closes.
 **Scope (v2):** email is NOT a general notification channel — staff notifications stay realtime
 in-app; the **digest + per-user prefs surface are cancelled**. Mail fires only on (a) automation/AI
 medium-or-higher-risk actions (attached to the existing WS4 impact gate / D14 suspension — no new
@@ -363,9 +374,10 @@ Gmail read surface — internal-type OAuth app, employees only, per-user OAuth (
 WD-23A-1's core `google_oauth_states` (hard dependency). Keycloak + Alertmanager SMTP (zero
 code); magic links = low-risk convenience login only, built last behind the p95 SLO gate. Zone A
 mail deliberately does NOT route through webdesk C-03.
-**Future plans:** MAIL-01A/01B…18 per the v2 ticket plan (07/08 dropped); blocked at W0 on
-Q-O1 (gaiada.com DNS custodian) + Q-O3 (Brevo signup, gates inbound leg); Gmail wave gated on
-Q-O2 (internal OAuth client) + WD-23A-1 landing.
+**Future plans:** dev stage W0–W7 per the v3 ticket plan (MAIL-00 sink → core → tap/inbound →
+UI/deploy → magic links → MAIL-18 exit gate) — **no external blockers**; then the staging reopen
+W-S0–W-S3 (relay/DNS + Brevo = ex-Q-O1/Q-O3, Gmail wave = ex-Q-O2 + WD-23A-1 landing, ≥7-day SLO
+window before real-user magic links). 07/08 stay dropped; dropped numbers not reused.
 
 ## search-marketing â€” SEO Â· SEM Â· GEO Â· `0.5.0` Â· DEV-VERIFIED
 

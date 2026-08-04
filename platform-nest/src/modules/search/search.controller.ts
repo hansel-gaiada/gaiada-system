@@ -92,7 +92,7 @@ import {
   startAuthorization, listGoogleConnections, getGoogleConnection, refreshConnection,
   revokeGoogleConnection, bindPropertyConnection,
 } from "./google/oauth";
-import { isGoogleProvider, type GoogleProvider } from "./google/oauth-state";
+import { isSearchGoogleProvider, type SearchGoogleProvider } from "./google/oauth-state";
 // SM-25b — GSC + GA4 read ingestion (design addendum §A12; tracker §6ao/§6x.3 item 5). Pure assembly
 // over SM-25a's OAuth core: pullGscPerformanceForProperty/pullGa4MetricsForProperty do the response
 // interpretation + idempotent persistence (google/{gsc,ga4}-client.ts); this controller only resolves
@@ -195,8 +195,10 @@ const APPLY_REPLAY_REFUSED =
 
 // SM-25a: the closed provider set, checked BEFORE it reaches any query — same discipline as
 // assertUuid above, applied to a path/body value instead of an id shape.
-function assertGoogleProvider(value: string): GoogleProvider {
-  if (!isGoogleProvider(value)) {
+function assertGoogleProvider(value: string): SearchGoogleProvider {
+  // The SEARCH guard: the shared provider union gained `google_drive` when the state machine moved to
+  // core, and every message below still promises search's three. Narrow here or the widening leaks.
+  if (!isSearchGoogleProvider(value)) {
     throw new BadRequestException("provider must be one of google_search_console|google_analytics|google_ads");
   }
   return value;

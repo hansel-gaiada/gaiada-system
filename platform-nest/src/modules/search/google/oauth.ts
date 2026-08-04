@@ -74,7 +74,22 @@ import {
  *  and `analytics.readonly` are read-only by name; `adwords` is Google's single Ads scope and is NOT
  *  read-only, which is why SM-25c is a read binding and every Ads WRITE stays behind SM-21's
  *  approve-execute-replay + WS4 one-shot approval (§A12.1/D-8) regardless of what this token permits. */
-export const DEFAULT_SCOPES: Record<GoogleProvider, string[]> = {
+/** WD-23A-1: keyed by SEARCH's providers, not the shared `GoogleProvider` union. The union gained
+ *  `google_drive`, which has no search scopes and no property-binding column — forcing an entry here
+ *  would mean inventing one. Core surfaces declare their own scopes on their registry entry. */
+export type SearchGoogleProvider = Exclude<GoogleProvider, "google_drive">;
+
+/** Validate a provider at a SEARCH request boundary.
+ *
+ *  `isGoogleProvider` deliberately admits every provider the shared state machine supports, which now
+ *  includes `google_drive`. Search must NOT accept that: it has no scopes, no property-binding column
+ *  and no Cerbos resource for it, so a Drive value arriving on a search route is a bad request, not a
+ *  core surface being helpful. This is the guard that keeps the widening from leaking sideways. */
+export function isSearchGoogleProvider(v: string): v is SearchGoogleProvider {
+  return v === "google_search_console" || v === "google_analytics" || v === "google_ads";
+}
+
+export const DEFAULT_SCOPES: Record<SearchGoogleProvider, string[]> = {
   google_search_console: ["https://www.googleapis.com/auth/webmasters.readonly"],
   google_analytics: ["https://www.googleapis.com/auth/analytics.readonly"],
   google_ads: ["https://www.googleapis.com/auth/adwords"],
@@ -134,7 +149,7 @@ export interface StartAuthorizationInput {
   /** The CLIENT whose own Google account is being linked (clients.id). */
   clientId: string;
   propertyId?: string | null;
-  provider: GoogleProvider;
+  provider: SearchGoogleProvider;
   /** Optional narrowing; defaults to DEFAULT_SCOPES[provider]. Never widened beyond what is passed. */
   scopes?: string[];
   createdBy: string | null;
@@ -192,7 +207,7 @@ export interface CompleteAuthorizationInput {
   code: string;
   /** The principal presenting the callback. Must be the one who started the flow (attack A1). */
   principalUserId: string | null;
-  provider: GoogleProvider;
+  provider: SearchGoogleProvider;
   fetchImpl?: FetchImpl;
 }
 
@@ -527,7 +542,7 @@ export async function listGoogleConnections(tenantId: string, clientId?: string)
 /** The three binding columns 0034 created for P4. A FIXED map, never a caller-supplied column name —
  *  the provider is a union type and this record is exhaustive, so no string from a request body ever
  *  reaches the SQL text. */
-const PROPERTY_BINDING_COLUMN: Record<GoogleProvider, "gsc_connection_id" | "ga4_connection_id" | "ads_connection_id"> = {
+const PROPERTY_BINDING_COLUMN: Record<SearchGoogleProvider, "gsc_connection_id" | "ga4_connection_id" | "ads_connection_id"> = {
   google_search_console: "gsc_connection_id",
   google_analytics: "ga4_connection_id",
   google_ads: "ads_connection_id",
@@ -558,7 +573,10 @@ const PROPERTY_BINDING_COLUMN: Record<GoogleProvider, "gsc_connection_id" | "ga4
 export async function resolvePropertyConnection(
   tenantId: string,
   propertyId: string,
-  provider: GoogleProvider,
+  // SearchGoogleProvider, not the shared union: there is no property-binding column for a core
+  // provider like google_drive, so accepting one here could only ever produce `undefined` as a column
+  // name. Narrowing turns that into a compile error instead of SQL built from undefined.
+  provider: SearchGoogleProvider,
 ): Promise<string | null> {
   const col = PROPERTY_BINDING_COLUMN[provider];
   const rows = await withTenants(
@@ -595,7 +613,7 @@ export async function resolvePropertyConnection(
 export async function bindPropertyConnection(
   tenantId: string,
   propertyId: string,
-  provider: GoogleProvider,
+  provider: SearchGoogleProvider,
   connectionId: string | null,
 ): Promise<boolean> {
   const col = PROPERTY_BINDING_COLUMN[provider];

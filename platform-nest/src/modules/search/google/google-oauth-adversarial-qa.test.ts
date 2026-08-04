@@ -15,7 +15,7 @@
 //      `UPDATE ... WHERE consumed_at IS NULL RETURNING` is what decides the single winner.
 //  2f. An EXPIRED state, backdated directly in the DB (not merely waiting out a TTL) — must fail exactly
 //      like an unknown state (no oracle distinguishing "expired" from "never existed").
-//  5.  FORCE-RLS on search_google_oauth_states, explicitly confirmed to run over the `platform_app_test`
+//  5.  FORCE-RLS on google_oauth_states, explicitly confirmed to run over the `platform_app_test`
 //      role (NOSUPERUSER NOBYPASSRLS — see testing/setup.ts) and not a superuser connection: a tenant-B
 //      session whose GUC never named tenant A must foreclose a targeted read of tenant A's row BY ID,
 //      not merely return an empty COUNT(*) (a COUNT alone can't distinguish "filtered by RLS" from
@@ -190,7 +190,7 @@ describe.skipIf(!TEST_URL)("QA adversarial pass · SM-25a/SM-51 Google OAuth cor
 
     await withTenants(
       [tenant],
-      (c) => c.query(`UPDATE search_google_oauth_states SET consumed_at = now() WHERE id = $1`, [state.stateId]),
+      (c) => c.query(`UPDATE google_oauth_states SET consumed_at = now() WHERE id = $1`, [state.stateId]),
       { modules: ["search"] },
     );
 
@@ -223,7 +223,7 @@ describe.skipIf(!TEST_URL)("QA adversarial pass · SM-25a/SM-51 Google OAuth cor
     const row = await withTenants(
       [tenant],
       (c) => c.query<{ consumed_at: string | null }>(
-        `SELECT consumed_at FROM search_google_oauth_states WHERE id = $1`,
+        `SELECT consumed_at FROM google_oauth_states WHERE id = $1`,
         [state.stateId],
       ),
       { modules: ["search"] },
@@ -251,7 +251,7 @@ describe.skipIf(!TEST_URL)("QA adversarial pass · SM-25a/SM-51 Google OAuth cor
 
     await withTenants(
       [tenant],
-      (c) => c.query(`UPDATE search_google_oauth_states SET expires_at = now() - interval '1 hour' WHERE id = $1`, [state.stateId]),
+      (c) => c.query(`UPDATE google_oauth_states SET expires_at = now() - interval '1 hour' WHERE id = $1`, [state.stateId]),
       { modules: ["search"] },
     );
 
@@ -294,7 +294,7 @@ describe.skipIf(!TEST_URL)("QA adversarial pass · SM-25a/SM-51 Google OAuth cor
     // the POLICY, not incidental app code.
     const targeted = await withTenants(
       [otherTenant],
-      (c) => c.query<{ id: string }>(`SELECT id FROM search_google_oauth_states WHERE id = $1`, [state.stateId]),
+      (c) => c.query<{ id: string }>(`SELECT id FROM google_oauth_states WHERE id = $1`, [state.stateId]),
       { modules: ["search"] },
     );
     expect(targeted.rows).toEqual([]);
@@ -303,7 +303,7 @@ describe.skipIf(!TEST_URL)("QA adversarial pass · SM-25a/SM-51 Google OAuth cor
     // must also match zero rows — not merely "the read is filtered", the WRITE path is foreclosed too.
     const writeAttempt = await withTenants(
       [otherTenant],
-      (c) => c.query(`UPDATE search_google_oauth_states SET consumed_at = now() WHERE id = $1`, [state.stateId]),
+      (c) => c.query(`UPDATE google_oauth_states SET consumed_at = now() WHERE id = $1`, [state.stateId]),
       { modules: ["search"] },
     );
     expect(writeAttempt.rowCount).toBe(0);
@@ -312,7 +312,7 @@ describe.skipIf(!TEST_URL)("QA adversarial pass · SM-25a/SM-51 Google OAuth cor
     // row having failed to insert at all).
     const asOwner = await withTenants(
       [tenant],
-      (c) => c.query<{ id: string }>(`SELECT id FROM search_google_oauth_states WHERE id = $1`, [state.stateId]),
+      (c) => c.query<{ id: string }>(`SELECT id FROM google_oauth_states WHERE id = $1`, [state.stateId]),
       { modules: ["search"] },
     );
     expect(asOwner.rows.length).toBe(1);
@@ -324,7 +324,7 @@ describe.skipIf(!TEST_URL)("QA adversarial pass · SM-25a/SM-51 Google OAuth cor
     // floor: app_current_tenants() empty means the USING clause's ANY(...) can never be true.
     const rows = await withTenants(
       [],
-      (c) => c.query<{ n: string }>(`SELECT count(*) AS n FROM search_google_oauth_states`),
+      (c) => c.query<{ n: string }>(`SELECT count(*) AS n FROM google_oauth_states`),
       { modules: ["search"] },
     );
     expect(Number(rows.rows[0].n)).toBe(0);

@@ -56,7 +56,7 @@ import type { FastifyRequest } from "fastify";
 import { authorize } from "../../core/http";
 import { AuthGuard } from "../../auth/guards";
 import { completeAuthorization } from "./google/oauth";
-import { isGoogleProvider, parseStateToken } from "./google/oauth-state";
+import { isSearchGoogleProvider, parseStateToken } from "./google/oauth-state";
 
 @Controller("api/search/google/oauth")
 @UseGuards(AuthGuard)
@@ -84,7 +84,10 @@ export class SearchGoogleOauthCallbackController {
     if (!state || typeof state !== "string") {
       throw new BadRequestException("state is required");
     }
-    if (!provider || !isGoogleProvider(provider)) {
+    // isSearchGoogleProvider, NOT isGoogleProvider: the shared union now includes `google_drive`, and
+    // this route's own error message promises only search's three. Using the wide guard would have
+    // silently accepted a Drive provider here and made the message a lie.
+    if (!provider || !isSearchGoogleProvider(provider)) {
       throw new BadRequestException("provider must be one of google_search_console|google_analytics|google_ads");
     }
 

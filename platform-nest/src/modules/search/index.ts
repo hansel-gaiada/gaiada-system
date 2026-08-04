@@ -11,6 +11,7 @@
 // start writing into them — nothing here is a stub, the numbers just start at 0 and light up as
 // later tickets land, exactly like every other module's rollups did before their write paths shipped.
 import { config } from "../../config";
+import { registerSearchGoogleSurfaces } from "./google/property-binding";
 import type { ModuleContract, RollupProvider } from "../contract";
 import {
   handleAiVisibilityChanged,
@@ -106,6 +107,12 @@ const searchRollups: RollupProvider = {
     ];
   },
 };
+
+// WD-23A-1: declare search's three Google surfaces against the shared registry as this module is
+// loaded. Done HERE, at the module's own entry point, so the registration lives with the module that
+// owns the surfaces rather than in a central list core would have to maintain — and so importing the
+// search module is all it takes for its surfaces to exist (tests import it too).
+registerSearchGoogleSurfaces();
 
 export const searchModule: ModuleContract = {
   key: "search",

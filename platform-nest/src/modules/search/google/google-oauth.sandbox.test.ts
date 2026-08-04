@@ -157,7 +157,7 @@ describe.skipIf(!TEST_URL)("SM-25a · Google OAuth core, full chain against the 
       [tenant],
       (c) => c.query<{ simulated: boolean; issuer_host: string; code_challenge_method: string; consumed_at: string | null; code_verifier_enc: string }>(
         `SELECT simulated, issuer_host, code_challenge_method, consumed_at, code_verifier_enc
-           FROM search_google_oauth_states ORDER BY created_at DESC LIMIT 1`,
+           FROM google_oauth_states ORDER BY created_at DESC LIMIT 1`,
       ),
       { modules: ["search"] },
     );
@@ -292,13 +292,13 @@ describe.skipIf(!TEST_URL)("SM-25a · Google OAuth core, full chain against the 
     });
     const mine = await withTenants(
       [tenant],
-      (c) => c.query<{ n: string }>(`SELECT count(*) AS n FROM search_google_oauth_states`),
+      (c) => c.query<{ n: string }>(`SELECT count(*) AS n FROM google_oauth_states`),
       { modules: ["search"] },
     );
     expect(Number(mine.rows[0].n)).toBeGreaterThan(0);
     const theirs = await withTenants(
       [otherTenant],
-      (c) => c.query<{ n: string }>(`SELECT count(*) AS n FROM search_google_oauth_states`),
+      (c) => c.query<{ n: string }>(`SELECT count(*) AS n FROM google_oauth_states`),
       { modules: ["search"] },
     );
     expect(Number(theirs.rows[0].n)).toBe(0);
@@ -312,7 +312,7 @@ describe.skipIf(!TEST_URL)("SM-25a · Google OAuth core, full chain against the 
     // Omitting the module scope must fail CLOSED — this is the property that makes forgetting it a
     // zero-row bug rather than a cross-module read.
     const unscoped = await withTenants([tenant], (c) =>
-      c.query<{ n: string }>(`SELECT count(*) AS n FROM search_google_oauth_states`),
+      c.query<{ n: string }>(`SELECT count(*) AS n FROM google_oauth_states`),
     );
     expect(Number(unscoped.rows[0].n)).toBe(0);
   });
@@ -542,7 +542,7 @@ describe.skipIf(!TEST_URL)("SM-25a · Google OAuth core, full chain against the 
       // And it fails BEFORE writing anything: no half-started authorization request is left behind.
       const before = await withTenants(
         [tenant],
-        (c) => c.query<{ n: string }>(`SELECT count(*) AS n FROM search_google_oauth_states`),
+        (c) => c.query<{ n: string }>(`SELECT count(*) AS n FROM google_oauth_states`),
         { modules: ["search"] },
       );
       await expect(
@@ -550,7 +550,7 @@ describe.skipIf(!TEST_URL)("SM-25a · Google OAuth core, full chain against the 
       ).rejects.toBeInstanceOf(GoogleOAuthNotConfiguredError);
       const after = await withTenants(
         [tenant],
-        (c) => c.query<{ n: string }>(`SELECT count(*) AS n FROM search_google_oauth_states`),
+        (c) => c.query<{ n: string }>(`SELECT count(*) AS n FROM google_oauth_states`),
         { modules: ["search"] },
       );
       expect(after.rows[0].n).toBe(before.rows[0].n);
