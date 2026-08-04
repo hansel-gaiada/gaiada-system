@@ -144,3 +144,64 @@ recreate with **both** compose files or `:3004` gets unpublished.
    `npm run lint:migration-rls` + apply to the dev DB.
 8. Full `platform-nest` suite. Baseline: the 3 `search-notifications.test.ts` `REDIS_URL not set`
    failures are **pre-existing and SEO-owned** — do not chase them.
+
+---
+
+## 6 · The Keycloak oracle now EXECUTES — recipe + evidence (2026-08-04)
+
+§4's second hard sub-AC was *"the Keycloak oracle must execute, not skip"*. It skipped. It no longer
+has to, and this is the exact recipe — recorded because the failure mode is silent: without
+`KEYCLOAK_OAUTH_TEST=1` **and** a reachable issuer **and** `GOOGLE_DEV_CLIENT_SECRET`,
+`google-oauth-keycloak.test.ts` reports a clean pass having run **nothing**.
+
+### Evidence (pre-refactor baseline, so the refactor has something to be compared against)
+
+| Run | Result |
+|---|---|
+| `npx vitest run src/modules/search/google/ --maxWorkers=4` | **120 passed / 4 skipped** — the 4 were this oracle |
+| the oracle, enabled per below | **4 passed / 0 skipped** — real auth-code+PKCE round trip · refresh with ROTATION (chain of 3) · RFC-7009 revocation WITH client auth |
+
+### Recipe
+
+```sh
+# 1. The dedicated test DB + Cerbos. These do NOT come back after a Docker restart, and test-pg needs
+#    ~5 min of WAL recovery afterwards — until then every suite dies with "the database system is
+#    starting up", which looks like a code failure and is not one.
+docker start gaiada-test-pg gaiada-test-cerbos     # publish 55433 / 3592 = what platform-nest/.env wants
+docker exec gaiada-test-pg pg_isready -U postgres  # poll until ready
+
+# 2. A REAL Keycloak issuer, standalone. Deliberately NOT the compose `auth` profile:
+#    - that service depends_on `postgres`, and the dev Postgres can be hours into an fsync after an
+#      unclean shutdown (it was, here — fallout from the 615-orphan-test-database incident);
+#    - it passes `KC_PROXY_HEADERS: ${KC_PROXY_HEADERS:-}`, and Keycloak 26 REFUSES to boot on an
+#      empty value ("Expected values are: forwarded, xforwarded"), crash-looping. That var is set on
+#      the server, so this only bites a local bring-up.
+#    The oracle asserts nothing about Keycloak's persistence, so the embedded DB is sufficient.
+#    MSYS_NO_PATHCONV=1 is required on Git Bash or the CONTAINER path is rewritten to a Windows one
+#    and the realm mount silently lands somewhere else (the import then never happens).
+MSYS_NO_PATHCONV=1 docker run -d --name gaiada-kc-oracle -p 127.0.0.1:8080:8080 \
+  -e KC_BOOTSTRAP_ADMIN_USERNAME=admin -e KC_BOOTSTRAP_ADMIN_PASSWORD=admin \
+  -v "<abs>/infra/compose/keycloak:/opt/keycloak/data/import:ro" \
+  quay.io/keycloak/keycloak:26.0 start-dev --import-realm
+
+# Verify with -f: `curl -s -o /dev/null` exits 0 on a 404, so a readiness loop without -f reports
+# "up" for a realm that was never imported. Confirm the log line "Realm 'gaiada' imported".
+curl -fs http://localhost:8080/realms/gaiada/.well-known/openid-configuration
+
+# 3. The realm JSON carries only gaiada-platform + gaiada-ui and ZERO users, so both are needed:
+cd infra/compose/keycloak
+KC_URL=http://localhost:8080 KEYCLOAK_ADMIN_PASSWORD=admin GOOGLE_DEV_CLIENT_SECRET=google-dev-secret \
+  python provision-google-dev-client.py
+KC_URL=http://localhost:8080 KEYCLOAK_ADMIN_PASSWORD=admin DEV_USER_PASSWORD='Passw0rd!' \
+  python provision-dev-users.py      # creates owner@gaiada-creative.test, the oracle's KC_TEST_USER
+
+# 4. Run it. Confirm the output says 4 passed — NOT "4 skipped".
+KEYCLOAK_OAUTH_TEST=1 GOOGLE_DEV_CLIENT_SECRET=google-dev-secret KC_URL=http://localhost:8080 \
+  SEARCH_ALLOW_PRIVATE_GOOGLE_ENDPOINT=1 \
+  npx vitest run src/modules/search/google/google-oauth-keycloak.test.ts --maxWorkers=4
+```
+
+**What this does and does not prove**, restating the provisioning script's own warning so it is not
+lost: a green round trip validates OUR OAuth machinery against a real issuer that enforces PKCE and
+client authentication. It does **not** validate the Google integration — that still needs a real
+Google client (OQ-9 / SM-41G).
