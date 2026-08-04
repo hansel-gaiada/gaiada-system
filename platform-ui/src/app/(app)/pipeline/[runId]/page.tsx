@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { redirect, notFound } from "next/navigation";
 import { getSessionUserId } from "@/lib/session-server";
-import { getMe } from "@/lib/platform";
+import { getMe, PlatformError } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
 import { can } from "@/lib/rbac";
 import {
@@ -78,10 +78,23 @@ export default async function PipelineRunPage({ params }: { params: Promise<{ ru
   const client = run.client_id ? await getClient(userId, tenant, run.client_id) : null;
 
   // C6 — run -> project. This was listed as blocked because pipeline_runs had no project_id at all; W0
-  // added the column and WD-30 populates it, so the link is finally resolvable. Fetched in parallel with
-  // nothing else depending on it; a project deleted since the run was created resolves to null and gets
-  // the same honest treatment as a missing client.
-  const project = run.project_id ? await getProject(userId, tenant, run.project_id).catch(() => null) : null;
+  // added the column and WD-30 populates it, so the link is finally resolvable.
+  //
+  // The reason for NOT writing `.catch(() => null)` here: that folds a 403 and a 404 into one value, and
+  // the page would then explain a refusal as "it may have been deleted" — a confident wrong answer, and
+  // exactly criterion 5 of the agentic-native bar ("never an empty result that reads as no-data").
+  // Distinguished so each case can say what actually happened.
+  let project: Awaited<ReturnType<typeof getProject>> | null = null;
+  let projectRefused = false;
+  if (run.project_id) {
+    try {
+      project = await getProject(userId, tenant, run.project_id);
+    } catch (e) {
+      // 403 = the project exists and this user may not see it; anything else (404 included) = gone.
+      if (e instanceof PlatformError && e.status === 403) projectRefused = true;
+      else if (!(e instanceof PlatformError)) throw e;
+    }
+  }
 
   async function onDecide(formData: FormData) {
     "use server";
@@ -163,8 +176,10 @@ export default async function PipelineRunPage({ params }: { params: Promise<{ ru
               {run.project_id ? (
                 project ? (
                   <>Project: <Link href={`/projects/${run.project_id}`}>{project.name}</Link></>
+                ) : projectRefused ? (
+                  <>Project: you don&apos;t have access to it (it exists — ask an admin if you need it)</>
                 ) : (
-                  <>Project: unavailable (id {run.project_id} — it may have been deleted)</>
+                  <>Project: not found (id {run.project_id} — it may have been deleted)</>
                 )
               ) : (
                 <>No project is linked to this run. It is set from the meeting the run started from, so a
