@@ -11,6 +11,7 @@
     "seed:automation": "node dist/seed/automation.js",
     "seed:claude-seats": "node dist/seed/claude-seats.js",
     "seed:search": "node dist/seed/search.js",
+    "seed:portal-clients": "node dist/seed/portal-clients.js",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "lint:withtenants": "node scripts/lint-withtenants.mjs",
