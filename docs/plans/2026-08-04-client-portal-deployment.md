@@ -195,7 +195,57 @@ drive it end to end on the server:
 - `docker compose -f docker-compose.vps.yml -f docker-compose.hostdata.yml config` parses with no
   mandatory var missing (the real deploy combination).
 
-**UNVERIFIED — and why:**
+---
+
+## 8 · DEPLOYED — `Alpha 01.013.0033a`, 2026-08-04
+
+Everything §7 listed as unverified is now verified, on the live box. Recorded here so the next reader
+does not re-derive it.
+
+**Pipeline:** 3 commits to `main` → CI green (9/9 jobs) → tag `alpha-01.013.0033a` → `release.yml`
+(9 signed images) → `deploy.yml`. Deploy log shows `applied: 0075_client_portal.sql`,
+`Container gaiada-cerbos-1 Restarting`, then `all services healthy`.
+
+**CI found five defects, every one in the TEST rather than the code** — the honest cost of authoring a
+DB-backed suite with no database available (see the file header of `portal-dashboard.test.ts`):
+a truncated uuid v7 used as a unique label (v7 is time-ordered, so the prefix collides — and the same
+mistake made a cross-client leak assertion match *clean* data), a rounding expectation (Postgres rounds
+numeric half-away-from-zero, so 62.5 → 63), two assertions on `.message` where `http-error.filter.ts`
+reshapes every error to `{ error }`, and an SSE test using `app.inject()`, which waits for a response
+an SSE handler deliberately never completes.
+
+**Verified on gda-aicenter:**
+
+| Check | Result |
+|---|---|
+| Running images | all 9 Gaiada containers on `alpha-01.013.0033a` |
+| `~/gaiada/.deployed-tag` | `alpha-01.013.0033a` |
+| Version the app reports (internal `/health`) | `Alpha 01.013.0033a`, `ok: true` |
+| `0075` in `schema_migrations` | `0075_client_portal.sql` present (ledger now 74) |
+| New tables | `contracts`, `contract_signatures`, `invoice_payments` |
+| FORCE RLS | `true` on all three |
+| Composite uniques | `ux_{clients,projects,invoices,files,contracts}_id_tenant` present |
+| Tenant-scoped FKs on the new tables | 8 |
+| Cerbos reload (the new deploy step) | re-initialised `/policies` and logged **“Found 56 executable policies”**, no errors — `resource_contract.yaml` synced, `resource_portal.yaml` carries `pay` + `update_profile` |
+| Portal routes in the deployed build | all 11 + the `/portal/stream` route handler, from `app-path-routes-manifest.json` |
+| nginx SSE block | **applied 2026-08-04**, `nginx -t` passed, reloaded; backup at `…erp.gaiada.online.bak-20260804T040133Z` |
+| Regression sweep | `/login` 200 · Keycloak discovery 200 · `/n8n/` still gated · zero unhealthy containers |
+
+**Two traps worth recording for the next verification:**
+1. **A 307 proves nothing about routing.** Every `/portal/*` path returns 307 → `/login` for an
+   anonymous caller — and so does `/portal/nope-not-a-route`, because the middleware redirects before
+   routing. Prove routes exist from the build manifest inside the container, not from HTTP status.
+2. **The Cerbos image is distroless.** `docker exec … ls /policies` fails with
+   *“exec: sh: executable file not found”*, which reads exactly like an empty mount and briefly looked
+   like a broken deploy. Inspect the host side of the mount, or read the container's logs.
+
+**Still outstanding (unchanged by this deploy):** no staff UI for contract authoring or payment
+confirmation — contracts must be created via API, and a client-recorded payment stays `pending` until
+someone calls the decide endpoint. See §5.
+
+---
+
+### Historical: what was unverified at authoring time
 - `portal-dashboard.test.ts` (25 DB-backed isolation/capability cases) is **written and typechecked
   but never executed**: the local Postgres/Cerbos pair is deliberately off on this machine (owner
   decision — the server is the source of truth). It runs in CI, which provisions PG + migrations +
