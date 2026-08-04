@@ -59,17 +59,41 @@ const PLANS: Plan[] = [
 
 // ── lookups ───────────────────────────────────────────────────────────────────────────────────────
 
-async function findClient(name: string): Promise<{ tenantId: string; clientId: string } | null> {
-  // Deliberately NOT tenant-scoped: the seed does not know which member company serves this client,
-  // which is the whole point of portal-clients.ts spreading them across several. Reads `clients`
-  // through withGlobal, which is legitimate for a seed running as the owner/migrator role.
+/** Every company, so a client can be found without knowing which one serves it.
+ *
+ *  `companies` and `users` are the ONLY two tables here without row security, which is what makes
+ *  `withGlobal` legitimate for them and illegitimate for everything else — see findClient. */
+async function allCompanyIds(): Promise<string[]> {
   const r = await withGlobal((c) =>
-    c.query<{ id: string; tenant_id: string }>(
-      `SELECT id, tenant_id FROM clients WHERE name = $1 AND deleted_at IS NULL LIMIT 1`,
-      [name],
-    ),
+    c.query<{ id: string }>(`SELECT id FROM companies WHERE deleted_at IS NULL ORDER BY created_at ASC`),
   );
-  return r.rows[0] ? { tenantId: r.rows[0].tenant_id, clientId: r.rows[0].id } : null;
+  return r.rows.map((x) => x.id);
+}
+
+/** Locate a client by name across every company.
+ *
+ *  ⚠ THIS MUST SEARCH TENANT BY TENANT, and the first version did not. It read `clients` through
+ *  `withGlobal`, reasoning that the seed does not know which member company serves the client. That is
+ *  true and it is not a licence to skip the tenant context: `clients` has FORCE ROW LEVEL SECURITY and
+ *  the seed runs as `platform_app` with `bypassrls = false`, so with no `app.current_tenant_ids` GUC set
+ *  the policy matches NOTHING. The query returned zero rows for all five clients and the seed reported
+ *  "run the portal-clients seed first" — a misdiagnosis of its own bug, pointing at a prerequisite that
+ *  had in fact just run successfully.
+ *
+ *  Exactly the failure mode the backfill-RLS trap describes (unset GUC ⇒ affects zero rows ⇒ reports
+ *  success). Only `companies` and `users` are RLS-free; `clients`, `client_contacts`,
+ *  `company_memberships`, `projects`, `invoices` and `contracts` are all FORCE RLS. If a seed reads any
+ *  of those, it goes through `withTenants`. */
+async function findClient(name: string): Promise<{ tenantId: string; clientId: string } | null> {
+  for (const tenantId of await allCompanyIds()) {
+    const r = await withTenants([tenantId], (c) =>
+      c.query<{ id: string }>(
+        `SELECT id FROM clients WHERE name = $1 AND deleted_at IS NULL LIMIT 1`, [name],
+      ),
+    );
+    if (r.rows[0]) return { tenantId, clientId: r.rows[0].id };
+  }
+  return null;
 }
 
 async function findProject(tenantId: string, clientId: string): Promise<string | null> {
@@ -88,12 +112,15 @@ async function findProject(tenantId: string, clientId: string): Promise<string |
  *  internal recipients from `projects.owner_id`, so a project with no owner means a client action
  *  notifies nobody — which looks exactly like the notification code being broken. */
 async function anyStaffUser(tenantId: string): Promise<string | null> {
-  const r = await withGlobal((c) =>
+  // withTenants, not withGlobal: `company_memberships` AND `client_contacts` are both FORCE RLS (see
+  // findClient's note). The first version used withGlobal and would have returned null for every
+  // company — leaving every project unowned, which is the one thing this function exists to prevent.
+  const r = await withTenants([tenantId], (c) =>
     c.query<{ user_id: string }>(
       `SELECT cm.user_id
          FROM company_memberships cm
-         JOIN users u ON u.id = cm.user_id AND u.deleted_at IS NULL
         WHERE cm.company_id = $1 AND cm.deleted_at IS NULL
+          AND EXISTS (SELECT 1 FROM users u WHERE u.id = cm.user_id AND u.deleted_at IS NULL)
           AND NOT EXISTS (
             SELECT 1 FROM client_contacts cc WHERE cc.user_id = cm.user_id AND cc.deleted_at IS NULL
           )
@@ -604,7 +631,13 @@ export async function seedPortalWorkspace(): Promise<void> {
   }
 
   if (missing.length) {
-    console.log(`\n! Skipped (run seed:agency then the portal-clients seed first):\n  ${missing.join("\n  ")}`);
+    // Two causes, and the message names both — the first version blamed only the prerequisite and sent
+    // the reader to re-run a seed that had already succeeded, when the real cause was this file querying
+    // an RLS table with no tenant context (see findClient).
+    console.log(`\n! Skipped: ${missing.length} of ${PLANS.length}\n  ${missing.join("\n  ")}`);
+    console.log(`  Either the prerequisite seeds have not run, OR a lookup here hit a FORCE-RLS table`);
+    console.log(`  without a tenant context (which returns zero rows and looks identical). If the`);
+    console.log(`  portal-clients seed just printed those clients, it is the second one.`);
   }
   console.log(`\nStates now reachable in the portal: overdue milestone · overdue invoice · partial payment ·`);
   console.log(`payment awaiting verification · REJECTED payment with a reason · voided invoice · voided agreement ·`);

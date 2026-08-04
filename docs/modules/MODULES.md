@@ -23,7 +23,7 @@ version and add a `CHANGELOG.md` entry on every notable module change.
 
 ## App version
 
-**`Alpha 01.014.0035a`** â€” see [`VERSIONING.md`](./VERSIONING.md) for the format, and
+**`Alpha 01.015.0036a`** â€” see [`VERSIONING.md`](./VERSIONING.md) for the format, and
 
 [`/VERSION`](../../VERSION) for the machine-readable source. The app version composes the module
 versions below; the running build reports it at `GET /health`.
@@ -34,7 +34,7 @@ versions below; the running build reports it at `GET /health`.
 
 | Module | Ver | Status | Workstream | Since |
 |---|---|---|---|---|
-| platform-nest | `0.12.1` | PROTOTYPED | WS1 | 2026-08-04 |
+| platform-nest | `0.12.2` | PROTOTYPED | WS1 | 2026-08-04 |
 | platform-ui | `0.15.1` | PROTOTYPED | WS5 | 2026-08-04 |
 | ai-gateway-go | `0.13.0` | PROTOTYPED | WS3 | 2026-07 |
 | mcp-hub | `0.9.3` | PROTOTYPED | WS2 | 2026-08-03 |
@@ -332,24 +332,40 @@ one-rail contract-snapshot scaffolder) activates once webdesk's own P3 codegen l
 **What exists:** blueprint only (approved 2026-07-23) â€” see [`../BLUEPRINTS.md`](../BLUEPRINTS.md). No code.
 **Future plans:** phased build P1 Foundation â†’ P2 Forms+Mail â†’ P3 Contract/codegen â†’ P4 ERP control+envs â†’
 P5 AI+approvals â†’ P6 WordPress headless.
-**2026-08-04 blueprint amendment (still no code):** C-03 unpinned from Hostinger SMTP → rented relay
-(Brevo → ZeptoMail/SES), three sending subdomains + separate per-stream provider keys (D14),
-`From:` our domain + `Reply-To:` human default with per-tenant custom-domain upgrade, explicit
-"Zone A mail never routes through C-03". Blueprint HTML is v1.1; PDF + hosted artifact NOT re-rendered yet.
+**2026-08-04 blueprint amendment (still no code):** C-03 unpinned from Hostinger SMTP → rented relay,
+three sending identities + separate per-stream provider keys (D14), `From:` our domain +
+`Reply-To:` human default with per-tenant custom-domain upgrade, explicit "Zone A mail never routes
+through C-03". **v1.2 (same day, Zone A mail v2):** domains locked — C-03's forms stream pinned to
+`forms.gaiada.online` on Brevo (deliberately off gaiada.com); Zone A (`notify.`/`auth.gaiada.com`)
+moved to the Google Workspace SMTP relay with Brevo failover. Blueprint HTML is v1.2; PDF + hosted
+artifact NOT re-rendered yet.
 
 ## mail — Zone A Email (platform-nest) · `0.0.0` · PLANNED
 
-**What exists:** design only — [`../superpowers/specs/2026-08-04-zone-a-mail-design.md`](../superpowers/specs/2026-08-04-zone-a-mail-design.md)
-+ ticket plan [`../superpowers/plans/2026-08-04-mail-subsystem-tickets.md`](../superpowers/plans/2026-08-04-mail-subsystem-tickets.md). No code; the ERP currently sends zero email.
-**Scope:** sending-only. Rented relay (Brevo free tier → ZeptoMail/SES), 3 sending subdomains with
-separate keys (`forms.`/`notify.`/`auth.` — reputation isolation so form abuse can never block login
-mail), `src/mail/` core module (provider adapter, PG-backed queue, `mail_log`, suppressions,
-bounce webhooks), notification email = immediate allowlist + daily digest riding the existing
-`notify()`/`notifications` surface, Keycloak realm SMTP + Alertmanager SMTP (zero code), magic
-links designed (built last, behind a p95 latency SLO gate). Zone A mail deliberately does NOT
-route through webdesk C-03.
-**Future plans:** MAIL-01…12 per the ticket plan; blocked at W0 on owner Q1 (subdomain root
-`gaiada.online` vs `.com`) + Q2 (provider account signup).
+**What exists:** design only, **v2 (owner revision 2026-08-04, same day as v1)** —
+[`../superpowers/specs/2026-08-04-zone-a-mail-design.md`](../superpowers/specs/2026-08-04-zone-a-mail-design.md)
++ re-cut ticket plan [`../superpowers/plans/2026-08-04-mail-subsystem-tickets.md`](../superpowers/plans/2026-08-04-mail-subsystem-tickets.md). No code; the ERP currently sends zero email.
+**Scope (v2):** email is NOT a general notification channel — staff notifications stay realtime
+in-app; the **digest + per-user prefs surface are cancelled**. Mail fires only on (a) automation/AI
+medium-or-higher-risk actions (attached to the existing WS4 impact gate / D14 suspension — no new
+classifier) and (b) anything requiring human approval, routed to the resolved decider set (Cerbos
+DECIDE mirror; clients ride the same path via the existing pipeline-gate plumbing). D14-aware
+sequencing: warning wording first for automation/agent (approving executes nothing today);
+actionable wording gated on the D14 resume path. Approval links = plain deep links behind SSO —
+no action buttons, no approve-by-reply, never magic links. **Bidirectional:** inbound system-mail
+threads via `reply+<token>@notify.gaiada.com` → `mail_messages` (untrusted intake: signature,
+caps, sanitizer, ClamAV) threaded onto entities; still no mailbox hosting of ours. ERP mail
+surface: `/admin/mail` log UI + entity thread panels. Domains locked: `auth.`/`notify.gaiada.com`
+(Workspace root) + `forms.gaiada.online` (Zone B only); **Google Workspace SMTP relay primary for
+Zone A**, Brevo = failover + inbound + Zone B forms. Roadmap (staging-ready, not parked): staff
+Gmail read surface — internal-type OAuth app, employees only, per-user OAuth (no DWD),
+`gmail.readonly`, render-on-demand/cache-nothing, tokens in the 0033 vault, state machine =
+WD-23A-1's core `google_oauth_states` (hard dependency). Keycloak + Alertmanager SMTP (zero
+code); magic links = low-risk convenience login only, built last behind the p95 SLO gate. Zone A
+mail deliberately does NOT route through webdesk C-03.
+**Future plans:** MAIL-01A/01B…18 per the v2 ticket plan (07/08 dropped); blocked at W0 on
+Q-O1 (gaiada.com DNS custodian) + Q-O3 (Brevo signup, gates inbound leg); Gmail wave gated on
+Q-O2 (internal OAuth client) + WD-23A-1 landing.
 
 ## search-marketing â€” SEO Â· SEM Â· GEO Â· `0.5.0` Â· DEV-VERIFIED
 
