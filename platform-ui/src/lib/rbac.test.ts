@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { can, isElevated, canManageIT, accessibleCompanies, canSwitchCompany, isManagerTier } from "./rbac";
+import { can, isElevated, canManageIT, accessibleCompanies, canSwitchCompany, isManagerTier, isClient, isStaff, isClientOnly } from "./rbac";
 import type { Me } from "./platform";
 
 const companies = [
@@ -152,5 +152,59 @@ describe("accessibleCompanies / canSwitchCompany", () => {
     const mgrA = me([{ role: "manager", scopeType: "company", scopeId: "co-a" }]);
     expect(accessibleCompanies(mgrA).map((c) => c.id)).toEqual(["co-a"]);
     expect(canSwitchCompany(mgrA)).toBe(false);
+  });
+});
+
+// The rule that decides WHERE a user lands. `(app)/page.tsx` redirects `isClient && !isElevated` to
+// /portal and `navFor` gates on the identical pair, so these two predicates together are the routing
+// contract for external clients. Untested before: a client used to land on the staff dashboard because
+// nothing consulted them outside nav.
+describe("isClient — external client routing", () => {
+  const client = me([{ role: "client", scopeType: "company", scopeId: "co-a" }]);
+
+  it("a client-only user is routed to the portal", () => {
+    expect(isClient(client)).toBe(true);
+    expect(isStaff(client)).toBe(false);
+    expect(isClientOnly(client)).toBe(true);
+  });
+
+  it("staff are not clients, so the staff home is never taken away from them", () => {
+    for (const role of ["member", "manager", "company_admin", "group_executive", "platform_admin"] as const) {
+      const u = me([{ role, scopeType: role === "group_executive" || role === "platform_admin" ? "global" : "company", scopeId: role === "group_executive" || role === "platform_admin" ? null : "co-a" }]);
+      expect(isClient(u)).toBe(false);
+    }
+  });
+
+  it("a MANAGER who is also a client contact keeps the staff surface — the bug this rule replaces", () => {
+    // Real case: an internal PM added as a contact on their own client. The old rule was
+    // `isClient && !isElevated`, and isElevated covers ONLY global platform_admin/group_executive —
+    // so a manager matched it, navFor handed them portal-only navigation, and the redirect added here
+    // would have locked them out of the app entirely. Any staff role must win.
+    const both = me([
+      { role: "manager", scopeType: "company", scopeId: "co-a" },
+      { role: "client", scopeType: "company", scopeId: "co-a" },
+    ]);
+    expect(isClient(both)).toBe(true);
+    expect(isElevated(both)).toBe(false);   // <- exactly why the old guard misfired
+    expect(isStaff(both)).toBe(true);
+    expect(isClientOnly(both)).toBe(false); // <- keeps the staff home
+  });
+
+  it("every staff tier that is also a client keeps the staff surface", () => {
+    for (const role of ["member", "manager", "company_admin"] as const) {
+      const u = me([
+        { role, scopeType: "company", scopeId: "co-a" },
+        { role: "client", scopeType: "company", scopeId: "co-a" },
+      ]);
+      expect(isClientOnly(u)).toBe(false);
+    }
+  });
+
+  it("a client cannot reach staff capabilities", () => {
+    // Nav and routing are cosmetic; this asserts the capability model agrees, so a client who types a
+    // staff URL is not merely un-navigated but un-permitted. Cerbos + the portal BFF remain authority.
+    for (const cap of ["admin.access", "people.directory", "pm.manage", "approvals.decide"] as const) {
+      expect(can(client, cap, "co-a")).toBe(false);
+    }
   });
 });

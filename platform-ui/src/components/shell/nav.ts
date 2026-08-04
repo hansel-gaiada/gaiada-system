@@ -1,5 +1,5 @@
 import type { Me } from "@/lib/platform";
-import { can, isElevated, isClient, canManageIT } from "@/lib/rbac";
+import { can, isElevated, isClientOnly, canManageIT } from "@/lib/rbac";
 import type { IconName } from "./icons";
 
 // Access helpers live in lib/rbac (the RBAC source of truth); re-exported here
@@ -18,7 +18,10 @@ export interface NavGroup { label: string; items: NavItem[] }
 // per department linking straight into that department's console/interface.
 export function navFor(me: Me, tenantId?: string | null, departments: { id: string; name: string }[] = []): NavGroup[] {
   // WS11: an external client (not also staff) gets a clean portal-only nav — never the staff surface.
-  if (isClient(me) && !isElevated(me)) {
+  // `isClientOnly`, not `isClient && !isElevated`: the latter is true for a MANAGER or company_admin
+  // who is also a client contact (isElevated covers only global admin/exec), and handed that person
+  // portal-only nav — losing their whole staff surface. See rbac.ts::isStaff.
+  if (isClientOnly(me)) {
     return [{ label: "Portal", items: [{ label: "Project Portal", href: "/portal", icon: "home" }] }];
   }
   const business: NavItem[] = [

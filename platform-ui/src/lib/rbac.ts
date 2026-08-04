@@ -197,6 +197,26 @@ export function isClient(me: Me): boolean {
   return me.roles.some((r) => r.role === "client");
 }
 
+/** Any staff grant at all — i.e. any role that is not `client`.
+ *
+ *  This is the correct companion to `isClient` for deciding "is this person EXTERNAL ONLY", and it
+ *  replaces an `isElevated` check that was subtly wrong: `isElevated` is only global `platform_admin`
+ *  / `group_executive`, so `isClient && !isElevated` classified a **manager or company_admin who is
+ *  also a client contact** as an external client. `navFor` used that pair and handed such a person
+ *  portal-only navigation, losing the entire staff surface. A PM added as a contact on their own
+ *  client is an ordinary thing to do, so this was reachable, not theoretical.
+ *
+ *  Deliberately "has any non-client role" rather than a list of staff roles: a role added later is
+ *  staff by default, which fails toward keeping someone's workspace rather than silently taking it. */
+export function isStaff(me: Me): boolean {
+  return me.roles.some((r) => r.role !== "client");
+}
+
+/** External client with no staff standing — the one case that gets the portal instead of the app. */
+export function isClientOnly(me: Me): boolean {
+  return isClient(me) && !isStaff(me);
+}
+
 // Can this user manage IT? Against a specific company when given; otherwise
 // "anywhere" (used for nav visibility before a company is fixed).
 export function canManageIT(me: Me, companyId?: string | null): boolean {
