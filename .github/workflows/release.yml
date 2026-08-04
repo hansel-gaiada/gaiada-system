@@ -110,15 +110,25 @@ jobs:
       # — so the account hit its spending limit and EVERY Actions job stopped starting, which reads as
       # a broken pipeline rather than a full disk in someone else's datacentre.
       #
-      # Keeping 12 versions per package is a deliberate trade against rollback range, not a round
-      # number: deploy.yml's rollback path re-pins a PREVIOUS TAG and needs that tag's image to still
-      # exist, so this is the depth of history a rollback can reach. 12 releases at the current cadence
-      # is a few weeks. Raise it if releases speed up; do not drop below ~5 or the rollback that
-      # matters (two or three cuts back, when a regression is noticed late) silently stops working.
+      # ⚠ 9 VERSIONS = 3 RELEASES. Every release pushes THREE versions per package:
+      #     alpha-01.015.0036a                  the image
+      #     sha256-<imageDigest>.sig            cosign signature
+      #     sha256-<imageDigest>.att            attested SBOM
+      # So this number is releases × 3, and reading it as "keep 9 releases" is the mistake to avoid.
+      # `min-versions-to-keep: 3` would keep ONE release and delete the tag currently running on the
+      # box — the state a rollback needs most.
+      #
+      # The .sig is load-bearing, not decorative: deploy.yml VERIFIES the cosign signature before it
+      # deploys or rolls back, so a tag whose .sig has been pruned can no longer be deployed to at all.
+      # Any change to this number must stay a multiple of 3 for that reason.
+      #
+      # 3 releases is the owner's call (2026-08-04) to stay inside the free Packages allowance. It is a
+      # real trade: rollback now reaches two cuts back, not twelve. If a regression is noticed late,
+      # the tag to roll back to may already be gone — re-cut from git instead.
       #
       # `continue-on-error`: a retention failure must never fail a release whose image is already
       # pushed, signed and attested. Storage creeping back up is a smaller problem than a red release.
-      - name: Prune old GHCR versions (keep the last 12)
+      - name: Prune old GHCR versions (keep the last 3 releases = 9 versions)
         uses: actions/delete-package-versions@v5
         continue-on-error: true
         with:
@@ -127,7 +137,7 @@ jobs:
           # silently targets a package name that does not exist.
           package-name: gaiada-${{ matrix.component }}
           package-type: container
-          min-versions-to-keep: 12
+          min-versions-to-keep: 9
           # GITHUB_TOKEN can delete versions of a package OWNED BY this repo. These packages are
           # user-namespace (`ghcr.io/hansel-gaiada/...`), and if they are not linked to the repository
           # GitHub refuses and this step logs a 403 — which `continue-on-error` turns into a warning
