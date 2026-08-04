@@ -14,6 +14,48 @@ local stack). None of these mean "production-done".
 Every cut app version and the exact module manifest it contains, so any deployed build can be
 reconstructed from this table alone. Format defined in [`VERSIONING.md`](./VERSIONING.md).
 
+> **⚠ LOG GAP (noted 2026-08-04).** Tags `alpha-01.009.0028a`, `alpha-01.011.0030a` and
+> `alpha-01.012.0031a` exist in git but have **no entry here** — rule 2 ("every app version records its
+> module manifest") was skipped by the concurrent sessions that cut them, so those three builds are not
+> reconstructible from this file. Not back-filled here because the contents are not known to this
+> session; whoever cut them should add them. Related drift found at the same time: the **App version**
+> line in `MODULES.md` had been left at `01.005.0021a` — eight releases stale — while `/VERSION` was at
+> `01.012.0031a`. Per VERSIONING rule 5 `/VERSION` is authoritative; the `MODULES.md` line is now
+> corrected and should be moved with every cut.
+
+### `Alpha 01.013.0033a` — 2026-08-04 — the client portal
+
+The client side gets its own interface. Contents: the CP-* program — `(portal)` route group (11
+routes, own shell), the portal BFF (workspace · commerce · profile · SSE stream), migration `0075`
+(`contracts`, `contract_signatures`, `invoice_payments`), the staff contract/payment-confirmation
+counterpart, `resource_contract.yaml` + two new `portal` actions, an nginx SSE location block, and an
+explicit Cerbos-reload step in `deploy.yml`. Full detail:
+[`docs/plans/2026-08-04-client-portal-deployment.md`](../plans/2026-08-04-client-portal-deployment.md)
+and §16 of [`../FRONTEND-BFF-CONTRACT.md`](../FRONTEND-BFF-CONTRACT.md).
+
+Counter moved `0031 → 0033`: two modules bumped (`platform-nest` `0.11.1 → 0.12.0`, `platform-ui`
+`0.14.0 → 0.15.0`), so the revision letter resets to `a`.
+
+**⚠ This cut carries the first execution of migration `0075` against a real database.** It was
+developed with no local Postgres and no Docker daemon available, so it is hand-reviewed but
+**never applied anywhere** — and it `ALTER`s four existing tables (`clients`, `projects`, `invoices`,
+`files`) to add the composite uniques its tenant-scoped FKs need. The 25-case DB-backed portal
+isolation suite has likewise never run. CI is the gate; see the deployment plan §7.
+
+**Module manifest (16):**
+
+| Module | Ver | Module | Ver |
+|---|---|---|---|
+| platform-nest | `0.12.0` | ai-agents | `0.5.0` |
+| platform-ui | `0.15.0` | hermes-gateway | `0.2.0` |
+| ai-gateway-go | `0.13.0` | capture-helper | `0.2.0` |
+| mcp-hub | `0.9.3` | webdev | `0.10.0` |
+| sync-engine-go | `0.7.0` | webdesk | `0.0.0` |
+| automation (n8n) | `0.4.1` | search-marketing | `0.5.0` |
+| observability | `0.6.0` | social-media | `0.0.0` |
+| infra | `0.8.0` | | |
+| wa-chat-bot | `0.9.2` | | |
+
 ### `Alpha 01.010.0029a` — 2026-08-04 — the team's UI branch, consolidated (manifest recorded after the fact)
 
 Cut by a concurrent session for its client-portal fix. Recorded here because **the same cut also
@@ -575,6 +617,77 @@ anywhere real.
 ---
 
 ## platform-nest
+### [0.12.0] — 2026-08-04 · PROTOTYPED (client portal backend, CP-*)
+
+The backend for the client portal — the client side as a **separate interface** (owner decision,
+2026-08-04). Plan + runbook: `docs/plans/2026-08-04-client-portal-deployment.md`; contract §16 of
+`docs/FRONTEND-BFF-CONTRACT.md`.
+
+- **Migration `0075_client_portal.sql`** — `contracts` (versioned, with a term and a value,
+  `supersedes_id` for re-issues), `contract_signatures` (one row per party, UNIQUE — the
+  `scope_signoffs` shape reused deliberately rather than a second signing idiom), and
+  `invoice_payments` (an append-only money ledger behind `invoices.status`, which had a status enum
+  and nothing else: no amount, no date, no method, no reference, no proof, and therefore no partial
+  payments and no balance). Head was 0074; `0058`/`0059` remain the reports program's orphaned
+  reservation gaps. Pure DDL — no backfill, so the `migration-backfill-rls-trap` does not apply.
+
+- **`portal-scope.ts`** — the portal's isolation kernel, extracted from `PortalController` because the
+  portal grew from 3 routes to ~20 across four controllers and a rule re-derived four times is a rule
+  that will disagree with itself.
+
+- **TWO LATENT IDOR GAPS CLOSED while extracting it**, both of the same shape — a value resolved and
+  then not applied:
+  - `decideGate` and `scopeSign` both resolved `projectIds` and **never used it**. The read paths
+    (`listRuns`/`getRun`) carried the project predicate, so a project-scoped contact could not SEE a
+    run outside their project — but could DECIDE its gate or SIGN its scope, addressable by one id
+    with no listing step.
+  - `client_contacts.capability` (`signer`|`viewer`) existed since 0072 explicitly so that "contacts
+    who WATCH but must not SIGN" was expressible, and **nothing ever read it**: every invited
+    stakeholder could countersign a scope agreement. Now enforced on both signing paths, while a
+    viewer keeps feedback and payment (paying is not signing).
+
+- **Portal BFF, three read/write controllers**: `portal-workspace` (overview, projects, project
+  detail, milestones, timeline, deliverables), `portal-commerce` (invoices, payment-with-proof,
+  contracts, e-signature, and the portal's own scoped file download), `portal-profile` (profile,
+  own-details PATCH, change-request). Client-safe by construction, not by filtering: individual tasks,
+  effort/cost, and the raw `activities` log are structurally absent, and the timeline is a UNION over
+  client-visible OBJECTS so a new internal event type cannot leak into a client's feed by default.
+
+- **Realtime (`portal-live.service.ts` + `portal-stream.controller.ts`)** — the first SSE in this
+  platform and the first long-lived connection served to external parties. **A frame carries a topic
+  and a timestamp and nothing else**; the browser's reaction is to refetch through the
+  ownership-enforcing BFF, so authorization still happens exactly once where it already worked and a
+  fan-out filtering bug costs a wasted refetch rather than a disclosure. Tails the existing Redis
+  Streams with a plain `XREAD` from the tail (at-most-once, no consumer group — joining the
+  `in-process-platform` group would have STOLEN entries from module dispatch). Owns its own Redis
+  connection with its own `error` listener: `getRedis().duplicate()` would have constructed the shared
+  lazy client purely to clone its options, and that client has no error handler — which surfaced
+  immediately as an "[ioredis] Unhandled error event" on a machine where `REDIS_URL` points at a
+  Redis that is not running (every dev box). 9 unit tests, no infrastructure needed.
+
+- **`contracts.controller.ts` — the staff counterpart**, shipped in the same change because without it
+  the portal's contracts section is permanently empty and a client-recorded payment can never leave
+  `pending`. Draft → send → countersign (owner-only, deliberately narrower than `company_admin`), plus
+  the payment confirm/reject decision that **refuses self-confirmation** and derives
+  `invoices.status='paid'` from the confirmed ledger rather than from the request.
+
+- **Cerbos**: `resource_portal.yaml` gains `pay` + `update_profile` (each its own action, so one can be
+  revoked without the other); **new** `resource_contract.yaml`. A new policy file has been observed not
+  to hot-reload through a bind mount, and an unloaded policy DENIES silently — so `deploy.yml` now
+  restarts Cerbos explicitly after syncing policies.
+
+- **Two client-facing notification hrefs corrected** (`client-notify.ts`, `pipeline.controller.ts`):
+  both pointed at bare `/portal` for run-specific events, which now lands on the dashboard rather than
+  the thing that needs the client. Both deep-link to `/portal/approvals/:runId`.
+
+- **`files` target kinds** gain `contract` and `invoice_payment`. Note this grants a client nothing:
+  the staff upload route re-authorizes against the parent kind, which the `client` role does not hold.
+
+**Verification:** `tsc --noEmit` clean; `portal-live.test.ts` 9/9. `portal-dashboard.test.ts` (25
+DB-backed isolation/capability cases, incl. cross-client 404s, viewer-cannot-sign, overpayment refusal,
+and the download IDOR) is **written and typechecked but UNVERIFIED** — the local Postgres/Cerbos pair is
+deliberately off (the server is the source of truth); it runs in CI.
+
 ### [0.11.0] — 2026-08-04 · PROTOTYPED (the regression test the seal-hash fix shipped without)
 Recorded after the fact for the `reva/ui` half of this version; the concurrent session's client-portal
 / pipeline work and migration `0074` also land under it. See `Alpha 01.010.0029a`.
@@ -767,6 +880,75 @@ tenant's 8 seeded rows still need purging (per-tenant SQL in the design doc §12
 - **Unreleased / next:** identity writes, org-structure endpoints.
 
 ## platform-ui
+### [0.15.0] — 2026-08-04 · DEV-VERIFIED (the client portal, CP-*)
+
+The client portal as a **separate interface** from the employee ERP (owner decision, 2026-08-04). The
+separation that was missing was presentational — the backend split was already clean — so this is a new
+route group with its own shell, navigation, vocabulary and empty states, sharing the design system and
+none of the staff layout.
+
+- **`(portal)` route group, 11 routes.** Overview · Projects (+detail) · Timeline · Deliverables ·
+  Approvals (+run detail) · Invoices (+detail) · Agreements (+detail) · Profile. `(app)/portal/*` was
+  **deleted** — two route groups cannot both serve `/portal` — and the old `/portal/[runId]` moved to
+  `/portal/approvals/[runId]`, which also removes a dynamic segment that sat one static sibling away
+  from swallowing `/portal/invoices`.
+
+- **Route group, not a second Next app.** It is genuinely a separate interface; what it does not
+  duplicate is the plumbing (HMAC session, the single server-side egress, tokens, DEMO_MODE, the
+  Playwright harness, the CI build gate). Splitting it out later is moving one folder; unpicking a
+  divergent copy of the session layer would not be.
+
+- **Own chrome** (`components/portal/`): sticky header + horizontal tab strip, a live-state indicator,
+  and a two-item account menu. Deliberately absent: the company switcher (a client belongs to the one
+  company that serves them), global search over internal entities, the approvals inbox, the departments
+  rail, and the density/width preferences. All colours come from the token layer — `portal.css` contains
+  no literal, so `styles/tokens.test.ts` still governs it.
+
+- **`PortalLive`** — EventSource against a new `/api/portal/stream` route handler (one of the enumerated
+  exceptions to "pages call `platformFetch` directly": EventSource is a browser API and the token never
+  leaves the server). It renders no stream data — a frame triggers `router.refresh()`. **Polling is
+  always armed** (120s live / 30s otherwise) rather than switched on after a detected failure, because
+  SSE fails invisibly from the client: a buffering proxy, a network that kills long-lived connections, a
+  backend with no Redis. Also refreshes on tab focus.
+
+- **`lib/portal.ts` split into the documented trio** (`portal.ts` pure + `portal-data.ts` server-only +
+  `portalActions.ts`). It used to BE the reader module; a `"use client"` live component importing
+  `PortalTopic` from it would have pulled `server-only` into the browser bundle — the exact trap where
+  `tsc` and vitest pass and `next build` breaks.
+
+- **Money and dates are locale-pinned** (`money`, `portalDate`, `relativeDays`, `isPastDue`). Bare
+  `toLocaleString` reads the host's ICU data, so server render and client hydration disagree; on a due
+  date that is the difference between "today" and "overdue", and on an invoice it is a client's total.
+
+- **Write flows use `useActionState`, not void form actions.** The server refuses these for reasons a
+  client can act on ("your access is view-only", "amount exceeds the outstanding balance", "this
+  agreement's term has ended"). A void action swallows all of them and re-renders unchanged, which reads
+  as "the button is broken" on the two most consequential things a client does here.
+
+- **The payment form never says "paid".** It records a claim that finance verifies, and the copy says
+  so — a client who believes the portal has settled their invoice will not answer the reminder that
+  follows. The contract page puts the terms ABOVE the signature block, always: a sign button on a page
+  that does not show what is being signed is not a signature, and the form does not render at all when
+  no document is attached.
+
+- **A real bug the tests caught, fixed in the backend too:** re-signing a contract returned **400 "this
+  agreement is signed and cannot be signed"** to the person who had just successfully signed it, because
+  the status check ran before the already-signed check — and signing is what changes the status. A
+  double-tapped button on a phone hit it. Both the controller and the fixture now check idempotency
+  first.
+
+- **`demoPortal.ts`** — a stateful demo store carrying the states that make branches reachable in a
+  browser: an overdue open milestone, a contract awaiting the client with our side already signed, a
+  partially-paid invoice. It mirrors the real BFF's *behaviour*, not just its shapes — the identity 403
+  and the payment claim/confirm split are asserted, because DEMO_MODE is what the build gate and
+  Playwright run against, and a fixture more permissive than the backend makes every downstream check
+  pass against a backend that does not exist.
+
+**Verification (local):** `tsc --noEmit` clean · `DEMO_MODE=1 npm run build` green with all 11 portal
+routes emitted · `npm test` **1040/1040** across 102 files (43 new: 25 pure-helper, 18 fixture-fidelity)
+· `playwright --project=portal` **6/6** — the shell swap (staff surfaces asserted ABSENT), all 8 tabs,
+contract signing, payment recording, and the staff teach-state.
+
 ### [0.12.0] — 2026-08-04 · PROTOTYPED (design-system pass from `reva/ui`, plus the queue fix)
 Authored on `reva/ui` across 15 commits and consolidated in merge `04459ef`; that branch never
 versioned its own work, and the cut it landed in (`Alpha 01.010.0029a`) was made by a concurrent

@@ -1,0 +1,37 @@
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: contract
+  importDerivedRoles: ["gaiada_scopes"]
+  variables:
+    import: ["gaiada_common"]
+  rules:
+    - actions: ["*"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["platform_admin", "group_executive"]
+    # Contract authoring is a commercial act with a value and a term attached, so it sits at the same
+    # tier as invoicing (resource_invoice.yaml) rather than at project-management tier: company_admin
+    # writes, manager reads.
+    #
+    # `send` and `countersign` are their OWN actions, not folded into `update`:
+    #   * `send` is the transition that makes terms visible to the CLIENT. Whoever may draft terms is
+    #     not automatically whoever may put them in front of a customer.
+    #   * `countersign` binds this company to the agreement. It is deliberately the narrowest action
+    #     here — see the second rule.
+    - actions: ["read", "create", "update", "delete", "send"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    # COUNTERSIGNING IS OWNER-ONLY, and that is the point of splitting it out. `platform_admin` /
+    # `group_executive` are covered by the wildcard above; company_admin deliberately is NOT listed
+    # here. Binding the company to a contract worth real money should not be reachable by the same
+    # grant that lets someone tidy up a draft.
+    #
+    # ⚠ THIS IS NOT THE CLIENT'S SIGNATURE PATH. A client never touches this resource: their
+    # countersignature goes through `resource_portal`'s `sign` action, scoped to their own contracts by
+    # portal-scope.ts. The two parties are authorized by two different policies on purpose, so widening
+    # one can never accidentally widen the other.
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["manager"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }

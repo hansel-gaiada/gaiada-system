@@ -24,7 +24,16 @@ export default defineConfig({
       name: "chromium",
       use: { ...devices["Desktop Chrome"], storageState: ".auth/user.json" },
       dependencies: ["setup"],
-      testIgnore: [/auth\.spec\.ts/, /smoke\.spec\.ts/],
+      testIgnore: [/auth\.spec\.ts/, /smoke\.spec\.ts/, /portal\.spec\.ts/],
+    },
+    {
+      // CP-17 client portal. Its OWN project with NO stored session, because every test here signs in as
+      // an external client (or, in one case, as staff) and the shared `.auth/user.json` is a staff
+      // session — reusing it would make `isClientOnly` false and silently test the staff shell instead
+      // of the portal, which is the one thing this suite exists to check.
+      name: "portal",
+      use: { ...devices["Desktop Chrome"] },
+      testMatch: /portal\.spec\.ts/,
     },
     {
       // Anonymous flows (login, step-up, sign-out) — no stored session.

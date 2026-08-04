@@ -197,6 +197,31 @@ jobs:
           ssh vps "cd '${DEPLOY_DIR}/infra/compose' && GAIADA_TAG='${TAG}' GHCR_OWNER='${OWNER}' APP_VERSION='${{ steps.version.outputs.app_version }}' \
             COMPOSE_PROFILES='${COMPOSE_PROFILES}' docker compose ${COMPOSE_FILES} up -d --no-build --remove-orphans"
 
+      # CP-18 — force Cerbos to re-read its policy repo.
+      #
+      # `up -d` does NOT restart cerbos: its image and its compose definition are unchanged by a policy
+      # edit, so compose correctly sees nothing to do. That leaves the reload to
+      # `watchForChanges: true`, and there are two ways that quietly fails:
+      #   * `rsync` writes a temp file and RENAMES it into place. The disk driver watches for changes,
+      #     and a rename is not a modify — whether it is picked up depends on the inotify events the
+      #     driver subscribes to.
+      #   * A brand-new policy FILE has been observed not to be picked up at all through a bind mount.
+      #
+      # The failure mode is the reason this is worth a step of its own: an unloaded policy is not an
+      # error anywhere. Cerbos keeps serving the OLD policy, so a resource kind or action it has not
+      # heard of is DENIED — and the endpoint 403s for every user while every log line looks healthy.
+      # It reads exactly like an application authorization bug, and it has cost a debugging session
+      # before. A restart is ~1s and removes the whole question.
+      #
+      # Placed after `up -d` so a cerbos container that was just recreated is not restarted twice, and
+      # before the health gate so a policy repo that fails to parse fails THIS deploy rather than
+      # silently denying in production.
+      - name: Reload Cerbos policies
+        run: |
+          set -euo pipefail
+          ssh vps "cd '${DEPLOY_DIR}/infra/compose' && GAIADA_TAG='${TAG}' GHCR_OWNER='${OWNER}' \
+            COMPOSE_PROFILES='${COMPOSE_PROFILES}' docker compose ${COMPOSE_FILES} restart cerbos"
+
       - name: Wait for health
         id: health
         run: |

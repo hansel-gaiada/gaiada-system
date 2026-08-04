@@ -11,7 +11,12 @@ import { scrubText, isScrubbableText } from "./scrub";
 import { AuthGuard } from "../auth/guards";
 
 const MAX_BYTES = 25 * 1024 * 1024;
-const TARGET_KINDS = new Set(["project", "task", "deliverable", "client", "agency_campaign", "agency_creative_asset"]);
+// CP-1: `contract` and `invoice_payment` join the set so a contract PDF and a transfer receipt are
+// ordinary attachments rather than a second blob mechanism. Note what this does NOT grant: line 59
+// re-authorizes the caller against `{kind: targetType}`, and neither kind is readable by the `client`
+// derived role in Cerbos — so a client CANNOT upload through this staff route. Client-side proof
+// upload goes through the portal's own route, which authorizes on `portal` + client ownership.
+const TARGET_KINDS = new Set(["project", "task", "deliverable", "client", "agency_campaign", "agency_creative_asset", "contract", "invoice_payment"]);
 
 function dispositionHeader(filename: string): string {
   const ascii = filename.replace(/[\r\n"\\]/g, "_").replace(/[^\x20-\x7e]/g, "_");

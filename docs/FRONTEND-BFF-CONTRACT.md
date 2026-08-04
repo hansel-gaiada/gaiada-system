@@ -1214,3 +1214,101 @@ Google Search Console / GA4 / Google Ads connection entries just need the UI wir
 in the SM-25a section above (deliberately not stubbed in SM-11). **Real Google acceptance is still
 gated on a Google OAuth client (SM-41G)** — construction is unblocked, only staging/production
 verification is not.
+
+## 16. Client portal (CP-* program, 2026-08-04) — `platform-ui/src/lib/portal{,-data}.ts`, `portalActions.ts`
+
+[Deployment plan: `plans/2026-08-04-client-portal-deployment.md`](plans/2026-08-04-client-portal-deployment.md)
+
+The client-facing dashboard, served from its own `(portal)` route group with its own shell — a
+SEPARATE INTERFACE from the staff ERP (owner decision, 2026-08-04), not a client-gated corner of it.
+
+**Unlike every other section of this document, this one is NOT frontend-first.** Backend and frontend
+were built together, so every row below is ✅ on both sides. That is deliberate: frontend-first drift
+(the console reading fields the backend never sends) is this repo's recurring bug class, and the
+portal is read by people outside the company where a confidently-wrong number costs the most.
+
+### Isolation model — read this before adding a portal route
+
+Four layers, and only the third is per-client:
+
+1. **RLS** — tenant, in Postgres (FORCE RLS on the authorized-tenant-set).
+2. **Cerbos** — the `client` derived role on the `portal` resource. Actions: `read`, `decide`, `sign`,
+   `pay`, `update_profile`. **Cerbos does not see rows**, so `read` means "may ask the portal", never
+   "may see any client's data".
+3. **`src/core/portal-scope.ts`** — `client_id = ANY(:callerClientIds)` plus the project restriction,
+   applied as a SQL predicate on **every** portal query. This is what stops client A reading client B
+   inside the same tenant. Ownership resolves through `client_contacts` UNIONed with the legacy
+   `clients.portal_user_id`; the union is load-bearing (the invite flow never writes that column).
+4. **Per-route** — the addressed entity belongs to a run/invoice/contract inside that scoped set.
+
+`capability` (`signer` | `viewer`) gates signing only: a viewer may still give feedback and record a
+payment. Not-yours and does-not-exist both answer **404**, deliberately indistinguishable, so no route
+becomes an existence oracle for another client's ids.
+
+### 16a. Workspace reads — `src/core/portal-workspace.controller.ts`
+
+| Status | Method | Path | Notes |
+|---|---|---|---|
+| ✅ | GET | `/api/:t/portal/overview` | The whole landing payload in ONE request: `{clients[], client, viewOnly, progress{projects,activeProjects,completedProjects,percent}, deliverables{total,delivered,overdue}, nextMilestone, needsYou[], finance{byCurrency[],primary}}`. `needsYou[]` = `{kind:'gate'\|'contract', id, requires:'signature'\|'feedback', label, context, href, since}`. Progress is the mean of PROJECT progress (not of pooled tasks), each project weighted by `pm_tasks.progress` with `done` counting 100. |
+| ✅ | GET | `/api/:t/portal/projects` | `PortalProject[]` — progress, milestone counts, deliverable count, next milestone due. |
+| ✅ | GET | `/api/:t/portal/projects/:projectId` | Adds `milestones[]`, `deliverables[]`, `runs[]`, `workload{todo,in_progress,blocked,done}`. **Never returns individual tasks** — `workload` is aggregate counts only. 404 for another client's or another project-scope's project. |
+| ✅ | GET | `/api/:t/portal/milestones` | Commitment calendar across visible projects. |
+| ✅ | GET | `/api/:t/portal/timeline` | `?limit` (clamped 1–400, default 120). `PortalTimelineEvent[]` = `{kind, id, label, status, at, tense:'due'\|'happened', context, projectId}`. Composed as a UNION over client-visible OBJECTS — **never** from `activities`, so a new internal event type cannot leak into a client's feed by default. |
+| ✅ | GET | `/api/:t/portal/deliverables` | `?projectId`. Attachment metadata batched in one query (`files[]` per deliverable). |
+
+### 16b. Commerce — `src/core/portal-commerce.controller.ts`
+
+| Status | Method | Path | Notes |
+|---|---|---|---|
+| ✅ | GET | `/api/:t/portal/invoices` | `draft` excluded. Adds `paid`, `pendingConfirmation`, `balance`, `overdue`. **Not** `ModuleEnabledGuard("billing")`-gated — a client with invoices must keep reading them if the module is switched off. |
+| ✅ | GET | `/api/:t/portal/invoices/:invoiceId` | Frozen `lines[]` + `payments[]` + `paid`/`balance`. |
+| ✅ | POST | `/api/:t/portal/invoices/:invoiceId/payments` | `{amount, paidOn(YYYY-MM-DD), method, reference?, note?, proof?{filename,contentType,content(base64)}}`. Records a **CLAIM**: inserted `status='pending'`, `invoices.status` untouched, `client_id`/`currency` read from the invoice (never the body). Refuses future dates and overpayment beyond a 1% tolerance. Proof ≤10 MB. Action `pay`; **capability not required**. |
+| ✅ | GET | `/api/:t/portal/contracts` | `draft` excluded. `clientSigned`/`providerSigned`/`termEnded` per row (`termEnded` derived on read, never written back). |
+| ✅ | GET | `/api/:t/portal/contracts/:contractId` | Adds `bodyMd`, `document`, `signatures[]`, `canSign`, `viewOnly`. **`canSign` is the exact conjunction `POST /sign` enforces** — mirror it, never recompute it. |
+| ✅ | POST | `/api/:t/portal/contracts/:contractId/sign` | `{signerName, signerTitle?, agree:true}`. `agree` refused server-side if absent. Requires `signer` capability. Idempotent — a re-sign answers 200 `{alreadySigned:true}`, checked BEFORE the status check (signing is what changes the status). Flips to `signed` only when BOTH parties are present. |
+| ✅ | GET | `/api/:t/portal/files/:fileId` | The portal's OWN download. Resolves ownership by walking the file's parent entity through the scope predicate; parent kinds limited to `deliverable\|contract\|invoice_payment\|project`. Attachment-only + `nosniff` + sandbox CSP. **Do not link the staff `/files/:id/content` route from the portal** — it authorizes on the parent resource kind, which the `client` role does not hold, so it 403s by design. |
+
+### 16c. Profile — `src/core/portal-profile.controller.ts`
+
+| Status | Method | Path | Notes |
+|---|---|---|---|
+| ✅ | GET | `/api/:t/portal/profile` | `{me, clients[], contacts[], access{canSign,wholeClient,grants[]}}`. `contacts[]` = fellow contacts of THEIR clients only. |
+| ✅ | PATCH | `/api/:t/portal/profile` | `{name?, title?}` — the caller's own `users` row, two columns, nothing else. **Never `email`** (the IdP identity and the invite's bound address) or `status`. Action `update_profile`. |
+| ✅ | POST | `/api/:t/portal/profile/change-request` | `{message, clientId?}` → **202**. Records an activity + notifies the account owners. Mutates NOTHING: `clients.name`/`contact` appear on issued invoices and signed contracts, so a client editing them would change what frozen documents appear to say. |
+
+### 16d. Realtime — `src/core/portal-stream.controller.ts` + `portal-live.service.ts`
+
+| Status | Method | Path | Notes |
+|---|---|---|---|
+| ✅ | GET | `/api/:t/portal/stream` | SSE. Opens `retry:` + `event: hello` `{mode:'live'\|'poll'}`; then `event: change` `{topic, at}`; `:` heartbeat every 25s; 30-minute connection rotation (forces re-authorization). Sends `X-Accel-Buffering: no`. |
+
+**A frame carries a topic and a timestamp — no ids, no payload, no business data.** The browser's only
+reaction is `router.refresh()`, which re-runs the ordinary reads through the ownership-enforcing BFF.
+Authorization therefore still happens once, where it already worked. A filtering bug in the fan-out
+costs a wasted refetch, not a disclosure — that inversion is the whole security argument for shipping
+realtime to external parties. `mode:'poll'` when `REDIS_URL` is unset; the client polls unconditionally
+anyway (120s when live, 30s when not), because SSE fails in ways invisible from the client.
+
+Topics: `approvals · projects · deliverables · invoices · contracts · profile`. The event→topic map in
+`portal-live.service.ts` is an **allowlist** — an unmapped event type produces no frame, so adding an
+internal event cannot wake a client's browser by default.
+
+### 16e. Staff counterpart — `src/core/contracts.controller.ts` (**no UI yet — see deferrals**)
+
+Shipped in the same change because without it the portal's contracts section is permanently empty and
+a client-recorded payment can never leave `pending`.
+
+| Status | Method | Path | Notes |
+|---|---|---|---|
+| ✅ | GET | `/api/:t/contracts` | `?clientId`, `?status`. Authz: `contract` read (company_admin/manager). |
+| ✅ | GET | `/api/:t/contracts/:contractId` | Adds `signatures[]`. |
+| ✅ | POST | `/api/:t/contracts` | Always created `draft`. Validates the project belongs to the named client; `supersedesId` bumps `version`. |
+| ✅ | PATCH | `/api/:t/contracts/:contractId` | Draft-only, except `status:'void'`. A sent/signed contract is re-issued via `supersedesId`, never edited. |
+| ✅ | POST | `/api/:t/contracts/:contractId/send` | `draft → sent` + notifies signer contacts. Refuses with no document or `bodyMd`. Action `send`. |
+| ✅ | POST | `/api/:t/contracts/:contractId/countersign` | `{signerName, signerTitle?}`. Action `countersign` — **owner-only** (`platform_admin`/`group_executive`); company_admin deliberately excluded. |
+| ✅ | GET | `/api/:t/invoice-payments` | `?status` — finance's confirmation queue. Authz: `invoice` read. |
+| ✅ | POST | `/api/:t/invoice-payments/:paymentId/decide` | `{decision:'confirm'\|'reject', reason?}`. `reason` required to reject. **Refuses self-confirmation** (recorder ≠ confirmer). On confirm, derives `invoices.status='paid'` by comparing the CONFIRMED ledger against the total (±1 tolerance), only from `sent`. Notifies the client either way. Authz: `invoice` update. |
+
+**⚠ NO STAFF UI EXISTS FOR §16e.** Contracts must be created and payments confirmed via API until
+`/clients/[id]/contracts` and a finance queue page are built. Whoever owns finance needs to know the
+decide endpoint exists, or client payments accumulate as `pending` with nobody looking.

@@ -9,13 +9,30 @@ resourcePolicy:
     - actions: ["*"]
       effect: EFFECT_ALLOW
       derivedRoles: ["platform_admin"]
-    # An authenticated client of this tenant may read the portal and act on their client-side gates
-    # (sign PRD / scope, submit feedback). Per-run isolation (only THEIR runs) is enforced in the
-    # portal controller via run.client_id -> clients.portal_user_id. Staff may also read (support).
-    - actions: ["read", "decide", "sign"]
+    # An authenticated client of this tenant may read the portal and act on their own items:
+    #   read           — every portal GET (overview/projects/timeline/deliverables/invoices/contracts/
+    #                    profile/files/stream)
+    #   decide         — client-side pipeline gates (feedback, approvals)
+    #   sign           — scope agreements and contracts
+    #   pay            — CP-3: record a payment against their own invoice. Its own action, NOT folded
+    #                    into `decide`, because these are different powers with different blast radii
+    #                    and one day one of them may need revoking without the other.
+    #   update_profile — CP-4: their own name/title, and profile change REQUESTS. Deliberately narrow-
+    #                    named: a generic `update` would silently widen the day someone reuses it.
+    #
+    # ⚠ THIS POLICY IS NOT THE ROW-LEVEL BOUNDARY. Cerbos does not see rows, so `read` here means "may
+    # ask the portal", never "may see any client's data". Per-client and per-project isolation is
+    # src/core/portal-scope.ts's SQL predicate, applied on every portal query; RLS is the tenant wall
+    # beneath both. Widening this list does NOT widen which rows a client can reach — but REMOVING the
+    # scope predicate from a query would, so read that file before adding a portal route.
+    - actions: ["read", "decide", "sign", "pay", "update_profile"]
       effect: EFFECT_ALLOW
       derivedRoles: ["client"]
       condition: { match: { expr: "variables.inTenant" } }
+    # Staff read-only, for support ("what does the client actually see?"). Deliberately excludes `pay`,
+    # `sign` and `update_profile`: a manager must not be able to sign a contract or record a payment AS
+    # the client side — those routes resolve the actor's own client contact rows and a staff member has
+    # none, but failing at the policy is clearer than failing four queries deep.
     - actions: ["read"]
       effect: EFFECT_ALLOW
       derivedRoles: ["company_admin", "manager", "group_executive"]

@@ -22,7 +22,13 @@ export function navFor(me: Me, tenantId?: string | null, departments: { id: stri
   // who is also a client contact (isElevated covers only global admin/exec), and handed that person
   // portal-only nav — losing their whole staff surface. See rbac.ts::isStaff.
   if (isClientOnly(me)) {
-    return [{ label: "Portal", items: [{ label: "Project Portal", href: "/portal", icon: "home" }] }];
+    // CP-7: the portal is now its OWN route group with its own shell, so an external client never
+    // renders this nav at all — `(portal)/portal/layout.tsx` replaces `(app)/layout.tsx` for every
+    // `/portal/*` path. This entry is kept as the belt to that braces: if a client ever lands on an
+    // `(app)` route (a stale bookmark, a notification href pointing at a staff page), the staff shell
+    // draws around them and this is the one link out. Removing it would leave them with an empty
+    // sidebar and no way back.
+    return [{ label: "Portal", items: [{ label: "Your portal", href: "/portal", icon: "home" }] }];
   }
   const business: NavItem[] = [
     { label: "Projects", href: "/projects", icon: "projects" },

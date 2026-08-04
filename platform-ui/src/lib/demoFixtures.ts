@@ -8,6 +8,7 @@ import "server-only";
 import { pmDemo, allTrackerNotifications, pmTasksForUser } from "./demoPm";
 import { meetingsDemo } from "./demoMeetings";
 import { pipelineDemo, portalDemo } from "./demoPipeline";
+import { portalDashboardDemo } from "./demoPortal";
 import { reportsDemo } from "./demoReports";
 import { checkinsDemo } from "./demoCheckins";
 import { appraisalsDemo } from "./demoAppraisals";
@@ -1621,7 +1622,14 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
   const pipeline = pipelineDemo(method, p, url.searchParams, body);
   if (pipeline) return pipeline;
 
-  // Client portal (C5) — identity-aware, so a staff user still gets the 403 the real BFF returns.
+  // Client portal DASHBOARD (CP-2..CP-5) — overview/projects/timeline/deliverables/invoices/contracts/
+  // profile. Runs FIRST so its routes win, and returns null for anything it does not own so the
+  // runs/gates routes still reach `portalDemo` below. Both are identity-aware (a staff user gets the
+  // real BFF's 403), which is what keeps the staff teach-state on /portal reachable.
+  const portalDash = portalDashboardDemo(method, p, userId, body);
+  if (portalDash) return portalDash;
+
+  // Client portal runs/gates (C5) — identity-aware, so a staff user still gets the 403 the real BFF returns.
   const portal = portalDemo(method, p, userId);
   if (portal) return portal;
 

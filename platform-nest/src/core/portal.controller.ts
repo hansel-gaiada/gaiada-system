@@ -13,7 +13,7 @@
 // THEIR runs, the client-safe view (no internal report track, no internal gates, no PM notes), and a
 // plain-language "current blockage". Client decisions flow through the SAME pipeline_gates state
 // machine + events as staff decisions, so the waiting n8n workflow resumes identically.
-import { BadRequestException, Body, Controller, ForbiddenException, Get, HttpCode, NotFoundException, Param, Post, Req, UseGuards } from "@nestjs/common";
+import { BadRequestException, Body, Controller, Get, HttpCode, NotFoundException, Param, Post, Req, UseGuards } from "@nestjs/common";
 import type { FastifyRequest } from "fastify";
 import { newId, withTenants } from "../db";
 import { config } from "../config";
@@ -22,7 +22,7 @@ import { emitEvent } from "../events/outbox.service";
 import { AuthGuard } from "../auth/guards";
 import { lockPipelineRun } from "./pipeline-lock";
 import { notifyBestEffort, notifyScopeSignedBothSides, resolveClientRecipients } from "./client-notify";
-import type { PoolClient } from "pg";
+import { requireSigner, resolvePortalScope } from "./portal-scope";
 
 const CLIENT_DECISIONS = new Set(["signed", "approved", "changes_requested"]);
 const REQUIRED_SCOPE_PARTIES = ["provider", "client"] as const;
@@ -63,83 +63,17 @@ function currentBlockage(
 @Controller("api")
 @UseGuards(AuthGuard)
 export class PortalController {
-  /** Resolve the caller's client row for this tenant, or 403 if they are not a portal client. */
-  /** Every client this caller is a portal contact of.
-   *
-   *  ⚠ W0 GAP THIS CLOSES — the whole invite flow was unreachable without it. `client_contacts`
-   *  (migration 0072) is what the invite/accept flow writes; `clients.portal_user_id` is the older
-   *  single-contact column, and it is the ONLY thing this method used to read. So an invited contact
-   *  could accept, get a Keycloak account, receive the `client` role, gain the tenant via
-   *  principal.ts's client_contacts union, pass `resource_portal` authz — and then be refused right
-   *  here with "not a portal client". Everything upstream succeeded and the portal still showed
-   *  nothing. The W0 spec said the portal "resolves through this table instead"; that intent was
-   *  never implemented, which is exactly the kind of gap a design doc cannot catch.
-   *
-   *  Returns a SET, because D-1 made contacts many-per-client: one person can legitimately be a
-   *  stakeholder for two clients of the same agency.
-   *
-   *  The legacy `portal_user_id` lookup is UNIONed in rather than dropped: it still has live rows and
-   *  its own tests, and removing it here would be a silent access regression for anyone provisioned
-   *  the old way. It is retired by a later migration, not by this method. */
-  /** Convenience for the four read/write paths: the caller's client set plus their project
-   *  restriction (null = all projects). */
-  private async callerScope(
-    c: PoolClient,
-    principal: { userId: string | null },
-  ): Promise<{ clientIds: string[]; projectIds: string[] | null }> {
-    const clientIds = await this.callerClientIds(c, principal);
-    const projectIds = await this.allowedProjectIds(c, principal.userId as string, clientIds);
-    return { clientIds, projectIds };
-  }
-
-  private async callerClientIds(c: PoolClient, principal: { userId: string | null }): Promise<string[]> {
-    if (!principal.userId) throw new ForbiddenException("not a portal client");
-    const r = await c.query<{ id: string }>(
-      `SELECT cc.client_id AS id
-         FROM client_contacts cc
-        WHERE cc.user_id = $1 AND cc.status = 'active' AND cc.deleted_at IS NULL
-        UNION
-       SELECT cl.id FROM clients cl WHERE cl.portal_user_id = $1 AND cl.deleted_at IS NULL`,
-      [principal.userId],
-    );
-    const ids = r.rows.map((row) => row.id);
-    // A `revoked` or still-`invited` contact resolves to nothing and is refused here — status governs
-    // ACCESS, which is precisely the question this method asks.
-    if (!ids.length) throw new ForbiddenException("not a portal client");
-    return ids;
-  }
-
-  /** The projects this caller may see for a given client, or `null` meaning ALL of them.
-   *
-   *  D-1 allows a contact to be scoped to one project (`project_id`) or to the whole client
-   *  (`project_id IS NULL`). A client-wide row therefore WIDENS access and must win over any
-   *  narrower row — otherwise adding a project-scoped row to someone who already had client-wide
-   *  access would silently take access away. */
-  private async allowedProjectIds(
-    c: PoolClient,
-    userId: string,
-    clientIds: string[],
-  ): Promise<string[] | null> {
-    const r = await c.query<{ project_id: string | null; legacy: boolean }>(
-      `SELECT cc.project_id, false AS legacy
-         FROM client_contacts cc
-        WHERE cc.user_id = $1 AND cc.status = 'active' AND cc.deleted_at IS NULL
-          AND cc.client_id = ANY($2::uuid[])
-        UNION ALL
-       SELECT NULL::uuid AS project_id, true AS legacy
-         FROM clients cl WHERE cl.portal_user_id = $1 AND cl.deleted_at IS NULL`,
-      [userId, clientIds],
-    );
-    // Any client-wide grant (or the legacy whole-client scheme) => unrestricted.
-    if (r.rows.some((row) => row.project_id === null)) return null;
-    return r.rows.map((row) => row.project_id as string);
-  }
+  // CP-1: the caller's client/project/capability resolution MOVED to ./portal-scope.ts, unchanged in
+  // behaviour, because the portal is now four controllers that all need the same predicate. See that
+  // file's header for why the `client_contacts` ∪ `clients.portal_user_id` union must not be
+  // simplified. Call `resolvePortalScope(c, req.principal)` directly — there is no local wrapper, so
+  // there is no second place for the rule to drift.
 
   @Get(":tenantId/portal/runs")
   async listRuns(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string) {
     await authorize(req.principal, { kind: "portal", tenantId }, "read");
     return withTenants([tenantId], async (c) => {
-      const { clientIds, projectIds } = await this.callerScope(c, req.principal);
+      const { clientIds, projectIds } = await resolvePortalScope(c, req.principal);
       const runs = await c.query<{ id: string; title: string; status: string }>(
         `SELECT id, title, status, created_at FROM pipeline_runs
          WHERE client_id = ANY($1::uuid[]) AND deleted_at IS NULL
@@ -200,7 +134,7 @@ export class PortalController {
   async getRun(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("runId") runId: string) {
     await authorize(req.principal, { kind: "portal", tenantId }, "read");
     return withTenants([tenantId], async (c) => {
-      const { clientIds, projectIds } = await this.callerScope(c, req.principal);
+      const { clientIds, projectIds } = await resolvePortalScope(c, req.principal);
       const run = await c.query<{ id: string; title: string; status: string }>(
         `SELECT id, title, status, created_at FROM pipeline_runs
           WHERE id = $1 AND client_id = ANY($2::uuid[]) AND deleted_at IS NULL
@@ -244,7 +178,15 @@ export class PortalController {
     if (!decision || !CLIENT_DECISIONS.has(decision)) throw new BadRequestException("decision must be signed|approved|changes_requested");
     await authorize(req.principal, { kind: "portal", tenantId }, "decide");
     const decided = await withTenants([tenantId], async (c) => {
-      const { clientIds, projectIds } = await this.callerScope(c, req.principal);
+      const scope = await resolvePortalScope(c, req.principal);
+      const { clientIds } = scope;
+      // CP-1 — CLOSES A GAP 0072 OPENED AND NEVER ENFORCED. `client_contacts.capability` exists
+      // precisely so "contacts who WATCH but must not SIGN" is expressible (0072's own words), and
+      // nothing ever read it: every invited stakeholder could countersign. A `viewer` may still send
+      // FEEDBACK — that is the whole point of inviting them — so the gate is on the SIGNING decisions
+      // only, not on the route. `changes_requested` stays open to viewers for the same reason.
+      const isSignature = decision === "signed" || decision === "approved";
+      if (isSignature) requireSigner(scope);
       // WD-29 (DEF-2): this is the CLIENT-side twin of PipelineController.decideGate and it is where
       // BOTH of DEF-2's triggering decisions actually land in production — `prd_sign` and
       // `customer_feedback` are client gates, decided here through the portal. Locking only the
@@ -254,11 +196,18 @@ export class PortalController {
       // Addressed by gate id, so read the immutable run key first, then lock, then run the original
       // ownership-checked UPDATE unchanged (its `status = 'pending'` predicate stays authoritative and
       // is now evaluated under the lock).
+      // CP-1 — SECOND GAP CLOSED HERE: `projectIds` was resolved on this path and then never applied.
+      // `listRuns`/`getRun` both carry the `($n IS NULL OR project_id = ANY($n))` predicate, so a
+      // project-scoped contact could not SEE a run outside their project — but they could DECIDE a gate
+      // on it, because this query filtered on the client only. Reachable with one addressable id and no
+      // listing step, which is exactly the shape of an IDOR. Same predicate as the read paths, so a
+      // project-less run stays invisible to a project-scoped contact on all three routes alike.
       const owner = await c.query<{ run_id: string }>(
         `SELECT g.run_id FROM pipeline_gates g JOIN pipeline_runs r ON g.run_id = r.id
          WHERE g.id = $1 AND r.client_id = ANY($2::uuid[]) AND g.actor_side = 'client' AND g.deleted_at IS NULL
-           AND r.deleted_at IS NULL`,
-        [id, clientIds],
+           AND r.deleted_at IS NULL
+           AND ($3::uuid[] IS NULL OR r.project_id = ANY($3::uuid[]))`,
+        [id, clientIds, scope.projectIds],
       );
       if (!owner.rows[0]) return null;
       await lockPipelineRun(c, owner.rows[0].run_id);
@@ -308,15 +257,22 @@ export class PortalController {
   ) {
     await authorize(req.principal, { kind: "portal", tenantId }, "sign");
     const result = await withTenants([tenantId], async (c) => {
-      const { clientIds, projectIds } = await this.callerScope(c, req.principal);
+      const scope = await resolvePortalScope(c, req.principal);
+      const { clientIds } = scope;
+      // CP-1: this route is named `sign` and signs a legal agreement, so the capability gate is
+      // unconditional here (unlike decideGate, where a viewer's feedback is legitimate).
+      requireSigner(scope);
       // WD-29 (DEF-2): the client-side scope sign-off — the second of the two events whose near-
       // simultaneous arrival with `prd_sign` produced the duplicate design stages. Same per-run lock
       // as every other transition, taken before the party set is read.
       await lockPipelineRun(c, runId);
+      // CP-1: `projectIds` was resolved here and never applied either — same IDOR shape as decideGate
+      // (a project-scoped contact could sign the scope of a run on another of their client's projects).
       const run = await c.query<{ project_id: string | null; owner_id: string | null; created_by: string | null; client_id: string | null }>(
         `SELECT project_id, owner_id, created_by, client_id FROM pipeline_runs
-          WHERE id = $1 AND client_id = ANY($2::uuid[]) AND deleted_at IS NULL`,
-        [runId, clientIds],
+          WHERE id = $1 AND client_id = ANY($2::uuid[]) AND deleted_at IS NULL
+            AND ($3::uuid[] IS NULL OR project_id = ANY($3::uuid[]))`,
+        [runId, clientIds, scope.projectIds],
       );
       if (!run.rows[0]) throw new NotFoundException("run not found");
       // The client always signs the 'client' party. ON CONFLICT keeps it idempotent.

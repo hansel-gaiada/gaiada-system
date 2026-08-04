@@ -514,7 +514,10 @@ export class PipelineController {
     if (opened.recipients.length) {
       await notifyBestEffort(tenantId, req.principal.userId, opened.recipients, "pipeline.gate.opened", {
         title: CLIENT_GATE_OPEN_TITLE[kind] ?? "Action needed on your project",
-        href: "/portal",
+        // CP-12: deep-link to the RUN whose gate just opened. `/portal` is now the client dashboard, so
+        // sending someone there for "sign the PRD on project X" made them find it themselves. The
+        // portal's own route group puts runs at `/portal/approvals/:runId`.
+        href: `/portal/approvals/${runId}`,
         entityType: "pipeline_gate",
         entityId: id,
         severity: clientNotifyKindForGate(kind) === "signature" ? "warning" : "info",

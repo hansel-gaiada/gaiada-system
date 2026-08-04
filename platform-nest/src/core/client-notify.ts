@@ -104,8 +104,12 @@ export async function notifyScopeSignedBothSides(
     });
   }
   if (clientRecipients.length) {
+    // CP-12: deep-links to the RUN, not to the portal root. `/portal` is now the dashboard, so a
+    // run-specific notification landing there made the client hunt for the thing they were told about
+    // (the dashboard does list it, so this was never broken — just one click worse than it should be).
+    // The route is `/portal/approvals/:runId` since the portal became its own route group.
     await notifyBestEffort(tenantId, actorId, clientRecipients, "scope.signed", {
-      title, href: "/portal", entityType: "pipeline_run", entityId: runId, severity: "info",
+      title, href: `/portal/approvals/${runId}`, entityType: "pipeline_run", entityId: runId, severity: "info",
     });
   }
 }

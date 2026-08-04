@@ -19,6 +19,20 @@ import { TasksMineController } from "./core/tasks-mine.controller";
 import { MeetingRecordingsController } from "./core/meetings.controller";
 import { ClientContactsController, ClientInviteAcceptController } from "./core/client-contacts.controller";
 import { PortalController } from "./core/portal.controller";
+// CP-2..CP-5: the client portal split across four further controller classes, all on the same `api`
+// prefix as PortalController. Nest permits that as long as no individual route path collides, and none
+// does (workspace = overview/projects/milestones/timeline/deliverables, commerce = invoices/contracts/
+// files, profile = profile*, stream = stream). Split by subject rather than crammed into one file
+// because each is independently reviewable and they have different risk profiles — commerce is the only
+// one an external party WRITES through.
+import { PortalWorkspaceController } from "./core/portal-workspace.controller";
+import { PortalCommerceController } from "./core/portal-commerce.controller";
+import { PortalProfileController } from "./core/portal-profile.controller";
+import { PortalStreamController } from "./core/portal-stream.controller";
+// CP-19: the STAFF half of the portal's commerce surface — contract authoring/send/countersign and
+// payment confirmation. Without it the portal's contracts section is permanently empty and a
+// client-recorded payment can never leave `pending`, so it ships in the same change.
+import { ContractsController } from "./core/contracts.controller";
 import { FilesController } from "./core/files.controller";
 import { CreativeController } from "./core/creative.controller";
 import { WorkActivityController } from "./core/work-activity.controller";
@@ -50,7 +64,7 @@ import { ModuleCatalogController } from "./modules/module-catalog.controller";
 @Module({
   controllers: [
     HealthController, IdentityController, CoreController, TeamsController, CustomFieldsController,
-    AuthzCheckController, ClientWorkController, BillingController, CollabController, AutomationApprovalsController, PipelineController, ApprovalsController, ApprovalsDecideController, TasksMineController, MeetingRecordingsController, PortalController, ClientContactsController, ClientInviteAcceptController, FilesController, CreativeController, WorkActivityController, IntegrationsController, ClaudeSeatsController, AdminIdentityController,
+    AuthzCheckController, ClientWorkController, BillingController, CollabController, AutomationApprovalsController, PipelineController, ApprovalsController, ApprovalsDecideController, TasksMineController, MeetingRecordingsController, PortalController, PortalWorkspaceController, PortalCommerceController, PortalProfileController, PortalStreamController, ContractsController, ClientContactsController, ClientInviteAcceptController, FilesController, CreativeController, WorkActivityController, IntegrationsController, ClaudeSeatsController, AdminIdentityController,
     CompanyAdminController, ServiceAssignmentsController, CompanyCrudController, AdminSystemsController, BotAdminController, IntelligenceController,
     // Vertical modules (compiled-in; per-tenant enable gate at the controller).
     AgencyController, PmController, ItController, ClientsController, HrController, SearchController,
