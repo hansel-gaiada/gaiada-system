@@ -22,22 +22,45 @@ name: ci
 # change). That is the biggest remaining saving, and it is also how a cross-component break gets
 # through — a change to a shared contract that only touches one folder still needs the other suites.
 # Left as a decision for whoever measures the minutes again.
+# ── ON-DEMAND ONLY (2026-08-04, owner decision) ───────────────────────────────────────────────────
+# The free Actions allowance is exhausted and the repo stays PRIVATE, so CI no longer runs itself.
+# `workflow_dispatch` means minutes are spent when someone asks for them and never otherwise — the
+# cheapest arrangement that keeps the pipeline intact rather than deleting it.
+#
+# THE COST OF THIS IS REAL AND IS NOT HIDDEN: a push to `main` is now UNVERIFIED by default. The
+# platform-nest suite is the one that matters most — it is the only place the DB-backed tests
+# (migrations, RLS, Cerbos, the portal isolation suite) ever run, and none of that is reproducible on a
+# dev box without Postgres. So:
+#
+#   * before merging anything non-trivial, run it:  gh workflow run ci.yml
+#   * locally, the closest equivalent is:           sh infra/scripts/test-all.sh
+#   * `paths-ignore` is kept below so that even a manual run skips docs-only refs.
+#
+# Restore automatic CI by uncommenting the `push:`/`pull_request:` blocks — they are left in place,
+# already cost-tuned (main only, docs ignored, superseded runs cancelled), so this is a one-line
+# revert the moment the allowance is back.
 on:
-  push:
-    branches: [main]
-    paths-ignore:
-      - "**/*.md"
-      - "**/*.pdf"
-      - "docs/**"
-      - "legal/**"
-      - "design/**"
-  pull_request:
-    paths-ignore:
-      - "**/*.md"
-      - "**/*.pdf"
-      - "docs/**"
-      - "legal/**"
-      - "design/**"
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: "Why this run (shows in the run list — e.g. 'pre-merge check for CP-21')"
+        required: false
+        type: string
+  # push:
+  #   branches: [main]
+  #   paths-ignore:
+  #     - "**/*.md"
+  #     - "**/*.pdf"
+  #     - "docs/**"
+  #     - "legal/**"
+  #     - "design/**"
+  # pull_request:
+  #   paths-ignore:
+  #     - "**/*.md"
+  #     - "**/*.pdf"
+  #     - "docs/**"
+  #     - "legal/**"
+  #     - "design/**"
 
 # Supersede in-flight runs of the same ref. NOT applied to deploy.yml, which sets
 # `cancel-in-progress: false` on purpose — a half-applied migration is worse than a queued deploy.

@@ -23,6 +23,46 @@ reconstructed from this table alone. Format defined in [`VERSIONING.md`](./VERSI
 > `01.012.0031a`. Per VERSIONING rule 5 `/VERSION` is authoritative; the `MODULES.md` line is now
 > corrected and should be moved with every cut.
 
+### `Alpha 01.016.0037a` — 2026-08-04 — HAND-BUILT deploy (Actions blocked), carrying wd23a-1
+
+**⚠ This cut did NOT go through `release.yml`.** GitHub Actions is blocked by billing — every job dies
+in ~10s with `steps=0` — so the image was built **on the VPS** from `git archive HEAD` and tagged
+locally. Consequences, stated rather than buried:
+
+- **No cosign signature and no attested SBOM.** `deploy.yml` verifies both before it deploys; this
+  bypassed that gate entirely. The supply-chain assurance for this one release is "the build ran on the
+  target box from a clean export of a known commit", which is weaker than every release before it.
+- **The image exists only on the box, not in GHCR.** A `docker compose pull` for `platform-nest` at this
+  tag will 404. Recreating the container is fine (the image is local); `--pull always` is not.
+- **Re-cut it properly the moment Actions returns**: `gh workflow run release.yml` on a real tag. This
+  entry exists so that is not forgotten.
+
+Contents — one component changed since the deployed `alpha-01.014.0035a` (verified per component with
+`git diff --name-only`; the other eight are byte-identical, so only `platform-nest` was rebuilt):
+
+- **`platform-nest 0.12.2 → 0.13.0` — the Google OAuth state machine moved to core**, from another
+  session's `wd23a-1` work (`1ffb60c`, `e7b446e`), including migration **`0076_core_google_oauth_states.sql`**
+  (`google_oauth_states`, FORCE RLS). Not my change; versioned here because the app version records what
+  is DEPLOYED, and this is what is deployed.
+- the two remaining portal-seed fixes (`e8c76fd`, `e7d7857`).
+- CI cost control + GHCR retention (`397e471`, `10a992c`) — infra, no module.
+
+**Verification that replaced CI**, since CI could not run:
+
+| Check | Result |
+|---|---|
+| `platform-nest` typecheck at HEAD, in a clean throwaway worktree | `tsc` exit 0, no output |
+| Full migration set from EMPTY, real migrator, disposable `postgres:15` container with the real NOSUPERUSER/NOBYPASSRLS role set | **75 applied**, `0076` in the ledger, `google_oauth_states` + `contracts` both `forceRLS=t` |
+| Per-component diff vs the deployed tag | only `platform-nest` changed |
+
+A disposable container was used rather than the live cluster because `platform_owner` correctly lacks
+`CREATEDB` — it cannot make itself a scratch database, which is the right posture and the reason this
+check has to bring its own Postgres.
+
+**What was NOT verified:** the DB-backed suites (the 32-case portal isolation suite, RLS, Cerbos). Those
+only run in CI. Migrations applying is not the same as behaviour being correct — treat this release's
+runtime behaviour as PROTOTYPED, not DEV-VERIFIED.
+
 ### `Alpha 01.015.0036a` — 2026-08-04 — the seed hit its own RLS wall
 
 `portal-workspace.js` ran on the live box and skipped **all five** clients with
@@ -1776,6 +1816,24 @@ Built by a 4-agent parallel run against a frozen contract (`docs/superpowers/pla
 - **Next:** complete the MOM→PRD delivery pipeline tails.
 
 ## mail
+### [0.0.1] — 2026-08-04 · DEV-VERIFIED (seam only) · MAIL-16D — `GmailClient` seam + fixture implementation
+- Design §8C/A14 (binding): dev builds ONLY the `GmailClient` interface, a fixture-backed
+  implementation, and a provider-agnostic contract-test suite — no OAuth link flow, no live Google
+  adapter, no UI, no migration. New self-contained directory
+  `platform-nest/src/integrations/gmail/` (does not touch `platform-nest/src/mail/**`, which is
+  MAIL-04's concurrent keystone build): `types.ts` (interface + decoded domain shapes), `errors.ts`
+  (`GmailUnauthorizedError`/`GmailRevokedError`/`GmailRateLimitedError` w/ `retryAfterSeconds`/
+  `GmailNotFoundError`), `fixture-client.ts` + `fixtures/*.json` (5-thread/8-message/4-label
+  committed corpus), `contract.ts` (the shared suite MAIL-16's live adapter must pass unmodified at
+  staging). Proved implementation-agnostic by running the identical suite, unmodified, against a
+  SECOND deliberately-differently-built fake client (`contract.agnosticism.test.ts` — Map-keyed
+  store, single-page pagination, independent corpus) — 25/25 tests green across both
+  implementations (`npx vitest run src/integrations/gmail`), `tsc --noEmit` clean. Zero persistence
+  of message content anywhere (M14): enforced by a static source-text scan for write/DB primitives
+  plus a runtime before/after byte-identity check on the fixture corpus
+  (`gmail.zero-persistence.test.ts`). README.md in that directory states plainly that
+  thread/label/pagination semantics are UNVERIFIED against the real Gmail API (design §15 R7).
+  Status caps at DEV-VERIFIED for the seam only — no claim about real Gmail behaviour.
 ### [0.0.0] — 2026-08-04 · PLANNED · design v3 (owner directive: finish the dev stage with zero external keys)
 - Third same-day revision (still no code). **Nothing external blocks the dev stage anymore**: the
   v2 blockers Q-O1/Q-O2/Q-O3 stop being blockers and become rows in a new **Staging Reopen

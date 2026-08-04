@@ -23,7 +23,7 @@ version and add a `CHANGELOG.md` entry on every notable module change.
 
 ## App version
 
-**`Alpha 01.015.0036a`** â€” see [`VERSIONING.md`](./VERSIONING.md) for the format, and
+**`Alpha 01.016.0037a`** â€” see [`VERSIONING.md`](./VERSIONING.md) for the format, and
 
 [`/VERSION`](../../VERSION) for the machine-readable source. The app version composes the module
 versions below; the running build reports it at `GET /health`.
@@ -54,7 +54,7 @@ versions below; the running build reports it at `GET /health`.
 | render-gateway-go | `0.0.0` | PLANNED | Creative | 2026-07-23 |
 | reports | `0.3.1` | PROTOTYPED | Cross-cutting | 2026-08-03 |
 | report-renderer | `0.1.0` | DEV-VERIFIED | Cross-cutting | 2026-07-31 |
-| mail | `0.0.0` | PLANNED | Cross-cutting | 2026-08-04 |
+| mail | `0.0.1` | IN PROGRESS | Cross-cutting | 2026-08-04 |
 
 ---
 
@@ -340,10 +340,14 @@ through C-03". **v1.2 (same day, Zone A mail v2):** domains locked — C-03's fo
 moved to the Google Workspace SMTP relay with Brevo failover. Blueprint HTML is v1.2; PDF + hosted
 artifact NOT re-rendered yet.
 
-## mail — Zone A Email (platform-nest) · `0.0.0` · PLANNED
+## mail — Zone A Email (platform-nest) · `0.0.1` · IN PROGRESS
 
-**What exists:** design only, **v3 (2026-08-04 — third same-day revision: dev stage with zero
-external keys)** —
+**What exists:** MAIL-16D landed 2026-08-04 — the `GmailClient` seam + fixture-backed
+implementation + provider-agnostic contract-test suite, DEV-VERIFIED for the seam only, in the
+self-contained `platform-nest/src/integrations/gmail/` directory (see that directory's README.md
+for the honesty note: thread/label/pagination semantics are UNVERIFIED against real Gmail). No
+other mail code has landed yet. Design **v3 (2026-08-04 — third same-day revision: dev stage with
+zero external keys)** —
 [`../superpowers/specs/2026-08-04-zone-a-mail-design.md`](../superpowers/specs/2026-08-04-zone-a-mail-design.md)
 + re-cut ticket plan [`../superpowers/plans/2026-08-04-mail-subsystem-tickets.md`](../superpowers/plans/2026-08-04-mail-subsystem-tickets.md). No code; the ERP currently sends zero email.
 **v3 (owner directive):** nothing external blocks the dev stage. Dev provider = **Mailpit** sink
