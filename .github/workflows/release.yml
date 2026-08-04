@@ -102,6 +102,39 @@ jobs:
           subject-digest: ${{ steps.build.outputs.digest }}
           push-to-registry: true
 
+      # ── GHCR RETENTION (2026-08-04) ───────────────────────────────────────────────────────────
+      # Nothing has ever pruned the REGISTRY. The VPS side is pruned on every deploy (added after a
+      # full disk rolled back a healthy release), but each release pushed 9 more images to GHCR and
+      # none were ever removed: 594 versions across 9 private packages by 2026-08-04. Private package
+      # storage is metered, the free allowance is 500 MB, and `report-renderer` alone carries Chromium
+      # — so the account hit its spending limit and EVERY Actions job stopped starting, which reads as
+      # a broken pipeline rather than a full disk in someone else's datacentre.
+      #
+      # Keeping 12 versions per package is a deliberate trade against rollback range, not a round
+      # number: deploy.yml's rollback path re-pins a PREVIOUS TAG and needs that tag's image to still
+      # exist, so this is the depth of history a rollback can reach. 12 releases at the current cadence
+      # is a few weeks. Raise it if releases speed up; do not drop below ~5 or the rollback that
+      # matters (two or three cuts back, when a regression is noticed late) silently stops working.
+      #
+      # `continue-on-error`: a retention failure must never fail a release whose image is already
+      # pushed, signed and attested. Storage creeping back up is a smaller problem than a red release.
+      - name: Prune old GHCR versions (keep the last 12)
+        uses: actions/delete-package-versions@v5
+        continue-on-error: true
+        with:
+          # `matrix.component` is a flat STRING (see the matrix above: `- wa-chat-bot`, ...), not an
+          # object — this must match how IMAGE is built (`gaiada-${{ matrix.component }}`) or it
+          # silently targets a package name that does not exist.
+          package-name: gaiada-${{ matrix.component }}
+          package-type: container
+          min-versions-to-keep: 12
+          # GITHUB_TOKEN can delete versions of a package OWNED BY this repo. These packages are
+          # user-namespace (`ghcr.io/hansel-gaiada/...`), and if they are not linked to the repository
+          # GitHub refuses and this step logs a 403 — which `continue-on-error` turns into a warning
+          # rather than a failed release. If that happens, mint a PAT with `delete:packages`, store it
+          # as the `GHCR_CLEANUP_TOKEN` secret, and it is used instead.
+          token: ${{ secrets.GHCR_CLEANUP_TOKEN || secrets.GITHUB_TOKEN }}
+
   # The single deploy point: once EVERY component is built, signed and attested, hand the
   # tag to deploy.yml. `git push --tags` is therefore the whole release-and-deploy action.
   # Deploy is still independently runnable (workflow_dispatch) for rollback.

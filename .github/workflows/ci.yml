@@ -4,9 +4,46 @@
 # Until then, run the same checks locally: sh infra/scripts/test-all.sh
 name: ci
 
+# ── COST CONTROL (2026-08-04) ─────────────────────────────────────────────────────────────────────
+# This repo is PRIVATE, so every minute here is metered against the account's free allowance, and that
+# allowance ran out — every job started failing with "spending limit needs to be increased". The owner's
+# decision is to stay on the free tier, so this workflow has to stop wasting minutes. Three changes,
+# cheapest first:
+#
+#   1. `paths-ignore` — a docs-only commit used to run all NINE jobs. Several commits on 2026-08-04
+#      (CHANGELOG, blueprints, a runbook) did exactly that: ~20 minutes of compute to typecheck code
+#      nobody had touched. Markdown and PDFs cannot break a build.
+#   2. `push` narrowed to `main` — before this, a push to a feature branch ran the suite, and opening a
+#      PR from it ran the SAME commit again. Now branch work is verified once, via its PR.
+#   3. `concurrency` with `cancel-in-progress` — pushing three times in ten minutes used to run three
+#      full suites to completion. Only the newest commit's result matters; the older two are cancelled.
+#
+# What is deliberately NOT done: per-component path filters (only run `gateway-go` when Go files
+# change). That is the biggest remaining saving, and it is also how a cross-component break gets
+# through — a change to a shared contract that only touches one folder still needs the other suites.
+# Left as a decision for whoever measures the minutes again.
 on:
   push:
+    branches: [main]
+    paths-ignore:
+      - "**/*.md"
+      - "**/*.pdf"
+      - "docs/**"
+      - "legal/**"
+      - "design/**"
   pull_request:
+    paths-ignore:
+      - "**/*.md"
+      - "**/*.pdf"
+      - "docs/**"
+      - "legal/**"
+      - "design/**"
+
+# Supersede in-flight runs of the same ref. NOT applied to deploy.yml, which sets
+# `cancel-in-progress: false` on purpose — a half-applied migration is worse than a queued deploy.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
