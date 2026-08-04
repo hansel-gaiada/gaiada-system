@@ -96,14 +96,73 @@ async function findClient(name: string): Promise<{ tenantId: string; clientId: s
   return null;
 }
 
-async function findProject(tenantId: string, clientId: string): Promise<string | null> {
+/** The client's projects, PRIMARY FIRST.
+ *
+ *  "Primary" = the one carrying a pipeline run, because that is the project `portal-clients.ts` created
+ *  and attached the gates to. Taking the oldest project instead (the first version) put the milestones
+ *  and deliverables on a DIFFERENT project from the approvals, and left the rest reading 0% with no
+ *  milestones — verified by crawling the live portal as a seeded client: Nusa Coffee showed four
+ *  projects, three of them empty, and the one detail page a reviewer would click first was blank.
+ *
+ *  The tail matters as much as the head: a client with four projects should not see three husks, so the
+ *  caller gives the others a light task set (see `seedSecondaryProject`). */
+async function findProjects(tenantId: string, clientId: string): Promise<string[]> {
   const r = await withTenants([tenantId], (c) =>
     c.query<{ id: string }>(
-      `SELECT id FROM projects WHERE client_id = $1 AND deleted_at IS NULL ORDER BY created_at ASC LIMIT 1`,
+      `SELECT p.id
+         FROM projects p
+        WHERE p.client_id = $1 AND p.deleted_at IS NULL
+        ORDER BY EXISTS (
+          SELECT 1 FROM pipeline_runs r WHERE r.project_id = p.id AND r.deleted_at IS NULL
+        ) DESC, p.created_at ASC`,
       [clientId],
     ),
   );
-  return r.rows[0]?.id ?? null;
+  return r.rows.map((x) => x.id);
+}
+
+/** A secondary project gets tasks and one milestone only — enough that it reads as real work in
+ *  progress rather than an empty shell, without inventing invoices or agreements against it. */
+async function seedSecondaryProject(tenantId: string, projectId: string, staff: string | null): Promise<void> {
+  // Guard on MILESTONES, not tasks. Keying on tasks skipped every project the agency seed had already
+  // given tasks to — which is most of them — so those projects kept a progress bar and still showed
+  // "No milestones set yet", the exact husk this function exists to prevent. Milestones are the thing
+  // being added, so they are the thing to check for.
+  const has = await withTenants([tenantId], (c) =>
+    c.query(`SELECT 1 FROM pm_milestones WHERE project_id = $1 AND deleted_at IS NULL LIMIT 1`, [projectId]),
+  );
+  if (has.rows[0]) return;
+  const ms = newId();
+  await withTenants([tenantId], (c) =>
+    c.query(
+      `INSERT INTO pm_milestones (id, tenant_id, project_id, name, due_date, status, origin_site)
+       VALUES ($1,$2,$3,'Current phase',$4::date,'open',$5)`,
+      [ms, tenantId, projectId, day(21), site()],
+    ),
+  );
+  for (const [title, status, progress] of [
+    ["Scope confirmed", "done", 100],
+    ["Production in progress", "in_progress", 45],
+    ["Review & handover", "todo", 0],
+  ] as Array<[string, string, number]>) {
+    await withTenants([tenantId], (c) =>
+      c.query(
+        `INSERT INTO pm_tasks (id, tenant_id, project_id, title, status, progress, milestone_id, origin_site)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+        [newId(), tenantId, projectId, title, status, progress, ms, site()],
+      ),
+    );
+  }
+  if (staff) {
+    await withTenants([tenantId], (c) =>
+      c.query(
+        `UPDATE projects SET owner_id = COALESCE(owner_id, $2),
+                start_date = COALESCE(start_date, $3::date), due_date = COALESCE(due_date, $4::date)
+          WHERE id = $1`,
+        [projectId, staff, day(-30), day(45)],
+      ),
+    );
+  }
 }
 
 /** A staff member of this company, for `owner_id` / `created_by` / `confirmed_by`.
@@ -595,7 +654,8 @@ export async function seedPortalWorkspace(): Promise<void> {
       continue;
     }
     const { tenantId, clientId } = found;
-    const projectId = await findProject(tenantId, clientId);
+    const projects = await findProjects(tenantId, clientId);
+    const projectId = projects[0];
     if (!projectId) {
       missing.push(`${plan.client} (no project — run the portal-clients seed first)`);
       continue;
@@ -617,6 +677,9 @@ export async function seedPortalWorkspace(): Promise<void> {
     await seedDeliverables(tenantId, projectId, clientId, plan.shape, staff);
     await seedInvoices(tenantId, clientId, plan.shape, staff, clientUser);
     await seedContracts(tenantId, clientId, projectId, plan.shape, staff, clientUser);
+    // Everything else the client owns gets a light shape, so a projects list of four does not show
+    // three husks at 0% — which is exactly what the first live crawl found.
+    for (const other of projects.slice(1)) await seedSecondaryProject(tenantId, other, staff);
 
     const counts = await withTenants([tenantId], (c) =>
       c.query<{ ms: string; tasks: string; dels: string; invs: string; ctrs: string }>(
