@@ -11,9 +11,20 @@
 //   * a client-recorded payment lands 'pending' and does NOT move invoices.status
 //   * overpayment past the tolerance is refused
 //
-// UNVERIFIED LOCALLY (2026-08-04): the dev Postgres/Cerbos pair is deliberately not running on this
-// machine (owner decision — the server is the source of truth), so this suite has been written and
-// typechecked but not executed. It runs in CI, which provisions PG + migrations + Cerbos.
+// WRITTEN BLIND, THEN CORRECTED BY CI (2026-08-04). The dev Postgres/Cerbos pair is deliberately not
+// running on this machine (owner decision — the server is the source of truth), so this suite was
+// authored and typechecked without ever executing. CI — which provisions PG + migrations + Cerbos — was
+// its first run, and it found FIVE defects in two passes, every one of them in the test rather than in
+// the code under test:
+//   1. `REF-${id.slice(0,8)}` collided — uuid v7 is time-ordered (see the fixture comment below).
+//   2. the same truncation made a cross-client leak assertion match CLEAN data.
+//   3. `progressPercent` expected 62; Postgres rounds 62.5 half-away-from-zero, so 63.
+//   4/5. asserted `.message` on error bodies, but http-error.filter.ts reshapes every HttpException to
+//      `{ error }` for parity with the old Fastify core — so `.message` read undefined and
+//      `.toMatch()` was being handed nothing.
+//   6. `app.inject()` cannot test the SSE route at all — it waits for a response that never completes.
+// Recorded because it is the honest cost of writing DB-backed tests with no database: they typecheck,
+// they read correctly, and they are wrong in ways only execution reveals.
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import type { NestFastifyApplication } from "@nestjs/platform-fastify";
 import { config } from "../config";
@@ -90,7 +101,7 @@ describe.skipIf(!TEST_URL)("client portal dashboard (CP-2..CP-5)", () => {
       await c.query(`UPDATE projects SET client_id = $2 WHERE id = $1`, [projectA2, clientA]);
       await c.query(`UPDATE projects SET client_id = $2 WHERE id = $1`, [projectB, clientB]);
 
-      // Progress substrate: 2 of 4 done, one at 50% -> weighted 62 (not the 50 a done/total count gives).
+      // Progress substrate: 2 of 4 done, one at 50% -> weighted 63 (not the 50 a done/total count gives).
       for (const [title, status, progress] of [
         ["a", "done", 0], ["b", "done", 100], ["c", "in_progress", 50], ["d", "todo", 0],
       ] as Array<[string, string, number]>) {
@@ -203,7 +214,10 @@ describe.skipIf(!TEST_URL)("client portal dashboard (CP-2..CP-5)", () => {
     const r = await app.inject({ method: "GET", url: `/api/${co}/portal/projects/${projectA1}`, headers: asUser(signerA) });
     expect(r.statusCode).toBe(200);
     const b = r.json();
-    expect(b.progressPercent).toBe(62);
+    // 4 tasks: done/0, done/100, in_progress/50, todo/0. `done` counts as 100 regardless of its stored
+    // progress, so avg = (100 + 100 + 50 + 0) / 4 = 62.5 — and Postgres `round()` on numeric rounds
+    // HALF AWAY FROM ZERO, giving 63. (Expected 62 first time round; the SQL was right.)
+    expect(b.progressPercent).toBe(63);
     expect(b.milestones).toHaveLength(1);
     expect(b.deliverables[0]).toMatchObject({ name: "Homepage design" });
     expect(b.workload).toMatchObject({ todo: 1, in_progress: 1, done: 2 });
@@ -262,7 +276,7 @@ describe.skipIf(!TEST_URL)("client portal dashboard (CP-2..CP-5)", () => {
       payload: { amount: 5000, paidOn: new Date().toISOString().slice(0, 10) },
     });
     expect(r.statusCode).toBe(400);
-    expect(r.json().message).toMatch(/outstanding balance/i);
+    expect(r.json().error).toMatch(/outstanding balance/i);
   });
 
   it("refuses a future-dated payment", async () => {
@@ -313,7 +327,7 @@ describe.skipIf(!TEST_URL)("client portal dashboard (CP-2..CP-5)", () => {
       payload: { signerName: "Vic Viewer", agree: true },
     });
     expect(r.statusCode).toBe(403);
-    expect(r.json().message).toMatch(/view-only/i);
+    expect(r.json().error).toMatch(/view-only/i);
   });
 
   it("refuses a signature without the explicit attestation", async () => {
@@ -487,14 +501,45 @@ describe.skipIf(!TEST_URL)("client portal dashboard (CP-2..CP-5)", () => {
 
   // ── stream ──────────────────────────────────────────────────────────────────────────────────────
   it("the SSE endpoint opens with a hello frame and declares its mode", async () => {
-    // `inject` resolves when the handler returns; the stream stays open, so what is asserted is the
-    // headers and the FIRST frames — which is exactly the contract the browser depends on.
-    const r = await app.inject({ method: "GET", url: `/api/${co}/portal/stream`, headers: asUser(signerA) });
-    expect(r.headers["content-type"]).toMatch(/text\/event-stream/);
-    // The header that makes SSE survive nginx. Regressing it produces a stream that appears dead.
-    expect(r.headers["x-accel-buffering"]).toBe("no");
-    expect(r.payload).toContain("event: hello");
-    expect(r.payload).toMatch(/"mode":"(live|poll)"/);
+    // ⚠ `app.inject()` CANNOT test this route, and the first CI run proved it by timing out at 20s.
+    // inject resolves when the response COMPLETES; an SSE handler deliberately never completes one —
+    // it writes frames and holds the socket open until the client leaves or the 30-minute rotation
+    // fires. So this needs a real socket: listen, read the FIRST chunk, then abort as a browser would.
+    await app.listen({ port: 0, host: "127.0.0.1" });
+    const addr = app.getHttpServer().address() as { port: number };
+    const ctrl = new AbortController();
+    try {
+      const res = await fetch(`http://127.0.0.1:${addr.port}/api/${co}/portal/stream`, {
+        headers: asUser(signerA),
+        signal: ctrl.signal,
+      });
+      expect(res.status).toBe(200);
+      expect(res.headers.get("content-type")).toMatch(/text\/event-stream/);
+      // The header that makes SSE survive nginx. Regressing it produces a stream that looks dead
+      // rather than broken, which is the hardest failure of this feature to get reported accurately.
+      expect(res.headers.get("x-accel-buffering")).toBe("no");
+
+      const reader = (res.body as ReadableStream<Uint8Array>).getReader();
+      // Guarded read: if the handler ever stopped flushing its opening frames, fail with a message that
+      // says so instead of hanging until the suite-level timeout kills the whole file.
+      const first = await Promise.race([
+        reader.read(),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("no SSE frame within 5s — the opening frames are not being flushed")), 5_000),
+        ),
+      ]);
+      const text = new TextDecoder().decode(first.value);
+      expect(text).toContain("event: hello");
+      expect(text).toMatch(/"mode":"(live|poll)"/);
+      // `retry:` sets the browser's own reconnect backoff — without it a server restart produces a
+      // thundering herd from every open portal tab.
+      expect(text).toContain("retry:");
+      await reader.cancel();
+    } finally {
+      // Abort like a closing tab, which is also what exercises the server's cleanup path (unsubscribe
+      // + clear the heartbeat and rotation timers).
+      ctrl.abort();
+    }
   });
 
   it("refuses a stream for a non-client", async () => {
