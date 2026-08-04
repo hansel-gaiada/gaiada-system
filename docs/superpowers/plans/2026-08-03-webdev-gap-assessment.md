@@ -107,10 +107,28 @@ themselves are fine — it is the *surrounding* run lifecycle that has no contro
 |---|---|---|---|
 | C1 | ✅ FIXED 2026-08-04 (server-side `clientId`/`projectId` filters; client resolved from the list's own column) | `/pipeline` fetches **every** run with no filter, search or pagination | `lib/pipeline.ts:102` — bare `GET /pipeline/runs`; page passes nothing |
 | C2 | ✅ FIXED (status/clientId/projectId filter UI present) | `/meetings` has no filter UI although the lib already supports it | `listRecordings` accepts `status`/`clientId`/`projectId` (`lib/meetings.ts:82-90`); `meetings/page.tsx:25` passes none |
-| C3 | ✅ FIXED 2026-08-04 (batched: 2 queries, + a free `pendingActions` count) | The portal did **N+1 fetches** — lists all runs then calls `getPortalRun` for each | `portal/page.tsx:29-31` (`Promise.all` over every run). Fine at 3 runs, not at 300 |
+| C3 | ✅ FIXED 2026-08-04 (batched: 2 queries + a free `pendingActions` count). **Readers now live in `lib/portal-data.ts` and feed the client portal's own `(portal)/portal/approvals` page — see the note under this table.** | The portal did **N+1 fetches** — lists all runs then calls `getPortalRun` for each | `portal/page.tsx:29-31` (`Promise.all` over every run). Fine at 3 runs, not at 300 |
 | C4 | ✅ FIXED 2026-08-04 (list SELECT now carries `client_id`/`project_id`/`owner_id`) | The pipeline **list** had no client column, so you cannot see whose work a run is without opening it | `lib/pipeline.ts:14` states the list SELECT omits `client_id` |
-| C5 | ✅ FIXED 2026-08-04 (`/portal/[runId]` + shared `PortalGateActions`; the list is now a summary) | No client-facing run **detail** route — everything was inline on one page, and `getPortalRun`/`PortalRunDetail` were dead code | only `portal/page.tsx` existed |
+| C5 | ✅ FIXED 2026-08-04, then SUPERSEDED: the run detail is now `(portal)/portal/approvals/[runId]`, still rendering the shared `PortalGateActions`. **See the note under this table.** | No client-facing run **detail** route — everything was inline on one page, and `getPortalRun`/`PortalRunDetail` were dead code | only `portal/page.tsx` existed |
 | C6 | ✅ FIXED 2026-08-04 (unblocked by W0's `project_id` + WD-30 populating it; both selects now carry it, run workspace links to the project) | No run→project / run→recording→project navigation anywhere | — |
+
+> **⚠ The client portal moved after this section was written (CP-2..CP-5, a separate session,
+> 2026-08-04).** It is no longer `(app)/portal/*` inside the staff shell — it is its own Next route
+> group **`(portal)/portal/*`** with its own `PortalShell`, covering overview · projects · timeline ·
+> deliverables · invoices · contracts · profile · approvals, plus a live SSE stream. That is the
+> owner's "clients get a separate interface" decision being executed, and an **employee portal is
+> planned next on the same pattern**.
+>
+> What that means for the rows above: C3's batched reader and C5's detail page were not thrown away —
+> `listPortalRuns`/`getPortalRun` moved to `lib/portal-data.ts`, the `pendingActions` count feeds the
+> new approvals list, and `PortalGateActions` is reused verbatim by `approvals/[runId]`. Only the
+> ROUTE changed. Seeding is likewise split in two halves that must run in order:
+> `seed:portal-clients` (identity + delivery) then `seed/portal-workspace.ts` (the six new surfaces).
+>
+> The staff-group guard also moved for the same reason: `isClientOnly(me) -> redirect("/portal")` now
+> sits in **`(app)/layout.tsx`**, not on the root page, because the root alone still let a client reach
+> `/projects` and get the staff shell. It is deliberately one-directional — `(portal)` does NOT bounce
+> staff, since a manager legitimately previews what their client sees.
 
 ---
 

@@ -14,6 +14,12 @@
 //   a pipeline_run per project WITH client_id + project_id  ->  stages with real artifacts
 //   a PENDING client gate on some runs, so "N things need you" is a real state, not a mock
 //
+// THIS IS HALF THE PORTAL SEED. It seeds IDENTITY + DELIVERY (clients, contacts, logins, projects,
+// runs, gates) — which was the whole portal when the portal was the runs page. The CP-2..CP-5 client
+// dashboard added six more surfaces, and `seed/portal-workspace.ts` seeds those (milestones,
+// deliverables, invoices, payments, agreements) on top of THESE five clients. Run this one FIRST;
+// the other resolves the clients by the same names it finds here.
+//
 // Idempotent, following seed/agency.ts: every step is create-or-skip, so re-running enriches rather
 // than duplicating. Direct DB writes plus the Keycloak Admin API — no running platform needed.
 //

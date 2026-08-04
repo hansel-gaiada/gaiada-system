@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
-import { accessibleCompanies, isManagerTier, isClientOnly } from "@/lib/rbac";
+import { accessibleCompanies, isManagerTier } from "@/lib/rbac";
 import { getMyWorkQueue } from "@/lib/queue";
 import { getActivity, weeklyThroughput } from "@/lib/data";
 import { myPlacement } from "@/lib/departments";
@@ -48,10 +48,8 @@ export default async function Dashboard({ searchParams }: { searchParams: Search
   // client landed on My Work — a staff queue/agenda that resolves to nothing for them (every read
   // 403s and degrades) and made their own projects something they had to go find in the sidebar.
   //
-  // `isClientOnly` (any staff role wins), because a staff member who is ALSO a client contact must
-  // keep the staff home — for them this page is the useful one. Using `!isElevated` here, as navFor
-  // used to, would have bounced every manager-who-is-a-contact out of the app entirely.
-  if (isClientOnly(me)) redirect("/portal");
+  // The client -> /portal redirect moved UP to `(app)/layout.tsx`: on this page alone it still let a
+  // client reach /projects or /tasks and get the staff shell. One guard, at the group boundary.
 
   const tenantId = await getActiveTenant(me);
   const { scope: rawScope, filter: rawFilter } = await searchParams;
