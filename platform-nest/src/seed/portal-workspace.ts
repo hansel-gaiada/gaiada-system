@@ -115,11 +115,16 @@ async function anyStaffUser(tenantId: string): Promise<string | null> {
   // withTenants, not withGlobal: `company_memberships` AND `client_contacts` are both FORCE RLS (see
   // findClient's note). The first version used withGlobal and would have returned null for every
   // company — leaving every project unowned, which is the one thing this function exists to prevent.
+  // The column is `tenant_id`, NOT `company_id` — the first version guessed and got a 42703
+  // errorMissingColumn on the live box. `kind <> 'service'` matters too: automation and bot principals
+  // are deliberately `users` rows with a `service` membership, and making a bot the owner of a client's
+  // project would send every client notification to something that cannot read it.
   const r = await withTenants([tenantId], (c) =>
     c.query<{ user_id: string }>(
       `SELECT cm.user_id
          FROM company_memberships cm
-        WHERE cm.company_id = $1 AND cm.deleted_at IS NULL
+        WHERE cm.tenant_id = $1 AND cm.deleted_at IS NULL AND cm.status = 'active'
+          AND COALESCE(cm.kind, 'employee') <> 'service'
           AND EXISTS (SELECT 1 FROM users u WHERE u.id = cm.user_id AND u.deleted_at IS NULL)
           AND NOT EXISTS (
             SELECT 1 FROM client_contacts cc WHERE cc.user_id = cm.user_id AND cc.deleted_at IS NULL
