@@ -276,10 +276,122 @@ export function pipelineDemo(method: string, p: string, params: URLSearchParams,
   const listM = p.match(/^\/api\/[^/]+\/pipeline\/runs$/);
   if (listM && m === "GET") {
     const status = params.get("status");
+    const clientId = params.get("clientId");
+    const projectId = params.get("projectId");
     let rows = RUNS;
     if (status) rows = rows.filter((r) => r.status === status);
-    // The real list SELECT doesn't return client_id (only the detail read does) — match that shape.
-    return ok(rows.map(({ client_id, ...rest }) => { void client_id; return rest; }));
+    // C1: the real controller filters these SERVER-side, so the fixture must too — filtering only by
+    // status here would make the demo look like the client filter does nothing.
+    if (clientId) rows = rows.filter((r) => r.client_id === clientId);
+    if (projectId) rows = rows.filter((r) => (r as { project_id?: string | null }).project_id === projectId);
+    // C4: the list SELECT now DOES return client_id/project_id (it used to omit them, which is why
+    // the page had to cross-reference the recordings registry). Returned in full to match.
+    return ok(rows);
+  }
+
+  // B2 — start a run with no source meeting.
+  const createRunM = p.match(/^\/api\/[^/]+\/pipeline\/runs$/);
+  if (createRunM && m === "POST") {
+    const b = JSON.parse(body || "{}") as {
+      title?: string; clientId?: string; projectId?: string;
+      stages?: { track: string; name: string; status?: string }[];
+    };
+    if (!b.title) return { status: 400, json: { error: "title required" } };
+    const id = nid("run-demo");
+    RUNS.push({
+      id, title: b.title, status: "extracting",
+      // Null on purpose: a hand-started run has no meeting, which is exactly what distinguishes it.
+      source_meeting_id: null,
+      client_id: b.clientId ?? null,
+      mom_ref: null, created_by: "demo-hansel", created_at: now(), updated_at: now(),
+    } as DemoRun);
+    for (const st of b.stages ?? []) {
+      STAGES.push({
+        id: nid("stg"), run_id: id, track: st.track as DemoStage["track"], name: st.name,
+        status: (st.status ?? "pending") as DemoStage["status"],
+        artifact_ref: null, confidence: null, updated_at: now(),
+      });
+    }
+    return { status: 201, json: { id, deduped: false } };
+  }
+
+  return null;
+}
+
+/** The run started from this meeting id, if any. Exported for demoMeetings' B6 relink sweep, which
+ *  needs the same meeting_id -> run mapping the real endpoint joins on. demoPipeline owns RUNS, so the
+ *  lookup lives here and the dependency runs one way (demoMeetings -> demoPipeline). */
+export function pipelineRunIdForMeeting(meetingId: string): string | null {
+  return RUNS.find((r) => r.source_meeting_id === meetingId)?.id ?? null;
+}
+
+// ---- Client portal (C5) ----
+// The portal had NO demo fixture at all, so `/portal` and `/portal/[runId]` could not be reviewed
+// backend-free even though `DEMO_MODE=1 next build` and the Playwright smoke project both run that way.
+//
+// Served from the SAME RUNS/STAGES/GATES the staff surface uses, deliberately: two parallel fixture
+// sets would let the demo show a client a different reality from the run workspace, which is exactly
+// the class of drift the real code avoids by having one PortalController over one table.
+const DEMO_PORTAL_CLIENT_ID = "cl-1"; // Northwind Traders — matches ME_CLIENT's company in demoFixtures
+
+/** Plain-language blockage, mirroring PortalController.currentBlockage's precedence exactly. */
+function demoBlockage(run: DemoRun, stages: DemoStage[], clientGates: DemoGate[]): string {
+  const pending = clientGates.find((g) => g.status === "pending");
+  if (pending) {
+    if (pending.kind === "prd_sign") return "Waiting for your signature on the PRD to proceed";
+    if (pending.kind === "scope_signoff") return "Waiting for your signature on the Scope Agreement";
+    if (pending.kind === "customer_feedback") return "Waiting for your feedback";
+    return "Waiting for your input";
+  }
+  if (run.status === "blocked") return "On hold — our team will follow up with you";
+  if (run.status === "complete") return "Delivered — nothing outstanding";
+  if (stages.some((s) => s.status === "running" || s.status === "awaiting_gate")) return "In progress — our team is working on it";
+  return "Up to date — nothing needed from you right now";
+}
+
+/** Returns a DemoResult for any /portal route, or null. Only the demo CLIENT identity may see data —
+ *  a staff user gets 403, which is what makes the page's "you are signed in as staff" state reachable. */
+export function portalDemo(method: string, p: string, userId: string): DemoResult | null {
+  const m = method.toUpperCase();
+  const isPortalRoute = /^\/api\/[^/]+\/portal\//.test(p);
+  if (!isPortalRoute) return null;
+  // Mirrors the real BFF's refusal for anyone who is not a portal contact. Without this the demo
+  // would show staff a client's dashboard and the staff teach-state would be dead code.
+  if (userId !== "demo-client") return { status: 403, json: { error: "not a portal client" } };
+
+  const mine = RUNS.filter((r) => r.client_id === DEMO_PORTAL_CLIENT_ID);
+  const clientGates = (runId: string) =>
+    GATES.filter((g) => g.run_id === runId && g.actor_side === "client");
+
+  const listM = p.match(/^\/api\/[^/]+\/portal\/runs$/);
+  if (listM && m === "GET") {
+    return ok(mine.map((r) => {
+      const gates = clientGates(r.id);
+      return {
+        id: r.id, title: r.title, status: r.status,
+        currentBlockage: demoBlockage(r, STAGES.filter((s) => s.run_id === r.id && s.track !== "report"), gates),
+        pendingActions: gates.filter((g) => g.status === "pending").length,
+      };
+    }));
+  }
+
+  const detailM = p.match(/^\/api\/[^/]+\/portal\/runs\/([^/]+)$/);
+  if (detailM && m === "GET") {
+    const run = mine.find((r) => r.id === detailM[1]);
+    // 404 for a run belonging to another client, same as the real controller — deliberately
+    // indistinguishable from a nonexistent id so a client cannot probe for other clients' run ids.
+    if (!run) return { status: 404, json: { error: "run not found" } };
+    // The report track is filtered out HERE, not at render time: it is the BFF's job in the real
+    // code, and a fixture that leaked it would make the "internal track stays internal" check vacuous.
+    const stages = STAGES.filter((s) => s.run_id === run.id && s.track !== "report");
+    const gates = clientGates(run.id);
+    return ok({
+      id: run.id, title: run.title, status: run.status,
+      currentBlockage: demoBlockage(run, stages, gates),
+      stages: stages.map((s) => ({ track: s.track, name: s.name, status: s.status, artifact_ref: s.artifact_ref })),
+      gates: gates.map((g) => ({ id: g.id, kind: g.kind, status: g.status, decision: g.decision, created_at: g.created_at })),
+      scopeSignoffs: SCOPE_SIGNOFFS[run.id] ?? [],
+    });
   }
 
   return null;

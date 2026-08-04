@@ -90,11 +90,11 @@ pipeline write surface is **two** calls: gate decide, and stage-artifact PATCH.
 | # | Sev | Endpoint that exists | What a human cannot do today |
 |---|---|---|---|
 | B1 | ✅ FIXED (W1: `recordScopeSignoffAction`) | `POST /api/:t/pipeline/runs/:runId/scope-signoffs` | **The agency cannot record its half of the scope dual-sign from the app.** I had to curl it during the server walk. Together with A3 this means *no* scope agreement can ever complete in the product. |
-| B2 | 🟠 STILL OPEN | `POST /api/:t/pipeline/runs` | Start a delivery run for an existing client/project **without** a meeting recording. Every run must currently originate from a recording. |
+| B2 | ✅ FIXED 2026-08-04 (`createRunAction` + Recovery tools panel) | `POST /api/:t/pipeline/runs` | Start a delivery run for an existing client/project **without** a meeting recording. Every run must currently originate from a recording. |
 | B3 | ✅ FIXED (W1: `updateRunStatusAction`) | `PATCH /api/:t/pipeline/runs/:runId` (WD-05 `updateRun`) | Park / unblock / re-status a run. A stuck run stays stuck. |
 | B4 | ✅ FIXED (W1: `createStageAction`) | `POST /api/:t/pipeline/runs/:runId/stages` | Add a beat by hand when automation didn't create it. |
 | B5 | ✅ FIXED (W1: `openGateAction`) | `POST /api/:t/pipeline/gates` | Open a review gate manually — the only recovery when a workflow missed one. |
-| B6 | 🟡 STILL OPEN (API-only) | `POST /api/:t/meetings/recordings/relink-orphans` | Repair recordings orphaned from their run. API-only; needed on the server today. |
+| B6 | ✅ FIXED 2026-08-04 (`relinkOrphanRecordingsAction`, idempotent, reports "nothing to repair") | `POST /api/:t/meetings/recordings/relink-orphans` | Repair recordings orphaned from their run. API-only; needed on the server today. |
 
 `decideGateAction` covers all six `GateKind`s generically (`lib/pipeline.ts:21`), so gate decisions
 themselves are fine — it is the *surrounding* run lifecycle that has no controls.
@@ -105,8 +105,8 @@ themselves are fine — it is the *surrounding* run lifecycle that has no contro
 
 | # | Sev | Gap | Evidence |
 |---|---|---|---|
-| C1 | 🟠 | `/pipeline` fetches **every** run with no filter, search or pagination | `lib/pipeline.ts:102` — bare `GET /pipeline/runs`; page passes nothing |
-| C2 | 🟠 | `/meetings` has no filter UI although the lib already supports it | `listRecordings` accepts `status`/`clientId`/`projectId` (`lib/meetings.ts:82-90`); `meetings/page.tsx:25` passes none |
+| C1 | ✅ FIXED 2026-08-04 (server-side `clientId`/`projectId` filters; client resolved from the list's own column) | `/pipeline` fetches **every** run with no filter, search or pagination | `lib/pipeline.ts:102` — bare `GET /pipeline/runs`; page passes nothing |
+| C2 | ✅ FIXED (status/clientId/projectId filter UI present) | `/meetings` has no filter UI although the lib already supports it | `listRecordings` accepts `status`/`clientId`/`projectId` (`lib/meetings.ts:82-90`); `meetings/page.tsx:25` passes none |
 | C3 | ✅ FIXED 2026-08-04 (batched: 2 queries, + a free `pendingActions` count) | The portal did **N+1 fetches** — lists all runs then calls `getPortalRun` for each | `portal/page.tsx:29-31` (`Promise.all` over every run). Fine at 3 runs, not at 300 |
 | C4 | ✅ FIXED 2026-08-04 (list SELECT now carries `client_id`/`project_id`/`owner_id`) | The pipeline **list** had no client column, so you cannot see whose work a run is without opening it | `lib/pipeline.ts:14` states the list SELECT omits `client_id` |
 | C5 | ✅ FIXED 2026-08-04 (`/portal/[runId]` + shared `PortalGateActions`; the list is now a summary) | No client-facing run **detail** route — everything was inline on one page, and `getPortalRun`/`PortalRunDetail` were dead code | only `portal/page.tsx` existed |

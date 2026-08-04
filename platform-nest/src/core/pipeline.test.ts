@@ -487,6 +487,68 @@ describe.skipIf(!TEST_URL)("meeting-to-delivery pipeline surface (WS11 §4B)", (
     });
   });
 
+  // C1 — the list filters. Added because /pipeline previously fetched the 200-row cap and narrowed in
+  // the browser, which stops being a filter the moment a tenant has more than 200 runs.
+  describe("C1 list filters", () => {
+    it("narrows by clientId, and excludes other clients' runs", () => {
+      // The assertion that matters is the EXCLUSION: a filter that returns everything looks identical
+      // to one that works when the fixture has few rows.
+      return (async () => {
+        const mine = await createClient(co, "Filter Target Co");
+        const theirs = await createClient(co, "Filter Other Co");
+        for (const [cl, title] of [[mine, "mine-1"], [mine, "mine-2"], [theirs, "theirs-1"]] as [string, string][]) {
+          await app.inject({ method: "POST", url: `/api/${co}/pipeline/runs`, headers: asUser(admin), payload: { title, clientId: cl } });
+        }
+        const r = await app.inject({ method: "GET", url: `/api/${co}/pipeline/runs?clientId=${mine}`, headers: asUser(admin) });
+        expect(r.statusCode).toBe(200);
+        const titles = r.json().map((x: { title: string }) => x.title);
+        expect(titles).toContain("mine-1");
+        expect(titles).toContain("mine-2");
+        expect(titles).not.toContain("theirs-1");
+      })();
+    });
+
+    it("a malformed clientId matches nothing instead of 500ing on a uuid cast", () => {
+      // Compared as text on purpose: a hand-edited query string is a normal thing to receive, and an
+      // invalid-uuid cast would fail the whole request rather than return an empty list.
+      return (async () => {
+        const r = await app.inject({ method: "GET", url: `/api/${co}/pipeline/runs?clientId=not-a-uuid`, headers: asUser(admin) });
+        expect(r.statusCode).toBe(200);
+        expect(r.json()).toEqual([]);
+      })();
+    });
+
+    it("narrows by projectId", () => {
+      return (async () => {
+        const cl = await createClient(co, "Proj Filter Co");
+        const proj = await withTenants([co], (c) =>
+          c.query<{ id: string }>(
+            `INSERT INTO projects (id, tenant_id, name, status, origin_site) VALUES ($1,$2,$3,'active',$4) RETURNING id`,
+            [newId(), co, "Filterable Project", config.originSite],
+          ),
+        ).then((x) => x.rows[0].id);
+        await app.inject({ method: "POST", url: `/api/${co}/pipeline/runs`, headers: asUser(admin),
+          payload: { title: "in-project", clientId: cl, projectId: proj } });
+        await app.inject({ method: "POST", url: `/api/${co}/pipeline/runs`, headers: asUser(admin),
+          payload: { title: "no-project", clientId: cl } });
+        const r = await app.inject({ method: "GET", url: `/api/${co}/pipeline/runs?projectId=${proj}`, headers: asUser(admin) });
+        const titles = r.json().map((x: { title: string }) => x.title);
+        expect(titles).toEqual(["in-project"]);
+      })();
+    });
+
+    it("the LIST now returns client_id and project_id (C4/C6)", () => {
+      // Their absence is why the UI cross-referenced the recordings registry for a client column and
+      // why run->project navigation did not exist. Pinned so a future SELECT tidy-up cannot drop them.
+      return (async () => {
+        const r = await app.inject({ method: "GET", url: `/api/${co}/pipeline/runs`, headers: asUser(admin) });
+        expect(r.statusCode).toBe(200);
+        expect(r.json()[0]).toHaveProperty("client_id");
+        expect(r.json()[0]).toHaveProperty("project_id");
+      })();
+    });
+  });
+
   // WD-30. The gap these cover was found on the LIVE server, not here: every pipeline_run on
   // gda-aicenter had client_id NULL (5 of 5), because createRun has always accepted clientId while
   // the n8n extraction flow never sent one. `/portal/runs` filters by the caller's client ids, so a

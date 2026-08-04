@@ -40,8 +40,12 @@ Playwright projects: `setup` (auth state) → `chromium` (authed flows) · `anon
 sign-out, no stored session) · `smoke` (self-contained, does its own login).
 
 Dev login accepts **any email** in demo mode; the email picks the identity tier
-(`src/app/login/actions.ts`): contains `ic` or `gede@gaiada.com` → IC, contains `seo-staff` →
-`search_staff` (drives gated/disabled rendering), anything else → manager.
+(`src/app/login/actions.ts`): contains `seo-staff` → `search_staff` (drives gated/disabled
+rendering), contains `client` or ends `@northwind.example` → **external client** (portal-only nav,
+redirected to `/portal`), contains `ic` or `gede@gaiada.com` → IC, anything else → manager. The
+client test runs BEFORE the `ic` one because a real client address can contain "ic" (`erica@…`) and
+the client tier is the more specific claim — ordering is the mechanism, and `lib/demoIdentity.test.ts` pins it (the resolver is pure and lives
+there because `actions.ts` is `"use server"` and may export only async functions).
 
 ## Architecture
 
@@ -92,7 +96,9 @@ server-only readers with a `*Actions.ts` sibling. Every actions file follows one
 
 ### Authorization is mirrored, not owned
 `lib/rbac.ts` is the UI capability model (`Role` → `Capability[]`, `can(me, cap, companyId?)`,
-`isElevated`, `isClient`); `components/shell/nav.ts` gates nav off it. **Cerbos + RLS on the
+`isElevated`, `isClient`/`isStaff`/**`isClientOnly`**); `components/shell/nav.ts` gates nav off it. Use
+`isClientOnly` for "external client" — `isClient && !isElevated` wrongly matches a manager who is
+also a client contact, which stripped their whole staff surface. **Cerbos + RLS on the
 backend remain the authority.** Capability families: `admin/company/org/people/pm/it/approvals/
 knowledge`, `hr.*`, `search.*`, and the reporting program's `reports.*`, `checkin.*`,
 `appraisal.*`. Read the inline comments — several capabilities are "the server narrows this"
@@ -138,7 +144,9 @@ available tabular equivalent.
 `DEMO_MODE=1` makes `platformFetch` dispatch to `lib/demoFixtures.ts` before any network call.
 It delegates to stateful sub-stores in order: `demoPm` → `demoMeetings` → `demoPipeline` →
 `demoReports` → `demoCheckins` → `demoAppraisals`, then its own inline routes. Several demo
-identities exist on purpose (`demo-hansel` elevated, `gede-ic` member, `seo-staff`) so
+identities exist on purpose (`demo-hansel` elevated, `gede-ic` member, `seo-staff`, and
+`demo-client` — an external client holding ONLY the `client` role, so the portal-only nav and the
+`/portal` landing redirect are drivable; giving it any second role would silently make it staff) so
 negative-permission rendering is drivable in a browser. Add a fixture whenever you add a
 consumed endpoint — e2e and the build gate both run in demo mode.
 

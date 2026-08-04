@@ -2,6 +2,7 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { sealSession, SESSION_COOKIE } from "@/lib/session";
+import { demoIdentityFor } from "@/lib/demoIdentity";
 
 // Only allow same-app relative return paths — never an absolute/protocol URL.
 function safeReturn(raw: string): string {
@@ -22,10 +23,10 @@ export async function login(_prev: { error: string } | null, formData: FormData)
   // Inert unless DEMO_MODE=1 is set locally. Checked BEFORE the "ic" substring test since neither
   // "seo-staff" nor "seo-staff@gaiada.com" contains "ic", but order still matters for clarity.
   if (process.env.DEMO_MODE === "1") {
-    const lower = email.toLowerCase();
-    const isSearchStaff = lower === "seo-staff@gaiada.com" || lower.includes("seo-staff");
-    const isIC = email === "gede@gaiada.com" || lower.includes("ic");
-    const userId = isSearchStaff ? "seo-staff" : isIC ? "gede-ic" : "demo-hansel";
+    // Tier resolution lives in `lib/demoIdentity.ts` because this module is `"use server"` and may
+    // export only async functions — a pure helper cannot live here, and the ordering it encodes is
+    // load-bearing enough to need tests (see demoIdentity.test.ts).
+    const userId = demoIdentityFor(email);
     const jar = await cookies();
     jar.set(SESSION_COOKIE, sealSession(userId), {
       httpOnly: true,

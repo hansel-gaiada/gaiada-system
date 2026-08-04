@@ -7,7 +7,7 @@ import "server-only";
 
 import { pmDemo, allTrackerNotifications, pmTasksForUser } from "./demoPm";
 import { meetingsDemo } from "./demoMeetings";
-import { pipelineDemo } from "./demoPipeline";
+import { pipelineDemo, portalDemo } from "./demoPipeline";
 import { reportsDemo } from "./demoReports";
 import { checkinsDemo } from "./demoCheckins";
 import { appraisalsDemo } from "./demoAppraisals";
@@ -29,6 +29,10 @@ const DEMO_USER_IC_ID = "gede-ic";  // IC (Individual Contributor) tier — memb
 // (search_staff HAS search.manage) — that half is still only provable with the existing `member`
 // identity, once it can reach dept-3 at all (see the login-mapping + org-structure note below).
 const DEMO_USER_SEARCH_STAFF_ID = "seo-staff";
+// External-client tier. `client` is the ONLY role: `isClientOnly` keys off "holds no staff role", so
+// adding any second role here would silently turn this identity back into staff and stop exercising
+// the portal-only nav + landing redirect this identity exists to cover.
+const DEMO_USER_CLIENT_ID = "demo-client";
 
 let demoSeq = 1000;
 const demoId = (p: string) => `${p}-${++demoSeq}`;
@@ -68,6 +72,20 @@ const ME = {
 
 // IC-tier identity: Frontend Developer with member-only role (no manager-tier roles).
 // `isManagerTier` returns false, so the Queue+Agenda Home variant renders instead of Command Center.
+const ME_CLIENT = {
+  userId: "demo-client",
+  // Northwind Traders is the demo client that OWNS run-demo-1 (demoPipeline's `client_id: "cl-1"`).
+  // Naming this identity after a different client would make the portal show "your projects" for a
+  // company this person has nothing to do with.
+  name: "Dana Whitfield",
+  email: "dana@northwind.example",
+  title: "Marketing Lead, Northwind Traders",
+  assurance: "high",
+  // One company: a client belongs to the company that SERVES them and must never see a switcher.
+  companies: [{ id: "co-agency", name: "Gaia Digital Agency", type: "agency" }],
+  roles: [{ role: "client", scopeType: "company", scopeId: "co-agency" }],
+};
+
 const ME_IC = {
   userId: DEMO_USER_IC_ID,
   name: "Gede Kusuma",
@@ -1582,6 +1600,7 @@ function ok(json: unknown): DemoResult {
 function getCurrentDemoIdentity(userId: string) {
   if (userId === DEMO_USER_SEARCH_STAFF_ID) return ME_SEARCH_STAFF;
   if (userId === DEMO_USER_IC_ID) return ME_IC;
+  if (userId === DEMO_USER_CLIENT_ID) return ME_CLIENT;
   return ME;
 }
 
@@ -1601,6 +1620,10 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
   // Delivery pipeline runs/stages/gates (WD-02 run workspace) — stateful store (lib/demoPipeline.ts).
   const pipeline = pipelineDemo(method, p, url.searchParams, body);
   if (pipeline) return pipeline;
+
+  // Client portal (C5) — identity-aware, so a staff user still gets the 403 the real BFF returns.
+  const portal = portalDemo(method, p, userId);
+  if (portal) return portal;
 
   // Tracker/reporting grain documents (TR-17) — stateless per-request fixtures (lib/demoReports.ts).
   const reports = reportsDemo(method, p, url.searchParams, body, userId);

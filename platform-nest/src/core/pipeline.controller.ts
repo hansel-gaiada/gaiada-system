@@ -279,12 +279,21 @@ export class PipelineController {
     // pipeline_runs_meeting_idx from migration 0017 — so this is an indexed lookup, not a scan).
     // No schema change, no new authz surface: still gated by the existing "read" action below.
     @Query("sourceMeetingId") sourceMeetingId?: string,
+    // C1: the same additive shape `listRecordings` has had since it was written, so /pipeline can
+    // narrow to one client or project server-side instead of fetching 200 rows and hiding most of
+    // them in the browser. Both are indexed by the tenant-scoped queries that already use them.
+    @Query("clientId") clientId?: string,
+    @Query("projectId") projectId?: string,
   ) {
     await authorize(req.principal, { kind: "pipeline_run", tenantId }, "read");
     const conditions = ["deleted_at IS NULL"];
     const params: string[] = [];
     if (status) { params.push(status); conditions.push(`status = $${params.length}`); }
     if (sourceMeetingId) { params.push(sourceMeetingId); conditions.push(`source_meeting_id = $${params.length}`); }
+    // Compared as text, not cast to uuid: a malformed id from a hand-edited query string then matches
+    // nothing instead of erroring the whole request with a 500 on an invalid-uuid cast.
+    if (clientId) { params.push(clientId); conditions.push(`client_id::text = $${params.length}`); }
+    if (projectId) { params.push(projectId); conditions.push(`project_id::text = $${params.length}`); }
     const rows = await withTenants([tenantId], (c) =>
       c.query(
         // C4/C6: client_id + project_id are selected here so the list can show WHOSE work a run is and

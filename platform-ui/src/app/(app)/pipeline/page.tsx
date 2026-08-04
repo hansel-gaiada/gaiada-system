@@ -5,16 +5,17 @@ import { getActiveTenant } from "@/lib/tenant";
 import { can } from "@/lib/rbac";
 import { listPipelineRuns, listInternalPendingGates, GATE_LABEL, RUN_STATUSES } from "@/lib/pipeline";
 import { listRecordings } from "@/lib/meetings";
-import { listClients } from "@/lib/entities";
+import { listClients, listProjects } from "@/lib/entities";
 import { decideGateAction } from "@/lib/pipelineActions";
 import { Card, Eyebrow, StatusBadge } from "@/components/ui";
 import { DataTable, type Column } from "@/components/data/DataTable";
 import { EmptyNote } from "@/components/systems/EmptyNote";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { StartRunPanel } from "@/components/pipeline/StartRunPanel";
 import { formatDateTime } from "@/lib/format";
 
 // Next 15: searchParams is async.
-type SP = Promise<{ status?: string }>;
+type SP = Promise<{ status?: string; clientId?: string }>;
 
 const COLUMNS: Column[] = [
   { key: "title", header: "Run", sortable: true },
@@ -35,23 +36,20 @@ export default async function PipelinePage({ searchParams }: { searchParams: SP 
   if (!tenant) {
     return <EmptyNote>Select a company to see its delivery pipeline.</EmptyNote>;
   }
-  const { status } = await searchParams;
+  const { status, clientId: clientFilter } = await searchParams;
 
-  // C1: a real filter, not a client-only re-slice — passed straight through to the backend's own
-  // `status` query param (pipeline.controller.ts's listRuns). Search + pagination over the result
-  // are DataTable's (client-side; the backend already caps the list at 200 rows).
-  const [runs, gates, recordings, clients] = await Promise.all([
-    listPipelineRuns(userId, tenant, { status: status || undefined }),
+  // C1: real filters, passed straight through to the backend's own query params
+  // (pipeline.controller.ts's listRuns takes status + clientId). Narrowing SERVER-side matters here:
+  // the alternative is fetching the 200-row cap and hiding most of it in the browser, which stops
+  // being a filter the moment there are more than 200 runs. Search + sort over the returned page are
+  // DataTable's, which is the right place for them.
+  const [runs, gates, recordings, clients, projects] = await Promise.all([
+    listPipelineRuns(userId, tenant, { status: status || undefined, clientId: clientFilter || undefined }),
     listInternalPendingGates(userId, tenant),
-    // C4: the run list SELECT genuinely omits client_id (lib/pipeline.ts's own doc comment) — there
-    // is no id to resolve a name FROM on that response. What CAN be resolved without a backend
-    // change or an N+1: a run's `source_meeting_id` matches a recording's `meeting_id`, and the
-    // recordings registry DOES carry `client_id` (meeting_recordings has always had it). So the
-    // client column is populated for every run that traces back to a captured meeting, honestly
-    // blank ("—") for the rest (created directly, or a dispatcher run where client context never
-    // attached — the known gap tracked in the run workspace's own "Links" card).
+    // Still fetched, but only for the MEETING title column now — not to reconstruct the client.
     listRecordings(userId, tenant),
     listClients(userId, tenant),
+    listProjects(userId, tenant),
   ]);
   const mayDecide = can(me, "approvals.decide", tenant);
 
@@ -60,7 +58,11 @@ export default async function PipelinePage({ searchParams }: { searchParams: SP 
   const recordingTitleByMeetingId = new Map(recordings.map((r) => [r.meeting_id, r.title]));
 
   const rows = runs.map((r) => {
-    const clientId = r.source_meeting_id ? clientIdByMeetingId.get(r.source_meeting_id) : undefined;
+    // C4 closed the reason this used to be a cross-reference: the list SELECT now returns client_id
+    // directly, so a run created WITHOUT a meeting (or whose meeting is gone) still shows its client.
+    // The meeting-derived lookup is kept only as a fallback for a server on an older tag, where the
+    // field is simply absent from the response.
+    const clientId = r.client_id ?? (r.source_meeting_id ? clientIdByMeetingId.get(r.source_meeting_id) : undefined);
     return {
       id: r.id,
       title: r.title ?? "(untitled)",
@@ -118,6 +120,17 @@ export default async function PipelinePage({ searchParams }: { searchParams: SP 
         )}
       </Card>
 
+      {mayDecide && (
+        <div style={{ marginTop: 28 }}>
+          <Card title="Start a run · repair links">
+            <StartRunPanel
+              clients={clients.map((c) => ({ id: c.id, name: c.name }))}
+              projects={projects.map((p) => ({ id: p.id, name: p.name }))}
+            />
+          </Card>
+        </div>
+      )}
+
       <div style={{ marginTop: 28 }}>
         <Card style={{ marginBottom: 20 }}>
           <form className="lux-filters" method="get" aria-label="Run filters">
@@ -127,6 +140,17 @@ export default async function PipelinePage({ searchParams }: { searchParams: SP 
                 <option value="">All</option>
                 {RUN_STATUSES.map((s) => (
                   <option key={s} value={s}>{s.replace(/_/g, " ")}</option>
+                ))}
+              </select>
+            </label>
+            {/* C1: filtering by client is the question a PM actually asks of this list ("what is
+                running for Nusa Coffee?"), and it is answered by the backend, not by hiding rows. */}
+            <label className="lux-filters__field">
+              <span>Client</span>
+              <select name="clientId" defaultValue={clientFilter ?? ""}>
+                <option value="">All clients</option>
+                {clients.map((c) => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
                 ))}
               </select>
             </label>
@@ -153,9 +177,10 @@ export default async function PipelinePage({ searchParams }: { searchParams: SP 
               />
               {hasUnresolvedClient && (
                 <p style={{ margin: "14px 0 0", font: "400 12px/1.5 var(--font-body)", color: "var(--erp-ink-50)" }}>
-                  Client is blank for a run with no traceable source meeting, or where the dispatcher
-                  didn&apos;t attach client context on ingest — the run list itself doesn&apos;t carry a client id
-                  to resolve (see the run workspace&apos;s own note on this gap).
+                  Client is blank only for a run genuinely not attached to one — created directly, or
+                  started from a meeting that had no client. The list now carries the client itself, so
+                  this is no longer a display limitation: it means the run really has no client, and it
+                  will not appear in any client portal until one is set.
                 </p>
               )}
             </>

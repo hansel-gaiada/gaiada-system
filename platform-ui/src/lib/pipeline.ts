@@ -126,11 +126,19 @@ async function safe<T>(p: Promise<T>, fallback: T): Promise<T> {
   }
 }
 
-// C1: the controller also accepts `status` (and `sourceMeetingId`, not surfaced here — that's the
-// hub's own lookup path). Passing no opts keeps every existing call site's behavior identical.
-export async function listPipelineRuns(userId: string, tenant: string, opts: { status?: string } = {}): Promise<PipelineRun[]> {
+// C1: the controller accepts `status`, `clientId` and `projectId` (plus `sourceMeetingId`, not
+// surfaced here — that's the hub's own lookup path). Narrowing happens SERVER-side; the alternative
+// was fetching the 200-row cap and hiding most of it in the browser, which is not a filter.
+// Passing no opts keeps every existing call site's behavior identical.
+export async function listPipelineRuns(
+  userId: string,
+  tenant: string,
+  opts: { status?: string; clientId?: string; projectId?: string } = {},
+): Promise<PipelineRun[]> {
   const q = new URLSearchParams();
   if (opts.status) q.set("status", opts.status);
+  if (opts.clientId) q.set("clientId", opts.clientId);
+  if (opts.projectId) q.set("projectId", opts.projectId);
   const qs = q.toString();
   return safe(platformFetch<PipelineRun[]>(`/api/${tenant}/pipeline/runs${qs ? `?${qs}` : ""}`, userId), []);
 }

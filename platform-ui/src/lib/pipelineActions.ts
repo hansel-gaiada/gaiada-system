@@ -174,3 +174,72 @@ export async function openGateAction(formData: FormData): Promise<PipelineResult
     throw e;
   }
 }
+
+// B2 — start a delivery run for an existing client/project WITHOUT a meeting recording.
+//
+// Until now every run had to originate from a captured meeting, because that is the only path the
+// dispatcher creates. Real work does not always start with a recorded call: an email brief, a
+// walk-in, a continuation of last quarter's project. Without this the only way to track such work
+// was to fabricate a meeting, which corrupts the capture registry to satisfy a UI limitation.
+//
+// `sourceMeetingId` is deliberately NOT sent: leaving it null is what marks the run as
+// human-originated, and it is also the dispatcher's dedupe key — inventing one would risk colliding
+// with a real ingest later. clientId is REQUIRED here even though the API allows null, because a run
+// with no client cannot appear in any client portal, and creating one from this form would silently
+// produce work the client can never see.
+export async function createRunAction(formData: FormData): Promise<PipelineResult & { id?: string }> {
+  const c = await ctx();
+  if ("error" in c) return { ok: false, error: c.error };
+  if (!can(c.me, "approvals.decide", c.tenant)) return { ok: false, error: "You don't have permission to start a run." };
+  const title = String(formData.get("title") ?? "").trim();
+  const clientId = String(formData.get("clientId") ?? "").trim();
+  const projectId = String(formData.get("projectId") ?? "").trim();
+  if (!title) return { ok: false, error: "Give the run a title." };
+  if (!clientId) return { ok: false, error: "Pick a client — a run with no client never reaches the portal." };
+  try {
+    const r = await platformFetch<{ id: string }>(`/api/${c.tenant}/pipeline/runs`, c.userId, {
+      method: "POST",
+      body: JSON.stringify({
+        title,
+        clientId,
+        projectId: projectId || undefined,
+        // The three extraction beats the dispatcher would have created, so the run opens in a state
+        // the rest of the workspace understands rather than an empty shell with no tracks.
+        stages: [
+          { track: "delivery", name: "prd_extract", status: "pending" },
+          { track: "report", name: "report_extract", status: "pending" },
+          { track: "scope", name: "scope_extract", status: "pending" },
+        ],
+      }),
+    });
+    revalidatePath("/pipeline");
+    return { ok: true, id: r.id };
+  } catch (e) {
+    if (e instanceof PlatformError) return { ok: false, error: e.message };
+    throw e;
+  }
+}
+
+// B6 — repair recordings orphaned from their run.
+//
+// The endpoint has existed since the WD-26 sweep and was API-only, so recovering from it meant a
+// curl against production. It is idempotent (only recordings still missing `pipeline_run_id` are
+// selected), which is what makes it safe to expose as a button rather than a runbook step.
+export async function relinkOrphanRecordingsAction(): Promise<PipelineResult & { relinked?: number }> {
+  const c = await ctx();
+  if ("error" in c) return { ok: false, error: c.error };
+  if (!can(c.me, "approvals.decide", c.tenant)) return { ok: false, error: "You don't have permission to run the repair." };
+  try {
+    const r = await platformFetch<{ relinked: number }>(
+      `/api/${c.tenant}/meetings/recordings/relink-orphans`,
+      c.userId,
+      { method: "POST" },
+    );
+    revalidatePath("/meetings");
+    revalidatePath("/pipeline");
+    return { ok: true, relinked: r.relinked };
+  } catch (e) {
+    if (e instanceof PlatformError) return { ok: false, error: e.message };
+    throw e;
+  }
+}

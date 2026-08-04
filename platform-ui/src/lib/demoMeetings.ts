@@ -1,4 +1,5 @@
 import "server-only";
+import { pipelineRunIdForMeeting } from "./demoPipeline";
 // TEMP DEMO MODE — stateful in-memory store for the meeting-recordings registry (WS11 capture edge),
 // mirroring demoPm.ts. Module-level state persists per dev-server process, resets on restart. Active
 // only via DEMO_MODE=1; routed from demoFixtures.getDemoResponse. Lets the whole record → transcript →
@@ -137,6 +138,24 @@ export function meetingsDemo(method: string, p: string, params: URLSearchParams,
     };
     RECORDINGS.unshift(rec);
     return { status: 201, json: { id: rec.id, meetingId: rec.meeting_id, deduped: false } };
+  }
+
+  // B6 — relink recordings orphaned from their run. Placed BEFORE the `/:id`-shaped matchers below,
+  // because "relink-orphans" would otherwise be captured as a recording id.
+  const relinkM = p.match(/^\/api\/[^/]+\/meetings\/recordings\/relink-orphans$/);
+  if (relinkM && m === "POST") {
+    // Mirrors the real sweep: only recordings that are ingested-but-unlinked AND whose meeting_id
+    // matches a run are repaired, so re-running reports 0 rather than repairing the same rows twice.
+    let relinked = 0;
+    for (const rec of RECORDINGS) {
+      if (rec.pipeline_run_id) continue;
+      const runId = pipelineRunIdForMeeting(rec.meeting_id);
+      if (!runId) continue;
+      rec.pipeline_run_id = runId;
+      rec.updated_at = now();
+      relinked++;
+    }
+    return ok({ relinked });
   }
 
   const transM = p.match(/^\/api\/[^/]+\/meetings\/recordings\/([^/]+)\/transcript$/);
