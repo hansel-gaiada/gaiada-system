@@ -89,12 +89,12 @@ pipeline write surface is **two** calls: gate decide, and stage-artifact PATCH.
 
 | # | Sev | Endpoint that exists | What a human cannot do today |
 |---|---|---|---|
-| B1 | 🔴 | `POST /api/:t/pipeline/runs/:runId/scope-signoffs` | **The agency cannot record its half of the scope dual-sign from the app.** I had to curl it during the server walk. Together with A3 this means *no* scope agreement can ever complete in the product. |
-| B2 | 🟠 | `POST /api/:t/pipeline/runs` | Start a delivery run for an existing client/project **without** a meeting recording. Every run must currently originate from a recording. |
-| B3 | 🟠 | `PATCH /api/:t/pipeline/runs/:runId` (WD-05 `updateRun`) | Park / unblock / re-status a run. A stuck run stays stuck. |
-| B4 | 🟠 | `POST /api/:t/pipeline/runs/:runId/stages` | Add a beat by hand when automation didn't create it. |
-| B5 | 🟠 | `POST /api/:t/pipeline/gates` | Open a review gate manually — the only recovery when a workflow missed one. |
-| B6 | 🟡 | `POST /api/:t/meetings/recordings/relink-orphans` | Repair recordings orphaned from their run. API-only; needed on the server today. |
+| B1 | ✅ FIXED (W1: `recordScopeSignoffAction`) | `POST /api/:t/pipeline/runs/:runId/scope-signoffs` | **The agency cannot record its half of the scope dual-sign from the app.** I had to curl it during the server walk. Together with A3 this means *no* scope agreement can ever complete in the product. |
+| B2 | 🟠 STILL OPEN | `POST /api/:t/pipeline/runs` | Start a delivery run for an existing client/project **without** a meeting recording. Every run must currently originate from a recording. |
+| B3 | ✅ FIXED (W1: `updateRunStatusAction`) | `PATCH /api/:t/pipeline/runs/:runId` (WD-05 `updateRun`) | Park / unblock / re-status a run. A stuck run stays stuck. |
+| B4 | ✅ FIXED (W1: `createStageAction`) | `POST /api/:t/pipeline/runs/:runId/stages` | Add a beat by hand when automation didn't create it. |
+| B5 | ✅ FIXED (W1: `openGateAction`) | `POST /api/:t/pipeline/gates` | Open a review gate manually — the only recovery when a workflow missed one. |
+| B6 | 🟡 STILL OPEN (API-only) | `POST /api/:t/meetings/recordings/relink-orphans` | Repair recordings orphaned from their run. API-only; needed on the server today. |
 
 `decideGateAction` covers all six `GateKind`s generically (`lib/pipeline.ts:21`), so gate decisions
 themselves are fine — it is the *surrounding* run lifecycle that has no controls.
@@ -118,9 +118,9 @@ themselves are fine — it is the *surrounding* run lifecycle that has no contro
 
 | # | Sev | Gap |
 |---|---|---|
-| D1 | 🔴 | The browser recorder + video allowlist are **not deployed** — the running image `alpha-01.004.0005a` predates them. Two real recordings from 2026-07-31 sit at `status='recording'`: users pressed a button that never recorded. |
-| D2 | 🟠 | `pm` is **not** in the agency tenant's `enabled_modules` (`agency,hr` only), so the WD-06 report sink (`pm.createDoc`/`pm.createTask`) will fail module-gating when the report track reaches it. |
-| D3 | 🟡 | DB migration head `0063` vs repo `0069` (search + reports, other sessions'). Not webdev's, but the box is behind. |
+| D1 | ✅ FIXED 2026-08-04 (recorder + video allowlist deployed on `alpha-01.011.0030a`) | The browser recorder + video allowlist are **not deployed** — the running image `alpha-01.004.0005a` predates them. Two real recordings from 2026-07-31 sit at `status='recording'`: users pressed a button that never recorded. |
+| D2 | ✅ FIXED (verified live: agency `enabled_modules` now carries `pm`) | `pm` is **not** in the agency tenant's `enabled_modules` (`agency,hr` only), so the WD-06 report sink (`pm.createDoc`/`pm.createTask`) will fail module-gating when the report track reaches it. |
+| D3 | ✅ FIXED 2026-08-04 (server migration head `0074` == repo head) | DB migration head `0063` vs repo `0069` (search + reports, other sessions'). Not webdev's, but the box is behind. |
 | D4 | ✅ | whisper not started · bridge entity types empty · bridge timeout too tight — **fixed 2026-08-03**, and now in `.env.example` + the deploy runbook so a redeploy can't regress them (commit `8ddf538`). |
 
 ---
