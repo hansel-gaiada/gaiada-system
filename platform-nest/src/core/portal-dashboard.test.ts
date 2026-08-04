@@ -124,13 +124,28 @@ describe.skipIf(!TEST_URL)("client portal dashboard (CP-2..CP-5)", () => {
       }
       contractA = newId();
       contractB = newId();
-      for (const [id, client, project] of [[contractA, clientA, projectA1], [contractB, clientB, projectB]] as Array<[string, string, string]>) {
+      // References are EXPLICIT literals, not derived from the id.
+      //
+      // The first version of this fixture used `REF-${id.slice(0, 8)}` and CI caught it immediately:
+      // `duplicate key value violates unique constraint "ix_contracts_reference_uniq"`. `newId()` is
+      // uuid **v7**, which is time-ordered — its leading bits are a millisecond timestamp — so two ids
+      // minted in the same millisecond share their first 8 hex characters. A slice of a v7 uuid is a
+      // timestamp, not an identity, and truncating one to make a "unique" label produces collisions
+      // exactly when rows are created together, which in a test fixture is always.
+      //
+      // Worth keeping as the comment rather than the fix alone: the constraint behaved perfectly (it
+      // refused two identical references in one tenant at the same version, which is its whole job) and
+      // the bug was in the fixture's assumption about uuid v7.
+      for (const [id, client, project, reference] of [
+        [contractA, clientA, projectA1, "REF-ACME-001"],
+        [contractB, clientB, projectB, "REF-RIVAL-001"],
+      ] as Array<[string, string, string, string]>) {
         await c.query(
           `INSERT INTO contracts (id, tenant_id, client_id, project_id, title, reference, status, value, currency,
                                   starts_on, ends_on, sent_at, created_by, origin_site)
            VALUES ($1, $2, $3, $4, 'Master Services Agreement', $5, 'sent', 25000, 'IDR',
                    current_date - 1, current_date + 365, now(), $6, $7)`,
-          [id, co, client, project, `REF-${id.slice(0, 8)}`, admin, site()],
+          [id, co, client, project, reference, admin, site()],
         );
       }
     });
@@ -420,8 +435,13 @@ describe.skipIf(!TEST_URL)("client portal dashboard (CP-2..CP-5)", () => {
     expect(kinds.has("milestone")).toBe(true);
     expect(kinds.has("contract")).toBe(true);
     expect(kinds.has("invoice")).toBe(true);
-    // Client B's reference must not appear anywhere in client A's timeline.
-    expect(JSON.stringify(r.json())).not.toContain(contractB.slice(0, 8));
+    // Client B's contract must not appear anywhere in client A's timeline. Asserted on the FULL id and
+    // the reference literal — `contractB.slice(0, 8)` would have been worse than useless here: uuid v7
+    // is time-ordered, so that prefix is also contractA's prefix, and the assertion would have failed
+    // on correctly-scoped data (a false alarm) rather than catching a leak.
+    const body = JSON.stringify(r.json());
+    expect(body).not.toContain(contractB);
+    expect(body).not.toContain("REF-RIVAL-001");
     expect(new Set(r.json().map((e: { tense: string }) => e.tense)).size).toBeGreaterThan(1);
   });
 
