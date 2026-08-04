@@ -23,6 +23,35 @@ reconstructed from this table alone. Format defined in [`VERSIONING.md`](./VERSI
 > `01.012.0031a`. Per VERSIONING rule 5 `/VERSION` is authoritative; the `MODULES.md` line is now
 > corrected and should be moved with every cut.
 
+### `Alpha 01.014.0035a` — 2026-08-04 — data to look at, and a lie to a customer
+
+Closes the gap that made the deployed client portal unusable: it was authorized, routed and empty. The
+live database had 3 companies and 47 users but **zero clients, projects, invoices or contracts**, and
+zero `client_contacts` rows — so all nine `client`-role accounts resolved to 403.
+
+- **`seed/portal-workspace.ts`** — the half of the portal demo `portal-clients.ts` never covered:
+  milestones, tasks (they drive every progress %), deliverables with attachments, invoices, the payment
+  ledger, and contracts with signatures. Deliberately **uneven across five clients**, because the
+  branches that break are the ones no fixture reaches: an overdue milestone, an overdue invoice, a
+  partial payment, a payment awaiting verification, a **rejected** payment with a reason, a voided
+  invoice, a voided agreement, an agreement countersigned by us and waiting on the client, an agreement
+  nobody has signed, a fully-signed one, a **view-only contact who cannot sign**, a delivered item with
+  no file, and a settled account. Idempotent; `files` rows are reference attachments (a URL, no
+  `storage_key`) because a seed cannot write bytes into the storage volume and a metadata row pointing
+  at nothing produces a download that 404s.
+
+- **A false statement to a customer, fixed.** `/portal` answered a 403 from the BFF with "You're signed
+  in as a staff member" — but that 403 covers **two** people: a staff member, and a genuine client whose
+  contact row does not exist yet or was revoked. Nine real client accounts on the live box would have
+  been told they were staff. `isClientOnly(me)` is the discriminator the UI already had; clients now get
+  "your portal isn't linked yet — nothing is wrong on your side".
+
+Counter `0033 → 0035`: `platform-nest` `0.12.0 → 0.12.1`, `platform-ui` `0.15.0 → 0.15.1`.
+
+**No npm script was added for the new seed** — `platform-nest/package.json` carries a concurrent
+session's uncommitted `seed:departments` line, and staging it would have dragged their work into this
+commit. Run it as `node dist/seed/portal-workspace.js`; the script can be added by whoever lands that.
+
 ### `Alpha 01.013.0033a` — 2026-08-04 — the client portal
 
 The client side gets its own interface. Contents: the CP-* program — `(portal)` route group (11

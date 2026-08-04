@@ -5,6 +5,7 @@ import { getMe } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
 import { getPortalOverview } from "@/lib/portal-data";
 import { money, overallProgress, portalDate, relativeDays } from "@/lib/portal";
+import { isClientOnly } from "@/lib/rbac";
 import { Card, Eyebrow } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
 import { PortalLive } from "@/components/portal/PortalLive";
@@ -28,10 +29,34 @@ export default async function PortalOverviewPage() {
 
   const { overview, isPortalClient } = await getPortalOverview(userId, tenant);
 
-  // A staff member reaching the portal is not an error and must not read like one. Distinguished from
-  // "a client with no projects yet" because telling staff "once your kickoff is processed, your project
-  // appears here" implied a client project was on its way to THEM.
+  // The BFF answers 403 for TWO different people and they need different words.
+  //
+  // It refuses anyone with no active `client_contacts` row — which is every staff member, and ALSO a
+  // genuine client whose contact row has not been created yet or has been revoked. The first version of
+  // this page collapsed both into "you're signed in as a staff member", so a real client — nine of whom
+  // hold the `client` role on the live system with no contact row — was told they were staff. A false
+  // statement, to a customer, on the first screen they see.
+  //
+  // `isClientOnly(me)` is the discriminator the UI already has: it means "holds the client role and no
+  // staff role". Cerbos and the scope predicate remain the authority for ACCESS; this only decides which
+  // explanation is true.
   if (!isPortalClient) {
+    if (isClientOnly(me)) {
+      return (
+        <>
+          <PortalPageHead
+            eyebrow={me.name ?? "Your portal"}
+            title="Your portal isn't linked yet"
+            lead="Your account exists, but it hasn't been connected to your projects yet — so there's nothing to show you."
+          />
+          <EmptyNote>
+            Nothing is wrong on your side, and there is nothing you need to do. Your account manager
+            finishes the setup at their end; once they have, your projects, deliverables, invoices and
+            agreements all appear here.
+          </EmptyNote>
+        </>
+      );
+    }
     return (
       <>
         <PortalPageHead

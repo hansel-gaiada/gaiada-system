@@ -23,7 +23,7 @@ version and add a `CHANGELOG.md` entry on every notable module change.
 
 ## App version
 
-**`Alpha 01.013.0033a`** â€” see [`VERSIONING.md`](./VERSIONING.md) for the format, and
+**`Alpha 01.014.0035a`** â€” see [`VERSIONING.md`](./VERSIONING.md) for the format, and
 
 [`/VERSION`](../../VERSION) for the machine-readable source. The app version composes the module
 versions below; the running build reports it at `GET /health`.
@@ -34,8 +34,8 @@ versions below; the running build reports it at `GET /health`.
 
 | Module | Ver | Status | Workstream | Since |
 |---|---|---|---|---|
-| platform-nest | `0.12.0` | PROTOTYPED | WS1 | 2026-08-04 |
-| platform-ui | `0.15.0` | PROTOTYPED | WS5 | 2026-08-04 |
+| platform-nest | `0.12.1` | PROTOTYPED | WS1 | 2026-08-04 |
+| platform-ui | `0.15.1` | PROTOTYPED | WS5 | 2026-08-04 |
 | ai-gateway-go | `0.13.0` | PROTOTYPED | WS3 | 2026-07 |
 | mcp-hub | `0.9.3` | PROTOTYPED | WS2 | 2026-08-03 |
 | sync-engine-go | `0.7.0` | PROTOTYPED | WS1 | 2026-07 |
@@ -54,6 +54,7 @@ versions below; the running build reports it at `GET /health`.
 | render-gateway-go | `0.0.0` | PLANNED | Creative | 2026-07-23 |
 | reports | `0.3.1` | PROTOTYPED | Cross-cutting | 2026-08-03 |
 | report-renderer | `0.1.0` | DEV-VERIFIED | Cross-cutting | 2026-07-31 |
+| mail | `0.0.0` | PLANNED | Cross-cutting | 2026-08-04 |
 
 ---
 
@@ -331,6 +332,24 @@ one-rail contract-snapshot scaffolder) activates once webdesk's own P3 codegen l
 **What exists:** blueprint only (approved 2026-07-23) â€” see [`../BLUEPRINTS.md`](../BLUEPRINTS.md). No code.
 **Future plans:** phased build P1 Foundation â†’ P2 Forms+Mail â†’ P3 Contract/codegen â†’ P4 ERP control+envs â†’
 P5 AI+approvals â†’ P6 WordPress headless.
+**2026-08-04 blueprint amendment (still no code):** C-03 unpinned from Hostinger SMTP → rented relay
+(Brevo → ZeptoMail/SES), three sending subdomains + separate per-stream provider keys (D14),
+`From:` our domain + `Reply-To:` human default with per-tenant custom-domain upgrade, explicit
+"Zone A mail never routes through C-03". Blueprint HTML is v1.1; PDF + hosted artifact NOT re-rendered yet.
+
+## mail — Zone A Email (platform-nest) · `0.0.0` · PLANNED
+
+**What exists:** design only — [`../superpowers/specs/2026-08-04-zone-a-mail-design.md`](../superpowers/specs/2026-08-04-zone-a-mail-design.md)
++ ticket plan [`../superpowers/plans/2026-08-04-mail-subsystem-tickets.md`](../superpowers/plans/2026-08-04-mail-subsystem-tickets.md). No code; the ERP currently sends zero email.
+**Scope:** sending-only. Rented relay (Brevo free tier → ZeptoMail/SES), 3 sending subdomains with
+separate keys (`forms.`/`notify.`/`auth.` — reputation isolation so form abuse can never block login
+mail), `src/mail/` core module (provider adapter, PG-backed queue, `mail_log`, suppressions,
+bounce webhooks), notification email = immediate allowlist + daily digest riding the existing
+`notify()`/`notifications` surface, Keycloak realm SMTP + Alertmanager SMTP (zero code), magic
+links designed (built last, behind a p95 latency SLO gate). Zone A mail deliberately does NOT
+route through webdesk C-03.
+**Future plans:** MAIL-01…12 per the ticket plan; blocked at W0 on owner Q1 (subdomain root
+`gaiada.online` vs `.com`) + Q2 (provider account signup).
 
 ## search-marketing â€” SEO Â· SEM Â· GEO Â· `0.5.0` Â· DEV-VERIFIED
 
