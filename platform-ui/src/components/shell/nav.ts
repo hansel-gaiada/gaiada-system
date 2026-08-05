@@ -52,6 +52,21 @@ export function navFor(me: Me, tenantId?: string | null, departments: { id: stri
     { label: "IT", href: "/it", icon: "pulse" },
   ];
   const groups: NavGroup[] = [
+    // "Me" is FIRST and ungated (employee-portal wave A). Every principal with a staff surface has a
+    // personal hub — there is no capability to hold, and gating it would be gating someone out of
+    // their own leave, loans and inbox. It sits above Workspace because "my things" is what an
+    // employee opens the ERP for; Workspace is the shared surface.
+    //
+    // Deliberately SHORT: Leave and Loans are the two surfaces that existed nowhere else, Inbox is
+    // the personal read of the notification feed, and /me itself re-homes the seven self-service
+    // pages that already live under Business/Reports/Appraisals. Repeating those seven here would
+    // duplicate nav entries rather than give them a home.
+    { label: "Me", items: [
+      { label: "Overview", href: "/me", icon: "home" },
+      { label: "Inbox", href: "/me/inbox", icon: "check" },
+      { label: "Leave", href: "/me/leave", icon: "clock" },
+      { label: "Loans", href: "/me/loans", icon: "wallet" },
+    ] },
     { label: "Workspace", items: [
       { label: "Dashboard", href: "/", icon: "home" },
       { label: "Calendar", href: "/calendar", icon: "clock" },

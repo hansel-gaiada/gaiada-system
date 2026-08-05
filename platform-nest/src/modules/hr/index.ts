@@ -7,8 +7,23 @@
 // (rollups/engine.ts's per-module invocation, WSD-4) — the third wall (app_module_allowed('hr'),
 // WSD-3) is open for the duration of the call, so plain SELECTs against hr_* tables just work.
 import type { ModuleContract, RollupProvider } from "../contract";
+import type { OutboxEvent } from "../../events/types";
 import { applyLeaveDecision } from "./leave-decision";
+import { applyLoanDecision } from "./loan-decision";
 import { instantiateDefaultOnboarding } from "./checklists";
+
+/**
+ * `eventHandlers` is keyed BY EVENT TYPE, so the module gets exactly one handler for
+ * `automation_approval.decided` — and hr now files two kinds of approval (leave, and loans since
+ * wave E). This dispatcher fans the single event out to both appliers rather than either one
+ * silently winning. Each applier re-checks `origin === 'hr'` and its own id field, so a decision for
+ * the other kind (or any non-hr origin) is a cheap no-op there; running them in sequence rather than
+ * in parallel keeps the ordering deterministic if a payload ever carries both.
+ */
+async function applyHrApprovalDecision(event: OutboxEvent): Promise<void> {
+  await applyLeaveDecision(event);
+  await applyLoanDecision(event);
+}
 
 const hrRollups: RollupProvider = {
   metrics: [
@@ -36,12 +51,15 @@ const hrRollups: RollupProvider = {
 
 export const hrModule: ModuleContract = {
   key: "hr",
-  migrations: ["0028_module_hr.sql"],
+  migrations: ["0028_module_hr.sql", "0081_hr_loans.sql"],
   permissions: [
     { key: "hr:case:read", description: "View HR cases (onboarding/offboarding/review/grievance/other)" },
     { key: "hr:case:write", description: "Create/update HR cases" },
     { key: "hr:leave:file", description: "File a leave request" },
     { key: "hr:leave:decide", description: "Approve/deny a leave request (unified approvals surface)" },
+    { key: "hr:loan:request", description: "Request an employee loan (self-service)" },
+    { key: "hr:loan:decide", description: "Approve/decline an employee loan (unified approvals surface)" },
+    { key: "hr:loan:repay", description: "Record a repayment against an employee loan (staff only)" },
     { key: "hr:record:read", description: "View HR records (contract/document/note)" },
     { key: "hr:record:write", description: "Create/update HR records" },
     { key: "hr:record:export", description: "Bulk-export HR records (high assurance only)" },
@@ -85,6 +103,38 @@ export const hrModule: ModuleContract = {
         required: ["tenantId", "subjectUserId", "leaveType", "startsOn", "endsOn", "minutes"],
       },
     },
+    {
+      name: "hr.listLoans",
+      description: "List employee loans for the served company (staff see all; a member sees their own)",
+      minAssurance: "verified",
+      method: "GET",
+      pathTemplate: "/api/:tenantId/modules/hr/loans",
+      inputSchema: { type: "object", properties: { tenantId: { type: "string" } }, required: ["tenantId"] },
+    },
+    {
+      name: "hr.requestLoan",
+      // 'high' impact, unlike hr.fileLeave's 'medium': approving this one moves money, so D14
+      // suspends it for a human decision on the unified approvals surface.
+      description: "Request an employee loan for a subject (D14 high-impact automation write)",
+      minAssurance: "verified",
+      method: "POST",
+      pathTemplate: "/api/:tenantId/modules/hr/loans",
+      write: true,
+      impact: "high",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tenantId: { type: "string" },
+          subjectUserId: { type: "string" },
+          principalAmount: { type: "number" },
+          termMonths: { type: "number" },
+          annualInterestRate: { type: "number" },
+          currency: { type: "string" },
+          purpose: { type: "string" },
+        },
+        required: ["tenantId", "subjectUserId", "principalAmount", "termMonths"],
+      },
+    },
   ],
   rollupProviders: [hrRollups],
   uiManifest: [
@@ -98,7 +148,7 @@ export const hrModule: ModuleContract = {
     // /automation-approvals/:id/decide endpoint (core/automation-approvals.controller.ts) —
     // only for origin='hr' rows (the event carries the row's origin; every other origin's
     // decided event is a harmless no-op here).
-    "automation_approval.decided": applyLeaveDecision,
+    "automation_approval.decided": applyHrApprovalDecision,
     // Auto-instantiate the tenant's default onboarding checklist when a new user is invited
     // AND hr is enabled/served for that tenant (the consumer's isModuleEnabled gate, ex-ORG-11).
     "user.invited": instantiateDefaultOnboarding,

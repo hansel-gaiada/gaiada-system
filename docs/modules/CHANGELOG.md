@@ -783,6 +783,46 @@ anywhere real.
 ---
 
 ## platform-nest
+### [0.14.0] — 2026-08-05 · IN PROGRESS (employee loans: request → approve → amortize → repay)
+
+Employee-portal wave E. An employee requests a loan, a human decides it on the EXISTING unified
+approvals surface, and approval materializes an amortization schedule that repayments accrue against.
+
+- **Migration `0081_hr_loans.sql`** — `hr_loan_requests` (the agreement) + `hr_loan_installments`
+  (the frozen schedule) + `hr_loan_repayments` (append-only ledger), all three behind the same
+  `app_module_allowed('hr')` third wall as the rest of the module, with tenant-scoped composite FKs.
+- **`loan-schedule.ts`** — pure amortization + FIFO allocation, all arithmetic in integer minor
+  units. 19 unit tests, no database. Two invariants pinned: the schedule sums to the principal
+  EXACTLY (per-installment rounding is absorbed by the last row), and an overpayment surfaces as
+  `credit` rather than a negative balance.
+- **`loans.controller.ts`** — request/list/detail/cancel/repayment. Reuses Cerbos kind `hr_case`
+  rather than adding `resource_hr_loan.yaml`, because a NEW policy file is not hot-reloaded through
+  the bind mount and an unlisted kind is a silent DENY that reads like a logic bug.
+- **`loan-decision.ts`** + an `automation_approval.decided` DISPATCHER in the module contract: that
+  key allows one handler per module and hr now files two kinds of approval (leave, loans), so both
+  appliers run in sequence and each no-ops on the other's payload.
+
+Three things worth keeping in mind here:
+
+1. **A member may request but never repay.** Recording a repayment authorizes as `hr_case:update`,
+   an action the `member` derived role does not hold, so the employee who owes the money cannot
+   declare it paid. Request/cancel/read use `subjectUserId` and match the member self-service rule.
+2. **A degenerate loan closes early.** 1.00 over 120 months is 100 cents across 120 installments —
+   the balance is gone after 100, and rows 101-120 would be `total_due = 0`, which `CHECK (total_due
+   > 0)` rejects, failing the whole approval INSERT. Caught by the property-style test, not by
+   inspection; `buildSchedule` now stops when the balance does, so the result may be SHORTER than
+   the term and callers must read the returned length.
+3. **Payroll deduction is a documented seam.** Wave D (payroll) is deferred, so `method:
+   'payroll_deduction'` is selectable but nothing writes it automatically. When payroll lands it
+   becomes the automated writer of exactly this ledger row — no shape change needed.
+
+Impact is **`high`**, not leave's `medium`: this one moves money, so D14 suspends the agent/n8n path
+for a human decision. MCP gains `hr.listLoans` + `hr.requestLoan`.
+
+**UNVERIFIED:** the DB-dependent half. `tsc`, both migration lint gates and the 19 pure tests are
+green; the HR integration suite needs live Postgres + Cerbos + Redis, which this box does not run
+(server is truth). The approval→schedule path needs an on-server pass after deploy.
+
 ### [0.13.1] — 2026-08-05 · IN PROGRESS (APPR-01: per-approval detail route, backend half)
 
 Closes a gap found during the mail build: emailed `automation_approval`/`agency_approval`
@@ -1072,6 +1112,50 @@ tenant's 8 seeded rows still need purging (per-tenant SQL in the design doc §12
 - **Unreleased / next:** identity writes, org-structure endpoints.
 
 ## platform-ui
+### [0.16.0] — 2026-08-05 · IN PROGRESS (`/me` — the personal hub, and it is not under HR)
+
+Employee-portal waves A + F.
+
+**Why a section and not a second shell.** Clients got their own interface because they are outsiders
+with no ERP identity. An employee already IS an ERP user, so a second shell would mean two
+navigations and two places for "my stuff" to live. What was missing was never a shell — it was a
+HOME: the seven self-service surfaces an employee needs (`/`, `/account`, `/people/:userId`,
+`/reports/person`, `/appraisals/mine`, `/timesheets`, notifications) were scattered across
+Workspace / Business / Reports / Appraisals with no entry point. `/me` re-homes them as LINKS, so
+each keeps its single implementation and its original nav home.
+
+**And not under HR** (owner, 2026-08-04): HR manages employees to the extent HR needs; this section
+is what the employee themselves owns. Hence top-level, first in the nav, and ungated — there is no
+capability to hold, and gating it would gate someone out of their own leave, loans and inbox.
+
+- `/me` — at-a-glance (unread / leave awaiting a decision / loan outstanding) + the eight doors.
+- `/me/leave` — the employee's own leave. NO new backend surface: the `member` self-service rule
+  already allowed read/create/cancel of one's own leave, and `LeaveForm`/`fileLeave`/`cancelLeave`
+  already existed for the HR console. This is the same components addressed to the subject.
+- `/me/loans` + `/me/loans/[loanId]` — request with a live monthly estimate, then the frozen
+  schedule, the derived FIFO allocation and the money ledger. The repayment form renders only for
+  `hr.manage` holders; showing it to the borrower would be a button that 403s.
+- `/me/inbox` (wave F) — the honest shape of an employee inbox on this backend. There is no
+  personal-mailbox store; there are per-user NOTIFICATIONS and entity-scoped MAIL THREADS. Inventing
+  a mailbox would mean a second unread model to keep in sync, so a notification row is the unit and
+  opening one renders a single `MailThreadPanel` (not one panel per row — that would be N BFF reads
+  for a page people mostly scan). Reuses `/notifications`' server actions so "read" means one thing.
+
+Two traps this build walked into, both from `platform-ui/CLAUDE.md` and both worth the reminder:
+
+- `lib/loans.ts` first held types, pure helpers AND the `platformFetch` readers, while the
+  `"use client"` loan forms imported `money` from it — a `server-only` import reaching a client
+  component, which breaks `next build` while `tsc` and vitest stay green. Split into `loans.ts`
+  (pure, client-safe) + `loans-data.ts` (`server-only`) per the module-trio convention.
+- `Field` is uncontrolled (`defaultValue` only), so the live estimate reads the form on change rather
+  than per-input state — it cannot drift from what will actually be submitted.
+
+`lib/demoLoans.ts` keeps every surface drivable under `DEMO_MODE` (deliberately stateless: a frozen
+schedule and an append-only ledger have no interesting in-session mutation to model). Three loans in
+different states — active/part-paid with one overdue, settled with interest, pending with no schedule.
+
+1145 UI tests + `tsc` + `DEMO_MODE=1 next build` all green; `nav.test.ts` updated for the new group.
+
 ### [0.15.3] — 2026-08-05 · IN PROGRESS (UI-01: reauth now preserves the deep-link target)
 
 Closes the gap MAIL-09 found live (Smoke 3 / ex-Q-V7 — see `docs/modules/MODULES.md`'s mail

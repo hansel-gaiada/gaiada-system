@@ -527,7 +527,13 @@ _Cross-references:_ `memory/org-structure-contract`, `memory/it-device-contract`
 `memory/pm-ai-tracker-contract`, `memory/ui-rbac-and-company-scope`, `memory/backbone-program`. Type shapes are canonical in
 `platform-ui/src/lib/{platform,entities,adminData,org,organization,pm,it,admin}.ts`.
 
-## 10. HR module (WSD-4, 2026-07-22) — `modules/hr/hr.controller.ts` — **BACKEND ✅ BUILT (no UI/`lib/hr.ts` consumer yet — WSD-5)**
+## 10. HR module (WSD-4, 2026-07-22) — `modules/hr/hr.controller.ts` + `loans.controller.ts` — **BACKEND ✅ BUILT, UI ✅ WIRED**
+
+**Corrected 2026-08-05:** this header previously read "no UI/`lib/hr.ts` consumer yet — WSD-5", and
+the ⬜ PENDING line below claimed the `/hr` UI was unbuilt. Both were stale: `platform-ui/src/lib/hr.ts`
++ `hrActions.ts` exist, the `/hr/{leave,attendance,onboarding,cases}` console pages are built, and
+`rbac.ts` carries `hr.view`/`hr.manage`. Employee-portal wave A additionally re-homes the
+self-service half at `/me/leave` (same lib, same actions, addressed to the subject).
 
 From `docs/superpowers/specs/2026-07-20-hr-module-design.md`. Module key `'hr'`; dark unless
 `companies.enabled_modules ∋ 'hr'` OR an ACTIVE `service_assignment` serves `'hr'` to the tenant
@@ -549,8 +555,49 @@ From `docs/superpowers/specs/2026-07-20-hr-module-design.md`. Module key `'hr'`;
   (manual trigger; the same helper backs the automatic `user.invited` → onboarding-case spawn).
 - Rollups: `hr.open_cases`, `hr.leave_pending`, `hr.onboarding_active` feed the cross-company
   management view like every other module.
-- **⬜ PENDING (WSD-5):** `/hr`, `/hr/leave`, `/hr/attendance`, `/hr/onboarding` UI + `lib/hr.ts` +
-  `rbac.ts` `hr.view`/`hr.manage` caps. Backend is UI-ready — every route above is live now.
+### 10a. Employee loans (employee-portal wave E, 2026-08-05) — `modules/hr/loans.controller.ts` — **BACKEND ✅ BUILT, UI ✅ WIRED (`lib/loans.ts` + `loans-data.ts` + `loanActions.ts`)**
+
+Migration `0081_hr_loans.sql`: `hr_loan_requests` (the agreement) + `hr_loan_installments` (the
+schedule FROZEN at approval) + `hr_loan_repayments` (append-only ledger), all three behind the same
+`app_module_allowed('hr')` third wall as the rest of §10.
+
+- ✅ `POST /api/:t/modules/hr/loans` `{subjectUserId, principalAmount, termMonths, annualInterestRate?,
+  currency?, purpose?}` → `{id, approvalId, status:"pending"}`. Files the request AND an
+  `automation_approvals` row (`origin:'hr'`, `workflow_id:'hr:loan'`, impact **`high`** — leave is
+  `medium`; this one moves money) in ONE transaction, with a schedule PREVIEW in `tool_args` so the
+  decider sees the monthly burden, not just the principal. **One live loan per employee** (a pending
+  or approved loan 400s a second request).
+- ✅ `GET /api/:t/modules/hr/loans[?subjectUserId&status]` → `{loans[], scope:"self"|"tenant"}`.
+  `scope` reports which Cerbos path won: `"self"` means a plain `member` whose list is ALREADY
+  narrowed server-side — the UI must not offer a subject filter in that case.
+- ✅ `GET /api/:t/modules/hr/loans/:id` → the loan + `schedule[]` + `summary` + `repayments[]`.
+  404 (not 403) when invisible, so an id's existence never leaks.
+- ✅ `POST /api/:t/modules/hr/loans/:id/cancel` — own PENDING only; also withdraws the paired approval.
+- ✅ `POST /api/:t/modules/hr/loans/:id/repayments` `{amount, paidOn?, method?, note?}` —
+  **STAFF ONLY**, authorized as `hr_case:update`, an action the `member` derived role does not hold,
+  so the employee who owes the money can never declare it repaid. Auto-settles when the ledger covers
+  the schedule (status is DERIVED from the ledger, not latched).
+- Deciding rides the EXISTING `POST /api/:t/automation-approvals/:id/decide` — no forked endpoint.
+  `loan-decision.ts` applies the outcome, and **approval is where the schedule is born**: the
+  amortization rows are materialized then, anchored on the APPROVAL date (so a request that sat in the
+  inbox does not get a first instalment in the past), and the subject is notified with the terms.
+- Authorization reuses Cerbos kind **`hr_case`** rather than a new `resource_hr_loan.yaml` — a brand-new
+  policy file is not hot-reloaded through the bind mount, and an unlisted kind is a silent DENY that
+  reads like a logic bug.
+- MCP: `hr.listLoans` (read) + `hr.requestLoan` (write, impact `high` → D14-suspended for a human).
+- **Deferred seam:** `method:'payroll_deduction'` is selectable but nothing writes it automatically —
+  employee-portal wave D (payroll) is not built. When it lands it becomes the automated writer of
+  exactly this ledger row; the shape does not need to change.
+
+### 10b. `/me` personal hub (employee-portal wave A/F, 2026-08-05) — **UI ✅ BUILT on existing endpoints**
+
+No new backend surface. `/me` is a SECTION of the staff ERP (not a second shell like `/portal` —
+an employee already IS an ERP user), and it re-homes the seven scattered self-service pages: `/`,
+`/account`, `/people/:userId`, `/reports/person`, `/appraisals/mine`, `/timesheets`, plus the
+notification feed. `/me/inbox` (wave F) unifies `GET /api/:t/notifications` with the entity-scoped
+`GET /api/:t/mail/threads` from §mail — there is no personal-mailbox store, and inventing one would
+mean a second unread model; a notification row is therefore the unit. `/me/leave` and `/me/loans`
+carry their own `ModuleDisabled` note because `hr` is dark for every company except the agency.
 
 ## 11. Work-activity / evidence model (P1-04, Web-Dev Phase 1) — `src/core/work-activity.controller.ts` — **BACKEND ✅ BUILT, UI ✅ WIRED (`platform-ui/src/lib/activity.ts` — reconciled 2026-07-30, WD-20)**
 

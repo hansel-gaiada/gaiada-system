@@ -41,7 +41,7 @@ const TEMPLATE_KINDS = new Set(["onboarding", "offboarding"]);
  *  member-self rule (subjectUserId = the caller's own id) and report which path won so the caller
  *  applies the matching WHERE-clause narrowing. Throws (403) if NEITHER path is authorized —
  *  never silently returns an empty list for a genuinely unauthorized caller. */
-async function staffOrSelfRead(principal: Principal, tenantId: string, kind: "hr_case"): Promise<{ selfOnly: boolean }> {
+export async function staffOrSelfRead(principal: Principal, tenantId: string, kind: "hr_case"): Promise<{ selfOnly: boolean }> {
   try {
     await authorize(principal, { kind, tenantId, module: "hr" }, "read");
     return { selfOnly: false };
@@ -459,9 +459,10 @@ export class HrController {
       { modules: ["hr"] },
     );
     await writeActivity(tenantId, req.principal.userId, "filed", "hr_leave_request", leaveRequestId, { subjectUserId, leaveType, minutes });
-    // MAIL-06 (F1 fix): this is the ONLY place an origin='hr' automation_approvals row is created
-    // (automation-approvals.controller.ts's create() endpoint restricts ORIGINS to automation|agent),
-    // so this is the one call site that must resolve the module='hr' decider set — company_admin +
+    // MAIL-06 (F1 fix): origin='hr' automation_approvals rows are created in exactly TWO places —
+    // here (leave) and LoansController.requestLoan (employee-portal wave E); the generic
+    // automation-approvals.controller.ts create() endpoint restricts ORIGINS to automation|agent.
+    // Both call sites must therefore resolve the module='hr' decider set — company_admin +
     // group_executive PLUS the providing unit's hr_manager (module_manager scoped module='hr',
     // mirroring resource_automation_approval.yaml's WSD-2 rule; see approval-deciders.ts's header).
     const deciders = await resolveAutomationApprovalDeciders(tenantId, "hr");

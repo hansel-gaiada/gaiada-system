@@ -11,7 +11,12 @@ describe("navFor (RBAC-gated visibility)", () => {
   it("member sees Workspace/Organization/Departments/Business/Reports/Intelligence/Systems but no Settings, no Rollups", () => {
     const groups = navFor({ ...base, roles: [{ role: "member", scopeType: "company", scopeId: "c1" }] });
     const labels = groups.map((g) => g.label);
-    expect(labels).toEqual(["Workspace", "Organization", "Departments", "Business", "Reports", "Appraisals", "Intelligence", "Systems"]);
+    expect(labels).toEqual(["Me", "Workspace", "Organization", "Departments", "Business", "Reports", "Appraisals", "Intelligence", "Systems"]);
+    // Employee-portal wave A: "Me" is FIRST and ungated — every principal with a staff surface has a
+    // personal hub, and there is no capability to hold. Gating it would gate someone out of their own
+    // leave, loans and inbox.
+    const meGroup = groups.find((g) => g.label === "Me")!;
+    expect(meGroup.items.map((i) => i.label)).toEqual(["Overview", "Inbox", "Leave", "Loans"]);
     const business = groups.find((g) => g.label === "Business")!;
     expect(business.items.map((i) => i.label)).not.toContain("Rollups");
     // TR-17: a plain member always sees the self/scoped grain reports, never the exec-only Company one.
