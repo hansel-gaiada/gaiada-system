@@ -23,6 +23,70 @@ reconstructed from this table alone. Format defined in [`VERSIONING.md`](./VERSI
 > `01.012.0031a`. Per VERSIONING rule 5 `/VERSION` is authoritative; the `MODULES.md` line is now
 > corrected and should be moved with every cut.
 
+### `Alpha 01.018.0045a` — 2026-08-06 — the employee portal, and the assistant's tool broker
+
+First cut since `0040b`. Ten commits from several concurrent sessions; the two headline changes are
+the employee portal (this session) and the assistant tool broker (another).
+
+**Employee portal — waves A, E, F.** `/me` is a personal hub: a SECTION of the staff ERP, not a
+second shell like `/portal`, because an employee already IS an ERP user and what was missing was a
+HOME for the seven self-service surfaces scattered across Workspace/Business/Reports/Appraisals. It
+is deliberately NOT under HR — HR manages employees to the extent HR needs; this is what the employee
+owns. Employee loans land end-to-end (migration `0081`: agreement + a schedule FROZEN at approval +
+an append-only ledger, all behind the `app_module_allowed('hr')` third wall), decided on the EXISTING
+unified approvals surface at impact `high` rather than leave's `medium` because this one moves money.
+A member may request but never repay: recording a repayment authorizes as `hr_case:update`, an action
+the `member` derived role does not hold. `/me/inbox` unifies the notification feed with entity-scoped
+mail threads — there is no personal-mailbox store, and inventing one would mean a second unread model.
+
+**Also in this cut:** ASST-13/15/16/17/19 (egress-audit rows on `/complete/stream`, provider hint +
+hermes as a gateway provider, per-thread brain picker, the tool broker running under the CHATTING
+USER's principal, memory panel with propose/confirm quarantine), MAIL-10 magic links + inbound
+truncation metadata, UI-01 deep-link-preserving reauth, and a `.gitattributes` pinning `*.go` to LF.
+
+**Two process failures worth recording, because both were silent:**
+
+1. **Main was pushed non-compiling for ~2 hours.** Commit `0bf1481` swept this session's two in-flight
+   one-line edits (`app.module.ts` registering a controller, `demoFixtures.ts` wiring a demo store)
+   into itself WITHOUT the files those imports point to, which were still untracked. Neither
+   `git status` nor `git diff HEAD` showed those files as modified afterwards — the tell that someone
+   else had already committed them. `b17b7dc` closed it. This is the shared-working-tree trap from the
+   other direction: previously documented as *my* commit sweeping *their* staged files.
+2. **`mail 0.0.15` has no CHANGELOG entry** (rule 1). The registry table moved without one, so this
+   release's module-reference counter is derived from the five actual version MOVES in `MODULES.md`
+   (`platform-nest` ×1, `platform-ui` ×2, `mail` ×2), not from the four recorded entries. Whoever cut
+   `mail 0.0.15` should add it; not back-filled here because its contents are not known to this session.
+
+**Verification standing at cut time:** `tsc` clean across both platforms, 1145 platform-ui tests,
+19 loan-arithmetic tests, both migration lint gates, `DEMO_MODE=1 next build` green. The HR
+integration suite needs live Postgres + Cerbos + Redis, which the dev box does not run — CI caught two
+count assertions wave E's three new tables shifted (`8703179`), which is exactly the class of defect
+that gap hides. The approval→schedule path still needs an on-server pass after this deploys.
+
+| Module | Ver |
+|---|---|
+| platform-nest | `0.14.0` |
+| platform-ui | `0.16.0` |
+| ai-gateway-go | `0.13.0` |
+| mcp-hub | `0.9.3` |
+| sync-engine-go | `0.7.0` |
+| automation (n8n) | `0.4.1` |
+| observability | `0.6.0` |
+| infra | `0.8.0` |
+| wa-chat-bot | `0.9.2` |
+| ai-agents | `0.5.0` |
+| hermes-gateway | `0.2.0` |
+| capture-helper | `0.2.0` |
+| webdev | `0.11.0` |
+| webdesk | `0.0.0` |
+| search-marketing | `0.5.1` |
+| social-media | `0.0.0` |
+| creative | `0.1.0` |
+| render-gateway-go | `0.0.0` |
+| reports | `0.3.1` |
+| report-renderer | `0.1.0` |
+| mail | `0.0.15` |
+
 ### `Alpha 01.017.0040b` — 2026-08-05 — re-cut: Rekor would not take report-renderer's SBOM
 
 `0040a` never deployed. `build-sign (report-renderer)` failed twice on the SBOM attestation —
