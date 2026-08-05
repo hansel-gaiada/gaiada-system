@@ -23,6 +23,48 @@ reconstructed from this table alone. Format defined in [`VERSIONING.md`](./VERSI
 > `01.012.0031a`. Per VERSIONING rule 5 `/VERSION` is authoritative; the `MODULES.md` line is now
 > corrected and should be moved with every cut.
 
+### `Alpha 01.019.0047a` — 2026-08-06 — the loan approval path, actually executed
+
+A verification cut, not a feature cut. `0045a` deployed employee loans and this closes what that
+release could not prove: `loans.test.ts` now drives approval → schedule → ledger → settle through
+the real event pipeline against live Postgres + Cerbos + Redis, and found four defects doing it (a
+latent one-day date shift east of UTC, a 403/404 existence oracle on the detail read, a 500 when an
+employee withdraws their own request, and one wrong assertion of my own that read through RLS and
+looked like a broken feature). Full writeup in the platform-nest 0.14.1 entry.
+
+Carries migration `0083`, which widens `automation_approvals.status` to allow `cancelled` — a
+requester retiring their own row, which the 0014 vocabulary had no word for. **Until this deploys,
+withdrawing a pending loan request 500s on the live box**; that is the one user-visible reason this
+cut exists.
+
+Also folds in `infra 0.8.1`, cut after `0045a` and never yet released: the `bash -n` precheck on the
+box's `.env` that stops a malformed value from failing the backup gate and rolling back an otherwise
+green release.
+
+| Module | Ver |
+|---|---|
+| platform-nest | `0.14.1` |
+| platform-ui | `0.16.0` |
+| ai-gateway-go | `0.13.0` |
+| mcp-hub | `0.9.3` |
+| sync-engine-go | `0.7.0` |
+| automation (n8n) | `0.4.1` |
+| observability | `0.6.0` |
+| infra | `0.8.1` |
+| wa-chat-bot | `0.9.2` |
+| ai-agents | `0.5.0` |
+| hermes-gateway | `0.2.0` |
+| capture-helper | `0.2.0` |
+| webdev | `0.11.0` |
+| webdesk | `0.0.0` |
+| search-marketing | `0.5.1` |
+| social-media | `0.0.0` |
+| creative | `0.1.0` |
+| render-gateway-go | `0.0.0` |
+| reports | `0.3.1` |
+| report-renderer | `0.1.0` |
+| mail | `0.0.15` |
+
 ### `Alpha 01.018.0045a` — 2026-08-06 — the employee portal, and the assistant's tool broker
 
 First cut since `0040b`. Ten commits from several concurrent sessions; the two headline changes are
@@ -847,6 +889,61 @@ anywhere real.
 ---
 
 ## platform-nest
+### [0.14.1] — 2026-08-06 · IN PROGRESS (the loan approval path finally RUNS, and four things it found)
+
+`0.14.0` shipped employee loans with 19 pure arithmetic tests, `tsc`, both lint gates and a green
+`platform-nest` CI job — and yet the single most consequential step in the feature had never once
+executed anywhere. `loan-decision.ts` is where the amortization schedule is BORN, and it only runs
+inside the `automation_approval.decided` consumer: no unit test reaches it, no controller test
+reaches it, the dev box was believed to have no database, and the server closes the dev auth header
+(`AUTH_MODE=oidc`) so there was no token to drive it with. Three green signals, zero coverage of
+approval materializing the rows that define what an employee OWES.
+
+`loans.test.ts` closes that — 20 beats against live Postgres + Cerbos + Redis, driving the real
+outbox→Redis→consumer pipeline, in the place that runs on every push. Writing it found FOUR defects:
+
+1. **A latent one-day date shift.** `isoDate()` converted pg's `date` with `toISOString()`, which is
+   UTC — so every timezone EAST of UTC reads the previous calendar day. A due date of 2026-09-01 came
+   back as `2026-08-31`. Not live today only because the containers run with no `TZ` (UTC == local
+   there), but it reproduces on any dev machine in Asia, and setting `TZ` on the container — which a
+   Bali-based team would plausibly do to make logs readable — would have shipped wrong instalment
+   dates to every borrower silently. The same mistake in `loan-decision.ts` was worse than cosmetic:
+   approving at 02:00 local on the 1st would see UTC's "yesterday" (last month) and anchor the first
+   instalment THIS month instead of next. Both now read LOCAL components via one shared
+   `localToday()`.
+2. **The detail endpoint was an existence oracle.** A colleague reading someone else's loan id got
+   403 where an unknown id got 404, so the pair distinguishes "exists but not yours" from "does not
+   exist" — letting an employee walk ids and learn which loans are real in their company. A denial is
+   now 404, matching what the code's own comment always claimed.
+3. **Withdrawing a request threw a 500.** `automation_approvals.status` has allowed only
+   `pending|approved|rejected` since 0014 — a decider's vocabulary, with no word for the REQUESTER
+   retiring their own row. Migration `0083` widens it to include `cancelled`. `rejected` was the
+   zero-migration workaround and is wrong: it records that someone with authority refused, when
+   nobody ever looked.
+4. **My own test read through RLS and believed a real feature was broken.** `notifications` is in
+   0001's FORCE-RLS sweep, so reading it with `withGlobal` (no tenant GUC) returns zero rows and
+   reports success — indistinguishable from "notify() never fired". The fourth time this estate has
+   lost time to that exact shape.
+
+⚠ **`0083` exposes an EXISTING gap, deliberately left alone.** `cancelLeave()` never touches its
+paired approval, so every withdrawn leave request since 0028 has left a permanently-`pending` row in
+the approvals inbox. The migration makes the one-line fix possible; applying it to leave is outside
+wave E, and backfilling the stale rows would have to guess which `pending` rows were withdrawn versus
+still genuinely awaiting a decision.
+
+Verification standing: 79 tests green across all five HR suites (hr, loans, loan-schedule,
+wsd7-acceptance, module-hr-rls), `tsc` clean. Separately verified against the LIVE box: the deployed
+Cerbos policy answers all 11 authorization questions correctly (including the borrower being denied
+`hr_case:update` on his own loan), and the live schema enforces the third wall — an INSERT without
+the `hr` scope is REFUSED rather than silently dropped, and `total_due = 0` is rejected by the CHECK
+that made the degenerate-schedule bug a hard failure.
+
+One finding recorded rather than changed: `resource_hr_case.yaml`'s `member` rule is MODULE-BLIND
+(it tests tenant + assurance + subject, never `resource.attr.module`), so module scoping for a plain
+member comes entirely from ModuleEnabledGuard and RLS. Nothing exploits that today — every hr route
+passes `module: "hr"` — but a future controller authorizing `hr_case` under a different module would
+not be objected to by that rule.
+
 ### [0.14.0] — 2026-08-05 · IN PROGRESS (employee loans: request → approve → amortize → repay)
 
 Employee-portal wave E. An employee requests a loan, a human decides it on the EXISTING unified

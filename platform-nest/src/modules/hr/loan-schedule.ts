@@ -14,6 +14,19 @@
 //    `buildSchedule` guarantees `sum(principalDue) === principal` and it is asserted in the tests.
 
 /**
+ * Today as `YYYY-MM-DD`, from LOCAL components. The ONE clock-reading export in this otherwise pure
+ * module, kept here so both the controller and the decision handler share one implementation.
+ *
+ * ⚠ Deliberately NOT `new Date().toISOString().slice(0,10)`. That is UTC, and every timezone east of
+ * UTC sees the previous calendar day for part of each day — which silently disagrees with what pg
+ * `date` columns round-trip as. See the note on isoDate() in loans.controller.ts for the full story.
+ */
+export function localToday(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+/**
  * The conventional first-installment anchor: the 1st of the month AFTER `fromIso`. A fixed,
  * predictable anchor keeps the preview shown to the decider and the schedule frozen at approval on
  * the same footing. Pure (takes the date) so it is shared by the controller and the decision handler

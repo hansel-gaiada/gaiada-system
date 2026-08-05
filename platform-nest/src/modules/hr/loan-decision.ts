@@ -10,7 +10,7 @@
 import { withTenants } from "../../db";
 import { notify } from "../../core/http";
 import type { OutboxEvent } from "../../events/types";
-import { buildSchedule, firstOfNextMonth } from "./loan-schedule";
+import { buildSchedule, firstOfNextMonth, localToday } from "./loan-schedule";
 
 interface DecidedPayload {
   decision?: "approved" | "rejected";
@@ -56,7 +56,11 @@ export async function applyLoanDecision(event: OutboxEvent): Promise<void> {
         principal: row.principal_amount,
         annualRatePct: row.annual_interest_rate,
         termMonths: row.term_months,
-        firstDueOn: firstOfNextMonth(new Date().toISOString().slice(0, 10)),
+        // LOCAL components, not toISOString() — see the note on isoDate() in loans.controller.ts.
+        // Here the stake is a whole month: approving at 02:00 local on the 1st under a UTC+8 TZ
+        // would see UTC's "yesterday" (the previous month's last day) and anchor the first
+        // instalment THIS month instead of next.
+        firstDueOn: firstOfNextMonth(localToday()),
       });
       // Note: `schedule.length` can be SHORTER than term_months for a degenerate tiny principal
       // (loan-schedule.ts closes the loan early rather than emitting zero-value rows, which

@@ -35,14 +35,14 @@ import { AuthGuard } from "../../auth/guards";
 import { ModuleEnabledGuard } from "../module-enabled.guard";
 import { staffOrSelfRead } from "./hr.controller";
 import {
-  buildSchedule, firstOfNextMonth, summarizeLoan, type Installment, type RepaymentRow,
+  buildSchedule, firstOfNextMonth, localToday, summarizeLoan, type Installment, type RepaymentRow,
 } from "./loan-schedule";
 
 const REPAYMENT_METHODS = new Set(["payroll_deduction", "transfer", "cash", "other"]);
 const MAX_TERM_MONTHS = 120;
 
-/** Today as an ISO date. Isolated here so loan-schedule.ts itself stays clock-free and testable. */
-const today = (): string => new Date().toISOString().slice(0, 10);
+/** Today as an ISO date, from LOCAL components (see localToday's note on why not toISOString). */
+const today = localToday;
 
 interface LoanRow {
   id: string;
@@ -254,11 +254,20 @@ export class LoansController {
 
     // Authorize the ROW's subject, so an employee reads their own loan and staff read any. Done
     // after the fetch because the subject is what is being authorized.
-    await authorize(
-      req.principal,
-      { kind: "hr_case", tenantId, module: "hr", subjectUserId: loaded.row.subject_user_id },
-      "read",
-    );
+    //
+    // A denial becomes 404, NOT 403. Otherwise the two outcomes are distinguishable and the endpoint
+    // is an existence oracle: a colleague could walk loan ids and learn which ones are real in their
+    // company, which is exactly the fact a loan's existence should not volunteer. The caller has no
+    // legitimate use for the difference — they cannot see the row either way.
+    try {
+      await authorize(
+        req.principal,
+        { kind: "hr_case", tenantId, module: "hr", subjectUserId: loaded.row.subject_user_id },
+        "read",
+      );
+    } catch {
+      throw new NotFoundException("loan not found");
+    }
     return {
       ...shapeLoan(loaded.row, loaded.installments, loaded.repayments),
       repayments: loaded.ledger.map((r) => ({
@@ -451,9 +460,22 @@ async function loadChildren(
   return { installments, repayments };
 }
 
-/** pg returns `date` as a JS Date; the schedule math is string-based, so normalize at the boundary. */
+/**
+ * pg returns a `date` column as a JS Date at LOCAL midnight; the schedule math is string-based, so
+ * normalize at the boundary.
+ *
+ * ⚠ NOT `toISOString()`. That converts to UTC, which moves the CALENDAR DAY BACKWARDS for every
+ * timezone east of UTC: on a UTC+8 machine a due date of 2026-09-01 comes back as "2026-08-31".
+ * Latent rather than live today only because the containers run with no TZ set (UTC), so local ==
+ * UTC there — but it reproduces on any dev box in Asia (it broke a real assertion in
+ * loans.test.ts), and setting TZ on the container, which a Bali-based team would plausibly do to
+ * make logs readable, would ship it to production silently. For a date-only column the LOCAL
+ * components are the value, so read those.
+ */
 function isoDate(v: unknown): string {
-  if (v instanceof Date) return v.toISOString().slice(0, 10);
+  if (v instanceof Date) {
+    return `${v.getFullYear()}-${String(v.getMonth() + 1).padStart(2, "0")}-${String(v.getDate()).padStart(2, "0")}`;
+  }
   return String(v).slice(0, 10);
 }
 
