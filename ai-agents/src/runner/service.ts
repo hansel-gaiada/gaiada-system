@@ -35,7 +35,7 @@ import { traceRun, type AgentTrace, type TraceStatus } from "../evals/trace";
 import { specialists, writeSpecialists, supervisor } from "../specialists";
 import { ObservabilityCollector } from "../obs/collector";
 import { episodeFromTrace, type Episode } from "../memory/episodic";
-import { liveDeps, tenantContext, startRegistryImpactBootstrap } from "../deps";
+import { liveDeps, tenantContext, envelopeContext, startRegistryImpactBootstrap } from "../deps";
 import { PgGoalStore, type GoalStore, type FinishGoalPatch, type BudgetCaps, type RunInput } from "./store";
 import { GoalQueue } from "./queue";
 
@@ -233,7 +233,11 @@ export function buildRunnerApp(deps: RunnerDeps): FastifyInstance {
 
     let patch: FinishGoalPatch;
     try {
-      patch = await tenantContext.run(g.tenantId, async (): Promise<FinishGoalPatch> => {
+      // D14-14: `envelopeContext` nests INSIDE `tenantContext` — same goal, same lifetime, same
+      // per-goal-not-module-level reasoning (see deps.ts's header on `envelopeContext`). This is what
+      // lets `liveDeps.resolveApproval` recover the ORIGINAL requester's OBO envelope without agent.ts
+      // having to pass it explicitly (D14-10's contract deliberately omits it — see agent.ts's doc).
+      patch = await tenantContext.run(g.tenantId, () => envelopeContext.run(envelope, async (): Promise<FinishGoalPatch> => {
         if (g.agent === reg.supervisor.name || g.agent === "supervisor") {
           const run = await runOrchestrator(reg.supervisor, g.goal, envelope, counted, {
             tenantId: g.tenantId,
@@ -272,7 +276,7 @@ export function buildRunnerApp(deps: RunnerDeps): FastifyInstance {
         await store.insertRun(runInputFromTrace(trace, g.id, g.tenantId, provider));
         await recordObservation(trace, g.tenantId, provider);
         return mapTrace(trace);
-      });
+      }));
     } catch (err) {
       patch = mapError(err);
     }

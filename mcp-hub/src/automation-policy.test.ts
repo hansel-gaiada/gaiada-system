@@ -120,6 +120,76 @@ describe("automation scoped service accounts + write gate (WS4 §3)", () => {
     expect(names).toContain("llm.summarize");
     expect(names).toContain("projects.create");
   });
+
+  // ════════════════════════════════════════════════════════════════════════════════════════════════
+  // D14-14 — approvals.resolveExecute: never scoped, and the fail-closed tripwire if it ever is.
+  //
+  // These isolate the WORKFLOW-SCOPE and IMPACT-SUSPEND logic specifically, so they mint a "verified"
+  // n8n principal (`wfVerified`, NOT the file's shared `wf()` helper, which mints "low" — the same
+  // ceiling the real `mintPrincipal()` puts on every envelope-derived principal today). With a real
+  // "low" n8n principal the assurance-rank check in `authorize()` denies FIRST, before workflow scope
+  // or impact is ever consulted — which is an even stronger floor than either of these tests targets,
+  // but it would make both tests trivially pass for the wrong reason (a `wf()`-minted principal always
+  // reads "denied: ... requires verified assurance", never "not scoped" or "suspend: ... high-impact").
+  // Elevating assurance here isolates the SPECIFIC mechanisms Ruling 1 calls out; the real-world
+  // assurance ceiling is exercised separately in the LAST test in this block.
+  // ════════════════════════════════════════════════════════════════════════════════════════════════
+  function wfVerified(externalId: string): Principal {
+    return { provider: "n8n", externalId, assurance: "verified" };
+  }
+
+  describe("approvals.resolveExecute is never model/workflow-selectable (D14-14, architect Ruling 1)", () => {
+    it("is in NO real workflow's AUTOMATION_ALLOWLIST entry (structural — catches an accidental future addition)", () => {
+      const offenders = Object.entries(AUTOMATION_ALLOWLIST)
+        .filter(([, tools]) => tools.includes("approvals.resolveExecute"))
+        .map(([wf]) => wf);
+      expect(offenders).toEqual([]);
+    });
+
+    it("a verified n8n principal is STILL denied by the WORKFLOW-SCOPE check (deny-by-default — no allowlist entry names it)", () => {
+      const d = authorize(wfVerified("wf:new-client-seed"), "approvals.resolveExecute"); // a real, otherwise-write-capable workflow
+      expect(d.allow).toBe(false);
+      if (!d.allow) expect(d.reason).toMatch(/not scoped/);
+    });
+
+    it("THE TRIPWIRE: if it were EVER (mis-)scoped into a workflow, the impact gate would suspend it, not execute it", () => {
+      // Simulates the one mistake the architect's Ruling 1 explicitly guards against: someone adding
+      // this name to a real AUTOMATION_ALLOWLIST entry. Even then, the workflow-scope check would pass
+      // (that's the whole point of the mistake) — but the write:true/impact:"high" label the tool
+      // itself carries (registered in platform-write-tools.ts) means the D14 impact-suspend branch in
+      // `policy.ts` fires next, deny-with-suspend rather than allow. The honesty of the label IS the
+      // fail-closed backstop.
+      AUTOMATION_ALLOWLIST["wf:d14-14-mis-scoped-tripwire-test"] = ["approvals.resolveExecute"];
+      try {
+        const d = authorize(wfVerified("wf:d14-14-mis-scoped-tripwire-test"), "approvals.resolveExecute");
+        expect(d.allow).toBe(false);
+        if (!d.allow) expect(d.reason).toMatch(/suspend.*high-impact/);
+      } finally {
+        delete AUTOMATION_ALLOWLIST["wf:d14-14-mis-scoped-tripwire-test"];
+      }
+    });
+
+    it("a real (\"low\") n8n envelope is denied on assurance ALONE, before workflow-scope is even consulted — the actual production floor", () => {
+      const d = authorize(wf("wf:new-client-seed"), "approvals.resolveExecute"); // wf() mints "low", like real mintPrincipal()
+      expect(d.allow).toBe(false);
+      if (!d.allow) expect(d.reason).toMatch(/assurance/);
+    });
+
+    it("a non-automation (agent-envelope) principal is NOT gated by the workflow-scope/impact-suspend branch at all — assurance is the only floor", () => {
+      // The runner's OBO envelope for an agent goal is never provider==="n8n" (it is the ORIGINAL
+      // human/channel requester's envelope — telegram/whatsapp/platform/etc.), so `isAutomation()` is
+      // false and the whole automation branch in policy.ts (workflow scope + impact suspend) is
+      // skipped entirely, exactly as the architect's Ruling 1 states ("the agent-side gate never sees
+      // a tool that no AgentDef lists"). What remains is the assurance floor (minAssurance:"verified"
+      // on the tool itself) — a "low" agent-envelope principal is denied there, not by this branch.
+      const agentEnvelope: Principal = { provider: "telegram", externalId: "tg:555", assurance: "low" };
+      const d = authorize(agentEnvelope, "approvals.resolveExecute");
+      expect(d.allow).toBe(false);
+      if (!d.allow) expect(d.reason).toMatch(/assurance/);
+      const verifiedAgentEnvelope: Principal = { provider: "telegram", externalId: "tg:555", assurance: "verified" };
+      expect(authorize(verifiedAgentEnvelope, "approvals.resolveExecute").allow).toBe(true);
+    });
+  });
 });
 
 describe("D14 write gate suspends medium+/unclassified writes for automation", () => {

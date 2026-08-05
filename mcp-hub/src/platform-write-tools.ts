@@ -301,4 +301,64 @@ export function registerPlatformWriteTools(): void {
         principal,
       ),
   });
+
+  // ══════════════════════════════════════════════════════════════════════════════════════════════════
+  // D14-14 — the agent re-run transport. Fronts platform-nest's D14-10 endpoint
+  // `POST :tenantId/automation-approvals/resolve-and-execute` so `ai-agents/src/deps.ts`'s
+  // `resolveApproval` (the ONLY caller — see below) can reach it: ai-agents holds no platform
+  // credential and reaches the platform ONLY through this hub, exactly like every other tool here.
+  //
+  // NEVER MODEL-SELECTABLE (architect Ruling 1, 2026-08-05 SET C §C.0). This call is made by the
+  // RUNNER (`ai-agents/src/agent.ts`'s write gate consults `AgentDeps.resolveApproval` directly, not
+  // via a model-chosen tool call), never by a model choosing a tool from an `AgentDef.tools` map — the
+  // structural proof is `ai-agents/src/agent-write-guard.test.ts`'s assertion that this NAME appears in
+  // NO AgentDef anywhere. It is likewise added to NO workflow's `AUTOMATION_ALLOWLIST` (automation-
+  // policy.ts) — an n8n principal is denied by the workflow-scope check, which runs BEFORE impact is
+  // ever consulted (`policy.ts`'s `isAutomation` branch), so the "infinite regress" horn (a suspend-
+  // resolution tool that itself needs suspending) never applies: an agent envelope is never
+  // `isAutomation`, so the impact-suspend branch below is simply skipped for it, and an n8n principal
+  // never reaches the impact check at all because it fails the workflow-scope check first.
+  //
+  // WHY `impact: "high"` IS BOTH HONEST AND A TRIPWIRE: this call, when it succeeds, drives a
+  // human-approved WRITE (D14-03's single-use claim, re-driven as the original requester). Labeling it
+  // anything less would misrepresent its effect. And because it is scoped into NO workflow allow-list,
+  // that honesty costs nothing today — but it means that if a future edit EVER adds this name to an
+  // `AUTOMATION_ALLOWLIST` entry (the one thing this file's header forbids), the D14 impact gate
+  // suspends that call instead of silently executing it. A mis-scoping fails closed, not open.
+  //
+  // Real authorization for the call itself is NOT this `minAssurance` gate — it is layered, per the
+  // ruling: hub `minAssurance: "verified"` (today unreachable via any chat/portal OBO envelope, which
+  // `principal.ts`'s `mintPrincipal` only ever mints to "low" — the SAME pre-existing gap
+  // `rollup.metrics` in `tools.ts` already documents as "no chat surface can reach it"; closing that
+  // gap is a separate, already-deferred IdP/assurance ticket, not this one) + Cerbos (unchanged for a
+  // non-automation caller) + the platform endpoint's OWN binding: `requested_by == principal.id` (only
+  // the ORIGINAL requester may resolve their own suspended call — never the approver, per §1's
+  // authority rule). This registration adds a floor; it does not relax any of those.
+  registerTool({
+    name: "approvals.resolveExecute",
+    description:
+      "RUNNER-ONLY, never model-selectable: ask the platform whether a decided approval binds this exact " +
+      "(agent, tool, args) call and, if approved and unexecuted, execute it once. Never call this as a " +
+      "model-chosen action — it appears in no AgentDef and is authorized only for the original requester.",
+    minAssurance: "verified",
+    write: true,
+    impact: "high",
+    inputSchema: {
+      type: "object",
+      properties: {
+        tenantId: { type: "string" },
+        agentName: { type: "string", description: "the AgentDef name — matched against automation_approvals.workflow_id" },
+        toolName: { type: "string", description: "the tool the agent's high_write gate suspended on" },
+        toolArgs: { type: "object", description: "the exact args the canonical argsSha256 is computed over" },
+      },
+      required: ["tenantId", "agentName", "toolName"],
+    },
+    handler: (args, principal) =>
+      platformSend(
+        "POST",
+        `/api/${String(args.tenantId)}/automation-approvals/resolve-and-execute`,
+        { agentName: args.agentName, toolName: args.toolName, toolArgs: args.toolArgs ?? {} },
+        principal,
+      ),
+  });
 }

@@ -53,6 +53,24 @@
 // with a per-tool allowlist of high writes that satisfy them — do not simply delete the assertion, or
 // the next AgentDef edit re-arms the defect silently. The `low_write` half above is untouched by all
 // of this and stays as-is.
+//
+// ── D14-14 LANDED (2026-08-05) — THE BLANKET BAN BECOMES A PER-TOOL ALLOWLIST ───────────────────────
+// Prerequisite (1) above is now satisfied END TO END: `mcp-hub/src/platform-write-tools.ts` registers
+// `approvals.resolveExecute` (write:true, impact:"high", minAssurance:"verified" — never scoped into
+// any workflow allow-list, never listed in any AgentDef), and `ai-agents/src/deps.ts`'s `liveDeps`
+// binds a real `resolveApproval` that calls it. The transport half of the ban is gone.
+//
+// Prerequisite (2) is STILL per-tool: today's `approval-executables.ts` registers only `deploy.staging`
+// and `deploy.production` — neither is, or is meant to be, an AgentDef tool. So `RERUN_CAPABLE_HIGH_WRITES`
+// below is the allowlist the blanket ban becomes, and it is EMPTY today: no tool yet satisfies BOTH
+// halves for an agent-callable write. Today's three AgentDefs are therefore unaffected — this change is
+// a MECHANISM swap (blanket ban → per-tool allowlist + structural absence check), not a behavior change.
+//
+// TO ADD A TOOL to `RERUN_CAPABLE_HIGH_WRITES`, its PR must show BOTH, by name:
+//   (a) the live resolver is wired (true globally as of D14-14 — cite this file's date/ticket), AND
+//   (b) `platform-nest/src/core/approval-executables.ts` has an entry for that exact tool name with a
+//       server-side `precondition` (not the `NO_PRECONDITION_REASON` fail-closed default).
+// Do not delete this assertion when adding an entry — extend the allowlist and keep the check.
 import { describe, it, expect } from "vitest";
 import * as specialistsModule from "./specialists";
 import type { AgentDef, Impact } from "./agent";
@@ -72,6 +90,30 @@ import type { AgentDef, Impact } from "./agent";
  * columns' nullability in the migration.
  */
 export const VERIFIED_IDEMPOTENT_LOW_WRITES: readonly string[] = ["tasks.update"];
+
+/**
+ * D14-14 — high-write tools an AgentDef MAY declare, because BOTH prerequisites the header above
+ * requires are satisfied for that exact tool name:
+ *   (a) the live `resolveApproval` transport is wired (globally true since D14-14 — see this file's
+ *       header for the mechanism), AND
+ *   (b) `platform-nest/src/core/approval-executables.ts` registers that tool with a real server-side
+ *       precondition (not the fail-closed `NO_PRECONDITION_REASON` default).
+ *
+ * EMPTY TODAY. `approval-executables.ts` registers only `deploy.staging`/`deploy.production` (D14-05),
+ * and neither is an agent-callable tool — they exist for the n8n `wf:delivery` pipeline, not for any
+ * AgentDef. Extending this list requires citing BOTH (a) and (b) by name in the PR for the specific
+ * tool being added; a per-tool proof, never a blanket audit (the same discipline
+ * `VERIFIED_IDEMPOTENT_LOW_WRITES` above already uses).
+ */
+export const RERUN_CAPABLE_HIGH_WRITES: readonly string[] = [];
+
+/** D14-14 — the runner-only re-run transport tool. NEVER model-selectable: the write gate in
+ *  `agent.ts` calls `AgentDeps.resolveApproval` directly, never via a tool a model chose from an
+ *  `AgentDef.tools` map. This name must therefore appear in NO AgentDef, ever — see the guard test
+ *  below. (Kept as a literal rather than imported: ai-agents cannot import mcp-hub's registry —
+ *  separate standalone projects, not a monorepo — so this is the one place the name is pinned on the
+ *  ai-agents side, mirroring how `mcp-hub/src/platform-write-tools.ts` pins it on the other.) */
+export const RESOLVE_EXECUTE_TOOL_NAME = "approvals.resolveExecute";
 
 /** Structural AgentDef check — deliberately duck-typed rather than instanceof/type-only. */
 function isAgentDef(value: unknown): value is AgentDef {
@@ -125,10 +167,10 @@ describe("D14-11 — AgentDef write-capability guard", () => {
     expect(defs.map((d) => d.def.name)).toContain("task-triager");
   });
 
-  it("declares no `high_write` tool on any AgentDef (D14-10 landed; see the header for what still gates the lift)", () => {
+  it("declares `high_write` only for tools on RERUN_CAPABLE_HIGH_WRITES (D14-14: per-tool allowlist, not a blanket ban)", () => {
     const offenders = defs.flatMap(({ exportPath, def }) =>
       Object.entries(def.tools)
-        .filter(([, impact]) => impact === "high_write")
+        .filter(([tool, impact]) => impact === "high_write" && !RERUN_CAPABLE_HIGH_WRITES.includes(tool))
         .map(([tool]) => `${def.name} (${exportPath}) declares high_write "${tool}"`),
     );
     expect(
@@ -136,24 +178,48 @@ describe("D14-11 — AgentDef write-capability guard", () => {
       offenders.length === 0
         ? ""
         : [
-            "A `high_write` AgentDef tool is still banned. D14-10 landed, but two prerequisites OUTSIDE",
-            "its scope are not met, so a re-run STILL cannot make forward progress with this tool:",
+            "A `high_write` AgentDef tool must be on RERUN_CAPABLE_HIGH_WRITES before an AgentDef may",
+            `declare it. Current allowlist: [${RERUN_CAPABLE_HIGH_WRITES.join(", ")}] (see this file's header).`,
             "",
-            "  1. No live `AgentDeps.resolveApproval` transport. agent.ts consults it before throwing,",
-            "     but nothing implements it (deps.ts has no binding, and the MCP hub exposes no",
-            "     resolve-and-execute tool — only approvals.request). With no resolver the gate takes its",
-            "     documented fallback — throw + file — i.e. the duplicate-approval generator, unchanged:",
-            "     a re-run replays steps 1..N-1, re-suspends here, and files a SECOND approval.",
+            "Two prerequisites gate that allowlist, and a PR extending it must show BOTH, by name, for",
+            "the specific tool:",
             "",
-            "  2. No executable-registry entry for the tool. Even with the transport, the platform can",
-            "     only execute a tool registered in platform-nest/src/core/approval-executables.ts",
-            "     (today: deploy.staging, deploy.production). Anything else stays",
-            "     execution_status='not_applicable' and resolves to `not_executable` — a loud stop, no",
-            "     progress. Entries are one-per-ticket with their own server-side precondition; money-",
-            "     spending tools are permanently barred.",
+            "  (a) The live `AgentDeps.resolveApproval` transport is wired — TRUE globally since D14-14",
+            "      (mcp-hub/src/platform-write-tools.ts registers approvals.resolveExecute;",
+            "      ai-agents/src/deps.ts's liveDeps binds a real resolveApproval that calls it).",
             "",
-            "To hold a high_write, satisfy BOTH for that tool, then replace this blanket ban with a",
-            "per-tool allowlist naming it — do not just delete the assertion.",
+            "  (b) platform-nest/src/core/approval-executables.ts registers THIS tool with a real",
+            "      server-side precondition (not the fail-closed NO_PRECONDITION_REASON default) — the",
+            "      platform can only auto-execute a registered tool; anything else stays",
+            "      execution_status='not_applicable' and resolves to `not_executable`, a loud stop with",
+            "      no forward progress. Entries are one-per-ticket with their own precondition;",
+            "      money-spending tools are permanently barred from that registry.",
+            "",
+            "Add the tool name to RERUN_CAPABLE_HIGH_WRITES only once both hold — do not just delete or",
+            "widen this assertion.",
+            "",
+            ...offenders.map((o) => `  - ${o}`),
+          ].join("\n"),
+    ).toEqual([]);
+  });
+
+  it("D14-14: approvals.resolveExecute — the runner-only re-run transport — appears in NO AgentDef.tools map", () => {
+    // Structural proof, not a convention: the write gate in agent.ts calls AgentDeps.resolveApproval
+    // DIRECTLY (runner infrastructure), never via a tool a model selects from an AgentDef.tools map.
+    // If this name ever appeared in a map, a model could choose to call it directly — defeating the
+    // single-use claim and the requested_by binding that make it safe (§1's authority rule) — so its
+    // absence is exactly what the architect's Ruling 1 (2026-08-05 SET C §C.0) requires.
+    const offenders = defs
+      .filter(({ def }) => RESOLVE_EXECUTE_TOOL_NAME in def.tools)
+      .map(({ def, exportPath }) => `${def.name} (${exportPath}) lists ${RESOLVE_EXECUTE_TOOL_NAME}`);
+    expect(
+      offenders,
+      offenders.length === 0
+        ? ""
+        : [
+            `"${RESOLVE_EXECUTE_TOOL_NAME}" must never appear in any AgentDef.tools map — it is a`,
+            "runner-only transport (agent.ts's write gate calls AgentDeps.resolveApproval directly),",
+            "never a model-selectable tool. See D14-14 / architect Ruling 1 (2026-08-05 SET C §C.0).",
             "",
             ...offenders.map((o) => `  - ${o}`),
           ].join("\n"),

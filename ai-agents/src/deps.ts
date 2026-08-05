@@ -2,13 +2,40 @@
 // The agent process holds NO provider keys and NO database access — by construction.
 import "dotenv/config";
 import { AsyncLocalStorage } from "node:async_hooks";
-import type { AgentDeps, Envelope, RegistryToolImpact } from "./agent";
+import type { AgentDeps, ApprovalResolution, Envelope, RegistryToolImpact } from "./agent";
 
 // Per-goal tenant context: the runner wraps each goal's execution in `tenantContext.run(tenantId, …)`
 // so completions are attributed to the triggering tenant for the Gateway's existing per-tenant daily
 // cap (design §3.5.4 — the cap already EXISTS; this only feeds `x-tenant-id`). Concurrency-safe (unlike
 // a module-level variable) when AGENT_MAX_CONCURRENT_GOALS > 1.
 export const tenantContext = new AsyncLocalStorage<string>();
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+// D14-14 — the per-goal OBO envelope, mirroring `tenantContext` immediately above (same file, same
+// reasoning, same concurrency hazard).
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+//
+// WHY THIS EXISTS: `resolveApproval` (below) must call the platform's `resolve-and-execute` endpoint
+// AS THE ORIGINAL REQUESTER — the endpoint is Cerbos-gated to `requested_by == principal.id` (§1's
+// authority rule; see `platform-nest/src/core/automation-approvals.controller.ts`'s header). But
+// `AgentDeps.resolveApproval` (agent.ts, D14-10) deliberately carries NO envelope parameter — only
+// `{agentName, toolName, toolArgs}` — so the concrete implementation must recover the run's envelope
+// from context, exactly as `complete()` below recovers `tenantId` from `tenantContext`. `runOrchestrator`
+// / `runWriteAgent` / `runAgent` all thread ONE envelope value through an entire goal unchanged (it is a
+// function parameter, never re-derived per call), so capturing it ONCE per goal — at the SAME place
+// `runner/service.ts` already opens `tenantContext.run(g.tenantId, …)` — is correct for the run's whole
+// lifetime, and AsyncLocalStorage (not a module-level variable) keeps concurrent goals from clobbering
+// each other's envelope, same as tenantContext's own header note.
+//
+// FAIL-SOFT BY DESIGN, NOT BY ACCIDENT: a caller that never wraps a run in this context (today: the CLI,
+// `cli.ts`, which also never wraps `tenantContext`) gets `{ match: "none" }` from `resolveApproval` below
+// — i.e. exactly the "no resolver configured" fallback, NEVER a thrown error. That is deliberately a
+// DIFFERENT failure class from a fault DURING an attempted consultation (hub down / 403 / unknown tool,
+// which DO throw, per this file's `resolveApproval` doc): "this call site was never wired to consult the
+// platform" is not evidence of anything platform-side, so treating it as `none` cannot manufacture the
+// duplicate-approval generator the way mapping a real fault to `none` would. Wiring MORE call sites is a
+// matter of adding `envelopeContext.run(...)` at that site — never of relaxing this check.
+export const envelopeContext = new AsyncLocalStorage<Envelope>();
 
 const config = {
   gatewayUrl: process.env.GATEWAY_URL ?? "http://localhost:3002",
@@ -155,9 +182,54 @@ export function resetRegistryImpactCache(): void {
   registryImpactCache.clear();
 }
 
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+// D14-14 — the live `resolveApproval` transport. Turns D14-10's proven-correct `AgentDeps.resolveApproval`
+// contract (agent.ts) from an interface nothing implements into a real call through the hub's
+// `approvals.resolveExecute` tool (mcp-hub/src/platform-write-tools.ts), which fronts platform-nest's
+// `POST :tenantId/automation-approvals/resolve-and-execute` (D14-10).
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+//
+// MUST NEVER MAP A FAULT TO `{ match: "none" }` (agent.ts's own contract doc, restated here because
+// this is the one place it can be violated by accident): `none` means "nothing decided binds this call,
+// file a fresh approval" — mapping a transport failure, a hub-side deny, or an unknown-tool response
+// onto it would rebuild the exact duplicate-approval generator this ticket exists to kill. So this
+// function is deliberately UNGUARDED against `callTool`'s own thrown errors: it lets them propagate.
+// `callTool` (above) already throws on every one of those cases — a network failure (hub down; `fetch`
+// itself rejects), a non-2xx HTTP response, or an MCP `isError` result (unknown tool, insufficient
+// assurance, workflow-scope denial, or the tool handler's own thrown error, which for this tool
+// includes the platform's 403 when a decided row exists but belongs to someone else, per §1's authority
+// rule) — so simply not catching them is what satisfies the contract. The ONE thing this function adds
+// beyond a bare passthrough is the context lookup below, whose OWN "nothing to consult" case resolves to
+// `none` deliberately — see `envelopeContext`'s doc above for why that is a different failure class.
+async function resolveApproval(input: {
+  agentName: string;
+  toolName: string;
+  toolArgs: Record<string, unknown>;
+}): Promise<ApprovalResolution> {
+  const tenantId = tenantContext.getStore();
+  const envelope = envelopeContext.getStore();
+  if (!tenantId || !envelope) {
+    // Not wired for this call site (see envelopeContext's doc) — behave exactly as if no resolver were
+    // configured at all. This is NOT a fault during a consultation; no consultation was attempted.
+    return { match: "none" };
+  }
+  const raw = await callTool(
+    "approvals.resolveExecute",
+    { tenantId, agentName: input.agentName, toolName: input.toolName, toolArgs: input.toolArgs },
+    envelope,
+  );
+  // `raw` is the hub tool's text content — for this tool, the platform's JSON response verbatim
+  // (mirrors `approvals.request`'s own handler in platform-write-tools.ts: `JSON.stringify(await
+  // res.json())`). A response that fails to parse as JSON is exactly as much a fault as an HTTP error —
+  // JSON.parse throwing here propagates for the same reason `callTool`'s own throws do: never silently
+  // treated as "nothing decided".
+  return JSON.parse(raw) as ApprovalResolution;
+}
+
 export const liveDeps: AgentDeps = {
   complete,
   callTool,
   lastProvider: () => lastServedProvider,
   getRegistryImpact,
+  resolveApproval,
 };

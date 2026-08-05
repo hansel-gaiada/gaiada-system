@@ -21,8 +21,17 @@ func NewOllamaProvider(url, model, embedModel string, client *http.Client) *Olla
 	return &OllamaProvider{URL: url, Model: model, EmbedModel: embedModel, Client: client}
 }
 
+// Compile-time check: Ollama is the one provider that can report real ASST-11 usage today (its
+// NDJSON final line carries eval counts) — see the plan doc's DONE WHEN list.
+var _ UsageStreamingProvider = (*OllamaProvider)(nil)
+var _ ModelReporter = (*OllamaProvider)(nil)
+
 func (p *OllamaProvider) Name() string    { return "ollama" }
 func (p *OllamaProvider) Available() bool { return p.URL != "" }
+
+// ModelName implements providers.ModelReporter (ASST-11): the chat model this instance is
+// configured with, exactly what /api/generate is called with — never the embed model.
+func (p *OllamaProvider) ModelName() string { return p.Model }
 
 func (p *OllamaProvider) Complete(ctx context.Context, prompt string) (string, error) {
 	// Marshal error is safely ignored: the input is always a struct of strings/bools,
@@ -63,6 +72,23 @@ func (p *OllamaProvider) Complete(ctx context.Context, prompt string) (string, e
 // incrementality). bufio.Scanner reads and dispatches one line at a time so onToken fires as
 // each chunk arrives.
 func (p *OllamaProvider) CompleteStream(ctx context.Context, prompt string, onToken func(string)) error {
+	// onUsage is a no-op: plain CompleteStream callers (everything before ASST-11) don't ask for
+	// usage, so completeStream's real-counts plumbing is invisible to them.
+	return p.completeStream(ctx, prompt, onToken, func(int, int) {})
+}
+
+// CompleteStreamUsage implements providers.UsageStreamingProvider (ASST-11): identical wire
+// behavior to CompleteStream, but additionally invokes onUsage with Ollama's real end-of-stream
+// eval counts when the final NDJSON line reports them. Real Ollama's `"done":true` line carries
+// `prompt_eval_count` and `eval_count` (see the Ollama API docs for /api/generate) — these are the
+// upstream's own token accounting, not an estimate, so they are exactly what ASST-11's `usage`
+// event is for. If either count is absent (older Ollama, or a response cut short before any
+// generation happened) onUsage is never called — no guess, no zero-fill.
+func (p *OllamaProvider) CompleteStreamUsage(ctx context.Context, prompt string, onToken func(string), onUsage func(promptTokens, completionTokens int)) error {
+	return p.completeStream(ctx, prompt, onToken, onUsage)
+}
+
+func (p *OllamaProvider) completeStream(ctx context.Context, prompt string, onToken func(string), onUsage func(promptTokens, completionTokens int)) error {
 	// Marshal error is safely ignored: the input is always a struct of strings/bools,
 	// which is always marshalable.
 	body, _ := json.Marshal(map[string]any{"model": p.Model, "prompt": prompt, "stream": true})
@@ -93,9 +119,11 @@ func (p *OllamaProvider) CompleteStream(ctx context.Context, prompt string, onTo
 			continue
 		}
 		var chunk struct {
-			Response *string `json:"response"`
-			Done     bool    `json:"done"`
-			Error    *string `json:"error"`
+			Response        *string `json:"response"`
+			Done            bool    `json:"done"`
+			Error           *string `json:"error"`
+			PromptEvalCount *int    `json:"prompt_eval_count"`
+			EvalCount       *int    `json:"eval_count"`
 		}
 		if err := json.Unmarshal([]byte(line), &chunk); err != nil {
 			// A malformed or truncated line (e.g. the upstream connection dropped mid-write,
@@ -111,6 +139,12 @@ func (p *OllamaProvider) CompleteStream(ctx context.Context, prompt string, onTo
 			onToken(*chunk.Response)
 		}
 		if chunk.Done {
+			// ASST-11: only call onUsage when BOTH counts are actually present on this line —
+			// a partial pair (one present, one absent) is not a real count either, so it is
+			// treated the same as neither being present rather than half-guessed.
+			if chunk.PromptEvalCount != nil && chunk.EvalCount != nil {
+				onUsage(*chunk.PromptEvalCount, *chunk.EvalCount)
+			}
 			break
 		}
 	}

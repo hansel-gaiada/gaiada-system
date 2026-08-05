@@ -109,9 +109,9 @@ func writeErr(w http.ResponseWriter, status int, msg string) {
 // distinguish "the stream ended cleanly" from "the connection dropped mid-answer", and it did
 // not exist before this ticket.
 //
-// writeSSEData/writeSSEError/writeSSEDone are the ONLY functions that may write `data:` or
-// `event:` lines on this route — every call site below goes through one of them so the
-// one-line-of-JSON invariant cannot be bypassed by a future edit forgetting to encode.
+// writeSSEData/writeSSEError/writeSSEDone/writeSSEMeta/writeSSEUsage are the ONLY functions that
+// may write `data:` or `event:` lines on this route — every call site below goes through one of
+// them so the one-line-of-JSON invariant cannot be bypassed by a future edit forgetting to encode.
 func writeSSEData(w http.ResponseWriter, flusher http.Flusher, canFlush bool, payload string) {
 	// json.Marshal of a Go string cannot fail (invalid UTF-8 is replaced, never rejected), so
 	// the encode error is not actionable — but guard it anyway rather than assume.
@@ -144,6 +144,87 @@ func writeSSEDone(w http.ResponseWriter, flusher http.Flusher, canFlush bool) {
 	if canFlush {
 		flusher.Flush()
 	}
+}
+
+// --- ASST-11: additive `event: meta` + terminal `event: usage` -------------------------------
+//
+// Both are grammar-v2 events (single-line JSON `data:`, same as everything else on this route)
+// layered ADDITIVELY on top of ASST-10: an older consumer that has never heard of "meta" or
+// "usage" simply never matches those `event:` lines and is unaffected — the only consumer that
+// exists today (ASST-06's relay, not yet built) is written against this doc from day one, and
+// after it exists this framing may never change again without a version bump (Ruling 2).
+//
+// metaPayload answers OQ-6: which brain actually served THIS stream. providerSession is reserved
+// for a future per-provider session/conversation handle (e.g. an upstream that supports multi-turn
+// server-side state) — nothing in this gateway populates it yet, so it is always omitted rather
+// than sent empty; a consumer must already treat its absence as "no session", never an error.
+type metaPayload struct {
+	Provider        string `json:"provider"`
+	Model           string `json:"model"`
+	ProviderSession string `json:"providerSession,omitempty"`
+}
+
+// writeSSEMeta writes the `event: meta` frame. Call site + timing rule: see the long comment
+// immediately above the `emit` closure inside the /complete/stream handler — it must be written
+// from INSIDE the DLP scrubber's sink, at the first byte release, never from inside the
+// chain.Run/CompleteStream callback directly (a provider that never gets bytes to the wire must
+// never announce itself).
+func writeSSEMeta(w http.ResponseWriter, flusher http.Flusher, canFlush bool, provider, model string) {
+	enc, err := json.Marshal(metaPayload{Provider: provider, Model: model})
+	if err != nil {
+		// Marshal of two plain strings cannot fail in practice (see writeSSEData's identical
+		// reasoning) — guarded anyway rather than assumed. Drop the un-encodable model rather than
+		// the whole frame: knowing WHICH provider served, even without its model name, is still
+		// strictly better than silence.
+		enc, _ = json.Marshal(metaPayload{Provider: provider})
+	}
+	fmt.Fprintf(w, "event: meta\ndata: %s\n\n", enc)
+	if canFlush {
+		flusher.Flush()
+	}
+}
+
+// usagePayload is real provider-reported token counts ONLY — see providers.UsageStreamingProvider
+// for why this can never be zero-filled or estimated. ASST-06's own ~4-chars/token estimate is the
+// labelled fallback a consumer keeps using when this frame never arrives.
+type usagePayload struct {
+	PromptTokens     int `json:"promptTokens"`
+	CompletionTokens int `json:"completionTokens"`
+}
+
+// writeSSEUsage writes the terminal `event: usage` frame — see its one call site (immediately
+// before writeSSEDone, on the success path only) for why it can never appear on an error path or
+// after `done`.
+func writeSSEUsage(w http.ResponseWriter, flusher http.Flusher, canFlush bool, promptTokens, completionTokens int) {
+	enc, err := json.Marshal(usagePayload{PromptTokens: promptTokens, CompletionTokens: completionTokens})
+	if err != nil {
+		// Two ints cannot fail to marshal; guarded for the same reason as above.
+		return
+	}
+	fmt.Fprintf(w, "event: usage\ndata: %s\n\n", enc)
+	if canFlush {
+		flusher.Flush()
+	}
+}
+
+// modelOf reports a provider's model name via the optional providers.ModelReporter capability, or
+// "" for a provider with no fixed model concept (echo) — truthful absence, not a guess.
+func modelOf(p providers.Provider) string {
+	if mr, ok := p.(providers.ModelReporter); ok {
+		return mr.ModelName()
+	}
+	return ""
+}
+
+// callCompleteStream invokes CompleteStream, using the ASST-11 usage extension when the provider
+// implements it so onUsage fires with the provider's real end-of-stream counts. A provider without
+// the extension (echo; any provider that hasn't been wired for real counts yet) simply never
+// drives onUsage — usage stays absent on the wire for that attempt, never faked.
+func callCompleteStream(ctx context.Context, sp providers.StreamingProvider, prompt string, onToken func(string), onUsage func(promptTokens, completionTokens int)) error {
+	if up, ok := sp.(providers.UsageStreamingProvider); ok {
+		return up.CompleteStreamUsage(ctx, prompt, onToken, onUsage)
+	}
+	return sp.CompleteStream(ctx, prompt, onToken)
 }
 
 func authorized(r *http.Request, token string) bool {
@@ -709,6 +790,19 @@ func NewServer(cfg config.Config, chains Chains, b *budget.Budget, classifier *d
 		streamed := false
 		midStreamErrorHandled := false
 
+		// ASST-11: metaEmitted/currentProvider/currentModel/usage are the meta+usage plumbing.
+		// currentProvider/currentModel are written at the TOP of each chain.Run attempt (below),
+		// i.e. before that attempt's CompleteStream/Complete call runs — so whenever emit() below
+		// fires, these two variables name exactly the provider whose output is being released,
+		// never a prior failed-over attempt and never a later one that hasn't started yet (chain.Run
+		// tries providers strictly sequentially, so at most one attempt is ever "current").
+		metaEmitted := false
+		var currentProvider, currentModel string
+		// usage is nil until a provider's onUsage callback fires with REAL counts (ASST-11: never
+		// zero-filled, never estimated). It is only ever read on the success path, after chain.Run
+		// returns — see the write site right before writeSSEDone.
+		var usage *usagePayload
+
 		// Native streaming when the selected provider supports it; otherwise emit the full
 		// response as one SSE event so the wire contract is stable regardless.
 		//
@@ -722,7 +816,19 @@ func NewServer(cfg config.Config, chains Chains, b *budget.Budget, classifier *d
 		//   2. single-chunk fallback for a non-streaming provider → dlp.DLP(text) at the bottom.
 		// dlp.DLP earlier in this handler covers the PROMPT only and is not a substitute for
 		// either.
+		//
+		// ASST-11: emit is ALSO the one and only place `event: meta` can be written for this
+		// response. Writing it here — inside the scrubber's sink, guarded by metaEmitted, BEFORE
+		// the token that triggered the release — is what makes the timing rule (Ruling 2) real
+		// rather than aspirational: meta names whichever provider is "current" at the moment bytes
+		// actually reach the wire, which is NEVER the provider from an attempt whose buffered output
+		// was Reset() (discarded) on failover, because Reset() means emit() was never called for
+		// that attempt at all. See TestCompleteStreamMetaNamesFailoverProviderNotTheOneThatDiedInsideHoldWindow.
 		emit := func(token string) {
+			if !metaEmitted {
+				metaEmitted = true
+				writeSSEMeta(w, flusher, canFlush, currentProvider, currentModel)
+			}
 			streamed = true
 			// ASST-10: single-line JSON `data:` payload — see the writeSSEData comment above for
 			// why this is the only safe encoding for arbitrary token text.
@@ -765,8 +871,16 @@ func NewServer(cfg config.Config, chains Chains, b *budget.Budget, classifier *d
 		onToken := func(token string) { scrubber.Write(token) }
 		streamedAttempt := false
 		text, _, _, err := chain.Run(chains.LLM, streamCtx, func(p providers.Provider) (string, error) {
+			// ASST-11: recorded BEFORE the attempt runs, so if emit() fires during (or at the final
+			// Close() flush after) THIS attempt, it reports THIS provider — see the emit closure's
+			// comment for why that is always the provider actually releasing bytes, never a prior
+			// discarded attempt or a later one that hasn't run yet.
+			currentProvider, currentModel = p.Name(), modelOf(p)
 			if sp, isStreaming := p.(providers.StreamingProvider); isStreaming {
-				if serr := sp.CompleteStream(streamCtx, result.Clean, onToken); serr != nil {
+				serr := callCompleteStream(streamCtx, sp, result.Clean, onToken, func(promptTokens, completionTokens int) {
+					usage = &usagePayload{PromptTokens: promptTokens, CompletionTokens: completionTokens}
+				})
+				if serr != nil {
 					if streamed {
 						// Scrubbed bytes from THIS attempt already reached the client. Flush the
 						// held tail (so the client gets everything the provider did produce, once
@@ -782,6 +896,10 @@ func NewServer(cfg config.Config, chains Chains, b *budget.Budget, classifier *d
 						// Nothing reached the client: everything this attempt produced is still
 						// inside the DLP buffer. Drop it so the next provider starts clean.
 						scrubber.Reset()
+						// ASST-11: this attempt's usage (if any) must not survive failover either —
+						// it belongs to a provider that never committed bytes to the wire, exactly
+						// like the discarded buffer it traveled alongside.
+						usage = nil
 					}
 					return "", serr
 				}
@@ -813,6 +931,12 @@ func NewServer(cfg config.Config, chains Chains, b *budget.Budget, classifier *d
 				return
 			}
 			emit(clean.Clean)
+		}
+		// ASST-11: usage is TERMINAL — written before `done`, and ONLY when a provider actually
+		// reported real counts (usage is nil otherwise: never zero-filled, never estimated). This
+		// is unreachable on any error path — every error branch above returns before this line.
+		if usage != nil {
+			writeSSEUsage(w, flusher, canFlush, usage.PromptTokens, usage.CompletionTokens)
 		}
 		// ASST-10: the clean-completion terminal. Reached ONLY on a success path — every error
 		// branch above returns before this point — so a consumer can rely on `event: done` to

@@ -84,6 +84,10 @@ func (p *OpenAIProvider) chat(ctx context.Context, model string, content any) (s
 
 func (p *OpenAIProvider) Name() string { return "openai" }
 
+// ModelName implements providers.ModelReporter (ASST-11): the text-completion model — the same one
+// Complete() uses, never VisionModel (media is a different capability with its own model choice).
+func (p *OpenAIProvider) ModelName() string { return p.Model }
+
 // Available needs both a base URL and a key — an OpenAI-compatible endpoint always authenticates,
 // so a missing key is a misconfiguration, not an anonymous mode.
 func (p *OpenAIProvider) Available() bool { return p.BaseURL != "" && p.APIKey != "" }

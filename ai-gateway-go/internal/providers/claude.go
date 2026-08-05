@@ -28,6 +28,9 @@ func NewClaudeProvider(apiKey, model string, client *http.Client) *ClaudeProvide
 func (p *ClaudeProvider) Name() string    { return "claude" }
 func (p *ClaudeProvider) Available() bool { return p.APIKey != "" }
 
+// ModelName implements providers.ModelReporter (ASST-11).
+func (p *ClaudeProvider) ModelName() string { return p.Model }
+
 func (p *ClaudeProvider) endpoint() string {
 	if p.baseURL != "" {
 		return p.baseURL

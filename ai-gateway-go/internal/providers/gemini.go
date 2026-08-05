@@ -28,6 +28,9 @@ func NewGeminiProvider(apiKey, model string, client *http.Client) *GeminiProvide
 func (p *GeminiProvider) Name() string    { return "gemini" }
 func (p *GeminiProvider) Available() bool { return p.APIKey != "" }
 
+// ModelName implements providers.ModelReporter (ASST-11).
+func (p *GeminiProvider) ModelName() string { return p.Model }
+
 func (p *GeminiProvider) base() string {
 	if p.baseURL != "" {
 		return p.baseURL

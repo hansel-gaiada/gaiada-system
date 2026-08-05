@@ -21,9 +21,67 @@ describe("platform write-tools", () => {
   afterEach(() => vi.restoreAllMocks());
 
   it("registers the write + authz tools", () => {
-    for (const n of ["authz.check", "projects.create", "tasks.create", "tasks.update", "approvals.request"]) {
+    for (const n of ["authz.check", "projects.create", "tasks.create", "tasks.update", "approvals.request", "approvals.resolveExecute"]) {
       expect(getTool(n)).toBeDefined();
     }
+  });
+
+  // D14-14 — the agent re-run transport.
+  describe("approvals.resolveExecute (D14-14)", () => {
+    it("is registered write:true, impact:high, minAssurance:verified — the honest label + fail-closed tripwire", () => {
+      const t = getTool("approvals.resolveExecute")!;
+      expect(t.write).toBe(true);
+      expect(t.impact).toBe("high");
+      expect(t.minAssurance).toBe("verified");
+    });
+
+    it("forwards tenantId + the caller's OBO envelope to resolve-and-execute, and returns the platform's resolution verbatim", async () => {
+      const resolution = { match: "executed", approvalId: "ap-1", consumed: false, result: "done", truncated: false };
+      const spy = mockFetch(200, resolution);
+      vi.stubGlobal("fetch", spy);
+      const out = await getTool("approvals.resolveExecute")!.handler(
+        { tenantId: "co-1", agentName: "task-triager", toolName: "tasks.update", toolArgs: { taskId: "t1" } },
+        principal,
+      );
+      expect(JSON.parse(out)).toEqual(resolution);
+      const [url, init] = (spy as any).mock.calls[0];
+      expect(url).toContain("/api/co-1/automation-approvals/resolve-and-execute");
+      expect(init.method).toBe("POST");
+      expect((init.headers as Record<string, string>)["x-obo-provider"]).toBe(principal.provider);
+      expect((init.headers as Record<string, string>)["x-obo-external-id"]).toBe(principal.externalId);
+      const body = JSON.parse(init.body);
+      expect(body).toEqual({ agentName: "task-triager", toolName: "tasks.update", toolArgs: { taskId: "t1" } });
+      // The tenantId travels in the URL, exactly like every other tool here — never duplicated into the
+      // body (which would let a caller-supplied body tenantId silently diverge from the URL's).
+      expect(body.tenantId).toBeUndefined();
+    });
+
+    it("defaults toolArgs to {} when omitted", async () => {
+      const spy = mockFetch(200, { match: "none" });
+      vi.stubGlobal("fetch", spy);
+      await getTool("approvals.resolveExecute")!.handler({ tenantId: "co-1", agentName: "a", toolName: "t" }, principal);
+      const body = JSON.parse((spy as any).mock.calls[0][1].body);
+      expect(body.toolArgs).toEqual({});
+    });
+
+    it("maps a platform 403 (someone else's approval) to a thrown denial — never silently swallowed", async () => {
+      vi.stubGlobal("fetch", mockFetch(403, { error: "not authorized: an approved execution may be resolved only by the principal that filed it" }));
+      await expect(
+        getTool("approvals.resolveExecute")!.handler({ tenantId: "co-1", agentName: "a", toolName: "t" }, principal),
+      ).rejects.toThrow(/not authorized/);
+    });
+
+    it("maps a hub-unreachable network failure to a thrown error", async () => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => {
+          throw new Error("ECONNREFUSED");
+        }),
+      );
+      await expect(
+        getTool("approvals.resolveExecute")!.handler({ tenantId: "co-1", agentName: "a", toolName: "t" }, principal),
+      ).rejects.toThrow(/ECONNREFUSED/);
+    });
   });
 
   it("approvals.request is a LOW write and posts a suspension to the platform inbox", () => {

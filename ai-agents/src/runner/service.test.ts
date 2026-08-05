@@ -12,6 +12,7 @@ import type {
 import { EpisodicStore } from "../memory/episodic";
 import { ObservabilityCollector } from "../obs/collector";
 import { supervisor as realSupervisor, taskTriager } from "../specialists";
+import { tenantContext, envelopeContext } from "../deps";
 import type { AgentDef, AgentDeps } from "../agent";
 import type { OrchestratorDef } from "../orchestrator";
 
@@ -125,11 +126,19 @@ class MemGoalStore implements GoalStore {
 }
 
 // ---- scripted deps ------------------------------------------------------------------------------
-function scripted(responses: string[], toolResults: Record<string, string> = {}, getRegistryImpact?: AgentDeps["getRegistryImpact"]): AgentDeps {
+// `calls` records every `callTool` invocation (name only, in order) — the D14-14 tests use it as the
+// "zero new approval rows" detector (asserting `approvals.request` was never called), mirroring the
+// `Harness.calls` idiom `approval-resume.test.ts` already uses for the same purpose.
+function scripted(responses: string[], toolResults: Record<string, string> = {}, getRegistryImpact?: AgentDeps["getRegistryImpact"]): AgentDeps & { calls: Array<{ name: string }> } {
   let i = 0;
+  const calls: Array<{ name: string }> = [];
   return {
+    calls,
     complete: async () => responses[Math.min(i++, responses.length - 1)],
-    callTool: async (name) => toolResults[name] ?? "ok",
+    callTool: async (name) => {
+      calls.push({ name });
+      return toolResults[name] ?? "ok";
+    },
     lastProvider: () => undefined,
     getRegistryImpact,
   };
@@ -285,6 +294,59 @@ describe("agent-runner service", () => {
     expect(g.status).toBe("suspended");
     expect(g.approvalId).toBe("appr-reconcile");
     expect(g.errorKind).toBe("approval_required");
+  });
+
+  // ══════════════════════════════════════════════════════════════════════════════════════════════════
+  // D14-14 — the resolver survives service.ts's `counted` wrapper (the SAME dep-rebuild hazard D14-10's
+  // own comment on `resolveApproval: agentDeps.resolveApproval` above already flags). These prove it by
+  // assertion, not by inference: a goal that hits a high_write and gets a decided resolution back
+  // actually completes through the REAL HTTP path (`buildRunnerApp` → `processGoal` → the `counted`
+  // wrapper → `runWriteAgent`/`runAgent`), and the goal's own envelope/tenantId are genuinely visible to
+  // `AgentDeps.resolveApproval` at the moment it is called — proving `envelopeContext`/`tenantContext`
+  // are populated by the time the wrapped deps reach the runner, not merely that the field survives.
+  // ══════════════════════════════════════════════════════════════════════════════════════════════════
+  it("D14-14: `resolveApproval` reaches the runner THROUGH service.ts's `counted` wrapper, with the goal's own tenantId/envelope visible via context", async () => {
+    let consulted = 0;
+    let seenTenant: string | undefined;
+    let seenProvider: string | undefined;
+    const deps = scripted(['{"tool":"danger.write","args":{"x":1}}', '{"final":"done"}'], {});
+    deps.resolveApproval = async (input) => {
+      consulted++;
+      // The counted wrapper must not have dropped tenantContext/envelopeContext visibility either —
+      // service.ts opens both around the SAME body that calls runWriteAgent/runOrchestrator.
+      seenTenant = tenantContext.getStore();
+      seenProvider = envelopeContext.getStore()?.provider;
+      expect(input).toEqual({ agentName: "test-writer", toolName: "danger.write", toolArgs: { x: 1 } });
+      return { match: "executed", approvalId: "ap-1", consumed: false, result: "done", truncated: false };
+    };
+    const { app } = build({ deps, servingProvider: "echo" });
+    const { id } = (await trigger(app, { goal: "do the write", agent: "test-writer" })).json() as { id: string };
+    await idle(app);
+    const g = (await goalStatus(app, id)).json() as GoalDetail;
+    expect(consulted).toBe(1); // reached through the counted wrapper
+    expect(seenTenant).toBe(TENANT);
+    expect(seenProvider).toBe("platform"); // trigger()'s default envelope
+    expect(g.status).toBe("ok"); // completed, not suspended — the write was resumed, not re-filed
+    expect(deps.calls.map((c) => c.name)).not.toContain("approvals.request"); // nothing (re-)filed
+  });
+
+  // ── the mandated negative (D14-14): hub down ⇒ a loud goal failure, ZERO new approval rows ─────────
+  it("D14-14: resolveApproval throwing (hub down) ⇒ the goal FAILS loudly and files NO approval — never treated as `none`", async () => {
+    const deps = scripted(['{"tool":"danger.write","args":{"x":1}}'], { "approvals.request": '{"id":"should-never-file"}' });
+    deps.resolveApproval = async () => {
+      throw new Error("hub unreachable: ECONNREFUSED");
+    };
+    const { app } = build({ deps, servingProvider: "echo" });
+    const { id } = (await trigger(app, { goal: "do the write", agent: "test-writer" })).json() as { id: string };
+    await idle(app);
+    const g = (await goalStatus(app, id)).json() as GoalDetail;
+    // Loud failure — NOT "suspended" (which would mean it was treated as if nothing were decided, i.e.
+    // the exact fault-to-`none` mapping this ticket forbids) and NOT "ok".
+    expect(g.status).toBe("failed");
+    expect(g.outcome).toContain("hub unreachable");
+    // The zero-new-approval-rows assertion: `approvals.request` was never called despite being
+    // available and armed to succeed — a fault during consultation must never fall through to filing.
+    expect(deps.calls.map((c) => c.name)).not.toContain("approvals.request");
   });
 
   it("suspended via supervisor: a delegated write suspends the WHOLE goal (GoalSuspendedError +approval_id, blackboard persisted)", async () => {

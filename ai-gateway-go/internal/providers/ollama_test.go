@@ -192,6 +192,122 @@ func TestOllamaCompleteStreamMidStreamErrorStopsAfterPriorTokens(t *testing.T) {
 	}
 }
 
+// --- ASST-11: ModelName + CompleteStreamUsage (real end-of-stream token counts) --------------
+
+func TestOllamaModelNameReportsConfiguredChatModelNotEmbedModel(t *testing.T) {
+	p := NewOllamaProvider("http://example.invalid", "llama3.2", "nomic-embed-text", nil)
+	if got := p.ModelName(); got != "llama3.2" {
+		t.Fatalf("expected ModelName to report the chat model, got %q", got)
+	}
+}
+
+// Real Ollama's "done":true line carries prompt_eval_count/eval_count — its own token accounting,
+// not an estimate. CompleteStreamUsage must surface exactly those, unmodified.
+func TestOllamaCompleteStreamUsageReportsRealCountsFromFinalLine(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		lines := []string{
+			`{"response":"hello","done":false}`,
+			`{"response":" world","done":false}`,
+			`{"response":"","done":true,"prompt_eval_count":12,"eval_count":34,"total_duration":123}`,
+		}
+		for _, l := range lines {
+			fmt.Fprintln(w, l)
+		}
+	}))
+	defer srv.Close()
+
+	p := NewOllamaProvider(srv.URL, "llama3.2", "llama3.2", srv.Client())
+	var called bool
+	var gotPrompt, gotCompletion int
+	err := p.CompleteStreamUsage(context.Background(), "hi", func(string) {}, func(promptTokens, completionTokens int) {
+		called = true
+		gotPrompt, gotCompletion = promptTokens, completionTokens
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !called {
+		t.Fatal("expected onUsage to fire with the final NDJSON line's real counts")
+	}
+	if gotPrompt != 12 || gotCompletion != 34 {
+		t.Fatalf("expected promptTokens=12 completionTokens=34, got %d/%d", gotPrompt, gotCompletion)
+	}
+}
+
+// Older Ollama (or a response cut short before generation) may omit the eval counts on the final
+// line. onUsage must NOT fire in that case — a real `usage` event is real counts or nothing, never
+// a guess or a zero-fill.
+func TestOllamaCompleteStreamUsageAbsentWhenFinalLineOmitsCounts(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		lines := []string{
+			`{"response":"hello","done":false}`,
+			`{"response":"","done":true}`,
+		}
+		for _, l := range lines {
+			fmt.Fprintln(w, l)
+		}
+	}))
+	defer srv.Close()
+
+	p := NewOllamaProvider(srv.URL, "llama3.2", "llama3.2", srv.Client())
+	called := false
+	err := p.CompleteStreamUsage(context.Background(), "hi", func(string) {}, func(int, int) {
+		called = true
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if called {
+		t.Fatal("expected onUsage to NOT fire when the final line carries no real counts")
+	}
+}
+
+// A final line with only ONE of the two counts (a partial pair) must be treated the same as
+// neither being present — half a real count is not a real count.
+func TestOllamaCompleteStreamUsageAbsentWhenFinalLineHasOnlyOneCount(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintln(w, `{"response":"","done":true,"prompt_eval_count":12}`)
+	}))
+	defer srv.Close()
+
+	p := NewOllamaProvider(srv.URL, "llama3.2", "llama3.2", srv.Client())
+	called := false
+	err := p.CompleteStreamUsage(context.Background(), "hi", func(string) {}, func(int, int) {
+		called = true
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if called {
+		t.Fatal("expected onUsage to NOT fire on a partial (one-of-two) count pair")
+	}
+}
+
+// The pre-existing CompleteStream (ASST-03) must behave identically after the ASST-11 refactor
+// that factored it through completeStream — same tokens, same error handling, usage plumbing
+// completely invisible to a caller that doesn't ask for it.
+func TestOllamaCompleteStreamUnaffectedByUsageRefactor(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		lines := []string{
+			`{"response":"hi","done":false}`,
+			`{"response":"","done":true,"prompt_eval_count":1,"eval_count":2}`,
+		}
+		for _, l := range lines {
+			fmt.Fprintln(w, l)
+		}
+	}))
+	defer srv.Close()
+
+	p := NewOllamaProvider(srv.URL, "llama3.2", "llama3.2", srv.Client())
+	var got []string
+	if err := p.CompleteStream(context.Background(), "hi", func(tok string) { got = append(got, tok) }); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if joined := strings.Join(got, ""); joined != "hi" {
+		t.Fatalf("expected %q, got %q", "hi", joined)
+	}
+}
+
 // A partial/truncated final NDJSON line (e.g. the upstream connection dropped mid-write,
 // leaving an unterminated JSON object with no closing brace and no trailing newline) must not
 // panic the decoder and must not be emitted as a garbage token — the valid lines before it are
