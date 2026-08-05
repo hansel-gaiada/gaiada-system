@@ -10,6 +10,7 @@ import { ThreadRail } from "./ThreadRail";
 import { ThreadView } from "./ThreadView";
 import { Composer } from "./Composer";
 import { MemoryPanel } from "./MemoryPanel";
+import { BrainPicker } from "./BrainPicker";
 import { useAssistantStream } from "./useAssistantStream";
 import { Toast } from "@/components/ui";
 import "./assistant.css";
@@ -175,6 +176,16 @@ export function AssistantWorkspace({ initialThreads, initialActiveThreadId }: {
     if (r.ok) setThreads(r.items);
   }
 
+  // ASST-16 — the active thread, for the brain picker. `patchActiveThread` is BrainPicker's own
+  // optimistic-update/rollback channel (same shape as handleRename/handleTogglePin above, just
+  // generalized to an arbitrary partial patch since the picker needs to set two fields at once —
+  // brainProvider AND the hermesSessionId reset — atomically in local state).
+  const activeThread = threads.find((t) => t.id === activeThreadId) ?? null;
+  function patchActiveThread(patch: Partial<AssistantThread>) {
+    if (!activeThreadId) return;
+    setThreads((prev) => prev.map((t) => (t.id === activeThreadId ? { ...t, ...patch } : t)));
+  }
+
   // ---- Send / stop --------------------------------------------------------------------------------
   const hasPendingMessage = messages.some(isPendingMessage);
   const canSend = !!activeThreadId && !loadingThread && !sending && !hasPendingMessage && stream.state.status !== "streaming";
@@ -243,6 +254,11 @@ export function AssistantWorkspace({ initialThreads, initialActiveThreadId }: {
       />
       <div className="asst-main">
         <div className="asst-main__toolbar">
+          <BrainPicker
+            thread={activeThread}
+            disabled={stream.state.status === "streaming"}
+            onChanged={patchActiveThread}
+          />
           <button
             type="button"
             className="asst-memory-toggle"

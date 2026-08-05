@@ -6,6 +6,22 @@
 //
 // Ticket: docs/superpowers/plans/2026-08-05-d14-and-assistant-tickets.md ("### ASST-06").
 //
+// ── ASST-16 — provider hint request fields + the `event: session` split (consuming ASST-15) ────────
+// ASST-15 rewrote the gateway wire to a SINGLE dialect (docs/FRONTEND-BFF-CONTRACT.md §18's
+// "ASST-15" addendum, authoritative): `event: meta` ({provider, model}) fires PRE-first-token,
+// UNCONDITIONALLY, for every provider including hermes — it NEVER carries `providerSession`
+// anymore. The late-known fact (Hermes' session id) moved to its own additive TERMINAL
+// `event: session` ({providerSession}), written after `usage` (if any) and before `done`, emitted
+// AT MOST ONCE and only when the serving provider actually has one to report. This file mirrors
+// that split exactly: `GatewayStreamEvent`'s `meta` variant no longer carries `providerSession`,
+// and a new `session` variant/case handles the new event. The request body sent to
+// `/complete/stream` also grows two optional fields this ticket adds — `provider` (a hint: route
+// to the named provider FIRST when available and its breaker is closed, else fall through to the
+// normal chain — OQ-6's "fail over and LABEL", never a hard error) and `providerSession` (an
+// opaque token threaded verbatim to whichever provider implements
+// providers.SessionStreamingProvider, today only hermes) — see `RelayGenerationInput`'s
+// `provider`/`providerSession` fields and their one call site below.
+//
 // ── THE WIRE GRAMMAR THIS FILE CONSUMES (do not re-derive, ASST-10 already shipped it) ───────────
 // Every `data:` line on the gateway's stream route is EXACTLY ONE line of JSON:
 //   - a default (unnamed) event's `data:` is the JSON STRING of the token text, e.g. `data: "a\nb"`
@@ -21,9 +37,10 @@
 //
 // ── ASST-12 — CONSUMING ai-gateway-go's `meta`/`usage` (ASST-11, additive grammar-v2) ───────────────
 // ASST-11 closed the gap the paragraph below used to describe: the gateway's `/complete/stream`
-// wire now carries an additive `event: meta` (`{provider, model, providerSession?}`, emitted
-// EXACTLY ONCE at the DLP scrubber's first byte release — i.e. it names the provider that actually
-// COMMITTED output, never a provider that died inside the hold window) and a terminal
+// wire now carries an additive `event: meta` (`{provider, model}` — see the ASST-16 header above:
+// ASST-15 later removed the `providerSession?` field this originally carried), emitted EXACTLY
+// ONCE at the DLP scrubber's first byte release — i.e. it names the provider that actually
+// COMMITTED output, never a provider that died inside the hold window — and a terminal
 // `event: usage` (`{promptTokens, completionTokens}`, emitted ONLY when the serving provider
 // reports REAL end-of-stream counts — today that is `ollama` alone; `echo`/`openai`/`gemini`/
 // `claude` report nothing, so `usage` is simply ABSENT for them, which is the common path, not an
@@ -105,13 +122,19 @@ export type GatewayStreamEvent =
    *  terminal: arrives once, before the first token, then the loop continues. `model` may
    *  legitimately be `""` (a provider with no fixed-model concept, e.g. `echo`) — that is a
    *  truthful absence, not malformed data, so it is passed through as-is, never coerced to null
-   *  or dropped. */
-  | { type: "meta"; provider: string; model: string; providerSession?: string }
+   *  or dropped. ASST-15: no longer carries `providerSession` — see `session` below. */
+  | { type: "meta"; provider: string; model: string }
   /** ASST-11's terminal `event: usage` — REAL end-of-stream provider-reported counts (never
    *  zero-filled, never estimated). Arrives immediately before `done`, only when the serving
    *  provider reports them (today: `ollama` only) — absent on every other provider and on every
    *  error path, which is the common case, not an exception. */
-  | { type: "usage"; promptTokens: number; completionTokens: number };
+  | { type: "usage"; promptTokens: number; completionTokens: number }
+  /** ASST-15's additive terminal `event: session` — the late-known Hermes session id, split out
+   *  of `meta` for exactly the reason documented at this file's header. Emitted at most once,
+   *  after `usage` (if any) and before `done`, and only when the serving provider actually has a
+   *  session to report (today: `hermes` only) — absent on every error path and for every other
+   *  provider, which is the common case, not an exception. */
+  | { type: "session"; providerSession: string };
 
 /** Translate the gateway's raw SSE bytes into `GatewayStreamEvent`s per the ASST-10 grammar (plus
  *  ASST-11's additive `meta`/`usage`). Terminates (returns) after yielding `done`, `error`, or the
@@ -145,14 +168,9 @@ export async function* parseGatewayStream(body: ReadableStream<Uint8Array>): Asy
       }
       case "meta": {
         try {
-          const parsed = JSON.parse(raw.data) as { provider?: unknown; model?: unknown; providerSession?: unknown };
+          const parsed = JSON.parse(raw.data) as { provider?: unknown; model?: unknown };
           if (typeof parsed.provider === "string" && typeof parsed.model === "string") {
-            yield {
-              type: "meta",
-              provider: parsed.provider,
-              model: parsed.model,
-              providerSession: typeof parsed.providerSession === "string" ? parsed.providerSession : undefined,
-            };
+            yield { type: "meta", provider: parsed.provider, model: parsed.model };
           }
           // A malformed-but-present meta frame (missing/wrong-typed fields) is dropped, not
           // thrown — absent-tolerant per the additive-event contract; the badge simply stays
@@ -170,6 +188,20 @@ export async function* parseGatewayStream(body: ReadableStream<Uint8Array>): Asy
           }
         } catch {
           // Same reasoning — drop, never throw. The estimate remains the labelled fallback.
+        }
+        continue;
+      }
+      case "session": {
+        // ASST-15 — terminal-adjacent (arrives after usage, before done), non-terminal itself.
+        try {
+          const parsed = JSON.parse(raw.data) as { providerSession?: unknown };
+          if (typeof parsed.providerSession === "string" && parsed.providerSession) {
+            yield { type: "session", providerSession: parsed.providerSession };
+          }
+          // Empty/missing/wrong-typed -> dropped, never thrown: the gateway's own discipline is
+          // "never sent empty", but this consumer stays absent-tolerant regardless.
+        } catch {
+          // Same reasoning — a parse failure must never break the stream.
         }
         continue;
       }
@@ -302,8 +334,13 @@ export interface RelayEmit {
   token: (text: string) => void;
   /** ASST-12 — relays a `meta` frame the instant it arrives (i.e. before any further tokens), so a
    *  live-streaming client can show "served by <provider>" without waiting for `done`. Called at
-   *  most once per generation (the gateway's own invariant — see `GatewayStreamEvent`'s header). */
-  meta: (provider: string, model: string, providerSession?: string) => void;
+   *  most once per generation (the gateway's own invariant — see `GatewayStreamEvent`'s header).
+   *  ASST-15: no longer carries `providerSession` — see `session` below. */
+  meta: (provider: string, model: string) => void;
+  /** ASST-15 — relays the terminal `event: session` the instant it arrives (after usage, before
+   *  done): the late-known provider session id (today: hermes only). Called at most once, and
+   *  only when the serving provider actually reported one. */
+  session: (providerSession: string) => void;
   /** `tokens`/`latencyMs` keep their ASST-06 meaning (a total count + wall-clock latency at
    *  terminal time). `source` says which kind of count `tokens` actually is: `"provider"` when
    *  `promptTokens`/`completionTokens` came from ASST-11's real `usage` frame (in which case
@@ -328,9 +365,16 @@ export interface RelayResult {
   errorMessage?: string;
   /** ASST-11's `meta` — the provider/model that actually served this reply. Undefined (persisted
    *  as NULL) when `meta` never arrived: an older gateway, or a provider that died before
-   *  committing any bytes to the wire. Absence is "unknown provider", never an error. */
+   *  committing any bytes to the wire. Absence is "unknown provider", never an error. THIS may
+   *  legitimately differ from `RelayGenerationInput.provider` (the hint) — a hint for a down
+   *  provider falls through to the chain (OQ-6), and this field always names the ACTUAL server,
+   *  never the requested one (ASST-16's "the badge shows the truth" requirement). */
   provider?: string;
   model?: string;
+  /** ASST-15's terminal `event: session` — undefined unless the SERVING provider actually
+   *  reported one (today: hermes only). ASST-16 persists this to
+   *  `assistant_threads.hermes_session_id` and threads it back as `providerSession` on the NEXT
+   *  turn so the same Hermes conversation resumes. */
   providerSession?: string;
   /** `"provider"` only when ASST-11's real `usage` frame arrived (today: `ollama` only);
    *  `"estimate"` otherwise — including every error/abnormal-drop path, since a provider never
@@ -350,6 +394,15 @@ export interface RelayGenerationInput {
   gatewayUrl?: string;
   gatewayToken?: string;
   fetchImpl?: typeof fetch;
+  /** ASST-16 — the thread's `brain_provider` (e.g. `'hermes'`), sent as `/complete/stream`'s
+   *  optional `provider` HINT. A pure reordering of the chain's provider snapshot on the gateway
+   *  side (ASST-15's `chain.RunWithHint`) — never a hard requirement. Absent/empty ⇒ the gateway's
+   *  normal failover chain picks, byte-identical to before this ticket. */
+  provider?: string;
+  /** ASST-16 — the thread's `hermes_session_id` (if any), sent as `/complete/stream`'s optional
+   *  `providerSession` field. Opaque to platform-nest too — we only round-trip whatever the
+   *  gateway told us on a PRIOR turn's `event: session`; we never generate or inspect it. */
+  providerSession?: string;
 }
 
 /** Call ai-gateway-go's `POST /complete/stream`, relay each parsed event through `emit`, and
@@ -408,7 +461,14 @@ export async function relayGeneration(entry: GenerationEntry, input: RelayGenera
         Authorization: `Bearer ${input.gatewayToken ?? config.services.gateway.token}`,
         "x-tenant-id": input.tenantId,
       },
-      body: JSON.stringify({ prompt: input.prompt }),
+      // ASST-16: `provider`/`providerSession` are ASST-15's optional hint fields. Omitted (rather
+      // than sent as "") when absent, matching the gateway's own "absent hint ⇒ byte-identical to
+      // before this ticket" contract for every OTHER caller of this route.
+      body: JSON.stringify({
+        prompt: input.prompt,
+        ...(input.provider ? { provider: input.provider } : {}),
+        ...(input.providerSession ? { providerSession: input.providerSession } : {}),
+      }),
       signal: controller.signal,
     });
     if (!res.ok || !res.body) {
@@ -420,18 +480,25 @@ export async function relayGeneration(entry: GenerationEntry, input: RelayGenera
     for await (const evt of parseGatewayStream(res.body as ReadableStream<Uint8Array>)) {
       resetIdleTimer(); // any activity from upstream resets the idle clock, tokens or terminal alike
       if (evt.type === "meta") {
-        // Gateway invariant (ASST-11): emitted at most once, before the first token, naming the
-        // provider that actually committed bytes — captured verbatim, never re-derived.
+        // Gateway invariant (ASST-11/15): emitted at most once, PRE-first-token, naming the
+        // provider that actually committed bytes — captured verbatim, never re-derived. ASST-15:
+        // never carries providerSession anymore (see the `session` case below).
         metaProvider = evt.provider;
         metaModel = evt.model;
-        metaProviderSession = evt.providerSession;
-        input.emit.meta(evt.provider, evt.model, evt.providerSession);
+        input.emit.meta(evt.provider, evt.model);
         continue;
       }
       if (evt.type === "usage") {
         // Terminal-adjacent (arrives just before `done`), but non-terminal itself — keep reading.
         realPromptTokens = evt.promptTokens;
         realCompletionTokens = evt.completionTokens;
+        continue;
+      }
+      if (evt.type === "session") {
+        // ASST-15: terminal-adjacent (arrives after usage, before done) — the late-known Hermes
+        // session id. Captured + relayed the instant it arrives; never invented on any other path.
+        metaProviderSession = evt.providerSession;
+        input.emit.session(evt.providerSession);
         continue;
       }
       if (evt.type === "token") {

@@ -63,6 +63,26 @@ export interface AssistantMessage {
 
 export interface ThreadListResult { items: AssistantThread[]; total: number }
 export interface ThreadDetailResult { thread: AssistantThread; messages: AssistantMessage[]; hasMoreMessages: boolean }
+
+// ── ASST-16 — the right-rail brain picker's option list ────────────────────────────────────────────
+// `brainProvider` (stored, PATCHable via the existing thread PATCH endpoint) is sent to
+// ai-gateway-go's `/complete/stream` as an optional `provider` HINT (ASST-15) — never a hard
+// requirement (OQ-6: a down/unavailable hinted provider silently falls through to the gateway's
+// normal failover chain; the "served by" badge on `Message` always shows the ACTUAL server, which
+// may legitimately differ from what's picked here). `null`/"Auto" means "no hint — let the chain
+// pick", the pre-ASST-16 default behaviour, byte-identical to before this ticket.
+export interface BrainOption { value: string | null; label: string }
+export const BRAIN_OPTIONS: BrainOption[] = [
+  { value: null, label: "Auto (failover chain)" },
+  { value: "ollama", label: "Ollama (local)" },
+  { value: "hermes", label: "Hermes" },
+  { value: "gemini", label: "Gemini" },
+  { value: "claude", label: "Claude" },
+];
+
+export function brainOptionLabel(value: string | null): string {
+  return BRAIN_OPTIONS.find((o) => o.value === value)?.label ?? (value ?? "Auto (failover chain)");
+}
 export interface SendMessageResult { messageId: string; streamUrl: string }
 export interface StopResult { ok: boolean; stopped: boolean }
 

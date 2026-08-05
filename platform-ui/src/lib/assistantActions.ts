@@ -94,6 +94,15 @@ export async function setThreadStatusAction(threadId: string, status: AssistantT
   return patchThread(threadId, { status });
 }
 
+// ASST-16 — the right-rail brain picker. Reuses the SAME PATCH endpoint ASST-05 already shipped
+// (this ticket adds no new route) — `brainProvider: null` picks "Auto" (no hint; the gateway's
+// normal failover chain decides). The backend clears `hermes_session_id` server-side whenever this
+// PATCH actually changes the stored value (assistant.controller.ts's patchThread) — switching
+// brains mid-thread always starts a fresh provider session, without touching the ERP transcript.
+export async function setThreadBrainAction(threadId: string, brainProvider: string | null): Promise<ActionResult> {
+  return patchThread(threadId, { brainProvider });
+}
+
 async function patchThread(threadId: string, body: Record<string, unknown>): Promise<ActionResult> {
   const c = await ctx();
   if ("error" in c) return { ok: false, error: c.error };

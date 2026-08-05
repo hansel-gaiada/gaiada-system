@@ -57,26 +57,51 @@ async function waitFor(predicate: () => boolean, timeoutMs = 2000, intervalMs = 
  *   (default)           — 3 tokens ("Hello ", "there ", "friend"), then `event: done`. No meta/
  *                          usage frame at all by default — this is the ASST-10-shaped gateway most
  *                          providers (echo/openai/gemini/claude) still look like, the common path
- *                          ASST-12 must handle as "unknown provider", never an error. */
+ *                          ASST-12 must handle as "unknown provider", never an error.
+ *   SIMULATE_HERMES_UP  — (ASST-15/16) only takes effect when the REQUEST's `provider` field is
+ *                          "hermes": responds as hermes, and emits a terminal `event: session` —
+ *                          ECHOING the request's `providerSession` verbatim when one was sent (the
+ *                          "same session resumes" case this ticket's Phase-2 gate asserts on), or
+ *                          minting a fresh `sess-N` (from `hermesSessionCounter`) when none was
+ *                          sent (first turn). Mirrors the real gateway's own "opaque, never
+ *                          inspected/validated, just threaded through" contract.
+ *   SIMULATE_HERMES_DOWN — (ASST-15/16) the request's `provider` hint is "hermes", but this fake
+ *                          simulates OQ-6's mandated behaviour: hermes is unavailable, so the
+ *                          gateway silently FAILS OVER to a different provider (here: "ollama") —
+ *                          `meta` names the ACTUAL server (ollama), never the requested one
+ *                          (hermes), and no `event: session` is ever written (a provider that
+ *                          never ran never has a session to report). Never a hard error. */
 interface FakeGateway {
   url: string;
   close: () => Promise<void>;
   abortedProbes: Map<string, boolean>;
+  /** Every `/complete/stream` request this fake received, in order — `provider`/`providerSession`
+   *  are the ASST-15 request fields ASST-16 is responsible for sending. The load-bearing
+   *  assertion instrument for "turn 2 sends back the session turn 1 captured". */
+  receivedRequests: Array<{ prompt: string; provider?: string; providerSession?: string }>;
 }
 
 async function startFakeGateway(): Promise<FakeGateway> {
   const abortedProbes = new Map<string, boolean>();
+  const receivedRequests: FakeGateway["receivedRequests"] = [];
+  let hermesSessionCounter = 0;
   const server: Server = createServer((req, res) => {
     if (req.method === "POST" && req.url === "/complete/stream") {
       let raw = "";
       req.on("data", (chunk) => (raw += chunk));
       req.on("end", () => {
         let prompt = "";
+        let reqProvider: string | undefined;
+        let reqProviderSession: string | undefined;
         try {
-          prompt = (JSON.parse(raw) as { prompt?: string }).prompt ?? "";
+          const parsed = JSON.parse(raw) as { prompt?: string; provider?: string; providerSession?: string };
+          prompt = parsed.prompt ?? "";
+          reqProvider = parsed.provider || undefined;
+          reqProviderSession = parsed.providerSession || undefined;
         } catch {
           // ignore — an unparsable body is not this fake's concern
         }
+        receivedRequests.push({ prompt, provider: reqProvider, providerSession: reqProviderSession });
         res.writeHead(200, { "content-type": "text/event-stream" });
 
         const probeId = /PROBE:(\S+)/.exec(prompt)?.[1];
@@ -95,6 +120,8 @@ async function startFakeGateway(): Promise<FakeGateway> {
         const metaMatch = /SIMULATE_META:(\S*?):(\S*)/.exec(prompt);
         const usageMatch = /SIMULATE_USAGE:(\d+):(\d+)/.exec(prompt);
         const unknownEvent = prompt.includes("SIMULATE_UNKNOWN_EVENT");
+        const hermesUp = prompt.includes("SIMULATE_HERMES_UP") && reqProvider === "hermes";
+        const hermesDown = prompt.includes("SIMULATE_HERMES_DOWN") && reqProvider === "hermes";
 
         void (async () => {
           if (unknownEvent) {
@@ -105,6 +132,12 @@ async function startFakeGateway(): Promise<FakeGateway> {
           }
           if (metaMatch) {
             res.write(`event: meta\ndata: ${JSON.stringify({ provider: metaMatch[1], model: metaMatch[2] })}\n\n`);
+          } else if (hermesUp) {
+            res.write(`event: meta\ndata: ${JSON.stringify({ provider: "hermes", model: "hermes-model" })}\n\n`);
+          } else if (hermesDown) {
+            // OQ-6: "fail over and LABEL" — meta names the provider that ACTUALLY served this
+            // reply (ollama), never the requested-but-unavailable one (hermes). Never a 5xx.
+            res.write(`event: meta\ndata: ${JSON.stringify({ provider: "ollama", model: "fallback-model" })}\n\n`);
           }
           const tokens = ["Hello ", "there ", "friend"];
           for (const tok of tokens) {
@@ -125,6 +158,14 @@ async function startFakeGateway(): Promise<FakeGateway> {
           if (usageMatch) {
             res.write(`event: usage\ndata: ${JSON.stringify({ promptTokens: Number(usageMatch[1]), completionTokens: Number(usageMatch[2]) })}\n\n`);
           }
+          if (hermesUp) {
+            // ASST-15: terminal, after usage, before done. Echo the caller's providerSession
+            // verbatim (resuming), or mint a fresh one (first turn) — opaque either way.
+            const session = reqProviderSession || `sess-${++hermesSessionCounter}`;
+            res.write(`event: session\ndata: ${JSON.stringify({ providerSession: session })}\n\n`);
+          }
+          // hermesDown: no session frame — the provider that actually ran (ollama) has no session
+          // concept, and hermes itself never ran for this reply.
           res.write(`event: done\ndata: {}\n\n`);
           res.end();
         })();
@@ -149,13 +190,14 @@ async function startFakeGateway(): Promise<FakeGateway> {
     url: `http://127.0.0.1:${addr.port}`,
     close: () => new Promise<void>((resolve) => server.close(() => resolve())),
     abortedProbes,
+    receivedRequests,
   };
 }
 
 describe.skipIf(!TEST_URL)("Assistant send->stream engine (ASST-06)", () => {
   let app: NestFastifyApplication;
   let port: number;
-  let gateway: { url: string; close: () => Promise<void>; abortedProbes: Map<string, boolean> };
+  let gateway: FakeGateway;
   let A: string;
   let owner: string;
   let other: string;
@@ -363,6 +405,139 @@ describe.skipIf(!TEST_URL)("Assistant send->stream engine (ASST-06)", () => {
       .find((m) => m.id === messageId)!;
     expect(msg.content).toBe("Hello there friend"); // the 3 real tokens, unaffected by the bogus frame
     expect(msg.errorKind).toBeNull();
+  });
+
+  // ── ASST-16 — per-thread brain picker + Hermes session mapping (blueprint Phase-2 gate) ──────────
+  describe("ASST-16: brain routing + Hermes session continuity", () => {
+    async function patchBrain(threadId: string, brainProvider: string | null) {
+      const r = await app.inject({
+        method: "PATCH", url: `/api/${A}/assistant/threads/${threadId}`, headers: asUser(owner), payload: { brainProvider },
+      });
+      expect(r.statusCode).toBe(200);
+      return r;
+    }
+
+    async function getThread(threadId: string) {
+      const r = await app.inject({ method: "GET", url: `/api/${A}/assistant/threads/${threadId}`, headers: asUser(owner) });
+      expect(r.statusCode).toBe(200);
+      return r.json() as { thread: { hermesSessionId: string | null; brainProvider: string | null } };
+    }
+
+    it("THE PHASE-2 GATE: picking hermes routes to hermes, and turn 2 sends back the EXACT session turn 1 captured, resuming the SAME conversation", async () => {
+      const threadId = await newThread("hermes session continuity");
+      await patchBrain(threadId, "hermes");
+
+      // Turn 1: no session exists yet, so the request sent to the gateway must carry NO
+      // providerSession — there is nothing to resume yet.
+      const sent1 = await sendMessage(threadId, "SIMULATE_HERMES_UP first turn");
+      const { streamUrl: streamUrl1 } = sent1.json() as { messageId: string; streamUrl: string };
+      const body1 = await readAll(await openStream(streamUrl1));
+      expect(body1).toContain('event: meta\ndata: {"provider":"hermes","model":"hermes-model"}');
+      expect(body1).not.toContain("event: error");
+
+      const req1 = gateway.receivedRequests.at(-1)!;
+      expect(req1.provider).toBe("hermes"); // ASST-16 sent the thread's brain as the hint
+      expect(req1.providerSession).toBeUndefined(); // nothing to resume on turn 1
+
+      const afterTurn1 = await getThread(threadId);
+      const capturedSession = afterTurn1.thread.hermesSessionId;
+      expect(capturedSession).toBeTruthy(); // ASST-15's terminal `event: session` was persisted
+
+      // Turn 2: the EXACT session id captured after turn 1 must be sent back verbatim.
+      const sent2 = await sendMessage(threadId, "SIMULATE_HERMES_UP second turn, please resume");
+      const { streamUrl: streamUrl2 } = sent2.json() as { messageId: string; streamUrl: string };
+      await readAll(await openStream(streamUrl2));
+
+      const req2 = gateway.receivedRequests.at(-1)!;
+      expect(req2.provider).toBe("hermes");
+      expect(req2.providerSession).toBe(capturedSession); // <-- the load-bearing continuity assertion
+
+      // The fake gateway ECHOES a sent providerSession verbatim (resuming) — so it must be
+      // unchanged after turn 2 too, proving the SAME Hermes session carried across both turns.
+      const afterTurn2 = await getThread(threadId);
+      expect(afterTurn2.thread.hermesSessionId).toBe(capturedSession);
+    });
+
+    it("Hermes down: the reply is still served by the chain (never a hard error), and the badge (`meta`) names the ACTUAL server, not the requested one", async () => {
+      const threadId = await newThread("hermes down failover");
+      await patchBrain(threadId, "hermes");
+
+      const sent = await sendMessage(threadId, "SIMULATE_HERMES_DOWN please respond anyway");
+      const { messageId, streamUrl } = sent.json() as { messageId: string; streamUrl: string };
+      const res = await openStream(streamUrl);
+      const body = await readAll(res);
+
+      // OQ-6: fail over and LABEL. The hint (hermes) was sent, but the badge shows the truth.
+      expect(body).toContain('event: meta\ndata: {"provider":"ollama","model":"fallback-model"}');
+      expect(body).not.toContain('"provider":"hermes"');
+      expect(body).toContain("event: done\ndata: {}");
+      expect(body).not.toContain("event: error"); // never a hard error — OQ-6's explicit mandate
+
+      const req = gateway.receivedRequests.at(-1)!;
+      expect(req.provider).toBe("hermes"); // the hint we sent
+
+      const got = await app.inject({ method: "GET", url: `/api/${A}/assistant/threads/${threadId}`, headers: asUser(owner) });
+      const msg = (got.json() as { messages: Array<{ id: string; provider: string | null; model: string | null; errorKind: string | null }> }).messages
+        .find((m) => m.id === messageId)!;
+      // Persisted provider/model also name the ACTUAL server — never the requested one.
+      expect(msg.provider).toBe("ollama");
+      expect(msg.model).toBe("fallback-model");
+      expect(msg.errorKind).toBeNull();
+
+      // No provider ran a hermes session, so nothing was captured.
+      const thread = await getThread(threadId);
+      expect(thread.thread.hermesSessionId).toBeNull();
+    });
+
+    it("switching brains mid-thread clears hermes_session_id (starts a fresh provider session) WITHOUT touching ERP thread history", async () => {
+      const threadId = await newThread("brain switch mid-thread");
+      await patchBrain(threadId, "hermes");
+
+      const sent1 = await sendMessage(threadId, "SIMULATE_HERMES_UP establish a session");
+      await readAll(await openStream((sent1.json() as { streamUrl: string }).streamUrl));
+      const afterHermes = await getThread(threadId);
+      expect(afterHermes.thread.hermesSessionId).toBeTruthy();
+
+      // Switch to a different brain — the stale hermes session id must be cleared: resuming it
+      // against a non-hermes provider (or a LATER re-pick of hermes, once turns were served by
+      // someone else) would be meaningless at best and wrong at worst.
+      await patchBrain(threadId, "ollama");
+      const afterSwitch = await getThread(threadId);
+      expect(afterSwitch.thread.hermesSessionId).toBeNull();
+      expect(afterSwitch.thread.brainProvider).toBe("ollama");
+
+      // ERP thread history is completely untouched by the brain switch — both prior messages
+      // (user + hermes' reply) are still there, unchanged.
+      const got = await app.inject({ method: "GET", url: `/api/${A}/assistant/threads/${threadId}`, headers: asUser(owner) });
+      const messages = (got.json() as { messages: Array<{ seq: number; role: string; content: string | null }> }).messages;
+      expect(messages).toHaveLength(2);
+      expect(messages[1].content).toBe("Hello there friend");
+
+      // Switching BACK to hermes does not resurrect the old session either — it starts fresh.
+      await patchBrain(threadId, "hermes");
+      const sent2 = await sendMessage(threadId, "SIMULATE_HERMES_UP back to hermes, fresh session please");
+      await readAll(await openStream((sent2.json() as { streamUrl: string }).streamUrl));
+      const req2 = gateway.receivedRequests.at(-1)!;
+      expect(req2.providerSession).toBeUndefined(); // no stale session resumed
+      const afterReturn = await getThread(threadId);
+      expect(afterReturn.thread.hermesSessionId).toBeTruthy(); // a brand-new session was captured
+    });
+
+    it("re-PATCHing the SAME brainProvider value does NOT clear an in-progress hermes session", async () => {
+      const threadId = await newThread("no-op brain repick");
+      await patchBrain(threadId, "hermes");
+      const sent1 = await sendMessage(threadId, "SIMULATE_HERMES_UP establish");
+      await readAll(await openStream((sent1.json() as { streamUrl: string }).streamUrl));
+      const captured = (await getThread(threadId)).thread.hermesSessionId;
+      expect(captured).toBeTruthy();
+
+      await patchBrain(threadId, "hermes"); // re-picking the identical brain — a no-op re-render, not a switch
+      expect((await getThread(threadId)).thread.hermesSessionId).toBe(captured);
+
+      const sent2 = await sendMessage(threadId, "SIMULATE_HERMES_UP still resuming");
+      await readAll(await openStream((sent2.json() as { streamUrl: string }).streamUrl));
+      expect(gateway.receivedRequests.at(-1)!.providerSession).toBe(captured);
+    });
   });
 
   it("a second concurrent send to the same thread is rejected (409), never interleaving seq", async () => {

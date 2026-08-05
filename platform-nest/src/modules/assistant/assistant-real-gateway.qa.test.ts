@@ -54,6 +54,7 @@ describe("ASST-08 adversarial: real ai-gateway-go through the ASST-06 relay (not
           token: (t) => tokens.push(t),
           meta: () => {},
           usage: () => {},
+          session: () => {},
           done: () => {},
           error: (msg) => tokens.push(`__ERROR__:${msg}`),
         },
@@ -85,7 +86,7 @@ describe("ASST-08 adversarial: real ai-gateway-go through the ASST-06 relay (not
       prompt,
       gatewayUrl: GATEWAY_URL,
       gatewayToken: GATEWAY_TOKEN,
-      emit: { token: (t) => tokens.push(t), meta: () => {}, usage: () => {}, done: () => {}, error: (m) => tokens.push(`__ERROR__:${m}`) },
+      emit: { token: (t) => tokens.push(t), meta: () => {}, usage: () => {}, session: () => {}, done: () => {}, error: (m) => tokens.push(`__ERROR__:${m}`) },
     });
     const full = tokens.join("");
     expect(full).not.toContain("REDACTED");

@@ -10,7 +10,7 @@ import "server-only";
 // returns `{status, json}`, which has no way to represent a stream, so the stream proxy route
 // (`app/api/assistant/threads/[id]/stream/route.ts`) calls this file directly instead of going
 // through `platformFetch`'s DEMO_MODE branch. See that route's header for the split.
-import type { AssistantMessageRole, AssistantThreadStatus } from "./assistant";
+import type { AssistantMemoryScope, AssistantMessageRole, AssistantThreadStatus } from "./assistant";
 
 interface DemoThread {
   id: string;
@@ -49,6 +49,24 @@ interface DemoMessage {
   latencyMs: number | null;
   errorKind: string | null;
   createdAt: string;
+}
+
+// ASST-19 — durable memory (blueprint §4.1, memory #2 of 4). Owner-scoped the same way threads
+// are (`ownerUserId === userId` on every read/write), and the SAME quarantine shape as the real
+// backend: `confirmedAt: null` is a proposal, inert until a separate "confirm" call.
+interface DemoMemory {
+  id: string;
+  tenantId: string;
+  ownerUserId: string;
+  scope: AssistantMemoryScope;
+  content: string;
+  provenance: "user" | "assistant";
+  trust: "trusted" | "untrusted";
+  pinned: boolean;
+  confirmedAt: string | null;
+  sourceThreadId: string | null;
+  createdAt: string;
+  updatedAt: string;
 }
 
 const now = () => new Date().toISOString();
@@ -109,6 +127,31 @@ function seedMessages(): DemoMessage[] {
   ];
 }
 
+function seedMemory(): DemoMemory[] {
+  return [
+    {
+      id: "asst-mem-1", tenantId: "co-agency", ownerUserId: DEMO_OWNER, scope: "user",
+      content: "Prefers short, direct replies — no filler preamble.", provenance: "user",
+      trust: "trusted", pinned: true, confirmedAt: "2026-08-02T10:00:00Z", sourceThreadId: null,
+      createdAt: "2026-08-02T09:59:00Z", updatedAt: "2026-08-02T10:00:00Z",
+    },
+    {
+      id: "asst-mem-2", tenantId: "co-agency", ownerUserId: DEMO_OWNER, scope: "company",
+      content: "The company's fiscal year starts in April.", provenance: "user",
+      trust: "trusted", pinned: false, confirmedAt: "2026-08-01T08:00:00Z", sourceThreadId: null,
+      createdAt: "2026-08-01T07:55:00Z", updatedAt: "2026-08-01T08:00:00Z",
+    },
+    {
+      id: "asst-mem-3", tenantId: "co-agency", ownerUserId: DEMO_OWNER, scope: "user",
+      // Deliberately UNCONFIRMED — proves the panel's "pending" section (and, on the backend side,
+      // context.ts's quarantine gate) with no extra clicks needed to see the state exists.
+      content: "Might be based in the Jakarta office (unconfirmed guess).", provenance: "assistant",
+      trust: "untrusted", pinned: false, confirmedAt: null, sourceThreadId: "asst-thread-1",
+      createdAt: "2026-08-04T09:05:00Z", updatedAt: "2026-08-04T09:05:00Z",
+    },
+  ];
+}
+
 // ── WHY THIS SITS ON `globalThis` INSTEAD OF A PLAIN MODULE-LEVEL `const` (found empirically —
 // this bit the very first live drive of ASST-07 under DEMO_MODE) ────────────────────────────────
 // Next.js compiles Server Actions and Route Handlers as SEPARATE module graphs ("layers"), even
@@ -130,12 +173,18 @@ declare global {
   var __gaiadaDemoAssistantMessages: DemoMessage[] | undefined;
   // eslint-disable-next-line no-var
   var __gaiadaDemoAssistantSeq: { n: number } | undefined;
+  // eslint-disable-next-line no-var
+  var __gaiadaDemoAssistantMemory: DemoMemory[] | undefined;
 }
 
 const THREADS: DemoThread[] = globalThis.__gaiadaDemoAssistantThreads ?? (globalThis.__gaiadaDemoAssistantThreads = seedThreads());
 const MESSAGES: DemoMessage[] = globalThis.__gaiadaDemoAssistantMessages ?? (globalThis.__gaiadaDemoAssistantMessages = seedMessages());
 const seqBox = globalThis.__gaiadaDemoAssistantSeq ?? (globalThis.__gaiadaDemoAssistantSeq = { n: 1 });
 const nid = (p: string) => `${p}-demo-${seqBox.n++}`;
+// ASST-19 — same globalThis-singleton requirement as THREADS/MESSAGES above (this store is read
+// from the "action" layer via proposeMemoryAction/confirmMemoryAction and would otherwise be a
+// SECOND, independently-initialized array under the route layer — see the header comment above).
+const MEMORY: DemoMemory[] = globalThis.__gaiadaDemoAssistantMemory ?? (globalThis.__gaiadaDemoAssistantMemory = seedMemory());
 
 interface DemoResult { status: number; json: unknown }
 const ok = (json: unknown): DemoResult => ({ status: 200, json });
@@ -148,6 +197,13 @@ function pinnedThenRecent(a: DemoThread, b: DemoThread): number {
   return Date.parse(b.createdAt) - Date.parse(a.createdAt);
 }
 
+function memoryPinnedThenRecent(a: DemoMemory, b: DemoMemory): number {
+  if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
+  const av = a.confirmedAt ? Date.parse(a.confirmedAt) : Date.parse(a.createdAt);
+  const bv = b.confirmedAt ? Date.parse(b.confirmedAt) : Date.parse(b.createdAt);
+  return bv - av;
+}
+
 function pubThread(t: DemoThread) {
   const { tenantId, ...rest } = t;
   void tenantId;
@@ -156,6 +212,11 @@ function pubThread(t: DemoThread) {
 function pubMessage(m: DemoMessage) {
   const { tenantId, threadId, partial, ...rest } = m;
   void tenantId; void threadId; void partial;
+  return rest;
+}
+function pubMemory(m: DemoMemory) {
+  const { tenantId, ...rest } = m;
+  void tenantId;
   return rest;
 }
 
@@ -209,7 +270,14 @@ export function assistantDemo(method: string, p: string, params: URLSearchParams
       if (Object.prototype.hasOwnProperty.call(b, "title")) thread.title = typeof b.title === "string" ? b.title.trim().slice(0, 500) || null : null;
       if (typeof b.pinned === "boolean") thread.pinned = b.pinned;
       if (b.status === "active" || b.status === "archived") thread.status = b.status;
-      if (Object.prototype.hasOwnProperty.call(b, "brainProvider")) thread.brainProvider = b.brainProvider ?? null;
+      if (Object.prototype.hasOwnProperty.call(b, "brainProvider")) {
+        const next = b.brainProvider ?? null;
+        // ASST-16 — mirrors assistant.controller.ts's patchThread: switching to a DIFFERENT brain
+        // clears the stale Hermes session id server-side (a fresh provider session starts on the
+        // next turn), so the demo fixture must not leave a stale one behind either.
+        if (next !== thread.brainProvider) thread.hermesSessionId = null;
+        thread.brainProvider = next;
+      }
       if (Object.prototype.hasOwnProperty.call(b, "brainModel")) thread.brainModel = b.brainModel ?? null;
       thread.updatedAt = now();
       return ok({ id: thread.id });
@@ -219,6 +287,10 @@ export function assistantDemo(method: string, p: string, params: URLSearchParams
       const idx = THREADS.indexOf(thread);
       THREADS.splice(idx, 1);
       for (let i = MESSAGES.length - 1; i >= 0; i--) if (MESSAGES[i].threadId === threadId) MESSAGES.splice(i, 1);
+      // ASST-19 — mirrors the real composite FK's `ON DELETE SET NULL (source_thread_id)`
+      // (migration 0079): a memory row that cited this thread SURVIVES the delete, with its
+      // provenance link cleared, not removed.
+      for (const mem of MEMORY) if (mem.sourceThreadId === threadId) mem.sourceThreadId = null;
       return ok({ ok: true });
     }
     // GET
@@ -258,6 +330,71 @@ export function assistantDemo(method: string, p: string, params: URLSearchParams
     rows = [...rows].sort(pinnedThenRecent);
     const total = rows.length;
     return ok({ items: rows.slice(offset, offset + limit).map(pubThread), total });
+  }
+
+  // ── ASST-19: memory panel ────────────────────────────────────────────────────────────────────
+  const confirmM = p.match(/^\/api\/([^/]+)\/assistant\/memory\/([^/]+)\/confirm$/);
+  if (confirmM && m === "POST") {
+    const [, tenantId, memoryId] = confirmM;
+    const mem = MEMORY.find((x) => x.id === memoryId && x.tenantId === tenantId);
+    if (!mem || mem.ownerUserId !== userId) return { status: 404, json: { error: "memory not found" } };
+    const b = JSON.parse(body || "{}") as { content?: string; pinned?: boolean };
+    if (typeof b.content === "string") {
+      const trimmed = b.content.trim();
+      if (!trimmed) return { status: 400, json: { error: "content cannot be empty" } };
+      mem.content = trimmed;
+    }
+    if (typeof b.pinned === "boolean") mem.pinned = b.pinned;
+    // Idempotent on the ORIGINAL confirmation timestamp — mirrors the real
+    // `confirmed_at = COALESCE(confirmed_at, now())`.
+    if (!mem.confirmedAt) mem.confirmedAt = now();
+    mem.trust = "trusted";
+    mem.updatedAt = now();
+    return ok({ id: mem.id });
+  }
+
+  const memoryDetailM = p.match(/^\/api\/([^/]+)\/assistant\/memory\/([^/]+)$/);
+  if (memoryDetailM && m === "DELETE") {
+    const [, tenantId, memoryId] = memoryDetailM;
+    const mem = MEMORY.find((x) => x.id === memoryId && x.tenantId === tenantId);
+    if (!mem || mem.ownerUserId !== userId) return { status: 404, json: { error: "memory not found" } };
+    MEMORY.splice(MEMORY.indexOf(mem), 1);
+    return ok({ ok: true });
+  }
+
+  const memoryListCreateM = p.match(/^\/api\/([^/]+)\/assistant\/memory$/);
+  if (memoryListCreateM) {
+    const [, tenantId] = memoryListCreateM;
+    if (m === "POST") {
+      const b = JSON.parse(body || "{}") as { content?: string; scope?: string; sourceThreadId?: string };
+      const content = (b.content ?? "").trim();
+      if (!content) return { status: 400, json: { error: "content is required" } };
+      const scope: AssistantMemoryScope = b.scope === "company" ? "company" : "user";
+      const mem: DemoMemory = {
+        id: nid("asst-mem"), tenantId, ownerUserId: userId, scope, content, provenance: "user",
+        trust: "untrusted", pinned: false, confirmedAt: null,
+        sourceThreadId: b.sourceThreadId || null, createdAt: now(), updatedAt: now(),
+      };
+      MEMORY.push(mem);
+      return { status: 201, json: { id: mem.id } };
+    }
+    // GET — owner-only list, mirrors the real `WHERE owner_user_id = $1`, with the same
+    // scope/pinned/confirmed filters the backend accepts.
+    const scopeFilter = params.get("scope");
+    const pinnedFilter = params.get("pinned");
+    const confirmedFilter = params.get("confirmed");
+    const limit = Math.max(1, Math.min(500, Number(params.get("limit")) || 100));
+    const offset = Math.max(0, Number(params.get("offset")) || 0);
+    let rows = MEMORY.filter((x) => x.tenantId === tenantId && x.ownerUserId === userId);
+    if (scopeFilter) rows = rows.filter((x) => x.scope === scopeFilter);
+    if (pinnedFilter !== null) rows = rows.filter((x) => x.pinned === (pinnedFilter === "true"));
+    if (confirmedFilter !== null) {
+      const wantConfirmed = confirmedFilter === "true";
+      rows = rows.filter((x) => (wantConfirmed ? x.confirmedAt !== null : x.confirmedAt === null));
+    }
+    rows = [...rows].sort(memoryPinnedThenRecent);
+    const total = rows.length;
+    return ok({ items: rows.slice(offset, offset + limit).map(pubMemory), total });
   }
 
   return null;

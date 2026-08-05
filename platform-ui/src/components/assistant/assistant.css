@@ -16,7 +16,19 @@
    memory drawer exists so far). A third grid column, added only while it's open. */
 .asst-workspace--with-memory { grid-template-columns: 280px 1fr 300px; }
 
-.asst-main__toolbar { display: flex; justify-content: flex-end; padding: 8px 14px 0; }
+.asst-main__toolbar { display: flex; justify-content: flex-end; align-items: center; gap: 10px; padding: 8px 14px 0; }
+/* ASST-16 — the per-thread brain picker, same toolbar row as the memory toggle. */
+.asst-brain-picker { display: flex; align-items: center; gap: 6px; }
+.asst-brain-picker__label {
+  font: 700 10px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-subtle);
+}
+.asst-brain-picker__select {
+  border: 0.5px solid var(--erp-hairline); background: transparent; cursor: pointer;
+  padding: 5px 8px; font: 400 12px var(--font-body); color: var(--text-primary);
+}
+.asst-brain-picker__select:focus-visible { outline: none; border-color: var(--erp-accent); }
+.asst-brain-picker__select:disabled { cursor: not-allowed; opacity: 0.6; }
+.asst-brain-picker__error { font: 400 11px var(--font-body); color: var(--status-danger-fg); }
 .asst-memory-toggle {
   border: 0.5px solid var(--erp-hairline); background: transparent; cursor: pointer;
   padding: 6px 12px; font: 700 10px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase;

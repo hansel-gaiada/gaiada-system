@@ -313,8 +313,22 @@ export class AssistantController {
       sets.push(`status = $${params.length}`);
     }
     if (has("brainProvider")) {
-      params.push(typeof body.brainProvider === "string" ? body.brainProvider.trim().slice(0, 100) || null : null);
+      const nextBrainProvider = typeof body.brainProvider === "string" ? body.brainProvider.trim().slice(0, 100) || null : null;
+      params.push(nextBrainProvider);
       sets.push(`brain_provider = $${params.length}`);
+      // ASST-16 — switching brains mid-thread starts a FRESH provider session, without touching
+      // ERP thread history: `hermes_session_id` is Hermes' OWN resume token, meaningless (and
+      // actively wrong) once the thread is routed at a different provider — the ERP transcript
+      // itself is entirely independent of it (assistant_messages is never touched here). Cleared
+      // whenever `brainProvider` actually changes (including a change AWAY from hermes to anything
+      // else, and a change TO hermes from anything else — either direction must not resume a stale
+      // session that belonged to a different routing decision). Left untouched on a PATCH that
+      // doesn't mention brainProvider at all (e.g. a plain rename/pin), and left untouched when the
+      // new value is IDENTICAL to what's already stored (re-picking the same brain must not throw
+      // away an in-progress Hermes conversation).
+      if (nextBrainProvider !== thread.brainProvider) {
+        sets.push(`hermes_session_id = NULL`);
+      }
     }
     if (has("brainModel")) {
       params.push(typeof body.brainModel === "string" ? body.brainModel.trim().slice(0, 200) || null : null);
@@ -506,13 +520,21 @@ export class AssistantController {
     const result = await relayGeneration(generation, {
       tenantId,
       prompt,
+      // ASST-16 — route this generation with the thread's chosen brain, and resume its Hermes
+      // session if one is already open. `provider` is a HINT only (OQ-6: "fail over and label") —
+      // a down/unavailable hermes silently falls through to the gateway's normal failover chain,
+      // never a hard error; `result.provider`/`result.model` (persisted below) always name the
+      // ACTUAL server, never the requested one, which is what makes the ASST-12 badge truthful.
+      provider: thread.brainProvider ?? undefined,
+      providerSession: thread.hermesSessionId ?? undefined,
       emit: {
         token: (text) => write(sseLine("token", { text })),
-        // ASST-12: relayed the instant `meta` arrives (before `done`) so a live-streaming client
-        // can show "served by <provider>" without waiting for the reply to finish — the "silent
-        // failover is invisible" gap this ticket closes. `providerSession` is only included when
-        // present (ASST-11 never sends it empty).
-        meta: (provider, model, providerSession) => write(sseLine("meta", { provider, model, ...(providerSession ? { providerSession } : {}) })),
+        // ASST-12/15: relayed the instant `meta` arrives (before `done`) so a live-streaming
+        // client can show "served by <provider>" without waiting for the reply to finish — the
+        // "silent failover is invisible" gap ASST-12 closed. ASST-15: never carries
+        // `providerSession` anymore (see `session` below) — this is now the SAME shape for every
+        // provider, hermes included.
+        meta: (provider, model) => write(sseLine("meta", { provider, model })),
         // `source`/`promptTokens`/`completionTokens` are ASST-12's additions to this frame's shape
         // (see docs/FRONTEND-BFF-CONTRACT.md §18) — `source` is what lets the UI's cost meter
         // label whether `tokens` is a real measurement or the ~4-chars/token estimate.
@@ -522,6 +544,11 @@ export class AssistantController {
             ...(promptTokens !== undefined ? { promptTokens } : {}),
             ...(completionTokens !== undefined ? { completionTokens } : {}),
           })),
+        // ASST-16/15: the terminal `event: session` is NOT relayed onto our own browser-facing
+        // wire (the UI never needs the raw Hermes token — it is internal routing plumbing,
+        // persisted below and threaded back on the NEXT turn). Capturing it here is enough; no
+        // new frame on the BFF's own SSE contract was needed for this ticket's acceptance bar.
+        session: () => {},
         done: () => write(sseLine("done", {})),
         error: (message, errorKind) => write(sseLine("error", { error: message, errorKind })),
       },
@@ -553,9 +580,18 @@ export class AssistantController {
             [result.text, result.tokensEstimate, result.latencyMs, result.errorKind ?? "unknown", result.provider ?? null, result.model ?? null, parts, messageId],
           );
         }
+        // ASST-16: persist the terminal `event: session` (if any) so turn 2 can resume the SAME
+        // Hermes conversation — see the relayGeneration call above's `providerSession` input.
+        // `COALESCE($2, hermes_session_id)` deliberately never CLEARS an existing session id when
+        // this particular turn didn't report one (e.g. the hint fell through to a non-hermes
+        // provider mid-thread without an explicit brain switch, or hermes itself failed before
+        // reaching its terminal frame) — only an explicit brainProvider PATCH (above) clears it.
         await c.query(
-          `UPDATE assistant_threads SET total_tokens = total_tokens + $1, last_message_at = now(), updated_at = now() WHERE id = $2`,
-          [result.tokensEstimate, id],
+          `UPDATE assistant_threads
+             SET total_tokens = total_tokens + $1, last_message_at = now(), updated_at = now(),
+                 hermes_session_id = COALESCE($2, hermes_session_id)
+             WHERE id = $3`,
+          [result.tokensEstimate, result.providerSession ?? null, id],
         );
       },
       { modules: ["assistant"] },
