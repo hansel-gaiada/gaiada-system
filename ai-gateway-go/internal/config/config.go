@@ -22,13 +22,20 @@ type Config struct {
 	OllamaEmbedModel string
 	// OpenAI-compatible provider (fronts Ollama Cloud / OpenRouter / vLLM / …). Holds a cloud
 	// key, so it is excluded in "site" topology mode the same way gemini/claude are.
-	OpenAIBaseURL         string
-	OpenAIAPIKey          string
-	OpenAIModel           string
-	OpenAIVisionModel     string
-	OpenAIMaxTokens       int
-	WhisperURL            string
-	WhisperModel          string
+	OpenAIBaseURL     string
+	OpenAIAPIKey      string
+	OpenAIModel       string
+	OpenAIVisionModel string
+	OpenAIMaxTokens   int
+	WhisperURL        string
+	WhisperModel      string
+	// HermesURL/HermesModel (ASST-15): hermes-gateway, a SEPARATE standalone shim service (never
+	// this process itself) that runs the local Hermes agent as the brain. Empty URL means
+	// Available()==false — same "unconfigured, not a failure" posture as every other optional
+	// provider. HermesModel is whatever hermes-gateway itself reports configuring (HERMES_MODEL on
+	// THAT process) — this gateway never picks Hermes' model, only names it for the wire's `meta`.
+	HermesURL             string
+	HermesModel           string
 	LLMChain              []string
 	MediaChain            []string
 	EmbedChain            []string
@@ -116,6 +123,8 @@ func Load() Config {
 		OpenAIMaxTokens:       envInt("OPENAI_MAX_TOKENS", 1024),
 		WhisperURL:            envOr("WHISPER_URL", ""),
 		WhisperModel:          envOr("WHISPER_MODEL", "Systran/faster-whisper-small"),
+		HermesURL:             envOr("HERMES_URL", ""),
+		HermesModel:           envOr("HERMES_MODEL", ""),
 		LLMChain:              splitCsv(envOr("LLM_CHAIN", "ollama,gemini,claude")),
 		MediaChain:            splitCsv(envOr("MEDIA_CHAIN", "whisper,gemini")),
 		EmbedChain:            splitCsv(envOr("EMBED_CHAIN", "ollama,gemini")),

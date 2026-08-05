@@ -32,7 +32,7 @@ import (
 // KNOWN_PROVIDERS is the set a runtime chain-reorder may name (the registry below, plus the always-
 // appended echo terminator). Exposed to the admin write path so an unknown name is rejected with a
 // clear message instead of silently shortening the chain.
-var knownProviders = []string{"whisper", "ollama", "openai", "gemini", "claude", "echo"}
+var knownProviders = []string{"whisper", "ollama", "openai", "gemini", "claude", "hermes", "echo"}
 
 // buildProviderList is buildChain's provider-resolution half, split out so the admin config-write
 // path can rebuild a chain's provider list at runtime using the SAME registry + topology rules the
@@ -44,6 +44,9 @@ func buildProviderList(names []string, cfg config.Config, client *http.Client) [
 		"openai":  providers.NewOpenAIProvider(cfg.OpenAIBaseURL, cfg.OpenAIAPIKey, cfg.OpenAIModel, cfg.OpenAIVisionModel, cfg.OpenAIMaxTokens, client),
 		"gemini":  providers.NewGeminiProvider(cfg.GeminiAPIKey, cfg.GeminiModel, client),
 		"claude":  providers.NewClaudeProvider(cfg.AnthropicAPIKey, cfg.AnthropicModel, client),
+		// hermes (ASST-15): hermes-gateway is a SEPARATE local shim process (never a cloud
+		// credential holder), same posture as ollama/whisper — never excluded by site topology.
+		"hermes": providers.NewHermesProvider(cfg.HermesURL, cfg.HermesModel, client),
 	}
 	list := []providers.Provider{}
 	for _, n := range names {

@@ -303,12 +303,55 @@ func overallTaxonomy(taxonomies []string) string {
 // client disconnected, or the caller's own timeout budget already expired) stops trying
 // further providers instead of burning through the rest of the chain pointlessly.
 func Run[T any](c *Chain, ctx context.Context, fn func(providers.Provider) (T, error)) (T, string, string, error) {
+	return runOrdered(c, ctx, c.snapshot(), fn)
+}
+
+// RunWithHint (ASST-15) behaves EXACTLY like Run, except the attempt order is reordered so that
+// the provider named `hint` — when it is actually present in this chain — is tried FIRST;
+// everything else keeps its existing relative order unchanged. An empty hint, or one that names no
+// provider in this chain, falls straight through to Run's untouched behavior (no reordering at
+// all), which is what makes "absent hint ⇒ byte-identical behavior" and "unknown-name hint ⇒ never
+// a hard error" both true for free rather than as special-cased branches.
+//
+// This is deliberately a PURE REORDERING, nothing else: it does not bypass, weaken, or even touch
+// the breaker/availability gate — runOrdered's loop below applies the identical
+// Available()/healthState() check to the hinted provider as it would to any provider in that
+// position, so a hinted-but-currently-open-breaker (or unconfigured) provider is skipped exactly
+// as today, and the chain falls through to whichever provider is next in the reordered list. A
+// hint therefore can never force a down provider to serve — it can only change WHICH available,
+// healthy provider gets tried first. Breaker state (recordFailure/recordSuccess/openForRateLimit)
+// is recorded per real attempt exactly as it always was; RunWithHint touches none of it directly.
+func RunWithHint[T any](c *Chain, ctx context.Context, hint string, fn func(providers.Provider) (T, error)) (T, string, string, error) {
+	if hint == "" {
+		return Run(c, ctx, fn)
+	}
+	order := c.snapshot()
+	reordered := make([]providers.Provider, 0, len(order))
+	var hinted providers.Provider
+	for _, p := range order {
+		if hinted == nil && p.Name() == hint {
+			hinted = p
+			continue
+		}
+		reordered = append(reordered, p)
+	}
+	if hinted == nil {
+		// Unmatched hint (e.g. a typo, or a provider not configured into THIS chain at all):
+		// fall through to the normal order untouched — never a hard error (OQ-6).
+		return Run(c, ctx, fn)
+	}
+	reordered = append([]providers.Provider{hinted}, reordered...)
+	return runOrdered(c, ctx, reordered, fn)
+}
+
+// runOrdered is Run's actual loop, factored out so RunWithHint can reuse it verbatim against a
+// caller-reordered snapshot — the breaker/availability/failure-recording logic is therefore
+// IDENTICAL for both call paths; only which snapshot is walked ever differs.
+func runOrdered[T any](c *Chain, ctx context.Context, order []providers.Provider, fn func(providers.Provider) (T, error)) (T, string, string, error) {
 	var zero T
 	var errs []string
 	var taxonomies []string
-	// Snapshot the order once: the lock must not be held across fn(p) (a network call), and an
-	// admin reorder mid-request must not tear the iteration.
-	for _, p := range c.snapshot() {
+	for _, p := range order {
 		if ctx.Err() != nil {
 			break
 		}

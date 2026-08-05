@@ -13,7 +13,12 @@
 //
 // Modes (selected via a `--fixture-mode=<mode>` arg, passed through HERMES_EXTRA_ARGS by tests):
 //   happy              (default) full box + footer with a Session: id, exit 0.
-//   die-before-close   dies (exit 1) mid-box, before the closing "╰" line ever arrives.
+//   die-before-close   dies (exit 1) mid-box, before the closing "╰" line ever arrives — but AFTER
+//                      body lines were already written (ASST-15: exercises "meta already
+//                      committed, then error" — content DID reach the parser before the death).
+//   die-during-preamble dies (exit 1) right after the preamble, BEFORE the box ever opens — zero
+//                      content ever reaches the parser (ASST-15: exercises "no meta ever, because
+//                      nothing committed" — the PRE-state mirror image of die-before-close).
 //   die-clean-no-close exits 0 WITHOUT ever printing the closing "╰" line (distinct from the
 //                      nonzero-exit case above — exercises the "!boxClosed" error branch alone).
 //   hang               prints only the preamble, then never continues — the gateway's own
@@ -74,6 +79,12 @@ async function run() {
     // (that would test nothing) — keep it alive until the gateway's own timeout kills it.
     setInterval(() => {}, 60_000);
     return;
+  }
+
+  if (mode === "die-during-preamble") {
+    // Dies before the box ever opens — zero content lines ever reach the parser (still PRE
+    // state). Distinct from die-before-close, which dies AFTER body lines were already written.
+    process.exit(1);
   }
 
   // Box-open marker deliberately split across two writes, WITH an ANSI escape split too.

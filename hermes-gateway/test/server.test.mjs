@@ -104,7 +104,7 @@ function parseSSE(body) {
 
 // --- happy path: multiple v2 frames, box decoration stripped incrementally ----------------------
 
-test("POST /complete/stream: multiple v2 frames, no box decoration, meta + done present", async () => {
+test("POST /complete/stream: multiple v2 frames, no box decoration, meta + session + done present", async () => {
   const s = await startServer();
   try {
     const res = await fetch(`http://127.0.0.1:${s.port}/complete/stream`, {
@@ -126,10 +126,28 @@ test("POST /complete/stream: multiple v2 frames, no box decoration, meta + done 
     }
     assert.equal(tokenFrames.map((f) => f.data[0]).join(""), "Hello from the fixture, line one\nline two of the reply\nline three bold-ish end");
 
+    // ASST-15: meta carries ONLY {provider, model} — providerSession moved to its own event.
     const metaFrames = frames.filter((f) => f.event === "meta");
     assert.equal(metaFrames.length, 1, "expected exactly one event: meta");
+    assert.deepEqual(Object.keys(metaFrames[0].data[0]).sort(), ["model", "provider"]);
     assert.equal(metaFrames[0].data[0].provider, "hermes");
-    assert.equal(metaFrames[0].data[0].providerSession, "fixture-session-abc123");
+
+    // ASST-15: meta fires BEFORE the first token frame (pre-first-content, same timing rule as
+    // ai-gateway-go's own `meta`) — this is the actual fix for the "Unknown provider for the
+    // whole reply" defect the divergence caused. Assert ordering on the RAW body, not just frame
+    // presence, so a regression back to terminal-meta would be caught here.
+    const metaIdx = body.indexOf("event: meta");
+    const firstTokenIdx = body.indexOf("data: " + JSON.stringify(tokenFrames[0].data[0]));
+    assert.ok(metaIdx !== -1 && firstTokenIdx !== -1 && metaIdx < firstTokenIdx,
+      `expected event: meta before the first token frame, meta@${metaIdx} firstToken@${firstTokenIdx}`);
+
+    // ASST-15: the late-known session id arrives on its OWN terminal event instead.
+    const sessionFrames = frames.filter((f) => f.event === "session");
+    assert.equal(sessionFrames.length, 1, "expected exactly one event: session");
+    assert.equal(sessionFrames[0].data[0].providerSession, "fixture-session-abc123");
+    const sessionIdx = body.indexOf("event: session");
+    const doneIdxRaw = body.indexOf("event: done");
+    assert.ok(sessionIdx !== -1 && doneIdxRaw !== -1 && sessionIdx < doneIdxRaw, "expected event: session before event: done");
 
     const doneFrames = frames.filter((f) => f.event === "done");
     assert.equal(doneFrames.length, 1, "expected exactly one event: done");
@@ -152,7 +170,8 @@ test("session id round-trips: turn-1 meta.providerSession becomes turn-2's --res
       headers: authHeaders(s.token),
       body: JSON.stringify({ prompt: "turn one" }),
     });
-    const providerSession = parseSSE(await turn1.text()).find((f) => f.event === "meta").data[0].providerSession;
+    // ASST-15: providerSession now arrives on event: session, not meta.
+    const providerSession = parseSSE(await turn1.text()).find((f) => f.event === "session").data[0].providerSession;
     assert.equal(providerSession, "fixture-session-abc123");
 
     // Turn 1's own argv must NOT contain --resume (nothing to resume yet) — asserted from the
@@ -178,7 +197,14 @@ test("session id round-trips: turn-1 meta.providerSession becomes turn-2's --res
 
 // --- truncated/dying Hermes: event: error, never a hang, never a half-frame claimed complete ----
 
-test("dying Hermes (nonzero exit, box never closed) yields event: error, not done", async () => {
+// ASST-15 behavior note: the fixture's die-before-close mode still writes 3 body lines (which DO
+// get parsed and relayed to the client) before the process dies — so under the NEW pre-first-
+// content meta timing, `meta` has ALREADY been announced by the time the death is discovered. This
+// mirrors ai-gateway-go's own precedent exactly (TestCompleteStreamMetaNeverContradictedOnMidStream
+// FailureAfterAlreadyStreamed): once real output has committed to the wire, a later failure is
+// reported honestly via event: error WITHOUT retracting or contradicting the meta that already
+// went out — never zero meta frames for a run that had, in fact, already streamed real content.
+test("dying Hermes (nonzero exit, box never closed) after streaming content: meta already announced, then event: error, not done", async () => {
   const s = await startServer({ HERMES_EXTRA_ARGS: "--fixture-mode=die-before-close" });
   try {
     const res = await fetch(`http://127.0.0.1:${s.port}/complete/stream`, {
@@ -189,7 +215,32 @@ test("dying Hermes (nonzero exit, box never closed) yields event: error, not don
     const frames = parseSSE(await res.text());
     assert.equal(frames.filter((f) => f.event === "error").length, 1);
     assert.equal(frames.filter((f) => f.event === "done").length, 0);
-    assert.equal(frames.filter((f) => f.event === "meta").length, 0);
+    assert.equal(frames.filter((f) => f.event === "session").length, 0, "no session id was ever printed before the death");
+    const metaFrames = frames.filter((f) => f.event === "meta");
+    assert.equal(metaFrames.length, 1, "meta was already committed once content streamed, before the later failure");
+    assert.equal(metaFrames[0].data[0].provider, "hermes");
+  } finally {
+    await s.stop();
+  }
+});
+
+// The mirror-image negative: a run that dies BEFORE any content ever parses (stuck in PRE state —
+// e.g. a hung tool-approval prompt, covered by the dedicated hang test below) must announce NO
+// meta at all — never a provider that produced nothing. Reusing the "hang" fixture here would
+// duplicate that test; this one exercises the same "PRE state, zero content" case via a fixture
+// mode that dies immediately after the preamble, before the box ever opens.
+test("Hermes dying during the PRE-box preamble (zero content ever parsed) announces no meta", async () => {
+  const s = await startServer({ HERMES_EXTRA_ARGS: "--fixture-mode=die-during-preamble" });
+  try {
+    const res = await fetch(`http://127.0.0.1:${s.port}/complete/stream`, {
+      method: "POST",
+      headers: authHeaders(s.token),
+      body: JSON.stringify({ prompt: "dies before any box content" }),
+    });
+    const frames = parseSSE(await res.text());
+    assert.equal(frames.filter((f) => f.event === "error").length, 1);
+    assert.equal(frames.filter((f) => f.event === "meta").length, 0, "no content ever reached the wire, so no provider should ever be announced");
+    assert.equal(frames.filter((f) => f.event === "done").length, 0);
   } finally {
     await s.stop();
   }

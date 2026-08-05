@@ -136,25 +136,35 @@ function runHermes(prompt, image) {
 // separate code path (spawn + HermesBoxStreamParser from ./stream-parser.mjs) so nothing here can
 // change /complete or /media's behaviour by accident.
 //
-// Wire grammar v2 (ASST-10/11), matching ai-gateway-go/internal/server/server.go's
-// writeSSEData/writeSSEMeta/writeSSEError/writeSSEDone byte-for-byte: every `data:` line is exactly
-// one line of JSON. Token frames are the default (unnamed) SSE event, data = the JSON string of
-// the piece. `event: meta` carries {provider:"hermes", model, providerSession?}. `event: error`
-// carries {"error": string}. `event: done` (data "{}" ) is the ONLY clean-completion terminal —
-// absent on every error path, so a consumer can always tell a clean end from a dropped connection.
+// Wire grammar v2 (ASST-10/11/15), matching ai-gateway-go/internal/server/server.go's
+// writeSSEData/writeSSEMeta/writeSSEError/writeSSEDone/writeSSESession byte-for-byte: every
+// `data:` line is exactly one line of JSON. Token frames are the default (unnamed) SSE event,
+// data = the JSON string of the piece. `event: meta` carries {provider:"hermes", model} —
+// EXACTLY once per stream, at the FIRST parsed content piece (see emitPiece below), same timing
+// rule as ai-gateway-go's own `meta`, no exceptions. `event: session` (ASST-15, NEW) carries
+// {providerSession: string} — TERMINAL, at most once, only when Hermes actually reported a
+// session id. `event: error` carries {"error": string}. `event: done` (data "{}") is the ONLY
+// clean-completion terminal — absent on every error path, so a consumer can always tell a clean
+// end from a dropped connection.
 //
-// Deliberate timing deviation from ai-gateway-go's `meta` (documented, not an oversight): that
-// gateway emits `meta` BEFORE the first token, because its concern is which failover survivor
-// committed bytes to the wire. This shim has no failover and its `providerSession` is a genuinely
-// TERMINAL fact — Hermes only prints "Session:" in the footer, after the box closes — so `meta`
-// here is emitted once, right before `done`, carrying the session id this turn just established
-// (or resumed). A future ai-gateway-go "hermes" provider (ASST-15) re-times this at the relay layer
-// however ASST-11 requires; this file's job is only to make the fact (the session id) available.
+// ASST-15 RESOLVED the divergence ASST-14 (deliberately, and correctly at the time) introduced:
+// this shim used to emit `meta` TERMINALLY, carrying `providerSession` inline, because Hermes'
+// session id is only knowable from its footer — a genuinely late fact. That made `meta` mean two
+// different things depending on which process emitted it (ai-gateway-go: pre-first-token; here:
+// terminal) — one grammar, two dialects, and a real user-visible cost: the "served by" badge read
+// "Unknown provider" for an entire Hermes reply, resolving only at the very end. The fix: `meta`
+// now ALWAYS fires pre-first-content here too (provider/model are static — known before Hermes
+// even starts, no reason to wait), and the late-arriving session id moved to its own additive
+// terminal event. See docs/FRONTEND-BFF-CONTRACT.md §18's "ASST-15" addendum for the full
+// reasoning (why (a) — a new event — was chosen over (b) — widening `meta`'s own timing rule).
 function writeSSEData(res, payload) {
   res.write(`data: ${JSON.stringify(payload)}\n\n`);
 }
 function writeSSEMeta(res, meta) {
   res.write(`event: meta\ndata: ${JSON.stringify(meta)}\n\n`);
+}
+function writeSSESession(res, providerSession) {
+  res.write(`event: session\ndata: ${JSON.stringify({ providerSession })}\n\n`);
 }
 function writeSSEError(res, message) {
   res.write(`event: error\ndata: ${JSON.stringify({ error: message })}\n\n`);
@@ -199,8 +209,22 @@ function handleCompleteStream(req, res, payload) {
   let settled = false;
   let timedOut = false;
   let stderrTail = "";
-
-  const parser = new HermesBoxStreamParser((piece) => writeSSEData(res, piece));
+  // metaEmitted (ASST-15): gates writeSSEMeta so it fires EXACTLY ONCE, at the first piece the
+  // parser ever produces — mirroring ai-gateway-go's own "meta at first byte release" discipline.
+  // A run that dies before any content ever parses (PRE state the whole time — e.g. the
+  // tool-approval-hang fixture mode) never gets metaEmitted set, so no meta is ever announced for
+  // it, matching the failover-safety property ASST-11 established: never announce a provider that
+  // produced nothing.
+  let metaEmitted = false;
+  const emitMetaOnce = () => {
+    if (metaEmitted) return;
+    metaEmitted = true;
+    writeSSEMeta(res, { provider: "hermes", model: CFG.model || "" });
+  };
+  const parser = new HermesBoxStreamParser((piece) => {
+    emitMetaOnce();
+    writeSSEData(res, piece);
+  });
 
   const child = spawn(cmd, [...prefixArgs, ...args], { cwd: CFG.cwd, windowsHide: true });
 
@@ -280,11 +304,18 @@ function handleCompleteStream(req, res, payload) {
     }
 
     console.log(`[complete/stream] ${elapsed}ms session=${parser.sessionId ?? "<none>"}`);
-    writeSSEMeta(res, {
-      provider: "hermes",
-      model: CFG.model || "",
-      ...(parser.sessionId ? { providerSession: parser.sessionId } : {}),
-    });
+    // Edge-case safety net: a successful run with a box that opened+closed but produced literally
+    // zero content lines (degenerate, never observed from real Hermes) would otherwise complete
+    // with no meta at all — emit it here too, guarded by the same flag, so a clean completion
+    // always names its provider. The COMMON case (any real reply) already emitted this at the
+    // first piece, well before this point; emitMetaOnce() is therefore a true no-op there.
+    emitMetaOnce();
+    // ASST-15: providerSession is TERMINAL and ONLY-when-real (Hermes only prints "Session:" in
+    // the footer, after the box closes) — never invented, never sent empty, mirroring
+    // ai-gateway-go's writeSSESession discipline exactly.
+    if (parser.sessionId) {
+      writeSSESession(res, parser.sessionId);
+    }
     writeSSEDone(res);
     res.end();
   }

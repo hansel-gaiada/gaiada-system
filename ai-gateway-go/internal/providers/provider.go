@@ -43,3 +43,27 @@ type UsageStreamingProvider interface {
 	StreamingProvider
 	CompleteStreamUsage(ctx context.Context, prompt string, onToken func(string), onUsage func(promptTokens, completionTokens int)) error
 }
+
+// SessionStreamingProvider is an optional extension of StreamingProvider (ASST-15): a provider
+// whose underlying brain owns its OWN session/conversation handle — today, hermes-gateway's Hermes
+// agent, which prints a `Session:` id in its footer — implements CompleteStreamSession in addition
+// to CompleteStream. The gateway treats this string as completely OPAQUE both ways: it never
+// inspects, validates, or generates it, only carries it between the caller and this one provider.
+//
+// `session` is the caller-supplied continuation token to resume (empty string when the caller has
+// none — e.g. turn 1 of a new conversation, or any provider that was never given one). onSession
+// reports the (possibly new, possibly unchanged) session id the provider actually has, mirroring
+// UsageStreamingProvider's onUsage discipline exactly: called AT MOST ONCE, and ONLY when the
+// provider genuinely has a real session id to report — never invented, never sent empty. Because
+// some providers (hermes) only learn their own session id from output that arrives at the very end
+// of the reply, onSession may fire anywhere from immediately to just before
+// CompleteStreamSession returns; callers must not assume any timing beyond "at most once, only
+// ever for tokens already passed to onToken by the time it fires" — see the ASST-15 addendum in
+// docs/FRONTEND-BFF-CONTRACT.md §18 for the wire-level `event: session` this backs.
+//
+// A provider with no session concept (ollama/gemini/claude/openai/echo today) simply doesn't
+// implement this interface.
+type SessionStreamingProvider interface {
+	StreamingProvider
+	CompleteStreamSession(ctx context.Context, prompt, session string, onToken func(string), onSession func(session string)) error
+}

@@ -286,3 +286,130 @@ func TestClassifyTimeoutFromContextDeadlineExceeded(t *testing.T) {
 		t.Fatalf("expected [timeout] tag in aggregate message, got %q", err.Error())
 	}
 }
+
+// --- ASST-15: RunWithHint — pure reordering, never a breaker bypass ------------------------------
+
+// The hint is honored: naming a provider that is available+healthy moves it to the front even
+// though it is NOT first in the configured order.
+func TestRunWithHintRoutesToNamedProviderWhenHealthy(t *testing.T) {
+	first := &stubProvider{name: "first", avail: true}
+	second := &stubProvider{name: "second", avail: true}
+	c := NewChain([]providers.Provider{first, second}, 3, 60_000, time.Now)
+
+	_, provider, _, err := RunWithHint(c, context.Background(), "second", func(p providers.Provider) (string, error) {
+		return p.Complete(context.Background(), "hi")
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if provider != "second" {
+		t.Fatalf("expected the hinted provider 'second' to serve, got %q", provider)
+	}
+	if first.calls != 0 {
+		t.Fatalf("expected the non-hinted provider to never be attempted, got %d calls", first.calls)
+	}
+}
+
+// The hint names a provider whose breaker is OPEN. This is the load-bearing negative: the hint
+// must NEVER force a call to a down provider — it only reorders WHICH available/healthy provider
+// is tried first. An open breaker must skip the hinted provider exactly as if it were naturally
+// first in line, and the chain must still serve via the next provider, with no hard error.
+func TestRunWithHintNeverBypassesAnOpenBreaker(t *testing.T) {
+	now := time.Now()
+	clock := func() time.Time { return now }
+	down := &stubProvider{name: "down", avail: true, failCount: 999}
+	up := &stubProvider{name: "up", avail: true}
+	c := NewChain([]providers.Provider{down, up}, 1, 60_000, clock)
+
+	// Trip the breaker on "down" with a normal (unhinted) call first.
+	_, _, _, _ = Run(c, context.Background(), func(p providers.Provider) (string, error) {
+		return p.Complete(context.Background(), "hi")
+	})
+	if state := c.State(); state["down"] != "open" {
+		t.Fatalf("expected 'down' breaker open before the hinted call, got %q", state["down"])
+	}
+	callsBefore := down.calls
+
+	_, provider, _, err := RunWithHint(c, context.Background(), "down", func(p providers.Provider) (string, error) {
+		return p.Complete(context.Background(), "hi")
+	})
+	if err != nil {
+		t.Fatalf("hint + down provider must still serve (fail over and label), got error: %v", err)
+	}
+	if provider != "up" {
+		t.Fatalf("expected the chain to serve via 'up' despite the hint naming 'down', got %q", provider)
+	}
+	// THE assertion: no additional call was made to the breaker-open hinted provider. The hint
+	// reordered the attempt list; it did not force an attempt past the breaker gate.
+	if down.calls != callsBefore {
+		t.Fatalf("hint bypassed the open breaker: 'down' was called again (calls %d -> %d)", callsBefore, down.calls)
+	}
+}
+
+// A provider named by the hint but genuinely unavailable (no credentials/URL configured, the
+// Available()==false gate — distinct from a tripped breaker) is skipped the same way: no hard
+// error, normal fallthrough.
+func TestRunWithHintFallsThroughWhenNamedProviderUnavailable(t *testing.T) {
+	unavailable := &stubProvider{name: "unconfigured", avail: false}
+	up := &stubProvider{name: "up", avail: true}
+	c := NewChain([]providers.Provider{unavailable, up}, 3, 60_000, time.Now)
+
+	_, provider, _, err := RunWithHint(c, context.Background(), "unconfigured", func(p providers.Provider) (string, error) {
+		return p.Complete(context.Background(), "hi")
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if provider != "up" {
+		t.Fatalf("expected fallthrough to 'up', got %q", provider)
+	}
+	if unavailable.calls != 0 {
+		t.Fatalf("Available()==false must mean never called, hint or not, got %d calls", unavailable.calls)
+	}
+}
+
+// An unmatched hint (names no provider in this chain at all — e.g. a typo, or "hermes" hinted
+// against a chain that never configured it) falls through to the untouched normal order. Never a
+// hard error.
+func TestRunWithHintUnmatchedNameFallsThroughToNormalOrder(t *testing.T) {
+	first := &stubProvider{name: "first", avail: true}
+	second := &stubProvider{name: "second", avail: true}
+	c := NewChain([]providers.Provider{first, second}, 3, 60_000, time.Now)
+
+	_, provider, _, err := RunWithHint(c, context.Background(), "does-not-exist", func(p providers.Provider) (string, error) {
+		return p.Complete(context.Background(), "hi")
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if provider != "first" {
+		t.Fatalf("expected the normal (first) provider to serve on an unmatched hint, got %q", provider)
+	}
+}
+
+// An empty hint must be byte-for-byte Run(): same provider order, same result, for every existing
+// caller unaffected by this ticket.
+func TestRunWithHintEmptyHintIsIdenticalToRun(t *testing.T) {
+	first := &stubProvider{name: "first", avail: true}
+	second := &stubProvider{name: "second", avail: true}
+	cHint := NewChain([]providers.Provider{first, second}, 3, 60_000, time.Now)
+	cPlain := NewChain([]providers.Provider{
+		&stubProvider{name: "first", avail: true}, &stubProvider{name: "second", avail: true},
+	}, 3, 60_000, time.Now)
+
+	_, providerHint, _, errHint := RunWithHint(cHint, context.Background(), "", func(p providers.Provider) (string, error) {
+		return p.Complete(context.Background(), "hi")
+	})
+	_, providerPlain, _, errPlain := Run(cPlain, context.Background(), func(p providers.Provider) (string, error) {
+		return p.Complete(context.Background(), "hi")
+	})
+	if errHint != nil || errPlain != nil {
+		t.Fatalf("unexpected errors: hint=%v plain=%v", errHint, errPlain)
+	}
+	if providerHint != providerPlain {
+		t.Fatalf("empty hint changed which provider served: hint=%q plain=%q", providerHint, providerPlain)
+	}
+	if providerHint != "first" {
+		t.Fatalf("expected the first (unreordered) provider to serve, got %q", providerHint)
+	}
+}

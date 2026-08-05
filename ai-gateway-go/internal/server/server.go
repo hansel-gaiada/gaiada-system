@@ -154,14 +154,20 @@ func writeSSEDone(w http.ResponseWriter, flusher http.Flusher, canFlush bool) {
 // exists today (ASST-06's relay, not yet built) is written against this doc from day one, and
 // after it exists this framing may never change again without a version bump (Ruling 2).
 //
-// metaPayload answers OQ-6: which brain actually served THIS stream. providerSession is reserved
-// for a future per-provider session/conversation handle (e.g. an upstream that supports multi-turn
-// server-side state) — nothing in this gateway populates it yet, so it is always omitted rather
-// than sent empty; a consumer must already treat its absence as "no session", never an error.
+// metaPayload answers OQ-6: which brain actually served THIS stream.
+//
+// ASST-15: this payload NO LONGER carries providerSession. ASST-11 reserved a field for it here,
+// but ASST-14 (hermes-gateway) revealed the field can't be populated pre-first-token for every
+// provider — hermes-gateway's session id is only known from output that arrives after the reply
+// completes, a genuinely late fact — which would have forced `meta`'s timing itself to become
+// provider-dependent (early for most providers, terminal for hermes): one grammar, two dialects,
+// the exact defect shape this program keeps re-encountering. Resolution (see
+// docs/FRONTEND-BFF-CONTRACT.md §18's "ASST-15" addendum): `meta` keeps its ONE timing rule,
+// unconditionally, for every provider — pre-first-token, no exceptions — and the late-arriving
+// session id moved to its own additive terminal event, `event: session` (writeSSESession below).
 type metaPayload struct {
-	Provider        string `json:"provider"`
-	Model           string `json:"model"`
-	ProviderSession string `json:"providerSession,omitempty"`
+	Provider string `json:"provider"`
+	Model    string `json:"model"`
 }
 
 // writeSSEMeta writes the `event: meta` frame. Call site + timing rule: see the long comment
@@ -207,6 +213,28 @@ func writeSSEUsage(w http.ResponseWriter, flusher http.Flusher, canFlush bool, p
 	}
 }
 
+// sessionPayload (ASST-15) is a provider's OWN, OPAQUE session/conversation handle — the gateway
+// never inspects, generates, or validates this string, only carries it. See writeSSESession.
+type sessionPayload struct {
+	ProviderSession string `json:"providerSession"`
+}
+
+// writeSSESession writes the terminal `event: session` frame (ASST-15) — see its one call site
+// (after usage, immediately before writeSSEDone, on the success path only) for why it can never
+// appear on an error path or after `done`. Empty sessions are never written (see the one call
+// site's nil-check): mirrors writeSSEUsage's "real value or nothing" discipline exactly.
+func writeSSESession(w http.ResponseWriter, flusher http.Flusher, canFlush bool, session string) {
+	enc, err := json.Marshal(sessionPayload{ProviderSession: session})
+	if err != nil {
+		// A plain string cannot fail to marshal; guarded for the same reason as writeSSEUsage.
+		return
+	}
+	fmt.Fprintf(w, "event: session\ndata: %s\n\n", enc)
+	if canFlush {
+		flusher.Flush()
+	}
+}
+
 // modelOf reports a provider's model name via the optional providers.ModelReporter capability, or
 // "" for a provider with no fixed model concept (echo) — truthful absence, not a guess.
 func modelOf(p providers.Provider) string {
@@ -216,11 +244,19 @@ func modelOf(p providers.Provider) string {
 	return ""
 }
 
-// callCompleteStream invokes CompleteStream, using the ASST-11 usage extension when the provider
-// implements it so onUsage fires with the provider's real end-of-stream counts. A provider without
-// the extension (echo; any provider that hasn't been wired for real counts yet) simply never
-// drives onUsage — usage stays absent on the wire for that attempt, never faked.
-func callCompleteStream(ctx context.Context, sp providers.StreamingProvider, prompt string, onToken func(string), onUsage func(promptTokens, completionTokens int)) error {
+// callCompleteStream invokes CompleteStream, dispatching to the richest optional extension a
+// provider implements: providers.SessionStreamingProvider (ASST-15 — threads the caller's opaque
+// `session` hint in, and reports whatever session the provider actually has via onSession) takes
+// priority over providers.UsageStreamingProvider (ASST-11 — onUsage fires with real end-of-stream
+// counts), which takes priority over plain providers.StreamingProvider. No provider today
+// implements both extensions at once, so this ordering is a "richest available" choice rather than
+// a real conflict — but if one someday does, the session-aware call is deliberately the one that
+// runs (session > usage in precedence here has no significance beyond "pick one deterministically";
+// see the ASST-15 addendum for why the two never need to compose).
+func callCompleteStream(ctx context.Context, sp providers.StreamingProvider, prompt, session string, onToken func(string), onUsage func(promptTokens, completionTokens int), onSession func(session string)) error {
+	if ssp, ok := sp.(providers.SessionStreamingProvider); ok {
+		return ssp.CompleteStreamSession(ctx, prompt, session, onToken, onSession)
+	}
 	if up, ok := sp.(providers.UsageStreamingProvider); ok {
 		return up.CompleteStreamUsage(ctx, prompt, onToken, onUsage)
 	}
@@ -291,6 +327,9 @@ func providerConfigReport(cfg config.Config) []providerCfg {
 	return []providerCfg{
 		{Name: "ollama", Model: cfg.OllamaModel, Endpoint: cfg.OllamaURL, KeyRequired: false, KeyConfigured: cfg.OllamaURL != ""},
 		{Name: "whisper", Model: cfg.WhisperModel, Endpoint: cfg.WhisperURL, KeyRequired: false, KeyConfigured: cfg.WhisperURL != ""},
+		// hermes (ASST-15): a separate local shim process (hermes-gateway), never a cloud
+		// credential holder — same posture as ollama/whisper.
+		{Name: "hermes", Model: cfg.HermesModel, Endpoint: cfg.HermesURL, KeyRequired: false, KeyConfigured: cfg.HermesURL != ""},
 		{Name: "openai", Model: cfg.OpenAIModel, Endpoint: cfg.OpenAIBaseURL, KeyRequired: true, KeyConfigured: cfg.OpenAIAPIKey != "", SiteExcluded: site},
 		{Name: "gemini", Model: cfg.GeminiModel, KeyRequired: true, KeyConfigured: cfg.GeminiAPIKey != "", SiteExcluded: site},
 		{Name: "claude", Model: cfg.AnthropicModel, KeyRequired: true, KeyConfigured: cfg.AnthropicAPIKey != "", SiteExcluded: site},
@@ -759,6 +798,16 @@ func NewServer(cfg config.Config, chains Chains, b *budget.Budget, classifier *d
 		}
 		var body struct {
 			Prompt string `json:"prompt"`
+			// Provider (ASST-15) is an optional per-request HINT: route to the named provider
+			// FIRST when this chain has it AND its breaker/availability gate says it's usable —
+			// otherwise fall through to the normal failover chain (chain.RunWithHint below), NEVER
+			// a hard error (OQ-6: fail over and label). Absent/empty ⇒ byte-identical to today.
+			Provider string `json:"provider"`
+			// ProviderSession (ASST-15) is an OPAQUE token this gateway never inspects, generates,
+			// or validates — threaded verbatim into whichever attempted provider implements
+			// providers.SessionStreamingProvider (today: hermes). See docs/FRONTEND-BFF-CONTRACT.md
+			// §18's "ASST-15" addendum.
+			ProviderSession string `json:"providerSession"`
 		}
 		_ = json.NewDecoder(r.Body).Decode(&body)
 		if strings.TrimSpace(body.Prompt) == "" {
@@ -802,6 +851,10 @@ func NewServer(cfg config.Config, chains Chains, b *budget.Budget, classifier *d
 		// zero-filled, never estimated). It is only ever read on the success path, after chain.Run
 		// returns — see the write site right before writeSSEDone.
 		var usage *usagePayload
+		// session is nil until a provider's onSession callback fires with a REAL session id
+		// (ASST-15: same never-invented discipline as usage). Read only on the success path, after
+		// usage, immediately before writeSSEDone.
+		var session *string
 
 		// Native streaming when the selected provider supports it; otherwise emit the full
 		// response as one SSE event so the wire contract is stable regardless.
@@ -870,15 +923,23 @@ func NewServer(cfg config.Config, chains Chains, b *budget.Budget, classifier *d
 		scrubber := dlp.NewStreamScrubber(emit)
 		onToken := func(token string) { scrubber.Write(token) }
 		streamedAttempt := false
-		text, _, _, err := chain.Run(chains.LLM, streamCtx, func(p providers.Provider) (string, error) {
+		// ASST-15: RunWithHint is a PURE REORDERING of chain.Run's snapshot (see chain.go's doc
+		// comment) — an empty/unmatched body.Provider degrades to Run's untouched behavior, and a
+		// hinted-but-down provider is skipped by the exact same breaker/Available() gate every
+		// other provider in this loop is, never bypassed. Everything below (currentProvider/
+		// currentModel bookkeeping, the meta/usage/session capture, the hold-window discard) is
+		// UNCHANGED from before this ticket — only which provider is tried in which order can differ.
+		text, _, _, err := chain.RunWithHint(chains.LLM, streamCtx, body.Provider, func(p providers.Provider) (string, error) {
 			// ASST-11: recorded BEFORE the attempt runs, so if emit() fires during (or at the final
 			// Close() flush after) THIS attempt, it reports THIS provider — see the emit closure's
 			// comment for why that is always the provider actually releasing bytes, never a prior
 			// discarded attempt or a later one that hasn't run yet.
 			currentProvider, currentModel = p.Name(), modelOf(p)
 			if sp, isStreaming := p.(providers.StreamingProvider); isStreaming {
-				serr := callCompleteStream(streamCtx, sp, result.Clean, onToken, func(promptTokens, completionTokens int) {
+				serr := callCompleteStream(streamCtx, sp, result.Clean, body.ProviderSession, onToken, func(promptTokens, completionTokens int) {
 					usage = &usagePayload{PromptTokens: promptTokens, CompletionTokens: completionTokens}
+				}, func(providerSession string) {
+					session = &providerSession
 				})
 				if serr != nil {
 					if streamed {
@@ -896,10 +957,11 @@ func NewServer(cfg config.Config, chains Chains, b *budget.Budget, classifier *d
 						// Nothing reached the client: everything this attempt produced is still
 						// inside the DLP buffer. Drop it so the next provider starts clean.
 						scrubber.Reset()
-						// ASST-11: this attempt's usage (if any) must not survive failover either —
-						// it belongs to a provider that never committed bytes to the wire, exactly
-						// like the discarded buffer it traveled alongside.
+						// ASST-11/15: this attempt's usage/session (if any) must not survive
+						// failover either — both belong to a provider that never committed bytes
+						// to the wire, exactly like the discarded buffer they traveled alongside.
 						usage = nil
+						session = nil
 					}
 					return "", serr
 				}
@@ -937,6 +999,13 @@ func NewServer(cfg config.Config, chains Chains, b *budget.Budget, classifier *d
 		// is unreachable on any error path — every error branch above returns before this line.
 		if usage != nil {
 			writeSSEUsage(w, flusher, canFlush, usage.PromptTokens, usage.CompletionTokens)
+		}
+		// ASST-15: session is likewise TERMINAL and ONLY-when-real (never invented, never sent
+		// empty) — written after usage, before done. This is where hermes' late-known session id
+		// reaches the wire, WITHOUT meta itself ever needing to move (see the ASST-15 addendum in
+		// docs/FRONTEND-BFF-CONTRACT.md §18 and metaPayload's doc comment above).
+		if session != nil && *session != "" {
+			writeSSESession(w, flusher, canFlush, *session)
 		}
 		// ASST-10: the clean-completion terminal. Reached ONLY on a success path — every error
 		// branch above returns before this point — so a consumer can rely on `event: done` to
