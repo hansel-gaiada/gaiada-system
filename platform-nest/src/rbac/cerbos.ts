@@ -19,6 +19,11 @@ export interface Resource {
    *  `resource.attr.subjectUserId == principal.id`. Omitted -> "" -> those rules fail
    *  closed (never a leak from a handler that forgot to pass it). */
   subjectUserId?: string;
+  /** ASST-21: a free-text origin marker (currently only `"assistant_handoff"`) so the additive
+   *  `agent_run` rule (resource_agent_run.yaml) can be scoped to EXACTLY runs created through the
+   *  assistant's handoff endpoint, never every owner-attributed run in the platform. Omitted -> "" ->
+   *  that rule's `==` comparison fails closed, same convention as every other optional attr here. */
+  origin?: string;
 }
 
 export type Decision = { allow: true } | { allow: false; reason: string };
@@ -47,6 +52,7 @@ function resourcePayload(r: Resource) {
       teamId: r.teamId ?? "",
       module: r.module ?? "",
       subjectUserId: r.subjectUserId ?? "",
+      origin: r.origin ?? "",
     },
   };
 }

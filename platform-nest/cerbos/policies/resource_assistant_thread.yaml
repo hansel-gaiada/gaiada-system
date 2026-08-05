@@ -61,7 +61,14 @@ resourcePolicy:
     # Owner, full stop. Every thread action — including message/stream/stop, which are as
     # sensitive as read/update since they drive or observe the live transcript — requires
     # `principal.id == resource.attr.ownerId` within the tenant. No other rule exists in this file.
-    - actions: ["create", "read", "update", "delete", "message", "stream", "stop"]
+    #
+    # ASST-21 ADDITIVE: `handoff` (creating a goal run from the thread) joins this SAME list, under
+    # the SAME condition — handing a task to a specialist is exactly as owner-only as sending a
+    # message, and the run it creates then executes under this same owner's OBO envelope
+    # (broker.ts's `oboEnvelopeFor`), which is the whole reason reading it back is later safe
+    # (resource_agent_run.yaml). This is an EDIT to an existing file (hot-reloads live — no
+    # container restart needed), unlike the brand-new `resource_agent_run.yaml` alongside it.
+    - actions: ["create", "read", "update", "delete", "message", "stream", "stop", "handoff"]
       effect: EFFECT_ALLOW
       roles: ["user"]
       condition:

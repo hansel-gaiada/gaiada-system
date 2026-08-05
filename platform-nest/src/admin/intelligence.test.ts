@@ -6,7 +6,7 @@ import type { AddressInfo } from "node:net";
 import type { NestFastifyApplication } from "@nestjs/platform-fastify";
 import { config } from "../config";
 import { buildApp } from "../main";
-import { withGlobal } from "../db";
+import { newId, withGlobal, withTenants } from "../db";
 import { initTestDb, teardownTestDb, TEST_URL } from "../testing/setup";
 import { createCompany, createUser, addMembership, createRole, grantRole } from "../testing/fixtures";
 
@@ -96,6 +96,12 @@ describe.skipIf(!TEST_URL)("agent goals proxy (B3)", () => {
   // callback; TS's control-flow narrowing can't see through that, so a precise optional type
   // here fights the narrower (spuriously narrows to `never` at some call sites).
   let lastPostBody: any;
+  // ASST-21 — `assistant_handoffs.run_id` is a real `uuid` column (migration 0084), unlike this
+  // file's pre-existing human-readable `run-1`/`goal-1` stub ids — computed once, up front, so both
+  // the fake server's route match and the DB row + request URL below all agree on the same value
+  // regardless of hook ordering (a plain `let` closed over by the server's request handler, read at
+  // REQUEST time, not at server-start time).
+  const HANDOFF_RUN_ID = newId();
 
   function startStub(): Promise<{ server: Server; base: string }> {
     const server = createServer((req, res) => {
@@ -141,6 +147,17 @@ describe.skipIf(!TEST_URL)("agent goals proxy (B3)", () => {
             runId: "run-1", goalId: "goal-1", agent: "researcher", status: "ok", outcome: "found 3 docs",
             steps: [{ kind: "model", detail: "planned" }, { kind: "tool", detail: "search ok" }],
             modelCalls: 2, toolCalls: 1, toolsCalled: ["search"], provider: "gemini", startedAt: 1, endedAt: 2,
+          });
+        }
+        // ASST-21 — a SEPARATE run id, standing in for a handoff run's transcript. Distinct from
+        // "run-1" above on purpose: "run-1" has NO `assistant_handoffs` row anywhere in this suite,
+        // which is exactly what keeps it proving the UNCHANGED elevated-only path; this one gets a
+        // handoff row inserted by the ASST-21 tests below, so the two can never be confused.
+        if (req.method === "GET" && url.startsWith(`/runs/${HANDOFF_RUN_ID}`)) {
+          return send(200, {
+            runId: HANDOFF_RUN_ID, goalId: "goal-handoff-1", agent: "status-reporter", status: "ok",
+            outcome: "1 project, 0 tasks", steps: [{ kind: "tool", detail: "projects.list ok" }],
+            modelCalls: 1, toolCalls: 1, toolsCalled: ["projects.list"], provider: "echo", startedAt: 1, endedAt: 2,
           });
         }
         return send(404, { error: "not found" });
@@ -211,6 +228,97 @@ describe.skipIf(!TEST_URL)("agent goals proxy (B3)", () => {
     expect(r.statusCode).toBe(200);
     const run = r.json() as { steps: Array<{ kind: string; detail: string }> };
     expect(run.steps).toEqual([{ kind: "model", detail: "planned" }, { kind: "tool", detail: "search ok" }]);
+  });
+
+  // ══════════════════════════════════════════════════════════════════════════════════════════════
+  // ASST-21 — the additive handoff-owner carve-out, and its regression guard.
+  // ══════════════════════════════════════════════════════════════════════════════════════════════
+  // Design: docs/superpowers/plans/2026-08-05-d14-and-assistant-tickets.md ("### ASST-21").
+  // `run-1` above has NO `assistant_handoffs` row anywhere in this file, so the "run transcript is
+  // elevated-only" test just above is ALREADY the regression guard: it exercises the EXACT SAME
+  // `isElevated(req)` line this ticket's edit wraps, with a non-elevated `member` still 403ing and
+  // `admin` (platform_admin @ global) still 200ing, completely unchanged. The tests below add the
+  // NEW owner-scoped allow path for a DIFFERENT runId that a real handoff links — a member who is
+  // this specific handoff's owner, a different member who is not, and `company_admin` (deliberately
+  // NOT elevated — `admin/elevated.ts` only recognizes platform_admin/group_executive @ global) all
+  // hit the SAME `/agents/runs/:runId` route the regression test above already covers.
+  describe("ASST-21: handoff-owner additive carve-out", () => {
+    let owner: string;
+    let sameCompanyOther: string;
+    let companyAdmin: string;
+
+    beforeAll(async () => {
+      owner = await createUser("handoff-owner@a.test");
+      sameCompanyOther = await createUser("handoff-other@a.test");
+      companyAdmin = await createUser("handoff-admin@a.test");
+      await addMembership(tenant, owner);
+      await addMembership(tenant, sameCompanyOther);
+      await addMembership(tenant, companyAdmin);
+      const memberRole = await createRole("member");
+      const companyAdminRole = await createRole("company_admin");
+      await grantRole(owner, memberRole, "company", tenant);
+      await grantRole(sameCompanyOther, memberRole, "company", tenant);
+      await grantRole(companyAdmin, companyAdminRole, "company", tenant);
+
+      // The link ASST-21's endpoint would have created via `handoffs.ts`'s `createHandoff` — inserted
+      // directly here (module-scoped withTenants, exactly what the real code path uses) so this test
+      // targets the READ side (the additive Cerbos rule + intelligence.controller.ts's edit) without
+      // re-testing the write side, which `assistant-handoff.test.ts` already covers end to end.
+      await withTenants(
+        [tenant],
+        (c) =>
+          c.query(
+            `INSERT INTO assistant_threads (id, tenant_id, owner_user_id, origin_site) VALUES ($1,$2,$3,'central')`,
+            [newId(), tenant, owner],
+          ),
+        { modules: ["assistant"] },
+      );
+      const threadRow = await withTenants(
+        [tenant],
+        (c) => c.query<{ id: string }>(`SELECT id FROM assistant_threads WHERE tenant_id = $1 AND owner_user_id = $2`, [tenant, owner]),
+        { modules: ["assistant"] },
+      );
+      await withTenants(
+        [tenant],
+        (c) =>
+          c.query(
+            `INSERT INTO assistant_handoffs
+               (id, tenant_id, thread_id, owner_user_id, agent, goal_text, goal_id, run_id, status, origin_site)
+             VALUES ($1,$2,$3,$4,'status-reporter','status please',$5,$6,'ok','central')`,
+            [newId(), tenant, threadRow.rows[0].id, owner, newId(), HANDOFF_RUN_ID],
+          ),
+        { modules: ["assistant"] },
+      );
+    });
+
+    it("the triggering owner CAN read the handoff run's transcript (owner-scoped, not elevated-scoped)", async () => {
+      const r = await app.inject({ method: "GET", url: `/api/${tenant}/agents/runs/${HANDOFF_RUN_ID}`, headers: asUser(owner) });
+      expect(r.statusCode).toBe(200);
+      const run = r.json() as { steps: Array<{ kind: string; detail: string }> };
+      expect(run.steps).toEqual([{ kind: "tool", detail: "projects.list ok" }]);
+    });
+
+    it("a DIFFERENT same-company user CANNOT read it", async () => {
+      const r = await app.inject({ method: "GET", url: `/api/${tenant}/agents/runs/${HANDOFF_RUN_ID}`, headers: asUser(sameCompanyOther) });
+      expect(r.statusCode).toBe(403);
+    });
+
+    it("company_admin CANNOT read it either (owner-scoped, no admin backdoor — company_admin is NOT isElevated)", async () => {
+      const r = await app.inject({ method: "GET", url: `/api/${tenant}/agents/runs/${HANDOFF_RUN_ID}`, headers: asUser(companyAdmin) });
+      expect(r.statusCode).toBe(403);
+    });
+
+    it("a runId with NO assistant_handoffs row still 403s a non-elevated caller (the additive path never widens to 'any owner-attributed run')", async () => {
+      const r = await app.inject({ method: "GET", url: `/api/${tenant}/agents/runs/run-1`, headers: asUser(owner) });
+      expect(r.statusCode).toBe(403);
+    });
+
+    it("REGRESSION GUARD (restated with THIS suite's own principals): elevated (platform_admin) still reads a non-handoff run; a non-elevated owner-of-a-handoff still cannot read a DIFFERENT, non-handoff run", async () => {
+      const asAdmin = await app.inject({ method: "GET", url: `/api/${tenant}/agents/runs/run-1`, headers: asUser(admin) });
+      expect(asAdmin.statusCode).toBe(200);
+      const asHandoffOwner = await app.inject({ method: "GET", url: `/api/${tenant}/agents/runs/run-1`, headers: asUser(owner) });
+      expect(asHandoffOwner.statusCode).toBe(403);
+    });
   });
 
   it("trigger is elevated-only", async () => {

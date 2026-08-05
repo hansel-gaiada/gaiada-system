@@ -12,6 +12,7 @@ import { ThreadView } from "./ThreadView";
 import { Composer } from "./Composer";
 import { MemoryPanel } from "./MemoryPanel";
 import { CapabilitiesPanel } from "./CapabilitiesPanel";
+import { RosterPanel } from "./RosterPanel";
 import { BrainPicker } from "./BrainPicker";
 import { PageContextChip } from "./PageContextChip";
 import { useAssistantStream } from "./useAssistantStream";
@@ -89,6 +90,9 @@ export function AssistantWorkspace({ initialThreads, initialActiveThreadId, vari
   // math the design doesn't call for; blueprint §8 lists both as members of one collapsible
   // "context inspector" family, not two independent panes.
   const [capabilitiesOpen, setCapabilitiesOpen] = useState(false);
+  // ASST-21 — the roster panel (registry + episodic history + hand-off/run-watch) joins the SAME
+  // one-at-a-time right-rail slot as memory/capabilities (blueprint §8's context-inspector family).
+  const [rosterOpen, setRosterOpen] = useState(false);
 
   const stream = useAssistantStream();
   const stateRef = useRef(stream.state);
@@ -300,7 +304,7 @@ export function AssistantWorkspace({ initialThreads, initialActiveThreadId, vari
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stream.state.status, streamingMessageId, activeThreadId]);
 
-  const rightRailOpen = memoryOpen || capabilitiesOpen;
+  const rightRailOpen = memoryOpen || capabilitiesOpen || rosterOpen;
 
   return (
     <div className={`asst-workspace${variant === "drawer" ? " asst-workspace--drawer" : ""}${rightRailOpen ? " asst-workspace--with-memory" : ""}`}>
@@ -345,6 +349,7 @@ export function AssistantWorkspace({ initialThreads, initialActiveThreadId, vari
             onClick={() => {
               setCapabilitiesOpen((v) => !v);
               setMemoryOpen(false);
+              setRosterOpen(false);
             }}
           >
             Capabilities
@@ -357,9 +362,23 @@ export function AssistantWorkspace({ initialThreads, initialActiveThreadId, vari
             onClick={() => {
               setMemoryOpen((v) => !v);
               setCapabilitiesOpen(false);
+              setRosterOpen(false);
             }}
           >
             Memory
+          </button>
+          <button
+            type="button"
+            className="asst-memory-toggle"
+            aria-expanded={rosterOpen}
+            aria-controls="asst-roster-panel"
+            onClick={() => {
+              setRosterOpen((v) => !v);
+              setMemoryOpen(false);
+              setCapabilitiesOpen(false);
+            }}
+          >
+            Agents
           </button>
         </div>
         <ThreadView
@@ -372,6 +391,7 @@ export function AssistantWorkspace({ initialThreads, initialActiveThreadId, vari
       </div>
       {capabilitiesOpen && <CapabilitiesPanel onClose={() => setCapabilitiesOpen(false)} />}
       {memoryOpen && <MemoryPanel activeThreadId={activeThreadId} onClose={() => setMemoryOpen(false)} />}
+      {rosterOpen && <RosterPanel activeThreadId={activeThreadId} onClose={() => setRosterOpen(false)} />}
       {toastMsg && <Toast message={toastMsg} />}
     </div>
   );

@@ -47,6 +47,7 @@ import {
 } from "./broker";
 import { assembleCapabilities } from "./capabilities";
 import { resolveCitation } from "./citations";
+import { createHandoff, fetchEpisodicHistory, fetchRoster, listHandoffsForThread } from "./handoffs";
 
 // ── ASST-06 — the send->stream engine ────────────────────────────────────────────────────────────
 //
@@ -761,6 +762,77 @@ export class AssistantController {
       { modules: ["assistant"] },
     );
     return { ok: true, stopped: rowCount > 0 };
+  }
+
+  // ================================================================== HANDOFF (ASST-21) ==========
+  // "Hand off a longer task to a specialist" — one Hermes front door + a visible agent roster
+  // (blueprint §8's D-B), not per-department personas. Owner-only, same Cerbos resource + condition
+  // as every other thread action (resource_assistant_thread.yaml's additive "handoff" action) — see
+  // handoffs.ts's file header for why the run this creates is later safe for the SAME owner to read
+  // back (it executes under their own OBO envelope, never a service principal).
+  @Post(":tenantId/assistant/threads/:id/handoff")
+  @HttpCode(201)
+  async handoff(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Param("id") id: string,
+    @Body() body: { agent?: string; goal?: string },
+  ) {
+    const ownerId = req.principal.userId;
+    if (!ownerId) throw new BadRequestException("an authenticated user is required");
+    const thread = await withTenants([tenantId], (c) => fetchThread(c, id), { modules: ["assistant"] });
+    if (!thread) throw new NotFoundException("thread not found");
+    await authorize(req.principal, { kind: "assistant_thread", id, tenantId, ownerId: thread.ownerUserId }, "handoff");
+
+    const agent = typeof body?.agent === "string" ? body.agent.trim() : "";
+    const goal = typeof body?.goal === "string" ? body.goal : "";
+    if (!agent) throw new BadRequestException("agent is required");
+
+    return withTenants(
+      [tenantId],
+      (c) => createHandoff(c, { tenantId, threadId: id, ownerId, agent, goal }),
+      { modules: ["assistant"] },
+    );
+  }
+
+  // Owner-only run-watch read: the thread's handoffs, lazily refreshed from the runner (status,
+  // outcome, and — once the runner reports one — the runId a caller can then read the full
+  // transcript of via `GET :tenantId/agents/runs/:runId`, which now recognizes THIS owner via
+  // resource_agent_run.yaml's additive rule).
+  @Get(":tenantId/assistant/threads/:id/handoffs")
+  async listHandoffs(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("id") id: string) {
+    const thread = await withTenants([tenantId], (c) => fetchThread(c, id), { modules: ["assistant"] });
+    if (!thread) throw new NotFoundException("thread not found");
+    await authorize(req.principal, { kind: "assistant_thread", id, tenantId, ownerId: thread.ownerUserId }, "read");
+
+    return withTenants([tenantId], (c) => listHandoffsForThread(c, id), { modules: ["assistant"] });
+  }
+
+  // ================================================================== ROSTER (ASST-21) ============
+  // The right-rail roster panel's ONE read: the REAL specialist registry (never a hardcoded mirror —
+  // see handoffs.ts's `fetchRoster`) plus THIS caller's own episodic run history. Self-scoped by
+  // construction (same reasoning as `capabilities()` below: there is no parameter here a caller could
+  // vary to widen whose history comes back) — `runIds` is derived from THIS user's own
+  // `assistant_handoffs` rows, never a bare tenant-wide history request.
+  @Get(":tenantId/assistant/agents")
+  async roster(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string) {
+    const userId = req.principal.userId;
+    if (!userId) throw new BadRequestException("an authenticated user is required");
+
+    const [roster, ownRunIds] = await Promise.all([
+      fetchRoster(),
+      withTenants(
+        [tenantId],
+        (c) =>
+          c.query<{ runId: string }>(
+            `SELECT run_id AS "runId" FROM assistant_handoffs WHERE tenant_id = $1 AND owner_user_id = $2 AND run_id IS NOT NULL`,
+            [tenantId, userId],
+          ).then((r) => r.rows.map((row) => row.runId)),
+        { modules: ["assistant"] },
+      ),
+    ]);
+    const episodicHistory = await fetchEpisodicHistory(tenantId, ownRunIds);
+    return { agents: roster.agents, supervisor: roster.supervisor, runnerConfigured: roster.runnerConfigured, episodicHistory };
   }
 
   // ================================================================== MEMORY (ASST-19) ==========

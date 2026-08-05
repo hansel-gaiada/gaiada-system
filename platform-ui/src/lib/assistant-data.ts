@@ -5,7 +5,10 @@ import "server-only";
 // load; everything after that (thread switch, rail refresh, mutations) goes through
 // `lib/assistantActions.ts` because it is triggered by client interaction, not a navigation.
 import { platformFetch, PlatformError } from "./platform";
-import type { ThreadDetailResult, ThreadListResult, MemoryListResult, CapabilitiesResult, ResolvedCitation, PinnedPageContext } from "./assistant";
+import type {
+  ThreadDetailResult, ThreadListResult, MemoryListResult, CapabilitiesResult, ResolvedCitation, PinnedPageContext,
+  RosterResult, AssistantHandoff,
+} from "./assistant";
 
 export interface ListThreadsParams {
   q?: string;
@@ -83,4 +86,17 @@ export async function resolveCitation(userId: string, tenantId: string, sourceRe
 export async function resolvePageContextRef(userId: string, tenantId: string, ref: string): Promise<PinnedPageContext | null> {
   const resolved = await resolveCitation(userId, tenantId, ref);
   return resolved ? { ref, ...resolved } : null;
+}
+
+// ASST-21 — the roster panel's ONE read: the REAL specialist registry plus THIS caller's own
+// episodic run history (`modules/assistant/assistant.controller.ts`'s `roster()` — self-scoped by
+// construction, no thread/owner param to pass).
+export function getRoster(userId: string, tenantId: string): Promise<RosterResult> {
+  return platformFetch<RosterResult>(`/api/${tenantId}/assistant/agents`, userId);
+}
+
+// The run-watch view's ONE read: a thread's handoffs, lazily refreshed server-side from the runner
+// (see handoffs.ts's `refreshHandoff`) — owner-only, same Cerbos gate as every other thread action.
+export function listThreadHandoffs(userId: string, tenantId: string, threadId: string): Promise<AssistantHandoff[]> {
+  return platformFetch<AssistantHandoff[]>(`/api/${tenantId}/assistant/threads/${threadId}/handoffs`, userId);
 }

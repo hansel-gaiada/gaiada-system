@@ -70,8 +70,10 @@ export class PgEpisodicStore {
     );
   }
 
-  /** D9.1 — hard tenant pre-filter. Loads each episode's feedback too. */
-  async query(tenantSet: string[], filter?: { agent?: string; status?: TraceStatus }): Promise<Episode[]> {
+  /** D9.1 — hard tenant pre-filter. Loads each episode's feedback too. `runIds` (ASST-21) mirrors
+   *  the in-memory store's own additive narrowing filter — see episodic.ts's `query` header for why
+   *  this store still has no user/owner column to filter by directly. */
+  async query(tenantSet: string[], filter?: { agent?: string; status?: TraceStatus; runIds?: string[] }): Promise<Episode[]> {
     if (tenantSet.length === 0) return [];
     const { rows } = await this.pool.query<{
       run_id: string; agent: string; tenant_id: string; goal: string; status: string; outcome: string | null;
@@ -82,8 +84,9 @@ export class PgEpisodicStore {
        WHERE tenant_id = ANY($1::uuid[])
          AND ($2::text IS NULL OR agent = $2)
          AND ($3::text IS NULL OR status = $3)
+         AND ($4::text[] IS NULL OR run_id = ANY($4))
        ORDER BY ended_at`,
-      [tenantSet, filter?.agent ?? null, filter?.status ?? null],
+      [tenantSet, filter?.agent ?? null, filter?.status ?? null, filter?.runIds ?? null],
     );
     if (rows.length === 0) return [];
     const fb = await this.pool.query<{ run_id: string; rating: string; note: string | null; provenance: string; trust: string; at: string }>(

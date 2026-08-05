@@ -15,7 +15,8 @@ import { AuthGuard } from "../auth/guards";
 import { ModuleEnabledGuard } from "../modules/module-enabled.guard";
 import { lastIngestRun, runIngestSweep } from "../modules/knowledge/ingest/scheduler";
 import { isElevated } from "./elevated";
-import { newId, withGlobal } from "../db";
+import { newId, withGlobal, withTenants } from "../db";
+import { fetchHandoffByRunId } from "../modules/assistant/handoffs";
 
 async function getJson(url: string, token?: string): Promise<unknown> {
   const ac = new AbortController();
@@ -149,9 +150,23 @@ export class IntelligenceController {
 
   // Elevated-only (§4): a full run's step transcript can carry tool output fetched under the
   // *triggering* user's authority. Tenant-pinned by the runner itself (no cross-tenant probing).
+  //
+  // ASST-21 ADDITIVE, do not widen: the line above (`isElevated`) is COMPLETELY UNCHANGED — every
+  // run that is NOT a handoff still 403s for a non-elevated caller exactly as before (the regression
+  // this comment guards: `intelligence.test.ts`'s "run transcript is elevated-only" case still
+  // exercises this exact path for a plain member and must keep failing). The block below only ever
+  // RUNS when `isElevated` was false, and even then it 403s unless `assistant_handoffs` (ASST-21,
+  // `modules/assistant/handoffs.ts`) says THIS runId is a handoff THIS caller triggered — the run
+  // then executed under the caller's own OBO envelope (broker.ts's `oboEnvelopeFor`), so reading it
+  // back is not an elevation. `resource_agent_run.yaml` is the Cerbos-authoritative form of that
+  // check (owner AND origin='assistant_handoff', both required).
   @Get(":tenantId/agents/runs/:runId")
   async agentRun(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("runId") runId: string) {
-    if (!isElevated(req)) throw new ForbiddenException("platform admin required");
+    if (!isElevated(req)) {
+      const handoff = await withTenants([tenantId], (c) => fetchHandoffByRunId(c, runId), { modules: ["assistant"] });
+      if (!handoff) throw new ForbiddenException("platform admin required");
+      await authorize(req.principal, { kind: "agent_run", tenantId, ownerId: handoff.ownerUserId, origin: "assistant_handoff" }, "read");
+    }
     const svc = config.services.agents;
     if (!svc.url) throw new NotFoundException("agents service not configured");
     try {

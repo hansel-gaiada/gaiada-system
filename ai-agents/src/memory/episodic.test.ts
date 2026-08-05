@@ -52,6 +52,16 @@ describe("WS8 episodic memory (Step D, D9)", () => {
     expect(s.query(["co-1"], { status: "protocol_error" }).map((e) => e.runId)).toEqual(["r2"]);
   });
 
+  it("ASST-21: query narrows by runIds (additive — omitted means unfiltered, same as before)", () => {
+    const s = new EpisodicStore();
+    s.record(episodeFromTrace(trace("r1", "a"), "co-1"));
+    s.record(episodeFromTrace(trace("r2", "a"), "co-1"));
+    s.record(episodeFromTrace(trace("r3", "a"), "co-1"));
+    expect(s.query(["co-1"], { runIds: ["r2"] }).map((e) => e.runId)).toEqual(["r2"]);
+    expect(s.query(["co-1"], { runIds: [] }).map((e) => e.runId)).toEqual([]); // an empty allow-list is "nothing", not "everything"
+    expect(s.query(["co-1"]).map((e) => e.runId).sort()).toEqual(["r1", "r2", "r3"]); // no filter -> unchanged
+  });
+
   it("D9.3: untrusted feedback is quarantined — never returned as trusted signal", () => {
     const s = new EpisodicStore();
     s.record(episodeFromTrace(trace("r1", "a"), "co-1"));

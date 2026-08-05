@@ -58,9 +58,12 @@ function safeEqual(a: string, b: string): boolean {
   return timingSafeEqual(ab, bb);
 }
 
-/** A minimal episodic sink both EpisodicStore (in-memory) and PgEpisodicStore satisfy. */
+/** A minimal episodic sink both EpisodicStore (in-memory) and PgEpisodicStore satisfy. `query` is
+ *  OPTIONAL (not every future test double needs to answer reads) — `GET /episodes` (ASST-21) treats
+ *  its absence the same as "no episodic store configured" (404), never as "empty history". */
 export interface EpisodicSink {
   record(ep: Episode): void | Promise<void>;
+  query?(tenantSet: string[], filter?: { agent?: string; status?: string; runIds?: string[] }): Episode[] | Promise<Episode[]>;
 }
 
 /** The agent registry the runner routes against; injectable so tests can add scripted specialists. */
@@ -379,6 +382,47 @@ export function buildRunnerApp(deps: RunnerDeps): FastifyInstance {
   app.get("/metrics/agents", async (req, reply) => {
     if (!authorized(req)) return reply.code(401).send({ error: "unauthorized" });
     return { summary: collector.summary(), alerts: collector.alerts() };
+  });
+
+  // ASST-21 — the roster's REAL registry (not a hand-maintained mirror). Bearer-gated like every
+  // other route here (not `/health`'s open probe shape) since it names each agent's full tool
+  // allow-list, which is more than the bare name list `/health` already exposes publicly.
+  // `writeCapable` + `evaledProviders` let the roster panel show honestly whether a specialist's
+  // write is currently live (D13) or forced read-only, without the platform having to mirror D13's
+  // own enrollment logic.
+  app.get("/agents", async (req, reply) => {
+    if (!authorized(req)) return reply.code(401).send({ error: "unauthorized" });
+    const describe = (name: string, def: AgentDef, writeCapable: boolean) => ({
+      name,
+      tools: Object.keys(def.tools),
+      maxSteps: def.maxSteps,
+      maxToolCalls: def.maxToolCalls,
+      writeCapable,
+      evaledProviders: def.evaledProviders ?? [],
+    });
+    return {
+      agents: [
+        ...Object.entries(reg.specialists).map(([n, d]) => describe(n, d, false)),
+        ...Object.entries(reg.writeSpecialists).map(([n, d]) => describe(n, d, true)),
+      ],
+      supervisor: { name: reg.supervisor.name, maxSubRuns: reg.supervisor.maxSubRuns, goalBudget: reg.supervisor.goalBudget },
+    };
+  });
+
+  // ASST-21 — episodic run history, narrowed by the CALLER-SUPPLIED run-id set. This is the only
+  // shape that keeps D9.1's tenant pre-filter AND respects that an Episode carries no owner/user
+  // column (see episodic.ts's `query` header): the platform already knows, from its own
+  // `assistant_handoffs` table, exactly which run ids belong to the requesting user's handoffs — it
+  // asks for THOSE, never "give me this tenant's history" unfiltered. An empty/omitted `runIds`
+  // returns [] (not the whole tenant's history) — the platform-nest caller always supplies the set.
+  app.get<{ Querystring: { tenant?: string; runIds?: string } }>("/episodes", async (req, reply) => {
+    if (!authorized(req)) return reply.code(401).send({ error: "unauthorized" });
+    const tenant = req.query?.tenant;
+    if (!tenant || !UUID_RE.test(tenant)) return reply.code(400).send({ error: "tenant (uuid) required" });
+    if (!episodic?.query) return reply.code(404).send({ error: "episodic store not configured" });
+    const runIds = (req.query?.runIds ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+    const episodes = await episodic.query([tenant], { runIds });
+    return { episodes };
   });
 
   return app;

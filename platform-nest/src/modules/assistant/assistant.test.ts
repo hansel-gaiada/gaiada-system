@@ -66,7 +66,7 @@ describe.skipIf(!TEST_URL)("Assistant module (ASST-05)", () => {
 
   it("module registration: assistant's ModuleContract carries the ASST-05 shape", () => {
     expect(getModule("assistant")).toBe(assistantModule);
-    expect(assistantModule.migrations).toEqual(["0079_module_assistant.sql"]);
+    expect(assistantModule.migrations).toEqual(["0079_module_assistant.sql", "0084_assistant_handoffs.sql"]);
     // Deliberately empty in phases 0-1 (see index.ts's header) — not a placeholder omission.
     expect(assistantModule.mcpTools).toEqual([]);
     expect(assistantModule.rollupProviders).toEqual([]);

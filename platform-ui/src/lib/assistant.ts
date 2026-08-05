@@ -550,3 +550,97 @@ export interface PinnedPageContext {
   label: string;
   href: string;
 }
+
+// ============================================================== ASST-21: agent roster + handoff ====
+// blueprint §8's "agent roster" line + D-B: "one Hermes front door + a visible agent roster — hand
+// a longer task to a specialist." Mirrors platform-nest's `modules/assistant/handoffs.ts` shapes
+// byte-for-byte (see docs/FRONTEND-BFF-CONTRACT.md §18's ASST-21 addendum).
+
+/** One entry in `GET :t/assistant/agents`'s registry — the runner's REAL specialist list, never a
+ *  hardcoded mirror (see handoffs.ts's `fetchRoster` header). `writeCapable` + `evaledProviders`
+ *  let the panel show honestly whether a specialist's write is currently live (D13) or forced
+ *  read-only, without the UI re-implementing D13's own enrollment logic. */
+export interface RosterAgent {
+  name: string;
+  tools: string[];
+  maxSteps: number;
+  maxToolCalls: number;
+  writeCapable: boolean;
+  evaledProviders: string[];
+}
+
+/** One episodic run-history entry (ai-agents `Episode`, narrowed server-side to THIS caller's own
+ *  handoff runs — see `fetchEpisodicHistory`'s header on why an Episode carries no user column). */
+export interface RosterEpisode {
+  runId: string;
+  agent: string;
+  goal: string;
+  status: string;
+  outcome: string | null;
+  toolsCalled: string[];
+  failedTools: string[];
+  provider?: string;
+  createdAt: number;
+}
+
+export interface RosterResult {
+  agents: RosterAgent[];
+  supervisor: { name: string } | null;
+  /** `false` means the agent runner isn't reachable/configured in THIS environment at all —
+   *  distinct from "configured, and there are genuinely zero specialists" (see `fetchRoster`'s own
+   *  header — same convention as ASST-18's `hubConfigured`). */
+  runnerConfigured: boolean;
+  episodicHistory: RosterEpisode[];
+}
+
+/** Mirrors the runner's `GoalStatus` (ai-agents `runner/store.ts`) — a handoff's own lifecycle. */
+export type HandoffStatus =
+  | "queued" | "running" | "ok" | "suspended" | "budget_exhausted" | "failed" | "interrupted" | "cancelled";
+
+const TERMINAL_HANDOFF_STATUSES = new Set<HandoffStatus>(["ok", "suspended", "budget_exhausted", "failed", "interrupted", "cancelled"]);
+
+export interface AssistantHandoff {
+  id: string;
+  threadId: string;
+  ownerUserId: string;
+  agent: string;
+  goalText: string;
+  goalId: string;
+  /** Set once the runner reports a terminal run for this goal — the run-watch view's cue that
+   *  `GET :t/agents/runs/:runId` (now additionally readable by THIS owner, resource_agent_run.yaml)
+   *  has something to show. `null` while still queued/running. */
+  runId: string | null;
+  status: HandoffStatus;
+  outcome: string | null;
+  errorKind: string | null;
+  approvalId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export function isHandoffTerminal(h: Pick<AssistantHandoff, "status">): boolean {
+  return TERMINAL_HANDOFF_STATUSES.has(h.status);
+}
+
+/** Drives the run-watch view's poll loop — "keep polling while ANY handoff on this thread is still
+ *  in flight", the same shape `hasActiveGoal` already uses for the Intelligence console's goal list
+ *  (`lib/admin.ts`), kept as its own function here rather than imported so this file stays free of
+ *  a dependency on the admin surface. */
+export function hasActiveHandoff(handoffs: Pick<AssistantHandoff, "status">[]): boolean {
+  return handoffs.some((h) => !isHandoffTerminal(h));
+}
+
+const HANDOFF_STATUS_LABEL: Record<HandoffStatus, string> = {
+  queued: "Queued",
+  running: "Running…",
+  ok: "Done",
+  suspended: "Waiting for approval",
+  budget_exhausted: "Stopped (budget)",
+  failed: "Failed",
+  interrupted: "Interrupted",
+  cancelled: "Cancelled",
+};
+
+export function handoffStatusLabel(status: string): string {
+  return HANDOFF_STATUS_LABEL[status as HandoffStatus] ?? status;
+}

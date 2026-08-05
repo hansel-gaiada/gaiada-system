@@ -75,11 +75,21 @@ export class EpisodicStore {
     this.episodes.push(ep);
   }
 
-  /** D9.1 — hard tenant pre-filter. Only episodes in the caller's authorized-tenant-set are returned. */
-  query(tenantSet: string[], filter?: { agent?: string; status?: TraceStatus }): Episode[] {
+  /** D9.1 — hard tenant pre-filter. Only episodes in the caller's authorized-tenant-set are returned.
+   *  `runIds` (ASST-21) is an ADDITIVE narrowing filter, not a widening one: a caller who wants "this
+   *  particular user's episodes" has no user-id column to filter by (an Episode carries no owner —
+   *  see this file's header), so the ROSTER endpoint narrows by the exact run ids IT already knows
+   *  belong to that user (its own `assistant_handoffs` rows) rather than this store learning about
+   *  users at all. Omitted -> no narrowing, exactly the pre-ASST-21 behaviour. */
+  query(tenantSet: string[], filter?: { agent?: string; status?: TraceStatus; runIds?: string[] }): Episode[] {
     const allowed = new Set(tenantSet);
+    const runIds = filter?.runIds ? new Set(filter.runIds) : null;
     return this.episodes.filter(
-      (e) => allowed.has(e.tenantId) && (!filter?.agent || e.agent === filter.agent) && (!filter?.status || e.status === filter.status),
+      (e) =>
+        allowed.has(e.tenantId) &&
+        (!filter?.agent || e.agent === filter.agent) &&
+        (!filter?.status || e.status === filter.status) &&
+        (!runIds || runIds.has(e.runId)),
     );
   }
 

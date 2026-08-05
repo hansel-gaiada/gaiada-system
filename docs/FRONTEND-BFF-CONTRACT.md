@@ -2021,3 +2021,104 @@ capability cards, and knowledge citation chips under a grounded reply).
   tested; whether the LIVE WS8 knowledge service (on a deployed box, with real ERP documents actually
   ingested) returns retrievable hits for a real user query is not verified by this ticket and should
   be checked against a live environment before relying on it.
+
+### Agent roster + handoff to a goal run (ASST-21, 2026-08-06)
+
+blueprint §8's "agent roster" line + D-B ("one Hermes front door + a visible agent roster — hand a
+longer task to a specialist," deliberately NOT per-department personas).
+
+- **THE AUTHZ DESIGN PIN (binding — read this before touching either read gate)**: a handoff runs
+  under the CHATTING USER's own OBO envelope — `broker.ts`'s `oboEnvelopeFor`, the ONE function in
+  this codebase that can spell one, reused VERBATIM by `modules/assistant/handoffs.ts::createHandoff`
+  (the SECOND caller of it, after the broker's tool turns). That is what makes the run's transcript
+  SAFE for that same owner to read back: it is output fetched under their OWN authority, not an
+  elevation. So a NEW, ADDITIVE Cerbos rule (`cerbos/policies/resource_agent_run.yaml`, a brand-new
+  `agent_run` resource kind) lets the triggering owner read a run with `origin='assistant_handoff'`
+  — and `admin/intelligence.controller.ts`'s pre-existing `isElevated(req)` gate on `GET
+  :t/agents/runs/:runId` is **completely UNCHANGED**: it is checked FIRST, exactly as before, and the
+  additive Cerbos check only runs when it was false, and even then only allows through when
+  `modules/assistant/handoffs.ts::fetchHandoffByRunId` says THIS runId is a handoff THIS caller
+  triggered. A non-handoff run (or a handoff run some OTHER user triggered) still 403s a non-elevated
+  caller exactly like before this ticket — proven by a REGRESSION test in `admin/intelligence.test.ts`
+  reusing the SAME `run-1` fixture the pre-existing "run transcript is elevated-only" test already
+  covers, plus a second regression case in the ASST-21 describe block itself.
+- ✅ **`POST /api/:t/assistant/threads/:id/handoff`** (`modules/assistant/assistant.controller.ts`'s
+  `handoff()`, `modules/assistant/handoffs.ts::createHandoff`) — owner-only, same Cerbos resource as
+  every other thread action: `resource_assistant_thread.yaml` gained ONE additive action
+  (`"handoff"`, appended to the existing owner-only rule's `actions` list — an EDIT to an EXISTING
+  file, hot-reloads live, no container restart). Body `{agent, goal}`; `agent` is validated against
+  the RUNNER'S REAL registry (`GET /agents` on the runner — see below), never a hardcoded list — an
+  unknown name 400s naming the real ones. Mints the OBO envelope via `oboEnvelopeFor({userId: owner,
+  tenantId})`, upserts the platform self-link (`ensurePlatformSelfLink`, same as the broker), POSTs
+  `/goals` to the runner with that envelope + `requestedBy`, and persists a NEW `assistant_handoffs`
+  row (migration `0084_assistant_handoffs.sql`) linking `thread_id` -> `goal_id`, with
+  `owner_user_id` = the chatting user (redundantly, not just derivable via the thread join, so the
+  additive Cerbos check never needs a second table). Response `{id, goalId, status}`. Supervisor
+  fan-out is deliberately NOT offered here (one handoff -> at most one run; a supervisor goal can fan
+  out into several, which the run-linking model doesn't support). **No `writeActivity()`/`notify()`**
+  on the write (same reasoning as ASST-05/06 — the shared tenant feed must never learn a private
+  thread exists).
+- ✅ **`GET /api/:t/assistant/threads/:id/handoffs`** (`listHandoffs()`,
+  `handoffs.ts::listHandoffsForThread`/`refreshHandoff`) — the run-watch view's one read. Owner-only
+  (same thread `"read"` action, unchanged). LAZILY syncs each non-terminal row from the runner's own
+  `GET /goals/:goalId` before returning — `run_id` (NULL while queued/running) is filled the moment
+  the runner reports a run, which is the cue the UI uses to know `GET :t/agents/runs/:runId` (now
+  additionally owner-readable) has something to show.
+- ✅ **`GET /api/:t/assistant/agents`** (`roster()`, `handoffs.ts::fetchRoster`/`fetchEpisodicHistory`)
+  — the roster panel's one read: `{agents, supervisor, runnerConfigured, episodicHistory}`. `agents`
+  comes from a NEW runner endpoint, `GET /agents` (`ai-agents/src/runner/service.ts`), which reflects
+  `AgentRegistry.specialists`/`writeSpecialists` LIVE (`{name, tools, maxSteps, maxToolCalls,
+  writeCapable, evaledProviders}`) — never a hand-maintained mirror (unlike `broker.ts`'s
+  `ASSISTANT_AGENT_TOOLS`, which stays a deliberately narrow read-only-agent mirror for the TOOL-TURN
+  gate only, untouched by this ticket). `episodicHistory` comes from a NEW runner endpoint, `GET
+  /episodes?tenant=&runIds=` — narrowed by the run ids THIS caller's OWN `assistant_handoffs` rows
+  name, never a bare "give me this tenant's whole history": an `Episode` (`ai-agents/src/memory/
+  episodic{,-pg}.ts`) carries a `tenantId` but NO owner/user column, so `EpisodicStore.query`/
+  `PgEpisodicStore.query` gained an ADDITIVE, optional `runIds` filter (omitted = unfiltered, byte-
+  identical to pre-ASST-21 behaviour) — the caller-supplied id SET is what turns "tenant-wide" into
+  "this user's own." Self-scoped by construction, same reasoning as `capabilities()`: no parameter
+  here could widen whose history comes back. `runnerConfigured:false` (not an empty list) is the
+  honest "the runner isn't reachable" state, same convention as ASST-18's `hubConfigured`.
+- ✅ **UI**: `components/assistant/RosterPanel.tsx` — a FOURTH right-rail panel joining the SAME
+  one-at-a-time slot as Memory/Capabilities (`AssistantWorkspace`'s `rightRailOpen` gate widened to
+  `memoryOpen || capabilitiesOpen || rosterOpen`). Renders the registry, a "hand off to a specialist"
+  form (agent picker sourced from the SAME `GET :t/assistant/agents` read — never a second list), THIS
+  thread's own handoffs (the run-watch view — polls every 4s via `lib/assistant.ts::hasActiveHandoff`
+  while any handoff is non-terminal, stops the instant all are terminal), and episodic history.
+  "View transcript" on a handoff with a `runId` is LAZY (fetched only on click, via
+  `getHandoffTranscriptAction` → the SAME `lib/admin.ts::getAgentRun` the Intelligence console
+  already uses against `GET :t/agents/runs/:runId` — no second reader implementation) — a transcript
+  can be long, so it is never auto-loaded for every row.
+- **Schema**: `assistant_handoffs` (migration `0084_assistant_handoffs.sql`) — `id, tenant_id,
+  thread_id (composite FK -> assistant_threads, CASCADE), owner_user_id, agent, goal_text, goal_id
+  (uuid, no FK — separate ai-agents DB), run_id (uuid, no FK, nullable until the runner reports one,
+  UNIQUE when present), status, outcome, error_kind, approval_id (no FK, mirrors
+  assistant_tool_calls.approval_id)`. Same composed `tenant_isolation` RLS policy (mod='assistant') as
+  every other assistant_* table (0079's pattern).
+- **Cerbos**: `resource_agent_run.yaml` is a BRAND-NEW resource kind/file — it needed a
+  `docker restart gaiada-test-cerbos` (+ health wait) before its tests could pass; a `matchedPolicy`
+  smoke check (`rbac/cerbos-agent-run.test.ts`) proves the owner-ALLOW path resolves for real, not a
+  uniform silent deny. `resource_assistant_thread.yaml`'s edit (adding `"handoff"` to the existing
+  rule's action list) needed NO restart — same file, hot-reloads live.
+- **`fetchHandoffByRunId` fails closed on a malformed runId, not a 500**: `assistant_handoffs.run_id`
+  is a `uuid` column; a non-uuid `:runId` path param (client-supplied, unvalidated upstream) short-
+  circuits to `null` BEFORE the query — otherwise Postgres's "invalid input syntax for type uuid"
+  would turn a plain "not a handoff, fall through to elevated-only" into a 500 instead of a clean 403.
+  Caught by this ticket's own regression tests re-using the pre-existing `run-1` (non-uuid-shaped)
+  fixture id in `admin/intelligence.test.ts`.
+- Tests: `modules/assistant/assistant-handoff.test.ts` (8 — the write side: envelope assertion
+  against the exact body the fake runner received, owner-only create/list, unknown-agent 400 naming
+  the real registry, no writeActivity/notify, roster reflects the fake runner's real registry,
+  episodic history narrowed to the caller's own run ids), `admin/intelligence.test.ts`'s new "ASST-21:
+  handoff-owner additive carve-out" block (5 — owner CAN / different same-company user CANNOT /
+  company_admin CANNOT / a runId with no handoff row still 403s / the regression guard restated with
+  this suite's own elevated principal), `rbac/cerbos-agent-run.test.ts` (8 — the Cerbos policy in
+  isolation, incl. the matchedPolicy smoke check and an explicit "wrong origin still denies" probe),
+  plus additive unit tests in `ai-agents/src/memory/episodic{,-pg}.test.ts` and
+  `ai-agents/src/runner/service.test.ts` for the `runIds` filter and the two new runner endpoints.
+- **Deferred, out of this ticket's scope**: a suspended handoff run (a `high_write` filing a D14
+  approval) does not yet surface any signal back INTO the thread transcript itself (no new message/
+  notification is written) — the run-watch view's own status chip (`"Waiting for approval"`) is the
+  only place that becomes visible today. Wiring that back into the thread is real work (a new
+  message part, or reusing the SSE `approval_required` shape ASST-17 already defined for in-turn
+  tool calls) and was left for a follow-up rather than folded in here.

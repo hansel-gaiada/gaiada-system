@@ -463,4 +463,56 @@ describe("agent-runner service", () => {
     expect(reader.ok).toBe(1);
     void id;
   });
+
+  // ASST-21 — the roster's registry endpoint. Asserts it reflects the INJECTED registry (not a
+  // hardcoded list) so a future specialist shows up here without a second file to edit.
+  it("GET /agents reflects the REAL injected registry, not a hardcoded mirror; bearer-gated", async () => {
+    const { app } = build({
+      deps: scripted(['{"final":"x"}']),
+      reg: registry({ specialists: { reader, "extra-reader": { ...reader, name: "extra-reader" } } }),
+    });
+    const noAuth = await app.inject({ method: "GET", url: "/agents" });
+    expect(noAuth.statusCode).toBe(401);
+
+    const r = await app.inject({ method: "GET", url: "/agents", headers: AUTH });
+    expect(r.statusCode).toBe(200);
+    const body = r.json() as { agents: Array<{ name: string; tools: string[]; writeCapable: boolean }>; supervisor: { name: string } };
+    const byName = new Map(body.agents.map((a) => [a.name, a]));
+    expect([...byName.keys()].sort()).toEqual(["extra-reader", "reader", "reconcile-writer", "task-triager", "test-writer"]);
+    expect(byName.get("reader")?.writeCapable).toBe(false);
+    expect(byName.get("reader")?.tools).toEqual(Object.keys(reader.tools));
+    expect(byName.get("task-triager")?.writeCapable).toBe(true);
+    expect(body.supervisor.name).toBe(realSupervisor.name);
+  });
+
+  // ASST-21 — episodic history, narrowed by caller-supplied run ids (the platform's own
+  // assistant_handoffs rows), never a bare "give me the tenant's whole history".
+  it("GET /episodes narrows by runIds; omitted/empty -> []; 404 without an episodic store; tenant required", async () => {
+    const episodic = new EpisodicStore();
+    const { app } = build({ deps: scripted(['{"final":"a"}', '{"final":"b"}']), episodic });
+    await trigger(app, { goal: "one", agent: "reader" });
+    await idle(app);
+    await trigger(app, { goal: "two", agent: "reader" });
+    await idle(app);
+    const all = episodic.query([TENANT]);
+    expect(all).toHaveLength(2);
+    const [first, second] = all;
+
+    const one = await app.inject({ method: "GET", url: `/episodes?tenant=${TENANT}&runIds=${first.runId}`, headers: AUTH });
+    expect(one.statusCode).toBe(200);
+    expect((one.json() as { episodes: Array<{ runId: string }> }).episodes.map((e) => e.runId)).toEqual([first.runId]);
+
+    const both = await app.inject({ method: "GET", url: `/episodes?tenant=${TENANT}&runIds=${first.runId},${second.runId}`, headers: AUTH });
+    expect((both.json() as { episodes: unknown[] }).episodes).toHaveLength(2);
+
+    const omitted = await app.inject({ method: "GET", url: `/episodes?tenant=${TENANT}`, headers: AUTH });
+    expect((omitted.json() as { episodes: unknown[] }).episodes).toEqual([]); // no runIds -> nothing, never the whole tenant
+
+    const badTenant = await app.inject({ method: "GET", url: `/episodes?tenant=not-a-uuid`, headers: AUTH });
+    expect(badTenant.statusCode).toBe(400);
+
+    const { app: appNoEpisodic } = build({ deps: scripted(['{"final":"x"}']) });
+    const r404 = await appNoEpisodic.inject({ method: "GET", url: `/episodes?tenant=${TENANT}&runIds=x`, headers: AUTH });
+    expect(r404.statusCode).toBe(404);
+  });
 });

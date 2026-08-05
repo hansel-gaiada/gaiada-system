@@ -15,12 +15,18 @@ import { getSessionUserId } from "./session-server";
 import { getMe, platformFetch, PlatformError, type Me } from "./platform";
 import { getActiveTenant } from "./tenant";
 import {
-  listThreads, getThread, listMemory, getCapabilities, resolveCitation, THREAD_LIST_LIMIT, type ListThreadsParams, type GetThreadParams,
+  listThreads, getThread, listMemory, getCapabilities, resolveCitation, getRoster, listThreadHandoffs,
+  THREAD_LIST_LIMIT, type ListThreadsParams, type GetThreadParams,
 } from "./assistant-data";
 import type {
   AssistantMemoryScope, AssistantThreadStatus, CapabilitiesResult, MemoryListResult, ResolvedCitation, SendMessageResult, StopResult,
-  ThreadDetailResult, ThreadListResult,
+  ThreadDetailResult, ThreadListResult, RosterResult, AssistantHandoff,
 } from "./assistant";
+// ASST-21 — the run-watch view's transcript read reuses the EXISTING Intelligence-console reader
+// verbatim (no second implementation of `GET :t/agents/runs/:runId`). It already degrades a 403 to
+// `null` (`skipUnavailable`), which is exactly right here too: a run that ISN'T this caller's own
+// handoff (or isn't yet linked with a runId) still degrades to "not available" rather than throwing.
+import { getAgentRun, type AgentRun } from "./admin";
 
 // The default payload must add NO properties. `Record<string, never>` looks right but isn't: its index
 // signature requires EVERY property to be `never`, so `{ ok: true } & Record<string, never>` makes
@@ -262,6 +268,71 @@ export async function resolveCitationAction(sourceRef: string): Promise<ActionRe
   try {
     const resolved = await resolveCitation(c.userId, c.tenant, sourceRef);
     return { ok: true, resolved };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+// ---- Agent roster + handoff (ASST-21) --------------------------------------------------------------
+// blueprint §8's "agent roster" / D-B ("one Hermes front door + a visible agent roster — hand a
+// longer task to a specialist"). `createHandoff` runs under the CHATTING USER's own OBO envelope on
+// the backend (broker.ts's `oboEnvelopeFor`, reused verbatim by `modules/assistant/handoffs.ts`) —
+// nothing here needs its own capability gate for the SAME reason the thread actions above don't:
+// the backend's `authorize()` (owner-only, resource_assistant_thread.yaml's additive `handoff`
+// action) already enforces it.
+
+export async function refreshRosterAction(): Promise<ActionResult<RosterResult>> {
+  const c = await ctx();
+  if ("error" in c) return { ok: false, error: c.error };
+  try {
+    const r = await getRoster(c.userId, c.tenant);
+    return { ...r, ok: true };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+export async function createHandoffAction(
+  threadId: string,
+  agent: string,
+  goal: string,
+): Promise<ActionResult<{ id: string; goalId: string; status: string }>> {
+  const c = await ctx();
+  if ("error" in c) return { ok: false, error: c.error };
+  try {
+    const r = await platformFetch<{ id: string; goalId: string; status: string }>(
+      `/api/${c.tenant}/assistant/threads/${threadId}/handoff`,
+      c.userId,
+      { method: "POST", body: JSON.stringify({ agent, goal }) },
+    );
+    return { ok: true, ...r };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+/** The run-watch view's one poll — the thread's handoffs, each already lazily refreshed from the
+ *  runner server-side (`handoffs.ts`'s `refreshHandoff`), so a caller here never has to separately
+ *  poll a goal id itself. */
+export async function refreshHandoffsAction(threadId: string): Promise<ActionResult<{ items: AssistantHandoff[] }>> {
+  const c = await ctx();
+  if ("error" in c) return { ok: false, error: c.error };
+  try {
+    const items = await listThreadHandoffs(c.userId, c.tenant, threadId);
+    return { ok: true, items };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+/** Lazily fetches ONE handoff run's full transcript — never auto-loaded for every handoff in the
+ *  list (a transcript can be long; the run-watch view fetches this only when the user opens one). */
+export async function getHandoffTranscriptAction(runId: string): Promise<ActionResult<{ run: AgentRun | null }>> {
+  const c = await ctx();
+  if ("error" in c) return { ok: false, error: c.error };
+  try {
+    const run = await getAgentRun(c.userId, c.tenant, runId);
+    return { ok: true, run };
   } catch (e) {
     return fail(e);
   }

@@ -1,0 +1,59 @@
+# ASST-21 — agent_run: the ADDITIVE, narrow carve-out for handoff-run transcript reads.
+#
+# Ticket: docs/superpowers/plans/2026-08-05-d14-and-assistant-tickets.md ("### ASST-21").
+# Design: docs/blueprints/assistant-foundation.md §8's "agent roster" line.
+#
+# ── THE AUTHZ DESIGN PIN (binding — do not widen) ──────────────────────────────────────────────────
+# Reading a full agent-run transcript is `isElevated`-only PLATFORM-WIDE, by design
+# (`admin/intelligence.controller.ts`'s `GET :t/agents/runs/:runId`) — that gate is a CODE-LEVEL
+# check (`admin/elevated.ts`'s `isElevated`), not a Cerbos policy, and THIS FILE DOES NOT TOUCH IT.
+# The controller calls `isElevated(req)` FIRST, completely unchanged; ONLY when that is false does it
+# fall through to a Cerbos check against THIS resource kind. So this policy can only ever ADD an allow
+# path for a caller isElevated() already rejected — it structurally cannot regress the elevated-only
+# rule for every other run, because that rule never reaches Cerbos at all.
+#
+# WHY the additive path is safe (the ticket's own binding argument, restated): a handoff run
+# (`POST /api/:t/assistant/threads/:id/handoff`, `modules/assistant/handoffs.ts`) executes under the
+# CHATTING USER's own OBO envelope — `broker.ts`'s `oboEnvelopeFor`, the ONE function in this codebase
+# that can spell one. The transcript is therefore output fetched under the READER's OWN authority, not
+# someone else's — reading it back is not an elevation, unlike a transcript from a run some OTHER
+# user's authority produced (which is exactly what stays elevated-only, unconditionally, above).
+#
+# ── THE RULE ITSELF: owner AND origin, both required ──────────────────────────────────────────────
+# `variables.owns` (`resource.attr.ownerId == principal.id`) is necessary but NOT sufficient on its
+# own — it must also be a run this policy actually knows is a handoff (`resource.attr.origin ==
+# "assistant_handoff"`), so this rule can never accidentally cover a DIFFERENT kind of owner-
+# attributed run this platform might grow later (e.g. a directly-triggered elevated goal that happens
+# to record the triggering admin as its "owner" for audit purposes — that is NOT a handoff and must
+# stay elevated-only). `intelligence.controller.ts` only ever calls this check after confirming (via
+# `assistant_handoffs`, ASST-21's own linking table) that the runId IS a handoff row — this condition
+# is defence in depth against that lookup being wrong, not the sole gate.
+#
+# ── CRITICAL ENVIRONMENT TRAP (verified repeatedly this program — see resource_assistant_thread.yaml
+#    for the fullest writeup) ─────────────────────────────────────────────────────────────────────────
+#   1. THIS IS A NEW POLICY FILE (no `agent_run` kind existed before ASST-21) — NOT hot-reloaded over
+#      the Windows bind mount even though `cerbos.yaml` sets `watchForChanges: true`. You MUST restart
+#      the Cerbos container that serves the environment you're testing against after adding this file.
+#   2. An UNLISTED resource `kind` is a SILENT DENY — every check against `agent_run` before the
+#      restart returns deny, with no error, indistinguishable from "the rule is wrong". Before
+#      trusting any DENY result below, prove the owner-ALLOW path actually returns ALLOW with a
+#      `matchedPolicy` (see `cerbos-agent-run.test.ts`'s smoke check).
+#   3. The container the test suite reaches is `gaiada-test-cerbos` (publishes :3592) — NOT
+#      `gaiada-cerbos-1`. Restarting the wrong container changes nothing the tests can see. Prod is
+#      unaffected: the deploy pipeline's Cerbos-restart step already restarts the real container on
+#      every deploy.
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: agent_run
+  variables:
+    import: ["gaiada_common"]
+  rules:
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      roles: ["user"]
+      condition:
+        match:
+          expr: >-
+            variables.inTenant && variables.owns &&
+            request.resource.attr.origin == "assistant_handoff"

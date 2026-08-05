@@ -26,12 +26,13 @@ import type { ModuleContract } from "../contract";
 
 export const assistantModule: ModuleContract = {
   key: "assistant",
-  migrations: ["0079_module_assistant.sql"],
+  migrations: ["0079_module_assistant.sql", "0084_assistant_handoffs.sql"],
   permissions: [
     { key: "assistant:thread:read", description: "Read your own assistant threads and messages" },
     { key: "assistant:thread:write", description: "Create, rename, pin, archive or delete your own assistant threads" },
     { key: "assistant:memory:read", description: "Read your own assistant memory (durable facts/preferences)" },
     { key: "assistant:memory:write", description: "Propose, confirm or delete your own assistant memory" },
+    { key: "assistant:handoff", description: "Hand off a thread to a specialist agent and watch its run" },
   ],
   customFieldTargets: [],
   mcpTools: [],

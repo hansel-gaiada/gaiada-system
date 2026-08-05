@@ -10,7 +10,7 @@ import "server-only";
 // returns `{status, json}`, which has no way to represent a stream, so the stream proxy route
 // (`app/api/assistant/threads/[id]/stream/route.ts`) calls this file directly instead of going
 // through `platformFetch`'s DEMO_MODE branch. See that route's header for the split.
-import type { AssistantMemoryScope, AssistantMessageRole, AssistantThreadStatus } from "./assistant";
+import type { AssistantMemoryScope, AssistantMessageRole, AssistantThreadStatus, HandoffStatus } from "./assistant";
 
 interface DemoThread {
   id: string;
@@ -68,6 +68,34 @@ interface DemoMemory {
   createdAt: string;
   updatedAt: string;
 }
+
+// ASST-21 — a handoff created via the roster panel's "hand off" form. Owner-scoped the same way
+// threads/memory are; demo mode resolves instantly to `ok` (no real runner to poll) so the
+// run-watch view has something terminal to show without a fake async loop.
+interface DemoHandoff {
+  id: string;
+  tenantId: string;
+  threadId: string;
+  ownerUserId: string;
+  agent: string;
+  goalText: string;
+  goalId: string;
+  runId: string | null;
+  status: HandoffStatus;
+  outcome: string | null;
+  errorKind: string | null;
+  approvalId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// A small, fixed stand-in for the runner's REAL registry (see `handoffs.ts`'s `fetchRoster` for
+// why the live backend never hardcodes this) — demo mode has no runner process to ask.
+const DEMO_ROSTER_AGENTS = [
+  { name: "status-reporter", tools: ["projects.list", "tasks.list"], maxSteps: 8, maxToolCalls: 6, writeCapable: false, evaledProviders: [] as string[] },
+  { name: "approvals-chaser", tools: ["agency.pendingApprovals"], maxSteps: 4, maxToolCalls: 2, writeCapable: false, evaledProviders: [] as string[] },
+  { name: "task-triager", tools: ["tasks.list", "tasks.update"], maxSteps: 10, maxToolCalls: 6, writeCapable: true, evaledProviders: ["openai"] },
+];
 
 const now = () => new Date().toISOString();
 const DEMO_OWNER = "demo-hansel";
@@ -175,6 +203,8 @@ declare global {
   var __gaiadaDemoAssistantSeq: { n: number } | undefined;
   // eslint-disable-next-line no-var
   var __gaiadaDemoAssistantMemory: DemoMemory[] | undefined;
+  // eslint-disable-next-line no-var
+  var __gaiadaDemoAssistantHandoffs: DemoHandoff[] | undefined;
 }
 
 const THREADS: DemoThread[] = globalThis.__gaiadaDemoAssistantThreads ?? (globalThis.__gaiadaDemoAssistantThreads = seedThreads());
@@ -185,6 +215,9 @@ const nid = (p: string) => `${p}-demo-${seqBox.n++}`;
 // from the "action" layer via proposeMemoryAction/confirmMemoryAction and would otherwise be a
 // SECOND, independently-initialized array under the route layer — see the header comment above).
 const MEMORY: DemoMemory[] = globalThis.__gaiadaDemoAssistantMemory ?? (globalThis.__gaiadaDemoAssistantMemory = seedMemory());
+// ASST-21 — same singleton requirement; read from the "action" layer via createHandoffAction/
+// refreshHandoffsAction.
+const HANDOFFS: DemoHandoff[] = globalThis.__gaiadaDemoAssistantHandoffs ?? (globalThis.__gaiadaDemoAssistantHandoffs = []);
 
 interface DemoResult { status: number; json: unknown }
 const ok = (json: unknown): DemoResult => ({ status: 200, json });
@@ -216,6 +249,11 @@ function pubMessage(m: DemoMessage) {
 }
 function pubMemory(m: DemoMemory) {
   const { tenantId, ...rest } = m;
+  void tenantId;
+  return rest;
+}
+function pubHandoff(h: DemoHandoff) {
+  const { tenantId, ...rest } = h;
   void tenantId;
   return rest;
 }
@@ -395,6 +433,61 @@ export function assistantDemo(method: string, p: string, params: URLSearchParams
     rows = [...rows].sort(memoryPinnedThenRecent);
     const total = rows.length;
     return ok({ items: rows.slice(offset, offset + limit).map(pubMemory), total });
+  }
+
+  // ── ASST-21: agent roster + handoff ──────────────────────────────────────────────────────────────
+  // No real runner in demo mode: a handoff resolves to `ok` IMMEDIATELY (no async poll loop to fake)
+  // so the run-watch view has a terminal state to render on the very next read. `runId` is synthetic
+  // and does NOT resolve through the (unfaked) `/agents/runs/:runId` route — `getHandoffTranscriptAction`
+  // degrades that to "Transcript not available" via the SAME `skipUnavailable` the Intelligence
+  // console already relies on, which is the honest outcome in a backend-free environment.
+  const rosterM = p.match(/^\/api\/([^/]+)\/assistant\/agents$/);
+  if (rosterM && m === "GET") {
+    const episodicHistory = HANDOFFS.filter((h) => h.ownerUserId === userId && h.runId).map((h) => ({
+      runId: h.runId as string, agent: h.agent, goal: h.goalText, status: h.status, outcome: h.outcome,
+      toolsCalled: [], failedTools: [], createdAt: Date.parse(h.updatedAt),
+    }));
+    return ok({
+      agents: DEMO_ROSTER_AGENTS,
+      supervisor: { name: "supervisor" },
+      runnerConfigured: true,
+      episodicHistory,
+    });
+  }
+
+  const handoffM = p.match(/^\/api\/([^/]+)\/assistant\/threads\/([^/]+)\/handoff$/);
+  if (handoffM && m === "POST") {
+    const [, tenantId, threadId] = handoffM;
+    const thread = THREADS.find((t) => t.id === threadId && t.tenantId === tenantId);
+    if (!thread || thread.ownerUserId !== userId) return { status: 404, json: { error: "thread not found" } };
+    const b = JSON.parse(body || "{}") as { agent?: string; goal?: string };
+    const agent = (b.agent ?? "").trim();
+    if (!agent) return { status: 400, json: { error: "agent is required" } };
+    if (!DEMO_ROSTER_AGENTS.some((a) => a.name === agent)) {
+      return { status: 400, json: { error: `agent must be one of ${DEMO_ROSTER_AGENTS.map((a) => a.name).join(", ")}` } };
+    }
+    const goal = (b.goal ?? "").trim();
+    if (!goal) return { status: 400, json: { error: "goal is required" } };
+    const id = nid("asst-handoff");
+    const goalId = nid("demo-goal");
+    const runId = nid("demo-run");
+    const ts = now();
+    HANDOFFS.push({
+      id, tenantId, threadId, ownerUserId: userId, agent, goalText: goal, goalId, runId,
+      status: "ok", outcome: `(demo) ${agent} handled: ${goal}`, errorKind: null, approvalId: null,
+      createdAt: ts, updatedAt: ts,
+    });
+    return { status: 201, json: { id, goalId, status: "ok" } };
+  }
+
+  const handoffListM = p.match(/^\/api\/([^/]+)\/assistant\/threads\/([^/]+)\/handoffs$/);
+  if (handoffListM && m === "GET") {
+    const [, tenantId, threadId] = handoffListM;
+    const thread = THREADS.find((t) => t.id === threadId && t.tenantId === tenantId);
+    if (!thread || thread.ownerUserId !== userId) return { status: 404, json: { error: "thread not found" } };
+    const rows = HANDOFFS.filter((h) => h.threadId === threadId && h.tenantId === tenantId)
+      .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+    return ok(rows.map(pubHandoff));
   }
 
   // ── ASST-18: capabilities panel + empty-state cards ─────────────────────────────────────────────

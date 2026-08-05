@@ -52,6 +52,12 @@ describe.skipIf(!dbUp)("PgEpisodicStore (durable, D9)", () => {
     expect(await store.query([])).toEqual([]);
   });
 
+  it("ASST-21: query narrows by runIds (additive — omitted means unfiltered)", async () => {
+    expect((await store.query([T_A], { runIds: ["r1"] })).map((e) => e.runId)).toEqual(["r1"]);
+    expect(await store.query([T_A], { runIds: [] })).toEqual([]); // empty allow-list -> nothing, not everything
+    expect((await store.query([T_A])).map((e) => e.runId).sort()).toEqual(["r1", "r2"]); // no filter -> unchanged
+  });
+
   it("D9.3: feedback persists; only trusted is a signal", async () => {
     await store.addFeedback("r1", { rating: "down", provenance: "external", trust: "untrusted", at: 1 });
     await store.addFeedback("r1", { rating: "up", provenance: "human", trust: "trusted", at: 2 });
