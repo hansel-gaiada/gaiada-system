@@ -3,7 +3,8 @@ import {
   groupThreads, filterThreads, threadTitle, isPendingMessage,
   parseSSEBuffer, decodeAssistantEvent, streamReducer, initialStreamState, humanizeErrorKind,
   brainBadgeLabel, parseUsageMeta, usageMeterLabel,
-  type AssistantThread,
+  isPendingMemory, groupMemory,
+  type AssistantThread, type AssistantMemory,
 } from "./assistant";
 
 function thread(overrides: Partial<AssistantThread> = {}): AssistantThread {
@@ -223,5 +224,41 @@ describe("humanizeErrorKind", () => {
   });
   it("falls back gracefully for an unknown kind", () => {
     expect(humanizeErrorKind("some_new_kind_the_ui_has_never_seen")).toBe("Something went wrong.");
+  });
+});
+
+function memory(overrides: Partial<AssistantMemory> = {}): AssistantMemory {
+  return {
+    id: "m1", ownerUserId: "u1", scope: "user", content: "likes dark mode",
+    provenance: "user", trust: "untrusted", pinned: false, confirmedAt: null, sourceThreadId: null,
+    createdAt: "2026-08-04T09:00:00Z", updatedAt: "2026-08-04T09:00:00Z", ...overrides,
+  };
+}
+
+describe("isPendingMemory", () => {
+  it("a null confirmedAt is pending (a proposal, inert on the backend)", () => {
+    expect(isPendingMemory(memory({ confirmedAt: null }))).toBe(true);
+  });
+  it("a set confirmedAt is not pending", () => {
+    expect(isPendingMemory(memory({ confirmedAt: "2026-08-04T09:05:00Z" }))).toBe(false);
+  });
+});
+
+describe("groupMemory", () => {
+  it("splits pending vs confirmed, each pinned-first-then-most-recent", () => {
+    const items: AssistantMemory[] = [
+      memory({ id: "old-confirmed", confirmedAt: "2026-08-01T00:00:00Z" }),
+      memory({ id: "pinned-confirmed", pinned: true, confirmedAt: "2026-08-02T00:00:00Z" }),
+      memory({ id: "new-confirmed", confirmedAt: "2026-08-03T00:00:00Z" }),
+      memory({ id: "pending-1", confirmedAt: null, createdAt: "2026-08-01T00:00:00Z" }),
+      memory({ id: "pinned-pending", pinned: true, confirmedAt: null, createdAt: "2026-08-02T00:00:00Z" }),
+    ];
+    const { pending, confirmed } = groupMemory(items);
+    expect(pending.map((m) => m.id)).toEqual(["pinned-pending", "pending-1"]);
+    expect(confirmed.map((m) => m.id)).toEqual(["pinned-confirmed", "new-confirmed", "old-confirmed"]);
+  });
+
+  it("an empty list yields two empty groups, not an error", () => {
+    expect(groupMemory([])).toEqual({ pending: [], confirmed: [] });
   });
 });

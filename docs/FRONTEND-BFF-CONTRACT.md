@@ -1365,6 +1365,8 @@ sends mail once `MAIL_ENABLED=1` on a deployed box.
 | ✅ | GET | `/api/:tenantId/mail/messages/:messageId/attachments/:index` | **MAIL-13** — quarantined attachment bytes. Same A10 parent-entity authorization as the thread read, then gated on scan status: `clean` serves · `infected` `403` at every privilege (the bytes were never stored) · `pending` (unscannable) `403` at every privilege · `skipped` (scanning off) **admin-only**. Always `Content-Disposition: attachment` + `nosniff` + a `sandbox` CSP. Use the thread payload's per-attachment `downloadable` / `blockedReason` (`infected` \| `not_yet_scanned` \| `admin_only` \| `no_content`) to decide whether to render a link at all — those fields are computed with the SAME gate the endpoint enforces. |
 | ✅ | GET | `/api/:tenantId/portal/mail/threads?runId=` | **MAIL-13** — the portal run view's thread panel. Client principals are NOT authorized by `resource_pipeline_run` (its read rules are elevated-only), so this route uses the portal's own kernel: Cerbos `portal` read + `resolvePortalScope` client/project ownership applied TO THE RUN before any mail table is touched. Another client's run → **`404`, not `403`** (portal non-disclosure). Same message shape as above; `skipped` attachments are never downloadable on this surface. |
 | ✅ | GET | `/api/admin/mail/log/:id/thread` | **MAIL-13** — the admin log detail pane's thread. Elevated-only (`isElevated`) **AND** the A10 parent-entity check when the mail hangs off an entity, so this is not the one thread read that outranks its parent. Mail with no entity (auth-stream mail, and NDR/bounce messages — which intake stores with a NULL entity precisely so a bounce never renders as a human reply on a decision surface) is governed by elevation alone. Attachments are reported metadata-only here (`downloadable: false`); bytes come from the tenant-scoped route above. |
+| ✅ | POST | `/auth/magic-link` | **MAIL-10** — mint a magic-link login token (design §9). Root-level, BFF-internal (`ServiceGuard`, Bearer `PLATFORM_SERVICE_TOKEN` — a browser cannot call this directly). `{email}` → **always `202 {ok:true}`**, body AND timing flattened so an existing address is indistinguishable from an unknown one (best-effort — see `src/mail/magic-link/service.ts`'s `dummyEquivalentWork` comment on what "flattened" does and doesn't guarantee against a real network attacker). Rate-limited 3/address/hour + 10/IP/hour (`MAIL_MAGIC_LINK_RATE_PER_ADDRESS_HOUR`/`_IP_HOUR`) — over either limit still returns the identical `202`, just skips the mint. **One documented exception (design §5.1):** a known-but-suppressed auth address gets a distinguishable `503 {error:"delivery unavailable — contact an admin"}` instead — deliberate, not a leak of the enumeration-resistance property above. `404` when `MAIL_MAGIC_LINKS_ENABLED=0` (the default). Caller must forward the real end-user IP via `x-forwarded-for` for the per-IP limit to mean anything (see the controller's own header comment). |
+| ✅ | POST | `/auth/magic-link/consume` | **MAIL-10** — single-use atomic consume. Root-level, `ServiceGuard`-gated (called by `platform-ui/src/app/auth/magic/route.ts`, never directly by a browser). `{token}` → `200 {userId}` on success. Unknown, already-consumed (replayed), and expired tokens ALL return the exact same `422 {error:"this sign-in link is not usable — request a new one"}` — no distinguishing detail, no timing tell by construction (one atomic `UPDATE … WHERE consumed_at IS NULL AND expires_at > now() RETURNING`). `404` when the feature flag is off. `auth_magic_links` stores only `sha256(rawToken)` — never a usable token, never logged. |
 
 **No "send arbitrary mail" endpoint exists at any privilege** (design §6.1) — the only way a row
 lands in `mail_log` is the internal `enqueueMail()` primitive (`src/mail/queue.ts`), called by
@@ -1378,6 +1380,22 @@ does **not** sign webhooks at all — its documented mechanisms are basic-auth-i
 or custom headers, so the HMAC verifier is ours and R3 needs re-scoping), and real relay NDR format is
 §15 R4.
 
+**MAIL-10 has now landed** (2026-08-05): magic links (migration `0080_auth_magic_links.sql`,
+GLOBAL/no-tenant table accessed via `withGlobal` — same class as `users`/`identity_links`, NOT one
+of the `app.mail_context`-GUC-gated 0077 mail tables). **M11 restated for this doc too: a magic
+link is never an approval mechanism** — approval/warning mail keeps carrying a plain, tokenless
+entity URL, forever; pinned by `src/mail/magic-link/m11-non-goal.test.ts`. `platform-ui`'s
+`/auth/magic` route (GET, reads `?token=`) is the landing page an emailed link opens; it consumes
+the token against the endpoint above and mints EXACTLY the same cookie shape dev-login's
+`sealSession(userId)` produces — not the OIDC-wrapped form `auth/callback/route.ts` uses. **Caps
+at IN PROGRESS, not DEV-VERIFIED:** the live round-trip on a deployed box (mint → Mailpit capture
+→ consume → cookie) is **PENDING-DEPLOY** (no deploy path while GitHub Actions is billing-blocked);
+everything else is proven against the real test Postgres (`npx vitest run src/mail src/db` from
+`platform-nest/`, 291/291 green incl. `src/db/rls.test.ts` **unmodified** — this table carries no
+`tenant_id` column, so that estate-wide FORCE-RLS invariant does not select it). **No SLO claim
+anywhere** — the M8 auth-stream latency SLO needs ≥7 days of real relay traffic (design §15 R5)
+and stays whole-deferred.
+
 **Env (`MAIL_*`, all in `src/config.ts` + the `platform` service's `environment:` block in
 `infra/compose/docker-compose.vps.yml` + `.env.example` in both `platform-nest/` and
 `infra/compose/`):** `MAIL_ENABLED` (master gate, default `0` — dark: no sender loop, `enqueueMail`
@@ -1385,7 +1403,9 @@ no-ops), `MAIL_SENDER_INTERVAL_MS`, per-stream `MAIL_STREAM_{NOTIFY,AUTH}_{TRANS
 BREVO_*,FROM}`, `MAIL_REPLY_DOMAIN`, `MAIL_LINK_BASE_URL` (A12 — new; the deep-link base every
 approval template's `href` is built from; compiled default `https://erp.gaiada.invalid`),
 `MAIL_WEBHOOK_TOKEN`, `MAIL_INBOUND_TOKEN`, `MAIL_INBOUND_MAX_BYTES`, `MAIL_INBOUND_SCAN`,
-`MAIL_MAGIC_LINKS_ENABLED`. gda-aicenter's compose already defaults both streams at
+`MAIL_MAGIC_LINKS_ENABLED` (default `0`), `MAIL_MAGIC_LINK_TTL_SECONDS` (default `900`),
+`MAIL_MAGIC_LINK_RATE_PER_ADDRESS_HOUR` (default `3`), `MAIL_MAGIC_LINK_RATE_PER_IP_HOUR` (default
+`10`). gda-aicenter's compose already defaults both streams at
 `mailpit:1025` (authless) — see MAIL-00's Mailpit service in the same compose file.
 
 **A12 (binding):** every domain/FROM/link-base in `src/mail/` is env config with a reserved-TLD
@@ -1548,7 +1568,9 @@ original behaviour: NULL provider/model, the char-count estimate — never an er
 last moment either event could be added for free; once a SECOND gateway consumer exists (beyond
 this relay), changing this framing again is a breaking change.
 
-- **`event: meta`** — `data: {"provider":string,"model":string,"providerSession"?:string}`.
+- **`event: meta`** — `data: {"provider":string,"model":string}`. **(ASST-15, 2026-08-05: the
+  `providerSession"?:string` field this payload carried under ASST-11 is REMOVED — see the
+  "ASST-15 — one grammar for `meta`" addendum below for why and what replaced it.)**
   Emitted **exactly once per stream**, at the moment the ASST-04 DLP scrubber releases its FIRST
   bytes to the wire — i.e. immediately before the first content `data:` frame, NOT at provider
   selection time. That timing is load-bearing: it names the provider that actually **committed**
@@ -1557,8 +1579,6 @@ this relay), changing this framing again is a breaking change.
   it — the failover replacement's `meta` is what the client sees, and it is never contradicted
   afterward (once `meta` is written, no further provider can run for that response). `model` is
   `""` for a provider with no fixed-model concept (e.g. `echo`) — truthful absence, not a guess.
-  `providerSession` is reserved for a future per-provider session handle; nothing populates it yet,
-  so it is **omitted**, never sent empty.
   **Additive contract: a consumer MUST treat an absent `meta` event as "unknown provider" — never
   an error.** This covers both an older gateway build (pre-ASST-11) and, until the ASST-06
   follow-up lands, THIS gateway's only real consumer, which simply never looks for it yet.
@@ -1578,3 +1598,133 @@ this relay), changing this framing again is a breaking change.
   (`writeSSEMeta`/`writeSSEUsage` in `internal/server/server.go`) that guarantee the one-line-JSON
   invariant — no call site can bypass it. Full coverage in
   `internal/server/server_meta_test.go` and `internal/providers/ollama_test.go`.
+
+### ASST-15 — provider hint, `providerSession` passthrough, and one grammar for `meta`
+
+**The divergence this ticket resolves.** ASST-14 shipped `hermes-gateway`'s `/complete/stream`
+emitting `meta` **terminally** (right before `done`), because Hermes' session id is only knowable
+once its footer parses — a genuinely late fact. ASST-11's ruling above says `meta` fires
+**pre-first-token**, everywhere. That was one grammar with two dialects — the exact shape of every
+recurring defect named at planning time (the AgentDef-vs-registry impact drift; the impact gate
+living in two places): the same event name meaning two different things depending on which
+process emitted it. Concretely, it also left a real user-visible defect: the "served by" badge
+read "Unknown provider" for the entire length of a Hermes reply, resolving only at the very end.
+
+**Resolution chosen: (a) — keep `meta` pre-first-token, UNCONDITIONALLY, everywhere; move the
+late-arriving fact to a new, separate, additive terminal event.** `providerSession` is deleted
+from `meta`'s payload (see the updated bullet above) and never reappears there. A brand new event,
+`event: session`, carries it instead:
+
+- **`event: session`** — `data: {"providerSession":string}`. **Terminal** — written after the
+  last token (and after `event: usage`, if any), immediately before `event: done`. Emitted **at
+  most once**, and **only when the serving provider actually has a session id to report** — never
+  invented, never sent empty, mirroring `event: usage`'s "real counts or nothing" discipline
+  exactly. Absent on every error path (a provider that dies never gets to report a session for a
+  reply the client is being told failed). Which providers can report it today: **`hermes` only**
+  (`internal/providers/hermes.go`'s `SessionStreamingProvider` extension of `StreamingProvider`) —
+  `ollama`/`gemini`/`claude`/`openai`/`echo` have no session concept and never emit it, by design,
+  not a gap.
+
+**Why (a) over (b) ("meta gains a formally-permitted terminal form, providerSession allowed
+late").** (b) was considered — it's cheaper (no new event name) and ASST-12's relay
+(`platform-nest/src/modules/assistant/stream.ts`) already tolerates a `meta` frame arriving at any
+point, so it would not have required a platform-nest change either. It was rejected because **it
+does not fix the actual defect**: under (b), Hermes' `meta` would still land right before `done`,
+so the badge would still read "Unknown provider" for the whole reply — the divergence would be
+merely *documented*, not *closed*. Under (a), `provider`/`model` are known the instant an attempt
+starts (`p.Name()`/`ModelName()`, static, no network round-trip needed) for every provider
+including `hermes` — there is no real reason for `meta` itself to ever be late; only the
+session id is genuinely late, and only for one provider. Splitting the late fact into its own event
+means `meta`'s timing rule has **zero exceptions, for any current or future provider** — the
+single-dialect property the whole ticket exists to establish — while `hermes` still gets its badge
+lit up immediately like every other provider, closing the user-visible bug, not just relabeling
+it.
+
+**Both emitters agree, byte-for-byte grammar:**
+- `ai-gateway-go` (`internal/server/server.go`): `writeSSEMeta` writes `{provider,model}` only (the
+  `ProviderSession` field was removed from `metaPayload`); a new `writeSSESession` writes
+  `event: session` from a `SessionStreamingProvider`'s `onSession` callback, gated exactly like
+  `onUsage` — discarded on failover if the attempt died inside the ASST-04 hold window, never
+  written on any error path, at most once.
+- `hermes-gateway` (`server.mjs`): `writeSSEMeta` now fires at the **first** piece the
+  `HermesBoxStreamParser` emits (mirroring ai-gateway-go's scrubber-release timing exactly — a
+  Hermes run that dies before any body content is parsed never gets a `meta` written for it,
+  matching the ASST-11 hold-window discipline), carrying `{provider:"hermes", model}` only. A new
+  `writeSSESession` fires once, terminally, with `{providerSession}` **only when
+  `parser.sessionId` is non-null** — never on the timeout/spawn-error/non-zero-exit/box-never-closed
+  paths, which all return before it. `/complete` and `/media` are untouched (wa-chat-bot depends on
+  them byte-for-byte); zero runtime dependencies preserved.
+
+**Provider hint + `providerSession` request fields (`POST /complete/stream` only).** The request
+body gains two optional fields: `provider` (a hint — route to the NAMED provider first when it is
+available *and* its breaker is closed; otherwise fall through to the normal failover chain,
+**never a hard error** — OQ-6's ruling is "fail over and LABEL", and `meta` does the labelling) and
+`providerSession` (an **opaque** token the gateway never inspects, generates, or validates — it is
+threaded verbatim into whichever attempted provider implements
+`providers.SessionStreamingProvider`, today only `hermes`). The hint is a pure **reordering** of
+the chain's provider snapshot (`chain.RunWithHint`) — it does not skip the breaker/availability
+checks for the hinted provider (an open breaker or `Available()==false` still skips it exactly as
+if it were first in line naturally) and does not touch breaker state; an empty or unmatched hint
+falls through to the chain's untouched `Run` behavior. Absent hint ⇒ byte-identical behavior to
+before this ticket for every existing caller (`/complete`, `/media`, `/embed` don't accept a hint
+at all; `/complete/stream` with no `provider` field delegates straight to `Run`).
+
+### Memory panel backend — propose vs confirm, quarantine discipline (ASST-19, 2026-08-05)
+
+Note on the "PENDING (ASST-06+)" bullet above (in §18's own list): it still names
+`GET·POST·DELETE /api/:t/assistant/memory` as pending — that line is left as written rather than
+edited in place (per this ticket's own instruction, to avoid clobbering concurrent edits to that
+list); this subsection is the up-to-date status. `GET /api/:t/assistant/capabilities`,
+`POST .../messages/:id/feedback` and `POST .../threads/:id/handoff` remain genuinely pending.
+
+`assistant_memory` is memory #2 of the blueprint's "four memories" (§4.1) — durable, editable,
+deletable, and its writes are **proposals**: a row is recorded the instant it is proposed, but
+`confirmed_at IS NULL` until a human confirms it, and an unconfirmed row is completely inert (see
+below). Same owner-only Cerbos policy as threads (`resource_assistant_memory.yaml`, ASST-02, **NO**
+company_admin/group_executive/superadmin rule), with exactly four actions —
+`list`/`propose`/`confirm`/`delete` — and no separate `update` action.
+
+- ✅ **`GET /api/:t/assistant/memory`** — action `list`, self-scoped (`WHERE owner_user_id` = the
+  caller). Query: `scope` (`user`|`company`), `pinned` (bool), `confirmed` (bool — the confirm UI's
+  "pending proposals" vs "confirmed memory" split), `limit`/`offset` (default 100/max 500).
+  Response `{ items, total }`; ordered pinned-first, then confirmed-first (nulls first, i.e.
+  unconfirmed proposals surface at the top of their own group), then most-recent.
+- ✅ **`POST /api/:t/assistant/memory`** — action `propose`. `{ content, scope?, sourceThreadId? }`
+  → `{ id }`. Always inserts `provenance='user'`, `trust` and `confirmed_at` left at their
+  migration-0079 column defaults (`'untrusted'` / `NULL`) — this is THE quarantine boundary: the
+  row exists (for audit + the confirm UI) but is otherwise inert until confirmed. A future ASST-17
+  wiring (the assistant proposing memories through its own event surface, this ticket's stated
+  dependency) would call the same INSERT shape with `provenance='assistant'` — not built here.
+- ✅ **`POST /api/:t/assistant/memory/:id/confirm`** — action `confirm`, the ONLY way
+  `confirmed_at`/`trust` ever change. `{ content?, pinned? }` optional. Idempotent on the
+  confirmation TIMESTAMP (`confirmed_at = COALESCE(confirmed_at, now())` — re-confirming an
+  already-confirmed row does not reset when it was first confirmed) but doubles as the **pin/edit**
+  affordance for an already-confirmed row: Cerbos has no separate `update` action, so editing
+  `content` or toggling `pinned` on an existing memory reuses `confirm` with just those fields set.
+- ✅ **`DELETE /api/:t/assistant/memory/:id`** — action `delete`. Hard delete. **Deleting the
+  THREAD it was mined from does NOT delete the memory** — migration 0079's composite tenant-scoped
+  FK on `source_thread_id` is `ON DELETE SET NULL (source_thread_id)` (PG15+ column-list form): the
+  memory row survives with its provenance link cleared, proven by
+  `modules/assistant/assistant-memory.test.ts`.
+- **`scope` implemented as metadata only, NOT a visibility switch** — the ticket left this
+  ambiguous ("if the ticket is ambiguous, say what you implemented and why"). `assistant_memory.scope`
+  (`user`|`company`, migration 0079) records what the fact is ABOUT (a personal preference vs.
+  something about the company the user chose to have remembered); `resource_assistant_memory.yaml`
+  does not branch on it, so a `scope='company'` row is exactly as owner-private as a `scope='user'`
+  one — same 403s for every non-owner, proven in `assistant-memory.test.ts`. A genuine
+  shared-company-memory feature (any principal in the company can read a `scope='company'` row)
+  would need its own Cerbos rule and its own ticket — reading `scope` as a widening switch here
+  would be exactly the "for consistency" backdoor ASST-02's policy header warns against.
+- **THE QUARANTINE GATE lives in `context.ts`, not here** — `assembleContext`'s
+  `fetchConfirmedMemory` reads `assistant_memory` with `WHERE owner_user_id = $1 AND confirmed_at IS
+  NOT NULL` and injects the result as a "known facts about this user (confirmed)" block ahead of
+  the transcript. An unconfirmed row is invisible to every assembled prompt, full stop — proven
+  directly on the assembled `prompt` STRING (never the UI/API shape) by
+  `modules/assistant/context-memory.test.ts`'s two tests: (1) the blueprint's Phase-4 gate — a
+  DELETED memory is absent from the next assembled context; (2) the negative — an UNCONFIRMED
+  memory never appears in an assembled prompt, until it is confirmed.
+- Deliberately **NO** `writeActivity()`/`notify()` on any memory write (same reasoning as every
+  other assistant write — the tenant activity feed is member-readable and would leak private
+  memory content, not just a thread's existence).
+- **⬜ PENDING:** the platform-ui right-rail memory panel (view/edit/delete/pin) — this ticket's
+  backend is UI-ready for all four endpoints above.

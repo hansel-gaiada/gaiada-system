@@ -12,6 +12,19 @@
   height: calc(100vh - 230px);
   min-height: 480px;
 }
+/* ASST-19 — the collapsible right rail (blueprint §8's "context inspector" family; only the
+   memory drawer exists so far). A third grid column, added only while it's open. */
+.asst-workspace--with-memory { grid-template-columns: 280px 1fr 300px; }
+
+.asst-main__toolbar { display: flex; justify-content: flex-end; padding: 8px 14px 0; }
+.asst-memory-toggle {
+  border: 0.5px solid var(--erp-hairline); background: transparent; cursor: pointer;
+  padding: 6px 12px; font: 700 10px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--ink-subtle); transition: color 0.2s var(--erp-ease), border-color 0.2s var(--erp-ease);
+}
+.asst-memory-toggle:hover, .asst-memory-toggle:focus-visible, .asst-memory-toggle[aria-expanded="true"] {
+  color: var(--text-primary); border-color: var(--erp-accent);
+}
 
 /* ---- Rail ------------------------------------------------------------------------------------ */
 .asst-rail { display: flex; flex-direction: column; min-height: 0; border-right: 0.5px solid var(--erp-hairline); background: var(--surface-page); }
@@ -96,7 +109,51 @@
 
 .asst-sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 
+/* ---- Memory panel (ASST-19) -------------------------------------------------------------------- */
+.asst-mem { display: flex; flex-direction: column; min-height: 0; border-left: 0.5px solid var(--erp-hairline); background: var(--surface-page); }
+.asst-mem__head { display: flex; align-items: center; justify-content: space-between; padding: 14px; border-bottom: 0.5px solid var(--erp-hairline-soft); }
+.asst-mem__close { border: none; background: transparent; cursor: pointer; width: 26px; height: 26px; font-size: 16px; line-height: 1; color: var(--ink-faint); transition: color 0.2s var(--erp-ease); }
+.asst-mem__close:hover, .asst-mem__close:focus-visible { color: var(--text-primary); }
+
+.asst-mem__propose { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border-bottom: 0.5px solid var(--erp-hairline-soft); }
+.asst-mem__propose-input {
+  resize: vertical; min-height: 44px; border: 0.5px solid var(--line-control); background: transparent;
+  padding: 8px 10px; font: 400 13px/1.45 var(--font-body); color: var(--text-primary); outline: none;
+}
+.asst-mem__propose-input:focus-visible { border-color: var(--erp-accent); }
+.asst-mem__propose-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.asst-mem__scope-select { border: 0.5px solid var(--line-control); background: var(--surface-page); padding: 5px 6px; font: 400 12px var(--font-body); color: var(--text-primary); }
+
+.asst-mem__error { margin: 0; padding: 8px 14px; font: 600 12px var(--font-body); color: var(--status-danger-fg); }
+
+.asst-mem__list { flex: 1; overflow-y: auto; padding: 4px 0 14px; min-height: 0; }
+.asst-mem__group-label { margin: 0; padding: 12px 14px 2px; font: 700 10px var(--font-body); letter-spacing: 0.12em; text-transform: uppercase; color: var(--erp-ink-50); }
+.asst-mem__group-hint { margin: 0; padding: 0 14px 6px; font: 400 11.5px var(--font-body); color: var(--ink-faint); }
+.asst-mem__empty { padding: 10px 14px 16px; font: 400 12.5px var(--font-body); color: var(--ink-faint); }
+.asst-mem__list ul { list-style: none; margin: 0; padding: 0; }
+
+.asst-mem__row { padding: 8px 14px; border-bottom: 0.5px solid var(--erp-hairline-soft); }
+.asst-mem__content { margin: 0 0 6px; font: 400 12.5px/1.5 var(--font-body); color: var(--text-primary); word-break: break-word; }
+.asst-mem__edit-input {
+  width: 100%; resize: vertical; min-height: 44px; margin-bottom: 6px; border: none;
+  border-bottom: 0.5px solid var(--erp-accent); background: transparent; outline: none;
+  padding: 4px 2px; font: 400 12.5px/1.45 var(--font-body); color: var(--text-primary);
+}
+.asst-mem__row-meta { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.asst-mem__scope-chip { font: 700 9px var(--font-body); letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-subtle); }
+.asst-mem__row-actions { display: flex; align-items: center; gap: 2px; flex-shrink: 0; }
+.asst-mem__action { border: 0.5px solid var(--erp-accent); background: transparent; cursor: pointer; padding: 3px 8px; font: 700 9.5px var(--font-body); letter-spacing: 0.05em; text-transform: uppercase; color: var(--erp-accent); }
+.asst-mem__action:hover, .asst-mem__action:focus-visible { background: var(--tint-active); }
+.asst-mem__icon-btn {
+  border: none; background: transparent; cursor: pointer; width: 24px; height: 24px; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center; font-size: 11px;
+  color: var(--ink-faint); transition: color 0.2s var(--erp-ease), background 0.2s var(--erp-ease);
+}
+.asst-mem__icon-btn:hover, .asst-mem__icon-btn:focus-visible { color: var(--text-primary); background: var(--wash); }
+.asst-mem__icon-btn--danger { width: auto; padding: 0 8px; font: 700 10px var(--font-body); color: var(--status-danger-fg); letter-spacing: 0.04em; text-transform: uppercase; }
+
 @media (max-width: 860px) {
-  .asst-workspace { grid-template-columns: 1fr; grid-template-rows: 220px 1fr; height: calc(100vh - 200px); }
+  .asst-workspace, .asst-workspace--with-memory { grid-template-columns: 1fr; grid-template-rows: 220px 1fr; height: calc(100vh - 200px); }
   .asst-rail { border-right: none; border-bottom: 0.5px solid var(--erp-hairline); }
+  .asst-mem { border-left: none; border-top: 0.5px solid var(--erp-hairline); max-height: 320px; }
 }

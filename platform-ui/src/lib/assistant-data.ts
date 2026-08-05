@@ -5,7 +5,7 @@ import "server-only";
 // load; everything after that (thread switch, rail refresh, mutations) goes through
 // `lib/assistantActions.ts` because it is triggered by client interaction, not a navigation.
 import { platformFetch } from "./platform";
-import type { ThreadDetailResult, ThreadListResult } from "./assistant";
+import type { ThreadDetailResult, ThreadListResult, MemoryListResult } from "./assistant";
 
 export interface ListThreadsParams {
   q?: string;
@@ -39,4 +39,15 @@ export function getThread(userId: string, tenantId: string, threadId: string, pa
   if (params.beforeSeq) qs.set("beforeSeq", String(params.beforeSeq));
   const suffix = qs.toString();
   return platformFetch<ThreadDetailResult>(`/api/${tenantId}/assistant/threads/${threadId}${suffix ? `?${suffix}` : ""}`, userId);
+}
+
+// ASST-19 — the memory panel's own read. Owner-only (resource_assistant_memory.yaml); no pagination
+// params exercised here — the panel loads the owner's whole memory set in one page (the same
+// "give me everything you'll give me" call listThreads makes above), matching a durable-facts list
+// that is expected to stay small (unlike the message transcript, which genuinely needs paging).
+export const MEMORY_LIST_LIMIT = 500; // the backend's own MAX_MEMORY_LIST_LIMIT
+
+export function listMemory(userId: string, tenantId: string): Promise<MemoryListResult> {
+  const qs = new URLSearchParams({ limit: String(MEMORY_LIST_LIMIT) });
+  return platformFetch<MemoryListResult>(`/api/${tenantId}/assistant/memory?${qs.toString()}`, userId);
 }

@@ -9,6 +9,7 @@ import {
 import { ThreadRail } from "./ThreadRail";
 import { ThreadView } from "./ThreadView";
 import { Composer } from "./Composer";
+import { MemoryPanel } from "./MemoryPanel";
 import { useAssistantStream } from "./useAssistantStream";
 import { Toast } from "@/components/ui";
 import "./assistant.css";
@@ -53,6 +54,11 @@ export function AssistantWorkspace({ initialThreads, initialActiveThreadId }: {
   const [sending, setSending] = useState(false);
   const [streamingMessageId, setStreamingMessageId] = useState<string | null>(null);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
+  // ASST-19 — the right-rail memory drawer (blueprint §8's collapsible "context inspector" family;
+  // memory is the first panel built into it). Owned here, not inside MemoryPanel itself, because
+  // the grid-column layout it drives (`.asst-workspace--with-memory`) lives on this component's
+  // own root element.
+  const [memoryOpen, setMemoryOpen] = useState(false);
 
   const stream = useAssistantStream();
   const stateRef = useRef(stream.state);
@@ -223,7 +229,7 @@ export function AssistantWorkspace({ initialThreads, initialActiveThreadId }: {
   }, [stream.state.status, streamingMessageId, activeThreadId]);
 
   return (
-    <div className="asst-workspace">
+    <div className={`asst-workspace${memoryOpen ? " asst-workspace--with-memory" : ""}`}>
       <ThreadRail
         threads={threads}
         activeThreadId={activeThreadId}
@@ -236,6 +242,17 @@ export function AssistantWorkspace({ initialThreads, initialActiveThreadId }: {
         onDelete={handleDelete}
       />
       <div className="asst-main">
+        <div className="asst-main__toolbar">
+          <button
+            type="button"
+            className="asst-memory-toggle"
+            aria-expanded={memoryOpen}
+            aria-controls="asst-memory-panel"
+            onClick={() => setMemoryOpen((v) => !v)}
+          >
+            Memory
+          </button>
+        </div>
         <ThreadView
           messages={messages}
           streamState={stream.state}
@@ -244,6 +261,7 @@ export function AssistantWorkspace({ initialThreads, initialActiveThreadId }: {
         />
         <Composer canSend={canSend} streaming={stream.state.status === "streaming"} onSend={handleSend} onStop={handleStop} />
       </div>
+      {memoryOpen && <MemoryPanel activeThreadId={activeThreadId} onClose={() => setMemoryOpen(false)} />}
       {toastMsg && <Toast message={toastMsg} />}
     </div>
   );

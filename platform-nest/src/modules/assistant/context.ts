@@ -1,8 +1,10 @@
 // ASST-06 — context assembly + compaction v1.
+// ASST-19 — user-memory injection, quarantined to CONFIRMED rows only (see below).
 //
-// Ticket: docs/superpowers/plans/2026-08-05-d14-and-assistant-tickets.md ("### ASST-06").
+// Ticket: docs/superpowers/plans/2026-08-05-d14-and-assistant-tickets.md ("### ASST-06", "### ASST-19").
 // Design: docs/blueprints/assistant-foundation.md §4.1 ("thread memory" — resuming an old session
-// is EXACT, not approximate) and §5 (streaming/transport).
+// is EXACT, not approximate) and §4.1's "four memories" (user memory is #2 of 4) and §5
+// (streaming/transport).
 //
 // ── WHY THIS BUILDS ONE PROMPT STRING, NOT A CHAT-MESSAGES ARRAY ─────────────────────────────────
 // ai-gateway-go's `/complete` and `/complete/stream` both take a single `{ prompt: string }` body
@@ -19,6 +21,17 @@
 // still shows every message (GET /threads/:id already pages through all of them) while a NEW
 // generation's prompt only carries the summary + the newest messages that fit the budget — never a
 // silently-truncated transcript.
+//
+// ── THE QUARANTINE (ASST-19 — THE INVARIANT THAT MATTERS MOST) ────────────────────────────────────
+// `assistant_memory` writes are PROPOSALS (blueprint §4.1): the assistant asks "remember this?",
+// and a row is recorded immediately with `confirmed_at IS NULL` — for audit and for the confirm
+// UI — but it is NOT yet trusted. `fetchConfirmedMemory` below is the ONLY place this file reads
+// `assistant_memory`, and its WHERE clause is the entire gate: `confirmed_at IS NOT NULL`. An
+// unconfirmed row must NEVER reach a model call — the same discipline
+// `ai-agents/src/memory/episodic.ts` applies to untrusted feedback (recorded, never fed as
+// signal). Do not add a second read path for this table that skips the predicate, and do not
+// relax it under test pressure — that is exactly the leak class this file exists to prevent (the
+// assistant would start treating unverified guesses as user facts).
 import type { PoolClient } from "pg";
 import { config } from "../../config";
 
@@ -31,6 +44,7 @@ const SYSTEM_PREAMBLE =
   "far (and the summary of anything older, if present) as context.";
 
 interface ThreadForContext {
+  ownerUserId: string;
   compactionSummary: string | null;
   compactionSummaryUptoSeq: number | null;
 }
@@ -60,6 +74,59 @@ function renderMessage(m: MessageForContext): string {
 
 function renderTranscript(messages: MessageForContext[]): string {
   return messages.map(renderMessage).join("\n");
+}
+
+// ── ASST-19: confirmed-only user memory ────────────────────────────────────────────────────────────
+
+interface MemoryForContext {
+  content: string;
+}
+
+/** Default cap on how much confirmed memory can occupy in the prompt — kept small and separate
+ *  from `contextCharBudget` (the recent-transcript budget) so a long memory list can never crowd
+ *  out the actual conversation. */
+const DEFAULT_MEMORY_CHAR_BUDGET = 2000;
+/** Row cap on the underlying query — belt-and-braces alongside the char budget below; a runaway
+ *  memory list should never turn this into an unbounded scan. */
+const MEMORY_ROW_LIMIT = 100;
+
+/**
+ * THE QUARANTINE GATE (see this file's header). Reads `assistant_memory` for exactly one owner,
+ * filtered to `confirmed_at IS NOT NULL` — an unconfirmed (proposed-but-not-yet-confirmed) row is
+ * invisible to this query, full stop. `scope` ('user' | 'company') is NOT filtered here: per
+ * ASST-02, `assistant_memory` access (including this read) is owner-only end to end with no
+ * broader company-visibility grant yet — `scope` currently only describes WHAT the fact is about
+ * (a personal preference vs. something about the company the user chose to have remembered), not
+ * WHO else can see it. Both scopes are therefore equally "this owner's confirmed memory" today;
+ * see assistant.controller.ts's header for the fuller rationale.
+ *
+ * Ordered pinned-first, then most-recently-confirmed — the same priority the confirm UI uses, so
+ * if the char budget below truncates the list, what survives is the same "most important first"
+ * ordering a human would expect.
+ */
+async function fetchConfirmedMemory(c: PoolClient, ownerUserId: string): Promise<MemoryForContext[]> {
+  const { rows } = await c.query<MemoryForContext>(
+    `SELECT content FROM assistant_memory
+       WHERE owner_user_id = $1 AND confirmed_at IS NOT NULL
+       ORDER BY pinned DESC, confirmed_at DESC
+       LIMIT $2`,
+    [ownerUserId, MEMORY_ROW_LIMIT],
+  );
+  return rows;
+}
+
+/** Render confirmed memory rows into a bulleted block, truncated to `charBudget`. Returns `null`
+ *  (never an empty string) when there is nothing to say, so callers can `if (block)` cleanly. */
+function renderMemory(rows: MemoryForContext[], charBudget: number): string | null {
+  const lines: string[] = [];
+  let used = 0;
+  for (const r of rows) {
+    const line = `- ${r.content}`;
+    if (used + line.length > charBudget) break;
+    lines.push(line);
+    used += line.length + 1;
+  }
+  return lines.length > 0 ? lines.join("\n") : null;
 }
 
 export interface SummarizeOptions {
@@ -122,7 +189,7 @@ export async function assembleContext(
   threadId: string,
   thread: ThreadForContext,
   excludeFromSeq: number,
-  opts?: SummarizeOptions & { charBudget?: number },
+  opts?: SummarizeOptions & { charBudget?: number; memoryCharBudget?: number },
 ): Promise<AssembledContext> {
   const budget = opts?.charBudget ?? config.assistant.contextCharBudget;
 
@@ -154,7 +221,14 @@ export async function assembleContext(
     compactionUpdate = { summary: newSummary, uptoSeq };
   }
 
+  // ASST-19: the quarantine gate — `fetchConfirmedMemory` reads ONLY `confirmed_at IS NOT NULL`
+  // rows for this thread's owner. A proposed-but-unconfirmed memory is invisible here by
+  // construction, never reaching this prompt.
+  const memoryRows = await fetchConfirmedMemory(c, thread.ownerUserId);
+  const memoryBlock = renderMemory(memoryRows, opts?.memoryCharBudget ?? DEFAULT_MEMORY_CHAR_BUDGET);
+
   const sections = [SYSTEM_PREAMBLE];
+  if (memoryBlock) sections.push(`Known facts and preferences about this user (confirmed):\n${memoryBlock}`);
   if (summary) sections.push(`Summary of the earlier conversation:\n${summary}`);
   const transcript = renderTranscript(kept);
   if (transcript) sections.push(transcript);

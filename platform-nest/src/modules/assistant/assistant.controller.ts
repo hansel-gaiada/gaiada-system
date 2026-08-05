@@ -75,6 +75,10 @@ async function lockAssistantThread(c: PoolClient, threadId: string): Promise<voi
 }
 
 const MAX_MESSAGE_CONTENT_LENGTH = 20_000;
+const MAX_MEMORY_CONTENT_LENGTH = 2_000;
+const MEMORY_SCOPES = new Set(["user", "company"]);
+const DEFAULT_MEMORY_LIST_LIMIT = 100;
+const MAX_MEMORY_LIST_LIMIT = 500;
 
 const THREAD_STATUSES = new Set(["active", "archived"]);
 const DEFAULT_LIST_LIMIT = 50;
@@ -137,6 +141,33 @@ const MESSAGE_SELECT = `
   SELECT id, seq, role, content, parts, provider, model, tokens, latency_ms AS "latencyMs",
          error_kind AS "errorKind", created_at AS "createdAt"
   FROM assistant_messages`;
+
+// ASST-19 — durable user memory (blueprint §4.1, memory #2 of 4). See this file's memory-section
+// header (below, right above the endpoints) for the propose/confirm/quarantine model.
+interface MemoryRow {
+  id: string;
+  ownerUserId: string;
+  scope: string;
+  content: string;
+  provenance: string;
+  trust: string;
+  pinned: boolean;
+  confirmedAt: string | null;
+  sourceThreadId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+const MEMORY_SELECT = `
+  SELECT id, owner_user_id AS "ownerUserId", scope, content, provenance, trust, pinned,
+         confirmed_at AS "confirmedAt", source_thread_id AS "sourceThreadId",
+         created_at AS "createdAt", updated_at AS "updatedAt"
+  FROM assistant_memory`;
+
+async function fetchMemory(c: PoolClient, id: string): Promise<MemoryRow | undefined> {
+  const r = await c.query<MemoryRow>(`${MEMORY_SELECT} WHERE id = $1`, [id]);
+  return r.rows[0];
+}
 
 @Controller("api")
 @UseGuards(AuthGuard, ModuleEnabledGuard("assistant"))
@@ -562,5 +593,178 @@ export class AssistantController {
       { modules: ["assistant"] },
     );
     return { ok: true, stopped: rowCount > 0 };
+  }
+
+  // ================================================================== MEMORY (ASST-19) ==========
+  // Durable user memory (blueprint §4.1, memory #2 of 4). `assistant_memory` is OWNER-ONLY end to
+  // end (resource_assistant_memory.yaml, ASST-02) with exactly FOUR Cerbos actions —
+  // `list`/`propose`/`confirm`/`delete` — and deliberately NO `update`/`edit`/`pin` action, so
+  // every mutating call below authorizes against one of those four names verbatim; an unlisted
+  // action name is a SILENT DENY (ASST-02's header), not a 500, so getting the name wrong here
+  // reads exactly like a broken owner check.
+  //
+  // ── PROPOSE vs CONFIRM ARE KEPT DISTINCT (this ticket's central design point) ────────────────────
+  //   - `POST .../memory` = PROPOSE: inserts a NEW row with `confirmed_at = NULL`,
+  //     `trust = 'untrusted'` (the column defaults from migration 0079). This HTTP path is always
+  //     `provenance = 'user'` — a human explicitly asking to remember something (via the panel's
+  //     "add memory" affordance, or answering the assistant's own "remember this?" prompt once
+  //     ASST-17 wires that surface — deferred, this ticket's dependency line names it explicitly).
+  //     A proposal is recorded for audit/the confirm UI and is otherwise COMPLETELY INERT: see
+  //     context.ts's `fetchConfirmedMemory` — it is invisible to every assembled prompt until
+  //     confirmed.
+  //   - `POST .../memory/:id/confirm` = CONFIRM: the ONLY way `confirmed_at` and `trust` ever
+  //     change. Idempotent on the confirmation timestamp itself (`COALESCE(confirmed_at, now())`
+  //     — re-confirming an already-confirmed row does not reset WHEN it was confirmed) but this is
+  //     ALSO the one remaining verb Cerbos gives an owner to mutate an EXISTING row's `content`/
+  //     `pinned` — there is no separate "update" action, so editing text or toggling pin on an
+  //     already-confirmed memory reuses `confirm` with the field(s) to change and no-op on the
+  //     confirmation state (the owner re-affirming/adjusting their own already-trusted memory is
+  //     exactly the same authority as confirming it the first time).
+  //
+  // `scope` ('user'|'company', 0079) is accepted and stored but NOT a visibility switch in v1 —
+  // per resource_assistant_memory.yaml's header, EVERY row stays owner-private regardless of
+  // `scope`; it only records what the fact is ABOUT (a personal preference vs. something about the
+  // company the user chose to have remembered), not who else may read it. A future shared-company-
+  // memory feature would need its own Cerbos rule and its own ticket, not a `scope` read here.
+  @Get(":tenantId/assistant/memory")
+  async listMemory(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Query("scope") scope?: string,
+    @Query("pinned") pinnedQ?: string,
+    @Query("confirmed") confirmedQ?: string,
+    @Query("limit") limitQ?: string,
+    @Query("offset") offsetQ?: string,
+  ) {
+    const ownerId = req.principal.userId;
+    if (!ownerId) throw new BadRequestException("an authenticated user is required");
+    if (scope !== undefined && !MEMORY_SCOPES.has(scope)) {
+      throw new BadRequestException(`scope must be one of ${[...MEMORY_SCOPES].join(",")}`);
+    }
+    // Self-scoped by construction (WHERE owner_user_id = the caller) — same non-widening pattern
+    // as listThreads's own "list" authorize() call above.
+    await authorize(req.principal, { kind: "assistant_memory", tenantId, ownerId }, "list");
+
+    const limit = clampInt(limitQ, DEFAULT_MEMORY_LIST_LIMIT, 1, MAX_MEMORY_LIST_LIMIT);
+    const offset = clampInt(offsetQ, 0, 0, Number.MAX_SAFE_INTEGER);
+    const pinnedFilter = pinnedQ === undefined ? null : pinnedQ === "true";
+    const confirmedFilter = confirmedQ === undefined ? null : confirmedQ === "true";
+
+    return withTenants(
+      [tenantId],
+      async (c) => {
+        const filterParams = [ownerId, scope ?? null, pinnedFilter, confirmedFilter];
+        const { rows } = await c.query<MemoryRow>(
+          `${MEMORY_SELECT}
+             WHERE owner_user_id = $1
+               AND ($2::text IS NULL OR scope = $2)
+               AND ($3::boolean IS NULL OR pinned = $3)
+               AND ($4::boolean IS NULL OR ($4 AND confirmed_at IS NOT NULL) OR (NOT $4 AND confirmed_at IS NULL))
+             ORDER BY pinned DESC, confirmed_at DESC NULLS FIRST, created_at DESC
+             LIMIT $5 OFFSET $6`,
+          [...filterParams, limit, offset],
+        );
+        const { rows: countRows } = await c.query<{ n: number }>(
+          `SELECT count(*)::int AS n FROM assistant_memory
+             WHERE owner_user_id = $1
+               AND ($2::text IS NULL OR scope = $2)
+               AND ($3::boolean IS NULL OR pinned = $3)
+               AND ($4::boolean IS NULL OR ($4 AND confirmed_at IS NOT NULL) OR (NOT $4 AND confirmed_at IS NULL))`,
+          filterParams,
+        );
+        return { items: rows, total: countRows[0]?.n ?? 0 };
+      },
+      { modules: ["assistant"] },
+    );
+  }
+
+  @Post(":tenantId/assistant/memory")
+  @HttpCode(201)
+  async proposeMemory(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Body() body: { content?: string; scope?: string; sourceThreadId?: string },
+  ) {
+    const ownerId = req.principal.userId;
+    if (!ownerId) throw new BadRequestException("an authenticated user is required");
+    await authorize(req.principal, { kind: "assistant_memory", tenantId, ownerId }, "propose");
+
+    const content = typeof body?.content === "string" ? body.content.trim() : "";
+    if (!content) throw new BadRequestException("content is required");
+    if (content.length > MAX_MEMORY_CONTENT_LENGTH) {
+      throw new BadRequestException(`content exceeds max length (${MAX_MEMORY_CONTENT_LENGTH})`);
+    }
+    const scope = body?.scope ?? "user";
+    if (!MEMORY_SCOPES.has(scope)) throw new BadRequestException(`scope must be one of ${[...MEMORY_SCOPES].join(",")}`);
+    const sourceThreadId = typeof body?.sourceThreadId === "string" && body.sourceThreadId ? body.sourceThreadId : null;
+
+    const id = newId();
+    await withTenants(
+      [tenantId],
+      (c) =>
+        c.query(
+          `INSERT INTO assistant_memory (id, tenant_id, owner_user_id, scope, content, provenance, source_thread_id, origin_site)
+           VALUES ($1, $2, $3, $4, $5, 'user', $6, $7)`,
+          [id, tenantId, ownerId, scope, content, sourceThreadId, config.originSite],
+        ),
+      { modules: ["assistant"] },
+    );
+    // `trust`/`confirmed_at` are left at their column defaults ('untrusted' / NULL, migration
+    // 0079) — this row is a PROPOSAL and is invisible to context.ts's quarantine gate until a
+    // separate `confirm` call.
+    return { id };
+  }
+
+  @Post(":tenantId/assistant/memory/:id/confirm")
+  @HttpCode(200)
+  async confirmMemory(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Param("id") id: string,
+    @Body() body: { content?: string; pinned?: boolean },
+  ) {
+    const memory = await withTenants([tenantId], (c) => fetchMemory(c, id), { modules: ["assistant"] });
+    if (!memory) throw new NotFoundException("memory not found");
+    await authorize(req.principal, { kind: "assistant_memory", id, tenantId, ownerId: memory.ownerUserId }, "confirm");
+
+    const sets: string[] = ["updated_at = now()", "confirmed_at = COALESCE(confirmed_at, now())", "trust = 'trusted'"];
+    const params: unknown[] = [id];
+    if (typeof body?.content === "string") {
+      const trimmed = body.content.trim();
+      if (!trimmed) throw new BadRequestException("content cannot be empty");
+      if (trimmed.length > MAX_MEMORY_CONTENT_LENGTH) {
+        throw new BadRequestException(`content exceeds max length (${MAX_MEMORY_CONTENT_LENGTH})`);
+      }
+      params.push(trimmed);
+      sets.push(`content = $${params.length}`);
+    }
+    if (typeof body?.pinned === "boolean") {
+      params.push(body.pinned);
+      sets.push(`pinned = $${params.length}`);
+    }
+
+    const res = await withTenants(
+      [tenantId],
+      (c) => c.query(`UPDATE assistant_memory SET ${sets.join(", ")} WHERE id = $1`, params),
+      { modules: ["assistant"] },
+    );
+    if (res.rowCount === 0) throw new NotFoundException("memory not found");
+    return { id };
+  }
+
+  @Delete(":tenantId/assistant/memory/:id")
+  @HttpCode(200)
+  async deleteMemory(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("id") id: string) {
+    const memory = await withTenants([tenantId], (c) => fetchMemory(c, id), { modules: ["assistant"] });
+    if (!memory) throw new NotFoundException("memory not found");
+    await authorize(req.principal, { kind: "assistant_memory", id, tenantId, ownerId: memory.ownerUserId }, "delete");
+
+    const res = await withTenants(
+      [tenantId],
+      (c) => c.query(`DELETE FROM assistant_memory WHERE id = $1`, [id]),
+      { modules: ["assistant"] },
+    );
+    if (res.rowCount === 0) throw new NotFoundException("memory not found");
+    return { ok: true };
   }
 }

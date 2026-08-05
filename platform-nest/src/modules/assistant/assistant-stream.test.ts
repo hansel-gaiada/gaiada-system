@@ -517,7 +517,7 @@ describe.skipIf(!TEST_URL)("Assistant send->stream engine (ASST-06)", () => {
 
     const assembled = await withTenants(
       [A],
-      (c) => assembleContext(c, threadId, { compactionSummary: null, compactionSummaryUptoSeq: null }, 7, {
+      (c) => assembleContext(c, threadId, { ownerUserId: owner, compactionSummary: null, compactionSummaryUptoSeq: null }, 7, {
         gatewayUrl: gateway.url, gatewayToken: "gw-token", charBudget: 80,
       }),
       { modules: ["assistant"] },

@@ -347,3 +347,66 @@ const ERROR_KIND_LABEL: Record<string, string> = {
 export function humanizeErrorKind(kind: string): string {
   return ERROR_KIND_LABEL[kind] ?? "Something went wrong.";
 }
+
+// ============================================================== ASST-19: memory panel ==============
+// Durable user memory (blueprint §4.1, memory #2 of 4) — owner-only end to end
+// (resource_assistant_memory.yaml), exactly mirroring platform-nest's
+// `modules/assistant/assistant.controller.ts` MemoryRow shape (see docs/FRONTEND-BFF-CONTRACT.md
+// §18's "Memory panel backend" subsection). `confirmedAt === null` is a PROPOSAL — inert on the
+// backend (never injected into an assembled prompt, context.ts's quarantine gate) and rendered
+// here as "pending confirmation", never as if it were already a trusted fact.
+
+export type AssistantMemoryScope = "user" | "company";
+
+export interface AssistantMemory {
+  id: string;
+  ownerUserId: string;
+  scope: AssistantMemoryScope;
+  content: string;
+  provenance: "user" | "assistant";
+  trust: "trusted" | "untrusted";
+  pinned: boolean;
+  confirmedAt: string | null;
+  sourceThreadId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface MemoryListResult { items: AssistantMemory[]; total: number }
+
+/** A memory row still awaiting confirmation — the panel's own "propose" affordance produces one of
+ *  these, and it stays inert (context.ts never reads it) until `confirm` is called. */
+export function isPendingMemory(m: Pick<AssistantMemory, "confirmedAt">): boolean {
+  return m.confirmedAt === null;
+}
+
+/** Split a loaded memory list into "pending your confirmation" and "confirmed", each already
+ *  ordered pinned-first-then-most-recent — the same grouping the backend's own `GET
+ *  .../memory?confirmed=` filter exists for, done client-side once the panel has the full list
+ *  loaded (mirrors `groupThreads`' client-side-grouping-over-one-page rationale above). */
+export interface GroupedMemory {
+  pending: AssistantMemory[];
+  confirmed: AssistantMemory[];
+}
+
+function byPinnedThenRecency(a: AssistantMemory, b: AssistantMemory): number {
+  if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
+  const av = a.confirmedAt ? Date.parse(a.confirmedAt) : Date.parse(a.createdAt);
+  const bv = b.confirmedAt ? Date.parse(b.confirmedAt) : Date.parse(b.createdAt);
+  return bv - av;
+}
+
+export function groupMemory(items: AssistantMemory[]): GroupedMemory {
+  const pending = items.filter(isPendingMemory).sort(byPinnedThenRecency);
+  const confirmed = items.filter((m) => !isPendingMemory(m)).sort(byPinnedThenRecency);
+  return { pending, confirmed };
+}
+
+/** Panel copy for the scope selector — NOT a visibility control (see ASST-19's contract-doc note:
+ *  `scope` records what the fact is ABOUT, not who else can read it; every row stays owner-private
+ *  regardless). Kept here, not inline in the component, so the "not a sharing switch" framing
+ *  can't drift between two copies of the same string. */
+export const MEMORY_SCOPE_LABEL: Record<AssistantMemoryScope, string> = {
+  user: "About you",
+  company: "About the company",
+};
