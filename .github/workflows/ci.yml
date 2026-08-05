@@ -22,23 +22,23 @@ name: ci
 # change). That is the biggest remaining saving, and it is also how a cross-component break gets
 # through — a change to a shared contract that only touches one folder still needs the other suites.
 # Left as a decision for whoever measures the minutes again.
-# ── ON-DEMAND ONLY (2026-08-04, owner decision) ───────────────────────────────────────────────────
-# The free Actions allowance is exhausted and the repo stays PRIVATE, so CI no longer runs itself.
-# `workflow_dispatch` means minutes are spent when someone asks for them and never otherwise — the
-# cheapest arrangement that keeps the pipeline intact rather than deleting it.
+# ── AUTOMATIC CI RESTORED (2026-08-05, MAIL-21) ───────────────────────────────────────────────────
+# The repo was made PUBLIC (2026-08-04), so Actions minutes are free and the billing wall that
+# forced on-demand-only CI (below, kept for history) no longer applies. Verified before flipping
+# this back on: ci.yml reads ZERO `secrets.*` anywhere in this file — a public repo's fork PRs
+# reaching `pull_request` therefore have nothing sensitive to exfiltrate, and GitHub's own
+# first-time-contributor approval gate (platform default on public, non-org repos; cannot be
+# loosened per-repo without an org) still stands between an unknown fork and a runner.
 #
-# THE COST OF THIS IS REAL AND IS NOT HIDDEN: a push to `main` is now UNVERIFIED by default. The
-# platform-nest suite is the one that matters most — it is the only place the DB-backed tests
-# (migrations, RLS, Cerbos, the portal isolation suite) ever run, and none of that is reproducible on a
-# dev box without Postgres. So:
+# Restored exactly as pre-cost-tuned: main-only push, docs-paths ignored, superseded runs
+# cancelled (see `concurrency` below) — nothing about the cost-control shape changed, only that
+# it now also runs itself instead of requiring `gh workflow run ci.yml` by hand.
 #
-#   * before merging anything non-trivial, run it:  gh workflow run ci.yml
-#   * locally, the closest equivalent is:           sh infra/scripts/test-all.sh
-#   * `paths-ignore` is kept below so that even a manual run skips docs-only refs.
-#
-# Restore automatic CI by uncommenting the `push:`/`pull_request:` blocks — they are left in place,
-# already cost-tuned (main only, docs ignored, superseded runs cancelled), so this is a one-line
-# revert the moment the allowance is back.
+# ── history: ON-DEMAND ONLY (2026-08-04, owner decision, repo was PRIVATE) ────────────────────────
+# The free Actions allowance was exhausted while the repo was private, so CI stopped running
+# itself and fell back to `workflow_dispatch` — minutes spent only when asked for. That constraint
+# is gone now that the repo is public; the workflow_dispatch entry point stays for manual runs
+# (e.g. pre-merge checks on a branch that doesn't touch `main` yet).
 on:
   workflow_dispatch:
     inputs:
@@ -46,21 +46,21 @@ on:
         description: "Why this run (shows in the run list — e.g. 'pre-merge check for CP-21')"
         required: false
         type: string
-  # push:
-  #   branches: [main]
-  #   paths-ignore:
-  #     - "**/*.md"
-  #     - "**/*.pdf"
-  #     - "docs/**"
-  #     - "legal/**"
-  #     - "design/**"
-  # pull_request:
-  #   paths-ignore:
-  #     - "**/*.md"
-  #     - "**/*.pdf"
-  #     - "docs/**"
-  #     - "legal/**"
-  #     - "design/**"
+  push:
+    branches: [main]
+    paths-ignore:
+      - "**/*.md"
+      - "**/*.pdf"
+      - "docs/**"
+      - "legal/**"
+      - "design/**"
+  pull_request:
+    paths-ignore:
+      - "**/*.md"
+      - "**/*.pdf"
+      - "docs/**"
+      - "legal/**"
+      - "design/**"
 
 # Supersede in-flight runs of the same ref. NOT applied to deploy.yml, which sets
 # `cancel-in-progress: false` on purpose — a half-applied migration is worse than a queued deploy.
@@ -148,6 +148,24 @@ jobs:
       # 0051). Pure static analysis, no DB needed, so it fails at authoring/PR time rather than
       # only showing up as bad data after a real deploy. See scripts/lint-migration-rls.mjs.
       - run: npm run lint:migration-rls
+      # MAIL-13 / design A13 — the inbound adversarial corpus as a NAMED, FAIL-FAST gate.
+      #
+      # A13 makes the committed corpus (platform-nest/src/mail/__fixtures__/inbound/) a permanent
+      # regression suite, not dev scaffolding: "a live provider will never conveniently send forged
+      # senders, replayed message-ids, oversized bodies, or hostile HTML on demand". `npm test` below
+      # already runs it as part of the whole suite, so this step is deliberately redundant — it exists
+      # so a corpus regression is legible as its own red step, fails BEFORE the 20-minute full suite,
+      # and survives any future narrowing of `npm test`. Staging APPENDS real captured Brevo samples
+      # here rather than replacing anything.
+      - name: Mail inbound adversarial corpus (A13 — permanent regression gate)
+        run: npm run test:mail-corpus
+        env:
+          DATABASE_URL_TEST: postgres://postgres:postgres@localhost:5432/postgres
+          CERBOS_URL: http://localhost:3592
+          # Distinct prefix so this step's per-file databases cannot collide with the full-suite step
+          # that follows (src/testing/setup.ts derives the DB name from the test path, so two runs
+          # against one Postgres would otherwise drop each other's schema mid-run).
+          TEST_DB_PREFIX: mailcorpus
       - run: npm test
         env:
           DATABASE_URL_TEST: postgres://postgres:postgres@localhost:5432/postgres
