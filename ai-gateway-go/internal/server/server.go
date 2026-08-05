@@ -793,6 +793,7 @@ func NewServer(cfg config.Config, chains Chains, b *budget.Budget, classifier *d
 	mux.HandleFunc("POST /complete/stream", func(w http.ResponseWriter, r *http.Request) {
 		started := time.Now()
 		if !authorized(r, cfg.GatewayToken) {
+			emit(r.Context(), audit.EgressAudit{TS: started.UnixMilli(), Capability: "llm", OK: false, Blocked: "auth"})
 			writeErr(w, 401, "unauthorized")
 			return
 		}
@@ -811,21 +812,26 @@ func NewServer(cfg config.Config, chains Chains, b *budget.Budget, classifier *d
 		}
 		_ = json.NewDecoder(r.Body).Decode(&body)
 		if strings.TrimSpace(body.Prompt) == "" {
+			// Mirrors /complete: an invalid body never reaches egress, so no audit row here either
+			// (same as /complete's own empty-prompt 400).
 			writeErr(w, 400, "prompt required")
 			return
 		}
 		ok, scope := b.Take(tenantOf(r), started)
 		if !ok {
+			emit(r.Context(), audit.EgressAudit{TS: started.UnixMilli(), Capability: "llm", OK: false, Blocked: "budget"})
 			writeErr(w, 429, scope+" daily budget exceeded — degraded until tomorrow")
 			return
 		}
 		result, err := dlp.DLP(body.Prompt)
 		if err != nil {
+			emit(r.Context(), audit.EgressAudit{TS: started.UnixMilli(), Capability: "llm", OK: false, Blocked: "dlp", LatencyMs: time.Since(started).Milliseconds()})
 			writeErr(w, 503, err.Error())
 			return
 		}
 		if c := activeClassifier(); c != nil {
 			if allowed, cerr := c.Classify(r.Context(), result.Clean); cerr != nil || !allowed {
+				emit(r.Context(), audit.EgressAudit{TS: started.UnixMilli(), Capability: "llm", OK: false, Blocked: "dlp", Redactions: len(result.Redactions), LatencyMs: time.Since(started).Milliseconds()})
 				writeErr(w, 503, "DLP classifier blocked this request")
 				return
 			}
@@ -870,14 +876,18 @@ func NewServer(cfg config.Config, chains Chains, b *budget.Budget, classifier *d
 		// dlp.DLP earlier in this handler covers the PROMPT only and is not a substitute for
 		// either.
 		//
-		// ASST-11: emit is ALSO the one and only place `event: meta` can be written for this
+		// ASST-11: emitToken is ALSO the one and only place `event: meta` can be written for this
 		// response. Writing it here — inside the scrubber's sink, guarded by metaEmitted, BEFORE
 		// the token that triggered the release — is what makes the timing rule (Ruling 2) real
 		// rather than aspirational: meta names whichever provider is "current" at the moment bytes
 		// actually reach the wire, which is NEVER the provider from an attempt whose buffered output
-		// was Reset() (discarded) on failover, because Reset() means emit() was never called for
+		// was Reset() (discarded) on failover, because Reset() means emitToken() was never called for
 		// that attempt at all. See TestCompleteStreamMetaNamesFailoverProviderNotTheOneThatDiedInsideHoldWindow.
-		emit := func(token string) {
+		//
+		// Named emitToken (not emit) so it never shadows the outer per-route audit `emit` closure
+		// (ASST-13) — this handler needs both live at once: emitToken writes response bytes to the
+		// wire, the outer emit writes the ONE terminal egress-audit row for the whole request.
+		emitToken := func(token string) {
 			if !metaEmitted {
 				metaEmitted = true
 				writeSSEMeta(w, flusher, canFlush, currentProvider, currentModel)
@@ -920,7 +930,46 @@ func NewServer(cfg config.Config, chains Chains, b *budget.Budget, classifier *d
 		//
 		// midStreamErrorHandled tracks whether this handler already wrote the SSE `error` event
 		// itself, so the generic err != nil branch below doesn't write a second one.
-		scrubber := dlp.NewStreamScrubber(emit)
+		scrubber := dlp.NewStreamScrubber(emitToken)
+
+		// ASST-13: exactly ONE terminal egress-audit row for this stream, covering every outcome
+		// from here down — clean completion, mid-stream error, an explicit response-side DLP
+		// failure, or an abandoned/disconnected connection. Every early refusal ABOVE (auth,
+		// budget, prompt-side DLP, the classifier) already wrote its own row and returned before
+		// reaching this point, so this defer never double-counts them.
+		//
+		// A defer — not an explicit call at each return site — is what makes "a client disconnect
+		// still writes exactly one row" true: a disconnect mid-generation cancels streamCtx (it is
+		// derived from r.Context()), which unwinds this handler through the SAME err != nil return
+		// below as any other provider failure, and a defer fires on every return path out of this
+		// function, deliberate or not, with no separate code path to keep in sync.
+		//
+		// auditProvider/auditOK/auditBlocked are mutated in place as the streaming logic below
+		// runs; the closure reads their final values at the moment the handler actually returns.
+		auditOK := false
+		auditBlocked := ""
+		var auditProvider *string
+		defer func() {
+			// Redactions/ForcedBoundaries are read live here, not snapshotted earlier: by the time
+			// this fires, every Write/Close/Reset on scrubber for the WINNING attempt has already
+			// happened, so these are the final counts for the response actually sent (Reset()
+			// zeroes redactions for a discarded failed-over attempt, which is correct — those bytes
+			// never reached the client). Redactions sums prompt-side (result.Redactions, scrubbed
+			// once at the top of this handler) and response-side (scrubber) counts, matching the
+			// non-streaming routes' single "how much PII did this request touch" field while still
+			// surfacing the response-side counters ASST-04 exported for exactly this purpose.
+			emit(r.Context(), audit.EgressAudit{
+				TS:               started.UnixMilli(),
+				Capability:       "llm",
+				Provider:         auditProvider,
+				OK:               auditOK,
+				Blocked:          auditBlocked,
+				Redactions:       len(result.Redactions) + scrubber.Redactions(),
+				ForcedBoundaries: scrubber.ForcedBoundaries(),
+				LatencyMs:        time.Since(started).Milliseconds(),
+			})
+		}()
+
 		onToken := func(token string) { scrubber.Write(token) }
 		streamedAttempt := false
 		// ASST-15: RunWithHint is a PURE REORDERING of chain.Run's snapshot (see chain.go's doc
@@ -929,7 +978,7 @@ func NewServer(cfg config.Config, chains Chains, b *budget.Budget, classifier *d
 		// other provider in this loop is, never bypassed. Everything below (currentProvider/
 		// currentModel bookkeeping, the meta/usage/session capture, the hold-window discard) is
 		// UNCHANGED from before this ticket — only which provider is tried in which order can differ.
-		text, _, _, err := chain.RunWithHint(chains.LLM, streamCtx, body.Provider, func(p providers.Provider) (string, error) {
+		text, provider, taxonomy, err := chain.RunWithHint(chains.LLM, streamCtx, body.Provider, func(p providers.Provider) (string, error) {
 			// ASST-11: recorded BEFORE the attempt runs, so if emit() fires during (or at the final
 			// Close() flush after) THIS attempt, it reports THIS provider — see the emit closure's
 			// comment for why that is always the provider actually releasing bytes, never a prior
@@ -971,15 +1020,36 @@ func NewServer(cfg config.Config, chains Chains, b *budget.Budget, classifier *d
 			return p.Complete(streamCtx, result.Clean)
 		})
 		if err != nil {
+			// ASST-13: taxonomy is chain's classification of the SAME error that just made this
+			// stream fail — timeout/rate_limit/provider_error — recorded for the audit row exactly
+			// like /complete's own provider-error branch does.
+			auditBlocked = taxonomy
+			if streamed {
+				// Bytes from THIS attempt already reached the client (see the `streamed` doc
+				// comment above) — the audit must name the provider that actually served them.
+				// `provider` from RunWithHint is "" here (a failed attempt never reports a name —
+				// see runOrdered's final return), so use currentProvider instead: recorded at the
+				// top of this same attempt, it is exactly the provider whose output this response
+				// carries, never the requested-but-dead one. Naming the dead provider here would be
+				// the misleading row the ticket calls out.
+				p := currentProvider
+				auditProvider = &p
+			}
 			if !midStreamErrorHandled {
 				writeSSEError(w, flusher, canFlush, err.Error())
 			}
 			return
 		}
+		// The provider that actually committed output for this response — recorded now so every
+		// return below (including a response-side DLP failure closing the stream) still attributes
+		// the audit row to the real server, not the requested hint.
+		servedBy := provider
+		auditProvider = &servedBy
 		// Exactly one flush of the held tail on the success path (no-op if the winning provider
 		// was non-streaming, or if the mid-stream branch above already closed). Skipping it would
 		// truncate every streamed response by up to dlp.MaxDetectableSpan bytes.
 		if cerr := scrubber.Close(); cerr != nil {
+			auditBlocked = "dlp"
 			writeSSEError(w, flusher, canFlush, cerr.Error())
 			return
 		}
@@ -989,10 +1059,11 @@ func NewServer(cfg config.Config, chains Chains, b *budget.Budget, classifier *d
 			// the streamed path. This sink was equally unscrubbed before ASST-04.
 			clean, derr := dlp.DLP(text)
 			if derr != nil {
+				auditBlocked = "dlp"
 				writeSSEError(w, flusher, canFlush, derr.Error())
 				return
 			}
-			emit(clean.Clean)
+			emitToken(clean.Clean)
 		}
 		// ASST-11: usage is TERMINAL — written before `done`, and ONLY when a provider actually
 		// reported real counts (usage is nil otherwise: never zero-filled, never estimated). This
@@ -1012,6 +1083,9 @@ func NewServer(cfg config.Config, chains Chains, b *budget.Budget, classifier *d
 		// mean "the answer is complete" and its absence (stream just closes) to mean an abnormal
 		// drop, never ambiguity between the two.
 		writeSSEDone(w, flusher, canFlush)
+		// ASST-13: reached ONLY here — every error/DLP-failure branch above already returned — so
+		// this is the one place the audit row for this request is allowed to say OK.
+		auditOK = true
 	})
 
 	return mux

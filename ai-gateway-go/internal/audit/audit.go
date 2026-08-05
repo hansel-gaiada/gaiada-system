@@ -21,7 +21,15 @@ type EgressAudit struct {
 	// see chain.overallTaxonomy.
 	Blocked    string `json:"blocked,omitempty"`
 	Redactions int    `json:"redactions"`
-	LatencyMs  int64  `json:"latencyMs"`
+	// ForcedBoundaries (ASST-13) is dlp.StreamScrubber.ForcedBoundaries() — a count of
+	// cap-triggered response-side flushes that skipped the split-transparency check (see
+	// internal/dlp/stream.go). Zero on every non-streaming route (/complete, /media, /embed
+	// never construct a StreamScrubber) and omitted from their JSON, so those rows stay
+	// byte-identical to before this field existed. Non-zero only means /complete/stream hit
+	// its buffer cap under adversarial/pathological input — see the dlp package comment for
+	// the exact cost.
+	ForcedBoundaries int   `json:"forcedBoundaries,omitempty"`
+	LatencyMs        int64 `json:"latencyMs"`
 }
 
 func WriteAudit(path string, e EgressAudit) error {
