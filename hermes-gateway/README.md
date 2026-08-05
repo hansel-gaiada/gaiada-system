@@ -13,6 +13,43 @@ A tiny, zero-dependency HTTP shim that makes the **local Hermes agent** the AI b
 | `POST /complete` | `{ "prompt": "…" }` | `{ "text": "…" }` |
 | `POST /media` | `{ "base64": "…", "mime": "image/png" }` | `{ "text": "…" }` |
 | `GET /health` | — | `{ ok, brain, model, provider }` |
+| `POST /complete/stream` | `{ "prompt": "…", "providerSession"?: "…" }` | SSE, grammar v2 (below) |
+
+`/complete` and `/media` are unchanged by `/complete/stream` (ASST-14) — different code path
+entirely (`spawn` + an incremental parser in `stream-parser.mjs`, vs the existing buffered
+`execFile` + whole-buffer `extractChatReply`).
+
+### `/complete/stream` (ASST-14)
+
+Streams a `hermes chat` turn as Server-Sent Events, speaking the platform's grammar v2
+(ASST-10/11): every `data:` line is exactly one line of JSON.
+
+- Default (unnamed) events: `data: "<token text>"` — box decoration (`│`/`┃`/`╭`/`╰`, ANSI escapes,
+  the "Query:"/"Session:" preamble/footer) is stripped incrementally as it streams, never leaked.
+- `event: meta` — `data: {"provider":"hermes","model":"…","providerSession"?:"…"}`. Emitted once,
+  immediately before `event: done`. **Deliberately terminal, not pre-first-token** (unlike
+  `ai-gateway-go`'s own `meta`): the session id is only known once Hermes' footer has been parsed,
+  so there is nothing truthful to announce earlier. See the comment above `handleCompleteStream`
+  in `server.mjs`.
+- `event: error` — `data: {"error":"…"}`. Emitted on a spawn failure, a nonzero Hermes exit, a
+  timeout (see below), or a clean exit whose reply box never closed (truncated output). Never
+  followed by `done`.
+- `event: done` — `data: {}`. The only clean-completion terminal.
+
+**Session continuity:** pass back a turn's `meta.providerSession` as `providerSession` on the next
+call to continue the same Hermes session (`--resume <id>` under the hood) instead of starting a
+fresh one.
+
+**Approvals stay ON here too** — no `--yolo`. An unapproved tool hang is caught by
+`HERMES_STREAM_TIMEOUT_MS` (defaults to `HERMES_TIMEOUT_MS`) and surfaced as a typed
+`event: error`, never an open-ended hang.
+
+Tests: `npm test` (Node's built-in test runner, no new dependencies) — `test/parser.test.mjs`
+unit-tests the incremental parser against constructed transcript fixtures;
+`test/server.test.mjs` drives the real server as a subprocess against
+`test/fixtures/fake-hermes.mjs`, a fake Hermes binary (no live Hermes install was available on the
+dev machine that wrote this — **live-Hermes streaming behaviour is UNVERIFIED**; verify against a
+real `hermes` before relying on this in production).
 
 Both go out with an optional `Authorization: Bearer <GATEWAY_TOKEN>`.
 
@@ -46,6 +83,7 @@ Requires: Node 18+, `hermes` on PATH, ollama serving the configured model.
 | `HERMES_MODEL` | `gemma-mm` | ollama model Hermes uses. `ornith` is faster/text-only. |
 | `HERMES_PROVIDER` | `ollama` | |
 | `HERMES_TIMEOUT_MS` | `240000` | Per text request. |
+| `HERMES_STREAM_TIMEOUT_MS` | `HERMES_TIMEOUT_MS` | `/complete/stream` only; also what turns a hung tool-approval prompt into a typed `event: error`. |
 | `HERMES_MEDIA_TIMEOUT_MS` | `600000` | Vision is slow on the Arc iGPU (~4–5 min/image). |
 | `HERMES_CWD` | `./work` | Isolated agent working dir (keeps tool use off the repo). |
 | `HERMES_EXTRA_ARGS` | *(empty)* | **Approvals stay ON by default** — a headless run can't auto-execute tools. Set `--yolo` only if you knowingly want autonomous tool use (your risk). |

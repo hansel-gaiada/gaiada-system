@@ -5,6 +5,7 @@
   "type": "module",
   "description": "AI Gateway shim that uses the local Hermes agent as the wa-chat-bot's brain (trial).",
   "scripts": {
-    "start": "node server.mjs"
+    "start": "node server.mjs",
+    "test": "node --test test/parser.test.mjs test/server.test.mjs"
   }
 }
