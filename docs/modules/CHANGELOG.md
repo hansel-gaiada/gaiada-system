@@ -1717,6 +1717,40 @@ Verified: 939 unit tests pass, `tsc` clean, `next build` green. Not driven in a 
 - **Next:** deploy to a real host; tune SLOs on prod traffic.
 
 ## infra
+### [0.8.1] — 2026-08-06 · PROTOTYPED (the .env has two consumers and they disagree)
+
+`alpha-01.018.0045a` built and signed all nine images, then LOST the deploy at the backup gate and
+rolled a good release back. Cause: the box's `.env` had
+
+    MAIL_STREAM_NOTIFY_FROM=Gaiada Dev <no-reply@notify.gaiada.invalid>
+
+added by hand during MAIL-09 and never mirrored into `.env.example`. `docker compose` parses that
+file ITSELF, so the value is a fine literal and the whole stack ran on it for hours. `deploy.yml`'s
+backup step SOURCES the same file in bash, where `<addr>` is a redirection — so it is a syntax error
+in exactly one of the two consumers. The log said only:
+
+    ./infra/compose/.env: line 97: syntax error near unexpected token `newline'
+
+no variable name, no mention of which consumer, and no reason compose had been happy.
+
+Three fixes, in the order they matter:
+
+1. **`deploy.yml` gains a `bash -n` precheck on the box's `.env`**, before backup/pull/migrate/
+   rollback, naming the offending line with the VALUE REDACTED (bash echoes the line verbatim, and
+   that line is by definition config). A confusing mid-deploy rollback becomes an immediate stop that
+   states the rule: quote anything containing a space or any of `< > | & ; ( ) $ \``.
+2. **`.env.example` gains the `MAIL_STREAM_*` / `MAIL_REPLY_DOMAIN` trio, quoted, with the
+   two-consumers warning inline.** Their absence is the actual root cause — a variable that only ever
+   exists on the box gets written in whatever form happens to work for the one parser its author
+   tested.
+3. **`KC_SMTP_FROM_DISPLAY_NAME="Gaiada Auth (dev)"` is now quoted** in `.env.example` — the same
+   latent landmine (space + parens), already committed, waiting for the next `.env` derived from it.
+
+The gate behaved correctly throughout: because the backup failed, migrations never ran, so the
+rollback left NO schema/code split — the live DB stayed at `0079` while `0080`/`0081` waited. That is
+the ordering working as designed, and worth stating because the rollback warning
+("Schema was NOT reverted — check migrations") reads as though it might not have.
+
 ### [0.7.4] — 2026-08-03 · PROTOTYPED (one secret under two names; n8n squatting the ERP root)
 - **The platform read the bot's admin token from `${BOT_ADMIN_TOKEN}` while the bot read
   `${ADMIN_TOKEN}`** — one shared secret, two `.env` names. A deployment that set only `ADMIN_TOKEN`

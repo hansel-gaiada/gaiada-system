@@ -174,6 +174,30 @@ jobs:
           echo '${{ secrets.GITHUB_TOKEN }}' \
             | ssh vps "docker login ghcr.io -u '${{ github.actor }}' --password-stdin"
 
+      # ⚠ The box's .env is consumed TWO WAYS, and the two grammars disagree. `docker compose` parses
+      # it itself, so `NAME=Gaiada Dev <a@b>` is a perfectly good literal and the stack runs. The
+      # backup gate below SOURCES the same file in bash, where `<a@b>` is a redirection — so an
+      # unquoted value with a space or `< > | & ; ( ) $ \`` is a syntax error there and nowhere else.
+      #
+      # On 2026-08-06 a hand-added MAIL_STREAM_*_FROM pair (never mirrored into .env.example) did
+      # exactly this: it killed the backup step of an otherwise-green release, which tripped the
+      # rollback and reverted a good deploy. The only clue in the log was
+      #     ./infra/compose/.env: line 97: syntax error near unexpected token `newline'
+      # with no statement of which variable, which consumer, or why compose had been happy with it.
+      #
+      # Checking it here turns that into an immediate, self-explaining stop BEFORE anything is
+      # backed up, pulled, migrated or rolled back. Values are redacted from the output — bash prints
+      # the offending line verbatim, and that line is by definition a config value.
+      - name: Validate the box's .env is shell-sourceable
+        run: |
+          set -uo pipefail
+          if ! ssh vps "bash -n '${DEPLOY_DIR}/infra/compose/.env'" 2>/tmp/envcheck.err; then
+            echo "::error::${DEPLOY_DIR}/infra/compose/.env cannot be sourced by bash, which the backup gate and migration steps both require. Quote any value containing a space or any of < > | & ; ( ) \$ \` — docker compose accepts it unquoted, bash does not."
+            sed -E 's/=.*/=<value redacted>/' /tmp/envcheck.err || true
+            exit 1
+          fi
+          echo "OK: the box's .env can be sourced by both consumers."
+
       # PG_HOST is read from the box's own .env so backup.sh knows whether the core cluster is a
       # container to exec into or a host cluster to dump directly.
       - name: Backup databases (gate for migrations)
