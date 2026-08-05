@@ -1505,13 +1505,19 @@ with other resources' admin-bypass rules. Do not add one; see the policy file's 
   events are Phase 3 — this ticket's relay never emits them.
 - **⬜ PENDING:** `/assistant` UI (`platform-ui`) + `lib/assistant.ts` (ASST-07). Backend is
   UI-ready for all eight endpoints above.
-- **DEVOPS — SSE-BEHIND-A-PROXY (not yet applied, ASST-09's job):** nginx buffers SSE by default;
-  the client portal's own stream (`core/portal-stream.controller.ts`) needed a hand-applied
-  `proxy_buffering off` / `X-Accel-Buffering: no` vhost block before it worked in production. THIS
-  route (`GET .../threads/:id/stream`) needs the identical treatment — the response already sends
-  `X-Accel-Buffering: no` itself, but the vhost-level `proxy_buffering off` block is still a
-  separate, deploy-side step (belt-and-braces, per the portal's own precedent) — or it will work
-  in local dev and look silently dead (buffered until close) behind the real proxy.
+- **DEVOPS — SSE-BEHIND-A-PROXY (ASST-09, config written 2026-08-05, NOT YET applied to the live
+  box):** nginx buffers SSE by default; the client portal's own stream
+  (`core/portal-stream.controller.ts`) needed a hand-applied `proxy_buffering off` /
+  `X-Accel-Buffering: no` vhost block before it worked in production. THIS route (the
+  browser-facing platform-ui proxy at `GET /api/assistant/threads/:id/stream` — platform-nest's
+  own `GET .../threads/:id/stream` is called server-side over `PLATFORM_URL` and never crosses
+  the public vhost, so it needs no nginx change) now has the identical treatment committed in
+  `infra/nginx/erp.gaiada.online.conf` (`nginx -t` verified). The response already sends
+  `X-Accel-Buffering: no` itself, so the vhost-level `proxy_buffering off` block is
+  belt-and-braces, per the portal's own precedent — but nginx config is never synced by CI, so
+  this is still a **separate, manual apply-on-the-box step** before it takes effect in prod. See
+  `infra/runbooks/deploy-vps.md`'s "nginx SSE: assistant stream (ASST-09)" section for the exact
+  block, the apply steps, and the `curl -N` verification that streaming is genuinely incremental.
 - `ModuleContract.mcpTools` and `rollupProviders` are deliberately **empty** in this ticket — the
   tool-broker surface is Phase 3 (unregistered on purpose, not a placeholder omission) and no
   metric surface is specified yet. See `modules/assistant/index.ts`'s header comment.

@@ -198,6 +198,99 @@ authorization-logic bug in the new code, not a stale-policy problem.
   # expect "matchedPolicy":"resource.assistant_thread.vdefault" — its absence means the kind never loaded.
   ```
 
+## nginx SSE: assistant stream (ASST-09, 2026-08-05)
+
+The assistant's reply stream is Server-Sent Events, and nginx buffers proxied responses by
+default — a client behind it receives nothing until the response completes, so a streaming
+assistant renders as a frozen page. The client portal's own SSE stream
+(`core/portal-stream.controller.ts`) hit exactly this and needed a hand-applied
+`proxy_buffering off` vhost block before it worked in production (see
+`../../docs/plans/2026-08-04-client-portal-deployment.md`). The assistant needs the identical
+treatment.
+
+**Only one hop crosses the public vhost.** Two SSE-shaped paths exist, but only one is reachable
+through nginx:
+
+1. `GET /api/assistant/threads/:id/stream` — **platform-ui's own proxy** (browser-facing; this is
+   the one the browser fetches, because a bearer token can never reach client JS —
+   `platform-ui/src/app/api/assistant/threads/[id]/stream/route.ts`). This is the path nginx must
+   treat specially.
+2. `GET /api/:tenantId/assistant/threads/:id/stream` — **platform-nest's** route
+   (`assistant.controller.ts`). Route (1)'s handler calls this one itself, server-side, over
+   `PLATFORM_URL` (in-cluster `http://platform:3004`), **never through the public vhost.** Node's
+   own `fetch`/`ReadableStream` plumbing has no buffering proxy in front of it there, so this
+   second hop needs no nginx change at all — don't add a block for it, there is nothing for it to
+   attach to.
+
+**The block (already in the repo, `infra/nginx/erp.gaiada.online.conf`, inserted right before
+`location /`):**
+
+```nginx
+location ~ ^/api/assistant/threads/[^/]+/stream$ {
+    proxy_pass http://127.0.0.1:3005;
+    proxy_http_version 1.1;
+    proxy_set_header Host              $host;
+    proxy_set_header X-Real-IP         $remote_addr;
+    proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-Host  $host;
+    proxy_set_header Connection        "";
+    proxy_buffering off;
+    proxy_cache off;
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
+    gzip off;
+}
+```
+
+Same shape as CP-5's `location = /api/portal/stream` block just above it in that file, on
+purpose — `docs/FRONTEND-BFF-CONTRACT.md`'s SSE-BEHIND-A-PROXY note says to reuse it rather than
+invent a variant. One deliberate difference: it is a **regex** location (`~`), not an exact-path
+one, because the assistant route carries a thread id in the URL — an exact match can't express
+that.
+
+1. **Apply on the box** (this repo change does not deploy itself — nginx config is never synced
+   by CI, same as the portal block before it):
+   ```bash
+   ssh gda-aicenter
+   sudo cp /etc/nginx/conf.d/erp.gaiada.online.conf \
+           /etc/nginx/conf.d/erp.gaiada.online.conf.bak-$(date -u +%Y%m%dT%H%M%SZ)
+   sudo $EDITOR /etc/nginx/conf.d/erp.gaiada.online.conf   # paste the block above, before `location /`
+   sudo nginx -t && sudo systemctl reload nginx
+   ```
+2. **Verify streaming is genuinely incremental, not one buffered flush** — open a real thread in
+   the UI first so a `messageId` exists, or drive the route directly with a valid session/bearer
+   and `messageId`:
+   ```bash
+   curl -N -s --max-time 15 \
+     -H "authorization: Bearer $SESSION_OR_SERVICE_TOKEN" \
+     "https://erp.gaiada.online/api/assistant/threads/$THREAD_ID/stream?messageId=$MESSAGE_ID"
+   ```
+   Expect `data:` frames to print one at a time, paced by the model's own token cadence — the
+   first should arrive within a second or two, not after the full 15s timeout. If the terminal
+   sits silent and then dumps every token at once right before `curl` exits, nginx is still
+   buffering: re-check the block landed before `location /` (location order matters — nginx
+   evaluates this regex location after all plain-prefix locations, so a `location /` defined
+   *before* it would still lose to it, but a stray copy-paste error putting the new block
+   *outside* the `server {}` block would not) and that the reload actually picked it up (`nginx
+   -T | grep -A3 'assistant/threads'`).
+3. **Cerbos.** This release also ships two NEW policy files,
+   `resource_assistant_thread.yaml` and `resource_assistant_memory.yaml` (ASST-02). See "Cerbos:
+   adding a NEW policy file" above — **prod needs no extra step** (the existing `deploy.yml`
+   "Reload Cerbos policies" step restarts Cerbos unconditionally on every deploy, which is
+   sufficient for a brand-new file). This is called out here only so nobody mistakes a Cerbos
+   403 on the assistant surface for an nginx problem while debugging this ticket, or vice versa —
+   they are independent failure modes that happen to ship in the same release. For **local dev**,
+   the new policy files need the local-only step in that section
+   (`docker restart gaiada-test-cerbos`, not `gaiada-cerbos-1`) before the assistant's Cerbos
+   checks will resolve at all.
+
+**Rollback:** restore the timestamped `.bak` copy, `nginx -t && systemctl reload nginx`. The SSE
+block is additive-only (a new `location` block) and touches nothing else in the vhost, so
+rollback cannot regress `/n8n/`, `/idp/`, the portal stream, or the UI root — verify with a plain
+`curl -I https://erp.gaiada.online/` (expect 200) after any nginx change here regardless of
+direction.
+
 ## Security notes
 
 - All service tokens are distinct random values; the only exposed port is localhost-bound.

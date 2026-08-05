@@ -269,6 +269,13 @@ services:
       # service. All fail-soft: an unset URL just reports "not configured" in the console.
       GATEWAY_URL: http://ai-gateway:3002
       GATEWAY_TOKEN: ${GATEWAY_TOKEN:-}
+      # ASST-06 — assistant-specific tunables (see platform-nest/.env.example for the full
+      # rationale). Both were read by config.ts and documented there already but had NO
+      # passthrough row here, so setting either in infra/compose/.env would have had ZERO
+      # effect on the container — the exact class of bug the INTEGRATION_TOKEN_KEY /
+      # MEETING_VIDEO_MAX_BYTES comments above already caught twice on this box.
+      ASSISTANT_STREAM_IDLE_TIMEOUT_MS: ${ASSISTANT_STREAM_IDLE_TIMEOUT_MS:-60000}
+      ASSISTANT_CONTEXT_CHAR_BUDGET: ${ASSISTANT_CONTEXT_CHAR_BUDGET:-12000}
       BOT_URL: http://bot:3001
       # Same shared secret the bot service reads (see its ADMIN_TOKEN below). The two read
       # DIFFERENT .env names, so a deployment that sets only ADMIN_TOKEN left this empty and
