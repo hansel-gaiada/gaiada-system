@@ -700,6 +700,376 @@ production credential (D-D: dev-stage providers — Ollama/echo).
 
 ---
 
+# SET C — Remainder program (owner-approved 2026-08-05): two rulings + 24 tickets
+
+> Baseline: everything above landed at `e2d65f8`, CI green (platform-nest 3152 / platform-ui 1091 /
+> mcp-hub 169 / ai-agents 116, tsc clean ×6). ASST-09 is IN FLIGHT with devops — excluded from the
+> R-waves below.
+
+## C.0 Ruling 1 — the agent re-run transport (D14-14)
+
+D14-10's endpoint is proven but unreachable: `ai-agents/src/deps.ts` has no `resolveApproval` and
+there is no hub tool; ai-agents holds no platform credential and reaches the platform ONLY through
+the hub. **Ruled: accept the runner-infrastructure model, with two hardenings.** The call is made
+by the RUNNER, never chosen by the model, so it appears in NO `AgentDef.tools` map and passes no
+agent-side impact gate; it is added to NO workflow's `AUTOMATION_ALLOWLIST`, so n8n principals are
+denied by the workflow-scope check — which runs BEFORE impact is ever consulted — making the
+infinite-regress horn unreachable. That frees the label to be honest: register it
+**`write: true, impact: "high"`** — truthful about its effect, and a fail-closed tripwire: if
+anyone ever DOES add it to a workflow allowlist, the impact gate suspends instead of executing.
+Hardening 2: "never model-selectable" is enforced structurally, not by convention — the write-guard
+test asserts the tool name appears in no `AgentDef.tools` map. Real authorization stays where
+D14-10 put it: hub `minAssurance: "verified"` + Cerbos + the endpoint's `requested_by == principal`
+binding. Hard requirement carried over: the resolver **throws** on transport failure / 403 /
+unknown tool and NEVER returns `{match:"none"}` — mapping a fault to `none` rebuilds the
+duplicate-approval generator through the error path.
+
+## C.1 Ruling 2 — the `meta` event (ASST-11)
+
+**Ruled: additive grammar-v2 events, two of them.** (1) `event: meta`, data
+`{"provider":string,"model":string,"providerSession":string?}`, emitted exactly once per stream at
+the moment the ASST-04 scrubber FIRST releases bytes to the wire, immediately before the first
+token frame — that timing is load-bearing: it ties `meta` to the provider that actually commits to
+the wire under the ASST-04 `streamed` discipline, so a provider that dies inside the hold window
+fails over WITHOUT having emitted a contradictory `meta`. (2) `event: usage`, data
+`{"promptTokens":int,"completionTokens":int}`, terminal (before `done`), emitted ONLY when the
+provider reports real counts — usage cannot ride on the pre-first-token `meta` because counts only
+exist at end-of-stream. Consumers: ASST-06's relay treats an absent `meta` as "unknown provider"
+(null columns, never an error — older gateways), and keeps its ~4-chars/token estimate as the
+labelled fallback when `usage` never arrives. This is the LAST cheap moment: today's only consumer
+is the ASST-06 relay; after the Phase-2 brain picker and more consumers exist, this becomes a
+breaking change. `meta` answers OQ-6 (failover must LABEL the serving brain) and gives the Phase-2
+picker its verification signal.
+
+## C.2 Group A — ruling tickets
+
+### D14-14 — Hub tool `approvals.resolveExecute` + `deps.resolveApproval` + guard evolution
+- **Seat:** senior-integrator · Sonnet·high (seat default)
+- **Files:** `mcp-hub/src/registry.ts` (tool def: `approvals.resolveExecute`, minAssurance
+  `verified`, `write: true, impact: "high"`, POST
+  `/api/:tenantId/automation-approvals/resolve-and-execute`), `ai-agents/src/deps.ts`
+  (`resolveApproval` via the hub call under the run's OBO envelope), `ai-agents/src/agent-write-guard.test.ts`
+  (evolution below), hub + ai-agents tests. Add to NO workflow allowlist; add to NO AgentDef.
+- **Guard evolution (do NOT delete the assertion):** the blanket `high_write` ban becomes a
+  per-tool allowlist `RERUN_CAPABLE_HIGH_WRITES` — a tool may carry `high_write` in an AgentDef
+  ONLY if (a) the live resolver is wired (this ticket) AND (b) it has a
+  `platform-nest/src/core/approval-executables.ts` entry with a server-side precondition; the test
+  message names both requirements. Plus the new structural assertion: `approvals.resolveExecute`
+  appears in NO `AgentDef.tools` map.
+- **Done when:** an agent goal that suspended, was approved, and re-ran completes end-to-end
+  through the hub transport (the D14-10 acceptance, now with no test-side shim); n8n principal
+  calling the tool ⇒ denied by workflow scope (and a deliberately-mis-scoped test proves the
+  impact gate would suspend it — the tripwire); hub down / 403 / unknown tool ⇒ the goal FAILS
+  loudly with a typed error and NO new approval row is filed (the mandated negative); guard suite:
+  today's AgentDefs pass, an unlisted `high_write` fails naming both requirements.
+- **Deps:** none (D14-10/13 landed). **QA gate:** yes (authz + the error-path duplicate hazard).
+
+### ASST-11 — Gateway `meta` + terminal `usage` events (grammar v2, additive)
+- **Seat:** senior-integrator · Sonnet·high (seat default)
+- **Files:** `ai-gateway-go/internal/server/server.go` (emit `meta` at first scrubber release,
+  before the first token frame; `usage` before `done` when counts exist; same single-line-JSON
+  grammar; fallback single-chunk path included), the minimal streaming-plumbing change needed for
+  a provider to report end-of-stream counts (e.g. an optional usage-reporting extension of
+  `StreamingProvider` — implementer's choice), `internal/providers/ollama.go` (Ollama NDJSON final
+  line carries eval counts — wire them), stream tests.
+- **Done when:** tests: `meta` arrives exactly once, before the first token, naming the provider
+  that served the bytes; provider dies inside the hold window ⇒ failover with NO stale `meta` from
+  the dead provider (order proof against the ASST-04 discipline); `usage` present with real Ollama
+  counts and absent on providers that report none; error path emits no `usage`; all ASST-10
+  round-trip tests still green; `go vet` + suite green.
+- **Deps:** none. **QA gate:** no (self-verifying; ASST-24 re-drives e2e).
+
+### ASST-12 — BFF/UI: consume `meta`/`usage` — provider labelling + truthful cost meter
+- **Seat:** medior · Sonnet·medium (seat default)
+- **Files:** `platform-nest/src/modules/assistant/stream.ts` (parse both events, absent-tolerant),
+  message persistence (fill the existing null `provider`/`model`/token columns; record
+  `usageSource: provider|estimate`), `platform-ui/src/components/assistant/*` ("served by" brain
+  badge on the message; cost meter distinguishes real vs estimated), tests.
+- **Done when:** streamed reply persists non-null provider/model when `meta` arrives and renders
+  the badge; absent `meta` ⇒ "unknown provider", zero errors; real `usage` overrides the estimate
+  and the meter labels which it is showing; suite + `next build` green.
+- **Deps:** ASST-11. **QA gate:** no (ASST-24 covers).
+
+## C.3 Group B — stream egress audit
+
+### ASST-13 — Egress-audit rows on `/complete/stream`
+- **Seat:** medior · Sonnet·medium — **inline candidate** (mirrors the `/complete` emit pattern in
+  the same file)
+- **Files:** `ai-gateway-go/internal/server/server.go` (emit `audit.EgressAudit` on the stream
+  route: blocked-budget, blocked-DLP-prompt, provider-error, and a terminal OK row carrying
+  provider, latency, and the scrubber's exported `Redactions()` / `ForcedBoundaries()` counts),
+  tests.
+- **Done when:** every stream outcome (budget-refused, DLP-refused, mid-stream error, clean
+  completion) emits exactly one terminal audit row with the response-side redaction counts; counts
+  match a seeded-PII fixture; existing audit consumers unaffected (`/complete`/`/media`/`/embed`
+  rows byte-identical).
+- **Deps:** none (ASST-11 touches the same file — do not share a wave). **QA gate:** no.
+
+## C.4 Group C — executable-registry entries (one program per ticket; money tools stay barred)
+
+### D14-15 — PM entries: `pm.createTask`, `pm.createDoc`, and the J2 ball-pass tool
+- **Seat:** senior-be · Sonnet·high (seat default)
+- **Files:** `platform-nest/src/core/approval-executables.ts` (+ tests). Ball-pass tool name per
+  the PM Phase-4 contract — verify at build, do not guess.
+- **Scope:** per-tool server-side preconditions with typed refusals: project exists and is not
+  archived (`project_archived`), target status/board still valid, assignee still a member
+  (`assignee_gone`); advisory lock keyed per PROJECT in the executor's namespace.
+  **Co-locking:** NOT needed — PM tools never touch pipeline runs, so no
+  `PIPELINE_RUN_LOCK_NS` co-lock (stated in the entry header so nobody adds one "for safety").
+- **Done when:** unit tests per refusal branch; an approved `pm.createTask` row for an archived
+  project lands `failed` with `precondition_failed:project_archived` and the hub is never called;
+  happy path executes exactly once under redelivery.
+- **Deps:** none. **QA gate:** yes (write-execution path).
+
+### D14-16 — Mail approval-action tool entry — **RECOMMEND DEFER**
+- **Seat:** senior-be · Sonnet·high (seat default)
+- **Defer reason (owner call):** the mail subsystem is PLANNED — its approval-action tool does not
+  exist yet; a registry entry for a nonexistent tool is dead configuration. Build this ticket WITH
+  the mail tool when that program ships. If built now: precondition = thread/message still exists
+  and the action not already taken (idempotent on the action key); per-thread advisory lock; no
+  pipeline co-lock.
+- **Files:** `platform-nest/src/core/approval-executables.ts` + tests. **Deps:** the mail
+  subsystem's tool landing. **QA gate:** yes.
+
+### D14-17 — Assistant write-tool entries (Phase-6 v1 proposal set)
+- **Seat:** senior-be · Sonnet·high (seat default)
+- **Scope:** the v1 proposal set REUSES D14-15's PM entries where possible; any net-new
+  assistant-proposed write tool gets its own entry + precondition + typed refusals here. Money
+  tools (SM-55/A13) permanently barred — restated in the file header. No pipeline co-lock unless a
+  tool demonstrably touches pipeline runs; if one does, it must take BOTH the executor-namespace
+  lock and `lockPipelineRun` (the namespaces do NOT serialize against each other — say so per
+  entry).
+- **Files:** `platform-nest/src/core/approval-executables.ts`,
+  `platform-nest/cerbos/policies/resource_mcp_tool.yaml` (extend D14-13's policy-side executable
+  list in the same change — the two-list discipline), tests.
+- **Done when:** every listed tool has precondition tests both directions; the D14-13 drift test
+  extended to the new names; a non-listed assistant tool proposal lands `not_applicable`, never
+  auto-executes.
+- **Deps:** ASST-17 (the broker defines which tools the assistant can propose), D14-15.
+  **QA gate:** yes.
+
+## C.5 Group D — verification debt (shipped code, unverified claims)
+
+> Note for the orchestrator: these need a LIVE stack. The 2026-07-31 owner decision says local
+> stack OFF / server is truth — run these against gda-aicenter or get an explicit local-compose
+> exception before dispatching.
+
+### VER-01 — D14-08 approvals-UI click-through (live)
+- **Seat:** qa · Sonnet·medium. **Files:** test/evidence only.
+- **Done when:** on a live stack, an approved executable row visibly walks `pending → executed`;
+  a forced failure shows `execution_error` + Retry, and Retry re-drives to `executed`; a
+  non-admin sees no Retry/settings controls; `not_applicable` rows render as before.
+- **Deps:** none. **QA gate:** it is one.
+
+### VER-02 — Assistant against a LIVE platform-nest (never driven outside `DEMO_MODE=1`)
+- **Seat:** qa · Sonnet·medium. **Files:** test/evidence only.
+- **Done when:** create/send/stream/stop/refresh round-trip on the live BFF with a real provider;
+  owner-privacy probes (user B, admin) fail closed LIVE; **company-switcher re-scopes the thread
+  rail live** (not merely filtered); stop cancels the upstream request observably; transcripts
+  survive refresh byte-identical.
+- **Deps:** ASST-09 (nginx SSE, in flight) for the server path. **QA gate:** it is one.
+
+### VER-03 — Rendered a11y + dark-token pass on `/assistant`
+- **Seat:** qa · Sonnet·medium. **Files:** test/evidence only (defects ticketed, not fixed here).
+- **Scope honesty:** the platform has NO global dark theme — verify a11y (keyboard-only drive,
+  aria-live on the stream, focus order, reduced-motion) and dark-TOKEN-readiness (no hardcoded
+  light-only values), not "dark theme works".
+- **Deps:** none. **QA gate:** it is one.
+
+### VER-04 — Live Redis delivery + live mcp-hub for the D14 matrix
+- **Seat:** qa · Sonnet·medium. **Files:** test/evidence only.
+- **Done when:** D14-09 item (a) end-to-end over a REAL Redis consumer loop (file → decide →
+  auto-execute → `executed` + notifications) and a REAL hub process with Cerbos ON (grant verify,
+  D14-13 policy allow/deny spot-checks) — the two legs the merged suites stubbed.
+- **Deps:** none. **QA gate:** it is one.
+
+## C.6 Group E — chores
+
+### CHORE-01 — `gofmt`/CRLF normalization in `ai-gateway-go` (~20 pre-existing files)
+- **Seat:** junior · Haiku·medium — **solo wave, never bundled with feature work** (a
+  whole-package reformat buries real diffs and is a merge-conflict generator in this shared
+  checkout).
+- **Files:** the `gofmt -l`-flagged files + `.gitattributes` (pin `*.go text eol=lf` so it cannot
+  recur from a Windows checkout).
+- **Done when:** `gofmt -l` empty; `go vet` + full suite green; the PR contains formatting-only
+  changes (no semantic diff under `git diff -w` beyond line endings); `.gitattributes` in place.
+- **Deps:** a quiet gateway boundary (after ASST-11/13 merge). **QA gate:** no.
+
+### CHORE-02 — Drop the 804 orphaned test databases on `gaiada-postgres-1`
+- **Seat:** devops · Sonnet·medium — **inline candidate**; not urgent (shm at 2%) — any quiet slot.
+- **Scope:** KEEP-allowlist ONLY, never a pattern denylist (orphans span many prefixes — `qa1_`,
+  `sm14b_`, `sm50_`, `qa081013_`, `wd29full_`, `arch1_`, …): keep exactly
+  `gaiada, gaiada_platform, gaiada_knowledge, gaiada_keycloak, gaiada_n8n, postgres, template0, template1`;
+  dry-run printout reviewed before any DROP; verify the backup job is fresh FIRST.
+- **Done when:** dry-run list approved; post-run `\l` shows only the allowlist; backups verified
+  before and after; runbook note added (mirror of the test-DB-orphans /dev/shm lesson).
+- **Deps:** none. **QA gate:** no.
+
+## C.7 Group F — assistant phases 2–6
+
+### ASST-14 — hermes-gateway: streamed spawn + incremental box parser + session capture
+- **Seat:** senior-integrator · Sonnet·high (seat default)
+- **Files:** `hermes-gateway/server.mjs` (new `POST /complete/stream`: `spawn` not buffered
+  `execFile`, stdout streamed through a NEW line-oriented incremental ANSI/box parser — today's
+  `extractChatReply` needs the whole buffer and cannot be reused unchanged; parse and expose the
+  `Session:` id; accept a `providerSession` input and pass `--resume`; speak grammar v2 incl.
+  `meta` with `provider:"hermes"` + `providerSession`), parser unit tests against recorded Hermes
+  transcripts. The one-shot `/complete` + `/media` endpoints stay byte-identical (wa-chat-bot
+  depends on them).
+- **Done when:** a streamed Hermes reply arrives as multiple v2 frames with the box decoration
+  stripped incrementally; the session id round-trips (`meta.providerSession` on turn 1 ⇒ `--resume`
+  on turn 2 continues the same Hermes session); tool-approval hang still times out to a typed
+  error, never `--yolo`; wa-chat-bot contract untouched (existing endpoints' tests green).
+- **Deps:** ASST-11 (grammar). **QA gate:** no (ASST-24 covers).
+
+### ASST-15 — Gateway per-provider routing + `providerSession` passthrough
+- **Seat:** senior-integrator · Sonnet·high (seat default)
+- **Files:** `ai-gateway-go/internal/server/server.go` (+config): optional `provider` hint on
+  `/complete/stream` — route to the named provider when available, else the normal failover chain
+  (never a hard error: OQ-6 says fail over and LABEL, and `meta` now does the labelling); opaque
+  `providerSession` passthrough to providers that accept it (hermes shim); tests.
+- **Done when:** hint honored when the provider is up; hint + provider down ⇒ chain serves and
+  `meta` names the actual server; `providerSession` reaches the hermes shim opaquely; no behavior
+  change when the hint is absent.
+- **Deps:** ASST-11, ASST-14. **QA gate:** no.
+
+### ASST-16 — BFF/UI: per-thread brain picker + Hermes session mapping
+- **Seat:** medior · Sonnet·medium (seat default)
+- **Files:** `platform-nest/src/modules/assistant/stream.ts` + controller (send thread `brain` as
+  the provider hint; persist `meta.providerSession` to `assistant_threads.hermes_session_id`;
+  send it back on subsequent turns), `platform-ui` right-rail brain picker (thread PATCH already
+  exists), tests.
+- **Done when:** picking Hermes on a thread routes to Hermes and turn 2 resumes the SAME Hermes
+  session (blueprint Phase-2 gate); Hermes down ⇒ reply served by the chain and the ASST-12 badge
+  shows the truth; switching brains mid-thread starts a fresh provider session without losing ERP
+  thread history.
+- **Deps:** ASST-12, ASST-14, ASST-15. **QA gate:** no (ASST-24 covers).
+
+### ASST-17 — Tool broker under the CHATTING USER's principal (Phase 3 core)
+- **Seat:** senior-be · **opus·medium** — the transcript-safety invariant (every tool runs under
+  the chatting user's Cerbos principal, never a service principal) is the surface's core authz
+  property; a mistake makes every thread an elevation vector.
+- **Design pin (architect):** v1 routes tool-using turns through the EXISTING ai-agents runtime
+  under the user's OBO envelope (the proven tool loop + provider handling), relaying its
+  tool_call/tool_result progress as SSE events and streaming the final answer; per-provider native
+  function-calling in the gateway is explicitly NOT built now. **Do NOT close the agent/registry
+  impact drift by widening `policy.ts`'s `isAutomation` branch to all principals — it would push
+  every human/OBO medium+ write into D14 suspension and break this very broker.**
+- **Files:** `platform-nest/src/modules/assistant/broker.ts` (new), `stream.ts` (emit
+  `tool_call`/`tool_result`/`approval_required` events), `assistant_tool_calls` persistence
+  (authority_user_id = the chatting user, redacted args), ai-agents invocation plumbing, tests.
+- **Done when:** a tool-using turn produces `assistant_tool_calls` rows attributable to the
+  chatting user (blueprint Phase-3 gate); a tool the user lacks Cerbos rights for is REFUSED
+  in-thread (typed, visible), never executed by a service principal; a read tool returns live
+  tenant data scoped to that user; transcript stays owner-private end-to-end.
+- **Deps:** ASST-16 (engine stable). **QA gate:** yes (authz-central).
+
+### ASST-18 — Capabilities panel + knowledge citations
+- **Seat:** medior · Sonnet·medium (seat default)
+- **Files:** assistant controller (`GET /api/:t/assistant/capabilities` = hub `visibleToolsFor`
+  under the user's envelope ∩ module gates), right-rail capabilities panel + empty-state
+  capability cards, context assembly RAG retrieval + citation chips (the live pgvector tiers),
+  tests.
+- **Done when:** the panel shows exactly what THIS user can call (an unauthorized tool is absent,
+  not greyed); a knowledge-grounded answer renders its citations and they resolve; empty-state
+  cards render from the same capabilities source.
+- **Deps:** ASST-17. **QA gate:** no (ASST-24 covers).
+
+### ASST-19 — Memory panel: propose → confirm, quarantine discipline
+- **Seat:** senior-be · Sonnet·high (seat default)
+- **Files:** assistant controller (`GET·POST·DELETE /api/:t/assistant/memory` — propose vs
+  confirm), context assembly (ONLY `confirmed_at IS NOT NULL` rows are ever injected as fact —
+  the quarantine; unconfirmed rows are stored but inert), right-rail memory panel
+  (view/edit/delete/pin), tests incl. the negative (an unconfirmed row never appears in an
+  assembled prompt — assert on the assembled context, not the UI).
+- **Done when:** blueprint Phase-4 gate — the user deletes a memory and can SEE the effect (next
+  assembled context excludes it, provable in a test); propose→confirm round-trip; owner-only
+  enforced (Cerbos `assistant_memory` from ASST-02).
+- **Deps:** ASST-17 (the assistant proposes memories through the same event surface).
+  **QA gate:** yes (privacy).
+
+### ASST-20 — Message feedback → episodic `HumanFeedback` — **deferrable polish**
+- **Seat:** medior · Sonnet·medium — **inline candidate** (small; and low value until the
+  roster/eval loops consume feedback — owner may defer to post-v1).
+- **Files:** `POST /api/:t/assistant/messages/:id/feedback`, ai-agents episodic ingestion with the
+  existing trust rules (untrusted-by-default quarantine), thumbs UI on messages, tests.
+- **Done when:** ↑/↓ lands as an episodic `HumanFeedback` row with correct provenance/trust; the
+  same untrusted-feedback quarantine as agent runs applies; double-vote idempotent.
+- **Deps:** ASST-06 (done). **QA gate:** no.
+
+### ASST-21 — Agent roster + handoff to a goal run
+- **Seat:** senior-be · Sonnet·high (seat default)
+- **Authz design pin:** handoff runs execute under the CHATTING USER's envelope (same argument as
+  ASST-17), so the run transcript is safe for THAT user — a new ADDITIVE Cerbos rule lets the
+  triggering owner read runs with `origin=assistant_handoff`; the elevated-only rule for all other
+  runs is UNCHANGED (the constraint-#2 transcript rule stays intact).
+- **Files:** `POST /api/:t/assistant/threads/:id/handoff` (create goal run, link it to the
+  thread), roster right-rail panel (registry list + episodic history), run-watch view for
+  owner-scoped runs, `platform-nest/cerbos/policies/` (the additive run-read rule — EDIT or new
+  file; if NEW, the restart step + silent-DENY trap applies), tests.
+- **Done when:** hand a long task to a specialist from a thread and WATCH the run as a
+  non-elevated user; another user cannot read it; an elevated-only run (non-handoff) remains
+  elevated-only (regression test); the run's suspension (if a `high_write` files an approval)
+  surfaces back into the thread.
+- **Deps:** ASST-17. **QA gate:** yes (authz change).
+
+### ASST-22 — `@drawer` mount
+- **Seat:** medior · Sonnet·medium (seat default)
+- **Files:** platform-ui `@drawer` parallel-route mount + FAB, page-context pinning (current
+  page's entity as a typed context ref on the pinned thread), "open in full page" promotion —
+  same engine hook as the page (the aivory FAB precedent proves this is composition, not new
+  engine).
+- **Done when:** drawer opens on any app page with a thread pinned to that page's context; promote
+  round-trips to `/assistant` with history intact; `next build` green; keyboard accessible.
+- **Deps:** ASST-16. **QA gate:** no (ASST-24 covers).
+
+### ASST-23 — Write proposals in-thread (Phase 6 — D14 is live now)
+- **Seat:** senior-be · Sonnet·high (seat default)
+- **Files:** broker → proposal flow (a write intent becomes a proposal card; filing goes through
+  the EXISTING approvals surface with `origin='agent'`, `approval_id` linked on
+  `assistant_tool_calls`), `approval_required` SSE event wiring, proposal card UI states
+  (`proposed / sent for approval / approved+executed / failed+retry` — the D14 execution chips,
+  NOT the old "approval does not execute" disclaimer, which this ticket REMOVES), tests.
+- **Done when:** end-to-end in one thread: assistant proposes a write → approver decides → the
+  write EXECUTES (D14 path) → the card shows `executed` and the thread gets the terminal notify;
+  a rejected proposal shows rejected and files no duplicate; an unregistered tool proposal is
+  refused at proposal time (registry-scoped, D14-17), not silently accepted.
+- **Deps:** D14-14, D14-15, D14-17, ASST-17. **QA gate:** yes (writes).
+
+### ASST-24 — QA gate: phases 2–6 end-to-end
+- **Seat:** qa · Sonnet·medium
+- **Scope:** independently verify every C.7 criterion, then adversarial: Hermes session resume
+  across restarts; brain failover labelling truthfulness (kill Hermes mid-thread); tool authority
+  (user B's rights never leak into user A's thread and vice versa; broker refusals typed); memory
+  quarantine (unconfirmed rows provably absent from prompts); handoff-run isolation (owner reads,
+  others don't, elevated-only runs unchanged); proposal→approve→execute→notify loop incl. failure
+  + retry; drawer/page parity.
+- **Deps:** ASST-14..23 (as landed). **QA gate:** it IS the gate.
+
+## C.8 Remainder dispatch (R-waves, cap ≤2; ASST-09 in flight is excluded)
+
+| Wave | Tickets | Note |
+|---|---|---|
+| R1 | **D14-14** + **ASST-11** | the two "last cheap moment" items: agent-write transport (unblocks PM J2 + every agent write) and the wire's final additive change |
+| R2 | **D14-15** + **ASST-12** | PM registry entries vs BFF/UI meta consumption |
+| R3 | **VER-01** + **ASST-13** | live click-through vs stream audit (gateway file free after R1) |
+| R4 | **VER-02** + **VER-04** | both qa/live-stack — run sequentially by the same seat if the stack contends |
+| R5 | **ASST-14** + **VER-03** | hermes shim vs rendered a11y pass |
+| R6 | **ASST-15** + **CHORE-02** | gateway routing vs server DB cleanup |
+| R7 | **ASST-16** + **CHORE-01** | BFF/UI brain picker vs the solo gofmt sweep (quiet gateway boundary — nothing else touches ai-gateway-go this wave) |
+| R8 | **ASST-17** (opus·medium, the Phase-3 core) + **ASST-20** | broker vs the small feedback leg (disjoint files) |
+| R9 | **ASST-18** + **D14-17** | capabilities panel vs assistant registry entries (both need 17: satisfied) |
+| R10 | **ASST-19** (memory — owns the right rail this wave) | solo: rail collision with 18 avoided by sequencing |
+| R11 | **ASST-21** + **ASST-22** | roster/handoff (BE+rail) vs drawer mount (separate mount surface) |
+| R12 | **ASST-23** | Phase 6 integration — needs D14-14/15/17 + ASST-17 (all landed) |
+| R13 | **ASST-24 (QA gate — phases 2–6 ship here)** | |
+
+**Critical path:** ASST-11 → ASST-12 → ASST-14 → ASST-15 → ASST-16 → ASST-17 → ASST-19/21 →
+ASST-23 → ASST-24; D14-14 → D14-15/17 joins at ASST-23. **D14-16 deferred** (mail tool doesn't
+exist yet). CHORE-02 floats — any quiet slot.
+
+---
+
 ## 2. Dispatch order (hard cap: ≤2 genuinely-independent tickets per wave)
 
 D14 is front-loaded — it is the terminal blocker of five programs; assistant tickets fill the
@@ -727,7 +1097,7 @@ joining before any Cerbos-ON end-to-end — until D14-13 lands, an `origin='auto
 ASST-05 (∥ ASST-10) → ASST-06 → ASST-07 → ASST-08. Shared-checkout discipline applies (commit
 early, never `git add -A`, re-check main before push).
 
-## 3. Opus tags (5 of 23 — everything else is seat default)
+## 3. Opus tags (6 of 47 — everything else is seat default)
 
 - **D14-03 · opus·high** — authority/idempotency/TOCTOU core; a mistake is silent unattended writes
   or silent duplicates.
@@ -741,6 +1111,9 @@ early, never `git add -A`, re-check main before push).
   matrix, hence medium not high.
 - **ASST-04 · opus·medium** — silent-PII-leak hazard: wrong boundary-buffer logic passes every
   happy-path test.
+- **ASST-17 · opus·medium** — the transcript-safety invariant (every tool under the chatting
+  user's Cerbos principal, never a service principal) is the assistant's core authz property; a
+  mistake makes every thread an elevation vector.
 
 ## 4. Inline flags (below army scale — orchestrator may run these in-line)
 
@@ -750,6 +1123,11 @@ early, never `git add -A`, re-check main before push).
 - **D14-11** — one lint-test file in ai-agents. Inline-verify by running the ai-agents suite; do it
   in wave 1 — it is the insurance that must precede any AgentDef change.
 - **ASST-09** — server config + compose env lines; no app code.
+- **ASST-13** — mirrors the `/complete` audit-emit pattern inside the same file.
+- **ASST-20** — one endpoint + episodic ingestion + thumbs UI; also a defer candidate (§5.14).
+- **CHORE-02** — server ops with a KEEP-allowlist script; devops can run it inline in any quiet
+  slot (shm at 2%, not urgent). CHORE-01 stays a real junior ticket but SOLO — a 20-file reformat
+  must never share a wave/PR with feature work.
 
 ## 5. Discovered facts, risks, and owner items
 
@@ -827,3 +1205,13 @@ early, never `git add -A`, re-check main before push).
    dead provider's partial answer onto the next provider's full answer — the exact duplication
    class ASST-03 fixed. Intended consequence: a response shorter than the 37-byte hold window that
    dies mid-generation fails over cleanly instead of emitting a stub plus an error.
+14. **SET C decisions the owner should see (2026-08-05):** (a) **Phase-3 protocol pin** — the
+   assistant's tool-using turns route through the EXISTING ai-agents runtime under the chatting
+   user's OBO envelope (ASST-17); per-provider native function-calling in the gateway is
+   deliberately NOT built in v1 — revisit only if the agent-loop latency proves unacceptable.
+   (b) **Defer recommendations:** D14-16 (mail registry entry — the mail subsystem's tool does not
+   exist yet; an entry for a nonexistent tool is dead config), ASST-20 (feedback→episodic — low
+   value until eval loops consume it), CHORE-02 (floats; shm at 2%). (c) **VER-01..04 need a live
+   stack** — the 2026-07-31 owner ruling says local stack OFF / server is truth, so they run
+   against gda-aicenter or need an explicit local-compose exception. (d) VER-03 is scoped honestly:
+   a11y + dark-TOKEN-readiness — a platform-wide dark theme still does not exist to verify against.
