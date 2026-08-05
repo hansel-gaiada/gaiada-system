@@ -5,17 +5,19 @@ import { getMe } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
 import { getSystemStatus, getSystemConfig, getWorkflowExecutions, getBridgeHealth } from "@/lib/admin";
 import { listWorkflows } from "@/lib/it";
-import { isElevated } from "@/lib/rbac";
+import { isElevated, can } from "@/lib/rbac";
 import { listAutomationApprovals } from "@/lib/automationApprovals";
+import { getCompanyDetail } from "@/lib/entities";
 import { PageHeader } from "@/components/PageHeader";
 import { DescriptionList } from "@/components/DescriptionList";
 import { Card, Button, StatusBadge, HairlineTable, KpiTile } from "@/components/ui";
 import { StatusCard } from "@/components/systems/StatusCard";
 import { EmptyNote } from "@/components/systems/EmptyNote";
 import { ActionButton } from "@/components/systems/ActionButton";
+import { ApprovalRetryCard } from "@/components/systems/ApprovalRetryCard";
 import { WorkflowsTable, ExecutionsTable } from "@/components/systems/AutomationLists";
 import { SearchableTable } from "@/components/systems/SearchableTable";
-import { toggleWorkflow, replayDeadLetters } from "./actions";
+import { toggleWorkflow, replayDeadLetters, setApprovalRetryCount } from "./actions";
 import "@/components/systems/systems.css";
 import { formatTimestamp } from "@/lib/format";
 
@@ -37,7 +39,7 @@ export default async function AutomationSystemPage() {
   const me = await getMe(userId);
   const tenant = await getActiveTenant(me);
 
-  const [status, config, workflowList, executions, bridge, approvals] = await Promise.all([
+  const [status, config, workflowList, executions, bridge, approvals, companyDetail] = await Promise.all([
     getSystemStatus(userId, "automation"),
     getSystemConfig(userId, "automation"),
     // The ID-bearing list (not the status probe's name-only summary) — an activate/deactivate needs
@@ -48,6 +50,10 @@ export default async function AutomationSystemPage() {
     // Approvals are tenant-scoped (they carry company data); the systems console shows the active
     // company's queue and says so, rather than silently implying it is platform-wide.
     tenant ? listAutomationApprovals(userId, tenant, { status: "pending" }) : Promise.resolve([]),
+    // D14-08 — the "Approval retry" card's current value. Read here rather than deriving from
+    // `getCompany` (which stays list-derived on purpose, per its own comment) because `settings`
+    // only comes back from the single-company detail endpoint.
+    tenant ? getCompanyDetail(userId, tenant) : Promise.resolve(null),
   ]);
 
   const detail = status?.detail ?? {};
@@ -56,6 +62,13 @@ export default async function AutomationSystemPage() {
   const probeRows = Array.isArray(detail.workflows) ? (detail.workflows as WorkflowRow[]) : null;
   const n8nUrl = typeof detail.n8nUrl === "string" ? detail.n8nUrl : null;
   const elevated = isElevated(me);
+
+  // D14-08 — admin-gated by `company.manage` (the same capability the settings PATCH itself
+  // requires), narrowed to the active tenant like every other company-scoped write on this page.
+  const canManageRetry = !!tenant && can(me, "company.manage", tenant);
+  const settings = (companyDetail?.settings ?? {}) as { automation?: { approvalRetry?: { autoRetryCount?: unknown } } };
+  const rawAutoRetryCount = settings.automation?.approvalRetry?.autoRetryCount;
+  const autoRetryCount = typeof rawAutoRetryCount === "number" && Number.isInteger(rawAutoRetryCount) ? rawAutoRetryCount : 0;
 
   // Newest execution per workflow, so the list can show a real last-run without a second round-trip
   // (executions come back newest-first).
@@ -247,6 +260,15 @@ export default async function AutomationSystemPage() {
           )}
         </Card>
       </div>
+
+      {/* D14-08 — admin-only. Not rendered at all for anyone the settings write would refuse: the
+          ticket's rule is "don't offer a control the backend would deny", not "hide it behind a
+          disabled state". */}
+      {canManageRetry && tenant && (
+        <div style={{ marginTop: 20 }}>
+          <ApprovalRetryCard tenantId={tenant} autoRetryCount={autoRetryCount} action={setApprovalRetryCount} />
+        </div>
+      )}
 
       <div style={{ marginTop: 20 }}>
         <Card title="Configuration">

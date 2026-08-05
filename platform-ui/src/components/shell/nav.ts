@@ -81,7 +81,11 @@ export function navFor(me: Me, tenantId?: string | null, departments: { id: stri
       ...(can(me, "appraisal.score", tenantId) || can(me, "appraisal.read", tenantId) ? [{ label: "Team Appraisals", href: "/appraisals", icon: "check" } as NavItem] : []),
       ...(can(me, "appraisal.cycle.admin", tenantId) ? [{ label: "Appraisal Cycles", href: "/appraisals/cycles", icon: "check" } as NavItem] : []),
     ] },
+    // ASST-07: owner-private end to end (no admin/company_admin/group_executive bypass — see
+    // resource_assistant_thread.yaml), so this needs no `can()` gate: every signed-in staff user
+    // gets their own thread history, nothing more, mirroring the backend's owner-only Cerbos rule.
     { label: "Intelligence", items: [
+      { label: "Assistant", href: "/assistant", icon: "assistant" },
       { label: "Knowledge", href: "/knowledge", icon: "box" },
       { label: "AI Agents", href: "/agents", icon: "agents" },
     ] },

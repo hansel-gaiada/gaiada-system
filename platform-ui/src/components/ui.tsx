@@ -75,6 +75,11 @@ const STATUS_FAMILY: Record<string, StatusFamily> = {
   // rust — attention/negative states
   "at risk": "critical", overdue: "critical", low: "critical", critical: "critical", blocked: "critical",
   "on hold": "critical", rejected: "critical", error: "critical",
+  // D14-08 — automation_approvals.execution_status (0078), the decision-vs-execution second axis.
+  // "pending"/"executing" fall through to the default "progress" family already; "executed" is
+  // its own positive terminal state (distinct from the decision "approved") and "failed" its own
+  // negative one (distinct from "rejected" — a rejected row never executes at all).
+  executed: "ok", failed: "critical",
   // ORG-13 service-assignment lifecycle states
   proposed: "progress", suspended: "idle", orphaned: "critical", revoked: "critical",
   // F1/C1 connection/seat lifecycle states (unconfigured/pending/error/revoked

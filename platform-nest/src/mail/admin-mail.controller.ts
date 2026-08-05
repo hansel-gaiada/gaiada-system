@@ -5,7 +5,7 @@
 // no partial/redacted view.
 import { BadRequestException, Controller, ForbiddenException, Get, NotFoundException, Param, Query, Req, UseGuards } from "@nestjs/common";
 import type { FastifyRequest } from "fastify";
-import { withGlobal } from "../db";
+import { withMailContext } from "../db";
 import { AuthGuard } from "../auth/guards";
 import { isElevated } from "../admin/elevated";
 import { authorizeThreadParent } from "./thread-authz";
@@ -94,7 +94,7 @@ export class AdminMailController {
     }
     const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
 
-    const rows = await withGlobal((c) =>
+    const rows = await withMailContext((c) =>
       c.query<MailLogRow>(
         `SELECT ${LIST_COLUMNS} FROM mail_log ${where} ORDER BY created_at DESC LIMIT $${args.push(limit)} OFFSET $${args.push(offset)}`,
         args,
@@ -106,7 +106,7 @@ export class AdminMailController {
   @Get("log/:id")
   async detail(@Req() req: FastifyRequest, @Param("id") id: string): Promise<MailLogRow> {
     if (!isElevated(req)) throw new ForbiddenException("platform admin required");
-    const rows = await withGlobal((c) =>
+    const rows = await withMailContext((c) =>
       c.query<MailLogRow>(`SELECT ${LIST_COLUMNS} FROM mail_log WHERE id = $1`, [id]),
     );
     const row = rows.rows[0];
@@ -137,7 +137,7 @@ export class AdminMailController {
     if (!isElevated(req)) throw new ForbiddenException("platform admin required");
     if (!UUID_RE.test(id)) throw new BadRequestException("id must be a valid id");
 
-    const logRows = await withGlobal((c) =>
+    const logRows = await withMailContext((c) =>
       c.query<{ id: string; tenant_id: string | null; entity_type: string | null; entity_id: string | null }>(
         `SELECT id, tenant_id, entity_type, entity_id FROM mail_log WHERE id = $1`,
         [id],
@@ -149,7 +149,7 @@ export class AdminMailController {
       await authorizeThreadParent(req.principal, log.tenant_id, log.entity_type, log.entity_id);
     }
 
-    const messages = await withGlobal((c) =>
+    const messages = await withMailContext((c) =>
       c.query<AdminThreadRow>(
         `SELECT id, mail_log_id, from_email, subject, body_text, body_html_sanitized, attachments,
                 size_bytes, received_at

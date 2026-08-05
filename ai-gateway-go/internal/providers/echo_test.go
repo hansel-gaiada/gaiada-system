@@ -40,6 +40,30 @@ func TestEchoCompleteTruncatesByRuneNotByte(t *testing.T) {
 	}
 }
 
+// ASST-03: CompleteStream is the keyless dev/test streaming terminator — it must emit the
+// prompt word-by-word (not the whole answer as one chunk) so /complete/stream has something
+// real to exercise with zero providers configured, and the joined tokens must reconstruct
+// exactly what Complete() would have returned.
+func TestEchoCompleteStreamEmitsWordByWordAndReconstructsCompleteOutput(t *testing.T) {
+	p := NewEchoProvider()
+	full, err := p.Complete(context.Background(), "hello there friend")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	var got []string
+	if err := p.CompleteStream(context.Background(), "hello there friend", func(tok string) {
+		got = append(got, tok)
+	}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) < 3 {
+		t.Fatalf("expected >=3 discrete onToken calls, got %d: %v", len(got), got)
+	}
+	if joined := strings.Join(got, ""); joined != full {
+		t.Fatalf("expected joined tokens to reconstruct Complete()'s output exactly;\n got:  %q\n want: %q", joined, full)
+	}
+}
+
 func TestEchoEmbedIsDeterministicAndNormalized(t *testing.T) {
 	p := NewEchoProvider()
 	v1, err := p.Embed(context.Background(), "hello world")

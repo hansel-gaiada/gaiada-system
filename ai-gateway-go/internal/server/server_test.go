@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -63,6 +64,38 @@ func (p *rateLimitedProvider) Complete(_ context.Context, _ string) (string, err
 }
 func (p *rateLimitedProvider) Media(_ context.Context, _, _ string) (string, error) { return "", nil }
 func (p *rateLimitedProvider) Embed(_ context.Context, _ string) ([]float64, error) { return nil, nil }
+
+// fakeStreamingProvider (ASST-03 tests) implements providers.StreamingProvider directly, giving
+// full control over exactly how many tokens are emitted before a provider fails — standing in
+// for a real upstream dying mid-generation without a real network call. failBefore fails with
+// NO tokens emitted at all (pre-first-token failure); failAfter emits `tokens` first and THEN
+// fails (mid-stream failure). calls counts invocations of CompleteStream so a test can assert a
+// provider was — or, for the mid-stream-failover fix, was NOT — invoked.
+type fakeStreamingProvider struct {
+	name       string
+	tokens     []string
+	failBefore error
+	failAfter  error
+	calls      int
+}
+
+func (f *fakeStreamingProvider) Name() string    { return f.name }
+func (f *fakeStreamingProvider) Available() bool { return true }
+func (f *fakeStreamingProvider) Complete(_ context.Context, _ string) (string, error) {
+	return "", errors.New("fakeStreamingProvider: Complete should not be called — it implements StreamingProvider")
+}
+func (f *fakeStreamingProvider) Media(_ context.Context, _, _ string) (string, error) { return "", nil }
+func (f *fakeStreamingProvider) Embed(_ context.Context, _ string) ([]float64, error) { return nil, nil }
+func (f *fakeStreamingProvider) CompleteStream(_ context.Context, _ string, onToken func(string)) error {
+	f.calls++
+	if f.failBefore != nil {
+		return f.failBefore
+	}
+	for _, tok := range f.tokens {
+		onToken(tok)
+	}
+	return f.failAfter
+}
 
 // newTestServer builds a server around a caller-supplied chain (shared across all three
 // capabilities, which is fine for these single-capability tests) so B5 tests can control
@@ -534,5 +567,101 @@ func TestCompleteStreamIsNotBoundByProviderTimeout(t *testing.T) {
 	}
 	if elapsed < slow.delay {
 		t.Fatalf("expected the call to actually wait out the provider's %s delay (proving no fixed deadline cut it short), only took %s", slow.delay, elapsed)
+	}
+}
+
+// ASST-03 (plan §0.4): the mid-stream-failover bug. Before the fix, a provider error AFTER
+// tokens were already flushed to the client caused chain.Run to fail over to the next
+// provider — so the client received the first provider's partial output followed by the
+// second provider's full output, duplicated into one corrupt answer. The fix: once the FIRST
+// token has reached the client, a later error from that same attempt must emit the SSE `error`
+// event instead of failing over, and the next provider must never be invoked.
+//
+// ASST-04 note on the fixture: "reached the client" is now decided by the response-side DLP
+// scrubber releasing bytes to the wire, so the pre-failure output has to be longer than the
+// scrubber's trailing hold window (dlp.MaxDetectableSpan = 37 bytes) for anything to have
+// actually been flushed. The original two-word fixture ("hello"/"world", 10 bytes) would sit
+// entirely inside that buffer and is now the DIFFERENT case covered by
+// TestCompleteStreamShortBufferedOutputStillFailsOverCleanly below. The property asserted here
+// is unchanged.
+func TestCompleteStreamMidStreamFailureEmitsErrorAndNeverInvokesNextProvider(t *testing.T) {
+	first := &fakeStreamingProvider{
+		name: "first",
+		tokens: []string{
+			"hello, here is the first half of a real answer ",
+			"world of the second half arrives too ",
+		},
+		failAfter: errors.New("upstream died mid-generation"),
+	}
+	second := &fakeStreamingProvider{name: "second", tokens: []string{"should", "not", "appear"}}
+	c := chain.NewChain([]providers.Provider{first, second}, 3, 60_000, time.Now)
+	cfg := config.Config{GatewayToken: "secret", DailyCallCap: 1000, PerTenantDailyCallCap: 1000}
+	srv := newTestServer(t, cfg, c)
+	defer srv.Close()
+
+	req, _ := http.NewRequest("POST", srv.URL+"/complete/stream", bytes.NewReader([]byte(`{"prompt":"hi"}`)))
+	req.Header.Set("Authorization", "Bearer secret")
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer res.Body.Close()
+	b, _ := io.ReadAll(res.Body)
+	got := string(b)
+
+	// Both pre-failure tokens must be on the wire. Compared over the reassembled payload rather
+	// than per-`data:`-event because the DLP scrubber batches at safe boundaries, so token and
+	// SSE-event boundaries are no longer 1:1.
+	if payload := sseContent(got); !strings.Contains(payload, "hello") || !strings.Contains(payload, "world") {
+		t.Fatalf("expected both pre-failure tokens on the wire, got payload %q (raw %q)", payload, got)
+	}
+	if n := strings.Count(got, "event: error"); n != 1 {
+		t.Fatalf("expected exactly one SSE error event (not zero, not a duplicate from a failover), got %d in %q", n, got)
+	}
+	if strings.Contains(got, "should") || strings.Contains(got, "not") || strings.Contains(got, "appear") {
+		t.Fatalf("expected the second provider's output to never reach the client, got %q", got)
+	}
+	// The load-bearing assertion: the second provider must never be invoked at all, not merely
+	// "invoked but its output discarded."
+	if second.calls != 0 {
+		t.Fatalf("expected the second provider to never be invoked, got %d calls", second.calls)
+	}
+	if first.calls != 1 {
+		t.Fatalf("expected exactly one attempt against the failing first provider, got %d calls", first.calls)
+	}
+}
+
+// ASST-03: a provider that fails BEFORE emitting any token (nothing yet flushed to the client)
+// must still fail over to the next provider exactly as it did before the fix — the fix only
+// changes behavior once a token has actually reached the client.
+func TestCompleteStreamPreFirstTokenFailureStillFailsOver(t *testing.T) {
+	first := &fakeStreamingProvider{name: "first", failBefore: errors.New("upstream unavailable")}
+	second := &fakeStreamingProvider{name: "second", tokens: []string{"fallback", "answer"}}
+	c := chain.NewChain([]providers.Provider{first, second}, 3, 60_000, time.Now)
+	cfg := config.Config{GatewayToken: "secret", DailyCallCap: 1000, PerTenantDailyCallCap: 1000}
+	srv := newTestServer(t, cfg, c)
+	defer srv.Close()
+
+	req, _ := http.NewRequest("POST", srv.URL+"/complete/stream", bytes.NewReader([]byte(`{"prompt":"hi"}`)))
+	req.Header.Set("Authorization", "Bearer secret")
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer res.Body.Close()
+	b, _ := io.ReadAll(res.Body)
+	got := string(b)
+
+	if strings.Contains(got, "event: error") {
+		t.Fatalf("expected a clean failover with no SSE error event, got %q", got)
+	}
+	if !strings.Contains(got, "fallback") || !strings.Contains(got, "answer") {
+		t.Fatalf("expected the second provider's tokens on the wire, got %q", got)
+	}
+	if first.calls != 1 {
+		t.Fatalf("expected exactly one attempt against the failing first provider, got %d calls", first.calls)
+	}
+	if second.calls != 1 {
+		t.Fatalf("expected exactly one call to the second (successful) provider, got %d calls", second.calls)
 	}
 }

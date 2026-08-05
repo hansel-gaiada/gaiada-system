@@ -13,7 +13,7 @@ import { Body, Controller, HttpCode, Post, Req, UnauthorizedException } from "@n
 import type { FastifyRequest } from "fastify";
 import { config } from "../config";
 import { secretEquals } from "../core/secret-box";
-import { withGlobal } from "../db";
+import { withMailContext } from "../db";
 import { addSuppression } from "./suppressions";
 import { recordWebhookUnknown } from "./metrics";
 
@@ -65,7 +65,7 @@ export class MailWebhookController {
       recordWebhookUnknown();
       return;
     }
-    await withGlobal(async (c) => {
+    await withMailContext(async (c) => {
       const { rows } = await c.query<{ id: string; to_email: string }>(
         `SELECT id, to_email FROM mail_log WHERE provider_message_id = $1 LIMIT 1`,
         [messageId],

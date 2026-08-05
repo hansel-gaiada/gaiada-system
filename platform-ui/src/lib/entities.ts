@@ -108,6 +108,20 @@ export async function getCompany(u: string, _t: string, id: string): Promise<Com
   return list.find((c) => c.id === id) ?? null;
 }
 
+// D14-08 — `GET /api/companies/:companyId` now exists for real (`admin/company-crud.controller.ts`,
+// built alongside D14-07's settings write below) and is the only reader that carries `settings`
+// (`getCompany` above deliberately still derives from the list — untouched, other callers rely on
+// that shape). Degrades to `null` on 404/403 so a caller missing the grant sees "unavailable", not
+// a thrown error.
+export async function getCompanyDetail(u: string, id: string): Promise<CompanyDetail | null> {
+  try {
+    return await platformFetch<CompanyDetail>(`/api/companies/${id}`, u);
+  } catch (e) {
+    if (e instanceof PlatformError && (e.status === 404 || e.status === 403)) return null;
+    throw e;
+  }
+}
+
 // Company CRUD — BFF contract (backend TODO, see docs/FRONTEND-BFF-CONTRACT.md):
 //   POST  /api/companies                 body {name,type,parentCompanyId?,modules?} -> { id }
 //   PATCH /api/companies/:id              body (partial)                             -> { ok }
@@ -117,6 +131,17 @@ export const createCompany = (u: string, body: CompanyInput) =>
   platformFetch<{ id: string }>(`/api/companies`, u, { method: "POST", body: JSON.stringify(body) });
 export const updateCompany = (u: string, id: string, body: Partial<CompanyInput>) =>
   platformFetch<{ ok: true }>(`/api/companies/${id}`, u, { method: "PATCH", body: JSON.stringify(body) });
+
+// D14-07's namespaced settings write — the SAME `PATCH /api/companies/:id` above, but this is the
+// only key `company-crud.controller.ts` accepts under `settings` (a validated, individually-merged
+// path; never a blanket `settings` overwrite — see that controller's own header). Kept as its own
+// typed call rather than widening `CompanyInput` so nothing else on this page can accidentally send
+// an arbitrary `settings` blob through `updateCompany`.
+export const updateApprovalRetryCount = (u: string, companyId: string, autoRetryCount: number) =>
+  platformFetch<{ ok: true }>(`/api/companies/${companyId}`, u, {
+    method: "PATCH",
+    body: JSON.stringify({ settings: { automation: { approvalRetry: { autoRetryCount } } } }),
+  });
 
 // ---- Projects (list + detail endpoints both exist) ----
 export const listProjects = (u: string, t: string) => platformFetch<Project[]>(`/api/${t}/projects`, u);

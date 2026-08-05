@@ -122,6 +122,17 @@ function budgetedDeps(deps: AgentDeps, budget: { modelCalls: number; toolCalls: 
       return deps.callTool(name, args, envelope);
     },
     lastProvider: deps.lastProvider, // forward so write-routing can attribute the served provider
+    // D14-10: forward the approval resolver too. This object REPLACES the caller's deps for the whole
+    // subtree, so an unforwarded optional field is not "unused" — it is silently DROPPED, and the
+    // runner would fall back to throw-and-file for every sub-run. That exact class of omission (a
+    // value present upstream but not listed in the passthrough) has shipped four silently-disabled
+    // features in this estate; the resolver is deliberately not budgeted, because it performs no model
+    // call and any tool effect it triggers is the platform's, already counted on the approval row.
+    resolveApproval: deps.resolveApproval,
+    // D14-12: same hazard, same fix — forward the registry-impact reader so every sub-run's write gate
+    // sees the reconciled (stricter-of-two) impact, not just the top-level run. It is synchronous and
+    // free (no model/tool call), so it is not budgeted either.
+    getRegistryImpact: deps.getRegistryImpact,
   };
 }
 

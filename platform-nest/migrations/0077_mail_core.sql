@@ -1,26 +1,49 @@
 -- 0077_mail_core.sql — MAIL-04 (Zone A mail core; design doc
--- docs/superpowers/specs/2026-08-04-zone-a-mail-design.md v3, §5 DDL verbatim).
+-- docs/superpowers/specs/2026-08-04-zone-a-mail-design.md v3, §5 DDL verbatim), amended by MAIL-22
+-- (2026-08-05, senior-db) to restore the estate-wide FORCE-RLS invariant.
 --
 -- Ledger note: the design/plan docs both said "0076" as of the v3 write-up, but `0076` was taken
 -- out-of-band by a concurrent session (`0076_core_google_oauth_states.sql`) before this ticket
 -- executed. Re-checked with `ls migrations | sort | tail` immediately before writing this file —
--- `0077` was free and is taken here.
+-- `0077` was free and is taken here. This file is amended IN PLACE rather than superseded by a new
+-- migration: as of MAIL-22 it had been committed but never applied to any persistent database (only
+-- ephemeral per-test-file DBs created by `src/testing/setup.ts`), so amending it keeps the ledger at
+-- one coherent migration with no window in which these tables existed without RLS. Amending an
+-- APPLIED migration would violate README rule 4 — do not use this file as a precedent for that case.
 --
--- GLOBAL tables (no RLS at all — no ALTER ... ENABLE/FORCE ROW LEVEL SECURITY anywhere in this
--- file). Forced by design §6.1/F2: auth mail has no tenant (tenant_id NULL before any tenant
--- context exists), and under the platform's standard tenant_isolation policy a NULL tenant_id is
--- invisible to every tenant-scoped reader AND to platform_owner (deliberately NOBYPASSRLS) AND to
--- withGlobal (FORCE RLS + unset GUC ⇒ policy false) — a NULL-tenant row in a FORCE-RLS table is
--- readable by nobody, permanently. Same class as `users`/`identity_links` (the existing sanctioned
--- withGlobal surface, src/db/index.ts). `platform_owner` creates these tables; default privileges
--- (infra/db/init-cluster.sh's ALTER DEFAULT PRIVILEGES) auto-grant DML to `platform_app` — no
--- explicit GRANT needed here.
+-- RLS: MAIL-22 restores FORCE ROW LEVEL SECURITY on all three tables below, closing the gap
+-- `src/db/rls.test.ts`'s estate-wide "every tenant-scoped table has FORCE RLS" invariant flagged
+-- (`mail_log`/`mail_messages` carry `tenant_id`; the original cut left them and `mail_suppressions`
+-- with no RLS at all). The MAIL-04 reasoning this replaces was correct about the platform's
+-- *standard* `tenant_isolation` policy (a NULL `tenant_id` row is invisible under it to everyone,
+-- permanently — auth mail would be unreadable) but wrong to conclude from that that these tables
+-- must have NO RLS. The fix mirrors 0015_site_subscriptions_rls.sql's GUC-gate pattern: FORCE RLS
+-- plus a policy gated on a dedicated session GUC (`app.mail_context`) that only the mail module's
+-- own DB wrapper (`withMailContext`, src/db/index.ts) sets, via `set_config(..., true)` (SET LOCAL
+-- semantics, scoped to one transaction). NULL-tenant rows (auth mail) are gated on the SAME
+-- predicate as every other row here — the policy does not distinguish by tenant_id at all, only by
+-- whether the caller's connection opted into mail context — so auth mail stays fully readable and
+-- writable by the one code path that is supposed to touch it.
+--
+-- BE HONEST ABOUT WHAT THIS BUYS (stated plainly, not overclaimed): the GUC gate does not make mail
+-- data unreadable to code that sets `app.mail_context` — any code path that calls `withMailContext`
+-- (or issues the same `set_config` by hand) gets in, exactly as `withGlobal` got in before this
+-- change. What FORCE RLS + the gate restores is DEFENCE IN DEPTH: a future query added against
+-- `mail_log`/`mail_suppressions`/`mail_messages` through the ordinary `withGlobal`/`withTenants`
+-- helpers — i.e. code that forgot this table needs its own context — now fails closed (zero rows,
+-- or a WITH CHECK violation on write) instead of silently reading or writing global mail data.
+-- Application-layer authorization (the elevated-only admin log, the A10 parent-entity check on
+-- thread reads — see `src/mail/thread-authz.ts`) remains the PRIMARY gate; this is the backstop for
+-- when that layer is bypassed or misused, the same invariant every other FORCE-RLS table in this
+-- estate exists to provide.
 --
 -- Zero backfill DML in this file (no UPDATE/DELETE/INSERT...SELECT at all — every table below is
--- freshly created here with zero pre-existing rows), and even if there were, none of these tables
--- are FORCE-RLS, so the 0052+ CI backfill/RLS lint (scripts/lint-migration-rls.mjs) has nothing to
--- bite on by construction: that lint only flags DML against a table that carries FORCE ROW LEVEL
--- SECURITY, and no ALTER TABLE ... FORCE ROW LEVEL SECURITY statement exists anywhere below.
+-- freshly created here with zero pre-existing rows), so the 0052+ CI backfill/RLS lint
+-- (scripts/lint-migration-rls.mjs) — which now genuinely applies, since FORCE ROW LEVEL SECURITY
+-- statements exist below — still finds nothing to flag: that lint only flags UPDATE/DELETE/
+-- INSERT...SELECT against a FORCE-RLS table's PRE-EXISTING rows, and a table CREATE TABLE'd in this
+-- same file has none. Confirmed by running `npm run lint:migration-rls` after this amendment (see
+-- MAIL-22's report).
 
 CREATE TABLE mail_log (
   id uuid PRIMARY KEY,
@@ -86,3 +109,32 @@ CREATE TABLE mail_messages (
 );
 CREATE INDEX mail_messages_entity_idx ON mail_messages (entity_type, entity_id, received_at);
 CREATE INDEX mail_messages_log_idx    ON mail_messages (mail_log_id);
+
+-- MAIL-22 — GUC-gated FORCE RLS, mirroring 0015_site_subscriptions_rls.sql's `app.sync_context`
+-- pattern exactly, with a mail-specific GUC. One policy per table, unconditional on `tenant_id`
+-- (including NULL) — the gate is "did the caller's connection opt into mail context", not "does
+-- this row belong to tenant X". `withMailContext` (src/db/index.ts) is the ONLY place that sets
+-- `app.mail_context = 'on'`; every other NOBYPASSRLS reader of this database (withGlobal,
+-- withTenants, an ad-hoc psql session as the app role) sees zero rows and cannot write any, by
+-- construction. Standard Postgres caveat, not specific to this gate: a superuser or any role with
+-- BYPASSRLS ignores RLS/FORCE RLS entirely regardless of the GUC — `platform_owner` (migrations)
+-- and `platform_app` (runtime) are both deliberately NOBYPASSRLS (db-topology-roles), so this
+-- applies to every real connection in the estate; only a literal Postgres superuser session (e.g.
+-- the test harness's disposable-DB admin) is exempt, same as for every other FORCE-RLS table here.
+ALTER TABLE mail_log ENABLE ROW LEVEL SECURITY;
+ALTER TABLE mail_log FORCE ROW LEVEL SECURITY;
+CREATE POLICY mail_context ON mail_log FOR ALL
+  USING (current_setting('app.mail_context', true) = 'on')
+  WITH CHECK (current_setting('app.mail_context', true) = 'on');
+
+ALTER TABLE mail_suppressions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE mail_suppressions FORCE ROW LEVEL SECURITY;
+CREATE POLICY mail_context ON mail_suppressions FOR ALL
+  USING (current_setting('app.mail_context', true) = 'on')
+  WITH CHECK (current_setting('app.mail_context', true) = 'on');
+
+ALTER TABLE mail_messages ENABLE ROW LEVEL SECURITY;
+ALTER TABLE mail_messages FORCE ROW LEVEL SECURITY;
+CREATE POLICY mail_context ON mail_messages FOR ALL
+  USING (current_setting('app.mail_context', true) = 'on')
+  WITH CHECK (current_setting('app.mail_context', true) = 'on');

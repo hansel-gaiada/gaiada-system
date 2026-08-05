@@ -146,7 +146,7 @@ completes in dev.
 | A1 | `src/mail/` is core infrastructure, not a `ModuleContract` module (no per-tenant enable gate; same class as `src/events/`). | Unchanged. |
 | A2 | PG-backed queue (`mail_log` doubles as spool), `FOR UPDATE SKIP LOCKED`, chained-`setTimeout` sweeper, env-gated. Not BullMQ, not the outbox (Redis is optional in platform-nest; auth mail can't ride an optional dependency). | Unchanged. |
 | A3 | SMTP (nodemailer) is the v1 transport; adapter interface admits HTTP-API transports later. New dependency: `nodemailer` only. | Unchanged — and now even easier: relay + Brevo both speak SMTP. |
-| A4 | Mail tables are GLOBAL (no RLS); `tenant_id` is nullable provenance. Forced by F2 (§6.1). | Unchanged; now also covers `mail_messages`. |
+| A4 | Mail tables are GLOBAL; `tenant_id` is nullable provenance. Forced by F2 (§6.1). | **AMENDED by MAIL-22 (2026-08-05):** still global/not-tenant-isolated, but they now carry **FORCE RLS** with a GUC-gated `mail_context` policy (the `0015_site_subscriptions_rls.sql` pattern) instead of no RLS. "No RLS" broke `rls.test.ts`'s FORCE-RLS invariant — see the superseding note in §6.1. Covers all three tables. |
 | A5 | Email rides exclusively on `notifications` rows — the single tap is inside `notify()`, post-insert, fail-soft. | **Kept as the mechanism, allowlist collapsed**: the tap fires for exactly two types (§7.2). The invariant survives: you are only ever emailed about something that is in a bell (yours or, for clients, their portal bell). Auth/ops mail excepted as before. |
 | A6 | Templates are code (TS functions keyed by `template_key`), not DB rows. | Unchanged. |
 | A7 | One cross-tenant daily digest per user. | **WITHDRAWN with M7.** |
@@ -435,8 +435,32 @@ content columns; a later janitor can null them after 90 days (follow-up, not v1)
 
 ### 6.1 Why the mail tables are global (A4/F2) — the forced move, shown (preserved from v1)
 
+> **⚠️ SUPERSEDED IN PART — MAIL-22 (2026-08-05, owner-approved).** The reasoning below is correct
+> about the **standard `tenant_isolation` policy**, but its conclusion — "no RLS at all" — was wrong,
+> and shipping it broke a real invariant: `src/db/rls.test.ts`'s *"every tenant-scoped table has
+> FORCE RLS"* selects every table carrying a `tenant_id` column, so `mail_log` and `mail_messages`
+> made the mail module the first FORCE-RLS violation in the estate. That test exists precisely to
+> catch forgotten RLS, and widening it would have degraded the guard for every future table.
+>
+> The escape was already in the codebase: `0015_site_subscriptions_rls.sql` keeps a
+> **non-tenant-isolated** table under FORCE RLS by gating a policy on a GUC. RLS never required the
+> `tenant_id = ANY(<set>)` predicate — only the standard policy did.
+>
+> **Actual shipped design:** all three mail tables carry `ENABLE` + `FORCE ROW LEVEL SECURITY` plus a
+> `mail_context` policy — `USING/WITH CHECK (current_setting('app.mail_context', true) = 'on')` —
+> whose predicate ignores `tenant_id` entirely, so NULL-tenant auth mail stays fully readable and
+> writable and F2 is not recreated. A new `withMailContext()` in `src/db/index.ts` sets it inside a
+> transaction (`withGlobal` has no transaction, and `SET LOCAL` needs one); `withGlobal` itself is
+> unchanged, so `users`/`identity_links` callers are unaffected. `0077` was amended in place rather
+> than superseded, since it had never been applied to any persistent database.
+>
+> **Be precise about what this buys:** it is defence in depth, not a new primary gate. Code that sets
+> the GUC still sees all mail rows. What it restores is the catch on cross-tenant reads from code
+> that forgot to establish context — exactly the failure the invariant guards. The compensating
+> controls listed below remain the primary authorization, and every one of them still applies.
+
 The platform's standard posture is FORCE RLS + `tenant_isolation` on the authorized-tenant-set
-GUC. Mail cannot use it, for a structural reason:
+GUC. Mail cannot use **that policy**, for a structural reason:
 
 1. Auth mail has **no tenant** (`tenant_id NULL` — magic links exist before any tenant context).
 2. Under the standard policy, `tenant_id = ANY(<set>)` is NULL for a NULL tenant ⇒ the row is

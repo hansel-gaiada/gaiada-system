@@ -89,6 +89,63 @@ func writeErr(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
 }
 
+// --- ASST-10: SSE wire grammar v2 -------------------------------------------------------
+//
+// The bug: `fmt.Fprintf(w, "data: %s\n\n", token)` writing a raw (unescaped) token is broken
+// per the SSE spec the moment the token contains a newline. A bare `\n` inside the payload
+// starts a second physical line with no `field:` prefix, which a spec-compliant parser
+// DISCARDS — the text after the newline is silently lost, not merely reordered. A `\n\n`
+// inside the payload is worse: it is indistinguishable from the blank line that terminates
+// the event, so the event ends early and the remainder of that token starts a brand new
+// (fieldless, therefore discarded) event. Real Ollama emits paragraph breaks as literal `\n\n`
+// tokens, so this was broken in production, not just in theory.
+//
+// The fix (architect ruling, plan doc "ASST-10"): every `data:` line on this route is
+// EXACTLY ONE line of JSON, on every path (streamed tokens, `event: error`, the new
+// `event: done` terminal, and the single-chunk fallback — one grammar everywhere). A JSON
+// string encodes embedded newlines as the two-character escape `\n`, which cannot itself
+// contain a raw line break, so the SSE framing can never be split or truncated by the
+// payload's own content. `event: done` / `data: {}` is new: it is the ONLY way a consumer can
+// distinguish "the stream ended cleanly" from "the connection dropped mid-answer", and it did
+// not exist before this ticket.
+//
+// writeSSEData/writeSSEError/writeSSEDone are the ONLY functions that may write `data:` or
+// `event:` lines on this route — every call site below goes through one of them so the
+// one-line-of-JSON invariant cannot be bypassed by a future edit forgetting to encode.
+func writeSSEData(w http.ResponseWriter, flusher http.Flusher, canFlush bool, payload string) {
+	// json.Marshal of a Go string cannot fail (invalid UTF-8 is replaced, never rejected), so
+	// the encode error is not actionable — but guard it anyway rather than assume.
+	enc, err := json.Marshal(payload)
+	if err != nil {
+		enc, _ = json.Marshal(fmt.Sprintf("[unencodable token: %v]", err))
+	}
+	fmt.Fprintf(w, "data: %s\n\n", enc)
+	if canFlush {
+		flusher.Flush()
+	}
+}
+
+func writeSSEError(w http.ResponseWriter, flusher http.Flusher, canFlush bool, errMsg string) {
+	enc, err := json.Marshal(map[string]string{"error": errMsg})
+	if err != nil {
+		enc, _ = json.Marshal(map[string]string{"error": fmt.Sprintf("[unencodable error: %v]", err)})
+	}
+	fmt.Fprintf(w, "event: error\ndata: %s\n\n", enc)
+	if canFlush {
+		flusher.Flush()
+	}
+}
+
+// writeSSEDone writes the v2 clean-completion terminal. Emitted exactly once, only on a
+// success path that never wrote an `event: error` — see the single call site at the end of
+// the /complete/stream handler.
+func writeSSEDone(w http.ResponseWriter, flusher http.Flusher, canFlush bool) {
+	fmt.Fprint(w, "event: done\ndata: {}\n\n")
+	if canFlush {
+		flusher.Flush()
+	}
+}
+
 func authorized(r *http.Request, token string) bool {
 	if token == "" {
 		return false // fail-closed
@@ -647,40 +704,121 @@ func NewServer(cfg config.Config, chains Chains, b *budget.Budget, classifier *d
 		w.Header().Set("Cache-Control", "no-cache")
 		flusher, canFlush := w.(http.Flusher)
 
+		// streamed flips true on the FIRST token flushed to the client — see the long comment
+		// below the emit closure. Declared here because emit is what sets it.
+		streamed := false
+		midStreamErrorHandled := false
+
 		// Native streaming when the selected provider supports it; otherwise emit the full
 		// response as one SSE event so the wire contract is stable regardless.
+		//
+		// ASST-04: emit is the ONLY thing that writes response content to this wire, and
+		// everything reaching it has been through response-side DLP. There are two paths and
+		// both are covered:
+		//   1. streamed tokens  → dlp.StreamScrubber (below). Not a per-token scrub: a PAN split
+		//      across two provider tokens matches nothing in either fragment, so the scrubber
+		//      holds a trailing window ≥ the longest detectable span and only emits text no
+		//      future token can change. See internal/dlp/stream.go.
+		//   2. single-chunk fallback for a non-streaming provider → dlp.DLP(text) at the bottom.
+		// dlp.DLP earlier in this handler covers the PROMPT only and is not a substitute for
+		// either.
 		emit := func(token string) {
-			fmt.Fprintf(w, "data: %s\n\n", token)
-			if canFlush {
-				flusher.Flush()
-			}
+			streamed = true
+			// ASST-10: single-line JSON `data:` payload — see the writeSSEData comment above for
+			// why this is the only safe encoding for arbitrary token text.
+			writeSSEData(w, flusher, canFlush, token)
 		}
 		// Unlike Complete/Media/Embed, streaming deliberately does NOT wrap each attempt in a
 		// PROVIDER_TIMEOUT_MS deadline (B5 design doc §3.5): a legitimately long streamed
 		// response can exceed that single-call budget, and the SSE flush loop above is
 		// itself the liveness signal. r.Context() still propagates so a client disconnect
 		// cancels the in-flight upstream call.
-		streamed := false
-		text, _, _, err := chain.Run(chains.LLM, r.Context(), func(p providers.Provider) (string, error) {
+		//
+		// streamCtx (not r.Context() directly) is passed to chain.Run: mid-stream failover fix
+		// (planning-time bug, plan §0.4) below cancels it to stop chain.Run's loop from trying a
+		// second provider once tokens have already reached the client for this response.
+		streamCtx, cancelStream := context.WithCancel(r.Context())
+		defer cancelStream()
+
+		// `streamed` means "bytes for this response have reached the CLIENT" (ASST-03: once true,
+		// a provider error must never fail over — the client already has partial output from
+		// THIS provider, and appending a second provider's full answer would duplicate/corrupt
+		// it into one garbled response). ASST-04 does NOT change that definition; it changes
+		// where the flag is set, and the distinction matters:
+		//
+		//   - It is set inside `emit`, i.e. when the DLP scrubber releases bytes to the wire —
+		//     NOT when a provider hands over a token. A token still sitting in the scrubber's
+		//     trailing buffer has reached nobody, so failing over is still safe and still
+		//     produces one clean answer instead of a truncated one plus an error.
+		//   - That is only true because the buffer is DISCARDED on that path (scrubber.Reset()
+		//     below). Flushing it instead would prefix the dead provider's partial answer onto
+		//     the next provider's full answer — re-opening exactly the duplication ASST-03 closed.
+		//
+		// Consequence worth knowing: a response shorter than dlp.MaxDetectableSpan that fails
+		// mid-generation now fails over cleanly rather than emitting a stub + error. That is a
+		// strict improvement, and TestCompleteStreamShortBufferedOutputStillFailsOverCleanly
+		// pins it.
+		//
+		// midStreamErrorHandled tracks whether this handler already wrote the SSE `error` event
+		// itself, so the generic err != nil branch below doesn't write a second one.
+		scrubber := dlp.NewStreamScrubber(emit)
+		onToken := func(token string) { scrubber.Write(token) }
+		streamedAttempt := false
+		text, _, _, err := chain.Run(chains.LLM, streamCtx, func(p providers.Provider) (string, error) {
 			if sp, isStreaming := p.(providers.StreamingProvider); isStreaming {
-				if serr := sp.CompleteStream(r.Context(), result.Clean, emit); serr != nil {
+				if serr := sp.CompleteStream(streamCtx, result.Clean, onToken); serr != nil {
+					if streamed {
+						// Scrubbed bytes from THIS attempt already reached the client. Flush the
+						// held tail (so the client gets everything the provider did produce, once
+						// — Close is idempotent), then emit the error event directly and cancel
+						// streamCtx so chain.Run's loop — which checks ctx.Err() at the top of
+						// each iteration, before trying the next provider — breaks instead of
+						// failing over. The second provider is therefore never invoked.
+						_ = scrubber.Close()
+						writeSSEError(w, flusher, canFlush, serr.Error())
+						midStreamErrorHandled = true
+						cancelStream()
+					} else {
+						// Nothing reached the client: everything this attempt produced is still
+						// inside the DLP buffer. Drop it so the next provider starts clean.
+						scrubber.Reset()
+					}
 					return "", serr
 				}
-				streamed = true
+				streamedAttempt = true
 				return "", nil
 			}
-			return p.Complete(r.Context(), result.Clean)
+			return p.Complete(streamCtx, result.Clean)
 		})
 		if err != nil {
-			fmt.Fprintf(w, "event: error\ndata: %s\n\n", err.Error())
-			if canFlush {
-				flusher.Flush()
+			if !midStreamErrorHandled {
+				writeSSEError(w, flusher, canFlush, err.Error())
 			}
 			return
 		}
-		if !streamed {
-			emit(text)
+		// Exactly one flush of the held tail on the success path (no-op if the winning provider
+		// was non-streaming, or if the mid-stream branch above already closed). Skipping it would
+		// truncate every streamed response by up to dlp.MaxDetectableSpan bytes.
+		if cerr := scrubber.Close(); cerr != nil {
+			writeSSEError(w, flusher, canFlush, cerr.Error())
+			return
 		}
+		if !streamedAttempt {
+			// Non-streaming provider: the whole response arrives at once, so it goes out as one
+			// SSE event (stable wire contract) — but it is scrubbed, fail-closed, exactly like
+			// the streamed path. This sink was equally unscrubbed before ASST-04.
+			clean, derr := dlp.DLP(text)
+			if derr != nil {
+				writeSSEError(w, flusher, canFlush, derr.Error())
+				return
+			}
+			emit(clean.Clean)
+		}
+		// ASST-10: the clean-completion terminal. Reached ONLY on a success path — every error
+		// branch above returns before this point — so a consumer can rely on `event: done` to
+		// mean "the answer is complete" and its absence (stream just closes) to mean an abnormal
+		// drop, never ambiguity between the two.
+		writeSSEDone(w, flusher, canFlush)
 	})
 
 	return mux

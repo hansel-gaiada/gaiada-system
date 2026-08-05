@@ -439,6 +439,7 @@ in code, flagged only for "no frontend wired" rather than "backend pending":
 | ✅ (no UI) | GET | `/health` | `health/health.controller.ts` — bare, no `/api` prefix; infra healthcheck only. |
 | ✅ (UI built, APPR-01) | POST/GET | `/api/:t/automation-approvals[/:id][/:id/decide]` | `core/automation-approvals.controller.ts` — WS4 automation-suspension surface; distinct from `/modules/agency/approvals`. **APPR-01 (2026-08-05) added `GET /:id`** — the single-row read backing `platform-ui`'s `/approvals/[id]` detail page (`lib/approvals.ts`'s `getAutomationApprovalDetail`). Fetches the row BEFORE authorizing (mirrors the existing `decide()`'s own WSD-4 pattern) so an hr-origin row's `module:'hr'` branch of `resource_automation_approval.yaml` still applies; a cross-tenant id is invisible via RLS ⇒ 404, never a leak. Response is camelCase (`workflowId`/`toolName`/`toolArgs`/`agentName`/`requestedByName`/`decidedByName`/`executionStatus`/…), NOT a mirror of the list's snake_case rows — nothing else consumed a single row before this. Same `read` action the list already gates on; no Cerbos policy change. |
 | ✅ (UI built, APPR-01) | GET | `/api/:t/modules/agency/approvals/:approvalId` | `modules/agency/agency.controller.ts` — the agency twin of the row above, same rationale + same fetch-before-authorize shape, same `read` action `pending`/`decided` already use. camelCase (`campaignId`/`campaign`/`assetId`/`requestedByName`/`decidedByName`/…). Module-gated like every other route in this controller (404 if `agency` isn't enabled for the tenant). |
+| ✅ (no UI — machine surface) | POST | `/api/:t/automation-approvals/resolve-and-execute` | **D14-10** — `core/automation-approvals.controller.ts`. NOT a UI endpoint and must never be called from `platform-ui`: it is how the **agent runner** (`ai-agents`) resumes a suspended goal under the owner’s D14-b "re-run from the top" decision. Body `{agentName, toolName, toolArgs}`; matches a decided `origin='agent'` row on `(workflow_id = agentName, tool_name, canonical argsSha256)` and returns a typed `{match: none|executed|rejected|executing|failed|not_executable}` — every branch is a **200** so the caller can never mistake a fault for "nothing on file" (that mistake re-files a duplicate approval). Executes only through D14-03’s single-use `pending → executing` claim, so the executor-auto-execute and re-run paths together produce exactly ONE tool call; the loser consumes the stored `execution_result`. Cerbos-gated to the ORIGINAL requester (`create` + `requested_by == principal`), never the approver — a non-requester gets 403, not `none`. The approvals UI keeps using `/:id`, `/:id/decide` and `/:id/retry`. |
 | ✅ (no UI) | GET | `/mcp/tool-defs` | `modules/mcp-tools.controller.ts` (`@Controller("mcp")`) — consumed by MCP Hub, not platform-ui. |
 | ✅ (no UI) | POST | `/principal/resolve`, `/identity/enroll/start`, `/identity/enroll/confirm` | `identity/identity.controller.ts` — root-level, not under `/api`; OBO/D4 enrollment, service-to-service. |
 | ✅ **STALE "no UI" tag — now consumed** | GET/POST | `/api/:t/portal/runs[/:runId]`, POST `/gates/:id/decide`, POST `/runs/:runId/scope-sign` | `core/portal.controller.ts` — the client portal (`/portal`, `lib/portal.ts`). WD-03 (Web Dev Phase 1 §12, D-3): the sign view now renders the LATEST stage artifact (`ArtifactMarkdown`) above the sign/feedback action for the gate it governs — "what a client signs must be what they see." Full doc sweep for this row + neighbors is WD-07's ticket, not redone here. **D-3 notify delta (2026-08-03):** `POST /portal/gates/:id/decide` now notifies the internal side (the run's `owner_id`, else its `created_by`) via `notify()`, and `POST /runs/:runId/scope-signoffs` / this controller's own `scope-sign` notify BOTH sides once `scope.signed` completes — `href: "/pipeline/:runId"` for staff, `href: "/portal"` for the client. Best-effort: a `notify()` failure is caught per-recipient and logged (`[client-notify]`), never rolls back the decide/sign-off write. No response-shape change. **C3/C5 delta (2026-08-04):** `GET /portal/runs` returns each run's **`pendingActions`** count (outstanding client decisions) and computes every blockage in TWO batched queries instead of two per run — it was 2N+1, up to 201 round trips on a full page, on the one surface whose latency is paid by someone outside the company. `GET /portal/runs/:runId` is now actually rendered; before this the reader and its type existed as dead code and the list page fetched every run's detail (1+N HTTP calls) to inline it. **Route moved (CP-2..CP-5, 2026-08-04):** it renders at **`(portal)/portal/approvals/[runId]`**, not `(app)/portal/[runId]` — the client portal is now its own route group with its own `PortalShell`, and the readers moved to `lib/portal-data.ts` (types + pure helpers stayed in `lib/portal.ts`, which is now deliberately client-safe for the live-SSE component). `pendingActions` feeds the new approvals list and `PortalGateActions` is reused verbatim, so this delta's substance is intact — only the path changed. |
@@ -1414,3 +1415,103 @@ returns the same shape, pinned in `lib/mail.test.ts`. `platform-ui`'s new `/appr
 (`app/(app)/approvals/[id]/page.tsx`) is what that id-bearing link now resolves to — see §8's two
 new `GET .../:id` rows above for the reads it's built on, and MODULES.md/CHANGELOG.md for the
 full writeup (both projects, `IN PROGRESS`, `PENDING-DEPLOY` on the live-walk ACs).
+
+## 18. Assistant module (ASST-* program, 2026-08-05) — `modules/assistant/assistant.controller.ts` — **BACKEND ✅ BUILT — threads/messages CRUD (ASST-05) + send→stream engine (ASST-06); no UI consumer yet**
+
+From `docs/blueprints/assistant-foundation.md` (design) and
+`docs/superpowers/plans/2026-08-05-d14-and-assistant-tickets.md` ("### ASST-05", the authoritative
+ticket). Module key `'assistant'`; dark unless `companies.enabled_modules ∋ 'assistant'` OR an
+ACTIVE `service_assignment` serves it. All routes mounted `/api/:tenantId/assistant/*` (no
+`/modules/` segment — matches the blueprint's literal BFF contract table, same top-level-prefix
+convention as `PmController`/`ItController`).
+
+**Authorization model — read before touching this surface.** `assistant_thread` is **owner-only,
+with NO company_admin/group_executive/superadmin bypass** (ASST-02's Cerbos policy,
+`cerbos/policies/resource_assistant_thread.yaml`, live + verified). Every `authorize()` call passes
+`ownerId` — list uses the caller's own id (self-scoped by construction), read/update/delete use the
+FETCHED row's `owner_user_id`, never anything client-supplied. A same-company user who isn't the
+owner gets **403**, not a degraded view — this is deliberate, not a gap to "fix" toward consistency
+with other resources' admin-bypass rules. Do not add one; see the policy file's header for why.
+
+- ✅ `GET /api/:t/assistant/threads` — paginated (`limit`/`offset`, default 50 / max 200),
+  substring search on title (`q`), optional `status` filter (`active`/`archived`), ordered
+  pinned-first then `last_message_at DESC NULLS LAST`. Response `{ items, total }`.
+- ✅ `POST /api/:t/assistant/threads` — `{ title?, brainProvider?, brainModel? }` → `{ id }`. Owner
+  is always the caller; `brain` is stored but **not routed** until Phase 2 (ASST-06/Hermes) — see
+  that ticket, not this one, for per-brain dispatch.
+- ✅ `GET /api/:t/assistant/threads/:id` — thread + paged messages (`messageLimit` default 200/max
+  500, `beforeSeq` cursor for older pages), returned oldest→newest. Response
+  `{ thread, messages, hasMoreMessages }`.
+- ✅ `PATCH /api/:t/assistant/threads/:id` — rename (`title`) / pin (`pinned`) / archive
+  (`status: 'active'|'archived'`) / brain (`brainProvider`/`brainModel`).
+- ✅ `DELETE /api/:t/assistant/threads/:id` — hard delete; CASCADEs to `assistant_messages` →
+  `assistant_tool_calls`, and SETs NULL (row survives) on `assistant_memory.source_thread_id` —
+  proven by `modules/assistant/assistant.test.ts`'s cascade probe (admin-pool reads, not just
+  invisible-under-RLS).
+- Deliberately **NO** `writeActivity()`/`notify()` call on any of the above: the tenant activity
+  feed (`GET :t/activity`) is readable by every plain member, and writing thread metadata into it
+  would leak a private thread's existence/title to people with no Cerbos grant to read it — the
+  same class of admin-adjacent backdoor the Cerbos policy itself refuses to open.
+- ✅ **`POST /api/:t/assistant/threads/:id/messages`** (ASST-06) — `{ content }` →
+  `{ messageId, streamUrl }`. The "POST" half of the POST-then-GET pair (`EventSource` cannot
+  POST). Persists the user's message AND an assistant-role **placeholder** (`content=NULL,
+  error_kind=NULL`) at the next two `seq` values, in ONE transaction, behind a
+  `pg_advisory_xact_lock` on the thread id (same idiom as `core/pipeline-lock.ts`'s WD-29 fix,
+  own namespace) — the placeholder's existence + null-content state IS the "generation pending"
+  signal (no new column). A second send while one is still pending/streaming gets **409**, not a
+  silent interleave — the lock only serializes the race, a precondition re-check INSIDE it (the
+  same D14 lesson: a lock alone is not enough) is what makes the loser actually refuse.
+- ✅ **`GET /api/:t/assistant/threads/:id/stream?messageId=<id>`** (ASST-06) — SSE. Re-emits
+  typed events `token` (`{text}`), `usage` (`{tokens, latencyMs}` — **an ~4-chars/token estimate**,
+  not a real tokenizer count: the gateway's `/complete/stream` wire has no `usage` field, ASST-10),
+  `done` (`{}`), `error` (`{error, errorKind}`). `errorKind` ∈ `upstream_error` (the gateway sent
+  `event: error`) | **`abnormal_drop`** (the gateway's stream ended with NEITHER `done` NOR
+  `error` — treated as a failure, never as success, per ASST-10's explicit mandate) | `idle_timeout`
+  (no upstream activity for `ASSISTANT_STREAM_IDLE_TIMEOUT_MS`, default 60s — a stalled generation
+  fails visibly instead of hanging the connection forever) | `stopped` (see below) |
+  `client_disconnected` | `not_configured` (`GATEWAY_URL` unset) | `transport_error`. On `done`,
+  the placeholder is finalized with the full text + the token estimate + latency and the thread's
+  `total_tokens`/`last_message_at` are bumped; on ANY other outcome it is finalized with the
+  partial text received so far (possibly `""`) + a typed `error_kind` — a stopped/failed
+  generation's partial reply is always visible, never silently discarded. Re-opening an
+  already-finalized `messageId` **404s**. **`provider`/`model` are left NULL** on every streamed
+  message — the gateway's SSE wire does not name which provider actually served a streamed
+  reply (unlike `/complete`'s `{text,provider}` shape), so recording the thread's requested
+  `brainProvider` would misattribute a failed-over reply. **Thread `brain` is stored but NOT
+  ROUTED in Phase 1** — the gateway's own chain/failover picks the provider; per-brain dispatch is
+  Phase 2. Context assembly (`modules/assistant/context.ts`) folds the system preamble + a
+  rolling **compaction summary** + the most recent messages (char-budget
+  `ASSISTANT_CONTEXT_CHAR_BUDGET`, default 12000) into the single `prompt` string
+  `/complete(/stream)` accepts (that route has no chat-messages array). **Compaction v1**: when
+  the window overflows, the oldest excerpt is folded into `assistant_threads.compaction_summary`
+  via one `POST /complete` call and `compaction_summary_upto_seq` advances — the RAW messages are
+  NEVER deleted, so resuming an old thread still replays every one of them (`GET .../threads/:id`
+  already pages through the full transcript); only a NEW generation's prompt is shortened.
+- ✅ **`POST /api/:t/assistant/threads/:id/stop`** (ASST-06) → `{ ok, stopped }`. **Cancels the
+  upstream gateway request** (aborts the in-flight `fetch`, which propagates to ai-gateway-go's
+  own `r.Context()` and stops `chain.Run` mid-provider) — verified directly against a fake
+  gateway observing the client disconnect, not inferred (`assistant-stream.test.ts`). Two paths:
+  if this process is running the generation, abort it via an in-memory per-thread registry
+  (`modules/assistant/stream.ts`, best-effort/single-instance-v1 — same posture as mcp-hub's D14
+  nonce cache); otherwise (never opened, or already finished on this process) a direct `UPDATE`
+  closes any still-pending placeholder so the thread is never left wedged. The SSE socket
+  disconnecting client-side (tab closed) triggers the identical cancellation path.
+- Deliberately **NO** `writeActivity()`/`notify()` call on any of the above (same reasoning as
+  ASST-05's CRUD — see above).
+- **⬜ PENDING (ASST-06+):** `GET /api/:t/assistant/capabilities`,
+  `GET·POST·DELETE /api/:t/assistant/memory`, `POST .../messages/:id/feedback`,
+  `POST .../threads/:id/handoff` — phases 2-5 of the blueprint's build sequence (§9), not
+  decomposed into tickets yet. Tool-call (`tool_call`/`tool_result`/`approval_required`) SSE
+  events are Phase 3 — this ticket's relay never emits them.
+- **⬜ PENDING:** `/assistant` UI (`platform-ui`) + `lib/assistant.ts` (ASST-07). Backend is
+  UI-ready for all eight endpoints above.
+- **DEVOPS — SSE-BEHIND-A-PROXY (not yet applied, ASST-09's job):** nginx buffers SSE by default;
+  the client portal's own stream (`core/portal-stream.controller.ts`) needed a hand-applied
+  `proxy_buffering off` / `X-Accel-Buffering: no` vhost block before it worked in production. THIS
+  route (`GET .../threads/:id/stream`) needs the identical treatment — the response already sends
+  `X-Accel-Buffering: no` itself, but the vhost-level `proxy_buffering off` block is still a
+  separate, deploy-side step (belt-and-braces, per the portal's own precedent) — or it will work
+  in local dev and look silently dead (buffered until close) behind the real proxy.
+- `ModuleContract.mcpTools` and `rollupProviders` are deliberately **empty** in this ticket — the
+  tool-broker surface is Phase 3 (unregistered on purpose, not a placeholder omission) and no
+  metric surface is specified yet. See `modules/assistant/index.ts`'s header comment.

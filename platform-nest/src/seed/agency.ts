@@ -9,32 +9,15 @@ import { newId, withGlobal, withTenants, closePool } from "../db";
 import { config } from "../config";
 import { migrate } from "../db/migrate";
 import { createRole, grantRole, addMembership } from "../testing/fixtures";
+import { seedDepartmentsAndHr, type SeededDepartments } from "./departments";
+import { EMPLOYEES, AGENCY_DEPTS } from "./roster";
 
 const HOLDING_NAME = "D & A Syrowatka";
 const AGENCY_NAME = "Gaia Digital Agency";
 const RESORT_NAME = "Sanur Resort";
 const site = () => config.originSite;
 
-// Agency employees placed under org-tree nodes (division v-* or, for the no-division
-// departments Social Media / GM, the department d-*). Reused people (existing emails)
-// resolve to their existing accounts; the rest are created. [email, name, title, target].
-const EMPLOYEES: [string, string, string, string][] = [
-  ["gede@gaia.test", "Gede Pratama", "Frontend Developer", "v-webdev"],
-  ["komang.adi@gaia.test", "Komang Adi", "Backend Developer", "v-webdev"],
-  ["putu.yoga@gaia.test", "Putu Yoga", "Web Maintenance Engineer", "v-webmaint"],
-  ["hansel@gaiada.com", "Clement Hansel", "AI Manager", "v-aimgr"],
-  ["kadek.sari@gaia.test", "Kadek Sari", "UI/UX Designer", "v-uiux"],
-  ["design@gaiada-creative.test", "Citra (Design)", "Senior Designer", "v-design"],
-  ["luh.ayu@gaia.test", "Luh Ayu", "Graphic Designer", "v-design"],
-  ["wayan.krisna@gaia.test", "Wayan Krisna", "Video Editor", "v-video"],
-  ["nyoman.bagus@gaia.test", "Nyoman Bagus", "SEO Specialist", "v-seo"],
-  ["kadek.rai@gaia.test", "Kadek Rai", "SEM Specialist", "v-sem"],
-  ["copy@gaiada-creative.test", "Dewi (Copy)", "Copywriter", "v-copy"],
-  ["putu.wira@gaia.test", "Putu Wira", "Backlink Specialist", "v-backlink"],
-  ["made.ayu@gaia.test", "Made Ayu", "Social Media Manager", "d-social"],
-  ["komang.dewi@gaia.test", "Komang Dewi", "Content Creator", "d-social"],
-  ["owner@gaiada-creative.test", "Ayu (Owner)", "Managing Director", "d-gm"],
-];
+// The people roster + department/division shape both seeds share now live in ./roster.
 type Placements = Record<string, { id: string; name: string }[]>;
 
 export interface SeededAgency {
@@ -46,6 +29,7 @@ export interface SeededAgency {
   projects: string[];
   campaignId: string;
   intakeProjectId: string;
+  departments: SeededDepartments;
 }
 
 // ---- idempotent ensure-helpers ----
@@ -95,7 +79,7 @@ const unit = (kind: string, refId: string, refName: string, respId: string, resp
 export async function seedAgency(): Promise<SeededAgency> {
   // ---- Holding + member companies ----
   const holdingId = await ensureCompany(HOLDING_NAME, [], "holding", null);
-  const tenantId = await ensureCompany(AGENCY_NAME, ["agency", "hr", "reports"], "agency", holdingId);
+  const tenantId = await ensureCompany(AGENCY_NAME, ["agency", "hr", "reports", "assistant"], "agency", holdingId);
   const resortId = await ensureCompany(RESORT_NAME, [], "resort", holdingId);
 
   // ---- People ----
@@ -195,8 +179,11 @@ export async function seedAgency(): Promise<SeededAgency> {
   await seedComplianceAndFields(tenantId);
   await seedCheckinsAndFacts(tenantId, users);
   await seedResort(resortId, users);
+  // Per-department project portfolios (incl. GM), a task for every placed employee, and the HR
+  // file set that matches the same roster. Runs last: it reads the org tree seeded above.
+  const departments = await seedDepartmentsAndHr(tenantId, clients, users.admin);
 
-  return { tenantId, holdingId, resortId, users, clients, projects, campaignId, intakeProjectId };
+  return { tenantId, holdingId, resortId, users, clients, projects, campaignId, intakeProjectId, departments };
 }
 
 // ---- Org structures ----
@@ -208,13 +195,7 @@ async function seedOrgStructures(tenantId: string, resortId: string, u: Record<s
   const dept = (id: string, name: string, divisions: [string, string][]) =>
     ({ id, name, kind: "department", children: [...divisions.map(([vid, vname]) => div(vid, vname)), ...people(id)] });
   const agency = {
-    root: { id: "root", name: AGENCY_NAME, kind: "company", children: [
-      dept("d-webdev", "Web Dev", [["v-webdev", "Web Dev"], ["v-webmaint", "Web Maintenance"], ["v-aimgr", "AI Manager"], ["v-uiux", "UI/UX"]]),
-      dept("d-creatives", "Creatives", [["v-design", "Design Graphics"], ["v-video", "Video Editor"]]),
-      dept("d-seo", "SEO", [["v-seo", "SEO"], ["v-sem", "SEM"], ["v-copy", "Copywriter"], ["v-backlink", "Backlink"]]),
-      dept("d-social", "Social Media", []),
-      dept("d-gm", "GM", []),
-    ] },
+    root: { id: "root", name: AGENCY_NAME, kind: "company", children: AGENCY_DEPTS.map((d) => dept(d.id, d.name, d.divisions)) },
   };
   const resort = { root: { id: "root", name: RESORT_NAME, kind: "company", children: [
     { id: "d-ops", name: "Operations", kind: "department", children: [
@@ -467,6 +448,8 @@ if (require.main === module) {
     console.log(`  AGENCY_TENANT_ID=${r.tenantId}`);
     console.log(`  RESORT_TENANT_ID=${r.resortId}`);
     console.log(`  INTAKE_PROJECT_ID=${r.intakeProjectId}`);
+    console.log(`  departments: ${r.departments.departments.map((d) => `${d.name}(${d.people})`).join(", ")}`);
+    console.log(`  department tasks created: ${r.departments.tasksCreated}`);
     await closePool();
     process.exit(0);
   })().catch((e) => { console.error(e); process.exit(1); });

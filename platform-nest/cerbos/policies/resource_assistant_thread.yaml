@@ -1,0 +1,69 @@
+# ASST-02 — assistant_thread: owner-private, with NO admin backdoor.
+#
+# Ticket: docs/superpowers/plans/2026-08-05-d14-and-assistant-tickets.md ("### ASST-02").
+# Design: docs/blueprints/assistant-foundation.md §6 (authorization) and §8's note that the
+# reference implementation (aivory) has no equivalent — this owner-private model is an
+# ERP-specific requirement the reference never needed, not something inherited from it.
+#
+# WHY OWNER-PRIVATE, WITH NO ELEVATED READ RULE (do not "fix" this under test pressure):
+# Triggering an agent goal and reading its run transcript are `isElevated`-only elsewhere in this
+# platform (`admin/intelligence.controller.ts`) precisely because a transcript can contain tool
+# output that was fetched under the TRIGGERING USER's own authority — an admin reading it would be
+# reading through someone else's authority by proxy. A chat thread IS a transcript (assistant_messages
+# + assistant_tool_calls). The assistant is safe for ordinary, non-elevated users ONLY because two
+# things both hold: (1) tools execute under the chatting user's own Cerbos principal (never a service
+# principal — see resource_assistant_tool_call semantics folded into assistant_messages/tool_calls),
+# AND (2) the thread stays private to its owner. Widening this read rule to any admin role breaks
+# invariant (2) and turns every admin grant into a transcript-reading backdoor across every tool a
+# user has ever run through the assistant.
+#
+# So, DELIBERATELY: there is NO `company_admin` / `group_executive` / `platform_admin` rule below.
+# This is the ONE resource policy in this repo that must NOT open with the wildcard
+# `derivedRoles: ["platform_admin"]` allow-all rule every neighbouring resource_*.yaml file starts
+# with (see resource_hr_record.yaml, resource_hr_case.yaml, resource_integration_connection.yaml,
+# resource_notification.yaml, etc. for that pattern, and note its ABSENCE here is intentional, not a
+# gap someone should "restore for consistency"). Admin access to someone's private assistant thread
+# is a separate, audited feature that is deliberately absent in v1 (blueprint §6, §8) — build it, if
+# ever, as its own explicit, logged action, not as a rule reuse here.
+#
+# THE RULE ITSELF: base role `user` (every principal has it, per rbac/cerbos.ts's
+# `principalPayload` — it is NOT a derived/elevated role) plus the shared `owns` variable
+# (`_variables.yaml`: `has(resource.attr.ownerId) && resource.attr.ownerId == principal.id`), which
+# is exactly "the caller is this thread's owner" and nothing else. `owns` also fails CLOSED (not
+# open) if a handler forgets to pass `ownerId` — `has()` guards it, matching the codebase-wide
+# convention (see resource_integration_connection.yaml's comment on the same variable).
+#
+# ── CRITICAL ENVIRONMENT TRAP (verified 2026-08-05 while building this exact ticket) ─────────────
+#   1. THIS IS A NEW POLICY FILE. A newly-added Cerbos policy file is NOT hot-reloaded over the
+#      Windows bind mount — inotify does not cross it, even though `cerbos.yaml` sets
+#      `watchForChanges: true` and edits to EXISTING files do pick up live. After adding this file
+#      (or `resource_assistant_memory.yaml`) you MUST restart the Cerbos container that serves the
+#      environment you're testing against.
+#   2. An UNLISTED resource `kind` is a SILENT DENY: every check against `assistant_thread` before
+#      the restart returns deny, with no error surfaced anywhere — it reads EXACTLY like a policy
+#      logic bug (e.g. "the owner rule must be wrong"), not a missing/stale-policy problem. Before
+#      trusting ANY deny result against a new kind, run a smoke check that the owner-ALLOW path
+#      actually returns ALLOW — a matrix where every case denies is the signature of this trap, not
+#      a passing test.
+#   3. In THIS repo, the container the test suite reaches is `gaiada-test-cerbos` (publishes
+#      :3592) — NOT `gaiada-cerbos-1` (the app's own dev Cerbos, unpublished ports internally).
+#      Restarting the wrong container changes nothing the tests can see. Prod is unaffected by this
+#      trap: the deploy pipeline's existing Cerbos-restart step already restarts the real container
+#      on every deploy, so a new policy file lands correctly there without any extra step — see the
+#      deploy runbook note added alongside this file.
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: assistant_thread
+  variables:
+    import: ["gaiada_common"]
+  rules:
+    # Owner, full stop. Every thread action — including message/stream/stop, which are as
+    # sensitive as read/update since they drive or observe the live transcript — requires
+    # `principal.id == resource.attr.ownerId` within the tenant. No other rule exists in this file.
+    - actions: ["create", "read", "update", "delete", "message", "stream", "stop"]
+      effect: EFFECT_ALLOW
+      roles: ["user"]
+      condition:
+        match:
+          expr: "variables.inTenant && variables.notLow && variables.owns"

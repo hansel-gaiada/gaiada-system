@@ -8,6 +8,44 @@
 #   - automation (isAutomation): the tool must be in the workflow's scope, AND unattended runs may
 #     only perform LOW-impact writes — medium/high/unclassified writes are denied (the hub turns
 #     that denial into a "suspend for human approval", WS4 §3 / D14).
+#   - D14-13: …UNLESS the hub presents a VERIFIED single-use execution grant for exactly this call,
+#     surfaced as the `approvalId` resource attribute (see below).
+#
+# ───────────────────────────────────────────────────────────────────────────────────────────────────
+# D14-13 — the grant-aware impact conjunct (architect ruling, mechanism (b)+(c);
+# docs/superpowers/plans/2026-08-05-d14-and-assistant-tickets.md Amendment (2) + §1).
+#
+# WHY IT EXISTS: this policy is the impact gate's SECOND, independent encoding. Cerbos is
+# authoritative whenever CERBOS_URL is set (it is, for mcp-hub and mcp-hub-central in
+# infra/compose/docker-compose.vps.yml), so D14-04's hub-side grant alone would leave every
+# origin='automation' re-drive Cerbos-DENIED and the approval row `failed`. Lifting the suspension
+# requires BOTH encodings to know about the grant.
+#
+# `request.resource.attr.approvalId` is set by mcp-hub/src/cerbos.ts EXCLUSIVELY from D14-04's
+# branded VerifiedExecutionGrant — an object only verifyExecutionGrant() can mint (HMAC over the
+# payload + canonical args digest + ≤120s expiry + the platform-side single-use `pending → executing`
+# claim). It is NEVER read from caller args, a caller header, or any unverified source, and it is only
+# attached to the resource whose `name` the grant itself names.
+#
+# PLACEMENT IS LOAD-BEARING: the disjunct hangs off the IMPACT term ONLY, INSIDE the
+# `automationScope` conjunction. One level out and a grant would also bypass the workflow's
+# AUTOMATION_ALLOWLIST — i.e. an approval for one tool would unlock every tool. The assurance
+# conjunct above is a separate `all.of` entry and is likewise unreachable from here: a grant can
+# never buy assurance rank. (Regression-tested: mcp-hub/src/cerbos.test.ts, cases
+# "misplacement detector" and "assurance still binds with a grant".)
+#
+# THE EXECUTABLE-TOOL LIST BELOW MIRRORS platform-nest/src/core/approval-executables.ts. It is the
+# containment for the one dangerous bug class (attribute set without verification): even then, only
+# these tools can be lifted. Every ticket that registers a new executable approval MUST add the tool
+# name in BOTH places — and drift fails CLOSED (registry entry without a policy entry ⇒ Cerbos deny
+# ⇒ a visible `failed` approval row, never a silent allow). MONEY-SPENDING TOOLS
+# (search.setBudget / search.applyNegatives / search.launchCampaign — SM-55 / architect ruling A13)
+# ARE PERMANENTLY BARRED FROM BOTH LISTS.
+#
+# The `has()` + string-type + non-empty triple is fail-closed for every shape a request can carry:
+# attribute absent (every pre-existing request), empty string, and JSON null all fall through to the
+# unchanged deny. Without the `type(...) == string` guard, CEL's heterogeneous `!=` would let a null
+# satisfy `!= ""` — so that guard is load-bearing, not decoration.
 apiVersion: api.cerbos.dev/v1
 resourcePolicy:
   version: default
@@ -25,8 +63,15 @@ resourcePolicy:
                   request.principal.attr.assurance == "verified" ||
                   (request.principal.attr.assurance == "low" && request.resource.attr.minAssurance != "verified") ||
                   (request.principal.attr.assurance == "anonymous" && request.resource.attr.minAssurance == "anonymous")
-              # Automation callers: in-scope AND (read/probe OR a low-impact write) only.
+              # Automation callers: in-scope AND (read/probe OR a low-impact write OR a write whose
+              # exact call carries a verified execution grant AND whose tool is an approved
+              # executable). See the D14-13 header block above before touching this expression.
               - expr: >
                   !request.principal.attr.isAutomation ||
                   (request.resource.attr.name in request.principal.attr.automationScope &&
-                   (!request.resource.attr.write || request.resource.attr.impact == "low"))
+                   (!request.resource.attr.write ||
+                    request.resource.attr.impact == "low" ||
+                    (has(request.resource.attr.approvalId) &&
+                     type(request.resource.attr.approvalId) == string &&
+                     request.resource.attr.approvalId != "" &&
+                     request.resource.attr.name in ["deploy.staging", "deploy.production"])))

@@ -44,6 +44,22 @@ describe("can() — capability + scope", () => {
       expect(can(member, cap, "co-a")).toBe(false);
     }
   });
+
+  // D14-08 — `approvals.retry` must be NARROWER than `approvals.decide`: the backend Cerbos
+  // grant for the retry action is superadmin/company_admin/group_executive, deliberately
+  // excluding manager (retry re-attempts a write that already failed once). A plain `can()` check
+  // is what the approvals list uses to decide whether to render the Retry button at all, so this
+  // pins the exact gap that matters for that decision.
+  it("approvals.retry is granted to admin/exec/company_admin but NOT manager", () => {
+    expect(can(admin, "approvals.retry", "co-a")).toBe(true);
+    expect(can(exec, "approvals.retry", "co-a")).toBe(true);
+    expect(can(coAdminA, "approvals.retry", "co-a")).toBe(true);
+    expect(can(mgrA, "approvals.retry", "co-a")).toBe(false);
+    expect(can(member, "approvals.retry", "co-a")).toBe(false);
+    // manager still decides — retry is a strictly narrower cut of the same surface, not a
+    // replacement for approvals.decide.
+    expect(can(mgrA, "approvals.decide", "co-a")).toBe(true);
+  });
 });
 
 describe("hr caps (hr_staff/hr_manager)", () => {

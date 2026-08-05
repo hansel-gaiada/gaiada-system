@@ -1,0 +1,43 @@
+# ASST-02 — assistant_memory: owner-private, with NO admin backdoor.
+#
+# Ticket: docs/superpowers/plans/2026-08-05-d14-and-assistant-tickets.md ("### ASST-02").
+# Design: docs/blueprints/assistant-foundation.md §4.1 (the "four memories") and §6 (authorization).
+#
+# Same rationale as resource_assistant_thread.yaml (read it first) — a user's durable assistant
+# memory (proposed/confirmed facts & preferences, `assistant_memory` table, migration 0079) is at
+# least as sensitive as the thread it was mined from, since a memory row can retain a fact
+# extracted from a transcript long after the thread itself is archived or deleted. The same
+# invariant applies: this is safe to expose to a non-elevated user ONLY because it stays private to
+# its owner. DELIBERATELY NO `company_admin` / `group_executive` / `platform_admin` rule below —
+# do not add the wildcard `derivedRoles: ["platform_admin"]` allow-all rule that opens most
+# neighbouring resource_*.yaml files. Admin access to someone's memory is a separate, audited
+# feature, deliberately absent in v1.
+#
+# `assistant_memory.scope` can be `user` or `company` (0079), but v1 authorization does not branch
+# on it: EVERY row, company-scoped or not, still carries an `owner_user_id` (the proposer/confirmer)
+# and stays owner-private end to end — a `scope='company'` row is a hint for a future shared-memory
+# feature, not a present authorization widening. Do not read `scope` here to grant company-wide
+# access; that would be exactly the kind of "for consistency" widening this ticket exists to avoid.
+#
+# THE RULE ITSELF: base role `user` (every principal has it — see resource_assistant_thread.yaml's
+# comment on `principalPayload`) plus the shared `owns` variable, fail-closed via `has()` if a
+# handler forgets `ownerId`.
+#
+# ── CRITICAL ENVIRONMENT TRAP — see resource_assistant_thread.yaml's header for the full
+#    explanation (new-file-not-hot-reloaded + unlisted-kind-is-silent-deny + gaiada-test-cerbos vs
+#    gaiada-cerbos-1). Applies identically here — both files were added together and both need the
+#    same restart before either kind resolves.
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: assistant_memory
+  variables:
+    import: ["gaiada_common"]
+  rules:
+    # Owner, full stop, on every memory action.
+    - actions: ["list", "propose", "confirm", "delete"]
+      effect: EFFECT_ALLOW
+      roles: ["user"]
+      condition:
+        match:
+          expr: "variables.inTenant && variables.notLow && variables.owns"

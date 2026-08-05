@@ -2,7 +2,7 @@
 // The agent process holds NO provider keys and NO database access — by construction.
 import "dotenv/config";
 import { AsyncLocalStorage } from "node:async_hooks";
-import type { AgentDeps, Envelope } from "./agent";
+import type { AgentDeps, Envelope, RegistryToolImpact } from "./agent";
 
 // Per-goal tenant context: the runner wraps each goal's execution in `tenantContext.run(tenantId, …)`
 // so completions are attributed to the triggering tenant for the Gateway's existing per-tenant daily
@@ -61,4 +61,103 @@ async function callTool(name: string, args: Record<string, unknown>, envelope: E
   return text;
 }
 
-export const liveDeps: AgentDeps = { complete, callTool, lastProvider: () => lastServedProvider };
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+// D14-12 — background, fail-soft cache of the hub registry's write/impact classification.
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+//
+// The hub already exposes this over `GET /tools` (`mcp-hub/src/server.ts`): open, non-sensitive
+// metadata — `{ name, description, minAssurance, write, impact, source }` per tool — no hub change was
+// needed for this ticket (verified before writing this). This module fetches that listing and keeps a
+// synchronous in-memory snapshot, mirroring `mcp-hub/src/module-tools.ts`'s own bootstrap (retry with
+// backoff until the first success, then periodic refresh) so a hub redeploy that reclassifies a tool
+// is picked up without an ai-agents restart.
+//
+// WHY THIS MUST NEVER BLOCK A RUN: `agent.ts`'s write gate calls `AgentDeps.getRegistryImpact`
+// synchronously on every tool dispatch — see that file's doc. `startRegistryImpactBootstrap` is
+// therefore NEVER awaited by anything that also awaits an agent run: `getRegistryImpact` below reads
+// whatever snapshot is already warm (possibly empty, on a cold start or a down hub) and returns
+// `undefined` for anything not in it. `effectiveImpact()` treats `undefined` as "no registry opinion"
+// — the AgentDef label wins, i.e. TODAY'S exact behaviour. A hub blip degrades reconciliation to a
+// no-op, never to a failed or stalled agent run, and agent startup itself never calls the hub — the
+// bootstrap is started explicitly by the runner's `start()`, not by importing this module.
+const registryImpactCache = new Map<string, RegistryToolImpact>();
+
+/** Synchronous, side-effect-free — safe to call from `agent.ts`'s hot path. */
+function getRegistryImpact(name: string): RegistryToolImpact | undefined {
+  return registryImpactCache.get(name);
+}
+
+interface HubToolsRow {
+  name: string;
+  write?: boolean;
+  impact?: "low" | "medium" | "high" | null;
+}
+
+/** One fetch+swap of the cache. Exported for tests; returns whether it succeeded. Fail-soft: on any
+ *  error the PREVIOUS snapshot is kept (never cleared to empty on a transient failure) and the error is
+ *  logged, not thrown — a hub blip must never surface as an agent-run failure. */
+export async function refreshRegistryImpacts(fetchImpl: typeof fetch = fetch): Promise<boolean> {
+  try {
+    const res = await fetchImpl(`${config.hubUrl}/tools`);
+    if (!res.ok) throw new Error(`hub ${res.status}`);
+    const rows = (await res.json()) as HubToolsRow[];
+    registryImpactCache.clear();
+    for (const r of rows) registryImpactCache.set(r.name, { write: !!r.write, impact: r.impact ?? undefined });
+    return true;
+  } catch (err) {
+    console.warn(
+      `[ai-agents] hub /tools unreachable (${(err as Error).message}) — D14-12 registry-impact ` +
+        "reconciliation falls back to each AgentDef's own label until the next retry (never blocks a run)",
+    );
+    return false;
+  }
+}
+
+const REGISTRY_IMPACT_RETRY_BASE_MS = Number(process.env.AGENT_REGISTRY_IMPACT_RETRY_BASE_MS ?? 2_000);
+const REGISTRY_IMPACT_RETRY_MAX_MS = Number(process.env.AGENT_REGISTRY_IMPACT_RETRY_MAX_MS ?? 60_000);
+// 0 disables periodic refresh (retry-until-success only) — mirrors module-tools.ts's REFRESH_MS.
+const REGISTRY_IMPACT_REFRESH_MS = Number(process.env.AGENT_REGISTRY_IMPACT_REFRESH_MS ?? 5 * 60_000);
+
+let registryImpactBootstrapping = false;
+let registryImpactTimer: NodeJS.Timeout | undefined;
+let registryImpactFailures = 0;
+
+function registryImpactBackoffMs(failures: number): number {
+  return Math.min(REGISTRY_IMPACT_RETRY_BASE_MS * 2 ** Math.max(0, failures - 1), REGISTRY_IMPACT_RETRY_MAX_MS);
+}
+
+/** Start the self-healing bootstrap loop. NOT called by importing this module — the runner's `start()`
+ *  calls it explicitly, AFTER its own listener is up, so a down hub never blocks agent-runner startup
+ *  (same ordering discipline mcp-hub uses for module-tools.ts's own bootstrap). Idempotent. */
+export function startRegistryImpactBootstrap(fetchImpl: typeof fetch = fetch): void {
+  if (registryImpactBootstrapping) return;
+  registryImpactBootstrapping = true;
+  const tick = async (): Promise<void> => {
+    const ok = await refreshRegistryImpacts(fetchImpl);
+    registryImpactFailures = ok ? 0 : registryImpactFailures + 1;
+    if (ok && REGISTRY_IMPACT_REFRESH_MS <= 0) return;
+    const delay = ok ? REGISTRY_IMPACT_REFRESH_MS : registryImpactBackoffMs(registryImpactFailures);
+    registryImpactTimer = setTimeout(() => void tick(), delay);
+  };
+  void tick();
+}
+
+/** Test/shutdown helper. */
+export function stopRegistryImpactBootstrap(): void {
+  if (registryImpactTimer) clearTimeout(registryImpactTimer);
+  registryImpactTimer = undefined;
+  registryImpactBootstrapping = false;
+  registryImpactFailures = 0;
+}
+
+/** Test-only reset of the cache itself (mirrors mcp-hub's resetRegistry()). */
+export function resetRegistryImpactCache(): void {
+  registryImpactCache.clear();
+}
+
+export const liveDeps: AgentDeps = {
+  complete,
+  callTool,
+  lastProvider: () => lastServedProvider,
+  getRegistryImpact,
+};

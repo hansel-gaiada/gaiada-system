@@ -35,7 +35,7 @@ import { traceRun, type AgentTrace, type TraceStatus } from "../evals/trace";
 import { specialists, writeSpecialists, supervisor } from "../specialists";
 import { ObservabilityCollector } from "../obs/collector";
 import { episodeFromTrace, type Episode } from "../memory/episodic";
-import { liveDeps, tenantContext } from "../deps";
+import { liveDeps, tenantContext, startRegistryImpactBootstrap } from "../deps";
 import { PgGoalStore, type GoalStore, type FinishGoalPatch, type BudgetCaps, type RunInput } from "./store";
 import { GoalQueue } from "./queue";
 
@@ -220,6 +220,14 @@ export function buildRunnerApp(deps: RunnerDeps): FastifyInstance {
         return agentDeps.callTool(n, a, e);
       },
       lastProvider: agentDeps.lastProvider,
+      // D14-10: forwarded, not counted. This wrapper replaces the deps for the whole goal, so omitting
+      // the optional resolver would silently drop it and every re-run would go back to throw-and-file.
+      resolveApproval: agentDeps.resolveApproval,
+      // D14-12: same hazard — this wrapper replaces the deps for the whole goal, so omitting the
+      // registry-impact reader would silently drop D14-12's reconciliation for every goal run through
+      // the service (only direct runAgent()/runWriteAgent() callers that pass agentDeps straight
+      // through would keep it).
+      getRegistryImpact: agentDeps.getRegistryImpact,
     };
     const provider = cfg.servingProvider ?? agentDeps.lastProvider?.() ?? null;
 
@@ -385,6 +393,10 @@ async function start(): Promise<void> {
   await episodic.init();
   const app = buildRunnerApp({ store, agentDeps: liveDeps, episodic });
   await app.listen({ port: runnerConfig.port, host: runnerConfig.host });
+  // D14-12: start AFTER the listener is up, mirroring mcp-hub's module-tools ordering — a down hub
+  // must never block the runner from serving. Retries with backoff until the first success, then
+  // refreshes periodically; every run in the meantime falls back to each AgentDef's own label.
+  startRegistryImpactBootstrap();
   console.log(`Gaiada agent-runner on :${runnerConfig.port}`);
 }
 

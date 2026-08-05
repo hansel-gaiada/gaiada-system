@@ -49,9 +49,16 @@
    (company_admin / group_executive / module_manager-for-hr). Superadmin is ADDED, never replaces
    (D14-06), or the HR leave path regresses.
 8. Hub tool-call authorization call-site: `mcp-hub/src/hub.ts` → `authorizeCall` in
-   `mcp-hub/src/policy.ts`. The suspension is *only* the `tool.write && tool.impact !== "low"`
-   branch (policy.ts:46-52); Cerbos and `AUTOMATION_ALLOWLIST` are separate checks that stay
-   untouched.
+   `mcp-hub/src/policy.ts`. **CORRECTED 2026-08-05 (found by D14-04, orchestrator-verified): the
+   impact gate is encoded in TWO places** — the in-code `tool.write && tool.impact !== "low"`
+   branch (policy.ts:46-52) AND `platform-nest/cerbos/policies/resource_mcp_tool.yaml`, whose
+   single `call` allow clause requires
+   `!isAutomation || (name in automationScope && (!write || impact == "low"))`. Cerbos is
+   authoritative whenever `CERBOS_URL` is set — and it IS set for mcp-hub and mcp-hub-central in
+   `infra/compose/docker-compose.vps.yml`. Lifting the suspension therefore requires BOTH D14-04
+   (in-code) and D14-13 (policy); assurance and `AUTOMATION_ALLOWLIST` remain separate, untouched
+   checks. Same two-independent-encodings drift hazard as D14-12's AgentDef-vs-registry problem,
+   in a second location.
 
 ## 1. Architect-fixed contract: the single-use execution grant
 
@@ -63,11 +70,14 @@ D14-03 (platform) and D14-04 (hub) implement to this contract; neither may unila
   `exp − iat ≤ 120s`. `argsSha256` = SHA-256 over canonical JSON (recursively sorted keys) of the
   approval row's stored `tool_args`; the hub recomputes it over the *actual* call args — any
   mismatch is a deny.
-- **Hub semantics:** a VALID grant matching `(tenantId, toolName, argsSha256)` skips ONLY the
-  impact-suspend branch. Assurance rank, `workflowScope` (AUTOMATION_ALLOWLIST), and Cerbos are
-  evaluated **unchanged**. Invalid / expired / mismatched / replayed grant ⇒ the normal
-  suspend/deny path. Every grant verdict (accepted / rejected + reason + approvalId) goes to the
-  JSONL tool audit.
+- **Hub semantics (corrected 2026-08-05):** a VALID grant matching `(tenantId, toolName,
+  argsSha256)` lifts ONLY the impact suspension — in **both** places it is encoded: the in-code
+  suspend branch (D14-04) and the `resource_mcp_tool.yaml` impact conjunct via the
+  verified-`approvalId` resource attribute (D14-13; the policy disjunct sits INSIDE the
+  workflow-scope conjunction and is narrowed to an explicit executable-tool list). Assurance rank,
+  `workflowScope` (AUTOMATION_ALLOWLIST), and every OTHER Cerbos condition are evaluated
+  **unchanged**. Invalid / expired / mismatched / replayed grant ⇒ the normal suspend/deny path.
+  Every grant verdict (accepted / rejected + reason + approvalId) goes to the JSONL tool audit.
 - **Single-use:** authoritative enforcement is platform-side — the grant is minted only inside the
   `pending → executing` claimed transition (D14-03), which can succeed once per row. The hub
   additionally keeps a best-effort in-memory nonce cache with TTL (v1 hub is single-instance).
@@ -75,6 +85,11 @@ D14-03 (platform) and D14-04 (hub) implement to this contract; neither may unila
   to both services' `environment:` blocks in `infra/compose/docker-compose.vps.yml` (compose
   env-passthrough trap: a var in `.env` does nothing unless listed) and to
   `platform-nest/.env.example`.
+- **Canonical encodings (pinned 2026-08-05):** `iat`/`exp` in **milliseconds**; `argsSha256` as
+  **lowercase hex**; signature as **base64url**. The producer (D14-03) MUST emit these canonical
+  forms; the verifier (D14-04, shipped) is deliberately liberal — values < 1e11 read as seconds and
+  larger as ms, normalized per claim independently, with ≤120s enforced AFTER normalization; hex
+  (either case), base64, and base64url all accepted for digest/signature. See §5.10.
 - **Authority of the re-driven call:** the ORIGINAL filing principal —
   `origin='automation'` ⇒ OBO `{ provider: "n8n", externalId: <row.workflow_id> }`;
   `origin='agent'` ⇒ OBO for user `<row.requested_by>`. Executing as the approver is REJECTED
@@ -83,7 +98,7 @@ D14-03 (platform) and D14-04 (hub) implement to this contract; neither may unila
 
 ---
 
-# SET A — D14-a resume path (12 tickets)
+# SET A — D14-a resume path (13 tickets)
 
 ### D14-01 — Migration 0078: separate execution state from decision state
 - **Seat:** senior-db · Sonnet·high (seat default) — **inline candidate, see §4**
@@ -153,9 +168,9 @@ D14-03 (platform) and D14-04 (hub) implement to this contract; neither may unila
      `execution_status='failed'`, typed `execution_error='precondition_failed: <reason>'`, notify,
      and NEVER call the hub.
   4. Mint the grant (§1) and re-drive **through the hub** as the ORIGINAL principal (§1 authority
-     rule) — the hub re-evaluates assurance + AUTOMATION_ALLOWLIST + Cerbos UNCHANGED; a since-
-     de-scoped workflow or revoked role fails there, and that failure is recorded as `failed` with
-     the hub's typed reason (the correct outcome per the plan §6 step 4).
+     rule) — the hub re-evaluates assurance + AUTOMATION_ALLOWLIST + every OTHER Cerbos condition
+     UNCHANGED; a since-de-scoped workflow or revoked role fails there, and that failure is
+     recorded as `failed` with the hub's typed reason (the correct outcome per the plan §6 step 4).
   5. Terminal transition: success ⇒ `executed`, `executed_at`, `executed_by` = original principal
      identifier, `execution_result` (size-capped, redacted). Failure ⇒ `failed` + typed
      `execution_error`.
@@ -178,6 +193,12 @@ D14-03 (platform) and D14-04 (hub) implement to this contract; neither may unila
   the pre-ticket code (reproducing today's silent no-op).
 - **Deps:** D14-01, D14-02, D14-04 (contract is fixed in §1, so build can proceed in parallel;
   integration test needs D14-04 merged). **QA gate:** yes (security-critical).
+- **KNOWN-EXPECTED WINDOW (do not misread as an executor bug):** with `CERBOS_URL` set, the
+  `origin='automation'` path CANNOT pass end-to-end until **D14-13** lands — the
+  `resource_mcp_tool.yaml` policy independently encodes the impact gate and will DENY a granted
+  re-drive, landing the row `failed` with a Cerbos deny reason. Develop and verify the automation
+  path against the in-code engine (Cerbos off) or after D14-13; the `origin='agent'` path is
+  unaffected (the gate never applied to non-n8n principals).
 
 ### D14-04 — Hub-side execution grant: lift ONLY the impact suspension, single-use
 - **Seat:** senior-integrator · **opus·high** — modifies THE automation write gate; a fail-open bug
@@ -190,11 +211,14 @@ D14-03 (platform) and D14-04 (hub) implement to this contract; neither may unila
   `v`, tenant/tool match, canonical-JSON `argsSha256` recompute), hub config module (add
   `APPROVAL_GRANT_SECRET`), `infra/compose/docker-compose.vps.yml` (add the env to BOTH mcp-hub and
   platform services' `environment:` blocks — passthrough trap), hub tests.
-- **Hard constraints:** deny-by-default is preserved — no grant, bad grant, expired grant, replayed
-  nonce, args mismatch, or tool mismatch all take today's exact path. Assurance, `workflowScope`,
-  and Cerbos evaluation are byte-for-byte unchanged (constraint 1). A grant presented by a
-  NON-automation principal changes nothing it wasn't already allowed (for `origin=agent` re-drives
-  the gate never applied — the grant is audit-only there).
+- **Hard constraints (corrected 2026-08-05):** deny-by-default is preserved — no grant, bad grant,
+  expired grant, replayed nonce, args mismatch, or tool mismatch all take today's exact path.
+  Assurance and `workflowScope` are byte-for-byte unchanged; Cerbos evaluation is unchanged EXCEPT
+  that this ticket hands the VERIFIED-grant object through to the Cerbos-payload layer for D14-13's
+  attribute. This ticket lifts only the IN-CODE encoding of the gate — with Cerbos ON, automation
+  re-drives remain denied until D14-13 (expected, see D14-03's known-expected window). A grant
+  presented by a NON-automation principal changes nothing it wasn't already allowed (for
+  `origin=agent` re-drives the gate never applied — the grant is audit-only there).
 - **Done when:** hub tests prove: valid grant + in-scope workflow + Cerbos allow ⇒ tool executes;
   valid grant + workflow NOT in `AUTOMATION_ALLOWLIST` ⇒ deny (unchanged reason); valid grant +
   Cerbos deny ⇒ deny; tampered signature / expired / args-hash mismatch / second use of the same
@@ -288,12 +312,15 @@ D14-03 (platform) and D14-04 (hub) implement to this contract; neither may unila
   approved agent `high_write` row is consumed exactly ONCE across both claim orders (executor
   auto-execute first vs goal re-run first), the losing path consuming the stored result without
   re-calling the tool; (i) impact drift (D14-12): an AgentDef label weaker than the registry's
-  `impact` is overridden — stricter wins in both directions.
+  `impact` is overridden — stricter wins in both directions; (j) grant-aware policy (D14-13), run
+  with Cerbos ON: granted+scoped+listed ⇒ allow; granted but workflow-unscoped ⇒ deny; granted but
+  tool not in the policy list (probe with a search/money tool name) ⇒ deny; forged-attribute
+  injection via tool args/headers ⇒ deny.
 - **Done when:** full platform-nest + mcp-hub suites green locally (Docker PG + Cerbos; drop
   orphaned test DBs first — shm trap); every red finding is fixed-or-ticketed before the set is
   called done. CI verification deferred while Actions billing is dead — mark CI-dependent items
   UNVERIFIED explicitly.
-- **Deps:** D14-01..08, D14-10..12. **QA gate:** it IS the gate.
+- **Deps:** D14-01..08, D14-10..13. **QA gate:** it IS the gate.
 
 ## Amendment 2026-08-05 — agent re-run tickets (orchestrator-verified idempotency audit)
 
@@ -385,9 +412,71 @@ re-run-from-the-top is **D14-10 + D14-11** below.
   `high_write`); serialize after D14-10 (both edit `ai-agents/src/agent.ts`). **QA gate:** yes
   (gate-strength change).
 
+## Amendment 2026-08-05 (2) — the impact gate's second encoding (architect ruling)
+
+D14-04 found, and the orchestrator verified, that constraint 1 as originally written was
+self-contradictory: `resource_mcp_tool.yaml` INDEPENDENTLY encodes the impact gate (see §0.8), and
+Cerbos is authoritative in prod, so a grant lifting only the in-code branch leaves every
+`origin='automation'` re-drive Cerbos-DENIED and `failed`. The premise that the gate lived only in
+`mcp-hub/src/policy.ts` was wrong — it lives in two places.
+
+**Ruling — mechanism (b) + (c) combined,** over the alternatives considered:
+(a) a bare `executionGranted: true` boolean — same trust model but audit-blind; rejected in favor of
+(b) passing the **verified `approvalId`** as the resource attribute (identical trust, but the Cerbos
+decision log carries WHICH approval lifted the gate); PLUS (c) narrowing the policy disjunct to an
+**explicit executable-tool list** mirroring `core/approval-executables.ts`. The disjunct attaches to
+the **impact term only, INSIDE the `automationScope` conjunction** — placement is load-bearing: one
+level out and a grant would bypass the workflow allow-list too.
+
+**Why trusting a hub-supplied attribute is acceptable here:** the policy's decision is ALREADY
+computed entirely from hub-asserted attributes (`isAutomation`, `automationScope`, `write`,
+`impact`) — a hub bug can already forge any of them, so the attribute adds no new trusted party;
+the hub process was and remains the enforcement boundary, with Cerbos as policy-as-data, not an
+independent verifier. Enforcement of the lift rests on D14-04's grant verification (HMAC +
+canonical args digest + expiry + the platform-side single-use claim), every enumerable bug class of
+which fails toward DENY. The one dangerous class — attribute set without verification — is (i) the
+same class as forging `impact:"low"`, which exists today, and (ii) contained by (c) to the listed
+deploy tools, keeping money tools structurally excluded at BOTH layers (SM-55/A13). The drift cost
+of (c) is one policy line per registry addition, paid inside the same per-tool ticket the registry
+doctrine already requires, and drift fails CLOSED (visible `failed` row, not a silent allow).
+
+### D14-13 — `resource_mcp_tool.yaml`: grant-aware impact conjunct (the gate's second encoding)
+- **Seat:** senior-integrator · **opus·medium** — edits THE authorization policy itself; a
+  misplaced disjunct silently widens the bypass past the workflow allow-list. The ruling pins the
+  exact shape and the negative matrix, hence medium not high.
+- **Files:** `platform-nest/cerbos/policies/resource_mcp_tool.yaml` (the disjunct + the explicit
+  executable-tool list, with a header comment binding the list to
+  `platform-nest/src/core/approval-executables.ts` — every registry-addition ticket updates BOTH;
+  drift fails closed), `mcp-hub/src/cerbos.ts` (add `approvalId` to the resource attrs, sourced
+  EXCLUSIVELY from D14-04's verified-grant object — never from caller args/headers),
+  `mcp-hub/src/hub.ts` (thread the verified grant into the Cerbos check), `mcp-hub/src/cerbos.test.ts`
+  + the platform Cerbos policy/parity suite.
+- **Ruled shape (implement exactly; illustrative CEL):**
+  `!isAutomation || (name in automationScope && (!write || impact == "low" || (has(R.attr.approvalId) && R.attr.approvalId != "" && name in ["deploy.staging","deploy.production"])))`
+  — the disjunct on the impact term ONLY. This is an EDIT to an existing policy file: hot-reload
+  applies; the new-file silent-DENY trap does not.
+- **Done when (negative cases mandatory):**
+  - ALLOW: automation principal + workflow-scoped tool + verified grant + tool in the list ⇒
+    Cerbos allows; an `origin='automation'` re-drive lands `executed` end-to-end **with
+    `CERBOS_URL` set** — the test that un-fails D14-03's automation path.
+  - DENY, each as its own test: verified grant but workflow NOT scoped for the tool (**the
+    misplacement detector** — proves the disjunct did not escape the `automationScope`
+    conjunction); verified grant + tool absent from the policy list (probe with a search/money
+    tool name); no / invalid / expired / args-mismatched grant ⇒ attribute never set ⇒ today's
+    exact behavior; attribute injection attempted via tool args or headers ⇒ not honored;
+    non-automation principals ⇒ identical decisions with and without a grant.
+  - Absent-attribute evaluation is error-free on every pre-existing request shape (CEL `has()`
+    guard; full existing policy suite unchanged-green).
+  - The Cerbos decision/audit output carries the `approvalId`.
+  - Parity: with `CERBOS_URL` unset, D14-04's in-code engine yields the same allow/deny verdict
+    for every case above.
+  - Drift direction proven by test: a tool present in the platform registry but missing from the
+    policy list ⇒ deny ⇒ row `failed` with a typed reason (fail-closed, visible).
+- **Deps:** D14-04. **QA gate:** yes — and exercised by D14-09's matrix item (j).
+
 ---
 
-# SET B — Assistant Phases 0–1 only (9 tickets)
+# SET B — Assistant Phases 0–1 only (10 tickets)
 
 Phases 2–6 (Hermes streaming/session-map, tool broker/capabilities, memory panel, roster/drawer,
 write proposals) are NOT decomposed here by instruction. Nothing below may hard-depend on a
@@ -495,8 +584,11 @@ production credential (D-D: dev-stage providers — Ollama/echo).
   not already present — verify), tests.
 - **Scope:** the POST-then-GET pair (EventSource can't POST). Persist the user message (next `seq`),
   assemble context (system preamble + compaction summary + most recent messages within a token
-  budget), call `ai-gateway-go POST /complete/stream`, re-emit as typed SSE events `token`, `usage`,
-  `done`, `error` (tool events are Phase 3 — not here). On `done`, persist the assistant message
+  budget), call `ai-gateway-go POST /complete/stream` **consuming the ASST-10 wire grammar**
+  (single-line JSON `data:` payloads; tokens are JSON strings on default message events;
+  `event: error` carries `{"error":string}`; `event: done` is the clean terminal — treat stream end
+  WITHOUT `done` as an abnormal drop), re-emit as typed SSE events `token`, `usage`, `done`,
+  `error` (tool events are Phase 3 — not here). On `done`, persist the assistant message
   with tokens/latency and bump thread counters + `last_message_at`; on error persist `error_kind`.
   **Stop must cancel upstream** (abort the gateway fetch), not merely detach the client; a
   server-side idle timeout kills a stalled upstream into a visible `error` event. Compaction v1:
@@ -510,7 +602,7 @@ production credential (D-D: dev-stage providers — Ollama/echo).
   (observable on a fake gateway) and the partial message persists flagged; a second concurrent send
   to the same thread is rejected or serialized (no interleaved seq corruption); owner-only holds on
   stream + stop.
-- **Deps:** ASST-03, ASST-05. **QA gate:** yes (multi-file core engine).
+- **Deps:** ASST-03, ASST-05, ASST-10 (wire grammar). **QA gate:** yes (multi-file core engine).
 
 ### ASST-07 — `/assistant` workspace page (minimal full page, real streaming)
 - **Seat:** senior-fe · Sonnet·high (seat default)
@@ -540,7 +632,9 @@ production credential (D-D: dev-stage providers — Ollama/echo).
   elevated roles equally denied; cross-tenant RLS probe; module-gate probe (no `assistant` scope ⇒
   0 rows); (b) the silent-DENY check — restart Cerbos and prove the new kinds resolve; (c) stream
   robustness — kill the provider mid-answer (error event, no duplicate tokens — ASST-03's fix),
-  idle-timeout path, stop-then-resend; (d) DLP — a seeded PII completion arrives redacted through
+  idle-timeout path, stop-then-resend, and newline fidelity — a streamed fenced code block and
+  multi-paragraph markdown arrive byte-identical through the full gateway→BFF→browser path
+  (ASST-10); (d) DLP — a seeded PII completion arrives redacted through
   the full BFF relay (ASST-04 in the real path); (e) company switcher re-scopes the rail; (f) FE
   a11y/dark-token spot-check.
 - **Done when:** platform-nest + ai-gateway-go suites and the platform-ui e2e slice green locally;
@@ -563,6 +657,47 @@ production credential (D-D: dev-stage providers — Ollama/echo).
 - **Deps:** ASST-06 (knows the final paths/envs), D14-04 (the secret). Deferrable until the first
   server deploy of either program — local dev is unaffected. **QA gate:** no.
 
+### ASST-10 — Gateway SSE wire grammar v2: newline-safe JSON payloads (live framing bug)
+- **Seat:** senior-integrator · Sonnet·high (seat default)
+- **The bug (found by ASST-04, orchestrator-verified):** `ai-gateway-go/internal/server/server.go:670`
+  emits `data: %s\n\n` raw. Per the SSE spec, a payload containing `\n` yields a second line with
+  no `field:` prefix — which parsers DISCARD, silently losing the text — and `\n\n` terminates the
+  event early. Real Ollama emits paragraph breaks as tokens containing `\n\n`, so this is broken in
+  production TODAY; ASST-04's boundary-batched chunks made it more likely, not caused it. The four
+  `event: error` emit sites (:722/:742/:753/:765) share the defect (Go error strings can be
+  multi-line). The ERP assistant streams markdown — paragraphs, lists, fenced code — so ASST-06/07
+  must NOT be built on this framing.
+- **Ruling (architect):** wire grammar v2 = every `data:` payload is exactly ONE line of JSON.
+  Tokens: default (message) events with data = the JSON **string** of the token text. Errors:
+  `event: error`, data = `{"error": string}`. Clean completion: NEW `event: done`, data = `{}` —
+  added in the same change so consumers can distinguish a clean end from a connection drop (the
+  consumer-visible contract changes exactly once). Per-line `data:` prefixing (option a) was
+  rejected: it round-trips text correctly under the spec's concatenation rule, but leaves no room
+  for structured fields — forcing a second grammar break when `usage` arrives — and the assistant's
+  downstream contract is ALREADY JSON-typed events through a pure reducer (blueprint §5), so JSON
+  end-to-end is one grammar for the whole pipeline with nothing to re-litigate at ASST-06.
+  **Consumers / compatibility:** `/complete/stream` has NO live consumer today — wa-chat-bot,
+  knowledge, and ai-agents all use the non-streaming endpoints, and the route emitted a single
+  chunk until ASST-03 — so the only consumer is ASST-06, not yet built. This is the last free
+  moment to change the wire; after ASST-06 it becomes a breaking change.
+- **Files:** `ai-gateway-go/internal/server/server.go` (the `emit` closure at :670, the four
+  `event: error` sites, the new `event: done` terminal, and the single-chunk fallback path — same
+  grammar everywhere), stream-route tests alongside the existing server tests (create
+  `ai-gateway-go/internal/server/server_stream_test.go` if none exists), plus a header comment at
+  the emit site documenting the v2 grammar.
+- **Ordering constraint:** JSON-encode at the WIRE boundary, AFTER the ASST-04 scrubber releases
+  bytes — never scrub JSON-escaped text (escapes would invisibly split PII patterns).
+- **Done when:** round-trip tests through a real SSE parse: a token containing `\n` and a token
+  containing `\n\n` both arrive byte-identical after JSON decode (mandated cases), plus a
+  multi-token fenced code block; a multi-line provider error survives via `{"error":...}`; raw
+  wire output is verified to contain NO unprefixed lines; `event: done` present on clean
+  completion and absent on the error path; the ASST-04 boundary/redaction tests re-run green over
+  the new framing (proves the encode-after-scrub order); the fallback single-chunk path uses the
+  same grammar; existing gateway suite + `go vet` green.
+- **Deps:** ASST-03, ASST-04 (wraps the scrubber's release point). Must land BEFORE ASST-06.
+  **QA gate:** no (self-verifying tests; ASST-08 re-drives it end-to-end via the newline-fidelity
+  check).
+
 ---
 
 ## 2. Dispatch order (hard cap: ≤2 genuinely-independent tickets per wave)
@@ -575,22 +710,24 @@ second slot only where repos/files cannot collide.
 | 1 | **D14-01** + **D14-04** (+ **D14-11 run inline by the orchestrator** — no seat, no slot) | migration file vs mcp-hub repo — disjoint; D14-04 is the security long pole, start it first; D14-11 is the insurance that must exist before any AgentDef is touched |
 | 2 | **D14-02** + **D14-06** | consumer/controller code vs a Cerbos yaml — disjoint files |
 | 3 | **D14-03** + **ASST-03** | platform-nest core vs ai-gateway-go — different repos |
-| 4 | **D14-05** + **D14-07** | registry entries vs retry endpoint/settings — disjoint platform files (07 needs 03 merged: satisfied) |
-| 5 | **D14-10** + **ASST-04** | ai-agents + one platform controller vs ai-gateway-go (10 needs 01–03: satisfied) |
-| 6 | **D14-12** + **D14-08** | D14-12 serialized after D14-10 (both edit `ai-agents/src/agent.ts`); D14-08 is platform-ui — disjoint |
-| 7 | **D14-09 (QA gate — SET A ships here)** + **ASST-01** | qa runs suites; ASST-01 is one new migration file (number-serialized AFTER D14-01 merged, so 0079 is safe) |
-| 8 | **ASST-02** + **ASST-09** | Cerbos yamls vs server/compose config |
-| 9 | **ASST-05** (solo — everything else depends on it) | |
+| 4 | **D14-13** + **D14-05** | Cerbos policy + hub attribute vs platform core registry — disjoint; D14-13 goes immediately after D14-04/03 because it is what makes the automation-origin path passable under Cerbos at all |
+| 5 | **D14-07** + **ASST-04** | platform controller vs ai-gateway-go (D14-07 and D14-10 both edit the approvals controller — they must NEVER share a wave) |
+| 6 | **D14-10** + **D14-08** | ai-agents + approvals controller vs platform-ui — disjoint |
+| 7 | **D14-12** + **ASST-01** | D14-12 serialized after D14-10 (both edit `ai-agents/src/agent.ts`); ASST-01 is one new migration file (number-serialized AFTER D14-01 merged, so 0079 is safe) |
+| 8 | **D14-09 (QA gate — SET A ships here)** + **ASST-02** | qa runs suites; ASST-02 is new Cerbos yamls — disjoint |
+| 9 | **ASST-05** + **ASST-10** | platform-nest module vs ai-gateway-go wire framing — different repos; ASST-10 MUST precede ASST-06 (the relay consumes its grammar) |
 | 10 | **ASST-06** (solo — core engine) | |
-| 11 | **ASST-07** (solo — FE workspace) | |
+| 11 | **ASST-07** + **ASST-09** | FE workspace vs server/compose config (ASST-09's soft dep on ASST-06 satisfied) |
 | 12 | **ASST-08 (QA gate — SET B phases 0–1 ship here)** | |
 
-**Critical path (SET A):** D14-01 → D14-02 → D14-03 → {D14-05, D14-10} → D14-12 → D14-09, with
-D14-04 joining before D14-03's integration tests. **Critical path (SET B):** ASST-01/02 → ASST-05 →
-ASST-06 → ASST-07 → ASST-08. Shared-checkout discipline applies (commit early, never `git add -A`,
-re-check main before push).
+**Critical path (SET A):** D14-01 → D14-02 → D14-03 → D14-10 → D14-12 → D14-09 (D14-07 before
+D14-10 is wave-serialization on the shared controller file, not logic), with **D14-04 → D14-13**
+joining before any Cerbos-ON end-to-end — until D14-13 lands, an `origin='automation'` row landing
+`failed` under Cerbos is EXPECTED, not an executor bug. **Critical path (SET B):** ASST-01/02 →
+ASST-05 (∥ ASST-10) → ASST-06 → ASST-07 → ASST-08. Shared-checkout discipline applies (commit
+early, never `git add -A`, re-check main before push).
 
-## 3. Opus tags (4 of 21 — everything else is seat default)
+## 3. Opus tags (5 of 23 — everything else is seat default)
 
 - **D14-03 · opus·high** — authority/idempotency/TOCTOU core; a mistake is silent unattended writes
   or silent duplicates.
@@ -599,6 +736,9 @@ re-check main before push).
 - **D14-10 · opus·medium** — single-use consumption racing D14-03's auto-execute (OQ-4); a mistake
   is a double-executed high-impact write, and the primitives (claim, argsSha256 binding) already
   exist so the work is hard but bounded.
+- **D14-13 · opus·medium** — edits THE authorization policy itself; a misplaced disjunct silently
+  widens the bypass past the workflow allow-list. The ruling pins the exact shape and negative
+  matrix, hence medium not high.
 - **ASST-04 · opus·medium** — silent-PII-leak hazard: wrong boundary-buffer logic passes every
   happy-path test.
 
@@ -647,3 +787,43 @@ re-check main before push).
    (AgentDef-vs-registry impact drift, stricter wins — explicitly NOT by widening the hub's
    `isAutomation` gate, which would break the human/OBO write path). The D14 plan §7.1's broad
    "audit every low-impact write" prerequisite is corrected to exactly D14-10 + D14-11.
+9. **RULED — the impact gate has TWO encodings (program-blocking conflict, found by D14-04,
+   orchestrator-verified):** `resource_mcp_tool.yaml`'s `call` clause independently requires
+   `!write || impact == "low"` for automation principals, and Cerbos is authoritative with
+   `CERBOS_URL` set (it is, in the prod compose). Constraint 1's original "Cerbos re-evaluated
+   unchanged" was therefore self-contradictory — derived from `mcp-hub/src/policy.ts` alone.
+   Corrected in §1 and §0.8; ruling and ticket in Amendment (2) / D14-13 (verified-`approvalId`
+   attribute + impact-conjunct-only disjunct, narrowed to an explicit policy-side executable list).
+   Until D14-13 lands, an `origin='automation'` row landing `failed` under Cerbos-ON is EXPECTED —
+   never diagnose it as a D14-03 executor bug. The resume-path plan's §6 Step 4 has been corrected
+   in place to match.
+10. **§1 under-specifications resolved by D14-04 (recorded so D14-03 cannot disagree with the
+   shipped verifier):** `iat`/`exp` units were unpinned — the verifier accepts values < 1e11 as
+   seconds and larger as milliseconds, normalizing each claim independently and enforcing the
+   ≤120s window AFTER normalization; the `argsSha256`/signature encodings were unpinned — hex
+   (either case), base64, and base64url are all accepted. §1 now pins the canonical producer
+   spelling: **milliseconds + lowercase hex + base64url**. D14-03 MUST emit canonical; the
+   verifier stays liberal.
+11. **RULED — live SSE framing bug (found by ASST-04, orchestrator-verified):** `data: %s\n\n` at
+   `server.go:670` (and the four `event: error` sites) silently DROPS text after a `\n` inside a
+   token and terminates the event early on `\n\n`; real Ollama emits `\n\n` paragraph tokens, so
+   this is broken in production today — ASST-04's larger boundary-batched chunks made it more
+   likely, not caused it. Ruled fix: wire grammar v2 — single-line JSON `data:` payloads plus an
+   `event: done` terminal (ticket ASST-10; full rationale there). ASST-06 amended to consume v2
+   and now depends on ASST-10; ASST-08 gained the end-to-end newline-fidelity check.
+12. **Discovered, UNOWNED (from ASST-04 — record only, no ticket yet):** (a) the stream route
+   emits NO egress-audit row at all — unlike `/complete`/`/media`/`/embed` — so response-side
+   redaction counts go nowhere even though the scrubber already exports `Redactions()` and
+   `ForcedBoundaries()` for exactly that. Recommend ticketing BEFORE staging: the assistant makes
+   streaming the primary egress path, and an unaudited primary path defeats the gateway's audit
+   premise. (b) `gofmt -l` flags ~20 pre-existing `ai-gateway-go` files (CRLF endings from the
+   Windows checkout); ASST-04 rightly did not reformat other sessions' files mid-program.
+   Recommendation: YES — a junior chore ticket, but scheduled SOLO at a quiet wave boundary
+   (after SET A ships): a whole-package reformat mid-flight is a merge-conflict generator in this
+   shared checkout.
+13. **Shipped behaviour — do NOT "fix" later (ASST-04, deliberate):** `streamed` now flips when
+   the scrubber RELEASES bytes to the wire, not when a provider yields a token, and the trailing
+   hold buffer is DISCARDED on the failover path. Flushing that buffer on failover would prefix a
+   dead provider's partial answer onto the next provider's full answer — the exact duplication
+   class ASST-03 fixed. Intended consequence: a response shorter than the 37-byte hold window that
+   dies mid-generation fails over cleanly instead of emitting a stub plus an error.

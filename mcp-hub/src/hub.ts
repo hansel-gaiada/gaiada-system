@@ -13,11 +13,19 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import type { Principal } from "./principal";
 import { visibleToolsFor, authorizeCall } from "./policy";
-import { auditToolCall, principalRef } from "./audit";
+import { auditToolCall, principalRef, type GrantAudit } from "./audit";
 import { RESOURCE_TEMPLATES, canReadResources, readResource } from "./resources";
 import { PROMPTS, canUsePrompts, getPrompt } from "./prompts";
+import { verifyExecutionGrant, type VerifiedExecutionGrant } from "./approval-grant";
 
-export function buildHubServer(principal: Principal): Server {
+export interface HubServerOptions {
+  /** Raw `x-approval-grant` header value from the tool call, if the caller sent one (D14-04).
+   *  Verified HERE, at the call site, because verification binds the grant to the ACTUAL arguments.
+   *  Absent ⇒ the authorization path is byte-for-byte today's. */
+  approvalGrant?: string;
+}
+
+export function buildHubServer(principal: Principal, options: HubServerOptions = {}): Server {
   const server = new Server(
     { name: "gaiada-mcp-hub", version: "0.1.0" },
     { capabilities: { tools: {}, resources: {}, prompts: {} } },
@@ -33,17 +41,34 @@ export function buildHubServer(principal: Principal): Server {
 
   server.setRequestHandler(CallToolRequestSchema, async (req) => {
     const name = req.params.name;
-    const decision = await authorizeCall(principal, name);
+    const args = (req.params.arguments as Record<string, unknown>) ?? {};
+
+    // D14-04: verify a presented execution grant against THIS call (tool name + actual args) before
+    // authorizing. A rejected grant is simply not a grant — authorization then takes today's exact
+    // path with today's exact reason — but the verdict is always audited, accepted or rejected.
+    let grant: VerifiedExecutionGrant | undefined;
+    let grantAudit: GrantAudit | undefined;
+    if (options.approvalGrant) {
+      const verdict = verifyExecutionGrant(options.approvalGrant, { toolName: name, args });
+      if (verdict.ok) {
+        grant = verdict.grant;
+        grantAudit = { verdict: "accepted", approvalId: verdict.grant.approvalId };
+      } else {
+        grantAudit = { verdict: "rejected", reason: verdict.reason, ...(verdict.approvalId ? { approvalId: verdict.approvalId } : {}) };
+      }
+    }
+
+    const decision = await authorizeCall(principal, name, grant);
     if (!decision.allow) {
-      auditToolCall({ ts: Date.now(), tool: name, principal: principalRef(principal), decision: "deny", reason: decision.reason });
+      auditToolCall({ ts: Date.now(), tool: name, principal: principalRef(principal), decision: "deny", reason: decision.reason, ...(grantAudit ? { grant: grantAudit } : {}) });
       return { content: [{ type: "text" as const, text: decision.reason }], isError: true };
     }
     try {
-      const text = await decision.tool.handler((req.params.arguments as Record<string, unknown>) ?? {}, principal);
-      auditToolCall({ ts: Date.now(), tool: name, principal: principalRef(principal), decision: "allow", ok: true });
+      const text = await decision.tool.handler(args, principal);
+      auditToolCall({ ts: Date.now(), tool: name, principal: principalRef(principal), decision: "allow", ok: true, ...(grantAudit ? { grant: grantAudit } : {}) });
       return { content: [{ type: "text" as const, text }] };
     } catch (err) {
-      auditToolCall({ ts: Date.now(), tool: name, principal: principalRef(principal), decision: "allow", ok: false });
+      auditToolCall({ ts: Date.now(), tool: name, principal: principalRef(principal), decision: "allow", ok: false, ...(grantAudit ? { grant: grantAudit } : {}) });
       return { content: [{ type: "text" as const, text: `tool failed: ${(err as Error).message}` }], isError: true };
     }
   });

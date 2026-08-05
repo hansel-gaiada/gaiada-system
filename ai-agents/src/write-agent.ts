@@ -4,8 +4,21 @@
 // wrapper turns that suspension into a DURABLE, human-decidable record by filing it through the
 // mcp-hub `approvals.request` tool (origin="agent") — the SAME platform automation_approvals inbox
 // WS4 automation uses (generalized, not duplicated). The agent still commits nothing; a human
-// approves/rejects in platform-ui. (Auto-resuming an approved agent write is a Temporal concern,
-// deferred — the approved row is the durable artifact a resume step reads.)
+// approves/rejects in platform-ui.
+//
+// D14-10 UPDATE — the resume path is no longer deferred to Temporal. Under the owner's locked D14-b
+// decision a suspended goal is resumed by RE-RUNNING IT FROM THE TOP, and `agent.ts` now consults the
+// platform (`AgentDeps.resolveApproval`) before throwing. Consequences for THIS file:
+//
+//   * `ApprovalRequiredError` is now raised ONLY when no decided row binds the exact call, so
+//     `fileApproval` below can no longer file a duplicate for a call a human already decided. The
+//     re-file that made re-run useless is gone by construction, not by a check added here.
+//   * A resumed run reaches `status: "completed"` with `run.approvals` populated, surfaced as
+//     `resumed` on the result so a caller can distinguish "completed having performed a human-approved
+//     write" (and whether its result was freshly executed or reused) from "completed doing reads".
+//   * `ApprovalNotResumableError` (approved-but-stuck: executing / failed / no registry entry)
+//     deliberately PROPAGATES. It must not be caught and turned into a filing: there is already a row
+//     for this call, and a human — not this wrapper — is the one who unsticks it (D14-07 retry).
 //
 // D13 failover safety: a write-capable agent may run with its write tools ONLY on a provider that
 // passed its eval suite + tool-calling contract (def.evaledProviders). On any other (un-evaled)
@@ -17,6 +30,7 @@ import {
   type AgentDef,
   type AgentDeps,
   type AgentRun,
+  type ApprovalConsumption,
   type Envelope,
 } from "./agent";
 
@@ -38,7 +52,12 @@ export interface FiledApproval {
 }
 
 export type WriteAgentResult =
-  | { status: "completed"; run: AgentRun }
+  /** D14-10: `resumed` is present ONLY when this run turned one or more decided approvals into
+   *  progress — the consumed-result path made visible at the result level instead of buried in
+   *  `run.steps`. Optional (never a new variant) on purpose: `runner/service.ts`'s `mapWriteResult`
+   *  exhausts this union with an `else`, so a fourth variant would silently be treated as
+   *  `suspended` and dereference a `filed` that isn't there. Additive field, no consumer breaks. */
+  | { status: "completed"; run: AgentRun; resumed?: ApprovalConsumption[] }
   | { status: "suspended"; filed: FiledApproval }
   | { status: "forced_read_only"; run: AgentRun; reason: string };
 
@@ -97,8 +116,13 @@ export async function runWriteAgent(
   }
   try {
     const run = await runAgent(def, goal, envelope, deps);
-    return { status: "completed", run };
+    // D14-10: surface the consumed/executed approvals when there were any. `run.approvals` is absent
+    // on every run that resolved nothing, so this stays undefined for all pre-existing behaviour.
+    return run.approvals?.length ? { status: "completed", run, resumed: run.approvals } : { status: "completed", run };
   } catch (err) {
+    // ApprovalRequiredError now means "NO decided row binds this exact call" (agent.ts consults
+    // first), so this filing can no longer duplicate a decision a human already made.
+    // ApprovalNotResumableError is deliberately NOT caught here — see this file's header.
     if (err instanceof ApprovalRequiredError) {
       const filed = await fileApproval(deps, envelope, tenantId, def.name, err);
       return { status: "suspended", filed };

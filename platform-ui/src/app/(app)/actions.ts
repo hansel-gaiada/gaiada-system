@@ -2,6 +2,7 @@
 import { revalidatePath } from "next/cache";
 import { getSessionUserId } from "@/lib/session-server";
 import { platformFetch } from "@/lib/platform";
+import { retryAutomationApproval as retryAutomationApprovalCall } from "@/lib/automationApprovals";
 
 export async function decideApproval(tenantId: string, approvalId: string, decision: "approved" | "rejected"): Promise<{ ok: boolean; error?: string }> {
   const userId = await getSessionUserId();
@@ -84,5 +85,26 @@ export async function decideApprovalItem(
   revalidatePath(`/approvals/${id}`);
   revalidatePath("/");
   revalidatePath("/departments");
+  return { ok: true };
+}
+
+// D14-08 — retry a FAILED (or stuck-`executing`, per D14-07's staleness window) automation
+// write's execution from the unified inbox's "Recently decided" section. No client-side RBAC gate
+// here on purpose: the backend Cerbos-authorizes the `retry` action (superadmin/company_admin/
+// group_executive, NOT manager) and returns a real 403 for anyone else — this action only relays
+// that outcome. What IS gated client-side is whether the button renders at all
+// (`ApprovalsList`'s `retryableTenantIds`, computed from `can(me, "approvals.retry", tenantId)` in
+// `/approvals/page.tsx`) — the UI must not OFFER the control to someone it would refuse, not merely
+// hide a button someone could still POST to.
+export async function retryAutomationApproval(tenantId: string, id: string): Promise<{ ok: boolean; error?: string }> {
+  const userId = await getSessionUserId();
+  if (!userId) return { ok: false, error: "Session expired — sign in again." };
+  try {
+    await retryAutomationApprovalCall(userId, tenantId, id);
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
+  revalidatePath("/approvals");
+  revalidatePath(`/approvals/${id}`);
   return { ok: true };
 }

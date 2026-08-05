@@ -50,6 +50,7 @@ import { PmController } from "./modules/pm/pm.controller";
 import { ItController } from "./modules/it/it.controller";
 import { ClientsController } from "./modules/clients/clients.controller";
 import { HrController } from "./modules/hr/hr.controller";
+import { AssistantController } from "./modules/assistant/assistant.controller";
 import { SearchController } from "./modules/search/search.controller";
 import { SearchGoogleOauthCallbackController } from "./modules/search/search-google-oauth.controller";
 import { SearchGoogleAdsController } from "./modules/search/search-google-ads.controller";
@@ -79,7 +80,7 @@ import { MailThreadController } from "./mail/thread.controller";
     AuthzCheckController, ClientWorkController, BillingController, CollabController, AutomationApprovalsController, PipelineController, ApprovalsController, ApprovalsDecideController, TasksMineController, MeetingRecordingsController, PortalController, PortalWorkspaceController, PortalCommerceController, PortalProfileController, PortalStreamController, ContractsController, ClientContactsController, ClientInviteAcceptController, FilesController, CreativeController, WorkActivityController, IntegrationsController, ClaudeSeatsController, AdminIdentityController,
     CompanyAdminController, ServiceAssignmentsController, CompanyCrudController, AdminSystemsController, BotAdminController, IntelligenceController,
     // Vertical modules (compiled-in; per-tenant enable gate at the controller).
-    AgencyController, PmController, ItController, ClientsController, HrController, SearchController,
+    AgencyController, PmController, ItController, ClientsController, HrController, AssistantController, SearchController,
     // SM-25a: the Google OAuth callback is tenant-agnostic on purpose (Google permits no wildcard
     // redirect URIs — see the file header) and so cannot mount under SearchController's
     // `api/:tenantId/modules/search` prefix. Registered as its own controller, mounted at the fixed

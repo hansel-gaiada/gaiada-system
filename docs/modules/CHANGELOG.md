@@ -2591,6 +2591,82 @@ Built by a 4-agent parallel run against a frozen contract (`docs/superpowers/pla
 - **Not done, deliberately:** no release tag cut, no `deploy.yml` trigger, no fix to the
   `test:mail-corpus` script or any file under `platform-nest/**`/`platform-ui/**`.
 
+## mail (continued)
+### [0.0.12] — 2026-08-05 · IN PROGRESS · MAIL-22 (senior-db) — FORCE-RLS invariant restored on the mail tables
+
+- **The gap:** `src/db/rls.test.ts`'s estate-wide "every tenant-scoped table has FORCE RLS" invariant
+  selects every `public` table carrying a `tenant_id` column and asserts `relforcerowsecurity`.
+  `mail_log` and `mail_messages` (both nullable `tenant_id` — auth mail has none) had **no RLS at
+  all**, added that way by MAIL-04's original design (v3 §5/§6.1, finding F2): a NULL `tenant_id`
+  row is invisible under the platform's standard `tenant_isolation` policy to every reader,
+  permanently, so the original cut concluded these three tables must carry no RLS whatsoever. That
+  reasoning was right about the standard policy and wrong about the conclusion — it is the one
+  failing test in an otherwise fully green regression run.
+- **The fix — the 0015 GUC-gate pattern, mirrored exactly.** Amended
+  `platform-nest/migrations/0077_mail_core.sql` **in place** (not superseded by a new migration:
+  the file was committed this session but had never been applied to any persistent database, only
+  ephemeral per-test-file DBs, so amending keeps the ledger at one coherent migration — README rule
+  4 does not apply). All three tables (`mail_log`, `mail_suppressions`, `mail_messages`) now get
+  `ENABLE`+`FORCE ROW LEVEL SECURITY` plus a `mail_context` policy gated on a NEW dedicated GUC,
+  `app.mail_context`, unconditional on `tenant_id` — the policy does not distinguish NULL from any
+  other tenant value, only whether the connection opted into mail context at all. This is the same
+  shape `0015_site_subscriptions_rls.sql` uses for the sync engine's `app.sync_context`.
+- **A new DB wrapper, not a change to `withGlobal`.** `withMailContext()`
+  (`platform-nest/src/db/index.ts`) runs `fn` inside its own transaction and sets
+  `app.mail_context = 'on'` with SET LOCAL semantics (`set_config(..., true)`) — shaped like
+  `withTenants` but with a fixed value instead of a tenant list. Deliberately a SEPARATE function
+  from `withGlobal` rather than a flag on it: `withGlobal` has no transaction of its own (each call
+  is autocommit), so there is nowhere on that path to hang a GUC that survives to a second query,
+  and folding this in would force every OTHER `withGlobal` caller (`users`, `identity_links`) into
+  a transaction it doesn't need, or leak the GUC session-wide to a borrowed pooled connection.
+  Every mail-table query in `src/mail/**` now goes through `withMailContext` —
+  `queue.ts` (`enqueueMail`), `sender.ts` (`claimDueMail`/`markSent`/`markFailedOrRetry`/
+  `processClaimedMail`), `admin-mail.controller.ts` (log list/detail/thread), `thread.controller.ts`
+  (entity + portal thread reads, attachment lookup), `webhook.controller.ts` (delivery events), and
+  `inbound/intake.ts` (VERP token lookup, message insert, NDR apply) — while `mail/intake.ts`'s
+  read of the GLOBAL `users` table (recipient email resolution) correctly stays on `withGlobal`,
+  unchanged. `sender.ts`'s `claimDueMail` also dropped its own now-redundant inner
+  `BEGIN`/`COMMIT`/`ROLLBACK` (it was nesting inside `withMailContext`'s transaction).
+- **Honesty about what this buys, stated in the migration header and here:** the GUC gate does not
+  make mail data unreadable to code that sets `app.mail_context` — any path that calls
+  `withMailContext` gets in, same as `withGlobal` did before. What it restores is DEFENCE IN DEPTH:
+  a future query against these tables through the ordinary `withGlobal`/`withTenants` helpers (code
+  that forgot this table needs its own context) now fails closed — zero rows on read, a
+  `WITH CHECK` violation on write — instead of silently succeeding. Application-layer authorization
+  (the elevated-only admin log; the A10 parent-entity check in `thread-authz.ts`) remains the
+  PRIMARY gate, unchanged by this ticket.
+- **Proof, not assertion — `src/mail/migration.test.ts`:** replaced the stale "`mail_log` has NO
+  row-level security" test (now false) with three: (1) all three tables carry
+  `relrowsecurity`+`relforcerowsecurity` true; (2) a connection that never sets
+  `app.mail_context` (`withGlobal`) sees ZERO existing `mail_log` rows and gets a
+  row-level-security error on INSERT — the defence-in-depth proof; (3) a connection using
+  `withMailContext` can insert, read back, AND update a NULL-`tenant_id` (auth-stream) row — the
+  binding "auth mail keeps working" proof MAIL-22 was scoped to protect, cross-checked against the
+  superuser `adminPool()` view to rule out a false-positive from the mail-context connection's own
+  eyes.
+- **Verification, real output, scoped per the shared-cluster runbook** (`TEST_DB_PREFIX` set,
+  never the full suite): `npx vitest run src/mail src/db` → **26 files / 274 tests, all green**,
+  including `src/db/rls.test.ts` **unmodified** (5 tests) now passing the "every tenant-scoped
+  table has FORCE RLS" assertion for real, and `src/mail/migration.test.ts` (8 tests, the 3 new
+  ones among them). `npm run lint:migration-rls` → OK (0077 has zero backfill DML — no
+  UPDATE/DELETE/INSERT...SELECT — so the now-genuinely-applicable RLS lint still finds nothing to
+  flag). `npm run lint:withtenants` → OK, unaffected (mail doesn't gain any new `withTenants` call).
+  Twenty per-file test databases created under the run's `TEST_DB_PREFIX` were dropped afterward
+  (`DROP DATABASE ... WITH (FORCE)`); confirmed zero remaining under that prefix on the shared
+  `gaiada-test-pg` instance.
+- **Not touched, deliberately:** the concurrent D14 session's files
+  (`src/core/approval-execute*.ts`, `approval-executables*.ts`, `d14-06-*.ts`, `hub-client.ts`,
+  `0078_*.sql`, `events/consumer.service.ts`, `approvals-decide.test.ts`, the two Cerbos policy
+  files, `mcp-hub/**`) and the AI-chat session's `ai-gateway-go/**`. `src/main.ts` and
+  `src/core/automation-approvals.controller.ts` were left as found (deliberately uncommitted,
+  interleaving mail + D14 work) and were not committed by this ticket. One real cross-boundary
+  note for whoever owns it next: `src/core/mail-06-decider-notifications.test.ts` (MAIL-06,
+  outside `src/mail/` and outside this ticket's read/verify scope) exercises the real
+  `notify() → mailIntake → enqueueMail` write path through the live app and was reasoned through
+  by code inspection rather than executed here (it reads `mail_log` only via the superuser
+  `adminPool()`, so it is expected to keep passing, but was not run as part of this ticket's
+  scoped `src/mail src/db` command).
+
 ## webdesk
 ### [0.0.0] — 2026-07-23 · PLANNED
 - Blueprint approved; no code. Phased plan P1–P6 (see BLUEPRINTS.md).

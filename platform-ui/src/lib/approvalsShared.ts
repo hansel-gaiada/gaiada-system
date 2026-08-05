@@ -35,6 +35,17 @@ export interface UnifiedApprovalItem {
   status: string;
 }
 
+// D14-08 — the second, honest axis. `status` (above, on UnifiedApprovalItem) is the DECISION;
+// this is what actually happened to the write once approved. Mirrors `automation_approvals.
+// execution_status` (0078) exactly. Only automation/agent/hr-origin items ever carry one — agency
+// and pipeline approvals have no execution step, so those origins are never looked up here.
+export type ExecutionStatus = "not_applicable" | "pending" | "executing" | "executed" | "failed";
+export interface ExecutionInfo {
+  status: ExecutionStatus;
+  error: string | null;
+  attempts: number | null;
+}
+
 export function originCounts(items: Pick<UnifiedApprovalItem, "origin">[]): Record<ApprovalOrigin, number> {
   const counts = { agency: 0, pipeline: 0, hr: 0, automation: 0, agent: 0 } as Record<ApprovalOrigin, number>;
   for (const item of items) counts[item.origin] += 1;

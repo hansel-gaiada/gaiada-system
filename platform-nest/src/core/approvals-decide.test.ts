@@ -17,6 +17,7 @@ import { createCompany, createUser, addMembership, createRole, grantRole } from 
 import { seedAutomationAccounts } from "../seed/automation";
 import { agencyModule } from "../modules/agency";
 import { newId, withTenants } from "../db";
+import { registerExecutableApproval, resetExecutableApprovals } from "./approval-executables";
 
 const svc = { authorization: "Bearer svc-token" };
 const asUser = (id: string) => ({ ...svc, "x-user-id": id });
@@ -35,6 +36,12 @@ describe.skipIf(!TEST_URL)("POST /api/:tenantId/approvals/:id/decide — unified
     config.serviceToken = "svc-token";
     resetModules();
     resetCoreRollupProviders();
+    // D14-02: register exactly one fixture tool for this suite's execution_status tests — the
+    // registry is a plain in-memory singleton (approval-executables.ts), reset first so a stray
+    // registration from another test file in the same process can't collide (registerExecutableApproval
+    // throws on a duplicate toolName by design).
+    resetExecutableApprovals();
+    registerExecutableApproval({ toolName: "test.registered-tool" });
     registerModule(agencyModule);
     registerModule({
       key: "hr", migrations: [], permissions: [], customFieldTargets: [], mcpTools: [], rollupProviders: [], uiManifest: [],
@@ -245,5 +252,126 @@ describe.skipIf(!TEST_URL)("POST /api/:tenantId/approvals/:id/decide — unified
       payload: { origin: "automation", decision: "changes_requested" }, // valid for pipeline, NOT for automation
     });
     expect(r.statusCode).toBe(400);
+  });
+
+  // ══════════════════════════════════════════════════════════════════════════════════════════════
+  // D14-02 — decision -> execution wiring. The executor is REGISTRY-scoped, not origin-scoped
+  // (approval-executables.ts's doctrine + migration 0078's header): execution_status only ever
+  // becomes 'pending' for an APPROVED row whose origin is automation|agent AND whose tool_name has
+  // a registered executable entry. Every other combination stays 'not_applicable' forever.
+  // ══════════════════════════════════════════════════════════════════════════════════════════════
+
+  it("approved + a REGISTERED tool sets execution_status='pending' in the same UPDATE that flips status", async () => {
+    const created = await app.inject({
+      method: "POST", url: `/api/${co}/automation-approvals`, headers: asWorkflow("wf:new-client-seed"),
+      payload: { workflowId: "wf:new-client-seed", toolName: "test.registered-tool", toolArgs: { x: 1 }, impact: "high", reason: "d14-02 registered-tool test" },
+    });
+    const id = created.json().id;
+    const decide = await app.inject({
+      method: "POST", url: `/api/${co}/automation-approvals/${id}/decide`, headers: asUser(admin),
+      payload: { decision: "approved" },
+    });
+    expect(decide.statusCode).toBe(200);
+    const row = await adminPool().query(`SELECT status, execution_status FROM automation_approvals WHERE id = $1`, [id]);
+    expect(row.rows[0]).toMatchObject({ status: "approved", execution_status: "pending" });
+  });
+
+  it("approved + an UNREGISTERED tool (a money-spending search apply tool, permanently barred) stays execution_status='not_applicable'", async () => {
+    const created = await app.inject({
+      method: "POST", url: `/api/${co}/automation-approvals`, headers: asWorkflow("wf:new-client-seed"),
+      payload: { workflowId: "wf:new-client-seed", toolName: "search.setBudget", toolArgs: {}, impact: "high", reason: "d14-02 unregistered-tool test" },
+    });
+    const id = created.json().id;
+    const decide = await app.inject({
+      method: "POST", url: `/api/${co}/automation-approvals/${id}/decide`, headers: asUser(admin),
+      payload: { decision: "approved" },
+    });
+    expect(decide.statusCode).toBe(200);
+    const row = await adminPool().query(`SELECT status, execution_status FROM automation_approvals WHERE id = $1`, [id]);
+    expect(row.rows[0]).toMatchObject({ status: "approved", execution_status: "not_applicable" });
+  });
+
+  it("a REJECTED decision stays execution_status='not_applicable' even for a registered tool", async () => {
+    const created = await app.inject({
+      method: "POST", url: `/api/${co}/automation-approvals`, headers: asWorkflow("wf:new-client-seed"),
+      payload: { workflowId: "wf:new-client-seed", toolName: "test.registered-tool", toolArgs: {}, impact: "high", reason: "d14-02 rejected test" },
+    });
+    const id = created.json().id;
+    const decide = await app.inject({
+      method: "POST", url: `/api/${co}/automation-approvals/${id}/decide`, headers: asUser(admin),
+      payload: { decision: "rejected" },
+    });
+    expect(decide.statusCode).toBe(200);
+    const row = await adminPool().query(`SELECT status, execution_status FROM automation_approvals WHERE id = $1`, [id]);
+    expect(row.rows[0]).toMatchObject({ status: "rejected", execution_status: "not_applicable" });
+  });
+
+  it("origin='hr' approved stays execution_status='not_applicable' even if its tool_name is (hypothetically) registered — the origin gate runs before the registry lookup", async () => {
+    // Proves the guard is an ORIGIN check, not merely an accident of the registry being empty for
+    // hr's real tool names: register the exact tool_name this row carries, then decide approved,
+    // and confirm it still doesn't become auto-executable. This is what keeps HR's own
+    // decided-event handler (modules/hr/leave-decision.ts) safe from double-application.
+    registerExecutableApproval({ toolName: "hr.fileLeave-d14-02-guard-test" });
+    const id = newId();
+    await withTenants([co], (c) =>
+      c.query(
+        `INSERT INTO automation_approvals (id, tenant_id, workflow_id, tool_name, tool_args, impact, reason, requested_by, origin, origin_site)
+         VALUES ($1,$2,'hr:leave','hr.fileLeave-d14-02-guard-test','{}','medium',$3,$4,'hr',$5)`,
+        [id, co, "D14-02 hr origin-gate test", admin, config.originSite],
+      ),
+    );
+    const decide = await app.inject({
+      method: "POST", url: `/api/${co}/automation-approvals/${id}/decide`, headers: asUser(hrManager),
+      payload: { decision: "approved" },
+    });
+    expect(decide.statusCode).toBe(200);
+    const row = await adminPool().query(`SELECT status, execution_status FROM automation_approvals WHERE id = $1`, [id]);
+    expect(row.rows[0]).toMatchObject({ status: "approved", execution_status: "not_applicable" });
+  });
+
+  it("GET .../automation-approvals list returns the new execution_* fields", async () => {
+    const created = await app.inject({
+      method: "POST", url: `/api/${co}/automation-approvals`, headers: asWorkflow("wf:new-client-seed"),
+      payload: { workflowId: "wf:new-client-seed", toolName: "test.registered-tool", toolArgs: {}, impact: "high", reason: "d14-02 list-fields test" },
+    });
+    const id = created.json().id;
+    await app.inject({ method: "POST", url: `/api/${co}/automation-approvals/${id}/decide`, headers: asUser(admin), payload: { decision: "approved" } });
+
+    const list = await app.inject({ method: "GET", url: `/api/${co}/automation-approvals?status=approved`, headers: asUser(admin) });
+    expect(list.statusCode).toBe(200);
+    const row = (list.json() as Array<Record<string, unknown>>).find((r) => r.id === id);
+    expect(row).toMatchObject({
+      execution_status: "pending",
+      execution_attempts: 0,
+      executed_at: null,
+      executed_by: null,
+      execution_error: null,
+    });
+  });
+
+  it("both decide surfaces (façade + native) produce the IDENTICAL execution_status for the same registered tool", async () => {
+    const createRow = async () => {
+      const created = await app.inject({
+        method: "POST", url: `/api/${co}/automation-approvals`, headers: asWorkflow("wf:new-client-seed"),
+        payload: { workflowId: "wf:new-client-seed", toolName: "test.registered-tool", toolArgs: {}, impact: "high", reason: "d14-02 facade/native parity" },
+      });
+      return created.json().id as string;
+    };
+    const idFacade = await createRow();
+    const idNative = await createRow();
+
+    const viaFacade = await app.inject({ method: "POST", url: `/api/${co}/approvals/${idFacade}/decide`, headers: asUser(admin), payload: { origin: "automation", decision: "approved" } });
+    expect(viaFacade.statusCode).toBe(200);
+    const viaNative = await app.inject({ method: "POST", url: `/api/${co}/automation-approvals/${idNative}/decide`, headers: asUser(admin), payload: { decision: "approved" } });
+    expect(viaNative.statusCode).toBe(200);
+
+    const rows = await adminPool().query<{ id: string; execution_status: string }>(
+      `SELECT id, execution_status FROM automation_approvals WHERE id IN ($1,$2)`,
+      [idFacade, idNative],
+    );
+    const byId = Object.fromEntries(rows.rows.map((r) => [r.id, r.execution_status]));
+    expect(byId[idFacade]).toBe("pending");
+    expect(byId[idNative]).toBe("pending");
+    expect(byId[idFacade]).toBe(byId[idNative]);
   });
 });

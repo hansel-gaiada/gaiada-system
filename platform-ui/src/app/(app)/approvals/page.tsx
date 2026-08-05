@@ -1,12 +1,13 @@
 import { redirect } from "next/navigation";
 import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
-import { accessibleCompanies } from "@/lib/rbac";
+import { accessibleCompanies, can } from "@/lib/rbac";
 import {
   listApprovals, originCounts, isApprovalOrigin, ORIGIN_LABEL,
   type ApprovalOrigin, type ApprovalSort,
 } from "@/lib/approvals";
-import { decideApprovalItem } from "../actions";
+import { fetchExecutionStates } from "@/lib/automationApprovals";
+import { decideApprovalItem, retryAutomationApproval } from "../actions";
 import { Card, Eyebrow } from "@/components/ui";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { ScopePill } from "@/components/scope/ScopePill";
@@ -71,6 +72,14 @@ export default async function ApprovalsPage({ searchParams }: { searchParams: Se
   const pendingShown = origin ? pending.envelope.items.filter((i) => i.origin === origin) : pending.envelope.items;
   const decidedShown = (origin ? decided.envelope.items.filter((i) => i.origin === origin) : decided.envelope.items)
     .slice(0, RECENTLY_DECIDED_LIMIT);
+
+  // D14-08 — the second, honest axis. Only decided rows can ever have executed anything (a still-
+  // pending decision is always `not_applicable`), so this fans out ONLY over `decidedShown`, and
+  // only for the automation/agent/hr origins that have an execution step at all (see
+  // `fetchExecutionStates`'s own header for why the unified endpoint can't carry this itself).
+  const executionByItemId = await fetchExecutionStates(userId, decidedShown);
+  const decidedTenantIds = [...new Set(decidedShown.map((i) => i.tenantId))];
+  const retryableTenantIds = decidedTenantIds.filter((id) => can(me, "approvals.retry", id));
 
   const pendingEmptyText =
     total === 0
@@ -138,7 +147,15 @@ export default async function ApprovalsPage({ searchParams }: { searchParams: Se
             Recently-decided history isn&apos;t reachable right now — showing nothing rather than a guess.
           </p>
         ) : (
-          <ApprovalsList items={decidedShown} mode="decided" decide={decideApprovalItem} emptyText={decidedEmptyText} />
+          <ApprovalsList
+            items={decidedShown}
+            mode="decided"
+            decide={decideApprovalItem}
+            emptyText={decidedEmptyText}
+            executionByItemId={executionByItemId}
+            retryableTenantIds={retryableTenantIds}
+            retry={retryAutomationApproval}
+          />
         )}
       </Card>
     </>

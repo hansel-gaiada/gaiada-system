@@ -10,6 +10,38 @@ import type { OutboxEvent } from "./types";
 const GROUP = "in-process-platform";
 const CONSUMER = "platform-1";
 
+// D14-02 — the CORE (non-module) event-handler registry. Module handlers (ModuleContract.
+// eventHandlers, dispatched in the loop below via allModules()) only ever fire for a tenant that
+// has the owning module ENABLED (isModuleEnabled) — that gate is correct for module capabilities a
+// tenant can toggle off, but it is the wrong gate for platform-core behavior that must run
+// unconditionally. The automation-approval EXECUTOR (D14-03's core/approval-execute.ts, registered
+// as a stub in main.ts for now) is exactly that: whether an approved row auto-executes cannot
+// depend on whether some unrelated module happens to be enabled for that tenant.
+//
+// A core handler therefore dispatches for EVERY event of its registered eventType on a watched
+// stream, for EVERY tenant, with NO isModuleEnabled check — same isolated try/catch as the module
+// loop, and folded into the exact same allOk/ack/retry/dead-letter accounting below, so a failing
+// core handler is indistinguishable (from the redelivery/dead-letter machinery's point of view)
+// from a failing module handler: it leaves the entry un-acked and counts toward
+// DEAD_LETTER_MAX_RETRIES like any other handler failure.
+export type CoreEventHandler = (event: OutboxEvent) => Promise<void>;
+const coreHandlers = new Map<string, CoreEventHandler[]>();
+
+/** Register a core event handler for `eventType`. Multiple handlers may register for the same
+ *  eventType (appended, mirroring how multiple MODULES can each declare a handler for one
+ *  eventType) — each runs independently, isolated by its own try/catch. */
+export function registerCoreEventHandler(eventType: string, handler: CoreEventHandler): void {
+  const list = coreHandlers.get(eventType) ?? [];
+  list.push(handler);
+  coreHandlers.set(eventType, list);
+}
+
+/** Test-only reset, mirroring `modules/registry.ts`'s `resetModules()` — clears every registered
+ *  core handler so test files don't leak handlers (or their side effects) across runs. */
+export function resetCoreEventHandlers(): void {
+  coreHandlers.clear();
+}
+
 // Task 7: entries that fail every handler this many times are moved off the live
 // stream onto a plain (non-consumer-group) dead-letter stream and ack'd there so
 // they stop being redelivered.
@@ -75,6 +107,18 @@ export async function consumeOnce(entityType: string, groupName = GROUP): Promis
       } catch (err) {
         // eslint-disable-next-line no-console
         console.error(`event handler failed (module=${mod.key}, event=${event.eventType}):`, (err as Error).message);
+        allOk = false;
+      }
+    }
+    // D14-02: core handlers — deliberately NO isModuleEnabled gate (see registerCoreEventHandler's
+    // header above). Folded into the SAME allOk flag so ack/retry/dead-letter accounting is
+    // identical regardless of whether the failure came from a module or a core handler.
+    for (const handler of coreHandlers.get(event.eventType) ?? []) {
+      try {
+        await handler(event);
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error(`core event handler failed (event=${event.eventType}):`, (err as Error).message);
         allOk = false;
       }
     }

@@ -125,24 +125,28 @@ class MemGoalStore implements GoalStore {
 }
 
 // ---- scripted deps ------------------------------------------------------------------------------
-function scripted(responses: string[], toolResults: Record<string, string> = {}): AgentDeps {
+function scripted(responses: string[], toolResults: Record<string, string> = {}, getRegistryImpact?: AgentDeps["getRegistryImpact"]): AgentDeps {
   let i = 0;
   return {
     complete: async () => responses[Math.min(i++, responses.length - 1)],
     callTool: async (name) => toolResults[name] ?? "ok",
     lastProvider: () => undefined,
+    getRegistryImpact,
   };
 }
 
 // custom agents for scripted terminal outcomes
 const reader: AgentDef = { name: "reader", systemPrompt: "read", tools: { "x.read": "read" }, maxSteps: 2, maxToolCalls: 5 };
 const writer: AgentDef = { name: "test-writer", systemPrompt: "write", tools: { "danger.write": "high_write" }, maxSteps: 4, maxToolCalls: 4, evaledProviders: ["echo"] };
+// D14-12 — declared LOW; only the hub registry (via getRegistryImpact) makes this dangerous. Used to
+// prove the runner's `counted` wrapper in service.ts forwards `getRegistryImpact`, not just resolveApproval.
+const writerLowDeclared: AgentDef = { name: "reconcile-writer", systemPrompt: "write", tools: { "maybe.write": "low_write" }, maxSteps: 4, maxToolCalls: 4, evaledProviders: ["echo"] };
 
 function registry(over: Partial<AgentRegistry> = {}): AgentRegistry {
   return {
     supervisor: realSupervisor,
     specialists: { reader },
-    writeSpecialists: { "test-writer": writer, "task-triager": taskTriager },
+    writeSpecialists: { "test-writer": writer, "task-triager": taskTriager, "reconcile-writer": writerLowDeclared },
     ...over,
   };
 }
@@ -261,6 +265,25 @@ describe("agent-runner service", () => {
     const g = (await goalStatus(app, id)).json() as GoalDetail;
     expect(g.status).toBe("suspended");
     expect(g.approvalId).toBe("appr-1");
+    expect(g.errorKind).toBe("approval_required");
+  });
+
+  it("D14-12: a declared low_write promoted to high_write by the registry still suspends through the runner (proves service.ts's `counted` wrapper forwards getRegistryImpact — the same hazard D14-10 hit with resolveApproval)", async () => {
+    const { app } = build({
+      deps: scripted(
+        ['{"tool":"maybe.write","args":{"x":1}}'],
+        { "approvals.request": '{"id":"appr-reconcile"}' },
+        (name) => (name === "maybe.write" ? { write: true, impact: "high" } : undefined),
+      ),
+      servingProvider: "echo",
+    });
+    const { id } = (await trigger(app, { goal: "maybe write it", agent: "reconcile-writer" })).json() as { id: string };
+    await idle(app);
+    const g = (await goalStatus(app, id)).json() as GoalDetail;
+    // If getRegistryImpact were silently dropped by the `counted` wrapper, this agent's declared
+    // low_write would run unattended and land `status: "ok"` instead — exactly the drift D14-12 closes.
+    expect(g.status).toBe("suspended");
+    expect(g.approvalId).toBe("appr-reconcile");
     expect(g.errorKind).toBe("approval_required");
   });
 

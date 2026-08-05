@@ -3,7 +3,7 @@
 // wires the `notify()` tap on top of this; this ticket only builds and tests the primitive itself.
 import { randomBytes } from "node:crypto";
 import { config } from "../config";
-import { newId, withGlobal } from "../db";
+import { newId, withMailContext } from "../db";
 import { stripHeaderInjection, isPlausibleEmail } from "./sanitize";
 import { isSuppressed } from "./suppressions";
 import { renderTemplate } from "./templates";
@@ -55,7 +55,7 @@ export async function enqueueMail(input: EnqueueMailInput): Promise<EnqueueMailR
   const subject = stripHeaderInjection(rendered.subject);
   const replyToken = input.withReplyToken ? newReplyToken() : null;
 
-  return withGlobal(async (c) => {
+  return withMailContext(async (c) => {
     const suppressed = await isSuppressed(c, input.toEmail, input.stream);
     const id = newId();
     const status: "queued" | "suppressed" = suppressed ? "suppressed" : "queued";

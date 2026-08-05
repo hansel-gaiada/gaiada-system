@@ -21,7 +21,7 @@
 // Putting the idempotency decision (3) before the attachment work (4) is what makes a replayed
 // delivery cost nothing: no re-scan, no re-write of quarantine bytes, no second row.
 import { config } from "../../config";
-import { newId, withGlobal } from "../../db";
+import { newId, withMailContext } from "../../db";
 import { storage } from "../../core/storage";
 import { addSuppression } from "../suppressions";
 import { recordInbound, recordInboundRejected } from "../metrics";
@@ -86,7 +86,7 @@ export function extractReplyToken(recipientAddresses: string[]): { token: string
 }
 
 async function findByReplyToken(token: string): Promise<MatchedMailLog | null> {
-  const { rows } = await withGlobal((c) =>
+  const { rows } = await withMailContext((c) =>
     c.query<MatchedMailLog>(
       `SELECT id, tenant_id, entity_type, entity_id, to_email, status FROM mail_log WHERE reply_token = $1`,
       [token],
@@ -225,7 +225,7 @@ export async function ingestInbound(msg: NormalizedInbound): Promise<IngestResul
   const entityType = ndr.ndr ? null : matched.entity_type;
   const entityId = ndr.ndr ? null : matched.entity_id;
 
-  const inserted = await withGlobal(async (c) => {
+  const inserted = await withMailContext(async (c) => {
     const res = await c.query<{ id: string }>(
       `INSERT INTO mail_messages (
          id, mail_log_id, tenant_id, entity_type, entity_id, provider, provider_message_id,
@@ -263,7 +263,7 @@ export async function ingestInbound(msg: NormalizedInbound): Promise<IngestResul
 
   if (!ndr.ndr && msg.attachments.length) {
     const stored = await processAttachments(id, msg.attachments);
-    await withGlobal((c) =>
+    await withMailContext((c) =>
       c.query(`UPDATE mail_messages SET attachments = $2::jsonb WHERE id = $1`, [id, JSON.stringify(stored)]),
     );
   }
@@ -283,7 +283,7 @@ export async function ingestInbound(msg: NormalizedInbound): Promise<IngestResul
  *  'bounced'` makes a replayed NDR a true no-op on the log row, matching the delivery-event webhook's
  *  idempotency shape. */
 async function applyNdr(matched: MatchedMailLog, hard: boolean, detail: string): Promise<void> {
-  await withGlobal(async (c) => {
+  await withMailContext(async (c) => {
     if (hard) {
       await c.query(
         `UPDATE mail_log SET status = 'bounced', last_error = $2, updated_at = now()

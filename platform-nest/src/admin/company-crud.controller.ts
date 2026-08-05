@@ -73,23 +73,60 @@ export class CompanyCrudController {
   }
 
   // Update a company (company.manage — company_admin on the tenant, or global-elevated).
+  //
+  // D14-07: this is also the write path for `companies.settings.automation.approvalRetry` (OQ-5) —
+  // the ticket's constraint 10 forbids a new settings table/subsystem, and this PATCH is the ONLY
+  // existing company-write surface, so the retry setting rides through it as a namespaced,
+  // individually-validated key rather than a generic `settings` overwrite. `companies.settings` is
+  // a SHARED jsonb column (0001) other features may already have keys in, so the SQL below merges
+  // via `jsonb_set(..., '{automation,approvalRetry}', ..., true)` — it touches ONLY that one nested
+  // path and leaves every sibling top-level key, and every sibling key under `automation`, exactly
+  // as it was. Never build a blanket `settings = $n::jsonb` overwrite here.
   @Patch("companies/:companyId")
   @HttpCode(200)
   async updateCompany(
     @Req() req: FastifyRequest,
     @Param("companyId") companyId: string,
-    @Body() b: { name?: string; type?: string; parentCompanyId?: string | null; status?: string; modules?: string[] },
+    @Body() b: {
+      name?: string; type?: string; parentCompanyId?: string | null; status?: string; modules?: string[];
+      settings?: { automation?: { approvalRetry?: { autoRetryCount?: unknown } } };
+    },
   ) {
     await authorize(req.principal, { kind: "company", id: companyId, tenantId: companyId }, "update");
     const modules = b?.modules !== undefined && Array.isArray(b.modules) ? b.modules.filter((m) => typeof m === "string") : null;
     // parentCompanyId is nullable-settable: distinguish "omitted" from "set to null".
     const setParent = Object.prototype.hasOwnProperty.call(b ?? {}, "parentCompanyId");
+
+    // `undefined` (the field, or any ancestor of it, omitted) => leave `settings` completely
+    // untouched; a present value is validated 0..3 (approval-execute.ts's MAX_AUTO_RETRY_COUNT
+    // clamp is the read-side twin of this write-side validation — keep both if either changes).
+    let autoRetryCount: number | undefined;
+    const rawRetry = b?.settings?.automation?.approvalRetry?.autoRetryCount;
+    if (rawRetry !== undefined) {
+      if (typeof rawRetry !== "number" || !Number.isInteger(rawRetry) || rawRetry < 0 || rawRetry > 3) {
+        throw new BadRequestException("settings.automation.approvalRetry.autoRetryCount must be an integer 0..3");
+      }
+      autoRetryCount = rawRetry;
+    }
+    const setRetry = autoRetryCount !== undefined;
+
     await withTenants([companyId], async (c) => {
       if (setParent && b.parentCompanyId) {
         if (b.parentCompanyId === companyId) throw new BadRequestException("a company cannot be its own parent");
         const parent = await c.query(`SELECT 1 FROM companies WHERE id = $1 AND deleted_at IS NULL`, [b.parentCompanyId]);
         if (!parent.rows[0]) throw new BadRequestException("parent company not found");
       }
+      // NOTE on the `settings` merge below: jsonb_set with create_missing=true CANNOT create an
+      // intermediate object on a multi-segment path — against a settings value with no top-level
+      // 'automation' key yet, jsonb_set(settings, '{automation,approvalRetry}', ..., true) returns
+      // settings UNCHANGED (documented Postgres behaviour: jsonb_set only ever creates the FINAL
+      // path segment, never its ancestors; verified against this exact shape while building this
+      // ticket). So this merges with the jsonb concat operator at each level instead: the inner
+      // concat overlays the new 'approvalRetry' key onto whatever the existing 'automation' object
+      // already has (preserving sibling keys under 'automation'); the outer concat overlays the
+      // resulting 'automation' key onto the rest of `settings` (preserving every sibling TOP-LEVEL
+      // key). Both COALESCEs handle a NULL `settings` and an absent/NULL 'automation' key on a
+      // company that has neither yet.
       const res = await c.query(
         `UPDATE companies SET
            name = COALESCE($2, name),
@@ -97,9 +134,15 @@ export class CompanyCrudController {
            status = COALESCE($4, status),
            enabled_modules = COALESCE($5, enabled_modules),
            parent_company_id = CASE WHEN $6 THEN $7 ELSE parent_company_id END,
+           settings = CASE WHEN $8::boolean THEN
+             COALESCE(settings, '{}'::jsonb) || jsonb_build_object(
+               'automation',
+               COALESCE(settings -> 'automation', '{}'::jsonb) || jsonb_build_object('approvalRetry', jsonb_build_object('autoRetryCount', $9::int))
+             )
+           ELSE settings END,
            updated_at = now()
          WHERE id = $1 AND deleted_at IS NULL`,
-        [companyId, b?.name ?? null, b?.type ?? null, b?.status ?? null, modules, setParent, b?.parentCompanyId ?? null],
+        [companyId, b?.name ?? null, b?.type ?? null, b?.status ?? null, modules, setParent, b?.parentCompanyId ?? null, setRetry, autoRetryCount ?? 0],
       );
       if (res.rowCount === 0) throw new NotFoundException("company not found");
       await emitEvent(c, companyId, "company", companyId, "company.updated", { status: b?.status ?? null });

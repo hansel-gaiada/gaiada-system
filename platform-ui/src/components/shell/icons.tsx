@@ -25,6 +25,7 @@ const PATHS = {
   hub: "M9.5 12a2.5 2.5 0 1 0 5 0a2.5 2.5 0 1 0 -5 0 M12 4v5 M12 15v5 M4 12h5 M15 12h5",
   bot: "M7 7h10v9H7z M9 16v3 M15 16v3 M10 11h.01 M14 11h.01 M12 4v3",
   automation: "M12 12m-8 0a8 8 0 1 0 16 0a8 8 0 1 0 -16 0 M12 8v4l3 2",
+  assistant: "M4 5h16v11H8l-4 4V5z M8 9h8 M8 12.5h5",
 };
 
 export type IconName = keyof typeof PATHS;

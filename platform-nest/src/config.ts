@@ -310,6 +310,25 @@ const configBase = {
     // AGENT_RUNNER_TOKEN gates every runner call, same convention as the other service tokens.
     agents: { url: process.env.AGENTS_URL ?? "", token: process.env.AGENT_RUNNER_TOKEN ?? "" },
   },
+  // ASST-06 — the assistant's send->stream engine. Reuses `services.gateway` above for the actual
+  // ai-gateway-go URL/token (already the one place GATEWAY_URL/GATEWAY_TOKEN are wired from env,
+  // same binding admin-systems.controller.ts and search's providers/gateway-client.ts read) —
+  // these two knobs are assistant-specific TUNABLES, not a second gateway endpoint.
+  assistant: {
+    // Server-side idle timeout for a single streamed generation (modules/assistant/stream.ts):
+    // no token/event received from ai-gateway-go for this long -> abort the upstream fetch and
+    // surface a visible `error` event (errorKind 'idle_timeout') rather than hanging the SSE
+    // connection forever. Deliberately shorter than the blueprint's client-side 120s idle timeout
+    // (§5/ASST-07) so the SERVER fails the stalled generation first and the browser sees a clean
+    // error instead of ever hitting its own timeout.
+    streamIdleTimeoutMs: Number(process.env.ASSISTANT_STREAM_IDLE_TIMEOUT_MS ?? 60_000),
+    // Context-assembly char budget (modules/assistant/context.ts) for the recent-messages window
+    // kept VERBATIM in the prompt sent to the gateway. Approximate (~4 chars/token), not a real
+    // tokenizer count -- the gateway's /complete(/stream) wire carries no usage field for us to
+    // calibrate against (ASST-10's grammar has no `usage` event upstream). Overflow beyond this
+    // budget triggers compaction v1 (fold the oldest excerpt into the thread's rolling summary).
+    contextCharBudget: Number(process.env.ASSISTANT_CONTEXT_CHAR_BUDGET ?? 12_000),
+  },
   /**
    * BROWSER-reachable n8n editor origin — deliberately NOT `services.automation.url`.
    *

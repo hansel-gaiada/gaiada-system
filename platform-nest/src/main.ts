@@ -32,6 +32,7 @@ import { clientsModule } from "./modules/clients";
 import { knowledgeModule } from "./modules/knowledge";
 import { automationConsoleModule } from "./modules/automation-console";
 import { hrModule } from "./modules/hr";
+import { assistantModule } from "./modules/assistant";
 import { searchModule } from "./modules/search";
 import { reportsModule } from "./modules/reports";
 import { createDataForSeoProviderFromConfig } from "./modules/search/providers/dataforseo";
@@ -63,7 +64,9 @@ import {
 import { registerCoreRollupProvider, coreTaskRollups, syncMetricDefinitions } from "./rollups/engine";
 import { clientWorkRollups } from "./core/client-work";
 import { startRelayLoop } from "./events/relay";
-import { startConsumerLoop } from "./events/consumer.service";
+import { startConsumerLoop, registerCoreEventHandler } from "./events/consumer.service";
+// D14-03 — the core automation-approval EXECUTOR (replaces D14-02's stub handler below).
+import { automationApprovalExecutorHandler } from "./core/approval-execute";
 import { startReconcileLoop, startDriftSweepLoop } from "./events/reconcile-consumer";
 import { startN8nBridgeLoop } from "./events/n8n-bridge";
 import { startGraphBridgeLoop } from "./events/graph-bridge";
@@ -77,6 +80,17 @@ import { startStaleReaperLoop } from "./modules/it/discovery.service";
 // principal is minted `assurance: "low"` by construction, so giving n8n a path to vendor spend would
 // have meant weakening two controls on the money path. Dark by default — see the config comment.
 import { startSearchPullSchedulerLoop } from "./modules/search/pull-scheduler";
+// MAIL-04 (design §7.7/§7.8) — the mail sender worker. Only started when MAIL_ENABLED=1 (the
+// master gate): starting it unconditionally would still send nothing today (resolveAdapter falls
+// back to dev-log when disabled, provider.ts), but not starting it at all is the honest "module is
+// dark" state design §7.8 describes, and it means a disabled deployment runs no extra DB polling
+// loop for a feature it isn't using. A plain Postgres sweep, no Redis dependency — same family as
+// the burndown/drift/IT-reaper loops below, outside the redisUrl gate.
+import { startMailSenderLoop } from "./mail/sender";
+// MAIL-13 (design §7.6) — see the call in buildApp() for why the inbound door needs its own
+// URL-scoped raw-body hook rather than a global parser change.
+import type { FastifyInstance } from "fastify";
+import { registerInboundRawBodyCapture } from "./mail/inbound/raw-body";
 
 export async function buildApp(): Promise<NestFastifyApplication> {
   // Fastify logs are pino JSON with trace_id/span_id when OTEL is on, else stay off (unchanged
@@ -129,6 +143,12 @@ export async function buildApp(): Promise<NestFastifyApplication> {
   // per-kind cap is applied in the handler once the mimetype/extension has been classified. Taking
   // the audio cap here instead would silently truncate every video above it.
   await app.register(multipart, { limits: { fileSize: maxUploadBytes(), files: 1 } });
+  // MAIL-13 (design §7.6) — raw-body capture for `POST /api/mail/inbound/*` ONLY. Needed because
+  // HMAC verification must run over the exact received bytes (a JSON re-serialization is a different
+  // string) and because Fastify's 1 MiB default body limit would otherwise 413 a legitimate inbound
+  // mail well below the documented `MAIL_INBOUND_MAX_BYTES` cap. URL-scoped, so no other route's
+  // parsing behaviour changes — see src/mail/inbound/raw-body.ts for the full rationale.
+  registerInboundRawBodyCapture(app.getHttpAdapter().getInstance() as unknown as FastifyInstance);
   await app.init();
   return app;
 }
@@ -290,6 +310,10 @@ export function wireSearchProviderModeAndAdsWriteMode(
   console.log(`[search] Ads write mode: ${adsWriteMode} (SEARCH_ADS_WRITE_MODE)`);
 }
 
+// D14-03 replaced D14-02's inert stub here. The real executor lives in `core/approval-execute.ts`
+// (`automationApprovalExecutorHandler`) and is registered below exactly where the stub was — the
+// registration site, the event type and the watched stream are all unchanged. See that file's header
+// for the four invariants (authority / single-use / TOCTOU / loudness) and the crash-wedge rule.
 async function bootstrap(): Promise<void> {
   // Same startup sequence the Fastify server ran: migrate, register compiled-in modules +
   // core rollup providers, sync the governed metric registry, then serve.
@@ -305,6 +329,7 @@ async function bootstrap(): Promise<void> {
   registerModule(knowledgeModule);
   registerModule(automationConsoleModule);
   registerModule(hrModule);
+  registerModule(assistantModule);
   registerModule(searchModule);
   registerModule(reportsModule);
   // SM-75: the search provider-mode + ads-write-mode boot wiring — see wireSearchProviderModeAndAdsWriteMode's
@@ -331,6 +356,11 @@ async function bootstrap(): Promise<void> {
     // but never invoked — the event would be written to the outbox, relayed, and read by nobody, so
     // `partial`/`indeterminate` outcomes would silently notify no one. That is precisely the failure
     // this list's own comment above warns about, now that the producer exists.
+    // D14-02/D14-03: register the core (non-module) executor handler BEFORE the consumer loop starts
+    // reading — see core/approval-execute.ts's header for what it does, and
+    // registerCoreEventHandler's header (consumer.service.ts) for why this runs with no
+    // isModuleEnabled gate. The stream is already in the watched list below ("automation_approval").
+    registerCoreEventHandler("automation_approval.decided", automationApprovalExecutorHandler);
     startConsumerLoop(["deliverable", "user", "automation_approval", "search_engagement", "search_audit", "search_property", "search_change_proposal"]);
     // ORG-6 service-assignment reconciler (A7): outbox-driven, own consumer group. Only when the
     // release-train flag is on — dark by default so assignments stay dormant metadata.
@@ -411,6 +441,14 @@ async function bootstrap(): Promise<void> {
         "(cadence, tool toggles and budget caps all come from each engagement's tool_scope; " +
         "ledger attribution requested_by=NULL correlationId=sched:<tool>)",
     );
+  }
+  // MAIL-04: dark by default (config.mail.enabled reads MAIL_ENABLED). When on, the loop still
+  // resolves to the dev-log adapter per stream until real per-stream host/creds are configured
+  // (provider.ts's resolveAdapter) — the flag alone never causes a network send.
+  if (config.mail.enabled) {
+    startMailSenderLoop(config.mail.senderIntervalMs);
+    // eslint-disable-next-line no-console
+    console.log(`mail sender on: every ${config.mail.senderIntervalMs}ms (MAIL_ENABLED=1)`);
   }
   const app = await buildApp();
   const port = Number(process.env.PLATFORM_PORT ?? 3004);

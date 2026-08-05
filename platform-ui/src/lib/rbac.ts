@@ -36,6 +36,11 @@ export type Capability =
   | "pm.manage"          // create/assign/move tasks, confirm AI-tracker writes
   | "it.manage"          // register/edit devices
   | "approvals.decide"   // approve/reject
+  // D14-08 — retry a FAILED (or stuck-executing) automation write's execution (Cerbos action
+  // `retry` on `automation_approval`). Deliberately NARROWER than `approvals.decide`: a plain
+  // `manager` may decide but must not retry — retry re-attempts a write that already failed once,
+  // which the backend restricts to superadmin/company_admin/group_executive (D14-07's grant).
+  | "approvals.retry"
   | "knowledge.review"   // review/quarantine knowledge sources
   | "hr.view"            // read hr_cases/hr_records/leave/attendance for a company
   | "hr.manage"          // file/decide leave on others' behalf, edit cases/records/checklists, manage templates
@@ -70,7 +75,7 @@ export type Capability =
 // What each role grants (within its own scope). Order/duplication is harmless.
 const ALL: Capability[] = [
   "admin.access", "company.manage", "org.edit", "people.directory",
-  "rollups.view", "pm.manage", "it.manage", "approvals.decide", "knowledge.review",
+  "rollups.view", "pm.manage", "it.manage", "approvals.decide", "approvals.retry", "knowledge.review",
   "hr.view", "hr.manage",
   "search.view", "search.manage", "search.scope.write", "search.campaign.launch", "search.report.approve", "search.ledger.admin",
   "reports.person.view", "reports.project.view", "reports.department.view", "reports.company.view",
@@ -95,7 +100,7 @@ export const ROLE_CAPS: Record<Role, Capability[]> = {
   platform_admin: ALL,
   group_executive: ALL,
   company_admin: [
-    "admin.access", "company.manage", "org.edit", "people.directory", "pm.manage", "it.manage", "approvals.decide", "knowledge.review",
+    "admin.access", "company.manage", "org.edit", "people.directory", "pm.manage", "it.manage", "approvals.decide", "approvals.retry", "knowledge.review",
     "hr.view", "hr.manage",
     "search.view", "search.manage", "search.scope.write", "search.campaign.launch", "search.report.approve", "search.ledger.admin",
     // The tenant's own administrator holds the exec-only reporting tier within its company (§8's

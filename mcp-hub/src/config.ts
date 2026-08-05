@@ -22,6 +22,12 @@ export const config = {
   // versioned `mcp_tool` policy in Cerbos instead of the in-code engine (which remains the
   // fail-closed fallback). Empty ⇒ in-code mode (dev/tests). Same Cerbos as the platform.
   cerbosUrl: process.env.CERBOS_URL ?? "",
+  // D14 execution grant (D14-04, plan §1): the HMAC secret shared with platform-nest, which mints a
+  // single-use `x-approval-grant` when a human approves a suspended automation write. Empty ⇒ every
+  // presented grant is REJECTED (fail closed — the impact gate keeps suspending), never skipped.
+  // Must be listed in BOTH services' compose `environment:` blocks; a value in .env alone does
+  // nothing (this repo has shipped four features silently disabled that exact way).
+  approvalGrantSecret: process.env.APPROVAL_GRANT_SECRET ?? "",
   // Rate limiting (§8): token bucket per principal (provider:externalId) AND per service token.
   // 0 disables. Sustained rate/min + burst ceiling.
   rateLimitPerMin: Number(process.env.HUB_RATE_LIMIT_PER_MIN ?? 120),

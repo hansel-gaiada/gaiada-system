@@ -29,6 +29,7 @@ import { cerbosEnabled } from "./cerbos";
 import { RESOURCE_TEMPLATES } from "./resources";
 import { PROMPTS } from "./prompts";
 import { AUTOMATION_ALLOWLIST } from "./automation-policy";
+import { APPROVAL_GRANT_HEADER } from "./approval-grant";
 
 function safeEqual(a: string, b: string): boolean {
   const ab = Buffer.from(a);
@@ -117,6 +118,11 @@ export function buildHttpApp(): express.Express {
         assuranceRanks: ["anonymous", "low", "verified"],
         // §3 / D14: the rule that decides whether an unattended automation write runs or suspends.
         automationWriteGate: "unattended automation runs LOW-impact writes only; medium/high/unclassified writes suspend for human approval",
+        // D14-04 presence flag (no secret material, mirroring the gateway's /admin/config rule).
+        // FALSE means every presented execution grant is rejected, so an approved automation write
+        // can never re-drive — the misconfiguration that would otherwise look exactly like "D14
+        // resume is broken". Absence fails CLOSED, which is why it must be visible.
+        executionGrantConfigured: !!config.approvalGrantSecret,
         revocationCheck: config.revocationCheck,
         revocationTtlMs: config.revocationTtlMs,
       },
@@ -189,7 +195,18 @@ export function buildHttpApp(): express.Express {
       res.status(403).json({ error: "access revoked" });
       return;
     }
-    const server = buildHubServer(principal);
+    // D14-04: the execution grant rides on this request's `x-approval-grant` header. It is passed
+    // RAW to the MCP server and verified at the tool-call site (hub.ts), because verification binds
+    // it to the actual tool name + arguments — which only the call itself knows. Without this line
+    // the whole grant path would be inert in production (the compose env-passthrough failure class,
+    // one layer up): the header would arrive and be dropped, and every approved automation write
+    // would keep suspending forever with no signal that anything was wrong.
+    // A duplicated header arrives as an array (Node joins most duplicates, but never rely on it):
+    // take the FIRST value rather than letting a non-string reach the verifier.
+    const rawGrant = req.headers[APPROVAL_GRANT_HEADER];
+    const server = buildHubServer(principal, {
+      approvalGrant: (Array.isArray(rawGrant) ? rawGrant[0] : rawGrant) || undefined,
+    });
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
     res.on("close", () => {
       void transport.close();

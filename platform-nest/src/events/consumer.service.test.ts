@@ -3,7 +3,7 @@ import Redis from "ioredis";
 import { withTenants } from "../db";
 import { emitEvent } from "./outbox.service";
 import { relayBatch } from "./relay";
-import { consumeOnce } from "./consumer.service";
+import { consumeOnce, registerCoreEventHandler, resetCoreEventHandlers } from "./consumer.service";
 import { setRedis, closeRedis } from "./redis";
 import { registerModule, resetModules } from "../modules/registry";
 import { initTestDb, teardownTestDb, TEST_URL } from "../testing/setup";
@@ -36,6 +36,9 @@ describe.skipIf(!TEST_URL || !REDIS_TEST_URL)("EventConsumerService", () => {
     }
     received.length = 0;
     resetModules();
+    // D14-02: core handlers are a separate in-memory registry from modules — reset it too, so a
+    // handler (or its side effects) registered by one test never leaks into the next.
+    resetCoreEventHandlers();
     // Reset enabled_modules to empty so tests don't leak state onto the shared company
     // (the "dispatches" test below appends 'agency'; without this reset the "does not
     // dispatch" test would spuriously see it as already-enabled).
@@ -159,6 +162,55 @@ describe.skipIf(!TEST_URL || !REDIS_TEST_URL)("EventConsumerService", () => {
     await relayBatch(100);
 
     // Retry past DEAD_LETTER_MAX_RETRIES.
+    for (let i = 0; i < 6; i++) await consumeOnce("deliverable");
+
+    const dead = await redis.xrange("events:deliverable:dead-letter", "-", "+");
+    expect(dead.length).toBeGreaterThanOrEqual(1);
+  });
+
+  // D14-02 — the core (non-module) handler registry: the seam the automation-approval executor
+  // (D14-03) needs, because module handlers are gated by isModuleEnabled and the executor must not
+  // be (execution eligibility is registry-scoped, not module-scoped — see approval-executables.ts).
+  it("dispatches to a core handler with NO module-enable gate, for a tenant with zero modules enabled", async () => {
+    registerCoreEventHandler("deliverable.approved", async (event) => {
+      received.push(event);
+    });
+    // beforeEach already reset enabled_modules to '{}' for `co` and this test does NOT enable any
+    // module — a core handler must still fire, unlike the module-dispatch test above which
+    // explicitly demonstrates the opposite (module handlers skipped when disabled).
+    const entityId = "00000000-0000-0000-0000-000000000040";
+    await withTenants([co], (c) => emitEvent(c, co, "deliverable", entityId, "deliverable.approved", { by: "core" }));
+    await relayBatch(100);
+
+    const handled = await consumeOnce("deliverable");
+    expect(handled).toBe(1);
+    expect(received).toHaveLength(1);
+    expect((received[0] as { entityId: string }).entityId).toBe(entityId);
+  });
+
+  it("a throwing core handler leaves the entry un-acked, then dead-letters after DEAD_LETTER_MAX_RETRIES deliveries", async () => {
+    registerCoreEventHandler("deliverable.approved", async () => {
+      throw new Error("core handler boom");
+    });
+    const entityId = "00000000-0000-0000-0000-000000000041";
+    await withTenants([co], (c) => emitEvent(c, co, "deliverable", entityId, "deliverable.approved", {}));
+    await relayBatch(100);
+
+    const handled = await consumeOnce("deliverable");
+    // The core handler threw, so the entry must NOT be counted as handled/acked — identical
+    // accounting to a throwing MODULE handler (see the test above this one in the file).
+    expect(handled).toBe(0);
+
+    const summary = (await redis.xpending("events:deliverable", "in-process-platform")) as [
+      number,
+      string | null,
+      string | null,
+      [string, string][] | null,
+    ];
+    expect(summary[0]).toBeGreaterThanOrEqual(1);
+
+    // Retry past DEAD_LETTER_MAX_RETRIES (5) — a core-handler failure must dead-letter exactly like
+    // a module-handler failure, not silently ack.
     for (let i = 0; i < 6; i++) await consumeOnce("deliverable");
 
     const dead = await redis.xrange("events:deliverable:dead-letter", "-", "+");

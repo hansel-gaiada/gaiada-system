@@ -12,6 +12,7 @@ import { portalDashboardDemo } from "./demoPortal";
 import { reportsDemo } from "./demoReports";
 import { checkinsDemo } from "./demoCheckins";
 import { appraisalsDemo } from "./demoAppraisals";
+import { assistantDemo } from "./demoAssistant";
 
 export interface DemoResult {
   status: number;
@@ -246,6 +247,11 @@ const UNIFIED_APPROVALS: UnifiedDemoRow[] = [
   { id: "un-aa-1", origin: "automation", tenantId: "co-agency", subject: "Repeated auth failures on CCTV — Parking; auto-disable suspended for review.", createdAt: "2026-07-21T22:00:00Z", status: "pending", impact: "high" },
   { id: "un-aa-2", origin: "agent", tenantId: "co-agency", subject: "Bulk status update flagged unclassified by the write gate.", createdAt: "2026-07-22T07:30:00Z", status: "pending", impact: "medium" },
   { id: "hr-1", origin: "hr", tenantId: "co-resort", subject: "Leave request — Andi (3 days)", subjectHref: "/hr", createdAt: "2026-07-22T02:00:00Z", status: "pending" },
+  // D14-08 — decided automation-family rows, paired 1:1 with AUTOMATION_APPROVALS's `aa-3`/`aa-4`
+  // (same id) so `fetchExecutionStates`'s per-tenant merge finds them. `un-aa-1`/`un-aa-2` above stay
+  // pending on purpose — the row this ticket adds is specifically the DECIDED one.
+  { id: "aa-3", origin: "automation", tenantId: "co-agency", subject: "Repeated auth failures on CCTV — Lobby; auto-disable suspended for review.", createdAt: "2026-07-22T09:00:00Z", status: "approved", impact: "high" },
+  { id: "aa-4", origin: "agent", tenantId: "co-agency", subject: "Bulk status update flagged unclassified by the write gate.", createdAt: "2026-07-22T09:15:00Z", status: "approved", impact: "medium" },
 ];
 
 const ACTIVITY = [
@@ -651,6 +657,30 @@ const AUTOMATION_APPROVALS: Record<string, unknown>[] = [
     reason: "Bulk status update flagged unclassified by the write gate.",
     status: "pending", origin: "agent", agent_name: "status-reporter", requested_by: "agent:status-reporter",
     decided_by: null, decided_at: null, created_at: "2026-07-22T07:30:00Z",
+  },
+  // D14-08 — two DECIDED rows so the "Recently decided" section's execution chip has real cases to
+  // walk in demo mode without a live backend: one clean run and one that actually needs the Retry
+  // button (undecided rows above are always execution_status='not_applicable', per 0078's header —
+  // never any of these).
+  {
+    id: "aa-3", workflow_id: "wf-device-alert", tool_name: "it.devices.disable",
+    tool_args: { deviceId: "dev-cam-lobby" }, impact: "high",
+    reason: "Repeated auth failures on CCTV — Lobby; auto-disable suspended for review.",
+    status: "approved", origin: "automation", agent_name: null, requested_by: "system",
+    decided_by: DEMO_USER_ID, decided_at: "2026-07-22T09:10:00Z", created_at: "2026-07-22T09:00:00Z",
+    execution_status: "executed", executed_at: "2026-07-22T09:10:05Z", executed_by: DEMO_USER_ID,
+    execution_error: null, execution_result: { text: "Device dev-cam-lobby disabled.", truncated: false },
+    execution_attempts: 1,
+  },
+  {
+    id: "aa-4", workflow_id: "wf-summarize", tool_name: "pm.tasks.bulkUpdate",
+    tool_args: { projectId: "p-web-1" }, impact: "medium",
+    reason: "Bulk status update flagged unclassified by the write gate.",
+    status: "approved", origin: "agent", agent_name: "status-reporter", requested_by: "agent:status-reporter",
+    decided_by: DEMO_USER_ID, decided_at: "2026-07-22T09:20:00Z", created_at: "2026-07-22T09:15:00Z",
+    execution_status: "failed", executed_at: null, executed_by: null,
+    execution_error: "hub_unreachable: timed out after 3 attempts", execution_result: null,
+    execution_attempts: 1,
   },
 ];
 
@@ -1795,6 +1825,13 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
   const appraisals = appraisalsDemo(method, p, url.searchParams, body, userId);
   if (appraisals) return appraisals;
 
+  // Assistant workspace (ASST-07) — stateful in-memory store (lib/demoAssistant.ts). Owner-scoped
+  // (filters by userId) so DEMO_MODE mirrors the real owner-only Cerbos policy. The SSE stream
+  // itself is answered separately by `demoAssistantStreamBody` (this dispatcher only ever returns
+  // JSON) — see that file's header.
+  const assistant = assistantDemo(method, p, url.searchParams, body, userId);
+  if (assistant) return assistant;
+
   const currentIdentity = getCurrentDemoIdentity(userId);
 
   // /api/me reflects the (mutable) company set so newly-created companies appear.
@@ -1808,9 +1845,16 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
     }
     return ok(COMPANIES);
   }
-  const companyPatch = p.match(/^\/api\/companies\/([^/]+)$/);
-  if (companyPatch && m === "PATCH") {
-    const co = COMPANIES.find((c) => c.id === companyPatch[1]);
+  const companySingleMatch = p.match(/^\/api\/companies\/([^/]+)$/);
+  if (companySingleMatch && m === "GET") {
+    // D14-08 — the single-company detail read (`lib/entities.ts::getCompanyDetail`), the only
+    // reader that needs `settings` (the "Approval retry" card's current `autoRetryCount`).
+    const co = COMPANIES.find((c) => c.id === companySingleMatch[1]);
+    if (!co) return { status: 404, json: { error: "company not found" } };
+    return ok({ ...co, settings: co.settings ?? {} });
+  }
+  if (companySingleMatch && m === "PATCH") {
+    const co = COMPANIES.find((c) => c.id === companySingleMatch[1]);
     if (co) {
       const b = JSON.parse(body || "{}");
       if (b.name != null) co.name = b.name;
@@ -1818,6 +1862,14 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
       if (b.status != null) co.status = b.status;
       if (b.parentCompanyId !== undefined) co.parent_company_id = b.parentCompanyId;
       if (Array.isArray(b.modules)) co.enabled_modules = b.modules;
+      // D14-07's namespaced settings write — mirror the real merge (touch ONLY this one nested
+      // path, never overwrite the rest of `settings`).
+      const autoRetryCount = b.settings?.automation?.approvalRetry?.autoRetryCount;
+      if (autoRetryCount !== undefined) {
+        const settings = (co.settings as Record<string, unknown>) ?? {};
+        const automation = (settings.automation as Record<string, unknown>) ?? {};
+        co.settings = { ...settings, automation: { ...automation, approvalRetry: { autoRetryCount } } };
+      }
     }
     return ok({ ok: true });
   }
@@ -2342,6 +2394,14 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
     const b = JSON.parse(body || "{}") as { decision?: "approved" | "rejected" };
     if (row && b.decision) { row.status = b.decision; row.decided_by = DEMO_USER_ID; row.decided_at = "2026-07-22T09:00:00Z"; }
     return ok({ id: autoApprovalDecide[1], status: row?.status ?? "approved" });
+  }
+  // D14-08 (D14-07's retry façade) — flips a failed row back to an in-flight state, mirroring the
+  // real endpoint's contract closely enough for the demo build gate to exercise the Retry button.
+  const autoApprovalRetry = p.match(/^\/api\/[^/]+\/automation-approvals\/([^/]+)\/retry$/);
+  if (autoApprovalRetry && m === "POST") {
+    const row = AUTOMATION_APPROVALS.find((a) => a.id === autoApprovalRetry[1]) as Record<string, unknown> | undefined;
+    if (row) { row.execution_status = "pending"; row.execution_error = null; }
+    return ok({ id: autoApprovalRetry[1], status: "pending" });
   }
   // APPR-01 — single-approval read backing `/approvals/[id]` (automation/agent/hr origin). Must be
   // an explicit fixture, not left to the file's final GET catch-all (`ok([])`, an empty ARRAY —

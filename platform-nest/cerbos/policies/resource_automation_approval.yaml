@@ -21,7 +21,18 @@ resourcePolicy:
       derivedRoles: ["company_admin", "manager", "group_executive"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }
     # Deciding (approve/reject) is a human governance action — company admins and owners only.
-    - actions: ["decide"]
+    #
+    # D14-06 adds `retry`: re-running the EXECUTION of an already-approved row (D14-07's endpoint)
+    # after `execution_status='failed'`. It carries the same real-world consequence as the original
+    # decision — a medium+/unclassified write actually happening — so it gets the same decider set
+    # rather than a weaker one. A plain `manager` is deliberately excluded from both (they hold
+    # `read` above, so the inbox is visible but not actionable).
+    #
+    # OQ-1 note (superadmin approves, and as the fallback): NO addition was needed for it. The
+    # `actions: ["*"]` / `platform_admin` rule at the top of this file already covers `decide` and
+    # now `retry` for the platform superadmin, on every origin. A second explicit rule would be
+    # redundant and would invite someone to later "tidy" one of the two and change behaviour.
+    - actions: ["decide", "retry"]
       effect: EFFECT_ALLOW
       derivedRoles: ["company_admin", "group_executive"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }

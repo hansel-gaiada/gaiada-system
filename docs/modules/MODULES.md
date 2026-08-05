@@ -54,7 +54,7 @@ versions below; the running build reports it at `GET /health`.
 | render-gateway-go | `0.0.0` | PLANNED | Creative | 2026-07-23 |
 | reports | `0.3.1` | PROTOTYPED | Cross-cutting | 2026-08-03 |
 | report-renderer | `0.1.0` | DEV-VERIFIED | Cross-cutting | 2026-07-31 |
-| mail | `0.0.11` | IN PROGRESS | Cross-cutting | 2026-08-05 |
+| mail | `0.0.12` | IN PROGRESS | Cross-cutting | 2026-08-05 |
 
 ---
 
@@ -340,7 +340,31 @@ through C-03". **v1.2 (same day, Zone A mail v2):** domains locked — C-03's fo
 moved to the Google Workspace SMTP relay with Brevo failover. Blueprint HTML is v1.2; PDF + hosted
 artifact NOT re-rendered yet.
 
-## mail — Zone A Email (platform-nest) · `0.0.11` · IN PROGRESS
+## mail — Zone A Email (platform-nest) · `0.0.12` · IN PROGRESS
+
+**0.0.12 (2026-08-05, senior-db, MAIL-22) — FORCE-RLS invariant restored on all three mail tables.**
+`mail_log`/`mail_messages` carry `tenant_id` (nullable — auth mail has none) and had NO RLS at all
+since MAIL-04's original cut, which broke `src/db/rls.test.ts`'s estate-wide "every tenant-scoped
+table has FORCE RLS" invariant (the one failing test in an otherwise-green full regression run).
+Fixed by amending `platform-nest/migrations/0077_mail_core.sql` in place (never applied to a
+persistent database — safe to amend per README rule 4) to add `ENABLE`+`FORCE ROW LEVEL SECURITY`
+plus a `mail_context` policy on `mail_log`, `mail_suppressions`, AND `mail_messages`, gated on a
+dedicated `app.mail_context` session GUC — the same GUC-gate shape `0015_site_subscriptions_rls.sql`
+uses for the sync engine's `app.sync_context`. A new `withMailContext()` wrapper
+(`src/db/index.ts`) sets that GUC (SET LOCAL semantics, one transaction) and is now the exclusive
+DB entry point for all mail-table access in `src/mail/**` (`queue.ts`, `sender.ts`,
+`admin-mail.controller.ts`, `thread.controller.ts`, `webhook.controller.ts`,
+`inbound/intake.ts`) — `withGlobal` itself is untouched, so its other callers (`users`,
+`identity_links`) are unaffected. NULL-tenant (auth) mail rows are governed by the identical
+predicate as every other row (context-opted-in or not), so they remain fully readable/writable by
+the mail module and are proven so by a new test in `src/mail/migration.test.ts`, alongside a
+defence-in-depth proof that a connection which never opts in (e.g. a future query mistakenly using
+`withGlobal`) sees zero rows and cannot write. Stated plainly, not overclaimed: this restores
+defence in depth against code that forgets mail's context, not a new access-control layer — the
+elevated-only admin log and the A10 parent-entity thread check remain the primary gate.
+`npm run lint:migration-rls` and `npm run lint:withtenants` both pass (0077 has zero backfill DML,
+so the now-applicable RLS lint finds nothing to flag). Scoped regression (`src/mail src/db`, 26
+files / 274 tests) green, including `src/db/rls.test.ts` **unmodified**.
 
 **0.0.11 (2026-08-05, devops, MAIL-21 batch B0) — server↔repo reconciliation + CI restored + a
 correction to 0.0.10's own claims.** `COMPOSE_PROFILES` re-verified (`bot,auth,whisper,mail-dev,scan`

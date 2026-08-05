@@ -159,6 +159,45 @@ assume a passing local `npm test`/`go test` means the container builds or runs:
   token → **401**. Nothing about this image remains unverified on the target host. The earlier
   Docker-Desktop-only verification is in `docs/modules/CHANGELOG.md`'s report-renderer entry.
 
+## Cerbos: adding a NEW policy file (ASST-02 lesson, 2026-08-05)
+
+Confirmed again while building `resource_assistant_thread.yaml` / `resource_assistant_memory.yaml`
+(ASST-02): a **newly-added** Cerbos policy file is not picked up by `watchForChanges: true` over a
+bind mount the way an *edit to an existing file* is — and an unlisted resource `kind` is a **SILENT
+DENY** (every check against it returns deny, with no error anywhere), which reads exactly like an
+authorization-logic bug in the new code, not a stale-policy problem.
+
+- **Prod is already covered.** `deploy.yml`'s "Reload Cerbos policies" step (added for CP-18, the
+  client-portal `resource_contract.yaml` rollout, and re-verified live 2026-08-04 — see
+  `../../docs/plans/2026-08-04-client-portal-deployment.md`) runs `docker compose restart cerbos`
+  unconditionally on every deploy, after `up -d` and before the health gate. It does not
+  distinguish "new file" from "edited file" — it restarts every time — so a deploy that ships
+  `resource_assistant_thread.yaml`/`resource_assistant_memory.yaml` (or any future new
+  `resource_*.yaml`) needs **no extra step**. Do not assume prod is broken just because a fresh
+  policy file was added; the existing step already handles it.
+- **Local/dev is NOT covered automatically.** After adding a new policy file to
+  `platform-nest/cerbos/policies/` on a dev box, restart the Cerbos container that the thing you're
+  testing actually talks to, and confirm `healthy` before trusting any result:
+  ```bash
+  docker restart gaiada-test-cerbos   # the container the platform-nest TEST SUITE reaches (:3592)
+  # NOT gaiada-cerbos-1 — that's the app's own dev Cerbos; restarting it changes nothing the tests see.
+  docker inspect --format '{{.State.Health.Status}}' gaiada-test-cerbos   # wait for "healthy"
+  ```
+- **Before trusting a DENY, prove the kind resolves at all.** A matrix where every principal is
+  denied on every action looks exactly like a passing "owner-only" test and is the signature of an
+  unlisted kind. Smoke-check with `includeMeta: true` and read `matchedPolicy` off the response —
+  `docker cp`/`docker exec` cannot help here (Cerbos is distroless, and `docker cp` reads the HOST
+  bind-mount path anyway, never what the running process has loaded):
+  ```bash
+  curl -s -X POST http://localhost:3592/api/check/resources -H "Content-Type: application/json" -d '{
+    "requestId":"smoke","includeMeta":true,
+    "principal":{"id":"u1","roles":["user"],"attr":{"assurance":"high","companies":["t1"],"grants":[]}},
+    "resources":[{"actions":["read"],"resource":{"kind":"assistant_thread","id":"x",
+      "attr":{"id":"x","tenantId":"t1","ownerId":"u1","projectId":"","teamId":"","module":"","subjectUserId":""}}}]
+  }'
+  # expect "matchedPolicy":"resource.assistant_thread.vdefault" — its absence means the kind never loaded.
+  ```
+
 ## Security notes
 
 - All service tokens are distinct random values; the only exposed port is localhost-bound.

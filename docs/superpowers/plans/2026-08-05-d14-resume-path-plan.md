@@ -143,16 +143,42 @@ The correct rule:
 - Re-drive as the **original filing principal** (`requested_by`).
 - The approval lifts **only the impact suspension**, for **that one call**, single-use, keyed on the
   approval row id. It grants nothing else.
-- Cerbos and the workflow allow-list are re-evaluated **unchanged** at execution time. If the
-  workflow has since been de-scoped or the principal's role revoked, execution **fails** with a typed
-  reason and the row goes `failed` — which is the correct outcome, and a strictly better failure mode
-  than a superadmin executing it anyway.
+- The workflow allow-list, assurance, and every **other** Cerbos condition are re-evaluated
+  **unchanged** at execution time; the approval lifts the impact suspension in **both** places it is
+  encoded (see the 2026-08-05 correction below — the original "Cerbos unchanged" wording was wrong).
+  If the workflow has since been de-scoped or the principal's role revoked, execution **fails** with
+  a typed reason and the row goes `failed` — which is the correct outcome, and a strictly better
+  failure mode than a superadmin executing it anyway.
 - Record `executed_by` (the principal that ran it) separately from `decided_by` (the human who lifted
   the gate). They are different facts; conflating them destroys the audit trail's meaning.
 
 This also keeps the human decision semantically honest: the approver is asked "should this
 consequential write happen?", which is exactly the question the impact gate raised — not "should this
 principal be granted new authority?"
+
+> **Correction (2026-08-05, architect ruling during decomposition — ticket D14-13):** this step
+> originally said "Cerbos … re-evaluated **unchanged**", a conclusion derived from reading
+> `mcp-hub/src/policy.ts` alone. That reading was wrong: **the impact gate is encoded in TWO
+> places.** `platform-nest/cerbos/policies/resource_mcp_tool.yaml`'s single `call` allow clause
+> independently requires `!isAutomation || (name in automationScope && (!write || impact == "low"))`,
+> and Cerbos is authoritative whenever `CERBOS_URL` is set — which it is for mcp-hub and
+> mcp-hub-central in the prod compose. So a grant lifting only the in-code suspend branch still gets
+> a Cerbos DENY, and every `origin='automation'` re-drive lands `failed` (only `origin='agent'`
+> re-drives would work, since the gate never applied to non-n8n principals).
+>
+> **Ruled design:** the hub passes the **verified** grant's `approvalId` as a Cerbos resource
+> attribute — set exclusively from the HMAC-verified grant object (signature + canonical-args
+> digest + expiry + the platform-side single-use claim), never from caller input — and the policy's
+> **impact conjunct only** gains the narrow disjunct
+> `has(approvalId) && approvalId != "" && name in <explicit executable list>`, placed INSIDE the
+> `automationScope` conjunction (so the workflow allow-list still binds) and list-narrowed (so even
+> a hub bug asserting the attribute cannot lift the gate for money tools — SM-55/A13). This is
+> acceptable because Cerbos already decides entirely from hub-asserted attributes here; the hub
+> process is, and was, the enforcement boundary. The rule this step states is therefore: the
+> approval lifts the impact suspension **in both encodings**; assurance, the workflow allow-list,
+> and every OTHER Cerbos condition are re-evaluated unchanged. Same drift class as §7.1's
+> two-independent-classifications hazard: one gate, two encodings — future impact-gate changes must
+> touch both or fail closed.
 
 **Step 5 — precondition re-check under a lock.** Inside the same transaction that moves the row to
 `executing`, take the WD-29-style per-entity advisory lock and re-evaluate the tool's own precondition.

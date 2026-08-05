@@ -12,6 +12,9 @@
 }
 .approval-row__preview { color: var(--erp-accent); font: 400 12px var(--font-body); text-decoration: none; }
 .approval-row__preview:hover { text-decoration: underline; }
+/* D14-08 — the failed execution's `execution_error`, shown inline under a decided row. Colour rides
+   the existing status-critical text token (same tier StatusBadge itself uses), not a new literal. */
+.approval-row__exec-error { margin-top: 4px; font: 400 12px/1.4 var(--font-body); color: var(--status-critical-fg); }
 
 .approvals-status-toggle, .approvals-sort-toggle { display: flex; gap: 6px; align-items: center; }
 .approvals-status-toggle a, .approvals-sort-toggle a {

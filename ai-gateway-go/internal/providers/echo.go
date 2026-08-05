@@ -28,6 +28,28 @@ func (p *EchoProvider) Media(_ context.Context, _ string, mime string) (string, 
 	return fmt.Sprintf("[media %s — no provider key configured]", mime), nil
 }
 
+// CompleteStream implements providers.StreamingProvider: the keyless dev/test streaming
+// terminator (D-D) — with no provider configured, the /complete/stream route still has
+// something real to exercise the streaming wire contract against. Emits the same text
+// Complete() would return, split word-by-word (SplitAfter keeps each token's trailing space
+// so re-joining the emitted tokens reproduces the original string exactly).
+func (p *EchoProvider) CompleteStream(ctx context.Context, prompt string, onToken func(string)) error {
+	full, err := p.Complete(ctx, prompt)
+	if err != nil {
+		return err
+	}
+	for _, tok := range strings.SplitAfter(full, " ") {
+		if tok == "" {
+			continue
+		}
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		onToken(tok)
+	}
+	return nil
+}
+
 // Embed: deterministic bag-of-words hash embedding — real cosine geometry, zero providers.
 func (p *EchoProvider) Embed(_ context.Context, text string) ([]float64, error) {
 	const dims = 128

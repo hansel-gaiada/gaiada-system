@@ -6,6 +6,18 @@ import { config } from "./config";
 import { recordToolAudit } from "./metrics";
 import type { Principal } from "./principal";
 
+/** D14-04: the verdict on a presented `x-approval-grant`. Present ONLY when the caller actually sent
+ *  the header — a call with no grant audits exactly as it does today, with no extra field.
+ *  `approvalId` is recorded only once the HMAC verified — before that every claim in the payload is
+ *  attacker-controlled, so an unauthenticated id is deliberately NOT written to the trail (the
+ *  `bad_signature` / `malformed` reason is the fact; the claimed id would not be one).
+ *  Rejection reasons are the stable codes from approval-grant.ts. */
+export interface GrantAudit {
+  verdict: "accepted" | "rejected";
+  reason?: string;
+  approvalId?: string;
+}
+
 export interface ToolAudit {
   ts: number;
   tool: string;
@@ -13,6 +25,7 @@ export interface ToolAudit {
   decision: "allow" | "deny";
   ok?: boolean; // handler outcome when allowed
   reason?: string; // deny reason
+  grant?: GrantAudit; // D14 execution-grant verdict (only when a grant header was presented)
 }
 
 export function auditToolCall(e: ToolAudit): void {

@@ -3,7 +3,7 @@
 // with `FOR UPDATE SKIP LOCKED` so two platform instances never double-send the same row, backoff
 // with a 5-attempt cap, auth-stream-first ordering (a stuck notify-stream queue must never starve
 // password resets).
-import { withGlobal } from "../db";
+import { withMailContext } from "../db";
 import { isSuppressed } from "./suppressions";
 import { renderTemplate } from "./templates";
 import { resolveAdapter } from "./provider";
@@ -25,42 +25,40 @@ export function backoffMinutes(attemptsAfter: number): number {
  *  `FOR UPDATE SKIP LOCKED` is what makes two concurrent callers (two workers, or two platform
  *  instances) partition a shared due-set with no row claimed twice. Auth-stream rows sort first
  *  (`ORDER BY (stream = 'auth') DESC, next_attempt_at ASC`) so a backlog on the notify stream can
- *  never delay a password-reset mail sitting in the same batch window. */
+ *  never delay a password-reset mail sitting in the same batch window.
+ *
+ *  `withMailContext` already runs `fn` inside its own BEGIN/COMMIT (MAIL-22, so the mail-context GUC
+ *  it sets survives for the whole call) — this used to open a SECOND, nested transaction of its own
+ *  before that wrapper existed; now the claim+update below simply runs inside the one transaction
+ *  `withMailContext` already provides, and a thrown error rolls that same transaction back. */
 export async function claimDueMail(limit = 20): Promise<ClaimedMail[]> {
-  return withGlobal(async (c) => {
-    await c.query("BEGIN");
-    try {
-      const { rows } = await c.query<ClaimedMail>(
-        `SELECT id, stream, to_email, template_key, payload, subject, entity_type, entity_id, reply_token, attempts
-           FROM mail_log
-          WHERE status = 'queued' AND next_attempt_at <= now()
-          ORDER BY (stream = 'auth') DESC, next_attempt_at ASC
-          FOR UPDATE SKIP LOCKED
-          LIMIT $1`,
-        [limit],
-      );
-      if (rows.length > 0) {
-        await c.query(`UPDATE mail_log SET status = 'sending', updated_at = now() WHERE id = ANY($1::uuid[])`, [
-          rows.map((r) => r.id),
-        ]);
-      }
-      await c.query("COMMIT");
-      return rows;
-    } catch (err) {
-      await c.query("ROLLBACK");
-      throw err;
+  return withMailContext(async (c) => {
+    const { rows } = await c.query<ClaimedMail>(
+      `SELECT id, stream, to_email, template_key, payload, subject, entity_type, entity_id, reply_token, attempts
+         FROM mail_log
+        WHERE status = 'queued' AND next_attempt_at <= now()
+        ORDER BY (stream = 'auth') DESC, next_attempt_at ASC
+        FOR UPDATE SKIP LOCKED
+        LIMIT $1`,
+      [limit],
+    );
+    if (rows.length > 0) {
+      await c.query(`UPDATE mail_log SET status = 'sending', updated_at = now() WHERE id = ANY($1::uuid[])`, [
+        rows.map((r) => r.id),
+      ]);
     }
+    return rows;
   });
 }
 
 async function markSuppressedRow(id: string): Promise<void> {
-  await withGlobal((c) =>
+  await withMailContext((c) =>
     c.query(`UPDATE mail_log SET status = 'suppressed', updated_at = now() WHERE id = $1`, [id]),
   );
 }
 
 async function markSent(id: string, provider: string, providerMessageId: string | undefined): Promise<void> {
-  await withGlobal((c) =>
+  await withMailContext((c) =>
     c.query(
       `UPDATE mail_log
           SET status = 'sent', provider = $2, provider_message_id = $3,
@@ -74,7 +72,7 @@ async function markSent(id: string, provider: string, providerMessageId: string 
 async function markFailedOrRetry(id: string, attemptsBefore: number, errorMessage: string): Promise<void> {
   const attemptsAfter = attemptsBefore + 1;
   if (attemptsAfter >= MAIL_MAX_ATTEMPTS) {
-    await withGlobal((c) =>
+    await withMailContext((c) =>
       c.query(
         `UPDATE mail_log SET status = 'failed', attempts = $2, last_error = $3, updated_at = now() WHERE id = $1`,
         [id, attemptsAfter, errorMessage.slice(0, 2000)],
@@ -83,7 +81,7 @@ async function markFailedOrRetry(id: string, attemptsBefore: number, errorMessag
     return;
   }
   const minutes = backoffMinutes(attemptsAfter);
-  await withGlobal((c) =>
+  await withMailContext((c) =>
     c.query(
       `UPDATE mail_log
           SET status = 'queued', attempts = $2, last_error = $3,
@@ -99,7 +97,7 @@ async function markFailedOrRetry(id: string, attemptsBefore: number, errorMessag
  *  failure path (suppressed, send error) is captured and turned into a row update, so one bad row
  *  in a batch can never abort the rest of the batch. */
 export async function processClaimedMail(row: ClaimedMail): Promise<"sent" | "suppressed" | "failed" | "retry"> {
-  const suppressedNow = await withGlobal((c) => isSuppressed(c, row.to_email, row.stream));
+  const suppressedNow = await withMailContext((c) => isSuppressed(c, row.to_email, row.stream));
   if (suppressedNow) {
     await markSuppressedRow(row.id);
     recordSuppressed(row.stream);

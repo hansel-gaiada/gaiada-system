@@ -28,7 +28,7 @@ import {
   UseGuards,
 } from "@nestjs/common";
 import type { FastifyReply, FastifyRequest } from "fastify";
-import { withGlobal, withTenants } from "../db";
+import { withMailContext, withTenants } from "../db";
 import { AuthGuard } from "../auth/guards";
 import { authorize } from "../core/http";
 import { isElevated } from "../admin/elevated";
@@ -138,7 +138,7 @@ const MESSAGE_COLUMNS = `id, mail_log_id, from_email, subject, body_text, body_h
 /** Shared read. `tenant_id = $3` is not redundant with the entity predicate: `mail_messages` has no
  *  RLS, so without it a (hypothetical) entity-id collision or a mis-stamped row would cross tenants. */
 async function readEntityThread(tenantId: string, entityType: string, entityId: string): Promise<MailMessageRow[]> {
-  const { rows } = await withGlobal((c) =>
+  const { rows } = await withMailContext((c) =>
     c.query<MailMessageRow>(
       `SELECT ${MESSAGE_COLUMNS} FROM mail_messages
         WHERE entity_type = $1 AND entity_id = $2 AND tenant_id = $3
@@ -186,7 +186,7 @@ export class MailThreadController {
     const index = Number(indexRaw);
     if (!Number.isInteger(index) || index < 0) throw new BadRequestException("index must be a non-negative integer");
 
-    const { rows } = await withGlobal((c) =>
+    const { rows } = await withMailContext((c) =>
       c.query<{ entity_type: string | null; entity_id: string | null; attachments: StoredAttachment[] | null }>(
         `SELECT entity_type, entity_id, attachments FROM mail_messages WHERE id = $1 AND tenant_id = $2`,
         [messageId, tenantId],
