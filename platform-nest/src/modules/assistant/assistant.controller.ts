@@ -38,11 +38,15 @@ import { config } from "../../config";
 import { authorize } from "../../core/http";
 import { AuthGuard } from "../../auth/guards";
 import { ModuleEnabledGuard } from "../module-enabled.guard";
-import { assembleContext, persistCompactionUpdate } from "./context";
-import { abortForClientDisconnect, estimateTokens, relayGeneration, releaseGeneration, reserveGeneration, requestStop, sseLine, usageMetaParts } from "./stream";
+import { assembleContext, persistCompactionUpdate, type ContextCitation } from "./context";
+import {
+  abortForClientDisconnect, citationParts, estimateTokens, relayGeneration, releaseGeneration, reserveGeneration, requestStop, sseLine, usageMetaParts,
+} from "./stream";
 import {
   ASSISTANT_AGENT_TOOLS, DEFAULT_TOOL_AGENT, persistToolCalls, readTurnMode, runToolTurn, turnModePart, type ToolTurnResult,
 } from "./broker";
+import { assembleCapabilities } from "./capabilities";
+import { resolveCitation } from "./citations";
 
 // ── ASST-06 — the send->stream engine ────────────────────────────────────────────────────────────
 //
@@ -492,6 +496,11 @@ export class AssistantController {
 
     let placeholder: { id: string; seq: number; parts: unknown } | undefined;
     let prompt: string;
+    // ASST-18 — whatever the RAG retrieval found for THIS generation (possibly empty; see
+    // context.ts's `AssembledContext.citations` header for why empty is not distinguished from
+    // "the knowledge service degraded" at this layer). Hoisted out of the `try` below so both the
+    // SSE emit and the later persistence code (well past that block) can read it.
+    let citations: ContextCitation[] = [];
     try {
       placeholder = await withTenants(
         [tenantId],
@@ -513,6 +522,7 @@ export class AssistantController {
         { modules: ["assistant"] },
       );
       prompt = assembled.prompt;
+      citations = assembled.citations;
       if (assembled.compactionUpdate) {
         await withTenants([tenantId], (c) => persistCompactionUpdate(c, id, assembled.compactionUpdate!), { modules: ["assistant"] });
       }
@@ -537,6 +547,15 @@ export class AssistantController {
     // Mirrors portal-stream.controller.ts: a client that leaves mid-generation must not leave the
     // upstream gateway call running (and DLP/budget/audit spend accruing) into the void.
     raw.on("close", () => abortForClientDisconnect(id));
+
+    // ASST-18 — citations are known BEFORE any generation starts (context assembly already ran, in
+    // the try block above), so they render the instant the stream opens rather than only after
+    // `done` — the same "don't make the user wait for a fact we already have" reasoning ASST-12's
+    // early `meta` frame used for the brain badge. Fires for BOTH branches below (tool turn and
+    // plain chat) since `assembled.citations` is common to both.
+    if (citations.length > 0) {
+      write(sseLine("citations", { items: citations.map((h) => ({ sourceRef: h.sourceRef, text: h.text })) }));
+    }
 
     // ── ASST-17 — THE TOOL-TURN BRANCH ───────────────────────────────────────────────────────────
     // Routed here, and only here, when the PLACEHOLDER ROW says this is a tool turn (never the query
@@ -593,6 +612,7 @@ export class AssistantController {
       const toolParts = JSON.stringify([
         turnModePart(turnMode.agent),
         ...usageMetaParts({ usageSource: "estimate" }),
+        ...citationParts(citations),
       ]);
       await withTenants(
         [tenantId],
@@ -677,7 +697,7 @@ export class AssistantController {
     // the real prompt/completion breakdown (when present) go into `parts` via `usageMetaParts` —
     // an existing jsonb column (migration 0079, default `[]`, never written to before this ticket),
     // so no schema change was needed to record which kind of token count `tokens` actually is.
-    const parts = JSON.stringify(usageMetaParts(result));
+    const parts = JSON.stringify([...usageMetaParts(result), ...citationParts(citations)]);
     await withTenants(
       [tenantId],
       async (c) => {
@@ -914,5 +934,49 @@ export class AssistantController {
     );
     if (res.rowCount === 0) throw new NotFoundException("memory not found");
     return { ok: true };
+  }
+
+  // ================================================================== CAPABILITIES (ASST-18) =====
+  // blueprint §8's right-rail "capabilities" list AND the empty-state capability cards — BOTH fed
+  // from this ONE endpoint (the ticket's own discoverability requirement: the empty state must
+  // never be a hand-maintained list that can drift from what this user can actually do).
+  //
+  // `visibleToolsFor(user) ∩ tenant's module gates` — see capabilities.ts's header. No
+  // `authorize()` call here, unlike threads/memory: there is no per-row resource to fetch-then-
+  // authorize against — the result is INHERENTLY self-scoped (always and only THIS caller's own
+  // OBO envelope, wall 1 of ASST-17's broker) and Cerbos re-authorizes every tool again at the hub
+  // (wall 2) before anything actually runs. There is no parameter here a caller could vary to widen
+  // whose capabilities come back.
+  @Get(":tenantId/assistant/capabilities")
+  async capabilities(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string) {
+    const userId = req.principal.userId;
+    if (!userId) throw new BadRequestException("an authenticated user is required");
+    return assembleCapabilities({ userId, tenantId }, tenantId);
+  }
+
+  // ================================================================== CITATIONS (ASST-18) ========
+  // Resolves ONE knowledge-chunk `sourceRef` (as returned in a `citations` SSE frame / a message's
+  // persisted `parts`) to a navigable {kind,label,href} — or a 404, on purpose, when this file has
+  // no honest destination for it (see citations.ts's header: "a chip that 404s is worse than no
+  // chip" means the FRONTEND must never render a link for an unresolvable ref, not that this
+  // endpoint should invent one).
+  //
+  // Gated the SAME way `admin/intelligence.controller.ts`'s `knowledgeSources` proxy is (broad
+  // "any tenant member may read" — resource_activity.yaml's company_admin/manager/member/viewer/
+  // team_lead grant): resolving a citation is the same sensitivity as seeing that a knowledge
+  // source exists at all, not a new authorization surface that needs its own Cerbos resource kind.
+  @Get(":tenantId/assistant/citations/:sourceRef")
+  async resolveCitationRoute(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Param("sourceRef") sourceRefParam: string,
+  ) {
+    const userId = req.principal.userId;
+    if (!userId) throw new BadRequestException("an authenticated user is required");
+    await authorize(req.principal, { kind: "activity", tenantId }, "read");
+    const sourceRef = decodeURIComponent(sourceRefParam);
+    const resolved = await withTenants([tenantId], (c) => resolveCitation(c, tenantId, sourceRef), { modules: ["assistant"] });
+    if (!resolved) throw new NotFoundException("this citation has no resolvable destination");
+    return resolved;
   }
 }

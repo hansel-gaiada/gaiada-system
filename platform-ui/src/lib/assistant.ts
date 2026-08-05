@@ -124,6 +124,27 @@ export function parseUsageMeta(parts: unknown): UsageMetaPart | null {
   return parts.find(isUsageMetaPart) ?? null;
 }
 
+// ASST-18 — reads the persisted citation list back out of a message's `parts` column, mirroring
+// platform-nest's `CitationsPart` (stream.ts) byte-for-byte, the same "read, never re-derive"
+// discipline `parseUsageMeta` below already established for usage metadata.
+interface CitationsPart {
+  type: "citations";
+  items: AssistantCitation[];
+}
+
+function isCitationsPart(v: unknown): v is CitationsPart {
+  return !!v && typeof v === "object" && (v as { type?: unknown }).type === "citations" && Array.isArray((v as { items?: unknown }).items);
+}
+
+/** Returns `[]` (never `null`) for a message with no citations — a plain chat turn and a
+ *  knowledge-grounded turn with zero relevant hits render identically (no chips), which is the
+ *  correct behaviour (see context.ts's own header on why those two cases are not distinguished). */
+export function parseCitations(parts: unknown): AssistantCitation[] {
+  if (!Array.isArray(parts)) return [];
+  const found = parts.find(isCitationsPart);
+  return found?.items ?? [];
+}
+
 /** The "served by" brain badge label. `provider === null` (no `meta` ever arrived — an older
  *  gateway, or a provider that died before committing bytes) renders as "Unknown provider", never
  *  as blank or an error. `model === ""` (a provider with no fixed-model concept, e.g. `echo`)
@@ -228,6 +249,14 @@ export function parseSSEBuffer(buffer: string): { blocks: RawSSEBlock[]; rest: s
   return { blocks, rest };
 }
 
+// ASST-18 — one knowledge-grounding hit. `text` is the chunk snippet that grounded the answer;
+// no `score` on the wire/persisted shape (see stream.ts's `citationParts` header — a ranking
+// signal for that ONE turn's retrieval, not something a rendered chip needs to carry forward).
+export interface AssistantCitation {
+  sourceRef: string;
+  text: string;
+}
+
 export type ClientStreamEvent =
   | { type: "token"; text: string }
   // ASST-12 — relays ASST-11's `meta` the instant it arrives (before any token), so a
@@ -241,6 +270,10 @@ export type ClientStreamEvent =
   // (`"estimate"`, the common case: absent on every other provider and on every error path).
   // `promptTokens`/`completionTokens` are only ever set alongside `source === "provider"`.
   | { type: "usage"; tokens: number; latencyMs: number; source: "provider" | "estimate"; promptTokens?: number; completionTokens?: number }
+  // ASST-18 — arrives once, before the first token (context assembly, including retrieval, has
+  // already finished by the time the stream opens at all). Absent entirely on a turn that used no
+  // RAG grounding — never an empty-items frame (mirrors platform-nest's `citationParts`).
+  | { type: "citations"; items: AssistantCitation[] }
   | { type: "done" }
   | { type: "error"; error: string; errorKind: string };
 
@@ -277,6 +310,14 @@ export function decodeAssistantEvent(block: RawSSEBlock): ClientStreamEvent | nu
       const completionTokens = typeof obj.completionTokens === "number" ? obj.completionTokens : undefined;
       return { type: "usage", tokens, latencyMs, source, promptTokens, completionTokens };
     }
+    case "citations": {
+      const raw = Array.isArray(obj.items) ? obj.items : [];
+      const items = raw
+        .filter((it): it is { sourceRef: string; text: string } =>
+          !!it && typeof it === "object" && typeof (it as { sourceRef?: unknown }).sourceRef === "string" && typeof (it as { text?: unknown }).text === "string")
+        .map((it) => ({ sourceRef: it.sourceRef, text: it.text }));
+      return { type: "citations", items };
+    }
     case "done":
       return { type: "done" };
     case "error":
@@ -312,11 +353,15 @@ export interface StreamState {
    *  itself — the honest "unknown provider" state, never an error. */
   meta: { provider: string; model: string } | null;
   usage: { tokens: number; latencyMs: number; source: "provider" | "estimate"; promptTokens?: number; completionTokens?: number } | null;
+  // ASST-18 — set the instant a `citations` frame arrives (before any token, same ordering
+  // guarantee as `meta`). `[]` for the entire stream when this turn used no RAG grounding — the
+  // honest "nothing to cite" state, identical in rendering to "not answered yet".
+  citations: AssistantCitation[];
   error: { message: string; kind: string } | null;
 }
 
 export function initialStreamState(): StreamState {
-  return { status: "idle", text: "", meta: null, usage: null, error: null };
+  return { status: "idle", text: "", meta: null, usage: null, citations: [], error: null };
 }
 
 const TERMINAL_STATUSES = new Set<StreamStatus>(["done", "error", "stopped"]);
@@ -333,6 +378,8 @@ export function streamReducer(state: StreamState, event: ClientStreamEvent): Str
       return { ...state, meta: { provider: event.provider, model: event.model } };
     case "usage":
       return { ...state, usage: { tokens: event.tokens, latencyMs: event.latencyMs, source: event.source, promptTokens: event.promptTokens, completionTokens: event.completionTokens } };
+    case "citations":
+      return { ...state, citations: event.items };
     case "done":
       return { ...state, status: "done" };
     case "error":
@@ -430,3 +477,62 @@ export const MEMORY_SCOPE_LABEL: Record<AssistantMemoryScope, string> = {
   user: "About you",
   company: "About the company",
 };
+
+// ============================================================== ASST-18: capabilities panel =======
+// blueprint §8's right-rail "capabilities" list AND the empty-state capability cards — both fed
+// from `GET :tenantId/assistant/capabilities`, mirroring platform-nest's `AssistantCapability`/
+// `CapabilitiesResult` (modules/assistant/capabilities.ts) byte-for-byte.
+
+export interface AssistantCapability {
+  name: string;
+  description: string;
+  /** The owning `ModuleContract.key`, or `null` for an ungated platform-core tool. Grouping only —
+   *  the filtering that decides whether a tool appears at ALL already happened server-side. */
+  module: string | null;
+}
+
+export interface CapabilitiesResult {
+  tools: AssistantCapability[];
+  /** `false` means the assistant's tool hub isn't configured in THIS environment at all — distinct
+   *  from "configured, and you genuinely have zero capabilities" (both currently render an empty
+   *  `tools` array; this flag is what lets the panel word its empty state honestly rather than
+   *  guessing which of the two is true). */
+  hubConfigured: boolean;
+}
+
+/** `name`'s dot-prefix (`"projects.list"` -> `"projects"`) as a display category. Purely a
+ *  presentation grouping — the same "no server round trip for a client-side reshape" rationale
+ *  `groupThreads`/`groupMemory` above already use. A tool with no dot groups under `"general"`. */
+function capabilityCategory(name: string): string {
+  const dot = name.indexOf(".");
+  return dot > 0 ? name.slice(0, dot) : "general";
+}
+
+export interface CapabilityGroup {
+  category: string;
+  tools: AssistantCapability[];
+}
+
+/** Groups by dot-prefix category, each group's tools sorted by name, groups sorted by category —
+ *  a stable, deterministic layout for the card grid (both the panel and the empty-state cards call
+ *  this over the SAME loaded list, see `CapabilityCards`). */
+export function groupCapabilities(tools: AssistantCapability[]): CapabilityGroup[] {
+  const byCategory = new Map<string, AssistantCapability[]>();
+  for (const t of tools) {
+    const cat = capabilityCategory(t.name);
+    const list = byCategory.get(cat) ?? [];
+    list.push(t);
+    byCategory.set(cat, list);
+  }
+  return [...byCategory.entries()]
+    .map(([category, catTools]) => ({ category, tools: [...catTools].sort((a, b) => a.name.localeCompare(b.name)) }))
+    .sort((a, b) => a.category.localeCompare(b.category));
+}
+
+// ============================================================== ASST-18: citation resolution ======
+
+export interface ResolvedCitation {
+  kind: string;
+  label: string;
+  href: string;
+}

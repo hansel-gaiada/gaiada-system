@@ -4,8 +4,8 @@ import "server-only";
 // platform-ui/CLAUDE.md. Consumed by `app/(app)/assistant/page.tsx` for the initial server-rendered
 // load; everything after that (thread switch, rail refresh, mutations) goes through
 // `lib/assistantActions.ts` because it is triggered by client interaction, not a navigation.
-import { platformFetch } from "./platform";
-import type { ThreadDetailResult, ThreadListResult, MemoryListResult } from "./assistant";
+import { platformFetch, PlatformError } from "./platform";
+import type { ThreadDetailResult, ThreadListResult, MemoryListResult, CapabilitiesResult, ResolvedCitation } from "./assistant";
 
 export interface ListThreadsParams {
   q?: string;
@@ -50,4 +50,24 @@ export const MEMORY_LIST_LIMIT = 500; // the backend's own MAX_MEMORY_LIST_LIMIT
 export function listMemory(userId: string, tenantId: string): Promise<MemoryListResult> {
   const qs = new URLSearchParams({ limit: String(MEMORY_LIST_LIMIT) });
   return platformFetch<MemoryListResult>(`/api/${tenantId}/assistant/memory?${qs.toString()}`, userId);
+}
+
+// ASST-18 — the capabilities panel's AND the empty-state cards' ONE read. Both call THIS same
+// function (via `refreshCapabilitiesAction` -> here), so they can never drift about what this user
+// can actually do — see `CapabilityCards`'s own header for why that matters.
+export function getCapabilities(userId: string, tenantId: string): Promise<CapabilitiesResult> {
+  return platformFetch<CapabilitiesResult>(`/api/${tenantId}/assistant/capabilities`, userId);
+}
+
+// ASST-18 — resolves ONE citation chip. Returns `null` on a 404 (an unresolvable ref — see
+// citations.ts's header: "a chip that 404s is worse than no chip") rather than throwing, so the
+// caller can render "unavailable" instead of surfacing a raw platform error for what is an
+// expected, honest outcome for several real ingested knowledge kinds.
+export async function resolveCitation(userId: string, tenantId: string, sourceRef: string): Promise<ResolvedCitation | null> {
+  try {
+    return await platformFetch<ResolvedCitation>(`/api/${tenantId}/assistant/citations/${encodeURIComponent(sourceRef)}`, userId);
+  } catch (e) {
+    if (e instanceof PlatformError && e.status === 404) return null;
+    throw e;
+  }
 }

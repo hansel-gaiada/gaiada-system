@@ -472,22 +472,39 @@ function runnerBase(input: ToolTurnInput): string {
   return (input.runnerUrl ?? config.services.agents.url).replace(/\/$/, "");
 }
 
+/** One tool the hub reports as visible to a principal — `tools/list`'s own `{name, description}`
+ *  shape, undecorated. ASST-18's capabilities panel needs the description; the capability GATE
+ *  (below) only ever needed the name, which is why this used to return a bare `Set<string>` —
+ *  `listUserVisibleTools` is kept as a thin wrapper over this so neither caller can drift from the
+ *  other about what the hub actually said. */
+export interface VisibleToolDef {
+  name: string;
+  description: string;
+}
+
 /**
- * Ask the hub which tools THIS USER can see, under the user's own OBO envelope.
+ * Ask the hub which tools THIS USER can see, under the user's own OBO envelope — THE ONE fetch this
+ * whole assistant surface makes against `tools/list`. Both wall 1 (the capability gate, via
+ * `listUserVisibleTools` below) and ASST-18's `GET .../assistant/capabilities`
+ * (`./capabilities.ts`) build on this single function, so "did the gate and the capabilities PANEL
+ * ever disagree about what the hub said?" cannot happen by construction.
  *
  * The hub answers `tools/list` with `visibleToolsFor(principal)` — Cerbos-authoritative when
  * `CERBOS_URL` is set, deny-by-default in-code otherwise (`mcp-hub/src/policy.ts`). Fails CLOSED in
  * every direction: an unconfigured hub, a non-2xx, an unparsable body or a transport error all yield
- * an EMPTY set, which the gate reads as "this user can see nothing" and refuses the turn. That is the
- * correct posture — a hub we cannot reach is not evidence that the user is authorized.
+ * an EMPTY array, which every caller reads as "this user can see nothing" — never "assume
+ * authorized". A hub we cannot reach is not evidence that the user IS authorized, and (ASST-18) not
+ * evidence they are NOT, either — it is simply unavailable, which is why the capabilities endpoint
+ * reports `hubConfigured` separately rather than collapsing "denied" and "unreachable" into the same
+ * silent empty list.
  */
-export async function listUserVisibleTools(
+export async function listUserVisibleToolDefs(
   user: ChattingUser,
   opts: { fetchImpl?: typeof fetch; hubUrl?: string; hubToken?: string; signal?: AbortSignal; timeoutMs?: number } = {},
-): Promise<Set<string>> {
+): Promise<VisibleToolDef[]> {
   const url = (opts.hubUrl ?? config.services.hub.url).replace(/\/$/, "");
   const token = opts.hubToken ?? config.services.hub.token;
-  if (!url || !token) return new Set();
+  if (!url || !token) return [];
   const envelope = oboEnvelopeFor(user);
   assertUserProvider(envelope.provider);
   const fetchImpl = opts.fetchImpl ?? fetch;
@@ -508,24 +525,36 @@ export async function listUserVisibleTools(
       body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }),
       signal: ac.signal,
     });
-    if (!res.ok) return new Set();
+    if (!res.ok) return [];
     const raw = await res.text();
     const source = raw.trim().startsWith("{")
       ? raw.trim()
       : (raw.split("\n").find((l) => l.startsWith("data:"))?.slice(5).trim() ?? "");
-    if (!source) return new Set();
-    const rpc = JSON.parse(source) as { result?: { tools?: Array<{ name?: unknown }> } };
-    const out = new Set<string>();
+    if (!source) return [];
+    const rpc = JSON.parse(source) as { result?: { tools?: Array<{ name?: unknown; description?: unknown }> } };
+    const out: VisibleToolDef[] = [];
     for (const t of rpc.result?.tools ?? []) {
-      if (typeof t?.name === "string" && t.name) out.add(t.name);
+      if (typeof t?.name === "string" && t.name) {
+        out.push({ name: t.name, description: typeof t.description === "string" ? t.description : "" });
+      }
     }
     return out;
   } catch {
-    return new Set(); // fail closed — see this function's header
+    return []; // fail closed — see this function's header
   } finally {
     clearTimeout(timer);
     opts.signal?.removeEventListener("abort", onOuterAbort);
   }
+}
+
+/** The capability GATE's own shape: just the names, as a `Set` for O(1) membership checks. A thin
+ *  derivation of `listUserVisibleToolDefs` (above) — never a second fetch. */
+export async function listUserVisibleTools(
+  user: ChattingUser,
+  opts: { fetchImpl?: typeof fetch; hubUrl?: string; hubToken?: string; signal?: AbortSignal; timeoutMs?: number } = {},
+): Promise<Set<string>> {
+  const defs = await listUserVisibleToolDefs(user, opts);
+  return new Set(defs.map((d) => d.name));
 }
 
 /** Default `readApproval`: the suspended write's own row, tenant-scoped. Imported lazily (inside the

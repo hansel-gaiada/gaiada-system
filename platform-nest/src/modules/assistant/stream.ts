@@ -606,6 +606,27 @@ export function usageMetaParts(result: Pick<RelayResult, "usageSource" | "prompt
   }];
 }
 
+// ────────────────────────────────── persistence-shape helper (ASST-18) ───────────────────────────
+
+/** ASST-18 — persisted alongside `UsageMetaPart` in the SAME `parts` array, so a RELOADED transcript
+ *  renders the identical citation chips a live stream showed (the `citations` SSE frame below is
+ *  the live-render path; this is the persisted record of the same fact, mirroring how
+ *  `turnModePart`/`UsageMetaPart` both round-trip through this one jsonb column). Text only, no
+ *  `score` — the score is a ranking signal for THAT turn's retrieval, not something a rendered chip
+ *  needs to carry forward. */
+export interface CitationsPart {
+  type: "citations";
+  items: { sourceRef: string; text: string }[];
+}
+
+/** Returns `[]` (never `[{ type: "citations", items: [] }]`) when there were no citations, so a
+ *  message that used no RAG grounding round-trips through `parts` exactly as it did before this
+ *  ticket — no new empty marker for every ordinary chat turn. */
+export function citationParts(citations: { sourceRef: string; text: string }[]): CitationsPart[] {
+  if (citations.length === 0) return [];
+  return [{ type: "citations", items: citations.map((c) => ({ sourceRef: c.sourceRef, text: c.text })) }];
+}
+
 // ──────────────────────────────────── SSE encoding to OUR client ─────────────────────────────────
 
 /** Encode ONE line of the SSE response THIS controller sends to the ERP browser, applying the
@@ -627,7 +648,11 @@ export type AssistantSseEvent =
   | "error"
   | "tool_call"
   | "tool_result"
-  | "approval_required";
+  | "approval_required"
+  // ASST-18 — emitted once, right after context assembly, BEFORE the first `token` (context
+  // assembly, including retrieval, has already finished by the time any of this route's other
+  // frames could be written). Non-terminal, like the ASST-17 trio above.
+  | "citations";
 
 export function sseLine(event: AssistantSseEvent, data: unknown): string {
   return `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;

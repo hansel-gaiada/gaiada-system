@@ -397,6 +397,40 @@ export function assistantDemo(method: string, p: string, params: URLSearchParams
     return ok({ items: rows.slice(offset, offset + limit).map(pubMemory), total });
   }
 
+  // ── ASST-18: capabilities panel + empty-state cards ─────────────────────────────────────────────
+  // A small, fixed set standing in for `visibleToolsFor(user) ∩ module gates` — no per-user Cerbos
+  // decision to fake here (this is demo mode, not a backend), so every demo identity sees the same
+  // list. `hubConfigured: true` — the demo fixture is itself the "configured and answering" case;
+  // the "not configured"/"unreachable" states are exercised by the live-backend tests instead.
+  const capabilitiesM = p.match(/^\/api\/([^/]+)\/assistant\/capabilities$/);
+  if (capabilitiesM && m === "GET") {
+    return ok({
+      tools: [
+        { name: "projects.list", description: "List projects", module: null },
+        { name: "tasks.list", description: "List tasks", module: null },
+        { name: "clients.list", description: "List clients", module: null },
+        { name: "agency.pendingApprovals", description: "Approvals waiting for a decision", module: "agency" },
+      ],
+      hubConfigured: true,
+    });
+  }
+
+  // ── ASST-18: citation resolution ─────────────────────────────────────────────────────────────────
+  // Mirrors citations.ts's own narrow, honest contract: resolves the handful of demo refs a demo
+  // knowledge-grounded reply might cite, 404s everything else — a demo build must not fabricate a
+  // link for a ref it cannot really resolve either.
+  const citationM = p.match(/^\/api\/([^/]+)\/assistant\/citations\/([^/]+)$/);
+  if (citationM && m === "GET") {
+    const ref = decodeURIComponent(citationM[2]);
+    const known: Record<string, { kind: string; label: string; href: string }> = {
+      "erp:project:demo-project-1": { kind: "project", label: "Demo Project", href: "/projects/demo-project-1" },
+      "erp:client:demo-client-1": { kind: "client", label: "Demo Client", href: "/clients/demo-client-1" },
+    };
+    const resolved = known[ref];
+    if (!resolved) return { status: 404, json: { error: "this citation has no resolvable destination" } };
+    return ok(resolved);
+  }
+
   return null;
 }
 

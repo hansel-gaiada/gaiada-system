@@ -1938,3 +1938,86 @@ user uuid. Do not add a second envelope spelling.
   that panel needs), the `/assistant` UI's tool-chip rendering for the three new frames, and
   per-tool-call `duration_ms`/`args` fidelity, which would need the ai-agents runner to report richer
   tool steps than `"<tool> ok"` — deliberately NOT done here (see the redaction note above).
+
+### Capabilities panel + knowledge citations (ASST-18, 2026-08-06)
+
+Closes the "still PENDING" bullet directly above for `GET /api/:t/assistant/capabilities`, and adds
+the RAG-retrieval/citations half of blueprint §8 (right-rail "capabilities" list, the empty-state
+capability cards, and knowledge citation chips under a grounded reply).
+
+- ✅ **`GET /api/:t/assistant/capabilities`** (`modules/assistant/capabilities.ts`) —
+  `visibleToolsFor(user) ∩ tenant's module gates`, literally: `broker.ts`'s new
+  `listUserVisibleToolDefs` (a refactor of the existing `listUserVisibleTools` — same fetch, same
+  fail-closed posture, now also returning `description`) asks the hub under the CALLER'S OWN OBO
+  envelope, and this file intersects the result with `allModules()[].mcpTools[].name` ownership ∩
+  `enabledModuleKeys(tenantId)`. Response `{ tools: [{name, description, module}], hubConfigured }`.
+  `module` is `null` for an ungated platform-core tool (most of them — see the file's own header on
+  why the hub's `source` tag is NOT a module key). `hubConfigured` distinguishes "the hub isn't set
+  up in this environment at all" from "configured, and this user genuinely has none" — both
+  currently collapse to the same empty `tools` array, so this flag is what lets the panel word its
+  empty state honestly instead of guessing. **No new Cerbos resource/action** — the result is
+  inherently self-scoped (always and only the caller's own envelope) and the hub/Cerbos re-authorize
+  every tool again before anything runs; there is no parameter here that could widen whose
+  capabilities come back.
+- ✅ **UI: `CapabilityCards`** (`components/assistant/CapabilityCards.tsx`) is the ONE component that
+  fetches + renders this endpoint's result, consumed by BOTH `CapabilitiesPanel` (the right-rail
+  panel, toggled the same way `MemoryPanel` is — one of the two occupies the shared right-rail grid
+  column at a time) and `ThreadView`'s empty state (blueprint §8: "Empty state: capability cards —
+  doubles as the discoverability answer"). Grouped by the tool name's dot-prefix
+  (`lib/assistant.ts`'s `groupCapabilities`) for display only.
+- ✅ **`GET /api/:t/assistant/citations/:sourceRef`** (`modules/assistant/citations.ts`) — resolves
+  ONE knowledge-chunk `sourceRef` (erp-source.ts's own `erp:<kind>:<id>` ingestion convention) to a
+  navigable `{kind, label, href}`, or a 404 **on purpose** when this file has no honest destination
+  for it (a deleted row, an unmapped kind like `report`/`file`, a malformed ref, or a `person`/`org`
+  ref whose EMBEDDED tenant id doesn't match the route tenant). Resolvable kinds today: `client`,
+  `project`, `task`, `pmtask`/`deliverable`/`pmdoc` (resolve to their containing project — no
+  standalone detail route exists yet for those three), `meeting`, `person`, `org`/`orgunits`.
+  Gated the same broad way `admin/intelligence.controller.ts`'s `knowledgeSources` proxy is
+  (`activity`/`read` — any tenant member).
+- ✅ **Context assembly RAG retrieval** (`modules/assistant/context.ts`) — one retrieval per
+  generation (BOTH the plain-chat and the tool-turn branch, since both share `assembleContext`),
+  reusing `modules/search/knowledge-client.ts`'s `queryPropertyKnowledge` VERBATIM (no second
+  retrieval implementation) against the LATEST user message, `aclScope: ""` (matches
+  erp-source.ts's own `acl = []` convention for internal ERP documents — "every member of this
+  tenant"). Fail-soft by construction (`queryPropertyKnowledge` already degrades to `[]` on any
+  error; this file also wraps the call in its own `try/catch` in case a test double throws) — an
+  unreachable/unconfigured knowledge service narrows THIS turn's grounding, never fails the turn.
+  `config.assistant.knowledgeTopK` (env `ASSISTANT_KNOWLEDGE_TOPK`, default 4; `0` disables
+  retrieval outright) caps how many chunks are requested. Citations are appended to the prompt as a
+  "cite as [1], [2], …" block and returned as `AssembledContext.citations` (always an array).
+- ✅ **Wire + persistence**: a new NON-TERMINAL SSE event `citations` (`{items:[{sourceRef,text}]}`),
+  emitted from `assistant.controller.ts`'s `stream()` handler directly (not through
+  `stream.ts`'s `relayGeneration` — ASST-16's brain-picker/session code is untouched) the instant the
+  stream opens, before the first `token` (context assembly, including retrieval, already finished by
+  then). Persisted onto the finalized message's existing `parts` jsonb via a new `citationParts()`
+  helper (`stream.ts`), mirroring `usageMetaParts`'s "no schema change needed" shape — `[]` (not an
+  empty-items marker) for a turn that used no grounding, so an ordinary chat turn's `parts` is
+  byte-identical to before this ticket. UI: `lib/assistant.ts`'s `parseCitations` reads it back;
+  `StreamState.citations` carries the live value while streaming (same "live-then-persisted" split
+  ASST-12's badge/meter already use). Rendered by `components/assistant/CitationChips.tsx` under an
+  assistant bubble — **a chip is NEVER a plain `<a href>`**: clicking it calls
+  `resolveCitationAction` → the citations endpoint FIRST, and only navigates to the href the backend
+  just re-verified still exists; an unresolvable ref renders a disabled "Source unavailable" chip,
+  never a link that 404s.
+- **Module gating note**: `assembleCapabilities`'s module-ownership map comes from
+  `allModules()[].mcpTools[].name` — a tool NOT registered via any `ModuleContract.mcpTools` (every
+  `platform-read`/`platform-write`/core tool the hub itself serves, e.g. `projects.list`/
+  `tasks.list`, and the two tools `ASSISTANT_AGENT_TOOLS` already drives a turn with) passes through
+  UNGATED regardless of tenant module toggles — that is correct, not a gap: those tools were never
+  owned by a toggleable module in the first place, so there is nothing to gate them against.
+- Tests — `modules/assistant/assistant-capabilities.test.ts` (6 tests: the two-user SET-DIFFERENCE
+  assertion — an unauthorized tool is absent from the array, not present-and-disabled — module
+  gating across two tenants with the SAME user and SAME hub answer, hub-unreachable vs
+  hub-not-configured-at-all as two distinct honest states, and per-caller OBO headers reaching the
+  hub) and `modules/assistant/assistant-citations.test.ts` (5 tests: resolution against real rows,
+  the "never resolves a chip that would 404" negative sweep — deleted row / unknown kind / malformed
+  ref / cross-tenant ref forgery — and an end-to-end run: a fake knowledge service names a REAL
+  project row, the stream emits `event: citations` carrying that exact ref before `done`, the
+  persisted message's `parts` carries the same fact on reload, and resolving that exact chip returns
+  the project's real href).
+- **UNVERIFIED note**: citation resolution was proven end-to-end against a FAKE knowledge service in
+  this test environment (no live pgvector/embedding stack reachable from this sandbox) — the SQL
+  query shape, the SSE frame, the persistence, and the resolve-then-navigate UI flow are all real and
+  tested; whether the LIVE WS8 knowledge service (on a deployed box, with real ERP documents actually
+  ingested) returns retrievable hits for a real user query is not verified by this ticket and should
+  be checked against a live environment before relying on it.

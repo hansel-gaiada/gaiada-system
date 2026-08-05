@@ -1,8 +1,9 @@
 import {
-  isPendingMessage, humanizeErrorKind, brainBadgeLabel, parseUsageMeta, usageMeterLabel,
+  isPendingMessage, humanizeErrorKind, brainBadgeLabel, parseUsageMeta, parseCitations, usageMeterLabel,
   type AssistantMessage, type StreamState,
 } from "@/lib/assistant";
 import { renderMarkdownLite } from "./markdownLite";
+import { CitationChips } from "./CitationChips";
 
 // ASST-07 — one message bubble. `streaming`/`liveText` are set ONLY for the single row currently
 // being generated in THIS tab (see AssistantWorkspace) — every other row renders its persisted
@@ -41,6 +42,11 @@ export function Message({ message, streaming, liveText, liveState }: {
   const usageSource = streaming ? liveState?.usage?.source ?? null : usageMeta?.usageSource ?? null;
   const meterLabel = usageMeterLabel(tokens, usageSource);
 
+  // ASST-18 — while streaming, read the LIVE frame (arrived before any token, per stream.ts's own
+  // ordering guarantee); once finalized, read the persisted `parts` — the same "live state during
+  // the turn, then the reload-safe record" split ASST-12's badge/meter already use above.
+  const citations = streaming ? liveState?.citations ?? [] : parseCitations(message.parts);
+
   return (
     <article className={`asst-msg asst-msg--${isUser ? "user" : "assistant"}`}>
       <div className="asst-msg__role">{isUser ? "You" : "Assistant"}</div>
@@ -57,6 +63,7 @@ export function Message({ message, streaming, liveText, liveState }: {
         )}
         {stopped && <p className="asst-msg__meta asst-msg__meta--stopped">Stopped{bodyText ? "." : " before any reply."}</p>}
         {failed && <p className="asst-msg__error">{humanizeErrorKind(message.errorKind as string)}</p>}
+        {!isUser && citations.length > 0 && <CitationChips citations={citations} />}
         {showBadge && (
           <div className="asst-msg__servedby">
             <span className="asst-msg__badge">{brainBadgeLabel(provider, model)}</span>

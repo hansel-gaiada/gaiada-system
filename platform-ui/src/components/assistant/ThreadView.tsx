@@ -3,6 +3,7 @@ import { useEffect, useRef } from "react";
 import type { AssistantMessage, StreamState } from "@/lib/assistant";
 import { Message } from "./Message";
 import { StreamIndicator } from "./StreamIndicator";
+import { CapabilityCards } from "./CapabilityCards";
 import { useTypewriter } from "./useAssistantStream";
 
 // ASST-07 — the center column. One rendering path for both history and the live reply: the
@@ -29,10 +30,14 @@ export function ThreadView({
   }
 
   if (messages.length === 0 && streamState.status === "idle") {
+    // ASST-18 — blueprint §8: "Empty state: capability cards — doubles as the discoverability
+    // answer." `CapabilityCards` is the SAME component (and the same underlying fetch) the
+    // right-rail panel renders — see that component's own header for why that is load-bearing.
     return (
-      <div className="asst-thread-empty">
+      <div className="asst-thread-empty asst-thread-empty--wide">
         <p className="type-eyebrow" style={{ color: "var(--erp-accent)", marginBottom: 8, display: "block" }}>Assistant</p>
-        <p>Ask a question about your projects, clients, or the platform — or start drafting something.</p>
+        <p>Ask a question about your projects, clients, or the platform — or try one of these:</p>
+        <CapabilityCards variant="empty-state" />
       </div>
     );
   }

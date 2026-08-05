@@ -4,7 +4,8 @@ import {
   parseSSEBuffer, decodeAssistantEvent, streamReducer, initialStreamState, humanizeErrorKind,
   brainBadgeLabel, parseUsageMeta, usageMeterLabel,
   isPendingMemory, groupMemory,
-  type AssistantThread, type AssistantMemory,
+  groupCapabilities, parseCitations,
+  type AssistantThread, type AssistantMemory, type AssistantCapability,
 } from "./assistant";
 
 function thread(overrides: Partial<AssistantThread> = {}): AssistantThread {
@@ -131,7 +132,7 @@ describe("streamReducer — pure, immutable, guarded against terminal-state resu
     let s = initialStreamState();
     s = streamReducer(s, { type: "token", text: "Hel" });
     s = streamReducer(s, { type: "token", text: "lo" });
-    expect(s).toEqual({ status: "streaming", text: "Hello", meta: null, usage: null, error: null });
+    expect(s).toEqual({ status: "streaming", text: "Hello", meta: null, usage: null, citations: [], error: null });
   });
   it("meta sets the live badge state as soon as it arrives, non-terminal", () => {
     let s = initialStreamState();
@@ -163,12 +164,12 @@ describe("streamReducer — pure, immutable, guarded against terminal-state resu
   });
   it("any other errorKind lands status 'error' and records the message/kind", () => {
     const s = streamReducer(initialStreamState(), { type: "error", error: "boom", errorKind: "upstream_error" });
-    expect(s).toEqual({ status: "error", text: "", meta: null, usage: null, error: { message: "boom", kind: "upstream_error" } });
+    expect(s).toEqual({ status: "error", text: "", meta: null, usage: null, citations: [], error: { message: "boom", kind: "upstream_error" } });
   });
   it("never mutates the previous state object", () => {
     const s0 = initialStreamState();
     const s1 = streamReducer(s0, { type: "token", text: "x" });
-    expect(s0).toEqual({ status: "idle", text: "", meta: null, usage: null, error: null });
+    expect(s0).toEqual({ status: "idle", text: "", meta: null, usage: null, citations: [], error: null });
     expect(s1).not.toBe(s0);
   });
 });
@@ -260,5 +261,66 @@ describe("groupMemory", () => {
 
   it("an empty list yields two empty groups, not an error", () => {
     expect(groupMemory([])).toEqual({ pending: [], confirmed: [] });
+  });
+});
+
+// ============================================================== ASST-18 =============================
+
+describe("groupCapabilities — dot-prefix category, sorted", () => {
+  it("groups by the dot-prefix and sorts groups + tools by name", () => {
+    const tools: AssistantCapability[] = [
+      { name: "tasks.list", description: "List tasks", module: null },
+      { name: "projects.list", description: "List projects", module: null },
+      { name: "agency.pendingApprovals", description: "Approvals", module: "agency" },
+    ];
+    const groups = groupCapabilities(tools);
+    expect(groups.map((g) => g.category)).toEqual(["agency", "projects", "tasks"]);
+    expect(groups.find((g) => g.category === "agency")?.tools.map((t) => t.name)).toEqual(["agency.pendingApprovals"]);
+    const withoutDot: AssistantCapability = { name: "ping", description: "", module: null };
+    const grouped = groupCapabilities([...tools, withoutDot]);
+    expect(grouped.find((g) => g.category === "general")?.tools.map((t) => t.name)).toEqual(["ping"]);
+  });
+
+  it("an empty list yields an empty group array, not an error", () => {
+    expect(groupCapabilities([])).toEqual([]);
+  });
+});
+
+describe("decodeAssistantEvent — the citations frame (ASST-18)", () => {
+  it("decodes a well-formed citations block", () => {
+    expect(decodeAssistantEvent({ event: "citations", data: '{"items":[{"sourceRef":"erp:project:1","text":"Project: Acme"}]}' }))
+      .toEqual({ type: "citations", items: [{ sourceRef: "erp:project:1", text: "Project: Acme" }] });
+  });
+  it("drops malformed items rather than throwing", () => {
+    expect(decodeAssistantEvent({ event: "citations", data: '{"items":[{"sourceRef":"ok","text":"t"},{"sourceRef":123}]}' }))
+      .toEqual({ type: "citations", items: [{ sourceRef: "ok", text: "t" }] });
+  });
+  it("a missing items array decodes to an empty list, never null/undefined", () => {
+    expect(decodeAssistantEvent({ event: "citations", data: "{}" })).toEqual({ type: "citations", items: [] });
+  });
+});
+
+describe("streamReducer — citations", () => {
+  it("citations set the live state the instant they arrive, non-terminal", () => {
+    let s = initialStreamState();
+    s = streamReducer(s, { type: "citations", items: [{ sourceRef: "erp:project:1", text: "t" }] });
+    expect(s.citations).toEqual([{ sourceRef: "erp:project:1", text: "t" }]);
+    expect(s.status).toBe("idle"); // same non-terminal rule `meta` follows
+  });
+});
+
+describe("parseCitations — reads the persisted parts[], mirrors platform-nest's CitationsPart", () => {
+  it("finds the citations part among other part types and returns its items", () => {
+    const parts = [
+      { type: "usage_meta", usageSource: "estimate" },
+      { type: "citations", items: [{ sourceRef: "erp:client:1", text: "Client: Acme" }] },
+    ];
+    expect(parseCitations(parts)).toEqual([{ sourceRef: "erp:client:1", text: "Client: Acme" }]);
+  });
+  it("returns [] (never null) for parts with no citations, or a malformed/absent parts value", () => {
+    expect(parseCitations([{ type: "usage_meta", usageSource: "estimate" }])).toEqual([]);
+    expect(parseCitations([])).toEqual([]);
+    expect(parseCitations(null)).toEqual([]);
+    expect(parseCitations("not an array")).toEqual([]);
   });
 });

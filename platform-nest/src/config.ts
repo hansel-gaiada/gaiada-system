@@ -328,6 +328,11 @@ const configBase = {
     // calibrate against (ASST-10's grammar has no `usage` event upstream). Overflow beyond this
     // budget triggers compaction v1 (fold the oldest excerpt into the thread's rolling summary).
     contextCharBudget: Number(process.env.ASSISTANT_CONTEXT_CHAR_BUDGET ?? 12_000),
+    // ASST-18 — how many knowledge chunks context.ts's RAG retrieval asks WS8's `/search` for on
+    // every context assembly. `0` disables retrieval outright (an explicit opt-out, not a silent
+    // one) — `assembleContext` skips the call entirely rather than asking for zero and getting an
+    // empty array back, so this is a real "off" switch, not just a very small "on".
+    knowledgeTopK: Number(process.env.ASSISTANT_KNOWLEDGE_TOPK ?? 4),
   },
   /**
    * BROWSER-reachable n8n editor origin — deliberately NOT `services.automation.url`.

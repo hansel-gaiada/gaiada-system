@@ -34,6 +34,7 @@
 // assistant would start treating unverified guesses as user facts).
 import type { PoolClient } from "pg";
 import { config } from "../../config";
+import { queryPropertyKnowledge, type KnowledgeHit } from "../search/knowledge-client";
 
 /** The assistant's fixed system preamble. Deliberately generic in Phase 1 — no per-department
  *  persona (blueprint D-B: "one Hermes front door", personas deferred), no tool-capability list
@@ -169,6 +170,22 @@ async function summarizeExcerpt(excerpt: string, existingSummary: string | null,
   return summary;
 }
 
+// ── ASST-18: RAG retrieval + citations, fail-soft ──────────────────────────────────────────────────
+// One retrieval per generation, against the live pgvector tiers (WS8's knowledge service), scoped to
+// the thread OWNER's own authorized-tenant-set (the SAME `queryPropertyKnowledge` the search module
+// already uses — reused verbatim, not reimplemented: it self-links the owner's OBO envelope and
+// fails soft to `[]` on ANY error, so an unreachable/unconfigured knowledge service degrades this
+// turn's GROUNDING, never the turn itself). `aclScope: ""` matches erp-source.ts's own convention —
+// every internal-tier ERP document is ingested with an EMPTY acl (`acl = '{}'`), which the store
+// reads as "every member of this tenant"; `""` is the scope value that condition matches (D9.1:
+// `acl = '{}' OR $2 = ANY(acl)`), not a magic empty string.
+export type ContextCitation = KnowledgeHit;
+
+/** A citation source, injectable for tests (default: the live `queryPropertyKnowledge`). Same shape
+ *  `../search/knowledge-client.ts` already exports — kept as its own type alias here so this file's
+ *  signatures don't have to spell out the import at every call site. */
+export type KnowledgeQueryFn = typeof queryPropertyKnowledge;
+
 export interface AssembledContext {
   /** The full prompt to send to `/complete(/stream)`. */
   prompt: string;
@@ -176,6 +193,12 @@ export interface AssembledContext {
    *  this onto `assistant_threads` (compaction_summary / compaction_summary_upto_seq) or the same
    *  excerpt gets re-summarized (and re-billed) on the next send. */
   compactionUpdate?: { summary: string; uptoSeq: number };
+  /** ASST-18 — whatever knowledge chunks grounded this turn, in ranked order. Always an array (never
+   *  `undefined`) so callers can persist/emit it unconditionally; empty means either retrieval found
+   *  nothing relevant OR the knowledge service degraded — both render identically to the user
+   *  (no citation chips), which is correct: "we have nothing to cite" and "we couldn't check" are
+   *  the same actionable fact from the reader's side. */
+  citations: ContextCitation[];
 }
 
 /** Assemble the prompt for a new generation in `threadId`, folding older messages into the
@@ -189,7 +212,15 @@ export async function assembleContext(
   threadId: string,
   thread: ThreadForContext,
   excludeFromSeq: number,
-  opts?: SummarizeOptions & { charBudget?: number; memoryCharBudget?: number },
+  opts?: SummarizeOptions & {
+    charBudget?: number;
+    memoryCharBudget?: number;
+    /** ASST-18 test seam — default is the live `queryPropertyKnowledge`. */
+    queryKnowledge?: KnowledgeQueryFn;
+    /** ASST-18 — how many chunks to ask for. Default `config.assistant.knowledgeTopK`; `0` (or a
+     *  negative override) skips retrieval entirely rather than asking for none. */
+    knowledgeTopK?: number;
+  },
 ): Promise<AssembledContext> {
   const budget = opts?.charBudget ?? config.assistant.contextCharBudget;
 
@@ -227,13 +258,32 @@ export async function assembleContext(
   const memoryRows = await fetchConfirmedMemory(c, thread.ownerUserId);
   const memoryBlock = renderMemory(memoryRows, opts?.memoryCharBudget ?? DEFAULT_MEMORY_CHAR_BUDGET);
 
+  // ASST-18: retrieve against the LATEST user message in `kept` — the one this generation is
+  // actually replying to. Never against `excerpt`/the folded prefix: what was just asked is the
+  // right retrieval query, not the running summary of everything asked before it.
+  const queryFn = opts?.queryKnowledge ?? queryPropertyKnowledge;
+  const knowledgeTopK = opts?.knowledgeTopK ?? config.assistant.knowledgeTopK;
+  let citations: ContextCitation[] = [];
+  const lastUserMessage = [...kept].reverse().find((m) => m.role === "user" && m.content);
+  if (lastUserMessage?.content && knowledgeTopK > 0) {
+    try {
+      citations = await queryFn(thread.ownerUserId, "", lastUserMessage.content, knowledgeTopK);
+    } catch {
+      citations = []; // grounding is additive — see this section's header; never fails the turn.
+    }
+  }
+
   const sections = [SYSTEM_PREAMBLE];
   if (memoryBlock) sections.push(`Known facts and preferences about this user (confirmed):\n${memoryBlock}`);
   if (summary) sections.push(`Summary of the earlier conversation:\n${summary}`);
   const transcript = renderTranscript(kept);
   if (transcript) sections.push(transcript);
+  if (citations.length > 0) {
+    const block = citations.map((h, i) => `[${i + 1}] (${h.sourceRef}) ${h.text}`).join("\n\n");
+    sections.push(`Relevant company knowledge — cite it as [1], [2], … where you use it:\n${block}`);
+  }
   sections.push("Assistant:");
-  return { prompt: sections.join("\n\n"), compactionUpdate };
+  return { prompt: sections.join("\n\n"), compactionUpdate, citations };
 }
 
 /** Persist a compaction update produced by `assembleContext` onto the thread row. Separate from

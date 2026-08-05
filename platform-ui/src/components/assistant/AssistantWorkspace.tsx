@@ -10,6 +10,7 @@ import { ThreadRail } from "./ThreadRail";
 import { ThreadView } from "./ThreadView";
 import { Composer } from "./Composer";
 import { MemoryPanel } from "./MemoryPanel";
+import { CapabilitiesPanel } from "./CapabilitiesPanel";
 import { BrainPicker } from "./BrainPicker";
 import { useAssistantStream } from "./useAssistantStream";
 import { Toast } from "@/components/ui";
@@ -60,6 +61,11 @@ export function AssistantWorkspace({ initialThreads, initialActiveThreadId }: {
   // the grid-column layout it drives (`.asst-workspace--with-memory`) lives on this component's
   // own root element.
   const [memoryOpen, setMemoryOpen] = useState(false);
+  // ASST-18 — the capabilities panel occupies the SAME right-rail slot as memory, one at a time
+  // (opening one closes the other) — a third simultaneous grid column would need its own layout
+  // math the design doesn't call for; blueprint §8 lists both as members of one collapsible
+  // "context inspector" family, not two independent panes.
+  const [capabilitiesOpen, setCapabilitiesOpen] = useState(false);
 
   const stream = useAssistantStream();
   const stateRef = useRef(stream.state);
@@ -239,8 +245,10 @@ export function AssistantWorkspace({ initialThreads, initialActiveThreadId }: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stream.state.status, streamingMessageId, activeThreadId]);
 
+  const rightRailOpen = memoryOpen || capabilitiesOpen;
+
   return (
-    <div className={`asst-workspace${memoryOpen ? " asst-workspace--with-memory" : ""}`}>
+    <div className={`asst-workspace${rightRailOpen ? " asst-workspace--with-memory" : ""}`}>
       <ThreadRail
         threads={threads}
         activeThreadId={activeThreadId}
@@ -261,10 +269,25 @@ export function AssistantWorkspace({ initialThreads, initialActiveThreadId }: {
           />
           <button
             type="button"
+            className="asst-cap-toggle"
+            aria-expanded={capabilitiesOpen}
+            aria-controls="asst-capabilities-panel"
+            onClick={() => {
+              setCapabilitiesOpen((v) => !v);
+              setMemoryOpen(false);
+            }}
+          >
+            Capabilities
+          </button>
+          <button
+            type="button"
             className="asst-memory-toggle"
             aria-expanded={memoryOpen}
             aria-controls="asst-memory-panel"
-            onClick={() => setMemoryOpen((v) => !v)}
+            onClick={() => {
+              setMemoryOpen((v) => !v);
+              setCapabilitiesOpen(false);
+            }}
           >
             Memory
           </button>
@@ -277,6 +300,7 @@ export function AssistantWorkspace({ initialThreads, initialActiveThreadId }: {
         />
         <Composer canSend={canSend} streaming={stream.state.status === "streaming"} onSend={handleSend} onStop={handleStop} />
       </div>
+      {capabilitiesOpen && <CapabilitiesPanel onClose={() => setCapabilitiesOpen(false)} />}
       {memoryOpen && <MemoryPanel activeThreadId={activeThreadId} onClose={() => setMemoryOpen(false)} />}
       {toastMsg && <Toast message={toastMsg} />}
     </div>

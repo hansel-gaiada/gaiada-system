@@ -14,9 +14,12 @@ import { revalidatePath } from "next/cache";
 import { getSessionUserId } from "./session-server";
 import { getMe, platformFetch, PlatformError, type Me } from "./platform";
 import { getActiveTenant } from "./tenant";
-import { listThreads, getThread, listMemory, THREAD_LIST_LIMIT, type ListThreadsParams, type GetThreadParams } from "./assistant-data";
+import {
+  listThreads, getThread, listMemory, getCapabilities, resolveCitation, THREAD_LIST_LIMIT, type ListThreadsParams, type GetThreadParams,
+} from "./assistant-data";
 import type {
-  AssistantMemoryScope, AssistantThreadStatus, MemoryListResult, SendMessageResult, StopResult, ThreadDetailResult, ThreadListResult,
+  AssistantMemoryScope, AssistantThreadStatus, CapabilitiesResult, MemoryListResult, ResolvedCitation, SendMessageResult, StopResult,
+  ThreadDetailResult, ThreadListResult,
 } from "./assistant";
 
 // The default payload must add NO properties. `Record<string, never>` looks right but isn't: its index
@@ -227,6 +230,38 @@ export async function deleteMemoryAction(memoryId: string): Promise<ActionResult
   try {
     await platformFetch(`/api/${c.tenant}/assistant/memory/${memoryId}`, c.userId, { method: "DELETE" });
     return { ok: true };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+// ---- Capabilities panel + empty-state cards (ASST-18) --------------------------------------------
+// `CapabilityCards` (the component BOTH the panel and the empty state render) calls this SAME
+// action either way — see that component's own header for why that is the thing that makes "the
+// empty state can never drift from what this user can actually do" true, not just asserted.
+
+export async function refreshCapabilitiesAction(): Promise<ActionResult<CapabilitiesResult>> {
+  const c = await ctx();
+  if ("error" in c) return { ok: false, error: c.error };
+  try {
+    const r = await getCapabilities(c.userId, c.tenant);
+    return { ...r, ok: true };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+// ---- Citation resolution (ASST-18) ----------------------------------------------------------------
+// `resolved: null` is a NORMAL, expected outcome (an honest "no destination for this chip" — see
+// citations.ts's header), not an error — the caller renders the chip as plain text rather than a
+// link in that case, never a broken/soon-to-404 `<a>`.
+
+export async function resolveCitationAction(sourceRef: string): Promise<ActionResult<{ resolved: ResolvedCitation | null }>> {
+  const c = await ctx();
+  if ("error" in c) return { ok: false, error: c.error };
+  try {
+    const resolved = await resolveCitation(c.userId, c.tenant, sourceRef);
+    return { ok: true, resolved };
   } catch (e) {
     return fail(e);
   }
