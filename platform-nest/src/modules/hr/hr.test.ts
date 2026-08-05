@@ -116,8 +116,17 @@ describe.skipIf(!TEST_URL || !REDIS_TEST_URL)("HR module (WSD-4)", () => {
 
   it("module registration: hr's ModuleContract carries the design's shape", () => {
     expect(getModule("hr")).toBe(hrModule);
-    expect(hrModule.mcpTools.map((t) => t.name)).toEqual(["hr.listCases", "hr.listLeave", "hr.fileLeave"]);
+    // Wave E added the two loan tools. hr.requestLoan is impact `high` (leave's file is `medium`) —
+    // approving it moves money, so D14 suspends the agent/n8n path for a human decision.
+    expect(hrModule.mcpTools.map((t) => t.name)).toEqual([
+      "hr.listCases", "hr.listLeave", "hr.fileLeave", "hr.listLoans", "hr.requestLoan",
+    ]);
+    expect(hrModule.mcpTools.find((t) => t.name === "hr.requestLoan")?.impact).toBe("high");
     expect(hrModule.customFieldTargets).toEqual(["hr_case", "hr_record"]);
+    // Still exactly TWO keys after wave E: `automation_approval.decided` is keyed by EVENT TYPE, so
+    // hr gets one handler for it, and hr now files two kinds of approval (leave, loans). The contract
+    // therefore registers a dispatcher that runs both appliers; adding a third key here would mean
+    // one of them had silently stopped being called.
     expect(Object.keys(hrModule.eventHandlers ?? {})).toEqual(["automation_approval.decided", "user.invited"]);
   });
 

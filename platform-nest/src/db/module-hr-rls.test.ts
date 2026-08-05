@@ -51,15 +51,25 @@ describe.skipIf(!TEST_URL)("HR module RLS — served-tenant + third-wall (0028)"
   afterAll(teardownTestDb);
 
   // ── (c) rls.test.ts invariant: every hr_* table has tenant_id AND FORCE RLS ──────────────────────
-  it("all six hr_* tables FORCE RLS (rls.test.ts sweep invariant)", async () => {
+  // Wave E (0081) added the three hr_loan_* tables, so this list is nine. Kept as an EXPLICIT list
+  // rather than a `LIKE 'hr\_%'` sweep on purpose: naming each table is what makes "a new hr_* table
+  // was added and nobody gave it the third wall" a failure here instead of a silent pass.
+  const HR_TABLES = [
+    "hr_attendance", "hr_cases", "hr_checklist_templates", "hr_leave_balances", "hr_leave_requests",
+    "hr_loan_installments", "hr_loan_repayments", "hr_loan_requests", "hr_records",
+  ];
+
+  it("all nine hr_* tables FORCE RLS (rls.test.ts sweep invariant)", async () => {
     const { rows } = await withGlobal((c) =>
       c.query<{ relname: string; relforcerowsecurity: boolean }>(
         `SELECT relname, relforcerowsecurity FROM pg_class
-          WHERE relkind='r' AND relname IN
-            ('hr_cases','hr_records','hr_leave_requests','hr_leave_balances','hr_attendance','hr_checklist_templates')`,
+          WHERE relkind='r' AND relname = ANY($1::text[]) ORDER BY relname`,
+        [HR_TABLES],
       ),
     );
-    expect(rows.length).toBe(6);
+    // Every named table must EXIST as well as force RLS — a typo in the list above would otherwise
+    // quietly reduce this test's coverage rather than fail it.
+    expect(rows.map((r) => r.relname)).toEqual(HR_TABLES);
     for (const r of rows) expect(r.relforcerowsecurity, `${r.relname} must FORCE RLS`).toBe(true);
   });
 
@@ -70,7 +80,10 @@ describe.skipIf(!TEST_URL)("HR module RLS — served-tenant + third-wall (0028)"
           WHERE tablename LIKE 'hr\\_%' ORDER BY tablename`,
       ),
     );
-    expect(rows.length).toBe(6);
+    // This one IS a `LIKE 'hr\_%'` sweep, so it catches a table the list above forgot. Asserted as
+    // the table SET rather than a count: "expected 9 to be 6" says nothing about which table arrived
+    // or whether it got a policy, which is the whole question.
+    expect(rows.map((r) => r.tablename)).toEqual(HR_TABLES);
     for (const r of rows) {
       expect(r.policyname, r.tablename).toBe("tenant_isolation");
       expect(r.cmd, r.tablename).toBe("ALL");
