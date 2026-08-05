@@ -23,7 +23,7 @@ version and add a `CHANGELOG.md` entry on every notable module change.
 
 ## App version
 
-**`Alpha 01.016.0037a`** â€” see [`VERSIONING.md`](./VERSIONING.md) for the format, and
+**`Alpha 01.017.0040a`** â€” see [`VERSIONING.md`](./VERSIONING.md) for the format, and
 
 [`/VERSION`](../../VERSION) for the machine-readable source. The app version composes the module
 versions below; the running build reports it at `GET /health`.
@@ -54,7 +54,7 @@ versions below; the running build reports it at `GET /health`.
 | render-gateway-go | `0.0.0` | PLANNED | Creative | 2026-07-23 |
 | reports | `0.3.1` | PROTOTYPED | Cross-cutting | 2026-08-03 |
 | report-renderer | `0.1.0` | DEV-VERIFIED | Cross-cutting | 2026-07-31 |
-| mail | `0.0.12` | IN PROGRESS | Cross-cutting | 2026-08-05 |
+| mail | `0.0.13` | IN PROGRESS | Cross-cutting | 2026-08-05 |
 
 ---
 
@@ -340,7 +340,31 @@ through C-03". **v1.2 (same day, Zone A mail v2):** domains locked — C-03's fo
 moved to the Google Workspace SMTP relay with Brevo failover. Blueprint HTML is v1.2; PDF + hosted
 artifact NOT re-rendered yet.
 
-## mail — Zone A Email (platform-nest) · `0.0.12` · IN PROGRESS
+## mail — Zone A Email (platform-nest) · `0.0.13` · IN PROGRESS
+
+**0.0.13 (2026-08-05, senior-be, MAIL-23) — drift guard for the Cerbos decider mirror.**
+`src/core/approval-deciders.ts` mirrors two Cerbos policies IN APPLICATION CODE for notification
+routing only (Cerbos remains the sole authorization authority); there was no automated check that
+the mirror still matched the policies it claims to reproduce, so a policy edit changing WHO may
+decide, with no matching edit to the mirror, would silently misroute or drop review-needed mail
+with zero signal. New `src/core/approval-deciders-policy-drift.test.ts` reads both policy YAMLs at
+test time (no live Cerbos, no DB — pure file parsing, narrow hand-written parser rather than a new
+`yaml`/`js-yaml` dependency, since neither is declared in `platform-nest/package.json`) and asserts
+each policy's decide-equivalent rule's `derivedRoles` — `resource_automation_approval.yaml`'s
+`decide` action and `resource_agency_approval.yaml`'s `approve` action (it has no `decide` action
+at all) — matches the concrete role names the mirror's header documents (`company_admin`,
+`group_executive`, `hr_manager`; `company_admin`, `agency_approver`). Verified it does NOT
+false-positive on the exact live case (D14-06 adding `retry` alongside `decide` with the same role
+set) or on an unrelated comment edit, via in-memory mutations of the real policy text — never the
+committed policy files, which are off-limits (D14 owns them). Demonstrated the guard actually
+fires: a committed test mutates a copy to add a role and asserts the comparator throws an
+actionable message (names the policy file, the added role, and that `approval-deciders.ts` must be
+updated); separately, manually dropped `hr_manager` from the test's own expected-role constant,
+ran the suite, got 4/5 red with that exact message, then reverted to 5/5 green.
+`npx vitest run src/core/approval-deciders-policy-drift.test.ts` → 5/5 green; `npx tsc --noEmit` →
+clean. No bug found today — the concurrent D14 role set (`company_admin`, `group_executive`)
+was and is unchanged; this only makes the NEXT such change loud. Test-only: no migration, no
+production-code change, no Cerbos policy edit.
 
 **0.0.12 (2026-08-05, senior-db, MAIL-22) — FORCE-RLS invariant restored on all three mail tables.**
 `mail_log`/`mail_messages` carry `tenant_id` (nullable — auth mail has none) and had NO RLS at all

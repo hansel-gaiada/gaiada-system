@@ -23,6 +23,58 @@ reconstructed from this table alone. Format defined in [`VERSIONING.md`](./VERSI
 > `01.012.0031a`. Per VERSIONING rule 5 `/VERSION` is authoritative; the `MODULES.md` line is now
 > corrected and should be moved with every cut.
 
+### `Alpha 01.017.0040a` — 2026-08-05 — back on the pipeline; supersedes the hand-built release
+
+**The first properly built, signed release since Actions was blocked.** `01.016.0037a` was hand-built on
+the VPS with no cosign signature and no attested SBOM, and it was still what production was running —
+this cut replaces it through `release.yml`, restoring the supply-chain gate `deploy.yml` enforces. It
+also has a git tag, which `01.016.0037a` never got (VERSIONING rule 4: the deployed tag matches the app
+version).
+
+Counter `0037 → 0040`: three modules bumped — `platform-nest 0.13.0 → 0.13.1`, `platform-ui 0.15.1 →
+0.15.2`, `mail 0.0.1 → 0.0.13`.
+
+Contents (four programs that had accumulated on `main` unversioned, plus one fix):
+
+- **the Zone A mail subsystem** — approvals + risk email, inbound threads, mail UI, with migration
+  **`0077_mail_core.sql`**. This release is what first applies it to production.
+- **the D14 resume path closed** + **ERP assistant phases 0–1**, then ASST-09 (nginx SSE block + env
+  passthrough), ASST-11/12 (meta/usage wire events, brain badge and a truthful cost meter), ASST-14
+  (hermes-gateway streamed spawn + incremental box parser), and D14-15 (PM executable registry).
+  `D14 has no resume path` was a standing platform-wide blocker; it is closed here.
+- **`fix(seed)!`: the hard-coded portal password is gone.** Going public on 2026-08-05 made
+  `"PortalDemo!2026"` world-readable **while those seven accounts were live**, so anyone reading the seed
+  could sign into a real client's portal. All seven were rotated on the box and verified both directions
+  (old rejected at Keycloak, new one lands on `/portal`); the seed now generates a random password per
+  run so there is no literal left to leak.
+
+Two settings corrected now that the repo is public and storage is free again:
+
+- **GHCR retention 9 → 30** (3 releases → 10). Nine was chosen only to fit the free *private* Packages
+  allowance; it left a late-noticed regression with no tag to roll back to.
+- **SLSA provenance** is expected to work now (it needs a public repo). `continue-on-error` is left on
+  for exactly one release so the outcome is observed rather than assumed — if the step passed on this
+  run, remove that line so a future provenance failure is loud.
+
+**Module manifest (21) — as of this commit.** Recorded with a caveat: other sessions were editing
+`MODULES.md` in the shared checkout while this was written (`mail` moved `0.0.12 → 0.0.13` between two
+reads), so treat the three IN PROGRESS rows as a snapshot, not a settled state.
+
+| Module | Ver | Module | Ver | Module | Ver |
+|---|---|---|---|---|---|
+| platform-nest | `0.13.1` | wa-chat-bot | `0.9.2` | webdesk | `0.0.0` |
+| platform-ui | `0.15.2` | ai-agents | `0.5.0` | search-marketing | `0.5.1` |
+| ai-gateway-go | `0.13.0` | hermes-gateway | `0.2.0` | social-media | `0.0.0` |
+| mcp-hub | `0.9.3` | capture-helper | `0.2.0` | creative | `0.1.0` |
+| sync-engine-go | `0.7.0` | webdev | `0.11.0` | render-gateway-go | `0.0.0` |
+| automation (n8n) | `0.4.1` | reports | `0.3.1` | report-renderer | `0.1.0` |
+| observability | `0.6.0` | infra | `0.8.0` | mail | `0.0.13` |
+
+Pre-cut verification (local, before pushing three other sessions' commits): `platform-nest` and
+`platform-ui` `tsc` clean, `platform-ui` **1108 tests** across 108 files, `DEMO_MODE` build green. The
+DB-backed suites — including the 32-case client-portal isolation suite, which passed in CI run
+`30989473747` — are CI's job and gate this tag.
+
 ### `Alpha 01.016.0037a` — 2026-08-04 — HAND-BUILT deploy (Actions blocked), carrying wd23a-1
 
 **⚠ This cut did NOT go through `release.yml`.** GitHub Actions is blocked by billing — every job dies
@@ -2666,6 +2718,68 @@ Built by a 4-agent parallel run against a frozen contract (`docs/superpowers/pla
   by code inspection rather than executed here (it reads `mail_log` only via the superuser
   `adminPool()`, so it is expected to keep passing, but was not run as part of this ticket's
   scoped `src/mail src/db` command).
+
+## mail (continued)
+### [0.0.13] — 2026-08-05 · IN PROGRESS · MAIL-23 (senior-be) — drift guard for the Cerbos decider mirror
+
+- **The gap:** `src/core/approval-deciders.ts` mirrors two Cerbos policies IN APPLICATION CODE,
+  purely for notification routing (Cerbos remains the sole authorization authority; the mirror
+  only decides who gets TOLD a high-risk action needs review — every decide/approve endpoint still
+  calls `authorize()` at decide-time, unchanged). There was no automated check that the mirror
+  still matches the policies it claims to reproduce. A policy edit that changed the decider role
+  set with no matching edit to the mirror would silently misroute — or drop — that notification
+  mail, with zero signal. Live risk at the time of this ticket: the concurrent D14 session had just
+  changed `resource_automation_approval.yaml` (added `retry` alongside `decide`); its role set
+  happened to be unchanged (verified by reading the file), but nothing would have caught it if it
+  hadn't been.
+- **The fix — a new file-parsing test, no live Cerbos, no DB.** `src/core/approval-deciders-policy-drift.test.ts`
+  reads both policy YAMLs at test time and asserts each policy's decide-equivalent rule's
+  `derivedRoles` matches the concrete role names the mirror's header documents:
+  `resource_automation_approval.yaml`'s `decide` action → `company_admin`, `group_executive`,
+  `hr_manager` (WSD-2's `module_manager`, composed for `module=="hr"` — the only concrete
+  instantiation `resolveAutomationApprovalDeciders` ever queries); `resource_agency_approval.yaml`'s
+  `approve` action (it has NO `decide` action at all) → `company_admin`, `agency_approver`
+  (`module_approver`, composed for `module=="agency"` since `agency.controller.ts` always passes
+  that module for `agency_approval` resources).
+- **Narrow hand-written parser, not a new dependency.** `yaml`/`js-yaml` resolve in `node_modules`
+  but only as TRANSITIVE deps (`npm ls yaml` shows neither declared in
+  `platform-nest/package.json`), so depending on either would silently ride some OTHER package's
+  dependency tree shape rather than a guarantee of this one. The test instead parses the two
+  files' `rules:` list items itself — reads each item's inline `actions: [...]` /
+  `derivedRoles: [...]` flow-sequences (the entirety of what both files use for these fields today)
+  and THROWS rather than guessing if that shape ever changes. It never evaluates
+  `condition.match.expr` (no CEL evaluator) — role NAMES only, the same granularity the mirror's
+  own header comment uses. The `["*"]` platform_admin catch-all is deliberately excluded from the
+  decide-equivalent match (a superadmin bypass, not a decider grant the mirror's header lists).
+- **Verified NOT to false-positive on the exact live case.** One test simulates "before D14-06" by
+  stripping `retry` from the real policy text in memory and confirms the resolved role set is
+  identical with or without it — the guard reacts to ROLE changes, not action-list additions. A
+  second test perturbs an unrelated comment near the rule for the same proof. Both prove the guard
+  would NOT have fired on the D14-06 change that just happened.
+- **Demonstrated failure, not just claimed — two proofs, neither touching the real policy files**
+  (D14 owns them, read-only per the shared-tree boundary): (1) a committed test mutates an
+  in-memory copy of the automation policy text to add an extra role (`manager`) to the `decide`
+  rule and asserts the comparator throws with an actionable message naming the policy file, the
+  added role, and that `approval-deciders.ts` must be updated; (2) manually confirmed with real red
+  terminal output — temporarily dropped `hr_manager` from this test file's own expected-role
+  constant, ran `npx vitest run src/core/approval-deciders-policy-drift.test.ts`, got **4/5
+  failing** with the exact actionable message (`added role(s) [hr_manager] ... platform-nest/src/core/
+  approval-deciders.ts (and its header comment) mirrors this policy ... MUST be updated to match,
+  or the wrong people get told about — or nobody is told about — a medium-or-higher-risk action.`),
+  then reverted the constant and re-ran green (5/5).
+- **Verification, real output, no DB needed at all** (pure file-parsing — no `TEST_DB_PREFIX`
+  required, nothing to drop from `gaiada-test-pg`): `npx vitest run
+  src/core/approval-deciders-policy-drift.test.ts` → **5/5 green**. `npx tsc --noEmit` → clean.
+- **No bug found today.** The concurrent D14 change kept the same `["company_admin",
+  "group_executive"]` role set on the `decide`/`retry` rule — confirmed by reading the file at
+  ticket start, and now continuously by this guard, which passes against the current policies +
+  mirror.
+- **Not touched, deliberately:** both Cerbos policy files (`resource_automation_approval.yaml`,
+  `resource_agency_approval.yaml` — D14 owns them), `src/mail/**` and `src/db/**` + any new
+  migration (a concurrent MAIL-10 session), `src/core/approval-execute*.ts`/
+  `approval-executables*.ts`/`hub-client.ts`/`events/consumer.service.ts`/`mcp-hub/**` (D14),
+  `ai-gateway-go/**`/`hermes-gateway/**` (the assistant session). This ticket is test-only: no
+  migration, no production-code change, no Cerbos policy edit.
 
 ## webdesk
 ### [0.0.0] — 2026-07-23 · PLANNED

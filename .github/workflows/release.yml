@@ -90,10 +90,14 @@ jobs:
 
       # GitHub refuses attestations on user-owned PRIVATE repos ("Feature not available for
       # user-owned private repositories") — it needs a public repo or an org plan. Non-blocking
-      # until this repo moves to an organization, because the controls deploy.yml actually
-      # ENFORCES are the two above (cosign keyless signature + attested SBOM), and both succeed.
-      # Losing SLSA provenance is a real reduction in supply-chain assurance, not a formality:
-      # re-enable by removing continue-on-error the moment the repo is org-owned.
+      # until then, because the controls deploy.yml actually ENFORCES are the two above (cosign
+      # keyless signature + attested SBOM), and both succeed.
+      #
+      # ⏳ 2026-08-05: the repo is now PUBLIC, so the precondition is met and this step is expected to
+      # SUCCEED. `continue-on-error` is deliberately left in place for ONE release so the outcome can be
+      # observed rather than assumed — removing it on the same commit that first exercises it would turn
+      # a wrong guess into a failed release. Check this step's outcome on the `alpha-01.017.0040a` run:
+      # if it succeeded, delete the `continue-on-error` line so a future provenance failure is loud.
       - name: SLSA build provenance attestation
         uses: actions/attest-build-provenance@v1
         continue-on-error: true
@@ -137,7 +141,11 @@ jobs:
           # silently targets a package name that does not exist.
           package-name: gaiada-${{ matrix.component }}
           package-type: container
-          min-versions-to-keep: 9
+          # 30 = 10 RELEASES × 3 artifacts. Raised from 9 (3 releases) on 2026-08-05: that number was
+          # chosen purely to fit inside the free PRIVATE Packages allowance, and the repo is public now,
+          # so storage is no longer the constraint — rollback range is. 3 releases meant a regression
+          # noticed late had no tag left to roll back to. Still a multiple of 3 for the reason below.
+          min-versions-to-keep: 30
           # GITHUB_TOKEN can delete versions of a package OWNED BY this repo. These packages are
           # user-namespace (`ghcr.io/hansel-gaiada/...`), and if they are not linked to the repository
           # GitHub refuses and this step logs a 403 — which `continue-on-error` turns into a warning
