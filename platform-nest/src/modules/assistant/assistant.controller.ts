@@ -39,7 +39,10 @@ import { authorize } from "../../core/http";
 import { AuthGuard } from "../../auth/guards";
 import { ModuleEnabledGuard } from "../module-enabled.guard";
 import { assembleContext, persistCompactionUpdate } from "./context";
-import { abortForClientDisconnect, relayGeneration, releaseGeneration, reserveGeneration, requestStop, sseLine, usageMetaParts } from "./stream";
+import { abortForClientDisconnect, estimateTokens, relayGeneration, releaseGeneration, reserveGeneration, requestStop, sseLine, usageMetaParts } from "./stream";
+import {
+  ASSISTANT_AGENT_TOOLS, DEFAULT_TOOL_AGENT, persistToolCalls, readTurnMode, runToolTurn, turnModePart, type ToolTurnResult,
+} from "./broker";
 
 // ── ASST-06 — the send->stream engine ────────────────────────────────────────────────────────────
 //
@@ -373,7 +376,7 @@ export class AssistantController {
     @Req() req: FastifyRequest,
     @Param("tenantId") tenantId: string,
     @Param("id") id: string,
-    @Body() body: { content?: string },
+    @Body() body: { content?: string; mode?: string; agent?: string },
   ) {
     const thread = await withTenants([tenantId], (c) => fetchThread(c, id), { modules: ["assistant"] });
     if (!thread) throw new NotFoundException("thread not found");
@@ -384,6 +387,21 @@ export class AssistantController {
     if (content.length > MAX_MESSAGE_CONTENT_LENGTH) {
       throw new BadRequestException(`content exceeds max length (${MAX_MESSAGE_CONTENT_LENGTH})`);
     }
+
+    // ASST-17 — is this a TOOL turn? Recorded on the placeholder row at send time; the stream route
+    // reads it back from the ROW, never from its own query string (see broker.ts's `readTurnMode`
+    // header for why that distinction is load-bearing). `mode` is a per-turn preference the user
+    // expresses for their OWN turn — it is not an authority claim, and it cannot widen anything: the
+    // tools the turn may use are decided by the hub under the user's own Cerbos principal, twice.
+    if (body?.mode !== undefined && body.mode !== "chat" && body.mode !== "tools") {
+      throw new BadRequestException("mode must be 'chat' or 'tools'");
+    }
+    const toolMode = body?.mode === "tools";
+    const agent = typeof body?.agent === "string" && body.agent ? body.agent : DEFAULT_TOOL_AGENT;
+    if (toolMode && !ASSISTANT_AGENT_TOOLS[agent]) {
+      throw new BadRequestException(`agent must be one of ${Object.keys(ASSISTANT_AGENT_TOOLS).join(",")}`);
+    }
+    const placeholderParts = toolMode ? JSON.stringify([turnModePart(agent)]) : "[]";
 
     const assistantMessageId = await withTenants(
       [tenantId],
@@ -419,9 +437,9 @@ export class AssistantController {
         // upstream call even starts, so no later sender can ever land a message between the two.
         const assistantId = newId();
         await c.query(
-          `INSERT INTO assistant_messages (id, tenant_id, thread_id, seq, role, content, origin_site)
-           VALUES ($1, $2, $3, $4, 'assistant', NULL, $5)`,
-          [assistantId, tenantId, id, userSeq + 1, config.originSite],
+          `INSERT INTO assistant_messages (id, tenant_id, thread_id, seq, role, content, parts, origin_site)
+           VALUES ($1, $2, $3, $4, 'assistant', NULL, $5::jsonb, $6)`,
+          [assistantId, tenantId, id, userSeq + 1, placeholderParts, config.originSite],
         );
         return assistantId;
       },
@@ -430,7 +448,10 @@ export class AssistantController {
 
     return {
       messageId: assistantMessageId,
-      streamUrl: `/api/${tenantId}/assistant/threads/${id}/stream?messageId=${assistantMessageId}`,
+      streamUrl:
+        `/api/${tenantId}/assistant/threads/${id}/stream?messageId=${assistantMessageId}` +
+        // Convenience for the client only — the SERVER reads the mode off the placeholder row.
+        (toolMode ? "&mode=tools" : ""),
     };
   }
 
@@ -469,14 +490,14 @@ export class AssistantController {
     const generation = reserveGeneration(id, messageId);
     if (!generation) throw new ConflictException("a stream is already active for this thread");
 
-    let placeholder: { id: string; seq: number } | undefined;
+    let placeholder: { id: string; seq: number; parts: unknown } | undefined;
     let prompt: string;
     try {
       placeholder = await withTenants(
         [tenantId],
         (c) =>
-          c.query<{ id: string; seq: number }>(
-            `SELECT id, seq FROM assistant_messages
+          c.query<{ id: string; seq: number; parts: unknown }>(
+            `SELECT id, seq, parts FROM assistant_messages
                WHERE id = $1 AND thread_id = $2 AND role = 'assistant' AND content IS NULL AND error_kind IS NULL`,
             [messageId, id],
           ).then((r) => r.rows[0]),
@@ -516,6 +537,97 @@ export class AssistantController {
     // Mirrors portal-stream.controller.ts: a client that leaves mid-generation must not leave the
     // upstream gateway call running (and DLP/budget/audit spend accruing) into the void.
     raw.on("close", () => abortForClientDisconnect(id));
+
+    // ── ASST-17 — THE TOOL-TURN BRANCH ───────────────────────────────────────────────────────────
+    // Routed here, and only here, when the PLACEHOLDER ROW says this is a tool turn (never the query
+    // string — see broker.ts's `readTurnMode`). Everything below this block is ASST-06/12/16's plain
+    // chat path, untouched.
+    //
+    // The authority handed to the broker is `req.principal.userId` — the chatting user, the same
+    // principal `authorize(... "stream")` just cleared as this thread's owner. There is no other
+    // authority input, and `broker.oboEnvelopeFor` refuses anything that is not a real user id.
+    const turnMode = readTurnMode(placeholder.parts);
+    if (turnMode) {
+      const authorityUserId = req.principal.userId;
+      if (!authorityUserId) {
+        // Unreachable behind the owner check (an owner is a user), but fail LOUD rather than let a
+        // tool turn proceed with an unnamed authority.
+        releaseGeneration(id);
+        write(sseLine("error", { error: "an authenticated user is required for a tool turn", errorKind: "no_authority" }));
+        if (!raw.destroyed) raw.end();
+        return;
+      }
+      let turn: ToolTurnResult;
+      try {
+        turn = await runToolTurn({
+          user: { userId: authorityUserId, tenantId },
+          prompt,
+          agent: turnMode.agent,
+          signal: generation.controller.signal,
+          emit: {
+            toolCall: (c) => write(sseLine("tool_call", c)),
+            toolResult: (r) => write(sseLine("tool_result", r)),
+            approvalRequired: (a) => write(sseLine("approval_required", a)),
+          },
+        });
+      } finally {
+        // `relayGeneration`'s own `finally` is what releases the registry slot on the chat path; the
+        // broker never touches that registry, so this branch must release it itself or `POST .../stop`
+        // stays wedged for this thread until the process restarts.
+        releaseGeneration(id);
+      }
+
+      // The runner is a QUEUED service with no incremental output (ai-agents design §3.2), so the
+      // answer arrives whole. It is emitted as ONE `token` frame rather than chopped into a fake
+      // cadence — presenting a non-streamed answer as if it had streamed would be the same class of
+      // dishonesty as ASST-12's estimate-labelled-as-a-measurement.
+      if (turn.provider) write(sseLine("meta", { provider: turn.provider, model: "" }));
+      if (turn.text) write(sseLine("token", { text: turn.text }));
+      const toolTokens = estimateTokens(turn.text);
+      write(sseLine("usage", { tokens: toolTokens, latencyMs: 0, source: "estimate" }));
+      if (turn.outcome === "answered") write(sseLine("done", {}));
+      else write(sseLine("error", { error: turn.text, errorKind: turn.errorKind ?? "runner_error" }));
+
+      // Persist the message AND its tool-call ledger in ONE transaction: a visible tool chip whose
+      // row never landed (or vice versa) is a transcript that lies about what ran.
+      const toolParts = JSON.stringify([
+        turnModePart(turnMode.agent),
+        ...usageMetaParts({ usageSource: "estimate" }),
+      ]);
+      await withTenants(
+        [tenantId],
+        async (c) => {
+          await c.query(
+            `UPDATE assistant_messages
+               SET content = $1, tokens = $2, provider = $3, error_kind = $4, parts = $5::jsonb
+               WHERE id = $6`,
+            [
+              turn.text,
+              toolTokens,
+              turn.provider ?? null,
+              turn.outcome === "answered" ? null : (turn.errorKind ?? "runner_error"),
+              toolParts,
+              messageId,
+            ],
+          );
+          await persistToolCalls(c, {
+            tenantId,
+            messageId,
+            // THE Phase-3 gate: every row's authority is the chatting user, never a service id.
+            authorityUserId,
+            calls: turn.toolCalls,
+          });
+          await c.query(
+            `UPDATE assistant_threads SET total_tokens = total_tokens + $1, last_message_at = now(), updated_at = now() WHERE id = $2`,
+            [toolTokens, id],
+          );
+        },
+        { modules: ["assistant"] },
+      );
+
+      if (!raw.destroyed) raw.end();
+      return;
+    }
 
     const result = await relayGeneration(generation, {
       tenantId,

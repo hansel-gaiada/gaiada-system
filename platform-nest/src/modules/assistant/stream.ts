@@ -614,6 +614,21 @@ export function usageMetaParts(result: Pick<RelayResult, "usageSource" | "prompt
  *  (embedded `\n`/`\n\n` become the two/four-character escapes), so this framing is safe for
  *  arbitrary token text (markdown, fenced code, multi-paragraph answers) end to end, the same
  *  property ASST-10 established for the gateway->platform hop. */
-export function sseLine(event: "token" | "meta" | "usage" | "done" | "error", data: unknown): string {
+/** The event names this route's own SSE wire speaks. ASST-17 adds the three tool-broker frames —
+ *  `tool_call`, `tool_result`, `approval_required` (see broker.ts's `BrokerEmit` and
+ *  docs/FRONTEND-BFF-CONTRACT.md §18's ASST-17 addendum). All three are NON-TERMINAL: a turn still
+ *  ends with exactly one `done` or one `error`, so "stream ended without `done`" remains an ERROR
+ *  for a tool turn exactly as it is for a plain chat turn (ASST-10's mandate, unchanged). */
+export type AssistantSseEvent =
+  | "token"
+  | "meta"
+  | "usage"
+  | "done"
+  | "error"
+  | "tool_call"
+  | "tool_result"
+  | "approval_required";
+
+export function sseLine(event: AssistantSseEvent, data: unknown): string {
   return `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
 }

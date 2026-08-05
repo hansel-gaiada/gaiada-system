@@ -1823,3 +1823,118 @@ existing `PATCH /api/:t/assistant/threads/:id` (ASST-05) already accepted `brain
   Hermes session continuity"` block covers the Phase-2 gate, the Hermes-down failover badge, brain
   switching (incl. the no-op-on-identical-value case), and end-to-end against a fake gateway that
   reproduces ASST-15's request/response shape byte-for-byte.
+
+### ASST-17 — tool broker under the CHATTING USER's principal (Phase 3 core, 2026-08-05)
+
+`modules/assistant/broker.ts` (new) + the tool-turn branch in `assistant.controller.ts`'s stream
+route. **Supersedes** the ASST-06 bullet above that says "Tool-call
+(`tool_call`/`tool_result`/`approval_required`) SSE events are Phase 3 — this ticket's relay never
+emits them": they are emitted now, on the tool-turn path only. A plain chat turn's wire is
+byte-identical to before this ticket.
+
+**THE AUTHZ PROPERTY THIS SURFACE RESTS ON — read before touching anything here.** Reading an agent
+*run transcript* elsewhere in this platform is `isElevated`-only *by design*
+(`admin/intelligence.controller.ts`), because a transcript can contain tool output fetched under the
+triggering user's authority. **A chat thread IS a transcript.** The assistant is safe for ordinary,
+non-elevated users only because two things hold *together*: threads are owner-private with no admin
+bypass (ASST-02), **and** every tool executes under the **chatting user's own Cerbos principal** —
+never a service principal, never an ambient/elevated one. Break the second and the first stops
+mattering. Structurally, there is exactly ONE function that can spell an OBO envelope in this
+surface (`broker.ts`'s `oboEnvelopeFor`); it takes the chatting user and nothing else, hard-codes
+`provider: "platform"`, and throws (`ServicePrincipalRefusedError`) on anything that is not a real
+user uuid. Do not add a second envelope spelling.
+
+- ✅ **`POST /api/:t/assistant/threads/:id/messages`** gains two OPTIONAL fields:
+  `mode?: 'chat' | 'tools'` (default `chat`) and `agent?: string` (default `status-reporter`; must
+  be a key of `broker.ts`'s `ASSISTANT_AGENT_TOOLS` — an unknown agent is a **400 at send time**,
+  not a mid-stream surprise). A tool turn records the fact on the PLACEHOLDER ROW, inside the
+  existing `parts` jsonb, as `[{type:'turn_mode',mode:'tools',agent}]` — the same "no schema change
+  needed" move ASST-12 made for `usageSource`. **The returned `streamUrl` gains `&mode=tools` as a
+  CLIENT CONVENIENCE ONLY: the stream route reads the mode off the ROW, never off its own query
+  string** — an `EventSource` URL is client-controlled, so reading `?mode=` there would let a client
+  flip a turn the server never accepted as a tool turn.
+- ✅ **`GET .../stream`** emits three ADDITIVE, **non-terminal** frames on the tool path (a turn
+  still ends with exactly one `done` or one `error`, so stream-end-without-`done` remains an ERROR,
+  unchanged):
+  - `event: tool_call` — `{callId, toolName, args}`. **`args` is ALWAYS the redacted shape**, never
+    raw values (see redaction below).
+  - `event: tool_result` — `{callId, toolName, status: 'succeeded'|'failed'|'denied', summary}`.
+  - `event: approval_required` — `{callId, toolName, approvalId, impact}`. The D14 write-proposal
+    surface (blueprint §7): the broker **never executes** a suspended write; D14's own resume path
+    does, under the requester's authority. Terminal outcome for such a turn is `error` +
+    `errorKind: 'approval_required'`, with the runner's own suspension text as the message content.
+  - `errorKind` additions on the tool path: `tool_denied` (the capability gate refused),
+    `not_configured` (`AGENTS_URL` unset), `runner_busy` (429), `runner_error`, `unknown_agent`,
+    `no_authority`, plus the runner's own `errorKind` passthrough (e.g. `ToolNotAllowedError`).
+  - The answer arrives as **ONE `token` frame**, not a synthesized cadence: the agent-runner is a
+    queued service with no incremental output (ai-agents design §3.2). Faking a token cadence would
+    be the same class of dishonesty as ASST-12's estimate-labelled-as-a-measurement. `meta` carries
+    the run's reported provider with `model: ""`; `usage` is always `source: 'estimate'`.
+- ✅ **Two walls, both under the user's own principal.**
+  **Wall 1** (`broker.ts`, before a goal exists): the broker asks the hub `tools/list` **under the
+  user's own OBO envelope**; the hub answers `visibleToolsFor(principal)`, Cerbos-authoritative. Any
+  tool the turn needs that this user cannot see is REFUSED in-thread — typed `tool_denied`, a
+  `denied` `assistant_tool_calls` row, and **the goal is never POSTed at all**, so nothing runs
+  anywhere under any principal. Fails **closed** in every direction: an unconfigured, unreachable or
+  unparsable hub yields an empty visible-tool set ⇒ refuse. A hub we cannot reach is not evidence
+  that the user is authorized.
+  **Wall 2** (mcp-hub, unchanged): every `tools/call` is re-authorized under the same principal, and
+  platform-nest re-checks Cerbos + RLS behind it. Wall 1 is an early honest refusal; wall 2 is the
+  authority.
+- ✅ **`assistant_tool_calls` persistence** (migration 0079, no new migration): written in the SAME
+  transaction as the assistant message it belongs to — a visible tool chip whose row never landed
+  (or vice versa) is a transcript that lies about what ran. `authority_user_id` is **always the
+  chatting user**, passed as its own required parameter and re-validated inside `persistToolCalls`
+  (`ServicePrincipalRefusedError` on anything that is not a user uuid; the column's own
+  `REFERENCES users(id)` is a second wall).
+  **`args` redaction** (0079's column comment, "REDACTED before persist (app layer)" — this is that
+  layer): `redactToolArgs` preserves the SHAPE (key names at every depth, arrays collapsed to
+  `[redacted:array(n)]`, nesting capped at depth 4) and destroys every VALUE (`[redacted:string]`,
+  `[redacted:number]`, …). An auditor needs to know which tool ran with which argument *names*;
+  nobody needs the values, and the values are exactly what could carry PII/secrets. Honest scope
+  note: on the runner path the broker never even SEES raw arguments (the runner's step transcript
+  records `"<tool> ok"`/`"<tool> failed"` and no args), so those rows carry `{}` — the one place real
+  arguments reach this process is a suspended write's `automation_approvals.tool_args`, and that is
+  where the redaction actually runs. Do NOT "improve" this by teaching the runner to report raw
+  args: the current split means the agents database never holds them either.
+- **Do NOT close the agent/registry impact drift by widening `mcp-hub/src/policy.ts`'s
+  `isAutomation` branch to all principals.** It would push every human/OBO medium+ write into D14
+  suspension and break this broker's ordinary read path. The human write half is §7's proposal model
+  plus D14's approvals surface, which this broker *consumes*, not re-implements.
+- Reading a run transcript **server-side inside the broker** is not the elevated-only read the
+  intelligence controller guards: that rule protects an admin from reading through a *different*
+  user's authority. This run executed under THIS user's envelope and its output is relayed into THIS
+  user's own owner-private thread — the transcript goes exactly where it was already permitted to go.
+  (The same argument ASST-21 will make for handoff runs.)
+- No new Cerbos policy or action: a tool turn runs inside `assistant_thread`'s existing `stream`
+  action (ASST-02), which is already owner-only. That deliberately avoids the "a NEW policy file is
+  not hot-reloaded over the Windows bind mount, and an unlisted kind is a SILENT DENY" trap.
+- Deliberately **NO** `writeActivity()`/`notify()` on any of this (same reasoning as ASST-05/06):
+  the tenant activity feed is member-readable and would leak private thread content.
+- Tests — `modules/assistant/assistant-broker.test.ts` (16 tests, live PG + Cerbos + a recording
+  fake hub and fake agent-runner). The load-bearing ones, and why each is shaped the way it is:
+  - **the Phase-3 gate** — a tool turn's rows are attributable to the chatting user, AND the runner
+    was invoked with `envelope {provider:'platform', externalId:<chatting user>}` / `requestedBy` the
+    same, AND the hub's visibility call carried that user's OBO headers. The `Bearer` on both hops is
+    asserted explicitly as the *transport* credential, so the "token ≠ authority" distinction is
+    recorded in a test rather than only in a comment.
+  - **the refusal, on BOTH halves** — the typed/visible in-thread refusal *and*
+    `runner.receivedGoals === 0`. Asserting only "the user saw an error" would pass in exactly the
+    world this ticket exists to prevent (the call ran under the wrong principal and merely reported a
+    failure). Verified load-bearing by deliberate mutation: patching the broker to still emit the
+    refusal while submitting the goal anyway fails on the zero-requests assertion alone.
+  - **live tenant data, scoped to that user** — the fake runner performs a REAL
+    `GET /api/:t/projects` under the envelope it was handed, and the streamed answer contains a
+    project row inserted by that test run (so it cannot be a fixture); the same endpoint with the
+    same service token but a DIFFERENT verified user's envelope returns **403**, which is what rules
+    out an ambient read.
+  - **owner-private end to end after a tool turn** — a same-company `member` and a `company_admin`
+    are both 403 on thread read, on send, and on opening the stream URL, and the thread is absent
+    from their list.
+  - **a table-wide sweep** — `SELECT DISTINCT authority_user_id … WHERE tenant_id = A` is exactly the
+    set of humans who chatted, and never the `kind='service'` account seeded alongside them.
+- **⬜ Still PENDING after this ticket:** `GET /api/:t/assistant/capabilities` (ASST-18 — reuse
+  `broker.ts`'s `listUserVisibleTools`, which is already the "under the user's own envelope" reader
+  that panel needs), the `/assistant` UI's tool-chip rendering for the three new frames, and
+  per-tool-call `duration_ms`/`args` fidelity, which would need the ai-agents runner to report richer
+  tool steps than `"<tool> ok"` — deliberately NOT done here (see the redaction note above).
