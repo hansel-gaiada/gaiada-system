@@ -1,0 +1,27 @@
+/* ASST-22 — the persistent assistant trigger. Token colours only (no hex/rgb literals —
+   src/styles/tokens.test.ts's guard); `:focus-visible` is inherited from the global ring in
+   globals.css, so nothing component-local is needed for that half of keyboard reachability. */
+.asst-fab {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 90; /* below the drawer's scrim (120) and panel (121) — it must never float ABOVE its own drawer */
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 0.5px solid var(--erp-accent);
+  background: var(--surface-card);
+  color: var(--erp-accent);
+  padding: 10px 16px;
+  font: 700 11px var(--font-body);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  text-decoration: none;
+  box-shadow: var(--elev-overlay);
+  transition: background 0.2s var(--erp-ease), color 0.2s var(--erp-ease);
+}
+.asst-fab:hover { background: var(--tint-active); }
+
+@media (max-width: 560px) {
+  .asst-fab { right: 14px; bottom: 14px; padding: 9px 14px; }
+}

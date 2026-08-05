@@ -5,7 +5,7 @@ import "server-only";
 // load; everything after that (thread switch, rail refresh, mutations) goes through
 // `lib/assistantActions.ts` because it is triggered by client interaction, not a navigation.
 import { platformFetch, PlatformError } from "./platform";
-import type { ThreadDetailResult, ThreadListResult, MemoryListResult, CapabilitiesResult, ResolvedCitation } from "./assistant";
+import type { ThreadDetailResult, ThreadListResult, MemoryListResult, CapabilitiesResult, ResolvedCitation, PinnedPageContext } from "./assistant";
 
 export interface ListThreadsParams {
   q?: string;
@@ -70,4 +70,17 @@ export async function resolveCitation(userId: string, tenantId: string, sourceRe
     if (e instanceof PlatformError && e.status === 404) return null;
     throw e;
   }
+}
+
+// ASST-22 — resolves a `@drawer` page-context ref (`lib/assistantContext.ts`'s `derivePageContextRef`)
+// through the EXACT SAME endpoint `resolveCitation` above already calls. Deliberately no second
+// implementation: a page-context ref and a knowledge-citation ref are the same wire shape
+// (`erp:<kind>:<id>`, erp-source.ts's convention), and citations.ts's "never resolve a ref that
+// would 404" bar applies just as much to a drawer pin as to a chip under a reply — an unresolvable
+// ref (a deleted/renamed row since the page loaded) means the drawer opens with NO pin, not a fake
+// one. `null` is passed straight through by both call sites (the intercepted drawer route treats it
+// exactly like "no `ctx` param at all").
+export async function resolvePageContextRef(userId: string, tenantId: string, ref: string): Promise<PinnedPageContext | null> {
+  const resolved = await resolveCitation(userId, tenantId, ref);
+  return resolved ? { ref, ...resolved } : null;
 }

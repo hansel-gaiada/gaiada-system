@@ -1,7 +1,8 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { AssistantMessage, AssistantThread } from "@/lib/assistant";
+import type { AssistantMessage, AssistantThread, PinnedPageContext } from "@/lib/assistant";
 import { isPendingMessage } from "@/lib/assistant";
+import { pageContextPrefix } from "@/lib/assistantContext";
 import {
   createThreadAction, deleteThreadAction, refreshThreadAction, refreshThreadsAction,
   renameThreadAction, sendMessageAction, setThreadPinnedAction, setThreadStatusAction, stopStreamAction,
@@ -12,6 +13,7 @@ import { Composer } from "./Composer";
 import { MemoryPanel } from "./MemoryPanel";
 import { CapabilitiesPanel } from "./CapabilitiesPanel";
 import { BrainPicker } from "./BrainPicker";
+import { PageContextChip } from "./PageContextChip";
 import { useAssistantStream } from "./useAssistantStream";
 import { Toast } from "@/components/ui";
 import "./assistant.css";
@@ -19,8 +21,14 @@ import "./assistant.css";
 // ASST-07 — the whole `/assistant` page is one client component tree (not a series of navigations):
 // switching threads and streaming a reply are both fundamentally "update state, don't reload",
 // exactly like aivory's `useChat` being the single engine both the page and its floating mount
-// consume (per docs/blueprints/assistant-foundation.md §8 — the `@drawer` mount is future work, but
-// this hook/component shape is what makes it "cheap once the page exists", per that doc).
+// consume (per docs/blueprints/assistant-foundation.md §8).
+//
+// ASST-22 — this component IS the `@drawer` mount now, unmodified: the intercepted route
+// (`app/(app)/@drawer/(.)assistant/page.tsx`) renders this exact same tree inside `AssistantDrawer`
+// chrome, passing `variant="drawer"` and a resolved `pageContext`. No second copy of the reducer,
+// the stream hook, or any of `ThreadRail`/`ThreadView`/`Composer`/`MemoryPanel`/`CapabilitiesPanel`
+// exists anywhere — exactly the "cheap once the page exists" claim `AivoryAssistant.tsx`/
+// `AiraFloatingAssistant.tsx` prove in aivory (both consume the SAME `useChat`).
 //
 // ── ONE DELIBERATE PHASE-1 TRADE-OFF, WORTH STATING EXPLICITLY ──────────────────────────────────────
 // Switching away from a thread that is actively streaming (or closing the tab) aborts THIS browser's
@@ -45,12 +53,27 @@ function setUrlThreadParam(id: string | null): void {
   window.history.replaceState(null, "", url.toString());
 }
 
-export function AssistantWorkspace({ initialThreads, initialActiveThreadId }: {
+export function AssistantWorkspace({ initialThreads, initialActiveThreadId, variant = "page", pageContext = null }: {
   initialThreads: AssistantThread[];
   initialActiveThreadId: string | null;
+  /** "drawer" trims chrome that doesn't fit a narrow slide-over (see `assistant-drawer.css`) and
+   *  renders the "Open in full page" promotion — everything ELSE (rail, streaming, memory,
+   *  capabilities) behaves identically in both variants. */
+  variant?: "page" | "drawer";
+  /** ASST-22 — the entity the CURRENT app page resolved to, already server-verified to still exist
+   *  (`resolvePageContextRef`, called by the drawer route). `null` on a page with no resolvable
+   *  entity, or on the full `/assistant` page (which has no "current page" to pin against). */
+  pageContext?: PinnedPageContext | null;
 }) {
   const [threads, setThreads] = useState<AssistantThread[]>(initialThreads);
-  const [activeThreadId, setActiveThreadId] = useState<string | null>(initialActiveThreadId ?? initialThreads[0]?.id ?? null);
+  // ASST-22 — the full page falls back to the most-recent thread (`initialThreads[0]`, per
+  // `listThreads`' pinned-then-recent ordering) when no `?thread=` was requested — that fallback is
+  // deliberately NOT applied in drawer variant: reusing an unrelated pre-existing thread would
+  // silently defeat "the drawer opens with a thread pinned to THIS page's context" (the mount
+  // effect below creates a fresh one instead whenever the drawer opens with no explicit thread).
+  const [activeThreadId, setActiveThreadId] = useState<string | null>(
+    initialActiveThreadId ?? (variant === "page" ? initialThreads[0]?.id ?? null : null),
+  );
   const [messages, setMessages] = useState<AssistantMessage[]>([]);
   const [loadingThread, setLoadingThread] = useState(false);
   const [sending, setSending] = useState(false);
@@ -128,6 +151,32 @@ export function AssistantWorkspace({ initialThreads, initialActiveThreadId }: {
     setMessages([]);
   }
 
+  // ASST-22 — the drawer hides `ThreadRail` entirely (see assistant.css's `.asst-workspace--drawer`
+  // header note: a multi-thread list doesn't fit a slide-over, "Open in full page" is what that's
+  // for), which also removes the ONLY affordance for starting a first thread. A first-time drawer
+  // open with zero existing threads therefore auto-creates one — the full page never does this
+  // (its rail's own "New chat" button is reachable there), so this is gated on `variant` alone, not
+  // a change to the page's own empty-thread behaviour.
+  //
+  // `autoCreatedRef` is load-bearing, not defensive boilerplate: Next dev runs React 18 Strict
+  // Mode, which deliberately double-invokes every mount effect (run → cleanup → run again) on the
+  // SAME component instance/state to surface exactly this class of bug. `handleNew()` is NOT
+  // idempotent (each call is a real `POST .../threads`) — an unguarded `useEffect(() => {
+  // handleNew() }, [])` created TWO threads on every drawer open, and the SECOND call's
+  // `setActiveThreadId` silently overwrote the first (whichever create request's response arrived
+  // last), so the id captured for "Open in full page" could point at the empty twin instead of the
+  // one the user actually chatted in — caught by this ticket's own Playwright spec, not by
+  // inspection. The ref persists across Strict Mode's extra effect pass (same component instance,
+  // no re-render in between), so it makes the second invocation a no-op.
+  const autoCreatedRef = useRef(false);
+  useEffect(() => {
+    if (variant === "drawer" && !activeThreadId && !autoCreatedRef.current) {
+      autoCreatedRef.current = true;
+      void handleNew();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   async function handleRename(id: string, title: string) {
     setThreads((prev) => prev.map((t) => (t.id === id ? { ...t, title } : t)));
     const r = await renameThreadAction(id, title);
@@ -200,12 +249,18 @@ export function AssistantWorkspace({ initialThreads, initialActiveThreadId }: {
     if (!activeThreadId || !canSend) return;
     setSending(true);
     const lastSeq = messages.length ? messages[messages.length - 1].seq : 0;
+    // ASST-22 — the ONE place the pinned page context actually reaches the assistant: prefixed onto
+    // the FIRST outgoing message of the thread only (mirrors aivory's `AivoryAssistant.tsx`
+    // `contextPrefix`, applied only when `messages.length === 0`). Sent AND displayed identically
+    // (never a hidden addition) — see `lib/assistantContext.ts::pageContextPrefix`'s header for why
+    // this is composition over the existing `content` field rather than a new wire shape.
+    const outgoing = messages.length === 0 && pageContext ? pageContextPrefix(pageContext.label, pageContext.ref) + text : text;
     const optimisticUser: AssistantMessage = {
-      id: `local-user-${Date.now()}`, seq: lastSeq + 1, role: "user", content: text, parts: null,
+      id: `local-user-${Date.now()}`, seq: lastSeq + 1, role: "user", content: outgoing, parts: null,
       provider: null, model: null, tokens: null, latencyMs: null, errorKind: null, createdAt: new Date().toISOString(),
     };
     setMessages((prev) => [...prev, optimisticUser]);
-    const r = await sendMessageAction(activeThreadId, text);
+    const r = await sendMessageAction(activeThreadId, outgoing);
     setSending(false);
     if (!r.ok) {
       setMessages((prev) => prev.filter((m) => m.id !== optimisticUser.id));
@@ -248,7 +303,7 @@ export function AssistantWorkspace({ initialThreads, initialActiveThreadId }: {
   const rightRailOpen = memoryOpen || capabilitiesOpen;
 
   return (
-    <div className={`asst-workspace${rightRailOpen ? " asst-workspace--with-memory" : ""}`}>
+    <div className={`asst-workspace${variant === "drawer" ? " asst-workspace--drawer" : ""}${rightRailOpen ? " asst-workspace--with-memory" : ""}`}>
       <ThreadRail
         threads={threads}
         activeThreadId={activeThreadId}
@@ -262,11 +317,26 @@ export function AssistantWorkspace({ initialThreads, initialActiveThreadId }: {
       />
       <div className="asst-main">
         <div className="asst-main__toolbar">
+          {pageContext && <PageContextChip context={pageContext} />}
           <BrainPicker
             thread={activeThread}
             disabled={stream.state.status === "streaming"}
             onChanged={patchActiveThread}
           />
+          {variant === "drawer" && activeThreadId && (
+            // ASST-22 — a plain `<a>`, deliberately NOT `next/link`: this route's own segment
+            // (`/assistant`) is what the intercepted drawer route matches, so a client-side
+            // navigation to it — including via `next/link` or `router.push` — stays intercepted and
+            // the drawer never promotes. A bare anchor forces a real browser navigation, which is
+            // the documented way to escape an intercepting route, and lands on the untouched
+            // `app/(app)/assistant/page.tsx`, which reads `?thread=` and reselects this EXACT
+            // thread — same id, and its full history loads straight from the backend (never from
+            // anything this component holds in memory), so "history intact" holds even though this
+            // component itself unmounts on the hard navigation.
+            <a className="asst-promote-link" href={`/assistant?thread=${encodeURIComponent(activeThreadId)}`}>
+              Open in full page ↗
+            </a>
+          )}
           <button
             type="button"
             className="asst-cap-toggle"

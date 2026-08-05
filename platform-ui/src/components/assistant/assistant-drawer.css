@@ -1,0 +1,60 @@
+/* ASST-22 — `@drawer` mount chrome. Mirrors `components/pm/task-detail.css`'s `.pm-drawer*` rules
+   (same slide-over pattern, same tokens) — narrower, since a chat panel doesn't need the task
+   detail's two-column width. Token colours only (no hex/rgb literals — src/styles/tokens.test.ts's
+   guard); the keyframe animation below is already neutralised for a `prefers-reduced-motion:
+   reduce` user by the global kill-switch in globals.css (see assistant.css's own header note —
+   identical mechanism, not repeated here). */
+
+.asst-drawer__scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  background: var(--scrim);
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  animation: erp-fade 0.18s var(--erp-ease);
+}
+.asst-drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 121;
+  width: min(480px, 94vw);
+  display: flex;
+  flex-direction: column;
+  background: var(--surface-page);
+  border-left: 0.5px solid var(--erp-hairline);
+  box-shadow: var(--elev-overlay);
+  animation: asst-drawer-in 0.22s var(--erp-ease);
+}
+@keyframes asst-drawer-in { from { transform: translateX(24px); opacity: 0; } to { transform: none; opacity: 1; } }
+.asst-drawer__bar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 18px;
+  border-bottom: 0.5px solid var(--erp-hairline);
+  background: var(--surface-chrome);
+}
+.asst-drawer__crumb { font: 700 11px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-subtle); }
+.asst-drawer__close {
+  border: 0.5px solid var(--erp-hairline);
+  background: transparent;
+  color: var(--erp-ink-60);
+  font: 400 13px var(--font-body);
+  padding: 4px 9px;
+  cursor: pointer;
+  transition: color 0.2s var(--erp-ease);
+}
+.asst-drawer__close:hover, .asst-drawer__close:focus-visible { color: var(--text-primary); }
+.asst-drawer__body { flex: 1 1 auto; min-height: 0; padding: 0; display: flex; }
+.asst-drawer__body > * { flex: 1 1 auto; min-width: 0; }
+.asst-drawer__empty { padding: 24px 18px; font: 400 14px/1.6 var(--font-body); color: var(--ink-muted); }
+
+@media (max-width: 560px) {
+  .asst-drawer { width: 100vw; }
+}

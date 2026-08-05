@@ -536,3 +536,17 @@ export interface ResolvedCitation {
   label: string;
   href: string;
 }
+
+// ============================================================== ASST-22: `@drawer` page-context ===
+// The resolved form of `lib/assistantContext.ts`'s `DerivedPageContext` — identical shape to
+// `ResolvedCitation` plus the original `ref` (the chip needs it both to re-resolve on click, same
+// discipline as `CitationChips`, and `AssistantWorkspace` needs it to build the first-message
+// preamble — see `pageContextPrefix`). Kept as its own named type rather than reusing
+// `ResolvedCitation & {ref}` inline at every call site so a rename of either shape is a compiler
+// error, not a silent drift.
+export interface PinnedPageContext {
+  ref: string;
+  kind: string;
+  label: string;
+  href: string;
+}

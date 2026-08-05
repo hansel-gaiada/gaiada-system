@@ -16,7 +16,36 @@
    memory drawer exists so far). A third grid column, added only while it's open. */
 .asst-workspace--with-memory { grid-template-columns: 280px 1fr 300px; }
 
-.asst-main__toolbar { display: flex; justify-content: flex-end; align-items: center; gap: 10px; padding: 8px 14px 0; }
+.asst-main__toolbar { display: flex; justify-content: flex-end; align-items: center; gap: 10px; padding: 8px 14px 0; flex-wrap: wrap; }
+/* ASST-22 — the page-context pin + the drawer's promotion link share the toolbar row with the
+   brain picker / capabilities / memory toggles; `flex-wrap` above keeps a narrow drawer from
+   clipping any of them rather than overflowing. */
+.asst-context-chip {
+  border: 0.5px solid var(--erp-accent); background: transparent; cursor: pointer;
+  padding: 4px 10px; font: 700 10px var(--font-body); letter-spacing: 0.04em; color: var(--erp-accent);
+  margin-right: auto; transition: background 0.2s var(--erp-ease), color 0.2s var(--erp-ease), border-color 0.2s var(--erp-ease);
+}
+.asst-context-chip:hover, .asst-context-chip:focus-visible { background: var(--tint-active); }
+.asst-context-chip--unavailable { cursor: default; border-color: var(--erp-hairline); color: var(--ink-faint); }
+.asst-context-chip--unavailable:hover { background: transparent; }
+.asst-promote-link {
+  font: 700 10px var(--font-body); letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-subtle);
+  padding: 6px 4px; text-decoration: none; transition: color 0.2s var(--erp-ease);
+}
+.asst-promote-link:hover, .asst-promote-link:focus-visible { color: var(--erp-accent); }
+
+/* ASST-22 — `@drawer` mount: same component tree as the full page (composition, not a second
+   engine — see AssistantWorkspace's header), just a single-thread-focused layout that fits a
+   narrow slide-over: no viewport-height assumption (the drawer chrome owns the scroll box, not
+   this component) and no thread rail (a multi-thread list is what "Open in full page" is for —
+   aivory's own floating mount has no rail either, for the same reason). */
+.asst-workspace--drawer { grid-template-columns: 1fr; height: 100%; min-height: 0; border: 0; }
+.asst-workspace--drawer .asst-rail { display: none; }
+.asst-workspace--drawer.asst-workspace--with-memory { grid-template-columns: 1fr 220px; }
+@media (max-width: 560px) {
+  .asst-workspace--drawer.asst-workspace--with-memory { grid-template-columns: 1fr; }
+  .asst-workspace--drawer .asst-mem, .asst-workspace--drawer .asst-cap { display: none; }
+}
 /* ASST-16 — the per-thread brain picker, same toolbar row as the memory toggle. */
 .asst-brain-picker { display: flex; align-items: center; gap: 6px; }
 .asst-brain-picker__label {
@@ -125,6 +154,7 @@
   padding: 10px 12px; font: 400 14px/1.5 var(--font-body); color: var(--text-primary); outline: none;
 }
 .asst-composer__input:focus-visible { border-color: var(--erp-accent); }
+.asst-composer__input:disabled { opacity: 0.6; cursor: not-allowed; }
 .asst-composer__actions { display: flex; align-items: center; }
 
 .asst-sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }

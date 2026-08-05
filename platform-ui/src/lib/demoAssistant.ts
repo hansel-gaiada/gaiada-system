@@ -422,9 +422,19 @@ export function assistantDemo(method: string, p: string, params: URLSearchParams
   const citationM = p.match(/^\/api\/([^/]+)\/assistant\/citations\/([^/]+)$/);
   if (citationM && m === "GET") {
     const ref = decodeURIComponent(citationM[2]);
+    // ASST-22 — extended with real `demoFixtures.ts`/`demoMeetings.ts` ids (not the illustrative
+    // `demo-project-1`/`demo-client-1` placeholders below, kept for back-compat) so the `@drawer`
+    // mount's page-context pin — built from the ACTUAL demo page you're standing on
+    // (`lib/assistantContext.ts::derivePageContextRef`) — resolves to something real under
+    // DEMO_MODE, not a 404, on `/projects/p-web-1`, `/tasks/t-4`, `/clients/cl-1`, and
+    // `/people/u-pm`. Tenant id `co-agency` matches every seeded demo identity's active company.
     const known: Record<string, { kind: string; label: string; href: string }> = {
       "erp:project:demo-project-1": { kind: "project", label: "Demo Project", href: "/projects/demo-project-1" },
       "erp:client:demo-client-1": { kind: "client", label: "Demo Client", href: "/clients/demo-client-1" },
+      "erp:project:p-web-1": { kind: "project", label: "Client site redesign", href: "/projects/p-web-1" },
+      "erp:task:t-4": { kind: "task", label: "Wire homepage hero", href: "/tasks/t-4" },
+      "erp:client:cl-1": { kind: "client", label: "Northwind Traders", href: "/clients/cl-1" },
+      "erp:person:co-agency:u-pm": { kind: "person", label: "Dewi Santoso", href: "/people/u-pm" },
     };
     const resolved = known[ref];
     if (!resolved) return { status: 404, json: { error: "this citation has no resolvable destination" } };

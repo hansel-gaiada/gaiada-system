@@ -6,6 +6,7 @@ import { canViewAllCompanies, isUnrestricted } from "@/lib/rbac";
 import { Sidebar } from "./Sidebar";
 import { TopBar } from "./TopBar";
 import { SpecialAccessBanner } from "./SpecialAccessBanner";
+import { AssistantFab } from "./AssistantFab";
 import "./shell.css";
 
 export function Shell({ me, tenantId, moduleLabel, prefs = DEFAULT_PREFS, departments = [], children }: {
@@ -21,6 +22,8 @@ export function Shell({ me, tenantId, moduleLabel, prefs = DEFAULT_PREFS, depart
         {special && <SpecialAccessBanner unrestricted={isUnrestricted(me)} />}
         <div className="erp-main__inner">{children}</div>
       </main>
+      {/* ASST-22 — reachable from every app page `Shell` renders, not just `/assistant` itself. */}
+      <AssistantFab tenantId={tenantId} />
     </div>
   );
 }

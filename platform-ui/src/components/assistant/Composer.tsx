@@ -49,7 +49,13 @@ export function Composer({ canSend, streaming, onSend, onStop }: {
         value={value}
         onChange={(e) => setValue(e.target.value)}
         onKeyDown={onKeyDown}
-        placeholder="Message the assistant… (Enter to send, Shift+Enter for a new line)"
+        // ASST-22 — disabled (not just the Send button) while `canSend` is false for a reason other
+        // than active streaming: a typable-but-silently-inert box is exactly the gap that let the
+        // drawer's own thread-auto-create race (creating the page-context thread is a real network
+        // round trip) swallow a fast Enter press with no feedback at all. Streaming keeps the box
+        // enabled on purpose — Stop is still the composer's own action while a reply is in flight.
+        disabled={!canSend && !streaming}
+        placeholder={!canSend && !streaming ? "Preparing the assistant…" : "Message the assistant… (Enter to send, Shift+Enter for a new line)"}
         rows={3}
       />
       <div className="asst-composer__actions">
