@@ -85,7 +85,9 @@ func (f *fakeStreamingProvider) Complete(_ context.Context, _ string) (string, e
 	return "", errors.New("fakeStreamingProvider: Complete should not be called — it implements StreamingProvider")
 }
 func (f *fakeStreamingProvider) Media(_ context.Context, _, _ string) (string, error) { return "", nil }
-func (f *fakeStreamingProvider) Embed(_ context.Context, _ string) ([]float64, error) { return nil, nil }
+func (f *fakeStreamingProvider) Embed(_ context.Context, _ string) ([]float64, error) {
+	return nil, nil
+}
 func (f *fakeStreamingProvider) CompleteStream(_ context.Context, _ string, onToken func(string)) error {
 	f.calls++
 	if f.failBefore != nil {
