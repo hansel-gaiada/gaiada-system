@@ -29,6 +29,7 @@
 // Keycloak is OPTIONAL and fail-soft: without KEYCLOAK_ADMIN_CLIENT_SECRET the rows are still seeded
 // and each contact is left `invited` with a printed invite path, which is exactly the real flow. It
 // does not pretend to have provisioned an account it could not create.
+import { randomBytes } from "node:crypto";
 import { newId, withGlobal, withTenants, closePool } from "../db";
 import { config } from "../config";
 import { createUser as kcCreateUser, findUserByEmail as kcFindUser, setPassword as kcSetPassword, keycloakAdminConfigured } from "../core/keycloak-admin";
@@ -37,9 +38,20 @@ import { createInvite } from "../core/client-invites";
 const site = () => config.originSite;
 
 // One shared password for every seeded contact, so trying five clients does not mean tracking five
-// secrets. Overridable, and PRINTED at the end rather than assumed — a seed that quietly sets a
-// credential you cannot discover is useless for the thing this seed is for.
-const PASSWORD = process.env.SEED_PORTAL_PASSWORD || "PortalDemo!2026";
+// secrets. PRINTED at the end rather than assumed — a seed that quietly sets a credential you cannot
+// discover is useless for the thing this seed is for.
+//
+// ⚠ NO HARD-CODED FALLBACK, and this cost a real incident. The default used to be a literal
+// (`"PortalDemo!2026"`). That was defensible while the repository was private; on 2026-08-05 the repo
+// was made PUBLIC and the literal became world-readable — while those seven accounts were live on
+// erp.gaiada.online with exactly that password. Anyone reading the seed could sign in to the client
+// portal of a running system. The passwords were rotated and the fallback removed.
+//
+// A random password per run is the shape that cannot regress: there is nothing to leak, it is printed
+// once, and `SEED_PORTAL_PASSWORD` still lets a caller pin it deliberately (e.g. a CI fixture) rather
+// than by accident.
+const PASSWORD = process.env.SEED_PORTAL_PASSWORD
+  || `Portal-${randomBytes(9).toString("base64url")}`;
 
 interface Spec {
   /** Company that SERVES this client. Must already exist (seed:agency creates them). */
