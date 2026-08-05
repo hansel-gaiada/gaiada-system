@@ -489,7 +489,7 @@ enumerates every human-approval ask in the ERP, from three sources:
 |---|---|---|---|
 | `automation` / `agent` | `automation_approvals` | hub gate suspension | tenant `company_admin` + `group_executive` members |
 | `hr` | `automation_approvals` (origin='hr') | leave request flow | the above **+** the providing unit's `hr_manager` (module_manager scoped to module='hr', WSD-2/WSD-4) |
-| `agency` | `agency_approvals` | brief/asset review submission | mirror of the Cerbos `agency_approval` DECIDE set (verify exact roles at build) |
+| `agency` | `agency_approvals` | brief/asset review submission | **settled (ex-Q-V8, v4):** `company_admin` + `module_approver` → concretely **`agency_approver`** — the policy's `approve` action set (it has no `decide` action); NOT `group_executive` (§7.3) |
 | `pipeline` | `pipeline_gates` | gate opens (PRD sign, scope sign-off, feedback) | **clients**: `resolveClientRecipients()` (`client-notify.ts`) — active contacts, project-scoped, `capability='signer'` only for signature gates; **staff-decided gates**: run owner (fallback creator) |
 
 The mail mechanism is the v1 tap, with the allowlist collapsed to exactly **two** notification
@@ -524,7 +524,12 @@ outbox event. `agency.controller.ts`'s two `agency_approvals` INSERT paths likew
 nobody (only the decide path notifies — `approval_decided` back to the requester). The approvals
 inbox is pull-only on the request side. Only pipeline gates notify on open (client-notify.ts).
 **MAIL-06 closes this for the in-app bell AND gives email its substrate** — a real existing UX
-gap, not just mail plumbing.
+gap, not just mail plumbing. **v4 correction: this enumeration was incomplete** — a third live
+`automation_approvals` insert site (the Google-Ads change-proposal suspend path,
+`modules/search/search.controller.ts`) was equally broken and was NOT named here; MAIL-06 found
+and fixed it with the same shared resolver, so the wired set is FOUR create sites (automation
+controller, hr `fileLeave()`, agency's two paths, search's suspend path — the latter riding the
+automation-controller origin). See the header F1 correction.
 
 **Does a decider concept exist?** Not as data. There is **no per-approval decider column** and no
 assignment step anywhere in the schema. "Who may decide" exists only as Cerbos policy:
@@ -534,7 +539,12 @@ assignment step anywhere in the schema. "Who may decide" exists only as Cerbos p
   (the providing unit's hr_manager).
 - `resource_pipeline_gate.yaml`: staff `decide`; client-side gates decide via
   `resource_portal.yaml` (`decide`/`sign`) with `portal-scope.ts` row predicates.
-- `resource_agency_approval.yaml`: its own decide set (mirror at build).
+- `resource_agency_approval.yaml`: **settled at build (ex-Q-V8, v4)** — the policy has **no
+  `decide` action**; its decide-equivalent is **`approve`**, granted to derived roles
+  `company_admin` + `module_approver`. `module_approver` string-composes `"<module>_approver"`
+  and the controller always passes `module: "agency"`, so the concrete role is
+  **`agency_approver`**. NOT `group_executive` — that role decides `automation_approval` only.
+  Mirrored (routing only, Cerbos stays authoritative) in `src/core/approval-deciders.ts` (MAIL-06).
 
 **Resolution rule (v1): mail the mirrored Cerbos DECIDE set, resolved via the role/membership
 tables at create time** — the same resolution direction the code already uses elsewhere
@@ -568,6 +578,13 @@ Build sequence (binding on the ticket plan):
    ("only Temporal/minted-creds remain"); the standing platform-wide gap record that with the
    DEF-2 race this makes **Temporal a real decision, not speculative** (full-fidelity register +
    `2026-08-03-agentic-native-erp-plan.md`, where the D14 resume path is named the top blocker).
+   **v4 update:** the resume path is now an executing program of its own —
+   `docs/superpowers/plans/2026-08-05-d14-resume-path-plan.md`, whose first migration
+   `0078_automation_approval_execution.sql` (splitting execution state from decision state on
+   `automation_approvals`) has landed. The step-3 wording flip stays gated on that program
+   **completing** (an execution-status column existing is not a resume path), stays a
+   one-constant change, and requires an architect design-review at flip time because the flip
+   converts a safety wording into an executable promise.
 3. **Actionable approval mail for automation/agent** — flip the wording class only once approving
    actually executes. A one-constant change by design (the wording class is data on the origin).
 
@@ -578,6 +595,19 @@ Build sequence (binding on the ticket plan):
   (`/portal/approvals/:runId`). **No action buttons. No approve-by-reply** (sender addresses are
   forgeable ⇒ approve-by-reply is approval forgery by construction; inbound replies thread as
   *comments*, never as decisions — §7.6).
+- **v4 — per-item approval landing (owner-approved; ticket APPR-01, cross-program, in flight):**
+  as built, emailed approval links landed on the bare `/approvals` LIST — no per-item route
+  existed (`entityHref()` in `platform-ui/src/lib/mail.ts` mapped `automation_approval` and
+  `agency_approval` both to `/approvals` with no id, while `pipeline_run` correctly got
+  `/pipeline/:id`). The owner approved adding **`/approvals/[id]`** as the per-item landing page.
+  Binding on APPR-01 from this design's side: the fix must land on **both** halves — the UI route
+  AND the backend-emitted `payload.href` on `approval.requested` notifications (MAIL-06's four
+  call sites currently emit `href: "/approvals"`) — because MAIL-05's tap only absolutises
+  whatever route it is handed (`MAIL_LINK_BASE_URL` + href); it never re-derives one. A UI route
+  with no href change leaves every already-queued and future mail pointing at the list. APPR-01
+  also provides the mount point for MAIL-15's deferred approval-detail thread panel (§8A). The
+  M11 constraints apply to the new route unchanged: plain URL, auth at the door, no token, no
+  action params.
 - The link is a **plain URL** — it carries no token, no session, no capability. Authentication
   happens at the door: valid session/JWT → straight to the entity; expired → the normal SSO
   reauth first, then land on the target (the platform-ui middleware's validated `?return=`
@@ -590,8 +620,9 @@ Build sequence (binding on the ticket plan):
 
 **Address + routing:** every threads-eligible outbound mail sets
 `Reply-To: reply+<token>@notify.gaiada.com` (`reply_token`, 128-bit CSPRNG base64url, unique per
-outbound mail — VERP-style). MX on `notify.gaiada.com` → **Brevo inbound parsing** → signed
-webhook `POST /api/mail/inbound/brevo`. Fallback if Brevo inbound disappoints at verification
+outbound mail — VERP-style). MX on `notify.gaiada.com` → **Brevo inbound parsing** →
+token-authenticated webhook `POST /api/mail/inbound/brevo` (v4: Brevo offers **no** webhook
+signing — see the auth bullet below). Fallback if Brevo inbound disappoints at verification
 (§15 R3, ex-Q-V2): a **single provider-hosted mailbox polled over IMAP** (chained-timeout sweeper, same
 A2 pattern) — still no mailbox hosting and no IMAP **server** of ours; that decision survives.
 
@@ -601,8 +632,21 @@ metadata only** (forgeable). No token / unknown token → count + log + drop wit
 
 **Untrusted-input handling (all binding):**
 
-- Authenticate the webhook: provider signature where offered, plus `MAIL_INBOUND_TOKEN` in the
-  URL/header; reject otherwise. Idempotent by `(provider, provider_message_id)` UNIQUE.
+- Authenticate the webhook — **v4, grounded in Brevo's actual capabilities:** Brevo does **NOT
+  sign inbound webhooks**. Its documented mechanisms are (1) basic-auth credentials embedded in
+  the webhook URL, (2) a token-bearing request header defined on the webhook object, (3)
+  arbitrary custom headers — no payload signature exists (verified against Brevo's docs
+  2026-08-04, recorded in `src/mail/inbound/auth.ts`). "Provider signature where offered"
+  therefore resolves to **none offered**: the **`MAIL_INBOUND_TOKEN` header check**
+  (`x-gaiada-mail-inbound-token`, constant-time, fail-closed when unset) **IS the
+  provider-documented scheme** and satisfies this requirement by itself. The HMAC-SHA256 verifier
+  that was also built — `MAIL_INBOUND_SIGNING_KEY` over the RAW request bytes,
+  `t=<unix>,v1=<hex>` header, timestamp-bound via `MAIL_INBOUND_SIGNATURE_TOLERANCE_S` (default
+  300 s), REQUIRED once the key is configured — is **OURS: defence-in-depth**, exercisable only
+  by callers we control (the fixture corpus, the replay script, any future fronting proxy we
+  sign from). It must never be documented or configured as a Brevo scheme. A reader finding no
+  provider-signature verification in the code is looking at **compliance with this paragraph,
+  not a gap**. Idempotent by `(provider, provider_message_id)` UNIQUE.
 - Size caps at intake (`MAIL_INBOUND_MAX_BYTES`, default 5 MB total; per-attachment + count caps).
 - **Never store or render raw provider HTML.** Server-side allowlist sanitizer at intake; store
   `body_text` + `body_html_sanitized` only; render sanitized content in a constrained container.
@@ -611,6 +655,25 @@ metadata only** (forgeable). No token / unknown token → count + log + drop wit
   endpoint; `skipped` when scanning is off — then downloads are admin-only). Note honestly:
   ClamAV exists in this estate **as the webdesk-blueprint pattern only** — MAIL-14 is its first
   actual instantiation (opt-in compose service, like the observability stack).
+- **v4 — attachment payload reality:** Brevo inbound delivers attachment **`DownloadToken`s, not
+  bytes** — a token to be exchanged at Brevo's API (account key) for the content. Dev fixtures
+  inline bytes so the quarantine→scan→download-gate path runs end-to-end in dev; the
+  **token→bytes fetch is real staging work** behind the existing `NormalizedAttachment` seam and
+  is carried as an explicit §15 R3 step. The fail-closed rule is stage-independent: an
+  unfetched/unfetchable attachment stays `scanStatus='pending'` — quarantined, download refused
+  at every privilege — and renders as existing-but-unservable; it is never promoted to
+  `skipped`/admin-downloadable when there is nothing to download.
+- **v4 — cap semantics RATIFIED as implemented** (`src/mail/inbound/intake.ts`; this was an
+  implementer interpretation of v3's "per-attachment + count caps", now design text): an
+  over-cap or over-count **individual** attachment is **dropped while the message still
+  threads** — the human's reply text is the C1 feature, and refusing a delivery over one
+  oversized attachment would discard it (our 4xx never reaches the human sender anyway; the
+  provider does not relay it). Only the **total request cap** (`MAIL_INBOUND_MAX_BYTES`, applied
+  pre-parse) refuses a whole delivery — that one is a resource limit on the request, not a
+  content decision. Binding rider on the ratification: the drop must stay **visible** — the
+  stored attachment metadata keeps `rejected: true` + `rejectReason`
+  (`too_large`/`too_many`) and the thread UI renders the omission; a silent drop on a decision
+  surface would misrepresent what the sender sent.
 - UI renders inbound messages with a provenance banner: *"Email reply — sender unverified"*, so a
   forged `From:` cannot lend authority to thread content sitting on a decision surface.
 
