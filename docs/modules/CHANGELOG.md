@@ -665,6 +665,7 @@ anywhere real.
 
 | Date | Event |
 |---|---|
+| 2026-08-05 | `mail` **MAIL-19 landed (senior-be) — quoted-history intake cap reshaped to head+tail (design A15), closing a real content-loss bug: a bottom-posted reply (below a long quoted thread) could be truncated away entirely by the old head-only 128 KiB cap, with no recovery possible since raw MIME is never stored.** `sanitizeInboundText` (`platform-nest/src/mail/inbound/html-sanitize.ts`) now keeps ~¾ head / ¼ tail of the same budget with an explicit `[truncated at intake: N characters omitted here]` marker spliced in at the boundary; `N` and the split are computed purely from length, never content, so a sender-forged decoy marker is stored back as inert ordinary text and can never mislabel or relocate the genuine one. `body_html_sanitized` unchanged (still head-only — splicing HTML mid-document would break the rebuilt-balanced-tags guarantee); no quote-boundary detection added (that's MAIL-20 render work); **no schema change, no migration** (the ledger is contended — `0078_automation_approval_execution.sql` landed from a concurrent session the same day). Three new corpus cases (`16-bottom-posted-oversize-quote` — THE regression, reply asserted present in `mail_messages.body_text` read back from Postgres; `17-top-posted-oversize-quote` — same profile, reply first, pins the reshape doesn't regress the case the old cap already handled; `18-elision-marker-spoof` — two forged decoy markers survive verbatim while exactly one genuine marker carries the correct count) plus five new unit tests; all 15 pre-existing corpus cases (incl. `07-oversized-body`'s unrelated whole-request 413 cap and `12-quoted-reply-bloat`, whose `_meta.expect` text was updated to note it sits under the internal cap) verified unchanged. `npx vitest run src/mail`: 15 files / 142 tests green (135 pre-existing + 7 new); `tsc --noEmit` clean under `src/mail` (three pre-existing errors in `src/core/d14-06-approval-decider-policy.test.ts` are concurrent APPR-01/D14 work, untouched by this ticket); A12 grep gate clean on every touched file incl. fixtures; test DBs run under a dedicated `TEST_DB_PREFIX`, all dropped after. Capped **IN PROGRESS** — no live-box replay leg in this ticket (deferred to batch B2, unaffected by the change since `fixtureNames()` picks the new cases up automatically). |
 | 2026-08-04 | `webdev` **WD-23A-1 LANDED — the Google OAuth state machine is now CORE, unblocking the mail subsystem's Gmail ticket. `platform-nest 0.12.2 -> 0.13.0`, `webdev 0.10.0 -> 0.11.0`, `search-marketing 0.5.0 -> 0.5.1`.** Migration **0076** creates `google_oauth_states` and drops the module-local `search_google_oauth_states`; the state machine, token client, hosts helper and the OAuth-generic errors moved to `src/core/google-oauth/`, with the old paths as re-export shims so **no search call site and no probe assertion changed**. Renumbered from the staged `0070` after re-verifying the head — five migrations landed while it sat parked outside `migrations/` (parked deliberately: the runner executes the whole folder and this file DROPs the old table, so landing it early would have taken search's OAuth flow down until the code caught up). It also **unblocks MAIL-16**, whose ticket says "if still unlanded, STOP and escalate; never build a second state machine". 🔴 **THE DESIGN CORRECTION, and it failed loudly rather than silently:** the re-spec said the per-row `module` column replaces 0060's hard-coded `app_module_allowed('search')` and the `{modules:['search']}` option could therefore be dropped. Dropping it broke **every INSERT** with `new row violates row-level security policy` — because `app_module_allowed` reads the **request-declared `app.scopes` GUC**, not a company's enabled modules. The gate is a two-sided handshake: the row's `module` and the request's declared scope must MATCH. So a surface stamping `module:'search'` keeps declaring that scope on every read and write (which is what makes 0060's wall byte-equivalent), while a core surface stamps NULL and declares nothing. `consumeAuthorizationState` therefore takes `module` as an EXPECTATION — the row cannot be read at all without declaring the scope first, which is the point — and a wrong/absent module yields the same coarse `unknown_or_expired` as a forged state, so a caller cannot tell "exists but not mine" from "does not exist". One `moduleScope()` helper states the rule at all four call sites. Worth naming the asymmetry: getting this wrong the SAFE-LOOKING way — dropping `module` from the row — is silent and would have deleted search's third wall in a refactor; the loud failure is the one that happened. **A second consequence the types caught:** widening the provider union with `google_drive` made `isGoogleProvider` admit it, and search's two request-boundary validators used that guard while their error messages promised only search's three providers — they would have silently accepted Drive. New `isSearchGoogleProvider` guards both, search's provider-keyed records are keyed by `SearchGoogleProvider`, and the search adapter now **proves** a consumed row is a search row instead of assuming it. **A third: an egress-inventory row became a lie.** SM-39 listed `google/token-endpoint-client.ts` as approved outbound egress; after the move that path is a 4-line shim with no network call, so three of its assertions failed correctly. Deleting the row would have retired a security control during a refactor, so the guarantee MOVED with the code — new `core/google-oauth/egress.test.ts` pins the same two properties for core. That new test caught a defect in ITSELF on first run: its detector matched only `fetch(` while the token client does `const doFetch = fetchImpl ?? fetch`, so it reported ZERO egress in the one file that has it — passing its own allowlist while proving nothing. **Evidence:** Google suite **120 passed / 4 skipped both before and after** (identical to the recorded baseline); the **Keycloak oracle EXECUTED — 4 passed** (real auth-code+PKCE, refresh WITH rotation, RFC-7009 revocation), closing the AC that had been silently skipping; the new module-gate-both-ways suite **5 passed**, with a negative control (stamping `module: null` reds 3 of the 5, so the gate is load-bearing not decorative); `tsc` + both lint gates clean. The two probe files were edited ONLY as the amended AC permits — 8 + 6 table-identifier references, 14 lines, no assertion or expected value touched; neither names the state table's `client_id`/`property_id`, so no column edit was needed. **Still open (WD-23A-2, needs a real Google client / OQ-9):** the core callback controller at `api/integrations/google/callback` and webdev's Drive surface registration. Search's own callback is untouched and still serves its existing path. `VERSION` deliberately NOT bumped — other sessions are cutting tags rapidly and this rides the next one. |
 | 2026-08-04 | `mail` **design REVISED to v2 the same day it was authored — the owner materially narrowed AND widened the scope; still `0.0.0` PLANNED, no code.** **CUT:** staff notification email is dead (notifications stay realtime in-app); the digest engine (old MAIL-07) and the per-user channel-prefs surface + `mail_notification_prefs` table (old MAIL-08) are **cancelled** — a required approval must reach its decider, so approval mail is not opt-out-able. The owner's 12:00/18:00 WITA cadence is the **WhatsApp/Telegram group rollup** (the bot's existing digest feature), not email — noted out of scope. **Triggers now attach to EXISTING classification, no new classifier:** mail fires only on (a) automation/AI medium+/unclassified writes — exactly the set the WS4 impact gate already suspends into `automation_approvals` — and (b) anything requiring human approval, routed to the resolved decider set (no per-approval decider column exists anywhere — confirmed; resolution mirrors the Cerbos DECIDE sets per origin: `company_admin`/`group_executive`, hr adds the providing unit's `hr_manager`, pipeline client gates use the existing `client-notify.ts` signer resolution — clients ride the SAME path, no separate stream). **D14-aware sequencing:** warning wording ships first for automation/agent origins (approving a suspended write executes NOTHING today — the mail must never imply execution); actionable wording for those origins is gated on the D14 resume path (Temporal decision, out of this program). **Link security locked:** approval mail carries a plain deep link behind SSO — no action buttons, no approve-by-reply, **never magic links** (magic links stay low-risk convenience login only, now an explicit non-goal). **WIDENED:** the module becomes **bidirectional** — inbound system-mail threads (`reply+<token>@notify.gaiada.com` VERP → new `mail_messages` global table, untrusted intake: signature+token auth, size caps, server-side sanitizer, ClamAV quarantine — MAIL-14 is ClamAV's first actual instantiation in the estate) + an ERP mail surface (`/admin/mail` sent-log UI + entity thread panels) + a **staging-ready staff Gmail read surface** (internal-type OAuth app ⇒ no CASA, employees only; per-user OAuth, NO domain-wide delegation; `gmail.readonly`; render-on-demand/cache-nothing so staging never mirrors real mail; tokens in the 0033 vault; state machine = WD-23A-1's staged core `google_oauth_states` — hard dependency, do not duplicate). **Domains locked (supersedes v1 Q1):** `auth.gaiada.com` + `notify.gaiada.com` (Workspace root) + `forms.gaiada.online` (Zone B only, off the employee-mail domain); **Google Workspace SMTP relay becomes Zone A primary** (free with seats, ~10k/day vs a handful/day of actual volume — the free-tier question is moot), Brevo = failover + inbound + Zone B forms; DNS guardrails: never touch root MX/root SPF, MX only on `notify.`, check `_dmarc` `sp=`. Both v1 findings preserved: approvals notify NOBODY on create (now also verified for `agency_approvals`), and NULL-tenant rows under FORCE-RLS are readable by nobody ⇒ mail tables stay GLOBAL. Ledger re-verified: head `0075` ⇒ mail core still `0076` (now incl. `mail_messages`); Gmail CHECK-widening at build-time next-unused (hint `0077`); `0058`/`0059`/`0070` untouched. Ticket plan re-cut: MAIL-01A/01B…MAIL-18 (07/08 dropped, numbers not reused), two Opus flags (MAIL-10 magic links, MAIL-13 inbound intake — both opus·medium). Blueprint `webdesk` → v1.2 (Zone B unaffected; Zone A provider/domain notes). Same docs, revised in place. |
 | 2026-08-04 | `mail` **registered at `0.0.0` PLANNED — design only, no code; the ERP currently sends zero email** (no mail module in platform-nest, Alertmanager SMTP vars all empty, Keycloak realm has no `smtpServer`, provisioning sidesteps verification with `emailVerified:true`). New cross-cutting subsystem: [`../superpowers/specs/2026-08-04-zone-a-mail-design.md`](../superpowers/specs/2026-08-04-zone-a-mail-design.md) + ticket plan [`../superpowers/plans/2026-08-04-mail-subsystem-tickets.md`](../superpowers/plans/2026-08-04-mail-subsystem-tickets.md). Owner-locked shape: **sending only** (no mailboxes/IMAP); self-hosted service layer, **rented SMTP hop** (Brevo free tier → ZeptoMail/SES; Hostinger SMTP unpinned — shared-mailbox relay, low caps, can't send as arbitrary domains, VPS port block to verify); **three sending subdomains + three separate provider keys** (`forms.`/`notify.`/`auth.`) so form abuse can never rate-limit employee login mail; `From:` our domain + `Reply-To:` human default with per-tenant custom-domain upgrade; **Zone A mail never routes through webdesk C-03** (trust wall); portal email **digests by default** (immediate only for an approvals/mentions allowlist) riding the existing `notify()`/`notifications` surface; magic links designed now (single-use hashed tokens, always-202 enumeration resistance, `sealSession` coexistence with hybrid SSO+dev-login) but **built last behind a measured p95 delivery SLO** on the auth stream. Design found two real gaps while reading the code: creating an `automation_approvals` row notifies NOBODY today (MAIL-06 adds decider notifications), and NULL-tenant rows under the standard FORCE-RLS policy are readable by nobody at all (owner is NOBYPASSRLS) — which forces the mail tables global (design §6.1). Migration verified against the live ledger: head `0075`, `0058`/`0059`/`0070` claimed/dead ⇒ mail core takes **`0076`** (re-verify at DDL time per README rule 5). 12 tickets MAIL-01…12, one Opus flag (MAIL-10 magic links, opus·medium), blocked at W0 on owner Q1 (subdomain root) + Q2 (provider signup). **Same session: `webdesk` blueprint amended to v1.1** (C-02 recipient-config note, C-03 provider path + reputation split + Zone A separation, new D14, portability row) — HTML only; PDF + hosted artifact not re-rendered. |
@@ -710,7 +711,33 @@ anywhere real.
 ---
 
 ## platform-nest
-### [0.12.0] — 2026-08-04 · PROTOTYPED (client portal backend, CP-*)
+### [0.13.1] — 2026-08-05 · IN PROGRESS (APPR-01: per-approval detail route, backend half)
+
+Closes a gap found during the mail build: emailed `automation_approval`/`agency_approval`
+notifications carried `payload.href: "/approvals"` (the bare list) — a decider clicking the link
+had to hunt for the row. `platform-ui`'s new `/approvals/[id]` needed an id-bearing href AND a
+single-row read to resolve it against; both land here. **Caps at IN PROGRESS** — no deploy path
+right now (Actions billing-blocked), so nothing below is DEV-VERIFIED against the live box.
+
+- **Two new single-row reads**, same authorization as the list they sit next to (no new model, no
+  weaker gate — verified with a cross-tenant-404 + "same refusal as the list" test on each):
+  `GET /api/:t/automation-approvals/:id` (`core/automation-approvals.controller.ts`, fetch-before-
+  authorize so an hr-origin row's `module='hr'` branch of `resource_automation_approval.yaml`
+  still applies, mirroring the existing `decide()`'s own pattern) and
+  `GET /api/:t/modules/agency/approvals/:approvalId` (`modules/agency/agency.controller.ts`, same
+  fetch-before-authorize shape, same `read` action the `pending`/`decided` endpoints already use).
+  Both return camelCase rows (`workflowId`/`toolName`/… and `campaignId`/`campaign`/…) — a new
+  shape, not a mirror of the existing snake_case list rows, since nothing else read it yet.
+- **`payload.href` fixed at all FIVE `approval.requested` emission sites** (the same five MAIL-06
+  enumerated): `core/automation-approvals.controller.ts` `create()`, `modules/hr/hr.controller.ts`
+  `fileLeave()`, `modules/search/search.controller.ts`'s Google-Ads suspend path, and
+  `modules/agency/agency.controller.ts`'s `createApproval()` + `submit()`. Each now emits
+  `` `/approvals/${id}` `` instead of the bare `"/approvals"` — pinned with a test per site
+  reading the real `notifications.payload` row.
+- No Cerbos policy change — both new reads reuse the `read` action the list endpoints already
+  authorize against.
+
+
 
 The backend for the client portal — the client side as a **separate interface** (owner decision,
 2026-08-04). Plan + runbook: `docs/plans/2026-08-04-client-portal-deployment.md`; contract §16 of
@@ -973,7 +1000,40 @@ tenant's 8 seeded rows still need purging (per-tenant SQL in the design doc §12
 - **Unreleased / next:** identity writes, org-structure endpoints.
 
 ## platform-ui
-### [0.15.0] — 2026-08-04 · DEV-VERIFIED (the client portal, CP-*)
+### [0.15.2] — 2026-08-05 · IN PROGRESS (APPR-01: per-approval detail route)
+
+Closes a confirmed gap found during the mail build (owner-approved this session): emailed
+approval links landed on the bare `/approvals` LIST — `lib/mail.ts`'s `entityHref()` mapped both
+`automation_approval` and `agency_approval` to `/approvals` with no id, while `pipeline_run`
+correctly got `/pipeline/:id`. Also closes MAIL-15's one deferral: `MailThreadPanel` had nowhere
+to live on the approvals surface until this route existed. **Caps at IN PROGRESS** — no deploy
+path right now, so the live-walk ACs are PENDING-DEPLOY.
+
+- **New `/approvals/[id]` detail page** (`app/(app)/approvals/[id]/page.tsx`). The url carries
+  only an id (matching what `payload.href`/`entityHref()` emit — no `?kind=` query param), so
+  `lib/approvals.ts`'s new `getApprovalDetail()` tries the automation read first (its backend
+  fetches the row BEFORE authorizing, so a 404 there is a genuine "not this kind" and safe to fall
+  through) then the agency read; either leg's 403 propagates immediately as a real refusal
+  (`limitedState()`, same convention as `/admin/mail/[id]`) rather than being swallowed into
+  "try the other kind". Renders overview fields per origin, a decide form (routed through the
+  SAME `POST /api/:t/approvals/:id/decide` façade the unified inbox already uses — hidden
+  `tenantId`/`approvalId`/`origin` fields, no closure over the fetched row, mirroring
+  `pipeline/[runId]`'s `GateRow`), and the `MailThreadPanel` embed MAIL-15 deferred.
+- **`entityHref()` now returns the id-bearing route for staff** (`/approvals/:id`, was the bare
+  `/approvals`) for both `automation_approval` and `agency_approval` — pinned in a new
+  `lib/mail.test.ts`. **Portal is unchanged**: these two entity types are staff-only (their
+  decider sets never resolve to a client principal), so there is no per-item portal surface to
+  link to — only `pipeline_run` has one, and it was already id-bearing on both sides.
+- **`decideApprovalItem` (`app/(app)/actions.ts`) gained a `revalidatePath` for the specific item**
+  alongside its existing `/approvals`/`/` — a no-op for the older callers that never visit it.
+- **DEMO_MODE**: an explicit fixture for the new automation-approvals detail route
+  (`demoFixtures.ts`) plus a defensive `isRowShaped()` guard in `lib/approvals.ts` — the file's
+  final GET catch-all returns an empty ARRAY (`ok([])`), which is truthy in JS, so an unguarded
+  demo id with no fixture would render a confident wrong page instead of falling through to the
+  other backend/404 (the exact "frontend-first drift" trap this project's `CLAUDE.md` warns
+  about; caught by a live DEMO_MODE Playwright smoke while building this, not by `tsc`/vitest).
+
+
 
 The client portal as a **separate interface** from the employee ERP (owner decision, 2026-08-04). The
 separation that was missing was presentational — the backend split was already clean — so this is a new
@@ -1816,6 +1876,70 @@ Built by a 4-agent parallel run against a frozen contract (`docs/superpowers/pla
 - **Next:** complete the MOM→PRD delivery pipeline tails.
 
 ## mail
+### [0.0.10] — 2026-08-05 · IN PROGRESS · Design v4 amendment (architect, docs) + compose-passthrough closure + program state
+- **Design → v4** (`docs/superpowers/specs/2026-08-04-zone-a-mail-design.md`) and **ticket plan →
+  v4** (`docs/superpowers/plans/2026-08-04-mail-subsystem-tickets.md`): the dev build's findings
+  folded back into the design authority's record. No design reversals; corrections + one new
+  decision (A15). No application code in this entry.
+- **Brevo signs nothing (design §7.6/§15 R3 re-scoped):** Brevo's only webhook-security mechanisms
+  are URL basic-auth, a token header, or custom headers — no payload signature exists. The
+  `MAIL_INBOUND_TOKEN` wall **is** the provider-documented scheme (satisfying "provider signature
+  *where offered*" — none is); the HMAC verifier MAIL-13 built (`MAIL_INBOUND_SIGNING_KEY`, raw
+  bytes, timestamp-bound) is **ours, defence-in-depth**, never to be presented as a Brevo scheme.
+  §15 R3's "verify against real signatures" is struck; R3 now verifies the real token-wall
+  configuration and adds the **attachment `DownloadToken`→bytes fetch** (Brevo sends tokens, not
+  bytes; dev fixtures inline bytes; fail-closed stands — unfetchable ⇒ `pending` ⇒ quarantined ⇒
+  download refused).
+- **Quoted-history gap decided as A15 (new tickets MAIL-19/20):** intake's first-128KB body cap
+  could truncate away a bottom-posted reply — the exact content C1 exists to capture,
+  unrecoverable since raw MIME is never stored; MAIL-15 landed without the assumed render-side
+  collapse, so the concern was owned by nobody. Decision: **head+tail cap at intake**
+  (heuristic-free, MAIL-19) + **quote-collapse at render** (computed, never stored, MAIL-20);
+  intake-side quote *stripping* explicitly rejected (a heuristic misfire would destroy the only
+  copy of a human's words).
+- **Attachment cap semantics RATIFIED as implemented** (`intake.ts`): over-cap/over-count
+  *individual* attachment ⇒ dropped-but-visible (`rejected`/`rejectReason` stored + rendered),
+  message still threads; only the *total* request cap (`MAIL_INBOUND_MAX_BYTES`, pre-parse)
+  refuses a delivery. Now design text, with the visibility rider binding.
+- **F1 audit corrected:** the design's F1 finding missed a THIRD live `automation_approvals`
+  insert site — `search.controller.ts`'s Google-Ads change-proposal suspend path — which MAIL-06
+  found and fixed with the same shared resolver (see `0.0.7`). The design now says its own F1
+  enumeration must not be cited as complete.
+- **APPR-01 recorded (owner-approved, cross-program, in flight):** `/approvals/[id]` per-item
+  route — emailed approval links currently land on the bare `/approvals` list (`entityHref()`
+  maps both approval types there with no id). Design §7.5 v4 binds the fix to BOTH halves — UI
+  route AND the backend-emitted `payload.href` (MAIL-06's four sites emit `"/approvals"`;
+  MAIL-05's tap only absolutises what it is handed) — and names it the mount point for MAIL-15's
+  deferred approval-detail thread panel.
+- **Settled verifies recorded in the design:** ex-Q-V6 — Keycloak realm import does NOT
+  substitute `${env.*}` placeholders (MAIL-03's empirical proof; `configure-smtp.sh` is the
+  fresh-boot path); ex-Q-V8 — `resource_agency_approval.yaml` has no `decide` action; `approve` →
+  `company_admin` + `module_approver` ⇒ concretely `agency_approver` (not `group_executive`).
+- **A13 vindicated in the design record:** the corpus caught three type-check-invisible defects
+  before any live traffic (incl. the `<embed>` void-element bug that silently destroyed every
+  byte after it) — cited at A13 and §7.6 as the permanent answer to "is the corpus worth keeping".
+- **Migration fact:** mail core landed as **`0077_mail_core.sql`** (`0076` taken mid-session by
+  `0076_core_google_oauth_states.sql`); design §5 + plan corrected; `migrations/README.md`
+  already carries the drift record; head at writing time `0078` (the D14 resume-path program —
+  now cross-referenced at §7.4: the M12 wording flip stays gated on that program *completing*).
+- **Program state — the billing wall (new owner gate Q-O4):** GitHub Actions is billing-blocked
+  and is the ONLY deploy path (`release.yml` signed images → `deploy.yml`; the box never
+  compiles). MAIL-09 cannot execute; MAIL-10/11 and MAIL-18's gate verdict are blocked behind it;
+  dev-stage exit criterion #3 (corpus shown running in CI) is committed-but-unprovable; ex-Q-V7
+  stays unsettled. Plan v4 defines the **deferred live-verification batch B0–B4**, starting with
+  **MAIL-21** (fix `COMPOSE_PROFILES` → `mail-dev,scan` BEFORE the first deploy — else
+  `--remove-orphans` deletes mailpit+clamav — then reconcile the repo↔server drift: MAIL-03's
+  compose/realm edits never synced to the server's ungitted `~/gaiada`; MAIL-02's scp'd files +
+  server-only `.env.alertmanager-mail`).
+- **Compose-passthrough closure (infra fix landed in-session, recorded here):** the eight
+  `MAIL_INBOUND_*`/`MAIL_CLAMAV_*` vars MAIL-13 added were missing from the `platform` service
+  `environment:` block and would have shipped silently disabled — now forwarded in
+  `docker-compose.vps.yml`. Fourth-plus instance of this trap estate-wide; the design now binds
+  the passthrough to the same ticket that introduces a var, with a grep in the AC.
+- **Status discipline unchanged:** everything verified only against Mailpit/fixtures caps at
+  DEV-VERIFIED; deliverability, inbox placement, and SLO claims stay UNVERIFIED; suites-green
+  work behind the wall is IN PROGRESS with live legs PENDING-DEPLOY, never DEV-VERIFIED.
+
 ### [0.0.9] — 2026-08-05 · IN PROGRESS · MAIL-15 — mail surface UI (`platform-ui`)
 - **`/admin/mail` list + `/admin/mail/[id]` detail** (`platform-ui/src/app/(app)/admin/mail/`),
   added to the Settings section tabs. List filters `stream`/`status`/`tenantId`/`entityType`/
@@ -2393,6 +2517,79 @@ Built by a 4-agent parallel run against a frozen contract (`docs/superpowers/pla
   three separate keys for reputation isolation; Zone A mail never routes through webdesk C-03.
   Design: `docs/superpowers/specs/2026-08-04-zone-a-mail-design.md` · tickets:
   `docs/superpowers/plans/2026-08-04-mail-subsystem-tickets.md`.
+
+## mail (continued)
+### [0.0.11] — 2026-08-05 · IN PROGRESS · MAIL-21 batch B0 (devops) — server↔repo reconciliation + CI restored + a load-bearing correction to 0.0.10's own claims
+
+- **`COMPOSE_PROFILES` re-verified, not re-applied.** `gh api .../actions/variables/COMPOSE_PROFILES`
+  reads `bot,auth,whisper,mail-dev,scan` — `mail-dev` + `scan` both present, matching the
+  orchestrator's 2026-08-04 in-session fix. No drift, no write made.
+- **Deploy-shaped `up -d --remove-orphans` executed on gda-aicenter** (real `COMPOSE_PROFILES` +
+  `COMPOSE_FILES` repo vars, same already-deployed tag `alpha-01.016.0037a` — confirmed tag parity
+  against `docker inspect` before running, no pull/no migrate). `mailpit`, `clamav`, and the
+  standalone `gaiada-alertmanager` project's `alertmanager` container all survived, untouched
+  (uptime unaffected by the command). `amtool check-config` on the rendered alertmanager config:
+  3 receivers, SUCCESS.
+- **Server↔repo diff, file by file:**
+  - `infra/compose/docker-compose.vps.yml`, `docker-compose.observability.yml`,
+    `docker-compose.alertmanager-mail.yml`, `infra/scripts/*.sh`, `infra/db/*.sh`,
+    `infra/compose/keycloak/{provision-dev-users.py,provision-google-dev-client.py}`: **clean**
+    (`test-all.sh` shows a byte diff that is CRLF-vs-LF only — the Windows checkout's line endings;
+    content is identical, not a real divergence).
+  - `infra/compose/keycloak/gaiada-realm.json`: server copy **lacks** the `smtpServer` block +
+    `gaiada.smtp-note` (MAIL-03's finding that realm-import does not expand `${env.*}`).
+    `infra/compose/keycloak/configure-smtp.sh`: **absent** on the server entirely. **Recorded, not
+    hand-fixed** — `deploy.yml`'s sync step already `rsync`s the whole `infra/compose/keycloak/`
+    tree on every deploy, so the next deploy self-heals this. Confirmed the live realm is
+    unaffected either way (MAIL-03 pushed real values via `kcadm`, which is DB-persisted).
+  - `infra/compose/docker-compose.vps.yml` **on the server** is missing the entire MAIL-03
+    (`KC_SMTP_*`), MAIL-04/13 (`MAIL_*`/`MAIL_CLAMAV_*`, ~30 vars), and D14-04
+    (`APPROVAL_GRANT_SECRET`) `environment:` passthrough blocks that exist in the repo copy.
+    Confirmed via `docker inspect gaiada-platform-1`: **zero** `MAIL_*`/`KC_SMTP_*`/
+    `APPROVAL_GRANT_SECRET` vars present in the running container's actual env. This is the
+    expected pre-deploy state (the box is still on `alpha-01.016.0037a`, cut before this compose
+    work existed) and self-heals the moment MAIL-09 deploys — recorded so B1 doesn't mistake it
+    for a mystery.
+  - `platform-nest/cerbos/policies/`: two files (`resource_automation_approval.yaml`,
+    `resource_mcp_tool.yaml`) diverge — both are the concurrent **D14 program's** grant-aware
+    policy work (D14-04/06/13), not mail's. Same self-heals-on-deploy shape (rsync + the
+    deploy.yml `restart cerbos` step); noted here only because this pass touched every policy
+    file in the diff sweep. One stray `resource_scope_signoff.yaml.bak.1785750553` sits
+    server-side from an earlier hand-edit — harmless (wrong extension for Cerbos to load) but
+    uncleaned; left in place (not this ticket's file to delete).
+  - `docker-compose.alertmanager-mail.yml`: **clean**, byte-identical.
+- **`.env.alertmanager-mail`** (MAIL-02's server-only secret, `chmod 600`, 10 keys) — confirmed
+  present, shape diffed against `infra/compose/.env.example`'s shared `SMTP_*` block, and
+  documented (keys only, no values) in `CREDENTIALS.local.md` §6a.
+- **CI triggers re-enabled** (`.github/workflows/ci.yml`): `ci.yml` reads **zero** `secrets.*` —
+  confirmed by grep before touching anything — so a public repo's fork PRs reaching
+  `pull_request` have nothing to exfiltrate; GitHub's first-time-contributor approval gate is the
+  platform default on a public, non-org repo and cannot be loosened per-repo. `push`/`pull_request`
+  restored to their exact pre-cost-tuned shape (main-only, docs-paths ignored, cancel-in-progress).
+- **A CI run was triggered and it FAILED — `platform-nest` job, step "Mail inbound adversarial
+  corpus (A13)": `npm error Missing script: "test:mail-corpus"`.** Root-caused, not patched (out of
+  scope for this ticket and off-limits per the concurrent-session boundary on `platform-nest/**`):
+  **`platform-nest/src/mail/` — the entire mail module (MAIL-04/05/06/13/15/19/20's code, the
+  fixture corpus, and the `0077_mail_core.sql` migration) is `git status` UNTRACKED.** So is most
+  of the concurrent D14 work (`0078_automation_approval_execution.sql`,
+  `src/core/approval-{deciders,executables,execute}.ts`, etc.). **This corrects a claim made in
+  this module's own `0.0.10`/MAIL-13 entries** ("wired into CI as a named fail-fast step",
+  "committed adversarial corpus") — those describe the *working tree*, not `git`; nothing under
+  `src/mail/` has ever been committed. Consequence, stated plainly: dev-stage exit criterion #3
+  ("the corpus is committed and running in CI") is not merely *unprovable* behind the billing wall
+  as `0.0.10`/the ticket-plan v4 state it — it is currently **false regardless of billing**,
+  because there is nothing in version control for a checkout to pick up. Every "code-complete
+  (PENDING-DEPLOY)" ticket status recorded for MAIL-04/05/06/13/15/19/20 describes code that
+  exists only in this shared working tree: a fresh clone, a lost working tree, or `release.yml`
+  building from `main` today would all produce a platform image with **none** of the mail module
+  in it. This is a bigger blocker than Q-O4 ever was, and closing it (committing the module) is
+  outside this devops ticket's remit — flagged here for whoever owns `platform-nest/src/mail/` and
+  the D14 program to act on before MAIL-09 or any release build is attempted.
+- **Runbook note:** the box's disk stayed at 76% / 12G free throughout (unchanged by the
+  `up -d` proof-run); `GAIADA_TAG`/`APP_VERSION` in the server `.env` matched the running
+  container and `.deployed-tag` before that command ran (no stale-tag rollback risk taken).
+- **Not done, deliberately:** no release tag cut, no `deploy.yml` trigger, no fix to the
+  `test:mail-corpus` script or any file under `platform-nest/**`/`platform-ui/**`.
 
 ## webdesk
 ### [0.0.0] — 2026-07-23 · PLANNED

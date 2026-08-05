@@ -34,8 +34,8 @@ versions below; the running build reports it at `GET /health`.
 
 | Module | Ver | Status | Workstream | Since |
 |---|---|---|---|---|
-| platform-nest | `0.13.0` | PROTOTYPED | WS1 | 2026-08-04 |
-| platform-ui | `0.15.1` | PROTOTYPED | WS5 | 2026-08-04 |
+| platform-nest | `0.13.1` | IN PROGRESS | WS1 | 2026-08-05 |
+| platform-ui | `0.15.2` | IN PROGRESS | WS5 | 2026-08-05 |
 | ai-gateway-go | `0.13.0` | PROTOTYPED | WS3 | 2026-07 |
 | mcp-hub | `0.9.3` | PROTOTYPED | WS2 | 2026-08-03 |
 | sync-engine-go | `0.7.0` | PROTOTYPED | WS1 | 2026-07 |
@@ -54,7 +54,7 @@ versions below; the running build reports it at `GET /health`.
 | render-gateway-go | `0.0.0` | PLANNED | Creative | 2026-07-23 |
 | reports | `0.3.1` | PROTOTYPED | Cross-cutting | 2026-08-03 |
 | report-renderer | `0.1.0` | DEV-VERIFIED | Cross-cutting | 2026-07-31 |
-| mail | `0.0.8` | IN PROGRESS | Cross-cutting | 2026-08-05 |
+| mail | `0.0.11` | IN PROGRESS | Cross-cutting | 2026-08-05 |
 
 ---
 
@@ -340,7 +340,135 @@ through C-03". **v1.2 (same day, Zone A mail v2):** domains locked — C-03's fo
 moved to the Google Workspace SMTP relay with Brevo failover. Blueprint HTML is v1.2; PDF + hosted
 artifact NOT re-rendered yet.
 
-## mail — Zone A Email (platform-nest) · `0.0.9` · IN PROGRESS
+## mail — Zone A Email (platform-nest) · `0.0.11` · IN PROGRESS
+
+**0.0.11 (2026-08-05, devops, MAIL-21 batch B0) — server↔repo reconciliation + CI restored + a
+correction to 0.0.10's own claims.** `COMPOSE_PROFILES` re-verified (`bot,auth,whisper,mail-dev,scan`
+— no drift, no write); a deploy-shaped `up -d --remove-orphans` on gda-aicenter (real repo-var
+profiles/files, tag-parity-checked first) left mailpit/clamav/the standalone alertmanager pair
+running untouched. Full server↔repo diff run: compose files, scripts, and keycloak provisioning
+scripts are clean; the realm JSON's `smtpServer` block + `configure-smtp.sh` (MAIL-03) and the
+`MAIL_*`/`KC_SMTP_*`/`APPROVAL_GRANT_SECRET` compose passthrough (MAIL-03/04/13 + the concurrent
+D14 program) are absent from the server's stale pre-deploy copy — both self-heal via `deploy.yml`'s
+existing rsync/scp sync step, confirmed rather than assumed (`docker inspect` shows zero of those
+vars in the currently-running container, consistent with the box still being pinned to
+`alpha-01.016.0037a`). `.env.alertmanager-mail` documented in `CREDENTIALS.local.md` §6a (keys
+only). CI's `push`/`pull_request` triggers restored (secret-free confirmed by grep first) and a run
+was executed. **The run surfaced a materially bigger problem than the billing wall:**
+`platform-nest/src/mail/` — the entire mail module's code, tests, and fixture corpus — has **never
+been committed to git**; it exists only in this shared working tree. `0.0.10`'s and MAIL-13's own
+CHANGELOG language ("wired into CI", "committed adversarial corpus") describes the working tree,
+not version control. Dev-stage exit criterion #3 is not blocked-and-unprovable, as v4 states — it
+is unmet outright, independent of GitHub Actions billing, until someone commits the module. See
+CHANGELOG `0.0.11` for the full ledger; not fixed here (`platform-nest/src/mail/` is outside this
+devops ticket's remit and off-limits per the concurrent-session boundary in force).
+
+**0.0.10 (2026-08-05, architect) — design v4 amendment + program state.** The dev build's findings
+are folded back into the design (see CHANGELOG `0.0.10` for the full list): Brevo signs nothing —
+the token wall IS the provider scheme and the built HMAC verifier is OURS (defence-in-depth);
+Brevo delivers attachment `DownloadToken`s, not bytes (token→bytes fetch = staging §15 R3);
+quoted-history handling decided as **A15** (head+tail intake cap + render-side collapse — new
+tickets MAIL-19/20); attachment cap semantics ratified as implemented (drop-but-thread
+per-attachment, total cap refuses); the F1 audit corrected (a third `automation_approvals` insert
+site in `search.controller.ts`, fixed by MAIL-06); APPR-01 (`/approvals/[id]`, owner-approved,
+cross-program) recorded as the per-item approval landing + thread-panel mount, which must also
+flip the backend-emitted `payload.href`. **Program state: BLOCKED at the billing wall** — GitHub
+Actions billing is off and it is the only deploy path, so MAIL-09/10/11 + MAIL-18's gate and exit
+criterion #3 (corpus shown in CI) cannot run; ticket plan v4 defines the deferred
+live-verification batch (B0–B4), which MUST start with the `COMPOSE_PROFILES` repo-var fix
+(MAIL-21) or the first deploy deletes the mailpit+clamav containers. Also recorded this session:
+the eight `MAIL_INBOUND_*`/`MAIL_CLAMAV_*` vars are now forwarded in the `platform` service
+`environment:` block (the compose-passthrough follow-up below is CLOSED).
+
+**MAIL-19 landed 2026-08-05 (senior-be) — quoted-history intake cap SHAPE (design A15),
+`platform-nest/src/mail/inbound/html-sanitize.ts`'s `sanitizeInboundText`.** Fixes the real
+content-loss bug A15 was written to close: the pre-A15 cap kept only the FIRST 128 KiB of an
+over-cap plain-text inbound body, so a **bottom-posted** reply (the human's words below a long
+quoted thread) could be truncated away entirely with no way to recover it (raw MIME is never
+stored). Reshaped to a **head+tail** cap — ~¾ head / ¼ tail of the same 128 KiB budget — with an
+explicit `[truncated at intake: N characters omitted here]` marker spliced in at the boundary; `N`
+and the split point are computed ENTIRELY from `raw.length`/`maxLength`, never from content, which
+is what makes the marker un-forgeable (a sender-embedded decoy string shaped like the marker is
+stored back as ordinary text, never treated specially) and keeps intake heuristic-free — no
+quote-boundary detection was added, per A15's binding "caps and records, never interprets"
+invariant (quote-boundary detection is MAIL-20 render work). `body_html_sanitized` is UNCHANGED
+(still head-capped only — splicing HTML mid-document would break the rebuilt-balanced-tags
+guarantee; the no-loss guarantee rides on `body_text`, which is NOT NULL). **No schema change, no
+migration** (deliberate — the migration ledger is contended; `0078_automation_approval_execution.sql`
+landed from a concurrent session the same day). **Three new corpus cases** added to
+`src/mail/__fixtures__/inbound/` (16/17/18), wired into `corpus.test.ts`, driven through the real
+`POST /api/mail/inbound/brevo` endpoint against live Postgres: `16-bottom-posted-oversize-quote`
+(THE regression case — reply below a ~145 KB quote, asserted present in `mail_messages.body_text`
+read back from the database), `17-top-posted-oversize-quote` (same size profile, reply first — the
+case the old head-only cap already handled, pinned so the reshape can't regress it), and
+`18-elision-marker-spoof` (two sender-forged decoy markers, one at the very start and one planted
+immediately adjacent to the real elision boundary — asserted to survive verbatim as ordinary
+content while exactly one marker in the output carries the mathematically correct omitted-count,
+distinguishable from both decoys' bogus counts by that number alone). Five new unit tests in
+`html-sanitize.test.ts` pin the same properties at the string-function level (head+tail retention,
+top-posted-unchanged, under-cap-verbatim-no-marker, the spoof property). **All 15 pre-existing
+corpus cases verified unchanged, incl. `07-oversized-body` (whole-request 413 refusal — an
+unrelated cap on raw pre-parse bytes, `MAIL_INBOUND_MAX_BYTES`) and `12-quoted-reply-bloat`** (its
+`_meta.expect` text updated to note it sits UNDER the 128 KiB body_text cap and so is not itself an
+over-cap case — the genuine head+tail regression coverage lives in 16/17; its test assertions are
+unchanged). **Verified this session:** `npx vitest run src/mail` — 15 files, 142 tests green (135
+pre-existing + 7 new); `npx tsc --noEmit` clean for everything under `src/mail` (three pre-existing,
+unrelated errors surfaced in `src/core/d14-06-approval-decider-policy.test.ts` from concurrent
+D14/APPR-01 work in `src/core/**` — not touched by this ticket, not introduced by it); A12 grep
+gate re-run scoped to every file this ticket touched (incl. all three new fixtures) returns zero
+`gaiada.com`/`gaiada.online` hits; test DBs run under a dedicated `TEST_DB_PREFIX`, all 9 dropped
+after the run (zero orphans left behind). **Capped at IN PROGRESS, not DEV-VERIFIED:** no live box
+access in this ticket (same constraint recorded on MAIL-04/05/15) — the replay-script leg against
+the deployed box is deferred to batch B2 per the ticket plan, unaffected by this change (the
+fixture loader picks up 16/17/18 automatically via `fixtureNames()`).
+
+**MAIL-20 landed 2026-08-05 (medior) — quote-collapse at render (design A15.2),
+`platform-ui/src/lib/mailQuote.ts` + `components/mail/QuotedMessageBody.tsx`, wired into
+`MailThreadPanel` (entity/portal thread panels) and `/admin/mail/[id]`.** Pure, zero-I/O boundary
+detectors — `splitQuotedText` (contiguous `>`-prefixed line runs, folding sandwiched blank lines;
+an `On … wrote:`/`-----Original Message-----`/Outlook `From:`+`Sent:`+`To:`+`Subject:` header
+collapses to the end of the text since it carries no per-line delimiter) and `splitQuotedHtml`
+(depth-counted `<blockquote>` spans over the sanitized HTML — the only tag-based signal available,
+since the sanitizer strips every attribute including `class`, so a `gmail_quote` class-based
+detector as literally named in the ticket brief is structurally impossible against
+`bodyHtmlSanitized` and was replaced with tag-based detection) — split a message into alternating
+visible/quoted segments, recomputed fresh on every render and **never persisted or sent back to the
+server** (design binding). Multiple quote blocks (interleaved-reply) each get their own toggle.
+Native `<details>`/`<summary>` (no client JS, no `"use client"` boundary) renders the affordance,
+satisfying keyboard-reachability and labelling for free. **The MAIL-19/marker-spoof constraint,
+resolved as OPTION 2 (flagged, not invented):** checked `platform-nest/src/mail/thread.controller.ts`
+(`ThreadMessageView`) and the `mail_messages` DDL — **no structured `truncated`/`omittedChars` field
+is exposed today**, only `bodyText`/`bodyHtmlSanitized`; the true distinguishing signal (the
+mathematically correct `N`) lives only in the intake computation and never reaches this layer. With
+no trustworthy signal, `lib/mailQuote.ts` and `QuotedMessageBody` **never pattern-match the marker
+string at all** — not to extract it, not to keep it specially visible, not to style it — every
+classification is driven purely by structural shape (`>`-prefix, `<blockquote>` tag) that ordinary
+sender text does not take. On the two MAIL-19 reference shapes (`16-bottom-posted-oversize-quote`,
+`17-top-posted-oversize-quote`) the marker ends up visible by default anyway, as an EMERGENT effect
+of the marker line not being `>`-prefixed (it breaks the quote run) — not because the code
+recognised it; this is stated explicitly in both files' header comments so it isn't misread as a
+missed requirement later. **A follow-up is needed if guaranteed marker-visibility (independent of
+line shape) is wanted**: platform-nest would need to expose a structured `truncated`/`omittedChars`
+field on `ThreadMessageView`/`mail_messages` — deliberately NOT built here (new field ⇒ possible
+migration, and the ledger is contended); flagged for architect routing. **Tests:** 12 new cases in
+`lib/mailQuote.test.ts` (no-boundary fail-safe, bottom-posted, top-posted, interleaved-reply,
+header-style-to-end-of-text, the marker-breaks-a-run emergent property, the forged-marker-verbatim
+case, and five HTML/`<blockquote>` cases incl. nesting + multiple top-level blocks + unterminated
+tag) plus 5 in `components/mail/QuotedMessageBody.test.tsx` (reply visible without interaction,
+`<details>` closed by default, keyboard-reachable native `<summary>`, expansion reveals the full
+quote, forged marker renders as plain `<pre>` text with no chrome element). **Verified this
+session:** `npx tsc --noEmit` clean (exit 0); full `platform-ui` suite green — 106 files / 1062
+tests, incl. the 17 new ones; `DEMO_MODE=1 npx next build` green (`/admin/mail`,
+`/admin/mail/[id]`, `/pipeline/[runId]`, `/portal/approvals/[runId]` all present in the route
+manifest); A12 grep gate re-run scoped to every file this ticket touched returns zero
+`gaiada.com`/`gaiada.online` hits. `demoFixtures.ts` gained a second `run-demo-1` thread message
+(a bottom-posted quoted reply at demo scale) so `DEMO_MODE=1 npm run dev` shows the collapsed-quote
+UI with no backend. **Nothing about the collapse is stored** — verified by construction: the
+functions take a string and return a string split, no DB write, no new BFF field, no new endpoint.
+**Capped at IN PROGRESS, not DEV-VERIFIED:** no live-box walk in this ticket (same constraint as
+MAIL-04/05/15/19) and no deploy path exists (Actions billing-blocked); the only PENDING-DEPLOY leg
+is a live-box eyeball of the rendered collapse, which needs nothing beyond what MAIL-15 already
+verified for the panel itself.
 
 **MAIL-15 landed 2026-08-05 (medior) — the mail surface UI, `platform-ui/src/lib/mail.ts` +
 `components/mail/` + `/admin/mail`.** Admin log list (`/admin/mail`, filters stream/status/
@@ -375,7 +503,9 @@ follow-up, not claimed here. **Deferred, with reason:** the approval-detail surf
 has no per-item detail page to embed a thread panel into — approvals are decided inline in the
 unified `ApprovalsList` component on the list page itself; wiring a thread panel there would mean
 restructuring that component, which is out of this ticket's scope. Flagged for the next approvals
-UX ticket rather than silently skipped.
+UX ticket rather than silently skipped. *(0.0.10 update: that ticket now exists — **APPR-01**,
+owner-approved `/approvals/[id]`, in flight cross-program; design §7.5 v4 binds it to also flip
+the backend-emitted `payload.href`, since MAIL-05's tap only absolutises what it is handed.)*
 
 **MAIL-03 landed 2026-08-04 (devops) — Keycloak realm SMTP against the Mailpit sink, real auth
 flows end-to-end, DEV-VERIFIED on gda-aicenter.** Live realm `smtpServer` configured via `kcadm`
@@ -478,10 +608,13 @@ until it does, nothing in the ERP enqueues mail on its own. **Status caps at IN 
 DEV-VERIFIED:** MAIL-04 was verified against a local fake-SMTP stand-in and live Postgres — the
 real Mailpit sink on gda-aicenter was never reached (no server access in this ticket); that live
 smoke (enqueue → message asserted via the Mailpit API) is a tracked follow-up, not claimed here.
-Design **v3 (2026-08-04 — third same-day revision: dev stage with
-zero external keys)** —
+Design **v4 (2026-08-05 — implementation-findings amendment; v3 was 2026-08-04's third same-day
+revision: dev stage with zero external keys)** —
 [`../superpowers/specs/2026-08-04-zone-a-mail-design.md`](../superpowers/specs/2026-08-04-zone-a-mail-design.md)
-+ re-cut ticket plan [`../superpowers/plans/2026-08-04-mail-subsystem-tickets.md`](../superpowers/plans/2026-08-04-mail-subsystem-tickets.md). No code; the ERP currently sends zero email.
++ ticket plan (v4) [`../superpowers/plans/2026-08-04-mail-subsystem-tickets.md`](../superpowers/plans/2026-08-04-mail-subsystem-tickets.md).
+*(The "no code / zero email" line that stood here is history — the dev stage has executed; see
+the ticket entries above and the plan's Execution state table. Live sending is still OFF pending
+the deferred live-verification batch.)*
 **v3 (owner directive):** nothing external blocks the dev stage. Dev provider = **Mailpit** sink
 (compose service on gda-aicenter, `mail-dev` profile, loopback-only UI); inbound is driven by a
 committed **adversarial fixture corpus** (kept permanently as the regression suite); every
@@ -574,10 +707,12 @@ can never render as a human reply on a decision surface. Thread reads —
 `GET /api/:t/mail/messages/:id/attachments/:i`, `GET /api/admin/mail/log/:id/thread` — authorize
 against the **PARENT entity** (A10) through one shared `thread-authz.ts` that reproduces each parent
 surface's own `authorize()` shape, `module` attribute included.
-**New env (all in `src/config.ts`; NOT yet in the compose `platform` environment: block — see the
-follow-up below):** `MAIL_INBOUND_SIGNING_KEY`, `MAIL_INBOUND_SIGNATURE_TOLERANCE_S`,
-`MAIL_INBOUND_MAX_ATTACHMENT_BYTES`, `MAIL_INBOUND_MAX_ATTACHMENTS`, `MAIL_INBOUND_RATE_PER_MIN`,
-`MAIL_CLAMAV_HOST`/`_PORT`/`_TIMEOUT_MS`.
+**New env (all in `src/config.ts`):** `MAIL_INBOUND_SIGNING_KEY`,
+`MAIL_INBOUND_SIGNATURE_TOLERANCE_S`, `MAIL_INBOUND_MAX_ATTACHMENT_BYTES`,
+`MAIL_INBOUND_MAX_ATTACHMENTS`, `MAIL_INBOUND_RATE_PER_MIN`,
+`MAIL_CLAMAV_HOST`/`_PORT`/`_TIMEOUT_MS` *(0.0.10 update: the compose-passthrough gap flagged at
+landing is CLOSED — all eight are now forwarded in `docker-compose.vps.yml`'s `platform`
+`environment:` block)*.
 **Evidence:** `npx vitest run src/mail` → **15 files, 135/135 tests passing** against live Postgres +
 Cerbos (the 22-case corpus suite, the 15-probe thread-authorization suite, 21 sanitizer unit tests,
 and every pre-existing MAIL-04/05 suite incl. the A12 grep gate, which the new fixtures pass).
@@ -593,11 +728,12 @@ deployed box (`npm run mail:replay-inbound -- --base <url>` exists and is **PEND
 corpus is committed to CI but **cannot be shown running** while GitHub Actions is billing-blocked
 (dev-stage exit criterion #3 stays OPEN); real Brevo payload fidelity/signatures (§15 R3), real relay
 NDR classifiability (§15 R4), and the live clamd path (proven separately by MAIL-14 on the box, here
-driven through a stub scanner) are all unverified here. **Follow-up for devops:** the new `MAIL_*`
-vars above are not in `infra/compose/docker-compose.vps.yml`'s `platform` service `environment:`
-block — until they are, they are silently disabled on the box (the standing compose-passthrough
-trap). Brevo inbound also hands out attachment `DownloadToken`s rather than bytes, so the
-token→bytes fetch is staging work behind the existing `NormalizedAttachment` seam.
+driven through a stub scanner) are all unverified here. **Follow-up CLOSED (0.0.10, 2026-08-05):** the new `MAIL_*`
+vars are now in `infra/compose/docker-compose.vps.yml`'s `platform` service `environment:` block
+(they would otherwise have shipped silently disabled — the standing compose-passthrough trap,
+caught in-session this time). Brevo inbound also hands out attachment `DownloadToken`s rather
+than bytes, so the token→bytes fetch is staging work behind the existing `NormalizedAttachment`
+seam — carried as a named step in design §15 R3 (v4).
 
 ## search-marketing â€” SEO Â· SEM Â· GEO Â· `0.5.0` Â· DEV-VERIFIED
 
