@@ -1,0 +1,160 @@
+{
+  "_meta": {
+    "title": "15 attachments against a count cap of 10",
+    "covers": "§7.6 corpus: too-many-attachments",
+    "expect": "Message threads; the first MAIL_INBOUND_MAX_ATTACHMENTS are stored and every one past the cap is recorded with fileRef=null, rejected=true, rejectReason=too_many. The stored attachment array length still equals the number the sender sent, so the UI can show honestly that 5 were refused rather than silently showing 10."
+  },
+  "items": [
+    {
+      "Uuid": [
+        "c1d0a1b2-0000-4000-8000-000000000a009"
+      ],
+      "MessageId": "<too-many-attachments-{{RUN}}@mail.client.invalid>",
+      "From": {
+        "Name": "Dita Prameswari",
+        "Address": "dita@client-one.invalid"
+      },
+      "To": [
+        {
+          "Name": "",
+          "Address": "reply+{{TOKEN}}@{{REPLY_DOMAIN}}"
+        }
+      ],
+      "Cc": [],
+      "Recipients": [
+        "reply+{{TOKEN}}@{{REPLY_DOMAIN}}"
+      ],
+      "SentAtDate": "Tue, 04 Aug 2026 14:00:00 +0800",
+      "ExtractedMarkdownMessage": "see body",
+      "Headers": {
+        "Message-Id": "<too-many-attachments-{{RUN}}@mail.client.invalid>"
+      },
+      "SpamScore": 0.5,
+      "Subject": "Re: Approval needed - scanned pages",
+      "RawTextBody": "All pages attached individually, sorry.",
+      "RawHtmlBody": "<p>All pages attached individually, sorry.</p>",
+      "Attachments": [
+        {
+          "Name": "page-01.txt",
+          "ContentType": "text/plain",
+          "ContentLength": 6,
+          "ContentID": null,
+          "DownloadToken": "fixture-token-09-0",
+          "Content": "cGFnZSAx"
+        },
+        {
+          "Name": "page-02.txt",
+          "ContentType": "text/plain",
+          "ContentLength": 6,
+          "ContentID": null,
+          "DownloadToken": "fixture-token-09-1",
+          "Content": "cGFnZSAy"
+        },
+        {
+          "Name": "page-03.txt",
+          "ContentType": "text/plain",
+          "ContentLength": 6,
+          "ContentID": null,
+          "DownloadToken": "fixture-token-09-2",
+          "Content": "cGFnZSAz"
+        },
+        {
+          "Name": "page-04.txt",
+          "ContentType": "text/plain",
+          "ContentLength": 6,
+          "ContentID": null,
+          "DownloadToken": "fixture-token-09-3",
+          "Content": "cGFnZSA0"
+        },
+        {
+          "Name": "page-05.txt",
+          "ContentType": "text/plain",
+          "ContentLength": 6,
+          "ContentID": null,
+          "DownloadToken": "fixture-token-09-4",
+          "Content": "cGFnZSA1"
+        },
+        {
+          "Name": "page-06.txt",
+          "ContentType": "text/plain",
+          "ContentLength": 6,
+          "ContentID": null,
+          "DownloadToken": "fixture-token-09-5",
+          "Content": "cGFnZSA2"
+        },
+        {
+          "Name": "page-07.txt",
+          "ContentType": "text/plain",
+          "ContentLength": 6,
+          "ContentID": null,
+          "DownloadToken": "fixture-token-09-6",
+          "Content": "cGFnZSA3"
+        },
+        {
+          "Name": "page-08.txt",
+          "ContentType": "text/plain",
+          "ContentLength": 6,
+          "ContentID": null,
+          "DownloadToken": "fixture-token-09-7",
+          "Content": "cGFnZSA4"
+        },
+        {
+          "Name": "page-09.txt",
+          "ContentType": "text/plain",
+          "ContentLength": 6,
+          "ContentID": null,
+          "DownloadToken": "fixture-token-09-8",
+          "Content": "cGFnZSA5"
+        },
+        {
+          "Name": "page-10.txt",
+          "ContentType": "text/plain",
+          "ContentLength": 6,
+          "ContentID": null,
+          "DownloadToken": "fixture-token-09-9",
+          "Content": "cGFnZSAxMA=="
+        },
+        {
+          "Name": "page-11.txt",
+          "ContentType": "text/plain",
+          "ContentLength": 6,
+          "ContentID": null,
+          "DownloadToken": "fixture-token-09-10",
+          "Content": "cGFnZSAxMQ=="
+        },
+        {
+          "Name": "page-12.txt",
+          "ContentType": "text/plain",
+          "ContentLength": 6,
+          "ContentID": null,
+          "DownloadToken": "fixture-token-09-11",
+          "Content": "cGFnZSAxMg=="
+        },
+        {
+          "Name": "page-13.txt",
+          "ContentType": "text/plain",
+          "ContentLength": 6,
+          "ContentID": null,
+          "DownloadToken": "fixture-token-09-12",
+          "Content": "cGFnZSAxMw=="
+        },
+        {
+          "Name": "page-14.txt",
+          "ContentType": "text/plain",
+          "ContentLength": 6,
+          "ContentID": null,
+          "DownloadToken": "fixture-token-09-13",
+          "Content": "cGFnZSAxNA=="
+        },
+        {
+          "Name": "page-15.txt",
+          "ContentType": "text/plain",
+          "ContentLength": 6,
+          "ContentID": null,
+          "DownloadToken": "fixture-token-09-14",
+          "Content": "cGFnZSAxNQ=="
+        }
+      ]
+    }
+  ]
+}

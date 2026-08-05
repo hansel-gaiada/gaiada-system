@@ -81,6 +81,10 @@ services:
       SMTP_FROM: ${SMTP_FROM:-}
       SMTP_USERNAME: ${SMTP_USERNAME:-}
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      # MAIL-02: defaults to Alertmanager's own secure default (true) so an unset var never
+      # silently disables TLS against a real relay; the dev-stage Mailpit sink sets this to
+      # "false" explicitly in the mail-dev environment.
+      SMTP_REQUIRE_TLS: ${SMTP_REQUIRE_TLS:-true}
       ALERT_EMAIL_TO: ${ALERT_EMAIL_TO:-}
       ALERT_WEBHOOK_URL: ${ALERT_WEBHOOK_URL:-http://ntfy/gaiada-alerts}
       DEADMANSSWITCH_URL: ${DEADMANSSWITCH_URL:-}

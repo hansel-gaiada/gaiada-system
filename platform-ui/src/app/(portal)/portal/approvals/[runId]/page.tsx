@@ -10,6 +10,7 @@ import { PortalGateActions } from "@/components/portal/PortalGateActions";
 import { ArtifactMarkdown } from "@/components/pipeline/ArtifactMarkdown";
 import { PortalLive } from "@/components/portal/PortalLive";
 import { PortalLink, PortalPageHead, PortalStatus } from "@/components/portal/PortalBits";
+import { MailThreadPanel } from "@/components/mail/MailThreadPanel";
 import "@/components/pipeline/pipeline.css";
 
 // CP-12 — one delivery, in full. MOVED from `/portal/[runId]` (see the approvals list for why).
@@ -116,6 +117,10 @@ export default async function PortalRunPage({ params }: { params: Promise<{ runI
             </div>
           </Card>
         )}
+
+        {/* MAIL-15 — portal variant of the thread panel (design §8A/§6.1: "the portal reuses the same
+            rule through the portal BFF" — a client principal is never treated as elevated). */}
+        <MailThreadPanel userId={userId} tenantId={tenant} entityType="pipeline_run" entityId={run.id} portal title="Replies" />
 
         <PortalLink href="/portal/approvals">All approvals</PortalLink>
       </div>

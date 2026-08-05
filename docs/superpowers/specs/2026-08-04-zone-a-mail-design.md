@@ -155,7 +155,7 @@ completes in dev.
 | A10 | *(new)* Thread reads are authorized against the **parent entity** (`authorize()` on the entity kind the thread hangs off), never against the global mail tables directly. That is the compensating control for `mail_messages` being global (§6.1). | New. |
 | A11 | *(new, v3)* **Dev mail sink = Mailpit on gda-aicenter**, a service in `infra/compose/docker-compose.vps.yml` under a new `mail-dev` profile (§4.3). All dev SMTP (platform, Keycloak, Alertmanager) points at `mailpit:1025` over the compose network — zero SMTP egress. UI/API (:8025) published **loopback-only** on the box, reached over an SSH tunnel: the sink holds live password-reset links and must never be internet-reachable. The Mailpit HTTP API is the evidence surface for ACs — scriptable assertions, not screenshots. | New. |
 | A12 | *(new, v3)* **No domain literals in mail code.** Every domain/subdomain/host and the deep-link base (`MAIL_LINK_BASE_URL` — new; no ERP public-base config existed) is env config. Compiled-in defaults use RFC-2606 reserved TLDs (`notify.gaiada.invalid`, `auth.gaiada.invalid`, `https://erp.gaiada.invalid`) so a missed env var is obviously fake and can never resolve or deliver. Enforced by a grep gate in the ACs: zero `gaiada.com`/`gaiada.online` occurrences under `src/mail/`, mail templates, and mail UI code — fixtures/tests included (they use reserved TLDs too). Staging swap = `.env` change only. | New. |
-| A13 | *(new, v3)* **The inbound fixture corpus is the permanent regression suite, not dev scaffolding.** A live provider will never conveniently send forged senders, replayed message-ids, oversized bodies, or hostile HTML on demand — the committed corpus is a **higher-fidelity adversarial test than a live provider** and stays in CI forever; staging APPENDS real-captured samples (incl. real signatures) rather than replacing anything. | New. |
+| A13 | *(new, v3)* **The inbound fixture corpus is the permanent regression suite, not dev scaffolding.** A live provider will never conveniently send forged senders, replayed message-ids, oversized bodies, or hostile HTML on demand — the committed corpus is a **higher-fidelity adversarial test than a live provider** and stays in CI forever; staging APPENDS real-captured samples rather than replacing anything (v4: "incl. real signatures" struck — Brevo has none, §7.6; and A13 is now VINDICATED by execution: the corpus caught three type-check-invisible defects, incl. the `<embed>` void-element byte-loss bug, before any live traffic existed). | New. |
 | A14 | *(new, v3)* **Gmail dev scope = the seam only.** Dev builds the `GmailClient` interface + a fixture-backed implementation + a shared contract-test suite (MAIL-16D). The OAuth link flow, live adapter, and reading-pane UI are deliberately deferred to the staging window — full reasoning in §8C. | New. |
 | A15 | *(new, v4)* **Quoted-history handling: heuristic-free head+tail cap at intake, quote-collapse heuristics at render, and intake-side quote STRIPPING stays forbidden.** The intake body cap keeps the head AND the tail of an over-cap plain-text body (explicit mid-elision marker), so a human's reply survives whether top- or bottom-posted — without intake ever interpreting content. Render detects quote boundaries and collapses history behind an expander, where a wrong guess costs a click instead of data. Storing only an extracted "reply portion" is REJECTED: the raw MIME is never stored, so a misfired heuristic would destroy the only copy of a human's words. Full reasoning §7.6; tickets MAIL-19 (intake) / MAIL-20 (render). | New. |
 
@@ -240,9 +240,18 @@ MAIL_LINK_BASE_URL                     # deep-link base for templates (A12 — n
                                        #   default https://erp.gaiada.invalid; gda-aicenter .env sets
                                        #   https://erp.gaiada.online (env, never code)
 MAIL_WEBHOOK_TOKEN=<random>            # provider delivery-event intake
-MAIL_INBOUND_TOKEN=<random>            # inbound intake auth (plus provider signature where offered)
-MAIL_INBOUND_MAX_BYTES=5242880         # total inbound message cap (5 MB default)
+MAIL_INBOUND_TOKEN=<random>            # inbound intake auth — v4: Brevo offers NO signatures, so
+                                       #   this header token IS the whole provider scheme (§7.6)
+MAIL_INBOUND_SIGNING_KEY=              # v4, OPTIONAL — OUR HMAC defence-in-depth layer (NOT a
+                                       #   Brevo scheme); once set, a valid signature is REQUIRED
+MAIL_INBOUND_SIGNATURE_TOLERANCE_S=300 # v4 — replay window for OUR signature scheme
+MAIL_INBOUND_MAX_BYTES=5242880         # total inbound message cap (5 MB default) — whole-delivery
+                                       #   REFUSAL, applied pre-parse (§7.6 v4 cap semantics)
+MAIL_INBOUND_MAX_ATTACHMENT_BYTES=10485760  # v4 — per-attachment cap: DROP-but-thread (§7.6)
+MAIL_INBOUND_MAX_ATTACHMENTS=10        # v4 — count cap: same drop-but-thread semantics
+MAIL_INBOUND_RATE_PER_MIN=…            # v4 — per-source intake rate limit
 MAIL_INBOUND_SCAN=off|clamav           # attachment scanning (§7.6)
+MAIL_CLAMAV_HOST/PORT/TIMEOUT_MS       # v4 — clamd client wiring (MAIL-14 service)
 MAIL_SENDER_INTERVAL_MS=15000
 MAIL_MAGIC_LINKS_ENABLED=0|1           # §9 — stays 0 for real users until the staging SLO gate (§15 R5)
 ```
@@ -695,10 +704,52 @@ corpus at the live dev box. The corpus MUST cover, at minimum:
 
 These are exactly the messages a live provider would never conveniently send on demand — the
 corpus is a **higher-fidelity adversarial test than a live provider** and is kept permanently as
-the regression suite (A13); staging appends real-captured Brevo samples (incl. real signatures)
-rather than discarding anything. What the corpus cannot prove — Brevo plan/availability, the real
-signature scheme (dev verifies against self-generated fixture signatures), real payload drift,
-real NDR formats — is §15 R3/R4.
+the regression suite (A13); staging appends real-captured Brevo samples rather than discarding
+anything (v4: "incl. real signatures" is struck — Brevo has none; what staging appends is real
+payload shapes and the real token-wall configuration). What the corpus cannot prove — Brevo
+plan/availability, real payload drift, the `DownloadToken`→bytes exchange, real NDR formats — is
+§15 R3/R4.
+
+**A13, vindicated at build (v4).** Before any live traffic existed, the corpus caught **three
+real defects invisible to type-checking**: two Fastify raw-body/content-length bugs that made
+every inbound post hang or 500, and a void-element bug where a mail containing `<embed>`
+**silently lost every byte after it** — including the human's reply. That is precisely the defect
+class A13 predicted a live provider would never surface on demand. Wherever A13's cost is
+questioned in the future, this paragraph is the answer: the corpus stays in CI permanently, and
+staging appends to it, never replaces it.
+
+**Quoted history (v4 — a real functional gap found at build, decided here as A15).** As landed,
+intake caps `body_text` by keeping the FIRST 128 KB and truncating the rest with an explicit
+marker (`sanitizeInboundText`). That is correct for top-posted replies — but a **bottom-posted**
+reply (the human's text BELOW the quoted thread) can be truncated away entirely, losing exactly
+the content C1 exists to capture; and because the raw MIME is never stored, the loss is
+unrecoverable. The implementer deliberately refused intake-side quote *stripping* (right call —
+see 3 below) and assumed collapse was MAIL-15 render work; MAIL-15 landed without it, so the
+concern was owned by nobody. Decision:
+
+1. **Intake (MAIL-19): change the cap SHAPE, not the intake philosophy.** For an over-cap
+   plain-text body, keep **head + tail** (~¾ head / ¼ tail of the budget) with an explicit
+   `[truncated at intake: N characters omitted here]` marker at the elision point. This is
+   heuristic-free — the reply survives at either end regardless of posting style — and intake
+   still "caps and records, never interprets", the invariant that protects the untrusted path.
+   `body_html_sanitized` stays head-capped (splicing HTML mid-document would break the
+   rebuilt-balanced-tags guarantee); the no-loss guarantee rides on `body_text`, which is
+   NOT NULL and always renderable. New corpus cases pin it: bottom-posted reply under an
+   over-cap quote (the regression this exists to prevent), a top-posted over-cap equivalent, and
+   an elision-marker spoof (hostile sender embedding our marker text). No schema change.
+2. **Render (MAIL-20): quote-collapse at display time.** Detect the FIRST quote boundary
+   (`On … wrote:`, `>`-prefixed runs, `-----Original Message-----` / Outlook `From:` blocks,
+   `gmail_quote`/`blockquote` in the sanitized HTML) and collapse everything below it behind
+   "Show quoted history" in the thread panel + admin detail. Fail-safe by construction: no
+   boundary detected → show everything; wrong boundary → the reader clicks expand. The
+   extraction is **computed at render, never stored** — heuristics improve retroactively, and a
+   misfire can never destroy data.
+3. **Rejected: storing only an extracted "reply portion" at intake.** Quote-boundary detection
+   is heuristic, and humans legitimately quote (a narrative "On Monday, John wrote:" is a false
+   boundary); with no raw MIME retained, a false positive silently discards the only copy of
+   part of a human's message. Render-side-only was equally rejected: it cannot recover what the
+   intake cap already discarded. Intake-side *cap-shape* + render-side *interpretation* is the
+   only split where every failure mode is recoverable.
 
 **Threading surface:** messages render (1) on the entity — approval detail, run workspace, portal
 run view — via `GET /api/:t/mail/threads` (entity-authorized, A10), and (2) in the admin mail log
@@ -749,7 +800,10 @@ delivered" honesty is what keeps the dev log UI truthful without special-casing.
 - **UI:** `/admin/mail` — list with status chips (queued/sent/delivered/bounced/suppressed —
   rendering the relay's "accepted ≠ delivered" honestly), recipient, stream, the **triggering
   entity as a deep link**, detail pane with thread. Entity surfaces (approval detail, run
-  workspace, portal run) get a thread panel fed by the entity-scoped read.
+  workspace, portal run) get a thread panel fed by the entity-scoped read. **v4:** MAIL-15 found
+  there IS no approval-detail surface — approvals are decided inline on the `/approvals` list —
+  so the panel shipped on the run workspace + portal run view only; the approval-detail mount
+  point is **APPR-01's `/approvals/[id]`** (§7.5), which wires the deferred panel when it lands.
 - Contract updates land in `docs/FRONTEND-BFF-CONTRACT.md` with the code, per repo convention.
 
 ### 8B. Deep-link-to-act
@@ -860,7 +914,14 @@ the staging reopen (§15 R6/R8):**
   `deploy.yml`'s `--remove-orphans`), leaving the full observability stack opt-in as before.
 - **Keycloak → Mailpit:** live realm `smtpServer` = `host mailpit, port 1025,
   from no-reply@auth.gaiada.invalid`, no auth/TLS — via kcadm/REST (`/idp` prefix) plus the repo
-  realm JSON with `KC_SMTP_*` env placeholders (the Q-V6 substitution check is now **dev-provable**).
+  realm JSON. **ex-Q-V6 SETTLED (v4, proved empirically by MAIL-03):** Keycloak realm import does
+  **NOT** substitute `${env.*}` placeholders — a throwaway realm imported with a literal
+  `${env.ZZZ_TEST_SMTP_HOST}` placeholder (env var set and passed through) persisted the
+  unexpanded string. Consequence, shipped: `infra/compose/keycloak/gaiada-realm.json` carries a
+  real working dev-default `smtpServer` block (the Mailpit shape) instead of inert placeholders,
+  and `infra/compose/keycloak/configure-smtp.sh` (reads the keycloak service's own `KC_SMTP_*`
+  env, pushes via `kcadm update`) is the fresh-boot path for any non-default value — runbook:
+  `docs/runbooks/idp-keycloak.md`.
   Then run the REAL flows end-to-end: forgot-password and verify-email for a dev user — the mail
   lands in Mailpit, and the link inside it points at the live `erp.gaiada.online/idp` realm and is
   clicked through to completion. This also answers the provisioner question in dev: with
@@ -872,15 +933,21 @@ the staging reopen (§15 R6/R8):**
 
 - **Compose passthrough rule** applies to every var in §4.1 — a var in `infra/compose/.env` does
   nothing unless the consuming service's `environment:` block forwards it (this repo shipped 4+
-  features silently disabled that way).
+  features silently disabled that way). **v4 — it happened again, inside this very program:**
+  eight `MAIL_INBOUND_*`/`MAIL_CLAMAV_*` vars (MAIL-13's additions) landed in `config.ts` but not
+  in the `platform` service `environment:` block, and would have shipped silently disabled —
+  caught and fixed 2026-08-05 (`docker-compose.vps.yml` now forwards all of them). The rule is
+  binding **per ticket, not per program**: the same ticket that introduces a var wires the
+  passthrough, and its AC greps `docker-compose.vps.yml` for the var name.
 - **Alertmanager:** already passthrough'd via `&am_env`. Server-side `.env` values only
   (notify-stream relay creds) + `amtool check-config` + a test alert. Do not touch
   `alertmanager.local.yml`.
 - **Keycloak realm SMTP** (auth-stream relay creds): live realm via kcadm/REST
   (`PUT /admin/realms/gaiada`, `smtpServer` object; server path prefix `/idp`); repo realm JSON
-  gets `smtpServer` with env placeholders + `KC_SMTP_*` forwarded (⚠ verify this KC version
-  substitutes env placeholders in realm import; else extend the provision script). Never commit
-  a literal password. `gaiada-provisioner` keeps `emailVerified: true` (unchanged).
+  keeps its working dev-default block (**ex-Q-V6 settled: realm import does NOT substitute env
+  placeholders** — the staging swap therefore runs `configure-smtp.sh` with the auth-stream relay
+  creds, never a placeholder edit). Never commit a literal password. `gaiada-provisioner` keeps
+  `emailVerified: true` (unchanged).
 
 ## 11. Observability + ops
 
@@ -908,8 +975,9 @@ at the staging reopen (§15) and lands in server-side `.env` + `CREDENTIALS.loca
 
 ## 13. Registration + status tracking
 
-- `docs/modules/MODULES.md`: `mail · 0.0.0 · PLANNED · Cross-cutting` (section updated for v2).
-- `docs/modules/CHANGELOG.md`: v2 amendment entry.
+- `docs/modules/MODULES.md`: `mail` section — `0.0.9+ · IN PROGRESS` at v4 (per-ticket landing
+  records live there and in the CHANGELOG; the original `0.0.0 PLANNED` row is history).
+- `docs/modules/CHANGELOG.md`: per-ticket entries `0.0.1`–`0.0.9` landed; v4 amendment entry added.
 - `docs/FRONTEND-BFF-CONTRACT.md`: endpoint additions ship with the code tickets.
 - Status language everywhere: PLANNED → IN PROGRESS → PROTOTYPED → DEV-VERIFIED. Nothing here may
   be described as "built/done".
@@ -919,17 +987,27 @@ at the staging reopen (§15) and lands in server-side `.env` + `CREDENTIALS.loca
 > is at best **DEV-VERIFIED** — never "done", never production-ready. Specifically **UNVERIFIED
 > until the staging reopen closes**: deliverability and inbox placement (**a Mailpit catch proves
 > rendering and wiring; it proves NOTHING about deliverability**), the SPF/DKIM/DMARC posture,
-> the M8 auth-stream latency SLO, Brevo inbound fidelity + real webhook signatures, real NDR
-> classifiability, and everything Gmail. No ticket AC may claim any of these; the `mail` entry in
-> `MODULES.md` carries this caveat verbatim until §15 is closed.
+> the M8 auth-stream latency SLO, Brevo inbound fidelity + the real token-wall configuration
+> (v4: "real webhook signatures" is struck — Brevo has none, §7.6), real NDR classifiability, and
+> everything Gmail. No ticket AC may claim any of these; the `mail` entry in `MODULES.md` carries
+> this caveat verbatim until §15 is closed.
+>
+> **v4 addition — the billing wall:** while GitHub Actions is billing-blocked (Q-O4) there is NO
+> deploy path (`release.yml` → signed GHCR images → `deploy.yml`; the box never compiles), so
+> anything whose evidence requires a deploy or a CI run is **code-complete-but-unverifiable**:
+> report it as IN PROGRESS with its live leg PENDING-DEPLOY, never DEV-VERIFIED on local suites
+> alone. (Box-direct devops work — MAIL-00/02/03/14 — is unaffected: its evidence never needed
+> the pipeline.) Nothing verified only against Mailpit or fixtures may read as production-ready;
+> deliverability, inbox placement, and SLO claims stay UNVERIFIED regardless of stage.
 
 ## 14. Open questions + where the old registers went (v3)
 
-**The only question still genuinely open for the owner:**
+**Questions genuinely open for the owner (v4):**
 
 | # | Question | Recommendation |
 |---|---|---|
 | Q-V4 | Single-person decider routing ("route to THE responsible person, not the admin set") — wants schema + assignment UI + escalation semantics. | Defer; v1 mails the resolved Cerbos DECIDE set (small). Revisit after the warning stream has run for a while. |
+| Q-O4 | *(new, v4 — THE binding constraint on the whole program)* **GitHub Actions billing.** The only deploy path is `release.yml` (cosign-signed GHCR images) → `deploy.yml`; the box never compiles. While billing is blocked: MAIL-09 cannot execute, MAIL-10/11 and MAIL-18's live legs are blocked behind it, dev-stage exit criterion #3 (corpus shown running in CI) is unprovable, ex-Q-V7 (OIDC deep-link preservation) stays unsettled, and repo↔server drift accumulates (ticket plan v4, MAIL-21). | Owner action: **restore billing.** The architect recommends AGAINST an interim manual deploy path — it would bypass image signing and recreate exactly the drift this program just documented. The moment billing returns, run the ticket plan v4 **deferred live-verification batch in order**, starting with the `COMPOSE_PROFILES` repo-var fix (append `mail-dev,scan` — it was permission-denied when MAIL-00 tried), which MUST precede the first deploy or `--remove-orphans` deletes the mailpit + clamav containers. |
 
 **Disposition of v2's blockers + verify register (M15 — ONE list now, not two):**
 
@@ -937,10 +1015,13 @@ at the staging reopen (§15) and lands in server-side `.env` + `CREDENTIALS.loca
   (R1, R7, R3 respectively) with a simulated dev-stage substitute. They become owner actions at
   the *staging* stage.
 - **Dev-provable verifies moved into dev ticket ACs** (they need no external key, so they are not
-  reopen rows): **Q-V6** (Keycloak realm-import env-placeholder substitution → MAIL-03),
+  reopen rows): **Q-V6** (Keycloak realm-import env-placeholder substitution → MAIL-03) —
+  **SETTLED v4: import does NOT substitute; `configure-smtp.sh` is the fresh-boot path (§10)**;
   **Q-V7** (OIDC reauth preserves the deep-link target — provable against the LIVE
-  `erp.gaiada.online` SSO today → MAIL-09), **Q-V8** (`resource_agency_approval.yaml` exact
-  DECIDE set — the policy is in-repo → MAIL-06).
+  `erp.gaiada.online` SSO → MAIL-09) — **still OPEN: MAIL-09 is blocked behind Q-O4**;
+  **Q-V8** (`resource_agency_approval.yaml` exact DECIDE set — the policy is in-repo → MAIL-06) —
+  **SETTLED v4: no `decide` action; `approve` → `company_admin` + `module_approver` ⇒ concretely
+  `agency_approver` (§7.3)**.
 - **Provider-dependent verifies folded into §15**: Q-V1 → R1, Q-V2 → R3, Q-V3 → R1, Q-V5 → R7,
   Q-V9 → R4. The Q-V numbers are retired; §15 is the single authoritative list.
 
@@ -954,7 +1035,7 @@ executing this table top to bottom.** Nothing in this table may be marked done b
 |---|---|---|---|---|---|
 | R1 | **Workspace SMTP relay + DNS identity** (Q-O1, ex-Q-V1/Q-V3): relay enablement/auth mode, subdomain envelope acceptance, SPF/DKIM/DMARC on `auth.`/`notify.` subdomains, `_dmarc.gaiada.com` `sp=` inheritance | Mailpit sink + `*.gaiada.invalid` env defaults (A11/A12) | Any DNS record; relay auth mode or caps; whether the relay accepts **subdomain envelope senders** (M2 fallback undecided); DKIM alignment on a real header; that root MX/SPF stay untouched | Identify the `gaiada.com` DNS custodian (owner, step 0). Execute MAIL-01A verbatim: enable/confirm relay, record auth mode; publish subdomain SPF (BOTH `_spf.google.com` + Brevo include) + per-subdomain `_dmarc`; check root `_dmarc` `sp=`; byte-diff root MX/SPF before/after; verify subdomain-envelope acceptance or record the root-address fallback; DKIM-alignment check on a real received header; 20-send latency sample | MAIL-01A (full); MAIL-04 `verify()` against real creds; MAIL-09 smokes 1–2 re-run with real mail |
 | R2 | **Deliverability + inbox placement** | Mailpit catch — **proves rendering and wiring, and proves NOTHING about deliverability** | Inbox-vs-spam on any real provider; sending reputation; that SPF/DKIM/DMARC evaluate to pass outside our own config | Real sends per stream to a Workspace inbox AND ≥1 consumer inbox (e.g. a personal gmail.com); raw headers attached showing SPF/DKIM/DMARC pass; spam-folder check recorded; repeat after any DNS change | MAIL-09 (real-recipient variant of every smoke) |
-| R3 | **Brevo: failover leg + inbound webhook + signature** (Q-O3, ex-Q-V2) | Fixture replay harness (A13) — real endpoint, committed adversarial corpus; signatures verified against self-generated fixtures | Brevo signup/plan actually offers inbound parsing + per-message webhooks; the REAL signature scheme verifies; real payload shapes match the recorded-shape corpus; MX routing on the notify subdomain; the failover transport flip | Execute MAIL-01B verbatim (signup, per-role keys, MX, forms identity). Send real mail to `reply+<token>@…`; assert threading end-to-end; capture ≥10 real payloads, DIFF against the corpus and APPEND them (A13 — never replace); verify signature validation against real signatures; flip `MAIL_STREAM_NOTIFY_TRANSPORT=brevo` once and send | MAIL-01B (full); MAIL-13 webhook-auth + threading ACs against real traffic; MAIL-18 forged-webhook attack re-run against the real scheme |
+| R3 | **Brevo: failover leg + inbound webhook + intake auth + attachment fetch** (Q-O3, ex-Q-V2) — **RE-SCOPED v4: Brevo does not sign webhooks** (token header / URL basic-auth / custom headers are its only mechanisms, §7.6), so v3's "verify signature validation against real signatures" is void — there is nothing real to verify against. The HMAC verifier is OURS (defence-in-depth) and is exercised by the corpus + replay script, never by Brevo. | Fixture replay harness (A13) — real endpoint, committed adversarial corpus; OUR HMAC scheme verified against self-generated signatures; attachment **bytes inlined in fixtures** (real Brevo sends `DownloadToken`s) | Brevo signup/plan actually offers inbound parsing + per-message webhooks; real payload shapes match the recorded-shape corpus; the **token wall as actually configured on a real Brevo webhook object**; the **`DownloadToken`→bytes exchange** (never exercised in dev); MX routing on the notify subdomain; the failover transport flip | Execute MAIL-01B verbatim (signup, per-role keys, MX, forms identity). Configure the webhook object to send `x-gaiada-mail-inbound-token` and prove a token-less/wrong-token post (Brevo's webhook tester) is 401'd. Send real mail to `reply+<token>@…`; assert threading end-to-end. **Build + verify the `DownloadToken`→bytes fetch** behind the `NormalizedAttachment` seam (Brevo attachment API, account key; fail-closed stands — unfetchable ⇒ `pending` ⇒ quarantined ⇒ download refused), then re-run the quarantine→scan→download-gate ACs with really-fetched bytes incl. EICAR. Capture ≥10 real payloads, DIFF against the corpus and APPEND them (A13 — never replace). Flip `MAIL_STREAM_NOTIFY_TRANSPORT=brevo` once and send. | MAIL-01B (full); MAIL-13 webhook-auth + threading + attachment ACs against real traffic; MAIL-18 forged-webhook attack re-run against the real auth configuration (token wall; OUR HMAC only where we front the webhook with a signer we control) |
 | R4 | **Relay NDR/bounce classifiability** (ex-Q-V9) | A fixture NDR shape in the corpus | That the relay's REAL NDR format is classifiable; the accepted failure mode (bounce shows as `sent`) rate | Force a real hard bounce (nonexistent mailbox on a real domain); assert `mail_log.status='bounced'` + suppression row; record the real NDR format in the runbook | MAIL-13 NDR AC |
 | R5 | **Auth-stream latency SLO + magic-link enablement** (M8) | None — sink latency is sub-ms and meaningless | p95 delivered−queued < 60s / p99 < 180s on the real relay; real-user login quality | ≥7 days of real auth-stream traffic; run the SLO query from `mail_log`; owner quality review; only then `MAIL_MAGIC_LINKS_ENABLED=1` for real users; one-shot re-probe of the enumeration timing-diff on staging infra | MAIL-11 SLO leg (adversarial leg does NOT re-run in full — logic is environment-independent; the timing re-probe only) |
 | R6 | **Keycloak SMTP on the real relay + `emailVerified:true` retirement** | Realm SMTP → sink; both flows (reset, verify-email) completed against Mailpit; dev users verified without the workaround | Relay auth/TLS from Keycloak; real deliverability of reset/verify mail to employee inboxes | Swap realm `smtpServer` to auth-stream relay creds (TLS on); re-run forgot-password + verify-email to a real inbox; THEN the owner decides retiring `emailVerified:true` in `gaiada-provisioner` — not before deliverability is proven (a premature retirement locks out anyone whose mail never arrives) | MAIL-03 (both flows, real inbox) |

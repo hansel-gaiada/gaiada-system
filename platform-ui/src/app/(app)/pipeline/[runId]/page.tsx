@@ -38,6 +38,7 @@ import { Card, Eyebrow, StatusBadge } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { ArtifactMarkdown } from "@/components/pipeline/ArtifactMarkdown";
+import { MailThreadPanel } from "@/components/mail/MailThreadPanel";
 import { formatDateTime } from "@/lib/format";
 import "@/components/pipeline/pipeline.css";
 
@@ -234,6 +235,10 @@ export default async function PipelineRunPage({ params }: { params: Promise<{ ru
             })}
           </div>
         </Card>
+
+        {/* MAIL-15 — inbound replies to this run's approval/gate mail (design §8A). Self-contained:
+            fetches its own data via the entity-scoped BFF read (A10), absence-degrades to empty. */}
+        <MailThreadPanel userId={userId} tenantId={tenant} entityType="pipeline_run" entityId={run.id} />
       </div>
 
       {/* B3–B5 — run lifecycle recovery tools. Deliberately NOT a Card next to the routine

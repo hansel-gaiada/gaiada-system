@@ -5,6 +5,8 @@ import type { FastifyRequest } from "fastify";
 import { newId, withTenants } from "../../db";
 import { config } from "../../config";
 import { authorize, writeActivity, notify } from "../../core/http";
+import { notifyBestEffort } from "../../core/client-notify";
+import { resolveAgencyApprovalDeciders } from "../../core/approval-deciders";
 import { AuthGuard } from "../../auth/guards";
 import { ModuleEnabledGuard } from "../module-enabled.guard";
 
@@ -51,6 +53,20 @@ export class AgencyController {
       ),
     );
     await writeActivity(tenantId, req.principal.userId, "created", "agency_approval", id, { subject });
+    // MAIL-06 (F1 fix) — subject-review creation path. Notify the mirrored agency_approval
+    // DECIDE-equivalent set (resource_agency_approval.yaml's `approve` action; see
+    // approval-deciders.ts's header for the exact mirror, ex-Q-V8).
+    const deciders = await resolveAgencyApprovalDeciders(tenantId);
+    await notifyBestEffort(tenantId, req.principal.userId, deciders, "approval.requested", {
+      title: subject,
+      // APPR-01: was the bare list — a decider clicking the email had to hunt for the row. The
+      // per-approval detail route (`platform-ui` `/approvals/[id]`) resolves this id against
+      // `GET .../modules/agency/approvals/:approvalId` (below).
+      href: `/approvals/${id}`,
+      entityType: "agency_approval",
+      entityId: id,
+      origin: "agency",
+    });
     return { id };
   }
 
@@ -172,22 +188,61 @@ export class AgencyController {
   @HttpCode(201)
   async submit(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("assetId") assetId: string) {
     await authorize(req.principal, { kind: "agency_approval", tenantId, module: "agency", ownerId: req.principal.userId ?? undefined }, "create");
-    const approvalId = await withTenants([tenantId], async (c) => {
+    const created = await withTenants([tenantId], async (c) => {
       const asset = await c.query<{ campaign_id: string; name: string }>(
         `SELECT campaign_id, name FROM agency_creative_assets WHERE id = $1 AND deleted_at IS NULL`, [assetId],
       );
       if (!asset.rows[0]) return null;
       await c.query(`UPDATE agency_creative_assets SET review_status = 'in_review', updated_at = now() WHERE id = $1`, [assetId]);
       const id = newId();
+      const subject = `Review: ${asset.rows[0].name}`;
       await c.query(
         `INSERT INTO agency_approvals (id, tenant_id, campaign_id, asset_id, subject, requested_by, origin_site)
          VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-        [id, tenantId, asset.rows[0].campaign_id, assetId, `Review: ${asset.rows[0].name}`, req.principal.userId, config.originSite],
+        [id, tenantId, asset.rows[0].campaign_id, assetId, subject, req.principal.userId, config.originSite],
       );
-      return id;
+      return { id, subject };
     });
-    if (!approvalId) throw new NotFoundException("asset not found");
+    if (!created) throw new NotFoundException("asset not found");
     await writeActivity(tenantId, req.principal.userId, "submitted", "agency_creative_asset", assetId);
-    return { approvalId };
+    // MAIL-06 (F1 fix) — asset-review creation path (the SECOND of the two agency_approvals INSERT
+    // sites the ticket names explicitly). Same mirrored decider set as the subject path above.
+    const deciders = await resolveAgencyApprovalDeciders(tenantId);
+    await notifyBestEffort(tenantId, req.principal.userId, deciders, "approval.requested", {
+      title: created.subject,
+      // APPR-01: was the bare list — see createApproval() above for the full rationale.
+      href: `/approvals/${created.id}`,
+      entityType: "agency_approval",
+      entityId: created.id,
+      origin: "agency",
+    });
+    return { approvalId: created.id };
+  }
+
+  // APPR-01 — single-row read backing `platform-ui`'s `/approvals/[id]` detail page. Fetch BEFORE
+  // authorize (same "no weaker than the list, no info leak" pattern as
+  // automation-approvals.controller.ts's `detail()`): RLS (withTenants) has already made a
+  // cross-tenant id invisible, so "not found for this tenant" is a genuine 404. Same `read` action
+  // the `pending`/`decided` endpoints above already gate on — no new authorization model.
+  @Get("approvals/:approvalId")
+  async approvalDetail(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("approvalId") approvalId: string) {
+    const { rows } = await withTenants([tenantId], (c) =>
+      c.query(
+        `SELECT a.id, a.subject, a.campaign_id AS "campaignId", c.name AS campaign, a.asset_id AS "assetId",
+                a.status, a.requested_by AS "requestedBy", ru.name AS "requestedByName",
+                a.decided_by AS "decidedBy", du.name AS "decidedByName",
+                a.decided_at AS "decidedAt", a.created_at AS "createdAt"
+         FROM agency_approvals a
+         JOIN agency_campaigns c ON c.id = a.campaign_id
+         LEFT JOIN users ru ON ru.id = a.requested_by
+         LEFT JOIN users du ON du.id = a.decided_by
+         WHERE a.id = $1 AND a.deleted_at IS NULL`,
+        [approvalId],
+      ),
+    );
+    const row = rows[0];
+    if (!row) throw new NotFoundException("approval not found");
+    await authorize(req.principal, { kind: "agency_approval", tenantId, module: "agency" }, "read");
+    return row;
   }
 }

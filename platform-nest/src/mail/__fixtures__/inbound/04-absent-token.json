@@ -1,0 +1,25 @@
+{
+  "_meta": {
+    "title": "No VERP token anywhere in the recipient list",
+    "covers": "§7.6 corpus: absent token (an A9 drop path)",
+    "expect": "204, zero mail_messages rows, mail_inbound_total{outcome=unmatched} incremented — never an error, and never any signal to the sender about whether a token exists (A9)"
+  },
+  "items": [
+    {
+      "Uuid": ["c1d0a1b2-0000-4000-8000-00000000a004"],
+      "MessageId": "<no-token-04-{{RUN}}@mail.stranger.invalid>",
+      "From": { "Name": "Cold Outreach", "Address": "sales@stranger.invalid" },
+      "To": [{ "Name": "Info", "Address": "hello@{{REPLY_DOMAIN}}" }],
+      "Cc": [],
+      "Recipients": ["hello@{{REPLY_DOMAIN}}"],
+      "SentAtDate": "Tue, 04 Aug 2026 10:00:00 +0800",
+      "Subject": "Partnership opportunity",
+      "RawTextBody": "Hi, I would like to discuss a partnership.",
+      "RawHtmlBody": "<p>Hi, I would like to discuss a partnership.</p>",
+      "ExtractedMarkdownMessage": "Hi, I would like to discuss a partnership.",
+      "Attachments": [],
+      "Headers": { "Message-Id": "<no-token-04-{{RUN}}@mail.stranger.invalid>" },
+      "SpamScore": 3.2
+    }
+  ]
+}

@@ -12,6 +12,8 @@ const TABS = [
   { key: "services", label: "Services", href: "/admin/services", icon: "hub" as const },
   { key: "compliance", label: "Compliance", href: "/admin/compliance", icon: "check" as const },
   { key: "audit", label: "Audit", href: "/admin/audit", icon: "clock" as const },
+  // MAIL-15 — sent-mail log + inbound threads (design §8A).
+  { key: "mail", label: "Mail", href: "/admin/mail", icon: "hub" as const },
   // Software information: deployed app version + each service's reported build (VERSIONING.md).
   { key: "about", label: "About", href: "/admin/about", icon: "pulse" as const },
 ];

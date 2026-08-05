@@ -145,6 +145,32 @@ function moneyEnv(name: string): number | null {
 
 const dataforseoProviderMonthlyCapUsd = moneyEnv("DATAFORSEO_MONTHLY_CAP_USD");
 
+// MAIL-04 (design §4.1) — one stream's transport facts, read for a given env-var PREFIX
+// ("NOTIFY" | "AUTH"). `defaultFrom` is the ONLY per-stream literal, and it is a RESERVED-TLD
+// fake (A12) — `*.gaiada.invalid` — so a deployment that forgets to set the real `*_FROM` value
+// sends from an address that can never resolve or deliver, rather than silently leaking a
+// plausible-looking `gaiada.com` identity nobody actually configured.
+function mailStreamConfig(prefix: "NOTIFY" | "AUTH", defaultFrom: string) {
+  return {
+    // A8: operator failover flip, per stream. Anything other than the literal "brevo" is "relay"
+    // (same typo-safety convention as SEARCH_PROVIDER_MODE/DATAFORSEO_QUEUE elsewhere in this file).
+    transport: (process.env[`MAIL_STREAM_${prefix}_TRANSPORT`] ?? "relay") === "brevo" ? ("brevo" as const) : ("relay" as const),
+    from: process.env[`MAIL_STREAM_${prefix}_FROM`] ?? defaultFrom,
+    relay: {
+      host: process.env[`MAIL_STREAM_${prefix}_RELAY_HOST`] ?? "",
+      port: Number(process.env[`MAIL_STREAM_${prefix}_RELAY_PORT`] ?? 587),
+      user: process.env[`MAIL_STREAM_${prefix}_RELAY_USER`] ?? "",
+      password: process.env[`MAIL_STREAM_${prefix}_RELAY_PASSWORD`] ?? "",
+    },
+    brevo: {
+      host: process.env[`MAIL_STREAM_${prefix}_BREVO_HOST`] ?? "",
+      port: Number(process.env[`MAIL_STREAM_${prefix}_BREVO_PORT`] ?? 587),
+      user: process.env[`MAIL_STREAM_${prefix}_BREVO_USER`] ?? "",
+      password: process.env[`MAIL_STREAM_${prefix}_BREVO_PASSWORD`] ?? "",
+    },
+  };
+}
+
 const configBase = {
   port: Number(process.env.PLATFORM_PORT ?? 3004),
   host: process.env.HOST ?? "0.0.0.0",
@@ -204,6 +230,22 @@ const configBase = {
   // path is fail-closed 503 (mapping create/list/revoke still work); a future OpenBao/KMS key rotates
   // in behind token_key_version. NEVER logged.
   integrationTokenKey: process.env.INTEGRATION_TOKEN_KEY ?? "",
+  // D14-03/D14-04 — the ONE shared HMAC secret for the single-use automation-write EXECUTION GRANT
+  // (contract: docs/superpowers/plans/2026-08-05-d14-and-assistant-tickets.md §1). platform-nest MINTS
+  // a grant inside an approval's `pending -> executing` claim; mcp-hub VERIFIES it and lifts ONLY its
+  // impact-suspend gate for that exact tool + args. It must be byte-identical in both services'
+  // `environment:` blocks (already wired in infra/compose/docker-compose.vps.yml for platform,
+  // mcp-hub and mcp-hub-central — the compose env-passthrough trap).
+  //
+  // Empty => FAIL CLOSED, and loudly rather than silently: core/hub-client.ts throws
+  // ApprovalGrantNotConfiguredError instead of minting an unsigned grant, so the approval lands
+  // `execution_status='failed'` with `not_configured: …` and notifies. That is deliberate — the
+  // alternative (mint with an empty key) would be rejected hub-side as `bad_signature` and
+  // misdiagnosed as a broken contract rather than an unfinished deployment. NEVER logged.
+  //
+  // The executor ALSO needs HUB_URL + HUB_SERVICE_TOKEN (config.services.hub below) to reach the
+  // hub at all; with either unset the re-drive records `not_configured` rather than half-attempting.
+  approvalGrantSecret: process.env.APPROVAL_GRANT_SECRET ?? "",
   // Event backbone (5c continuation): Redis Streams for outbox relay + consumption.
   redisUrl: process.env.REDIS_URL ?? "",
   // ORG-6 release train (A4): the whole shared-service reconciler is DARK by default. When off,
@@ -664,6 +706,69 @@ const configBase = {
     internalTenantIds: (process.env.KNOWLEDGE_INTERNAL_TENANT_IDS ?? "").split(",").map((s) => s.trim()).filter(Boolean),
     /** Index attached-file CONTENTS (text/spreadsheet only — see ingest/file-text.ts). */
     indexFileContents: (process.env.KNOWLEDGE_INDEX_FILE_CONTENTS ?? "1") === "1",
+  },
+  // MAIL-04 (docs/superpowers/specs/2026-08-04-zone-a-mail-design.md v3 §4.1/§10/§12). `src/mail/`
+  // is core infra (A1), not a ModuleContract module — no per-tenant enable gate, same class as
+  // `src/events/`.
+  //
+  // A12 (BINDING, grep-gate enforced): every domain/FROM/link-base below defaults to a
+  // RESERVED-TLD fake (`*.gaiada.invalid`) — never a real `gaiada.com`/`gaiada.online` literal —
+  // so a deployment that forgets to override an env var fails obviously (nothing resolves,
+  // nothing delivers) instead of silently sending as a plausible-looking identity nobody
+  // configured. The staging swap is an env change only; nothing in `src/mail/` ever needs editing.
+  mail: {
+    // Master gate (design §7.8): 0 (default) = the whole module is dark — the sender loop is never
+    // started (see main.ts) and `enqueueMail` no-ops rather than writing a row, so there truly are
+    // zero side effects, not merely "nothing gets sent". 1 = live (still routes through the
+    // dev-log adapter with no per-stream host configured — see provider.ts's resolveAdapter).
+    enabled: process.env.MAIL_ENABLED === "1",
+    senderIntervalMs: Number(process.env.MAIL_SENDER_INTERVAL_MS ?? 15000),
+    // VERP reply-token domain (§7.6). The local part (`reply+<token>@`) is built by the caller;
+    // this is only the host half.
+    replyDomain: process.env.MAIL_REPLY_DOMAIN ?? "notify.gaiada.invalid",
+    // The deep-link base every approval/warning template's `href` is built from (A12 — brand new;
+    // no ERP public-base config existed before this). Trailing slash stripped so callers can
+    // append paths freely, matching `automationPublicUrl`'s convention above.
+    linkBaseUrl: (process.env.MAIL_LINK_BASE_URL ?? "https://erp.gaiada.invalid").replace(/\/$/, ""),
+    // Provider delivery-event webhook auth (§7.7). Empty => the webhook refuses every request
+    // (fail-closed, same convention as SEARCH_CALLBACK_SECRET) — an unconfigured secret is an
+    // unfinished deployment, not permission to skip the check.
+    webhookToken: process.env.MAIL_WEBHOOK_TOKEN ?? "",
+    // Inbound intake auth + caps (§7.6). Scanning is a tri-state string, not a boolean, because a
+    // third value ('clamav') names a REAL dependency (MAIL-14) rather than just "on".
+    inboundToken: process.env.MAIL_INBOUND_TOKEN ?? "",
+    inboundMaxBytes: Number(process.env.MAIL_INBOUND_MAX_BYTES ?? 5 * 1024 * 1024),
+    inboundScan: (process.env.MAIL_INBOUND_SCAN ?? "off") === "clamav" ? ("clamav" as const) : ("off" as const),
+    // MAIL-13 (design §7.6). Brevo offers NO payload signature — its documented options are
+    // basic-auth-in-URL, a token header, or custom headers (verified against Brevo's docs
+    // 2026-08-04; see src/mail/inbound/auth.ts's header comment). So the token above is the wall
+    // that is real today, and this key enables an ADDITIONAL HMAC-SHA256 verifier over the raw
+    // request bytes. Empty (the default) => signature verification reports `off` rather than
+    // pretending to have passed. Set => a valid signature is REQUIRED (fail-closed on the
+    // configured path).
+    inboundSigningKey: process.env.MAIL_INBOUND_SIGNING_KEY ?? "",
+    inboundSignatureToleranceS: Number(process.env.MAIL_INBOUND_SIGNATURE_TOLERANCE_S ?? 300),
+    // Per-attachment + count caps (§7.6, listed alongside the total-message cap). An attachment over
+    // either cap is DROPPED while the message still threads; only the TOTAL cap above refuses a whole
+    // delivery. Rationale in src/mail/inbound/intake.ts's cap-policy note.
+    inboundMaxAttachmentBytes: Number(process.env.MAIL_INBOUND_MAX_ATTACHMENT_BYTES ?? 2 * 1024 * 1024),
+    inboundMaxAttachments: Number(process.env.MAIL_INBOUND_MAX_ATTACHMENTS ?? 10),
+    // Per-source flood control (§7.8). 0 disables. In-process/per-instance by design — there is no
+    // Redis dependency in src/mail/ (A2); see src/mail/inbound/rate-limit.ts.
+    inboundRatePerMin: Number(process.env.MAIL_INBOUND_RATE_PER_MIN ?? 60),
+    // MAIL-14's clamd. Reachable only when the compose `scan` profile is up; unreachable => every
+    // attachment stays `pending` => downloads refused (fail-closed on exposure, §7.6).
+    clamavHost: process.env.MAIL_CLAMAV_HOST ?? "clamav",
+    clamavPort: Number(process.env.MAIL_CLAMAV_PORT ?? 3310),
+    clamavTimeoutMs: Number(process.env.MAIL_CLAMAV_TIMEOUT_MS ?? 20000),
+    // §9 — stays 0 for real users until the staging M8 SLO gate closes (§15 R5); dev may flip it
+    // for dev-created users once MAIL-10 lands. Read here even though MAIL-10 ships in its own
+    // later ticket, so the env/compose wiring lands once and never has to be revisited per-ticket.
+    magicLinksEnabled: process.env.MAIL_MAGIC_LINKS_ENABLED === "1",
+    streams: {
+      notify: mailStreamConfig("NOTIFY", "Gaiada Dev <no-reply@notify.gaiada.invalid>"),
+      auth: mailStreamConfig("AUTH", "Gaiada Sign-in <no-reply@auth.gaiada.invalid>"),
+    },
   },
 };
 

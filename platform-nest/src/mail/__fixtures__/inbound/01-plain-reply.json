@@ -1,0 +1,31 @@
+{
+  "_meta": {
+    "title": "Ordinary human reply to an approval mail",
+    "covers": "baseline — not an attack case; the control that makes every other case's assertion meaningful",
+    "expect": "204; exactly one mail_messages row on the matched mail_log's entity; body_text preserved; body_html_sanitized keeps <p>/<a> and nothing else"
+  },
+  "items": [
+    {
+      "Uuid": ["c1d0a1b2-0000-4000-8000-00000000a001"],
+      "MessageId": "<reply-01-{{RUN}}@mail.client.invalid>",
+      "InReplyTo": "<approval-notice-1@notify.gaiada.invalid>",
+      "From": { "Name": "Dita Prameswari", "Address": "dita@client-one.invalid" },
+      "To": [{ "Name": "Gaiada Replies", "Address": "reply+{{TOKEN}}@{{REPLY_DOMAIN}}" }],
+      "Cc": [],
+      "ReplyTo": null,
+      "Recipients": ["reply+{{TOKEN}}@{{REPLY_DOMAIN}}"],
+      "SentAtDate": "Tue, 04 Aug 2026 09:14:22 +0800",
+      "Subject": "Re: Approval needed: Website scope sign-off",
+      "RawTextBody": "Looks good to me, but please confirm the launch date before I sign.\n\nThanks,\nDita",
+      "RawHtmlBody": "<p>Looks good to me, but please confirm the launch date before I sign.</p><p>Thanks,<br>Dita</p><p><a href=\"https://client-one.invalid/brief\">Our brief</a></p>",
+      "ExtractedMarkdownMessage": "Looks good to me, but please confirm the launch date before I sign.",
+      "ExtractedMarkdownSignature": "Thanks,\nDita",
+      "Attachments": [],
+      "Headers": {
+        "Content-Type": "multipart/alternative; boundary=\"b1\"",
+        "Message-Id": "<reply-01-{{RUN}}@mail.client.invalid>"
+      },
+      "SpamScore": 0.4
+    }
+  ]
+}

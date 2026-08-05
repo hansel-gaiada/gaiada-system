@@ -1,0 +1,34 @@
+{
+  "_meta": {
+    "title": "Replayed delivery — a FIXED provider MessageId, posted twice",
+    "covers": "§7.6 corpus: replayed (provider, provider_message_id) — idempotency",
+    "expect": "204 both times; exactly ONE mail_messages row; the second post writes nothing, re-scans nothing and re-stores no quarantine bytes (idempotency is decided by the UNIQUE index before any of that work runs). Note the MessageId deliberately omits {{RUN}} — replay across runs is the point."
+  },
+  "items": [
+    {
+      "Uuid": ["c1d0a1b2-0000-4000-8000-00000000a006"],
+      "MessageId": "<replayed-fixed-id@mail.client.invalid>",
+      "From": { "Name": "Dita Prameswari", "Address": "dita@client-one.invalid" },
+      "To": [{ "Name": "", "Address": "reply+{{TOKEN}}@{{REPLY_DOMAIN}}" }],
+      "Cc": [],
+      "Recipients": ["reply+{{TOKEN}}@{{REPLY_DOMAIN}}"],
+      "SentAtDate": "Tue, 04 Aug 2026 10:10:00 +0800",
+      "Subject": "Re: Approval needed: Website scope sign-off",
+      "RawTextBody": "Sending this once; the provider may deliver it more than once.",
+      "RawHtmlBody": "<p>Sending this once; the provider may deliver it more than once.</p>",
+      "ExtractedMarkdownMessage": "Sending this once; the provider may deliver it more than once.",
+      "Attachments": [
+        {
+          "Name": "note.txt",
+          "ContentType": "text/plain",
+          "ContentLength": 11,
+          "ContentID": null,
+          "DownloadToken": "fixture-token-06",
+          "Content": "cmVwbGF5IHRlc3Q="
+        }
+      ],
+      "Headers": { "Message-Id": "<replayed-fixed-id@mail.client.invalid>" },
+      "SpamScore": 0.3
+    }
+  ]
+}

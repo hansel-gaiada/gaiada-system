@@ -13,6 +13,11 @@ global:
   smtp_from: "${SMTP_FROM}"
   smtp_auth_username: "${SMTP_USERNAME}"
   smtp_auth_password: "${SMTP_PASSWORD}"
+  # MAIL-02: Alertmanager's built-in default is smtp_require_tls: true, which flatly refuses a
+  # TLS-less smarthost — including the dev-stage Mailpit sink (authless, plaintext, MAIL-00).
+  # Must default to "true" (real-relay-safe) so a missing env var never silently downgrades
+  # security; the sink leg sets SMTP_REQUIRE_TLS=false explicitly in that environment's .env.
+  smtp_require_tls: ${SMTP_REQUIRE_TLS}
 
 route:
   receiver: default-multi

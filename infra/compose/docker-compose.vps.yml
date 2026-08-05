@@ -213,6 +213,21 @@ services:
       KC_HOSTNAME: ${KC_HOSTNAME:-}
       KC_HTTP_RELATIVE_PATH: ${KC_HTTP_RELATIVE_PATH:-/}
       KC_PROXY_HEADERS: ${KC_PROXY_HEADERS:-}
+      # MAIL-03: realm SMTP against the Mailpit dev sink (mailpit:1025, mail-dev profile).
+      # NOT substituted into the realm-import JSON's `smtpServer` block (settled ex-Q-V6, see
+      # docs/runbooks/idp-keycloak.md) — Keycloak's DirImportProvider does not expand `${env.*}`
+      # placeholders anywhere in a realm export. These vars exist so a fresh boot's
+      # `./keycloak/configure-smtp.sh` (run once after `--import-realm` completes) has real
+      # values to push via kcadm; they do nothing on their own. Defaults are the dev-sink shape
+      # (no auth, no TLS, reserved-TLD from-address) so an unconfigured fresh box behaves exactly
+      # like the box this was proven against, not silently mail-less nor pointed at a real relay.
+      KC_SMTP_HOST: ${KC_SMTP_HOST:-mailpit}
+      KC_SMTP_PORT: ${KC_SMTP_PORT:-1025}
+      KC_SMTP_FROM: ${KC_SMTP_FROM:-no-reply@auth.gaiada.invalid}
+      KC_SMTP_FROM_DISPLAY_NAME: ${KC_SMTP_FROM_DISPLAY_NAME:-Gaiada Auth (dev)}
+      KC_SMTP_AUTH: ${KC_SMTP_AUTH:-false}
+      KC_SMTP_SSL: ${KC_SMTP_SSL:-false}
+      KC_SMTP_STARTTLS: ${KC_SMTP_STARTTLS:-false}
     ports:
       - "127.0.0.1:8080:8080"
     volumes:
@@ -419,6 +434,14 @@ services:
       REPORT_RENDERER_URL: ${REPORT_RENDERER_URL:-http://report-renderer:3007}
       RENDERER_TOKEN: ${RENDERER_TOKEN:?}
       PLATFORM_UI_INTERNAL_URL: ${PLATFORM_UI_INTERNAL_URL:-http://platform-ui:3005}
+      # D14-04 — the single-use execution grant the platform mints when a human approves a suspended
+      # automation write, and the hub verifies before lifting its impact gate. ONE shared HMAC secret,
+      # so this exact value must also appear in the mcp-hub service block below; a mismatch or an
+      # absence rejects every grant (fail CLOSED — approved writes keep suspending forever, which is
+      # safe but silent, so check mcp-hub's /admin/info `policy.executionGrantConfigured` after
+      # setting it). Deliberately NOT `:?`: a box that never approves automation writes should still
+      # boot. openssl rand -hex 32.
+      APPROVAL_GRANT_SECRET: ${APPROVAL_GRANT_SECRET:-}
       # ORG-6 release train (WSD-8 go-live 2026-07-22): shared-service assignments + reconciler.
       # Dark by default (empty/unset -> off); "1"/"true" flips the whole train on.
       SERVICE_ASSIGNMENTS_ENABLED: ${SERVICE_ASSIGNMENTS_ENABLED:-}
@@ -426,6 +449,72 @@ services:
       OTEL_ENABLED: ${OTEL_ENABLED:-0}
       OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4318}
       OTEL_SERVICE_NAME: platform
+      # ── MAIL-04 (design §4.1/§10/§12) — src/mail/ is core infra (A1), no per-tenant gate. ──────────
+      # Master gate stays OFF by default: the sender loop never starts and enqueueMail no-ops with
+      # zero side effects (config.ts's own header on this block). Flip to 1 only once the mail-dev
+      # profile (mailpit, above) is actually up — MAIL_ENABLED=1 with nothing listening at the relay
+      # host just means every send backs off and retries, never a crash.
+      MAIL_ENABLED: ${MAIL_ENABLED:-0}
+      MAIL_SENDER_INTERVAL_MS: ${MAIL_SENDER_INTERVAL_MS:-15000}
+      # Dev-stage default: BOTH streams point at the mail-dev Mailpit sink (`mailpit:1025`,
+      # authless — empty user/password keeps the smtp adapter's TLS rule on the legal plaintext
+      # branch, provider.ts). A8 operator failover flip stays available (`brevo`) for when real
+      # Brevo credentials land at the staging reopen (§15 R3) — set the *_BREVO_* vars then and
+      # flip *_TRANSPORT, no code change either way.
+      MAIL_STREAM_NOTIFY_TRANSPORT: ${MAIL_STREAM_NOTIFY_TRANSPORT:-relay}
+      MAIL_STREAM_NOTIFY_RELAY_HOST: ${MAIL_STREAM_NOTIFY_RELAY_HOST:-mailpit}
+      MAIL_STREAM_NOTIFY_RELAY_PORT: ${MAIL_STREAM_NOTIFY_RELAY_PORT:-1025}
+      MAIL_STREAM_NOTIFY_RELAY_USER: ${MAIL_STREAM_NOTIFY_RELAY_USER:-}
+      MAIL_STREAM_NOTIFY_RELAY_PASSWORD: ${MAIL_STREAM_NOTIFY_RELAY_PASSWORD:-}
+      MAIL_STREAM_NOTIFY_BREVO_HOST: ${MAIL_STREAM_NOTIFY_BREVO_HOST:-}
+      MAIL_STREAM_NOTIFY_BREVO_PORT: ${MAIL_STREAM_NOTIFY_BREVO_PORT:-587}
+      MAIL_STREAM_NOTIFY_BREVO_USER: ${MAIL_STREAM_NOTIFY_BREVO_USER:-}
+      MAIL_STREAM_NOTIFY_BREVO_PASSWORD: ${MAIL_STREAM_NOTIFY_BREVO_PASSWORD:-}
+      # A12: leave the FROM identity unset in dev so the compiled `*.gaiada.invalid` default (an
+      # address that can never resolve or deliver) is what a misconfigured deployment actually
+      # sends from — never a real-looking address nobody configured. Staging sets the real
+      # notify-subdomain identity here (§15 R1).
+      MAIL_STREAM_NOTIFY_FROM: ${MAIL_STREAM_NOTIFY_FROM:-}
+      MAIL_STREAM_AUTH_TRANSPORT: ${MAIL_STREAM_AUTH_TRANSPORT:-relay}
+      MAIL_STREAM_AUTH_RELAY_HOST: ${MAIL_STREAM_AUTH_RELAY_HOST:-mailpit}
+      MAIL_STREAM_AUTH_RELAY_PORT: ${MAIL_STREAM_AUTH_RELAY_PORT:-1025}
+      MAIL_STREAM_AUTH_RELAY_USER: ${MAIL_STREAM_AUTH_RELAY_USER:-}
+      MAIL_STREAM_AUTH_RELAY_PASSWORD: ${MAIL_STREAM_AUTH_RELAY_PASSWORD:-}
+      MAIL_STREAM_AUTH_BREVO_HOST: ${MAIL_STREAM_AUTH_BREVO_HOST:-}
+      MAIL_STREAM_AUTH_BREVO_PORT: ${MAIL_STREAM_AUTH_BREVO_PORT:-587}
+      MAIL_STREAM_AUTH_BREVO_USER: ${MAIL_STREAM_AUTH_BREVO_USER:-}
+      MAIL_STREAM_AUTH_BREVO_PASSWORD: ${MAIL_STREAM_AUTH_BREVO_PASSWORD:-}
+      MAIL_STREAM_AUTH_FROM: ${MAIL_STREAM_AUTH_FROM:-}
+      MAIL_REPLY_DOMAIN: ${MAIL_REPLY_DOMAIN:-}
+      # A12: NOT defaulted to the real erp host here — an operator sets the box's real public URL
+      # in its own (gitignored) .env; the compiled `https://erp.gaiada.invalid` fallback is what a
+      # forgotten override actually produces (obviously fake, never a live link).
+      MAIL_LINK_BASE_URL: ${MAIL_LINK_BASE_URL:-}
+      # Minted as a random local on the box (design §12 — dev stage has no external secrets at
+      # all); never committed. Empty = the delivery-event webhook / inbound intake fail-closed.
+      MAIL_WEBHOOK_TOKEN: ${MAIL_WEBHOOK_TOKEN:-}
+      MAIL_INBOUND_TOKEN: ${MAIL_INBOUND_TOKEN:-}
+      MAIL_INBOUND_MAX_BYTES: ${MAIL_INBOUND_MAX_BYTES:-5242880}
+      # MAIL-13 inbound hardening. NOTE: the HMAC verifier behind MAIL_INBOUND_SIGNING_KEY is OURS,
+      # not Brevo's — Brevo does not sign inbound webhooks (it offers basic-auth-in-URL / a token
+      # header only), so MAIL_INBOUND_TOKEN above is the provider-side check and this is defence in
+      # depth. Empty key = signature check disabled; the token check still fails closed.
+      MAIL_INBOUND_SIGNING_KEY: ${MAIL_INBOUND_SIGNING_KEY:-}
+      MAIL_INBOUND_SIGNATURE_TOLERANCE_S: ${MAIL_INBOUND_SIGNATURE_TOLERANCE_S:-300}
+      MAIL_INBOUND_MAX_ATTACHMENT_BYTES: ${MAIL_INBOUND_MAX_ATTACHMENT_BYTES:-10485760}
+      MAIL_INBOUND_MAX_ATTACHMENTS: ${MAIL_INBOUND_MAX_ATTACHMENTS:-10}
+      MAIL_INBOUND_RATE_PER_MIN: ${MAIL_INBOUND_RATE_PER_MIN:-60}
+      # 'clamav' only once the `scan` profile (above) is actually up; 'off' otherwise (default) —
+      # attachment downloads then stay admin-only rather than half-working against an absent scanner.
+      MAIL_INBOUND_SCAN: ${MAIL_INBOUND_SCAN:-off}
+      # clamd endpoint for the scan profile's service. Unreachable scanner ⇒ attachments stay
+      # 'pending' and download 403s at every privilege (fail-closed on exposure, fail-soft on boot).
+      MAIL_CLAMAV_HOST: ${MAIL_CLAMAV_HOST:-clamav}
+      MAIL_CLAMAV_PORT: ${MAIL_CLAMAV_PORT:-3310}
+      MAIL_CLAMAV_TIMEOUT_MS: ${MAIL_CLAMAV_TIMEOUT_MS:-30000}
+      # §9/§15 R5 — stays 0 for real users until the staging SLO gate closes. MAIL-10 is a later
+      # ticket; wired here now so its landing needs no second compose edit.
+      MAIL_MAGIC_LINKS_ENABLED: ${MAIL_MAGIC_LINKS_ENABLED:-0}
       # App version (docs/modules/VERSIONING.md), surfaced by GET /health. deploy.yml sets this
       # from /VERSION so a running box can always be asked what it is.
       APP_VERSION: ${APP_VERSION:-}
@@ -677,6 +766,11 @@ services:
       # WS2 §3: mTLS off until certs are enrolled (mirrors the gateway's GATEWAY_TLS_MODE: off).
       # Enroll with synccert (see mcp-hub/.env.example), mount them, then set HUB_TLS_MODE: enforced.
       HUB_TLS_MODE: ${HUB_TLS_MODE:-off}
+      # D14-04 — the OTHER half of the shared execution-grant secret (see the platform service above;
+      # both blocks must carry it or the two sides can never agree). Empty ⇒ every presented
+      # `x-approval-grant` is rejected and medium+/unclassified automation writes keep suspending:
+      # fail-closed, and visible on /admin/info as policy.executionGrantConfigured=false.
+      APPROVAL_GRANT_SECRET: ${APPROVAL_GRANT_SECRET:-}
       # WS11 delivery tools (build item 9). All fail CLOSED when unset (github.repoStatus / deploy.staging
       # simply refuse), so leaving these blank is safe — set them to enable the code + deploy stages.
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
@@ -721,6 +815,9 @@ services:
       CERBOS_URL: http://cerbos:3592
       HUB_TOPOLOGY: central
       HUB_TLS_MODE: ${HUB_TLS_MODE:-off}
+      # D14-04: same shared secret as the site hub — this is the SAME codebase, so an omission here
+      # would make the central hub the one place where approved writes silently never resume.
+      APPROVAL_GRANT_SECRET: ${APPROVAL_GRANT_SECRET:-}
     volumes:
       - hub-central-data:/app/data
     depends_on:
@@ -796,6 +893,64 @@ services:
       redis-bot:
         condition: service_started
 
+  # MAIL-00 (design §4.3) — dev-stage fake-SMTP sink for the Zone A mail subsystem. Catches
+  # everything, sends nothing; the real Workspace-relay/Brevo/DNS work is staging-only (design §15
+  # R1-R3/R9 — MAIL-01A/01B). Keycloak/Alertmanager/platform all point their SMTP at
+  # `mailpit:1025` over this compose network — zero SMTP egress from the box in dev.
+  # SECURITY (binding, design A11): SMTP is internal-only; the UI+API (:8025) are published
+  # LOOPBACK-ONLY (`127.0.0.1:8025:8025`) and must NEVER be internet-exposed — this sink will
+  # hold live password-reset and magic-link mail. Reach it via
+  # `ssh -L 8025:localhost:8025 gda-aicenter` then browse http://localhost:8025.
+  # Pinned release (verified on gda-aicenter 2026-08-04: `docker run --rm
+  # axllent/mailpit:v1.30.6 version` -> "v1.30.6"; never :latest, same estate rule as waha/keycloak).
+  # Profile `mail-dev` MUST be in the GitHub repo variable COMPOSE_PROFILES (same change as this
+  # ticket) or deploy.yml's `up -d --remove-orphans` deletes this container on the next deploy —
+  # the whisper near-miss trap (design §4.3 / plan standing rule 2).
+  mailpit:
+    profiles: [mail-dev]
+    image: axllent/mailpit:v1.30.6
+    restart: unless-stopped
+    environment:
+      # Persist captured mail across restarts so Mailpit API evidence survives a redeploy.
+      MP_DATABASE: /data/mailpit.db
+    ports:
+      - "127.0.0.1:8025:8025" # UI+API — LOOPBACK ONLY, never publish this beyond the box
+    volumes:
+      - mailpit-data:/data
+    healthcheck:
+      # `readyz` auto-detects the container's own bind interface/port (see `mailpit readyz --help`).
+      test: ["CMD", "/mailpit", "readyz"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+
+  # MAIL-14 (design §7.6) — ClamAV, the FIRST actual instantiation of this pattern in the estate
+  # (until now it existed only as the webdesk-blueprint pattern). Scans inbound mail attachments
+  # before any user may download them (MAIL_INBOUND_SCAN=clamav; unscannable stays quarantined —
+  # fail-closed exposure). Own `scan` profile, deliberately NOT `mail-dev`: real inbound at
+  # staging still needs scanning after the Mailpit sink retires (design §4.3). Runbook note:
+  # webdesk C-02 upload scanning will later reuse this same service.
+  # Pinned release (verified on gda-aicenter 2026-08-04: `clamav/clamav:1.5.3` — digest-identical
+  # to `:stable` at pin time; never `:latest`). freshclam definitions persist to a named volume so
+  # a restart does not re-download the whole database.
+  # Profile `scan` MUST be in the GitHub repo variable COMPOSE_PROFILES (same orphan trap as
+  # mailpit above).
+  clamav:
+    profiles: [scan]
+    image: clamav/clamav:1.5.3
+    restart: unless-stopped
+    volumes:
+      - clamav-data:/var/lib/clamav
+    healthcheck:
+      # Official image ships clamdcheck.sh; exits 0 only once clamd is up AND has loaded signatures
+      # (the first boot can take a few minutes while freshclam downloads the database).
+      test: ["CMD", "/usr/local/bin/clamdcheck.sh"]
+      interval: 30s
+      timeout: 10s
+      retries: 20
+      start_period: 180s
+
 volumes:
   pg-data:
   pg-bot-data:
@@ -811,3 +966,5 @@ volumes:
   platform-files:
   sync-data:
   search-crawl-data:
+  mailpit-data:
+  clamav-data:

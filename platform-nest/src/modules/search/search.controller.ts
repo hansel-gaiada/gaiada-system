@@ -32,6 +32,8 @@ import type { PoolClient } from "pg";
 import { newId, withTenants } from "../../db";
 import { config } from "../../config";
 import { authorize, writeActivity } from "../../core/http";
+import { notifyBestEffort } from "../../core/client-notify";
+import { resolveAutomationApprovalDeciders } from "../../core/approval-deciders";
 import { secretEquals } from "../../core/secret-box";
 import { validateCustomFields } from "../../core/custom-fields";
 import { emitEvent } from "../../events/outbox.service";
@@ -4211,6 +4213,26 @@ export class SearchController {
       }
       await writeActivity(tenantId, req.principal.userId, "suspended", "search_change_proposal", id, {
         kind, approvalId, toolName, payloadHash, impact: "high",
+      });
+      // MAIL-06 (F1 fix) — a THIRD live automation_approvals insert site beyond the two the ticket
+      // names explicitly (automation-approvals.controller.ts's create() endpoint; hr.controller.ts's
+      // fileLeave()). origin='automation' here (per this file's own comment above: "the AUTOMATED
+      // twin", not a new origin), so it gets the SAME decider set + wording class
+      // (`approval.warning` — deciding this row does not itself execute; a second call to this
+      // endpoint re-drives it) as the canonical hub-gate suspension path. Left unfixed, F1 would
+      // still be true for exactly this origin/path.
+      const deciders = await resolveAutomationApprovalDeciders(tenantId);
+      await notifyBestEffort(tenantId, req.principal.userId, deciders, "approval.requested", {
+        title: reason,
+        // APPR-01: was the bare list — see automation-approvals.controller.ts's create() for the
+        // full rationale; this is the third live automation_approvals insert site (MAIL-06's note above).
+        href: `/approvals/${approvalId}`,
+        entityType: "automation_approval",
+        entityId: approvalId,
+        origin: "automation",
+        impact: "high",
+        tool: toolName,
+        severity: "warning",
       });
       reply.status(202).send({
         id, outcome: "suspended" as const, approvalId, payloadHash, kind,

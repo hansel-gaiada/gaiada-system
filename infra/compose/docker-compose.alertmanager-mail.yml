@@ -1,0 +1,84 @@
+# MAIL-02 — Alertmanager (D15) run as its OWN compose project, attached to the existing `gaiada`
+# stack network as an external network. This is the n8n precedent (automation/docker-compose.yml):
+# a separate compose project survives `docker compose -p gaiada ... up -d --remove-orphans` on the
+# main stack, because `--remove-orphans` only prunes services within the SAME project that aren't
+# in the current compose files — it never touches a different project's containers.
+#
+# WHY THIS FILE EXISTS SEPARATELY FROM docker-compose.observability.yml: the full WS9 observability
+# stack (Prometheus/Tempo/Loki/Grafana/exporters) is NOT up on gda-aicenter and stays opt-in. This
+# file brings up ONLY the two alertmanager services, reusing the SAME rendered config
+# (infra/observability/alertmanager/alertmanager.yml) and the SAME &am_env shape as
+# docker-compose.observability.yml, so promoting to the full stack later is a drop-in — nothing
+# alertmanager-specific lives twice except this file itself.
+#
+# Bring up:
+#   cd infra/compose
+#   docker compose -f docker-compose.alertmanager-mail.yml --env-file .env.alertmanager-mail up -d
+# Tear down (keeps the shared network + volumes of the main `gaiada` project untouched):
+#   docker compose -f docker-compose.alertmanager-mail.yml down
+name: gaiada-alertmanager
+
+services:
+  # One-shot init: renders alertmanager.yml with envsubst into a shared volume before Alertmanager
+  # starts (the prom/alertmanager image has no envsubst built in).
+  alertmanager-render:
+    image: alpine:3.21
+    environment: &am_env
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      ALERT_CHAT_ID: ${ALERT_CHAT_ID:-0}
+      SMTP_SMARTHOST: ${SMTP_SMARTHOST:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      # MAIL-02: default "true" (Alertmanager's own secure default) so an unset var never
+      # silently disables TLS against a real relay. The Mailpit sink leg sets this "false"
+      # explicitly in .env.alertmanager-mail.
+      SMTP_REQUIRE_TLS: ${SMTP_REQUIRE_TLS:-true}
+      ALERT_EMAIL_TO: ${ALERT_EMAIL_TO:-}
+      ALERT_WEBHOOK_URL: ${ALERT_WEBHOOK_URL:-http://ntfy/gaiada-alerts}
+      DEADMANSSWITCH_URL: ${DEADMANSSWITCH_URL:-}
+    entrypoint:
+      - /bin/sh
+      - -c
+      - >
+        apk add --no-cache gettext >/dev/null &&
+        mkdir -p /rendered/templates &&
+        cp /tpl/templates/* /rendered/templates/ &&
+        envsubst < /tpl/alertmanager.yml > /rendered/alertmanager.yml &&
+        echo "alertmanager config rendered"
+    volumes:
+      - ../observability/alertmanager/alertmanager.yml:/tpl/alertmanager.yml:ro
+      - ../observability/alertmanager/templates:/tpl/templates:ro
+      - alertmanager-config:/rendered
+    networks:
+      - stack
+
+  alertmanager:
+    image: prom/alertmanager:v0.28.0
+    restart: unless-stopped
+    command: ["--config.file=/etc/alertmanager/alertmanager.yml"]
+    environment: *am_env
+    volumes:
+      - alertmanager-config:/etc/alertmanager
+      - alertmanager-data:/alertmanager
+    ports:
+      # loopback-only (SSH tunnel) — mirrors every other admin UI on this box.
+      - "127.0.0.1:9093:9093"
+    depends_on:
+      alertmanager-render:
+        condition: service_completed_successfully
+    networks:
+      - stack
+
+networks:
+  # The main stack's implicit default network (project `gaiada`, no explicit `networks:` block in
+  # docker-compose.vps.yml => Compose names it "gaiada_default"). Referenced external so this
+  # project's alertmanager can resolve `mailpit`, `ntfy`, etc. by service name without merging
+  # into the main project (and therefore without being touched by its --remove-orphans runs).
+  stack:
+    name: gaiada_default
+    external: true
+
+volumes:
+  alertmanager-config:
+  alertmanager-data:

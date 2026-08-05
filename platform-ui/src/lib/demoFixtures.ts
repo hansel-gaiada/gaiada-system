@@ -1597,6 +1597,156 @@ function ok(json: unknown): DemoResult {
   return { status: 200, json };
 }
 
+// ---- MAIL-15 fixtures (design A12 — reserved-TLD addresses only, never a real production domain) ----
+// Shapes mirror `platform-nest/src/mail/admin-mail.controller.ts`'s `MailLogRow` and
+// `src/mail/thread.controller.ts`'s `ThreadMessageView` exactly, so DEMO_MODE and the live BFF are
+// interchangeable from the UI's point of view.
+const DEMO_MAIL_LOG = [
+  {
+    id: "demo-mail-1",
+    stream: "notify",
+    tenant_id: "co-agency",
+    user_id: "demo-hansel",
+    to_email: "admin@notify.gaiada.invalid",
+    template_key: "approval.warning",
+    subject: "Automation suspended: high-impact write in Acme Co",
+    entity_type: "automation_approval",
+    entity_id: "demo-approval-1",
+    status: "sent",
+    attempts: 1,
+    next_attempt_at: "2026-08-01T09:05:00.000Z",
+    last_error: null,
+    provider: "smtp",
+    provider_message_id: "demo-provider-msg-1",
+    queued_at: "2026-08-01T09:04:40.000Z",
+    provider_accepted_at: "2026-08-01T09:05:01.000Z",
+    delivered_at: null,
+    created_at: "2026-08-01T09:04:40.000Z",
+    updated_at: "2026-08-01T09:05:01.000Z",
+  },
+  {
+    id: "demo-mail-2",
+    stream: "notify",
+    tenant_id: "co-agency",
+    user_id: "demo-client-1",
+    to_email: "signer@client.gaiada.invalid",
+    template_key: "approval.actionable",
+    subject: "Your decision is needed: PRD sign-off for Q3 Launch",
+    entity_type: "pipeline_run",
+    entity_id: "run-demo-1",
+    status: "sent",
+    attempts: 1,
+    next_attempt_at: "2026-08-02T14:00:00.000Z",
+    last_error: null,
+    provider: "smtp",
+    provider_message_id: "demo-provider-msg-2",
+    queued_at: "2026-08-02T13:59:40.000Z",
+    provider_accepted_at: "2026-08-02T14:00:01.000Z",
+    delivered_at: null,
+    created_at: "2026-08-02T13:59:40.000Z",
+    updated_at: "2026-08-02T14:00:01.000Z",
+  },
+  {
+    id: "demo-mail-3",
+    stream: "notify",
+    tenant_id: "co-agency",
+    user_id: null,
+    to_email: "bounced@nowhere.gaiada.invalid",
+    template_key: "approval.warning",
+    subject: "Automation suspended: medium-impact write in Beta LLC",
+    entity_type: "automation_approval",
+    entity_id: "demo-approval-2",
+    status: "bounced",
+    attempts: 1,
+    next_attempt_at: "2026-08-03T11:00:00.000Z",
+    last_error: "NDR: mailbox unavailable",
+    provider: "smtp",
+    provider_message_id: "demo-provider-msg-3",
+    queued_at: "2026-08-03T10:59:40.000Z",
+    provider_accepted_at: "2026-08-03T11:00:01.000Z",
+    delivered_at: null,
+    created_at: "2026-08-03T10:59:40.000Z",
+    updated_at: "2026-08-03T11:05:00.000Z",
+  },
+  {
+    id: "demo-mail-4",
+    stream: "auth",
+    tenant_id: null,
+    user_id: "demo-hansel",
+    to_email: "hansel@staff.gaiada.invalid",
+    template_key: "auth.magic_link",
+    subject: "Your Gaiada sign-in link",
+    entity_type: null,
+    entity_id: null,
+    status: "suppressed",
+    attempts: 0,
+    next_attempt_at: "2026-08-03T08:00:00.000Z",
+    last_error: null,
+    provider: null,
+    provider_message_id: null,
+    queued_at: "2026-08-03T08:00:00.000Z",
+    provider_accepted_at: null,
+    delivered_at: null,
+    created_at: "2026-08-03T08:00:00.000Z",
+    updated_at: "2026-08-03T08:00:00.000Z",
+  },
+];
+
+// MAIL-20 (design A15.2) — a bottom-posted reply under a quoted thread, so DEMO_MODE exercises
+// the render-side quote-collapse without a backend: the panel shows "Approved..." first and the
+// quoted history collapses behind "Show quoted history" (`components/mail/QuotedMessageBody.tsx`).
+// Shape mirrors the MAIL-19 corpus reference case `16-bottom-posted-oversize-quote` (a `>`-prefixed
+// quote run followed by the human's actual reply) at demo scale, not the 128 KiB intake-cap scale.
+const DEMO_QUOTED_REPLY_TEXT = [
+  "> On Mon, 3 Aug 2026, Gaiada Platform wrote: PRD sign-off requested for Q3 Launch.",
+  "> On Mon, 3 Aug 2026, Gaiada Platform wrote: scope covers phases 1-2 of the rollout.",
+  "> On Mon, 3 Aug 2026, Gaiada Platform wrote: budget line attached for reference.",
+  "",
+  "Approved. Please proceed with the milestone payment so we can move forward.",
+  "",
+  "-- ",
+  "Dita",
+].join("\n");
+
+function mailThreadForEntity(entityType: string, entityId: string) {
+  if (entityType === "pipeline_run" && entityId === "run-demo-1") {
+    return [
+      {
+        id: "demo-mail-msg-1",
+        mailLogId: "demo-mail-2",
+        fromEmail: "signer@client.gaiada.invalid",
+        senderVerified: false as const,
+        provenance: "inbound-email" as const,
+        subject: "Re: Your decision is needed: PRD sign-off for Q3 Launch",
+        bodyText: "Looks good — signing off shortly, just confirming scope with my team first.",
+        bodyHtmlSanitized: "<p>Looks good — signing off shortly, just confirming scope with my team first.</p>",
+        sizeBytes: 812,
+        receivedAt: "2026-08-02T15:30:00.000Z",
+        attachments: [],
+      },
+      {
+        id: "demo-mail-msg-2",
+        mailLogId: "demo-mail-2",
+        fromEmail: "dita@client-one.invalid",
+        senderVerified: false as const,
+        provenance: "inbound-email" as const,
+        subject: "Re: Your decision is needed: PRD sign-off for Q3 Launch",
+        bodyText: DEMO_QUOTED_REPLY_TEXT,
+        bodyHtmlSanitized: null,
+        sizeBytes: DEMO_QUOTED_REPLY_TEXT.length,
+        receivedAt: "2026-08-02T16:10:00.000Z",
+        attachments: [],
+      },
+    ];
+  }
+  return [];
+}
+
+function mailThreadFor(mailLogId: string) {
+  if (mailLogId === "demo-mail-2") return mailThreadForEntity("pipeline_run", "run-demo-1").map((m) => m);
+  return [];
+}
+
 // Resolve the current demo identity based on the logged-in userId.
 function getCurrentDemoIdentity(userId: string) {
   if (userId === DEMO_USER_SEARCH_STAFF_ID) return ME_SEARCH_STAFF;
@@ -1915,6 +2065,36 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
   const decideMatch = p.match(/^\/api\/[^/]+\/modules\/agency\/approvals\/([^/]+)\/decide$/);
   if (decideMatch && m === "POST") return ok({ id: decideMatch[1], status: "approved" });
 
+  // APPR-01 — single-approval read backing `/approvals/[id]` (agency origin). Placed AFTER the
+  // pending/decided/decide matches above so their literal path segments are consumed first; by the
+  // time this generic `:approvalId` matcher runs, "pending"/"decided"/".../decide" have already
+  // returned. Sourced from the SAME `APPROVALS_PENDING`/`APPROVALS_DECIDED`/`CAMPAIGNS` arrays the
+  // list endpoints use, mapped onto the real backend's camelCase detail shape
+  // (`agency.controller.ts`'s new `approvalDetail()`).
+  const agencyApprovalDetailMatch = p.match(/^\/api\/([^/]+)\/modules\/agency\/approvals\/([^/]+)$/);
+  if (agencyApprovalDetailMatch && m === "GET") {
+    if (agencyApprovalDetailMatch[1] !== "co-agency") return { status: 404, json: { error: "module agency not enabled" } };
+    const id = agencyApprovalDetailMatch[2];
+    const pending = APPROVALS_PENDING.find((a) => a.id === id);
+    if (pending) {
+      return ok({
+        id: pending.id, subject: pending.subject, campaignId: pending.campaignId, campaign: pending.campaign,
+        assetId: null, status: "pending", requestedBy: "u-pm", requestedByName: "Dewi Santoso",
+        decidedBy: null, decidedByName: null, decidedAt: null, createdAt: pending.created_at,
+      });
+    }
+    const decided = APPROVALS_DECIDED.find((a) => a.id === id);
+    if (decided) {
+      const camp = CAMPAIGNS.find((c) => c.name === decided.campaign);
+      return ok({
+        id: decided.id, subject: decided.subject, campaignId: camp?.id ?? "cam-1", campaign: decided.campaign,
+        assetId: null, status: decided.decision, requestedBy: "u-pm", requestedByName: "Dewi Santoso",
+        decidedBy: DEMO_USER_ID, decidedByName: decided.decided_by, decidedAt: decided.decided_at, createdAt: decided.decided_at,
+      });
+    }
+    return { status: 404, json: { error: "approval not found" } };
+  }
+
   // ---- WSUX-3 cross-company My-Work tasks (lib/agenda.ts, `GET /api/tasks/mine`) ----
   // Union shim demo leg: base ALL_TASKS (assignee_id) + PM poly-assignee tasks,
   // tagged with their owning company, mirroring tasks-mine.controller.ts's
@@ -2098,6 +2278,32 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
   if (p.match(/^\/api\/[^/]+\/compliance-gates\/[^/]+$/)) return ok({ ok: true });
   if (p.match(/^\/api\/[^/]+\/audit$/)) return ok(ACTIVITY);
 
+  // ---- MAIL-15 — mail log + entity threads (lib/mail.ts) ----
+  // A12: fixture addresses use the reserved TLD `*.gaiada.invalid`, same as the compiled backend
+  // defaults — never a real domain, even in demo data.
+  const mailThreadMatch = p.match(/^\/api\/admin\/mail\/log\/([^/]+)\/thread$/);
+  if (mailThreadMatch) return ok({ mailLogId: mailThreadMatch[1], messages: mailThreadFor(mailThreadMatch[1]) });
+  const mailDetailMatch = p.match(/^\/api\/admin\/mail\/log\/([^/]+)$/);
+  if (mailDetailMatch) {
+    const row = DEMO_MAIL_LOG.find((r) => r.id === mailDetailMatch[1]);
+    if (!row) return { status: 404, json: { error: "mail log entry not found" } };
+    return ok(row);
+  }
+  if (p === "/api/admin/mail/log") {
+    return ok({ rows: DEMO_MAIL_LOG, limit: 100, offset: 0 });
+  }
+  const portalMailThreadMatch = p.match(/^\/api\/[^/]+\/portal\/mail\/threads$/);
+  if (portalMailThreadMatch) {
+    const runId = url.searchParams.get("runId") ?? "";
+    return ok({ entityType: "pipeline_run", entityId: runId, messages: mailThreadForEntity("pipeline_run", runId) });
+  }
+  const mailThreadsMatch = p.match(/^\/api\/[^/]+\/mail\/threads$/);
+  if (mailThreadsMatch) {
+    const entityType = url.searchParams.get("entityType") ?? "";
+    const entityId = url.searchParams.get("entityId") ?? "";
+    return ok({ entityType, entityId, messages: mailThreadForEntity(entityType, entityId) });
+  }
+
   // ---- F2 work-activity feed (lib/activity.ts) ----
   const workActivityMatch = p.match(/^\/api\/[^/]+\/work-activity$/);
   if (workActivityMatch) {
@@ -2137,6 +2343,27 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
     if (row && b.decision) { row.status = b.decision; row.decided_by = DEMO_USER_ID; row.decided_at = "2026-07-22T09:00:00Z"; }
     return ok({ id: autoApprovalDecide[1], status: row?.status ?? "approved" });
   }
+  // APPR-01 — single-approval read backing `/approvals/[id]` (automation/agent/hr origin). Must be
+  // an explicit fixture, not left to the file's final GET catch-all (`ok([])`, an empty ARRAY —
+  // truthy in JS, which is exactly the bug `lib/approvals.ts`'s `isRowShaped()` guard exists for):
+  // an id with no fixture here needs a real 404 so the dual-fetch fallback in `getApprovalDetail`
+  // correctly falls through to the agency lookup instead of misreporting "found".
+  const autoApprovalDetailMatch = p.match(/^\/api\/[^/]+\/automation-approvals\/([^/]+)$/);
+  if (autoApprovalDetailMatch && m === "GET") {
+    const row = AUTOMATION_APPROVALS.find((a) => (a as { id: string }).id === autoApprovalDetailMatch[1]);
+    if (!row) return { status: 404, json: { error: "approval not found" } };
+    const r = row as Record<string, unknown>;
+    return ok({
+      id: r.id, workflowId: r.workflow_id, toolName: r.tool_name, toolArgs: r.tool_args,
+      impact: r.impact, reason: r.reason, status: r.status, origin: r.origin, agentName: r.agent_name,
+      requestedBy: r.requested_by, requestedByName: r.requested_by === "system" ? "System" : "Clement Hansel",
+      decidedBy: r.decided_by, decidedByName: r.decided_by ? "Clement Hansel" : null,
+      decidedAt: r.decided_at, createdAt: r.created_at,
+      executionStatus: r.execution_status ?? null, executedAt: r.executed_at ?? null, executedBy: r.executed_by ?? null,
+      executionError: r.execution_error ?? null, executionResult: r.execution_result ?? null, executionAttempts: r.execution_attempts ?? null,
+    });
+  }
+
   const autoApprovalsMatch = p.match(/^\/api\/([^/]+)\/automation-approvals$/);
   if (autoApprovalsMatch) {
     if (m === "POST") {

@@ -60,6 +60,18 @@ import { AppraisalsController } from "./modules/reports/appraisals.controller"; 
 import { PrintPayloadController } from "./modules/reports/print-payload.controller"; // TR-21
 import { McpToolsController } from "./modules/mcp-tools.controller";
 import { ModuleCatalogController } from "./modules/module-catalog.controller";
+// MAIL-04 — core mail infra (src/mail/, design A1: same class as src/events/, no ModuleContract
+// registration / no per-tenant enable gate). AdminMailController is the elevated-only
+// GET /api/admin/mail/log[/:id] read surface (§6.1/§8A); MailWebhookController is the
+// unauthenticated-by-session, token-only delivery-event intake (§7.7) — deliberately NOT under
+// AuthGuard, same shape as PrintPayloadController's root, session-less route.
+import { AdminMailController } from "./mail/admin-mail.controller";
+import { MailWebhookController } from "./mail/webhook.controller";
+// MAIL-13 — inbound system-mail threads (design §7.6). MailInboundController is the second
+// session-less, token-only provider door (the untrusted-input one); MailThreadController is the
+// entity-authorized read surface (A10) plus the scan-gated quarantine download.
+import { MailInboundController } from "./mail/inbound.controller";
+import { MailThreadController } from "./mail/thread.controller";
 
 @Module({
   controllers: [
@@ -101,6 +113,12 @@ import { ModuleCatalogController } from "./modules/module-catalog.controller";
     // Compiled-in module list for the settings UI (see the controller header for why it is
     // NOT gated on per-tenant enablement).
     ModuleCatalogController,
+    // MAIL-04 (design §6.1/§7.7/§8A) — core mail infra's two controllers.
+    AdminMailController,
+    MailWebhookController,
+    // MAIL-13 (design §7.6/§8A/A10) — inbound intake + entity-authorized thread reads.
+    MailInboundController,
+    MailThreadController,
   ],
 })
 export class AppModule {}

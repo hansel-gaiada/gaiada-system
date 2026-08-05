@@ -79,6 +79,9 @@ export async function decideApprovalItem(
     return { ok: false, error: (e as Error).message };
   }
   revalidatePath("/approvals");
+  // APPR-01: the per-approval detail page (`/approvals/[id]`) needs its own revalidation — a
+  // no-op for every OLDER caller (the unified inbox list) that never visits that path.
+  revalidatePath(`/approvals/${id}`);
   revalidatePath("/");
   revalidatePath("/departments");
   return { ok: true };

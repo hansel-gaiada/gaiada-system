@@ -3,13 +3,24 @@
   "enabled": true,
   "displayName": "Gaiada",
   "attributes": {
-    "gaiada.note": "Starter realm imported on first boot (--import-realm). Matches docs/runbooks/idp-keycloak.md. AFTER import: (1) regenerate the gaiada-platform client secret in the admin console and wire it into the platform, (2) confirm MFA is enforced, (3) flip PLATFORM_AUTH_MODE=oidc. Leaving AUTH_MODE=dev keeps this realm dormant."
+    "gaiada.note": "Starter realm imported on first boot (--import-realm). Matches docs/runbooks/idp-keycloak.md. AFTER import: (1) regenerate the gaiada-platform client secret in the admin console and wire it into the platform, (2) confirm MFA is enforced, (3) flip PLATFORM_AUTH_MODE=oidc, (4) run ./keycloak/configure-smtp.sh once (see gaiada.smtp-note) — the smtpServer block below is NOT live-substituted by the importer.",
+    "gaiada.smtp-note": "MAIL-03 (ex-Q-V6, settled dev-provable): Keycloak's realm-import (DirImportProvider, KC 26.0.8) does NOT expand ${env.*} placeholders in smtpServer or anywhere else in an imported realm file — proven by importing a throwaway realm with smtpServer.host='${env.ZZZ_TEST}' and finding the literal string, unexpanded, in the persisted realm. The smtpServer values below are therefore committed as an honest, working DEV DEFAULT (the Mailpit sink), not a template the importer fills in. A fresh box still needs one explicit step after import: run `./keycloak/configure-smtp.sh` (reads the same KC_SMTP_* env the keycloak service container sees) to push real values via kcadm. Re-run it any time KC_SMTP_* changes; import alone will not pick up a change."
   },
 
   "verifyEmail": true,
   "loginWithEmailAllowed": true,
   "registrationAllowed": false,
   "resetPasswordAllowed": true,
+
+  "smtpServer": {
+    "host": "mailpit",
+    "port": "1025",
+    "from": "no-reply@auth.gaiada.invalid",
+    "fromDisplayName": "Gaiada Auth (dev)",
+    "auth": "false",
+    "ssl": "false",
+    "starttls": "false"
+  },
 
   "accessTokenLifespan": 3600,
   "ssoSessionIdleTimeout": 36000,

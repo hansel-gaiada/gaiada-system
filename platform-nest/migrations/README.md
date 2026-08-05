@@ -180,3 +180,20 @@ at it, run `node dist/db/migrate.js`, confirm the ordered `applied:` list and ex
    remain the two permanently-orphaned reservation gaps for this program — still do NOT fill them.
    Registered in `src/modules/reports/index.ts`'s `migrations` array. **Next unused is `0070`** —
    re-verify with `ls migrations | sort | tail` before trusting that.
+
+   **2026-08-04 update (MAIL-04 mail core) — this log had drifted by SEVEN numbers.** The entry
+   above reported "next unused is `0070`"; the real head at implementation time was
+   `0075_client_portal.sql`, and `0070`–`0075` had all been consumed by work that never appended
+   here (`0070` is claimed by WD-23A-1's then-staged Google-OAuth file, `0071_it_network_discovery`,
+   `0074_pipeline_runs_backfill_client_from_meeting`, `0075_client_portal`, …). The mail subsystem's
+   ticket plan was written against `0076` on that stale basis and **`0076` was itself taken
+   mid-session** by a concurrent session landing `0076_core_google_oauth_states.sql` (WD-23A-1).
+   MAIL-04 therefore shipped as **`0077_mail_core.sql`** (`mail_log`, `mail_suppressions`,
+   `mail_messages` — GLOBAL, no RLS per design §6.1, zero backfill DML). `0058`/`0059` remain the
+   two permanently-orphaned gaps — still do NOT fill them. **Next unused is `0078`.**
+
+   The standing lesson, now demonstrated twice in one day: **this file is a record, not an
+   authority.** Multiple sessions share one working tree and land migrations concurrently, so a
+   number written in any plan or in this log is a hint that can go stale between planning and DDL.
+   Always run `ls migrations | sort | tail` immediately before naming a migration file, and append
+   here in the same change.

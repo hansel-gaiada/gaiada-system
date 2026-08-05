@@ -1,0 +1,42 @@
+{
+  "_meta": {
+    "title": "Malicious attachment (EICAR) alongside a clean one",
+    "covers": "§7.6 attachment quarantine + scan gate (consumes MAIL-14); the ticket AC 'EICAR ⇒ infected, download blocked'",
+    "expect": "204; threaded; the EICAR attachment is stored with scanStatus='infected' and fileRef=null (bytes are DISCARDED, never written to disk) and its download 403s at every privilege including admin; the clean sibling is scanStatus='clean' and downloadable. `Content: \"@eicar\"` is a loader directive — the literal EICAR signature is deliberately NOT committed to this repository (see __fixtures__/inbound/index.ts)."
+  },
+  "items": [
+    {
+      "Uuid": ["c1d0a1b2-0000-4000-8000-00000000a014"],
+      "MessageId": "<eicar-14-{{RUN}}@attacker.invalid>",
+      "From": { "Name": "Dita Prameswari", "Address": "dita@client-one.invalid" },
+      "To": [{ "Name": "", "Address": "reply+{{TOKEN}}@{{REPLY_DOMAIN}}" }],
+      "Cc": [],
+      "Recipients": ["reply+{{TOKEN}}@{{REPLY_DOMAIN}}"],
+      "SentAtDate": "Tue, 04 Aug 2026 12:30:00 +0800",
+      "Subject": "Re: Approval needed — signed copy attached",
+      "RawTextBody": "Signed copy attached, plus the revised notes.",
+      "RawHtmlBody": "<p>Signed copy attached, plus the revised notes.</p>",
+      "ExtractedMarkdownMessage": "Signed copy attached, plus the revised notes.",
+      "Attachments": [
+        {
+          "Name": "signed-scope.txt",
+          "ContentType": "text/plain",
+          "ContentLength": 18,
+          "ContentID": null,
+          "DownloadToken": "fixture-token-14a",
+          "Content": "c2lnbmVkIGJ5IHRoZSBjbGllbnQ="
+        },
+        {
+          "Name": "invoice-final.doc",
+          "ContentType": "application/msword",
+          "ContentLength": 68,
+          "ContentID": null,
+          "DownloadToken": "fixture-token-14b",
+          "Content": "@eicar"
+        }
+      ],
+      "Headers": { "Message-Id": "<eicar-14-{{RUN}}@attacker.invalid>" },
+      "SpamScore": 4.2
+    }
+  ]
+}

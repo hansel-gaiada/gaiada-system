@@ -52,8 +52,10 @@ jobs:
       # gda-aicenter trial adds the host-data overlay (Postgres/Redis/Ollama live on the host)
       # by setting COMPOSE_FILES to include docker-compose.hostdata.yml.
       COMPOSE_FILES: ${{ vars.COMPOSE_FILES || '-f docker-compose.vps.yml' }}
-      # Optional lanes, comma-separated (data,bot,auth,multisite,whisper,jobs). Docker Compose
-      # reads COMPOSE_PROFILES natively, so this needs no --profile flags. Empty = core only.
+      # Optional lanes, comma-separated (data,bot,auth,multisite,whisper,jobs,mail-dev,scan).
+      # Docker Compose reads COMPOSE_PROFILES natively, so this needs no --profile flags.
+      # Empty = core only. mail-dev = MAIL-00 Mailpit sink; scan = MAIL-14 ClamAV — both MUST be
+      # listed here (repo variable) or this job's `up -d --remove-orphans` deletes them.
       COMPOSE_PROFILES: ${{ vars.COMPOSE_PROFILES || '' }}
       COMPONENTS: >-
         wa-chat-bot mcp-hub ai-agents ai-gateway-go sync-engine-go

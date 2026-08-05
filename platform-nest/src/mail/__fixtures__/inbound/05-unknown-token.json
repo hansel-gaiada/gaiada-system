@@ -1,0 +1,25 @@
+{
+  "_meta": {
+    "title": "Well-formed but UNKNOWN reply token (a token-guessing probe)",
+    "covers": "§7.6 corpus: unknown token (an A9 drop path)",
+    "expect": "204, zero mail_messages rows, unmatched counter. Response must be byte-identical to the matched case's response (204, empty body) so the endpoint is not a token oracle. The literal token below is fixed and deliberately not substituted — it can never exist."
+  },
+  "items": [
+    {
+      "Uuid": ["c1d0a1b2-0000-4000-8000-00000000a005"],
+      "MessageId": "<unknown-token-05-{{RUN}}@mail.stranger.invalid>",
+      "From": { "Name": "Probe", "Address": "probe@stranger.invalid" },
+      "To": [{ "Name": "", "Address": "reply+AAAAAAAAAAAAAAAAAAAAAA@{{REPLY_DOMAIN}}" }],
+      "Cc": [],
+      "Recipients": ["reply+AAAAAAAAAAAAAAAAAAAAAA@{{REPLY_DOMAIN}}"],
+      "SentAtDate": "Tue, 04 Aug 2026 10:05:00 +0800",
+      "Subject": "Re: (guessing)",
+      "RawTextBody": "Does this token exist?",
+      "RawHtmlBody": "<p>Does this token exist?</p>",
+      "ExtractedMarkdownMessage": "Does this token exist?",
+      "Attachments": [],
+      "Headers": { "Message-Id": "<unknown-token-05-{{RUN}}@mail.stranger.invalid>" },
+      "SpamScore": 5.1
+    }
+  ]
+}

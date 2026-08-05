@@ -1,0 +1,28 @@
+{
+  "_meta": {
+    "title": "Human reply that TALKS ABOUT a bounce — the NDR classifier's false-positive guard",
+    "covers": "not in the §7.6 list; added because the classifier's harmful failure direction is a FALSE POSITIVE (a crafted reply that suppresses a real human's address = mail denial-of-service against a real recipient)",
+    "expect": "204; threaded as an ORDINARY reply (entity_type/entity_id populated); mail_log.status is UNCHANGED and NO suppression row is written. One NDR-ish signal (subject wording) is never enough — classification needs two, and the RFC 3464 report fields are the half a hand-written fake would have to forge wholesale."
+  },
+  "items": [
+    {
+      "Uuid": ["c1d0a1b2-0000-4000-8000-00000000a015"],
+      "MessageId": "<lookalike-15-{{RUN}}@mail.client.invalid>",
+      "From": { "Name": "Dita Prameswari", "Address": "dita@client-one.invalid" },
+      "To": [{ "Name": "", "Address": "reply+{{TOKEN}}@{{REPLY_DOMAIN}}" }],
+      "Cc": [],
+      "Recipients": ["reply+{{TOKEN}}@{{REPLY_DOMAIN}}"],
+      "SentAtDate": "Tue, 04 Aug 2026 13:00:00 +0800",
+      "Subject": "Re: Undeliverable: my colleague says your mail keeps bouncing",
+      "RawTextBody": "Heads up - Budi told me your approval mail came back as undeliverable for him. Status 5.1.1 apparently. Anyway, I approve the scope.",
+      "RawHtmlBody": "<p>Heads up - Budi told me your approval mail came back as undeliverable for him. Anyway, I approve the scope.</p>",
+      "ExtractedMarkdownMessage": "Heads up - Budi told me your approval mail came back as undeliverable for him.",
+      "Attachments": [],
+      "Headers": {
+        "Content-Type": "multipart/alternative; boundary=\"b2\"",
+        "Message-Id": "<lookalike-15-{{RUN}}@mail.client.invalid>"
+      },
+      "SpamScore": 1.2
+    }
+  ]
+}

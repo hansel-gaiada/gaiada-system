@@ -1,0 +1,29 @@
+{
+  "_meta": {
+    "title": "Relay NDR / hard bounce (RFC 3462 multipart/report + RFC 3464 delivery-status fields, 5.1.1)",
+    "covers": "§7.6 corpus: a relay NDR/bounce shape (feeds the §7.7 bounce-capture path)",
+    "expect": "204; mail_log.status flips to 'bounced' and ONE mail_suppressions row appears for the original recipient; the NDR is stored with a NULL entity so it can never render as a human reply on an approval/portal surface — it is visible only through the admin log thread. FIXTURE SHAPE, not a real relay NDR: §15 R4 is the register row that verifies the real format."
+  },
+  "items": [
+    {
+      "Uuid": ["c1d0a1b2-0000-4000-8000-00000000a013"],
+      "MessageId": "<ndr-13-{{RUN}}@relay.provider.invalid>",
+      "From": { "Name": "Mail Delivery Subsystem", "Address": "MAILER-DAEMON@relay.provider.invalid" },
+      "To": [{ "Name": "", "Address": "reply+{{TOKEN}}@{{REPLY_DOMAIN}}" }],
+      "Cc": [],
+      "Recipients": ["reply+{{TOKEN}}@{{REPLY_DOMAIN}}"],
+      "SentAtDate": "Tue, 04 Aug 2026 12:00:00 +0800",
+      "Subject": "Delivery Status Notification (Failure)",
+      "RawTextBody": "Your message could not be delivered to one or more recipients.\n\nReporting-MTA: dns; relay.provider.invalid\n\nFinal-Recipient: rfc822; someone@client-two.invalid\nAction: failed\nStatus: 5.1.1\nDiagnostic-Code: smtp; 550 5.1.1 The email account that you tried to reach does not exist.\n",
+      "RawHtmlBody": null,
+      "ExtractedMarkdownMessage": "Your message could not be delivered to one or more recipients.",
+      "Attachments": [],
+      "Headers": {
+        "Content-Type": "multipart/report; report-type=delivery-status; boundary=\"dsn-boundary\"",
+        "Auto-Submitted": "auto-replied",
+        "Message-Id": "<ndr-13-{{RUN}}@relay.provider.invalid>"
+      },
+      "SpamScore": 0.1
+    }
+  ]
+}

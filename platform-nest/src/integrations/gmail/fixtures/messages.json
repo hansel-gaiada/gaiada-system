@@ -1,0 +1,127 @@
+[
+  {
+    "id": "m1a",
+    "threadId": "t1",
+    "labelIds": ["INBOX", "UNREAD"],
+    "headers": {
+      "from": "team@example.invalid",
+      "to": "staff@gaiada.invalid",
+      "subject": "Welcome to the fixture corpus",
+      "date": "2026-07-31T10:00:00.000Z"
+    },
+    "parts": [
+      { "mimeType": "text/plain", "body": "This is a single-part plain-text fixture message." }
+    ],
+    "attachments": []
+  },
+  {
+    "id": "m2a",
+    "threadId": "t2",
+    "labelIds": ["INBOX"],
+    "headers": {
+      "from": "billing@example.invalid",
+      "to": "staff@gaiada.invalid",
+      "subject": "Invoice #A-1042 attached, and a reply",
+      "date": "2026-08-01T17:30:00.000Z"
+    },
+    "parts": [
+      { "mimeType": "text/plain", "body": "Please find invoice A-1042 attached." }
+    ],
+    "attachments": [
+      { "attachmentId": "att-1042", "filename": "invoice-A-1042.pdf", "mimeType": "application/pdf", "sizeBytes": 48213 }
+    ]
+  },
+  {
+    "id": "m2b",
+    "threadId": "t2",
+    "labelIds": ["INBOX"],
+    "headers": {
+      "from": "staff@gaiada.invalid",
+      "to": "billing@example.invalid",
+      "subject": "Re: Invoice #A-1042 attached, and a reply",
+      "date": "2026-08-01T17:45:00.000Z"
+    },
+    "parts": [
+      { "mimeType": "text/plain", "body": "Thanks, received — paying this week." }
+    ],
+    "attachments": []
+  },
+  {
+    "id": "m3a",
+    "threadId": "t3",
+    "labelIds": ["INBOX"],
+    "headers": {
+      "from": "digest@example.invalid",
+      "to": "staff@gaiada.invalid",
+      "subject": "Weekly digest (plain + html alternative)",
+      "date": "2026-08-02T08:00:00.000Z"
+    },
+    "parts": [
+      { "mimeType": "text/plain", "body": "Weekly digest: 3 updates this week." },
+      { "mimeType": "text/html", "body": "<p>Weekly digest: <b>3 updates</b> this week.</p>" }
+    ],
+    "attachments": []
+  },
+  {
+    "id": "m4a",
+    "threadId": "t4",
+    "labelIds": ["INBOX", "Label_Clients"],
+    "headers": {
+      "from": "legal@example.invalid",
+      "to": "staff@gaiada.invalid",
+      "subject": "Contract renewal — please review the attached redline",
+      "date": "2026-08-03T14:02:00.000Z"
+    },
+    "parts": [
+      { "mimeType": "text/plain", "body": "Attached is the redlined renewal for review." }
+    ],
+    "attachments": [
+      { "attachmentId": "att-redline", "filename": "renewal-redline.docx", "mimeType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "sizeBytes": 15320 }
+    ]
+  },
+  {
+    "id": "m5a",
+    "threadId": "t5",
+    "labelIds": ["INBOX"],
+    "headers": {
+      "from": "pm@example.invalid",
+      "to": "staff@gaiada.invalid",
+      "subject": "kickoff",
+      "date": "2026-08-04T09:00:00.000Z"
+    },
+    "parts": [
+      { "mimeType": "text/plain", "body": "Kicking off the project — agenda attached below." }
+    ],
+    "attachments": []
+  },
+  {
+    "id": "m5b",
+    "threadId": "t5",
+    "labelIds": ["INBOX"],
+    "headers": {
+      "from": "staff@gaiada.invalid",
+      "to": "pm@example.invalid",
+      "subject": "Re: kickoff",
+      "date": "2026-08-04T09:07:00.000Z"
+    },
+    "parts": [
+      { "mimeType": "text/plain", "body": "Sounds good, see you there." }
+    ],
+    "attachments": []
+  },
+  {
+    "id": "m5c",
+    "threadId": "t5",
+    "labelIds": ["INBOX", "UNREAD"],
+    "headers": {
+      "from": "pm@example.invalid",
+      "to": "staff@gaiada.invalid",
+      "subject": "Re: Re: kickoff — third reply in the thread",
+      "date": "2026-08-04T09:15:00.000Z"
+    },
+    "parts": [
+      { "mimeType": "text/plain", "body": "One more thing — moved the room to 3B." }
+    ],
+    "attachments": []
+  }
+]

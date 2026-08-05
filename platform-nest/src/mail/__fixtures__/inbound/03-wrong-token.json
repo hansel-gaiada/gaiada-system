@@ -1,0 +1,25 @@
+{
+  "_meta": {
+    "title": "Valid-looking sender paired with the WRONG reply_token (another mail's token)",
+    "covers": "§7.6 corpus: a valid-looking sender paired with a wrong reply_token",
+    "expect": "204; the message threads onto the mail_log row that owns {{TOKEN_B}} — NOT onto the thread the sender address belongs to. This is the pinned proof that the token routes and the sender does not."
+  },
+  "items": [
+    {
+      "Uuid": ["c1d0a1b2-0000-4000-8000-00000000a003"],
+      "MessageId": "<wrong-token-03-{{RUN}}@mail.client.invalid>",
+      "From": { "Name": "Dita Prameswari", "Address": "dita@client-one.invalid" },
+      "To": [{ "Name": "", "Address": "reply+{{TOKEN_B}}@{{REPLY_DOMAIN}}" }],
+      "Cc": [],
+      "Recipients": ["reply+{{TOKEN_B}}@{{REPLY_DOMAIN}}"],
+      "SentAtDate": "Tue, 04 Aug 2026 09:25:00 +0800",
+      "Subject": "Re: Approval needed: Website scope sign-off",
+      "RawTextBody": "Replying about MY approval, but addressed with someone else's reply token.",
+      "RawHtmlBody": "<p>Replying about MY approval, but addressed with someone else's reply token.</p>",
+      "ExtractedMarkdownMessage": "Replying about MY approval, but addressed with someone else's reply token.",
+      "Attachments": [],
+      "Headers": { "Message-Id": "<wrong-token-03-{{RUN}}@mail.client.invalid>" },
+      "SpamScore": 0.6
+    }
+  ]
+}

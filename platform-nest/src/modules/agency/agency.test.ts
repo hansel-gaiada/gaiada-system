@@ -9,7 +9,7 @@ import { agencyModule } from "./index";
 import {
   recomputeRollups, syncMetricDefinitions, registerCoreRollupProvider, resetCoreRollupProviders, coreTaskRollups,
 } from "../../rollups/engine";
-import { initTestDb, teardownTestDb, TEST_URL } from "../../testing/setup";
+import { initTestDb, teardownTestDb, TEST_URL, adminPool } from "../../testing/setup";
 import {
   createCompany, createUser, addMembership, createRole, grantRole, createProject,
 } from "../../testing/fixtures";
@@ -206,5 +206,81 @@ describe.skipIf(!TEST_URL)("agency module (phase e2e)", () => {
     // 3 active members (manager, member, approver) × 8h × 60 = 1440 capacity minutes.
     expect(Number(util?.denominator)).toBe(1440);
     expect(Number(rows.find((r) => r.metric_key === "agency.deliverables.due_week")?.numerator)).toBeGreaterThanOrEqual(1);
+  });
+
+  // APPR-01 — the single-row read backing `platform-ui`'s `/approvals/[id]`, plus the href-parity
+  // pin (the whole point of this ticket: the emailed link must land ON the item, not the list).
+  describe("APPR-01: single-approval detail read + emitted href parity", () => {
+    it("a member (broad agency_approval `read` grant) reads one row by id; the response carries campaign context", async () => {
+      const create = await app.inject({
+        method: "POST", url: `/api/${agencyCo}/modules/agency/approvals`,
+        headers: asUser(member), payload: { campaignId, subject: "Detail-read probe" },
+      });
+      expect(create.statusCode).toBe(201);
+      const id = create.json().id as string;
+
+      const ok = await app.inject({ method: "GET", url: `/api/${agencyCo}/modules/agency/approvals/${id}`, headers: asUser(member) });
+      expect(ok.statusCode).toBe(200);
+      expect(ok.json()).toMatchObject({ id, subject: "Detail-read probe", campaignId, status: "pending" });
+    });
+
+    it("a caller with no membership in the tenant at all is denied — same refusal `pending`/`decided` give", async () => {
+      const create = await app.inject({
+        method: "POST", url: `/api/${agencyCo}/modules/agency/approvals`,
+        headers: asUser(member), payload: { campaignId, subject: "Denial probe" },
+      });
+      const id = create.json().id as string;
+      const stranger = await createUser("stranger@no-membership.test"); // no addMembership(agencyCo, ...) at all
+
+      const deniedDetail = await app.inject({ method: "GET", url: `/api/${agencyCo}/modules/agency/approvals/${id}`, headers: asUser(stranger) });
+      const deniedList = await app.inject({ method: "GET", url: `/api/${agencyCo}/modules/agency/approvals/pending`, headers: asUser(stranger) });
+      expect(deniedDetail.statusCode).toBe(deniedList.statusCode); // no weaker than the list
+      expect(deniedDetail.statusCode).toBe(403);
+    });
+
+    it("an unknown id 404s, and a REAL id read through a different agency-enabled tenant's path 404s too (RLS — never a leak)", async () => {
+      const create = await app.inject({
+        method: "POST", url: `/api/${agencyCo}/modules/agency/approvals`,
+        headers: asUser(member), payload: { campaignId, subject: "Cross-tenant probe" },
+      });
+      const id = create.json().id as string;
+
+      const unknown = await app.inject({ method: "GET", url: `/api/${agencyCo}/modules/agency/approvals/00000000-0000-0000-0000-000000000000`, headers: asUser(member) });
+      expect(unknown.statusCode).toBe(404);
+
+      const otherAgencyCo = await createCompany("Second Creative House", ["agency"]);
+      const otherMember = await createUser("mem2@creative.test");
+      await addMembership(otherAgencyCo, otherMember);
+      await grantRole(otherMember, await createRole("member"), "company", otherAgencyCo);
+      const crossTenant = await app.inject({ method: "GET", url: `/api/${otherAgencyCo}/modules/agency/approvals/${id}`, headers: asUser(otherMember) });
+      expect(crossTenant.statusCode).toBe(404); // RLS makes the row invisible under the wrong tenant, even though this caller CAN read agency_approvals in general
+    });
+
+    it("the emitted notification's payload.href is the id-bearing detail route, not the bare list", async () => {
+      const create = await app.inject({
+        method: "POST", url: `/api/${agencyCo}/modules/agency/approvals`,
+        headers: asUser(member), payload: { campaignId, subject: "Href parity probe" },
+      });
+      const id = create.json().id as string;
+      const row = await adminPool().query<{ payload: { href: string } }>(
+        `SELECT payload FROM notifications WHERE type = 'approval.requested' AND (payload->>'entityId') = $1`, [id],
+      );
+      expect(row.rows[0].payload.href).toBe(`/approvals/${id}`);
+    });
+
+    it("the SECOND agency_approvals insert site (asset submit-for-review) also emits the id-bearing href", async () => {
+      const asset = await app.inject({
+        method: "POST", url: `/api/${agencyCo}/modules/agency/campaigns/${campaignId}/assets`,
+        headers: asUser(member), payload: { name: "Href-parity asset" },
+      });
+      const submit = await app.inject({
+        method: "POST", url: `/api/${agencyCo}/modules/agency/assets/${asset.json().id}/submit`, headers: asUser(member),
+      });
+      const approvalId2 = submit.json().approvalId as string;
+      const row = await adminPool().query<{ payload: { href: string } }>(
+        `SELECT payload FROM notifications WHERE type = 'approval.requested' AND (payload->>'entityId') = $1`, [approvalId2],
+      );
+      expect(row.rows[0].payload.href).toBe(`/approvals/${approvalId2}`);
+    });
   });
 });

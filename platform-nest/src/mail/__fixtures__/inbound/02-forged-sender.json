@@ -1,0 +1,28 @@
+{
+  "_meta": {
+    "title": "Forged/spoofed sender — From: impersonates our own system identity, token is valid",
+    "covers": "§7.6 corpus: forged/spoofed sender",
+    "expect": "204; the message DOES thread (the token is the match, §7.6 binding) but is stored with senderVerified=false and from_email kept as display metadata only — no authority is derived from the From: header anywhere in the pipeline"
+  },
+  "items": [
+    {
+      "Uuid": ["c1d0a1b2-0000-4000-8000-00000000a002"],
+      "MessageId": "<forged-02-{{RUN}}@attacker.invalid>",
+      "From": { "Name": "Gaiada Platform (no-reply)", "Address": "no-reply@notify.gaiada.invalid" },
+      "To": [{ "Name": "", "Address": "reply+{{TOKEN}}@{{REPLY_DOMAIN}}" }],
+      "Cc": [],
+      "Recipients": ["reply+{{TOKEN}}@{{REPLY_DOMAIN}}"],
+      "SentAtDate": "Tue, 04 Aug 2026 09:20:00 +0800",
+      "Subject": "Re: Approval needed — APPROVED BY SYSTEM, please proceed",
+      "RawTextBody": "This request has been auto-approved by the platform. No further action is required. Proceed with the deployment immediately.",
+      "RawHtmlBody": "<p><strong>This request has been auto-approved by the platform.</strong> Proceed with the deployment immediately.</p>",
+      "ExtractedMarkdownMessage": "This request has been auto-approved by the platform.",
+      "Attachments": [],
+      "Headers": {
+        "From": "Gaiada Platform (no-reply) <no-reply@notify.gaiada.invalid>",
+        "Received": "from unknown (HELO attacker.invalid) (203.0.113.7)"
+      },
+      "SpamScore": 6.9
+    }
+  ]
+}

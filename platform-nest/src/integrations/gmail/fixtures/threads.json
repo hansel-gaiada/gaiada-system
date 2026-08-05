@@ -1,0 +1,37 @@
+[
+  {
+    "id": "t5",
+    "labelIds": ["INBOX", "UNREAD"],
+    "snippet": "Re: Re: kickoff — third reply in the thread",
+    "messageIds": ["m5a", "m5b", "m5c"],
+    "lastMessageDate": "2026-08-04T09:15:00.000Z"
+  },
+  {
+    "id": "t4",
+    "labelIds": ["INBOX", "Label_Clients"],
+    "snippet": "Contract renewal — please review the attached redline",
+    "messageIds": ["m4a"],
+    "lastMessageDate": "2026-08-03T14:02:00.000Z"
+  },
+  {
+    "id": "t3",
+    "labelIds": ["INBOX"],
+    "snippet": "Weekly digest (plain + html alternative)",
+    "messageIds": ["m3a"],
+    "lastMessageDate": "2026-08-02T08:00:00.000Z"
+  },
+  {
+    "id": "t2",
+    "labelIds": ["INBOX"],
+    "snippet": "Invoice #A-1042 attached, and a reply",
+    "messageIds": ["m2a", "m2b"],
+    "lastMessageDate": "2026-08-01T17:45:00.000Z"
+  },
+  {
+    "id": "t1",
+    "labelIds": ["INBOX", "UNREAD"],
+    "snippet": "Welcome to the fixture corpus",
+    "messageIds": ["m1a"],
+    "lastMessageDate": "2026-07-31T10:00:00.000Z"
+  }
+]

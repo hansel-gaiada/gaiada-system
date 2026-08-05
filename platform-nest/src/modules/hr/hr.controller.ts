@@ -21,6 +21,8 @@ import type { FastifyRequest } from "fastify";
 import { newId, withGlobal, withTenants } from "../../db";
 import { config } from "../../config";
 import { authorize, writeActivity } from "../../core/http";
+import { notifyBestEffort } from "../../core/client-notify";
+import { resolveAutomationApprovalDeciders } from "../../core/approval-deciders";
 import { emitEvent } from "../../events/outbox.service";
 import { AuthGuard } from "../../auth/guards";
 import { ModuleEnabledGuard } from "../module-enabled.guard";
@@ -457,6 +459,22 @@ export class HrController {
       { modules: ["hr"] },
     );
     await writeActivity(tenantId, req.principal.userId, "filed", "hr_leave_request", leaveRequestId, { subjectUserId, leaveType, minutes });
+    // MAIL-06 (F1 fix): this is the ONLY place an origin='hr' automation_approvals row is created
+    // (automation-approvals.controller.ts's create() endpoint restricts ORIGINS to automation|agent),
+    // so this is the one call site that must resolve the module='hr' decider set — company_admin +
+    // group_executive PLUS the providing unit's hr_manager (module_manager scoped module='hr',
+    // mirroring resource_automation_approval.yaml's WSD-2 rule; see approval-deciders.ts's header).
+    const deciders = await resolveAutomationApprovalDeciders(tenantId, "hr");
+    await notifyBestEffort(tenantId, req.principal.userId, deciders, "approval.requested", {
+      title: `${subjectName} requested ${leaveType} leave`,
+      // APPR-01: was the bare list — see automation-approvals.controller.ts's create() for the
+      // full rationale; this is the ONLY other automation_approvals insert site (origin='hr').
+      href: `/approvals/${approvalId}`,
+      entityType: "automation_approval",
+      entityId: approvalId,
+      origin: "hr",
+      impact: "medium",
+    });
     return { id: leaveRequestId, approvalId, status: "pending" };
   }
 

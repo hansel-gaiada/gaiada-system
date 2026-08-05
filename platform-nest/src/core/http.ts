@@ -7,6 +7,7 @@ import { newId, withTenants } from "../db";
 import { config } from "../config";
 import { auditDecision, sessionVersionCurrent, type Principal } from "../rbac/principal";
 import { check, type Resource } from "../rbac/cerbos";
+import { mailIntake } from "../mail/intake";
 
 /** RBAC gate: throws ForbiddenException (403) on deny, UnauthorizedException (401) on a
  *  revoked session for mutations (D11). Returns void on allow. */
@@ -64,7 +65,14 @@ function titleFromType(type: string): string {
     .replace(/\b\w/g, (c) => c.toUpperCase()) || "Notification";
 }
 
-/** Best-effort in-app notification (5c.3); skips self and non-members. */
+/** Best-effort in-app notification (5c.3); skips self and non-members.
+ *
+ *  MAIL-05 (design §7.2/A5): once the `notifications` row commits, this calls the mail tap
+ *  (`mailIntake`) exactly once — the ENTIRE mail-triggering surface. It runs AFTER `withTenants`
+ *  returns (so a mail failure can never roll back the notification insert — mail tables are
+ *  GLOBAL and go through their own `withGlobal` connection regardless) and is wrapped in
+ *  try/catch: a thrown mail error is logged loudly and NEVER rethrown, so it can never fail the
+ *  write path that called `notify()` to announce itself (test-pinned in `src/mail/tap.test.ts`). */
 export async function notify(
   tenantId: string,
   recipientId: string | null,
@@ -73,7 +81,8 @@ export async function notify(
   payload: NotificationPayload = {},
 ): Promise<void> {
   if (!recipientId || recipientId === actorId) return;
-  await withTenants([tenantId], async (c) => {
+  const notificationId = newId();
+  const committed = await withTenants([tenantId], async (c) => {
     // The recipient must belong to this tenant — as staff/service (company_memberships) OR as an
     // external client portal contact (client_contacts, W0).
     //
@@ -96,12 +105,20 @@ export async function notify(
        )`,
       [recipientId],
     );
-    if (!member.rows[0]) return;
+    if (!member.rows[0]) return null;
     const typed: NotificationPayload = { title: titleFromType(type), ...payload };
     await c.query(
       `INSERT INTO notifications (id, tenant_id, user_id, type, payload, origin_site)
        VALUES ($1, $2, $3, $4, $5, $6)`,
-      [newId(), tenantId, recipientId, type, JSON.stringify({ ...typed, actorId }), config.originSite],
+      [notificationId, tenantId, recipientId, type, JSON.stringify({ ...typed, actorId }), config.originSite],
     );
+    return typed;
   });
+  if (!committed) return;
+  try {
+    await mailIntake({ notificationId, tenantId, userId: recipientId, type, payload: committed });
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error(`[mail-intake] tap failed (type=${type}, recipient=${recipientId}):`, (err as Error)?.message ?? err);
+  }
 }

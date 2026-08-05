@@ -34,6 +34,98 @@ export interface ApprovalsResult {
   unavailable: boolean;
 }
 
+// APPR-01 — the `/approvals/[id]` detail page's reads. Mirrors `core/automation-approvals.
+// controller.ts`'s `detail()` and `modules/agency/agency.controller.ts`'s `approvalDetail()`
+// exactly (both new, this same ticket) — field names are camelCase on both ends by construction.
+export interface AutomationApprovalDetail {
+  id: string;
+  workflowId: string;
+  toolName: string;
+  toolArgs: unknown;
+  impact: string;
+  reason: string | null;
+  status: string;
+  origin: "automation" | "agent" | "hr";
+  agentName: string | null;
+  requestedBy: string | null;
+  requestedByName: string | null;
+  decidedBy: string | null;
+  decidedByName: string | null;
+  decidedAt: string | null;
+  createdAt: string;
+  executionStatus: string | null;
+  executedAt: string | null;
+  executedBy: string | null;
+  executionError: string | null;
+  executionResult: unknown;
+  executionAttempts: number | null;
+}
+
+export interface AgencyApprovalDetail {
+  id: string;
+  subject: string;
+  campaignId: string;
+  campaign: string;
+  assetId: string | null;
+  status: string;
+  requestedBy: string | null;
+  requestedByName: string | null;
+  decidedBy: string | null;
+  decidedByName: string | null;
+  decidedAt: string | null;
+  createdAt: string;
+}
+
+export type ApprovalDetail =
+  | { kind: "automation_approval"; origin: "automation" | "agent" | "hr"; data: AutomationApprovalDetail }
+  | { kind: "agency_approval"; origin: "agency"; data: AgencyApprovalDetail };
+
+// `isRowShaped` guards against DEMO_MODE's catch-all GET fallback (`demoFixtures.ts`'s final
+// `if (m === "GET") return ok([]);`) — an unmatched path 200s with an empty ARRAY, which is
+// truthy in JS. Without this guard a demo id with no fixture would be treated as "found" with
+// every field undefined instead of falling through to the null/404 branch, which is exactly the
+// class of bug CLAUDE.md's "frontend-first drift" trap warns about (a confident wrong render,
+// nothing throws). Real platform-nest responses never take this shape — `detail()`/
+// `approvalDetail()` return the row object or throw 404 — so this is pure demo-mode defense.
+function isRowShaped(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+
+async function getAutomationApprovalDetail(userId: string, tenantId: string, id: string): Promise<AutomationApprovalDetail | null> {
+  try {
+    const data = await platformFetch<unknown>(`/api/${tenantId}/automation-approvals/${id}`, userId);
+    return isRowShaped(data) ? (data as unknown as AutomationApprovalDetail) : null;
+  } catch (e) {
+    if (e instanceof PlatformError && e.status === 404) return null;
+    throw e;
+  }
+}
+
+async function getAgencyApprovalDetail(userId: string, tenantId: string, id: string): Promise<AgencyApprovalDetail | null> {
+  try {
+    const data = await platformFetch<unknown>(`/api/${tenantId}/modules/agency/approvals/${id}`, userId);
+    return isRowShaped(data) ? (data as unknown as AgencyApprovalDetail) : null;
+  } catch (e) {
+    if (e instanceof PlatformError && e.status === 404) return null;
+    throw e;
+  }
+}
+
+/** The `/approvals/[id]` route carries only an id — no `?kind=` (the emitted `payload.href` and
+ *  `entityHref()` both intentionally omit it, since a client-controlled query param would just be
+ *  another thing a hand-edited URL could get wrong). Automation is tried first: its `detail()`
+ *  fetches the row BEFORE authorizing, so a 404 there is a genuine "not an automation_approval in
+ *  this tenant" — safe to fall through to the agency lookup. Either leg's 403 is a REAL refusal
+ *  (the row exists and this caller may not read it) and propagates immediately, never swallowed
+ *  into "try the other kind" — that would risk misreporting a real approval as not-found. */
+export async function getApprovalDetail(userId: string, tenantId: string, id: string): Promise<ApprovalDetail | null> {
+  const automation = await getAutomationApprovalDetail(userId, tenantId, id);
+  if (automation) return { kind: "automation_approval", origin: automation.origin, data: automation };
+  const agency = await getAgencyApprovalDetail(userId, tenantId, id);
+  if (agency) return { kind: "agency_approval", origin: "agency", data: agency };
+  return null;
+}
+
 // Always fetches every origin server-side (no `origin` query param) — the
 // inbox needs full cross-origin counts for its facet chips regardless of
 // which chip is currently selected, so origin filtering happens client-side
