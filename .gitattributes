@@ -3,3 +3,8 @@
 # like a code bug rather than an encoding one. core.autocrlf already keeps the index at LF for
 # anyone using the default Windows setup; this makes it explicit and independent of local config.
 *.sh text eol=lf
+
+# Go source files must use LF line endings. Windows autocrlf converts them to CRLF on checkout,
+# which causes gofmt to flag them as needing formatting. This entry ensures committed LF is
+# preserved in the working tree (preventing CRLF conversion).
+*.go text eol=lf
