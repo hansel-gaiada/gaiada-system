@@ -23,7 +23,40 @@ reconstructed from this table alone. Format defined in [`VERSIONING.md`](./VERSI
 > `01.012.0031a`. Per VERSIONING rule 5 `/VERSION` is authoritative; the `MODULES.md` line is now
 > corrected and should be moved with every cut.
 
-### `Alpha 01.019.0047a` — 2026-08-06 — the loan approval path, actually executed
+### `Alpha 01.019.0047b` — 2026-08-06 — re-cut: an unordered LIMIT 1 picked a different constraint on the box
+
+`0047a` never deployed. Every image built and signed, the new `.env` precheck passed (its first real
+outing, and it did its job), and the deploy then failed at **Run migrations**:
+
+    migration 0083_approval_status_cancelled.sql failed:
+      constraint "automation_approvals_status_check" for relation "automation_approvals" already exists
+
+`0083` located the constraint to widen the way 0028 did for `origin` — by substring-matching
+`pg_get_constraintdef` for `%status%` and `%pending%`, with `LIMIT 1`. On this table that matches TWO
+constraints, because 0078's `CHECK (execution_status IN ('not_applicable','pending',...))` contains
+both: "status" as the tail of "execution_status", and "pending" outright. With no `ORDER BY`, which
+one `LIMIT 1` returns is undefined — it chose the `status` constraint on a freshly-migrated test
+database, so the local suite went green, and the `execution_status` one on the live box, where it
+dropped that and then collided with the untouched `status` constraint it had never looked at.
+
+**Nothing was damaged**: migrations are transactional, so the whole of `0083` rolled back, and all
+four CHECK constraints were confirmed intact afterwards. The deploy rolled back to `0045a`.
+
+Two lessons, and the second is the one worth keeping:
+
+1. Identify a constraint by its COLUMN SET (`conkey`), not by substrings of its definition. The fix
+   matches `array_agg(attname) = ARRAY['status']` — a single-column CHECK on `status` and nothing
+   else — which cannot be fooled by a column whose name merely ends in "status".
+2. **A green local suite proved nothing here, because the defect was nondeterminism.** An unordered
+   `LIMIT 1` is a coin flip that can land differently per database, so "it applied cleanly to a fresh
+   test DB" was luck rather than evidence. The fix was therefore dry-run against the LIVE schema —
+   the only database that actually reproduced the failure — inside a rolled-back transaction that
+   also asserted `cancelled` is accepted (6 real rows), junk is still refused, the other three
+   constraints survive, and a second application is harmless.
+
+Same module set as `0047a`, so the module-reference counter holds and only the revision letter moves.
+
+### `Alpha 01.019.0047a` — 2026-08-06 — SUPERSEDED by 0047b, no deployment (migration 0083 failed)
 
 A verification cut, not a feature cut. `0045a` deployed employee loans and this closes what that
 release could not prove: `loans.test.ts` now drives approval → schedule → ledger → settle through
