@@ -162,7 +162,8 @@ describe("mail inbound — text + header sanitizers", () => {
   });
 
   it("caps a body and says so, rather than silently truncating", () => {
-    const { text, truncatedChars } = sanitizeInboundText("x".repeat(5000), 1000);
+    const { text, truncated, truncatedChars } = sanitizeInboundText("x".repeat(5000), 1000);
+    expect(truncated).toBe(true);
     expect(truncatedChars).toBe(4000);
     expect(text).toContain("[truncated at intake: 4000 characters omitted here]");
   });
@@ -194,10 +195,16 @@ describe("mail inbound — text + header sanitizers", () => {
   });
 
   it("[MAIL-19 / A15] an under-cap body is stored verbatim — no marker, zero truncatedChars", () => {
-    const { text, truncatedChars } = sanitizeInboundText("short and sweet", 1000);
+    const { text, truncated, truncatedChars } = sanitizeInboundText("short and sweet", 1000);
+    expect(truncated).toBe(false);
     expect(truncatedChars).toBe(0);
     expect(text).toBe("short and sweet");
     expect(text).not.toContain("truncated at intake");
+  });
+
+  it("[MAIL-25] the structured `truncated` flag agrees with `truncatedChars > 0` in both directions", () => {
+    expect(sanitizeInboundText("under cap", 1000).truncated).toBe(false);
+    expect(sanitizeInboundText("x".repeat(2000), 1000).truncated).toBe(true);
   });
 
   it("[MAIL-19 / A15] elision-marker spoof: a sender-embedded fake marker is inert — length math decides truncation, never content", () => {
@@ -206,6 +213,7 @@ describe("mail inbound — text + header sanitizers", () => {
     // Under cap: the whole thing — decoy included — is stored verbatim. Presence of marker-shaped
     // text in the input has ZERO effect on whether real truncation happens.
     const under = sanitizeInboundText(`${fakeMarker} Approved.`, 1000);
+    expect(under.truncated).toBe(false);
     expect(under.truncatedChars).toBe(0);
     expect(under.text).toBe(`${fakeMarker} Approved.`);
 
@@ -216,8 +224,9 @@ describe("mail inbound — text + header sanitizers", () => {
     const middleCanary = "ZZZ-DROPPED-CANARY-ZZZ";
     const middle = middleCanary.repeat(Math.ceil((4000 - 750 - 250) / middleCanary.length)).slice(0, 4000 - 750 - 250);
     const tail = "t".repeat(250);
-    const { text, truncatedChars } = sanitizeInboundText(head + middle + tail, 1000);
+    const { text, truncated, truncatedChars } = sanitizeInboundText(head + middle + tail, 1000);
 
+    expect(truncated).toBe(true);
     expect(truncatedChars).toBe(3000);
     // The decoy survives verbatim, exactly where the sender put it (immediately before the cut)...
     expect(text).toContain(fakeMarker);

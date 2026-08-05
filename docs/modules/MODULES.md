@@ -35,7 +35,7 @@ versions below; the running build reports it at `GET /health`.
 | Module | Ver | Status | Workstream | Since |
 |---|---|---|---|---|
 | platform-nest | `0.13.1` | IN PROGRESS | WS1 | 2026-08-05 |
-| platform-ui | `0.15.2` | IN PROGRESS | WS5 | 2026-08-05 |
+| platform-ui | `0.15.3` | IN PROGRESS | WS5 | 2026-08-05 |
 | ai-gateway-go | `0.13.0` | PROTOTYPED | WS3 | 2026-07 |
 | mcp-hub | `0.9.3` | PROTOTYPED | WS2 | 2026-08-03 |
 | sync-engine-go | `0.7.0` | PROTOTYPED | WS1 | 2026-07 |
@@ -54,7 +54,7 @@ versions below; the running build reports it at `GET /health`.
 | render-gateway-go | `0.0.0` | PLANNED | Creative | 2026-07-23 |
 | reports | `0.3.1` | PROTOTYPED | Cross-cutting | 2026-08-03 |
 | report-renderer | `0.1.0` | DEV-VERIFIED | Cross-cutting | 2026-07-31 |
-| mail | `0.0.13` | IN PROGRESS | Cross-cutting | 2026-08-05 |
+| mail | `0.0.15` | IN PROGRESS | Cross-cutting | 2026-08-05 |
 
 ---
 
@@ -86,6 +86,13 @@ authoritative `/admin/session/status`, instead of showing "unknown" as if it wer
 Approvals inbox, Companies/Projects/Tasks, Agency, Rollups, Systems/Intelligence/Admin consoles, People
 360, org-structure builder, Repsona-style PM + AI tracker, IT device console, per-department consoles
 (Web Dev reference), OIDC PKCE login. Runs backend-free in `DEMO_MODE`; Playwright e2e in dev.
+**0.15.3 (UI-01, reauth return-target preservation):** a shared, hardened same-origin-path-only
+`?return=` validator (`lib/returnTo.ts`) now guards every login-adjacent redirect — `middleware.ts`'s
+redirect-to-login, `/login`, `/step-up`, and (new) the OIDC `/auth/login` → `/auth/callback` round
+trip, which previously had no return-path concept at all. Closes the gap MAIL-09 found live: an
+emailed approval/pipeline deep link clicked with no session used to land back on `/` after reauth
+instead of the entity. See `docs/modules/CHANGELOG.md`'s platform-ui section for the full writeup;
+caps at IN PROGRESS pending a deploy to re-walk MAIL-09's ex-Q-V7 leg.
 **0.7.1 (digest controls):** "Run now" reports STARTED then polls the history to completion (no more false
 "unreachable" on a ~90s run), plus a group picker + "Preview (sends nothing)" rendering the digest text inert.
 **0.7.0 (console depth + pagination):** new Controls tab (actions kill switch with off-immediate/on-confirm,
@@ -340,7 +347,129 @@ through C-03". **v1.2 (same day, Zone A mail v2):** domains locked — C-03's fo
 moved to the Google Workspace SMTP relay with Brevo failover. Blueprint HTML is v1.2; PDF + hosted
 artifact NOT re-rendered yet.
 
-## mail — Zone A Email (platform-nest) · `0.0.13` · IN PROGRESS
+## mail — Zone A Email (platform-nest) · `0.0.16` · IN PROGRESS
+
+**0.0.16 (2026-08-05, senior-be, MAIL-25) — the inbound truncation notice is now driven by a
+structured field, not an emergent line-shape effect.** MAIL-19's intake cap splices a
+`[truncated at intake: N characters omitted here]` marker into `body_text`; MAIL-20's render-side
+quote collapse deliberately refused to key off that string (forgeable per corpus case
+`18-elision-marker-spoof`), leaving the notice's visibility an ACCIDENT of the marker's own line
+never being `>`-prefixed. Closed at the source: migration `0082_mail_truncation_metadata.sql`
+adds `mail_messages.body_truncated`/`body_truncated_chars` (additive, `NOT NULL DEFAULT`, zero
+backfill DML), set at intake from the SAME length arithmetic `sanitizeInboundText` already used
+for the cap — never by parsing content. `ThreadMessageView` (both the entity/portal thread reads
+and the admin log thread) now carries `bodyTruncated`/`bodyTruncatedChars`; `QuotedMessageBody`
+renders its notice from that field alone, as a separate always-rendered element independent of
+`lib/mailQuote.ts`'s structural quote-collapse (which is untouched — still `>`-prefix runs and
+`<blockquote>` depth, still content-shape-only). Proven: a forged marker with no structured field
+renders as inert plain text with NO notice (`QuotedMessageBody.test.tsx`'s `role="note"` absence
+check); a GENUINE marker deliberately constructed on a `>`-prefixed line — inside a quote run that
+would have hidden the old marker-text-as-notice behind "Show quoted history" — still shows the
+notice, because the notice never looks at `bodyText`. Backend: `npx vitest run src/mail` from
+`platform-nest/` — **21 files, 174/174 passing** (own `TEST_DB_PREFIX=mail25`, 14 throwaway DBs
+created and dropped, 0 orphaned) — MAIL-19's corpus cases 12/16/17/18 pass unchanged plus new
+structured-field assertions reading the columns back from Postgres. Frontend:
+`npx vitest run src/lib/mailQuote.test.ts src/components/mail/QuotedMessageBody.test.tsx` green,
+plus the full `platform-ui` suite (109 files/1145 tests) green; `next build` (`DEMO_MODE=1`) green.
+`tsc --noEmit` clean in both projects for anything this ticket touched (platform-ui carries two
+PRE-EXISTING, unrelated failures — a stale `.next/types/validator.ts` route-type error and
+`app/(app)/me/leave/page.tsx` — neither touched by this ticket). **Caps at IN PROGRESS**: the live
+leg belongs to MAIL-09/deploy, and this ticket makes no deliverability claim.
+
+**0.0.15 (2026-08-05, devops, MAIL-09) — mail ENABLED against the live Mailpit sink on
+gda-aicenter; live smokes executed.** Full evidence in `docs/modules/CHANGELOG.md`'s mail section.
+Headline: `MAIL_ENABLED=1` + `MAIL_LINK_BASE_URL` set server-side; found and fixed a
+compose-env-passthrough bug (`${VAR:-}` → empty string → code's `??` never falls to its compiled
+default → empty `From:`/`Reply-To:` domain → Mailpit `553`s every send) by setting explicit
+`*.gaiada.invalid` values in `.env`. Smokes 1 (suspended-write warning mail) and 2 (client-gate
+signer mail) **PASSED** with real Mailpit captures, correct M12 wording, and correct
+staff/portal deep links. Smoke 3 (ex-Q-V7) **SETTLED NEGATIVE**: a real browser walk proved
+`platform-ui`'s auth middleware drops the original deep-link target on the `/login` redirect —
+reauth always lands on `/`, never back on the entity. This is a `platform-ui` bug, not a mail-tap
+bug (MAIL-05/06 build the correct href; nothing carries it through reauth) — needs its own ticket.
+Smoke 4 (OTel) not live-claimable (`OTEL_ENABLED=0`, no collector, as expected). Smoke 5: two new
+Prometheus alert rules added (`MailQueueDepthHigh`, `MailSendFailureRateHigh`), `promtool check
+rules` green (12/12). **Also found, not fixed (out of this ticket's scope):**
+`0080_auth_magic_links.sql` (MAIL-10) is untracked in git — never committed, never released, not
+applied on the box; `auth_magic_links` does not exist there. MAIL-04/05/06 promoted to
+DEV-VERIFIED on the strength of this session's live evidence; MAIL-13/MAIL-15 were NOT re-verified
+here (their specific live legs weren't exercised) and stay at their prior status.
+
+**0.0.14 (2026-08-05, senior-be, MAIL-10) — magic links (low-risk convenience login, design §9;
+M8/M11 locked).** Migration `0080_auth_magic_links.sql` — re-ran `ls migrations | sort | tail`
+immediately before writing DDL per README rule 5; `0077`/`0078`/`0079` were taken, `0080` was free.
+`auth_magic_links` is GLOBAL (no `tenant_id` column, deliberately — a magic link authenticates AS
+a user before any tenant is selected, the same shape as `mail_log`'s NULL-tenant auth-mail rows),
+accessed via `withGlobal` like `users`/`identity_links`; NOT one of the `app.mail_context`-GUC-gated
+0077 tables (that GUC answers a different question). Because it carries no `tenant_id`,
+`src/db/rls.test.ts`'s "every tenant-scoped table has FORCE RLS" invariant does not select it —
+confirmed by running the suite **unmodified**, still green (5/5). This is the RLS decision the
+ticket asked to state explicitly, to avoid repeating MAIL-22's mistake (a `tenant_id` column
+shipped with no RLS) — the mistake doesn't apply here because there is no `tenant_id` at all.
+
+**Two hard lines, both held:**
+- **Never a usable token persisted, anywhere, including `mail_log.payload`.** `auth_magic_links`
+  stores only `sha256(rawToken)` hex. The harder case: the rest of `src/mail/` defers rendering to
+  an async sender worker that re-renders `{subject,html,text}` from `(template_key, payload)` —
+  fine for approval mail (no secret in its `href`), unsafe for a magic link (its `href` IS the
+  secret). Resolved by rendering + sending INLINE at mint time (raw token lives only in a
+  function-local closure, never assigned to anything `JSON.stringify`/`c.query` touches) and
+  writing a REDACTED `mail_log` audit row (no href, no token, `status` starts at `'sending'` so
+  the standard `WHERE status='queued'` sender loop never tries to re-render it from a hash it
+  cannot reverse). The send is fire-and-forget from the caller's perspective — awaiting it inside
+  the HTTP handler would reopen the exact timing oracle the next bullet closes.
+- **202 body + timing flattened for existing vs unknown address.** The HTTP handler never awaits
+  the SMTP round-trip; both branches do comparable DB-round-trip work (best-effort, not a
+  cryptographic constant-time claim — documented as such in `service.ts`). Rate limits
+  (3/address/hour, 10/IP/hour) apply BEFORE the user lookup and, when tripped, return the
+  identical accepted response with zero DB mint work. Design §5.1's ONE documented exception: a
+  known-but-suppressed address gets a distinguishable `503` — deliberate, not a regression.
+
+**M11 (a magic link must never be an approval mechanism)** — restated in three places: a header
+comment at the mint site (`service.ts`), a header comment at the template render site
+(`templates.ts`'s new `auth.magic_link` function), and a pinned test
+(`src/mail/magic-link/m11-non-goal.test.ts`) asserting (a) `approval.warning`/`approval.actionable`'s
+own wording never mentions "magic"/"token" and (b) no file outside `src/mail/magic-link/` (with
+two named, inspected exemptions: `templates.ts`'s own registration line, and a pre-existing
+`migration.test.ts` placeholder row that predates this ticket) references the `auth.magic_link`
+template key at all.
+
+**Activities audit — deliberately does NOT write to the `activities` table.**
+`activities.tenant_id` is `NOT NULL` (0001_core.sql) and every one of the ~40 call sites in this
+codebase resolves a real `:tenantId` route param first — there is no precedent for a tenant-less
+write, and a magic-link mint/consume has no tenant (a user in N companies has none to prefer; an
+unknown address has none at all). Followed the codebase's own precedent instead:
+`src/rbac/principal.ts`'s `auditDecision` — `if (!tenantId) return; // global-scope decisions have
+no tenant feed (logged by caller)`. Implemented as: a structured, token-free console audit line per
+mint/consume (`[magic-link:audit] …`, ids only, never a token or token hash) PLUS the durable
+record that already exists for every other kind of mail — the `mail_log` row (mint) and
+`auth_magic_links.consumed_at`/`consumed_ip` (consume), mirroring how `mail_log` itself is already
+documented as the A5 audit trail for notifications.
+
+Endpoints (root-level, `ServiceGuard`-only — BFF-internal, never browser-reachable):
+`POST /auth/magic-link` (mint, always 202) and `POST /auth/magic-link/consume` (atomic single-use,
+one generic error for unknown/replayed/expired). `platform-ui/src/app/auth/magic/route.ts` is the
+consume landing page; mints `sealSession(userId)` — the identical plain-payload cookie shape
+`login/actions.ts`'s dev-login produces, not `auth/callback/route.ts`'s OIDC-wrapped form.
+`MAIL_MAGIC_LINKS_ENABLED` stays `0` by default (config.ts AND the compose `environment:` block —
+both already existed from MAIL-13's forward-wiring; this ticket adds the three new
+`MAIL_MAGIC_LINK_{TTL_SECONDS,RATE_PER_ADDRESS_HOUR,RATE_PER_IP_HOUR}` vars to both places + the
+`.env.example`s). Real-user enablement is staging §15 R5 — explicitly not this ticket.
+
+Proof: `TEST_DB_PREFIX=mail10agent npx vitest run src/mail src/db` (run from `platform-nest/`) →
+**291/291 green**, incl. `src/db/rls.test.ts` unmodified (5/5) and the double-consume race
+(`Promise.allSettled` over 8 real concurrent connections against the real test Postgres → exactly
+1 fulfilled, 7 rejected with the same `MagicLinkConsumeError`). `npx tsc --noEmit` clean;
+`npm run lint:migration-rls` and `npm run lint:withtenants` both pass. 22 `mail10agent_*` test
+databases created during the run, all dropped after (`pgtest_*` count unchanged at 146 before/after,
+151 total databases before/after — no orphans left).
+
+**Cap: IN PROGRESS, not DEV-VERIFIED.** The live round-trip on a deployed box (mint → Mailpit
+capture → click → consume → cookie) is **PENDING-DEPLOY** — no deploy path exists while GitHub
+Actions is billing-blocked (the release currently in flight is failing on an unrelated SBOM
+attestation issue, per the orchestrating session). **No SLO claim anywhere** — M8's p95/p99
+auth-stream latency SLO needs ≥7 days of real relay traffic (design §15 R5) and is deferred whole,
+not approximated.
 
 **0.0.13 (2026-08-05, senior-be, MAIL-23) — drift guard for the Cerbos decider mirror.**
 `src/core/approval-deciders.ts` mirrors two Cerbos policies IN APPLICATION CODE for notification

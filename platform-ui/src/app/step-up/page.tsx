@@ -1,21 +1,15 @@
 import Link from "next/link";
 import { Eyebrow } from "@/components/ui";
+import { sanitizeReturnToParam } from "@/lib/returnTo";
 
 // D4 identity step-up landing. WA/Telegram (low-assurance) users are routed
 // here when they attempt a sensitive action. Public route (see middleware).
 // Reads ?return= to send the user back after a full sign-in.
 type SP = Promise<Record<string, string | string[] | undefined>>;
 
-function safeReturn(v: string | string[] | undefined): string {
-  const raw = Array.isArray(v) ? v[0] : v;
-  // Only allow same-app relative paths — never an absolute/protocol URL.
-  if (raw && raw.startsWith("/") && !raw.startsWith("//")) return raw;
-  return "/";
-}
-
 export default async function StepUpPage({ searchParams }: { searchParams: SP }) {
   const sp = await searchParams;
-  const returnTo = safeReturn(sp.return);
+  const returnTo = sanitizeReturnToParam(sp.return);
   const signInHref = `/login?return=${encodeURIComponent(returnTo)}`;
 
   return (

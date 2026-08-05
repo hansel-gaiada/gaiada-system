@@ -113,14 +113,19 @@ jobs:
       # until then, because the controls deploy.yml actually ENFORCES are the two above (cosign
       # keyless signature + attested SBOM), and both succeed.
       #
-      # ⏳ 2026-08-05: the repo is now PUBLIC, so the precondition is met and this step is expected to
-      # SUCCEED. `continue-on-error` is deliberately left in place for ONE release so the outcome can be
-      # observed rather than assumed — removing it on the same commit that first exercises it would turn
-      # a wrong guess into a failed release. Check this step's outcome on the `alpha-01.017.0040a` run:
-      # if it succeeded, delete the `continue-on-error` line so a future provenance failure is loud.
+      # ✅ 2026-08-05 RESOLVED: the outcome was observed rather than assumed, as intended. `0040a` failed
+      # before reaching this step (Rekor would not take report-renderer's SBOM), so the check moved to the
+      # `alpha-01.017.0040b` re-cut — where SLSA provenance succeeded on **all 9 components**. Precondition
+      # met, so `continue-on-error` is now REMOVED: a future provenance failure is loud, which is the point.
+      #
+      # NOTE: the `continue-on-error` on the SBOM attestation step above is a DIFFERENT case and stays for
+      # now. report-renderer is the only image carrying Chromium, so its SPDX SBOM covers the whole
+      # Playwright/Ubuntu base and the predicate is large enough that Rekor rejects it under load — it
+      # failed twice on `0040a`, then succeeded on `0040b`. That is fragility, not a hard fault. Removing
+      # that line before the SBOM is scoped to the application layer would make releases fail
+      # intermittently on an external service's load. Scope the SBOM first, then delete it.
       - name: SLSA build provenance attestation
         uses: actions/attest-build-provenance@v1
-        continue-on-error: true
         with:
           subject-name: ${{ env.IMAGE }}
           subject-digest: ${{ steps.build.outputs.digest }}

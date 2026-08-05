@@ -784,6 +784,28 @@ const configBase = {
     // for dev-created users once MAIL-10 lands. Read here even though MAIL-10 ships in its own
     // later ticket, so the env/compose wiring lands once and never has to be revisited per-ticket.
     magicLinksEnabled: process.env.MAIL_MAGIC_LINKS_ENABLED === "1",
+    // MAIL-10 — token lifetime + the two rate-limit dimensions the ticket AC names verbatim
+    // ("3 per address/hour, 10 per IP/hour"). Short TTL on purpose: like client_invites' token,
+    // this one grants a live SESSION, not merely a read, so a stale link sitting in an inbox is a
+    // liability, not a convenience.
+    magicLinkTtlSeconds: Number(process.env.MAIL_MAGIC_LINK_TTL_SECONDS ?? 15 * 60),
+    magicLinkRatePerAddressHour: Number(process.env.MAIL_MAGIC_LINK_RATE_PER_ADDRESS_HOUR ?? 3),
+    magicLinkRatePerIpHour: Number(process.env.MAIL_MAGIC_LINK_RATE_PER_IP_HOUR ?? 10),
+    // MAIL-24 (QA-MAIL-11 Finding 3, LOW/latent) — trusted-proxy allowlist for
+    // `magic-link/controller.ts`'s `clientIp()`. QA proved `x-forwarded-for` was honoured
+    // UNCONDITIONALLY: 8 freshly-spoofed IPs against a configured per-IP limit of 3 all minted
+    // (zero protection). Exact-string match against `req.ip` — the raw TCP peer, since this app
+    // never sets Fastify's `trustProxy` (main.ts), so `req.ip` is never itself header-influenced.
+    // Empty (the DEFAULT — "trust nothing") => `clientIp()` always returns the socket address, so
+    // an unconfigured deployment gets the pre-existing, honest trade-off (every caller behind one
+    // NAT/proxy shares one bucket) rather than a NEW hole (an attacker's own header moving the
+    // key). Set this to the real reverse-proxy's IP(s) ONLY once one actually sits in front of
+    // this service — comma-separated, no CIDR (a single reverse-proxy hop has one address; widen
+    // this to real CIDR matching only if a multi-IP proxy tier is introduced, a design decision).
+    // MUST also be set in docker-compose.vps.yml's platform `environment:` block (compose-env-
+    // passthrough trap — a var only in `.env` ships silently disabled).
+    magicLinkTrustedProxies: (process.env.MAIL_MAGIC_LINK_TRUSTED_PROXIES ?? "")
+      .split(",").map((s) => s.trim()).filter(Boolean),
     streams: {
       notify: mailStreamConfig("NOTIFY", "Gaiada Dev <no-reply@notify.gaiada.invalid>"),
       auth: mailStreamConfig("AUTH", "Gaiada Sign-in <no-reply@auth.gaiada.invalid>"),

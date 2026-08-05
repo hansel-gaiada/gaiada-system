@@ -522,6 +522,16 @@ services:
       # §9/§15 R5 — stays 0 for real users until the staging SLO gate closes. MAIL-10 is a later
       # ticket; wired here now so its landing needs no second compose edit.
       MAIL_MAGIC_LINKS_ENABLED: ${MAIL_MAGIC_LINKS_ENABLED:-0}
+      # MAIL-10 — token TTL + the two rate-limit dimensions (design §9). Wired here in the same
+      # change that adds them to config.ts, per the standing compose-passthrough rule.
+      MAIL_MAGIC_LINK_TTL_SECONDS: ${MAIL_MAGIC_LINK_TTL_SECONDS:-900}
+      MAIL_MAGIC_LINK_RATE_PER_ADDRESS_HOUR: ${MAIL_MAGIC_LINK_RATE_PER_ADDRESS_HOUR:-3}
+      MAIL_MAGIC_LINK_RATE_PER_IP_HOUR: ${MAIL_MAGIC_LINK_RATE_PER_IP_HOUR:-10}
+      # MAIL-24 (QA-MAIL-11 Finding 3) — trusted-proxy allowlist for the magic-link controller's
+      # x-forwarded-for read. Empty (default) = trust nothing = the per-IP rate limit always keys
+      # on the raw socket address. Set to the real reverse-proxy's IP ONLY once one is in front of
+      # this service (compose-env-passthrough trap — a var only in `.env` ships silently disabled).
+      MAIL_MAGIC_LINK_TRUSTED_PROXIES: ${MAIL_MAGIC_LINK_TRUSTED_PROXIES:-}
       # App version (docs/modules/VERSIONING.md), surfaced by GET /health. deploy.yml sets this
       # from /VERSION so a running box can always be asked what it is.
       APP_VERSION: ${APP_VERSION:-}

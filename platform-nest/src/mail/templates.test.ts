@@ -56,6 +56,13 @@ describe("mail/templates", () => {
   });
 
   it("exposes the known template keys used by this ticket", () => {
-    expect(knownTemplateKeys().sort()).toEqual(["approval.actionable", "approval.warning", "auth.shell"]);
+    // MAIL-10 added "auth.magic_link" (design §9) — a fourth code template, registered the same
+    // way as the other three (see this file's own header: templates are code, not DB rows).
+    expect(knownTemplateKeys().sort()).toEqual([
+      "approval.actionable",
+      "approval.warning",
+      "auth.magic_link",
+      "auth.shell",
+    ]);
   });
 });

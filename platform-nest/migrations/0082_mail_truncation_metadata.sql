@@ -1,0 +1,36 @@
+-- 0082_mail_truncation_metadata.sql — MAIL-25 (design A15 follow-up, senior-be).
+--
+-- Ledger note: written first as `0081_mail_truncation_metadata.sql` after `ls migrations | sort |
+-- tail` showed `0081` free — a concurrent HR-loans session landed `0081_hr_loans.sql` before this
+-- file's own tests finished, a genuine duplicate-prefix collision (migrations/README.md rule 3).
+-- Neither file had been applied to any persistent database at that point, so this file was renamed
+-- to `0082` (the next free slot) rather than treated as an APPLIED migration under rule 4; see
+-- migrations/README.md's 2026-08-05 entry for the full account.
+--
+-- THE GAP THIS CLOSES: MAIL-19's intake cap splices a `[truncated at intake: N characters omitted
+-- here]` MARKER into `body_text` at a boundary computed entirely from length. MAIL-20 (render-side
+-- quote collapse) deliberately refuses to key off that marker STRING — the `18-elision-marker-spoof`
+-- corpus case proves a forged decoy survives intake verbatim as ordinary content, indistinguishable
+-- from the real marker by shape alone. With no trustworthy signal, MAIL-20's truncation notice only
+-- rendered correctly as an EMERGENT side effect of the genuine marker's own line never being
+-- `>`-prefixed (see `platform-ui/src/lib/mailQuote.ts`'s former header comment) — an accident, not a
+-- rule, and it would break the moment a marker's line landed inside a quote-collapse boundary (e.g. an
+-- `On ... wrote:`-style header sweep-to-end-of-text ahead of it).
+--
+-- THE FIX: two additive columns on `mail_messages`, set at intake from the SAME length arithmetic
+-- that produces the cap (`sanitizeInboundText` in `src/mail/inbound/html-sanitize.ts`) — never by
+-- parsing `body_text` content. `ThreadMessageView` (`src/mail/thread.controller.ts` +
+-- `src/mail/admin-mail.controller.ts`) exposes them as `bodyTruncated`/`bodyTruncatedChars`, and the
+-- render layer (`platform-ui/src/components/mail/QuotedMessageBody.tsx`) renders its truncation
+-- notice from THAT field only — never from matching the marker string — so a forged marker stays
+-- inert plain content (no platform chrome) and the notice's correctness no longer depends on where
+-- the literal marker substring happens to land relative to a quote-collapse boundary.
+--
+-- Purely additive: NOT NULL with a DEFAULT, so every pre-existing row (there are none yet — MAIL-04
+-- landed 0077 in this same session, unapplied to any persistent database per that migration's own
+-- note) reads as "not truncated" with zero DML. No UPDATE/DELETE/INSERT...SELECT in this file, so the
+-- 0052+ CI backfill/RLS lint (scripts/lint-migration-rls.mjs) has nothing to flag on a FORCE-RLS table
+-- — confirmed by running `npm run lint:migration-rls` after writing this file (see the MAIL-25 report).
+ALTER TABLE mail_messages
+  ADD COLUMN body_truncated boolean NOT NULL DEFAULT false,
+  ADD COLUMN body_truncated_chars integer NOT NULL DEFAULT 0 CHECK (body_truncated_chars >= 0);

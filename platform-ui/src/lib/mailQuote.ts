@@ -11,22 +11,26 @@
 // WHY THIS FILE NEVER PATTERN-MATCHES MAIL-19's TRUNCATION MARKER (read before touching this file)
 // ============================================================================================
 // MAIL-19's intake cap splices `[truncated at intake: N characters omitted here]` into `body_text`
-// at a boundary computed ENTIRELY from length, never from content — which is exactly what makes it
-// unforgeable AT THE ACCOUNTING LAYER (a forged `N` won't match the real omitted-character count)
-// but that distinguishing signal (the true `N`, or any `truncated`/`omittedChars` flag) is NOT
-// exposed to this render layer: `ThreadMessageView` (`platform-nest/src/mail/thread.controller.ts`)
-// and the `mail_messages` DDL carry only `bodyText`/`bodyHtmlSanitized` — no structured truncation
-// field exists today (checked at MAIL-20 build time; corpus case `18-elision-marker-spoof` proves a
-// forged decoy string survives intake VERBATIM as ordinary content, indistinguishable from the real
-// marker by shape alone). Given no trustworthy signal, this file does not special-case the marker
-// STRING at all — not to extract it, not to keep it visible, not to style it. Every function below
-// classifies a line/tag purely by STRUCTURAL shape a sender's own reply text does not naturally
-// take (a `>`-prefixed line, a `<blockquote>` tag) — never by matching the marker's text. That the
-// two MAIL-19 reference corpus shapes (`16-bottom-posted-oversize-quote`,
-// `17-top-posted-oversize-quote`) happen to render with the marker visible by default is an
-// EMERGENT property of the marker line itself not being `>`-prefixed (it breaks a quote run), not a
-// rule this file encodes about the marker. See `components/mail/QuotedMessageBody.tsx` for the
-// consumer-side statement of the same guarantee.
+// at a boundary computed ENTIRELY from length, never from content — unforgeable AT THE ACCOUNTING
+// LAYER (a forged `N` won't match the real omitted-character count), but MAIL-20 originally found
+// that signal NOT exposed to this render layer at all: `ThreadMessageView` carried only
+// `bodyText`/`bodyHtmlSanitized`, so the only way to show a truncation notice would have been to
+// pattern-match the marker STRING — exactly the thing corpus case `18-elision-marker-spoof` proves is
+// forgeable (a decoy string survives intake VERBATIM as ordinary content, indistinguishable from the
+// real marker by shape alone).
+//
+// MAIL-25 closed that gap at the SOURCE, not here: `ThreadMessageView` now also carries
+// `bodyTruncated`/`bodyTruncatedChars` (migration `platform-nest/migrations/
+// 0082_mail_truncation_metadata.sql`), set at intake from the SAME length arithmetic that produces
+// the cap — never by parsing content. `components/mail/QuotedMessageBody.tsx` renders its
+// truncation notice from THAT field only. This file's job stays exactly what it was: classify a
+// line/tag purely by STRUCTURAL shape a sender's own reply text does not naturally take (a
+// `>`-prefixed line, a `<blockquote>` tag) — never by matching the marker's text, forged or genuine.
+// That separation is now load-bearing rather than accidental: the truncation notice's correctness no
+// longer depends on where the marker's line lands relative to a quote-collapse boundary (previously
+// an EMERGENT property of the marker line never being `>`-prefixed, which this file's own boundary
+// detector could break the moment a marker's line landed inside a header-style "collapse to the end"
+// sweep — see `QuotedMessageBody.test.tsx`'s explicit regression case for the constructed proof).
 // ============================================================================================
 
 export interface TextSegment {

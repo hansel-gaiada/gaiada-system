@@ -109,6 +109,20 @@ test.describe("client portal", () => {
     await expect(page.getByText(/finance team will confirm/i)).toBeVisible();
   });
 
+  // UI-01 — the portal-side counterpart of the mailed-approval-deep-link bug MAIL-09 found: a
+  // client clicking an emailed pipeline-approval link (`entityHref(..., { portal: true })` ->
+  // `/portal/approvals/:runId`) with no session must land back on that exact run after signing in,
+  // not on the generic `/portal` home.
+  test("an unauthenticated portal deep link survives the login round trip @portal", async ({ page }) => {
+    await page.goto("/portal/approvals/run-demo-1");
+    await page.waitForURL("**/login**");
+    expect(decodeURIComponent(page.url())).toContain("return=/portal/approvals/run-demo-1");
+
+    await page.getByLabel("Email").fill("dana@northwind.example");
+    await page.getByRole("button", { name: /sign in/i }).click();
+    await page.waitForURL("**/portal/approvals/run-demo-1");
+  });
+
   test("a staff member sees the teach-state, not a client dashboard @portal", async ({ page }) => {
     // The counterpart to the isolation tests in the BFF suite: the demo fixture refuses a non-client
     // caller exactly as the real scope resolver does, so this proves the UI handles that 403 as an

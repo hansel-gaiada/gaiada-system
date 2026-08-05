@@ -151,8 +151,8 @@ export class AdminMailController {
 
     const messages = await withMailContext((c) =>
       c.query<AdminThreadRow>(
-        `SELECT id, mail_log_id, from_email, subject, body_text, body_html_sanitized, attachments,
-                size_bytes, received_at
+        `SELECT id, mail_log_id, from_email, subject, body_text, body_html_sanitized, body_truncated,
+                body_truncated_chars, attachments, size_bytes, received_at
            FROM mail_messages WHERE mail_log_id = $1 ORDER BY received_at ASC, created_at ASC LIMIT 200`,
         [id],
       ),
@@ -168,6 +168,10 @@ export class AdminMailController {
         subject: row.subject,
         bodyText: row.body_text,
         bodyHtmlSanitized: row.body_html_sanitized,
+        // MAIL-25 — same structured signal as the entity/portal thread reads (`thread.controller.ts`);
+        // see `ThreadMessageView.bodyTruncated`'s doc comment for why this, not the marker string.
+        bodyTruncated: row.body_truncated,
+        bodyTruncatedChars: row.body_truncated_chars,
         sizeBytes: row.size_bytes,
         receivedAt: row.received_at,
         attachments: (Array.isArray(row.attachments) ? row.attachments : []).map((a) => ({
@@ -195,6 +199,8 @@ interface AdminThreadRow {
   subject: string | null;
   body_text: string;
   body_html_sanitized: string | null;
+  body_truncated: boolean;
+  body_truncated_chars: number;
   attachments: StoredAttachment[] | null;
   size_bytes: number;
   received_at: string;

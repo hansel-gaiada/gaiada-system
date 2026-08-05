@@ -213,7 +213,13 @@ export async function ingestInbound(msg: NormalizedInbound): Promise<IngestResul
 
   const ndr = classifyNdr(msg);
   const subject = sanitizeInboundHeaderText(msg.subject);
-  const { text } = sanitizeInboundText(msg.textBody);
+  // MAIL-25: `truncated`/`truncatedChars` are the structured, length-derived signal — persisted onto
+  // `mail_messages.body_truncated`/`body_truncated_chars` (migration
+  // `0082_mail_truncation_metadata.sql`) below, alongside `text` (which still carries the marker
+  // STRING for humans reading the raw body, unchanged). See `html-sanitize.ts`'s header comment on
+  // `sanitizeInboundText` for why this pair, and not the marker string, is what the render layer must
+  // trust.
+  const { text, truncated, truncatedChars } = sanitizeInboundText(msg.textBody);
   const html = sanitizeInboundHtml(msg.htmlBody);
 
   const id = newId();
@@ -229,8 +235,9 @@ export async function ingestInbound(msg: NormalizedInbound): Promise<IngestResul
     const res = await c.query<{ id: string }>(
       `INSERT INTO mail_messages (
          id, mail_log_id, tenant_id, entity_type, entity_id, provider, provider_message_id,
-         from_email, subject, body_text, body_html_sanitized, attachments, size_bytes, origin_site
-       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'[]'::jsonb,$12,$13)
+         from_email, subject, body_text, body_html_sanitized, body_truncated, body_truncated_chars,
+         attachments, size_bytes, origin_site
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'[]'::jsonb,$14,$15)
        ON CONFLICT (provider, provider_message_id) DO NOTHING
        RETURNING id`,
       [
@@ -246,6 +253,8 @@ export async function ingestInbound(msg: NormalizedInbound): Promise<IngestResul
         subject,
         text,
         html,
+        truncated,
+        truncatedChars,
         msg.sizeBytes,
         config.originSite,
       ],

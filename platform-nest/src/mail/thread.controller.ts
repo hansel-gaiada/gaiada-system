@@ -46,6 +46,8 @@ interface MailMessageRow {
   subject: string | null;
   body_text: string;
   body_html_sanitized: string | null;
+  body_truncated: boolean;
+  body_truncated_chars: number;
   attachments: StoredAttachment[] | null;
   size_bytes: number;
   received_at: string;
@@ -81,6 +83,14 @@ export interface ThreadMessageView {
   /** Already through the intake allowlist sanitizer — the raw MIME was never stored (§7.6). Still to
    *  be rendered in a constrained container, per the same section. */
   bodyHtmlSanitized: string | null;
+  /** MAIL-25 — the STRUCTURED truncation signal, set at intake from length arithmetic alone (never by
+   *  parsing `bodyText`; see `inbound/html-sanitize.ts`'s `sanitizeInboundText`). This is what the
+   *  render layer's truncation notice must be driven by, NOT the `[truncated at intake: ...]` marker
+   *  string that may also be present in `bodyText` — a forged marker cannot set this field, because it
+   *  is never derived from content. */
+  bodyTruncated: boolean;
+  /** Characters omitted at intake when `bodyTruncated` is true; `0` otherwise. */
+  bodyTruncatedChars: number;
   sizeBytes: number;
   receivedAt: string;
   attachments: ThreadAttachmentView[];
@@ -126,6 +136,8 @@ function toView(row: MailMessageRow, callerIsElevated: boolean): ThreadMessageVi
     subject: row.subject,
     bodyText: row.body_text,
     bodyHtmlSanitized: row.body_html_sanitized,
+    bodyTruncated: row.body_truncated,
+    bodyTruncatedChars: row.body_truncated_chars,
     sizeBytes: row.size_bytes,
     receivedAt: row.received_at,
     attachments: atts.map((a) => attachmentView(a, callerIsElevated)),
@@ -133,7 +145,7 @@ function toView(row: MailMessageRow, callerIsElevated: boolean): ThreadMessageVi
 }
 
 const MESSAGE_COLUMNS = `id, mail_log_id, from_email, subject, body_text, body_html_sanitized,
-       attachments, size_bytes, received_at`;
+       body_truncated, body_truncated_chars, attachments, size_bytes, received_at`;
 
 /** Shared read. `tenant_id = $3` is not redundant with the entity predicate: `mail_messages` has no
  *  RLS, so without it a (hypothetical) entity-id collision or a mis-stamped row would cross tenants. */

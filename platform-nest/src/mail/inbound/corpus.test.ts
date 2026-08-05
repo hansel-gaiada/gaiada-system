@@ -101,7 +101,7 @@ describe.skipIf(!TEST_URL)("mail inbound corpus — POST /api/mail/inbound/brevo
   async function messagesFor(mailLogId: string) {
     const r = await adminPool().query(
       `SELECT id, entity_type, entity_id, from_email, subject, body_text, body_html_sanitized,
-              attachments, size_bytes, tenant_id
+              body_truncated, body_truncated_chars, attachments, size_bytes, tenant_id
          FROM mail_messages WHERE mail_log_id = $1 ORDER BY created_at ASC`,
       [mailLogId],
     );
@@ -410,6 +410,9 @@ describe.skipIf(!TEST_URL)("mail inbound corpus — POST /api/mail/inbound/brevo
     // fixture is under the 128 KiB body_text cap (design A15/MAIL-19), so no truncation happens here
     // at all — the genuine over-cap head+tail cases live in 16/17 below.
     expect(String(row.body_text)).toContain("> ");
+    // [MAIL-25] under-cap: the structured field agrees with the absence of a marker.
+    expect(row.body_truncated).toBe(false);
+    expect(Number(row.body_truncated_chars)).toBe(0);
   });
 
   // ── 16 / 17 / 18 — MAIL-19 / design A15: head+tail intake cap shape ──────────────────────────────
@@ -437,6 +440,13 @@ describe.skipIf(!TEST_URL)("mail inbound corpus — POST /api/mail/inbound/brevo
     expect(markerMatches).toHaveLength(1);
     // Some of the quoted history in the middle really was dropped — this is a CAP, not a no-op.
     expect(Number(row.size_bytes)).toBeGreaterThan(100_000);
+
+    // [MAIL-25] THE structured signal — read back from Postgres, matching the marker's own N exactly.
+    // This is what the UI's truncation notice must be driven by, per the ticket's whole point.
+    const [, markerN] = /\[truncated at intake: (\d+) characters omitted here]/.exec(storedBodyText) ?? [];
+    expect(row.body_truncated).toBe(true);
+    expect(Number(row.body_truncated_chars)).toBe(Number(markerN));
+    expect(Number(row.body_truncated_chars)).toBeGreaterThan(0);
   });
 
   it("[17-top-posted-oversize-quote] the A15 companion case: a top-posted reply above an over-cap quote still survives", async () => {
@@ -456,6 +466,11 @@ describe.skipIf(!TEST_URL)("mail inbound corpus — POST /api/mail/inbound/brevo
     expect(storedBodyText.indexOf("Approved.")).toBeLessThan(100);
     const markerMatches = storedBodyText.match(/\[truncated at intake: \d+ characters omitted here]/g) ?? [];
     expect(markerMatches).toHaveLength(1);
+
+    // [MAIL-25] structured field agrees with the top-posted marker too.
+    const [, markerN] = /\[truncated at intake: (\d+) characters omitted here]/.exec(storedBodyText) ?? [];
+    expect(row.body_truncated).toBe(true);
+    expect(Number(row.body_truncated_chars)).toBe(Number(markerN));
   });
 
   it("[18-elision-marker-spoof] a forged elision marker cannot mislabel or hide behind the genuine one", async () => {
@@ -488,6 +503,12 @@ describe.skipIf(!TEST_URL)("mail inbound corpus — POST /api/mail/inbound/brevo
     expect(storedBodyText).not.toContain("DROPPED-MIDDLE-CANARY");
     // The tail content past the elision point is still present — this is a head+tail cap, not head-only.
     expect(storedBodyText).toContain("TAIL-CONTENT-MARKER-BEGIN");
+
+    // [MAIL-25] THE pin for this ticket: the structured field carries the mathematically correct
+    // count and is completely unmoved by either forged decoy (999999999, 1) planted in the content.
+    // A forged marker has no way to write to this column — it is set from length arithmetic alone.
+    expect(row.body_truncated).toBe(true);
+    expect(Number(row.body_truncated_chars)).toBe(18928);
   });
 
   // ── 13 / 15 NDR classification ────────────────────────────────────────────────────────────────

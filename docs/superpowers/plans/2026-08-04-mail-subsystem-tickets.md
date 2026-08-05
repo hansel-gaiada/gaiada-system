@@ -212,10 +212,44 @@ prerequisite lands (design §7.4 v4).
 
 ## Dev-stage exit criteria ("the dev stage is finished" means ALL of these)
 
-**v4 headline: the dev stage CANNOT close while the billing wall stands.** Criteria 1–3 are
-structurally blocked (marked ⛔ below); 4–6 hold today. No amount of suite-green work substitutes
-for the blocked evidence, and nothing may be promoted to DEV-VERIFIED on local suites alone
-(design §13 v4).
+> **v5 UPDATE — 2026-08-05: THE BILLING WALL IS GONE.** The repo was made public, so Actions
+> minutes are free and the pipeline works. What changed, verified rather than assumed:
+>
+> - **Criterion 3 is CLOSED.** CI is green on `main` (run `30989473747`, all 8 jobs) with the step
+>   `Mail inbound adversarial corpus (A13 — permanent regression gate) → success`. The corpus now
+>   demonstrably runs in CI. `ci.yml`'s `push`/`pull_request` triggers were re-enabled (MAIL-21)
+>   after confirming that workflow reads no secrets — necessary because a public repo would
+>   otherwise expose them to fork PRs.
+> - **The whole module is committed** (`d2ba24c`, 112 files, ~10.9k insertions). It had been
+>   **untracked**, so a deploy would have shipped nothing and CI could not see it. An agent
+>   reporting "committed" does not make it so — the lesson is to check `git status`, which is how
+>   MAIL-21 caught it.
+> - **MAIL-18's in-suite gate PASSED** with zero open critical findings: 144/144 `src/mail`,
+>   17/17 mail UI, XSS proven inert *as stored bytes* read back from Postgres, the unmatched-vs-matched
+>   inbound response proven byte-identical (not a token oracle), EICAR refused at every privilege
+>   including global admin, and M12 wording re-asserted on rendered output. Its **box-deployed**
+>   legs remain PENDING-DEPLOY. One informational, non-exploitable finding recorded: inbound timing
+>   differs between the unmatched fast-fail and a matched attachment path; response bodies are
+>   identical as required, and 128-bit token entropy makes the side-channel impractical.
+> - **MAIL-22 (new): the mail tables now carry FORCE RLS.** "Global, no RLS" made mail the first
+>   FORCE-RLS violation in the estate and broke `src/db/rls.test.ts`. Fixed with `0015`'s GUC-gate
+>   pattern; `rls.test.ts` passes **unmodified**. See the superseding note in design §6.1.
+> - **MAIL-23 (new): a decider drift-guard** reads both Cerbos policies at test time and fails when
+>   a decider role changes, without tripping on D14's `retry` addition. The mirror was verified
+>   still accurate — D14 added an action, not new deciders.
+> - **Migration reality:** mail core is `0077`, not `0076`. The ledger moved **three times** in one
+>   session (`0077` mail → `0078` D14 → `0079` assistant). Re-verify immediately before writing DDL.
+> - **Released:** `Alpha 01.017.0040a` is tagged and building through `release.yml` — the first
+>   properly signed release since the hand-built `0037`, which had no cosign signature or SBOM and
+>   existed only on the box rather than GHCR.
+>
+> **What still blocks closure** is no longer billing but simply that the deploy had not yet landed
+> when this was written: MAIL-09's live smokes, MAIL-18's box verdict, and MAIL-10/11.
+
+**v4 headline (superseded — retained for the record): the dev stage CANNOT close while the billing
+wall stands.** Criteria 1–3 are structurally blocked (marked ⛔ below); 4–6 hold today. No amount of
+suite-green work substitutes for the blocked evidence, and nothing may be promoted to DEV-VERIFIED
+on local suites alone (design §13 v4).
 
 1. Every dev-wave ticket — MAIL-00, 02, 03, 04, 05, 06, 09, 10, 11(dev leg), 13, 14, 15, 16D,
    **+ v4: 19, 20, 21** — is **DEV-VERIFIED** with evidence from gda-aicenter runs (Mailpit API

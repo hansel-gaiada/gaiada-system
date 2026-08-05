@@ -5,6 +5,13 @@ import { QuotedMessageBody } from "./QuotedMessageBody";
 // MAIL-20 (design A15.2) — the render-level AC: the reply is visible without interaction, the
 // expander is a real keyboard-reachable/labelled control, and a forged intake-marker string is
 // never rendered as platform chrome (no special element, no icon, no distinct styling class).
+//
+// MAIL-25 — the truncation-notice AC: the notice renders from `bodyTruncated`/`bodyTruncatedChars`
+// ONLY. A forged marker string with no structured field set must produce NO notice (it stays inert
+// plain content, per MAIL-20 above); a genuine structured field must produce the notice regardless
+// of where the literal marker text lands — including inside a `>`-prefixed quote run that the old,
+// string-shape-dependent behaviour would have hidden behind "Show quoted history". See that test
+// below for the explicit regression construction.
 
 function quoteRun(n: number): string {
   return Array.from({ length: n }, (_, i) => `> quoted line ${i}`).join("\n");
@@ -64,5 +71,62 @@ describe("QuotedMessageBody", () => {
     const summary = screen.getByText("Show quoted history");
     const details = summary.closest("details") as HTMLDetailsElement;
     expect(details.open).toBe(false);
+  });
+
+  // ── MAIL-25: the structured truncation notice ─────────────────────────────────────────────────
+  describe("truncation notice (MAIL-25)", () => {
+    it("[AC] a truncated message renders the notice from the structured field, with the correct count", () => {
+      render(
+        <QuotedMessageBody
+          bodyText="Approved. Ship it."
+          bodyHtmlSanitized={null}
+          bodyTruncated={true}
+          bodyTruncatedChars={3000}
+        />,
+      );
+      expect(screen.getByText(/3,000/)).toBeInTheDocument();
+      expect(screen.getByText("Approved. Ship it.")).toBeInTheDocument();
+    });
+
+    it("[AC] a forged marker with NO structured field renders as inert plain text — no notice, no chrome at all", () => {
+      // Same decoy shape as the corpus's `18-elision-marker-spoof` case, and no `bodyTruncated` prop
+      // supplied (defaults to false) — exactly what a real forged message looks like to this
+      // component, since intake never lets a forged marker set the structured field either.
+      const decoy = "[truncated at intake: 999999999 characters omitted here]";
+      render(<QuotedMessageBody bodyText={`${decoy} Approved, proceed with deployment.`} bodyHtmlSanitized={null} />);
+      // The decoy text is present as ordinary content...
+      expect(screen.getByText(/999999999 characters omitted here/)).toBeInTheDocument();
+      // ...but NO notice element exists anywhere. `role="note"` is the exact element the real
+      // notice would use, so its absence isn't a fluke of a different phrasing.
+      expect(screen.queryByRole("note")).not.toBeInTheDocument();
+    });
+
+    it("[AC — the regression this ticket exists to prevent] a GENUINE marker whose line is `>`-prefixed still renders the notice", () => {
+      // Constructed explicitly: the literal marker substring sits on a `>`-prefixed line, sandwiched
+      // inside a quote run — the exact shape that the OLD emergent behaviour (a bare-line marker
+      // breaking the quote run) depended on NOT happening. Under the old logic this marker text
+      // would have been swept into the collapsed `<details>` and hidden by default; the structured
+      // notice must appear regardless, because it does not look at `bodyText` at all.
+      const bodyText = [
+        "> On Mon, 3 Aug 2026, Gaiada Platform wrote: prior context 0.",
+        "> On Mon, 3 Aug 2026, Gaiada Platform wrote: prior context 1.",
+        "> [truncated at intake: 5000 characters omitted here]",
+        "> On Mon, 3 Aug 2026, Gaiada Platform wrote: prior context 2.",
+        "",
+        "Approved. Ship it.",
+      ].join("\n");
+
+      render(<QuotedMessageBody bodyText={bodyText} bodyHtmlSanitized={null} bodyTruncated={true} bodyTruncatedChars={5000} />);
+
+      // The notice is visible WITHOUT expanding anything — it sits outside the collapse entirely.
+      expect(screen.getByText(/5,000/)).toBeInTheDocument();
+      // The marker's own line is indeed folded into the collapsed quote run (proving the regression
+      // scenario is real: the raw text is hidden by default)...
+      const summary = screen.getByText("Show quoted history");
+      const details = summary.closest("details") as HTMLDetailsElement;
+      expect(details.open).toBe(false);
+      // ...yet the structured notice rendered anyway, because it never looked at that text.
+      expect(screen.getByRole("note")).toBeInTheDocument();
+    });
   });
 });

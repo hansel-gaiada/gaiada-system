@@ -3,15 +3,13 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { sealSession, SESSION_COOKIE } from "@/lib/session";
 import { demoIdentityFor } from "@/lib/demoIdentity";
-
-// Only allow same-app relative return paths — never an absolute/protocol URL.
-function safeReturn(raw: string): string {
-  return raw.startsWith("/") && !raw.startsWith("//") ? raw : "/";
-}
+import { sanitizeReturnTo } from "@/lib/returnTo";
 
 export async function login(_prev: { error: string } | null, formData: FormData): Promise<{ error: string }> {
   const email = String(formData.get("email") ?? "").trim();
-  const returnTo = safeReturn(String(formData.get("return") ?? "/"));
+  // Re-validated here at the point of actually issuing the redirect (consumption time), not just
+  // trusted because the hidden field was populated from an already-sanitized value — see UI-01.
+  const returnTo = sanitizeReturnTo(String(formData.get("return") ?? "/"));
   if (!email) return { error: "Enter your email to continue." };
 
   // TEMP DEMO MODE — see lib/demoFixtures.ts. Select between three demo identities:

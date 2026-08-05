@@ -12,6 +12,7 @@ import { portalDashboardDemo } from "./demoPortal";
 import { reportsDemo } from "./demoReports";
 import { checkinsDemo } from "./demoCheckins";
 import { appraisalsDemo } from "./demoAppraisals";
+import { loansDemo } from "./demoLoans";
 import { assistantDemo } from "./demoAssistant";
 
 export interface DemoResult {
@@ -1750,6 +1751,8 @@ function mailThreadForEntity(entityType: string, entityId: string) {
         subject: "Re: Your decision is needed: PRD sign-off for Q3 Launch",
         bodyText: "Looks good — signing off shortly, just confirming scope with my team first.",
         bodyHtmlSanitized: "<p>Looks good — signing off shortly, just confirming scope with my team first.</p>",
+        bodyTruncated: false,
+        bodyTruncatedChars: 0,
         sizeBytes: 812,
         receivedAt: "2026-08-02T15:30:00.000Z",
         attachments: [],
@@ -1763,6 +1766,10 @@ function mailThreadForEntity(entityType: string, entityId: string) {
         subject: "Re: Your decision is needed: PRD sign-off for Q3 Launch",
         bodyText: DEMO_QUOTED_REPLY_TEXT,
         bodyHtmlSanitized: null,
+        // MAIL-25 — demo scale stand-in for a real intake-cap truncation, so DEMO_MODE also drives
+        // the structured truncation notice (never derived from `DEMO_QUOTED_REPLY_TEXT`'s content).
+        bodyTruncated: true,
+        bodyTruncatedChars: 42000,
         sizeBytes: DEMO_QUOTED_REPLY_TEXT.length,
         receivedAt: "2026-08-02T16:10:00.000Z",
         attachments: [],
@@ -1824,6 +1831,10 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
   // Appraisal subsystem (TR-26) — stateful in-memory store (lib/demoAppraisals.ts).
   const appraisals = appraisalsDemo(method, p, url.searchParams, body, userId);
   if (appraisals) return appraisals;
+
+  // Employee loans (wave E) — stateless derived fixtures (lib/demoLoans.ts).
+  const loans = loansDemo(method, p, url.searchParams, body, userId);
+  if (loans) return loans;
 
   // Assistant workspace (ASST-07) — stateful in-memory store (lib/demoAssistant.ts). Owner-scoped
   // (filters by userId) so DEMO_MODE mirrors the real owner-only Cerbos policy. The SSE stream

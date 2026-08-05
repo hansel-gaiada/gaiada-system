@@ -108,10 +108,46 @@ function renderAuthShell(payload: AuthShellPayload): RenderedMail {
   return { subject, html, text };
 }
 
+/** MAIL-10 (design §9). `payload.href` is the ONE place in this whole file a link is allowed to
+ *  carry a bearer credential — every other template's `href` (approval.warning/actionable) is a
+ *  PLAIN entity URL with no token, by M11. That asymmetry is the entire point of M11, restated
+ *  here at the render site so it cannot be missed by anyone editing this function:
+ *
+ *  ── M11 HARD NON-GOAL — READ BEFORE TOUCHING THIS FUNCTION ──────────────────────────────────
+ *  A magic link is a bearer credential sitting in an inbox. It is a LOGIN convenience ONLY and
+ *  must NEVER become an approval mechanism — approval/warning mail must stay exactly what
+ *  renderApprovalWarning/renderApprovalActionable above already are: a plain entity URL, no
+ *  token, auth at the door. This function must never be called from the approval/warning send
+ *  path, and no future edit here may add approval semantics (approve/reject wording, a decision
+ *  payload, anything actioned by clicking). Pinned by
+ *  `src/mail/magic-link/m11-non-goal.test.ts`, re-asserted end to end by MAIL-18/MAIL-11.
+ *  ──────────────────────────────────────────────────────────────────────────────────────────── */
+export interface AuthMagicLinkPayload {
+  href: string;
+  ttlMinutes: number;
+  [key: string]: unknown;
+}
+
+function renderAuthMagicLink(payload: AuthMagicLinkPayload): RenderedMail {
+  const href = asStr(payload.href);
+  const ttl = Number.isFinite(payload.ttlMinutes) && payload.ttlMinutes > 0 ? payload.ttlMinutes : 15;
+  const subject = stripHeaderInjection("Your Gaiada sign-in link");
+  const text =
+    `Click the link below to sign in to Gaiada. This link expires in ${ttl} minute(s) and can ` +
+    `only be used once.\n\n${href}\n\nIf you did not request this, you can safely ignore this email.`;
+  const html =
+    `<p>Click the link below to sign in to Gaiada. This link expires in ${escapeHtml(String(ttl))} ` +
+    `minute(s) and can only be used once.</p>` +
+    `<p><a href="${escapeHtml(href)}">${escapeHtml(href)}</a></p>` +
+    `<p>If you did not request this, you can safely ignore this email.</p>`;
+  return { subject, html, text };
+}
+
 const TEMPLATES: Record<string, (payload: Record<string, unknown>) => RenderedMail> = {
   "approval.warning": (p) => renderApprovalWarning(p as ApprovalMailPayload),
   "approval.actionable": (p) => renderApprovalActionable(p as ApprovalMailPayload),
   "auth.shell": (p) => renderAuthShell(p as AuthShellPayload),
+  "auth.magic_link": (p) => renderAuthMagicLink(p as AuthMagicLinkPayload),
 };
 
 export function knownTemplateKeys(): string[] {

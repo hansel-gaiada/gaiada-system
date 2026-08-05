@@ -50,15 +50,22 @@ describe.skipIf(!TEST_URL)("mail thread reads — parent-entity authorization (A
     entityType: string | null;
     entityId: string | null;
     attachments?: StoredAttachment[];
+    bodyTruncated?: boolean;
+    bodyTruncatedChars?: number;
   }): Promise<string> {
     const id = newId();
     await adminPool().query(
       `INSERT INTO mail_messages (id, mail_log_id, tenant_id, entity_type, entity_id, provider,
                                   provider_message_id, from_email, subject, body_text,
-                                  body_html_sanitized, attachments, size_bytes, origin_site)
+                                  body_html_sanitized, body_truncated, body_truncated_chars,
+                                  attachments, size_bytes, origin_site)
        VALUES ($1,$2,$3,$4,$5,'brevo-inbound',$6,'dita@client-one.invalid','Re: approval',
-               'the reply body','<p>the reply body</p>',$7::jsonb,120,'test')`,
-      [id, opts.mailLogId, opts.tenantId, opts.entityType, opts.entityId, `pmid-${id}`, JSON.stringify(opts.attachments ?? [])],
+               'the reply body','<p>the reply body</p>',$7,$8,$9::jsonb,120,'test')`,
+      [
+        id, opts.mailLogId, opts.tenantId, opts.entityType, opts.entityId, `pmid-${id}`,
+        opts.bodyTruncated ?? false, opts.bodyTruncatedChars ?? 0,
+        JSON.stringify(opts.attachments ?? []),
+      ],
     );
     return id;
   }
@@ -160,12 +167,41 @@ describe.skipIf(!TEST_URL)("mail thread reads — parent-entity authorization (A
     const t = await thread(coA, "pipeline_run", runA, adminA);
     expect(parent.statusCode).toBe(200);
     expect(t.statusCode).toBe(200);
-    const body = t.json() as { messages: Array<{ bodyText: string; senderVerified: boolean; provenance: string }> };
+    const body = t.json() as {
+      messages: Array<{ bodyText: string; senderVerified: boolean; provenance: string; bodyTruncated: boolean; bodyTruncatedChars: number }>;
+    };
     expect(body.messages).toHaveLength(1);
     expect(body.messages[0].bodyText).toBe("the reply body");
     // The provenance contract MAIL-15's "Email reply — sender unverified" banner is driven by.
     expect(body.messages[0].senderVerified).toBe(false);
     expect(body.messages[0].provenance).toBe("inbound-email");
+    // [MAIL-25] the structured truncation signal defaults false/0 for an ordinary, untruncated reply.
+    expect(body.messages[0].bodyTruncated).toBe(false);
+    expect(body.messages[0].bodyTruncatedChars).toBe(0);
+  });
+
+  // ── MAIL-25: the structured truncation field is exposed end to end ───────────────────────────────
+  it("[MAIL-25] a message stored with body_truncated=true surfaces bodyTruncated/bodyTruncatedChars on every thread read", async () => {
+    // A DEDICATED entity id, deliberately NOT `runA` — every other test in this file asserts an exact
+    // message count on `runA`'s own thread (seeded once in `beforeAll`), so threading a second message
+    // onto that same entity here would silently inflate those counts. `authorizeThreadParent`'s
+    // pipeline_run branch authorizes on `{kind, id, tenantId}` alone (no existence lookup — see
+    // `thread-authz.ts`), so a fresh id needs no matching `pipeline_runs` row to read the thread.
+    const dedicatedRunId = newId();
+    const truncatedLog = await seedMailLog(coA, "pipeline_run", dedicatedRunId);
+    await seedMessage({
+      mailLogId: truncatedLog, tenantId: coA, entityType: "pipeline_run", entityId: dedicatedRunId,
+      bodyTruncated: true, bodyTruncatedChars: 18928,
+    });
+
+    const entity = await thread(coA, "pipeline_run", dedicatedRunId, adminA);
+    const entityBody = entity.json() as { messages: Array<{ mailLogId: string; bodyTruncated: boolean; bodyTruncatedChars: number }> };
+    expect(entityBody.messages).toHaveLength(1);
+    expect(entityBody.messages[0]).toMatchObject({ bodyTruncated: true, bodyTruncatedChars: 18928 });
+
+    const admin = await app.inject({ method: "GET", url: `/api/admin/mail/log/${truncatedLog}/thread`, headers: asUser(adminGlobal) });
+    const adminBody = admin.json() as { messages: Array<{ bodyTruncated: boolean; bodyTruncatedChars: number }> };
+    expect(adminBody.messages[0]).toMatchObject({ bodyTruncated: true, bodyTruncatedChars: 18928 });
   });
 
   it("pipeline_run: a plain member is refused on the parent AND on the thread, with the SAME status", async () => {

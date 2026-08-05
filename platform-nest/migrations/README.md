@@ -197,3 +197,22 @@ at it, run `node dist/db/migrate.js`, confirm the ordered `applied:` list and ex
    number written in any plan or in this log is a hint that can go stale between planning and DDL.
    Always run `ls migrations | sort | tail` immediately before naming a migration file, and append
    here in the same change.
+
+   **2026-08-05 update (MAIL-25, mail truncation metadata) — `0081` collided mid-ticket; shipped as
+   `0082`.** `ls migrations | sort | tail` at implementation time showed the real head as
+   `0080_auth_magic_links.sql` (MAIL-10, landed) with `0081` genuinely free, and the file was
+   written as `0081_mail_truncation_metadata.sql` on that basis — exactly the number the ticket
+   brief itself warned "has moved four times today across concurrent sessions." Before this file's
+   own test run finished, a concurrent HR-loans session landed `0081_hr_loans.sql` (untracked,
+   uncommitted, same as this one at that moment) — a genuine duplicate-prefix collision, forbidden
+   by rule 3 above. Neither file had been applied to any persistent database yet (both were
+   freshly-written, uncommitted files; the only place either had run was a disposable per-test-file
+   DB), so rule 4's "never rename an APPLIED migration" did not apply — this ticket's file was
+   renamed to the next genuinely free number instead: **`0082_mail_truncation_metadata.sql`** (two
+   additive columns on `mail_messages`: `body_truncated boolean NOT NULL DEFAULT false`,
+   `body_truncated_chars integer NOT NULL DEFAULT 0`; zero backfill DML). `0081_hr_loans.sql` was
+   left untouched — not this ticket's file to renumber. `0058`/`0059` remain the two
+   permanently-orphaned reservation gaps — still do NOT fill them. **Next unused is `0083`** —
+   re-verify with `ls migrations | sort | tail` before trusting that; this exact scenario (a number
+   free at check-time, taken by the time the file lands) is the demonstrated failure mode, not a
+   hypothetical one.

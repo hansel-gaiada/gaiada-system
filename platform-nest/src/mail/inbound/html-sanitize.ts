@@ -329,13 +329,23 @@ export function sanitizeInboundHtml(input: string | null | undefined, opts: Sani
  *  text shaped like `[truncated at intake: ... ]` gets it stored back as ordinary text, wherever it
  *  landed in the kept head/tail (or dropped, if it landed in the omitted middle, exactly like any
  *  other content there) — it can never suppress, relocate, or relabel the ONE marker this function
- *  itself inserts. */
+ *  itself inserts.
+ *
+ *  MAIL-25: the returned `truncated`/`truncatedChars` pair is the STRUCTURED signal that makes the
+ *  fact-of-truncation trustworthy downstream. It is derived from this SAME length arithmetic — never
+ *  by scanning `text` for the marker string — so a sender who plants marker-shaped decoy text in the
+ *  body has zero influence over it. The caller (`./intake.ts`) persists it onto
+ *  `mail_messages.body_truncated`/`body_truncated_chars` (migration
+ *  `0082_mail_truncation_metadata.sql`); the render layer
+ *  (`platform-ui/src/components/mail/QuotedMessageBody.tsx`) renders its truncation notice from THAT
+ *  column pair only, never from matching the marker text — see that file's header comment for the
+ *  render-side half of this guarantee. */
 export function sanitizeInboundText(
   input: string | null | undefined,
   maxLength = 128 * 1024,
-): { text: string; truncatedChars: number } {
+): { text: string; truncated: boolean; truncatedChars: number } {
   const raw = stripWhere((input ?? "").replace(/\r\n?/g, "\n"), isTextControl);
-  if (raw.length <= maxLength) return { text: raw, truncatedChars: 0 };
+  if (raw.length <= maxLength) return { text: raw, truncated: false, truncatedChars: 0 };
 
   const headLen = Math.ceil(maxLength * 0.75);
   const tailLen = maxLength - headLen;
@@ -345,6 +355,7 @@ export function sanitizeInboundText(
   const tail = tailLen > 0 ? raw.slice(raw.length - tailLen) : "";
   return {
     text: `${head}\n[truncated at intake: ${omitted} characters omitted here]\n${tail}`,
+    truncated: true,
     truncatedChars: omitted,
   };
 }

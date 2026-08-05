@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { sanitizeReturnTo } from "@/lib/returnTo";
 
 // Edge runtime can't use node:crypto — presence check only here; every page
 // verifies the HMAC server-side via getSessionUserId() before using the id.
@@ -20,7 +21,16 @@ export function middleware(req: NextRequest) {
     pathname.startsWith("/login") || pathname.startsWith("/step-up") || pathname.startsWith("/auth") ||
     pathname.startsWith("/print") || pathname.startsWith("/invite");
   const hasSession = Boolean(req.cookies.get("gaiada_session")?.value);
-  if (!isPublic && !hasSession) return NextResponse.redirect(new URL("/login", req.url));
+  if (!isPublic && !hasSession) {
+    // UI-01: preserve the originally-requested deep link through the login/reauth round trip
+    // (e.g. a mailed approval link with no session must not dead-end at "/" after sign-in). The
+    // value we're building here is inherently path+search off req.nextUrl, but it still passes
+    // through the shared validator for consistency with every other write site and to cap length.
+    const target = sanitizeReturnTo(`${pathname}${req.nextUrl.search}`);
+    const loginUrl = new URL("/login", req.url);
+    if (target !== "/") loginUrl.searchParams.set("return", target);
+    return NextResponse.redirect(loginUrl);
+  }
   return NextResponse.next();
 }
 

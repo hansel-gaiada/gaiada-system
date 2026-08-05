@@ -130,9 +130,15 @@ export default async function AdminMailDetailPage({ params }: { params: Promise<
                   </div>
                   <div style={{ font: "400 13px/1.5 var(--font-body)" }}>
                     {/* MAIL-20: quote-collapsed at render — see `QuotedMessageBody` for the boundary
-                        detection + the anti-chrome-spoofing reasoning (no structured intake field
-                        exists to do better; see the MAIL-20 report). */}
-                    <QuotedMessageBody bodyText={msg.bodyText} bodyHtmlSanitized={msg.bodyHtmlSanitized} />
+                        detection + the anti-chrome-spoofing reasoning. MAIL-25: the truncation notice
+                        it renders is driven by the structured `bodyTruncated`/`bodyTruncatedChars`
+                        fields only, never by matching the marker string in `bodyText`. */}
+                    <QuotedMessageBody
+                      bodyText={msg.bodyText}
+                      bodyHtmlSanitized={msg.bodyHtmlSanitized}
+                      bodyTruncated={msg.bodyTruncated}
+                      bodyTruncatedChars={msg.bodyTruncatedChars}
+                    />
                   </div>
                 </div>
               ))}

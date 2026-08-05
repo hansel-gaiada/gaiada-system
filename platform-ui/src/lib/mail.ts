@@ -80,6 +80,13 @@ export interface ThreadMessageView {
   subject: string | null;
   bodyText: string;
   bodyHtmlSanitized: string | null;
+  /** MAIL-25 — the STRUCTURED truncation signal, set at intake from length arithmetic alone (never
+   *  by parsing `bodyText`). `QuotedMessageBody`'s truncation notice must be driven by THIS field,
+   *  never by matching the `[truncated at intake: ...]` marker string that may also appear in
+   *  `bodyText` — a forged marker cannot set this field. */
+  bodyTruncated: boolean;
+  /** Characters omitted at intake when `bodyTruncated` is true; `0` otherwise. */
+  bodyTruncatedChars: number;
   sizeBytes: number;
   receivedAt: string;
   attachments: ThreadAttachmentView[];

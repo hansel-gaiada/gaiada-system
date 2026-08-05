@@ -100,8 +100,14 @@ function ThreadMessage({ message }: { message: ThreadMessageView }) {
         {/* Already through the intake allowlist sanitizer server-side (design §7.6) — the raw MIME
             was never stored. Still rendered in a constrained, scrollable container per that section,
             never inline with the rest of the page's markup. MAIL-20: quote-collapsed at render, see
-            `QuotedMessageBody` for the boundary detection + anti-chrome-spoofing reasoning. */}
-        <QuotedMessageBody bodyText={message.bodyText} bodyHtmlSanitized={message.bodyHtmlSanitized} />
+            `QuotedMessageBody` for the boundary detection + anti-chrome-spoofing reasoning. MAIL-25:
+            the truncation notice inside it is driven by `bodyTruncated`/`bodyTruncatedChars` only. */}
+        <QuotedMessageBody
+          bodyText={message.bodyText}
+          bodyHtmlSanitized={message.bodyHtmlSanitized}
+          bodyTruncated={message.bodyTruncated}
+          bodyTruncatedChars={message.bodyTruncatedChars}
+        />
       </div>
 
       {message.attachments.length > 0 && (

@@ -20,22 +20,67 @@ import { hasQuotedSegment, splitQuotedHtml, splitQuotedText } from "@/lib/mailQu
 // detector (a `>`-prefix, a `<blockquote>` tag), which existing chunk of the message goes behind
 // the toggle. A forged `[truncated at intake: ...]` string is never detected, extracted, or
 // special-cased here: it renders as ordinary sender text, wherever the structural split places it,
-// exactly like the rest of the message. See `lib/mailQuote.ts`'s header comment for the full
-// reasoning on why no structured signal exists to do better, and what would be needed to.
+// exactly like the rest of the message.
+//
+// MAIL-25 — the truncation NOTICE below is the trustworthy counterpart to that refusal. It is
+// rendered from `bodyTruncated`/`bodyTruncatedChars` ONLY — two fields `ThreadMessageView` now
+// carries, set at intake from length arithmetic alone (never from parsing `bodyText`; see
+// `platform-nest/src/mail/inbound/html-sanitize.ts`'s `sanitizeInboundText` and migration
+// `0082_mail_truncation_metadata.sql`). Two consequences fall out of that, and both are pinned by
+// `QuotedMessageBody.test.tsx`:
+//   1. A forged `[truncated at intake: ...]` string in `bodyText` cannot make this notice appear —
+//      it has no path to set `bodyTruncated`, so it stays inert plain content, never chrome.
+//   2. A GENUINE truncation is guaranteed to show its notice regardless of where the literal marker
+//      substring lands relative to `lib/mailQuote.ts`'s structural quote-collapse boundaries (a
+//      `>`-prefix run, a header-style "collapse to the end" sweep). Before this ticket, the notice
+//      was just the raw marker text sitting in the body, and it rendered visibly only as an EMERGENT
+//      side effect of the marker's own line never being `>`-prefixed — an accident of the current
+//      intake insertion shape, not a rule `lib/mailQuote.ts` encoded. This notice is now a SEPARATE,
+//      always-rendered element driven by structured data, so that accident is no longer load-bearing.
+function TruncationNotice({ chars }: { chars: number }) {
+  return (
+    <div
+      role="note"
+      style={{
+        font: "500 12px/1.4 var(--font-body)",
+        color: "var(--status-warning-fg)",
+        background: "var(--status-warning-bg)",
+        borderRadius: 6,
+        padding: "6px 10px",
+        marginBottom: 6,
+      }}
+    >
+      Message truncated at intake — {chars.toLocaleString("en-US")} character{chars === 1 ? "" : "s"} omitted.
+    </div>
+  );
+}
+
 export function QuotedMessageBody({
   bodyText,
   bodyHtmlSanitized,
+  bodyTruncated = false,
+  bodyTruncatedChars = 0,
 }: {
   bodyText: string;
   bodyHtmlSanitized: string | null;
+  bodyTruncated?: boolean;
+  bodyTruncatedChars?: number;
 }) {
+  const notice = bodyTruncated ? <TruncationNotice chars={bodyTruncatedChars} /> : null;
+
   if (bodyHtmlSanitized) {
     const segments = splitQuotedHtml(bodyHtmlSanitized);
     if (!hasQuotedSegment(segments)) {
-      return <div dangerouslySetInnerHTML={{ __html: bodyHtmlSanitized }} />;
+      return (
+        <>
+          {notice}
+          <div dangerouslySetInnerHTML={{ __html: bodyHtmlSanitized }} />
+        </>
+      );
     }
     return (
       <>
+        {notice}
         {segments.map((seg, i) =>
           seg.kind === "visible" ? (
             seg.html ? <div key={i} dangerouslySetInnerHTML={{ __html: seg.html }} /> : null
@@ -54,10 +99,16 @@ export function QuotedMessageBody({
 
   const segments = splitQuotedText(bodyText);
   if (!hasQuotedSegment(segments)) {
-    return <pre style={{ whiteSpace: "pre-wrap", margin: 0, font: "inherit" }}>{bodyText}</pre>;
+    return (
+      <>
+        {notice}
+        <pre style={{ whiteSpace: "pre-wrap", margin: 0, font: "inherit" }}>{bodyText}</pre>
+      </>
+    );
   }
   return (
     <>
+      {notice}
       {segments.map((seg, i) =>
         seg.kind === "visible" ? (
           seg.text ? (

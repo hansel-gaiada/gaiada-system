@@ -50,6 +50,7 @@ import { PmController } from "./modules/pm/pm.controller";
 import { ItController } from "./modules/it/it.controller";
 import { ClientsController } from "./modules/clients/clients.controller";
 import { HrController } from "./modules/hr/hr.controller";
+import { LoansController } from "./modules/hr/loans.controller";
 import { AssistantController } from "./modules/assistant/assistant.controller";
 import { SearchController } from "./modules/search/search.controller";
 import { SearchGoogleOauthCallbackController } from "./modules/search/search-google-oauth.controller";
@@ -73,6 +74,10 @@ import { MailWebhookController } from "./mail/webhook.controller";
 // entity-authorized read surface (A10) plus the scan-gated quarantine download.
 import { MailInboundController } from "./mail/inbound.controller";
 import { MailThreadController } from "./mail/thread.controller";
+// MAIL-10 (design §9) — low-risk convenience login via single-use magic links. Root-level,
+// ServiceGuard-only (platform-ui's server-side code is the sole caller); MAIL_MAGIC_LINKS_ENABLED
+// defaults 0 so this stays dark until the staging SLO gate (§15 R5) closes.
+import { MagicLinkController } from "./mail/magic-link/controller";
 
 @Module({
   controllers: [
@@ -80,7 +85,7 @@ import { MailThreadController } from "./mail/thread.controller";
     AuthzCheckController, ClientWorkController, BillingController, CollabController, AutomationApprovalsController, PipelineController, ApprovalsController, ApprovalsDecideController, TasksMineController, MeetingRecordingsController, PortalController, PortalWorkspaceController, PortalCommerceController, PortalProfileController, PortalStreamController, ContractsController, ClientContactsController, ClientInviteAcceptController, FilesController, CreativeController, WorkActivityController, IntegrationsController, ClaudeSeatsController, AdminIdentityController,
     CompanyAdminController, ServiceAssignmentsController, CompanyCrudController, AdminSystemsController, BotAdminController, IntelligenceController,
     // Vertical modules (compiled-in; per-tenant enable gate at the controller).
-    AgencyController, PmController, ItController, ClientsController, HrController, AssistantController, SearchController,
+    AgencyController, PmController, ItController, ClientsController, HrController, LoansController, AssistantController, SearchController,
     // SM-25a: the Google OAuth callback is tenant-agnostic on purpose (Google permits no wildcard
     // redirect URIs — see the file header) and so cannot mount under SearchController's
     // `api/:tenantId/modules/search` prefix. Registered as its own controller, mounted at the fixed
@@ -120,6 +125,8 @@ import { MailThreadController } from "./mail/thread.controller";
     // MAIL-13 (design §7.6/§8A/A10) — inbound intake + entity-authorized thread reads.
     MailInboundController,
     MailThreadController,
+    // MAIL-10 (design §9).
+    MagicLinkController,
   ],
 })
 export class AppModule {}

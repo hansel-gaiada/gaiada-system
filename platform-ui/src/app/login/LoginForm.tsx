@@ -60,7 +60,7 @@ export function LoginForm({
         <Eyebrow style={{ fontSize: 9 }}>or</Eyebrow>
         <span style={{ flex: 1, height: 1, background: "var(--erp-hairline)" }} />
       </div>
-      <a href="/auth/login" style={{ textAlign: "center", textDecoration: "none", border: "0.5px solid var(--erp-hairline)", padding: "10px 12px", font: "500 13px var(--font-body)", letterSpacing: "0.04em", color: "var(--text-primary)" }}>
+      <a href={`/auth/login?return=${encodeURIComponent(returnTo)}`} style={{ textAlign: "center", textDecoration: "none", border: "0.5px solid var(--erp-hairline)", padding: "10px 12px", font: "500 13px var(--font-body)", letterSpacing: "0.04em", color: "var(--text-primary)" }}>
         Sign in with SSO (Keycloak)
       </a>
     </form>

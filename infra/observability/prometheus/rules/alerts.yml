@@ -93,3 +93,53 @@ groups:
         annotations:
           summary: "Agent write on an un-evaled provider (D13)"
           description: "{{ $value }} run(s) performed a write while served by a provider not eval-cleared for that agent."
+
+      # --- Mail (MAIL-24, Finding 4): ANY auth-stream send failure. Magic-link mail is
+      # single-attempt by design — the raw token is never persisted (M11/MAIL-10), so the standard
+      # queued-retry sender loop (which re-renders from `mail_log.payload`) can never see or retry
+      # these rows (src/mail/magic-link/service.ts's header). A failed send here means a real user
+      # got a 202 and never received their sign-in link, with nothing else watching for it — so
+      # this fires on ANY increase, deliberately separate from a failure-RATE threshold (unlike a
+      # future generic notify-stream mail alert, which has a queued retry to absorb a transient
+      # blip and can afford to wait for a rate).
+      - alert: MailAuthStreamSendFailed
+        expr: increase(mail_failed_total{stream="auth"}[15m]) > 0
+        for: 0m
+        labels:
+          severity: ticket
+        annotations:
+          summary: "Auth-stream mail send failed (magic-link) — no automatic retry"
+          description: "{{ $value }} auth-stream send failure(s) in 15m. Single-attempt by design (no raw-token persistence to retry from) — find the affected user via mail_log WHERE stream='auth' AND status='failed' and tell them to request a fresh sign-in link."
+
+      # --- Mail (MAIL-09, design §11): queue depth. Rows accumulate `queued` with backoff when the
+      # relay is down or creds are wrong (§7.8) — the sender itself never surfaces this on its own,
+      # so a stuck queue is invisible without a metric watching mail_queue_depth{stream} (a gauge
+      # sampled at each sender sweep, MAIL-04). Threshold and window per design §11 verbatim.
+      - alert: MailQueueDepthHigh
+        expr: mail_queue_depth > 50
+        for: 15m
+        labels:
+          severity: ticket
+        annotations:
+          summary: "Mail queue depth elevated on stream {{ $labels.stream }}"
+          description: "{{ $value }} row(s) queued on stream {{ $labels.stream }} for 15m+. Check relay reachability/creds; mail_log rows carry last_error per row."
+
+      # --- Mail (MAIL-09, design §11/A8): failure-rate pager — "flip the transport" signal. A8
+      # makes failover an OPERATOR action, not automatic; this is the alert that tells the operator
+      # to flip MAIL_STREAM_*_TRANSPORT to the other leg (relay<->brevo). Deliberately a RATE over
+      # 1h, unlike MailAuthStreamSendFailed's any-failure rule above — the notify stream has a
+      # queued retry that can absorb a transient blip, so this waits for a sustained rate before
+      # paging (mirrors the auth-stream comment's own reasoning, inverted).
+      - alert: MailSendFailureRateHigh
+        expr: |
+          (
+            sum by (stream) (increase(mail_failed_total[1h]))
+            /
+            clamp_min(sum by (stream) (increase(mail_failed_total[1h]) + increase(mail_sent_total[1h])), 1)
+          ) > 0.2
+        for: 0m
+        labels:
+          severity: page
+        annotations:
+          summary: "Mail send failure rate > 20% on stream {{ $labels.stream }} (last 1h)"
+          description: "{{ $value | humanizePercentage }} of stream {{ $labels.stream }} sends failed in the last hour. Operator action per design A8: flip MAIL_STREAM_{{ $labels.stream }}_TRANSPORT to the other leg (relay<->brevo)."
