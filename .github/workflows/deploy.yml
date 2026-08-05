@@ -269,8 +269,29 @@ jobs:
           exit 1
           REMOTE
 
+      # Two records, because they are read by different things and only one of them was ever written.
+      #
+      # `.deployed-tag` is this workflow's own memory (the rollback target).
+      #
+      # `.env`'s GAIADA_TAG/APP_VERSION are what a HUMAN running `docker compose up -d` on the box
+      # gets — and nothing has ever updated them, so they drift to whatever was last set by hand. That
+      # is not cosmetic: compose substitutes GAIADA_TAG into every image reference, so a stale value
+      # means the next `up -d` for ANY reason (adding a service, restarting one, editing a profile)
+      # silently ROLLS THE WHOLE STACK BACK to an old tag, and APP_VERSION then makes /health report a
+      # version that is not running. Observed drifting on both deploys of 2026-08-06 and corrected by
+      # hand each time; written here so it stops being a manual step that gets forgotten.
+      #
+      # APP_VERSION contains spaces, so it MUST stay quoted — the precheck above now enforces that
+      # for the whole file, and this write is one of the few things that could violate it.
       - name: Record deployed tag
-        run: ssh vps "echo '${TAG}' > '${DEPLOY_DIR}/.deployed-tag'"
+        run: |
+          set -euo pipefail
+          ssh vps "echo '${TAG}' > '${DEPLOY_DIR}/.deployed-tag'"
+          ssh vps "cd '${DEPLOY_DIR}/infra/compose' \
+            && sed -i -E 's|^GAIADA_TAG=.*|GAIADA_TAG=${TAG}|' .env \
+            && sed -i -E 's|^APP_VERSION=.*|APP_VERSION=\"${{ steps.version.outputs.app_version }}\"|' .env \
+            && bash -n .env"
+          echo "Recorded ${TAG} in .deployed-tag and in the box's .env (GAIADA_TAG + APP_VERSION)."
 
       # Retention. Nothing else prunes release images, and each deploy adds nine — one of them
       # (report-renderer, a headless-Chrome image) is ~3.6GB. On 2026-08-03 that silently filled
