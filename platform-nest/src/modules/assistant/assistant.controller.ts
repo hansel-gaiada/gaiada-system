@@ -39,7 +39,7 @@ import { authorize } from "../../core/http";
 import { AuthGuard } from "../../auth/guards";
 import { ModuleEnabledGuard } from "../module-enabled.guard";
 import { assembleContext, persistCompactionUpdate } from "./context";
-import { abortForClientDisconnect, relayGeneration, releaseGeneration, reserveGeneration, requestStop, sseLine } from "./stream";
+import { abortForClientDisconnect, relayGeneration, releaseGeneration, reserveGeneration, requestStop, sseLine, usageMetaParts } from "./stream";
 
 // ── ASST-06 — the send->stream engine ────────────────────────────────────────────────────────────
 //
@@ -477,7 +477,20 @@ export class AssistantController {
       prompt,
       emit: {
         token: (text) => write(sseLine("token", { text })),
-        usage: (tokens, latencyMs) => write(sseLine("usage", { tokens, latencyMs })),
+        // ASST-12: relayed the instant `meta` arrives (before `done`) so a live-streaming client
+        // can show "served by <provider>" without waiting for the reply to finish — the "silent
+        // failover is invisible" gap this ticket closes. `providerSession` is only included when
+        // present (ASST-11 never sends it empty).
+        meta: (provider, model, providerSession) => write(sseLine("meta", { provider, model, ...(providerSession ? { providerSession } : {}) })),
+        // `source`/`promptTokens`/`completionTokens` are ASST-12's additions to this frame's shape
+        // (see docs/FRONTEND-BFF-CONTRACT.md §18) — `source` is what lets the UI's cost meter
+        // label whether `tokens` is a real measurement or the ~4-chars/token estimate.
+        usage: (tokens, latencyMs, source, promptTokens, completionTokens) =>
+          write(sseLine("usage", {
+            tokens, latencyMs, source,
+            ...(promptTokens !== undefined ? { promptTokens } : {}),
+            ...(completionTokens !== undefined ? { completionTokens } : {}),
+          })),
         done: () => write(sseLine("done", {})),
         error: (message, errorKind) => write(sseLine("error", { error: message, errorKind })),
       },
@@ -487,20 +500,26 @@ export class AssistantController {
     // id (never re-derives a seq), so it cannot race the seq-allocation section of sendMessage —
     // it can only race a NEW sendMessage() call, which is exactly what "content IS NULL" being
     // cleared here is what UNBLOCKS.
+    //
+    // ASST-12: `provider`/`model` are filled from `result.provider`/`result.model` — non-null only
+    // when ASST-11's `meta` frame arrived (undefined -> NULL otherwise, the same honest "unknown
+    // provider" state ASST-06 left these columns in; see stream.ts's file header). `usageSource` +
+    // the real prompt/completion breakdown (when present) go into `parts` via `usageMetaParts` —
+    // an existing jsonb column (migration 0079, default `[]`, never written to before this ticket),
+    // so no schema change was needed to record which kind of token count `tokens` actually is.
+    const parts = JSON.stringify(usageMetaParts(result));
     await withTenants(
       [tenantId],
       async (c) => {
         if (result.outcome === "done") {
-          // provider/model are left NULL for a streamed reply — see stream.ts's file header for
-          // why the gateway's SSE wire cannot tell us which provider actually served it.
           await c.query(
-            `UPDATE assistant_messages SET content = $1, tokens = $2, latency_ms = $3 WHERE id = $4`,
-            [result.text, result.tokensEstimate, result.latencyMs, messageId],
+            `UPDATE assistant_messages SET content = $1, tokens = $2, latency_ms = $3, provider = $4, model = $5, parts = $6::jsonb WHERE id = $7`,
+            [result.text, result.tokensEstimate, result.latencyMs, result.provider ?? null, result.model ?? null, parts, messageId],
           );
         } else {
           await c.query(
-            `UPDATE assistant_messages SET content = $1, tokens = $2, latency_ms = $3, error_kind = $4 WHERE id = $5`,
-            [result.text, result.tokensEstimate, result.latencyMs, result.errorKind ?? "unknown", messageId],
+            `UPDATE assistant_messages SET content = $1, tokens = $2, latency_ms = $3, error_kind = $4, provider = $5, model = $6, parts = $7::jsonb WHERE id = $8`,
+            [result.text, result.tokensEstimate, result.latencyMs, result.errorKind ?? "unknown", result.provider ?? null, result.model ?? null, parts, messageId],
           );
         }
         await c.query(

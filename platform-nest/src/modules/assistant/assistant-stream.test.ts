@@ -50,7 +50,14 @@ async function waitFor(predicate: () => boolean, timeoutMs = 2000, intervalMs = 
  *   SIMULATE_IDLE       — send response headers, then NEVER write a byte (idle-timeout probe).
  *   SIMULATE_ERROR:<m>  — after the 3 tokens, emit `event: error` with message <m> instead of `done`.
  *   SIMULATE_ABNORMAL_DROP — after the 3 tokens, close the connection with NEITHER `done` NOR `error`.
- *   (default)           — 3 tokens ("Hello ", "there ", "friend"), then `event: done`. */
+ *   SIMULATE_META:<provider>:<model> — (ASST-11/12) emit `event: meta` before the first token,
+ *                          naming <provider>/<model> (an empty <model> segment sends `model: ""`).
+ *   SIMULATE_USAGE:<p>:<c> — (ASST-11/12) emit a terminal `event: usage` with promptTokens=<p>,
+ *                          completionTokens=<c>, immediately before `done`.
+ *   (default)           — 3 tokens ("Hello ", "there ", "friend"), then `event: done`. No meta/
+ *                          usage frame at all by default — this is the ASST-10-shaped gateway most
+ *                          providers (echo/openai/gemini/claude) still look like, the common path
+ *                          ASST-12 must handle as "unknown provider", never an error. */
 interface FakeGateway {
   url: string;
   close: () => Promise<void>;
@@ -85,8 +92,20 @@ async function startFakeGateway(): Promise<FakeGateway> {
         const delayMs = Number(/SIMULATE_DELAY:(\d+)/.exec(prompt)?.[1] ?? "20");
         const errorMsg = /SIMULATE_ERROR:(\S+)/.exec(prompt)?.[1];
         const abnormalDrop = prompt.includes("SIMULATE_ABNORMAL_DROP");
+        const metaMatch = /SIMULATE_META:(\S*?):(\S*)/.exec(prompt);
+        const usageMatch = /SIMULATE_USAGE:(\d+):(\d+)/.exec(prompt);
+        const unknownEvent = prompt.includes("SIMULATE_UNKNOWN_EVENT");
 
         void (async () => {
+          if (unknownEvent) {
+            // A future grammar-v3+ frame this platform-nest build has never heard of — the
+            // additive-event contract requires it to be ignored, never mis-parsed as a token or
+            // thrown as an error (see stream.ts's parseGatewayStream header).
+            res.write(`event: tool_call\ndata: ${JSON.stringify({ unexpected: true })}\n\n`);
+          }
+          if (metaMatch) {
+            res.write(`event: meta\ndata: ${JSON.stringify({ provider: metaMatch[1], model: metaMatch[2] })}\n\n`);
+          }
           const tokens = ["Hello ", "there ", "friend"];
           for (const tok of tokens) {
             if (res.writableEnded || res.destroyed) return;
@@ -102,6 +121,9 @@ async function startFakeGateway(): Promise<FakeGateway> {
           if (abnormalDrop) {
             res.end(); // deliberately no terminal event at all
             return;
+          }
+          if (usageMatch) {
+            res.write(`event: usage\ndata: ${JSON.stringify({ promptTokens: Number(usageMatch[1]), completionTokens: Number(usageMatch[2]) })}\n\n`);
           }
           res.write(`event: done\ndata: {}\n\n`);
           res.end();
@@ -233,11 +255,16 @@ describe.skipIf(!TEST_URL)("Assistant send->stream engine (ASST-06)", () => {
 
     const got = await app.inject({ method: "GET", url: `/api/${A}/assistant/threads/${threadId}`, headers: asUser(owner) });
     expect(got.statusCode).toBe(200);
-    const gotBody = got.json() as { messages: Array<{ seq: number; role: string; content: string; errorKind: string | null; tokens: number | null }> };
+    const gotBody = got.json() as { messages: Array<{ seq: number; role: string; content: string; errorKind: string | null; tokens: number | null; provider: string | null; model: string | null }> };
     expect(gotBody.messages).toHaveLength(2);
     expect(gotBody.messages[0]).toMatchObject({ seq: 1, role: "user", content: "Hi there, please respond." });
     expect(gotBody.messages[1]).toMatchObject({ seq: 2, role: "assistant", content: "Hello there friend", errorKind: null });
     expect(gotBody.messages[1].tokens).toBeGreaterThan(0);
+    // ASST-12: this fake gateway never sent `event: meta` — the common path (echo/openai/gemini/
+    // claude report nothing). provider/model stay NULL, the honest "unknown provider" state — not
+    // an error, and no different from ASST-06's original behaviour before ASST-11 existed.
+    expect(gotBody.messages[1].provider).toBeNull();
+    expect(gotBody.messages[1].model).toBeNull();
 
     // Re-GET (a second, independent read) replays byte-identical content — proves persistence, not
     // just an in-memory echo of what the SSE stream happened to carry.
@@ -248,6 +275,94 @@ describe.skipIf(!TEST_URL)("Assistant send->stream engine (ASST-06)", () => {
     // SAME messageId 404s instead of silently re-streaming or hanging.
     const reopened = await openStream(streamUrl);
     expect(reopened.status).toBe(404);
+  });
+
+  // ── ASST-12: consuming ASST-11's additive `event: meta` / terminal `event: usage` ────────────────
+  it("`meta` arrives -> persists non-null provider/model and relays a `meta` frame to our own client before any token", async () => {
+    const threadId = await newThread("meta probe");
+    const sent = await sendMessage(threadId, "SIMULATE_META:ollama:llama3.2 please respond");
+    const { messageId, streamUrl } = sent.json() as { messageId: string; streamUrl: string };
+
+    const res = await openStream(streamUrl);
+    const body = await readAll(res);
+    expect(body).toContain('event: meta\ndata: {"provider":"ollama","model":"llama3.2"}');
+    // Load-bearing ordering: meta committed to OUR wire before the first token frame, mirroring
+    // ASST-11's own gateway-side invariant.
+    expect(body.indexOf("event: meta")).toBeLessThan(body.indexOf("event: token"));
+    expect(body).not.toContain("event: error");
+
+    const got = await app.inject({ method: "GET", url: `/api/${A}/assistant/threads/${threadId}`, headers: asUser(owner) });
+    const msg = (got.json() as { messages: Array<{ id: string; provider: string | null; model: string | null }> }).messages
+      .find((m) => m.id === messageId)!;
+    expect(msg.provider).toBe("ollama");
+    expect(msg.model).toBe("llama3.2");
+  });
+
+  it("a provider with no fixed-model concept reports model:\"\" — persisted and relayed as an empty string, never null and never dropped", async () => {
+    const threadId = await newThread("meta empty-model probe");
+    const sent = await sendMessage(threadId, "SIMULATE_META:echo: please respond");
+    const { messageId, streamUrl } = sent.json() as { messageId: string; streamUrl: string };
+    const res = await openStream(streamUrl);
+    const body = await readAll(res);
+    expect(body).toContain('event: meta\ndata: {"provider":"echo","model":""}');
+
+    const got = await app.inject({ method: "GET", url: `/api/${A}/assistant/threads/${threadId}`, headers: asUser(owner) });
+    const msg = (got.json() as { messages: Array<{ id: string; provider: string | null; model: string | null }> }).messages
+      .find((m) => m.id === messageId)!;
+    expect(msg.provider).toBe("echo");
+    expect(msg.model).toBe(""); // truthful absence, distinct from NULL (no meta at all)
+  });
+
+  it("real `usage` OVERRIDES the ~4-chars/token estimate — persisted tokens = promptTokens+completionTokens, and the relayed `usage` frame labels source:'provider'", async () => {
+    const threadId = await newThread("real usage probe");
+    const sent = await sendMessage(threadId, "SIMULATE_META:ollama:llama3.2 SIMULATE_USAGE:37:41 please respond");
+    const { messageId, streamUrl } = sent.json() as { messageId: string; streamUrl: string };
+    const res = await openStream(streamUrl);
+    const body = await readAll(res);
+
+    const usageLine = body.split("\n\n").find((b) => b.startsWith("event: usage"))!;
+    const usagePayload = JSON.parse(usageLine.split("data: ")[1]) as { tokens: number; source: string; promptTokens: number; completionTokens: number };
+    expect(usagePayload).toMatchObject({ tokens: 78, source: "provider", promptTokens: 37, completionTokens: 41 });
+
+    const got = await app.inject({ method: "GET", url: `/api/${A}/assistant/threads/${threadId}`, headers: asUser(owner) });
+    const msg = (got.json() as { messages: Array<{ id: string; tokens: number | null; provider: string | null }> }).messages
+      .find((m) => m.id === messageId)!;
+    expect(msg.tokens).toBe(78); // the REAL total, not the char-count estimate
+    expect(msg.provider).toBe("ollama");
+  });
+
+  it("absent usage (no SIMULATE_USAGE marker) keeps the relayed `usage` frame labelled source:'estimate' — never presented as a measurement", async () => {
+    const threadId = await newThread("estimate-labelled probe");
+    const sent = await sendMessage(threadId, "please respond, no usage marker here");
+    const { streamUrl } = sent.json() as { messageId: string; streamUrl: string };
+    const res = await openStream(streamUrl);
+    const body = await readAll(res);
+
+    const usageLine = body.split("\n\n").find((b) => b.startsWith("event: usage"))!;
+    const usagePayload = JSON.parse(usageLine.split("data: ")[1]) as { source: string; promptTokens?: number; completionTokens?: number };
+    expect(usagePayload.source).toBe("estimate");
+    expect(usagePayload.promptTokens).toBeUndefined();
+    expect(usagePayload.completionTokens).toBeUndefined();
+  });
+
+  it("an unrecognised/future SSE event type on the gateway wire is ignored — the stream still completes cleanly, zero errors", async () => {
+    const threadId = await newThread("unknown event probe");
+    const sent = await sendMessage(threadId, "SIMULATE_UNKNOWN_EVENT please respond");
+    const { messageId, streamUrl } = sent.json() as { messageId: string; streamUrl: string };
+    const res = await openStream(streamUrl);
+    const body = await readAll(res);
+    // The unknown `tool_call` frame the fake gateway wrote first never surfaces as a token, an
+    // error, or anything at all on OUR wire — it is silently dropped, and the reply still
+    // completes normally right after it.
+    expect(body).not.toContain("tool_call");
+    expect(body).not.toContain("event: error");
+    expect(body).toContain("event: done\ndata: {}");
+
+    const got = await app.inject({ method: "GET", url: `/api/${A}/assistant/threads/${threadId}`, headers: asUser(owner) });
+    const msg = (got.json() as { messages: Array<{ id: string; content: string | null; errorKind: string | null }> }).messages
+      .find((m) => m.id === messageId)!;
+    expect(msg.content).toBe("Hello there friend"); // the 3 real tokens, unaffected by the bogus frame
+    expect(msg.errorKind).toBeNull();
   });
 
   it("a second concurrent send to the same thread is rejected (409), never interleaving seq", async () => {

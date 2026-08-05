@@ -19,16 +19,20 @@
 // ASST-04 already scrubs response bytes (DLP) upstream of this file, at the gateway's wire
 // boundary — this file must NEVER re-scrub or decode-then-rescrub what it receives.
 //
-// ── WHY provider/model ARE NOT RECORDED FOR A STREAMED REPLY ──────────────────────────────────────
-// A thread's `brain` (brain_provider/brain_model) is STORED (migration 0079) but NOT ROUTED in
-// Phase 1 — the gateway's own chain/failover picks whichever provider actually serves the prompt
-// (ollama -> ... -> echo), and unlike the non-streaming `/complete` route (`{text, provider}`),
-// `/complete/stream`'s SSE wire carries no field naming which provider served it. So the platform
-// genuinely cannot attribute a streamed reply to a specific provider without ai-gateway-go adding
-// one — recording the thread's REQUESTED brain on the message would misrepresent a failed-over
-// reply as having been served by the brain the user picked. `assistant_messages.provider`/`model`
-// are therefore left NULL for every streamed message in Phase 1; per-brain routing + provider
-// attribution is Phase 2 work (see this file's header and docs/FRONTEND-BFF-CONTRACT.md §18).
+// ── ASST-12 — CONSUMING ai-gateway-go's `meta`/`usage` (ASST-11, additive grammar-v2) ───────────────
+// ASST-11 closed the gap the paragraph below used to describe: the gateway's `/complete/stream`
+// wire now carries an additive `event: meta` (`{provider, model, providerSession?}`, emitted
+// EXACTLY ONCE at the DLP scrubber's first byte release — i.e. it names the provider that actually
+// COMMITTED output, never a provider that died inside the hold window) and a terminal
+// `event: usage` (`{promptTokens, completionTokens}`, emitted ONLY when the serving provider
+// reports REAL end-of-stream counts — today that is `ollama` alone; `echo`/`openai`/`gemini`/
+// `claude` report nothing, so `usage` is simply ABSENT for them, which is the common path, not an
+// error). Both are handled as **absent-tolerant**: an older gateway (or any provider that never
+// reports usage) emits neither, and that must read as "unknown provider" / "no real usage
+// available" — never as a failure. `relayGeneration` below captures whichever of the two arrives
+// and returns them on `RelayResult` so the controller can persist `provider`/`model` (previously
+// always NULL for a streamed reply) and record `usageSource: 'provider' | 'estimate'` so nothing
+// ever presents the ~4-chars/token estimate as if it were a measurement.
 import { config } from "../../config";
 
 // ─────────────────────────────────────── low-level SSE parsing ───────────────────────────────────
@@ -96,41 +100,95 @@ export type GatewayStreamEvent =
   /** Stream ended without a `done` (or `error`) event ever arriving — the abnormal-drop case this
    *  ticket calls out by name. Kept as its OWN variant (not folded into `error`) so callers can
    *  classify it precisely (`error_kind = 'abnormal_drop'`) instead of string-matching a message. */
-  | { type: "abnormal_drop" };
+  | { type: "abnormal_drop" }
+  /** ASST-11's `event: meta` — the provider that actually committed bytes to the wire. Non-
+   *  terminal: arrives once, before the first token, then the loop continues. `model` may
+   *  legitimately be `""` (a provider with no fixed-model concept, e.g. `echo`) — that is a
+   *  truthful absence, not malformed data, so it is passed through as-is, never coerced to null
+   *  or dropped. */
+  | { type: "meta"; provider: string; model: string; providerSession?: string }
+  /** ASST-11's terminal `event: usage` — REAL end-of-stream provider-reported counts (never
+   *  zero-filled, never estimated). Arrives immediately before `done`, only when the serving
+   *  provider reports them (today: `ollama` only) — absent on every other provider and on every
+   *  error path, which is the common case, not an exception. */
+  | { type: "usage"; promptTokens: number; completionTokens: number };
 
-/** Translate the gateway's raw SSE bytes into `GatewayStreamEvent`s per the ASST-10 grammar.
- *  Terminates (returns) after yielding `done`, `error`, or the synthesized `abnormal_drop` — never
- *  yields anything after a terminal event, mirroring the gateway's own "exactly one terminal"
- *  invariant. */
+/** Translate the gateway's raw SSE bytes into `GatewayStreamEvent`s per the ASST-10 grammar (plus
+ *  ASST-11's additive `meta`/`usage`). Terminates (returns) after yielding `done`, `error`, or the
+ *  synthesized `abnormal_drop` — never yields anything after a terminal event, mirroring the
+ *  gateway's own "exactly one terminal" invariant. `meta`/`usage` are non-terminal and simply keep
+ *  the loop going. Any OTHER/unrecognised named event (a future grammar-v3+ addition this file has
+ *  never heard of) is silently ignored rather than mis-parsed as a token or thrown as an error —
+ *  the additive-event contract this whole file consumes requires that an unknown event type never
+ *  breaks the stream. */
 export async function* parseGatewayStream(body: ReadableStream<Uint8Array>): AsyncGenerator<GatewayStreamEvent> {
   let sawTerminal = false;
   for await (const raw of iterateSSEBlocks(body)) {
-    if (raw.event === "error") {
-      sawTerminal = true;
-      let message = "unknown upstream error";
-      try {
-        const parsed = JSON.parse(raw.data) as { error?: unknown };
-        if (typeof parsed.error === "string" && parsed.error) message = parsed.error;
-      } catch {
-        // Malformed JSON from an otherwise-conformant gateway shouldn't happen, but a parse
-        // failure must still surface as SOME error rather than silently dropping the event.
+    switch (raw.event) {
+      case "error": {
+        sawTerminal = true;
+        let message = "unknown upstream error";
+        try {
+          const parsed = JSON.parse(raw.data) as { error?: unknown };
+          if (typeof parsed.error === "string" && parsed.error) message = parsed.error;
+        } catch {
+          // Malformed JSON from an otherwise-conformant gateway shouldn't happen, but a parse
+          // failure must still surface as SOME error rather than silently dropping the event.
+        }
+        yield { type: "error", error: message };
+        return;
       }
-      yield { type: "error", error: message };
-      return;
+      case "done": {
+        sawTerminal = true;
+        yield { type: "done" };
+        return;
+      }
+      case "meta": {
+        try {
+          const parsed = JSON.parse(raw.data) as { provider?: unknown; model?: unknown; providerSession?: unknown };
+          if (typeof parsed.provider === "string" && typeof parsed.model === "string") {
+            yield {
+              type: "meta",
+              provider: parsed.provider,
+              model: parsed.model,
+              providerSession: typeof parsed.providerSession === "string" ? parsed.providerSession : undefined,
+            };
+          }
+          // A malformed-but-present meta frame (missing/wrong-typed fields) is dropped, not
+          // thrown — absent-tolerant per the additive-event contract; the badge simply stays
+          // "unknown provider" for this stream, exactly as if the gateway had never sent it.
+        } catch {
+          // Same reasoning — a parse failure must never break the stream.
+        }
+        continue;
+      }
+      case "usage": {
+        try {
+          const parsed = JSON.parse(raw.data) as { promptTokens?: unknown; completionTokens?: unknown };
+          if (typeof parsed.promptTokens === "number" && typeof parsed.completionTokens === "number") {
+            yield { type: "usage", promptTokens: parsed.promptTokens, completionTokens: parsed.completionTokens };
+          }
+        } catch {
+          // Same reasoning — drop, never throw. The estimate remains the labelled fallback.
+        }
+        continue;
+      }
+      case "message": {
+        // Default (unnamed) event: `data` is the JSON STRING of the token text (ASST-10).
+        let text: unknown;
+        try {
+          text = JSON.parse(raw.data);
+        } catch {
+          text = raw.data; // defensive fallback — treat unparsable data as literal text
+        }
+        yield { type: "token", text: typeof text === "string" ? text : String(text) };
+        continue;
+      }
+      default:
+        // Unrecognised event name — a future additive frame this file has never heard of. Ignore
+        // it and keep reading; this is the whole point of the additive-event contract.
+        continue;
     }
-    if (raw.event === "done") {
-      sawTerminal = true;
-      yield { type: "done" };
-      return;
-    }
-    // Default (unnamed) event: `data` is the JSON STRING of the token text (ASST-10).
-    let text: unknown;
-    try {
-      text = JSON.parse(raw.data);
-    } catch {
-      text = raw.data; // defensive fallback — treat unparsable data as literal text
-    }
-    yield { type: "token", text: typeof text === "string" ? text : String(text) };
   }
   if (!sawTerminal) {
     yield { type: "abnormal_drop" };
@@ -242,7 +300,17 @@ export function abortForClientDisconnect(threadId: string): boolean {
 
 export interface RelayEmit {
   token: (text: string) => void;
-  usage: (tokens: number, latencyMs: number) => void;
+  /** ASST-12 — relays a `meta` frame the instant it arrives (i.e. before any further tokens), so a
+   *  live-streaming client can show "served by <provider>" without waiting for `done`. Called at
+   *  most once per generation (the gateway's own invariant — see `GatewayStreamEvent`'s header). */
+  meta: (provider: string, model: string, providerSession?: string) => void;
+  /** `tokens`/`latencyMs` keep their ASST-06 meaning (a total count + wall-clock latency at
+   *  terminal time). `source` says which kind of count `tokens` actually is: `"provider"` when
+   *  `promptTokens`/`completionTokens` came from ASST-11's real `usage` frame (in which case
+   *  `tokens` is their sum), or `"estimate"` when no provider-reported usage ever arrived (the
+   *  ~4-chars/token approximation, unchanged from ASST-06). `promptTokens`/`completionTokens` are
+   *  only ever set alongside `source === "provider"`. */
+  usage: (tokens: number, latencyMs: number, source: "provider" | "estimate", promptTokens?: number, completionTokens?: number) => void;
   done: () => void;
   error: (message: string, errorKind: string) => void;
 }
@@ -250,11 +318,28 @@ export interface RelayEmit {
 export interface RelayResult {
   /** Full concatenated text received before the terminal event (possibly partial on error/stop). */
   text: string;
+  /** Total token count. Despite the name (kept for call-site stability), this is the REAL
+   *  provider-reported total (promptTokens + completionTokens) whenever `usageSource ===
+   *  "provider"` — it is only ever the ~4-chars/token estimate when `usageSource === "estimate"`. */
   tokensEstimate: number;
   latencyMs: number;
   outcome: "done" | "error";
   errorKind?: string;
   errorMessage?: string;
+  /** ASST-11's `meta` — the provider/model that actually served this reply. Undefined (persisted
+   *  as NULL) when `meta` never arrived: an older gateway, or a provider that died before
+   *  committing any bytes to the wire. Absence is "unknown provider", never an error. */
+  provider?: string;
+  model?: string;
+  providerSession?: string;
+  /** `"provider"` only when ASST-11's real `usage` frame arrived (today: `ollama` only);
+   *  `"estimate"` otherwise — including every error/abnormal-drop path, since a provider never
+   *  reports usage on those. This is what makes the persisted `tokens` column (and the UI's cost
+   *  meter) able to say which kind of number it is showing instead of presenting an estimate as a
+   *  measurement. */
+  usageSource: "provider" | "estimate";
+  promptTokens?: number;
+  completionTokens?: number;
 }
 
 export interface RelayGenerationInput {
@@ -297,12 +382,22 @@ export async function relayGeneration(entry: GenerationEntry, input: RelayGenera
   let text = "";
   const latencyMs = () => Date.now() - started;
 
+  // ASST-12 — captured from `meta`/`usage` GatewayStreamEvents as they arrive (see that type's
+  // header). Both stay undefined when the corresponding frame never arrives, which is the common,
+  // non-error case — every early-return below must therefore default `usageSource` to
+  // `"estimate"` and leave `provider`/`model` undefined rather than guessing.
+  let metaProvider: string | undefined;
+  let metaModel: string | undefined;
+  let metaProviderSession: string | undefined;
+  let realPromptTokens: number | undefined;
+  let realCompletionTokens: number | undefined;
+
   try {
     const url = (input.gatewayUrl ?? config.services.gateway.url).replace(/\/$/, "");
     if (!url) {
       const msg = "ai-gateway-go is not configured (GATEWAY_URL unset) — the assistant fails closed rather than degrading silently";
       input.emit.error(msg, "not_configured");
-      return { text, tokensEstimate: 0, latencyMs: latencyMs(), outcome: "error", errorKind: "not_configured", errorMessage: msg };
+      return { text, tokensEstimate: 0, latencyMs: latencyMs(), outcome: "error", errorKind: "not_configured", errorMessage: msg, usageSource: "estimate" };
     }
     const fetchImpl = input.fetchImpl ?? fetch;
     resetIdleTimer();
@@ -319,34 +414,64 @@ export async function relayGeneration(entry: GenerationEntry, input: RelayGenera
     if (!res.ok || !res.body) {
       const msg = `ai-gateway /complete/stream returned HTTP ${res.status}`;
       input.emit.error(msg, "transport_error");
-      return { text, tokensEstimate: estimateTokens(text), latencyMs: latencyMs(), outcome: "error", errorKind: "transport_error", errorMessage: msg };
+      return { text, tokensEstimate: estimateTokens(text), latencyMs: latencyMs(), outcome: "error", errorKind: "transport_error", errorMessage: msg, usageSource: "estimate" };
     }
 
     for await (const evt of parseGatewayStream(res.body as ReadableStream<Uint8Array>)) {
       resetIdleTimer(); // any activity from upstream resets the idle clock, tokens or terminal alike
+      if (evt.type === "meta") {
+        // Gateway invariant (ASST-11): emitted at most once, before the first token, naming the
+        // provider that actually committed bytes — captured verbatim, never re-derived.
+        metaProvider = evt.provider;
+        metaModel = evt.model;
+        metaProviderSession = evt.providerSession;
+        input.emit.meta(evt.provider, evt.model, evt.providerSession);
+        continue;
+      }
+      if (evt.type === "usage") {
+        // Terminal-adjacent (arrives just before `done`), but non-terminal itself — keep reading.
+        realPromptTokens = evt.promptTokens;
+        realCompletionTokens = evt.completionTokens;
+        continue;
+      }
       if (evt.type === "token") {
         text += evt.text;
         input.emit.token(evt.text);
         continue;
       }
       if (evt.type === "done") {
-        const tokensEstimate = estimateTokens(text);
         const lm = latencyMs();
-        input.emit.usage(tokensEstimate, lm);
+        // Real provider-reported usage OVERRIDES the estimate whenever it arrived; otherwise the
+        // ASST-06 ~4-chars/token estimate remains the labelled fallback — never presented as a
+        // measurement (see RelayResult.usageSource's header).
+        const hasRealUsage = realPromptTokens !== undefined && realCompletionTokens !== undefined;
+        const tokensTotal = hasRealUsage ? realPromptTokens! + realCompletionTokens! : estimateTokens(text);
+        const usageSource: "provider" | "estimate" = hasRealUsage ? "provider" : "estimate";
+        input.emit.usage(tokensTotal, lm, usageSource, realPromptTokens, realCompletionTokens);
         input.emit.done();
-        return { text, tokensEstimate, latencyMs: lm, outcome: "done" };
+        return {
+          text, tokensEstimate: tokensTotal, latencyMs: lm, outcome: "done",
+          provider: metaProvider, model: metaModel, providerSession: metaProviderSession,
+          usageSource, promptTokens: realPromptTokens, completionTokens: realCompletionTokens,
+        };
       }
       if (evt.type === "error") {
         const lm = latencyMs();
         input.emit.error(evt.error, "upstream_error");
-        return { text, tokensEstimate: estimateTokens(text), latencyMs: lm, outcome: "error", errorKind: "upstream_error", errorMessage: evt.error };
+        return {
+          text, tokensEstimate: estimateTokens(text), latencyMs: lm, outcome: "error", errorKind: "upstream_error", errorMessage: evt.error,
+          provider: metaProvider, model: metaModel, providerSession: metaProviderSession, usageSource: "estimate",
+        };
       }
       // evt.type === "abnormal_drop" — the wire ended without done/error. Treated as an error,
       // never as success (this ticket's explicit mandate).
       const lm = latencyMs();
       const msg = "upstream stream ended without a done event (abnormal drop)";
       input.emit.error(msg, "abnormal_drop");
-      return { text, tokensEstimate: estimateTokens(text), latencyMs: lm, outcome: "error", errorKind: "abnormal_drop", errorMessage: msg };
+      return {
+        text, tokensEstimate: estimateTokens(text), latencyMs: lm, outcome: "error", errorKind: "abnormal_drop", errorMessage: msg,
+        provider: metaProvider, model: metaModel, providerSession: metaProviderSession, usageSource: "estimate",
+      };
     }
     // Unreachable in practice: parseGatewayStream always yields exactly one terminal event before
     // its generator returns. Kept as a typed fallback rather than an assertion so a future
@@ -354,7 +479,10 @@ export async function relayGeneration(entry: GenerationEntry, input: RelayGenera
     const lm = latencyMs();
     const msg = "upstream stream ended unexpectedly with no terminal event";
     input.emit.error(msg, "abnormal_drop");
-    return { text, tokensEstimate: estimateTokens(text), latencyMs: lm, outcome: "error", errorKind: "abnormal_drop", errorMessage: msg };
+    return {
+      text, tokensEstimate: estimateTokens(text), latencyMs: lm, outcome: "error", errorKind: "abnormal_drop", errorMessage: msg,
+      provider: metaProvider, model: metaModel, providerSession: metaProviderSession, usageSource: "estimate",
+    };
   } catch (err) {
     const lm = latencyMs();
     const isAbort = (err as Error)?.name === "AbortError";
@@ -378,11 +506,37 @@ export async function relayGeneration(entry: GenerationEntry, input: RelayGenera
       }
     }
     input.emit.error(errorMessage, errorKind);
-    return { text, tokensEstimate: estimateTokens(text), latencyMs: lm, outcome: "error", errorKind, errorMessage };
+    return {
+      text, tokensEstimate: estimateTokens(text), latencyMs: lm, outcome: "error", errorKind, errorMessage,
+      provider: metaProvider, model: metaModel, providerSession: metaProviderSession, usageSource: "estimate",
+    };
   } finally {
     if (idleTimer) clearTimeout(idleTimer);
     activeGenerations.delete(entry.threadId);
   }
+}
+
+// ────────────────────────────────── persistence-shape helper (ASST-12) ───────────────────────────
+
+/** The shape persisted into `assistant_messages.parts` (jsonb, previously always `[]` and unused —
+ *  no schema change needed, see this ticket's own header note) to carry `usageSource` and the
+ *  real prompt/completion breakdown, alongside the existing `provider`/`model`/`tokens` columns.
+ *  Kept as its own tiny helper (not inlined at the one call site) so the shape has exactly one
+ *  definition the UI's `parseUsageMeta` mirrors byte-for-byte. */
+export interface UsageMetaPart {
+  type: "usage_meta";
+  usageSource: "provider" | "estimate";
+  promptTokens?: number;
+  completionTokens?: number;
+}
+
+export function usageMetaParts(result: Pick<RelayResult, "usageSource" | "promptTokens" | "completionTokens">): UsageMetaPart[] {
+  return [{
+    type: "usage_meta",
+    usageSource: result.usageSource,
+    ...(result.promptTokens !== undefined ? { promptTokens: result.promptTokens } : {}),
+    ...(result.completionTokens !== undefined ? { completionTokens: result.completionTokens } : {}),
+  }];
 }
 
 // ──────────────────────────────────── SSE encoding to OUR client ─────────────────────────────────
@@ -393,6 +547,6 @@ export async function relayGeneration(entry: GenerationEntry, input: RelayGenera
  *  (embedded `\n`/`\n\n` become the two/four-character escapes), so this framing is safe for
  *  arbitrary token text (markdown, fenced code, multi-paragraph answers) end to end, the same
  *  property ASST-10 established for the gateway->platform hop. */
-export function sseLine(event: "token" | "usage" | "done" | "error", data: unknown): string {
+export function sseLine(event: "token" | "meta" | "usage" | "done" | "error", data: unknown): string {
   return `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
 }

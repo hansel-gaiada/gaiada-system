@@ -75,6 +75,55 @@ export function isPendingMessage(m: Pick<AssistantMessage, "content" | "errorKin
   return m.content === null && m.errorKind === null;
 }
 
+// ============================================================== ASST-12: provider badge + cost meter
+// `provider`/`model` come straight off the message row (platform-nest fills them from ASST-11's
+// `meta` frame — see assistant.controller.ts; null means the gateway never announced a serving
+// provider for this reply, the honest common-path state, never an error). `usageSource` is NOT a
+// message column — it is read out of the EXISTING `parts` jsonb (see stream.ts's `usageMetaParts`,
+// the single source of truth for this shape) rather than re-derived here, per the ticket's own
+// "usageSource ... drives the label (not re-derived in the UI)" requirement.
+
+/** Mirrors platform-nest's `UsageMetaPart` (stream.ts) byte-for-byte. */
+export interface UsageMetaPart {
+  type: "usage_meta";
+  usageSource: "provider" | "estimate";
+  promptTokens?: number;
+  completionTokens?: number;
+}
+
+function isUsageMetaPart(v: unknown): v is UsageMetaPart {
+  return !!v && typeof v === "object" && (v as { type?: unknown }).type === "usage_meta"
+    && ((v as { usageSource?: unknown }).usageSource === "provider" || (v as { usageSource?: unknown }).usageSource === "estimate");
+}
+
+/** Reads the persisted usage-source annotation out of a message's `parts` column. Returns `null`
+ *  for a message that predates ASST-12 (or never got a terminal outcome yet) — callers must treat
+ *  that the same as "estimate, no breakdown", never as an error. */
+export function parseUsageMeta(parts: unknown): UsageMetaPart | null {
+  if (!Array.isArray(parts)) return null;
+  return parts.find(isUsageMetaPart) ?? null;
+}
+
+/** The "served by" brain badge label. `provider === null` (no `meta` ever arrived — an older
+ *  gateway, or a provider that died before committing bytes) renders as "Unknown provider", never
+ *  as blank or an error. `model === ""` (a provider with no fixed-model concept, e.g. `echo`)
+ *  renders as "unknown model" — a truthful absence, not a broken value. */
+export function brainBadgeLabel(provider: string | null, model: string | null): string {
+  if (!provider) return "Unknown provider";
+  const modelLabel = model && model.trim() ? model : "unknown model";
+  return `${provider} · ${modelLabel}`;
+}
+
+/** The cost-meter label: a token count plus which KIND of number it is. `usageSource` distinguishes
+ *  a real provider-reported measurement from the ~4-chars/token estimate — this is the whole point
+ *  of the ticket (never present an estimate as if it were a measurement). Returns `null` when there
+ *  is nothing to show yet (no tokens recorded). */
+export function usageMeterLabel(tokens: number | null, usageSource: "provider" | "estimate" | null): string | null {
+  if (tokens === null) return null;
+  const measured = usageSource === "provider";
+  return `${tokens} token${tokens === 1 ? "" : "s"} (${measured ? "measured" : "estimated"})`;
+}
+
 // ============================================================== Left-rail: search + date grouping ==
 // Lifted from aivory's useConversationHistory/ConversationHistory (Today/Yesterday/Last 7 Days/
 // Older, pinned split into its own bucket) — see docs/blueprints/assistant-foundation.md §8's
@@ -161,7 +210,17 @@ export function parseSSEBuffer(buffer: string): { blocks: RawSSEBlock[]; rest: s
 
 export type ClientStreamEvent =
   | { type: "token"; text: string }
-  | { type: "usage"; tokens: number; latencyMs: number }
+  // ASST-12 — relays ASST-11's `meta` the instant it arrives (before any token), so a
+  // live-streaming reply can show "served by <provider>" without waiting for the reply to
+  // finish — this is the "silent failover is invisible" gap the ticket exists to close.
+  // `model` may legitimately be `""` (a provider with no fixed-model concept, e.g. `echo`) —
+  // that is a truthful absence carried through as-is, never coerced.
+  | { type: "meta"; provider: string; model: string }
+  // `source` says whether `tokens` is a REAL provider-reported count (`"provider"`, only when
+  // ASST-11's real `usage` frame arrived — today: `ollama` only) or the ~4-chars/token estimate
+  // (`"estimate"`, the common case: absent on every other provider and on every error path).
+  // `promptTokens`/`completionTokens` are only ever set alongside `source === "provider"`.
+  | { type: "usage"; tokens: number; latencyMs: number; source: "provider" | "estimate"; promptTokens?: number; completionTokens?: number }
   | { type: "done" }
   | { type: "error"; error: string; errorKind: string };
 
@@ -180,11 +239,23 @@ export function decodeAssistantEvent(block: RawSSEBlock): ClientStreamEvent | nu
   switch (block.event) {
     case "token":
       return typeof obj.text === "string" ? { type: "token", text: obj.text } : null;
+    case "meta":
+      // Absent-tolerant by construction: a malformed/partial meta block simply decodes to `null`
+      // and is dropped by the caller's guard (same as any other unrecognised block) — the badge
+      // stays "unknown provider" rather than throwing.
+      return typeof obj.provider === "string" && typeof obj.model === "string"
+        ? { type: "meta", provider: obj.provider, model: obj.model }
+        : null;
     case "usage": {
       const tokens = Number(obj.tokens);
       const latencyMs = Number(obj.latencyMs);
       if (!Number.isFinite(tokens) || !Number.isFinite(latencyMs)) return null;
-      return { type: "usage", tokens, latencyMs };
+      // `source` defaults to "estimate" for an older platform-nest relay that never sends it
+      // (pre-ASST-12) — absent-tolerant, never assumed "provider".
+      const source: "provider" | "estimate" = obj.source === "provider" ? "provider" : "estimate";
+      const promptTokens = typeof obj.promptTokens === "number" ? obj.promptTokens : undefined;
+      const completionTokens = typeof obj.completionTokens === "number" ? obj.completionTokens : undefined;
+      return { type: "usage", tokens, latencyMs, source, promptTokens, completionTokens };
     }
     case "done":
       return { type: "done" };
@@ -216,12 +287,16 @@ export interface StreamState {
   /** The TRUE accumulated text — every token concatenated, updated instantly. The typewriter
    *  smoother (render layer) lags behind this on purpose; never read this expecting animation. */
   text: string;
-  usage: { tokens: number; latencyMs: number } | null;
+  /** ASST-12 — set the instant a `meta` frame arrives (before any token, per ASST-11's own
+   *  ordering invariant). Null for the entire stream when the serving provider never announced
+   *  itself — the honest "unknown provider" state, never an error. */
+  meta: { provider: string; model: string } | null;
+  usage: { tokens: number; latencyMs: number; source: "provider" | "estimate"; promptTokens?: number; completionTokens?: number } | null;
   error: { message: string; kind: string } | null;
 }
 
 export function initialStreamState(): StreamState {
-  return { status: "idle", text: "", usage: null, error: null };
+  return { status: "idle", text: "", meta: null, usage: null, error: null };
 }
 
 const TERMINAL_STATUSES = new Set<StreamStatus>(["done", "error", "stopped"]);
@@ -234,8 +309,10 @@ export function streamReducer(state: StreamState, event: ClientStreamEvent): Str
   switch (event.type) {
     case "token":
       return { ...state, status: "streaming", text: state.text + event.text };
+    case "meta":
+      return { ...state, meta: { provider: event.provider, model: event.model } };
     case "usage":
-      return { ...state, usage: { tokens: event.tokens, latencyMs: event.latencyMs } };
+      return { ...state, usage: { tokens: event.tokens, latencyMs: event.latencyMs, source: event.source, promptTokens: event.promptTokens, completionTokens: event.completionTokens } };
     case "done":
       return { ...state, status: "done" };
     case "error":

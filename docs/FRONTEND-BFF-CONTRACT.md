@@ -1462,24 +1462,37 @@ with other resources' admin-bypass rules. Do not add one; see the policy file's 
   silent interleave — the lock only serializes the race, a precondition re-check INSIDE it (the
   same D14 lesson: a lock alone is not enough) is what makes the loser actually refuse.
 - ✅ **`GET /api/:t/assistant/threads/:id/stream?messageId=<id>`** (ASST-06) — SSE. Re-emits
-  typed events `token` (`{text}`), `usage` (`{tokens, latencyMs}` — **an ~4-chars/token estimate**,
-  not a real tokenizer count: the gateway's `/complete/stream` wire has no `usage` field, ASST-10),
-  `done` (`{}`), `error` (`{error, errorKind}`). `errorKind` ∈ `upstream_error` (the gateway sent
+  typed events `token` (`{text}`), **`meta`** (`{provider, model}` — ASST-12, added 2026-08-05:
+  relayed the instant ai-gateway-go's own `event: meta` arrives, i.e. before the first token; see
+  the "Gateway wire addendum" below for the gateway-side timing invariant this mirrors), `usage`
+  (`{tokens, latencyMs, source, promptTokens?, completionTokens?}` — ASST-12 added `source` ∈
+  `"provider" | "estimate"` plus the real breakdown when present; `tokens` is the ASST-06
+  ~4-chars/token estimate ONLY when `source === "estimate"` — when `source === "provider"` it is
+  `promptTokens + completionTokens`, a REAL count relayed from the gateway's own terminal
+  `event: usage` (ASST-11). Absent real usage is the common path today (only `ollama` reports it) —
+  `source` still arrives as `"estimate"` in that case, never omitted and never silently zero-filled).
+  Also `done` (`{}`), `error` (`{error, errorKind}`). `errorKind` ∈ `upstream_error` (the gateway sent
   `event: error`) | **`abnormal_drop`** (the gateway's stream ended with NEITHER `done` NOR
   `error` — treated as a failure, never as success, per ASST-10's explicit mandate) | `idle_timeout`
   (no upstream activity for `ASSISTANT_STREAM_IDLE_TIMEOUT_MS`, default 60s — a stalled generation
   fails visibly instead of hanging the connection forever) | `stopped` (see below) |
   `client_disconnected` | `not_configured` (`GATEWAY_URL` unset) | `transport_error`. On `done`,
-  the placeholder is finalized with the full text + the token estimate + latency and the thread's
-  `total_tokens`/`last_message_at` are bumped; on ANY other outcome it is finalized with the
-  partial text received so far (possibly `""`) + a typed `error_kind` — a stopped/failed
-  generation's partial reply is always visible, never silently discarded. Re-opening an
-  already-finalized `messageId` **404s**. **`provider`/`model` are left NULL** on every streamed
-  message — the gateway's SSE wire does not name which provider actually served a streamed
-  reply (unlike `/complete`'s `{text,provider}` shape), so recording the thread's requested
-  `brainProvider` would misattribute a failed-over reply. **Thread `brain` is stored but NOT
-  ROUTED in Phase 1** — the gateway's own chain/failover picks the provider; per-brain dispatch is
-  Phase 2. Context assembly (`modules/assistant/context.ts`) folds the system preamble + a
+  the placeholder is finalized with the full text + the token count (real when `usageSource ===
+  'provider'`, else the estimate) + latency and the thread's `total_tokens`/`last_message_at` are
+  bumped; on ANY other outcome it is finalized with the partial text received so far (possibly
+  `""`) + a typed `error_kind` — a stopped/failed generation's partial reply is always visible,
+  never silently discarded. Re-opening an already-finalized `messageId` **404s**.
+  **`provider`/`model` (ASST-12, 2026-08-05):** filled from ai-gateway-go's `event: meta` (ASST-11)
+  whenever it arrived — **left NULL when it never did** (an older gateway, or a provider that died
+  before committing bytes to the wire), which is the honest "unknown provider" state, never an
+  error; `model` may itself be `""` (a provider with no fixed-model concept, e.g. `echo`) —
+  distinct from NULL, rendered by the UI as "unknown model" rather than a broken value.
+  `usageSource` (`'provider' | 'estimate'`) is persisted too, but NOT as its own column — it lives
+  inside the existing `parts` jsonb (previously always `[]` and unused; see `stream.ts`'s
+  `usageMetaParts`/`UsageMetaPart`, mirrored byte-for-byte by platform-ui's `parseUsageMeta`) so no
+  migration was needed. **Thread `brain` is stored but NOT ROUTED in Phase 1** — the gateway's own
+  chain/failover picks the provider; per-brain dispatch is Phase 2. Context assembly
+  (`modules/assistant/context.ts`) folds the system preamble + a
   rolling **compaction summary** + the most recent messages (char-budget
   `ASSISTANT_CONTEXT_CHAR_BUDGET`, default 12000) into the single `prompt` string
   `/complete(/stream)` accepts (that route has no chat-messages array). **Compaction v1**: when
@@ -1521,3 +1534,47 @@ with other resources' admin-bypass rules. Do not add one; see the policy file's 
 - `ModuleContract.mcpTools` and `rollupProviders` are deliberately **empty** in this ticket — the
   tool-broker surface is Phase 3 (unregistered on purpose, not a placeholder omission) and no
   metric surface is specified yet. See `modules/assistant/index.ts`'s header comment.
+
+### Gateway wire addendum — `event: meta` + terminal `event: usage` (ASST-11, 2026-08-05)
+
+**`ai-gateway-go`'s `POST /complete/stream` only — NOT platform-nest's `.../threads/:id/stream`**
+(that BFF-facing route has its OWN, separate `meta`/`usage` frames, documented in the bullet
+above — ASST-12 re-emits them on ITS wire, it does not merely forward the gateway's). Two ADDITIVE
+grammar-v2 events (ASST-10: single-line JSON `data:`, same as every other frame on this route),
+layered onto the wire while it still had exactly one consumer. **ASST-12 (2026-08-05) is that
+consumer now — platform-nest's relay (`modules/assistant/stream.ts`) parses both, absent-tolerantly**
+(an older gateway build, or any provider that reports neither, degrades to exactly ASST-06's
+original behaviour: NULL provider/model, the char-count estimate — never an error). This was the
+last moment either event could be added for free; once a SECOND gateway consumer exists (beyond
+this relay), changing this framing again is a breaking change.
+
+- **`event: meta`** — `data: {"provider":string,"model":string,"providerSession"?:string}`.
+  Emitted **exactly once per stream**, at the moment the ASST-04 DLP scrubber releases its FIRST
+  bytes to the wire — i.e. immediately before the first content `data:` frame, NOT at provider
+  selection time. That timing is load-bearing: it names the provider that actually **committed**
+  output under ASST-03/04's `streamed` discipline. A provider that dies while its output is still
+  inside the scrubber's hold window (nothing yet reached the client) never gets `meta` written for
+  it — the failover replacement's `meta` is what the client sees, and it is never contradicted
+  afterward (once `meta` is written, no further provider can run for that response). `model` is
+  `""` for a provider with no fixed-model concept (e.g. `echo`) — truthful absence, not a guess.
+  `providerSession` is reserved for a future per-provider session handle; nothing populates it yet,
+  so it is **omitted**, never sent empty.
+  **Additive contract: a consumer MUST treat an absent `meta` event as "unknown provider" — never
+  an error.** This covers both an older gateway build (pre-ASST-11) and, until the ASST-06
+  follow-up lands, THIS gateway's only real consumer, which simply never looks for it yet.
+- **`event: usage`** — `data: {"promptTokens":int,"completionTokens":int}`. **Terminal** — written
+  immediately before `event: done`, and **only** when a provider reports REAL end-of-stream token
+  counts (never zero-filled, never estimated — the whole point of this event is that it is never
+  ASST-06's own ~4-chars/token estimate wearing a "real" label). Absent on every error path, and
+  absent whenever the serving provider doesn't report counts.
+  **Which providers can report it today: `ollama` only** (`internal/providers/ollama.go` —
+  Ollama's NDJSON final line carries `prompt_eval_count`/`eval_count`, wired via the new
+  `providers.UsageStreamingProvider` extension of `StreamingProvider`). `echo`, `openai` (incl.
+  Ollama Cloud), `gemini`, and `claude` report no real counts today — `usage` is simply absent for
+  them, by design, not a gap. Live production usage from the real Ollama upstream is
+  **UNVERIFIED** — proven only against fixture NDJSON in `internal/providers/ollama_test.go`; no
+  live Ollama instance was driven for this ticket.
+- Both events go through the same `writeSSEData`/`writeSSEError`/`writeSSEDone`-style helpers
+  (`writeSSEMeta`/`writeSSEUsage` in `internal/server/server.go`) that guarantee the one-line-JSON
+  invariant — no call site can bypass it. Full coverage in
+  `internal/server/server_meta_test.go` and `internal/providers/ollama_test.go`.

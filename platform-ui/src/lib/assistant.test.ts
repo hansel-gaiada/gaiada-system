@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   groupThreads, filterThreads, threadTitle, isPendingMessage,
   parseSSEBuffer, decodeAssistantEvent, streamReducer, initialStreamState, humanizeErrorKind,
+  brainBadgeLabel, parseUsageMeta, usageMeterLabel,
   type AssistantThread,
 } from "./assistant";
 
@@ -85,7 +86,8 @@ describe("parseSSEBuffer — the exact wire framing sseLine() produces", () => {
 describe("decodeAssistantEvent — guards against malformed/unrecognised blocks", () => {
   it("decodes token/usage/done/error", () => {
     expect(decodeAssistantEvent({ event: "token", data: '{"text":"hi"}' })).toEqual({ type: "token", text: "hi" });
-    expect(decodeAssistantEvent({ event: "usage", data: '{"tokens":10,"latencyMs":200}' })).toEqual({ type: "usage", tokens: 10, latencyMs: 200 });
+    expect(decodeAssistantEvent({ event: "usage", data: '{"tokens":10,"latencyMs":200}' }))
+      .toEqual({ type: "usage", tokens: 10, latencyMs: 200, source: "estimate", promptTokens: undefined, completionTokens: undefined });
     expect(decodeAssistantEvent({ event: "done", data: "{}" })).toEqual({ type: "done" });
     expect(decodeAssistantEvent({ event: "error", data: '{"error":"boom","errorKind":"upstream_error"}' }))
       .toEqual({ type: "error", error: "boom", errorKind: "upstream_error" });
@@ -100,6 +102,27 @@ describe("decodeAssistantEvent — guards against malformed/unrecognised blocks"
   it("returns null for an unrecognised event name", () => {
     expect(decodeAssistantEvent({ event: "tool_call", data: "{}" })).toBeNull();
   });
+
+  // ── ASST-12: meta + real usage ────────────────────────────────────────────────────────────────
+  it("decodes a meta event naming the serving provider/model", () => {
+    expect(decodeAssistantEvent({ event: "meta", data: '{"provider":"ollama","model":"llama3.2"}' }))
+      .toEqual({ type: "meta", provider: "ollama", model: "llama3.2" });
+  });
+  it("model:\"\" is a truthful absence, decoded as-is, never dropped", () => {
+    expect(decodeAssistantEvent({ event: "meta", data: '{"provider":"echo","model":""}' }))
+      .toEqual({ type: "meta", provider: "echo", model: "" });
+  });
+  it("returns null for a meta block missing provider/model", () => {
+    expect(decodeAssistantEvent({ event: "meta", data: "{}" })).toBeNull();
+  });
+  it("decodes real usage with source:'provider' plus the prompt/completion breakdown", () => {
+    expect(decodeAssistantEvent({ event: "usage", data: '{"tokens":15,"latencyMs":300,"source":"provider","promptTokens":10,"completionTokens":5}' }))
+      .toEqual({ type: "usage", tokens: 15, latencyMs: 300, source: "provider", promptTokens: 10, completionTokens: 5 });
+  });
+  it("an unrecognised source value defaults to 'estimate' — never assumed 'provider'", () => {
+    const decoded = decodeAssistantEvent({ event: "usage", data: '{"tokens":5,"latencyMs":10,"source":"bogus"}' });
+    expect(decoded).toMatchObject({ type: "usage", source: "estimate" });
+  });
 });
 
 describe("streamReducer — pure, immutable, guarded against terminal-state resurrection", () => {
@@ -107,7 +130,18 @@ describe("streamReducer — pure, immutable, guarded against terminal-state resu
     let s = initialStreamState();
     s = streamReducer(s, { type: "token", text: "Hel" });
     s = streamReducer(s, { type: "token", text: "lo" });
-    expect(s).toEqual({ status: "streaming", text: "Hello", usage: null, error: null });
+    expect(s).toEqual({ status: "streaming", text: "Hello", meta: null, usage: null, error: null });
+  });
+  it("meta sets the live badge state as soon as it arrives, non-terminal", () => {
+    let s = initialStreamState();
+    s = streamReducer(s, { type: "meta", provider: "ollama", model: "llama3.2" });
+    expect(s.meta).toEqual({ provider: "ollama", model: "llama3.2" });
+    expect(s.status).toBe("idle"); // meta alone doesn't start "streaming" — a token does
+  });
+  it("real usage overrides what the reducer is holding — the meter can then say 'measured'", () => {
+    let s = initialStreamState();
+    s = streamReducer(s, { type: "usage", tokens: 15, latencyMs: 300, source: "provider", promptTokens: 10, completionTokens: 5 });
+    expect(s.usage).toEqual({ tokens: 15, latencyMs: 300, source: "provider", promptTokens: 10, completionTokens: 5 });
   });
   it("done is terminal", () => {
     let s = initialStreamState();
@@ -128,13 +162,53 @@ describe("streamReducer — pure, immutable, guarded against terminal-state resu
   });
   it("any other errorKind lands status 'error' and records the message/kind", () => {
     const s = streamReducer(initialStreamState(), { type: "error", error: "boom", errorKind: "upstream_error" });
-    expect(s).toEqual({ status: "error", text: "", usage: null, error: { message: "boom", kind: "upstream_error" } });
+    expect(s).toEqual({ status: "error", text: "", meta: null, usage: null, error: { message: "boom", kind: "upstream_error" } });
   });
   it("never mutates the previous state object", () => {
     const s0 = initialStreamState();
     const s1 = streamReducer(s0, { type: "token", text: "x" });
-    expect(s0).toEqual({ status: "idle", text: "", usage: null, error: null });
+    expect(s0).toEqual({ status: "idle", text: "", meta: null, usage: null, error: null });
     expect(s1).not.toBe(s0);
+  });
+});
+
+describe("brainBadgeLabel — absent meta is 'Unknown provider', never blank or an error", () => {
+  it("renders provider + model when both are known", () => {
+    expect(brainBadgeLabel("ollama", "llama3.2")).toBe("ollama · llama3.2");
+  });
+  it("a null provider (no meta ever arrived) renders 'Unknown provider'", () => {
+    expect(brainBadgeLabel(null, null)).toBe("Unknown provider");
+    expect(brainBadgeLabel(null, "some-model")).toBe("Unknown provider");
+  });
+  it("model:\"\" (a provider with no fixed-model concept, e.g. echo) renders 'unknown model', not blank", () => {
+    expect(brainBadgeLabel("echo", "")).toBe("echo · unknown model");
+  });
+});
+
+describe("parseUsageMeta — reads the persisted parts[]; the source is never re-derived in the UI", () => {
+  it("finds the usage_meta entry among other parts", () => {
+    expect(parseUsageMeta([{ type: "usage_meta", usageSource: "provider", promptTokens: 10, completionTokens: 5 }]))
+      .toEqual({ type: "usage_meta", usageSource: "provider", promptTokens: 10, completionTokens: 5 });
+  });
+  it("returns null for a message predating ASST-12 (empty parts, or not an array)", () => {
+    expect(parseUsageMeta([])).toBeNull();
+    expect(parseUsageMeta(null)).toBeNull();
+    expect(parseUsageMeta(undefined)).toBeNull();
+  });
+});
+
+describe("usageMeterLabel — distinguishes a real measurement from the estimate, out loud", () => {
+  it("labels a provider-sourced count as measured", () => {
+    expect(usageMeterLabel(78, "provider")).toBe("78 tokens (measured)");
+  });
+  it("labels an estimate-sourced count as estimated", () => {
+    expect(usageMeterLabel(42, "estimate")).toBe("42 tokens (estimated)");
+  });
+  it("null usageSource (predates ASST-12) still renders — defaults to estimated, never crashes", () => {
+    expect(usageMeterLabel(10, null)).toBe("10 tokens (estimated)");
+  });
+  it("returns null when there is nothing to show yet", () => {
+    expect(usageMeterLabel(null, null)).toBeNull();
   });
 });
 

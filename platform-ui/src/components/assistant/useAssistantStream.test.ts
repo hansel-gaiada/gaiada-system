@@ -88,7 +88,26 @@ describe("openAssistantStream — real incremental decoding", () => {
     expect(events).toEqual([
       { type: "token", text: "Hel" },
       { type: "token", text: "lo" },
-      { type: "usage", tokens: 2, latencyMs: 40 },
+      { type: "usage", tokens: 2, latencyMs: 40, source: "estimate", promptTokens: undefined, completionTokens: undefined },
+      { type: "done" },
+    ]);
+  });
+
+  it("decodes a meta event and a real (provider-sourced) usage event", async () => {
+    const reader = makeControllableReader();
+    installFetchMock(reader);
+    const enc = new TextEncoder();
+    reader.push(enc.encode('event: meta\ndata: {"provider":"ollama","model":"llama3.2"}\n\n'));
+    reader.push(enc.encode('event: token\ndata: {"text":"hi"}\n\n'));
+    reader.push(enc.encode('event: usage\ndata: {"tokens":15,"latencyMs":300,"source":"provider","promptTokens":10,"completionTokens":5}\n\n'));
+    reader.push(enc.encode("event: done\ndata: {}\n\n"));
+    reader.push(null);
+
+    const events = await drain(openAssistantStream("t1", "m1").events);
+    expect(events).toEqual([
+      { type: "meta", provider: "ollama", model: "llama3.2" },
+      { type: "token", text: "hi" },
+      { type: "usage", tokens: 15, latencyMs: 300, source: "provider", promptTokens: 10, completionTokens: 5 },
       { type: "done" },
     ]);
   });

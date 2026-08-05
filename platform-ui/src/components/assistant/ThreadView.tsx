@@ -41,7 +41,15 @@ export function ThreadView({
     <div className="asst-thread" role="log" aria-label="Conversation">
       {messages.map((m) => {
         const isLive = m.id === streamingMessageId && streamState.status === "streaming";
-        return <Message key={m.id} message={m} streaming={isLive} liveText={isLive ? displayText : undefined} />;
+        return (
+          <Message
+            key={m.id}
+            message={m}
+            streaming={isLive}
+            liveText={isLive ? displayText : undefined}
+            liveState={isLive ? streamState : undefined}
+          />
+        );
       })}
       <StreamIndicator state={streamState} />
       <div ref={bottomRef} />
