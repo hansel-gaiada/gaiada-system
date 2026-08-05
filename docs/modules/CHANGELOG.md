@@ -23,6 +23,26 @@ reconstructed from this table alone. Format defined in [`VERSIONING.md`](./VERSI
 > `01.012.0031a`. Per VERSIONING rule 5 `/VERSION` is authoritative; the `MODULES.md` line is now
 > corrected and should be moved with every cut.
 
+### `Alpha 01.017.0040b` — 2026-08-05 — re-cut: Rekor would not take report-renderer's SBOM
+
+`0040a` never deployed. `build-sign (report-renderer)` failed twice on the SBOM attestation —
+`POST https://rekor.sigstore.dev/api/v1/log/entries giving up after 4 attempt(s)`, each time after
+cosign's own 4 retries — and because `deploy` declares `needs: build-sign`, the whole deploy was
+**skipped**. A supply-chain nicety stopped a production deploy that was otherwise green.
+
+Revision letter, not the counter: no module changed, only `release.yml` (VERSIONING: "an infra/CI change
+that touches no module is exactly this case — bump the letter").
+
+`cosign attest` is now `continue-on-error`. That is **not** a weakened deploy gate: deploy.yml's
+"Verify image signatures" step runs `cosign verify` — the signature only, never
+`cosign verify-attestation` — and `cosign sign` succeeds for every component including this one. What is
+genuinely lost is the attested SBOM in the public transparency log for `report-renderer`, whose Chromium
+layers make its SPDX predicate far larger than the rest. The proper fix, left as follow-up: SBOM the app
+layers rather than the whole base image, or attest that one component with `--tlog-upload=false`, then
+make the step blocking again.
+
+Code is unchanged from `0040a`, which CI passed at `429c5ea`.
+
 ### `Alpha 01.017.0040a` — 2026-08-05 — back on the pipeline; supersedes the hand-built release
 
 **The first properly built, signed release since Actions was blocked.** `01.016.0037a` was hand-built on
