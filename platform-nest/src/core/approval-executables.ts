@@ -130,10 +130,12 @@ export function getExecutable(toolName: string): ExecutableApprovalEntry | undef
  * test files that register their own fixture entries don't collide with entries left over from a
  * prior test run in the same process.
  *
- * NOTE for callers: this also clears the D14-05 `deploy.staging`/`deploy.production` entries
- * registered below (they are a plain call to `registerExecutableApproval`, no different from a test
- * fixture, once the module has loaded). A test file that needs them back after resetting calls
- * `registerCoreExecutableApprovals()` — do not hand-roll a second copy of their lock/precondition.
+ * NOTE for callers: this also clears the D14-05 `deploy.staging`/`deploy.production` entries AND the
+ * D14-15 `pm.createTask`/`pm.createDoc` entries registered below (they are all plain calls to
+ * `registerExecutableApproval`, no different from a test fixture, once the module has loaded). A
+ * test file that needs the deploy pair back after resetting calls `registerCoreExecutableApprovals()`;
+ * one that needs the PM pair back calls `registerPmExecutableApprovals()` — either way, do not
+ * hand-roll a second copy of their lock/precondition.
  */
 export function resetExecutableApprovals(): void {
   registry.clear();
@@ -262,3 +264,161 @@ export function registerCoreExecutableApprovals(): void {
 }
 
 registerCoreExecutableApprovals();
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════════
+// D14-15 — `pm.createTask` / `pm.createDoc`: the PM module's first two registry entries.
+// ═════════════════════════════════════════════════════════════════════════════════════════════════
+//
+// Both tools are thin OBO fronts (`mcp-hub/src/pm-tools.ts`) over platform-nest's own PM endpoints
+// (`POST /api/:t/pm/tasks`, `POST /api/:t/pm/projects/:projectId/docs`) — `impact:"low"`, `write:true`,
+// allowlisted to `wf:report` only (WD-06's report sink). Before this entry existed, `getExecutable()`
+// returning undefined kept every approved PM write permanently `not_applicable` — this is what lets
+// one actually execute.
+//
+// THE J2 BALL-PASS TOOL DOES NOT EXIST YET — it is deliberately NOT registered here. The PM Phase-4
+// contract (`docs/superpowers/plans/2026-08-04-pm-repsona-parity-phase4-plan.md`, item `P4-J2`)
+// PROPOSES a write-tool set for the hub to ship next — `pm.setStatus`, `pm.passBall`,
+// `pm.setDueDate`, `pm.comment` — and calls out `pm.passBall` as "the interesting one" for the
+// impact gate. Verified at build time: `mcp-hub/src/pm-tools.ts` registers exactly two tools today,
+// `pm.createTask` and `pm.createDoc`; none of the four J2 names exist anywhere in the hub or the
+// platform. Registering a name nobody can call is dead configuration — the same reason D14-16 (the
+// mail equivalent) was deferred — so only the two real tools are registered below. When
+// `pm.passBall` lands, give it its OWN entry with its OWN precondition (a ball-pass is a
+// status-transition-adjacent action, not a create — "already passed to this holder" / "task closed"
+// are candidate typed refusals, but that is the next ticket's call to make, not this one's to guess).
+//
+// SCOPE BOUNDARY — READ THIS BEFORE ASSUMING ANY PM WRITE PATH IS WIRED. An earlier draft of this
+// comment said these entries "complete the AUTOMATION (n8n) re-drive path". That is **backwards**, and
+// the inversion matters, so here is the actual reachability:
+//
+// Both tools are `impact: "low"` (`mcp-hub/src/pm-tools.ts`), and the D14 gate suspends only
+// `tool.write && tool.impact !== "low"` (`mcp-hub/src/policy.ts`). So on the n8n path these tools
+// NEVER suspend, never file an `automation_approvals` row, and therefore can never reach this
+// registry at all. The schema agrees: `automation_approvals.impact` is
+// `CHECK (impact IN ('medium','high','unclassified'))` — a low-impact write cannot even be
+// REPRESENTED as a suspended row. Registering them buys the n8n path exactly nothing.
+//
+// The only path that can reach these entries is the AGENT path, and only if an `AgentDef` declares
+// one of these tools as a `high_write`: D14-12's stricter-wins reconciliation would then suspend it
+// and file an `origin='agent'` row, which this entry would execute. That is genuinely useful, because
+// D14-14's `RERUN_CAPABLE_HIGH_WRITES` allowlist requires TWO things per tool before a `high_write`
+// is permitted — a live resolver AND an `approval-executables.ts` entry with a server-side
+// precondition. These entries are that second half for PM.
+//
+// It is still not reachable TODAY: `mcp-hub/src/principal.ts` mints every envelope-derived principal
+// at `"low"` assurance while `approvals.resolveExecute` requires `"verified"`, and no `AgentDef`
+// declares a `high_write` (the guard test forbids it while `RERUN_CAPABLE_HIGH_WRITES` is empty).
+// So: do NOT read this as unblocking PM Phase-4 J2 on either path.
+//
+// NO PIPELINE CO-LOCK (stated so nobody adds `lockPipelineRun` here "for safety" later): PM tools
+// never read or write `pipeline_runs` / `pipeline_stages` — those are mutated by
+// `pipeline.controller.ts` exclusively under `PIPELINE_RUN_LOCK_NS`, which is why `deploy.*` above
+// takes that lock. Neither PM entry touches that state, so co-locking it here would only manufacture
+// a false dependency between two systems that share nothing.
+//
+// "project exists and is not archived": `projects.status` (0001_core.sql) is free text with no CHECK
+// constraint; `'archived'` is the value the rest of the platform already treats as terminal (see
+// `core/portal-workspace.controller.ts`'s own exclusion list). Soft-deleted (`deleted_at IS NOT NULL`)
+// and archived are BOTH refused, but with different typed reasons — `project_not_found` vs
+// `project_archived` — because they are different facts for a human reading the approval row: one
+// means "that project is gone", the other "that project was deliberately closed after this write was
+// filed and someone should look at why".
+//
+// "target status/board still valid": NOT a live branch for either entry today. Neither tool's input
+// schema (`mcp-hub/src/pm-tools.ts`) accepts a status/board argument: `pm.createTask` always lands on
+// the project's own default (first-by-position) status inside `pm.controller.ts#createTask`'s own
+// handler, and `pm.createDoc` has no status concept at all. This becomes a real, tested branch once
+// `pm.setStatus` (or `pm.passBall`) gets its own entry — noted here so its absence reads as a
+// deliberate scope call, not an oversight.
+//
+// "assignee still a member" (`assignee_gone`): only `pm.createTask` can name one
+// (`assigneeUserId`) — `pm.createDoc` has no assignee field, so its precondition never runs this
+// check. Reused verbatim from `pm.controller.ts`'s own `addContributor` membership check
+// (`SELECT 1 FROM company_memberships WHERE user_id = $1 AND deleted_at IS NULL AND status =
+// 'active'`, scoped by the surrounding `withTenants` RLS context rather than a second `tenant_id`
+// filter) — not reimplemented. A present-but-departed assignee REFUSES rather than silently creating
+// the task unassigned: the approval was filed to assign a named person, and creating it anyway would
+// misrepresent what was approved (the WD-29 lesson: never let a stale snapshot's intent quietly
+// mutate into something else at execution time).
+//
+// LOCK KEY: the PM project id extracted from `tool_args.projectId` — the one unit of consistency both
+// tools' approvals for the SAME project contend over (mirrors `deployLockKey`'s runId choice above).
+// Shared, unprefixed, across `pm.createTask` and `pm.createDoc` for a VALID id (two writes into the
+// same project are exactly the case worth serializing); a missing/malformed id falls back to a
+// tool-prefixed key of the raw args so no two distinct malformed calls — and no two distinct tools'
+// malformed calls — ever collapse onto one shared constant lock.
+
+function extractPmProjectId(toolArgs: Record<string, unknown>): string | null {
+  const v = toolArgs?.projectId;
+  return typeof v === "string" && v.trim().length > 0 ? v : null;
+}
+
+function pmLockKey(toolArgs: Record<string, unknown>, toolName: string): string {
+  const projectId = extractPmProjectId(toolArgs);
+  if (projectId) return projectId;
+  return `${toolName}:invalid-project-id:${JSON.stringify(toolArgs)}`;
+}
+
+/** Shared "project still exists and is not archived" check both PM preconditions start with.
+ *  Never writes; only reads. A missing/malformed `projectId` fails closed as `project_not_found`
+ *  rather than throwing — there is no project to re-evaluate against. */
+async function pmProjectPrecondition(
+  client: PoolClient,
+  toolArgs: Record<string, unknown>,
+): Promise<PreconditionVerdict> {
+  const projectId = extractPmProjectId(toolArgs);
+  if (!projectId) return { ok: false, reason: "project_not_found" };
+  const project = await client.query<{ status: string }>(
+    `SELECT status FROM projects WHERE id = $1 AND deleted_at IS NULL`,
+    [projectId],
+  );
+  const row = project.rows[0];
+  if (!row) return { ok: false, reason: "project_not_found" };
+  if (row.status === "archived") return { ok: false, reason: "project_archived" };
+  return { ok: true };
+}
+
+function extractPmAssigneeUserId(toolArgs: Record<string, unknown>): string | null {
+  const v = toolArgs?.assigneeUserId;
+  return typeof v === "string" && v.trim().length > 0 ? v : null;
+}
+
+async function pmCreateTaskPrecondition(
+  client: PoolClient,
+  toolArgs: Record<string, unknown>,
+): Promise<PreconditionVerdict> {
+  const projectVerdict = await pmProjectPrecondition(client, toolArgs);
+  if (!projectVerdict.ok) return projectVerdict;
+  const assigneeUserId = extractPmAssigneeUserId(toolArgs);
+  if (!assigneeUserId) return { ok: true };
+  // Same membership predicate as pm.controller.ts's own addContributor guard — reused, not
+  // reimplemented. Scoped by the surrounding withTenants() RLS context, same as that call site.
+  const member = await client.query(
+    `SELECT 1 FROM company_memberships WHERE user_id = $1 AND deleted_at IS NULL AND status = 'active'`,
+    [assigneeUserId],
+  );
+  if (!member.rows[0]) return { ok: false, reason: "assignee_gone" };
+  return { ok: true };
+}
+
+/**
+ * Registers `pm.createTask` and `pm.createDoc`. Exported for the same reason
+ * `registerCoreExecutableApprovals` is: a test file that calls `resetExecutableApprovals()` and wants
+ * these two back afterward should call this rather than hand-roll a second copy of their
+ * lock/precondition. `resetExecutableApprovals()` clears these along with the deploy entries — same
+ * note applies as that function's own doc.
+ */
+export function registerPmExecutableApprovals(): void {
+  registerExecutableApproval({
+    toolName: "pm.createTask",
+    lockKey: (args) => pmLockKey(args, "pm.createTask"),
+    precondition: pmCreateTaskPrecondition,
+  });
+  registerExecutableApproval({
+    toolName: "pm.createDoc",
+    lockKey: (args) => pmLockKey(args, "pm.createDoc"),
+    precondition: pmProjectPrecondition,
+  });
+}
+
+registerPmExecutableApprovals();
