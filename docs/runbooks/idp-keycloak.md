@@ -38,6 +38,84 @@ realm and clients (below), then flip `PLATFORM_AUTH_MODE=oidc` and restart the p
 re-run them against a fresh Keycloak to reproduce. A realm-export JSON can be dropped in
 `infra/compose/keycloak/` for `--import-realm` on first boot once finalized.
 
+## SMTP (MAIL-03) — realm mail against the Mailpit dev sink
+
+The realm sends mail (forgot-password, verify-email, and any future required-action email)
+through the SMTP config on `realms/gaiada.smtpServer`. Dev default points at the Mailpit sink
+that ships with the `mail-dev` compose profile: host `mailpit`, port `1025`, from
+`no-reply@auth.gaiada.invalid`, no auth, no TLS — the sink is authless/plaintext by design and
+loopback-only for its UI/API (`127.0.0.1:8025`), never internet-exposed.
+
+**ex-Q-V6 — settled, dev-provable (2026-08-04): realm-import does NOT substitute `${env.*}`
+placeholders.** Verified by importing a throwaway realm
+(`zzz-smtp-placeholder-test`) whose `smtpServer.host` was literally `"${env.ZZZ_TEST_SMTP_HOST}"`
+with that env var actually set and passed through the keycloak service's `environment:` block.
+After `--import-realm` ran, `kcadm.sh get realms/zzz-smtp-placeholder-test` showed the field
+**unexpanded** — the literal placeholder string, not the env value. Keycloak's
+`DirImportProvider`/`ExportImportUtil` import path performs no property/env substitution on the
+realm JSON, in this version (`quay.io/keycloak/keycloak:26.0`, resolved `26.0.8`) or generally.
+The test realm and probe file were deleted after the check; no permanent state was left behind.
+
+**Consequence for `gaiada-realm.json`:** its committed `smtpServer` block holds real, working dev
+values (the Mailpit shape above), not `${env.KC_SMTP_*}` placeholders — shipping literal
+placeholder strings would have made a fresh realm's SMTP config literally try to connect to a
+host named `${env.KC_SMTP_HOST}`, which is strictly worse than an honest default.
+
+**Fresh-boot path (works today):** the default import already gives a fresh box a working
+sink-backed SMTP config with zero extra steps. If you need something other than the default
+(a different sink port, or in staging a real relay), set `KC_SMTP_HOST`/`KC_SMTP_PORT`/
+`KC_SMTP_FROM`/`KC_SMTP_FROM_DISPLAY_NAME`/`KC_SMTP_AUTH`/`KC_SMTP_SSL`/`KC_SMTP_STARTTLS` in
+`.env` (same names the keycloak service's `environment:` block already passes through — the
+compose-passthrough trap: setting them only in `.env` does nothing extra beyond making them
+visible inside the container; the container seeing them still does not touch the realm), then run:
+
+```bash
+docker exec -e KEYCLOAK_ADMIN_PASSWORD=<admin pw> gaiada-keycloak-1 \
+  bash /opt/keycloak/data/import/configure-smtp.sh
+```
+
+`infra/compose/keycloak/configure-smtp.sh` is bind-mounted in at `/opt/keycloak/data/import/`
+(same mount as the realm JSON) — it re-reads the container's own `KC_SMTP_*` env and pushes it via
+`kcadm update realms/gaiada -s smtpServer.*`. Idempotent; re-run any time the values change (import
+never picks up a change on its own — the realm already exists after first boot, so
+`--import-realm` skips it on every later restart).
+
+**Live-configured on gda-aicenter 2026-08-04** via one-off `kcadm.sh update` against the running
+container (this is what `configure-smtp.sh` now automates for future boots); confirmed to survive
+a `docker compose ... up -d --force-recreate keycloak` (smtpServer is DB-persisted state, not
+import-derived, so a container restart never loses it).
+
+### Real auth-flow evidence (dev-verified against the sink, 2026-08-04)
+
+Both the forgot-password and verify-email flows were driven end-to-end against the live
+`erp.gaiada.online/idp` realm (real HTTP requests through nginx, real PKCE authorization-code
+flow, real Mailpit API capture, real link click, real token issuance) using disposable dev users
+(`mail03-forgot@dev.gaiada.invalid`, `mail03-verify@dev.gaiada.invalid`; both deleted after):
+
+- **Forgot password:** submitted via `login-actions/reset-credentials`, captured a "Reset
+  password" mail in Mailpit, clicked the emailed action-token link, and received a real Bearer
+  access token from the token endpoint off the resulting authorization code (`acr:1`, valid
+  `account` REST profile fetch). **Finding worth flagging** (not a MAIL-03 blocker): the realm's
+  "reset credentials" flow's "Reset Password" execution is configured `REQUIRED` but the observed
+  live behavior authenticates and completes without presenting an inline new-password form when
+  the user already holds a password credential and no `UPDATE_PASSWORD` required action is queued
+  — reproduced identically under both the `account-console` and `gaiada-ui` clients, so it is flow
+  behavior, not a client artifact. Worth a follow-up look at the flow config if self-service
+  in-band password replacement (not just re-authentication) is required later.
+- **Verify email:** created a user WITHOUT `emailVerified:true`, added the `VERIFY_EMAIL` required
+  action, logged in with a real password — Keycloak gated on the required action and sent the
+  "Verify email" mail (captured in Mailpit), clicked the link, and the required-action redirect
+  chain completed to a real authorization code / Bearer token. `kcadm get users/<id>` confirmed
+  `emailVerified` flipped `false → true` purely through this flow.
+
+### Retirement evidence — the `emailVerified:true` provisioner workaround CAN be retired in dev
+
+The verify-email user above is the proof: it was created with **no** `emailVerified:true` and no
+special provisioner handling, and became `emailVerified:true` through nothing but the real
+sink-backed verify-email mail flow. **The `gaiada-provisioner` client itself is unchanged by this
+ticket** — retiring the workaround for real (non-dev) users is staging item **§15 R6**, not this
+one; this only proves the *mechanism* dev needs to retire it is now live and working.
+
 ## The `google-dev` client — a local OAuth issuer for the search module (SM-51, addendum §A12.3)
 
 The search-marketing department reaches Google Search Console / GA4 / Ads by **per-client OAuth**.

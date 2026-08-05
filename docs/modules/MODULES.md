@@ -54,7 +54,7 @@ versions below; the running build reports it at `GET /health`.
 | render-gateway-go | `0.0.0` | PLANNED | Creative | 2026-07-23 |
 | reports | `0.3.1` | PROTOTYPED | Cross-cutting | 2026-08-03 |
 | report-renderer | `0.1.0` | DEV-VERIFIED | Cross-cutting | 2026-07-31 |
-| mail | `0.0.1` | IN PROGRESS | Cross-cutting | 2026-08-04 |
+| mail | `0.0.8` | IN PROGRESS | Cross-cutting | 2026-08-05 |
 
 ---
 
@@ -340,13 +340,145 @@ through C-03". **v1.2 (same day, Zone A mail v2):** domains locked — C-03's fo
 moved to the Google Workspace SMTP relay with Brevo failover. Blueprint HTML is v1.2; PDF + hosted
 artifact NOT re-rendered yet.
 
-## mail — Zone A Email (platform-nest) · `0.0.1` · IN PROGRESS
+## mail — Zone A Email (platform-nest) · `0.0.9` · IN PROGRESS
+
+**MAIL-15 landed 2026-08-05 (medior) — the mail surface UI, `platform-ui/src/lib/mail.ts` +
+`components/mail/` + `/admin/mail`.** Admin log list (`/admin/mail`, filters stream/status/
+tenantId/entityType/entityId/since, offset-based "Load more" pagination) and detail
+(`/admin/mail/[id]`, an event timeline synthesized from `mail_log`'s own lifecycle timestamps —
+there is no separate events table — plus the inbound thread); a self-contained
+`MailThreadPanel` server component (fetches its own data via `getEntityMailThread`/
+`getPortalRunMailThread`) wired into the pipeline run workspace (`/pipeline/[runId]`) and the
+portal run view (`/portal/approvals/[runId]`, via the portal-scoped BFF read — never the elevated
+admin path). **Two honesty requirements, both structural, not copy choices:** (1) status chips —
+`sent` renders through a dedicated `MailStatusChip` that appends "accepted by relay — not a
+delivery confirmation" rather than reusing the bare `StatusBadge`, so a future status can't
+silently regress into implying delivery; (2) every thread message the BFF serves carries
+`senderVerified:false` (`ThreadMessageView`), and `MailThreadPanel`/the admin detail page render
+the "Email reply — sender unverified (‹from_email›)" banner off that field, never a hardcoded
+per-page assumption. Thread reads (`GET /api/admin/mail/log/:id/thread`, `GET /api/:t/mail/
+threads`, `GET /api/:t/portal/mail/threads`) absence-degrade to an empty thread on 404/405
+(`degradeThread` in `lib/mail.ts`) — MAIL-13 landed concurrently with this ticket and the brief
+called it "unverified"; a 403 still propagates as a real refusal. **DEMO_MODE** fixtures added to
+`demoFixtures.ts` (`DEMO_MAIL_LOG` + thread rows) use only the reserved TLD `*.gaiada.invalid`
+(design A12) and are wired into the existing route dispatcher; a permanent smoke test
+(`lib/mail-demo-smoke.test.ts`) proves list/detail/admin-thread/entity-thread/portal-thread all
+serve with zero backend, and that the portal route still 403s a staff caller exactly like the
+real portal-scope predicate would. **Verified this session:** `npx tsc --noEmit` clean; full unit
+suite green (1041 tests, incl. the new smoke test); `next build` green with `/admin/mail` and
+`/admin/mail/[id]` both present in the route manifest; the A12 grep gate re-run scoped to every
+file this ticket touched returns zero `gaiada.com`/`gaiada.online` hits. **Not verified — capped
+at IN PROGRESS accordingly:** no live BFF was reached (no server access in this ticket, same
+constraint MAIL-04/05 recorded) — the list/filter/paginate-against-the-live-box AC and the
+corpus-fed-thread-visible AC are both PENDING a deploy + live walk, tracked as a MAIL-09-style
+follow-up, not claimed here. **Deferred, with reason:** the approval-detail surface (`/approvals`)
+has no per-item detail page to embed a thread panel into — approvals are decided inline in the
+unified `ApprovalsList` component on the list page itself; wiring a thread panel there would mean
+restructuring that component, which is out of this ticket's scope. Flagged for the next approvals
+UX ticket rather than silently skipped.
+
+**MAIL-03 landed 2026-08-04 (devops) — Keycloak realm SMTP against the Mailpit sink, real auth
+flows end-to-end, DEV-VERIFIED on gda-aicenter.** Live realm `smtpServer` configured via `kcadm`
+under the `/idp` prefix (host `mailpit`, port `1025`, from `no-reply@auth.gaiada.invalid`, no
+auth/TLS); confirmed to survive a `docker compose ... up -d --force-recreate keycloak` (it's
+DB-persisted realm state, not import-derived). **ex-Q-V6 settled, dev-provable:** realm-import
+does **not** substitute `${env.*}` placeholders — proven by importing a throwaway realm with a
+literal `${env.ZZZ_TEST_SMTP_HOST}` placeholder (env var actually set + passed through) and
+finding the unexpanded string in the persisted realm afterwards; test realm + probe file deleted,
+no residue. `infra/compose/keycloak/gaiada-realm.json` therefore ships a real working dev-default
+`smtpServer` block (the Mailpit shape) instead of inert placeholder strings, plus a new
+`infra/compose/keycloak/configure-smtp.sh` (reads the keycloak service's own `KC_SMTP_*` env,
+pushes it via `kcadm update`) for anyone who needs a non-default value — the honest fresh-boot
+path is documented in `docs/runbooks/idp-keycloak.md`. `KC_SMTP_HOST/PORT/FROM/
+FROM_DISPLAY_NAME/AUTH/SSL/STARTTLS` added to the keycloak service's compose `environment:` block
+and `.env.example` in the same change (the compose-passthrough trap). **Both flows driven
+end-to-end on the live `erp.gaiada.online/idp` realm** with disposable dev users (deleted after):
+forgot-password (real PKCE authorization-code flow → Mailpit-captured "Reset password" mail →
+clicked action-token link → real Bearer token issued) and verify-email (created a user WITHOUT
+`emailVerified:true`, forced login → `VERIFY_EMAIL` required action → Mailpit-captured mail →
+clicked link → `emailVerified` flipped `false→true`, confirmed via `kcadm get users`). **Retirement
+evidence:** the verify-email user proves the `gaiada-provisioner` admin-side
+`emailVerified:true` workaround CAN be retired in dev; the provisioner client itself is
+**unchanged** — retiring it for real users is staging item §15 R6, not this ticket. **Finding
+flagged, not fixed here** (outside MAIL-03's scope): the realm's "Reset Password" flow execution
+is `REQUIRED` but observed live behavior authenticates straight through without an inline
+new-password form when the user already holds a credential and no `UPDATE_PASSWORD` required
+action is queued — reproduced under two different clients, so it's flow behavior, documented in
+the runbook for follow-up. Caps at DEV-VERIFIED per program rules — no deliverability claim, the
+real-relay leg is staging §15 R1/R8.
+
+**MAIL-05 landed 2026-08-04 (senior-be) — the approval/risk email tap, `src/mail/intake.ts`.**
+`notify()` (`core/http.ts`) now calls `mailIntake()` exactly once, AFTER its own `notifications`
+row commits: allowlist is EXACTLY `{approval.requested, pipeline.gate.opened}` (probed —
+`mention`/`comment`/`approval_decided` produce zero `mail_log` rows even though the bell
+notification still lands); recipient email resolves via `users.email` (one path for staff AND
+client-contact users, M10); wording class by origin per M12/§7.4 (`automation`/`agent` →
+`approval.warning`, everything else incl. `pipeline`/`hr`/`agency`/unspecified → the safer default
+`approval.actionable`); every mail gets the entity deep link built from `MAIL_LINK_BASE_URL` (plain
+URL — no token, no query string, no literal domain — asserted) and a fresh `reply_token`; no
+preference surface of any kind (approvals stay non-opt-out-able). **Fail-soft is enforced by the
+caller**: `notify()` wraps the tap in try/catch and only logs on failure — test-pinned by forcing
+the tap's enqueue primitive to throw and asserting both that `notify()` itself still resolves and
+that the triggering HTTP write (a real client-gate open) still returns 201. The M12 wording gate is
+re-asserted on the RENDERED output of a row the tap itself enqueued (not just a hand-crafted
+template payload) — `src/mail/tap.test.ts`, 13 tests, green against live Postgres (+ the existing
+77-test `src/mail` suite, `client-notifications.test.ts`, `automation-approvals.test.ts`, and
+`agency.test.ts` all still green; `tsc --noEmit` clean). **Same pass — a QA-filed defect fixed:**
+`GET /api/admin/mail/log`'s `tenantId`/`entityId` (`uuid`) and `since` (`timestamptz`) query
+filters now shape-check before the query runs (`admin-mail.controller.ts`, same `UUID_RE` /
+`Date.parse` convention as `pm.controller.ts`/`search.controller.ts`) — a malformed value is a
+clean 400 instead of an uncaught Postgres error surfacing as a bare 500;
+`adversarial-qa.test.ts`'s former `[DOCUMENTS DEFECT]` case is updated to assert 400 and is green.
+**Status stays IN PROGRESS, not DEV-VERIFIED:** all evidence above is against live Postgres +
+Nest's in-process HTTP injection, not a deployed box — the live probe ("trigger a gate on
+gda-aicenter ⇒ mail visible in Mailpit with the correct deep link") is explicitly MAIL-09's job and
+is **not claimed here**; this session confirmed the Mailpit container is up and healthy on
+gda-aicenter but did not deploy this change to it, so running the probe now would only exercise the
+OLD (pre-tap) deployed code — reported as PENDING rather than faked.
 
 **What exists:** MAIL-16D landed 2026-08-04 — the `GmailClient` seam + fixture-backed
 implementation + provider-agnostic contract-test suite, DEV-VERIFIED for the seam only, in the
 self-contained `platform-nest/src/integrations/gmail/` directory (see that directory's README.md
-for the honesty note: thread/label/pagination semantics are UNVERIFIED against real Gmail). No
-other mail code has landed yet. Design **v3 (2026-08-04 — third same-day revision: dev stage with
+for the honesty note: thread/label/pagination semantics are UNVERIFIED against real Gmail).
+**MAIL-00 + MAIL-14 landed 2026-08-04 (this entry, devops) — the Mailpit dev sink + ClamAV scan
+service, DEV-VERIFIED with real gda-aicenter evidence:** `mailpit` (`axllent/mailpit:v1.30.6`,
+`mail-dev` profile) and `clamav` (`clamav/clamav:1.5.3`, its own `scan` profile — deliberately
+NOT `mail-dev`, since real inbound at staging still needs scanning after the sink retires) added
+as new top-level services in `infra/compose/docker-compose.vps.yml` (purely additive — the
+concurrently-edited `platform` service block was left untouched). Both live on the box: `docker
+inspect` shows `healthy` for both; a keyless authless SMTP transaction against `mailpit:1025`
+from inside the stack network was accepted and surfaced in `GET /api/v1/messages` over the
+loopback API; `ss -tlnp` on the box confirms `:8025` is bound to `127.0.0.1` only (never
+internet-reachable — it will hold live password-reset/magic-link mail); the EICAR test string was
+flagged `Eicar-Signature FOUND` via `clamdscan`; both containers survived two consecutive
+deploy-shaped `up -d --remove-orphans` runs (the orphan probe). **Known gap, reported not
+silently worked around:** the GitHub repo variable `COMPOSE_PROFILES` (currently `bot,auth,
+whisper`) could NOT be updated to append `mail-dev,scan` — both `gh variable set` and `gh api`
+were denied by this session's permission classifier. The two services were brought up on the box
+with the profiles supplied manually for this application + the orphan-probe evidence, but until
+the repo variable itself is fixed, **the next real `deploy.yml` run will delete both containers**
+(the exact trap this ticket exists to prevent) — see the CHANGELOG entry for the exact command to
+run. `deploy.yml`'s lane comment updated in the same change.
+**MAIL-04 landed 2026-08-04 — the mail CORE module, `platform-nest/src/mail/`:**
+migration `0077_mail_core.sql` (`mail_log`/`mail_suppressions`/`mail_messages`, GLOBAL/no-RLS per
+design §6.1); `MailProviderAdapter` (`smtp` via nodemailer + `dev-log`, the TLS rule from design
+§4.1 — plaintext allowed only when a stream's user+password are both empty); the internal
+`enqueueMail()` primitive; the sender worker (chained-setTimeout sweep, `FOR UPDATE SKIP LOCKED`
+claim, `min(2^attempts,60)`-minute backoff, 5-attempt cap, auth-stream-first ordering);
+enqueue-time + send-time suppression enforcement; `POST /api/mail/webhooks/brevo` (token-authed,
+idempotent, 204-on-unknown); elevated-only `GET /api/admin/mail/log[/:id]`; the three code
+templates (`approval.warning`, `approval.actionable`, `auth.shell`) with the M12 wording gate
+pinned in tests; the A12 grep gate wired into CI (`src/mail/grep-gate.test.ts`). 49 tests green
+against live Postgres, incl. a local fake-SMTP server standing in for the sink. **Also observed
+already present in `infra/compose/docker-compose.vps.yml` (landed by a concurrent devops session,
+not built or verified by this ticket): the MAIL-00 Mailpit dev sink (`mail-dev` profile,
+loopback-only UI) and the MAIL-14 ClamAV scan service (`scan` profile).** The `notify()` tap
+(MAIL-05 — what actually populates `mail_log` from real approval/gate events) has **not** landed;
+until it does, nothing in the ERP enqueues mail on its own. **Status caps at IN PROGRESS, not
+DEV-VERIFIED:** MAIL-04 was verified against a local fake-SMTP stand-in and live Postgres — the
+real Mailpit sink on gda-aicenter was never reached (no server access in this ticket); that live
+smoke (enqueue → message asserted via the Mailpit API) is a tracked follow-up, not claimed here.
+Design **v3 (2026-08-04 — third same-day revision: dev stage with
 zero external keys)** —
 [`../superpowers/specs/2026-08-04-zone-a-mail-design.md`](../superpowers/specs/2026-08-04-zone-a-mail-design.md)
 + re-cut ticket plan [`../superpowers/plans/2026-08-04-mail-subsystem-tickets.md`](../superpowers/plans/2026-08-04-mail-subsystem-tickets.md). No code; the ERP currently sends zero email.
@@ -382,6 +514,90 @@ mail deliberately does NOT route through webdesk C-03.
 UI/deploy → magic links → MAIL-18 exit gate) — **no external blockers**; then the staging reopen
 W-S0–W-S3 (relay/DNS + Brevo = ex-Q-O1/Q-O3, Gmail wave = ex-Q-O2 + WD-23A-1 landing, ≥7-day SLO
 window before real-user magic links). 07/08 stay dropped; dropped numbers not reused.
+
+**MAIL-02 landed 2026-08-04 (devops) — Alertmanager email live against the Mailpit sink, D15
+second transport, DEV-VERIFIED with real gda-aicenter evidence.** Added
+`smtp_require_tls: ${SMTP_REQUIRE_TLS}` to `infra/observability/alertmanager/alertmanager.yml`'s
+`global:` block (Alertmanager's own default is `true`, which flatly refuses the TLS-less sink —
+this one line supersedes the earlier "don't edit compose" note) and `SMTP_REQUIRE_TLS:
+${SMTP_REQUIRE_TLS:-true}` (secure-by-default) to the `&am_env` anchor in
+`infra/compose/docker-compose.observability.yml`; mirrored into a **new standalone compose
+project** `infra/compose/docker-compose.alertmanager-mail.yml` (`name: gaiada-alertmanager`,
+services `alertmanager-render` + `alertmanager` only — the WS9 stack stays NOT up on the box),
+attached to the main stack's network via `networks.stack: {name: gaiada_default, external:
+true}` — the n8n precedent, so it survives the main project's `--remove-orphans`. Server-side env
+lives in a new, ungitted `infra/compose/.env.alertmanager-mail` (`SMTP_SMARTHOST=mailpit:1025`,
+`SMTP_FROM=alerts@notify.gaiada.invalid`, empty auth, `SMTP_REQUIRE_TLS=false`; Telegram/ntfy/
+webhook/deadmansswitch given deliberate `*.invalid` placeholder values so every receiver stays
+config-valid without needing real third-party credentials — this ticket exercises the email leg
+only). **Evidence:** `amtool check-config` inside the running container →
+`SUCCESS … 3 receivers … 1 templates` (all of `default-multi`/`page-all`/`deadmansswitch` present,
+Telegram/ntfy legs config-valid, not removed); a synthetic `POST /api/v2/alerts`
+(`MAIL02SyntheticProbe`) landed in the Mailpit API within the `group_wait` window — message
+`From: alerts@notify.gaiada.invalid`, `To: ops@notify.gaiada.invalid`, `Subject: "[FIRING:1]
+MAIL02SyntheticProbe mail-02-devops-ticket (warning)"` — captured, then resolved for hygiene; the
+real deploy-equivalent command was run for real (`COMPOSE_PROFILES='bot,auth,whisper,mail-dev,
+scan' docker compose -f docker-compose.vps.yml -f docker-compose.hostdata.yml up -d --no-build
+--remove-orphans`, the exact repo-variable values read live via `gh api`) and both `mailpit` and
+the separate `gaiada-alertmanager` project's `alertmanager` container were confirmed unaffected
+(`docker ps` before/after) — no orphan removal touched either. `docker-compose.obs-local.yml` and
+`alertmanager.local.yml` left untouched. **Cap: DEV-VERIFIED — real-relay leg (Telegram token,
+real SMTP relay, real ntfy/webhook/dead-man's-switch endpoints) is staging §15 R8, not claimed
+here.** Nothing in `platform-nest/` touched.
+
+**MAIL-13 landed 2026-08-05 (senior-be) — inbound system-mail threads (C1), the untrusted-input
+pipeline.** `POST /api/mail/inbound/brevo` is real: token wall (`MAIL_INBOUND_TOKEN`, constant-time,
+**fail-closed when unset** — same shape as MAIL-04's `assertWebhookToken`) plus an OPTIONAL
+HMAC-SHA256 signature over the RAW request bytes (`MAIL_INBOUND_SIGNING_KEY`; required once
+configured). **Finding, architect-visible:** Brevo does **not** sign webhooks at all — its documented
+options are basic-auth-in-URL, a token header, or custom headers (verified against Brevo's docs
+2026-08-04), so "implemented to Brevo's documented scheme" is the TOKEN, and the HMAC verifier is
+ours; §15 R3's "verify signature validation against real signatures" needs re-scoping at staging.
+Matching is the VERP `reply+<token>@` local part → `mail_log.reply_token` and nothing else —
+`from_email` is stored as display metadata and never consulted for routing or authorization.
+Inbound is idempotent on `(provider, provider_message_id)`, and the idempotency decision happens
+BEFORE any sanitizing/scanning/quarantine write, so a replayed delivery costs nothing. Raw MIME is
+never stored: a tokenize-and-REBUILD HTML allowlist sanitizer (`src/mail/inbound/html-sanitize.ts`,
+no new dependency) constructs the stored `body_html_sanitized` from an allowlisted tag set plus
+escaped text, so no attribute except a scheme-validated `a[href]` can exist in the output and
+`<img>`/`<script>`/`<style>`/`<svg>` are unrepresentable rather than filtered. Attachments land in a
+quarantine prefix of the existing file store (never a `files` row) with a `scanStatus` download gate
+consuming MAIL-14's clamd: `clean` serves, `infected` refuses at every privilege and its bytes are
+never written to disk, `pending` (unscannable — clamd down/absent) stays quarantined at every
+privilege, `skipped` (scanning off) is admin-only. Unmatched/absent/unknown token ⇒ counter + log +
+**204** (A9) with a response byte-identical to the matched case, so the endpoint is not a token
+oracle. Best-effort NDR classification requires TWO independent signals (its harmful failure
+direction is a FALSE positive, which would suppress a real recipient's address) and only a 5.x.x
+status produces `status='bounced'` + suppression; NDR rows are stored with a NULL entity so a bounce
+can never render as a human reply on a decision surface. Thread reads —
+`GET /api/:t/mail/threads`, `GET /api/:t/portal/mail/threads`,
+`GET /api/:t/mail/messages/:id/attachments/:i`, `GET /api/admin/mail/log/:id/thread` — authorize
+against the **PARENT entity** (A10) through one shared `thread-authz.ts` that reproduces each parent
+surface's own `authorize()` shape, `module` attribute included.
+**New env (all in `src/config.ts`; NOT yet in the compose `platform` environment: block — see the
+follow-up below):** `MAIL_INBOUND_SIGNING_KEY`, `MAIL_INBOUND_SIGNATURE_TOLERANCE_S`,
+`MAIL_INBOUND_MAX_ATTACHMENT_BYTES`, `MAIL_INBOUND_MAX_ATTACHMENTS`, `MAIL_INBOUND_RATE_PER_MIN`,
+`MAIL_CLAMAV_HOST`/`_PORT`/`_TIMEOUT_MS`.
+**Evidence:** `npx vitest run src/mail` → **15 files, 135/135 tests passing** against live Postgres +
+Cerbos (the 22-case corpus suite, the 15-probe thread-authorization suite, 21 sanitizer unit tests,
+and every pre-existing MAIL-04/05 suite incl. the A12 grep gate, which the new fixtures pass).
+Committed adversarial corpus at `src/mail/__fixtures__/inbound/` — 15 provider-shaped fixtures
+covering every case design §7.6 enumerates, each self-describing and each with a pinned test; wired
+into CI as a named fail-fast step (`npm run test:mail-corpus`). **Three real defects were found by
+the corpus and fixed:** (1) the replacement body handed to Fastify's parser was a string, so
+`Buffer.concat` threw inside a stream callback and every inbound request HUNG instead of erroring;
+(2) `content-length` was not rewritten for that replacement stream, 500-ing every post; (3) `embed`
+was subtree-dropped despite being a void element, so a mail containing `<embed>` silently lost every
+byte after it. **Caps at IN PROGRESS.** NOT claimed: the replay script has never run against a
+deployed box (`npm run mail:replay-inbound -- --base <url>` exists and is **PENDING-DEPLOY**); the
+corpus is committed to CI but **cannot be shown running** while GitHub Actions is billing-blocked
+(dev-stage exit criterion #3 stays OPEN); real Brevo payload fidelity/signatures (§15 R3), real relay
+NDR classifiability (§15 R4), and the live clamd path (proven separately by MAIL-14 on the box, here
+driven through a stub scanner) are all unverified here. **Follow-up for devops:** the new `MAIL_*`
+vars above are not in `infra/compose/docker-compose.vps.yml`'s `platform` service `environment:`
+block — until they are, they are silently disabled on the box (the standing compose-passthrough
+trap). Brevo inbound also hands out attachment `DownloadToken`s rather than bytes, so the
+token→bytes fetch is staging work behind the existing `NormalizedAttachment` seam.
 
 ## search-marketing â€” SEO Â· SEM Â· GEO Â· `0.5.0` Â· DEV-VERIFIED
 

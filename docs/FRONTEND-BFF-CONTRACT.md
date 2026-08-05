@@ -1312,3 +1312,89 @@ a client-recorded payment can never leave `pending`.
 **⚠ NO STAFF UI EXISTS FOR §16e.** Contracts must be created and payments confirmed via API until
 `/clients/[id]/contracts` and a finance queue page are built. Whoever owns finance needs to know the
 decide endpoint exists, or client payments accumulate as `pending` with nobody looking.
+
+## 17. Mail subsystem (MAIL-* program, 2026-08-04) — `src/mail/` — **STATUS: IN PROGRESS**
+
+Design: [`../superpowers/specs/2026-08-04-zone-a-mail-design.md`](../superpowers/specs/2026-08-04-zone-a-mail-design.md)
+(v3) + ticket plan [`../superpowers/plans/2026-08-04-mail-subsystem-tickets.md`](../superpowers/plans/2026-08-04-mail-subsystem-tickets.md).
+`src/mail/` is core infra (design A1), not a `ModuleContract` module — no per-tenant enable gate,
+same class as `src/events/`. **Status-language discipline (design §13, binding):** everything below
+is verified only against a local fake-SMTP stand-in and a live Postgres test DB — **not** against
+the real Mailpit sink on gda-aicenter (no server access in this ticket) and **not** against any
+real provider. Caps at **IN PROGRESS**, never DEV-VERIFIED, until that live smoke runs (tracked as
+a follow-up on MAIL-09).
+
+MAIL-04 shipped the core module: adapter + queue + sender + delivery webhook + admin log reads.
+MAIL-05 landed the `notify()` tap (`src/mail/intake.ts`), which populates `mail_log` for real, for
+exactly two notification types — `approval.requested` and `pipeline.gate.opened` — whenever
+`MAIL_ENABLED=1`. Everything else in the bell (`mention`, `comment`, `approval_decided`, etc.)
+still never enqueues mail.
+
+**MAIL-06 has now landed** (2026-08-04, F1 fix): `approval.requested` is EMITTED for real, from
+FOUR creation sites (`notify()` via `notifyBestEffort()`, `core/client-notify.ts`) — the ticket
+named two, a third live insert site was found and closed for full-fidelity (see the CHANGELOG
+`mail` §0.0.7 entry for the exact reasoning):
+1. `core/automation-approvals.controller.ts` `create()` — origin `automation`/`agent` (the WS4
+   hub-gate suspension path). Notifies the tenant's `company_admin` + `group_executive`.
+2. `modules/hr/hr.controller.ts` `fileLeave()` — the ONLY `origin='hr'` insert site. Notifies
+   `company_admin` + `group_executive` **plus** the providing unit's `hr_manager` (module_manager
+   scoped `module='hr'` — a DIFFERENT module's manager is never included).
+3. `modules/agency/agency.controller.ts` `createApproval()` (subject-review path).
+4. `modules/agency/agency.controller.ts` `submit()` (asset-review path).
+   Both agency paths notify the `resource_agency_approval.yaml` `approve`-action set:
+   `company_admin` + `agency_approver` (ex-Q-V8 — that policy's DECIDE-equivalent action is named
+   `approve`, not `decide`).
+5. (Beyond the ticket's two named tables, closed for consistency) `modules/search/search.controller.ts`'s
+   Google-Ads change-proposal suspend path — a THIRD `automation_approvals` insert site, origin
+   `automation`, same decider set as (1).
+Recipient resolution mirrors the Cerbos policy (`src/core/approval-deciders.ts`, new — see its
+header for the exact mirror and why it is routing-only, never an authz decision), deduped by user
+id, with `notify()`'s existing self-skip preserved. `pipeline.gate.opened` was already emitted
+(`pipeline.controller.ts`), unchanged by this ticket — a client-actionable gate opening already
+sends mail once `MAIL_ENABLED=1` on a deployed box.
+
+| Status | Method | Path | Notes |
+|---|---|---|---|
+| ✅ | GET | `/api/admin/mail/log` | Elevated-only (`isElevated` — `platform_admin`/`group_executive` global). Filters: `?stream`, `?status`, `?tenantId`, `?entityType`, `?entityId`, `?since`; `?limit`/`?offset` pagination. Non-elevated caller: 403. `mail_log` is a GLOBAL table (no RLS, design §6.1) — this is its ONLY read path today. **`tenantId`/`entityId` must be uuid-shaped and `since` must be a parseable date — a malformed value now 400s (fixed 2026-08-04; previously an uncaught Postgres error surfaced as a bare 500).** |
+| ✅ | GET | `/api/admin/mail/log/:id` | Full row. 404 for an unknown id. Same elevated-only gate. |
+| ✅ | POST | `/api/mail/webhooks/brevo` | Provider delivery-event intake (design §7.7). NOT behind `AuthGuard` — the only wall is the `x-gaiada-mail-webhook-token` header (constant-time compare against `MAIL_WEBHOOK_TOKEN`; fail-closed when unset). Idempotent by `provider_message_id`; unknown/unmatched id or unrecognized event shape → `204` (never a 5xx a provider would retry forever over). In the dev stage this endpoint receives nothing (no live Brevo) — built and tested for real so it is ready the moment §15 R3 wires a real webhook at staging. |
+| ✅ | POST | `/api/mail/inbound/brevo` | **MAIL-13** — inbound reply intake (design §7.6). Session-less like the webhook above; walls are `x-gaiada-mail-inbound-token` (constant-time vs `MAIL_INBOUND_TOKEN`, **fail-closed when unset**) plus, when `MAIL_INBOUND_SIGNING_KEY` is set, a REQUIRED `x-gaiada-mail-inbound-signature: t=<unix>,v1=<hex hmac-sha256 of "<t>.<raw body>">`. Statuses: `401` bad/absent token or signature · `413` over `MAIL_INBOUND_MAX_BYTES` · `429` per-source rate limit · `400` unparseable body · **`204` for everything else including threaded, replayed and the A9 unmatched drop** — the 204 body is empty and byte-identical in all those cases, deliberately, so the endpoint is not a reply-token oracle. Not a UI endpoint; listed because it is what populates the thread reads below. |
+| ✅ | GET | `/api/:tenantId/mail/threads?entityType=&entityId=` | **MAIL-13** — the entity thread panel's read (approval detail, run workspace). `entityType` ∈ `automation_approval` \| `agency_approval` \| `pipeline_run`; anything else → `400`. **Authorized against the PARENT entity (A10), not against the mail tables** — it 403s in exactly the cases the parent surface 403s (`/api/:t/pipeline/runs`, `/api/:t/automation-approvals`), cross-tenant included. Returns `{entityType, entityId, messages[]}`; each message is `{id, mailLogId, fromEmail, senderVerified: false, provenance: "inbound-email", subject, bodyText, bodyHtmlSanitized, sizeBytes, receivedAt, attachments[]}`. **`senderVerified` is always `false` and is the field the "Email reply — sender unverified" banner must be driven by** — do not hardcode the banner, and do not present `fromEmail` as an identity. `bodyHtmlSanitized` has already been through the server-side allowlist at intake (raw MIME is never stored) and must still be rendered in a constrained container. Never returns `mail_log.payload`, `reply_token`, or storage keys. |
+| ✅ | GET | `/api/:tenantId/mail/messages/:messageId/attachments/:index` | **MAIL-13** — quarantined attachment bytes. Same A10 parent-entity authorization as the thread read, then gated on scan status: `clean` serves · `infected` `403` at every privilege (the bytes were never stored) · `pending` (unscannable) `403` at every privilege · `skipped` (scanning off) **admin-only**. Always `Content-Disposition: attachment` + `nosniff` + a `sandbox` CSP. Use the thread payload's per-attachment `downloadable` / `blockedReason` (`infected` \| `not_yet_scanned` \| `admin_only` \| `no_content`) to decide whether to render a link at all — those fields are computed with the SAME gate the endpoint enforces. |
+| ✅ | GET | `/api/:tenantId/portal/mail/threads?runId=` | **MAIL-13** — the portal run view's thread panel. Client principals are NOT authorized by `resource_pipeline_run` (its read rules are elevated-only), so this route uses the portal's own kernel: Cerbos `portal` read + `resolvePortalScope` client/project ownership applied TO THE RUN before any mail table is touched. Another client's run → **`404`, not `403`** (portal non-disclosure). Same message shape as above; `skipped` attachments are never downloadable on this surface. |
+| ✅ | GET | `/api/admin/mail/log/:id/thread` | **MAIL-13** — the admin log detail pane's thread. Elevated-only (`isElevated`) **AND** the A10 parent-entity check when the mail hangs off an entity, so this is not the one thread read that outranks its parent. Mail with no entity (auth-stream mail, and NDR/bounce messages — which intake stores with a NULL entity precisely so a bounce never renders as a human reply on a decision surface) is governed by elevation alone. Attachments are reported metadata-only here (`downloadable: false`); bytes come from the tenant-scoped route above. |
+
+**No "send arbitrary mail" endpoint exists at any privilege** (design §6.1) — the only way a row
+lands in `mail_log` is the internal `enqueueMail()` primitive (`src/mail/queue.ts`), called by
+server-side code, never by an HTTP body. **MAIL-13 has now landed** (2026-08-05): the inbound intake and all four thread reads above are
+built, with a committed adversarial corpus (`platform-nest/src/mail/__fixtures__/inbound/`, 15
+provider-shaped fixtures) as their permanent regression suite per design A13. **Caps at IN PROGRESS,
+not DEV-VERIFIED:** `npm run mail:replay-inbound -- --base <url>` has never been pointed at a
+deployed box (**PENDING-DEPLOY**), and the corpus is wired into CI but **cannot be shown running**
+while GitHub Actions is billing-blocked. Real Brevo payload/signature fidelity is §15 R3 (note: Brevo
+does **not** sign webhooks at all — its documented mechanisms are basic-auth-in-URL, a token header,
+or custom headers, so the HMAC verifier is ours and R3 needs re-scoping), and real relay NDR format is
+§15 R4.
+
+**Env (`MAIL_*`, all in `src/config.ts` + the `platform` service's `environment:` block in
+`infra/compose/docker-compose.vps.yml` + `.env.example` in both `platform-nest/` and
+`infra/compose/`):** `MAIL_ENABLED` (master gate, default `0` — dark: no sender loop, `enqueueMail`
+no-ops), `MAIL_SENDER_INTERVAL_MS`, per-stream `MAIL_STREAM_{NOTIFY,AUTH}_{TRANSPORT,RELAY_*,
+BREVO_*,FROM}`, `MAIL_REPLY_DOMAIN`, `MAIL_LINK_BASE_URL` (A12 — new; the deep-link base every
+approval template's `href` is built from; compiled default `https://erp.gaiada.invalid`),
+`MAIL_WEBHOOK_TOKEN`, `MAIL_INBOUND_TOKEN`, `MAIL_INBOUND_MAX_BYTES`, `MAIL_INBOUND_SCAN`,
+`MAIL_MAGIC_LINKS_ENABLED`. gda-aicenter's compose already defaults both streams at
+`mailpit:1025` (authless) — see MAIL-00's Mailpit service in the same compose file.
+
+**A12 (binding):** every domain/FROM/link-base in `src/mail/` is env config with a reserved-TLD
+(`*.gaiada.invalid`) compiled default — grep-gate-enforced (`rg -n "gaiada\.(com|online)"
+platform-nest/src/mail/` returns zero, tests/fixtures included, wired into CI as
+`src/mail/grep-gate.test.ts`).
+
+**MAIL-15 (2026-08-05, `platform-ui`) now consumes this section for real.** `lib/mail.ts` calls
+`GET /api/admin/mail/log[/:id[/thread]]` for `/admin/mail` + `/admin/mail/[id]`, and
+`GET /api/:t/mail/threads` / `GET /api/:t/portal/mail/threads` (MAIL-13, landed concurrently) for
+the `MailThreadPanel` embedded in the pipeline run workspace and the portal run view. Thread reads
+absence-degrade to an empty thread on 404/405 — treated as "not there yet", not an error — but a
+403 still propagates as a real refusal. No new endpoints requested; this is a consumer note, not a
+contract change.

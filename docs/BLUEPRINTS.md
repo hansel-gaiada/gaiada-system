@@ -42,7 +42,17 @@ the contract pipeline, key flows (provisioning, form submit, staging→live prom
 architecture, environments & promotion, observability/ops, and the phased roadmap with sample tickets.
 
 - **URL:** https://claude.ai/code/artifact/9ccdc040-9886-4c1d-a7ca-c052ca16a731
-- **Version:** v1.0 · 2026-07-23
+- **Version:** v1.2 · 2026-07-23, amended 2026-08-04 twice (v1.1: C-02/C-03 mail — Hostinger
+  unpinned → rented relay; three sending identities + per-stream keys; `From:` ours / `Reply-To:`
+  human default; Zone A mail explicitly does NOT route through C-03; new decision D14. v1.2, same
+  day: Zone A mail design went to v2 — domains locked, C-03's forms stream pinned to
+  `forms.gaiada.online` on Brevo, deliberately off the `gaiada.com` employee-mail domain; Zone A
+  `notify.`/`auth.gaiada.com` moved to the Google Workspace SMTP relay with Brevo failover — see
+  [`superpowers/specs/2026-08-04-zone-a-mail-design.md`](./superpowers/specs/2026-08-04-zone-a-mail-design.md),
+  since revised to **v3** the same day: the Zone A dev stage now runs against a Mailpit sink with
+  all real-provider work moved to a Staging Reopen Register — Zone B scope unaffected, the
+  `forms.gaiada.online` identity simply activates at that reopen).
+  ⚠️ HTML only — the committed PDF and the hosted artifact still show v1.0.
 - **Print:** A4/Letter, page-breaks per part.
 
 ## 3. GAIADA Search-Marketing — Engineering Blueprint

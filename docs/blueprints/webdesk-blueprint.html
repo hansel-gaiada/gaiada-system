@@ -332,7 +332,7 @@ flowchart TB
   FORMS --- PGB
   CTRL --- PGB
   MEDIA --- OBJ
-  MAIL -->|SMTP provider| EXT["Mail provider<br/>Hostinger SMTP → SES"]
+  MAIL -->|SMTP provider| EXT["Mail provider<br/>Brevo → ZeptoMail / SES"]
 
   UI --> NEST
   MCPH --> NEST
@@ -471,7 +471,7 @@ flowchart TB
             <tr><td>Object storage</td><td class="mono">MinIO on VPS disk</td><td class="mono">S3 / GCS (S3 API)</td><td>endpoint + creds</td></tr>
             <tr><td>Video</td><td class="mono">Cloudflare R2</td><td class="mono">R2 / S3 / CDN</td><td>bucket config</td></tr>
             <tr><td>Compute</td><td class="mono">Docker Compose</td><td class="mono">ECS / Cloud Run / K8s</td><td>compose → manifests</td></tr>
-            <tr><td>Mail</td><td class="mono">Hostinger SMTP</td><td class="mono">SES / Resend</td><td>provider adapter</td></tr>
+            <tr><td>Mail</td><td class="mono">Brevo free tier (SMTP/API)</td><td class="mono">ZeptoMail / SES</td><td>provider adapter (keys stay per-stream, §C-03)</td></tr>
             <tr><td>Database</td><td class="mono">Postgres container</td><td class="mono">RDS / Cloud SQL</td><td>connection string</td></tr>
           </tbody>
         </table></div>
@@ -514,6 +514,7 @@ flowchart TB
             <li>Anti-abuse: Cloudflare Turnstile verification, honeypot field, rate limiting, size caps.</li>
             <li>Validate against the form's declared schema (zod); sanitize; persist submission.</li>
             <li>Enqueue notifications (mail via C-03, event to ERP) and optional autoresponder.</li>
+            <li>Per-tenant recipient addresses (e.g. <code>info@clientA.com</code>) are plain form config — any mailbox at any host the client already uses. Recipients need no DNS, mailbox, or provider work on our side; only a tenant that opts into the C-03 "send as your own domain" upgrade touches DNS, and that is about the <em>sender</em>, never the recipient.</li>
           </ul></dd>
           <dt>Interfaces</dt><dd><span class="mono">in</span>: public HTTPS POST · <span class="mono">out</span>: mail jobs, signed submission event → ERP</dd>
           <dt>Data owned</dt><dd><code>form_definitions</code>, <code>submissions</code> (may contain PII → retention policy §10)</dd>
@@ -526,16 +527,16 @@ flowchart TB
       <div class="spec">
         <div class="spec-head"><span class="id">C-03</span><h3>Mail / SMTP Service</h3><span class="zone b">Zone B</span></div>
         <div class="spec-body"><dl>
-          <dt>Purpose</dt><dd>Centralized transactional mail for all tenants — form notifications, autoresponders, system mail.</dd>
-          <dt>Technology</dt><dd>NestJS + BullMQ; pluggable <strong>provider adapter</strong> (Hostinger SMTP now → SES/Resend later).</dd>
+          <dt>Purpose</dt><dd>Centralized transactional mail for all tenants — form notifications, autoresponders, system mail. <strong>Zone B only:</strong> Zone A (ERP) mail — approval/risk-warning mail, magic links, password reset — does <em>not</em> route through C-03. platform-nest carries its own mail module (same adapter contract; <em>v2 revision:</em> Zone A's primary transport is the Google Workspace SMTP relay on <code>gaiada.com</code>, with Brevo as failover — the shared Brevo account serves C-03's <code>forms.gaiada.online</code> stream and Zone A's inbound/failover roles under separate keys), so ERP authentication never depends on the internet-facing platform (see <code>docs/superpowers/specs/2026-08-04-zone-a-mail-design.md</code> v2).</dd>
+          <dt>Technology</dt><dd>NestJS + BullMQ; pluggable <strong>provider adapter</strong> over a <em>rented</em> relay — Brevo free tier now (~300/day, SMTP + API; verify current caps at build time) → ZeptoMail or Amazon SES at volume; swap = adapter config. Never a direct-to-MX MTA: deliverability is IP reputation, and we rent that. <em>Hostinger SMTP is rejected</em> — a shared-mailbox relay with low caps that cannot send as arbitrary domains, and Hostinger VPSes block outbound SMTP ports by default (verify against the KVM8 box before relying on port 587 egress at all).</dd>
           <dt>Responsibilities</dt><dd><ul>
-            <li>Template rendering per tenant; from/reply-to per tenant domain.</li>
+            <li>Template rendering per tenant. <strong>Default sending identity:</strong> <code>From:</code> our sending domain, <code>Reply-To:</code> the actual human (e.g. the form visitor) — zero per-client DNS work, one reputation we control. Per-tenant <em>"send as your own domain"</em> is an opt-in upgrade for clients willing to add SPF/DKIM records; C-03 must support both.</li>
             <li>Queue, send, retry with backoff, record delivery status.</li>
             <li>Suppression list, bounce/complaint handling (provider-dependent).</li>
           </ul></dd>
           <dt>Interfaces</dt><dd><span class="mono">in</span>: internal job enqueue only (never public) · <span class="mono">out</span>: SMTP/API to provider</dd>
           <dt>Data owned</dt><dd><code>mail_templates</code>, <code>mail_log</code>, <code>suppressions</code></dd>
-          <dt>Security</dt><dd>No public endpoint; SPF/DKIM/DMARC per sending domain; rate limits to protect sender reputation</dd>
+          <dt>Security</dt><dd>No public endpoint; SPF/DKIM/DMARC per sending domain; rate limits to protect sender reputation. <strong>Reputation isolation:</strong> C-03 sends exclusively from the forms stream (<code>forms.&lt;domain&gt;</code>, its own provider API key) — Zone A's <code>notify.</code> / <code>auth.</code> streams use separate subdomains and separate keys, so a bot flooding a public contact form can burn the forms domain without ever touching portal notifications or login mail.</dd>
           <dt>Operations</dt><dd>Provider swap = adapter config; delivery-failure alerting</dd>
         </dl></div>
       </div>
@@ -1060,6 +1061,7 @@ gantt
             <tr><td class="mono">D11</td><td>Keycloak client-credentials + mTLS control channel</td><td>Reuses infra; strongest practical service auth</td></tr>
             <tr><td class="mono">D12</td><td>One-way control, signed-webhook events</td><td>No cross-zone DB grants</td></tr>
             <tr><td class="mono">D13</td><td>Versioned, reversible one-click promotion</td><td>Safe staging→live for humans and AI alike</td></tr>
+            <tr><td class="mono">D14</td><td>Mail = rented relay, three sending identities with separate provider keys — <strong>Zone B</strong>: <code>forms.gaiada.online</code> on Brevo (this platform's stream, internet-triggerable, deliberately OFF the Workspace domain); <strong>Zone A</strong>: <code>notify.gaiada.com</code>/<code>auth.gaiada.com</code> on the Google Workspace SMTP relay with Brevo failover (its own design doc). <code>From:</code> our domain + <code>Reply-To:</code> human as the C-03 default identity; Zone A mail never routes through C-03 <em>(amended 2026-08-04, v2 same day: domains locked + Zone A moved to the Workspace relay; unpins Hostinger SMTP)</em></td><td>Reputation isolation — form abuse must never be able to block employee login or taint the domain that carries real employee email; zero per-client DNS by default; deliverability is rented IP reputation, not software; swap = adapter config</td></tr>
           </tbody>
         </table></div>
       </div>
@@ -1087,8 +1089,8 @@ gantt
     </section>
 
     <footer>
-      <p><strong>GAIADA WebDesk — Engineering Blueprint v1.0</strong></p>
-      <p class="mono">Status: Draft for review · 2026-07-23 · Web Dev · Platform · Classification: Internal<br/>
+      <p><strong>GAIADA WebDesk — Engineering Blueprint v1.2</strong></p>
+      <p class="mono">Status: Draft for review · 2026-07-23 · amended 2026-08-04 (C-02/C-03 mail: provider path + reputation split, D14; v1.2 same day: Zone A mail v2 — domains locked, Workspace relay primary for Zone A, forms stream pinned to gaiada.online) · Web Dev · Platform · Classification: Internal<br/>
       Architecture decisions locked (§14). Feeds architect decomposition → /army. Not a commitment of dates; sequencing is fixed, durations are estimates.</p>
     </footer>
   </main>
