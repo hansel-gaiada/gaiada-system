@@ -155,6 +155,17 @@ services:
       # Text chain: OpenAI-compatible brain first, then local Ollama, then cloud fallbacks. A
       # provider whose key/URL is unset reports Available()=false and is skipped, so this order is
       # safe even when OPENAI_* is blank (it falls straight through to the old ollama,gemini,claude).
+      # NOTE (ASST-15/16): "hermes" is NOT in this default. chain.RunWithHint only reorders a
+      # provider that is ALREADY a member of this list — a per-thread brain-picker hint of
+      # "hermes" silently falls through to the normal first-in-order provider if "hermes" isn't
+      # listed here, even with HERMES_URL/HERMES_MODEL both set. Operators who want the brain
+      # picker's "hermes" option to actually work must add it to LLM_CHAIN in .env, e.g.
+      # `LLM_CHAIN=openai,ollama,gemini,claude,hermes` (appended LAST — hermes only wins on an
+      # explicit hint or if every earlier provider is unavailable, so unhinted callers on existing
+      # deployments see no change). This default is deliberately left unchanged here: adding
+      # "hermes" to it would alter the unhinted default chain for every existing caller of this
+      # gateway (wa-chat-bot, knowledge, search) on every deployment that doesn't override
+      # LLM_CHAIN — an operator decision, not something to flip silently in the shared default.
       LLM_CHAIN: ${LLM_CHAIN:-openai,ollama,gemini,claude}
       # Media chain: openai vision handles images; audio (and anything non-image) fails over to
       # whisper for transcription, then gemini. openai auto-skips when its key is unset.
@@ -176,6 +187,18 @@ services:
       # DLP, the daily cost cap, the egress audit and failover all stay here.
       GATEWAY_TOPOLOGY_MODE: ${GATEWAY_TOPOLOGY_MODE:-central}
       GATEWAY_CENTRAL_URL: ${GATEWAY_CENTRAL_URL:-}
+      # ASST-15 — hermes-gateway wired as a NAMED chain provider ("hermes"), distinct from the
+      # central-forward path above (GATEWAY_TOPOLOGY_MODE=site + GATEWAY_CENTRAL_URL), which also
+      # happens to point at hermes-gateway on this box today but goes through the OLDER
+      # central-forward provider, not this one. Both can point at the same shim; they are two
+      # separate code paths. Empty URL => HermesProvider.Available()==false, fail-soft (no crash,
+      # provider just never wins). HERMES_MODEL is NOT this gateway choosing Hermes' model — it is
+      # only whatever hermes-gateway itself is configured with, threaded through for the wire's
+      # `meta` field (see ai-gateway-go/internal/providers/hermes.go). Adding these two vars alone
+      # does NOT put "hermes" into LLM_CHAIN above — see the LLM_CHAIN comment for why that matters
+      # for ASST-16's per-thread brain-picker hint.
+      HERMES_URL: ${HERMES_URL:-}
+      HERMES_MODEL: ${HERMES_MODEL:-}
       # Model-assisted DLP classifier stays opt-in; enable only where Ollama is reachable.
       DLP_CLASSIFIER_ENABLED: ${DLP_CLASSIFIER_ENABLED:-false}
       EGRESS_ALLOWLIST: generativelanguage.googleapis.com,api.anthropic.com,ollama.com,whisper,host.docker.internal

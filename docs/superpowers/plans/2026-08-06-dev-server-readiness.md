@@ -18,12 +18,12 @@ audit (see item 5) — that is a concurrent session doing its own work, not this
 |---|------|---------|-------------------|
 | 1 | Migrations 0078/0079 apply cleanly | **GO** (already proven) | Live server |
 | 2 | Cerbos new-policy-file trap | **GO**, with one caveat | Live server (structural) |
-| 3 | Env passthrough | **NO-GO** (1 var pair missing) / GO (rest) | Local `docker compose config` + live server |
+| 3 | Env passthrough | **GO (repo-side fixed 2026-08-06)** — `HERMES_URL`/`HERMES_MODEL` now wired into `ai-gateway`'s environment block and both new `.env.example` rows; operator still must set them + decide `LLM_CHAIN` on the box (see §3-addendum below) | Local `docker compose config` (real tool, both with and without `docker-compose.hostdata.yml`) |
 | 4 | nginx SSE block | **MANUAL / NOT YET APPLIED** | Live server |
 | 5 | Version/tag parity | **NO-GO — cut required, and one may already be in flight** | Repo + `gh` |
 | 6 | hermes-gateway new endpoint | **NO-GO** (stale binary) | Live server |
 | 7 | `--remove-orphans` profiles | **GO** | `gh variable list` + compose file |
-| 8 | Assistant module enablement | **NO-GO — seed not re-run on dev tenant** | Live server DB (read-only) |
+| 8 | Assistant module enablement | **GO-with-caveat (repo-side verified 2026-08-06)** — seed already lists `"assistant"` (survived the `agency.ts`/`departments.ts`/`roster.ts` refactor); re-running the FULL seed is safe against duplicate rows but **UNSAFE against `enabled_modules`** — see §8-addendum. Use the scoped fix, not a blind seed re-run. | Repo read (`agency.ts`, `admin-identity.controller.ts`) — not executed |
 
 ---
 
@@ -171,6 +171,104 @@ whether the box should point them at `http://host.docker.internal:3009` (same ta
 `GATEWAY_CENTRAL_URL` already uses) or keep the two mechanisms deliberately separate, and set
 `LLM_CHAIN` to include `hermes` if the direct-provider path is meant to be live rather than the
 central-forward path.
+
+---
+
+### §3-addendum (2026-08-06, DevOps, repo-side only — no deploy/restart performed)
+
+**Fixed:** `HERMES_URL`/`HERMES_MODEL` now sit in `ai-gateway`'s `environment:` block in
+`infra/compose/docker-compose.vps.yml`, right next to `GATEWAY_TOPOLOGY_MODE`/`GATEWAY_CENTRAL_URL`
+(with a comment explaining the two are separate code paths that may point at the same shim), and
+are documented with a full rationale block in `infra/compose/.env.example`. Verified with the real
+tool, against a scratch `.env` (all `:?}`-required vars filled with a placeholder, `HERMES_URL`/
+`HERMES_MODEL` filled with test values so a real render could be inspected):
+
+```
+$ COMPOSE_PROFILES=data,auth,multisite,whisper \
+  docker compose --env-file <scratch>.env -f docker-compose.vps.yml config
+...
+  ai-gateway:
+    environment:
+      ...
+      GATEWAY_CENTRAL_URL: ""
+      GATEWAY_TOKEN: dummy-placeholder-value
+      GATEWAY_TOPOLOGY_MODE: central
+      GEMINI_API_KEY: ""
+      HERMES_MODEL: hermes-test-model
+      HERMES_URL: http://host.docker.internal:3009
+      LLM_CHAIN: openai,ollama,gemini,claude
+      MEDIA_CHAIN: openai,whisper,gemini
+      ...
+```
+
+Both vars resolve into the `ai-gateway` service and nowhere else — confirmed the correct service
+(the one running `ai-gateway-go`, not `platform`, not `mcp-hub`).
+
+**`host.docker.internal` — verified, not assumed.** Re-ran the same command WITH
+`docker-compose.hostdata.yml` layered on top (the file that matches the box's real
+`COMPOSE_FILES` repo variable, `-f docker-compose.vps.yml -f docker-compose.hostdata.yml`):
+
+```
+$ COMPOSE_PROFILES=bot,auth,whisper,mail-dev,scan \
+  docker compose --env-file <scratch>.env \
+  -f docker-compose.vps.yml -f docker-compose.hostdata.yml config
+...
+  ai-gateway:
+    environment:
+      ...
+      HERMES_MODEL: hermes-test-model
+      HERMES_URL: http://host.docker.internal:3009
+      ...
+    extra_hosts:
+      - host.docker.internal=host-gateway
+```
+
+Conclusion: on THIS box's real compose invocation, `host.docker.internal` DOES resolve for
+`ai-gateway`, because `docker-compose.hostdata.yml`'s `x-hostgw` anchor (`extra_hosts:
+host.docker.internal:host-gateway`) is already applied to the `ai-gateway` service (it was added
+for `GATEWAY_CENTRAL_URL`/Ollama-embedding reasons — see the file's own comment, "Needs the host
+for BOTH the Ollama embedding endpoint and the Hermes shim"). No new `extra_hosts` entry was
+needed or added — the existing one already covers the new var. **This is compose-topology-specific,
+not universal**: rendering `docker-compose.vps.yml` ALONE (no hostdata overlay — e.g. a from-scratch
+deploy with a containerized Postgres/Redis/Ollama) produces no `extra_hosts` line at all, so on
+plain Linux Docker Engine (not Docker Desktop, which auto-adds the name) `host.docker.internal`
+would silently fail to resolve in that topology. Flagging this so nobody copies
+`HERMES_URL=http://host.docker.internal:3009` onto a differently-shaped deployment and gets a
+connection-refused with no clue why.
+
+**`LLM_CHAIN` recommendation.** The repo's compose default is
+`LLM_CHAIN=openai,ollama,gemini,claude` (`docker-compose.vps.yml`); the live server's `.env` has
+`LLM_CHAIN=gemini,claude` (per §3 above) — neither includes `hermes`. Read
+`ai-gateway-go/internal/chain/chain.go` (`RunWithHint`) and its test
+`TestCompleteStreamAbsentProviderHintBehavesLikeBeforeThisTicket` /
+`chain_test.go`'s unmatched-hint case: **a provider hint only reorders a provider that is ALREADY a
+member of the configured chain.** If `hermes` is not in `LLM_CHAIN`, ASST-16's per-thread
+brain-picker sending `provider: "hermes"` will **silently fall through to the normal first-in-order
+provider** — no error, no visible failure, just the wrong brain answering. This is a second,
+independent way the named `hermes` provider stays dark even after `HERMES_URL`/`HERMES_MODEL` are
+set correctly.
+
+**Recommendation:** append `hermes` to the END of `LLM_CHAIN`, e.g.
+`LLM_CHAIN=openai,ollama,gemini,claude,hermes` (or `gemini,claude,hermes` to match what's live).
+Appending LAST is the low-risk position: an *unhinted* call only reaches `hermes` if every earlier
+provider in the chain is unavailable, so on today's box (where `HERMES_URL` is currently unset)
+this is a no-op, and even once `HERMES_URL` is set it only changes behaviour for the case where the
+whole rest of the chain is down — a new failover path, not a reordering of the common case.
+Putting it first or mid-chain would not be: it would change which provider answers the ORDINARY
+unhinted request for every existing caller of this gateway (**wa-chat-bot, knowledge, search all
+share this one `ai-gateway` service and its one `LLM_CHAIN`**) — that is a behaviour change for
+production traffic that has nothing to do with the assistant feature, and I have deliberately NOT
+made it myself. **This is an operator decision, made via the server's `.env`, not a change to the
+compose file's shared default** — I left `docker-compose.vps.yml`'s `LLM_CHAIN:
+${LLM_CHAIN:-openai,ollama,gemini,claude}` untouched and only added a comment there documenting the
+hint-reorder trap, precisely so nobody re-reads this file in six months and assumes "hermes" already
+works because the vars are present.
+
+`platform-nest/.env.example` was **deliberately NOT** given a `HERMES_URL`/`HERMES_MODEL` entry:
+that file documents platform-nest's own env surface (e.g. `GATEWAY_URL`/`GATEWAY_TOKEN`, which is
+platform-nest's OUTBOUND client config for calling `ai-gateway`), not `ai-gateway-go`'s internal
+provider config. `HERMES_URL`/`HERMES_MODEL` are consumed only inside the `ai-gateway` container,
+so `infra/compose/.env.example` is the one correct place for them.
 
 ---
 
@@ -390,7 +488,82 @@ execute it).
 
 ---
 
+### §8-addendum (2026-08-06, DevOps, repo read-only — no seed executed, no server touched)
+
+**The seed line survived the refactor.** `platform-nest/src/seed/agency.ts:82`:
+
+```ts
+const tenantId = await ensureCompany(AGENCY_NAME, ["agency", "hr", "reports", "assistant"], "agency", holdingId);
+```
+
+`"assistant"` is present. (`"mail"` is not — out of scope for this ticket; that module belongs to
+the concurrent mail session's own work, not touched here.)
+
+**Idempotency — answered definitively, and it is a two-part answer, not a plain yes:**
+
+1. **No duplicate rows.** `ensureCompany` (`agency.ts:36-49`) looks up the company by `name` first
+   and does an `UPDATE` on a hit, `INSERT` only on a miss. Re-running the seed will never create a
+   second `"Gaia Digital Agency"` row. In that narrow sense, yes, it is safe to re-run.
+2. **`enabled_modules` is NOT merged — it is unconditionally overwritten:**
+   ```ts
+   await withGlobal((c) => c.query(
+     `UPDATE companies SET type=$2, parent_company_id=$3, enabled_modules=$4 WHERE id=$1`,
+     [id, type, parentId, modules]));
+   ```
+   `$4` is the seed's hardcoded 4-element array (`["agency","hr","reports","assistant"]`) — this
+   `UPDATE` **replaces the whole array**, it does not append.
+
+**Why this matters, concretely, on THIS tenant:** the live `enabled_modules` for "Gaia Digital
+Agency" (per §8's own read) is `{agency,hr,reports,pm,it,billing,knowledge,clients,
+automation-console,search}` — **ten** modules, only three of which (`agency`,`hr`,`reports`) match
+the seed's list. The other seven (`pm`,`it`,`billing`,`knowledge`,`clients`,`automation-console`,
+`search`) were almost certainly added one-at-a-time via the admin module-toggle endpoint
+(`PATCH /api/admin/:tenantId/company/modules` → `admin-identity.controller.ts:391-414`, which
+correctly does `array_append(array_remove(enabled_modules,$2),$2)` — an append/dedupe, not an
+overwrite) rather than by re-running the seed. **Blindly running `npm run seed:agency` against this
+tenant today would silently DROP all seven of those modules**, replacing the live 10-item array with
+the seed's 4-item one — a real regression, not a duplication, and not something `npm run
+seed:agency`'s own output would flag as unusual (the script has no diff/warn step; the row is
+simply UPDATEd and the run reports success).
+
+**Verdict: `npm run seed:agency` is idempotent (no dupes) but is NOT safe to re-run as-is against
+a tenant whose module set has since been widened by any other path (admin console, manual SQL).**
+This falls under this ticket's own state-destroying-operation rule (a company row's live
+`enabled_modules` is stateful, and this would be a silent narrowing of it) — I am not recommending
+the blind re-run as the runbook step, and I did not execute it myself.
+
+**Recommended operational step instead — a scoped, additive fix that mirrors the admin toggle's own
+SQL shape** (safe: touches only the `assistant` key, cannot regress anything else):
+
+```sql
+UPDATE companies
+SET enabled_modules = array_append(array_remove(enabled_modules, 'assistant'), 'assistant'),
+    updated_at = now()
+WHERE name = 'Gaia Digital Agency' AND deleted_at IS NULL;
+```
+
+or, equivalently and without touching the DB directly, the already-built and already-authorized
+admin API:
+
+```
+PATCH /api/admin/<tenantId>/company/modules
+Body: { "module": "assistant", "enabled": true }
+```
+
+Either is additive-only and cannot drop `pm`/`it`/`billing`/`knowledge`/`clients`/
+`automation-console`/`search`. I did **not** modify `ensureCompany` itself to merge instead of
+overwrite — that function is shared by every `ensureCompany(...)` call in this seed (including
+fresh-install holding/resort rows) and changing its semantics is a broader design decision than
+this ticket's scope; flagging it here as a real latent bug for whoever owns `seed/agency.ts` next,
+not fixing it silently.
+
+---
+
 ## Stop-and-fix-first (in the order they'd actually bite)
+
+**Repo-side items 3 and 8 below are now closed as of 2026-08-06 (DevOps pass) — see the §3-addendum
+and §8-addendum sections above for evidence.** What remains is entirely manual/operator work on the
+box; the ordered list below is the actual bite order for whoever runs it, folding in both addenda.
 
 1. **Do not tag/deploy while `platform-nest` CI on HEAD is unresolved.** At audit time it was
    still running after the previous commit failed on a test-count mismatch that HEAD's own commit
@@ -398,22 +571,34 @@ execute it).
 2. **Do not race the concurrent session that is mid-way through a VERSION/CHANGELOG/MODULES.md
    bump** (`VERSION` changed under this audit from `Alpha 01.017.0040b` to `Alpha 01.018.0045a`,
    uncommitted). Let it land, then tag from the resulting commit.
-3. **Apply the nginx ASST-09 SSE block by hand** to
+3. Before touching the box at all: `grep GAIADA_TAG /home/Hansel/gaiada/infra/compose/.env`,
+   compare to `.deployed-tag` and `docker ps --format '{{.Image}}'` — confirm they agree before any
+   `up -d`, to avoid the recorded silent-rollback footgun.
+4. **Set `HERMES_URL=http://host.docker.internal:3009` and (optionally) `HERMES_MODEL=`** in the
+   box's `infra/compose/.env` — the repo-side wiring (compose passthrough + `.env.example`
+   documentation) is done; only the operator's `.env` value is left. Confirm
+   `docker-compose.hostdata.yml` is in the box's `COMPOSE_FILES` (it is, per §7) so the existing
+   `extra_hosts` entry on `ai-gateway` covers the name.
+5. **Decide on `LLM_CHAIN`.** If ASST-16's per-thread "hermes" brain-picker option is meant to work
+   on this box, append `hermes` to the box's `LLM_CHAIN` (e.g. `gemini,claude,hermes`, matching
+   what's currently live) — appending LAST, not first, per the §3-addendum's behaviour-change
+   warning. If not, leave `LLM_CHAIN` alone and accept that "hermes" stays a picker option that
+   silently no-ops (falls through to the default provider).
+6. **Apply the nginx ASST-09 SSE block by hand** to
    `/etc/nginx/sites-available/erp.gaiada.online` on the box (not by re-copying the repo file,
    which would revert an already-live, unrelated n8n path fix) — `nginx -t`, then reload — before
    or alongside the deploy that ships assistant. Otherwise the assistant will visibly hang, not
-   404, the first time anyone uses it.
-4. **Wire `HERMES_URL`/`HERMES_MODEL`** into `docker-compose.vps.yml`'s `ai-gateway` service and
-   both `.env.example` files, and decide whether `LLM_CHAIN` should include `hermes` — otherwise
-   ASST-15's named provider is permanently dark on this box even after everything else ships.
-5. **Update `/opt/hermes-gateway/server.mjs`** on the box (hand copy, since it's non-dockerized) to
+   404, the first time anyone uses it. **NOT done by this DevOps pass — explicitly left to the
+   runbook, per instruction.**
+7. **Update `/opt/hermes-gateway/server.mjs`** on the box (hand copy, since it's non-dockerized) to
    the version with `/complete/stream`, then `systemctl restart hermes-gateway` — the box is
-   currently running 5-day-stale code that predates ASST-14/15 entirely.
-6. **Re-run `npm run seed:agency`** against the dev tenant after deploy, or the assistant (and
-   mail) will 404 for everyone at the module gate regardless of everything else being correct.
-7. Before touching the box at all: `grep GAIADA_TAG /home/Hansel/gaiada/infra/compose/.env`,
-   compare to `.deployed-tag` and `docker ps --format '{{.Image}}'` — confirm they agree before any
-   `up -d`, to avoid the recorded silent-rollback footgun.
+   currently running 5-day-stale code that predates ASST-14/15 entirely. **NOT done by this DevOps
+   pass — explicitly left to the runbook, per instruction.**
+8. **Do NOT blindly re-run `npm run seed:agency`** against the dev tenant — per the §8-addendum, its
+   `ensureCompany` UPDATE overwrites `enabled_modules` wholesale and would drop the 7 modules
+   (`pm`,`it`,`billing`,`knowledge`,`clients`,`automation-console`,`search`) already live on this
+   tenant via the admin console. Instead run the scoped, additive fix (SQL or the admin API — see
+   §8-addendum) to add `assistant` without touching the rest of the array.
 
 ## Verified against the live server vs. repo-only
 
@@ -434,6 +619,44 @@ values); reading of migration/Cerbos/deploy.yml/nginx source files.
 
 **Explicitly UNVERIFIED:** a live Cerbos `CheckResources` ALLOW probe against `assistant_thread`/
 `assistant_memory` (no published port, no shell in the distroless container — could not execute);
-whether `ensureCompany`'s upsert path in `seed/agency.ts` safely widens `enabled_modules` on an
-existing row without side effects (read the seed's own code, did not execute it); whether the
-in-flight concurrent VERSION bump seen mid-audit resolves cleanly.
+whether the in-flight concurrent VERSION bump seen mid-audit resolves cleanly.
+
+---
+
+## DevOps follow-up pass (2026-08-06) — repo-only, no deploy/restart/ssh-mutation
+
+Closed the two REPO-side blockers from items 3 and 8 (see §3-addendum and §8-addendum above for
+full evidence). Confirmed `git status` clean on `platform-nest/src/seed/**` before touching it (no
+concurrent-session conflict).
+
+**Repo files changed:**
+- `infra/compose/docker-compose.vps.yml` — `HERMES_URL`/`HERMES_MODEL` added to `ai-gateway`'s
+  `environment:` block; explanatory comment added to the `LLM_CHAIN` line about the
+  hint-only-reorders-existing-members trap. No other service touched. `LLM_CHAIN`'s default value
+  itself left unchanged (operator decision, not a repo default change).
+- `infra/compose/.env.example` — `HERMES_URL=`/`HERMES_MODEL=` rows added with rationale
+  (host-routability, hint-chain-membership requirement). `platform-nest/.env.example` deliberately
+  NOT changed — that file documents platform-nest's own outbound `GATEWAY_URL`/`GATEWAY_TOKEN`, not
+  `ai-gateway-go`'s internal provider config.
+- `platform-nest/src/seed/agency.ts` — **read only, not modified.** `"assistant"` already present
+  at line 82; the `ensureCompany` overwrite behaviour is a pre-existing latent bug documented in
+  §8-addendum, not fixed here (broader design decision, out of this ticket's scope).
+- This doc (`docs/superpowers/plans/2026-08-06-dev-server-readiness.md`) — go/no-go table rows 3
+  and 8 updated, §3-addendum + §8-addendum added, "Stop-and-fix-first" renumbered into bite order
+  with the two closed items folded in, this section added.
+
+**Verification performed (repo-only, real tool, no server contact):**
+```
+$ COMPOSE_PROFILES=data,auth,multisite,whisper docker compose --env-file <scratch>.env \
+    -f infra/compose/docker-compose.vps.yml config
+    → ai-gateway.environment.HERMES_URL / HERMES_MODEL present, correctly resolved.
+
+$ COMPOSE_PROFILES=bot,auth,whisper,mail-dev,scan docker compose --env-file <scratch>.env \
+    -f infra/compose/docker-compose.vps.yml -f infra/compose/docker-compose.hostdata.yml config
+    → same, PLUS ai-gateway.extra_hosts: [host.docker.internal=host-gateway] confirming
+      host.docker.internal resolves in the box's real compose topology.
+```
+
+**Not done (explicitly out of scope for this pass, left to the runbook):** nginx SSE block, the
+hermes-gateway binary update, actually setting `HERMES_URL`/`LLM_CHAIN` in the box's `.env`, and
+actually running the scoped `enabled_modules` fix. No deploy, no SSH, no restart.
