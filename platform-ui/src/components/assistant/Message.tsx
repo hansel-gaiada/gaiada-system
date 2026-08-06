@@ -55,7 +55,22 @@ export function Message({ message, streaming, liveText, liveState }: {
   const sessionResumeMismatch = !streaming ? parseSessionResumeMismatch(message.parts) : null;
 
   return (
-    <article className={`asst-msg asst-msg--${isUser ? "user" : "assistant"}`}>
+    // VER-03 — `.asst-thread` (the ancestor list) is `role="log"`, an implicit-polite live region:
+    // ANY DOM mutation inside it — including a text node changing, not just a node being added — is
+    // fair game for a screen reader to queue up and announce. That is exactly what the typewriter
+    // smoother (`useTypewriter`, REVEAL_TICK_MS = 16) produces for the row currently streaming: a
+    // text-node mutation every ~16ms. Without this, that reads as the "spam every token" failure
+    // mode this ticket calls out by name, even though nothing here uses `aria-live="assertive"` —
+    // the implicit "polite" default on `role="log"` is enough to cause it on its own. `aria-live`
+    // is re-computed per descendant, so setting it to "off" on JUST the actively-streaming row
+    // takes this one row out of the log's liveness for the duration of the stream, while every
+    // OTHER row (a newly-added user message, a newly-added assistant placeholder, a later reply
+    // added to a DIFFERENT thread's log) is still announced normally. The already-separate
+    // `StreamIndicator` (`role="status" aria-live="polite"`) is what actually announces the
+    // thinking → responding → finished/stopped/error transitions — this row's own text is
+    // deliberately never read aloud token-by-token OR as one long dump; a screen-reader user is
+    // told when a reply lands and can then read it like any other content.
+    <article className={`asst-msg asst-msg--${isUser ? "user" : "assistant"}`} aria-live={streaming ? "off" : undefined}>
       <div className="asst-msg__role">{isUser ? "You" : "Assistant"}</div>
       <div className="asst-msg__bubble">
         {pending && !streaming ? (

@@ -12,7 +12,7 @@ Programme progress: **~37 of 47** tickets across the D14 resume path + the ERP a
 
 | Programme | State | Note |
 |---|---|---|
-| **WS11 delivery pipeline / webdev DEF-3** | **Unblocked.** `deploy.staging` + `deploy.production` are registered in the executable registry with real server-side preconditions. | This was the WD-08 dead end where `wf:delivery` could *never* complete a production deploy unattended. It is closed for the n8n/automation path. |
+| **WS11 delivery pipeline / webdev DEF-3** | **Unblocked**, but read the note — the original claim here was overstated. | **CORRECTED 2026-08-06 after VER-01.** `deploy.staging` + `deploy.production` are registered with real server-side preconditions, and VER-01 verified the whole executor live. BUT `deploy.staging` is `impact:"low"`, so it **never suspends on the D14 gate in the first place** — its registry entry therefore serves the *agent re-run* path, not the n8n path. The WD-08 dead end (`wf:delivery` unable to finish a prod deploy unattended) was never an impact-gate problem for the staging tool at all. `deploy.production`'s tier is the one that matters; verify it per-tool before claiming any specific pipeline is unblocked. Two independent passes agree on this (the D14-15 registry comment was inverted the same way). |
 | **Agentic-native criterion 4** | Satisfiable. The mechanism ("approval must actually execute on decision") exists. | Per-capability compliance still needs each write registered individually — one ticket per tool, by decision. |
 | **ERP assistant phases 0–3 + drawer** | Built, CI green, on `main`. | Needs 2 remaining server steps to be *usable* — see §3. |
 | **Mail subsystem / magic links / employee portal** (other session) | Landed, CI green. | No D14 dependency for anything except the approval-action half (§2.4). |
@@ -43,13 +43,26 @@ is registered `minAssurance: "verified"` (deliberately — the honest tier).
 **Session shape:** one design session (architect) + one implementation ticket. Everything above
 unblocks together.
 
-### 2.2 Verification debt (VER-01…04) — needs a live-stack decision
-The assistant has **never been driven against a live platform-nest** — only `DEMO_MODE=1`. Also
-unverified: D14-08's approvals UI click-through, the live Redis delivery leg for D14-09 item (a), and
-a live mcp-hub process.
+### 2.2 Verification debt (VER-01…04) — ✅ CLOSED 2026-08-06
+~~The assistant has never been driven against a live platform-nest.~~ **All four VER tickets now
+PASS.** Resolved by running the services **from source** against the already-running
+`gaiada-test-pg` + `gaiada-test-cerbos` — which is *not* an exception to the 2026-07-31 "local stack
+OFF, server is truth" ruling, because it stands up no local stack: it borrows two containers that
+were already up and adds ordinary processes on scratch ports. That recipe is the reusable answer for
+every future live-verification ticket. Reports:
 
-**Blocker:** these need either `gda-aicenter` or an explicit exception to the 2026-07-31
-"local stack OFF, server is truth" ruling. Not a code problem.
+| | Verdict |
+|---|---|
+| `2026-08-06-ver-01-deploy-legs-report.md` | D14 executor: authority rule, precondition gating, single-use claim under **real** concurrency (8 racing calls + live consumer ⇒ exactly one won), registry-scoping |
+| `2026-08-06-ver-02-live-assistant-report.md` | Assistant live, not DEMO_MODE-only: real SSE, owner-privacy fails closed vs a real `company_admin`, tenant re-scoping proven at the RLS layer, stop-cancels-upstream proven at 4 layers |
+| `2026-08-06-ver-03-a11y-dark-report.md` | 4 real a11y defects found + fixed + unit-tested; the dark-theme premise was stale (already tokenized) |
+| `2026-08-06-ver-04-live-legs-report.md` | The two previously-stubbed D14 legs (Redis delivery, executed_by ≠ decided_by) |
+
+**Two methodology cautions worth carrying forward.** Proving a *non-event* (a webhook that must NOT
+fire) needs a second independent source — VER-01 used mcp-hub's own audit log showing zero entries.
+And an `echo`-fast provider **cannot** be used to race a cancellation: it completes in <1ms, so
+VER-02 had to introduce a slow test-double before `stop()` was testable at all; three attempts
+against `echo` all reported `stopped:false`, which would have read as a product bug.
 
 ### 2.3 Tool-call transcript fidelity — needs an architect call
 `assistant_tool_calls` rows carry `args = {}` and no `duration_ms`, because the ai-agents runner's
@@ -92,18 +105,33 @@ Buildable now, but it will run with **ASST-23 outstanding** (blocked by §2.1). 
 - **Everything documented** in the gitignored `CREDENTIALS.local.md` §10 + §6 index, and in the
   `hermes-bidirectional` memory.
 
-### Remaining (2 steps)
-1. **Cut a release + deploy.** `VERSION`/newest tag are both `alpha-01.019.0047b`, which predates
-   `48a9aa7` (the `HERMES_URL`/`HERMES_MODEL` compose passthrough), `b9e0856` (ASST-21) **and** the
-   other session's `cec0504`. A cut therefore ships another session's unreleased work — deliberately
-   left to the owner rather than done unilaterally.
-2. **Three `.env` lines** on the box (I was blocked from writing to the production secrets file, which
-   is a reasonable guard):
+### Remaining — ✅ BOTH DONE 2026-08-06
+
+1. **Release cut + deploy — DONE.** Another session cut `alpha-01.021.0053a`, which contains **all**
+   of this session's work (HERMES wiring, ASST-21, the hermes session-fork fix, the three-hop session
+   signal). Built, deployed, live. **Tag parity verified after the deploy completed** — `.env`
+   `GAIADA_TAG`, `.env` `APP_VERSION`, `.deployed-tag` and the running image all read
+   `alpha-01.021.0053a`, so a `docker compose up -d` is safe.
+
+   **New observation about the stale-tag footgun:** mid-deploy the box is *transiently* inconsistent
+   (image already at the new tag while `.env`/`.deployed-tag` still read the old one). During that
+   window an `up -d` really would roll back. The correct response is to **wait for the run to finish
+   and re-check**, not to "fix" `.env` by hand — the deploy writes it at the end. Do not treat a
+   mid-flight mismatch as the documented bug.
+
+2. **The three `.env` lines — ALREADY SET**, and correctly:
    ```
+   LLM_CHAIN=gemini,claude,hermes      # hermes appended LAST
    HERMES_URL=http://host.docker.internal:3009
    HERMES_MODEL=hermes
-   LLM_CHAIN=gemini,claude,hermes      # append hermes LAST
    ```
+   Confirmed reaching the `ai-gateway` container, so Hermes is a live selectable brain on the server.
+
+   **Correction to an earlier claim in this document's own history:** two prior "findings" of mine
+   (`.env` has no `GAIADA_TAG` so the footgun doesn't apply; neither `HERMES` var is set) were reads
+   of **`~/gaiada/.env`, which does not exist**. The core-stack env file is
+   `~/gaiada/infra/compose/.env` — as `CREDENTIALS.local.md` §6 already documented. A silent
+   empty/missing file read like a real negative result twice; use an explicit existence check.
    Appending `hermes` last leaves unhinted behaviour identical for every existing caller of the shared
    gateway (wa-chat-bot, knowledge, search). Until it is in the chain the brain picker is an **honest
    no-op**: `chain.RunWithHint` only reorders a provider already in the chain, and an unmatched hint
@@ -131,3 +159,23 @@ Buildable now, but it will run with **ASST-23 outstanding** (blocked by §2.1). 
   `mail_log_reply_token_key` duplicate in `corpus.test.ts`). Check ownership before assuming a
   regression.
 - Pre-existing **duplicate migration numbers at `0003` and `0018`**.
+- **`role="log"` is an implicit `aria-live="polite"` region, and a TEXT-NODE mutation counts.** The
+  assistant's typewriter smoother rewrites the streaming row every 16ms inside `.asst-thread`, which
+  is the "announce every token" screen-reader failure mode *without anyone writing
+  `aria-live="assertive"` anywhere*. Auditing for the explicit attribute would have missed it. Fix is
+  to scope `aria-live="off"` to the streaming row only, so other rows still announce.
+- **An `echo` provider cannot test cancellation** (see §2.2) and **proving a non-event needs a second
+  source** (also §2.2).
+- **`~/gaiada/.env` does not exist** — it's `~/gaiada/infra/compose/.env` (see §3).
+
+---
+
+## 5. Follow-ups routed to other lanes (not done here, deliberately)
+
+- **`components/pm/TaskDrawer.tsx` has the identical missing Tab-focus-trap bug** that VER-03 fixed in
+  `AssistantDrawer.tsx` (the assistant drawer was modelled on it). Focus can walk off the panel onto
+  the shell behind the scrim. That file is **Lane B (PM console)** per `docs/ui-work-split.md`, so it
+  was flagged rather than touched — but it is a known, located, one-pattern fix.
+- **Two cross-lane token questions for the `ui-work-split` Phase-0 owner:** whether `--accent` needs
+  its own text-contrast tier, and whether the underline-inputs' `outline:none` convention clears
+  WCAG 2.4.11. Both are systemic, so neither was decided unilaterally.

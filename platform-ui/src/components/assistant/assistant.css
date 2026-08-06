@@ -55,7 +55,10 @@
   border: 0.5px solid var(--erp-hairline); background: transparent; cursor: pointer;
   padding: 5px 8px; font: 400 12px var(--font-body); color: var(--text-primary);
 }
-.asst-brain-picker__select:focus-visible { outline: none; border-color: var(--erp-accent); }
+/* VER-03 — was `outline: none` + a border-color swap only: every OTHER <select> in the app
+   (e.g. pm.css's `.pm-statussel__select`) keeps a visible 2px outline ring on focus; this was the
+   one place on the assistant surface that fell back to a thinner, easier-to-miss indicator. */
+.asst-brain-picker__select:focus-visible { outline: 2px solid var(--erp-accent); outline-offset: 1px; border-color: var(--erp-accent); }
 .asst-brain-picker__select:disabled { cursor: not-allowed; opacity: 0.6; }
 .asst-brain-picker__error { font: 400 11px var(--font-body); color: var(--status-danger-fg); }
 .asst-cap-toggle {
