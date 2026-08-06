@@ -21,27 +21,36 @@ Programme progress: **~37 of 47** tickets across the D14 resume path + the ERP a
 
 ## 2. BLOCKED — with the exact blocker
 
-### 2.1 The assurance ceiling — ONE fix unblocks four things
-**Blocker:** `mcp-hub/src/principal.ts` mints **every** envelope-derived OBO principal at
-`assurance: "low"`, and there is no code path to `"verified"`. D14-14's `approvals.resolveExecute`
-is registered `minAssurance: "verified"` (deliberately — the honest tier).
+### 2.1 The assurance ceiling — ✅ CLOSED 2026-08-06, option 1 (the real fix)
+~~`mcp-hub/src/principal.ts` mints every envelope-derived OBO principal at `"low"` and there is no code
+path to `"verified"`.~~ **There is now exactly one path: `elevateAssurance`.** Option 2 (lowering
+`approvals.resolveExecute` to `"low"`) was refused for the reason recorded above. Design:
+`2026-08-06-assurance-minting-design.md`. Shipped in **`alpha-01.020.0052a`**, deployed and verified on
+`gda-aicenter` (`/admin/info` → `assuranceElevationConfigured: true`).
 
-**Therefore blocked:**
-- **PM Phase 4 `J2`** write half (bot/agent writes to PM)
-- **ASST-23** — assistant write proposals (assistant Phase 6)
-- **D14-17** — assistant write-tool registry entries
-- **Hermes' own MCP authority** into the ERP — the live two-way link runs low-assurance for the
-  same reason, so this is one gap seen from two directions
+Three conjuncts, all fail-closed, none client-controllable: the caller presented the new
+**`HUB_ASSURANCE_TOKEN`** (held only by platform-nest and ai-agents), the principal is **not**
+automation, and `POST /principal/resolve` **vouches** (active, non-revoked, dual-proof-verified link).
+The design point: identity comes from the envelope, but the *authority to call that identity verified*
+comes from the caller — which is what keeps `principal.ts`'s founding rule literally true, that a
+chat-surface envelope can only ever mint `low`, even when its D4 link IS verified.
 
-**Options (owner decision):**
-1. Build a verified-assurance minting path for agent envelopes — the real fix; touches D4 dual-proof
-   enrollment territory. *Recommended.*
-2. Lower `approvals.resolveExecute` to `minAssurance: "low"` — works immediately, puts a
-   high-impact write behind the weakest gate. *Argued against.*
-3. Accept the agent-write half stays inert and stop counting it as deliverable.
+**Status of the four things it was blocking:**
 
-**Session shape:** one design session (architect) + one implementation ticket. Everything above
-unblocks together.
+| | Now |
+|---|---|
+| **Hermes' MCP authority** | ✅ Unblocked, and a second bug found doing it: `ai-gateway-go`'s `hermes` provider sent **no bearer**, so it 401'd on every call and had *never* served — masked because a site chain fell over to `central-forward` pointing at the same hermes-gateway. Fixed in `alpha-01.022.0056a`; badge now reads `HERMES · HERMES`. |
+| **D14-17** | ✅ Closed as *zero net-new entries* — evaluated and proven unnecessary, not skipped. |
+| **ASST-23 / PM Phase 4 `J2`** | ✅ Assurance is no longer the blocker. `RERUN_CAPABLE_HIGH_WRITES` went `[]` → `["pm.createTask","pm.createDoc"]` with `task-filer` (`44d99fe`). **Not yet deployed** — it landed after the `0056a` tag. |
+
+**Two cautions for whoever verifies the loop end to end:**
+- `HUB_REVOCATION_CHECK=false` **also** caps assurance at `low`, because the platform vouching rides
+  the same `/principal/resolve` lookup. It will look like a policy bug and is a config one.
+- A `requires verified assurance` denial is now a **real misconfiguration** (unset
+  `HUB_ASSURANCE_TOKEN`), not the expected steady state. Check `/admin/info` first.
+- Separately: `APPROVAL_GRANT_SECRET` was **absent** on the box, so every D14 grant was being
+  rejected (`executionGrantConfigured: false`). Set 2026-08-06; both flags now true. Compose passed it
+  through for all three services and `.env` simply had no value — the passthrough trap's twin.
 
 ### 2.2 Verification debt (VER-01…04) — ✅ CLOSED 2026-08-06
 ~~The assistant has never been driven against a live platform-nest.~~ **All four VER tickets now
@@ -85,7 +94,11 @@ instance holds `gaiada`, `gaiada_platform`, `gaiada_knowledge`, `gaiada_keycloak
 the orphans use many prefixes (`qa1_`, `sm14b_`, `sm50_`, `qa081013_`, `wd29full_`, `arch1_`…).
 
 ### 2.7 ASST-24 — the phases 2–6 QA gate
-Buildable now, but it will run with **ASST-23 outstanding** (blocked by §2.1). Worth running anyway.
+~~It will run with ASST-23 outstanding (blocked by §2.1).~~ **§2.1 is closed and ASST-23's AgentDef half
+has landed** (`task-filer`, `44d99fe`), so this gate can now run against the real write path rather than
+around it. Note `44d99fe` post-dates the `alpha-01.022.0056a` tag, so it is **on `main` but not on the
+box** — a server-side run of this gate needs a release first, or the §2.2 borrow-the-test-containers
+recipe.
 
 ---
 
@@ -106,6 +119,11 @@ Buildable now, but it will run with **ASST-23 outstanding** (blocked by §2.1). 
   `hermes-bidirectional` memory.
 
 ### Remaining — ✅ BOTH DONE 2026-08-06
+
+> **Current deployed tag: `alpha-01.022.0056a`** (was `0053a` when the note below was written).
+> Two further releases followed: `0052a` (assurance minting, §2.1) and `0056a` (the Hermes
+> provider bearer fix). The three `.env` lines below are set, plus two more that were missing and
+> without which their features were inert: `HUB_ASSURANCE_TOKEN` and `APPROVAL_GRANT_SECRET`.
 
 1. **Release cut + deploy — DONE.** Another session cut `alpha-01.021.0053a`, which contains **all**
    of this session's work (HERMES wiring, ASST-21, the hermes session-fork fix, the three-hop session
