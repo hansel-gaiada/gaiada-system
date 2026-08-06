@@ -34,7 +34,7 @@
 // failure mode the ticket forbids in the OTHER direction — this is its mirror: don't UNDER-explain a
 // hub outage as if it were an authorization decision).
 import { allModules, enabledModuleKeys } from "../registry";
-import { listUserVisibleToolDefs, type ChattingUser, type VisibleToolDef } from "./broker";
+import { ASSISTANT_AGENT_TOOLS, ASSISTANT_AGENT_WRITE_TOOLS, listUserVisibleToolDefs, type ChattingUser, type VisibleToolDef } from "./broker";
 import { config } from "../../config";
 
 export interface AssistantCapability {
@@ -46,6 +46,17 @@ export interface AssistantCapability {
   module: string | null;
 }
 
+/** One tool-using agent the broker (`broker.ts`) can drive a turn through — the AUTHORITATIVE list,
+ *  so the FE never hand-maintains its own copy of agent names/tools (ASST-23, §7.4/T3a). */
+export interface AssistantToolAgent {
+  name: string;
+  /** Every tool this agent may call (read + write). Mirrors `ASSISTANT_AGENT_TOOLS[name]`. */
+  tools: readonly string[];
+  /** The subset of `tools` this agent may PROPOSE as a D14 write (files an approval, never executes
+   *  in-process). Mirrors `ASSISTANT_AGENT_WRITE_TOOLS[name]` — `[]` for a read-only agent. */
+  writeTools: readonly string[];
+}
+
 export interface CapabilitiesResult {
   tools: AssistantCapability[];
   /** `false` means the hub URL/token isn't set in THIS environment at all — the honest "not
@@ -53,6 +64,11 @@ export interface CapabilitiesResult {
    *  the same underlying `[]` in `listUserVisibleToolDefs`; this flag is a best-effort hint the
    *  panel can use to word its empty state without over-claiming precision it doesn't have). */
   hubConfigured: boolean;
+  /** Every agent `broker.ts` can drive a tool turn through, plus which of its tools are writes — the
+   *  composer's agent picker sources from THIS, not a hand-maintained FE list (ASST-23). Independent
+   *  of `tools`/`hubConfigured` above: it is not filtered by what THIS caller can currently see (the
+   *  hub/Cerbos still decide that per-turn, twice) — it is simply the broker's own real roster. */
+  toolAgents: AssistantToolAgent[];
 }
 
 /** `toolName -> owning module key`, rebuilt fresh from the in-process registry on every call. This
@@ -104,5 +120,10 @@ export async function assembleCapabilities(
 
   const hubUrl = opts.hubUrl ?? config.services.hub.url;
   const hubToken = opts.hubToken ?? config.services.hub.token;
-  return { tools, hubConfigured: !!(hubUrl && hubToken) };
+  const toolAgents: AssistantToolAgent[] = Object.entries(ASSISTANT_AGENT_TOOLS).map(([name, agentTools]) => ({
+    name,
+    tools: agentTools,
+    writeTools: ASSISTANT_AGENT_WRITE_TOOLS[name] ?? [],
+  }));
+  return { tools, hubConfigured: !!(hubUrl && hubToken), toolAgents };
 }

@@ -150,6 +150,98 @@ const MESSAGE_SELECT = `
          error_kind AS "errorKind", created_at AS "createdAt"
   FROM assistant_messages`;
 
+// ── ASST-23 (§2.5/§7.4, T3a) — the card-state join: GET thread additionally returns, per message,
+// the tool calls it made, each joined to whatever `automation_approvals` row it is waiting on (if
+// any). The join itself needs no new Cerbos/module wiring: `assistant_tool_calls` is already read
+// under `withTenants([tenantId], …, {modules:["assistant"]})` (the enclosing query), and
+// `automation_approvals` is a CORE tenant-gated table with NO module conjunct in its own RLS policy
+// (migration 0014 — `tenant_id = ANY(app_current_tenants())` only) — so it is readable in the SAME
+// transaction/GUC state without widening anything: the approver's own `/approvals/:id` read is a
+// SEPARATE, differently-authorized surface (their own Cerbos grant), this join only ever surfaces the
+// row's STATUS/EXECUTION fields back into a thread the caller already owns. `assistant_tool_calls.args`
+// is already redacted at rest (broker.ts's `redactToolArgs`) — this join selects it as-is, never the
+// approval row's OWN (real) `tool_args`, so no raw argument value reaches this response.
+//
+// Card states this makes derivable on the FE (not computed here — this endpoint hands back the raw
+// facts, per the "select the columns you assert on explicitly" discipline): a row with `approvalId`
+// NULL is a plain read (`succeeded`/`failed`/`denied`); one with an approval joined reads
+// `approval.status` ('pending'|'approved'|'rejected'|'cancelled') and, once approved,
+// `approval.executionStatus` ('pending'|'executing'|'executed'|'failed'|'not_applicable') +
+// `approval.executionError` for the failed/not_executable detail.
+interface ToolCallRow {
+  id: string;
+  messageId: string;
+  toolName: string;
+  mcpServer: string | null;
+  args: unknown;
+  resultSummary: string | null;
+  status: string;
+  approvalId: string | null;
+  durationMs: number | null;
+  createdAt: string;
+  approvalStatus: string | null;
+  approvalExecutionStatus: string | null;
+  approvalExecutionError: string | null;
+}
+
+export interface ThreadToolCall {
+  id: string;
+  toolName: string;
+  mcpServer: string | null;
+  args: unknown;
+  resultSummary: string | null;
+  status: string;
+  approvalId: string | null;
+  durationMs: number | null;
+  createdAt: string;
+  /** `null` when this call was never a suspended write (a plain read, or a wall-1/step-0.5 refusal
+   *  that never reached the runner). Explicit-column SELECT below — an approval row that genuinely
+   *  has no matching id (should never happen; `approvalId` is only ever set from a row that just was
+   *  read, broker.ts) would ALSO read as `null` here, which is the same honest "nothing to join"
+   *  answer as "there was no approval to begin with" — never conflated with a real decided state. */
+  approval: { status: string; executionStatus: string; executionError: string | null } | null;
+}
+
+/** One SELECT for every tool call belonging to the given messages, LEFT JOINed to its approval row
+ *  (if `approval_id` is set). Grouped by message id for the caller to zip back onto its own message
+ *  list. Empty `messageIds` short-circuits to an empty map — no query for a thread with no messages. */
+async function fetchToolCallsByMessage(c: PoolClient, messageIds: string[]): Promise<Map<string, ThreadToolCall[]>> {
+  const out = new Map<string, ThreadToolCall[]>();
+  if (messageIds.length === 0) return out;
+  const { rows } = await c.query<ToolCallRow>(
+    `SELECT tc.id, tc.message_id AS "messageId", tc.tool_name AS "toolName", tc.mcp_server AS "mcpServer",
+            tc.args, tc.result_summary AS "resultSummary", tc.status, tc.approval_id AS "approvalId",
+            tc.duration_ms AS "durationMs", tc.created_at AS "createdAt",
+            aa.status AS "approvalStatus", aa.execution_status AS "approvalExecutionStatus",
+            aa.execution_error AS "approvalExecutionError"
+       FROM assistant_tool_calls tc
+       LEFT JOIN automation_approvals aa ON aa.id = tc.approval_id
+      WHERE tc.message_id = ANY($1::uuid[])
+      ORDER BY tc.created_at ASC`,
+    [messageIds],
+  );
+  for (const r of rows) {
+    const call: ThreadToolCall = {
+      id: r.id,
+      toolName: r.toolName,
+      mcpServer: r.mcpServer,
+      args: r.args,
+      resultSummary: r.resultSummary,
+      status: r.status,
+      approvalId: r.approvalId,
+      durationMs: r.durationMs,
+      createdAt: r.createdAt,
+      approval: r.approvalId
+        ? { status: r.approvalStatus ?? "unknown", executionStatus: r.approvalExecutionStatus ?? "unknown", executionError: r.approvalExecutionError }
+        : null,
+    };
+    const bucket = out.get(r.messageId);
+    if (bucket) bucket.push(call);
+    else out.set(r.messageId, [call]);
+  }
+  return out;
+}
+
 // ASST-19 — durable user memory (blueprint §4.1, memory #2 of 4). See this file's memory-section
 // header (below, right above the endpoints) for the propose/confirm/quarantine model.
 interface MemoryRow {
@@ -281,7 +373,12 @@ export class AssistantController {
              ORDER BY seq DESC LIMIT $3`,
           [id, beforeSeq, messageLimit],
         );
-        return rows.reverse(); // DESC-then-reverse -> chronological (ascending seq) order for display
+        const ordered = rows.reverse(); // DESC-then-reverse -> chronological (ascending seq) order
+        // ASST-23 (§2.5/§7.4, T3a) — the card-state join, additive. Same transaction/GUC state as the
+        // message SELECT above, so the "readable without a module conjunct" reasoning in this file's
+        // own header (right above `fetchToolCallsByMessage`) applies without a second withTenants call.
+        const byMessage = await fetchToolCallsByMessage(c, ordered.map((m) => m.id));
+        return ordered.map((m) => ({ ...m, toolCalls: byMessage.get(m.id) ?? [] }));
       },
       { modules: ["assistant"] },
     );

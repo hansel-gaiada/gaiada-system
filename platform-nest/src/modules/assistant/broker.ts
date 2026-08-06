@@ -97,6 +97,7 @@
 import type { PoolClient } from "pg";
 import { config } from "../../config";
 import { newId, withGlobal } from "../../db";
+import { getExecutable } from "../../core/approval-executables";
 
 // ─────────────────────────────────────── the chatting user ───────────────────────────────────────
 
@@ -394,7 +395,8 @@ interface RunnerRunDetail {
 }
 
 /**
- * The tools a given assistant agent may need, mirrored from `ai-agents/src/specialists.ts`.
+ * The tools a given assistant agent may need, mirrored from `ai-agents/src/specialists.ts`
+ * (`specialists` for the read-only entries, `writeSpecialists` for `task-filer`).
  *
  * Yes, this is a mirror, and mirrors drift — so keep its JOB narrow: it decides only WHICH tools the
  * capability gate asks the hub about for this turn. It is never an authorization source (the hub +
@@ -402,13 +404,86 @@ interface RunnerRunDetail {
  * have used — an over-strict refusal, never an under-strict allow. That asymmetry is why a mirror is
  * acceptable here and would not be if this list gated execution.
  *
- * Read-only agents only, deliberately: the assistant's write half is §7's proposal model, which
- * arrives as `approval_required` (below) rather than as a write tool the broker green-lights.
+ * ── ASST-23 — THE WRITE-MAP CONTRACT (supersedes the old "read-only agents only" pin) ──────────────
+ * Until ASST-23, every agent this map named was read-only BY CONSTRUCTION and that was pinned as a
+ * hard invariant (`core/d14-17-assistant-write-registry.test.ts`'s tests (A)/(A-reverse)). That
+ * guarantee is now retired, on purpose: `task-filer` is a WRITE-capable agent, and the assistant's
+ * write half is §7's proposal model — a `high_write` the agent declares (`ai-agents/src/
+ * specialists.ts`'s `writeSpecialists`) suspends and files an `origin='agent'` approval row exactly
+ * the way D14 already does for automation, surfaced in-thread as `approval_required` (below), never
+ * executed by the broker itself.
+ *
+ * The successor invariant, now enforced by BOTH a runtime gate (step 0.5 in `runToolTurn`, below) and
+ * a rewritten test:
+ *   1. Every tool named in `ASSISTANT_AGENT_WRITE_TOOLS[agent]` MUST have a registered
+ *      `core/approval-executables.ts` entry (`getExecutable(name) !== undefined`) — enforced live,
+ *      not just pinned: a turn naming an agent with an unregistered write tool is refused, typed, at
+ *      proposal time, and the runner is never contacted (mirrors wall 1's "provably nothing ran"
+ *      shape).
+ *   2. `ASSISTANT_AGENT_WRITE_TOOLS[agent]` is always a SUBSET of `ASSISTANT_AGENT_TOOLS[agent]` — the
+ *      broker can never propose a write for a tool the agent isn't even allowed to call.
+ *   3. Every tool in `ASSISTANT_AGENT_TOOLS` that is NOT also in `ASSISTANT_AGENT_WRITE_TOOLS[agent]`
+ *      stays unregistered in `approval-executables.ts` — a read genuinely stays a read; nothing here
+ *      quietly promotes a read-only mirror entry into something the executor would act on.
  */
 export const ASSISTANT_AGENT_TOOLS: Record<string, readonly string[]> = {
   "status-reporter": ["projects.list", "tasks.list"],
   "approvals-chaser": ["agency.pendingApprovals"],
+  // ASST-23 (§7.1 — both v1 PM writes ship together): mirrors ai-agents' `writeSpecialists.task-filer`
+  // (T2, `ai-agents/src/specialists.ts`) — read tools it needs to compose a proposal PLUS the two
+  // `high_write` tools it may propose. Both write tools already have a D14-15 registry entry
+  // (`core/approval-executables.ts`'s `registerPmExecutableApprovals()`), so step 0.5 below passes for
+  // this agent today; that registration is what T2's `RERUN_CAPABLE_HIGH_WRITES` allowlist consumes.
+  "task-filer": ["projects.list", "tasks.list", "pm.createTask", "pm.createDoc"],
 };
+
+/**
+ * The WRITE subset of `ASSISTANT_AGENT_TOOLS`, per agent — the tools this agent may PROPOSE (file a
+ * D14 approval for), as opposed to merely call as a read. See the write-map contract above.
+ *
+ * An agent absent from this map (every read-only one, e.g. `status-reporter`/`approvals-chaser`) is
+ * read-only in exactly the old sense — `ASSISTANT_AGENT_WRITE_TOOLS[agent] ?? []` is `[]`, so step 0.5
+ * is a no-op for it and it can never reach `approval_required` through any tool of its own.
+ */
+export const ASSISTANT_AGENT_WRITE_TOOLS: Record<string, readonly string[]> = {
+  "task-filer": ["pm.createTask", "pm.createDoc"],
+};
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+// ASST-23 / T2b FINDING — NEITHER MIRROR ABOVE MAY EVER NAME A DELEGATING/FAN-OUT AGENT
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+// T2b (ai-agents, landed in parallel with this file) found that a goal routed through the SUPERVISOR's
+// fan-out path (`ai-agents/src/specialists.ts`'s `supervisor`, which delegates to sub-runs rather than
+// holding its own `tools`) still files a suspended write IMMEDIATELY even under `fileOnSuspend:false`
+// — the confirm-chip machinery (§7.2, T2b/T3b) is scoped to a SINGLE write-specialist's own
+// suspend-and-file boundary (`runWriteAgent`), not to a fan-out of several. If this broker ever named
+// the supervisor here, a chat turn would silently bypass the owner's confirm gate the instant T3b
+// ships, with no other signal that it happened.
+//
+// `ai-agents` and `platform-nest` are separate standalone projects (CLAUDE.md's "not a monorepo"
+// rule) — this file cannot import ai-agents' `AgentDef` to check "is this agent delegating"
+// structurally from the shape of the real definition. The enforceable boundary AT THIS SIDE is
+// therefore by NAME: today there is exactly one delegating construct in ai-agents, named
+// `"supervisor"`. If ai-agents ever adds a second fan-out/delegating agent under a different name,
+// add that name here too — this denylist is what fails LOUDLY (at import time, not just in a test
+// someone could skip) if either mirror above is ever widened to include one.
+const FORBIDDEN_DELEGATING_AGENTS = new Set<string>(["supervisor"]);
+
+function assertNoDelegatingAgent(mirror: Record<string, readonly string[]>, mirrorName: string): void {
+  for (const name of Object.keys(mirror)) {
+    if (FORBIDDEN_DELEGATING_AGENTS.has(name)) {
+      throw new Error(
+        `${mirrorName} names '${name}', a delegating/fan-out agent. T2b found that a fileOnSuspend:false ` +
+          "goal routed through the supervisor still files a write immediately, bypassing the owner's confirm " +
+          "chip (§7.2 of docs/superpowers/plans/2026-08-06-asst-23-unblock-design.md) — the broker must only " +
+          "ever drive a single specialist/write-specialist per turn, never a fan-out orchestrator.",
+      );
+    }
+  }
+}
+
+assertNoDelegatingAgent(ASSISTANT_AGENT_TOOLS, "ASSISTANT_AGENT_TOOLS");
+assertNoDelegatingAgent(ASSISTANT_AGENT_WRITE_TOOLS, "ASSISTANT_AGENT_WRITE_TOOLS");
 
 /** The agent a tool turn uses when the caller names none. `status-reporter` is the read-only
  *  specialist whose allow-list is exactly the two company-data reads a chat turn most often needs. */
@@ -601,6 +676,50 @@ export async function runToolTurn(input: ToolTurnInput): Promise<ToolTurnResult>
   }
 
   const toolCalls: BrokerToolCallRecord[] = [];
+
+  // (0.5) THE REGISTRY GATE (ASST-23, §2.3/§7.4) — every write tool THIS agent may propose must
+  // already have a server-side `core/approval-executables.ts` entry, or the turn is refused HERE,
+  // typed, before the hub is even asked and LONG before any goal exists. This is deliberately its own
+  // step, not folded into wall 1: wall 1 answers "may this USER call this tool" (a Cerbos question);
+  // this answers "if this agent's model proposes a write, does anything exist that could ever execute
+  // it" (a platform-registry question, decided once, in-process, with no network call of its own).
+  // Getting this wrong in the permissive direction would let a `high_write` agent get filed, approved,
+  // and then dead-end at `execution_status='not_applicable'` with a human none the wiser until they
+  // read the row — this gate is what makes the dead end visible in-thread, at proposal time, instead.
+  const writeTools = ASSISTANT_AGENT_WRITE_TOOLS[agent] ?? [];
+  const unexecutable = writeTools.filter((toolName) => getExecutable(toolName) === undefined);
+  if (unexecutable.length > 0) {
+    // Same "provably nothing ran" shape as wall 1's refusal, below: a `denied` row per offending tool,
+    // no arguments (none were ever composed — the goal never started), and the runner is NEVER
+    // contacted. `errorKind: "tool_not_executable"` is its own typed reason, distinct from wall 1's
+    // `tool_denied` (a Cerbos/visibility refusal) — this one is "even if you were allowed to call it,
+    // nothing here can execute it yet."
+    for (const toolName of unexecutable) {
+      const record: BrokerToolCallRecord = {
+        id: newId(),
+        toolName,
+        mcpServer: "mcp-hub",
+        args: {},
+        status: "denied",
+        resultSummary: summarize(
+          `denied: '${toolName}' has no registered approval-executable entry yet — the tool was NOT proposed and nothing was run`,
+        ),
+        approvalId: null,
+        durationMs: null,
+      };
+      toolCalls.push(record);
+      input.emit.toolCall({ callId: record.id, toolName, args: record.args });
+      input.emit.toolResult({ callId: record.id, toolName, status: "denied", summary: record.resultSummary });
+    }
+    return {
+      outcome: "refused",
+      text:
+        `I can't propose that write yet: ${unexecutable.join(", ")} ${unexecutable.length === 1 ? "has" : "have"} no ` +
+        "approval-executable entry registered on this platform. Nothing was run on your behalf.",
+      toolCalls,
+      errorKind: "tool_not_executable",
+    };
+  }
 
   // (1) WALL 1 — the capability gate, under the user's OWN envelope. Runs BEFORE the goal exists.
   const visible = await (input.visibleTools ?? ((u: ChattingUser) =>

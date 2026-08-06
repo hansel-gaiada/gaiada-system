@@ -1,35 +1,47 @@
-// D14-17 — Assistant write-tool entries (Phase-6 v1 proposal set): the ticket's own escape hatch says
-// "if the broker's proposable surface turns out to be empty ... say so clearly with evidence rather
-// than inventing tools". This file IS that evidence, made into regression coverage rather than a claim
-// in a doc comment.
+// D14-17 — Assistant write-tool entries (Phase-6 v1 proposal set). ORIGINALLY this file pinned a
+// FINDING: the broker's proposable surface was entirely read-only, so zero net-new tools existed to
+// register (full original narrative retained in `approval-executables.ts`'s own D14-17 section — read
+// that first, it is unchanged). **ASST-23 (§7.4/T3a, 2026-08-06) supersedes that finding on purpose**:
+// `modules/assistant/broker.ts` now names a real write-capable agent, `task-filer`
+// (`ASSISTANT_AGENT_TOOLS["task-filer"]` includes `pm.createTask`/`pm.createDoc`,
+// `ASSISTANT_AGENT_WRITE_TOOLS["task-filer"]` names them as its PROPOSABLE writes). The three facts
+// the old finding rested on have changed exactly as much as ASST-23 changed them and no more:
+//   1. The broker's tool universe is no longer entirely read-only — `task-filer` is write-capable.
+//   2. Whether `taskTriager`/`writeSpecialists` is broker-reachable is UNCHANGED by this ticket (it
+//      still isn't — `task-filer` is a separate, new AgentDef, T2's job, not a promotion of
+//      `taskTriager`).
+//   3. `ai-agents/src/agent-write-guard.test.ts`'s `RERUN_CAPABLE_HIGH_WRITES` allowlist gaining
+//      `pm.createTask`/`pm.createDoc` is THAT project's own ticket (T2) to land — this file does not
+//      assert on ai-agents' allowlist at all (separate standalone project, no import across the
+//      boundary), it only asserts on what platform-nest itself can prove: the registry + the broker's
+//      OWN mirror agree.
 //
-// THE FINDING (full narrative in approval-executables.ts's own D14-17 section — read that first):
-//   1. `modules/assistant/broker.ts`'s `ASSISTANT_AGENT_TOOLS` is the broker's ENTIRE tool universe —
-//      `runToolTurn` refuses any `agent` not present as a key of that map before contacting the runner
-//      at all. Today: two entries, both read-only (`status-reporter`, `approvals-chaser`).
-//   2. The one write-capable AgentDef anywhere (`ai-agents/src/specialists.ts`'s `taskTriager`,
-//      `tasks.update`/`low_write`) is NOT reachable through the broker — it lives in `writeSpecialists`,
-//      which `ASSISTANT_AGENT_TOOLS` never names.
-//   3. `ai-agents/src/agent-write-guard.test.ts`'s `RERUN_CAPABLE_HIGH_WRITES` — the CI-enforced
-//      allowlist of tool names ANY AgentDef anywhere may declare `high_write` — is `[]`. A `high_write`
-//      is the ONLY thing that files an `origin='agent'` approval row (`agent.ts`'s write gate); a
-//      `low_write` executes immediately and never reaches this registry at all.
+// ── THE SUCCESSOR INVARIANT (what (A)/(A-reverse) became, and why) ─────────────────────────────────
+// The OLD (A)/(A-reverse) pinned "the broker's tool universe is read-only, full stop" — an exact
+// `toEqual` on `ASSISTANT_AGENT_TOOLS` plus "nothing in it is registered". That pin is now FALSE by
+// design (task-filer's two tools ARE registered, on purpose), so keeping it would fail this suite for
+// the very feature ASST-23 ships — exactly the "don't delete the guard, evolve it" instruction. The
+// invariant this file now proves, per broker.ts's own "ASST-23 — THE WRITE-MAP CONTRACT" header:
+//   (A1) every tool named in `ASSISTANT_AGENT_WRITE_TOOLS[agent]`, for every agent, HAS a registered
+//        `approval-executables.ts` entry — a write the broker could propose must never dead-end at
+//        `not_applicable` for lack of registration;
+//   (A2) the reverse: every tool in `ASSISTANT_AGENT_TOOLS[agent]` that is NOT ALSO named in
+//        `ASSISTANT_AGENT_WRITE_TOOLS[agent]` has NO registered executable — a plain read (or a tool
+//        this agent was never given write-propose rights to) genuinely stays inert at the registry
+//        layer, never silently promoted into something the executor would act on;
+//   (A3) `ASSISTANT_AGENT_WRITE_TOOLS[agent]` is always a SUBSET of `ASSISTANT_AGENT_TOOLS[agent]` —
+//        the broker can never propose a write for a tool the agent isn't even allowed to call at all.
+// Together these are STRICTLY STRONGER than the old pin for what matters (every write is backed by a
+// real precondition) while correctly no longer claiming "the whole surface is read-only", which was
+// true only because nobody had shipped a write agent yet.
 //
-// So: zero net-new assistant write tools exist to register. What THIS file proves, concretely:
-//   (A) the broker's tool universe is pinned exactly as read above, and none of it collides with a
-//       registered executable (structural pin — regresses loudly if either fact changes silently);
-//   (B) a REPRESENTATIVE not-yet-existent "assistant write" tool name — chosen arbitrarily, since none
-//       exists — filed as an `origin='agent'` approval and approved, stays `execution_status=
-//       'not_applicable'` FOREVER and is never claimed to `'pending'`/`'executing'` (the "non-listed
-//       assistant tool proposal never auto-executes" requirement, both directions: unregistered stays
-//       inert, and (C) below proves a REGISTERED tool of the identical shape does light up — so (B) is
-//       demonstrably the registry gate doing its job, not an accident of the row being malformed);
-//   (C) the "reuse D14-15's PM entries" fallback actually holds for an AGENT-origin proposal (not just
-//       automation/n8n, which is all D14-15's own test file exercises) — `pm.createTask`/`pm.createDoc`
-//       execute an `origin='agent'` approval exactly as they would an `origin='automation'` one, both on
-//       the happy path and on a stale precondition, proving the registry entries are origin-agnostic and
-//       genuinely need no change for the assistant to reuse them the moment some future AgentDef the
-//       broker can drive proposes one.
+// (B) and (C) are UNCHANGED in spirit and, for (C), EXTENDED: (B) proves a representative unregistered
+// "assistant write" tool name still dead-ends forever at `not_applicable`, never auto-executing — the
+// negative control that makes (A1) meaningful rather than vacuous. (C) proves BOTH of D14-15's PM
+// entries execute an `origin='agent'` approval correctly (happy path + stale precondition) — extended
+// beyond the original `pm.createTask`-only coverage to include `pm.createDoc` per the owner's OQ-1
+// ruling (§7.1: "both PM tools ship in v1", so both need this proof, not just one with the other
+// "covered by the same mechanism" — the mechanism claim must be made TRUE, not merely asserted).
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from "vitest";
 import { config } from "../config";
 import { newId, withTenants } from "../db";
@@ -43,7 +55,7 @@ import {
   getExecutable,
 } from "./approval-executables";
 import { executeApprovedAutomationWrite } from "./approval-execute";
-import { ASSISTANT_AGENT_TOOLS } from "../modules/assistant/broker";
+import { ASSISTANT_AGENT_TOOLS, ASSISTANT_AGENT_WRITE_TOOLS } from "../modules/assistant/broker";
 
 const GRANT_SECRET = "d14-17-test-secret-not-a-real-one";
 /** A name chosen ONLY to be recognizable as "assistant-flavored" in test output — it is NOT a real
@@ -78,30 +90,53 @@ describe.skipIf(!TEST_URL)("D14-17 — assistant write-tool registry: evaluated,
     await teardownTestDb();
   });
 
-  // ── (A) the broker's tool universe, pinned ───────────────────────────────────────────────────────
+  // ── (A) the write-map contract (ASST-23 successor invariant — see file header) ───────────────────
 
-  it("(A) the assistant broker's entire proposable tool universe is read-only, and none of it collides with a registered executable", () => {
-    // Pinned exactly, not just "no writes": a change here means someone widened the broker's roster,
-    // which is the ONE fact this whole finding rests on — this must fail loudly, not silently pass a
-    // weaker check.
-    expect(ASSISTANT_AGENT_TOOLS).toEqual({
-      "status-reporter": ["projects.list", "tasks.list"],
-      "approvals-chaser": ["agency.pendingApprovals"],
-    });
-    for (const tools of Object.values(ASSISTANT_AGENT_TOOLS)) {
-      for (const toolName of tools) {
-        // These are reads, so this is expected to be trivially true today — asserted anyway so a
-        // future write tool slipped into this map without a matching registry decision is caught
-        // here, not only by ai-agents' own (separate-project) guard test.
-        expect(getExecutable(toolName)).toBeUndefined();
+  it("(A1) every tool ASSISTANT_AGENT_WRITE_TOOLS names, for every agent, HAS a registered approval-executable entry", () => {
+    // Fails loudly the moment a future agent's write-map names a tool nobody registered an executor
+    // for — exactly the dead-end (approved, then stuck at 'not_applicable' with no one told) this
+    // gate exists to make impossible to ship silently.
+    expect(Object.keys(ASSISTANT_AGENT_WRITE_TOOLS).length).toBeGreaterThan(0); // this file has teeth today
+    for (const [agent, writeTools] of Object.entries(ASSISTANT_AGENT_WRITE_TOOLS)) {
+      expect(writeTools.length).toBeGreaterThan(0);
+      for (const toolName of writeTools) {
+        expect(getExecutable(toolName), `${agent}'s write tool '${toolName}' has no approval-executables entry`).not.toBeUndefined();
       }
     }
   });
 
-  it("(A) no registered executable-approval entry is named after anything in the broker's tool universe (reverse check)", () => {
-    const brokerTools = new Set(Object.values(ASSISTANT_AGENT_TOOLS).flat());
-    for (const registered of ["deploy.staging", "deploy.production", "pm.createTask", "pm.createDoc"]) {
-      expect(brokerTools.has(registered)).toBe(false);
+  it("(A2) every broker tool NOT named as a write for its agent has NO registered executable — a read genuinely stays a read (reverse check)", () => {
+    for (const [agent, tools] of Object.entries(ASSISTANT_AGENT_TOOLS)) {
+      const writeSet = new Set(ASSISTANT_AGENT_WRITE_TOOLS[agent] ?? []);
+      for (const toolName of tools) {
+        if (writeSet.has(toolName)) continue; // covered, and required to be registered, by (A1)
+        expect(
+          getExecutable(toolName),
+          `${toolName} is not a declared write for '${agent}' but IS a registered executable — either promote it to the write map or unregister it`,
+        ).toBeUndefined();
+      }
+    }
+  });
+
+  it("(A3) ASSISTANT_AGENT_WRITE_TOOLS[agent] is always a SUBSET of ASSISTANT_AGENT_TOOLS[agent] — never a write on a tool the agent can't even call", () => {
+    for (const [agent, writeTools] of Object.entries(ASSISTANT_AGENT_WRITE_TOOLS)) {
+      const allTools = new Set(ASSISTANT_AGENT_TOOLS[agent] ?? []);
+      for (const toolName of writeTools) {
+        expect(allTools.has(toolName), `'${agent}' proposes '${toolName}' as a write but its own tool list does not include it`).toBe(true);
+      }
+    }
+  });
+
+  // ── (A4) T2b's finding, pinned on THIS side of the ai-agents/platform-nest boundary ──────────────
+  // T2b (ai-agents) found that a `fileOnSuspend:false` goal routed through the SUPERVISOR's fan-out
+  // path still files a write immediately — bypassing the confirm chip (§7.2) the moment T3b ships.
+  // `broker.ts` itself throws at import time if either mirror ever names a delegating agent (see its
+  // own "ASST-23 / T2b FINDING" section, right above `ASSISTANT_AGENT_WRITE_TOOLS`) — this test is
+  // the second, independent proof that the invariant currently holds, so a regression is caught by a
+  // failing assertion here in addition to (not instead of) the module-load throw.
+  it("(A4) neither mirror ever names a delegating/fan-out agent (T2b's supervisor-bypass finding) — 'supervisor' is absent from both", () => {
+    for (const mirror of [ASSISTANT_AGENT_TOOLS, ASSISTANT_AGENT_WRITE_TOOLS]) {
+      expect(Object.keys(mirror)).not.toContain("supervisor");
     }
   });
 
@@ -201,6 +236,38 @@ describe.skipIf(!TEST_URL)("D14-17 — assistant write-tool registry: evaluated,
       const projectId = await makeProject("archived");
       const id = await fileAgentOriginApproved(
         "pm.createTask",
+        { tenantId: co, projectId, title: "Should never land" },
+        "pending",
+      );
+      const outcome = await executeApprovedAutomationWrite(co, id);
+      expect(outcome).toMatchObject({ status: "failed", error: "precondition_failed: project_archived" });
+      expect(hubCalls).toHaveLength(0);
+      const row = await rowOf(id);
+      expect(row.execution_status).toBe("failed");
+    });
+
+    // ── §7.1's caveat, closed: the original (C) coverage above only ever drove pm.createTask. Both
+    // tools ship in v1 (owner ruling, §7.1), so "pm.createDoc is covered by the same mechanism" must be
+    // made TRUE here, not merely asserted by analogy — mirrors the two pm.createTask cases exactly,
+    // minus the assignee branch (pm.createDoc's own precondition, `pmProjectPrecondition`, has none —
+    // see approval-executables.ts's header on why that is a documented scope call).
+
+    it("(§7.1) a fresh project's origin='agent' pm.createDoc executes exactly once — same entry, same precondition, no code change needed for the assistant to use it", async () => {
+      const projectId = await makeProject();
+      const id = await fileAgentOriginApproved(
+        "pm.createDoc",
+        { tenantId: co, projectId, title: "Filed by the assistant broker (simulated)" },
+        "pending",
+      );
+      const outcome = await executeApprovedAutomationWrite(co, id);
+      expect(outcome.status).toBe("executed");
+      expect(hubCalls).toHaveLength(1);
+    });
+
+    it("(§7.1) an origin='agent' pm.createDoc against an ARCHIVED project still fails closed with precondition_failed:project_archived, and the hub is called ZERO times", async () => {
+      const projectId = await makeProject("archived");
+      const id = await fileAgentOriginApproved(
+        "pm.createDoc",
         { tenantId: co, projectId, title: "Should never land" },
         "pending",
       );

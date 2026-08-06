@@ -36,6 +36,7 @@ import { createCompany, createUser, addMembership, createRole, grantRole, create
 import { registerModule, resetModules } from "../registry";
 import { assistantModule } from "./index";
 import {
+  ASSISTANT_AGENT_WRITE_TOOLS,
   DEFAULT_TOOL_AGENT,
   ServicePrincipalRefusedError,
   ensurePlatformSelfLink,
@@ -45,6 +46,11 @@ import {
   redactToolArgs,
   turnModePart,
 } from "./broker";
+// ASST-23 (§7.4/T3a) — the registry-gate refusal test mutates the in-process executable registry
+// (mirrors d14-17-assistant-write-registry.test.ts's own beforeAll pattern) and the card-state test
+// drives the REAL executor after a REAL decide() call — no second, parallel implementation of either.
+import { getExecutable, registerCoreExecutableApprovals, registerPmExecutableApprovals, resetExecutableApprovals } from "../../core/approval-executables";
+import { executeApprovedAutomationWrite } from "../../core/approval-execute";
 
 // ══════════════════════════════════════ pure units (no DB needed) ═══════════════════════════════
 
@@ -149,8 +155,17 @@ async function startFakeHub(): Promise<FakeHub> {
           oboExternalId,
           authorization: req.headers.authorization as string | undefined,
         });
-        const tools = (oboExternalId ? visibility.get(oboExternalId) : undefined) ?? [];
         res.writeHead(200, { "content-type": "application/json" });
+        if (method === "tools/call") {
+          // ASST-23 (§7.4/T3a card-state test) — the executor's re-drive (`core/approval-execute.ts`'s
+          // `callHubTool`) hits this SAME `/mcp` endpoint with a DIFFERENT jsonrpc method. It only
+          // needs a well-formed non-error `tools/call` response; the tool's own real effect is
+          // platform-nest's PM handler, which this fake never reaches — same "the hub is a fixture"
+          // scope every other test in this file already accepts for `tools/list`.
+          res.end(JSON.stringify({ jsonrpc: "2.0", id: 1, result: { content: [{ text: "ok (fake hub)" }] } }));
+          return;
+        }
+        const tools = (oboExternalId ? visibility.get(oboExternalId) : undefined) ?? [];
         res.end(
           JSON.stringify({
             jsonrpc: "2.0",
@@ -364,11 +379,17 @@ describe.skipIf(!TEST_URL)("Assistant tool broker (ASST-17) — live PG + Cerbos
     // The hub's per-principal answer. `owner` sees both status-reporter tools; `restricted` sees
     // neither of them (only an unrelated tool), which is how a Cerbos deny for that user looks on the
     // wire. Nobody else is in the map at all — deny-by-default.
-    hub.visibility.set(owner, ["projects.list", "tasks.list", "clients.list"]);
+    // ASST-23 (§7.4/T3a) — `owner` also sees task-filer's tools, incl. both write tools, so the
+    // registry-gate (step 0.5) and card-state tests below exercise wall 1 too, not just the new gate.
+    hub.visibility.set(owner, ["projects.list", "tasks.list", "clients.list", "pm.createTask", "pm.createDoc"]);
     hub.visibility.set(restricted, ["clients.list"]);
 
     config.services.hub = { url: hub.url, token: "hub-token", assuranceToken: "" };
     config.services.agents = { url: runner.url, token: "runner-token" };
+    // ASST-23 card-state test: the executor's re-drive needs a configured grant secret to mint the
+    // execution grant header (approval-execute.ts's attemptRedrive) — same pattern every other
+    // executor-touching test file in this codebase uses (see d14-17-assistant-write-registry.test.ts).
+    config.approvalGrantSecret = "asst-broker-test-secret-not-a-real-one";
     // The chat path is not exercised here, but leave the gateway unset-safe: a tool turn must never
     // touch it, and if it did, the resulting `not_configured` error would be loud.
     config.services.gateway = { url: "", token: "" };
@@ -582,6 +603,104 @@ describe.skipIf(!TEST_URL)("Assistant tool broker (ASST-17) — live PG + Cerbos
     // REAL arguments, REALLY redacted: shape preserved, every value destroyed.
     expect(rows[0].args).toEqual({ iban: "[redacted:string]", amount: "[redacted:number]", note: { memo: "[redacted:string]" } });
     expect(JSON.stringify(rows[0].args)).not.toContain(secretIban);
+  });
+
+  // ── ASST-23 (§7.4/T3a) — STEP 0.5, THE REGISTRY GATE ────────────────────────────────────────────
+  it("step 0.5: a write tool with NO approval-executables entry is refused BEFORE the runner is ever contacted — zero goals, typed refusal", async () => {
+    // Simulate a drifted mirror: task-filer's write tools are removed from the registry (leaving only
+    // the deploy.* entries), so ASSISTANT_AGENT_WRITE_TOOLS["task-filer"] names two tools this
+    // process, right now, cannot execute. Restored in `finally` — this mutates a process-wide
+    // singleton the rest of this file (and this suite's later tests) depend on being intact.
+    resetExecutableApprovals();
+    registerCoreExecutableApprovals(); // deploy.staging/production only — pm.createTask/createDoc gone
+    try {
+      expect(getExecutable("pm.createTask")).toBeUndefined(); // the precondition this test actually probes
+      const threadId = await newThread(owner, "registry gate refusal");
+      const goalsBefore = runner.receivedGoals.length;
+      const { messageId, streamUrl } = await sendToolMessage(owner, threadId, "TOOLRUN_OK file a task please", "task-filer");
+
+      const body = await readStream(streamUrl, owner);
+      expect(body).toContain("event: error");
+      expect(body).toContain('"errorKind":"tool_not_executable"');
+      expect(body).not.toContain("event: done");
+
+      // Provably nothing ran, under any principal — same shape as wall 1's own refusal test: the
+      // runner never even received a goal, so there is no world where this executed under a service
+      // principal and merely reported a failure afterwards.
+      expect(runner.receivedGoals.slice(goalsBefore)).toHaveLength(0);
+
+      const rows = await toolCallRows(messageId);
+      expect(rows.map((r) => r.tool_name).sort()).toEqual(ASSISTANT_AGENT_WRITE_TOOLS["task-filer"].slice().sort());
+      for (const r of rows) {
+        expect(r.status).toBe("denied");
+        expect(r.authority_user_id).toBe(owner); // still attributed to the chatting user, never a service id
+        expect(r.approval_id).toBeNull(); // nothing was ever filed
+      }
+
+      // Visible on reload too, not just the live stream.
+      const got = await app.inject({ method: "GET", url: `/api/${A}/assistant/threads/${threadId}`, headers: asUser(owner) });
+      const msgs = (got.json() as { messages: Array<{ errorKind: string | null }> }).messages;
+      expect(msgs[1].errorKind).toBe("tool_not_executable");
+    } finally {
+      registerPmExecutableApprovals(); // restore pm.createTask/pm.createDoc for every test after this one
+    }
+  });
+
+  // ── ASST-23 (§7.4/T3a) — THE CARD-STATE JOIN, END TO END ────────────────────────────────────────
+  it("card state: a suspended origin='agent' pm.createTask, once decided AND executed, shows up EXECUTED on a fresh GET thread — via the real decide() endpoint and the real executor, never a second implementation", async () => {
+    const projectId = await createProject(A, `Card State Project ${Date.now()}`);
+    const approvalId = newId();
+    await withTenants([A], (c) =>
+      c.query(
+        `INSERT INTO automation_approvals
+           (id, tenant_id, workflow_id, tool_name, tool_args, impact, reason, requested_by, origin, agent_name, origin_site)
+         VALUES ($1,$2,'task-filer','pm.createTask',$3::jsonb,'high','suspend: high-impact write',$4,'agent','task-filer',$5)`,
+        [approvalId, A, JSON.stringify({ tenantId: A, projectId, title: "Filed via the assistant broker (card-state test)" }), owner, config.originSite],
+      ),
+    );
+
+    const threadId = await newThread(owner, "card state");
+    const { messageId, streamUrl } = await sendToolMessage(owner, threadId, `TOOLRUN_SUSPEND:${approvalId} file this task`, "task-filer");
+    const body = await readStream(streamUrl, owner);
+    expect(body).toContain("event: approval_required");
+    expect(body).toContain(approvalId);
+
+    // Pre-decision: the ledger row is `pending`, joined to an approval that is itself still `pending`
+    // for DECISION and, per migration 0078's column DEFAULT, still `not_applicable` for EXECUTION —
+    // `decide()` (below) is what first flips execution_status to 'pending' once it sees a registered
+    // tool. Asserting the default here (not guessing 'pending') is the "a column a SELECT omits reads
+    // exactly like NULL" discipline applied to a state transition: get the PRE-state right or the
+    // POST-state assertion proves nothing.
+    const preDecision = await app.inject({ method: "GET", url: `/api/${A}/assistant/threads/${threadId}`, headers: asUser(owner) });
+    const preMsgs = (preDecision.json() as { messages: Array<{ toolCalls: Array<{ toolName: string; status: string; approvalId: string | null; approval: { status: string; executionStatus: string } | null }> }> }).messages;
+    expect(preMsgs[1].toolCalls).toHaveLength(1);
+    expect(preMsgs[1].toolCalls[0]).toMatchObject({ toolName: "pm.createTask", status: "pending", approvalId, approval: { status: "pending", executionStatus: "not_applicable" } });
+
+    // The human decides — the REAL endpoint, as the REAL company_admin decider, exactly as a person
+    // would from the approvals inbox. This is D14's existing surface; ASST-23 adds no new one.
+    const decideRes = await app.inject({
+      method: "POST", url: `/api/${A}/automation-approvals/${approvalId}/decide`, headers: asUser(admin), payload: { decision: "approved" },
+    });
+    expect(decideRes.statusCode).toBe(200);
+
+    // Drive the executor directly rather than waiting on a live Redis-backed outbox consumer — the
+    // SAME entry point the outbox handler and D14-07's retry call (approval-execute.ts), same pattern
+    // d14-09/d14-17's own suites use to prove decide()->execute without standing up a relay.
+    const outcome = await executeApprovedAutomationWrite(A, approvalId);
+    expect(outcome.status).toBe("executed");
+
+    const postDecision = await app.inject({ method: "GET", url: `/api/${A}/assistant/threads/${threadId}`, headers: asUser(owner) });
+    const postMsgs = (postDecision.json() as { messages: Array<{ toolCalls: Array<{ toolName: string; approvalId: string | null; approval: { status: string; executionStatus: string; executionError: string | null } | null }> }> }).messages;
+    expect(postMsgs[1].toolCalls).toHaveLength(1);
+    expect(postMsgs[1].toolCalls[0]).toMatchObject({
+      toolName: "pm.createTask",
+      approvalId,
+      approval: { status: "approved", executionStatus: "executed", executionError: null },
+    });
+    // The ledger row's OWN status column is untouched by decide/execute — it is a read-time join, not
+    // a mutation of the transcript (§2.5's own invariant, restated as a live assertion here).
+    const rawRow = await toolCallRows(messageId);
+    expect(rawRow[0].status).toBe("pending");
   });
 
   it("a failed tool run persists a typed error_kind and still attributes every row to the chatting user", async () => {

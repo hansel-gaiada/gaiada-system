@@ -2259,3 +2259,99 @@ longer task to a specialist," deliberately NOT per-department personas).
   only place that becomes visible today. Wiring that back into the thread is real work (a new
   message part, or reusing the SSE `approval_required` shape ASST-17 already defined for in-turn
   tool calls) and was left for a follow-up rather than folded in here.
+
+### T3a — the broker's first write turn: registry gate + write-tool mirror + card-state join (ASST-23, 2026-08-06)
+
+Implements the platform-nest half of `docs/superpowers/plans/2026-08-06-asst-23-unblock-design.md`
+§7.4/T3a — the owner's OQ-1/OQ-2 override of the original ASST-23 design (§2). **T3a is scoped to
+this repo only and codes against a FAKE runner** (the real `task-filer` AgentDef is `ai-agents`' T2,
+a separate ticket in a separate standalone project — see CLAUDE.md). Everything below lands
+independently of T2 and is provably safe to ship first: a turn naming `task-filer` today reaches a
+real runner that doesn't know that name yet (a `runner_error`/404 from the real agent-runner,
+unchanged failure shape) rather than anything worse.
+
+**Explicitly NOT this ticket** (owner's §7.2 override, T3b/T2b's scope): the in-thread confirm chip,
+`assistant_write_intents`, the confirm/dismiss endpoints, `fileOnSuspend`, and the Cerbos
+`confirm_write` edit. The flow below is `approval_required` exactly as ASST-17 already shipped it —
+a write turn suspends and FILES immediately (no confirmation gate yet); T3b adds the chip on top of
+this without changing anything documented here.
+
+- ✅ **`ASSISTANT_AGENT_TOOLS` gains `"task-filer": ["projects.list", "tasks.list", "pm.createTask",
+  "pm.createDoc"]`** (`modules/assistant/broker.ts`) — mirrors `ai-agents/src/specialists.ts`'s
+  `writeSpecialists.task-filer` (T2). Both v1 write tools ship together per the owner's OQ-1 answer
+  (§7.1: "both now") — `pm.createDoc` is not a fast-follow.
+- ✅ **NEW `ASSISTANT_AGENT_WRITE_TOOLS: Record<string, readonly string[]>`** — the WRITE subset of
+  the map above, per agent (`{"task-filer": ["pm.createTask", "pm.createDoc"]}` today). An agent
+  absent from this map (every read-only one) is read-only in exactly ASST-17's original sense.
+- ✅ **NEW — step (0.5), THE REGISTRY GATE, runs BEFORE wall 1** (`runToolTurn`, `broker.ts`): every
+  tool in `ASSISTANT_AGENT_WRITE_TOOLS[agent]` must have a registered `core/approval-executables.ts`
+  entry (`getExecutable(name) !== undefined`) or the turn is refused — typed
+  (`errorKind: "tool_not_executable"`), a `denied` `assistant_tool_calls` row per offending tool, and
+  **the runner is never contacted** (same "provably nothing ran" shape as wall 1's own refusal).
+  This is a platform-registry question ("if this agent proposes this write, does anything exist that
+  could ever execute it"), deliberately distinct from wall 1's Cerbos question ("may this user call
+  this tool") — getting it wrong in the permissive direction would let a write get filed, approved,
+  and dead-end at `execution_status='not_applicable'` with nobody told until they read the row; this
+  gate surfaces that dead end in-thread, at proposal time, instead. Both of v1's write tools
+  (`pm.createTask`/`pm.createDoc`) already have a D14-15 registry entry, so this gate passes for
+  `task-filer` today — it exists for the drift case (a future write tool added to the mirror before
+  its registry entry lands), proven live by a test that deliberately un-registers both tools first.
+- ✅ **`GET /api/:t/assistant/threads/:id` gains per-message `toolCalls[]`** (`assistant.controller.ts`'s
+  `getThread`, additive — every existing field on `thread`/`messages` is unchanged):
+  ```
+  toolCalls: Array<{
+    id, toolName, mcpServer, args, resultSummary, status, approvalId, durationMs, createdAt,
+    approval: { status, executionStatus, executionError } | null   // null iff approvalId is null
+  }>
+  ```
+  Fetched by a single additive query (`fetchToolCallsByMessage`) LEFT JOINing `assistant_tool_calls`
+  to `automation_approvals` on `approval_id = id`, inside the SAME `withTenants([tenantId], …,
+  {modules:["assistant"]})` transaction as the message SELECT — no second DB round trip's worth of
+  module-scope reasoning needed. **Why the join is legal without widening anything**:
+  `automation_approvals`'s own RLS policy (migration 0014) is `tenant_id = ANY(app_current_tenants())`
+  ONLY — no module conjunct — so it is readable in this transaction's GUC state exactly as it would be
+  from any other core controller; this endpoint only ever surfaces the row's STATUS/EXECUTION fields
+  back into a thread the caller already owns (Cerbos already cleared `"read"` on the thread above),
+  never the approver's OWN differently-authorized `/approvals/:id` read. `args` here is the ledger's
+  OWN already-redacted column (`assistant_tool_calls.args` — ASST-17's `redactToolArgs`), never
+  `automation_approvals.tool_args` (the real, unredacted values) — no raw argument value reaches this
+  response by construction. Card states this makes derivable on the FE (computed by the FE, not this
+  endpoint — it hands back raw facts per the "select the columns you assert on" discipline): a row
+  with `approval: null` is a plain read or a wall-1/step-0.5 refusal; one with `approval` set reads
+  `approval.status` (`pending|approved|rejected|cancelled`) and, once approved,
+  `approval.executionStatus` (`pending|executing|executed|failed|not_applicable`) +
+  `approval.executionError`. **The ledger row's own `status` column is NEVER mutated by decide/
+  execute** — verified live: `decide()`/`executeApprovedAutomationWrite()` run exactly as they did
+  before this ticket, and the join is what makes their effect visible on a re-fetch of the thread.
+- ✅ **`GET /api/:t/assistant/capabilities` gains `toolAgents: Array<{name, tools, writeTools}>`**
+  (`modules/assistant/capabilities.ts`) — the AUTHORITATIVE agent roster for the composer's tools-mode
+  agent picker, sourced directly from `ASSISTANT_AGENT_TOOLS`/`ASSISTANT_AGENT_WRITE_TOOLS` (never a
+  hand-maintained FE mirror). Independent of the existing `tools`/`hubConfigured` fields — it is the
+  broker's own real roster, not filtered by what the calling user currently sees (the hub/Cerbos still
+  decide that per-turn, twice, exactly as before).
+- ✅ **`core/d14-17-assistant-write-registry.test.ts` REWRITTEN, not deleted** — its old (A)/
+  (A-reverse) pinned "the broker's entire tool universe is read-only, and none of it is registered".
+  That pin is now FALSE by design (`task-filer`'s two tools ARE registered, on purpose), so ASST-23
+  legitimately supersedes it. The successor invariant, per `broker.ts`'s own "write-map contract"
+  header: (A1) every tool named in `ASSISTANT_AGENT_WRITE_TOOLS[agent]` HAS a registered executable;
+  (A2) every tool in `ASSISTANT_AGENT_TOOLS[agent]` NOT also in the write map has NO registered
+  executable (reads genuinely stay reads); (A3) the write map is always a SUBSET of the full tool
+  list. (B)/(C) are unchanged in spirit; (C) is EXTENDED to cover `pm.createDoc`'s
+  `origin='agent'` execution (happy path + archived-project refusal), not just `pm.createTask`'s —
+  closing the one honest caveat §7.1 named: "both tools covered" had to be made true, not asserted.
+- Tests — `modules/assistant/assistant-broker.test.ts` gains two live-PG-+-Cerbos cases: **the
+  registry-gate refusal** (both v1 write tools deliberately un-registered via
+  `resetExecutableApprovals()`/`registerCoreExecutableApprovals()`, restored in a `finally`; asserts
+  the typed refusal, zero runner goals, and a `denied` row per tool — then restores the registry for
+  every test after it) and **the card-state join end to end** (a seam-suspended `origin='agent'
+  pm.createTask` row → the REAL `POST .../decide` endpoint, as a real `company_admin` → the REAL
+  `executeApprovedAutomationWrite()` — no second implementation of either — → a fresh `GET thread`
+  shows `approval: {status:'approved', executionStatus:'executed', executionError:null}`; the
+  pre-decision fetch is asserted first, against the column DEFAULT (`execution_status:
+  'not_applicable'` — decide() has not run yet), not a guessed `'pending'`, so the post-decision
+  assertion actually proves a transition rather than a coincidence).
+- **Follow-ups this ticket deliberately leaves open** (all named in the design doc, none silently
+  dropped): `ai-agents`' real `task-filer` AgentDef + `RERUN_CAPABLE_HIGH_WRITES` allowlist entry
+  (T2); the in-thread confirm chip + `assistant_write_intents` (T3b/T2b, §7.2); the FE's tool-chip/
+  proposal-card rendering and agent picker consuming `toolAgents` (T4); `AGENT_SERVING_PROVIDER` pinned
+  on the deployed box (T6).
