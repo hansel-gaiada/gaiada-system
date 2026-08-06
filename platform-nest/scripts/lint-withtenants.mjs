@@ -224,10 +224,40 @@ function lineOf(src, index) {
   return line;
 }
 
+/** True when the `withTenants(` at `matchIndex` is PROSE, not a call.
+ *
+ *  Two comment forms, both of which have to be handled:
+ *
+ *   1. a line comment — `// ... withTenants(...)` — caught by the `//` prefix check, as before.
+ *   2. a BLOCK comment — `/* ... *\/` or a JSDoc `/** ... *\/`. This was the gap: a JSDoc
+ *      continuation line's prefix is ` * `, which contains no `//`, so every doc comment that
+ *      described `withTenants(...)` was scanned as if it were real code. It then failed the
+ *      single-element-array test (prose is not an array literal) and was reported as an
+ *      unallowlisted cross-tenant call — a false FAIL that blocked CI on `main`, found 2026-08-06
+ *      when `modules/assistant/write-intents.ts` documented the transaction-boundary rule in a
+ *      docblock. Rewording the comment would have left the trap armed for the next person, so the
+ *      detector is fixed instead.
+ *
+ *  Block-comment detection is positional rather than a re-parse, so reported line numbers stay
+ *  exact: if the nearest preceding `/*` comes AFTER the nearest preceding `*\/`, the match sits
+ *  inside an unterminated (i.e. still-open) block comment.
+ *
+ *  Known limitation, stated rather than hidden: a literal "/*" inside a STRING before the match
+ *  could fool this into treating real code as commented. That is the same class of approximation
+ *  the file header already accepts by choosing a depth-aware scanner over a TS AST, and it errs
+ *  toward the pre-existing behaviour for every call site in the tree today. If a future call is
+ *  ever missed this way, that is the moment to switch to a real parser — not now, for a
+ *  hypothetical.
+ */
 function isCommentReference(src, matchIndex) {
   const lineStart = src.lastIndexOf("\n", matchIndex) + 1;
   const prefix = src.slice(lineStart, matchIndex);
-  return prefix.includes("//");
+  if (prefix.includes("//")) return true;
+
+  const lastOpen = src.lastIndexOf("/*", matchIndex);
+  if (lastOpen === -1) return false;
+  const lastClose = src.lastIndexOf("*/", matchIndex);
+  return lastOpen > lastClose;
 }
 
 function normalizePattern(arg) {
