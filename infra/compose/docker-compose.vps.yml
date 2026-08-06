@@ -481,8 +481,14 @@ services:
       # ORG-6 release train (WSD-8 go-live 2026-07-22): shared-service assignments + reconciler.
       # Dark by default (empty/unset -> off); "1"/"true" flips the whole train on.
       SERVICE_ASSIGNMENTS_ENABLED: ${SERVICE_ASSIGNMENTS_ENABLED:-}
-      # WA-hardening D: base telemetry default (see ai-gateway comment above for rationale).
-      OTEL_ENABLED: ${OTEL_ENABLED:-0}
+      # OBS-01 follow-up (2026-08-06 incident): platform used to read the SAME shared OTEL_ENABLED
+      # as the other 5 telemetry-carrying services. Turning it on for platform alone meant either an
+      # unscoped `.env` edit (which once accidentally restarted ai-gateway) or a shell-level override
+      # on a scoped `up -d platform` that a plain release then silently reverts (compose recreates
+      # from file defaults, which are `0`). PLATFORM_OTEL_ENABLED is a DISTINCT var referenced only in
+      # this block, so `platform` can default to "on" across releases while ai-gateway/knowledge/
+      # mcp-hub/bot/bot-media-worker (and the idle sync-central) keep defaulting to OTEL_ENABLED's `0`.
+      OTEL_ENABLED: ${PLATFORM_OTEL_ENABLED:-0}
       OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4318}
       OTEL_SERVICE_NAME: platform
       # ── MAIL-04 (design §4.1/§10/§12) — src/mail/ is core infra (A1), no per-tenant gate. ──────────
