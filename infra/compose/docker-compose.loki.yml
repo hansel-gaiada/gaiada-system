@@ -1,0 +1,51 @@
+# OBS-02 — Loki, run as its OWN compose project. Same precedent as MAIL-02's
+# docker-compose.alertmanager-mail.yml and OBS-01's docker-compose.otel-metrics.yml: a separate
+# compose project survives `docker compose -p gaiada ... up -d --remove-orphans` on the main
+# stack, because --remove-orphans only prunes services within the SAME project that aren't in its
+# current compose files — it never touches a different project's containers. Does NOT require a
+# COMPOSE_PROFILES change.
+#
+# WHY A SEPARATE FILE FROM docker-compose.otel-metrics.yml: Loki is a storage tier with its own
+# retention/compaction lifecycle and disk footprint; keeping it in its own project means it can be
+# torn down/rebuilt independently of the metrics collector, exactly like alertmanager is independent
+# of otel-metrics today.
+#
+# otel-collector (in the gaiada-otel-metrics project) ships logs here over the shared external
+# `gaiada_default` network — see config.tier2-logs.yaml. No Grafana here: query via Loki's HTTP API
+# directly (see infra/runbooks/observability-loki.md for LogQL examples over the SSH tunnel), which
+# keeps this box's footprint smaller. Add Grafana later as a drop-in if a UI becomes worth the
+# extra ~200MB image + one more loopback-only port.
+#
+# Bring up:
+#   cd infra/compose
+#   docker compose -f docker-compose.loki.yml up -d
+# Tear down (keeps the shared network + main project untouched):
+#   docker compose -f docker-compose.loki.yml down
+name: gaiada-loki
+
+services:
+  loki:
+    image: grafana/loki:3.3.2
+    restart: unless-stopped
+    command: ["-config.file=/etc/loki/loki.yaml"]
+    volumes:
+      - ../observability/loki/loki.yaml:/etc/loki/loki.yaml:ro
+      - loki-data:/loki
+    ports:
+      # loopback-only (SSH tunnel) — mirrors every other admin/API surface on this box (Mailpit
+      # :8025, Prometheus :9090, Alertmanager :9093). Never internet-exposed.
+      - "127.0.0.1:3100:3100"
+    networks:
+      - stack
+
+networks:
+  # The main stack's implicit default network (project `gaiada`, no explicit `networks:` block in
+  # docker-compose.vps.yml => Compose names it "gaiada_default"). Referenced external so
+  # otel-collector (gaiada-otel-metrics project) can resolve `loki` by service name without
+  # merging into the main project, and without being touched by its --remove-orphans runs.
+  stack:
+    name: gaiada_default
+    external: true
+
+volumes:
+  loki-data:

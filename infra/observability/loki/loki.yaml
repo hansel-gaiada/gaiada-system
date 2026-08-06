@@ -31,5 +31,18 @@ limits_config:
   retention_period: 168h # 7 days at trial scale
   allow_structured_metadata: true # required for OTLP ingest (trace_id etc. as structured metadata)
 
+# OBS-02: retention_period above does NOTHING by itself — Loki only enforces it if the compactor
+# is running with retention_enabled. Without this block logs would accumulate unbounded, which is
+# exactly the disk-fills-then-a-deploy-rolls-back-a-healthy-release risk this box has already hit
+# once (see infra/runbooks/observability-loki.md). delete_request_store is required for the
+# TSDB+filesystem combination to actually process deletion markers.
+compactor:
+  working_directory: /loki/compactor
+  compaction_interval: 10m
+  retention_enabled: true
+  retention_delete_delay: 2h
+  retention_delete_worker_count: 150
+  delete_request_store: filesystem
+
 analytics:
   reporting_enabled: false

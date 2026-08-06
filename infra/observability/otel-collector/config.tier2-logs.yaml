@@ -1,0 +1,91 @@
+# OBS-02 (Tier 2) — adds the LOGS pipeline back on top of Tier 1's metrics-only collector
+# (config.tier1-metrics.yaml), now that Loki is up (docker-compose.loki.yml, project
+# gaiada-loki). Deliberately still NOT the full WS9 config.yaml: this box is running Tier 2 of
+# the observability rollout — metrics (gaiada-otel-metrics) + logs (gaiada-loki) — but NOT Tempo,
+# so the traces pipeline and the otlp/tempo exporter stay OUT (same reasoning as Tier 1's header:
+# exporting to a collector target that isn't running is just noisy, futile retries).
+#
+# The filelog receiver + json-unwrap/parse operator chain below is copied verbatim from the
+# known-good full-stack config (../otel-collector/config.yaml) — WS9's 2026-07-15 end-to-end
+# verification proved this exact operator chain correlates container stdout to Loki correctly, so
+# this reuses it rather than inventing a new one.
+#
+# Promoting to the full stack later is still a drop-in: switch docker-compose.otel-metrics.yml back
+# to config.yaml (adds otlp/tempo + the traces pipeline) once Tempo is brought up — nothing here
+# conflicts with that superset.
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+  # Tail every gaiada container's JSON log file. The Docker json-file driver wraps each line as
+  # {"log": "...", "stream": "...", "time": "..."}; we unwrap `log`, then parse the service's own
+  # JSON (pino/slog) to lift trace_id/span_id/level so logs correlate to traces in Grafana once
+  # Tempo exists. Requires the collector to run as root (see docker-compose.otel-metrics.yml) —
+  # /var/lib/docker/containers is root:root 710 on this box, which even group-membership can't
+  # read past (measured directly on gda-aicenter during OBS-02).
+  filelog:
+    include:
+      - /var/lib/docker/containers/*/*-json.log
+    include_file_path: true
+    operators:
+      - type: json_parser
+        parse_from: body
+        parse_to: attributes.docker
+      - type: move
+        from: attributes.docker.log
+        to: body
+      - type: json_parser
+        parse_from: body
+        parse_to: attributes
+        if: 'body matches "^\\s*\\{"'
+      - type: severity_parser
+        parse_from: attributes.level
+        if: 'attributes.level != nil'
+
+processors:
+  batch:
+    timeout: 10s
+  resourcedetection:
+    detectors: [env, system]
+    timeout: 5s
+  # Cap memory so the collector can never OOM the box under a telemetry burst.
+  memory_limiter:
+    check_interval: 5s
+    limit_percentage: 80
+    spike_limit_percentage: 25
+
+exporters:
+  # Prometheus scrapes THIS endpoint for all app/business metrics pushed over OTLP.
+  prometheus:
+    endpoint: 0.0.0.0:8889
+    resource_to_telemetry_conversion:
+      enabled: true
+  # `loki` is a service in the separate `gaiada-loki` compose project, reachable here because both
+  # projects join the same external `gaiada_default` network (same cross-project resolution
+  # precedent as this collector already reaching `alertmanager` from gaiada-alertmanager).
+  otlphttp/loki:
+    endpoint: http://loki:3100/otlp
+  debug:
+    verbosity: basic
+
+service:
+  telemetry:
+    logs:
+      level: info
+    metrics:
+      # Bind on all interfaces so Prometheus can scrape the collector's own metrics at
+      # otel-collector:8888 (prometheus.yml expects this target). Default is localhost = unreachable cross-container.
+      address: 0.0.0.0:8888
+  pipelines:
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, resourcedetection, batch]
+      exporters: [prometheus]
+    logs:
+      receivers: [otlp, filelog]
+      processors: [memory_limiter, resourcedetection, batch]
+      exporters: [otlphttp/loki]

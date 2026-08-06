@@ -13,9 +13,21 @@
 # deliberately Tier 1: just enough to let the 5 mail alert rules evaluate and reach the ALREADY
 # running gaiada-alertmanager project. Grafana/Loki/Tempo/exporters are a separate decision.
 #
-# otel-collector uses config.tier1-metrics.yaml (metrics-only subset of the known-good
-# config.yaml — see that file's header for why) so there's no futile export traffic toward a
-# Tempo/Loki that isn't running.
+# otel-collector originally used config.tier1-metrics.yaml (metrics only, no Tempo/Loki running).
+#
+# OBS-02 (2026-08-06): promoted to config.tier2-logs.yaml now that Loki is up as its own project
+# (docker-compose.loki.yml, project gaiada-loki) — adds the filelog receiver + logs pipeline back,
+# still with no traces/Tempo (unchanged reasoning: don't export toward a target that isn't
+# running). See config.tier2-logs.yaml's header for the promotion path to the full stack.
+#
+# `user: "0:0"` is required for the filelog receiver to read container logs on this box: measured
+# directly — /var/lib/docker/containers is root:root mode 710 (owner rwx, group/other cannot even
+# list it), and the individual *-json.log files are root:root mode 640. The image's default
+# non-root uid (10001), even with the root GID added via group_add, could not list the directory
+# (mode 710 has no group-read bit) — confirmed with `setpriv --reuid=10001 --regid=10001
+# --groups=0` failing "Permission denied" on this exact box, while `--reuid=0 --regid=0` (root,
+# which bypasses DAC checks) succeeded. Root here is scoped to a read-only bind mount; the
+# container gets no other elevated capability.
 #
 # Bring up:
 #   cd infra/compose
@@ -28,9 +40,13 @@ services:
   otel-collector:
     image: otel/opentelemetry-collector-contrib:0.116.1
     restart: unless-stopped
+    user: "0:0"
     command: ["--config=/etc/otelcol/config.yaml"]
     volumes:
-      - ../observability/otel-collector/config.tier1-metrics.yaml:/etc/otelcol/config.yaml:ro
+      - ../observability/otel-collector/config.tier2-logs.yaml:/etc/otelcol/config.yaml:ro
+      # Read-only tail of container stdout for the filelog receiver (logs -> Loki). Same mount as
+      # the known-good docker-compose.observability.yml.
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
     networks:
       - stack
 
