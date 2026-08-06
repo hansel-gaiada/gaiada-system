@@ -281,6 +281,114 @@ admin-API-mediated endpoint (which also changes who owns "forgot password" for t
 platform). Re-run this exact browser-driven test (old password must stop working, new-password form
 must render, under both clients) after whichever path is chosen.
 
+### PR-00 (2026-08-06, senior-integrator) — REFUTED (as currently configured): `execute-actions-email`
+### does not rotate the password either, and for a different, DIFFERENT-LOOKING reason than #16527
+
+Ticket: browser-prove the SEC-03 design's load-bearing hypothesis — that admin
+`execute-actions-email` with `UPDATE_PASSWORD` sidesteps the native reset-credentials bug
+(SEC-01/SEC-02, upstream keycloak/keycloak#16527) because its handler
+(`ExecuteActionsActionTokenHandler`) runs no authentication flow at all. Source reading (design
+§2) said WRONG-in-mechanism/RIGHT-in-consequence; this ticket exists because "the same realm read
+correctly configured for weeks" before SEC-01 caught the first bug from config alone.
+
+**Method:** throwaway user `pr00-throwaway@dev.gaiada.invalid` (`emailVerified:true`, password
+`OldPassw0rd!PR00`, no required actions), created/deleted via `kcadm.sh` against
+`gaiada-keycloak-1`. Triggered `PUT .../users/{id}/execute-actions-email?lifespan=900` with
+`["UPDATE_PASSWORD"]` via the `gaiada-provisioner` service-account client (client-credentials
+grant, `manage-users`), once with `client_id=gaiada-ui` and once with `client_id=account-console`.
+Mail captured via Mailpit's API on-box (`127.0.0.1:8025`); links driven with a real headless
+Chromium via Playwright (`@playwright/test`, run from `platform-ui/node_modules`), each click in a
+brand-new, cookie-less browser context.
+
+**Verdict: REFUTED, as the realm is currently configured — but not a repeat of #16527. A precise,
+different, and apparently fixable root cause was found in Keycloak's own log, not inferred.**
+
+**The four pass conditions, each proven separately:**
+
+1. **New-password form renders — FALSE.** Both runs (gaiada-ui and account-console `azp`)
+   produced: mail → link → a confirmation interstitial ("Perform the following action(s): Update
+   Password » Click here to proceed", the documented scanner-prefetch protection, confirmed
+   present) → clicking through went **directly** to "Your account has been updated." **Zero**
+   `<input type="password">` fields ever appeared, under either client. Screenshots captured at
+   every step.
+2. **Original password no longer works, fresh context — FALSE (the decisive one).** After BOTH
+   execute-actions runs completed, a fresh cookie-less Playwright context signed in with the
+   **original** password (`OldPassw0rd!PR00`) and succeeded outright: under `account-console`,
+   landed on the real Account Management console (`.../idp/realms/gaiada/account/`, valid auth
+   code + `session_state` on the URL); under `gaiada-ui`, landed on the full authenticated ERP
+   shell at `/` with the throwaway user's email in the nav. Same shape as SEC-01/02.
+   `kcadm get users/{id}/credentials` before and after both runs shows **exactly one** password
+   credential, **identical `id` (`c0a7cf76-...`) and `createdDate`** throughout — never touched.
+3. **No session minted on completion — TRUE (this part of the design holds).** Unlike SEC-01/02's
+   native-flow finding (which granted a live authenticated session), the execute-actions
+   completion page mints **no** app/account session: reusing the completed flow's own
+   `storageState`, a fresh navigation to `/idp/realms/gaiada/account/` and to `/` both redirected
+   to their respective login pages. Only cookie present post-flow: `AUTH_SESSION_ID` (httpOnly,
+   Keycloak's own flow-tracking cookie, not an identity session).
+4. **Single-use — FALSE, as a direct consequence of (1) never completing.** Re-clicking the
+   identical `gaiada-ui` link in a third fresh context reproduced the **exact same** interstitial →
+   "account updated" sequence again (not an invalid/expired error page). Consistent with the
+   design's own documented caveat that an execute-actions token is "re-clickable until the action
+   completes" (`UpdatePassword.isOneTimeAction()` never fires if the required-action provider
+   never runs) — so this isn't a contradiction of the design, it's the same root cause surfacing
+   a second way.
+
+**The root cause — found in the container's own log, not inferred from config:**
+```
+WARN  [org.keycloak.services.managers.AuthenticationManager] Could not find configuration for
+Required Action UPDATE_PASSWORD, did you forget to register it?
+```
+`kcadm get authentication/required-actions -r gaiada` confirms why: the realm's registered
+required actions are exactly `CONFIGURE_TOTP` (enabled), `VERIFY_EMAIL` (enabled), and
+`delete_account` (disabled). **`UPDATE_PASSWORD` is not registered at all** — not present, not
+merely disabled. `AuthenticationManager.nextRequiredAction()` can't find a provider for an alias
+that isn't registered on the realm, so it treats the token's action as vacuously satisfied and
+falls straight through to the `END_AFTER_REQUIRED_ACTIONS` info page. Every symptom above (no form,
+no rotation, re-clickable) is explained by this one gap.
+
+**Why this is not the same finding as SEC-01/SEC-02, and matters differently to the architect:**
+#16527 is a Keycloak **core** ordering bug with no realm-config fix (hence "custom SPI / core
+patch" as the only real alternatives). This is a **realm required-actions registration gap** —
+Authentication → Required Actions in the admin console (or
+`kcadm create authentication/required-actions -r gaiada -s alias=UPDATE_PASSWORD -s
+providerId=UPDATE_PASSWORD -s enabled=true -s name="Update Password"`), a config surface distinct
+from `authenticationFlows`/`resetPasswordAllowed`. **This ticket did not touch it** — the
+guardrail was "change nothing else," and enabling a required action is exactly the kind of realm
+auth-config change this ticket was scoped to observe, not perform. That is precisely why the
+verdict is "REFUTED as configured," not "REFUTED, mechanism dead": whether
+`ExecuteActionsActionTokenHandler`'s claimed disjoint-code-path behavior actually holds **has not
+been observed yet**, because the flow never got far enough to exercise it. The `AuthenticationManager`
+merge-of-session-and-user-level-required-actions claim (design §2 table, row 3) is also unconfirmed
+by this run for the same reason.
+
+**Both-clients comparability (direct parity with SEC-01/SEC-02's method):** identical outcome
+under `account-console` and `gaiada-ui` for all four conditions — interstitial renders, form never
+does, completion page is the generic info page under both, original password authenticates
+successfully under both post-flow. This rules out a client-specific artifact; the gap is realm-wide.
+
+**Interstitial + lifespan, as asked:** the confirmation interstitial (fresh/no-matching-session
+click) reproduced exactly as the design predicted, before either the form or the fallthrough.
+**900s lifespan honoured** — decoded the mailed action-token JWT directly: `exp - iat = 900`
+exactly (`1785994754 - 1785993854`), and the mail text says "This link will expire within 15
+minutes," matching the explicit `lifespan=900` query param, not the realm's 12h default.
+
+**Recommended next step (NOT performed here, architect's call):** register `UPDATE_PASSWORD` as
+an enabled required action on the realm (one `kcadm create authentication/required-actions` call,
+reversible) and **re-run this exact test** before trusting §2 of the SEC-03 design either way. If
+the form then renders and the credential then rotates, the disjoint-code-path hypothesis is
+confirmed after all and the only gap was a missing one-line realm registration (not a design
+defect). If it still doesn't rotate even with the required action registered, the design is truly
+void and PR-01..07 stay parked pending the custom-SPI/core-patch reopen per §4.
+
+**Verification performed (real, driven, not inferred):** two independent execute-actions-email
+dispatches (different `client_id`), each mail captured from Mailpit's real API, each link driven
+by a real headless-Chromium Playwright context (fresh per step, never reused across a
+different check), `kcadm` credential/required-action state read before and after. Throwaway user
+`pr00-throwaway@dev.gaiada.invalid` deleted; `kcadm get users -q email=...` returned `[]`
+afterward. Four-project survival (`gaiada`, `gaiada-alertmanager`, `gaiada-automation`,
+`gaiada-otel-metrics`) reconfirmed post-session, `gaiada-platform-1` untouched at its
+pre-session `StartedAt`/healthy state; disk unchanged at 76%. No realm/flow config was changed.
+
 ### Retirement evidence — the `emailVerified:true` provisioner workaround CAN be retired in dev
 
 The verify-email user above is the proof: it was created with **no** `emailVerified:true` and no
