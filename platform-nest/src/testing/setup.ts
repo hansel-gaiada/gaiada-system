@@ -105,6 +105,22 @@ export async function initTestDb(): Promise<void> {
       DO $$ BEGIN
         CREATE ROLE ${APP_ROLE} LOGIN PASSWORD '${APP_PASSWORD}' NOSUPERUSER NOBYPASSRLS;
       EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+      -- SELF-HEAL the shared role's password, and do it UNCONDITIONALLY.
+      --
+      -- The CREATE above swallows duplicate_object, which means a role that already exists is left
+      -- exactly as it is — including with the WRONG password. ${APP_ROLE} is shared across every
+      -- suite and every concurrent session, so anything that ever ALTERs it (a stray repair, a
+      -- provisioning experiment, another agent's cleanup) silently breaks EVERY test file at once
+      -- with "password authentication failed" — 165 files in one observed run, which reads like a
+      -- catastrophic code regression rather than one bad role attribute. It has happened twice.
+      --
+      -- ALTER ROLE is idempotent and cheap, so re-asserting the intended attributes on every
+      -- initTestDb makes the harness self-healing: the next test run repairs the role instead of a
+      -- human diagnosing 165 red files. NOSUPERUSER/NOBYPASSRLS are re-asserted too, deliberately —
+      -- they are the properties the RLS suites depend on being TRUE, and a role quietly granted
+      -- BYPASSRLS would make every tenant-isolation test pass for the wrong reason, which is far
+      -- worse than a loud auth failure.
+      ALTER ROLE ${APP_ROLE} WITH LOGIN PASSWORD '${APP_PASSWORD}' NOSUPERUSER NOBYPASSRLS;
       GRANT USAGE ON SCHEMA public TO ${APP_ROLE};
       GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO ${APP_ROLE};
     `);
