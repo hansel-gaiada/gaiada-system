@@ -23,6 +23,52 @@ reconstructed from this table alone. Format defined in [`VERSIONING.md`](./VERSI
 > `01.012.0031a`. Per VERSIONING rule 5 `/VERSION` is authoritative; the `MODULES.md` line is now
 > corrected and should be moved with every cut.
 
+### `Alpha 01.020.0052a` — 2026-08-06 — the assurance ceiling closes; the agent-write surface goes live
+
+The release the `0047b` report deliberately left to the owner, because a cut here ships **four
+sessions' unreleased work**, not one. What it carries:
+
+- **mcp-hub `0.10.0` — verified assurance can be minted at all.** The headline. `mintPrincipal` had put
+  every envelope-derived principal at `low` and nothing minted `verified`, while
+  `approvals.resolveExecute` requires it — so D14's agent-write half, PM Phase-4 `J2`'s write half,
+  `ASST-23`, `D14-17` and Hermes' MCP authority were all the SAME gap. Three fail-closed conjuncts;
+  chat surfaces deliberately stay `low`; n8n is refused outright per the binding §A13 ruling.
+- **platform-nest `0.15.0`** — the IdP side of that vouching, plus **ASST-21** (agent roster + handoff)
+  from another session, which was unreleased at `0047b`.
+- **ai-agents `0.5.1`** — the runner presents the elevated token, carrying the triggering human's
+  envelope.
+- **infra `0.8.2`** — `HUB_ASSURANCE_TOKEN` passthrough to the four services that need it, plus the
+  earlier unreleased `HERMES_URL`/`HERMES_MODEL` wiring (`48a9aa7`) and the deployed-tag `.env` write
+  (`3960e88`).
+- **mail `0.0.17`** — MAIL-24/25/26 + MAIL-27's corpus hardening, already recorded before this cut.
+
+**Deployment note — three `.env` lines are required on the box for the Hermes half to do anything**
+(`HERMES_URL`, `HERMES_MODEL`, and appending `hermes` LAST to `LLM_CHAIN`). Until they are set the
+brain picker is an honest no-op: `chain.RunWithHint` only reorders a provider already in the chain and
+an unmatched hint falls through silently. `HUB_ASSURANCE_TOKEN` is likewise **optional and
+fail-closed** — unset, every `minAssurance:"verified"` tool denies exactly as it did before this
+release, which is safe but indistinguishable from a bug without checking
+`/admin/info`'s new `assuranceElevationConfigured` flag.
+
+Counter moves `0047 → 0052`: five module rows bumped since that cut (mail, mcp-hub, platform-nest,
+ai-agents, infra), so the revision letter resets to `a`.
+
+**Module manifest** (VERSIONING rule 2 — the exact set this build composes):
+
+| Module | Ver | | Module | Ver |
+|---|---|---|---|---|
+| platform-nest | `0.15.0` | | webdev | `0.11.0` |
+| platform-ui | `0.16.0` | | webdesk | `0.0.0` |
+| ai-gateway-go | `0.13.0` | | search-marketing | `0.5.1` |
+| mcp-hub | `0.10.0` | | social-media | `0.0.0` |
+| sync-engine-go | `0.7.0` | | creative | `0.1.0` |
+| automation (n8n) | `0.4.1` | | render-gateway-go | `0.0.0` |
+| observability | `0.6.0` | | reports | `0.3.1` |
+| infra | `0.8.2` | | report-renderer | `0.1.0` |
+| wa-chat-bot | `0.9.2` | | mail | `0.0.17` |
+| ai-agents | `0.5.1` | | hermes-gateway | `0.2.0` |
+| capture-helper | `0.2.0` | | | |
+
 ### `Alpha 01.019.0047b` — 2026-08-06 — re-cut: an unordered LIMIT 1 picked a different constraint on the box
 
 `0047a` never deployed. Every image built and signed, the new `.env` precheck passed (its first real
@@ -922,6 +968,25 @@ anywhere real.
 ---
 
 ## platform-nest
+### [0.15.0] — 2026-08-06 · IN PROGRESS (the IdP can now vouch; ASST-21 agent roster + handoff)
+- **The platform is one of two services entitled to mint `verified` hub principals** — it IS the IdP,
+  so it is the one caller whose "this envelope belongs to a session I authenticated" means something.
+  `core/hub-client.ts` presents `HUB_ASSURANCE_TOKEN` when configured; `hubConfigured()` now accepts
+  EITHER token so a deployment setting only the elevated one is not reported `not_configured`.
+- **The D14 agent re-drive needed no other change**: `approval-execute.ts`'s `resolveRedrivePrincipal`
+  already resolves the requester's own link `WHERE verified_at IS NOT NULL`, so the platform's
+  vouching conjunct holds by construction. The layered authorization above the floor is untouched —
+  Cerbos still decides, and `requested_by == principal.id` still means only the original requester may
+  resolve their own suspended call, never the approver.
+- **Corrected four load-bearing comments** that this makes wrong, since in this codebase they are the
+  design record: `approval-executables.ts` (the assurance blocker is GONE — the remaining one is the
+  empty `RERUN_CAPABLE_HIGH_WRITES`, so a `requires verified assurance` denial from there is now a real
+  misconfiguration, not the steady state), `modules/reports/index.ts` (still chat-unreachable, and
+  why), and both `modules/search` sites (still refused, but by an explicit line rather than by
+  impossibility).
+- (Earlier, unreleased at `0047b`: **ASST-21** — assistant agent roster + handoff with an
+  ADDITIVE-only transcript carve-out, `b9e0856`.)
+
 ### [0.14.1] — 2026-08-06 · IN PROGRESS (the loan approval path finally RUNS, and four things it found)
 
 `0.14.0` shipped employee loans with 19 pure arithmetic tests, `tsc`, both lint gates and a green
@@ -1805,6 +1870,37 @@ Verified: 939 unit tests pass, `tsc` clean, `next build` green. Not driven in a 
 - **Known risk:** docker build unverified. **Next:** verify container build, OpenBao creds, media DLP.
 
 ## mcp-hub
+### [0.10.0] — 2026-08-06 · PROTOTYPED (the assurance ceiling is closed — `verified` can finally be minted)
+- **NEW `elevateAssurance()` (`principal.ts`) — the ONLY path from `low` to `verified`.** Nothing in
+  the codebase had ever minted `verified`, so every `minAssurance: "verified"` tool was *statically*
+  unreachable. The consequence was much larger than the hub: D14-14's `approvals.resolveExecute`
+  carries that floor, so the entire **agent-write half of D14 was inert**, along with PM Phase-4 `J2`'s
+  write half, `ASST-23`, `D14-17`, and Hermes' own MCP authority — one gap seen from five directions.
+  Design: `docs/superpowers/plans/2026-08-06-assurance-minting-design.md`.
+- Three conjuncts, all required, all **fail-closed**, none client-controllable: (1) the request
+  authenticated with the new **`HUB_ASSURANCE_TOKEN`**, held only by platform-nest and ai-agents;
+  (2) the principal is **not** automation; (3) the platform independently vouches over
+  `POST /principal/resolve` (active, non-revoked user reached through a dual-proof-verified link).
+  Identity comes from the envelope; the AUTHORITY to call it verified comes from the caller — which is
+  what keeps this file's founding rule literally true, that **chat-surface envelopes can only ever mint
+  `low`**, even for a WhatsApp identity whose D4 link IS verified.
+- **`revocation.ts` now keeps the whole platform answer** instead of only `revoked`, and serves both
+  concerns from ONE cached round-trip. Not merely a load saving: two caches could disagree inside a
+  window, and the concerns fail in OPPOSITE directions (revocation open, elevation closed), so the
+  cached value must distinguish "the platform said no" from "the platform never answered". Hence the
+  explicit `{unavailable | resolved}` union — and `unavailable` is never cached.
+- **`/admin/info` reports `assuranceElevationConfigured`**, for the same reason the D14 grant flag is
+  there: absence fails closed, so an unset token looks exactly like "the D14 agent half is broken".
+- **Cerbos needed no policy edit** — `resource_mcp_tool.yaml` already gates on the *value*
+  `"verified"`. Deliberate: a policy change would have needed a Cerbos restart to take effect.
+- ⚠ **An n8n principal is refused the tier outright** (binding §A13 ruling — the assurance gate is THE
+  control keeping automation off money-spending `search.*` tools). Note the guarantee **changed
+  nature**: "low by construction" is no longer structural impossibility but an explicit refusal, a line
+  someone could delete. Pinned by `assurance.test.ts`; recorded at both `modules/search` sites.
+- 27 new tests (**206/206 green**), including elevation end-to-end over real HTTP through `/mcp`
+  against a fake platform — conjunct 1 lives in the auth branch, so only a real request proves the
+  wiring rather than the rule.
+
 ### [0.9.0] — 2026-07-27 · PROTOTYPED (readable decision audit + posture surface + tool attribution)
 - **NEW bearer-gated `GET /audit`** (`readRecentAudit` in `audit.ts`) — the READ side of the §8
   tool-call trail, newest-first. Every allow/deny decision with its reason was being appended to
@@ -1847,6 +1943,17 @@ Verified: 939 unit tests pass, `tsc` clean, `next build` green. Not driven in a 
 - **Next:** deploy to a real host; tune SLOs on prod traffic.
 
 ## infra
+### [0.8.2] — 2026-08-06 · PROTOTYPED (compose passthrough for the Hermes brain + the assurance token)
+- **`HUB_ASSURANCE_TOKEN` passed through to exactly four services** — `platform`, `agent-runner`,
+  `mcp-hub`, `mcp-hub-central` (optional/`:-`, so existing deployments are unaffected). Both halves are
+  required: set it on the callers but not the hub and their elevated requests authenticate as ordinary
+  `low` callers, with every agent write denying for a reason that reads like a code bug. Deliberately
+  NOT given to `bot` or n8n — that would lift the chat-surface ceiling the design rests on.
+- Documents the pairing in `.env.example` with the one warning that matters: it must be a **different
+  secret** from `HUB_SERVICE_TOKEN`, since sharing them hands the chat surfaces the elevated tier.
+- (Earlier, unreleased at `0047b`: `HERMES_URL`/`HERMES_MODEL` passthrough — `48a9aa7` — and writing
+  the deployed tag into the box's `.env` rather than only `.deployed-tag` — `3960e88`.)
+
 ### [0.8.1] — 2026-08-06 · PROTOTYPED (the .env has two consumers and they disagree)
 
 `alpha-01.018.0045a` built and signed all nine images, then LOST the deploy at the backup gate and
@@ -2269,6 +2376,14 @@ Built by a 4-agent parallel run against a frozen contract (`docs/superpowers/pla
 - **Blocked:** infra (OpenBao/Gemini/WAHA) + legal Gate 1 before real ingestion.
 
 ## ai-agents
+### [0.5.1] — 2026-08-06 · PROTOTYPED (entitled to mint verified principals)
+- Presents the new **`HUB_ASSURANCE_TOKEN`** on hub tool calls when set, falling back to
+  `HUB_SERVICE_TOKEN`. The runner is one of exactly two services entitled to elevate, because it
+  carries the **triggering human's** envelope and never an identity of its own. Without this the
+  agent-write half of D14 stays inert no matter what the hub supports (see `mcp-hub` `0.10.0`).
+  An unset value degrades to today's behaviour — the call is still made, and denied at the assurance
+  gate — rather than failing to call.
+
 ### [0.4.0] — 2026-07-24 · PROTOTYPED (agent-runner service + goal/run store + queue)
 - **Workstream B agent runtime e2e (design §3):** NEW `src/runner/service.ts` Fastify microservice (port 3006, AGENT_RUNNER_TOKEN auth, mirroring knowledge/service.ts patterns).
   `buildRunnerApp(deps)` factory for tests. Env: `GATEWAY_URL/GATEWAY_TOKEN`, `HUB_URL/HUB_SERVICE_TOKEN`, `AGENTS_DATABASE_URL` (runtime role), `MIGRATE_DATABASE_URL`

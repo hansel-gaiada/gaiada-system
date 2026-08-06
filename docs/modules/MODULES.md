@@ -23,7 +23,7 @@ version and add a `CHANGELOG.md` entry on every notable module change.
 
 ## App version
 
-**`Alpha 01.019.0047b`** â€” see [`VERSIONING.md`](./VERSIONING.md) for the format, and
+**`Alpha 01.020.0052a`** â€” see [`VERSIONING.md`](./VERSIONING.md) for the format, and
 
 [`/VERSION`](../../VERSION) for the machine-readable source. The app version composes the module
 versions below; the running build reports it at `GET /health`.
@@ -34,16 +34,16 @@ versions below; the running build reports it at `GET /health`.
 
 | Module | Ver | Status | Workstream | Since |
 |---|---|---|---|---|
-| platform-nest | `0.14.1` | IN PROGRESS | WS1 | 2026-08-06 |
+| platform-nest | `0.15.0` | IN PROGRESS | WS1 | 2026-08-06 |
 | platform-ui | `0.16.0` | IN PROGRESS | WS5 | 2026-08-05 |
 | ai-gateway-go | `0.13.0` | PROTOTYPED | WS3 | 2026-07 |
-| mcp-hub | `0.9.3` | PROTOTYPED | WS2 | 2026-08-03 |
+| mcp-hub | `0.10.0` | PROTOTYPED | WS2 | 2026-08-06 |
 | sync-engine-go | `0.7.0` | PROTOTYPED | WS1 | 2026-07 |
 | automation (n8n) | `0.4.1` | DEV-VERIFIED | WS4 | 2026-07 |
 | observability | `0.6.0` | DEV-VERIFIED | WS9 | 2026-07 |
-| infra | `0.8.1` | PROTOTYPED | WS10 | 2026-08-06 |
+| infra | `0.8.2` | PROTOTYPED | WS10 | 2026-08-06 |
 | wa-chat-bot | `0.9.2` | PROTOTYPED | WS5 | 2026-08-03 |
-| ai-agents | `0.5.0` | PROTOTYPED | WS8 | 2026-08-03 |
+| ai-agents | `0.5.1` | PROTOTYPED | WS8 | 2026-08-06 |
 | hermes-gateway | `0.2.0` | PROTOTYPED | WS3 | 2026-07 |
 | capture-helper | `0.2.0` | IN PROGRESS | WS11 | 2026-07 |
 | webdev | `0.11.0` | IN PROGRESS | Web Dev | 2026-08-04 |
