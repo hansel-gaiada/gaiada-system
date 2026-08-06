@@ -32,7 +32,89 @@ import {
   type AgentRun,
   type ApprovalConsumption,
   type Envelope,
+  type Impact,
 } from "./agent";
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+// T1 — the agent-side impact label is NOT the wire impact label. Translate at the filing boundary.
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+//
+// THE BUG THIS CLOSES: `fileApproval` used to forward `err.impact` to the hub's `approvals.request`
+// tool verbatim. For a suspended `high_write` that value is the literal string `"high_write"` (see
+// `agent.ts`'s write gate: `if (impact === "high_write") throw new ApprovalRequiredError(tool, impact,
+// ...)`), but BOTH downstream consumers only ever accepted `medium | high | unclassified`:
+//   - the hub tool's own JSON-schema enum for `approvals.request` (`mcp-hub/src/platform-write-tools.ts`)
+//   - the platform controller (`platform-nest/src/core/automation-approvals.controller.ts`'s `IMPACTS`
+//     set) and migration 0014's CHECK constraint on `automation_approvals.impact`
+// So the FIRST genuine `high_write` filing in the platform's history would 400 at the hub and the
+// agent goal would fail with no proposal ever appearing — never caught because every agent-side test
+// scripted `callTool` (the real schema was never exercised) and the D14-17 tests inserted approval
+// rows via raw SQL with `impact='high'` directly. See
+// docs/superpowers/plans/2026-08-06-t1-impact-vocabulary-report.md for the full writeup.
+//
+// THE WIRE VOCABULARY IS CORRECT AND SHARED WITH n8n — it is not widened here. The agent-side `Impact`
+// union (`agent.ts`) is the internal label; this is the one place it gets translated before it leaves
+// `ai-agents` on the wire.
+//
+// `ai-agents` and `platform-nest` are separate standalone projects, not a monorepo (see CLAUDE.md), so
+// the accepted wire set below is RESTATED rather than imported — the source of truth is
+// `platform-nest/src/core/automation-approvals.controller.ts`'s `IMPACTS = new Set(["medium", "high",
+// "unclassified"])` (mirrored by `mcp-hub/src/platform-write-tools.ts`'s `approvals.request` schema
+// enum). `write-agent.test.ts` pins this restated copy against that exact list so a future divergence
+// on either side fails a test here instead of a live 400.
+export type WireImpact = "medium" | "high" | "unclassified";
+
+/** The full accepted wire set, restated from `platform-nest`'s `IMPACTS` (see the header above) —
+ *  exported so a test can assert `toWireImpact`'s range never leaves this set. */
+export const WIRE_IMPACTS: readonly WireImpact[] = ["medium", "high", "unclassified"];
+
+/**
+ * Map `agent.ts`'s `Impact` label (as carried by `ApprovalRequiredError.impact`, typed `Impact |
+ * "unclassified"`) onto the wire vocabulary above. EXHAUSTIVE over every value the type permits, so a
+ * future variant added to `Impact` is a compile error here (`_exhaustive: never`) rather than a
+ * runtime 400 at the hub.
+ *
+ * Mapping, and why:
+ *
+ *  - "high_write" -> "high". The strictest agent-side write tier onto the wire's strictest tier.
+ *    `agent.ts`'s own D14-12 header already establishes that the hub treats "medium" | "high" |
+ *    undefined (unclassified-but-write) as equally confirm-required, stricter-wins in both directions
+ *    — "high" is the one wire label that keeps a `high_write` at least as strict as that equivalence
+ *    on the way out, and it is the exact severity `approvals.resolveExecute` (the D14-14 rerun-capable
+ *    transport) is itself registered at in `mcp-hub/src/platform-write-tools.ts` (impact:"high") — so a
+ *    rerun-capable high_write carries the same tier end to end, filing through to execution.
+ *
+ *  - "unclassified" -> "unclassified". Identical spelling on both sides; a straight pass-through kept
+ *    explicit (rather than folded into a default) so it is visibly covered by this exhaustiveness check.
+ *
+ *  - "low_write" and "read" -> THROW. Neither should ever reach here: `agent.ts`'s write gate only
+ *    throws `ApprovalRequiredError` when the EFFECTIVE impact is exactly `"high_write"` (see the `if
+ *    (impact === "high_write")` branch there) — a `low_write` runs unattended by design (that is what
+ *    makes it low), and a `read` tool has no write-impact opinion at all. There is also no wire tier
+ *    for "safe to auto-execute": the wire only has medium|high|unclassified, because a filed suspension
+ *    is by definition at least medium-severity. Mapping either onto "medium" would fabricate a severity
+ *    nobody assessed; a loud throw at the filing boundary is more honest than silently inventing one, or
+ *    than letting the hub reject a nonsensical filing with a 400 downstream.
+ */
+export function toWireImpact(impact: Impact | "unclassified"): WireImpact {
+  switch (impact) {
+    case "high_write":
+      return "high";
+    case "unclassified":
+      return "unclassified";
+    case "low_write":
+    case "read":
+      throw new Error(
+        `fileApproval: impact "${impact}" has no wire representation — an ApprovalRequiredError should ` +
+          `only ever carry "high_write" (agent.ts's write gate) or "unclassified"; this means something ` +
+          `constructed it outside that contract`,
+      );
+    default: {
+      const _exhaustive: never = impact;
+      throw new Error(`fileApproval: unmapped agent-side impact "${String(_exhaustive)}"`);
+    }
+  }
+}
 
 export function isWriteCapable(def: AgentDef): boolean {
   return Object.values(def.tools).some((impact) => impact !== "read");
@@ -69,6 +151,10 @@ export async function fileApproval(
   agentName: string,
   err: ApprovalRequiredError,
 ): Promise<FiledApproval> {
+  // T1 fix: translate the agent-side label to the wire vocabulary BEFORE it leaves this process — see
+  // `toWireImpact`'s header for the mapping and why. `err.impact` (e.g. "high_write") is never sent
+  // over the wire directly.
+  const wireImpact = toWireImpact(err.impact);
   const raw = await deps.callTool(
     "approvals.request",
     {
@@ -76,7 +162,7 @@ export async function fileApproval(
       workflowId: agentName, // the principal-side identifier of who was suspended
       toolName: err.tool,
       toolArgs: err.args,
-      impact: err.impact,
+      impact: wireImpact,
       reason: err.message,
       origin: "agent",
       agentName,
@@ -89,7 +175,7 @@ export async function fileApproval(
   } catch {
     /* hub returned a non-JSON body; leave id null — the approval may still have been recorded */
   }
-  return { approvalId, tool: err.tool, impact: String(err.impact) };
+  return { approvalId, tool: err.tool, impact: wireImpact };
 }
 
 /**
