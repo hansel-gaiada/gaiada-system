@@ -3619,6 +3619,43 @@ Built by a 4-agent parallel run against a frozen contract (`docs/superpowers/pla
   CR-01/06/13; QA gates CR-01/06/12/13/20.
 
 ## mail (continued)
+### [0.0.20] — 2026-08-06 · IN PROGRESS · MAIL-31 (senior-be) — the replay verifier now measures what it claims
+
+The audit table originally scoped here was **dropped**: the owner decided to stand up Tier-2 Loki, which
+makes the existing `logMagicLinkAudit` stdout lines durable and searchable — the same address, IP,
+outcome and timestamp the table would have stored. Building both would duplicate the facts and add a
+migration plus a prune mechanism for nothing. Nothing was written before the redirect; `migrations/`
+untouched at `0084`.
+
+What shipped is the verifier fix, which stands on its own:
+
+- **The false negative:** `replay-inbound.mjs` proved threading via one *aggregate* `mail_messages`
+  delta across a whole corpus run for a single reply token. Fixture `06-replayed-provider-id` is the
+  only one with a **fixed** `provider_message_id` (no `{{RUN}}` nonce) — deliberately, since its point
+  is that a second delivery lands zero rows. When 06 was the only token-referencing fixture in a run
+  and its id had already landed, the delta was *correctly* 0, and the script printed
+  `THREADING BROKEN` over correct behaviour.
+- **Why that mattered:** it is the exact mirror of the defect this thread began with, where the same
+  script reported `PASS` over a completely dead path (MAIL-29). Both are checks that do not measure
+  what they claim — one blind to failure, one blind to success.
+- **The fix** adds a dedicated per-message check for the duplicate fixture, independent of the
+  aggregate: query by `(provider, provider_message_id)` to prove a row genuinely exists (catching
+  "nothing landed"), then redeliver the identical payload and re-query to prove no second row appears
+  and the response is still 204 (catching "dedup itself is broken"). **Neither leg alone distinguishes
+  broken from correct; both are required.** Also extracted `signedHeaders()` so the redelivery is
+  freshly signed — a reused signature would fall outside `MAIL_INBOUND_SIGNATURE_TOLERANCE_S`.
+- **MAIL-29's aggregate check is untouched in strength** — it still governs every non-duplicate
+  fixture, and it still fires in the negative demonstration.
+- **Proven both directions with real ingredients.** New permanent `replay-inbound-mail31.e2e.test.ts`
+  boots a real listening NestJS instance against the disposable test Postgres and shells out to the
+  actual script. Negative direction was demonstrated by editing `intake.ts`'s INSERT to
+  `SELECT ... WHERE false` — a genuine zero-row write rather than a faked return value — clearing the
+  transform cache and re-running fresh: both `THREADING BROKEN` and the new dedup failure fired, exit 1.
+  Reverted, `git diff` byte-identical, harness green again.
+- Evidence: `src/mail` **177/177 across 22 files**; `tsc` clean; both lints OK; `rls.test.ts` unmodified
+  and green; `mail24-timing-remeasure` ratio **1.27** (inside the 1.8 bound), confirming nothing here
+  regressed the enumeration property.
+
 ### [0.0.18] — 2026-08-06 · IN PROGRESS · MAIL-29 (senior-be) — inbound threading was dead in production, and the corpus could not have known
 
 - **The bug:** `extractAngleAddress()` in `inbound/brevo-payload.ts` lowercased the *entire* recipient

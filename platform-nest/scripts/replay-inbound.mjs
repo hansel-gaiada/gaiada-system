@@ -82,6 +82,23 @@ function parseArgs(argv) {
 const EXPECTED = { "07-oversized-body.json": 204 };
 const DEFAULT_EXPECTED = 204;
 
+// MAIL-31 — the one fixture in the corpus whose whole point is a deliberately FIXED
+// `provider_message_id` (06's `_meta`: "the second post writes nothing... replay across runs is the
+// point"). Named explicitly, the same way `corpus.test.ts` already hardcodes it by filename — this
+// corpus is small and versioned, not a place to infer "which fixture is the duplicate one" from a
+// heuristic that could silently stop matching if the fixture is edited.
+const DUPLICATE_FIXTURE = "06-replayed-provider-id.json";
+
+function signedHeaders(args, payload) {
+  const headers = { "content-type": "application/json", [TOKEN_HEADER]: args.token };
+  if (args.signingKey) {
+    const t = Math.floor(Date.now() / 1000);
+    const mac = createHmac("sha256", args.signingKey).update(`${t}.`).update(Buffer.from(payload, "utf8")).digest("hex");
+    headers[SIGNATURE_HEADER] = `t=${t},v1=${mac}`;
+  }
+  return headers;
+}
+
 function substitute(text, args, run) {
   return text
     .replace(/\{\{TOKEN\}\}/g, args.replyToken || "REPLAY-NO-LIVE-TOKEN")
@@ -143,11 +160,30 @@ async function main() {
   // (e.g. `--only 04-absent-token.json`) — in that case there is nothing for the DB check to prove,
   // so it should not fail a run that legitimately never attempted to thread anything.
   let anyTokenFixturePosted = false;
+  // MAIL-31 — same idea, EXCLUDING the duplicate fixture. This is what gates the aggregate
+  // "some new row must have landed somewhere in the whole run" check below: that check cannot tell
+  // fixture 06's CORRECT zero-contribution (already deduped) apart from a genuinely broken pipeline
+  // when 06 is the only token fixture in the run (e.g. `--only 06-replayed-provider-id.json` on a
+  // second invocation, once the fixed provider_message_id has already landed once). `06`'s OWN
+  // correctness is proven separately and more precisely below (`duplicateCheck`), keyed off its
+  // specific `provider_message_id` rather than an aggregate delta over the whole corpus — so this
+  // flag narrows the aggregate check to what it can actually prove, without weakening it for every
+  // OTHER threading fixture (which still uses a per-run `{{RUN}}` nonce and is still expected to
+  // contribute a genuinely NEW row on every invocation).
+  let anyNonDuplicateTokenFixturePosted = false;
+  // MAIL-31 — dedicated dedup proof for the duplicate fixture, independent of the aggregate delta
+  // above. Populated only when DB verification is actually available (same gate as the aggregate
+  // check) and the duplicate fixture is part of this run. `null` means "not applicable" (fixture not
+  // run, or no DB access) — NOT "verified"; only `{ok:true}` is a pass.
+  let duplicateCheck = null;
 
   const results = [];
   for (const name of names) {
     const rawText = readFileSync(join(FIXTURE_DIR, name), "utf8");
-    if (rawText.includes("{{TOKEN}}") || rawText.includes("{{TOKEN_B}}")) anyTokenFixturePosted = true;
+    if (rawText.includes("{{TOKEN}}") || rawText.includes("{{TOKEN_B}}")) {
+      anyTokenFixturePosted = true;
+      if (name !== DUPLICATE_FIXTURE) anyNonDuplicateTokenFixturePosted = true;
+    }
     const doc = JSON.parse(substitute(rawText, args, run));
     const meta = doc._meta ?? {};
     delete doc._meta;
@@ -157,12 +193,7 @@ async function main() {
       }
     }
     const payload = JSON.stringify(doc);
-    const headers = { "content-type": "application/json", [TOKEN_HEADER]: args.token };
-    if (args.signingKey) {
-      const t = Math.floor(Date.now() / 1000);
-      const mac = createHmac("sha256", args.signingKey).update(`${t}.`).update(Buffer.from(payload, "utf8")).digest("hex");
-      headers[SIGNATURE_HEADER] = `t=${t},v1=${mac}`;
-    }
+    const headers = signedHeaders(args, payload);
 
     let status = 0;
     let error = null;
@@ -175,6 +206,59 @@ async function main() {
     const expected = EXPECTED[name] ?? DEFAULT_EXPECTED;
     const threadingCase = payload.includes("REPLAY-NO-LIVE-TOKEN");
     results.push({ name, status, expected, ok: status === expected, error, title: meta.title, note: threadingCase ? "no live reply token supplied — resolves to the A9 unmatched path, NOT threading" : null });
+
+    // MAIL-31 — the duplicate fixture's whole point is a FIXED `provider_message_id` (the corpus
+    // loop above already posted it once, just like every other fixture). What proves "correctly
+    // deduped" rather than "silently dropped" is NOT "delta was zero" (zero is what a dead pipeline
+    // also produces) — it is (a) a row for this exact provider_message_id genuinely exists, and
+    // (b) posting the IDENTICAL payload a second time, right now, creates no second row. Both legs
+    // are required; neither alone distinguishes "broken" from "correct".
+    if (name === DUPLICATE_FIXTURE && dbCheck && dbCheck.client) {
+      const providerMessageId = doc.items?.[0]?.MessageId ?? null;
+      if (!providerMessageId) {
+        duplicateCheck = { ok: false, reason: "fixture 06 has no items[0].MessageId to key the dedup check on — fixture may have drifted from its documented shape" };
+      } else {
+        const selectSql = `SELECT id FROM mail_messages WHERE provider = 'brevo-inbound' AND provider_message_id = $1`;
+        const firstRows = (await dbCheck.client.query(selectSql, [providerMessageId])).rows;
+        if (firstRows.length === 0) {
+          duplicateCheck = {
+            ok: false,
+            reason: `no mail_messages row exists for provider_message_id=${JSON.stringify(providerMessageId)} after posting fixture 06 — this is the genuinely-broken case (nothing landed), not a correct dedupe`,
+          };
+        } else if (firstRows.length > 1) {
+          duplicateCheck = {
+            ok: false,
+            reason: `${firstRows.length} mail_messages rows share provider_message_id=${JSON.stringify(providerMessageId)} — the UNIQUE(provider, provider_message_id) index did not dedupe`,
+          };
+        } else {
+          const firstRowId = firstRows[0].id;
+          // The explicit redelivery: same bytes, freshly signed (the signature's timestamp tolerance
+          // means reusing the first post's `headers` would either replay a stale signature or, once
+          // outside tolerance, wrongly fail auth rather than exercise dedup).
+          const redeliveryHeaders = signedHeaders(args, payload);
+          let redeliveryStatus = 0;
+          try {
+            const res = await fetch(url, { method: "POST", headers: redeliveryHeaders, body: payload });
+            redeliveryStatus = res.status;
+          } catch (err) {
+            duplicateCheck = { ok: false, reason: `redelivery POST for fixture 06 threw: ${err instanceof Error ? err.message : String(err)}` };
+          }
+          if (!duplicateCheck) {
+            const secondRows = (await dbCheck.client.query(selectSql, [providerMessageId])).rows;
+            if (secondRows.length !== 1 || secondRows[0].id !== firstRowId) {
+              duplicateCheck = {
+                ok: false,
+                reason: `redelivering the identical fixture 06 payload changed the row set for provider_message_id=${JSON.stringify(providerMessageId)} (was 1 row [${firstRowId}], now ${secondRows.length} row(s) [${secondRows.map((r) => r.id).join(",")}]) — dedup broken`,
+              };
+            } else if (redeliveryStatus !== 204) {
+              duplicateCheck = { ok: false, reason: `redelivery of fixture 06 returned ${redeliveryStatus}, expected 204 (a re-delivered duplicate must still 204, not error)` };
+            } else {
+              duplicateCheck = { ok: true, providerMessageId, rowId: firstRowId };
+            }
+          }
+        }
+      }
+    }
   }
 
   // Re-query AFTER the corpus ran, and turn the before/after delta into the actual proof.
@@ -197,7 +281,7 @@ async function main() {
   }
 
   if (args.json) {
-    console.log(JSON.stringify({ url, run, results, dbCheck: dbCheck ? { error: dbCheck.error, mailLogId: dbCheck.mailLogId, before: dbCheck.before, delta: dbCheck.delta, rows: dbCheck.rows, verified: dbVerified } : null }, null, 2));
+    console.log(JSON.stringify({ url, run, results, dbCheck: dbCheck ? { error: dbCheck.error, mailLogId: dbCheck.mailLogId, before: dbCheck.before, delta: dbCheck.delta, rows: dbCheck.rows, verified: dbVerified } : null, duplicateCheck }, null, 2));
   } else {
     console.log(`\nmail:replay-inbound -> ${url}   (run=${run})\n`);
     for (const r of results) {
@@ -233,12 +317,33 @@ async function main() {
       for (const row of dbCheck.rows) {
         console.log(`    id=${row.id} entity_type=${row.entity_type} entity_id=${row.entity_id} from_email=${row.from_email} subject=${JSON.stringify(row.subject)}`);
       }
-    } else if (dbCheck) {
+    } else if (anyNonDuplicateTokenFixturePosted && dbCheck) {
       console.log(
         "\n  THREADING BROKEN: a --reply-token was supplied and every threading case returned 204, but\n" +
         `  zero new mail_messages rows landed on mail_log ${dbCheck.mailLogId}. A 204 is not a pass —\n` +
         "  this is exactly the failure mode MAIL-29 shipped with undetected. Treating this run as FAILED.\n",
       );
+    } else if (dbCheck) {
+      // MAIL-31 — every token fixture actually posted in THIS run was the duplicate fixture, whose
+      // own correct behaviour IS a zero delta (already deduped). The aggregate delta above has
+      // nothing to say either way here — see `duplicateCheck` below for the real proof.
+      console.log(
+        "\n  Aggregate delta was zero, but the only token fixture in this run was the duplicate-provider-\n" +
+        "  message-id fixture (06) — a zero delta is its CORRECT outcome, not evidence of breakage. See\n" +
+        "  the dedicated duplicate-fixture check below for the real proof.\n",
+      );
+    }
+    if (duplicateCheck) {
+      if (duplicateCheck.ok) {
+        console.log(
+          `\n  DUPLICATE-FIXTURE DEDUP VERIFIED: provider_message_id=${JSON.stringify(duplicateCheck.providerMessageId)} ` +
+          `resolves to exactly ONE mail_messages row (${duplicateCheck.rowId}), and posting the IDENTICAL\n` +
+          "  payload again just now created no second row (still 204). This is the direct, per-message proof\n" +
+          "  that fixture 06's zero-contribution to any aggregate delta is a correct dedupe, not a dead path.\n",
+        );
+      } else {
+        console.log(`\n  DUPLICATE-FIXTURE CHECK FAILED: ${duplicateCheck.reason}\n`);
+      }
     }
     if (args.replyToken) {
       console.log(
@@ -251,9 +356,16 @@ async function main() {
       );
     }
   }
-  const threadingFailed = anyTokenFixturePosted &&
-    (Boolean(dbCheck && dbCheck.error) || Boolean(dbCheck && !dbCheck.error && !dbVerified));
-  process.exit(results.some((r) => !r.ok) || threadingFailed ? 1 : 0);
+  // MAIL-31 — a config/connectivity error (bad --reply-token, no --database-url) still fails the
+  // run whenever ANY token fixture posted, duplicate included: nothing could be verified either
+  // way. The "delta stayed at zero" branch, in contrast, only fails when a NON-duplicate token
+  // fixture was posted — for the duplicate fixture alone, zero is correct, and its own correctness
+  // is proven independently by `duplicateCheckFailed` below.
+  const configFailed = anyTokenFixturePosted && Boolean(dbCheck && dbCheck.error);
+  const aggregateFailed = anyNonDuplicateTokenFixturePosted && Boolean(dbCheck && !dbCheck.error && !dbVerified);
+  const threadingFailed = configFailed || aggregateFailed;
+  const duplicateCheckFailed = Boolean(duplicateCheck && duplicateCheck.ok === false);
+  process.exit(results.some((r) => !r.ok) || threadingFailed || duplicateCheckFailed ? 1 : 0);
 }
 
 main().catch((err) => {
