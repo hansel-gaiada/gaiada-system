@@ -137,4 +137,30 @@ export async function teardownTestDb(): Promise<void> {
   await closePool().catch(() => {});
   await admin?.end().catch(() => {});
   admin = null;
+
+  // Actually drop the physical database initTestDb created — this is the fix for the
+  // per-file-database leak (615 abandoned databases once exhausted Docker's 64MB /dev/shm).
+  // `admin` (just closed above) was connected to `dbName` itself, and Postgres refuses to
+  // DROP DATABASE on the database a session is connected to — so the drop CANNOT run over
+  // `admin`; it needs its own maintenance connection to whatever database TEST_URL names
+  // (normally `postgres`), exactly mirroring the CREATE/DROP pairing in initTestDb above.
+  // `WITH (FORCE)` (PG13+; confirmed running 17.10 here) terminates any straggling backends —
+  // safe for the same reason it's safe in initTestDb: dbName is unique to this file, so FORCE
+  // can never disconnect a different suite's database.
+  //
+  // Guarded end-to-end so a teardown hiccup never fails an otherwise-passing suite: no-op if
+  // TEST_URL was never set, `IF EXISTS` makes a second teardown call (or a setup that failed
+  // before creating anything) a no-op, and the query itself is wrapped so any error is
+  // swallowed rather than thrown — matching the `.catch(() => {})` swallowing already used
+  // for closePool/admin.end above.
+  if (!TEST_URL) return;
+  const dbName = perFileDbName();
+  const maintenance = new Pool({ connectionString: TEST_URL, max: 1 });
+  try {
+    await maintenance.query(`DROP DATABASE IF EXISTS ${dbName} WITH (FORCE)`);
+  } catch {
+    // best-effort cleanup only — never fail the suite over a teardown hiccup
+  } finally {
+    await maintenance.end().catch(() => {});
+  }
 }

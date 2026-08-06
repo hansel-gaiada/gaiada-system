@@ -1976,6 +1976,38 @@ Alertmanager was already running with 3 valid receivers.
 - **Next:** deploy to a real host; tune SLOs on prod traffic.
 
 ## infra
+### [0.8.3] — 2026-08-06 · PROTOTYPED (INFRA-01 — the test-database leak, fixed at the root)
+
+`teardownTestDb()` in `platform-nest/src/testing/setup.ts` closed its pools and **never dropped the
+database**, so every test file leaked one permanently. That is the root cause of the incident where
+**615 abandoned databases exhausted Docker's 64MB `/dev/shm`** and made every suite fail with a
+misleading "No space left on device" while disk had 826GB free. A full run is ~210 files, so one
+unmitigated run added ~210 databases; several sessions running suites concurrently is how the
+threshold was reached. For two days the workaround was to tell each agent individually to use a
+distinct `TEST_DB_PREFIX` and drop its own databases — N repetitions of a manual step for a
+three-line defect.
+
+- **The constraint that made the original code unfixable in place:** `admin` is a pool connected to
+  the test database *itself*, and Postgres refuses `DROP DATABASE` from a session connected to it. The
+  drop therefore needs a **fresh maintenance connection** to `TEST_URL` (i.e. `postgres`), mirroring
+  the CREATE side of `initTestDb`. Order: close app pool → close `admin` → open maintenance → `DROP
+  DATABASE IF EXISTS ... WITH (FORCE)` → end maintenance.
+- `WITH (FORCE)` is required because plain `DROP` fails while any connection lingers — precisely the
+  situation at teardown. Needs PG13+; the live test instance is **PostgreSQL 17.10**, confirmed.
+- Wrapped in try/catch/finally so **a teardown hiccup can never fail an otherwise-passing suite**,
+  matching the file's existing `.catch(() => {})` idiom.
+- Recomputes the deterministic database name independently of `admin`'s state, so it is a no-op when
+  teardown runs twice or setup failed partway — and now also cleans up when a database was created
+  but `initTestDb` threw afterwards.
+- **Verified:** all 162 `teardownTestDb` call sites checked for post-teardown database access (the 15
+  where `adminPool()` co-occurs were read individually) — none rely on it. Three suites (DB-heavy,
+  DB-moderate, no-DB) run twice each plus once together under `fileParallelism: false`; scoped
+  database counts return to zero every time, no flakiness, no timing regression. `tsc` clean.
+- The pre-existing orphan backlog was deliberately **not** mass-dropped (some belonged to other
+  sessions' in-flight runs). It now sits at **1**. Count orphans with
+  `datistemplate=false and datname<>'postgres'` — **not** `datname like 'test_%'`, which matches
+  nothing and reported "0 orphans" for hours while ~565 existed.
+
 ### [0.8.2] — 2026-08-06 · PROTOTYPED (compose passthrough for the Hermes brain + the assurance token)
 - **`HUB_ASSURANCE_TOKEN` passed through to exactly four services** — `platform`, `agent-runner`,
   `mcp-hub`, `mcp-hub-central` (optional/`:-`, so existing deployments are unaffected). Both halves are
