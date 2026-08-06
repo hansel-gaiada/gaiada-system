@@ -79,6 +79,29 @@
 // metric-only, never surfaced in the response, which stays the one generic `MagicLinkConsumeError`
 // for all three (unchanged from M11/MAIL-10; re-pinned by `qa-mail11-adversarial.test.ts` and
 // `controller.test.ts`, both left untouched).
+//
+// ── MAIL-35 — the forensic layer above answered "from what IP", not "against whom" ─────────────
+// Loki went live (OBS-02) and immediately exposed the gap MAIL-26 flagged but didn't close: every
+// `logMagicLinkAudit` line below was missing the one field that turns "a probing run happened" into
+// "these addresses were probed" — the submitted/resolved email. Fixed per-branch, honestly, not by
+// blanket-adding a field that would be empty on the one branch that truly has nothing to log:
+//  - `mint.rate_limited` / `mint.unknown_address` — the caller-submitted address is always known
+//    (it's a function argument), so both now carry `email`.
+//  - `consume.rejected` reason=`expired`|`replayed` — the token resolves to a real `auth_magic_links`
+//    row (that's the whole reason those two reasons exist), so its `email` column (NOT NULL,
+//    0080_auth_magic_links.sql) is recovered in the SAME classification read `consumeMagicLink`
+//    already runs (one extra output column, zero extra round trips — see below) and logged.
+//  - `consume.rejected` reason=`unknown` (empty token OR a token_hash matching no row at all) — there
+//    is genuinely no address to attribute the attempt to. This logs `addressKnown: false` instead of
+//    an `email` field holding `null`/`""`, so the line is honest about "nothing to look up" rather
+//    than reading like "we looked and found nothing".
+// Also added: the source IP on `consume.rejected` (all three reasons), resolved through
+// `controller.ts`'s trusted-proxy-aware `clientIp()` the same as mint already was — it was already
+// being threaded into `consumeMagicLink`'s `input.ip` (for the `consumed_ip` column) but never
+// logged, so the forensic join previously depended on a ~120ms correlation with a separate Fastify
+// access-log line. None of this touches the HTTP response (still byte-identical across all three
+// rejection classes — `controller.test.ts`/`qa-mail11-adversarial.test.ts` re-pin that unmodified)
+// or the raw token invariant (still never logged — see `logMagicLinkAudit`'s own doc comment below).
 import type { PoolClient } from "pg";
 import { config } from "../../config";
 import { newId, withGlobal, withMailContext } from "../../db";
@@ -120,8 +143,10 @@ export class MagicLinkConsumeError extends Error {
 
 function logMagicLinkAudit(event: string, detail: Record<string, unknown>): void {
   // Structured, token-free by construction: every call site below passes only ids (`userId`,
-  // `linkId`, `mailLogId`) — never `rawToken`/`tokenHash`. `auditDecision`'s "logged by caller"
-  // precedent (see this file's header) is what this line implements.
+  // `linkId`, `mailLogId`), the normalized `email` (MAIL-35 — the address a mint/consume attempt
+  // targeted, when it is honestly knowable; see this file's MAIL-35 header comment), and `ip` —
+  // never `rawToken`/`tokenHash`. `auditDecision`'s "logged by caller" precedent (see this file's
+  // header) is what this line implements.
   // eslint-disable-next-line no-console
   console.log(`[magic-link:audit] ${event}`, JSON.stringify(detail));
 }
@@ -241,7 +266,8 @@ export async function requestMagicLink(input: RequestMagicLinkInput): Promise<Re
     if (!addrDecision.allowed) recordMagicLinkRateLimited("address");
     if (!ipDecision.allowed) recordMagicLinkRateLimited("ip");
     await dummyEquivalentWork();
-    logMagicLinkAudit("mint.rate_limited", { ip });
+    // `email` is the caller-submitted address — always known here (MAIL-35).
+    logMagicLinkAudit("mint.rate_limited", { ip, email });
     return { status: "accepted" };
   }
 
@@ -254,7 +280,9 @@ export async function requestMagicLink(input: RequestMagicLinkInput): Promise<Re
   const userId = found.rows[0]?.id ?? null;
   if (!userId) {
     await dummyEquivalentWork();
-    logMagicLinkAudit("mint.unknown_address", {});
+    // `email` is the caller-submitted address — always known here even though no user matched it
+    // (MAIL-35). Internal log only — the 202 response stays byte-identical to the known-address case.
+    logMagicLinkAudit("mint.unknown_address", { email });
     return { status: "accepted" };
   }
 
@@ -369,13 +397,19 @@ export interface ConsumedMagicLink {
  *  narrower and deliberately weaker claim than "distinguishable in the response", which stays false. */
 export async function consumeMagicLink(input: ConsumeMagicLinkInput): Promise<ConsumedMagicLink> {
   if (!config.mail.magicLinksEnabled) throw new MagicLinkNotEnabledError();
+  // `ip` is ONLY for the audit log line (MAIL-35) — resolved by the controller's trusted-proxy-aware
+  // `clientIp()` before it ever reaches here, same as `requestMagicLink`'s own `ip` fallback
+  // convention below. The DB write further down keeps using `input.ip || null` (never the string
+  // "unknown") so `consumed_ip` stays a true NULL, not a literal, when the caller has no IP.
+  const ip = input.ip || "unknown";
   const raw = input.token ?? "";
   if (!raw) {
     // Empty-token probe: no DB round trip possible (nothing to look up), but it is still a
     // rejected consume and worth the same "unknown" signal as a garbage token that DOES reach the
-    // query below — see the MAIL-26 header comment above.
+    // query below — see the MAIL-26 header comment above. `addressKnown: false` (MAIL-35): there is
+    // genuinely no address to attribute this attempt to — no field logged in place of one.
     recordMagicLinkConsumeRejected("unknown");
-    logMagicLinkAudit("consume.rejected", { reason: "unknown" });
+    logMagicLinkAudit("consume.rejected", { reason: "unknown", ip, addressKnown: false });
     throw new MagicLinkConsumeError();
   }
   const tokenHash = hashToken(raw);
@@ -399,6 +433,7 @@ export async function consumeMagicLink(input: ConsumeMagicLinkInput): Promise<Co
       claimed_user_id: string | null;
       found_consumed_at: string | null;
       found_expires_at: string | null;
+      found_email: string | null;
     }>(
       `WITH claimed AS (
          UPDATE auth_magic_links
@@ -406,13 +441,14 @@ export async function consumeMagicLink(input: ConsumeMagicLinkInput): Promise<Co
           WHERE token_hash = $1 AND consumed_at IS NULL AND expires_at > now()
          RETURNING id, user_id
        ), found AS (
-         SELECT consumed_at, expires_at FROM auth_magic_links WHERE token_hash = $1
+         SELECT consumed_at, expires_at, email FROM auth_magic_links WHERE token_hash = $1
        )
        SELECT
          (SELECT id FROM claimed) AS claimed_id,
          (SELECT user_id FROM claimed) AS claimed_user_id,
          (SELECT consumed_at FROM found) AS found_consumed_at,
-         (SELECT expires_at FROM found) AS found_expires_at`,
+         (SELECT expires_at FROM found) AS found_expires_at,
+         (SELECT email FROM found) AS found_email`,
       [tokenHash, input.ip || null],
     ),
   );
@@ -422,14 +458,25 @@ export async function consumeMagicLink(input: ConsumeMagicLinkInput): Promise<Co
     // stays the single generic `MagicLinkConsumeError` below for all three reasons (re-pinned by
     // `qa-mail11-adversarial.test.ts`'s log-leak sweep and `controller.test.ts`'s body-shape
     // assertion). `found_expires_at` is only non-null when a row exists (the column is NOT NULL in
-    // the schema), so: already-consumed beats expired beats "no row at all".
+    // the schema), so: already-consumed beats expired beats "no row at all". `found_email` rides
+    // the SAME `found` CTE/round-trip added by MAIL-26 (not a new query) — MAIL-35 just also
+    // selects it, so the reject path's cost shape is unchanged from what MAIL-24 already measured.
     const reason: "unknown" | "expired" | "replayed" = row.found_consumed_at
       ? "replayed"
       : row.found_expires_at
         ? "expired"
         : "unknown";
     recordMagicLinkConsumeRejected(reason);
-    logMagicLinkAudit("consume.rejected", { reason });
+    if (reason === "unknown") {
+      // No `auth_magic_links` row matched this token hash at all (MAIL-35) — genuinely no address
+      // to attribute the attempt to. `addressKnown: false`, never an `email` field holding null.
+      logMagicLinkAudit("consume.rejected", { reason, ip, addressKnown: false });
+    } else {
+      // `expired`/`replayed` both require a real row to exist (that's what set `found_consumed_at`
+      // or `found_expires_at`), and `email` is NOT NULL on that row (0080_auth_magic_links.sql) —
+      // so `found_email` is guaranteed non-null here; the cast documents that guarantee to TS.
+      logMagicLinkAudit("consume.rejected", { reason, ip, email: row.found_email as string });
+    }
     throw new MagicLinkConsumeError();
   }
   // `claimed_id` truthy here guarantees `claimed_user_id` is too — they come from the same
