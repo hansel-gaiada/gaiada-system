@@ -162,6 +162,125 @@ mistake as fixed from config inspection alone (the execution already reads REQUI
 Throwaway user deleted and confirmed absent (`kcadm get users -q email=...` returned `[]`) after
 the test; no realm/flow config was modified.
 
+### SEC-02 (2026-08-06, senior-integrator) — root-caused: a documented Keycloak core interaction,
+### not a realm-config defect. No fix applied; flagged for the architect.
+
+Ticket: make the reset email actually rotate the password. Guardrail was to work through SEC-01's
+four hypotheses in order and **stop with a precise diagnosis** rather than ship an unverified
+change to a live auth flow. Realm exported first (rollback point, see below); worked entirely
+against a second throwaway user (`sec02-throwaway@dev.gaiada.invalid`), created and deleted via
+`kcadm.sh`; mail captured through the same Mailpit API route as SEC-01 (the SSH session to
+`gda-aicenter` itself *is* the tunnel — Mailpit is loopback-only on the box).
+
+**Realm export (rollback point):** `~/gaiada-realm-backups/gaiada-realm-export-20260806-030015.json`
+on `gda-aicenter` (74,678 bytes; `kcadm.sh create realms/gaiada/partial-export -q
+exportClients=true -q exportGroupsAndRoles=true`). No realm/flow config was changed this session,
+so this export was never needed as a rollback — it exists purely as the required checkpoint.
+
+**Hypothesis 1 (wrong nesting level) — RULED OUT.** The partial export's
+`authenticationFlows[].authenticationExecutions[]` array is unambiguous: `reset-password`
+(priority 30, `requirement: REQUIRED`) sits directly under the **top-level** `reset credentials`
+flow, as a sibling of `reset-credentials-choose-user` (10) and `reset-credential-email` (20), with
+only the OTP step (priority 40) wrapped in a `CONDITIONAL` subflow reference. No ALTERNATIVE/
+DISABLED parent is swallowing it.
+
+**Hypothesis 2 (wrong flow bound) — RULED OUT.** The realm's `resetCredentialsFlow` attribute is
+literally `"reset credentials"`, and the export contains exactly one `topLevel: true` flow with
+that alias (`id 9dc059a9-...`). No duplicate/similarly-named flow exists to be shadowing it.
+
+**Hypothesis 3 (link/token-type artefact) — RULED OUT, and more precisely than SEC-01 could show.**
+Decoded the actual action-token JWT from a captured mail: `typ: "reset-credentials"`, correct
+`azp` (`account-console` / `gaiada-ui` per client), and an `asid` claim that ties the token back to
+the *specific authentication session* created when the reset was requested. That raised a sharper
+version of hypothesis 3: is the short-circuit an artefact of the **requesting** browser's session
+(e.g. some stale continuity), rather than the link itself? Tested directly — clicked the emailed
+link in a **brand-new, cookie-less Playwright browser context** that never touched the requesting
+session (confirmed zero relevant cookies beforehand: only session-tracking `AUTH_SESSION_ID`/
+`KC_RESTART`, no identity cookie). **Identical result:** "Your account has been updated," zero
+`<input type=password>` fields, under both `account-console` and `gaiada-ui`. The action token
+carries the session reference in its own signed payload (`asid`), so Keycloak resumes that
+server-side auth session regardless of which device/browser redeems it — by design, the same way
+every mailed action link works. This rules out "browser artefact" as the mechanism; the
+short-circuit is intrinsic to the flow/token processing itself, not to session continuity.
+
+**Hypothesis 4, confirmed — but more precisely than "the authenticator short-circuits."** Pulled the
+actual Keycloak 26.0.8 source (the exact tag running in `quay.io/keycloak/keycloak:26.0`) for the
+two classes in the completion path:
+
+- `org.keycloak.authentication.authenticators.resetcred.ResetPassword#authenticate()` — confirmed
+  it does the *correct* thing for our config: since the execution `isRequired()`, it calls
+  `context.getAuthenticationSession().addRequiredAction(UserModel.RequiredAction.UPDATE_PASSWORD)`
+  before `context.success()`. **The authenticator is not silently skipping anything** — it queues
+  `UPDATE_PASSWORD`, just onto the *authentication session*, not onto the persisted `UserModel`
+  (which is exactly why `kcadm get users/<id> --fields requiredActions` keeps reading `[]`
+  throughout — that field only ever reflected the persisted side).
+- `org.keycloak.authentication.actiontoken.resetcred.ResetCredentialsActionTokenHandler` — the
+  action-token handler that runs the flow to completion calls a custom
+  `ResetCredsAuthenticationProcessor` subclass whose `authenticationComplete()` falls through to
+  the base `AuthenticationProcessor#authenticationComplete()` → `nextRequiredAction()` →
+  `AuthenticationManager.nextRequiredAction(...)`, which is supposed to notice the queued
+  session-level `UPDATE_PASSWORD` and redirect into its challenge form before finishing.
+
+That last hop is a **documented, still-open upstream Keycloak behavior**, not something expressible
+in our realm JSON: [keycloak/keycloak#16527](https://github.com/keycloak/keycloak/discussions/16527)
+traces the exact same symptom (a `ResetPassword`-queued session-level required action getting lost
+relative to user-level ones in this same action-token completion path) to
+`AuthenticationManager.nextRequiredAction` not applying the same priority-sort to session-level
+required actions that it applies to user-level ones — confirmed by the thread's own author needing
+to **patch Keycloak's Java source** to fix it, then settling instead on **writing a custom
+authenticator** to replace `reset-password` outright ("the simplest solution is the best solution").
+Two upstream-proven fixes exist, and both are code changes to Keycloak itself, not realm config:
+patching `AuthenticationManager` core-wide (blast radius: every required-action resolution on the
+realm, not just password reset), or shipping a custom SPI authenticator to replace the
+`reset-password` provider in our flow (narrower, but still a Java provider that has to be built
+into and mounted in the Keycloak image — no build/test pipeline for that exists in this repo, unlike
+our own Go/Node services' `wsl.ps1` path). [keycloak/keycloak#40744](https://github.com/keycloak/keycloak/issues/40744)
+is a related-looking but **different** bug (immediate auth from a *misconfigured* flow with the
+email/reset-password steps removed entirely) — checked and excluded; our flow's executions are all
+present and `REQUIRED`, confirmed by the export above.
+
+**A config-only alternative was considered and rejected as out of scope, not because it's unsafe:**
+stamping `UPDATE_PASSWORD` on the persisted `UserModel` (not the session) at the moment the reset
+is *requested* would sidestep the ordering bug entirely, since user-level required actions ARE
+correctly honored by `nextRequiredAction()`. But there is no code seam to attach that to — both
+`account-console` and `gaiada-ui` hit Keycloak's own native "Forgot Password?" link directly; no
+platform-nest code sits in that path today. Keycloak's admin API has a purpose-built mechanism for
+exactly this shape — `PUT /admin/realms/{realm}/users/{id}/execute-actions-email` with
+`["UPDATE_PASSWORD"]`, which queues the required action on the persisted user and does not go
+through the buggy session-ordering path at all — but adopting it means routing self-service
+password reset through a new platform-nest-owned endpoint (with its own anti-enumeration
+requirements) instead of Keycloak's native flow, and/or disabling `resetPasswordAllowed`. That is
+an architecture decision (who owns "forgot password," not just how the flow is configured), not a
+flow-config fix, so it is **flagged for the architect**, not implemented here.
+
+**Verification performed (real, driven, not inferred):**
+- Old password (`sec02-throwaway`, both a special-character and a plain password were tried across
+  two `set-password` cycles) **still authenticated successfully** after the "reset," in a fresh
+  browser context, under both `account-console` (landed on `/idp/realms/gaiada/account/`) and
+  `gaiada-ui` (landed on the full authenticated ERP shell at `/`) — reproducing SEC-01's finding
+  independently, from a from-scratch throwaway user.
+- `kcadm get users/<id>/credentials` after the "reset": exactly one password credential, unchanged
+  `createdDate`. `requiredActions` (persisted): `[]` throughout.
+- **Normal-login / lockout check:** signed in as an existing, untouched dev user
+  (`design@gaiada-creative.test`, the shared dev password) via ordinary `gaiada-ui` SSO — landed
+  authenticated on the full staff shell. Expected, since no realm/flow config was touched this
+  session, but driven for real per the guardrail rather than assumed.
+- Throwaway user `sec02-throwaway@dev.gaiada.invalid` deleted; `kcadm get users -q email=...`
+  returned `[ ]` afterward.
+- Four-project survival re-checked post-session: `gaiada` (keycloak untouched at its pre-session
+  uptime, mailpit/clamav healthy), `gaiada-alertmanager`, `gaiada-automation` (n8n), and
+  `gaiada-otel-metrics` all still `Up`.
+
+**Net: no fix applied.** Config inspection alone would have missed this the same way it missed
+SEC-01 — the flow reads REQUIRED, the authenticator's own source shows it queuing the right
+required action, and the bug only surfaces in how a downstream, undocumented-at-the-realm-level
+completion path resolves session-scoped vs. user-scoped required actions. The old-password test
+remains the only real check. **Blocked on an architect decision**: patch-Keycloak-core vs.
+custom-SPI-authenticator vs. move self-service password reset to a platform-nest-owned
+admin-API-mediated endpoint (which also changes who owns "forgot password" for the whole
+platform). Re-run this exact browser-driven test (old password must stop working, new-password form
+must render, under both clients) after whichever path is chosen.
+
 ### Retirement evidence — the `emailVerified:true` provisioner workaround CAN be retired in dev
 
 The verify-email user above is the proof: it was created with **no** `emailVerified:true` and no
