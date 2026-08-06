@@ -333,7 +333,20 @@ describe.skipIf(!TEST_URL)("mail inbound corpus — POST /api/mail/inbound/brevo
     config.mail.inboundMaxAttachments = 10;
     const res = await post(body("09-too-many-attachments.json"));
     expect(res.statusCode).toBe(204);
-    const atts = (await messagesFor(mailA.id))[0].attachments as Array<Record<string, unknown>>;
+    // MAIL-27: assert the row exists BEFORE indexing into it. `[0].attachments` on a zero-length
+    // result throws an opaque "Cannot read properties of undefined", not a named, diagnosable
+    // assertion — the exact failure mode every sibling case (08, 13, ...) already guards against by
+    // checking `toHaveLength(1)` first. Kept even though MAIL-27's investigation found no live
+    // mechanism that drops this row (attachment processing is a single strictly-sequential,
+    // index-preserving for-loop, fully awaited before the controller responds — see the ticket
+    // report); this guard is cheap insurance against a future regression turning that loop into
+    // something concurrent, and it makes a genuine miss legible instead of cryptic.
+    const rows = await messagesFor(mailA.id);
+    expect(rows).toHaveLength(1);
+    // Deliberately count/set-based, not positional: this proves the cap kept exactly 10 and rejected
+    // exactly 5, without caring WHICH 10 of the 15 survived — so it stays true even if attachment
+    // processing were ever parallelized (it is not today; see the diagnosis above).
+    const atts = rows[0].attachments as Array<Record<string, unknown>>;
     expect(atts).toHaveLength(15); // the count the sender sent is reported honestly
     expect(atts.filter((a) => a.fileRef)).toHaveLength(10);
     expect(atts.filter((a) => a.rejected && a.rejectReason === "too_many")).toHaveLength(5);
@@ -377,7 +390,9 @@ describe.skipIf(!TEST_URL)("mail inbound corpus — POST /api/mail/inbound/brevo
   it("[11-encoding-attacks] the stored subject is one line with no control characters; encoded payloads are inert", async () => {
     const res = await post(body("11-encoding-attacks.json"));
     expect(res.statusCode).toBe(204);
-    const row = (await messagesFor(mailA.id))[0];
+    const rows = await messagesFor(mailA.id); // MAIL-27: guard before indexing — see 09's comment
+    expect(rows).toHaveLength(1);
+    const row = rows[0];
     const subject = String(row.subject);
     const stored = String(row.body_html_sanitized);
     const text = String(row.body_text);
@@ -402,7 +417,9 @@ describe.skipIf(!TEST_URL)("mail inbound corpus — POST /api/mail/inbound/brevo
   it("[12-quoted-reply-bloat] threads, and does NOT lose the actual reply (this payload sits under the intake cap)", async () => {
     const res = await post(body("12-quoted-reply-bloat.json"));
     expect(res.statusCode).toBe(204);
-    const row = (await messagesFor(mailA.id))[0];
+    const rows = await messagesFor(mailA.id); // MAIL-27: guard before indexing — see 09's comment
+    expect(rows).toHaveLength(1);
+    const row = rows[0];
     expect(String(row.body_text)).toContain("Approved.");
     expect(Number(row.size_bytes)).toBeGreaterThan(100_000);
     // Intake caps, it does not interpret: quoted history is still present (collapsing it is MAIL-20
@@ -419,7 +436,9 @@ describe.skipIf(!TEST_URL)("mail inbound corpus — POST /api/mail/inbound/brevo
   it("[16-bottom-posted-oversize-quote] THE regression case: a bottom-posted reply under an over-cap quote survives", async () => {
     const res = await post(body("16-bottom-posted-oversize-quote.json"));
     expect(res.statusCode).toBe(204);
-    const row = (await messagesFor(mailA.id))[0];
+    const rows = await messagesFor(mailA.id); // MAIL-27: guard before indexing — see 09's comment
+    expect(rows).toHaveLength(1);
+    const row = rows[0];
     const storedBodyText = String(row.body_text);
 
     // Printed so the ticket report can quote the ACTUAL database value, not just a passing assertion.
@@ -452,7 +471,9 @@ describe.skipIf(!TEST_URL)("mail inbound corpus — POST /api/mail/inbound/brevo
   it("[17-top-posted-oversize-quote] the A15 companion case: a top-posted reply above an over-cap quote still survives", async () => {
     const res = await post(body("17-top-posted-oversize-quote.json"));
     expect(res.statusCode).toBe(204);
-    const row = (await messagesFor(mailA.id))[0];
+    const rows = await messagesFor(mailA.id); // MAIL-27: guard before indexing — see 09's comment
+    expect(rows).toHaveLength(1);
+    const row = rows[0];
     const storedBodyText = String(row.body_text);
 
     // eslint-disable-next-line no-console
@@ -476,7 +497,9 @@ describe.skipIf(!TEST_URL)("mail inbound corpus — POST /api/mail/inbound/brevo
   it("[18-elision-marker-spoof] a forged elision marker cannot mislabel or hide behind the genuine one", async () => {
     const res = await post(body("18-elision-marker-spoof.json"));
     expect(res.statusCode).toBe(204);
-    const row = (await messagesFor(mailA.id))[0];
+    const rows = await messagesFor(mailA.id); // MAIL-27: guard before indexing — see 09's comment
+    expect(rows).toHaveLength(1);
+    const row = rows[0];
     const storedBodyText = String(row.body_text);
 
     // eslint-disable-next-line no-console
@@ -547,6 +570,7 @@ describe.skipIf(!TEST_URL)("mail inbound corpus — POST /api/mail/inbound/brevo
     const supp = await adminPool().query(`SELECT count(*)::int AS n FROM mail_suppressions`);
     expect(supp.rows[0].n).toBe(0); // no mail-denial-of-service against a real recipient
     const rows = await messagesFor(mailA.id);
+    expect(rows).toHaveLength(1); // MAIL-27: guard before indexing — see 09's comment
     expect(rows[0].entity_id).toBe(mailA.entityId); // threaded as an ordinary reply
   });
 
@@ -566,7 +590,9 @@ describe.skipIf(!TEST_URL)("mail inbound corpus — POST /api/mail/inbound/brevo
 
     const res = await post(body("14-eicar-attachment.json"));
     expect(res.statusCode).toBe(204);
-    const atts = (await messagesFor(mailA.id))[0].attachments as Array<Record<string, unknown>>;
+    const rows14 = await messagesFor(mailA.id); // MAIL-27: guard before indexing — see 09's comment
+    expect(rows14).toHaveLength(1);
+    const atts = rows14[0].attachments as Array<Record<string, unknown>>;
     expect(atts[0]).toMatchObject({ name: "signed-scope.txt", scanStatus: "clean" });
     expect(atts[0].fileRef).toBeTruthy();
     expect(atts[1]).toMatchObject({ name: "invoice-final.doc", scanStatus: "infected", fileRef: null });
@@ -580,7 +606,9 @@ describe.skipIf(!TEST_URL)("mail inbound corpus — POST /api/mail/inbound/brevo
     setScannerForTest({ name: "down", async scan() { return "pending"; } });
     const res = await post(body("06-replayed-provider-id.json"));
     expect(res.statusCode).toBe(204);
-    const atts = (await messagesFor(mailA.id))[0].attachments as Array<Record<string, unknown>>;
+    const rowsPending = await messagesFor(mailA.id); // MAIL-27: guard before indexing — see 09's comment
+    expect(rowsPending).toHaveLength(1);
+    const atts = rowsPending[0].attachments as Array<Record<string, unknown>>;
     expect(atts[0].scanStatus).toBe("pending");
   });
 

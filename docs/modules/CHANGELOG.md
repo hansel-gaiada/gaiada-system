@@ -3346,6 +3346,24 @@ Built by a 4-agent parallel run against a frozen contract (`docs/superpowers/pla
   WS9/Loki is not running, and per-attempt forensics (which address, which IP) still needs log
   aggregation. This narrows the blind spot to "a sustained run is happening"; it does not close it.
 
+- **MAIL-27 (qa) — investigated the intermittent `[09-too-many-attachments]` CI flake and hardened
+  the corpus against misdiagnosis.** The failure reddened `main` on an *assistant* commit, which is
+  actively misleading during multi-session work. **Could not reproduce** — 40+ consecutive local runs,
+  zero failures — and ruled out each candidate mechanism with evidence rather than assumption:
+  attachment processing is a strictly sequential index-preserving `for` loop (no `Promise.all`), the
+  read has `ORDER BY`, `fileParallelism: false` with no `.concurrent`, the rate limiter is reset in
+  `beforeEach`, the scanner is off for this case so `scanStatus` is assigned synchronously, rows are
+  re-seeded and tables truncated per test, and the controller awaits both transactions before
+  returning so there is no visible-read race. Presumed a runner-level resource flake, not a logic
+  defect — recorded as such rather than "fixed" by loosening an assertion.
+  One **real latent fragility** was found and closed in 9 cases (09, 11, 12, 14–18, `[scan]`): they
+  indexed `(await messagesFor(...))[0]` without first asserting the row exists, so an absent row
+  throws an opaque `TypeError` instead of a named assertion failure — indistinguishable from a real
+  assertion failure when skimming a CI log, and plausibly why this flake read as inscrutable. The
+  guard is strictly additive; every protected property still holds (total-cap refusal, drop-but-still-
+  thread, and `rejected`/`rejectReason` visibility per the §7.6 rider). Test-only, no version bump.
+  Sibling cases 06/08/13 already had the guard.
+
 Evidence: `src/mail` 174 tests green across 21 files with QA's `qa-mail11-adversarial.test.ts`
 assertions intact; `promtool check rules` SUCCESS on 14 rules; `tsc --noEmit` clean;
 `lint:migration-rls` (83 migrations) and `lint:withtenants` (272 files) both OK; A12 grep gate
