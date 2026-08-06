@@ -23,6 +23,61 @@ reconstructed from this table alone. Format defined in [`VERSIONING.md`](./VERSI
 > `01.012.0031a`. Per VERSIONING rule 5 `/VERSION` is authoritative; the `MODULES.md` line is now
 > corrected and should be moved with every cut.
 
+> **⚠ TAG/COMMIT MISMATCH (found 2026-08-06, this cut).** The pushed tag `alpha-01.020.0052a`
+> resolves to commit `ccb2c04` (the OBS-01 observability commit), **not** `d78319d` — the commit
+> that actually wrote the release entry below and the manifest it records. `d78319d` is `ccb2c04`'s
+> parent, so the tagged/deployed build for `0052a` already contains `observability 0.6.1` (OBS-01),
+> one commit past what the entry below manifests (`0.6.0`). Confirmed by diffing
+> `git show alpha-01.020.0052a:docs/modules/MODULES.md` against `HEAD` — only the `infra` row
+> differs. Practical effect: this session's baseline for "what's new" is the **tag's real content**
+> (which already carries OBS-01), not the recorded manifest — so OBS-01 is not re-counted below.
+> Not corrected retroactively (moving a pushed, already-deployed tag is its own risk); flagging so
+> the next session doesn't re-diagnose the same gap.
+
+### `Alpha 01.021.0053a` — 2026-08-06 — REL-01's scoped SBOM goes live; the test-DB leak closed
+
+Everything on `main` since the `alpha-01.020.0052a` tag's actual (tagged) content. Because that tag
+points one commit later than its own changelog entry (see the mismatch note above), OBS-01
+(`observability 0.6.1`) is already inside the `0052a`-tagged build and is **not** new module churn
+for this cut — the only module that moved is `infra`.
+
+- **`infra` `0.8.2` → `0.8.4`** (two bumps, one module — counts once toward the counter):
+  - **`0.8.3` (INFRA-01)** — `teardownTestDb()` never dropped its database; root cause of the
+    615-orphan `/dev/shm` exhaustion incident. Fixed with a fresh maintenance connection + `DROP
+    DATABASE ... WITH (FORCE)`, try/catch/finally so a teardown hiccup can't fail a passing suite.
+    Orphan backlog now at 1 (was ~565+).
+  - **`0.8.4` (REL-01)** — `report-renderer`'s SBOM scoped to source (`syft dir:` on
+    `./report-renderer`) instead of the built image, so it stops cataloguing the shared
+    `mcr.microsoft.com/playwright` base: 17,080,639 bytes / 826 packages → 451,910 bytes / 229
+    packages (~38x smaller), the component that had twice made Rekor reject the SBOM attest.
+    `continue-on-error` **removed** from the attest step estate-wide — a genuine future attestation
+    failure now fails the release loud instead of degrading silently. This release is the first
+    live test of that change (see the "SBOM attest" result recorded by this cut's deploy report).
+- **`e7f8144` (ASST-24 + VER-04)** — hermes-gateway forked-session signal fix, already on `main`
+  from another session; carried through, not modified by this ticket. No module version bump
+  recorded against it independently of the manifest below.
+- **`441c5e5`** — docs-only (idp password-reset finding attributed to upstream Keycloak); no module
+  version change.
+
+Counter moves `0052 → 0053`: **one** module row bumped since the tag's real baseline (`infra`), so
+the revision letter resets to `a`.
+
+**Module manifest** (VERSIONING rule 2 — the exact set this build composes):
+
+| Module | Ver | | Module | Ver |
+|---|---|---|---|---|
+| platform-nest | `0.15.0` | | webdev | `0.11.0` |
+| platform-ui | `0.16.0` | | webdesk | `0.0.0` |
+| ai-gateway-go | `0.13.0` | | search-marketing | `0.5.1` |
+| mcp-hub | `0.10.0` | | social-media | `0.0.0` |
+| sync-engine-go | `0.7.0` | | creative | `0.1.0` |
+| automation (n8n) | `0.4.1` | | render-gateway-go | `0.0.0` |
+| observability | `0.6.1` | | reports | `0.3.1` |
+| infra | `0.8.4` | | report-renderer | `0.1.0` |
+| wa-chat-bot | `0.9.2` | | mail | `0.0.17` |
+| ai-agents | `0.5.1` | | hermes-gateway | `0.2.0` |
+| capture-helper | `0.2.0` | | | |
+
 ### `Alpha 01.020.0052a` — 2026-08-06 — the assurance ceiling closes; the agent-write surface goes live
 
 The release the `0047b` report deliberately left to the owner, because a cut here ships **four
