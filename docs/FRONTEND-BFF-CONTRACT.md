@@ -1824,6 +1824,67 @@ existing `PATCH /api/:t/assistant/threads/:id` (ASST-05) already accepted `brain
   switching (incl. the no-op-on-identical-value case), and end-to-end against a fake gateway that
   reproduces ASST-15's request/response shape byte-for-byte.
 
+### ASST-24 — Hermes session-resume mismatch is now reported, not silently forked (2026-08-06)
+
+**The defect this closes (ASST-24 QA gate, MEDIUM).** ASST-15/16 above made Hermes session
+continuity work on the happy path, but left one adversarial case with zero diagnostic signal: if
+`hermes-gateway` loses its session state (e.g. a restart) and is then asked to `--resume` a
+`providerSession` id it no longer has any record of, the real Hermes CLI exits 0 with a perfectly
+well-formed reply and a well-formed `Session:` footer — it just silently mints a brand-new,
+unrelated session instead of continuing the old one. `hermes-gateway/server.mjs` had no code path
+that compared the id it got back against the id it was asked to resume, so the wire looked like an
+ordinary success: `event: session` naming the new id, `event: done`, no `event: error` anywhere.
+platform-nest's own `hermes_session_id = COALESCE($2, hermes_session_id)` persistence
+(`assistant.controller.ts`) then happily overwrote the thread's session id with the forked one — the
+ERP transcript kept reading as one continuous conversation while Hermes' own agent memory had
+silently diverged. Reproduced by `hermes-gateway/test/session-resume-mismatch.test.mjs`.
+
+**The fix — additive fields on the SAME `event: session`, no new event, never `event: error`.**
+The reply itself is a genuinely valid answer; only the continuity claim was false, so this is not
+an error condition — it is dishonest labelling of a success. Widening `event: session`'s payload
+keeps grammar v2 single-dialect (the whole point of the ASST-15 resolution above): a new event name
+would have been a second way to say "here is what happened with the session," which is exactly the
+kind of two-dialects-for-one-fact problem ASST-15 was written to eliminate.
+
+- **`event: session`** — `data: {"providerSession":string,"resumed":boolean,"requestedSession"?:string}`.
+  Still terminal, still at most once, still only when the serving provider actually has a session
+  id to report (unchanged from ASST-15). Two ADDITIVE fields:
+  - **`resumed`** — always present. `true` when a resume was requested AND the returned
+    `providerSession` equals the requested id (a genuine resume happened), or when NO resume was
+    requested at all (turn 1 / a fresh conversation — nothing to mismatch, so a brand-new session
+    is exactly what was expected: this repo's chosen definition for the "no-resume-requested"
+    case). `false` when a resume WAS requested and the returned id differs — Hermes silently forked
+    instead of continuing.
+  - **`requestedSession`** — present ONLY when the request actually carried a `providerSession` to
+    resume (never invented, never sent empty — the same discipline `providerSession`/`event: usage`
+    already follow on this wire). Absent whenever `resumed` is `true` because nothing was
+    requested; present whenever `resumed` is `false`, carrying the id that was asked for so a
+    consumer can log/display exactly what failed to resume.
+  - This is the ONLY signal `hermes-gateway` has available — Hermes gives no distinct exit code or
+    stderr marker for "I ignored your --resume and started fresh" — but comparing the two ids is
+    sufficient: it is exactly the fact an ERP consumer needs.
+  - `ai-gateway-go` is UNCHANGED by this ticket (it has no session-forking failure mode to detect
+    today); this addendum is `hermes-gateway`-only.
+- **What a consumer (platform-nest's relay / a future UI) should do with `resumed: false`: SURFACE
+  it, never swallow it.** The honest UX is telling the user the conversation restarted — e.g. a
+  system-style message in the thread ("Hermes couldn't resume the previous conversation and started
+  a new one") or a badge next to the reply — NOT silently accepting the new session id as if
+  nothing happened, which is the exact user-visible failure mode this ticket exists to close.
+  **Not built in this ticket** (scoped to `hermes-gateway` only, per the ticket that authorized this
+  work) — `platform-nest/src/modules/assistant/stream.ts`'s relay still parses `event: session` for
+  `providerSession` alone and does not yet read `resumed`/`requestedSession`; consuming the signal
+  is an explicit follow-up. Additive fields are safe to ship ahead of that consumer: ASST-12's relay
+  parses known fields and ignores unknown ones, exactly like an older gateway build ignoring
+  `event: usage`.
+- Tests: `hermes-gateway/test/session-resume-mismatch.test.mjs` — the stale/unknown-id case
+  (`resumed: false`, both ids present, reply still completes with `event: done` and no
+  `event: error`), the happy path (id returned unchanged ⇒ `resumed: true`), and the
+  no-resume-requested case (`resumed: true`, `requestedSession` absent). Wired into
+  `hermes-gateway/package.json`'s `test` script (the QA gate found it was written but not run;
+  now fixed) — `npm test` is 24/24 green, and `/complete`/`/media` are proven byte-for-byte
+  unchanged by `git diff` (this ticket's entire diff is confined to `writeSSESession` and the one
+  call site inside `handleCompleteStream`'s `finish()`).
+
 ### ASST-17 — tool broker under the CHATTING USER's principal (Phase 3 core, 2026-08-05)
 
 `modules/assistant/broker.ts` (new) + the tool-turn branch in `assistant.controller.ts`'s stream

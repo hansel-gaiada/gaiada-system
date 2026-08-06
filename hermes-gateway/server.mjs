@@ -143,9 +143,13 @@ function runHermes(prompt, image) {
 // EXACTLY once per stream, at the FIRST parsed content piece (see emitPiece below), same timing
 // rule as ai-gateway-go's own `meta`, no exceptions. `event: session` (ASST-15, NEW) carries
 // {providerSession: string} — TERMINAL, at most once, only when Hermes actually reported a
-// session id. `event: error` carries {"error": string}. `event: done` (data "{}") is the ONLY
-// clean-completion terminal — absent on every error path, so a consumer can always tell a clean
-// end from a dropped connection.
+// session id. **(ASST-24 QA-gate fix, 2026-08-06: two ADDITIVE fields — `resumed: boolean`,
+// always present, and `requestedSession: string`, present only when a resume was actually asked
+// for — flag a stale/unknown `providerSession` that Hermes silently forked instead of resuming
+// instead of the previous silent success. See the dedicated comment on `writeSSESession` and
+// docs/FRONTEND-BFF-CONTRACT.md §18's "ASST-24" addendum.)** `event: error` carries
+// {"error": string}. `event: done` (data "{}") is the ONLY clean-completion terminal — absent on
+// every error path, so a consumer can always tell a clean end from a dropped connection.
 //
 // ASST-15 RESOLVED the divergence ASST-14 (deliberately, and correctly at the time) introduced:
 // this shim used to emit `meta` TERMINALLY, carrying `providerSession` inline, because Hermes'
@@ -163,8 +167,20 @@ function writeSSEData(res, payload) {
 function writeSSEMeta(res, meta) {
   res.write(`event: meta\ndata: ${JSON.stringify(meta)}\n\n`);
 }
-function writeSSESession(res, providerSession) {
-  res.write(`event: session\ndata: ${JSON.stringify({ providerSession })}\n\n`);
+// ASST-24 QA-gate fix: `event: session` gains two ADDITIVE fields (same grammar, no new event
+// name — see the long comment above handleCompleteStream's `finish()` for why). `requestedSession`
+// is only included when a resume was actually asked for (never invented, never sent empty — the
+// same discipline `providerSession` itself already follows); `resumed` is always present:
+//   - a resume WAS requested: true only if Hermes' returned id equals the requested one, false if
+//     Hermes silently forked a new/unrelated session instead (the defect this fixes: previously
+//     indistinguishable from a real resume).
+//   - NO resume was requested (fresh conversation, turn 1): true — there is nothing to mismatch, so
+//     a brand-new session is exactly what was expected. Documented in
+//     docs/FRONTEND-BFF-CONTRACT.md §18.
+function writeSSESession(res, providerSession, requestedSession, resumed) {
+  const payload = { providerSession, resumed };
+  if (requestedSession) payload.requestedSession = requestedSession;
+  res.write(`event: session\ndata: ${JSON.stringify(payload)}\n\n`);
 }
 function writeSSEError(res, message) {
   res.write(`event: error\ndata: ${JSON.stringify({ error: message })}\n\n`);
@@ -313,8 +329,17 @@ function handleCompleteStream(req, res, payload) {
     // ASST-15: providerSession is TERMINAL and ONLY-when-real (Hermes only prints "Session:" in
     // the footer, after the box closes) — never invented, never sent empty, mirroring
     // ai-gateway-go's writeSSESession discipline exactly.
+    //
+    // ASST-24 QA-gate fix: compare the id Hermes actually reported against the one we ASKED it to
+    // resume (`providerSession`, the request field captured at the top of this handler). Hermes
+    // gives no other signal (no distinct exit code, no stderr marker) when it silently ignores a
+    // stale/unknown `--resume <id>` and mints a fresh session instead — exit 0, a well-formed box,
+    // a well-formed footer, indistinguishable from a real resume except for the id itself. That
+    // comparison is therefore the ONLY thing this gateway can check, but it IS sufficient: it's
+    // exactly the signal an ERP consumer needs to know continuity did not happen.
     if (parser.sessionId) {
-      writeSSESession(res, parser.sessionId);
+      const resumed = providerSession ? providerSession === parser.sessionId : true;
+      writeSSESession(res, parser.sessionId, providerSession || "", resumed);
     }
     writeSSEDone(res);
     res.end();
