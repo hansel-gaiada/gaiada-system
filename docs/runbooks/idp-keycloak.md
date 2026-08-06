@@ -389,6 +389,174 @@ afterward. Four-project survival (`gaiada`, `gaiada-alertmanager`, `gaiada-autom
 `gaiada-otel-metrics`) reconfirmed post-session, `gaiada-platform-1` untouched at its
 pre-session `StartedAt`/healthy state; disk unchanged at 76%. No realm/flow config was changed.
 
+### PR-00b (2026-08-06, senior-integrator) — REGISTERED `UPDATE_PASSWORD`: BOTH paths now rotate.
+### SEC-02's #16527 diagnosis was wrong as an explanation for the live symptom (the gap was a
+### missing realm registration); PR-01..PR-07 should be CANCELLED, not reduced.
+
+Ticket: register `UPDATE_PASSWORD` as a required action on the realm (PR-00's own recommended
+next step) and re-run **both** PR-00's execute-actions-email test and SEC-01's native
+reset-credentials test, to answer whether the eight-ticket PR-01..07 replacement program is still
+necessary. Guardrail: registering the required action was the *only* config change authorized —
+no flow edits, no `resetPasswordAllowed` change.
+
+**Realm export (rollback point):**
+`~/gaiada-realm-backups/gaiada-realm-export-20260806-053804.json` on `gda-aicenter` (74,678 bytes,
+identical size to SEC-02's — nothing had changed in between). Never needed as a rollback; the one
+change made (register a required action) was intentional, expected-behavior-changing, and is
+easily reversible via `kcadm delete authentication/required-actions/UPDATE_PASSWORD -r gaiada` if
+ever needed.
+
+**Required-actions list, before:**
+```json
+[
+  {"alias":"CONFIGURE_TOTP","enabled":true,"defaultAction":false,"priority":10},
+  {"alias":"VERIFY_EMAIL","enabled":true,"defaultAction":false,"priority":50},
+  {"alias":"delete_account","enabled":false,"defaultAction":false,"priority":60}
+]
+```
+
+**Change made:** `kcadm create authentication/register-required-action -r gaiada -s
+providerId=UPDATE_PASSWORD -s name="Update Password"`. Registered as **enabled, `defaultAction:
+false`** — matching the realm's existing pattern (neither `CONFIGURE_TOTP` nor `VERIFY_EMAIL` is a
+default action either; new users are not made to change their password on next login just because
+the provider now exists on the realm).
+
+**Required-actions list, after:**
+```json
+[
+  {"alias":"CONFIGURE_TOTP","enabled":true,"defaultAction":false,"priority":10},
+  {"alias":"VERIFY_EMAIL","enabled":true,"defaultAction":false,"priority":50},
+  {"alias":"delete_account","enabled":false,"defaultAction":false,"priority":60},
+  {"alias":"UPDATE_PASSWORD","name":"Update Password","providerId":"UPDATE_PASSWORD","enabled":true,"defaultAction":false,"priority":61}
+]
+```
+
+**Path A re-test (execute-actions-email, admin API via `gaiada-provisioner`, lifespan=900) —
+throwaway `pr00b-throwaway@dev.gaiada.invalid`, both `client_id=account-console` and
+`client_id=gaiada-ui`:**
+
+1. **New-password form renders — TRUE (both clients).** The link now lands on
+   `login-actions/required-action?execution=UPDATE_PASSWORD&...` with a real "Update password"
+   form (New Password / Confirm password / "Sign out from other devices", pre-checked). This is
+   the opposite of PR-00's finding (which went straight to "Your account has been updated" with
+   zero password fields).
+2. **Original password no longer works, fresh context — TRUE (decisive).** After submitting a new
+   password through the `gaiada-ui` link, a fresh cookie-less context: old password
+   (`OldPassw0rd!PR00b`) → login failed ("Invalid username or password"); new password → landed on
+   the real authenticated Account Console. Repeated independently through the `account-console`
+   link with a second new password — same result, and the *first* new password now failed too
+   (correctly superseded). `kcadm get users/{id}/credentials` confirms rotation each time: the
+   password credential's `createdDate` advanced on every completed submission
+   (`1785995089283 → 1785995358793 → 1785995523490`), while `requiredActions` (persisted) returned
+   to `[]` after each completion.
+3. **No session minted on completion — TRUE (still holds, both clients).** Post-submit, the
+   completion page carries only `AUTH_SESSION_ID` (Keycloak's flow cookie); navigating to
+   `/idp/realms/gaiada/account/` in the *same* browser context redirects to the OIDC authorize
+   endpoint (i.e., not authenticated), for both `account-console` and `gaiada-ui`.
+4. **Single-use — TRUE (now, for the right reason).** Re-clicking either already-completed link in
+   a fresh context produces "We are sorry... Action expired. Please continue with login now." —
+   PR-00 saw FALSE here only because the flow never reached completion in the first place
+   (`UpdatePassword.isOneTimeAction()` never fired); now that it does complete, single-use holds.
+
+**Path B re-test (native `login-actions/reset-credentials`, real browser, "Forgot Password?") —
+SEC-01's exact method, but with fresh throwaway users to avoid any cross-contamination with the
+execute-actions runs above: `pr00b2-throwaway@dev.gaiada.invalid` (via `account-console`'s own
+login page) and `pr00b3-throwaway@dev.gaiada.invalid` (via the real `gaiada-ui` ERP login →
+"Sign in with SSO" → Keycloak-hosted form, so this is the actual staff-facing path, not just the
+admin console):**
+
+1. **New-password form renders — TRUE (both clients).** Identical shape to path A: clicking the
+   mailed "Reset password" link (decoded `typ: "reset-credentials"`, `asid` tying it to the
+   requesting session — same token type SEC-02 examined) in a brand-new cookie-less context now
+   lands on `login-actions/required-action?execution=UPDATE_PASSWORD&...` with the same form. This
+   directly overturns SEC-01/SEC-02's finding, which saw "Your account has been updated" with zero
+   password fields and a live authenticated session on the exact same flow.
+2. **Original password no longer works, fresh context — TRUE (decisive), both clients.** Account-
+   console path: old password (`OldPassw0rd!PR00b2`) failed post-reset, new password
+   (`NewPassw0rd!PR00b2`) succeeded, landing on the real Account Console. Gaiada-ui path
+   (independent throwaway user, independent reset request under `client_id=gaiada-ui`): identical
+   result — old password failed, new password succeeded. `kcadm` credentials confirm rotation
+   (`createdDate` advanced) in both cases.
+3. **No session minted on completion — TRUE, both clients.** This is the headline change from
+   SEC-01/SEC-02: back then, completing this exact flow **did** mint a live session (landed
+   directly on the authenticated account page / full ERP shell). Now, post-submit, the same-context
+   navigation to `/account/` redirects to re-authenticate — no session. The form step now
+   interposed between "click the link" and "flow completes" is what removes the session-minting
+   side effect; it was never a separate bug, it was the *same* missing-required-action gap
+   manifesting as "flow completes without ever needing the user again," which happened to also
+   short-circuit into a granted session under the native flow's completion path.
+4. **Single-use — TRUE, both clients.** Re-clicking the already-completed native reset link
+   ("Action expired") with zero password fields on re-click — same shape as path A.
+
+**Log evidence (the decisive artifact, not inference):** the exact warning that explained
+everything in PR-00 —
+`WARN [...AuthenticationManager] Could not find configuration for Required Action
+UPDATE_PASSWORD, did you forget to register it?` — **does not appear anywhere** in the Keycloak
+container log across this entire session (both paths, all four throwaway users, all
+submit/re-click/login-check runs; checked with `docker logs --since 20m | grep -i
+"UPDATE_PASSWORD\|Could not find configuration\|Required Action"` → zero matches). What *does*
+appear is exactly the expected, correctly-attributed event stream: `LOGIN_ERROR
+error="invalid_user_credentials"` for every old-password attempt, `EXECUTE_ACTIONS_ERROR
+error="expired_code"` / `RESET_PASSWORD_ERROR error="expired_code"
+reason="expiredActionMessage"` for every re-click of an already-completed link. No new/unexplained
+WARN or ERROR class appeared.
+
+**Verdict on SEC-02's #16527 diagnosis: WRONG as an explanation for the live symptom, though the
+source-reading behind it was accurate on its own terms.** SEC-02 correctly read
+`ResetPassword.authenticate()` queuing a session-level `UPDATE_PASSWORD` required action, and
+correctly read that `AuthenticationManager.nextRequiredAction()` is the code path deciding what
+happens next — but `nextRequiredAction()` never got far enough to hit the session/user-level
+ordering bug #16527 describes, because **the realm had no registered provider for the alias at
+all**, so Keycloak treated the queued action as unresolvable and fell straight through to
+`END_AFTER_REQUIRED_ACTIONS`, before the ordering logic in question ever ran. #16527 may well be a
+real, separate upstream bug in general — this session did not (and could not) exercise the
+session-vs-user-level ordering path at all, since the required action now resolves cleanly on the
+very first hop. The registration gap was sufficient by itself to explain 100% of both SEC-01's and
+PR-00's observed symptoms (no form, no rotation, live session grant, re-clickable link) — there is
+no remaining symptom that still needs #16527 to explain it.
+
+**Recommendation: PR-01..PR-07 should be CANCELLED, not reduced.** The eight-ticket program
+(SEC-03) was designed around a "no realm-config fix exists, must build a platform-owned
+replacement or patch Keycloak core" premise that this ticket disproves for both paths with the
+same one-line fix. Both the execute-actions-email path *and* the native forgot-password/reset-
+credentials path now: render a real password form, reject the old password afterward, mint no
+session on completion, and are single-use. There is no remaining gap in either path that PR-01..07
+was scoped to close. If the architect wants an extra margin of defense-in-depth (e.g. still
+preferring a platform-owned endpoint for anti-enumeration reasons unrelated to rotation), that is a
+much smaller, optional follow-up — not the original eight-ticket core-patch/custom-SPI program,
+which should be closed out as moot.
+
+**Normal-login regression check (explicit, driven for real, not assumed):** existing dev user
+`design@gaiada-creative.test` (`requiredActions: []` before and after — the new registration did
+not retroactively attach itself to any existing user) signed in through the real SSO flow with
+their normal password and landed on the authenticated Account Console, same as always. New
+required actions on a realm only ever apply to sessions that get the action explicitly queued
+(via execute-actions-email, the reset-credentials flow, or a future default-action flag we did
+**not** set) — existing users with no pending required action are unaffected, confirmed live.
+
+**Realm JSON in the repo (`infra/compose/keycloak/gaiada-realm.json`) — NOT edited this session,
+flagging per the ticket's ask:** its `requiredActions` array ships only `CONFIGURE_TOTP` and
+`VERIFY_EMAIL` (no `delete_account`, no `UPDATE_PASSWORD`). A fresh realm import today would carry
+the exact same gap PR-00 found on the live box. Recommend adding an `UPDATE_PASSWORD` entry
+(`enabled: true, defaultAction: false, priority: 61`, matching what's now live) to that array so
+fresh boots don't silently regress this — not done here since the ticket scoped the *live* change
+to registration only and asked to "note it," not act on it.
+
+**Cleanup and survival, as required:** four throwaway users created across the two paths
+(`pr00b-throwaway`, `pr00b2-throwaway`, `pr00b3-throwaway@dev.gaiada.invalid` — one for path A, two
+independent ones for path B's two clients) all deleted and confirmed absent
+(`kcadm get users -q email=... ` → `[]`) after the session. Four-project survival re-checked
+post-session: `gaiada`, `gaiada-alertmanager`, `gaiada-automation` (n8n), and `gaiada-otel-metrics`
+all still present with containers `Up`; `gaiada-keycloak-1` itself was never restarted (`Up 17h`
+throughout — required-action registration is a live admin-API call, no restart needed). Disk
+unchanged at 76%. Several `gaiada` project containers (`platform-ui`, `platform`, `mcp-hub`,
+`cerbos`, `ai-gateway`, `agent-runner`, `report-renderer`) showed short uptimes
+(~1-2 minutes) at the end of this session — **not caused by this ticket** (nothing here touched
+compose, restarted `platform`, or redeployed anything); consistent with a concurrent session's
+deploy landing on the shared box during this window (see memory `concurrent-agents-version-
+drift`/`shared-repo-concurrent-sessions`). `gaiada-keycloak-1`'s own uptime is the relevant signal
+for this ticket and it was untouched.
+
 ### Retirement evidence — the `emailVerified:true` provisioner workaround CAN be retired in dev
 
 The verify-email user above is the proof: it was created with **no** `emailVerified:true` and no

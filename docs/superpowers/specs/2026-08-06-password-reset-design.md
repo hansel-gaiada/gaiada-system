@@ -1,5 +1,40 @@
 # Self-Service Password Reset — platform-owned, Keycloak-executed (SEC-03)
 
+> # ⛔ CANCELLED 2026-08-06 — the premise was wrong. Do not build this.
+>
+> **PR-00b proved a one-line realm change fixes both reset paths, so this eight-ticket program is
+> unnecessary in full — cancelled, not reduced.**
+>
+> `UPDATE_PASSWORD` was **never registered as a required action on the `gaiada` realm** (only
+> `CONFIGURE_TOTP`, `VERIFY_EMAIL`, `delete_account` were). Keycloak logged it plainly:
+> `WARN Could not find configuration for Required Action UPDATE_PASSWORD, did you forget to register it?`
+> After `kcadm create authentication/register-required-action -s providerId=UPDATE_PASSWORD`
+> (enabled, `defaultAction: false`, priority 61), **both** paths satisfy all four conditions — form
+> renders, the original password stops working, no session is minted, link is single-use — verified in
+> a real browser under `account-console` and `gaiada-ui`, including the **native** reset-credentials
+> flow this document was written to replace.
+>
+> **SEC-02's keycloak/keycloak#16527 attribution was wrong as an explanation of the live symptom.**
+> The source reading was accurate on its own terms, but `nextRequiredAction()` never reached the
+> session-vs-user ordering logic that issue describes — with no registered provider for the alias it
+> fell through first. The registration gap accounts for 100% of both SEC-01's and PR-00's symptoms.
+>
+> **Why this document is kept rather than deleted:** its `execute-actions-email` mechanism analysis
+> (no flow re-entry, no session minted, credential replaced) is accurate and was independently
+> confirmed by PR-00b, and the reasoning about *why* a platform-minted token would be worse — it
+> breaks the "platform never sees passwords" invariant, and a token-verify bug there means arbitrary
+> account takeover rather than an email to the victim's own mailbox — remains the right answer if this
+> ever needs revisiting.
+>
+> **The lesson, recorded because it cost an eight-ticket design:** three investigations, three
+> methods. Driving the flow found the symptom. Reading source produced a confident, thorough, wrong
+> cause. Reading the **server log** gave the answer in one line. Ask what the running system is
+> *configured* with before inferring from what the code *does*.
+>
+> Durable fix: the registration is now in `infra/compose/keycloak/gaiada-realm.json` so a fresh
+> `--import-realm` boot cannot reproduce the gap.
+
+
 **Date:** 2026-08-06 · **Author:** architect · **Status:** PLANNED
 **Replaces:** Keycloak's native "Forgot password?" flow on realm `gaiada`, which is broken upstream
 (SEC-01 confirmed, SEC-02 root-caused: `docs/runbooks/idp-keycloak.md`).
