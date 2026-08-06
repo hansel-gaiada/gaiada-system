@@ -278,10 +278,17 @@ services:
         condition: service_healthy
 
   # Cerbos (5b) — policy decision point. Policies from ./cerbos/policies (read-only).
+  # OBS-03 (2026-08-06): pinned off `latest` — this is the authz engine, the one component still
+  # on a floating tag. 0.54.0 is the exact version already running (confirmed via
+  # `docker inspect` image digest sha256:211c261f6031675522a35c6055b13fd719c4aff13747307e4bcb6907326537ef,
+  # which matches this tag), so this pin is a version no-op. `--log-level=warn` silences the
+  # per-call gRPC "Handled request" access-log spam (no config-file key for it in this version);
+  # decision audit (allow/deny + matched policy) is enabled separately in cerbos.yaml and still
+  # emits regardless of --log-level (validated empirically against a throwaway container).
   cerbos:
-    image: ghcr.io/cerbos/cerbos:latest
+    image: ghcr.io/cerbos/cerbos:0.54.0
     restart: unless-stopped
-    command: ["server", "--config=/config/cerbos.yaml"]
+    command: ["server", "--config=/config/cerbos.yaml", "--log-level=warn"]
     volumes:
       - ../../platform-nest/cerbos:/config:ro
       - ../../platform-nest/cerbos/policies:/policies:ro

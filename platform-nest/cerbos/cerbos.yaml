@@ -5,5 +5,14 @@ storage:
   disk:
     directory: /policies
     watchForChanges: true
+# OBS-03 (2026-08-06): the two-line-per-call gRPC access log ("Handled request", no config key
+# for it in 0.54.0 — see infra/runbooks/observability-cerbos-audit.md) is silenced via
+# --log-level=warn on the server command in compose, not here. Decision audit is ON and goes to
+# stdout, where the otel-collector filelog receiver already ships container stdout to Loki.
 audit:
-  enabled: false
+  enabled: true
+  accessLogsEnabled: false
+  decisionLogsEnabled: true
+  backend: file
+  file:
+    path: stdout
