@@ -54,7 +54,7 @@ versions below; the running build reports it at `GET /health`.
 | render-gateway-go | `0.0.0` | PLANNED | Creative | 2026-07-23 |
 | reports | `0.3.1` | PROTOTYPED | Cross-cutting | 2026-08-03 |
 | report-renderer | `0.1.0` | DEV-VERIFIED | Cross-cutting | 2026-07-31 |
-| mail | `0.0.18` | IN PROGRESS | Cross-cutting | 2026-08-06 |
+| mail | `0.0.19` | IN PROGRESS | Cross-cutting | 2026-08-06 |
 
 ---
 
@@ -347,7 +347,26 @@ through C-03". **v1.2 (same day, Zone A mail v2):** domains locked — C-03's fo
 moved to the Google Workspace SMTP relay with Brevo failover. Blueprint HTML is v1.2; PDF + hosted
 artifact NOT re-rendered yet.
 
-## mail — Zone A Email (platform-nest) · `0.0.18` · IN PROGRESS
+## mail — Zone A Email (platform-nest) · `0.0.19` · IN PROGRESS
+
+**0.0.19 (2026-08-06, devops, MAIL-30) — inbound threading verified live; MAIL-13 and MAIL-29 promoted
+to DEV-VERIFIED.** Ran the strengthened replay against deployed `alpha-01.022.0056a` using a real
+**mixed-case** token from `mail_log` (`WxgfNc9SNTtwaKif2TnfBA`) — the exact input class MAIL-29 fixed.
+16 `mail_messages` rows landed on the correct `pipeline_gate` entity (the NDR fixture correctly
+attaching to none); unmatched ⇒ `204` and bad-token ⇒ `401` both byte-identical; hostile HTML inert as
+*stored* content; EICAR `scanStatus:"infected"` with `fileRef:null`, never on disk; provider-id
+idempotency held. Reaching the rows required `?options=-c app.mail_context=on` on the connection —
+MAIL-22's FORCE-RLS GUC gate working exactly as designed.
+Module stays **IN PROGRESS**: MAIL-15's live leg is still outstanding.
+**Two named gaps, neither a production defect.** (1) `replay-inbound.mjs`'s verifier reports
+`THREADING BROKEN` for an intentionally-deduped repost, because it cannot distinguish "nothing landed
+because broken" from "nothing landed because correctly deduped" — the mirror image of the original
+defect, where the same script reported PASS over a dead path. Both are checks that do not measure what
+they claim. (2) The per-attachment **byte** cap is unexercisable at production defaults
+(`MAIL_INBOUND_MAX_ATTACHMENT_BYTES=10MB` vs a 48KB fixture); the rejection *mechanism* is proven via
+the count cap instead.
+**Honest limit:** EICAR's download-refusal-at-every-privilege is code+data proof, not a live 403 with
+an admin token — that session was out of scope and was not faked.
 
 **0.0.18 (2026-08-06, senior-be, MAIL-29) — inbound threading had never worked outside tests; fixed,
 and the test gap that hid it closed.** `extractAngleAddress()` blanket-lowercased the recipient
