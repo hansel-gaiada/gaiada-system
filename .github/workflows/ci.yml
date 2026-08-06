@@ -132,7 +132,7 @@ jobs:
         run: |
           docker run -d --name cerbos -p 3592:3592 \
             -v "$PWD/cerbos:/config:ro" -v "$PWD/cerbos/policies:/policies:ro" \
-            ghcr.io/cerbos/cerbos:latest server --config=/config/cerbos.yaml
+            ghcr.io/cerbos/cerbos:0.54.0 server --config=/config/cerbos.yaml
           for i in $(seq 1 30); do
             curl -fsS http://localhost:3592/_cerbos/health && break || sleep 1
           done
