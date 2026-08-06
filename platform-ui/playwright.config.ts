@@ -3,7 +3,9 @@ import { defineConfig, devices } from "@playwright/test";
 // E2E against the app running in DEMO_MODE (no backend needed — see
 // src/lib/demoFixtures.ts). Assumes a production build exists (`next build`);
 // the webServer just starts it with DEMO_MODE=1.
-const PORT = 3005;
+// `E2E_PORT` lets a session avoid clashing with a sibling agent's own dev server on the default
+// port — the shared-checkout discipline several concurrent-session tickets in this program require.
+const PORT = Number(process.env.E2E_PORT) || 3005;
 
 export default defineConfig({
   testDir: "./e2e",

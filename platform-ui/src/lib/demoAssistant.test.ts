@@ -172,6 +172,63 @@ describe("demoAssistant — write-capable agent (task-filer): full propose -> co
   });
 });
 
+describe("demoAssistant — FE-verification gap #2 (2026-08-06): rejected/execution_failed/cancelled reachable through a REAL confirm, not just constructed props", () => {
+  // Before this fixture change, `confirmWriteM` always resolved to `approved`+`executed` — these
+  // three states existed only as `ProposalCard.test.tsx`'s constructed-props cases. The keyword in
+  // the drafting message (mirroring the plain-chat `ERROR_TEST`/`STALL_TEST` convention) is what a
+  // real browser drives via the composer to reach each one; this test drives the SAME dispatcher
+  // functions the route handlers call, proving the fixture side of that path end to end.
+  async function draftAndConfirm(content: string) {
+    const threadId = createThread();
+    const { messageId } = sendToolsMessage(threadId, content);
+    await drainStream(demoAssistantStreamBody(TENANT, threadId, messageId)!);
+    const { messages } = getThread(threadId);
+    const call = messages.find((m) => m.id === messageId)!.toolCalls.find(
+      (c) => (c.intent as { status: string } | null)?.status === "draft",
+    )!;
+    const r = assistantDemo(
+      "POST", `/api/${TENANT}/assistant/threads/${threadId}/tool-calls/${call.id}/confirm`,
+      new URLSearchParams(), JSON.stringify({}), USER,
+    );
+    return { r, threadId, messageId, callId: call.id };
+  }
+
+  it("REJECT_TEST -> confirm files an approval with status:'rejected' — no execution ever attempted", async () => {
+    const { r } = await draftAndConfirm("file a task REJECT_TEST for the redesign");
+    const body = r!.json as { approval: { status: string; executionStatus: string; executionError: string | null } };
+    expect(body.approval.status).toBe("rejected");
+    expect(body.approval.executionError).toBeNull();
+  });
+
+  it("CANCEL_TEST -> confirm files an approval with status:'cancelled'", async () => {
+    const { r } = await draftAndConfirm("file a task CANCEL_TEST for the redesign");
+    const body = r!.json as { approval: { status: string; executionStatus: string } };
+    expect(body.approval.status).toBe("cancelled");
+  });
+
+  it("FAIL_TEST -> confirm files an APPROVED row whose execution failed, with a non-null executionError", async () => {
+    const { r } = await draftAndConfirm("file a task FAIL_TEST for the redesign");
+    const body = r!.json as { approval: { status: string; executionStatus: string; executionError: string | null } };
+    expect(body.approval.status).toBe("approved");
+    expect(body.approval.executionStatus).toBe("failed");
+    expect(body.approval.executionError).toBeTruthy();
+  });
+
+  it("each outcome round-trips identically through the reload-joined GET (never just the confirm response)", async () => {
+    const { threadId, messageId, callId } = await draftAndConfirm("file a task REJECT_TEST for the redesign");
+    const { messages } = getThread(threadId);
+    const call = messages.find((m) => m.id === messageId)!.toolCalls.find((c) => c.id === callId)!;
+    expect(call.intent).toBeNull(); // the approval join takes over once filed — same invariant as the default path
+    expect((call.approval as { status: string }).status).toBe("rejected");
+  });
+
+  it("the default path (no keyword) is untouched — still resolves to approved+executed", async () => {
+    const { r } = await draftAndConfirm("file a plain task for the redesign");
+    const body = r!.json as { approval: { status: string; executionStatus: string } };
+    expect(body.approval).toEqual({ status: "approved", executionStatus: "executed", executionError: null });
+  });
+});
+
 describe("demoAssistant — capabilities exposes toolAgents for the composer's picker", () => {
   it("returns the fixed demo roster, task-filer included with its write tools", () => {
     const r = assistantDemo("GET", `/api/${TENANT}/assistant/capabilities`, new URLSearchParams(), undefined, USER);

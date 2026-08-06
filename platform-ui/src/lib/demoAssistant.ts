@@ -72,6 +72,46 @@ interface DemoToolCall {
   createdAt: string;
 }
 
+// FE-verification gap #2 (2026-08-06) — before this, EVERY demo confirm resolved straight to
+// `approved`+`executed` (see `confirmWriteM`'s original comment, preserved below): `rejected`/
+// `execution_failed`/`cancelled` were reachable in this codebase ONLY via `ProposalCard.test.tsx`'s
+// constructed-props cases, never through a real propose->confirm click path. A live backend decides
+// the outcome out of band (a human on `/approvals/[id]`, D14's executor) — demo mode has no such
+// second actor, so the outcome is instead pre-baked into the DRAFT at propose time via a keyword in
+// the sent message (the SAME "literal text in the message drives a deterministic demo branch"
+// mechanism `ERROR_TEST`/`STALL_TEST` already establish below for the plain-chat path), and only
+// REVEALED at confirm time — confirm still performs the one-and-only filing write, exactly like the
+// default path. This does NOT touch the trap: `intent` is still read before `approval`, the approval
+// row is still created (not mutated in place) only once, at confirm, and `deriveProposalCardState`
+// never learns this field exists.
+export type DemoWriteOutcome = "executed" | "rejected" | "cancelled" | "failed" | "not_executable";
+
+/** Case-insensitive keyword scan over the message that drafted this write — mirrors
+ *  `demoAssistantStreamBody`'s own `ERROR_TEST`/`STALL_TEST` convention. Absent any keyword, the
+ *  outcome is the honest common case: `"executed"`. */
+function pickDemoWriteOutcome(sourceText: string): DemoWriteOutcome {
+  if (/REJECT_TEST/i.test(sourceText)) return "rejected";
+  if (/CANCEL_TEST/i.test(sourceText)) return "cancelled";
+  if (/FAIL_TEST/i.test(sourceText)) return "failed";
+  if (/NOTEXEC_TEST/i.test(sourceText)) return "not_executable";
+  return "executed";
+}
+
+/** The approval-row shape each `DemoWriteOutcome` produces at confirm time — the ONE place this
+ *  mapping lives (both `confirmWriteM`'s fresh-file branch and its idempotent-replay branch read
+ *  through here, never duplicate the literal shapes). `executionError` on `"failed"` is prose, not a
+ *  wire-typed reason code — a demo fixture rendering a plausible human sentence, same register as
+ *  the rest of this file's demo copy. */
+function demoApprovalOutcomeFor(outcome: DemoWriteOutcome): Pick<DemoWriteApproval, "status" | "executionStatus" | "executionError"> {
+  switch (outcome) {
+    case "rejected": return { status: "rejected", executionStatus: "pending", executionError: null };
+    case "cancelled": return { status: "cancelled", executionStatus: "pending", executionError: null };
+    case "failed": return { status: "approved", executionStatus: "failed", executionError: "Execution failed (demo): the project was archived before this write could run." };
+    case "not_executable": return { status: "approved", executionStatus: "not_applicable", executionError: null };
+    case "executed": default: return { status: "approved", executionStatus: "executed", executionError: null };
+  }
+}
+
 interface DemoWriteIntent {
   id: string;
   tenantId: string;
@@ -87,6 +127,10 @@ interface DemoWriteIntent {
   status: WriteIntentStatus;
   approvalId: string | null;
   expiresAt: string;
+  /** Demo-only: which terminal shape THIS draft's eventual confirm will produce — decided once, at
+   *  draft time, from the drafting message's own text (see `pickDemoWriteOutcome`). Never read by
+   *  anything outside this file; not part of any wire/persisted shape. */
+  demoOutcome: DemoWriteOutcome;
 }
 
 interface DemoWriteApproval {
@@ -651,12 +695,20 @@ export function assistantDemo(method: string, p: string, params: URLSearchParams
   // (D14); demo mode has no second "decide" surface to fake for THIS specific approval shape without
   // duplicating the whole automation-approvals demo store (`demoFixtures.ts`'s own
   // `AUTOMATION_APPROVALS`, a much larger, unrelated fixture this ticket deliberately does not
-  // touch). So confirming a demo write resolves straight to `approved`+`executed` — the SAME
+  // touch). So confirming a demo write resolves IMMEDIATELY to a terminal approval shape — the SAME
   // "resolves instantly, no fake async loop" convention `DemoHandoff` already uses for handoffs,
-  // applied here for the identical reason. This is enough to drive the full card lifecycle
-  // (`awaiting_confirmation -> sent_for_approval` (visible for one tick in the response below,
-  // in case a caller inspects it) `-> executed`) end to end in DEMO_MODE/e2e; the "a HUMAN decides
-  // out of band" half of the story is proven against the LIVE stack (T5), not here.
+  // applied here for the identical reason — rather than faking the out-of-band decision itself.
+  //
+  // WHICH terminal shape is decided by `intent.demoOutcome` (pinned at draft time from the drafting
+  // message's own text — see this file's header above `DemoWriteOutcome`), not hardcoded to
+  // `executed` as it was before: this is what makes `rejected`/`execution_failed`/`cancelled`
+  // reachable by an actual propose->confirm click in a real browser (FE-verification gap #2,
+  // 2026-08-06), not merely by `ProposalCard.test.tsx`'s constructed-props cases. This is enough to
+  // drive the full card lifecycle (`awaiting_confirmation -> sent_for_approval` (visible for one tick
+  // in the response below, in case a caller inspects it) `-> <terminal>`) end to end in
+  // DEMO_MODE/e2e; the "a HUMAN decides out of band" half of the story (a DIFFERENT actor making the
+  // decision after filing, rather than it being pre-baked into the draft) is proven against the LIVE
+  // stack (T5), not here.
   const confirmWriteM = p.match(/^\/api\/([^/]+)\/assistant\/threads\/([^/]+)\/tool-calls\/([^/]+)\/confirm$/);
   if (confirmWriteM && m === "POST") {
     const [, tenantId, threadId, callId] = confirmWriteM;
@@ -677,14 +729,12 @@ export function assistantDemo(method: string, p: string, params: URLSearchParams
       return { status: 409, json: { error: `cannot confirm: this write proposal is '${intent.status}'`, status: intent.status } };
     }
     const approvalId = nid("demo-approval");
-    WRITE_APPROVALS.push({ id: approvalId, tenantId, toolName: intent.toolName, status: "approved", executionStatus: "executed", executionError: null });
+    const outcome = demoApprovalOutcomeFor(intent.demoOutcome);
+    WRITE_APPROVALS.push({ id: approvalId, tenantId, toolName: intent.toolName, ...outcome });
     intent.status = "filed";
     intent.approvalId = approvalId;
     intent.toolArgs = null; // scrubbed the instant the row leaves 'draft', in every direction
-    return ok({
-      intentId: intent.id, status: "filed", approvalId,
-      approval: { status: "approved", executionStatus: "executed", executionError: null },
-    });
+    return ok({ intentId: intent.id, status: "filed", approvalId, approval: outcome });
   }
 
   const dismissWriteM = p.match(/^\/api\/([^/]+)\/assistant\/threads\/([^/]+)\/tool-calls\/([^/]+)\/dismiss$/);
@@ -845,7 +895,7 @@ export function demoAssistantStreamBody(tenantId: string, threadId: string, mess
           WRITE_INTENTS.push({
             id: intentId, tenantId, threadId, toolCallId: writeCallId, ownerUserId: thread.ownerUserId,
             agent: turnMode.agent, toolName: writeTool, toolArgs: realArgs, impact: "high",
-            status: "draft", approvalId: null, expiresAt,
+            status: "draft", approvalId: null, expiresAt, demoOutcome: pickDemoWriteOutcome(sourceText),
           });
           enqueue(`event: confirm_required\ndata: ${JSON.stringify({ callId: writeCallId, toolName: writeTool, intentId, args: redactedArgs, impact: "high", expiresAt })}\n\n`);
           finalText = `I've drafted a ${writeTool} write. Confirm it to send it for approval, or dismiss it — nothing has been changed or sent yet.`;

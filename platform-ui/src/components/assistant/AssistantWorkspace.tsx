@@ -76,6 +76,24 @@ export function AssistantWorkspace({ initialThreads, initialActiveThreadId, vari
   const [activeThreadId, setActiveThreadId] = useState<string | null>(
     initialActiveThreadId ?? (variant === "page" ? initialThreads[0]?.id ?? null : null),
   );
+  // FE-verification gap #1 (2026-08-06) — a real race the new committed Playwright regression spec
+  // caught: `loadThread(id)` is async, and NOTHING previously checked whether `id` was STILL the
+  // active thread by the time its `GET thread` resolved. Switching threads twice in quick
+  // succession (the exact "+ New chat" right after landing on the page" pattern the new spec
+  // exercises) could let an EARLIER, slower `loadThread` call for the thread you just navigated
+  // AWAY from resolve AFTER a newer switch already set `messages` to something else (a fresh
+  // empty array from `handleNew`, or a different thread's history from `selectThread`) — silently
+  // overwriting the current thread's messages with the stale one's. `activeThreadIdRef` is a
+  // synchronously-updated mirror of `activeThreadId` (a `useEffect`-updated ref would still lag
+  // one render behind the very state change this guard needs to observe): every place that changes
+  // `activeThreadId` updates BOTH in the same synchronous call via `setActive`, so `loadThread`
+  // can compare its OWN request's id against the CURRENT truth at resolve time, not a stale
+  // closure over `activeThreadId` captured when the call started.
+  const activeThreadIdRef = useRef(activeThreadId);
+  function setActive(id: string | null) {
+    activeThreadIdRef.current = id;
+    setActiveThreadId(id);
+  }
   const [messages, setMessages] = useState<AssistantMessage[]>([]);
   const [loadingThread, setLoadingThread] = useState(false);
   const [sending, setSending] = useState(false);
@@ -110,7 +128,12 @@ export function AssistantWorkspace({ initialThreads, initialActiveThreadId, vari
   const loadThread = useCallback(async (id: string) => {
     setLoadingThread(true);
     const r = await refreshThreadAction(id);
+    // Staleness guard (see `activeThreadIdRef`'s header above): always clear the busy flag — SOME
+    // fetch resolved and nothing should stay disabled waiting on a request that will never apply —
+    // but never let a request for a thread that is no longer active mutate `messages`/`threads`.
+    const stale = activeThreadIdRef.current !== id;
     setLoadingThread(false);
+    if (stale) return;
     if (!r.ok) {
       toast(r.error);
       return;
@@ -158,7 +181,7 @@ export function AssistantWorkspace({ initialThreads, initialActiveThreadId, vari
     if (id === activeThreadId) return;
     stream.reset();
     setStreamingMessageId(null);
-    setActiveThreadId(id);
+    setActive(id);
     setUrlThreadParam(id);
     void loadThread(id);
   }
@@ -179,7 +202,7 @@ export function AssistantWorkspace({ initialThreads, initialActiveThreadId, vari
     setThreads((prev) => [optimistic, ...prev]);
     stream.reset();
     setStreamingMessageId(null);
-    setActiveThreadId(r.id);
+    setActive(r.id);
     setUrlThreadParam(r.id);
     setMessages([]);
   }
@@ -252,7 +275,7 @@ export function AssistantWorkspace({ initialThreads, initialActiveThreadId, vari
       const next = prevThreads.find((t) => t.id !== id) ?? null;
       stream.reset();
       setStreamingMessageId(null);
-      setActiveThreadId(next?.id ?? null);
+      setActive(next?.id ?? null);
       setUrlThreadParam(next?.id ?? null);
       setMessages([]);
       if (next) void loadThread(next.id);
