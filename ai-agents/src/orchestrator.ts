@@ -187,7 +187,11 @@ export async function runOrchestrator(
         const res = await runWriteAgent(specialist, task!, envelope, deps, opts.tenantId ?? "", provider);
         if (res.status === "suspended") {
           // D14: a high_write suspends the WHOLE goal — now with a durable approval on file.
-          throw new GoalSuspendedError(name!, res.filed.approvalId, blackboard);
+          // T2b note: the orchestrator never passes `fileOnSuspend:false` (out of this ticket's
+          // scope — see the ASST-23 unblock design §7.2.5/T2b), so `res.filed` is always non-null in
+          // practice here; the ternary only satisfies the type now that `WriteAgentResult`'s
+          // `"suspended"` status has two shapes (write-agent.ts).
+          throw new GoalSuspendedError(name!, res.filed ? res.filed.approvalId : null, blackboard);
         }
         const note = res.status === "forced_read_only" ? ` [read-only: ${res.reason}]` : "";
         blackboard.push({ specialist: name!, task: task!, status: "ok", summary: res.run.outcome + note });

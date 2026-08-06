@@ -55,7 +55,9 @@ describe("WS8 write-agent (Step B): D13 provider gate + D14 approval filing", ()
     const d = deps([`{"tool": "tasks.update", "args": {"taskId": "t1", "status": "done"}}`], {});
     const res = await runWriteAgent(highWriteAgent, "triage", envelope, d, "co-1", "gemini");
     expect(res.status).toBe("suspended");
-    if (res.status === "suspended") expect(res.filed.approvalId).toBe("ap-1");
+    // T2b: no `fileOnSuspend` opt passed ⇒ the filed (non-null) shape; optional chaining only
+    // satisfies the type now that `"suspended"` has two shapes.
+    if (res.status === "suspended") expect(res.filed?.approvalId).toBe("ap-1");
     // The high_write itself never executed — only approvals.request was called.
     const toolCalls = d.calls.map((c) => c.name);
     expect(toolCalls).toContain("approvals.request");
@@ -121,6 +123,83 @@ describe("T1 — the agent-side Impact label is translated to the wire vocabular
     expect(res.status).toBe("suspended");
     const filedArgs = d.calls.find((c) => c.name === "approvals.request")!.args;
     expect(REAL_PLATFORM_IMPACTS.has(filedArgs.impact as string)).toBe(true);
-    if (res.status === "suspended") expect(REAL_PLATFORM_IMPACTS.has(res.filed.impact)).toBe(true);
+    if (res.status === "suspended") expect(REAL_PLATFORM_IMPACTS.has(res.filed?.impact ?? "")).toBe(true);
+  });
+});
+
+// T2b — deferred filing (§7.2.5 DELTA, ASST-23 unblock design 2026-08-06). `fileOnSuspend:false` must
+// suspend WITHOUT calling `approvals.request`, and every pre-existing (6-arg / omitted-opt / explicit
+// `true`) call must stay byte-identical to today.
+describe("T2b — runWriteAgent(opts.fileOnSuspend): deferred filing, invariant-preserving", () => {
+  it("default (no 7th arg at all) still files immediately — byte-identical to the pre-T2b signature", async () => {
+    const d = deps([`{"tool": "tasks.update", "args": {"taskId": "t1", "status": "done"}}`], {});
+    const res = await runWriteAgent(highWriteAgent, "triage", envelope, d, "co-1", "gemini");
+    expect(res.status).toBe("suspended");
+    if (res.status === "suspended") expect(res.filed).not.toBeNull();
+    expect(d.calls.map((c) => c.name)).toContain("approvals.request");
+  });
+
+  it("opts:{} (present but empty) also files immediately — the default lives inside runWriteAgent, not at the call site", async () => {
+    const d = deps([`{"tool": "tasks.update", "args": {"taskId": "t1", "status": "done"}}`], {});
+    const res = await runWriteAgent(highWriteAgent, "triage", envelope, d, "co-1", "gemini", {});
+    expect(res.status).toBe("suspended");
+    if (res.status === "suspended") expect(res.filed).not.toBeNull();
+    expect(d.calls.map((c) => c.name)).toContain("approvals.request");
+  });
+
+  it("fileOnSuspend:true explicitly behaves identically to the default (files immediately)", async () => {
+    const d = deps([`{"tool": "tasks.update", "args": {"taskId": "t1", "status": "done"}}`], {});
+    const res = await runWriteAgent(highWriteAgent, "triage", envelope, d, "co-1", "gemini", { fileOnSuspend: true });
+    expect(res.status).toBe("suspended");
+    if (res.status === "suspended") {
+      expect(res.filed).not.toBeNull();
+      expect(res.filed?.approvalId).toBe("ap-1");
+    }
+    expect(d.calls.map((c) => c.name)).toContain("approvals.request");
+  });
+
+  it("fileOnSuspend:false suspends WITHOUT filing — approvals.request is NEVER called, and no approval id exists", async () => {
+    const d = deps([`{"tool": "tasks.update", "args": {"taskId": "t1", "status": "done"}}`], {});
+    const res = await runWriteAgent(highWriteAgent, "triage", envelope, d, "co-1", "gemini", { fileOnSuspend: false });
+    expect(res.status).toBe("suspended");
+    if (res.status === "suspended") {
+      expect(res.filed).toBeNull();
+      if (res.filed === null) {
+        expect(res.intent).toEqual({ tool: "tasks.update", impact: "high", args: { taskId: "t1", status: "done" } });
+      }
+    }
+    // The zero-filing assertion: the mock is armed to succeed (`approvals.request` would return an id
+    // if called), yet it is never invoked — the intent capture path never reaches the hub at all.
+    expect(d.calls).toHaveLength(0);
+  });
+
+  it("fileOnSuspend:false reuses toWireImpact — the intent's impact is the SAME mapping fileApproval would have sent, never the raw agent-side label", async () => {
+    const d = deps([`{"tool": "tasks.update", "args": {"taskId": "t1", "status": "done"}}`], {});
+    const res = await runWriteAgent(highWriteAgent, "triage", envelope, d, "co-1", "gemini", { fileOnSuspend: false });
+    expect(res.status).toBe("suspended");
+    if (res.status === "suspended" && res.filed === null) {
+      expect(res.intent.impact).toBe(toWireImpact("high_write"));
+      expect(res.intent.impact).toBe("high");
+      expect(res.intent.impact).not.toBe("high_write");
+    }
+  });
+
+  it("fileOnSuspend:false still respects D13 — an un-evaled provider is forced read-only BEFORE the write gate is ever reached", async () => {
+    const d = deps([`{"tool": "tasks.list", "args": {}}`, `{"final": "read-only summary"}`], { "tasks.list": "[]" });
+    const res = await runWriteAgent(highWriteAgent, "triage", envelope, d, "co-1", "claude", { fileOnSuspend: false }); // claude not evaled
+    expect(res.status).toBe("forced_read_only");
+    expect(d.calls.map((c) => c.name)).not.toContain("tasks.update");
+    expect(d.calls.map((c) => c.name)).not.toContain("approvals.request");
+  });
+
+  it("fileOnSuspend has no effect on a `completed` (all-reads) run — the option is only consulted on the ApprovalRequiredError catch branch", async () => {
+    const agent = { ...taskTriager, evaledProviders: ["echo"] };
+    const d = deps(
+      [`{"tool": "tasks.list", "args": {}}`, `{"final": "no overdue tasks"}`],
+      { "tasks.list": "[]" },
+    );
+    const res = await runWriteAgent(agent, "triage", envelope, d, "co-1", "echo", { fileOnSuspend: false });
+    expect(res.status).toBe("completed");
+    expect(d.calls.map((c) => c.name)).not.toContain("approvals.request");
   });
 });

@@ -31,7 +31,13 @@ const run =
           outcome:
             r.status === "completed" || r.status === "forced_read_only"
               ? r.run.outcome + (r.status === "forced_read_only" ? `\n(note: ${r.reason})` : "")
-              : `suspended for approval — filed ${r.filed.approvalId ?? "(id unknown)"} for ${r.filed.tool} (${r.filed.impact})`,
+              // T2b: the CLI never requests deferred filing (`fileOnSuspend:false` is out of this
+              // ticket's scope for direct callers), so `r.filed` is always non-null here in practice —
+              // the branch below is defensive, satisfying the type now that `WriteAgentResult`'s
+              // `"suspended"` status has two shapes (write-agent.ts).
+              : r.filed
+                ? `suspended for approval — filed ${r.filed.approvalId ?? "(id unknown)"} for ${r.filed.tool} (${r.filed.impact})`
+                : `suspended awaiting confirmation for ${r.intent.tool} (${r.intent.impact}) — not yet filed`,
         }))
       : runAgent(specialists[name], goal, { provider, externalId }, liveDeps).then((r) => ({
           header: `${name} (${r.steps.length} steps)`,

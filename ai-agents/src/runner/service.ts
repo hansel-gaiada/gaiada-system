@@ -30,7 +30,7 @@ import {
   PlannerProtocolError,
   type OrchestratorDef,
 } from "../orchestrator";
-import { runWriteAgent, type WriteAgentResult } from "../write-agent";
+import { runWriteAgent, type WriteAgentResult, type SuspendedIntent } from "../write-agent";
 import { traceRun, type AgentTrace, type TraceStatus } from "../evals/trace";
 import { specialists, writeSpecialists, supervisor } from "../specialists";
 import { ObservabilityCollector } from "../obs/collector";
@@ -49,6 +49,11 @@ export const runnerConfig = {
   maxQueue: Number(process.env.AGENT_MAX_QUEUE ?? 10),
   // Optional override of the provider the D13 write gate sees; else deps.lastProvider() drives it.
   servingProvider: process.env.AGENT_SERVING_PROVIDER || undefined,
+  // T2b (§7.2.4.1/§7.2.5) — how long a `fileOnSuspend:false` intent survives in the in-memory TTL map
+  // before it can no longer be handed back on `GET /goals/:id`. Purely a raw-args retention bound:
+  // correctness never depends on it (a confirm-time filer re-checks server-side preconditions, same as
+  // every other approval). Default ~15 min per the design's own number.
+  intentTtlMs: Number(process.env.AGENT_INTENT_TTL_MS ?? 15 * 60 * 1000),
 };
 
 function safeEqual(a: string, b: string): boolean {
@@ -109,7 +114,21 @@ function mapWriteResult(res: WriteAgentResult): FinishGoalPatch {
     // succeeded) but error_kind surfaces the downgrade — never silently widened to a write success.
     return { status: "ok", outcome: `${res.run.outcome}\n[note: ${res.reason}]`, errorKind: "forced_read_only" };
   }
-  // suspended: a durable approval is already filed (WS4 inbox) via runWriteAgent → hub approvals.request.
+  // res.status === "suspended" from here — TWO shapes since T2b (write-agent.ts's WriteAgentResult doc).
+  // Handle BOTH explicitly; do not fall through assuming `filed` is always present.
+  if (res.filed === null) {
+    // T2b (`fileOnSuspend:false`): suspended WITHOUT filing. No approvalId — nothing was filed. The
+    // outcome text deliberately carries no raw args: this patch is what `store.finishGoal` persists to
+    // the agents DB, which must never hold raw args (see `SuspendedIntent`'s doc) — `processGoal` parks
+    // the real intent (incl. args) in the in-memory TTL map, never in this patch.
+    return {
+      status: "suspended",
+      outcome: `suspended awaiting confirmation for ${res.intent.tool} (${res.intent.impact}) — not yet filed`,
+      errorKind: "approval_required",
+    };
+  }
+  // suspended, filed (the default path): a durable approval is already filed (WS4 inbox) via
+  // runWriteAgent → hub approvals.request.
   return {
     status: "suspended",
     outcome: `suspended for approval — filed ${res.filed.approvalId ?? "(id unknown)"} for ${res.filed.tool} (${res.filed.impact})`,
@@ -189,6 +208,23 @@ export function buildRunnerApp(deps: RunnerDeps): FastifyInstance {
   const episodic = deps.episodic;
   const reg = deps.registry ?? defaultRegistry;
 
+  // T2b — two in-memory, per-process maps. NEITHER is agents-DB state (no migration in this ticket);
+  // both are exactly as durable as the goal lifecycle they serve, and that is deliberate: a runner
+  // restart already kills in-flight/queued goals (`sweepInterrupted` on boot), so losing either map on
+  // restart is not a new failure mode — see write-agent.ts's `SuspendedIntent` doc.
+  //
+  // `goalOptionsById` — the per-goal `fileOnSuspend` request from POST /goals, read once by
+  // `processGoal` and then discarded. Only NON-default (`false`) entries are ever stored: every goal
+  // that omits the flag (or sends `true`) needs no entry at all, because `processGoal` falls back to
+  // `true` when the map has nothing — so a goal that never requested deferred filing costs zero memory
+  // here, and the fallback keeps every default-path goal byte-identical even if this map is empty.
+  const goalOptionsById = new Map<string, { fileOnSuspend: false }>();
+  // `suspendedIntentsById` — populated ONLY when a goal suspends with `filed: null` (T2b's deferred
+  // path). `GET /goals/:id` merges an unexpired entry in as `suspendedIntent`; an expired entry is
+  // lazily evicted on that same read (no background sweep — see the design's §7.2.3 "lazy reap" idiom,
+  // applied here to the analogous in-memory case).
+  const suspendedIntentsById = new Map<string, { intent: SuspendedIntent; expiresAt: number }>();
+
   const app = Fastify({ logger: fastifyLoggerOption() as never });
 
   function authorized(req: FastifyRequest): boolean {
@@ -260,7 +296,16 @@ export function buildRunnerApp(deps: RunnerDeps): FastifyInstance {
 
         const writeDef = reg.writeSpecialists[g.agent];
         if (writeDef) {
-          const res = await runWriteAgent(writeDef, g.goal, envelope, counted, g.tenantId, provider ?? "echo");
+          // T2b — read-then-discard: the option is only needed for THIS run, and the map only ever
+          // holds `false` entries (see the map's own doc), so `.get(...) ?? true` fallback keeps every
+          // default-path goal identical whether or not it was ever inserted.
+          const fileOnSuspend = goalOptionsById.get(g.id)?.fileOnSuspend ?? true;
+          goalOptionsById.delete(g.id);
+          const res = await runWriteAgent(writeDef, g.goal, envelope, counted, g.tenantId, provider ?? "echo", { fileOnSuspend });
+          if (res.status === "suspended" && res.filed === null) {
+            // T2b: park the intent (incl. REAL args) in-memory only — never in `patch`/the goal row.
+            suspendedIntentsById.set(g.id, { intent: res.intent, expiresAt: Date.now() + cfg.intentTtlMs });
+          }
           const mapped = mapWriteResult(res);
           if (res.status === "completed" || res.status === "forced_read_only") {
             const traceStatus: TraceStatus = "ok";
@@ -309,6 +354,9 @@ export function buildRunnerApp(deps: RunnerDeps): FastifyInstance {
       agent?: string;
       envelope?: { provider?: string; externalId?: string };
       requestedBy?: string;
+      /** T2b (§7.2.5) — default TRUE (see write-agent.ts's `WriteAgentOptions` doc). Every existing
+       *  caller omits this field and keeps today's file-immediately behaviour, byte-for-byte. */
+      fileOnSuspend?: boolean;
     };
   }>("/goals", async (req, reply) => {
     if (!authorized(req)) return reply.code(401).send({ error: "unauthorized" });
@@ -321,6 +369,8 @@ export function buildRunnerApp(deps: RunnerDeps): FastifyInstance {
     if (!known) return reply.code(400).send({ error: `unknown agent: ${agent}` });
     if (!b.envelope?.provider || !b.envelope?.externalId)
       return reply.code(400).send({ error: "envelope {provider, externalId} required" });
+    if (b.fileOnSuspend !== undefined && typeof b.fileOnSuspend !== "boolean")
+      return reply.code(400).send({ error: "fileOnSuspend must be boolean" });
 
     // Capacity check BEFORE inserting a row — a full queue is a clean 429, no orphaned goal.
     if (queue.size().queued >= cfg.maxQueue) return reply.code(429).send({ error: "goal queue full" });
@@ -334,9 +384,12 @@ export function buildRunnerApp(deps: RunnerDeps): FastifyInstance {
       requestedBy: b.requestedBy,
       budget: budgetForAgent(agent, reg),
     });
+    // T2b — only a non-default request costs a map entry (see `goalOptionsById`'s own doc above).
+    if (b.fileOnSuspend === false) goalOptionsById.set(id, { fileOnSuspend: false });
     const accepted = queue.enqueue(id);
     if (!accepted) {
       // Lost a race for the last slot — mark the just-inserted goal interrupted so it isn't orphaned.
+      goalOptionsById.delete(id); // T2b: never consumed by processGoal — don't leak the entry
       await store.finishGoal(id, { status: "interrupted", outcome: "queue full at enqueue" });
       return reply.code(429).send({ error: "goal queue full" });
     }
@@ -357,6 +410,15 @@ export function buildRunnerApp(deps: RunnerDeps): FastifyInstance {
     if (!tenant || !UUID_RE.test(tenant)) return reply.code(400).send({ error: "tenant (uuid) required" });
     const goal = await store.getGoal(req.params.id, tenant);
     if (!goal) return reply.code(404).send({ error: "goal not found" }); // tenant mismatch → 404, no probing
+    // T2b — merge the in-memory intent in ONLY after the tenant-scoped lookup above has already
+    // succeeded: the map is keyed by goalId alone (no tenant column), so gating on `goal` being
+    // non-null first is what stops a wrong-tenant request from ever reaching this lookup at all — the
+    // existing 404-before-probing guarantee extends to `suspendedIntent` for free, not by a second check.
+    const entry = suspendedIntentsById.get(req.params.id);
+    if (entry) {
+      if (Date.now() < entry.expiresAt) return { ...goal, suspendedIntent: entry.intent };
+      suspendedIntentsById.delete(req.params.id); // lazy TTL eviction — no background sweep (see the map's doc)
+    }
     return goal;
   });
 

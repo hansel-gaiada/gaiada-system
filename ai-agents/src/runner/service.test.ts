@@ -161,7 +161,7 @@ function registry(over: Partial<AgentRegistry> = {}): AgentRegistry {
 }
 
 let apps: FastifyInstance[] = [];
-function build(opts: { deps: AgentDeps; reg?: AgentRegistry; token?: string; servingProvider?: string; maxConcurrent?: number; maxQueue?: number; collector?: ObservabilityCollector; episodic?: EpisodicStore; store?: MemGoalStore }) {
+function build(opts: { deps: AgentDeps; reg?: AgentRegistry; token?: string; servingProvider?: string; maxConcurrent?: number; maxQueue?: number; collector?: ObservabilityCollector; episodic?: EpisodicStore; store?: MemGoalStore; intentTtlMs?: number }) {
   const store = opts.store ?? new MemGoalStore();
   const app = buildRunnerApp({
     store,
@@ -174,6 +174,11 @@ function build(opts: { deps: AgentDeps; reg?: AgentRegistry; token?: string; ser
       servingProvider: opts.servingProvider,
       maxConcurrent: opts.maxConcurrent ?? 1,
       maxQueue: opts.maxQueue ?? 10,
+      // T2b: only override when the test explicitly asks — omitting the key entirely (rather than
+      // passing `intentTtlMs: undefined`) keeps `buildRunnerApp`'s `{...runnerConfig, ...deps.config}`
+      // spread from clobbering the real default with `undefined` (which would make every non-TTL test
+      // silently expire intents immediately, since `Date.now() < NaN` is always false).
+      ...(opts.intentTtlMs !== undefined ? { intentTtlMs: opts.intentTtlMs } : {}),
     },
   });
   apps.push(app);
@@ -294,6 +299,140 @@ describe("agent-runner service", () => {
     expect(g.status).toBe("suspended");
     expect(g.approvalId).toBe("appr-reconcile");
     expect(g.errorKind).toBe("approval_required");
+  });
+
+  // ══════════════════════════════════════════════════════════════════════════════════════════════════
+  // T2b — `fileOnSuspend: false` (§7.2.5 DELTA, ASST-23 unblock design 2026-08-06): the confirm-chip
+  // flow's runner leg. A goal may request DEFERRED filing — suspend WITHOUT calling
+  // `approvals.request`, park the real args in an in-memory TTL map, and hand them back on
+  // `GET /goals/:id` as `suspendedIntent`. Every test below drives the REAL HTTP path end to end
+  // (`buildRunnerApp` → `POST /goals` → `processGoal` → `runWriteAgent` → `GET /goals/:id`), never the
+  // pure function in isolation — the same discipline the D14-14 block above already uses.
+  // ══════════════════════════════════════════════════════════════════════════════════════════════════
+  it("T2b default (fileOnSuspend omitted): byte-identical to pre-T2b — files immediately, no suspendedIntent field ever appears", async () => {
+    const { app } = build({
+      deps: scripted(['{"tool":"danger.write","args":{"x":1}}'], { "approvals.request": '{"id":"appr-default"}' }),
+      servingProvider: "echo",
+    });
+    const { id } = (await trigger(app, { goal: "do the write", agent: "test-writer" })).json() as { id: string };
+    await idle(app);
+    const g = (await goalStatus(app, id)).json() as GoalDetail & { suspendedIntent?: unknown };
+    expect(g.status).toBe("suspended");
+    expect(g.approvalId).toBe("appr-default");
+    expect(g.errorKind).toBe("approval_required");
+    expect(g.suspendedIntent).toBeUndefined(); // filed path never populates the intent map
+  });
+
+  it("T2b fileOnSuspend:false — suspends WITHOUT filing (approvals.request never called), no approvalId, and GET /goals/:id merges suspendedIntent", async () => {
+    const deps = scripted(['{"tool":"danger.write","args":{"x":1,"note":"secret-plan"}}'], { "approvals.request": '{"id":"should-never-file"}' });
+    const { app } = build({ deps, servingProvider: "echo" });
+    const { id } = (await trigger(app, { goal: "do the write", agent: "test-writer", fileOnSuspend: false })).json() as { id: string };
+    await idle(app);
+    const g = (await goalStatus(app, id)).json() as GoalDetail & { suspendedIntent?: { tool: string; impact: string; args: Record<string, unknown> } };
+    expect(g.status).toBe("suspended");
+    expect(g.errorKind).toBe("approval_required");
+    expect(g.approvalId).toBeNull(); // nothing was filed, so there is no approval id yet
+    expect(deps.calls.map((c) => c.name)).not.toContain("approvals.request"); // never filed
+    expect(g.suspendedIntent).toEqual({ tool: "danger.write", impact: "high", args: { x: 1, note: "secret-plan" } });
+  });
+
+  it("T2b: the agents DB NEVER holds the raw args — the goal row itself carries no trace of them, even though GET merges them in from the in-memory map", async () => {
+    const MARKER = "MARKER-do-not-persist-me-xyz";
+    const deps = scripted(['{"tool":"danger.write","args":{"payload":"' + MARKER + '"}}'], {});
+    const { app, store } = build({ deps, servingProvider: "echo" });
+    const { id } = (await trigger(app, { goal: "do the write", agent: "test-writer", fileOnSuspend: false })).json() as { id: string };
+    await idle(app);
+    // Read the STORE ROW DIRECTLY (not the HTTP response) — this is the "agents-DB never holds raw
+    // args" proof: the store is the thing the ticket forbids from ever seeing the marker.
+    const row = store.goals.get(id)!;
+    expect(JSON.stringify(row)).not.toContain(MARKER);
+    // The HTTP GET, by contrast, DOES legitimately carry it (custody chain §7.2.4: the runner hands the
+    // real args back to its caller on this one read, which is what lets a confirm-time filer use them).
+    const g = (await goalStatus(app, id)).json() as GoalDetail & { suspendedIntent?: { args: Record<string, unknown> } };
+    expect(JSON.stringify(g.suspendedIntent)).toContain(MARKER);
+  });
+
+  it("T2b fileOnSuspend:true explicitly — identical to the default (files immediately)", async () => {
+    const deps = scripted(['{"tool":"danger.write","args":{"x":1}}'], { "approvals.request": '{"id":"appr-explicit-true"}' });
+    const { app } = build({ deps, servingProvider: "echo" });
+    const { id } = (await trigger(app, { goal: "do the write", agent: "test-writer", fileOnSuspend: true })).json() as { id: string };
+    await idle(app);
+    const g = (await goalStatus(app, id)).json() as GoalDetail & { suspendedIntent?: unknown };
+    expect(g.status).toBe("suspended");
+    expect(g.approvalId).toBe("appr-explicit-true");
+    expect(deps.calls.map((c) => c.name)).toContain("approvals.request");
+    expect(g.suspendedIntent).toBeUndefined();
+  });
+
+  it("T2b: an unresolved high_write still ends the goal exactly once regardless of fileOnSuspend — ≤1 intent per message holds (the maxToolCalls budget is what stops a second attempt within the same run)", async () => {
+    // test-writer's maxToolCalls is 4, but the FIRST high_write throws ApprovalRequiredError and the
+    // catch branch returns immediately — there is structurally no second attempt within one run.
+    const deps = scripted(['{"tool":"danger.write","args":{"x":1}}', '{"tool":"danger.write","args":{"x":2}}'], {});
+    const { app } = build({ deps, servingProvider: "echo" });
+    const { id } = (await trigger(app, { goal: "do the write", agent: "test-writer", fileOnSuspend: false })).json() as { id: string };
+    await idle(app);
+    const g = (await goalStatus(app, id)).json() as GoalDetail & { suspendedIntent?: { args: Record<string, unknown> } };
+    expect(g.status).toBe("suspended");
+    expect(g.suspendedIntent?.args).toEqual({ x: 1 }); // the FIRST attempt, never a second
+    expect(deps.calls).toHaveLength(0); // no tool ever ran, no approval ever filed
+  });
+
+  it("T2b: POST /goals rejects a non-boolean fileOnSuspend (400) — never silently coerced", async () => {
+    const { app } = build({ deps: scripted(['{"final":"x"}']) });
+    const res = await app.inject({
+      method: "POST",
+      url: "/goals",
+      headers: AUTH,
+      payload: { tenantId: TENANT, goal: "hi", agent: "test-writer", envelope: { provider: "platform", externalId: "u1" }, fileOnSuspend: "false" },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it("T2b: intent TTL expiry — suspendedIntent disappears from GET /goals/:id after expiry, distinguishable from a goal that never existed (404) and from the still-suspended goal itself (200, fields intact, field just absent)", async () => {
+    const deps = scripted(['{"tool":"danger.write","args":{"x":1}}'], {});
+    const { app } = build({ deps, servingProvider: "echo", intentTtlMs: 15 });
+    const { id } = (await trigger(app, { goal: "do the write", agent: "test-writer", fileOnSuspend: false })).json() as { id: string };
+    await idle(app);
+
+    // Immediately after suspension: present.
+    const fresh = (await goalStatus(app, id)).json() as GoalDetail & { suspendedIntent?: unknown };
+    expect(fresh.suspendedIntent).toBeDefined();
+
+    // Wait past the (tiny, test-only) TTL.
+    await new Promise((r) => setTimeout(r, 40));
+
+    const expired = (await goalStatus(app, id)).json() as GoalDetail & { suspendedIntent?: unknown };
+    // Distinguishable from "never existed": the goal itself is still a real 200 with its status/error
+    // fields intact — only the intent is gone.
+    expect(expired.status).toBe("suspended");
+    expect(expired.errorKind).toBe("approval_required");
+    expect(expired.approvalId).toBeNull();
+    expect(expired.suspendedIntent).toBeUndefined();
+    // A genuinely nonexistent goal 404s instead — the two failure modes are NOT the same shape.
+    expect((await goalStatus(app, randomUUID())).statusCode).toBe(404);
+  });
+
+  it("T2b: a supervisor-delegated write is unaffected by fileOnSuspend — the flag is only consulted for a TOP-LEVEL write-specialist goal (out of scope for delegated sub-runs per the ticket)", async () => {
+    const sup: OrchestratorDef = {
+      name: "supervisor", systemPrompt: "sup", specialists: { "test-writer": writer },
+      maxPlannerSteps: 5, maxSubRuns: 3, goalBudget: { modelCalls: 20, toolCalls: 20 },
+    };
+    const { app } = build({
+      reg: registry({ supervisor: sup }),
+      servingProvider: "echo",
+      deps: scripted(
+        ['{"assign":{"specialist":"test-writer","task":"write it"}}', '{"tool":"danger.write","args":{}}'],
+        { "approvals.request": '{"id":"appr-sup"}' },
+      ),
+    });
+    // fileOnSuspend:false on a SUPERVISOR goal — the orchestrator's internal runWriteAgent call never
+    // sees this flag (it is not wired through delegation), so the sub-run still files immediately.
+    const { id } = (await trigger(app, { goal: "delegate a write", agent: "supervisor", fileOnSuspend: false })).json() as { id: string };
+    await idle(app);
+    const g = (await goalStatus(app, id)).json() as GoalDetail & { suspendedIntent?: unknown };
+    expect(g.status).toBe("suspended");
+    expect(g.approvalId).toBe("appr-sup"); // filed, not deferred — proves the flag didn't silently apply
+    expect(g.suspendedIntent).toBeUndefined();
   });
 
   // ══════════════════════════════════════════════════════════════════════════════════════════════════

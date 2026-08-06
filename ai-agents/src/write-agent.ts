@@ -133,6 +133,30 @@ export interface FiledApproval {
   impact: string;
 }
 
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+// T2b — deferred filing (§7.2.5 of the 2026-08-06 ASST-23 unblock design's DELTA). The owner overrode
+// OQ-2: an in-thread confirm chip ships before a proposal is filed. `runWriteAgent` gains a per-call
+// `fileOnSuspend` option (default TRUE — see the function's own doc); when it is explicitly `false`,
+// a suspended `high_write` is captured as a `SuspendedIntent` INSTEAD of being filed through
+// `fileApproval`. Nothing here calls `approvals.request` on that path — no decider bell/mail exists
+// until something downstream (the confirm endpoint, out of THIS repo's scope) files it for real.
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+
+/** T2b — a suspended `high_write` that was NOT filed (`fileOnSuspend:false`). `impact` is already the
+ *  WIRE label (`toWireImpact(err.impact)` — the SAME exported helper `fileApproval` uses below, reused
+ *  rather than duplicated), because this crosses a process boundary too: `runner/service.ts` hands it
+ *  back on `GET /goals/:id` as `suspendedIntent`, and a future confirm-time filer must receive the
+ *  exact same wire-legal value `fileApproval` would have sent — never the raw agent-side `"high_write"`
+ *  label. `args` are the model-composed tool args VERBATIM — this is the one place `ai-agents` returns
+ *  them to a caller instead of filing them; the caller (the runner service, then platform-nest) is
+ *  responsible for their custody from here (see the design's §7.2.4 custody chain) — `ai-agents` itself
+ *  never persists them (no agents-DB migration in this ticket; the runner keeps them in-memory only). */
+export interface SuspendedIntent {
+  tool: string;
+  impact: WireImpact;
+  args: Record<string, unknown>;
+}
+
 export type WriteAgentResult =
   /** D14-10: `resumed` is present ONLY when this run turned one or more decided approvals into
    *  progress — the consumed-result path made visible at the result level instead of buried in
@@ -140,7 +164,14 @@ export type WriteAgentResult =
    *  exhausts this union with an `else`, so a fourth variant would silently be treated as
    *  `suspended` and dereference a `filed` that isn't there. Additive field, no consumer breaks. */
   | { status: "completed"; run: AgentRun; resumed?: ApprovalConsumption[] }
+  /** The pre-T2b shape: filed immediately (the `fileOnSuspend` default, or an explicit `true`). */
   | { status: "suspended"; filed: FiledApproval }
+  /** T2b (`fileOnSuspend:false` only): suspended WITHOUT filing. `filed: null` is the discriminant a
+   *  consumer switches on within the shared `"suspended"` status — see `runner/service.ts`'s
+   *  `mapWriteResult`, which now handles BOTH `suspended` shapes explicitly rather than assuming
+   *  `filed` is always present (the exact hazard the comment above used to warn about; it is now
+   *  handled, not just documented). */
+  | { status: "suspended"; filed: null; intent: SuspendedIntent }
   | { status: "forced_read_only"; run: AgentRun; reason: string };
 
 /** File a pending approval for a suspended high_write, via the hub tool, under the caller's OBO. */
@@ -178,10 +209,27 @@ export async function fileApproval(
   return { approvalId, tool: err.tool, impact: wireImpact };
 }
 
+/** T2b — per-goal options for {@link runWriteAgent}. */
+export interface WriteAgentOptions {
+  /**
+   * Whether a suspended `high_write` is filed through the hub immediately (the historical, and
+   * default, behaviour) or merely captured as a {@link SuspendedIntent} for a caller to file later
+   * (the confirm-chip flow, §7.2.5). Defaults to `true` so every pre-T2b caller — the CLI, the
+   * orchestrator's delegated writes, every existing test — stays BYTE-IDENTICAL: an omitted 7th
+   * argument, an omitted `fileOnSuspend` key, and an explicit `fileOnSuspend: true` all take the exact
+   * same branch below.
+   */
+  fileOnSuspend?: boolean;
+}
+
 /**
  * Run a specialist that may hold write capability. `servingProvider` is the provider the Gateway will
  * use for this run (the caller supplies it — auto-detecting it from the Gateway response is the one
  * remaining runtime wire, see the WS8 plan). Enforces D13 (provider gate) then D14 (approval filing).
+ *
+ * T2b: `opts.fileOnSuspend` (default `true`) controls what happens when a `high_write` suspends with
+ * no decided approval bound to it (`ApprovalRequiredError`). `false` skips `fileApproval` entirely and
+ * returns the intent instead — see `SuspendedIntent`'s doc for why nothing here persists it.
  */
 export async function runWriteAgent(
   def: AgentDef,
@@ -190,7 +238,9 @@ export async function runWriteAgent(
   deps: AgentDeps,
   tenantId: string,
   servingProvider: string,
+  opts: WriteAgentOptions = {},
 ): Promise<WriteAgentResult> {
+  const fileOnSuspend = opts.fileOnSuspend ?? true;
   if (isWriteCapable(def) && !(def.evaledProviders ?? []).includes(servingProvider)) {
     // D13: this provider has not been evaled for this write-capable agent — force read-only.
     const run = await runAgent(readOnlyProjection(def), goal, envelope, deps);
@@ -210,6 +260,12 @@ export async function runWriteAgent(
     // first), so this filing can no longer duplicate a decision a human already made.
     // ApprovalNotResumableError is deliberately NOT caught here — see this file's header.
     if (err instanceof ApprovalRequiredError) {
+      if (!fileOnSuspend) {
+        // T2b: capture, don't file. Same wire-impact mapping `fileApproval` uses — ONE helper, reused,
+        // not duplicated — so a later filer (outside this repo) receives the exact value `fileApproval`
+        // would have sent for the identical error.
+        return { status: "suspended", filed: null, intent: { tool: err.tool, impact: toWireImpact(err.impact), args: err.args } };
+      }
       const filed = await fileApproval(deps, envelope, tenantId, def.name, err);
       return { status: "suspended", filed };
     }

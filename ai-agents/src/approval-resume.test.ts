@@ -109,7 +109,9 @@ describe("D14-10 — the runner consults before throwing", () => {
     const d = harness([wantsWrite], [{ match: "none" }]);
     const res = await runWriteAgent(highWriteAgent, "triage", envelope, d, "co-1", "gemini");
     expect(res.status).toBe("suspended");
-    if (res.status === "suspended") expect(res.filed.approvalId).toBe("ap-new");
+    // T2b: this call passes no `fileOnSuspend` opt, so `res.filed` is the non-null (filed) shape —
+    // optional chaining only satisfies the type now that `"suspended"` has two shapes.
+    if (res.status === "suspended") expect(res.filed?.approvalId).toBe("ap-new");
     expect(d.calls.map((c) => c.name)).toEqual(["approvals.request"]);
     expect(d.consults).toHaveLength(1);
   });
