@@ -811,6 +811,23 @@ services:
       # carries the triggering human's envelope, never an identity of its own. Without this the whole
       # agent-write half of D14 stays inert.
       HUB_ASSURANCE_TOKEN: ${HUB_ASSURANCE_TOKEN:-}
+      # T6 (ASST-23) — the provider the D13 write gate sees. This is NOT cosmetic: `service.ts` resolves
+      # `cfg.servingProvider ?? deps.lastProvider() ?? null` and then passes `provider ?? "echo"` into
+      # runWriteAgent. Left unset, a runner that has not yet observed a real provider hands the write
+      # gate `"echo"`, which is NOT in task-filer's `evaledProviders: ["openai"]` — so D13 correctly
+      # STRIPS its write tools and forces the agent read-only. The assistant would then never propose a
+      # write, and the failure is SILENT: no error, no log, just a chat that quietly only ever reads,
+      # while every local test passes because the tests pass a provider explicitly.
+      #
+      # `openai` matches the taskFiler enrollment (ai-agents/src/specialists.ts) and the pre-existing
+      # taskTriager precedent. The value names the ENROLLED provider identity the eval suite certified,
+      # not the vendor actually serving — the Gateway's own chain decides that.
+      #
+      # Defaulted (`:-openai`) rather than required (`:?`) on purpose: an absent value must not stop the
+      # whole stack from coming up over one agent capability. This is the same class of trap as
+      # APPROVAL_GRANT_SECRET, which WAS passed through for three services while `.env` simply had no
+      # value — so every D14 grant was rejected until 2026-08-06. A passthrough line is not a set value.
+      AGENT_SERVING_PROVIDER: ${AGENT_SERVING_PROVIDER:-openai}
     depends_on:
       postgres:
         condition: service_healthy
