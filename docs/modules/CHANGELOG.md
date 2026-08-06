@@ -1976,6 +1976,36 @@ Alertmanager was already running with 3 valid receivers.
 - **Next:** deploy to a real host; tune SLOs on prod traffic.
 
 ## infra
+### [0.8.4] — 2026-08-06 · PROTOTYPED (REL-01 — report-renderer SBOM scoped; the attest safety net removed)
+
+`report-renderer` is the **only** image in the estate built `FROM
+mcr.microsoft.com/playwright:v1.61.1-noble`, so SBOM'ing the built image cataloged the whole
+Chromium/Firefox/WebKit + Debian base on top of the app. That produced by far the largest predicate of
+the nine components, and Rekor rejected it **twice** on `alpha-01.017.0040a`
+(`giving up after 4 attempt(s)`, each after cosign's own 4 retries) before accepting it once on the
+`0040b` re-cut with no code change — so **fragility under Rekor load, not a deterministic fault**. An
+earlier diagnosis of mine called it deterministic; that was wrong and is corrected in the workflow
+comment.
+
+- **Scoped to source** (`./report-renderer`, syft `dir:` via `anchore/sbom-action`'s `path` input) for
+  this component only, via a matrix conditional; the other eight still scan the built image.
+  Measured locally against the same base image: **17,080,639 bytes / 826 packages →
+  451,910 bytes / 229 packages, ~38x**. Microsoft owns the base image's provenance and we neither
+  control nor patch those OS packages, so cataloguing them added bulk without adding a control.
+- **`SYFT_JAVASCRIPT_INCLUDE_DEV_DEPENDENCIES=true` is required, not cosmetic.** `tsx` is this image's
+  actual `CMD` yet is a `devDependency`, and syft drops dev deps by default — a plain source scan
+  would have silently omitted the real runtime entrypoint. The Dockerfile's `npm ci` has no
+  `--omit=dev`, so dev deps genuinely ship; the SBOM should describe the container, not its intent.
+  Spot-checked: `playwright`, `express`, `dotenv`, `tsx`, `typescript`, `vitest`, `supertest` all
+  present with real versions — scoped, not hollowed out.
+- **`continue-on-error` removed** from the SBOM attest step, matching the sequencing already used for
+  SLSA provenance: pull the net only once the fix is demonstrated, so a genuine future attestation
+  failure is loud again **for every component**. Someone had added it to unblock `0040b`, which
+  silently disabled a supply-chain gate estate-wide.
+- **Honest limit:** local reproduction, not a live Rekor round-trip. The next release is the real
+  test, and it will now **fail loud** rather than degrade silently. If Rekor still rejects, re-add
+  `continue-on-error: true` and reopen the workflow note rather than re-diagnosing from scratch.
+
 ### [0.8.3] — 2026-08-06 · PROTOTYPED (INFRA-01 — the test-database leak, fixed at the root)
 
 `teardownTestDb()` in `platform-nest/src/testing/setup.ts` closed its pools and **never dropped the

@@ -76,36 +76,75 @@ jobs:
         uses: sigstore/cosign-installer@v3
 
       - name: Generate SBOM (SPDX)
+        if: matrix.component != 'report-renderer'
         uses: anchore/sbom-action@v0
         with:
           image: ${{ env.IMAGE }}@${{ steps.build.outputs.digest }}
           format: spdx-json
           output-file: sbom.spdx.json
 
+      # report-renderer is scoped to its SOURCE (package.json/package-lock.json under
+      # ./report-renderer), not the built image — see the "SBOM SCOPING" note below the attest
+      # step for why and the measured before/after numbers.
+      #
+      # SYFT_JAVASCRIPT_INCLUDE_DEV_DEPENDENCIES=true is REQUIRED, not cosmetic: `tsx` is listed
+      # under devDependencies in report-renderer/package.json but is this image's actual CMD
+      # (`npx tsx src/server.ts`) — syft drops devDependencies by default, which would silently
+      # omit the real runtime entrypoint from the SBOM. The Dockerfile's `npm ci` has no
+      # `--omit=dev`, so devDependencies are genuinely installed in the shipped image; the SBOM
+      # should describe what's actually in the container, not just its "production" intent.
+      - name: Generate SBOM (SPDX) — report-renderer, scoped to source
+        if: matrix.component == 'report-renderer'
+        uses: anchore/sbom-action@v0
+        env:
+          SYFT_JAVASCRIPT_INCLUDE_DEV_DEPENDENCIES: "true"
+        with:
+          path: ./report-renderer
+          format: spdx-json
+          output-file: sbom.spdx.json
+
       - name: Sign image (keyless)
         run: cosign sign --yes ${{ env.IMAGE }}@${{ steps.build.outputs.digest }}
 
-      # ⚠ NON-BLOCKING since 2026-08-05, and the reason matters more than the flag.
+      # ── SBOM SCOPING (2026-08-06) — history + what changed ────────────────────────────────────
       #
-      # This step fails RELIABLY for `report-renderer` — twice in a row on `alpha-01.017.0040a`, each
-      # time after cosign's own 4 internal retries and ~2 minutes:
+      # This step failed RELIABLY for `report-renderer` on `alpha-01.017.0040a` — twice in a row,
+      # each time after cosign's own 4 internal retries and ~2 minutes:
       #     POST https://rekor.sigstore.dev/api/v1/log/entries giving up after 4 attempt(s)
-      # That image carries Chromium, so its SPDX predicate is by far the largest here; Sigstore's public
-      # transparency log will not take it. The other eight components attest fine, so this is a size
-      # problem with one image, not a broken pipeline. It blocked the whole release: build-sign failed,
-      # and `deploy` (needs: build-sign) was SKIPPED — a supply-chain nicety stopping a production
-      # deploy that was otherwise green.
+      # then SUCCEEDED on the `0040b` re-cut with no code change. That is fragility under Rekor
+      # load, not a deterministic fault — worth stating plainly since an earlier pass at this
+      # comment called it deterministic, which was wrong.
       #
-      # Why non-blocking is not a weakened gate: deploy.yml's "Verify image signatures" step runs
-      # `cosign verify` — the SIGNATURE only, never `cosign verify-attestation`. The enforced control is
-      # the keyless signature from the previous step, and that SUCCEEDS for every component including
-      # this one. What is actually lost is the attested SBOM in the public log for report-renderer.
+      # Root cause: `report-renderer/Dockerfile` is the ONLY image in the estate built `FROM
+      # mcr.microsoft.com/playwright:v1.61.1-noble` (it carries Chromium+Firefox+WebKit). SBOM'ing
+      # the built image cataloged the whole base OS on top of the app: 826 packages (514 deb + ~306
+      # npm + a few go/oci) at 17,080,639 bytes — by far the largest predicate of the nine
+      # components, and Microsoft already owns that base image's own provenance; we don't control
+      # or patch those OS packages ourselves, so cataloguing them added bulk without adding a
+      # control.
       #
-      # That is a real reduction, so it should not stay this way: the fix is to shrink the predicate
-      # (SBOM the app layers rather than the whole Chromium base) or attest with `--tlog-upload=false`
-      # for that component alone, and then make this blocking again.
+      # Fix: the "Generate SBOM (SPDX) — report-renderer, scoped to source" step above scans
+      # `./report-renderer` directly (syft `dir:`, via anchore/sbom-action's `path` input) instead
+      # of the built image, with `SYFT_JAVASCRIPT_INCLUDE_DEV_DEPENDENCIES=true` so the SBOM still
+      # matches what `npm ci` actually installs into the container. Measured locally 2026-08-06
+      # (syft 1.50.0, same base image, docker-archive scan of the built image vs dir scan of the
+      # source): 17,080,639 bytes / 826 packages -> 451,910 bytes / 229 packages — a ~38x drop.
+      # Spot-checked the scoped SBOM: `playwright`, `express`, `dotenv` (regular deps) and `tsx`,
+      # `typescript`, `vitest`, `supertest` (dev deps, present because of the include-dev-deps flag
+      # above) are all present as real packages with real versions.
+      #
+      # `continue-on-error` is REMOVED per the same sequencing already used below for SLSA
+      # provenance: only pull the safety net once the fix is demonstrated, so a future genuine
+      # attestation failure is loud again for every component, including this one.
+      #
+      # Honest limit of this proof: it is a local reproduction, not a real Rekor round-trip — the
+      # actual test is the next release. A ~38x predicate reduction is a strong, directionally
+      # correct fix for a size/load-based rejection, but if Rekor still rejects report-renderer's
+      # (now much smaller) SBOM on the next cut, the release will now FAIL LOUD at this step
+      # instead of silently degrading — that is the deliberate trade-off of removing the flag here.
+      # If that happens, re-add `continue-on-error: true` to this step and reopen this note rather
+      # than re-diagnosing from scratch.
       - name: Attest SBOM to the image (keyless)
-        continue-on-error: true
         run: cosign attest --yes --type spdxjson --predicate sbom.spdx.json ${{ env.IMAGE }}@${{ steps.build.outputs.digest }}
 
       # GitHub refuses attestations on user-owned PRIVATE repos ("Feature not available for
@@ -118,12 +157,9 @@ jobs:
       # `alpha-01.017.0040b` re-cut — where SLSA provenance succeeded on **all 9 components**. Precondition
       # met, so `continue-on-error` is now REMOVED: a future provenance failure is loud, which is the point.
       #
-      # NOTE: the `continue-on-error` on the SBOM attestation step above is a DIFFERENT case and stays for
-      # now. report-renderer is the only image carrying Chromium, so its SPDX SBOM covers the whole
-      # Playwright/Ubuntu base and the predicate is large enough that Rekor rejects it under load — it
-      # failed twice on `0040a`, then succeeded on `0040b`. That is fragility, not a hard fault. Removing
-      # that line before the SBOM is scoped to the application layer would make releases fail
-      # intermittently on an external service's load. Scope the SBOM first, then delete it.
+      # NOTE: the SBOM attestation step above went through the identical sequence — see the
+      # "SBOM SCOPING (2026-08-06)" comment on that step for the report-renderer-specific history
+      # and the before/after numbers that justified removing its `continue-on-error` too.
       - name: SLSA build provenance attestation
         uses: actions/attest-build-provenance@v1
         with:
