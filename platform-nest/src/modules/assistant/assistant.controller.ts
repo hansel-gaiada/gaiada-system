@@ -40,7 +40,7 @@ import { AuthGuard } from "../../auth/guards";
 import { ModuleEnabledGuard } from "../module-enabled.guard";
 import { assembleContext, persistCompactionUpdate, type ContextCitation } from "./context";
 import {
-  abortForClientDisconnect, citationParts, estimateTokens, relayGeneration, releaseGeneration, reserveGeneration, requestStop, sseLine, usageMetaParts,
+  abortForClientDisconnect, citationParts, estimateTokens, relayGeneration, releaseGeneration, reserveGeneration, requestStop, sessionResumeMismatchParts, sseLine, usageMetaParts,
 } from "./stream";
 import {
   ASSISTANT_AGENT_TOOLS, DEFAULT_TOOL_AGENT, persistToolCalls, readTurnMode, runToolTurn, turnModePart, type ToolTurnResult,
@@ -698,7 +698,11 @@ export class AssistantController {
     // the real prompt/completion breakdown (when present) go into `parts` via `usageMetaParts` —
     // an existing jsonb column (migration 0079, default `[]`, never written to before this ticket),
     // so no schema change was needed to record which kind of token count `tokens` actually is.
-    const parts = JSON.stringify([...usageMetaParts(result), ...citationParts(citations)]);
+    // ASST-24: appends a `session_resume_mismatch` part in the SAME `parts` array whenever
+    // `result.sessionResumed === false` (a real, known mismatch) — `[]` for every other case
+    // (true, or absent on an older gateway), so an ordinary turn's persisted shape is byte-
+    // identical to before this ticket.
+    const parts = JSON.stringify([...usageMetaParts(result), ...citationParts(citations), ...sessionResumeMismatchParts(result)]);
     await withTenants(
       [tenantId],
       async (c) => {

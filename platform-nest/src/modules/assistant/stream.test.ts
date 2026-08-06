@@ -8,7 +8,7 @@
 // Ticket: docs/superpowers/plans/2026-08-05-d14-and-assistant-tickets.md ("### ASST-12", "### ASST-16").
 import { describe, it, expect, vi } from "vitest";
 import {
-  parseGatewayStream, relayGeneration, reserveGeneration, usageMetaParts,
+  parseGatewayStream, relayGeneration, reserveGeneration, sessionResumeMismatchParts, usageMetaParts,
   type RelayEmit, type RelayResult,
 } from "./stream";
 
@@ -68,7 +68,7 @@ describe("parseGatewayStream — ASST-11's additive meta/usage frames + ASST-15'
     expect(events).toEqual([{ type: "token", text: "ok" }, { type: "done" }]);
   });
 
-  it("ASST-15: yields a terminal session event, non-terminal itself (parsing continues to done)", async () => {
+  it("ASST-15/24: yields a terminal session event, non-terminal itself (parsing continues to done); resumed absent on the wire defaults to true", async () => {
     const body = sseBody(
       `event: meta\ndata: ${JSON.stringify({ provider: "hermes", model: "m1" })}\n\n`,
       `data: ${JSON.stringify("hi")}\n\n`,
@@ -79,9 +79,27 @@ describe("parseGatewayStream — ASST-11's additive meta/usage frames + ASST-15'
     expect(events).toEqual([
       { type: "meta", provider: "hermes", model: "m1" },
       { type: "token", text: "hi" },
-      { type: "session", providerSession: "sess-1" },
+      { type: "session", providerSession: "sess-1", resumed: true, requestedSession: undefined },
       { type: "done" },
     ]);
+  });
+
+  it("ASST-24: resumed:false + requestedSession are parsed verbatim off the widened session frame", async () => {
+    const body = sseBody(
+      `event: session\ndata: ${JSON.stringify({ providerSession: "forked-abc999", resumed: false, requestedSession: "sess-stale-123" })}\n\n`,
+      `event: done\ndata: {}\n\n`,
+    );
+    const events = await collect(parseGatewayStream(body));
+    expect(events[0]).toEqual({ type: "session", providerSession: "forked-abc999", resumed: false, requestedSession: "sess-stale-123" });
+  });
+
+  it("ASST-24: resumed:true with a requestedSession present (a genuine resume, not the no-resume-requested case) is parsed verbatim", async () => {
+    const body = sseBody(
+      `event: session\ndata: ${JSON.stringify({ providerSession: "sess-abc", resumed: true, requestedSession: "sess-abc" })}\n\n`,
+      `event: done\ndata: {}\n\n`,
+    );
+    const events = await collect(parseGatewayStream(body));
+    expect(events[0]).toEqual({ type: "session", providerSession: "sess-abc", resumed: true, requestedSession: "sess-abc" });
   });
 
   it("ASST-15: an empty or malformed session frame is dropped, never thrown, never surfaced as a real session", async () => {
@@ -144,7 +162,7 @@ function collectingEmit(): RelayEmit & { calls: Record<string, unknown[][]> } {
     token: (text) => calls.token.push([text]),
     meta: (provider, model) => calls.meta.push([provider, model]),
     usage: (tokens, latencyMs, source, promptTokens, completionTokens) => calls.usage.push([tokens, latencyMs, source, promptTokens, completionTokens]),
-    session: (providerSession) => calls.session.push([providerSession]),
+    session: (providerSession, resumed, requestedSession) => calls.session.push([providerSession, resumed, requestedSession]),
     done: () => calls.done.push([]),
     error: (message, errorKind) => calls.error.push([message, errorKind]),
   };
@@ -196,7 +214,30 @@ describe("relayGeneration — real usage overrides the estimate, absent meta is 
     expect(result.outcome).toBe("done");
     expect(result.provider).toBe("hermes");
     expect(result.providerSession).toBe("sess-abc");
-    expect(emit.calls.session).toEqual([["sess-abc"]]);
+    // ASST-24: absent on the wire -> defaults to true ("assume fine"), never a spurious mismatch.
+    expect(result.sessionResumed).toBe(true);
+    expect(result.requestedSession).toBeUndefined();
+    expect(emit.calls.session).toEqual([["sess-abc", true, undefined]]);
+  });
+
+  it("ASST-24: resumed:false + requestedSession round-trip onto RelayResult AND emit.session, live", async () => {
+    const entry = fakeEntry("thread-session-mismatch");
+    const emit = collectingEmit();
+    const body = sseBody(
+      `event: meta\ndata: ${JSON.stringify({ provider: "hermes", model: "hermes-model" })}\n\n`,
+      `data: ${JSON.stringify("hi")}\n\n`,
+      `event: session\ndata: ${JSON.stringify({ providerSession: "forked-abc999", resumed: false, requestedSession: "sess-stale-123" })}\n\n`,
+      `event: done\ndata: {}\n\n`,
+    );
+    const result = await relayGeneration(entry, {
+      tenantId: "t1", prompt: "hi", emit, gatewayUrl: "http://fake-gateway.test", fetchImpl: fakeFetch(body),
+    });
+    expect(result.outcome).toBe("done");
+    // ASST-16 preserved: even a FORKED session is the live one now, so it's still the id persisted.
+    expect(result.providerSession).toBe("forked-abc999");
+    expect(result.sessionResumed).toBe(false);
+    expect(result.requestedSession).toBe("sess-stale-123");
+    expect(emit.calls.session).toEqual([["forked-abc999", false, "sess-stale-123"]]);
   });
 
   it("absent meta and absent usage (the common path, e.g. echo/openai/gemini/claude): unknown provider, estimate labelled as such, zero errors", async () => {
@@ -257,5 +298,19 @@ describe("usageMetaParts — the jsonb `parts` shape persisted alongside provide
   });
   it("omits promptTokens/completionTokens entirely when they were never real (estimate case)", () => {
     expect(usageMetaParts({ usageSource: "estimate" })).toEqual([{ type: "usage_meta", usageSource: "estimate" }]);
+  });
+});
+
+describe("sessionResumeMismatchParts — ASST-24's persisted 'the conversation restarted' fact", () => {
+  it("resumed:false -> ONE part, carrying the requested session id", () => {
+    expect(sessionResumeMismatchParts({ sessionResumed: false, requestedSession: "sess-stale-123" })).toEqual([
+      { type: "session_resume_mismatch", requestedSession: "sess-stale-123" },
+    ]);
+  });
+  it("resumed:true -> [] (nothing to surface, including the no-resume-requested case)", () => {
+    expect(sessionResumeMismatchParts({ sessionResumed: true, requestedSession: undefined })).toEqual([]);
+  });
+  it("resumed absent (older gateway, or no session event at all) -> [] — absent-tolerant, never treated as a failure", () => {
+    expect(sessionResumeMismatchParts({ sessionResumed: undefined, requestedSession: undefined })).toEqual([]);
   });
 });

@@ -127,6 +127,10 @@
 .asst-msg__badge { font: 700 9.5px var(--font-body); letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-subtle); }
 .asst-msg__usage { font: 400 11.5px var(--font-body); color: var(--ink-faint); }
 
+/* ASST-24 — quiet, informational note: the conversation restarted on the provider's side. Not an
+   error (no --status-danger token), just a step quieter than the ordinary meta line above. */
+.asst-msg__session-note { margin: 6px 0 0; font: 400 12px var(--font-body); font-style: italic; color: var(--ink-subtle); }
+
 .asst-md-p { margin: 0 0 10px; }
 .asst-md-p:last-child { margin-bottom: 0; }
 .asst-md-ul { margin: 0 0 10px; padding-left: 20px; }

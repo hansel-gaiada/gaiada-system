@@ -93,15 +93,16 @@ func (p *HermesProvider) Embed(_ context.Context, _ string) ([]float64, error) {
 // CompleteStream implements providers.StreamingProvider for a caller with no session to pass —
 // e.g. the non-hinted, non-session-aware chain.Run path.
 func (p *HermesProvider) CompleteStream(ctx context.Context, prompt string, onToken func(string)) error {
-	return p.CompleteStreamSession(ctx, prompt, "", onToken, func(string) {})
+	return p.CompleteStreamSession(ctx, prompt, "", onToken, func(string, bool, string) {})
 }
 
-// CompleteStreamSession implements providers.SessionStreamingProvider (ASST-15). `session` is the
-// OPAQUE caller-supplied continuation token — forwarded verbatim as the outgoing request body's
-// `providerSession` field when non-empty, omitted otherwise (never sent as an empty string).
-// onSession reports whatever hermes-gateway's `event: session` frame carries back, at most once,
-// only when present.
-func (p *HermesProvider) CompleteStreamSession(ctx context.Context, prompt, session string, onToken func(string), onSession func(string)) error {
+// CompleteStreamSession implements providers.SessionStreamingProvider (ASST-15, widened by
+// ASST-24). `session` is the OPAQUE caller-supplied continuation token — forwarded verbatim as the
+// outgoing request body's `providerSession` field when non-empty, omitted otherwise (never sent as
+// an empty string). onSession reports whatever hermes-gateway's `event: session` frame carries
+// back, at most once, only when present, INCLUDING the ASST-24 `resumed`/`requestedSession` fields
+// hermes-gateway's own fix (server.mjs's `writeSSESession`) now always sends alongside it.
+func (p *HermesProvider) CompleteStreamSession(ctx context.Context, prompt, session string, onToken func(string), onSession func(session string, resumed bool, requestedSession string)) error {
 	reqBody := map[string]string{"prompt": prompt}
 	if session != "" {
 		reqBody["providerSession"] = session
@@ -129,16 +130,23 @@ func (p *HermesProvider) CompleteStreamSession(ctx context.Context, prompt, sess
 
 // parseHermesSSE reads hermes-gateway's own wire grammar v2 — identical single-line-JSON `data:`
 // framing to this gateway's own (ASST-10), `event:` lines naming meta/session/error/done (ASST-11/
-// 15) — and relays it: default (unnamed) events -> onToken, `event: session` -> onSession,
+// 15/24) — and relays it: default (unnamed) events -> onToken, `event: session` -> onSession,
 // `event: error` -> returned as this call's error (which chain.Run then treats exactly like any
 // other provider failure — normal failover/error-event handling, no special case needed),
 // `event: done` -> clean return.
+//
+// ASST-24: `event: session`'s payload now carries `resumed`/`requestedSession` alongside
+// `providerSession` — parsed here with `resumed` as a `*bool` so a genuinely ABSENT field (an
+// older hermes-gateway build that predates the fix) is distinguishable from an explicit `false`;
+// absent defaults to `true` ("assume fine, never assume failed" — the same discipline the ticket
+// mandates all the way up the chain). `requestedSession` defaults to "" when absent, mirroring
+// `providerSession`'s own never-invented convention.
 //
 // `event: meta` is deliberately NOT relayed: hermes-gateway's copy of it carries exactly
 // {provider:"hermes", model}, which THIS gateway's own emit()/writeSSEMeta already knows
 // statically via Name()/ModelName() before this call even starts — relaying it would be redundant,
 // not informative, and would risk a second, contradictory meta reaching the real client.
-func parseHermesSSE(r io.Reader, onToken func(string), onSession func(string)) error {
+func parseHermesSSE(r io.Reader, onToken func(string), onSession func(session string, resumed bool, requestedSession string)) error {
 	scanner := bufio.NewScanner(r)
 	// hermes-gateway's tokens are Hermes chat-box lines, not large media — 4MB is generous
 	// headroom over the default 64KB scanner buffer without being unbounded.
@@ -169,10 +177,16 @@ func parseHermesSSE(r io.Reader, onToken func(string), onSession func(string)) e
 				sawDone = true
 			case "session":
 				var payload struct {
-					ProviderSession string `json:"providerSession"`
+					ProviderSession  string `json:"providerSession"`
+					Resumed          *bool  `json:"resumed"`
+					RequestedSession string `json:"requestedSession"`
 				}
 				if err := json.Unmarshal([]byte(data), &payload); err == nil && payload.ProviderSession != "" {
-					onSession(payload.ProviderSession)
+					resumed := true // absent-tolerant default: "assume fine", never "assume failed"
+					if payload.Resumed != nil {
+						resumed = *payload.Resumed
+					}
+					onSession(payload.ProviderSession, resumed, payload.RequestedSession)
 				}
 			case "meta":
 				// Deliberately ignored — see the doc comment above this function.

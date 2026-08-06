@@ -1,5 +1,5 @@
 import {
-  isPendingMessage, humanizeErrorKind, brainBadgeLabel, parseUsageMeta, parseCitations, usageMeterLabel,
+  isPendingMessage, humanizeErrorKind, brainBadgeLabel, parseUsageMeta, parseCitations, parseSessionResumeMismatch, usageMeterLabel,
   type AssistantMessage, type StreamState,
 } from "@/lib/assistant";
 import { renderMarkdownLite } from "./markdownLite";
@@ -47,6 +47,13 @@ export function Message({ message, streaming, liveText, liveState }: {
   // the turn, then the reload-safe record" split ASST-12's badge/meter already use above.
   const citations = streaming ? liveState?.citations ?? [] : parseCitations(message.parts);
 
+  // ASST-24 — read-only, persisted-only (no live-stream counterpart exists — see
+  // `parseSessionResumeMismatch`'s own header). Never shown on the row currently streaming in
+  // THIS tab; appears once the transcript reloads after the turn finishes, exactly like a
+  // refresh would show it. `null` for the overwhelming common case (a genuine resume, turn 1, or
+  // an older gateway) — rendered as nothing, never as an error.
+  const sessionResumeMismatch = !streaming ? parseSessionResumeMismatch(message.parts) : null;
+
   return (
     <article className={`asst-msg asst-msg--${isUser ? "user" : "assistant"}`}>
       <div className="asst-msg__role">{isUser ? "You" : "Assistant"}</div>
@@ -64,6 +71,14 @@ export function Message({ message, streaming, liveText, liveState }: {
         {stopped && <p className="asst-msg__meta asst-msg__meta--stopped">Stopped{bodyText ? "." : " before any reply."}</p>}
         {failed && <p className="asst-msg__error">{humanizeErrorKind(message.errorKind as string)}</p>}
         {!isUser && citations.length > 0 && <CitationChips citations={citations} />}
+        {/* ASST-24 — quiet, honest note: the reply itself is valid (never rendered as an error or
+            a failure state); only Hermes' OWN memory diverged. The earlier turns are still right
+            here in this transcript — it is the provider's side that restarted. */}
+        {!isUser && sessionResumeMismatch && (
+          <p className="asst-msg__session-note">
+            Hermes couldn&apos;t resume the previous conversation and started a new one.
+          </p>
+        )}
         {showBadge && (
           <div className="asst-msg__servedby">
             <span className="asst-msg__badge">{brainBadgeLabel(provider, model)}</span>

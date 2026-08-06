@@ -4,7 +4,7 @@ import {
   parseSSEBuffer, decodeAssistantEvent, streamReducer, initialStreamState, humanizeErrorKind,
   brainBadgeLabel, parseUsageMeta, usageMeterLabel,
   isPendingMemory, groupMemory,
-  groupCapabilities, parseCitations,
+  groupCapabilities, parseCitations, parseSessionResumeMismatch,
   type AssistantThread, type AssistantMemory, type AssistantCapability,
 } from "./assistant";
 
@@ -322,5 +322,24 @@ describe("parseCitations — reads the persisted parts[], mirrors platform-nest'
     expect(parseCitations([])).toEqual([]);
     expect(parseCitations(null)).toEqual([]);
     expect(parseCitations("not an array")).toEqual([]);
+  });
+});
+
+describe("parseSessionResumeMismatch — ASST-24: reads the persisted 'conversation restarted' note", () => {
+  it("finds the session_resume_mismatch part among other part types", () => {
+    const parts = [
+      { type: "usage_meta", usageSource: "estimate" },
+      { type: "session_resume_mismatch", requestedSession: "sess-stale-123" },
+    ];
+    expect(parseSessionResumeMismatch(parts)).toEqual({ type: "session_resume_mismatch", requestedSession: "sess-stale-123" });
+  });
+  it("returns null for a genuine resume / turn 1 / an older gateway — all render identically (nothing)", () => {
+    expect(parseSessionResumeMismatch([{ type: "usage_meta", usageSource: "estimate" }])).toBeNull();
+    expect(parseSessionResumeMismatch([])).toBeNull();
+  });
+  it("returns null for a malformed/absent parts value, never throws", () => {
+    expect(parseSessionResumeMismatch(null)).toBeNull();
+    expect(parseSessionResumeMismatch(undefined)).toBeNull();
+    expect(parseSessionResumeMismatch("not an array")).toBeNull();
   });
 });

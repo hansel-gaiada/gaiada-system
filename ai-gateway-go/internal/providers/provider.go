@@ -61,9 +61,17 @@ type UsageStreamingProvider interface {
 // ever for tokens already passed to onToken by the time it fires" — see the ASST-15 addendum in
 // docs/FRONTEND-BFF-CONTRACT.md §18 for the wire-level `event: session` this backs.
 //
+// ASST-24: onSession's two additional params carry the QA-gate fix's additive signal —
+// `resumed` (true when `session` equals what was requested, OR when nothing was requested at all;
+// false when a resume WAS requested and the provider silently forked instead) and
+// `requestedSession` (the id that was asked for, empty when none was — mirrors `session` itself:
+// never invented). A provider that predates this fix (or an intermediary that can't observe the
+// mismatch) should report `resumed: true, requestedSession: ""` — "assume fine" is the safe
+// default, never "assume failed".
+//
 // A provider with no session concept (ollama/gemini/claude/openai/echo today) simply doesn't
 // implement this interface.
 type SessionStreamingProvider interface {
 	StreamingProvider
-	CompleteStreamSession(ctx context.Context, prompt, session string, onToken func(string), onSession func(session string)) error
+	CompleteStreamSession(ctx context.Context, prompt, session string, onToken func(string), onSession func(session string, resumed bool, requestedSession string)) error
 }

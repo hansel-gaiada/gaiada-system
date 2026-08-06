@@ -145,6 +145,34 @@ export function parseCitations(parts: unknown): AssistantCitation[] {
   return found?.items ?? [];
 }
 
+// ASST-24 — reads the persisted "Hermes couldn't resume the previous conversation and started a
+// new one" fact back out of a message's `parts` column, mirroring platform-nest's
+// `SessionResumeMismatchPart` (stream.ts) byte-for-byte — the same "read, never re-derive"
+// discipline `parseUsageMeta`/`parseCitations` above already established. There is NO live-stream
+// counterpart (unlike `meta`/`citations`): the backend's own `session` event is deliberately not
+// relayed onto the browser-facing SSE wire (assistant.controller.ts's `session: () => {}`), so
+// this part — read after the transcript reload that follows every terminal stream state — is the
+// ONLY way this fact ever reaches the UI. That is fine: it is an informational note about what
+// already happened, not something that needs to appear mid-generation.
+export interface SessionResumeMismatchPart {
+  type: "session_resume_mismatch";
+  requestedSession: string;
+}
+
+function isSessionResumeMismatchPart(v: unknown): v is SessionResumeMismatchPart {
+  return !!v && typeof v === "object" && (v as { type?: unknown }).type === "session_resume_mismatch";
+}
+
+/** Returns `null` for every message that ISN'T a known, real resume mismatch — that covers a
+ *  genuine resume, turn 1 (nothing requested), an older gateway that never reported the fields at
+ *  all, and any message that predates ASST-24. All four cases render identically (nothing), by
+ *  design (see docs/FRONTEND-BFF-CONTRACT.md §18's "ASST-24" addendum: absent must be treated as
+ *  "unknown/assume fine", never as a failure). */
+export function parseSessionResumeMismatch(parts: unknown): SessionResumeMismatchPart | null {
+  if (!Array.isArray(parts)) return null;
+  return parts.find(isSessionResumeMismatchPart) ?? null;
+}
+
 /** The "served by" brain badge label. `provider === null` (no `meta` ever arrived — an older
  *  gateway, or a provider that died before committing bytes) renders as "Unknown provider", never
  *  as blank or an error. `model === ""` (a provider with no fixed-model concept, e.g. `echo`)

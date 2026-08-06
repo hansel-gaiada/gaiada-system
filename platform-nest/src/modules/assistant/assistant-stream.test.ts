@@ -70,7 +70,14 @@ async function waitFor(predicate: () => boolean, timeoutMs = 2000, intervalMs = 
  *                          gateway silently FAILS OVER to a different provider (here: "ollama") —
  *                          `meta` names the ACTUAL server (ollama), never the requested one
  *                          (hermes), and no `event: session` is ever written (a provider that
- *                          never ran never has a session to report). Never a hard error. */
+ *                          never ran never has a session to report). Never a hard error.
+ *   SIMULATE_HERMES_FORK — (ASST-24) the request's `provider` hint is "hermes" AND it sent a
+ *                          `providerSession` to resume — this fake reproduces hermes-gateway's own
+ *                          real defect (docs/FRONTEND-BFF-CONTRACT.md §18's "ASST-24" addendum):
+ *                          it silently MINTS a brand-new `forked-<n>` id instead of echoing the
+ *                          one that was asked for, and reports `resumed: false` +
+ *                          `requestedSession` naming the id that failed to resume — still a clean
+ *                          `event: done`, never an `event: error` (the reply itself is valid). */
 interface FakeGateway {
   url: string;
   close: () => Promise<void>;
@@ -120,7 +127,14 @@ async function startFakeGateway(): Promise<FakeGateway> {
         const metaMatch = /SIMULATE_META:(\S*?):(\S*)/.exec(prompt);
         const usageMatch = /SIMULATE_USAGE:(\d+):(\d+)/.exec(prompt);
         const unknownEvent = prompt.includes("SIMULATE_UNKNOWN_EVENT");
-        const hermesUp = prompt.includes("SIMULATE_HERMES_UP") && reqProvider === "hermes";
+        // NOTE: context.ts folds the WHOLE thread history into the assembled prompt, so a turn-2
+        // prompt CONTAINS turn 1's marker text too (e.g. "SIMULATE_HERMES_UP" from an earlier
+        // message survives into every later turn's assembled prompt). `hermesFork` is therefore
+        // checked BEFORE `hermesUp` below and both are mutually exclusive by construction — the
+        // fork simulation, being the more specific/rarer one, wins whenever both markers are
+        // present in the same assembled prompt.
+        const hermesFork = prompt.includes("SIMULATE_HERMES_FORK") && reqProvider === "hermes";
+        const hermesUp = !hermesFork && prompt.includes("SIMULATE_HERMES_UP") && reqProvider === "hermes";
         const hermesDown = prompt.includes("SIMULATE_HERMES_DOWN") && reqProvider === "hermes";
 
         void (async () => {
@@ -132,7 +146,7 @@ async function startFakeGateway(): Promise<FakeGateway> {
           }
           if (metaMatch) {
             res.write(`event: meta\ndata: ${JSON.stringify({ provider: metaMatch[1], model: metaMatch[2] })}\n\n`);
-          } else if (hermesUp) {
+          } else if (hermesUp || hermesFork) {
             res.write(`event: meta\ndata: ${JSON.stringify({ provider: "hermes", model: "hermes-model" })}\n\n`);
           } else if (hermesDown) {
             // OQ-6: "fail over and LABEL" — meta names the provider that ACTUALLY served this
@@ -163,6 +177,12 @@ async function startFakeGateway(): Promise<FakeGateway> {
             // verbatim (resuming), or mint a fresh one (first turn) — opaque either way.
             const session = reqProviderSession || `sess-${++hermesSessionCounter}`;
             res.write(`event: session\ndata: ${JSON.stringify({ providerSession: session })}\n\n`);
+          } else if (hermesFork) {
+            // ASST-24: reproduces the real defect — silently mints an UNRELATED id instead of
+            // echoing reqProviderSession, and reports resumed:false + requestedSession naming the
+            // one that failed to resume. Still `event: done`, never `event: error`.
+            const forked = `forked-${++hermesSessionCounter}`;
+            res.write(`event: session\ndata: ${JSON.stringify({ providerSession: forked, resumed: false, requestedSession: reqProviderSession })}\n\n`);
           }
           // hermesDown: no session frame — the provider that actually ran (ollama) has no session
           // concept, and hermes itself never ran for this reply.
@@ -537,6 +557,103 @@ describe.skipIf(!TEST_URL)("Assistant send->stream engine (ASST-06)", () => {
       const sent2 = await sendMessage(threadId, "SIMULATE_HERMES_UP still resuming");
       await readAll(await openStream((sent2.json() as { streamUrl: string }).streamUrl));
       expect(gateway.receivedRequests.at(-1)!.providerSession).toBe(captured);
+    });
+
+    // ── ASST-24 — surfacing a Hermes silent-fork mismatch, never swallowing it ─────────────────────
+    // Nested inside THIS describe block (not a sibling) so it can reuse patchBrain/getThread's
+    // closure over `threadId`-scoped helpers, exactly like every other test above.
+    describe("ASST-24: resumed:false is persisted + rendered; resumed:true / absent renders nothing", () => {
+    async function getMessages(threadId: string) {
+      const r = await app.inject({ method: "GET", url: `/api/${A}/assistant/threads/${threadId}`, headers: asUser(owner) });
+      expect(r.statusCode).toBe(200);
+      return (r.json() as {
+        thread: { hermesSessionId: string | null };
+        messages: Array<{ id: string; seq: number; role: string; content: string | null; parts: unknown }>;
+      });
+    }
+    function sessionMismatchPart(parts: unknown): { type: string; requestedSession: string } | undefined {
+      return Array.isArray(parts) ? (parts as Array<{ type: string; requestedSession: string }>).find((p) => p.type === "session_resume_mismatch") : undefined;
+    }
+
+    it("resumed:false -> persisted on the message row AND still there after a refetch (not just live state); hermes_session_id still tracks the reported (forked) id", async () => {
+      const threadId = await newThread("hermes fork mismatch");
+      await patchBrain(threadId, "hermes");
+
+      // Turn 1: establish a real session to resume.
+      const sent1 = await sendMessage(threadId, "SIMULATE_HERMES_UP establish a session to fork later");
+      await readAll(await openStream((sent1.json() as { streamUrl: string }).streamUrl));
+      const capturedSession = (await getThread(threadId)).thread.hermesSessionId;
+      expect(capturedSession).toBeTruthy();
+
+      // Turn 2: hermes-gateway silently forks instead of resuming `capturedSession`.
+      const sent2 = await sendMessage(threadId, "SIMULATE_HERMES_FORK please resume, but it won't");
+      const { messageId: msg2Id, streamUrl: streamUrl2 } = sent2.json() as { messageId: string; streamUrl: string };
+      const body2 = await readAll(await openStream(streamUrl2));
+      // Still a clean, valid reply — ASST-24's explicit mandate: this is dishonest LABELLING of a
+      // success, never an error condition.
+      expect(body2).toContain("event: done\ndata: {}");
+      expect(body2).not.toContain("event: error");
+
+      const req2 = gateway.receivedRequests.at(-1)!;
+      expect(req2.providerSession).toBe(capturedSession); // we DID ask it to resume the real session
+
+      // ASST-16 preserved: even though continuity failed, the FORKED session is now the live one —
+      // hermes_session_id must still update to whatever the gateway actually reported, so turn 3
+      // resumes THAT (not the stale, now-meaningless original).
+      const afterFork = await getThread(threadId);
+      expect(afterFork.thread.hermesSessionId).toBeTruthy();
+      expect(afterFork.thread.hermesSessionId).not.toBe(capturedSession);
+
+      // Persisted, and — the load-bearing "assert the persisted row, not just live state" check —
+      // STILL there on a completely separate refetch of the thread.
+      const firstFetch = await getMessages(threadId);
+      const msg2First = firstFetch.messages.find((m) => m.id === msg2Id)!;
+      const partFirst = sessionMismatchPart(msg2First.parts);
+      expect(partFirst).toBeDefined();
+      expect(partFirst!.requestedSession).toBe(capturedSession);
+
+      const refetch = await getMessages(threadId);
+      const msg2Refetched = refetch.messages.find((m) => m.id === msg2Id)!;
+      const partRefetched = sessionMismatchPart(msg2Refetched.parts);
+      expect(partRefetched).toBeDefined();
+      expect(partRefetched!.requestedSession).toBe(capturedSession);
+    });
+
+    it("resumed:true (a genuine resume) -> nothing rendered on the message", async () => {
+      const threadId = await newThread("hermes genuine resume, nothing to surface");
+      await patchBrain(threadId, "hermes");
+
+      const sent1 = await sendMessage(threadId, "SIMULATE_HERMES_UP turn 1");
+      await readAll(await openStream((sent1.json() as { streamUrl: string }).streamUrl));
+
+      // Turn 2 genuinely resumes (the fake gateway's SIMULATE_HERMES_UP branch echoes the sent
+      // providerSession verbatim) — resumed:true is implicit (no mismatch), nothing to surface.
+      const sent2 = await sendMessage(threadId, "SIMULATE_HERMES_UP turn 2, genuinely resumes");
+      const { messageId } = sent2.json() as { messageId: string; streamUrl: string };
+      await readAll(await openStream((sent2.json() as { streamUrl: string }).streamUrl));
+
+      const { messages } = await getMessages(threadId);
+      const msg2 = messages.find((m) => m.id === messageId)!;
+      expect(sessionMismatchPart(msg2.parts)).toBeUndefined();
+    });
+
+    it("fields ABSENT (an older-gateway-shaped session frame, no resumed/requestedSession at all) -> nothing rendered, no errors — the compatibility case", async () => {
+      // Every other SIMULATE_HERMES_UP-driven test in this file already exercises exactly this
+      // wire shape (see startFakeGateway's header: its `event: session` frame carries ONLY
+      // `providerSession`, matching an ai-gateway-go/hermes-gateway build that predates ASST-24) —
+      // this test names the property explicitly rather than leaving it merely implied.
+      const threadId = await newThread("older-gateway compatibility, absent fields");
+      await patchBrain(threadId, "hermes");
+      const sent = await sendMessage(threadId, "SIMULATE_HERMES_UP a build with no resumed field at all");
+      const { messageId } = sent.json() as { messageId: string; streamUrl: string };
+      const body = await readAll(await openStream((sent.json() as { streamUrl: string }).streamUrl));
+      expect(body).not.toContain("event: error");
+
+      const { messages } = await getMessages(threadId);
+      const msg = messages.find((m) => m.id === messageId)!;
+      expect(sessionMismatchPart(msg.parts)).toBeUndefined();
+      expect(msg.content).toBe("Hello there friend"); // the reply itself rendered normally
+    });
     });
   });
 

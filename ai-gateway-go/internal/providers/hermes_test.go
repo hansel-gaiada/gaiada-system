@@ -73,10 +73,14 @@ func TestHermesProviderThreadsProviderSessionOpaquelyToTheShim(t *testing.T) {
 	const wantSession = "hermes-session-abc-123-DO-NOT-INTERPRET"
 	var gotTokens []string
 	var gotSession string
+	var gotResumed bool
+	var gotRequested string
 	err := p.CompleteStreamSession(context.Background(), "hi", wantSession, func(tok string) {
 		gotTokens = append(gotTokens, tok)
-	}, func(s string) {
+	}, func(s string, resumed bool, requestedSession string) {
 		gotSession = s
+		gotResumed = resumed
+		gotRequested = requestedSession
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -90,8 +94,83 @@ func TestHermesProviderThreadsProviderSessionOpaquelyToTheShim(t *testing.T) {
 	if gotSession != "hermes-session-abc-123" {
 		t.Fatalf("expected onSession to report the shim's returned session id, got %q", gotSession)
 	}
+	// ASST-24: the fake shim's SSE body carries no `resumed`/`requestedSession` fields at all
+	// (an older-shim shape) — absent-tolerant default must be "resumed: true", never a spurious
+	// false.
+	if !gotResumed {
+		t.Fatalf("expected resumed to default to true when the shim's session frame omits it, got false")
+	}
+	if gotRequested != "" {
+		t.Fatalf("expected requestedSession to default to empty when the shim's session frame omits it, got %q", gotRequested)
+	}
 	if strings.Join(gotTokens, "") != "hello from hermes" {
 		t.Fatalf("expected tokens relayed, got %v", gotTokens)
+	}
+}
+
+// ASST-24: when the shim's `event: session` frame DOES carry `resumed`/`requestedSession` (the
+// post-fix hermes-gateway shape), this provider must relay them through to onSession verbatim —
+// this is the new signal the whole ticket exists to plumb through to platform-nest.
+func TestHermesProviderRelaysResumedFalseAndRequestedSession(t *testing.T) {
+	shim := &fakeHermesShim{
+		sseBody: sseLine("meta", `{"provider":"hermes","model":""}`) +
+			sseLine("", jsonStr("hello again")) +
+			sseLine("session", `{"providerSession":"forked-abc999","resumed":false,"requestedSession":"sess-stale-123"}`) +
+			sseLine("done", "{}"),
+	}
+	srv := httptest.NewServer(shim.handler(t))
+	defer srv.Close()
+
+	p := NewHermesProvider(srv.URL, "", http.DefaultClient)
+	var gotSession string
+	var gotResumed bool
+	var gotRequested string
+	sawResumedTrue := false // sanity: make sure we didn't just get the zero-value default
+	err := p.CompleteStreamSession(context.Background(), "hi", "sess-stale-123", func(string) {}, func(s string, resumed bool, requestedSession string) {
+		gotSession, gotResumed, gotRequested = s, resumed, requestedSession
+		sawResumedTrue = resumed
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if gotSession != "forked-abc999" {
+		t.Fatalf("expected the forked session id relayed, got %q", gotSession)
+	}
+	if gotResumed {
+		t.Fatalf("expected resumed=false relayed verbatim, got true (sawResumedTrue=%v)", sawResumedTrue)
+	}
+	if gotRequested != "sess-stale-123" {
+		t.Fatalf("expected requestedSession relayed verbatim, got %q", gotRequested)
+	}
+}
+
+// ASST-24 happy path through this provider: resumed=true, requestedSession present (a resume WAS
+// asked for and genuinely succeeded) — distinct from the "nothing requested" default-true case
+// covered above.
+func TestHermesProviderRelaysResumedTrueWithRequestedSessionOnAGenuineResume(t *testing.T) {
+	shim := &fakeHermesShim{
+		sseBody: sseLine("meta", `{"provider":"hermes","model":""}`) +
+			sseLine("", jsonStr("continuing")) +
+			sseLine("session", `{"providerSession":"sess-abc","resumed":true,"requestedSession":"sess-abc"}`) +
+			sseLine("done", "{}"),
+	}
+	srv := httptest.NewServer(shim.handler(t))
+	defer srv.Close()
+
+	p := NewHermesProvider(srv.URL, "", http.DefaultClient)
+	var gotResumed bool
+	var gotRequested string
+	err := p.CompleteStreamSession(context.Background(), "hi", "sess-abc", func(string) {}, func(_ string, resumed bool, requestedSession string) {
+		gotResumed, gotRequested = resumed, requestedSession
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !gotResumed {
+		t.Fatalf("expected resumed=true relayed verbatim, got false")
+	}
+	if gotRequested != "sess-abc" {
+		t.Fatalf("expected requestedSession relayed verbatim, got %q", gotRequested)
 	}
 }
 
@@ -129,7 +208,7 @@ func TestHermesProviderNeverInventsASessionWhenTheShimReportsNone(t *testing.T) 
 
 	p := NewHermesProvider(srv.URL, "", http.DefaultClient)
 	sessionCalls := 0
-	err := p.CompleteStreamSession(context.Background(), "hi", "", func(string) {}, func(string) {
+	err := p.CompleteStreamSession(context.Background(), "hi", "", func(string) {}, func(string, bool, string) {
 		sessionCalls++
 	})
 	if err != nil {

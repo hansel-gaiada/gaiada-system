@@ -1885,6 +1885,82 @@ kind of two-dialects-for-one-fact problem ASST-15 was written to eliminate.
   unchanged by `git diff` (this ticket's entire diff is confined to `writeSSESession` and the one
   call site inside `handleCompleteStream`'s `finish()`).
 
+**Follow-up closed (2026-08-06): the signal now reaches ai-gateway-go, platform-nest, and
+platform-ui — nothing swallows it.** The paragraph above's "Not built in this ticket" note left a
+gap this addendum closes: `hermes-gateway`'s fix only reaches the ERP because THREE more hops now
+carry the same two additive fields, unchanged in shape end to end.
+
+- **`ai-gateway-go` (the missing hop — platform-nest never talks to hermes-gateway directly).**
+  `internal/providers/provider.go`'s `SessionStreamingProvider.CompleteStreamSession` and
+  `internal/providers/hermes.go`'s `parseHermesSSE`/`CompleteStreamSession` widen `onSession`'s
+  signature to `(session string, resumed bool, requestedSession string)` — parsed off
+  hermes-gateway's own `event: session` frame with `resumed` read as a `*bool` so a genuinely
+  ABSENT field (an older hermes-gateway build) is distinguishable from an explicit `false` and
+  defaults to `true` ("assume fine, never assume failed" — the ticket's own mandate, not a guess
+  made up here). `internal/server/server.go`'s `sessionPayload`/`writeSSESession` widen this
+  gateway's OWN outer `event: session` frame the identical way — `Resumed` is always present (no
+  `omitempty`: a consumer must be able to tell "this build reports it, and it's true" from "this
+  build has never heard of the field"), `RequestedSession` is `omitempty` (absent whenever nothing
+  was requested, mirroring `ProviderSession`'s own never-invented discipline). Both fields are
+  captured in the SAME `onSession` closure firing as `session` itself inside the `/complete/stream`
+  handler and reset together (never independently) on the mid-stream-failover discard path, so a
+  discarded attempt's mismatch can never leak into the winning attempt's frame. Tests:
+  `internal/providers/hermes_test.go` (absent-on-the-wire defaults to `resumed: true`; a real
+  `resumed: false` + `requestedSession` relays verbatim; a genuine `resumed: true` WITH a
+  `requestedSession` present is distinguished from the no-resume-requested default-true case) and
+  `internal/server/server_routing_test.go` (`TestCompleteStreamRelaysResumedFalseEndToEndThroughTheRoute`
+  — a fake hermes-gateway shim scripts the exact `resumed:false` wire shape and this gateway's OWN
+  outer wire is asserted to carry it through, still with a clean `event: done` and no
+  `event: error`). Full `go test ./internal/server/... ./internal/providers/... ./internal/chain/...`
+  green via `wsl.ps1` (Smart App Control blocks a native host build, per this repo's standing note).
+- **`platform-nest/src/modules/assistant/stream.ts`** — `GatewayStreamEvent`'s `session` variant
+  and `parseGatewayStream`'s `"session"` case now read `resumed`/`requestedSession` off
+  ai-gateway-go's frame the same absent-tolerant way (a malformed or missing `resumed` on THIS
+  wire also defaults to `true`, so an ai-gateway-go build that predates this rollout is safe too —
+  the compatibility chain holds at every hop, not just the first one). `RelayEmit.session` and
+  `RelayResult` grow `sessionResumed?: boolean` / `requestedSession?: string`, captured in
+  `relayGeneration` alongside the existing `metaProviderSession` capture and returned on every exit
+  path (done/error/abnormal_drop/catch) — `undefined` together whenever no session event ever
+  arrived, exactly mirroring `providerSession`'s own convention. New persistence helper
+  `sessionResumeMismatchParts(result)` returns `[]` for `sessionResumed !== false` (covers `true`
+  AND `undefined` in one guard — the ticket's explicit "absent must never read as a failure"
+  requirement) and a single `{ type: "session_resume_mismatch", requestedSession }` part
+  otherwise, appended into the SAME `parts` jsonb column ASST-12's `usageMetaParts`/ASST-18's
+  `citationParts` already write to (migration 0079's `parts jsonb`, no schema change needed —
+  the established convention this ticket follows, not a new one).
+  `assistant.controller.ts`'s persist block appends `...sessionResumeMismatchParts(result)` next to
+  the two existing part-builders; **ASST-16's `hermes_session_id = COALESCE($2, hermes_session_id)`
+  UPDATE is completely untouched** — a forked session is still the live one going forward, so it is
+  still what gets persisted and resumed on the NEXT turn, mismatch or not. The controller's
+  `session: () => {}` no-op emit callback (unchanged — see the ASST-16 addendum above for why the
+  raw Hermes token was never relayed onto the BROWSER-facing wire) stays a no-op: the new fields are
+  captured on `RelayResult`, read straight off it after `relayGeneration` returns, never threaded
+  through that closure. Tests: `stream.test.ts` (parsing: absent defaults true, explicit false +
+  requestedSession, explicit true + requestedSession present; `sessionResumeMismatchParts`'s three
+  cases) and `assistant-stream.test.ts`'s new `SIMULATE_HERMES_FORK` fake-gateway branch + "ASST-24"
+  nested describe (resumed:false persists AND survives a completely separate refetch — not just
+  live state — while `hermes_session_id` still updates to the FORKED id, not the stale original;
+  resumed:true renders nothing; the absent-fields/older-gateway case renders nothing) — 20/20 green
+  in that file, 105/107 across the whole `assistant/` suite (2 pre-existing skips, unrelated).
+- **`platform-ui`** — `lib/assistant.ts`'s `parseSessionResumeMismatch(parts)` mirrors
+  `stream.ts`'s `SessionResumeMismatchPart` byte-for-byte (the same "read the persisted fact, never
+  re-derive it" discipline `parseUsageMeta`/`parseCitations` already established), returning `null`
+  for every case that renders as nothing — a genuine resume, turn 1, an older gateway, or a message
+  that predates this ticket. **Deliberately READ-ONLY, persisted-only — there is no live-stream
+  counterpart**: the backend's own `session` event was never relayed onto the browser-facing SSE
+  wire (by ASST-16's own design), so this note only appears once the transcript reloads after the
+  turn's terminal state, the same "refetch after done" path ASST-12's badge/meter already rely on.
+  `components/assistant/Message.tsx` renders it as a quiet, honest, non-error note — "Hermes
+  couldn't resume the previous conversation and started a new one" — directly below the citation
+  chips, styled by `assistant.css`'s new `.asst-msg__session-note` (reuses the existing
+  `--ink-subtle` token, no new colour literal, no `--status-danger` — this is an informational
+  note, not a failure state, per the ticket's own framing: the reply itself was valid). Never shown
+  on the row currently streaming in the caller's own tab (`sessionResumeMismatch` is `null` while
+  `streaming` is true) — it only ever appears on a finalized row, exactly matching where the fact
+  actually lives. Tests: `lib/assistant.test.ts`'s new `parseSessionResumeMismatch` describe block.
+  Baselines: `tsc --noEmit` clean, full `npm test` 1171/1171 green (was ≥1168), `DEMO_MODE=1 npm run
+  build` exits 0.
+
 ### ASST-17 — tool broker under the CHATTING USER's principal (Phase 3 core, 2026-08-05)
 
 `modules/assistant/broker.ts` (new) + the tool-turn branch in `assistant.controller.ts`'s stream

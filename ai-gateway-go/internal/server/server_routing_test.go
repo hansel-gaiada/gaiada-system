@@ -198,6 +198,11 @@ func TestCompleteStreamAbsentProviderHintBehavesLikeBeforeThisTicket(t *testing.
 // the request body it actually received so this test can assert on it directly.
 type fakeHermesShimServer struct {
 	lastBody map[string]any
+	// sessionEvent, when non-empty, REPLACES the default "event: session" data line — lets
+	// callers script the ASST-24 resumed/requestedSession shape without duplicating this whole
+	// fixture. Empty uses the original ASST-15-only shape (no resumed/requestedSession at all —
+	// the absent-tolerant compatibility case).
+	sessionEvent string
 }
 
 func (f *fakeHermesShimServer) start(t *testing.T) *httptest.Server {
@@ -207,9 +212,13 @@ func (f *fakeHermesShimServer) start(t *testing.T) *httptest.Server {
 		_ = json.Unmarshal(raw, &f.lastBody)
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(200)
+		sessionLine := f.sessionEvent
+		if sessionLine == "" {
+			sessionLine = "event: session\ndata: {\"providerSession\":\"hermes-turn-2-session\"}\n\n"
+		}
 		body := "event: meta\ndata: {\"provider\":\"hermes\",\"model\":\"\"}\n\n" +
 			`data: "hello from the real hermes shim"` + "\n\n" +
-			"event: session\ndata: {\"providerSession\":\"hermes-turn-2-session\"}\n\n" +
+			sessionLine +
 			"event: done\ndata: {}\n\n"
 		_, _ = w.Write([]byte(body))
 	}))
@@ -241,8 +250,17 @@ func TestCompleteStreamProviderSessionReachesHermesShimOpaquelyThroughTheRoute(t
 		t.Fatalf("expected event: session on the outer wire, got %q", got)
 	}
 	sess := extractSessionPayload(t, got)
-	if sess != "hermes-turn-2-session" {
-		t.Fatalf("expected the outer wire's session to be the shim's reported session id, got %q", sess)
+	if sess.ProviderSession != "hermes-turn-2-session" {
+		t.Fatalf("expected the outer wire's session to be the shim's reported session id, got %q", sess.ProviderSession)
+	}
+	// ASST-24: the fake shim in THIS test carries no resumed/requestedSession fields at all (the
+	// pre-fix hermes-gateway shape) — the outer wire must still report `resumed: true` (the
+	// absent-tolerant default), never fabricate a false mismatch.
+	if !sess.Resumed {
+		t.Fatalf("expected resumed=true on the outer wire when the shim omits the field, got false")
+	}
+	if sess.RequestedSession != "" {
+		t.Fatalf("expected requestedSession absent on the outer wire when the shim omits it, got %q", sess.RequestedSession)
 	}
 	// meta on the OUTER wire never carries providerSession (ASST-15 resolution: moved off meta
 	// entirely) — assert the raw meta block has no such field.
@@ -251,8 +269,55 @@ func TestCompleteStreamProviderSessionReachesHermesShimOpaquelyThroughTheRoute(t
 	}
 }
 
-// extractSessionPayload finds the "event: session" block and decodes its providerSession field.
-func extractSessionPayload(t *testing.T, body string) string {
+// ASST-24 end to end through the real route: a stale/unknown providerSession that hermes-gateway
+// silently forked must reach OUR client's `event: session` frame with `resumed: false` and the
+// ORIGINAL `requestedSession`, not just the shim's own wire — proving ai-gateway-go's relay, not
+// just hermes-gateway's own fix, actually carries the ASST-24 signal all the way through.
+func TestCompleteStreamRelaysResumedFalseEndToEndThroughTheRoute(t *testing.T) {
+	shim := &fakeHermesShimServer{
+		sessionEvent: "event: session\ndata: {\"providerSession\":\"forked-abc999\",\"resumed\":false,\"requestedSession\":\"sess-stale-123\"}\n\n",
+	}
+	shimSrv := shim.start(t)
+	defer shimSrv.Close()
+
+	hermes := providers.NewHermesProvider(shimSrv.URL, "", http.DefaultClient)
+	c := chain.NewChain([]providers.Provider{hermes}, 3, 60_000, time.Now)
+	cfg := config.Config{GatewayToken: "secret", DailyCallCap: 1000, PerTenantDailyCallCap: 1000}
+	srv := newTestServer(t, cfg, c)
+	defer srv.Close()
+
+	got := postStream(t, srv, `{"prompt":"hi","provider":"hermes","providerSession":"sess-stale-123"}`)
+	assertNoUnprefixedLines(t, got)
+
+	sess := extractSessionPayload(t, got)
+	if sess.ProviderSession != "forked-abc999" {
+		t.Fatalf("expected the forked session id on the outer wire, got %q", sess.ProviderSession)
+	}
+	if sess.Resumed {
+		t.Fatalf("expected resumed=false on the outer wire (a real mismatch), got true")
+	}
+	if sess.RequestedSession != "sess-stale-123" {
+		t.Fatalf("expected requestedSession relayed on the outer wire, got %q", sess.RequestedSession)
+	}
+	// The reply itself must still be a clean, non-error completion — ASST-24's own mandate: this
+	// is dishonest labelling of a success, never an error condition.
+	if !strings.Contains(got, "event: done") {
+		t.Fatalf("expected a clean event: done even though the session mismatched, got %q", got)
+	}
+	if strings.Contains(got, "event: error") {
+		t.Fatalf("expected NO event: error for a session mismatch (ASST-24: not an error condition), got %q", got)
+	}
+}
+
+// sessionWirePayload is the full ASST-15/24 `event: session` shape this test file decodes.
+type sessionWirePayload struct {
+	ProviderSession  string `json:"providerSession"`
+	Resumed          bool   `json:"resumed"`
+	RequestedSession string `json:"requestedSession"`
+}
+
+// extractSessionPayload finds the "event: session" block and decodes its full payload.
+func extractSessionPayload(t *testing.T, body string) sessionWirePayload {
 	t.Helper()
 	for _, block := range strings.Split(body, "\n\n") {
 		if !strings.HasPrefix(block, "event: session") {
@@ -263,17 +328,15 @@ func extractSessionPayload(t *testing.T, body string) string {
 			if !ok {
 				continue
 			}
-			var payload struct {
-				ProviderSession string `json:"providerSession"`
-			}
+			var payload sessionWirePayload
 			if err := json.Unmarshal([]byte(rest), &payload); err != nil {
 				t.Fatalf("event: session data: line is not valid single-line JSON: %q: %v", rest, err)
 			}
-			return payload.ProviderSession
+			return payload
 		}
 	}
 	t.Fatalf("no event: session block found in %q", body)
-	return ""
+	return sessionWirePayload{}
 }
 
 // postStream POSTs a raw JSON body to /complete/stream on an already-built test server and returns

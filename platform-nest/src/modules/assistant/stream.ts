@@ -133,8 +133,20 @@ export type GatewayStreamEvent =
    *  of `meta` for exactly the reason documented at this file's header. Emitted at most once,
    *  after `usage` (if any) and before `done`, and only when the serving provider actually has a
    *  session to report (today: `hermes` only) — absent on every error path and for every other
-   *  provider, which is the common case, not an exception. */
-  | { type: "session"; providerSession: string };
+   *  provider, which is the common case, not an exception.
+   *
+   *  ASST-24: widens the SAME event (no new event name — see docs/FRONTEND-BFF-CONTRACT.md §18's
+   *  "ASST-24" addendum, authoritative) with two additive fields. `resumed` is ALWAYS present on
+   *  this parsed type once the frame decodes at all: `true` when a resume was requested and
+   *  genuinely happened, or when nothing was requested (turn 1 — nothing to have failed); `false`
+   *  when a resume WAS requested and the gateway silently forked instead. An older ai-gateway-go
+   *  build that has never heard of this field omits it on the wire — `parseGatewayStream` below
+   *  defaults a genuinely absent field to `true` ("assume fine, never assume failed"), so this
+   *  type itself never needs an optional/undefined state for `resumed`. `requestedSession` is
+   *  present ONLY when a resume was actually asked for (absent whenever `resumed` is `true`
+   *  because nothing was requested) — never invented, mirroring `providerSession`'s own
+   *  never-sent-empty discipline. */
+  | { type: "session"; providerSession: string; resumed: boolean; requestedSession?: string };
 
 /** Translate the gateway's raw SSE bytes into `GatewayStreamEvent`s per the ASST-10 grammar (plus
  *  ASST-11's additive `meta`/`usage`). Terminates (returns) after yielding `done`, `error`, or the
@@ -192,14 +204,22 @@ export async function* parseGatewayStream(body: ReadableStream<Uint8Array>): Asy
         continue;
       }
       case "session": {
-        // ASST-15 — terminal-adjacent (arrives after usage, before done), non-terminal itself.
+        // ASST-15/24 — terminal-adjacent (arrives after usage, before done), non-terminal itself.
         try {
-          const parsed = JSON.parse(raw.data) as { providerSession?: unknown };
+          const parsed = JSON.parse(raw.data) as { providerSession?: unknown; resumed?: unknown; requestedSession?: unknown };
           if (typeof parsed.providerSession === "string" && parsed.providerSession) {
-            yield { type: "session", providerSession: parsed.providerSession };
+            // ASST-24: `resumed` absent (an older ai-gateway-go build) defaults to `true` — "assume
+            // fine, never assume failed" is the ticket's explicit mandate for the compatibility
+            // case, not a guess made up here. A malformed (present-but-wrong-typed) `resumed` gets
+            // the same treatment as absent, for the same reason.
+            const resumed = typeof parsed.resumed === "boolean" ? parsed.resumed : true;
+            const requestedSession = typeof parsed.requestedSession === "string" && parsed.requestedSession
+              ? parsed.requestedSession
+              : undefined;
+            yield { type: "session", providerSession: parsed.providerSession, resumed, requestedSession };
           }
-          // Empty/missing/wrong-typed -> dropped, never thrown: the gateway's own discipline is
-          // "never sent empty", but this consumer stays absent-tolerant regardless.
+          // Empty/missing/wrong-typed providerSession -> dropped, never thrown: the gateway's own
+          // discipline is "never sent empty", but this consumer stays absent-tolerant regardless.
         } catch {
           // Same reasoning — a parse failure must never break the stream.
         }
@@ -339,8 +359,11 @@ export interface RelayEmit {
   meta: (provider: string, model: string) => void;
   /** ASST-15 — relays the terminal `event: session` the instant it arrives (after usage, before
    *  done): the late-known provider session id (today: hermes only). Called at most once, and
-   *  only when the serving provider actually reported one. */
-  session: (providerSession: string) => void;
+   *  only when the serving provider actually reported one. ASST-24 widens this with `resumed`
+   *  (always a real boolean by the time this fires — see `GatewayStreamEvent`'s `session` variant
+   *  header for the absent-tolerant default) and `requestedSession` (present only when a resume
+   *  was actually asked for). */
+  session: (providerSession: string, resumed: boolean, requestedSession?: string) => void;
   /** `tokens`/`latencyMs` keep their ASST-06 meaning (a total count + wall-clock latency at
    *  terminal time). `source` says which kind of count `tokens` actually is: `"provider"` when
    *  `promptTokens`/`completionTokens` came from ASST-11's real `usage` frame (in which case
@@ -374,8 +397,20 @@ export interface RelayResult {
   /** ASST-15's terminal `event: session` — undefined unless the SERVING provider actually
    *  reported one (today: hermes only). ASST-16 persists this to
    *  `assistant_threads.hermes_session_id` and threads it back as `providerSession` on the NEXT
-   *  turn so the same Hermes conversation resumes. */
+   *  turn so the same Hermes conversation resumes — UNCHANGED by ASST-24: even a forked session
+   *  (`sessionResumed === false`) is still the live one going forward, so it is still what gets
+   *  persisted and resumed next turn (see docs/FRONTEND-BFF-CONTRACT.md §18's ASST-16 addendum on
+   *  why `COALESCE` never re-derives this from anywhere else). */
   providerSession?: string;
+  /** ASST-24 — undefined whenever `providerSession` itself is undefined (no session event ever
+   *  arrived); otherwise always a real boolean (the absent-on-the-wire case already defaults to
+   *  `true` inside `parseGatewayStream`, so this field is never a three-way ambiguity for a
+   *  caller). `true` = a genuine resume, or nothing was requested; `false` = a resume was
+   *  requested and the gateway silently forked instead — the ONE case a consumer must surface. */
+  sessionResumed?: boolean;
+  /** ASST-24 — the id that was asked for, present only when `sessionResumed === false` (mirrors
+   *  the wire's own "never invented, never sent when nothing was requested" discipline). */
+  requestedSession?: string;
   /** `"provider"` only when ASST-11's real `usage` frame arrived (today: `ollama` only);
    *  `"estimate"` otherwise — including every error/abnormal-drop path, since a provider never
    *  reports usage on those. This is what makes the persisted `tokens` column (and the UI's cost
@@ -442,6 +477,10 @@ export async function relayGeneration(entry: GenerationEntry, input: RelayGenera
   let metaProvider: string | undefined;
   let metaModel: string | undefined;
   let metaProviderSession: string | undefined;
+  // ASST-24 — captured alongside metaProviderSession, from the SAME `session` event firing; never
+  // set independently of it (both stay undefined together whenever no session event arrives).
+  let metaSessionResumed: boolean | undefined;
+  let metaRequestedSession: string | undefined;
   let realPromptTokens: number | undefined;
   let realCompletionTokens: number | undefined;
 
@@ -495,10 +534,13 @@ export async function relayGeneration(entry: GenerationEntry, input: RelayGenera
         continue;
       }
       if (evt.type === "session") {
-        // ASST-15: terminal-adjacent (arrives after usage, before done) — the late-known Hermes
-        // session id. Captured + relayed the instant it arrives; never invented on any other path.
+        // ASST-15/24: terminal-adjacent (arrives after usage, before done) — the late-known
+        // Hermes session id, plus the resumed/requestedSession mismatch signal. Captured +
+        // relayed the instant it arrives; never invented on any other path.
         metaProviderSession = evt.providerSession;
-        input.emit.session(evt.providerSession);
+        metaSessionResumed = evt.resumed;
+        metaRequestedSession = evt.requestedSession;
+        input.emit.session(evt.providerSession, evt.resumed, evt.requestedSession);
         continue;
       }
       if (evt.type === "token") {
@@ -519,6 +561,7 @@ export async function relayGeneration(entry: GenerationEntry, input: RelayGenera
         return {
           text, tokensEstimate: tokensTotal, latencyMs: lm, outcome: "done",
           provider: metaProvider, model: metaModel, providerSession: metaProviderSession,
+          sessionResumed: metaSessionResumed, requestedSession: metaRequestedSession,
           usageSource, promptTokens: realPromptTokens, completionTokens: realCompletionTokens,
         };
       }
@@ -527,7 +570,8 @@ export async function relayGeneration(entry: GenerationEntry, input: RelayGenera
         input.emit.error(evt.error, "upstream_error");
         return {
           text, tokensEstimate: estimateTokens(text), latencyMs: lm, outcome: "error", errorKind: "upstream_error", errorMessage: evt.error,
-          provider: metaProvider, model: metaModel, providerSession: metaProviderSession, usageSource: "estimate",
+          provider: metaProvider, model: metaModel, providerSession: metaProviderSession,
+          sessionResumed: metaSessionResumed, requestedSession: metaRequestedSession, usageSource: "estimate",
         };
       }
       // evt.type === "abnormal_drop" — the wire ended without done/error. Treated as an error,
@@ -537,7 +581,8 @@ export async function relayGeneration(entry: GenerationEntry, input: RelayGenera
       input.emit.error(msg, "abnormal_drop");
       return {
         text, tokensEstimate: estimateTokens(text), latencyMs: lm, outcome: "error", errorKind: "abnormal_drop", errorMessage: msg,
-        provider: metaProvider, model: metaModel, providerSession: metaProviderSession, usageSource: "estimate",
+        provider: metaProvider, model: metaModel, providerSession: metaProviderSession,
+        sessionResumed: metaSessionResumed, requestedSession: metaRequestedSession, usageSource: "estimate",
       };
     }
     // Unreachable in practice: parseGatewayStream always yields exactly one terminal event before
@@ -548,7 +593,8 @@ export async function relayGeneration(entry: GenerationEntry, input: RelayGenera
     input.emit.error(msg, "abnormal_drop");
     return {
       text, tokensEstimate: estimateTokens(text), latencyMs: lm, outcome: "error", errorKind: "abnormal_drop", errorMessage: msg,
-      provider: metaProvider, model: metaModel, providerSession: metaProviderSession, usageSource: "estimate",
+      provider: metaProvider, model: metaModel, providerSession: metaProviderSession,
+      sessionResumed: metaSessionResumed, requestedSession: metaRequestedSession, usageSource: "estimate",
     };
   } catch (err) {
     const lm = latencyMs();
@@ -575,7 +621,8 @@ export async function relayGeneration(entry: GenerationEntry, input: RelayGenera
     input.emit.error(errorMessage, errorKind);
     return {
       text, tokensEstimate: estimateTokens(text), latencyMs: lm, outcome: "error", errorKind, errorMessage,
-      provider: metaProvider, model: metaModel, providerSession: metaProviderSession, usageSource: "estimate",
+      provider: metaProvider, model: metaModel, providerSession: metaProviderSession,
+      sessionResumed: metaSessionResumed, requestedSession: metaRequestedSession, usageSource: "estimate",
     };
   } finally {
     if (idleTimer) clearTimeout(idleTimer);
@@ -604,6 +651,31 @@ export function usageMetaParts(result: Pick<RelayResult, "usageSource" | "prompt
     ...(result.promptTokens !== undefined ? { promptTokens: result.promptTokens } : {}),
     ...(result.completionTokens !== undefined ? { completionTokens: result.completionTokens } : {}),
   }];
+}
+
+// ────────────────────────────────── persistence-shape helper (ASST-24) ───────────────────────────
+
+/** ASST-24 — the follow-up ticket to the hermes-gateway fix (docs/FRONTEND-BFF-CONTRACT.md §18's
+ *  "ASST-24" addendum, authoritative): "SURFACE `resumed: false`, never swallow it." Persisted in
+ *  the SAME `parts` jsonb column as `UsageMetaPart`/`CitationsPart` above (ASST-12's convention —
+ *  no schema change needed) so a page refresh still shows the note, not just the live SSE state
+ *  (the wire itself never relays `session` onto the browser-facing frame — see
+ *  assistant.controller.ts's `session: () => {}` comment — so this persisted record is the ONLY
+ *  way the fact reaches the UI at all). */
+export interface SessionResumeMismatchPart {
+  type: "session_resume_mismatch";
+  requestedSession: string;
+}
+
+/** Returns `[]` (never a part) for `resumed === true` OR `resumed === undefined` (no session
+ *  event ever arrived, or an older gateway that doesn't report the field) — both are the honest
+ *  "nothing to surface" case per the ticket's explicit absent-tolerant mandate: only a REAL,
+ *  known mismatch (`sessionResumed === false`) is worth telling the user about. `requestedSession`
+ *  falls back to `""` only as a defensive default; the gateway's own discipline guarantees it is
+ *  always present alongside `resumed: false`. */
+export function sessionResumeMismatchParts(result: Pick<RelayResult, "sessionResumed" | "requestedSession">): SessionResumeMismatchPart[] {
+  if (result.sessionResumed !== false) return [];
+  return [{ type: "session_resume_mismatch", requestedSession: result.requestedSession ?? "" }];
 }
 
 // ────────────────────────────────── persistence-shape helper (ASST-18) ───────────────────────────

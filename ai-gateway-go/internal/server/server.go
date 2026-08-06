@@ -213,18 +213,24 @@ func writeSSEUsage(w http.ResponseWriter, flusher http.Flusher, canFlush bool, p
 	}
 }
 
-// sessionPayload (ASST-15) is a provider's OWN, OPAQUE session/conversation handle — the gateway
-// never inspects, generates, or validates this string, only carries it. See writeSSESession.
+// sessionPayload (ASST-15, widened by ASST-24) is a provider's OWN, OPAQUE session/conversation
+// handle — the gateway never inspects, generates, or validates this string, only carries it. See
+// writeSSESession. `Resumed` is always present (never omitted — a consumer must be able to tell
+// "this gateway build reports it, and it's true" from "this gateway build doesn't report it at
+// all"); `RequestedSession` is omitted whenever nothing was actually requested, mirroring
+// `ProviderSession`'s own never-invented-never-empty convention.
 type sessionPayload struct {
-	ProviderSession string `json:"providerSession"`
+	ProviderSession  string `json:"providerSession"`
+	Resumed          bool   `json:"resumed"`
+	RequestedSession string `json:"requestedSession,omitempty"`
 }
 
-// writeSSESession writes the terminal `event: session` frame (ASST-15) — see its one call site
+// writeSSESession writes the terminal `event: session` frame (ASST-15/24) — see its one call site
 // (after usage, immediately before writeSSEDone, on the success path only) for why it can never
 // appear on an error path or after `done`. Empty sessions are never written (see the one call
 // site's nil-check): mirrors writeSSEUsage's "real value or nothing" discipline exactly.
-func writeSSESession(w http.ResponseWriter, flusher http.Flusher, canFlush bool, session string) {
-	enc, err := json.Marshal(sessionPayload{ProviderSession: session})
+func writeSSESession(w http.ResponseWriter, flusher http.Flusher, canFlush bool, session string, resumed bool, requestedSession string) {
+	enc, err := json.Marshal(sessionPayload{ProviderSession: session, Resumed: resumed, RequestedSession: requestedSession})
 	if err != nil {
 		// A plain string cannot fail to marshal; guarded for the same reason as writeSSEUsage.
 		return
@@ -253,7 +259,7 @@ func modelOf(p providers.Provider) string {
 // a real conflict — but if one someday does, the session-aware call is deliberately the one that
 // runs (session > usage in precedence here has no significance beyond "pick one deterministically";
 // see the ASST-15 addendum for why the two never need to compose).
-func callCompleteStream(ctx context.Context, sp providers.StreamingProvider, prompt, session string, onToken func(string), onUsage func(promptTokens, completionTokens int), onSession func(session string)) error {
+func callCompleteStream(ctx context.Context, sp providers.StreamingProvider, prompt, session string, onToken func(string), onUsage func(promptTokens, completionTokens int), onSession func(session string, resumed bool, requestedSession string)) error {
 	if ssp, ok := sp.(providers.SessionStreamingProvider); ok {
 		return ssp.CompleteStreamSession(ctx, prompt, session, onToken, onSession)
 	}
@@ -859,8 +865,12 @@ func NewServer(cfg config.Config, chains Chains, b *budget.Budget, classifier *d
 		var usage *usagePayload
 		// session is nil until a provider's onSession callback fires with a REAL session id
 		// (ASST-15: same never-invented discipline as usage). Read only on the success path, after
-		// usage, immediately before writeSSEDone.
+		// usage, immediately before writeSSEDone. sessionResumed/sessionRequested are ASST-24's
+		// additive fields, captured alongside session in the SAME callback firing (never
+		// independently) — see the onSession closure below and its accompanying failover-discard.
 		var session *string
+		sessionResumed := true // "assume fine" default, matches SessionStreamingProvider's onSession contract
+		var sessionRequested string
 
 		// Native streaming when the selected provider supports it; otherwise emit the full
 		// response as one SSE event so the wire contract is stable regardless.
@@ -987,8 +997,10 @@ func NewServer(cfg config.Config, chains Chains, b *budget.Budget, classifier *d
 			if sp, isStreaming := p.(providers.StreamingProvider); isStreaming {
 				serr := callCompleteStream(streamCtx, sp, result.Clean, body.ProviderSession, onToken, func(promptTokens, completionTokens int) {
 					usage = &usagePayload{PromptTokens: promptTokens, CompletionTokens: completionTokens}
-				}, func(providerSession string) {
+				}, func(providerSession string, resumed bool, requestedSession string) {
 					session = &providerSession
+					sessionResumed = resumed
+					sessionRequested = requestedSession
 				})
 				if serr != nil {
 					if streamed {
@@ -1006,11 +1018,13 @@ func NewServer(cfg config.Config, chains Chains, b *budget.Budget, classifier *d
 						// Nothing reached the client: everything this attempt produced is still
 						// inside the DLP buffer. Drop it so the next provider starts clean.
 						scrubber.Reset()
-						// ASST-11/15: this attempt's usage/session (if any) must not survive
+						// ASST-11/15/24: this attempt's usage/session (if any) must not survive
 						// failover either — both belong to a provider that never committed bytes
 						// to the wire, exactly like the discarded buffer they traveled alongside.
 						usage = nil
 						session = nil
+						sessionResumed = true
+						sessionRequested = ""
 					}
 					return "", serr
 				}
@@ -1076,7 +1090,7 @@ func NewServer(cfg config.Config, chains Chains, b *budget.Budget, classifier *d
 		// reaches the wire, WITHOUT meta itself ever needing to move (see the ASST-15 addendum in
 		// docs/FRONTEND-BFF-CONTRACT.md §18 and metaPayload's doc comment above).
 		if session != nil && *session != "" {
-			writeSSESession(w, flusher, canFlush, *session)
+			writeSSESession(w, flusher, canFlush, *session, sessionResumed, sessionRequested)
 		}
 		// ASST-10: the clean-completion terminal. Reached ONLY on a success path — every error
 		// branch above returns before this point — so a consumer can rely on `event: done` to
