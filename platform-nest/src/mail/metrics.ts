@@ -35,6 +35,23 @@ const inbound = meter.createCounter("mail_inbound_total", {
 const inboundRejected = meter.createCounter("mail_inbound_rejected_total", {
   description: "Inbound deliveries refused at intake, by reason (auth|size|dupe|rate|malformed)",
 });
+// MAIL-26 — closes the two blind branches MAIL-11's QA gate flagged: a rate-limited magic-link
+// mint and a rejected magic-link consume write no `auth_magic_links`/`mail_log` row at all, so
+// today they leave no durable trace beyond stdout (and WS9/Loki, the thing that durably ships
+// stdout, is opt-in and not running). These two counters are that trace's floor, not its ceiling:
+// they make "someone is probing" visible as a sustained rate (see the new alert rules in
+// infra/observability/prometheus/rules/alerts.yml), but a counter increment carries no per-attempt
+// detail (which address, which IP, which token) — that forensic layer still requires log
+// aggregation (WS9/Loki) reading the existing `logMagicLinkAudit` console lines, which this does
+// NOT replace or substitute for.
+const magicLinkRateLimited = meter.createCounter("mail_magic_link_rate_limited_total", {
+  description:
+    "Magic-link mint attempts short-circuited by the per-address/per-IP hourly rate limit, by dimension (address|ip). The HTTP response is unchanged (still 202) — this is the only durable signal of the block.",
+});
+const magicLinkConsumeRejected = meter.createCounter("mail_magic_link_consume_rejected_total", {
+  description:
+    "Magic-link consume attempts rejected, by reason (unknown|expired|replayed). The reason is a server-side label ONLY — the HTTP response stays the single generic MagicLinkConsumeError for all three, by design (MAIL-10/MAIL-11).",
+});
 
 export function recordEnqueued(stream: string, templateKey: string): void {
   enqueued.add(1, { stream, template: templateKey });
@@ -63,4 +80,15 @@ export function recordInbound(provider: string, outcome: string): void {
  *  the delivery-level outcome itself for the refusals that are whole-delivery refusals. */
 export function recordInboundRejected(reason: string): void {
   inboundRejected.add(1, { reason });
+}
+/** `dimension` is `"address"` or `"ip"` — called once per exceeded dimension, so a request that
+ *  blew both limits at once bumps the counter twice (once per label), not once with a compound
+ *  label. See this file's MAIL-26 comment above for what this does and does NOT give an operator. */
+export function recordMagicLinkRateLimited(dimension: string): void {
+  magicLinkRateLimited.add(1, { dimension });
+}
+/** `reason` is `"unknown" | "expired" | "replayed"` — a metric-only classification (never surfaced
+ *  in the HTTP response). See this file's MAIL-26 comment above. */
+export function recordMagicLinkConsumeRejected(reason: string): void {
+  magicLinkConsumeRejected.add(1, { reason });
 }

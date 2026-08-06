@@ -61,6 +61,24 @@
 // durably recorded as the mail_log audit row (mint) / the `auth_magic_links` row's own
 // `consumed_at`/`consumed_ip` columns (consume) — the row IS the audit trail, the same convention
 // `mail_log` already uses for every other kind of mail (A5).
+//
+// ── THE TWO BRANCHES THAT WRITE NO ROW AT ALL — MAIL-26 closes the visibility gap, not the gap ──
+// MAIL-11's QA gate judged the above "adequate for the branches that write a DB row, not for the
+// two that don't": a rate-limited mint (early-returns out of `requestMagicLink` before any INSERT)
+// and a rejected consume (unknown/expired/replayed token — the atomic UPDATE below affects zero
+// rows) leave nothing behind but a `logMagicLinkAudit` console line, and nothing in this project
+// durably ships stdout (WS9/Loki is opt-in and NOT running). MAIL-26 adds a fail-soft OTel counter
+// for each of those two branches (`recordMagicLinkRateLimited`/`recordMagicLinkConsumeRejected`,
+// `src/mail/metrics.ts`) plus sustained-rate alert rules
+// (`infra/observability/prometheus/rules/alerts.yml`) — deliberately NO migration, NO new table:
+// a counter increment answers "is someone probing right now", not "which address/token/IP did it".
+// That per-attempt forensic question is still ONLY answerable from `logMagicLinkAudit`'s console
+// lines via log aggregation (WS9/Loki) — the counters do not replace that, they cover the window
+// before it exists. The consume-side counter carries a `reason` label (unknown|expired|replayed)
+// derived from a same-statement, same-cost classification read (see `consumeMagicLink` below) —
+// metric-only, never surfaced in the response, which stays the one generic `MagicLinkConsumeError`
+// for all three (unchanged from M11/MAIL-10; re-pinned by `qa-mail11-adversarial.test.ts` and
+// `controller.test.ts`, both left untouched).
 import type { PoolClient } from "pg";
 import { config } from "../../config";
 import { newId, withGlobal, withMailContext } from "../../db";
@@ -68,7 +86,14 @@ import { normalizeEmail } from "../sanitize";
 import { isSuppressed } from "../suppressions";
 import { renderTemplate } from "../templates";
 import { resolveAdapter } from "../provider";
-import { recordEnqueued, recordSent, recordFailed, recordSendDuration } from "../metrics";
+import {
+  recordEnqueued,
+  recordSent,
+  recordFailed,
+  recordSendDuration,
+  recordMagicLinkRateLimited,
+  recordMagicLinkConsumeRejected,
+} from "../metrics";
 import type { RenderedMail } from "../types";
 import { generateRawToken, hashToken } from "./tokens";
 import { checkHourlyRate } from "./rate-limit";
@@ -209,6 +234,12 @@ export async function requestMagicLink(input: RequestMagicLinkInput): Promise<Re
   const addrDecision = checkHourlyRate(`addr:${email}`, config.mail.magicLinkRatePerAddressHour);
   const ipDecision = checkHourlyRate(`ip:${ip}`, config.mail.magicLinkRatePerIpHour);
   if (!addrDecision.allowed || !ipDecision.allowed) {
+    // In-memory OTel counter add — no I/O, negligible relative to `dummyEquivalentWork`'s DB round
+    // trips below, so it does not perturb the known-vs-unknown timing property this branch's
+    // caller (both known and unknown addresses can land here identically) already holds. One
+    // `.add()` per exceeded dimension, not a single compound label — see metrics.ts.
+    if (!addrDecision.allowed) recordMagicLinkRateLimited("address");
+    if (!ipDecision.allowed) recordMagicLinkRateLimited("ip");
     await dummyEquivalentWork();
     logMagicLinkAudit("mint.rate_limited", { ip });
     return { status: "accepted" };
@@ -331,28 +362,80 @@ export interface ConsumedMagicLink {
  *  statement, so two concurrent presentations of the same token cannot both win — Postgres's
  *  row-level lock serializes them, the loser's WHERE clause sees the already-set `consumed_at`
  *  and matches zero rows. Unknown token, replayed token, and expired token are indistinguishable
- *  by construction: all three produce zero returned rows, and the single `MagicLinkConsumeError`
- *  below is the only thing ever thrown for any of them — no `.reason`, no distinguishing detail. */
+ *  TO THE CALLER by construction: all three produce zero returned rows, and the single
+ *  `MagicLinkConsumeError` below is the only thing ever thrown for any of them — no `.reason` field,
+ *  no distinguishing detail in the response or its timing (see the query's own comment, MAIL-26).
+ *  They ARE distinguished server-side-only, at the metric label, for operator visibility — a
+ *  narrower and deliberately weaker claim than "distinguishable in the response", which stays false. */
 export async function consumeMagicLink(input: ConsumeMagicLinkInput): Promise<ConsumedMagicLink> {
   if (!config.mail.magicLinksEnabled) throw new MagicLinkNotEnabledError();
   const raw = input.token ?? "";
-  if (!raw) throw new MagicLinkConsumeError();
+  if (!raw) {
+    // Empty-token probe: no DB round trip possible (nothing to look up), but it is still a
+    // rejected consume and worth the same "unknown" signal as a garbage token that DOES reach the
+    // query below — see the MAIL-26 header comment above.
+    recordMagicLinkConsumeRejected("unknown");
+    logMagicLinkAudit("consume.rejected", { reason: "unknown" });
+    throw new MagicLinkConsumeError();
+  }
   const tokenHash = hashToken(raw);
 
-  const claimed = await withGlobal((c: PoolClient) =>
-    c.query<{ id: string; user_id: string }>(
-      `UPDATE auth_magic_links
-          SET consumed_at = now(), consumed_ip = $2
-        WHERE token_hash = $1 AND consumed_at IS NULL AND expires_at > now()
-        RETURNING id, user_id`,
+  // MAIL-26 — the atomic UPDATE alone (unchanged; still the WHOLE anti-replay mechanism per this
+  // function's own doc comment above) tells us THAT a token was rejected but never WHY. `found`
+  // classifies why, in the SAME single statement/round-trip, so classification costs exactly the
+  // same regardless of outcome — success, unknown, expired, or replayed all run this one query,
+  // never a second query gated on the first one's result. That matters here specifically: if the
+  // classification read only ran on the reject path, an unknown/expired/replayed token would each
+  // pay a *different* shaped cost (an index hit vs an index miss vs none at all) and reopen, for
+  // consume, the exact class of gross timing oracle MAIL-24 closed for mint's known/unknown split
+  // — so this is written to make the query plan (and therefore the cost) identical for all four
+  // outcomes instead. `found` reads `auth_magic_links` directly rather than through `claimed`, so
+  // per Postgres's WITH-clause semantics (sibling CTEs don't see each other's side effects without
+  // an explicit data dependency) it evaluates against the PRE-update snapshot — precisely the state
+  // that explains why `claimed`'s WHERE clause did or didn't match a row.
+  const result = await withGlobal((c: PoolClient) =>
+    c.query<{
+      claimed_id: string | null;
+      claimed_user_id: string | null;
+      found_consumed_at: string | null;
+      found_expires_at: string | null;
+    }>(
+      `WITH claimed AS (
+         UPDATE auth_magic_links
+            SET consumed_at = now(), consumed_ip = $2
+          WHERE token_hash = $1 AND consumed_at IS NULL AND expires_at > now()
+         RETURNING id, user_id
+       ), found AS (
+         SELECT consumed_at, expires_at FROM auth_magic_links WHERE token_hash = $1
+       )
+       SELECT
+         (SELECT id FROM claimed) AS claimed_id,
+         (SELECT user_id FROM claimed) AS claimed_user_id,
+         (SELECT consumed_at FROM found) AS found_consumed_at,
+         (SELECT expires_at FROM found) AS found_expires_at`,
       [tokenHash, input.ip || null],
     ),
   );
-  const row = claimed.rows[0];
-  if (!row) {
-    logMagicLinkAudit("consume.rejected", {});
+  const row = result.rows[0];
+  if (!row.claimed_id) {
+    // Classification is BEST-EFFORT and metric-only — it is never surfaced in the response, which
+    // stays the single generic `MagicLinkConsumeError` below for all three reasons (re-pinned by
+    // `qa-mail11-adversarial.test.ts`'s log-leak sweep and `controller.test.ts`'s body-shape
+    // assertion). `found_expires_at` is only non-null when a row exists (the column is NOT NULL in
+    // the schema), so: already-consumed beats expired beats "no row at all".
+    const reason: "unknown" | "expired" | "replayed" = row.found_consumed_at
+      ? "replayed"
+      : row.found_expires_at
+        ? "expired"
+        : "unknown";
+    recordMagicLinkConsumeRejected(reason);
+    logMagicLinkAudit("consume.rejected", { reason });
     throw new MagicLinkConsumeError();
   }
-  logMagicLinkAudit("consume.ok", { userId: row.user_id, linkId: row.id });
-  return { userId: row.user_id };
+  // `claimed_id` truthy here guarantees `claimed_user_id` is too — they come from the same
+  // `RETURNING id, user_id` row (user_id is NOT NULL in the schema); TS can't see that correlation
+  // across scalar subqueries, so this is a narrowing assertion, not a real possibility of null.
+  const claimedUserId = row.claimed_user_id as string;
+  logMagicLinkAudit("consume.ok", { userId: claimedUserId, linkId: row.claimed_id });
+  return { userId: claimedUserId };
 }

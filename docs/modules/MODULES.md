@@ -54,7 +54,7 @@ versions below; the running build reports it at `GET /health`.
 | render-gateway-go | `0.0.0` | PLANNED | Creative | 2026-07-23 |
 | reports | `0.3.1` | PROTOTYPED | Cross-cutting | 2026-08-03 |
 | report-renderer | `0.1.0` | DEV-VERIFIED | Cross-cutting | 2026-07-31 |
-| mail | `0.0.15` | IN PROGRESS | Cross-cutting | 2026-08-05 |
+| mail | `0.0.17` | IN PROGRESS | Cross-cutting | 2026-08-06 |
 
 ---
 
@@ -347,7 +347,20 @@ through C-03". **v1.2 (same day, Zone A mail v2):** domains locked — C-03's fo
 moved to the Google Workspace SMTP relay with Brevo failover. Blueprint HTML is v1.2; PDF + hosted
 artifact NOT re-rendered yet.
 
-## mail — Zone A Email (platform-nest) · `0.0.16` · IN PROGRESS
+## mail — Zone A Email (platform-nest) · `0.0.17` · IN PROGRESS
+
+**0.0.17 (2026-08-06, senior-be, MAIL-24/25/26) — QA findings closed; this heading and the registry
+row had drifted apart.** MAIL-24 closed the magic-link timing enumeration oracle (3.25x -> 1.28x,
+via equivalent real work rather than fingerprintable sleeps), put `x-forwarded-for` behind a
+trusted-proxy allowlist defaulting to trust-nothing (spoofed headers previously defeated the per-IP
+rate limit entirely), and made a silent failed auth-send loud via an alert instead of retrying —
+retrying would require persisting a raw token, which is deliberately never done. MAIL-26 added
+fail-soft counters for the two branches that wrote no DB row (rate-limited mint, rejected consume),
+classifying the rejection reason through a sibling CTE so it costs no extra query and creates no new
+timing oracle; the HTTP response stays byte-identical and MAIL-24 timing bound re-verified. Counters
+are not firing alerts: WS9/Loki is not running, and per-attempt forensics still needs log
+aggregation. Full detail in CHANGELOG `[0.0.17]`, which also records why 0.0.15/0.0.16 were
+asserted here with no changelog entry (concurrent sessions clobbering these two files).
 
 **0.0.16 (2026-08-05, senior-be, MAIL-25) — the inbound truncation notice is now driven by a
 structured field, not an emergent line-shape effect.** MAIL-19's intake cap splices a

@@ -143,3 +143,37 @@ groups:
         annotations:
           summary: "Mail send failure rate > 20% on stream {{ $labels.stream }} (last 1h)"
           description: "{{ $value | humanizePercentage }} of stream {{ $labels.stream }} sends failed in the last hour. Operator action per design A8: flip MAIL_STREAM_{{ $labels.stream }}_TRANSPORT to the other leg (relay<->brevo)."
+
+      # --- Mail (MAIL-26): sustained magic-link rate-limit blocks — the probing signal, not a
+      # failure signal. This endpoint returns the SAME 202 whether a mint was accepted or blocked
+      # by the hourly rate limit (design §5.1's enumeration-resistance requirement — see
+      # src/mail/magic-link/service.ts's header), so a rate-limited HAMMER against this route is
+      # otherwise invisible in the HTTP layer entirely. A RATE over a window, not "any increase"
+      # (unlike MailAuthStreamSendFailed above): a handful of blocked requests is normal operation
+      # for a real user who double-clicked "resend"; a sustained run is what's worth a ticket.
+      # `dimension` distinguishes "one address, many attempts" from "one IP, many addresses" per
+      # `mail_magic_link_rate_limited_total`'s label (src/mail/metrics.ts) — this fires per-dimension.
+      - alert: MailMagicLinkRateLimitSustained
+        expr: increase(mail_magic_link_rate_limited_total[15m]) > 10
+        for: 5m
+        labels:
+          severity: ticket
+        annotations:
+          summary: "Sustained magic-link rate-limit blocks on dimension {{ $labels.dimension }}"
+          description: "{{ $value }} magic-link mint attempt(s) blocked by the hourly rate limit on dimension {{ $labels.dimension }} in 15m. The HTTP response never distinguished this from a normal 202 (by design) — this counter is the only signal. Per-attempt detail (which address/IP) requires log aggregation (WS9/Loki) over the `[magic-link:audit] mint.rate_limited` lines; this metric only says a sustained run is happening."
+
+      # --- Mail (MAIL-26): sustained rejected magic-link consumes — token-space probing/replay.
+      # Same reasoning as above, mirrored for the OTHER blind branch MAIL-11's QA gate flagged: a
+      # rejected consume (unknown/expired/replayed token) writes no DB row and returns the same
+      # generic 422 for all three, by design (see consumeMagicLink's doc comment). `reason` lets an
+      # operator tell "one attacker guessing random tokens" (mostly `unknown`) apart from "a stale
+      # or already-used link being retried" (mostly `expired`/`replayed`) WITHOUT the response ever
+      # revealing that distinction to the caller — the label is metric-only.
+      - alert: MailMagicLinkConsumeRejectedSustained
+        expr: increase(mail_magic_link_consume_rejected_total[15m]) > 10
+        for: 5m
+        labels:
+          severity: ticket
+        annotations:
+          summary: "Sustained rejected magic-link consumes, reason={{ $labels.reason }}"
+          description: "{{ $value }} magic-link consume attempt(s) rejected (reason={{ $labels.reason }}) in 15m. The HTTP response never distinguished this from any other rejection (by design) — this counter is the only signal. Per-attempt detail (which token/IP) requires log aggregation (WS9/Loki) over the `[magic-link:audit] consume.rejected` lines; this metric only says a sustained run is happening."

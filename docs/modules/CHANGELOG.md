@@ -3290,6 +3290,67 @@ Built by a 4-agent parallel run against a frozen contract (`docs/superpowers/pla
   CR-01/06/13; QA gates CR-01/06/12/13/20.
 
 ## mail (continued)
+### [0.0.17] — 2026-08-06 · IN PROGRESS · MAIL-24/25/26 + a repair of this file's own bookkeeping
+
+> **Why this entry jumps to 0.0.17 and consolidates three tickets.** `MODULES.md` claimed
+> `mail 0.0.15` in its registry row and carried a `0.0.16` detail block for MAIL-25, while this
+> file's mail section stopped at `[0.0.14]` — so two versions were asserted with no changelog
+> entry, violating versioning rule 1. Cause: four agents and three other sessions appended to
+> these two files concurrently and clobbered each other's writes. Rather than silently renumber,
+> the gap is recorded and the registry is moved to `0.0.17`. Mitigation now in force: subagents are
+> **forbidden** from editing `MODULES.md`/`CHANGELOG.md` and report their text instead, so a single
+> writer applies it — these are the highest-contention files in the repo.
+
+- **MAIL-24 (senior-be) — closed three findings from MAIL-11's adversarial gate.**
+  (1) The **timing enumeration oracle**: measured at 3.25× (known 13ms / unknown 4ms, tight IQRs
+  both sides, so signal not noise) and closed to **1.28×** by giving the unknown branch
+  equivalent *real* work — a decoy insert/delete rolled back through `withMailContext` — rather
+  than sleeps, which are themselves fingerprintable and tax every caller. Unknown now runs
+  marginally *slower* than known, which is the safe direction.
+  (2) **`x-forwarded-for` spoofing** defeated the per-IP rate limit outright (8 spoofed IPs, 8
+  successes). Now gated behind a trusted-proxy allowlist defaulting to **trust nothing**. Not
+  exploitable before the fix — no browser-facing request form exists — but it would have become
+  exploitable the day one shipped.
+  (3) A **failed auth-stream send was silent and unretried**. Kept single-attempt by design
+  (retrying would require persisting a raw token, which M10 deliberately never does) and made
+  loud via a `MailAuthStreamSendFailed` alert instead. A bounded re-mint path was considered and
+  deliberately **not** built — it carries its own replay/enumeration surface and belongs to an
+  architect call once the alert shows real failure frequency.
+
+- **MAIL-25 (senior-be) — inbound truncation notice: an accident replaced by a guarantee.**
+  Migration **`0082_mail_truncation_metadata.sql`** (additive `body_truncated` /
+  `body_truncated_chars`, zero backfill DML) plus the field on `ThreadMessageView`. Previously the
+  notice rendered correctly *only* because the genuine elision marker happened not to sit on a
+  quote-prefixed line — and a sender can forge that marker string (MAIL-19's corpus case 18 proves
+  forged markers are stored verbatim, which is correct intake behaviour). The UI now renders from
+  the structured columns, derived from the cap's own arithmetic, so forged markers stay inert plain
+  text. The quote-prefixed-marker case that would have broken the old behaviour is pinned
+  explicitly. Shipped as `0082`, not `0081`: a concurrent HR-loans session landed
+  `0081_hr_loans.sql` mid-ticket, so this file was renamed — the **fifth** ledger movement in one
+  session.
+
+- **MAIL-26 (senior-be) — the two blind magic-link branches are now detectable.** MAIL-11 judged
+  the audit trail *"adequate for the branches that write a DB row, not for the two that don't"* —
+  a rate-limited mint and a rejected consume wrote nothing, leaving brute-force probing traceless
+  beyond container stdout retention. Added fail-soft counters
+  `mail_magic_link_rate_limited_total{dimension}` and
+  `mail_magic_link_consume_rejected_total{reason}` (`unknown`/`expired`/`replayed`), plus two
+  sustained-rate alerts (`>10` in 15m for 5m — rate-based, since occasional blocks are normal).
+  **No migration**, deliberately: the ledger had already moved five times and more sessions were
+  starting. The interesting part is how the `reason` label avoids creating a *new* oracle — the
+  single-use `UPDATE … RETURNING` became one statement with a **sibling CTE** reading the
+  pre-update snapshot, so classifying why a token was rejected costs exactly the same as not
+  classifying, with no second query gated on the first. Verified unregressed: the HTTP response
+  stays byte-identical across all three rejection classes, and MAIL-24's timing bound still holds
+  (re-measured 1.11× and 1.56×, both under 1.8). **Counters existing is not alerts firing** —
+  WS9/Loki is not running, and per-attempt forensics (which address, which IP) still needs log
+  aggregation. This narrows the blind spot to "a sustained run is happening"; it does not close it.
+
+Evidence: `src/mail` 174 tests green across 21 files with QA's `qa-mail11-adversarial.test.ts`
+assertions intact; `promtool check rules` SUCCESS on 14 rules; `tsc --noEmit` clean;
+`lint:migration-rls` (83 migrations) and `lint:withtenants` (272 files) both OK; A12 grep gate
+zero matches. Test databases created under scoped prefixes and dropped, counts reconciled exactly.
+
 ### [0.0.14] — 2026-08-05 · IN PROGRESS · MAIL-10 (senior-be) — magic links (low-risk convenience login, design §9; M8/M11 locked)
 
 - **Migration `0080_auth_magic_links.sql`.** Ledger re-verified with `ls migrations | sort | tail`
