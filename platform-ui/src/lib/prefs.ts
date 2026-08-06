@@ -37,6 +37,16 @@ export async function getPrefs(): Promise<Prefs> {
   }
 }
 
+export type SidebarState = "expanded" | "collapsed";
+export const SIDEBAR_COOKIE = "gaiada_sidebar";
+
+// Separate cookie from the prefs blob: the toggle writes it client-side for an
+// instant collapse, so it must not have to round-trip (or clobber) the rest.
+export async function getSidebarState(): Promise<SidebarState> {
+  const jar = await cookies();
+  return jar.get(SIDEBAR_COOKIE)?.value === "collapsed" ? "collapsed" : "expanded";
+}
+
 export async function writePrefs(next: Prefs): Promise<void> {
   const jar = await cookies();
   jar.set(COOKIE, JSON.stringify(next), {

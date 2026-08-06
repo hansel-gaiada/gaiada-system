@@ -7,7 +7,9 @@ import type { IconName } from "./icons";
 export { isElevated, canManageIT } from "@/lib/rbac";
 
 export interface NavItem { label: string; href: string; icon: IconName }
-export interface NavGroup { label: string; items: NavItem[] }
+/** `icon` is the collapsed rail's category glyph; `pinned` keeps a group's rows one
+ *  click away — open by default when expanded, flat (never a flyout) in the rail. */
+export interface NavGroup { label: string; items: NavItem[]; icon?: IconName; pinned?: boolean }
 
 // Nav is capability-gated against the ACTIVE company (tenantId). Company-scoped
 // capabilities (people.directory, admin.access) resolve for that company;
@@ -43,22 +45,23 @@ export function navFor(me: Me, tenantId?: string | null, departments: { id: stri
     { label: "IT", href: "/it", icon: "pulse" },
   ];
   const groups: NavGroup[] = [
-    { label: "Workspace", items: [
+    // Daily destinations: always reachable in one click, in either mode.
+    { label: "Workspace", pinned: true, items: [
       { label: "Dashboard", href: "/", icon: "home" },
       { label: "Calendar", href: "/calendar", icon: "clock" },
       { label: "Approvals", href: "/approvals", icon: "check" },
     ] },
     // Companies now live inside the Organization Overview.
-    { label: "Organization", items: [
+    { label: "Organization", icon: "sitemap", items: [
       { label: "Overview", href: "/organization", icon: "inventory" },
     ] },
-    { label: "Departments", items: deptItems },
-    { label: "Business", items: business },
+    { label: "Departments", icon: "hr", items: deptItems },
+    { label: "Business", icon: "briefcase", items: business },
     // TR-17: the tracker/reporting program's grain report pages. Person/project/department are
     // always listed (§8 lets everyone read at least their own person-grain document; the BFF is
     // the real authority for project/department scoping) — Company is nav-gated by `rollups.view`
     // the same way the existing Rollups link is, since §8 makes company-grain exec-only.
-    { label: "Reports", items: [
+    { label: "Reports", icon: "chart", items: [
       { label: "My Report", href: "/reports/person", icon: "pulse" },
       { label: "Project Reports", href: "/reports/project", icon: "pulse" },
       { label: "Department Reports", href: "/reports/department", icon: "pulse" },
@@ -67,16 +70,16 @@ export function navFor(me: Me, tenantId?: string | null, departments: { id: stri
     // TR-26: `/appraisals/mine` is self-service (every principal reads their own record, always —
     // same reasoning as check-ins, no capability gates it). The other two rows are capability-gated
     // per the TR-25 rbac.ts mirror: manager/HR scoring console, then HR-only cycle administration.
-    { label: "Appraisals", items: [
+    { label: "Appraisals", icon: "award", items: [
       { label: "My Appraisals", href: "/appraisals/mine", icon: "check" },
       ...(can(me, "appraisal.score", tenantId) || can(me, "appraisal.read", tenantId) ? [{ label: "Team Appraisals", href: "/appraisals", icon: "check" } as NavItem] : []),
       ...(can(me, "appraisal.cycle.admin", tenantId) ? [{ label: "Appraisal Cycles", href: "/appraisals/cycles", icon: "check" } as NavItem] : []),
     ] },
-    { label: "Intelligence", items: [
+    { label: "Intelligence", icon: "agents", items: [
       { label: "Knowledge", href: "/knowledge", icon: "box" },
       { label: "AI Agents", href: "/agents", icon: "agents" },
     ] },
-    { label: "Systems", items: [
+    { label: "Systems", icon: "server", items: [
       { label: "WA/TG Bot", href: "/systems/bot", icon: "bot" },
       { label: "AI Gateway", href: "/systems/gateway", icon: "gateway" },
       { label: "MCP Hub", href: "/systems/hub", icon: "hub" },
