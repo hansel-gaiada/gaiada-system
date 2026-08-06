@@ -1,0 +1,66 @@
+# OBS-01 (Tier 1) — otel-collector + Prometheus ONLY, run as their OWN compose project, attached
+# to the existing `gaiada` stack network as an external network. Same precedent as MAIL-02's
+# docker-compose.alertmanager-mail.yml: a separate compose project survives
+# `docker compose -p gaiada ... up -d --remove-orphans` on the main stack, because
+# --remove-orphans only prunes services within the SAME project that aren't in its current
+# compose files — it never touches a different project's containers.
+#
+# WHY NOT docker-compose.observability.yml: that file is the FULL WS9 stack (+Tempo/Loki/Grafana/
+# 6 exporters/ntfy) merged into the MAIN `gaiada` project (name: gaiada) — bringing it up would
+# mean either (a) adding it to the main project's COMPOSE_FILES, which risks deploy.yml's
+# --remove-orphans reaping anything not listed, or (b) a second alertmanager, duplicating MAIL-02.
+# This box is disk-constrained (76% / 12G free at authoring time) and the ticket scope is
+# deliberately Tier 1: just enough to let the 5 mail alert rules evaluate and reach the ALREADY
+# running gaiada-alertmanager project. Grafana/Loki/Tempo/exporters are a separate decision.
+#
+# otel-collector uses config.tier1-metrics.yaml (metrics-only subset of the known-good
+# config.yaml — see that file's header for why) so there's no futile export traffic toward a
+# Tempo/Loki that isn't running.
+#
+# Bring up:
+#   cd infra/compose
+#   docker compose -f docker-compose.otel-metrics.yml up -d
+# Tear down (keeps the shared network + main project untouched):
+#   docker compose -f docker-compose.otel-metrics.yml down
+name: gaiada-otel-metrics
+
+services:
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.116.1
+    restart: unless-stopped
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes:
+      - ../observability/otel-collector/config.tier1-metrics.yaml:/etc/otelcol/config.yaml:ro
+    networks:
+      - stack
+
+  prometheus:
+    image: prom/prometheus:v3.1.0
+    restart: unless-stopped
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.retention.time=15d"
+      - "--web.enable-lifecycle"
+    volumes:
+      - ../observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ../observability/prometheus/rules:/etc/prometheus/rules:ro
+      - prometheus-data:/prometheus
+    ports:
+      # loopback-only (SSH tunnel) — mirrors every other admin UI on this box.
+      - "127.0.0.1:9090:9090"
+    depends_on:
+      - otel-collector
+    networks:
+      - stack
+
+networks:
+  # The main stack's implicit default network (project `gaiada`, no explicit `networks:` block in
+  # docker-compose.vps.yml => Compose names it "gaiada_default"). Referenced external so Prometheus
+  # can resolve `alertmanager` (already running as the gaiada-alertmanager project) and so `platform`
+  # etc. can resolve `otel-collector` by service name, without merging into the main project.
+  stack:
+    name: gaiada_default
+    external: true
+
+volumes:
+  prometheus-data:

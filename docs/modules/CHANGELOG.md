@@ -1937,6 +1937,39 @@ Verified: 939 unit tests pass, `tsc` clean, `next build` green. Not driven in a 
 - **Next:** more flows; Temporal for durable orchestration.
 
 ## observability
+### [0.6.1] — 2026-08-06 · DEV-VERIFIED (OBS-01 — the metrics path is live; the mail alerts can finally fire)
+
+Five mail alert rules had been passing `promtool check rules` while **nothing evaluated them** — no
+Prometheus, no collector, `OTEL_ENABLED=0`. Two mitigations depended on them and were inert:
+MAIL-24's `MailAuthStreamSendFailed` (a failed sign-in email is otherwise silent and, by design,
+never retried) and MAIL-26's probing alerts. Tier 1 only: `otel-collector` + `prometheus`, as a
+**separate compose project** (`gaiada-otel-metrics`, the MAIL-02 Alertmanager precedent) so
+`deploy.yml`'s `--remove-orphans` cannot delete it and no `COMPOSE_PROFILES` change is needed.
+Deliberately NOT Loki/Tempo/Grafana/exporters — 18 services against ~12G free would be reckless, and
+Alertmanager was already running with 3 valid receivers.
+
+- **Proven end to end, not just wired:** 20 rules loaded (14 operational + 6 SLO) incl. all 5 mail
+  alerts; Prometheus's Alertmanager target confirmed as the running instance; real OTel
+  auto-instrumentation metrics arriving from `platform`; and one alert driven to **firing** by a
+  synthetic OTLP push, then confirmed present in the live Alertmanager routed to `default-multi`.
+  The injected series was tagged `obs01-synthetic` and purged after.
+- **Found and fixed real drift:** the server's checked-out `alerts.yml` was **stale at 145 lines**
+  against the repo's 179 — missing both MAIL-26 rules, so those alerts existed only in git. Synced;
+  server and repo now agree. The same drift class MAIL-21 cleaned up, quietly re-forming.
+- **NOT verified:** a real mail-triggered alert (magic links are disabled on this box, so no mail
+  codepath fires organically — the feature flag was deliberately left alone rather than flipped for a
+  test), and SLO burn-rate behaviour.
+- ⚠️ **Incident, disclosed rather than buried.** `OTEL_ENABLED` is a **shared** `${VAR:-0}` read by
+  six services. Setting it in `.env` to enable `platform` alone, then running an unscoped
+  `up -d --remove-orphans`, recreated all six — including `ai-gateway-go`, which another active
+  session owns. Caught via `docker inspect`, reverted, and redone as a **shell-level override on a
+  service-scoped command** so only `platform` got it. Final state verified: `platform=1`, the other
+  five back to `0`, `ai-gateway-go` on its original tag and healthy. Cost: five services, two brief
+  restarts. Lesson: to flip a shared var for one service, never write it to `.env`, and always scope
+  `up -d` to explicit service names.
+- Disk 75% → 77% (~11.8G free) from two image pulls. Rollback: `docker compose -f
+  docker-compose.otel-metrics.yml down`; `.env` backup retained on the box.
+
 ### [0.6.0] — 2026-07-23 · DEV-VERIFIED
 - Baseline. OTel across all services; opt-in Grafana stack; SLOs; alerting; restore drill. Verified e2e
   on a live Docker stack (2026-07-15).

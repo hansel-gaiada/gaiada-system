@@ -108,6 +108,60 @@ flow, real Mailpit API capture, real link click, real token issuance) using disp
   chain completed to a real authorization code / Bearer token. `kcadm get users/<id>` confirmed
   `emailVerified` flipped `false → true` purely through this flow.
 
+### SEC-01 (2026-08-06, QA) — CONFIRMED: the reset-password link is a login link, not a rotation link
+
+Re-tested MAIL-03's finding above with a **real Chromium browser** (Playwright), not curl/PKCE,
+specifically to rule out a headless artefact. Throwaway user `sec01-throwaway@dev.gaiada.invalid`
+(password `OldPassw0rd!SEC01`, `emailVerified:true`, no required actions), created/deleted via
+`kcadm.sh` against `gaiada-keycloak-1`; mail captured through the SSH-tunnelled Mailpit API
+(`127.0.0.1:8025`).
+
+**Verdict: CONFIRMED, not a curl artefact — the browser behaves identically.**
+
+- **What rendered:** clicking the emailed action-token link, in the same browser session that
+  requested it, landed **directly on an authenticated page with zero `<input type="password">`
+  fields** — the account console (`.../idp/realms/gaiada/account`, full profile page) under
+  `account-console`, and the full staff ERP shell (`https://erp.gaiada.online/`, nav + "Good
+  morning, sec01-throwaway@dev.gaiada.invalid") under `gaiada-ui`. No inline new-password form at
+  any point, under either client.
+- **The decisive test — old password after the "reset":** in a **fresh browser context** (no
+  cookies from the reset), signing in with the **original** password (`OldPassw0rd!SEC01`)
+  succeeded outright under both `account-console` and `gaiada-ui`, landing on the authenticated
+  page each time. The password was never rotated.
+- **kcadm confirms no rotation happened:** `GET users/<id>/credentials` after the flow shows
+  exactly **one** password credential, `createdDate` matching the original `set-password` call
+  (pre-reset) — no second credential was ever created. `requiredActions` stayed `[]` throughout;
+  Keycloak never queued `UPDATE_PASSWORD`.
+- **Flow config read (read-only, unchanged):** realm `resetCredentialsFlow` → `"reset credentials"`.
+  That flow's executions: Choose User (REQUIRED) → Send Reset Email (REQUIRED) → **Reset Password
+  (REQUIRED, providerId `reset-password`)** → Reset - Conditional OTP (CONDITIONAL, not configured
+  for this user so it's skipped). The "Reset Password" execution is REQUIRED in configuration, yet
+  the live flow never presented it for this account (has a password credential already, no
+  `UPDATE_PASSWORD` required action pending) — Keycloak's `reset-password` authenticator treats
+  itself as already-satisfied in that case and falls through, ending the flow at
+  re-authentication instead of forcing a change.
+- **Browser vs. curl:** identical. MAIL-03's headless/PKCE walk was not an artefact — this is real
+  flow behavior, reproduced with a real browser end to end, under both clients.
+
+**Security consequence, restated:** possession of the mailbox → click the link → land in an
+authenticated session, with the original credential still valid afterward. Same "bearer
+credential sitting in an inbox" shape that decision M11 explicitly forbids for approval links.
+The email is not a self-service password-rotation mechanism in its current form; it is a
+password-equivalent bearer link with an unusually long blast radius (whoever reads that one email
+can sign in indefinitely afterward, since nothing was invalidated).
+
+**Recommendation (no fix implemented — out of scope for this ticket):** the likely correct shape,
+to confirm with a Keycloak-version-aware follow-up, is to stamp `UPDATE_PASSWORD` as a required
+action when *issuing* the reset-credentials email (or switch the "Reset Password" execution's
+semantics so it does not self-satisfy against an existing credential), so the flow cannot complete
+without the user setting a new password. This is a realm/flow-config change, not a platform-code
+change — route it to whoever owns Keycloak realm config (senior-integrator / devops), and re-run
+this same browser-based test after any change, since the current live behavior is easy to
+mistake as fixed from config inspection alone (the execution already reads REQUIRED).
+
+Throwaway user deleted and confirmed absent (`kcadm get users -q email=...` returned `[]`) after
+the test; no realm/flow config was modified.
+
 ### Retirement evidence — the `emailVerified:true` provisioner workaround CAN be retired in dev
 
 The verify-email user above is the proof: it was created with **no** `emailVerified:true` and no
