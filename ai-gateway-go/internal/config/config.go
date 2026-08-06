@@ -36,6 +36,16 @@ type Config struct {
 	// THAT process) — this gateway never picks Hermes' model, only names it for the wire's `meta`.
 	HermesURL             string
 	HermesModel           string
+	// HermesToken: the bearer hermes-gateway requires. That shim authenticates BEFORE it routes, so
+	// an unauthenticated call gets 401 on EVERY path — which is exactly what this provider used to
+	// send (no Authorization header at all), making the `hermes` provider unusable from the day it
+	// landed. The failure was invisible because a site-topology chain then failed over to
+	// `central-forward`, which DOES send a bearer and, in the gda-aicenter deployment, points at the
+	// same hermes-gateway — so Hermes still answered, just badged `central-forward`, and the
+	// assistant's brain picker looked inert for every option.
+	// Defaults to GATEWAY_TOKEN because hermes-gateway's own env file defines exactly one key with
+	// that name; HERMES_TOKEN exists so a deployment CAN give the shim its own secret.
+	HermesToken           string
 	LLMChain              []string
 	MediaChain            []string
 	EmbedChain            []string
@@ -125,6 +135,9 @@ func Load() Config {
 		WhisperModel:          envOr("WHISPER_MODEL", "Systran/faster-whisper-small"),
 		HermesURL:             envOr("HERMES_URL", ""),
 		HermesModel:           envOr("HERMES_MODEL", ""),
+		// Same nested-envOr idiom as DLPClassifierModel below: an explicit override, else the shared
+		// GATEWAY_TOKEN (which is what hermes-gateway's own env file names), else empty.
+		HermesToken:           envOr("HERMES_TOKEN", envOr("GATEWAY_TOKEN", "")),
 		LLMChain:              splitCsv(envOr("LLM_CHAIN", "ollama,gemini,claude")),
 		MediaChain:            splitCsv(envOr("MEDIA_CHAIN", "whisper,gemini")),
 		EmbedChain:            splitCsv(envOr("EMBED_CHAIN", "ollama,gemini")),

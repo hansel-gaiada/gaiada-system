@@ -24,14 +24,24 @@ import (
 // (grammar v2), standing in for a real hermes-gateway process.
 type fakeHermesShim struct {
 	lastBody   map[string]any
+	lastAuth   string // the Authorization header as received — hermes-gateway REQUIRES a bearer
 	sseBody    string // raw response body to write verbatim
 	statusCode int
+	// requireAuth reproduces the real hermes-gateway posture: it authenticates BEFORE routing, so
+	// every path 401s without a bearer. Used by the regression test below.
+	requireAuth string
 }
 
 func (f *fakeHermesShim) handler(t *testing.T) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		raw, _ := io.ReadAll(r.Body)
 		_ = json.Unmarshal(raw, &f.lastBody)
+		f.lastAuth = r.Header.Get("Authorization")
+		// Auth BEFORE routing, exactly like the real shim.
+		if f.requireAuth != "" && f.lastAuth != "Bearer "+f.requireAuth {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
 		if f.statusCode != 0 && f.statusCode != 200 {
 			w.WriteHeader(f.statusCode)
 			return
@@ -66,7 +76,7 @@ func TestHermesProviderThreadsProviderSessionOpaquelyToTheShim(t *testing.T) {
 	srv := httptest.NewServer(shim.handler(t))
 	defer srv.Close()
 
-	p := NewHermesProvider(srv.URL, "", http.DefaultClient)
+	p := NewHermesProvider(srv.URL, "", "", http.DefaultClient)
 
 	// Deliberately an opaque-looking token (not something the gateway could plausibly interpret)
 	// to prove it survives untouched.
@@ -121,7 +131,7 @@ func TestHermesProviderRelaysResumedFalseAndRequestedSession(t *testing.T) {
 	srv := httptest.NewServer(shim.handler(t))
 	defer srv.Close()
 
-	p := NewHermesProvider(srv.URL, "", http.DefaultClient)
+	p := NewHermesProvider(srv.URL, "", "", http.DefaultClient)
 	var gotSession string
 	var gotResumed bool
 	var gotRequested string
@@ -157,7 +167,7 @@ func TestHermesProviderRelaysResumedTrueWithRequestedSessionOnAGenuineResume(t *
 	srv := httptest.NewServer(shim.handler(t))
 	defer srv.Close()
 
-	p := NewHermesProvider(srv.URL, "", http.DefaultClient)
+	p := NewHermesProvider(srv.URL, "", "", http.DefaultClient)
 	var gotResumed bool
 	var gotRequested string
 	err := p.CompleteStreamSession(context.Background(), "hi", "sess-abc", func(string) {}, func(_ string, resumed bool, requestedSession string) {
@@ -185,7 +195,7 @@ func TestHermesProviderOmitsProviderSessionFieldWhenCallerHasNone(t *testing.T) 
 	srv := httptest.NewServer(shim.handler(t))
 	defer srv.Close()
 
-	p := NewHermesProvider(srv.URL, "", http.DefaultClient)
+	p := NewHermesProvider(srv.URL, "", "", http.DefaultClient)
 	err := p.CompleteStream(context.Background(), "hi", func(string) {})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -206,7 +216,7 @@ func TestHermesProviderNeverInventsASessionWhenTheShimReportsNone(t *testing.T) 
 	srv := httptest.NewServer(shim.handler(t))
 	defer srv.Close()
 
-	p := NewHermesProvider(srv.URL, "", http.DefaultClient)
+	p := NewHermesProvider(srv.URL, "", "", http.DefaultClient)
 	sessionCalls := 0
 	err := p.CompleteStreamSession(context.Background(), "hi", "", func(string) {}, func(string, bool, string) {
 		sessionCalls++
@@ -228,7 +238,7 @@ func TestHermesProviderRelaysUpstreamErrorEvent(t *testing.T) {
 	srv := httptest.NewServer(shim.handler(t))
 	defer srv.Close()
 
-	p := NewHermesProvider(srv.URL, "", http.DefaultClient)
+	p := NewHermesProvider(srv.URL, "", "", http.DefaultClient)
 	err := p.CompleteStream(context.Background(), "hi", func(string) {})
 	if err == nil {
 		t.Fatalf("expected an error")
@@ -247,7 +257,7 @@ func TestHermesProviderTreatsMissingDoneAsAbnormalDrop(t *testing.T) {
 	srv := httptest.NewServer(shim.handler(t))
 	defer srv.Close()
 
-	p := NewHermesProvider(srv.URL, "", http.DefaultClient)
+	p := NewHermesProvider(srv.URL, "", "", http.DefaultClient)
 	err := p.CompleteStream(context.Background(), "hi", func(string) {})
 	if err == nil {
 		t.Fatalf("expected an error for a stream that never reached event: done")
@@ -266,7 +276,7 @@ func TestHermesProviderIgnoresUpstreamMetaEvent(t *testing.T) {
 	srv := httptest.NewServer(shim.handler(t))
 	defer srv.Close()
 
-	p := NewHermesProvider(srv.URL, "", http.DefaultClient)
+	p := NewHermesProvider(srv.URL, "", "", http.DefaultClient)
 	var got []string
 	err := p.CompleteStream(context.Background(), "hi", func(tok string) { got = append(got, tok) })
 	if err != nil {
@@ -281,7 +291,7 @@ func TestHermesProviderAvailableReflectsConfiguredURL(t *testing.T) {
 	if (&HermesProvider{}).Available() {
 		t.Fatalf("expected Available()==false with no URL configured")
 	}
-	if !NewHermesProvider("http://localhost:1", "", http.DefaultClient).Available() {
+	if !NewHermesProvider("http://localhost:1", "", "", http.DefaultClient).Available() {
 		t.Fatalf("expected Available()==true once a URL is configured")
 	}
 }
@@ -291,7 +301,7 @@ func TestHermesProviderRateLimitPropagatesAs429(t *testing.T) {
 	srv := httptest.NewServer(shim.handler(t))
 	defer srv.Close()
 
-	p := NewHermesProvider(srv.URL, "", http.DefaultClient)
+	p := NewHermesProvider(srv.URL, "", "", http.DefaultClient)
 	err := p.CompleteStream(context.Background(), "hi", func(string) {})
 	if err == nil {
 		t.Fatalf("expected an error")
@@ -299,5 +309,73 @@ func TestHermesProviderRateLimitPropagatesAs429(t *testing.T) {
 	var rl *RateLimitError
 	if !errors.As(err, &rl) {
 		t.Fatalf("expected a *RateLimitError, got %T: %v", err, err)
+	}
+}
+
+// --- the bearer hermes-gateway requires (regression, fixed 2026-08-06) -------------------------
+//
+// THE DEFECT THIS PINS: HermesProvider sent NO Authorization header, and hermes-gateway
+// authenticates BEFORE it routes — so the `hermes` provider 401'd on every call and had never once
+// succeeded against a real shim. It stayed invisible because a site-topology chain is
+// `[hermes, central-forward, echo]` and, in the gda-aicenter deployment, CENTRAL_URL points at the
+// SAME hermes-gateway: hermes 401'd, central-forward (which does send a bearer) answered, and Hermes
+// replied either way. The only symptoms were a "served by" badge that never said Hermes and an
+// assistant brain picker that looked inert for every option. Verified against the live box before
+// fixing: an unauthenticated POST to the shim's /complete/stream returns 401.
+
+func TestHermesProviderSendsTheBearerOnBothEndpoints(t *testing.T) {
+	const token = "hermes-gateway-token-not-a-real-one"
+
+	// streaming path
+	shim := &fakeHermesShim{
+		requireAuth: token,
+		sseBody: sseLine("meta", `{"provider":"hermes","model":""}`) +
+			sseLine("", jsonStr("ok")) + sseLine("done", "{}"),
+	}
+	srv := httptest.NewServer(shim.handler(t))
+	defer srv.Close()
+
+	p := NewHermesProvider(srv.URL, "", token, http.DefaultClient)
+	var got []string
+	if err := p.CompleteStreamSession(context.Background(), "hi", "", func(tok string) {
+		got = append(got, tok)
+	}, func(string, bool, string) {}); err != nil {
+		t.Fatalf("CompleteStreamSession with a token: unexpected error %v", err)
+	}
+	if want := "Bearer " + token; shim.lastAuth != want {
+		t.Errorf("stream Authorization = %q, want %q", shim.lastAuth, want)
+	}
+	if strings.Join(got, "") != "ok" {
+		t.Errorf("tokens = %q, want \"ok\"", strings.Join(got, ""))
+	}
+
+	// non-streaming path (/complete) — wa-chat-bot's contract, same auth requirement
+	shim2 := &fakeHermesShim{requireAuth: token, sseBody: `{"text":"ok"}`}
+	srv2 := httptest.NewServer(shim2.handler(t))
+	defer srv2.Close()
+	p2 := NewHermesProvider(srv2.URL, "", token, http.DefaultClient)
+	if out, err := p2.Complete(context.Background(), "hi"); err != nil || out != "ok" {
+		t.Fatalf("Complete with a token = %q, %v; want \"ok\", nil", out, err)
+	}
+	if want := "Bearer " + token; shim2.lastAuth != want {
+		t.Errorf("complete Authorization = %q, want %q", shim2.lastAuth, want)
+	}
+}
+
+// The pre-fix behaviour, kept as the proof this test file would have caught it: a tokenless provider
+// against an auth-requiring shim fails, and fails with the honest surfaced status rather than
+// silently returning empty text.
+func TestHermesProviderWithoutATokenIsRejectedByAnAuthRequiringShim(t *testing.T) {
+	shim := &fakeHermesShim{requireAuth: "the-shim-token", sseBody: sseLine("done", "{}")}
+	srv := httptest.NewServer(shim.handler(t))
+	defer srv.Close()
+
+	p := NewHermesProvider(srv.URL, "", "", http.DefaultClient) // no token — the old behaviour
+	err := p.CompleteStreamSession(context.Background(), "hi", "", func(string) {}, func(string, bool, string) {})
+	if err == nil {
+		t.Fatal("expected an error when the shim requires auth and the provider sends none")
+	}
+	if !strings.Contains(err.Error(), "401") {
+		t.Errorf("error = %v, want it to name the 401 so the failover reason is legible", err)
 	}
 }

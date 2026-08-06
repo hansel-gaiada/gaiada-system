@@ -1838,6 +1838,27 @@ Verified: 939 unit tests pass, `tsc` clean, `next build` green. Not driven in a 
 - **Unreleased / next:** deploy once backend admin API is live.
 
 ## ai-gateway-go
+### [0.13.1] — 2026-08-06 · PROTOTYPED (the `hermes` provider had never once succeeded — it sent no bearer)
+- **`HermesProvider` sent NO `Authorization` header**, on either `/complete` or `/complete/stream`.
+  hermes-gateway authenticates BEFORE it routes, so every call 401'd: the `hermes` provider has been
+  non-functional since it landed. Verified against the live box before fixing — an unauthenticated POST
+  to the shim returns `401`, and the shim's `GATEWAY_TOKEN` is byte-identical to this gateway's.
+- **Why nobody noticed, which is the interesting part.** A site-topology chain is
+  `[hermes, central-forward, echo]` (`main.go:53` strips gemini/claude/openai; `:60` appends
+  central-forward). On `gda-aicenter`, `GATEWAY_CENTRAL_URL` points at that *same* hermes-gateway — so
+  hermes 401'd, central-forward answered, and **Hermes replied every time anyway**. The only symptoms
+  were a "served by" badge that never named Hermes and an assistant brain picker that looked inert for
+  EVERY option (a hint can only reorder providers in the chain; it cannot rescue one that 401s).
+- Adds `HermesToken` (`HERMES_TOKEN`, falling back to `GATEWAY_TOKEN` via the same nested-`envOr` idiom
+  `DLPClassifierModel` uses — hermes-gateway's own env file defines exactly that one key). Empty is
+  still allowed and still honest: the 401 then surfaces as `hermes 401` rather than being masked.
+- **This changes which PROVIDER serves, not which BRAIN serves.** Unhinted callers (wa-chat-bot,
+  knowledge, search) reached Hermes via central-forward before and reach Hermes via the native provider
+  now — same brain, one fewer wasted 401 round-trip. So it needed no topology decision.
+- Two regression tests: the bearer is asserted on BOTH endpoints against a shim that authenticates
+  before routing, and the pre-fix case (tokenless vs auth-requiring shim) must fail with a `401` in the
+  message so the failover reason stays legible. Full suite green under WSL.
+
 ### [0.13.0] — 2026-07-27 · PROTOTYPED (runtime config writes + a real chain lock)
 - **NEW bearer-gated `PUT /admin/config`** (one key per call) **+ `DELETE /admin/config?key=`**
   (revert to env). Writable: the two budget caps, breaker threshold/cooldown, provider timeout, the

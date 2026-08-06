@@ -229,7 +229,7 @@ func TestCompleteStreamProviderSessionReachesHermesShimOpaquelyThroughTheRoute(t
 	shimSrv := shim.start(t)
 	defer shimSrv.Close()
 
-	hermes := providers.NewHermesProvider(shimSrv.URL, "", http.DefaultClient)
+	hermes := providers.NewHermesProvider(shimSrv.URL, "", "", http.DefaultClient)
 	c := chain.NewChain([]providers.Provider{hermes}, 3, 60_000, time.Now)
 	cfg := config.Config{GatewayToken: "secret", DailyCallCap: 1000, PerTenantDailyCallCap: 1000}
 	srv := newTestServer(t, cfg, c)
@@ -280,7 +280,7 @@ func TestCompleteStreamRelaysResumedFalseEndToEndThroughTheRoute(t *testing.T) {
 	shimSrv := shim.start(t)
 	defer shimSrv.Close()
 
-	hermes := providers.NewHermesProvider(shimSrv.URL, "", http.DefaultClient)
+	hermes := providers.NewHermesProvider(shimSrv.URL, "", "", http.DefaultClient)
 	c := chain.NewChain([]providers.Provider{hermes}, 3, 60_000, time.Now)
 	cfg := config.Config{GatewayToken: "secret", DailyCallCap: 1000, PerTenantDailyCallCap: 1000}
 	srv := newTestServer(t, cfg, c)

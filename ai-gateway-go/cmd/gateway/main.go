@@ -46,7 +46,7 @@ func buildProviderList(names []string, cfg config.Config, client *http.Client) [
 		"claude":  providers.NewClaudeProvider(cfg.AnthropicAPIKey, cfg.AnthropicModel, client),
 		// hermes (ASST-15): hermes-gateway is a SEPARATE local shim process (never a cloud
 		// credential holder), same posture as ollama/whisper — never excluded by site topology.
-		"hermes": providers.NewHermesProvider(cfg.HermesURL, cfg.HermesModel, client),
+		"hermes": providers.NewHermesProvider(cfg.HermesURL, cfg.HermesModel, cfg.HermesToken, client),
 	}
 	list := []providers.Provider{}
 	for _, n := range names {

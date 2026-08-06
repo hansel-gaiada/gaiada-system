@@ -24,13 +24,32 @@ import (
 // HermesProvider is an HTTP client for hermes-gateway's own /complete and /complete/stream
 // endpoints. Model is reported (providers.ModelReporter) but is whatever hermes-gateway's own
 // HERMES_MODEL config says — this gateway never picks Hermes' model itself.
+// ⚠ TOKEN IS LOAD-BEARING, NOT OPTIONAL (fixed 2026-08-06). hermes-gateway authenticates BEFORE it
+// routes, so an unauthenticated request gets 401 on EVERY path — and this provider previously sent no
+// Authorization header at all, which meant the `hermes` provider had never once succeeded against a
+// real hermes-gateway. Nothing looked broken because a site-topology chain is
+// `[hermes, central-forward, echo]`: hermes 401'd, the chain failed over to `central-forward`, and in
+// the gda-aicenter deployment CENTRAL_URL points at that same hermes-gateway — so Hermes still
+// answered every time, just badged `central-forward`. The only visible symptoms were a "served by"
+// badge that never named Hermes and an assistant brain picker that appeared inert for EVERY option
+// (a provider hint can only reorder providers within the chain; it cannot rescue one that 401s).
 type HermesProvider struct {
 	URL, Model string
+	Token      string
 	Client     *http.Client
 }
 
-func NewHermesProvider(url, model string, client *http.Client) *HermesProvider {
-	return &HermesProvider{URL: url, Model: model, Client: client}
+func NewHermesProvider(url, model, token string, client *http.Client) *HermesProvider {
+	return &HermesProvider{URL: url, Model: model, Token: token, Client: client}
+}
+
+// authorize sets the bearer hermes-gateway requires. Skipped when empty so a tokenless local shim
+// (tests, a dev box with auth disabled) still works — the 401 then surfaces as the honest
+// `hermes 401` failover error rather than being masked here.
+func (p *HermesProvider) authorize(req *http.Request) {
+	if p.Token != "" {
+		req.Header.Set("Authorization", "Bearer "+p.Token)
+	}
 }
 
 var _ StreamingProvider = (*HermesProvider)(nil)
@@ -58,6 +77,7 @@ func (p *HermesProvider) Complete(ctx context.Context, prompt string) (string, e
 		return "", err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	p.authorize(req)
 	res, err := p.Client.Do(req)
 	if err != nil {
 		return "", err
@@ -114,6 +134,7 @@ func (p *HermesProvider) CompleteStreamSession(ctx context.Context, prompt, sess
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "text/event-stream")
+	p.authorize(req)
 	res, err := p.Client.Do(req)
 	if err != nil {
 		return err

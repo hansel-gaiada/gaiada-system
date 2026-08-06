@@ -166,6 +166,17 @@ services:
       # "hermes" to it would alter the unhinted default chain for every existing caller of this
       # gateway (wa-chat-bot, knowledge, search) on every deployment that doesn't override
       # LLM_CHAIN — an operator decision, not something to flip silently in the shared default.
+      #
+      # ⚠ SITE TOPOLOGY CHANGES WHAT THIS LIST MEANS (learned the hard way 2026-08-06, gda-aicenter).
+      # With GATEWAY_TOPOLOGY_MODE=site, cmd/gateway/main.go:53 STRIPS gemini/claude/openai from this
+      # chain (a site gateway holds no cloud keys) and appends a `central-forward` provider. So
+      # `LLM_CHAIN=gemini,claude,hermes` becomes the effective chain `[hermes, central-forward, echo]`
+      # — two of the three names you wrote are silently gone. And because that box's
+      # GATEWAY_CENTRAL_URL points at hermes-gateway itself, central-forward reaches the SAME Hermes:
+      # when the hermes provider was 401ing (it sent no bearer until HERMES_TOKEN, above), Hermes still
+      # answered via central-forward, so nothing looked broken except a "served by" badge that never
+      # named Hermes and a brain picker that was inert for EVERY option. If you are debugging why a
+      # picked brain never wins, check TOPOLOGY_MODE before you touch this line.
       LLM_CHAIN: ${LLM_CHAIN:-openai,ollama,gemini,claude}
       # Media chain: openai vision handles images; audio (and anything non-image) fails over to
       # whisper for transcription, then gemini. openai auto-skips when its key is unset.
@@ -199,6 +210,12 @@ services:
       # for ASST-16's per-thread brain-picker hint.
       HERMES_URL: ${HERMES_URL:-}
       HERMES_MODEL: ${HERMES_MODEL:-}
+      # HERMES_TOKEN (fix 2026-08-06): the bearer hermes-gateway REQUIRES — it authenticates before
+      # it routes, so the `hermes` provider used to 401 on every call and had never once served.
+      # OPTIONAL: empty falls back to GATEWAY_TOKEN (envOr treats a set-but-empty var as unset),
+      # which is the key hermes-gateway's own env file defines. Set it only to give the shim its
+      # own distinct secret.
+      HERMES_TOKEN: ${HERMES_TOKEN:-}
       # Model-assisted DLP classifier stays opt-in; enable only where Ollama is reachable.
       DLP_CLASSIFIER_ENABLED: ${DLP_CLASSIFIER_ENABLED:-false}
       EGRESS_ALLOWLIST: generativelanguage.googleapis.com,api.anthropic.com,ollama.com,whisper,host.docker.internal
