@@ -2,7 +2,7 @@
 // deterministically with mock deps (no live Gateway/hub).
 import { describe, it, expect } from "vitest";
 import { runWriteAgent, isWriteCapable, readOnlyProjection, fileApproval, toWireImpact, WIRE_IMPACTS } from "./write-agent";
-import { taskTriager } from "./specialists";
+import { taskTriager, taskFiler } from "./specialists";
 import { ApprovalRequiredError } from "./agent";
 import type { AgentDef, AgentDeps } from "./agent";
 
@@ -201,5 +201,46 @@ describe("T2b — runWriteAgent(opts.fileOnSuspend): deferred filing, invariant-
     const res = await runWriteAgent(agent, "triage", envelope, d, "co-1", "echo", { fileOnSuspend: false });
     expect(res.status).toBe("completed");
     expect(d.calls.map((c) => c.name)).not.toContain("approvals.request");
+  });
+});
+
+// T2 (ASST-23) — the real `task-filer` def (not a synthetic fixture), end to end through
+// `runWriteAgent`, on its actual enrolled provider ("openai" — see specialists.ts). Proves the T1 wire
+// mapping and T2's def are wired together correctly for BOTH v1 write tools: a suspended `pm.createTask`
+// / `pm.createDoc` files with the real tool name and the wire-legal `impact:"high"` (never the raw
+// agent-side `"high_write"` label), and neither write tool is ever actually called.
+describe("T2 — task-filer: runWriteAgent files pm.createTask/pm.createDoc as a wire-legal impact:'high' (scripted provider)", () => {
+  it("pm.createTask suspends and files impact:'high' under origin='agent', agentName='task-filer'", async () => {
+    const d = deps([`{"tool": "pm.createTask", "args": {"projectId": "p1", "title": "Fix login bug"}}`], {});
+    const res = await runWriteAgent(taskFiler, "file a task", envelope, d, "co-1", "openai");
+    expect(res.status).toBe("suspended");
+    if (res.status === "suspended") expect(res.filed?.impact).toBe("high");
+    const filed = d.calls.find((c) => c.name === "approvals.request")!.args;
+    expect(filed).toMatchObject({
+      origin: "agent",
+      agentName: "task-filer",
+      toolName: "pm.createTask",
+      impact: "high",
+      toolArgs: { projectId: "p1", title: "Fix login bug" },
+    });
+    expect(d.calls.map((c) => c.name)).not.toContain("pm.createTask");
+  });
+
+  it("pm.createDoc suspends and files impact:'high' likewise", async () => {
+    const d = deps([`{"tool": "pm.createDoc", "args": {"projectId": "p1", "title": "Design spec"}}`], {});
+    const res = await runWriteAgent(taskFiler, "file a doc", envelope, d, "co-1", "openai");
+    expect(res.status).toBe("suspended");
+    if (res.status === "suspended") expect(res.filed?.impact).toBe("high");
+    const filed = d.calls.find((c) => c.name === "approvals.request")!.args;
+    expect(filed).toMatchObject({ origin: "agent", agentName: "task-filer", toolName: "pm.createDoc", impact: "high" });
+    expect(d.calls.map((c) => c.name)).not.toContain("pm.createDoc");
+  });
+
+  it("on the UN-enrolled provider, task-filer is forced read-only — neither write tool is even offered", async () => {
+    const d = deps([`{"tool": "projects.list", "args": {}}`, `{"final": "no action taken"}`], { "projects.list": "[]" });
+    const res = await runWriteAgent(taskFiler, "file a task", envelope, d, "co-1", "claude"); // not in evaledProviders
+    expect(res.status).toBe("forced_read_only");
+    expect(d.calls.map((c) => c.name)).not.toContain("pm.createTask");
+    expect(d.calls.map((c) => c.name)).not.toContain("pm.createDoc");
   });
 });

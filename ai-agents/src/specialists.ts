@@ -57,11 +57,88 @@ export const taskTriager: AgentDef = {
   evaledProviders: ["openai"],
 };
 
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+// T2 (ASST-23, §7.1) — `task-filer`: the assistant's first proposable write. Reachable ONLY through
+// the platform-nest assistant broker's `writeSpecialists` route (`runner/service.ts` routes anything
+// named here through `runWriteAgent` — the D13+D14-gated path; the plain `runAgent`/`traceRun`/
+// orchestrator path would suspend WITHOUT filing, which is the wrong gate for a chat-triggered write —
+// see this file's own header and D14-11's guard test for why that distinction is load-bearing).
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+//
+// WHY `high_write` HERE IS THE HONEST DECLARATION, NOT A DEMO HACK (preserve this reasoning — it is
+// the crux of the whole ticket, not incidental color):
+//
+// The hub tier and this AgentDef's label answer TWO DIFFERENT QUESTIONS, and conflating them is the
+// mistake this ticket exists to avoid making.
+//
+//   - The HUB tier (`mcp-hub/src/pm-tools.ts`: `pm.createTask`/`pm.createDoc` are both `impact:"low"`)
+//     classifies the write's BLAST RADIUS for the automation gate: in-tenant, reversible, no external
+//     effect. That is correct and it is LOAD-BEARING for a working program — `wf:report` (WD-06) calls
+//     both tools unattended today, and the n8n suspend branch only fires on `impact !== "low"`
+//     (`mcp-hub/src/policy.ts`'s `isAutomation` conjunct). Re-tiering either tool at the hub to justify
+//     this ticket would suspend that pipeline for no reason — it would also be DISHONEST, because the
+//     write genuinely IS low-impact when a human wired it into a scoped workflow with deterministic
+//     inputs. Do NOT do this; it is listed as a rejected alternative in the design for exactly this
+//     reason.
+//   - This AgentDef's label answers a DIFFERENT question: "may an LLM commit this unattended, when IT
+//     composed the arguments from a chat turn?" The blueprint's locked decision D-A is that every
+//     assistant write becomes a proposal, never a silent commit — so `high_write` is the truthful
+//     declaration of the policy actually in force for THIS caller, even though the SAME tool call made
+//     by a human-authored n8n workflow is fine unattended. Same tool, same hub tier, two different
+//     callers, two different risk postures — the AgentDef label is where that distinction lives.
+//
+// D14-12's stricter-wins reconciliation (`agent.ts`'s `effectiveImpact`) is what makes this SAFE to
+// declare: the effective impact is `max(declared, registry)`, so a registry `"low"` never weakens a
+// declared `high_write` back down — the exact case its own header pins as a test ("`high_write` +
+// registry `"low"` ⇒ stays `high_write`"). Declaring `high_write` on a hub-`low` tool is therefore not
+// a workaround, it is the mechanism D14-12 was built for.
+//
+// TWO PREREQUISITES, BOTH VERIFIED FOR BOTH TOOLS (see `agent-write-guard.test.ts`'s
+// `RERUN_CAPABLE_HIGH_WRITES` and its header for the full citation):
+//   (a) the live `AgentDeps.resolveApproval` transport — TRUE globally since D14-14
+//       (`ai-agents/src/deps.ts`'s `liveDeps.resolveApproval` calls the hub's
+//       `approvals.resolveExecute`, `mcp-hub/src/platform-write-tools.ts:345`).
+//   (b) `platform-nest/src/core/approval-executables.ts`'s `registerPmExecutableApprovals()` registers
+//       BOTH `pm.createTask` (a real `pmCreateTaskPrecondition`: project exists ∧ not archived ∧
+//       assignee still an active member) and `pm.createDoc` (the shared `pmProjectPrecondition`: project
+//       exists ∧ not archived) — neither is the fail-closed `NO_PRECONDITION_REASON` default.
+//
+// `pm.createDoc` ships alongside `pm.createTask` in v1 per the owner's OQ-1 answer (2026-08-06,
+// design §7.1) — both tools are equally ready per (b) above (same registry function, same project
+// precondition; `createDoc` simply has no assignee branch because the tool has no assignee field).
+//
+// evaledProviders: `openai` (Ollama Cloud, `deepseek-v4-flash` — the same "openai" gateway provider
+// slot `task-triager` was enrolled on) — cleared 2026-08-06 after the eval + adversarial-containment
+// suite (`evals/cases.ts`) went green on scripted deps and a live floor run (one protocol-adherence
+// turn, one proposal-shaped turn per write tool, one containment probe — §7.3 of the design) confirmed
+// the provider follows the strict single-JSON-action protocol and never escapes the allow-list. See
+// `docs/superpowers/plans/2026-08-06-t2-task-filer-report.md` for the run transcript + quota consumed.
+// Revert to [] to force read-only.
+export const taskFiler: AgentDef = {
+  name: "task-filer",
+  systemPrompt:
+    "You are Gaiada's task filer. When asked to create a task or a project document, first read the " +
+    "company's projects and tasks to find the right project (and, for a task, a plausible assignee) " +
+    "before filing. File exactly the create you were asked for — never invent a project, assignee, or " +
+    "extra task/doc nobody asked for. Make one tool call at a time; every create you propose is reviewed " +
+    "by a human before it takes effect.",
+  tools: {
+    "projects.list": "read",
+    "tasks.list": "read",
+    "pm.createTask": "high_write",
+    "pm.createDoc": "high_write",
+  },
+  maxSteps: 8,
+  maxToolCalls: 4,
+  evaledProviders: ["openai"],
+};
+
 /** Write-capable specialists — driven via runWriteAgent (D13 provider gate + D14 approval filing),
  *  deliberately NOT in the read-only supervisor set until the orchestrator routes writes through the
  *  same gate (WS8 Step B follow-up). */
 export const writeSpecialists: Record<string, AgentDef> = {
   [taskTriager.name]: taskTriager,
+  [taskFiler.name]: taskFiler,
 };
 
 /** The default supervisor over all registered specialists (WS8 §2.2). */

@@ -4,13 +4,18 @@
 // WHAT THESE TESTS PIN, and why each matters:
 //  * `effectiveImpact()` is the whole mechanism — a pure, exported function, tested directly against
 //    the four DONE-WHEN scenarios from the ticket before ever touching `runAgent`.
-//  * The "no-regression anchor": today's three real specialists (status-reporter, approvals-chaser,
+//  * The "no-regression anchor": today's real specialists (status-reporter, approvals-chaser,
 //    task-triager), reconciled against their REAL hub registry entries (hardcoded here from
 //    `mcp-hub/src/platform-tools.ts` / `platform-write-tools.ts` / `platform-nest/src/modules/agency/
 //    index.ts`, verified at ticket time), must come out byte-identical to their declared labels. If
 //    this ever fails, either specialists.ts changed a tool's declared impact, or the hub registry
 //    changed a tool's classification underneath it — either way it means "diagnose the drift", not
 //    "the test is wrong".
+//  * T2 (ASST-23) added `task-filer`, which is the DELIBERATE EXCEPTION to "byte-identical": its two
+//    write tools (`pm.createTask`/`pm.createDoc`) are hub `impact:"low"` while the AgentDef declares
+//    `high_write` — the honest divergence this whole ticket exists to make safe (see specialists.ts's
+//    header). It gets its own assertion, separate from the it.each below, precisely because "declared
+//    equals effective" is the WRONG expectation for it.
 //  * An end-to-end `runAgent` test proves the reconciled impact actually reaches the write gate (not
 //    just the pure function in isolation) — a `low_write` tool promoted to `high_write` by the
 //    registry throws `ApprovalRequiredError` exactly like a declared `high_write` would.
@@ -28,7 +33,7 @@ import {
   type RegistryToolImpact,
 } from "./agent";
 import { runOrchestrator, GoalSuspendedError, type OrchestratorDef } from "./orchestrator";
-import { statusReporter, approvalsChaser, taskTriager, specialists, writeSpecialists } from "./specialists";
+import { statusReporter, approvalsChaser, taskTriager, taskFiler, specialists, writeSpecialists } from "./specialists";
 
 const envelope: Envelope = { provider: "telegram", externalId: "tg:1" };
 
@@ -69,7 +74,7 @@ describe("D14-12 — effectiveImpact() (pure mapping)", () => {
   });
 });
 
-describe("D14-12 — no-regression anchor: today's three specialists, reconciled against their REAL hub entries", () => {
+describe("D14-12 — no-regression anchor: today's specialists, reconciled against their REAL hub entries", () => {
   // Hardcoded from the hub registry at ticket time — do NOT import mcp-hub from ai-agents (separate
   // standalone projects, per CLAUDE.md); re-verify against the source files named above if this ever
   // needs updating.
@@ -78,6 +83,11 @@ describe("D14-12 — no-regression anchor: today's three specialists, reconciled
     "tasks.list": undefined, // same file — no `write` field
     "agency.pendingApprovals": undefined, // platform-nest/src/modules/agency/index.ts — no `write` field
     "tasks.update": { write: true, impact: "low" }, // mcp-hub/src/platform-write-tools.ts:236-240
+    // T2 (ASST-23) — mcp-hub/src/pm-tools.ts's registerPmTools(): BOTH are `write: true, impact: "low"`
+    // (the same tier as pipeline.createRun / tasks.create — a genuinely low-blast-radius write; the
+    // hub tier is NOT changed by this ticket, see specialists.ts's header for why).
+    "pm.createTask": { write: true, impact: "low" },
+    "pm.createDoc": { write: true, impact: "low" },
   };
 
   const getRegistryImpact = (name: string): RegistryToolImpact | undefined => realRegistry[name];
@@ -99,9 +109,19 @@ describe("D14-12 — no-regression anchor: today's three specialists, reconciled
     expect(effectiveImpact("low_write", realRegistry["tasks.update"])).toBe("low_write");
   });
 
+  it("task-filer: pm.createTask/pm.createDoc are hub impact:'low', yet reconciliation STAYS high_write — the D14-12 stricter-wins case this ticket relies on, proven against the real registry values, not a synthetic fixture", () => {
+    expect(realRegistry["pm.createTask"]).toEqual({ write: true, impact: "low" });
+    expect(realRegistry["pm.createDoc"]).toEqual({ write: true, impact: "low" });
+    for (const tool of ["pm.createTask", "pm.createDoc"]) {
+      expect(taskFiler.tools[tool]).toBe("high_write");
+      // The AgentDef label is stricter than the registry's ⇒ left alone, never loosened to low_write.
+      expect(effectiveImpact("high_write", getRegistryImpact(tool))).toBe("high_write");
+    }
+  });
+
   it("collects every AgentDef reachable from specialists.ts (both read-only and write-capable maps)", () => {
     const all = { ...specialists, ...writeSpecialists };
-    expect(Object.keys(all).sort()).toEqual(["approvals-chaser", "status-reporter", "task-triager"]);
+    expect(Object.keys(all).sort()).toEqual(["approvals-chaser", "status-reporter", "task-filer", "task-triager"]);
   });
 });
 

@@ -60,17 +60,23 @@
 // any workflow allow-list, never listed in any AgentDef), and `ai-agents/src/deps.ts`'s `liveDeps`
 // binds a real `resolveApproval` that calls it. The transport half of the ban is gone.
 //
-// Prerequisite (2) is STILL per-tool: today's `approval-executables.ts` registers only `deploy.staging`
-// and `deploy.production` — neither is, or is meant to be, an AgentDef tool. So `RERUN_CAPABLE_HIGH_WRITES`
-// below is the allowlist the blanket ban becomes, and it is EMPTY today: no tool yet satisfies BOTH
-// halves for an agent-callable write. Today's three AgentDefs are therefore unaffected — this change is
-// a MECHANISM swap (blanket ban → per-tool allowlist + structural absence check), not a behavior change.
+// Prerequisite (2) is STILL per-tool: at D14-14 landing, `approval-executables.ts` registered only
+// `deploy.staging` and `deploy.production` — neither is, or is meant to be, an AgentDef tool. So
+// `RERUN_CAPABLE_HIGH_WRITES` below is the allowlist the blanket ban becomes, and it was EMPTY at
+// landing: no tool yet satisfied BOTH halves for an agent-callable write. The three AgentDefs that
+// existed then were therefore unaffected — that change was a MECHANISM swap (blanket ban → per-tool
+// allowlist + structural absence check), not a behavior change.
 //
 // TO ADD A TOOL to `RERUN_CAPABLE_HIGH_WRITES`, its PR must show BOTH, by name:
 //   (a) the live resolver is wired (true globally as of D14-14 — cite this file's date/ticket), AND
 //   (b) `platform-nest/src/core/approval-executables.ts` has an entry for that exact tool name with a
 //       server-side `precondition` (not the `NO_PRECONDITION_REASON` fail-closed default).
 // Do not delete this assertion when adding an entry — extend the allowlist and keep the check.
+//
+// ── T2 (ASST-23, 2026-08-06) — FIRST TWO ENTRIES LAND: `pm.createTask`, `pm.createDoc` ──────────────
+// See `RERUN_CAPABLE_HIGH_WRITES`'s own doc, immediately below, for the full per-tool (a)/(b) citation.
+// `ai-agents/src/specialists.ts`'s new `task-filer` AgentDef (`writeSpecialists`) is the first, and
+// only, AgentDef that declares either — the allowlist stays a per-tool ledger, not a blanket grant.
 import { describe, it, expect } from "vitest";
 import * as specialistsModule from "./specialists";
 import type { AgentDef, Impact } from "./agent";
@@ -99,13 +105,36 @@ export const VERIFIED_IDEMPOTENT_LOW_WRITES: readonly string[] = ["tasks.update"
  *   (b) `platform-nest/src/core/approval-executables.ts` registers that tool with a real server-side
  *       precondition (not the fail-closed `NO_PRECONDITION_REASON` default).
  *
- * EMPTY TODAY. `approval-executables.ts` registers only `deploy.staging`/`deploy.production` (D14-05),
- * and neither is an agent-callable tool — they exist for the n8n `wf:delivery` pipeline, not for any
- * AgentDef. Extending this list requires citing BOTH (a) and (b) by name in the PR for the specific
- * tool being added; a per-tool proof, never a blanket audit (the same discipline
- * `VERIFIED_IDEMPOTENT_LOW_WRITES` above already uses).
+ * ── T2 (ASST-23, 2026-08-06) — FIRST TWO ENTRIES: `pm.createTask`, `pm.createDoc` ───────────────────
+ * Both prerequisites verified, by name, for BOTH tools (not asserted — read from the code):
+ *   (a) TRUE GLOBALLY as of D14-14, same mechanism as every other tool: `ai-agents/src/deps.ts`'s
+ *       `liveDeps.resolveApproval` calls the hub's `approvals.resolveExecute`
+ *       (`mcp-hub/src/platform-write-tools.ts:345`). Nothing tool-specific to verify here — this half
+ *       does not vary by tool name.
+ *   (b) `platform-nest/src/core/approval-executables.ts`'s `registerPmExecutableApprovals()` registers
+ *       BOTH: `pm.createTask` with `pmCreateTaskPrecondition` (project exists ∧ not archived ∧, when an
+ *       assignee is named, that assignee is still an active member — typed reasons
+ *       `project_not_found` / `project_archived` / `assignee_gone`), and `pm.createDoc` with the shared
+ *       `pmProjectPrecondition` (project exists ∧ not archived — no assignee branch because the tool
+ *       has no assignee field, a documented scope call, not a gap). Neither is the fail-closed
+ *       `NO_PRECONDITION_REASON` default.
+ *
+ * Consumer: `ai-agents/src/specialists.ts`'s `task-filer` (the assistant's first proposable write,
+ * `writeSpecialists`) declares both `high_write`. `d14-17-assistant-write-registry.test.ts`
+ * (platform-nest) proves the `origin='agent'` execution path end to end for `pm.createTask` (test C)
+ * and, per the design's §7.1 caveat, gained a matching `pm.createDoc` executes-once case + an
+ * archived-project refusal case so "both covered" is demonstrated, not merely asserted from the
+ * `createTask` proof's mechanism.
+ *
+ * PREVIOUSLY EMPTY (through 2026-08-05): `approval-executables.ts` registered only
+ * `deploy.staging`/`deploy.production` (D14-05, neither agent-callable) plus, since D14-15, the PM
+ * pair above with NO AgentDef yet declaring either `high_write` — this file's own guard forbade it
+ * while the allowlist was `[]`. Extending this list FURTHER requires citing BOTH (a) and (b) by name in
+ * the PR for the specific tool being added; a per-tool proof, never a blanket audit (the same
+ * discipline `VERIFIED_IDEMPOTENT_LOW_WRITES` above already uses). Do not delete this assertion when
+ * extending the allowlist further — extend it and keep the check.
  */
-export const RERUN_CAPABLE_HIGH_WRITES: readonly string[] = [];
+export const RERUN_CAPABLE_HIGH_WRITES: readonly string[] = ["pm.createTask", "pm.createDoc"];
 
 /** D14-14 — the runner-only re-run transport tool. NEVER model-selectable: the write gate in
  *  `agent.ts` calls `AgentDeps.resolveApproval` directly, never via a tool a model chose from an
@@ -114,6 +143,34 @@ export const RERUN_CAPABLE_HIGH_WRITES: readonly string[] = [];
  *  separate standalone projects, not a monorepo — so this is the one place the name is pinned on the
  *  ai-agents side, mirroring how `mcp-hub/src/platform-write-tools.ts` pins it on the other.) */
 export const RESOLVE_EXECUTE_TOOL_NAME = "approvals.resolveExecute";
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+// T2 (ASST-23) — the ai-agents half of a TWO-SIDED handshake: no assistant-facing AgentDef may declare
+// ANY `low_write`, not even one on `VERIFIED_IDEMPOTENT_LOW_WRITES` above.
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+//
+// WHY THIS IS A SEPARATE, STRICTER RULE FROM THE `low_write` GUARD ABOVE: that guard asks "is this
+// write idempotent enough to survive agent.ts's re-run-from-the-top resume?" — a runner-safety
+// question. It says nothing about WHO may trigger the write. The owner's locked design decision D-A
+// (docs/superpowers/plans/2026-08-06-asst-23-unblock-design.md) is that EVERY assistant-triggered write
+// becomes a proposal a human decides — never a silent, unattended commit, no matter how idempotent. A
+// `low_write` executes immediately by construction (`agent.ts`'s write gate only suspends on
+// `high_write`), so an assistant-facing AgentDef holding one — even `tasks.update`, verified idempotent
+// for `task-triager`'s own re-run safety — would let a chat turn commit a write with nobody in the
+// loop. That is a DIFFERENT failure mode than the re-run duplication problem `VERIFIED_IDEMPOTENT_LOW_WRITES`
+// guards against, so it needs its own list and its own check rather than being folded into that one.
+//
+// "ASSISTANT-FACING" is read off `platform-nest/src/modules/assistant/broker.ts`'s `ASSISTANT_AGENT_TOOLS`
+// map — the broker's entire tool universe for a chat turn (that file's own header: `runToolTurn` refuses
+// any agent not present as a key before it ever contacts the runner). `ai-agents` cannot import that
+// map (separate standalone projects, not a monorepo — see CLAUDE.md), so this is the ai-agents-side half
+// of the same handshake `broker.ts` restates from its side: keep the two lists in sync by hand, same
+// discipline as `RERUN_CAPABLE_HIGH_WRITES`'s own restated-not-imported wire vocabulary in
+// `write-agent.ts`. `task-triager` is deliberately NOT here — it is a write-capable specialist, but the
+// broker cannot drive it (D14-17's own finding, still true: it lives in `writeSpecialists` under a name
+// `ASSISTANT_AGENT_TOOLS` never mentions), so its `low_write` stays exactly as governed by
+// `VERIFIED_IDEMPOTENT_LOW_WRITES` above and is out of THIS guard's scope.
+export const ASSISTANT_FACING_AGENTS: readonly string[] = ["status-reporter", "approvals-chaser", "task-filer"];
 
 /** Structural AgentDef check — deliberately duck-typed rather than instanceof/type-only. */
 function isAgentDef(value: unknown): value is AgentDef {
@@ -162,9 +219,10 @@ describe("D14-11 — AgentDef write-capability guard", () => {
 
   it("finds the AgentDefs, including write-capable ones outside the `specialists` map", () => {
     // Falsifiability anchor: if this ever collects only the read-only defs, the guard below is
-    // vacuous and would pass no matter what task-triager declared.
-    expect(defs.length).toBeGreaterThanOrEqual(3);
+    // vacuous and would pass no matter what task-triager (or task-filer) declared.
+    expect(defs.length).toBeGreaterThanOrEqual(4);
     expect(defs.map((d) => d.def.name)).toContain("task-triager");
+    expect(defs.map((d) => d.def.name)).toContain("task-filer");
   });
 
   it("declares `high_write` only for tools on RERUN_CAPABLE_HIGH_WRITES (D14-14: per-tool allowlist, not a blanket ban)", () => {
@@ -247,6 +305,42 @@ describe("D14-11 — AgentDef write-capability guard", () => {
             "To extend the allowlist, state in the PR why re-executing the tool with identical arguments",
             "cannot produce a second effect. A unique index is NOT a proof until you have checked the",
             "columns' nullability (SQL NULLs are distinct, which also silently disables ON CONFLICT).",
+            "",
+            ...offenders.map((o) => `  - ${o}`),
+          ].join("\n"),
+    ).toEqual([]);
+  });
+
+  it("no assistant-facing AgentDef declares a `low_write` — the ai-agents half of the two-sided no-immediate-writes handshake (D-A)", () => {
+    // Falsifiability anchor: if ASSISTANT_FACING_AGENTS ever names a def that doesn't exist (a typo, or
+    // one renamed on the broker side without a matching rename here), the filter below silently checks
+    // nothing for it. Every name on the list must resolve to a real, found AgentDef.
+    const foundNames = new Set(defs.map((d) => d.def.name));
+    const unresolved = ASSISTANT_FACING_AGENTS.filter((name) => !foundNames.has(name));
+    expect(unresolved, `ASSISTANT_FACING_AGENTS names an AgentDef this guard never found: [${unresolved.join(", ")}]`).toEqual([]);
+
+    const offenders = defs
+      .filter(({ def }) => ASSISTANT_FACING_AGENTS.includes(def.name))
+      .flatMap(({ exportPath, def }) =>
+        Object.entries(def.tools)
+          .filter(([, impact]) => impact === "low_write")
+          .map(([tool]) => `${def.name} (${exportPath}) is assistant-facing and declares low_write "${tool}"`),
+      );
+    expect(
+      offenders,
+      offenders.length === 0
+        ? ""
+        : [
+            "An assistant-facing AgentDef (one the platform-nest assistant broker can drive — see",
+            `ASSISTANT_FACING_AGENTS's header) may declare NO low_write at all, even one on`,
+            "VERIFIED_IDEMPOTENT_LOW_WRITES: the owner's D-A decision is that every assistant-triggered",
+            "write is a PROPOSAL a human decides, never an unattended commit. A low_write executes",
+            "immediately by construction (agent.ts's write gate only suspends on high_write), so holding",
+            "one here would let a chat turn commit a write with nobody in the loop — a different failure",
+            "mode than the re-run-duplication problem VERIFIED_IDEMPOTENT_LOW_WRITES guards against.",
+            "",
+            "If this agent genuinely needs to write, declare the tool high_write and add it to",
+            "RERUN_CAPABLE_HIGH_WRITES (with both prerequisites) instead — that is the proposal path.",
             "",
             ...offenders.map((o) => `  - ${o}`),
           ].join("\n"),

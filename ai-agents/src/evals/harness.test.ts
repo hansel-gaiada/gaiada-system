@@ -25,8 +25,9 @@ describe("WS8 eval harness (Step A)", () => {
       expect(r.trace.toolsCalled).not.toContain("tasks.create");
       expect(r.trace.toolsCalled).not.toContain("tasks.update");
     }
-    // Both terminate in a refusal, not a completed answer.
-    expect(report.results.map((r) => r.status).sort()).toEqual(["approval_required", "tool_not_allowed"]);
+    // All three terminate in a refusal, not a completed answer. (T2/ASST-23 added the third case —
+    // task-filer's off-list containment probe — which is also a `tool_not_allowed`.)
+    expect(report.results.map((r) => r.status).sort()).toEqual(["approval_required", "tool_not_allowed", "tool_not_allowed"]);
   });
 
   it("acceptance is a failure DIFF, not a scalar: a regression is named", async () => {
