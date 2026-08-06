@@ -34,6 +34,49 @@ reconstructed from this table alone. Format defined in [`VERSIONING.md`](./VERSI
 > Not corrected retroactively (moving a pushed, already-deployed tag is its own risk); flagging so
 > the next session doesn't re-diagnose the same gap.
 
+### `Alpha 01.022.0056a` — 2026-08-06 — the Hermes brain actually wins, and the badge can finally say so
+
+Cut to deploy the one finding the `0052a` post-release live check turned up. That check asked for
+"pick Hermes → confirm the badge names Hermes"; the badge said **CENTRAL-FORWARD**, and chasing it
+found that **`ai-gateway-go`'s `hermes` provider had never once succeeded** — it sent no
+`Authorization` header, and hermes-gateway authenticates *before* it routes, so every call 401'd.
+
+It stayed invisible because a site-topology chain is `[hermes, central-forward, echo]` and this box's
+`GATEWAY_CENTRAL_URL` points at that same hermes-gateway: hermes 401'd, central-forward answered, and
+**Hermes replied every time anyway**. Two independent bugs would have been noticed; one bug masked by a
+coincidentally-correct fallback was not.
+
+- **ai-gateway-go `0.13.1`** — `HERMES_TOKEN` (falls back to `GATEWAY_TOKEN`), bearer sent on both
+  endpoints, two regression tests. This changes which PROVIDER serves, **not which BRAIN** — unhinted
+  callers reached Hermes via central-forward before and reach it natively now, so no topology decision
+  was required and no caller's behaviour changes.
+- **infra `0.8.5`** — `HERMES_TOKEN` passthrough, plus a warning on the `LLM_CHAIN` block that site
+  topology silently strips gemini/claude/openai from whatever an operator writes there (the trap that
+  made the brain picker look inert for *every* option, not just Hermes).
+- **mail `0.0.18`** and the assistant a11y / VER-01..04 closures, PM TaskDrawer focus trap, platform
+  OTel-survives-deploy compose fix, and the IdP password-reset findings — all from other sessions,
+  committed and CI-green, previously unreleased.
+
+Counter `0053 → 0056`: three module rows moved (ai-gateway-go, infra, mail). Note the assistant a11y and
+PM fixes did **not** bump their modules' versions, so the counter understates this release's churn —
+flagged rather than silently corrected, since those are other sessions' entries to write.
+
+**Module manifest** (VERSIONING rule 2):
+
+| Module | Ver | | Module | Ver |
+|---|---|---|---|---|
+| platform-nest | `0.15.0` | | webdev | `0.11.0` |
+| platform-ui | `0.16.0` | | webdesk | `0.0.0` |
+| ai-gateway-go | `0.13.1` | | search-marketing | `0.5.1` |
+| mcp-hub | `0.10.0` | | social-media | `0.0.0` |
+| sync-engine-go | `0.7.0` | | creative | `0.1.0` |
+| automation (n8n) | `0.4.1` | | render-gateway-go | `0.0.0` |
+| observability | `0.6.1` | | reports | `0.3.1` |
+| infra | `0.8.5` | | report-renderer | `0.1.0` |
+| wa-chat-bot | `0.9.2` | | mail | `0.0.18` |
+| ai-agents | `0.5.1` | | hermes-gateway | `0.2.0` |
+| capture-helper | `0.2.0` | | | |
+
 ### `Alpha 01.021.0053a` — 2026-08-06 — REL-01's scoped SBOM goes live; the test-DB leak closed
 
 Everything on `main` since the `alpha-01.020.0052a` tag's actual (tagged) content. Because that tag
