@@ -34,6 +34,71 @@ reconstructed from this table alone. Format defined in [`VERSIONING.md`](./VERSI
 > Not corrected retroactively (moving a pushed, already-deployed tag is its own risk); flagging so
 > the next session doesn't re-diagnose the same gap.
 
+### `Alpha 01.023.0061a` — 2026-08-06 — the assistant can propose a write, and you confirm it in-thread
+
+ASST-23. When this release's work started the assistant could not propose a write **at all**, blocked
+three independent ways: the broker's tool universe was read-only, the only write-capable AgentDef was
+unreachable through it, and `RERUN_CAPABLE_HIGH_WRITES` was `[]`. All three are closed, and
+`pm.createTask` + `pm.createDoc` are now proposable — the owner chose both for v1.
+
+**The owner overrode the architect** on one point, and it is recorded that way deliberately: an
+in-thread **confirm chip** is required before anything is filed. The architect argued against it (the
+approval is already the human gate, so you confirm twice for one write); the decision stands and both
+sides stay legible in `2026-08-06-asst-23-unblock-design.md` §2.4.2/§7.
+
+**The architectural correction that made this cheap:** `mcp-hub`'s impact gate is **automation-only**
+and is not on the assistant's path. The mechanism is the *agent-side* write gate, which fires on the
+AgentDef's **declared** impact, and D14-12's stricter-wins rule preserves a declaration stricter than
+the registry. So: no new hub tool, no re-tiering, no Cerbos rule change, no mcp-hub edit. Re-tiering the
+PM tools would have started suspending the WD-06 report pipeline — a working program broken to enable a
+new one.
+
+**Three real bugs found by building it, none of which a green suite would have shown:**
+- `write-agent.ts` filed the literal `"high_write"` while every consumer accepts only
+  `medium|high|unclassified` — **the first genuine high_write filing in the platform's history would
+  have 400'd.** It survived because every agent-side test scripted `callTool` and D14-17's tests used
+  raw SQL: two independent test strategies each bypassing the one contract that mattered.
+- The confirm design's own claim UPDATE both nulled `tool_args` and `RETURNING`ed them — which returns
+  NULL, so the confirm would have filed an approval with **no arguments**. Caught by an implementer
+  contradicting the spec.
+- `loadThread` had no staleness guard, so a slow thread fetch could resolve after you switched threads
+  and overwrite the new thread's messages. Found by writing the browser spec.
+
+**Verified across real OS processes** (VER-ASST23), not against a double: propose → confirm → approve →
+execute → notify, with a real `pm_tasks` row, `requested_by = executed_by ≠ decided_by` in one query,
+and `SuspendedIntent.impact` observed crossing as the wire label `"high"` — the exact seam the first bug
+above existed for.
+
+Also in this cut: `AGENT_SERVING_PROVIDER` pinned (unset, D13 strips the write tools and the assistant
+goes **silently** read-only while every local test passes), and CI's Cerbos pinned to `0.54.0` to match
+compose — the authz engine had been pinned in production and floating in the pipeline.
+
+Counter `0056 → 0061`: five module rows moved (platform-nest, platform-ui, ai-agents, infra, and mail
+from a concurrent session). **Not included:** the PM Phase 4 session's 15 uncommitted files — another
+session's in-flight work is not mine to land, and committing it would risk turning `main` red on code
+whose tests I cannot vouch for.
+
+**Known gaps, not implied closed:** no real screen-reader pass; the new Playwright spec is in the
+`chromium` project so it is coverage you can RUN, not a CI gate; and a handoff to `task-filer` still
+files **without** the confirm chip (the handoff click is treated as consent) — an owner decision left
+open.
+
+**Module manifest** (VERSIONING rule 2):
+
+| Module | Ver | | Module | Ver |
+|---|---|---|---|---|
+| platform-nest | `0.16.0` | | webdev | `0.11.0` |
+| platform-ui | `0.17.0` | | webdesk | `0.0.0` |
+| ai-gateway-go | `0.13.1` | | search-marketing | `0.5.1` |
+| mcp-hub | `0.10.0` | | social-media | `0.0.0` |
+| sync-engine-go | `0.7.0` | | creative | `0.1.0` |
+| automation (n8n) | `0.4.1` | | render-gateway-go | `0.0.0` |
+| observability | `0.6.1` | | reports | `0.3.1` |
+| infra | `0.8.6` | | report-renderer | `0.1.0` |
+| wa-chat-bot | `0.9.2` | | mail | `0.0.19` |
+| ai-agents | `0.6.0` | | hermes-gateway | `0.2.0` |
+| capture-helper | `0.2.0` | | | |
+
 ### `Alpha 01.022.0056a` — 2026-08-06 — the Hermes brain actually wins, and the badge can finally say so
 
 Cut to deploy the one finding the `0052a` post-release live check turned up. That check asked for
@@ -1066,6 +1131,33 @@ anywhere real.
 ---
 
 ## platform-nest
+### [0.16.0] - 2026-08-06 - IN PROGRESS (ASST-23: the broker can propose a write, and confirm-before-file)
+- **The broker write turn + a registry gate that refuses BEFORE the runner is contacted.** A turn naming
+  an agent with an unregistered write tool gets a typed `tool_not_executable` refusal and the runner is
+  never reached - the same "provably nothing ran" shape as wall 1, rather than discovering at execution
+  time that the approval could never have executed.
+- **An IMPORT-TIME guard against a confirm-chip bypass.** A `fileOnSuspend:false` goal routed through
+  `supervisor` still files immediately (found and documented in ai-agents 0.6.0). Not reachable from the
+  assistant - the broker rejects any agent absent from its mirror - but that safety was implicit in a
+  table this work edits, so `assertNoDelegatingAgent` now runs at MODULE LOAD, not in a test: a test can
+  be skipped, a module that refuses to load cannot.
+- **`assistant_write_intents` (migration 0085)** - brand-new table, ZERO DML, so it is structurally
+  immune to the RLS-backfill trap rather than defending against it. FORCE RLS with the
+  `app_module_allowed('assistant')` conjunct matching its siblings.
+- **Confirm/dismiss are owner-only**, and `create()`'s body was extracted into a shared
+  `fileAutomationApproval()` so a confirmed row is shape-identical to a runner-filed one and the n8n
+  path is untouched. Exclusivity is Postgres's own row-level locking, not an application
+  check-then-write - proven with a genuine 8-way race, plus a confirm-vs-dismiss race (opposing terminal
+  transitions are a different failure mode than N identical ones).
+- **Found a defect in the design, not just the code:** the confirm design specified the claim as a
+  single UPDATE that both nulled `tool_args` and `RETURNING`ed them - which returns NULL, so the confirm
+  would have filed an approval with no arguments. Split into three statements in one transaction.
+- D14-17 closed as **zero net-new registry entries**, proven rather than skipped, with 7 tests pinning
+  the read-only surface so it cannot silently rot.
+- **`lint:withtenants` read docblocks as code** (a JSDoc ` * ` prefix contains no `//`), which turned
+  `main` red for four commits. Fixed the DETECTOR, not the comment - and verified it still bites by
+  injecting a real multi-tenant call.
+
 ### [0.15.0] — 2026-08-06 · IN PROGRESS (the IdP can now vouch; ASST-21 agent roster + handoff)
 - **The platform is one of two services entitled to mint `verified` hub principals** — it IS the IdP,
   so it is the one caller whose "this envelope belongs to a session I authenticated" means something.
@@ -1469,6 +1561,29 @@ tenant's 8 seeded rows still need purging (per-tenant SQL in the design doc §12
 - **Unreleased / next:** identity writes, org-structure endpoints.
 
 ## platform-ui
+### [0.17.0] - 2026-08-06 - IN PROGRESS (ASST-23 proposal card; a real thread-load race fixed)
+- **The proposal card**, full D14 lifecycle: awaiting-confirm -> sent for approval -> approved+executed
+  -> failed+retry, plus rejected/dismissed/expired. This REMOVES the old "approval does not execute"
+  disclaimer, which stopped being true when D14 landed. First UI path that can send `mode:'tools'`.
+- **A real latent bug fixed:** `loadThread(id)` was async and nothing checked whether `id` was still
+  active when it resolved - switch threads mid-fetch and the older response lands last, silently
+  overwriting the new thread's messages. Guarded with a SYNCHRONOUSLY-updated ref; a `useEffect`-updated
+  ref would still lag the render the guard compares against, so it would have looked right and fixed
+  nothing.
+- **The `approval_id`-is-null trap, resolved deliberately:** it reads null BOTH for a plain read and for
+  "nothing to join yet" - different facts, identical appearance. `deriveProposalCardState` reads
+  `intent` first, `approval` second, and falls back to "not a proposal" only when BOTH are null. That
+  ordering IS the fix, not a style choice.
+- **Confirm and Dismiss send NO args** - the card shows the redacted args the SSE gave it and never
+  sends them back, because a tampered confirm could otherwise file user-authored args wearing model
+  provenance.
+- A committed Playwright spec (6 tests) replacing a throwaway script, and demo fixtures making
+  `rejected`/`execution_failed`/`cancelled` reachable through a real confirm click. **Honest limit:** the
+  spec is in the `chromium` project and CI runs `--project=smoke` - so it is coverage you can RUN, not
+  a merge gate.
+- Earlier in this window: four a11y defects on `/assistant` and the `TaskDrawer` Tab focus trap. Both
+  drawers were modal to a screen reader and porous to the Tab key.
+
 ### [0.16.0] — 2026-08-05 · IN PROGRESS (`/me` — the personal hub, and it is not under HR)
 
 Employee-portal waves A + F.
@@ -2095,6 +2210,18 @@ Alertmanager was already running with 3 valid receivers.
 - **Next:** deploy to a real host; tune SLOs on prod traffic.
 
 ## infra
+### [0.8.6] - 2026-08-06 - PROTOTYPED (pin the agent runner's provider; pin CI's authz engine)
+- **`AGENT_SERVING_PROVIDER` pinned to `openai` on `agent-runner`.** Unset, the runner resolves
+  `?? lastProvider() ?? "echo"`, and `echo` is not in `task-filer`'s `evaledProviders` - so D13
+  correctly STRIPS its write tools and the assistant quietly only ever reads. No error, no log, and
+  every local test still green. Same shape as `APPROVAL_GRANT_SECRET`, which was passed through for
+  three services while `.env` had no value. Defaulted (`:-openai`) not required (`:?`), so an absent
+  value cannot stop the stack coming up over one agent capability - and verified by rendering
+  `docker compose config` with the var present-but-empty, ABSENT entirely, and explicitly set.
+- **CI's Cerbos pinned to `0.54.0`,** matching compose. OBS-03 pinned production and validated the new
+  `audit:` config against that version while CI still pulled `:latest` - the authz engine was pinned on
+  the box and floating in the pipeline. Both versions were tested against the real policies first.
+
 ### [0.8.4] — 2026-08-06 · PROTOTYPED (REL-01 — report-renderer SBOM scoped; the attest safety net removed)
 
 `report-renderer` is the **only** image in the estate built `FROM
@@ -2590,6 +2717,26 @@ Built by a 4-agent parallel run against a frozen contract (`docs/superpowers/pla
 - **Blocked:** infra (OpenBao/Gemini/WAHA) + legal Gate 1 before real ingestion.
 
 ## ai-agents
+### [0.6.0] - 2026-08-06 - PROTOTYPED (task-filer: the first agent allowed to propose a write)
+- **`RERUN_CAPABLE_HIGH_WRITES` went from `[]` to its first entries ever** - `pm.createTask` and
+  `pm.createDoc` - behind `task-filer`, a new write specialist. `high_write` is the HONEST declaration,
+  not a demo hack: the hub tier answers "blast radius for the automation gate", the AgentDef label
+  answers "may an LLM commit this unattended?", and since all assistant writes are proposals the answer
+  is no.
+- **THE BUG THAT WOULD HAVE 400'd THE FIRST REAL FILING:** `fileApproval` forwarded the agent-side label
+  `"high_write"` verbatim, but the hub schema and the platform controller accept only
+  `medium|high|unclassified`. `toWireImpact` now translates at the boundary, EXHAUSTIVELY over the union
+  so a future variant is a compile error rather than a runtime 400. `low_write`/`read` throw rather than
+  being folded into `"medium"` - no wire tier means "safe to auto-execute", so mapping them would
+  fabricate a severity nobody assessed.
+- **`fileOnSuspend` (default TRUE)** captures a suspended write as a `SuspendedIntent` instead of filing
+  it. The default is the safety property: an omitted key, an explicit `true`, and no options argument all
+  take the exact prior path, proven by test. Real args are held IN MEMORY - the agents DB must never hold
+  raw tool args, and a runner restart already kills in-flight goals via `sweepInterrupted`.
+- A new guard: no assistant-facing AgentDef may declare `low_write` (a `low_write` runs unattended by
+  definition). It carries a **falsifiability anchor** - every name in `ASSISTANT_FACING_AGENTS` must
+  resolve to a real AgentDef, so a typo cannot leave the guard silently checking nothing.
+
 ### [0.5.1] — 2026-08-06 · PROTOTYPED (entitled to mint verified principals)
 - Presents the new **`HUB_ASSURANCE_TOKEN`** on hub tool calls when set, falling back to
   `HUB_SERVICE_TOKEN`. The runner is one of exactly two services entitled to elevate, because it
