@@ -119,7 +119,7 @@ describe.skipIf(!TEST_URL)("admin systems aggregator (Phase C)", () => {
     stub = server;
     config.services.gateway = { url: `${base}/gw`, token: "gw-token" };
     config.services.bot = { url: `${base}/bot`, token: "bot-token" };
-    config.services.hub = { url: `${base}/hub`, token: "hub-token" };
+    config.services.hub = { url: `${base}/hub`, token: "hub-token", assuranceToken: "" };
     config.services.knowledge = { url: `${base}/kn`, token: "kn-token" };
     config.services.automation = { url: `${base}/n8n`, token: "" };
 
@@ -461,7 +461,7 @@ describe.skipIf(!TEST_URL)("admin systems aggregator (Phase C)", () => {
 
   it("hub tools falls back to names-only when /tools is absent", async () => {
     const base = config.services.hub.url.replace(/\/hub$/, "");
-    config.services.hub = { url: `${base}/hubnotools`, token: "" };
+    config.services.hub = { url: `${base}/hubnotools`, token: "", assuranceToken: "" };
     const tools = (await app.inject({ method: "GET", url: `/api/admin/hub/tools`, headers: asUser(admin) })).json() as Array<{ name: string; description: string }>;
     expect(tools).toEqual([{ name: "onlyname", description: "", minAssurance: "" }]);
   });

@@ -11,7 +11,7 @@ import { fileURLToPath } from "node:url";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { config } from "./config";
 import { buildHubServer } from "./hub";
-import { mintPrincipal } from "./principal";
+import { elevateAssurance, mintPrincipal } from "./principal";
 import { registerCoreTools } from "./tools";
 import { registerPlatformTools } from "./platform-tools";
 import { registerPlatformWriteTools } from "./platform-write-tools";
@@ -21,7 +21,7 @@ import { registerPmTools } from "./pm-tools";
 import { registerWorkActivityTools } from "./work-activity-tools";
 import { startModuleToolsBootstrap, moduleToolsStatus } from "./module-tools";
 import { take } from "./ratelimit";
-import { isRevoked } from "./revocation";
+import { identityRevoked, platformVouchesFor, resolvePlatformIdentity } from "./revocation";
 import { tlsEnabled, loadTlsOptions, checkPeer } from "./tls";
 import { auditToolCall, principalRef, readRecentAudit } from "./audit";
 import { allTools, withSource } from "./registry";
@@ -123,6 +123,14 @@ export function buildHttpApp(): express.Express {
         // can never re-drive — the misconfiguration that would otherwise look exactly like "D14
         // resume is broken". Absence fails CLOSED, which is why it must be visible.
         executionGrantConfigured: !!config.approvalGrantSecret,
+        // Assurance elevation (design §2) presence flag, visible for exactly the reason the grant flag
+        // above is: absence fails CLOSED, so with it unset every `minAssurance:"verified"` tool —
+        // including D14-14's `approvals.resolveExecute` — is unreachable and every agent write denies
+        // with "requires verified assurance". That misconfiguration looks identical to "the D14 agent
+        // half is broken", which is precisely the diagnosis this flag exists to short-circuit.
+        assuranceElevationConfigured: !!config.assuranceToken,
+        // The other half of the same story: switching the revocation lookup off ALSO caps assurance at
+        // `low`, because the platform vouching (conjunct 3) rides on that same lookup.
         revocationCheck: config.revocationCheck,
         revocationTtlMs: config.revocationTtlMs,
       },
@@ -167,34 +175,48 @@ export function buildHttpApp(): express.Express {
       return;
     }
     if (peer.reason) console.warn(`[mtls] ${peer.reason}`);
-    // Service auth (fail-closed).
+    // Service auth (fail-closed). EITHER token authenticates the service; which one it was decides
+    // whether this caller may reach `verified` assurance at all (design §2 conjunct 1). An empty
+    // configured token never matches — `safeEqual` is reached only for a non-empty config value, so
+    // an unset HUB_ASSURANCE_TOKEN cannot be satisfied by an empty header.
     const h = req.headers.authorization ?? "";
     const token = h.startsWith("Bearer ") ? h.slice(7) : "";
-    if (!config.serviceToken || !safeEqual(token, config.serviceToken)) {
+    const plainOk = !!config.serviceToken && safeEqual(token, config.serviceToken);
+    const callerEntitled = !!config.assuranceToken && safeEqual(token, config.assuranceToken);
+    if (!plainOk && !callerEntitled) {
       res.status(401).json({ error: "unauthorized" });
       return;
     }
     // OBO principal — minted HERE from the envelope; clients cannot assert assurance.
-    const principal = mintPrincipal({
+    const base = mintPrincipal({
       provider: (req.headers["x-obo-provider"] as string) || undefined,
       externalId: (req.headers["x-obo-external-id"] as string) || undefined,
     });
     // Rate limit (§8): per end-user principal AND a coarser per-service-token ceiling. 429 on breach.
-    const principalOk = take(`p:${principal.provider}:${principal.externalId}`, config.rateLimitPerMin, config.rateLimitBurst);
+    const principalOk = take(`p:${base.provider}:${base.externalId}`, config.rateLimitPerMin, config.rateLimitBurst);
     const tokenOk = take(`t:${token}`, config.rateLimitPerMin * 10, config.rateLimitBurst * 10);
     if (!principalOk || !tokenOk) {
-      auditToolCall({ ts: Date.now(), tool: "(rate-limit)", principal: principalRef(principal), decision: "deny", reason: "rate_limited" });
+      auditToolCall({ ts: Date.now(), tool: "(rate-limit)", principal: principalRef(base), decision: "deny", reason: "rate_limited" });
       res.status(429).json({ error: "rate limit exceeded — slow down" });
       return;
     }
-    // D11: reject a revoked identity (verified link → deactivated user) for the whole request,
-    // before any tool runs — this covers gateway-backed tools that never re-hit the platform.
-    // Per-principal, cached; fail-open if the platform is unreachable.
-    if (await isRevoked(principal)) {
-      auditToolCall({ ts: Date.now(), tool: "(revoked)", principal: principalRef(principal), decision: "deny", reason: "revoked" });
+    // ONE platform identity lookup, cached per principal, serving two concerns with OPPOSITE failure
+    // directions (see revocation.ts's header for why they must share a single cached answer):
+    //
+    //  - D11 revocation: reject a revoked identity (verified link → deactivated user) for the whole
+    //    request, before any tool runs — this covers gateway-backed tools that never re-hit the
+    //    platform. Fail-OPEN if the platform is unreachable.
+    //  - Assurance elevation (design §2): the platform's vouching, conjunct 3. Fail-CLOSED.
+    const identity = await resolvePlatformIdentity(base);
+    if (identityRevoked(identity)) {
+      auditToolCall({ ts: Date.now(), tool: "(revoked)", principal: principalRef(base), decision: "deny", reason: "revoked" });
       res.status(403).json({ error: "access revoked" });
       return;
     }
+    // The ONLY path from `low` to `verified` in the codebase. `callerEntitled` came from WHICH service
+    // token authenticated this request (conjunct 1) — never from a header a caller could set — and
+    // n8n is refused inside elevateAssurance regardless (conjunct 2, the §A13 ruling).
+    const principal = elevateAssurance(base, { callerEntitled, vouched: platformVouchesFor(identity) });
     // D14-04: the execution grant rides on this request's `x-approval-grant` header. It is passed
     // RAW to the MCP server and verified at the tool-call site (hub.ts), because verification binds
     // it to the actual tool name + arguments — which only the call itself knows. Without this line

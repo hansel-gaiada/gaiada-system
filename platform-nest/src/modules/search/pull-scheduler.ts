@@ -8,8 +8,10 @@
 // writable only under `search:scope:write` (Cerbos-gated, verified human) — IS the standing
 // authorization for recurring vendor spend, exactly as an approved row is the authorization artifact
 // for a one-off (§07). n8n was rejected as the host because every automation principal is minted
-// `assurance: "low"` BY CONSTRUCTION (mcp-hub/src/principal.ts: verified comes from the platform IdP,
-// never from an envelope) and every `search.*` write tool is `minAssurance: "verified"`. Lowering that
+// `assurance: "low"` BY CONSTRUCTION (mcp-hub/src/principal.ts — since 2026-08-06 that means an
+// explicit `isAutomation` refusal inside `elevateAssurance` rather than the absence of any minting path
+// at all; see `modules/search/index.ts`'s §A13 note for why the distinction matters and which test
+// pins it) and every `search.*` write tool is `minAssurance: "verified"`. Lowering that
 // gate so a scheduled flow could spend unattended would have weakened TWO controls on the money path
 // (the assurance gate AND the D14 medium-impact suspend) to avoid writing this file. The hard rule that
 // came out of the same ruling and that this file must never undermine: **no allow-list may ever include

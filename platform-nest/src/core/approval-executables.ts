@@ -305,10 +305,20 @@ registerCoreExecutableApprovals();
 // is permitted — a live resolver AND an `approval-executables.ts` entry with a server-side
 // precondition. These entries are that second half for PM.
 //
-// It is still not reachable TODAY: `mcp-hub/src/principal.ts` mints every envelope-derived principal
-// at `"low"` assurance while `approvals.resolveExecute` requires `"verified"`, and no `AgentDef`
-// declares a `high_write` (the guard test forbids it while `RERUN_CAPABLE_HIGH_WRITES` is empty).
-// So: do NOT read this as unblocking PM Phase-4 J2 on either path.
+// REACHABILITY, CORRECTED 2026-08-06 — one of the two blockers named here is now GONE. The assurance
+// ceiling is closed (`mcp-hub/src/principal.ts`'s `elevateAssurance`; design
+// docs/superpowers/plans/2026-08-06-assurance-minting-design.md): an agent envelope presented by
+// ai-agents or platform-nest, with the platform vouching for it, now mints `"verified"`, so
+// `approvals.resolveExecute` clears its `minAssurance` floor and the transport is live.
+//
+// The REMAINING blocker is the other one, unchanged: no `AgentDef` declares a `high_write` (the guard
+// test forbids it while `RERUN_CAPABLE_HIGH_WRITES` is empty). Until one does, nothing files an
+// `origin='agent'` row that these entries could execute. So: still do NOT read this as unblocking PM
+// Phase-4 J2 — but the reason is now the empty allowlist alone, NOT assurance. Two things follow that
+// a future reader would otherwise get wrong: a `requires verified assurance` denial from here is now a
+// real misconfiguration (an unset HUB_ASSURANCE_TOKEN — check `/admin/info`'s
+// `assuranceElevationConfigured`), not the expected steady state; and adding a `high_write` is now the
+// single remaining step, not the first of two.
 //
 // NO PIPELINE CO-LOCK (stated so nobody adds `lockPipelineRun` here "for safety" later): PM tools
 // never read or write `pipeline_runs` / `pipeline_stages` — those are mutated by

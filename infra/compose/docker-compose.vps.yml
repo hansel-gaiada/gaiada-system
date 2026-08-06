@@ -307,6 +307,12 @@ services:
       ADMIN_TOKEN: ${BOT_ADMIN_TOKEN:-${ADMIN_TOKEN:-}}
       HUB_URL: http://mcp-hub:3003
       HUB_SERVICE_TOKEN: ${HUB_SERVICE_TOKEN:-}
+      # Assurance elevation (mcp-hub design §2, 2026-08-06). The platform is one of only TWO
+      # services entitled to mint `verified` hub principals (it is the IdP); this is what lets the D14
+      # agent re-drive clear `approvals.resolveExecute`'s minAssurance floor. Optional + fail-closed:
+      # unset ⇒ every verified-tier tool denies, exactly as before it existed. NEVER give this value
+      # to the bot or n8n — it would lift the chat-surface `low` ceiling this design rests on.
+      HUB_ASSURANCE_TOKEN: ${HUB_ASSURANCE_TOKEN:-}
       KNOWLEDGE_URL: http://knowledge:3005
       KNOWLEDGE_SERVICE_TOKEN: ${KNOWLEDGE_SERVICE_TOKEN:-}
       # Knowledge (D9 RAG) corpus refresh. Off unless KNOWLEDGE_INGEST_ENABLED=1 — a fresh
@@ -778,6 +784,10 @@ services:
       GATEWAY_TOKEN: ${GATEWAY_TOKEN:?}
       HUB_URL: http://mcp-hub:3003
       HUB_SERVICE_TOKEN: ${HUB_SERVICE_TOKEN:?}
+      # Assurance elevation (mcp-hub design §2): the agent runner is the OTHER entitled caller — it
+      # carries the triggering human's envelope, never an identity of its own. Without this the whole
+      # agent-write half of D14 stays inert.
+      HUB_ASSURANCE_TOKEN: ${HUB_ASSURANCE_TOKEN:-}
     depends_on:
       postgres:
         condition: service_healthy
@@ -793,6 +803,10 @@ services:
       - "127.0.0.1:3003:3003" # localhost-only; lets the standalone automation stack (n8n) reach the hub
     environment:
       HUB_SERVICE_TOKEN: ${HUB_SERVICE_TOKEN:?}
+      # The hub VERIFIES this token (design §2 conjunct 1) — it must be set here as well as on the
+      # two entitled callers, or their elevated requests authenticate as ordinary `low` callers and
+      # every agent write denies with "requires verified assurance".
+      HUB_ASSURANCE_TOKEN: ${HUB_ASSURANCE_TOKEN:-}
       GATEWAY_URL: http://ai-gateway:3002
       GATEWAY_TOKEN: ${GATEWAY_TOKEN:?}
       PLATFORM_URL: http://platform:3004
@@ -846,6 +860,8 @@ services:
     restart: unless-stopped
     environment:
       HUB_SERVICE_TOKEN: ${HUB_SERVICE_TOKEN:?}
+      # Same token on the central hub — cross-company tools are exactly where the tier matters.
+      HUB_ASSURANCE_TOKEN: ${HUB_ASSURANCE_TOKEN:-}
       GATEWAY_URL: http://ai-gateway:3002
       GATEWAY_TOKEN: ${GATEWAY_TOKEN:?}
       PLATFORM_URL: http://platform:3004

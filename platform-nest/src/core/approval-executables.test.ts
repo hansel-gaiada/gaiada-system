@@ -31,7 +31,7 @@ describe.skipIf(!TEST_URL)("D14-05 registry: deploy.staging / deploy.production"
   beforeAll(async () => {
     await initTestDb();
     config.approvalGrantSecret = GRANT_SECRET;
-    config.services.hub = { url: "http://hub.test", token: "hub-token" };
+    config.services.hub = { url: "http://hub.test", token: "hub-token", assuranceToken: "" };
     // Independent of whatever another test file in this same worker left the registry in — restore
     // EXACTLY the production two entries via the exported bootstrap rather than hand-rolling a second
     // copy of their lock/precondition (see approval-executables.ts's doc on resetExecutableApprovals).

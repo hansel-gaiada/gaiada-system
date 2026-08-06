@@ -42,7 +42,20 @@ const config = {
   gatewayToken: process.env.GATEWAY_TOKEN ?? "",
   hubUrl: process.env.HUB_URL ?? "http://localhost:3003",
   hubServiceToken: process.env.HUB_SERVICE_TOKEN ?? "",
+  // Assurance elevation (mcp-hub design §2, 2026-08-06): the agent runner is one of exactly two
+  // services entitled to mint `verified` hub principals, because it carries the TRIGGERING HUMAN's
+  // envelope — never an identity of its own. Presenting this token lets the hub elevate that envelope
+  // to `verified` when the platform independently vouches for it, which is what makes D14-14's
+  // `approvals.resolveExecute` (minAssurance: "verified") reachable and the agent-write half of D14
+  // live at all. Falls back to the ordinary token, so an unset value degrades to exactly today's
+  // behaviour — every write denied with "requires verified assurance" — rather than failing to call.
+  hubAssuranceToken: process.env.HUB_ASSURANCE_TOKEN ?? "",
 };
+
+/** The hub token to present: the elevated one when configured, else the ordinary service token. */
+function hubToken(): string {
+  return config.hubAssuranceToken || config.hubServiceToken;
+}
 
 // The provider the Gateway reported for the most recent completion (after any failover). Used by the
 // D13 write gate (runWriteAgent) + WS9 attribution; undefined until the first completion.
@@ -71,7 +84,7 @@ async function callTool(name: string, args: Record<string, unknown>, envelope: E
     headers: {
       "Content-Type": "application/json",
       Accept: "application/json, text/event-stream",
-      Authorization: `Bearer ${config.hubServiceToken}`,
+      Authorization: `Bearer ${hubToken()}`,
       "x-obo-provider": envelope.provider,
       "x-obo-external-id": envelope.externalId,
     },

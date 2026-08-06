@@ -6,6 +6,20 @@ export const config = {
   // Service token calling clients (bot, agents, n8n) must present. Empty -> reject all
   // (fail-closed). This authenticates the SERVICE; the end user rides in the OBO envelope.
   serviceToken: process.env.HUB_SERVICE_TOKEN ?? "",
+  // Assurance elevation (design §2, 2026-08-06): a SECOND service token, distinct from the one above
+  // and held ONLY by callers entitled to mint `verified` principals — platform-nest (it IS the IdP)
+  // and ai-agents (it carries the triggering human's envelope). A caller presenting this token may
+  // reach `verified` when the platform ALSO vouches for the envelope's identity; a caller presenting
+  // the ordinary token above is capped at `low` no matter whose link is verified, which is what keeps
+  // `principal.ts`'s "chat-surface envelopes can only ever mint LOW assurance" literally true.
+  // Accepted as ordinary service auth too, so an elevated caller needs one token, not two.
+  //
+  // EMPTY ⇒ NOBODY EVER ELEVATES (fail-closed; behaviour identical to before this existed). It must be
+  // listed in the `environment:` block of BOTH the hub and every elevated caller — a value in .env
+  // alone does nothing, the failure class that has shipped four features silently disabled in this
+  // repo. Never give this value to n8n or the bot; an n8n principal is refused in code regardless
+  // (the §A13 ruling), but the bot is not, and handing it over would quietly lift the chat ceiling.
+  assuranceToken: process.env.HUB_ASSURANCE_TOKEN ?? "",
   // Tool-call audit trail (JSONL — decision + metadata, args redacted).
   auditFile: process.env.HUB_AUDIT_FILE ?? "data/tool-audit.jsonl",
   // AI Gateway (WS3) — AI-backed tools call it; the hub holds no provider keys (D8).

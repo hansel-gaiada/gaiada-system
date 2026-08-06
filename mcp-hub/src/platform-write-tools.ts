@@ -327,13 +327,21 @@ export function registerPlatformWriteTools(): void {
   // suspends that call instead of silently executing it. A mis-scoping fails closed, not open.
   //
   // Real authorization for the call itself is NOT this `minAssurance` gate — it is layered, per the
-  // ruling: hub `minAssurance: "verified"` (today unreachable via any chat/portal OBO envelope, which
-  // `principal.ts`'s `mintPrincipal` only ever mints to "low" — the SAME pre-existing gap
-  // `rollup.metrics` in `tools.ts` already documents as "no chat surface can reach it"; closing that
-  // gap is a separate, already-deferred IdP/assurance ticket, not this one) + Cerbos (unchanged for a
-  // non-automation caller) + the platform endpoint's OWN binding: `requested_by == principal.id` (only
-  // the ORIGINAL requester may resolve their own suspended call — never the approver, per §1's
-  // authority rule). This registration adds a floor; it does not relax any of those.
+  // ruling: hub `minAssurance: "verified"` + Cerbos (unchanged for a non-automation caller) + the
+  // platform endpoint's OWN binding: `requested_by == principal.id` (only the ORIGINAL requester may
+  // resolve their own suspended call — never the approver, per §1's authority rule). This registration
+  // adds a floor; it does not relax any of those.
+  //
+  // UPDATE 2026-08-06 — the `verified` tier is now REACHABLE, and this tool is what motivated closing
+  // it (docs/superpowers/plans/2026-08-06-assurance-minting-design.md). It is still unreachable from a
+  // chat/portal OBO envelope: `principal.ts`'s `elevateAssurance` requires the caller to present
+  // HUB_ASSURANCE_TOKEN, which only platform-nest and ai-agents hold, so the "no chat surface can reach
+  // it" property `rollup.metrics` documents in `tools.ts` is unchanged. What DID change is that the
+  // two entitled services can now clear this floor when the platform independently vouches for the
+  // envelope — which is exactly the D14 agent re-drive (`approval-execute.ts`'s
+  // `resolveRedrivePrincipal` already hands the hub the requester's own `verified_at IS NOT NULL`
+  // link). An n8n principal is refused the tier outright (§A13), which costs nothing here: this name
+  // is in no AUTOMATION_ALLOWLIST, so a workflow fails the scope check before assurance is consulted.
   registerTool({
     name: "approvals.resolveExecute",
     description:

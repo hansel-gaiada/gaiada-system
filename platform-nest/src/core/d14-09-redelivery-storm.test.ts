@@ -54,7 +54,7 @@ describe.skipIf(!TEST_URL)("D14-09 adversarial: concurrent redelivery storm + cr
     await initTestDb();
     config.serviceToken = "svc-token";
     config.approvalGrantSecret = GRANT_SECRET;
-    config.services.hub = { url: "http://hub.storm.test", token: "hub-token" };
+    config.services.hub = { url: "http://hub.storm.test", token: "hub-token", assuranceToken: "" };
     resetModules();
     resetCoreRollupProviders();
     resetExecutableApprovals();

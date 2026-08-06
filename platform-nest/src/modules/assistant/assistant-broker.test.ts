@@ -367,7 +367,7 @@ describe.skipIf(!TEST_URL)("Assistant tool broker (ASST-17) — live PG + Cerbos
     hub.visibility.set(owner, ["projects.list", "tasks.list", "clients.list"]);
     hub.visibility.set(restricted, ["clients.list"]);
 
-    config.services.hub = { url: hub.url, token: "hub-token" };
+    config.services.hub = { url: hub.url, token: "hub-token", assuranceToken: "" };
     config.services.agents = { url: runner.url, token: "runner-token" };
     // The chat path is not exercised here, but leave the gateway unset-safe: a tool turn must never
     // touch it, and if it did, the resulting `not_configured` error would be loud.
@@ -513,7 +513,7 @@ describe.skipIf(!TEST_URL)("Assistant tool broker (ASST-17) — live PG + Cerbos
 
   it("an unreachable hub fails CLOSED — no visible tools means refuse, never 'assume authorized'", async () => {
     const saved = config.services.hub;
-    config.services.hub = { url: "http://127.0.0.1:1", token: "hub-token" }; // nothing listens there
+    config.services.hub = { url: "http://127.0.0.1:1", token: "hub-token", assuranceToken: "" }; // nothing listens there
     try {
       const threadId = await newThread(owner, "hub down");
       const goalsBefore = runner.receivedGoals.length;

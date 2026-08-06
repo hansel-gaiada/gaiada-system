@@ -302,7 +302,17 @@ const configBase = {
   services: {
     gateway: { url: process.env.GATEWAY_URL ?? "", token: process.env.GATEWAY_TOKEN ?? "" },
     bot: { url: process.env.BOT_URL ?? "", token: process.env.BOT_ADMIN_TOKEN ?? process.env.ADMIN_TOKEN ?? "" },
-    hub: { url: process.env.HUB_URL ?? "", token: process.env.HUB_SERVICE_TOKEN ?? "" },
+    // `assuranceToken` (mcp-hub design §2, 2026-08-06): the platform is one of exactly two services
+    // entitled to mint `verified` hub principals — it IS the IdP, so it is the one caller whose word
+    // "this envelope belongs to a session I authenticated" means something. Presented instead of
+    // `token` on OBO tool calls (core/hub-client.ts) so the D14 agent re-drive can clear
+    // `approvals.resolveExecute`'s `minAssurance: "verified"` floor. Empty ⇒ falls back to `token`,
+    // i.e. exactly today's behaviour (every verified-tier tool denied), never a failure to call.
+    hub: {
+      url: process.env.HUB_URL ?? "",
+      token: process.env.HUB_SERVICE_TOKEN ?? "",
+      assuranceToken: process.env.HUB_ASSURANCE_TOKEN ?? "",
+    },
     knowledge: { url: process.env.KNOWLEDGE_URL ?? "", token: process.env.KNOWLEDGE_SERVICE_TOKEN ?? "" },
     // n8n: token is its Public-API key (X-N8N-API-KEY) used to list workflows/executions.
     automation: { url: process.env.AUTOMATION_URL ?? "", token: process.env.AUTOMATION_API_KEY ?? "" },

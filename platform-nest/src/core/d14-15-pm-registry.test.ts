@@ -38,7 +38,7 @@ describe.skipIf(!TEST_URL)("D14-15 registry: pm.createTask / pm.createDoc", () =
   beforeAll(async () => {
     await initTestDb();
     config.approvalGrantSecret = GRANT_SECRET;
-    config.services.hub = { url: "http://hub.test", token: "hub-token" };
+    config.services.hub = { url: "http://hub.test", token: "hub-token", assuranceToken: "" };
     // Independent of whatever another test file in this worker left the registry in — restore the
     // full production set (deploy.* + pm.*) via the exported bootstraps rather than hand-rolling a
     // second copy of their lock/precondition.

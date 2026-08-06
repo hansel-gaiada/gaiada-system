@@ -231,7 +231,7 @@ describe.skipIf(!TEST_URL)("D14-03 executor — claim, precondition, re-drive, r
     await initTestDb();
     config.serviceToken = "svc-token";
     config.approvalGrantSecret = GRANT_SECRET;
-    config.services.hub = { url: "http://hub.test", token: "hub-token" };
+    config.services.hub = { url: "http://hub.test", token: "hub-token", assuranceToken: "" };
     resetModules();
     resetCoreRollupProviders();
     resetExecutableApprovals();
@@ -579,7 +579,7 @@ describe.skipIf(!TEST_URL)("D14-03 executor — claim, precondition, re-drive, r
 
   it("an unreachable-by-configuration hub is recorded as `not_configured`, not as a hub outage", async () => {
     const saved = { ...config.services.hub };
-    config.services.hub = { url: "", token: "" };
+    config.services.hub = { url: "", token: "", assuranceToken: "" };
     try {
       const id = await fileDecided({ toolName: "test.exec-ok", args: { runId: "run-nohub" } });
       const out = await executeApprovedAutomationWrite(co, id);

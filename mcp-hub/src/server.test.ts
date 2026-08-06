@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, beforeEach, afterAll } from "vitest";
 import type { Server } from "node:http";
 import { config } from "./config";
 import { buildHttpApp } from "./server";
@@ -110,6 +110,103 @@ describe("mcp-hub HTTP entrypoint", () => {
     const r = await fetch(`${base}/tools`);
     const rows = (await r.json()) as Array<{ name: string; source: string }>;
     expect(rows.find((t) => t.name === "whoami")?.source).toBe("core");
+  });
+
+  // ─────────── assurance elevation, end-to-end over real HTTP (design §2, 2026-08-06) ───────────
+  //
+  // assurance.test.ts pins the RULE; this pins the WIRING, which is the half that can rot silently.
+  // Conjunct 1 lives in server.ts's auth branch — it is decided by WHICH service token authenticated
+  // the request — so only a real request through /mcp proves the elevated token is read from the right
+  // place and reaches the principal the tools actually see. `whoami` returns the minted principal
+  // verbatim, so the assertion is on the real value, not on a stub.
+  describe("assurance elevation over /mcp", () => {
+    let platform: Server;
+    let resolveBody: unknown;
+
+    async function whoamiWith(token: string, externalId: string): Promise<{ assurance: string }> {
+      const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
+      const { StreamableHTTPClientTransport } = await import("@modelcontextprotocol/sdk/client/streamableHttp.js");
+      const transport = new StreamableHTTPClientTransport(new URL(`${base}/mcp`), {
+        requestInit: {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "x-obo-provider": "whatsapp",
+            "x-obo-external-id": externalId,
+          },
+        },
+      });
+      const client = new Client({ name: "assurance-test", version: "0.0.0" });
+      await client.connect(transport);
+      const res = await client.callTool({ name: "whoami", arguments: {} });
+      await client.close();
+      return JSON.parse((res.content as Array<{ text: string }>)[0].text);
+    }
+
+    beforeAll(async () => {
+      // Stand up a fake platform rather than stubbing fetch: the call under test is made by
+      // server.ts's own request path, which uses the global fetch.
+      const { createServer } = await import("node:http");
+      platform = createServer((_req, res) => {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify(resolveBody));
+      });
+      await new Promise<void>((resolve) => platform.listen(0, "127.0.0.1", resolve));
+      const addr = platform.address() as { port: number };
+      config.platformUrl = `http://127.0.0.1:${addr.port}`;
+      config.revocationCheck = true;
+      config.assuranceToken = "elevated-token";
+    });
+    afterAll(async () => {
+      config.assuranceToken = "";
+      config.platformUrl = "";
+      await new Promise<void>((resolve) => platform.close(() => resolve()));
+    });
+    beforeEach(async () => {
+      // Distinct externalIds per case would also work; resetting is the clearer guarantee that no
+      // case reads another's cached platform answer.
+      (await import("./revocation")).resetRevocationCache();
+    });
+
+    it("elevates to verified: entitled token + a platform-vouched identity", async () => {
+      resolveBody = { userId: "u1", assurance: "linked", companies: [], roles: [] };
+      expect((await whoamiWith("elevated-token", "628110@c.us")).assurance).toBe("verified");
+    });
+
+    // The chat ceiling, proven end-to-end: SAME identity, SAME vouching platform, ordinary token.
+    // This is `principal.ts`'s founding rule ("chat-surface envelopes can only ever mint LOW
+    // assurance") as an executable assertion — the bot holds only `svc-token`.
+    it("caps the ordinary service token at low for that SAME vouched identity", async () => {
+      resolveBody = { userId: "u1", assurance: "linked", companies: [], roles: [] };
+      expect((await whoamiWith("svc-token", "628110@c.us")).assurance).toBe("low");
+    });
+
+    it("stays low when the platform does not vouch (unverified link — userId but assurance low)", async () => {
+      resolveBody = { userId: "u1", assurance: "low", companies: [], roles: [] };
+      expect((await whoamiWith("elevated-token", "628110@c.us")).assurance).toBe("low");
+    });
+
+    it("still denies a revoked identity presenting the elevated token (D11 runs first)", async () => {
+      resolveBody = { userId: "u1", assurance: "low", revoked: true };
+      const r = await fetch(`${base}/mcp`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json, text/event-stream",
+          Authorization: "Bearer elevated-token",
+          "x-obo-provider": "whatsapp",
+          "x-obo-external-id": "628110@c.us",
+        },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+      });
+      expect(r.status).toBe(403);
+    });
+
+    it("reports the elevation presence flag on /admin/info (absence fails closed, so it must be visible)", async () => {
+      const r = await fetch(`${base}/admin/info`, { headers: { Authorization: "Bearer svc-token" } });
+      const body = (await r.json()) as { policy: { assuranceElevationConfigured: boolean } };
+      expect(body.policy.assuranceElevationConfigured).toBe(true);
+      expect(JSON.stringify(body)).not.toContain("elevated-token"); // never leak the secret
+    });
   });
 
   it("rejects everything when no service token is configured", async () => {

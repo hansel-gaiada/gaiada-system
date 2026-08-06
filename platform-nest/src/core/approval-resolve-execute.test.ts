@@ -100,7 +100,7 @@ describe.skipIf(!TEST_URL)("D14-10 resolve-and-execute — agent re-run makes fo
     await initTestDb();
     config.serviceToken = "svc-token";
     config.approvalGrantSecret = GRANT_SECRET;
-    config.services.hub = { url: "http://hub.d1410.test", token: "hub-token" };
+    config.services.hub = { url: "http://hub.d1410.test", token: "hub-token", assuranceToken: "" };
     resetModules();
     resetCoreRollupProviders();
     // Isolated fixture tool. `resetExecutableApprovals()` first so this file is independent of

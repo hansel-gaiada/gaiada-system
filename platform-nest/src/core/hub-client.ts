@@ -220,7 +220,9 @@ export type HubCallOutcome =
 /** True when the hub is reachable at all (fail-soft convention: an unset URL/token is a
  *  configuration state the caller reports honestly, never a call against a phantom host). */
 export function hubConfigured(): boolean {
-  return !!(config.services.hub.url && config.services.hub.token);
+  // EITHER token is a usable credential (the elevated one is accepted as ordinary service auth hub-
+  // side), so a deployment that sets only HUB_ASSURANCE_TOKEN is configured, not "not_configured".
+  return !!(config.services.hub.url && (config.services.hub.token || config.services.hub.assuranceToken));
 }
 
 /** Does this hub reason string mean "refused before the tool ran"? The hub's own spellings:
@@ -260,7 +262,11 @@ export async function callHubTool(input: {
       headers: {
         "Content-Type": "application/json",
         Accept: "application/json, text/event-stream",
-        Authorization: `Bearer ${config.services.hub.token}`,
+        // The elevated token when configured (mcp-hub design §2 conjunct 1) — this is what lets the
+        // hub mint `verified` for the ORIGINAL requester's envelope resolved just above, which the
+        // agent re-drive needs and which no chat-surface caller can obtain. Falls back to the ordinary
+        // service token: an unset value denies verified-tier tools, it never breaks the call.
+        Authorization: `Bearer ${config.services.hub.assuranceToken || config.services.hub.token}`,
         "x-obo-provider": input.obo.provider,
         "x-obo-external-id": input.obo.externalId,
         ...(input.grantHeader ? { [APPROVAL_GRANT_HEADER]: input.grantHeader } : {}),

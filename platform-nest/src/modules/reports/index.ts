@@ -54,6 +54,16 @@
 // principal minting) can satisfy is the conservative, correct default until that lands. Not a
 // contradiction to fix; a placeholder to leave alone, same as pm.runTracker.
 //
+// AMENDED 2026-08-06 — assurance minting landed (`mcp-hub/src/principal.ts`'s `elevateAssurance`;
+// design docs/superpowers/plans/2026-08-06-assurance-minting-design.md) and the paragraphs above stay
+// CORRECT, deliberately: the new path requires the CALLER to hold HUB_ASSURANCE_TOKEN, which only
+// platform-nest and ai-agents do. A chat-surface envelope from wa-chat-bot still mints `"low"` no
+// matter how verified the underlying D4 link is, so `checkin.submit` still needs its `minAssurance:
+// "low"` for the WA loop to work, and `reports.getCompliance` is still chat-unreachable. What changed:
+// "only the platform IdP can satisfy it" is now a live path rather than a pending one, so this tool IS
+// reachable by the agent runner acting for a human. That is fine on its own terms — the real bar was
+// always Cerbos' `report_admin`/compliance policies plus the platform's own `notLow`, both untouched.
+//
 // ⚠ HUB GENERIC-FRONTING CONSTRAINT (load-bearing, discovered while wiring these four — read before
 // adding another GET tool with filter args to ANY module). mcp-hub/src/module-tools.ts's
 // `callPlatform()` builds the outgoing request from a def's `pathTemplate` + the tool's args in

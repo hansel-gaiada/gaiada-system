@@ -69,7 +69,7 @@ describe.skipIf(!TEST_URL)("D14-09 (f) — origin='agent' executes as the reques
     await initTestDb();
     config.serviceToken = "svc-token";
     config.approvalGrantSecret = GRANT_SECRET;
-    config.services.hub = { url: "http://hub.d1409f.test", token: "hub-token" };
+    config.services.hub = { url: "http://hub.d1409f.test", token: "hub-token", assuranceToken: "" };
     resetModules();
     resetCoreRollupProviders();
     resetExecutableApprovals();

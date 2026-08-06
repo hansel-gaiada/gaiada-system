@@ -183,6 +183,17 @@ export const searchModule: ModuleContract = {
   // `permits()` checks assurance BEFORE both the allow-list and the impact gate — so a `verified`
   // write tool is refused outright, long before `impact` is consulted.
   //
+  // ⚠️ 2026-08-06 — THE GUARANTEE STILL HOLDS, BUT ITS NATURE CHANGED, AND §A13 RESTS ON IT. Assurance
+  // minting landed (design docs/superpowers/plans/2026-08-06-assurance-minting-design.md), so
+  // `verified` is now reachable in general. "By construction" for n8n is no longer *structural
+  // impossibility* — it is now an EXPLICIT REFUSAL: `elevateAssurance` returns early for
+  // `isAutomation(provider)` even when the caller is entitled AND the platform vouches. That is a line
+  // of code someone could delete, where before there was nothing to delete. It is pinned by
+  // mcp-hub/src/assurance.test.ts's "an n8n principal is NEVER elevated, even entitled AND vouched
+  // (§A13)". If that test ever fails, the second of the two controls keeping automation away from
+  // money-spending tools is gone and only the empty AUTOMATION_ALLOWLIST (SM-55) remains — treat it as
+  // a paid-spend exposure, not a test to relax.
+  //
   // The stale clause did real harm: an agent read it as licence to lower `minAssurance` so an n8n
   // flow could reach a paid pull, and left that instruction in a workflow file for the next agent
   // (removed by SM-55). `impact:'medium'` REMAINS — as risk classification for agent-surface

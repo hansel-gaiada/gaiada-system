@@ -195,7 +195,7 @@ describe.skipIf(!TEST_URL)("automation approvals suspension surface (WS4 §3)", 
 
     beforeAll(async () => {
       config.approvalGrantSecret = "d14-07-test-secret-not-a-real-one";
-      config.services.hub = { url: "http://hub.d1407.test", token: "hub-token" };
+      config.services.hub = { url: "http://hub.d1407.test", token: "hub-token", assuranceToken: "" };
       // Isolated from every other tool this file uses (money.transfer / tasks.update stay
       // unregistered throughout — resetting here does not change their behaviour).
       resetExecutableApprovals();

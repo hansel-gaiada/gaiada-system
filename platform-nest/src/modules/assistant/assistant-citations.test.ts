@@ -153,7 +153,7 @@ describe.skipIf(!TEST_URL)("Assistant knowledge citations (ASST-18) — live PG 
     hub = await startFakeHub(["projects.list", "tasks.list"]);
     runner = await startFakeRunner();
     knowledge = await startFakeKnowledge();
-    config.services.hub = { url: hub.url, token: "hub-token" };
+    config.services.hub = { url: hub.url, token: "hub-token", assuranceToken: "" };
     config.services.agents = { url: runner.url, token: "runner-token" };
     config.services.knowledge = { url: knowledge.url, token: "knowledge-token" };
     config.services.gateway = { url: "", token: "" }; // the tool-turn path never touches this

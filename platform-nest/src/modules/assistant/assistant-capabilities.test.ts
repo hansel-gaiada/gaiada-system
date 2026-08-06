@@ -97,7 +97,7 @@ describe.skipIf(!TEST_URL)("Assistant capabilities (ASST-18) — live PG + Cerbo
     ]);
     hub.visibility.set(restricted, [{ name: "clients.list", description: "List clients" }]);
 
-    config.services.hub = { url: hub.url, token: "hub-token" };
+    config.services.hub = { url: hub.url, token: "hub-token", assuranceToken: "" };
 
     app = await buildApp();
   });
@@ -175,7 +175,7 @@ describe.skipIf(!TEST_URL)("Assistant capabilities (ASST-18) — live PG + Cerbo
 
   it("FAILS CLOSED: an unreachable hub yields an empty capability list (never a cached or optimistic one), and `hubConfigured` still reports the hub as configured", async () => {
     const saved = config.services.hub;
-    config.services.hub = { url: "http://127.0.0.1:1", token: "hub-token" }; // nothing listens there
+    config.services.hub = { url: "http://127.0.0.1:1", token: "hub-token", assuranceToken: "" }; // nothing listens there
     try {
       const caps = await getCapabilities(A, owner);
       expect(caps.tools).toEqual([]);
@@ -187,7 +187,7 @@ describe.skipIf(!TEST_URL)("Assistant capabilities (ASST-18) — live PG + Cerbo
 
   it("the hub not being configured AT ALL is reported honestly via `hubConfigured: false`", async () => {
     const saved = config.services.hub;
-    config.services.hub = { url: "", token: "" };
+    config.services.hub = { url: "", token: "", assuranceToken: "" };
     try {
       const caps = await getCapabilities(A, owner);
       expect(caps.tools).toEqual([]);
