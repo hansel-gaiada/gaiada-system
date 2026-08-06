@@ -98,6 +98,7 @@ import type { PoolClient } from "pg";
 import { config } from "../../config";
 import { newId, withGlobal } from "../../db";
 import { getExecutable } from "../../core/approval-executables";
+import { intentTtlMs } from "./write-intents";
 
 // ─────────────────────────────────────── the chatting user ───────────────────────────────────────
 
@@ -317,7 +318,16 @@ export async function persistToolCalls(
 export interface BrokerEmit {
   toolCall: (c: { callId: string; toolName: string; args: Record<string, unknown> }) => void;
   toolResult: (r: { callId: string; toolName: string; status: "succeeded" | "failed" | "denied"; summary: string | null }) => void;
+  /** Legacy/defensive — see `RunnerGoalDetail.approvalId`'s own doc: this broker no longer requests
+   *  `fileOnSuspend:true`, so this emitter fires only if a runner ever ignores that and files
+   *  anyway. */
   approvalRequired: (a: { callId: string; toolName: string; approvalId: string | null; impact: string | null }) => void;
+  /** T3b (§7.2.7) — a write SUSPENDED WITHOUT FILING (the confirm-chip path, this broker's only mode
+   *  today). `args` are REDACTED (shape-preserving, same `redactToolArgs` every other emitter here
+   *  uses) — the real args never reach the wire; they are persisted server-side into
+   *  `assistant_write_intents.tool_args` by the caller (`assistant.controller.ts`'s stream handler),
+   *  keyed by the SAME `intentId` this frame carries. */
+  confirmRequired: (a: { callId: string; toolName: string; intentId: string; args: Record<string, unknown>; impact: string; expiresAt: string }) => void;
 }
 
 // ─────────────────────────── "this turn may use tools" — a PERSISTED fact ────────────────────────
@@ -372,12 +382,32 @@ interface RunnerRunSummary {
   endedAt: number;
 }
 
+/** T3b/T2b — the deferred-filing shape `agent-runner`'s `GET /goals/:id` merges in when a goal
+ *  suspended with `fileOnSuspend:false` (`ai-agents/src/write-agent.ts`'s `SuspendedIntent`,
+ *  `runner/service.ts`'s in-memory TTL map). `impact` is ALREADY the wire label (T1's `toWireImpact`,
+ *  reused — never re-derived here); `args` are the model-composed args VERBATIM — the runner's one
+ *  and only hand-off of real args to this process. Absent (undefined) once the runner's own TTL map
+ *  evicts the entry — see the suspended-branch handling below for what that degrades to. */
+interface RunnerSuspendedIntent {
+  tool: string;
+  impact: string;
+  args: Record<string, unknown>;
+}
+
 interface RunnerGoalDetail {
   id: string;
   status: string;
   outcome: string | null;
   errorKind: string | null;
+  /** The PRE-T3b, filed-immediately shape (`fileOnSuspend:true`, the runner's own default). This
+   *  broker no longer requests that default (see `runToolTurn`'s `POST /goals` body below), so this
+   *  field is legacy/defensive on this path now — kept, and still read first if ever present, rather
+   *  than deleted: a future caller that submits `fileOnSuspend:true` (or a runner that ignores the
+   *  flag) must still be handled correctly, not silently mishandled by code that assumes the newer
+   *  shape is the only one. */
   approvalId: string | null;
+  /** T3b/T2b — present only on a `fileOnSuspend:false` suspension (this broker's only mode). */
+  suspendedIntent?: RunnerSuspendedIntent | null;
   runs?: RunnerRunSummary[];
 }
 
@@ -524,6 +554,25 @@ export interface ToolTurnInput {
 
 export type ToolTurnOutcome = "answered" | "refused" | "suspended" | "error";
 
+/** T3b — the REAL (unredacted) intent info a caller must persist into `assistant_write_intents`, in
+ *  the SAME transaction it persists this turn's (redacted) `toolCalls` ledger row. `id` is the
+ *  intent's own future primary key (pre-generated here, mirroring how `BrokerToolCallRecord.id` is
+ *  pre-generated) so the `confirm_required` SSE frame (already emitted, by the time the caller sees
+ *  this) and the eventual DB row agree on the same id without a second round trip. `toolCallId` names
+ *  which entry in THIS SAME result's `toolCalls` array the intent belongs to (composite FK target). */
+export interface SuspendedIntentResult {
+  id: string;
+  toolCallId: string;
+  toolName: string;
+  impact: string;
+  /** REAL args, verbatim from the runner — never redacted here. The caller redacts only when
+   *  persisting the `assistant_tool_calls` ledger row; this field is what it persists, unredacted,
+   *  into `assistant_write_intents.tool_args`. */
+  args: Record<string, unknown>;
+  agent: string;
+  expiresAt: string; // ISO — config.assistantIntentTtlMs (write-intents.ts's intentTtlMs()) from now
+}
+
 export interface ToolTurnResult {
   outcome: ToolTurnOutcome;
   /** What goes into the assistant message's `content` and onto the wire as token text. Always a
@@ -535,7 +584,12 @@ export interface ToolTurnResult {
   errorKind?: string;
   /** The provider the runner reported for the serving run, when it reported one. */
   provider?: string;
+  /** Legacy/defensive — set only on the `approvalId`-filed branch (see `RunnerGoalDetail`'s doc);
+   *  this broker's own requests never produce it today. */
   approvalId?: string;
+  /** T3b — set only on the confirm-chip branch (`goal.suspendedIntent`, this broker's only mode for a
+   *  suspended write). The caller persists it into `assistant_write_intents` alongside `toolCalls`. */
+  intent?: SuspendedIntentResult;
 }
 
 const DEFAULT_POLL_INTERVAL_MS = 250;
@@ -786,6 +840,15 @@ export async function runToolTurn(input: ToolTurnInput): Promise<ToolTurnResult>
         // The ONE envelope, from the ONE function that can spell one. Never a body-supplied value.
         envelope,
         requestedBy: envelope.externalId,
+        // T3b (§7.2.2/§7.2.5) — the owner's confirm-chip override. EVERY chat-path tool turn defers
+        // filing: a `high_write` suspension is captured as `goal.suspendedIntent`, never filed
+        // through the hub, until the owner explicitly confirms it (see the suspended branch below).
+        // Harmless for a read-only agent (it never suspends, so the flag is never consulted) and for
+        // a goal that never suspends at all — this is why it is sent UNCONDITIONALLY rather than only
+        // for write-capable agents. The handoff path (`handoffs.ts`'s `createHandoff`) is a DIFFERENT
+        // goal-submission call and is deliberately NOT touched — §7.2.5's scope note: a handoff still
+        // files directly, because the handoff click itself is the explicit consent.
+        fileOnSuspend: false,
       }),
       signal: input.signal,
     });
@@ -864,9 +927,46 @@ export async function runToolTurn(input: ToolTurnInput): Promise<ToolTurnResult>
 
   // (5) Terminal mapping.
   if (goal.status === "suspended") {
-    // §7 — a write became a PROPOSAL. D14 already filed the approval; the broker's job is to make it
-    // visible in-thread and to record the (redacted) call it is waiting on. It never executes it, and
-    // D14's own resume path (D14-01..09) is what eventually does, under the requester's authority.
+    // T3b (§7.2.7) — `fileOnSuspend: false` is sent UNCONDITIONALLY above, so `goal.suspendedIntent`
+    // is this broker's ONLY suspended-write shape today: a write became a DRAFT, not yet a proposal.
+    // Nothing has been filed, nobody has been notified, and D14's chain has not started — see
+    // `write-intents.ts`'s header for the confirm/dismiss state machine that takes it from here.
+    if (goal.suspendedIntent) {
+      const intent = goal.suspendedIntent;
+      const intentId = newId();
+      const toolCallId = newId();
+      const redactedArgs = redactToolArgs(intent.args);
+      const expiresAt = new Date(Date.now() + intentTtlMs()).toISOString();
+      const record: BrokerToolCallRecord = {
+        id: toolCallId,
+        toolName: intent.tool,
+        mcpServer: "mcp-hub",
+        args: redactedArgs,
+        status: "pending",
+        resultSummary: summarize(goal.outcome ?? "awaiting your confirmation before this is sent for approval"),
+        approvalId: null,
+        durationMs: null,
+      };
+      toolCalls.push(record);
+      input.emit.confirmRequired({ callId: toolCallId, toolName: intent.tool, intentId, args: redactedArgs, impact: intent.impact, expiresAt });
+      return {
+        outcome: "suspended",
+        text:
+          goal.outcome ??
+          `I've drafted a ${intent.tool} write. Confirm it to send it for approval, or dismiss it — nothing has been changed or sent yet.`,
+        toolCalls,
+        errorKind: "confirm_required",
+        provider,
+        intent: { id: intentId, toolCallId, toolName: intent.tool, impact: intent.impact, args: intent.args, agent, expiresAt },
+      };
+    }
+
+    // Legacy/defensive fallback — NOT this broker's normal path (see `RunnerGoalDetail`'s doc on
+    // `approvalId`): either a runner filed anyway (`fileOnSuspend:true` ignored or a future default
+    // change), or the sub-second worst case the design names — the runner's in-memory intent TTL map
+    // evicted (or never received) the entry between `finishGoal` and this poll (e.g. a runner restart
+    // mid-flight). Both degrade to an honest, typed message rather than a silent hang or a fabricated
+    // proposal.
     const approvalId = goal.approvalId ?? undefined;
     let toolName = "(unknown tool)";
     let impact: string | null = null;
@@ -885,27 +985,36 @@ export async function runToolTurn(input: ToolTurnInput): Promise<ToolTurnResult>
         // the suspension itself is the fact the user needs.
       }
     }
-    const record: BrokerToolCallRecord = {
-      id: newId(),
-      toolName,
-      mcpServer: "mcp-hub",
-      args,
-      status: "pending",
-      resultSummary: summarize(goal.outcome ?? "waiting for human approval"),
-      approvalId: approvalId ?? null,
-      durationMs: null,
-    };
-    toolCalls.push(record);
-    input.emit.approvalRequired({ callId: record.id, toolName, approvalId: approvalId ?? null, impact });
+    if (approvalId) {
+      const record: BrokerToolCallRecord = {
+        id: newId(),
+        toolName,
+        mcpServer: "mcp-hub",
+        args,
+        status: "pending",
+        resultSummary: summarize(goal.outcome ?? "waiting for human approval"),
+        approvalId,
+        durationMs: null,
+      };
+      toolCalls.push(record);
+      input.emit.approvalRequired({ callId: record.id, toolName, approvalId, impact });
+      return {
+        outcome: "suspended",
+        text: goal.outcome ?? `That needs a human approval before it can run (approval ${approvalId}). Nothing was changed.`,
+        toolCalls,
+        errorKind: "approval_required",
+        provider,
+        approvalId,
+      };
+    }
+    // Neither shape present: the intent was lost (evicted/never-received), not filed. Loud and typed,
+    // never a fabricated proposal and never a silent hang.
     return {
-      outcome: "suspended",
-      text:
-        goal.outcome ??
-        `That needs a human approval before it can run${approvalId ? ` (approval ${approvalId})` : ""}. Nothing was changed.`,
+      outcome: "error",
+      text: "The proposal for that write was lost before it could be shown — please ask again.",
       toolCalls,
-      errorKind: "approval_required",
+      errorKind: "intent_lost",
       provider,
-      approvalId,
     };
   }
 

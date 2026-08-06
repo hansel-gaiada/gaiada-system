@@ -44,7 +44,7 @@ const svc = { authorization: "Bearer svc-token" };
 const asUser = (id: string) => ({ ...svc, "x-user-id": id });
 
 function noopEmit(): BrokerEmit {
-  return { toolCall: vi.fn(), toolResult: vi.fn(), approvalRequired: vi.fn() };
+  return { toolCall: vi.fn(), toolResult: vi.fn(), approvalRequired: vi.fn(), confirmRequired: vi.fn() };
 }
 
 // ══════════════════════════════════════ pure units (no DB needed) ═══════════════════════════════

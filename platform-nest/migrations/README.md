@@ -216,3 +216,13 @@ at it, run `node dist/db/migrate.js`, confirm the ordered `applied:` list and ex
    re-verify with `ls migrations | sort | tail` before trusting that; this exact scenario (a number
    free at check-time, taken by the time the file lands) is the demonstrated failure mode, not a
    hypothetical one.
+
+   **2026-08-06 update (T3b, `assistant_write_intents`) — landed as `0085`, no collision.**
+   `ls migrations | sort | tail` at authoring time showed the real head as
+   `0084_assistant_handoffs.sql` (ASST-21, landed same day), so this ticket's new table took
+   `0085_assistant_write_intents.sql` — a brand-new table, zero DML, composite tenant-scoped FK to
+   `assistant_tool_calls` (`ON DELETE CASCADE`), `UNIQUE (tool_call_id)` on a NOT-NULL column (the
+   "NULL defeats UNIQUE" trap does not apply here — checked explicitly). Re-verified again
+   immediately before the full-suite run (still `0085`, no concurrent session took it in the
+   interim). `0058`/`0059`/`0070` remain the permanently-orphaned reservation gaps — still do NOT
+   fill them. **Next unused is `0086`.**

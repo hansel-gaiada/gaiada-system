@@ -48,6 +48,8 @@ import {
 import { assembleCapabilities } from "./capabilities";
 import { resolveCitation } from "./citations";
 import { createHandoff, fetchEpisodicHistory, fetchRoster, listHandoffsForThread } from "./handoffs";
+import { confirmWriteIntent, dismissWriteIntent, reapExpiredIntents, type ToolCallIntent } from "./write-intents";
+import { notifyApprovalFiled } from "../../core/approval-filing";
 
 // ── ASST-06 — the send->stream engine ────────────────────────────────────────────────────────────
 //
@@ -182,6 +184,15 @@ interface ToolCallRow {
   approvalStatus: string | null;
   approvalExecutionStatus: string | null;
   approvalExecutionError: string | null;
+  // T3b (§7.2.7) — the confirm-chip's own state, LEFT JOINed by `tool_call_id`. NULL for every call
+  // that was never a suspended write, exactly like the approval columns above. `intentApprovalId` is
+  // the intent row's OWN `approval_id` (set only once the owner confirms) — the confirm-chip path
+  // never writes `tc.approval_id` at turn time (nothing was filed yet), so THIS is where a confirmed
+  // call's approval id actually comes from; `COALESCE`d against `tc.approval_id` in the query below
+  // so the one legacy/defensive filed-at-turn-time shape (`RunnerGoalDetail.approvalId`) still works.
+  intentStatus: string | null;
+  intentExpiresAt: string | null;
+  intentApprovalId: string | null;
 }
 
 export interface ThreadToolCall {
@@ -200,11 +211,22 @@ export interface ThreadToolCall {
    *  read, broker.ts) would ALSO read as `null` here, which is the same honest "nothing to join"
    *  answer as "there was no approval to begin with" — never conflated with a real decided state. */
   approval: { status: string; executionStatus: string; executionError: string | null } | null;
+  /** T3b (§7.2.7) — `null` once `approvalId` is set (filed) or for a call that was never a suspended
+   *  write; otherwise `{status, expiresAt}` for a still-`draft`/`dismissed`/`expired` intent. A card
+   *  reads `awaiting confirmation` from `intent.status === 'draft'`, `dismissed`/`expired` from the
+   *  matching value, and `sent for approval`+ from `approval` once `approvalId` is non-null — never
+   *  both at once, by construction (the confirm claim nulls nothing here, it sets `approvalId`, which
+   *  is what flips which of the two fields this row reports). */
+  intent: ToolCallIntent | null;
 }
 
 /** One SELECT for every tool call belonging to the given messages, LEFT JOINed to its approval row
- *  (if `approval_id` is set). Grouped by message id for the caller to zip back onto its own message
- *  list. Empty `messageIds` short-circuits to an empty map — no query for a thread with no messages. */
+ *  (if `approval_id` is set) AND its write-intent row (if one was ever drafted for it). Grouped by
+ *  message id for the caller to zip back onto its own message list. Empty `messageIds`
+ *  short-circuits to an empty map — no query for a thread with no messages.
+ *
+ *  Callers MUST run `reapExpiredIntents(c, threadId)` first (same transaction) so a past-expiry draft
+ *  reads as `expired` here, not as a stale `draft` — see `getThread` below. */
 async function fetchToolCallsByMessage(c: PoolClient, messageIds: string[]): Promise<Map<string, ThreadToolCall[]>> {
   const out = new Map<string, ThreadToolCall[]>();
   if (messageIds.length === 0) return out;
@@ -212,15 +234,21 @@ async function fetchToolCallsByMessage(c: PoolClient, messageIds: string[]): Pro
     `SELECT tc.id, tc.message_id AS "messageId", tc.tool_name AS "toolName", tc.mcp_server AS "mcpServer",
             tc.args, tc.result_summary AS "resultSummary", tc.status, tc.approval_id AS "approvalId",
             tc.duration_ms AS "durationMs", tc.created_at AS "createdAt",
+            wi.status AS "intentStatus", wi.expires_at AS "intentExpiresAt", wi.approval_id AS "intentApprovalId",
             aa.status AS "approvalStatus", aa.execution_status AS "approvalExecutionStatus",
             aa.execution_error AS "approvalExecutionError"
        FROM assistant_tool_calls tc
-       LEFT JOIN automation_approvals aa ON aa.id = tc.approval_id
+       LEFT JOIN assistant_write_intents wi ON wi.tool_call_id = tc.id
+       LEFT JOIN automation_approvals aa ON aa.id = COALESCE(tc.approval_id, wi.approval_id)
       WHERE tc.message_id = ANY($1::uuid[])
       ORDER BY tc.created_at ASC`,
     [messageIds],
   );
   for (const r of rows) {
+    // The EFFECTIVE approval id: `tc.approval_id` (legacy/defensive, filed-at-turn-time) OR the
+    // intent row's OWN `approval_id` (the confirm-chip path — filed only once the owner confirms).
+    // Never both meaningfully at once (a legacy-filed call never has an intent row at all).
+    const approvalId = r.approvalId ?? r.intentApprovalId;
     const call: ThreadToolCall = {
       id: r.id,
       toolName: r.toolName,
@@ -228,12 +256,15 @@ async function fetchToolCallsByMessage(c: PoolClient, messageIds: string[]): Pro
       args: r.args,
       resultSummary: r.resultSummary,
       status: r.status,
-      approvalId: r.approvalId,
+      approvalId,
       durationMs: r.durationMs,
       createdAt: r.createdAt,
-      approval: r.approvalId
+      approval: approvalId
         ? { status: r.approvalStatus ?? "unknown", executionStatus: r.approvalExecutionStatus ?? "unknown", executionError: r.approvalExecutionError }
         : null,
+      // Once filed (approvalId set), the approval join above takes over — intent goes to null rather
+      // than reporting 'filed' redundantly, matching §7.2.1's "the approval join takes over" ruling.
+      intent: r.intentStatus && !approvalId ? { status: r.intentStatus as ToolCallIntent["status"], expiresAt: r.intentExpiresAt ?? "" } : null,
     };
     const bucket = out.get(r.messageId);
     if (bucket) bucket.push(call);
@@ -368,6 +399,11 @@ export class AssistantController {
     const messages = await withTenants(
       [tenantId],
       async (c) => {
+        // T3b (§7.2.3's "lazy reap" idiom) — BEFORE the card-state join reads `assistant_write_intents`,
+        // flip any past-expiry 'draft' on THIS thread to 'expired' + scrub its `tool_args`, in one
+        // UPDATE. Same transaction as the join below, so the read that follows can never observe a
+        // stale draft this same request just decided was expired.
+        await reapExpiredIntents(c, id);
         const { rows } = await c.query<MessageRow>(
           `${MESSAGE_SELECT} WHERE thread_id = $1 AND ($2::int IS NULL OR seq < $2)
              ORDER BY seq DESC LIMIT $3`,
@@ -685,6 +721,10 @@ export class AssistantController {
             toolCall: (c) => write(sseLine("tool_call", c)),
             toolResult: (r) => write(sseLine("tool_result", r)),
             approvalRequired: (a) => write(sseLine("approval_required", a)),
+            // T3b (§7.2.7) — the confirm-chip's own frame. Redacted args only (broker.ts's own doc on
+            // this emitter); the REAL args are persisted server-side below, keyed by the SAME
+            // `intentId` this frame carries, never sent to the browser.
+            confirmRequired: (a) => write(sseLine("confirm_required", a)),
           },
         });
       } finally {
@@ -735,6 +775,35 @@ export class AssistantController {
             authorityUserId,
             calls: turn.toolCalls,
           });
+          // T3b (§7.2.1/§7.2.4) — the draft write-intent row, in the SAME transaction as the ledger
+          // row it belongs to, and AFTER `persistToolCalls` above so `tool_call_id`'s composite FK
+          // (migration 0085) resolves against a row that already exists. `tool_args` here are the
+          // REAL (unredacted) args from `turn.intent` — the ONLY durable pre-filing home for them
+          // (§7.2.4's custody-chain step 2); the ledger row `persistToolCalls` just wrote carries only
+          // the redacted copy. `owner_user_id` is `authorityUserId` — the SAME chatting-user id every
+          // other row in this transaction is attributed to, never read off anything client-supplied.
+          if (turn.intent) {
+            await c.query(
+              `INSERT INTO assistant_write_intents
+                 (id, tenant_id, thread_id, message_id, tool_call_id, owner_user_id, agent, tool_name,
+                  tool_args, impact, status, expires_at, origin_site)
+               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10,'draft',$11,$12)`,
+              [
+                turn.intent.id,
+                tenantId,
+                id,
+                messageId,
+                turn.intent.toolCallId,
+                authorityUserId,
+                turn.intent.agent,
+                turn.intent.toolName,
+                JSON.stringify(turn.intent.args ?? {}),
+                turn.intent.impact,
+                turn.intent.expiresAt,
+                config.originSite,
+              ],
+            );
+          }
           await c.query(
             `UPDATE assistant_threads SET total_tokens = total_tokens + $1, last_message_at = now(), updated_at = now() WHERE id = $2`,
             [toolTokens, id],
@@ -863,6 +932,86 @@ export class AssistantController {
       { modules: ["assistant"] },
     );
     return { ok: true, stopped: rowCount > 0 };
+  }
+
+  // ================================================================== CONFIRM WRITE (T3b) ========
+  // The owner's confirm chip. NOT a flag on `sendMessage` (this file's own T3b design note): a
+  // confirm is not a message, and overloading send would entangle the placeholder/stream lifecycle
+  // for no reason. Owner-only via Cerbos `confirm_write` (resource_assistant_thread.yaml, same rule,
+  // same condition as every other thread action) — gates BOTH confirm and dismiss.
+  //
+  // The confirm REQUEST carries NO args (§7.2.4's whole point): a tampered confirm must not be able
+  // to file user-authored args wearing model provenance. The server files exactly what
+  // `assistant_write_intents.tool_args` holds, claimed atomically inside `confirmWriteIntent`.
+  @Post(":tenantId/assistant/threads/:id/tool-calls/:callId/confirm")
+  @HttpCode(200)
+  async confirmWrite(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Param("id") id: string,
+    @Param("callId") callId: string,
+  ) {
+    const thread = await withTenants([tenantId], (c) => fetchThread(c, id), { modules: ["assistant"] });
+    if (!thread) throw new NotFoundException("thread not found");
+    await authorize(req.principal, { kind: "assistant_thread", id, tenantId, ownerId: thread.ownerUserId }, "confirm_write");
+
+    const requestedBy = req.principal.userId;
+    if (!requestedBy) throw new BadRequestException("an authenticated user is required");
+
+    const result = await withTenants(
+      [tenantId],
+      (c) => confirmWriteIntent(c, { tenantId, threadId: id, toolCallId: callId, requestedBy }),
+      { modules: ["assistant"] },
+    );
+    // `write-intents.ts`'s own header explains why the transaction NEVER throws: any DB write a
+    // `not_found`/`conflict` outcome carries (the lazy reap-on-expiry, in particular) must survive
+    // regardless of the eventual HTTP status — which it now can, because that status is decided HERE,
+    // strictly AFTER `withTenants(...)` has already committed.
+    if (result.outcome === "not_found") throw new NotFoundException("no write proposal found for this tool call");
+    if (result.outcome === "conflict") throw new ConflictException(`cannot confirm: this write proposal is '${result.status}'`);
+
+    // The decider notification (MAIL-06) runs AFTER this transaction commits, and only on the
+    // request that ACTUALLY won the claim (`justFiled`) — never on an idempotent double-click/replay,
+    // which would otherwise double-notify every decider for the SAME filing. Best-effort, same as
+    // `create()`'s own notify step; a failure here must never turn an already-committed filing into
+    // an error response.
+    if (result.justFiled && result.notifyInput) {
+      await notifyApprovalFiled(result.approvalId!, result.notifyInput);
+    }
+    const { outcome, justFiled, notifyInput, ...publicResult } = result;
+    void outcome;
+    void justFiled;
+    void notifyInput;
+    return publicResult;
+  }
+
+  @Post(":tenantId/assistant/threads/:id/tool-calls/:callId/dismiss")
+  @HttpCode(200)
+  async dismissWrite(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Param("id") id: string,
+    @Param("callId") callId: string,
+  ) {
+    const thread = await withTenants([tenantId], (c) => fetchThread(c, id), { modules: ["assistant"] });
+    if (!thread) throw new NotFoundException("thread not found");
+    await authorize(req.principal, { kind: "assistant_thread", id, tenantId, ownerId: thread.ownerUserId }, "confirm_write");
+
+    const result = await withTenants(
+      [tenantId],
+      (c) => dismissWriteIntent(c, { threadId: id, toolCallId: callId }),
+      { modules: ["assistant"] },
+    );
+    if (result.outcome === "not_found") throw new NotFoundException("no write proposal found for this tool call");
+    if (result.outcome === "conflict") throw new ConflictException(`cannot dismiss: this write proposal is '${result.status}'`);
+
+    // Dismiss never files, so `justFiled`/`notifyInput` are always absent/false here — stripped
+    // anyway so the internal discriminant never leaks onto the wire.
+    const { outcome, justFiled, notifyInput, ...publicResult } = result;
+    void outcome;
+    void justFiled;
+    void notifyInput;
+    return publicResult;
   }
 
   // ================================================================== HANDOFF (ASST-21) ==========

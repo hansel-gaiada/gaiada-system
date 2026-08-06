@@ -68,7 +68,16 @@ resourcePolicy:
     # (broker.ts's `oboEnvelopeFor`), which is the whole reason reading it back is later safe
     # (resource_agent_run.yaml). This is an EDIT to an existing file (hot-reloads live — no
     # container restart needed), unlike the brand-new `resource_agent_run.yaml` alongside it.
-    - actions: ["create", "read", "update", "delete", "message", "stream", "stop", "handoff"]
+    #
+    # T3b/ASST-23 §7.2.2 ADDITIVE: `confirm_write` gates BOTH the confirm and the dismiss endpoint
+    # (POST …/tool-calls/:callId/confirm and .../dismiss) — one action name, no separate "dismiss"
+    # rule, because sending a chip's decision either way is exactly as owner-only as everything else
+    # in this list and needs no different condition. Per the standing instruction, treat this as
+    # needing the `gaiada-test-cerbos` restart + an owner-ALLOW/non-owner-DENY smoke check even though
+    # it is an edit to an EXISTING file (ASST-21 observed same-file edits hot-reloading live) — the
+    # restart costs nothing and the silent-DENY-on-an-unlisted-action trap costs an afternoon.
+    # Emphatically no admin path here either: this file's own header forbids one.
+    - actions: ["create", "read", "update", "delete", "message", "stream", "stop", "handoff", "confirm_write"]
       effect: EFFECT_ALLOW
       roles: ["user"]
       condition:

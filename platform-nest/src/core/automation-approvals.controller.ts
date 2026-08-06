@@ -8,16 +8,14 @@
 // concern the spec defers). The approved row is the durable artifact a future resume step reads.
 import { BadRequestException, Body, ConflictException, Controller, ForbiddenException, Get, HttpCode, NotFoundException, Param, Post, Query, Req, UseGuards } from "@nestjs/common";
 import type { FastifyRequest } from "fastify";
-import { newId, withTenants } from "../db";
-import { config } from "../config";
+import { withTenants } from "../db";
 import { authorize, writeActivity } from "./http";
-import { notifyBestEffort } from "./client-notify";
-import { resolveAutomationApprovalDeciders } from "./approval-deciders";
 import { emitEvent } from "../events/outbox.service";
 import { AuthGuard } from "../auth/guards";
 import { getExecutable } from "./approval-executables";
 import { EXECUTING_STALE_MS, executeApprovedAutomationWrite, isExecutionWedged, toolArgsOf } from "./approval-execute";
 import { computeArgsSha256 } from "./hub-client";
+import { fileAutomationApproval } from "./approval-filing";
 
 const IMPACTS = new Set(["medium", "high", "unclassified"]);
 const ORIGINS = new Set(["automation", "agent"]);
@@ -144,39 +142,24 @@ export class AutomationApprovalsController {
     if (!IMPACTS.has(impact)) throw new BadRequestException("impact must be medium|high|unclassified");
     if (!ORIGINS.has(origin)) throw new BadRequestException("origin must be automation|agent");
     await authorize(req.principal, { kind: "automation_approval", tenantId }, "create");
-    const id = newId();
-    await withTenants([tenantId], (c) =>
-      c.query(
-        `INSERT INTO automation_approvals
-           (id, tenant_id, workflow_id, tool_name, tool_args, impact, reason, requested_by, origin, agent_name, origin_site)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
-        [id, tenantId, workflowId, toolName, JSON.stringify(toolArgs), impact, reason ?? null, req.principal.userId, origin, agentName ?? null, config.originSite],
-      ),
-    );
-    await writeActivity(tenantId, req.principal.userId, "suspended", "automation_approval", id, { workflowId, toolName, impact, origin, agentName });
-    // MAIL-06 (F1 fix): notify the resolved decider set — this is what gives the row a bell (and,
-    // via the MAIL-05 tap, an email) for the FIRST time; previously nobody was told an approval was
-    // filed. `origin` is constrained to automation|agent by ORIGINS above (never 'hr' through this
-    // endpoint — hr-origin rows are created directly by hr.controller.ts's fileLeave()), so the
-    // module param below is always undefined here; it is passed through defensively rather than
-    // hardcoded because resolveAutomationApprovalDeciders() is the SAME helper hr.controller.ts calls.
-    const deciders = await resolveAutomationApprovalDeciders(tenantId, origin === "hr" ? "hr" : undefined);
-    await notifyBestEffort(tenantId, req.principal.userId, deciders, "approval.requested", {
-      title: reason ?? `${toolName} (${workflowId})`,
-      // APPR-01: was the bare list (`/approvals`) — a decider clicking the email had to hunt for
-      // the row. `entityId` above is `id`, the row this notification is actually about; the
-      // per-approval detail route (`platform-ui` `/approvals/[id]`) resolves it against BOTH
-      // `GET :tenantId/automation-approvals/:id` (below) and the agency equivalent, so this same
-      // shape works for every origin this controller files (automation/agent/hr).
-      href: `/approvals/${id}`,
-      entityType: "automation_approval",
-      entityId: id,
-      origin,
+    if (!req.principal.userId) throw new BadRequestException("an authenticated user is required");
+    // T3b: the INSERT + activity-log write + decider notification (MAIL-06) now live in
+    // `core/approval-filing.ts`'s `fileAutomationApproval`, shared with the confirm-machinery's
+    // atomic claim (`modules/assistant/write-intents.ts`). `origin` here is constrained to
+    // automation|agent by ORIGINS above (never 'hr' through THIS endpoint — hr-origin rows are
+    // created directly by hr.controller.ts's fileLeave()); this call is otherwise byte-identical to
+    // the pre-extraction inline body — same INSERT, same activity verb, same notification payload.
+    return fileAutomationApproval({
+      tenantId,
+      workflowId,
+      toolName,
+      toolArgs,
       impact,
-      tool: toolName,
-      severity: impact === "high" ? "warning" : "info",
+      reason,
+      origin,
+      agentName,
+      requestedBy: req.principal.userId,
     });
-    return { id, status: "pending" };
   }
 
   // APPR-01 — single-row read backing `platform-ui`'s `/approvals/[id]` detail page. Fetch BEFORE

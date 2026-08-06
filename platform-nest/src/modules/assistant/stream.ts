@@ -721,6 +721,9 @@ export type AssistantSseEvent =
   | "tool_call"
   | "tool_result"
   | "approval_required"
+  // T3b (§7.2.7) — the confirm-chip's own frame: a write suspended WITHOUT filing. Non-terminal,
+  // same shape-discipline as the other tool-broker frames above; see broker.ts's `BrokerEmit`.
+  | "confirm_required"
   // ASST-18 — emitted once, right after context assembly, BEFORE the first `token` (context
   // assembly, including retrieval, has already finished by the time any of this route's other
   // frames could be written). Non-terminal, like the ASST-17 trio above.

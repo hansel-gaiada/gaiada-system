@@ -246,6 +246,12 @@ const configBase = {
   // The executor ALSO needs HUB_URL + HUB_SERVICE_TOKEN (config.services.hub below) to reach the
   // hub at all; with either unset the re-drive records `not_configured` rather than half-attempting.
   approvalGrantSecret: process.env.APPROVAL_GRANT_SECRET ?? "",
+  // T3b (§7.2.3 of the 2026-08-06 ASST-23 unblock design DELTA) — how long an unconfirmed
+  // `assistant_write_intents` draft's REAL args survive before the confirm/dismiss claim structurally
+  // refuses it (`expires_at > now()`) and a later GET thread lazily flips it to 'expired' + scrubs
+  // `tool_args` to NULL. Purely a raw-args retention bound: correctness never depends on it — the
+  // registry precondition re-checks staleness at EXECUTION time regardless. Default 1h per the design.
+  assistantIntentTtlMs: Number(process.env.ASSISTANT_INTENT_TTL_MS ?? 60 * 60 * 1000),
   // Event backbone (5c continuation): Redis Streams for outbox relay + consumption.
   redisUrl: process.env.REDIS_URL ?? "",
   // ORG-6 release train (A4): the whole shared-service reconciler is DARK by default. When off,

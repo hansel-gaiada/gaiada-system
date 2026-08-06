@@ -88,10 +88,27 @@ config. Build it *with* the mail program, not before.
 ### 2.5 ASST-20 — feedback → episodic
 **Deferred post-v1.** Little value until eval loops consume the signal.
 
-### 2.6 CHORE-02 — 804 orphaned databases on `gaiada-postgres-1`
-Not urgent (shm at 2%). Must use an explicit **KEEP-allowlist**, never a pattern denylist: that
-instance holds `gaiada`, `gaiada_platform`, `gaiada_knowledge`, `gaiada_keycloak`, `gaiada_n8n`, and
-the orphans use many prefixes (`qa1_`, `sm14b_`, `sm50_`, `qa081013_`, `wd29full_`, `arch1_`…).
+### 2.6 CHORE-02 — orphaned databases — ✅ OBSOLETE 2026-08-06, do NOT do this work
+~~804 orphaned databases on `gaiada-postgres-1`.~~ **The actual count when someone finally looked was
+9.** The chore had been silently obsoleted by the INFRA-01 root-cause fix: `teardownTestDb()` now
+really does `DROP DATABASE … WITH (FORCE)` over its own maintenance connection (it cannot run over
+`admin`, which is connected to the database being dropped). The leak simply stopped.
+
+Dropped the last 2 stragglers (`gaiada_platform_test_h31`, `p1_04_test`) by **explicit name**; 7
+remain, all legitimate. Keeper allowlist: `gaiada`, `gaiada_platform`, `gaiada_knowledge`,
+`gaiada_keycloak`, `gaiada_n8n`, `gaiada_platform_test` (the canonical shared test DB), `postgres`.
+Always drop by NAME on this instance — it holds real data, and a pattern denylist would have caught
+`gaiada_platform_test`.
+
+**Independent proof the leak is dead, better than the static count:** a full 246-file platform-nest
+run went 6 orphans → 6 orphans. Before the fix that same run would have added ~210.
+
+**Therefore: stop assigning per-agent test-DB cleanup and stop asking agents to set a distinct
+`TEST_DB_PREFIX`.** That was a workaround repeated N times for a three-line defect, and each agent
+dutifully reported "created 14, dropped 14" while the real bug survived. Still true, and still the
+useful part: count with `select count(*) from pg_database where datistemplate=false and
+datname<>'postgres'` — **NOT** `datname like 'test_%'`, which matches nothing and once reported
+"0 orphans" for hours while ~565 existed.
 
 ### 2.7 ASST-24 — the phases 2–6 QA gate
 ~~It will run with ASST-23 outstanding (blocked by §2.1).~~ **§2.1 is closed and ASST-23's AgentDef half
