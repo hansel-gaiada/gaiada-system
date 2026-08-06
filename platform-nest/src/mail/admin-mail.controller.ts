@@ -17,7 +17,11 @@ import type { ThreadMessageView } from "./thread.controller";
 // the three was still safely PARAMETERIZED (no injection, no leak), but the raw Postgres "invalid
 // input syntax for type X" error was uncaught and surfaced as a bare 500 instead of a 400. Same
 // shape-check-before-query convention as `modules/pm/pm.controller.ts`'s `UUID_RE` /
-// `modules/search/search.controller.ts`'s `assertUuid`.
+// `modules/search/search.controller.ts`'s `assertUuid` — and, since MAIL-33, applied to BOTH of
+// this controller's own `:id`-taking routes (`detail()` and `thread()`), not just one of them: the
+// same drift class as MAIL-33's `pipeline_gate` finding — `thread()` validated `id`, `detail()`
+// didn't, each internally consistent, neither checked against the other. `admin-mail.controller.
+// test.ts`'s "every id-taking route" test pins that the two agree, so this can't silently re-split.
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function assertUuidFilter(value: string, label: string): void {
@@ -106,6 +110,13 @@ export class AdminMailController {
   @Get("log/:id")
   async detail(@Req() req: FastifyRequest, @Param("id") id: string): Promise<MailLogRow> {
     if (!isElevated(req)) throw new ForbiddenException("platform admin required");
+    // Same shape-check-before-query this file's own `list()` already applies to its `tenantId`/
+    // `entityId` filters (`assertUuidFilter`, see this file's header comment) and `thread()` below
+    // applies to this SAME `:id` param — added because it was missing here: a malformed id used to
+    // reach the raw Postgres `uuid` column and surface as a bare 500 through the last-resort filter,
+    // exactly the class of bug that header comment already exists to prevent, just not applied
+    // symmetrically across this controller's own two id-taking routes.
+    if (!UUID_RE.test(id)) throw new BadRequestException("id must be a valid id");
     const rows = await withMailContext((c) =>
       c.query<MailLogRow>(`SELECT ${LIST_COLUMNS} FROM mail_log WHERE id = $1`, [id]),
     );

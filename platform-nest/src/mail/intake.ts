@@ -17,6 +17,7 @@
 import { config } from "../config";
 import { withGlobal } from "../db";
 import { enqueueMail } from "./queue";
+import { MAIL_THREAD_ENTITY_KINDS } from "./thread-authz";
 
 const MAIL_NOTIFICATION_TYPES = new Set(["approval.requested", "pipeline.gate.opened"]);
 
@@ -88,6 +89,21 @@ export async function mailIntake(input: MailIntakeInput): Promise<void> {
   const templateKey = wordingClassFor(input.type, input.payload);
   const href = absoluteEntityHref(typeof input.payload.href === "string" ? input.payload.href : undefined);
 
+  // MAIL-33 — the entity ref this row is allowed to carry is gated by the SAME set thread-authz
+  // authorizes reads against (`MAIL_THREAD_ENTITY_KINDS`, imported above, not a second copy of the
+  // list). Stamping a kind here that thread reads don't recognize is exactly the drift class this
+  // ticket found: `pipeline_gate` had a passing write-side test and a passing read-side test, and
+  // nothing enforced they agreed. Falling back to "no entity" (both fields null) rather than storing
+  // a half-known ref matches the already-established "entity-less mail" posture (NDR messages,
+  // auth-stream mail) — `admin-mail.controller.ts`'s thread read skips the parent-entity check
+  // entirely when either field is null, so this degrades to elevation-only rather than an unreadable
+  // 403 for everyone. An entityId with no recognized entityType is treated the same as neither being
+  // present — a stray id next to a null type authorizes against nothing.
+  const entityType = typeof input.payload.entityType === "string" && MAIL_THREAD_ENTITY_KINDS.has(input.payload.entityType)
+    ? input.payload.entityType
+    : null;
+  const entityId = entityType && typeof input.payload.entityId === "string" ? input.payload.entityId : null;
+
   await enqueueMail({
     stream: "notify",
     templateKey,
@@ -95,8 +111,8 @@ export async function mailIntake(input: MailIntakeInput): Promise<void> {
     tenantId: input.tenantId,
     userId: input.userId,
     notificationIds: [input.notificationId],
-    entityType: typeof input.payload.entityType === "string" ? input.payload.entityType : null,
-    entityId: typeof input.payload.entityId === "string" ? input.payload.entityId : null,
+    entityType,
+    entityId,
     // §7.6 — every threads-eligible outbound mail mints a fresh VERP reply token. Both allowlisted
     // types hang off a real ERP entity a reply should thread onto, so both always request one;
     // there is no allowlisted case that should NOT get a reply_token.

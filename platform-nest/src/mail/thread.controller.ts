@@ -2,7 +2,7 @@
 //
 //   GET /api/:tenantId/mail/threads?entityType=&entityId=
 //   GET /api/:tenantId/mail/messages/:messageId/attachments/:index
-//   GET /api/:tenantId/portal/mail/threads?runId=
+//   GET /api/:tenantId/portal/mail/threads?runId=  (or ?gateId=, MAIL-33)
 //
 // `mail_messages` is a GLOBAL table with no RLS (§6.1), so NOTHING here may reach it before the
 // caller has been authorized against the parent entity (`thread-authz.ts`). Every handler below is
@@ -236,17 +236,54 @@ export class MailThreadController {
    *  first"). A client principal is NOT authorized by `resource_pipeline_run` (its read rules are
    *  elevated-only), so the entity check here is the portal's own four-layer kernel: Cerbos `portal`
    *  read, then `resolvePortalScope`'s client+project ownership predicate applied TO THE RUN, before
-   *  any mail table is touched. */
+   *  any mail table is touched.
+   *
+   *  MAIL-33 — accepts `gateId` as an alternative to `runId`. `pipeline.gate.opened` (the notification
+   *  that reaches a client signer, `pipeline.controller.ts`'s `openGate`) stamps `mail_log.entity_type
+   *  = 'pipeline_gate'` with the GATE's own id, not the run's — so a reply to that email threads onto
+   *  `mail_messages` rows keyed the same way, and `runId` alone can never surface them (an entity-scoped
+   *  read is keyed on the exact `(entity_type, entity_id)` pair, never "any thread on this run"). The
+   *  ownership predicate mirrors `PortalController.decideGate`'s own gate-ownership check exactly
+   *  (`actor_side = 'client'`, joined through the run to the SAME client/project scope) — a gate this
+   *  client cannot legitimately act on must not leak its thread either, even if the client happens to
+   *  own the parent run. */
   @Get(":tenantId/portal/mail/threads")
   async portalThread(
     @Req() req: FastifyRequest,
     @Param("tenantId") tenantId: string,
     @Query("runId") runId?: string,
-  ): Promise<{ entityType: "pipeline_run"; entityId: string; messages: ThreadMessageView[] }> {
-    if (!runId) throw new BadRequestException("runId required");
-    if (!UUID_RE.test(runId)) throw new BadRequestException("runId must be a valid id");
+    @Query("gateId") gateId?: string,
+  ): Promise<{ entityType: "pipeline_run" | "pipeline_gate"; entityId: string; messages: ThreadMessageView[] }> {
+    if (!runId && !gateId) throw new BadRequestException("runId or gateId required");
+    if (runId && gateId) throw new BadRequestException("provide only one of runId or gateId");
     await authorize(req.principal, { kind: "portal", tenantId }, "read");
 
+    if (gateId) {
+      if (!UUID_RE.test(gateId)) throw new BadRequestException("gateId must be a valid id");
+      const owned = await withTenants([tenantId], async (c) => {
+        const scope = await resolvePortalScope(c, req.principal);
+        // Predicate shape is IDENTICAL to `PortalController.decideGate`'s own ownership check
+        // (`core/portal.controller.ts`) — same table join, same `actor_side = 'client'` gate, same
+        // `($n IS NULL OR project_id = ANY($n))` project clause, deliberately WITHOUT the extra
+        // "OR project_id IS NULL" this file's `runId` branch below carries: mirroring decideGate here
+        // means a client can read a gate's thread in exactly the cases they could act on that same
+        // gate, never a case wider than that.
+        const g = await c.query<{ id: string }>(
+          `SELECT g.id FROM pipeline_gates g JOIN pipeline_runs r ON g.run_id = r.id
+            WHERE g.id = $1 AND g.deleted_at IS NULL AND g.actor_side = 'client' AND r.deleted_at IS NULL
+              AND r.client_id = ANY($2::uuid[])
+              AND ($3::uuid[] IS NULL OR r.project_id = ANY($3::uuid[]))`,
+          [gateId, scope.clientIds, scope.projectIds],
+        );
+        return g.rows.length > 0;
+      });
+      // 404, not 403 — same non-disclosure rule as the run branch below.
+      if (!owned) throw new NotFoundException("gate not found");
+      const rows = await readEntityThread(tenantId, "pipeline_gate", gateId);
+      return { entityType: "pipeline_gate", entityId: gateId, messages: rows.map((r) => toView(r, false)) };
+    }
+
+    if (!UUID_RE.test(runId!)) throw new BadRequestException("runId must be a valid id");
     const owned = await withTenants([tenantId], async (c) => {
       const scope = await resolvePortalScope(c, req.principal);
       const r = await c.query<{ id: string }>(
@@ -263,10 +300,10 @@ export class MailThreadController {
     // portal follows.
     if (!owned) throw new NotFoundException("run not found");
 
-    const rows = await readEntityThread(tenantId, "pipeline_run", runId);
+    const rows = await readEntityThread(tenantId, "pipeline_run", runId!);
     // `false` for elevation: a portal caller is never treated as an admin here even if they somehow
     // also hold a global grant, so `skipped` attachments stay unservable on the portal surface.
-    return { entityType: "pipeline_run", entityId: runId, messages: rows.map((r) => toView(r, false)) };
+    return { entityType: "pipeline_run", entityId: runId!, messages: rows.map((r) => toView(r, false)) };
   }
 }
 

@@ -3,6 +3,7 @@ import Link from "next/link";
 import { getSessionUserId } from "@/lib/session-server";
 import { getMe, PlatformError } from "@/lib/platform";
 import { getMailLogDetail, getMailLogThread, entityHref, type MailLogRow } from "@/lib/mail";
+import { isUuidShaped } from "@/lib/mailFilters";
 import { MailStatusChip } from "@/components/mail/MailStatusChip";
 import { QuotedMessageBody } from "@/components/mail/QuotedMessageBody";
 import { PageHeader } from "@/components/PageHeader";
@@ -22,6 +23,42 @@ function limitedState() {
       <Card>
         <p style={{ margin: 0, font: "400 14px/1.5 var(--font-body)", color: "var(--ink-muted)" }}>
           This page is limited to administrators.
+        </p>
+      </Card>
+    </>
+  );
+}
+
+// MAIL-34 defect 1 (detail page's equivalent gap) — `admin-mail.controller.ts`'s `detail()` has
+// no id-shape check, unlike its sibling `thread()` on the same controller: a malformed id reaches
+// a raw `uuid` column comparison and the platform's last-resort exception filter turns that into
+// an uncaught 500, which this page didn't catch either (it only caught 403) — the same crash
+// symptom as the list page's defect, one step removed. Fixing the backend validation is out of
+// scope here (platform-ui only); checked here instead, BEFORE the request is ever sent, so no id
+// shape this page can produce ever reaches that code path. A malformed id can never be a real
+// `mail_log.id` (a `uuid` column), so this is not a weaker refusal than a real 404 — just an
+// earlier, cheaper one that also says what's wrong instead of leaving the user to guess.
+function invalidIdState(id: string) {
+  return (
+    <>
+      <Breadcrumbs items={[{ label: "Home", href: "/" }, { label: "Mail", href: "/admin/mail" }, { label: "Invalid id" }]} />
+      <PageHeader eyebrow="Settings" title="Mail" subtitle="" />
+      <Card>
+        <p style={{ margin: 0, font: "400 14px/1.5 var(--font-body)", color: "var(--status-critical-fg)" }}>
+          &quot;{id}&quot; isn&apos;t a valid mail log id. Check the link and try again.
+        </p>
+      </Card>
+    </>
+  );
+}
+
+function filterErrorState(message: string) {
+  return (
+    <>
+      <PageHeader eyebrow="Settings" title="Mail" subtitle="" />
+      <Card>
+        <p style={{ margin: 0, font: "400 14px/1.5 var(--font-body)", color: "var(--status-critical-fg)" }}>
+          {message}.
         </p>
       </Card>
     </>
@@ -52,11 +89,19 @@ export default async function AdminMailDetailPage({ params }: { params: Promise<
   if (!userId) redirect("/login");
   await getMe(userId);
 
+  // MAIL-34 defect 1 — see invalidIdState()'s comment: a malformed id must never reach the
+  // backend at all, since the detail endpoint has no shape check of its own.
+  if (!isUuidShaped(id)) return invalidIdState(id);
+
   let row: MailLogRow | null;
   try {
     row = await getMailLogDetail(userId, id);
   } catch (e) {
     if (e instanceof PlatformError && e.status === 403) return limitedState();
+    // Defensive, symmetric with the list page: this endpoint has no other validated input today,
+    // so the backend has no live 400 path here, but this keeps the two pages' error handling
+    // identical rather than leaving one asymmetric should that ever change.
+    if (e instanceof PlatformError && e.status === 400) return filterErrorState(e.message);
     throw e;
   }
   if (!row) notFound();

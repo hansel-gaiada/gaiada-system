@@ -126,6 +126,45 @@ export async function getApprovalDetail(userId: string, tenantId: string, id: st
   return null;
 }
 
+// MAIL-34 defect 2 — resolves an approval id against the CALLER'S OWN authorized tenant set
+// (`candidateTenantIds`, active-tenant-first so the common case costs nothing extra) instead of
+// the UI's single active-company selection. Before this, `/approvals/[id]` always queried
+// `getActiveTenant(me)` only, so an elevated cross-tenant admin following a mail-log deep link
+// got a false 404 whenever their active company happened to differ from the approval's own tenant
+// — the exact audience the mail surface's "email is just a pointer, a valid session goes straight
+// through" design (M11) exists for.
+//
+// Why this can't widen access: `/automation-approvals/:id` and `/modules/agency/approvals/:id`
+// are RLS-scoped to the `tenantId` in the URL (`withTenants([tenantId], ...)` — see
+// `automation-approvals.controller.ts`'s `detail()`), so a row belonging to a DIFFERENT tenant
+// than the one queried is genuinely invisible at the database level, for ANY caller including a
+// global platform_admin. That means:
+//   - a WRONG candidate tenant can only ever 404 (the row isn't there to find) — never leaks that
+//     a row with this id exists somewhere else;
+//   - the CORRECT tenant is the only one that can answer with the row, or with a REAL 403 (Cerbos's
+//     `authorize()` in `detail()` runs AFTER the row is fetched — same order as `decide()` — so a
+//     caller who has a membership in that tenant but isn't authorized for THIS action gets refused
+//     honestly, not silently skipped);
+//   - `candidateTenantIds` only ever contains tenants the caller already holds an ACTIVE membership
+//     in (`me.companies` — the same set `getActiveTenant`/the company switcher are bounded by), so
+//     this loop can only ever find a tenant the caller was already allowed to switch into by hand.
+// A 403 on the tenant that DOES hold the row propagates immediately — never swallowed into "try the
+// next tenant", which would risk demoting an honest refusal into a misleading not-found.
+export async function getApprovalDetailAcrossTenants(
+  userId: string,
+  candidateTenantIds: string[],
+  id: string,
+): Promise<{ tenantId: string; detail: ApprovalDetail } | null> {
+  const seen = new Set<string>();
+  for (const tenantId of candidateTenantIds) {
+    if (!tenantId || seen.has(tenantId)) continue;
+    seen.add(tenantId);
+    const detail = await getApprovalDetail(userId, tenantId, id);
+    if (detail) return { tenantId, detail };
+  }
+  return null;
+}
+
 // Always fetches every origin server-side (no `origin` query param) — the
 // inbox needs full cross-origin counts for its facet chips regardless of
 // which chip is currently selected, so origin filtering happens client-side

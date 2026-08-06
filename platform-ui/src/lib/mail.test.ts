@@ -21,6 +21,15 @@ describe("entityHref", () => {
     expect(entityHref("pipeline_run", "run-1", { portal: true })).toBe("/portal/approvals/run-1");
   });
 
+  // MAIL-33 — `entityId` is the GATE's own id here, and no per-gate detail page exists on either
+  // side, so (unlike pipeline_run) this can never be id-bearing without an I/O call this pure
+  // function is not allowed to make. Each side's actionable inbox instead — never null, never a
+  // broken/guessed id-bearing link.
+  it("pipeline_gate — staff gets the internal review inbox, portal gets the sign-off list (no per-gate route exists on either side)", () => {
+    expect(entityHref("pipeline_gate", "gate-1")).toBe("/pipeline");
+    expect(entityHref("pipeline_gate", "gate-1", { portal: true })).toBe("/portal/approvals");
+  });
+
   it("null entityType/entityId, and an unknown entity type, all return null", () => {
     expect(entityHref(null, "x")).toBeNull();
     expect(entityHref("automation_approval", null)).toBeNull();

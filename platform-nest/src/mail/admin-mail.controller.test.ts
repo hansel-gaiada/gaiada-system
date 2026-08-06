@@ -90,4 +90,28 @@ describe.skipIf(!TEST_URL)("admin mail log — GET /api/admin/mail/log[/:id]", (
     const missing = await app.inject({ method: "GET", url: `/api/admin/mail/log/${newId()}`, headers: asUser(admin) });
     expect(missing.statusCode).toBe(404);
   });
+
+  // ── MAIL-33 follow-on: detail() had no id-shape check while its sibling thread() did ────────────
+  it("detail() 400s a malformed id instead of 500ing through to Postgres", async () => {
+    const res = await app.inject({ method: "GET", url: "/api/admin/mail/log/not-a-uuid", headers: asUser(admin) });
+    expect(res.statusCode).toBe(400);
+  });
+
+  // Generalized on purpose: this controller has exactly two `:id`-taking routes (`detail`, `thread`)
+  // besides the query-filtered `list()` (already covered by `assertUuidFilter` above). Asserting
+  // BOTH agree on a malformed id — rather than pinning `detail()` alone — is what would have caught
+  // this specific asymmetry, and is the same shape as MAIL-33's tap/thread-authz agreement test: two
+  // halves of one controller that were each internally consistent and never checked against each
+  // other. If a third `:id` route is ever added here without the same check, this list is the place
+  // to extend, not a reason to skip it.
+  it("every :id-taking route on this controller agrees on rejecting a malformed id with 400, never 500", async () => {
+    const idTakingRoutes = [
+      (id: string) => `/api/admin/mail/log/${id}`,
+      (id: string) => `/api/admin/mail/log/${id}/thread`,
+    ];
+    for (const route of idTakingRoutes) {
+      const res = await app.inject({ method: "GET", url: route("not-a-uuid"), headers: asUser(admin) });
+      expect(res.statusCode).toBe(400);
+    }
+  });
 });

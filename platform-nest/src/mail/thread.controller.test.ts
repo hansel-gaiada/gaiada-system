@@ -31,8 +31,10 @@ describe.skipIf(!TEST_URL)("mail thread reads — parent-entity authorization (A
 
   let runA: string; // pipeline_run in coA, owned by client A
   let approvalA: string; // automation_approval in coA
+  let gateA: string; // pipeline_gate on runA, actor_side='client' — clientContactA legitimately holds it
   let mailLogRun: string;
   let mailLogApproval: string;
+  let mailLogGate: string;
   let messageWithAttachments: string;
 
   const files = new Map<string, Buffer>();
@@ -129,8 +131,20 @@ describe.skipIf(!TEST_URL)("mail thread reads — parent-entity authorization (A
       [approvalA, coA],
     );
 
+    // MAIL-33 — a real client-actionable gate on runA, exactly the shape `pipeline.controller.ts`'s
+    // `openGate` creates. `actor_side = 'client'` is load-bearing: it is what both the portal
+    // ownership predicate (mirrored off `PortalController.decideGate`) and the "who legitimately
+    // holds this gate" framing in the ticket turn on.
+    gateA = newId();
+    await adminPool().query(
+      `INSERT INTO pipeline_gates (id, tenant_id, run_id, kind, actor_side, status, opened_by, origin_site)
+       VALUES ($1,$2,$3,'prd_sign','client','pending',$4,'test')`,
+      [gateA, coA, runA, adminA],
+    );
+
     mailLogRun = await seedMailLog(coA, "pipeline_run", runA);
     mailLogApproval = await seedMailLog(coA, "automation_approval", approvalA);
+    mailLogGate = await seedMailLog(coA, "pipeline_gate", gateA);
 
     messageWithAttachments = await seedMessage({
       mailLogId: mailLogRun,
@@ -148,6 +162,7 @@ describe.skipIf(!TEST_URL)("mail thread reads — parent-entity authorization (A
     files.set("mail-quarantine/x/2", Buffer.from("unscanned"));
     files.set("mail-quarantine/x/3", Buffer.from("skipped"));
     await seedMessage({ mailLogId: mailLogApproval, tenantId: coA, entityType: "automation_approval", entityId: approvalA });
+    await seedMessage({ mailLogId: mailLogGate, tenantId: coA, entityType: "pipeline_gate", entityId: gateA });
 
     app = await buildApp();
   });
@@ -246,6 +261,38 @@ describe.skipIf(!TEST_URL)("mail thread reads — parent-entity authorization (A
     expect(threadNo.statusCode).toBe(parentNo.statusCode);
   });
 
+  // ── pipeline_gate parity (MAIL-33: parent authorization is the RUN, not the gate's own kind) ──
+  it("pipeline_gate: an allowed caller (readable via the parent RUN) reads the thread; a refused caller gets the SAME status", async () => {
+    const parentOk = await app.inject({ method: "GET", url: `/api/${coA}/pipeline/runs`, headers: asUser(adminA) });
+    const threadOk = await thread(coA, "pipeline_gate", gateA, adminA);
+    expect(parentOk.statusCode).toBe(200);
+    expect(threadOk.statusCode).toBe(200);
+    expect((threadOk.json() as { messages: unknown[] }).messages).toHaveLength(1);
+
+    const parentNo = await app.inject({ method: "GET", url: `/api/${coA}/pipeline/runs`, headers: asUser(memberA) });
+    const threadNo = await thread(coA, "pipeline_gate", gateA, memberA);
+    expect(parentNo.statusCode).toBe(403);
+    expect(threadNo.statusCode).toBe(parentNo.statusCode);
+  });
+
+  // The negative probe MAIL-33's AC calls for explicitly: a caller who cannot read runA (a
+  // DIFFERENT tenant's company_admin — has no grant on coA at all, so cannot read the run) must not
+  // be able to read gateA's thread just because it hangs off `pipeline_gate` rather than
+  // `pipeline_run`. Proves access was not WIDENED by routing the gate's authorization through its
+  // parent run instead of through the gate's own (identically-shaped) Cerbos rule.
+  it("NEGATIVE PROBE — pipeline_gate: a caller who cannot read the PARENT RUN cannot read the gate's thread either, and sees no content", async () => {
+    const parent = await app.inject({ method: "GET", url: `/api/${coA}/pipeline/runs`, headers: asUser(adminB) });
+    const t = await thread(coA, "pipeline_gate", gateA, adminB);
+    expect(parent.statusCode).toBe(403);
+    expect(t.statusCode).toBe(403);
+    expect(t.body).not.toContain("the reply body");
+  });
+
+  it("pipeline_gate: a gate id with no matching row 404s rather than throwing (mirrors automation_approval's read-then-authorize ordering)", async () => {
+    const res = await thread(coA, "pipeline_gate", newId(), adminA);
+    expect(res.statusCode).toBe(404);
+  });
+
   it("an entity kind that is not a thread parent is refused by the allowlist, not by Cerbos silence", async () => {
     const res = await thread(coA, "pm_task", newId(), adminGlobal);
     expect(res.statusCode).toBe(400);
@@ -311,6 +358,40 @@ describe.skipIf(!TEST_URL)("mail thread reads — parent-entity authorization (A
     const res = await thread(coA, "pipeline_run", runA, clientContactA);
     expect(res.statusCode).toBe(403);
     expect(res.body).not.toContain("the reply body");
+  });
+
+  // ── portal gate variant (MAIL-33) ────────────────────────────────────────────────────────────────
+  it("portal: the client signer who legitimately holds the gate reads its thread via ?gateId=; another client's contact gets 404", async () => {
+    const mine = await app.inject({
+      method: "GET", url: `/api/${coA}/portal/mail/threads?gateId=${gateA}`, headers: asUser(clientContactA),
+    });
+    expect(mine.statusCode).toBe(200);
+    const body = mine.json() as { entityType: string; entityId: string; messages: unknown[] };
+    expect(body).toMatchObject({ entityType: "pipeline_gate", entityId: gateA });
+    expect(body.messages).toHaveLength(1);
+
+    // 404, not 403 — same non-disclosure rule as the run variant: a gate belonging to a different
+    // client of the same agency must be indistinguishable from a nonexistent one.
+    const theirs = await app.inject({
+      method: "GET", url: `/api/${coA}/portal/mail/threads?gateId=${gateA}`, headers: asUser(clientContactB),
+    });
+    expect(theirs.statusCode).toBe(404);
+    expect(theirs.body).not.toContain("the reply body");
+  });
+
+  it("portal: a client contact CANNOT use the staff entity route for a gate either", async () => {
+    const res = await thread(coA, "pipeline_gate", gateA, clientContactA);
+    expect(res.statusCode).toBe(403);
+    expect(res.body).not.toContain("the reply body");
+  });
+
+  it("portal: gateId and runId are mutually exclusive, and at least one is required", async () => {
+    const neither = await app.inject({ method: "GET", url: `/api/${coA}/portal/mail/threads`, headers: asUser(clientContactA) });
+    expect(neither.statusCode).toBe(400);
+    const both = await app.inject({
+      method: "GET", url: `/api/${coA}/portal/mail/threads?runId=${runA}&gateId=${gateA}`, headers: asUser(clientContactA),
+    });
+    expect(both.statusCode).toBe(400);
   });
 
   it("portal: attachments never serve on the portal surface when scanning is off (skipped is admin-only)", async () => {

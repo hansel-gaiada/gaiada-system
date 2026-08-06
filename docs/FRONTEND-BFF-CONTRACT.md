@@ -2355,3 +2355,74 @@ this without changing anything documented here.
   (T2); the in-thread confirm chip + `assistant_write_intents` (T3b/T2b, §7.2); the FE's tool-chip/
   proposal-card rendering and agent picker consuming `toolAgents` (T4); `AGENT_SERVING_PROVIDER` pinned
   on the deployed box (T6).
+
+### T3b — the confirm-before-file machinery (ASST-23, §7.2, 2026-08-06)
+
+The owner's OQ-2 override (§7.2 of `docs/superpowers/plans/2026-08-06-asst-23-unblock-design.md`):
+a chat-path write no longer files an `automation_approvals` row at suspension time. It suspends as a
+**draft**, in-thread, and the OWNER explicitly confirms or dismisses it before anything is filed or
+any decider is notified. `approval_required` (ASST-17, above) keeps its exact prior meaning — a
+FILED proposal — and remains correct for handoff-origin suspensions (`POST …/handoff` still files
+directly, unchanged, per §7.2.5's scope note: the handoff click is itself the explicit consent) and
+for any future `fileOnSuspend:true` caller; it simply no longer occurs on THIS path's first leg.
+
+- **Migration `0085_assistant_write_intents.sql`** — new table `assistant_write_intents`
+  (tenant-scoped, `assistant`-module RLS, composite FK to `assistant_tool_calls`, zero DML). Holds the
+  ONLY durable pre-filing home of the REAL (unredacted) args; NULL from the moment `status` leaves
+  `'draft'`, in every direction. See the migration's own header for the full rationale.
+- ✅ **`GET .../stream` gains a FOURTH additive, non-terminal frame**: `event: confirm_required` —
+  `{callId, toolName, intentId, args, impact, expiresAt}`. `args` is the REDACTED shape (same
+  `redactToolArgs`, never raw values — the real args are persisted server-side into
+  `assistant_write_intents.tool_args`, keyed by the SAME `intentId`, never sent to the browser).
+  Terminal outcome for this turn is `error` + `errorKind: 'confirm_required'` (render as
+  awaiting-confirmation, **never** error styling — same rule ASST-17 established for
+  `approval_required`).
+- ✅ **`POST /api/:t/assistant/threads/:id/tool-calls/:callId/confirm`** and **`.../dismiss`** — new
+  endpoints, owner-only (Cerbos `confirm_write` on `assistant_thread`, same rule/condition as every
+  other thread action — no admin path). `callId` is the tool call's own id (the `callId` a
+  `confirm_required` frame carried, and the `id` a `toolCalls[]` entry carries on GET thread). The
+  confirm REQUEST body is EMPTY — no args field exists on this endpoint, deliberately: the server
+  files exactly what `assistant_write_intents.tool_args` holds, claimed atomically inside one
+  transaction (single-winner `UPDATE … WHERE status='draft' AND expires_at > now()`), never
+  re-derived from a request. Both endpoints return the post-action card state directly (no extra
+  fetch needed):
+  ```
+  { intentId, status: 'filed'|'dismissed', approvalId: string|null,
+    approval: { status, executionStatus, executionError } | null }
+  ```
+  A second click (double-click, replay, or a losing racer) gets the row's CURRENT state back as a
+  **200**, idempotently — never a second filing, never a second dismiss. Confirming an already
+  `dismissed`/`expired` intent (or dismissing an already `filed` one) is a **409** with
+  `{error, status}` naming the row's actual current status — a typed refusal, not a silent no-op.
+  A `callId` with no draft at all is a **404**.
+- ✅ **`GET /api/:t/assistant/threads/:id` — `toolCalls[]` gains `intent: {status, expiresAt} | null`**
+  (additive; every ASST-23/T3a field on the same array is unchanged). `intent` is non-null only while
+  a row is `draft`/`dismissed`/`expired` — once `approvalId` is set (filed, whether by this confirm
+  path or the legacy filed-at-turn-time shape), the EXISTING `approval` join (T3a) takes over and
+  `intent` goes back to `null` rather than reporting `'filed'` redundantly. Full card-state set now:
+  `awaiting confirmation → sent for approval → approved+executed | approved+failed (an administrator
+  can retry) | rejected | approved but not executable`, plus the two terminal-without-filing states
+  `dismissed` / `expired`. **Lazy reap, same request**: before this join runs, `GET thread` flips any
+  of THIS thread's past-expiry `draft` rows to `expired` (and scrubs `tool_args`) in one UPDATE — no
+  background job anywhere in this feature.
+- **Filing extraction** (`core/approval-filing.ts`, new) — `automation-approvals.controller.ts`'s
+  `create()` body (INSERT + activity log + decider notification) is now `fileAutomationApproval()`;
+  `create()` is a thin wrapper calling it. The confirm endpoint's atomic claim calls the lower-level
+  `insertAutomationApprovalRow()` (same INSERT, on the confirm transaction's own connection) directly,
+  so a confirm-filed row is **byte-for-byte shape-identical** to a runner-filed or n8n-filed one —
+  `origin='agent'`, `workflow_id` = the agent name, `requested_by` = the CHATTING USER (never the
+  approver — this is what keeps the D14 executor's re-drive principal and `resolve-and-execute`'s
+  `requested_by` gate intact) — the matching/executor/grant chains downstream need zero changes. The
+  n8n path (`create()`) is unaffected in behaviour, only the code that runs it moved.
+- **Config** — `ASSISTANT_INTENT_TTL_MS` (default 1h). Purely a raw-args retention bound; correctness
+  (can this write still legally happen) is re-checked at EXECUTION time by the registry precondition,
+  never by this value.
+- **No new SSE frame for dismiss** — a dismissal is only ever the RESULT of the owner's own
+  `POST …/dismiss` call, so its outcome arrives in that call's HTTP response, not on the stream (the
+  stream may not even be open by the time a human clicks dismiss on a reloaded thread).
+- **Explicitly unaffected**: `wf:report`'s n8n `pm.createTask` path (still executes unattended,
+  `create()` byte-identical); the handoff endpoint (still files directly, no confirm gate — §7.2.5's
+  scope note, restated); D13 (provider gate, unchanged — the consult still happens inside the
+  runner's goal, before the confirm machinery exists); the transcript-redaction invariant (the
+  `confirm_required` frame and every GET carry redacted args + `intentId` only, exactly like
+  `approval_required`'s existing rule).

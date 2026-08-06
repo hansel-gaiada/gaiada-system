@@ -202,6 +202,27 @@ export async function getPortalRunMailThread(
   );
 }
 
+/** MAIL-33 — the portal's gate-scoped sibling of `getPortalRunMailThread`. A `pipeline.gate.opened`
+ *  reply threads onto `mail_log.entity_type = 'pipeline_gate'` keyed by the GATE's own id, not the
+ *  run's (see `platform-nest/src/mail/thread.controller.ts`'s `portalThread` doc comment) — so a run's
+ *  thread panel alone can never surface it. Authorized the same way as the run variant: via
+ *  `?gateId=` on the SAME portal BFF route, never the admin surface, and only for a gate this client
+ *  signer actually holds (`actor_side = 'client'`, ownership mirrored off `PortalController.decideGate`
+ *  on the backend). */
+export async function getPortalGateMailThread(
+  userId: string,
+  tenantId: string,
+  gateId: string,
+): Promise<{ entityType: "pipeline_gate"; entityId: string; messages: ThreadMessageView[] }> {
+  return degradeThread(
+    platformFetch<{ entityType: "pipeline_gate"; entityId: string; messages: ThreadMessageView[] }>(
+      `/api/${tenantId}/portal/mail/threads${qs({ gateId })}`,
+      userId,
+    ),
+    { entityType: "pipeline_gate" as const, entityId: gateId, messages: [] },
+  );
+}
+
 // Staff vs. portal href for the triggering entity (design §7.5 "one deep link to the ERP entity" +
 // §7.5 staff/portal split). Mirrors the shapes `entity_type` takes in `mail_log` (§5): the four
 // approval-ish origins land in the unified approvals inbox, and pipeline runs get their own
@@ -228,6 +249,18 @@ export function entityHref(entityType: string | null, entityId: string | null, o
       return opts.portal ? `/portal/approvals` : `/approvals/${entityId}`;
     case "pipeline_run":
       return opts.portal ? `/portal/approvals/${entityId}` : `/pipeline/${entityId}`;
+    // MAIL-33 — `entityId` here is the GATE's own id, never the run's (both real emission sites,
+    // `pipeline.controller.ts`'s `openGate` and `portal.controller.ts`'s `decideGate`, stamp
+    // `entityType: "pipeline_gate"` with the gate id — see thread-authz.ts's header). This function
+    // does no I/O (mail.test.ts pins that), so it cannot look up which run a bare gate id belongs to
+    // and can never build the id-bearing `/pipeline/:runId` or `/portal/approvals/:runId` route the
+    // real outbound email itself uses (that one is built from `runId`, in scope, at the notify() call
+    // site — see `payload.href` there). Routing to each side's own ACTIONABLE INBOX instead — staff's
+    // `/pipeline` "Awaiting internal review" gate list, the client's `/portal/approvals` sign-off
+    // list — is the same non-null, always-correct fallback shape this function already uses for
+    // automation_approval/agency_approval's portal side (no per-item surface exists for either).
+    case "pipeline_gate":
+      return opts.portal ? `/portal/approvals` : `/pipeline`;
     default:
       return null;
   }
