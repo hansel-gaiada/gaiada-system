@@ -46,6 +46,20 @@
 # attribute absent (every pre-existing request), empty string, and JSON null all fall through to the
 # unchanged deny. Without the `type(...) == string` guard, CEL's heterogeneous `!=` would let a null
 # satisfy `!= ""` — so that guard is load-bearing, not decoration.
+#
+# D14-17 (2026-08-06) — Assistant write-tool entries evaluated, ZERO NET-NEW ENTRIES, so this list is
+# UNCHANGED by that ticket. Full evidence in platform-nest/src/core/approval-executables.ts's own
+# D14-17 section; summary: the assistant broker's ENTIRE tool universe (`ASSISTANT_AGENT_TOOLS` in
+# modules/assistant/broker.ts) is two read-only agents, and `ai-agents/src/agent-write-guard.test.ts`'s
+# `RERUN_CAPABLE_HIGH_WRITES` allowlist — which gates every `high_write` any AgentDef anywhere may
+# declare — is `[]`. No `origin='agent'` write proposal can exist today, so nothing needs the grant-
+# lift disjunct below. Separately, and independently of that: `pm.createTask`/`pm.createDoc` (D14-15,
+# the PM entries this ticket was told to reuse) were correctly NOT added here either, because they are
+# `impact:"low"` at the hub (`mcp-hub/src/pm-tools.ts`) — the disjunct they'd need is
+# `impact == "low"`, which already short-circuits the `all.of` before the grant term is ever reached,
+# for BOTH automation and agent principals. A tool only needs an entry in the list below when it is
+# `write:true` AND `impact != "low"` AND an `origin='automation'` (n8n) re-drive of it must be able to
+# pass this conjunct — none of today's registry entries beyond `deploy.*` meet that bar.
 apiVersion: api.cerbos.dev/v1
 resourcePolicy:
   version: default

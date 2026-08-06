@@ -432,3 +432,50 @@ export function registerPmExecutableApprovals(): void {
 }
 
 registerPmExecutableApprovals();
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════════
+// D14-17 — Assistant write-tool entries (Phase-6 v1 proposal set): EVALUATED, ZERO NET-NEW ENTRIES.
+// ═════════════════════════════════════════════════════════════════════════════════════════════════
+//
+// This ticket's own instruction (docs/superpowers/plans/2026-08-05-d14-and-assistant-tickets.md,
+// "D14-17") is: derive the tool list from the assistant broker's REAL capability surface, not from
+// guesswork, and report an empty finding honestly rather than inventing tools to justify the ticket.
+// The finding, with the evidence that makes it falsifiable:
+//
+//   1. `modules/assistant/broker.ts`'s `ASSISTANT_AGENT_TOOLS` is the broker's ENTIRE tool universe —
+//      `runToolTurn` refuses any `agent` not present as a key of that map before it ever contacts the
+//      runner (`if (!required) return { outcome: "error", errorKind: "unknown_agent" }`). Today it has
+//      exactly two entries, BOTH read-only: `"status-reporter": ["projects.list", "tasks.list"]` and
+//      `"approvals-chaser": ["agency.pendingApprovals"]`. Neither AgentDef the broker can drive holds
+//      any write tool at all, let alone a `high_write` one.
+//   2. `ai-agents/src/specialists.ts` has exactly THREE AgentDefs. `taskTriager` — the repo's only
+//      write-capable specialist (`tasks.update`, `low_write`) — is NOT reachable through the broker: it
+//      lives in `writeSpecialists`, not `specialists`, and `ASSISTANT_AGENT_TOOLS` names neither map.
+//      So even the one write ai-agents can do anywhere is structurally unreachable from a chat turn.
+//   3. `ai-agents/src/agent-write-guard.test.ts`'s `RERUN_CAPABLE_HIGH_WRITES` allowlist — the CI-
+//      enforced set of tool names ANY AgentDef anywhere is permitted to declare `high_write` — is
+//      `[]`. The guard test structurally fails the build the moment any AgentDef (assistant-driven or
+//      not) declares a `high_write` outside that (currently empty) allowlist. A `high_write` is the
+//      ONLY thing that ever files an `origin='agent'` proposal in the first place (`agent.ts`'s write
+//      gate); a `low_write` executes immediately and never reaches this registry.
+//
+// CONCLUSION: the assistant's proposable write-tool surface is EMPTY today, by construction, enforced
+// in a different project's CI guard (2 above) that this ticket must not weaken. There is therefore
+// nothing net-new to register here. The ticket's fallback instruction — "the v1 set fully reuses
+// D14-15's PM entries" — is satisfied exactly as written: `pm.createTask` / `pm.createDoc` are already
+// registered above (D14-15) and need no change; the moment some future AgentDef the broker can drive
+// declares one of them (or any other tool) as `high_write`, D14-12's stricter-wins reconciliation would
+// treat it as high-impact and file an `origin='agent'` row, and THIS registry (unchanged) is what would
+// let it execute — that is future work for whichever ticket adds that AgentDef, not this one.
+//
+// Regression coverage for this finding lives in `d14-17-assistant-write-registry.test.ts`: it pins the
+// broker's read-only tool surface, proves a representative unregistered "assistant write" tool name
+// stays `execution_status='not_applicable'` and never auto-executes (both directions — see that file),
+// and documents why no Cerbos `resource_mcp_tool.yaml` change accompanies this entry (that file's own
+// D14-17 note explains the same finding from the policy side).
+//
+// MONEY TOOLS REMAIN PERMANENTLY BARRED (restated, per this ticket's explicit instruction): nothing in
+// this section registers, or ever may register, `search.setBudget` / `search.applyNegatives` /
+// `search.launchCampaign` (SM-55 / architect ruling A13) — see this file's header doctrine. VER-01
+// verified `search.setBudget` stays `not_applicable` even after a human approves it; nothing here
+// changes that.
