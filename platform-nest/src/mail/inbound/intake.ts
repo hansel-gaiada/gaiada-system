@@ -85,6 +85,20 @@ export function extractReplyToken(recipientAddresses: string[]): { token: string
   return null;
 }
 
+/** MAIL-29: matching is deliberately EXACT-CASE, not case-normalized on either side.
+ *
+ *  The token is ours — minted by `queue.ts`'s `newReplyToken()` from a known, fixed alphabet
+ *  (base64url: `A-Za-z0-9-_`) — so there is no "the human might have typed it differently" reason to
+ *  normalize, unlike a user-entered credential. The alternative some fix for MAIL-29 could have taken
+ *  — lowercasing `mail_log.reply_token` at write time (or at read time here) to match a lowercased
+ *  extracted token — was rejected: it throws away real entropy on a security-relevant value for no
+ *  benefit. Base64url already draws from a full 64-symbol alphabet (6 bits/char); folding case merges
+ *  each letter's two symbols into one, cutting a 26-letter alphabet down to effectively ~13 distinct
+ *  values per alphabetic position while digits/`-`/`_` are untouched — roughly 0.8 bits of entropy
+ *  lost per alphabetic character of the token (~17 bits off a 128-bit token across its ~21 full
+ *  base64 characters), for a token whose entire job is to be unguessable. The correct fix (see
+ *  `brevo-payload.ts`'s `extractAngleAddress`) is to stop destroying the token's case before it gets
+ *  here, not to weaken what it is compared against. */
 async function findByReplyToken(token: string): Promise<MatchedMailLog | null> {
   const { rows } = await withMailContext((c) =>
     c.query<MatchedMailLog>(

@@ -6,6 +6,7 @@
 // row back OUT OF POSTGRES (`adminPool()`), not out of the sanitizer's return value. The ticket AC is
 // "XSS corpus inert AS STORED CONTENT, not just at render", and the only way to demonstrate that is to
 // look at what is actually in the database.
+import { randomBytes } from "node:crypto";
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import type { NestFastifyApplication } from "@nestjs/platform-fastify";
 import { config } from "../../config";
@@ -60,6 +61,22 @@ describe.skipIf(!TEST_URL)("mail inbound corpus — POST /api/mail/inbound/brevo
     replyDomain: config.mail.replyDomain,
   };
 
+  /** MAIL-29: mints tokens the same way `queue.ts`'s real `newReplyToken()` does (128-bit CSPRNG,
+   *  base64url), then FORCES alternating case onto whatever letters land in it. Before this fix, every
+   *  test in this corpus called `seedMail`, which minted `` `tok${newId().replace(/-/g, "")}` `` —
+   *  `newId()` is a UUIDv7 (lowercase hex) and `"tok"` is lowercase, so every token this suite ever
+   *  used was ALL-LOWERCASE by construction. `extractAngleAddress()`'s blanket-lowercasing bug was
+   *  therefore a no-op for every token this corpus exercised — the DB-level "threads onto the right
+   *  entity" assertions below were always real assertions against real Postgres rows, they just never
+   *  got to see the one input class (an uppercase character in the token) that broke production. Real
+   *  tokens are ~40% uppercase letters by alphabet share; forcing alternating case here means this
+   *  corpus can never again pass by accident the way it did for MAIL-29 — every threading case in this
+   *  file now runs the mixed-case path on every run, not just the one dedicated regression case below. */
+  function mixedCaseToken(): string {
+    const raw = randomBytes(16).toString("base64url");
+    return [...raw].map((c, i) => (i % 2 === 0 ? c.toUpperCase() : c.toLowerCase())).join("");
+  }
+
   /** Two live outbound mails, so the "wrong token" case can prove the token routes and the sender
    *  does not: mail A is the one whose RECIPIENT sends the replies, mail B is a different thread. */
   let mailA: { id: string; token: string; entityId: string };
@@ -67,7 +84,7 @@ describe.skipIf(!TEST_URL)("mail inbound corpus — POST /api/mail/inbound/brevo
 
   async function seedMail(toEmail: string): Promise<{ id: string; token: string; entityId: string }> {
     const id = newId();
-    const token = `tok${newId().replace(/-/g, "")}`.slice(0, 22);
+    const token = mixedCaseToken();
     const entityId = newId();
     await adminPool().query(
       `INSERT INTO pipeline_runs (id, tenant_id, title, status, origin_site)
@@ -229,6 +246,52 @@ describe.skipIf(!TEST_URL)("mail inbound corpus — POST /api/mail/inbound/brevo
     expect(rows[0].body_text).toContain("confirm the launch date");
     expect(rows[0].body_html_sanitized).toContain("<p>Looks good to me");
     expect(rows[0].body_html_sanitized).toContain('rel="noopener noreferrer nofollow"');
+  });
+
+  // ── MAIL-29 regression — the literal token from the live incident report ────────────────────────
+  it("[MAIL-29] a mixed-case reply token — the exact token quoted in the live incident report — threads correctly", async () => {
+    // The precise value from the bug report: proven dead live on the box (`SELECT count(*) FROM
+    // mail_log WHERE reply_token = lower('WxgfNc9SNTtwaKif2TnfBA')` -> 0). Pinning THIS literal string,
+    // not just "a" mixed-case token, is what makes this a named regression test for the actual incident
+    // rather than a generic property test.
+    const literalToken = "WxgfNc9SNTtwaKif2TnfBA";
+    expect(literalToken).not.toBe(literalToken.toLowerCase()); // sanity: genuinely mixed-case
+    expect(literalToken).not.toBe(literalToken.toUpperCase());
+    expect(literalToken).toMatch(/^[A-Za-z0-9_-]{8,128}$/); // shape VERP_LOCALPART_RE requires
+
+    const mail = await seedMail("mail29-recipient@a.test");
+    // Overwrite the randomly-minted token with the literal reported one, so the assertion below is
+    // against THAT exact string, not a coincidentally-similar random one.
+    await adminPool().query(`UPDATE mail_log SET reply_token = $2 WHERE id = $1`, [mail.id, literalToken]);
+
+    const { payload } = loadFixture("01-plain-reply.json", {
+      token: literalToken,
+      tokenB: mailB.token,
+      replyDomain: REPLY_DOMAIN,
+      run: newId().slice(0, 8),
+    });
+    const res = await post(JSON.stringify(payload));
+    expect(res.statusCode).toBe(204);
+
+    // THE proof, read back out of Postgres, not out of the sanitizer's return value.
+    const rows = await messagesFor(mail.id);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].entity_type).toBe("pipeline_run");
+    expect(rows[0].entity_id).toBe(mail.entityId);
+    expect(rows[0].tenant_id).toBe(tenantId);
+    expect(rows[0].body_text).toContain("confirm the launch date");
+
+    // And the deliberate MAIL-29 decision holds: the STORED token was never case-folded either —
+    // matching is exact-case against the token as minted, not normalized on either side.
+    const stored = await adminPool().query(`SELECT reply_token FROM mail_log WHERE id = $1`, [mail.id]);
+    expect(stored.rows[0].reply_token).toBe(literalToken);
+
+    // eslint-disable-next-line no-console
+    console.log(
+      "\n[MAIL-29 DB EVIDENCE] read back from Postgres after posting reply+" + literalToken + "@…:\n" +
+        `  mail_messages.id=${rows[0].id} entity_type=${rows[0].entity_type} entity_id=${rows[0].entity_id} tenant_id=${rows[0].tenant_id}\n` +
+        `  mail_log.reply_token (as stored) = ${JSON.stringify(stored.rows[0].reply_token)}\n`,
+    );
   });
 
   // ── 02 forged sender ──────────────────────────────────────────────────────────────────────────

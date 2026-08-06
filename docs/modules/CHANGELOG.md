@@ -3555,6 +3555,40 @@ Built by a 4-agent parallel run against a frozen contract (`docs/superpowers/pla
   CR-01/06/13; QA gates CR-01/06/12/13/20.
 
 ## mail (continued)
+### [0.0.18] — 2026-08-06 · IN PROGRESS · MAIL-29 (senior-be) — inbound threading was dead in production, and the corpus could not have known
+
+- **The bug:** `extractAngleAddress()` in `inbound/brevo-payload.ts` lowercased the *entire* recipient
+  address, including the local part carrying the VERP token. Tokens are minted mixed-case base64url
+  (`randomBytes(16).toString("base64url")`) and matched with case-sensitive `=` against
+  `mail_log.reply_token`, so any token with an uppercase character could never match. Confirmed dead
+  live: all 18 fixtures replayed against the deployed box left `mail_messages` at **0**.
+- **Fixed** by splitting on the last `@` and lowercasing only the domain — which is also the correct
+  email semantics (domain case-insensitive, local part case-sensitive), so the original code was wrong
+  on both counts. Matching stays deliberately **exact-case**: folding case on the stored token would
+  merge each letter's two base64url symbols, costing ≈0.81 bits/char — roughly **17 bits off a
+  128-bit token** whose entire job is to be unguessable.
+- **Why every test passed over a dead path — the more useful finding.** `corpus.test.ts`'s
+  `seedMail()` minted tokens as `tok` + `newId()` hex: lowercase UUIDv7, lowercase prefix. **Every
+  token the corpus ever exercised was all-lowercase by construction**, so the blanket-lowercasing was a
+  no-op for all of them. The DB-level "threads onto the right entity" assertions were genuine and
+  correct; they never got to see the one input class that broke production. The defect was that the
+  **harness generated its match keys from a different alphabet than production**.
+- **Closed at source, not patched around:** `seedMail` now mints tokens exactly as `queue.ts` does and
+  forces mixed case, so cases 01/02/03/06/08–18 all exercise the path — not just one new test. Added
+  `[MAIL-29]` pinning the literal incident token. Proven both directions by temporarily reverting the
+  fix in-file (not via git, per shared-tree discipline): **21 of 26 failed**, including the exact
+  zero-rows symptom; reapplied, green again.
+- **The verification gap closed too:** unmatched returns `204` by design (A9, so it is not a token
+  oracle), and `replay-inbound.mjs` asserted only HTTP status — a completely broken path reported all
+  PASS. It now takes `--database-url`, snapshots `mail_messages` before/after, and **fails the run**
+  with `THREADING BROKEN` if nothing landed.
+- Evidence: `src/mail` **175/175 across 21 files**; corpus 26/26; `tsc`, `lint:migration-rls`,
+  `lint:withtenants`, A12 grep gate all clean; no migration; **0 orphan databases** — INFRA-01's
+  teardown fix working in practice.
+- **Caps at IN PROGRESS.** A live-box `replay-inbound.mjs` run against a real reply token is the
+  remaining step. Ops follow-up, out of scope: any inbound reply received before today carrying a
+  mixed-case token was silently dropped and is unrecoverable.
+
 ### [0.0.17] — 2026-08-06 · IN PROGRESS · MAIL-24/25/26 + a repair of this file's own bookkeeping
 
 > **Why this entry jumps to 0.0.17 and consolidates three tickets.** `MODULES.md` claimed

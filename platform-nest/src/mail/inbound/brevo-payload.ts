@@ -66,13 +66,31 @@ function mailboxAddress(value: unknown): string | null {
   return null;
 }
 
-/** Accepts both `a@b.test` and `Display Name <a@b.test>`; returns the bare address, lowercased.
- *  Everything about a sender address is display metadata (§7.6), so this is presentation hygiene,
- *  not a security control. */
+/** Accepts both `a@b.test` and `Display Name <a@b.test>`; returns the bare address with the DOMAIN
+ *  lowercased and the LOCAL PART case preserved.
+ *
+ *  MAIL-29: this used to blanket-lowercase the whole address, which was wrong on both halves of email
+ *  address semantics — the domain is case-insensitive (correct to normalize) but the local part is
+ *  technically case-sensitive (RFC 5321 §2.4) and, concretely here, IS the VERP reply token
+ *  (`reply+<token>@…`, see `../intake.ts`). Tokens are minted as mixed-case base64url
+ *  (`randomBytes(16).toString("base64url")`, `queue.ts`'s `newReplyToken`) and matched against
+ *  `mail_log.reply_token` with case-sensitive `=`. Folding the local part to lowercase before
+ *  extraction meant any token containing an uppercase character — the large majority of them — could
+ *  never match, so inbound threading (MAIL-13) silently never worked outside a test corpus whose own
+ *  tokens happened to be all-lowercase (see `corpus.test.ts`'s header note on `seedMail`). Recipient
+ *  addresses feed `extractReplyToken` in `../intake.ts`, so preserving local-part case here is what
+ *  makes the match key match. `From:` case is display metadata (§7.6) either way — a sender address
+ *  never influences routing or authorization — so preserving its case too is harmless and simply
+ *  correct, not a behavior this file has any reason to special-case away from recipients. */
 function extractAngleAddress(raw: string): string | null {
   const angle = /<([^<>]+)>/.exec(raw);
-  const candidate = (angle ? angle[1] : raw).trim().toLowerCase();
-  return candidate.includes("@") ? candidate : null;
+  const candidate = (angle ? angle[1] : raw).trim();
+  const at = candidate.lastIndexOf("@");
+  if (at <= 0) return null;
+  const local = candidate.slice(0, at);
+  const domain = candidate.slice(at + 1);
+  if (!local.length || !domain.length) return null;
+  return `${local}@${domain.toLowerCase()}`;
 }
 
 function mailboxList(value: unknown): string[] {

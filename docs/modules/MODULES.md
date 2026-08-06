@@ -54,7 +54,7 @@ versions below; the running build reports it at `GET /health`.
 | render-gateway-go | `0.0.0` | PLANNED | Creative | 2026-07-23 |
 | reports | `0.3.1` | PROTOTYPED | Cross-cutting | 2026-08-03 |
 | report-renderer | `0.1.0` | DEV-VERIFIED | Cross-cutting | 2026-07-31 |
-| mail | `0.0.17` | IN PROGRESS | Cross-cutting | 2026-08-06 |
+| mail | `0.0.18` | IN PROGRESS | Cross-cutting | 2026-08-06 |
 
 ---
 
@@ -347,7 +347,23 @@ through C-03". **v1.2 (same day, Zone A mail v2):** domains locked — C-03's fo
 moved to the Google Workspace SMTP relay with Brevo failover. Blueprint HTML is v1.2; PDF + hosted
 artifact NOT re-rendered yet.
 
-## mail — Zone A Email (platform-nest) · `0.0.17` · IN PROGRESS
+## mail — Zone A Email (platform-nest) · `0.0.18` · IN PROGRESS
+
+**0.0.18 (2026-08-06, senior-be, MAIL-29) — inbound threading had never worked outside tests; fixed,
+and the test gap that hid it closed.** `extractAngleAddress()` blanket-lowercased the recipient
+address including the VERP token's local part, while tokens are minted mixed-case base64url and
+matched exact-case — so any token containing an uppercase character could never match. Proven dead on
+the live box: `select count(*) from mail_messages` was **0** after replaying all 18 fixtures. Now
+lowercases only the domain (correct email semantics on both counts); matching stays exact-case
+because lowercasing the stored token would cost **≈17 bits off a 128-bit value**.
+**The instructive part is why tests passed:** `seedMail()` minted tokens from `newId()` — lowercase
+UUIDv7 hex — so every token the corpus ever exercised was all-lowercase *by construction*. The
+DB-level assertions were genuine; they simply never saw the breaking input class. The harness was
+generating its match keys from a different, accidentally-safe alphabet than production. Fixed at
+source: `seedMail` now mints tokens the way `queue.ts` does and forces mixed case, so the **whole
+corpus** is sensitive to this defect class rather than one added test. `replay-inbound.mjs` gained
+DB-backed verification and now fails with `THREADING BROKEN` when a supplied reply token produces
+zero new rows — a `204` alone no longer counts as a pass, which is precisely what let this ship.
 
 **0.0.17 (2026-08-06, senior-be, MAIL-24/25/26) — QA findings closed; this heading and the registry
 row had drifted apart.** MAIL-24 closed the magic-link timing enumeration oracle (3.25x -> 1.28x,
