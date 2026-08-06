@@ -20,7 +20,7 @@ import {
 } from "./assistant-data";
 import type {
   AssistantMemoryScope, AssistantThreadStatus, CapabilitiesResult, MemoryListResult, ResolvedCitation, SendMessageResult, StopResult,
-  ThreadDetailResult, ThreadListResult, RosterResult, AssistantHandoff,
+  ThreadDetailResult, ThreadListResult, RosterResult, AssistantHandoff, ToolCallApprovalJoin,
 } from "./assistant";
 // ASST-21 — the run-watch view's transcript read reuses the EXISTING Intelligence-console reader
 // verbatim (no second implementation of `GET :t/agents/runs/:runId`). It already degrades a 403 to
@@ -146,13 +146,28 @@ export async function deleteThreadAction(threadId: string): Promise<ActionResult
 // backend path literally returned in `streamUrl` — see `assistant-stream-server.ts`'s header for why
 // the browser never talks to platform-nest directly).
 
-export async function sendMessageAction(threadId: string, content: string): Promise<ActionResult<SendMessageResult>> {
+// T4 (ASST-23, §7.4) — `opts` is new and OPTIONAL: a plain chat send passes nothing, and the body
+// sent is BYTE-IDENTICAL to before this ticket (`{content}` only) — `mode`/`agent` are only ever
+// added to the body when the composer's tools-mode affordance is actually engaged, never sent as
+// an explicit `mode:'chat'` for the default case, so there is exactly one wire shape for "plain
+// chat" both before and after this ticket.
+export interface SendMessageOpts {
+  mode?: "chat" | "tools";
+  agent?: string;
+}
+
+export async function sendMessageAction(threadId: string, content: string, opts: SendMessageOpts = {}): Promise<ActionResult<SendMessageResult>> {
   const c = await ctx();
   if ("error" in c) return { ok: false, error: c.error };
   try {
+    const body: Record<string, unknown> = { content };
+    if (opts.mode === "tools") {
+      body.mode = "tools";
+      if (opts.agent) body.agent = opts.agent;
+    }
     const r = await platformFetch<SendMessageResult>(`/api/${c.tenant}/assistant/threads/${threadId}/messages`, c.userId, {
       method: "POST",
-      body: JSON.stringify({ content }),
+      body: JSON.stringify(body),
     });
     return { ...r, ok: true };
   } catch (e) {
@@ -333,6 +348,53 @@ export async function getHandoffTranscriptAction(runId: string): Promise<ActionR
   try {
     const run = await getAgentRun(c.userId, c.tenant, runId);
     return { ok: true, run };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+// ---- Confirm-before-file (T3b, §7.2) — the owner's confirm chip -----------------------------------
+// Owner-only via Cerbos `confirm_write` on `assistant_thread` (same rule as every other thread
+// action); nothing here needs its own capability gate, same reasoning as every action above.
+//
+// THE CONFIRM REQUEST CARRIES NO ARGS, deliberately (§7.2.4): the server files exactly what
+// `assistant_write_intents.tool_args` already holds, server-side, claimed atomically — a tampered
+// confirm call must not be able to file user-authored args wearing model provenance. `body:
+// JSON.stringify({})` (not a truly bodyless POST) mirrors `stopStreamAction`'s own convention above
+// — a real, tiny JSON body, so `platformFetch`'s "only claim application/json when a body exists"
+// rule never trips Fastify's empty-body-with-json-content-type 400 (see platform-ui/CLAUDE.md).
+export interface ConfirmOrDismissResult {
+  intentId: string;
+  status: "filed" | "dismissed";
+  approvalId: string | null;
+  approval: ToolCallApprovalJoin | null;
+}
+
+export async function confirmWriteAction(threadId: string, callId: string): Promise<ActionResult<ConfirmOrDismissResult>> {
+  const c = await ctx();
+  if ("error" in c) return { ok: false, error: c.error };
+  try {
+    const r = await platformFetch<ConfirmOrDismissResult>(
+      `/api/${c.tenant}/assistant/threads/${threadId}/tool-calls/${callId}/confirm`,
+      c.userId,
+      { method: "POST", body: JSON.stringify({}) },
+    );
+    return { ...r, ok: true };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+export async function dismissWriteAction(threadId: string, callId: string): Promise<ActionResult<ConfirmOrDismissResult>> {
+  const c = await ctx();
+  if ("error" in c) return { ok: false, error: c.error };
+  try {
+    const r = await platformFetch<ConfirmOrDismissResult>(
+      `/api/${c.tenant}/assistant/threads/${threadId}/tool-calls/${callId}/dismiss`,
+      c.userId,
+      { method: "POST", body: JSON.stringify({}) },
+    );
+    return { ...r, ok: true };
   } catch (e) {
     return fail(e);
   }

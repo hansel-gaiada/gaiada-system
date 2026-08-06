@@ -1,9 +1,12 @@
 import {
   isPendingMessage, humanizeErrorKind, brainBadgeLabel, parseUsageMeta, parseCitations, parseSessionResumeMismatch, usageMeterLabel,
+  normalizeThreadToolCall, normalizeLiveToolCall, partitionToolCalls,
   type AssistantMessage, type StreamState,
 } from "@/lib/assistant";
 import { renderMarkdownLite } from "./markdownLite";
 import { CitationChips } from "./CitationChips";
+import { ProposalCard } from "./ProposalCard";
+import { ToolCallChips } from "./ToolCallChips";
 
 // ASST-07 — one message bubble. `streaming`/`liveText` are set ONLY for the single row currently
 // being generated in THIS tab (see AssistantWorkspace) — every other row renders its persisted
@@ -18,16 +21,25 @@ import { CitationChips } from "./CitationChips";
 // tab instead reads `liveState.meta`/`liveState.usage` so a mid-generation failover is visible the
 // instant it happens, not only after the transcript reloads — that immediacy is the whole point of
 // ASST-11 naming the provider at first-byte-release rather than at `done`.
-export function Message({ message, streaming, liveText, liveState }: {
+// T4 (ASST-23) — `errorKind`s that end the turn but are NOT a failure: the proposal card (below)
+// is what tells the true story for these two, so the generic red error paragraph must never render
+// for them — rendering it would reintroduce exactly the "approval does not execute"-shaped
+// confusion this ticket is required to remove (a suspended write is progress, not an error).
+const NON_ERROR_TERMINAL_KINDS = new Set(["confirm_required", "approval_required"]);
+
+export function Message({ message, streaming, liveText, liveState, threadId }: {
   message: AssistantMessage;
   streaming?: boolean;
   liveText?: string;
   liveState?: StreamState;
+  /** Needed only to build the Confirm/Dismiss endpoints' URL (`ProposalCard`) — this component
+   *  otherwise has no reason to know which thread it's rendering inside. */
+  threadId: string;
 }) {
   const isUser = message.role === "user";
   const pending = isPendingMessage(message);
   const bodyText = streaming ? liveText ?? "" : message.content ?? "";
-  const failed = !streaming && !!message.errorKind && message.errorKind !== "stopped";
+  const failed = !streaming && !!message.errorKind && message.errorKind !== "stopped" && !NON_ERROR_TERMINAL_KINDS.has(message.errorKind);
   const stopped = !streaming && message.errorKind === "stopped";
 
   const provider = streaming ? liveState?.meta?.provider ?? null : message.provider;
@@ -53,6 +65,17 @@ export function Message({ message, streaming, liveText, liveState }: {
   // refresh would show it. `null` for the overwhelming common case (a genuine resume, turn 1, or
   // an older gateway) — rendered as nothing, never as an error.
   const sessionResumeMismatch = !streaming ? parseSessionResumeMismatch(message.parts) : null;
+
+  // T4 (ASST-23, §7.2/§7.4) — same "live during the turn, then the reload-safe record" split as
+  // citations/meta/usage above: while THIS row is the one streaming, read the SSE-accumulated
+  // `liveState.toolCalls`; once finalized (or on any historical row), read the persisted,
+  // reload-joined `message.toolCalls`. Both normalize down to the SAME shape (`NormalizedToolCall`)
+  // before `partitionToolCalls` splits them into plain chips vs. full proposal cards — see that
+  // function's header for why `isWriteProposal`, never `approvalId` alone, is the split.
+  const normalizedToolCalls = streaming
+    ? (liveState?.toolCalls ?? []).map(normalizeLiveToolCall)
+    : (message.toolCalls ?? []).map(normalizeThreadToolCall);
+  const { proposals, chips } = partitionToolCalls(normalizedToolCalls);
 
   return (
     // VER-03 — `.asst-thread` (the ancestor list) is `role="log"`, an implicit-polite live region:
@@ -86,6 +109,15 @@ export function Message({ message, streaming, liveText, liveState }: {
         {stopped && <p className="asst-msg__meta asst-msg__meta--stopped">Stopped{bodyText ? "." : " before any reply."}</p>}
         {failed && <p className="asst-msg__error">{humanizeErrorKind(message.errorKind as string)}</p>}
         {!isUser && citations.length > 0 && <CitationChips citations={citations} />}
+        {/* T4 (ASST-23) — tool chips (plain reads/refusals) then proposal cards (write intents this
+            turn drafted). Order is deliberate: "here's what I looked at" before "here's what I want
+            to do", the same order a human explanation would use. */}
+        {!isUser && chips.length > 0 && <ToolCallChips calls={chips} />}
+        {!isUser && proposals.length > 0 && (
+          <div className="asst-proposal-row">
+            {proposals.map((p) => <ProposalCard key={p.callId} call={p} threadId={threadId} />)}
+          </div>
+        )}
         {/* ASST-24 — quiet, honest note: the reply itself is valid (never rendered as an error or
             a failure state); only Hermes' OWN memory diverged. The earlier turns are still right
             here in this transcript — it is the provider's side that restarted. */}

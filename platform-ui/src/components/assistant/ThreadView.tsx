@@ -11,12 +11,17 @@ import { useTypewriter } from "./useAssistantStream";
 // typewriter-smoothed live text overlaid; every other row renders straight from the last server
 // fetch. That is what makes "refresh restores the exact transcript" true without a second code path.
 export function ThreadView({
-  messages, streamState, streamingMessageId, loading,
+  messages, streamState, streamingMessageId, loading, threadId,
 }: {
   messages: AssistantMessage[];
   streamState: StreamState;
   streamingMessageId: string | null;
   loading: boolean;
+  /** T4 (ASST-23) — passed straight through to `Message` for the Confirm/Dismiss endpoints' URL;
+   *  this component has no other use for it. `""` on the (rare) render with no active thread yet —
+   *  harmless, since a thread-less render also has no messages, so no `ProposalCard` ever mounts to
+   *  actually need it. */
+  threadId: string;
 }) {
   const displayText = useTypewriter(streamState.text);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -59,6 +64,7 @@ export function ThreadView({
             streaming={isLive}
             liveText={isLive ? displayText : undefined}
             liveState={isLive ? streamState : undefined}
+            threadId={threadId}
           />
         );
       })}

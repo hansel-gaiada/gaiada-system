@@ -1,11 +1,12 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { AssistantMessage, AssistantThread, PinnedPageContext } from "@/lib/assistant";
-import { isPendingMessage } from "@/lib/assistant";
+import { isPendingMessage, hasPendingProposalDecision } from "@/lib/assistant";
 import { pageContextPrefix } from "@/lib/assistantContext";
 import {
   createThreadAction, deleteThreadAction, refreshThreadAction, refreshThreadsAction,
   renameThreadAction, sendMessageAction, setThreadPinnedAction, setThreadStatusAction, stopStreamAction,
+  type SendMessageOpts,
 } from "@/lib/assistantActions";
 import { ThreadRail } from "./ThreadRail";
 import { ThreadView } from "./ThreadView";
@@ -124,6 +125,34 @@ export function AssistantWorkspace({ initialThreads, initialActiveThreadId, vari
     // `initialThreads` list carries no messages (list vs. detail are different backend calls).
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // T4 (ASST-23) — the out-of-band-decision poll: a proposal card whose approval is decided
+  // elsewhere (a `company_admin`/etc. on `/approvals/[id]`, in a different tab or session
+  // entirely) never pushes anything into this thread — a re-`GET thread` is the only way to see it.
+  // Deliberately NOT `loadThread` (which flips `loadingThread`, blanking the whole `ThreadView` per
+  // its own `loading` prop — fine for an explicit thread switch, a very visible regression for a
+  // silent background poll): a bare, silent re-fetch that only ever replaces `messages`/`threads`
+  // in place. React only touches the DOM where the rendered output actually differs, so a poll that
+  // finds nothing new causes no mutation at all — the SAME "no cost when nothing changed" property
+  // `RosterPanel`'s own handoff poll already relies on.
+  const refreshThreadSilently = useCallback(async (id: string) => {
+    const r = await refreshThreadAction(id);
+    if (!r.ok) return; // best-effort — a transient failure just tries again next tick
+    setMessages(r.messages);
+    setThreads((prev) => prev.map((t) => (t.id === id ? r.thread : t)));
+  }, []);
+
+  const PENDING_PROPOSAL_POLL_MS = 4000; // same cadence RosterPanel's handoff poll already uses
+  useEffect(() => {
+    // Never polls while a send/stream is in flight (avoid clobbering the optimistic user message +
+    // placeholder this same component is about to append) — by construction, a proposal only ever
+    // reaches a "pending decision" state AFTER its turn has already gone terminal and reloaded, so
+    // this guard is a defensive belt, not the normal path.
+    if (!activeThreadId || sending || stream.state.status === "streaming") return;
+    if (!hasPendingProposalDecision(messages)) return;
+    const t = setInterval(() => void refreshThreadSilently(activeThreadId), PENDING_PROPOSAL_POLL_MS);
+    return () => clearInterval(t);
+  }, [activeThreadId, messages, sending, stream.state.status, refreshThreadSilently]);
 
   function selectThread(id: string) {
     if (id === activeThreadId) return;
@@ -249,7 +278,7 @@ export function AssistantWorkspace({ initialThreads, initialActiveThreadId, vari
   const hasPendingMessage = messages.some(isPendingMessage);
   const canSend = !!activeThreadId && !loadingThread && !sending && !hasPendingMessage && stream.state.status !== "streaming";
 
-  async function handleSend(text: string) {
+  async function handleSend(text: string, opts: SendMessageOpts = {}) {
     if (!activeThreadId || !canSend) return;
     setSending(true);
     const lastSeq = messages.length ? messages[messages.length - 1].seq : 0;
@@ -264,7 +293,9 @@ export function AssistantWorkspace({ initialThreads, initialActiveThreadId, vari
       provider: null, model: null, tokens: null, latencyMs: null, errorKind: null, createdAt: new Date().toISOString(),
     };
     setMessages((prev) => [...prev, optimisticUser]);
-    const r = await sendMessageAction(activeThreadId, outgoing);
+    // T4 (ASST-23, §7.4) — the tools-mode affordance: `opts` came straight from the Composer's own
+    // toggle/agent select, unchanged all the way down to `sendMessageAction`'s body-shaping.
+    const r = await sendMessageAction(activeThreadId, outgoing, opts);
     setSending(false);
     if (!r.ok) {
       setMessages((prev) => prev.filter((m) => m.id !== optimisticUser.id));
@@ -386,6 +417,7 @@ export function AssistantWorkspace({ initialThreads, initialActiveThreadId, vari
           streamState={stream.state}
           streamingMessageId={streamingMessageId}
           loading={loadingThread}
+          threadId={activeThreadId ?? ""}
         />
         <Composer canSend={canSend} streaming={stream.state.status === "streaming"} onSend={handleSend} onStop={handleStop} />
       </div>

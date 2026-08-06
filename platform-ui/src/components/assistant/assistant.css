@@ -258,6 +258,68 @@
 .asst-cite-chip--unavailable { cursor: default; border-color: var(--erp-hairline); color: var(--ink-faint); }
 .asst-cite-chip--unavailable:hover { background: transparent; }
 
+/* ---- Tool call chips (T4, ASST-23) — plain reads/refusals; same visual weight as citation chips - */
+.asst-toolchip-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.asst-toolchip {
+  display: inline-flex; align-items: center; gap: 6px; border: 0.5px solid var(--erp-hairline);
+  padding: 3px 9px; font: 400 11px var(--font-body); color: var(--ink-subtle);
+}
+.asst-toolchip__name { font: 400 11px var(--font-data); color: var(--text-primary); }
+.asst-toolchip__status { font: 700 9px var(--font-body); letter-spacing: 0.05em; text-transform: uppercase; }
+.asst-toolchip[data-status="succeeded"] .asst-toolchip__status { color: var(--status-ok-fg); }
+.asst-toolchip[data-status="failed"] .asst-toolchip__status { color: var(--status-danger-fg); }
+.asst-toolchip[data-status="denied"] .asst-toolchip__status { color: var(--status-idle-fg); }
+.asst-toolchip[data-status="running"] .asst-toolchip__status,
+.asst-toolchip[data-status="pending"] .asst-toolchip__status { color: var(--status-progress-fg); }
+
+/* ---- Proposal card (T4, ASST-23, §7.2) — the D14 execution chip: the full write-proposal
+   lifecycle (`awaiting_confirmation -> sent_for_approval -> executed|execution_failed|
+   not_executable | rejected | cancelled`, plus terminal-without-filing `dismissed`/`expired`). ---- */
+.asst-proposal-row { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
+.asst-proposal {
+  border: 0.5px solid var(--erp-hairline); background: var(--surface-card); padding: 12px 14px;
+  display: flex; flex-direction: column; gap: 8px; max-width: 420px;
+}
+.asst-proposal__head { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px; }
+.asst-proposal__tool { font: 600 12.5px var(--font-data); color: var(--text-primary); }
+.asst-proposal__impact { font: 700 9px var(--font-body); letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-subtle); }
+.asst-proposal__state { font: 700 9.5px var(--font-body); letter-spacing: 0.05em; text-transform: uppercase; margin-left: auto; }
+/* Colour tiers follow the SAME lifecycle mapping RosterPanel's own status chip already established
+   (terminal-ok=ok, terminal-bad=danger, waiting-on-a-human=warning/progress, closed-without-
+   success=idle) — see this file's ASST-21 section above. */
+.asst-proposal[data-state="awaiting_confirmation"] .asst-proposal__state { color: var(--status-warning-fg); }
+.asst-proposal[data-state="sent_for_approval"] .asst-proposal__state,
+.asst-proposal[data-state="executing"] .asst-proposal__state { color: var(--status-progress-fg); }
+.asst-proposal[data-state="executed"] .asst-proposal__state { color: var(--status-ok-fg); }
+.asst-proposal[data-state="execution_failed"] .asst-proposal__state { color: var(--status-danger-fg); }
+.asst-proposal[data-state="rejected"] .asst-proposal__state,
+.asst-proposal[data-state="cancelled"] .asst-proposal__state,
+.asst-proposal[data-state="dismissed"] .asst-proposal__state,
+.asst-proposal[data-state="expired"] .asst-proposal__state,
+.asst-proposal[data-state="not_executable"] .asst-proposal__state { color: var(--status-idle-fg); }
+
+.asst-proposal__args { margin: 0; display: flex; flex-direction: column; gap: 2px; }
+.asst-proposal__arg { display: flex; gap: 6px; font: 400 11.5px var(--font-data); }
+.asst-proposal__arg dt { color: var(--ink-faint); }
+.asst-proposal__arg dd { margin: 0; color: var(--ink-subtle); }
+.asst-proposal__hint { margin: 0; font: 400 11px var(--font-body); color: var(--ink-faint); font-style: italic; }
+.asst-proposal__error { margin: 0; font: 600 12px var(--font-body); color: var(--status-danger-fg); }
+.asst-proposal__actions { display: flex; gap: 8px; }
+.asst-proposal__link { font: 700 10px var(--font-body); letter-spacing: 0.05em; text-transform: uppercase; color: var(--erp-accent); text-decoration: none; }
+.asst-proposal__link:hover, .asst-proposal__link:focus-visible { text-decoration: underline; }
+
+/* ---- Composer tools-mode affordance (T4, ASST-23) ------------------------------------------------- */
+.asst-composer-toolbar { display: flex; align-items: center; gap: 10px; padding: 8px 20px 0; flex-wrap: wrap; }
+.asst-composer-toggle { display: flex; align-items: center; gap: 6px; font: 400 12px var(--font-body); color: var(--ink-subtle); }
+.asst-composer-toggle input { cursor: pointer; }
+.asst-composer__agent-select {
+  border: 0.5px solid var(--erp-hairline); background: transparent; cursor: pointer;
+  padding: 4px 7px; font: 400 12px var(--font-body); color: var(--text-primary);
+}
+.asst-composer__agent-select:focus-visible { outline: 2px solid var(--erp-accent); outline-offset: 1px; }
+.asst-composer__agent-select:disabled { cursor: not-allowed; opacity: 0.6; }
+.asst-composer__mode-hint { font: 400 11px var(--font-body); color: var(--ink-faint); }
+
 @media (max-width: 860px) {
   .asst-workspace, .asst-workspace--with-memory { grid-template-columns: 1fr; grid-template-rows: 220px 1fr; height: calc(100vh - 200px); }
   .asst-rail { border-right: none; border-bottom: 0.5px solid var(--erp-hairline); }

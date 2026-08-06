@@ -10,7 +10,10 @@ import "server-only";
 // returns `{status, json}`, which has no way to represent a stream, so the stream proxy route
 // (`app/api/assistant/threads/[id]/stream/route.ts`) calls this file directly instead of going
 // through `platformFetch`'s DEMO_MODE branch. See that route's header for the split.
-import type { AssistantMemoryScope, AssistantMessageRole, AssistantThreadStatus, HandoffStatus } from "./assistant";
+import type {
+  AssistantMemoryScope, AssistantMessageRole, AssistantThreadStatus, HandoffStatus,
+  AssistantToolAgent, ThreadToolCall, WriteIntentStatus,
+} from "./assistant";
 
 interface DemoThread {
   id: string;
@@ -49,6 +52,114 @@ interface DemoMessage {
   latencyMs: number | null;
   errorKind: string | null;
   createdAt: string;
+}
+
+// ── T4 (ASST-23, §7.4) — the tool-turn / write-proposal demo stores. Mirrors platform-nest's
+// `assistant_tool_calls` + `assistant_write_intents` + `automation_approvals` (redacted-args-at-
+// persist, real-args-only-in-the-intent-row, one confirm-time claim) as closely as a demo fixture
+// reasonably should — see each store's own comment for the one deliberate simplification each
+// makes over the real backend. ─────────────────────────────────────────────────────────────────────
+interface DemoToolCall {
+  id: string;
+  tenantId: string;
+  messageId: string;
+  toolName: string;
+  mcpServer: string | null;
+  /** Already redacted at creation (mirrors the real ledger's own invariant) — never a real value. */
+  args: unknown;
+  resultSummary: string | null;
+  status: string; // 'succeeded' | 'failed' | 'denied' | 'pending'
+  createdAt: string;
+}
+
+interface DemoWriteIntent {
+  id: string;
+  tenantId: string;
+  threadId: string;
+  toolCallId: string;
+  ownerUserId: string;
+  agent: string;
+  toolName: string;
+  /** The ONLY pre-filing home of the REAL (unredacted) args — NULL the instant status leaves
+   *  'draft', exactly like the real `assistant_write_intents.tool_args` column. */
+  toolArgs: Record<string, unknown> | null;
+  impact: string;
+  status: WriteIntentStatus;
+  approvalId: string | null;
+  expiresAt: string;
+}
+
+interface DemoWriteApproval {
+  id: string;
+  tenantId: string;
+  toolName: string;
+  status: "pending" | "approved" | "rejected" | "cancelled";
+  executionStatus: "pending" | "executing" | "executed" | "failed" | "not_applicable";
+  executionError: string | null;
+}
+
+// A small, fixed stand-in for `broker.ts`'s REAL `ASSISTANT_AGENT_TOOLS`/`ASSISTANT_AGENT_WRITE_TOOLS`
+// maps — demo mode has no broker process to ask. `status-reporter` first, matching the real
+// `DEFAULT_TOOL_AGENT`.
+const DEMO_TOOL_AGENTS: AssistantToolAgent[] = [
+  { name: "status-reporter", tools: ["projects.list", "tasks.list"], writeTools: [] },
+  { name: "approvals-chaser", tools: ["agency.pendingApprovals"], writeTools: [] },
+  { name: "task-filer", tools: ["projects.list", "tasks.list", "pm.createTask", "pm.createDoc"], writeTools: ["pm.createTask", "pm.createDoc"] },
+];
+
+const ASSISTANT_INTENT_TTL_MS = 60 * 60 * 1000; // mirrors the real default (config.assistantIntentTtlMs)
+
+/** Shape-only redaction — the SAME contract the real `redactToolArgs` holds (key names survive,
+ *  every value is destroyed), just without the depth-capping/array-collapsing a demo fixture never
+ *  needs to exercise. */
+function demoRedactArgs(args: Record<string, unknown>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(args)) {
+    out[key] = `[redacted:${Array.isArray(value) ? "array" : typeof value}]`;
+  }
+  return out;
+}
+
+/** Mirrors `broker.ts`'s `readTurnMode` — reads the fact off the placeholder ROW's own `parts`,
+ *  never off anything client-controlled (a query string, a re-sent body). */
+function readTurnModeDemo(parts: unknown): { agent: string } | null {
+  if (!Array.isArray(parts)) return null;
+  for (const p of parts) {
+    if (p && typeof p === "object" && (p as { type?: unknown }).type === "turn_mode" && (p as { mode?: unknown }).mode === "tools") {
+      const agent = typeof (p as { agent?: unknown }).agent === "string" ? (p as { agent: string }).agent : "status-reporter";
+      return { agent };
+    }
+  }
+  return null;
+}
+
+/** Lazy reap (mirrors `write-intents.ts`'s `reapExpiredIntents`) — flips any of THIS thread's
+ *  past-expiry drafts to 'expired' and scrubs `toolArgs`, called before every GET-thread join. */
+function reapExpiredIntentsDemo(threadId: string): void {
+  const nowMs = Date.now();
+  for (const intent of WRITE_INTENTS) {
+    if (intent.threadId === threadId && intent.status === "draft" && Date.parse(intent.expiresAt) <= nowMs) {
+      intent.status = "expired";
+      intent.toolArgs = null;
+    }
+  }
+}
+
+/** Mirrors `assistant.controller.ts`'s `fetchToolCallsByMessage` — the SAME LEFT-JOIN-by-`tool_call_id`/
+ *  `approval_id` precedence, over the demo stores instead of Postgres. Called AFTER
+ *  `reapExpiredIntentsDemo` so a past-expiry draft never reads as a stale 'draft' here. */
+function demoToolCallsForMessage(messageId: string): ThreadToolCall[] {
+  return TOOL_CALLS.filter((tc) => tc.messageId === messageId).map((tc) => {
+    const intent = WRITE_INTENTS.find((wi) => wi.toolCallId === tc.id) ?? null;
+    const approvalId = intent?.approvalId ?? null;
+    const approval = approvalId ? WRITE_APPROVALS.find((a) => a.id === approvalId) ?? null : null;
+    return {
+      id: tc.id, toolName: tc.toolName, mcpServer: tc.mcpServer, args: tc.args, resultSummary: tc.resultSummary,
+      status: tc.status, approvalId, durationMs: null, createdAt: tc.createdAt,
+      approval: approval ? { status: approval.status, executionStatus: approval.executionStatus, executionError: approval.executionError } : null,
+      intent: intent && !approvalId ? { status: intent.status, expiresAt: intent.expiresAt } : null,
+    };
+  });
 }
 
 // ASST-19 — durable memory (blueprint §4.1, memory #2 of 4). Owner-scoped the same way threads
@@ -205,6 +316,16 @@ declare global {
   var __gaiadaDemoAssistantMemory: DemoMemory[] | undefined;
   // eslint-disable-next-line no-var
   var __gaiadaDemoAssistantHandoffs: DemoHandoff[] | undefined;
+  // T4 — same cross-layer singleton requirement as THREADS/MESSAGES above (this session's own
+  // header explains why): the tool-turn simulation runs from the "route" layer
+  // (`demoAssistantStreamBody`), while confirm/dismiss run from the "action" layer
+  // (`assistantDemo`, called via `platformFetch`'s DEMO_MODE branch) — both must see the SAME rows.
+  // eslint-disable-next-line no-var
+  var __gaiadaDemoAssistantToolCalls: DemoToolCall[] | undefined;
+  // eslint-disable-next-line no-var
+  var __gaiadaDemoAssistantIntents: DemoWriteIntent[] | undefined;
+  // eslint-disable-next-line no-var
+  var __gaiadaDemoAssistantApprovals: DemoWriteApproval[] | undefined;
 }
 
 const THREADS: DemoThread[] = globalThis.__gaiadaDemoAssistantThreads ?? (globalThis.__gaiadaDemoAssistantThreads = seedThreads());
@@ -218,6 +339,10 @@ const MEMORY: DemoMemory[] = globalThis.__gaiadaDemoAssistantMemory ?? (globalTh
 // ASST-21 — same singleton requirement; read from the "action" layer via createHandoffAction/
 // refreshHandoffsAction.
 const HANDOFFS: DemoHandoff[] = globalThis.__gaiadaDemoAssistantHandoffs ?? (globalThis.__gaiadaDemoAssistantHandoffs = []);
+// T4 — see the singleton declaration's own comment above.
+const TOOL_CALLS: DemoToolCall[] = globalThis.__gaiadaDemoAssistantToolCalls ?? (globalThis.__gaiadaDemoAssistantToolCalls = []);
+const WRITE_INTENTS: DemoWriteIntent[] = globalThis.__gaiadaDemoAssistantIntents ?? (globalThis.__gaiadaDemoAssistantIntents = []);
+const WRITE_APPROVALS: DemoWriteApproval[] = globalThis.__gaiadaDemoAssistantApprovals ?? (globalThis.__gaiadaDemoAssistantApprovals = []);
 
 interface DemoResult { status: number; json: unknown }
 const ok = (json: unknown): DemoResult => ({ status: 200, json });
@@ -269,9 +394,19 @@ export function assistantDemo(method: string, p: string, params: URLSearchParams
     if (!thread || thread.ownerUserId !== userId) return { status: 404, json: { error: "thread not found" } };
     const pending = MESSAGES.some((msg) => msg.threadId === threadId && msg.role === "assistant" && msg.content === null && msg.errorKind === null);
     if (pending) return { status: 409, json: { error: "a response is already streaming for this thread — stop it or wait for it to finish" } };
-    const b = JSON.parse(body || "{}") as { content?: string };
+    const b = JSON.parse(body || "{}") as { content?: string; mode?: string; agent?: string };
     const content = (b.content ?? "").trim();
     if (!content) return { status: 400, json: { error: "content is required" } };
+    // T4 (ASST-23) — mirrors `assistant.controller.ts`'s `sendMessage`: an unknown `mode` value or
+    // an agent that isn't a real (demo) tool agent 400s at SEND time, never mid-stream.
+    if (b.mode !== undefined && b.mode !== "chat" && b.mode !== "tools") {
+      return { status: 400, json: { error: "mode must be 'chat' or 'tools'" } };
+    }
+    const toolMode = b.mode === "tools";
+    const agent = typeof b.agent === "string" && b.agent ? b.agent : "status-reporter";
+    if (toolMode && !DEMO_TOOL_AGENTS.some((a) => a.name === agent)) {
+      return { status: 400, json: { error: `agent must be one of ${DEMO_TOOL_AGENTS.map((a) => a.name).join(",")}` } };
+    }
     const threadMsgs = MESSAGES.filter((msg) => msg.threadId === threadId);
     const nextSeq = (threadMsgs.length ? Math.max(...threadMsgs.map((msg) => msg.seq)) : 0) + 1;
     MESSAGES.push({
@@ -279,11 +414,21 @@ export function assistantDemo(method: string, p: string, params: URLSearchParams
       parts: null, provider: null, model: null, tokens: null, latencyMs: null, errorKind: null, createdAt: now(),
     });
     const assistantId = nid("asst-msg");
+    // ASST-17 — the placeholder row records the turn mode in `parts` (mirrors the real
+    // `turnModePart`), which is what `demoAssistantStreamBody` reads back to decide whether to
+    // simulate a tool turn at all — never trusting a client-controlled query string either.
+    const placeholderParts = toolMode ? [{ type: "turn_mode", mode: "tools", agent }] : null;
     MESSAGES.push({
       id: assistantId, tenantId, threadId, seq: nextSeq + 1, role: "assistant", content: null, partial: "",
-      parts: null, provider: null, model: null, tokens: null, latencyMs: null, errorKind: null, createdAt: now(),
+      parts: placeholderParts, provider: null, model: null, tokens: null, latencyMs: null, errorKind: null, createdAt: now(),
     });
-    return { status: 201, json: { messageId: assistantId, streamUrl: `/api/${tenantId}/assistant/threads/${threadId}/stream?messageId=${assistantId}` } };
+    return {
+      status: 201,
+      json: {
+        messageId: assistantId,
+        streamUrl: `/api/${tenantId}/assistant/threads/${threadId}/stream?messageId=${assistantId}${toolMode ? "&mode=tools" : ""}`,
+      },
+    };
   }
 
   const stopM = p.match(/^\/api\/([^/]+)\/assistant\/threads\/([^/]+)\/stop$/);
@@ -333,13 +478,21 @@ export function assistantDemo(method: string, p: string, params: URLSearchParams
     }
     // GET
     if (!thread || thread.ownerUserId !== userId) return { status: 404, json: { error: "thread not found" } };
+    // T4 (ASST-23, §7.2.3) — the SAME "lazy reap, same request" idiom the real `getThread` uses,
+    // BEFORE the join below reads `WRITE_INTENTS` — a past-expiry draft must never read as a stale
+    // 'draft' on this response.
+    reapExpiredIntentsDemo(threadId);
     const messageLimit = Math.max(1, Math.min(500, Number(params.get("messageLimit")) || 200));
     const beforeSeqRaw = params.get("beforeSeq");
     const beforeSeq = beforeSeqRaw ? Number(beforeSeqRaw) : null;
     let msgs = MESSAGES.filter((msg) => msg.threadId === threadId).sort((a, b) => a.seq - b.seq);
     if (beforeSeq != null) msgs = msgs.filter((msg) => msg.seq < beforeSeq);
     const page = msgs.slice(-messageLimit);
-    return ok({ thread: pubThread(thread), messages: page.map(pubMessage), hasMoreMessages: page.length === messageLimit });
+    // T4 — additive `toolCalls[]` per message, mirroring `fetchToolCallsByMessage`'s shape exactly
+    // (docs/FRONTEND-BFF-CONTRACT.md §18's T3a/T3b addenda) — every OTHER message field is
+    // untouched (`pubMessage` unchanged).
+    const messages = page.map((msg) => ({ ...pubMessage(msg), toolCalls: demoToolCallsForMessage(msg.id) }));
+    return ok({ thread: pubThread(thread), messages, hasMoreMessages: page.length === messageLimit });
   }
 
   const listCreateM = p.match(/^\/api\/([^/]+)\/assistant\/threads$/);
@@ -490,6 +643,67 @@ export function assistantDemo(method: string, p: string, params: URLSearchParams
     return ok(rows.map(pubHandoff));
   }
 
+  // ── T4 (ASST-23, §7.2) — confirm/dismiss: the owner's confirm chip ─────────────────────────────────
+  // Mirrors `write-intents.ts`'s single-winner claim (single-threaded here, so "claim" is just "find
+  // the still-draft row and flip it") and its idempotent-replay/typed-conflict shape. **ONE
+  // deliberate demo-only simplification, stated so it reads as a choice, not an accident**: the real
+  // backend's `confirmWriteIntent` files a `pending` approval and a HUMAN elsewhere decides it later
+  // (D14); demo mode has no second "decide" surface to fake for THIS specific approval shape without
+  // duplicating the whole automation-approvals demo store (`demoFixtures.ts`'s own
+  // `AUTOMATION_APPROVALS`, a much larger, unrelated fixture this ticket deliberately does not
+  // touch). So confirming a demo write resolves straight to `approved`+`executed` — the SAME
+  // "resolves instantly, no fake async loop" convention `DemoHandoff` already uses for handoffs,
+  // applied here for the identical reason. This is enough to drive the full card lifecycle
+  // (`awaiting_confirmation -> sent_for_approval` (visible for one tick in the response below,
+  // in case a caller inspects it) `-> executed`) end to end in DEMO_MODE/e2e; the "a HUMAN decides
+  // out of band" half of the story is proven against the LIVE stack (T5), not here.
+  const confirmWriteM = p.match(/^\/api\/([^/]+)\/assistant\/threads\/([^/]+)\/tool-calls\/([^/]+)\/confirm$/);
+  if (confirmWriteM && m === "POST") {
+    const [, tenantId, threadId, callId] = confirmWriteM;
+    const thread = THREADS.find((t) => t.id === threadId && t.tenantId === tenantId);
+    if (!thread || thread.ownerUserId !== userId) return { status: 404, json: { error: "thread not found" } };
+    reapExpiredIntentsDemo(threadId);
+    const intent = WRITE_INTENTS.find((wi) => wi.toolCallId === callId && wi.threadId === threadId);
+    if (!intent) return { status: 404, json: { error: "no write proposal found for this tool call" } };
+    if (intent.status !== "draft") {
+      if (intent.status === "filed") {
+        // Idempotent replay/double-click — the row already reached THIS action's target state.
+        const approval = intent.approvalId ? WRITE_APPROVALS.find((a) => a.id === intent.approvalId) ?? null : null;
+        return ok({
+          intentId: intent.id, status: "filed", approvalId: intent.approvalId,
+          approval: approval ? { status: approval.status, executionStatus: approval.executionStatus, executionError: approval.executionError } : null,
+        });
+      }
+      return { status: 409, json: { error: `cannot confirm: this write proposal is '${intent.status}'`, status: intent.status } };
+    }
+    const approvalId = nid("demo-approval");
+    WRITE_APPROVALS.push({ id: approvalId, tenantId, toolName: intent.toolName, status: "approved", executionStatus: "executed", executionError: null });
+    intent.status = "filed";
+    intent.approvalId = approvalId;
+    intent.toolArgs = null; // scrubbed the instant the row leaves 'draft', in every direction
+    return ok({
+      intentId: intent.id, status: "filed", approvalId,
+      approval: { status: "approved", executionStatus: "executed", executionError: null },
+    });
+  }
+
+  const dismissWriteM = p.match(/^\/api\/([^/]+)\/assistant\/threads\/([^/]+)\/tool-calls\/([^/]+)\/dismiss$/);
+  if (dismissWriteM && m === "POST") {
+    const [, tenantId, threadId, callId] = dismissWriteM;
+    const thread = THREADS.find((t) => t.id === threadId && t.tenantId === tenantId);
+    if (!thread || thread.ownerUserId !== userId) return { status: 404, json: { error: "thread not found" } };
+    reapExpiredIntentsDemo(threadId);
+    const intent = WRITE_INTENTS.find((wi) => wi.toolCallId === callId && wi.threadId === threadId);
+    if (!intent) return { status: 404, json: { error: "no write proposal found for this tool call" } };
+    if (intent.status !== "draft") {
+      if (intent.status === "dismissed") return ok({ intentId: intent.id, status: "dismissed", approvalId: null, approval: null });
+      return { status: 409, json: { error: `cannot dismiss: this write proposal is '${intent.status}'`, status: intent.status } };
+    }
+    intent.status = "dismissed";
+    intent.toolArgs = null;
+    return ok({ intentId: intent.id, status: "dismissed", approvalId: null, approval: null });
+  }
+
   // ── ASST-18: capabilities panel + empty-state cards ─────────────────────────────────────────────
   // A small, fixed set standing in for `visibleToolsFor(user) ∩ module gates` — no per-user Cerbos
   // decision to fake here (this is demo mode, not a backend), so every demo identity sees the same
@@ -505,6 +719,11 @@ export function assistantDemo(method: string, p: string, params: URLSearchParams
         { name: "agency.pendingApprovals", description: "Approvals waiting for a decision", module: "agency" },
       ],
       hubConfigured: true,
+      // T4 (ASST-23, §7.4) — the composer's tools-mode agent picker source. Real endpoint sources
+      // this from `broker.ts`'s own `ASSISTANT_AGENT_TOOLS`/`ASSISTANT_AGENT_WRITE_TOOLS`; demo mode
+      // has no broker, so `DEMO_TOOL_AGENTS` stands in (defined near this file's other demo-roster
+      // constants).
+      toolAgents: DEMO_TOOL_AGENTS,
     });
   }
 
@@ -574,6 +793,9 @@ export function demoAssistantStreamBody(tenantId: string, threadId: string, mess
   const userMsg = MESSAGES.find((msg) => msg.threadId === threadId && msg.seq === placeholder.seq - 1 && msg.role === "user");
   const sourceText = (userMsg?.content ?? "").trim();
   const encoder = new TextEncoder();
+  // ASST-17/T4 — read the turn mode off the ROW, exactly like the real relay/broker does (see
+  // `readTurnModeDemo`'s own header) — never off anything client-supplied at stream-open time.
+  const turnMode = readTurnModeDemo(placeholder.parts);
 
   return new ReadableStream<Uint8Array>({
     async start(controller) {
@@ -584,6 +806,75 @@ export function demoAssistantStreamBody(tenantId: string, threadId: string, mess
           // controller already closed (client aborted) — nothing left to do.
         }
       };
+
+      // ── T4 (ASST-23, §7.4) — THE TOOL-TURN SIMULATION. Deliberately its own branch, checked
+      // first: a tools-mode turn never falls through to the plain-chat echo below (and the
+      // ERROR_TEST/STALL_TEST hooks are plain-chat-only test affordances, not meaningful here). ────
+      if (turnMode) {
+        const agentDef = DEMO_TOOL_AGENTS.find((a) => a.name === turnMode.agent);
+        const readTool = agentDef?.tools[0] ?? "projects.list";
+        const readCallId = nid("asst-toolcall");
+        TOOL_CALLS.push({
+          id: readCallId, tenantId, messageId, toolName: readTool, mcpServer: "mcp-hub",
+          args: {}, resultSummary: null, status: "succeeded", createdAt: now(),
+        });
+        enqueue(`event: tool_call\ndata: ${JSON.stringify({ callId: readCallId, toolName: readTool, args: {} })}\n\n`);
+        await sleep(120);
+        enqueue(`event: tool_result\ndata: ${JSON.stringify({ callId: readCallId, toolName: readTool, status: "succeeded", summary: null })}\n\n`);
+
+        let finalText: string;
+        let errorKind: string | null = null;
+        const writeTool = agentDef?.writeTools[0];
+        if (writeTool) {
+          // A write-capable agent (`task-filer`) drafts a write EVERY turn — deterministic and
+          // drivable with no need to parse the user's message for intent (a demo fixture, not an
+          // LLM). Real args live ONLY in the intent row (§7.2.4's custody chain); the ledger row
+          // and the wire both ever see the REDACTED copy.
+          const realArgs: Record<string, unknown> = writeTool === "pm.createTask"
+            ? { projectId: "demo-project-1", title: sourceText || "Untitled task", assigneeId: "demo-hansel" }
+            : { projectId: "demo-project-1", title: sourceText || "Untitled doc" };
+          const redactedArgs = demoRedactArgs(realArgs);
+          const writeCallId = nid("asst-toolcall");
+          const intentId = nid("asst-intent");
+          const expiresAt = new Date(Date.now() + ASSISTANT_INTENT_TTL_MS).toISOString();
+          TOOL_CALLS.push({
+            id: writeCallId, tenantId, messageId, toolName: writeTool, mcpServer: "mcp-hub",
+            args: redactedArgs, resultSummary: "awaiting your confirmation before this is sent for approval",
+            status: "pending", createdAt: now(),
+          });
+          WRITE_INTENTS.push({
+            id: intentId, tenantId, threadId, toolCallId: writeCallId, ownerUserId: thread.ownerUserId,
+            agent: turnMode.agent, toolName: writeTool, toolArgs: realArgs, impact: "high",
+            status: "draft", approvalId: null, expiresAt,
+          });
+          enqueue(`event: confirm_required\ndata: ${JSON.stringify({ callId: writeCallId, toolName: writeTool, intentId, args: redactedArgs, impact: "high", expiresAt })}\n\n`);
+          finalText = `I've drafted a ${writeTool} write. Confirm it to send it for approval, or dismiss it — nothing has been changed or sent yet.`;
+          errorKind = "confirm_required";
+        } else {
+          finalText = `(demo) Using ${readTool}, here's what I found: 3 open projects, 12 open tasks assigned to you.`;
+        }
+
+        enqueue(`event: meta\ndata: ${JSON.stringify({ provider: "agent-runner", model: "" })}\n\n`);
+        enqueue(`event: token\ndata: ${JSON.stringify({ text: finalText })}\n\n`);
+        const toolTokens = Math.max(1, Math.ceil(finalText.length / 4));
+        enqueue(`event: usage\ndata: ${JSON.stringify({ tokens: toolTokens, latencyMs: 0, source: "estimate" })}\n\n`);
+        if (errorKind) {
+          enqueue(`event: error\ndata: ${JSON.stringify({ error: finalText, errorKind })}\n\n`);
+        } else {
+          enqueue(`event: done\ndata: {}\n\n`);
+        }
+        placeholder.content = finalText;
+        placeholder.tokens = toolTokens;
+        placeholder.errorKind = errorKind;
+        // The turn_mode part this row was created with (see `sendMessage`'s POST handler) is
+        // preserved — only the fields a REAL turn would also update are touched here.
+        thread.totalTokens += toolTokens;
+        thread.lastMessageAt = now();
+        thread.updatedAt = now();
+        controller.close();
+        return;
+      }
+
       if (/ERROR_TEST/i.test(sourceText)) {
         await sleep(250);
         enqueue(`event: error\ndata: ${JSON.stringify({ error: "Demo-forced failure (message contained ERROR_TEST).", errorKind: "upstream_error" })}\n\n`);

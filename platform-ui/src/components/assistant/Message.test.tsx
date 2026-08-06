@@ -25,6 +25,7 @@ describe("Message — streaming aria-live containment", () => {
         streaming
         liveText="Hel"
         liveState={{ ...initialStreamState(), status: "streaming", text: "Hel" }}
+        threadId="t1"
       />,
     );
     const article = screen.getByRole("article");
@@ -32,7 +33,7 @@ describe("Message — streaming aria-live containment", () => {
   });
 
   it("does NOT set aria-live on a finished/historical row — the log's own implicit polite live-ness is left to do its normal job of announcing new rows", () => {
-    render(<Message message={baseMessage()} />);
+    render(<Message message={baseMessage()} threadId="t1" />);
     const article = screen.getByRole("article");
     expect(article).not.toHaveAttribute("aria-live");
   });

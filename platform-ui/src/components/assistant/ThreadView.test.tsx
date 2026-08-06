@@ -20,7 +20,7 @@ Element.prototype.scrollIntoView = vi.fn();
 describe("ThreadView — empty-state heading order", () => {
   it("renders the empty-state label as a real <h2>, not a styled paragraph", () => {
     render(
-      <ThreadView messages={[]} streamState={initialStreamState()} streamingMessageId={null} loading={false} />,
+      <ThreadView messages={[]} streamState={initialStreamState()} streamingMessageId={null} loading={false} threadId="" />,
     );
     expect(screen.getByRole("heading", { level: 2, name: "Assistant" })).toBeInTheDocument();
   });
@@ -35,6 +35,7 @@ describe("ThreadView — empty-state heading order", () => {
         streamState={initialStreamState()}
         streamingMessageId={null}
         loading={false}
+        threadId="t1"
       />,
     );
     expect(screen.getByRole("log", { name: "Conversation" })).toBeInTheDocument();

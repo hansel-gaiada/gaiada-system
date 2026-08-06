@@ -1483,7 +1483,7 @@ returns the same shape, pinned in `lib/mail.test.ts`. `platform-ui`'s new `/appr
 new `GET .../:id` rows above for the reads it's built on, and MODULES.md/CHANGELOG.md for the
 full writeup (both projects, `IN PROGRESS`, `PENDING-DEPLOY` on the live-walk ACs).
 
-## 18. Assistant module (ASST-* program, 2026-08-05) — `modules/assistant/assistant.controller.ts` — **BACKEND ✅ BUILT — threads/messages CRUD (ASST-05) + send→stream engine (ASST-06); no UI consumer yet**
+## 18. Assistant module (ASST-* program, 2026-08-05) — `modules/assistant/assistant.controller.ts` — **BACKEND ✅ BUILT — threads/messages CRUD (ASST-05) + send→stream engine (ASST-06); FE ✅ BUILT (ASST-07 + the ASST-16/17/18/19/21 iterations + T4, 2026-08-06)**
 
 From `docs/blueprints/assistant-foundation.md` (design) and
 `docs/superpowers/plans/2026-08-05-d14-and-assistant-tickets.md` ("### ASST-05", the authoritative
@@ -1578,13 +1578,22 @@ with other resources' admin-bypass rules. Do not add one; see the policy file's 
   disconnecting client-side (tab closed) triggers the identical cancellation path.
 - Deliberately **NO** `writeActivity()`/`notify()` call on any of the above (same reasoning as
   ASST-05's CRUD — see above).
-- **⬜ PENDING (ASST-06+):** `GET /api/:t/assistant/capabilities`,
-  `GET·POST·DELETE /api/:t/assistant/memory`, `POST .../messages/:id/feedback`,
-  `POST .../threads/:id/handoff` — phases 2-5 of the blueprint's build sequence (§9), not
-  decomposed into tickets yet. Tool-call (`tool_call`/`tool_result`/`approval_required`) SSE
-  events are Phase 3 — this ticket's relay never emits them.
-- **⬜ PENDING:** `/assistant` UI (`platform-ui`) + `lib/assistant.ts` (ASST-07). Backend is
-  UI-ready for all eight endpoints above.
+- **Corrected 2026-08-06 (T4):** the two bullets below this note were ASST-06's original "not built
+  yet" list — stale, per this doc's own "a stale 'no UI consumer yet' row is a real defect" rule
+  (platform-ui/CLAUDE.md). Current status: `GET :t/assistant/capabilities` (ASST-18), memory
+  CRUD (ASST-19), `POST .../threads/:id/handoff` (ASST-21) all shipped with FE consumers.
+  `POST .../messages/:id/feedback` remains genuinely unbuilt (not part of any landed ticket).
+  `tool_call`/`tool_result`/`approval_required` (ASST-17) plus `confirm_required` (T3b) all have a
+  live FE decoder + renderer as of T4 (below) — `/assistant`'s composer can send `mode:'tools'`,
+  the transcript renders tool chips + the full D14 proposal card, and Confirm/Dismiss call T3b's
+  endpoints. Original text, left as written rather than edited in place:
+  - ~~PENDING (ASST-06+): `GET /api/:t/assistant/capabilities`,
+    `GET·POST·DELETE /api/:t/assistant/memory`, `POST .../messages/:id/feedback`,
+    `POST .../threads/:id/handoff` — phases 2-5 of the blueprint's build sequence (§9), not
+    decomposed into tickets yet. Tool-call (`tool_call`/`tool_result`/`approval_required`) SSE
+    events are Phase 3 — this ticket's relay never emits them.~~
+  - ~~PENDING: `/assistant` UI (`platform-ui`) + `lib/assistant.ts` (ASST-07). Backend is
+    UI-ready for all eight endpoints above.~~
 - **DEVOPS — SSE-BEHIND-A-PROXY (ASST-09, config written 2026-08-05, NOT YET applied to the live
   box):** nginx buffers SSE by default; the client portal's own stream
   (`core/portal-stream.controller.ts`) needed a hand-applied `proxy_buffering off` /
@@ -2426,3 +2435,63 @@ for any future `fileOnSuspend:true` caller; it simply no longer occurs on THIS p
   runner's goal, before the confirm machinery exists); the transcript-redaction invariant (the
   `confirm_required` frame and every GET carry redacted args + `intentId` only, exactly like
   `approval_required`'s existing rule).
+
+### T4 — platform-ui: event grammar + proposal card + tools-mode composer (ASST-23, §7.4, 2026-08-06)
+
+Pure FE work — no new backend endpoint; this section records how the FE now CONSUMES every shape
+T3a/T3b already defined above (per platform-ui/CLAUDE.md's "update the relevant § when you add or
+change a consumed endpoint" rule).
+
+- ✅ **`lib/assistant.ts`** decodes all four tool-turn SSE frames (`tool_call`/`tool_result`/
+  `approval_required`/`confirm_required` — previously decoded to `null`, pinned by
+  `lib/assistant.test.ts`'s old ":105" case; that pin is now inverted onto a genuinely-unrecognised
+  event name, not deleted). New types: `ThreadToolCall`/`ToolCallApprovalJoin`/`ToolCallIntentJoin`
+  (mirror `assistant.controller.ts`'s `ThreadToolCall` byte-for-byte) and `AssistantMessage.toolCalls?`
+  (additive). `StreamState.toolCalls: LiveToolCall[]` accumulates the SSE-live view by `callId`.
+- ✅ **`deriveProposalCardState(call)`** is THE trap fix, mechanized: reads `intent` first,
+  `approval` second, and only falls back to "not a proposal" (`'plain'`) when BOTH are absent —
+  `approvalId` itself is never read as a discriminant anywhere in the FE. Full state set:
+  `awaiting_confirmation | sent_for_approval | executing | executed | execution_failed |
+  not_executable | rejected | cancelled | dismissed | expired | plain`.
+- ✅ **UI**: `components/assistant/ProposalCard.tsx` (the D14 execution chip — Confirm/Dismiss call
+  `confirmWriteAction`/`dismissWriteAction`, POSTing `tool-calls/:callId/confirm|dismiss` with an
+  EMPTY body, per T3b's own "the confirm request carries no args" invariant; the redacted args are
+  rendered via `formatRedactedArgs`, never a real value), `ToolCallChips.tsx` (plain reads/refusals).
+  `Message.tsx` partitions a turn's tool calls (`partitionToolCalls`, split on `isWriteProposal`,
+  never `approvalId` alone) and suppresses the generic red-error paragraph for
+  `errorKind ∈ {confirm_required, approval_required}` — rendered as proposal-pending, **not** error
+  styling, and this ticket introduces **no** "approval does not execute" copy (verified none existed
+  before it either — nothing to remove, only a requirement not to add one).
+- ✅ **`Composer.tsx`** gains the tools-mode affordance (a checkbox + agent `<select>`, sourced from
+  `GET :t/assistant/capabilities`'s new `toolAgents` field — never a hand-maintained FE mirror) —
+  the first UI path able to send `mode:'tools'`/`agent` at all. `sendMessageAction` only adds
+  `mode`/`agent` to the POST body when tools mode is actually engaged; a plain chat send's body is
+  byte-identical to pre-T4 (`{content}` only).
+- ✅ **Pending-poll**: `AssistantWorkspace` re-fetches the thread (silently — never through
+  `loadThread`, which flips the `loading` flag and would blank `ThreadView` on every tick) every 4s
+  while `hasPendingProposalDecision(messages)` is true (a card `sent_for_approval`/`executing` —
+  i.e. a decision that could land out-of-band, on `/approvals/[id]`, in a different session).
+- ✅ **A11y** (VER-03's standing gap rule — not a follow-up): Confirm/Dismiss are real `<button>`s
+  with a tool-naming `aria-label` (disambiguates two proposal cards on the same thread), inherit the
+  app-wide `:focus-visible` ring via the shared `lux-btn` classes. A proposal card appearing
+  mid-stream is not an announcement storm: it mutates at most a handful of discrete times per turn
+  (never token-by-token, unlike the typewriter, which is what `aria-live="off"` on the streaming row
+  already exists to contain) — the SAME "meta/citations arrive once, non-terminal" precedent ASST-12/
+  18 already established for this exact `role="log"` region.
+- **DEMO_MODE**: `lib/demoAssistant.ts` gained `toolAgents` on the capabilities fixture, a
+  `assistant_write_intents`/`assistant_tool_calls`/automation-approval-lite store set, tools-mode
+  send-time validation, and a full tool-turn stream simulation (read-only chip for
+  `status-reporter`/`approvals-chaser`, a deterministic `pm.createTask` draft for `task-filer`) plus
+  the confirm/dismiss endpoints. **One stated demo-only simplification**: confirming a demo draft
+  resolves straight to `approved`+`executed` (mirrors `DemoHandoff`'s own "resolves instantly, no
+  fake async loop" convention) rather than faking a separate human-decides-later step against a
+  second demo approvals store — sufficient to drive the full card lifecycle in DEMO_MODE/e2e; the
+  "a human decides out of band, in a different session" half of the story is a live-stack-only
+  proof (T5), not a demo-mode one.
+- Tests: `lib/assistant.test.ts` (new decode/reducer/`deriveProposalCardState`/`partitionToolCalls`/
+  `hasPendingProposalDecision` cases), `components/assistant/ProposalCard.test.tsx` (8 — button
+  presence per state, the confirm/dismiss request shape, the "fresher prop beats a stale local
+  override" regression guard), `ToolCallChips.test.tsx`, `lib/demoAssistant.test.ts` (11 — an
+  integration test over the real demo dispatcher + the real SSE generator, not further mocked:
+  proves send-time 400s, the read-only chip path, the full write-proposal lifecycle including the
+  redaction check, double-confirm idempotency, and the 409/404 refusal shapes).

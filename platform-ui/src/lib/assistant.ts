@@ -59,6 +59,56 @@ export interface AssistantMessage {
   latencyMs: number | null;
   errorKind: string | null;
   createdAt: string;
+  // T4 (ASST-23, §7.4/T3a+T3b) — additive, GET-thread-only field (never present on an optimistic
+  // local/placeholder message this UI constructs itself — see AssistantWorkspace's `handleSend`).
+  // `undefined` and `[]` mean the same thing ("nothing to render") everywhere this is read; kept
+  // optional rather than defaulted at every construction site so the existing optimistic-message
+  // literals don't all need editing for a field they can never actually populate themselves.
+  toolCalls?: ThreadToolCall[];
+}
+
+// ============================================================== ASST-23/T3a+T3b: tool-call ledger ===
+// Mirrors platform-nest's `ThreadToolCall` (assistant.controller.ts) byte-for-byte — see
+// docs/FRONTEND-BFF-CONTRACT.md §18's "T3a"/"T3b" addenda. THE TRAP (stated once, load-bearing):
+// `approvalId` reads `null` for TWO different reasons — a plain read/refusal that was never a write
+// proposal at all, AND a drafted write that hasn't been confirmed (filed) yet. Never branch card
+// state on `approvalId` alone; `deriveProposalCardState` below reads `intent` first, `approval`
+// second, and only falls back to "not a proposal" when BOTH are null — that ordering IS the fix for
+// the trap, not a style choice.
+export interface ToolCallApprovalJoin {
+  status: string; // 'pending' | 'approved' | 'rejected' | 'cancelled'
+  executionStatus: string; // 'pending' | 'executing' | 'executed' | 'failed' | 'not_applicable'
+  executionError: string | null;
+}
+
+export type WriteIntentStatus = "draft" | "filed" | "dismissed" | "expired";
+
+export interface ToolCallIntentJoin {
+  status: WriteIntentStatus;
+  expiresAt: string;
+}
+
+/** The shape both `ThreadToolCall` (persisted, GET thread) and `LiveToolCall` (in-flight, SSE)
+ *  satisfy — the common input `deriveProposalCardState` reads, so one function works for a card
+ *  rendered mid-stream and the SAME card re-rendered from the reload-joined state after. */
+export interface ProposalJoinable {
+  approval: ToolCallApprovalJoin | null;
+  intent: { status: WriteIntentStatus } | null;
+}
+
+export interface ThreadToolCall extends ProposalJoinable {
+  id: string;
+  toolName: string;
+  mcpServer: string | null;
+  /** Always the REDACTED shape (`redactToolArgs` on the backend) — shape-only, never a real value.
+   *  See `formatRedactedArgs` for how this renders. */
+  args: unknown;
+  resultSummary: string | null;
+  status: string; // 'succeeded' | 'failed' | 'denied' | 'pending'
+  approvalId: string | null;
+  durationMs: number | null;
+  createdAt: string;
+  intent: ToolCallIntentJoin | null;
 }
 
 export interface ThreadListResult { items: AssistantThread[]; total: number }
@@ -302,6 +352,22 @@ export type ClientStreamEvent =
   // already finished by the time the stream opens at all). Absent entirely on a turn that used no
   // RAG grounding — never an empty-items frame (mirrors platform-nest's `citationParts`).
   | { type: "citations"; items: AssistantCitation[] }
+  // ── T4 (ASST-23, §7.4) — the tool-turn frames. Until this ticket these all decoded to `null`
+  // (pinned by lib/assistant.test.ts's old ":105" case) — ASST-17/T3a/T3b made them real, on the
+  // tool-turn path only; a plain chat turn's wire never emits any of these four. ──────────────────
+  // `{callId, toolName, args}` — `args` is ALWAYS the redacted shape (never a real value; see
+  // `formatRedactedArgs`).
+  | { type: "tool_call"; callId: string; toolName: string; args: unknown }
+  | { type: "tool_result"; callId: string; toolName: string; status: "succeeded" | "failed" | "denied"; summary: string | null }
+  // The LEGACY/defensive shape (broker.ts: a write that got filed at turn time — never this
+  // ticket's normal chat-path outcome, see `confirm_required` below — but still real: a handoff-
+  // origin suspension, or a future `fileOnSuspend:true` caller). `impact` is `null`-tolerant (the
+  // approval row's own `impact` column can, in principle, be absent).
+  | { type: "approval_required"; callId: string; toolName: string; approvalId: string; impact: string | null }
+  // T3b (§7.2.7) — the owner's confirm-chip draft. `args` is REDACTED (the real args live only in
+  // `assistant_write_intents.tool_args`, server-side, keyed by `intentId` — never sent to the
+  // browser). This is the NORMAL suspended-write outcome on the chat path today.
+  | { type: "confirm_required"; callId: string; toolName: string; intentId: string; args: unknown; impact: string; expiresAt: string }
   | { type: "done" }
   | { type: "error"; error: string; errorKind: string };
 
@@ -317,6 +383,7 @@ export function decodeAssistantEvent(block: RawSSEBlock): ClientStreamEvent | nu
     return null;
   }
   const obj = (data && typeof data === "object" ? data : {}) as Record<string, unknown>;
+  const str = (v: unknown): string | null => (typeof v === "string" ? v : null);
   switch (block.event) {
     case "token":
       return typeof obj.text === "string" ? { type: "token", text: obj.text } : null;
@@ -346,6 +413,37 @@ export function decodeAssistantEvent(block: RawSSEBlock): ClientStreamEvent | nu
         .map((it) => ({ sourceRef: it.sourceRef, text: it.text }));
       return { type: "citations", items };
     }
+    // ── T4: the four tool-turn frames — each requires only the fields it renders; a block missing
+    // a required field decodes to `null` (same "drop, don't throw" guard as every case above). ────
+    case "tool_call": {
+      const callId = str(obj.callId);
+      const toolName = str(obj.toolName);
+      if (!callId || !toolName) return null;
+      return { type: "tool_call", callId, toolName, args: obj.args ?? {} };
+    }
+    case "tool_result": {
+      const callId = str(obj.callId);
+      const toolName = str(obj.toolName);
+      const status = obj.status;
+      if (!callId || !toolName || (status !== "succeeded" && status !== "failed" && status !== "denied")) return null;
+      return { type: "tool_result", callId, toolName, status, summary: str(obj.summary) };
+    }
+    case "approval_required": {
+      const callId = str(obj.callId);
+      const toolName = str(obj.toolName);
+      const approvalId = str(obj.approvalId);
+      if (!callId || !toolName || !approvalId) return null;
+      return { type: "approval_required", callId, toolName, approvalId, impact: str(obj.impact) };
+    }
+    case "confirm_required": {
+      const callId = str(obj.callId);
+      const toolName = str(obj.toolName);
+      const intentId = str(obj.intentId);
+      const impact = str(obj.impact);
+      const expiresAt = str(obj.expiresAt);
+      if (!callId || !toolName || !intentId || !impact || !expiresAt) return null;
+      return { type: "confirm_required", callId, toolName, intentId, args: obj.args ?? {}, impact, expiresAt };
+    }
     case "done":
       return { type: "done" };
     case "error":
@@ -371,6 +469,30 @@ export function decodeAssistantEvent(block: RawSSEBlock): ClientStreamEvent | nu
 
 export type StreamStatus = "idle" | "streaming" | "done" | "error" | "stopped";
 
+// T4 (ASST-23) — the live, in-flight view of one tool call, accumulated across the `tool_call` /
+// `tool_result` / `approval_required` / `confirm_required` frames by callId. Satisfies
+// `ProposalJoinable` (same as the persisted `ThreadToolCall`) so `deriveProposalCardState` renders
+// a card identically whether it is reading the live SSE-accumulated state or the reload-joined one
+// — see that function's own header.
+export interface LiveToolCall extends ProposalJoinable {
+  callId: string;
+  toolName: string;
+  /** Always the redacted shape off the wire — see `ThreadToolCall.args`. `undefined` only for the
+   *  legacy `approval_required` frame, which carries no args at all (the row it names was already
+   *  filed elsewhere; there is nothing fresh to preview). */
+  args?: unknown;
+  /** The plain-read/refusal outcome — `"running"` until a `tool_result` (or a suspension frame)
+   *  arrives; `"pending"` for a suspended write (mirrors `ThreadToolCall.status`'s own vocabulary —
+   *  the CARD state, when this is a write proposal, still comes from `intent`/`approval`, never
+   *  from this field; this only drives the plain-chip rendering path). */
+  status: "running" | "succeeded" | "failed" | "denied" | "pending";
+  resultSummary: string | null;
+  approvalId: string | null;
+  impact: string | null;
+  intentId: string | null;
+  expiresAt: string | null;
+}
+
 export interface StreamState {
   status: StreamStatus;
   /** The TRUE accumulated text — every token concatenated, updated instantly. The typewriter
@@ -385,14 +507,35 @@ export interface StreamState {
   // guarantee as `meta`). `[]` for the entire stream when this turn used no RAG grounding — the
   // honest "nothing to cite" state, identical in rendering to "not answered yet".
   citations: AssistantCitation[];
+  // T4 — accumulated in wire order, one entry per distinct `callId` seen so far (see
+  // `upsertLiveToolCall`). `[]` for every plain chat turn — a tool turn's frames are the only thing
+  // that ever populates this.
+  toolCalls: LiveToolCall[];
   error: { message: string; kind: string } | null;
 }
 
 export function initialStreamState(): StreamState {
-  return { status: "idle", text: "", meta: null, usage: null, citations: [], error: null };
+  return { status: "idle", text: "", meta: null, usage: null, citations: [], toolCalls: [], error: null };
 }
 
 const TERMINAL_STATUSES = new Set<StreamStatus>(["done", "error", "stopped"]);
+
+/** Insert-or-update by `callId`, preserving arrival order for a new id and never reordering an
+ *  existing one — a `tool_result` following its own `tool_call` updates the SAME card in place
+ *  rather than appending a second one. */
+function upsertLiveToolCall(list: LiveToolCall[], callId: string, patch: Partial<LiveToolCall>): LiveToolCall[] {
+  const idx = list.findIndex((c) => c.callId === callId);
+  if (idx === -1) {
+    const base: LiveToolCall = {
+      callId, toolName: "", args: undefined, status: "running", resultSummary: null,
+      approvalId: null, impact: null, intentId: null, expiresAt: null, approval: null, intent: null,
+    };
+    return [...list, { ...base, ...patch }];
+  }
+  const next = [...list];
+  next[idx] = { ...next[idx], ...patch };
+  return next;
+}
 
 export function streamReducer(state: StreamState, event: ClientStreamEvent): StreamState {
   // Guard: once a stream has resolved, every later event is either a duplicate delivery or an
@@ -408,15 +551,195 @@ export function streamReducer(state: StreamState, event: ClientStreamEvent): Str
       return { ...state, usage: { tokens: event.tokens, latencyMs: event.latencyMs, source: event.source, promptTokens: event.promptTokens, completionTokens: event.completionTokens } };
     case "citations":
       return { ...state, citations: event.items };
+    case "tool_call":
+      return { ...state, toolCalls: upsertLiveToolCall(state.toolCalls, event.callId, { toolName: event.toolName, args: event.args, status: "running" }) };
+    case "tool_result":
+      return { ...state, toolCalls: upsertLiveToolCall(state.toolCalls, event.callId, { toolName: event.toolName, status: event.status, resultSummary: event.summary }) };
+    case "approval_required":
+      // Legacy/defensive shape — never preceded by its own `tool_call` (broker.ts emits this
+      // directly), so `upsertLiveToolCall` inserts a fresh entry here, not just patches one.
+      // `approval` non-null (with `intent` left null) is what `deriveProposalCardState` reads as
+      // "already filed" — see that function's header on why the two fields are never both set.
+      return {
+        ...state,
+        toolCalls: upsertLiveToolCall(state.toolCalls, event.callId, {
+          toolName: event.toolName, status: "pending", approvalId: event.approvalId, impact: event.impact,
+          approval: { status: "pending", executionStatus: "not_applicable", executionError: null }, intent: null,
+        }),
+      };
+    case "confirm_required":
+      // The normal chat-path suspension. Also never preceded by its own `tool_call`. `intent`
+      // non-null (with `approval` left null) is what marks this "drafted, not yet filed" — the
+      // exact trap this file's header warns about, resolved by construction: nothing here ever
+      // sets both fields at once.
+      return {
+        ...state,
+        toolCalls: upsertLiveToolCall(state.toolCalls, event.callId, {
+          toolName: event.toolName, status: "pending", args: event.args, impact: event.impact,
+          intentId: event.intentId, expiresAt: event.expiresAt, intent: { status: "draft" }, approval: null,
+        }),
+      };
     case "done":
       return { ...state, status: "done" };
     case "error":
       // The backend's own `stopped` errorKind is a user-requested stop, not a failure — keep it a
-      // distinct terminal status so the UI can say "stopped" instead of "error".
+      // distinct terminal status so the UI can say "stopped" instead of "error". `confirm_required`/
+      // `approval_required` are ALSO not failures (Message.tsx renders them as proposal-pending,
+      // never error styling) but they DO still end the turn, so `status` becomes "error" for both —
+      // the card, not this generic error banner, is what tells the truth about what happened.
       return { ...state, status: event.errorKind === "stopped" ? "stopped" : "error", error: { message: event.error, kind: event.errorKind } };
     default:
       return state;
   }
+}
+
+// ============================================================== T4: proposal card state ==============
+// The D14 execution-chip states this ticket exists to render (§7.2.7's full set). `deriveProposalCardState`
+// is THE one function both a live (SSE-accumulated) and a persisted (GET-thread-joined) tool call feed
+// through — see `ProposalJoinable`'s header for why one function can serve both.
+export type ProposalCardState =
+  | "awaiting_confirmation"
+  | "dismissed"
+  | "expired"
+  | "sent_for_approval"
+  | "executing"
+  | "executed"
+  | "execution_failed"
+  | "not_executable"
+  | "rejected"
+  | "cancelled"
+  /** Not a write proposal at all — a plain read/refusal. Callers render a small chip, never a card. */
+  | "plain";
+
+/** THE TRAP, mechanized: `approvalId` alone cannot distinguish "never a proposal" from "drafted,
+ *  not yet filed" — both read `null`. This reads `intent` FIRST (a still-drafted/dismissed/expired
+ *  write, never yet filed) and `approval` SECOND (a filed write, joined by `approvalId`), falling
+ *  back to `"plain"` only when BOTH are absent — never inferring anything from `approvalId` itself. */
+export function deriveProposalCardState(call: ProposalJoinable): ProposalCardState {
+  if (call.intent) {
+    switch (call.intent.status) {
+      case "draft": return "awaiting_confirmation";
+      case "dismissed": return "dismissed";
+      case "expired": return "expired";
+      case "filed": return "sent_for_approval"; // transient — the approval join takes over on the next read
+    }
+  }
+  if (call.approval) {
+    const { status, executionStatus } = call.approval;
+    if (status === "rejected") return "rejected";
+    if (status === "cancelled") return "cancelled";
+    if (status === "pending") return "sent_for_approval";
+    // status === "approved"
+    if (executionStatus === "executed") return "executed";
+    if (executionStatus === "failed") return "execution_failed";
+    if (executionStatus === "not_applicable") return "not_executable";
+    return "executing"; // 'executing' | 'pending' | any future value — approved, not yet resolved
+  }
+  return "plain";
+}
+
+/** Whether this call is a write proposal at all (a card) vs. a plain read/refusal (a chip) — the
+ *  SAME intent-then-approval read `deriveProposalCardState` uses, never `approvalId` alone. */
+export function isWriteProposal(call: ProposalJoinable): boolean {
+  return call.intent !== null || call.approval !== null;
+}
+
+/** Only an `awaiting_confirmation` card can still be confirmed/dismissed — every other state is
+ *  already decided (by the owner, an approver, the executor, or the TTL) and the buttons must not
+ *  render, not merely be disabled: a disabled Confirm on an already-filed row would imply the
+ *  click WOULD have done something, which is exactly the "the confirm request carries no args, so
+ *  there's nothing left to re-send" property this state machine holds. */
+export function canActOnProposal(state: ProposalCardState): boolean {
+  return state === "awaiting_confirmation";
+}
+
+const PROPOSAL_STATE_LABEL: Record<ProposalCardState, string> = {
+  awaiting_confirmation: "Awaiting your confirmation",
+  dismissed: "Dismissed",
+  expired: "Expired — never sent",
+  sent_for_approval: "Sent for approval",
+  executing: "Approved — executing",
+  executed: "Approved and executed",
+  execution_failed: "Approved — execution failed",
+  not_executable: "Approved — nothing could execute it",
+  rejected: "Rejected",
+  cancelled: "Cancelled",
+  plain: "",
+};
+
+export function proposalStateLabel(state: ProposalCardState): string {
+  return PROPOSAL_STATE_LABEL[state];
+}
+
+/** Shape-only preview of an ALREADY-REDACTED args object (`redactToolArgs` on the backend) — one
+ *  `key: [redacted:type]` line per top-level key. Never attempts to recover a value (there is none
+ *  to recover: the wire never carries one) — this is deliberately as dumb as the data it's reading. */
+export function formatRedactedArgs(args: unknown): { key: string; hint: string }[] {
+  if (!args || typeof args !== "object" || Array.isArray(args)) return [];
+  return Object.entries(args as Record<string, unknown>).map(([key, value]) => ({
+    key,
+    hint: typeof value === "string" ? value : JSON.stringify(value),
+  }));
+}
+
+/** `expiresAt`'s display form — pinned locale + timeZone (CLAUDE.md's hydration-divergence trap:
+ *  `toLocaleString` alone depends on runtime ICU, so an SSR pass and a client re-render can
+ *  legitimately disagree; `charts/chartHover.ts::fmtDate` sets the precedent this follows). Returns
+ *  `null` for an unparseable value rather than "Invalid Date" — an honest "don't know" beats a
+ *  string that looks like a real answer. */
+export function formatExpiresAt(iso: string): string | null {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  return `${d.toLocaleString("en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "UTC" })} UTC`;
+}
+
+/** The one shape `ProposalCard`/`ToolCallChips` actually render — `ThreadToolCall` (persisted,
+ *  `id`-keyed) and `LiveToolCall` (in-flight, `callId`-keyed) both normalize down to this, which is
+ *  what lets those two components stay ignorant of which source produced their data (the exact
+ *  "Message.tsx already does this for citations/meta" split this file's other card-state helpers
+ *  follow). `expiresAt` is `null` once filed (the approval join has no expiry concept) — only
+ *  meaningful alongside `state === 'awaiting_confirmation'`. */
+export interface NormalizedToolCall extends ProposalJoinable {
+  callId: string;
+  toolName: string;
+  args: unknown;
+  status: string;
+  resultSummary: string | null;
+  approvalId: string | null;
+  impact: string | null;
+  expiresAt: string | null;
+}
+
+export function normalizeThreadToolCall(c: ThreadToolCall): NormalizedToolCall {
+  return {
+    callId: c.id, toolName: c.toolName, args: c.args, status: c.status, resultSummary: c.resultSummary,
+    approvalId: c.approvalId, impact: null, expiresAt: c.intent?.expiresAt ?? null,
+    approval: c.approval, intent: c.intent,
+  };
+}
+
+export function normalizeLiveToolCall(c: LiveToolCall): NormalizedToolCall {
+  return {
+    callId: c.callId, toolName: c.toolName, args: c.args ?? {}, status: c.status, resultSummary: c.resultSummary,
+    approvalId: c.approvalId, impact: c.impact, expiresAt: c.expiresAt,
+    approval: c.approval, intent: c.intent,
+  };
+}
+
+export interface PartitionedToolCalls {
+  /** Write proposals — render as `ProposalCard`s, in wire/arrival order. */
+  proposals: NormalizedToolCall[];
+  /** Plain reads/refusals — render as small `ToolCallChips`, in wire/arrival order. */
+  chips: NormalizedToolCall[];
+}
+
+/** THE single split point: `isWriteProposal` (never `approvalId` alone — see this file's header)
+ *  decides which of the two renderings a call gets. */
+export function partitionToolCalls(calls: NormalizedToolCall[]): PartitionedToolCalls {
+  const proposals: NormalizedToolCall[] = [];
+  const chips: NormalizedToolCall[] = [];
+  for (const c of calls) (isWriteProposal(c) ? proposals : chips).push(c);
+  return { proposals, chips };
 }
 
 // Client-side error kinds this file's consumer synthesizes, layered onto the backend's own set
@@ -437,6 +760,20 @@ const ERROR_KIND_LABEL: Record<string, string> = {
   client_idle_timeout: "No response for 2 minutes — the connection was closed.",
   client_abnormal_drop: "The connection ended before the reply finished.",
   client_error: "Something went wrong while streaming the reply.",
+  // ── T4 (ASST-17/ASST-23) — the tool-turn's own errorKinds. `confirm_required`/`approval_required`
+  // are deliberately EXCLUDED from this dict's callers (Message.tsx never renders them through the
+  // generic error path — the proposal card is what tells that story), but a label still lives here
+  // so `humanizeErrorKind` never falls through to the generic "Something went wrong." for them if
+  // some other surface (a toast, a log) ever needs a one-line gloss.
+  tool_denied: "Your account isn't authorized to use one of the tools this needed.",
+  tool_not_executable: "That write can't be proposed yet — nothing on this platform can execute it.",
+  runner_busy: "The assistant's tool runtime is busy — try again in a moment.",
+  runner_error: "The assistant's tool runtime returned an error.",
+  unknown_agent: "That isn't one of the assistant's tool agents.",
+  no_authority: "The assistant couldn't establish who was asking.",
+  intent_lost: "The proposal for that write was lost before it could be shown — please ask again.",
+  confirm_required: "Awaiting your confirmation before this is sent for approval.",
+  approval_required: "Sent for approval — nothing has been changed yet.",
 };
 
 export function humanizeErrorKind(kind: string): string {
@@ -519,6 +856,16 @@ export interface AssistantCapability {
   module: string | null;
 }
 
+// T4 (ASST-23, §7.4/T3a) — the composer's tools-mode agent picker, sourced from THIS, never a
+// hand-maintained FE mirror of `ASSISTANT_AGENT_TOOLS`/`ASSISTANT_AGENT_WRITE_TOOLS` (broker.ts's
+// own real maps, per the contract doc's "no FE mirror" rule). `writeTools` is always a subset of
+// `tools`; an agent with an empty `writeTools` is read-only in exactly ASST-17's original sense.
+export interface AssistantToolAgent {
+  name: string;
+  tools: readonly string[];
+  writeTools: readonly string[];
+}
+
 export interface CapabilitiesResult {
   tools: AssistantCapability[];
   /** `false` means the assistant's tool hub isn't configured in THIS environment at all — distinct
@@ -526,6 +873,7 @@ export interface CapabilitiesResult {
    *  `tools` array; this flag is what lets the panel word its empty state honestly rather than
    *  guessing which of the two is true). */
   hubConfigured: boolean;
+  toolAgents: AssistantToolAgent[];
 }
 
 /** `name`'s dot-prefix (`"projects.list"` -> `"projects"`) as a display category. Purely a
@@ -671,4 +1019,23 @@ const HANDOFF_STATUS_LABEL: Record<HandoffStatus, string> = {
 
 export function handoffStatusLabel(status: string): string {
   return HANDOFF_STATUS_LABEL[status as HandoffStatus] ?? status;
+}
+
+// ============================================================== T4: pending-proposal poll ============
+// A card whose approval is decided OUT OF BAND (a `company_admin`/`group_executive`/`platform_admin`
+// deciding on `/approvals/[id]`, in a different tab or a different session entirely) never pushes an
+// update into this thread — `GET thread`'s join is the only way to see it. The SAME "keep polling
+// while something is still in flight, stop the instant it isn't" shape `hasActiveHandoff` above
+// already established for handoffs, applied to proposal cards instead of runs.
+const PENDING_DECISION_STATES = new Set<ProposalCardState>(["sent_for_approval", "executing"]);
+
+/** True while ANY message on the currently-loaded page has a write-proposal card sitting in a
+ *  state that a HUMAN ELSEWHERE could still change (filed-and-pending, or approved-and-executing) —
+ *  the caller's cue to keep re-fetching the thread. A card already terminal (executed/failed/
+ *  rejected/cancelled/not_executable) or not yet filed (awaiting_confirmation/dismissed/expired,
+ *  all of which only this owner's own click can move) never keeps the poll alive. */
+export function hasPendingProposalDecision(messages: Pick<AssistantMessage, "toolCalls">[]): boolean {
+  return messages.some((m) =>
+    (m.toolCalls ?? []).some((call) => isWriteProposal(call) && PENDING_DECISION_STATES.has(deriveProposalCardState(call))),
+  );
 }

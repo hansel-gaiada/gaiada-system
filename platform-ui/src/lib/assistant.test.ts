@@ -5,7 +5,10 @@ import {
   brainBadgeLabel, parseUsageMeta, usageMeterLabel,
   isPendingMemory, groupMemory,
   groupCapabilities, parseCitations, parseSessionResumeMismatch,
-  type AssistantThread, type AssistantMemory, type AssistantCapability,
+  deriveProposalCardState, isWriteProposal, canActOnProposal, proposalStateLabel, formatRedactedArgs,
+  hasPendingProposalDecision, normalizeThreadToolCall, normalizeLiveToolCall, partitionToolCalls,
+  formatExpiresAt,
+  type AssistantThread, type AssistantMemory, type AssistantCapability, type ThreadToolCall, type LiveToolCall,
 } from "./assistant";
 
 function thread(overrides: Partial<AssistantThread> = {}): AssistantThread {
@@ -102,7 +105,63 @@ describe("decodeAssistantEvent — guards against malformed/unrecognised blocks"
     expect(decodeAssistantEvent({ event: "token", data: '{"text":123}' })).toBeNull();
   });
   it("returns null for an unrecognised event name", () => {
-    expect(decodeAssistantEvent({ event: "tool_call", data: "{}" })).toBeNull();
+    // Pre-T4, this exact case ("tool_call") was the pin for "these four event names are not yet
+    // decoded at all" (ASST-23's design doc §1.4 cites this line by number). T3a/T3b made
+    // tool_call/tool_result/approval_required/confirm_required real events on the tool-turn path —
+    // ASST-23 legitimately supersedes that finding, so the pin is inverted here (kept, not deleted)
+    // onto a name that is STILL genuinely unrecognised, and the four real ones get their own
+    // "decodes to a real event" cases directly below instead of asserting they decode to null.
+    expect(decodeAssistantEvent({ event: "some_future_event", data: "{}" })).toBeNull();
+  });
+
+  // ── T4 (ASST-23, §7.4) — the four tool-turn frames now decode for real. ─────────────────────────
+  it("decodes tool_call", () => {
+    expect(decodeAssistantEvent({ event: "tool_call", data: '{"callId":"c1","toolName":"projects.list","args":{"k":"[redacted:string]"}}' }))
+      .toEqual({ type: "tool_call", callId: "c1", toolName: "projects.list", args: { k: "[redacted:string]" } });
+  });
+  it("tool_call: a missing args object defaults to {}, never null/undefined", () => {
+    expect(decodeAssistantEvent({ event: "tool_call", data: '{"callId":"c1","toolName":"projects.list"}' }))
+      .toEqual({ type: "tool_call", callId: "c1", toolName: "projects.list", args: {} });
+  });
+  it("tool_call: missing callId/toolName decodes to null", () => {
+    expect(decodeAssistantEvent({ event: "tool_call", data: '{"toolName":"projects.list"}' })).toBeNull();
+    expect(decodeAssistantEvent({ event: "tool_call", data: '{"callId":"c1"}' })).toBeNull();
+  });
+  it("decodes tool_result for each status", () => {
+    for (const status of ["succeeded", "failed", "denied"] as const) {
+      expect(decodeAssistantEvent({ event: "tool_result", data: `{"callId":"c1","toolName":"t","status":"${status}","summary":"s"}` }))
+        .toEqual({ type: "tool_result", callId: "c1", toolName: "t", status, summary: "s" });
+    }
+  });
+  it("tool_result: an invalid status decodes to null (never coerced)", () => {
+    expect(decodeAssistantEvent({ event: "tool_result", data: '{"callId":"c1","toolName":"t","status":"bogus"}' })).toBeNull();
+  });
+  it("tool_result: a null summary is preserved, never coerced to a string", () => {
+    expect(decodeAssistantEvent({ event: "tool_result", data: '{"callId":"c1","toolName":"t","status":"succeeded"}' }))
+      .toEqual({ type: "tool_result", callId: "c1", toolName: "t", status: "succeeded", summary: null });
+  });
+  it("decodes approval_required (the legacy/defensive filed-at-turn-time shape)", () => {
+    expect(decodeAssistantEvent({ event: "approval_required", data: '{"callId":"c1","toolName":"pm.createTask","approvalId":"a1","impact":"high"}' }))
+      .toEqual({ type: "approval_required", callId: "c1", toolName: "pm.createTask", approvalId: "a1", impact: "high" });
+  });
+  it("approval_required: a null impact is preserved (the row's own impact column can be absent)", () => {
+    expect(decodeAssistantEvent({ event: "approval_required", data: '{"callId":"c1","toolName":"t","approvalId":"a1"}' }))
+      .toEqual({ type: "approval_required", callId: "c1", toolName: "t", approvalId: "a1", impact: null });
+  });
+  it("approval_required: missing approvalId decodes to null", () => {
+    expect(decodeAssistantEvent({ event: "approval_required", data: '{"callId":"c1","toolName":"t"}' })).toBeNull();
+  });
+  it("decodes confirm_required (the owner's confirm-chip draft — the normal chat-path suspension)", () => {
+    expect(decodeAssistantEvent({
+      event: "confirm_required",
+      data: '{"callId":"c1","toolName":"pm.createTask","intentId":"i1","args":{"title":"[redacted:string]"},"impact":"high","expiresAt":"2026-08-06T10:00:00Z"}',
+    })).toEqual({
+      type: "confirm_required", callId: "c1", toolName: "pm.createTask", intentId: "i1",
+      args: { title: "[redacted:string]" }, impact: "high", expiresAt: "2026-08-06T10:00:00Z",
+    });
+  });
+  it("confirm_required: missing any required field decodes to null", () => {
+    expect(decodeAssistantEvent({ event: "confirm_required", data: '{"callId":"c1","toolName":"t","intentId":"i1","impact":"high"}' })).toBeNull();
   });
 
   // ── ASST-12: meta + real usage ────────────────────────────────────────────────────────────────
@@ -132,7 +191,7 @@ describe("streamReducer — pure, immutable, guarded against terminal-state resu
     let s = initialStreamState();
     s = streamReducer(s, { type: "token", text: "Hel" });
     s = streamReducer(s, { type: "token", text: "lo" });
-    expect(s).toEqual({ status: "streaming", text: "Hello", meta: null, usage: null, citations: [], error: null });
+    expect(s).toEqual({ status: "streaming", text: "Hello", meta: null, usage: null, citations: [], toolCalls: [], error: null });
   });
   it("meta sets the live badge state as soon as it arrives, non-terminal", () => {
     let s = initialStreamState();
@@ -164,12 +223,12 @@ describe("streamReducer — pure, immutable, guarded against terminal-state resu
   });
   it("any other errorKind lands status 'error' and records the message/kind", () => {
     const s = streamReducer(initialStreamState(), { type: "error", error: "boom", errorKind: "upstream_error" });
-    expect(s).toEqual({ status: "error", text: "", meta: null, usage: null, citations: [], error: { message: "boom", kind: "upstream_error" } });
+    expect(s).toEqual({ status: "error", text: "", meta: null, usage: null, citations: [], toolCalls: [], error: { message: "boom", kind: "upstream_error" } });
   });
   it("never mutates the previous state object", () => {
     const s0 = initialStreamState();
     const s1 = streamReducer(s0, { type: "token", text: "x" });
-    expect(s0).toEqual({ status: "idle", text: "", meta: null, usage: null, citations: [], error: null });
+    expect(s0).toEqual({ status: "idle", text: "", meta: null, usage: null, citations: [], toolCalls: [], error: null });
     expect(s1).not.toBe(s0);
   });
 });
@@ -341,5 +400,214 @@ describe("parseSessionResumeMismatch — ASST-24: reads the persisted 'conversat
     expect(parseSessionResumeMismatch(null)).toBeNull();
     expect(parseSessionResumeMismatch(undefined)).toBeNull();
     expect(parseSessionResumeMismatch("not an array")).toBeNull();
+  });
+});
+
+// ============================================================== T4 (ASST-23, §7.4) ===================
+
+describe("streamReducer — tool-turn frames accumulate a live tool-call list by callId", () => {
+  it("tool_call inserts a running entry; the matching tool_result updates it in place, not a second row", () => {
+    let s = initialStreamState();
+    s = streamReducer(s, { type: "tool_call", callId: "c1", toolName: "projects.list", args: {} });
+    expect(s.toolCalls).toHaveLength(1);
+    expect(s.toolCalls[0]).toMatchObject({ callId: "c1", toolName: "projects.list", status: "running" });
+    s = streamReducer(s, { type: "tool_result", callId: "c1", toolName: "projects.list", status: "succeeded", summary: null });
+    expect(s.toolCalls).toHaveLength(1); // still one row, updated — not appended
+    expect(s.toolCalls[0]).toMatchObject({ callId: "c1", status: "succeeded" });
+    expect(s.status).toBe("idle"); // non-terminal, same rule meta/citations already follow
+  });
+
+  it("two distinct callIds accumulate as two entries, in arrival order", () => {
+    let s = initialStreamState();
+    s = streamReducer(s, { type: "tool_call", callId: "a", toolName: "t1", args: {} });
+    s = streamReducer(s, { type: "tool_call", callId: "b", toolName: "t2", args: {} });
+    expect(s.toolCalls.map((c) => c.callId)).toEqual(["a", "b"]);
+  });
+
+  it("confirm_required inserts a card with intent:{status:'draft'} and approval left null — never both set", () => {
+    let s = initialStreamState();
+    s = streamReducer(s, {
+      type: "confirm_required", callId: "c1", toolName: "pm.createTask", intentId: "i1",
+      args: { title: "[redacted:string]" }, impact: "high", expiresAt: "2026-08-06T10:00:00Z",
+    });
+    expect(s.toolCalls).toHaveLength(1);
+    const call = s.toolCalls[0];
+    expect(call.intent).toEqual({ status: "draft" });
+    expect(call.approval).toBeNull();
+    expect(call.args).toEqual({ title: "[redacted:string]" });
+    expect(deriveProposalCardState(call)).toBe("awaiting_confirmation");
+  });
+
+  it("approval_required (legacy/defensive) inserts a card with approval set and intent left null", () => {
+    let s = initialStreamState();
+    s = streamReducer(s, { type: "approval_required", callId: "c1", toolName: "pm.createTask", approvalId: "a1", impact: "high" });
+    const call = s.toolCalls[0];
+    expect(call.approval).toEqual({ status: "pending", executionStatus: "not_applicable", executionError: null });
+    expect(call.intent).toBeNull();
+    expect(deriveProposalCardState(call)).toBe("sent_for_approval");
+  });
+
+  it("a confirm_required/approval_required terminal error does not resurrect after the guard kicks in", () => {
+    let s = initialStreamState();
+    s = streamReducer(s, { type: "confirm_required", callId: "c1", toolName: "t", intentId: "i1", args: {}, impact: "high", expiresAt: "later" });
+    s = streamReducer(s, { type: "error", error: "drafted", errorKind: "confirm_required" });
+    expect(s.status).toBe("error");
+    const after = streamReducer(s, { type: "tool_call", callId: "c2", toolName: "t2", args: {} });
+    expect(after).toBe(s); // dropped — same guard every other post-terminal event already gets
+  });
+});
+
+describe("deriveProposalCardState — THE TRAP: never infer from approvalId alone", () => {
+  function joinable(over: Partial<ThreadToolCall> = {}): ThreadToolCall {
+    return {
+      id: "tc1", toolName: "pm.createTask", mcpServer: "mcp-hub", args: {}, resultSummary: null,
+      status: "pending", approvalId: null, durationMs: null, createdAt: "2026-08-06T09:00:00Z",
+      approval: null, intent: null, ...over,
+    };
+  }
+
+  it("approval:null AND intent:null is a plain read/refusal, never a card — the two 'approvalId reads null' cases resolved", () => {
+    // Case 1: a plain read that was never a write proposal at all.
+    expect(deriveProposalCardState(joinable())).toBe("plain");
+    expect(isWriteProposal(joinable())).toBe(false);
+  });
+
+  it("intent:{status:'draft'} with approvalId/approval BOTH still null is 'awaiting_confirmation', not 'plain'", () => {
+    // Case 2: a drafted write, not yet confirmed — approvalId reads null here too, but this is NOT
+    // the same fact as the plain-read case above. This is the exact defect class the ticket names.
+    const call = joinable({ intent: { status: "draft", expiresAt: "2026-08-06T10:00:00Z" } });
+    expect(deriveProposalCardState(call)).toBe("awaiting_confirmation");
+    expect(isWriteProposal(call)).toBe(true);
+    expect(canActOnProposal(deriveProposalCardState(call))).toBe(true);
+  });
+
+  it("intent:dismissed / intent:expired map to their own terminal-without-filing states", () => {
+    expect(deriveProposalCardState(joinable({ intent: { status: "dismissed", expiresAt: "x" } }))).toBe("dismissed");
+    expect(deriveProposalCardState(joinable({ intent: { status: "expired", expiresAt: "x" } }))).toBe("expired");
+  });
+
+  it("once approvalId is set, the approval join takes over — status pending is 'sent_for_approval'", () => {
+    const call = joinable({ approvalId: "a1", approval: { status: "pending", executionStatus: "not_applicable", executionError: null } });
+    expect(deriveProposalCardState(call)).toBe("sent_for_approval");
+    expect(canActOnProposal(deriveProposalCardState(call))).toBe(false);
+  });
+
+  it("approved + executed / failed / not_applicable map to their own distinct states", () => {
+    const approved = (executionStatus: string, executionError: string | null = null) =>
+      joinable({ approvalId: "a1", approval: { status: "approved", executionStatus, executionError } });
+    expect(deriveProposalCardState(approved("executed"))).toBe("executed");
+    expect(deriveProposalCardState(approved("failed", "boom"))).toBe("execution_failed");
+    expect(deriveProposalCardState(approved("not_applicable"))).toBe("not_executable");
+    expect(deriveProposalCardState(approved("executing"))).toBe("executing");
+    expect(deriveProposalCardState(approved("pending"))).toBe("executing");
+  });
+
+  it("rejected and cancelled are their own states, distinct from a plain read", () => {
+    expect(deriveProposalCardState(joinable({ approvalId: "a1", approval: { status: "rejected", executionStatus: "not_applicable", executionError: null } }))).toBe("rejected");
+    expect(deriveProposalCardState(joinable({ approvalId: "a1", approval: { status: "cancelled", executionStatus: "not_applicable", executionError: null } }))).toBe("cancelled");
+  });
+
+  it("proposalStateLabel has a non-empty label for every real state, and an empty one for 'plain' (no card to label)", () => {
+    const states = [
+      "awaiting_confirmation", "dismissed", "expired", "sent_for_approval", "executing",
+      "executed", "execution_failed", "not_executable", "rejected", "cancelled",
+    ] as const;
+    for (const s of states) expect(proposalStateLabel(s)).not.toBe("");
+    expect(proposalStateLabel("plain")).toBe("");
+  });
+});
+
+describe("formatRedactedArgs — shape-only preview, never recovers a value that was never sent", () => {
+  it("lists one key/hint pair per top-level key of an already-redacted args object", () => {
+    expect(formatRedactedArgs({ title: "[redacted:string]", projectId: "[redacted:string]" }))
+      .toEqual([{ key: "title", hint: "[redacted:string]" }, { key: "projectId", hint: "[redacted:string]" }]);
+  });
+  it("a non-string hint value is stringified, never left as an object the caller can't render", () => {
+    expect(formatRedactedArgs({ tags: "[redacted:array(2)]" })).toEqual([{ key: "tags", hint: "[redacted:array(2)]" }]);
+  });
+  it("null/undefined/array/non-object input yields [], never throws", () => {
+    expect(formatRedactedArgs(null)).toEqual([]);
+    expect(formatRedactedArgs(undefined)).toEqual([]);
+    expect(formatRedactedArgs([1, 2])).toEqual([]);
+    expect(formatRedactedArgs("nope")).toEqual([]);
+  });
+});
+
+describe("hasPendingProposalDecision — the out-of-band-decision poll's cue", () => {
+  function msgWithCall(approval: { status: string; executionStatus: string; executionError: string | null } | null, intent: { status: string; expiresAt?: string } | null = null) {
+    return { toolCalls: [{
+      id: "tc1", toolName: "pm.createTask", mcpServer: "mcp-hub", args: {}, resultSummary: null,
+      status: "pending", approvalId: approval ? "a1" : null, durationMs: null, createdAt: "x",
+      approval, intent,
+    } as unknown as ThreadToolCall] };
+  }
+
+  it("true while a filed proposal is still pending a decision", () => {
+    expect(hasPendingProposalDecision([msgWithCall({ status: "pending", executionStatus: "not_applicable", executionError: null })])).toBe(true);
+  });
+  it("true while an approved write is still executing", () => {
+    expect(hasPendingProposalDecision([msgWithCall({ status: "approved", executionStatus: "executing", executionError: null })])).toBe(true);
+  });
+  it("false once terminal (executed/failed/rejected) — nothing left to poll for", () => {
+    expect(hasPendingProposalDecision([msgWithCall({ status: "approved", executionStatus: "executed", executionError: null })])).toBe(false);
+    expect(hasPendingProposalDecision([msgWithCall({ status: "rejected", executionStatus: "not_applicable", executionError: null })])).toBe(false);
+  });
+  it("false for an awaiting-confirmation draft — only the owner's own click can move it, not an out-of-band decision", () => {
+    expect(hasPendingProposalDecision([msgWithCall(null, { status: "draft", expiresAt: "x" })])).toBe(false);
+  });
+  it("false for a message with no toolCalls at all, or an undefined toolCalls field", () => {
+    expect(hasPendingProposalDecision([{ toolCalls: [] }])).toBe(false);
+    expect(hasPendingProposalDecision([{}])).toBe(false);
+  });
+});
+
+describe("normalize + partition — ThreadToolCall and LiveToolCall render through ONE shape", () => {
+  it("normalizeThreadToolCall reads expiresAt out of the nested intent join", () => {
+    const persisted: ThreadToolCall = {
+      id: "tc1", toolName: "pm.createTask", mcpServer: "mcp-hub", args: { title: "[redacted:string]" },
+      resultSummary: null, status: "pending", approvalId: null, durationMs: null, createdAt: "x",
+      approval: null, intent: { status: "draft", expiresAt: "2026-08-06T10:00:00Z" },
+    };
+    expect(normalizeThreadToolCall(persisted)).toEqual({
+      callId: "tc1", toolName: "pm.createTask", args: { title: "[redacted:string]" }, status: "pending",
+      resultSummary: null, approvalId: null, impact: null, expiresAt: "2026-08-06T10:00:00Z",
+      approval: null, intent: { status: "draft", expiresAt: "2026-08-06T10:00:00Z" },
+    });
+  });
+
+  it("normalizeLiveToolCall reads expiresAt off its own top-level field, and defaults args to {}", () => {
+    const live: LiveToolCall = {
+      callId: "c1", toolName: "pm.createTask", args: undefined, status: "pending", resultSummary: null,
+      approvalId: null, impact: "high", intentId: "i1", expiresAt: "2026-08-06T10:00:00Z",
+      approval: null, intent: { status: "draft" },
+    };
+    expect(normalizeLiveToolCall(live)).toEqual({
+      callId: "c1", toolName: "pm.createTask", args: {}, status: "pending", resultSummary: null,
+      approvalId: null, impact: "high", expiresAt: "2026-08-06T10:00:00Z",
+      approval: null, intent: { status: "draft" },
+    });
+  });
+
+  it("partitionToolCalls splits by isWriteProposal, preserving order within each bucket", () => {
+    const read = normalizeLiveToolCall({
+      callId: "a", toolName: "projects.list", args: {}, status: "succeeded", resultSummary: null,
+      approvalId: null, impact: null, intentId: null, expiresAt: null, approval: null, intent: null,
+    });
+    const draft = normalizeLiveToolCall({
+      callId: "b", toolName: "pm.createTask", args: {}, status: "pending", resultSummary: null,
+      approvalId: null, impact: "high", intentId: "i1", expiresAt: "later", approval: null, intent: { status: "draft" },
+    });
+    const { proposals, chips } = partitionToolCalls([read, draft]);
+    expect(proposals.map((c) => c.callId)).toEqual(["b"]);
+    expect(chips.map((c) => c.callId)).toEqual(["a"]);
+  });
+});
+
+describe("formatExpiresAt — pinned locale + timeZone, an honest null on garbage input", () => {
+  it("formats a real ISO timestamp with a fixed UTC timezone", () => {
+    expect(formatExpiresAt("2026-08-06T10:05:00Z")).toBe("06 Aug, 10:05 UTC");
+  });
+  it("returns null (never 'Invalid Date') for an unparseable value", () => {
+    expect(formatExpiresAt("not a date")).toBeNull();
   });
 });
