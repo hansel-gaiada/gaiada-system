@@ -269,10 +269,10 @@ describe("divisionStatusGrid", () => {
     expect(seo.columns.map((c) => c.key)).toEqual(video.columns.map((c) => c.key));
     expect(seo.columns.map((c) => c.key)).toEqual(noDiv.columns.map((c) => c.key));
     // Tasks land in the right (row, column) cell.
-    expect(seo.columns.find((c) => c.label === "To do")?.tasks.map((t) => t.id)).toEqual(["seo-todo"]);
+    expect(seo.columns.find((c) => c.label === "ToDo")?.tasks.map((t) => t.id)).toEqual(["seo-todo"]);
     expect(seo.columns.find((c) => c.label === "Done")?.tasks.map((t) => t.id)).toEqual(["seo-done"]);
-    expect(video.columns.find((c) => c.label === "To do")?.tasks.map((t) => t.id)).toEqual(["video-todo"]);
-    expect(noDiv.columns.find((c) => c.label === "To do")?.tasks.map((t) => t.id)).toEqual(["unplaced"]);
+    expect(video.columns.find((c) => c.label === "ToDo")?.tasks.map((t) => t.id)).toEqual(["video-todo"]);
+    expect(noDiv.columns.find((c) => c.label === "ToDo")?.tasks.map((t) => t.id)).toEqual(["unplaced"]);
     // `people` only on real division rows — BoardGrid's cross-row ambiguity check needs this to
     // be absent on the synthetic bucket (same contract as `divisionColumns`).
     expect(seo.people).toEqual(divisions[0].people);
@@ -301,9 +301,9 @@ describe("assigneeStatusGrid", () => {
     const ada = rows.find((r) => r.label === "Ada")!;
     const ben = rows.find((r) => r.label === "Ben")!;
     expect(ada.columns.map((c) => c.key)).toEqual(ben.columns.map((c) => c.key));
-    expect(ada.columns.find((c) => c.label === "To do")?.tasks.map((t) => t.id)).toEqual(["a"]);
-    expect(ben.columns.find((c) => c.label === "In progress")?.tasks.map((t) => t.id)).toEqual(["b"]);
-    expect(rows.find((r) => r.label === "Unassigned")?.columns.find((c) => c.label === "To do")?.tasks.map((t) => t.id)).toEqual(["c"]);
+    expect(ada.columns.find((c) => c.label === "ToDo")?.tasks.map((t) => t.id)).toEqual(["a"]);
+    expect(ben.columns.find((c) => c.label === "Doing")?.tasks.map((t) => t.id)).toEqual(["b"]);
+    expect(rows.find((r) => r.label === "Unassigned")?.columns.find((c) => c.label === "ToDo")?.tasks.map((t) => t.id)).toEqual(["c"]);
   });
 
   it("stays uniform at any status count — a renamed custom registry (P2-05) still produces the same columns on every row", () => {

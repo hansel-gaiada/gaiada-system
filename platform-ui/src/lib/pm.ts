@@ -55,6 +55,9 @@ import { platformFetch, PlatformError } from "./platform";
 import { getOrgStructure, type OrgNode } from "./org";
 import { listMembers } from "./entities";
 import type { TagColor } from "./tagColors";
+// Client-safe vocabulary module (P4-L2) — the single home for status LABELS, so a picker rendered in
+// a client component and the synthesized DEFAULT_STATUSES below can never disagree about wording.
+import { PM_STATUS_LADDER } from "./pmVocabulary";
 export type { TagColor } from "./tagColors";
 
 // Legacy status ids/labels. `TaskStatus` is no longer the board's column model
@@ -85,21 +88,46 @@ export interface ProjectStatus {
   position: number;
 }
 
-// The legacy 4, synthesized for any project with no status-registry rows so it
-// stays visually + behaviorally identical to before custom statuses existed.
-// Hues match the old hardcoded Gantt bar colours (pm.css) exactly: todo
-// champagne, in_progress bronze (--erp-accent), blocked rust, done green.
-export const DEFAULT_STATUSES: ProjectStatus[] = [
-  { id: "todo",        label: "To do",       color: "var(--status-idle-fg)", isDone: false, isBlocked: false, position: 0 },
-  { id: "in_progress", label: "In progress", color: "var(--accent)", isDone: false, isBlocked: false, position: 1 },
-  { id: "blocked",     label: "Blocked",     color: "var(--status-critical-fg)", isDone: false, isBlocked: true,  position: 2 },
-  { id: "done",        label: "Done",        color: "var(--status-ok-fg)", isDone: true,  isBlocked: false, position: 3 },
-];
+// The default ladder, synthesized for any project with no status-registry rows.
+//
+// P4-B8 (2026-08-06): this used to be the "legacy 4" (To do / In progress / Blocked / Done) with
+// house-palette hues. It is now DERIVED from `PM_STATUS_LADDER` — the owner's
+// `Backlog · ToDo · Doing · Blocked · Done` — so the labels have exactly one home
+// (`lib/pmVocabulary.ts`, which is client-safe and therefore usable by the pickers too). Colours
+// stay here because they are design tokens, not vocabulary, and they now point at the
+// Repsona-faithful PM palette (`styles/tokens/pm.css`) per workstream L.
+//
+// TWO CONSEQUENCES, both deliberate and owner-approved:
+//   1. Every project still on the synthesized set GAINS a Backlog column. Without that the ladder
+//      the owner specified would not exist for the majority of projects, which are exactly the ones
+//      that never customized a registry.
+//   2. `isSynthDefaultStatuses` below therefore no longer means "the legacy 4" — it means "still on
+//      the current defaults". Its purpose (keep never-customized projects visually quiet) is
+//      unchanged; the set it recognises has grown by one.
+// `in_progress` KEEPS ITS PERSISTED ID and only gains the label "Doing" — renaming the id would
+// orphan every existing task row (pinned by lib/pmVocabulary.test.ts).
+const DEFAULT_STATUS_COLOR: Record<string, string> = {
+  backlog:     "var(--pm-status-backlog)",
+  todo:        "var(--pm-status-todo)",
+  in_progress: "var(--pm-status-in-progress)",
+  blocked:     "var(--pm-status-blocked)",
+  done:        "var(--pm-status-done)",
+};
+export const DEFAULT_STATUSES: ProjectStatus[] = PM_STATUS_LADDER.map((s, i) => ({
+  id: s.id,
+  label: s.label,
+  // A ladder entry with no mapped hue would render an invisible column head, so fall back to the
+  // neutral slate rather than to an empty string.
+  color: DEFAULT_STATUS_COLOR[s.id] ?? "var(--pm-status-backlog)",
+  isDone: s.isDone,
+  isBlocked: s.isBlocked,
+  position: i,
+}));
 export const synthDefaultStatuses = (): ProjectStatus[] => DEFAULT_STATUSES.map((s) => ({ ...s }));
 
-// True when a status set is (structurally) just the synthesized legacy 4 — the
-// board uses this to keep default projects pixel-identical (no status-colour
-// dots on the column heads until a project is actually customized).
+// True when a status set is (structurally) just the synthesized defaults — the board uses this to
+// keep never-customized projects visually quiet (no status-colour dots on the column heads until a
+// project is actually customized). P4-B8: "the defaults" is now the 5-status ladder, not the legacy 4.
 export function isSynthDefaultStatuses(statuses: ProjectStatus[]): boolean {
   if (statuses.length !== DEFAULT_STATUSES.length) return false;
   const byId = new Map(statuses.map((s) => [s.id, s]));
@@ -110,6 +138,38 @@ export function isSynthDefaultStatuses(statuses: ProjectStatus[]): boolean {
 }
 
 export interface StatusFlags { isDone: boolean; isBlocked: boolean }
+
+// ---- "where does a new task start?" — two DIFFERENT answers (P4-B8) ----
+// Adding `Backlog` at position 0 exposed that several call sites all reached for "the first status"
+// (`statuses[0]`, or `find(s => !s.isDone)`) while meaning two different things. Once Backlog exists
+// those two intents diverge, and the failure is SILENT: a spawned recurring occurrence lands in
+// Backlog, nobody sees it in ToDo, and the recurrence looks like it stopped working. Naming both
+// intents is the fix — a bare `statuses[0]` in PM code is now a smell.
+//
+// Ordering is by `position`, never array order, because a registry read may arrive unsorted.
+
+/** Fresh, uncommitted work (a duplicate, an imported task): the earliest non-done status — Backlog when the project has one. */
+export function intakeStatusId(statuses: ProjectStatus[]): string {
+  const ordered = [...statuses].sort((a, b) => a.position - b.position);
+  return (ordered.find((s) => !s.isDone) ?? ordered[0])?.id ?? "todo";
+}
+
+/**
+ * Work that is READY to be picked up right now — a recurrence firing, or a task whose last blocker
+ * just cleared (workstream I's auto-promotion). Prefers the canonical `todo` id, since that is the
+ * persisted id of "ready" in our own ladder; otherwise the earliest status that is neither done nor
+ * blocked, which reproduces the pre-Backlog behaviour for a fully custom registry.
+ */
+export function readyStatusId(statuses: ProjectStatus[]): string {
+  const ordered = [...statuses].sort((a, b) => a.position - b.position);
+  // The `todo` preference is by id, so it MUST be re-checked against the flags: a project is free to
+  // mark the literal `todo` status done or blocked, and trusting the id alone would drop new work
+  // straight into a done column. The flags are the authority; the id is only a tie-breaker among
+  // statuses that are already valid landing spots. (platform-nest carries the identical guard.)
+  const canonical = ordered.find((s) => s.id === "todo" && !s.isDone && !s.isBlocked);
+  if (canonical) return canonical.id;
+  return (ordered.find((s) => !s.isDone && !s.isBlocked) ?? ordered.find((s) => !s.isDone) ?? ordered[0])?.id ?? "todo";
+}
 // THE one place status semantics live. Resolve a task's status id to its
 // done/blocked flags against the project's OWN status set. Falls back to
 // legacy-id semantics when the set is absent or the id predates it
@@ -152,6 +212,18 @@ export interface Contributor { userId: string; name: string }
 // so existing server-side callers keep importing them from "./pm".
 import { RECURRENCE_FREQS, RECURRENCE_LABEL, type RecurrenceFreq } from "./pmRecurrence";
 export { RECURRENCE_FREQS, RECURRENCE_LABEL, type RecurrenceFreq };
+
+// ---- urgency: overdue · almost late · in time (P4-G1/G2) ----
+// Same split rationale as the recurrence block above: `lib/pmUrgency.ts` is client-safe because the
+// board cards / Gantt bars / List rows that render an urgency badge are CLIENT components and cannot
+// import this `server-only` module. Re-exported so server callers keep importing from "./pm".
+// `taskUrgency` needs a precomputed `isDone` — resolve it here with `isDoneStatus(task.status,
+// projectStatuses)` before handing tasks to a client component, exactly like `taskTags`.
+export {
+  taskUrgency, projectUrgency, rollUpUrgency, dayDiff,
+  DUE_SOON_DAYS_DEFAULT, URGENCY_SEVERITY, URGENCY_LABEL,
+  type UrgencyTier, type UrgencyInput, type UrgencyOptions, type UrgencyRollUp,
+} from "./pmUrgency";
 export interface TaskRecurrence { freq: RecurrenceFreq; until?: string }
 // A recurring task's title everywhere it renders gets a leading "↻ " glyph
 // (board card, list/detail, Gantt label, dept rail) — one tiny pure helper so
@@ -480,10 +552,23 @@ export function suggestFromTask(task: PmTask, statuses: ProjectStatus[] = DEFAUL
   const doneStatus = ordered.find((s) => s.isDone);
   const flow = ordered.filter((s) => !s.isDone && !s.isBlocked); // the "todo → in progress → …" spine
   let status = task.status;
+  // P4-B8: this used to be `task.status === flow[0].id → flow[1].id`, i.e. "if you are at the very
+  // START of the spine and have progress, step forward one". Inserting `backlog` ahead of `todo`
+  // silently broke it — `todo` stopped being flow[0], so a task with real subtask progress was no
+  // longer suggested for Doing. Nothing threw; the suggestion just quietly stopped appearing.
+  //
+  // Generalised to "advance to the ACTIVE-WORK step from anything before it". The active step is
+  // `in_progress` when the registry has it (our own ladder's persisted id, so every project on the
+  // defaults qualifies), else the second spine entry — which reproduces the old behaviour exactly
+  // for a fully custom registry. Bounded on purpose: a task already AT or past the active step is
+  // left alone, because progress alone must never push work forward into a review/approval status.
+  const activeIdx = flow.findIndex((s) => s.id === "in_progress");
+  const targetIdx = activeIdx > 0 ? activeIdx : Math.min(1, flow.length - 1);
+  const currentIdx = flow.findIndex((s) => s.id === task.status);
   if (progress >= 100 && doneStatus && task.status !== doneStatus.id) {
     status = doneStatus.id;
-  } else if (progress > 0 && flow.length >= 2 && task.status === flow[0].id) {
-    status = flow[1].id;
+  } else if (progress > 0 && flow.length >= 2 && currentIdx >= 0 && currentIdx < targetIdx) {
+    status = flow[targetIdx].id;
   }
   const targetLabel = ordered.find((s) => s.id === status)?.label ?? (STATUS_LABEL[status as TaskStatus] ?? status);
   const done = sub.filter((s) => s.done).length;

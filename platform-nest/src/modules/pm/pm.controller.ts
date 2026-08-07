@@ -99,14 +99,66 @@ interface StatusRow {
 type ProjectStatus = { id: string; label: string; color: string; isDone: boolean; isBlocked: boolean; position: number; wipLimit?: number };
 
 // D-3: default ids ARE the legacy literals so existing pm_tasks.status values stay valid with zero
-// row rewrites; labels/colors match today's platform-ui lib/pm.ts + components/ui.tsx STATUS_COLORS
-// (byte-identical read-back for a project that never opens the editor).
+// row rewrites; labels/colors mirror platform-ui's lib/pmVocabulary.ts PM_STATUS_LADDER +
+// styles/tokens/pm.css (byte-identical read-back for a project that never opens the editor).
+//
+// P4-B8b (2026-08-06): the owner's ladder is `Backlog · ToDo · Doing · Blocked · Done`. `backlog` is
+// the only new id; `in_progress` KEEPS its id and only gains the label "Doing" — renaming the id
+// would orphan every existing pm_tasks.status value. Colours are the Repsona-faithful PM palette,
+// which is why they changed too.
+//
+// NO MIGRATION accompanies this, deliberately. Statuses are synth-on-read: a project with zero
+// `pm_project_statuses` rows — the overwhelming majority, i.e. everything that never opened the
+// editor — picks up the 5-status ladder automatically on the next read. A project that HAS
+// materialized rows customized its workflow on purpose, and injecting a status at position 0 would
+// silently reorder someone's board; those keep exactly what they have. This also sidesteps the
+// backfill-under-RLS trap entirely, since there is no backfill.
+//
+// Known wart, pre-existing: these are literal hex, so a MATERIALIZED status carries a fixed colour
+// that cannot adapt to dark mode, while a synthesized one is rendered by the UI through
+// `var(--pm-status-*)` and does. Same values, so the two agree in light mode. Out of scope here.
 const DEFAULT_STATUSES: readonly StatusRow[] = [
-  { id: "todo", position: 0, label: "To do", color: "#6E5A43", isDone: false, isBlocked: false, wipLimit: null },
-  { id: "in_progress", position: 1, label: "In progress", color: "#6E5A43", isDone: false, isBlocked: false, wipLimit: null },
-  { id: "blocked", position: 2, label: "Blocked", color: "#B5622F", isDone: false, isBlocked: true, wipLimit: null },
-  { id: "done", position: 3, label: "Done", color: "#4B7A5A", isDone: true, isBlocked: false, wipLimit: null },
+  { id: "backlog", position: 0, label: "Backlog", color: "#90A4AE", isDone: false, isBlocked: false, wipLimit: null },
+  { id: "todo", position: 1, label: "ToDo", color: "#8BC34A", isDone: false, isBlocked: false, wipLimit: null },
+  { id: "in_progress", position: 2, label: "Doing", color: "#CDDC39", isDone: false, isBlocked: false, wipLimit: null },
+  { id: "blocked", position: 3, label: "Blocked", color: "#FF7043", isDone: false, isBlocked: true, wipLimit: null },
+  { id: "done", position: 4, label: "Done", color: "#FFC107", isDone: true, isBlocked: false, wipLimit: null },
 ];
+
+// ---- "where does a new task start?" — two DIFFERENT answers (P4-B8b) ----
+// Four call sites below used to share one expression ("first by position", or "first non-done")
+// while meaning two different things. That was harmless while `todo` was position 0 and became a
+// SILENT bug the moment `Backlog` took that slot: a fired recurrence lands in Backlog, nobody sees
+// it in ToDo, and the recurrence looks broken while every test asserting "a child was spawned"
+// still passes. platform-ui carries the identical pair (lib/pm.ts) — keep them in step.
+
+// Narrowest possible input: these two only ever need an id, an order and the done flag, so they
+// accept both `StatusRow` (wipLimit: number|null) and `ProjectStatus` (wipLimit?: number) without a
+// cast at any call site.
+type StatusPick = { id: string; position: number; isDone: boolean; isBlocked: boolean };
+
+/** Fresh, uncommitted work (a duplicate): the earliest non-done status — Backlog when one exists. */
+function intakeStatus(statuses: readonly StatusPick[]): string {
+  const ordered = [...statuses].sort((a, z) => a.position - z.position);
+  return (ordered.find((s) => !s.isDone) ?? ordered[0])?.id ?? "todo";
+}
+
+/**
+ * Work that is READY to be picked up now: a fired recurrence, a task created from the form, or (once
+ * workstream I lands) a task whose last blocker just cleared. Prefers the canonical `todo` id;
+ * otherwise the earliest non-done, non-blocked status — which reproduces the pre-Backlog behaviour
+ * exactly for a registry that was customized away from our ids.
+ */
+function readyStatus(statuses: readonly StatusPick[]): string {
+  const ordered = [...statuses].sort((a, z) => a.position - z.position);
+  // The `todo` preference is by id, so it MUST be re-checked against the flags: a project is free to
+  // mark the literal `todo` status done or blocked (the suite has exactly such a project), and
+  // trusting the id alone would drop new work straight into a done column. The flags are the
+  // authority; the id is only a tie-breaker among statuses that are already valid landing spots.
+  const canonical = ordered.find((s) => s.id === "todo" && !s.isDone && !s.isBlocked);
+  if (canonical) return canonical.id;
+  return (ordered.find((s) => !s.isDone && !s.isBlocked) ?? ordered.find((s) => !s.isDone) ?? ordered[0])?.id ?? "todo";
+}
 
 function toProjectStatus(r: StatusRow): ProjectStatus {
   const out: ProjectStatus = { id: r.id, label: r.label, color: r.color, isDone: r.isDone, isBlocked: r.isBlocked, position: r.position };
@@ -820,10 +872,12 @@ export class PmController {
     await withTenants([tenantId], async (c) => {
       if (!(await projectExists(c, b.projectId!))) throw new NotFoundException("project not found");
       // Validate status against the project's EFFECTIVE status set (synthesized or materialized).
-      // When not supplied, default to the first status by position (= 'todo' for the common
-      // unedited project → byte-identical, but never orphaned if the editor removed/reordered it).
+      // P4-B8b: when not supplied, default to the READY status, not "first by position" — that used
+      // to mean 'todo' and would now mean 'backlog', silently relocating every task created from the
+      // New Task form into a column nobody works from. `readyStatus` keeps today's outcome and stays
+      // correct if the editor removed or reordered our ids.
       const statuses = await effectiveStatuses(c, b.projectId!);
-      let status = [...statuses].sort((a, z) => a.position - z.position)[0]?.id ?? "todo";
+      let status = readyStatus(statuses);
       if (typeof b.status === "string") {
         if (!statuses.some((s) => s.id === b.status)) throw new BadRequestException("invalid status");
         status = b.status;
@@ -1103,8 +1157,9 @@ export class PmController {
           );
           if (!existing.rows[0]) {
             const childId = newId();
-            const orderedStatuses = [...statuses].sort((a, z) => a.position - z.position);
-            const firstNonDone = orderedStatuses.find((s) => !s.isDone) ?? orderedStatuses[0];
+            // P4-B8b: READY, not "first non-done" — a fired occurrence must be actionable, and
+            // "first non-done" became Backlog when the ladder gained it.
+            const spawnStatus = readyStatus(statuses);
             const resetSubtasks = subtasks.map((s) => ({ ...s, done: false }));
             const childSeq = await allocateTaskSeq(c, task.projectId); // WD-28: a spawned occurrence is a real new task
             await c.query(
@@ -1112,7 +1167,7 @@ export class PmController {
                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::date,$11::date,$12,$13,$14,$15,$16,$17,$18,$19)`,
               [
                 childId, tenantId, task.projectId, finalTitle, finalDescription,
-                firstNonDone?.id ?? "todo", finalPriority,
+                spawnStatus, finalPriority,
                 assignee ? JSON.stringify(assignee) : null, finalMilestoneId,
                 next.startDate, next.dueDate, finalEstimateMinutes,
                 JSON.stringify(resetSubtasks), tags, JSON.stringify(customFields),
@@ -1247,10 +1302,11 @@ export class PmController {
     const source = await withTenants([tenantId], async (c) => {
       const task = await fetchTask(c, taskId);
       if (!task) throw new NotFoundException("task not found");
-      // Reset status to the project's first-by-position NON-done status — via effectiveStatuses'
-      // isDone FLAG, exactly like the recurrence-spawn path above — NEVER the literal "todo".
+      // P4-B8b: a duplicate is uncommitted work, so it resets to the INTAKE status (Backlog when
+      // the project has one) — deliberately NOT the `readyStatus` a fired recurrence gets, and never
+      // the literal "todo" (the registry may not have that id at all).
       const statuses = [...(await effectiveStatuses(c, task.projectId))].sort((a, z) => a.position - z.position);
-      const firstNonDone = statuses.find((s) => !s.isDone) ?? statuses[0];
+      const dupStatus = intakeStatus(statuses);
       const resetSubtasks = (Array.isArray(task.subtasks) ? (task.subtasks as { title: string }[]) : [])
         .map((s) => ({ id: newId(), title: s.title, done: false }));
       const seq = await allocateTaskSeq(c, task.projectId); // WD-28: a duplicate is a new task, gets its own seq (never copies the source's)
@@ -1259,7 +1315,7 @@ export class PmController {
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::date, $12::date, $13, $14, $15, $16, $17, $18, $19)`,
         [
           id, tenantId, task.projectId, `${task.title} (copy)`, task.description,
-          firstNonDone?.id ?? "todo", task.priority, 0,
+          dupStatus, task.priority, 0,
           task.assignee ? JSON.stringify(task.assignee) : null, task.milestoneId,
           task.startDate, task.dueDate, task.estimateMinutes,
           JSON.stringify(task.customFields ?? {}), task.recurrence ? JSON.stringify(task.recurrence) : null,
@@ -1392,8 +1448,10 @@ export class PmController {
       //    suggestions are not copied; recurrence_spawned_from is NOT carried (it would be a
       //    source-project task id). Task titles are kept VERBATIM — the PROJECT is the "(copy)", so
       //    suffixing every task title (as the single-task P3-01 duplicate does) would be wrong here.
+      // P4-B8b: same INTAKE intent as the single-task duplicate — a cloned project's tasks are
+      // uncommitted work, so Backlog when the target project has one.
       const statuses = [...(await effectiveStatuses(c, newProjectId))].sort((a, z) => a.position - z.position);
-      const firstNonDone = statuses.find((st) => !st.isDone) ?? statuses[0];
+      const cloneStatus = intakeStatus(statuses);
       const taskMap = new Map<string, string>();
       const srcTasks = await c.query<TaskRow>(`${TASK_SELECT} AND t.project_id = $1 ORDER BY t.created_at`, [projectId]);
       for (const t of srcTasks.rows) {
@@ -1411,7 +1469,7 @@ export class PmController {
            VALUES ($1, $2, $3, $4, $5, $6, $7, 0, NULL, $8, $9::date, $10::date, $11, $12, $13, $14, $15, $16, $17)`,
           [
             nid, tenantId, newProjectId, t.title, t.description,
-            firstNonDone?.id ?? "todo", t.priority, remappedMilestone,
+            cloneStatus, t.priority, remappedMilestone,
             t.startDate, t.dueDate, t.estimateMinutes,
             JSON.stringify(t.customFields ?? {}), t.recurrence ? JSON.stringify(t.recurrence) : null,
             JSON.stringify(resetSubtasks), remappedTags, seq, config.originSite,

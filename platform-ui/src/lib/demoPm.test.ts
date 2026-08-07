@@ -185,22 +185,23 @@ describe("demoPm tags", () => {
 describe("demoPm custom statuses", () => {
   const P = "p-status-demo"; // fresh project so its registry starts empty (synth defaults)
 
-  it("synthesizes the legacy 4 for a project with no rows, and on the PmProject", () => {
+  // P4-B8: the synthesized default set is the owner's 5-status ladder, Backlog first.
+  it("synthesizes the default 5-status ladder for a project with no rows, and on the PmProject", () => {
     const rows = json<ProjectStatus[]>(call("GET", `/api/${T}/pm/projects/${P}/statuses`));
-    expect(rows.map((s) => s.id)).toEqual(["todo", "in_progress", "blocked", "done"]);
+    expect(rows.map((s) => s.id)).toEqual(["backlog", "todo", "in_progress", "blocked", "done"]);
     expect(rows.find((s) => s.id === "done")?.isDone).toBe(true);
     expect(rows.find((s) => s.id === "blocked")?.isBlocked).toBe(true);
     const proj = json<PmProject>(call("GET", `/api/${T}/pm/projects/${P}`));
-    expect(proj.statuses.map((s) => s.id)).toEqual(["todo", "in_progress", "blocked", "done"]);
+    expect(proj.statuses.map((s) => s.id)).toEqual(["backlog", "todo", "in_progress", "blocked", "done"]);
   });
 
-  it("adds a 5th status (materializing the defaults first) and appends it in position", () => {
+  it("adds a status beyond the defaults (materializing them first) and appends it in position", () => {
     const created = json<{ id: string }>(call("POST", `/api/${T}/pm/projects/${P}/statuses`, { label: "Review", color: "var(--accent)", isDone: false, isBlocked: false }));
     expect(created.id).toBeTruthy();
     const rows = json<ProjectStatus[]>(call("GET", `/api/${T}/pm/projects/${P}/statuses`));
-    expect(rows).toHaveLength(5);
+    expect(rows).toHaveLength(6); // the 5-status ladder + Review
     expect(rows.at(-1)?.label).toBe("Review");
-    expect(rows.at(-1)?.position).toBe(4);
+    expect(rows.at(-1)?.position).toBe(5);
   });
 
   it("renames + reflags a status (Done→Shipped stays isDone); a task recomputes to it at 100%", () => {
@@ -233,11 +234,11 @@ describe("demoPm custom statuses", () => {
   });
 
   it("reorders via position PATCH", () => {
-    call("PATCH", `/api/${T}/pm/projects/${P}/statuses/in_progress`, { position: 0 });
-    call("PATCH", `/api/${T}/pm/projects/${P}/statuses/todo`, { position: 1 });
+    // Move Doing ahead of Backlog to prove `position` (not insertion order) drives the sort.
+    call("PATCH", `/api/${T}/pm/projects/${P}/statuses/in_progress`, { position: -1 });
     const rows = json<ProjectStatus[]>(call("GET", `/api/${T}/pm/projects/${P}/statuses`));
     expect(rows[0].id).toBe("in_progress");
-    expect(rows[1].id).toBe("todo");
+    expect(rows[1].id).toBe("backlog");
   });
 });
 
@@ -255,7 +256,12 @@ describe("demoPm recurring tasks", () => {
 
     const child = json<PmTask>(call("GET", `/api/${T}/pm/tasks/${patch.spawned!.id}`));
     expect(child.title).toBe("Weekly report");
-    expect(child.status).toBe("todo"); // first non-done status
+    // P4-B8 REGRESSION GUARD. This must be the READY status (`todo`), never merely the first
+    // non-done one — which became `backlog` the moment the ladder gained it. A fired occurrence
+    // parked in Backlog is invisible in ToDo, so the recurrence looks broken while every test that
+    // only checked "a child was spawned" still passes. See `readyStatusId`.
+    expect(child.status).toBe("todo");
+    expect(child.status).not.toBe("backlog");
     expect(child.progress).toBe(0);
     expect(child.recurrence).toEqual({ freq: "weekly" });
   });
@@ -404,7 +410,9 @@ describe("demoPm task templates", () => {
 });
 
 describe("demoPm task duplicate", () => {
-  it("clones a task into the same project, reset to the first status and 0% progress, subtasks unstarted", () => {
+  // P4-B8: a duplicate is uncommitted work, so it resets to the INTAKE status (Backlog when the
+  // project has one) — not to the "ready" status a fired recurrence gets. See `intakeStatusId`.
+  it("clones a task into the same project, reset to the intake status and 0% progress, subtasks unstarted", () => {
     const orig = json<{ id: string }>(call("POST", `/api/${T}/pm/tasks`, { projectId: "p-web-1", title: "Original task" }));
     call("PATCH", `/api/${T}/pm/tasks/${orig.id}`, { addSubtask: "One" });
     call("PATCH", `/api/${T}/pm/tasks/${orig.id}`, { addSubtask: "Two" });
@@ -422,7 +430,7 @@ describe("demoPm task duplicate", () => {
     const copy = json<PmTask>(call("GET", `/api/${T}/pm/tasks/${dup.id}`));
     expect(copy.title).toBe("Original task (copy)");
     expect(copy.projectId).toBe("p-web-1");
-    expect(copy.status).toBe("todo"); // reset to the first status
+    expect(copy.status).toBe("backlog"); // intake status — the earliest non-done one
     expect(copy.progress).toBe(0); // reset, not carried over from the 50% original
     expect(copy.subtasks).toHaveLength(2);
     expect(copy.subtasks.every((s) => !s.done)).toBe(true); // cloned unstarted

@@ -10,6 +10,9 @@ import {
   taskProgressFromSubtasks,
   suggestFromTask,
   synthDefaultStatuses,
+  // P4-B8: the two named "where does a new task start?" intents. A bare `statuses[0]` here is what
+  // silently parked fired recurrences in Backlog.
+  intakeStatusId, readyStatusId,
   nextRecurrenceOccurrence,
   RECURRENCE_FREQS,
   type PmTask,
@@ -735,14 +738,14 @@ export function pmDemo(method: string, p: string, search: URLSearchParams, body?
     // Copy tasks (per-project), resetting as per spec:
     // unassigned + first non-done status + 0 progress, new ids, tags remapped
     const origTasks = tasks.filter((t) => t.projectId === orig.id);
-    const firstStatus = statusesFor(newId)[0];
+    const copyStatus = intakeStatusId(statusesFor(newId)); // uncommitted copy → Backlog when present
     for (const origTask of origTasks) {
       const copiedTask: PmTask = {
         ...origTask,
         id: nextId("t"),
         projectId: newId,
         projectName: newName,
-        status: firstStatus?.id ?? "todo",
+        status: copyStatus,
         progress: 0,
         assignee: null,
         subtasks: origTask.subtasks.map((s) => ({ ...s, id: nextId("s"), done: false })),
@@ -812,12 +815,12 @@ export function pmDemo(method: string, p: string, search: URLSearchParams, body?
   if (taskDuplicate && m === "POST") {
     const orig = tasks.find((x) => x.id === taskDuplicate[1]);
     if (!orig) return { status: 404, json: { error: "task not found" } };
-    const firstStatus = [...statusesFor(orig.projectId)].sort((a, b) => a.position - b.position)[0];
+    const dupStatus = intakeStatusId(statusesFor(orig.projectId)); // uncommitted copy → Backlog when present
     const copy: PmTask = {
       ...orig,
       id: nextId("t"),
       title: `${orig.title} (copy)`,
-      status: firstStatus?.id ?? "todo",
+      status: dupStatus,
       progress: 0,
       subtasks: orig.subtasks.map((s) => ({ ...s, id: nextId("s"), done: false })),
       dependsOn: [],
@@ -961,10 +964,13 @@ function patchTask(t: PmTask, b: Record<string, unknown>): { id: string; dueDate
   if (!next) return null;
   if (spawnedChildren.some((x) => x.parentId === t.id && x.dueDate === next.dueDate)) return null; // idempotency guard
 
-  const firstNonDone = afterStatuses.find((s) => !s.isDone) ?? afterStatuses[0];
+  // P4-B8: `readyStatusId`, NOT "first non-done" — with Backlog at position 0 the latter parked
+  // every fired occurrence where nobody would see it, and a recurrence that silently stops
+  // producing visible work is indistinguishable from a broken recurrence.
+  const spawnStatus = readyStatusId(afterStatuses);
   const child: PmTask = {
     id: nextId("t"), projectId: t.projectId, projectName: t.projectName, title: t.title, description: t.description,
-    status: firstNonDone?.id ?? "todo", priority: t.priority, progress: 0, assignee: t.assignee,
+    status: spawnStatus, priority: t.priority, progress: 0, assignee: t.assignee,
     subtasks: t.subtasks.map((s) => ({ ...s, done: false })), milestoneId: t.milestoneId,
     startDate: next.startDate, dueDate: next.dueDate, estimateMinutes: t.estimateMinutes, loggedMinutes: 0,
     dependsOn: [], tags: [...t.tags], customFields: { ...t.customFields }, updatedAt: stamp(), recurrence: t.recurrence,

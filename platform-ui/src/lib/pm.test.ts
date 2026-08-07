@@ -52,12 +52,16 @@ describe("resolveResponsible", () => {
 });
 
 describe("groupByStatus", () => {
-  it("defaults to the synth legacy 4 ordered columns (un-customized project)", () => {
+  // P4-B8: the synthesized default set is now the owner's 5-status ladder
+  // (`Backlog · ToDo · Doing · Blocked · Done`), so an un-customized project shows a Backlog column
+  // and `in_progress` reads as "Doing". Ids are unchanged — only labels and the added Backlog.
+  it("defaults to the synth 5-status ladder, ordered (un-customized project)", () => {
     const cols = groupByStatus([task({ id: "a", status: "todo" }), task({ id: "b", status: "done" }), task({ id: "c", status: "todo" })]);
-    expect(cols.map((c) => c.key)).toEqual(["todo", "in_progress", "blocked", "done"]);
-    expect(cols.map((c) => c.label)).toEqual(["To do", "In progress", "Blocked", "Done"]);
-    expect(cols[0].tasks.map((t) => t.id)).toEqual(["a", "c"]);
-    expect(cols[3].tasks.map((t) => t.id)).toEqual(["b"]);
+    expect(cols.map((c) => c.key)).toEqual(["backlog", "todo", "in_progress", "blocked", "done"]);
+    expect(cols.map((c) => c.label)).toEqual(["Backlog", "ToDo", "Doing", "Blocked", "Done"]);
+    expect(cols[0].tasks).toEqual([]);                                  // nothing in Backlog yet
+    expect(cols[1].tasks.map((t) => t.id)).toEqual(["a", "c"]);          // ToDo
+    expect(cols[4].tasks.map((t) => t.id)).toEqual(["b"]);               // Done
   });
   it("is driven by the project's own ordered ProjectStatus[] (custom ids/labels)", () => {
     const cols = groupByStatus([task({ id: "a", status: "s-ship" }), task({ id: "b", status: "s-back" })], CUSTOM);
@@ -97,6 +101,42 @@ describe("suggestFromTask", () => {
     const s = suggestFromTask(task({ status: "todo", subtasks: [sub(true), sub(false)] }));
     expect(s.progress).toBe(50);
     expect(s.status).toBe("in_progress");
+  });
+
+  // Regression, P4-B8. The rule used to be "at flow[0] → step to flow[1]", so inserting `backlog`
+  // ahead of `todo` silently stopped suggesting Doing for a task with real progress — nothing threw,
+  // the suggestion just disappeared. The rule is now "from anything before the active-work step,
+  // jump to it", which must hold from BOTH pre-start statuses.
+  it("suggests the active-work step from backlog as well as todo", () => {
+    for (const from of ["backlog", "todo"]) {
+      const s = suggestFromTask(task({ status: from, subtasks: [sub(true), sub(false)] }));
+      expect(s.status, from).toBe("in_progress");
+    }
+  });
+
+  // The bound that keeps the generalisation safe: progress alone must never push work FORWARD past
+  // the active step into a review/approval status, or a half-done task lands in Client Review.
+  it("never advances a task that is already at or past the active-work step", () => {
+    const REVIEW = [
+      { id: "todo", label: "ToDo", color: "", isDone: false, isBlocked: false, position: 0 },
+      { id: "in_progress", label: "Doing", color: "", isDone: false, isBlocked: false, position: 1 },
+      { id: "client_review", label: "Client Review", color: "", isDone: false, isBlocked: false, position: 2 },
+      { id: "done", label: "Done", color: "", isDone: true, isBlocked: false, position: 3 },
+    ];
+    expect(suggestFromTask(task({ status: "in_progress", subtasks: [sub(true), sub(false)] }), REVIEW).status).toBe("in_progress");
+    expect(suggestFromTask(task({ status: "client_review", subtasks: [sub(true), sub(false)] }), REVIEW).status).toBe("client_review");
+  });
+
+  // A fully custom registry with no `in_progress` id must keep the ORIGINAL behaviour: step one
+  // forward from the head of the spine.
+  it("falls back to a single step forward when the registry has no in_progress id", () => {
+    const CUSTOM = [
+      { id: "queued", label: "Queued", color: "", isDone: false, isBlocked: false, position: 0 },
+      { id: "active", label: "Active", color: "", isDone: false, isBlocked: false, position: 1 },
+      { id: "shipped", label: "Shipped", color: "", isDone: true, isBlocked: false, position: 2 },
+    ];
+    expect(suggestFromTask(task({ status: "queued", subtasks: [sub(true), sub(false)] }), CUSTOM).status).toBe("active");
+    expect(suggestFromTask(task({ status: "active", subtasks: [sub(true), sub(false)] }), CUSTOM).status).toBe("active");
   });
   it("moves to done at 100% and explains", () => {
     const s = suggestFromTask(task({ status: "in_progress", subtasks: [sub(true), sub(true)] }));

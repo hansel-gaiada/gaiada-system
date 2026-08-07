@@ -353,11 +353,13 @@ describe.skipIf(!TEST_URL)("PM subsystem (§5)", () => {
     const getTask = async (id: string) =>
       (await app.inject({ method: "GET", url: `/api/${tenant}/pm/tasks/${id}`, headers: hdr() })).json() as { status: string; progress: number };
 
-    it("a project that never opens the editor reads back the 4 synthesized defaults (byte-identical)", async () => {
+    // P4-B8b: the synthesized set is the owner's 5-status ladder. `in_progress` keeps its id and only
+    // gains the label "Doing" — an id rename would orphan every existing pm_tasks.status value.
+    it("a project that never opens the editor reads back the 5 synthesized defaults (byte-identical)", async () => {
       const pid = await freshProject("Statuses fresh");
       const statuses = await getStatuses(pid);
-      expect(statuses.map((s) => s.id)).toEqual(["todo", "in_progress", "blocked", "done"]);
-      expect(statuses.map((s) => s.label)).toEqual(["To do", "In progress", "Blocked", "Done"]);
+      expect(statuses.map((s) => s.id)).toEqual(["backlog", "todo", "in_progress", "blocked", "done"]);
+      expect(statuses.map((s) => s.label)).toEqual(["Backlog", "ToDo", "Doing", "Blocked", "Done"]);
       expect(statuses.find((s) => s.id === "done")!.isDone).toBe(true);
       expect(statuses.find((s) => s.id === "blocked")!.isBlocked).toBe(true);
       expect(statuses.find((s) => s.id === "todo")!.isDone).toBe(false);
@@ -366,7 +368,7 @@ describe.skipIf(!TEST_URL)("PM subsystem (§5)", () => {
 
       // the project GET carries the same synthesized set
       const proj = (await app.inject({ method: "GET", url: `/api/${tenant}/pm/projects/${pid}`, headers: hdr() })).json() as { statuses: Array<{ id: string }> };
-      expect(proj.statuses.map((s) => s.id)).toEqual(["todo", "in_progress", "blocked", "done"]);
+      expect(proj.statuses.map((s) => s.id)).toEqual(["backlog", "todo", "in_progress", "blocked", "done"]);
     });
 
     it("a plain member cannot edit statuses (manage-gated); read is allowed", async () => {
@@ -389,10 +391,10 @@ describe.skipIf(!TEST_URL)("PM subsystem (§5)", () => {
       expect(st.id).toBe("shipped");
       expect(st.isDone).toBe(true);
       expect(st.wipLimit).toBe(3);
-      expect(st.position).toBe(4); // appended after the 4 materialized defaults (positions 0..3)
+      expect(st.position).toBe(5); // appended after the 5 materialized defaults (positions 0..4)
 
       const statuses = await getStatuses(pid);
-      expect(statuses.map((s) => s.id)).toEqual(["todo", "in_progress", "blocked", "done", "shipped"]);
+      expect(statuses.map((s) => s.id)).toEqual(["backlog", "todo", "in_progress", "blocked", "done", "shipped"]);
       // the legacy task is still readable/valid against the now-materialized set
       expect((await getTask(legacyTask)).status).toBe("todo");
     });
@@ -901,16 +903,47 @@ describe.skipIf(!TEST_URL)("PM subsystem (§5)", () => {
 
       const createRes = await app.inject({ method: "POST", url: `/api/${tenant}/pm/tasks`, headers: hdr(), payload: { projectId: pid, title: "Custom status source" } });
       const sourceId = (createRes.json() as { id: string }).id;
-      // created directly into "todo", which is now is_done -> progress coupled to 100 at create time
+      // P4-B8b: the source is now placed into the done-flagged "todo" EXPLICITLY. It used to arrive
+      // there by accident, because create defaulted to "first status by position". That default is
+      // now `readyStatus`, which skips a done-flagged status on purpose — a new task must never be
+      // born complete. The explicit PATCH keeps this test about DUPLICATION, which is its subject.
+      await app.inject({ method: "PATCH", url: `/api/${tenant}/pm/tasks/${sourceId}`, headers: hdr(), payload: { status: "todo" } });
+      // sitting in a done-flagged status -> progress is coupled to 100
       expect((await app.inject({ method: "GET", url: `/api/${tenant}/pm/tasks/${sourceId}`, headers: hdr() })).json()).toMatchObject({ status: "todo", progress: 100 });
 
       const dup = await app.inject({ method: "POST", url: `/api/${tenant}/pm/tasks/${sourceId}/duplicate`, headers: hdr() });
       expect(dup.statusCode).toBe(201);
       const dupId = (dup.json() as { id: string }).id;
       const copy = (await app.inject({ method: "GET", url: `/api/${tenant}/pm/tasks/${dupId}`, headers: hdr() })).json() as { status: string; progress: number };
-      expect(copy.status).toBe("in_progress"); // first-by-position NON-done via the FLAG, not the literal "todo"
+      // P4-B8b: still the first-by-position NON-done status via the FLAG — which is now `backlog`,
+      // since the ladder put it ahead of the (here done-flagged) `todo`. The assertion that matters
+      // is unchanged: never the literal "todo" when that status is marked done.
+      expect(copy.status).toBe("backlog");
       expect(copy.status).not.toBe("todo");
       expect(copy.progress).toBe(0);
+    });
+
+    // Companion to the above, and a bug this suite caught during P4-B8b: `readyStatus` PREFERS the
+    // canonical `todo` id, so it has to re-check the flags. A project that marks `todo` done would
+    // otherwise have every fired recurrence and every new task land in a DONE column.
+    it("readyStatus never lands new work on a 'todo' status the project has flagged done", async () => {
+      const pid = await freshProject("Ready status flag guard");
+      await app.inject({ method: "POST", url: `/api/${tenant}/pm/projects/${pid}/statuses`, headers: hdr(), payload: { label: "Trigger materialize", color: "#111111" } });
+      await app.inject({ method: "PATCH", url: `/api/${tenant}/pm/projects/${pid}/statuses/todo`, headers: hdr(), payload: { isDone: true } });
+
+      // A recurring task, completed -> spawns the next occurrence, which must be actionable.
+      const created = await app.inject({ method: "POST", url: `/api/${tenant}/pm/tasks`, headers: hdr(), payload: { projectId: pid, title: "Weekly thing", dueDate: "2026-08-10", recurrence: { freq: "weekly" } } });
+      const srcId = (created.json() as { id: string }).id;
+      await app.inject({ method: "PATCH", url: `/api/${tenant}/pm/tasks/${srcId}`, headers: hdr(), payload: { status: "done" } });
+
+      const all = (await app.inject({ method: "GET", url: `/api/${tenant}/pm/projects/${pid}/tasks`, headers: hdr() })).json() as Array<{ id: string; status: string }>;
+      const statuses = (await app.inject({ method: "GET", url: `/api/${tenant}/pm/projects/${pid}/statuses`, headers: hdr() })).json() as Array<{ id: string; isDone: boolean; isBlocked: boolean }>;
+      const doneIds = new Set(statuses.filter((x) => x.isDone).map((x) => x.id));
+      const blockedIds = new Set(statuses.filter((x) => x.isBlocked).map((x) => x.id));
+      const child = all.find((t) => t.id !== srcId);
+      expect(child).toBeDefined();
+      expect(doneIds.has(child!.status)).toBe(false);
+      expect(blockedIds.has(child!.status)).toBe(false);
     });
 
     it("a plain member cannot duplicate a task (create-gated)", async () => {
@@ -1168,13 +1201,13 @@ describe.skipIf(!TEST_URL)("PM subsystem (§5)", () => {
       expect(dup.statusCode).toBe(201);
       const newPid = (dup.json() as { id: string }).id;
 
-      // clone reads the same 4 synthesized defaults (nothing was materialized to copy)
+      // clone reads the same 5 synthesized defaults (nothing was materialized to copy)
       const statuses = (await get(`/api/${tenant}/pm/projects/${newPid}/statuses`)).json() as Array<{ id: string }>;
-      expect(statuses.map((s) => s.id)).toEqual(["todo", "in_progress", "blocked", "done"]);
+      expect(statuses.map((s) => s.id)).toEqual(["backlog", "todo", "in_progress", "blocked", "done"]);
 
       const tasks = (await get(`/api/${tenant}/pm/projects/${newPid}/tasks`)).json() as Array<{ title: string; status: string }>;
       expect(tasks).toHaveLength(1);
-      expect(tasks[0].status).toBe("todo"); // first-by-position non-done of the synth set
+      expect(tasks[0].status).toBe("backlog"); // INTAKE status: a cloned project's tasks are uncommitted
     });
 
     it("requires a name", async () => {
