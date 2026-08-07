@@ -1672,6 +1672,29 @@ tenant's 8 seeded rows still need purging (per-tenant SQL in the design doc §12
 - **Unreleased / next:** identity writes, org-structure endpoints.
 
 ## platform-ui
+### [0.19.0] - 2026-08-07 - IN PROGRESS (the sidebar collapses to a 64px icon rail)
+- Merged `fadhil/ui` (1 commit, forked 163 commits back). Expanded mode gets collapsible nav groups;
+  collapsed mode swaps renderer entirely - a 64px rail with one glyph per group, children in a
+  floating flyout, labels as hover/focus tooltips. ~12 icons stand in for ~35 rows.
+- State lives in its own **`gaiada_sidebar`** cookie, not the `gaiada_prefs` blob, so the toggle
+  writes it client-side without round-tripping or clobbering density/width/theme. Stamped onto
+  `<html data-sidebar>` server-side so a collapsed rail never flashes open.
+- Below the drawer breakpoint the off-canvas panel still wins (touch has no hover) and the collapse
+  button hides, so the two never fight.
+- **Merge resolution (`nav.ts`, the one conflict):** the branch predated both the `Me` group and the
+  `Assistant` row; both were kept. `Me` is a rail **flyout** with a new `user` glyph, not pinned -
+  pinning it alongside Workspace would put 7 flat rows above the categories and undo the rail.
+- **New:** [`docs/sidebar-nav-map.md`](../sidebar-nav-map.md) - the authoritative human index of
+  where every nav row sits, its capability gate, and a per-push change record. Nav moves have been
+  landing as unreadable one-line array diffs; this is where they get explained. `nav.test.ts` gained
+  a guard so a new group cannot silently ship without a rail glyph (it would fall back to a generic
+  `box`) and so a second `pinned` group fails the suite.
+- **Not verified:** the three new Playwright specs (collapse, rail flyout, cookie persistence) are
+  not `@smoke`-tagged, so CI does not run them and this session did not - they need a live backend.
+  `tsc`, 1340 vitest tests and `next build` are green on the merge result.
+- Lands AFTER the `Alpha 01.025.0064a` cut, which manifests platform-ui `0.18.0` - `0.19.0` is
+  unreleased until the next cut.
+
 ### [0.18.0] - 2026-08-07 - IN PROGRESS (the chat no longer opens onto a debug panel)
 - **The empty state was the raw tool registry** - `activity.feed`, `authz.check`,
   `workActivity.relink`, with developer prose - and it was the first thing anyone saw. Replaced with

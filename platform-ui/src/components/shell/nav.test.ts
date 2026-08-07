@@ -60,6 +60,20 @@ describe("navFor (RBAC-gated visibility)", () => {
     const appraisals = groups.find((g) => g.label === "Appraisals")!;
     expect(appraisals.items.map((i) => i.label)).toEqual(["My Appraisals", "Team Appraisals", "Appraisal Cycles"]);
   });
+  // The 64px rail draws ONE glyph per multi-row group (NavGroupSection → RailCategory). A group that
+  // forgets `icon` still renders — it silently falls back to a generic `box`, so the rail grows a
+  // second anonymous square instead of failing. This is that missing failure. See
+  // docs/sidebar-nav-map.md for the placement record this guards.
+  it("gives every collapsible group a rail glyph, and pins only Workspace", () => {
+    const groups = navFor({ ...base, roles: [{ role: "platform_admin", scopeType: "global", scopeId: null }] }, "c1");
+    const needsGlyph = groups.filter((g) => g.label && !g.pinned && g.items.length > 1);
+    expect(needsGlyph.filter((g) => !g.icon).map((g) => g.label)).toEqual([]);
+    // Two pinned groups would put 7 flat rows above the glyphs and undo the rail.
+    expect(groups.filter((g) => g.pinned).map((g) => g.label)).toEqual(["Workspace"]);
+    // Distinct glyphs: the same shape twice in a 12-icon column is unreadable.
+    const glyphs = needsGlyph.map((g) => g.icon!);
+    expect(new Set(glyphs).size).toBe(glyphs.length);
+  });
 });
 
 describe("canManageIT", () => {

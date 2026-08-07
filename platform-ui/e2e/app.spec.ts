@@ -11,31 +11,36 @@ test("My Work dashboard loads", async ({ page }) => {
 
 test("sidebar navigates the business modules", async ({ page }) => {
   await page.goto("/");
+  // Nav groups collapse; Business holds these four and starts closed on the dashboard.
+  await sidebar(page).getByRole("button", { name: "Business" }).click();
   for (const [label, heading] of [
     ["Projects", /projects/i],
     ["Tasks", /tasks/i],
-    ["Companies", /companies/i],
+    ["Deliverables", /deliverables/i],
     ["Agency", /agency|campaign/i],
   ] as const) {
     await sidebar(page).getByRole("link", { name: label, exact: true }).click();
     await expect(page.getByRole("heading", { level: 1 })).toContainText(heading);
   }
+  // Workspace is pinned: its daily rows stay open away from the dashboard too.
+  await expect(sidebar(page).getByRole("link", { name: "Calendar", exact: true })).toBeVisible();
 });
 
 test("global search returns cross-entity results", async ({ page }) => {
   await page.goto("/");
-  // "gaiada" matches companies, which are searched across every tenant the
+  // "gaia" matches companies, which are searched across every tenant the
   // user can access (independent of the active company).
-  await page.getByLabel("Search").fill("gaiada");
+  await page.getByLabel("Search").fill("gaia");
   await page.getByLabel("Search").press("Enter");
-  await page.waitForURL("**/search?q=gaiada");
+  await page.waitForURL("**/search?q=gaia");
   await expect(page.getByRole("heading", { level: 1 })).toContainText(/results for/i);
-  await expect(page.getByRole("link", { name: /Gaiada Agency/i })).toBeVisible();
+  await expect(page.getByRole("link", { name: /Gaia Digital Agency/i }).first()).toBeVisible();
 });
 
 test("notifications surface shows items and unread badge", async ({ page }) => {
   await page.goto("/");
-  const bell = page.getByRole("link", { name: /notifications/i });
+  // Scoped to the top bar: a demo task is titled "Push notifications spike".
+  const bell = page.locator(".erp-top").getByRole("link", { name: /notifications/i });
   await expect(bell).toBeVisible();
   await bell.click();
   await page.waitForURL("**/notifications");
@@ -70,10 +75,10 @@ test("account page + density preference", async ({ page }) => {
 });
 
 test("people directory opens an employee 360", async ({ page }) => {
-  await page.goto("/");
-  await sidebar(page).getByRole("link", { name: "People", exact: true }).click();
-  await page.waitForURL("**/people");
-  await expect(page.getByRole("heading", { level: 1 })).toContainText(/people/i);
+  // The directory lives in the HR console (/people redirects there), not the sidebar.
+  await page.goto("/people");
+  await page.waitForURL("**/hr/people");
+  await expect(page.getByRole("heading", { level: 1 })).toContainText(/hr/i);
   // Open a colleague from the directory.
   await page.getByRole("link", { name: "Made Putra" }).click();
   await page.waitForURL(/\/people\/u-dev/);
@@ -222,6 +227,52 @@ test("a meeting recording links to its ingested pipeline run", async ({ page }) 
   await expect(page.getByRole("heading", { level: 1 })).toContainText(/northwind/i);
 });
 
+test("the sidebar collapses to a labelled icon rail and stays collapsed", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByRole("link", { name: "Dashboard" })).toContainText("Dashboard");
+
+  await page.getByRole("button", { name: "Close sidebar" }).click();
+  await expect(page.locator("html")).toHaveAttribute("data-sidebar", "collapsed");
+  await expect(page.getByRole("link", { name: "Dashboard" }).locator("span")).toBeHidden();
+
+  await page.getByRole("link", { name: "Approvals" }).first().hover();
+  await expect(page.locator(".erp-railtip")).toHaveText("Approvals");
+
+  await page.reload();
+  await expect(page.locator("html")).toHaveAttribute("data-sidebar", "collapsed");
+  await page.getByRole("button", { name: "Open sidebar" }).click();
+  await expect(page.locator("html")).not.toHaveAttribute("data-sidebar", "collapsed");
+});
+
+test("rail categories open a flyout by click, hover and keyboard", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "Close sidebar" }).click();
+
+  const flyout = page.locator(".erp-railmenu");
+  const category = (name: string) => sidebar(page).getByRole("button", { name, exact: true });
+
+  await category("Business").click();
+  await expect(flyout).toContainText("Delivery Pipeline");
+
+  // Escape closes and hands focus back; hover then opens a different category,
+  // and only one panel is ever open.
+  await page.keyboard.press("Escape");
+  await expect(category("Business")).toBeFocused();
+  await category("Systems").hover();
+  await expect(flyout).toHaveCount(1);
+  await expect(flyout).toContainText("MCP Hub");
+
+  // Hover must not steal focus, so the keyboard walk starts from the category itself.
+  await category("Systems").focus();
+  await page.keyboard.press("ArrowDown");
+  await expect(flyout.getByRole("link", { name: "WA/TG Bot" })).toBeFocused();
+  await page.keyboard.press("ArrowDown");
+  await expect(flyout.getByRole("link", { name: "AI Gateway" })).toBeFocused();
+  await page.keyboard.press("Enter");
+  await page.waitForURL("**/systems/gateway");
+  await expect(flyout).toHaveCount(0);
+});
+
 test("sign out returns to login", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("button", { name: /clement hansel/i }).click();
@@ -230,4 +281,15 @@ test("sign out returns to login", async ({ page }) => {
   await signOut.click();
   await page.waitForURL("**/login", { timeout: 15_000 });
   await expect(page.getByRole("button", { name: /sign in/i })).toBeVisible();
+});
+
+test("the mobile drawer keeps labels even when the desktop rail is collapsed", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "Close sidebar" }).click();
+  await page.setViewportSize({ width: 420, height: 820 });
+  await page.getByRole("button", { name: "Open navigation" }).click();
+  await expect(sidebar(page).getByRole("button", { name: "Business" })).toBeVisible();
+  await sidebar(page).getByRole("button", { name: "Business" }).click();
+  await expect(sidebar(page).getByRole("link", { name: "Projects", exact: true })).toBeVisible();
+  await expect(page.locator(".erp-railmenu")).toHaveCount(0);
 });
