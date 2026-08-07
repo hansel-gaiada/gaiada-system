@@ -3,10 +3,14 @@ import Link from "next/link";
 import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
-import { getPortalTimeline } from "@/lib/portal-data";
-import { clientStatus, portalDate, relativeDays, splitTimeline, statusTone, type PortalTimelineEvent } from "@/lib/portal";
+import { getPortalTimeline, listPortalProjects } from "@/lib/portal-data";
+import {
+  clientStatus, portalDate, projectRange, projectUrgencyTier, relativeDays, splitTimeline, statusTone,
+  type PortalProject, type PortalTimelineEvent,
+} from "@/lib/portal";
 import { Card } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
+import { UrgencyChip } from "@/components/pm/UrgencyChip";
 import { PortalLive } from "@/components/portal/PortalLive";
 import { PortalPageHead } from "@/components/portal/PortalBits";
 
@@ -36,8 +40,16 @@ export default async function PortalTimelinePage() {
   const tenant = await getActiveTenant(me);
   if (!tenant) return <EmptyNote>No workspace selected.</EmptyNote>;
 
-  const events = await getPortalTimeline(userId, tenant);
+  // P4-K2: the project range + urgency tier crossing into the portal, per the K1 client-safe
+  // projection (project authored range · progress % · milestone state · urgency tier — never ball
+  // history, internal status labels, staff names or task titles). `listPortalProjects` already
+  // returns `startDate`/`dueDate`/`progressPercent`; nothing new to fetch, only to render.
+  const [events, projects] = await Promise.all([
+    getPortalTimeline(userId, tenant),
+    listPortalProjects(userId, tenant),
+  ]);
   const now = new Date();
+  const today = now.toISOString().slice(0, 10);
   const { upcoming, history } = splitTimeline(events, now);
 
   return (
@@ -48,6 +60,12 @@ export default async function PortalTimelinePage() {
         lead="Everything scheduled and everything that has happened, in one place."
         actions={<PortalLive topics={["projects", "deliverables", "invoices", "contracts", "approvals"]} />}
       />
+
+      {projects.length > 0 && (
+        <Card title="Your projects">
+          <ProjectRanges projects={projects} today={today} />
+        </Card>
+      )}
 
       {events.length === 0 ? (
         <EmptyNote>Nothing on your timeline yet.</EmptyNote>
@@ -66,6 +84,36 @@ export default async function PortalTimelinePage() {
         </div>
       )}
     </>
+  );
+}
+
+// P4-K2 — the client-safe range + urgency strip. Deliberately just three fields per project: the
+// authored range (`projectRange`, workstream H's `startDate`/`dueDate`, never the task-derived
+// envelope), the progress percentage the portal already showed pre-Phase-4, and the urgency tier
+// (`projectUrgencyTier`, the ONE shared definition — never a bespoke date comparison here). No
+// milestone titles, no ball holder, no internal status word: those stay off this component by
+// construction because `PortalProject` never carries them (see `lib/portal.ts`'s BFF contract).
+function ProjectRanges({ projects, today }: { projects: PortalProject[]; today: string }) {
+  return (
+    <div className="cp-tl">
+      {projects.map((p) => (
+        <div className="cp-tl__row" key={p.id}>
+          <div className="cp-tl__rail">
+            <UrgencyChip tier={projectUrgencyTier(p, today)} variant="dot" detail={portalDate(p.dueDate)} />
+          </div>
+          <div className="cp-tl__body">
+            <div className="cp-tl__label">
+              <Link href={`/portal/projects/${p.id}`} style={{ color: "inherit", textDecoration: "none" }}>
+                {p.name}
+              </Link>
+            </div>
+            <div className="cp-tl__meta">
+              {projectRange(p)} · {p.progressPercent}% complete
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
   );
 }
 

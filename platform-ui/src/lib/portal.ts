@@ -7,6 +7,16 @@
 // `"use client"` live component that needs `PortalTopic` would have pulled `server-only` into the
 // browser bundle — the exact failure the CLAUDE.md trap list calls out: `tsc` and vitest pass, and
 // `next build` breaks. Splitting first was cheaper than debugging that later.
+//
+// P4-K2/K1 — urgency tier crossing into the portal reuses the ONE urgency definition
+// (`lib/pmUrgency.ts`) rather than a portal-local date comparison: the entire premise of that
+// module is that every surface agrees on "overdue"/"almost late"/"in time", and the portal is not
+// exempt just because it renders a different set of fields. Both modules are deliberately import-
+// free and client-safe on their own, so importing one from the other does not risk pulling
+// `server-only` into the browser bundle.
+import { taskUrgency } from "./pmUrgency";
+import type { UrgencyTier } from "./pmUrgency";
+export type { UrgencyTier };
 
 // ── The BFF contract (mirrors platform-nest src/core/portal-*.controller.ts) ──────────────────────
 
@@ -379,4 +389,29 @@ export function splitTimeline(
 export function overallProgress(o: Pick<PortalOverview, "progress">): number {
   const p = o.progress?.percent;
   return Number.isFinite(p) ? Math.max(0, Math.min(100, Math.round(p))) : 0;
+}
+
+/** A project's own authored range, formatted for the client ("14 Jul 2026 – 30 Sep 2026"). Both
+ *  ends are optional in the data (a project can lack a start or a due date); each side degrades to
+ *  "—" independently rather than the whole range disappearing. Client-safe projection: this is
+ *  ONLY the authored `startDate`/`dueDate` pair (workstream H) — never a task-derived envelope,
+ *  which is internal Gantt detail the portal must not reconstruct. */
+export function projectRange(project: Pick<PortalProject, "startDate" | "dueDate">): string {
+  const start = portalDate(project.startDate);
+  const end = portalDate(project.dueDate);
+  if (start === "—" && end === "—") return "—";
+  return `${start} – ${end}`;
+}
+
+/** Urgency tier for a project's own authored due date (P4-K2, decided in K1). Reuses the ONE
+ *  urgency definition (`lib/pmUrgency.ts`) rather than a portal-local date comparison — the whole
+ *  premise of that module is that every surface must agree, and the portal earns no exemption.
+ *  `isDone` is derived from the project's own progress percentage (100% = done) because the portal
+ *  never receives an internal status label to check against — that is exactly the field K1 says
+ *  must never cross. */
+export function projectUrgencyTier(
+  project: Pick<PortalProject, "dueDate" | "progressPercent">,
+  today: string,
+): UrgencyTier {
+  return taskUrgency({ dueDate: project.dueDate, isDone: project.progressPercent >= 100 }, today);
 }

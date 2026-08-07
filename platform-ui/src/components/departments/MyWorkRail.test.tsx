@@ -41,4 +41,41 @@ describe("MyWorkRail", () => {
     expect(screen.getByText("No due date yet")).toBeInTheDocument();
     expect(document.querySelector(".pm-urg")).toBeNull();
   });
+
+  // P4-K3 — the ball-holder queue section is entirely optional so every render site that has not
+  // wired the ball queue yet keeps compiling and rendering exactly as before.
+  it("omits the ball section entirely when the prop is not supplied", () => {
+    render(<MyWorkRail today={[]} waiting={[]} />);
+    expect(screen.queryByText(/is with you/)).toBeNull();
+  });
+
+  it("shows the ball empty state when the caller supplies an empty array", () => {
+    render(<MyWorkRail today={[]} waiting={[]} ball={[]} />);
+    expect(screen.getByText("Ball is with you")).toBeInTheDocument();
+    expect(screen.getByText("Nothing on your ball right now.")).toBeInTheDocument();
+  });
+
+  it("renders ball items with readiness and a precomputed urgency tier, never deriving either", () => {
+    const { container } = render(
+      <MyWorkRail
+        today={[]}
+        waiting={[]}
+        ball={[
+          { id: "b1", title: "Ship the deck", href: "/tasks/b1", projectName: "Northwind rebrand", dueDate: "2020-01-01", urgencyTier: "overdue", readiness: "ready" },
+          { id: "b2", title: "Review copy", readiness: "blocked" },
+        ]}
+      />
+    );
+    expect(screen.getByText("Ball is with you")).toBeInTheDocument();
+    expect(screen.getByText("Ship the deck")).toBeInTheDocument();
+    expect(screen.getByText("Northwind rebrand")).toBeInTheDocument();
+    expect(container.querySelector(".pm-urg--overdue")).toBeTruthy();
+    expect(screen.getByText("Ready")).toBeInTheDocument();
+    expect(screen.getByText("Blocked")).toBeInTheDocument();
+  });
+
+  it("renders a custom ball empty-state message when supplied", () => {
+    render(<MyWorkRail today={[]} waiting={[]} ball={[]} ballEmptyText="Nobody's turn — all clear." />);
+    expect(screen.getByText("Nobody's turn — all clear.")).toBeInTheDocument();
+  });
 });

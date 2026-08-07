@@ -4,14 +4,14 @@ import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
 import { can } from "@/lib/rbac";
-import { getDepartment, myDeptTasksToday, myBlockedTasks, toRailPriority } from "@/lib/departments";
-import { titleWithRecurrenceGlyph, isDoneStatus, taskUrgency } from "@/lib/pm";
+import { getDepartment, myDeptTasksToday, myDeptBallTasks, myBlockedTasks, toRailPriority } from "@/lib/departments";
+import { titleWithRecurrenceGlyph, isDoneStatus, taskUrgency, openDependencies } from "@/lib/pm";
 import { getMyWorkQueue, projectQueueForCompany } from "@/lib/queue";
 import { toolkitFor } from "@/lib/deptToolkits";
 import { PageHeader } from "@/components/PageHeader";
 import { DeptTabs } from "@/components/shell/DeptTabs";
 import { DeptShellFrame } from "@/components/departments/DeptShellFrame";
-import { MyWorkRail, type RailTaskItem, type RailWaitingItem } from "@/components/departments/MyWorkRail";
+import { MyWorkRail, type RailTaskItem, type RailWaitingItem, type RailBallItem } from "@/components/departments/MyWorkRail";
 import "@/components/departments/departments.css";
 
 type Params = Promise<{ deptId: string }>;
@@ -67,6 +67,21 @@ export default async function DepartmentConsoleLayout({ children, params }: { ch
     urgencyTier: taskUrgency({ dueDate: t.dueDate, isDone: isDoneStatus(t.status, dept.statusesByProject[t.projectId]) }, railToday),
   }));
 
+  // P4-K3 — "the ball is with you". Readiness comes from the chain graph (workstream I): a task with
+  // an unclosed blocker is yours but not yet startable, and saying so is the difference between a
+  // queue and a to-do list. Both urgency and readiness are precomputed HERE — the rail derives
+  // neither, same contract as `today` above.
+  const ballTaskById = new Map(dept.tasks.map((t) => [t.id, t]));
+  const ball: RailBallItem[] = myDeptBallTasks(dept.tasks, userId, dept.statusesByProject).map((t) => ({
+    id: t.id,
+    title: titleWithRecurrenceGlyph(t),
+    href: `/tasks/${t.id}`,
+    dueDate: t.dueDate,
+    projectName: t.projectName,
+    readiness: openDependencies(t, ballTaskById, dept.statusesByProject[t.projectId]).length > 0 ? "blocked" : "ready",
+    urgencyTier: taskUrgency({ dueDate: t.dueDate, isDone: isDoneStatus(t.status, dept.statusesByProject[t.projectId]) }, railToday),
+  }));
+
   const waiting: RailWaitingItem[] = [
     ...waitingFromQueue.map((i): RailWaitingItem => ({
       id: i.id,
@@ -94,7 +109,7 @@ export default async function DepartmentConsoleLayout({ children, params }: { ch
         actions={canEditOrg ? <Link href={`/companies/${tenant}/org`} className="lux-btn lux-btn--ghost lux-btn--sm">Edit structure</Link> : undefined}
       />
       <DeptTabs groups={toolkit.groups} deptId={deptId} />
-      <DeptShellFrame groups={toolkit.groups} deptId={deptId} rail={<MyWorkRail today={today} waiting={waiting} />}>
+      <DeptShellFrame groups={toolkit.groups} deptId={deptId} rail={<MyWorkRail today={today} waiting={waiting} ball={ball} />}>
         {children}
       </DeptShellFrame>
     </>

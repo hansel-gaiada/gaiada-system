@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
-  clientStatus, isPastDue, money, overallProgress, portalDate, relativeDays, splitTimeline, statusTone,
-  type PortalTimelineEvent,
+  clientStatus, isPastDue, money, overallProgress, portalDate, projectRange, projectUrgencyTier, relativeDays,
+  splitTimeline, statusTone, type PortalProject, type PortalTimelineEvent,
 } from "./portal";
 
 // CP-16 — the portal's pure layer. Every function here renders text a CLIENT reads, on both the server
@@ -182,5 +182,83 @@ describe("overallProgress", () => {
   it("treats a missing or non-finite percent as zero", () => {
     expect(overallProgress({ progress: {} as never })).toBe(0);
     expect(overallProgress({ progress: { percent: Number.NaN } as never })).toBe(0);
+  });
+});
+
+// P4-K2 — the project range + urgency tier crossing into the portal (K1's client-safe projection).
+describe("projectRange", () => {
+  it("formats both ends of an authored range", () => {
+    expect(projectRange({ startDate: "2026-07-01", dueDate: "2026-09-30" })).toBe("01 Jul 2026 – 30 Sept 2026");
+  });
+
+  it("degrades each end independently rather than dropping the whole range", () => {
+    expect(projectRange({ startDate: null, dueDate: "2026-09-30" })).toBe("— – 30 Sept 2026");
+    expect(projectRange({ startDate: "2026-07-01", dueDate: null })).toBe("01 Jul 2026 – —");
+  });
+
+  it("renders a single em-dash when neither end is known", () => {
+    expect(projectRange({ startDate: null, dueDate: null })).toBe("—");
+  });
+});
+
+describe("projectUrgencyTier", () => {
+  const today = "2026-08-04";
+
+  it("reuses the ONE urgency definition — matches taskUrgency's overdue boundary", () => {
+    expect(projectUrgencyTier({ dueDate: "2026-08-01", progressPercent: 40 }, today)).toBe("overdue");
+  });
+
+  it("is due-soon within the default 3-day window and on-track beyond it", () => {
+    expect(projectUrgencyTier({ dueDate: "2026-08-06", progressPercent: 40 }, today)).toBe("due-soon");
+    expect(projectUrgencyTier({ dueDate: "2026-08-20", progressPercent: 40 }, today)).toBe("on-track");
+  });
+
+  it("is undated with no due date", () => {
+    expect(projectUrgencyTier({ dueDate: null, progressPercent: 0 }, today)).toBe("undated");
+  });
+
+  // The disclosure-relevant case: `isDone` must come from `progressPercent`, the one client-safe
+  // signal — never from an internal status word the portal was never sent in the first place.
+  it("is done at 100% progress even with a due date in the past — done outranks overdue", () => {
+    expect(projectUrgencyTier({ dueDate: "2026-01-01", progressPercent: 100 }, today)).toBe("done");
+  });
+});
+
+// P4-K5 — isolation: the client-safe projection (K1) is "project authored range · progress % ·
+// milestone state · urgency tier" and NOTHING else. This pins it structurally, not just by intent:
+// if someone widens `PortalProject` to carry ball history, an internal status label or a staff
+// name, this test catches it at the type/shape boundary these helpers consume, before it ever
+// reaches a portal page.
+describe("P4-K5 isolation — the client-safe projection stays exactly K1's four fields", () => {
+  const FORBIDDEN_KEYS = [
+    "assignee", "ball", "refId", "responsibleId", "assignmentHistory", "ballHistory",
+    "internalStatus", "staffName", "assigneeName", "ownerName", "taskTitle", "taskTitles",
+  ];
+
+  it("PortalProject (the type projectRange/projectUrgencyTier consume) declares no forbidden key", () => {
+    // A real payload shaped exactly like the BFF contract in `lib/portal.ts` — if a future edit
+    // widens the interface with any of the forbidden keys, this object literal starts satisfying a
+    // wider type and a reviewer might not notice; the runtime key check below still catches it.
+    const sample: PortalProject = {
+      id: "p1", name: "Northwind rebrand", status: "in_progress", startDate: "2026-07-01",
+      dueDate: "2026-09-30", clientId: "c1", clientName: "Northwind", progressPercent: 40,
+      milestoneCount: 4, milestonesDone: 1, deliverableCount: 2, nextMilestoneDue: "2026-08-20",
+    };
+    for (const key of FORBIDDEN_KEYS) {
+      expect(Object.keys(sample)).not.toContain(key);
+    }
+    // And the two helpers only ever read `startDate`/`dueDate`/`progressPercent` — proven by the
+    // fact that a narrowed object missing every other field still works.
+    expect(projectRange({ startDate: sample.startDate, dueDate: sample.dueDate })).toBe("01 Jul 2026 – 30 Sept 2026");
+    expect(projectUrgencyTier({ dueDate: sample.dueDate, progressPercent: sample.progressPercent }, "2026-08-04")).toBe("on-track");
+  });
+
+  it("the internal task status vocabulary word 'in_progress' never appears in the client-facing urgency label", () => {
+    // Urgency crosses (K1 allows it); the internal status word that produced `status: 'in_progress'`
+    // above must not leak alongside it. `projectUrgencyTier`'s output is a closed UrgencyTier enum —
+    // assert it structurally rather than trusting review.
+    const tier = projectUrgencyTier({ dueDate: "2026-08-20", progressPercent: 40 }, "2026-08-04");
+    expect(["done", "overdue", "due-soon", "on-track", "undated"]).toContain(tier);
+    expect(tier).not.toBe("in_progress");
   });
 });

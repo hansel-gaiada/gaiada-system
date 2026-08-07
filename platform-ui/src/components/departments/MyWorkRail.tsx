@@ -2,6 +2,7 @@ import Link from "next/link";
 import { TeachState } from "./TeachState";
 import { UrgencyChip } from "@/components/pm/UrgencyChip";
 import type { UrgencyTier } from "@/lib/pmUrgency";
+import { PM_TERMS } from "@/lib/pmVocabulary";
 
 // The persistent rail (decision #10: rendered once in `[deptId]/layout.tsx`, so
 // it is on screen no matter which tab is open). Two sections per decision #12:
@@ -38,14 +39,42 @@ export interface RailWaitingItem {
   waitingOn?: string;
 }
 
+// P4-K3 — the ball-holder queue: "whose turn is it right now" (plan workstream B/K). Ball is our
+// existing `assignee.refId`, renamed; this section answers "which of MY tasks currently hold the
+// ball", distinct from "My work today" (which is due-date driven, not turn driven) — a task can be
+// due next week and still be the one thing actually blocking you from passing it on.
+export type RailReadiness = "ready" | "blocked";
+
+export interface RailBallItem {
+  id: string;
+  title: string;
+  href?: string;
+  /** Optional context caption, e.g. the owning project's name. */
+  projectName?: string;
+  /** ISO date; display only, same as `RailTaskItem.dueDate` — NOT read for urgency. */
+  dueDate?: string | null;
+  /** Chain-enforcement readiness (P4-I): whether this task's dependencies are clear. Precomputed
+   *  by the caller against the `dependsOn` graph — this component never derives it, same rule as
+   *  `urgencyTier` below. Omit when the caller has no chain data (renders no readiness badge). */
+  readiness?: RailReadiness;
+  // P4-G5: precomputed by the caller, same contract as `RailTaskItem.urgencyTier` — never derived
+  // here from `dueDate`.
+  urgencyTier?: UrgencyTier;
+}
+
 export interface MyWorkRailProps {
   today: RailTaskItem[];
   waiting: RailWaitingItem[];
+  /** Tasks where the viewer currently holds the Ball. Optional so every existing render site (none
+   *  of which have wired the ball queue yet) keeps compiling and rendering unchanged; omit the prop
+   *  to skip the section entirely, or pass `[]` to render its empty state. */
+  ball?: RailBallItem[];
   todayEmptyText?: string;
   waitingEmptyText?: string;
+  ballEmptyText?: string;
 }
 
-export function MyWorkRail({ today, waiting, todayEmptyText, waitingEmptyText }: MyWorkRailProps) {
+export function MyWorkRail({ today, waiting, ball, todayEmptyText, waitingEmptyText, ballEmptyText }: MyWorkRailProps) {
   return (
     <div className="dept-rail">
       <section className="dept-rail__section">
@@ -76,6 +105,37 @@ export function MyWorkRail({ today, waiting, todayEmptyText, waitingEmptyText }:
           </ul>
         )}
       </section>
+
+      {ball !== undefined && (
+        <section className="dept-rail__section">
+          <span className="type-eyebrow dept-rail__heading">{PM_TERMS.ball} is with you</span>
+          {ball.length === 0 ? (
+            <p className="dept-rail__empty">{ballEmptyText ?? "Nothing on your ball right now."}</p>
+          ) : (
+            <ul className="dept-rail__list">
+              {ball.map((item) => {
+                const row = (
+                  <>
+                    <span className="dept-rail__item-title">{item.title}</span>
+                    <span className="dept-rail__item-meta">
+                      {item.projectName && <span className="dept-rail__item-project">{item.projectName}</span>}
+                      {item.urgencyTier && <UrgencyChip tier={item.urgencyTier} variant="dot" detail={item.dueDate ?? undefined} />}
+                      {item.readiness && (
+                        <span className="dept-rail__kind">{item.readiness === "ready" ? "Ready" : "Blocked"}</span>
+                      )}
+                    </span>
+                  </>
+                );
+                return (
+                  <li key={item.id} className="dept-rail__item">
+                    {item.href ? <Link href={item.href} className="dept-rail__item-link">{row}</Link> : row}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </section>
+      )}
 
       <section className="dept-rail__section dept-rail__section--waiting">
         <span className="type-eyebrow dept-rail__heading">Waiting on me</span>
