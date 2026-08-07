@@ -60,6 +60,29 @@
 # for BOTH automation and agent principals. A tool only needs an entry in the list below when it is
 # `write:true` AND `impact != "low"` AND an `origin='automation'` (n8n) re-drive of it must be able to
 # pass this conjunct — none of today's registry entries beyond `deploy.*` meet that bar.
+# ---------------------------------------------------------------------------------------------------
+# P4-J1/P4-J3 (2026-08-07) -- the four new PM read tools (pm.listTasks / pm.getTask / pm.listProjects /
+# pm.taskAssignmentHistory, mcp-hub/src/pm-tools.ts) needed NO new rule or conjunct here, and that is
+# deliberate, not an oversight -- read this before assuming a gap:
+#
+#   - each is write:false (unset), minAssurance:"low" -- the SAME shape as every pre-existing
+#     thin-front read tool this policy already authorizes generically (projects.list, tasks.list,
+#     workActivity.feed, ...). The all.of above matches on tool ATTRIBUTES, not tool NAME, so a new
+#     read tool with this shape is authorized by the existing rule the instant it registers; nothing
+#     tool-specific needs adding.
+#   - the automation conjunct's "!request.resource.attr.write" disjunct already lets any in-scope
+#     workflow call a read tool -- but no AUTOMATION_ALLOWLIST entry names any of these four, so no
+#     n8n workflow can reach them regardless (deny-by-default; add an entry only if a workflow
+#     genuinely needs a PM read).
+#   - this policy is ONLY the hub's coarse "may this principal call this MCP tool at all" gate (one
+#     shared hub_caller role; no per-tenant/per-company-role attribute exists on the principal it
+#     sees here). The actual PM RBAC -- company_admin/manager/member/viewer/team_lead, tenant
+#     scoping, and the client-tier/cross-tenant denial the P4-J1 adversarial tests exercise -- is a
+#     SEPARATE, already-existing gate: this repo's own resource_pm_task.yaml / resource_pm_project.yaml,
+#     evaluated when the OBO envelope these tools forward resolves to a real principal on the
+#     platform side. Duplicating that check here would be a second, driftable copy of the same rule
+#     -- the same "one policy per resource" discipline this file's own header already follows for
+#     the executable-tool list above.
 apiVersion: api.cerbos.dev/v1
 resourcePolicy:
   version: default
