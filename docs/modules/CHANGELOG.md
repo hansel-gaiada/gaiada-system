@@ -34,6 +34,55 @@ reconstructed from this table alone. Format defined in [`VERSIONING.md`](./VERSI
 > Not corrected retroactively (moving a pushed, already-deployed tag is its own risk); flagging so
 > the next session doesn't re-diagnose the same gap.
 
+### `Alpha 01.027.0070a` - 2026-08-07 - the four things the owner found by using it
+
+Everything in this cut traces to the owner driving the deployed assistant and reporting what they saw.
+No test produced any of it.
+
+**A handoff filed a write behind your back.** Not merely "skipped the confirm chip" - it filed into
+`automation_approvals` and notified every decider the moment the goal suspended. Closed by reusing the
+chat path's exact mechanism, so the safety property no longer depends on how a run was started.
+
+**Threads all read "New chat".** The client-side fix shipped in `0063a` could never have worked for
+them: it fired only on a thread's FIRST message, and every existing thread already had messages. It was
+also client-side, so only one UI path titled anything. Now written server-side in the same transaction
+as the first message insert, plus a backfill proven against a NON-SUPERUSER `NOBYPASSRLS` role - the
+real deployment shape, where a missing GUC matches zero rows and reports success. 4 untitled -> 1, and
+that one correctly stays "New chat" because it has no user message.
+
+**A model's invented tool name is now resolved, not just survived.** Two hand-written aliases, reads
+only, enforced at module load, resolved before any authorization gate.
+
+**Accessibility got a real gate and an honest boundary.** 15 axe checks across 7 surfaces x both
+themes, which found six places rendering informational text with the DECORATIVE `--ink-faint` token.
+Deferred items carry rule ids and reasons rather than blanket suppressions. No screen reader has been
+run - `docs/a11y-manual-checklist.md` is the 15-minute human pass for what axe structurally cannot see.
+
+Counter `0067 -> 0070`: three module rows (platform-nest, ai-agents, and platform-ui from a concurrent
+session's collapsible sidebar).
+
+**Known gaps, stated rather than implied closed:** no real screen-reader pass; a harvested handoff
+intent may not surface in an already-open thread until reload; and the write path's live behaviour is
+still unconfirmed end to end - an earlier "verified" claim was true of the configuration and false of
+the behaviour, because `/complete` was discarding the provider hint while D13 moved to enforce on the
+provider that actually served.
+
+**Module manifest** (VERSIONING rule 2):
+
+| Module | Ver | | Module | Ver |
+|---|---|---|---|---|
+| platform-nest | `0.17.0` | | webdev | `0.11.0` |
+| platform-ui | `0.20.0` | | webdesk | `0.0.0` |
+| ai-gateway-go | `0.13.2` | | search-marketing | `0.5.1` |
+| mcp-hub | `0.10.0` | | social-media | `0.0.0` |
+| sync-engine-go | `0.7.0` | | creative | `0.1.0` |
+| automation (n8n) | `0.4.1` | | render-gateway-go | `0.0.0` |
+| observability | `0.6.1` | | reports | `0.3.1` |
+| infra | `0.8.6` | | report-renderer | `0.1.0` |
+| wa-chat-bot | `0.9.2` | | mail | `0.0.19` |
+| ai-agents | `0.7.1` | | hermes-gateway | `0.2.0` |
+| capture-helper | `0.2.0` | | | |
+
 ### `Alpha 01.026.0067a` — 2026-08-07 — the agent runner can finally obtain the provider it declares
 
 The last link in the D13 chain. `0065a` made D13 enforce the provider that actually SERVED and made
@@ -1287,6 +1336,27 @@ anywhere real.
 ---
 
 ## platform-nest
+### [0.17.0] - 2026-08-07 - IN PROGRESS (a handoff no longer files a write behind your back)
+- **The confirm-chip bypass is closed, and it was worse than "skips the chip".** `createHandoff` never
+  sent `fileOnSuspend`, so it inherited the runner's default of TRUE: a handoff-driven `high_write` was
+  filed into `automation_approvals` and **every decider notified** the instant the goal suspended, with
+  zero owner confirmation. Documented as a deliberate scope cut in the ASST-23 design (the handoff click
+  was treated as consent); the owner overruled it.
+- The settling argument, kept because it generalises: clicking "hand off" is consent to RUN AN AGENT,
+  not consent to THIS write with THESE arguments - which is what the chip shows before anything is
+  filed. A modal at handoff time would have been consent to a blank cheque.
+- **Reuse, not a second mechanism.** `harvestSuspendedIntent` writes the same three tables with the same
+  redaction and TTL as the chat path, so the existing confirm/dismiss endpoints and card-state join
+  handle it with ZERO changes - no new endpoint, no Cerbos rule, no migration. The safety property no
+  longer depends on how the run was started.
+- **Idempotency without a new column:** the synthesized `assistant_tool_calls.id` reuses the handoff
+  row's own id (different table, no collision). A goal can suspend at most once, so "does a tool_call
+  with this id exist" is an exact, race-safe already-harvested check - taken under the SAME per-thread
+  advisory lock `sendMessage` uses, so a concurrent chat turn cannot collide on
+  `assistant_messages`' `UNIQUE (thread_id, seq)`.
+- Known UX latency, reported not fixed: a harvested handoff intent is correctly file-only-on-confirm and
+  fully confirmable, but may not surface in an already-open thread until reload.
+
 ### [0.16.0] - 2026-08-06 - IN PROGRESS (ASST-23: the broker can propose a write, and confirm-before-file)
 - **The broker write turn + a registry gate that refuses BEFORE the runner is contacted.** A turn naming
   an agent with an unregistered write tool gets a typed `tool_not_executable` refusal and the runner is
@@ -3008,6 +3078,24 @@ Built by a 4-agent parallel run against a frozen contract (`docs/superpowers/pla
 - **Blocked:** infra (OpenBao/Gemini/WAHA) + legal Gate 1 before real ingestion.
 
 ## ai-agents
+### [0.7.1] - 2026-08-07 - PROTOTYPED (known near-miss tool names resolve; reads only)
+- Follow-up to the recoverable-refusal loop, not a replacement - that stays as the net for everything
+  not in the map. **Root cause moved the design:** the live `pm.listTasks` failure never reached
+  mcp-hub, it died in `runAgent`'s allow-list check. n8n and the bot use fixed operator-written tool
+  strings and cannot produce this defect class at all, so the map belongs in `ai-agents` rather than
+  inside the hub's four-policy-surface authorization pipeline.
+- **The security condition is the whole point:** resolution is the literal first operation on the
+  model's tool name - before the allow-list, before D14-12 impact reconciliation, before
+  `resolveApproval`, before `callTool`. Resolving after authorization would be a bypass. The regression
+  test pins this by authorization OUTCOME, not source order, so it still fails if the call is moved and
+  the code merely looks right.
+- **Reads only, enforced at MODULE LOAD** (the file throws on import if an entry targets a non-read
+  tool). No write can be reached by a name the model guessed. A future write near-miss is a materially
+  different risk - a wrong guess could resolve to a DIFFERENT mutating action than intended - and needs
+  its own owner decision, not a map entry.
+- Two hand-written entries, no fuzzy matching. A guessing resolver is how a call lands on the wrong
+  resource.
+
 ### [0.7.0] — 2026-08-07 · PROTOTYPED (D13 now enforces what SERVED, and asks for what it wants)
 - **The D13 provider gate was satisfiable by a declaration that need not be true, and on `gda-aicenter`
   it wasn't.** `AGENT_SERVING_PROVIDER` (compose default `openai`) is what `runWriteAgent` checked against
