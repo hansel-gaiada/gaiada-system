@@ -226,3 +226,17 @@ at it, run `node dist/db/migrate.js`, confirm the ordered `applied:` list and ex
    immediately before the full-suite run (still `0085`, no concurrent session took it in the
    interim). `0058`/`0059`/`0070` remain the permanently-orphaned reservation gaps — still do NOT
    fill them. **Next unused is `0086`.**
+
+   **2026-08-07 update (assistant thread-title backfill) — landed as `0086`, no collision.**
+   `ls migrations | sort | tail` at authoring time showed the real head as
+   `0085_assistant_write_intents.sql` with `0086` genuinely free. Shipped as
+   `0086_assistant_thread_title_backfill.sql`: a DML-only backfill against the pre-existing
+   `assistant_threads`/`assistant_messages` tables (0079), NOT a new-tables migration, so — same
+   precedent as `0051_pm_short_codes_backfill_fix.sql` — it is deliberately NOT added to
+   `assistantModule.migrations` (that array documents new-table migrations for the module
+   registry/registration test, not every DML-only follow-up). Wraps every `assistant_threads`/
+   `assistant_messages` touch with BOTH `app.current_tenant_ids` AND `app.scopes='assistant'`
+   per-tenant (assistant's FORCE-RLS policy composes BOTH walls — a plain `app.current_tenant_ids`
+   backfill, sufficient for `lint:migration-rls`'s own regex, would still silently match zero rows
+   here without the module-scope GUC too). `0058`/`0059`/`0070` remain the permanently-orphaned
+   reservation gaps — still do NOT fill them. **Next unused is `0087`.**
