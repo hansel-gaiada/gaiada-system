@@ -145,7 +145,10 @@ function scripted(responses: string[], toolResults: Record<string, string> = {},
 }
 
 // custom agents for scripted terminal outcomes
-const reader: AgentDef = { name: "reader", systemPrompt: "read", tools: { "x.read": "read" }, maxSteps: 2, maxToolCalls: 5 };
+// maxSteps: 4 (not 2) — 2026-08-07: an off-list tool call now gets `MAX_OFF_LIST_ATTEMPTS` (2)
+// recoverable retries before `agent.ts` throws `ToolNotAllowedError` (see its own header), so the
+// "tool off the allow-list" test below needs 3 model calls to reach that terminal error, not 1.
+const reader: AgentDef = { name: "reader", systemPrompt: "read", tools: { "x.read": "read" }, maxSteps: 4, maxToolCalls: 5 };
 const writer: AgentDef = { name: "test-writer", systemPrompt: "write", tools: { "danger.write": "high_write" }, maxSteps: 4, maxToolCalls: 4, evaledProviders: ["echo"] };
 // D14-12 — declared LOW; only the hub registry (via getRegistryImpact) makes this dangerous. Used to
 // prove the runner's `counted` wrapper in service.ts forwards `getRegistryImpact`, not just resolveApproval.
@@ -236,7 +239,10 @@ describe("agent-runner service", () => {
     expect(run.steps.length).toBeGreaterThan(0);
   });
 
-  it("failed: a tool off the allow-list → status failed + error_kind tool_not_allowed", async () => {
+  it("failed: a tool off the allow-list, repeated past the recoverable cap → status failed + error_kind tool_not_allowed", async () => {
+    // 2026-08-07: the FIRST two off-list calls are now recoverable nudges (agent.ts's
+    // MAX_OFF_LIST_ATTEMPTS), not an immediate throw — this scripted deps object returns the same
+    // off-list call every time it's asked, so it exercises the terminal path past that cap.
     const { app } = build({ deps: scripted(['{"tool":"evil.delete","args":{}}']) });
     const { id } = (await trigger(app, { goal: "hack", agent: "reader" })).json() as { id: string };
     await idle(app);

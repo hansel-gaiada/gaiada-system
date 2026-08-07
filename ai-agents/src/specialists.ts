@@ -114,14 +114,47 @@ export const taskTriager: AgentDef = {
 // the provider follows the strict single-JSON-action protocol and never escapes the allow-list. See
 // `docs/superpowers/plans/2026-08-06-t2-task-filer-report.md` for the run transcript + quota consumed.
 // Revert to [] to force read-only.
+//
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+// 2026-08-07 — LIVE INCIDENT: the model called `pm.listTasks` (does not exist anywhere — not on this
+// allow-list, not in the hub registry) and, before `agent.ts`'s recoverable-off-list fix landed
+// alongside this change, that killed the whole turn.
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+// `agent.ts` now gives an off-list guess a bounded, recoverable nudge rather than ending the turn (see
+// its own 2026-08-07 header) — that is the structural fix and it covers every specialist, not just this
+// one. This systemPrompt change is the OTHER half: reduce the INVITATION to guess in the first place.
+//
+// WHY THIS AGENT IS THE ONE THAT INVITES IT: its own allow-list mixes two naming namespaces for one
+// domain — reads under `projects.`/`tasks.` (`projects.list`, `tasks.list`) and creates under `pm.`
+// (`pm.createTask`, `pm.createDoc`). A model that can see `pm.createTask` in its own tool list has every
+// reason to guess a sibling `pm.listTasks` "read" by analogy — the exact guess that happened live. THAT
+// INCONSISTENCY IS A KNOWN DESIGN WART, left as-is on purpose: `pm.createTask`/`pm.createDoc` are
+// load-bearing across D14 (`agent-write-guard.test.ts`'s `RERUN_CAPABLE_HIGH_WRITES`), the hub registry
+// (`mcp-hub/src/pm-tools.ts`), `wf:report`'s automation allowlist, and the Cerbos policy list — renaming
+// either to match the `projects.`/`tasks.` namespace (or vice versa) would touch all four for a
+// naming-hygiene reason alone, which is out of scope here. Naming the exact tools below, verbatim, is
+// the cheaper mitigation that doesn't touch any of that surface.
+//
+// `projects.get`/`tasks.get` (single-resource reads, also real hub tools) were considered as additions
+// to this allow-list — they would let the model resolve "the right project" without re-listing
+// everything. NOT added here: doing so would also require widening platform-nest's broker mirrors
+// (`ASSISTANT_AGENT_TOOLS`/`ASSISTANT_AGENT_WRITE_TOOLS` in
+// `platform-nest/src/modules/assistant/broker.ts`) and confirming Cerbos's `mcp_tool` policy already
+// makes them visible to an ordinary chatting user's OBO principal — a contract-surface change, not a
+// naming fix, and outside this ticket's scope (see the 2026-08-07 off-list-recovery report).
 export const taskFiler: AgentDef = {
   name: "task-filer",
   systemPrompt:
-    "You are Gaiada's task filer. When asked to create a task or a project document, first read the " +
-    "company's projects and tasks to find the right project (and, for a task, a plausible assignee) " +
-    "before filing. File exactly the create you were asked for — never invent a project, assignee, or " +
-    "extra task/doc nobody asked for. Make one tool call at a time; every create you propose is reviewed " +
-    "by a human before it takes effect.",
+    "You are Gaiada's task filer. Your ONLY callable tools are exactly these four — there is no " +
+    "pm.listTasks, tasks.read, or any other name, and calling anything else will be refused: " +
+    "projects.list (read all projects), tasks.list (read all tasks), pm.createTask (file a task), " +
+    "pm.createDoc (file a project document). Reads live under the projects./tasks. names; creates live " +
+    "under the pm. name — do NOT guess a tool name by analogy across those two (e.g. there is no " +
+    "pm.listTasks: to read tasks, call tasks.list). When asked to create a task or a project document, " +
+    "first call projects.list and tasks.list to find the right project (and, for a task, a plausible " +
+    "assignee) before filing. File exactly the create you were asked for — never invent a project, " +
+    "assignee, or extra task/doc nobody asked for. Make one tool call at a time; every create you " +
+    "propose is reviewed by a human before it takes effect.",
   tools: {
     "projects.list": "read",
     "tasks.list": "read",

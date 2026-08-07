@@ -6,6 +6,31 @@
 //    transcript — never a committed placeholder
 // Models come via the Gateway, tools via the MCP hub with the requesting user's OBO
 // envelope — an agent can never act with more authority than the human it serves.
+//
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+// 2026-08-07 — an off-list tool NAME is a recoverable protocol slip, not a fatal one.
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+// LIVE INCIDENT: the assistant's `task-filer` was driven with a real goal and the model called
+// `mcp__gaiada__pm_listTasks` — a tool that exists on NEITHER this agent's allow-list NOR the hub's
+// registry (`pm.listTasks` doesn't exist anywhere; the closest real tools are `tasks.list` and
+// `pm.createTask`). The runner refused the call correctly (it was NEVER invoked — see below), but the
+// refusal was, until this ticket, indistinguishable from every other allow-list violation: it threw
+// `ToolNotAllowedError` and ended the WHOLE TURN. One naming guess killed a turn that had every fact it
+// needed to answer the goal correctly with a valid tool name.
+//
+// THE FIX, and what does NOT change: an off-list call is now fed back to the model as a REFUSAL in the
+// transcript (same "SYSTEM: ..." nudge idiom the malformed-JSON retry below already uses), naming the
+// exact allow-listed tools so the model can retry with a real one — bounded by
+// `MAX_OFF_LIST_ATTEMPTS` (2), after which the run fails exactly as before this ticket
+// (`ToolNotAllowedError`, typed, run stops). Two invariants are unconditional and unchanged by this:
+//   (1) the off-list tool is NEVER actually invoked — `deps.callTool` is not reached on this branch,
+//       recoverable or not; only the REFUSAL is recoverable, never the containment.
+//   (2) naming the valid tools in the refusal leaks nothing new: the full `Available tools` list is
+//       already IN the model's own prompt every turn (`buildPrompt`, below) — repeating it in a
+//       refusal cannot widen what the model can see or do.
+// A genuine high-impact write still suspends for approval exactly as before (this block runs strictly
+// before the impact gate and never touches it).
+export const MAX_OFF_LIST_ATTEMPTS = 2;
 
 export type Impact = "read" | "low_write" | "high_write";
 
@@ -308,6 +333,11 @@ export async function runAgent(
   let modelCalls = 0;
   let toolCalls = 0;
   let protocolRetries = 0;
+  // 2026-08-07 — bounded recoverable retries for an off-allow-list tool NAME (see this file's header
+  // block). Independent of `protocolRetries` (a different failure shape: malformed JSON vs. a
+  // well-formed action naming a tool that doesn't exist here) and never reset mid-run — the cap is on
+  // total off-list guesses for the whole goal, not per distinct name.
+  let offListAttempts = 0;
 
   /** Attach D14-10's resolution record only when there is one, so a run that resolved nothing is
    *  byte-identical to a pre-ticket run. */
@@ -333,8 +363,22 @@ export async function runAgent(
     const tool = action.tool!;
     const declaredImpact = def.tools[tool];
     if (declaredImpact === undefined) {
-      // Not on the allow-list at all — refuse outright. If the model invented a write
-      // tool, this is also the "unclassified ⇒ confirmation required" path (D14).
+      // Not on the allow-list at all. `deps.callTool` is NEVER reached on this branch, recoverable or
+      // not — see this file's 2026-08-07 header block. A bounded number of attempts get fed back as a
+      // typed refusal so a model that GUESSES a plausible-but-wrong name (e.g. inventing `pm.listTasks`
+      // by analogy from `pm.createTask`) can recover with a real one instead of losing the whole turn.
+      // Past the cap this is exactly the pre-ticket behaviour: refuse outright, run stops. If the model
+      // invented a write tool, this is also the "unclassified ⇒ confirmation required" path (D14).
+      if (offListAttempts < MAX_OFF_LIST_ATTEMPTS) {
+        offListAttempts++;
+        transcript.push(
+          `TOOL ${tool} REFUSED: "${tool}" is not on your allow-list and was NOT called — nothing ` +
+            `executed. Your available tools are exactly: ${Object.keys(def.tools).join(", ")}. Reply ` +
+            "with one of those exact tool names, or {\"final\": ...} if you already have enough " +
+            "information to answer.",
+        );
+        continue;
+      }
       throw new ToolNotAllowedError(tool, steps);
     }
     // D14-12 — reconcile against the hub registry BEFORE the gate below sees it, stricter of the two

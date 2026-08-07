@@ -7,9 +7,11 @@ import {
   ApprovalRequiredError,
   BudgetExhaustedError,
   ModelProtocolError,
+  MAX_OFF_LIST_ATTEMPTS,
   type AgentDef,
   type AgentDeps,
 } from "./agent";
+import { statusReporter } from "./specialists";
 
 const envelope = { provider: "telegram", externalId: "tg:555" };
 
@@ -47,9 +49,77 @@ describe("agent runner (WS8 step 1 + D14)", () => {
     expect(toolCalls).toEqual(["projects.list"]);
   });
 
-  it("refuses tools outside the allow-list (typed, run stops)", async () => {
+  it("refuses tools outside the allow-list (typed, run stops) once recovery is exhausted", async () => {
     const deps = scripted([`{"tool": "users.delete", "args": {}}`]);
     await expect(runAgent(def, "x", envelope, deps)).rejects.toThrow(ToolNotAllowedError);
+  });
+
+  // ══════════════════════════════════════════════════════════════════════════════════════════════════
+  // 2026-08-07 — LIVE BUG: the assistant's `task-filer` had its model call `pm.listTasks` (invented by
+  // analogy from `pm.createTask`; it exists on neither this agent's allow-list nor the hub registry) and
+  // the turn died outright ("tool not on the agent's allow-list", no partial answer). See agent.ts's own
+  // 2026-08-07 header for the fix: a bounded, recoverable nudge instead of an immediate fatal refusal.
+  // ══════════════════════════════════════════════════════════════════════════════════════════════════
+
+  it("an off-list tool guess is a RECOVERABLE nudge: the hallucinated tool is never called, and the model finishes on retry with a valid name", async () => {
+    const pmLikeDef: AgentDef = {
+      name: "pm-like-agent",
+      systemPrompt: "test",
+      tools: { "tasks.list": "read", "pm.createTask": "high_write" },
+      maxSteps: 6,
+      maxToolCalls: 4,
+    };
+    const toolCalls: string[] = [];
+    const deps = scripted(
+      [
+        `{"tool": "pm.listTasks", "args": {}}`, // hallucinated — refused, must NEVER be dispatched
+        `{"tool": "tasks.list", "args": {}}`, // retries with a real, allow-listed name
+        `{"final": "1 open task: Fix bug."}`,
+      ],
+      (name) => {
+        toolCalls.push(name);
+        return JSON.stringify([{ id: "t1", title: "Fix bug" }]);
+      },
+    );
+    const run = await runAgent(pmLikeDef, "list my open tasks", envelope, deps);
+    expect(run.outcome).toContain("1 open task");
+    // The hallucinated name was NEVER invoked — only the real retry reached deps.callTool.
+    expect(toolCalls).toEqual(["tasks.list"]);
+  });
+
+  it("caps off-list recovery at MAX_OFF_LIST_ATTEMPTS, then refuses outright exactly as before — the tool is NEVER dispatched on any attempt", async () => {
+    let modelCalls = 0;
+    const deps: AgentDeps = {
+      complete: async () => {
+        modelCalls++;
+        return `{"tool": "users.delete", "args": {}}`;
+      },
+      callTool: async () => {
+        throw new Error("must never be called — the off-list tool is refused, not executed, on every attempt");
+      },
+    };
+    const err = await runAgent(def, "x", envelope, deps).catch((e) => e);
+    expect(err).toBeInstanceOf(ToolNotAllowedError);
+    // MAX_OFF_LIST_ATTEMPTS recoverable retries + one terminal attempt = the total model calls consumed.
+    expect(modelCalls).toBe(MAX_OFF_LIST_ATTEMPTS + 1);
+  });
+
+  it("the recoverable nudge is shared runAgent behaviour — it covers every specialist (e.g. status-reporter, approvals-chaser), not just task-filer", async () => {
+    const toolCalls: string[] = [];
+    const deps = scripted(
+      [
+        `{"tool": "projects.getSingle", "args": {}}`, // hallucinated — not a real status-reporter tool
+        `{"tool": "projects.list", "args": {}}`,
+        `{"final": "ok"}`,
+      ],
+      (name) => {
+        toolCalls.push(name);
+        return "[]";
+      },
+    );
+    const run = await runAgent(statusReporter, "status?", envelope, deps);
+    expect(run.outcome).toBe("ok");
+    expect(toolCalls).toEqual(["projects.list"]);
   });
 
   it("high-impact writes suspend for human approval — nothing executes", async () => {
