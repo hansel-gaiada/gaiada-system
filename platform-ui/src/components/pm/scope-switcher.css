@@ -1,0 +1,15 @@
+/* Scope switcher (P4-A4) — Repsona's project dropdown. PM-scoped tokens only (var(--pm-*)), same
+   discipline as the rest of components/pm/** (P4-L1's palette lives in styles/tokens/pm.css). */
+.pm-scope { display: inline-flex; align-items: center; }
+.pm-scope__select {
+  font: 700 12px var(--font-body);
+  color: var(--pm-text);
+  background: var(--pm-surface-card);
+  border: 0.5px solid var(--pm-line);
+  border-radius: var(--pm-radius);
+  padding: 7px 10px;
+  min-width: 160px;
+  cursor: pointer;
+}
+.pm-scope__select:hover { border-color: var(--pm-accent); }
+.pm-scope__select:focus-visible { outline: 2px solid var(--pm-accent); outline-offset: 1px; }

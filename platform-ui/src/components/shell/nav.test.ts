@@ -30,8 +30,10 @@ describe("navFor (RBAC-gated visibility)", () => {
     const org = groups.find((g) => g.label === "Organization")!;
     expect(org.items.map((i) => i.label)).toEqual(["Overview"]);
     // No standalone IT group (IT is now a department) and no People in Workspace (now HR).
+    // P4-A5: "PM" (the cross-project scope surface, /pm) sits right after Dashboard — ungated,
+    // same as Projects/Tasks elsewhere.
     const workspace = groups.find((g) => g.label === "Workspace")!;
-    expect(workspace.items.map((i) => i.label)).toEqual(["Dashboard", "Calendar", "Approvals"]);
+    expect(workspace.items.map((i) => i.label)).toEqual(["Dashboard", "PM", "Calendar", "Approvals"]);
   });
   it("renders Departments as its own group: business departments plus functional HR/IT", () => {
     const groups = navFor(

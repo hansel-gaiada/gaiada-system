@@ -44,6 +44,13 @@ import "server-only";
 //     to version v's content AND appends a NEW version authored by the restorer; nothing
 //     is ever rewritten). `getDoc`/`listDocs` now include the doc's current `version` number.
 //   Note templates reuse the P3-01/P3-03 template endpoints with `kind=doc` (P3-11).
+//   GET  /api/:t/pm/tasks now answers { items, nextCursor } (was a bare PmTask[]) and accepts
+//     status[]/tag[]/priority[]/responsible[]/ball[]/milestone[]/dueFrom/dueTo/q/overdueOnly/
+//     dueSoon/dueSoonDays/includeClosed/includeSubtasks(no-op)/cursor/limit (P4-A1, landed
+//     2026-08-07). `includeClosed` defaults FALSE server-side (done tasks hidden) — see
+//     listAllPmTasksPaged's own doc for why this reader defaults it back to true.
+//   GET /api/:t/pm/flow, GET /api/:t/pm/burndown — tenant-grain siblings of the per-project
+//     versions, same response shape, pre-merged across every project (P4-A2, landed 2026-08-07).
 // Comments reuse the existing GET/POST /api/:t/comments?entityType=task&entityId=.
 //   POST /api/:t/comments/:commentId/reactions {emoji}          -> { ok:true } (P3-09,
 //     idempotent — reacting twice with the same emoji is a no-op, not a duplicate)
@@ -447,6 +454,61 @@ export const listAllPmTasks = async (u: string, t: string, q: { assignee?: strin
   );
   if (Array.isArray(res)) return res;
   return Array.isArray(res?.items) ? res.items : [];
+};
+// ---- @all scope reader (P4-A1 landed 2026-08-07; P4-A3/A5 are the consumers) ----
+// `listAllPmTasks` above deliberately stops at the FIRST page — six existing callers want "the
+// tenant's tasks" for aggregation and would silently under-report if this reader looped underneath
+// them, so it stays exactly as it is. The `@all` PM scope (plan §1.1/§3 workstream A) needs EVERY
+// task, following `nextCursor` until the backend reports none, plus the server-side facets P4-A1
+// added — so this is a separate reader, not a change to that one.
+//
+// `includeClosed` defaults to `true` HERE, unlike the backend's own default (`false` — done tasks
+// hidden). Every other PM surface a task can appear in — a single project's board, a department's
+// board — shows its Done column populated; a tenant-wide board that silently hid every finished
+// task would be the one place in the app where "Done" looks empty for no visible reason. A caller
+// that genuinely wants "open work only" passes `includeClosed: false` explicitly (same shape as
+// `overdueOnly`/`dueSoon` below).
+export interface PmTaskFilters {
+  status?: string[]; tag?: string[]; priority?: string[]; responsible?: string[]; ball?: string[];
+  milestone?: string[]; dueFrom?: string; dueTo?: string; q?: string; overdueOnly?: boolean;
+  dueSoon?: boolean; dueSoonDays?: number; includeClosed?: boolean;
+}
+export const listAllPmTasksPaged = async (u: string, t: string, filters: PmTaskFilters = {}): Promise<PmTask[]> => {
+  const { includeClosed = true, ...rest } = filters;
+  const out: PmTask[] = [];
+  let cursor: string | undefined;
+  // A runaway-loop guard only (a backend bug that never returns a null cursor) — 200 pages * the
+  // 200-row max page size is 40k tasks; a real tenant exhausts its work long before that.
+  const MAX_PAGES = 200;
+  for (let page = 0; page < MAX_PAGES; page++) {
+    const qs = new URLSearchParams();
+    const arrays: [string, string[] | undefined][] = [
+      ["status", rest.status], ["tag", rest.tag], ["priority", rest.priority],
+      ["responsible", rest.responsible], ["ball", rest.ball], ["milestone", rest.milestone],
+    ];
+    // Repeated keys (`?tag=a&tag=b`) — the backend accepts either that or comma-separated; repeated
+    // is the shape `URLSearchParams` produces natively, no manual joining to get wrong.
+    for (const [key, values] of arrays) for (const v of values ?? []) qs.append(key, v);
+    if (rest.dueFrom) qs.set("dueFrom", rest.dueFrom);
+    if (rest.dueTo) qs.set("dueTo", rest.dueTo);
+    if (rest.q) qs.set("q", rest.q);
+    if (rest.overdueOnly) qs.set("overdueOnly", "1");
+    if (rest.dueSoon) qs.set("dueSoon", "1");
+    if (rest.dueSoonDays !== undefined) qs.set("dueSoonDays", String(rest.dueSoonDays));
+    if (includeClosed) qs.set("includeClosed", "1");
+    qs.set("limit", "200");
+    if (cursor) qs.set("cursor", cursor);
+    const res = await skipUnavailable(
+      platformFetch<PmTaskPage | PmTask[]>(`/api/${t}/pm/tasks?${qs.toString()}`, u),
+      { items: [] } as PmTaskPage,
+    );
+    const items = Array.isArray(res) ? res : (res.items ?? []);
+    out.push(...items);
+    const next = Array.isArray(res) ? undefined : res.nextCursor;
+    if (!next) break;
+    cursor = next;
+  }
+  return out;
 };
 export const getPmTask = (u: string, t: string, id: string) =>
   skipUnavailable(platformFetch<PmTask | null>(`/api/${t}/pm/tasks/${id}`, u), null);
@@ -974,6 +1036,21 @@ export const getBurndown = (u: string, t: string, projectId: string, from?: stri
   return skipUnavailable(platformFetch<BurndownPoint[]>(`/api/${t}/pm/projects/${projectId}/burndown${suffix}`, u), [] as BurndownPoint[]);
 };
 
+// ---- tenant-grain burndown (P4-A2, landed 2026-08-07) ----
+// `GET /api/:t/pm/burndown` — the SAME `BurndownPoint[]` shape as the per-project reader above,
+// already summed server-side across every project the tenant has (the backend's own comment: an
+// `open`/`done`-weighted mean, not a mean-of-means). Same degrade-gracefully contract: a stale
+// backend without this route, or DEMO_MODE (no fixture for it yet — see the P4-A3/A5 report), 404s
+// or falls through to an empty array either way, so the `@all` Charts view renders its existing
+// empty-state handling rather than crashing on a route that isn't there.
+export const getTenantBurndown = (u: string, t: string, from?: string, to?: string) => {
+  const qs = new URLSearchParams();
+  if (from) qs.set("from", from);
+  if (to) qs.set("to", to);
+  const suffix = qs.toString() ? `?${qs}` : "";
+  return skipUnavailable(platformFetch<BurndownPoint[]>(`/api/${t}/pm/burndown${suffix}`, u), [] as BurndownPoint[]);
+};
+
 // The department Timeline spans several projects, each with its own burndown series — sum them
 // by calendar date (a date missing from some projects' series still sums whatever rows DO exist
 // that day; avgProgress is weighted by that day's total open+done across the summed projects).
@@ -1037,6 +1114,22 @@ export const getFlow = (u: string, t: string, projectId: string, from?: string, 
   if (to) qs.set("to", to);
   const suffix = qs.toString() ? `?${qs}` : "";
   return skipUnavailable(platformFetch<FlowPoint[]>(`/api/${t}/pm/projects/${projectId}/flow${suffix}`, u), [] as FlowPoint[]);
+};
+
+// ---- tenant-grain flow (P4-A2, landed 2026-08-07) ----
+// `GET /api/:t/pm/flow` — merged server-side by LITERAL status id across every project (the
+// backend's own comment: "a best-effort tenant-wide silhouette, not a semantically-unified
+// breakdown"). That merge is actually safe for our data: the shared ladder ids (`backlog`/`todo`/
+// `in_progress`/`blocked`/`done`) are meant to merge, and a per-project CUSTOM status gets a
+// randomly-generated id (`pm_project_statuses.id`), so two different projects' custom statuses
+// never collide under this merge — it isn't a coincidence that this is safe, the id space is
+// disjoint by construction. Same degrade contract as `getTenantBurndown` above.
+export const getTenantFlow = (u: string, t: string, from?: string, to?: string) => {
+  const qs = new URLSearchParams();
+  if (from) qs.set("from", from);
+  if (to) qs.set("to", to);
+  const suffix = qs.toString() ? `?${qs}` : "";
+  return skipUnavailable(platformFetch<FlowPoint[]>(`/api/${t}/pm/flow${suffix}`, u), [] as FlowPoint[]);
 };
 
 // The department Charts page (P3-07) spans several projects, each with its own /flow series AND

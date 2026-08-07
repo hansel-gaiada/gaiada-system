@@ -76,6 +76,11 @@ export function navFor(me: Me, tenantId?: string | null, departments: { id: stri
     // Daily destinations: always reachable in one click, in either mode.
     { label: "Workspace", pinned: true, items: [
       { label: "Dashboard", href: "/", icon: "home" },
+      // P4-A5: the cross-project (`@all`) PM surface — plan decision 1 makes this the new PM home
+      // (`/` stays the personal My Work landing). Ungated, same precedent as the Projects/Tasks
+      // nav rows below (no `pm.view` capability exists — the server/Cerbos side is the authority
+      // on what a caller's tasks actually contain; this is a place to look, not a grant).
+      { label: "PM", href: "/pm", icon: "projects" },
       { label: "Calendar", href: "/calendar", icon: "clock" },
       { label: "Approvals", href: "/approvals", icon: "check" },
     ] },
