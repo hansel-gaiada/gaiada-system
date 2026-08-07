@@ -13,7 +13,7 @@ import { refreshCapabilitiesAction, type SendMessageOpts } from "@/lib/assistant
 // — self-fetched here, once, on mount (this component persists across thread switches — see
 // AssistantWorkspace — so there is no per-thread refetch to do), never a hand-maintained FE mirror
 // of `ASSISTANT_AGENT_TOOLS`/`ASSISTANT_AGENT_WRITE_TOOLS`.
-export function Composer({ canSend, streaming, onSend, onStop }: {
+export function Composer({ canSend, streaming, onSend, onStop, prefill }: {
   /** False while a generation is pending for this thread (matches the backend's own "one active
    *  generation per thread" rule — see assistant.controller.ts's 409) OR while the thread itself
    *  hasn't loaded yet. */
@@ -21,12 +21,40 @@ export function Composer({ canSend, streaming, onSend, onStop }: {
   streaming: boolean;
   onSend: (text: string, opts?: SendMessageOpts) => void;
   onStop: () => void;
+  /** 2026-08-07 — the empty state's suggestion tiles (`EmptyStateSuggestions`) hand text up through
+   *  THIS rather than calling `onSend` directly: a suggestion click fills the box, it never sends
+   *  on the user's behalf — the user still presses Enter/Send themselves, exactly as if they'd
+   *  typed it. `seq` (not just `text`) is what actually re-triggers the effect below: two DIFFERENT
+   *  clicks can legitimately carry the SAME prompt text (the same tile clicked twice, e.g. after
+   *  clearing the box), and a value-only dependency would silently no-op the second click. */
+  prefill?: { text: string; seq: number } | null;
 }) {
   const [value, setValue] = useState("");
   const taRef = useRef<HTMLTextAreaElement>(null);
   const [toolAgents, setToolAgents] = useState<AssistantToolAgent[]>([]);
   const [toolsMode, setToolsMode] = useState(false);
   const [agent, setAgent] = useState<string>("");
+  // Guards against re-applying the SAME prefill twice (React 18 Strict Mode's double-invoked
+  // mount effect — see AssistantWorkspace's `autoCreatedRef` for the identical trap/fix) AND
+  // against ever re-firing later just because the user happened to type text matching an old
+  // prefill verbatim — only a genuinely NEW `seq` applies.
+  const appliedPrefillSeq = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (!prefill || appliedPrefillSeq.current === prefill.seq) return;
+    appliedPrefillSeq.current = prefill.seq;
+    setValue(prefill.text);
+    // Deferred a frame: `setValue` above only SCHEDULES the DOM update, and focusing/selecting
+    // immediately would race the commit — a stale DOM `value` makes `setSelectionRange`'s length
+    // clamp to the OLD (often empty) text, leaving the cursor at position 0 instead of the end.
+    const id = requestAnimationFrame(() => {
+      const ta = taRef.current;
+      if (!ta) return;
+      ta.focus();
+      ta.setSelectionRange(prefill.text.length, prefill.text.length);
+    });
+    return () => cancelAnimationFrame(id);
+  }, [prefill]);
 
   useEffect(() => {
     let alive = true;

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  groupThreads, filterThreads, threadTitle, isPendingMessage,
+  groupThreads, filterThreads, threadTitle, deriveThreadTitle, isPendingMessage,
   parseSSEBuffer, decodeAssistantEvent, streamReducer, initialStreamState, humanizeErrorKind,
   brainBadgeLabel, parseUsageMeta, usageMeterLabel,
   isPendingMemory, groupMemory,
@@ -30,6 +30,31 @@ describe("threadTitle / isPendingMessage", () => {
     expect(isPendingMessage({ content: null, errorKind: null })).toBe(true);
     expect(isPendingMessage({ content: null, errorKind: "stopped" })).toBe(false);
     expect(isPendingMessage({ content: "", errorKind: null })).toBe(false);
+  });
+});
+
+describe("deriveThreadTitle — FE auto-titling from the first user message", () => {
+  it("returns short text verbatim, trimmed", () => {
+    expect(deriveThreadTitle("  Draft the Q3 update  ")).toBe("Draft the Q3 update");
+  });
+  it("collapses internal newlines/whitespace from a pasted multi-line message", () => {
+    expect(deriveThreadTitle("Can you help\n\nwith   this?")).toBe("Can you help with this?");
+  });
+  it("returns null for empty/whitespace-only input — callers must leave the thread untitled", () => {
+    expect(deriveThreadTitle("")).toBeNull();
+    expect(deriveThreadTitle("   \n  ")).toBeNull();
+  });
+  it("truncates long text on a word boundary and marks it with an ellipsis", () => {
+    const long = "Can you summarize every open approval across all of my companies and flag the ones that are overdue";
+    const title = deriveThreadTitle(long)!;
+    expect(title.length).toBeLessThanOrEqual(61); // 60 chars + the ellipsis glyph
+    expect(title.endsWith("…")).toBe(true);
+    expect(long.startsWith(title.slice(0, -1))).toBe(true); // never chopped mid-word
+  });
+  it("truncates a single very long word at the character limit rather than leaving it whole", () => {
+    const longWord = "a".repeat(120);
+    const title = deriveThreadTitle(longWord)!;
+    expect(title).toBe(`${"a".repeat(60)}…`);
   });
 });
 

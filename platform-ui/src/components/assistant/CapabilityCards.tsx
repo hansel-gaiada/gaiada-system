@@ -3,16 +3,14 @@ import { useEffect, useState } from "react";
 import { groupCapabilities, type AssistantCapability } from "@/lib/assistant";
 import { refreshCapabilitiesAction } from "@/lib/assistantActions";
 
-// ASST-18 — the ONE rendering of "what can this user actually do", used in TWO places: the
-// right-rail capabilities panel (`CapabilitiesPanel`) and the empty-state cards `ThreadView` shows
-// for a brand-new thread (blueprint §8: "Empty state: capability cards — doubles as the
-// discoverability answer"). Both call `refreshCapabilitiesAction` — the SAME server action, hitting
-// the SAME `GET :tenantId/assistant/capabilities` — so the two renderings can never drift apart:
-// there is exactly one fetch function in this whole surface that can produce a capability list, and
-// this is its only consumer. Do not give either caller its own copy of this component or its own
-// fetch — that is precisely the drift the ticket's "empty state must come from the SAME source"
-// requirement exists to prevent.
-export function CapabilityCards({ variant = "panel" }: { variant?: "panel" | "empty-state" }) {
+// ASST-18 — the full tool catalogue, rendered by the right-rail capabilities panel
+// (`CapabilitiesPanel`), reached from the toolbar's "Capabilities" button OR the empty state's own
+// "See everything I can do" tile (`EmptyStateSuggestions`) — see ThreadView's 2026-08-07 note for
+// why the raw catalogue no longer renders inline in a brand-new chat. Calls
+// `refreshCapabilitiesAction` — the SAME server action, hitting the SAME
+// `GET :tenantId/assistant/capabilities` — so there is exactly one fetch function in this whole
+// surface that can produce a capability list; don't give any caller its own copy.
+export function CapabilityCards() {
   const [tools, setTools] = useState<AssistantCapability[] | null>(null);
   const [hubConfigured, setHubConfigured] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -46,7 +44,7 @@ export function CapabilityCards({ variant = "panel" }: { variant?: "panel" | "em
 
   const groups = groupCapabilities(tools);
   return (
-    <div className={`asst-cap-cards asst-cap-cards--${variant}`}>
+    <div className="asst-cap-cards">
       {groups.map((g) => (
         <section key={g.category} className="asst-cap-card" aria-label={g.category}>
           <h3 className="asst-cap-card__title">{g.category}</h3>

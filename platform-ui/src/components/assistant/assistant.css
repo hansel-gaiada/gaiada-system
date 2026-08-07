@@ -15,6 +15,12 @@
 /* ASST-19 — the collapsible right rail (blueprint §8's "context inspector" family; only the
    memory drawer exists so far). A third grid column, added only while it's open. */
 .asst-workspace--with-memory { grid-template-columns: 280px 1fr 300px; }
+/* 2026-08-07 — the LEFT rail (ThreadRail) collapses to a narrow icon strip to maximise the
+   conversation column (owner complaint: the sidebar had no collapse affordance at all). Page
+   variant only — the drawer already hides `.asst-rail` outright, see below. Compound selector so
+   this wins over `.asst-workspace--with-memory` regardless of class order. */
+.asst-workspace--rail-collapsed { grid-template-columns: 46px 1fr; }
+.asst-workspace--rail-collapsed.asst-workspace--with-memory { grid-template-columns: 46px 1fr 300px; }
 
 .asst-main__toolbar { display: flex; justify-content: flex-end; align-items: center; gap: 10px; padding: 8px 14px 0; flex-wrap: wrap; }
 /* ASST-22 — the page-context pin + the drawer's promotion link share the toolbar row with the
@@ -80,8 +86,28 @@
 
 /* ---- Rail ------------------------------------------------------------------------------------ */
 .asst-rail { display: flex; flex-direction: column; min-height: 0; border-right: 0.5px solid var(--erp-hairline); background: var(--surface-page); }
-.asst-rail__head { padding: 14px; border-bottom: 0.5px solid var(--erp-hairline-soft); }
-.asst-rail__head .lux-btn { width: 100%; }
+.asst-rail__head { display: flex; align-items: center; gap: 8px; padding: 14px; border-bottom: 0.5px solid var(--erp-hairline-soft); }
+.asst-rail__head .lux-btn { flex: 1; }
+.asst-rail__body { display: flex; flex-direction: column; min-height: 0; flex: 1; }
+/* 2026-08-07 — collapsed: the toggle (always rendered, never hidden behind the content it
+   controls — see ThreadRail's header) plus a compact "new chat" icon are the ONLY things shown,
+   centred in the narrow strip. Everything else (search, session list) unmounts rather than just
+   visually hiding, so a Tab press never lands on an invisible row. */
+.asst-rail--collapsed .asst-rail__head { flex-direction: column; padding: 14px 6px; border-bottom: none; }
+.asst-rail--collapsed { align-items: center; }
+.asst-rail__collapse-btn {
+  border: 0.5px solid var(--erp-hairline); background: transparent; cursor: pointer; width: 28px; height: 28px;
+  flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; font-size: 12px;
+  color: var(--ink-subtle); transition: color 0.2s var(--erp-ease), border-color 0.2s var(--erp-ease);
+}
+.asst-rail__collapse-btn:hover, .asst-rail__collapse-btn:focus-visible { color: var(--text-primary); border-color: var(--erp-accent); }
+.asst-rail__new-collapsed {
+  border: 0.5px solid var(--erp-hairline); background: transparent; cursor: pointer; width: 28px; height: 28px;
+  display: inline-flex; align-items: center; justify-content: center; font-size: 16px; line-height: 1;
+  color: var(--ink-subtle); transition: color 0.2s var(--erp-ease), border-color 0.2s var(--erp-ease);
+}
+.asst-rail__new-collapsed:hover, .asst-rail__new-collapsed:focus-visible { color: var(--text-primary); border-color: var(--erp-accent); }
+.asst-rail__new-collapsed:disabled { opacity: 0.4; cursor: default; }
 .asst-rail__search { padding: 10px 14px; border-bottom: 0.5px solid var(--erp-hairline-soft); }
 .asst-rail__search input {
   width: 100%; border: none; border-bottom: 0.5px solid var(--line-control); background: transparent;
@@ -234,11 +260,10 @@
 .asst-cap__error { margin: 0; padding: 8px 14px; font: 600 12px var(--font-body); color: var(--status-danger-fg); }
 .asst-cap__empty { padding: 10px 14px 16px; font: 400 12.5px/1.5 var(--font-body); color: var(--ink-faint); }
 
-/* ---- Capability cards (ASST-18) — shared by the panel AND the empty state ----------------------- */
+/* ---- Capability cards (ASST-18) — the full catalogue, panel-only (see ThreadView's 2026-08-07
+   note: this no longer also renders inline in the empty state) ------------------------------------ */
 .asst-cap-cards { display: flex; flex-direction: column; gap: 14px; padding: 0 14px; }
-.asst-cap-cards--empty-state { flex-direction: row; flex-wrap: wrap; gap: 12px; padding: 0; margin-top: 16px; max-width: 640px; }
 .asst-cap-card { border: 0.5px solid var(--erp-hairline); background: var(--surface-card); padding: 10px 12px; }
-.asst-cap-cards--empty-state .asst-cap-card { flex: 1 1 220px; min-width: 200px; }
 .asst-cap-card__title { margin: 0 0 6px; font: 700 10px var(--font-body); letter-spacing: 0.1em; text-transform: uppercase; color: var(--erp-ink-50); }
 .asst-cap-card__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 .asst-cap-card__tool { display: flex; flex-direction: column; gap: 1px; }
@@ -246,6 +271,19 @@
 .asst-cap-card__tool-desc { font: 400 11.5px/1.4 var(--font-body); color: var(--ink-faint); }
 
 .asst-thread-empty--wide { max-width: none; }
+
+/* ---- Empty-state suggestions (2026-08-07) — replaces the inline capability catalogue with a
+   curated, human-readable set of starter prompts; see EmptyStateSuggestions.tsx's header. --------- */
+.asst-suggestions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 16px; max-width: 640px; }
+.asst-suggestion {
+  flex: 1 1 220px; min-width: 200px; text-align: left; cursor: pointer;
+  border: 0.5px solid var(--erp-hairline); background: var(--surface-card); padding: 12px 14px;
+  font: 600 13px var(--font-body); color: var(--text-primary);
+  transition: border-color 0.2s var(--erp-ease), background 0.2s var(--erp-ease);
+}
+.asst-suggestion:hover, .asst-suggestion:focus-visible { border-color: var(--erp-accent); background: var(--tint-hover); }
+.asst-suggestion--more { border-style: dashed; color: var(--ink-subtle); }
+.asst-suggestion__label { display: block; }
 
 /* ---- Citation chips (ASST-18) --------------------------------------------------------------------- */
 .asst-cite-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
@@ -324,4 +362,8 @@
   .asst-workspace, .asst-workspace--with-memory { grid-template-columns: 1fr; grid-template-rows: 220px 1fr; height: calc(100vh - 200px); }
   .asst-rail { border-right: none; border-bottom: 0.5px solid var(--erp-hairline); }
   .asst-mem, .asst-cap { border-left: none; border-top: 0.5px solid var(--erp-hairline); max-height: 320px; }
+  /* Same override the rules above already apply to columns — mobile stacks in rows regardless of
+     the collapsed preference, but a collapsed rail should still shrink its OWN row rather than
+     keep the full 220px it doesn't need. */
+  .asst-workspace--rail-collapsed { grid-template-rows: 54px 1fr; }
 }

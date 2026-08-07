@@ -1,13 +1,14 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { AssistantMessage, AssistantThread, PinnedPageContext } from "@/lib/assistant";
-import { isPendingMessage, hasPendingProposalDecision } from "@/lib/assistant";
+import { isPendingMessage, hasPendingProposalDecision, deriveThreadTitle } from "@/lib/assistant";
 import { pageContextPrefix } from "@/lib/assistantContext";
 import {
   createThreadAction, deleteThreadAction, refreshThreadAction, refreshThreadsAction,
   renameThreadAction, sendMessageAction, setThreadPinnedAction, setThreadStatusAction, stopStreamAction,
   type SendMessageOpts,
 } from "@/lib/assistantActions";
+import { setAssistantRailCollapsedAction } from "@/lib/prefsActions";
 import { ThreadRail } from "./ThreadRail";
 import { ThreadView } from "./ThreadView";
 import { Composer } from "./Composer";
@@ -55,7 +56,9 @@ function setUrlThreadParam(id: string | null): void {
   window.history.replaceState(null, "", url.toString());
 }
 
-export function AssistantWorkspace({ initialThreads, initialActiveThreadId, variant = "page", pageContext = null }: {
+export function AssistantWorkspace({
+  initialThreads, initialActiveThreadId, variant = "page", pageContext = null, initialRailCollapsed = false,
+}: {
   initialThreads: AssistantThread[];
   initialActiveThreadId: string | null;
   /** "drawer" trims chrome that doesn't fit a narrow slide-over (see `assistant-drawer.css`) and
@@ -66,6 +69,11 @@ export function AssistantWorkspace({ initialThreads, initialActiveThreadId, vari
    *  (`resolvePageContextRef`, called by the drawer route). `null` on a page with no resolvable
    *  entity, or on the full `/assistant` page (which has no "current page" to pin against). */
   pageContext?: PinnedPageContext | null;
+  /** 2026-08-07 — the left rail's persisted collapse state (`gaiada_prefs` cookie via
+   *  `lib/prefs.ts`), read server-side by `assistant/page.tsx`. Page variant only: the drawer
+   *  never renders `ThreadRail` at all (see `assistant-drawer.css`), so a collapse preference has
+   *  nothing to apply to there — the drawer route simply doesn't pass this prop. */
+  initialRailCollapsed?: boolean;
 }) {
   const [threads, setThreads] = useState<AssistantThread[]>(initialThreads);
   // ASST-22 — the full page falls back to the most-recent thread (`initialThreads[0]`, per
@@ -112,6 +120,28 @@ export function AssistantWorkspace({ initialThreads, initialActiveThreadId, vari
   // ASST-21 — the roster panel (registry + episodic history + hand-off/run-watch) joins the SAME
   // one-at-a-time right-rail slot as memory/capabilities (blueprint §8's context-inspector family).
   const [rosterOpen, setRosterOpen] = useState(false);
+  // 2026-08-07 — the left rail's collapse state (owner complaint: no collapse affordance existed
+  // at all). Only meaningful in "page" variant (the drawer never renders `ThreadRail`) — seeded
+  // from the persisted cookie value, kept in sync with it on every toggle via
+  // `setAssistantRailCollapsedAction` (fire-and-forget: this component's own state is already the
+  // source of truth for THIS session, the write is only for the NEXT page load).
+  const [railCollapsed, setRailCollapsed] = useState(variant === "page" && initialRailCollapsed);
+  function toggleRailCollapsed() {
+    setRailCollapsed((prev) => {
+      const next = !prev;
+      void setAssistantRailCollapsedAction(next);
+      return next;
+    });
+  }
+  // 2026-08-07 — the empty state's suggestion tiles (`EmptyStateSuggestions`, via `ThreadView`)
+  // hand a prompt up through this rather than sending it directly — see `Composer`'s `prefill` prop
+  // header for why. `seq` forces the effect to re-apply even when the SAME tile is clicked twice.
+  const [composerPrefill, setComposerPrefill] = useState<{ text: string; seq: number } | null>(null);
+  function openCapabilitiesPanel() {
+    setCapabilitiesOpen(true);
+    setMemoryOpen(false);
+    setRosterOpen(false);
+  }
 
   const stream = useAssistantStream();
   const stateRef = useRef(stream.state);
@@ -303,6 +333,7 @@ export function AssistantWorkspace({ initialThreads, initialActiveThreadId, vari
 
   async function handleSend(text: string, opts: SendMessageOpts = {}) {
     if (!activeThreadId || !canSend) return;
+    const isFirstMessage = messages.length === 0;
     setSending(true);
     const lastSeq = messages.length ? messages[messages.length - 1].seq : 0;
     // ASST-22 — the ONE place the pinned page context actually reaches the assistant: prefixed onto
@@ -310,7 +341,18 @@ export function AssistantWorkspace({ initialThreads, initialActiveThreadId, vari
     // `contextPrefix`, applied only when `messages.length === 0`). Sent AND displayed identically
     // (never a hidden addition) — see `lib/assistantContext.ts::pageContextPrefix`'s header for why
     // this is composition over the existing `content` field rather than a new wire shape.
-    const outgoing = messages.length === 0 && pageContext ? pageContextPrefix(pageContext.label, pageContext.ref) + text : text;
+    const outgoing = isFirstMessage && pageContext ? pageContextPrefix(pageContext.label, pageContext.ref) + text : text;
+    // 2026-08-07 owner fix — every thread in the rail used to read "New chat" forever, making the
+    // list useless for finding anything. Auto-title from the RAW first message (never the
+    // page-context-prefixed `outgoing`, which would title every pinned-page thread with the same
+    // "Regarding X:" boilerplate) — see `deriveThreadTitle`'s header for why this is FE-derived
+    // rather than a backend summary. Guarded on `activeThread.title` being null: the rename pencil
+    // in `ThreadRail` always wins once a title exists (derived or explicit), and this never fires
+    // a second time on the SAME thread once it does.
+    if (isFirstMessage && activeThread && !activeThread.title) {
+      const derivedTitle = deriveThreadTitle(text);
+      if (derivedTitle) void handleRename(activeThreadId, derivedTitle);
+    }
     const optimisticUser: AssistantMessage = {
       id: `local-user-${Date.now()}`, seq: lastSeq + 1, role: "user", content: outgoing, parts: null,
       provider: null, model: null, tokens: null, latencyMs: null, errorKind: null, createdAt: new Date().toISOString(),
@@ -359,13 +401,18 @@ export function AssistantWorkspace({ initialThreads, initialActiveThreadId, vari
   }, [stream.state.status, streamingMessageId, activeThreadId]);
 
   const rightRailOpen = memoryOpen || capabilitiesOpen || rosterOpen;
+  const railCollapsedActive = variant === "page" && railCollapsed;
 
   return (
-    <div className={`asst-workspace${variant === "drawer" ? " asst-workspace--drawer" : ""}${rightRailOpen ? " asst-workspace--with-memory" : ""}`}>
+    <div
+      className={`asst-workspace${variant === "drawer" ? " asst-workspace--drawer" : ""}${rightRailOpen ? " asst-workspace--with-memory" : ""}${railCollapsedActive ? " asst-workspace--rail-collapsed" : ""}`}
+    >
       <ThreadRail
         threads={threads}
         activeThreadId={activeThreadId}
         busy={loadingThread}
+        collapsed={railCollapsedActive}
+        onToggleCollapsed={toggleRailCollapsed}
         onSelect={selectThread}
         onNew={handleNew}
         onRename={handleRename}
@@ -441,8 +488,16 @@ export function AssistantWorkspace({ initialThreads, initialActiveThreadId, vari
           streamingMessageId={streamingMessageId}
           loading={loadingThread}
           threadId={activeThreadId ?? ""}
+          onSuggestionPick={(promptText) => setComposerPrefill({ text: promptText, seq: Date.now() })}
+          onOpenCapabilities={openCapabilitiesPanel}
         />
-        <Composer canSend={canSend} streaming={stream.state.status === "streaming"} onSend={handleSend} onStop={handleStop} />
+        <Composer
+          canSend={canSend}
+          streaming={stream.state.status === "streaming"}
+          onSend={handleSend}
+          onStop={handleStop}
+          prefill={composerPrefill}
+        />
       </div>
       {capabilitiesOpen && <CapabilitiesPanel onClose={() => setCapabilitiesOpen(false)} />}
       {memoryOpen && <MemoryPanel activeThreadId={activeThreadId} onClose={() => setMemoryOpen(false)} />}

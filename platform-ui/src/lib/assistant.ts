@@ -140,6 +140,33 @@ export function threadTitle(t: Pick<AssistantThread, "title">): string {
   return t.title?.trim() || "New chat";
 }
 
+// ── Auto-titling (owner complaint: every row in the rail reads "New chat") ─────────────────────────
+// FE-derived from the thread's first user message, chosen over a backend-generated summary title:
+// a summary would read better, but it costs an LLM call per thread AND a platform-nest change
+// (a new field/endpoint), whereas this is a pure client-side reshape of text the UI already has the
+// instant the first message is sent — see AssistantWorkspace's `handleSend` for where this is
+// called (only when the thread's `title` is still null; the rename pencil in ThreadRail always
+// wins once a title — derived or explicit — exists, this function never re-fires after that).
+const THREAD_TITLE_MAX = 60;
+
+/** Collapses whitespace (a pasted multi-line brief must not become a garbled title) and truncates
+ *  on a word boundary rather than mid-word. Returns `null` for empty/whitespace-only input so a
+ *  thread whose first "message" was blank stays untitled — `threadTitle` above already renders
+ *  that as "New chat", the correct fallback; this function must never hand back an empty string
+ *  masquerading as a real title. */
+export function deriveThreadTitle(rawText: string): string | null {
+  const collapsed = rawText.replace(/\s+/g, " ").trim();
+  if (!collapsed) return null;
+  if (collapsed.length <= THREAD_TITLE_MAX) return collapsed;
+  const cut = collapsed.slice(0, THREAD_TITLE_MAX);
+  const lastSpace = cut.lastIndexOf(" ");
+  // Only break on a word boundary if that leaves a reasonable amount of text — a single very long
+  // first "word" (a pasted URL/token) should still be truncated at the character limit rather than
+  // left uncut or chopped down to almost nothing.
+  const boundary = lastSpace > 20 ? cut.slice(0, lastSpace) : cut;
+  return `${boundary.trimEnd()}…`;
+}
+
 /** A message row that is still generating (no content yet, no terminal error yet). */
 export function isPendingMessage(m: Pick<AssistantMessage, "content" | "errorKind">): boolean {
   return m.content === null && m.errorKind === null;

@@ -13,11 +13,18 @@ import { groupThreads, filterThreads, threadTitle, type AssistantThread } from "
 // per-keystroke round trip buys nothing here that a local substring filter doesn't already give for
 // free, and it avoids a whole class of "stale results while typing" races).
 export function ThreadRail({
-  threads, activeThreadId, busy, onSelect, onNew, onRename, onTogglePin, onToggleArchive, onDelete,
+  threads, activeThreadId, busy, collapsed = false, onToggleCollapsed, onSelect, onNew, onRename, onTogglePin, onToggleArchive, onDelete,
 }: {
   threads: AssistantThread[];
   activeThreadId: string | null;
   busy: boolean;
+  /** 2026-08-07 owner fix — collapses the rail to a narrow icon strip so the conversation column
+   *  can use the space instead. The collapse TOGGLE itself is always rendered regardless of this
+   *  flag (see the render below) — a control that only reappears once you've already found some
+   *  OTHER way to expand things would fail the "stays keyboard-reachable" bar outright. Persisted
+   *  by the caller (`AssistantWorkspace`) into the `gaiada_prefs` cookie, not owned here. */
+  collapsed?: boolean;
+  onToggleCollapsed?: () => void;
   onSelect: (id: string) => void;
   onNew: () => void;
   onRename: (id: string, title: string) => void;
@@ -127,39 +134,67 @@ export function ThreadRail({
   }
 
   return (
-    <nav className="asst-rail" aria-label="Assistant sessions">
+    <nav className={`asst-rail${collapsed ? " asst-rail--collapsed" : ""}`} aria-label="Assistant sessions">
       <div className="asst-rail__head">
-        <button type="button" className="lux-btn lux-btn--solid lux-btn--sm" onClick={onNew} disabled={busy}>
-          + New chat
+        <button
+          type="button"
+          className="asst-rail__collapse-btn"
+          aria-expanded={!collapsed}
+          aria-controls="asst-rail-body"
+          aria-label={collapsed ? "Expand sessions sidebar" : "Collapse sessions sidebar"}
+          title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          onClick={onToggleCollapsed}
+        >
+          <span aria-hidden="true">{collapsed ? "»" : "«"}</span>
         </button>
-      </div>
-      <div className="asst-rail__search">
-        <label htmlFor="asst-rail-search" className="asst-sr-only">Search sessions</label>
-        <input
-          id="asst-rail-search"
-          type="search"
-          placeholder="Search sessions…"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-        />
-      </div>
-      <div className="asst-rail__list">
-        {grouped.pinned.length > 0 && (
-          <section aria-label="Pinned sessions">
-            <h2 className="asst-rail__group-label">Pinned</h2>
-            <ul>{grouped.pinned.map(renderRow)}</ul>
-          </section>
-        )}
-        {grouped.groups.map((g) => g.threads.length > 0 && (
-          <section key={g.label} aria-label={`${g.label} sessions`}>
-            <h2 className="asst-rail__group-label">{g.label}</h2>
-            <ul>{g.threads.map(renderRow)}</ul>
-          </section>
-        ))}
-        {visible.length === 0 && (
-          <p className="asst-rail__empty">{query ? "No sessions match your search." : "No sessions yet — start one above."}</p>
+        {!collapsed && (
+          <button type="button" className="lux-btn lux-btn--solid lux-btn--sm" onClick={onNew} disabled={busy}>
+            + New chat
+          </button>
         )}
       </div>
+      {collapsed ? (
+        <button
+          type="button"
+          className="asst-rail__new-collapsed"
+          aria-label="New chat"
+          title="New chat"
+          onClick={onNew}
+          disabled={busy}
+        >
+          <span aria-hidden="true">+</span>
+        </button>
+      ) : (
+        <div id="asst-rail-body" className="asst-rail__body">
+          <div className="asst-rail__search">
+            <label htmlFor="asst-rail-search" className="asst-sr-only">Search sessions</label>
+            <input
+              id="asst-rail-search"
+              type="search"
+              placeholder="Search sessions…"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+          </div>
+          <div className="asst-rail__list">
+            {grouped.pinned.length > 0 && (
+              <section aria-label="Pinned sessions">
+                <h2 className="asst-rail__group-label">Pinned</h2>
+                <ul>{grouped.pinned.map(renderRow)}</ul>
+              </section>
+            )}
+            {grouped.groups.map((g) => g.threads.length > 0 && (
+              <section key={g.label} aria-label={`${g.label} sessions`}>
+                <h2 className="asst-rail__group-label">{g.label}</h2>
+                <ul>{g.threads.map(renderRow)}</ul>
+              </section>
+            ))}
+            {visible.length === 0 && (
+              <p className="asst-rail__empty">{query ? "No sessions match your search." : "No sessions yet — start one above."}</p>
+            )}
+          </div>
+        </div>
+      )}
     </nav>
   );
 }

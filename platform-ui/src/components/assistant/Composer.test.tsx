@@ -50,3 +50,30 @@ describe("Composer — tools-mode affordance", () => {
     expect(onSend).toHaveBeenCalledWith("file a task", { mode: "tools", agent: "task-filer" });
   });
 });
+
+// 2026-08-07 — the empty state's suggestion tiles fill the box through `prefill`, never sending on
+// the user's behalf (see this prop's own header). This pins that the text lands in the box and that
+// the user still has to press Send themselves.
+describe("Composer — empty-state suggestion prefill", () => {
+  it("a prefill fills the box but does NOT send", () => {
+    const onSend = vi.fn();
+    render(<Composer canSend streaming={false} onSend={onSend} onStop={() => {}} prefill={{ text: "What's the status of my active projects right now?", seq: 1 }} />);
+    expect(screen.getByLabelText("Message the assistant")).toHaveValue("What's the status of my active projects right now?");
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it("pressing Send after a prefill sends exactly that text", () => {
+    const onSend = vi.fn();
+    render(<Composer canSend streaming={false} onSend={onSend} onStop={() => {}} prefill={{ text: "Draft a task for my team about ", seq: 1 }} />);
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    expect(onSend).toHaveBeenCalledWith("Draft a task for my team about", { mode: "chat" });
+  });
+
+  it("a SECOND prefill with a new seq overwrites the box even if the text is identical", () => {
+    const onSend = vi.fn();
+    const { rerender } = render(<Composer canSend streaming={false} onSend={onSend} onStop={() => {}} prefill={{ text: "same text", seq: 1 }} />);
+    fireEvent.change(screen.getByLabelText("Message the assistant"), { target: { value: "something the user typed" } });
+    rerender(<Composer canSend streaming={false} onSend={onSend} onStop={() => {}} prefill={{ text: "same text", seq: 2 }} />);
+    expect(screen.getByLabelText("Message the assistant")).toHaveValue("same text");
+  });
+});

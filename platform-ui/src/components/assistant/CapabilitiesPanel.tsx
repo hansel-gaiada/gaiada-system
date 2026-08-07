@@ -16,7 +16,7 @@ export function CapabilitiesPanel({ onClose }: { onClose: () => void }) {
       </div>
       <p className="asst-cap__hint">Exactly what you can ask the assistant to do — tools you don&rsquo;t have access to simply don&rsquo;t appear here.</p>
       <div className="asst-cap__body">
-        <CapabilityCards variant="panel" />
+        <CapabilityCards />
       </div>
     </aside>
   );

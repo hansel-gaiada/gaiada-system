@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
+import { getPrefs } from "@/lib/prefs";
 import { listThreads } from "@/lib/assistant-data";
 import { AssistantWorkspace } from "@/components/assistant/AssistantWorkspace";
 import { EmptyNote } from "@/components/systems/EmptyNote";
@@ -33,7 +34,10 @@ export default async function AssistantPage({ searchParams }: { searchParams: SP
   }
 
   const { thread: requestedThreadId } = await searchParams;
-  const initial = await listThreads(userId, tenant).catch(() => ({ items: [], total: 0 }));
+  const [initial, prefs] = await Promise.all([
+    listThreads(userId, tenant).catch(() => ({ items: [], total: 0 })),
+    getPrefs(),
+  ]);
   const initialActiveThreadId = requestedThreadId && initial.items.some((t) => t.id === requestedThreadId)
     ? requestedThreadId
     : null;
@@ -45,7 +49,11 @@ export default async function AssistantPage({ searchParams }: { searchParams: SP
         <Eyebrow style={{ color: "var(--erp-accent)", marginBottom: 6, display: "block" }}>Intelligence</Eyebrow>
         <h1 style={{ margin: 0, fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 30, lineHeight: 1.1 }}>Assistant</h1>
       </div>
-      <AssistantWorkspace initialThreads={initial.items} initialActiveThreadId={initialActiveThreadId} />
+      <AssistantWorkspace
+        initialThreads={initial.items}
+        initialActiveThreadId={initialActiveThreadId}
+        initialRailCollapsed={prefs.assistantRailCollapsed}
+      />
     </div>
   );
 }
