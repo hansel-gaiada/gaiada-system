@@ -34,6 +34,55 @@ reconstructed from this table alone. Format defined in [`VERSIONING.md`](./VERSI
 > Not corrected retroactively (moving a pushed, already-deployed tag is its own risk); flagging so
 > the next session doesn't re-diagnose the same gap.
 
+### `Alpha 01.024.0063a` - 2026-08-07 - what the first live drive of the assistant found
+
+Cut immediately after the owner used `0061a` on the real box. Two defects, both found by a
+human sending one message - neither by any test we wrote.
+
+**A hallucinated tool name killed the whole turn.** Asked to create a task, the model called
+`mcp__gaiada__pm_listTasks`, which exists nowhere, and the turn died with "Assistant reply failed".
+Our own design invited the guess: `task-filer` holds writes under `pm.*` and reads under
+`tasks.*`/`projects.*`, so a model seeing `pm.createTask` infers `pm.listTasks`. Refusing the CALL
+was right; ending the TURN was not. An off-list name is now fed back as a typed refusal naming the
+exact allow-listed tools, bounded at 2 attempts, after which behaviour is exactly as before. The
+tool is still never invoked, and a real write still suspends.
+
+**Why every test missed it, which is the part worth keeping:** VER-ASST23 and T5 both drove the
+loop across real OS processes - but with SCRIPTED tool calls that always used valid names. Nothing
+asked what happens when the model picks a name that does not exist, which is the single most likely
+thing a real LLM does. Cross-process verification is not real-input verification.
+
+**The chat opened onto a debug panel.** A new thread rendered the full raw tool catalogue -
+`activity.feed`, `authz.check`, `workActivity.relink` - with developer prose. It now leads with four
+human-readable tiles and the catalogue moved behind the existing CAPABILITIES button: relocated for
+power users, not deleted. Suggestions fill the composer and never auto-send, because auto-sending
+would spend a provider call on a guess at intent. Threads also auto-title from their first message
+(the sidebar was a column of identical "New chat" rows), and the rail collapses, persisted through
+the existing `gaiada_prefs` cookie with a type-guarded parse so an older cookie cannot break the page.
+
+Counter `0061 -> 0063`: two module rows (ai-agents, platform-ui).
+
+**Known gaps, not implied closed:** no real screen-reader pass; the naming inconsistency between
+`pm.*` writes and `tasks.*` reads is recorded as a design wart rather than fixed, because those names
+are load-bearing across D14, the executable registry, `wf:report`'s allowlist and the Cerbos policy
+list; and a handoff to `task-filer` still files without the in-thread confirm chip.
+
+**Module manifest** (VERSIONING rule 2):
+
+| Module | Ver | | Module | Ver |
+|---|---|---|---|---|
+| platform-nest | `0.16.0` | | webdev | `0.11.0` |
+| platform-ui | `0.18.0` | | webdesk | `0.0.0` |
+| ai-gateway-go | `0.13.1` | | search-marketing | `0.5.1` |
+| mcp-hub | `0.10.0` | | social-media | `0.0.0` |
+| sync-engine-go | `0.7.0` | | creative | `0.1.0` |
+| automation (n8n) | `0.4.1` | | render-gateway-go | `0.0.0` |
+| observability | `0.6.1` | | reports | `0.3.1` |
+| infra | `0.8.6` | | report-renderer | `0.1.0` |
+| wa-chat-bot | `0.9.2` | | mail | `0.0.19` |
+| ai-agents | `0.6.1` | | hermes-gateway | `0.2.0` |
+| capture-helper | `0.2.0` | | | |
+
 ### `Alpha 01.023.0061a` — 2026-08-06 — the assistant can propose a write, and you confirm it in-thread
 
 ASST-23. When this release's work started the assistant could not propose a write **at all**, blocked
@@ -1561,6 +1610,24 @@ tenant's 8 seeded rows still need purging (per-tenant SQL in the design doc §12
 - **Unreleased / next:** identity writes, org-structure endpoints.
 
 ## platform-ui
+### [0.18.0] - 2026-08-07 - IN PROGRESS (the chat no longer opens onto a debug panel)
+- **The empty state was the raw tool registry** - `activity.feed`, `authz.check`,
+  `workActivity.relink`, with developer prose - and it was the first thing anyone saw. Replaced with
+  four human-readable tiles; the catalogue MOVED behind the existing CAPABILITIES button rather than
+  being deleted, so power users keep it and newcomers are not confronted with it.
+- Suggestions **fill the composer and never auto-send** - auto-sending would spend a real provider
+  call on a guess at the user's intent.
+- **Threads auto-title from their first message.** The sidebar was a column of identical "New chat"
+  rows. Empty/stalled threads still read "New chat"; long text breaks on a word boundary; a pasted URL
+  with no spaces truncates at the character limit instead of being chopped to nothing; a manual rename
+  always wins. FE-derived was chosen over a backend LLM summary (better titles, but a model call per
+  thread and a platform-nest change) - the rejected option is recorded as a decision, not an omission.
+- **The rail collapses**, persisted via the existing `gaiada_prefs` cookie with a type-guarded parse,
+  so a cookie written before this field existed cannot break the page. `aria-expanded` set, keyboard
+  reachable in both states, and nothing added near the `role="log"` transcript that would make a
+  screen reader announce more than it should.
+- Verified headless in light AND dark themes. **No real screen reader was run.**
+
 ### [0.17.0] - 2026-08-06 - IN PROGRESS (ASST-23 proposal card; a real thread-load race fixed)
 - **The proposal card**, full D14 lifecycle: awaiting-confirm -> sent for approval -> approved+executed
   -> failed+retry, plus rejected/dismissed/expired. This REMOVES the old "approval does not execute"
@@ -2717,6 +2784,22 @@ Built by a 4-agent parallel run against a frozen contract (`docs/superpowers/pla
 - **Blocked:** infra (OpenBao/Gemini/WAHA) + legal Gate 1 before real ingestion.
 
 ## ai-agents
+### [0.6.1] - 2026-08-07 - PROTOTYPED (an invented tool name no longer kills the turn)
+- **LIVE BUG.** The model called `mcp__gaiada__pm_listTasks` - a tool that exists nowhere - and
+  `runAgent` threw `ToolNotAllowedError`, ending the whole goal. Refusing the call is correct
+  containment; ending the turn over a recoverable naming slip is not.
+- An off-list name is now fed back as a typed refusal naming the exact allow-listed tools, bounded by
+  `MAX_OFF_LIST_ATTEMPTS` (2), after which behaviour is byte-for-byte the pre-fix path. **Two
+  invariants do not move:** `deps.callTool` is unreachable on the recoverable branch (it `continue`s),
+  and a genuine high-impact write still suspends - this block runs strictly before the impact gate.
+- The cap counts TOTAL off-list guesses per goal, not per distinct name; per-name would let a model
+  cycle names indefinitely, each one "the first attempt".
+- `task-filer`'s prompt now names its four callable tools verbatim and warns against cross-namespace
+  guessing. Hub tools were NOT renamed - `pm.createTask`/`pm.createDoc` are load-bearing across D14,
+  the executable registry, `wf:report`'s allowlist and the Cerbos policy list.
+- `status-reporter`/`approvals-chaser` share the same loop and are covered with no change, proven by
+  driving the real def through hallucinate -> retry -> success.
+
 ### [0.6.0] - 2026-08-06 - PROTOTYPED (task-filer: the first agent allowed to propose a write)
 - **`RERUN_CAPABLE_HIGH_WRITES` went from `[]` to its first entries ever** - `pm.createTask` and
   `pm.createDoc` - behind `task-filer`, a new write specialist. `high_write` is the HONEST declaration,
