@@ -378,9 +378,14 @@ describe.skipIf(!RUN)("WSD-7 — owner's literal acceptance scenario (HR serving
   it("beat 6 — u2's own PM 'my work' in home company A still shows only u2's own task, unaffected by cross-company HR grants (before AND after the revoke)", async () => {
     const mine = await app.inject({ method: "GET", url: `/api/${A}/pm/tasks?assignee=me`, headers: asUser(u2) });
     expect(mine.statusCode).toBe(200);
-    const rows = mine.json() as Array<{ title: string }>;
-    expect(rows).toHaveLength(1);
-    expect(rows[0].title).toBe("u2 personal task");
+    // P4-A1 made this endpoint paginated: `{ items, nextCursor }`, not a bare array. This test lives
+    // in the HR module and consumes PM, which is exactly why the shape change looked consumer-free
+    // from inside `src/modules/pm/` — a response-shape change has to be verified against the WHOLE
+    // suite, not the module that owns the handler.
+    const body = mine.json() as { items: Array<{ title: string }>; nextCursor: string | null };
+    expect(Array.isArray(body.items)).toBe(true);
+    expect(body.items).toHaveLength(1);
+    expect(body.items[0].title).toBe("u2 personal task");
     // No B/C hr_case ever leaks into a PM task listing (different module, different tenant).
   });
 
