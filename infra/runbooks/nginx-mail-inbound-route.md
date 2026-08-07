@@ -6,8 +6,44 @@ has no `/api/*` location, so both fall through to `location /` (platform-ui, `:3
 307-redirects anything it doesn't recognise to `/login` — confirmed live twice.
 
 This was designed and validated offline only (`nginx -t` in a throwaway container + a real
-routing proof against stub upstreams — see the NET-01 report for output). **Nobody has applied it
-to the box.**
+routing proof against stub upstreams — see the NET-01 report for output).
+
+## ✅ APPLIED to gda-aicenter 2026-08-07
+
+Backup taken at `/etc/nginx/sites-available/erp.gaiada.online.bak-20260807040201` (the rollback
+point). `nginx -t` passed, `systemctl reload nginx`, no dropped connections. Evidence:
+
+| Check | Before | After |
+|---|---|---|
+| `POST /api/mail/inbound/brevo` | **307** (fell through to platform-ui) | **401** (reached the app, token wall held) |
+| `POST /api/mail/webhooks/brevo` | 307 | **401** |
+| `/idp/…/openid-configuration` | 200 | 200 (no regression) |
+| `/n8n/` | 302 | 302 (no regression) |
+| Rate limit (40 rapid POSTs) | n/a | **15×401 + 25×429** — exactly `burst=15`, zone live |
+| `:3004` binding | `127.0.0.1` only | `127.0.0.1` only |
+
+Two corrections to the checks written above, both worth keeping:
+
+1. **The prerequisite curl below is missing `-H "Content-Type: application/json"`.** Without it the
+   endpoint returns **500**, not 401 — Fastify raises `Unsupported Media Type` and it escapes as an
+   unhandled exception. That is a logging nit, not a gate failure (real Brevo always sends JSON),
+   but the bare curl makes a healthy endpoint look broken. Always send the content-type.
+2. **The `docker port` prerequisite was already satisfied** — `ports: ["127.0.0.1:3004:3004"]` rode
+   the normal deploy pipeline in `alpha-01.026.0067a`, so no manual compose step was needed.
+
+`MAIL_INBOUND_TRUSTED_PROXIES=172.18.0.1` was appended to the box `.env` and platform recreated
+(scoped, blast radius 1). 172.18.0.1 is the docker bridge gateway = the host where nginx runs, i.e.
+the peer address the app actually observes; MAIL-37's resolver is **exact-IP, no CIDR** by design.
+Verified *at the process* (`docker exec … echo $MAIL_INBOUND_TRUSTED_PROXIES` → `172.18.0.1`), not
+merely in the file — see the compose-passthrough trap.
+
+⚠ Recreating any service on this box needs **both** compose files
+(`-f docker-compose.vps.yml -f docker-compose.hostdata.yml`); the vps file alone is an invalid
+project because Postgres/Redis run on the host. See `infra/runbooks/deploy-vps.md`.
+
+Still open (pre-existing, not introduced here): platform-ui's `:3005` is bound `0.0.0.0` and the box
+has **no host firewall** (no `ufw`, empty `DOCKER-USER` chain). It is unreachable from off-box, so
+the protection is a provider-level network filter rather than a host control.
 
 ## Prerequisite — confirm BEFORE touching nginx
 
