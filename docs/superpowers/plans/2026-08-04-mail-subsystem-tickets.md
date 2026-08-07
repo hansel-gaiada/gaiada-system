@@ -210,6 +210,35 @@ remains **not a ticket in this program** — gated on the **D14 resume-path prog
 migration `0078` landed); still a one-constant change + architect design-review when its
 prerequisite lands (design §7.4 v4).
 
+## v6 addition — MAIL-38: render-on-demand mail preview in the ERP (owner decision 2026-08-07)
+
+| Ticket | Scope | Seat | Model | Deps | Acceptance |
+|---|---|---|---|---|---|
+| MAIL-38 | **Rendered-body preview on `/admin/mail/[id]`.** Add an elevated-only `GET /api/admin/mail/log/:id/preview` that re-renders the message from the stored `template_key` + `payload` via the existing `renderTemplate()` and returns the composed subject/HTML/text; mount it as a Preview panel on the detail page. | senior-be + senior-fe | default | B4 (do not divert B2–B4) | Panel shows the same bytes a recipient would receive; XSS-inert under the A13 corpus payloads; nothing persisted; non-elevated ⇒ 403; works unchanged against a real relay at staging |
+
+**Why this exists.** The owner asked whether mail is reviewable from the ERP rather than through an
+SSH tunnel to Mailpit. Partly: `/admin/mail` (MAIL-15) already shows the log — subject, status,
+template, attempts, provider, entity link, event timeline — and renders *inbound* thread bodies with
+MAIL-20 quote collapse. But **`mail_log` never stores the rendered body** (columns are `subject` +
+`payload`; the body is composed at send time), so the one thing a wording/layout review needs is the
+one thing the ERP cannot show. Mailpit holds it, which is why the quality gate points there — and
+Mailpit is a **dev sink that disappears at staging**, so the gap would otherwise recur permanently.
+
+**Why it is cheap.** `renderTemplate(templateKey, payload): RenderedMail`
+(`platform-nest/src/mail/templates.ts:161`) is already a pure function, and both inputs are columns
+on the row. This is a new read endpoint over existing machinery, not a new renderer.
+
+**Design constraints — these are the ticket, not decoration:**
+- **Render on demand, cache nothing.** Same rule design §11 already locked for Gmail; a cached
+  render would put message bodies in the database that the schema deliberately keeps out.
+- **Treat the payload as hostile.** Inbound-derived values reach `payload`, and MAIL-18 proved XSS
+  inert *as stored bytes* — that guarantee does not survive being composed into HTML and injected
+  into an admin page. Sanitize and sandbox (the `bodyHtmlSanitized` path + a sandboxed frame);
+  re-run the A13 corpus payloads through the preview specifically. An admin-only surface is the
+  worst place to regress XSS, since the viewer is by definition elevated.
+- **Elevated-only, consistent with `admin-mail.controller.ts`** (`isElevated`, flat 403 otherwise).
+- **Sequencing:** queued *after* B4. It must not divert B2–B4, which close the dev stage.
+
 ## Dev-stage exit criteria ("the dev stage is finished" means ALL of these)
 
 > **v5 UPDATE — 2026-08-05: THE BILLING WALL IS GONE.** The repo was made public, so Actions
