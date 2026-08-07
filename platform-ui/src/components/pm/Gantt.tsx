@@ -104,12 +104,24 @@ function dayOfMonth(isoDate: string): string {
 }
 
 interface DayBand { pct: number; widthPct: number }
-interface HeaderTick { iso: string; pct: number; labelled: boolean }
+interface HeaderTick { iso: string; pct: number; labelled: boolean; label?: string }
+
+// P4-C1 — explicit Day/Week/Month zoom, replacing the adaptive-density heuristic below when set.
+// `null` (no `?gz=`) keeps the exact prior heuristic behaviour — this is an additive prop-free
+// override read straight from the URL (bookmarkable, same convention as `?collapsed=`).
+type GanttZoom = "day" | "week" | "month";
+function parseZoom(raw: string | null): GanttZoom | null {
+  return raw === "day" || raw === "week" || raw === "month" ? raw : null;
+}
+// P4-C1 — physical pixels-per-day at each zoom, applied to `.pm-gantt`'s min-width (see
+// `ganttWidthPx` below) so Day zoom visibly reads wider/finer than Month zoom, not just
+// differently-labelled at the same size.
+const PX_PER_DAY: Record<GanttZoom, number> = { day: 32, week: 8, month: 4 };
 
 // One band per weekend calendar day, in "day interval" terms (day i spans [i, i+1) of the
 // timeline), so the shaded strip lines up with that day's bars, not the point tick beside it.
 // Capped by the caller (`dense`) so a pathological multi-year window never renders one <span>
-// per day — the explicit date-window picker (P4-C2) is where that case gets a real fix.
+// per day — P4-C2's explicit date window is the real fix for that case (narrow the window).
 function buildWeekendBands(start: string, days: number): DayBand[] {
   if (days <= 0) return [];
   const dayWidth = 100 / days;
@@ -122,12 +134,12 @@ function buildWeekendBands(start: string, days: number): DayBand[] {
 
 // One tick per calendar day (point, not interval — a tick marks the day BOUNDARY at offset i so
 // it sits directly under where that day's column starts, same offsetPct convention bars use).
-// `labelled` thins the text at wider spans (Day view up to a month, Week view beyond that) without
-// a real Day/Week/Month zoom toggle — that's P4-C1; this is only the fallback that keeps the axis
-// legible today and cheap to swap for an explicit granularity prop later.
-function buildHeaderTicks(start: string, days: number): HeaderTick[] {
+// `labelled` thins the text at wider spans without an explicit zoom. `forceStep` is P4-C1's hook:
+// Day zoom pins step=1 (every day labelled), Week zoom pins step=7, and leaving it undefined
+// reproduces the exact old heuristic (auto — no `?gz=`) byte-for-byte.
+function buildHeaderTicks(start: string, days: number, forceStep?: number): HeaderTick[] {
   if (days <= 0) return [{ iso: start, pct: 0, labelled: true }];
-  const step = days <= 31 ? 1 : days <= 120 ? 7 : Math.max(1, Math.ceil(days / 16));
+  const step = forceStep ?? (days <= 31 ? 1 : days <= 120 ? 7 : Math.max(1, Math.ceil(days / 16)));
   const out: HeaderTick[] = [];
   for (let i = 0; i <= days; i++) {
     out.push({ iso: dayShift(start, i), pct: (i / days) * 100, labelled: i % step === 0 || i === days });
@@ -135,13 +147,90 @@ function buildHeaderTicks(start: string, days: number): HeaderTick[] {
   return out;
 }
 
+const MONTH_ABBR = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const isoFromMs = (ms: number): string => new Date(ms).toISOString().slice(0, 10);
+// P4-C1 — Month zoom's OWN guard, independent of the ≤366-day `dense` cap Day/Week zoom keep
+// reusing: ticks land on calendar month boundaries, so a multi-year window renders O(months) ticks,
+// never O(days) — the performance constraint this ticket owns for the case dense can't cover
+// (a legitimate "view years at a glance" use of Month zoom). `MAX_MONTH_TICKS` is a second,
+// belt-and-suspenders cap so an extreme multi-decade window can't slowly regress the same way.
+const MAX_MONTH_TICKS = 60;
+function buildMonthTicks(start: string, end: string): HeaderTick[] {
+  const startMs = Date.parse(start);
+  const endMs = Date.parse(end);
+  const span = Math.max(DAY, endMs - startMs);
+  const startD = new Date(startMs);
+  let y = startD.getUTCFullYear();
+  let m = startD.getUTCMonth();
+  const isoDates: string[] = [start]; // always anchor the left edge, even mid-month
+  m += 1;
+  if (m > 11) { m = 0; y += 1; }
+  while (true) {
+    const ms = Date.UTC(y, m, 1);
+    if (ms > endMs) break;
+    isoDates.push(isoFromMs(ms));
+    m += 1;
+    if (m > 11) { m = 0; y += 1; }
+  }
+  const step = Math.max(1, Math.ceil(isoDates.length / MAX_MONTH_TICKS));
+  const thinned = isoDates.filter((_, i) => i % step === 0 || i === isoDates.length - 1);
+  return thinned.map((iso, i) => {
+    const ms = Date.parse(iso);
+    const d = new Date(ms);
+    const showYear = i === 0 || d.getUTCMonth() === 0;
+    const label = showYear ? `${MONTH_ABBR[d.getUTCMonth()]} ${d.getUTCFullYear()}` : MONTH_ABBR[d.getUTCMonth()];
+    return { iso, pct: ((ms - startMs) / span) * 100, labelled: true, label };
+  });
+}
+
 // Offset (0-100) of `iso` within [start, start+days], or null when it falls outside the
 // rendered window — the guard that hides the today line when "today" isn't on this axis at all.
+// Also reused by P4-C2 to reposition milestone diamonds against an explicit window.
 function pctForDate(start: string, days: number, iso: string): number | null {
   if (days <= 0) return null;
   const idx = Math.round((Date.parse(iso) - Date.parse(start)) / DAY);
   if (idx < 0 || idx > days) return null;
   return (idx / days) * 100;
+}
+
+// P4-C2 — an explicit, clearable date window. Mirrors lib/pm.ts's `computeTimeline` per-bar clamp
+// math (same precedent as `hasCycle`/`depScan` below: this file cannot import the server-only
+// module at runtime, so the pure math is duplicated deliberately) but against an ARBITRARY
+// [winStart, winEnd] instead of the task-derived min/max. A task with real dates entirely outside
+// the window is DROPPED, not pinned to an edge — pinning would misrepresent where it actually
+// falls. A task with no dates at all is pinned to the window start and dashed, same convention
+// `computeTimeline` uses for `startsMissing`.
+function applyWindowToBars(bars: TimelineBar[], winStart: string, winEnd: string): TimelineBar[] {
+  const winStartMs = Date.parse(winStart);
+  const winEndMs = Date.parse(winEnd);
+  const spanMs = Math.max(DAY, winEndMs - winStartMs);
+  const out: TimelineBar[] = [];
+  for (const b of bars) {
+    const t = b.task;
+    const hasDate = !!(t.startDate || t.dueDate);
+    const s = t.startDate ? Date.parse(t.startDate) : t.dueDate ? Date.parse(t.dueDate) : winStartMs;
+    const e = t.dueDate ? Date.parse(t.dueDate) : s + DAY;
+    if (hasDate && (e < winStartMs || s > winEndMs)) continue;
+    const clampedS = Math.max(winStartMs, Math.min(s, winEndMs));
+    const clampedE = Math.max(clampedS + DAY / 2, Math.min(e + DAY, winEndMs));
+    out.push({
+      ...b,
+      offsetPct: ((clampedS - winStartMs) / spanMs) * 100,
+      widthPct: Math.min(100, ((clampedE - clampedS) / spanMs) * 100),
+    });
+  }
+  return out;
+}
+
+// P4-C2 — milestone diamonds repositioned (or hidden, if outside) against the explicit window.
+function applyWindowToMilestones(markers: MilestoneMarker[], winStart: string, days: number): MilestoneMarker[] {
+  const out: MilestoneMarker[] = [];
+  for (const m of markers) {
+    const pct = pctForDate(winStart, days, m.date);
+    if (pct === null) continue;
+    out.push({ ...m, offsetPct: pct });
+  }
+  return out;
 }
 
 // Up to two initials from a display name — the avatar's fallback rendering (no photo store
@@ -276,18 +365,92 @@ export function Gantt(props: GanttProps) {
   const burndown = props.burndown ?? [];
   const [showBurndown, setShowBurndown] = useState(false);
 
-  // ---- P4-L3: day/week header, weekend banding, today line ----
+  // ---- P4-C1/P4-C2 — zoom + explicit date window, both persisted in the URL (?gz=, ?gfrom=/
+  // ?gto=) with the same read/replace convention as ?collapsed= above. Absent params reproduce
+  // today's behaviour exactly: `zoomParam` null keeps the adaptive-density heuristic, and with no
+  // `gfrom`/`gto` the window stays whatever the server derived (`timeline.start`/`end`/`days`).
+  const zoomParam = parseZoom(searchParams.get("gz"));
+  const winFromParam = searchParams.get("gfrom");
+  const winToParam = searchParams.get("gto");
+  const windowActive = !!(
+    winFromParam && winToParam &&
+    !Number.isNaN(Date.parse(winFromParam)) && !Number.isNaN(Date.parse(winToParam)) &&
+    winToParam >= winFromParam // lexical ISO (yyyy-mm-dd) comparison is date-correct
+  );
+  const effStart = windowActive ? winFromParam! : timeline.start;
+  const effEnd = windowActive ? winToParam! : timeline.end;
+  const effDays = windowActive ? Math.max(1, Math.round((Date.parse(effEnd) - Date.parse(effStart)) / DAY)) : timeline.days;
+
+  const setZoomParams = useCallback((next: URLSearchParams) => {
+    const qs = next.toString();
+    router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+  }, [pathname, router]);
+  const setZoom = useCallback((z: GanttZoom) => {
+    const params = new URLSearchParams(Array.from(searchParams.entries()));
+    if (zoomParam === z) { params.delete("gz"); setLive("Zoom reset to automatic."); }
+    else { params.set("gz", z); setLive(`Zoom set to ${z}.`); }
+    setZoomParams(params);
+  }, [searchParams, zoomParam, setZoomParams]);
+  const applyWindow = useCallback((from: string, to: string) => {
+    if (!from || !to) return;
+    if (to < from) { setLive("End date must be on or after the start date."); return; }
+    const params = new URLSearchParams(Array.from(searchParams.entries()));
+    params.set("gfrom", from);
+    params.set("gto", to);
+    setZoomParams(params);
+    setLive(`Showing ${fmt(from)} to ${fmt(to)}.`);
+  }, [searchParams, setZoomParams]);
+  const clearWindow = useCallback(() => {
+    const params = new URLSearchParams(Array.from(searchParams.entries()));
+    params.delete("gfrom");
+    params.delete("gto");
+    setZoomParams(params);
+    setLive("Showing the full timeline.");
+  }, [searchParams, setZoomParams]);
+
+  // P4-C2: bars/milestones recomputed against the explicit window (mirrors computeTimeline's own
+  // clamp math — see applyWindowToBars). Memoized: `groups`' own memo comment above explains why an
+  // unmemoized fallback here would retrigger the dependency-line effect every render.
+  const viewGroups: GanttGroup[] = useMemo(
+    () => (windowActive ? groups.map((g) => ({ ...g, bars: applyWindowToBars(g.bars, effStart, effEnd) })) : groups),
+    [groups, windowActive, effStart, effEnd],
+  );
+  const viewMilestones: MilestoneMarker[] = useMemo(
+    () => (windowActive ? applyWindowToMilestones(milestones ?? [], effStart, effDays) : (milestones ?? [])),
+    [milestones, windowActive, effStart, effDays],
+  );
+
+  // ---- P4-L3/P4-C1: day/week/month header, weekend banding, today line ----
   // Client-only fallback for "today" (see the `todayISO` prop doc above) — starts `null` so the
   // very first render (server AND client, pre-hydration) draws no line, then fills in post-mount.
   const [clientToday, setClientToday] = useState<string | null>(null);
   useEffect(() => { setClientToday(new Date().toISOString().slice(0, 10)); }, []);
   const resolvedToday = props.todayISO ?? clientToday;
-  // Capped at ~a year so a pathological multi-year window (no date-window picker yet, P4-C2)
-  // never renders one <span> per day; beyond that it falls back to the plain start/end axis.
-  const dense = timeline.days > 0 && timeline.days <= 366;
-  const weekendBands = useMemo(() => (dense ? buildWeekendBands(timeline.start, timeline.days) : []), [dense, timeline.start, timeline.days]);
-  const headerTicks = useMemo(() => (dense ? buildHeaderTicks(timeline.start, timeline.days) : []), [dense, timeline.start, timeline.days]);
-  const todayPct = resolvedToday ? pctForDate(timeline.start, timeline.days, resolvedToday) : null;
+  // Capped at ~a year so a pathological multi-year window never renders one <span> per day — Month
+  // zoom below has its OWN independent guard (buildMonthTicks/MAX_MONTH_TICKS) so it can still
+  // render a long window cheaply; Day/Week zoom and the no-zoom heuristic all share this one.
+  const dense = effDays > 0 && effDays <= 366;
+  // Weekend bands are per-day elements — never rendered for Month zoom (they'd be both meaningless
+  // at that scale and, for a long window, exactly the "one element per day" case this ticket's
+  // hard constraint forbids), and still gated on `dense` otherwise (unchanged rule).
+  const showWeekendBands = dense && zoomParam !== "month";
+  const weekendBands = useMemo(() => (showWeekendBands ? buildWeekendBands(effStart, effDays) : []), [showWeekendBands, effStart, effDays]);
+  const headerTicks = useMemo(() => {
+    if (zoomParam === "month") return buildMonthTicks(effStart, effEnd);
+    if (!dense) return [];
+    const forceStep = zoomParam === "day" ? 1 : zoomParam === "week" ? 7 : undefined;
+    return buildHeaderTicks(effStart, effDays, forceStep);
+  }, [zoomParam, dense, effStart, effEnd, effDays]);
+  const useFineAxis = zoomParam === "month" ? headerTicks.length > 0 : dense;
+  const todayPct = resolvedToday ? pctForDate(effStart, effDays, resolvedToday) : null;
+
+  // P4-C1: a real zoom, not just denser labels — widening `.pm-gantt`'s min-width scales every
+  // bar's PHYSICAL size (offsetPct/widthPct stay percentages of this container, unchanged) so Day
+  // zoom actually reads like Day zoom instead of the same pixels with finer tick labels. Unset
+  // (no `?gz=`) leaves the CSS default (620px) exactly as before — zero visual change for any
+  // caller that hasn't opted in. The existing ResizeObserver on `containerRef` already re-measures
+  // dependency lines on any width change, so this needs no extra plumbing.
+  const ganttWidthPx = zoomParam ? Math.max(620, effDays * PX_PER_DAY[zoomParam]) : undefined;
 
   const containerRef = useRef<HTMLDivElement | null>(null);
   const barRefs = useRef(new Map<string, HTMLElement | null>());
@@ -319,7 +482,7 @@ export function Gantt(props: GanttProps) {
     setLines(next);
   }, [depEdges]);
 
-  useLayoutEffect(() => { recomputeLines(); }, [recomputeLines, collapsedParam, groups, drag]);
+  useLayoutEffect(() => { recomputeLines(); }, [recomputeLines, collapsedParam, viewGroups, drag]);
   useEffect(() => {
     if (!containerRef.current) return;
     const ro = new ResizeObserver(() => recomputeLines());
@@ -395,7 +558,7 @@ export function Gantt(props: GanttProps) {
   };
   const onDragMove = (e: React.PointerEvent) => {
     if (!drag) return;
-    const deltaDays = Math.round(((e.clientX - drag.startX) / Math.max(1, drag.trackWidth)) * timeline.days);
+    const deltaDays = Math.round(((e.clientX - drag.startX) / Math.max(1, drag.trackWidth)) * effDays);
     if (deltaDays !== drag.deltaDays) setDrag({ ...drag, deltaDays });
   };
   const endDrag = (e: React.PointerEvent) => {
@@ -495,7 +658,7 @@ export function Gantt(props: GanttProps) {
     let left = bar.offsetPct;
     let width = bar.widthPct;
     if (drag && drag.moveSet.has(bar.task.id) && drag.deltaDays !== 0) {
-      const dPct = (drag.deltaDays / Math.max(1, timeline.days)) * 100;
+      const dPct = (drag.deltaDays / Math.max(1, effDays)) * 100;
       if (drag.mode === "move") left += dPct;
       else if (drag.mode === "start") { left += dPct; width -= dPct; }
       else width += dPct;
@@ -628,42 +791,90 @@ export function Gantt(props: GanttProps) {
 
   return (
     <div className="erp-scroll" style={{ overflowX: "auto" }}>
+      {/* P4-C1/P4-C2 toolbar — zoom + the explicit date window. Renders unconditionally (both are
+          read-only-safe chrome, unlike the drag/link interactions gated on `interactive`/`canEdit`
+          below), and is entirely URL-driven so it survives navigation/bookmarking like `?collapsed=`. */}
+      <div className="pm-gantt__toolbar">
+        <div className="pm-gantt__zoomgroup" role="group" aria-label="Gantt zoom">
+          {(["day", "week", "month"] as const).map((z) => (
+            <button
+              key={z} type="button" className="pm-gantt__zoom"
+              aria-pressed={zoomParam === z}
+              onClick={() => setZoom(z)}
+            >
+              {z === "day" ? "Day" : z === "week" ? "Week" : "Month"}
+            </button>
+          ))}
+        </div>
+        <form
+          className="pm-gantt__window"
+          aria-label="Date window"
+          onSubmit={(e) => {
+            e.preventDefault();
+            const form = e.currentTarget;
+            const from = (form.elements.namedItem("gfrom") as HTMLInputElement)?.value ?? "";
+            const to = (form.elements.namedItem("gto") as HTMLInputElement)?.value ?? "";
+            applyWindow(from, to);
+          }}
+        >
+          {/* `key`'d on the current URL value so an external change (Apply/Clear, or a bookmarked
+              link) is reflected in these uncontrolled inputs by remounting them — plain
+              `defaultValue` would only apply once and never follow a later prop/URL change. */}
+          <input key={`gfrom-${winFromParam ?? effStart}`} name="gfrom" type="date" defaultValue={winFromParam ?? effStart} aria-label="Window start" />
+          <span className="pm-gantt__window-sep" aria-hidden>–</span>
+          <input key={`gto-${winToParam ?? effEnd}`} name="gto" type="date" defaultValue={winToParam ?? effEnd} aria-label="Window end" />
+          <button type="submit" className="lux-btn lux-btn--ghost lux-btn--sm">Apply</button>
+          {windowActive && (
+            <button type="button" className="pm-gantt__window-clear" onClick={clearWindow} aria-label="Clear date window — show the full timeline">×</button>
+          )}
+        </form>
+      </div>
+
       {/* P2-08: hides entirely when the series is empty (disabled/stale backend, or a project
-          with no tasks yet) — no overlay, no error, per design spec §4 phase-2. */}
-      {burndown.length > 0 && (
+          with no tasks yet) — no overlay, no error, per design spec §4 phase-2. Also hidden while
+          an explicit window is active: the overlay's x-positions are computed against the
+          SERVER-derived timeline (there is no per-point date to remap against an arbitrary
+          window — unlike bars/milestones, which carry real dates), so showing it here would
+          silently misalign rather than degrade gracefully. */}
+      {burndown.length > 0 && !windowActive && (
         <div className="pm-gantt__bdtoggle">
           <button type="button" className="lux-btn lux-btn--ghost lux-btn--sm" aria-pressed={showBurndown} onClick={() => setShowBurndown((v) => !v)}>
             {showBurndown ? "Hide burndown" : "Show burndown"}
           </button>
         </div>
       )}
-      <div className="pm-gantt" ref={containerRef}>
-        {/* P4-L3: day/week header with weekday labels — dense (<=~a year) spans get a real
-            per-day/week tick axis; wider spans fall back to the plain start/end label rather
-            than one <span> per day (the date-window picker, P4-C2, is the real fix for those). */}
-        {dense ? (
+      <div className="pm-gantt" ref={containerRef} style={ganttWidthPx ? { minWidth: `${ganttWidthPx}px` } : undefined}>
+        {/* P4-L3/P4-C1: day/week/month header with weekday labels — dense (<=~a year) spans get a
+            real per-day/week tick axis (or, at Month zoom, calendar-month ticks regardless of
+            span); wider undense spans without Month zoom fall back to the plain start/end label
+            rather than one <span> per day. */}
+        {useFineAxis ? (
           <div className="pm-gantt__daxis">
             <span className="pm-gantt__daxis-head">Task</span>
             <div className="pm-gantt__daxis-track">
               {headerTicks.map((tk) => (
                 <span key={tk.iso} className="pm-gantt__daxis-tick" style={{ left: `${tk.pct}%` }}>
                   {tk.labelled ? (
-                    <>
-                      <span className="pm-gantt__daxis-wd">{weekdayAbbr(tk.iso)}</span>
-                      <span className="pm-gantt__daxis-d">{dayOfMonth(tk.iso)}</span>
-                    </>
+                    tk.label ? (
+                      <span className="pm-gantt__daxis-d">{tk.label}</span>
+                    ) : (
+                      <>
+                        <span className="pm-gantt__daxis-wd">{weekdayAbbr(tk.iso)}</span>
+                        <span className="pm-gantt__daxis-d">{dayOfMonth(tk.iso)}</span>
+                      </>
+                    )
                   ) : null}
                 </span>
               ))}
             </div>
           </div>
         ) : (
-          <div className="pm-gantt__axis"><span>{fmt(timeline.start)}</span><span>{fmt(timeline.end)}</span></div>
+          <div className="pm-gantt__axis"><span>{fmt(effStart)}</span><span>{fmt(effEnd)}</span></div>
         )}
 
         {/* Weekend banding — a decorative fill behind every row (negative z-index), never text,
-            so it carries no contrast duty; capped to `dense` spans for the same reason as the
-            header ticks above. */}
+            so it carries no contrast duty; capped to `dense` spans (never Month zoom) for the same
+            reason as the header ticks above. */}
         {weekendBands.length > 0 && (
           <div className="pm-gantt__weekends" aria-hidden>
             {weekendBands.map((b, i) => (
@@ -683,7 +894,7 @@ export function Gantt(props: GanttProps) {
           </div>
         )}
 
-        {showBurndown && burndown.length > 0 && (
+        {showBurndown && burndown.length > 0 && !windowActive && (
           <>
             <div className="pm-gantt__bdrow">
               <span className="pm-gantt__bdlabel">Burndown</span>
@@ -701,11 +912,11 @@ export function Gantt(props: GanttProps) {
           </>
         )}
 
-        {milestones && milestones.length > 0 && (
+        {viewMilestones.length > 0 && (
           <div className="pm-gantt__msrow">
             <span className="pm-gantt__mslabel">Milestones</span>
             <div className="pm-gantt__mstrack">
-              {milestones.map((m) => (
+              {viewMilestones.map((m) => (
                 <span key={m.id} className="pm-gantt__milestone" style={{ left: `${m.offsetPct}%` }} title={`${m.name} · ${fmt(m.date)}`} />
               ))}
             </div>
@@ -713,13 +924,13 @@ export function Gantt(props: GanttProps) {
         )}
 
         {/* vertical dashed guidelines spanning the body */}
-        {milestones && milestones.length > 0 && (
+        {viewMilestones.length > 0 && (
           <div className="pm-gantt__guides" aria-hidden>
-            {milestones.map((m) => <span key={m.id} className="pm-gantt__guide" style={{ left: `${m.offsetPct}%` }} />)}
+            {viewMilestones.map((m) => <span key={m.id} className="pm-gantt__guide" style={{ left: `${m.offsetPct}%` }} />)}
           </div>
         )}
 
-        {groups.map((g) => {
+        {viewGroups.map((g) => {
           const isCollapsed = collapsed.has(g.key);
           return (
             <div className="pm-gantt__group" key={g.key}>

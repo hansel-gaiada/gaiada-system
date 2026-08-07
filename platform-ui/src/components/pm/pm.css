@@ -113,6 +113,32 @@
 .pm-doc:hover { border-color: var(--pm-accent); color: var(--pm-accent); }
 
 /* ---- gantt / timeline ---- */
+/* P4-C1/P4-C2 — zoom (Day/Week/Month) + explicit clearable date window. Sits above the scrollable
+   `.pm-gantt` box itself so it never scrolls out of view with the chart. */
+.pm-gantt__toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
+.pm-gantt__zoomgroup { display: inline-flex; }
+.pm-gantt__zoom {
+  font: 700 10px var(--font-body); letter-spacing: 0.06em; text-transform: uppercase; color: var(--pm-text-dim);
+  background: transparent; border: 0.5px solid var(--pm-line); padding: 5px 11px; cursor: pointer;
+}
+.pm-gantt__zoom + .pm-gantt__zoom { margin-left: -0.5px; }
+.pm-gantt__zoom:first-child { border-radius: var(--pm-radius) 0 0 var(--pm-radius); }
+.pm-gantt__zoom:last-child { border-radius: 0 var(--pm-radius) var(--pm-radius) 0; }
+.pm-gantt__zoom:hover { color: var(--pm-text); }
+.pm-gantt__zoom[aria-pressed="true"] { color: var(--pm-accent-fg); background: var(--pm-accent); border-color: var(--pm-accent); }
+.pm-gantt__zoom:focus-visible { outline: 2px solid var(--pm-accent); outline-offset: 1px; }
+.pm-gantt__window { display: inline-flex; align-items: center; gap: 6px; }
+.pm-gantt__window input[type="date"] { font: 400 12px var(--font-body); padding: 4px 6px; border: 0.5px solid var(--pm-line); border-radius: var(--pm-radius); background: var(--pm-surface-card); color: var(--pm-text); }
+.pm-gantt__window input[type="date"]:focus-visible { outline: 2px solid var(--pm-accent); outline-offset: 1px; }
+.pm-gantt__window-sep { color: var(--pm-text-faint); font-size: 11px; }
+.pm-gantt__window-clear {
+  font: 700 12px var(--font-body); line-height: 1; color: var(--pm-text-dim); background: transparent;
+  border: 0.5px solid var(--pm-line); border-radius: var(--pm-radius-pill); width: 20px; height: 20px;
+  padding: 0; cursor: pointer; display: inline-flex; align-items: center; justify-content: center;
+}
+.pm-gantt__window-clear:hover, .pm-gantt__window-clear:focus-visible { color: var(--pm-accent); border-color: var(--pm-accent); }
+.pm-gantt__window-clear:focus-visible { outline: 2px solid var(--pm-accent); outline-offset: 1px; }
+
 .pm-gantt { display: flex; flex-direction: column; gap: 8px; min-width: 620px; position: relative; }
 .pm-gantt__axis { display: flex; justify-content: space-between; font: 700 10px var(--font-body); letter-spacing: 0.06em; text-transform: uppercase; color: var(--pm-text-faint); padding-left: 232px; }
 .pm-gantt__row { display: grid; grid-template-columns: 232px 1fr; align-items: center; gap: 12px; }
