@@ -2,10 +2,11 @@
 import { useEffect, useRef, useState, useTransition, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import type { AxisColumn, PmTask, Tag } from "@/lib/pm";
+import type { AxisColumn, PmTask, Tag, UrgencyTier } from "@/lib/pm";
 import type { GridRow } from "@/lib/departments";
 import { ProgressBar } from "./ProgressBar";
 import { TagChip } from "./TagChip";
+import { UrgencyChip } from "./UrgencyChip";
 import "./pm.css";
 
 // The board unifies every grouping axis (status/assignee/priority/division —
@@ -43,6 +44,13 @@ interface Props<K extends string> {
   // once and hands the plain, serializable result down — same pattern as
   // `blockedIds` below.
   taskTags?: Record<string, Tag[]>;
+  // P4-G5: each card's urgency TIER, precomputed by the SERVER caller —
+  // `taskUrgency(task, today, { isDone: isDoneStatus(task.status, projectStatuses) })`
+  // (lib/pm, re-exported from the client-safe lib/pmUrgency.ts). Board never resolves
+  // `today` or an "is this done" flag itself; that is exactly the drift the ticket
+  // exists to prevent (two boards disagreeing about whether a card is late). Same
+  // precedent as `taskTags`/`blockedIds`: a plain serializable map keyed by task id.
+  taskUrgency?: Record<string, UrgencyTier>;
 }
 
 interface PendingPick<K extends string> {
@@ -63,7 +71,7 @@ interface MoveMenu {
   anchor: { x: number; y: number };
 }
 
-export function Board<K extends string>({ columns, move, movePick, colorColumns, blockedIds, taskHrefBase, taskTags }: Props<K>) {
+export function Board<K extends string>({ columns, move, movePick, colorColumns, blockedIds, taskHrefBase, taskTags, taskUrgency }: Props<K>) {
   const taskHref = (id: string) => (taskHrefBase ? `${taskHrefBase}/${id}` : `/tasks/${id}`);
   const showToast = (msg: string) => { setToast(msg); window.setTimeout(() => setToast((cur) => (cur === msg ? null : cur)), 4000); };
   const router = useRouter();
@@ -211,6 +219,7 @@ export function Board<K extends string>({ columns, move, movePick, colorColumns,
                   blocked={blockedIds?.has(t.id) ?? false}
                   dragging={draggingId === t.id}
                   tags={taskTags?.[t.id] ?? []}
+                  urgencyTier={taskUrgency?.[t.id]}
                   onDragStart={(id) => { dragId.current = id; setDraggingId(id); }}
                   onDragEnd={() => setDraggingId(null)}
                   moveBtnRef={(el) => { if (el) moveBtnRefs.current.set(t.id, el); else moveBtnRefs.current.delete(t.id); }}
@@ -291,6 +300,8 @@ interface GridProps {
   blockedIds?: Set<string>;
   taskHrefBase?: string;
   taskTags?: Record<string, Tag[]>;
+  // P4-G5 — same precomputed-tier map as `Board.Props.taskUrgency`; see that comment.
+  taskUrgency?: Record<string, UrgencyTier>;
 }
 
 // True 2-axis swimlane grid (P2-09, design spec §8): ROWS = Division/Assignee, COLUMNS = Status,
@@ -300,7 +311,7 @@ interface GridProps {
 // (across status columns) is an unambiguous status change; dropping across a row boundary
 // (different division/assignee) reuses Board's anchored responsible-person popover / straight
 // reassignment. The keyboard "⇅ Move" menu offers BOTH axes, symmetric with the mouse.
-export function BoardGrid({ rows, columnMove, columnMovePick, rowMove, rowAxisLabel, colorColumns, blockedIds, taskHrefBase, taskTags }: GridProps) {
+export function BoardGrid({ rows, columnMove, columnMovePick, rowMove, rowAxisLabel, colorColumns, blockedIds, taskHrefBase, taskTags, taskUrgency }: GridProps) {
   const taskHref = (id: string) => (taskHrefBase ? `${taskHrefBase}/${id}` : `/tasks/${id}`);
   const showToast = (msg: string) => { setToast(msg); window.setTimeout(() => setToast((cur) => (cur === msg ? null : cur)), 4000); };
   const router = useRouter();
@@ -439,6 +450,7 @@ export function BoardGrid({ rows, columnMove, columnMovePick, rowMove, rowAxisLa
                     blocked={blockedIds?.has(t.id) ?? false}
                     dragging={draggingId === t.id}
                     tags={taskTags?.[t.id] ?? []}
+                    urgencyTier={taskUrgency?.[t.id]}
                     onDragStart={(id) => { dragRef.current = { taskId: id, rowKey: row.key }; setDraggingId(id); }}
                     onDragEnd={() => setDraggingId(null)}
                     moveBtnRef={(el) => { if (el) moveBtnRefs.current.set(t.id, el); else moveBtnRefs.current.delete(t.id); }}
@@ -538,23 +550,19 @@ function Popover({ x, y, label, onClose, children }: { x: number; y: number; lab
   );
 }
 
-// Due-date pill tone — same overdue/today/normal thresholds as the dept
-// rail's MyWorkRail.dueBadge (components/departments/MyWorkRail.tsx), kept
-// as a local pure fn so Board doesn't reach across into departments/.
-function dueTone(dueDate: string | null): { label: string; tone: "risk" | "soon" | "quiet" } | null {
-  if (!dueDate) return null;
-  const due = new Date(dueDate);
-  if (Number.isNaN(due.getTime())) return null;
-  const now = new Date();
-  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const days = Math.floor((due.getTime() - startOfToday.getTime()) / 86_400_000);
-  if (days < 0) return { label: "Overdue", tone: "risk" };
-  if (days === 0) return { label: "Due today", tone: "soon" };
-  return { label: `Due ${due.toLocaleDateString(undefined, { month: "short", day: "numeric" })}`, tone: "quiet" };
+// P4-G5: the ad hoc "days until due" tone this used to compute inline is exactly the drift the
+// urgency ticket exists to prevent — a card comparing dates against its OWN clock, disagreeing with
+// every other render site the instant they straddle midnight differently. Removed in favour of the
+// server-precomputed `urgencyTier` prop (see `Props.taskUrgency`), rendered via the shared
+// `UrgencyChip`. Only pure FORMATTING (no comparison) is left here, for the chip's tooltip detail —
+// locale + timeZone pinned per the chartHover.ts precedent, since an unpinned `toLocaleDateString`
+// is the other half of this codebase's documented hydration trap.
+function fmtDueDetail(dueDate: string): string {
+  return `due ${new Date(`${dueDate.slice(0, 10)}T00:00:00Z`).toLocaleDateString("en-GB", { day: "2-digit", month: "short", timeZone: "UTC" })}`;
 }
 
 function Card({
-  task, onDragStart, onDragEnd, blocked = false, dragging = false, taskHref, moveBtnRef, onOpenMove, tags = [],
+  task, onDragStart, onDragEnd, blocked = false, dragging = false, taskHref, moveBtnRef, onOpenMove, tags = [], urgencyTier,
 }: {
   task: PmTask;
   onDragStart: (id: string) => void;
@@ -565,10 +573,10 @@ function Card({
   moveBtnRef?: (el: HTMLButtonElement | null) => void;
   onOpenMove?: (btn: HTMLButtonElement) => void;
   tags?: Tag[];
+  urgencyTier?: UrgencyTier;
 }) {
   const who = task.assignee ? (task.assignee.responsibleName || task.assignee.refName) : "Unassigned";
   const unitTag = task.assignee && task.assignee.kind !== "person" ? task.assignee.refName : null;
-  const due = dueTone(task.dueDate);
   return (
     // A "⇅ Move" trigger button sits BESIDE the card link (not nested inside
     // it — a button inside an <a> is invalid/inaccessible) so a11y focus
@@ -606,7 +614,12 @@ function Card({
             )}
             {blocked && <span className="pm-blocked-chip">Blocked</span>}
           </span>
-          {due && <span className={`pm-due pm-due--${due.tone}`}>{due.label}</span>}
+          {/* Dense, high-count context (a column can hold many cards) — dot form, so a `done`/
+              `undated` card (most tasks have no due date) shows nothing, matching the old
+              behaviour of rendering no pill at all in those cases. */}
+          {urgencyTier && (
+            <UrgencyChip tier={urgencyTier} variant="dot" detail={task.dueDate ? fmtDueDetail(task.dueDate) : undefined} />
+          )}
         </div>
       </Link>
       {onOpenMove && (

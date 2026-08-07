@@ -16,7 +16,7 @@ import {
   groupByStatus, computeTimeline, openDependencies, resolveTags, parseTagFilterParam,
   synthDefaultStatuses, isSynthDefaultStatuses, titleWithRecurrenceGlyph,
   getBurndown, burndownOverlay, timelineFromDates, getFlow, flowSeries, tagBreakdown,
-  projectProgress, isDoneStatus, type PmTask, type Tag, type ProjectStatus,
+  projectProgress, isDoneStatus, taskUrgency, type PmTask, type Tag, type ProjectStatus, type UrgencyTier,
 } from "@/lib/pm";
 import {
   moveTask, createPmTask, setProjectOwner, addMilestone, saveDoc,
@@ -31,6 +31,7 @@ import { Card, HairlineTable, StatusBadge } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
 import { Board } from "@/components/pm/Board";
 import { Gantt } from "@/components/pm/Gantt";
+import { UrgencyChip } from "@/components/pm/UrgencyChip";
 import { Charts, type ChartsKpis } from "@/components/pm/Charts";
 import { ProgressBar } from "@/components/pm/ProgressBar";
 import { NewTaskForm } from "@/components/pm/NewTaskForm";
@@ -146,6 +147,14 @@ export async function ProjectWorkspaceView({
   // is a plain id match (unlike the dept board's cross-project label match).
   const taskTags: Record<string, Tag[]> = {};
   for (const t of tasks) taskTags[t.id] = resolveTags(t.tags, tags);
+
+  // P4-G5: urgency, resolved ONCE for this whole render and threaded to every view (Board/List/
+  // Timeline/Milestones) below — never per-view, never per-row. `today` is a plain date string so
+  // server and any client component it's handed to agree by construction (see lib/pmUrgency.ts);
+  // `isDoneStatus` resolves against THIS project's own status registry, same precedent as `taskTags`.
+  const today = new Date().toISOString().slice(0, 10);
+  const taskUrgencyById: Record<string, UrgencyTier> = {};
+  for (const t of tasks) taskUrgencyById[t.id] = taskUrgency({ dueDate: t.dueDate, isDone: isDoneStatus(t.status, projectStatuses) }, today);
   const selectedTagIds = parseTagFilterParam(searchParams.tags);
   const filteredTasks = selectedTagIds.length === 0 ? tasks : tasks.filter((t) => t.tags.some((id) => selectedTagIds.includes(id)));
 
@@ -278,11 +287,11 @@ export async function ProjectWorkspaceView({
                 </div>
               </div>
               {swimlane === "priority" ? (
-                <Board columns={priorityColumns(filteredTasks)} move={setTaskPriority} blockedIds={blockedIds} taskHrefBase={taskHrefBase} taskTags={taskTags} />
+                <Board columns={priorityColumns(filteredTasks)} move={setTaskPriority} blockedIds={blockedIds} taskHrefBase={taskHrefBase} taskTags={taskTags} taskUrgency={taskUrgencyById} />
               ) : swimlane === "assignee" ? (
-                <Board columns={assigneeColumns(filteredTasks)} move={reassignResponsible} blockedIds={blockedIds} taskHrefBase={taskHrefBase} taskTags={taskTags} />
+                <Board columns={assigneeColumns(filteredTasks)} move={reassignResponsible} blockedIds={blockedIds} taskHrefBase={taskHrefBase} taskTags={taskTags} taskUrgency={taskUrgencyById} />
               ) : (
-                <Board columns={groupByStatus(filteredTasks, projectStatuses)} move={moveTask} colorColumns={showStatusColors} blockedIds={blockedIds} taskHrefBase={taskHrefBase} taskTags={taskTags} />
+                <Board columns={groupByStatus(filteredTasks, projectStatuses)} move={moveTask} colorColumns={showStatusColors} blockedIds={blockedIds} taskHrefBase={taskHrefBase} taskTags={taskTags} taskUrgency={taskUrgencyById} />
               )}
             </>
           )
@@ -305,7 +314,10 @@ export async function ProjectWorkspaceView({
                 who(t),
                 <StatusBadge key="s" label={statusLabel(t.status)} />,
                 <ProgressBar key="p" value={t.progress} />,
-                t.dueDate ?? "—",
+                <span key="d" style={{ display: "inline-flex", alignItems: "center", gap: 6, justifyContent: "flex-end" }}>
+                  {t.dueDate ?? "—"}
+                  <UrgencyChip tier={taskUrgencyById[t.id]} variant="dot" />
+                </span>,
               ])}
               tcols="2fr 1.4fr 1.2fr 1fr 1.2fr 0.8fr"
             />
@@ -321,7 +333,7 @@ export async function ProjectWorkspaceView({
         const burndown = tl ? burndownOverlay(tl, burndownSeries) : [];
         return (
           <Card>
-            {tl ? <Gantt timeline={tl} taskHrefBase={taskHrefBase} barColors={barColors} burndown={burndown} /> : <EmptyNote>Add start/due dates to tasks to see them on the timeline.</EmptyNote>}
+            {tl ? <Gantt timeline={tl} taskHrefBase={taskHrefBase} barColors={barColors} burndown={burndown} taskUrgency={taskUrgencyById} /> : <EmptyNote>Add start/due dates to tasks to see them on the timeline.</EmptyNote>}
           </Card>
         );
       })()}
@@ -349,18 +361,37 @@ export async function ProjectWorkspaceView({
           {milestones.length === 0 && <EmptyNote>No milestones yet.</EmptyNote>}
           {milestones.map((mst) => {
             const mtasks = tasks.filter((t) => t.milestoneId === mst.id);
+            // Milestone-grain urgency: a milestone has no ProjectStatus registry of its own (that
+            // model is task-scoped, P2-05), so "done" is read off its own status string directly —
+            // the same `mst.status` this Card already renders as a StatusBadge. Low-count, one row
+            // per milestone -> chip form (room for the word, unlike the dense task tables below it).
+            const mstTier = taskUrgency({ dueDate: mst.dueDate, isDone: mst.status === "done" }, today);
             return (
-              <Card key={mst.id} title={mst.name} headerRight={<span style={{ display: "inline-flex", gap: 10, alignItems: "center" }}><StatusBadge label={mst.status} /><span style={{ font: "400 12px var(--font-body)", color: "var(--erp-ink-50)" }}>{mst.dueDate ?? "—"}</span></span>}>
+              <Card
+                key={mst.id}
+                title={mst.name}
+                headerRight={
+                  <span style={{ display: "inline-flex", gap: 10, alignItems: "center" }}>
+                    <StatusBadge label={mst.status} />
+                    <span style={{ font: "400 12px var(--font-body)", color: "var(--erp-ink-50)" }}>{mst.dueDate ?? "—"}</span>
+                    <UrgencyChip tier={mstTier} variant="chip" />
+                  </span>
+                }
+              >
                 {mtasks.length === 0 ? <EmptyNote>No tasks in this milestone.</EmptyNote> : (
                   <HairlineTable
-                    columns={[{ label: "Task" }, { label: "Assignee" }, { label: "Status" }, { label: "Progress", align: "right" }]}
+                    columns={[{ label: "Task" }, { label: "Assignee" }, { label: "Status" }, { label: "Progress" }, { label: "Due", align: "right" }]}
                     rows={mtasks.map((t) => [
                       <Link key="t" href={taskHref(t.id)} style={{ color: "var(--text-primary)", textDecoration: "none" }}>{titleWithRecurrenceGlyph(t)}</Link>,
                       who(t),
                       <StatusBadge key="s" label={statusLabel(t.status)} />,
                       <ProgressBar key="p" value={t.progress} />,
+                      <span key="d" style={{ display: "inline-flex", alignItems: "center", gap: 6, justifyContent: "flex-end" }}>
+                        {t.dueDate ?? "—"}
+                        <UrgencyChip tier={taskUrgencyById[t.id]} variant="dot" />
+                      </span>,
                     ])}
-                    tcols="2fr 1.2fr 1fr 1.2fr"
+                    tcols="2fr 1.2fr 1fr 1fr 1.2fr"
                   />
                 )}
               </Card>

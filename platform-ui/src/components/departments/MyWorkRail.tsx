@@ -1,5 +1,7 @@
 import Link from "next/link";
 import { TeachState } from "./TeachState";
+import { UrgencyChip } from "@/components/pm/UrgencyChip";
+import type { UrgencyTier } from "@/lib/pmUrgency";
 
 // The persistent rail (decision #10: rendered once in `[deptId]/layout.tsx`, so
 // it is on screen no matter which tab is open). Two sections per decision #12:
@@ -14,11 +16,17 @@ export interface RailTaskItem {
   id: string;
   title: string;
   href?: string;
-  /** ISO date; omit/null when there's no due date. */
+  /** ISO date; omit/null when there's no due date. Kept for display; NOT read for urgency —
+   * see `urgencyTier` below. */
   dueDate?: string | null;
   priority?: RailPriority;
   /** Optional context caption, e.g. the owning project's name. */
   projectName?: string;
+  // P4-G5: precomputed by the caller (`taskUrgency(task, today, { isDone: isDoneStatus(...) })`,
+  // lib/pm) — the rail used to derive its own overdue/due-today/normal tone from `dueDate` with a
+  // local `new Date()` comparison, exactly the drift this ticket exists to close (this rail and a
+  // board card disagreeing about "today" at midnight). Omit/undefined renders no indicator.
+  urgencyTier?: UrgencyTier;
 }
 
 export interface RailWaitingItem {
@@ -37,18 +45,6 @@ export interface MyWorkRailProps {
   waitingEmptyText?: string;
 }
 
-function dueBadge(dueDate?: string | null): { label: string; tone: "risk" | "soon" | "quiet" } | null {
-  if (!dueDate) return null;
-  const due = new Date(dueDate);
-  if (Number.isNaN(due.getTime())) return null;
-  const now = new Date();
-  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const days = Math.floor((due.getTime() - startOfToday.getTime()) / 86_400_000);
-  if (days < 0) return { label: "Overdue", tone: "risk" };
-  if (days === 0) return { label: "Due today", tone: "soon" };
-  return { label: `Due ${due.toLocaleDateString(undefined, { month: "short", day: "numeric" })}`, tone: "quiet" };
-}
-
 export function MyWorkRail({ today, waiting, todayEmptyText, waitingEmptyText }: MyWorkRailProps) {
   return (
     <div className="dept-rail">
@@ -59,13 +55,12 @@ export function MyWorkRail({ today, waiting, todayEmptyText, waitingEmptyText }:
         ) : (
           <ul className="dept-rail__list">
             {today.map((item) => {
-              const badge = dueBadge(item.dueDate);
               const row = (
                 <>
                   <span className="dept-rail__item-title">{item.title}</span>
                   <span className="dept-rail__item-meta">
                     {item.projectName && <span className="dept-rail__item-project">{item.projectName}</span>}
-                    {badge && <span className={`dept-rail__due dept-rail__due--${badge.tone}`}>{badge.label}</span>}
+                    {item.urgencyTier && <UrgencyChip tier={item.urgencyTier} variant="dot" detail={item.dueDate ?? undefined} />}
                     {(item.priority === "high" || item.priority === "critical") && (
                       <span className={`dept-rail__priority dept-rail__priority--${item.priority}`}>{item.priority}</span>
                     )}

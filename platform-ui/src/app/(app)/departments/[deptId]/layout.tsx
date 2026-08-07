@@ -5,7 +5,7 @@ import { getMe } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
 import { can } from "@/lib/rbac";
 import { getDepartment, myDeptTasksToday, myBlockedTasks, toRailPriority } from "@/lib/departments";
-import { titleWithRecurrenceGlyph } from "@/lib/pm";
+import { titleWithRecurrenceGlyph, isDoneStatus, taskUrgency } from "@/lib/pm";
 import { getMyWorkQueue, projectQueueForCompany } from "@/lib/queue";
 import { toolkitFor } from "@/lib/deptToolkits";
 import { PageHeader } from "@/components/PageHeader";
@@ -53,6 +53,10 @@ export default async function DepartmentConsoleLayout({ children, params }: { ch
   const queue = await getMyWorkQueue(me, userId, [{ id: tenant, name: tenant }]);
   const waitingFromQueue = projectQueueForCompany(queue, tenant, { types: ["approval", "gate"] });
 
+  // P4-G5: resolved ONCE for this render, then handed to MyWorkRail via each item's own
+  // `urgencyTier` — the rail must never derive it itself (see MyWorkRail.tsx's removed
+  // `dueBadge`, which used to compare `dueDate` against a local `new Date()`).
+  const railToday = new Date().toISOString().slice(0, 10);
   const today: RailTaskItem[] = myDeptTasksToday(dept.tasks, userId, dept.statusesByProject).map((t) => ({
     id: t.id,
     title: titleWithRecurrenceGlyph(t),
@@ -60,6 +64,7 @@ export default async function DepartmentConsoleLayout({ children, params }: { ch
     dueDate: t.dueDate,
     priority: toRailPriority(t.priority),
     projectName: t.projectName,
+    urgencyTier: taskUrgency({ dueDate: t.dueDate, isDone: isDoneStatus(t.status, dept.statusesByProject[t.projectId]) }, railToday),
   }));
 
   const waiting: RailWaitingItem[] = [

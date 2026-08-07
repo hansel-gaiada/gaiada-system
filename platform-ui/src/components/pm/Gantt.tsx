@@ -3,10 +3,11 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, use
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import type {
   Timeline, TimelineBar, PmTask, GanttGroup, GanttGroupBy, MilestoneMarker, GanttDepEdge,
-  BurndownOverlayPoint,
+  BurndownOverlayPoint, UrgencyTier,
 } from "@/lib/pm";
 import { addDependency, batchReschedule, type RescheduleItem } from "@/lib/pmActions";
 import { EmptyNote } from "@/components/systems/EmptyNote";
+import { UrgencyChip } from "./UrgencyChip";
 import "./pm.css";
 
 // Gantt — bars on a shared date axis. Read-only by default (legacy project view);
@@ -55,6 +56,12 @@ interface GanttProps {
   // lib/pm.ts's `burndownOverlay`). Absent/empty -> the toggle button doesn't render at all (no
   // overlay, no error) — the ONE gate for "hide gracefully when the series is empty".
   burndown?: BurndownOverlayPoint[];
+  // P4-G5: task id -> urgency TIER, precomputed by the server caller (`taskUrgency(task, today,
+  // { isDone: isDoneStatus(...) })` from lib/pm) — same precedent as `barColors`. Gantt is a client
+  // component and must never resolve "today" or done-ness itself (the hydration/drift trap the
+  // urgency ticket exists to close); absent/empty renders no indicator, same graceful-degrade
+  // convention as every other optional map prop here.
+  taskUrgency?: Record<string, UrgencyTier>;
 }
 
 const DAY = 24 * 3600 * 1000;
@@ -407,6 +414,7 @@ export function Gantt(props: GanttProps) {
     const dragging = !!drag?.moveSet.has(t.id);
     const linkSource = link?.fromId === t.id;
     const isSelected = selected.has(t.id);
+    const urgencyTier = props.taskUrgency?.[t.id];
     // P2-05: colour from the status registry when supplied (inline, overrides the
     // legacy class); the class stays as the fallback for callers that don't pass it.
     const barColor = props.barColors?.[t.id];
@@ -421,7 +429,11 @@ export function Gantt(props: GanttProps) {
     );
     return (
       <div className="pm-gantt__row" key={t.id}>
-        <a className="pm-gantt__label" href={taskHref(t.id)} onClick={(e) => navigate(e, t.id)}>{t.recurrence ? "↻ " : ""}{t.title}</a>
+        <a className="pm-gantt__label" href={taskHref(t.id)} onClick={(e) => navigate(e, t.id)}>
+          {/* Dense, many-row context — dot form, same rationale as the board card. */}
+          {urgencyTier && <UrgencyChip tier={urgencyTier} variant="dot" />}
+          {t.recurrence ? "↻ " : ""}{t.title}
+        </a>
         <div className="pm-gantt__track">
           {interactive ? (
             // Interactive: a div (so the dependency-draw <button> nests validly) —

@@ -6,8 +6,8 @@ import { can } from "@/lib/rbac";
 import { getDepartment, getOwnedProjectsPm } from "@/lib/departments";
 import {
   computeTimeline, groupTimelineBars, milestoneMarkers, dependencyEdges,
-  getBurndown, aggregateBurndown, burndownOverlay,
-  type PmTask, type Milestone,
+  getBurndown, aggregateBurndown, burndownOverlay, isDoneStatus, taskUrgency,
+  type PmTask, type Milestone, type UrgencyTier,
 } from "@/lib/pm";
 import { Card } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
@@ -46,6 +46,12 @@ export default async function DepartmentTimelinePage({ params }: { params: Param
   const timeline = computeTimeline(allTasks);
   const canEdit = can(me, "pm.manage", tenant);
 
+  // P4-G5: urgency, resolved ONCE for this render — each task's own owning project's status
+  // registry decides its `isDone` (same registry `statusesByProject` already keys the board by).
+  const today = new Date().toISOString().slice(0, 10);
+  const taskUrgencyById: Record<string, UrgencyTier> = {};
+  for (const t of allTasks) taskUrgencyById[t.id] = taskUrgency({ dueDate: t.dueDate, isDone: isDoneStatus(t.status, dept.statusesByProject[t.projectId]) }, today);
+
   if (!timeline) {
     return (
       <Card title="Timeline">
@@ -83,6 +89,7 @@ export default async function DepartmentTimelinePage({ params }: { params: Param
         interactive
         canEdit={canEdit}
         burndown={burndown}
+        taskUrgency={taskUrgencyById}
       />
     </Card>
   );

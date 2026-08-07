@@ -1,6 +1,6 @@
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
-import { Board } from "./Board";
+import { Board, BoardGrid } from "./Board";
 import type { AxisColumn, PmTask } from "@/lib/pm";
 
 // Board is a client component that calls useRouter().refresh() after every
@@ -33,7 +33,7 @@ describe("Board", () => {
     expect(screen.getByText("Task one")).toBeInTheDocument();
   });
 
-  it("shows subtask count, blocked chip, and a due pill on the card (P1-02 card anatomy)", () => {
+  it("shows subtask count and a blocked chip on the card (P1-02 card anatomy)", () => {
     const t = task({
       id: "t1", title: "Has extras", dueDate: "2020-01-01",
       subtasks: [{ id: "s1", title: "a", done: true }, { id: "s2", title: "b", done: false }],
@@ -41,7 +41,51 @@ describe("Board", () => {
     render(<Board columns={statusColumns([t])} move={vi.fn()} blockedIds={new Set(["t1"])} />);
     expect(screen.getByText("1/2")).toBeInTheDocument();
     expect(screen.getByText("Blocked")).toBeInTheDocument();
-    expect(screen.getByText(/Overdue/)).toBeInTheDocument();
+  });
+
+  // P4-G5: Board never computes urgency itself (no `new Date()` on `task.dueDate` anywhere in this
+  // file any more) — it only renders whatever tier the server caller hands it per task id.
+  describe("urgency indicator (P4-G5)", () => {
+    it("renders the given tier as a dot, keyed by task id — not derived from dueDate locally", () => {
+      const t = task({ id: "t1", title: "Overdue task", dueDate: "2020-01-01" });
+      // Both the dot span and its sr-only child carry the "Overdue" text — asserting via
+      // container/class (as UrgencyChip.test.tsx does) avoids screen.getByText's ambiguous-match
+      // error over that nesting.
+      const { container } = render(<Board columns={statusColumns([t])} move={vi.fn()} taskUrgency={{ t1: "overdue" }} />);
+      expect(container.querySelector(".pm-urg--overdue")).toBeTruthy();
+    });
+
+    it("renders nothing when the caller supplies no map (graceful degrade, same as taskTags)", () => {
+      const t = task({ id: "t1", title: "No map", dueDate: "2020-01-01" });
+      const { container } = render(<Board columns={statusColumns([t])} move={vi.fn()} />);
+      expect(container.querySelector(".pm-urg")).toBeNull();
+    });
+
+    it("renders nothing for a task the map marks done or undated, even dot-form (no noise on finished/undated cards)", () => {
+      const tasks = [
+        task({ id: "t1", title: "Done task" }),
+        task({ id: "t2", title: "Undated task" }),
+      ];
+      const { container } = render(
+        <Board columns={statusColumns(tasks)} move={vi.fn()} taskUrgency={{ t1: "done", t2: "undated" }} />,
+      );
+      expect(container.querySelector(".pm-urg")).toBeNull();
+    });
+
+    it("BoardGrid renders the tier on cards the same way, keyed by task id", () => {
+      const t = task({ id: "t1", title: "Grid task", dueDate: "2020-01-01" });
+      const rows = [{ key: "row-1", label: "Row one", columns: statusColumns([t]) }];
+      const { container } = render(
+        <BoardGrid
+          rows={rows}
+          columnMove={vi.fn()}
+          rowMove={vi.fn()}
+          rowAxisLabel="Division"
+          taskUrgency={{ t1: "due-soon" }}
+        />,
+      );
+      expect(container.querySelector(".pm-urg--due-soon")).toBeTruthy();
+    });
   });
 
   it("the keyboard ⇅ Move affordance opens a menu and commits an unambiguous move", async () => {

@@ -10,7 +10,7 @@ import {
 } from "@/lib/departments";
 import {
   unionStatusColumns, isSynthDefaultStatuses, openDependencies, listTags, resolveTags, distinctTagLabels, filterTasksByTagLabels,
-  parseTagFilterParam, type Tag,
+  parseTagFilterParam, isDoneStatus, taskUrgency, type Tag, type UrgencyTier,
 } from "@/lib/pm";
 import { moveTask, moveTaskToStatusLabel, setTaskPriority, reassignResponsible, setDivisionAssignee } from "@/lib/pmActions";
 import { Card } from "@/components/ui";
@@ -109,6 +109,13 @@ export default async function DepartmentBoardPage({ params, searchParams }: { pa
   const taskTags: Record<string, Tag[]> = {};
   for (const t of dept.tasks) taskTags[t.id] = resolveTags(t.tags, registriesByProject[t.projectId] ?? []);
 
+  // P4-G5: urgency, resolved ONCE for this whole render — `today` a single date string, `isDone`
+  // per task against ITS OWN project's status registry (same precedent as the `blockedIds` computed
+  // above). Passed to every Board/BoardGrid call below, whichever axis is active.
+  const today = new Date().toISOString().slice(0, 10);
+  const taskUrgencyById: Record<string, UrgencyTier> = {};
+  for (const t of dept.tasks) taskUrgencyById[t.id] = taskUrgency({ dueDate: t.dueDate, isDone: isDoneStatus(t.status, dept.statusesByProject[t.projectId]) }, today);
+
   return (
     <>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, gap: 12, flexWrap: "wrap" }}>
@@ -187,11 +194,11 @@ export default async function DepartmentBoardPage({ params, searchParams }: { pa
               : "No tasks match this tag filter."}
           </EmptyNote>
       ) : swimlane === "priority" ? (
-        <Board columns={priorityColumns(tagFilteredTasks)} move={setTaskPriority} blockedIds={blockedIds} taskTags={taskTags} />
+        <Board columns={priorityColumns(tagFilteredTasks)} move={setTaskPriority} blockedIds={blockedIds} taskTags={taskTags} taskUrgency={taskUrgencyById} />
       ) : swimlane === "assignee" ? (
-        <Board columns={assigneeColumns(tagFilteredTasks)} move={reassignResponsible} blockedIds={blockedIds} taskTags={taskTags} />
+        <Board columns={assigneeColumns(tagFilteredTasks)} move={reassignResponsible} blockedIds={blockedIds} taskTags={taskTags} taskUrgency={taskUrgencyById} />
       ) : swimlane === "division" ? (
-        <Board columns={divisionColumns(tagFilteredTasks, dept.divisions)} move={setDivisionAssignee} blockedIds={blockedIds} taskTags={taskTags} />
+        <Board columns={divisionColumns(tagFilteredTasks, dept.divisions)} move={setDivisionAssignee} blockedIds={blockedIds} taskTags={taskTags} taskUrgency={taskUrgencyById} />
       ) : swimlane === "grid-division" ? (
         // §8 true 2-axis grid: rows=Division, columns=Status (union-by-label, same as the flat
         // status swimlane below). Within-row drop = status change; cross-row drop = the same
@@ -205,6 +212,7 @@ export default async function DepartmentBoardPage({ params, searchParams }: { pa
           colorColumns={showStatusColors}
           blockedIds={blockedIds}
           taskTags={taskTags}
+          taskUrgency={taskUrgencyById}
         />
       ) : swimlane === "grid-assignee" ? (
         <BoardGrid
@@ -216,12 +224,13 @@ export default async function DepartmentBoardPage({ params, searchParams }: { pa
           colorColumns={showStatusColors}
           blockedIds={blockedIds}
           taskTags={taskTags}
+          taskUrgency={taskUrgencyById}
         />
       ) : (
         // Status axis on the dept board = union-by-label (§7 D-4): columns are the
         // distinct labels across projects; a drop maps to the card's own project's
         // matching status id, or opens the pick popover on no-match (movePick).
-        <Board columns={unionStatusColumns(tagFilteredTasks, dept.statusesByProject)} move={moveTaskToStatusLabel} movePick={moveTask} colorColumns={showStatusColors} blockedIds={blockedIds} taskTags={taskTags} />
+        <Board columns={unionStatusColumns(tagFilteredTasks, dept.statusesByProject)} move={moveTaskToStatusLabel} movePick={moveTask} colorColumns={showStatusColors} blockedIds={blockedIds} taskTags={taskTags} taskUrgency={taskUrgencyById} />
       )}
     </>
   );
