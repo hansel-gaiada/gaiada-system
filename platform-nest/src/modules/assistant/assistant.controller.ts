@@ -50,6 +50,7 @@ import { resolveCitation } from "./citations";
 import { createHandoff, fetchEpisodicHistory, fetchRoster, listHandoffsForThread } from "./handoffs";
 import { confirmWriteIntent, dismissWriteIntent, reapExpiredIntents, type ToolCallIntent } from "./write-intents";
 import { notifyApprovalFiled } from "../../core/approval-filing";
+import { deriveServerThreadTitle } from "./thread-title";
 
 // ── ASST-06 — the send->stream engine ────────────────────────────────────────────────────────────
 //
@@ -571,6 +572,22 @@ export class AssistantController {
            VALUES ($1, $2, $3, $4, 'user', $5, $6)`,
           [userMessageId, tenantId, id, userSeq, content, config.originSite],
         );
+        // 2026-08-07 owner fix, AUTHORITATIVE half (see thread-title.ts's header for the FE-only
+        // half this supersedes) — title the thread from its first user message, in the SAME
+        // transaction as that message's own INSERT, so no caller (this endpoint is the ONLY place
+        // assistant_messages rows are ever inserted, per this file's header) can create a thread
+        // that stays "New chat" forever. `userSeq === 1` is the load-bearing proxy for "this INSERT
+        // is the very first message this thread has ever had": `userSeq` was computed just above as
+        // `COALESCE(MAX(seq),0)+1` BEFORE this INSERT ran, so `=== 1` means no row existed yet.
+        // Guarded on `title IS NULL` so a manual rename — via PATCH, including the FE's own
+        // fire-and-forget optimistic PATCH that this same request may be racing — always wins and is
+        // never overwritten.
+        if (userSeq === 1 && stillThere.title === null) {
+          const derivedTitle = deriveServerThreadTitle(content);
+          if (derivedTitle) {
+            await c.query(`UPDATE assistant_threads SET title = $1, updated_at = now() WHERE id = $2`, [derivedTitle, id]);
+          }
+        }
         // The placeholder — see file header. Reserves seq userSeq+1 for the reply BEFORE the
         // upstream call even starts, so no later sender can ever land a message between the two.
         const assistantId = newId();

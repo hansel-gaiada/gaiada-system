@@ -154,7 +154,11 @@
 /* ASST-12 — "served by" brain badge + the truthful cost meter (real vs estimated tokens). */
 .asst-msg__servedby { display: flex; align-items: center; gap: 8px; margin-top: 8px; padding-top: 8px; border-top: 0.5px solid var(--erp-hairline-soft); }
 .asst-msg__badge { font: 700 9.5px var(--font-body); letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-subtle); }
-.asst-msg__usage { font: 400 11.5px var(--font-body); color: var(--ink-faint); }
+/* A11Y-AUTO-01 — was `--ink-faint` (the token's own comment reserves that tier for "decorative
+   only", ~3.3:1 in light theme; axe measured 2.82:1 here in practice). The token count/cost line is
+   real informational text, not decoration — `--ink-subtle` (>=4.5:1, "small caps labels" tier) is
+   the correct tier, matching the sibling `.asst-msg__badge` right above it, which already used it. */
+.asst-msg__usage { font: 400 11.5px var(--font-body); color: var(--ink-subtle); }
 
 /* ASST-24 — quiet, informational note: the conversation restarted on the provider's side. Not an
    error (no --status-danger token), just a step quieter than the ordinary meta line above. */
@@ -167,13 +171,19 @@
 .asst-inline-code { font-family: var(--font-data); font-size: 0.92em; background: var(--wash-strong); padding: 1px 5px; }
 .asst-code-block { position: relative; background: var(--wash-strong); border: 0.5px solid var(--erp-hairline-soft); padding: 14px; margin: 4px 0 10px; overflow-x: auto; font-family: var(--font-data); font-size: 12.5px; line-height: 1.5; white-space: pre; }
 .asst-code-block:last-child { margin-bottom: 0; }
-.asst-code-lang { position: absolute; top: 6px; right: 10px; font: 700 9px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-faint); }
+/* A11Y-AUTO-01 — same `--ink-faint`-on-real-text fix as `.asst-msg__usage` above: the language tag
+   is informational (identifies the fenced block), not decorative. */
+.asst-code-lang { position: absolute; top: 6px; right: 10px; font: 700 9px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-subtle); }
 
 /* Blinking caret while a reply is actively streaming. Neutralised by the global reduced-motion rule. */
 .asst-cursor { display: inline-block; width: 2px; height: 14px; margin-left: 2px; background: var(--erp-accent); vertical-align: -2px; animation: asst-blink 1s steps(1) infinite; }
 @keyframes asst-blink { 50% { opacity: 0; } }
 
-.asst-stream-status { display: flex; align-items: center; gap: 8px; padding-left: 2px; font: 400 12.5px var(--font-body); color: var(--ink-faint); }
+/* A11Y-AUTO-01 — was `--ink-faint` (axe measured 2.87:1 in light theme). This line's text IS the
+   `role="status" aria-live="polite"` announcement content (`StreamIndicator.tsx`) — the single most
+   load-bearing string on the whole streaming surface, not a candidate for the "decorative only"
+   tier. `--ink-subtle` (>=4.5:1) is correct here. */
+.asst-stream-status { display: flex; align-items: center; gap: 8px; padding-left: 2px; font: 400 12.5px var(--font-body); color: var(--ink-subtle); }
 .asst-thinking-dots { display: inline-flex; gap: 3px; }
 .asst-thinking-dots span { width: 4px; height: 4px; background: var(--ink-faint); animation: asst-pulse 1.2s ease-in-out infinite; }
 .asst-thinking-dots span:nth-child(2) { animation-delay: 0.15s; }
@@ -338,9 +348,14 @@
 
 .asst-proposal__args { margin: 0; display: flex; flex-direction: column; gap: 2px; }
 .asst-proposal__arg { display: flex; gap: 6px; font: 400 11.5px var(--font-data); }
-.asst-proposal__arg dt { color: var(--ink-faint); }
+/* A11Y-AUTO-01 — was `--ink-faint` (axe measured 2.82:1 in light theme). These `dt`s name the
+   redacted-args preview's field labels — real content a reviewer relies on before confirming a
+   write, not decoration. `--ink-subtle` matches the `dd` value beside it, which already used it. */
+.asst-proposal__arg dt { color: var(--ink-subtle); }
 .asst-proposal__arg dd { margin: 0; color: var(--ink-subtle); }
-.asst-proposal__hint { margin: 0; font: 400 11px var(--font-body); color: var(--ink-faint); font-style: italic; }
+/* A11Y-AUTO-01 — was `--ink-faint`. An expiry deadline is real information a reviewer needs before
+   the confirm window closes, not decoration. */
+.asst-proposal__hint { margin: 0; font: 400 11px var(--font-body); color: var(--ink-subtle); font-style: italic; }
 .asst-proposal__error { margin: 0; font: 600 12px var(--font-body); color: var(--status-danger-fg); }
 .asst-proposal__actions { display: flex; gap: 8px; }
 .asst-proposal__link { font: 700 10px var(--font-body); letter-spacing: 0.05em; text-transform: uppercase; color: var(--erp-accent); text-decoration: none; }
@@ -356,7 +371,9 @@
 }
 .asst-composer__agent-select:focus-visible { outline: 2px solid var(--erp-accent); outline-offset: 1px; }
 .asst-composer__agent-select:disabled { cursor: not-allowed; opacity: 0.6; }
-.asst-composer__mode-hint { font: 400 11px var(--font-body); color: var(--ink-faint); }
+/* A11Y-AUTO-01 — was `--ink-faint`. Explains what a tools-mode turn may actually do (including the
+   "may draft a write" warning) — real information, not decoration. */
+.asst-composer__mode-hint { font: 400 11px var(--font-body); color: var(--ink-subtle); }
 
 @media (max-width: 860px) {
   .asst-workspace, .asst-workspace--with-memory { grid-template-columns: 1fr; grid-template-rows: 220px 1fr; height: calc(100vh - 200px); }

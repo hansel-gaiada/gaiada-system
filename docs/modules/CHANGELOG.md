@@ -34,6 +34,30 @@ reconstructed from this table alone. Format defined in [`VERSIONING.md`](./VERSI
 > Not corrected retroactively (moving a pushed, already-deployed tag is its own risk); flagging so
 > the next session doesn't re-diagnose the same gap.
 
+### `Alpha 01.026.0067a` — 2026-08-07 — the agent runner can finally obtain the provider it declares
+
+The last link in the D13 chain. `0065a` made D13 enforce the provider that actually SERVED and made
+Ollama Cloud selectable; this makes the runner able to GET it.
+
+- **`ai-gateway-go` `0.13.2`** — `/complete` now honours the `provider` hint, like `/complete/stream`
+  always did. Until this, ai-agents' runner (which calls `/complete`) could ask for its eval-cleared
+  provider and be silently ignored, so agent writes were contained-but-inert rather than working. Found
+  by probing the box: the same hint returned `hermes` on `/complete` and `openai` on `/complete/stream`.
+- **`platform-ui` `0.19.1`** and the assistant server-side titling / a11y-audit work from other sessions.
+
+**End state on `gda-aicenter`, verified rather than assumed:** unhinted text → `hermes` (wa-chat-bot,
+knowledge and search unchanged); `hint=openai` → `openai / deepseek-v4-flash` on BOTH endpoints; `/media`
+on a real image → a genuine vision description; the assistant's picker lists **"Ollama Cloud"** and the
+choice persists to `assistant_threads.brain_provider`.
+
+Two traps recorded in the box's own `.env` because each cost a wrong conclusion: a **1×1 test PNG** makes
+`/media` look broken (the vision model rejects it, the chain fails over, and you get the echo stub —
+indistinguishable from "unconfigured"), and picking a brain **within milliseconds of "+ NEW CHAT"** races
+the router push that adds `?thread=`, remounting the controlled `<select>` so the change is discarded with
+no request sent. A human is too slow to hit the second; automation hits it every time.
+
+Counter `0065 → 0067`: two module rows (ai-gateway-go, platform-ui).
+
 ### `Alpha 01.025.0065a` — 2026-08-07 — D13 stops trusting a declaration it could not verify,
 and the provider that makes it true becomes selectable
 
@@ -1693,7 +1717,8 @@ tenant's 8 seeded rows still need purging (per-tenant SQL in the design doc §12
 - **Unreleased / next:** identity writes, org-structure endpoints.
 
 ## platform-ui
-### [0.20.0] - 2026-08-07 - IN PROGRESS (the sidebar collapses to a 64px icon rail)
+<<<<<<< HEAD
+### [0.20.0] — 2026-08-07 · IN PROGRESS (the sidebar collapses to a 64px icon rail)
 - Merged `fadhil/ui` (1 commit, forked 163 commits back). Expanded mode gets collapsible nav groups;
   collapsed mode swaps renderer entirely - a 64px rail with one glyph per group, children in a
   floating flyout, labels as hover/focus tooltips. ~12 icons stand in for ~35 rows.
@@ -1713,9 +1738,66 @@ tenant's 8 seeded rows still need purging (per-tenant SQL in the design doc §12
 - **Not verified:** the three new Playwright specs (collapse, rail flyout, cookie persistence) are
   not `@smoke`-tagged, so CI does not run them and this session did not - they need a live backend.
   `tsc`, 1340 vitest tests and `next build` are green on the merge result.
-- Lands AFTER the `Alpha 01.025.0065a` cut, which manifests platform-ui `0.19.0` - `0.20.0` is
-  unreleased until the next cut. (Numbered `0.20.0`, not `0.19.0`: a concurrent session claimed
-  `0.19.0` for the brain picker below while this merge was being verified.)
+- **Inherits an open a11y item.** `0.19.1` below defers `.erp-side__grouplabel`'s raw CSS `opacity`
+  (axe-excluded there, needs a reviewed `shell.css` fix). That selector now also styles the rail
+  flyout's `.erp-railmenu__title`, so the deferred fix covers one more surface than when it was
+  written - not a new defect, a wider blast radius for the existing one.
+- Lands AFTER the `Alpha 01.026.0067a` cut, which manifests platform-ui `0.19.1` - `0.20.0` is
+  unreleased until the next cut. (Numbered `0.20.0`, not `0.19.0`: concurrent sessions claimed
+  `0.19.0` and `0.19.1` below while this merge was being verified.)
+
+### [0.19.1] — 2026-08-07 · IN PROGRESS (automated a11y auditing + the manual checklist automation can't replace)
+- **`@axe-core/playwright` added, devDependency only.** Runtime deps stay exactly `next`/`react`/
+  `react-dom`/`server-only` — nothing from this ticket is imported by app code. New
+  `e2e/a11y-axe.spec.ts`, 15 checks total (7 surfaces × light/dark): `/assistant` empty state,
+  an active thread with real history, a genuinely mid-stream snapshot, a proposal card awaiting
+  confirmation, both drawers (assistant + PM task, each opened the real way — a click, not a direct
+  `goto` — since the task drawer only intercepts a client-side navigation), and one dense baseline
+  page (the project board). All 15 green. Not wired into the CI merge gate (`--project=smoke
+  --grep @smoke` doesn't touch it) — this suite is slower (real SSE round trips) and less
+  deterministic on a shared, often multi-agent-loaded box than the smoke check; it stays an
+  on-demand/CI-nightly audit (`npm run e2e:a11y`) until proven stable enough to gate on.
+- **Two real bugs in the test's own first draft, both instructive:** (1) the shared session's
+  default active company is NOT the one every seeded assistant/PM fixture lives under, so
+  `/assistant?thread=…` silently rendered empty until the spec pinned `gaiada_tenant=co-agency`
+  itself (same trap `smoke.spec.ts` already worked around) — a reminder that "the page rendered
+  with no error" and "the page rendered the right DATA" are different claims, even inside a test.
+  (2) demoAssistant's `STALL_TEST` hook never emits a `token` event by design (it exists to prove
+  the 120s idle-timeout path), so `streamReducer` never flips `status` to `"streaming"` and
+  `aria-live="off"` never actually turns on — a genuinely mid-stream DOM snapshot needs a real
+  (short) reply, not the stall hook.
+- **Fixed, because axe caught real defects that were cheap and clearly ours:**
+  - `ProgressBar.tsx`'s `role="progressbar"` had no accessible name (every PM progress bar,
+    board cards + the detail meta strip) — `aria-label={"Progress: N%"}` added.
+  - `Contributors.tsx`/`Dependencies.tsx`'s "Add a contributor…"/"Add a blocker…" `<select>`s had
+    no label at all — `aria-label` added to each.
+  - Six places in `assistant.css` used `--ink-faint` (the token's own comment: "decorative
+    only", ~3.3:1) on text that is actually informational — a message's token/cost line, a
+    fenced-code-block language tag, the streaming status line (which IS the `aria-live` content),
+    a proposal's redacted-arg field names, its expiry deadline, and the tools-mode composer hint.
+    All six promoted to `--ink-subtle` (>=4.5:1), matching sibling elements on the same components
+    that already used the correct tier.
+- **Deferred, recorded, not silently suppressed** (exact rule id + reason lives in the spec file
+  and the full report): the sidebar tagline/nav-group labels' raw CSS `opacity` (app-wide, not a
+  surface this program built, needs a `shell.css` fix + visual review); the task-drawer section
+  headers' `--ink-subtle` measuring 4.42:1 in dark theme against the 4.5:1 the token's own comment
+  claims (a one-line token bump would fix it everywhere at once, which is exactly why it needs its
+  own reviewed ticket, not a number picked blind here); PM tag chips' user-chosen swatch colours
+  (a palette/design problem, not a token bug). A broader systemic finding, NOT yet verified with
+  axe and NOT fixed here (scope discipline, not an oversight): `--ink-faint` is used on more
+  real-information text elsewhere in `assistant.css` (Memory/Capabilities panel hints, the rail's
+  empty-state message, message meta lines) that this ticket's 7 tested surfaces never render —
+  worth its own pass.
+- **New `docs/a11y-manual-checklist.md`** — a ~15-minute scripted NVDA/VoiceOver pass for what axe
+  cannot check: whether the streaming reply announces once (not per token), where focus lands after
+  Confirm/Dismiss on a proposal card (a known, unfixed gap — the buttons unmount and nothing moves
+  focus), whether the proposal card's own state change is announced at all (it isn't wired to
+  announce currently), and whether the collapsed thread rail is reachable/correctly announced.
+  **No real screen reader has been run against it as of this entry** — every "expected" result in
+  it is a prediction from reading the code, stated as such.
+- Report: `docs/superpowers/plans/2026-08-07-a11y-automation-report.md`. `tsc` clean; full vitest
+  suite green (1344, no regression); `DEMO_MODE=1 npm run build` green; the CI smoke check
+  (`--project=smoke --grep @smoke`) still passes.
 
 ### [0.19.0] — 2026-08-07 · IN PROGRESS (the assistant brain picker offers Ollama Cloud)
 - **`BRAIN_OPTIONS` gains `openai` — "Ollama Cloud".** The picker previously offered Auto / Ollama
@@ -2188,6 +2270,23 @@ Verified: 939 unit tests pass, `tsc` clean, `next build` green. Not driven in a 
 - **Unreleased / next:** deploy once backend admin API is live.
 
 ## ai-gateway-go
+### [0.13.2] — 2026-08-07 · PROTOTYPED (the non-streaming /complete honours the provider hint too)
+- **Only `/complete/stream` honoured `provider`; `/complete` silently discarded it** and used plain chain
+  order. The asymmetry looked cosmetic and was not: `ai-agents`' runner calls `/complete`, and D13's
+  provider gate (ai-agents 0.7.0) enforces against the provider that ACTUALLY SERVED — so the runner
+  could declare *and ask for* its eval-cleared provider and never receive it, leaving agent writes
+  correctly contained but **permanently inert**. The assistant's brain picker worked only because it
+  happens to stream.
+- Found by probing the live box, not by reading: `hint=openai` on `/complete` returned `hermes` while the
+  same hint on `/complete/stream` returned `openai`.
+- Semantics unchanged and deliberately so — `RunWithHint` is a PURE REORDERING of the chain snapshot,
+  never a requirement: an unknown name, or one whose provider is unavailable/breaker-open, falls through
+  to normal failover. Absent or empty `provider` is byte-for-byte the old behaviour, pinned by two of the
+  three new tests.
+- The tests use `adminwrite_test.go`'s plain `namedProvider`, not `namedStreamingProvider` — the latter
+  deliberately errors on `Complete()` to prove the stream path, a useful guard that also makes it
+  unusable here.
+
 ### [0.13.1] — 2026-08-06 · PROTOTYPED (the `hermes` provider had never once succeeded — it sent no bearer)
 - **`HermesProvider` sent NO `Authorization` header**, on either `/complete` or `/complete/stream`.
   hermes-gateway authenticates BEFORE it routes, so every call 401'd: the `hermes` provider has been

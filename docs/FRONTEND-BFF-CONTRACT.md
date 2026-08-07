@@ -1528,6 +1528,20 @@ with other resources' admin-bypass rules. Do not add one; see the policy file's 
   signal (no new column). A second send while one is still pending/streaming gets **409**, not a
   silent interleave — the lock only serializes the race, a precondition re-check INSIDE it (the
   same D14 lesson: a lock alone is not enough) is what makes the loser actually refuse.
+  **Server-side auto-titling (2026-08-07 owner fix):** in the SAME transaction, when this INSERT is
+  the thread's first message ever (`userSeq === 1`) AND `assistant_threads.title IS NULL`, the
+  title is derived from the raw `content` (ASST-22 page-context preamble stripped first — see
+  `modules/assistant/thread-title.ts::deriveServerThreadTitle`) and persisted. This is the
+  AUTHORITATIVE fix for "every thread in the sidebar reads New chat" — the client-side titling
+  that shipped in alpha-01.024.0063a (`AssistantWorkspace.tsx`'s `handleSend`) only ever fired on
+  `messages.length === 0`, which is never true for a pre-existing thread, so it fixed nothing for
+  any thread that already had history and never ran at all for any OTHER caller (the drawer, an
+  agent-created thread, a future API client). That FE code is KEPT as a belt-and-braces optimistic
+  update — not removed — because its derivation is byte-for-byte identical to this one, so the
+  two cannot disagree regardless of which write lands first. A manual rename (`PATCH .../threads/
+  :id` with `title`) always wins and is never overwritten by this. Migration
+  `0086_assistant_thread_title_backfill.sql` backfills every pre-existing `title IS NULL` thread
+  from its first user message using the same algorithm.
 - ✅ **`GET /api/:t/assistant/threads/:id/stream?messageId=<id>`** (ASST-06) — SSE. Re-emits
   typed events `token` (`{text}`), **`meta`** (`{provider, model}` — ASST-12, added 2026-08-05:
   relayed the instant ai-gateway-go's own `event: meta` arrives, i.e. before the first token; see

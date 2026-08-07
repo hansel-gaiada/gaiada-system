@@ -43,7 +43,7 @@ export function Dependencies({ current, options, canEdit, add, remove }: Props) 
       )}
       {canEdit && options.length > 0 && (
         <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 4 }}>
-          <select className="lux-field__control" value={pick} onChange={(e) => setPick(e.target.value)} style={{ flex: 1 }}>
+          <select className="lux-field__control" aria-label="Add a blocker" value={pick} onChange={(e) => setPick(e.target.value)} style={{ flex: 1 }}>
             <option value="">Add a blocker…</option>
             {options.map((o) => <option key={o.id} value={o.id}>{o.title}</option>)}
           </select>
