@@ -240,3 +240,17 @@ at it, run `node dist/db/migrate.js`, confirm the ordered `applied:` list and ex
    backfill, sufficient for `lint:migration-rls`'s own regex, would still silently match zero rows
    here without the module-scope GUC too). `0058`/`0059`/`0070` remain the permanently-orphaned
    reservation gaps — still do NOT fill them. **Next unused is `0087`.**
+
+   **2026-08-07 update (P4-B1/B2, `pm_task_assignment_events`) — `0087` TAKEN, no collision.** The
+   ticket brief (`2026-08-04-pm-repsona-parity-phase4-plan.md`) named `0078` off a stale head of
+   `0077_mail_core.sql`; `ls migrations | sort | tail` at authoring time showed the real head as
+   `0086_assistant_thread_title_backfill.sql` with `0087` genuinely free. Shipped as
+   `0087_pm_task_assignment_events.sql`: the append-only Ball/assignment history ledger beside
+   `pm_tasks.assignee` (plan §1.5/workstream B — Ball is NOT a new axis, only the history table is
+   new). Composite tenant-scoped FK to `pm_tasks(id, tenant_id)` (reuses 0054's
+   `ux_pm_tasks_id_tenant`), plain `tenant_isolation` policy off `app_current_tenants()` (pm_*
+   convention, NOT the `app_module_allowed` third wall — see the file's own deviation-(2) note),
+   append-only enforced by a genuine BEFORE UPDATE/DELETE trigger (0068's precedent, not a
+   `platform_app` GRANT/REVOKE — the file explains why a REVOKE is untestable through this repo's
+   test harness). `0058`/`0059`/`0070` remain the permanently-orphaned reservation gaps — still do
+   NOT fill them. **Next unused is `0088`.**

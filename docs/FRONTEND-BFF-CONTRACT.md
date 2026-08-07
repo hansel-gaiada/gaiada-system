@@ -250,6 +250,24 @@ per the 2026-07-17 route inventory (confirm UI has been repointed off the in-mem
 - `GET /api/:t/pm/tasks/:id/suggestions`, `POST /api/:t/pm/tasks/:id/tracker/run`,
   `POST /api/:t/pm/suggestions/:id/confirm|dismiss`
 - Task comments reuse `GET/POST /api/:t/comments?entityType=task&entityId=`.
+- **BUILT (P4-B1..B5, 2026-08-07):** `GET /api/:t/pm/tasks/:taskId/assignment-history` →
+  the full append-only chain, newest-first, with ref/responsible/changed-by names resolved.
+  Read-gated identically to `GET /pm/tasks/:id`.
+  Migration `0087_pm_task_assignment_events.sql` adds `pm_task_assignment_events` (FORCE RLS +
+  the plain `tenant_isolation` policy off `app_current_tenants()`, per the pm_* convention —
+  **not** the `app_module_allowed` third wall).
+  **"Ball" is NOT a new field.** Per the owner's 2026-08-06 decision, Ball *is* the existing
+  `assignee`, renamed for the team's Repsona vocabulary: **Ball = `assignee.refId`/`kind`**,
+  **Responsible = `assignee.responsibleId`**. There is no `ball_user_id` column and no second
+  assignment axis — this endpoint returns the HISTORY beside the existing field, which remains
+  the one source of truth for the current value.
+  Append-only is enforced in the database by `BEFORE UPDATE`/`BEFORE DELETE` triggers that
+  unconditionally raise (a GRANT/REVOKE is not exercisable through this repo's test harness —
+  same precedent as `0068`). The append itself lives inside `syncTaskAssignees`, the single
+  choke point every write path already shares, so a new write path cannot forget to log.
+  UI consumer: `P4-B7` (assignment-history timeline on the task detail) — **not built yet**.
+- **PENDING (P4-A1):** `?ball=me` / `?ball[]=` facets on `GET /api/:t/pm/tasks` filter on the
+  existing `assignee`, and belong to the cross-project scope ticket, not to the ledger above.
 - **BUILT (P3-08, 2026-07-24):** `GET /api/:t/pm/tasks/:id/followers` → `[{id,name}]`,
   `POST`/`DELETE /api/:t/pm/tasks/:id/follow` (no body — the followed row is ALWAYS
   `user_id = principal`, never client-supplied; read-gated, since following is a self-scoped

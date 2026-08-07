@@ -537,6 +537,10 @@ async function amendRow(c: PoolClient, rowId: string, target: RoleTarget, actorU
   }
 }
 
+// P4-B3: returns whether this role's open value actually changed (insert / amend / transfer /
+// remove), so the caller (syncTaskAssignees) knows whether to append a ledger row. A true no-op
+// (nothing open, nothing wanted; or the incoming target is identical to what's already open) must
+// NOT append — see pm_task_assignment_events' own header: it is a log of WRITES, not a heartbeat.
 async function applyRoleTransition(
   c: PoolClient,
   tenantId: string,
@@ -545,17 +549,17 @@ async function applyRoleTransition(
   target: RoleTarget | null,
   actorUserId: string | null,
   today: string,
-): Promise<void> {
+): Promise<boolean> {
   const existing = await openRoleRow(c, tenantId, taskId, role);
 
   if (!existing) {
-    if (!target) return; // nothing open, nothing wanted -> true no-op
+    if (!target) return false; // nothing open, nothing wanted -> true no-op
     await insertOpenRow(c, tenantId, taskId, role, target, actorUserId, today);
-    return;
+    return true;
   }
 
   const sameValue = existing.assigneeKind === target?.kind && existing.assigneeRef === target?.ref;
-  if (sameValue) return; // identical to what's already open -> no-op, don't churn history
+  if (sameValue) return false; // identical to what's already open -> no-op, don't churn history
 
   const openedToday = existing.validFrom === today;
 
@@ -569,7 +573,7 @@ async function applyRoleTransition(
         [existing.id, addDaysIso(today, -1)],
       );
     }
-    return;
+    return true;
   }
 
   if (openedToday) {
@@ -581,7 +585,7 @@ async function applyRoleTransition(
     // it the same way. A mere close (ending an interval's validity, not changing what it once was)
     // does not re-stamp origin_site, on purpose.
     await amendRow(c, existing.id, target, actorUserId);
-    return;
+    return true;
   }
 
   // genuine transfer: close yesterday, open a new interval today.
@@ -590,6 +594,34 @@ async function applyRoleTransition(
     [existing.id, addDaysIso(today, -1)],
   );
   await insertOpenRow(c, tenantId, taskId, role, target, actorUserId, today);
+  return true;
+}
+
+// P4-B1..B3 — the assignment-history LEDGER (migration 0087). One row per WRITE that actually
+// changed the ball (assignee.refId/kind) or the responsible (assignee.responsibleId), recording the
+// task's status "at the moment of handoff" (plan §1.5). Deliberately centralized HERE, inside the
+// one function every assignee-writing path already calls (createTask, patchTask reassignment,
+// recurrence spawn, duplicateTask — see syncTaskAssignees below), rather than a call added at each
+// of those four sites separately: a write path that forgets to call this ledger insert would lose
+// history silently and nothing would surface it (the whole risk this ticket exists to close), so the
+// append is made structurally impossible to skip by living inside the SAME dual-write choke point
+// the blob/pm_task_assignees invariant already depends on, instead of being one more thing four
+// different call sites must each remember to do.
+async function appendAssignmentEvent(
+  c: PoolClient,
+  tenantId: string,
+  taskId: string,
+  assignee: Assignee,
+  statusId: string,
+  note: string | null,
+  actorUserId: string | null,
+): Promise<void> {
+  await c.query(
+    `INSERT INTO pm_task_assignment_events
+       (tenant_id, task_id, ref_id, ref_kind, responsible_id, status_id, note, changed_by)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+    [tenantId, taskId, assignee?.refId ?? null, assignee?.kind ?? null, assignee?.responsibleId ?? null, statusId, note, actorUserId],
+  );
 }
 
 async function syncTaskAssignees(
@@ -598,10 +630,18 @@ async function syncTaskAssignees(
   taskId: string,
   assignee: Assignee,
   actorUserId: string | null,
+  statusId: string,
+  note: string | null = null,
 ): Promise<void> {
   const today = todayIso();
-  await applyRoleTransition(c, tenantId, taskId, "owner", ownerTarget(assignee), actorUserId, today);
-  await applyRoleTransition(c, tenantId, taskId, "responsible", responsibleTarget(assignee), actorUserId, today);
+  const ownerChanged = await applyRoleTransition(c, tenantId, taskId, "owner", ownerTarget(assignee), actorUserId, today);
+  const responsibleChanged = await applyRoleTransition(c, tenantId, taskId, "responsible", responsibleTarget(assignee), actorUserId, today);
+  // Append ONLY when something actually changed — a syncTaskAssignees call that turned out to be a
+  // true no-op (e.g. a PATCH that included `assignee` but with the same value already open) must not
+  // churn the ledger, mirroring applyRoleTransition's own no-churn rule for pm_task_assignees itself.
+  if (ownerChanged || responsibleChanged) {
+    await appendAssignmentEvent(c, tenantId, taskId, assignee, statusId, note, actorUserId);
+  }
 }
 
 export interface AssigneeDriftResult {
@@ -842,6 +882,41 @@ export class PmController {
     return task;
   }
 
+  // P4-B4 — the full ball/assignment-history chain for one task (migration 0087). Read-gated
+  // IDENTICALLY to the task itself (same authorize() call as getTask above, same "read" action) —
+  // this is a view of the task's own history, not a separate resource with its own permission
+  // surface. RLS (pm_task_assignment_events' plain tenant_isolation policy) is the second wall: a
+  // forged cross-tenant taskId 404s (the task lookup below finds nothing under this tenant's RLS
+  // scope) exactly like every other cross-tenant probe in this file, never a 200 with someone
+  // else's history. Newest first (created_at DESC), matching the ledger's own index order.
+  @Get(":tenantId/pm/tasks/:taskId/assignment-history")
+  async getAssignmentHistory(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("taskId") taskId: string) {
+    await authorize(req.principal, { kind: "pm_task", tenantId, id: taskId }, "read");
+    return withTenants([tenantId], async (c) => {
+      const task = await c.query(`SELECT 1 FROM pm_tasks WHERE id = $1 AND deleted_at IS NULL`, [taskId]);
+      if (!task.rows[0]) throw new NotFoundException("task not found");
+      const r = await c.query<{
+        id: string; refId: string | null; refKind: string | null; refName: string | null;
+        responsibleId: string | null; responsibleName: string | null;
+        statusId: string; note: string | null; changedBy: string | null; changedByName: string | null;
+        createdAt: string;
+      }>(
+        `SELECT e.id, e.ref_id AS "refId", e.ref_kind AS "refKind", ru.name AS "refName",
+                e.responsible_id AS "responsibleId", rp.name AS "responsibleName",
+                e.status_id AS "statusId", e.note, e.changed_by AS "changedBy", cb.name AS "changedByName",
+                e.created_at AS "createdAt"
+         FROM pm_task_assignment_events e
+         LEFT JOIN users ru ON e.ref_kind = 'person' AND ru.id::text = e.ref_id
+         LEFT JOIN users rp ON rp.id = e.responsible_id
+         LEFT JOIN users cb ON cb.id = e.changed_by
+         WHERE e.tenant_id = $1 AND e.task_id = $2
+         ORDER BY e.created_at DESC`,
+        [tenantId, taskId],
+      );
+      return r.rows;
+    });
+  }
+
   @Post(":tenantId/pm/tasks")
   @HttpCode(201)
   async createTask(
@@ -911,7 +986,9 @@ export class PmController {
       // TR-02 dual-write: same transaction as the INSERT above, so blob+rows commit or roll back
       // together — a malformed/unknown person ref fails loudly here and the whole task creation
       // (including the blob) is rolled back, never a partial write.
-      await syncTaskAssignees(c, tenantId, id, assignee, req.principal.userId);
+      // P4-B3: statusId is this task's freshly-chosen status — a create-with-assignee is the FIRST
+      // assignment event for this task, so the ledger's very first row for it lands here.
+      await syncTaskAssignees(c, tenantId, id, assignee, req.principal.userId, status);
       await logAssigneeDriftIfAny(c, tenantId, id);
       // TR-31: actorId (structured hint -> work-activity-linker.ts rule a "hint:actorId" -> an
       // EXACT person link; also becomes the outbox consumer's actor_user_id).
@@ -1126,8 +1203,13 @@ export class PmController {
       // TR-02 dual-write: only when THIS patch actually touched the assignee (managing) — the
       // same transaction as the UPDATE above, so a malformed/unknown ref rolls back the whole
       // PATCH, blob included, never a partial write.
+      // P4-B3: statusId is this patch's FINAL status (post-coupling above) — "the status at the
+      // moment of handoff" per plan §1.5. `assignmentNote` is an optional free-text reason a human
+      // can attach to a reassignment/correction (e.g. "wrong queue"); undefined for every other
+      // write path, which is exactly right — only a human-initiated PATCH has a reason to give.
       if (managing) {
-        await syncTaskAssignees(c, tenantId, taskId, assignee, req.principal.userId);
+        const assignmentNote = typeof b.assignmentNote === "string" ? b.assignmentNote.slice(0, 500) : null;
+        await syncTaskAssignees(c, tenantId, taskId, assignee, req.principal.userId, status, assignmentNote);
         await logAssigneeDriftIfAny(c, tenantId, taskId);
       }
       // TR-05: carry the FLAG-DRIVEN completion facts (wasDone/isDoneNow, already computed above
@@ -1176,7 +1258,9 @@ export class PmController {
             );
             // TR-02 dual-write: the spawned child carries the same assignee as its parent's
             // final (post-patch) value — same transaction as the INSERT above.
-            await syncTaskAssignees(c, tenantId, childId, assignee, req.principal.userId);
+            // P4-B3: the child's own FIRST assignment event, status = spawnStatus (its own READY
+            // status, not the parent's DONE status it was just completed into).
+            await syncTaskAssignees(c, tenantId, childId, assignee, req.principal.userId, spawnStatus);
             await logAssigneeDriftIfAny(c, tenantId, childId);
             // TR-31: deliberately NO actorId here — a recurrence auto-spawn is a system-derived
             // side effect of the completing PATCH above (which DOES carry its own actorId), not a
@@ -1325,7 +1409,9 @@ export class PmController {
       // TR-02 dual-write: the copy carries the SOURCE task's owner/responsible (matching the
       // blob copy above). Contributors are deliberately NOT copied — same "comments/time/
       // suggestions dropped" policy as everything else this duplicate doesn't carry.
-      await syncTaskAssignees(c, tenantId, id, task.assignee, req.principal.userId);
+      // P4-B3: the copy's own FIRST assignment event, status = dupStatus (its own INTAKE status,
+      // never the source task's status — a duplicate is uncommitted work, per P4-B8b above).
+      await syncTaskAssignees(c, tenantId, id, task.assignee, req.principal.userId, dupStatus);
       await logAssigneeDriftIfAny(c, tenantId, id);
       // Comments/time/suggestions/dependsOn are deliberately dropped: not copied, not referenced
       // (depends_on defaults to '{}' — the INSERT above never sets it).
