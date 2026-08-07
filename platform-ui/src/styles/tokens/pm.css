@@ -53,10 +53,26 @@
   --pm-ink:            #1A1916;  /* the one text colour used on every tone fill */
   --pm-text:           #212121;
   --pm-text-dim:       #616161;
+  /* Fainter meta tier (counts, uppercase micro-labels) — the PM-scoped twin of
+     the house --ink-subtle step. 4.62:1 on --pm-surface-card. */
+  --pm-text-faint:     #757575;
+  /* Nested/inner hairline (P4-L4) — a decorative FILL, so no 4.5:1 duty, same
+     class as --pm-tone-N-line below. Formula, not a literal pair: blends
+     --pm-line toward --pm-surface-card, so it tracks whichever theme's
+     surfaces are active without a second dark-block declaration — the sync
+     guard only compares properties actually redeclared there, and this one
+     deliberately isn't one of them. */
+  --pm-line-soft: color-mix(in srgb, var(--pm-line) 55%, var(--pm-surface-card));
 
   /* Repsona's interactive blue — links, buttons, active tabs. 4.6:1 on white. */
   --pm-accent:      #1976D2;
   --pm-accent-weak: #E3F2FD;
+  /* Text/icon sitting ON the accent fill (Gantt bar labels, filled toggle
+     buttons). White clears the light accent at exactly 4.6:1 (the ratio noted
+     above) but collapses to 2.21:1 on the LIFTED dark accent below — so this
+     pair, unlike --pm-accent itself, needs a real per-theme value. Dark uses
+     --pm-ink rather than a second literal: 7.95:1 on #64B5F6. */
+  --pm-accent-fg:   #FFFFFF;
 
   /* Repsona is rounded; the house style is not. Scoped to PM only.
      Pills (tag chips, status badges, avatars) are fully round. */
@@ -87,6 +103,13 @@
   --pm-status-in-progress: #CDDC39;
   --pm-status-blocked:     #FF7043;
   --pm-status-done:        #FFC107;
+  /* Text/label sitting on a status-hue fill (Gantt bars, filled column dots) —
+     same ink-on-fill technique as --pm-tone-on below, and no coincidence: every
+     status hue above is literally one of the tone-ramp values (backlog=tone-8,
+     todo=tone-5, in-progress=tone-4, blocked=tone-6, done=tone-3), so the
+     already-measured ratios apply unchanged: 6.79 / 8.37 / 11.63 / 6.40 /
+     10.78:1. Theme-invariant like --pm-tone-on — no dark-block entry needed. */
+  --pm-status-ink:         var(--pm-ink);
 
   /* ---- Categorical tone ramp (tags, chart series, board accents) -----------
      8 tones, Material 300-400 level. `-on` is the text colour that sits ON the
@@ -131,8 +154,10 @@
     --pm-line:           #3D3D3D;
     --pm-text:           #ECEFF1;  /* 12.26:1 on --pm-surface-card */
     --pm-text-dim:       #B0BEC5;
+    --pm-text-faint:     #90A4AE;  /* 5.47:1 on --pm-surface-card */
     --pm-accent:         #64B5F6;  /* the 1976D2 blue is unreadable on dark */
     --pm-accent-weak:    #1E3A5F;
+    --pm-accent-fg:      var(--pm-ink);  /* white fails at 2.21:1 on this lighter blue; ink clears 7.95:1 */
     --pm-urgency-overdue-fg:  #FF7961;  /* 5.50:1 on #2B2B2B */
     --pm-urgency-due-soon-fg: #FFB300;  /* 7.89:1 */
     --pm-urgency-on-track-fg: #81C784;  /* 7.04:1 */
@@ -148,8 +173,10 @@ html[data-theme="dark"] {
   --pm-line:           #3D3D3D;
   --pm-text:           #ECEFF1;
   --pm-text-dim:       #B0BEC5;
+  --pm-text-faint:     #90A4AE;
   --pm-accent:         #64B5F6;
   --pm-accent-weak:    #1E3A5F;
+  --pm-accent-fg:      var(--pm-ink);
   --pm-urgency-overdue-fg:  #FF7961;
   --pm-urgency-due-soon-fg: #FFB300;
   --pm-urgency-on-track-fg: #81C784;

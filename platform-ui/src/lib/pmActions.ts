@@ -150,6 +150,24 @@ export async function reassignResponsible(taskId: string, responsibleId: string)
   return r;
 }
 
+// P4-F4 — "Set to me" on the Ball. Mirror of `reassignResponsible` above: keeps whatever the
+// other slot holds (`responsibleId`/`responsibleName` when there was already an assignee) and only
+// swaps the ball itself to the caller, always as `kind:"person"` (Repsona's ball is single-person —
+// plan §1.5 decision 3). When the task has no assignee yet, both slots start on the caller, same
+// bootstrap convention `reassignResponsible` uses on its own axis.
+export async function setBallToMe(taskId: string): Promise<PmResult> {
+  const c = await ctx();
+  if ("error" in c) return { ok: false, error: c.error };
+  const current = await getPmTask(c.userId, c.tenant, taskId);
+  if (!current) return { ok: false, error: "Task not found." };
+  const assignee: Assignee = current.assignee
+    ? { ...current.assignee, kind: "person", refId: c.userId, refName: c.me.name }
+    : { kind: "person", refId: c.userId, refName: c.me.name, responsibleId: c.userId, responsibleName: c.me.name };
+  const r = await send(`/pm/tasks/${taskId}`, "PATCH", { assignee }, "pm.manage");
+  revalTask(taskId);
+  return r;
+}
+
 // Division-axis drag: sets assignee={kind:"division",...} with the resolved responsible person.
 // `responsibleId` is optional at the TYPE level only so this matches Board's generic `move`
 // signature (other axes never pass it) — at runtime it's always required for a real commit;

@@ -2,23 +2,29 @@
    Before: ten sibling <Card>s (Overview, Assignee, Contributors, Subtasks, Custom fields,
    Dependencies, Time, AI Tracker, Attachments, Comments), every one the same weight, so nothing
    read as primary. Now the work is on the left and its properties on the right, sections divided by
-   the system's hairlines instead of ten boxes. Tokens only — no colour literals. */
+   the system's hairlines instead of ten boxes. Tokens only — no colour literals.
+
+   P4-L4 (2026-08-07): repointed from house tokens to the PM-scoped Repsona palette
+   (`styles/tokens/pm.css`) — see pm.css's header comment for why. `--elev-overlay`
+   and `--scrim` stay house tokens on purpose (the plan explicitly keeps shadows on
+   that one house mechanism for PM's floating layers too); radius is --pm-radius*
+   only, scoped to the drawer/menus. */
 
 .pm-detail {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 320px;
   gap: 0;
-  border-top: 0.5px solid var(--erp-hairline);
+  border-top: 0.5px solid var(--pm-line);
 }
 .pm-detail__main { min-width: 0; padding: 20px 26px 26px 0; }
 .pm-detail__side {
   min-width: 0;
   padding: 20px 0 26px 22px;
-  border-left: 0.5px solid var(--erp-hairline);
+  border-left: 0.5px solid var(--pm-line);
 }
 
 /* A titled block. The label is the system eyebrow; the rule under it replaces the card border. */
-.pm-sec + .pm-sec { margin-top: 22px; padding-top: 20px; border-top: 0.5px solid var(--erp-hairline-soft); }
+.pm-sec + .pm-sec { margin-top: 22px; padding-top: 20px; border-top: 0.5px solid var(--pm-line-soft); }
 .pm-sec__head {
   display: flex;
   align-items: baseline;
@@ -27,17 +33,17 @@
   margin-bottom: 10px;
 }
 .pm-sec__label { font-size: 10px; opacity: 0.5; }
-.pm-sec__count { font: 400 12px var(--font-body); color: var(--erp-ink-50); }
+.pm-sec__count { font: 400 12px var(--font-body); color: var(--pm-text-faint); }
 .pm-sec__body { min-width: 0; }
 
 /* Description reads as prose, not as a field value — it is the one long-form thing here. */
 .pm-desc {
   margin: 0;
   font: 400 14px/1.65 var(--font-body);
-  color: var(--text-primary);
+  color: var(--pm-text);
   white-space: pre-wrap;
 }
-.pm-desc--empty { color: var(--erp-ink-50); font-style: italic; }
+.pm-desc--empty { color: var(--pm-text-faint); font-style: italic; }
 
 /* Properties: label left, control right, one per row. Rows are the scan path for "what is this
    task's state", so they stay uniform — no row grows a box of its own. */
@@ -50,13 +56,13 @@
   padding: 7px 0;
   min-height: 34px;
 }
-.pm-prop + .pm-prop { border-top: 0.5px solid var(--erp-hairline-soft); }
+.pm-prop + .pm-prop { border-top: 0.5px solid var(--pm-line-soft); }
 .pm-prop--stack { grid-template-columns: minmax(0, 1fr); align-items: start; gap: 6px; }
 .pm-prop__label {
   font: 700 10px var(--font-body);
   letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: var(--erp-ink-50);
+  color: var(--pm-text-faint);
 }
 /* Flex + wrap so a control that brings its own button (progress, status) folds inside the column
    instead of being clipped by it; min-width:0 lets long values ellipsize rather than push the grid. */
@@ -66,10 +72,10 @@
   flex-wrap: wrap;
   gap: 6px;
   font: 400 13px var(--font-body);
-  color: var(--text-primary);
+  color: var(--pm-text);
   min-width: 0;
 }
-.pm-prop__value--muted { color: var(--erp-ink-50); }
+.pm-prop__value--muted { color: var(--pm-text-faint); }
 /* Nothing in the properties column may exceed it — inputs and sliders default to a width wider than
    280px and would otherwise spill past the drawer's edge. */
 .pm-detail__side input,
@@ -82,7 +88,7 @@
   font: 700 10px var(--font-body);
   letter-spacing: 0.12em;
   text-transform: uppercase;
-  color: var(--erp-accent);
+  color: var(--pm-accent);
 }
 .pm-detail__title {
   margin: 6px 0 0;
@@ -90,10 +96,10 @@
   font-weight: 700;
   font-size: 24px;
   line-height: 1.2;
-  color: var(--text-primary);
+  color: var(--pm-text);
 }
-.pm-detail__project { font: 400 13px var(--font-body); color: var(--erp-ink-60); text-decoration: none; }
-.pm-detail__project:hover { color: var(--text-primary); }
+.pm-detail__project { font: 400 13px var(--font-body); color: var(--pm-text-dim); text-decoration: none; }
+.pm-detail__project:hover { color: var(--pm-text); }
 .pm-detail__actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
 
 /* ── Slide-over ───────────────────────────────────────────────────────────── */
@@ -116,8 +122,8 @@
   width: min(920px, 92vw);
   display: flex;
   flex-direction: column;
-  background: var(--surface-page);
-  border-left: 0.5px solid var(--erp-hairline);
+  background: var(--pm-surface-page);
+  border-left: 0.5px solid var(--pm-line);
   box-shadow: var(--elev-overlay);
   animation: pm-drawer-in 0.22s var(--erp-ease);
 }
@@ -129,32 +135,100 @@
   justify-content: space-between;
   gap: 12px;
   padding: 12px 22px;
-  border-bottom: 0.5px solid var(--erp-hairline);
-  background: var(--surface-chrome);
+  border-bottom: 0.5px solid var(--pm-line);
+  background: var(--pm-surface-raised);
 }
-.pm-drawer__crumb { font: 400 12px var(--font-body); color: var(--erp-ink-60); text-decoration: none; }
-.pm-drawer__crumb:hover { color: var(--text-primary); }
+.pm-drawer__crumb { font: 400 12px var(--font-body); color: var(--pm-text-dim); text-decoration: none; }
+.pm-drawer__crumb:hover { color: var(--pm-text); }
 .pm-drawer__tools { display: inline-flex; align-items: center; gap: 8px; }
 .pm-drawer__btn {
-  border: 0.5px solid var(--erp-hairline);
+  border: 0.5px solid var(--pm-line);
+  border-radius: var(--pm-radius);
   background: transparent;
-  color: var(--erp-ink-60);
+  color: var(--pm-text-dim);
   font: 400 13px var(--font-body);
   padding: 4px 9px;
   cursor: pointer;
   text-decoration: none;
   transition: color 0.2s var(--erp-ease);
 }
-.pm-drawer__btn:hover { color: var(--text-primary); }
+.pm-drawer__btn:hover { color: var(--pm-text); }
 .pm-drawer__body { flex: 1 1 auto; overflow-y: auto; padding: 18px 22px 28px; min-height: 0; }
 /* The drawer is narrower than a page, so the properties column stacks sooner. */
 .pm-drawer .pm-detail { grid-template-columns: minmax(0, 1fr) 280px; }
+
+/* ── Comment composer (P4-F1): @-mention · emoji · minimal markdown · Preview ─────────────── */
+.pm-composer__tabs { display: flex; gap: 4px; }
+.pm-composer__tab {
+  border: 0.5px solid var(--pm-line);
+  border-radius: var(--pm-radius);
+  background: transparent;
+  color: var(--pm-text-dim);
+  font: 700 10px var(--font-body);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+.pm-composer__tab:hover { color: var(--pm-text); }
+.pm-composer__tab--active { color: var(--pm-text); border-color: var(--pm-accent); }
+.pm-composer__toolbar { display: flex; gap: 6px; align-items: center; }
+.pm-composer__tool {
+  border: 0.5px solid var(--pm-line);
+  border-radius: var(--pm-radius);
+  background: var(--pm-surface-card);
+  color: var(--pm-text-dim);
+  font-size: 14px;
+  line-height: 1;
+  padding: 4px 8px;
+  cursor: pointer;
+}
+.pm-composer__tool:hover, .pm-composer__tool:focus-visible { border-color: var(--pm-accent); color: var(--pm-accent); }
+.pm-mention-pop, .pm-emoji-pop {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  min-width: 170px;
+  max-height: 220px;
+  overflow-y: auto;
+  background: var(--pm-surface-raised);
+  border: 0.5px solid var(--pm-line);
+  border-radius: var(--pm-radius-lg);
+  box-shadow: var(--elev-overlay);
+  padding: 4px;
+}
+.pm-emoji-pop { flex-direction: row; flex-wrap: wrap; min-width: 0; width: 172px; max-height: none; overflow: visible; }
+.pm-mention-pop__item, .pm-emoji-pop__item {
+  border: none;
+  background: transparent;
+  text-align: left;
+  padding: 6px 8px;
+  cursor: pointer;
+  font: 400 13px var(--font-body);
+  color: var(--pm-text);
+}
+.pm-mention-pop__item:hover, .pm-mention-pop__item:focus-visible,
+.pm-emoji-pop__item:hover, .pm-emoji-pop__item:focus-visible { background: color-mix(in srgb, var(--pm-accent) 10%, transparent); }
+.pm-emoji-pop__item { padding: 4px 6px; font-size: 16px; }
+.pm-mention-pop__empty { padding: 6px 8px; font: 400 12px var(--font-body); color: var(--pm-text-faint); }
+.pm-composer__preview { border: 0.5px solid var(--pm-line-soft); border-radius: var(--pm-radius); padding: 10px 12px; min-height: 64px; }
+.pm-md-p { margin: 0 0 8px; font: 400 14px/1.6 var(--font-body); color: var(--pm-text); white-space: pre-wrap; }
+.pm-md-p:last-child { margin-bottom: 0; }
+.pm-md-list { margin: 0 0 8px 18px; padding: 0; font: 400 14px/1.6 var(--font-body); color: var(--pm-text); }
+.pm-md-code { font-family: ui-monospace, monospace; font-size: 0.9em; background: var(--pm-surface-sunken); padding: 1px 4px; }
+
+/* ── "Set to me" (P4-F4) + Today quick-schedule (P4-F3) ──────────────────────────────────── */
+.pm-setme-msg, .pm-schedule-msg { font: 400 11px var(--font-body); color: var(--pm-accent); }
+.pm-schedule { display: inline-flex; align-items: center; gap: 6px; }
 
 @media (max-width: 1000px) {
   .pm-detail { grid-template-columns: minmax(0, 1fr); }
   .pm-detail__side {
     border-left: none;
-    border-top: 0.5px solid var(--erp-hairline);
+    border-top: 0.5px solid var(--pm-line);
     padding: 20px 0 26px;
     /* Properties first on a narrow screen would bury the description; keep reading order. */
   }

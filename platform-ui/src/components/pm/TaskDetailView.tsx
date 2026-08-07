@@ -9,15 +9,16 @@ import { attachFileAction, deleteFileAction } from "@/lib/collabActions";
 import { Attachments } from "@/components/Attachments";
 import {
   getPmTask, listTaskComments, listSuggestions, assignableUnits, listPmTasks, listTimeLogs, listTags,
-  listProjectStatuses, listFollowers, openDependencies, isDoneStatus, timeSummary, wouldCreateCycle, titleWithRecurrenceGlyph, resolveTags, type PmTask,
+  listProjectStatuses, listFollowers, openDependencies, isDoneStatus, timeSummary, wouldCreateCycle, titleWithRecurrenceGlyph, resolveTags, taskUrgency, type PmTask,
 } from "@/lib/pm";
 import {
   setTaskProgress, toggleSubtask, addSubtask, setAssignee, postTaskComment,
   runTracker, confirmSuggestion, dismissSuggestion, addDependency, removeDependency, logTime, deleteTaskAction,
   setTaskTags, createTag, updateTaskCustomFields, setTaskStatus, undoRecurrenceSpawn,
   duplicateTaskAction, saveTaskAsTemplateAction, followTask, unfollowTask, addReaction, removeReaction,
-  addContributor, removeContributor,
+  addContributor, removeContributor, reassignResponsible, setBallToMe, rescheduleTask,
 } from "@/lib/pmActions";
+import { PM_TERMS } from "@/lib/pmVocabulary";
 import { StatusSelect } from "@/components/pm/StatusSelect";
 import { PageHeader } from "@/components/PageHeader";
 import { DescriptionList } from "@/components/DescriptionList";
@@ -27,7 +28,8 @@ import { ProgressControl } from "@/components/pm/ProgressControl";
 import { Subtasks } from "@/components/pm/Subtasks";
 import { AssigneeEditor } from "@/components/pm/AssigneeEditor";
 import { TrackerPanel } from "@/components/pm/TrackerPanel";
-import { CommentThread, FollowToggle } from "@/components/pm/CommentThread";
+import { CommentThread, FollowToggle, SetToMeButton, TodayScheduleButton } from "@/components/pm/CommentThread";
+import { UrgencyChip } from "@/components/pm/UrgencyChip";
 import { Dependencies } from "@/components/pm/Dependencies";
 import { Contributors } from "@/components/pm/Contributors";
 import { TimeLog } from "@/components/pm/TimeLog";
@@ -116,6 +118,12 @@ export async function TaskDetailView({
     const h = Math.floor(m / 60), r = m % 60;
     return h > 0 ? `${h}h${r ? ` ${r}m` : ""}` : `${r}m`;
   };
+
+  // P4-F3: resolved once, server-side, so the "Today" quick-schedule button and the overdue
+  // glyph agree on what day it is — same hydration-divergence rule `pmUrgency.ts` pins `today`
+  // on (never `Date.now()` inside a client component).
+  const today = new Date().toISOString().slice(0, 10);
+  const dueUrgency = task.dueDate ? taskUrgency({ dueDate: task.dueDate, isDone: isDoneStatus(task.status, projectStatuses) }, today) : null;
 
   // P3-03: "Save as template" captures the task's current fields (tags resolved
   // to plain labels — a template is tenant-wide, so it can't hold this
@@ -219,6 +227,7 @@ export async function TaskDetailView({
               post={postTaskComment.bind(null, task.id)}
               addReaction={addReaction}
               removeReaction={removeReaction}
+              mentionCandidates={assignable.members}
             />
           </Section>
         </div>
@@ -235,7 +244,10 @@ export async function TaskDetailView({
                 undoSpawn={task.recurrence ? undoRecurrenceSpawn.bind(null, task.projectId) : undefined}
               />
             </Prop>
-            <Prop label="Assignee" muted={!task.assignee}>
+            {/* Ball = assignee.refId/kind, Responsible = assignee.responsibleId — one field, two
+                independent slots (plan §1.5), not two axes. Shown side by side per the Repsona
+                modal, each with its own "Set to me" (P4-F4). */}
+            <Prop label={PM_TERMS.ball} muted={!task.assignee}>
               {task.assignee ? (
                 <>
                   {task.assignee.refName}
@@ -244,15 +256,21 @@ export async function TaskDetailView({
                   )}
                 </>
               ) : "Unassigned"}
+              {canEdit && <SetToMeButton label={PM_TERMS.setToMe} act={setBallToMe.bind(null, task.id)} />}
             </Prop>
-            {task.assignee && task.assignee.kind !== "person" && (
-              <Prop label="In charge">
-                {responsibleId ? <Link href={`/people/${responsibleId}`}>{task.assignee.responsibleName}</Link> : "—"}
-              </Prop>
-            )}
+            <Prop label={PM_TERMS.responsible} muted={!responsibleId}>
+              {responsibleId ? <Link href={`/people/${responsibleId}`}>{task.assignee?.responsibleName}</Link> : "—"}
+              {canEdit && <SetToMeButton label={PM_TERMS.setToMe} act={reassignResponsible.bind(null, task.id, userId)} />}
+            </Prop>
             <Prop label="Priority">{task.priority}</Prop>
             <Prop label="Start" muted={!task.startDate}>{task.startDate ?? "Not set"}</Prop>
-            <Prop label="Due" muted={!task.dueDate}>{task.dueDate ?? "Not set"}</Prop>
+            {/* P4-F3: start–due range, the overdue/almost-late/in-time glyph (one definition,
+                `taskUrgency` — never a bespoke date comparison here), and a one-click "Today". */}
+            <Prop label="Due" muted={!task.dueDate}>
+              {task.startDate && task.dueDate ? `${task.startDate} – ${task.dueDate}` : task.dueDate ?? "Not set"}
+              {dueUrgency && <UrgencyChip tier={dueUrgency} variant="dot" />}
+              {canEdit && <TodayScheduleButton act={rescheduleTask.bind(null, task.id, task.startDate ?? null, today)} />}
+            </Prop>
             <Prop label="Estimate" muted={!task.estimateMinutes}>{fmtMinutes(task.estimateMinutes) ?? "Not set"}</Prop>
             <Prop label="Logged" muted={!task.loggedMinutes}>{fmtMinutes(task.loggedMinutes) ?? "None"}</Prop>
             <Prop label="Progress" stack>
