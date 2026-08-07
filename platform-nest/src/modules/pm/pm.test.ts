@@ -5,6 +5,7 @@ import type { NestFastifyApplication } from "@nestjs/platform-fastify";
 import { config } from "../../config";
 import { buildApp } from "../../main";
 import { initTestDb, teardownTestDb, TEST_URL, adminPool } from "../../testing/setup";
+import { newId } from "../../db";
 import { createCompany, createUser, addMembership, createRole, grantRole, createProject, defineCustomField } from "../../testing/fixtures";
 
 const svc = { authorization: "Bearer svc-token" };
@@ -1718,6 +1719,375 @@ describe.skipIf(!TEST_URL)("PM subsystem (§5)", () => {
       const del = await app.inject({ method: "DELETE", url: `/api/${tenant}/pm/tasks/${blocker}`, headers: hdr() });
       expect(del.statusCode).toBe(200);
       expect((await getTask(dependent)).status).toBe("todo");
+    });
+  });
+
+  // ---------------- P4-A1 — cross-project (`@all`) task list: facets + cursor pagination ----------------
+  describe("P4-A1 — cross-project task list facets + pagination", () => {
+    type ListItem = {
+      id: string; projectId: string; status: string; priority: string; dueDate: string | null;
+      isDone: boolean; isBlocked: boolean; assignee: { refId: string; responsibleId: string; kind: string } | null;
+      tags: string[]; milestoneId: string | null;
+    };
+    const addDays = (n: number) => {
+      const d = new Date();
+      d.setUTCDate(d.getUTCDate() + n);
+      return d.toISOString().slice(0, 10);
+    };
+
+    // Every test below gets its OWN tenant. This endpoint is DELIBERATELY tenant-wide with no
+    // project filter (the whole point of `@all`), so reusing the file's shared `tenant` would mean
+    // every assertion also sees whatever every OTHER test in this 2000-line file left behind there
+    // — harmless for a handful of tests, but this describe block runs enough "the list contains
+    // exactly..." and "walked the full set" assertions that shared-tenant noise becomes a real
+    // flake source once the whole suite (not just this filter) is run together. Isolation costs
+    // one extra company/user per test and buys determinism regardless of run order.
+    const isoPm = async (label: string) => {
+      const t = await createCompany(`Agency A1 ${label} (isolated)`, ["agency", "pm"]);
+      const mgr = await createUser(`${newId()}@x.test`, `A1 ${label} Manager`);
+      const mem = await createUser(`${newId()}@x.test`, `A1 ${label} Member`);
+      await addMembership(t, mgr);
+      await addMembership(t, mem);
+      await grantRole(mgr, await createRole("manager"), "company", t);
+      const h = asUser(mgr);
+      const newProject = (name: string) => createProject(t, name, mgr);
+      const newTask = async (pid: string, body: Record<string, unknown> = {}) =>
+        (await app.inject({ method: "POST", url: `/api/${t}/pm/tasks`, headers: h, payload: { projectId: pid, title: "T", ...body } }).then((r) => r.json())).id as string;
+      const list = (qs = "", as = h) => app.inject({ method: "GET", url: `/api/${t}/pm/tasks${qs}`, headers: as });
+      return { t, mgr, mem, hdr: h, newProject, newTask, list };
+    };
+
+    it("default (includeClosed=false) excludes done tasks; includeClosed=true reveals them", async () => {
+      const iso = await isoPm("default visibility");
+      const pid = await iso.newProject("A1 default visibility");
+      const open = await iso.newTask(pid, { title: "Open one" });
+      const done = await iso.newTask(pid, { title: "Done one", status: "done" });
+
+      const r1 = await iso.list();
+      expect(r1.statusCode).toBe(200);
+      const { items: hidden } = r1.json() as { items: ListItem[]; nextCursor: string | null };
+      const ids1 = hidden.map((t) => t.id);
+      expect(ids1).toContain(open);
+      expect(ids1).not.toContain(done);
+
+      const r2 = await iso.list("?includeClosed=true");
+      const { items: shown } = r2.json() as { items: ListItem[]; nextCursor: string | null };
+      const ids2 = shown.map((t) => t.id);
+      expect(ids2).toContain(open);
+      expect(ids2).toContain(done);
+      const doneRow = shown.find((t) => t.id === done)!;
+      expect(doneRow.isDone).toBe(true);
+    });
+
+    it("isDone/isBlocked are FLAG-DRIVEN off the task's OWN project registry, not a literal status match", async () => {
+      const iso = await isoPm("custom registry");
+      const pid = await iso.newProject("A1 custom registry");
+      await app.inject({ method: "POST", url: `/api/${iso.t}/pm/projects/${pid}/statuses`, headers: iso.hdr, payload: { label: "Shipped", color: "#4B7A5A", isDone: true } });
+      await app.inject({ method: "POST", url: `/api/${iso.t}/pm/projects/${pid}/statuses`, headers: iso.hdr, payload: { label: "OnHold", color: "#FF7043", isBlocked: true } });
+      const shipped = await iso.newTask(pid, { title: "Shipped one", status: "shipped" });
+      const onHold = await iso.newTask(pid, { title: "On hold one", status: "onhold" });
+
+      const r = await iso.list("?includeClosed=true");
+      const { items } = r.json() as { items: ListItem[] };
+      expect(items.find((t) => t.id === shipped)?.isDone).toBe(true);
+      expect(items.find((t) => t.id === onHold)?.isBlocked).toBe(true);
+      // an overdue "shipped" task must NOT surface under overdueOnly — done outranks the date.
+      await app.inject({ method: "PATCH", url: `/api/${iso.t}/pm/tasks/${shipped}`, headers: iso.hdr, payload: { dueDate: addDays(-5) } });
+      const overdue = await iso.list("?overdueOnly=true");
+      const overdueIds = (overdue.json() as { items: ListItem[] }).items.map((t) => t.id);
+      expect(overdueIds).not.toContain(shipped);
+    });
+
+    it("status[] / priority[] filter (repeated-key and comma-separated both parse); an invalid value 400s", async () => {
+      const iso = await isoPm("status priority");
+      const pid = await iso.newProject("A1 status priority");
+      const todo = await iso.newTask(pid, { title: "todo one", priority: "high" });
+      const blocked = await iso.newTask(pid, { title: "blocked one", status: "blocked", priority: "urgent" });
+      await iso.newTask(pid, { title: "normal one" });
+
+      const byStatusComma = await iso.list("?status=todo,blocked");
+      const idsComma = (byStatusComma.json() as { items: ListItem[] }).items.map((t) => t.id);
+      expect(idsComma).toEqual(expect.arrayContaining([todo, blocked]));
+
+      const byStatusRepeated = await iso.list("?status=todo&status=blocked");
+      const idsRepeated = (byStatusRepeated.json() as { items: ListItem[] }).items.map((t) => t.id);
+      expect(idsRepeated.sort()).toEqual(idsComma.sort());
+
+      const byPriority = await iso.list("?priority=high,urgent");
+      const priIds = (byPriority.json() as { items: ListItem[] }).items.map((t) => t.id);
+      expect(priIds).toEqual(expect.arrayContaining([todo, blocked]));
+
+      const badPriority = await iso.list("?priority=extreme");
+      expect(badPriority.statusCode).toBe(400);
+      const badStatus = await iso.list("?status=" + "x".repeat(41));
+      expect(badStatus.statusCode).toBe(400);
+    });
+
+    it("tag[] overlap, milestone[], responsible[] and ball[] (refId, kind-agnostic) all narrow the tenant-wide list", async () => {
+      const iso = await isoPm("tag milestone assignee");
+      const pid = await iso.newProject("A1 tag milestone assignee");
+      const tag = (await app.inject({ method: "POST", url: `/api/${iso.t}/pm/projects/${pid}/tags`, headers: iso.hdr, payload: { label: "Urgent", color: "clay" } }).then((r) => r.json())) as { id: string };
+      const ms = (await app.inject({ method: "POST", url: `/api/${iso.t}/pm/projects/${pid}/milestones`, headers: iso.hdr, payload: { name: "MVP" } }).then((r) => r.json())) as { id: string };
+      const deptBallId = newId(); // Ball = assignee.refId, kind-agnostic — a department id works exactly like a person id here.
+
+      const tagged = await iso.newTask(pid, { title: "tagged", tags: [tag.id] });
+      const milestoned = await iso.newTask(pid, { title: "milestoned", milestoneId: ms.id });
+      const respTask = await iso.newTask(pid, {
+        title: "responsible target",
+        assignee: { kind: "person", refId: iso.mem, refName: "Member", responsibleId: iso.mgr, responsibleName: "Manager" },
+      });
+      const ballTask = await iso.newTask(pid, {
+        title: "ball target",
+        assignee: { kind: "department", refId: deptBallId, refName: "Dept", responsibleId: iso.mem, responsibleName: "Member" },
+      });
+      const plain = await iso.newTask(pid, { title: "plain" });
+
+      const byTag = await iso.list(`?tag=${tag.id}`);
+      const tagIds = (byTag.json() as { items: ListItem[] }).items.map((t) => t.id);
+      expect(tagIds).toContain(tagged);
+      expect(tagIds).not.toContain(plain);
+
+      const byMs = await iso.list(`?milestone=${ms.id}`);
+      const msIds = (byMs.json() as { items: ListItem[] }).items.map((t) => t.id);
+      expect(msIds).toContain(milestoned);
+      expect(msIds).not.toContain(plain);
+
+      const byResp = await iso.list(`?responsible=${iso.mgr}`);
+      const respIds = (byResp.json() as { items: ListItem[] }).items.map((t) => t.id);
+      expect(respIds).toContain(respTask);
+      expect(respIds).not.toContain(ballTask);
+
+      const byBall = await iso.list(`?ball=${deptBallId}`);
+      const ballIds = (byBall.json() as { items: ListItem[] }).items.map((t) => t.id);
+      expect(ballIds).toContain(ballTask);
+      expect(ballIds).not.toContain(respTask);
+
+      const badUuid = await iso.list("?tag=not-a-uuid");
+      expect(badUuid.statusCode).toBe(400);
+    });
+
+    it("dueFrom/dueTo range + q keyword search (with literal %/_ in the term, not treated as a wildcard)", async () => {
+      const iso = await isoPm("due range and q");
+      const pid = await iso.newProject("A1 due range and q");
+      const inRange = await iso.newTask(pid, { title: "In range", dueDate: addDays(5) });
+      const outOfRange = await iso.newTask(pid, { title: "Out of range", dueDate: addDays(50) });
+      const percentTitle = await iso.newTask(pid, { title: "50% done report" });
+      const decoy = await iso.newTask(pid, { title: "50 days done report" }); // "50<anything> done" would match "50% done" as an UNESCAPED LIKE pattern (% as wildcard); must NOT match once % is escaped literal
+
+      const byRange = await iso.list(`?dueFrom=${addDays(1)}&dueTo=${addDays(10)}`);
+      const rangeIds = (byRange.json() as { items: ListItem[] }).items.map((t) => t.id);
+      expect(rangeIds).toContain(inRange);
+      expect(rangeIds).not.toContain(outOfRange);
+
+      const byQ = await iso.list(`?q=${encodeURIComponent("50% done")}`);
+      const qIds = (byQ.json() as { items: ListItem[] }).items.map((t) => t.id);
+      expect(qIds).toContain(percentTitle);
+      expect(qIds).not.toContain(decoy);
+
+      const badDate = await iso.list("?dueFrom=not-a-date");
+      expect(badDate.statusCode).toBe(400);
+    });
+
+    it("overdueOnly / dueSoon agree with lib/pmUrgency.ts's boundaries, and combine as a UNION when both are set", async () => {
+      const iso = await isoPm("urgency");
+      const pid = await iso.newProject("A1 urgency");
+      const overdue = await iso.newTask(pid, { title: "Overdue", dueDate: addDays(-2) });
+      const dueSoonEdge = await iso.newTask(pid, { title: "Due soon (boundary, day 3)", dueDate: addDays(3) });
+      const onTrack = await iso.newTask(pid, { title: "On track (day 4)", dueDate: addDays(4) });
+      const undated = await iso.newTask(pid, { title: "Undated" });
+
+      const overdueOnly = await iso.list("?overdueOnly=true");
+      const overdueIds = (overdueOnly.json() as { items: ListItem[] }).items.map((t) => t.id);
+      expect(overdueIds).toContain(overdue);
+      expect(overdueIds).not.toContain(dueSoonEdge);
+      expect(overdueIds).not.toContain(onTrack);
+      expect(overdueIds).not.toContain(undated);
+
+      const dueSoonOnly = await iso.list("?dueSoon=true");
+      const dueSoonIds = (dueSoonOnly.json() as { items: ListItem[] }).items.map((t) => t.id);
+      expect(dueSoonIds).toContain(dueSoonEdge);
+      expect(dueSoonIds).not.toContain(overdue);
+      expect(dueSoonIds).not.toContain(onTrack);
+
+      const both = await iso.list("?overdueOnly=true&dueSoon=true");
+      const bothIds = (both.json() as { items: ListItem[] }).items.map((t) => t.id);
+      expect(bothIds).toEqual(expect.arrayContaining([overdue, dueSoonEdge]));
+      expect(bothIds).not.toContain(onTrack);
+      expect(bothIds).not.toContain(undated);
+    });
+
+    it("cursor pagination walks the full set exactly once, in ascending due-date order, undated last", async () => {
+      const iso = await isoPm("pagination");
+      const pid = await iso.newProject("A1 pagination");
+      const withDates = await Promise.all([0, 1, 2, 3].map((n) => iso.newTask(pid, { title: `Dated ${n}`, dueDate: addDays(n) })));
+      const undated = await iso.newTask(pid, { title: "Undated tail" });
+      const all = [...withDates, undated];
+
+      const seen: string[] = [];
+      let cursor: string | null = null;
+      let pages = 0;
+      do {
+        const r = await iso.list(`?limit=2${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`);
+        expect(r.statusCode).toBe(200);
+        const { items, nextCursor } = r.json() as { items: ListItem[]; nextCursor: string | null };
+        expect(items.length).toBeGreaterThan(0);
+        expect(items.length).toBeLessThanOrEqual(2);
+        seen.push(...items.map((t) => t.id));
+        cursor = nextCursor;
+        pages += 1;
+      } while (cursor && pages < 20);
+
+      expect(seen).toHaveLength(all.length);
+      for (const id of all) expect(seen.filter((x) => x === id)).toHaveLength(1);
+      const undatedIdx = seen.indexOf(undated);
+      const lastDatedIdx = seen.indexOf(withDates[withDates.length - 1]);
+      expect(undatedIdx).toBeGreaterThan(lastDatedIdx);
+
+      const badCursor = await iso.list("?cursor=not-valid-base64url-json");
+      expect(badCursor.statusCode).toBe(400);
+      const badLimit = await iso.list("?limit=0");
+      expect(badLimit.statusCode).toBe(400);
+    });
+
+    it("includeSubtasks is accepted but a no-op today (subtasks are a checklist blob, not first-class tasks)", async () => {
+      const iso = await isoPm("include subtasks noop");
+      const pid = await iso.newProject("A1 include subtasks noop");
+      const id = await iso.newTask(pid, { title: "Has a checklist", subtasks: ["Step one"] });
+      const withFlag = await iso.list("?includeSubtasks=true");
+      const withoutFlag = await iso.list("?includeSubtasks=false");
+      const idsWith = (withFlag.json() as { items: ListItem[] }).items.map((t) => t.id);
+      const idsWithout = (withoutFlag.json() as { items: ListItem[] }).items.map((t) => t.id);
+      expect(idsWith).toContain(id);
+      expect(idsWithout).toContain(id);
+    });
+
+    it("RLS: a rival tenant's tasks never surface through ANY facet combination, and a forged cross-tenant URL 403s", async () => {
+      const home = await isoPm("rls home");
+      const pid = await home.newProject("A1 rls home");
+      const homeTag = (await app.inject({ method: "POST", url: `/api/${home.t}/pm/projects/${pid}/tags`, headers: home.hdr, payload: { label: "Home", color: "olive" } }).then((r) => r.json())) as { id: string };
+      const homeTask = await home.newTask(pid, {
+        title: "Home task 50% overdue",
+        status: "blocked",
+        priority: "urgent",
+        dueDate: addDays(-1),
+        tags: [homeTag.id],
+        assignee: { kind: "person", refId: home.mem, refName: "Member", responsibleId: home.mgr, responsibleName: "Manager" },
+      });
+
+      const rival = await isoPm("rls rival");
+      const rivalPid = await rival.newProject("Rival A1 project");
+      const rivalTag = (await app.inject({ method: "POST", url: `/api/${rival.t}/pm/projects/${rivalPid}/tags`, headers: rival.hdr, payload: { label: "Home", color: "olive" } }).then((r) => r.json())) as { id: string };
+      // deliberately overlapping shape (same status/priority/dueDate/tag LABEL/assignee ids) so a
+      // leak through shared literal values, not just distinct ids, would be caught.
+      const rivalTask = (await app.inject({
+        method: "POST", url: `/api/${rival.t}/pm/tasks`, headers: rival.hdr,
+        payload: { projectId: rivalPid, title: "Home task 50% overdue", status: "blocked", priority: "urgent", dueDate: addDays(-1), tags: [rivalTag.id] },
+      }).then((r) => r.json())) as { id: string };
+
+      // Every facet this ticket adds, exercised at once, against the HOME tenant's URL.
+      const qs = `?status=blocked&priority=urgent&tag=${homeTag.id}&responsible=${home.mgr}&ball=${home.mem}&dueFrom=${addDays(-30)}&dueTo=${addDays(0)}&q=${encodeURIComponent("50%")}&overdueOnly=true&includeClosed=true&limit=200`;
+      const r = await home.list(qs);
+      expect(r.statusCode).toBe(200);
+      const ids = (r.json() as { items: ListItem[] }).items.map((t) => t.id);
+      expect(ids).toContain(homeTask);
+      expect(ids).not.toContain(rivalTask.id);
+
+      // a forged cross-tenant tag/responsible/ball id (the RIVAL's own uuids) against the HOME
+      // tenant's URL must find nothing under RLS — never silently ignored-vs-leaked ambiguity.
+      const forgedFacets = await home.list(`?tag=${rivalTag.id}&responsible=${rival.mgr}`);
+      const forgedIds = (forgedFacets.json() as { items: ListItem[] }).items.map((t) => t.id);
+      expect(forgedIds).not.toContain(rivalTask.id);
+
+      // and the base RBAC wall still applies underneath all of this: a rival principal simply
+      // reading the home tenant's URL is denied outright.
+      const cross = await home.list("", rival.hdr);
+      expect(cross.statusCode).toBe(403);
+    });
+  });
+
+  // ---------------- P4-A2 — cross-project (tenant-grain) burndown + flow ----------------
+  describe("P4-A2 — tenant-grain burndown + flow", () => {
+    const getTenantBurndown = (qs = "", as = hdr()) => app.inject({ method: "GET", url: `/api/${tenant}/pm/burndown${qs}`, headers: as });
+    const getTenantFlow = (qs = "", as = hdr()) => app.inject({ method: "GET", url: `/api/${tenant}/pm/flow${qs}`, headers: as });
+    const todayStr = () => new Date().toISOString().slice(0, 10);
+
+    // Both aggregate EVERY project in the tenant (that's the whole point of "tenant-grain"), so
+    // an exact-count assertion needs its own isolated tenant per test — the shared `tenant` above
+    // already carries dozens of projects/tasks from every other test in this file by the time
+    // these run, same reasoning as P4-A1's pagination-completeness test.
+    const isolatedTenant = async (label: string) => {
+      const t = await createCompany(`Agency A2 ${label} (isolated)`, ["agency", "pm"]);
+      const mgr = await createUser(`a2-${label.replace(/\s+/g, "-")}@x.test`, `A2 ${label} Manager`);
+      await addMembership(t, mgr);
+      await grantRole(mgr, await createRole("manager"), "company", t);
+      const h = asUser(mgr);
+      const newProject = (name: string) => createProject(t, name, mgr);
+      const newTask = async (pid: string, body: Record<string, unknown> = {}) =>
+        (await app.inject({ method: "POST", url: `/api/${t}/pm/tasks`, headers: h, payload: { projectId: pid, title: "T", ...body } }).then((r) => r.json())).id as string;
+      return { tenantId: t, hdr: h, newProject, newTask };
+    };
+
+    it("burndown sums open/done across every project and weights avgProgress by each project's own task count", async () => {
+      const iso = await isolatedTenant("burndown");
+      const p1 = await iso.newProject("A2 burndown p1");
+      const p2 = await iso.newProject("A2 burndown p2");
+      // p1: 1 task at 0% progress (open). p2: 1 open (0%) + 1 done (100%) -> avg 50 in p2 alone.
+      await iso.newTask(p1);
+      await iso.newTask(p2);
+      const doneInP2 = await iso.newTask(p2, { status: "done" });
+      await app.inject({ method: "PATCH", url: `/api/${iso.tenantId}/pm/tasks/${doneInP2}`, headers: iso.hdr, payload: { progress: 100 } });
+
+      const r = await app.inject({ method: "GET", url: `/api/${iso.tenantId}/pm/burndown?from=${todayStr()}&to=${todayStr()}`, headers: iso.hdr });
+      expect(r.statusCode).toBe(200);
+      const rows = r.json() as Array<{ date: string; open: number; done: number; avgProgress: number }>;
+      expect(rows).toHaveLength(1);
+      expect(rows[0].open).toBe(2); // p1's task + p2's open task
+      expect(rows[0].done).toBe(1); // p2's done task
+      // weighted mean: p1 contributes progress 0 over 1 task, p2 contributes (0+100)/2=50 over 2
+      // tasks -> tenant-wide weighted avg = (1*0 + 2*50) / 3 = 33 (rounded).
+      expect(rows[0].avgProgress).toBe(33);
+    });
+
+    it("flow merges per-project status_counts by summing the SAME literal status id across projects", async () => {
+      const iso = await isolatedTenant("flow");
+      const p1 = await iso.newProject("A2 flow p1");
+      const p2 = await iso.newProject("A2 flow p2");
+      await iso.newTask(p1, { status: "todo" });
+      await iso.newTask(p1, { status: "todo" });
+      await iso.newTask(p2, { status: "todo" });
+      await iso.newTask(p2, { status: "done" });
+
+      const r = await app.inject({ method: "GET", url: `/api/${iso.tenantId}/pm/flow?from=${todayStr()}&to=${todayStr()}`, headers: iso.hdr });
+      expect(r.statusCode).toBe(200);
+      const rows = r.json() as Array<{ date: string; counts: Record<string, number> }>;
+      expect(rows).toHaveLength(1);
+      expect(rows[0].counts.todo).toBe(3);
+      expect(rows[0].counts.done).toBe(1);
+    });
+
+    it("empty range returns [] for both; a plain member (read-gated) can still read", async () => {
+      const b = await getTenantBurndown("?from=2000-01-01&to=2000-01-02");
+      expect(b.statusCode).toBe(200);
+      expect(b.json()).toEqual([]);
+      const f = await getTenantFlow("?from=2000-01-01&to=2000-01-02");
+      expect(f.statusCode).toBe(200);
+      expect(f.json()).toEqual([]);
+
+      const memberBurndown = await getTenantBurndown("", asUser(member));
+      expect(memberBurndown.statusCode).toBe(200);
+    });
+
+    it("validates from/to and applies the SAME RLS wall as every other pm_project read", async () => {
+      expect((await getTenantBurndown("?from=not-a-date")).statusCode).toBe(400);
+      expect((await getTenantFlow("?to=07-24-2026")).statusCode).toBe(400);
+
+      const rivalTenant = await createCompany("Rival Co (pm A2)", ["agency", "pm"]);
+      const rivalAdmin = await createUser("rival-a2@x.test", "Rival A2 Admin");
+      await addMembership(rivalTenant, rivalAdmin);
+      await grantRole(rivalAdmin, await createRole("manager"), "company", rivalTenant);
+
+      expect((await getTenantBurndown("", asUser(rivalAdmin))).statusCode).toBe(403);
+      expect((await getTenantFlow("", asUser(rivalAdmin))).statusCode).toBe(403);
     });
   });
 });

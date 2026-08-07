@@ -38,6 +38,77 @@ const TAG_COLORS = new Set(["bronze", "champagne", "olive", "slate", "clay", "mo
 const STATUS_ID_RE = /^[a-z0-9_]{1,40}$/;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
+// ---------------- P4-A1 — tenant-wide task list: query-param parsing helpers ----------------
+// Mirrors platform-ui's `lib/pmUrgency.ts` DUE_SOON_DAYS_DEFAULT (kept as a separate constant,
+// deliberately — this file has no import relationship with platform-ui, and the two are pinned
+// to the same value by a comment, not a shared module, same precedent as DEFAULT_STATUSES above).
+const DUE_SOON_DAYS_DEFAULT = 3;
+const TASK_LIST_LIMIT_DEFAULT = 50;
+const TASK_LIST_LIMIT_MAX = 200;
+
+/** Accepts either repeated query keys (`?tag=a&tag=b`, what Fastify's default querystring parser
+ *  produces) or one comma-separated value (`?tag=a,b`) — both are common client shapes and neither
+ *  should 400 the other. Dedupes; empty/whitespace-only pieces are dropped silently (an accidental
+ *  trailing comma is not a client error worth surfacing). Capped so a hostile/buggy client can't
+ *  build an ANY($n) list large enough to matter. */
+function parseArrayParam(v: unknown, max = 50): string[] {
+  if (v === undefined || v === null) return [];
+  const raw = Array.isArray(v) ? v : [v];
+  const out: string[] = [];
+  for (const item of raw) {
+    if (typeof item !== "string") continue;
+    for (const piece of item.split(",")) {
+      const t = piece.trim();
+      if (t) out.push(t);
+    }
+  }
+  const uniq = Array.from(new Set(out));
+  if (uniq.length > max) throw new BadRequestException(`too many values (max ${max})`);
+  return uniq;
+}
+
+function parseUuidArrayParam(v: unknown, field: string): string[] {
+  const arr = parseArrayParam(v);
+  for (const id of arr) if (!UUID_RE.test(id)) throw new BadRequestException(`${field} must be an array of uuids`);
+  return arr;
+}
+
+/** HTTP query values are always strings (or arrays of strings) — never a real boolean. */
+function parseBoolParam(v: unknown): boolean {
+  return v === "true" || v === "1";
+}
+
+/** Escapes ILIKE's own wildcard characters (and a literal backslash) in free-text `q` input so a
+ *  keyword containing `%` or `_` is matched LITERALLY rather than as a pattern. Postgres's default
+ *  LIKE/ILIKE escape character is backslash, so no explicit ESCAPE clause is needed once this has
+ *  run — same convention as everywhere else in this codebase that builds an ILIKE pattern. */
+function escapeLikePattern(s: string): string {
+  return s.replace(/[\\%_]/g, (ch) => `\\${ch}`);
+}
+
+/** Opaque keyset-pagination cursor for `listTasks` — `{ effDue, id }` of the last row on the
+ *  previous page, where `effDue` is the SAME "undated sorts last" sentinel the query orders by
+ *  (see `listTasks`'s SQL: `COALESCE(due_date, '9999-12-31')`). Base64url JSON rather than a raw
+ *  composite string so a malformed/tampered cursor fails a cheap shape check instead of silently
+ *  parsing into the wrong tuple. */
+interface TaskListCursor { d: string; id: string }
+
+function encodeTaskCursor(effDueIso: string, id: string): string {
+  return Buffer.from(JSON.stringify({ d: effDueIso, id })).toString("base64url");
+}
+
+function decodeTaskCursor(raw: string): TaskListCursor {
+  try {
+    const parsed = JSON.parse(Buffer.from(raw, "base64url").toString("utf8")) as Partial<TaskListCursor>;
+    if (typeof parsed.d !== "string" || !DATE_RE.test(parsed.d) || typeof parsed.id !== "string" || !UUID_RE.test(parsed.id)) {
+      throw new Error("bad cursor shape");
+    }
+    return { d: parsed.d, id: parsed.id };
+  } catch {
+    throw new BadRequestException("invalid cursor");
+  }
+}
+
 // ---------------- Recurring tasks (P2-06, pm-console-ux-design-spec §8) ----------------
 type RecurrenceFreq = "daily" | "weekly" | "biweekly" | "monthly";
 const RECURRENCE_FREQS = new Set<RecurrenceFreq>(["daily", "weekly", "biweekly", "monthly"]);
@@ -1183,19 +1254,191 @@ export class PmController {
   }
 
   // ---------------- Tasks ----------------
+  // ---------------- P4-A1 — the cross-project (`@all`) task list ----------------
+  // The ONLY tenant-wide PM read today (every other list is `pm/projects/:projectId/tasks`), and
+  // therefore the endpoint that makes the `@all` scope viable or not (plan §0, workstream A). Every
+  // facet below is applied SERVER-SIDE, in SQL, before the LIMIT — a tenant-wide "what's about to
+  // slip" view filtered in the browser means shipping every task in the tenant to the client, which
+  // does not scale and is exactly what this ticket exists to prevent.
+  //
+  // `isDone`/`isBlocked` on each row are FLAG-DRIVEN off that task's OWN project's status registry
+  // (the `reg` LATERAL below), never a literal `status = 'done'` match — tasks here span many
+  // projects with potentially different registries, which is exactly where an id-based shortcut
+  // breaks (mirrors `effectiveStatuses`/`openDependencies` elsewhere in this file). A project with
+  // zero materialized `pm_project_statuses` rows reads through the synthesized defaults' flags
+  // (`t.status = 'done'` / `'blocked'`, the only two DEFAULT_STATUSES ids with a flag set) — same
+  // synth-on-read contract as `effectiveStatuses`. An ORPHAN status id (kept, never pruned, on a
+  // MATERIALIZED project once its status row is deleted) has no registry row to match and reads as
+  // NOT done / NOT blocked (`COALESCE(..., false)`), matching `openDependencies`'s own "gone counts
+  // as open" reading.
+  //
+  // `overdueOnly`/`dueSoon` implement platform-ui's `lib/pmUrgency.ts` boundaries exactly: overdue =
+  // due date strictly before today, due-soon = due within `dueSoonDays` (default 3) INCLUSIVE of
+  // today, and `done` always wins (a finished task is excluded from both regardless of its date).
+  // Passing BOTH is a union ("show me anything already slipping or about to") rather than an
+  // intersection, which would be empty by construction since the two tiers are mutually exclusive —
+  // see the report for why.
+  //
+  // Cursor pagination is keyset, not OFFSET: `(effDue, id)` where `effDue` is `due_date` with
+  // undated tasks sorted last via a fixed-future sentinel (`COALESCE(due_date, '9999-12-31')`) —
+  // avoids the classic NULLS-LAST-vs-tuple-comparison trap (a raw ROW(due_date, id) comparison
+  // would silently drop every undated row the moment either cursor field is NULL, since Postgres
+  // row comparison yields NULL/false the instant it hits a NULL operand).
   @Get(":tenantId/pm/tasks")
-  async listTasks(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Query("assignee") assignee?: string) {
+  async listTasks(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Query() query: Record<string, unknown>) {
+    // ---- parse + validate (MI-03: input validation before authz/DB work) ----
+    const mine = query.assignee === "me";
+    const statusIds = parseArrayParam(query.status);
+    for (const s of statusIds) if (!STATUS_ID_RE.test(s)) throw new BadRequestException("status must be an array of valid status ids");
+    const priorities = parseArrayParam(query.priority);
+    for (const p of priorities) if (!PRIORITIES.has(p)) throw new BadRequestException("priority must be one of low|normal|high|urgent");
+    const tagIds = parseUuidArrayParam(query.tag, "tag");
+    const responsibleIds = parseUuidArrayParam(query.responsible, "responsible");
+    // Ball = assignee.refId (plan §1.5) — deliberately NOT restricted to kind:"person". A
+    // department/division can hold the ball (our poly-assignee superset over Repsona), so this
+    // facet matches refId regardless of kind, same as `responsible[]` matches responsibleId
+    // regardless of what kind the ball itself carries.
+    const ballIds = parseUuidArrayParam(query.ball, "ball");
+    const milestoneIds = parseUuidArrayParam(query.milestone, "milestone");
+
+    const dueFrom = typeof query.dueFrom === "string" ? query.dueFrom : undefined;
+    const dueTo = typeof query.dueTo === "string" ? query.dueTo : undefined;
+    if (dueFrom !== undefined && !DATE_RE.test(dueFrom)) throw new BadRequestException("dueFrom must be a YYYY-MM-DD date");
+    if (dueTo !== undefined && !DATE_RE.test(dueTo)) throw new BadRequestException("dueTo must be a YYYY-MM-DD date");
+
+    const q = typeof query.q === "string" ? query.q.trim().slice(0, 200) : "";
+    const overdueOnly = parseBoolParam(query.overdueOnly);
+    const dueSoon = parseBoolParam(query.dueSoon);
+    const includeClosed = parseBoolParam(query.includeClosed);
+    // `includeSubtasks` is accepted (never a 400) for forward-compat but is a NO-OP: our
+    // `subtasks` are a lightweight JSONB checklist blob ON a task, never separate `pm_tasks` rows
+    // (plan decision 11 — "promote them, or drop the toggle" — is still open as of this ticket).
+    // Every row this endpoint returns already IS a top-level task; there is nothing to
+    // include/exclude yet. Flagged in the P4-A1 report rather than guessed at here.
+
+    const dueSoonDays = (() => {
+      if (query.dueSoonDays === undefined) return DUE_SOON_DAYS_DEFAULT;
+      const n = Number(query.dueSoonDays);
+      if (!Number.isInteger(n) || n < 0 || n > 90) throw new BadRequestException("dueSoonDays must be an integer between 0 and 90");
+      return n;
+    })();
+
+    const limit = (() => {
+      if (query.limit === undefined) return TASK_LIST_LIMIT_DEFAULT;
+      const n = Number(query.limit);
+      if (!Number.isInteger(n) || n < 1 || n > TASK_LIST_LIMIT_MAX) throw new BadRequestException(`limit must be an integer between 1 and ${TASK_LIST_LIMIT_MAX}`);
+      return n;
+    })();
+
+    const cursor = typeof query.cursor === "string" && query.cursor ? decodeTaskCursor(query.cursor) : null;
+
     await authorize(req.principal, { kind: "pm_task", tenantId }, "read");
-    const mine = assignee === "me";
-    return withTenants([tenantId], (c) =>
-      c
-        .query<TaskRow>(
-          `${TASK_SELECT} ${mine ? `AND (t.assignee->>'responsibleId' = $1 OR (t.assignee->>'kind' = 'person' AND t.assignee->>'refId' = $1))` : ""}
-           ORDER BY t.due_date NULLS LAST, t.created_at DESC LIMIT 500`,
-          mine ? [req.principal.userId] : [],
+
+    // `today` resolved ONCE per request (never `CURRENT_DATE` inside the query, which would depend
+    // on the DB session's timezone setting) — same discipline as `patchTask`'s `todayIso()` call
+    // and platform-ui's `pmUrgency.ts` header ("today is a required parameter, never read from the
+    // clock inside the helper").
+    const today = todayIso();
+    const todayPlusN = addDaysIso(today, dueSoonDays);
+
+    return withTenants([tenantId], async (c) => {
+      const params: unknown[] = [];
+      const push = (v: unknown): string => {
+        params.push(v);
+        return `$${params.length}`;
+      };
+
+      // ---- CTE-level filters: plain columns, cheap, index-friendly ----
+      const cteConditions: string[] = ["t.deleted_at IS NULL"];
+      if (mine) {
+        const p = push(req.principal.userId);
+        cteConditions.push(`(t.assignee->>'responsibleId' = ${p} OR (t.assignee->>'kind' = 'person' AND t.assignee->>'refId' = ${p}))`);
+      }
+      if (statusIds.length) cteConditions.push(`t.status = ANY(${push(statusIds)}::text[])`);
+      if (priorities.length) cteConditions.push(`t.priority = ANY(${push(priorities)}::text[])`);
+      if (responsibleIds.length) cteConditions.push(`t.assignee->>'responsibleId' = ANY(${push(responsibleIds)}::text[])`);
+      if (ballIds.length) cteConditions.push(`t.assignee->>'refId' = ANY(${push(ballIds)}::text[])`);
+      if (tagIds.length) cteConditions.push(`t.tags && ${push(tagIds)}::uuid[]`);
+      if (milestoneIds.length) cteConditions.push(`t.milestone_id = ANY(${push(milestoneIds)}::uuid[])`);
+      if (dueFrom) cteConditions.push(`t.due_date >= ${push(dueFrom)}::date`);
+      if (dueTo) cteConditions.push(`t.due_date <= ${push(dueTo)}::date`);
+      if (q) {
+        const like = push(`%${escapeLikePattern(q)}%`);
+        cteConditions.push(`(t.title ILIKE ${like} OR t.description ILIKE ${like})`);
+      }
+
+      // ---- outer-query filters: depend on the CTE's OWN derived columns (isDone/effDue), so they
+      // cannot live in the CTE's WHERE (a SELECT's own output aliases aren't visible to its WHERE) ----
+      const outerConditions: string[] = [];
+      if (!includeClosed) outerConditions.push(`NOT base."isDone"`);
+      // Compared against "effDue" (a real `date`, the same `COALESCE(due_date, '9999-12-31')`
+      // sentinel the ORDER BY/cursor use) rather than "dueDate" (text, for display only) — this
+      // ALSO reproduces `lib/pmUrgency.ts`'s "undated" tier for free: the far-future sentinel can
+      // never be `< today` or fall inside the due-soon window, so an undated task is excluded from
+      // both without a separate `IS NOT NULL` check.
+      if (overdueOnly && dueSoon) {
+        outerConditions.push(`NOT base."isDone" AND base."effDue" <= ${push(todayPlusN)}::date`);
+      } else if (overdueOnly) {
+        outerConditions.push(`NOT base."isDone" AND base."effDue" < ${push(today)}::date`);
+      } else if (dueSoon) {
+        outerConditions.push(`NOT base."isDone" AND base."effDue" BETWEEN ${push(today)}::date AND ${push(todayPlusN)}::date`);
+      }
+      if (cursor) {
+        const d = push(cursor.d);
+        const id = push(cursor.id);
+        outerConditions.push(`(base."effDue", base.id) > (${d}::date, ${id}::uuid)`);
+      }
+      const limitParam = push(limit + 1); // fetch one extra row to detect "is there a next page"
+
+      const sql = `
+        WITH base AS (
+          SELECT t.id, t.project_id AS "projectId", p.name AS "projectName",
+                 p.short_code AS "projectShortCode", t.seq,
+                 CASE WHEN p.short_code IS NOT NULL AND t.seq IS NOT NULL THEN p.short_code || '-' || t.seq ELSE NULL END AS "displayCode",
+                 t.title, t.status, t.priority, t.progress, t.assignee,
+                 t.milestone_id AS "milestoneId",
+                 to_char(t.start_date, 'YYYY-MM-DD') AS "startDate",
+                 to_char(t.due_date, 'YYYY-MM-DD') AS "dueDate",
+                 t.tags, t.depends_on AS "dependsOn", t.updated_at AS "updatedAt",
+                 CASE WHEN reg.materialized THEN COALESCE(reg.is_done_row, false) ELSE (t.status = 'done') END AS "isDone",
+                 CASE WHEN reg.materialized THEN COALESCE(reg.is_blocked_row, false) ELSE (t.status = 'blocked') END AS "isBlocked",
+                 COALESCE(t.due_date, DATE '9999-12-31') AS "effDue",
+                 -- Text twin of "effDue", read for the cursor ONLY -- node-pg's date parser
+                 -- constructs the JS Date at LOCAL midnight (postgres-date's own documented
+                 -- behaviour: "force YYYY-MM-DD dates to be parsed as local time"), so calling
+                 -- toISOString() on "effDue" silently shifts the calendar day by the server's UTC
+                 -- offset. to_char sidesteps the Date object entirely -- same discipline as every
+                 -- OTHER date field in this file ("dueDate", "startDate" above).
+                 to_char(COALESCE(t.due_date, DATE '9999-12-31'), 'YYYY-MM-DD') AS "effDueText"
+          FROM pm_tasks t
+          JOIN projects p ON p.id = t.project_id
+          LEFT JOIN LATERAL (
+            SELECT
+              EXISTS(SELECT 1 FROM pm_project_statuses s2 WHERE s2.project_id = t.project_id AND s2.deleted_at IS NULL) AS materialized,
+              (SELECT s.is_done FROM pm_project_statuses s WHERE s.project_id = t.project_id AND s.id = t.status AND s.deleted_at IS NULL) AS is_done_row,
+              (SELECT s.is_blocked FROM pm_project_statuses s WHERE s.project_id = t.project_id AND s.id = t.status AND s.deleted_at IS NULL) AS is_blocked_row
+          ) reg ON true
+          WHERE ${cteConditions.join(" AND ")}
         )
-        .then((r) => r.rows),
-    );
+        SELECT * FROM base
+        ${outerConditions.length ? `WHERE ${outerConditions.join(" AND ")}` : ""}
+        ORDER BY base."effDue" ASC, base.id ASC
+        LIMIT ${limitParam}
+      `;
+
+      const result = await c.query(sql, params);
+      const rows = result.rows as Array<Record<string, unknown> & { id: string; effDue: Date; effDueText: string }>;
+      const hasMore = rows.length > limit;
+      const page = hasMore ? rows.slice(0, limit) : rows;
+      const nextCursor = hasMore
+        ? encodeTaskCursor(page[page.length - 1].effDueText, page[page.length - 1].id)
+        : null;
+      // `effDue`/`effDueText` are internal sort keys only (the "undated sorts last" sentinel) —
+      // never part of the public shape. `dueDate` (already on every row, null for undated tasks)
+      // is the real field.
+      const items = page.map(({ effDue, effDueText, ...rest }) => rest);
+      return { items, nextCursor };
+    });
   }
 
   @Get(":tenantId/pm/tasks/:taskId")
@@ -2292,6 +2535,104 @@ export class PmController {
       );
       // Empty series (no snapshots in range) returns [], never an error.
       return rows.rows;
+    });
+  }
+
+  // ---------------- P4-A2 — cross-project (tenant-grain) burndown + flow ----------------
+  // Same read-gate + snapshot-freshness contract as the per-project versions above, widened from
+  // one project to every project the tenant has. `pm_progress_snapshots` is already one row per
+  // (tenant, project, day) (migration 0040) — a tenant-grain series is a GROUP BY over that same
+  // table, not a new storage shape.
+  //
+  // Freshness: the per-project lazy upsert-on-read (D-2) only warms the ONE project it's called
+  // with, so a tenant-grain read upserts TODAY's snapshot for every one of the tenant's projects
+  // first — same loop `burndown-job.ts`'s nightly pre-warmer runs, just synchronous and scoped to
+  // "today" instead of "every day". A tenant with many projects pays for that loop on every
+  // uncached read; acceptable for now (bounded by project count, not task count) and flagged as a
+  // scaling follow-up in the P4-A2 report rather than solved here.
+  @Get(":tenantId/pm/burndown")
+  async getTenantBurndown(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Query("from") from?: string,
+    @Query("to") to?: string,
+  ) {
+    await authorize(req.principal, { kind: "pm_project", tenantId }, "read");
+    if (from !== undefined && !DATE_RE.test(from)) throw new BadRequestException("from must be a YYYY-MM-DD date");
+    if (to !== undefined && !DATE_RE.test(to)) throw new BadRequestException("to must be a YYYY-MM-DD date");
+    return withTenants([tenantId], async (c) => {
+      const { rows: projectRows } = await c.query<{ id: string }>(
+        `SELECT id FROM projects WHERE tenant_id = $1 AND deleted_at IS NULL`,
+        [tenantId],
+      );
+      for (const { id: pid } of projectRows) await upsertTodaySnapshot(c, tenantId, pid);
+
+      // avgProgress is a TASK-COUNT-WEIGHTED mean across projects, not a mean-of-means — a
+      // 2-task project and a 200-task project must not carry equal weight on the same date.
+      // `open_count + done_count` (the project's own total that day) is the weight; a date with
+      // zero tasks anywhere contributes 0/0 and is coalesced to 0 rather than dividing by zero.
+      const rows = await c.query<{ date: string; open: string; done: string; weighted: string | null }>(
+        `SELECT to_char(snapshot_date, 'YYYY-MM-DD') AS date,
+                SUM(open_count) AS open,
+                SUM(done_count) AS done,
+                SUM(avg_progress * (open_count + done_count)) AS weighted
+         FROM pm_progress_snapshots
+         WHERE ($1::date IS NULL OR snapshot_date >= $1::date)
+           AND ($2::date IS NULL OR snapshot_date <= $2::date)
+         GROUP BY snapshot_date
+         ORDER BY snapshot_date ASC`,
+        [from || null, to || null],
+      );
+      return rows.rows.map((r) => {
+        const open = Number(r.open);
+        const done = Number(r.done);
+        const total = open + done;
+        const avgProgress = total > 0 ? Math.round(Number(r.weighted ?? 0) / total) : 0;
+        return { date: r.date, open, done, avgProgress };
+      });
+    });
+  }
+
+  @Get(":tenantId/pm/flow")
+  async getTenantFlow(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Query("from") from?: string,
+    @Query("to") to?: string,
+  ) {
+    await authorize(req.principal, { kind: "pm_project", tenantId }, "read");
+    if (from !== undefined && !DATE_RE.test(from)) throw new BadRequestException("from must be a YYYY-MM-DD date");
+    if (to !== undefined && !DATE_RE.test(to)) throw new BadRequestException("to must be a YYYY-MM-DD date");
+    return withTenants([tenantId], async (c) => {
+      const { rows: projectRows } = await c.query<{ id: string }>(
+        `SELECT id FROM projects WHERE tenant_id = $1 AND deleted_at IS NULL`,
+        [tenantId],
+      );
+      for (const { id: pid } of projectRows) await upsertTodaySnapshot(c, tenantId, pid);
+
+      const rows = await c.query<{ date: string; counts: Record<string, number> }>(
+        `SELECT to_char(snapshot_date, 'YYYY-MM-DD') AS date, status_counts AS counts
+         FROM pm_progress_snapshots
+         WHERE ($1::date IS NULL OR snapshot_date >= $1::date)
+           AND ($2::date IS NULL OR snapshot_date <= $2::date)
+         ORDER BY snapshot_date ASC`,
+        [from || null, to || null],
+      );
+      // One row PER PROJECT per date comes back (the table's own grain) — merge by summing counts
+      // for the same literal status id across projects on the same date. A status id means
+      // different things in different projects' registries (a custom "Client Review" in one,
+      // orphaned nonsense in another), so this is a best-effort tenant-wide silhouette, not a
+      // semantically-unified breakdown — exactly what the per-project version already gives you
+      // if you need the real thing for one project.
+      const merged = new Map<string, Record<string, number>>();
+      for (const r of rows.rows) {
+        const bucket = merged.get(r.date) ?? {};
+        for (const [k, v] of Object.entries(r.counts ?? {})) bucket[k] = (bucket[k] ?? 0) + Number(v);
+        merged.set(r.date, bucket);
+      }
+      return Array.from(merged.entries())
+        .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+        .map(([date, counts]) => ({ date, counts }));
     });
   }
 
