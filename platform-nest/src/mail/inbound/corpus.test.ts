@@ -699,4 +699,48 @@ describe.skipIf(!TEST_URL)("mail inbound corpus — POST /api/mail/inbound/brevo
     const all = await adminPool().query(`SELECT count(*)::int AS n FROM mail_messages`);
     expect(all.rows[0].n).toBe(0);
   });
+
+  // ── live-defect reproduction (2026-08-07): no/unrecognized content-type used to 500 ──────────────
+  // Live evidence (production box; real domain deliberately not spelled out here — see A12's grep
+  // gate, grep-gate.test.ts): `POST /api/mail/inbound/brevo` with no content-type header returned
+  // 500, and the log showed `FastifyError: Unsupported Media Type: undefined`
+  // escaping to `LastResortExceptionFilter`'s unconditional 500. Fastify raises that error from its
+  // OWN content-type-parser selection step (`node_modules/fastify/lib/contentTypeParser.js`), which
+  // runs BEFORE the `preParsing` raw-body hook's replacement body is ever handed to a parser and
+  // BEFORE the controller (and therefore before `authenticateInbound`) ever runs — so this reproduces
+  // with NO auth headers at all, deliberately not routed through this file's `post()` helper (which
+  // always sets `content-type: application/json`). Brevo itself always sends JSON — this fixture
+  // exists for the internet-facing scanner traffic the ticket described, not a real provider case.
+  it("[malformed] (live-defect fix) no content-type header at all -> 415, not 500, and leaks nothing", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/mail/inbound/brevo",
+      // No `content-type` header — `light-my-request` only infers one for object payloads, never for
+      // a raw string, so this is the same "content-type: undefined" shape the live log captured.
+      payload: JSON.stringify({ items: [] }),
+    });
+    expect(res.statusCode).toBe(415);
+    expect(res.json()).toEqual({ error: "unsupported media type", code: "unsupported_media_type" });
+    // Never the raw Fastify error text ("Unsupported Media Type: undefined") or anything else
+    // exception-derived — the fixed generic body from LastResortExceptionFilter's client-error table.
+    expect(res.payload).not.toContain("Unsupported Media Type");
+    expect(res.payload).not.toContain("FastifyError");
+    const all = await adminPool().query(`SELECT count(*)::int AS n FROM mail_messages`);
+    expect(all.rows[0].n).toBe(0);
+  });
+
+  it("[malformed] (live-defect fix) an unrecognized content-type (application/xml) also 415s cleanly, not 500", async () => {
+    // NOT `text/plain` — Fastify registers a default parser for that (and for `application/json`)
+    // out of the box (`contentTypeParser.js`), so it would parse successfully rather than reproduce
+    // the "no matching parser" condition. `application/xml` has no registered parser anywhere in
+    // this app, matching the "genuinely unrecognized" shape the live defect needs.
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/mail/inbound/brevo",
+      headers: { "content-type": "application/xml" },
+      payload: "<not-brevo/>",
+    });
+    expect(res.statusCode).toBe(415);
+    expect(res.json()).toEqual({ error: "unsupported media type", code: "unsupported_media_type" });
+  });
 });

@@ -47,6 +47,38 @@
 // Conventions entry SM-57 added (`{ error, field?, code? }`, additive/optional) — a fixed, generic
 // discriminator costs nothing to add and lets a caller distinguish "an unclassified server fault"
 // from any other error shape without string-matching the (also fixed) `error` text.
+//
+// SM-58 addendum (2026-08-07 live-defect fix) — client input errors were flattened to 500 too.
+// Live evidence: `POST /api/mail/inbound/brevo` with no/unrecognized content-type made Fastify raise
+// its own `FST_ERR_CTP_INVALID_MEDIA_TYPE` (a 415-class `FastifyError`, thrown from
+// `contentTypeParser.js` BEFORE any controller or Nest `HttpException` ever runs), and this filter's
+// unconditional `reply.status(500)` swallowed the honest 415 into a generic server fault. Same family
+// as `FST_ERR_CTP_INVALID_CONTENT_LENGTH`/`FST_ERR_CTP_EMPTY_JSON_BODY` (400) and
+// `FST_ERR_CTP_BODY_TOO_LARGE` (413) — none of these are server faults, they are Fastify's own
+// rejection of malformed/oversized/mistyped requests, and this is the ONLY filter that ever sees them
+// (they are not `HttpException`s, so `HttpErrorFilter`'s `@Catch(HttpException)` never matches).
+//
+// `readClientErrorStatus` below trusts a validated `statusCode` (integer, 400-499 inclusive) off the
+// thrown value to pick the REPLY STATUS ONLY — never any text from the exception. That is deliberately
+// within the file's own leak rule: a status code is not a leak, a message is. The reply body for a
+// client-error status is still a FIXED, per-status generic phrase from a static lookup table below
+// (`CLIENT_ERROR_BODIES`) — never `exception.message` — so a hostile thrown value that forges
+// `statusCode` can at most steer an unclassified fault to present as a different (still generic,
+// still detail-free) 4xx instead of 500. It can never fabricate response content, and it can never
+// turn a genuine 5xx (or a value with no readable/valid statusCode at all) into anything but the
+// existing safe 500 default — see `readClientErrorStatus`'s own comment for the exact bounds.
+//
+// LOGGING/SPAN SEVERITY — a deliberate choice, not an oversight: a validated 4xx from this path is
+// treated as ROUTINE CLIENT INPUT NOISE, not a server fault. It still logs to stderr unconditionally
+// (nothing here should vanish when OTEL_ENABLED is unset, same rule as the 500 path), but under a
+// distinct `[client-error]` tag via `console.warn` rather than `[unhandled-exception]` — so a scanner
+// lobbing junk at a public webhook does not read, to a human or an alert rule grepping that tag, as
+// the same class of event as a genuine unclassified crash. For the same reason it does NOT call
+// `span.recordException`/`setStatus(ERROR)`: OTel's own HTTP semantic conventions only mark a server
+// span ERROR for 5xx (a 4xx is a correct response to bad input, not a failure of the server), and
+// this filter forcing ERROR on every 4xx here would inflate exactly the error-rate dashboards/alerts
+// that exist to catch real faults — the cost the live-defect report named as the actual damage of the
+// original bug (indistinguishable-from-noise faults), not just the wrong status number.
 import { ArgumentsHost, Catch, ExceptionFilter } from "@nestjs/common";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { context, trace, SpanStatusCode } from "@opentelemetry/api";
@@ -69,6 +101,47 @@ function readSafely(fn: () => unknown, fallback: string): string {
     return fallback;
   }
 }
+
+/** Reads `exception.statusCode` defensively (a hostile getter must not crash this filter, same
+ *  discipline as `readSafely`) and returns it ONLY when it is a plain finite integer in the 4xx
+ *  range (400-499 inclusive). Everything else — a 5xx status, a non-integer, a string, NaN,
+ *  Infinity, a value outside 400-499, a missing property, or a property that throws on read — comes
+ *  back `undefined`, which keeps this filter on the existing safe-500 path. This is deliberately the
+ *  ONLY place this filter still reads a property off the ORIGINAL (possibly hostile) `exception`
+ *  rather than off `toSafeFault()`'s inert copy, because the value is used exclusively to SELECT a
+ *  response status code from a fixed table below — never rendered, never concatenated into a log
+ *  line unescaped-and-untyped, never used to index anything unbounded. Do not widen this to accept
+ *  strings ("404"), booleans, or any coercion — an attacker-forged truthy-but-wrong-shaped value must
+ *  fail closed to `undefined`, not be coerced into a number. */
+function readClientErrorStatus(exception: unknown): number | undefined {
+  if (typeof exception !== "object" || exception === null) return undefined;
+  let raw: unknown;
+  try {
+    raw = (exception as { statusCode?: unknown }).statusCode;
+  } catch {
+    return undefined;
+  }
+  return typeof raw === "number" && Number.isInteger(raw) && raw >= 400 && raw <= 499 ? raw : undefined;
+}
+
+/** Fixed, generic per-status reply bodies for the client-error path — a static lookup keyed by the
+ *  now-validated status integer, NEVER anything derived from the exception's own text. Covers the
+ *  Fastify `FST_ERR_CTP_*` family this addendum was written for (400/413/415) plus the handful of
+ *  other 4xx values a stray thrown value could plausibly carry; anything not listed falls back to
+ *  `DEFAULT_CLIENT_ERROR_BODY` rather than growing this table without bound. */
+const CLIENT_ERROR_BODIES: Record<number, { error: string; code: string }> = {
+  400: { error: "bad request", code: "bad_request" },
+  404: { error: "not found", code: "not_found" },
+  405: { error: "method not allowed", code: "method_not_allowed" },
+  408: { error: "request timeout", code: "request_timeout" },
+  409: { error: "conflict", code: "conflict" },
+  413: { error: "payload too large", code: "payload_too_large" },
+  414: { error: "uri too long", code: "uri_too_long" },
+  415: { error: "unsupported media type", code: "unsupported_media_type" },
+  422: { error: "unprocessable entity", code: "unprocessable_entity" },
+  429: { error: "too many requests", code: "too_many_requests" },
+};
+const DEFAULT_CLIENT_ERROR_BODY = { error: "client error", code: "client_error" };
 
 /** Normalizes ANY thrown value (Error, Error subclass with hostile getters, plain string, null,
  *  undefined, a circular-reference object, an object with a hostile toString) into a fresh, inert
@@ -97,6 +170,21 @@ export class LastResortExceptionFilter implements ExceptionFilter {
     const err = toSafeFault(exception);
     const method = request?.method ?? "?";
     const url = request?.url ?? "?";
+    const clientStatus = readClientErrorStatus(exception);
+
+    if (clientStatus !== undefined) {
+      // Routine client-input noise, not a server fault — see the file header's LOGGING/SPAN SEVERITY
+      // note. Still unconditionally to stderr (console.warn, like console.error, never depends on
+      // OTEL_ENABLED) but under a distinct tag so it never reads as the same class of event as
+      // `[unhandled-exception]` to a human or an alert rule.
+      // eslint-disable-next-line no-console
+      console.warn(`[client-error] ${method} ${url} -> ${err.name} (${clientStatus}): ${err.message}`);
+      // Deliberately NOT span.recordException/setStatus(ERROR) here — see the file header. A 4xx is
+      // not a failed span per OTel's own HTTP semantic conventions.
+      const body = CLIENT_ERROR_BODIES[clientStatus] ?? DEFAULT_CLIENT_ERROR_BODY;
+      void reply.status(clientStatus).send(body);
+      return;
+    }
 
     // Server-side only, unconditionally — must survive even when OTEL_ENABLED is unset, which is
     // most dev/test runs, so this cannot be the only place the fault is recorded.
