@@ -78,6 +78,45 @@ function parseBoolParam(v: unknown): boolean {
   return v === "true" || v === "1";
 }
 
+/** Shared between EVERY task-list endpoint that accepts `dueSoonDays` (P4-G6) — the tenant-wide
+ *  list (`listTasks`) and the per-project list (`projectTasks`) must validate/default it
+ *  identically, or a project-scoped urgency read could silently accept a different window than
+ *  the tenant-wide one asking the same question. */
+function parseDueSoonDays(query: Record<string, unknown>): number {
+  if (query.dueSoonDays === undefined) return DUE_SOON_DAYS_DEFAULT;
+  const n = Number(query.dueSoonDays);
+  if (!Number.isInteger(n) || n < 0 || n > 90) throw new BadRequestException("dueSoonDays must be an integer between 0 and 90");
+  return n;
+}
+
+/** The `overdueOnly`/`dueSoon` SQL boundary, shared between every task-list endpoint (P4-G6) so
+ *  "what's about to slip" means the same thing whether you're looking at one project or the whole
+ *  tenant — same rule as platform-ui's `lib/pmUrgency.ts`: overdue = due date strictly before
+ *  today, due-soon = due within `dueSoonDays` INCLUSIVE of today, done always wins (an already-done
+ *  task is never overdue/due-soon regardless of its date, hence `isDoneExpr` gating both branches).
+ *  Passing BOTH is a union (anything already slipping OR about to), not an intersection — the two
+ *  tiers are mutually exclusive by construction, so an intersection would always be empty.
+ *  `isDoneExpr`/`effDueExpr` are raw SQL fragments so each caller can plug in its own column/
+ *  derivation (a LATERAL-joined flag for the tenant-wide list spanning many projects' registries,
+ *  a simple `status = ANY(doneIds)` for a single-project list); `push` allocates this caller's own
+ *  bound params, so this never needs to know the caller's parameter numbering. Returns `null` when
+ *  neither flag is set — a full pass-through, same as omitting the params entirely. */
+function urgencyCondition(args: {
+  overdueOnly: boolean;
+  dueSoon: boolean;
+  today: string;
+  todayPlusN: string;
+  isDoneExpr: string;
+  effDueExpr: string;
+  push: (v: unknown) => string;
+}): string | null {
+  const { overdueOnly, dueSoon, today, todayPlusN, isDoneExpr, effDueExpr, push } = args;
+  if (!overdueOnly && !dueSoon) return null;
+  if (overdueOnly && dueSoon) return `NOT ${isDoneExpr} AND ${effDueExpr} <= ${push(todayPlusN)}::date`;
+  if (overdueOnly) return `NOT ${isDoneExpr} AND ${effDueExpr} < ${push(today)}::date`;
+  return `NOT ${isDoneExpr} AND ${effDueExpr} BETWEEN ${push(today)}::date AND ${push(todayPlusN)}::date`;
+}
+
 /** Escapes ILIKE's own wildcard characters (and a literal backslash) in free-text `q` input so a
  *  keyword containing `%` or `_` is matched LITERALLY rather than as a pattern. Postgres's default
  *  LIKE/ILIKE escape character is backslash, so no explicit ESCAPE clause is needed once this has
@@ -398,16 +437,18 @@ function clearedStatusIfReady(
  *  separate, not-yet-built ticket; this only guarantees the event+audit trail the plan requires).
  *  Returns the promoted rows for the caller to audit/notify with, mirroring how `patchTask`
  *  already surfaces its recurrence-spawn result to the code after the transaction commits. */
+type ClearedDependent = { id: string; projectId: string; fromStatus: string; toStatus: string };
+
 async function promoteClearedDependents(
   c: PoolClient,
   closedTaskId: string,
-): Promise<{ id: string; projectId: string; fromStatus: string; toStatus: string }[]> {
+): Promise<ClearedDependent[]> {
   const dependents = await c.query<{ id: string; projectId: string; status: string; blockReason: string | null; dependsOn: string[] }>(
     `SELECT id, project_id AS "projectId", status, block_reason AS "blockReason", depends_on AS "dependsOn"
      FROM pm_tasks WHERE $1 = ANY(depends_on) AND deleted_at IS NULL`,
     [closedTaskId],
   );
-  const promoted: { id: string; projectId: string; fromStatus: string; toStatus: string }[] = [];
+  const promoted: ClearedDependent[] = [];
   for (const d of dependents.rows) {
     const stillOpen = await openDependencies(c, d.dependsOn);
     if (stillOpen.length > 0) continue; // another blocker remains — nothing to promote yet
@@ -421,6 +462,73 @@ async function promoteClearedDependents(
     promoted.push({ id: d.id, projectId: d.projectId, fromStatus: d.status, toStatus: cleared.status });
   }
   return promoted;
+}
+
+/** P4-I6 — "this is now startable": tells the ball holder (`assignee.refId`, regardless of
+ *  `kind` — same "ball = refId" reading `listTasks`'s `ball[]` facet uses) and the task's
+ *  followers once `promoteClearedDependents` reports a real Backlog/system-Blocked -> ToDo
+ *  transition for it.
+ *
+ *  Three requirements from the ticket, and why each is already satisfied rather than
+ *  reimplemented here:
+ *   1. "Only on the transition to zero open blockers" — guaranteed by the CALLER, not this
+ *      function: `promoteClearedDependents` only ever places a dependent in `cleared` once its
+ *      `stillOpen` count reaches zero AND a promotion actually applies (see its own body). A task
+ *      with four dependencies produces at most one entry across all four blocker-closes — never
+ *      four — because the first three closes leave `stillOpen.length > 0` and are `continue`d
+ *      before a row is ever pushed.
+ *   2. "Do not notify the actor about their own action" — `notify()`'s own
+ *      `recipientId === actorId` guard (core/http.ts) is reused unchanged: `closedByUserId` (the
+ *      person whose write closed the blocker) is passed as `notify()`'s `actorId`, so a ball
+ *      holder/follower who closed their own blocker is skipped by the SAME mechanism every other
+ *      notify() call site in this file relies on — never a bespoke `if` here.
+ *   3. "Idempotent — a re-close, or a re-run of the same transition, must not produce a second
+ *      notification" — also the caller's guarantee: a promotion that already happened moves the
+ *      task off `intakeStatus`/system-Blocked, so `clearedStatusIfReady` returns `null` the second
+ *      time and the task never reappears in `cleared`. This function is simply never called for a
+ *      transition that didn't just happen, so there is no dedup table or idempotency key to invent
+ *      — "called zero extra times" is a stronger guarantee than "called harmlessly twice".
+ *
+ *  Follows the file's existing fan-out/dedup shape exactly (`patchTask`'s follower notify below):
+ *  reads happen inside `withTenants`, `notify()` calls happen AFTER that commits, and one
+ *  `alreadyNotified` Set per task keeps a follower who is ALSO the ball holder to exactly one
+ *  notification. */
+async function notifyDependencyCleared(
+  tenantId: string,
+  closedByUserId: string | null,
+  cleared: readonly ClearedDependent[],
+): Promise<void> {
+  if (cleared.length === 0) return;
+  const info = await withTenants([tenantId], async (c) => {
+    const out: Array<{ id: string; title: string; refId: string | null; followerIds: string[] }> = [];
+    for (const dep of cleared) {
+      const t = await c.query<{ title: string; assignee: Assignee }>(`SELECT title, assignee FROM pm_tasks WHERE id = $1`, [dep.id]);
+      const followers = await c.query<{ userId: string }>(`SELECT user_id AS "userId" FROM pm_task_followers WHERE task_id = $1`, [dep.id]);
+      out.push({
+        id: dep.id,
+        title: t.rows[0]?.title ?? "",
+        refId: t.rows[0]?.assignee?.refId ?? null,
+        followerIds: followers.rows.map((f) => f.userId),
+      });
+    }
+    return out;
+  });
+  for (const dep of info) {
+    const alreadyNotified = new Set<string>();
+    const payload = {
+      title: `“${dep.title}” is now startable`, severity: "info" as const,
+      entityType: "task", entityId: dep.id, href: `/tasks/${dep.id}`,
+    };
+    if (dep.refId) {
+      alreadyNotified.add(dep.refId);
+      await notify(tenantId, dep.refId, closedByUserId, "dependency_cleared", payload);
+    }
+    for (const followerId of dep.followerIds) {
+      if (alreadyNotified.has(followerId)) continue;
+      alreadyNotified.add(followerId);
+      await notify(tenantId, followerId, closedByUserId, "dependency_cleared", payload);
+    }
+  }
 }
 
 // ---------------- Burndown snapshots (P2-07, pm-console-ux-design-spec §4, §0 D-2) ----------------
@@ -1245,12 +1353,55 @@ export class PmController {
     return { ok: true };
   }
 
+  // P4-G6 — the urgency facets (`overdueOnly`/`dueSoon`/`dueSoonDays`) also work at PROJECT scope,
+  // not only the tenant-wide `listTasks` below: "what's about to slip" has to mean the same thing
+  // at every grain the plan calls out (§1.5/workstream G — "rich for glancing many projects AND
+  // tasks"), and a scoped view that silently dropped the facets would disagree with the tenant-wide
+  // one reading the exact same tasks. Shares `parseDueSoonDays`/`urgencyCondition` with `listTasks`
+  // so the two can't drift apart the way `DEFAULT_STATUSES` once did (see the P4-B8b history note
+  // above) — one boundary, two call sites.
+  //
+  // Deliberately NOT the full A1 facet set (status/tag/priority/responsible/ball/milestone/q/
+  // cursor) — this endpoint predates pagination and every existing caller expects the plain array
+  // shape back, so widening it further is left to whichever ticket actually needs those facets at
+  // project scope. Omitting both params reproduces the exact original query, byte for byte.
   @Get(":tenantId/pm/projects/:projectId/tasks")
-  async projectTasks(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("projectId") projectId: string) {
+  async projectTasks(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Param("projectId") projectId: string,
+    @Query() query: Record<string, unknown>,
+  ) {
     await authorize(req.principal, { kind: "pm_task", tenantId, projectId }, "read");
-    return withTenants([tenantId], (c) =>
-      c.query<TaskRow>(`${TASK_SELECT} AND t.project_id = $1 ORDER BY t.created_at`, [projectId]).then((r) => r.rows),
-    );
+    const overdueOnly = parseBoolParam(query.overdueOnly);
+    const dueSoon = parseBoolParam(query.dueSoon);
+    const dueSoonDays = parseDueSoonDays(query);
+    return withTenants([tenantId], async (c) => {
+      const params: unknown[] = [projectId];
+      const push = (v: unknown): string => {
+        params.push(v);
+        return `$${params.length}`;
+      };
+      const conditions = [`t.project_id = $1`];
+      if (overdueOnly || dueSoon) {
+        // FLAG-DRIVEN off THIS project's own effective status registry (never a literal
+        // `status = 'done'` match) — same discipline as `openDependencies`/`upsertTodaySnapshot`.
+        // Single project here, so a plain `status = ANY(doneIds)` suffices; the tenant-wide list
+        // needs the LATERAL join below because it spans many projects' registries at once.
+        const statuses = await effectiveStatuses(c, projectId);
+        const doneIds = statuses.filter((s) => s.isDone).map((s) => s.id);
+        const isDoneExpr = doneIds.length ? `t.status = ANY(${push(doneIds)}::text[])` : "false";
+        const today = todayIso();
+        const todayPlusN = addDaysIso(today, dueSoonDays);
+        const urgency = urgencyCondition({
+          overdueOnly, dueSoon, today, todayPlusN, isDoneExpr,
+          effDueExpr: `COALESCE(t.due_date, DATE '9999-12-31')`, push,
+        });
+        if (urgency) conditions.push(urgency);
+      }
+      const r = await c.query<TaskRow>(`${TASK_SELECT} AND ${conditions.join(" AND ")} ORDER BY t.created_at`, params);
+      return r.rows;
+    });
   }
 
   // ---------------- Tasks ----------------
@@ -1316,12 +1467,7 @@ export class PmController {
     // Every row this endpoint returns already IS a top-level task; there is nothing to
     // include/exclude yet. Flagged in the P4-A1 report rather than guessed at here.
 
-    const dueSoonDays = (() => {
-      if (query.dueSoonDays === undefined) return DUE_SOON_DAYS_DEFAULT;
-      const n = Number(query.dueSoonDays);
-      if (!Number.isInteger(n) || n < 0 || n > 90) throw new BadRequestException("dueSoonDays must be an integer between 0 and 90");
-      return n;
-    })();
+    const dueSoonDays = parseDueSoonDays(query);
 
     const limit = (() => {
       if (query.limit === undefined) return TASK_LIST_LIMIT_DEFAULT;
@@ -1376,13 +1522,10 @@ export class PmController {
       // ALSO reproduces `lib/pmUrgency.ts`'s "undated" tier for free: the far-future sentinel can
       // never be `< today` or fall inside the due-soon window, so an undated task is excluded from
       // both without a separate `IS NOT NULL` check.
-      if (overdueOnly && dueSoon) {
-        outerConditions.push(`NOT base."isDone" AND base."effDue" <= ${push(todayPlusN)}::date`);
-      } else if (overdueOnly) {
-        outerConditions.push(`NOT base."isDone" AND base."effDue" < ${push(today)}::date`);
-      } else if (dueSoon) {
-        outerConditions.push(`NOT base."isDone" AND base."effDue" BETWEEN ${push(today)}::date AND ${push(todayPlusN)}::date`);
-      }
+      const urgency = urgencyCondition({
+        overdueOnly, dueSoon, today, todayPlusN, isDoneExpr: `base."isDone"`, effDueExpr: `base."effDue"`, push,
+      });
+      if (urgency) outerConditions.push(urgency);
       if (cursor) {
         const d = push(cursor.d);
         const id = push(cursor.id);
@@ -1901,6 +2044,8 @@ export class PmController {
         fromStatus: dep.fromStatus, toStatus: dep.toStatus, closedTaskId: taskId, closedByUserId: req.principal.userId,
       });
     }
+    // P4-I6 — "this is now startable": ball holder + followers of each promoted dependent.
+    await notifyDependencyCleared(tenantId, req.principal.userId, clearedDependents);
     return { ok: true, spawned };
   }
 
@@ -1936,6 +2081,8 @@ export class PmController {
         fromStatus: dep.fromStatus, toStatus: dep.toStatus, closedTaskId: taskId, reason: "blocker_deleted", closedByUserId: req.principal.userId,
       });
     }
+    // P4-I6 — a deleted blocker counts as "closed" here too; same notify as the completion path.
+    await notifyDependencyCleared(tenantId, req.principal.userId, clearedDependents);
     return { ok: true };
   }
 

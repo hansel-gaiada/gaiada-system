@@ -1720,6 +1720,139 @@ describe.skipIf(!TEST_URL)("PM subsystem (§5)", () => {
       expect(del.statusCode).toBe(200);
       expect((await getTask(dependent)).status).toBe("todo");
     });
+
+    // ---------------- P4-I6 — notify the ball holder + followers on "this is now startable" ----
+    // `notifyDependencyCleared` piggybacks entirely on `promoteClearedDependents`'s own promotion
+    // list (never a separate detector), so every case below is really testing that inherited
+    // guarantee end to end: only a genuine zero-open-blockers transition ever reaches it.
+    const notifsFor = async (userId: string) =>
+      (await app.inject({ method: "GET", url: `/api/${tenant}/notifications?unread=true`, headers: asUser(userId) })).json() as
+        Array<{ type: string; payload: { entityId?: string; title?: string } }>;
+    const clearedNotifsFor = async (userId: string, taskId: string) =>
+      (await notifsFor(userId)).filter((n) => n.type === "dependency_cleared" && n.payload?.entityId === taskId);
+
+    it("P4-I6: notifies the ball holder once the last blocker clears, with a startable-now title", async () => {
+      const pid = await freshProject("I6 ball notify");
+      const blocker = await newTask(pid, { title: "Blocker" });
+      const dependent = await newTask(pid, {
+        title: "Dependent (ball notify)",
+        assignee: { kind: "person", refId: member, refName: "Member Mel", responsibleId: member, responsibleName: "Member Mel" },
+      });
+      await patchTask(dependent, { addDependency: blocker });
+      await patchTask(dependent, { status: "backlog" });
+
+      const complete = await patchTask(blocker, { status: "done" }); // closed by `manager` (hdr())
+      expect(complete.statusCode).toBe(200);
+
+      const about = await clearedNotifsFor(member, dependent);
+      expect(about.length).toBe(1);
+      expect(about[0].payload.title).toContain("now startable");
+    });
+
+    it("P4-I6: four open blockers produce exactly ONE notification, fired on the last one to clear (never once per blocker)", async () => {
+      const pid = await freshProject("I6 four blockers");
+      const blockers = await Promise.all([1, 2, 3, 4].map((n) => newTask(pid, { title: `Blocker ${n}` })));
+      const dependent = await newTask(pid, {
+        title: "Dependent (four blockers)",
+        assignee: { kind: "person", refId: member, refName: "Member Mel", responsibleId: member, responsibleName: "Member Mel" },
+      });
+      for (const b of blockers) await patchTask(dependent, { addDependency: b });
+      await patchTask(dependent, { status: "backlog" });
+
+      for (const b of blockers.slice(0, 3)) {
+        expect((await patchTask(b, { status: "done" })).statusCode).toBe(200);
+      }
+      expect((await clearedNotifsFor(member, dependent)).length).toBe(0); // still one blocker open — no page yet
+
+      expect((await patchTask(blockers[3], { status: "done" })).statusCode).toBe(200);
+      expect((await clearedNotifsFor(member, dependent)).length).toBe(1); // exactly one, not four
+    });
+
+    it("P4-I6: idempotent — re-patching an already-done blocker to the same status (a no-op transition) sends no second notification", async () => {
+      const pid = await freshProject("I6 idempotent reclose");
+      const blocker = await newTask(pid, { title: "Blocker" });
+      const dependent = await newTask(pid, {
+        title: "Dependent (idempotent)",
+        assignee: { kind: "person", refId: member, refName: "Member Mel", responsibleId: member, responsibleName: "Member Mel" },
+      });
+      await patchTask(dependent, { addDependency: blocker });
+      await patchTask(dependent, { status: "backlog" });
+
+      await patchTask(blocker, { status: "done" });
+      expect((await clearedNotifsFor(member, dependent)).length).toBe(1);
+
+      // re-sending the SAME status is a no-op transition (wasDone already true) -> completingNow
+      // is false the second time, so `promoteClearedDependents` never even runs again for it.
+      const again = await patchTask(blocker, { status: "done" });
+      expect(again.statusCode).toBe(200);
+      expect((await clearedNotifsFor(member, dependent)).length).toBe(1); // still exactly one
+    });
+
+    it("P4-I6: a deleted blocker also counts as cleared and notifies the ball holder exactly once", async () => {
+      const pid = await freshProject("I6 delete notify");
+      const blocker = await newTask(pid, { title: "Blocker" });
+      const dependent = await newTask(pid, {
+        title: "Dependent (delete notify)",
+        assignee: { kind: "person", refId: member, refName: "Member Mel", responsibleId: member, responsibleName: "Member Mel" },
+      });
+      await patchTask(dependent, { addDependency: blocker });
+      await patchTask(dependent, { status: "backlog" });
+
+      const del = await app.inject({ method: "DELETE", url: `/api/${tenant}/pm/tasks/${blocker}`, headers: hdr() });
+      expect(del.statusCode).toBe(200);
+      expect((await clearedNotifsFor(member, dependent)).length).toBe(1);
+    });
+
+    it("P4-I6: does not notify the actor about their own action when the closer IS the ball holder", async () => {
+      const pid = await freshProject("I6 self skip");
+      const blocker = await newTask(pid, { title: "Blocker" });
+      const dependent = await newTask(pid, {
+        title: "Dependent (self skip)",
+        assignee: { kind: "person", refId: manager, refName: "Manager Mo", responsibleId: manager, responsibleName: "Manager Mo" },
+      });
+      await patchTask(dependent, { addDependency: blocker });
+      await patchTask(dependent, { status: "backlog" });
+
+      // `manager` (hdr()) both holds the ball on `dependent` AND closes `blocker` here -> notify()'s
+      // own recipientId===actorId guard must skip them, the SAME mechanism every other notify()
+      // call site in this file relies on, never a bespoke check inside notifyDependencyCleared.
+      expect((await patchTask(blocker, { status: "done" })).statusCode).toBe(200);
+      expect((await clearedNotifsFor(manager, dependent)).length).toBe(0);
+    });
+
+    it("P4-I6: notifies followers too, and a follower who is ALSO the ball holder gets exactly one notification, not two", async () => {
+      const pid = await freshProject("I6 follower dedup");
+      const blocker = await newTask(pid, { title: "Blocker" });
+      const dependent = await newTask(pid, {
+        title: "Dependent (follower dedup)",
+        assignee: { kind: "person", refId: member, refName: "Member Mel", responsibleId: member, responsibleName: "Member Mel" },
+      });
+      await patchTask(dependent, { addDependency: blocker });
+      await patchTask(dependent, { status: "backlog" });
+      await app.inject({ method: "POST", url: `/api/${tenant}/pm/tasks/${dependent}/follow`, headers: asUser(member) }); // follower == ball holder
+
+      expect((await patchTask(blocker, { status: "done" })).statusCode).toBe(200);
+      expect((await clearedNotifsFor(member, dependent)).length).toBe(1); // not two
+    });
+
+    it("P4-I6: a distinct follower (not the ball holder) is notified independently", async () => {
+      const follower = await createUser(`${newId()}@i6-follower.test`, "Follower Fio");
+      await addMembership(tenant, follower);
+      await grantRole(follower, await createRole("member"), "company", tenant);
+      const pid = await freshProject("I6 distinct follower");
+      const blocker = await newTask(pid, { title: "Blocker" });
+      const dependent = await newTask(pid, {
+        title: "Dependent (distinct follower)",
+        assignee: { kind: "person", refId: member, refName: "Member Mel", responsibleId: member, responsibleName: "Member Mel" },
+      });
+      await patchTask(dependent, { addDependency: blocker });
+      await patchTask(dependent, { status: "backlog" });
+      await app.inject({ method: "POST", url: `/api/${tenant}/pm/tasks/${dependent}/follow`, headers: asUser(follower) });
+
+      expect((await patchTask(blocker, { status: "done" })).statusCode).toBe(200);
+      expect((await clearedNotifsFor(member, dependent)).length).toBe(1);
+      expect((await clearedNotifsFor(follower, dependent)).length).toBe(1);
+    });
   });
 
   // ---------------- P4-A1 — cross-project (`@all`) task list: facets + cursor pagination ----------------
@@ -2001,6 +2134,106 @@ describe.skipIf(!TEST_URL)("PM subsystem (§5)", () => {
       // and the base RBAC wall still applies underneath all of this: a rival principal simply
       // reading the home tenant's URL is denied outright.
       const cross = await home.list("", rival.hdr);
+      expect(cross.statusCode).toBe(403);
+    });
+  });
+
+  // ---------------- P4-G6 — urgency facets on the PER-PROJECT list too ----------------
+  // `GET /pm/tasks` (tenant-wide, P4-A1) already implements `overdueOnly`/`dueSoon`/`dueSoonDays`
+  // per the plan's own claim — verified byte-for-byte against `lib/pmUrgency.ts`'s boundaries in
+  // the P4-A1 describe block above (overdue = due before today, due-soon = due within
+  // `dueSoonDays` INCLUSIVE of today, both is a union, `done` always wins). No drift found there.
+  // What WAS missing: `GET /pm/projects/:projectId/tasks` had zero facets at all — a plain list,
+  // every task, always — so "what's about to slip" disagreed with itself depending on which of
+  // the two endpoints you asked. This block pins the per-project endpoint to the SAME boundary,
+  // reusing `urgencyCondition`/`parseDueSoonDays` rather than a second implementation.
+  describe("P4-G6 — urgency facets on the per-project task list", () => {
+    const freshProject = (name: string) => createProject(tenant, name, manager);
+    const newTask = async (pid: string, body: Record<string, unknown> = {}) =>
+      (await app.inject({ method: "POST", url: `/api/${tenant}/pm/tasks`, headers: hdr(), payload: { projectId: pid, title: "T", ...body } }).then((r) => r.json())).id as string;
+    const patchTask = (id: string, body: Record<string, unknown>) =>
+      app.inject({ method: "PATCH", url: `/api/${tenant}/pm/tasks/${id}`, headers: hdr(), payload: body });
+    const projectTasks = (pid: string, qs = "") =>
+      app.inject({ method: "GET", url: `/api/${tenant}/pm/projects/${pid}/tasks${qs}`, headers: hdr() });
+    const addDays = (n: number) => {
+      const d = new Date();
+      d.setUTCDate(d.getUTCDate() + n);
+      return d.toISOString().slice(0, 10);
+    };
+
+    it("omitting overdueOnly/dueSoon reproduces the original unfiltered list, byte for byte (backward compatible)", async () => {
+      const pid = await freshProject("G6 unfiltered");
+      const open = await newTask(pid, { title: "Open one", dueDate: addDays(-10) }); // overdue, but not filtered out here
+      const done = await newTask(pid, { title: "Done one", status: "done" });
+
+      const r = await projectTasks(pid);
+      expect(r.statusCode).toBe(200);
+      const ids = (r.json() as Array<{ id: string }>).map((t) => t.id);
+      expect(ids).toEqual(expect.arrayContaining([open, done])); // no facet = no filtering, exactly as before
+    });
+
+    it("overdueOnly/dueSoon on the per-project list agree with the tenant-wide list's boundaries, and done always wins", async () => {
+      const pid = await freshProject("G6 boundaries");
+      const overdue = await newTask(pid, { title: "Overdue", dueDate: addDays(-2) });
+      const dueSoonEdge = await newTask(pid, { title: "Due soon (boundary, day 3)", dueDate: addDays(3) });
+      const onTrack = await newTask(pid, { title: "On track (day 4)", dueDate: addDays(4) });
+      const undated = await newTask(pid, { title: "Undated" });
+      const overdueButDone = await newTask(pid, { title: "Overdue but shipped", dueDate: addDays(-5), status: "done" });
+
+      const overdueOnly = await projectTasks(pid, "?overdueOnly=true");
+      const overdueIds = (overdueOnly.json() as Array<{ id: string }>).map((t) => t.id);
+      expect(overdueIds).toContain(overdue);
+      expect(overdueIds).not.toContain(dueSoonEdge);
+      expect(overdueIds).not.toContain(onTrack);
+      expect(overdueIds).not.toContain(undated);
+      expect(overdueIds).not.toContain(overdueButDone); // done outranks the date, same as the tenant-wide list
+
+      const dueSoonOnly = await projectTasks(pid, "?dueSoon=true");
+      const dueSoonIds = (dueSoonOnly.json() as Array<{ id: string }>).map((t) => t.id);
+      expect(dueSoonIds).toContain(dueSoonEdge);
+      expect(dueSoonIds).not.toContain(overdue);
+      expect(dueSoonIds).not.toContain(onTrack);
+
+      const both = await projectTasks(pid, "?overdueOnly=true&dueSoon=true");
+      const bothIds = (both.json() as Array<{ id: string }>).map((t) => t.id);
+      expect(bothIds).toEqual(expect.arrayContaining([overdue, dueSoonEdge]));
+      expect(bothIds).not.toContain(onTrack);
+      expect(bothIds).not.toContain(undated);
+    });
+
+    it("dueSoonDays widens/narrows the window identically to the tenant-wide list, and rejects the same out-of-range values", async () => {
+      const pid = await freshProject("G6 dueSoonDays");
+      const dayFive = await newTask(pid, { title: "Due in 5 days", dueDate: addDays(5) });
+
+      const narrow = await projectTasks(pid, "?dueSoon=true&dueSoonDays=3");
+      expect((narrow.json() as Array<{ id: string }>).map((t) => t.id)).not.toContain(dayFive);
+
+      const widened = await projectTasks(pid, "?dueSoon=true&dueSoonDays=5");
+      expect((widened.json() as Array<{ id: string }>).map((t) => t.id)).toContain(dayFive);
+
+      const bad = await projectTasks(pid, "?dueSoonDays=91");
+      expect(bad.statusCode).toBe(400);
+    });
+
+    it("isDone is FLAG-DRIVEN off THIS project's own custom status registry, not a literal 'done' match — same discipline as the tenant-wide list", async () => {
+      const pid = await freshProject("G6 custom registry");
+      await app.inject({ method: "POST", url: `/api/${tenant}/pm/projects/${pid}/statuses`, headers: hdr(), payload: { label: "Shipped", color: "#4B7A5A", isDone: true } });
+      const shipped = await newTask(pid, { title: "Shipped one", status: "shipped", dueDate: addDays(-5) });
+
+      const overdueOnly = await projectTasks(pid, "?overdueOnly=true");
+      const overdueIds = (overdueOnly.json() as Array<{ id: string }>).map((t) => t.id);
+      expect(overdueIds).not.toContain(shipped); // flagged done via the CUSTOM registry, not the literal id "done"
+    });
+
+    it("tenant isolation: a rival tenant's session cannot read this project's urgency-filtered list (RLS/authorize wall unchanged by the new params)", async () => {
+      const pid = await freshProject("G6 isolation");
+      await newTask(pid, { title: "Overdue", dueDate: addDays(-2) });
+      const rivalTenant = await createCompany("Rival Co (pm G6)", ["agency", "pm"]);
+      const rivalMgr = await createUser(`${newId()}@rival-g6.test`, "Rival Manager");
+      await addMembership(rivalTenant, rivalMgr);
+      await grantRole(rivalMgr, await createRole("manager"), "company", rivalTenant);
+
+      const cross = await app.inject({ method: "GET", url: `/api/${tenant}/pm/projects/${pid}/tasks?overdueOnly=true`, headers: asUser(rivalMgr) });
       expect(cross.statusCode).toBe(403);
     });
   });
