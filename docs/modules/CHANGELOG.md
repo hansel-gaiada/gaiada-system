@@ -34,6 +34,30 @@ reconstructed from this table alone. Format defined in [`VERSIONING.md`](./VERSI
 > Not corrected retroactively (moving a pushed, already-deployed tag is its own risk); flagging so
 > the next session doesn't re-diagnose the same gap.
 
+### `Alpha 01.026.0067a` — 2026-08-07 — the agent runner can finally obtain the provider it declares
+
+The last link in the D13 chain. `0065a` made D13 enforce the provider that actually SERVED and made
+Ollama Cloud selectable; this makes the runner able to GET it.
+
+- **`ai-gateway-go` `0.13.2`** — `/complete` now honours the `provider` hint, like `/complete/stream`
+  always did. Until this, ai-agents' runner (which calls `/complete`) could ask for its eval-cleared
+  provider and be silently ignored, so agent writes were contained-but-inert rather than working. Found
+  by probing the box: the same hint returned `hermes` on `/complete` and `openai` on `/complete/stream`.
+- **`platform-ui` `0.19.1`** and the assistant server-side titling / a11y-audit work from other sessions.
+
+**End state on `gda-aicenter`, verified rather than assumed:** unhinted text → `hermes` (wa-chat-bot,
+knowledge and search unchanged); `hint=openai` → `openai / deepseek-v4-flash` on BOTH endpoints; `/media`
+on a real image → a genuine vision description; the assistant's picker lists **"Ollama Cloud"** and the
+choice persists to `assistant_threads.brain_provider`.
+
+Two traps recorded in the box's own `.env` because each cost a wrong conclusion: a **1×1 test PNG** makes
+`/media` look broken (the vision model rejects it, the chain fails over, and you get the echo stub —
+indistinguishable from "unconfigured"), and picking a brain **within milliseconds of "+ NEW CHAT"** races
+the router push that adds `?thread=`, remounting the controlled `<select>` so the change is discarded with
+no request sent. A human is too slow to hit the second; automation hits it every time.
+
+Counter `0065 → 0067`: two module rows (ai-gateway-go, platform-ui).
+
 ### `Alpha 01.025.0065a` — 2026-08-07 — D13 stops trusting a declaration it could not verify,
 and the provider that makes it true becomes selectable
 
@@ -2217,6 +2241,23 @@ Verified: 939 unit tests pass, `tsc` clean, `next build` green. Not driven in a 
 - **Unreleased / next:** deploy once backend admin API is live.
 
 ## ai-gateway-go
+### [0.13.2] — 2026-08-07 · PROTOTYPED (the non-streaming /complete honours the provider hint too)
+- **Only `/complete/stream` honoured `provider`; `/complete` silently discarded it** and used plain chain
+  order. The asymmetry looked cosmetic and was not: `ai-agents`' runner calls `/complete`, and D13's
+  provider gate (ai-agents 0.7.0) enforces against the provider that ACTUALLY SERVED — so the runner
+  could declare *and ask for* its eval-cleared provider and never receive it, leaving agent writes
+  correctly contained but **permanently inert**. The assistant's brain picker worked only because it
+  happens to stream.
+- Found by probing the live box, not by reading: `hint=openai` on `/complete` returned `hermes` while the
+  same hint on `/complete/stream` returned `openai`.
+- Semantics unchanged and deliberately so — `RunWithHint` is a PURE REORDERING of the chain snapshot,
+  never a requirement: an unknown name, or one whose provider is unavailable/breaker-open, falls through
+  to normal failover. Absent or empty `provider` is byte-for-byte the old behaviour, pinned by two of the
+  three new tests.
+- The tests use `adminwrite_test.go`'s plain `namedProvider`, not `namedStreamingProvider` — the latter
+  deliberately errors on `Complete()` to prove the stream path, a useful guard that also makes it
+  unusable here.
+
 ### [0.13.1] — 2026-08-06 · PROTOTYPED (the `hermes` provider had never once succeeded — it sent no bearer)
 - **`HermesProvider` sent NO `Authorization` header**, on either `/complete` or `/complete/stream`.
   hermes-gateway authenticates BEFORE it routes, so every call 401'd: the `hermes` provider has been
