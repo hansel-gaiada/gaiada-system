@@ -28,6 +28,23 @@ services:
     image: grafana/loki:3.3.2
     restart: unless-stopped
     command: ["-config.file=/etc/loki/loki.yaml"]
+    # OBS-04: the otel-collector's filelog receiver tails EVERY container's json-file log
+    # (glob /var/lib/docker/containers/*/*-json.log), which previously included this
+    # container itself — so Loki ingested its own operational logs, including per-query
+    # lines that echo the query string (`caller=metrics.go ... query=<search term>`). That
+    # made a text search self-confirming: searching for X could "find" X only because Loki
+    # had just logged the search for X, while the real record was actually absent (or, in
+    # the case that produced this ticket, present but buried under noise). Switching this
+    # container's logging driver away from `json-file` (Docker's default) to `local` means
+    # Docker no longer writes a `*-json.log` file for it at all — it is structurally
+    # excluded from the filelog glob, permanently, independent of container ID/name and
+    # surviving recreation, with no otel-collector config needed. `docker logs` still works
+    # (the `local` driver supports it); only the collector's file-tailing path is affected.
+    logging:
+      driver: local
+      options:
+        max-size: "10m"
+        max-file: "3"
     volumes:
       - ../observability/loki/loki.yaml:/etc/loki/loki.yaml:ro
       - loki-data:/loki

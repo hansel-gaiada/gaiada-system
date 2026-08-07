@@ -289,6 +289,16 @@ services:
     image: ghcr.io/cerbos/cerbos:0.54.0
     restart: unless-stopped
     command: ["server", "--config=/config/cerbos.yaml", "--log-level=warn"]
+    # OBS-04: embed the compose service label into each json-file log line's `attrs` object
+    # so the otel-collector (config.tier2-logs.yaml) can lift it into an OTel `container.name`
+    # resource attribute, restoring a working per-container LogQL query in Loki (the
+    # runbook's documented `{container=~".*cerbos.*"}` was confirmed broken — no `container`
+    # label has ever existed). Does not change what Cerbos logs, only how Docker tags the
+    # line on disk.
+    logging:
+      driver: json-file
+      options:
+        labels: "com.docker.compose.service"
     volumes:
       - ../../platform-nest/cerbos:/config:ro
       - ../../platform-nest/cerbos/policies:/policies:ro

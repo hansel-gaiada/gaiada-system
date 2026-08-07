@@ -35,13 +35,45 @@ receivers:
       - type: json_parser
         parse_from: body
         parse_to: attributes.docker
+      # OBS-04: lift the compose service name into a proper OTel resource attribute so
+      # per-container LogQL queries work again (the runbook's `{container=~".*cerbos.*"}`
+      # was confirmed broken — no `container` label has ever existed). This only populates
+      # for containers whose compose service sets `logging.options.labels:
+      # "com.docker.compose.service"` (currently just `cerbos` — see docker-compose.vps.yml),
+      # which is what makes Docker's json-file driver embed compose's own
+      # `com.docker.compose.service` label into each line's `attrs` object. `container.name`
+      # is on Loki's default_resource_attributes_as_index_labels list, so it becomes a
+      # queryable label (`container_name`) with zero Loki-side config. Guarded so containers
+      # without the label (everything else, unchanged) are unaffected.
+      - type: move
+        from: attributes.docker.attrs["com.docker.compose.service"]
+        to: resource["container.name"]
+        if: 'attributes.docker.attrs != nil && attributes.docker.attrs["com.docker.compose.service"] != nil'
       - type: move
         from: attributes.docker.log
         to: body
+      # OBS-04: previously this parsed the FULL application JSON body straight into
+      # `attributes` (parse_to: attributes), so Cerbos's audit-decision lines — which embed
+      # the entire checkResources inputs/outputs payload — had every nested field flattened
+      # (Loki's OTLP ingestion joins nested keys with `_`) and shipped as structured
+      # metadata on every single line: measured at ~94% of ingested bytes per Cerbos audit
+      # line, for a record already fully present and searchable in `body`. Only `level` is
+      # still lifted (via a throwaway holder immediately consumed by severity_parser below)
+      # because Grafana's detected-level coloring needs it as a real attribute; nothing else
+      # from the body is promoted. The raw JSON stays in `body`, queryable with `|= "..."`
+      # or `| json` at query time — this is a collector/Loki plumbing change only, Cerbos's
+      # own log content and audit fields are untouched.
       - type: json_parser
         parse_from: body
-        parse_to: attributes
+        parse_to: attributes._body_probe
         if: 'body matches "^\\s*\\{"'
+      - type: move
+        from: attributes._body_probe.level
+        to: attributes.level
+        if: 'attributes._body_probe != nil && attributes._body_probe.level != nil'
+      - type: remove
+        field: attributes._body_probe
+        if: 'attributes._body_probe != nil'
       - type: severity_parser
         parse_from: attributes.level
         if: 'attributes.level != nil'
