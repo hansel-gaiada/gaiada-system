@@ -306,6 +306,13 @@ services:
   platform:
     image: ghcr.io/${GHCR_OWNER:-hansel-gaiada}/gaiada-platform-nest:${GAIADA_TAG:-latest}
     restart: unless-stopped
+    # NET-01/NET-02: host-native nginx proxies the provider-webhook namespace (/api/mail/) here.
+    # 🚨 The 127.0.0.1 prefix is load-bearing. A bare "3004:3004" binds 0.0.0.0 and would expose
+    # the ENTIRE backend API straight to the internet, bypassing nginx and every rule in the
+    # vhost. Loopback-only means nginx is the sole path in. Verify after any change with
+    # `ss -tlnp` that :3004 is bound to 127.0.0.1 and nothing else.
+    ports:
+      - "127.0.0.1:3004:3004"
     environment:
       PLATFORM_SERVICE_TOKEN: ${PLATFORM_SERVICE_TOKEN:?}
       # Runtime = restricted platform_app; migrations/grants run as platform_owner (MIGRATE_DATABASE_URL).
@@ -570,6 +577,16 @@ services:
       # all); never committed. Empty = the delivery-event webhook / inbound intake fail-closed.
       MAIL_WEBHOOK_TOKEN: ${MAIL_WEBHOOK_TOKEN:-}
       MAIL_INBOUND_TOKEN: ${MAIL_INBOUND_TOKEN:-}
+      # MAIL-37: which upstream peers may set X-Forwarded-For for the inbound webhook's
+      # per-source rate limiter. Defaults to EMPTY = trust nothing = fall back to the socket
+      # address, so an unset value is safe (coarse) rather than exploitable. Deliberately a
+      # SEPARATE key from MAIL_MAGIC_LINK_TRUSTED_PROXIES — they gate different network hops
+      # and must never be unioned. Production value once NET-01's nginx route is applied:
+      # `172.17.0.1,127.0.0.1`. nginx is host-native and reaches this container through a
+      # loopback-published port, so Docker hairpin-NAT means the app observes the bridge
+      # gateway rather than 127.0.0.1 — reasoned from this repo, NOT yet measured on the box.
+      # Narrow it to the measured peer once traffic flows.
+      MAIL_INBOUND_TRUSTED_PROXIES: ${MAIL_INBOUND_TRUSTED_PROXIES:-}
       MAIL_INBOUND_MAX_BYTES: ${MAIL_INBOUND_MAX_BYTES:-5242880}
       # MAIL-13 inbound hardening. NOTE: the HMAC verifier behind MAIL_INBOUND_SIGNING_KEY is OURS,
       # not Brevo's — Brevo does not sign inbound webhooks (it offers basic-auth-in-URL / a token
