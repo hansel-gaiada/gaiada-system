@@ -47,4 +47,14 @@ curl -s -X POST "$REALM/protocol/openid-connect/token" \
   -d "grant_type=authorization_code" -d "client_id=$CLIENT_ID" \
   --data-urlencode "redirect_uri=$REDIRECT" --data-urlencode "code=$CODE" \
   --data-urlencode "code_verifier=$VERIFIER" --max-time 30 \
-| python -c "import sys,json; d=json.load(sys.stdin); print(d['access_token']) if 'access_token' in d else (sys.stderr.write('ERR: '+json.dumps(d)[:200]+chr(10)), sys.exit(1))"
+| python -c "import sys,json
+# newline='' disables Windows' text-mode LF->CRLF translation. Without it, running this from Git
+# Bash on Windows emitted the token with a trailing \r: '\$(cat tokenfile)' strips only the \n, so
+# every request built from it carried 'Authorization: Bearer <token>\r'. That header is malformed,
+# and it is rejected BELOW Fastify's request logger — so the caller sees a bare
+# 400 {\"error\":\"Bad Request\",\"message\":\"Client Error\"} and the server logs NOTHING at all.
+# On 2026-08-07 that cost a QA agent its run and produced a confident report that the platform was
+# 400-ing every authenticated request, when the platform was entirely healthy.
+sys.stdout.reconfigure(newline='')
+d=json.load(sys.stdin)
+print(d['access_token']) if 'access_token' in d else (sys.stderr.write('ERR: '+json.dumps(d)[:200]+chr(10)), sys.exit(1))"

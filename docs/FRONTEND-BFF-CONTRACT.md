@@ -268,6 +268,65 @@ per the 2026-07-17 route inventory (confirm UI has been repointed off the in-mem
   UI consumer: `P4-B7` (assignment-history timeline on the task detail) — **not built yet**.
 - **PENDING (P4-A1):** `?ball=me` / `?ball[]=` facets on `GET /api/:t/pm/tasks` filter on the
   existing `assignee`, and belong to the cross-project scope ticket, not to the ledger above.
+- **BUILT (P4-H1, 2026-08-07):** `GET /api/:t/pm/projects/:id` now also returns `startDate` (the
+  base `projects.start_date` column — already existed, simply wasn't selected here before) and
+  `dependencyEnforcement: boolean` (P4-I3, see below). `PATCH /api/:t/pm/projects/:id` accepts
+  `startDate`/`dueDate`/`dependencyEnforcement` alongside the existing `owner`/`status`. This
+  **AUTHORED** range (decision 12) is never overwritten from task dates — a project's own
+  `startDate`/`dueDate` stay independent of whatever range its tasks' `startDate`/`dueDate` imply.
+  The task-derived envelope + the Gantt project-bar rendering (P4-H2/H3, plan §H) are `platform-ui`
+  work against data it already has (`GET .../pm/tasks` already carries every task's own dates) —
+  not built here. No new migration column: both `start_date`/`due_date` predate this ticket
+  (`0001_core.sql`).
+- **BUILT (P4-I1/I2/I3, decision 17, 2026-08-07):** `dependsOn` enforcement — previously fully
+  advisory (nothing server-side stopped a blocked task from being started). Migration
+  `0089_pm_dependency_enforcement.sql` adds `pm_tasks.block_reason text` and
+  `pm_project_meta.dependency_enforcement boolean NOT NULL DEFAULT true`. No new "chain" table —
+  enforcement runs on the EXISTING `depends_on` graph.
+  **The rule** (coordinated byte-for-byte with `platform-ui`'s `lib/pm.ts::reachableStatusIds`),
+  enforced in `PATCH /api/:t/pm/tasks/:id` (and `POST /api/:t/pm/suggestions/:id/confirm`'s
+  status-kind branch) whenever the task has an open dependency (`openDependencies()`, resolved
+  per-dependency against ITS OWN project's `isDone` flag — a dependency may live in a different
+  project) and the project hasn't opted out via `dependencyEnforcement:false`:
+    1. A transition into any status that is neither `isDone` nor `isBlocked` and is not the
+       project's intake status (`Backlog`) is rejected — **409**, `{error: "cannot move to […]:
+       blocked by N open dependenc(y|ies) (\"title\", …)"}` (the platform's global
+       `HttpErrorFilter` collapses every exception down to `{error, field?}`, so the blocker's
+       name travels in the message text, not a structured field).
+    2. A transition into an `isDone` status is ALWAYS allowed even with open dependencies —
+       closing a blocked task never unblocks anything (only closing ITS OWN blocker does); this is
+       an audited override (`pm.task.updated`'s `completedWithOpenDependencies: true`), never a
+       silent bypass.
+    3. The task's own CURRENT status is always reachable — an unrelated field edit on an
+       already-blocked task (retitle, log time, pass the ball) never 409s.
+    4. `Backlog`↔ toDo is the only auto-transition the system makes on its own: when the LAST open
+       blocker closes (the blocker completes OR is deleted) — cross-task via
+       `promoteClearedDependents`, or self-triggered via `removeDependency` — a task sitting in
+       `Backlog` (or a SYSTEM-set `Blocked`, see below) is promoted to the project's `readyStatus`
+       (never the literal `"todo"`). Audited: a `pm.task.dependencyCleared` event + a
+       `writeActivity` row (actor `null`, `closedTaskId`/`closedByUserId` in the metadata) — "a
+       write triggered by someone else's action," per the plan, never silent.
+  **Decision 17 — Blocked is distinguishable, system vs human:** `GET /api/:t/pm/tasks/:id`
+  gained `blockReason: string|null` and `blockedBy: [{id,title}]` (computed live off
+  `openDependencies()`, never stored — a stored blocker id would drift the moment that task's own
+  status changes). An explicit `PATCH … {status:"blocked", blockReason?}` while a dependency is
+  open FORCES `blockReason` to `null` regardless of what's sent (system attribution — "which
+  blocker" is `blockedBy`, not a stored string); with NO open dependency, an optional human
+  `blockReason` is stored verbatim (NOT required — an `isBlocked`-flagged status is also plain
+  product vocabulary outside this feature, e.g. a review gate, and a mandatory-reason gate would
+  400 on ordinary board moves that have nothing to do with `dependsOn`). A HUMAN-set block
+  (non-null reason) is never auto-cleared by dependency activity; only a SYSTEM-set one is.
+  **P4-I3/decision 14** — hard-block is the only enforced mode (no "warn" mode exists, by design);
+  a project may explicitly turn enforcement off via `PATCH /api/:t/pm/projects/:id
+  {dependencyEnforcement:false}` — audited for free through that endpoint's existing
+  `pm.project.updated` event + `writeActivity` row, not a separate mechanism.
+  **P4-I5 pinned:** passing the ball (reassigning `assignee`) on a blocked task is ALLOWED; bundling
+  it with an explicit `status` into a started column in the SAME `PATCH` is still rejected (409) —
+  see `pm.test.ts`'s dedicated case.
+  **Not built here (other tickets in workstream I):** `P4-I4` (UI: disabled-transition affordance +
+  a "ready to start" filter facet — `platform-ui` owns this, `reachableStatusIds` already landed)
+  and `P4-I6` (notify the ball holder when the last blocker clears — the event/audit trail this
+  ticket guarantees is the substrate `I6` consumes, no notification is sent yet).
 - **BUILT (P3-08, 2026-07-24):** `GET /api/:t/pm/tasks/:id/followers` → `[{id,name}]`,
   `POST`/`DELETE /api/:t/pm/tasks/:id/follow` (no body — the followed row is ALWAYS
   `user_id = principal`, never client-supplied; read-gated, since following is a self-scoped
@@ -1422,7 +1481,7 @@ sends mail once `MAIL_ENABLED=1` on a deployed box.
 
 | Status | Method | Path | Notes |
 |---|---|---|---|
-| ✅ | GET | `/api/admin/mail/log` | Elevated-only (`isElevated` — `platform_admin`/`group_executive` global). Filters: `?stream`, `?status`, `?tenantId`, `?entityType`, `?entityId`, `?since`; `?limit`/`?offset` pagination. Non-elevated caller: 403. `mail_log` is a GLOBAL table (no RLS, design §6.1) — this is its ONLY read path today. **`tenantId`/`entityId` must be uuid-shaped and `since` must be a parseable date — a malformed value now 400s (fixed 2026-08-04; previously an uncaught Postgres error surfaced as a bare 500).** |
+| ✅ | GET | `/api/admin/mail/log` | Elevated-only (`isElevated` — `platform_admin`/`group_executive` global). Filters: `?stream`, `?status`, `?tenantId`, `?entityType`, `?entityId`, `?since`; `?limit`/`?offset` pagination. Non-elevated caller: 403. `mail_log` is a GLOBAL (tenant-less) table and this is its ONLY read path today — but **"no RLS" is stale and actively dangerous**: MAIL-22 put `FORCE ROW LEVEL SECURITY` on `mail_log`/`mail_messages`/`mail_suppressions` behind an `app.mail_context` GUC. A reader without `BYPASSRLS` that has not set the GUC gets **zero rows and no error**, which is indistinguishable from an empty table — this misled two separate verification runs on 2026-08-07 into reporting the mail pipeline dead when it was working. Read via `withMailContext()`, or as superuser, never a plain `SELECT`. **`tenantId`/`entityId` must be uuid-shaped and `since` must be a parseable date — a malformed value now 400s (fixed 2026-08-04; previously an uncaught Postgres error surfaced as a bare 500).** |
 | ✅ | GET | `/api/admin/mail/log/:id` | Full row. 404 for an unknown id. Same elevated-only gate. |
 | ✅ | GET | `/api/admin/mail/log/:id/preview` | **MAIL-38** — the RENDERED body, recomposed on demand. `mail_log` stores `template_key` + `payload` and **never the composed body** (design §6.1), so before this the ERP could show that a mail was sent but not what it said — only the Mailpit dev sink could, and that sink does not survive the move to a real relay. Returns `{ mailLogId, templateKey, subject, html, text, renderedFromCurrentTemplate }` from the SAME `renderTemplate()` the sender uses; **nothing is cached** (design §11 "render on demand, cache nothing" — a cache would put bodies in the DB the schema deliberately excludes, and give erasure a second place to reach). Elevated-only, matching `/:id` rather than `/thread`: a preview exposes only what this platform composed and already sent, from a row the caller can already read in full, so it does not need `thread`'s A10 parent-entity gate. 404 (not 500) when `template_key` has no registered renderer. **Honest limit, surfaced in the payload:** re-rendered from the *current* template, so a template changed since send renders differently from what the recipient received. UI renders it in a `sandbox=""` iframe via `srcDoc` — defence in depth over the templates' own `escapeHtml()`, because `payload` can carry inbound-derived text and MAIL-18 only proved those bytes inert *as stored*, not as composed into an elevated-only page. |
 | ✅ | POST | `/api/mail/webhooks/brevo` | Provider delivery-event intake (design §7.7). NOT behind `AuthGuard` — the only wall is the `x-gaiada-mail-webhook-token` header (constant-time compare against `MAIL_WEBHOOK_TOKEN`; fail-closed when unset). Idempotent by `provider_message_id`; unknown/unmatched id or unrecognized event shape → `204` (never a 5xx a provider would retry forever over). In the dev stage this endpoint receives nothing (no live Brevo) — built and tested for real so it is ready the moment §15 R3 wires a real webhook at staging. |

@@ -122,8 +122,27 @@ async function main() {
   // MessageId is the whole point (idempotency across runs).
   const run = `replay${Date.now()}`;
 
-  const names = readdirSync(FIXTURE_DIR).filter((f) => f.endsWith(".json")).sort()
-    .filter((f) => !args.only || f === args.only);
+  // `--only` accepts ONE filename or a comma-separated list. It used to be an exact `===` against a
+  // single string, so the natural `--only a.json,b.json` matched nothing, ran zero fixtures, and
+  // exited GREEN — a silent no-op that reads exactly like a pass. Anything that can quietly test
+  // nothing and call it success is the same failure family as the RLS zero-row read above, so it
+  // now fails loudly instead.
+  const onlyList = args.only ? args.only.split(",").map((s) => s.trim()).filter(Boolean) : null;
+  const allNames = readdirSync(FIXTURE_DIR).filter((f) => f.endsWith(".json")).sort();
+  const names = onlyList ? allNames.filter((f) => onlyList.includes(f)) : allNames;
+
+  if (onlyList) {
+    const missing = onlyList.filter((n) => !allNames.includes(n));
+    if (missing.length) {
+      console.error(`--only named ${missing.length} fixture(s) that do not exist: ${missing.join(", ")}`);
+      console.error(`available: ${allNames.join(", ")}`);
+      process.exit(2);
+    }
+  }
+  if (!names.length) {
+    console.error("no fixtures selected — refusing to exit 0 having replayed nothing");
+    process.exit(2);
+  }
 
   // MAIL-29: when a live `--reply-token` is supplied, a 204 on the threading cases is NOT evidence of
   // anything — the A9 unmatched path returns the exact same status. So resolve the token to its
@@ -136,6 +155,22 @@ async function main() {
       const client = new Client({ connectionString: args.databaseUrl });
       try {
         await client.connect();
+
+        // MAIL-22 put FORCE ROW LEVEL SECURITY on mail_log/mail_messages behind an
+        // `app.mail_context` GUC, and this script never set it — so every SELECT below returned
+        // ZERO ROWS with no error, and the check reported "THREADING NOT VERIFIED" on replays that
+        // had in fact threaded perfectly. That is worse than the bug the check exists to catch: a
+        // false green is at least suspicious, whereas a false red sends someone hunting a defect
+        // that is not there. It did exactly that on 2026-08-07, costing a full QA agent run and
+        // producing a confident report that `notify()` was dead estate-wide when 251 notification
+        // rows existed.
+        //
+        // `false` (session-scoped, not SET LOCAL) because this client runs its queries outside any
+        // explicit transaction — the app's own withMailContext() uses `true` precisely because it
+        // is inside one. Same GUC, same value, different lifetime, and using the app's form here
+        // would silently reset before the very next statement.
+        await client.query("SELECT set_config('app.mail_context', 'on', false)");
+
         const found = await client.query(
           `SELECT id FROM mail_log WHERE reply_token = $1`,
           [args.replyToken],
