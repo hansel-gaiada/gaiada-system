@@ -51,6 +51,7 @@ import { createHandoff, fetchEpisodicHistory, fetchRoster, listHandoffsForThread
 import { confirmWriteIntent, dismissWriteIntent, reapExpiredIntents, type ToolCallIntent } from "./write-intents";
 import { notifyApprovalFiled } from "../../core/approval-filing";
 import { deriveServerThreadTitle } from "./thread-title";
+import { lockAssistantThread } from "./thread-lock";
 
 // ── ASST-06 — the send->stream engine ────────────────────────────────────────────────────────────
 //
@@ -79,11 +80,10 @@ import { deriveServerThreadTitle } from "./thread-title";
 // PIPELINE_RUN_LOCK_NS) for the same reason search's own two namespaces are distinct from
 // pipeline's: an assistant thread id and a pipeline run id must never hash-collide into shared
 // contention across two unrelated domains.
-const ASSISTANT_THREAD_LOCK_NS = 0x41535401; // 'AST' + 1, distinct from every other lock namespace in the app
-
-async function lockAssistantThread(c: PoolClient, threadId: string): Promise<void> {
-  await c.query("SELECT pg_advisory_xact_lock($1, hashtext($2))", [ASSISTANT_THREAD_LOCK_NS, threadId]);
-}
+//
+// Extracted into `thread-lock.ts` (still this exact namespace + function) so `handoffs.ts`'s
+// handoff-suspension harvest can take the SAME lock without a controller<->handoffs import cycle —
+// see that file's header.
 
 const MAX_MESSAGE_CONTENT_LENGTH = 20_000;
 const MAX_MEMORY_CONTENT_LENGTH = 2_000;

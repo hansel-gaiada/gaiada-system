@@ -599,26 +599,139 @@ describe.skipIf(!TEST_URL)("T3b — confirm-before-file machinery, live PG + Cer
     expect(dismissRes.statusCode).toBe(404);
   });
 
-  // ── SCOPE NOTE (§7.2.5): a handoff still files DIRECTLY, no confirm gate ─────────────────────────
-  it("handoff-to-task-filer does NOT request deferred filing — the REAL /handoff endpoint's goal submission never sends fileOnSuspend:false", async () => {
-    const threadId = await newThread(owner, "handoff scope note");
-    const before = runner.receivedGoals.length;
+  // ── 2026-08-07: the §7.2.5 scope note is OVERRULED — a handoff now reaches the SAME confirm chip ──
+  // (docs/superpowers/plans/2026-08-07-handoff-confirm-report.md). This block replaces the old
+  // "handoff files directly, no confirm gate" pin with its successor: a handoff's goal submission
+  // now ALSO sends `fileOnSuspend:false`, and a suspended handoff's write is harvested into
+  // `assistant_write_intents` via `handoffs.ts::refreshHandoff` — same table, same confirm/dismiss
+  // endpoints, same card-state join, never a second mechanism.
+  describe("handoff-initiated writes now reach the confirm chip (closing the §7.2.5 bypass)", () => {
+    it("the REAL /handoff endpoint's goal submission sends fileOnSuspend:false, exactly like the chat-path broker", async () => {
+      const threadId = await newThread(owner, "handoff no longer bypasses confirm");
+      const before = runner.receivedGoals.length;
 
-    const res = await app.inject({
-      method: "POST",
-      url: `/api/${A}/assistant/threads/${threadId}/handoff`,
-      headers: asUser(owner),
-      payload: { agent: "task-filer", goal: "file a task on my behalf" },
+      const res = await app.inject({
+        method: "POST",
+        url: `/api/${A}/assistant/threads/${threadId}/handoff`,
+        headers: asUser(owner),
+        payload: { agent: "task-filer", goal: "file a task on my behalf" },
+      });
+      expect(res.statusCode).toBe(201);
+
+      const goals = runner.receivedGoals.slice(before);
+      expect(goals).toHaveLength(1);
+      // Inverted from the old pin: the handoff click is consent to RUN the agent, never to ONE
+      // specific write with these specific arguments — so it defers filing exactly like a chat turn.
+      expect(goals[0].fileOnSuspend).toBe(false);
+      expect(goals[0].agent).toBe("task-filer");
     });
-    expect(res.statusCode).toBe(201);
 
-    const goals = runner.receivedGoals.slice(before);
-    expect(goals).toHaveLength(1);
-    // The scope note, proven live: unlike EVERY draftToDraft() call above (which asserts
-    // `fileOnSuspend === false`), a handoff's own goal submission (`handoffs.ts`, untouched by T3b)
-    // never sends the field at all — so a suspended handoff would still file immediately, exactly as
-    // before this ticket. The handoff click IS the explicit consent (§7.2.5).
-    expect(goals[0].fileOnSuspend).toBeUndefined();
-    expect(goals[0].agent).toBe("task-filer");
+    it("a suspended handoff is harvested in-thread as a draft — no approval filed, no decider notified, until the OWNER confirms it", async () => {
+      const secretTitle = `handoff secret ${newId()}`;
+      const threadId = await newThread(owner, "handoff harvest happy path");
+      const notifyBefore = await adminPool().query<{ n: string }>(
+        `SELECT count(*)::int AS n FROM notifications WHERE tenant_id = $1 AND user_id = $2 AND type = 'approval.requested'`,
+        [A, admin],
+      );
+
+      const handoffRes = await app.inject({
+        method: "POST",
+        url: `/api/${A}/assistant/threads/${threadId}/handoff`,
+        headers: asUser(owner),
+        payload: { agent: "task-filer", goal: intentMarker("pm.createTask", "high", { title: secretTitle }) },
+      });
+      expect(handoffRes.statusCode).toBe(201);
+      const handoffId = (handoffRes.json() as { id: string }).id;
+
+      // GET .../handoffs is the run-watch poll — it lazily refreshes from the runner, and (new) is
+      // where the harvest happens. Before this call NOTHING has been filed — the goal is suspended
+      // but nobody but the owner has any signal of it yet.
+      const beforeApprovals = await adminPool().query<{ n: string }>(`SELECT count(*)::int AS n FROM automation_approvals WHERE tenant_id = $1`, [A]);
+
+      const listRes = await app.inject({ method: "GET", url: `/api/${A}/assistant/threads/${threadId}/handoffs`, headers: asUser(owner) });
+      expect(listRes.statusCode).toBe(200);
+      const handoffs = listRes.json() as Array<{ id: string; status: string; approvalId: string | null }>;
+      const mine = handoffs.find((h) => h.id === handoffId)!;
+      expect(mine.status).toBe("suspended");
+      expect(mine.approvalId).toBeNull(); // NOT filed — this is the whole point of the fix
+
+      // Still nothing filed, nobody notified.
+      const afterApprovals = await adminPool().query<{ n: string }>(`SELECT count(*)::int AS n FROM automation_approvals WHERE tenant_id = $1`, [A]);
+      expect(afterApprovals.rows[0].n).toBe(beforeApprovals.rows[0].n);
+      const notifyAfterHarvest = await adminPool().query<{ n: string }>(
+        `SELECT count(*)::int AS n FROM notifications WHERE tenant_id = $1 AND user_id = $2 AND type = 'approval.requested'`,
+        [A, admin],
+      );
+      expect(notifyAfterHarvest.rows[0].n).toBe(notifyBefore.rows[0].n);
+
+      // The SAME in-thread confirm chip a chat turn would produce: one new assistant message, one
+      // tool call, a 'draft' intent, real args nowhere on the wire (the response above never carried
+      // `secretTitle`), and the message's own content confirms it never touched the DB as a write.
+      const { messages } = await getThread(owner, threadId);
+      expect(messages).toHaveLength(1); // the handoff itself never wrote a user turn into this thread
+      const call = messages[0].toolCalls[0];
+      expect(call.toolName).toBe("pm.createTask");
+      expect(call.approvalId).toBeNull();
+      expect(call.intent).toMatchObject({ status: "draft" });
+      const rawBody = JSON.stringify(listRes.json()) + JSON.stringify(await getThread(owner, threadId));
+      expect(rawBody).not.toContain(secretTitle);
+
+      // The real (unredacted) args live ONLY in assistant_write_intents.tool_args pre-confirm.
+      const intentRow = await adminPool().query<{ tool_args: { title?: string } }>(
+        `SELECT tool_args FROM assistant_write_intents WHERE tool_call_id = $1`,
+        [call.id],
+      );
+      expect(intentRow.rows[0].tool_args.title).toBe(secretTitle);
+
+      // Re-polling (a second GET .../handoffs) must NOT re-harvest — no second message, no second
+      // tool call, no error.
+      const secondList = await app.inject({ method: "GET", url: `/api/${A}/assistant/threads/${threadId}/handoffs`, headers: asUser(owner) });
+      expect(secondList.statusCode).toBe(200);
+      const afterSecondPoll = await getThread(owner, threadId);
+      expect(afterSecondPoll.messages).toHaveLength(1);
+      expect(afterSecondPoll.messages[0].toolCalls).toHaveLength(1);
+
+      // NOW the owner confirms — this is the ONLY action that may file, and it attributes the filing
+      // to the CHATTING USER (the owner), never to any handoff/agent identity.
+      const confirmRes = await app.inject({
+        method: "POST",
+        url: `/api/${A}/assistant/threads/${threadId}/tool-calls/${call.id}/confirm`,
+        headers: asUser(owner),
+      });
+      expect(confirmRes.statusCode).toBe(200);
+      const confirmed = confirmRes.json() as { approvalId: string; approval: { status: string } };
+      expect(confirmed.approval.status).toBe("pending");
+
+      const approvalRow = await adminPool().query<{ requested_by: string; origin: string; workflow_id: string; tool_name: string; tool_args: { title?: string } }>(
+        `SELECT requested_by, origin, workflow_id, tool_name, tool_args FROM automation_approvals WHERE id = $1`,
+        [confirmed.approvalId],
+      );
+      expect(approvalRow.rows[0]).toMatchObject({ requested_by: owner, origin: "agent", workflow_id: "task-filer", tool_name: "pm.createTask" });
+      expect(approvalRow.rows[0].tool_args.title).toBe(secretTitle);
+
+      // Confirming is what notifies the decider — never the handoff/harvest step itself.
+      const notifyAfterConfirm = await adminPool().query<{ n: string }>(
+        `SELECT count(*)::int AS n FROM notifications WHERE tenant_id = $1 AND user_id = $2 AND type = 'approval.requested'`,
+        [A, admin],
+      );
+      expect(Number(notifyAfterConfirm.rows[0].n)).toBeGreaterThan(Number(notifyBefore.rows[0].n));
+    });
+
+    it("a handoff whose goal never suspends harvests NOTHING — the guard is `status==='suspended' && suspendedIntent`, never merely 'this came from a handoff'", async () => {
+      // The fake runner in THIS file only registers "task-filer" on /agents, so drive a plain "OK"
+      // (non-INTENT) goal through it rather than switching agents.
+      const threadId = await newThread(owner, "handoff read-only path");
+      const res = await app.inject({
+        method: "POST",
+        url: `/api/${A}/assistant/threads/${threadId}/handoff`,
+        headers: asUser(owner),
+        payload: { agent: "task-filer", goal: "OK just read something" },
+      });
+      expect(res.statusCode).toBe(201);
+      const listRes = await app.inject({ method: "GET", url: `/api/${A}/assistant/threads/${threadId}/handoffs`, headers: asUser(owner) });
+      expect(listRes.statusCode).toBe(200);
+      const { messages } = await getThread(owner, threadId);
+      expect(messages).toHaveLength(0); // nothing was ever harvested — there was nothing to harvest
+    });
   });
 });

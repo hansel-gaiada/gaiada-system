@@ -2276,12 +2276,9 @@ longer task to a specialist," deliberately NOT per-department personas).
   isolation, incl. the matchedPolicy smoke check and an explicit "wrong origin still denies" probe),
   plus additive unit tests in `ai-agents/src/memory/episodic{,-pg}.test.ts` and
   `ai-agents/src/runner/service.test.ts` for the `runIds` filter and the two new runner endpoints.
-- **Deferred, out of this ticket's scope**: a suspended handoff run (a `high_write` filing a D14
-  approval) does not yet surface any signal back INTO the thread transcript itself (no new message/
-  notification is written) — the run-watch view's own status chip (`"Waiting for approval"`) is the
-  only place that becomes visible today. Wiring that back into the thread is real work (a new
-  message part, or reusing the SSE `approval_required` shape ASST-17 already defined for in-turn
-  tool calls) and was left for a follow-up rather than folded in here.
+- **CLOSED 2026-08-07** (was: "Deferred, out of this ticket's scope") — see the new dated addendum
+  below, "Closing the handoff confirm-chip bypass". A suspended handoff run now surfaces IN the
+  thread transcript itself, via the SAME confirm-chip machinery T3b built for the chat path.
 
 ### T3a — the broker's first write turn: registry gate + write-tool mirror + card-state join (ASST-23, 2026-08-06)
 
@@ -2385,9 +2382,11 @@ The owner's OQ-2 override (§7.2 of `docs/superpowers/plans/2026-08-06-asst-23-u
 a chat-path write no longer files an `automation_approvals` row at suspension time. It suspends as a
 **draft**, in-thread, and the OWNER explicitly confirms or dismisses it before anything is filed or
 any decider is notified. `approval_required` (ASST-17, above) keeps its exact prior meaning — a
-FILED proposal — and remains correct for handoff-origin suspensions (`POST …/handoff` still files
-directly, unchanged, per §7.2.5's scope note: the handoff click is itself the explicit consent) and
-for any future `fileOnSuspend:true` caller; it simply no longer occurs on THIS path's first leg.
+FILED proposal — and remains correct for any future `fileOnSuspend:true` caller; it simply no longer
+occurs on the chat path's first leg. (Original note, since SUPERSEDED 2026-08-07 — see the dated
+addendum below: "and remains correct for handoff-origin suspensions… the handoff click is itself the
+explicit consent" — the handoff path now defers filing too; see "Closing the handoff confirm-chip
+bypass" below.)
 
 - **Migration `0085_assistant_write_intents.sql`** — new table `assistant_write_intents`
   (tenant-scoped, `assistant`-module RLS, composite FK to `assistant_tool_calls`, zero DML). Holds the
@@ -2444,11 +2443,11 @@ for any future `fileOnSuspend:true` caller; it simply no longer occurs on THIS p
   `POST …/dismiss` call, so its outcome arrives in that call's HTTP response, not on the stream (the
   stream may not even be open by the time a human clicks dismiss on a reloaded thread).
 - **Explicitly unaffected**: `wf:report`'s n8n `pm.createTask` path (still executes unattended,
-  `create()` byte-identical); the handoff endpoint (still files directly, no confirm gate — §7.2.5's
-  scope note, restated); D13 (provider gate, unchanged — the consult still happens inside the
+  `create()` byte-identical); D13 (provider gate, unchanged — the consult still happens inside the
   runner's goal, before the confirm machinery exists); the transcript-redaction invariant (the
   `confirm_required` frame and every GET carry redacted args + `intentId` only, exactly like
-  `approval_required`'s existing rule).
+  `approval_required`'s existing rule). (Original note, since SUPERSEDED 2026-08-07 — the handoff
+  endpoint no longer "still files directly": see "Closing the handoff confirm-chip bypass" below.)
 
 ### T4 — platform-ui: event grammar + proposal card + tools-mode composer (ASST-23, §7.4, 2026-08-06)
 
@@ -2509,3 +2508,65 @@ change a consumed endpoint" rule).
   integration test over the real demo dispatcher + the real SSE generator, not further mocked:
   proves send-time 400s, the read-only chip path, the full write-proposal lifecycle including the
   redaction check, double-confirm idempotency, and the 409/404 refusal shapes).
+
+### Closing the handoff confirm-chip bypass (2026-08-07)
+
+`platform-nest` only — no `platform-ui`/`ai-agents` files touched. Full analysis + evidence:
+`docs/superpowers/plans/2026-08-07-handoff-confirm-report.md`.
+
+The owner overruled ASST-21/§7.2.5's original scope note ("the handoff click is itself the explicit
+consent"): clicking "hand off to a specialist" is consent to RUN AN AGENT, not to ONE SPECIFIC WRITE
+with THESE SPECIFIC ARGUMENTS — which is exactly what the confirm chip shows (redacted) before
+anything is filed. A separate modal at handoff time would be consent to a blank cheque. The fix
+therefore reuses T3b's existing confirm-chip machinery end to end rather than adding a second one.
+
+- ✅ **`POST :t/assistant/threads/:id/handoff`'s goal submission gains `fileOnSuspend: false`**
+  (`modules/assistant/handoffs.ts::createHandoff`) — byte-identical body otherwise. A `high_write`
+  the specialist proposes now suspends as a DRAFT (never filed) exactly like a chat-path tool turn.
+- ✅ **NEW `harvestSuspendedIntent`** (`handoffs.ts`, called from `refreshHandoff` — i.e. on every
+  `GET :t/assistant/threads/:id/handoffs` poll): when the polled goal reports
+  `status:'suspended'` + a `suspendedIntent`, it writes ONE new `assistant_messages` row (the
+  in-thread confirm chip's home), ONE `assistant_tool_calls` row, and ONE `assistant_write_intents`
+  DRAFT — the SAME three tables, same shapes, the broker's own chat-path harvest
+  (`modules/assistant/broker.ts`'s `runToolTurn`) writes. No new endpoint: the existing
+  `POST …/tool-calls/:callId/confirm`/`.../dismiss` and the existing `GET :t/assistant/threads/:id`
+  card-state join handle a harvested handoff intent with ZERO changes, because from their point of
+  view it is indistinguishable in shape from a chat-turn intent. `ProposalCard` (T4) therefore
+  renders it with no FE code change either.
+- **Idempotent without a new column**: the synthesized `assistant_tool_calls.id` is the handoff's
+  OWN `assistant_handoffs.id` (a different table's PK space — no collision). A goal can suspend at
+  most once ever (`ai-agents/src/agent.ts` ends the goal at the first unresolved `high_write`), so
+  "does a tool_call with this id already exist" is an exact, race-safe "already harvested" check —
+  repolling `GET …/handoffs` never re-harvests. No migration.
+- **Locking**: the harvest takes the SAME per-thread advisory lock `sendMessage` uses, extracted
+  into a new tiny shared module `modules/assistant/thread-lock.ts` (`ASSISTANT_THREAD_LOCK_NS`/
+  `lockAssistantThread`, moved out of `assistant.controller.ts` so `handoffs.ts` can import it
+  without a controller↔handoffs cycle) — a concurrent chat turn on the same thread can never
+  collide with a handoff harvest on `assistant_messages`' `UNIQUE (thread_id, seq)`.
+- **Invariants re-verified for this path specifically** (all hold, same mechanism as the chat
+  path): the filing (at confirm time) is attributed to the CHATTING/handoff-OWNING user, never any
+  handoff/agent identity; confirm/dismiss stay owner-only (unchanged Cerbos `confirm_write` rule —
+  no new authz surface was added); real args live ONLY in `assistant_write_intents.tool_args` until
+  confirm, never on the wire (the harvested message's `assistant_tool_calls.args` is
+  `redactToolArgs`'d, same as the chat path); unconfirmed intents notify nobody (a suspended handoff
+  produces zero `automation_approvals` rows and zero decider notifications — confirmed, live, both
+  before AND after a repeated poll); a confirmed handoff-harvested row is byte-for-byte
+  shape-identical to a chat-drafted or runner-filed one, so the executor/grant chains need zero
+  changes.
+- Tests: `modules/assistant/assistant-write-intents.test.ts` gains a new `describe` block (3 cases)
+  replacing the old, now-inverted "handoff files directly" pin — `fileOnSuspend:false` is sent;
+  a suspended handoff harvests a draft (no filing/notification pre-confirm, real args nowhere on
+  the wire, idempotent across a repeated poll) and confirms through the real `decide`-adjacent
+  filing path attributed to the owner; a handoff whose goal never suspends harvests nothing (the
+  guard is `status==='suspended' && suspendedIntent`, never "this came from a handoff"). Full
+  `platform-nest` suite green (typecheck, `lint:withtenants`, `lint:migration-rls`,
+  `test:mail-corpus`, `test`) — see the report for the exact run.
+- **A found-not-fixed FE gap, reported rather than silently left** (out of `senior-be` scope; no
+  `platform-ui` file was touched): `RosterPanel.tsx`'s run-watch poll (`hasActiveHandoff`) refreshes
+  ONLY `GET …/handoffs`, never the thread itself, and `AssistantWorkspace.tsx`'s own silent-refresh
+  poll only engages once `hasPendingProposalDecision(messages)` is already true (i.e., once the
+  harvested message is already IN `messages`). A harvested handoff intent is therefore correctly
+  reachable and confirmable, but may not appear in an already-open thread until the user reloads it
+  or navigates away and back — a UX-latency gap, not a safety bypass (the backend never files
+  without confirmation regardless of when the FE notices). Minimal follow-up: have `RosterPanel`'s
+  poll also trigger a silent thread refresh once any handoff's status is `'suspended'`.

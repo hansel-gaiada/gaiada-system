@@ -846,8 +846,12 @@ export async function runToolTurn(input: ToolTurnInput): Promise<ToolTurnResult>
         // Harmless for a read-only agent (it never suspends, so the flag is never consulted) and for
         // a goal that never suspends at all — this is why it is sent UNCONDITIONALLY rather than only
         // for write-capable agents. The handoff path (`handoffs.ts`'s `createHandoff`) is a DIFFERENT
-        // goal-submission call and is deliberately NOT touched — §7.2.5's scope note: a handoff still
-        // files directly, because the handoff click itself is the explicit consent.
+        // goal-submission call, but as of 2026-08-07 it ALSO sends `fileOnSuspend: false` — §7.2.5's
+        // original "the handoff click is itself the explicit consent" scope note was overruled by the
+        // owner (see `docs/superpowers/plans/2026-08-07-handoff-confirm-report.md`): a handoff's
+        // suspended write is now harvested into the SAME `assistant_write_intents`/confirm-chip
+        // machinery this file's own suspended branch below feeds, just entered from `handoffs.ts`'s
+        // `refreshHandoff` instead of from here — see that file's header for the harvest.
         fileOnSuspend: false,
       }),
       signal: input.signal,
