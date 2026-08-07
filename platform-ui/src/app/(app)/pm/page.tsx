@@ -27,7 +27,7 @@ import { Gantt } from "@/components/pm/Gantt";
 import { Charts } from "@/components/pm/Charts";
 import { TagChip } from "@/components/pm/TagChip";
 import { ScopeSwitcher } from "@/components/pm/ScopeSwitcher";
-import { PM_SWIMLANES, isSwimlane, isView, representativeTag, type PmSwimlane } from "./page-helpers";
+import { PM_SWIMLANES, isSwimlane, isView, representativeTag, leadWithUnassigned, type PmSwimlane } from "./page-helpers";
 import "@/components/pm/pm.css";
 
 // The `@all` cross-project PM surface (plan §1.1/§3 workstream A, tickets P4-A3/A4/A5) — Repsona's
@@ -41,10 +41,14 @@ import "@/components/pm/pm.css";
 // makes that trivial (no pathname plumbing needed to know "which view was I on").
 //
 // NOT built here (other tickets in the same plan): a `Home` column view (P4-A8, needs a
-// comments-on-tasks join), a standalone `Responsible`/`Ball` route (P4-A6/B6 — already reachable
-// here via the swimlane selector below, same mechanism the department board uses) and
-// `Productivity` (workstream E). Division/grid swimlanes stay on the department board — a division
-// only means something inside ONE department, so they don't generalise to `@all`/project scope.
+// comments-on-tasks join) and `Productivity` (workstream E). Division/grid swimlanes stay on the
+// department board — a division only means something inside ONE department, so they don't
+// generalise to `@all`/project scope.
+//
+// P4-A6: `Responsible`/`Ball` ARE first-class views here, at every scope — reached via the same
+// swimlane selector the department board uses (no fourth set of components, per the ticket), with
+// `leadWithUnassigned` (./page-helpers) normalising both to lead with a "no user" column, matching
+// the reference (§1.4/§1.5).
 
 type SearchParams = Promise<{
   view?: string; swimlane?: string; tags?: string | string[]; ball?: string | string[]; responsible?: string | string[];
@@ -244,9 +248,9 @@ async function BoardSection({
       ) : swimlane === "priority" ? (
         <Board columns={priorityColumns(facetFilteredTasks)} move={setTaskPriority} blockedIds={blockedIds} taskTags={taskTags} taskUrgency={taskUrgencyById} />
       ) : swimlane === "assignee" ? (
-        <Board columns={assigneeColumns(facetFilteredTasks)} move={reassignResponsible} blockedIds={blockedIds} taskTags={taskTags} taskUrgency={taskUrgencyById} />
+        <Board columns={leadWithUnassigned(assigneeColumns(facetFilteredTasks), "__unassigned")} move={reassignResponsible} blockedIds={blockedIds} taskTags={taskTags} taskUrgency={taskUrgencyById} />
       ) : swimlane === "ball" ? (
-        <Board columns={ballColumns(facetFilteredTasks)} move={reassignBall} blockedIds={blockedIds} taskTags={taskTags} taskUrgency={taskUrgencyById} />
+        <Board columns={leadWithUnassigned(ballColumns(facetFilteredTasks), "__no_ball")} move={reassignBall} blockedIds={blockedIds} taskTags={taskTags} taskUrgency={taskUrgencyById} />
       ) : (
         <Board
           columns={unionStatusColumns(facetFilteredTasks, work.statusesByProject)}

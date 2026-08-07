@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { isSwimlane, isView, representativeTag, PM_SWIMLANES } from "./page-helpers";
-import type { Tag } from "@/lib/pm";
+import { isSwimlane, isView, representativeTag, leadWithUnassigned, PM_SWIMLANES } from "./page-helpers";
+import type { Tag, AxisColumn } from "@/lib/pm";
 
 describe("pm page-helpers", () => {
   it("isSwimlane accepts exactly the four board axes this page mounts", () => {
@@ -41,5 +41,35 @@ describe("pm page-helpers", () => {
 
   it("representativeTag on an empty registry map returns undefined", () => {
     expect(representativeTag("Anything", {})).toBeUndefined();
+  });
+
+  // P4-A6: `assigneeColumns` (lib/departments.ts) sorts its sentinel column alphabetically and
+  // still carries the pre-rename label — this is the render-boundary fix for that, applied without
+  // touching that file.
+  describe("leadWithUnassigned", () => {
+    const col = (key: string, label: string): AxisColumn => ({ key, label, tasks: [] });
+
+    it("floats the sentinel column to the front and relabels it to PM_TERMS.unassigned", () => {
+      const cols = [col("u-1", "Ada"), col("u-2", "Ben"), col("__unassigned", "Unassigned")];
+      const out = leadWithUnassigned(cols, "__unassigned");
+      expect(out.map((c) => c.key)).toEqual(["__unassigned", "u-1", "u-2"]);
+      expect(out[0].label).toBe("no user");
+      // The rest keep their relative order — only the sentinel moves.
+      expect(out.slice(1).map((c) => c.label)).toEqual(["Ada", "Ben"]);
+    });
+
+    it("is a no-op when the sentinel is already first and already correctly labelled (ballColumns' own shape)", () => {
+      const cols = [col("__no_ball", "no user"), col("u-1", "Ada"), col("u-2", "Ben")];
+      expect(leadWithUnassigned(cols, "__no_ball")).toEqual(cols);
+    });
+
+    it("returns the columns untouched when the sentinel key is absent (every task assigned)", () => {
+      const cols = [col("u-1", "Ada"), col("u-2", "Ben")];
+      expect(leadWithUnassigned(cols, "__unassigned")).toEqual(cols);
+    });
+
+    it("returns [] untouched for an empty column list", () => {
+      expect(leadWithUnassigned([], "__unassigned")).toEqual([]);
+    });
   });
 });

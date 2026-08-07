@@ -244,8 +244,10 @@ describe("assigneeColumns", () => {
 
   it("groups by responsibleId, sorted by label, with an Unassigned column and no `people`", () => {
     const cols = assigneeColumns(tasks);
-    expect(cols.map((c) => c.label)).toEqual(["Ada", "Ben", "Unassigned"]);
-    expect(cols.find((c) => c.label === "Unassigned")?.tasks.map((t) => t.id)).toEqual(["c"]);
+    // P4-A6 follow-up: the sentinel now LEADS and uses PM_TERMS.unassigned ("no user"), matching
+    // ballColumns — the two boards sit one click apart and must order it identically.
+    expect(cols.map((c) => c.label)).toEqual(["no user", "Ada", "Ben"]);
+    expect(cols.find((c) => c.label === "no user")?.tasks.map((t) => t.id)).toEqual(["c"]);
     expect(cols.every((c) => c.people === undefined)).toBe(true);
   });
 });
@@ -325,9 +327,12 @@ describe("Ball / Responsible filter facets (P4-B9)", () => {
       { id: "u-1", label: "Ada" },
       { id: "u-2", label: "Ben" },
     ]);
+    // P4-A6 follow-up: Responsible now mirrors Ball exactly — sentinel first, "no user" wording.
+    // The two facet lists sit side by side in the same filter bar, so an inconsistency here is
+    // visible at a glance; this test's own name asks them to match the board, and now they do.
     expect(responsibleFacetOptions(tasks)).toEqual([
+      { id: "__unassigned", label: "no user" },
       { id: "u-1", label: "Ada" },
-      { id: "__unassigned", label: "Unassigned" },
     ]);
   });
 });
@@ -380,14 +385,14 @@ describe("assigneeStatusGrid", () => {
 
   it("builds one row per responsible person (sorted) + Unassigned, uniform status columns, no `people`", () => {
     const rows = assigneeStatusGrid(tasks, statusesByProject);
-    expect(rows.map((r) => r.label)).toEqual(["Ada", "Ben", "Unassigned"]);
+    expect(rows.map((r) => r.label)).toEqual(["no user", "Ada", "Ben"]);
     expect(rows.every((r) => r.people === undefined)).toBe(true);
     const ada = rows.find((r) => r.label === "Ada")!;
     const ben = rows.find((r) => r.label === "Ben")!;
     expect(ada.columns.map((c) => c.key)).toEqual(ben.columns.map((c) => c.key));
     expect(ada.columns.find((c) => c.label === "ToDo")?.tasks.map((t) => t.id)).toEqual(["a"]);
     expect(ben.columns.find((c) => c.label === "Doing")?.tasks.map((t) => t.id)).toEqual(["b"]);
-    expect(rows.find((r) => r.label === "Unassigned")?.columns.find((c) => c.label === "ToDo")?.tasks.map((t) => t.id)).toEqual(["c"]);
+    expect(rows.find((r) => r.label === "no user")?.columns.find((c) => c.label === "ToDo")?.tasks.map((t) => t.id)).toEqual(["c"]);
   });
 
   it("stays uniform at any status count — a renamed custom registry (P2-05) still produces the same columns on every row", () => {

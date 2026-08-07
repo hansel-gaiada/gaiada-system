@@ -2,19 +2,29 @@
 import { useState } from "react";
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
 import type { FlowSeries, BurndownPoint, BurndownOverlayPoint, TagBreakdownRow } from "@/lib/pm";
+import type { ReportDistribution } from "@/lib/reports";
 import { TAG_COLOR_HEX } from "@/lib/tagColors";
 import { Card, KpiTile, HairlineTable } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
+import { Donut } from "@/components/reports/charts/Donut";
 import "./pm.css";
 
-// Project Charts view (P3-06): a 3-tile KPI row + cumulative-flow / burndown / tag-breakdown
-// cards. This is a CLIENT component (hover/crosshair state) so it CANNOT import the
+// Project Charts view (P3-06), now scope-generic (P4-A7 — reused UNCHANGED at `@all`/department
+// scope, fed by `pmScope-data.ts`'s aggregates): a 3-tile KPI row + cumulative-flow / burndown /
+// tag-breakdown cards. This is a CLIENT component (hover/crosshair state) so it CANNOT import the
 // "server-only" lib/pm.ts at runtime — only its types (erased at compile time). Every number
 // plotted here is precomputed server-side by the (server) caller with pm.ts's tested pure
 // helpers (flowSeries/tagBreakdown/burndownOverlay) and handed in as serializable props — this
 // component only renders. `TAG_COLOR_HEX` is a real runtime import: lib/tagColors.ts is
 // deliberately NOT server-only (see its own header comment), same reason components/pm/TagChip.tsx
-// imports it directly instead of going through pm.ts.
+// imports it directly instead of going through pm.ts. `lib/reports.ts` is ALSO not server-only
+// (its own header explains why: the chart kit needs it at interaction time) so importing its
+// `ReportDistribution` type here — even a runtime one, not just `import type` — would be safe;
+// only the type is needed, so it stays a type-only import.
+//
+// P4-A7: the tag donut reuses `components/reports/charts/Donut` unmodified (no new chart
+// library — 4 runtime deps stays capped) rather than rebuilding one PM-local. It needs its own
+// `ReportDistribution` shape, built by `tagDistribution` below.
 
 export interface ChartsKpis { open: number; done: number; avgProgress: number }
 
@@ -55,7 +65,7 @@ export function Charts({ kpis, flow, burndownSeries, burndownOverlay, tagRows }:
       </div>
       <Card title="Cumulative flow"><CumulativeFlowChart flow={flow} /></Card>
       <Card title="Burndown"><BurndownChart series={burndownSeries} overlay={burndownOverlay} /></Card>
-      <Card title="Tag breakdown"><TagBreakdownChart rows={tagRows} /></Card>
+      <Card title="Tag breakdown"><TagBreakdownSection rows={tagRows} /></Card>
     </div>
   );
 }
@@ -200,11 +210,45 @@ function BurndownChart({ series, overlay }: { series: BurndownPoint[]; overlay: 
   );
 }
 
-// ---- tag breakdown — ranked horizontal bars (not a donut), square 0-radius ends ----
-function TagBreakdownChart({ rows }: { rows: TagBreakdownRow[] }) {
+// ---- tag breakdown: donut (P4-A7) + the existing ranked bars, side by side ----
+//
+// `tagDistribution` deliberately DROPS the trailing "Untagged" row before handing rows to the
+// donut. `tagBreakdown` (lib/pm.ts) builds a tag CLOUD, not a partition — a task with two tags
+// counts once toward EACH, so `TagBreakdownRow.pct` is "share of ALL tasks carrying this tag" and
+// can sum past 100% across rows. A donut's slices are angles that must sum to 360°, so feeding it
+// raw counts (including Untagged) would silently answer a DIFFERENT question — "share of
+// taggings" rather than "share of tasks" — while looking like the same percentage as the ranked
+// bars next to it. Excluding Untagged keeps the donut honestly about "of the tags actually
+// applied, how are they distributed", which is what a tag-distribution donut is for; the ranked
+// bars keep answering "what share of tasks carry this tag" (Untagged included) exactly as before.
+// Zero tags used anywhere -> `slices: []` -> `Donut` renders its own built-in empty state.
+export function tagDistribution(rows: TagBreakdownRow[]): ReportDistribution {
+  const tagged = rows.filter((r) => r.tagId !== null);
+  return {
+    key: "pm-tag-distribution",
+    label: "Tags",
+    kind: "donut",
+    slices: tagged.map((r) => ({
+      label: r.label,
+      value: r.count,
+      ref: { kind: "tag" as const, id: r.tagId! },
+    })),
+  };
+}
+
+function TagBreakdownSection({ rows }: { rows: TagBreakdownRow[] }) {
   if (rows.length === 0) {
     return <EmptyNote>No tasks yet — the tag breakdown needs at least one task.</EmptyNote>;
   }
+  return (
+    <div style={{ display: "grid", gap: 20, gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", alignItems: "start" }}>
+      <Donut distribution={tagDistribution(rows)} title="Tag distribution" />
+      <TagBreakdownChart rows={rows} />
+    </div>
+  );
+}
+
+function TagBreakdownChart({ rows }: { rows: TagBreakdownRow[] }) {
   const max = Math.max(1, ...rows.map((r) => r.count));
   return (
     <div className="pm-chart">

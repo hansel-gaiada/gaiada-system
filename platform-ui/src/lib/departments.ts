@@ -307,6 +307,28 @@ export function toRailPriority(p: Priority): RailPriority {
 
 // This person's not-done department tasks, sorted by (due date ascending —
 // undated last, then priority descending). "My work today" (decision #12).
+// P4-K3 — tasks where the viewer currently HOLDS THE BALL (`assignee.refId`), which is a different
+// question from `myDeptTasksToday` above (that one is due-date driven, off `responsibleId`). A task
+// can be due next week and still be the single thing blocking everyone else, because the turn is
+// yours; that is exactly the case a due-date rail hides.
+//
+// Ball is kind-agnostic in the data model, but a UNIT cannot take a turn — so only a person-kind
+// ball counts as "yours". Done tasks are excluded via the registry FLAGS, never a literal id.
+export function myDeptBallTasks(tasks: PmTask[], userId: string, statusesByProject: Record<string, ProjectStatus[]> = {}): PmTask[] {
+  return tasks
+    .filter((t) =>
+      !statusFlags(t.status, statusesByProject[t.projectId]).isDone
+      && t.assignee?.kind === "person"
+      && t.assignee.refId === userId)
+    .slice()
+    .sort((a, b) => {
+      const ad = a.dueDate ?? "9999-12-31";
+      const bd = b.dueDate ?? "9999-12-31";
+      if (ad !== bd) return ad.localeCompare(bd);
+      return PRIORITY_RANK[b.priority] - PRIORITY_RANK[a.priority];
+    });
+}
+
 export function myDeptTasksToday(tasks: PmTask[], userId: string, statusesByProject: Record<string, ProjectStatus[]> = {}): PmTask[] {
   return tasks
     .filter((t) => !statusFlags(t.status, statusesByProject[t.projectId]).isDone && t.assignee?.responsibleId === userId)
@@ -394,11 +416,21 @@ export function assigneeColumns(tasks: PmTask[]): AxisColumn[] {
   const byId = new Map<string, AxisColumn>();
   for (const t of tasks) {
     const id = t.assignee?.responsibleId ?? "__unassigned";
-    const label = t.assignee?.responsibleName || "Unassigned";
+    // P4-A6 follow-up: `PM_TERMS.unassigned` ("no user", Repsona's own wording), not the old literal
+    // "Unassigned" — PM_RENAMES flagged this exact spot as an unfinished rename, and two names for
+    // one column across two boards is precisely the half-rename the vocabulary module exists to stop.
+    const label = t.assignee?.responsibleName || PM_TERMS.unassigned;
     if (!byId.has(id)) byId.set(id, { key: id, label, tasks: [] });
     byId.get(id)!.tasks.push(t);
   }
-  return [...byId.values()].sort((a, b) => a.label.localeCompare(b.label));
+  // Sentinel LEADS, mirroring ballColumns below rather than sorting alphabetically. The two boards
+  // sit one click apart under the same swimlane picker, so a sentinel that leads on one and floats
+  // mid-list on the other reads as a rendering bug. It also matches the reference, where "no user"
+  // is the first column. (`/pm` had to correct this at the render boundary; fixing the source means
+  // the department board gets it too, and that workaround becomes a no-op.)
+  const rest = [...byId.entries()].filter(([id]) => id !== "__unassigned").sort((a, b) => a[1].label.localeCompare(b[1].label)).map(([, c]) => c);
+  const none = byId.get("__unassigned");
+  return none ? [none, ...rest] : rest;
 }
 
 // ---------------- Ball board (P4-B6/B9, plan §1.5) ----------------
@@ -517,11 +549,15 @@ export function assigneeStatusGrid(tasks: PmTask[], statusesByProject: Record<st
   const byId = new Map<string, { label: string; tasks: PmTask[] }>();
   for (const t of tasks) {
     const id = t.assignee?.responsibleId ?? "__unassigned";
-    const label = t.assignee?.responsibleName || "Unassigned";
+    const label = t.assignee?.responsibleName || PM_TERMS.unassigned;
     if (!byId.has(id)) byId.set(id, { label, tasks: [] });
     byId.get(id)!.tasks.push(t);
   }
-  return [...byId.entries()]
-    .sort((a, b) => a[1].label.localeCompare(b[1].label))
-    .map(([id, v]) => ({ key: id, label: v.label, columns: unionStatusColumns(v.tasks, statusesByProject) }));
+  // Same sentinel-leads rule as assigneeColumns/ballColumns above — the grid is the same Responsible
+  // axis rendered as rows, so it must not order its sentinel differently from the board.
+  const row = ([id, v]: [string, { label: string; tasks: PmTask[] }]): GridRow =>
+    ({ key: id, label: v.label, columns: unionStatusColumns(v.tasks, statusesByProject) });
+  const rest = [...byId.entries()].filter(([id]) => id !== "__unassigned").sort((a, b) => a[1].label.localeCompare(b[1].label)).map(row);
+  const none = byId.get("__unassigned");
+  return none ? [row(["__unassigned", none]), ...rest] : rest;
 }
