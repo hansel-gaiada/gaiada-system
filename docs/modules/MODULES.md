@@ -43,7 +43,7 @@ versions below; the running build reports it at `GET /health`.
 | observability | `0.6.1` | DEV-VERIFIED | WS9 | 2026-08-06 |
 | infra | `0.8.6` | PROTOTYPED | WS10 | 2026-08-06 |
 | wa-chat-bot | `0.9.2` | PROTOTYPED | WS5 | 2026-08-03 |
-| ai-agents | `0.6.1` | PROTOTYPED | WS8 | 2026-08-07 |
+| ai-agents | `0.7.0` | PROTOTYPED | WS8 | 2026-08-07 |
 | hermes-gateway | `0.2.0` | PROTOTYPED | WS3 | 2026-07 |
 | capture-helper | `0.2.0` | IN PROGRESS | WS11 | 2026-07 |
 | webdev | `0.11.0` | IN PROGRESS | Web Dev | 2026-08-04 |

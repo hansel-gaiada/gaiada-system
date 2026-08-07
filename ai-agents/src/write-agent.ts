@@ -24,6 +24,11 @@
 // passed its eval suite + tool-calling contract (def.evaledProviders). On any other (un-evaled)
 // provider it is forced READ-ONLY — its write tools are stripped from the allow-list, so an attempted
 // write is contained as a typed refusal rather than executed by an unproven model.
+//
+// D13 is enforced against the provider that ACTUALLY SERVED (`deps.lastProvider()`), not against the
+// caller's declaration — the declaration is only the cold-start seed. See the D13 block inside
+// `runWriteAgent` for the live misconfiguration that distinction was hiding, and why "prefer observed"
+// rather than "replace declared" is the right shape.
 import {
   runAgent,
   ApprovalRequiredError,
@@ -223,9 +228,11 @@ export interface WriteAgentOptions {
 }
 
 /**
- * Run a specialist that may hold write capability. `servingProvider` is the provider the Gateway will
- * use for this run (the caller supplies it — auto-detecting it from the Gateway response is the one
- * remaining runtime wire, see the WS8 plan). Enforces D13 (provider gate) then D14 (approval filing).
+ * Run a specialist that may hold write capability. `servingProvider` is the provider the caller
+ * DECLARES the Gateway will use; since 2026-08-07 it is only the cold-start seed — once the Gateway has
+ * reported one, `deps.lastProvider()` (what actually served) is what D13 enforces against. That closes
+ * the "one remaining runtime wire" this docstring used to describe as outstanding; see the D13 block in
+ * the body for the live misconfiguration it was hiding. Enforces D13 (provider gate) then D14 (filing).
  *
  * T2b: `opts.fileOnSuspend` (default `true`) controls what happens when a `high_write` suspends with
  * no decided approval bound to it (`ApprovalRequiredError`). `false` skips `fileApproval` entirely and
@@ -241,13 +248,50 @@ export async function runWriteAgent(
   opts: WriteAgentOptions = {},
 ): Promise<WriteAgentResult> {
   const fileOnSuspend = opts.fileOnSuspend ?? true;
-  if (isWriteCapable(def) && !(def.evaledProviders ?? []).includes(servingProvider)) {
+  // ══════════════════════════════════════════════════════════════════════════════════════════════
+  // D13 — OBSERVE the serving provider; do not merely trust the declaration.
+  // ══════════════════════════════════════════════════════════════════════════════════════════════
+  //
+  // This closes the wire this function's own docstring named as outstanding ("auto-detecting it from
+  // the Gateway response is the one remaining runtime wire"). It is a real gap, not a tidy-up:
+  //
+  // `servingProvider` is DECLARED by the caller — on the runner service it is
+  // `AGENT_SERVING_PROVIDER`, whose compose default is `openai`. Nothing forced that declaration to
+  // resemble reality, so on `gda-aicenter` (2026-08-07) the gate was passing on a provider that
+  // CANNOT serve there at all: `OPENAI_BASE_URL`/`OPENAI_API_KEY` unset (⇒ `Available()=false`),
+  // `openai` absent from `LLM_CHAIN`, and site topology strips gemini/claude anyway — so the
+  // effective chain is `[hermes, central-forward, echo]` and **Hermes** authored every agent write
+  // while this gate believed the eval-cleared `openai` had. D13's whole promise is "only a provider
+  // that passed its eval suite may author a write", and a control an env var can satisfy on its own
+  // is not that promise.
+  //
+  // WHY PREFER-OBSERVED RATHER THAN REPLACE: an UNSET declaration was itself a real failure mode
+  // (79051ff — writes go silently inert), and `lastProvider()` is `undefined` until the Gateway has
+  // served at least one completion, i.e. on a cold runner's very first turn. So the declaration is
+  // kept as the COLD-START seed and the observation wins the moment there is one. Test deps that omit
+  // `lastProvider` (most of them) therefore behave exactly as before — this is not a behaviour change
+  // for anything that was already honest.
+  //
+  // Not silent when they disagree: a mismatch means someone's configuration is lying, and the operator
+  // has to be able to see which way round. It is logged AND named in the refusal reason.
+  const observed = deps.lastProvider?.();
+  const effectiveProvider = observed ?? servingProvider;
+  const mismatch = observed !== undefined && observed !== servingProvider;
+  if (mismatch) {
+    console.warn(
+      `[d13] serving-provider mismatch for ${def.name}: declared "${servingProvider}", Gateway served ` +
+        `"${observed}" — enforcing against the SERVED provider. Fix the declaration ` +
+        "(AGENT_SERVING_PROVIDER) or the Gateway chain; one of them is wrong.",
+    );
+  }
+  if (isWriteCapable(def) && !(def.evaledProviders ?? []).includes(effectiveProvider)) {
     // D13: this provider has not been evaled for this write-capable agent — force read-only.
+    const because = mismatch ? ` (declared "${servingProvider}", Gateway served "${observed}")` : "";
     const run = await runAgent(readOnlyProjection(def), goal, envelope, deps);
     return {
       status: "forced_read_only",
       run,
-      reason: `provider "${servingProvider}" is not eval-cleared for ${def.name}; writes disabled (D13)`,
+      reason: `provider "${effectiveProvider}" is not eval-cleared for ${def.name}; writes disabled (D13)${because}`,
     };
   }
   try {

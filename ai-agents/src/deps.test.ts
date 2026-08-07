@@ -249,3 +249,52 @@ describe("D14-14 — liveDeps.resolveApproval", () => {
     expect(calls.find((c) => c.tenantId === "tenant-B")?.provider).toBe("whatsapp");
   });
 });
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+// D13 (2026-08-07) — the runner ASKS the Gateway for its serving provider
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+//
+// Before this, AGENT_SERVING_PROVIDER was only a claim the write gate believed, with nothing making it
+// true: on gda-aicenter it named `openai` while the chain actually served Hermes, and the gate passed on
+// a provider that could not serve there at all. Sending it as the Gateway's per-request `provider` hint
+// makes the declaration SHAPE reality; `runWriteAgent` then enforces against what actually served, so a
+// hint that misses is contained rather than believed. Ask, then verify you got it.
+//
+// `config` is read at import time, so these re-import the module under a stubbed env rather than
+// reaching into it.
+describe("D13 — AGENT_SERVING_PROVIDER is sent as the Gateway provider hint", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+    vi.resetModules();
+  });
+
+  async function completeOnce(env: string | undefined) {
+    vi.resetModules();
+    if (env === undefined) vi.stubEnv("AGENT_SERVING_PROVIDER", "");
+    else vi.stubEnv("AGENT_SERVING_PROVIDER", env);
+    const spy = vi.fn(async () => ({ ok: true, json: async () => ({ text: "hi", provider: "hermes" }) }));
+    vi.stubGlobal("fetch", spy as unknown as typeof fetch);
+    const mod = await import("./deps");
+    await mod.liveDeps.complete("prompt");
+    const [, init] = (spy as any).mock.calls[0];
+    return JSON.parse(init.body);
+  }
+
+  it("sends `provider` when the env var is set", async () => {
+    expect(await completeOnce("openai")).toEqual({ prompt: "prompt", provider: "openai" });
+  });
+
+  it("omits it entirely when unset — byte-for-byte the pre-existing request", async () => {
+    expect(await completeOnce(undefined)).toEqual({ prompt: "prompt" });
+  });
+
+  it("records what ACTUALLY served, not what was asked for — the value D13 enforces against", async () => {
+    vi.resetModules();
+    vi.stubEnv("AGENT_SERVING_PROVIDER", "openai"); // asked for openai...
+    vi.stubGlobal("fetch", (async () => ({ ok: true, json: async () => ({ text: "hi", provider: "hermes" }) })) as unknown as typeof fetch);
+    const mod = await import("./deps");
+    await mod.liveDeps.complete("prompt");
+    expect(mod.liveDeps.lastProvider!()).toBe("hermes"); // ...got hermes, and that is what is reported
+  });
+});

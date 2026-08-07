@@ -50,6 +50,16 @@ const config = {
   // live at all. Falls back to the ordinary token, so an unset value degrades to exactly today's
   // behaviour — every write denied with "requires verified assurance" — rather than failing to call.
   hubAssuranceToken: process.env.HUB_ASSURANCE_TOKEN ?? "",
+  // D13 (2026-08-07): the provider the runner ASKS the Gateway for. Same env var the runner service
+  // reads for the write gate (`runner/service.ts`), deliberately — before this it was ONLY a claim the
+  // gate believed, with nothing making it come true, so on gda-aicenter it named `openai` while the
+  // chain served Hermes and the gate passed on a provider that could not serve there at all.
+  // Sent as the Gateway's optional per-request `provider` HINT (ai-gateway-go server.go's `body.Provider`
+  // -> `chain.RunWithHint`) so the declaration SHAPES reality instead of merely asserting it.
+  // Empty => no hint, byte-for-byte the old request. A hinted-but-unavailable provider is skipped by the
+  // same Available()/breaker gate as any other and the chain serves instead — which `runWriteAgent` then
+  // catches as a declared/served mismatch and contains. Ask, then verify you got it.
+  servingProvider: process.env.AGENT_SERVING_PROVIDER ?? "",
 };
 
 /** The hub token to present: the elevated one when configured, else the ordinary service token. */
@@ -70,10 +80,11 @@ async function complete(prompt: string): Promise<string> {
       Authorization: `Bearer ${config.gatewayToken}`,
       ...(tenantId ? { "x-tenant-id": tenantId } : {}),
     },
-    body: JSON.stringify({ prompt }),
+    body: JSON.stringify(config.servingProvider ? { prompt, provider: config.servingProvider } : { prompt }),
   });
   if (!res.ok) throw new Error(`gateway ${res.status}`);
   const body = (await res.json()) as { text: string; provider?: string };
+  // What ACTUALLY served, after any hint miss or failover — the value D13 enforces against.
   lastServedProvider = body.provider;
   return body.text;
 }

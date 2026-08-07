@@ -23,6 +23,14 @@ function deps(model: string[], toolResults: Record<string, string> = {}): AgentD
   };
 }
 
+// A deps() whose Gateway REPORTS which provider served — the wire D13 now enforces against.
+// The plain `deps()` above deliberately omits `lastProvider`, which is why every pre-existing test
+// still exercises the declaration-only path unchanged.
+function depsServedBy(served: string, model: string[], toolResults: Record<string, string> = {}) {
+  const d = deps(model, toolResults);
+  return Object.assign(d, { lastProvider: () => served });
+}
+
 const highWriteAgent: AgentDef = {
   name: "risky-agent",
   systemPrompt: "test",
@@ -242,5 +250,59 @@ describe("T2 — task-filer: runWriteAgent files pm.createTask/pm.createDoc as a
     expect(res.status).toBe("forced_read_only");
     expect(d.calls.map((c) => c.name)).not.toContain("pm.createTask");
     expect(d.calls.map((c) => c.name)).not.toContain("pm.createDoc");
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+// D13 enforces against the provider that ACTUALLY SERVED, not the caller's declaration (2026-08-07)
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+//
+// THE LIVE MISCONFIGURATION THESE PIN. On gda-aicenter the runner declared
+// `AGENT_SERVING_PROVIDER=openai` (a compose default) and `task-filer` is enrolled for `openai`, so the
+// gate passed — while `openai` could not serve there AT ALL (no OPENAI_BASE_URL/API_KEY ⇒
+// Available()=false, absent from LLM_CHAIN, and site topology strips gemini/claude anyway). The
+// effective chain was `[hermes, central-forward, echo]`, so **Hermes** authored every agent write while
+// this gate believed an eval-cleared provider had. D13's promise is "only an eval-cleared provider may
+// author a write"; a control satisfiable by an env var alone is not that promise.
+describe("D13 enforces the SERVED provider, not the declared one", () => {
+  it("the live bug: declared an enrolled provider, Gateway served an un-enrolled one -> forced read-only", async () => {
+    const d = depsServedBy("hermes", [`{"tool": "projects.list", "args": {}}`, `{"final": "no action"}`], { "projects.list": "[]" });
+    const res = await runWriteAgent(taskFiler, "file a task", envelope, d, "co-1", "openai");
+    expect(res.status).toBe("forced_read_only");
+    if (res.status === "forced_read_only") {
+      expect(res.reason).toContain('provider "hermes" is not eval-cleared');
+      // The operator must be able to see WHICH WAY ROUND the configuration is lying.
+      expect(res.reason).toContain('declared "openai"');
+      expect(res.reason).toContain('served "hermes"');
+    }
+    expect(d.calls.map((c) => c.name)).not.toContain("pm.createTask");
+    expect(d.calls.map((c) => c.name)).not.toContain("pm.createDoc");
+  });
+
+  // The other direction matters just as much: this is "use the truth", not merely "be stricter".
+  // A pessimistic declaration must not disable writes that the actually-serving provider IS cleared for.
+  it("the converse: declared un-enrolled, Gateway served an ENROLLED provider -> writes stay enabled", async () => {
+    const d = depsServedBy("gemini", [`{"tool": "tasks.update", "args": {"id": "t1"}}`], {});
+    const res = await runWriteAgent(highWriteAgent, "update it", envelope, d, "co-1", "claude");
+    // Reached the D14 gate (suspended) rather than being contained by D13 — i.e. the write tool WAS offered.
+    expect(res.status).toBe("suspended");
+  });
+
+  it("cold start (79051ff) is preserved: nothing has served yet, so the declaration still seeds the gate", async () => {
+    // No `lastProvider` at all — the pre-existing deps() — declaring an enrolled provider must still work.
+    const d = deps([`{"tool": "tasks.update", "args": {"id": "t1"}}`], {});
+    const res = await runWriteAgent(highWriteAgent, "update it", envelope, d, "co-1", "gemini");
+    expect(res.status).toBe("suspended");
+    // ...and declaring an un-enrolled one must still contain it.
+    const d2 = deps([`{"final": "nothing"}`], {});
+    const res2 = await runWriteAgent(highWriteAgent, "update it", envelope, d2, "co-1", "claude");
+    expect(res2.status).toBe("forced_read_only");
+  });
+
+  it("when declaration and reality agree, the reason carries no mismatch note", async () => {
+    const d = depsServedBy("claude", [`{"final": "nothing"}`], {});
+    const res = await runWriteAgent(highWriteAgent, "update it", envelope, d, "co-1", "claude");
+    expect(res.status).toBe("forced_read_only");
+    if (res.status === "forced_read_only") expect(res.reason).not.toContain("declared");
   });
 });

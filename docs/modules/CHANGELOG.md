@@ -2784,6 +2784,39 @@ Built by a 4-agent parallel run against a frozen contract (`docs/superpowers/pla
 - **Blocked:** infra (OpenBao/Gemini/WAHA) + legal Gate 1 before real ingestion.
 
 ## ai-agents
+### [0.7.0] — 2026-08-07 · PROTOTYPED (D13 now enforces what SERVED, and asks for what it wants)
+- **The D13 provider gate was satisfiable by a declaration that need not be true, and on `gda-aicenter`
+  it wasn't.** `AGENT_SERVING_PROVIDER` (compose default `openai`) is what `runWriteAgent` checked against
+  `def.evaledProviders` — but `openai` could not serve on that box at all: no `OPENAI_BASE_URL`/
+  `OPENAI_API_KEY` (⇒ `Available()=false`), absent from `LLM_CHAIN`, and site topology strips
+  gemini/claude anyway, so the effective chain was `[hermes, central-forward, echo]`. **Hermes authored
+  every agent write while the gate believed the eval-cleared `openai` had.** D13's promise is "only a
+  provider that passed its eval suite may author a write"; a control an env var can satisfy alone is not
+  that promise.
+- **Enforce against the OBSERVED provider** (`deps.lastProvider()`), keeping the declaration only as the
+  cold-start seed — which closes the wire `runWriteAgent`'s own docstring already named as outstanding
+  ("auto-detecting it from the Gateway response is the one remaining runtime wire"). Prefer-observed
+  rather than replace-declared, because an unset declaration was itself a real failure mode (`79051ff`:
+  writes go silently inert) and `lastProvider()` is undefined until the Gateway has served once. Deps
+  that omit `lastProvider` — most tests — behave exactly as before.
+- **A mismatch is never silent:** logged, and named in the refusal reason both ways round
+  (`declared "openai", Gateway served "hermes"`), because a mismatch means a configuration is lying and
+  the operator has to see which side.
+- **Send the declaration as the Gateway's `provider` HINT** (`ai-gateway-go`'s `body.Provider` →
+  `chain.RunWithHint`, the same wire the assistant's brain picker uses). Before this there was no way for
+  the declaration to come true — it asserted a provider without asking for one. Now the runner asks, and
+  the check above verifies it got it: a hinted-but-unavailable provider is skipped by the same
+  `Available()`/breaker gate as any other, the chain serves instead, and the mismatch is contained rather
+  than believed. Empty ⇒ no hint, byte-for-byte the old request.
+- **Hermes cannot simply be enrolled instead** — measured, not assumed. Probed live on the box: Hermes
+  holds the runner's JSON protocol perfectly but names tools in its OWN MCP namespace
+  (`mcp__gaiada__projects_list`, not `projects.list`), so every call would fail the runner's allow-list.
+  Enrolling it needs that divergence resolved first.
+- 7 new tests: the live misconfiguration as a regression, **the converse** (a pessimistic declaration must
+  not disable writes the actually-serving provider IS cleared for — this is "use the truth", not merely
+  "be stricter"), cold-start preservation both ways, no mismatch note when they agree, and the hint being
+  sent / omitted / overridden-by-reality. Suite 165 passed / 45 skipped.
+
 ### [0.6.1] - 2026-08-07 - PROTOTYPED (an invented tool name no longer kills the turn)
 - **LIVE BUG.** The model called `mcp__gaiada__pm_listTasks` - a tool that exists nowhere - and
   `runAgent` threw `ToolNotAllowedError`, ending the whole goal. Refusing the call is correct
