@@ -10,13 +10,13 @@ import { Attachments } from "@/components/Attachments";
 import { PendingLink } from "@/components/PendingLink";
 import { listRecordings, STATUS_LABEL, formatDuration } from "@/lib/meetings";
 import { RecordControls } from "@/components/meetings/RecordControls";
-import { formatDateTime } from "@/lib/format";
+import { formatDate, formatDateTime } from "@/lib/format";
 import {
   getPmProject, listPmTasks, listMilestones, listDocs, assignableUnits, listTags,
   groupByStatus, computeTimeline, openDependencies, resolveTags, parseTagFilterParam,
   synthDefaultStatuses, isSynthDefaultStatuses, titleWithRecurrenceGlyph,
   getBurndown, burndownOverlay, timelineFromDates, getFlow, flowSeries, tagBreakdown,
-  projectProgress, isDoneStatus, taskUrgency, type PmTask, type Tag, type ProjectStatus, type UrgencyTier,
+  projectProgress, isDoneStatus, taskUrgency, taskDateEnvelope, projectUrgency, type PmTask, type Tag, type ProjectStatus, type UrgencyTier,
 } from "@/lib/pm";
 import {
   moveTask, createPmTask, setProjectOwner, addMilestone, saveDoc,
@@ -182,6 +182,19 @@ export async function ProjectWorkspaceView({
   const today = new Date().toISOString().slice(0, 10);
   const taskUrgencyById: Record<string, UrgencyTier> = {};
   for (const t of tasks) taskUrgencyById[t.id] = taskUrgency({ dueDate: t.dueDate, isDone: isDoneStatus(t.status, projectStatuses) }, today);
+
+  // P4-H3 — project range (decision 12: AUTHORED, with the task-derived envelope shown alongside;
+  // the gap between them is the slippage signal). Both `startDate` and the envelope helper now live
+  // in lib/pm.ts — the cast and the local fold this used to carry are gone.
+  const projectStartDate = pm?.startDate ?? null;
+  const projectDueDate = pm?.dueDate ?? null;
+  const taskEnvelope = taskDateEnvelope(tasks);
+  const projectIsDone = isDoneStatus(status, projectStatuses);
+  const projectUrgencyRoll = projectUrgency(
+    tasks.map((t) => ({ dueDate: t.dueDate, isDone: isDoneStatus(t.status, projectStatuses) })),
+    today,
+    { projectDueDate, projectIsDone },
+  );
   const selectedTagIds = parseTagFilterParam(searchParams.tags);
   const tagFilteredTasks = selectedTagIds.length === 0 ? tasks : tasks.filter((t) => t.tags.some((id) => selectedTagIds.includes(id)));
   // P4-B9: Ball/Responsible facets — options derived from the FULL unfiltered task set (so a
@@ -234,6 +247,17 @@ export async function ProjectWorkspaceView({
       <div className="pm-meta">
         <StatusBadge label={status} />
         <span className="pm-meta__prog"><ProgressBar value={progress} /></span>
+        {/* P4-H3 — authored range (decision 12) alongside the task-derived envelope: the gap
+            between "Range" and "Tasks span" IS the slippage signal, so both render, never blended
+            into one date. */}
+        <span className="pm-meta__item">
+          <span className="pm-meta__label">Range</span>
+          <span>{projectStartDate ? formatDate(projectStartDate) : "—"} → {projectDueDate ? formatDate(projectDueDate) : "—"}</span>
+          <span style={{ font: "400 11px var(--font-body)", color: "var(--erp-ink-50)" }}>
+            Tasks span {taskEnvelope.start ? formatDate(taskEnvelope.start) : "—"} → {taskEnvelope.end ? formatDate(taskEnvelope.end) : "—"}
+          </span>
+          <UrgencyChip tier={projectUrgencyRoll.tier} variant="chip" count={projectUrgencyRoll.counts[projectUrgencyRoll.tier] || undefined} />
+        </span>
         <span className="pm-meta__item">
           <span className="pm-meta__label">Owner</span>
           {owner ? (owner.responsibleName || owner.refName) : "Unassigned"}
