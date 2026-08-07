@@ -1,0 +1,41 @@
+/* PM top-bar counter badges (P4-A9) — literals forbidden by src/styles/tokens.test.ts; every
+   colour below is var(--pm-*). */
+
+.pm-counters {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.pm-counters__badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font: 400 11px var(--font-body);
+  color: var(--pm-text-dim);
+  background: var(--pm-surface-sunken);
+  border: 0.5px solid var(--pm-line);
+  border-radius: var(--pm-radius-pill);
+  padding: 3px 9px;
+  text-decoration: none;
+}
+
+.pm-counters__badge--link:hover,
+.pm-counters__badge--link:focus-visible {
+  color: var(--pm-accent);
+  border-color: var(--pm-accent);
+}
+.pm-counters__badge--link:focus-visible { outline: 2px solid var(--pm-accent); outline-offset: 1px; }
+
+.pm-counters__label {
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  font-size: 9px;
+  color: var(--pm-text-faint);
+}
+
+.pm-counters__count {
+  font-weight: 700;
+  color: var(--pm-text);
+}

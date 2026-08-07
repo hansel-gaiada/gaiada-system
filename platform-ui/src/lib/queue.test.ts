@@ -1,8 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { getMyWorkQueue, projectQueueForCompany } from "./queue";
+import { getMyWorkQueue, projectQueueForCompany, getPmHomeData, getPmCounters, isoDaysAgo, homeWindowLabel } from "./queue";
 import type { Me } from "./platform";
 import type { QueueItem } from "./queueUrgency";
 import type { Envelope } from "./envelope";
+import type { PmTask } from "./pm";
 
 beforeEach(() => {
   process.env.PLATFORM_URL = "http://p.test";
@@ -129,5 +130,161 @@ describe("projectQueueForCompany — rail projection ≡ filtered queue (WSUX-5 
     const projected = projectQueueForCompany(queue, "co-a");
     const manual = queue.items.filter((i) => i.companyId === "co-a");
     expect(projected).toEqual(manual);
+  });
+});
+
+// ---- P4-A8 (@all Home) / P4-A9 (top-bar counters) ----
+
+function pmTask(overrides: Partial<PmTask> & { id: string }): PmTask {
+  return {
+    projectId: "p1",
+    projectName: "Website Relaunch",
+    title: "Untitled",
+    description: "",
+    status: "todo",
+    priority: "normal",
+    progress: 0,
+    assignee: null,
+    subtasks: [],
+    milestoneId: null,
+    startDate: null,
+    dueDate: null,
+    estimateMinutes: null,
+    loggedMinutes: 0,
+    dependsOn: [],
+    tags: [],
+    customFields: {},
+    updatedAt: null,
+    recurrence: null,
+    projectShortCode: null,
+    seq: null,
+    displayCode: null,
+    ...overrides,
+  };
+}
+
+describe("isoDaysAgo / homeWindowLabel — pure calendar arithmetic, no Date.now()", () => {
+  it("subtracts calendar days at UTC midnight", () => {
+    expect(isoDaysAgo("2026-08-07", 7).slice(0, 10)).toBe("2026-07-31");
+  });
+  it("formats an explicit M/D – M/D window", () => {
+    expect(homeWindowLabel("2026-08-07")).toBe("7/31 – 8/7");
+  });
+});
+
+describe("getPmHomeData — P4-A8", () => {
+  const today = "2026-08-07";
+
+  function stubFetch() {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        const u = String(url);
+        if (u.includes("/co-a/pm/tasks") && !u.includes("assignee")) {
+          return new Response(
+            JSON.stringify([
+              pmTask({ id: "t1", status: "todo", dueDate: today }), // due today -> Today's Todo
+              pmTask({ id: "t2", status: "done", updatedAt: "2026-08-05T00:00:00Z" }), // done 2d ago -> Completed
+              pmTask({ id: "t3", status: "in_progress", dueDate: "2026-08-10" }), // due in 3d -> Upcoming
+              pmTask({
+                id: "t4",
+                status: "todo",
+                assignee: { kind: "person", refId: "u1", refName: "Gede", responsibleId: "u1", responsibleName: "Gede" },
+              }), // undated, but commented this week -> Tasks with Activity
+            ]),
+            { status: 200 },
+          );
+        }
+        if (u.includes("/pm/projects/p1/statuses")) return new Response(JSON.stringify([]), { status: 200 });
+        if (u.includes("/work-activity")) {
+          return new Response(
+            JSON.stringify([
+              { id: "wa1", tenantId: "co-a", source: "pm", sourceRef: "r1", actorUserId: "u2", actorExternal: null,
+                verb: "commented", objectKind: "pm_task", objectRef: "t4", title: null,
+                payload: { commentId: "c1" }, occurredAt: "2026-08-06T10:00:00Z", originSite: "site", createdAt: "2026-08-06T10:00:00Z",
+                links: [] },
+            ]),
+            { status: 200 },
+          );
+        }
+        if (u.includes("/comments?entityType=task&entityId=t4")) {
+          return new Response(
+            JSON.stringify([{ id: "c1", author_id: "u2", author_name: "Alice", body: "Looks good, ship it", parent_comment_id: null, created_at: "2026-08-06T10:00:00Z" }]),
+            { status: 200 },
+          );
+        }
+        return new Response(JSON.stringify([]), { status: 200 });
+      }),
+    );
+  }
+
+  it("buckets tasks into the 4 columns and attaches a comment excerpt on the activity column", async () => {
+    stubFetch();
+    const home = await getPmHomeData("u1", "co-a", today);
+
+    expect(home.today).toBe(today);
+    expect(home.windowLabel).toBe("7/31 – 8/7");
+    expect(home.todaysTodo.map((t) => t.id)).toEqual(["t1"]);
+    expect(home.completedTasks.map((t) => t.id)).toEqual(["t2"]);
+
+    const upcomingIds = home.upcomingSchedule.flatMap((g) => g.tasks.map((t) => t.id));
+    expect(upcomingIds).toEqual(["t3"]);
+
+    const activityTasks = home.tasksWithActivity.flatMap((g) => g.tasks);
+    expect(activityTasks.map((t) => t.id)).toEqual(["t4"]);
+    expect(activityTasks[0].commentExcerpt).toBe("Looks good, ship it");
+    expect(activityTasks[0].commentAuthor).toBe("Alice");
+    expect(activityTasks[0].assigneeName).toBe("Gede");
+  });
+
+  it("never throws when work-activity 404s (stale backend) — the other 3 columns still render", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        const u = String(url);
+        if (u.includes("/co-a/pm/tasks") && !u.includes("assignee")) {
+          return new Response(JSON.stringify([pmTask({ id: "t1", status: "todo", dueDate: today })]), { status: 200 });
+        }
+        if (u.includes("/pm/projects/p1/statuses")) return new Response(JSON.stringify([]), { status: 200 });
+        if (u.includes("/work-activity")) return new Response(JSON.stringify({ error: "not enabled" }), { status: 404 });
+        return new Response(JSON.stringify([]), { status: 200 });
+      }),
+    );
+    const home = await getPmHomeData("u1", "co-a", today);
+    expect(home.todaysTodo.map((t) => t.id)).toEqual(["t1"]);
+    expect(home.tasksWithActivity).toEqual([]);
+  });
+});
+
+describe("getPmCounters — P4-A9", () => {
+  const today = "2026-08-07";
+
+  it("counts ball / responsible / overdue off ONE assignee=me read; reactions is null (no BFF read exists)", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        const u = String(url);
+        if (u.includes("/co-a/pm/tasks?assignee=me")) {
+          return new Response(
+            JSON.stringify([
+              pmTask({ id: "a", status: "todo", assignee: { kind: "person", refId: "u1", refName: "Me", responsibleId: "u1", responsibleName: "Me" } }), // ball + responsible
+              pmTask({ id: "b", status: "todo", assignee: { kind: "person", refId: "u9", refName: "Other", responsibleId: "u1", responsibleName: "Me" } }), // responsible only
+              pmTask({ id: "c", status: "todo", dueDate: "2020-01-01", assignee: { kind: "person", refId: "u1", refName: "Me", responsibleId: "u9", responsibleName: "Other" } }), // ball + overdue
+              pmTask({ id: "d", status: "done", dueDate: "2020-01-01", assignee: { kind: "person", refId: "u1", refName: "Me", responsibleId: "u1", responsibleName: "Me" } }), // done -> never overdue
+            ]),
+            { status: 200 },
+          );
+        }
+        return new Response(JSON.stringify([]), { status: 200 });
+      }),
+    );
+    const counters = await getPmCounters("u1", "co-a", "u1", today);
+    expect(counters).toEqual({ ball: 3, responsible: 3, reactions: null, overdue: 1 });
+  });
+
+  it("degrades to zeros (not a throw) when the mine-scoped read is unavailable", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ error: "not enabled" }), { status: 404 })));
+    const counters = await getPmCounters("u1", "co-a", "u1", today);
+    expect(counters).toEqual({ ball: 0, responsible: 0, reactions: null, overdue: 0 });
   });
 });
