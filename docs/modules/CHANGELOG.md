@@ -1693,6 +1693,59 @@ tenant's 8 seeded rows still need purging (per-tenant SQL in the design doc §12
 - **Unreleased / next:** identity writes, org-structure endpoints.
 
 ## platform-ui
+### [0.19.1] — 2026-08-07 · IN PROGRESS (automated a11y auditing + the manual checklist automation can't replace)
+- **`@axe-core/playwright` added, devDependency only.** Runtime deps stay exactly `next`/`react`/
+  `react-dom`/`server-only` — nothing from this ticket is imported by app code. New
+  `e2e/a11y-axe.spec.ts`, 15 checks total (7 surfaces × light/dark): `/assistant` empty state,
+  an active thread with real history, a genuinely mid-stream snapshot, a proposal card awaiting
+  confirmation, both drawers (assistant + PM task, each opened the real way — a click, not a direct
+  `goto` — since the task drawer only intercepts a client-side navigation), and one dense baseline
+  page (the project board). All 15 green. Not wired into the CI merge gate (`--project=smoke
+  --grep @smoke` doesn't touch it) — this suite is slower (real SSE round trips) and less
+  deterministic on a shared, often multi-agent-loaded box than the smoke check; it stays an
+  on-demand/CI-nightly audit (`npm run e2e:a11y`) until proven stable enough to gate on.
+- **Two real bugs in the test's own first draft, both instructive:** (1) the shared session's
+  default active company is NOT the one every seeded assistant/PM fixture lives under, so
+  `/assistant?thread=…` silently rendered empty until the spec pinned `gaiada_tenant=co-agency`
+  itself (same trap `smoke.spec.ts` already worked around) — a reminder that "the page rendered
+  with no error" and "the page rendered the right DATA" are different claims, even inside a test.
+  (2) demoAssistant's `STALL_TEST` hook never emits a `token` event by design (it exists to prove
+  the 120s idle-timeout path), so `streamReducer` never flips `status` to `"streaming"` and
+  `aria-live="off"` never actually turns on — a genuinely mid-stream DOM snapshot needs a real
+  (short) reply, not the stall hook.
+- **Fixed, because axe caught real defects that were cheap and clearly ours:**
+  - `ProgressBar.tsx`'s `role="progressbar"` had no accessible name (every PM progress bar,
+    board cards + the detail meta strip) — `aria-label={"Progress: N%"}` added.
+  - `Contributors.tsx`/`Dependencies.tsx`'s "Add a contributor…"/"Add a blocker…" `<select>`s had
+    no label at all — `aria-label` added to each.
+  - Six places in `assistant.css` used `--ink-faint` (the token's own comment: "decorative
+    only", ~3.3:1) on text that is actually informational — a message's token/cost line, a
+    fenced-code-block language tag, the streaming status line (which IS the `aria-live` content),
+    a proposal's redacted-arg field names, its expiry deadline, and the tools-mode composer hint.
+    All six promoted to `--ink-subtle` (>=4.5:1), matching sibling elements on the same components
+    that already used the correct tier.
+- **Deferred, recorded, not silently suppressed** (exact rule id + reason lives in the spec file
+  and the full report): the sidebar tagline/nav-group labels' raw CSS `opacity` (app-wide, not a
+  surface this program built, needs a `shell.css` fix + visual review); the task-drawer section
+  headers' `--ink-subtle` measuring 4.42:1 in dark theme against the 4.5:1 the token's own comment
+  claims (a one-line token bump would fix it everywhere at once, which is exactly why it needs its
+  own reviewed ticket, not a number picked blind here); PM tag chips' user-chosen swatch colours
+  (a palette/design problem, not a token bug). A broader systemic finding, NOT yet verified with
+  axe and NOT fixed here (scope discipline, not an oversight): `--ink-faint` is used on more
+  real-information text elsewhere in `assistant.css` (Memory/Capabilities panel hints, the rail's
+  empty-state message, message meta lines) that this ticket's 7 tested surfaces never render —
+  worth its own pass.
+- **New `docs/a11y-manual-checklist.md`** — a ~15-minute scripted NVDA/VoiceOver pass for what axe
+  cannot check: whether the streaming reply announces once (not per token), where focus lands after
+  Confirm/Dismiss on a proposal card (a known, unfixed gap — the buttons unmount and nothing moves
+  focus), whether the proposal card's own state change is announced at all (it isn't wired to
+  announce currently), and whether the collapsed thread rail is reachable/correctly announced.
+  **No real screen reader has been run against it as of this entry** — every "expected" result in
+  it is a prediction from reading the code, stated as such.
+- Report: `docs/superpowers/plans/2026-08-07-a11y-automation-report.md`. `tsc` clean; full vitest
+  suite green (1344, no regression); `DEMO_MODE=1 npm run build` green; the CI smoke check
+  (`--project=smoke --grep @smoke`) still passes.
+
 ### [0.19.0] — 2026-08-07 · IN PROGRESS (the assistant brain picker offers Ollama Cloud)
 - **`BRAIN_OPTIONS` gains `openai` — "Ollama Cloud".** The picker previously offered Auto / Ollama
   (local) / Hermes / Gemini / Claude, so the OpenAI-compatible cloud slot was unreachable from the UI

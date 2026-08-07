@@ -35,7 +35,7 @@ versions below; the running build reports it at `GET /health`.
 | Module | Ver | Status | Workstream | Since |
 |---|---|---|---|---|
 | platform-nest | `0.16.0` | IN PROGRESS | WS1 | 2026-08-06 |
-| platform-ui | `0.19.0` | IN PROGRESS | WS5 | 2026-08-07 |
+| platform-ui | `0.19.1` | IN PROGRESS | WS5 | 2026-08-07 |
 | ai-gateway-go | `0.13.1` | PROTOTYPED | WS3 | 2026-08-06 |
 | mcp-hub | `0.10.0` | PROTOTYPED | WS2 | 2026-08-06 |
 | sync-engine-go | `0.7.0` | PROTOTYPED | WS1 | 2026-07 |
@@ -86,6 +86,18 @@ authoritative `/admin/session/status`, instead of showing "unknown" as if it wer
 Approvals inbox, Companies/Projects/Tasks, Agency, Rollups, Systems/Intelligence/Admin consoles, People
 360, org-structure builder, Repsona-style PM + AI tracker, IT device console, per-department consoles
 (Web Dev reference), OIDC PKCE login. Runs backend-free in `DEMO_MODE`; Playwright e2e in dev.
+**0.19.1 (A11Y-AUTO-01, automated axe-core auditing):** `@axe-core/playwright` added as a
+devDependency ONLY (runtime deps stay at `next`/`react`/`react-dom`/`server-only`) and wired into a
+new `e2e/a11y-axe.spec.ts`, covering `/assistant` (empty/active/streaming/proposal-card states),
+both drawers, and one dense baseline page, in both light and dark theme, 15 checks total, all
+green. Fixed 3 classes of real defects it found (a progressbar + two selects with no accessible
+name; six assistant-surface elements using the "decorative only" `--ink-faint` token on real
+informational text, now `--ink-subtle`). Deferred (recorded, not silently suppressed) app-wide
+sidebar/tag-chip contrast debt this program didn't introduce. Not wired into the CI merge gate
+(stays `chromium`-project, on-demand) — see the report for why. New
+`docs/a11y-manual-checklist.md` is the ~15-minute human NVDA/VoiceOver script for what axe cannot
+check; **no real screen reader has been run yet.** Report:
+`docs/superpowers/plans/2026-08-07-a11y-automation-report.md`.
 **0.15.3 (UI-01, reauth return-target preservation):** a shared, hardened same-origin-path-only
 `?return=` validator (`lib/returnTo.ts`) now guards every login-adjacent redirect — `middleware.ts`'s
 redirect-to-login, `/login`, `/step-up`, and (new) the OIDC `/auth/login` → `/auth/callback` round

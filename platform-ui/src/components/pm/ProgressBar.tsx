@@ -4,7 +4,7 @@ import "./pm.css";
 export function ProgressBar({ value }: { value: number }) {
   const v = Math.max(0, Math.min(100, Math.round(value)));
   return (
-    <div className="pm-progress" role="progressbar" aria-valuenow={v} aria-valuemin={0} aria-valuemax={100}>
+    <div className="pm-progress" role="progressbar" aria-valuenow={v} aria-valuemin={0} aria-valuemax={100} aria-label={`Progress: ${v}%`}>
       <span className="pm-progress__track"><span className="pm-progress__fill" style={{ right: `${100 - v}%` }} /></span>
       <span className="pm-progress__val">{v}%</span>
     </div>

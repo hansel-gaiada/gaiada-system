@@ -79,7 +79,7 @@ export function Contributors({ contributors, ownerId, ownerName, candidates, can
 
       {canEdit && contributors !== undefined && options.length > 0 && (
         <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 10 }}>
-          <select className="lux-field__control" value={pick} onChange={(e) => setPick(e.target.value)} style={{ flex: 1 }}>
+          <select className="lux-field__control" aria-label="Add a contributor" value={pick} onChange={(e) => setPick(e.target.value)} style={{ flex: 1 }}>
             <option value="">Add a contributor…</option>
             {options.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
           </select>
