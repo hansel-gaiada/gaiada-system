@@ -360,3 +360,65 @@ type simpleErr string
 
 func (e simpleErr) Error() string    { return string(e) }
 func errStreamOnce(msg string) error { return simpleErr(msg) }
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+// The SAME hint on the NON-STREAMING /complete (2026-08-07)
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+//
+// Only /complete/stream honoured `provider`, so a non-streaming caller could ask and be silently
+// ignored. That asymmetry was not cosmetic: ai-agents' runner calls /complete, and D13's provider gate
+// enforces against the provider that ACTUALLY SERVED — so an unhonoured hint meant the runner could
+// never obtain the eval-cleared provider it declares, leaving agent writes correctly contained but
+// permanently inert. The assistant's brain picker worked only because it happens to stream.
+
+// postComplete drives the non-streaming endpoint with a caller-supplied body. Uses `namedProvider`
+// (adminwrite_test.go) rather than this file's `namedStreamingProvider`, which deliberately errors on
+// Complete() because it exists to prove the STREAM path — a useful guard that also makes it unusable
+// here.
+func postComplete(t *testing.T, ps []providers.Provider, reqBody string) string {
+	t.Helper()
+	c := chain.NewChain(ps, 3, 60_000, time.Now)
+	cfg := config.Config{GatewayToken: "secret", DailyCallCap: 1000, PerTenantDailyCallCap: 1000}
+	srv := newTestServer(t, cfg, c)
+	defer srv.Close()
+
+	req, _ := http.NewRequest("POST", srv.URL+"/complete", bytes.NewReader([]byte(reqBody)))
+	req.Header.Set("Authorization", "Bearer secret")
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer res.Body.Close()
+	b, _ := io.ReadAll(res.Body)
+	return string(b)
+}
+
+func TestCompleteProviderHintRoutesToNamedProvider(t *testing.T) {
+	first := &namedProvider{name: "first"}
+	second := &namedProvider{name: "second"}
+	got := postComplete(t, []providers.Provider{first, second}, `{"prompt":"hi","provider":"second"}`)
+	if !strings.Contains(got, `"provider":"second"`) {
+		t.Errorf("hint ignored on /complete: want provider \"second\", got %s", got)
+	}
+}
+
+func TestCompleteWithNoHintKeepsDefaultChainOrder(t *testing.T) {
+	first := &namedProvider{name: "first"}
+	second := &namedProvider{name: "second"}
+	// Absent AND explicitly-empty must both behave exactly as before the hint existed.
+	for _, body := range []string{`{"prompt":"hi"}`, `{"prompt":"hi","provider":""}`} {
+		got := postComplete(t, []providers.Provider{first, second}, body)
+		if !strings.Contains(got, `"provider":"first"`) {
+			t.Errorf("body %s: want the default first-in-order provider, got %s", body, got)
+		}
+	}
+}
+
+// A hint is a REORDERING, never a requirement — an unknown name must not fail the call.
+func TestCompleteUnknownHintFallsThroughToTheChain(t *testing.T) {
+	first := &namedProvider{name: "first"}
+	got := postComplete(t, []providers.Provider{first}, `{"prompt":"hi","provider":"no-such-provider"}`)
+	if !strings.Contains(got, `"provider":"first"`) {
+		t.Errorf("an unknown hint must fall through, not fail: got %s", got)
+	}
+}

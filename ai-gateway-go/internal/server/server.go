@@ -664,6 +664,18 @@ func NewServer(cfg config.Config, chains Chains, b *budget.Budget, classifier *d
 		}
 		var body struct {
 			Prompt string `json:"prompt"`
+			// Provider (2026-08-07) is an optional per-request HINT, identical in meaning and handling
+			// to /complete/stream's — a PURE REORDERING of the chain, never a requirement: an unknown
+			// name, or one whose provider is unavailable/breaker-open, falls through to the normal
+			// failover order. Absent ⇒ byte-for-byte the previous behaviour (plain chain order).
+			//
+			// WHY IT WAS ADDED HERE: only the STREAM endpoint honoured the hint, so a non-streaming
+			// caller could ask and be silently ignored. That is not a cosmetic asymmetry — ai-agents'
+			// runner calls THIS endpoint, and D13's provider gate is only meaningful if the runner can
+			// actually obtain the eval-cleared provider it declares (see ai-agents' runWriteAgent:
+			// it enforces against what SERVED, so an unhonoured hint = writes correctly contained but
+			// permanently inert). The assistant's brain picker worked only because it streams.
+			Provider string `json:"provider"`
 		}
 		_ = json.NewDecoder(r.Body).Decode(&body)
 		if strings.TrimSpace(body.Prompt) == "" {
@@ -693,7 +705,7 @@ func NewServer(cfg config.Config, chains Chains, b *budget.Budget, classifier *d
 				return
 			}
 		}
-		text, provider, taxonomy, err := chain.Run(chains.LLM, r.Context(), func(p providers.Provider) (string, error) {
+		text, provider, taxonomy, err := chain.RunWithHint(chains.LLM, r.Context(), body.Provider, func(p providers.Provider) (string, error) {
 			// Fresh per-attempt timeout derived from r.Context(), NOT a single deadline shared
 			// across the whole failover chain: a hung provider costs at most one
 			// PROVIDER_TIMEOUT_MS before failing over, and a client disconnect (r.Context()
