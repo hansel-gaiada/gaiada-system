@@ -1672,6 +1672,24 @@ tenant's 8 seeded rows still need purging (per-tenant SQL in the design doc §12
 - **Unreleased / next:** identity writes, org-structure endpoints.
 
 ## platform-ui
+### [0.19.0] — 2026-08-07 · IN PROGRESS (the assistant brain picker offers Ollama Cloud)
+- **`BRAIN_OPTIONS` gains `openai` — "Ollama Cloud".** The picker previously offered Auto / Ollama
+  (local) / Hermes / Gemini / Claude, so the OpenAI-compatible cloud slot was unreachable from the UI
+  even where it was configured. Now selectable.
+- **The two Ollamas are DIFFERENT providers and the labels say so.** `ollama` is the LOCAL daemon
+  (`OLLAMA_URL` — on-box, no egress, no cost); `openai` is the OpenAI-compatible cloud slot
+  (`OPENAI_BASE_URL`), which on `gda-aicenter` points at Ollama Cloud (`https://ollama.com/v1`). Same
+  vendor brand, different runtime, different cost and failure modes — a deployment that repoints
+  `OPENAI_BASE_URL` elsewhere should relabel this entry.
+- **A wrong `value` here fails SILENTLY, which is why it now has tests.** `value` is the GATEWAY
+  PROVIDER NAME, sent verbatim as the hint: the platform stores `brainProvider` as free text with no
+  allow-list, and `chain.RunWithHint` ignores a hint naming a provider that is not in the chain — so a
+  typo degrades to "Auto" with no error anywhere and the badge still names whoever really served.
+  Nothing else in the stack would catch it. 4 tests pin every value against a restated copy of
+  `ai-gateway-go`'s `knownProviders` (restated, not imported — separate projects, not a monorepo), that
+  local and cloud Ollama stay distinguishable to a human, and that `brainOptionLabel` round-trips.
+- 97 tests green in `assistant.test.ts`; `tsc` clean.
+
 ### [0.18.0] - 2026-08-07 - IN PROGRESS (the chat no longer opens onto a debug panel)
 - **The empty state was the raw tool registry** - `activity.feed`, `authz.check`,
   `workActivity.relink`, with developer prose - and it was the first thing anyone saw. Replaced with

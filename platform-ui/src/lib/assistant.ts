@@ -122,9 +122,22 @@ export interface ThreadDetailResult { thread: AssistantThread; messages: Assista
 // may legitimately differ from what's picked here). `null`/"Auto" means "no hint — let the chain
 // pick", the pre-ASST-16 default behaviour, byte-identical to before this ticket.
 export interface BrainOption { value: string | null; label: string }
+// ⚠ `value` is the GATEWAY PROVIDER NAME, not a label — it is sent verbatim as the hint and must match
+// `ai-gateway-go`'s `knownProviders` (`cmd/gateway/main.go`), which is `whisper, ollama, openai, gemini,
+// claude, hermes, echo`. An unknown name is not an error anywhere: the platform stores `brainProvider`
+// as free text and `chain.RunWithHint` silently ignores a hint naming a provider that is not in the
+// chain — so a typo here degrades to "Auto" invisibly. Keep these two lists in step.
+//
+// THE TWO OLLAMAS ARE DIFFERENT PROVIDERS AND THE LABELS MUST NOT BLUR THAT:
+//   - `ollama` is the LOCAL daemon (`OLLAMA_URL`) — on-box, no egress, no cost.
+//   - `openai` is the OpenAI-COMPATIBLE cloud slot (`OPENAI_BASE_URL`), which in this deployment points
+//     at **Ollama Cloud** (`https://ollama.com/v1`) — see the compose comment on `OPENAI_BASE_URL`.
+//     Same vendor brand, different runtime, different failure modes and cost. A deployment that repoints
+//     `OPENAI_BASE_URL` at something else (real OpenAI, a gateway) should relabel this entry.
 export const BRAIN_OPTIONS: BrainOption[] = [
   { value: null, label: "Auto (failover chain)" },
   { value: "ollama", label: "Ollama (local)" },
+  { value: "openai", label: "Ollama Cloud" },
   { value: "hermes", label: "Hermes" },
   { value: "gemini", label: "Gemini" },
   { value: "claude", label: "Claude" },
