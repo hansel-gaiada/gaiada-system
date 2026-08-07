@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   groupThreads, filterThreads, threadTitle, deriveThreadTitle, isPendingMessage,
   parseSSEBuffer, decodeAssistantEvent, streamReducer, initialStreamState, humanizeErrorKind,
-  brainBadgeLabel, parseUsageMeta, usageMeterLabel,
+  brainBadgeLabel, parseUsageMeta, usageMeterLabel, BRAIN_OPTIONS, brainOptionLabel,
   isPendingMemory, groupMemory,
   groupCapabilities, parseCitations, parseSessionResumeMismatch,
   deriveProposalCardState, isWriteProposal, canActOnProposal, proposalStateLabel, formatRedactedArgs,
@@ -634,5 +634,52 @@ describe("formatExpiresAt — pinned locale + timeZone, an honest null on garbag
   });
   it("returns null (never 'Invalid Date') for an unparseable value", () => {
     expect(formatExpiresAt("not a date")).toBeNull();
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+// ASST-16 — the brain picker's values are GATEWAY PROVIDER NAMES, not labels
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+//
+// Why this needs a test at all: a wrong value fails SILENTLY end to end. The platform stores
+// `brainProvider` as free text (no allow-list) and `chain.RunWithHint` ignores a hint naming a provider
+// that is not in the chain — so a typo degrades to "Auto" with no error anywhere, and the badge would
+// still name whoever really served. Nothing else in the stack would catch it.
+//
+// KNOWN_GATEWAY_PROVIDERS is RESTATED, not imported — ai-gateway-go is a separate Go project (see
+// CLAUDE.md: components are standalone, not a monorepo). Source of truth is `knownProviders` in
+// `ai-gateway-go/cmd/gateway/main.go`; this copy makes a divergence fail here instead of in production.
+const KNOWN_GATEWAY_PROVIDERS = ["whisper", "ollama", "openai", "gemini", "claude", "hermes", "echo"];
+
+describe("BRAIN_OPTIONS", () => {
+  it("every value is a real gateway provider name (or null for Auto)", () => {
+    for (const o of BRAIN_OPTIONS) {
+      if (o.value === null) continue;
+      expect(KNOWN_GATEWAY_PROVIDERS).toContain(o.value);
+    }
+  });
+
+  it("offers Auto plus at least one cloud and one local brain, with no duplicate values", () => {
+    const values = BRAIN_OPTIONS.map((o) => o.value);
+    expect(values).toContain(null);
+    expect(new Set(values).size).toBe(values.length);
+  });
+
+  // The two Ollamas are DIFFERENT providers: `ollama` is the local daemon (OLLAMA_URL, on-box, no
+  // egress), `openai` is the OpenAI-compatible cloud slot (OPENAI_BASE_URL -> Ollama Cloud here).
+  // Same brand, different runtime and cost, so the labels must be distinguishable to a human.
+  it("distinguishes local Ollama from the OpenAI-compatible cloud slot", () => {
+    const local = BRAIN_OPTIONS.find((o) => o.value === "ollama");
+    const cloud = BRAIN_OPTIONS.find((o) => o.value === "openai");
+    expect(local).toBeDefined();
+    expect(cloud).toBeDefined();
+    expect(local!.label).not.toBe(cloud!.label);
+    expect(local!.label.toLowerCase()).toContain("local");
+  });
+
+  it("brainOptionLabel round-trips every option, and falls back to the raw value for an unknown one", () => {
+    for (const o of BRAIN_OPTIONS) expect(brainOptionLabel(o.value)).toBe(o.label);
+    expect(brainOptionLabel("some-future-provider")).toBe("some-future-provider");
+    expect(brainOptionLabel(null)).toBe("Auto (failover chain)");
   });
 });
