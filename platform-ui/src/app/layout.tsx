@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import "@/styles/globals.css";
-import { getPrefs } from "@/lib/prefs";
+import { getPrefs, getSidebarState } from "@/lib/prefs";
 
 export const metadata: Metadata = {
   title: "Syrowatka — Operating Platform",
@@ -13,8 +13,10 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   // at all, which hands the decision to the prefers-color-scheme block in
   // tokens/colors.css.
   const { theme } = await getPrefs();
+  // Stamped server-side so a collapsed sidebar never flashes open on first paint.
+  const sidebar = await getSidebarState();
   return (
-    <html lang="en" data-theme={theme === "auto" ? undefined : theme}>
+    <html lang="en" data-theme={theme === "auto" ? undefined : theme} data-sidebar={sidebar === "collapsed" ? "collapsed" : undefined}>
       <body>
         {/* Both faces are needed for first paint (display for the H1, body for
             everything else), so preload them instead of letting the browser

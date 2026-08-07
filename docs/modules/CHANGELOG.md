@@ -1717,6 +1717,35 @@ tenant's 8 seeded rows still need purging (per-tenant SQL in the design doc §12
 - **Unreleased / next:** identity writes, org-structure endpoints.
 
 ## platform-ui
+<<<<<<< HEAD
+### [0.20.0] — 2026-08-07 · IN PROGRESS (the sidebar collapses to a 64px icon rail)
+- Merged `fadhil/ui` (1 commit, forked 163 commits back). Expanded mode gets collapsible nav groups;
+  collapsed mode swaps renderer entirely - a 64px rail with one glyph per group, children in a
+  floating flyout, labels as hover/focus tooltips. ~12 icons stand in for ~35 rows.
+- State lives in its own **`gaiada_sidebar`** cookie, not the `gaiada_prefs` blob, so the toggle
+  writes it client-side without round-tripping or clobbering density/width/theme. Stamped onto
+  `<html data-sidebar>` server-side so a collapsed rail never flashes open.
+- Below the drawer breakpoint the off-canvas panel still wins (touch has no hover) and the collapse
+  button hides, so the two never fight.
+- **Merge resolution (`nav.ts`, the one conflict):** the branch predated both the `Me` group and the
+  `Assistant` row; both were kept. `Me` is a rail **flyout** with a new `user` glyph, not pinned -
+  pinning it alongside Workspace would put 7 flat rows above the categories and undo the rail.
+- **New:** [`docs/sidebar-nav-map.md`](../sidebar-nav-map.md) - the authoritative human index of
+  where every nav row sits, its capability gate, and a per-push change record. Nav moves have been
+  landing as unreadable one-line array diffs; this is where they get explained. `nav.test.ts` gained
+  a guard so a new group cannot silently ship without a rail glyph (it would fall back to a generic
+  `box`) and so a second `pinned` group fails the suite.
+- **Not verified:** the three new Playwright specs (collapse, rail flyout, cookie persistence) are
+  not `@smoke`-tagged, so CI does not run them and this session did not - they need a live backend.
+  `tsc`, 1340 vitest tests and `next build` are green on the merge result.
+- **Inherits an open a11y item.** `0.19.1` below defers `.erp-side__grouplabel`'s raw CSS `opacity`
+  (axe-excluded there, needs a reviewed `shell.css` fix). That selector now also styles the rail
+  flyout's `.erp-railmenu__title`, so the deferred fix covers one more surface than when it was
+  written - not a new defect, a wider blast radius for the existing one.
+- Lands AFTER the `Alpha 01.026.0067a` cut, which manifests platform-ui `0.19.1` - `0.20.0` is
+  unreleased until the next cut. (Numbered `0.20.0`, not `0.19.0`: concurrent sessions claimed
+  `0.19.0` and `0.19.1` below while this merge was being verified.)
+
 ### [0.19.1] — 2026-08-07 · IN PROGRESS (automated a11y auditing + the manual checklist automation can't replace)
 - **`@axe-core/playwright` added, devDependency only.** Runtime deps stay exactly `next`/`react`/
   `react-dom`/`server-only` — nothing from this ticket is imported by app code. New
