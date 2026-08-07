@@ -34,6 +34,68 @@ reconstructed from this table alone. Format defined in [`VERSIONING.md`](./VERSI
 > Not corrected retroactively (moving a pushed, already-deployed tag is its own risk); flagging so
 > the next session doesn't re-diagnose the same gap.
 
+### `Alpha 01.025.0064a` — 2026-08-07 — D13 stops trusting a declaration it could not verify
+
+One module moved, and it closes a security control that had been passing on a false premise since the
+agent-write path shipped.
+
+**`ai-agents` `0.7.0` — D13 enforced a DECLARATION, and on this box the declaration was untrue.**
+`runWriteAgent` checked `AGENT_SERVING_PROVIDER` (compose default `openai`) against
+`def.evaledProviders`. But `openai` cannot serve on `gda-aicenter` at all — no `OPENAI_BASE_URL`/
+`OPENAI_API_KEY` (⇒ `Available()=false`), absent from `LLM_CHAIN`, and site topology strips
+gemini/claude anyway — so the effective chain is `[hermes, central-forward, echo]` and **Hermes authored
+every agent write while the gate believed the eval-cleared `openai` had.** D13's promise is *"only a
+provider that passed its eval suite may author a write"*; a control an env var can satisfy on its own is
+not that promise.
+
+Fixed as a class, in two halves that only work together:
+1. **Enforce what SERVED** (`deps.lastProvider()`); the declaration is demoted to the cold-start seed.
+   This closes the wire `runWriteAgent`'s own docstring already called *"the one remaining runtime
+   wire"* — completing stated design intent, not reversing `79051ff`'s pin. Prefer-observed rather than
+   replace-declared, because an UNSET declaration was itself a real failure mode (writes go silently
+   inert) and `lastProvider()` is undefined until the Gateway has served once.
+2. **Ask for it** — the declaration now rides as the Gateway's per-request `provider` hint
+   (`chain.RunWithHint`, the brain picker's wire). Before this it asserted a provider without ever
+   requesting one, so it could never come true. Now the runner asks and (1) verifies it got it.
+
+**The `mcp__gaiada__*` tool names in `0063a` were Hermes' fingerprint, not a model guessing.** That cut
+recorded `task-filer` calling `mcp__gaiada__pm_listTasks` and read it as cross-namespace inference. A
+live probe of the same box returned `mcp__gaiada__projects_list` **from Hermes** — so the invented names
+were evidence that the un-evaled provider was authoring turns in production. `ff0a061` made that symptom
+non-fatal; this makes the cause impossible. Both were right to land.
+
+⚠ **DEPLOYMENT CONSEQUENCE, deliberately not papered over: agent writes are now CONTAINED on this box**
+(loudly, with `declared "openai", Gateway served "hermes"` in the reason) instead of executing via an
+un-evaled model. That is the correct state — the previous green was false. Enabling the feature honestly
+needs an eval-cleared provider to actually serve. The clean one-step option is to append `openai` **LAST**
+to `LLM_CHAIN` and point `OPENAI_*` at Ollama Cloud: appending last changes nothing for unhinted callers
+(site mode already leaves hermes first for bot/knowledge/search), the runner's new hint promotes it for
+itself only, and `openai` is the provider `task-filer`'s eval was actually run against, so the existing
+evidence stays valid. NOT done here — CLAUDE.md states Ollama Cloud is shared + weekly-rate-limited and
+must not become a hard prod dependency, so that is an owner decision. If it rate-limits, D13 now fails
+closed rather than misbehaving. **Enrolling Hermes instead is not available:** it holds the runner's JSON
+protocol but names tools in its own MCP namespace, so every call fails the allow-list.
+
+Counter `0063 → 0064`: one module row moved. Note `cd2a13f` (observability OBS-04) and `2b03126`
+(nginx NET-01) shipped in this cut **without** bumping their module versions, so the counter understates
+the churn — flagged rather than silently corrected, since those are the owning sessions' entries.
+
+**Module manifest** (VERSIONING rule 2):
+
+| Module | Ver | | Module | Ver |
+|---|---|---|---|---|
+| platform-nest | `0.16.0` | | webdev | `0.11.0` |
+| platform-ui | `0.18.0` | | webdesk | `0.0.0` |
+| ai-gateway-go | `0.13.1` | | search-marketing | `0.5.1` |
+| mcp-hub | `0.10.0` | | social-media | `0.0.0` |
+| sync-engine-go | `0.7.0` | | creative | `0.1.0` |
+| automation (n8n) | `0.4.1` | | render-gateway-go | `0.0.0` |
+| observability | `0.6.1` | | reports | `0.3.1` |
+| infra | `0.8.6` | | report-renderer | `0.1.0` |
+| wa-chat-bot | `0.9.2` | | mail | `0.0.19` |
+| ai-agents | `0.7.0` | | hermes-gateway | `0.2.0` |
+| capture-helper | `0.2.0` | | | |
+
 ### `Alpha 01.024.0063a` - 2026-08-07 - what the first live drive of the assistant found
 
 Cut immediately after the owner used `0061a` on the real box. Two defects, both found by a
