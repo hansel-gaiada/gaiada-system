@@ -30,7 +30,17 @@
 //       refusal cannot widen what the model can see or do.
 // A genuine high-impact write still suspends for approval exactly as before (this block runs strictly
 // before the impact gate and never touches it).
+import { resolveToolAlias } from "./tool-aliases";
+
 export const MAX_OFF_LIST_ATTEMPTS = 2;
+
+// 2026-08-07 — a FOLLOW-UP to the recoverable-refusal loop directly above, not a replacement for it:
+// an explicit, hand-written alias map (`tool-aliases.ts`) resolves KNOWN near-misses (e.g. the
+// `pm.listTasks` guess from the incident above) to their canonical name BEFORE the allow-list lookup
+// this file does a few lines below — see that module's header for the full security condition (why
+// resolution must happen before authorization, never after) and `tool-alias-resolution-order.test.ts`
+// for the regression test that pins it. Everything not in that map is unaffected: it still falls
+// through to the recoverable-refusal loop above exactly as before.
 
 export type Impact = "read" | "low_write" | "high_write";
 
@@ -360,7 +370,10 @@ export async function runAgent(
 
     if (action.final !== undefined) return finish(action.final);
 
-    const tool = action.tool!;
+    // Alias resolution happens FIRST — before the allow-list lookup immediately below, and therefore
+    // before every other gate in this function (D14-12 impact reconciliation, resolveApproval,
+    // deps.callTool). See tool-aliases.ts's header for why that order is the whole security property.
+    const tool = resolveToolAlias(action.tool!);
     const declaredImpact = def.tools[tool];
     if (declaredImpact === undefined) {
       // Not on the allow-list at all. `deps.callTool` is NEVER reached on this branch, recoverable or

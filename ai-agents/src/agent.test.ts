@@ -11,7 +11,7 @@ import {
   type AgentDef,
   type AgentDeps,
 } from "./agent";
-import { statusReporter } from "./specialists";
+import { statusReporter, taskFiler } from "./specialists";
 
 const envelope = { provider: "telegram", externalId: "tg:555" };
 
@@ -59,6 +59,13 @@ describe("agent runner (WS8 step 1 + D14)", () => {
   // analogy from `pm.createTask`; it exists on neither this agent's allow-list nor the hub registry) and
   // the turn died outright ("tool not on the agent's allow-list", no partial answer). See agent.ts's own
   // 2026-08-07 header for the fix: a bounded, recoverable nudge instead of an immediate fatal refusal.
+  //
+  // FOLLOW-UP (same day): `pm.listTasks` itself is now resolved by the explicit alias map
+  // (`tool-aliases.ts`) BEFORE it ever reaches this off-list check, so it no longer exercises the
+  // recoverable-nudge path at all — see "the exact live incident ... resolves on the FIRST model call"
+  // below. This test now uses a DIFFERENT hallucinated name (deliberately absent from the alias map) so
+  // it keeps proving the general off-list-recovery mechanism, which is still the fallback for every
+  // guess the alias map doesn't cover.
   // ══════════════════════════════════════════════════════════════════════════════════════════════════
 
   it("an off-list tool guess is a RECOVERABLE nudge: the hallucinated tool is never called, and the model finishes on retry with a valid name", async () => {
@@ -72,7 +79,7 @@ describe("agent runner (WS8 step 1 + D14)", () => {
     const toolCalls: string[] = [];
     const deps = scripted(
       [
-        `{"tool": "pm.listTasks", "args": {}}`, // hallucinated — refused, must NEVER be dispatched
+        `{"tool": "pm.fetchTasks", "args": {}}`, // hallucinated, NOT in the alias map — refused, must NEVER be dispatched
         `{"tool": "tasks.list", "args": {}}`, // retries with a real, allow-listed name
         `{"final": "1 open task: Fix bug."}`,
       ],
@@ -84,6 +91,29 @@ describe("agent runner (WS8 step 1 + D14)", () => {
     const run = await runAgent(pmLikeDef, "list my open tasks", envelope, deps);
     expect(run.outcome).toContain("1 open task");
     // The hallucinated name was NEVER invoked — only the real retry reached deps.callTool.
+    expect(toolCalls).toEqual(["tasks.list"]);
+  });
+
+  // ══════════════════════════════════════════════════════════════════════════════════════════════════
+  // 2026-08-07 (follow-up ticket) — the SAME live guess now resolves on the FIRST attempt, not the
+  // recoverable retry. The off-list loop above stays as the fallback for everything NOT in the map
+  // (tool-aliases.ts); this proves the specific, already-observed near-miss no longer costs a turn.
+  // ══════════════════════════════════════════════════════════════════════════════════════════════════
+  it("the exact live incident (task-filer's model calling pm.listTasks) now resolves on the FIRST model call via the alias map — zero off-list attempts consumed, real data returned from the canonical tool", async () => {
+    const toolCalls: string[] = [];
+    const deps = scripted(
+      [
+        `{"tool": "pm.listTasks", "args": {}}`, // the exact guess from the live incident
+        `{"final": "1 open task: Fix bug."}`,
+      ],
+      (name) => {
+        toolCalls.push(name);
+        return JSON.stringify([{ id: "t1", title: "Fix bug" }]);
+      },
+    );
+    const run = await runAgent(taskFiler, "list my open tasks", envelope, deps);
+    expect(run.outcome).toBe("1 open task: Fix bug.");
+    // The alias resolved to the canonical tool — the raw guess never reached deps.callTool.
     expect(toolCalls).toEqual(["tasks.list"]);
   });
 
