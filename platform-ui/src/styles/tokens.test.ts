@@ -57,6 +57,59 @@ describe("design tokens", () => {
     expect(pinned).toEqual(media);
   });
 
+  // ---- PM-scoped Repsona palette (P4-L1) ----------------------------------
+  // PM is a deliberate visual island (plan decision 18). These guards exist so the
+  // island stays contained and internally honest: the file may only declare `--pm-*`,
+  // it must be reachable, and its two dark blocks must agree — the same trap
+  // colors.css already guards against.
+  it("the PM palette declares only --pm-* properties", () => {
+    const pm = read("./tokens/pm.css");
+    const declared = [...pm.matchAll(/(--[a-z0-9-]+)\s*:/g)].map((m) => m[1]);
+    expect(declared.length).toBeGreaterThan(20);
+    expect(declared.filter((v) => !v.startsWith("--pm-"))).toEqual([]);
+  });
+
+  it("the PM palette is imported by globals", () => {
+    expect(read("./globals.css")).toContain('@import "./tokens/pm.css"');
+  });
+
+  it("the PM palette's two dark blocks stay in sync", () => {
+    const pm = read("./tokens/pm.css");
+    const media = declaredVars(pm, pm.indexOf('html:not([data-theme="light"])'));
+    const pinned = declaredVars(pm, pm.indexOf('html[data-theme="dark"]'));
+    expect(Object.keys(media).length).toBeGreaterThan(5);
+    expect(pinned).toEqual(media);
+  });
+
+  it("every PM urgency tier exposes both a graphic and a text tier", () => {
+    // Mirrors the house --status-* rule. A tier with only a fill leaves the badge's
+    // glyph/label unthemed, which is exactly how a colour-only indicator ships —
+    // unreadable for a greyscale or colour-blind reader.
+    const pm = read("./tokens/pm.css");
+    for (const tier of ["overdue", "due-soon", "on-track"]) {
+      expect(pm).toContain(`--pm-urgency-${tier}-graphic:`);
+      expect(pm).toContain(`--pm-urgency-${tier}-fg:`);
+    }
+  });
+
+  it("the PM tone ramp is complete — every tone has a fill and a hairline", () => {
+    const pm = read("./tokens/pm.css");
+    for (let n = 1; n <= 8; n++) {
+      expect(pm).toContain(`--pm-tone-${n}:`);
+      expect(pm).toContain(`--pm-tone-${n}-line:`);
+    }
+    expect(pm).toContain("--pm-tone-on:");
+  });
+
+  it("the PM status hues cover the whole ladder", () => {
+    // Guards the pairing with lib/pmVocabulary.ts PM_STATUS_LADDER: a status with no
+    // hue renders an uncoloured column head, which reads as a broken board.
+    const pm = read("./tokens/pm.css");
+    for (const id of ["backlog", "todo", "in-progress", "blocked", "done"]) {
+      expect(pm).toContain(`--pm-status-${id}:`);
+    }
+  });
+
   it("components never hardcode a colour literal", () => {
     // The token layer is the only place a raw colour may appear. Exceptions are
     // listed with the reason they cannot be themed.

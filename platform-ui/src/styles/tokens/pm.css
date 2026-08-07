@@ -1,0 +1,157 @@
+/* ============================================================================
+   PM token layer — Repsona-faithful palette (P4-L1 / P4-G4)
+   plan: docs/superpowers/plans/2026-08-04-pm-repsona-parity-phase4-plan.md §L
+
+   WHY THIS FILE EXISTS
+   Owner directive 2026-08-06: the PM surface mirrors Repsona, because the team is
+   already fluent in it. Repsona is dark-first, rounded and saturated; the
+   Syrowatka house style is hairline, zero-radius and muted bronze. Both cannot be
+   true on one surface, so PM is a deliberate visual island (plan decision 18) —
+   every OTHER surface keeps the house style.
+
+   The mechanism matters. `styles/tokens.test.ts` fails the build on any colour
+   literal under `src/components/**`, and the correct answer is NOT to exempt
+   `components/pm/**` — an exemption like that never comes back, and it would stop
+   the guard test protecting PM from accidental one-off colours forever. Instead the
+   Repsona palette lives HERE, in the token layer, where literals are legal, and PM
+   components consume only `var(--pm-*)`. Same shape of solution as the existing
+   `creative/creative.css` carve-out, but without spending an exemption.
+
+   PROVENANCE — read before "correcting" a value.
+   These hues are RECONSTRUCTED from screenshots of the live instance
+   (gda.repsona.com), not sampled from Repsona's stylesheet. They land on the
+   Material Design ramp, which is evidently what Repsona uses: the cumulative-flow
+   legend and tag-distribution donut read as pink / blue / amber / lime / light-green
+   / deep-orange, and the status hues below are mapped to match that legend
+   (ToDo green, Doing yellow-green, Blocked orange, Done amber). Treat them as a
+   faithful approximation; if someone ever samples the real CSS, that wins.
+
+   CONTRAST — every ratio below was computed with the WCAG 2.1 formula
+   (2026-08-06). Two rules, and they are different rules:
+     · TEXT needs >= 4.5:1 against whatever it sits on.
+     · A FILL (chip background, bar, dot) is a graphic, not text — it needs to be
+       distinguishable, not 4.5:1.
+
+   The tone ramp deliberately uses ONE text colour (ink) on every chip in BOTH
+   themes: ink-on-fill does not depend on the page surface, so a single validated
+   ramp works everywhere and there is no per-tone/per-theme text matrix to keep
+   honest. Measured ink-on-fill: 4.94 (purple, the floor) to 11.63 (lime).
+   The known weakness: on the LIGHT page these fills are only 1.45-3.41 against
+   paper, so a chip's edge would read faintly — mitigated by the hairline border
+   token below (`--pm-tone-N-line`), which is the house mechanism anyway.
+   ============================================================================ */
+
+:root {
+  /* ---- Repsona chrome ------------------------------------------------------
+     Kept as explicit PM surfaces rather than reusing --surface-card, because the
+     Repsona look is a flat mid-grey panel stack, not the house paper/linen. */
+  --pm-surface-page:   #F5F5F5;
+  --pm-surface-card:   #FFFFFF;
+  --pm-surface-raised: #FAFAFA;  /* menus, modal, popovers */
+  --pm-surface-sunken: #EEEEEE;  /* board column troughs   */
+  --pm-line:           #E0E0E0;
+  --pm-ink:            #1A1916;  /* the one text colour used on every tone fill */
+  --pm-text:           #212121;
+  --pm-text-dim:       #616161;
+
+  /* Repsona's interactive blue — links, buttons, active tabs. 4.6:1 on white. */
+  --pm-accent:      #1976D2;
+  --pm-accent-weak: #E3F2FD;
+
+  /* Repsona is rounded; the house style is not. Scoped to PM only.
+     Pills (tag chips, status badges, avatars) are fully round. */
+  --pm-radius:      4px;
+  --pm-radius-lg:   8px;
+  --pm-radius-pill: 999px;
+
+  /* ---- Urgency: overdue · almost late · in time (P4-G4) --------------------
+     Two tiers per state, same convention as the house --status-* families:
+       *-graphic = dot/bar/fill (a graphic, no 4.5:1 requirement)
+       *-fg      = text/glyph  (validated >= 4.5:1 on the surface below)
+     Kept SEPARATE from --status-critical/-ok on purpose: status and urgency are
+     different axes, and a task can legitimately be Doing AND overdue. Reusing the
+     status family would make one override the other on the same card. */
+  --pm-urgency-overdue-graphic:   #E53935;
+  --pm-urgency-due-soon-graphic:  #FFB300;
+  --pm-urgency-on-track-graphic:  #43A047;
+  --pm-urgency-overdue-fg:        #C62828;  /* 5.38:1 on --pm-surface-card */
+  --pm-urgency-due-soon-fg:       #8D5A00;  /* 5.59:1 */
+  --pm-urgency-on-track-fg:       #2E7D32;  /* 4.91:1 */
+  --pm-urgency-neutral-fg:        #616161;  /* undated / done — never alarming   */
+
+  /* ---- Status ladder (Backlog · ToDo · Doing · Blocked · Done) -------------
+     Hues mapped to the live instance's own cumulative-flow legend. Ids are the
+     PERSISTED values (see lib/pmVocabulary.ts) — `in_progress`, not `doing`. */
+  --pm-status-backlog:     #90A4AE;
+  --pm-status-todo:        #8BC34A;
+  --pm-status-in-progress: #CDDC39;
+  --pm-status-blocked:     #FF7043;
+  --pm-status-done:        #FFC107;
+
+  /* ---- Categorical tone ramp (tags, chart series, board accents) -----------
+     8 tones, Material 300-400 level. `-on` is the text colour that sits ON the
+     fill; `-line` is the hairline that gives a chip its edge on a light page. */
+  --pm-tone-1:      #F06292;  /* pink   — ink 5.75:1  */
+  --pm-tone-2:      #42A5F5;  /* blue   — ink 6.64:1  */
+  --pm-tone-3:      #FFC107;  /* amber  — ink 10.78:1 */
+  --pm-tone-4:      #CDDC39;  /* lime   — ink 11.63:1 */
+  --pm-tone-5:      #8BC34A;  /* green  — ink 8.37:1  */
+  --pm-tone-6:      #FF7043;  /* orange — ink 6.40:1  */
+  --pm-tone-7:      #BA68C8;  /* purple — ink 4.94:1  (the floor) */
+  --pm-tone-8:      #90A4AE;  /* slate  — ink 6.79:1  */
+  --pm-tone-on:     var(--pm-ink);
+  --pm-tone-1-line: color-mix(in srgb, var(--pm-tone-1) 55%, transparent);
+  --pm-tone-2-line: color-mix(in srgb, var(--pm-tone-2) 55%, transparent);
+  --pm-tone-3-line: color-mix(in srgb, var(--pm-tone-3) 55%, transparent);
+  --pm-tone-4-line: color-mix(in srgb, var(--pm-tone-4) 55%, transparent);
+  --pm-tone-5-line: color-mix(in srgb, var(--pm-tone-5) 55%, transparent);
+  --pm-tone-6-line: color-mix(in srgb, var(--pm-tone-6) 55%, transparent);
+  --pm-tone-7-line: color-mix(in srgb, var(--pm-tone-7) 55%, transparent);
+  --pm-tone-8-line: color-mix(in srgb, var(--pm-tone-8) 55%, transparent);
+}
+
+/* ---------------------------------------------------------------------------
+   DARK — Repsona's native mode, and the one every screenshot shows.
+
+   The two blocks below MUST declare identical values: CSS cannot union a media
+   query with an attribute selector, so drift would give an OS-dark user and a
+   pinned-dark user different colours. `tokens.test.ts` asserts they match — the
+   same guard colors.css already carries.
+
+   The tone ramp itself does NOT change between themes (ink-on-fill is
+   surface-independent, so one validated ramp serves both); only the chrome and
+   the text-tier urgency values do.
+   --------------------------------------------------------------------------- */
+@media (prefers-color-scheme: dark) {
+  html:not([data-theme="light"]) {
+    --pm-surface-page:   #212121;
+    --pm-surface-card:   #2B2B2B;
+    --pm-surface-raised: #333333;
+    --pm-surface-sunken: #262626;
+    --pm-line:           #3D3D3D;
+    --pm-text:           #ECEFF1;  /* 12.26:1 on --pm-surface-card */
+    --pm-text-dim:       #B0BEC5;
+    --pm-accent:         #64B5F6;  /* the 1976D2 blue is unreadable on dark */
+    --pm-accent-weak:    #1E3A5F;
+    --pm-urgency-overdue-fg:  #FF7961;  /* 5.50:1 on #2B2B2B */
+    --pm-urgency-due-soon-fg: #FFB300;  /* 7.89:1 */
+    --pm-urgency-on-track-fg: #81C784;  /* 7.04:1 */
+    --pm-urgency-neutral-fg:  #B0BEC5;
+  }
+}
+
+html[data-theme="dark"] {
+  --pm-surface-page:   #212121;
+  --pm-surface-card:   #2B2B2B;
+  --pm-surface-raised: #333333;
+  --pm-surface-sunken: #262626;
+  --pm-line:           #3D3D3D;
+  --pm-text:           #ECEFF1;
+  --pm-text-dim:       #B0BEC5;
+  --pm-accent:         #64B5F6;
+  --pm-accent-weak:    #1E3A5F;
+  --pm-urgency-overdue-fg:  #FF7961;
+  --pm-urgency-due-soon-fg: #FFB300;
+  --pm-urgency-on-track-fg: #81C784;
+  --pm-urgency-neutral-fg:  #B0BEC5;
+}

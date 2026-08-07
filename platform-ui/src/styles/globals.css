@@ -2,6 +2,10 @@
 @import "./tokens/colors.css";
 @import "./tokens/typography.css";
 @import "./tokens/spacing.css";
+/* PM-scoped Repsona palette (P4-L1). Declares only `--pm-*`, so it cannot affect
+   any other surface; imported here because the PM tree spans several route groups
+   and a per-component import would load it many times. See tokens/pm.css header. */
+@import "./tokens/pm.css";
 
 /* Design-system hard rules: zero radius, hairline borders, opacity hovers.
    Shadows exist in exactly ONE place — --elev-overlay, for layers that float

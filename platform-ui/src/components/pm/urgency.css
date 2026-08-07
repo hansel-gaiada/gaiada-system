@@ -1,0 +1,80 @@
+/* Urgency indicator (P4-G3). Colour comes from the PM-scoped Repsona palette
+   (`styles/tokens/pm.css`) — never a literal here, which `styles/tokens.test.ts`
+   enforces across every file under src/components.
+
+   Two tiers per state are used deliberately: `-graphic` fills the shape, `-fg`
+   colours the word. They differ because a fill is a graphic (no 4.5:1 duty) while
+   the label is text (validated >= 4.5:1 in both themes). */
+
+.pm-urg {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  vertical-align: middle;
+  flex: 0 0 auto;
+}
+
+.pm-urg__icon {
+  width: 10px;
+  height: 10px;
+  display: block;
+  /* The shape carries the meaning as much as the hue does — see UrgencyChip.tsx. */
+  fill: currentColor;
+  stroke: currentColor;
+}
+
+.pm-urg__text {
+  font: 600 11px var(--font-body);
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+
+/* Chip form: a filled pill, Repsona-style. Rounded ONLY through --pm-radius-pill,
+   which is scoped to PM; the house style remains zero-radius everywhere else. */
+.pm-urg--chip {
+  padding: 2px 8px 2px 7px;
+  border-radius: var(--pm-radius-pill);
+  border: 1px solid transparent;
+}
+
+/* Per-tier colour. `color` drives BOTH the icon (currentColor) and the label, so a
+   tier can never end up with a coloured shape and an unstyled word. */
+.pm-urg--overdue   { color: var(--pm-urgency-overdue-fg); }
+.pm-urg--due-soon  { color: var(--pm-urgency-due-soon-fg); }
+.pm-urg--on-track  { color: var(--pm-urgency-on-track-fg); }
+.pm-urg--done,
+.pm-urg--undated   { color: var(--pm-urgency-neutral-fg); }
+
+/* The chip's tinted bed + hairline edge. Tint is derived from the GRAPHIC tier so
+   the wash stays a wash; the label keeps the validated -fg value above. */
+.pm-urg--chip.pm-urg--overdue {
+  background: color-mix(in srgb, var(--pm-urgency-overdue-graphic) 14%, transparent);
+  border-color: color-mix(in srgb, var(--pm-urgency-overdue-graphic) 45%, transparent);
+}
+.pm-urg--chip.pm-urg--due-soon {
+  background: color-mix(in srgb, var(--pm-urgency-due-soon-graphic) 16%, transparent);
+  border-color: color-mix(in srgb, var(--pm-urgency-due-soon-graphic) 45%, transparent);
+}
+.pm-urg--chip.pm-urg--on-track {
+  background: color-mix(in srgb, var(--pm-urgency-on-track-graphic) 14%, transparent);
+  border-color: color-mix(in srgb, var(--pm-urgency-on-track-graphic) 42%, transparent);
+}
+.pm-urg--chip.pm-urg--done,
+.pm-urg--chip.pm-urg--undated {
+  background: color-mix(in srgb, var(--pm-urgency-neutral-fg) 12%, transparent);
+  border-color: color-mix(in srgb, var(--pm-urgency-neutral-fg) 32%, transparent);
+}
+
+/* Overdue is the one tier allowed to pull the eye across a long list — but only
+   the dot form, and only where motion is welcome. A page full of pulsing rows is
+   how an indicator becomes wallpaper, so the chip form never animates. */
+@media (prefers-reduced-motion: no-preference) {
+  .pm-urg--dot.pm-urg--overdue .pm-urg__icon {
+    animation: pm-urg-pulse 2.4s var(--erp-ease) infinite;
+  }
+}
+
+@keyframes pm-urg-pulse {
+  0%, 70%, 100% { opacity: 1; }
+  85%           { opacity: 0.45; }
+}
