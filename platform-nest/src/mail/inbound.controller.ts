@@ -19,6 +19,7 @@
 import { Controller, HttpCode, HttpException, HttpStatus, Post, Req, UnauthorizedException } from "@nestjs/common";
 import type { FastifyRequest } from "fastify";
 import { config } from "../config";
+import { resolveClientIp } from "./client-ip";
 import { authenticateInbound } from "./inbound/auth";
 import { MalformedInboundPayloadError, parseBrevoInbound } from "./inbound/brevo-payload";
 import { ingestInbound } from "./inbound/intake";
@@ -43,22 +44,33 @@ export class MailInboundController {
       throw new UnauthorizedException("inbound raw-body capture not installed");
     }
 
-    const auth = authenticateInbound(req.headers as Record<string, unknown>, captured.raw);
-    if (!auth.ok) {
-      recordInboundRejected("auth");
-      recordInbound("brevo-inbound", "rejected");
-      throw new UnauthorizedException(auth.reason);
-    }
-
-    // Rate limit AFTER authentication: an unauthenticated flood already costs only a constant-time
+    // MAIL-37 — rate limit BEFORE authentication (moved from after). The ordering comment this
+    // replaced justified auth-first on "an unauthenticated flood already costs only a constant-time
     // compare, and keying the limiter on authenticated traffic keeps a spoofed-IP flood from
-    // exhausting a legitimate provider's window.
-    const source = (req.headers["x-forwarded-for"] as string | undefined)?.split(",")[0]?.trim() || req.ip || "unknown";
+    // exhausting a legitimate provider's window" — that second half is now stale: `source` below is
+    // trusted-proxy-gated (see `./client-ip.ts`), so a spoofed header can no longer move the key
+    // regardless of which side of auth the check runs on. What auth-first was NOT buying us: bounding
+    // the cost of a REPEATED-source flood of invalid-token requests, each of which still pays for a
+    // signature-header parse + HMAC compare when `MAIL_INBOUND_SIGNING_KEY` is set. Rate-limiting
+    // first means a repeat offender gets 429'd before that cost is paid on requests past the window,
+    // with nginx's own `limit_req_zone` (§ NET-01, `$binary_remote_addr` — the real TCP peer, never
+    // spoofable) as a second, network-layer backstop in front of this once deployed. This does NOT
+    // touch the 401 path's behaviour for any request that stays under the limit: auth still runs
+    // exactly as before for those, byte-identical wrong/absent/unset-token responses included (see
+    // `corpus.test.ts`'s `[auth]` cases and `trusted-proxy.test.ts`'s ordering-safety case).
+    const source = resolveClientIp(req, { trustedProxies: config.mail.inboundTrustedProxies, xffPosition: "rightmost" });
     const rate = checkInboundRate(source, config.mail.inboundRatePerMin);
     if (!rate.allowed) {
       recordInboundRejected("rate");
       recordInbound("brevo-inbound", "rejected");
       throw new HttpException(`inbound rate limit exceeded (${rate.limit}/min)`, HttpStatus.TOO_MANY_REQUESTS);
+    }
+
+    const auth = authenticateInbound(req.headers as Record<string, unknown>, captured.raw);
+    if (!auth.ok) {
+      recordInboundRejected("auth");
+      recordInbound("brevo-inbound", "rejected");
+      throw new UnauthorizedException(auth.reason);
     }
 
     if (captured.overCap) {

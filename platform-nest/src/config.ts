@@ -796,6 +796,36 @@ const configBase = {
     // Per-source flood control (§7.8). 0 disables. In-process/per-instance by design — there is no
     // Redis dependency in src/mail/ (A2); see src/mail/inbound/rate-limit.ts.
     inboundRatePerMin: Number(process.env.MAIL_INBOUND_RATE_PER_MIN ?? 60),
+    // MAIL-37 — trusted-proxy allowlist for `inbound.controller.ts`'s per-source rate-limit key.
+    // Same gate as `magicLinkTrustedProxies` below (shared implementation: `src/mail/client-ip.ts`),
+    // but a SEPARATE list, deliberately: the two endpoints sit behind completely different network
+    // hops (this one behind the public-facing nginx vhost once NET-01 is applied; magic-link behind
+    // a direct platform-ui-to-platform-nest internal call), so the address that legitimately belongs
+    // in one allowlist has no business being trusted for the other. Exact-string match against
+    // `req.ip` — the raw TCP peer, since this app never sets Fastify's `trustProxy` (main.ts).
+    // Empty (the DEFAULT — "trust nothing") => every caller's header is ignored and the limiter keys
+    // on the socket address, same honest trade-off as everywhere else in this file.
+    //
+    // PRODUCTION VALUE — reasoned, not measured (no shell on the box for this ticket): nginx is a
+    // HOST-native process (not a sibling container) that reaches this app via a loopback-published
+    // Docker port (`127.0.0.1:<port>:<port>`, see the NET-01 runbook), not via the compose network
+    // platform-ui/platform-nest share. A host-loopback connection into a bridge-networked container's
+    // published port is hairpin-NATed by Docker; the peer address this app actually observes is the
+    // docker0 bridge gateway, NOT literally `127.0.0.1` — this repo already documents that gateway as
+    // `172.17.0.1` for the box this runs on (see `docker-compose.hostdata.yml`'s and
+    // `hermes-gateway.service`'s comments — both independently confirm containers reach the host, and
+    // are reached BY the host's hairpin-NATed loopback traffic, at that one address). Set to
+    // `172.17.0.1` for that reason. If the observed peer ever turns out to be `127.0.0.1` instead
+    // (e.g. a future non-Docker run of this app behind a local nginx, or a Docker networking mode
+    // that preserves the loopback source) — add it too; a comma-separated superset costs nothing
+    // (these are both non-routable, host-only addresses, never anything an internet attacker can BE)
+    // and the default posture is fail-closed either way, so an over-broad guess only risks staying at
+    // "trust nothing" a little longer, never a new hole. Confirm once deployed by checking whether
+    // legitimate Brevo traffic gets its own rate-limit bucket rather than sharing the fallback one
+    // (`mail_inbound_rejected_total{reason="rate"}` firing on normal volume would mean the configured
+    // address never matched and every caller is still sharing one socket-address bucket).
+    inboundTrustedProxies: (process.env.MAIL_INBOUND_TRUSTED_PROXIES ?? "")
+      .split(",").map((s) => s.trim()).filter(Boolean),
     // MAIL-14's clamd. Reachable only when the compose `scan` profile is up; unreachable => every
     // attachment stays `pending` => downloads refused (fail-closed on exposure, §7.6).
     clamavHost: process.env.MAIL_CLAMAV_HOST ?? "clamav",

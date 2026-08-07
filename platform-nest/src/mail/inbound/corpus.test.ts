@@ -676,7 +676,10 @@ describe.skipIf(!TEST_URL)("mail inbound corpus — POST /api/mail/inbound/brevo
   });
 
   // ── flood control + malformed ─────────────────────────────────────────────────────────────────
-  it("[rate] 429s past the per-source limit, after authentication", async () => {
+  // MAIL-37: the limiter now runs BEFORE authentication (inbound.controller.ts), but every request
+  // this case sends is authenticated (via `post()`'s default token header) — so this assertion is
+  // unchanged by the reorder; it was never testing ordering, only the per-source cap itself.
+  it("[rate] 429s past the per-source limit", async () => {
     config.mail.inboundRatePerMin = 2;
     resetInboundRateLimitForTest();
     const codes: number[] = [];

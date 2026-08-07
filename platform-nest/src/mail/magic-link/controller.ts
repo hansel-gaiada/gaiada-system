@@ -18,18 +18,23 @@ import {
 import type { FastifyRequest } from "fastify";
 import { config } from "../../config";
 import { ServiceGuard } from "../../auth/guards";
+import { resolveClientIp } from "../client-ip";
 import { requestMagicLink, consumeMagicLink, MagicLinkNotEnabledError, MagicLinkConsumeError } from "./service";
 
-/** Same `x-forwarded-for` precedent as `src/mail/inbound.controller.ts`'s source-key resolution —
- *  amended by MAIL-24 (QA-MAIL-11 Finding 3) to gate that header behind a trusted-proxy allowlist.
- *  QA's adversarial pass proved the un-gated version was a real hole in waiting: `req.headers`
- *  is caller-controlled and this app never sets Fastify's `trustProxy` (main.ts), so `req.ip` is
+/** MAIL-24 (QA-MAIL-11 Finding 3) gated this behind a trusted-proxy allowlist: `req.headers` is
+ *  caller-controlled and this app never sets Fastify's `trustProxy` (main.ts), so `req.ip` is
  *  ALWAYS the raw TCP peer, never itself header-influenced — but the OLD code trusted
  *  `x-forwarded-for` verbatim regardless of who that peer was, so 8 freshly-spoofed values
- *  against a limit of 3 all minted (zero protection; not remotely exploitable TODAY only because
- *  `ServiceGuard` gates this route and no browser-facing form exists anywhere in platform-ui —
- *  QA confirmed the grep — but the whole point is it must not become exploitable the moment one
- *  is built).
+ *  against a limit of 3 all minted (zero protection; not remotely exploitable AT THE TIME only
+ *  because `ServiceGuard` gates this route and no browser-facing form existed anywhere in
+ *  platform-ui — but the whole point is it must not become exploitable the moment one is built).
+ *
+ *  MAIL-37 extracted the gate itself into `../client-ip.ts` so `inbound.controller.ts` — which had
+ *  the identical un-gated bug and was never ported when MAIL-24 landed — shares this implementation
+ *  rather than a second, drifted copy. `xffPosition: "leftmost"` because the ONLY entity that ever
+ *  writes this header on this call path is platform-ui's own server-side code (a direct internal
+ *  call, no intermediary appending to it) — see `../client-ip.ts`'s module comment for why
+ *  `inbound.controller.ts` needs the opposite end of the header instead.
  *
  *  Meaningful per-end-user rate limiting still REQUIRES platform-ui's server action to forward
  *  the originating browser's IP in this header on its call to `/auth/magic-link` — but now ONLY
@@ -38,10 +43,7 @@ import { requestMagicLink, consumeMagicLink, MagicLinkNotEnabledError, MagicLink
  *  limiter keys on the socket address — the honest pre-existing trade-off (shared-IP callers
  *  share one bucket), not a new one. */
 function clientIp(req: FastifyRequest): string {
-  const socketIp = req.ip || "unknown";
-  if (!config.mail.magicLinkTrustedProxies.includes(socketIp)) return socketIp;
-  const xff = (req.headers["x-forwarded-for"] as string | undefined)?.split(",")[0]?.trim();
-  return xff || socketIp;
+  return resolveClientIp(req, { trustedProxies: config.mail.magicLinkTrustedProxies, xffPosition: "leftmost" });
 }
 
 @Controller()

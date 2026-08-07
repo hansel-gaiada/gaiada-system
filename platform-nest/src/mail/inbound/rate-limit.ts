@@ -10,10 +10,11 @@
 //     hub's limiter already makes ("Redis-backed multi-instance rate limiting" is listed there as a
 //     deferral, not a defect).
 //   * It is a FLOOD control, not an authorization control. The wall that keeps strangers out is the
-//     token in `auth.ts`; this exists so an authenticated-but-misbehaving provider (or a leaked
-//     token) cannot drive unbounded sanitizer + scanner + INSERT work. That ordering — authenticate
-//     first, then rate-limit — is why an unauthenticated flood costs a constant-time compare and
-//     nothing else.
+//     token in `auth.ts`; this exists so a misbehaving-or-hostile source (authenticated or not — see
+//     MAIL-37, `inbound.controller.ts` now checks this BEFORE auth) cannot drive unbounded
+//     sanitizer/scanner/INSERT work, or — pre-auth specifically — repeated signature-verify HMAC
+//     compares on a flood of invalid-token requests from one source. The controller-level comment on
+//     why the order changed (and why it's still safe) lives in `inbound.controller.ts`.
 //
 // The window is fixed rather than sliding: at these volumes the 2×-at-the-boundary imprecision of a
 // fixed window is irrelevant, and a fixed window has no per-request allocation.
