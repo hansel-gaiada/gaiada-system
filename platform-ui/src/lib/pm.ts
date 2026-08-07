@@ -332,6 +332,13 @@ export interface PmProject {
   id: string;
   name: string;
   status: string;
+  // P4-H1: the AUTHORED range's opening end. The backend's single-project read has returned this
+  // since cc769d1; it was missing here, so P4-H3 reached it through a cast. Decision 12 is that the
+  // range is authored and the task-derived envelope is shown ALONGSIDE it — the gap between the two
+  // is the slippage signal — so this must never be overwritten from task dates.
+  // NOTE the bulk `GET /api/:t/projects` list does NOT yet select `start_date`, only this
+  // single-project read does, which is why the list pages can show a target but no authored start.
+  startDate: string | null;
   shortCode: string | null; // WD-28: unique per tenant, derived on creation + backfilled for legacy rows
   progress: number;
   owner: Assignee | null;
@@ -416,8 +423,31 @@ export const getPmProject = (u: string, t: string, id: string) =>
 export const listPmTasks = (u: string, t: string, projectId: string) =>
   skipUnavailable(platformFetch<PmTask[]>(`/api/${t}/pm/projects/${projectId}/tasks`, u), [] as PmTask[]);
 // Tenant-wide task list (unifies the Tasks page onto the rich PM model).
-export const listAllPmTasks = (u: string, t: string, q: { assignee?: string } = {}) =>
-  skipUnavailable(platformFetch<PmTask[]>(`/api/${t}/pm/tasks${q.assignee ? `?assignee=${q.assignee}` : ""}`, u), [] as PmTask[]);
+// P4-A1 made this endpoint paginated: it now answers `{ items, nextCursor }` where it used to
+// answer a bare `PmTask[]`. SIX callers depend on this reader — lib/departments.ts (every department
+// board/timeline/projects page), /tasks, /calendar, /projects and lib/queue.ts (My Work) — so the
+// unwrap happens HERE, once, and every caller keeps its `PmTask[]` contract untouched.
+//
+// It tolerates BOTH shapes on purpose, the same way lib/envelope.ts's `normalizeEnvelope` tolerates
+// a bare array from an ungraduated endpoint. That is not defensive noise: this UI is deployed
+// separately from the backend, so during any rollout one side is briefly older than the other, and
+// the failure mode of guessing wrong is a runtime `.filter is not a function` on half the PM
+// surface. Note the demo fixture already returns the paginated shape, so DEMO_MODE exercises the
+// real contract rather than hiding the difference — which is exactly how this drift stayed
+// invisible to `tsc`, the unit suite AND the demo build until it was read against the live handler.
+//
+// NOTE this reader deliberately returns only the first page. The facets and cursor A1 added are for
+// the `@all` scope (P4-A5) to consume through a paginated reader of its own; every caller here wants
+// "the tenant's tasks" for aggregation, and silently paginating them would under-report.
+type PmTaskPage = { items: PmTask[]; nextCursor?: string | null };
+export const listAllPmTasks = async (u: string, t: string, q: { assignee?: string } = {}): Promise<PmTask[]> => {
+  const res = await skipUnavailable(
+    platformFetch<PmTask[] | PmTaskPage>(`/api/${t}/pm/tasks${q.assignee ? `?assignee=${q.assignee}` : ""}`, u),
+    [] as PmTask[],
+  );
+  if (Array.isArray(res)) return res;
+  return Array.isArray(res?.items) ? res.items : [];
+};
 export const getPmTask = (u: string, t: string, id: string) =>
   skipUnavailable(platformFetch<PmTask | null>(`/api/${t}/pm/tasks/${id}`, u), null);
 export const listMilestones = (u: string, t: string, projectId: string) =>
@@ -686,6 +716,25 @@ export function reachableStatusIds(statuses: ProjectStatus[], blocked: boolean):
   if (!blocked) return new Set(statuses.map((s) => s.id));
   const intake = intakeStatusId(statuses);
   return new Set(statuses.filter((s) => s.isDone || s.isBlocked || s.id === intake).map((s) => s.id));
+}
+
+// P4-H3 — the task-derived date envelope (earliest start, latest due) of a set of tasks.
+// Lives here because THREE surfaces needed it independently — the project workspace, the department
+// projects list and the tenant projects list — and each had grown its own copy. Three copies of a
+// min/max fold is how two of them quietly disagree the first time someone handles a null differently.
+//
+// This is the DERIVED half of decision 12. It is deliberately NOT the project's range: it is what
+// the work actually spans, shown next to what the team committed to, and the difference is the point.
+export function taskDateEnvelope(
+  tasks: { startDate: string | null; dueDate: string | null }[],
+): { start: string | null; end: string | null } {
+  let start: string | null = null;
+  let end: string | null = null;
+  for (const t of tasks) {
+    if (t.startDate && (!start || t.startDate < start)) start = t.startDate;
+    if (t.dueDate && (!end || t.dueDate > end)) end = t.dueDate;
+  }
+  return { start, end };
 }
 
 // ---- task templates (P3-03) ----

@@ -62,14 +62,14 @@ const sub = (id: string, title: string, done: boolean): Subtask => ({ id, title,
 // first 3-4 uppercase alnum chars of the name); `taskSeq` is this demo project's own counter,
 // mirroring `projects.task_seq` — the SAME single-counter-per-project shape as the real atomic
 // allocator, just without genuine concurrency in a single-process demo store.
-interface ProjectMeta { id: string; name: string; status: string; owner: Assignee | null; dueDate: string | null; shortCode: string | null; taskSeq: number }
+interface ProjectMeta { id: string; name: string; status: string; owner: Assignee | null; startDate: string | null; dueDate: string | null; shortCode: string | null; taskSeq: number }
 
 // ---- seed state ----
 const projects: ProjectMeta[] = [
-  { id: "p-web-1", name: "Client site redesign", status: "active", owner: person("u-pm"), dueDate: "2026-07-20", shortCode: "CLIE", taskSeq: 0 },
-  { id: "p-web-2", name: "Mobile app revamp", status: "active", owner: person("u-dev"), dueDate: "2026-08-10", shortCode: "MOBI", taskSeq: 0 },
-  { id: "p-seo-1", name: "SEO audit — Q3", status: "active", owner: person("u-pm"), dueDate: "2026-08-01", shortCode: "SEOA", taskSeq: 0 },
-  { id: "p-int-1", name: "Internal brand refresh", status: "completed", owner: person("demo-hansel"), dueDate: "2026-06-01", shortCode: "INTE", taskSeq: 0 },
+  { id: "p-web-1", name: "Client site redesign", status: "active", owner: person("u-pm"), startDate: "2026-06-15", dueDate: "2026-07-20", shortCode: "CLIE", taskSeq: 0 },
+  { id: "p-web-2", name: "Mobile app revamp", status: "active", owner: person("u-dev"), startDate: "2026-07-01", dueDate: "2026-08-10", shortCode: "MOBI", taskSeq: 0 },
+  { id: "p-seo-1", name: "SEO audit — Q3", status: "active", owner: person("u-pm"), startDate: "2026-07-05", dueDate: "2026-08-01", shortCode: "SEOA", taskSeq: 0 },
+  { id: "p-int-1", name: "Internal brand refresh", status: "completed", owner: person("demo-hansel"), startDate: "2026-05-01", dueDate: "2026-06-01", shortCode: "INTE", taskSeq: 0 },
 ];
 
 // Atomic in the real backend (UPDATE...RETURNING under a row lock); the demo store is single-
@@ -354,7 +354,7 @@ function projectView(p: ProjectMeta): PmProject {
   const pts = tasks.filter((t) => t.projectId === p.id);
   const progress = pts.length ? Math.round(pts.reduce((n, t) => n + t.progress, 0) / pts.length) : 0;
   return {
-    id: p.id, name: p.name, status: p.status, shortCode: p.shortCode, progress, owner: p.owner, dueDate: p.dueDate,
+    id: p.id, name: p.name, status: p.status, shortCode: p.shortCode, progress, owner: p.owner, startDate: p.startDate, dueDate: p.dueDate,
     milestones: milestones.filter((m) => m.projectId === p.id),
     docCount: docs.filter((d) => d.projectId === p.id).length,
     taskCount: pts.length,
@@ -759,7 +759,10 @@ export function pmDemo(method: string, p: string, search: URLSearchParams, body?
     const newId = nextId("p");
     // Create the new project meta — WD-28: the clone gets its OWN fresh derived short_code
     // (never the source's) and its task counter starts at 0, matching the real backend.
-    const newProj: ProjectMeta = { id: newId, name: newName, status: "active", owner: null, dueDate: null, shortCode: deriveDemoShortCode(newName), taskSeq: 0 };
+    // `startDate: null` alongside the already-cleared owner/dueDate: a clone inherits the WORK, not
+    // the schedule. Copying the authored range (P4-H1) would hand the new project a commitment
+    // nobody made, and the slippage signal — authored vs task-derived — would read as instantly late.
+    const newProj: ProjectMeta = { id: newId, name: newName, status: "active", owner: null, startDate: null, dueDate: null, shortCode: deriveDemoShortCode(newName), taskSeq: 0 };
     projects.push(newProj);
     // Copy statuses (per-project registry)
     const origStatuses = statusStore[orig.id];
@@ -822,13 +825,15 @@ export function pmDemo(method: string, p: string, search: URLSearchParams, body?
     let proj = projects.find((x) => x.id === projOne[1]);
     // Auto-vivify a project the PM store hasn't seen (e.g. one created via the
     // base /projects flow) so the workspace always has somewhere to land.
-    if (!proj) { proj = { id: projOne[1], name: "Project", status: "active", owner: null, dueDate: null, shortCode: deriveDemoShortCode("Project"), taskSeq: 0 }; projects.push(proj); }
+    if (!proj) { proj = { id: projOne[1], name: "Project", status: "active", owner: null, startDate: null, dueDate: null, shortCode: deriveDemoShortCode("Project"), taskSeq: 0 }; projects.push(proj); }
     if (m === "PATCH") {
       const b = parse(body);
       if (b.owner !== undefined) proj.owner = (b.owner as Assignee) || null;
       if (typeof b.name === "string") proj.name = b.name;
       if (typeof b.status === "string") proj.status = b.status;
       if (b.dueDate !== undefined) proj.dueDate = (b.dueDate as string) || null;
+      // P4-H1: the authored range's opening end is writable too, matching the backend's PATCH.
+      if (b.startDate !== undefined) proj.startDate = (b.startDate as string) || null;
       return ok({ ok: true });
     }
     return ok(projectView(proj));
@@ -838,7 +843,11 @@ export function pmDemo(method: string, p: string, search: URLSearchParams, body?
   if (p.match(/^\/api\/[^/]+\/pm\/tasks$/) && m === "GET") {
     const assignee = search.get("assignee");
     const rows = assignee === "me" ? tasks.filter((t) => t.assignee?.responsibleId === "demo-hansel") : tasks;
-    return ok(rows);
+    // P4-A1: the real endpoint is paginated — `{ items, nextCursor }`, not a bare array. The fixture
+    // mirrors that so DEMO_MODE exercises the SHAPE the backend actually sends; returning a bare
+    // array here is what let the shape change look harmless to the unit suite and the build gate.
+    // `nextCursor: null` because the demo store is small enough to always be one page.
+    return ok({ items: rows, nextCursor: null });
   }
   if (p.match(/^\/api\/[^/]+\/pm\/tasks$/) && m === "POST") {
     const b = parse(body);

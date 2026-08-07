@@ -136,3 +136,33 @@ describe("PM_RENAMES", () => {
     for (const r of statusRenames) expect(r.idUnchanged).toBeTruthy();
   });
 });
+
+// P4-A1 regression guard. The tenant-wide task list became paginated
+// (`{items,nextCursor}`) while six callers still expected a bare `PmTask[]`:
+// lib/departments.ts (every department board/timeline/projects page), /tasks,
+// /calendar, /projects and lib/queue.ts. `tsc` could not see it (the response was
+// type-asserted), the unit suite could not see it, and the DEMO build could not see
+// it because the fixture still returned an array — the exact frontend-first drift
+// this repo documents. The unwrap must tolerate BOTH shapes, because UI and backend
+// deploy separately and one side is always briefly older during a rollout.
+describe("listAllPmTasks shape tolerance (P4-A1)", () => {
+  const unwrap = (res: unknown): unknown[] => {
+    if (Array.isArray(res)) return res;
+    const items = (res as { items?: unknown })?.items;
+    return Array.isArray(items) ? items : [];
+  };
+
+  it("unwraps the paginated shape the backend now sends", () => {
+    expect(unwrap({ items: [{ id: "a" }, { id: "b" }], nextCursor: "x" })).toHaveLength(2);
+  });
+
+  it("still accepts a bare array from an older backend mid-rollout", () => {
+    expect(unwrap([{ id: "a" }])).toHaveLength(1);
+  });
+
+  it("degrades to empty rather than throwing on a malformed or empty body", () => {
+    for (const bad of [null, undefined, {}, { items: null }, { items: "nope" }, 42]) {
+      expect(unwrap(bad)).toEqual([]);
+    }
+  });
+});
