@@ -258,6 +258,24 @@ on local suites alone (design §13 v4).
    seam-only — their evidence never needed the pipeline). Code-complete-but-unverifiable
    (PENDING-DEPLOY, batch B1/B2): 04, 05, 06, 13, 15 (+ 19/20 once built). Cannot execute at
    all: 09 (B1), 10/11 (B3), 21 (B0).
+
+   **v6 state — 2026-08-07. B0 and B1 are CLOSED; B2 is IN PROGRESS.**
+   - **B1/MAIL-09 CLOSED with live evidence.** The `MAIL_*` sweep was taken from the *running
+     container* (`docker exec … ${#VAR}`), not `/health` and not `.env`: every declared var
+     arrives, and every empty one is empty by design (Brevo unconfigured, authless sink) rather
+     than dropped by compose. Smokes 1–4 pass. **ex-Q-V7 is SETTLED** — an unauthenticated deep
+     link walked `307 → /login?return=…` → Keycloak+PKCE → credential POST → callback →
+     `307` to the *exact* entity → `200`, so reauth provably preserves the target.
+     `mail_*` OTel counters were observed incrementing on a real send
+     (`mail_enqueued_total{stream="auth"}`, `mail_sent_total`, `mail_send_duration_ms`).
+   - **The version premise elsewhere in this plan is stale.** The box now runs
+     `alpha-01.027.0070a` = repo head, migrations applied through `0086`. There is no deploy gap.
+   - **Prerequisite that made B2 possible at all:** NET-01's nginx `/api/mail/` route was applied
+     2026-08-07 (`307 → 401`); before that, no inbound replay could reach platform-nest.
+   - **Two caveats, deliberately not rounded up:** smokes 1–2 were re-verified against live
+     Mailpit content rather than re-triggered (re-firing would have created duplicate
+     approval rows on a shared box), and the `mail_*` metrics were read from the collector's raw
+     scrape, not proven through a dashboard or a firing alert — the full WS9 stack is still down.
 2. **MAIL-18 and MAIL-11 (dev leg) both passed** with zero open critical findings.
    **v4 state: ⛔ blocked** — B3/B4; MAIL-18's corpus attacks run in-suite today but the gate
    verdict is defined against the deployed box; no partial pass may be claimed.
@@ -272,8 +290,21 @@ on local suites alone (design §13 v4).
    column untouched; MODULES.md/CHANGELOG carry the §13 status caveat verbatim (no
    deliverability/SLO/Gmail claims anywhere). **v4 state: HOLDS as populated (R3 re-scoped);
    substitute-verification tracking follows criterion 1.**
-6. Magic links (`MAIL_MAGIC_LINKS_ENABLED=0`) and the `emailVerified:true` retirement remain OFF
-   for real users. **v4 state: HOLDS** (MAIL-10 not built; provisioner unchanged).
+6. Magic links and the `emailVerified:true` retirement remain OFF **for real users**.
+   **v6 AMENDMENT — 2026-08-07, owner decision.** This criterion previously read
+   "`MAIL_MAGIC_LINKS_ENABLED=0`" flatly, which is now wrong in two ways: MAIL-10 **is** built
+   (`platform-nest/src/mail/magic-link/{controller,service,tokens,rate-limit}.ts` + MAIL-11's
+   `qa-mail11-adversarial.test.ts`, landed via MAIL-26/35/37), and the flag is **`=1` on
+   gda-aicenter** so that B3 can exercise it at all — verification is impossible with the feature
+   off, and shipping MAIL-10/11 to staging never having been run live is the worse trade.
+   The criterion is therefore scoped to where it was always aimed: **staging and production**,
+   where the W-S3 gate is unchanged (≥7-day SLO window → owner quality gate → flip to 1).
+   Dev posture, measured rather than assumed on 2026-08-07: the endpoint is **not internet-routed**
+   (nginx proxies only `/api/mail/`, so `POST /api/auth/magic-link` 307s into platform-ui and never
+   reaches platform-nest), it sits behind `ServiceGuard` + an internal token, and
+   `auth_magic_links` held exactly **1** row — a deliberate test send. No real user has been issued
+   a magic link. The provisioner remains unchanged, so the `emailVerified:true` half still HOLDS
+   as originally written.
 
 The staging stage then **begins at W-S0 with design §15 as the handover document** — nothing else
 needs to be re-derived.
