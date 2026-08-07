@@ -171,7 +171,10 @@ describe.skipIf(!TEST_URL)("admin mail log — GET /api/admin/mail/log[/:id]", (
   // metadata makes a future route covered the moment it is declared, rather than the moment
   // somebody remembers this file.
   it("every :id-taking route on this controller agrees on rejecting a malformed id with 400, never 500", async () => {
-    const proto = AdminMailController.prototype as Record<string, unknown>;
+    // Via `unknown`: a class prototype has no string index signature, so TS rejects the direct
+    // assertion as a non-overlapping conversion (TS2352). Reflection is exactly the case the
+    // double assertion exists for — the shape is genuinely opaque here.
+    const proto = AdminMailController.prototype as unknown as Record<string, unknown>;
     const paths = Object.getOwnPropertyNames(proto)
       .filter((k) => k !== "constructor")
       .map((k) => Reflect.getMetadata(PATH_METADATA, proto[k] as object) as unknown)
