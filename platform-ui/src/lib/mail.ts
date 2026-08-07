@@ -148,6 +148,36 @@ export async function getMailLogDetail(userId: string, id: string): Promise<Mail
   }
 }
 
+export interface MailPreview {
+  mailLogId: string;
+  templateKey: string;
+  subject: string;
+  html: string;
+  text: string;
+  /** False once the backend can no longer guarantee the current template matches the one that
+   *  actually sent this row. Today the endpoint always returns true; the field exists so the UI
+   *  reads a flag instead of hardcoding the caveat. */
+  renderedFromCurrentTemplate: boolean;
+}
+
+/** MAIL-38 — the rendered body of an outbound mail, recomposed server-side on demand.
+ *
+ *  `mail_log` has no body column by design, so this is the ONLY way to see what a sent mail said
+ *  from inside the ERP; before it existed the answer lived exclusively in the Mailpit dev sink,
+ *  which does not survive the move to a real relay.
+ *
+ *  Absence-degrades to `null` on 404/405 so the detail page still renders its log + timeline when
+ *  the UI is deployed ahead of the backend — the frontend-first drift this project keeps hitting.
+ *  A 403 deliberately still throws: that is a real authorization refusal, not an absent route. */
+export async function getMailPreview(userId: string, id: string): Promise<MailPreview | null> {
+  try {
+    return await platformFetch<MailPreview>(`/api/admin/mail/log/${id}/preview`, userId);
+  } catch (e) {
+    if (e instanceof PlatformError && (e.status === 404 || e.status === 405)) return null;
+    throw e;
+  }
+}
+
 /** Absence-degrades on 404/405 (MAIL-13's read landed but is unverified per the ticket brief — this
  *  must never surface as a page error). A 403 still throws: that is a real authorization refusal,
  *  not an absent route. */

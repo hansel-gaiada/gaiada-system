@@ -2,7 +2,7 @@ import { redirect, notFound } from "next/navigation";
 import Link from "next/link";
 import { getSessionUserId } from "@/lib/session-server";
 import { getMe, PlatformError } from "@/lib/platform";
-import { getMailLogDetail, getMailLogThread, entityHref, type MailLogRow } from "@/lib/mail";
+import { getMailLogDetail, getMailLogThread, getMailPreview, entityHref, type MailLogRow } from "@/lib/mail";
 import { isUuidShaped } from "@/lib/mailFilters";
 import { MailStatusChip } from "@/components/mail/MailStatusChip";
 import { QuotedMessageBody } from "@/components/mail/QuotedMessageBody";
@@ -107,6 +107,9 @@ export default async function AdminMailDetailPage({ params }: { params: Promise<
   if (!row) notFound();
 
   const thread = await getMailLogThread(userId, id);
+  // MAIL-38. Absence-degrades to null (see getMailPreview) so a UI deployed ahead of its backend
+  // still renders the log and timeline instead of erroring the whole page.
+  const preview = await getMailPreview(userId, id);
   const href = entityHref(row.entity_type, row.entity_id);
 
   return (
@@ -140,6 +143,60 @@ export default async function AdminMailDetailPage({ params }: { params: Promise<
             </p>
           )}
         </Card>
+
+        {/* MAIL-38 — the rendered message. `mail_log` stores `subject` + `payload` and never the
+            composed body, so this is recomposed server-side on demand from the same
+            `renderTemplate()` the sender uses; nothing is cached (design §11).
+
+            The iframe is `sandbox=""` — the maximally restrictive value, which withholds scripts,
+            forms, popups AND same-origin. That is defence in depth rather than the primary control:
+            the templates already `escapeHtml()` every payload value, but `payload` can carry
+            inbound-derived text, and MAIL-18 only proved those bytes inert AS STORED — a guarantee
+            that does not survive composition into HTML on an elevated-only page. If the escaping
+            ever regresses, the sandbox keeps it from becoming script execution in an admin session.
+            `srcDoc` (not `src`) so nothing is fetched over the network to render it. */}
+        {preview ? (
+          <Card title="Rendered message">
+            <p style={{ margin: "0 0 10px", font: "400 12px/1.5 var(--font-body)", color: "var(--ink-subtle)" }}>
+              Subject: {preview.subject || "(no subject)"}
+              {preview.renderedFromCurrentTemplate && (
+                <>
+                  {" · "}
+                  <span title="mail_log stores the template key and payload, not the sent body. This is re-rendered from today's template, so a template changed since this mail was sent will render differently from what the recipient received.">
+                    re-rendered from the current template
+                  </span>
+                </>
+              )}
+            </p>
+            <iframe
+              title="Rendered email body"
+              sandbox=""
+              srcDoc={preview.html}
+              style={{
+                width: "100%",
+                height: 420,
+                border: "1px solid var(--hairline)",
+                background: "var(--surface-card)",
+              }}
+            />
+            <details style={{ marginTop: 10 }}>
+              <summary style={{ font: "500 12px var(--font-body)", color: "var(--ink-muted)", cursor: "pointer" }}>
+                Plain-text alternative
+              </summary>
+              <pre style={{ margin: "8px 0 0", whiteSpace: "pre-wrap", font: "400 12px/1.6 var(--font-body)", color: "var(--ink-muted)" }}>
+                {preview.text}
+              </pre>
+            </details>
+          </Card>
+        ) : (
+          <Card title="Rendered message">
+            <EmptyNote>
+              Preview unavailable — the backend has no renderer for template{" "}
+              <code>{row.template_key}</code>, or this build of the platform predates MAIL-38&apos;s
+              preview endpoint. The log and timeline below are unaffected.
+            </EmptyNote>
+          </Card>
+        )}
 
         <Card title="Event timeline">
           <div style={{ display: "grid", gap: 8 }}>

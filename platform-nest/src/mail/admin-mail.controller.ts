@@ -9,6 +9,7 @@ import { withMailContext } from "../db";
 import { AuthGuard } from "../auth/guards";
 import { isElevated } from "../admin/elevated";
 import { authorizeThreadParent } from "./thread-authz";
+import { renderTemplate, UnknownMailTemplateError } from "./templates";
 import type { StoredAttachment } from "./inbound/intake";
 import type { ThreadMessageView } from "./thread.controller";
 
@@ -123,6 +124,79 @@ export class AdminMailController {
     const row = rows.rows[0];
     if (!row) throw new NotFoundException("mail log entry not found");
     return row;
+  }
+
+  /** MAIL-38 — `GET /api/admin/mail/log/:id/preview` (design §8A): the RENDERED body of an outbound
+   *  mail, recomposed on demand.
+   *
+   *  `mail_log` deliberately has no body column (§6.1) — the body is composed at send time from
+   *  `template_key` + `payload` and never persisted. That is why the admin log could show that a
+   *  mail was sent, to whom, with what status, and still never show what it SAID: the only surface
+   *  that could answer "what did the recipient actually see" was the Mailpit dev sink, which does
+   *  not exist outside dev. The owner hit exactly this on 2026-08-07 ("i can see the list in the
+   *  erp, but cannot click to see the mail content").
+   *
+   *  Re-render, never store. This calls the SAME `renderTemplate()` the sender uses, so the preview
+   *  is the composition path that produced the mail rather than a second, drifting approximation of
+   *  it. Nothing is cached: per design §11's "render on demand, cache nothing", caching would put
+   *  message bodies into the database that §6.1 is deliberately built to keep out — and would make
+   *  every future erasure request have a second place to reach.
+   *
+   *  The honest limit, surfaced in the response rather than left for a viewer to assume: this
+   *  renders from the CURRENT template code, so for a historical row whose template has since
+   *  changed it shows what that payload renders as TODAY, not a byte-exact archive of what was sent
+   *  then. That is the accepted cost of not storing bodies. `renderedFromCurrentTemplate` says so
+   *  explicitly; the UI prints it.
+   *
+   *  Authorization is elevation-only, matching `detail()` rather than `thread()`. That asymmetry is
+   *  deliberate: `thread()` adds the A10 parent-entity gate because it exposes INBOUND,
+   *  unauthenticated, attacker-supplied content on a decision surface. A preview exposes only what
+   *  this platform itself composed and already sent, from a row the same caller can read in full
+   *  via `detail()` — so it inherits `detail()`'s gate, not the stricter one. */
+  @Get("log/:id/preview")
+  async preview(
+    @Req() req: FastifyRequest,
+    @Param("id") id: string,
+  ): Promise<{
+    mailLogId: string;
+    templateKey: string;
+    subject: string;
+    html: string;
+    text: string;
+    renderedFromCurrentTemplate: boolean;
+  }> {
+    if (!isElevated(req)) throw new ForbiddenException("platform admin required");
+    if (!UUID_RE.test(id)) throw new BadRequestException("id must be a valid id");
+
+    const rows = await withMailContext((c) =>
+      c.query<{ template_key: string; payload: Record<string, unknown> | null }>(
+        `SELECT template_key, payload FROM mail_log WHERE id = $1`,
+        [id],
+      ),
+    );
+    const row = rows.rows[0];
+    if (!row) throw new NotFoundException("mail log entry not found");
+
+    // A row can outlive its renderer: `template_key` is free text in the column, and a template
+    // retired between send and view would otherwise surface as a bare 500 through the last-resort
+    // filter — the same failure mode the UUID checks above exist to prevent. Fail as a 404 naming
+    // the key, which is actionable, instead of an opaque server error.
+    try {
+      const rendered = renderTemplate(row.template_key, row.payload ?? {});
+      return {
+        mailLogId: id,
+        templateKey: row.template_key,
+        subject: rendered.subject,
+        html: rendered.html,
+        text: rendered.text,
+        renderedFromCurrentTemplate: true,
+      };
+    } catch (err) {
+      if (err instanceof UnknownMailTemplateError) {
+        throw new NotFoundException(`no renderer for template ${row.template_key}`);
+      }
+      throw err;
+    }
   }
 
   /** MAIL-13 — `GET /api/admin/mail/log/:id/thread` (design §8A): the inbound replies to one outbound
