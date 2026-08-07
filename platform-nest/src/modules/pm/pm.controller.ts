@@ -4,7 +4,7 @@
 // deterministic baseline (progress-from-subtasks + status coupling); the WS8 PM specialist
 // agent replaces the analysis later behind the same contract.
 import {
-  BadRequestException, Body, Controller, Delete, Get, HttpCode, NotFoundException, Param, Patch, Post, Query, Req, Res, UseGuards,
+  BadRequestException, Body, ConflictException, Controller, Delete, Get, HttpCode, NotFoundException, Param, Patch, Post, Query, Req, Res, UseGuards,
 } from "@nestjs/common";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import type { PoolClient } from "pg";
@@ -195,6 +195,163 @@ async function ensureMaterialized(c: PoolClient, tenantId: string, projectId: st
   }
 }
 
+// ---------------- Dependency-chain enforcement (P4-I1/I2/I3, decision 17; migration 0088) ----------------
+// `dependsOn` (task ids), the cycle guard, the reschedule cascade and the Gantt dependency edges
+// were already built — see platform-ui's `lib/pm.ts` — but were advisory only: nothing on the
+// server stopped a blocked task from being started. This section is the enforcement half, kept
+// on the EXISTING `dependsOn` DAG per the plan's own recommendation ("a chain is the linear case
+// of the graph we already have; a second overlapping model needs its own cycle guard and its own
+// bugs") — there is no separate "chain" table.
+//
+// Minimal shape of one open blocker, named so a 409/blocked-task read can tell a caller WHICH
+// task(s) are in the way (decision 17: "name the blocker").
+interface OpenBlocker { id: string; title: string; projectId: string; status: string }
+
+/** The open (non-done) tasks among `dependsOn`, resolved against EACH dependency's OWN project's
+ *  effective statuses (a dependency can live in a different project than the task that depends on
+ *  it) — mirrors platform-ui's `openDependencies()` (lib/pm.ts) exactly, so client and server
+ *  agree on what "open" means. A soft-deleted or cross-tenant (RLS-invisible) dependency task
+ *  simply doesn't come back from the SELECT, so it silently stops counting as a blocker — the
+ *  same "gone == closed" reading `deleteTask` below relies on. */
+async function openDependencies(c: PoolClient, dependsOn: readonly string[]): Promise<OpenBlocker[]> {
+  if (dependsOn.length === 0) return [];
+  const rows = await c.query<{ id: string; title: string; projectId: string; status: string }>(
+    `SELECT id, title, project_id AS "projectId", status FROM pm_tasks WHERE id = ANY($1::uuid[]) AND deleted_at IS NULL`,
+    [dependsOn],
+  );
+  const open: OpenBlocker[] = [];
+  const cache = new Map<string, StatusRow[]>();
+  for (const r of rows.rows) {
+    let statuses = cache.get(r.projectId);
+    if (!statuses) {
+      statuses = await effectiveStatuses(c, r.projectId);
+      cache.set(r.projectId, statuses);
+    }
+    const isDone = statuses.find((s) => s.id === r.status)?.isDone ?? false;
+    if (!isDone) open.push(r);
+  }
+  return open;
+}
+
+// P4-I3 (decision 14, ADOPTED): hard-block is the ONLY enforced mode — there is deliberately no
+// per-project "warn" setting (a warn-only mode is the thing the plan explicitly rejected: "the
+// constraint does not exist"). The per-project knob is a binary override instead — enforcement ON
+// (default) or explicitly turned OFF for this project — and the override is audited for free: it
+// is written through `patchProject`'s existing "manage"-gated, event+activity-logged path below,
+// never a second, unaudited mechanism.
+async function dependencyEnforcementEnabled(c: PoolClient, projectId: string): Promise<boolean> {
+  const r = await c.query<{ enforcement: boolean }>(
+    `SELECT dependency_enforcement AS enforcement FROM pm_project_meta WHERE project_id = $1`,
+    [projectId],
+  );
+  return r.rows[0]?.enforcement ?? true; // no meta row yet -> the default, hard-enforced
+}
+
+/** P4-I1 — applied to the status a `patchTask` write is about to persist, AFTER the existing
+ *  subtask/progress/custom-status coupling above has computed it. FLAG/FUNCTION-DRIVEN — never a
+ *  literal id match (the same discipline `readyStatus`/`intakeStatus` already use, precisely
+ *  because a project is free to flag the literal `todo` status done or blocked).
+ *
+ *  ═══ THE RULE (coordinated with the platform-ui `reachableStatusIds` gate — the two must agree
+ *  byte-for-byte, this is the wording pinned against both sides) ═══
+ *  While a task has open dependencies (`openDeps` non-empty) and enforcement is on for its
+ *  project:
+ *    1. Blocked work cannot START. A transition is rejected (409) into any status that is
+ *       NEITHER `isDone` NOR `isBlocked` and is NOT the project's intake status (`intakeStatus`,
+ *       Backlog) — i.e. the active-work spine (ToDo/Doing/any custom in-between column).
+ *    2. Blocked work CAN be closed. A transition into an `isDone` status is always allowed even
+ *       with open dependencies — closing a blocked task never unblocks anything (only closing
+ *       its BLOCKER does, via `promoteClearedDependents` below), and refusing to let someone
+ *       close work they actually finished is the behaviour that gets a constraint like this
+ *       disabled entirely. The caller is expected to note the override in its own audit trail
+ *       (decision 14's philosophy) — `patchTask` does, via `completedWithOpenDependencies` on its
+ *       `pm.task.updated` event/activity metadata.
+ *    3. The task's OWN current status is ALWAYS reachable (a true no-op with respect to status).
+ *       An unrelated field edit (retitling, adding a subtask, logging time) on an already-blocked
+ *       task must never 400 just because the status happened to carry over unchanged.
+ *  `openDeps` empty, or enforcement off for this project, is a full pass-through (today's fully
+ *  advisory behaviour restored; a project may opt out entirely via P4-I3's override).
+ */
+function enforceStartGate(args: {
+  status: string;
+  priorStatus: string;
+  statuses: readonly StatusRow[];
+  openDeps: readonly OpenBlocker[];
+}): void {
+  const { status, priorStatus, statuses, openDeps } = args;
+  if (openDeps.length === 0) return;
+  if (status === priorStatus) return; // rule 3 — never disable a no-op
+  const row = statuses.find((s) => s.id === status);
+  const reachable = status === intakeStatus(statuses) || !!row?.isBlocked || !!row?.isDone;
+  if (reachable) return;
+  // NOTE — the platform's global `HttpErrorFilter` reshapes EVERY HttpException response down to
+  // `{ error, field? }` (contract parity with the old Fastify core), discarding any other key a
+  // thrown exception's response object carries. So "name the blocker" (decision 17) has to live
+  // IN the message string here — a structured `blockedBy` field would silently vanish before it
+  // ever reached a caller. `blockedBy` is still available, unconditionally, on the task's own GET
+  // (via `openDependencies()`), for a UI that wants to render it ahead of ever attempting the PATCH.
+  const names = openDeps.map((d) => `"${d.title}"`).join(", ");
+  throw new ConflictException(
+    `cannot move to "${status}": blocked by ${openDeps.length} open dependenc${openDeps.length === 1 ? "y" : "ies"} (${names})`,
+  );
+}
+
+/** P4-I2 (decision 13) + decision 17's auto-clear half — given a task CURRENTLY sitting in
+ *  `currentStatus` whose open dependencies just became empty, returns the promotion to apply, or
+ *  `null` if this task isn't in a state that clearing should touch. Two cases promote, both
+ *  landing on the project's `readyStatus` (never the literal "todo" — a project may have
+ *  flagged that id done or blocked, see `readyStatus`'s own header):
+ *   - Backlog (the project's `intakeStatus`) -> ToDo: decision 13's literal ask.
+ *   - a SYSTEM-set Blocked (`blockReason === null`) -> ToDo: decision 17's "clear automatically
+ *     when it closes". A HUMAN-set block (non-null reason — an external wait unrelated to this
+ *     dependency graph) is deliberately NOT touched here; only the system half auto-clears. */
+function clearedStatusIfReady(
+  statuses: readonly StatusRow[],
+  currentStatus: string,
+  currentBlockReason: string | null,
+): { status: string; blockReason: null } | null {
+  const row = statuses.find((s) => s.id === currentStatus);
+  const isSystemBlocked = !!row?.isBlocked && currentBlockReason === null;
+  if (currentStatus === intakeStatus(statuses) || isSystemBlocked) {
+    return { status: readyStatus(statuses), blockReason: null };
+  }
+  return null;
+}
+
+/** P4-I2/decision 17 — after `closedTaskId` stops counting as an open blocker (it just completed,
+ *  or is being deleted — see the two call sites below), re-checks every task that named it in
+ *  `dependsOn`: if it was the LAST open blocker, promotes per `clearedStatusIfReady`. This is a
+ *  write triggered by someone ELSE's action (the plan's own words), so it is never silent — every
+ *  caller emits a `pm.task.dependencyCleared` event (inside the same transaction) and, once that
+ *  transaction commits, a `writeActivity` audit row (P4-I6's ball-holder notification is a
+ *  separate, not-yet-built ticket; this only guarantees the event+audit trail the plan requires).
+ *  Returns the promoted rows for the caller to audit/notify with, mirroring how `patchTask`
+ *  already surfaces its recurrence-spawn result to the code after the transaction commits. */
+async function promoteClearedDependents(
+  c: PoolClient,
+  closedTaskId: string,
+): Promise<{ id: string; projectId: string; fromStatus: string; toStatus: string }[]> {
+  const dependents = await c.query<{ id: string; projectId: string; status: string; blockReason: string | null; dependsOn: string[] }>(
+    `SELECT id, project_id AS "projectId", status, block_reason AS "blockReason", depends_on AS "dependsOn"
+     FROM pm_tasks WHERE $1 = ANY(depends_on) AND deleted_at IS NULL`,
+    [closedTaskId],
+  );
+  const promoted: { id: string; projectId: string; fromStatus: string; toStatus: string }[] = [];
+  for (const d of dependents.rows) {
+    const stillOpen = await openDependencies(c, d.dependsOn);
+    if (stillOpen.length > 0) continue; // another blocker remains — nothing to promote yet
+    const statuses = await effectiveStatuses(c, d.projectId);
+    const cleared = clearedStatusIfReady(statuses, d.status, d.blockReason);
+    if (!cleared) continue;
+    await c.query(
+      `UPDATE pm_tasks SET status = $2, block_reason = NULL, updated_at = now() WHERE id = $1`,
+      [d.id, cleared.status],
+    );
+    promoted.push({ id: d.id, projectId: d.projectId, fromStatus: d.status, toStatus: cleared.status });
+  }
+  return promoted;
+}
+
 // ---------------- Burndown snapshots (P2-07, pm-console-ux-design-spec §4, §0 D-2) ----------------
 // One row per (tenant, project, day) in pm_progress_snapshots (migration 0040). The nightly job
 // (burndown-job.ts) pre-warms every project; the LAZY upsert-on-read below is the correctness
@@ -327,6 +484,7 @@ const TASK_SELECT = `
          t.status, t.priority, t.progress, t.assignee, t.subtasks, t.milestone_id AS "milestoneId",
          to_char(t.start_date, 'YYYY-MM-DD') AS "startDate", to_char(t.due_date, 'YYYY-MM-DD') AS "dueDate",
          t.estimate_minutes AS "estimateMinutes", t.depends_on AS "dependsOn", t.tags, t.custom_fields AS "customFields", t.updated_at AS "updatedAt",
+         t.block_reason AS "blockReason",
          t.recurrence, p.short_code AS "projectShortCode", t.seq,
          CASE WHEN p.short_code IS NOT NULL AND t.seq IS NOT NULL THEN p.short_code || '-' || t.seq ELSE NULL END AS "displayCode",
          COALESCE((SELECT SUM(minutes) FROM time_entries te WHERE te.pm_task_id = t.id AND te.deleted_at IS NULL), 0)::int AS "loggedMinutes",
@@ -343,6 +501,7 @@ interface TaskRow {
   status: string; priority: string; progress: number; assignee: Assignee; subtasks: unknown[];
   milestoneId: string | null; startDate: string | null; dueDate: string | null;
   estimateMinutes: number | null; dependsOn: string[]; tags: string[]; customFields: Record<string, unknown>; updatedAt: string | null; loggedMinutes: number;
+  blockReason: string | null; // P4-I decision 17 — non-null = HUMAN-set Blocked (a required reason); null while isBlocked = SYSTEM-set (an open dependency)
   recurrence: TaskRecurrence | null;
   projectShortCode: string | null; seq: number | null; displayCode: string | null;
   contributors: Contributor[]; // TR-02 — additive; joined off pm_task_assignees, never the blob
@@ -775,6 +934,142 @@ async function resolveDocProjectId(tenantId: string, docId: string): Promise<str
   return projectId;
 }
 
+// ══════════════════════ Task-creation SERVICE (MI-03) ══════════════════════════════════════════
+// Extracted from `PmController.createTask` — SAME code, now callable in-process by another
+// subsystem, so nothing outside this module ever writes `pm_tasks`.
+//
+// WHY: the webdev maintenance-intake triage endpoint (core/webdev-change-requests.controller.ts,
+// route=`pm_task`) has to create a task INSIDE its own already-open `withTenants` transaction,
+// atomically with the change-request UPDATE and its events. Re-implementing the INSERT in core would
+// have duplicated everything the PM module keeps correct here — the effective-status ladder and its
+// is_done/progress coupling, D17 custom-field validation, the cross-project tag check, WD-28's atomic
+// per-project `seq` allocation, TR-02's assignee dual-write + drift log, and the `pm.task.created`
+// event — and every one of those would then drift the first time PM changed one of them.
+//
+// Split in two on purpose so the controller's observable ORDER of failures is unchanged:
+//   `normalizePmTaskInput` is pure input validation (no DB) and runs BEFORE `authorize`, exactly
+//   where it ran before; `createPmTaskInTx` is everything that needs the connection and runs inside
+//   the transaction. Folding both into one function would have turned a 400 on a malformed payload
+//   into a 403 for an unauthorized caller (or vice versa) — a contract change nobody asked for.
+export interface NormalizedPmTaskInput {
+  projectId: string;
+  title: string;
+  description: string;
+  status?: string;
+  priority: string;
+  dueDate: string | null;
+  startDate: string | null;
+  milestoneId: string | null;
+  estimateMinutes: number | null;
+  assignee: Assignee;
+  customFields: Record<string, unknown>;
+  recurrence: TaskRecurrence | null;
+  subtasks: Array<{ id: string; title: string; done: boolean }>;
+  tags: string[];
+}
+
+/** Pure validation/normalization of a create-task payload. Throws BadRequestException. No DB. */
+export function normalizePmTaskInput(b: {
+  projectId?: string; title?: string; status?: string; priority?: string; dueDate?: string; startDate?: string;
+  milestoneId?: string; description?: string; estimateMinutes?: number; assignee?: unknown;
+  customFields?: Record<string, unknown>; recurrence?: unknown; subtasks?: unknown; tags?: unknown;
+}): NormalizedPmTaskInput {
+  const title = b?.title?.trim();
+  if (!b?.projectId || !title) throw new BadRequestException("projectId and title required");
+  if (b.priority && !PRIORITIES.has(b.priority)) throw new BadRequestException("invalid priority");
+  // ---- subtasks (P3-01): string[] -> [{id,title,done:false}] ----
+  if (b.subtasks !== undefined && (!Array.isArray(b.subtasks) || !b.subtasks.every((s) => typeof s === "string"))) {
+    throw new BadRequestException("subtasks must be an array of strings");
+  }
+  const subtasks = Array.isArray(b.subtasks)
+    ? (b.subtasks as string[]).map((t) => t.trim()).filter((t) => t.length > 0).map((t) => ({ id: newId(), title: t.slice(0, 200), done: false }))
+    : [];
+  // ---- tags (P3-01): same cross-project-id validation as patchTask ----
+  if (b.tags !== undefined && !Array.isArray(b.tags)) throw new BadRequestException("tags must be an array of tag ids");
+  const tagIds = Array.isArray(b.tags) ? (b.tags as unknown[]) : [];
+  if (!tagIds.every((tg) => typeof tg === "string" && UUID_RE.test(tg))) throw new BadRequestException("tags must be an array of tag ids");
+  return {
+    projectId: b.projectId,
+    title,
+    description: b.description ?? "",
+    status: typeof b.status === "string" ? b.status : undefined,
+    priority: b.priority ?? "normal",
+    dueDate: b.dueDate || null,
+    startDate: b.startDate || null,
+    milestoneId: b.milestoneId || null,
+    estimateMinutes: b.estimateMinutes ?? null,
+    assignee: validAssignee(b.assignee),
+    customFields: b.customFields ?? {},
+    recurrence: validRecurrence(b.recurrence),
+    subtasks,
+    tags: Array.from(new Set(tagIds as string[])),
+  };
+}
+
+/** Create ONE pm_task on an already-open tenant-scoped connection.
+ *
+ *  MUST be called inside `withTenants([tenantId], ...)`: the seq allocation, the INSERT, the
+ *  assignee dual-write and the `pm.task.created` event all have to commit or roll back together
+ *  (TR-02's rule), and the caller may have further writes of its own in the same transaction.
+ *  Returns the new id plus the resolved status so the caller can report/notify without re-reading. */
+export async function createPmTaskInTx(
+  c: PoolClient,
+  tenantId: string,
+  actorUserId: string | null,
+  n: NormalizedPmTaskInput,
+): Promise<{ id: string; status: string }> {
+  if (!(await projectExists(c, n.projectId))) throw new NotFoundException("project not found");
+  // Validate status against the project's EFFECTIVE status set (synthesized or materialized).
+  // P4-B8b: when not supplied, default to the READY status, not "first by position" — that used
+  // to mean 'todo' and would now mean 'backlog', silently relocating every task created from the
+  // New Task form into a column nobody works from. `readyStatus` keeps today's outcome and stays
+  // correct if the editor removed or reordered our ids.
+  const statuses = await effectiveStatuses(c, n.projectId);
+  let status = readyStatus(statuses);
+  if (n.status !== undefined) {
+    if (!statuses.some((s) => s.id === n.status)) throw new BadRequestException("invalid status");
+    status = n.status;
+  }
+  // Same flag-driven done-coupling as patchTask: resolve via effectiveStatuses' isDone flag,
+  // never the literal id, so a renamed/custom is_done status still forces progress = 100
+  // when a task is created directly into it.
+  const chosenIsDone = statuses.find((s) => s.id === status)?.isDone ?? false;
+  const progress = chosenIsDone ? 100 : 0;
+  const cfError = await validateCustomFields(c, tenantId, "pm_task", n.customFields);
+  if (cfError) throw new BadRequestException(cfError);
+  if (n.tags.length > 0) {
+    const valid = await c.query<{ id: string }>(
+      `SELECT id FROM pm_project_tags WHERE project_id = $1 AND deleted_at IS NULL AND id = ANY($2::uuid[])`,
+      [n.projectId, n.tags],
+    );
+    if (valid.rows.length !== n.tags.length) throw new BadRequestException("one or more tag ids are not in this task's project tag registry");
+  }
+  // WD-28: atomic per-project seq allocation — see project-short-codes.ts / migration 0050
+  // for why this single UPDATE...RETURNING (not a read-then-write) is the concurrency-correct
+  // mechanism. Same connection/transaction as the INSERT below, so the row lock covers both.
+  const seq = await allocateTaskSeq(c, n.projectId);
+  const id = newId();
+  await c.query(
+    `INSERT INTO pm_tasks (id, tenant_id, project_id, title, description, status, priority, progress, assignee, milestone_id, start_date, due_date, estimate_minutes, custom_fields, recurrence, subtasks, tags, seq, origin_site)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::date, $12::date, $13, $14, $15, $16, $17, $18, $19)`,
+    [id, tenantId, n.projectId, n.title, n.description, status, n.priority, progress,
+     n.assignee ? JSON.stringify(n.assignee) : null, n.milestoneId, n.startDate, n.dueDate,
+     n.estimateMinutes, JSON.stringify(n.customFields), n.recurrence ? JSON.stringify(n.recurrence) : null,
+     JSON.stringify(n.subtasks), n.tags, seq, config.originSite],
+  );
+  // TR-02 dual-write: same transaction as the INSERT above, so blob+rows commit or roll back
+  // together — a malformed/unknown person ref fails loudly here and the whole task creation
+  // (including the blob) is rolled back, never a partial write.
+  // P4-B3: statusId is this task's freshly-chosen status — a create-with-assignee is the FIRST
+  // assignment event for this task, so the ledger's very first row for it lands here.
+  await syncTaskAssignees(c, tenantId, id, n.assignee, actorUserId, status);
+  await logAssigneeDriftIfAny(c, tenantId, id);
+  // TR-31: actorId (structured hint -> work-activity-linker.ts rule a "hint:actorId" -> an
+  // EXACT person link; also becomes the outbox consumer's actor_user_id).
+  await emitEvent(c, tenantId, "pm_task", id, "pm.task.created", { title: n.title, projectId: n.projectId, actorId: actorUserId });
+  return { id, status };
+}
+
 @Controller("api")
 @UseGuards(AuthGuard, ModuleEnabledGuard("pm"))
 export class PmController {
@@ -783,12 +1078,25 @@ export class PmController {
   async getProject(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("projectId") projectId: string) {
     await authorize(req.principal, { kind: "pm_project", tenantId, id: projectId }, "read");
     return withTenants([tenantId], async (c) => {
-      const proj = await c.query<{ name: string; status: string; dueDate: string | null; shortCode: string | null }>(
-        `SELECT name, status, to_char(due_date, 'YYYY-MM-DD') AS "dueDate", short_code AS "shortCode" FROM projects WHERE id = $1 AND deleted_at IS NULL`,
+      // P4-H1 — startDate is the base `projects` row's own `start_date` column (already there,
+      // simply never selected here before); dueDate remains the authored range's END. Decision 12
+      // (ADOPTED): this AUTHORED range is never overwritten from task dates — the derived
+      // task-envelope (min task start / max task due) is computed client-side off the tasks this
+      // same project already returns via GET .../tasks (P4-H2, platform-ui); the gap between the
+      // two IS the slippage signal, so the two must stay independently stored and independently
+      // readable, never collapsed into one.
+      const proj = await c.query<{ name: string; status: string; startDate: string | null; dueDate: string | null; shortCode: string | null }>(
+        `SELECT name, status, to_char(start_date, 'YYYY-MM-DD') AS "startDate", to_char(due_date, 'YYYY-MM-DD') AS "dueDate", short_code AS "shortCode"
+         FROM projects WHERE id = $1 AND deleted_at IS NULL`,
         [projectId],
       );
       if (!proj.rows[0]) throw new NotFoundException("project not found");
-      const meta = await c.query<{ owner: Assignee }>(`SELECT owner FROM pm_project_meta WHERE project_id = $1`, [projectId]);
+      // P4-I3/decision 14 — the per-project override: defaults to hard-enforced (true) when no
+      // meta row exists yet, exactly like `dependencyEnforcementEnabled` used by the write path.
+      const meta = await c.query<{ owner: Assignee; dependencyEnforcement: boolean | null }>(
+        `SELECT owner, dependency_enforcement AS "dependencyEnforcement" FROM pm_project_meta WHERE project_id = $1`,
+        [projectId],
+      );
       const milestones = await c.query(
         `SELECT id, project_id AS "projectId", name, to_char(due_date, 'YYYY-MM-DD') AS "dueDate", status
          FROM pm_milestones WHERE project_id = $1 AND deleted_at IS NULL ORDER BY due_date NULLS LAST, created_at`,
@@ -807,7 +1115,9 @@ export class PmController {
         shortCode: proj.rows[0].shortCode,
         progress: Math.round(Number(agg.rows[0].avg_progress ?? 0)),
         owner: meta.rows[0]?.owner ?? null,
+        startDate: proj.rows[0].startDate,
         dueDate: proj.rows[0].dueDate,
+        dependencyEnforcement: meta.rows[0]?.dependencyEnforcement ?? true,
         milestones: milestones.rows,
         statuses,
         docCount: Number(docs.rows[0].n),
@@ -822,24 +1132,38 @@ export class PmController {
     @Req() req: FastifyRequest,
     @Param("tenantId") tenantId: string,
     @Param("projectId") projectId: string,
-    @Body() b: { owner?: unknown; status?: string; dueDate?: string | null },
+    @Body() b: { owner?: unknown; status?: string; startDate?: string | null; dueDate?: string | null; dependencyEnforcement?: boolean },
   ) {
     await authorize(req.principal, { kind: "pm_project", tenantId, id: projectId }, "manage");
     await withTenants([tenantId], async (c) => {
       if (!(await projectExists(c, projectId))) throw new NotFoundException("project not found");
-      if (b?.status !== undefined || b?.dueDate !== undefined) {
+      // P4-H1 — startDate/dueDate together are the AUTHORED range (decision 12); both are plain
+      // COALESCE updates on the base row, same shape as the pre-existing dueDate/status pair.
+      if (b?.status !== undefined || b?.startDate !== undefined || b?.dueDate !== undefined) {
         await c.query(
-          `UPDATE projects SET status = COALESCE($2, status), due_date = COALESCE($3::date, due_date), updated_at = now()
+          `UPDATE projects SET status = COALESCE($2, status), start_date = COALESCE($3::date, start_date), due_date = COALESCE($4::date, due_date), updated_at = now()
            WHERE id = $1 AND deleted_at IS NULL`,
-          [projectId, b?.status ?? null, b?.dueDate ?? null],
+          [projectId, b?.status ?? null, b?.startDate ?? null, b?.dueDate ?? null],
         );
       }
-      if (Object.prototype.hasOwnProperty.call(b ?? {}, "owner")) {
-        const owner = validAssignee(b.owner);
+      const hasOwnerField = Object.prototype.hasOwnProperty.call(b ?? {}, "owner");
+      const hasEnforcementField = Object.prototype.hasOwnProperty.call(b ?? {}, "dependencyEnforcement");
+      if (hasOwnerField || hasEnforcementField) {
+        const owner = hasOwnerField ? validAssignee(b.owner) : null;
+        const enforcement = hasEnforcementField ? !!b.dependencyEnforcement : true; // true = the column DEFAULT on a fresh row
+        // P4-I3/decision 14 — this IS the "explicit, audited" override: gated on "manage" above
+        // (same authz as every other project-setting write here) and this whole call already
+        // emits `pm.project.updated` + `writeActivity` below, exactly like a status/dueDate edit.
+        // No separate, unaudited toggle exists. CASE-guarded per field so a patch touching ONLY
+        // one of {owner, dependencyEnforcement} never clobbers the other back to null/default.
         await c.query(
-          `INSERT INTO pm_project_meta (tenant_id, project_id, owner, origin_site) VALUES ($1, $2, $3, $4)
-           ON CONFLICT (tenant_id, project_id) DO UPDATE SET owner = $3, updated_at = now()`,
-          [tenantId, projectId, owner ? JSON.stringify(owner) : null, config.originSite],
+          `INSERT INTO pm_project_meta (tenant_id, project_id, owner, dependency_enforcement, origin_site)
+           VALUES ($1, $2, $3, $4, $5)
+           ON CONFLICT (tenant_id, project_id) DO UPDATE SET
+             owner = CASE WHEN $6 THEN $3 ELSE pm_project_meta.owner END,
+             dependency_enforcement = CASE WHEN $7 THEN $4 ELSE pm_project_meta.dependency_enforcement END,
+             updated_at = now()`,
+          [tenantId, projectId, owner ? JSON.stringify(owner) : null, enforcement, config.originSite, hasOwnerField, hasEnforcementField],
         );
       }
       // TR-31: actorId is a structured link hint (work-activity-linker.ts rule a, hint:actorId)
@@ -877,9 +1201,19 @@ export class PmController {
   @Get(":tenantId/pm/tasks/:taskId")
   async getTask(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("taskId") taskId: string) {
     await authorize(req.principal, { kind: "pm_task", tenantId, id: taskId }, "read");
-    const task = await withTenants([tenantId], (c) => fetchTask(c, taskId));
+    const { task, blockedBy } = await withTenants([tenantId], async (c) => {
+      const t = await fetchTask(c, taskId);
+      if (!t) return { task: undefined, blockedBy: [] as { id: string; title: string }[] };
+      // P4-I decision 17 — "name the blocker": computed live off `openDependencies()` on every
+      // read, never a stored string (a stored list would drift the moment a blocker closes and
+      // nobody re-read this task). Only on the single-task GET, not the list endpoints — the
+      // per-row per-project status lookup inside `openDependencies` is cheap for one task, not for
+      // a 500-row list.
+      const open = await openDependencies(c, t.dependsOn);
+      return { task: t, blockedBy: open.map((d) => ({ id: d.id, title: d.title })) };
+    });
     if (!task) throw new NotFoundException("task not found");
-    return task;
+    return { ...task, blockedBy };
   }
 
   // P4-B4 — the full ball/assignment-history chain for one task (migration 0087). Read-gated
@@ -924,76 +1258,13 @@ export class PmController {
     @Param("tenantId") tenantId: string,
     @Body() b: { projectId?: string; title?: string; status?: string; priority?: string; dueDate?: string; startDate?: string; milestoneId?: string; description?: string; estimateMinutes?: number; assignee?: unknown; customFields?: Record<string, unknown>; recurrence?: unknown; subtasks?: unknown; tags?: unknown },
   ) {
-    const title = b?.title?.trim();
-    if (!b?.projectId || !title) throw new BadRequestException("projectId and title required");
-    if (b.priority && !PRIORITIES.has(b.priority)) throw new BadRequestException("invalid priority");
-    // ---- subtasks (P3-01): string[] -> [{id,title,done:false}] ----
-    if (b.subtasks !== undefined && (!Array.isArray(b.subtasks) || !b.subtasks.every((s) => typeof s === "string"))) {
-      throw new BadRequestException("subtasks must be an array of strings");
-    }
-    const subtasks = Array.isArray(b.subtasks)
-      ? (b.subtasks as string[]).map((t) => t.trim()).filter((t) => t.length > 0).map((t) => ({ id: newId(), title: t.slice(0, 200), done: false }))
-      : [];
-    // ---- tags (P3-01): same cross-project-id validation as patchTask ----
-    if (b.tags !== undefined && !Array.isArray(b.tags)) throw new BadRequestException("tags must be an array of tag ids");
-    const tagIds = Array.isArray(b.tags) ? (b.tags as unknown[]) : [];
-    if (!tagIds.every((tg) => typeof tg === "string" && UUID_RE.test(tg))) throw new BadRequestException("tags must be an array of tag ids");
-    const uniqTags = Array.from(new Set(tagIds as string[]));
-    await authorize(req.principal, { kind: "pm_task", tenantId, projectId: b.projectId }, "create");
-    const assignee = validAssignee(b.assignee);
-    const customFields = b.customFields ?? {};
-    const recurrence = validRecurrence(b.recurrence);
-    const id = newId();
-    await withTenants([tenantId], async (c) => {
-      if (!(await projectExists(c, b.projectId!))) throw new NotFoundException("project not found");
-      // Validate status against the project's EFFECTIVE status set (synthesized or materialized).
-      // P4-B8b: when not supplied, default to the READY status, not "first by position" — that used
-      // to mean 'todo' and would now mean 'backlog', silently relocating every task created from the
-      // New Task form into a column nobody works from. `readyStatus` keeps today's outcome and stays
-      // correct if the editor removed or reordered our ids.
-      const statuses = await effectiveStatuses(c, b.projectId!);
-      let status = readyStatus(statuses);
-      if (typeof b.status === "string") {
-        if (!statuses.some((s) => s.id === b.status)) throw new BadRequestException("invalid status");
-        status = b.status;
-      }
-      // Same flag-driven done-coupling as patchTask: resolve via effectiveStatuses' isDone flag,
-      // never the literal id, so a renamed/custom is_done status still forces progress = 100
-      // when a task is created directly into it.
-      const chosenIsDone = statuses.find((s) => s.id === status)?.isDone ?? false;
-      const progress = chosenIsDone ? 100 : 0;
-      const cfError = await validateCustomFields(c, tenantId, "pm_task", customFields);
-      if (cfError) throw new BadRequestException(cfError);
-      if (uniqTags.length > 0) {
-        const valid = await c.query<{ id: string }>(
-          `SELECT id FROM pm_project_tags WHERE project_id = $1 AND deleted_at IS NULL AND id = ANY($2::uuid[])`,
-          [b.projectId, uniqTags],
-        );
-        if (valid.rows.length !== uniqTags.length) throw new BadRequestException("one or more tag ids are not in this task's project tag registry");
-      }
-      // WD-28: atomic per-project seq allocation — see project-short-codes.ts / migration 0050
-      // for why this single UPDATE...RETURNING (not a read-then-write) is the concurrency-correct
-      // mechanism. Same connection/transaction as the INSERT below, so the row lock covers both.
-      const seq = await allocateTaskSeq(c, b.projectId!);
-      await c.query(
-        `INSERT INTO pm_tasks (id, tenant_id, project_id, title, description, status, priority, progress, assignee, milestone_id, start_date, due_date, estimate_minutes, custom_fields, recurrence, subtasks, tags, seq, origin_site)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::date, $12::date, $13, $14, $15, $16, $17, $18, $19)`,
-        [id, tenantId, b.projectId, title, b.description ?? "", status, b.priority ?? "normal", progress,
-         assignee ? JSON.stringify(assignee) : null, b.milestoneId || null, b.startDate || null, b.dueDate || null,
-         b.estimateMinutes ?? null, JSON.stringify(customFields), recurrence ? JSON.stringify(recurrence) : null,
-         JSON.stringify(subtasks), uniqTags, seq, config.originSite],
-      );
-      // TR-02 dual-write: same transaction as the INSERT above, so blob+rows commit or roll back
-      // together — a malformed/unknown person ref fails loudly here and the whole task creation
-      // (including the blob) is rolled back, never a partial write.
-      // P4-B3: statusId is this task's freshly-chosen status — a create-with-assignee is the FIRST
-      // assignment event for this task, so the ledger's very first row for it lands here.
-      await syncTaskAssignees(c, tenantId, id, assignee, req.principal.userId, status);
-      await logAssigneeDriftIfAny(c, tenantId, id);
-      // TR-31: actorId (structured hint -> work-activity-linker.ts rule a "hint:actorId" -> an
-      // EXACT person link; also becomes the outbox consumer's actor_user_id).
-      await emitEvent(c, tenantId, "pm_task", id, "pm.task.created", { title, projectId: b.projectId, actorId: req.principal.userId });
-    });
+    // MI-03: input validation, then authz, then the DB work — the SAME three steps in the SAME
+    // order as before, now expressed through the two exported service functions above so that the
+    // webdev triage endpoint (core) creates tasks through this exact code instead of its own INSERT.
+    const n = normalizePmTaskInput(b ?? {});
+    const { title, assignee } = n;
+    await authorize(req.principal, { kind: "pm_task", tenantId, projectId: n.projectId }, "create");
+    const { id } = await withTenants([tenantId], (c) => createPmTaskInTx(c, tenantId, req.principal.userId, n));
     if (assignee?.responsibleId) {
       await notify(tenantId, assignee.responsibleId, req.principal.userId, "assignment", {
         title: "You were assigned a task", severity: "info", entityType: "task", entityId: id, href: `/tasks/${id}`,
@@ -1019,7 +1290,7 @@ export class PmController {
     // rather than mutating outer `let`s — read via the awaited return value
     // instead (TS's closure-narrowing can't soundly track outer mutations).
     let notifyResponsible: string | null = null;
-    const { spawned, statusChanged, newStatusLabel, taskTitle } = await withTenants([tenantId], async (c) => {
+    const { spawned, statusChanged, newStatusLabel, taskTitle, clearedDependents } = await withTenants([tenantId], async (c) => {
       let spawnedResult: { id: string; dueDate: string } | null = null;
       // Row-lock FIRST (before reading the "old" status the done-transition/spawn
       // guard depends on): a second concurrent PATCH completing the same task blocks
@@ -1060,6 +1331,13 @@ export class PmController {
         if (!dependsOn.includes(b.addDependency)) dependsOn.push(b.addDependency);
       }
       if (typeof b.removeDependency === "string") dependsOn = dependsOn.filter((d) => d !== b.removeDependency);
+
+      // ---- dependency-chain enforcement inputs (P4-I1/I2/I3) — computed off the FINAL
+      // dependsOn list above (any add/removeDependency already applied), so a patch that edits
+      // the graph AND asks for a status change in the same call is judged against the graph it
+      // is about to leave the task with, not the stale pre-patch one.
+      const openDeps = await openDependencies(c, dependsOn);
+      const enforcementOn = await dependencyEnforcementEnabled(c, task.projectId);
 
       // ---- contributors (TR-02, §3.1): zero or more PERSONS, never outcome-credited. Same
       // op-style as addSubtask/addDependency. Writes pm_task_assignees directly (contributors
@@ -1128,14 +1406,60 @@ export class PmController {
       const statuses = await effectiveStatuses(c, task.projectId);
       const byStatusId = new Map(statuses.map((s) => [s.id, s]));
       const doneStatus = [...statuses].sort((a, z) => a.position - z.position).find((s) => s.isDone);
+
+      // P4-I2/decision 17 — SELF-triggered clearing half: this same patch may have just removed
+      // the LAST open blocker via `removeDependency` above. Promote right here as the DEFAULT
+      // status (an explicit `b.status` below still wins) — the cross-task half, where some OTHER
+      // task's completion clears THIS one, is `promoteClearedDependents` further down.
+      let blockReason = task.blockReason;
+      if (openDeps.length === 0) {
+        const cleared = clearedStatusIfReady(statuses, status, blockReason);
+        if (cleared) { status = cleared.status; blockReason = null; }
+      }
+
       if (typeof b.progress === "number") progress = Math.max(0, Math.min(100, Math.round(b.progress)));
       else if (subtasksChanged && subtasks.length > 0) progress = Math.round((subtasks.filter((s) => s.done).length / subtasks.length) * 100);
       if (typeof b.status === "string") {
         if (!byStatusId.has(b.status)) throw new BadRequestException("invalid status");
         status = b.status;
+        // decision 17 — an EXPLICIT transition re-derives the attribution from scratch (never
+        // carries a stale reason forward across an unrelated status hop):
+        //  - moving OFF Blocked entirely: no reason applies any more.
+        //  - moving INTO Blocked WITH open deps: SYSTEM attribution — block_reason is FORCED
+        //    NULL regardless of what the body sent; "which blocker" is served live off
+        //    `openDependencies()` (GET's `blockedBy`), never a stored string, so it can't go
+        //    stale.
+        //  - moving INTO Blocked with NO open deps: an OPTIONAL human reason (e.g. "waiting on
+        //    the client") is stored verbatim when supplied. Deliberately NOT required — an
+        //    `isBlocked`-flagged status is also plain product vocabulary for "blocked" outside
+        //    this ticket's dependency-chain feature (a review gate, a WIP-limit column, etc.),
+        //    and retrofitting a mandatory-reason gate onto every such status would 400 on
+        //    perfectly ordinary board moves that have nothing to do with `dependsOn`. A present
+        //    reason is an unambiguous HUMAN signal either way; its absence here is simply "no
+        //    reason was given", not proof of anything either way — same honesty as leaving a
+        //    field blank anywhere else in this file.
+        const targetRow = byStatusId.get(status);
+        if (!targetRow?.isBlocked) {
+          blockReason = null;
+        } else if (openDeps.length > 0) {
+          blockReason = null;
+        } else {
+          const reason = typeof b.blockReason === "string" ? b.blockReason.trim() : "";
+          blockReason = reason ? reason.slice(0, 500) : null;
+        }
       }
       if (byStatusId.get(status)?.isDone) progress = 100;
       else if (progress >= 100 && doneStatus) status = doneStatus.id;
+
+      // P4-I1 — the hard gate (throws 409 on a real violation; see enforceStartGate's header for
+      // the exact rule, coordinated with platform-ui's `reachableStatusIds`). P4-I3/decision 14 —
+      // a project may explicitly turn enforcement OFF (`dependencyEnforcementEnabled`), in which
+      // case this is skipped and behaviour is fully advisory, exactly as it was before this ticket.
+      if (enforcementOn) enforceStartGate({ status, priorStatus: task.status, statuses, openDeps });
+      // decision 14 — rule 2 ALLOWS closing a blocked task despite open dependencies; that's not a
+      // silent success, it's an audited override. Carried through to the emitted event/activity
+      // below rather than a separate write path.
+      const completedWithOpenDependencies = openDeps.length > 0 && !!byStatusId.get(status)?.isDone && !(byStatusId.get(task.status)?.isDone ?? false);
 
       // P2-06: the recurrence spawn trigger is the not-done→done EDGE, resolved
       // against the project's is_done FLAGS (never a literal id) — computed from
@@ -1179,6 +1503,7 @@ export class PmController {
            tags = $18,
            custom_fields = $19,
            recurrence = CASE WHEN $20 THEN $21 ELSE recurrence END,
+           block_reason = $22,
            updated_at = now()
          WHERE id = $1 AND deleted_at IS NULL`,
         [
@@ -1198,6 +1523,7 @@ export class PmController {
           tags,
           JSON.stringify(customFields),
           hasRecurrenceField, recurrence ? JSON.stringify(recurrence) : null,
+          blockReason,
         ],
       );
       // TR-02 dual-write: only when THIS patch actually touched the assignee (managing) — the
@@ -1220,7 +1546,23 @@ export class PmController {
       // EXACT person link (work-activity-linker.ts rule a).
       await emitEvent(c, tenantId, "pm_task", taskId, "pm.task.updated", {
         status, statusChanged: status !== task.status, wasDone, isDoneNow, actorId: req.principal.userId,
+        // decision 14 — an audited record of rule 2's override (closing a blocked task): absent
+        // (not merely `false`) on every ordinary write, so it never adds noise to ordinary
+        // event/activity payloads.
+        ...(completedWithOpenDependencies ? { completedWithOpenDependencies: true, openBlockerIds: openDeps.map((d) => d.id) } : {}),
       });
+
+      // ---- P4-I2/decision 17, CROSS-task clearing half: this task just closed (completingNow)
+      // -> re-check every OTHER task that named it as a blocker; the self-triggered half (THIS
+      // task's own deps clearing via removeDependency) already ran above. Every promotion gets its
+      // own event here (inside the same transaction) and a writeActivity audit row after commit —
+      // "a write triggered by someone else's action" per the plan, never a silent update.
+      const clearedDependents = completingNow ? await promoteClearedDependents(c, taskId) : [];
+      for (const dep of clearedDependents) {
+        await emitEvent(c, tenantId, "pm_task", dep.id, "pm.task.dependencyCleared", {
+          fromStatus: dep.fromStatus, toStatus: dep.toStatus, closedTaskId: taskId, actorExternal: "pm:dependency-engine",
+        });
+      }
 
       // ---- recurring-task spawn (P2-06, design spec §8) ----
       // Fires ONLY on the not-done→done edge, so re-PATCHing an already-done task
@@ -1279,6 +1621,7 @@ export class PmController {
         statusChanged: status !== task.status,
         newStatusLabel: byStatusId.get(status)?.label ?? status,
         taskTitle: finalTitle,
+        clearedDependents,
       };
     });
     // P3-08 fan-out dedup: assignee (this patch's reassignment) and followers (on a real
@@ -1307,6 +1650,14 @@ export class PmController {
     }
     await writeActivity(tenantId, req.principal.userId, "updated", "pm_task", taskId, {});
     if (spawned) await writeActivity(tenantId, req.principal.userId, "created", "pm_task", spawned.id, { recurrenceParentId: taskId });
+    // P4-I2/decision 17 audit trail — actorId NULL (system-derived, same convention as the
+    // recurrence-spawn audit above): the promoted task's own owner didn't act, `taskId`'s
+    // completion did.
+    for (const dep of clearedDependents) {
+      await writeActivity(tenantId, null, "auto_promoted", "pm_task", dep.id, {
+        fromStatus: dep.fromStatus, toStatus: dep.toStatus, closedTaskId: taskId, closedByUserId: req.principal.userId,
+      });
+    }
     return { ok: true, spawned };
   }
 
@@ -1314,15 +1665,34 @@ export class PmController {
   @HttpCode(200)
   async deleteTask(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("taskId") taskId: string) {
     await authorize(req.principal, { kind: "pm_task", tenantId, id: taskId }, "delete");
-    await withTenants([tenantId], async (c) => {
+    const clearedDependents = await withTenants([tenantId], async (c) => {
       const res = await c.query(`UPDATE pm_tasks SET deleted_at = now() WHERE id = $1 AND deleted_at IS NULL`, [taskId]);
       if (res.rowCount === 0) throw new NotFoundException("task not found");
+      // P4-I2/decision 17 — a deleted blocker counts as "closed" for every task that named it:
+      // MUST run BEFORE the array_remove cleanup below, not after — `openDependencies()` already
+      // excludes `deleted_at IS NOT NULL` rows, so as long as dependents' `depends_on` arrays
+      // still literally contain `taskId` at the moment this runs, the just-soft-deleted row
+      // naturally reads as "no longer open" with zero special-casing. Running it AFTER the
+      // array_remove would strip `taskId` from those arrays first, and this query's own
+      // `$1 = ANY(depends_on)` lookup would then find no dependents to check at all.
+      const cleared = await promoteClearedDependents(c, taskId);
       // Drop this task from any other task's dependency list.
       await c.query(`UPDATE pm_tasks SET depends_on = array_remove(depends_on, $1) WHERE $1 = ANY(depends_on)`, [taskId]);
+      for (const dep of cleared) {
+        await emitEvent(c, tenantId, "pm_task", dep.id, "pm.task.dependencyCleared", {
+          fromStatus: dep.fromStatus, toStatus: dep.toStatus, closedTaskId: taskId, reason: "blocker_deleted", actorExternal: "pm:dependency-engine",
+        });
+      }
       // TR-31: actorId -> work_activity.actor_user_id + an EXACT person link.
       await emitEvent(c, tenantId, "pm_task", taskId, "pm.task.deleted", { actorId: req.principal.userId });
+      return cleared;
     });
     await writeActivity(tenantId, req.principal.userId, "deleted", "pm_task", taskId);
+    for (const dep of clearedDependents) {
+      await writeActivity(tenantId, null, "auto_promoted", "pm_task", dep.id, {
+        fromStatus: dep.fromStatus, toStatus: dep.toStatus, closedTaskId: taskId, reason: "blocker_deleted", closedByUserId: req.principal.userId,
+      });
+    }
     return { ok: true };
   }
 
@@ -2231,7 +2601,10 @@ export class PmController {
       if (!s) throw new NotFoundException("suggestion not found");
       if (s.status !== "pending") throw new BadRequestException("suggestion already resolved");
       // Apply the proposal, honouring the same FLAG-DRIVEN done↔100 coupling as PATCH.
-      const task = await c.query<{ project_id: string }>(`SELECT project_id FROM pm_tasks WHERE id = $1 AND deleted_at IS NULL`, [s.task_id]);
+      const task = await c.query<{ project_id: string; status: string; dependsOn: string[] }>(
+        `SELECT project_id, status, depends_on AS "dependsOn" FROM pm_tasks WHERE id = $1 AND deleted_at IS NULL`,
+        [s.task_id],
+      );
       if (!task.rows[0]) throw new NotFoundException("task not found");
       const statuses = await effectiveStatuses(c, task.rows[0].project_id);
       const doneStatus = [...statuses].sort((a, z) => a.position - z.position).find((x) => x.isDone);
@@ -2245,8 +2618,16 @@ export class PmController {
       } else {
         const proposed = statuses.find((x) => x.id === s.proposed);
         if (!proposed) throw new BadRequestException("suggestion has invalid status");
+        // P4-I1 — the AI Tracker is a server-side write path too (confirming its suggestion moves
+        // the task's status exactly like a PATCH would), so it is gated identically. Without this,
+        // "confirm suggestion" would be the one status-setting endpoint in the module that bypasses
+        // I1 entirely.
+        if (await dependencyEnforcementEnabled(c, task.rows[0].project_id)) {
+          const openDeps = await openDependencies(c, task.rows[0].dependsOn ?? []);
+          enforceStartGate({ status: s.proposed, priorStatus: task.rows[0].status, statuses, openDeps });
+        }
         await c.query(
-          `UPDATE pm_tasks SET status = $2, progress = CASE WHEN $3 THEN 100 ELSE progress END, updated_at = now() WHERE id = $1`,
+          `UPDATE pm_tasks SET status = $2, progress = CASE WHEN $3 THEN 100 ELSE progress END, block_reason = NULL, updated_at = now() WHERE id = $1`,
           [s.task_id, s.proposed, proposed.isDone],
         );
       }

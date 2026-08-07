@@ -1508,4 +1508,216 @@ describe.skipIf(!TEST_URL)("PM subsystem (§5)", () => {
       expect(forged.statusCode).toBe(404); // RLS scopes pm_docs to rivalTenant -> invisible
     });
   });
+
+  // ---------------- P4-H1 (project time range) + P4-I1/I2/I3 (enforced chained tasks) ----------------
+  // Plan: docs/superpowers/plans/2026-08-04-pm-repsona-parity-phase4-plan.md, workstreams H + I.
+  // Each test uses its OWN project (freshProject), same discipline as "custom statuses" above, so
+  // the default 5-status ladder (backlog/todo/in_progress/blocked/done) is never bled across cases
+  // by a materialized custom registry.
+  describe("P4-H1 project time range + P4-I1/I2/I3 dependency-chain enforcement", () => {
+    const freshProject = (name: string) => createProject(tenant, name, manager);
+    const newTask = async (pid: string, body: Record<string, unknown> = {}) =>
+      (await app.inject({ method: "POST", url: `/api/${tenant}/pm/tasks`, headers: hdr(), payload: { projectId: pid, title: "T", ...body } }).then((r) => r.json())).id as string;
+    const patchTask = (id: string, body: Record<string, unknown>, headers = hdr()) =>
+      app.inject({ method: "PATCH", url: `/api/${tenant}/pm/tasks/${id}`, headers, payload: body });
+    const getTask = async (id: string) =>
+      (await app.inject({ method: "GET", url: `/api/${tenant}/pm/tasks/${id}`, headers: hdr() })).json() as {
+        status: string; blockReason: string | null; blockedBy: Array<{ id: string; title: string }>;
+      };
+    const getProject = async (pid: string) =>
+      (await app.inject({ method: "GET", url: `/api/${tenant}/pm/projects/${pid}`, headers: hdr() })).json() as {
+        startDate: string | null; dueDate: string | null; dependencyEnforcement: boolean;
+      };
+    const patchProject = (pid: string, body: Record<string, unknown>) =>
+      app.inject({ method: "PATCH", url: `/api/${tenant}/pm/projects/${pid}`, headers: hdr(), payload: body });
+
+    it("P4-H1: exposes + PATCHes the AUTHORED startDate/dueDate range, independent of task dates (decision 12)", async () => {
+      const pid = await freshProject("H1 range");
+      let proj = await getProject(pid);
+      expect(proj.startDate).toBeNull();
+      expect(proj.dueDate).toBeNull();
+      expect(proj.dependencyEnforcement).toBe(true); // hard-enforced by default (decision 14)
+
+      const r = await patchProject(pid, { startDate: "2026-09-01", dueDate: "2026-12-01" });
+      expect(r.statusCode).toBe(200);
+      proj = await getProject(pid);
+      expect(proj.startDate).toBe("2026-09-01");
+      expect(proj.dueDate).toBe("2026-12-01");
+
+      // a task with WILDLY different dates never overwrites the authored range — the gap between
+      // them is the slippage signal, not something the system silently closes.
+      await newTask(pid, { startDate: "2020-01-01", dueDate: "2020-01-02" });
+      proj = await getProject(pid);
+      expect(proj.startDate).toBe("2026-09-01");
+      expect(proj.dueDate).toBe("2026-12-01");
+    });
+
+    it("P4-I1: hard-rejects an explicit transition into ToDo/Doing while a dependency is open, naming the blocker", async () => {
+      const pid = await freshProject("I1 gate");
+      const blocker = await newTask(pid, { title: "Blocker" });
+      const dependent = await newTask(pid, { title: "Dependent", status: "backlog" });
+      await patchTask(dependent, { addDependency: blocker });
+
+      const intoToDo = await patchTask(dependent, { status: "todo" });
+      expect(intoToDo.statusCode).toBe(409);
+      // "name the blocker" (decision 17) — the platform's global HttpErrorFilter collapses every
+      // HttpException down to `{ error, field? }`, so the blocker's title travels in the message
+      // text; the structured form is `blockedBy` on the task's own GET (checked below).
+      expect((intoToDo.json() as { error: string }).error).toContain("Blocker");
+      expect((await getTask(dependent)).blockedBy.map((d) => d.id)).toEqual([blocker]);
+
+      const intoDoing = await patchTask(dependent, { status: "in_progress" });
+      expect(intoDoing.statusCode).toBe(409);
+
+      // rule 3 — the task's own CURRENT status is always reachable; an unrelated edit never 409s
+      const noop = await patchTask(dependent, { title: "Dependent (renamed)" });
+      expect(noop.statusCode).toBe(200);
+      expect((await getTask(dependent)).status).toBe("backlog"); // unchanged by the rejected attempts
+    });
+
+    it("P4-I1 rule 2: closing a blocked task IS allowed despite an open dependency (an audited override, not a bypass)", async () => {
+      const pid = await freshProject("I1 close override");
+      const blocker = await newTask(pid, { title: "Blocker" });
+      const dependent = await newTask(pid, { title: "Dependent" }); // default status: todo (ready)
+      await patchTask(dependent, { addDependency: blocker });
+
+      const close = await patchTask(dependent, { status: "done" });
+      expect(close.statusCode).toBe(200);
+      expect((await getTask(dependent)).status).toBe("done");
+    });
+
+    it("P4-I1: moving into Backlog while blocked is always allowed (the intake status is exempt)", async () => {
+      const pid = await freshProject("I1 backlog exempt");
+      const blocker = await newTask(pid, { title: "Blocker" });
+      const dependent = await newTask(pid, { title: "Dependent" });
+      await patchTask(dependent, { addDependency: blocker });
+      const toBacklog = await patchTask(dependent, { status: "backlog" });
+      expect(toBacklog.statusCode).toBe(200);
+    });
+
+    it("P4-I2/decision13: the last blocker completing auto-promotes a Backlog dependent to ToDo", async () => {
+      const pid = await freshProject("I2 promote cross-task");
+      const blocker = await newTask(pid, { title: "Blocker" });
+      const dependent = await newTask(pid, { title: "Dependent" });
+      await patchTask(dependent, { addDependency: blocker });
+      await patchTask(dependent, { status: "backlog" }); // exempt even while blocked
+      expect((await getTask(dependent)).status).toBe("backlog");
+
+      const complete = await patchTask(blocker, { status: "done" });
+      expect(complete.statusCode).toBe(200);
+      expect((await getTask(dependent)).status).toBe("todo"); // readyStatus, never the literal "todo" by luck
+    });
+
+    it("P4-I2/decision13: removing the LAST dependency (self-triggered, no other task involved) also promotes Backlog -> ToDo", async () => {
+      const pid = await freshProject("I2 promote self");
+      const blocker = await newTask(pid, { title: "Blocker" });
+      const dependent = await newTask(pid, { title: "Dependent" });
+      await patchTask(dependent, { addDependency: blocker });
+      await patchTask(dependent, { status: "backlog" });
+
+      const removed = await patchTask(dependent, { removeDependency: blocker });
+      expect(removed.statusCode).toBe(200);
+      expect((await getTask(dependent)).status).toBe("todo");
+    });
+
+    it("decision 17: an open dependency forces SYSTEM attribution (block_reason null, blocker named); a human reason is stored once no dependency is open, and survives an unrelated edit", async () => {
+      const pid = await freshProject("decision17 attribution");
+      const blocker = await newTask(pid, { title: "Blocker" });
+      const dependent = await newTask(pid, { title: "Dependent" });
+      await patchTask(dependent, { addDependency: blocker });
+
+      // system-set: an open dependency exists -> block_reason is forced null no matter what's sent
+      const sys = await patchTask(dependent, { status: "blocked", blockReason: "ignored" });
+      expect(sys.statusCode).toBe(200);
+      let t = await getTask(dependent);
+      expect(t.status).toBe("blocked");
+      expect(t.blockReason).toBeNull();
+      expect(t.blockedBy.map((d) => d.id)).toEqual([blocker]);
+
+      // clearing the dependency auto-clears the SYSTEM-set block back to ToDo (decision 17)
+      await patchTask(blocker, { status: "done" });
+      t = await getTask(dependent);
+      expect(t.status).toBe("todo");
+
+      // now block it again with NO open dependency -> a human reason, stored verbatim
+      const human = await patchTask(dependent, { status: "blocked", blockReason: "waiting on the client" });
+      expect(human.statusCode).toBe(200);
+      t = await getTask(dependent);
+      expect(t.status).toBe("blocked");
+      expect(t.blockReason).toBe("waiting on the client");
+      expect(t.blockedBy).toEqual([]);
+
+      // a HUMAN-set block is not dependency-driven, so an unrelated edit must not silently wipe it
+      const unrelated = await patchTask(dependent, { title: "Dependent (edited)" });
+      expect(unrelated.statusCode).toBe(200);
+      expect((await getTask(dependent)).blockReason).toBe("waiting on the client");
+    });
+
+    it("P4-I3/decision14: a project may explicitly turn dependency enforcement OFF (audited via the same PATCH path)", async () => {
+      const pid = await freshProject("I3 override");
+      const blocker = await newTask(pid, { title: "Blocker" });
+      const dependent = await newTask(pid, { title: "Dependent" });
+      await patchTask(dependent, { addDependency: blocker });
+
+      expect((await patchTask(dependent, { status: "in_progress" })).statusCode).toBe(409); // still hard-enforced
+
+      const off = await patchProject(pid, { dependencyEnforcement: false });
+      expect(off.statusCode).toBe(200);
+      expect((await getProject(pid)).dependencyEnforcement).toBe(false);
+
+      const started = await patchTask(dependent, { status: "in_progress" });
+      expect(started.statusCode).toBe(200);
+      expect((await getTask(dependent)).status).toBe("in_progress");
+    });
+
+    it("P4-I5: passing the ball on a blocked task is allowed, but bundling it with an explicit start in the SAME patch is not", async () => {
+      const pid = await freshProject("I5 ball pass");
+      const blocker = await newTask(pid, { title: "Blocker" });
+      const dependent = await newTask(pid, {
+        title: "Dependent",
+        assignee: { kind: "person", refId: member, refName: "Member Mel", responsibleId: member, responsibleName: "Member Mel" },
+      });
+      await patchTask(dependent, { addDependency: blocker });
+
+      // decision 4 (anyone may pass the ball) + this plan's §I5: handing over blocked work is fine
+      const pass = await patchTask(dependent, {
+        assignee: { kind: "person", refId: manager, refName: "Manager Mo", responsibleId: manager, responsibleName: "Manager Mo" },
+      });
+      expect(pass.statusCode).toBe(200);
+      expect((await getTask(dependent)).status).not.toBe("in_progress");
+
+      // the case the plan warns will be got wrong: a ball-pass must NOT smuggle a start through
+      const passAndStart = await patchTask(dependent, {
+        assignee: { kind: "person", refId: member, refName: "Member Mel", responsibleId: member, responsibleName: "Member Mel" },
+        status: "in_progress",
+      });
+      expect(passAndStart.statusCode).toBe(409);
+      expect((await getTask(dependent)).status).not.toBe("in_progress");
+    });
+
+    it("a dependency can point at a task in a DIFFERENT project; that project's OWN is_done flag decides openness", async () => {
+      const pidA = await freshProject("I cross A");
+      const pidB = await freshProject("I cross B");
+      const blocker = await newTask(pidB, { title: "Blocker in B" });
+      const dependent = await newTask(pidA, { title: "Dependent in A" });
+      await patchTask(dependent, { addDependency: blocker });
+
+      expect((await patchTask(dependent, { status: "in_progress" })).statusCode).toBe(409);
+      await patchTask(blocker, { status: "done" });
+      expect((await patchTask(dependent, { status: "in_progress" })).statusCode).toBe(200);
+    });
+
+    it("deleting a blocker counts as closing it: the last dependent auto-clears from a system-set Blocked", async () => {
+      const pid = await freshProject("I delete cascades");
+      const blocker = await newTask(pid, { title: "Blocker" });
+      const dependent = await newTask(pid, { title: "Dependent" });
+      await patchTask(dependent, { addDependency: blocker });
+      await patchTask(dependent, { status: "blocked" }); // system-set: openDeps > 0 at the time
+      expect((await getTask(dependent)).blockReason).toBeNull();
+
+      const del = await app.inject({ method: "DELETE", url: `/api/${tenant}/pm/tasks/${blocker}`, headers: hdr() });
+      expect(del.statusCode).toBe(200);
+      expect((await getTask(dependent)).status).toBe("todo");
+    });
+  });
 });
