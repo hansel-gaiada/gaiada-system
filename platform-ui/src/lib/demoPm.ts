@@ -730,6 +730,44 @@ export function pmDemo(method: string, p: string, search: URLSearchParams, body?
   }
   // Burndown (P2-08, design spec §4) — mirrors the real backend's `from`/`to` range filter and
   // its "empty range -> []" contract.
+  // ---- tenant-grain flow + burndown (P4-A2) ----
+  // The `@all` scope's Charts view reads these. Without a fixture they fell through to the generic
+  // `ok([])`, so DEMO_MODE — which is what the build gate and e2e actually exercise — rendered the
+  // cross-project charts permanently empty and looked like a backend gap rather than a missing seed.
+  //
+  // Summed across every demo project, mirroring how the real endpoint merges: burndown adds
+  // open/done per date; flow adds each date's per-status counts by status id. Both keep the
+  // from/to contract of their per-project siblings.
+  if (p.match(/^\/api\/[^/]+\/pm\/burndown$/)) {
+    const byDate = new Map<string, BurndownPoint>();
+    for (const proj of projects) {
+      for (const pt of synthBurndownSeries(proj.id)) {
+        const acc = byDate.get(pt.date);
+        if (acc) { acc.open += pt.open; acc.done += pt.done; }
+        else byDate.set(pt.date, { ...pt });
+      }
+    }
+    const from = search.get("from");
+    const to = search.get("to");
+    const series = [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date));
+    return ok(series.filter((pt) => (!from || pt.date >= from) && (!to || pt.date <= to)));
+  }
+  if (p.match(/^\/api\/[^/]+\/pm\/flow$/)) {
+    const byDate = new Map<string, FlowPoint>();
+    for (const proj of projects) {
+      for (const pt of synthFlowSeries(proj.id)) {
+        const acc = byDate.get(pt.date);
+        if (!acc) { byDate.set(pt.date, { date: pt.date, counts: { ...pt.counts } }); continue; }
+        for (const [statusId, n] of Object.entries(pt.counts)) {
+          acc.counts[statusId] = (acc.counts[statusId] ?? 0) + n;
+        }
+      }
+    }
+    const from = search.get("from");
+    const to = search.get("to");
+    const series = [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date));
+    return ok(series.filter((pt) => (!from || pt.date >= from) && (!to || pt.date <= to)));
+  }
   const projBurndown = p.match(/^\/api\/[^/]+\/pm\/projects\/([^/]+)\/burndown$/);
   if (projBurndown) {
     const series = synthBurndownSeries(projBurndown[1]);

@@ -265,9 +265,32 @@ per the 2026-07-17 route inventory (confirm UI has been repointed off the in-mem
   unconditionally raise (a GRANT/REVOKE is not exercisable through this repo's test harness —
   same precedent as `0068`). The append itself lives inside `syncTaskAssignees`, the single
   choke point every write path already shares, so a new write path cannot forget to log.
-  UI consumer: `P4-B7` (assignment-history timeline on the task detail) — **not built yet**.
-- **PENDING (P4-A1):** `?ball=me` / `?ball[]=` facets on `GET /api/:t/pm/tasks` filter on the
-  existing `assignee`, and belong to the cross-project scope ticket, not to the ledger above.
+  UI consumer: `P4-B7` — **BUILT** (assignment-history timeline on the task detail, `fef853d`).
+- **BUILT (P4-A1/A2, 2026-08-07):** the tenant-wide list is now faceted and paginated.
+  **⚠ BREAKING SHAPE CHANGE — `GET /api/:t/pm/tasks` answers `{ items, nextCursor }`, not a bare
+  array.** Six frontend callers went through `listAllPmTasks` and one backend test
+  (`modules/hr/wsd7-acceptance.test.ts`) consumed it; the reader now unwraps centrally and
+  tolerates **both** shapes, because UI and backend deploy separately and one side is briefly older
+  during every rollout. Do not "tidy" that tolerance away.
+  Facets: `status[]`, `tag[]`, `priority[]`, `responsible[]`, `ball[]`, `milestone[]`, `dueFrom`,
+  `dueTo`, `q`, `overdueOnly`, `dueSoon`, `dueSoonDays`, `includeClosed` (**defaults false** — done
+  tasks hidden), `includeSubtasks` (accepted, **no-op** — our subtasks are a JSONB checklist, not
+  `pm_tasks` rows), `cursor`, `limit` (default 50, max 200). Arrays take repeated keys or
+  comma-separated, max 50, deduped.
+  `ball[]` matches `assignee->>'refId'` **kind-agnostically**, so a department- or division-held
+  ball filters too — a poly-assignee superset Repsona cannot express.
+  Every row carries `isDone`/`isBlocked` resolved from **that task's own project registry**, so
+  clients need no N+1 registry lookup. `overdueOnly`/`dueSoon` mirror `lib/pmUrgency.ts` exactly
+  (3-day default, done excluded, inclusive boundary); passing both is a **union**, since the tiers
+  are mutually exclusive and an intersection is always empty.
+  Also adds tenant-grain `GET /api/:t/pm/flow` and `GET /api/:t/pm/burndown`.
+- **BUILT (P4-G6, 2026-08-07):** `GET /api/:t/pm/projects/:projectId/tasks` gained the same
+  `overdueOnly`/`dueSoon`/`dueSoonDays` semantics via shared helpers, so "what is about to slip"
+  answers identically at project and tenant scope. Omitting them reproduces the old query exactly.
+- **BUILT (P4-I6, 2026-08-07):** closing the LAST open blocker notifies the promoted task's ball
+  holder and followers (`dependency_cleared`). Fires once per task however many blockers it had,
+  skips the actor, and needs no dedup table — a completed promotion moves the task off its intake
+  status, so a re-run produces no second transition to notify about.
 - **BUILT (P4-H1, 2026-08-07):** `GET /api/:t/pm/projects/:id` now also returns `startDate` (the
   base `projects.start_date` column — already existed, simply wasn't selected here before) and
   `dependencyEnforcement: boolean` (P4-I3, see below). `PATCH /api/:t/pm/projects/:id` accepts
