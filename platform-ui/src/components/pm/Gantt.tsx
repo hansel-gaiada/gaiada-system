@@ -3,11 +3,12 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, use
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import type {
   Timeline, TimelineBar, PmTask, GanttGroup, GanttGroupBy, MilestoneMarker, GanttDepEdge,
-  BurndownOverlayPoint, UrgencyTier,
+  BurndownOverlayPoint, UrgencyTier, Tag,
 } from "@/lib/pm";
 import { addDependency, batchReschedule, type RescheduleItem } from "@/lib/pmActions";
 import { EmptyNote } from "@/components/systems/EmptyNote";
 import { UrgencyChip } from "./UrgencyChip";
+import { TagChip } from "./TagChip";
 import "./pm.css";
 
 // Gantt — bars on a shared date axis. Read-only by default (legacy project view);
@@ -62,11 +63,104 @@ interface GanttProps {
   // urgency ticket exists to close); absent/empty renders no indicator, same graceful-degrade
   // convention as every other optional map prop here.
   taskUrgency?: Record<string, UrgencyTier>;
+  // P4-L3 — row anatomy: task id -> its OWN project's tag registry entries, resolved server-side.
+  // Same shape/precedent as Board's `taskTags` (BoardGrid, taskTags.ts callers) — a plain
+  // serializable map so Gantt never has to see a project's tag registry itself. Absent/empty
+  // renders no tag chips in the row's meta line (graceful degrade, same convention as barColors).
+  taskTags?: Record<string, Tag[]>;
+  // P4-L3 — the TODAY marker line. Prefer a server-resolved ISO date (same "resolve once,
+  // server-side" rule as `taskUrgency`'s `today` parameter — see lib/pmUrgency.ts) so it agrees
+  // with whatever urgency tiers were computed for this render. No caller passes this yet, so
+  // Gantt falls back to a CLIENT-computed date, but only after mount (see `todayISO` state
+  // below) — never during the initial render, so server and client render the SAME thing
+  // (no line) on the first pass and the line is added as a normal post-mount update, not a
+  // hydration mismatch. This is a purely decorative chrome marker, not a data-bearing tier, so
+  // the one-frame-late appearance and the (extremely rare, day-boundary-only) client/server
+  // clock disagreement it can introduce are an acceptable trade-off here — unlike urgency tiers,
+  // nothing downstream reads this value as ground truth.
+  todayISO?: string;
 }
 
 const DAY = 24 * 3600 * 1000;
 const fmt = (d: string) => new Date(d).toLocaleDateString("en-GB", { day: "2-digit", month: "short" });
 const dayShift = (isoDate: string, n: number) => new Date(Date.parse(isoDate) + n * DAY).toISOString().slice(0, 10);
+
+// ---- P4-L3: day/week header, weekend banding, today line ----
+// `Date.parse("YYYY-MM-DD")` always resolves to UTC midnight, and every function below reads it
+// back with the UTC getters — never `toLocaleDateString`/local getters — so weekday/weekend are a
+// pure function of the ISO string alone. That makes them safe to compute in a client component:
+// server and client always agree, unlike `fmt()` above (locale/timezone-dependent, pre-existing,
+// left as-is) or wall-clock "today" (see the `todayISO` prop doc).
+const WEEKDAY_ABBR = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
+function isWeekendDay(isoDate: string): boolean {
+  const d = new Date(Date.parse(isoDate)).getUTCDay();
+  return d === 0 || d === 6;
+}
+function weekdayAbbr(isoDate: string): string {
+  return WEEKDAY_ABBR[new Date(Date.parse(isoDate)).getUTCDay()];
+}
+function dayOfMonth(isoDate: string): string {
+  return String(new Date(Date.parse(isoDate)).getUTCDate());
+}
+
+interface DayBand { pct: number; widthPct: number }
+interface HeaderTick { iso: string; pct: number; labelled: boolean }
+
+// One band per weekend calendar day, in "day interval" terms (day i spans [i, i+1) of the
+// timeline), so the shaded strip lines up with that day's bars, not the point tick beside it.
+// Capped by the caller (`dense`) so a pathological multi-year window never renders one <span>
+// per day — the explicit date-window picker (P4-C2) is where that case gets a real fix.
+function buildWeekendBands(start: string, days: number): DayBand[] {
+  if (days <= 0) return [];
+  const dayWidth = 100 / days;
+  const out: DayBand[] = [];
+  for (let i = 0; i < days; i++) {
+    if (isWeekendDay(dayShift(start, i))) out.push({ pct: i * dayWidth, widthPct: dayWidth });
+  }
+  return out;
+}
+
+// One tick per calendar day (point, not interval — a tick marks the day BOUNDARY at offset i so
+// it sits directly under where that day's column starts, same offsetPct convention bars use).
+// `labelled` thins the text at wider spans (Day view up to a month, Week view beyond that) without
+// a real Day/Week/Month zoom toggle — that's P4-C1; this is only the fallback that keeps the axis
+// legible today and cheap to swap for an explicit granularity prop later.
+function buildHeaderTicks(start: string, days: number): HeaderTick[] {
+  if (days <= 0) return [{ iso: start, pct: 0, labelled: true }];
+  const step = days <= 31 ? 1 : days <= 120 ? 7 : Math.max(1, Math.ceil(days / 16));
+  const out: HeaderTick[] = [];
+  for (let i = 0; i <= days; i++) {
+    out.push({ iso: dayShift(start, i), pct: (i / days) * 100, labelled: i % step === 0 || i === days });
+  }
+  return out;
+}
+
+// Offset (0-100) of `iso` within [start, start+days], or null when it falls outside the
+// rendered window — the guard that hides the today line when "today" isn't on this axis at all.
+function pctForDate(start: string, days: number, iso: string): number | null {
+  if (days <= 0) return null;
+  const idx = Math.round((Date.parse(iso) - Date.parse(start)) / DAY);
+  if (idx < 0 || idx > days) return null;
+  return (idx / days) * 100;
+}
+
+// Up to two initials from a display name — the avatar's fallback rendering (no photo store
+// exists yet). "Edward Gusde" -> "EG"; "Marketing" (a division/department Ball, our superset of
+// Repsona's person-only field) -> "MA", same rule, no special-casing by AssigneeKind needed.
+function initials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "";
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
+
+// Meta-line due-date colouring reuses the board card's existing `.pm-due` family (pm.css) —
+// driven by the SAME precomputed urgency tier as the row's dot, so the two can never disagree.
+function dueUrgencyClass(tier: UrgencyTier | undefined): string {
+  if (tier === "overdue") return "pm-due--risk";
+  if (tier === "due-soon") return "pm-due--soon";
+  return "pm-due--quiet";
+}
 
 // New dates from a drag. move = shift both (preserve duration); start/end resize
 // one edge and never cross the other. Mirrors intent of the read-only geometry.
@@ -181,6 +275,19 @@ export function Gantt(props: GanttProps) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const burndown = props.burndown ?? [];
   const [showBurndown, setShowBurndown] = useState(false);
+
+  // ---- P4-L3: day/week header, weekend banding, today line ----
+  // Client-only fallback for "today" (see the `todayISO` prop doc above) — starts `null` so the
+  // very first render (server AND client, pre-hydration) draws no line, then fills in post-mount.
+  const [clientToday, setClientToday] = useState<string | null>(null);
+  useEffect(() => { setClientToday(new Date().toISOString().slice(0, 10)); }, []);
+  const resolvedToday = props.todayISO ?? clientToday;
+  // Capped at ~a year so a pathological multi-year window (no date-window picker yet, P4-C2)
+  // never renders one <span> per day; beyond that it falls back to the plain start/end axis.
+  const dense = timeline.days > 0 && timeline.days <= 366;
+  const weekendBands = useMemo(() => (dense ? buildWeekendBands(timeline.start, timeline.days) : []), [dense, timeline.start, timeline.days]);
+  const headerTicks = useMemo(() => (dense ? buildHeaderTicks(timeline.start, timeline.days) : []), [dense, timeline.start, timeline.days]);
+  const todayPct = resolvedToday ? pctForDate(timeline.start, timeline.days, resolvedToday) : null;
 
   const containerRef = useRef<HTMLDivElement | null>(null);
   const barRefs = useRef(new Map<string, HTMLElement | null>());
@@ -369,12 +476,12 @@ export function Gantt(props: GanttProps) {
       commitBatchMove([...moveSet(bar.task.id)], delta, bar);
     }
   };
-  const onBallKeyDown = (e: React.KeyboardEvent, bar: TimelineBar) => {
+  const onLinkHandleKeyDown = (e: React.KeyboardEvent, bar: TimelineBar) => {
     if (!interactive || !canEdit) return;
     if (e.key === "Enter" || e.key === " ") {
       e.preventDefault();
-      // The ball nests inside the bar's own key-handled div — stop the bubble so a link-mode
-      // toggle here doesn't also fire the bar's Enter/Space multiselect-toggle handler above.
+      // The dependency-draw handle nests inside the bar's own key-handled div — stop the bubble
+      // so a link-mode toggle here doesn't also fire the bar's Enter/Space multiselect handler.
       e.stopPropagation();
       if (link && link.fromId === bar.task.id) { setLink(null); setLive("Link cancelled."); }
       else { setLink({ fromId: bar.task.id, fromTitle: bar.task.title }); setLive(`Linking from ${bar.task.title}. Move to another task and press Enter to make it depend on this one; Escape cancels.`); }
@@ -427,13 +534,48 @@ export function Gantt(props: GanttProps) {
         <span className="pm-gantt__pct">{t.progress}%</span>
       </>
     );
+    // P4-L3: row anatomy fidelity pass — avatar (Ball/assignee) · title · project name ·
+    // tag chips · due date, closer to the reference's per-row layout. `showProjectName` skips
+    // the redundant repeat when the caller already grouped rows under a project header
+    // (groupBy="project", e.g. the department Timeline) — Repsona's own `@all` view (no
+    // project grouping) is exactly the case where the name earns its place on every row.
+    const showProjectName = groupBy !== "project";
+    const rowTags = props.taskTags?.[t.id] ?? [];
+    const assignee = t.assignee;
     return (
       <div className="pm-gantt__row" key={t.id}>
-        <a className="pm-gantt__label" href={taskHref(t.id)} onClick={(e) => navigate(e, t.id)}>
-          {/* Dense, many-row context — dot form, same rationale as the board card. */}
-          {urgencyTier && <UrgencyChip tier={urgencyTier} variant="dot" />}
-          {t.recurrence ? "↻ " : ""}{t.title}
-        </a>
+        <div className="pm-gantt__labelcell">
+          <a className="pm-gantt__label" href={taskHref(t.id)} onClick={(e) => navigate(e, t.id)}>
+            {/* Initials are decorative (aria-hidden); the name itself is real text for a screen
+                reader — `title` alone is not reliably announced (same rule urgency.css documents). */}
+            {assignee ? (
+              <span className="pm-gantt__avatar" title={assignee.refName}>
+                <span aria-hidden>{initials(assignee.refName)}</span>
+                <span className="pm-sr-only">{assignee.refName}</span>
+              </span>
+            ) : (
+              <span className="pm-gantt__avatar pm-gantt__avatar--empty">
+                <span className="pm-sr-only">Unassigned</span>
+              </span>
+            )}
+            <span className="pm-gantt__label-text">
+              {/* Dense, many-row context — dot form, same rationale as the board card. */}
+              {urgencyTier && <UrgencyChip tier={urgencyTier} variant="dot" />}
+              {t.recurrence ? "↻ " : ""}{t.title}
+            </span>
+          </a>
+          {(showProjectName || rowTags.length > 0 || t.dueDate) && (
+            <div className="pm-gantt__meta">
+              {showProjectName && t.projectName && <span className="pm-gantt__meta-project">{t.projectName}</span>}
+              {rowTags.length > 0 && (
+                <span className="pm-gantt__meta-tags">
+                  {rowTags.map((tg) => <TagChip key={tg.id} label={tg.label} color={tg.color} />)}
+                </span>
+              )}
+              {t.dueDate && <span className={`pm-due ${dueUrgencyClass(urgencyTier)}`}>{fmt(t.dueDate)}</span>}
+            </div>
+          )}
+        </div>
         <div className="pm-gantt__track">
           {interactive ? (
             // Interactive: a div (so the dependency-draw <button> nests validly) —
@@ -460,10 +602,10 @@ export function Gantt(props: GanttProps) {
                   <span className="pm-gantt__handle pm-gantt__handle--start" aria-hidden onPointerDown={(e) => beginDrag(e, bar, "start")} />
                   <span className="pm-gantt__handle pm-gantt__handle--end" aria-hidden onPointerDown={(e) => beginDrag(e, bar, "end")} />
                   <button
-                    type="button" className="pm-gantt__ball pm-gantt__ball--end"
+                    type="button" className="pm-gantt__link pm-gantt__link--end"
                     aria-label={`Draw dependency from ${t.title}`}
                     onPointerDown={(e) => beginLinkPointer(e, bar)}
-                    onKeyDown={(e) => onBallKeyDown(e, bar)}
+                    onKeyDown={(e) => onLinkHandleKeyDown(e, bar)}
                   />
                 </>
               )}
@@ -496,7 +638,50 @@ export function Gantt(props: GanttProps) {
         </div>
       )}
       <div className="pm-gantt" ref={containerRef}>
-        <div className="pm-gantt__axis"><span>{fmt(timeline.start)}</span><span>{fmt(timeline.end)}</span></div>
+        {/* P4-L3: day/week header with weekday labels — dense (<=~a year) spans get a real
+            per-day/week tick axis; wider spans fall back to the plain start/end label rather
+            than one <span> per day (the date-window picker, P4-C2, is the real fix for those). */}
+        {dense ? (
+          <div className="pm-gantt__daxis">
+            <span className="pm-gantt__daxis-head">Task</span>
+            <div className="pm-gantt__daxis-track">
+              {headerTicks.map((tk) => (
+                <span key={tk.iso} className="pm-gantt__daxis-tick" style={{ left: `${tk.pct}%` }}>
+                  {tk.labelled ? (
+                    <>
+                      <span className="pm-gantt__daxis-wd">{weekdayAbbr(tk.iso)}</span>
+                      <span className="pm-gantt__daxis-d">{dayOfMonth(tk.iso)}</span>
+                    </>
+                  ) : null}
+                </span>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <div className="pm-gantt__axis"><span>{fmt(timeline.start)}</span><span>{fmt(timeline.end)}</span></div>
+        )}
+
+        {/* Weekend banding — a decorative fill behind every row (negative z-index), never text,
+            so it carries no contrast duty; capped to `dense` spans for the same reason as the
+            header ticks above. */}
+        {weekendBands.length > 0 && (
+          <div className="pm-gantt__weekends" aria-hidden>
+            {weekendBands.map((b, i) => (
+              <span key={i} className="pm-gantt__weekend" style={{ left: `${b.pct}%`, width: `${b.widthPct}%` }} />
+            ))}
+          </div>
+        )}
+
+        {/* TODAY marker — a red vertical rule spanning every row, Repsona-style. Hidden entirely
+            when "today" (server-pinned via `todayISO`, or the post-mount client fallback — see
+            the prop doc) falls outside this axis's own [start, end]. Wrapped the same way as the
+            weekend bands above: the outer box aligns to the track's left edge, the inner line is
+            positioned by percentage OF that box so it shares the bars' own offsetPct math. */}
+        {todayPct !== null && (
+          <div className="pm-gantt__todaybox" aria-hidden>
+            <span className="pm-gantt__todayline" style={{ left: `${todayPct}%` }} />
+          </div>
+        )}
 
         {showBurndown && burndown.length > 0 && (
           <>

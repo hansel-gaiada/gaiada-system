@@ -132,6 +132,33 @@ export async function setTaskPriority(taskId: string, priority: Priority): Promi
 // Assignee-axis drag: keeps the existing assignee's kind/refId/refName, only swaps who's
 // responsible (the "__unassigned" sentinel column isn't a valid drop target — a task can't be
 // dragged into "no assignee" this way).
+// P4-B6 — Ball-axis drag: dropping a card on a person's Ball column reassigns the BALL
+// (`assignee.refId`/`kind`) and leaves Responsible (`assignee.responsibleId`) exactly as it was.
+// The mirror image of `reassignResponsible` below, which does the opposite — the two slots are
+// independent, which is precisely why Repsona's two boards show different tasks for one person.
+export async function reassignBall(taskId: string, refId: string): Promise<PmResult> {
+  // The "no user" column (`ballKey`'s `__no_ball` sentinel) is not a drop target, same precedent as
+  // the `__unassigned` guard below: dragging onto "nobody holds it" is almost always a misdrop.
+  if (refId === "__no_ball") return { ok: false, error: "Drop on a specific person to pass the ball — open the task to clear it." };
+  const c = await ctx();
+  if ("error" in c) return { ok: false, error: c.error };
+  const [current, { members }] = await Promise.all([
+    getPmTask(c.userId, c.tenant, taskId),
+    assignableUnits(c.userId, c.tenant),
+  ]);
+  if (!current) return { ok: false, error: "Task not found." };
+  const refName = members.find((m) => m.id === refId)?.name ?? refId;
+  // The ball is always a PERSON (decision 3 — a department cannot take a turn). A task with no
+  // prior assignee bootstraps BOTH slots onto the new holder, mirroring reassignResponsible's
+  // bootstrap for the symmetric case.
+  const assignee: Assignee = current.assignee
+    ? { ...current.assignee, kind: "person", refId, refName }
+    : { kind: "person", refId, refName, responsibleId: refId, responsibleName: refName };
+  const r = await send(`/pm/tasks/${taskId}`, "PATCH", { assignee }, "pm.manage");
+  revalTask(taskId);
+  return r;
+}
+
 export async function reassignResponsible(taskId: string, responsibleId: string): Promise<PmResult> {
   if (responsibleId === "__unassigned") return { ok: false, error: "Drop on a specific person to reassign — open the task to unassign." };
   const c = await ctx();

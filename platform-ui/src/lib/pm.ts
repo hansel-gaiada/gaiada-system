@@ -373,6 +373,34 @@ export interface Comment {
 // ---- task followers (P3-09) ----
 export interface Follower { id: string; name: string }
 
+// ---- assignment/ball history (P4-B1..B4, migration 0087) ----
+// The append-only chain beside `pm_tasks.assignee` (plan §1.5): passing the ball never erases the
+// previous holder, it appends a row. `refId`/`refKind`/`refName` mirror `Assignee.refId`/`kind` at
+// the moment of the write (the "Ball"); `responsibleId`/`responsibleName` mirror
+// `Assignee.responsibleId` (the "Responsible"); `statusId` is the task's status AT the moment of
+// handoff, not its current one. Names are resolved server-side (pm.controller.ts's
+// getAssignmentHistory join) so this reader never needs a second round-trip to look anyone up.
+// `refId`/`refKind`/`responsibleId` are nullable — an "unassigned" write still appends a row.
+export interface AssignmentEvent {
+  id: string;
+  refId: string | null;
+  refKind: AssigneeKind | null;
+  refName: string | null;
+  responsibleId: string | null;
+  responsibleName: string | null;
+  statusId: string;
+  note: string | null;
+  changedBy: string | null;
+  changedByName: string | null;
+  createdAt: string;
+}
+// Newest-first (the backend orders by created_at DESC — same convention as every other append-only
+// history reader here, e.g. listDocVersions). Degrades to [] on 404/403 same as every other PM
+// reader (stale backend before migration 0087 lands, or the module disabled for this tenant) — the
+// timeline then renders "No history yet" rather than an error.
+export const listAssignmentHistory = (u: string, t: string, taskId: string) =>
+  skipUnavailable(platformFetch<AssignmentEvent[]>(`/api/${t}/pm/tasks/${taskId}/assignment-history`, u), [] as AssignmentEvent[]);
+
 async function skipUnavailable<T>(p: Promise<T>, fallback: T): Promise<T> {
   try {
     return await p;
@@ -641,6 +669,23 @@ export function wouldCreateCycle(tasks: PmTask[], blockedId: string, blockerId: 
 // "done" semantics when omitted. Pure.
 export function openDependencies(task: PmTask, byId: Map<string, PmTask>, statuses?: ProjectStatus[]): PmTask[] {
   return (task.dependsOn ?? []).map((id) => byId.get(id)).filter((d): d is PmTask => !!d && !isDoneStatus(d.status, statuses));
+}
+
+// ---- chain enforcement — client-side courtesy (P4-I4) ----
+// Mirrors the server-side gate (P4-I1, built in parallel by another agent): while a task has open
+// (unresolved) dependencies, only three kinds of status are actually safe to land on — the
+// project's own INTAKE spot (Backlog, or its per-project equivalent — a task can always sit
+// uncommitted), a status already flagged `isBlocked` (the human "waiting on the client" case, §17),
+// or a done status (finishing despite a stale blocker is the server's call, not this courtesy
+// check's). Every other status counts as "started work" and is disabled until the blocker(s)
+// clear — this is what gives the ladder real teeth (plan §I). THE SERVER REMAINS AUTHORITATIVE:
+// this is advisory UI only, computed from whatever ProjectStatus[] the caller already has, and it
+// must degrade harmlessly (never crash, never silently allow) if the two ever disagree — a stale
+// list here just means a write attempt bounces off the real gate with the server's own reason.
+export function reachableStatusIds(statuses: ProjectStatus[], blocked: boolean): Set<string> {
+  if (!blocked) return new Set(statuses.map((s) => s.id));
+  const intake = intakeStatusId(statuses);
+  return new Set(statuses.filter((s) => s.isDone || s.isBlocked || s.id === intake).map((s) => s.id));
 }
 
 // ---- task templates (P3-03) ----

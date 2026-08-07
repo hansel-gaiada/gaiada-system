@@ -113,11 +113,30 @@
 .pm-doc:hover { border-color: var(--pm-accent); color: var(--pm-accent); }
 
 /* ---- gantt / timeline ---- */
-.pm-gantt { display: flex; flex-direction: column; gap: 8px; min-width: 560px; position: relative; }
-.pm-gantt__axis { display: flex; justify-content: space-between; font: 700 10px var(--font-body); letter-spacing: 0.06em; text-transform: uppercase; color: var(--pm-text-faint); padding-left: 200px; }
-.pm-gantt__row { display: grid; grid-template-columns: 200px 1fr; align-items: center; gap: 12px; }
-.pm-gantt__label { font: 400 13px var(--font-body); color: var(--pm-text); text-decoration: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pm-gantt { display: flex; flex-direction: column; gap: 8px; min-width: 620px; position: relative; }
+.pm-gantt__axis { display: flex; justify-content: space-between; font: 700 10px var(--font-body); letter-spacing: 0.06em; text-transform: uppercase; color: var(--pm-text-faint); padding-left: 232px; }
+.pm-gantt__row { display: grid; grid-template-columns: 232px 1fr; align-items: center; gap: 12px; }
+/* P4-L3: label cell now stacks two lines — the title link, then a meta line (project · tags ·
+   due date) — instead of one bare <a>. The width bump (200px -> 232px, propagated to every
+   sibling row type + the guide/overlay `left` offsets below) is what gives the meta line room. */
+.pm-gantt__labelcell { display: flex; flex-direction: column; gap: 2px; min-width: 0; overflow: hidden; }
+.pm-gantt__label { display: inline-flex; align-items: center; gap: 6px; font: 400 13px var(--font-body); color: var(--pm-text); text-decoration: none; min-width: 0; }
 .pm-gantt__label:hover { color: var(--pm-accent); }
+.pm-gantt__label-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+/* Ball/assignee avatar (P4-L3) — initials only, no photo store exists yet. Text-on-fill, not a
+   decorative graphic, so it uses --pm-text (already >=4.5:1 on --pm-surface-sunken in both
+   themes — see tokens/pm.css: --pm-text is 12.26:1 on the dark card, and the light pairing is
+   even higher-contrast, so no new token is needed for this reuse). */
+.pm-gantt__avatar {
+  display: inline-flex; align-items: center; justify-content: center; flex: 0 0 18px;
+  width: 18px; height: 18px; border-radius: var(--pm-radius-pill);
+  background: var(--pm-surface-sunken); color: var(--pm-text); border: 0.5px solid var(--pm-line);
+  font: 700 8px var(--font-body); letter-spacing: 0.01em;
+}
+.pm-gantt__avatar--empty { background: transparent; border-style: dashed; }
+.pm-gantt__meta { display: flex; align-items: center; gap: 6px; min-width: 0; font: 400 10px var(--font-body); color: var(--pm-text-faint); overflow: hidden; }
+.pm-gantt__meta-project { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 0 1 auto; }
+.pm-gantt__meta-tags { display: inline-flex; gap: 4px; flex: 0 0 auto; }
 .pm-gantt__track { position: relative; height: 22px; background: var(--pm-surface-sunken); border: 0.5px solid var(--pm-line-soft); border-radius: var(--pm-radius); }
 .pm-gantt__bar { position: absolute; top: 3px; bottom: 3px; background: var(--pm-accent); color: var(--pm-accent-fg); border-radius: var(--pm-radius); opacity: 0.9; display: flex; align-items: center; padding: 0 6px; font: 700 9px var(--font-body); white-space: nowrap; overflow: hidden; text-decoration: none; min-width: 4px; }
 .pm-gantt__bar--done { background: var(--pm-status-done); color: var(--pm-status-ink); }
@@ -139,20 +158,50 @@
 .pm-gantt__handle--start { left: 0; }
 .pm-gantt__handle--end { right: 0; }
 /* dependency-draw end handle (round: it's a connector affordance, not the
-   Ball/assignee concept — P4-B10 renames the CLASS once "ball" means the
-   assignee everywhere else; this is a .tsx-level rename I can't make here). */
-.pm-gantt__ball { position: absolute; right: -6px; top: 50%; transform: translateY(-50%); width: 11px; height: 11px; border-radius: 50%; border: 0.5px solid var(--pm-accent); background: var(--pm-surface-card); padding: 0; z-index: 3; cursor: crosshair; opacity: 0; transition: opacity 0.15s var(--erp-ease); }
-.pm-gantt__bar:hover .pm-gantt__ball, .pm-gantt__bar:focus-within .pm-gantt__ball, .pm-gantt__ball:focus-visible { opacity: 1; }
+   Ball/assignee concept — P4-B10 (2026-08-07): renamed from `.pm-gantt__ball*` now that "ball"
+   is the product's own name for the assignee everywhere else; a class calling the dependency
+   handle a "ball" would actively mislead the next reader. */
+.pm-gantt__link { position: absolute; right: -6px; top: 50%; transform: translateY(-50%); width: 11px; height: 11px; border-radius: 50%; border: 0.5px solid var(--pm-accent); background: var(--pm-surface-card); padding: 0; z-index: 3; cursor: crosshair; opacity: 0; transition: opacity 0.15s var(--erp-ease); }
+.pm-gantt__bar:hover .pm-gantt__link, .pm-gantt__bar:focus-within .pm-gantt__link, .pm-gantt__link:focus-visible { opacity: 1; }
 /* live reschedule tooltip */
 .pm-gantt__tip { position: absolute; top: -17px; font: 700 9px var(--font-body); letter-spacing: 0.02em; color: var(--pm-text); background: var(--pm-surface-raised); border: 0.5px solid var(--pm-line); border-radius: var(--pm-radius); padding: 1px 5px; white-space: nowrap; z-index: 6; pointer-events: none; }
 
 /* milestone diamonds lane + dashed guidelines */
-.pm-gantt__msrow { display: grid; grid-template-columns: 200px 1fr; gap: 12px; align-items: center; }
+.pm-gantt__msrow { display: grid; grid-template-columns: 232px 1fr; gap: 12px; align-items: center; }
 .pm-gantt__mslabel { font: 700 10px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--pm-text-faint); text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pm-gantt__mstrack { position: relative; height: 12px; }
 .pm-gantt__milestone { position: absolute; top: 1px; width: 8px; height: 8px; background: var(--pm-accent); transform: translateX(-4px) rotate(45deg); border: 0.5px solid var(--pm-surface-card); }
-.pm-gantt__guides { position: absolute; left: 212px; right: 0; top: 0; bottom: 0; pointer-events: none; z-index: 0; }
+.pm-gantt__guides { position: absolute; left: 244px; right: 0; top: 0; bottom: 0; pointer-events: none; z-index: 0; }
 .pm-gantt__guide { position: absolute; top: 0; bottom: 0; width: 0; border-left: 1px dashed var(--pm-line); }
+
+/* P4-L3 — day/week header (dense spans only; see Gantt.tsx `dense`). Same 232px+12px column
+   contract as every other row type above, so its ticks land exactly under the bars they label. */
+.pm-gantt__daxis { display: grid; grid-template-columns: 232px 1fr; align-items: end; gap: 12px; }
+.pm-gantt__daxis-head { font: 700 10px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--pm-text-faint); padding-bottom: 4px; }
+.pm-gantt__daxis-track { position: relative; height: 26px; }
+.pm-gantt__daxis-tick { position: absolute; bottom: 0; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; line-height: 1.2; }
+.pm-gantt__daxis-wd { font: 700 8px var(--font-body); letter-spacing: 0.04em; text-transform: uppercase; color: var(--pm-text-faint); }
+.pm-gantt__daxis-d { font: 700 10px var(--font-body); color: var(--pm-text-dim); }
+
+/* Weekend banding — a decorative fill (no 4.5:1 duty, it is never text), so a plain tint of
+   the existing hairline token is enough; no new colour token needed. Every row's OWN
+   `.pm-gantt__track` paints an opaque background (--pm-surface-sunken), so a band sitting
+   BEHIND that in the stacking order (as a negative z-index would put it) is invisible — it
+   would sink below every track, not just the bars. Explicit z-index:2 instead paints it as a
+   translucent wash ON TOP of the tracks (and any bar under it), same trick `.pm-gantt__guides`
+   already relies on for its dashed lines; the low mix keeps a bar's own status colour reading
+   clearly through the tint. */
+.pm-gantt__weekends { position: absolute; left: 244px; right: 0; top: 0; bottom: 0; pointer-events: none; z-index: 2; overflow: hidden; }
+.pm-gantt__weekend { position: absolute; top: 0; bottom: 0; background: color-mix(in srgb, var(--pm-line) 30%, transparent); }
+
+/* TODAY marker — Repsona draws it as a red rule crossing every row, so it needs to sit ABOVE the
+   bars (z-index 5: above the dependency-line overlay at 1, below the sticky group headers at 7
+   which must stay clickable/legible while scrolling). Reuses the urgency-overdue GRAPHIC token
+   (theme-invariant by design, see tokens/pm.css) rather than adding a new one: it is the same
+   "needs attention now" red, used here for a calendar marker instead of a task tier — a fill,
+   not text, so it carries no 4.5:1 duty either way. */
+.pm-gantt__todaybox { position: absolute; left: 244px; right: 0; top: 0; bottom: 0; pointer-events: none; z-index: 5; }
+.pm-gantt__todayline { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--pm-urgency-overdue-graphic); transform: translateX(-1px); }
 
 /* collapsible group headers */
 .pm-gantt__group { display: flex; flex-direction: column; gap: 8px; }
@@ -174,20 +223,20 @@
 
 /* P2-08 — burndown overlay */
 .pm-gantt__bdtoggle { display: flex; justify-content: flex-end; margin-bottom: 8px; }
-.pm-gantt__bdrow { display: grid; grid-template-columns: 200px 1fr; gap: 12px; align-items: center; animation: erp-toast 0.18s var(--erp-ease); }
+.pm-gantt__bdrow { display: grid; grid-template-columns: 232px 1fr; gap: 12px; align-items: center; animation: erp-toast 0.18s var(--erp-ease); }
 .pm-gantt__bdlabel { font: 700 10px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--pm-text-faint); text-align: right; white-space: nowrap; }
 .pm-gantt__bdtrack { position: relative; height: 48px; border: 0.5px solid var(--pm-line-soft); border-radius: var(--pm-radius); background: var(--pm-surface-sunken); }
 .pm-gantt__bdsvg { width: 100%; height: 100%; display: block; }
 .pm-gantt__bdline { fill: none; stroke-width: 1.6; vector-effect: non-scaling-stroke; }
 .pm-gantt__bdline--ideal { stroke: var(--pm-text-faint); stroke-dasharray: 4 3; }
 .pm-gantt__bdline--actual { stroke: var(--pm-accent); }
-.pm-gantt__bdlegend { display: flex; gap: 16px; margin: 4px 0 0 212px; font: 400 10px var(--font-body); color: var(--pm-text-dim); animation: erp-toast 0.18s var(--erp-ease); }
+.pm-gantt__bdlegend { display: flex; gap: 16px; margin: 4px 0 0 244px; font: 400 10px var(--font-body); color: var(--pm-text-dim); animation: erp-toast 0.18s var(--erp-ease); }
 .pm-gantt__bdlegend-dot { display: inline-block; width: 8px; height: 8px; margin-right: 5px; vertical-align: middle; }
 .pm-gantt__bdlegend-dot--ideal { background: var(--pm-text-faint); }
 .pm-gantt__bdlegend-dot--actual { background: var(--pm-accent); }
 
 @media (prefers-reduced-motion: reduce) {
-  .pm-gantt__bar, .pm-gantt__ball, .pm-gantt__tip, .pm-grid__cell, .pm-gantt__bdrow, .pm-gantt__bdlegend { transition: none; animation: none; }
+  .pm-gantt__bar, .pm-gantt__link, .pm-gantt__tip, .pm-grid__cell, .pm-gantt__bdrow, .pm-gantt__bdlegend { transition: none; animation: none; }
 }
 
 /* ---- dependencies ---- */

@@ -20,7 +20,7 @@ import {
 } from "@/lib/pm";
 import {
   moveTask, createPmTask, setProjectOwner, addMilestone, saveDoc,
-  setTaskPriority, reassignResponsible, createTag, updateTag, deleteTag,
+  setTaskPriority, reassignResponsible, reassignBall, createTag, updateTag, deleteTag,
   createStatus, updateStatus, reorderStatuses, deleteStatus,
 } from "@/lib/pmActions";
 import { can } from "@/lib/rbac";
@@ -41,7 +41,11 @@ import { DocEditor } from "@/components/pm/DocEditor";
 import { TagChip } from "@/components/pm/TagChip";
 import { TagManager } from "@/components/pm/TagManager";
 import { DuplicateProject } from "@/components/pm/DuplicateProject";
-import { assigneeColumns, priorityColumns, type BoardSwimlane } from "@/lib/departments";
+import {
+  assigneeColumns, priorityColumns, ballColumns, filterTasksByBall, filterTasksByResponsible,
+  ballFacetOptions, responsibleFacetOptions, type BoardSwimlane,
+} from "@/lib/departments";
+import { PM_TERMS } from "@/lib/pmVocabulary";
 import "@/components/pm/pm.css";
 
 // The full project workspace (Board/List/Timeline/Milestones/Docs + owner/
@@ -54,7 +58,15 @@ import "@/components/pm/pm.css";
 // own userId/tenant (same as every other server-fetched page/component in
 // this app — e.g. the dept layout + its child pages each do this
 // independently) since it isn't handed them as props.
-export type ProjectWorkspaceSearch = { view?: string; swimlane?: string; tags?: string | string[] };
+export type ProjectWorkspaceSearch = {
+  view?: string;
+  swimlane?: string;
+  tags?: string | string[];
+  // P4-B9: Ball/Responsible filter facets — same shape as `tags` (a GET-form checkbox
+  // multi-select; absent/empty means "no filter", not "match nothing").
+  ball?: string | string[];
+  responsible?: string | string[];
+};
 
 // "files", "discussion" and "meetings" are tabs, not always-rendered cards. They used to sit below
 // every view as three large panels — usually empty — so the page ended in dead weight and the board
@@ -63,21 +75,36 @@ const VIEWS = ["board", "list", "timeline", "charts", "milestones", "docs", "fil
 type View = (typeof VIEWS)[number];
 
 // The project board only groups by axes that make sense scoped to ONE
-// project — Status (default), Assignee, Priority. Division and the dept
+// project — Status (default), Responsible, Ball, Priority. Division and the dept
 // "focus" filter are department-scoped concepts (see the dept Board tab,
 // lib/departments.ts) and don't apply inside a single project's workspace.
-type ProjectSwimlane = Extract<BoardSwimlane, "status" | "assignee" | "priority">;
+//
+// P4-B6: "assignee" keys off `responsibleId` (see `assigneeColumns`) — it IS the Responsible
+// board, only the persisted `?swimlane=` value stays `assignee` for old bookmarked links. "ball"
+// is the new, genuinely separate axis (`ballColumns`, keyed off `assignee.refId`) — Repsona's two
+// boards show DIFFERENT tasks for the same person, which is the entire point (plan §1.5).
+type ProjectSwimlane = Extract<BoardSwimlane, "status" | "assignee" | "ball" | "priority">;
 const SWIMLANES: { value: ProjectSwimlane; label: string }[] = [
   { value: "status", label: "Status" },
-  { value: "assignee", label: "Assignee" },
+  { value: "assignee", label: PM_TERMS.responsible },
+  { value: "ball", label: PM_TERMS.ball },
   { value: "priority", label: "Priority" },
 ];
 function isSwimlane(v: string | undefined): v is Exclude<ProjectSwimlane, "status"> {
-  return v === "assignee" || v === "priority";
+  return v === "assignee" || v === "ball" || v === "priority";
 }
 
 function who(t: PmTask): string {
   return t.assignee ? (t.assignee.responsibleName || t.assignee.refName) : "Unassigned";
+}
+
+// P4-B9 — List-view Ball/Responsible columns read the two slots directly rather than through
+// `who()`'s blended fallback (which exists for callers that only have room for one name).
+function ballWho(t: PmTask): string {
+  return t.assignee?.refName || PM_TERMS.unassigned;
+}
+function responsibleWho(t: PmTask): string {
+  return t.assignee?.responsibleName || PM_TERMS.unassigned;
 }
 
 export async function ProjectWorkspaceView({
@@ -156,7 +183,15 @@ export async function ProjectWorkspaceView({
   const taskUrgencyById: Record<string, UrgencyTier> = {};
   for (const t of tasks) taskUrgencyById[t.id] = taskUrgency({ dueDate: t.dueDate, isDone: isDoneStatus(t.status, projectStatuses) }, today);
   const selectedTagIds = parseTagFilterParam(searchParams.tags);
-  const filteredTasks = selectedTagIds.length === 0 ? tasks : tasks.filter((t) => t.tags.some((id) => selectedTagIds.includes(id)));
+  const tagFilteredTasks = selectedTagIds.length === 0 ? tasks : tasks.filter((t) => t.tags.some((id) => selectedTagIds.includes(id)));
+  // P4-B9: Ball/Responsible facets — options derived from the FULL unfiltered task set (so a
+  // filter never removes its own options), applied on top of the tag filter, same chained-filter
+  // shape as the dept board's tag-then-focus filtering.
+  const selectedBallIds = parseTagFilterParam(searchParams.ball);
+  const selectedResponsibleIds = parseTagFilterParam(searchParams.responsible);
+  const ballOptions = ballFacetOptions(tasks);
+  const responsibleOptions = responsibleFacetOptions(tasks);
+  const filteredTasks = filterTasksByResponsible(filterTasksByBall(tagFilteredTasks, selectedBallIds), selectedResponsibleIds);
 
   // Own path in whichever mount point rendered this component — derivable
   // from `backHref` without a 4th "self path" prop: the list page's href
@@ -229,6 +264,8 @@ export async function ProjectWorkspaceView({
           <form className="lux-filters" method="get" aria-label="Filter by tag">
             <input type="hidden" name="view" value={view} />
             {swimlane !== "status" && <input type="hidden" name="swimlane" value={swimlane} />}
+            {selectedBallIds.map((id) => <input key={id} type="hidden" name="ball" value={id} />)}
+            {selectedResponsibleIds.map((id) => <input key={id} type="hidden" name="responsible" value={id} />)}
             <div className="pm-tagfilter">
               <span className="pm-tagfilter__label">Tags</span>
               <div className="pm-tagfilter__options">
@@ -250,9 +287,55 @@ export async function ProjectWorkspaceView({
         </div>
       )}
 
+      {/* Ball/Responsible filter facets (P4-B9) — same bookmarkable-GET-form shape as the tag
+          filter above, and independent of it (both can be active at once). Only renders when the
+          project has more than the trivial "no assignee at all" option, same threshold the tag
+          filter uses (`tags.length > 0`). */}
+      {(ballOptions.length > 0 || responsibleOptions.length > 0) && (
+        <div className="pm-filterbar">
+          <form className="lux-filters" method="get" aria-label={`Filter by ${PM_TERMS.ball} or ${PM_TERMS.responsible}`}>
+            <input type="hidden" name="view" value={view} />
+            {swimlane !== "status" && <input type="hidden" name="swimlane" value={swimlane} />}
+            {selectedTagIds.map((id) => <input key={id} type="hidden" name="tags" value={id} />)}
+            {ballOptions.length > 0 && (
+              <div className="pm-tagfilter">
+                <span className="pm-tagfilter__label">{PM_TERMS.ball}</span>
+                <div className="pm-tagfilter__options">
+                  {ballOptions.map((o) => (
+                    <label key={o.id} className="pm-tagfilter__opt">
+                      <input type="checkbox" name="ball" value={o.id} defaultChecked={selectedBallIds.includes(o.id)} />
+                      {o.label}
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
+            {responsibleOptions.length > 0 && (
+              <div className="pm-tagfilter">
+                <span className="pm-tagfilter__label">{PM_TERMS.responsible}</span>
+                <div className="pm-tagfilter__options">
+                  {responsibleOptions.map((o) => (
+                    <label key={o.id} className="pm-tagfilter__opt">
+                      <input type="checkbox" name="responsible" value={o.id} defaultChecked={selectedResponsibleIds.includes(o.id)} />
+                      {o.label}
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
+            <div className="lux-filters__actions">
+              <button type="submit" className="lux-btn lux-btn--ghost lux-btn--sm">Apply</button>
+              {(selectedBallIds.length > 0 || selectedResponsibleIds.length > 0) && (
+                <a href={`${basePath}?view=${view}`} className="lux-btn lux-btn--ghost lux-btn--sm">Reset</a>
+              )}
+            </div>
+          </form>
+        </div>
+      )}
+
       {view === "board" && (
         filteredTasks.length === 0 ? (
-          <EmptyNote>{tasks.length === 0 ? "No tasks yet — create the first one above." : "No tasks match this tag filter."}</EmptyNote>
+          <EmptyNote>{tasks.length === 0 ? "No tasks yet — create the first one above." : "No tasks match these filters."}</EmptyNote>
         ) : (
             <>
               {/* Unboxed: grouping is a setting, and a bordered card gave it the same weight as the
@@ -261,6 +344,9 @@ export async function ProjectWorkspaceView({
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>
                   <form className="lux-filters" method="get" aria-label="Board group-by">
                     <input type="hidden" name="view" value="board" />
+                    {selectedTagIds.map((id) => <input key={id} type="hidden" name="tags" value={id} />)}
+                    {selectedBallIds.map((id) => <input key={id} type="hidden" name="ball" value={id} />)}
+                    {selectedResponsibleIds.map((id) => <input key={id} type="hidden" name="responsible" value={id} />)}
                     <label className="lux-filters__field">
                       <span>Group by</span>
                       <select name="swimlane" defaultValue={swimlane}>
@@ -290,6 +376,8 @@ export async function ProjectWorkspaceView({
                 <Board columns={priorityColumns(filteredTasks)} move={setTaskPriority} blockedIds={blockedIds} taskHrefBase={taskHrefBase} taskTags={taskTags} taskUrgency={taskUrgencyById} />
               ) : swimlane === "assignee" ? (
                 <Board columns={assigneeColumns(filteredTasks)} move={reassignResponsible} blockedIds={blockedIds} taskHrefBase={taskHrefBase} taskTags={taskTags} taskUrgency={taskUrgencyById} />
+              ) : swimlane === "ball" ? (
+                <Board columns={ballColumns(filteredTasks)} move={reassignBall} blockedIds={blockedIds} taskHrefBase={taskHrefBase} taskTags={taskTags} taskUrgency={taskUrgencyById} />
               ) : (
                 <Board columns={groupByStatus(filteredTasks, projectStatuses)} move={moveTask} colorColumns={showStatusColors} blockedIds={blockedIds} taskHrefBase={taskHrefBase} taskTags={taskTags} taskUrgency={taskUrgencyById} />
               )}
@@ -300,10 +388,10 @@ export async function ProjectWorkspaceView({
       {view === "list" && (
         <Card>
           {filteredTasks.length === 0 ? (
-            <EmptyNote>{tasks.length === 0 ? "No tasks yet." : "No tasks match this tag filter."}</EmptyNote>
+            <EmptyNote>{tasks.length === 0 ? "No tasks yet." : "No tasks match these filters."}</EmptyNote>
           ) : (
             <HairlineTable
-              columns={[{ label: "Task" }, { label: "Tags" }, { label: "Assignee" }, { label: "Status" }, { label: "Progress" }, { label: "Due", align: "right" }]}
+              columns={[{ label: "Task" }, { label: "Tags" }, { label: PM_TERMS.ball }, { label: PM_TERMS.responsible }, { label: "Status" }, { label: "Progress" }, { label: "Due", align: "right" }]}
               rows={filteredTasks.map((t) => [
                 <Link key="t" href={taskHref(t.id)} style={{ color: "var(--text-primary)", textDecoration: "none" }}>{titleWithRecurrenceGlyph(t)}</Link>,
                 taskTags[t.id]?.length ? (
@@ -311,7 +399,8 @@ export async function ProjectWorkspaceView({
                     {taskTags[t.id].map((tg) => <TagChip key={tg.id} label={tg.label} color={tg.color} />)}
                   </div>
                 ) : "—",
-                who(t),
+                ballWho(t),
+                responsibleWho(t),
                 <StatusBadge key="s" label={statusLabel(t.status)} />,
                 <ProgressBar key="p" value={t.progress} />,
                 <span key="d" style={{ display: "inline-flex", alignItems: "center", gap: 6, justifyContent: "flex-end" }}>
@@ -319,7 +408,7 @@ export async function ProjectWorkspaceView({
                   <UrgencyChip tier={taskUrgencyById[t.id]} variant="dot" />
                 </span>,
               ])}
-              tcols="2fr 1.4fr 1.2fr 1fr 1.2fr 0.8fr"
+              tcols="2fr 1.2fr 1.1fr 1.1fr 1fr 1.2fr 0.8fr"
             />
           )}
         </Card>
@@ -333,7 +422,12 @@ export async function ProjectWorkspaceView({
         const burndown = tl ? burndownOverlay(tl, burndownSeries) : [];
         return (
           <Card>
-            {tl ? <Gantt timeline={tl} taskHrefBase={taskHrefBase} barColors={barColors} burndown={burndown} taskUrgency={taskUrgencyById} /> : <EmptyNote>Add start/due dates to tasks to see them on the timeline.</EmptyNote>}
+            {/* `todayISO`/`taskTags` are threaded from here for the same reason `taskUrgency` is:
+                this page already resolves `today` once on the server, and Gantt's client-side
+                fallback exists only for callers that don't. Passing it keeps the today-marker on the
+                server clock — the one that decided every urgency tier on this page — instead of the
+                viewer's, which can disagree across a timezone or a midnight boundary. */}
+            {tl ? <Gantt timeline={tl} taskHrefBase={taskHrefBase} barColors={barColors} burndown={burndown} taskUrgency={taskUrgencyById} todayISO={today} taskTags={taskTags} /> : <EmptyNote>Add start/due dates to tasks to see them on the timeline.</EmptyNote>}
           </Card>
         );
       })()}

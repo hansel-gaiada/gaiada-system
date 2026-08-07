@@ -9,7 +9,8 @@ import { attachFileAction, deleteFileAction } from "@/lib/collabActions";
 import { Attachments } from "@/components/Attachments";
 import {
   getPmTask, listTaskComments, listSuggestions, assignableUnits, listPmTasks, listTimeLogs, listTags,
-  listProjectStatuses, listFollowers, openDependencies, isDoneStatus, timeSummary, wouldCreateCycle, titleWithRecurrenceGlyph, resolveTags, taskUrgency, type PmTask,
+  listProjectStatuses, listFollowers, listAssignmentHistory, openDependencies, reachableStatusIds,
+  isDoneStatus, timeSummary, wouldCreateCycle, titleWithRecurrenceGlyph, resolveTags, taskUrgency, type PmTask,
 } from "@/lib/pm";
 import {
   setTaskProgress, toggleSubtask, addSubtask, setAssignee, postTaskComment,
@@ -85,7 +86,7 @@ export async function TaskDetailView({
     );
   }
 
-  const [comments, suggestions, assignable, projectTasks, timeLogs, files, tagRegistry, customFieldDefs, projectStatuses, followers] = await Promise.all([
+  const [comments, suggestions, assignable, projectTasks, timeLogs, files, tagRegistry, customFieldDefs, projectStatuses, followers, assignmentHistory] = await Promise.all([
     listTaskComments(userId, tenant, taskId),
     listSuggestions(userId, tenant, taskId),
     assignableUnits(userId, tenant),
@@ -96,6 +97,7 @@ export async function TaskDetailView({
     getFieldDefs(userId, tenant, "pm_task"),
     listProjectStatuses(userId, tenant, task.projectId),
     listFollowers(userId, tenant, taskId),
+    listAssignmentHistory(userId, tenant, taskId), // P4-B7
   ]);
   const canEdit = true; // signed-in members; backend RLS is the real boundary
   const statusLabel = (id: string) => projectStatuses.find((s) => s.id === id)?.label ?? id;
@@ -112,11 +114,35 @@ export async function TaskDetailView({
     .map((o) => ({ id: o.id, title: o.title }));
   const time = timeSummary(timeLogs);
 
+  // P4-I4: a courtesy mirror of the server-side chain-enforcement gate (P4-I1, built in parallel).
+  // Only Backlog/isBlocked/Done stay reachable while blockers are open — everything else is
+  // disabled with the reason stated, never a silently dead option. The task's OWN current status
+  // is never disabled (a task already sitting somewhere the ladder no longer allows must stay
+  // visibly selected, not rendered as a broken control).
+  const isBlockedByDeps = openDeps.length > 0;
+  const reachable = reachableStatusIds(projectStatuses, isBlockedByDeps);
+  const statusOptions = projectStatuses.map((s) => ({
+    id: s.id, label: s.label, color: s.color,
+    disabled: s.id !== task.status && !reachable.has(s.id),
+  }));
+  const statusDisabledHint = isBlockedByDeps
+    ? `Blocked by ${openDeps.length} open ${openDeps.length === 1 ? "dependency" : "dependencies"} — clear ${openDeps.length === 1 ? "it" : "them"} first.`
+    : undefined;
+
   const responsibleId = task.assignee?.responsibleId;
   const fmtMinutes = (m: number | null) => {
     if (m === null || m === 0) return null;
     const h = Math.floor(m / 60), r = m % 60;
     return h > 0 ? `${h}h${r ? ` ${r}m` : ""}` : `${r}m`;
+  };
+  // P4-B7: this component is an async Server Component — it renders once server-side with no
+  // client-side re-render/hydration of this markup, so a locale-formatted timestamp here cannot
+  // diverge the way it would inside a "use client" island (same convention as DocHistory's own
+  // `toLocaleString`, just without that component's hydration exposure).
+  const fmtWhen = (iso: string) => {
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return iso;
+    return d.toLocaleString("en-GB", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
   };
 
   // P4-F3: resolved once, server-side, so the "Today" quick-schedule button and the overdue
@@ -179,12 +205,19 @@ export async function TaskDetailView({
         </div>
       )}
 
-      {/* Blocked is the one thing that must interrupt: it explains why the work isn't moving. */}
+      {/* Blocked is the one thing that must interrupt: it explains why the work isn't moving, and
+          P4-I4 requires each blocker to be named AND linked, not just counted. */}
       {openDeps.length > 0 && (
         <p style={{ margin: "0 0 14px", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
           <span className="pm-blocked-chip">Blocked by {openDeps.length}</span>
           <span style={{ font: "400 13px var(--font-body)", color: "var(--erp-ink-60)" }}>
-            Waiting on: {openDeps.map((d) => d.title).join(", ")}
+            Waiting on:{" "}
+            {openDeps.map((d, i) => (
+              <span key={d.id}>
+                {i > 0 && ", "}
+                <Link href={`/tasks/${d.id}`} className="pm-detail__link">{d.title}</Link>
+              </span>
+            ))}
           </span>
         </p>
       )}
@@ -238,10 +271,11 @@ export async function TaskDetailView({
             <Prop label="Status">
               <StatusSelect
                 current={task.status}
-                statuses={projectStatuses.map((s) => ({ id: s.id, label: s.label, color: s.color }))}
+                statuses={statusOptions}
                 canEdit={canEdit}
                 save={setTaskStatus.bind(null, task.id)}
                 undoSpawn={task.recurrence ? undoRecurrenceSpawn.bind(null, task.projectId) : undefined}
+                disabledHint={statusDisabledHint}
               />
             </Prop>
             {/* Ball = assignee.refId/kind, Responsible = assignee.responsibleId — one field, two
@@ -277,6 +311,36 @@ export async function TaskDetailView({
               <ProgressControl taskId={task.id} value={task.progress} canEdit={canEdit} save={setTaskProgress} />
             </Prop>
           </div>
+
+          {/* P4-B7 — the assignment-history timeline (migration 0087, plan §1.5). Passing the Ball
+              above never erases the previous holder; this is the full append-only record, newest
+              first, read straight off the ledger rather than reconstructed from current state. */}
+          <Section label="History" count={assignmentHistory.length || undefined}>
+            {assignmentHistory.length === 0 ? (
+              <p className="pm-desc pm-desc--empty">No history yet.</p>
+            ) : (
+              <ol className="pm-history">
+                {assignmentHistory.map((e) => (
+                  <li key={e.id} className="pm-history__row">
+                    <span className="pm-history__when">{fmtWhen(e.createdAt)}</span>
+                    <span className="pm-history__body">
+                      <strong>{e.refName ?? PM_TERMS.unassigned}</strong>
+                      {e.refKind && e.refKind !== "person" && (
+                        <span className="pm-history__muted"> · {e.refKind}</span>
+                      )}
+                      <span className="pm-history__muted"> took the {PM_TERMS.ball.toLowerCase()}</span>
+                      {e.responsibleName && (
+                        <span className="pm-history__muted"> · {PM_TERMS.responsible}: {e.responsibleName}</span>
+                      )}
+                      <span className="pm-history__muted"> · {statusLabel(e.statusId)}</span>
+                      {e.changedByName && <span className="pm-history__by"> — by {e.changedByName}</span>}
+                      {e.note && <span className="pm-history__note"> “{e.note}”</span>}
+                    </span>
+                  </li>
+                ))}
+              </ol>
+            )}
+          </Section>
 
           {canEdit && (
             <Section label={task.assignee ? "Reassign" : "Assign"}>

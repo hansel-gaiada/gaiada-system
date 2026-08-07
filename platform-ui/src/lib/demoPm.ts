@@ -16,6 +16,7 @@ import {
   nextRecurrenceOccurrence,
   RECURRENCE_FREQS,
   type PmTask,
+  type AssignmentEvent,
   type PmProject,
   type Milestone,
   type ProjectDoc,
@@ -223,6 +224,56 @@ const DEMO_SELF = "demo-hansel";
 const followerStore: Record<string, Set<string>> = {};
 function followersFor(taskId: string): { id: string; name: string }[] {
   return [...(followerStore[taskId] ?? [])].map((id) => ({ id, name: MEMBERS[id] ?? id }));
+}
+
+// ---- assignment history (P4-B1..B7) ----
+// The demo twin of `pm_task_assignment_events` (migration 0087). Append-only, exactly like the
+// real table: nothing here ever mutates or removes a row, because "passing the ball does not erase
+// the previous holder" IS the feature — a fixture that overwrote would demo the opposite of what
+// shipped.
+//
+// Remember Ball is NOT a separate field: Ball = `assignee.refId`/`kind`, Responsible =
+// `assignee.responsibleId` (owner decision 2026-08-06). So one row records both slots as they stood
+// at that moment, plus the status the task was in at handoff.
+//
+// Seeding is LAZY and mirrors the migration's backfill: a task that already has an assignee gets one
+// synthetic origin row on first read, so existing demo tasks don't read as "never assigned". Without
+// it the History section would look broken on every seeded task rather than merely empty.
+const assignmentEvents: Record<string, AssignmentEvent[]> = {};
+
+function appendAssignmentEvent(t: PmTask, changedBy: string | null, note: string | null): void {
+  (assignmentEvents[t.id] ??= []).push({
+    id: nextId("ae"),
+    refId: t.assignee?.refId ?? null,
+    refKind: t.assignee?.kind ?? null,
+    refName: t.assignee?.refName ?? null,
+    responsibleId: t.assignee?.responsibleId ?? null,
+    responsibleName: t.assignee?.responsibleName ?? null,
+    statusId: t.status,
+    note,
+    changedBy,
+    changedByName: changedBy ? (MEMBERS[changedBy] ?? changedBy) : null,
+    createdAt: new Date().toISOString(),
+  });
+}
+
+function assignmentHistoryFor(taskId: string): AssignmentEvent[] {
+  const t = tasks.find((x) => x.id === taskId);
+  if (!t) return [];
+  if (!assignmentEvents[taskId] && t.assignee) {
+    // Origin row, dated from the task itself rather than "now" — the real backfill dates from the
+    // task's own created_at, and a history that claims every legacy task was assigned this second
+    // would be actively misleading.
+    assignmentEvents[taskId] = [{
+      id: nextId("ae"),
+      refId: t.assignee.refId, refKind: t.assignee.kind, refName: t.assignee.refName,
+      responsibleId: t.assignee.responsibleId, responsibleName: t.assignee.responsibleName,
+      statusId: t.status, note: null, changedBy: null, changedByName: null,
+      createdAt: t.updatedAt ?? "2026-07-15T09:00:00Z",
+    }];
+  }
+  // Newest-first, matching the endpoint's documented contract.
+  return [...(assignmentEvents[taskId] ?? [])].reverse();
 }
 
 // ---- comment reactions (P3-09) ----
@@ -451,6 +502,10 @@ export function pmDemo(method: string, p: string, search: URLSearchParams, body?
   }
 
   if (!p.includes("/pm/")) return null;
+
+  // Assignment history (P4-B7) — the append-only chain behind the task detail's History section.
+  const assignHistMatch = p.match(/^\/api\/[^/]+\/pm\/tasks\/([^/]+)\/assignment-history$/);
+  if (assignHistMatch) return ok(assignmentHistoryFor(assignHistMatch[1]));
 
   // Task followers (P3-09) — self-scoped, member-level.
   const followersMatch = p.match(/^\/api\/[^/]+\/pm\/tasks\/([^/]+)\/followers$/);
@@ -910,7 +965,19 @@ function patchTask(t: PmTask, b: Record<string, unknown>): { id: string; dueDate
   if (typeof b.addDependency === "string" && b.addDependency && !t.dependsOn.includes(b.addDependency)) t.dependsOn.push(b.addDependency);
   if (typeof b.removeDependency === "string") t.dependsOn = t.dependsOn.filter((d) => d !== b.removeDependency);
   if (typeof b.progress === "number") t.progress = Math.max(0, Math.min(100, b.progress));
-  if (b.assignee !== undefined) t.assignee = (b.assignee as Assignee) || null;
+  if (b.assignee !== undefined) {
+    const before = JSON.stringify(t.assignee ?? null);
+    // Materialize the origin row FIRST, while `t.assignee` still holds the OLD value. Seeding after
+    // the mutation records the incoming assignee as the task's "original" one and then appends the
+    // same value again — a phantom extra row, and a history that lies about who held it first.
+    assignmentHistoryFor(t.id);
+    t.assignee = (b.assignee as Assignee) || null;
+    // Append only on a REAL change — the backend gates on the same thing (applyRoleTransition
+    // reports whether a role actually changed), so a no-op PATCH must not churn the ledger.
+    if (JSON.stringify(t.assignee ?? null) !== before) {
+      appendAssignmentEvent(t, DEMO_SELF, (b.assignmentNote as string) ?? null);
+    }
+  }
   if (typeof b.addSubtask === "string" && b.addSubtask.trim()) t.subtasks.push({ id: nextId("s"), title: b.addSubtask.trim(), done: false });
   if (typeof b.toggleSubtask === "string") {
     const s = t.subtasks.find((x) => x.id === b.toggleSubtask);

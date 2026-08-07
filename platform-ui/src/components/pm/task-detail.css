@@ -102,6 +102,38 @@
 .pm-detail__project:hover { color: var(--pm-text); }
 .pm-detail__actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
 
+/* P4-I4: a blocked task's blockers, named AND linked (not just counted) in the banner above the
+   properties column. */
+.pm-detail__link { font: 400 13px var(--font-body); color: var(--pm-text-dim); text-decoration: none; }
+.pm-detail__link:hover { color: var(--pm-text); text-decoration: underline; }
+
+/* P4-I4: the reason a status option is disabled — visible, not just a hover title, because a
+   dead control with no stated cause reads as a bug. Shares the same overdue-toned hairline as
+   `.pm-blocked-chip` (pm.css) so the two visually agree without duplicating that token choice. */
+.pm-statussel__hint {
+  display: block;
+  width: 100%;
+  margin-top: 4px;
+  font: 400 11px var(--font-body);
+  color: var(--pm-urgency-overdue-fg);
+}
+
+/* P4-B7 — the assignment-history (Ball) timeline. Newest-first rows; a compact two-line layout
+   (when · what happened) rather than a table, since most rows are short and a table would waste
+   the width the properties column doesn't have. */
+.pm-history { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.pm-history__row { display: flex; flex-direction: column; gap: 2px; }
+.pm-history__when {
+  font: 700 10px var(--font-body);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--pm-text-faint);
+}
+.pm-history__body { font: 400 13px/1.5 var(--font-body); color: var(--pm-text); }
+.pm-history__muted { color: var(--pm-text-faint); }
+.pm-history__by { color: var(--pm-text-dim); }
+.pm-history__note { color: var(--pm-text-dim); font-style: italic; }
+
 /* ── Slide-over ───────────────────────────────────────────────────────────── */
 .pm-drawer__scrim {
   position: fixed;

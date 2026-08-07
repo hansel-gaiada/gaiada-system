@@ -90,6 +90,9 @@ export default async function DepartmentTimelinePage({ params }: { params: Param
         canEdit={canEdit}
         burndown={burndown}
         taskUrgency={taskUrgencyById}
+        // Server-resolved today — the same one that decided every tier in taskUrgencyById, so the
+        // marker line and the bars around it can never disagree about what day it is.
+        todayISO={today}
       />
     </Card>
   );

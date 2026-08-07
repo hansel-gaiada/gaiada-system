@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { pmDemo, allTrackerNotifications, synthBurndownSeries } from "./demoPm";
-import type { PmTask, PmProject, ProjectStatus, TrackerSuggestion, Comment, BurndownPoint, Template, ProjectDoc, DocVersion, DocVersionFull } from "./pm";
+import type { PmTask, PmProject, ProjectStatus, TrackerSuggestion, Comment, BurndownPoint, Template, ProjectDoc, DocVersion, DocVersionFull, AssignmentEvent, Assignee } from "./pm";
 
 const T = "co-agency";
 function call(method: string, path: string, body?: unknown) {
@@ -685,5 +685,52 @@ describe("demoPm note (doc) templates", () => {
 
     const taskTemplates = json<Template[]>(call("GET", `/api/${T}/pm/templates?kind=task`));
     expect(taskTemplates.some((t) => t.id === created.id)).toBe(false);
+  });
+});
+
+// ---- P4-B7 assignment history (demo twin of migration 0087) ----
+describe("demoPm assignment history", () => {
+  it("seeds one origin row for a task that already has an assignee, dated from the task not from now", () => {
+    const t = json<PmTask>(call("GET", `/api/${T}/pm/tasks/t-1`));
+    const hist = json<AssignmentEvent[]>(call("GET", `/api/${T}/pm/tasks/t-1/assignment-history`));
+    if (t.assignee) {
+      expect(hist).toHaveLength(1);
+      expect(hist[0].responsibleId).toBe(t.assignee.responsibleId);
+      expect(hist[0].createdAt).not.toBe(new Date().toISOString());
+    } else {
+      expect(hist).toHaveLength(0);
+    }
+  });
+
+  // The whole point of the ledger: reassigning must NOT erase who held it before.
+  it("appends on reassignment and never removes the previous holder", () => {
+    const created = json<{ id: string }>(call("POST", `/api/${T}/pm/tasks`, { projectId: "p-web-1", title: "Ball passing" }));
+    const a: Assignee = { kind: "person", refId: "u-1", refName: "Ada", responsibleId: "u-1", responsibleName: "Ada" };
+    const b: Assignee = { kind: "person", refId: "u-2", refName: "Ben", responsibleId: "u-2", responsibleName: "Ben" };
+    call("PATCH", `/api/${T}/pm/tasks/${created.id}`, { assignee: a });
+    call("PATCH", `/api/${T}/pm/tasks/${created.id}`, { assignee: b });
+    const hist = json<AssignmentEvent[]>(call("GET", `/api/${T}/pm/tasks/${created.id}/assignment-history`));
+    expect(hist).toHaveLength(2);
+    expect(hist[0].refName).toBe("Ben");   // newest first
+    expect(hist[1].refName).toBe("Ada");   // the previous holder survives
+  });
+
+  // Mirrors the backend, where applyRoleTransition reports whether a role actually changed.
+  it("does not churn the ledger on a no-op reassignment", () => {
+    const created = json<{ id: string }>(call("POST", `/api/${T}/pm/tasks`, { projectId: "p-web-1", title: "No churn" }));
+    const a: Assignee = { kind: "person", refId: "u-1", refName: "Ada", responsibleId: "u-1", responsibleName: "Ada" };
+    call("PATCH", `/api/${T}/pm/tasks/${created.id}`, { assignee: a });
+    call("PATCH", `/api/${T}/pm/tasks/${created.id}`, { assignee: a });
+    expect(json<AssignmentEvent[]>(call("GET", `/api/${T}/pm/tasks/${created.id}/assignment-history`))).toHaveLength(1);
+  });
+
+  it("records the status the task was in at the moment of handoff", () => {
+    const created = json<{ id: string }>(call("POST", `/api/${T}/pm/tasks`, { projectId: "p-web-1", title: "Status at handoff" }));
+    call("PATCH", `/api/${T}/pm/tasks/${created.id}`, { status: "in_progress" });
+    call("PATCH", `/api/${T}/pm/tasks/${created.id}`, {
+      assignee: { kind: "person", refId: "u-1", refName: "Ada", responsibleId: "u-1", responsibleName: "Ada" },
+    });
+    const hist = json<AssignmentEvent[]>(call("GET", `/api/${T}/pm/tasks/${created.id}/assignment-history`));
+    expect(hist[0].statusId).toBe("in_progress");
   });
 });

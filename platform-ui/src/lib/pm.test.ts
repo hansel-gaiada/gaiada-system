@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import {
   taskProgressFromSubtasks, projectProgress, resolveResponsible, groupByStatus, suggestFromTask,
-  computeTimeline, wouldCreateCycle, openDependencies, timeSummary,
+  computeTimeline, wouldCreateCycle, openDependencies, reachableStatusIds, DEFAULT_STATUSES, timeSummary,
   groupTimelineBars, offsetPctForDate, milestoneMarkers, dependencyEdges, dependencyConflict,
   resolveTags, distinctTagLabels, filterTasksByTagLabels, parseTagFilterParam,
   statusFlags, isDoneStatus, isBlockedStatus, isSynthDefaultStatuses, synthDefaultStatuses,
@@ -175,6 +175,34 @@ describe("dependencies", () => {
     const byId = new Map([[done.id, done], ["x", task({ id: "x", status: "todo" })]]);
     const t = task({ id: "t", dependsOn: ["a", "x"] });
     expect(openDependencies(t, byId).map((d) => d.id)).toEqual(["x"]);
+  });
+});
+
+// ---- P4-I4 chain enforcement (client-side courtesy) ----
+describe("reachableStatusIds", () => {
+  it("everything is reachable when nothing blocks the task", () => {
+    expect(reachableStatusIds(DEFAULT_STATUSES, false)).toEqual(new Set(DEFAULT_STATUSES.map((s) => s.id)));
+  });
+
+  it("blocked collapses the ladder to intake (backlog), isBlocked statuses, and done — never ToDo/Doing", () => {
+    const reachable = reachableStatusIds(DEFAULT_STATUSES, true);
+    expect(reachable.has("backlog")).toBe(true); // intake
+    expect(reachable.has("blocked")).toBe(true);  // isBlocked — the human "waiting externally" case
+    expect(reachable.has("done")).toBe(true);     // isDone — finishing is the server's call, not this courtesy check's
+    expect(reachable.has("todo")).toBe(false);
+    expect(reachable.has("in_progress")).toBe(false);
+  });
+
+  it("a fully custom registry with no id called \"backlog\" still exempts its own intake status", () => {
+    expect(reachableStatusIds(CUSTOM, true)).toEqual(new Set(["s-back", "s-stuck", "s-ship"]));
+  });
+
+  it("a registry with zero done/blocked statuses still exempts intake alone", () => {
+    const allOpen: ProjectStatus[] = [
+      { id: "one", label: "One", color: "#000", isDone: false, isBlocked: false, position: 0 },
+      { id: "two", label: "Two", color: "#000", isDone: false, isBlocked: false, position: 1 },
+    ];
+    expect(reachableStatusIds(allOpen, true)).toEqual(new Set(["one"]));
   });
 });
 

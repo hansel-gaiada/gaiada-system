@@ -4,6 +4,8 @@ import {
   toRailPriority, myDeptTasksToday, myBlockedTasks,
   parseBoardFocus, encodeBoardFocus, filterTasksByFocus,
   priorityColumns, assigneeColumns, divisionColumns, divisionStatusGrid, assigneeStatusGrid,
+  ballColumns, ballKey, responsibleKey, filterTasksByBall, filterTasksByResponsible,
+  ballFacetOptions, responsibleFacetOptions,
   type DeptDivision,
 } from "./departments";
 import { DEFAULT_STATUSES } from "./pm";
@@ -245,6 +247,88 @@ describe("assigneeColumns", () => {
     expect(cols.map((c) => c.label)).toEqual(["Ada", "Ben", "Unassigned"]);
     expect(cols.find((c) => c.label === "Unassigned")?.tasks.map((t) => t.id)).toEqual(["c"]);
     expect(cols.every((c) => c.people === undefined)).toBe(true);
+  });
+});
+
+// ---------------- Ball board (P4-B6/B9) ----------------
+describe("ballColumns", () => {
+  // Same person (Ada) holds the BALL on "a" but is only RESPONSIBLE (not the ball) on "b" — the
+  // whole point of the two axes being independent (plan §1.5): the two boards must disagree.
+  const tasks: PmTask[] = [
+    task({ id: "a", assignee: { kind: "person", refId: "u-1", refName: "Ada", responsibleId: "u-1", responsibleName: "Ada" } }),
+    task({ id: "b", assignee: { kind: "person", refId: "u-2", refName: "Ben", responsibleId: "u-1", responsibleName: "Ada" } }),
+    task({ id: "c", assignee: null }),
+  ];
+
+  it("groups by assignee.refId (the ball), not responsibleId", () => {
+    const cols = ballColumns(tasks);
+    expect(cols.find((c) => c.label === "Ada")?.tasks.map((t) => t.id)).toEqual(["a"]);
+    expect(cols.find((c) => c.label === "Ben")?.tasks.map((t) => t.id)).toEqual(["b"]);
+  });
+
+  it("leads with the 'no user' column (Repsona's own lower-case wording) instead of sorting it alphabetically", () => {
+    const cols = ballColumns(tasks);
+    expect(cols[0].label).toBe("no user");
+    expect(cols[0].tasks.map((t) => t.id)).toEqual(["c"]);
+    // the rest stay alphabetically sorted behind it
+    expect(cols.slice(1).map((c) => c.label)).toEqual(["Ada", "Ben"]);
+  });
+
+  it("omits the 'no user' column when every task has a ball holder", () => {
+    const placed = tasks.filter((t) => t.assignee);
+    expect(ballColumns(placed).map((c) => c.label)).toEqual(["Ada", "Ben"]);
+  });
+
+  it("differs from assigneeColumns (Responsible) for the SAME task set — the two boards show different tasks per person", () => {
+    const ballAda = ballColumns(tasks).find((c) => c.label === "Ada")!.tasks.map((t) => t.id);
+    const responsibleAda = assigneeColumns(tasks).find((c) => c.label === "Ada")!.tasks.map((t) => t.id);
+    expect(ballAda).toEqual(["a"]);
+    expect(responsibleAda).toEqual(["a", "b"]); // Ada is RESPONSIBLE for both
+  });
+});
+
+describe("ballKey / responsibleKey", () => {
+  it("read the two independent slots off the same assignee", () => {
+    const t = task({ assignee: { kind: "person", refId: "u-2", refName: "Ben", responsibleId: "u-1", responsibleName: "Ada" } });
+    expect(ballKey(t)).toBe("u-2");
+    expect(responsibleKey(t)).toBe("u-1");
+  });
+  it("sentinel keys for a task with no assignee at all", () => {
+    const t = task({ assignee: null });
+    expect(ballKey(t)).toBe("__no_ball");
+    expect(responsibleKey(t)).toBe("__unassigned");
+  });
+});
+
+describe("Ball / Responsible filter facets (P4-B9)", () => {
+  const tasks: PmTask[] = [
+    task({ id: "a", assignee: { kind: "person", refId: "u-1", refName: "Ada", responsibleId: "u-1", responsibleName: "Ada" } }),
+    task({ id: "b", assignee: { kind: "person", refId: "u-2", refName: "Ben", responsibleId: "u-1", responsibleName: "Ada" } }),
+    task({ id: "c", assignee: null }),
+  ];
+
+  it("filterTasksByBall: empty selection is a no-op; a non-empty selection keeps only matching ball holders", () => {
+    expect(filterTasksByBall(tasks, [])).toEqual(tasks);
+    expect(filterTasksByBall(tasks, ["u-1"]).map((t) => t.id)).toEqual(["a"]);
+    expect(filterTasksByBall(tasks, ["__no_ball"]).map((t) => t.id)).toEqual(["c"]);
+  });
+
+  it("filterTasksByResponsible: keeps only matching responsible ids, independent of the ball filter", () => {
+    expect(filterTasksByResponsible(tasks, [])).toEqual(tasks);
+    // Ada is responsible for BOTH a and b even though she only holds the ball on a.
+    expect(filterTasksByResponsible(tasks, ["u-1"]).map((t) => t.id)).toEqual(["a", "b"]);
+  });
+
+  it("ballFacetOptions/responsibleFacetOptions expose id/label pairs matching the board's own columns", () => {
+    expect(ballFacetOptions(tasks)).toEqual([
+      { id: "__no_ball", label: "no user" },
+      { id: "u-1", label: "Ada" },
+      { id: "u-2", label: "Ben" },
+    ]);
+    expect(responsibleFacetOptions(tasks)).toEqual([
+      { id: "u-1", label: "Ada" },
+      { id: "__unassigned", label: "Unassigned" },
+    ]);
   });
 });
 

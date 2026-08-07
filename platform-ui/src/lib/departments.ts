@@ -16,6 +16,7 @@ import { listProjects, type Project } from "./entities";
 import { listAssignmentsForUnit, assignmentInclusion, SERVICE_ASSIGNMENTS_ENABLED, type AssignmentSummary } from "./serviceAssignments";
 import type { Envelope } from "./envelope";
 import type { RailPriority } from "@/components/departments/MyWorkRail";
+import { PM_TERMS } from "./pmVocabulary";
 
 export interface DeptPerson { id: string; name: string }
 export interface DeptDivision { id: string; name: string; people: DeptPerson[] }
@@ -378,7 +379,12 @@ export function filterTasksByFocus(tasks: PmTask[], divisions: DeptDivision[], f
 // P2-09: the two flat lane axes above stay as-is; "grid-division"/"grid-assignee" are the NEW
 // true 2-axis grid mode (design spec §8) — same `?swimlane=` control, two more options, so the
 // GET-form/URL contract doesn't grow a second query param.
-export type BoardSwimlane = "status" | "assignee" | "priority" | "division" | "grid-division" | "grid-assignee";
+// P4-B6: "assignee" is, by its own key (`responsibleId`), already the Responsible axis —
+// `PM_TERMS.responsible` is what its board should be CALLED, but the persisted `?swimlane=`
+// value stays `assignee` so old bookmarked links keep working (same precedent as the id-vs-label
+// split throughout `pmVocabulary.ts`). "ball" is new: a genuinely separate axis keyed off
+// `assignee.refId` (see `ballColumns` below), never derived from "assignee".
+export type BoardSwimlane = "status" | "assignee" | "ball" | "priority" | "division" | "grid-division" | "grid-assignee";
 
 export function priorityColumns(tasks: PmTask[]): AxisColumn<Priority>[] {
   return PRIORITIES.map((p) => ({ key: p, label: PRIORITY_LABEL[p], tasks: tasks.filter((t) => t.priority === p) }));
@@ -393,6 +399,68 @@ export function assigneeColumns(tasks: PmTask[]): AxisColumn[] {
     byId.get(id)!.tasks.push(t);
   }
   return [...byId.values()].sort((a, b) => a.label.localeCompare(b.label));
+}
+
+// ---------------- Ball board (P4-B6/B9, plan §1.5) ----------------
+// Ball is `assignee.refId`/`kind` — a genuinely different axis from Responsible
+// (`assignee.responsibleId`, `assigneeColumns` above): the same person can hold the ball on one
+// task and be merely responsible (not holding the ball) on another, and the two boards must show
+// DIFFERENT tasks for the same person (plan §1.5's whole point). `ballKey`/`responsibleKey` are the
+// single definitions both the board columns and the filter facets (`filterTasksByBall`/
+// `filterTasksByResponsible`) key off, so a card can't land in one and be excluded by the other's
+// filter through two separately-maintained id readers.
+export function ballKey(task: PmTask): string {
+  return task.assignee?.refId ?? "__no_ball";
+}
+export function responsibleKey(task: PmTask): string {
+  return task.assignee?.responsibleId ?? "__unassigned";
+}
+
+// Per-person columns keyed off the BALL (`assignee.refId`), never `responsibleId` — dragging a
+// card here reassigns who currently holds the ball (`reassignBall`) and leaves Responsible
+// untouched, mirroring how the Responsible board's drag (`reassignResponsible`) leaves the ball
+// alone. Repsona's own "no user" column leads the board (PM_TERMS.unassigned, lower-case by
+// design) rather than sorting alphabetically with the rest — it's the parking lot for anything
+// nobody has picked up yet, not just another name.
+export function ballColumns(tasks: PmTask[]): AxisColumn[] {
+  const byId = new Map<string, AxisColumn>();
+  for (const t of tasks) {
+    const id = ballKey(t);
+    const label = t.assignee?.refName || PM_TERMS.unassigned;
+    if (!byId.has(id)) byId.set(id, { key: id, label, tasks: [] });
+    byId.get(id)!.tasks.push(t);
+  }
+  const rest = [...byId.entries()].filter(([id]) => id !== "__no_ball").sort((a, b) => a[1].label.localeCompare(b[1].label));
+  const cols: AxisColumn[] = [];
+  const noUser = byId.get("__no_ball");
+  if (noUser) cols.push(noUser);
+  for (const [, col] of rest) cols.push(col);
+  return cols;
+}
+
+// ---------------- Ball / Responsible filter facets (P4-B9) ----------------
+// Same "checkbox multi-select, empty selection = no filter" shape as the existing tag filter
+// (ProjectWorkspaceView/dept board page) — an empty `ids` means the facet hasn't been touched, not
+// "match nothing".
+export function filterTasksByBall(tasks: PmTask[], ids: string[]): PmTask[] {
+  if (ids.length === 0) return tasks;
+  const keep = new Set(ids);
+  return tasks.filter((t) => keep.has(ballKey(t)));
+}
+export function filterTasksByResponsible(tasks: PmTask[], ids: string[]): PmTask[] {
+  if (ids.length === 0) return tasks;
+  const keep = new Set(ids);
+  return tasks.filter((t) => keep.has(responsibleKey(t)));
+}
+
+// Facet option lists for the filter-bar checkboxes — id/label pairs derived from the SAME columns
+// the boards render, so a facet option's label can never drift from what the board itself calls
+// that person.
+export function ballFacetOptions(tasks: PmTask[]): { id: string; label: string }[] {
+  return ballColumns(tasks).map((c) => ({ id: c.key, label: c.label }));
+}
+export function responsibleFacetOptions(tasks: PmTask[]): { id: string; label: string }[] {
+  return assigneeColumns(tasks).map((c) => ({ id: c.key, label: c.label }));
 }
 
 export function divisionColumns(tasks: PmTask[], divisions: DeptDivision[]): AxisColumn[] {
