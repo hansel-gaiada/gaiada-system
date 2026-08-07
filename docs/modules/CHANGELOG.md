@@ -34,7 +34,14 @@ reconstructed from this table alone. Format defined in [`VERSIONING.md`](./VERSI
 > Not corrected retroactively (moving a pushed, already-deployed tag is its own risk); flagging so
 > the next session doesn't re-diagnose the same gap.
 
-### `Alpha 01.025.0064a` — 2026-08-07 — D13 stops trusting a declaration it could not verify
+### `Alpha 01.025.0065a` — 2026-08-07 — D13 stops trusting a declaration it could not verify,
+and the provider that makes it true becomes selectable
+
+> Cut as `0064a` first and re-cut before tagging, so `0064a` **never existed as a tag or a
+> deployment** — it was absorbed here rather than superseded. The reason is worth keeping: the
+> D13 fix alone would have left agent writes CONTAINED on the box with no way to enable them
+> honestly, so shipping the enforcement without the eval-cleared provider it demands would have
+> been a half-measure dressed as a release. Two module rows, one coherent change.
 
 One module moved, and it closes a security control that had been passing on a false premise since the
 agent-write path shipped.
@@ -58,6 +65,20 @@ Fixed as a class, in two halves that only work together:
    (`chain.RunWithHint`, the brain picker's wire). Before this it asserted a provider without ever
    requesting one, so it could never come true. Now the runner asks and (1) verifies it got it.
 
+**`platform-ui` `0.19.0` — the brain picker offers "Ollama Cloud".** The OpenAI-compatible slot was
+configured-but-unreachable from the UI, and it is the ONE provider `task-filer`'s eval was run against.
+The labels now distinguish the LOCAL ollama daemon from the cloud slot (same brand, different runtime and
+cost), and 4 tests pin every picker value against `ai-gateway-go`'s `knownProviders` — because a wrong
+value fails silently: it degrades to "Auto" with no error anywhere.
+
+**Enabled on `gda-aicenter` at the same time** (`.env`, no code): `OPENAI_BASE_URL`/`OPENAI_API_KEY` →
+Ollama Cloud, and `openai` appended **LAST** to `LLM_CHAIN`. Appending last is the whole trick — site
+topology strips gemini/claude, so unhinted callers (wa-chat-bot, knowledge, search) keep getting hermes
+first, unchanged; only a caller that HINTS openai gets it (the agent runner, or a user picking "Ollama
+Cloud"). `OPENAI_MAX_TOKENS` raised to 4096 because `deepseek-v4-flash` is a REASONING model: reasoning
+shares the budget and the provider returns a present-but-empty `content` as legitimate, so a starved
+budget reads as a silent empty reply rather than an error.
+
 **The `mcp__gaiada__*` tool names in `0063a` were Hermes' fingerprint, not a model guessing.** That cut
 recorded `task-filer` calling `mcp__gaiada__pm_listTasks` and read it as cross-namespace inference. A
 live probe of the same box returned `mcp__gaiada__projects_list` **from Hermes** — so the invented names
@@ -76,7 +97,7 @@ must not become a hard prod dependency, so that is an owner decision. If it rate
 closed rather than misbehaving. **Enrolling Hermes instead is not available:** it holds the runner's JSON
 protocol but names tools in its own MCP namespace, so every call fails the allow-list.
 
-Counter `0063 → 0064`: one module row moved. Note `cd2a13f` (observability OBS-04) and `2b03126`
+Counter `0063 → 0065`: two module rows moved (ai-agents, platform-ui). Note `cd2a13f` (observability OBS-04) and `2b03126`
 (nginx NET-01) shipped in this cut **without** bumping their module versions, so the counter understates
 the churn — flagged rather than silently corrected, since those are the owning sessions' entries.
 
@@ -85,7 +106,7 @@ the churn — flagged rather than silently corrected, since those are the owning
 | Module | Ver | | Module | Ver |
 |---|---|---|---|---|
 | platform-nest | `0.16.0` | | webdev | `0.11.0` |
-| platform-ui | `0.18.0` | | webdesk | `0.0.0` |
+| platform-ui | `0.19.0` | | webdesk | `0.0.0` |
 | ai-gateway-go | `0.13.1` | | search-marketing | `0.5.1` |
 | mcp-hub | `0.10.0` | | social-media | `0.0.0` |
 | sync-engine-go | `0.7.0` | | creative | `0.1.0` |
@@ -134,7 +155,7 @@ list; and a handoff to `task-filer` still files without the in-thread confirm ch
 | Module | Ver | | Module | Ver |
 |---|---|---|---|---|
 | platform-nest | `0.16.0` | | webdev | `0.11.0` |
-| platform-ui | `0.18.0` | | webdesk | `0.0.0` |
+| platform-ui | `0.19.0` | | webdesk | `0.0.0` |
 | ai-gateway-go | `0.13.1` | | search-marketing | `0.5.1` |
 | mcp-hub | `0.10.0` | | social-media | `0.0.0` |
 | sync-engine-go | `0.7.0` | | creative | `0.1.0` |
