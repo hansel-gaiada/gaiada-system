@@ -35,6 +35,33 @@ function escapeHtml(s: string): string {
     .replace(/'/g, "&#39;");
 }
 
+/** MAIL-18 gate follow-up (2026-08-08) — hardening, not a live bug fix.
+ *
+ *  `escapeHtml()` is the right tool for TEXT but not for a URL: a `javascript:alert(1)` payload
+ *  contains no `<`, `>`, `"` or `'`, so it passes through completely untouched and lands inside
+ *  `<a href="...">` as a working script URL. Escaping and scheme-safety are different problems and
+ *  the former does not imply the latter.
+ *
+ *  Not exploitable when this was written — every writer of `payload.href` (`intake.ts`'s
+ *  `absoluteEntityHref()` and the magic-link service) prefixes the trusted `MAIL_LINK_BASE_URL`
+ *  before storage, so a raw scheme could not reach a stored row. That is a property of today's
+ *  CALLERS, though, not of this renderer, and MAIL-38 has since made these templates render into an
+ *  elevated-only admin page — so the renderer should hold on its own rather than inherit safety from
+ *  every present and future caller getting it right.
+ *
+ *  Allowlist, not denylist: `javascript:`, `data:`, `vbscript:` and friends are unbounded, while the
+ *  set we legitimately emit is exactly two. Anything else renders as inert text via the caller's
+ *  normal escaping, so a bad URL becomes visible rather than clickable. */
+const SAFE_URL_SCHEME = /^https?:\/\//i;
+
+function safeHref(raw: string): string {
+  if (!raw) return "";
+  // Leading control characters and whitespace are stripped by browsers before scheme detection
+  // (`java\nscript:` is a classic bypass), so normalise before testing rather than after.
+  const normalized = raw.replace(/[\x00-\x20]/g, "");
+  return SAFE_URL_SCHEME.test(normalized) ? raw : "";
+}
+
 /** Shared payload shape for both approval wording classes (§7.2–§7.4). `href` is a PLAIN entity
  *  deep link with no token/session/capability (M11) — the caller builds it from
  *  `config.mail.linkBaseUrl`, never a literal domain. */
@@ -68,7 +95,7 @@ function renderApprovalWarning(payload: ApprovalMailPayload): RenderedMail {
     `<p>${escapeHtml(tool)} requested "${escapeHtml(asStr(payload.subjectTitle, "an action"))}" ` +
     `(impact: ${escapeHtml(impact)}) in ${escapeHtml(company)}.</p>` +
     `<p><strong>It is suspended; nothing has run.</strong></p>` +
-    `<p>Review it in the ERP: <a href="${escapeHtml(href)}">${escapeHtml(href)}</a></p>`;
+    `<p>Review it in the ERP: <a href="${escapeHtml(safeHref(href))}">${escapeHtml(href)}</a></p>`;
   return { subject, html, text };
 }
 
@@ -82,7 +109,7 @@ function renderApprovalActionable(payload: ApprovalMailPayload): RenderedMail {
   const text = `Your decision is needed on ${title}: ${href}`;
   const html =
     `<p>Your decision is needed on <strong>${escapeHtml(title)}</strong>:</p>` +
-    `<p><a href="${escapeHtml(href)}">${escapeHtml(href)}</a></p>`;
+    `<p><a href="${escapeHtml(safeHref(href))}">${escapeHtml(href)}</a></p>`;
   return { subject, html, text };
 }
 
@@ -103,7 +130,7 @@ function renderAuthShell(payload: AuthShellPayload): RenderedMail {
   const subject = stripHeaderInjection("Gaiada sign-in");
   const text = href ? `${body}\n\n${href}` : body;
   const html = href
-    ? `<p>${escapeHtml(body)}</p><p><a href="${escapeHtml(href)}">${escapeHtml(href)}</a></p>`
+    ? `<p>${escapeHtml(body)}</p><p><a href="${escapeHtml(safeHref(href))}">${escapeHtml(href)}</a></p>`
     : `<p>${escapeHtml(body)}</p>`;
   return { subject, html, text };
 }
@@ -138,7 +165,7 @@ function renderAuthMagicLink(payload: AuthMagicLinkPayload): RenderedMail {
   const html =
     `<p>Click the link below to sign in to Gaiada. This link expires in ${escapeHtml(String(ttl))} ` +
     `minute(s) and can only be used once.</p>` +
-    `<p><a href="${escapeHtml(href)}">${escapeHtml(href)}</a></p>` +
+    `<p><a href="${escapeHtml(safeHref(href))}">${escapeHtml(href)}</a></p>` +
     `<p>If you did not request this, you can safely ignore this email.</p>`;
   return { subject, html, text };
 }

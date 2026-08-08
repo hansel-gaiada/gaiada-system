@@ -275,6 +275,36 @@ a criterion here at all — deliverability is §15 staging content **by design**
 
 **Verdict: the dev stage CLOSES.** Staging begins at W-S0 with design §15 as the handover.
 
+**Both follow-ups CLOSED 2026-08-08, after the gate.**
+
+- **MAIL-05's outer controller is now DRIVEN, not corroborated** — the caveat carried since B2 is
+  gone. `POST /:tenantId/pipeline/gates` was called over real authenticated HTTP with a genuine
+  Keycloak token: Cerbos authorize → `resolveClientRecipients` → `notifyBestEffort` → queue → sender
+  produced a `mail_log` row tied to **that gate id** (checked by id, never by recency), `sent`, one
+  `notification_id`, `href = …/portal/approvals/<runId>` — portal-prefixed, no token or action
+  params, so **M11 holds on a live row**.
+  **A trap worth recording:** the first attempt used `actorSide: "internal"` and produced NO mail,
+  which looked like a defect. It is not — `openGate` resolves recipients ONLY for
+  `actorSide === "client"` (its own comment: "the client-actionable gate opens" trigger), because
+  staff notifications are realtime in-app by the owner's scoping decision. Worse, a stale
+  `"Pipeline Gate Opened"` row from an earlier agent's probe sat at the top of the table and was
+  nearly accepted as proof. **Query by the id you just created, never `ORDER BY created_at DESC`.**
+- **`escapeHtml()` now scheme-allowlists `href` (`safeHref`).** Escaping is not scheme-safety: a
+  `javascript:` URL contains no `<`, `>`, `"` or `'`, so it passed through untouched into
+  `<a href="…">`. Not exploitable when found (every writer prefixes the trusted
+  `MAIL_LINK_BASE_URL`), but MAIL-38 now renders these templates onto an elevated-only admin page,
+  so the renderer holds on its own instead of inheriting safety from every present and future
+  caller. Allowlist (`https?://` after stripping C0 controls, which defeats `java
+script:`), not a
+  denylist. A refused URL renders as a DEAD link with the value still visible, so it reads as
+  wrong rather than vanishing. Tests proven to have teeth: defeating `safeHref` fails them, restoring
+  it passes.
+  **Two of this project's own guards caught this work, and both were right:** `m11-non-goal.test.ts`
+  (the sign-in template key must appear in no file outside `magic-link/` — it greps the literal, so
+  even naming it in a comment trips it) and the **A12 grep gate** (zero `gaiada.com`/`gaiada.online`
+  literals in `src/mail/`, which my test URL violated). Both times the fix was to change the test,
+  never to weaken the guard.
+
 **Two observations carried forward, neither a blocker.**
 1. `webhook.controller.ts` still writes `stream='*'` — correct there: it is the **provider-authenticated** Brevo delivery webhook behind a separate `MAIL_WEBHOOK_TOKEN` (401 without it, verified), and a real provider bounce event genuinely does mean dead-everywhere. Re-check when R3 wires the real provider.
 2. `escapeHtml()` does not scheme-allowlist `href`, so a `javascript:` URL would pass through as literal text (it contains no `<>"` to escape). **Not exploitable today** — both writers of `payload.href` (`intake.ts`'s `absoluteEntityHref()` and the magic-link service) prefix the trusted `MAIL_LINK_BASE_URL` before storage, and MAIL-38's `sandbox=""` iframe blocks `javascript:` navigation as a second layer. Worth a senior-be hardening ticket, not a gate item.
