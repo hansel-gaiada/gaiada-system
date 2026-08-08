@@ -34,6 +34,9 @@ import {
   type BurndownPoint,
   type FlowPoint,
   type Template,
+  type ProductivityComponents,
+  type ProductivityDayPoint,
+  type ProductivityReport,
 } from "./pm";
 import { isTagColor, type TagColor } from "./tagColors";
 
@@ -224,6 +227,91 @@ const DEMO_SELF = "demo-hansel";
 const followerStore: Record<string, Set<string>> = {};
 function followersFor(taskId: string): { id: string; name: string }[] {
   return [...(followerStore[taskId] ?? [])].map((id) => ({ id, name: MEMBERS[id] ?? id }));
+}
+
+// ---- Productivity (P4-E2/E3/E4 demo twin) ----
+// Deterministic, not random-per-render: every date string hashes to the same synthetic count so
+// DEMO_MODE (and the e2e/build-gate runs against it) is reproducible. Mirrors the real contract
+// exactly, INCLUDING `score: null` + the identical `scoreNote` wording (copied verbatim from
+// pm.controller.ts's `getProductivity`) — this fixture demonstrates the "explicit absence, never a
+// faked 0" rule holds at the fixture layer too, not just against a live backend.
+const PRODUCTIVITY_TODAY = "2026-07-16"; // the same anchor `stamp()` uses elsewhere in this store
+const PRODUCTIVITY_SCORE_NOTE =
+  "No composite score is computed. Each component above is a raw, independently-verifiable " +
+  "count over [from, to]; 'total' is their sum (activity volume, not a de-duplicated task " +
+  "count — a task you both completed and commented on contributes to more than one component). " +
+  "A composite score formula, and who may view it, is decision 9 / ticket P4-E1 and has not " +
+  "been decided — see 2026-08-04-pm-repsona-parity-phase4-plan.md §5.";
+
+function addDaysIsoDemo(iso: string, n: number): string {
+  const d = new Date(`${iso}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+
+// A tiny seeded hash — NOT Math.random() — so a given date always produces the same synthetic
+// count. Different primes per component so the eight series don't move in lockstep (a real
+// person's activity mix varies day to day, not uniformly).
+function hashDay(iso: string, salt: number): number {
+  let h = salt;
+  for (const ch of iso) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return h;
+}
+function syntheticCount(iso: string, salt: number, quietWeekends: boolean, cap: number): number {
+  const dow = new Date(`${iso}T00:00:00Z`).getUTCDay(); // 0 = Sunday, 6 = Saturday
+  const isWeekend = dow === 0 || dow === 6;
+  if (isWeekend && quietWeekends && hashDay(iso, salt) % 3 !== 0) return 0; // most weekends quiet
+  const v = hashDay(iso, salt) % (cap + 1);
+  return isWeekend ? Math.floor(v / 2) : v;
+}
+
+function buildProductivitySeries(from: string, to: string): ProductivityDayPoint[] {
+  const out: ProductivityDayPoint[] = [];
+  let d = from;
+  let guard = 0; // matches the real endpoint's 400-day ceiling; stops a bad range from looping forever
+  while (d <= to && guard++ < 401) {
+    const completedTasks = syntheticCount(d, 11, true, 3);
+    const assignedCompleted = syntheticCount(d, 23, true, 2);
+    const involvedCompleted = syntheticCount(d, 37, true, 4);
+    const tasksAccepted = syntheticCount(d, 53, true, 2);
+    const reactionsGiven = syntheticCount(d, 71, false, 5);
+    const reactionsReceived = syntheticCount(d, 89, false, 4);
+    const notesContributions = syntheticCount(d, 101, true, 2);
+    const comments = syntheticCount(d, 113, true, 5);
+    const total = completedTasks + assignedCompleted + involvedCompleted + tasksAccepted
+      + reactionsGiven + reactionsReceived + notesContributions + comments;
+    out.push({ date: d, completedTasks, assignedCompleted, involvedCompleted, tasksAccepted, reactionsGiven, reactionsReceived, notesContributions, comments, total });
+    d = addDaysIsoDemo(d, 1);
+  }
+  return out;
+}
+
+function productivityDemo(search: URLSearchParams): Result {
+  const userId = search.get("userId") || DEMO_SELF;
+  const to = search.get("to") || PRODUCTIVITY_TODAY;
+  const from = search.get("from") || addDaysIsoDemo(to, -364);
+  const series = buildProductivitySeries(from, to);
+  const totals: ProductivityComponents = {
+    completedTasks: 0, assignedCompleted: 0, involvedCompleted: 0, tasksAccepted: 0,
+    reactionsGiven: 0, reactionsReceived: 0, notesContributions: 0, comments: 0, total: 0,
+  };
+  for (const row of series) {
+    totals.completedTasks += row.completedTasks;
+    totals.assignedCompleted += row.assignedCompleted;
+    totals.involvedCompleted += row.involvedCompleted;
+    totals.tasksAccepted += row.tasksAccepted;
+    totals.reactionsGiven += row.reactionsGiven;
+    totals.reactionsReceived += row.reactionsReceived;
+    totals.notesContributions += row.notesContributions;
+    totals.comments += row.comments;
+    totals.total += row.total;
+  }
+  const report: ProductivityReport = {
+    userId, from, to, days: series.length, series, totals,
+    score: null, // ALWAYS null — see this section's header comment. Never coerce to 0.
+    scoreNote: PRODUCTIVITY_SCORE_NOTE,
+  };
+  return ok(report);
 }
 
 // ---- assignment history (P4-B1..B7) ----
@@ -502,6 +590,10 @@ export function pmDemo(method: string, p: string, search: URLSearchParams, body?
   }
 
   if (!p.includes("/pm/")) return null;
+
+  // Productivity (P4-E2/E3/E4) — GET only, matches the real contract's query params.
+  const productivityMatch = p.match(/^\/api\/[^/]+\/pm\/productivity$/);
+  if (productivityMatch) return productivityDemo(search);
 
   // Assignment history (P4-B7) — the append-only chain behind the task detail's History section.
   const assignHistMatch = p.match(/^\/api\/[^/]+\/pm\/tasks\/([^/]+)\/assignment-history$/);

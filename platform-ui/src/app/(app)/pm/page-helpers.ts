@@ -17,9 +17,9 @@ export function isSwimlane(v: string | undefined): v is PmSwimlane {
   return v === "status" || v === "assignee" || v === "ball" || v === "priority";
 }
 
-export type PmView = "board" | "gantt" | "charts";
+export type PmView = "board" | "gantt" | "charts" | "productivity";
 export function isView(v: string | undefined): v is PmView {
-  return v === "board" || v === "gantt" || v === "charts";
+  return v === "board" || v === "gantt" || v === "charts" || v === "productivity";
 }
 
 // Same "first registry that carries this label" display-colour rule the department board's tag

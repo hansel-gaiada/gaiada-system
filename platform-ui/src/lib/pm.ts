@@ -415,6 +415,65 @@ export interface AssignmentEvent {
 export const listAssignmentHistory = (u: string, t: string, taskId: string) =>
   skipUnavailable(platformFetch<AssignmentEvent[]>(`/api/${t}/pm/tasks/${taskId}/assignment-history`, u), [] as AssignmentEvent[]);
 
+// ---- Productivity (P4-E2/E3/E4, plan §1.7 workstream E) ----
+// `GET /api/:t/pm/productivity?userId=&from=&to=` landed 2026-08-07 (pm.controller.ts's own header
+// comment there is the fullest account of the eight components' exact credit rules — read it before
+// changing any label here). Eight independently-verifiable daily counts, zero-filled per calendar
+// day (a gap day is `0`, never a missing entry — required for an honest heatmap), plus their JS-summed
+// `total` (activity VOLUME, not a de-duplicated task count).
+//
+// `score` IS DELIBERATELY `null`. No composite is computed — the formula and who may see it is
+// decision 9 / ticket P4-E1, a people decision that has not been made. `scoreNote` explains this
+// in-band. THE UI MUST RENDER THIS AS AN EXPLICIT ABSENCE, NEVER AS 0 — a fabricated zero is
+// indistinguishable from a real (bad) measurement, and this is a number people would be judged by.
+// See components/pm/Productivity.tsx.
+export interface ProductivityComponents {
+  completedTasks: number;
+  assignedCompleted: number;
+  involvedCompleted: number;
+  tasksAccepted: number;
+  reactionsGiven: number;
+  reactionsReceived: number;
+  notesContributions: number;
+  comments: number;
+  total: number;
+}
+export interface ProductivityDayPoint extends ProductivityComponents { date: string }
+export interface ProductivityReport {
+  userId: string;
+  from: string;
+  to: string;
+  days: number;
+  series: ProductivityDayPoint[];
+  totals: ProductivityComponents;
+  score: number | null; // ALWAYS null today — see the header comment above. Never coerce to 0.
+  scoreNote: string;
+}
+
+// Self is ALWAYS allowed server-side; reading someone else is authorized in-app against the same
+// person-scope boundary `/reports` uses (unrestricted/company_wide/unit_scoped/self_only — see
+// pm.controller.ts's `assertProductivityReadAllowed`). A 404 here means a stale backend (endpoint
+// not deployed yet) or the pm module disabled for this tenant — degrades to `null`, same as every
+// other PM reader. A 403 (asked for someone outside the caller's scope) is deliberately NOT
+// swallowed: the caller decides how to render "you can't view that person" vs "no data yet".
+export async function getProductivity(
+  u: string,
+  t: string,
+  params: { userId?: string; from?: string; to?: string } = {},
+): Promise<ProductivityReport | null> {
+  const qs = new URLSearchParams();
+  if (params.userId) qs.set("userId", params.userId);
+  if (params.from) qs.set("from", params.from);
+  if (params.to) qs.set("to", params.to);
+  const q = qs.toString();
+  try {
+    return await platformFetch<ProductivityReport>(`/api/${t}/pm/productivity${q ? `?${q}` : ""}`, u);
+  } catch (e) {
+    if (e instanceof PlatformError && e.status === 404) return null;
+    throw e;
+  }
+}
+
 async function skipUnavailable<T>(p: Promise<T>, fallback: T): Promise<T> {
   try {
     return await p;

@@ -20,12 +20,12 @@ describe("pm page-helpers", () => {
     for (const s of PM_SWIMLANES) expect(isSwimlane(s.value)).toBe(true);
   });
 
-  it("isView accepts only the three mounted views", () => {
+  it("isView accepts exactly the four mounted views", () => {
     expect(isView("board")).toBe(true);
     expect(isView("gantt")).toBe(true);
     expect(isView("charts")).toBe(true);
+    expect(isView("productivity")).toBe(true);
     expect(isView("home")).toBe(false);
-    expect(isView("productivity")).toBe(false);
     expect(isView(undefined)).toBe(false);
   });
 

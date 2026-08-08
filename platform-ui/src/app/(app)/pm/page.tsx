@@ -9,10 +9,11 @@ import {
 } from "@/lib/pmScope-data";
 import {
   unionStatusColumns, isSynthDefaultStatuses, openDependencies, resolveTags, distinctTagLabels,
-  filterTasksByTagLabels, parseTagFilterParam, isDoneStatus, taskUrgency,
+  filterTasksByTagLabels, parseTagFilterParam, isDoneStatus, taskUrgency, getProductivity,
   computeTimeline, groupTimelineBars, milestoneMarkers, dependencyEdges,
   type Tag, type UrgencyTier, type Milestone,
 } from "@/lib/pm";
+import { PlatformError } from "@/lib/platform";
 import {
   assigneeColumns, ballColumns, priorityColumns, filterTasksByBall, filterTasksByResponsible,
   ballFacetOptions, responsibleFacetOptions,
@@ -25,6 +26,7 @@ import { EmptyNote } from "@/components/systems/EmptyNote";
 import { Board } from "@/components/pm/Board";
 import { Gantt } from "@/components/pm/Gantt";
 import { Charts } from "@/components/pm/Charts";
+import { Productivity } from "@/components/pm/Productivity";
 import { TagChip } from "@/components/pm/TagChip";
 import { ScopeSwitcher } from "@/components/pm/ScopeSwitcher";
 import { PM_SWIMLANES, isSwimlane, isView, representativeTag, leadWithUnassigned, type PmSwimlane } from "./page-helpers";
@@ -35,15 +37,22 @@ import "@/components/pm/pm.css";
 // the exact same three views (P4-A3's whole point: one scope layer, no fourth set of components).
 // `/pm` is the new home for this (decision 1) — `/` stays the personal My Work landing.
 //
-// One page, three tab-switched views (`?view=board|gantt|charts`, same `?view=` idiom
-// `ProjectWorkspaceView` already uses) rather than three routes: the scope switcher's whole point
-// is to stay on the view you're looking at while re-scoping it, and a single page/search-param pair
-// makes that trivial (no pathname plumbing needed to know "which view was I on").
+// One page, tab-switched views (`?view=board|gantt|charts|productivity`, same `?view=` idiom
+// `ProjectWorkspaceView` already uses) rather than one route per view: the scope switcher's whole
+// point is to stay on the view you're looking at while re-scoping it, and a single page/search-param
+// pair makes that trivial (no pathname plumbing needed to know "which view was I on"). `productivity`
+// is the exception (see its own note below) — it ignores the scope switcher entirely.
 //
-// NOT built here (other tickets in the same plan): a `Home` column view (P4-A8, needs a
-// comments-on-tasks join) and `Productivity` (workstream E). Division/grid swimlanes stay on the
-// department board — a division only means something inside ONE department, so they don't
-// generalise to `@all`/project scope.
+// NOT built here (a separate ticket in the same plan): a `Home` column view (P4-A8, needs a
+// comments-on-tasks join). Division/grid swimlanes stay on the department board — a division only
+// means something inside ONE department, so they don't generalise to `@all`/project scope.
+//
+// `Productivity` (P4-E3/E4, plan §1.7) IS mounted here as a fourth tab, but it does not consume
+// `work`/the scope switcher at all — it is PERSON-grain (whose activity), not project/department/
+// tenant-grain like the other three, so re-scoping the board/gantt/charts tabs has no meaning for
+// it. It always shows the SIGNED-IN user's own series (self is always allowed server-side; the
+// backend's `?userId=` param exists for a future person-switcher, deliberately not built here —
+// out of this ticket's scope).
 //
 // P4-A6: `Responsible`/`Ball` ARE first-class views here, at every scope — reached via the same
 // swimlane selector the department board uses (no fourth set of components, per the ticket), with
@@ -77,7 +86,7 @@ export default async function PmPage({ searchParams }: { searchParams: SearchPar
   const taskUrgencyById: Record<string, UrgencyTier> = {};
   for (const t of work.tasks) taskUrgencyById[t.id] = taskUrgency({ dueDate: t.dueDate, isDone: isDoneStatus(t.status, work.statusesByProject[t.projectId]) }, today);
 
-  const tab = (v: "board" | "gantt" | "charts", label: string) => (
+  const tab = (v: "board" | "gantt" | "charts" | "productivity", label: string) => (
     <a href={`/pm?view=${v}`} className={`pm-tab${view === v ? " pm-tab--active" : ""}`}>{label}</a>
   );
 
@@ -98,6 +107,7 @@ export default async function PmPage({ searchParams }: { searchParams: SearchPar
           {tab("board", PM_TERMS.board)}
           {tab("gantt", PM_TERMS.gantt)}
           {tab("charts", PM_TERMS.charts)}
+          {tab("productivity", PM_TERMS.productivity)}
         </div>
       </div>
 
@@ -108,6 +118,7 @@ export default async function PmPage({ searchParams }: { searchParams: SearchPar
         <GanttSection work={work} canEdit={canEdit} taskUrgencyById={taskUrgencyById} today={today} userId={userId} tenant={tenant} />
       )}
       {view === "charts" && <ChartsSection work={work} userId={userId} tenant={tenant} />}
+      {view === "productivity" && <ProductivitySection userId={userId} tenant={tenant} scopeName={me.name} />}
     </>
   );
 }
@@ -332,6 +343,43 @@ async function ChartsSection({ work, userId, tenant }: { work: Awaited<ReturnTyp
       headerRight={<span style={{ font: "700 10px var(--font-body)", letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--erp-ink-50)" }}>{work.projectIds.length} project{work.projectIds.length === 1 ? "" : "s"}</span>}
     >
       <Charts kpis={data.kpis} flow={data.flow} burndownSeries={data.burndownSeries} burndownOverlay={data.burndownOverlay} tagRows={data.tagRows} />
+    </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Productivity (P4-E3/E4, plan §1.7) — self-view only for now (see the header note above this
+// component). `getProductivity` degrades a 404 (stale backend / module disabled) to `null`; a 403
+// is deliberately NOT swallowed by the reader (self is always allowed server-side, so hitting one
+// here would mean something is actually wrong, not "no data yet") — surfaced honestly rather than
+// silently reproduced as an empty state.
+async function ProductivitySection({ userId, tenant, scopeName }: { userId: string; tenant: string; scopeName: string }) {
+  let report;
+  try {
+    report = await getProductivity(userId, tenant, {});
+  } catch (e) {
+    if (e instanceof PlatformError && e.status === 403) {
+      return (
+        <Card title={PM_TERMS.productivity}>
+          <EmptyNote>You can&apos;t view this productivity series — {e.message}.</EmptyNote>
+        </Card>
+      );
+    }
+    throw e;
+  }
+  if (!report) {
+    return (
+      <Card title={PM_TERMS.productivity}>
+        <EmptyNote>Productivity data isn&apos;t available yet.</EmptyNote>
+      </Card>
+    );
+  }
+  return (
+    <Card
+      title={PM_TERMS.productivity}
+      headerRight={<span style={{ font: "700 10px var(--font-body)", letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--erp-ink-50)" }}>{scopeName}</span>}
+    >
+      <Productivity report={report} scopeName={scopeName} viewingSelf />
     </Card>
   );
 }

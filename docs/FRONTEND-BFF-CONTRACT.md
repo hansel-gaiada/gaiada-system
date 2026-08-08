@@ -308,6 +308,17 @@ per the 2026-07-17 route inventory (confirm UI has been repointed off the in-mem
   foreign-subject read — true for `report_document` (which has an `owns` policy condition) but NOT
   for this endpoint's `pm_task:read` gate, which carries no subject at all. Reusing the helper
   blindly would have let a plain member read a colleague's series.
+  **UI consumer (P4-E3/E4, 2026-08-08):** `platform-ui`'s `lib/pm.ts::getProductivity` +
+  `components/pm/Productivity.tsx`, mounted as the `/pm?view=productivity` tab (self-view only; the
+  `?userId=` param has no picker UI yet, out of E3/E4's scope). Renders `score:null` as an explicit
+  "—" plus the full `scoreNote` text — never coerces it to `0`. Reconciled against `/reports/person`
+  in-UI: that page's `delivery.tasks_completed` KPI counts the same underlying fact
+  (`work_activity`, verb='completed', actor-credited) but through the TR-07 **nightly fact job**,
+  while this endpoint queries `work_activity` **live** — the two can disagree for a few hours around
+  the nightly refresh, which the UI states explicitly rather than presenting two silent, possibly-
+  conflicting numbers for "how many tasks did I complete". `DEMO_MODE` fixture:
+  `lib/demoPm.ts::productivityDemo` (deterministic, seeded-hash synthetic series — not random per
+  render — matching the real contract's shape including the null score).
 - **BUILT (P4-I6, 2026-08-07):** closing the LAST open blocker notifies the promoted task's ball
   holder and followers (`dependency_cleared`). Fires once per task however many blockers it had,
   skips the actor, and needs no dedup table — a completed promotion moves the task off its intake
