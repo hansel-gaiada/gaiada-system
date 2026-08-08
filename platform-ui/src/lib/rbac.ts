@@ -33,7 +33,14 @@ export type Capability =
   | "org.edit"           // edit the org structure
   | "people.directory"   // browse the people directory
   | "rollups.view"       // cross-company rollups (global)
-  | "pm.manage"          // create/assign/move tasks, confirm AI-tracker writes
+  | "pm.manage"          // create/delete tasks, CHANGE OWNERSHIP (Responsible), confirm tracker writes
+  // Owner decision 2026-08-06: "anyone can pass the ball." Mirrors Cerbos's `pm_task:update`, which
+  // resource_pm_task.yaml grants to member/viewer/team_lead/manager/company_admin — i.e. any member.
+  // Passing the ball changes `assignee.refId` and leaves `assignee.responsibleId` alone; the server
+  // diffs the two and only escalates to `manage` when OWNERSHIP actually changes. This capability
+  // exists so the UI stops being stricter than the server: it previously gated the ball on
+  // `pm.manage`, which silently made a hand-off leads-only.
+  | "pm.contribute"      // pass the ball, execution edits (status/progress/dates) — any member
   | "it.manage"          // register/edit devices
   | "approvals.decide"   // approve/reject
   // D14-08 — retry a FAILED (or stuck-executing) automation write's execution (Cerbos action
@@ -75,7 +82,7 @@ export type Capability =
 // What each role grants (within its own scope). Order/duplication is harmless.
 const ALL: Capability[] = [
   "admin.access", "company.manage", "org.edit", "people.directory",
-  "rollups.view", "pm.manage", "it.manage", "approvals.decide", "approvals.retry", "knowledge.review",
+  "rollups.view", "pm.manage", "pm.contribute", "it.manage", "approvals.decide", "approvals.retry", "knowledge.review",
   "hr.view", "hr.manage",
   "search.view", "search.manage", "search.scope.write", "search.campaign.launch", "search.report.approve", "search.ledger.admin",
   "reports.person.view", "reports.project.view", "reports.department.view", "reports.company.view",
@@ -100,7 +107,7 @@ export const ROLE_CAPS: Record<Role, Capability[]> = {
   platform_admin: ALL,
   group_executive: ALL,
   company_admin: [
-    "admin.access", "company.manage", "org.edit", "people.directory", "pm.manage", "it.manage", "approvals.decide", "approvals.retry", "knowledge.review",
+    "admin.access", "company.manage", "org.edit", "people.directory", "pm.manage", "pm.contribute", "it.manage", "approvals.decide", "approvals.retry", "knowledge.review",
     "hr.view", "hr.manage",
     "search.view", "search.manage", "search.scope.write", "search.campaign.launch", "search.report.approve", "search.ledger.admin",
     // The tenant's own administrator holds the exec-only reporting tier within its company (§8's
@@ -113,14 +120,14 @@ export const ROLE_CAPS: Record<Role, Capability[]> = {
   // appraisals they are ASSIGNED (the server narrows to `manager_user_id`; this only decides whether
   // the scoring UI renders at all).
   manager: [
-    "pm.manage", "approvals.decide", "people.directory",
+    "pm.manage", "pm.contribute", "approvals.decide", "people.directory",
     ...REPORT_READS, "checkin.read", "checkin.excuse", "appraisal.read", "appraisal.score",
   ],
   // A plain member's own report, own check-in and own appraisal are NOT capabilities — they are
   // self-service, gated server-side by `ownerId`/`subjectUserId == principal.id` (§11 principle 2:
   // "nothing about you that you cannot read"). Adding a capability for them here would imply the UI
   // decides, and would have to be granted to everyone, which tells a gating check nothing.
-  member: [],
+  member: ["pm.contribute"],
   it_admin: ["it.manage", "company.manage"],
   it_manager: ["it.manage"],
   it: ["it.manage"],

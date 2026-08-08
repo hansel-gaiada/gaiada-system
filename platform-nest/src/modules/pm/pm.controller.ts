@@ -2003,9 +2003,40 @@ export class PmController {
     @Param("taskId") taskId: string,
     @Body() b: Record<string, unknown>,
   ) {
-    // Changing the assignee is the privileged operation; execution edits are member-level.
-    const managing = Object.prototype.hasOwnProperty.call(b ?? {}, "assignee");
-    await authorize(req.principal, { kind: "pm_task", tenantId, id: taskId }, managing ? "manage" : "update");
+    // Owner decision (2026-08-06): "anyone can pass the ball." This used to gate the WHOLE request
+    // on `manage` the moment the body carried an `assignee` key, which made passing the ball a
+    // leads/admins-only act — a member could move a task to Doing but not hand it on. The gap
+    // existed because Ball and Responsible share ONE `assignee` blob (Ball = refId/kind,
+    // Responsible = responsibleId), so "does the body mention assignee" cannot tell a hand-off from
+    // a change of ownership.
+    //
+    // So: gate on `update` first (the base right to touch this task at all — Cerbos grants it to
+    // any member), then read the current assignee and escalate to `manage` ONLY when the write
+    // actually changes ownership. Ordering matters: the base gate runs before any read, so a
+    // caller who may not touch the task learns nothing about it, and the escalation happens before
+    // the transaction opens, so a refused escalation writes nothing.
+    // NB `writesAssignee` is "this patch touches the assignee blob", which is a different question
+    // from "is this privileged" — it still drives whether we apply the value and append to the
+    // assignment ledger below. Conflating the two is what made the ball manager-only.
+    const writesAssignee = Object.prototype.hasOwnProperty.call(b ?? {}, "assignee");
+    await authorize(req.principal, { kind: "pm_task", tenantId, id: taskId }, "update");
+    if (writesAssignee) {
+      const incoming = validAssignee((b as { assignee?: unknown }).assignee);
+      const current = await withTenants([tenantId], (c) => fetchTask(c, taskId));
+      if (!current) throw new NotFoundException("task not found");
+      const currentAssignee = current.assignee as Assignee | null;
+      // A pure ball pass: the task already HAS an owner, that owner is unchanged, and the ball
+      // lands on a person (a department cannot take a turn). Everything else — clearing the
+      // assignee, changing responsibleId, assigning a unit, or bootstrapping an unassigned task
+      // (which necessarily SETS an owner) — is still an ownership change and still needs `manage`.
+      const ballPassOnly =
+        !!incoming && !!currentAssignee
+        && incoming.kind === "person"
+        && incoming.responsibleId === currentAssignee.responsibleId;
+      if (!ballPassOnly) {
+        await authorize(req.principal, { kind: "pm_task", tenantId, id: taskId }, "manage");
+      }
+    }
 
     // Both reassigned inside the transaction closure and returned at the end,
     // rather than mutating outer `let`s — read via the awaited return value
@@ -2193,7 +2224,7 @@ export class PmController {
       // ---- validated scalar meta ----
       if (b.priority !== undefined && b.priority !== null && !PRIORITIES.has(String(b.priority))) throw new BadRequestException("invalid priority");
       let assignee = task.assignee;
-      if (managing) {
+      if (writesAssignee) {
         assignee = validAssignee(b.assignee);
         if (assignee?.responsibleId && assignee.responsibleId !== task.assignee?.responsibleId) notifyResponsible = assignee.responsibleId;
       }
@@ -2247,14 +2278,14 @@ export class PmController {
           blockReason,
         ],
       );
-      // TR-02 dual-write: only when THIS patch actually touched the assignee (managing) — the
+      // TR-02 dual-write: only when THIS patch actually touched the assignee (writesAssignee) — the
       // same transaction as the UPDATE above, so a malformed/unknown ref rolls back the whole
       // PATCH, blob included, never a partial write.
       // P4-B3: statusId is this patch's FINAL status (post-coupling above) — "the status at the
       // moment of handoff" per plan §1.5. `assignmentNote` is an optional free-text reason a human
       // can attach to a reassignment/correction (e.g. "wrong queue"); undefined for every other
       // write path, which is exactly right — only a human-initiated PATCH has a reason to give.
-      if (managing) {
+      if (writesAssignee) {
         const assignmentNote = typeof b.assignmentNote === "string" ? b.assignmentNote.slice(0, 500) : null;
         await syncTaskAssignees(c, tenantId, taskId, assignee, req.principal.userId, status, assignmentNote);
         await logAssigneeDriftIfAny(c, tenantId, taskId);

@@ -154,7 +154,13 @@ export async function reassignBall(taskId: string, refId: string): Promise<PmRes
   const assignee: Assignee = current.assignee
     ? { ...current.assignee, kind: "person", refId, refName }
     : { kind: "person", refId, refName, responsibleId: refId, responsibleName: refName };
-  const r = await send(`/pm/tasks/${taskId}`, "PATCH", { assignee }, "pm.manage");
+  // `pm.contribute`, not `pm.manage` — owner decision 2026-08-06, "anyone can pass the ball".
+  // Note the two branches above need DIFFERENT rights and the server knows it: passing on a task
+  // that already has an owner leaves `responsibleId` untouched (member-level), while bootstrapping
+  // an UNASSIGNED task necessarily sets one, which the server still escalates to `manage`. We ask
+  // for the lower capability here and let the server refuse the bootstrap case — the UI must not be
+  // stricter than the authority, which is exactly the bug this replaces.
+  const r = await send(`/pm/tasks/${taskId}`, "PATCH", { assignee }, "pm.contribute");
   revalTask(taskId);
   return r;
 }

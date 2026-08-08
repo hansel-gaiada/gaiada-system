@@ -2324,6 +2324,78 @@ describe.skipIf(!TEST_URL)("PM subsystem (§5)", () => {
     });
   });
 
+  // ---------------- Ball pass vs ownership change (owner decision 2026-08-06) ----------------
+  // "Anyone can pass the ball." Ball and Responsible share ONE `assignee` blob, so the old gate —
+  // "body mentions assignee ⇒ require manage" — made a hand-off leads-only: a member could move a
+  // task to Doing but not hand it on. These pin the split between passing and re-owning.
+  describe("passing the ball is member-level; changing ownership is not", () => {
+    let ballTask: string;
+    const asMember = () => asUser(member);
+    const own = (refId: string, responsibleId: string, kind = "person") =>
+      ({ kind, refId, refName: "X", responsibleId, responsibleName: "Y" });
+
+    beforeAll(async () => {
+      ballTask = ((await createTask({ title: "Ball gate" })).json() as { id: string }).id;
+      // Give it an owner first, so a later pass is a pure hand-off rather than a bootstrap.
+      await app.inject({
+        method: "PATCH", url: `/api/${tenant}/pm/tasks/${ballTask}`, headers: hdr(),
+        payload: { assignee: own(manager, manager) },
+      });
+    });
+
+    it("a plain MEMBER can pass the ball when Responsible is unchanged", async () => {
+      const r = await app.inject({
+        method: "PATCH", url: `/api/${tenant}/pm/tasks/${ballTask}`, headers: asMember(),
+        payload: { assignee: own(member, manager) },
+      });
+      expect(r.statusCode).toBe(200);
+      const after = (await app.inject({ method: "GET", url: `/api/${tenant}/pm/tasks/${ballTask}`, headers: hdr() })).json() as { assignee: { refId: string; responsibleId: string } };
+      expect(after.assignee.refId).toBe(member);        // the ball moved
+      expect(after.assignee.responsibleId).toBe(manager); // ownership did not
+    });
+
+    it("the same member CANNOT change Responsible — that is still manage", async () => {
+      const r = await app.inject({
+        method: "PATCH", url: `/api/${tenant}/pm/tasks/${ballTask}`, headers: asMember(),
+        payload: { assignee: own(member, member) },
+      });
+      expect(r.statusCode).toBe(403);
+    });
+
+    it("a member cannot clear the assignee nor assign a unit — both set or remove ownership", async () => {
+      const cleared = await app.inject({
+        method: "PATCH", url: `/api/${tenant}/pm/tasks/${ballTask}`, headers: asMember(),
+        payload: { assignee: null },
+      });
+      expect(cleared.statusCode).toBe(403);
+      const unit = await app.inject({
+        method: "PATCH", url: `/api/${tenant}/pm/tasks/${ballTask}`, headers: asMember(),
+        payload: { assignee: own("d-x", manager, "division") },
+      });
+      expect(unit.statusCode).toBe(403);
+    });
+
+    // The escalation runs BEFORE the transaction opens, so a refusal must leave no trace.
+    it("a refused escalation writes nothing", async () => {
+      const after = (await app.inject({ method: "GET", url: `/api/${tenant}/pm/tasks/${ballTask}`, headers: hdr() })).json() as { assignee: { refId: string; responsibleId: string } };
+      expect(after.assignee.refId).toBe(member);
+      expect(after.assignee.responsibleId).toBe(manager);
+    });
+
+    it("a manager can still make the ownership change the member was refused", async () => {
+      const r = await app.inject({
+        method: "PATCH", url: `/api/${tenant}/pm/tasks/${ballTask}`, headers: hdr(),
+        payload: { assignee: own(member, member) },
+      });
+      expect(r.statusCode).toBe(200);
+    });
+
+    it("a member still cannot create or delete a task — only the ball gate moved", async () => {
+      const created = await app.inject({ method: "POST", url: `/api/${tenant}/pm/tasks`, headers: asMember(), payload: { projectId, title: "nope" } });
+      expect(created.statusCode).toBe(403);
+    });
+  });
+
   // ---------------- P4-E2 — per-person productivity series ----------------
   describe("P4-E2 — productivity series", () => {
     type Totals = {

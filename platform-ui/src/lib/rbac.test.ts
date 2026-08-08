@@ -224,3 +224,30 @@ describe("isClient — external client routing", () => {
     }
   });
 });
+
+// Owner decision 2026-08-06: "anyone can pass the ball." The UI capability model MIRRORS Cerbos —
+// resource_pm_task.yaml grants `update` to member/viewer/team_lead/manager/company_admin and
+// reserves `manage` for leads/admins. Before this, the UI gated the ball on `pm.manage`, which made
+// a hand-off leads-only and was STRICTER than the server: the client refused what the API allowed.
+describe("pm.contribute mirrors Cerbos pm_task:update", () => {
+  const memberA = me([{ role: "member", scopeType: "company", scopeId: "co-a" }]);
+  const mgrA = me([{ role: "manager", scopeType: "company", scopeId: "co-a" }]);
+  const adminA = me([{ role: "company_admin", scopeType: "company", scopeId: "co-a" }]);
+  const superAdmin = me([{ role: "platform_admin", scopeType: "global", scopeId: null }]);
+
+  it("a plain member may contribute (pass the ball) but may not manage", () => {
+    expect(can(memberA, "pm.contribute", "co-a")).toBe(true);
+    expect(can(memberA, "pm.manage", "co-a")).toBe(false);
+  });
+
+  it("still respects company scope — a member of A cannot contribute in B", () => {
+    expect(can(memberA, "pm.contribute", "co-b")).toBe(false);
+  });
+
+  it("every role that can manage can also contribute — manage implies contribute", () => {
+    for (const [label, who] of [["manager", mgrA], ["company_admin", adminA], ["platform_admin", superAdmin]] as const) {
+      if (!can(who, "pm.manage", "co-a")) continue;
+      expect(can(who, "pm.contribute", "co-a"), label).toBe(true);
+    }
+  });
+});
