@@ -103,4 +103,15 @@ describe("portal live bus (CP-5)", () => {
     expect(b.frames).toHaveLength(1);
     a.off(); b.off();
   });
+
+  // MI-02/MI-03 (webdev maintenance intake, D-7): both the portal-submit event (MI-02) and the
+  // staff triage/convert event (MI-03) must land on the SAME topic so the portal page refetches
+  // regardless of which side changed the request.
+  it("maps both change-request event types to the new 'requests' topic", () => {
+    const a = collector("t1", ["c1"]);
+    dispatchPortalFrame("t1", "webdev.change_request.created", { clientId: "c1" }, AT);
+    dispatchPortalFrame("t1", "webdev.change_request.updated", { clientId: "c1" }, AT);
+    expect(a.frames).toEqual([{ topic: "requests", at: AT }, { topic: "requests", at: AT }]);
+    a.off();
+  });
 });

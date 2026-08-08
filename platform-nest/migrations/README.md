@@ -254,3 +254,32 @@ at it, run `node dist/db/migrate.js`, confirm the ordered `applied:` list and ex
    `platform_app` GRANT/REVOKE — the file explains why a REVOKE is untestable through this repo's
    test harness). `0058`/`0059`/`0070` remain the permanently-orphaned reservation gaps — still do
    NOT fill them. **Next unused is `0088`.**
+
+   **2026-08-07 update (MI-01, `webdev_change_requests`) — `0088` TAKEN, no collision.** The
+   design doc (`2026-08-07-webdev-maintenance-intake-design.md` §1.2) named "next-unused at merge
+   time" rather than a fixed number, correctly anticipating drift. `ls migrations | sort | tail`
+   at authoring time showed the real head as `0087_pm_task_assignment_events.sql` (untracked,
+   concurrent PM session) with `0088` genuinely free; re-verified again immediately before writing
+   the file (still free) and again before committing (a concurrent session had by then landed
+   `0089_pm_dependency_enforcement.sql`, which is past this ticket's number and does not collide).
+   Shipped as `0088_webdev_change_requests.sql`: the maintenance-intake table, brand new, zero DML.
+   Guarded DO block adds `ux_pipeline_runs_id_tenant` (fresh — no prior migration had it) and
+   no-ops on `ux_pm_tasks_id_tenant` (already exists, from `0054`). Deliberately takes the **plain
+   CORE tenant wall** (0075's shape), NOT the `app_module_allowed('webdev')` third wall D-2 would
+   otherwise assign — ratified as D-2a (design doc §1.1, `webdev-design.md` §14): the client portal
+   is this table's primary writer and portal controllers declare no module scope, so a third wall
+   would silently zero every portal read. Two partial-unique backstops (`ux_wcr_run`, `ux_wcr_task`)
+   over the nullable link columns, plus two structural CHECK constraints
+   (`wcr_route_matches_status`, `wcr_portal_has_requester`) encoding the v1 state machine and the
+   portal threat model in DDL rather than controller discipline. Verified on a disposable
+   per-test-file Postgres via the repo's own `initTestDb` harness (migrated as owner, queried as
+   `platform_app_test`, NOSUPERUSER NOBYPASSRLS): cross-tenant isolation, unset-GUC-reads-zero-rows-
+   no-error, the composite-FK cross-tenant rejection (with a same-tenant positive control), both
+   CHECK constraints' bad-combination rejections, and both partial uniques' many-NULLs-allowed /
+   second-non-null-refused behavior — 8/8 assertions green; test database dropped after the run
+   (confirmed zero leftover `pgtest_f*`/prefixed databases). `npm run lint:migration-rls` green (88
+   migrations scanned, 35 enforced). `0058`/`0059`/`0070` remain the permanently-orphaned
+   reservation gaps — still do NOT fill them. **Next unused is `0090`** (`0089` is now TAKEN by a
+   concurrent PM session's `pm_dependency_enforcement.sql`, landed between this ticket's
+   authoring-time check and its commit — re-verify with `ls migrations | sort | tail` before
+   trusting that, exactly as every entry in this log has had to).

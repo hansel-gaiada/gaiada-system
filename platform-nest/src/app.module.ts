@@ -29,10 +29,18 @@ import { PortalWorkspaceController } from "./core/portal-workspace.controller";
 import { PortalCommerceController } from "./core/portal-commerce.controller";
 import { PortalProfileController } from "./core/portal-profile.controller";
 import { PortalStreamController } from "./core/portal-stream.controller";
+// MI-02 (webdev maintenance intake, D-7) — the portal's change-request surface. Own controller class
+// per the CP-2..CP-5 split precedent above: a distinct subject, a distinct risk profile (the second
+// external-party WRITE surface after commerce), same `api` prefix, no route collision.
+import { WebdevChangeRequestsPortalController } from "./core/webdev-change-requests-portal.controller";
 // CP-19: the STAFF half of the portal's commerce surface — contract authoring/send/countersign and
 // payment confirmation. Without it the portal's contracts section is permanently empty and a
 // client-recorded payment can never leave `pending`, so it ships in the same change.
 import { ContractsController } from "./core/contracts.controller";
+// MI-03 — the STAFF half of webdev maintenance intake (triage queue + mini-run spawner). Core, not a
+// module: there is no `src/modules/webdev/`, and `webdev_change_requests` takes the plain tenant wall
+// (D-2a) so no ModuleEnabledGuard belongs in front of triage. See the controller's own header.
+import { WebdevChangeRequestsController } from "./core/webdev-change-requests.controller";
 import { FilesController } from "./core/files.controller";
 import { CreativeController } from "./core/creative.controller";
 import { WorkActivityController } from "./core/work-activity.controller";
@@ -82,7 +90,7 @@ import { MagicLinkController } from "./mail/magic-link/controller";
 @Module({
   controllers: [
     HealthController, IdentityController, CoreController, TeamsController, CustomFieldsController,
-    AuthzCheckController, ClientWorkController, BillingController, CollabController, AutomationApprovalsController, PipelineController, ApprovalsController, ApprovalsDecideController, TasksMineController, MeetingRecordingsController, PortalController, PortalWorkspaceController, PortalCommerceController, PortalProfileController, PortalStreamController, ContractsController, ClientContactsController, ClientInviteAcceptController, FilesController, CreativeController, WorkActivityController, IntegrationsController, ClaudeSeatsController, AdminIdentityController,
+    AuthzCheckController, ClientWorkController, BillingController, CollabController, AutomationApprovalsController, PipelineController, ApprovalsController, ApprovalsDecideController, TasksMineController, MeetingRecordingsController, PortalController, PortalWorkspaceController, PortalCommerceController, PortalProfileController, PortalStreamController, WebdevChangeRequestsPortalController, WebdevChangeRequestsController, ContractsController, ClientContactsController, ClientInviteAcceptController, FilesController, CreativeController, WorkActivityController, IntegrationsController, ClaudeSeatsController, AdminIdentityController,
     CompanyAdminController, ServiceAssignmentsController, CompanyCrudController, AdminSystemsController, BotAdminController, IntelligenceController,
     // Vertical modules (compiled-in; per-tenant enable gate at the controller).
     AgencyController, PmController, ItController, ClientsController, HrController, LoansController, AssistantController, SearchController,

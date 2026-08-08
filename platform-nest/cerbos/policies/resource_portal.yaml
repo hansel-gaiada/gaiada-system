@@ -19,13 +19,21 @@ resourcePolicy:
     #                    and one day one of them may need revoking without the other.
     #   update_profile — CP-4: their own name/title, and profile change REQUESTS. Deliberately narrow-
     #                    named: a generic `update` would silently widen the day someone reuses it.
+    #   request_change — MI-02 (webdev maintenance intake, D-7): submit a webdev change request.
+    #                    Narrow-named for the same reason as update_profile. Deliberately available to
+    #                    EVERY active contact regardless of `capability` — design doc §5.1's ratified
+    #                    ruling is that submitting is a viewer-permitted act ("paying is not signing",
+    #                    and reporting a bug is strictly weaker than recording a payment); capability
+    #                    gates only the resulting mini-run's own sign gates, never this action. Do NOT
+    #                    condition this action on a signer-only derived role or attribute — that would
+    #                    silently re-tighten a ratified decision.
     #
     # ⚠ THIS POLICY IS NOT THE ROW-LEVEL BOUNDARY. Cerbos does not see rows, so `read` here means "may
     # ask the portal", never "may see any client's data". Per-client and per-project isolation is
     # src/core/portal-scope.ts's SQL predicate, applied on every portal query; RLS is the tenant wall
     # beneath both. Widening this list does NOT widen which rows a client can reach — but REMOVING the
     # scope predicate from a query would, so read that file before adding a portal route.
-    - actions: ["read", "decide", "sign", "pay", "update_profile"]
+    - actions: ["read", "decide", "sign", "pay", "update_profile", "request_change"]
       effect: EFFECT_ALLOW
       derivedRoles: ["client"]
       condition: { match: { expr: "variables.inTenant" } }

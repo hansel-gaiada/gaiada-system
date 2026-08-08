@@ -1,0 +1,74 @@
+# MI-03 (webdev maintenance intake, D-7 §4.2) — the STAFF half of change-request authz.
+#
+# webdev_change_request = a maintenance/change ask against a client website. The CLIENT half of this
+# feature does NOT live here: a portal submission authorizes `portal : request_change` on
+# resource_portal.yaml, and portal GETs ride that file's existing `read`.
+#
+# ── THE INVARIANT THIS FILE MUST NOT BREAK ───────────────────────────────────────────────────────
+# The `client` derived role appears NOWHERE in this policy, deliberately. Migration 0072's header
+# proved the portal design safe on exactly this property — "a principal holding just the client grant
+# can therefore satisfy exactly one policy (resource_portal.yaml), so making `inTenant` true for them
+# opens nothing else". Adding a `client` rule here (even a read-only one) would silently retire that
+# argument for every future reader of the decision log. A client-only principal must DENY on all
+# three actions below; webdev-change-requests.test.ts probes that positively rather than assuming it.
+#
+# ── ACTIONS ──────────────────────────────────────────────────────────────────────────────────────
+#   create — staff logging an INTERNAL-source request (source='internal'); manager+ per OQ-2's
+#            default. Widening to plain `member` later is a one-line policy edit, no schema change.
+#   read   — list/detail, including the triage queue. Deliberately elevated: the queue exposes every
+#            client's asks tenant-wide, the same rationale that made `pipeline_gate:read` elevated
+#            (resource_pipeline_gate.yaml:18). Plain `member` is therefore excluded.
+#   triage — the WHOLE disposition: decline AND convert (which spawns a run or a pm_task). One
+#            action, mirroring `pipeline_gate`'s single `decide` covering approve/reject/sign, because
+#            the decision is one act with one audit row and splitting it would invite a policy where
+#            someone can convert but not decline.
+#
+# Handlers pass resource.attr = {kind:"webdev_change_request", tenantId, module:"webdev", id?}.
+# `attr.module` is a CERBOS attribute and has nothing whatever to do with the `app.scopes` GUC that
+# app_module_allowed() reads: `webdev_change_requests` takes the PLAIN tenant wall (D-2a, migration
+# 0088's header) and passing this attr must never be read as licence to add a module wall back onto
+# the table. What it buys is the ORG-6 shared-service future for free — a serving webdev dept's
+# reconciler-materialized `webdev_manager` grant lights up triage in the SERVED tenant, because
+# module_manager/module_staff string-compose the role name from this attr (derived_roles.yaml:126–135).
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: webdev_change_request
+  importDerivedRoles: ["gaiada_scopes"]
+  variables:
+    import: ["gaiada_common"]
+  rules:
+    - actions: ["*"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["platform_admin"]
+    # ── TRAP #4: the group_executive (owner) rule is gated on `notLow` ONLY, never `inTenant` ──────
+    # `group_executive` is a GLOBAL cross-company grant (`scopeType == "global"`,
+    # derived_roles.yaml:19–24). `variables.inTenant` is `resource.tenantId in principal.companies`,
+    # and `principal.companies` is built exclusively from the caller's `company_memberships` rows — so
+    # an owner who holds the global grant but has no membership row in THIS company has an empty (or
+    # simply non-matching) `companies` set and `inTenant` is FALSE. Folding the exec into the
+    # company_admin/manager rule below would therefore produce a global grant that never fires, a
+    # DENY that reads exactly like a broken derived role. That mistake has already cost one wrong fix
+    # in this estate; the shipped correct shape is resource_integration_connection.yaml:29–33, which
+    # this rule copies. `notLow` still applies: a low-assurance chat session gets no company data,
+    # owner or not. QA probes this positively (exec with NO membership row => ALLOW).
+    - actions: ["create", "read", "triage"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["group_executive"]
+      condition: { match: { expr: "variables.notLow" } }
+    # The in-tenant elevated tier: company_admin and manager get the full surface.
+    - actions: ["create", "read", "triage"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin", "manager"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    # ORG-6 module tiers (derived_roles.yaml:108–135). The webdev dept's own manager disposes of
+    # requests; its staff can read the queue but not decide it, and cannot log internal requests
+    # against a client on the dept's behalf (that is a manager-tier act per OQ-2).
+    - actions: ["read", "triage"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["module_manager"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["module_staff"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }

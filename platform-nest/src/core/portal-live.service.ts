@@ -39,7 +39,8 @@ export type PortalTopic =
   | "deliverables"
   | "invoices"     // invoice issued/updated, payment confirmed
   | "contracts"
-  | "profile";     // contact added/revoked, capability changed
+  | "profile"      // contact added/revoked, capability changed
+  | "requests";    // MI-02/MI-03: a webdev change request submitted/triaged/converted
 
 /** event_type -> topic. An event type absent from this map produces NO frame: the portal's realtime
  *  surface is an allowlist, same principle as the timeline query (see portal-workspace.controller.ts).
@@ -66,6 +67,10 @@ const TOPIC_BY_EVENT: Record<string, PortalTopic> = {
   "contract.signed": "contracts",
   "client_contact.created": "profile",
   "client_contact.updated": "profile",
+  // MI-02/MI-03 (webdev maintenance intake, D-7): submit (portal) and triage/convert (staff) both
+  // land here — one topic covers the CR's whole lifecycle so the portal page refetches on either.
+  "webdev.change_request.created": "requests",
+  "webdev.change_request.updated": "requests",
 };
 
 /** The `events:<entityType>` streams worth tailing — derived from the map above rather than listed
@@ -75,6 +80,7 @@ const TAILED_ENTITY_TYPES = [
   "pipeline_gate", "pipeline_run", "pipeline_stage", "scope",
   "pm_task", "pm_project", "pm_milestone",
   "deliverable", "invoice", "invoice_payment", "contract", "client_contact",
+  "webdev_change_request",
 ] as const;
 
 export interface PortalFrame {
