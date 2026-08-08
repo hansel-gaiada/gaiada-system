@@ -5,7 +5,7 @@ import type { NestFastifyApplication } from "@nestjs/platform-fastify";
 import { config } from "../../config";
 import { buildApp } from "../../main";
 import { initTestDb, teardownTestDb, TEST_URL, adminPool } from "../../testing/setup";
-import { newId } from "../../db";
+import { newId, withTenants } from "../../db";
 import { createCompany, createUser, addMembership, createRole, grantRole, createProject, defineCustomField } from "../../testing/fixtures";
 
 const svc = { authorization: "Bearer svc-token" };
@@ -2321,6 +2321,266 @@ describe.skipIf(!TEST_URL)("PM subsystem (§5)", () => {
 
       expect((await getTenantBurndown("", asUser(rivalAdmin))).statusCode).toBe(403);
       expect((await getTenantFlow("", asUser(rivalAdmin))).statusCode).toBe(403);
+    });
+  });
+
+  // ---------------- P4-E2 — per-person productivity series ----------------
+  describe("P4-E2 — productivity series", () => {
+    type Totals = {
+      completedTasks: number; assignedCompleted: number; involvedCompleted: number; tasksAccepted: number;
+      reactionsGiven: number; reactionsReceived: number; notesContributions: number; comments: number; total: number;
+    };
+    type ProductivityResponse = {
+      userId: string; from: string; to: string; days: number;
+      series: Array<{ date: string } & Totals>;
+      totals: Totals;
+      score: number | null;
+      scoreNote: string;
+    };
+
+    // Every test gets its own tenant — same isolation rationale as the P4-A1 block above (this
+    // endpoint reads activity spanning the whole tenant's history, so shared-tenant noise from other
+    // describe blocks would make "the totals equal exactly N" assertions flaky by run order).
+    const isoE2 = async (label: string) => {
+      const t = await createCompany(`Agency E2 ${label} (isolated)`, ["agency", "pm"]);
+      const admin = await createUser(`${newId()}@x.test`, `E2 ${label} Admin`);
+      const a = await createUser(`${newId()}@x.test`, `E2 ${label} A`);
+      const b = await createUser(`${newId()}@x.test`, `E2 ${label} B`);
+      await addMembership(t, admin);
+      await addMembership(t, a);
+      await addMembership(t, b);
+      await grantRole(admin, await createRole("company_admin"), "company", t);
+      // A bare `company_memberships` row is NOT enough for Cerbos to allow even a self-read — the
+      // top-level fixture in this same file grants plain members a `member` role for exactly this
+      // reason. Without it, `a`/`b` 403 at the BASE `pm_task:read` gate before this endpoint's own
+      // person-axis narrowing is ever reached, which is a false negative for both "self is always
+      // allowed" and the `follow` call the components test below depends on.
+      const memberRole = await createRole("member");
+      await grantRole(a, memberRole, "company", t);
+      await grantRole(b, memberRole, "company", t);
+      const pid = await createProject(t, `E2 ${label} project`, admin);
+      const newTask = async (title: string, as = asUser(admin)) =>
+        (await app.inject({ method: "POST", url: `/api/${t}/pm/tasks`, headers: as, payload: { projectId: pid, title } }).then((r) => r.json())).id as string;
+      const get = (qs = "", as = asUser(admin)) => app.inject({ method: "GET", url: `/api/${t}/pm/productivity${qs}`, headers: as });
+      return { t, admin, a, b, pid, newTask, get };
+    };
+
+    // Direct-SQL seeding, same idiom as `fact-job.db.test.ts`'s `addActivity` — this endpoint reads
+    // raw ledgers whose real writers (the async outbox consumer, the assignee dual-write) stamp
+    // `now()`; controlling `occurredAt`/`createdAt` precisely is the only way to pin an event to a
+    // specific day for a deterministic zero-fill assertion.
+    async function addActivity(t: string, opts: { verb: string; objectKind: string; objectRef: string; actorUserId: string; occurredAt: string; source?: string }) {
+      const id = newId();
+      await withTenants([t], (c) =>
+        c.query(
+          `INSERT INTO work_activity (id, tenant_id, source, source_ref, actor_user_id, verb, object_kind, object_ref, occurred_at, origin_site)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::timestamptz,'central')`,
+          [id, t, opts.source ?? "pm", `e2-${id}`, opts.actorUserId, opts.verb, opts.objectKind, opts.objectRef, opts.occurredAt],
+        ),
+      );
+      return id;
+    }
+    async function addAssignmentEvent(t: string, taskId: string, refUserId: string, createdAt: string) {
+      await withTenants([t], (c) =>
+        c.query(
+          `INSERT INTO pm_task_assignment_events (id, tenant_id, task_id, ref_id, ref_kind, status_id, created_at)
+           VALUES ($1,$2,$3,$4,'person','todo',$5::timestamptz)`,
+          [newId(), t, taskId, refUserId, createdAt],
+        ),
+      );
+    }
+    async function addComment(t: string, taskId: string, authorId: string) {
+      const id = newId();
+      await withTenants([t], (c) =>
+        c.query(
+          `INSERT INTO comments (id, tenant_id, author_id, target_entity_type, target_entity_id, body, origin_site)
+           VALUES ($1,$2,$3,'task',$4,'x','central')`,
+          [id, t, authorId, taskId],
+        ),
+      );
+      return id;
+    }
+    async function addReaction(t: string, commentId: string, userId: string, emoji: string, createdAt: string) {
+      await withTenants([t], (c) =>
+        c.query(
+          `INSERT INTO comment_reactions (tenant_id, comment_id, user_id, emoji, origin_site, created_at)
+           VALUES ($1,$2,$3,$4,'central',$5::timestamptz)`,
+          [t, commentId, userId, emoji, createdAt],
+        ),
+      );
+    }
+    async function setPrimaryUnit(t: string, userId: string, unitNodeId: string) {
+      await withTenants([t], (c) =>
+        c.query(
+          `INSERT INTO org_unit_memberships (id, tenant_id, user_id, unit_node_id, is_primary, valid_from, source, origin_site)
+           VALUES ($1,$2,$3,$4,true,'2020-01-01','manual','central')`,
+          [newId(), t, userId, unitNodeId],
+        ),
+      );
+    }
+
+    it("no activity in range → every day zero-filled, totals zero, score explicitly null (not a missing key)", async () => {
+      const iso = await isoE2("empty range");
+      const r = await iso.get("?from=2026-02-01&to=2026-02-03");
+      expect(r.statusCode).toBe(200);
+      const body = r.json() as ProductivityResponse;
+      expect(body.userId).toBe(iso.admin);
+      expect(body.days).toBe(3);
+      expect(body.series.map((d) => d.date)).toEqual(["2026-02-01", "2026-02-02", "2026-02-03"]);
+      for (const day of body.series) {
+        expect(day.completedTasks).toBe(0);
+        expect(day.total).toBe(0);
+      }
+      expect(body.totals.total).toBe(0);
+      expect("score" in body).toBe(true);
+      expect(body.score).toBeNull();
+      expect(typeof body.scoreNote).toBe("string");
+      expect(body.scoreNote.length).toBeGreaterThan(0);
+    });
+
+    it("completedTasks credits the ACTOR who flipped the switch; assignedCompleted credits whoever held the ball AT THE MOMENT of completion, never the task's current ball", async () => {
+      const iso = await isoE2("assigned vs actor");
+      const task = await iso.newTask("ball history task");
+
+      // Ball timeline: passed to A on day 1, task completed (by admin, NOT A) on day 3 while A
+      // still holds it, ball THEN moves on to B on day 5 — after completion. Current ball is B.
+      await addAssignmentEvent(iso.t, task, iso.a, "2026-03-01T09:00:00Z");
+      await addActivity(iso.t, { verb: "completed", objectKind: "pm_task", objectRef: task, actorUserId: iso.admin, occurredAt: "2026-03-03T09:00:00Z" });
+      await addAssignmentEvent(iso.t, task, iso.b, "2026-03-05T09:00:00Z");
+
+      const range = "?from=2026-03-01&to=2026-03-06";
+      const forUser = async (userId: string) => (await iso.get(`${range}&userId=${userId}`, asUser(iso.admin))).json() as ProductivityResponse;
+      const adminSeries = await forUser(iso.admin);
+      const aSeries = await forUser(iso.a);
+      const bSeries = await forUser(iso.b);
+
+      // completedTasks: admin (the actor) gets credit, A and B (never actors here) do not.
+      expect(adminSeries.totals.completedTasks).toBe(1);
+      expect(aSeries.totals.completedTasks).toBe(0);
+      expect(bSeries.totals.completedTasks).toBe(0);
+
+      // assignedCompleted: A held the ball AT the completion instant (day-1 event, before the
+      // day-3 completion) → credited. B's ball event landed AFTER completion → NOT credited, even
+      // though B is the CURRENT holder. Admin never held the ball at all → not credited.
+      expect(aSeries.totals.assignedCompleted).toBe(1);
+      expect(bSeries.totals.assignedCompleted).toBe(0);
+      expect(adminSeries.totals.assignedCompleted).toBe(0);
+      const aCompletionDay = aSeries.series.find((d) => d.date === "2026-03-03")!;
+      expect(aCompletionDay.assignedCompleted).toBe(1);
+
+      // involvedCompleted is documented as "EVER held the ball" (not time-bounded like
+      // assignedCompleted) — so B counts here too, unlike assignedCompleted above.
+      expect(aSeries.totals.involvedCompleted).toBe(1);
+      expect(bSeries.totals.involvedCompleted).toBe(1);
+    });
+
+    it("tasksAccepted counts the ball landing on you; reactionsGiven/Received, notesContributions and comments each read their own raw ledger; involvedCompleted also fires for a plain follower", async () => {
+      const iso = await isoE2("components");
+      const task = await iso.newTask("components task");
+
+      // tasksAccepted: the ball lands on A twice on two different days.
+      await addAssignmentEvent(iso.t, task, iso.a, "2026-04-01T08:00:00Z");
+      await addAssignmentEvent(iso.t, task, iso.a, "2026-04-02T08:00:00Z");
+
+      // notesContributions: A creates/updates a doc.
+      const docId = newId();
+      await addActivity(iso.t, { verb: "created", objectKind: "doc", objectRef: docId, actorUserId: iso.a, occurredAt: "2026-04-03T08:00:00Z" });
+      await addActivity(iso.t, { verb: "updated", objectKind: "doc", objectRef: docId, actorUserId: iso.a, occurredAt: "2026-04-04T08:00:00Z" });
+
+      // comments: A comments on the task (work_activity, not the live outbox — see file header).
+      await addActivity(iso.t, { verb: "commented", objectKind: "pm_task", objectRef: task, actorUserId: iso.a, occurredAt: "2026-04-05T08:00:00Z" });
+
+      // reactions: B authors a comment, A reacts to it (reactionsGiven for A) and the reaction
+      // lands on B's own comment (reactionsReceived for B).
+      const commentId = await addComment(iso.t, task, iso.b);
+      await addReaction(iso.t, commentId, iso.a, "👍", "2026-04-06T08:00:00Z");
+
+      // involvedCompleted via plain follower (never held the ball, never commented): B follows the
+      // task through the REAL endpoint, then the task is completed by admin.
+      const followRes = await app.inject({ method: "POST", url: `/api/${iso.t}/pm/tasks/${task}/follow`, headers: asUser(iso.b) });
+      expect(followRes.statusCode).toBe(200); // catches the class of bug this test tripped once: an
+      // unauthorized setup call failing silently reads as "the endpoint's logic is wrong" instead of
+      // "the fixture never actually followed the task".
+      await addActivity(iso.t, { verb: "completed", objectKind: "pm_task", objectRef: task, actorUserId: iso.admin, occurredAt: "2026-04-07T08:00:00Z" });
+
+      const range = "?from=2026-04-01&to=2026-04-07";
+      const forUser = async (userId: string) => (await iso.get(`${range}&userId=${userId}`, asUser(iso.admin))).json() as ProductivityResponse;
+      const aSeries = await forUser(iso.a);
+      const bSeries = await forUser(iso.b);
+
+      expect(aSeries.totals.tasksAccepted).toBe(2);
+      expect(aSeries.series.find((d) => d.date === "2026-04-01")!.tasksAccepted).toBe(1);
+      expect(aSeries.series.find((d) => d.date === "2026-04-02")!.tasksAccepted).toBe(1);
+      expect(aSeries.totals.notesContributions).toBe(2);
+      expect(aSeries.totals.comments).toBe(1);
+      expect(aSeries.totals.reactionsGiven).toBe(1);
+      expect(aSeries.totals.reactionsReceived).toBe(0);
+      expect(bSeries.totals.reactionsGiven).toBe(0);
+      expect(bSeries.totals.reactionsReceived).toBe(1);
+      expect(bSeries.totals.involvedCompleted).toBe(1); // follower, never held ball or commented
+      expect(bSeries.totals.assignedCompleted).toBe(0); // never held the ball at all
+
+      // total is the per-day sum of the eight components, nothing more — spot-check one day.
+      const aApr03 = aSeries.series.find((d) => d.date === "2026-04-03")!;
+      expect(aApr03.total).toBe(
+        aApr03.completedTasks + aApr03.assignedCompleted + aApr03.involvedCompleted + aApr03.tasksAccepted +
+        aApr03.reactionsGiven + aApr03.reactionsReceived + aApr03.notesContributions + aApr03.comments,
+      );
+    });
+
+    it("who may read whom: self always allowed; a plain member is denied a colleague's series; company_admin may read anyone; a cross-tenant caller is denied outright", async () => {
+      const iso = await isoE2("authz");
+
+      // self
+      expect((await iso.get("", asUser(iso.a))).statusCode).toBe(200);
+
+      // plain member (self_only tier) reading a colleague → denied, never a silent empty 200.
+      const foreign = await iso.get(`?userId=${iso.b}`, asUser(iso.a));
+      expect(foreign.statusCode).toBe(403);
+
+      // company_admin (company_wide tier) may read anyone in the tenant.
+      const asAdminForA = await iso.get(`?userId=${iso.a}`, asUser(iso.admin));
+      expect(asAdminForA.statusCode).toBe(200);
+
+      // cross-tenant: a caller with no grant on this tenant at all is denied at the base pm_task
+      // gate, before the person-axis narrowing is even reached.
+      const rivalTenant = await createCompany("Rival Co (pm E2)", ["agency", "pm"]);
+      const rivalAdmin = await createUser(`${newId()}@x.test`, "Rival E2 Admin");
+      await addMembership(rivalTenant, rivalAdmin);
+      await grantRole(rivalAdmin, await createRole("company_admin"), "company", rivalTenant);
+      const crossTenant = await app.inject({ method: "GET", url: `/api/${iso.t}/pm/productivity?userId=${iso.a}`, headers: asUser(rivalAdmin) });
+      expect(crossTenant.statusCode).toBe(403);
+    });
+
+    it("unit_scoped tier (manager/team_lead) is narrowed to their own led unit: allowed inside, denied outside", async () => {
+      const iso = await isoE2("unit scoped");
+      const lead = await createUser(`${newId()}@x.test`, "E2 unit lead");
+      const outsider = await createUser(`${newId()}@x.test`, "E2 unit outsider");
+      await addMembership(iso.t, lead);
+      await addMembership(iso.t, outsider);
+      await grantRole(lead, await createRole("manager"), "company", iso.t);
+      await setPrimaryUnit(iso.t, lead, "d-e2");
+      await setPrimaryUnit(iso.t, iso.a, "d-e2"); // A is in the lead's own unit
+      await setPrimaryUnit(iso.t, outsider, "d-e2-other"); // outsider is in a different unit
+
+      const inLine = await iso.get(`?userId=${iso.a}`, asUser(lead));
+      expect(inLine.statusCode).toBe(200);
+
+      const outOfLine = await iso.get(`?userId=${outsider}`, asUser(lead));
+      expect(outOfLine.statusCode).toBe(403);
+    });
+
+    it("validates from/to/userId and rejects an oversized window", async () => {
+      const iso = await isoE2("validation");
+      expect((await iso.get("?from=not-a-date")).statusCode).toBe(400);
+      expect((await iso.get("?to=13-40-2026")).statusCode).toBe(400);
+      expect((await iso.get("?from=2026-05-05&to=2026-05-01")).statusCode).toBe(400);
+      expect((await iso.get("?userId=not-a-uuid")).statusCode).toBe(400);
+      expect((await iso.get("?from=2025-01-01&to=2026-12-31")).statusCode).toBe(400); // > 400 days
+
+      const defaultRange = await iso.get("");
+      expect(defaultRange.statusCode).toBe(200);
+      expect((defaultRange.json() as ProductivityResponse).days).toBe(365);
     });
   });
 });

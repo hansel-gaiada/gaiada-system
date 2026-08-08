@@ -287,6 +287,27 @@ per the 2026-07-17 route inventory (confirm UI has been repointed off the in-mem
 - **BUILT (P4-G6, 2026-08-07):** `GET /api/:t/pm/projects/:projectId/tasks` gained the same
   `overdueOnly`/`dueSoon`/`dueSoonDays` semantics via shared helpers, so "what is about to slip"
   answers identically at project and tenant scope. Omitting them reproduces the old query exactly.
+- **BUILT (P4-E2, 2026-08-07):** `GET /api/:t/pm/productivity?userId=&from=&to=` → `{userId, from, to,
+  days, series[], totals, score, scoreNote}`. `series` is **zero-filled per calendar day** (a gap
+  day is `0`, never an absent entry — a heatmap with holes lies about inactivity). Components:
+  `completedTasks` · `assignedCompleted` · `involvedCompleted` · `tasksAccepted` ·
+  `reactionsGiven` · `reactionsReceived` · `notesContributions` · `comments` · `total`.
+  Defaults to the trailing 365 days (a GitHub-style year heatmap's span); max window 400.
+  **`score` is deliberately `null` and deliberately PRESENT.** No composite is computed: the formula
+  and its visibility are decision 9 / `P4-E1`, a people decision that has not been made. `scoreNote`
+  carries that explanation in-band so a client cannot mistake the null for a backend fault. Also
+  note `total` is activity VOLUME, not a de-duplicated task count — a task you both completed and
+  commented on contributes to more than one component.
+  Credit semantics matter for fairness: `completedTasks` credits the actor who flipped the switch,
+  `assignedCompleted` credits whoever held the ball — closing someone else's task does not transfer
+  their credit.
+  **Read authorization is enforced in-app, not inherited.** Self is always allowed;
+  `unrestricted`/`company_wide` may read anyone in tenant; `unit_scoped` is narrowed to the caller's
+  own led-unit subtree; `self_only` is refused explicitly. That last branch is NOT delegated to
+  `assertPersonInLedScope`, because its `self_only` case assumes Cerbos already filtered a
+  foreign-subject read — true for `report_document` (which has an `owns` policy condition) but NOT
+  for this endpoint's `pm_task:read` gate, which carries no subject at all. Reusing the helper
+  blindly would have let a plain member read a colleague's series.
 - **BUILT (P4-I6, 2026-08-07):** closing the LAST open blocker notifies the promoted task's ball
   holder and followers (`dependency_cleared`). Fires once per task however many blockers it had,
   skips the actor, and needs no dedup table — a completed promotion moves the task off its intake

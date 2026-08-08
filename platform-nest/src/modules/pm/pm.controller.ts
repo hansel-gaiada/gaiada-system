@@ -4,7 +4,7 @@
 // deterministic baseline (progress-from-subtasks + status coupling); the WS8 PM specialist
 // agent replaces the analysis later behind the same contract.
 import {
-  BadRequestException, Body, ConflictException, Controller, Delete, Get, HttpCode, NotFoundException, Param, Patch, Post, Query, Req, Res, UseGuards,
+  BadRequestException, Body, ConflictException, Controller, Delete, ForbiddenException, Get, HttpCode, NotFoundException, Param, Patch, Post, Query, Req, Res, UseGuards,
 } from "@nestjs/common";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import type { PoolClient } from "pg";
@@ -17,6 +17,13 @@ import { AuthGuard } from "../../auth/guards";
 import { ModuleEnabledGuard } from "../module-enabled.guard";
 import { allocateTaskSeq, deriveUniqueShortCode, displayCode } from "../../core/project-short-codes";
 import { todayIso, addDaysIso } from "../../core/dept-resolution";
+// P4-E2 — the person-axis boundary this endpoint reuses verbatim rather than re-deriving (see the
+// endpoint's own header comment for why). Mirrors reports.controller.ts's import of the same file;
+// the reverse direction (reports/document-builder.ts, report-rollups.ts importing `effectiveStatuses`
+// FROM this file) already exists, so this is not a new circular-dependency shape — both directions
+// are call-time-only (inside request-handler bodies, never at module-init top level), which is the
+// property that makes a two-way import between these two modules safe in practice.
+import { PERSON_SCOPE_MODULES, assertPersonInLedScope, personAxisTier, todayIsoInTz } from "../reports/person-scope";
 
 type Assignee = {
   kind: "person" | "department" | "division";
@@ -1249,6 +1256,215 @@ export async function createPmTaskInTx(
   return { id, status };
 }
 
+// ---------------- P4-E2 helpers ----------------
+
+/** Who may read whose productivity series. See `getProductivity`'s header for the full reasoning;
+ *  this is deliberately its own function (not a bare call to `assertPersonInLedScope`) because that
+ *  function's `self_only` branch assumes CERBOS already denied a foreign-subject read for that tier
+ *  (true for `report_document`, which has its own `owns` policy condition — see person-scope.ts's
+ *  own header). No such resource-specific policy exists for "someone's PM productivity", and this
+ *  ticket's base gate (`pm_task:read`) carries no ownerId/subject at all, so Cerbos cannot have
+ *  already filtered self_only here. The self_only branch is therefore enforced explicitly, in-app,
+ *  rather than assumed. */
+async function assertProductivityReadAllowed(principal: Parameters<typeof personAxisTier>[0], tenantId: string, targetUserId: string): Promise<void> {
+  if (principal.userId && principal.userId === targetUserId) return;
+  const tier = personAxisTier(principal, tenantId);
+  if (tier === "unrestricted" || tier === "company_wide") return;
+  if (tier === "self_only") throw new ForbiddenException("outside your reporting line");
+  // unit_scoped: narrowed to the caller's own led-unit subtree, exactly as `/reports` does.
+  const asOf = todayIsoInTz(config.reportsTz);
+  await withTenants(
+    [tenantId],
+    (c) => assertPersonInLedScope(c, tenantId, principal, targetUserId, asOf),
+    { modules: PERSON_SCOPE_MODULES },
+  );
+}
+
+interface ProductivityDayRow {
+  date: string;
+  completedTasks: number;
+  assignedCompleted: number;
+  involvedCompleted: number;
+  tasksAccepted: number;
+  reactionsGiven: number;
+  reactionsReceived: number;
+  notesContributions: number;
+  comments: number;
+  total: number;
+}
+
+/** The eight-component daily series (plan §1.7). One query, eight independent CTEs (one per
+ *  component) LEFT-JOINed onto a `generate_series` day spine so every day in [from, to] is present
+ *  with explicit zeros — required for a calendar heatmap, which needs to distinguish "no activity"
+ *  from "no data point at all". Every day-bucketing expression uses `(col AT TIME ZONE $tz)::date`,
+ *  the same idiom `fact-job.ts`/`checkins.controller.ts` already bucket `work_activity` by, so this
+ *  view of "which day did X happen on" can never disagree with the tracker program's own. Every
+ *  column returned to the caller is produced by `to_char(..., 'YYYY-MM-DD')` — never a `date` handed
+ *  raw to node-pg, which would parse at local midnight and risk the off-by-one-day shift this module
+ *  has already hit once (see this file's cursor-pagination header).
+ *
+ *  Component definitions (each is independently re-derivable from the raw row it counts — the
+ *  explainability bar the ticket set):
+ *   - completedTasks     — `work_activity` rows YOU personally closed (verb='completed', actor=you).
+ *   - assignedCompleted  — tasks closed by ANYONE, where YOU held the ball (per
+ *                          `pm_task_assignment_events`) AT THE MOMENT of completion — the latest
+ *                          ball event at or before the completion timestamp, not the task's CURRENT
+ *                          assignee (which can have moved on since). A task with no person-ball event
+ *                          on record before it closed is excluded rather than guessed at.
+ *   - involvedCompleted  — tasks closed by ANYONE, where you were a follower, EVER held the ball, or
+ *                          EVER commented on it. A strict superset of assignedCompleted in spirit
+ *                          (Repsona's own Responsible-vs-Ball split shows these as independent, not
+ *                          mutually exclusive, series — see plan §1.5). `pm_task_assignees` role=
+ *                          'contributor' rows are deliberately NOT unioned in here: that table is the
+ *                          TR-34 time/effort-attribution substrate with its own interval semantics,
+ *                          a bigger lift to join correctly than this ticket's scope, and flagged as a
+ *                          follow-up rather than approximated.
+ *   - tasksAccepted      — the ball landing on you (`pm_task_assignment_events`, ref_kind='person',
+ *                          ref_id=you), bucketed by the event's own day.
+ *   - reactionsGiven      — `comment_reactions` rows you added.
+ *   - reactionsReceived   — `comment_reactions` on comments YOU authored.
+ *   - notesContributions  — `work_activity` doc events (create/update/restore) you actored.
+ *   - comments            — `work_activity` 'commented' events on a `pm_task` you actored (guarded at
+ *                          the source — collab.controller.ts only emits this onto the pm_task stream
+ *                          for a comment that resolves to a genuine `pm_tasks` row).
+ *  `total` is computed in JS (see `getProductivity`) as the per-day sum, deliberately NOT a ninth SQL
+ *  column — it is arithmetic on the row this function already returns, not a new fact. */
+async function queryProductivitySeries(
+  c: PoolClient,
+  tenantId: string,
+  userId: string,
+  from: string,
+  to: string,
+  tz: string,
+): Promise<ProductivityDayRow[]> {
+  const { rows } = await c.query<{
+    date: string;
+    completedTasks: number;
+    assignedCompleted: number;
+    involvedCompleted: number;
+    tasksAccepted: number;
+    reactionsGiven: number;
+    reactionsReceived: number;
+    notesContributions: number;
+    comments: number;
+  }>(
+    `WITH days AS (
+       SELECT generate_series($1::date, $2::date, interval '1 day')::date AS d
+     ),
+     completed_tasks AS (
+       SELECT (wa.occurred_at AT TIME ZONE $3)::date AS d, count(*)::int AS n
+         FROM work_activity wa
+        WHERE wa.tenant_id = $4 AND wa.source = 'pm' AND wa.object_kind = 'pm_task'
+          AND wa.verb = 'completed' AND wa.actor_user_id = $5
+          AND (wa.occurred_at AT TIME ZONE $3)::date BETWEEN $1::date AND $2::date
+        GROUP BY 1
+     ),
+     assigned_completed AS (
+       SELECT (wa.occurred_at AT TIME ZONE $3)::date AS d, count(*)::int AS n
+         FROM work_activity wa
+        WHERE wa.tenant_id = $4 AND wa.source = 'pm' AND wa.object_kind = 'pm_task' AND wa.verb = 'completed'
+          AND (wa.occurred_at AT TIME ZONE $3)::date BETWEEN $1::date AND $2::date
+          AND EXISTS (
+            SELECT 1 FROM pm_task_assignment_events e
+             WHERE e.tenant_id = wa.tenant_id AND e.task_id::text = wa.object_ref
+               AND e.ref_kind = 'person' AND e.ref_id = $5::text
+               AND e.created_at <= wa.occurred_at
+               AND e.created_at = (
+                 SELECT max(e2.created_at) FROM pm_task_assignment_events e2
+                  WHERE e2.tenant_id = wa.tenant_id AND e2.task_id::text = wa.object_ref AND e2.created_at <= wa.occurred_at
+               )
+          )
+        GROUP BY 1
+     ),
+     involved_completed AS (
+       SELECT (wa.occurred_at AT TIME ZONE $3)::date AS d, count(*)::int AS n
+         FROM work_activity wa
+        WHERE wa.tenant_id = $4 AND wa.source = 'pm' AND wa.object_kind = 'pm_task' AND wa.verb = 'completed'
+          AND (wa.occurred_at AT TIME ZONE $3)::date BETWEEN $1::date AND $2::date
+          AND (
+            EXISTS (SELECT 1 FROM pm_task_followers f WHERE f.tenant_id = wa.tenant_id AND f.task_id::text = wa.object_ref AND f.user_id = $5)
+            OR EXISTS (SELECT 1 FROM pm_task_assignment_events e WHERE e.tenant_id = wa.tenant_id AND e.task_id::text = wa.object_ref AND e.ref_kind = 'person' AND e.ref_id = $5::text)
+            OR EXISTS (SELECT 1 FROM work_activity cm WHERE cm.tenant_id = wa.tenant_id AND cm.object_kind = 'pm_task' AND cm.object_ref = wa.object_ref AND cm.verb = 'commented' AND cm.actor_user_id = $5)
+          )
+        GROUP BY 1
+     ),
+     tasks_accepted AS (
+       SELECT (e.created_at AT TIME ZONE $3)::date AS d, count(*)::int AS n
+         FROM pm_task_assignment_events e
+        WHERE e.tenant_id = $4 AND e.ref_kind = 'person' AND e.ref_id = $5::text
+          AND (e.created_at AT TIME ZONE $3)::date BETWEEN $1::date AND $2::date
+        GROUP BY 1
+     ),
+     reactions_given AS (
+       SELECT (r.created_at AT TIME ZONE $3)::date AS d, count(*)::int AS n
+         FROM comment_reactions r
+        WHERE r.tenant_id = $4 AND r.user_id = $5
+          AND (r.created_at AT TIME ZONE $3)::date BETWEEN $1::date AND $2::date
+        GROUP BY 1
+     ),
+     reactions_received AS (
+       SELECT (r.created_at AT TIME ZONE $3)::date AS d, count(*)::int AS n
+         FROM comment_reactions r
+         JOIN comments cm ON cm.id = r.comment_id AND cm.tenant_id = r.tenant_id
+        WHERE r.tenant_id = $4 AND cm.author_id = $5
+          AND (r.created_at AT TIME ZONE $3)::date BETWEEN $1::date AND $2::date
+        GROUP BY 1
+     ),
+     notes AS (
+       SELECT (wa.occurred_at AT TIME ZONE $3)::date AS d, count(*)::int AS n
+         FROM work_activity wa
+        WHERE wa.tenant_id = $4 AND wa.source = 'pm' AND wa.object_kind = 'doc'
+          AND wa.verb IN ('created','updated','restored') AND wa.actor_user_id = $5
+          AND (wa.occurred_at AT TIME ZONE $3)::date BETWEEN $1::date AND $2::date
+        GROUP BY 1
+     ),
+     comments_made AS (
+       SELECT (wa.occurred_at AT TIME ZONE $3)::date AS d, count(*)::int AS n
+         FROM work_activity wa
+        WHERE wa.tenant_id = $4 AND wa.source = 'pm' AND wa.object_kind = 'pm_task'
+          AND wa.verb = 'commented' AND wa.actor_user_id = $5
+          AND (wa.occurred_at AT TIME ZONE $3)::date BETWEEN $1::date AND $2::date
+        GROUP BY 1
+     )
+     SELECT
+       to_char(days.d, 'YYYY-MM-DD') AS date,
+       COALESCE(completed_tasks.n, 0) AS "completedTasks",
+       COALESCE(assigned_completed.n, 0) AS "assignedCompleted",
+       COALESCE(involved_completed.n, 0) AS "involvedCompleted",
+       COALESCE(tasks_accepted.n, 0) AS "tasksAccepted",
+       COALESCE(reactions_given.n, 0) AS "reactionsGiven",
+       COALESCE(reactions_received.n, 0) AS "reactionsReceived",
+       COALESCE(notes.n, 0) AS "notesContributions",
+       COALESCE(comments_made.n, 0) AS "comments"
+     FROM days
+     LEFT JOIN completed_tasks ON completed_tasks.d = days.d
+     LEFT JOIN assigned_completed ON assigned_completed.d = days.d
+     LEFT JOIN involved_completed ON involved_completed.d = days.d
+     LEFT JOIN tasks_accepted ON tasks_accepted.d = days.d
+     LEFT JOIN reactions_given ON reactions_given.d = days.d
+     LEFT JOIN reactions_received ON reactions_received.d = days.d
+     LEFT JOIN notes ON notes.d = days.d
+     LEFT JOIN comments_made ON comments_made.d = days.d
+     ORDER BY days.d ASC`,
+    [from, to, tz, tenantId, userId],
+  );
+
+  return rows.map((r) => ({
+    date: r.date,
+    completedTasks: r.completedTasks,
+    assignedCompleted: r.assignedCompleted,
+    involvedCompleted: r.involvedCompleted,
+    tasksAccepted: r.tasksAccepted,
+    reactionsGiven: r.reactionsGiven,
+    reactionsReceived: r.reactionsReceived,
+    notesContributions: r.notesContributions,
+    comments: r.comments,
+    total:
+      r.completedTasks + r.assignedCompleted + r.involvedCompleted + r.tasksAccepted +
+      r.reactionsGiven + r.reactionsReceived + r.notesContributions + r.comments,
+  }));
+}
+
 @Controller("api")
 @UseGuards(AuthGuard, ModuleEnabledGuard("pm"))
 export class PmController {
@@ -1635,6 +1851,125 @@ export class PmController {
       );
       return r.rows;
     });
+  }
+
+  // ---------------- P4-E2 — per-person productivity series (plan §1.7 / workstream E) ----------------
+  //
+  // WHAT THIS CONSUMES, AND WHY NOTHING NEW WAS BUILT TO FEED IT. The ticket's brief was explicit:
+  // "we have every ingredient and zero assembly ... consume those, do not fork a parallel activity
+  // model." Every component below reads an EXISTING ledger that a prior, independent ticket already
+  // built for its own reason:
+  //   - `work_activity` (§11 of the BFF contract, migration 0030) — completed/reopened/commented/doc
+  //     events, already actor-attributed (TR-31) and already FLAG-DRIVEN for done-ness (never a
+  //     literal status id — see deriveVerb() in work-activity-consumer.ts).
+  //   - `pm_task_assignment_events` (migration 0087, P4-B1) — the ball ledger. Feeds "tasks accepted"
+  //     (a ball landing on you) and lets "assigned-completed" resolve who actually HELD the ball AT
+  //     THE MOMENT a task closed, not who holds it now.
+  //   - `comment_reactions` (migration 0043, P3-08/09) — reactions given/received.
+  // `rollup_metrics` (D12) was deliberately NOT used: no PM-scoped rollup writer exists today (its
+  // shape — numerator/denominator ratios keyed by (module, metric_key, period)) is built for money/
+  // ratio reporting, not a per-day activity count series, and inventing a writer for it here would be
+  // exactly the "fork a parallel model" the brief warned against. `report_work_facts` (the TR-07 fact
+  // table) was ALSO deliberately not used, for a different reason: it lives behind the 'reports'
+  // module's third wall (`app_module_allowed('reports')`), and PM must not silently degrade to a
+  // blank Productivity view for every tenant that has 'pm' enabled but not 'reports' (agency-only
+  // today per the CLAUDE.md hr/reports note). Reading the raw ledgers directly keeps this view
+  // self-sufficient inside the pm module alone.
+  //
+  // THE SCORE (decision 9 / ticket P4-E1). E1 — "decide the score, and who may see it" — is its OWN
+  // ticket, explicitly tagged "you + architect" in the plan, not senior-be. It is NOT decided as of
+  // this ticket (no "E1 DECIDED" entry in the plan's §0.1 execution log). Inventing a weighted
+  // composite here anyway would reproduce exactly the failure mode the ticket brief warned about: a
+  // number nobody but its author can justify, because the WEIGHTS — not just the arithmetic — would
+  // be unowned and arbitrary. So this endpoint ships the eight components and their sum, and NO
+  // composite score. `score` is present in the payload as an explicit `null` (not an absent key) so
+  // a client can render "not yet defined" rather than mistake a missing field for a bug once E1 lands
+  // a real formula it can drop into the same slot.
+  //
+  // WHO MAY READ WHOM (this ticket's other hard call). A colleague's daily activity is exactly the
+  // kind of person-grain data TR-25 (`person-scope.ts`) already drew a boundary around for `/reports`
+  // — so this reuses that boundary rather than inventing a second one that could quietly disagree
+  // with it. Chosen tier, deliberately the NARROWEST that still lets the org actually use this: a
+  // caller may always read their own series; `unrestricted`/`company_wide` tiers (platform_admin,
+  // group_executive, company_admin, the HR tiers) may read anyone in the tenant; `unit_scoped`
+  // (manager/team_lead) is narrowed to their own led-unit subtree (TR-25's own subtree walk, so a
+  // department lead's reach here is identical to their reach in `/reports`); a plain member
+  // (`self_only`) may read ONLY themselves — never a colleague, however innocuous the ask feels. This
+  // is stricter than `assertPersonInLedScope`'s own default (that function assumes Cerbos already
+  // denied the self_only case via a resource-specific policy, which does not exist for "someone's
+  // productivity" — see `assertProductivityReadAllowed` below for why the self_only branch is
+  // re-implemented explicitly here rather than trusted to the reused function alone).
+  //
+  // DATE DISCIPLINE (this file's own recurring trap, hit twice already on this module). Every date
+  // this endpoint buckets by goes through `to_char(... , 'YYYY-MM-DD')` in SQL or is built from
+  // `todayIso()`/`addDaysIso()` — never a `Date#toISOString()` on a value node-pg parsed as a `date`
+  // (that parses at LOCAL midnight and silently shifts the calendar day by the server's UTC offset;
+  // see this file's cursor-pagination header above and platform-ui's `lib/pmUrgency.ts`). The
+  // occurred_at/created_at timestamps ARE real `timestamptz` values (not `date`), so they carry their
+  // own zone correctly; the only day-bucketing risk is which zone buckets them, handled by binding
+  // `AT TIME ZONE $tz` to `config.reportsTz` — the same knob `fact-job.ts`/`checkins.controller.ts`
+  // already bucket work_activity by, so a day boundary here can never disagree with the tracker
+  // program's own reading of "which day did this happen on".
+  private static readonly PRODUCTIVITY_MAX_WINDOW_DAYS = 400;
+  private static readonly PRODUCTIVITY_DEFAULT_WINDOW_DAYS = 365; // a GitHub-style year heatmap's span
+
+  @Get(":tenantId/pm/productivity")
+  async getProductivity(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Query() query: Record<string, unknown>) {
+    const targetUserId = typeof query.userId === "string" && query.userId ? query.userId : req.principal.userId;
+    if (!targetUserId || !UUID_RE.test(targetUserId)) throw new BadRequestException("userId must be a valid uuid");
+
+    const today = todayIso();
+    const from = typeof query.from === "string" && query.from ? query.from : addDaysIso(today, -(PmController.PRODUCTIVITY_DEFAULT_WINDOW_DAYS - 1));
+    const to = typeof query.to === "string" && query.to ? query.to : today;
+    if (!DATE_RE.test(from)) throw new BadRequestException("from must be a YYYY-MM-DD date");
+    if (!DATE_RE.test(to)) throw new BadRequestException("to must be a YYYY-MM-DD date");
+    if (to < from) throw new BadRequestException("to must be on or after from");
+    const days = Math.floor((Date.parse(`${to}T00:00:00.000Z`) - Date.parse(`${from}T00:00:00.000Z`)) / 86_400_000) + 1;
+    if (!Number.isFinite(days) || days < 1) throw new BadRequestException("from and to must be real calendar dates");
+    if (days > PmController.PRODUCTIVITY_MAX_WINDOW_DAYS) {
+      throw new BadRequestException(`range too large (max ${PmController.PRODUCTIVITY_MAX_WINDOW_DAYS} days)`);
+    }
+
+    // Base module gate — identical shape/action to every other pm_task read in this file (listTasks,
+    // getTask). This is the wall that makes cross-tenant access impossible: a principal with no
+    // grant covering `tenantId` is denied here, before any query touches the DB.
+    await authorize(req.principal, { kind: "pm_task", tenantId }, "read");
+    await assertProductivityReadAllowed(req.principal, tenantId, targetUserId);
+
+    const tz = config.reportsTz;
+    const series = await withTenants([tenantId], (c) => queryProductivitySeries(c, tenantId, targetUserId, from, to, tz));
+
+    const totals = { completedTasks: 0, assignedCompleted: 0, involvedCompleted: 0, tasksAccepted: 0, reactionsGiven: 0, reactionsReceived: 0, notesContributions: 0, comments: 0, total: 0 };
+    for (const row of series) {
+      totals.completedTasks += row.completedTasks;
+      totals.assignedCompleted += row.assignedCompleted;
+      totals.involvedCompleted += row.involvedCompleted;
+      totals.tasksAccepted += row.tasksAccepted;
+      totals.reactionsGiven += row.reactionsGiven;
+      totals.reactionsReceived += row.reactionsReceived;
+      totals.notesContributions += row.notesContributions;
+      totals.comments += row.comments;
+      totals.total += row.total;
+    }
+
+    return {
+      userId: targetUserId,
+      from,
+      to,
+      days,
+      series,
+      totals,
+      // Deliberately null, deliberately present — see this endpoint's header comment. Not a bug,
+      // not a placeholder that "should" have a number; P4-E1 (a people decision, not an engineering
+      // one) has not been made yet.
+      score: null as number | null,
+      scoreNote:
+        "No composite score is computed. Each component above is a raw, independently-verifiable " +
+        "count over [from, to]; 'total' is their sum (activity volume, not a de-duplicated task " +
+        "count — a task you both completed and commented on contributes to more than one component). " +
+        "A composite score formula, and who may view it, is decision 9 / ticket P4-E1 and has not " +
+        "been decided — see 2026-08-04-pm-repsona-parity-phase4-plan.md §5.",
+    };
   }
 
   @Post(":tenantId/pm/tasks")
