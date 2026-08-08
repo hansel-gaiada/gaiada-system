@@ -20,6 +20,14 @@ import { config } from "./config";
 import { registerTool } from "./registry";
 import type { Principal } from "./principal";
 
+// P4-J2: unlike the older 401/403-only special-case below (still exactly what it was — untouched
+// for the two pre-existing writes), EVERY non-2xx here now surfaces the platform's own `{error}`
+// body verbatim, not a bare status code. This is load-bearing for `pm.setStatus`: a chain-enforced
+// (P4-I1) status write can come back 409 with the platform's HttpErrorFilter-flattened message
+// naming the actual blockers (e.g. `cannot move to "doing": blocked by 1 open dependency (Design
+// mockup)`) — that text lives ONLY in `{error}`, the filter has already discarded any structured
+// field, so a generic `platform ${path} 409` would silently swallow the one thing that makes the
+// refusal actionable. An agent that can't see "blocked by X" retries forever; this is the fix.
 async function platformSend(method: "POST" | "PATCH", path: string, body: unknown, principal: { provider: string; externalId: string }): Promise<string> {
   const res = await fetch(`${config.platformUrl}${path}`, {
     method,
@@ -31,11 +39,10 @@ async function platformSend(method: "POST" | "PATCH", path: string, body: unknow
     },
     body: JSON.stringify(body),
   });
-  if (res.status === 401 || res.status === 403) {
+  if (!res.ok) {
     const b = (await res.json().catch(() => ({}))) as { error?: string };
-    throw new Error(b.error ?? "platform denied the request");
+    throw new Error(b.error ?? `platform ${path} ${res.status}`);
   }
-  if (!res.ok) throw new Error(`platform ${path} ${res.status}`);
   return JSON.stringify(await res.json());
 }
 
@@ -248,5 +255,158 @@ export function registerPmTools(): void {
       required: ["tenantId", "taskId"],
     },
     handler: (args, principal) => platformGetPm(`/api/${String(args.tenantId)}/pm/tasks/${String(args.taskId)}/assignment-history`, principal),
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────────────────────────
+  // P4-J2 — PM WRITE tools (decision 16: all FOUR classified `impact: "low"`, matching
+  // pm.createTask/pm.createDoc above). Why low is safe rather than lax, and not a loophole — see
+  // §4.2 of the Phase-4 plan:
+  //   - The D14 gate only ever suspends `write && impact !== "low"` (policy.ts's authorize()).
+  //     `low` means these NEVER suspend for an automation/agent caller and need NO
+  //     approval-executables.ts entry — filing one would imply a protection that does not apply,
+  //     since `automation_approvals.impact` is CHECK'd to medium|high|unclassified and a
+  //     low-impact write cannot even be filed as a pending approval.
+  //   - Impact tier is orthogonal to AUTHORIZATION. Cerbos + the platform's own RLS gate every one
+  //     of these exactly as they gate a human's PATCH — `low` is a statement about blast radius and
+  //     reversibility, never about permission. No handler below checks role/tenant/client-vs-staff;
+  //     that would be a security bug wearing a feature's clothes (non-negotiable #1).
+  //   - `pm.passBall` is genuinely cheap and reversible: it appends to the append-only assignment-
+  //     history ledger (migration 0087, the same ledger `pm.taskAssignmentHistory` reads) — nothing
+  //     is ever destroyed; a wrong pass is corrected by passing again.
+  //   - `pm.setStatus` is the one to think hardest about: with P4-I1 chain enforcement a status
+  //     write can be REJECTED server-side with a 409 when the task has open dependencies. That
+  //     409's message (the blocker names, produced by platform-nest's `enforceStartGate`) reaches
+  //     the caller VERBATIM via `platformSend`'s error path above, not a bare status code —
+  //     specifically so an agent sees "blocked by X" instead of retrying a write that will fail
+  //     identically forever.
+  //
+  // No tool here bypasses the endpoint a human uses: every one PATCHes/POSTs the exact same
+  // /pm/tasks/:id or /comments route platform-ui's own lib/pmActions.ts calls (setTaskStatus,
+  // reassignBall, rescheduleTask) / core/collab.controller.ts's createComment — same coupling
+  // rules (progress/done/recurrence-spawn/dependency-clear cascade), same authorize() action
+  // derivation (managing := "assignee" key present -> "manage", else "update"), same Cerbos
+  // policies (resource_pm_task.yaml / resource_comment.yaml). No handler re-implements any of it.
+  //
+  // Cerbos hub-gate check (resource_mcp_tool.yaml): VERIFIED, not assumed — these four are
+  // write:true + impact:"low", the exact shape the policy's automation conjunct already matches
+  // generically (`request.resource.attr.impact == "low"` short-circuits the `all.of` before the
+  // grant/executable-list term is ever reached). No edit to that file, no Cerbos restart needed;
+  // see the ticket report for the live CheckResources calls that proved it.
+
+  registerTool({
+    name: "pm.setStatus",
+    description:
+      "Move a PM task to a different status (thin front over PATCH /api/:t/pm/tasks/:taskId {status}). LOW write — never suspends for an automation/agent caller. " +
+      "May be REJECTED with a 409 whose message names the exact open dependency/dependencies blocking the move (P4-I1 chain enforcement) — that message reaches you VERBATIM (never a bare status code); do not retry the same status unless the named blocker has actually closed. " +
+      "blockReason is an optional free-text reason, applied only when moving INTO an isBlocked status that has NO open dependencies (an external wait, e.g. 'waiting on the client') — moving into Blocked WITH open dependencies always attributes to the system instead and ignores this field. Cerbos-gated exactly like a human's status change (member-level 'update' action, not the assignee-only 'manage').",
+    minAssurance: "low",
+    write: true,
+    impact: "low", // decision 16 — see the header block above; a chain-blocked move 409s server-side rather than corrupting the ladder, so an unattended low write can't silently violate P4-I1
+    inputSchema: {
+      type: "object",
+      properties: {
+        tenantId: { type: "string" },
+        taskId: { type: "string" },
+        status: { type: "string", description: "a status id from the task's project's EFFECTIVE status registry (default ladder: backlog/todo/doing/blocked/done, or a project's own custom ids)" },
+        blockReason: { type: "string", description: "optional; applied only when the target status isBlocked and there are no open dependencies" },
+      },
+      required: ["tenantId", "taskId", "status"],
+    },
+    handler: (args, principal) => {
+      const body: Record<string, unknown> = { status: args.status };
+      if (typeof args.blockReason === "string") body.blockReason = args.blockReason;
+      return platformSend("PATCH", `/api/${String(args.tenantId)}/pm/tasks/${String(args.taskId)}`, body, principal);
+    },
+  });
+
+  registerTool({
+    name: "pm.setDueDate",
+    description:
+      "Set (or clear) a PM task's due date (thin front over PATCH /api/:t/pm/tasks/:taskId {dueDate}). LOW write. Pass a YYYY-MM-DD string to set it, or null/'' to clear it. Does not touch startDate, status, or the assignee. Cerbos-gated exactly like a human's due-date edit (member-level 'update' action).",
+    minAssurance: "low",
+    write: true,
+    impact: "low", // same tier as pm.createTask/pm.createDoc — a scalar-date edit on an internal PM task, no cross-tenant or money effect
+    inputSchema: {
+      type: "object",
+      properties: {
+        tenantId: { type: "string" },
+        taskId: { type: "string" },
+        dueDate: { type: ["string", "null"], description: "YYYY-MM-DD, or null/'' to clear" },
+      },
+      required: ["tenantId", "taskId", "dueDate"],
+    },
+    handler: (args, principal) => {
+      const dueDate = args.dueDate === null || args.dueDate === undefined ? null : String(args.dueDate);
+      return platformSend("PATCH", `/api/${String(args.tenantId)}/pm/tasks/${String(args.taskId)}`, { dueDate }, principal);
+    },
+  });
+
+  registerTool({
+    name: "pm.passBall",
+    description:
+      "Pass the Ball on a task to a person (thin front over PATCH /api/:t/pm/tasks/:taskId {assignee}). Ball = assignee.refId/kind, and the ball is ALWAYS a person — a department/division cannot take a turn. " +
+      "Leaves Responsible (assignee.responsibleId) exactly as it was: this tool reads the task's CURRENT assignee first (GET /pm/tasks/:id) and carries the existing responsibleId/responsibleName forward unchanged, mirroring platform-ui's own reassignBall(); a task with no prior assignee bootstraps BOTH Ball and Responsible onto the new holder (same bootstrap convention as the UI). " +
+      "Every pass appends to the append-only assignment-history ledger (migration 0087, read back via pm.taskAssignmentHistory) — it never overwrites or deletes a prior entry, so a wrong pass is corrected by passing again, never undone. assignmentNote is an optional free-text reason for this specific pass. " +
+      "LOW write. Changing the Ball is the PRIVILEGED 'manage' action server-side (same as any assignee edit) — Cerbos requires company_admin/manager/team_lead, NOT a plain member or viewer, unlike pm.setStatus/pm.setDueDate/pm.comment.",
+    minAssurance: "low",
+    write: true,
+    impact: "low", // decision 16 — cheap and reversible: an append-only ledger row, never a mutation of history
+    inputSchema: {
+      type: "object",
+      properties: {
+        tenantId: { type: "string" },
+        taskId: { type: "string" },
+        refId: { type: "string", description: "the person now holding the ball (a user id) — Ball is always a person" },
+        refName: { type: "string", description: "optional display name; defaults to refId if omitted" },
+        assignmentNote: { type: "string", description: "optional free-text reason for this pass" },
+      },
+      required: ["tenantId", "taskId", "refId"],
+    },
+    handler: async (args, principal) => {
+      const tenantId = String(args.tenantId);
+      const taskId = String(args.taskId);
+      const refId = String(args.refId);
+      const refName = typeof args.refName === "string" && args.refName ? args.refName : refId;
+      // Read-before-write is not a choice here: the platform's `validAssignee` treats a partial
+      // assignee (refId with no responsibleId) as INVALID and nulls the whole field out, which
+      // would silently clear the task's Responsible instead of leaving it alone. Fetching the
+      // current assignee first — exactly what reassignBall does — is the only way to preserve it.
+      const currentRaw = await platformGetPm(`/api/${tenantId}/pm/tasks/${taskId}`, principal);
+      const current = JSON.parse(currentRaw) as {
+        assignee: { kind: string; refId: string; refName: string; responsibleId: string; responsibleName: string } | null;
+      };
+      const assignee = current.assignee
+        ? { ...current.assignee, kind: "person", refId, refName }
+        : { kind: "person", refId, refName, responsibleId: refId, responsibleName: refName };
+      const body: Record<string, unknown> = { assignee };
+      if (typeof args.assignmentNote === "string") body.assignmentNote = args.assignmentNote;
+      return platformSend("PATCH", `/api/${tenantId}/pm/tasks/${taskId}`, body, principal);
+    },
+  });
+
+  registerTool({
+    name: "pm.comment",
+    description:
+      "Post a comment on a PM task (thin front over POST /api/:t/comments {entityType:'task', entityId, body, ...}) — the same generic comment endpoint the platform UI uses for tasks; there is no PM-specific comment route. Triggers the platform's own @mention/assignee/follower notifications for free. LOW write. Cerbos-gated on the generic 'comment' resource (company_admin/manager/member/team_lead — viewers are read-only and excluded from commenting, same as a human).",
+    minAssurance: "low",
+    write: true,
+    impact: "low", // same tier as pm.createDoc — an append-only comment row
+    inputSchema: {
+      type: "object",
+      properties: {
+        tenantId: { type: "string" },
+        taskId: { type: "string" },
+        body: { type: "string", description: "comment text" },
+        parentCommentId: { type: "string", description: "optional — reply to an existing comment" },
+        mentions: { type: "array", items: { type: "string" }, description: "optional user ids to @-mention (each gets a notification)" },
+      },
+      required: ["tenantId", "taskId", "body"],
+    },
+    handler: (args, principal) => {
+      const commentBody: Record<string, unknown> = { entityType: "task", entityId: String(args.taskId), body: args.body };
+      if (typeof args.parentCommentId === "string") commentBody.parentCommentId = args.parentCommentId;
+      if (Array.isArray(args.mentions)) commentBody.mentions = args.mentions.map(String);
+      return platformSend("POST", `/api/${String(args.tenantId)}/comments`, commentBody, principal);
+    },
   });
 }
