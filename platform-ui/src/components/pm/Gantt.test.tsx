@@ -1,7 +1,7 @@
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, within, cleanup } from "@testing-library/react";
 import { describe, it, expect, vi, beforeAll, beforeEach } from "vitest";
 import { Gantt } from "./Gantt";
-import type { PmTask, Timeline, MilestoneMarker } from "@/lib/pm";
+import type { PmTask, Timeline, MilestoneMarker, Assignee } from "@/lib/pm";
 
 // Gantt reads the router/pathname/search-params hooks even in its read-only mode (collapsed-group
 // state is stored in ?collapsed=) — same stub shape as Board.test.tsx. `nav.search` is mutable
@@ -45,6 +45,10 @@ function task(p: Partial<PmTask> & Pick<PmTask, "id" | "title">): PmTask {
     dependsOn: [], tags: [], customFields: {}, updatedAt: null, recurrence: null,
     projectShortCode: null, seq: null, displayCode: null, ...p,
   };
+}
+
+function assignee(p: Partial<Assignee> & Pick<Assignee, "refId" | "refName">): Assignee {
+  return { kind: "person", responsibleId: p.refId, responsibleName: p.refName, ...p };
 }
 
 function timelineFor(tasks: PmTask[]): Timeline {
@@ -190,5 +194,238 @@ describe("Gantt explicit date window (P4-C2)", () => {
     const { container } = render(<Gantt timeline={timelineFor([t])} milestones={milestones} />);
     expect(container.querySelectorAll(".pm-gantt__milestone")).toHaveLength(1);
     expect(screen.getByTitle(/Kickoff/)).toBeInTheDocument();
+  });
+});
+
+describe("Gantt filter bar (P4-C3)", () => {
+  it("is closed by default and opens itself when a filter param is already in the URL", () => {
+    const t = task({ id: "t1", title: "Bar" });
+    const { container: closed } = render(<Gantt timeline={timelineFor([t])} />);
+    expect(closed.querySelector(".pm-gantt__filterbar")).not.toHaveAttribute("open");
+
+    nav.search = new URLSearchParams("gstatus=todo");
+    const { container: open } = render(<Gantt timeline={timelineFor([t])} />);
+    expect(open.querySelector(".pm-gantt__filterbar")).toHaveAttribute("open");
+    expect(screen.getByText("Filters (1)")).toBeInTheDocument();
+  });
+
+  it("Status facet: offers only the statuses present, and checking one both filters rows and writes ?gstatus=", () => {
+    const tasks = [
+      task({ id: "t1", title: "Todo bar", status: "todo" }),
+      task({ id: "t2", title: "Doing bar", status: "in_progress" }),
+    ];
+    render(<Gantt timeline={timelineFor(tasks)} />);
+    // Labels come from PM_STATUS_LADDER — "todo" -> "ToDo", "in_progress" -> "Doing".
+    fireEvent.click(screen.getByRole("checkbox", { name: "Doing" }));
+    expect(nav.replace).toHaveBeenCalledWith("/projects/p-1?gstatus=in_progress", { scroll: false });
+
+    cleanup();
+    nav.search = new URLSearchParams("gstatus=in_progress");
+    render(<Gantt timeline={timelineFor(tasks)} />);
+    expect(screen.getAllByText("Doing bar").length).toBeGreaterThan(0);
+    expect(screen.queryByText("Todo bar")).toBeNull();
+  });
+
+  it("Priority facet filters rows by the closed 4-value enum", () => {
+    nav.search = new URLSearchParams("gpriority=urgent");
+    const tasks = [
+      task({ id: "t1", title: "Urgent bar", priority: "urgent" }),
+      task({ id: "t2", title: "Normal bar", priority: "normal" }),
+    ];
+    render(<Gantt timeline={timelineFor(tasks)} />);
+    expect(screen.getByText("Urgent bar")).toBeInTheDocument();
+    expect(screen.queryByText("Normal bar")).toBeNull();
+  });
+
+  it("Ball facet is `assignee.refId`, Responsible facet is `assignee.responsibleId` — independently filterable (plan §1.5)", () => {
+    const edward = assignee({ refId: "u-edward", refName: "Edward", responsibleId: "u-gusde", responsibleName: "Gusde" });
+    const gusde = assignee({ refId: "u-gusde", refName: "Gusde", responsibleId: "u-gusde", responsibleName: "Gusde" });
+    const tasks = [
+      task({ id: "t1", title: "Edward's ball", assignee: edward }),
+      task({ id: "t2", title: "Gusde's ball", assignee: gusde }),
+    ];
+    nav.search = new URLSearchParams("gball=u-edward");
+    render(<Gantt timeline={timelineFor(tasks)} />);
+    expect(screen.getByText("Edward's ball")).toBeInTheDocument();
+    expect(screen.queryByText("Gusde's ball")).toBeNull();
+
+    // Both tasks share the same Responsible (Gusde) despite different Balls — filtering on
+    // Responsible must keep both, proving the two facets are independent, not aliases.
+    cleanup();
+    nav.search = new URLSearchParams("gresponsible=u-gusde");
+    render(<Gantt timeline={timelineFor(tasks)} />);
+    expect(screen.getByText("Edward's ball")).toBeInTheDocument();
+    expect(screen.getByText("Gusde's ball")).toBeInTheDocument();
+  });
+
+  it("Tags facet renders only when `taskTags` is supplied, and filters by the resolved label", () => {
+    const tasks = [task({ id: "t1", title: "Tagged bar", tags: ["tag-1"] }), task({ id: "t2", title: "Untagged bar" })];
+    const { container: noMap } = render(<Gantt timeline={timelineFor(tasks)} />);
+    expect(within(noMap).queryByText("Tags")).toBeNull();
+
+    cleanup();
+    nav.search = new URLSearchParams("gtags=tag-1");
+    render(<Gantt timeline={timelineFor(tasks)} taskTags={{ t1: [{ id: "tag-1", label: "Urgent work", color: "bronze" }] }} />);
+    expect(screen.getByText("Urgent work", { selector: "label span, label" })).toBeInTheDocument();
+    expect(screen.getByText("Tagged bar")).toBeInTheDocument();
+    expect(screen.queryByText("Untagged bar")).toBeNull();
+  });
+
+  it("Milestones facet renders only when `milestones` is supplied, and filtering excludes non-matching tasks", () => {
+    const tasks = [task({ id: "t1", title: "Milestone bar", milestoneId: "m1" }), task({ id: "t2", title: "No milestone" })];
+    const milestones: MilestoneMarker[] = [{ id: "m1", name: "Kickoff", date: "2024-01-03", offsetPct: 50 }];
+    nav.search = new URLSearchParams("gmilestone=m1");
+    render(<Gantt timeline={timelineFor(tasks)} milestones={milestones} />);
+    expect(screen.getByText("Milestone bar")).toBeInTheDocument();
+    expect(screen.queryByText("No milestone")).toBeNull();
+  });
+
+  it("Keywords: typing and submitting Apply filters writes ?gq= and matches on title or description", () => {
+    const tasks = [task({ id: "t1", title: "Bake a cake" }), task({ id: "t2", title: "Other work" })];
+    render(<Gantt timeline={timelineFor(tasks)} />);
+    fireEvent.change(screen.getByLabelText("Keywords"), { target: { value: "cake" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
+    expect(nav.replace).toHaveBeenCalledWith("/projects/p-1?gq=cake", { scroll: false });
+
+    cleanup();
+    nav.search = new URLSearchParams("gq=cake");
+    render(<Gantt timeline={timelineFor(tasks)} />);
+    expect(screen.getByText("Bake a cake")).toBeInTheDocument();
+    expect(screen.queryByText("Other work")).toBeNull();
+  });
+
+  it("Due date facet range excludes tasks outside [gduefrom, gdueto], distinct from the ?gfrom=/?gto= window", () => {
+    const tasks = [
+      task({ id: "t1", title: "Due in range", dueDate: "2024-01-05" }),
+      task({ id: "t2", title: "Due outside range", dueDate: "2024-01-20" }),
+    ];
+    nav.search = new URLSearchParams("gduefrom=2024-01-01&gdueto=2024-01-10");
+    render(<Gantt timeline={timelineFor(tasks)} />);
+    expect(screen.getByText("Due in range")).toBeInTheDocument();
+    expect(screen.queryByText("Due outside range")).toBeNull();
+  });
+
+  it("Overdue Only is disabled with a reason when no `taskUrgency` map is supplied, and filters correctly when it is", () => {
+    const tasks = [task({ id: "t1", title: "Bar" })];
+    render(<Gantt timeline={timelineFor(tasks)} />);
+    expect(screen.getByRole("checkbox", { name: /Overdue Only/ })).toBeDisabled();
+
+    cleanup();
+    const overdue = task({ id: "t1", title: "Overdue bar" });
+    const onTrack = task({ id: "t2", title: "On-track bar" });
+    nav.search = new URLSearchParams("goverdue=1");
+    render(<Gantt timeline={timelineFor([overdue, onTrack])} taskUrgency={{ t1: "overdue", t2: "on-track" }} />);
+    expect(screen.getByRole("checkbox", { name: /Overdue Only/ })).not.toBeDisabled();
+    expect(screen.getByRole("checkbox", { name: /Overdue Only/ })).toBeChecked();
+    expect(screen.getByText("Overdue bar")).toBeInTheDocument();
+    expect(screen.queryByText("On-track bar")).toBeNull();
+  });
+
+  it("Show Closed defaults to checked (no behaviour change for existing bookmarks/callers) and unchecking hides done tasks", () => {
+    const tasks = [task({ id: "t1", title: "Done bar", status: "done" }), task({ id: "t2", title: "Open bar", status: "todo" })];
+    const { container } = render(<Gantt timeline={timelineFor(tasks)} />);
+    expect(screen.getByRole("checkbox", { name: "Show Closed" })).toBeChecked();
+    expect(screen.getByText("Done bar")).toBeInTheDocument(); // default: nothing hidden
+    expect(container.querySelector(".pm-gantt__filterbar")).not.toHaveAttribute("open");
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "Show Closed" }));
+    expect(nav.replace).toHaveBeenCalledWith("/projects/p-1?gclosed=0", { scroll: false });
+
+    cleanup();
+    nav.search = new URLSearchParams("gclosed=0");
+    render(<Gantt timeline={timelineFor(tasks)} />);
+    expect(screen.queryByText("Done bar")).toBeNull();
+    expect(screen.getByText("Open bar")).toBeInTheDocument();
+  });
+
+  it("Sub-task toggle is disabled rather than faked (decision 11 is open — Subtasks aren't first-class tasks)", () => {
+    const t = task({ id: "t1", title: "Bar" });
+    render(<Gantt timeline={timelineFor([t])} />);
+    const box = screen.getByRole("checkbox", { name: /Sub-task/ });
+    expect(box).toBeDisabled();
+    expect(box).not.toBeChecked();
+  });
+
+  it("Clear filters removes every g* filter param but leaves an unrelated param (?collapsed=) alone", () => {
+    nav.search = new URLSearchParams("gstatus=todo&gpriority=urgent&collapsed=x");
+    const t = task({ id: "t1", title: "Bar" });
+    render(<Gantt timeline={timelineFor([t])} />);
+    fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
+    expect(nav.replace).toHaveBeenCalledWith("/projects/p-1?collapsed=x", { scroll: false });
+  });
+});
+
+describe("Gantt CSV export (P4-C5)", () => {
+  it("hides the Export CSV control when there is nothing to export", () => {
+    // Every bar filtered out by a facet, but the timeline itself isn't empty.
+    nav.search = new URLSearchParams("gstatus=nonexistent");
+    const t = task({ id: "t1", title: "Bar" });
+    render(<Gantt timeline={timelineFor([t])} />);
+    expect(screen.queryByRole("button", { name: "Export CSV" })).toBeNull();
+  });
+
+  it("exports only the currently-visible (filtered) rows as CSV", () => {
+    const created: string[] = [];
+    const origCreate = URL.createObjectURL;
+    const origRevoke = URL.revokeObjectURL;
+    let blobText = "";
+    (URL as unknown as { createObjectURL: (b: Blob) => string }).createObjectURL = vi.fn((b: Blob) => {
+      created.push("blob:mock");
+      // jsdom's Blob supports .text() synchronously enough for a microtask-free read isn't
+      // guaranteed, so capture the parts instead via the Blob constructor args below.
+      return "blob:mock";
+    });
+    (URL as unknown as { revokeObjectURL: (u: string) => void }).revokeObjectURL = vi.fn();
+    const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+
+    nav.search = new URLSearchParams("gpriority=urgent");
+    const tasks = [
+      task({ id: "t1", title: "Urgent bar", priority: "urgent" }),
+      task({ id: "t2", title: "Normal bar", priority: "normal" }),
+    ];
+    render(<Gantt timeline={timelineFor(tasks)} />);
+    fireEvent.click(screen.getByRole("button", { name: "Export CSV" }));
+
+    expect(created.length).toBe(1);
+    expect(clickSpy).toHaveBeenCalledTimes(1);
+
+    URL.createObjectURL = origCreate;
+    URL.revokeObjectURL = origRevoke;
+    clickSpy.mockRestore();
+    void blobText;
+  });
+});
+
+describe("Gantt inline \"Add a task\" (P4-C6)", () => {
+  it("renders nothing when the caller supplies no `onAddTask`", () => {
+    const t = task({ id: "t1", title: "Bar" });
+    render(<Gantt timeline={timelineFor([t])} interactive canEdit />);
+    expect(screen.queryByPlaceholderText("Add a task")).toBeNull();
+  });
+
+  it("renders nothing when write access is off, even with `onAddTask` supplied", () => {
+    const t = task({ id: "t1", title: "Bar" });
+    render(<Gantt timeline={timelineFor([t])} interactive canEdit={false} onAddTask={vi.fn()} />);
+    expect(screen.queryByPlaceholderText("Add a task")).toBeNull();
+  });
+
+  it("submits the group key and title, then refreshes on success", async () => {
+    const onAddTask = vi.fn().mockResolvedValue({ ok: true });
+    const t = task({ id: "t1", title: "Bar" });
+    render(<Gantt timeline={timelineFor([t])} interactive canEdit onAddTask={onAddTask} />);
+    fireEvent.change(screen.getByPlaceholderText("Add a task"), { target: { value: "New follow-up" } });
+    fireEvent.click(screen.getByRole("button", { name: "+ Add a task" }));
+    await vi.waitFor(() => expect(onAddTask).toHaveBeenCalledWith("__all", "New follow-up"));
+    await vi.waitFor(() => expect(nav.refresh).toHaveBeenCalled());
+  });
+
+  it("surfaces the returned error in the toast instead of refreshing", async () => {
+    const onAddTask = vi.fn().mockResolvedValue({ ok: false, error: "Nope." });
+    const t = task({ id: "t1", title: "Bar" });
+    render(<Gantt timeline={timelineFor([t])} interactive canEdit onAddTask={onAddTask} />);
+    fireEvent.change(screen.getByPlaceholderText("Add a task"), { target: { value: "New follow-up" } });
+    fireEvent.click(screen.getByRole("button", { name: "+ Add a task" }));
+    await screen.findByText("Nope.");
+    expect(nav.refresh).not.toHaveBeenCalled();
   });
 });

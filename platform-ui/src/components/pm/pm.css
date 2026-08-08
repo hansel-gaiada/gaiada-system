@@ -249,6 +249,29 @@
 
 /* P2-08 — burndown overlay */
 .pm-gantt__bdtoggle { display: flex; justify-content: flex-end; margin-bottom: 8px; }
+
+/* ---- P4-C3: filter bar ---- */
+.pm-gantt__filterbar { margin-bottom: 8px; border: 0.5px solid var(--pm-line); border-radius: var(--pm-radius); background: var(--pm-surface-card); }
+.pm-gantt__filterbar-summary { cursor: pointer; padding: 7px 10px; font: 700 11px var(--font-body); color: var(--pm-text); list-style: none; }
+.pm-gantt__filterbar-summary::-webkit-details-marker { display: none; }
+.pm-gantt__filterbar-summary:hover, .pm-gantt__filterbar-summary:focus-visible { color: var(--pm-accent); }
+.pm-gantt__filterbar-body { display: flex; flex-direction: column; gap: 10px; padding: 2px 10px 10px; border-top: 0.5px solid var(--pm-line-soft); }
+.pm-gantt__filterbar-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.pm-gantt__filterbar-field input {
+  font: 400 12px var(--font-body); padding: 4px 6px; border: 0.5px solid var(--pm-line);
+  border-radius: var(--pm-radius); background: var(--pm-surface-card); color: var(--pm-text);
+}
+.pm-gantt__filterbar-field input:focus-visible { outline: 2px solid var(--pm-accent); outline-offset: 1px; }
+.pm-gantt__filterbar-toggles { display: flex; flex-wrap: wrap; gap: 14px; padding-top: 2px; border-top: 0.5px solid var(--pm-line-soft); }
+.pm-tagfilter__opt--disabled { opacity: 0.55; cursor: not-allowed; }
+
+/* ---- P4-C6: inline "Add a task" per group ---- */
+.pm-gantt__addtask { display: flex; align-items: center; gap: 6px; padding: 6px 4px 6px 26px; }
+.pm-gantt__addtask input[type="text"] {
+  flex: 1 1 auto; min-width: 0; font: 400 12px var(--font-body); padding: 4px 6px;
+  border: 0.5px solid var(--pm-line); border-radius: var(--pm-radius); background: var(--pm-surface-card); color: var(--pm-text);
+}
+.pm-gantt__addtask input[type="text"]:focus-visible { outline: 2px solid var(--pm-accent); outline-offset: 1px; }
 .pm-gantt__bdrow { display: grid; grid-template-columns: 232px 1fr; gap: 12px; align-items: center; animation: erp-toast 0.18s var(--erp-ease); }
 .pm-gantt__bdlabel { font: 700 10px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--pm-text-faint); text-align: right; white-space: nowrap; }
 .pm-gantt__bdtrack { position: relative; height: 48px; border: 0.5px solid var(--pm-line-soft); border-radius: var(--pm-radius); background: var(--pm-surface-sunken); }

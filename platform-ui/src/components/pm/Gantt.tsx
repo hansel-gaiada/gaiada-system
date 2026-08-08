@@ -9,6 +9,7 @@ import { addDependency, batchReschedule, type RescheduleItem } from "@/lib/pmAct
 import { EmptyNote } from "@/components/systems/EmptyNote";
 import { UrgencyChip } from "./UrgencyChip";
 import { TagChip } from "./TagChip";
+import { PM_TERMS, PM_STATUS_LADDER } from "@/lib/pmVocabulary";
 import "./pm.css";
 
 // Gantt — bars on a shared date axis. Read-only by default (legacy project view);
@@ -79,6 +80,13 @@ interface GanttProps {
   // clock disagreement it can introduce are an acceptable trade-off here — unlike urgency tiers,
   // nothing downstream reads this value as ground truth.
   todayISO?: string;
+  // P4-C6 — inline "Add a task" per group row. A plain closure prop (unlike a Server Action bound
+  // reference) cannot cross the RSC boundary from an async server-component caller — same
+  // constraint `taskHrefBase`'s own doc above works around. Only a caller that can hand Gantt a
+  // Server Action passes this; every other mount simply doesn't render the affordance (no
+  // wiring required, no broken control). Resolves to the same `{ ok, error? }` shape the
+  // drag/link actions already use, so failures surface through the existing toast.
+  onAddTask?: (groupKey: string, title: string) => Promise<{ ok: boolean; error?: string }>;
 }
 
 const DAY = 24 * 3600 * 1000;
@@ -315,6 +323,62 @@ function depScan(bars: TimelineBar[], taskId: string): string[] {
   return [...out];
 }
 
+// ---- P4-C3: filter bar (Keywords · Tags · Status · Responsible · Ball · Priority · Milestones ·
+// Due date, + Overdue Only/Show Closed toggles) ----
+// `Priority` is a closed 4-value enum owned by the server-only `lib/pm.ts`; duplicated here as a
+// plain array/map for the SAME reason `hasCycle`/`depScan` above duplicate their pm.ts twins — a
+// client component cannot pull a runtime value out of a `server-only` module, only its erased type.
+const GANTT_PRIORITIES: PmTask["priority"][] = ["low", "normal", "high", "urgent"];
+const GANTT_PRIORITY_LABEL: Record<PmTask["priority"], string> = { low: "Low", normal: "Normal", high: "High", urgent: "Urgent" };
+
+// Best-effort "is this task closed" check that never guesses from a date — only from signals the
+// SERVER already resolved. Prefers the precomputed urgency tier (`done`, the exact signal
+// `props.taskUrgency` carries — resolved server-side from the task's own project's status
+// registry); when a tier WAS supplied but isn't `done`, that is authoritative too (not-closed).
+// Only when no tier was supplied at all does this fall back to the shared 5-status ladder, which
+// only knows the SYNTHESIZED default set — a task on a customized per-project registry (e.g.
+// "Ready to check") with no urgency map reads as "not closed", the safe default that never hides
+// a task nobody told this component was done.
+function isTaskClosed(t: PmTask, urgencyTier: UrgencyTier | undefined): boolean {
+  if (urgencyTier !== undefined) return urgencyTier === "done";
+  return PM_STATUS_LADDER.find((s) => s.id === t.status)?.isDone ?? false;
+}
+
+interface GanttFilters {
+  q: string;
+  tags: Set<string>; status: Set<string>; priority: Set<string>;
+  responsible: Set<string>; ball: Set<string>; milestone: Set<string>;
+  dueFrom: string; dueTo: string;
+  overdueOnly: boolean; hideClosed: boolean;
+}
+
+// The predicate every facet/toggle funnels through. `overdueOnly` reads ONLY `urgencyTier` — never
+// `t.dueDate` directly — per lib/pmUrgency.ts's header rule: one definition of "overdue", computed
+// once server-side and handed down, or every surface risks disagreeing with the one next to it.
+function taskMatchesFilters(t: PmTask, f: GanttFilters, urgencyTier: UrgencyTier | undefined): boolean {
+  if (f.q) {
+    const needle = f.q;
+    if (!t.title.toLowerCase().includes(needle) && !t.description.toLowerCase().includes(needle)) return false;
+  }
+  if (f.status.size && !f.status.has(t.status)) return false;
+  if (f.priority.size && !f.priority.has(t.priority)) return false;
+  if (f.responsible.size && !(t.assignee && f.responsible.has(t.assignee.responsibleId))) return false;
+  if (f.ball.size && !(t.assignee && f.ball.has(t.assignee.refId))) return false;
+  if (f.tags.size && !t.tags.some((id) => f.tags.has(id))) return false;
+  if (f.milestone.size && !(t.milestoneId && f.milestone.has(t.milestoneId))) return false;
+  if (f.dueFrom && (!t.dueDate || t.dueDate < f.dueFrom)) return false;
+  if (f.dueTo && (!t.dueDate || t.dueDate > f.dueTo)) return false;
+  if (f.overdueOnly && urgencyTier !== "overdue") return false;
+  if (f.hideClosed && isTaskClosed(t, urgencyTier)) return false;
+  return true;
+}
+
+// P4-C5: same escape/Blob/createObjectURL shape as components/data/DataTable.tsx's own
+// `exportCsv` — no new dependency, one convention for "download this table as CSV" app-wide.
+function csvEscape(s: string): string {
+  return `"${s.replace(/"/g, '""')}"`;
+}
+
 interface DragState { taskId: string; mode: DragMode; startX: number; trackWidth: number; deltaDays: number; moveSet: Set<string> }
 interface LinkState { fromId: string; fromTitle: string }
 interface Line { x1: number; y1: number; x2: number; y2: number; conflict: boolean }
@@ -420,6 +484,156 @@ export function Gantt(props: GanttProps) {
     [milestones, windowActive, effStart, effDays],
   );
 
+  // ---- P4-C3 — the filter bar, URL-driven like everything above (?gq=/?gtags=/?gstatus=/
+  // ?gresponsible=/?gball=/?gpriority=/?gmilestone=/?gduefrom=/?gdueto=/?goverdue=/?gclosed=).
+  // A DELIBERATELY separate param family from ?gfrom=/?gto=, which already mean "the visible date
+  // WINDOW" — the due-date FACET below is a different question ("only tasks due in this range")
+  // and gets its own ?gduefrom=/?gdueto= rather than colliding. Every param defaults to "no
+  // filter" (Set()/"" /false), so a caller or bookmark with none of these set renders exactly what
+  // it rendered before this ticket.
+  const gq = searchParams.get("gq") ?? "";
+  const gTagsParam = searchParams.get("gtags") ?? "";
+  const gStatusParam = searchParams.get("gstatus") ?? "";
+  const gPriorityParam = searchParams.get("gpriority") ?? "";
+  const gResponsibleParam = searchParams.get("gresponsible") ?? "";
+  const gBallParam = searchParams.get("gball") ?? "";
+  const gMilestoneParam = searchParams.get("gmilestone") ?? "";
+  const gDueFrom = searchParams.get("gduefrom") ?? "";
+  const gDueTo = searchParams.get("gdueto") ?? "";
+  const overdueOnly = searchParams.get("goverdue") === "1";
+  // "Show Closed" defaults ON — ?gclosed= absent means every task the caller handed in still
+  // renders (byte-identical to every Gantt mount before this ticket); unchecking it writes
+  // ?gclosed=0 to hide closed tasks.
+  const hideClosed = searchParams.get("gclosed") === "0";
+  // Memoized on the raw param STRINGS, not on freshly-`new Set()`'d objects — `filteredGroups`
+  // below depends on this object, and an unmemoized fallback here would retrigger the
+  // dependency-line effect every render (the exact "Maximum update depth exceeded" trap the
+  // `groups` memo's own comment documents; this is that lesson applied to a second memo).
+  const filters: GanttFilters = useMemo(() => ({
+    q: gq.trim().toLowerCase(),
+    tags: new Set(gTagsParam.split(",").filter(Boolean)),
+    status: new Set(gStatusParam.split(",").filter(Boolean)),
+    priority: new Set(gPriorityParam.split(",").filter(Boolean)),
+    responsible: new Set(gResponsibleParam.split(",").filter(Boolean)),
+    ball: new Set(gBallParam.split(",").filter(Boolean)),
+    milestone: new Set(gMilestoneParam.split(",").filter(Boolean)),
+    dueFrom: gDueFrom, dueTo: gDueTo, overdueOnly, hideClosed,
+  }), [gq, gTagsParam, gStatusParam, gPriorityParam, gResponsibleParam, gBallParam, gMilestoneParam, gDueFrom, gDueTo, overdueOnly, hideClosed]);
+  const activeFilterCount =
+    (filters.q ? 1 : 0) + (filters.tags.size ? 1 : 0) + (filters.status.size ? 1 : 0) + (filters.priority.size ? 1 : 0) +
+    (filters.responsible.size ? 1 : 0) + (filters.ball.size ? 1 : 0) + (filters.milestone.size ? 1 : 0) +
+    (filters.dueFrom || filters.dueTo ? 1 : 0) + (filters.overdueOnly ? 1 : 0) + (filters.hideClosed ? 1 : 0);
+  const filtersActive = activeFilterCount > 0;
+
+  // Distinct facet options, derived from the FULL unwindowed/unfiltered bar set so the choices on
+  // offer never shrink just because another facet already narrowed the view (standard multi-facet
+  // UX — Repsona's own filter bar behaves the same way).
+  const facetOptions = useMemo(() => {
+    const statuses = new Map<string, string>();
+    const priorities = new Set<PmTask["priority"]>();
+    const responsibles = new Map<string, string>();
+    const balls = new Map<string, string>();
+    for (const b of allBars) {
+      const t = b.task;
+      if (!statuses.has(t.status)) statuses.set(t.status, PM_STATUS_LADDER.find((s) => s.id === t.status)?.label ?? t.status);
+      priorities.add(t.priority);
+      if (t.assignee) {
+        responsibles.set(t.assignee.responsibleId, t.assignee.responsibleName);
+        balls.set(t.assignee.refId, t.assignee.refName);
+      }
+    }
+    const tags = new Map<string, Tag>();
+    for (const list of Object.values(props.taskTags ?? {})) for (const tg of list) tags.set(tg.id, tg);
+    return {
+      statuses: [...statuses.entries()],
+      priorities: GANTT_PRIORITIES.filter((p) => priorities.has(p)),
+      responsibles: [...responsibles.entries()],
+      balls: [...balls.entries()],
+      tags: [...tags.values()],
+      milestones: milestones ?? [],
+    };
+  }, [allBars, props.taskTags, milestones]);
+
+  // Toggles a value in a comma-joined URL param (?gtags=a,b) — reads the CURRENT url fresh at
+  // click time, same convention as `toggleCollapsed`/`setZoom` above (not off the memoized
+  // `filters`, which lags one render behind a just-fired navigation).
+  const toggleSetParam = useCallback((key: string, value: string) => {
+    const params = new URLSearchParams(Array.from(searchParams.entries()));
+    const current = new Set(params.get(key)?.split(",").filter(Boolean) ?? []);
+    if (current.has(value)) current.delete(value); else current.add(value);
+    if (current.size) params.set(key, [...current].join(",")); else params.delete(key);
+    setZoomParams(params);
+  }, [searchParams, setZoomParams]);
+  const setOverdueOnly = useCallback((checked: boolean) => {
+    const params = new URLSearchParams(Array.from(searchParams.entries()));
+    if (checked) params.set("goverdue", "1"); else params.delete("goverdue");
+    setZoomParams(params);
+  }, [searchParams, setZoomParams]);
+  const setHideClosed = useCallback((hide: boolean) => {
+    const params = new URLSearchParams(Array.from(searchParams.entries()));
+    if (hide) params.set("gclosed", "0"); else params.delete("gclosed");
+    setZoomParams(params);
+  }, [searchParams, setZoomParams]);
+  const applyTextFilters = useCallback((e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const form = e.currentTarget;
+    const val = (name: string) => ((form.elements.namedItem(name) as HTMLInputElement | null)?.value ?? "").trim();
+    const params = new URLSearchParams(Array.from(searchParams.entries()));
+    const q = val("gq"); const dueFrom = val("gduefrom"); const dueTo = val("gdueto");
+    if (q) params.set("gq", q); else params.delete("gq");
+    if (dueFrom) params.set("gduefrom", dueFrom); else params.delete("gduefrom");
+    if (dueTo) params.set("gdueto", dueTo); else params.delete("gdueto");
+    setZoomParams(params);
+  }, [searchParams, setZoomParams]);
+  const clearFilters = useCallback(() => {
+    const params = new URLSearchParams(Array.from(searchParams.entries()));
+    for (const key of ["gq", "gtags", "gstatus", "gpriority", "gresponsible", "gball", "gmilestone", "gduefrom", "gdueto", "goverdue", "gclosed"]) {
+      params.delete(key);
+    }
+    setZoomParams(params);
+    setLive("Filters cleared.");
+  }, [setZoomParams]);
+
+  // Facet/toggle filters layer ON TOP of the window (`viewGroups`/`viewMilestones` above already
+  // reflect ?gfrom=/?gto=). `allBars`/the drag-and-dependency machinery below stay against the
+  // FULL, unfiltered graph on purpose — hiding a row must never make its dependency edges or
+  // move-together cascade behave as if the task didn't exist.
+  const filteredGroups: GanttGroup[] = useMemo(
+    () => viewGroups.map((g) => ({ ...g, bars: g.bars.filter((b) => taskMatchesFilters(b.task, filters, props.taskUrgency?.[b.task.id])) })),
+    [viewGroups, filters, props.taskUrgency],
+  );
+  const filteredMilestones: MilestoneMarker[] = useMemo(
+    () => (filters.milestone.size ? viewMilestones.filter((m) => filters.milestone.has(m.id)) : viewMilestones),
+    [viewMilestones, filters.milestone],
+  );
+  const filteredTotal = useMemo(() => filteredGroups.reduce((n, g) => n + g.bars.length, 0), [filteredGroups]);
+
+  // P4-C5 — CSV of the visible (filtered) rows. Same escape/Blob/anchor-click shape as
+  // components/data/DataTable.tsx's own `exportCsv`; no new dependency.
+  const exportCsv = useCallback(() => {
+    const rows = filteredGroups.flatMap((g) => g.bars.map((b) => b.task));
+    const columns: { header: string; get: (t: PmTask) => string }[] = [
+      { header: "Title", get: (t) => t.title },
+      { header: "Project", get: (t) => t.projectName },
+      { header: "Status", get: (t) => PM_STATUS_LADDER.find((s) => s.id === t.status)?.label ?? t.status },
+      { header: PM_TERMS.priority, get: (t) => GANTT_PRIORITY_LABEL[t.priority] },
+      { header: PM_TERMS.ball, get: (t) => t.assignee?.refName ?? "" },
+      { header: PM_TERMS.responsible, get: (t) => t.assignee?.responsibleName ?? "" },
+      { header: "Start date", get: (t) => t.startDate ?? "" },
+      { header: PM_TERMS.dueDate, get: (t) => t.dueDate ?? "" },
+      { header: "Progress %", get: (t) => String(t.progress) },
+    ];
+    const head = columns.map((c) => csvEscape(c.header)).join(",");
+    const body = rows.map((t) => columns.map((c) => csvEscape(c.get(t))).join(",")).join("\n");
+    const blob = new Blob([`${head}\n${body}`], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "gantt-export.csv";
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [filteredGroups]);
+
   // ---- P4-L3/P4-C1: day/week/month header, weekend banding, today line ----
   // Client-only fallback for "today" (see the `todayISO` prop doc above) — starts `null` so the
   // very first render (server AND client, pre-hydration) draws no line, then fills in post-mount.
@@ -482,7 +696,7 @@ export function Gantt(props: GanttProps) {
     setLines(next);
   }, [depEdges]);
 
-  useLayoutEffect(() => { recomputeLines(); }, [recomputeLines, collapsedParam, viewGroups, drag]);
+  useLayoutEffect(() => { recomputeLines(); }, [recomputeLines, collapsedParam, filteredGroups, drag]);
   useEffect(() => {
     if (!containerRef.current) return;
     const ro = new ResizeObserver(() => recomputeLines());
@@ -828,7 +1042,156 @@ export function Gantt(props: GanttProps) {
             <button type="button" className="pm-gantt__window-clear" onClick={clearWindow} aria-label="Clear date window — show the full timeline">×</button>
           )}
         </form>
+        {/* P4-C5 — export the VISIBLE (filtered) rows, never the full unfiltered set; hidden when
+            there's nothing to export rather than shown disabled (same convention as the burndown
+            toggle below — no control, no error, when its data is empty). */}
+        {filteredTotal > 0 && (
+          <button type="button" className="lux-btn lux-btn--ghost lux-btn--sm" onClick={exportCsv}>Export CSV</button>
+        )}
       </div>
+
+      {/* P4-C3 — the filter bar. A `<details>` disclosure (same "collapsed by default, state
+          survives in the URL" shape as everything else in this toolbar) rather than always-open
+          chrome, so a read-only viewer who never filters isn't shown eight facets by default; it
+          opens itself when a filter is already active (e.g. from a bookmarked/shared link). */}
+      <details className="pm-gantt__filterbar" open={filtersActive || undefined}>
+        <summary className="pm-gantt__filterbar-summary">
+          Filters{activeFilterCount > 0 ? ` (${activeFilterCount})` : ""}
+        </summary>
+        <div className="pm-gantt__filterbar-body">
+          <form className="pm-gantt__filterbar-row" onSubmit={applyTextFilters} aria-label="Keywords and due-date filters">
+            <label className="pm-gantt__filterbar-field">
+              <span className="pm-sr-only">{PM_TERMS.keywords}</span>
+              <input key={`gq-${gq}`} name="gq" type="search" placeholder={PM_TERMS.keywords} defaultValue={gq} aria-label={PM_TERMS.keywords} />
+            </label>
+            <label className="pm-gantt__filterbar-field">
+              <span className="pm-sr-only">{PM_TERMS.dueDate} from</span>
+              <input key={`gduefrom-${gDueFrom}`} name="gduefrom" type="date" defaultValue={gDueFrom} aria-label={`${PM_TERMS.dueDate} from`} />
+            </label>
+            <span className="pm-gantt__window-sep" aria-hidden>–</span>
+            <label className="pm-gantt__filterbar-field">
+              <span className="pm-sr-only">{PM_TERMS.dueDate} to</span>
+              <input key={`gdueto-${gDueTo}`} name="gdueto" type="date" defaultValue={gDueTo} aria-label={`${PM_TERMS.dueDate} to`} />
+            </label>
+            <button type="submit" className="lux-btn lux-btn--ghost lux-btn--sm">Apply filters</button>
+            {filtersActive && (
+              <button type="button" className="lux-btn lux-btn--ghost lux-btn--sm" onClick={clearFilters}>Clear filters</button>
+            )}
+          </form>
+
+          {facetOptions.statuses.length > 0 && (
+            <div className="pm-tagfilter">
+              <span className="pm-tagfilter__label">Status</span>
+              <div className="pm-tagfilter__options">
+                {facetOptions.statuses.map(([id, label]) => (
+                  <label key={id} className="pm-tagfilter__opt">
+                    <input type="checkbox" checked={filters.status.has(id)} onChange={() => toggleSetParam("gstatus", id)} />
+                    {label}
+                  </label>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {facetOptions.priorities.length > 0 && (
+            <div className="pm-tagfilter">
+              <span className="pm-tagfilter__label">{PM_TERMS.priority}</span>
+              <div className="pm-tagfilter__options">
+                {facetOptions.priorities.map((p) => (
+                  <label key={p} className="pm-tagfilter__opt">
+                    <input type="checkbox" checked={filters.priority.has(p)} onChange={() => toggleSetParam("gpriority", p)} />
+                    {GANTT_PRIORITY_LABEL[p]}
+                  </label>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {facetOptions.responsibles.length > 0 && (
+            <div className="pm-tagfilter">
+              <span className="pm-tagfilter__label">{PM_TERMS.responsible}</span>
+              <div className="pm-tagfilter__options">
+                {facetOptions.responsibles.map(([id, name]) => (
+                  <label key={id} className="pm-tagfilter__opt">
+                    <input type="checkbox" checked={filters.responsible.has(id)} onChange={() => toggleSetParam("gresponsible", id)} />
+                    {name}
+                  </label>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {facetOptions.balls.length > 0 && (
+            <div className="pm-tagfilter">
+              <span className="pm-tagfilter__label">{PM_TERMS.ball}</span>
+              <div className="pm-tagfilter__options">
+                {facetOptions.balls.map(([id, name]) => (
+                  <label key={id} className="pm-tagfilter__opt">
+                    <input type="checkbox" checked={filters.ball.has(id)} onChange={() => toggleSetParam("gball", id)} />
+                    {name}
+                  </label>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {facetOptions.tags.length > 0 && (
+            <div className="pm-tagfilter">
+              <span className="pm-tagfilter__label">{PM_TERMS.tags}</span>
+              <div className="pm-tagfilter__options">
+                {facetOptions.tags.map((tg) => (
+                  <label key={tg.id} className="pm-tagfilter__opt">
+                    <input type="checkbox" checked={filters.tags.has(tg.id)} onChange={() => toggleSetParam("gtags", tg.id)} />
+                    {tg.label}
+                  </label>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {facetOptions.milestones.length > 0 && (
+            <div className="pm-tagfilter">
+              <span className="pm-tagfilter__label">{PM_TERMS.milestones}</span>
+              <div className="pm-tagfilter__options">
+                {facetOptions.milestones.map((m) => (
+                  <label key={m.id} className="pm-tagfilter__opt">
+                    <input type="checkbox" checked={filters.milestone.has(m.id)} onChange={() => toggleSetParam("gmilestone", m.id)} />
+                    {m.name}
+                  </label>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="pm-gantt__filterbar-toggles">
+            <label className="pm-tagfilter__opt" title={props.taskUrgency ? undefined : "Unavailable — this view wasn't given urgency data."}>
+              <input
+                type="checkbox" checked={overdueOnly} disabled={!props.taskUrgency}
+                onChange={(e) => setOverdueOnly(e.target.checked)}
+              />
+              {PM_TERMS.overdueOnly}
+              {!props.taskUrgency && <span className="pm-sr-only"> — unavailable: this view wasn't given urgency data.</span>}
+            </label>
+            <label className="pm-tagfilter__opt">
+              <input type="checkbox" checked={!hideClosed} onChange={(e) => setHideClosed(!e.target.checked)} />
+              {PM_TERMS.showClosed}
+            </label>
+            {/* P4-C3 / plan §5 decision 11 (open): our `Subtasks` are a checklist ON a task, not
+                first-class `pm_tasks` rows, so there is nothing for a "Sub-task" toggle to
+                include/exclude. Rendering it active would silently do nothing — worse than being
+                honest about the gap — so it stays visible (for Repsona-fidelity scanability) but
+                DISABLED, with the reason on the control itself, not hidden in a mouse-only tooltip. */}
+            <label
+              className="pm-tagfilter__opt pm-tagfilter__opt--disabled"
+              title="Not applicable yet — our Subtasks are a checklist on a task, not standalone tasks (open decision, plan §5 decision 11)."
+            >
+              <input type="checkbox" disabled aria-disabled="true" readOnly checked={false} />
+              {PM_TERMS.subTask}
+              <span className="pm-sr-only"> — not applicable: Subtasks are a checklist, not standalone tasks (open decision).</span>
+            </label>
+          </div>
+        </div>
+      </details>
 
       {/* P2-08: hides entirely when the series is empty (disabled/stale backend, or a project
           with no tasks yet) — no overlay, no error, per design spec §4 phase-2. Also hidden while
@@ -912,11 +1275,11 @@ export function Gantt(props: GanttProps) {
           </>
         )}
 
-        {viewMilestones.length > 0 && (
+        {filteredMilestones.length > 0 && (
           <div className="pm-gantt__msrow">
             <span className="pm-gantt__mslabel">Milestones</span>
             <div className="pm-gantt__mstrack">
-              {viewMilestones.map((m) => (
+              {filteredMilestones.map((m) => (
                 <span key={m.id} className="pm-gantt__milestone" style={{ left: `${m.offsetPct}%` }} title={`${m.name} · ${fmt(m.date)}`} />
               ))}
             </div>
@@ -924,13 +1287,13 @@ export function Gantt(props: GanttProps) {
         )}
 
         {/* vertical dashed guidelines spanning the body */}
-        {viewMilestones.length > 0 && (
+        {filteredMilestones.length > 0 && (
           <div className="pm-gantt__guides" aria-hidden>
-            {viewMilestones.map((m) => <span key={m.id} className="pm-gantt__guide" style={{ left: `${m.offsetPct}%` }} />)}
+            {filteredMilestones.map((m) => <span key={m.id} className="pm-gantt__guide" style={{ left: `${m.offsetPct}%` }} />)}
           </div>
         )}
 
-        {viewGroups.map((g) => {
+        {filteredGroups.map((g) => {
           const isCollapsed = collapsed.has(g.key);
           return (
             <div className="pm-gantt__group" key={g.key}>
@@ -942,9 +1305,42 @@ export function Gantt(props: GanttProps) {
                 </button>
               )}
               {!isCollapsed && g.bars.map(renderRow)}
+              {/* P4-C6 — inline "Add a task", only where the caller supplied a creator AND write
+                  access is on; every other mount renders nothing extra here (see `onAddTask`'s
+                  doc on the props interface for why this can't just be a plain callback). */}
+              {!isCollapsed && props.onAddTask && canEdit && (
+                <form
+                  className="pm-gantt__addtask"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    const form = e.currentTarget;
+                    const input = form.elements.namedItem("title") as HTMLInputElement;
+                    const title = input.value.trim();
+                    const addTask = props.onAddTask;
+                    if (!title || !addTask) return;
+                    const groupKey = g.key;
+                    startTransition(async () => {
+                      const r = await addTask(groupKey, title);
+                      if (!r.ok) setToast(r.error ?? "Couldn't add the task.");
+                      else { setToast(null); setLive(`${title} added.`); router.refresh(); }
+                    });
+                    input.value = "";
+                  }}
+                >
+                  <input
+                    name="title" type="text" placeholder={PM_TERMS.addATask}
+                    aria-label={`${PM_TERMS.addATask} to ${g.label || "this group"}`}
+                  />
+                  <button type="submit" className="lux-btn lux-btn--ghost lux-btn--sm">+ {PM_TERMS.addATask}</button>
+                </form>
+              )}
             </div>
           );
         })}
+
+        {filteredTotal === 0 && filtersActive && (
+          <EmptyNote>No tasks match these filters.</EmptyNote>
+        )}
 
         {undatedGroups.map((g) => (
           <div className="pm-gantt__group pm-gantt__group--empty" key={g.key}>
