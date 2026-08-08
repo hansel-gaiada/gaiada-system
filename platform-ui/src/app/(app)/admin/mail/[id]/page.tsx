@@ -168,6 +168,13 @@ export default async function AdminMailDetailPage({ params }: { params: Promise<
                 </>
               )}
             </p>
+            {preview.linkOmitted && (
+              <p style={{ margin: "0 0 10px", font: "400 12px/1.5 var(--font-body)", color: "var(--ink-muted)" }}>
+                The link in this message is blank on purpose. It carries a one-time sign-in token,
+                which is never stored — so it exists only in the delivered email and cannot be
+                reproduced here. The empty link is the protection working, not a broken template.
+              </p>
+            )}
             <iframe
               title="Rendered email body"
               sandbox=""

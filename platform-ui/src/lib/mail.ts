@@ -158,6 +158,11 @@ export interface MailPreview {
    *  actually sent this row. Today the endpoint always returns true; the field exists so the UI
    *  reads a flag instead of hardcoding the caveat. */
   renderedFromCurrentTemplate: boolean;
+  /** True when the template interpolates a value that is deliberately never stored, so the preview
+   *  cannot reproduce it. Today that is the magic-link URL: it carries a bearer token, so keeping it
+   *  on `mail_log` would put a live credential at rest. The empty link is the security property
+   *  working — the UI must say so rather than let it read as a broken template. */
+  linkOmitted: boolean;
 }
 
 /** MAIL-38 — the rendered body of an outbound mail, recomposed server-side on demand.

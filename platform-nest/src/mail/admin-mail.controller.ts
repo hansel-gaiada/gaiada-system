@@ -164,6 +164,7 @@ export class AdminMailController {
     html: string;
     text: string;
     renderedFromCurrentTemplate: boolean;
+    linkOmitted: boolean;
   }> {
     if (!isElevated(req)) throw new ForbiddenException("platform admin required");
     if (!UUID_RE.test(id)) throw new BadRequestException("id must be a valid id");
@@ -182,7 +183,16 @@ export class AdminMailController {
     // filter — the same failure mode the UUID checks above exist to prevent. Fail as a 404 naming
     // the key, which is actionable, instead of an opaque server error.
     try {
-      const rendered = renderTemplate(row.template_key, row.payload ?? {});
+      const payload = row.payload ?? {};
+      const rendered = renderTemplate(row.template_key, payload);
+      // Some templates interpolate a value that is DELIBERATELY never persisted, so a faithful
+      // preview cannot reproduce it. The magic-link URL is the case that exists today: it carries a
+      // bearer token, so storing it on `mail_log` would put a live credential at rest — verified
+      // 2026-08-08 that it is genuinely absent (auth rows carry only `ttlMinutes`; 0 of 7 hold an
+      // `href`). The template therefore renders `<a href=""></a>`, which looks like a broken
+      // template to anyone reviewing mail quality. Say so explicitly instead: the omission is the
+      // security property working, not a defect, and the UI must not imply otherwise.
+      const linkOmitted = !("href" in payload) && rendered.html.includes('href=""');
       return {
         mailLogId: id,
         templateKey: row.template_key,
@@ -190,6 +200,7 @@ export class AdminMailController {
         html: rendered.html,
         text: rendered.text,
         renderedFromCurrentTemplate: true,
+        linkOmitted,
       };
     } catch (err) {
       if (err instanceof UnknownMailTemplateError) {
