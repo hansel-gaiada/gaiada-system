@@ -24,6 +24,7 @@ import { config } from "../../config";
 import { newId, withMailContext } from "../../db";
 import { storage } from "../../core/storage";
 import { addSuppression } from "../suppressions";
+import type { MailStream } from "../types";
 import { recordInbound, recordInboundRejected } from "../metrics";
 import { sanitizeInboundHeaderText, sanitizeInboundHtml, sanitizeInboundText } from "./html-sanitize";
 import { classifyNdr } from "./ndr";
@@ -68,6 +69,9 @@ interface MatchedMailLog {
   entity_id: string | null;
   to_email: string;
   status: string;
+  /** MAIL-18 gate finding: needed so an inbound NDR can only ever suppress the stream its own
+   *  reply token belongs to. See `applyNdr()`. */
+  stream: MailStream;
 }
 
 /** Pulls the VERP token out of the recipient list. Returns the FIRST match: a delivery carries one
@@ -102,7 +106,7 @@ export function extractReplyToken(recipientAddresses: string[]): { token: string
 async function findByReplyToken(token: string): Promise<MatchedMailLog | null> {
   const { rows } = await withMailContext((c) =>
     c.query<MatchedMailLog>(
-      `SELECT id, tenant_id, entity_type, entity_id, to_email, status FROM mail_log WHERE reply_token = $1`,
+      `SELECT id, tenant_id, entity_type, entity_id, to_email, status, stream FROM mail_log WHERE reply_token = $1`,
       [token],
     ),
   );
@@ -313,7 +317,43 @@ async function applyNdr(matched: MatchedMailLog, hard: boolean, detail: string):
            WHERE id = $1 AND status <> 'bounced'`,
         [matched.id, detail],
       );
-      await addSuppression(c, matched.to_email, "*", "hard_bounce", { provider: "ndr", detail });
+      // ── MAIL-18 EXIT-GATE FINDING (2026-08-08), HIGH ────────────────────────────────────────────
+      // This line used to pass `"*"`, suppressing the address on EVERY stream. Combined with
+      // `isSuppressed`'s `stream IN ($2, '*')`, one inbound message permanently cut a person off
+      // from all mail — including the auth stream, i.e. their magic-link SIGN-IN mail.
+      //
+      // The reason that is a vulnerability and not merely a strong default: `classifyNdr()` requires
+      // "two independent signals", but ALL of its signals (From, Content-Type, Auto-Submitted,
+      // Subject, RFC-3464 body fields) are read straight out of the untrusted inbound message and
+      // are therefore authored by the sender. `ndr.ts` even describes S5 as "the part a hand-written
+      // fake would have to forge" — forging it is a few lines of text. So the only real barrier was
+      // possession of one reply token, and a reply token is published in the `Reply-To` of every
+      // threads-eligible mail the victim receives: visible to them, to anyone they forward to, and
+      // to any auto-responder in the path. Reproduced live at the gate with a single POST.
+      //
+      // Two changes, per the owner decision of 2026-08-08:
+      //   1. Suppress ONLY the stream this reply token belongs to — never `"*"`. A forged bounce can
+      //      no longer reach beyond the one stream it arrived on.
+      //   2. NEVER let inbound content suppress the AUTH stream at all. Account lockout is the worst
+      //      outcome here, auth mail is the recovery path for every other failure, and auth mail is
+      //      transactional — a real hard bounce on it should page a human, not silently disable
+      //      someone's ability to log in.
+      // The `mail_log` row is still flipped to `bounced` above either way, so a genuine bounce is
+      // still visible in the admin log and in metrics; what is withheld is the destructive side
+      // effect, not the signal.
+      //
+      // NOT a complete fix, and deliberately so: an attacker holding a NOTIFY-stream token can still
+      // suppress that victim's notify mail, which is a real (lower-severity) denial of approval mail.
+      // Closing that needs corroboration from a source the sender does not control — a provider-side
+      // Brevo bounce EVENT (the `/api/mail/webhooks/brevo` path), which does not exist until staging
+      // wires a real provider. Carried to the §15 staging register under R3/R4 as its own line, and
+      // it must be closed BEFORE the real inbound webhook goes live, because at that moment this
+      // stops requiring `MAIL_INBOUND_TOKEN` and becomes reachable by anyone who can send an email.
+      if (matched.stream === "auth") {
+        // Intentionally no suppression. The bounce is already recorded on the row above.
+      } else {
+        await addSuppression(c, matched.to_email, matched.stream, "hard_bounce", { provider: "ndr", detail });
+      }
     } else {
       await c.query(
         `UPDATE mail_log SET last_error = $2, updated_at = now() WHERE id = $1 AND (last_error IS DISTINCT FROM $2)`,

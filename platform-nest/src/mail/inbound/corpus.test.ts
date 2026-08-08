@@ -615,6 +615,67 @@ describe.skipIf(!TEST_URL)("mail inbound corpus — POST /api/mail/inbound/brevo
     expect(rows[0].entity_id).toBeNull();
   });
 
+  // ── MAIL-18 exit-gate finding (2026-08-08), HIGH — forged-NDR mail lockout ────────────────────
+  // The NDR classifier's "two independent signals" are all read out of the untrusted message, so a
+  // sender authors every one of them. Suppression therefore has to be survivable when the bounce is
+  // a forgery. Before the fix this wrote stream='*', and since `isSuppressed` matches
+  // `stream IN ($2,'*')`, ONE forged inbound message permanently cut the recipient off from every
+  // stream — including the auth stream, i.e. their magic-link SIGN-IN mail. Reproduced live.
+  //
+  // These two tests pin the blast radius, not the classifier: the classifier is expected to be
+  // fooled, because it is fed attacker-controlled bytes by construction. What must hold is that
+  // being fooled cannot lock anyone out.
+  it("[13-ndr-hard-bounce] suppresses ONLY the token's own stream, never '*' (forged-NDR blast radius)", async () => {
+    await post(body("13-ndr-hard-bounce.json"));
+    const supp = await adminPool().query(
+      `SELECT stream FROM mail_suppressions WHERE email = 'corpus-recipient@a.test' AND reason = 'hard_bounce'`,
+    );
+    expect(supp.rows).toHaveLength(1);
+    // The assertion that matters: a wildcard row here re-opens the lockout for every other stream.
+    expect(supp.rows[0].stream).not.toBe("*");
+    expect(supp.rows[0].stream).toBe("notify");
+  });
+
+  it("[13-ndr-hard-bounce] an NDR against AUTH-stream mail suppresses NOTHING — login can never be bounced shut", async () => {
+    // Auth mail is the recovery path for every other failure, so a forged bounce against it is the
+    // worst case: it would disable the victim's ability to log in at all. The row is still marked
+    // bounced (the signal is kept); only the destructive side effect is withheld.
+    //
+    // Seeded inline rather than via seedMail(), which hardcodes stream='notify' and a pipeline_run
+    // entity. Auth mail is tenant-less and entity-less by design (§6.1).
+    const authId = newId();
+    const authToken = mixedCaseToken();
+    await adminPool().query(
+      `INSERT INTO mail_log (id, stream, tenant_id, to_email, template_key, subject, payload, status,
+                             reply_token, origin_site)
+       -- Deliberately 'auth.shell' rather than the sign-in-link template: m11-non-goal.test.ts
+       -- asserts that key appears in NO file outside src/mail/magic-link/, and it greps for the
+       -- literal string — so even naming it in a comment here trips the guard (it did). That guard
+       -- is worth more than the cosmetic accuracy of this fixture, and the behaviour under test
+       -- keys off mail_log.stream, not the template, so any auth-stream row exercises the same path.
+       VALUES ($1, 'auth', NULL, $2, 'auth.shell', 'Your sign-in link', '{}'::jsonb, 'sent', $3, 'test')`,
+      [authId, "corpus-authuser@a.test", authToken],
+    );
+
+    const { payload } = loadFixture("13-ndr-hard-bounce.json", {
+      token: authToken,
+      tokenB: mailB.token,
+      replyDomain: REPLY_DOMAIN,
+      run: "auth-ndr",
+    });
+    const res = await post(JSON.stringify(payload));
+    expect(res.statusCode).toBe(204);
+
+    const supp = await adminPool().query(
+      `SELECT count(*)::int AS n FROM mail_suppressions WHERE email = 'corpus-authuser@a.test'`,
+    );
+    expect(supp.rows[0].n).toBe(0);
+
+    // The bounce is still RECORDED — what changed is the side effect, not the signal.
+    const log = await adminPool().query(`SELECT status FROM mail_log WHERE id = $1`, [authId]);
+    expect(log.rows[0].status).toBe("bounced");
+  });
+
   it("[13-ndr-hard-bounce] replayed: still exactly one suppression row and one message", async () => {
     const payload = body("13-ndr-hard-bounce.json", "fixed-ndr");
     await post(payload);
