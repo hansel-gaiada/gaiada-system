@@ -60,12 +60,9 @@ describe("agent runner (WS8 step 1 + D14)", () => {
   // the turn died outright ("tool not on the agent's allow-list", no partial answer). See agent.ts's own
   // 2026-08-07 header for the fix: a bounded, recoverable nudge instead of an immediate fatal refusal.
   //
-  // FOLLOW-UP (same day): `pm.listTasks` itself is now resolved by the explicit alias map
-  // (`tool-aliases.ts`) BEFORE it ever reaches this off-list check, so it no longer exercises the
-  // recoverable-nudge path at all — see "the exact live incident ... resolves on the FIRST model call"
-  // below. This test now uses a DIFFERENT hallucinated name (deliberately absent from the alias map) so
-  // it keeps proving the general off-list-recovery mechanism, which is still the fallback for every
-  // guess the alias map doesn't cover.
+  // This test uses a hallucinated name that has never been real anywhere (`pm.fetchTasks`) so it keeps
+  // proving the GENERAL off-list-recovery mechanism independent of any specific historical guess. See
+  // "the exact live incident" below for what happens to the ACTUAL `pm.listTasks` guess today.
   // ══════════════════════════════════════════════════════════════════════════════════════════════════
 
   it("an off-list tool guess is a RECOVERABLE nudge: the hallucinated tool is never called, and the model finishes on retry with a valid name", async () => {
@@ -95,15 +92,22 @@ describe("agent runner (WS8 step 1 + D14)", () => {
   });
 
   // ══════════════════════════════════════════════════════════════════════════════════════════════════
-  // 2026-08-07 (follow-up ticket) — the SAME live guess now resolves on the FIRST attempt, not the
-  // recoverable retry. The off-list loop above stays as the fallback for everything NOT in the map
-  // (tool-aliases.ts); this proves the specific, already-observed near-miss no longer costs a turn.
+  // 2026-08-07 (follow-up ticket, then RETRACTED 2026-08-08 by P4-J5) — a short-lived alias map entry
+  // used to resolve this EXACT guess on the first attempt, before `pm.listTasks` reached the off-list
+  // check at all. That entry is now retired: `mcp-hub/src/pm-tools.ts` (P4-J1) made `pm.listTasks` a
+  // REAL, DIFFERENT canonical tool (tenant-wide, facet-rich — not `tasks.list`'s project-scoped shape),
+  // so silently rewriting a correct call to it into a call to a DIFFERENT tool became a correctness bug,
+  // not a convenience — see `tool-aliases.ts`'s retirement note. Today the exact same guess against
+  // `task-filer` (which still does not, and should not, carry `pm.listTasks` on its own allow-list — see
+  // that AgentDef's own 2026-08-08 correction) falls through to the SAME general off-list-recovery
+  // mechanism the test above proves, costing one recoverable nudge instead of resolving silently.
   // ══════════════════════════════════════════════════════════════════════════════════════════════════
-  it("the exact live incident (task-filer's model calling pm.listTasks) now resolves on the FIRST model call via the alias map — zero off-list attempts consumed, real data returned from the canonical tool", async () => {
+  it("the exact live incident (task-filer's model calling pm.listTasks) now costs one recoverable nudge, not a silent same-turn resolution — the alias that used to shortcut it is retired", async () => {
     const toolCalls: string[] = [];
     const deps = scripted(
       [
-        `{"tool": "pm.listTasks", "args": {}}`, // the exact guess from the live incident
+        `{"tool": "pm.listTasks", "args": {}}`, // the exact guess from the live incident — now a REAL, DIFFERENT tool elsewhere, still not on task-filer's allow-list
+        `{"tool": "tasks.list", "args": {}}`, // recovers with the real allow-listed name after the nudge
         `{"final": "1 open task: Fix bug."}`,
       ],
       (name) => {
@@ -113,7 +117,7 @@ describe("agent runner (WS8 step 1 + D14)", () => {
     );
     const run = await runAgent(taskFiler, "list my open tasks", envelope, deps);
     expect(run.outcome).toBe("1 open task: Fix bug.");
-    // The alias resolved to the canonical tool — the raw guess never reached deps.callTool.
+    // The guess was NEVER dispatched — only the recovered, real tool name reached deps.callTool.
     expect(toolCalls).toEqual(["tasks.list"]);
   });
 

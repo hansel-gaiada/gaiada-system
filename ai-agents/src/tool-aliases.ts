@@ -63,24 +63,53 @@ interface AliasEntry {
   justification: string;
 }
 
-const TOOL_ALIASES: Readonly<Record<string, AliasEntry>> = {
-  "pm.listTasks": {
-    to: "tasks.list",
-    impact: "read",
-    justification:
-      "OBSERVED LIVE (2026-08-07, task-filer): the model guessed this name by analogy from " +
-      "pm.createTask. See specialists.ts's task-filer header for the full incident.",
-  },
-  "pm.getTask": {
-    to: "tasks.get",
-    impact: "read",
-    justification:
-      "Same root cause as pm.listTasks, pre-emptive (not yet separately observed live): " +
-      "pm.createTask invites the identical analogy for a single-resource read, and tasks.get is a " +
-      "real hub tool (mcp-hub/src/platform-tools.ts) — this is the same documented asymmetry, not a " +
-      "speculative guess.",
-  },
-};
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+// RETIRED 2026-08-08 (P4-J5) — pm.listTasks / pm.getTask are no longer near-misses, they are REAL
+// canonical tools now.
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+// The two entries this map used to carry (`pm.listTasks -> tasks.list`, `pm.getTask -> tasks.get`)
+// were correct on 2026-08-07: at that time neither name existed anywhere in the hub registry, so
+// silently redirecting a guess to the real, analogous tool was a safe, reads-only convenience.
+//
+// `mcp-hub/src/pm-tools.ts` (P4-J1, landed on top of this map) registered `pm.listTasks` and
+// `pm.getTask` as genuine, DIFFERENT tools — tenant-wide, facet-rich (status/tag/priority/ball/
+// responsible/dueSoon/cursor pagination), Cerbos-gated on the caller's own identity, not the
+// project-scoped `tasks.list`/single-resource `tasks.get` these aliases used to redirect to. Leaving
+// the alias in place after that would have been actively WRONG, not merely stale: any agent that
+// correctly named the real `pm.listTasks` tool (e.g. a PM specialist that declares it on its OWN
+// allow-list, per `specialists.ts`'s `pm-reporter`/`pm-task-manager`) would have had that call
+// silently rewritten to a DIFFERENT, less capable tool before the allow-list even saw the real name —
+// and since `tasks.list` requires a `projectId` a tenant-wide PM query never has, the rewritten call
+// would then either 400 at the platform or (worse) run against the wrong resource shape. A resolver
+// that turns a correct call into a wrong one is a bug, not a convenience; the fix is to retire the
+// entry, not to widen it.
+//
+// `task-filer` (the one specialist this alias used to help) loses nothing behaviourally: it never
+// declared `pm.listTasks` on its own allow-list, and never will (its job is narrowly "read via
+// projects.list/tasks.list, write via pm.createTask/createDoc" — see its own header). A stray guess of
+// `pm.listTasks` there still gets `agent.ts`'s bounded off-list recoverable-refusal loop, exactly like
+// any other unlisted name; it costs one extra round-trip instead of a silent (and now WRONG) same-turn
+// resolution. See specialists.ts's task-filer header for the corrected wording.
+const TOOL_ALIASES: Readonly<Record<string, AliasEntry>> = {};
+
+// Test-only overlay, checked FIRST by `resolveToolAlias` below. `TOOL_ALIASES` above is intentionally
+// empty right now (see the retirement note) — the alias-vs-authorization ORDERING property
+// (`tool-alias-resolution-order.test.ts`) is a property of `runAgent`'s call order, not of which real
+// aliases happen to exist today, and pinning that test to a real name is exactly what broke when
+// `pm.listTasks` stopped being a near-miss. Tests inject a synthetic, obviously-fake name via
+// `__setTestAlias`/`__clearTestAliases`; no production code path ever calls either.
+const testOverrideAliases = new Map<string, AliasEntry>();
+
+/** Test-only. Registers a synthetic alias for exercising resolution ORDER, independent of whatever is
+ *  (or isn't) in the real `TOOL_ALIASES` map. Never call this outside a test. */
+export function __setTestAlias(from: string, to: string): void {
+  testOverrideAliases.set(from, { to, impact: "read", justification: "test-only override" });
+}
+
+/** Test-only. Clears every synthetic alias registered via `__setTestAlias` — call in `afterEach`. */
+export function __clearTestAliases(): void {
+  testOverrideAliases.clear();
+}
 
 for (const [from, entry] of Object.entries(TOOL_ALIASES)) {
   if (entry.impact !== "read") {
@@ -104,16 +133,16 @@ for (const [from, entry] of Object.entries(TOOL_ALIASES)) {
  * root cause forever. A silent alias would be worse than no alias at all — see the ticket's framing.
  */
 export function resolveToolAlias(name: string): string {
-  const entry = TOOL_ALIASES[name];
+  const entry = testOverrideAliases.get(name) ?? TOOL_ALIASES[name];
   if (!entry) return name;
   // eslint-disable-next-line no-console
   console.warn(`[tool-alias] resolved "${name}" -> "${entry.to}"`);
   return entry.to;
 }
 
-/** Read-only view of the map for tests / future admin-console visibility. Never consulted by
- *  `resolveToolAlias` itself (which reads `TOOL_ALIASES` directly) — this exists so nothing outside
- *  this file needs its own copy of the alias list to assert against. */
+/** Read-only view of the PRODUCTION map only (never the test overlay) — for tests / future
+ *  admin-console visibility, so nothing outside this file needs its own copy of the alias list to
+ *  assert against. */
 export function toolAliasEntries(): ReadonlyArray<{ from: string; to: string }> {
   return Object.entries(TOOL_ALIASES).map(([from, e]) => ({ from, to: e.to }));
 }

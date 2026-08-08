@@ -33,7 +33,16 @@ import {
   type RegistryToolImpact,
 } from "./agent";
 import { runOrchestrator, GoalSuspendedError, type OrchestratorDef } from "./orchestrator";
-import { statusReporter, approvalsChaser, taskTriager, taskFiler, specialists, writeSpecialists } from "./specialists";
+import {
+  statusReporter,
+  approvalsChaser,
+  taskTriager,
+  taskFiler,
+  pmReporter,
+  pmTaskManager,
+  specialists,
+  writeSpecialists,
+} from "./specialists";
 
 const envelope: Envelope = { provider: "telegram", externalId: "tg:1" };
 
@@ -88,6 +97,21 @@ describe("D14-12 — no-regression anchor: today's specialists, reconciled again
     // hub tier is NOT changed by this ticket, see specialists.ts's header for why).
     "pm.createTask": { write: true, impact: "low" },
     "pm.createDoc": { write: true, impact: "low" },
+    // P4-J5 — mcp-hub/src/pm-tools.ts's P4-J1 reads: no `write` field at all (real, tenant-wide tools;
+    // see tool-aliases.ts's retirement note for why these are no longer aliased to tasks.list/tasks.get).
+    "pm.listTasks": undefined,
+    "pm.getTask": undefined,
+    "pm.listProjects": undefined,
+    "pm.taskAssignmentHistory": undefined,
+    // P4-J5 — mcp-hub/src/pm-tools.ts's P4-J2 writes, decision 16: all FOUR are `write: true,
+    // impact: "low"`, exactly like pm.createTask/pm.createDoc above — NOT a looser tier invented for
+    // pm-task-manager. Unlike task-filer's pm.createTask/pm.createDoc (a DELIBERATE high_write
+    // divergence), pm-task-manager declares these `low_write` — agreement with the registry, not a
+    // divergence — so it belongs in the it.each below, not in its own "stays stricter" assertion.
+    "pm.setStatus": { write: true, impact: "low" },
+    "pm.passBall": { write: true, impact: "low" },
+    "pm.setDueDate": { write: true, impact: "low" },
+    "pm.comment": { write: true, impact: "low" },
   };
 
   const getRegistryImpact = (name: string): RegistryToolImpact | undefined => realRegistry[name];
@@ -96,6 +120,8 @@ describe("D14-12 — no-regression anchor: today's specialists, reconciled again
     ["status-reporter", statusReporter],
     ["approvals-chaser", approvalsChaser],
     ["task-triager", taskTriager],
+    ["pm-reporter", pmReporter],
+    ["pm-task-manager", pmTaskManager],
   ])("%s: every declared tool's effective impact equals its declared impact (identical before/after)", (_name, def: AgentDef) => {
     for (const [tool, declared] of Object.entries(def.tools)) {
       expect(effectiveImpact(declared, getRegistryImpact(tool)), `${def.name}.${tool}`).toBe(declared);
@@ -119,9 +145,23 @@ describe("D14-12 — no-regression anchor: today's specialists, reconciled again
     }
   });
 
+  it("falsifiability anchor: the real registry entries for the four P4-J2 PM writes are impact:'low' — reconciliation must NOT promote any of them to high (decision 16 depends on this staying true)", () => {
+    for (const tool of ["pm.setStatus", "pm.passBall", "pm.setDueDate", "pm.comment"]) {
+      expect(realRegistry[tool]).toEqual({ write: true, impact: "low" });
+      expect(effectiveImpact("low_write", realRegistry[tool])).toBe("low_write");
+    }
+  });
+
   it("collects every AgentDef reachable from specialists.ts (both read-only and write-capable maps)", () => {
     const all = { ...specialists, ...writeSpecialists };
-    expect(Object.keys(all).sort()).toEqual(["approvals-chaser", "status-reporter", "task-filer", "task-triager"]);
+    expect(Object.keys(all).sort()).toEqual([
+      "approvals-chaser",
+      "pm-reporter",
+      "pm-task-manager",
+      "status-reporter",
+      "task-filer",
+      "task-triager",
+    ]);
   });
 });
 

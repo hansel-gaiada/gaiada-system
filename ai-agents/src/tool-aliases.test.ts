@@ -3,11 +3,12 @@
 // a SEPARATE, dedicated file (`tool-alias-resolution-order.test.ts`) because that property has to be
 // proven against `runAgent` itself, not against this module in isolation.
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { resolveToolAlias, toolAliasEntries } from "./tool-aliases";
+import { resolveToolAlias, toolAliasEntries, __setTestAlias, __clearTestAliases } from "./tool-aliases";
 
 describe("resolveToolAlias", () => {
   afterEach(() => {
     vi.restoreAllMocks();
+    __clearTestAliases();
   });
 
   it("passes an unrecognized name through UNCHANGED — no fuzzy matching, ever", () => {
@@ -16,26 +17,29 @@ describe("resolveToolAlias", () => {
     expect(resolveToolAlias("pm.createTask")).toBe("pm.createTask"); // a real write tool, not an alias
   });
 
-  it("resolves the observed incident: pm.listTasks -> tasks.list", () => {
-    expect(resolveToolAlias("pm.listTasks")).toBe("tasks.list");
+  // RETIRED 2026-08-08 (P4-J5): pm.listTasks/pm.getTask used to alias to tasks.list/tasks.get (the
+  // 2026-08-07 near-miss fix). mcp-hub/src/pm-tools.ts (P4-J1) then made BOTH real, DIFFERENT,
+  // canonical tools — tenant-wide and facet-rich, not the project-scoped tools they used to redirect
+  // to — so redirecting them would now be a correctness bug (a correct call silently rewritten to the
+  // wrong tool), not a convenience. These are regression guards: nobody should re-add either entry.
+  it("pm.listTasks / pm.getTask are now REAL canonical tools, not aliases — pass through unchanged", () => {
+    expect(resolveToolAlias("pm.listTasks")).toBe("pm.listTasks");
+    expect(resolveToolAlias("pm.getTask")).toBe("pm.getTask");
   });
 
-  it("resolves the same-cause pre-emptive alias: pm.getTask -> tasks.get", () => {
-    expect(resolveToolAlias("pm.getTask")).toBe("tasks.get");
-  });
-
-  it("is case-sensitive and exact-match only — a near-miss of the alias itself is NOT resolved", () => {
+  it("is case-sensitive and exact-match only — a near-miss of a real tool name is NOT resolved", () => {
     expect(resolveToolAlias("PM.LISTTASKS")).toBe("PM.LISTTASKS");
     expect(resolveToolAlias("pm.listTask")).toBe("pm.listTask"); // singular, one char off — unchanged
     expect(resolveToolAlias(" pm.listTasks")).toBe(" pm.listTasks"); // stray whitespace — unchanged
   });
 
-  it("logs a resolution (observability) but stays silent on a pass-through", () => {
+  it("logs a resolution (observability) but stays silent on a pass-through — exercised via the test-only overlay, since the production map is currently empty", () => {
+    __setTestAlias("test.aliasProbe", "test.canonicalProbe");
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    resolveToolAlias("pm.listTasks");
+    expect(resolveToolAlias("test.aliasProbe")).toBe("test.canonicalProbe");
     expect(warn).toHaveBeenCalledTimes(1);
-    expect(warn.mock.calls[0][0]).toContain("pm.listTasks");
-    expect(warn.mock.calls[0][0]).toContain("tasks.list");
+    expect(warn.mock.calls[0][0]).toContain("test.aliasProbe");
+    expect(warn.mock.calls[0][0]).toContain("test.canonicalProbe");
     warn.mockClear();
     resolveToolAlias("not.in.the.map");
     expect(warn).not.toHaveBeenCalled();
@@ -51,6 +55,10 @@ describe("TOOL_ALIASES invariants", () => {
   const KNOWN_HUB_WRITE_TOOLS: readonly string[] = [
     "pm.createDoc",
     "pm.createTask",
+    "pm.setStatus", // P4-J2
+    "pm.passBall", // P4-J2
+    "pm.setDueDate", // P4-J2
+    "pm.comment", // P4-J2
     "projects.create",
     "tasks.create",
     "tasks.update",
@@ -87,10 +95,7 @@ describe("TOOL_ALIASES invariants", () => {
     }
   });
 
-  it("the map is non-empty and matches the two documented, justified entries — a reviewer adding a third should update this count deliberately", () => {
-    expect(toolAliasEntries()).toEqual([
-      { from: "pm.listTasks", to: "tasks.list" },
-      { from: "pm.getTask", to: "tasks.get" },
-    ]);
+  it("the map is EMPTY (2026-08-08, P4-J5) — its two former entries were retired once pm.listTasks/pm.getTask became real tools; a reviewer re-adding one should do so deliberately, not by accident", () => {
+    expect(toolAliasEntries()).toEqual([]);
   });
 });

@@ -9,6 +9,7 @@ import { getMessages, saveMessage } from "./store";
 import { summarizeChat } from "./summarize";
 import { scrub } from "./scrub";
 import { saveCaptureToDrive, driveEnabled } from "./drive";
+import { pmSkills } from "./pm";
 import type { Principal } from "./principal";
 import type { InboundMessage } from "./waha";
 
@@ -168,6 +169,11 @@ export function registerBuiltins(): void {
       }
     },
   });
+
+  // P4-J4 — natural-language PM read/update (mcp-hub's pm.* tools). Registered as a group, same
+  // convention as every other built-in above: this file only wires it in, all behavior lives in
+  // pm.ts (which owns its own non-negotiables about authorization and denial rendering).
+  for (const skill of pmSkills()) registerSkill(skill);
 
   registerSkill({
     name: "actions",

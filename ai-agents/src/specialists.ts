@@ -26,9 +26,40 @@ export const approvalsChaser: AgentDef = {
   maxToolCalls: 2,
 };
 
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+// P4-J5 — the PM read specialist (Phase-4 plan, workstream J: "The AI agents also capable of full
+// access if the RBAC is enough"). Reads only — safe to reach through the plain supervisor/orchestrator
+// path with no D13 gate, same as status-reporter/approvals-chaser above.
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+//
+// All four tools are real, tenant-wide hub tools (mcp-hub/src/pm-tools.ts, P4-J1) — NOT the
+// project-scoped tasks.list/tasks.get this agent could have reached for instead. Authorization is
+// entirely the platform's: every call carries this run's OWN OBO envelope, so a triggering user with
+// no PM role in a tenant gets exactly the 403/empty-result a human in their position would get — this
+// AgentDef adds no role/tenant check of its own (the same non-negotiable the P4-J4 bot skill and this
+// ticket's whole design rest on).
+export const pmReporter: AgentDef = {
+  name: "pm-reporter",
+  systemPrompt:
+    "You are Gaiada's PM reporter. Answer questions about tasks and projects tenant-wide: what's " +
+    "assigned to someone, what's overdue or due soon, who currently holds the Ball on a task, who is " +
+    "Responsible for it, and what open dependency is blocking it. Prefer pm.listTasks' own facets " +
+    "(status/tag/priority/responsible/ball/dueSoon/overdueOnly/mine) over listing everything and " +
+    "filtering yourself. Never invent a task, project, person, or blocker that a tool didn't return.",
+  tools: {
+    "pm.listTasks": "read",
+    "pm.getTask": "read",
+    "pm.listProjects": "read",
+    "pm.taskAssignmentHistory": "read",
+  },
+  maxSteps: 8,
+  maxToolCalls: 6,
+};
+
 export const specialists: Record<string, AgentDef> = {
   [statusReporter.name]: statusReporter,
   [approvalsChaser.name]: approvalsChaser,
+  [pmReporter.name]: pmReporter,
 };
 
 // The first WRITE-CAPABLE specialist (WS8 Step B). It keeps the company's open tasks healthy with
@@ -116,9 +147,9 @@ export const taskTriager: AgentDef = {
 // Revert to [] to force read-only.
 //
 // ══════════════════════════════════════════════════════════════════════════════════════════════════
-// 2026-08-07 — LIVE INCIDENT: the model called `pm.listTasks` (does not exist anywhere — not on this
-// allow-list, not in the hub registry) and, before `agent.ts`'s recoverable-off-list fix landed
-// alongside this change, that killed the whole turn.
+// 2026-08-07 — LIVE INCIDENT: the model called `pm.listTasks` (at the time, on NEITHER this allow-list
+// NOR the hub registry at all) and, before `agent.ts`'s recoverable-off-list fix landed alongside this
+// change, that killed the whole turn.
 // ══════════════════════════════════════════════════════════════════════════════════════════════════
 // `agent.ts` now gives an off-list guess a bounded, recoverable nudge rather than ending the turn (see
 // its own 2026-08-07 header) — that is the structural fix and it covers every specialist, not just this
@@ -142,19 +173,28 @@ export const taskTriager: AgentDef = {
 // `platform-nest/src/modules/assistant/broker.ts`) and confirming Cerbos's `mcp_tool` policy already
 // makes them visible to an ordinary chatting user's OBO principal — a contract-surface change, not a
 // naming fix, and outside this ticket's scope (see the 2026-08-07 off-list-recovery report).
+//
+// CORRECTION, 2026-08-08 (P4-J5): `pm.listTasks`/`pm.getTask` are no longer hypothetical — P4-J1 made
+// both REAL, tenant-wide hub tools (`mcp-hub/src/pm-tools.ts`), and the `tool-aliases.ts` near-miss
+// entry that used to redirect a guess of either name to `tasks.list`/`tasks.get` has been retired for
+// exactly that reason (see that file's header). Neither is added to THIS agent's allow-list — its job
+// stays narrowly "read via projects.list/tasks.list, write via pm.createTask/createDoc", and widening
+// it is the same out-of-scope contract-surface change as `projects.get`/`tasks.get` above. The
+// systemPrompt below is corrected to stop asserting `pm.listTasks` "does not exist" (now false) while
+// still steering the model to the tools THIS agent actually has.
 export const taskFiler: AgentDef = {
   name: "task-filer",
   systemPrompt:
-    "You are Gaiada's task filer. Your ONLY callable tools are exactly these four — there is no " +
-    "pm.listTasks, tasks.read, or any other name, and calling anything else will be refused: " +
+    "You are Gaiada's task filer. Your ONLY callable tools are exactly these four — calling any other " +
+    "name will be refused, even a real tool that exists elsewhere in the system: " +
     "projects.list (read all projects), tasks.list (read all tasks), pm.createTask (file a task), " +
     "pm.createDoc (file a project document). Reads live under the projects./tasks. names; creates live " +
-    "under the pm. name — do NOT guess a tool name by analogy across those two (e.g. there is no " +
-    "pm.listTasks: to read tasks, call tasks.list). When asked to create a task or a project document, " +
-    "first call projects.list and tasks.list to find the right project (and, for a task, a plausible " +
-    "assignee) before filing. File exactly the create you were asked for — never invent a project, " +
-    "assignee, or extra task/doc nobody asked for. Make one tool call at a time; every create you " +
-    "propose is reviewed by a human before it takes effect.",
+    "under the pm. name — do NOT guess a tool name by analogy across those two (e.g. pm.listTasks is a " +
+    "DIFFERENT tool you do not have; to read tasks, call tasks.list). When asked to create a task or a " +
+    "project document, first call projects.list and tasks.list to find the right project (and, for a " +
+    "task, a plausible assignee) before filing. File exactly the create you were asked for — never " +
+    "invent a project, assignee, or extra task/doc nobody asked for. Make one tool call at a time; " +
+    "every create you propose is reviewed by a human before it takes effect.",
   tools: {
     "projects.list": "read",
     "tasks.list": "read",
@@ -166,12 +206,87 @@ export const taskFiler: AgentDef = {
   evaledProviders: ["openai"],
 };
 
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+// P4-J5 — the write-capable PM specialist ("the AI agents also capable of full access if the RBAC is
+// enough" — owner request, 2026-08-04 Phase-4 plan, workstream J).
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+//
+// WHY `low_write` HERE IS THE HONEST LABEL, NOT A LOOSER ONE INVENTED FOR THIS TICKET: unlike
+// `task-filer` above (whose `high_write` is a DELIBERATE divergence from the hub's `low` tier — see
+// that section's header for why), this agent's write tools declare EXACTLY what
+// `mcp-hub/src/pm-tools.ts` already declares for them: `pm.setStatus`, `pm.passBall`, `pm.setDueDate`
+// are all `impact:"low"` (decision 16 of the Phase-4 plan). D14-12's stricter-wins reconciliation
+// (`agent.ts`'s `effectiveImpact`) means declaring anything looser here would make no difference (the
+// registry would promote it right back to `low_write`) and anything stricter would suspend a write the
+// plan's own decision 16 says should run unattended — `low_write` is the one label that is actually
+// TRUE, not a convenience.
+//
+// `pm.comment` is DELIBERATELY NOT on this allow-list, even though decision 16 also classifies it
+// `impact:"low"` at the hub tier. Hub impact answers "how much damage can this do" (blast radius);
+// this ticket also has to answer a SEPARATE question `agent-write-guard.test.ts`'s
+// `VERIFIED_IDEMPOTENT_LOW_WRITES` exists to enforce — "does re-executing it with IDENTICAL arguments
+// produce a second effect", because the owner's D14-b decision resumes a suspended goal by RE-RUNNING
+// IT FROM THE TOP, replaying every low_write a prior attempt already committed. `pm.comment`'s target
+// (`core/collab.controller.ts`'s `createComment`) mints a fresh id and unconditionally INSERTs with no
+// dedup key — two identical re-runs create two comment rows. `pm.setStatus`/`pm.passBall`/
+// `pm.setDueDate` are all provably idempotent instead (see that file's own header for the per-tool
+// proof against `pm.controller.ts`'s actual handlers); the difference is why three of the four decision-
+// 16 writes are here and the fourth is a named follow-up, not an oversight.
+//
+// `pm.setStatus` is also the one tool of the three with a REAL server-side refusal mode: with chain
+// enforcement (P4-I1) a move into a non-`isBlocked` "started" status 409s when the task has open
+// dependencies, and the platform's `{error}` body names the blocker verbatim
+// (`cannot move to "doing": blocked by 1 open dependency (Design mockup)`). `deps.callTool` throws on
+// any non-2xx (see `ai-agents/src/deps.ts`'s `callTool`), and `agent.ts`'s low_write path (the `try`
+// around `deps.callTool` at the bottom of `runAgent`) already turns that throw into a transcript line
+// the model reads on its NEXT turn — `TOOL pm.setStatus FAILED: <message>` — so the systemPrompt below
+// only needs to tell the model what to DO with that fact (stop retrying the same move, report or
+// resolve the blocker) rather than re-plumb the failure path itself.
+//
+// evaledProviders is EMPTY — the SAME safe default `task-triager` and `task-filer` shipped with before
+// their own dedicated eval runs (see either of their headers above for the reasoning). This is not a
+// smaller ticket doing less than asked: decision 16 already made these writes safe to run unattended AT
+// THE HUB TIER (Cerbos + RLS + the append-only ball ledger — migration 0087 — are what make that safe,
+// not an approval queue). D13's `evaledProviders` gate answers an ORTHOGONAL question — has THIS
+// specific model, for THIS agent's own prompt, been proven to follow the strict single-JSON tool-call
+// protocol and stay on its allow-list — and assuming that without running the eval + tool-calling
+// contract suite (`evals/cases.ts`) would be assuming reliability nobody verified. Until an operator
+// runs that suite against a real provider and adds it here, `runWriteAgent` (`write-agent.ts`) forces
+// this agent's `readOnlyProjection` — i.e. its four `pm.*` reads still work today; the writes are
+// contained, not merely undeclared. See docs/runbooks/agent-evaled-providers-enrollment.md to enroll a
+// provider.
+export const pmTaskManager: AgentDef = {
+  name: "pm-task-manager",
+  systemPrompt:
+    "You are Gaiada's PM task manager. You may read tenant-wide task/project data (pm.listTasks, " +
+    "pm.getTask, pm.listProjects, pm.taskAssignmentHistory) and act on a single task: move its status " +
+    "(pm.setStatus), pass its Ball to a person (pm.passBall), or set/clear its due date " +
+    "(pm.setDueDate). You cannot post comments — that tool is not available to you. If pm.setStatus is " +
+    "REFUSED with a message naming an open dependency (e.g. 'blocked by 1 open dependency (Design " +
+    "mockup)'), do NOT retry the same status — that task genuinely cannot move yet; report the named " +
+    "blocker instead, or resolve it first. Change only what you were asked to change; never invent a " +
+    "task, project, or person. Make one tool call at a time.",
+  tools: {
+    "pm.listTasks": "read",
+    "pm.getTask": "read",
+    "pm.listProjects": "read",
+    "pm.taskAssignmentHistory": "read",
+    "pm.setStatus": "low_write",
+    "pm.passBall": "low_write",
+    "pm.setDueDate": "low_write",
+  },
+  maxSteps: 10,
+  maxToolCalls: 6,
+  evaledProviders: [],
+};
+
 /** Write-capable specialists — driven via runWriteAgent (D13 provider gate + D14 approval filing),
  *  deliberately NOT in the read-only supervisor set until the orchestrator routes writes through the
  *  same gate (WS8 Step B follow-up). */
 export const writeSpecialists: Record<string, AgentDef> = {
   [taskTriager.name]: taskTriager,
   [taskFiler.name]: taskFiler,
+  [pmTaskManager.name]: pmTaskManager,
 };
 
 /** The default supervisor over all registered specialists (WS8 §2.2). */

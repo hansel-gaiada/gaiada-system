@@ -94,8 +94,55 @@ import type { AgentDef, Impact } from "./agent";
  * distinct) and that same rule silently disables `ON CONFLICT`; and a column a SELECT omits looks
  * exactly like a NULL value. "It has a unique index" is not a proof until you have checked the
  * columns' nullability in the migration.
+ *
+ * ── P4-J5 (2026-08-08) — THREE OF FOUR PM writes ADDED; ONE EXCLUDED ON PURPOSE ─────────────────────
+ * `pm-task-manager` (specialists.ts) wanted all four P4-J2 writes. Per-tool proof against
+ * `platform-nest/src/modules/pm/pm.controller.ts`'s actual handlers (not the hub's impact label,
+ * which answers a different question — blast radius, not re-run safety):
+ *
+ *  - `pm.setStatus` -> `patchTask`'s status/progress coupling. On a re-run, the SECOND identical
+ *    `{status: X}` call arrives when the row is ALREADY at X (the first run committed it — low writes
+ *    never wait for approval). `status !== task.status` is false, so: `statusChanged` is false (no
+ *    duplicate follower notify, patchTask's own gate at the "if (statusChanged)" branch below the
+ *    transaction); `wasDone === isDoneNow` (both computed off the SAME status), so `completingNow` is
+ *    false and the not-done→done recurrence-spawn edge does NOT fire twice (patchTask's own comment:
+ *    "re-PATCHing an already-done task ... never spawns a second child — the edge is false the second
+ *    time", plus a second, independent existing-child guard); `blockReason`'s three branches
+ *    (cleared / system-forced-null / human-reason) are pure functions of `(status, openDeps,
+ *    b.blockReason)`, all identical on both calls, so it converges to the same value. The bounded
+ *    `UPDATE ... SET status = $5` is a plain overwrite with the value it already holds. The one thing
+ *    that DOES re-fire is `emitEvent`'s `pm.task.updated` — a second audit/outbox row, not a second
+ *    business-data effect — the same category of harmless bookkeeping `tasks.update`'s own proof
+ *    above tolerates; it is not what this guard exists to prevent.
+ *  - `pm.passBall` -> `patchTask`'s `writesAssignee` branch, specifically `syncTaskAssignees`
+ *    (`pm.controller.ts`): it calls `applyRoleTransition` for both the owner (Ball) and responsible
+ *    roles, and that function's OWN documented invariant is "a true no-op (... the incoming target is
+ *    identical to what's already open) must NOT append — see pm_task_assignment_events' own header: it
+ *    is a log of WRITES, not a heartbeat" (`sameValue` check, returns `false`). `syncTaskAssignees`
+ *    then appends to the ledger `ONLY when something actually changed` (`ownerChanged ||
+ *    responsibleChanged`). So a re-run's identical pass — same refId, same responsibleId (the tool
+ *    itself reads-before-write and carries the existing responsibleId forward unchanged) — appends
+ *    NOTHING to `pm_task_assignment_events` the second time. `notifyResponsible` is gated on
+ *    `assignee.responsibleId !== task.assignee.responsibleId`, already false post-first-run. The blob
+ *    UPDATE (`pm_tasks.assignee = $9`) overwrites with the value it already holds.
+ *  - `pm.setDueDate` -> `patchTask`'s `due_date = CASE WHEN $14 THEN $15::date ELSE due_date END` — a
+ *    single bounded scalar column set on an existing row, gated by nothing else in the coupling logic
+ *    (dueDate does not participate in the done/recurrence/dependency branches above). Structurally the
+ *    SAME shape as `tasks.update`'s own already-verified proof, just a different column.
+ *
+ *  - `pm.comment` is DELIBERATELY NOT HERE and NOT on `pm-task-manager`'s allow-list.
+ *    `core/collab.controller.ts`'s `createComment` mints a fresh `id = newId()` and unconditionally
+ *    `INSERT`s — no `ON CONFLICT`, no content-based or client-supplied dedup key (contrast
+ *    `addReaction` two functions above it in the SAME file, whose own comment states the exact
+ *    property this needs: "Idempotent: re-adding the same (comment, user, emoji) is a no-op ... the PK
+ *    IS the idempotency key" — `comments` has no equivalent). Two identical re-runs create TWO comment
+ *    rows. This is a real gap, not an oversight papered over: an agent that needs to comment on PM work
+ *    is a legitimate follow-up, gated on either (a) the platform adding a client-supplied idempotency
+ *    key to `POST :t/comments` (same shape `addReaction`'s composite PK already gives reactions), or
+ *    (b) declaring it `high_write` and adding a real `approval-executables.ts` entry — NOT on loosening
+ *    this guard.
  */
-export const VERIFIED_IDEMPOTENT_LOW_WRITES: readonly string[] = ["tasks.update"];
+export const VERIFIED_IDEMPOTENT_LOW_WRITES: readonly string[] = ["tasks.update", "pm.setStatus", "pm.passBall", "pm.setDueDate"];
 
 /**
  * D14-14 — high-write tools an AgentDef MAY declare, because BOTH prerequisites the header above
