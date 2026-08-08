@@ -703,6 +703,28 @@ async function fetchProjectTag(c: PoolClient, projectId: string, tagId: string):
   return r.rows[0];
 }
 
+// P4-J7 finding 2. `validAssignee` is deliberately lenient — it answers "is this a usable assignee,
+// yes or no" and every caller then treats `null` as "no assignee". That conflates two very different
+// requests at the HTTP boundary: an EXPLICIT `{assignee: null}` ("clear the owner", a real
+// operation) and a MALFORMED object ("I meant to set an owner and got the shape wrong").
+//
+// For a member the conflation was harmless — the ownership gate refused either way. For a caller
+// who already holds `manage`, a payload missing `responsibleId` was accepted as a clear and WIPED
+// the task's owner with a 200 and no explanation. Silent data loss from a typo.
+//
+// So: parse at the boundary. `null`/absent still clears; a non-null value that fails validation is
+// now a 400 naming the problem, which is what a fat-fingered client needs to see.
+function parseAssigneeInput(a: unknown): Assignee {
+  if (a === null || a === undefined) return null;
+  const parsed = validAssignee(a);
+  if (!parsed) {
+    throw new BadRequestException(
+      "invalid assignee: expected null, or an object with kind ('person'|'department'|'division'), a non-empty refId and a non-empty responsibleId",
+    );
+  }
+  return parsed;
+}
+
 function validAssignee(a: unknown): Assignee {
   if (!a || typeof a !== "object") return null;
   const r = a as Record<string, unknown>;
@@ -2021,7 +2043,7 @@ export class PmController {
     const writesAssignee = Object.prototype.hasOwnProperty.call(b ?? {}, "assignee");
     await authorize(req.principal, { kind: "pm_task", tenantId, id: taskId }, "update");
     if (writesAssignee) {
-      const incoming = validAssignee((b as { assignee?: unknown }).assignee);
+      const incoming = parseAssigneeInput((b as { assignee?: unknown }).assignee);
       const current = await withTenants([tenantId], (c) => fetchTask(c, taskId));
       if (!current) throw new NotFoundException("task not found");
       const currentAssignee = current.assignee as Assignee | null;
@@ -2225,7 +2247,7 @@ export class PmController {
       if (b.priority !== undefined && b.priority !== null && !PRIORITIES.has(String(b.priority))) throw new BadRequestException("invalid priority");
       let assignee = task.assignee;
       if (writesAssignee) {
-        assignee = validAssignee(b.assignee);
+        assignee = parseAssigneeInput(b.assignee);
         if (assignee?.responsibleId && assignee.responsibleId !== task.assignee?.responsibleId) notifyResponsible = assignee.responsibleId;
       }
 
