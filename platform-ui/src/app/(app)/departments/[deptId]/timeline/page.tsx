@@ -7,11 +7,12 @@ import { getDepartment, getOwnedProjectsPm } from "@/lib/departments";
 import {
   computeTimeline, groupTimelineBars, milestoneMarkers, dependencyEdges,
   getBurndown, aggregateBurndown, burndownOverlay, isDoneStatus, taskUrgency,
+  taskDateEnvelope, projectUrgency,
   type PmTask, type Milestone, type UrgencyTier,
 } from "@/lib/pm";
 import { Card } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
-import { Gantt } from "@/components/pm/Gantt";
+import { Gantt, type GanttProjectBar } from "@/components/pm/Gantt";
 import "@/components/departments/departments.css";
 
 type Params = Promise<{ deptId: string }>;
@@ -52,6 +53,33 @@ export default async function DepartmentTimelinePage({ params }: { params: Param
   const taskUrgencyById: Record<string, UrgencyTier> = {};
   for (const t of allTasks) taskUrgencyById[t.id] = taskUrgency({ dueDate: t.dueDate, isDone: isDoneStatus(t.status, dept.statusesByProject[t.projectId]) }, today);
 
+  // P4-H2 — the project summary bars. Keyed by project id, which IS the group key when
+  // `groupBy="project"` (see groupTimelineBars). Two ranges per project, never blended:
+  //   · AUTHORED — what the team committed to (`PmProject.startDate`/`dueDate`)
+  //   · DERIVED  — where the work actually sits (`taskDateEnvelope` over that project's tasks)
+  // Decision 12: the GAP between them is the slippage signal, so a project past its own target is
+  // visible without opening it. Computed server-side like every other precomputed Gantt map —
+  // `taskDateEnvelope` lives in the server-only lib/pm.ts and the Gantt is a client component.
+  const projectBars: Record<string, GanttProjectBar> = {};
+  const projectUrgencyById: Record<string, UrgencyTier> = {};
+  for (const op of datedOwned) {
+    const env = taskDateEnvelope(op.tasks);
+    projectBars[op.project.id] = {
+      // Base `Project` (snake_case), NOT `PmProject` — getOwnedProjectsPm returns the entity row.
+      authoredStart: op.project.start_date ?? null,
+      authoredEnd: op.project.due_date ?? null,
+      derivedStart: env.start,
+      derivedEnd: env.end,
+    };
+    // Folds in the project's OWN target, so a project that has blown its date reads as overdue even
+    // when every remaining task looks comfortable — the case a task-only roll-up hides.
+    projectUrgencyById[op.project.id] = projectUrgency(
+      op.tasks.map((t) => ({ dueDate: t.dueDate, isDone: isDoneStatus(t.status, dept.statusesByProject[t.projectId]) })),
+      today,
+      { projectDueDate: op.project.due_date ?? null },
+    ).tier;
+  }
+
   if (!timeline) {
     return (
       <Card title="Timeline">
@@ -90,6 +118,8 @@ export default async function DepartmentTimelinePage({ params }: { params: Param
         canEdit={canEdit}
         burndown={burndown}
         taskUrgency={taskUrgencyById}
+        projectBars={projectBars}
+        projectUrgency={projectUrgencyById}
         // Server-resolved today — the same one that decided every tier in taskUrgencyById, so the
         // marker line and the bars around it can never disagree about what day it is.
         todayISO={today}

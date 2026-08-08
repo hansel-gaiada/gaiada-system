@@ -241,6 +241,27 @@
 .pm-gantt__group-note { font: 400 11px var(--font-body); color: var(--pm-text-faint); margin-left: 8px; }
 .pm-gantt__group--empty { opacity: 0.8; }
 
+/* P4-H2 — project bars: the AUTHORED range (PmProject.startDate/dueDate) drawn ALONGSIDE the
+   task-derived envelope, one thin bar each rather than a single blended one, so the gap between
+   "what we committed to" and "where the work actually sits" reads as slippage at a glance
+   (decision 12). Reuses `.pm-gantt__row`/`.pm-gantt__track` for the same 232px+12px grid every
+   task bar below it shares, so the two bars land under the exact same day columns. */
+.pm-gantt__projectbar-row { margin-bottom: 2px; }
+.pm-gantt__projectbar-label { display: inline-flex; align-items: center; gap: 6px; font: 700 10px var(--font-body); letter-spacing: 0.06em; text-transform: uppercase; color: var(--pm-text-faint); }
+.pm-gantt__projectbar-track { height: 26px; }
+.pm-gantt__projectbar { position: absolute; height: 8px; border-radius: var(--pm-radius); }
+/* Authored (solid fill) sits above derived (dashed outline only) within the same track — fill vs
+   outline is a SHAPE distinction, not just a colour one, so the pairing still reads on a
+   greyscale render (same rule `UrgencyChip`'s glyphs follow). */
+.pm-gantt__projectbar--authored { top: 3px; background: var(--pm-accent); border: 0.5px solid var(--pm-accent); opacity: 0.85; }
+.pm-gantt__projectbar--derived { top: 15px; background: transparent; border: 1.5px dashed var(--pm-text-faint); }
+/* Urgency treatment (P4-H2/P4-G2's `projectUrgency`) recolours the AUTHORED bar only — the
+   derived envelope stays neutral on purpose, it's a fact ("here's where the work sits"), not a
+   judgement; projectUrgency judges the commitment, so only the commitment's bar carries it. */
+.pm-gantt__projectbar--overdue { background: var(--pm-urgency-overdue-graphic); border-color: var(--pm-urgency-overdue-graphic); }
+.pm-gantt__projectbar--due-soon { background: var(--pm-urgency-due-soon-graphic); border-color: var(--pm-urgency-due-soon-graphic); }
+.pm-gantt__projectbar--on-track { background: var(--pm-urgency-on-track-graphic); border-color: var(--pm-urgency-on-track-graphic); }
+
 /* dependency lines overlay */
 .pm-gantt__deps { position: absolute; left: 0; top: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; overflow: visible; }
 

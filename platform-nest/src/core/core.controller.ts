@@ -98,7 +98,11 @@ export class CoreController {
   async projects(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string) {
     await authorize(req.principal, { kind: "project", tenantId }, "read");
     const rows = await withTenants([tenantId], (c) =>
-      c.query(`SELECT id, name, status, client_id, is_internal, owner_id, due_date, custom_fields, department_id, short_code AS "shortCode"
+      // P4-H2: `start_date` was selected ONLY by the single-project detail read, so every LIST
+      // consumer could show a project's target but never the start of its authored range — and the
+      // authored-vs-derived slippage signal (decision 12) needs both ends. One extra column on a
+      // query that already reads the row.
+      c.query(`SELECT id, name, status, client_id, is_internal, owner_id, start_date, due_date, custom_fields, department_id, short_code AS "shortCode"
                FROM projects WHERE deleted_at IS NULL ORDER BY created_at DESC`),
     );
     return rows.rows;

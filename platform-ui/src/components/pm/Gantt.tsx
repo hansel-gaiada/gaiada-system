@@ -29,6 +29,19 @@ import "./pm.css";
 type DragMode = "move" | "start" | "end";
 type ExtraGroup = { key: string; label: string; note: string };
 
+// P4-H2 — decision 12's pairing: `authoredStart`/`authoredEnd` are `PmProject.startDate`/
+// `dueDate` verbatim (null when the project has no authored range yet); `derivedStart`/
+// `derivedEnd` are `taskDateEnvelope(tasks)`'s `{ start, end }` (null when the project has no
+// dated tasks). Either half — or both — can be null independently; each renders its own bar only
+// when it has at least one real date, exactly like `TimelineBar.startsMissing`'s single-date
+// fallback below.
+export interface GanttProjectBar {
+  authoredStart: string | null;
+  authoredEnd: string | null;
+  derivedStart: string | null;
+  derivedEnd: string | null;
+}
+
 interface GanttProps {
   timeline: Timeline;
   /** Precomputed groups (server-side, groupTimelineBars). Absent → one flat group (legacy). */
@@ -69,6 +82,23 @@ interface GanttProps {
   // serializable map so Gantt never has to see a project's tag registry itself. Absent/empty
   // renders no tag chips in the row's meta line (graceful degrade, same convention as barColors).
   taskTags?: Record<string, Tag[]>;
+  // P4-H2 — project bars, one per group when `groupBy="project"`: decision 12's AUTHORED range
+  // (PmProject.startDate/dueDate — what the team committed to) drawn ALONGSIDE the task-derived
+  // envelope (lib/pm.ts `taskDateEnvelope(tasks)` — where the work actually sits). Keyed by group
+  // key (== the project id `groupTimelineBars` buckets on), same convention as `barColors`/
+  // `taskUrgency` below: this is a client component and cannot import the server-only lib/pm.ts,
+  // so the server caller resolves both halves and hands them in as plain ISO strings. Absent, or
+  // an entry with all four fields null, renders no project-bar row at all (graceful degrade — a
+  // project with no dates yet, or a caller that hasn't wired this up, looks exactly as it did
+  // before this ticket).
+  projectBars?: Record<string, GanttProjectBar>;
+  // P4-H2 — the SAME `projectUrgency` tier (lib/pmUrgency.ts, computed from the authored range)
+  // used for project cards/Home/dept lists (P4-H3), precomputed server-side. Drives the authored
+  // bar's urgency treatment ONLY; the derived envelope stays neutral on purpose — it's a fact
+  // ("here's where the work sits"), not a judgement, and projectUrgency judges the COMMITMENT.
+  // Absent renders the bar in the plain accent colour, same graceful-degrade convention as
+  // `taskUrgency` above.
+  projectUrgency?: Record<string, UrgencyTier>;
   // P4-L3 — the TODAY marker line. Prefer a server-resolved ISO date (same "resolve once,
   // server-side" rule as `taskUrgency`'s `today` parameter — see lib/pmUrgency.ts) so it agrees
   // with whatever urgency tiers were computed for this render. No caller passes this yet, so
@@ -239,6 +269,34 @@ function applyWindowToMilestones(markers: MilestoneMarker[], winStart: string, d
     out.push({ ...m, offsetPct: pct });
   }
   return out;
+}
+
+// P4-H2 — bar geometry for a project's authored range or its task-derived envelope against the
+// CURRENT axis (`effStart`/`effDays` — already reflects an active ?gfrom=/?gto= window, same
+// values every task bar's own drag/preview math above uses). Mirrors `applyWindowToBars`' own
+// clamp math one-for-one (a single date pins to a 1-day bar via the same `+DAY` inclusive-end
+// convention `computeTimeline` uses) rather than introducing a second rounding rule that could
+// drift from where the task bars underneath actually land. Returns null — render nothing — when
+// both dates are absent (no range at all) or the range falls entirely outside the visible axis;
+// it deliberately does NOT pin to an edge the way a single missing date does, for the same reason
+// `applyWindowToBars` drops rather than pins a task wholly outside the window: pinning would claim
+// the range starts/ends somewhere it doesn't.
+function projectRangeGeometry(
+  start: string | null, end: string | null, axisStart: string, axisDays: number,
+): { offsetPct: number; widthPct: number } | null {
+  if (!start && !end) return null;
+  const axisStartMs = Date.parse(axisStart);
+  const axisEndMs = axisStartMs + axisDays * DAY;
+  const spanMs = Math.max(DAY, axisEndMs - axisStartMs);
+  const s = start ? Date.parse(start) : Date.parse(end!);
+  const e = end ? Date.parse(end) : s;
+  if (e < axisStartMs || s > axisEndMs) return null;
+  const clampedS = Math.max(axisStartMs, Math.min(s, axisEndMs));
+  const clampedE = Math.max(clampedS + DAY / 2, Math.min(e + DAY, axisEndMs));
+  return {
+    offsetPct: ((clampedS - axisStartMs) / spanMs) * 100,
+    widthPct: Math.min(100, ((clampedE - clampedS) / spanMs) * 100),
+  };
 }
 
 // Up to two initials from a display name — the avatar's fallback rendering (no photo store
@@ -1304,6 +1362,59 @@ export function Gantt(props: GanttProps) {
                   <span className="pm-gantt__group-count">{g.bars.length}</span>
                 </button>
               )}
+              {/* P4-H2 — the project bar: authored range alongside the task-derived envelope
+                  (decision 12). Rendered right on the group's header, regardless of `isCollapsed`
+                  — it's the "at a glance" summary the ticket asks for, so collapsing the group's
+                  individual tasks must not also hide it. Absent `projectBars` entry, or one with
+                  no dates in either half, renders nothing (see `projectRangeGeometry`'s doc). */}
+              {groupBy === "project" && (() => {
+                const pb = props.projectBars?.[g.key];
+                if (!pb) return null;
+                const authored = projectRangeGeometry(pb.authoredStart, pb.authoredEnd, effStart, effDays);
+                const derived = projectRangeGeometry(pb.derivedStart, pb.derivedEnd, effStart, effDays);
+                if (!authored && !derived) return null;
+                const tier = props.projectUrgency?.[g.key];
+                const authoredLabel = pb.authoredStart || pb.authoredEnd
+                  ? `${pb.authoredStart ? fmt(pb.authoredStart) : "—"} to ${pb.authoredEnd ? fmt(pb.authoredEnd) : "—"}`
+                  : null;
+                const derivedLabel = pb.derivedStart || pb.derivedEnd
+                  ? `${pb.derivedStart ? fmt(pb.derivedStart) : "—"} to ${pb.derivedEnd ? fmt(pb.derivedEnd) : "—"}`
+                  : null;
+                return (
+                  <div className="pm-gantt__row pm-gantt__projectbar-row">
+                    <div className="pm-gantt__labelcell">
+                      <span className="pm-gantt__projectbar-label">
+                        Project range
+                        {tier && <UrgencyChip tier={tier} variant="dot" />}
+                      </span>
+                      {/* The bars below are `aria-hidden` (pure geometry); this is their one
+                          accessible description, same "a colour/position is never the sole
+                          carrier" rule `UrgencyChip`'s own dot variant follows. */}
+                      <span className="pm-sr-only">
+                        {authoredLabel ? `Authored ${authoredLabel}.` : "No authored range yet."}
+                        {" "}
+                        {derivedLabel ? `Actual work spans ${derivedLabel}.` : "No dated tasks yet."}
+                      </span>
+                    </div>
+                    <div className="pm-gantt__track pm-gantt__projectbar-track" aria-hidden>
+                      {authored && (
+                        <span
+                          className={`pm-gantt__projectbar pm-gantt__projectbar--authored${tier ? ` pm-gantt__projectbar--${tier}` : ""}`}
+                          style={{ left: `${authored.offsetPct}%`, width: `${authored.widthPct}%` }}
+                          title={authoredLabel ? `Authored: ${authoredLabel}` : undefined}
+                        />
+                      )}
+                      {derived && (
+                        <span
+                          className="pm-gantt__projectbar pm-gantt__projectbar--derived"
+                          style={{ left: `${derived.offsetPct}%`, width: `${derived.widthPct}%` }}
+                          title={derivedLabel ? `Actual work: ${derivedLabel}` : undefined}
+                        />
+                      )}
+                    </div>
+                  </div>
+                );
+              })()}
               {!isCollapsed && g.bars.map(renderRow)}
               {/* P4-C6 — inline "Add a task", only where the caller supplied a creator AND write
                   access is on; every other mount renders nothing extra here (see `onAddTask`'s

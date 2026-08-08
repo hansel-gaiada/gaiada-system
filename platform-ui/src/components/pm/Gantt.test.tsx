@@ -1,7 +1,8 @@
 import { render, screen, fireEvent, within, cleanup } from "@testing-library/react";
 import { describe, it, expect, vi, beforeAll, beforeEach } from "vitest";
 import { Gantt } from "./Gantt";
-import type { PmTask, Timeline, MilestoneMarker, Assignee } from "@/lib/pm";
+import type { GanttProjectBar } from "./Gantt";
+import type { PmTask, Timeline, MilestoneMarker, Assignee, GanttGroup } from "@/lib/pm";
 
 // Gantt reads the router/pathname/search-params hooks even in its read-only mode (collapsed-group
 // state is stored in ?collapsed=) — same stub shape as Board.test.tsx. `nav.search` is mutable
@@ -427,5 +428,97 @@ describe("Gantt inline \"Add a task\" (P4-C6)", () => {
     fireEvent.click(screen.getByRole("button", { name: "+ Add a task" }));
     await screen.findByText("Nope.");
     expect(nav.refresh).not.toHaveBeenCalled();
+  });
+});
+
+describe("Gantt project bars — authored vs task-derived envelope (P4-H2, decision 12)", () => {
+  function groupsFor(tasks: PmTask[]): GanttGroup[] {
+    return [{ key: "p-1", label: "Project One", bars: tasks.map((t) => ({ task: t, offsetPct: 0, widthPct: 10, startsMissing: false })) }];
+  }
+
+  it("renders both an authored bar and a derived-envelope bar when groupBy is project and both halves are supplied", () => {
+    const t = task({ id: "t1", title: "Bar" });
+    const projectBars: Record<string, GanttProjectBar> = {
+      "p-1": { authoredStart: "2024-01-01", authoredEnd: "2024-01-10", derivedStart: "2024-01-03", derivedEnd: "2024-01-15" },
+    };
+    const { container } = render(
+      <Gantt timeline={timelineFor([t])} groups={groupsFor([t])} groupBy="project" projectBars={projectBars} />,
+    );
+    expect(container.querySelector(".pm-gantt__projectbar--authored")).toBeTruthy();
+    expect(container.querySelector(".pm-gantt__projectbar--derived")).toBeTruthy();
+    // The two are drawn as distinct bars (fill vs outline), not blended into one.
+    expect(container.querySelectorAll(".pm-gantt__projectbar").length).toBe(2);
+  });
+
+  it("degrades cleanly: a project with NO authored range still shows the derived envelope, and says so for screen readers", () => {
+    const t = task({ id: "t1", title: "Bar" });
+    const projectBars: Record<string, GanttProjectBar> = {
+      "p-1": { authoredStart: null, authoredEnd: null, derivedStart: "2024-01-03", derivedEnd: "2024-01-15" },
+    };
+    const { container } = render(
+      <Gantt timeline={timelineFor([t])} groups={groupsFor([t])} groupBy="project" projectBars={projectBars} />,
+    );
+    expect(container.querySelector(".pm-gantt__projectbar--authored")).toBeNull();
+    expect(container.querySelector(".pm-gantt__projectbar--derived")).toBeTruthy();
+    expect(screen.getByText(/No authored range yet\./)).toBeInTheDocument();
+  });
+
+  it("renders no project-bar row at all when neither half has a date", () => {
+    const t = task({ id: "t1", title: "Bar" });
+    const projectBars: Record<string, GanttProjectBar> = {
+      "p-1": { authoredStart: null, authoredEnd: null, derivedStart: null, derivedEnd: null },
+    };
+    const { container } = render(
+      <Gantt timeline={timelineFor([t])} groups={groupsFor([t])} groupBy="project" projectBars={projectBars} />,
+    );
+    expect(container.querySelector(".pm-gantt__projectbar-row")).toBeNull();
+  });
+
+  it("renders no project-bar row when the caller supplies no `projectBars` map at all (backward-compatible default)", () => {
+    const t = task({ id: "t1", title: "Bar" });
+    const { container } = render(
+      <Gantt timeline={timelineFor([t])} groups={groupsFor([t])} groupBy="project" />,
+    );
+    expect(container.querySelector(".pm-gantt__projectbar-row")).toBeNull();
+  });
+
+  it("never renders a project bar for a non-project grouping, even if `projectBars` happens to be supplied", () => {
+    const t = task({ id: "t1", title: "Bar", milestoneId: "m1" });
+    const groups: GanttGroup[] = [{ key: "m1", label: "Kickoff", bars: [{ task: t, offsetPct: 0, widthPct: 10, startsMissing: false }] }];
+    const projectBars: Record<string, GanttProjectBar> = {
+      m1: { authoredStart: "2024-01-01", authoredEnd: "2024-01-10", derivedStart: null, derivedEnd: null },
+    };
+    const { container } = render(
+      <Gantt timeline={timelineFor([t])} groups={groups} groupBy="milestone" projectBars={projectBars} />,
+    );
+    expect(container.querySelector(".pm-gantt__projectbar-row")).toBeNull();
+  });
+
+  it("applies the projectUrgency tier as a class on the authored bar and renders its urgency dot", () => {
+    const t = task({ id: "t1", title: "Bar" });
+    const projectBars: Record<string, GanttProjectBar> = {
+      "p-1": { authoredStart: "2024-01-01", authoredEnd: "2024-01-05", derivedStart: null, derivedEnd: null },
+    };
+    const { container } = render(
+      <Gantt
+        timeline={timelineFor([t])} groups={groupsFor([t])} groupBy="project"
+        projectBars={projectBars} projectUrgency={{ "p-1": "overdue" }}
+      />,
+    );
+    expect(container.querySelector(".pm-gantt__projectbar--authored.pm-gantt__projectbar--overdue")).toBeTruthy();
+    expect(container.querySelector(".pm-urg--overdue")).toBeTruthy();
+  });
+
+  it("stays visible when the group is collapsed — it's the at-a-glance summary, collapsing tasks must not hide it", () => {
+    nav.search = new URLSearchParams("collapsed=p-1");
+    const t = task({ id: "t1", title: "Bar" });
+    const projectBars: Record<string, GanttProjectBar> = {
+      "p-1": { authoredStart: "2024-01-01", authoredEnd: "2024-01-10", derivedStart: null, derivedEnd: null },
+    };
+    const { container } = render(
+      <Gantt timeline={timelineFor([t])} groups={groupsFor([t])} groupBy="project" projectBars={projectBars} />,
+    );
+    expect(container.querySelector(".pm-gantt__projectbar--authored")).toBeTruthy();
+    expect(screen.queryByText("Bar")).toBeNull(); // the task row itself IS hidden by the collapse
   });
 });

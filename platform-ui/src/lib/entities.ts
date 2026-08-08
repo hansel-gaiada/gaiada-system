@@ -16,6 +16,10 @@ export interface Project {
   // department; cross-department work still flows via task assignment. Null =
   // company-level / unassigned. BFF: GET returns it; POST/PATCH accept departmentId.
   department_id: string | null;
+  // P4-H2: the AUTHORED range's two ends. `start_date` used to live only on ProjectDetail because
+  // only the detail read selected it; the list now selects it too, so every consumer can draw the
+  // authored range against the task-derived envelope (decision 12).
+  start_date: string | null;
   due_date: string | null;
   custom_fields: Record<string, unknown>;
   // WD-28: unique per tenant, derived on creation + backfilled for legacy rows.
@@ -24,7 +28,6 @@ export interface Project {
 export interface ProjectDetail extends Project {
   client_name: string | null;
   owner_name: string | null;
-  start_date: string | null;
 }
 export interface Task {
   id: string;
