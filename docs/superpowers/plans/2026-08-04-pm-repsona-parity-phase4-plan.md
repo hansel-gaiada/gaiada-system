@@ -1,6 +1,11 @@
 # PM — Repsona Parity Phase 4: cross-project scope, the Ball axis, and a real dataviz layer
 
-Status: **PLANNED** · 2026-08-04 · supersedes nothing; extends
+Status: **COMPLETE — 2026-08-08.** Phase 4 and Phase 5's PM scope are on `main`, CI green.
+Shipped across 7 agent waves; see §0.1 for the execution log. Still open: `B0` (a design note the
+work itself overtook), `F2` (task-level like — owner decision), `K4` (the employee-portal contract,
+another session's surface), the 4 owner decisions in §5, and the 8 `PMA-*` tickets raised by the
+agentic-native audit (`2026-08-08-pm-agentic-native-audit.md`).
+Planned 2026-08-04 · supersedes nothing; extends
 `2026-07-23-pm-repsona-parity-and-console-redesign.md` (P1–P3, DEV-VERIFIED 2026-07-24/25) and its
 UX spec `2026-07-23-pm-console-ux-design-spec.md`.
 
