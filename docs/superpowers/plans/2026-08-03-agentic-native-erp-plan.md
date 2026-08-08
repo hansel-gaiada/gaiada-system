@@ -96,6 +96,48 @@ Each goal is "what must be true before staging". Ordered within each department 
    wherever authorization can fail.
 5. **Impact-classify every existing write** and register it with the gate, so criterion 4 is a
    property of the registry rather than per-endpoint memory.
+6. **Agent attribution — the "co-author" model.** ⚠ **PRE-STAGING GATE. App-wide, not per-department.
+   Owner decision 2026-08-08: deliberately NOT scoped into any department's ticket set — it is
+   systemic, it ripples across every module at once, and it warrants its own version cut.**
+
+   **The problem, found by the PM agentic audit (`2026-08-08-pm-agentic-native-audit.md`):** an agent
+   acting for a human runs under *that human's* envelope, and the channel never survives into the
+   platform. `Principal` (`platform-nest/src/rbac/principal.ts:23`) carries only
+   `userId · assurance · companies · roles · sessionVersion` — there is **no field for a provider,
+   channel or agent at all**, so this is not a dropped log line, it is information with nowhere to
+   live. Every activity row, `work_activity` fact and append-only ledger entry therefore records
+   **"Alice did X"** where the truth is **"Alice's agent did X"**, and the two are unrecoverable
+   after the fact. It is the one guarantee the PM assignment ledger cannot make — about precisely the
+   actor most worth auditing.
+
+   **The model (owner's framing, and it settles the design):** git's `Co-Authored-By`.
+   - **Author = the human.** Authority, permission, accountability. Cerbos still decides on the
+     human; an agent can never do anything its principal could not.
+   - **Co-author = the agent.** Mechanism, recorded *alongside* and never *instead*.
+
+   That framing is what makes it safe to add: it is **additive and authorization-neutral**. No new
+   rights are minted, so no policy needs re-reasoning — which is exactly why it can be deferred
+   without accumulating risk, and exactly why it must not be half-done per-module.
+
+   **Two steps, in order:**
+   - *Interim* — carry `via: {provider, externalId}` on the principal and stamp it onto
+     `writeActivity` metadata, `work_activity`, and the assignment ledger. Buys the audit trail with
+     no identity model change.
+   - *Full* — a real persona per department with its own `users` row, roles and lifecycle, so an
+     agent is an actor that can be granted and revoked independently. Depends on item 2
+     (`users.kind`). Today there are **zero** personas: six agent *specialists* exist
+     (`ai-agents/src/specialists.ts`) but they are skills, not identities — none has a user row or
+     anything Cerbos can authorize as itself. (Hermes has a `users` row purely to authenticate; it is
+     the brain, not a persona.)
+
+   **Why it earns a version cut:** it touches the principal type, the guard chain, every write that
+   records an actor, the activity/rollup readers, and any surface that displays "who did this" —
+   estate-wide, in one coordinated change, with a migration behind it.
+
+   **Related:** pairs with the audit's second structural finding — the D14 impact gate binds only
+   `provider === "n8n"` (`mcp-hub/src/policy.ts:47`, the impact branch sits INSIDE
+   `isAutomation(principal.provider)`), so tier-based protection is unenforceable against a direct
+   MCP agent. Both are the same root cause: **the platform cannot tell who is really calling.**
 
 ### HR
 - Tool coverage for leave (file/decide), attendance (log), cases (open/transition), onboarding
@@ -186,6 +228,10 @@ differently:
 5. Each department has ≥1 golden case usable as an eval.
 6. A capability inventory exists showing, per capability, its endpoint + its tool + its impact class.
    **If that table cannot be generated, the estate is not agentic-native regardless of how it feels.**
+7. **Agent attribution shipped at least to the interim `via:` stamp** (cross-cutting item 6). Until
+   it is, no audit trail in the estate can distinguish a human from their agent — so "who did this"
+   is unanswerable for exactly the actor that runs unattended. Owner decision 2026-08-08: this is a
+   gate, and it gets its own version cut rather than being smuggled into a department's tickets.
 
 ## Deferred — agent/persona integration (late staging, OPTIONAL)
 
