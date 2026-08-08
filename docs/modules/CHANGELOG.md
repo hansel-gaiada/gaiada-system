@@ -34,6 +34,38 @@ reconstructed from this table alone. Format defined in [`VERSIONING.md`](./VERSI
 > Not corrected retroactively (moving a pushed, already-deployed tag is its own risk); flagging so
 > the next session doesn't re-diagnose the same gap.
 
+### `Alpha 01.029.0074a` - 2026-08-08 - the follow-ups the last cut owed
+
+Manifest: `platform-nest 0.19.0`, `platform-ui 0.22.0` (counter +2, 0072 -> 0074). The bookkeeping
+caveat from `0072a` still stands and is still not this session's to close: the concurrent PM work in
+`ai-agents`/`mcp-hub`/`wa-chat-bot` remains unbumped.
+
+**A sign-in link no longer looks broken in the preview.** MAIL-38 rendered `<a href=""></a>` for
+auth-stream mail, which reads as a broken template on the exact surface built for reviewing mail
+quality. It is the opposite: the magic-link URL carries a bearer token and is **deliberately never
+stored** (verified live - auth rows hold only `ttlMinutes`, 0 of 7 carry an `href`), so the preview
+genuinely cannot reproduce it. The endpoint now returns `linkOmitted` and the panel explains it in a
+sentence. Found by driving MAIL-38 end to end rather than trusting that a 401 on the route meant the
+feature worked.
+
+**`escapeHtml()` now scheme-allowlists `href`.** Escaping is not scheme-safety: a `javascript:` URL
+contains no `<`, `>`, `"` or `'`, so it passed through untouched into `<a href="...">`. Not
+exploitable when found - every writer prefixes the trusted `MAIL_LINK_BASE_URL` - but MAIL-38 now
+renders these templates onto an elevated-only admin page, so the renderer holds on its own instead of
+inheriting safety from every caller. Allowlist (`https?://` after stripping C0 controls, defeating
+`java
+script:`), never a denylist; a refused URL renders as a dead link with the value still visible.
+Tests proven to have teeth by defeating the fix and confirming they fail.
+
+**MAIL-05's outer controller is now DRIVEN, not corroborated** - a caveat carried since B2. The real
+`POST /:tenantId/pipeline/gates` was called over authenticated HTTP and produced a `sent` row tied to
+that gate id, carrying a portal-prefixed link with no token or action params, so M11 holds on a live
+row. The trap worth keeping: the first attempt used `actorSide: "internal"`, produced no mail and
+looked like a defect - it is not, because `openGate` resolves recipients only for client-actionable
+gates (staff notifications are realtime in-app by design), and a stale row from an earlier probe sat
+at the top of the table and was nearly accepted as proof. **Query by the id you just created, never
+`ORDER BY created_at DESC`.**
+
 ### `Alpha 01.028.0072a` - 2026-08-08 - the mail dev stage, and the bug its own exit gate found
 
 Manifest bumped by this cut: `platform-nest 0.18.0`, `platform-ui 0.21.0` (module-reference counter
@@ -76,8 +108,10 @@ admin page.
 **Two verification tools were manufacturing false failures.** Neither was a product defect and both
 cost a full QA run. `replay-inbound.mjs` never set `app.mail_context`, so under MAIL-22's FORCE RLS
 its own DB check read zero rows and printed "THREADING NOT VERIFIED" for replays that had threaded
-perfectly. `scripts/sso-login.sh` emitted the token with a trailing `` on Windows, so every
-`Authorization: Bearer <token>` was malformed and rejected *below* Fastify's request logger - a bare
+perfectly. `scripts/sso-login.sh` emitted the token with a trailing `
+` on Windows, so every
+`Authorization: Bearer <token>
+` was malformed and rejected *below* Fastify's request logger - a bare
 400 with **no log line**, which reads exactly like an outage and was reported as one. Its `--only`
 flag also accepted a single filename by strict equality, so a comma list replayed zero fixtures and
 exited green. All three failed the same way: **a check that can silently measure nothing and call it
