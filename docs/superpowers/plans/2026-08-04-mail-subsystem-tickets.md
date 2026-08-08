@@ -239,6 +239,48 @@ on the row. This is a new read endpoint over existing machinery, not a new rende
 - **Elevated-only, consistent with `admin-mail.controller.ts`** (`isElevated`, flat 403 otherwise).
 - **Sequencing:** queued *after* B4. It must not divert B2–B4, which close the dev stage.
 
+## B3 + B4 CLOSED — the dev stage is CLOSED (2026-08-08, `alpha-01.028.0072a`)
+
+**B3/MAIL-11 PASS.** All 8 magic-link attack classes driven live: single-use replay ⇒ 422, expiry ⇒
+422, SHA-256 hash at rest (posting the stored hash is not replayable), byte-identical enumeration
+responses, **both rate limits server-enforced** (8 rapid mints ⇒ exactly 3 rows, the other 5
+`mint.rate_limited`, all still 202 so nothing leaks), no `Set-Cookie` on mint, tampering
+(flip/case/truncate) fails closed, and an empty `MAIL_MAGIC_LINK_TRUSTED_PROXIES` provably defeats
+XFF spoofing of the per-IP limit (12 spoofed values all logged as the real bridge IP) — closing the
+bypass MAIL-37 was written for. One agent claim corrected: it reported the leftover links as "all
+consumed or expired"; **3 were live** at that moment, on `*-throwaway@dev.gaiada.invalid` with 3
+minutes of TTL, behind a non-internet-routed endpoint. Judgement call upheld: consuming user A's
+token while holding a session as user B yields **A's** session — correct, not a finding.
+
+**B4/MAIL-18 found a live HIGH and correctly refused to pass** (see the forged-NDR entry in
+CHANGELOG `01.028.0072a`). Fixed, deployed, and **re-driven against the deployed build**: forged
+5.1.1 NDR against an auth-stream token ⇒ row `bounced`, **zero** suppressions; against a notify
+token ⇒ exactly one `stream='notify'` row; **zero** `stream='*'` rows table-wide. Residual bounded
+to notify with no bleed into auth, recorded as **§15 R4a**, which **must close before R3 wires the
+real webhook** — at that moment the `MAIL_INBOUND_TOKEN` wall disappears.
+
+**⚠ The re-run's criteria table is a RECONSTRUCTION, not this document's list.** That agent had no
+repo checkout (images-only deploy) and said so; its "criterion 6 = deliverability = NOT MET" is not
+a criterion here at all — deliverability is §15 staging content **by design**, and criterion 6 is
+"magic links OFF for real users". Audited against the REAL six:
+
+| # | Criterion | Verdict |
+|---|---|---|
+| 1 | Every dev-wave ticket DEV-VERIFIED on gda-aicenter | **MET-WITH-CAVEAT** — MAIL-05's outer `openGate` controller corroborated not driven; MAIL-15 never driven at browser-paint level |
+| 2 | MAIL-18 + MAIL-11 pass, **zero open critical findings** | **MET** — the one HIGH is fixed, deployed and re-verified. This was the only real blocker |
+| 3 | Inbound corpus committed + running in CI | **MET** — closed in v5 (run `30989473747`); CI green on the release commit, all 9 jobs |
+| 4 | A12 grep gate holds | **MET** — re-run live, zero `gaiada.com`/`gaiada.online` literals in mail code or mail UI |
+| 5 | §15 populated, staging columns untouched | **MET** — and the debt it created is paid: R4a appended |
+| 6 | Magic links OFF **for real users** (2026-08-07 amendment) | **MET** — endpoint not internet-routed (307s into platform-ui); 11 `auth_magic_links` rows, every address `.invalid`/`.test`, zero real users |
+
+**Verdict: the dev stage CLOSES.** Staging begins at W-S0 with design §15 as the handover.
+
+**Two observations carried forward, neither a blocker.**
+1. `webhook.controller.ts` still writes `stream='*'` — correct there: it is the **provider-authenticated** Brevo delivery webhook behind a separate `MAIL_WEBHOOK_TOKEN` (401 without it, verified), and a real provider bounce event genuinely does mean dead-everywhere. Re-check when R3 wires the real provider.
+2. `escapeHtml()` does not scheme-allowlist `href`, so a `javascript:` URL would pass through as literal text (it contains no `<>"` to escape). **Not exploitable today** — both writers of `payload.href` (`intake.ts`'s `absoluteEntityHref()` and the magic-link service) prefix the trusted `MAIL_LINK_BASE_URL` before storage, and MAIL-38's `sandbox=""` iframe blocks `javascript:` navigation as a second layer. Worth a senior-be hardening ticket, not a gate item.
+
+**Box left clean:** every B3/B4 test artifact removed — 0 suppressions, 0 `qa-mail18-*` rows, 0 rows at `bounced`.
+
 ## Dev-stage exit criteria ("the dev stage is finished" means ALL of these)
 
 > **v5 UPDATE — 2026-08-05: THE BILLING WALL IS GONE.** The repo was made public, so Actions
