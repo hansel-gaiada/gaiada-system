@@ -242,9 +242,34 @@ export interface PortalProfile {
 }
 
 /** Topics the live stream can name. Mirrors platform-nest src/core/portal-live.service.ts's
- *  `PortalTopic` — the two lists must agree, and this one is the browser's copy. */
-export type PortalTopic = "approvals" | "projects" | "deliverables" | "invoices" | "contracts" | "profile";
+ *  `PortalTopic` — the two lists must agree, and this one is the browser's copy.
+ *  `requests` (MI-02/MI-03) — a webdev change request submitted/triaged/converted. */
+export type PortalTopic = "approvals" | "projects" | "deliverables" | "invoices" | "contracts" | "profile" | "requests";
 export interface PortalLiveFrame { topic: PortalTopic; at: string }
+
+// ── MI-04 — maintenance intake (webdev change requests) ───────────────────────────────────────────
+//
+// Mirrors platform-nest src/core/webdev-change-requests-portal.controller.ts's SELECT_COLUMNS exactly
+// (list and detail share one shape there, so they share one type here too).
+export type PortalChangeRequestKind = "content" | "design" | "feature" | "bug";
+export type PortalChangeRequestStatus = "new" | "triaged" | "in_progress" | "done" | "declined";
+export interface PortalChangeRequest {
+  id: string;
+  kind: PortalChangeRequestKind;
+  title: string;
+  body: string | null;
+  status: PortalChangeRequestStatus;
+  route: "control_plane" | "mini_run" | "pm_task" | null;
+  clientId: string;
+  projectId: string | null;
+  projectName: string | null;
+  pipelineRunId: string | null;
+  pmTaskId: string | null;
+  declinedReason: string | null;
+  requestedBy: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
 
 // ── Pure helpers (used on BOTH sides of the network) ──────────────────────────────────────────────
 
@@ -338,6 +363,10 @@ const CLIENT_STATUS_WORDS: Record<string, string> = {
   rejected: "Not accepted",
   archived: "Closed",
   cancelled: "Cancelled",
+  // MI-04 — a webdev change request's own lifecycle (§2.2 of the design doc). `in_progress`/`done`
+  // above already cover the post-triage states; only the two pre-triage ones are new.
+  new: "Submitted",
+  triaged: "Being reviewed",
 };
 export function clientStatus(status: string | null | undefined): string {
   if (!status) return "—";
@@ -353,11 +382,11 @@ export function statusTone(status: string | null | undefined): PortalTone {
     case "done": case "complete": case "delivered": case "approved": case "signed": case "paid":
     case "confirmed":
       return "success";
-    case "sent": case "awaiting_gate": case "pending":
+    case "sent": case "awaiting_gate": case "pending": case "new":
       return "warning";
     case "blocked": case "declined": case "expired": case "rejected":
       return "danger";
-    case "in_progress": case "active":
+    case "in_progress": case "active": case "triaged":
       return "info";
     default:
       return "neutral";
@@ -414,4 +443,39 @@ export function projectUrgencyTier(
   today: string,
 ): UrgencyTier {
   return taskUrgency({ dueDate: project.dueDate, isDone: project.progressPercent >= 100 }, today);
+}
+
+// ── MI-04 pure helpers ─────────────────────────────────────────────────────────────────────────────
+
+const CHANGE_REQUEST_KIND_WORDS: Record<PortalChangeRequestKind, string> = {
+  content: "Content edit",
+  design: "Design change",
+  feature: "Feature request",
+  bug: "Bug report",
+};
+/** A change request's `kind`, in words a client recognises rather than the schema token. */
+export function changeRequestKindLabel(kind: string): string {
+  return CHANGE_REQUEST_KIND_WORDS[kind as PortalChangeRequestKind] ?? kind;
+}
+
+export interface PortalProjectOption { id: string; name: string }
+
+/** What the "New request" form's project selector may offer — computed from the caller's OWN scope
+ *  shape, never re-derived from the project list (a list of projects cannot say whether its owner is
+ *  client-wide or project-scoped; only `PortalProfile.access.wholeClient` can).
+ *
+ *  Design doc §5.1/§5.2 rule, encoded here once so the page, the demo fixture and this file's own test
+ *  all read it off the same function: a CLIENT-WIDE contact (`wholeClient: true`) additionally gets an
+ *  "all projects" option; a PROJECT-SCOPED contact gets NO such option and must name one of `projects`.
+ *
+ *  ⚠ Deliberately takes `wholeClient` and NOT `canSign`. The §5.1 ruling — test-pinned on the backend
+ *  in webdev-change-requests-portal.controller.ts — is that submitting is a VIEWER-permitted act;
+ *  signing capability gates only the resulting mini-run's own gates, never this form. There is no
+ *  parameter here for a future edit to accidentally start gating on, and `portal.test.ts` pins that a
+ *  viewer-scoped and a signer-scoped profile produce the IDENTICAL result. */
+export function changeRequestFormProps(
+  profile: { access: Pick<PortalProfile["access"], "wholeClient"> },
+  projects: PortalProjectOption[],
+): { allowClientWide: boolean; projects: PortalProjectOption[] } {
+  return { allowClientWide: profile.access.wholeClient, projects };
 }

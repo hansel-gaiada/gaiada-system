@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest";
 import {
-  clientStatus, isPastDue, money, overallProgress, portalDate, projectRange, projectUrgencyTier, relativeDays,
-  splitTimeline, statusTone, type PortalProject, type PortalTimelineEvent,
+  changeRequestFormProps, changeRequestKindLabel, clientStatus, isPastDue, money, overallProgress, portalDate,
+  projectRange, projectUrgencyTier, relativeDays, splitTimeline, statusTone,
+  type PortalProject, type PortalProjectOption, type PortalTimelineEvent,
 } from "./portal";
 
 // CP-16 — the portal's pure layer. Every function here renders text a CLIENT reads, on both the server
@@ -260,5 +261,83 @@ describe("P4-K5 isolation — the client-safe projection stays exactly K1's four
     const tier = projectUrgencyTier({ dueDate: "2026-08-20", progressPercent: 40 }, "2026-08-04");
     expect(["done", "overdue", "due-soon", "on-track", "undated"]).toContain(tier);
     expect(tier).not.toBe("in_progress");
+  });
+});
+
+// MI-04 — maintenance intake (webdev change requests). `clientStatus`/`statusTone` already have their
+// own dictionaries tested above; these two additions just extend the same tables, so only the new
+// entries are pinned here rather than re-asserting the whole map.
+describe("change request status vocabulary (MI-04 additions)", () => {
+  it("gives the two pre-triage states client-facing words", () => {
+    expect(clientStatus("new")).toBe("Submitted");
+    expect(clientStatus("triaged")).toBe("Being reviewed");
+  });
+
+  it("tones 'new' as warning (awaiting staff) and 'triaged' as info (in flight)", () => {
+    expect(statusTone("new")).toBe("warning");
+    expect(statusTone("triaged")).toBe("info");
+    // The post-triage states were already covered by the shared vocabulary — declined/in_progress/done
+    // are `danger`/`info`/`success` respectively, unchanged by this ticket.
+    expect(statusTone("declined")).toBe("danger");
+    expect(statusTone("in_progress")).toBe("info");
+    expect(statusTone("done")).toBe("success");
+  });
+});
+
+describe("changeRequestKindLabel", () => {
+  it("translates the four schema kinds into client vocabulary", () => {
+    expect(changeRequestKindLabel("feature")).toBe("Feature request");
+    expect(changeRequestKindLabel("design")).toBe("Design change");
+    expect(changeRequestKindLabel("content")).toBe("Content edit");
+    expect(changeRequestKindLabel("bug")).toBe("Bug report");
+  });
+
+  it("falls back to the raw token for anything unrecognised", () => {
+    expect(changeRequestKindLabel("something_new")).toBe("something_new");
+  });
+});
+
+// MI-04 — the "subtle AC": the project selector's shape, and the §5.1 ruling that signing capability
+// never influences it. `changeRequestFormProps` is the ONE seam both the live page and this test read,
+// so a future edit that starts reading `canSign` here shows up as a diff to a pinned test rather than
+// only being visible pixel-by-pixel in the rendered page — and both fixture shapes (client-wide vs
+// project-scoped) are covered here as PURE data, without logging in as a second client identity (the
+// task brief is explicit that a second identity must not be invented; `demo-client` alone drives the
+// live/e2e path and is client-wide, per demoPortal.ts's `profile` fixture).
+describe("changeRequestFormProps (§5.1 project rule + the viewer/signer ruling)", () => {
+  const projects: PortalProjectOption[] = [
+    { id: "p-1", name: "Website relaunch" },
+    { id: "p-2", name: "Brand refresh" },
+  ];
+
+  it("a CLIENT-WIDE contact's form allows the all-projects option", () => {
+    const r = changeRequestFormProps({ access: { wholeClient: true } }, projects);
+    expect(r.allowClientWide).toBe(true);
+    expect(r.projects).toEqual(projects);
+  });
+
+  it("a PROJECT-SCOPED contact's form gets NO all-projects option — they must name one of `projects`", () => {
+    const r = changeRequestFormProps({ access: { wholeClient: false } }, projects);
+    expect(r.allowClientWide).toBe(false);
+    // The project list itself is untouched — scoping to "must name one" is the caller's job (the
+    // form component renders no blank/all option when `allowClientWide` is false), not a filter here.
+    expect(r.projects).toEqual(projects);
+  });
+
+  it("§5.1 ruling, pinned at the UI layer: signing capability has ZERO influence on the form's shape", () => {
+    // A viewer-capability profile and a signer-capability profile, otherwise identical, must produce
+    // the IDENTICAL result — because there is no `canSign` parameter for either to differ on. This is
+    // the whole point: submitting a change request is a viewer-permitted act (design doc §5.1,
+    // test-pinned on the backend in webdev-change-requests-portal.controller.ts), so nothing at this
+    // layer may gate on signing capability either.
+    const viewerProfile = { access: { wholeClient: true, canSign: false } };
+    const signerProfile = { access: { wholeClient: true, canSign: true } };
+    expect(changeRequestFormProps(viewerProfile, projects)).toEqual(changeRequestFormProps(signerProfile, projects));
+  });
+
+  it("an empty project list still allows submission for a client-wide contact (the all-projects option alone)", () => {
+    const r = changeRequestFormProps({ access: { wholeClient: true } }, []);
+    expect(r.allowClientWide).toBe(true);
+    expect(r.projects).toEqual([]);
   });
 });

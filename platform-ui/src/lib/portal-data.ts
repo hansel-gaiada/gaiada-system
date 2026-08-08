@@ -19,9 +19,9 @@ import "server-only";
 // client concludes their project has no milestones, no invoices and no contract.
 import { platformFetch, PlatformError } from "./platform";
 import type {
-  PortalContract, PortalContractDetail, PortalDeliverable, PortalInvoice, PortalInvoiceDetail,
-  PortalMilestone, PortalOverview, PortalProfile, PortalProject, PortalProjectDetail, PortalRun,
-  PortalRunDetail, PortalTimelineEvent,
+  PortalChangeRequest, PortalContract, PortalContractDetail, PortalDeliverable, PortalInvoice,
+  PortalInvoiceDetail, PortalMilestone, PortalOverview, PortalProfile, PortalProject, PortalProjectDetail,
+  PortalRun, PortalRunDetail, PortalTimelineEvent,
 } from "./portal";
 
 /** Degrade "not found"/"not yours" to a fallback; let everything else propagate. NOT extended to 403:
@@ -120,4 +120,34 @@ export async function listPortalRuns(
 
 export async function getPortalRun(userId: string, tenant: string, runId: string): Promise<PortalRunDetail | null> {
   return safe(platformFetch<PortalRunDetail>(`/api/${tenant}/portal/runs/${runId}`, userId), null);
+}
+
+// ── MI-04: maintenance intake (webdev change requests) ─────────────────────────────────────────────
+
+/** The caller's own change requests (own clients, own project scope — `resolvePortalScope` on the
+ *  backend, never re-derived here), plus WHY the list is empty when it is, same shape as
+ *  `listPortalRuns` — a staff member browsing `/portal/requests` must get the teach-state, not a
+ *  silently empty list that reads as "no client has ever asked us anything". */
+export async function listPortalChangeRequests(
+  userId: string,
+  tenant: string,
+): Promise<{ requests: PortalChangeRequest[]; isPortalClient: boolean }> {
+  try {
+    return {
+      requests: await platformFetch<PortalChangeRequest[]>(`/api/${tenant}/portal/change-requests`, userId),
+      isPortalClient: true,
+    };
+  } catch (e) {
+    if (e instanceof PlatformError && e.status === 403) return { requests: [], isPortalClient: false };
+    if (e instanceof PlatformError && e.status === 404) return { requests: [], isPortalClient: true };
+    throw e;
+  }
+}
+
+export async function getPortalChangeRequest(
+  userId: string,
+  tenant: string,
+  id: string,
+): Promise<PortalChangeRequest | null> {
+  return safe(platformFetch<PortalChangeRequest>(`/api/${tenant}/portal/change-requests/${id}`, userId), null);
 }

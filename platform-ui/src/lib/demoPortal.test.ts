@@ -164,4 +164,88 @@ describe("demoPortal fixture fidelity", () => {
     // exercise the POLLING path — the one most likely to be broken and least likely to be noticed.
     expect(portalDashboardDemo("GET", T("stream"), CLIENT)?.json).toMatchObject({ mode: "poll" });
   });
+
+  // ── MI-04: maintenance intake (webdev change requests) ─────────────────────────────────────────────
+  describe("change requests", () => {
+    it("refuses a staff caller exactly like every other portal route here", () => {
+      const r = portalDashboardDemo("GET", T("change-requests"), "demo-hansel");
+      expect(r?.status).toBe(403);
+    });
+
+    it("ships an in_progress row with a REAL pipelineRunId so the mini-run deep-link lands on real content", () => {
+      const list = portalDashboardDemo("GET", T("change-requests"), CLIENT)?.json as Array<{
+        status: string; pipelineRunId: string | null;
+      }>;
+      const spawned = list.find((r) => r.status === "in_progress");
+      expect(spawned?.pipelineRunId).toBe("run-demo-1");
+    });
+
+    it("ships a declined row carrying a reason", () => {
+      const list = portalDashboardDemo("GET", T("change-requests"), CLIENT)?.json as Array<{
+        status: string; declinedReason: string | null;
+      }>;
+      expect(list.some((r) => r.status === "declined" && !!r.declinedReason)).toBe(true);
+    });
+
+    it("newest first", () => {
+      const list = portalDashboardDemo("GET", T("change-requests"), CLIENT)?.json as Array<{ createdAt: string }>;
+      const sorted = [...list].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+      expect(list.map((r) => r.createdAt)).toEqual(sorted.map((r) => r.createdAt));
+    });
+
+    it("404s an unknown id rather than inventing one", () => {
+      expect(portalDashboardDemo("GET", T("change-requests/nope"), CLIENT)?.status).toBe(404);
+    });
+
+    it("submits a request and the server derives status/route — never body-supplied", () => {
+      const r = portalDashboardDemo("POST", T("change-requests"), CLIENT, JSON.stringify({
+        kind: "feature", title: "Add a newsletter signup block",
+        // Both of these must be IGNORED — mirrors the real controller's "never body-trusted" rule.
+        status: "done", clientId: "someone-elses-client-id",
+      }));
+      expect(r?.status).toBe(201);
+      const created = r?.json as { id: string; status: string };
+      expect(created.status).toBe("new");
+
+      const detail = portalDashboardDemo("GET", T(`change-requests/${created.id}`), CLIENT)?.json as {
+        status: string; clientId: string; route: string | null;
+      };
+      expect(detail.status).toBe("new");
+      expect(detail.route).toBeNull();
+      expect(detail.clientId).toBe("cl-1"); // demo-client's OWN client, never the body-supplied one
+    });
+
+    it("refuses an invalid kind", () => {
+      const r = portalDashboardDemo("POST", T("change-requests"), CLIENT, JSON.stringify({
+        kind: "not-a-kind", title: "Something",
+      }));
+      expect(r?.status).toBe(400);
+      expect((r?.json as { field?: string }).field).toBe("kind");
+    });
+
+    it("refuses an empty title", () => {
+      const r = portalDashboardDemo("POST", T("change-requests"), CLIENT, JSON.stringify({
+        kind: "bug", title: "   ",
+      }));
+      expect(r?.status).toBe(400);
+    });
+
+    it("accepts a client-wide submission with no projectId (demo-client is client-wide)", () => {
+      const r = portalDashboardDemo("POST", T("change-requests"), CLIENT, JSON.stringify({
+        kind: "content", title: "Update the footer copyright year",
+      }));
+      const created = r?.json as { id: string };
+      const detail = portalDashboardDemo("GET", T(`change-requests/${created.id}`), CLIENT)?.json as {
+        projectId: string | null;
+      };
+      expect(detail.projectId).toBeNull();
+    });
+
+    it("404-shaped 'project not found' for a projectId that isn't the caller's", () => {
+      const r = portalDashboardDemo("POST", T("change-requests"), CLIENT, JSON.stringify({
+        kind: "design", title: "Redesign the invoice PDF", projectId: "not-a-real-project",
+      }));
+      expect(r?.status).toBe(400);
+    });
+  });
 });

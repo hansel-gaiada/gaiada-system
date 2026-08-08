@@ -211,6 +211,72 @@ const CHANGE_REQUESTS: string[] = [];
 let demoSeq = 0;
 const nextId = (p: string) => `${p}-demo-${++demoSeq}`;
 
+// ── MI-04: maintenance intake (webdev change requests) ─────────────────────────────────────────────
+//
+// A DIFFERENT thing from `CHANGE_REQUESTS` above (which is the unrelated "change my own profile info"
+// ask from CP-15) — naming collision with the real feature avoided on purpose, since a reviewer
+// searching for "change request" in this file must not find the wrong one.
+//
+// `demo-client` is CLIENT-WIDE (see the `profile` GET below: `access.wholeClient: true`), so this
+// fixture alone cannot drive the PROJECT-SCOPED half of the §5.1 project rule (a project-scoped
+// contact getting no "all projects" option, or being refused a NULL project) — the task brief is
+// explicit that a second client identity must not be invented to cover it. That half is pinned
+// instead as a pure-function unit test in `lib/portal.test.ts` (`changeRequestFormProps`), which
+// exercises both scope shapes directly without needing a second login.
+interface DemoChangeRequest {
+  id: string; kind: string; title: string; body: string | null;
+  status: string; route: string | null;
+  clientId: string; projectId: string | null; projectName: string | null;
+  pipelineRunId: string | null; pmTaskId: string | null;
+  declinedReason: string | null; requestedBy: string;
+  createdAt: string; updatedAt: string;
+}
+// ── WHY THIS STORE IS PINNED TO globalThis (found by a clean e2e run, 2026-08-08) ────────────────
+// A plain module-level array does NOT work here. Next bundles the `"use server"` action graph and the
+// page's RSC graph separately, so `portalSubmitChangeRequest`'s POST pushed onto one instance of this
+// array while the page's GET read a different one: the write returned 201, the success banner showed,
+// and the request the client had just filed was absent from the list.
+//
+// It passed an in-process vitest ("create then immediately re-read") because that test has ONE module
+// instance by construction — it exercised the store, never the bundling. That is the trap worth
+// remembering: the substitute proof was sound about the thing it tested and silent about the thing
+// that broke. Only the real browser against the real server could see it.
+//
+// `globalThis` gives every copy of this module the same array. Demo-only state, so a single process-
+// wide store is exactly the intended lifetime (it also survives dev HMR, which a module-level `const`
+// silently does not).
+const CR_STORE_KEY = Symbol.for("gaiada.demoPortal.webdevChangeRequests");
+const WEBDEV_CRS: DemoChangeRequest[] = ((globalThis as Record<symbol, unknown>)[CR_STORE_KEY] ??= [
+  // in_progress + a real pipelineRunId — the deep-link to the EXISTING /portal/approvals/run-demo-1
+  // (demoPipeline's RUNS) must land on real content, not a dead id invented just for this fixture.
+  {
+    id: "wcr-seed-1", kind: "feature", title: "Add a live chat widget to the homepage",
+    body: "Our support team keeps fielding the same three questions — could we add a chat bubble?",
+    status: "in_progress", route: "mini_run", clientId: CLIENT_ID,
+    projectId: "proj-nw-site", projectName: "Website relaunch",
+    pipelineRunId: "run-demo-1", pmTaskId: null, declinedReason: null,
+    requestedBy: DEMO_CLIENT_USER, createdAt: stamp(-6), updatedAt: stamp(-5),
+  },
+  // declined + a reason — the one branch nothing else in this fixture set exercises.
+  {
+    id: "wcr-seed-2", kind: "content", title: "Update the Bali office phone number",
+    body: "It changed last month — the old one still rings a disconnected line.",
+    status: "declined", route: null, clientId: CLIENT_ID, projectId: null, projectName: null,
+    pipelineRunId: null, pmTaskId: null,
+    declinedReason: "This is a footer edit our team can make directly — done as of today, no need to track it as a request.",
+    requestedBy: DEMO_CLIENT_USER, createdAt: stamp(-10), updatedAt: stamp(-9),
+  },
+  // untouched `new` — the triage queue's own state, so the portal side shows what "just submitted,
+  // nobody's looked at it yet" looks like without requiring a fresh POST first.
+  {
+    id: "wcr-seed-3", kind: "bug", title: "Checkout button does nothing on Safari",
+    body: null, status: "new", route: null, clientId: CLIENT_ID,
+    projectId: "proj-nw-site", projectName: "Website relaunch",
+    pipelineRunId: null, pmTaskId: null, declinedReason: null,
+    requestedBy: DEMO_CLIENT_USER, createdAt: stamp(-1), updatedAt: stamp(-1),
+  },
+]) as DemoChangeRequest[];
+
 // ── Derivations ───────────────────────────────────────────────────────────────────────────────────
 
 function paymentsOf(invoiceId: string): DemoPayment[] {
@@ -327,7 +393,7 @@ export function portalDashboardDemo(method: string, p: string, userId: string, b
   // Route table FIRST, identity check second — but only for routes this module owns, so unmatched
   // portal routes still fall through to `portalDemo` (runs/gates) rather than being 403'd here.
   const seg = p.replace(/^\/api\/[^/]+\/portal\//, "");
-  const OWNED = /^(overview|projects|milestones|timeline|deliverables|invoices|contracts|profile|stream|files)(\/|$)/;
+  const OWNED = /^(overview|projects|milestones|timeline|deliverables|invoices|contracts|profile|stream|files|change-requests)(\/|$)/;
   if (!OWNED.test(seg)) return null;
   if (userId !== DEMO_CLIENT_USER) return { status: 403, json: { error: "not a portal client" } };
 
@@ -508,6 +574,47 @@ export function portalDashboardDemo(method: string, p: string, userId: string, b
     if (message.length < 5) return bad("message required", "message");
     CHANGE_REQUESTS.push(message);
     return { status: 202, json: { accepted: true, notified: 1 } };
+  }
+
+  // ── change requests (MI-04) ──
+  // List: newest first, mirroring the real controller's `ORDER BY created_at DESC`.
+  if (seg === "change-requests" && m === "GET") {
+    return ok([...WEBDEV_CRS].sort((a, b) => b.createdAt.localeCompare(a.createdAt)));
+  }
+  const crDetailM = seg.match(/^change-requests\/([^/]+)$/);
+  if (crDetailM && m === "GET") {
+    const row = WEBDEV_CRS.find((r) => r.id === crDetailM[1]);
+    if (!row) return notFound("request not found");
+    return ok(row);
+  }
+  if (seg === "change-requests" && m === "POST") {
+    const kind = String(parsed.kind ?? "");
+    if (!["content", "design", "feature", "bug"].includes(kind)) {
+      return bad("kind must be one of content|design|feature|bug", "kind");
+    }
+    const title = String(parsed.title ?? "").trim();
+    if (!title) return bad("title is required", "title");
+    // demo-client is CLIENT-WIDE (see the `profile` GET below), so a NULL project is always valid
+    // here — the project-scoped refusal path is proven by a unit test instead (this file's header).
+    let projectId: string | null = null;
+    let projectName: string | null = null;
+    if (typeof parsed.projectId === "string" && parsed.projectId) {
+      const proj = PROJECTS.find((p) => p.id === parsed.projectId && p.clientId === CLIENT_ID);
+      if (!proj) return bad("project not found");
+      projectId = proj.id;
+      projectName = proj.name;
+    }
+    const id = nextId("wcr");
+    // Only kind/title/body/projectId are ever read from `parsed` — a body-supplied `status` or
+    // `clientId` is never even looked at, mirroring the real controller's "never body-trusted" rule.
+    const row: DemoChangeRequest = {
+      id, kind, title, body: parsed.body ? String(parsed.body) : null,
+      status: "new", route: null, clientId: CLIENT_ID, projectId, projectName,
+      pipelineRunId: null, pmTaskId: null, declinedReason: null, requestedBy: DEMO_CLIENT_USER,
+      createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+    };
+    WEBDEV_CRS.push(row);
+    return created({ id, status: "new" });
   }
 
   // ── files ──

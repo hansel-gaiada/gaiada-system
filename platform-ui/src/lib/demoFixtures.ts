@@ -8,6 +8,7 @@ import "server-only";
 import { pmDemo, allTrackerNotifications, pmTasksForUser } from "./demoPm";
 import { meetingsDemo } from "./demoMeetings";
 import { pipelineDemo, portalDemo } from "./demoPipeline";
+import { webdevChangeRequestsDemo } from "./demoWebdevChangeRequests";
 import { portalDashboardDemo } from "./demoPortal";
 import { reportsDemo } from "./demoReports";
 import { checkinsDemo } from "./demoCheckins";
@@ -1809,10 +1810,16 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
   const pipeline = pipelineDemo(method, p, url.searchParams, body);
   if (pipeline) return pipeline;
 
+  // MI-05 — Web Dev maintenance-intake triage queue (staff console) — stateful store
+  // (lib/demoWebdevChangeRequests.ts).
+  const webdevCr = webdevChangeRequestsDemo(method, p, url.searchParams, body, userId);
+  if (webdevCr) return webdevCr;
+
   // Client portal DASHBOARD (CP-2..CP-5) — overview/projects/timeline/deliverables/invoices/contracts/
-  // profile. Runs FIRST so its routes win, and returns null for anything it does not own so the
-  // runs/gates routes still reach `portalDemo` below. Both are identity-aware (a staff user gets the
-  // real BFF's 403), which is what keeps the staff teach-state on /portal reachable.
+  // profile/change-requests (MI-04 maintenance intake). Runs FIRST so its routes win, and returns
+  // null for anything it does not own so the runs/gates routes still reach `portalDemo` below. Both
+  // are identity-aware (a staff user gets the real BFF's 403), which is what keeps the staff
+  // teach-state on /portal reachable.
   const portalDash = portalDashboardDemo(method, p, userId, body);
   if (portalDash) return portalDash;
 

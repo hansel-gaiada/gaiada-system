@@ -56,6 +56,7 @@ test.describe("client portal", () => {
       ["/portal/projects", /Projects/],
       ["/portal/timeline", /Timeline/],
       ["/portal/deliverables", /Deliverables/],
+      ["/portal/requests", /Requests/],
       ["/portal/approvals", /Approvals/],
       ["/portal/invoices", /Invoices/],
       ["/portal/contracts", /Agreements/],
@@ -121,6 +122,36 @@ test.describe("client portal", () => {
     await page.getByLabel("Email").fill("dana@northwind.example");
     await page.getByRole("button", { name: /sign in/i }).click();
     await page.waitForURL("**/portal/approvals/run-demo-1");
+  });
+
+  // MI-04 — the client submits a change request, sees the ratified viewer-can-submit ruling hold in
+  // practice (this is `demo-client`, a `signer`, but nothing here checks that), and the existing
+  // fixture rows (declined + a mini-run deep-link) render real content.
+  test("a client submits a change request and sees it alongside the triage history @portal", async ({ page }) => {
+    await signInAsClient(page);
+    await page.goto("/portal/requests");
+
+    // The seeded fixture rows: a declined one with its reason visible, and an in-progress one whose
+    // deep-link lands on the SAME run the approvals suite already exercises (run-demo-1) — proving the
+    // link is real, not a dead id invented for this page.
+    await expect(page.getByText(/footer edit our team can make directly/i)).toBeVisible();
+    const deliveryLink = page.getByRole("link", { name: /view delivery/i }).first();
+    await expect(deliveryLink).toBeVisible();
+    await deliveryLink.click();
+    await expect(page).toHaveURL(/\/portal\/approvals\/run-demo-1$/);
+    await page.goBack();
+
+    // Submit a new one. `demo-client`'s profile is client-wide (`access.wholeClient: true`), so "Your
+    // whole account" is offered — the project-SCOPED half of this rule (no such option, and a required
+    // project) is pinned as a unit test instead (`lib/portal.test.ts`), per the task brief's "do not
+    // invent a second client identity" constraint.
+    await page.getByLabel(/what kind of request is this/i).selectOption("bug");
+    await page.getByLabel(/in a few words/i).fill("The pricing page 404s on mobile Safari");
+    await page.getByLabel(/which project is this for/i).selectOption({ label: "Your whole account" });
+    await page.getByRole("button", { name: /send request/i }).click();
+
+    await expect(page.getByText(/we've received your request/i)).toBeVisible();
+    await expect(page.getByText("The pricing page 404s on mobile Safari")).toBeVisible();
   });
 
   test("a staff member sees the teach-state, not a client dashboard @portal", async ({ page }) => {

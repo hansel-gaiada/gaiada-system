@@ -3,7 +3,12 @@ import "server-only";
 export class PlatformError extends Error {
   // `field` is additive (bot admin proxy 400s as {error, field} per doc §2.3/2.4) —
   // undefined for every existing caller that never sends it.
-  constructor(public status: number, message: string, public field?: string) { super(message); }
+  // `existing` is additive too (MI-03/MI-05): the webdev triage 409 ("already triaged") carries the
+  // artifact a race loser needs to navigate to instead of a bare failure — HttpErrorFilter forwards
+  // it verbatim (platform-nest/src/http-error.filter.ts). undefined for every other caller.
+  constructor(public status: number, message: string, public field?: string, public existing?: Record<string, unknown>) {
+    super(message);
+  }
 }
 
 export async function platformFetch<T>(path: string, userId: string, init: RequestInit = {}): Promise<T> {
@@ -14,8 +19,8 @@ export async function platformFetch<T>(path: string, userId: string, init: Reque
     const body = typeof init.body === "string" ? init.body : undefined;
     const { status, json } = getDemoResponse(init.method ?? "GET", path, userId, body);
     if (status < 200 || status >= 300) {
-      const body = json as { error?: string; field?: string };
-      throw new PlatformError(status, body?.error ?? `platform ${status}`, body?.field);
+      const body = json as { error?: string; field?: string; existing?: Record<string, unknown> };
+      throw new PlatformError(status, body?.error ?? `platform ${status}`, body?.field, body?.existing);
     }
     return json as T;
   }
@@ -56,12 +61,14 @@ export async function platformFetch<T>(path: string, userId: string, init: Reque
   if (!res.ok) {
     let msg = `platform ${res.status}`;
     let field: string | undefined;
+    let existing: Record<string, unknown> | undefined;
     try {
-      const body = (await res.json()) as { error?: string; field?: string };
+      const body = (await res.json()) as { error?: string; field?: string; existing?: Record<string, unknown> };
       msg = body.error ?? msg;
       field = body.field;
+      existing = body.existing;
     } catch { /* keep default */ }
-    throw new PlatformError(res.status, msg, field);
+    throw new PlatformError(res.status, msg, field, existing);
   }
   return (await res.json()) as T;
 }

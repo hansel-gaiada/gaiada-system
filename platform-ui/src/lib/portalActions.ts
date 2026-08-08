@@ -59,7 +59,7 @@ function fail(e: unknown): PortalActionResult {
  *  concrete path — so dynamic detail pages take their own explicit call from the caller. */
 function revalidatePortal(): void {
   for (const p of ["/portal", "/portal/projects", "/portal/timeline", "/portal/deliverables",
-    "/portal/approvals", "/portal/invoices", "/portal/contracts", "/portal/profile"]) {
+    "/portal/approvals", "/portal/invoices", "/portal/contracts", "/portal/profile", "/portal/requests"]) {
     revalidatePath(p);
   }
 }
@@ -218,6 +218,47 @@ export async function portalRequestProfileChange(_prev: PortalActionResult | nul
     });
     revalidatePath("/portal/profile");
     return { ok: true };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+// ── MI-04: maintenance intake (webdev change requests) ─────────────────────────────────────────────
+
+const CHANGE_REQUEST_KINDS = new Set(["content", "design", "feature", "bug"]);
+
+/** Submit a webdev change request. Mirrors `webdev-change-requests-portal.controller.ts`'s `create`
+ *  exactly: `kind`/`title`/`body`/`projectId` are the only fields sent, and NEVER `clientId`/`status` —
+ *  the backend derives those from the caller's own scope and ignores anything the body supplies for
+ *  them (the design doc's "rule 1"). `projectId` is sent as `undefined` (omitted) rather than `""` for
+ *  a client-wide submission — the backend's own check is `typeof bodyProjectId === "string" &&
+ *  bodyProjectId`, so an empty string would be treated identically, but omitting it says what actually
+ *  happened (no project named) rather than relying on that coincidence.
+ *
+ *  ⚠ NO signing-capability check here, and none belongs here — §5.1 of the design doc (test-pinned on
+ *  the backend) is that submitting is a viewer-permitted act. Adding a `requireSigner`-style gate to
+ *  this action would silently narrow a ratified decision back to signers-only. */
+export async function portalSubmitChangeRequest(_prev: PortalActionResult | null, formData: FormData): Promise<PortalActionResult> {
+  const c = await ctx();
+  if (!c) return { ok: false, error: "Your session has expired — please sign in again." };
+  const kind = String(formData.get("kind") ?? "");
+  const title = String(formData.get("title") ?? "").trim();
+  const body = String(formData.get("body") ?? "").trim();
+  const projectId = String(formData.get("projectId") ?? "").trim();
+  if (!CHANGE_REQUEST_KINDS.has(kind)) {
+    return { ok: false, error: "Choose what kind of request this is.", field: "kind" };
+  }
+  if (title.length < 3) return { ok: false, error: "Tell us what you need in a few words.", field: "title" };
+  try {
+    const r = await platformFetch<{ id: string; status: string }>(
+      `/api/${c.tenant}/portal/change-requests`, c.userId,
+      {
+        method: "POST",
+        body: JSON.stringify({ kind, title, body: body || undefined, projectId: projectId || undefined }),
+      },
+    );
+    revalidatePortal();
+    return { ok: true, id: r.id };
   } catch (e) {
     return fail(e);
   }

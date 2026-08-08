@@ -2,17 +2,20 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
-// The portal's eight destinations. A client component only because the active tab needs `usePathname`.
+// The portal's nine destinations. A client component only because the active tab needs `usePathname`.
 //
 // Order is the order a client asks the questions in: where are we, on what, when, what did we get, what
-// do you need from me, what do I owe, what did we agree, who am I. "Invoices" and "Agreements" are not
-// buried under a Settings-like grouping — being able to find your own contract is a headline feature of
-// a client portal, not an administrative detail.
+// do I need to ask for, what do you need from me, what do I owe, what did we agree, who am I. "Requests"
+// (MI-04) sits between Deliverables and Approvals — asking for something is a different act from
+// signing something, so it does not get folded into the Approvals tab even though both can end up
+// waiting on staff. "Invoices" and "Agreements" are not buried under a Settings-like grouping — being
+// able to find your own contract is a headline feature of a client portal, not an administrative detail.
 const TABS: Array<{ href: string; label: string; badge?: "pending" }> = [
   { href: "/portal", label: "Overview" },
   { href: "/portal/projects", label: "Projects" },
   { href: "/portal/timeline", label: "Timeline" },
   { href: "/portal/deliverables", label: "Deliverables" },
+  { href: "/portal/requests", label: "Requests" },
   { href: "/portal/approvals", label: "Approvals", badge: "pending" },
   { href: "/portal/invoices", label: "Invoices" },
   { href: "/portal/contracts", label: "Agreements" },

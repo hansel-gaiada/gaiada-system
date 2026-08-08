@@ -8,7 +8,7 @@
    the build on any colour literal in components/**.css — every colour below is a var().
 
    Layout: a slim sticky header + a horizontal tab strip, then one centred column. Horizontal rather
-   than a rail because the portal has eight destinations and no depth, and because a client on a phone
+   than a rail because the portal has nine destinations and no depth, and because a client on a phone
    gets a scrollable strip instead of a hamburger they have to discover. */
 
 .cp-shell {
