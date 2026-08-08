@@ -34,6 +34,60 @@ reconstructed from this table alone. Format defined in [`VERSIONING.md`](./VERSI
 > Not corrected retroactively (moving a pushed, already-deployed tag is its own risk); flagging so
 > the next session doesn't re-diagnose the same gap.
 
+### `Alpha 01.028.0072a` - 2026-08-08 - the mail dev stage, and the bug its own exit gate found
+
+Manifest bumped by this cut: `platform-nest 0.18.0`, `platform-ui 0.21.0` (module-reference counter
++2). **Bookkeeping caveat, recorded rather than papered over:** this build also carries a large body
+of concurrent PM work - roughly 14.5k insertions across `ai-agents`, `mcp-hub`, `wa-chat-bot` and the
+PM areas of `platform-nest`/`platform-ui` - that landed on `main` with **no module version bumps**.
+Those three modules are therefore NOT bumped here and this manifest understates what actually ships.
+Not back-filled: the session that wrote that code should record it, and inventing changelog text for
+14.5k lines nobody in this session reviewed would be worse than naming the gap. Same class as the
+LOG GAP note above.
+
+**A forged bounce could lock someone out of their own account.** The mail subsystem's own adversarial
+exit gate (MAIL-18) found it live, which is the entire reason that gate exists. `intake.ts` suppressed
+on stream `'*'`, and `isSuppressed` matches `stream IN ($2,'*')` - so one inbound message permanently
+cut an address off from every stream, **including the auth stream that carries sign-in mail**. The
+victim loses their mail and the recovery path for losing their mail at the same moment.
+
+It is a vulnerability rather than a strict default because `classifyNdr()`'s "two independent signals"
+are not independent *of the attacker*: From, Content-Type, Auto-Submitted, Subject and the RFC-3464
+body fields are all read out of the untrusted message. `ndr.ts` calls the body fields "the part a
+hand-written fake would have to forge" - forging them is a few lines of text. The only real barrier
+was holding one reply token, and reply tokens ship in the `Reply-To` of every threads-eligible mail
+the victim receives. Now: suppression is scoped to the token's own stream, never `'*'`, and inbound
+content can never suppress the auth stream at all. The row still flips to `bounced`, so a genuine
+bounce stays visible - what is withheld is the destructive side effect, not the signal.
+**Deliberately incomplete:** a notify-stream token can still suppress notify mail. Closing that needs
+corroboration the sender does not control (a provider-side bounce event), which does not exist until
+staging wires a real provider - carried to the staging register under R3/R4, and it must close BEFORE
+the real inbound webhook goes live, because at that point the token wall disappears.
+
+**You can finally read a sent email inside the ERP (MAIL-38).** `/admin/mail` listed every message and
+could not open one, because `mail_log` stores `template_key` + `payload` and never the composed body -
+so no page could render it and the only surface that could was a dev sink reachable over an SSH
+tunnel. A new elevated-only `GET /api/admin/mail/log/:id/preview` recomposes it on demand through the
+same `renderTemplate()` the sender uses, caching nothing. Rendered in a `sandbox=""` iframe: the
+templates already escape payload values, but payload can carry inbound-derived text and MAIL-18 only
+proved those bytes inert *as stored*, which is not the same as inert once composed into HTML on an
+admin page.
+
+**Two verification tools were manufacturing false failures.** Neither was a product defect and both
+cost a full QA run. `replay-inbound.mjs` never set `app.mail_context`, so under MAIL-22's FORCE RLS
+its own DB check read zero rows and printed "THREADING NOT VERIFIED" for replays that had threaded
+perfectly. `scripts/sso-login.sh` emitted the token with a trailing `` on Windows, so every
+`Authorization: Bearer <token>` was malformed and rejected *below* Fastify's request logger - a bare
+400 with **no log line**, which reads exactly like an outage and was reported as one. Its `--only`
+flag also accepted a single filename by strict equality, so a comma list replayed zero fixtures and
+exited green. All three failed the same way: **a check that can silently measure nothing and call it
+success** - the recurring failure mode of this whole program.
+
+**Also:** nginx now routes `/api/mail/` (NET-01), so the inbound webhooks reach the app at all - they
+had been 307ing into platform-ui since they were written. Rate-limited at the edge, verified live
+(40 rapid posts -> 15 pass, 25 x 429). The BFF contract's "mail_log has no RLS" line is corrected;
+reading it literally is what set the RLS trap above.
+
 ### `Alpha 01.027.0070a` - 2026-08-07 - the four things the owner found by using it
 
 Everything in this cut traces to the owner driving the deployed assistant and reporting what they saw.
