@@ -305,6 +305,50 @@ on local suites alone (design §13 v4).
      Mailpit content rather than re-triggered (re-firing would have created duplicate
      approval rows on a shared box), and the `mail_*` metrics were read from the collector's raw
      scrape, not proven through a dashboard or a firing alert — the full WS9 stack is still down.
+
+   **B2 CLOSED — 2026-08-07/08. All five legs PASS, each spot-checked by the coordinator against
+   superuser ground truth rather than accepted on the agent's report.**
+   - **MAIL-04** sink smoke: tagged row `approval.warning`/`sent`; Mailpit message carries a freshly
+     minted `reply+…` VERP token. Authless plaintext hop to the sink confirmed structurally
+     (`${#MAIL_STREAM_NOTIFY_RELAY_USER}` = 0 ⇒ `requireTLS` never forced).
+   - **MAIL-05** gate probe: row `019fdafb-…`, `approval.actionable` (correct — gates are the
+     actionable class), exactly ONE `notification_id`, reply token minted, deep link
+     `MAIL_LINK_BASE_URL`-absolutized with **no token or action params** (M11 holds). The
+     **negative** allowlist probe is the load-bearing half and was re-checked as superuser so it
+     could not be an RLS artifact: `mention` / `comment` / `approval_decided` produce **no mail at
+     all**. Partial: the outer HTTP `openGate` controller was not driven by this leg (bearer token
+     unobtainable at the time); corroborated by MAIL-13's real authenticated approval create.
+   - **MAIL-13**: threading proven **in Postgres**, not by status — the endpoint is always-202 by
+     design, so a 202 proves nothing. 15 `mail_messages` rows on the right `mail_log` row and
+     entity. Also live: **MAIL-29's VERP fix confirmed present** (a mixed-case token routed
+     correctly), dedup on redelivery, EICAR attachment `scanStatus=infected` + `fileRef=null` while
+     its clean sibling kept its ref (real ClamAV, not a stub), over-cap attachments
+     `rejected/too_many` while the message still threads, NDR → exactly one suppression while the
+     *lookalike human reply* adds none, hostile HTML stored inert.
+     **Unspecified bonus finding:** the NDR also flips the originating `mail_log` row to `bounced`
+     with `last_error` set — inbound classification updates outbound status, it does not merely log
+     beside it.
+   - **MAIL-15**: list, filters, **real pagination** (offset 0 vs 2 return distinct sets, not a
+     re-served first page), detail, admin + entity thread reads, `403` for non-elevated, thread
+     reads mirroring the parent entity's own Cerbos decision (A10), `404` — not disclosure — on a
+     cross-tenant id, `400` on a malformed uuid. UI-level rendering not driven (backend probe).
+   - **MAIL-19**: 200/200 suite; oversize-quote handling holds live — longest stored body
+     **131,126 chars** with the reply surviving at the TAIL (offset 131,041), which a head-only cap
+     would have discarded.
+
+   **Neither B2 blocker was a product defect — both were verification tools manufacturing false
+   failures, and both are fixed (commit `9bfda22`).** `replay-inbound.mjs` never set
+   `app.mail_context`, so its own DB check read zero rows under FORCE RLS and printed "THREADING NOT
+   VERIFIED" for replays that had threaded perfectly — directly beneath a comment explaining the
+   check exists because "a fully broken threading path used to produce an all-green replay". And
+   `scripts/sso-login.sh` emitted the token with a trailing `\r` on Windows, so every
+   `Authorization: Bearer <token>\r` was malformed and rejected **below** Fastify's request logger:
+   a bare `400` with **zero log lines**, which reads exactly like an outage and was reported as one
+   while the platform was entirely healthy. `--only` also accepted a single filename by strict
+   equality, so a comma list replayed zero fixtures and exited GREEN.
+   **The generalizable lesson: all three failed the same way — a check that can silently measure
+   nothing and call it success.** See [[migration-backfill-rls-trap]]; MAIL-04's own row text below
+   still says "no RLS", which is what set the trap.
 2. **MAIL-18 and MAIL-11 (dev leg) both passed** with zero open critical findings.
    **v4 state: ⛔ blocked** — B3/B4; MAIL-18's corpus attacks run in-suite today but the gate
    verdict is defined against the deployed box; no partial pass may be claimed.
