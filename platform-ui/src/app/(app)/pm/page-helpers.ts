@@ -4,6 +4,20 @@
 // `departments/[deptId]/projects/page-helpers.ts`.
 import { PM_TERMS } from "@/lib/pmVocabulary";
 import type { Tag, AxisColumn } from "@/lib/pm";
+import type { Capability } from "@/lib/rbac";
+
+// The Ball tab's OWN affordance gate — P4-B6 / owner decision 2026-08-06 ("anyone can pass the
+// ball"). `reassignBall` (lib/pmActions.ts) submits its PATCH gated on exactly this capability,
+// which mirrors Cerbos's `pm_task:update` grant (member/viewer/team_lead/manager/company_admin —
+// see `pm.contribute`'s doc comment in lib/rbac.ts and "pm.contribute mirrors Cerbos
+// pm_task:update" in rbac.test.ts). `page.tsx`'s Board/Gantt tabs stay on `pm.manage` — their own
+// writes (moveTask/setTaskPriority/reassignResponsible/rescheduleTask) genuinely ARE manage-gated.
+// Only the Ball tab must use THIS constant for its own `canPassBall`, not the Board/Gantt `canEdit`
+// — a prior version of this page passed the manage-tier flag into the Ball tab too, which silently
+// undid "anyone can pass the ball" at the rendering layer even though the write path underneath was
+// already correct (a `member` who reads the resulting empty-state note has no reason to try the
+// drag that would in fact succeed). `ball-gate.test.ts` pins this against drifting back.
+export const BALL_GATE_CAPABILITY: Capability = "pm.contribute";
 
 // `ball` used to be a fourth "Group by" axis here — owner decision 2026-08-09: it cluttered the
 // board view (switching the whole board layout just to see who's holding the ball), so it moved

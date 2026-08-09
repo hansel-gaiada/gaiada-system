@@ -29,7 +29,7 @@ import { Charts } from "@/components/pm/Charts";
 import { Productivity } from "@/components/pm/Productivity";
 import { TagChip } from "@/components/pm/TagChip";
 import { ScopeSwitcher } from "@/components/pm/ScopeSwitcher";
-import { PM_SWIMLANES, isSwimlane, isView, representativeTag, leadWithUnassigned, type PmSwimlane } from "./page-helpers";
+import { PM_SWIMLANES, isSwimlane, isView, representativeTag, leadWithUnassigned, BALL_GATE_CAPABILITY, type PmSwimlane } from "./page-helpers";
 import "@/components/pm/pm.css";
 
 // The `@all` cross-project PM surface (plan §1.1/§3 workstream A, tickets P4-A3/A4/A5) — Repsona's
@@ -83,6 +83,12 @@ export default async function PmPage({ searchParams }: { searchParams: SearchPar
   const sp = await searchParams;
   const view = isView(sp.view) ? sp.view : "board";
   const canEdit = can(me, "pm.manage", tenant);
+  // The Ball tab's OWN gate — deliberately NOT `canEdit` above. `reassignBall` (lib/pmActions.ts)
+  // already submits on `pm.contribute` (owner decision 2026-08-06, "anyone can pass the ball");
+  // `canEdit` (pm.manage) belongs to Board/Gantt's genuinely manage-gated writes only. See
+  // `BALL_GATE_CAPABILITY`'s comment in ./page-helpers for why conflating the two silently undoes
+  // the ball decision at the rendering layer even when the write path underneath is correct.
+  const canPassBall = can(me, BALL_GATE_CAPABILITY, tenant);
 
   // P4-G5 precedent: `today` resolved ONCE per render, urgency/isDone derived from THIS task's own
   // project's registry — never recomputed per view, so Board/Gantt/Charts can never disagree.
@@ -120,7 +126,7 @@ export default async function PmPage({ searchParams }: { searchParams: SearchPar
         <BoardSection work={work} sp={sp} canEdit={canEdit} taskUrgencyById={taskUrgencyById} userId={userId} tenant={tenant} />
       )}
       {view === "ball" && (
-        <BallSection work={work} sp={sp} canEdit={canEdit} taskUrgencyById={taskUrgencyById} userId={userId} tenant={tenant} />
+        <BallSection work={work} sp={sp} canPassBall={canPassBall} taskUrgencyById={taskUrgencyById} userId={userId} tenant={tenant} />
       )}
       {view === "gantt" && (
         <GanttSection work={work} canEdit={canEdit} taskUrgencyById={taskUrgencyById} today={today} userId={userId} tenant={tenant} />
@@ -288,14 +294,19 @@ async function BoardSection({
 // clutter the board view"). This used to be Board's fourth "Group by" axis (`swimlane === "ball"`
 // in `BoardSection` above); it is now the only place `ballColumns`/`reassignBall` render on this
 // page. Same data, same filters, same write path (`reassignBall` — P4-B6, "anyone can pass the
-// ball" is `pm.contribute`, not `pm.manage`; unchanged here) — only the "Group by" selector itself
-// is gone, since this whole tab IS the ball grouping (nothing left to switch between).
+// ball" is `pm.contribute`, not `pm.manage`) — only the "Group by" selector itself is gone, since
+// this whole tab IS the ball grouping (nothing left to switch between).
+//
+// `canPassBall` (NOT Board/Gantt's `canEdit`) is this tab's own gate — see `BALL_GATE_CAPABILITY`'s
+// comment in ./page-helpers. Board itself never actually blocks the drag (it has no such prop);
+// `canPassBall` only drives the empty-state note below, but that note is user-facing truth about
+// what this tab lets you do, so it must name the real capability rather than borrow Board/Gantt's.
 async function BallSection({
-  work, sp, canEdit, taskUrgencyById, userId, tenant,
+  work, sp, canPassBall, taskUrgencyById, userId, tenant,
 }: {
   work: Awaited<ReturnType<typeof resolveScopeWork>>;
   sp: { tags?: string | string[]; ball?: string | string[]; responsible?: string | string[] };
-  canEdit: boolean;
+  canPassBall: boolean;
   taskUrgencyById: Record<string, UrgencyTier>;
   userId: string;
   tenant: string;
@@ -391,9 +402,9 @@ async function BallSection({
         </Card>
       )}
 
-      {!canEdit && (
+      {!canPassBall && (
         <Card style={{ marginBottom: 16 }}>
-          <EmptyNote>You can view this board but can&apos;t move cards here — that needs {PM_TERMS.ball.toLowerCase()}/task-management access.</EmptyNote>
+          <EmptyNote>You can view this board but can&apos;t pass the {PM_TERMS.ball.toLowerCase()} here — passing it is open to any member of this company&apos;s project team, so that&apos;s the access to ask for.</EmptyNote>
         </Card>
       )}
 

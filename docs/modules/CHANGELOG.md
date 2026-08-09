@@ -34,6 +34,28 @@ reconstructed from this table alone. Format defined in [`VERSIONING.md`](./VERSI
 > Not corrected retroactively (moving a pushed, already-deployed tag is its own risk); flagging so
 > the next session doesn't re-diagnose the same gap.
 
+### `Alpha 01.033.0082a` - 2026-08-09 - the ball was open; the UI said it wasn't
+
+Manifest (counter +1, 0081 -> 0082): `platform-ui 0.23.3`.
+
+The Ball tab borrowed Board's `canEdit` (`pm.manage`) to drive its empty state, so a
+plain member — who genuinely holds `pm.contribute` — was told "you can't move cards
+here." The server had already been opened to them: `resource_pm_task.yaml` grants
+`update` to any member and reserves `manage` for leads/admins, and `patchTask`
+escalates to `manage` only when an assignee write is NOT a pure ball pass. The write
+path in `pmActions.ts` was already correct. Only the message was wrong — which is
+enough to suppress an affordance nobody then tries.
+
+Now a named `BALL_GATE_CAPABILITY`, a separate `canPassBall`, and copy that states
+the real requirement. Board/Gantt keep `canEdit`: their writes genuinely are
+`pm.manage`. Pinned by a test that asserts the capability CONSTANT and cross-checks
+the page and the action agree — a test that only proved a button renders would pass
+again the day the two drift apart.
+
+REPORTED, NOT FIXED: `lib/rbac.ts` has no `team_lead` role at all, while Cerbos grants
+`team_lead` update+manage on PM. A team-scoped lead gets zero PM capability in the UI
+mirror. That is a missing role tier, not a ball bug — architect call.
+
 ### `Alpha 01.032.0081a` - 2026-08-09 - the ball gets its own tab
 
 Manifest (counter +1, 0080 -> 0081): `platform-ui 0.23.2`.
