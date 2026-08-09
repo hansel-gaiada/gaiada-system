@@ -512,6 +512,25 @@ session is landing PM migrations right now).
 | MI-06 | **Docs truth.** `docs/FRONTEND-BFF-CONTRACT.md`: add the five new endpoint rows with BUILT/PENDING per reality, each citing its controller file; `docs/modules/MODULES.md`: webdev section gains the maintenance-intake lines (status language: IN PROGRESS until MI-07 passes, then DEV-VERIFIED) **and fix the 0.11.0 (index, line 49) vs 0.8.1 (heading, line 274) drift**; CHANGELOG entry per the per-module 0.x scheme. No code | junior | default | MI-02..05 merged | Contract rows match shipped routes exactly (spot-checked against the controllers); registry drift gone; status words are only PLANNED/IN PROGRESS/PROTOTYPED/DEV-VERIFIED; CHANGELOG present |
 | MI-07 ⚡ | **Phase QA gate (runs alone, last).** Evidence-driven full walk on the live stack: portal submit as viewer / signer / project-scoped contact → staff decline (+requester notified) → convert `pm_task` → convert `mini_run` → client signs `prd_sign` + both parties sign scope **on the mini-run** → design stage releases via live n8n fanout + `Load + decide` → run visible in `/portal/approvals`; the double-convert race driven BOTH ways (repo concurrency test + a real double-click through the UI); notification assertions **by row**: submit→project owners, decline/convert→requester, `prd_sign`→signers ONLY (assert the viewer fixture did NOT receive it); Cerbos matrix incl. the §4.1 invariant probe and the trap-#4 exec probe; RLS probes incl. unset-GUC; cross-client + cross-tenant isolation; trap-#2 regression guard (reads with and without declared module scope). File regressions as tickets, never fix ad hoc | qa | default | all of MI-01..06 | The written evidence list exists in full (WD-08 style); zero critical findings open; every "notified" claim is backed by a `notifications` row cited by id — **the missing-field-reads-as-null rule applies: a 200 with an empty list proves nothing** |
 
+> ### F2 — D17 custom fields on change requests: **DEFERRED out of this phase, 2026-08-08**
+> MI-03's row listed *"D17 `customFieldTargets` gains `webdev_change_request`"*. Verification found it
+> has **no home**: `customFieldTargets` is a `ModuleContract` field, there is **no
+> `src/modules/webdev/`**, `0088` has no `custom_fields` column, and neither controller calls
+> `validateCustomFields`. The seat correctly refused to improvise DDL.
+>
+> **Ruled: dropped from this phase, and NOT a gap MI-07 gates on.** The cost is not the reason —
+> the reason is that closing it pulls the wrong way. Creating a `webdev` **module** to host the
+> contract field would drag this surface toward module registration and module gating, which is
+> precisely what **D-2a** rejected for a table whose primary writer is the client portal: the module
+> gate is a two-sided handshake on the request-declared `app.scopes` GUC, so module-ising the CR
+> surface reintroduces the silent-zero-rows failure by the back door. Adding a `custom_fields` column
+> alone, with no module and no validation call, would ship a column nothing reads — the
+> "correct-but-unwired is indistinguishable from absent" pattern this estate has hit six times.
+>
+> Reopen when there is a real demand for per-tenant fields on a change request. At that point it is a
+> deliberate schema + contract ticket (column + validation call + a decision about where the contract
+> field lives), not a line item inside a triage ticket.
+
 **Waves (1–2 concurrency cap per the standard):**
 W1 `MI-01` alone (schema first, everything verifies against it) → W2 `MI-02 ∥ MI-03` (disjoint new
 files; both add distinct Cerbos files — MI-02 edits `resource_portal.yaml`, MI-03 adds a new policy

@@ -46,7 +46,7 @@ versions below; the running build reports it at `GET /health`.
 | ai-agents | `0.7.1` | PROTOTYPED | WS8 | 2026-08-07 |
 | hermes-gateway | `0.2.0` | PROTOTYPED | WS3 | 2026-07 |
 | capture-helper | `0.2.0` | IN PROGRESS | WS11 | 2026-07 |
-| webdev | `0.11.0` | IN PROGRESS | Web Dev | 2026-08-04 |
+| webdev | `0.12.0` | IN PROGRESS | Web Dev | 2026-08-08 |
 | webdesk | `0.0.0` | PLANNED | Web Dev | 2026-07-23 |
 | search-marketing | `0.5.1` | DEV-VERIFIED | SEO | 2026-08-04 |
 | social-media | `0.0.0` | PLANNED | Social Media | 2026-07-23 |
@@ -271,7 +271,7 @@ headless. **Known gaps:** dev-only convenience; not in production.
 feeds the meetingâ†’MOMâ†’PRD delivery pipeline. **Known gaps:** pipeline tails in progress; not in production.
 **Future plans:** complete the delivery pipeline (MOMâ†’PRD/report/scope) â†’ prod.
 
-## webdev â€” Delivery Rail Â· Cockpit Â· `0.8.1` Â· IN PROGRESS
+## webdev â€” Delivery Rail Â· Cockpit Â· `0.12.0` Â· IN PROGRESS
 
 **Design:** [`../blueprints/webdev-design.md`](../blueprints/webdev-design.md) (Â§12 has the ticket
 ledger); Phase-3 ticket plan:
@@ -279,7 +279,24 @@ ledger); Phase-3 ticket plan:
 Registered `0.0.0 PLANNED` on design approval (2026-07-24); flipped `IN PROGRESS` on WD-01 (first
 merged ticket, 2026-07-29) per the status-language rule; bumped `0.8.0` on WD-28 (first Phase-3
 ticket to land, 2026-07-30, per the Phase-3 plan's own instruction to bump the minor on first
-merge).
+merge); bumped `0.11.0` on WD-20 (Phase-1 and Phase-2 close-out, 2026-08-03); bumped `0.12.0` on
+MI-06 (maintenance-intake docs truth, 2026-08-08, schema/migrations MI-01..05 DEV-VERIFIED).
+
+**Provision seam (PRV program) — PROTOTYPED, no version bump claimed here.** Design:
+[`../blueprints/provision-erp-seam-design.md`](../blueprints/provision-erp-seam-design.md).
+Landed so far: PRV-00 (in-process `node:http` mock of the provision contract,
+`platform-nest/src/testing/mock-provision/` — fixtures carry the `UNVERIFIED-VENDOR-FIXTURE`
+marker until real envelopes are recorded), PRV-01 (`0090_webdev_provisioned_sites.sql` — the mirror
+table, THIRD-WALL RLS, three partial uniques), and PRV-02 (the FIRST `src/modules/webdev/` shell:
+`ProvisionProvider` driver interface + `provision-http` driver, the provisioning service with
+lock → re-read → precondition re-check → egress in one transaction, the 409 adopt-only-if-ours rule,
+poller + reconcile, `webdev.provisionSite` McpToolDef, and `POST/GET /api/:t/modules/webdev/*`).
+**PROTOTYPED, not DEV-VERIFIED:** every claim rests on CI against the PRV-00 mock. The seam is a real
+cross-host hop (gda-aicenter → gda-s01) and per the design's own verification doctrine the
+DEV-VERIFIED claim belongs to PRV-07's live leg on the boxes. Still open before the capability is
+reachable at all: PRV-03 (hub allowlist + `mcp_tool` policy + D14 registry entry + the Zone A Cerbos
+`webdev_provisioned_site` policy — until that policy exists, an unlisted resource kind is a silent
+DENY and the endpoints refuse every caller), PRV-04 (UI + BFF contract rows), PRV-05 (QA gate).
 
 **Phase 3 (external wiring) â€” 1 of 10 tickets landed:** WD-28 (PM per-project short-codes, OQ-7
 default) â€” **DEV-VERIFIED**: `projects.short_code` (unique per tenant) + `projects.task_seq`
@@ -341,10 +358,51 @@ gated. Phase 2 (WD-20, the webdev-*integrations*-console close-out â€” a si
 same tenant, not this delivery-rail one) already ran its own QA gate separately; see its evidence
 doc for that program's DEV-VERIFIED status, which does not carry over to this one.
 
-**Future plans:** WD-08 (Phase-1 QA gate) closes Phase 1; Phase 3 (external wiring â€” GitHub App,
-Drive OAuth, Claude Admin usage) is gated on owner decisions OQ-2/OQ-3; Phase 4 (webdesk + the
-one-rail contract-snapshot scaffolder) activates once webdesk's own P3 codegen lands; Phase 5
-(design/code specialists v2, QA harness, estimates, maintenance intake) is design-level only.
+**Maintenance Intake (MI-01 through MI-06) — SCHEMA/MIGRATIONS DEV-VERIFIED, DOCS RECONCILED:**
+MI-01..05 shipped a complete maintenance change-request intake surface (portal client submission +
+staff triage queue + conversion to pipeline runs or PM tasks). Schema: migration `0088_webdev_change_requests.sql`;
+portal endpoints `GET/POST /api/:t/portal/change-requests[/:id]` (client surface) + staff endpoints
+`GET/POST /api/:t/webdev/change-requests[/:id]` + `POST …/:id/triage` (triage queue); Cerbos resource
+`resource_webdev_change_request.yaml` + `request_change` action on `resource_portal.yaml`; UI at
+`(portal)/portal/requests` and `(app)/departments/[deptId]/requests`. Tested: portal list/detail/submit
+11/11, unit suite 1535/1535, `tsc` clean, `DEMO_MODE=1 npm run build` green. Scheduled triage gate
+(mini_run spawn or pm_task create) is idempotent under concurrent tries (advisory lock + re-check
+`status='new'` in one BEGIN/COMMIT). D-2a: `webdev_change_requests` table takes CORE tenant wall,
+deliberate (no `app_module_allowed()`). F1: disposition (decline/convert) audience follows authorship
+(portal-source requests notify contacts; internal-source requests do not, even when converted to a
+mini_run that opens a real `prd_sign` gate the client must sign). F2: D17 custom fields on change
+requests DEFERRED. MI-06 documented the five endpoints in `FRONTEND-BFF-CONTRACT.md` (§16f) and
+bumped the module version.
+
+**MI-07 (the QA gate) RAN 2026-08-08 — evidence
+[`2026-08-08-mi07-evidence.md`](../superpowers/plans/2026-08-08-mi07-evidence.md). It passes on every
+check it could execute, with ZERO critical findings, and the feature stays `IN PROGRESS` rather than
+DEV-VERIFIED because two checklist items are honestly UNVERIFIED — not reasoned around:**
+1. 🔴 **The live n8n fanout leg was never exercised** (MI-07-R2 — `automation/.env` and
+   `infra/compose/.env` disagree on `N8N_DB_PASSWORD` and neither matches the live role, so n8n will
+   not boot locally; the gate declined to alter a live credential without authorization). This is the
+   one leg that would confirm the design's load-bearing **"a mini-run needs zero special-casing"**
+   claim end to end — that the spawner's `pipeline.run.created` really is picked up by the shipped
+   fanout, which opens `scope_signoff` itself. **Payload-shape parity with `createRun` IS test-pinned,
+   so the claim is well-evidenced but not observed.** Close this before the phase is called done.
+2. A literal browser-driven Playwright walk of the new pages (MI-07-R3, informational — the e2e
+   harness's own `auth.setup.ts` login did not complete; the surfaces were driven over real HTTP
+   instead, and the portal/staff e2e specs pass under `DEMO_MODE`).
+
+Proven LIVE with positive controls and notification rows cited by id: the full submit → decline →
+convert(`pm_task`) → convert(`mini_run`) → PRD-sign chain; `prd_sign` notifications signers-ONLY
+(absence proven beside a presence control); the double-convert race **both** ways — the deterministic
+repo test AND a real concurrent HTTP double-fire against the live backend, exactly one run each time;
+the whole Cerbos matrix incl. the client-only invariant and the `group_executive`-without-membership
+case; RLS incl. an unset-GUC read; and the trap-#2 guard made non-vacuous on a tenant with
+`enabled_modules = {}`. Third finding: MI-07-R1 (low) — the local compose files disagree on
+postgres/cerbos host ports, so a routine recreate can silently break the dev stack. All three findings
+are **infra**, none is webdev code.
+
+**Future plans:** MI-07 (maintenance-intake QA gate) closes the feature; WD-08 (Phase-1 QA gate) closes
+Phase 1; Phase 3 (external wiring â€” GitHub App, Drive OAuth, Claude Admin usage) is gated on owner
+decisions OQ-2/OQ-3; Phase 4 (webdesk + the one-rail contract-snapshot scaffolder) activates once
+webdesk's own P3 codegen lands.
 
 ## webdesk â€” Website Platform Â· `0.0.0` Â· PLANNED
 

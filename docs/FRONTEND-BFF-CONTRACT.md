@@ -1494,6 +1494,29 @@ a client-recorded payment can never leave `pending`.
 `/clients/[id]/contracts` and a finance queue page are built. Whoever owns finance needs to know the
 decide endpoint exists, or client payments accumulate as `pending` with nobody looking.
 
+### 16f. Change Requests (maintenance intake) — `src/core/webdev-change-requests{,-portal}.controller.ts` — **STATUS: DEV-VERIFIED (MI-01..05)**
+
+Portal view for client-submitted change requests + staff triage queue.
+
+#### 16f-i. Portal — client submission and tracking
+
+| Status | Method | Path | Notes |
+|---|---|---|---|
+| ✅ | GET | `/api/:t/portal/change-requests` | `{id, kind, title, body, status, route, clientId, projectId, projectName, pipelineRunId, pmTaskId, declinedReason, requestedBy, createdAt, updatedAt}[]`. Client's own requests (own clients, own project scope), newest-first, capped at 200. Authz: `portal` read. |
+| ✅ | GET | `/api/:t/portal/change-requests/:id` | Single request. 404 for out-of-scope (not 403 — same existence-oracle avoidance as other portal detail endpoints). Authz: `portal` read. |
+| ✅ | POST | `/api/:t/portal/change-requests` | `{kind, title, body?, projectId?, clientId?}` → `{id, status:'new'}`. `kind` ∈ `content|design|feature|bug`. `title` required, ≤300 chars. Server-derives `client_id`, `project_id`, `requested_by`, `source='portal'`, `status='new'` (all from request context, never body-trusted). Viewer-permitted (capability `request_change`, gated on `portal` resource only — no `canSign` check). Emits `webdev.change_request.created` and notifies the client's project owners (best-effort). |
+
+#### 16f-ii. Staff — triage queue and conversion
+
+| Status | Method | Path | Notes |
+|---|---|---|---|
+| ✅ | GET | `/api/:t/webdev/change-requests` | `{id, kind, title, status, route, clientId, clientName, projectId, projectName, source, requestedBy, requestedByName, triagedBy, triagedByName, triagedAt, declinedReason, createdAt, updatedAt}[]`. Triage queue + full list. `?status`, `?clientId`, `?projectId`, `?kind` filters. Oldest-first (queue order), capped at 200. Authz: `webdev_change_request` read (manager/module-manager+ — `member` excluded). |
+| ✅ | GET | `/api/:t/webdev/change-requests/:id` | Full row + linked artifact status. Adds `body`, `runStatus`, `runTitle`, `taskTitle`, `taskStatus` (joined at read time, so CR shows live status without a stale copy). Authz: `webdev_change_request` read. |
+| ✅ | POST | `/api/:t/webdev/change-requests` | `{kind, title, body?, clientId?, projectId?}` → `{id, status:'new'}`. Staff-logged maintenance work. `source='internal'` (staff-raised, no client solicitation). `client_id` may be NULL (internal-only work). Server-derives all identity fields. No notification on create (internal work, not client-actionable). Authz: `webdev_change_request` create. |
+| ✅ | POST | `/api/:t/webdev/change-requests/:id/triage` | `{action, route?, reason?, kindOverride?}` → `{id, status, route, pipelineRunId?, pmTaskId?, signers[]?}`. Single triage decision (decline or convert). `action` ∈ `decline|convert`. Decline requires `reason` (≤1000 chars); convert picks a `route` ∈ `control_plane|mini_run|pm_task` (defaults by kind: content→pm_task, design/feature→mini_run, bug→pm_task). `kindOverride` ∈ `content|design|feature|bug` (optional, re-stamps the kind if provided). Serialized on the CR + precondition re-check (lock → re-read → check `status='new'` → spawn/update). **D-2a:** CR table takes CORE tenant wall, no `app_module_allowed()`. **F1:** notification audience follows source (portal requests notify contacts; internal requests don't — even when converted to a mini-run that opens a real `prd_sign` gate the client must sign, the disposition *notification* is withheld for internal-sourced requests; the gate opening itself notifies signers separately). Converts mini_run route spawn gates `prd_sign` directly (no dispatcher step); emits `pipeline.run.created` with honest `sourceMeetingId:null`. Emits `webdev.change_request.updated` + lifecycle event per outcome. Authz: `webdev_change_request` triage. |
+
+---
+
 ## 17. Mail subsystem (MAIL-* program, 2026-08-04) — `src/mail/` — **STATUS: IN PROGRESS**
 
 Design: [`../superpowers/specs/2026-08-04-zone-a-mail-design.md`](../superpowers/specs/2026-08-04-zone-a-mail-design.md)

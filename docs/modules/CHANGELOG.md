@@ -4149,6 +4149,29 @@ Built by a 4-agent parallel run against a frozen contract (`docs/superpowers/pla
   `ai-gateway-go/**`/`hermes-gateway/**` (the assistant session). This ticket is test-only: no
   migration, no production-code change, no Cerbos policy edit.
 
+## webdev
+### [0.12.0] — 2026-08-08 · IN PROGRESS
+- **Maintenance Intake (MI-01..05) — schema/migrations DEV-VERIFIED, docs reconciled (MI-06):**
+  Complete change-request intake surface landed (migration `0088_webdev_change_requests.sql`);
+  portal submission + staff triage queue + conversion to pipeline runs or PM tasks. Five endpoints:
+  `GET/POST /api/:t/portal/change-requests` + `GET /api/:t/portal/change-requests/:id` (client
+  surface, viewer-permitted submission); `GET /api/:t/webdev/change-requests` (triage queue),
+  `GET /api/:t/webdev/change-requests/:id` (detail + linked artifact status), `POST /api/:t/webdev/change-requests`
+  (internal-source logging), `POST /api/:t/webdev/change-requests/:id/triage` (decline or convert).
+  Cerbos resource `resource_webdev_change_request.yaml` + `request_change` action on
+  `resource_portal.yaml`. UI: `(portal)/portal/requests` + `(app)/departments/[deptId]/requests`.
+  Tested: portal surface 11/11, unit suite 1535/1535, `tsc` clean, `DEMO_MODE=1 npm run build` green.
+  Triage gate (mini_run spawn or pm_task create) idempotent under concurrent tries (advisory lock +
+  re-check `status='new'` in one transaction). D-2a: table takes CORE tenant wall (deliberate,
+  no `app_module_allowed()`). F1: disposition audience follows authorship (portal requests notify
+  contacts; internal requests don't). F2: D17 custom fields DEFERRED.
+  `FRONTEND-BFF-CONTRACT.md` §16f documented the endpoints; module bumped 0.11.0 → 0.12.0.
+  **Feature is IN PROGRESS until MI-07 (QA gate) passes.**
+
+### [0.11.0] — 2026-08-03 · IN PROGRESS
+- WD-20 Phase-1/Phase-2 close-out. Phase 2 (`webdev-integrations-console`) completed its own QA gate
+  separately; see its evidence doc. Module version recorded for tracking; no schema changes this entry.
+
 ## webdesk
 ### [0.0.0] — 2026-07-23 · PLANNED
 - Blueprint approved; no code. Phased plan P1–P6 (see BLUEPRINTS.md).
