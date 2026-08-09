@@ -8,6 +8,7 @@ import {
   distinctStatusLabels, unionStatusColumns,
   addRecurrenceFreq, nextRecurrenceOccurrence, titleWithRecurrenceGlyph,
   transitiveDependents, burndownOverlay, aggregateBurndown, getBurndown, aggregateFlow,
+  normalizePmTask,
   type PmTask, type Assignee, type Subtask, type TimeLog, type Milestone, type Tag, type ProjectStatus,
   type BurndownPoint, type FlowPoint,
 } from "./pm";
@@ -40,6 +41,46 @@ describe("progress helpers", () => {
   it("projectProgress averages task progress", () => {
     expect(projectProgress([])).toBe(0);
     expect(projectProgress([{ progress: 100 }, { progress: 0 }, { progress: 50 }])).toBe(50);
+  });
+});
+
+// Production incident, alpha-01.030.0078a: the backend's tenant-wide paginated task list (a SEPARATE
+// hand-written SQL projection from the one every other reader uses) shipped without `subtasks` in
+// its SELECT list. `PmTask.subtasks` is declared non-optional, so `tsc` had no way to see the gap —
+// the type asserted a guarantee the wire response didn't keep. `Board.tsx`'s `task.subtasks.length`
+// then threw for every card on the page. This pins the boundary fix (every `lib/pm.ts` reader runs
+// its result through `normalizePmTask` before returning it) so a future backend regression degrades
+// to an empty checklist instead of a blank app — belt to the backend SQL fix's suspenders, not a
+// replacement for it (the real contract test lives in platform-nest's pm.test.ts against the actual
+// endpoint response).
+describe("normalizePmTask (boundary guarantee for fields every render site treats as required)", () => {
+  it("a task JSON missing subtasks (the exact production crash) normalizes to an empty array, not undefined", () => {
+    const raw = task({}) as unknown as Record<string, unknown>;
+    delete raw.subtasks;
+    const normalized = normalizePmTask(raw as unknown as PmTask);
+    expect(normalized.subtasks).toEqual([]);
+  });
+
+  it("also defends description/tags/dependsOn/customFields the same way, without disturbing fields that were actually present", () => {
+    const existingSubtasks = [sub(true)];
+    const raw = task({ title: "Real title", subtasks: existingSubtasks }) as unknown as Record<string, unknown>;
+    delete raw.description;
+    delete raw.tags;
+    delete raw.dependsOn;
+    delete raw.customFields;
+    const normalized = normalizePmTask(raw as unknown as PmTask);
+    expect(normalized.description).toBe("");
+    expect(normalized.tags).toEqual([]);
+    expect(normalized.dependsOn).toEqual([]);
+    expect(normalized.customFields).toEqual({});
+    // untouched fields survive unchanged
+    expect(normalized.title).toBe("Real title");
+    expect(normalized.subtasks).toEqual(existingSubtasks);
+  });
+
+  it("a well-formed task passes through unchanged", () => {
+    const t = task({ subtasks: [sub(false), sub(true)], tags: ["tag-1"], dependsOn: ["dep-1"], customFields: { k: "v" } });
+    expect(normalizePmTask(t)).toEqual(t);
   });
 });
 

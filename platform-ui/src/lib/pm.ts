@@ -311,6 +311,34 @@ export interface PmTask {
   contributors?: Contributor[];
 }
 
+// Boundary guarantee for the fields above that every render site reads WITHOUT a null-check
+// (`task.subtasks.length`, `task.tags.some(...)`, `task.dependsOn.includes(...)`, `task.description.
+// toLowerCase()` — Board/Gantt/TaskDetailView/ProjectWorkspaceView all do this, by design: the type
+// says these are guaranteed, so nothing should have to defend against them). That guarantee is only
+// as good as every possible producer of a "PmTask[]" JSON blob honouring it, and this app has more
+// than one: `platformFetch` does no runtime validation (a raw JSON cast), the backend has at least
+// two independently-hand-written SQL projections for "a task row" (TASK_SELECT vs the tenant-wide
+// paginated CTE in pm.controller.ts's `listTasks`) that have already drifted once — a forgotten
+// column in the newer one shipped `subtasks: undefined` straight to `Board.tsx` and crashed every
+// card in production. `tsc` cannot see this: it trusts the interface, not the response.
+//
+// So every reader below runs its result through this before returning it, regardless of which
+// backend endpoint answered. This is the ONE place that turns "the type says it's required" into
+// "it actually is", rather than pushing an `?? []` onto every one of the (many) render sites above.
+export function normalizePmTask(raw: PmTask): PmTask {
+  return {
+    ...raw,
+    subtasks: Array.isArray(raw.subtasks) ? raw.subtasks : [],
+    description: typeof raw.description === "string" ? raw.description : "",
+    tags: Array.isArray(raw.tags) ? raw.tags : [],
+    dependsOn: Array.isArray(raw.dependsOn) ? raw.dependsOn : [],
+    customFields: raw.customFields && typeof raw.customFields === "object" ? raw.customFields : {},
+    // `recurrence`/`contributors` are already nullable/optional in the type (every existing reader
+    // treats absence as "none") — no default needed beyond what `??`/`?.` at the call site expects.
+  };
+}
+const normalizePmTasks = (raw: PmTask[]): PmTask[] => raw.map(normalizePmTask);
+
 export interface TimeLog {
   id: string;
   taskId: string;
@@ -486,8 +514,8 @@ async function skipUnavailable<T>(p: Promise<T>, fallback: T): Promise<T> {
 // ---- Readers (all degrade) ----
 export const getPmProject = (u: string, t: string, id: string) =>
   skipUnavailable(platformFetch<PmProject | null>(`/api/${t}/pm/projects/${id}`, u), null);
-export const listPmTasks = (u: string, t: string, projectId: string) =>
-  skipUnavailable(platformFetch<PmTask[]>(`/api/${t}/pm/projects/${projectId}/tasks`, u), [] as PmTask[]);
+export const listPmTasks = async (u: string, t: string, projectId: string): Promise<PmTask[]> =>
+  normalizePmTasks(await skipUnavailable(platformFetch<PmTask[]>(`/api/${t}/pm/projects/${projectId}/tasks`, u), [] as PmTask[]));
 // Tenant-wide task list (unifies the Tasks page onto the rich PM model).
 // P4-A1 made this endpoint paginated: it now answers `{ items, nextCursor }` where it used to
 // answer a bare `PmTask[]`. SIX callers depend on this reader — lib/departments.ts (every department
@@ -511,8 +539,8 @@ export const listAllPmTasks = async (u: string, t: string, q: { assignee?: strin
     platformFetch<PmTask[] | PmTaskPage>(`/api/${t}/pm/tasks${q.assignee ? `?assignee=${q.assignee}` : ""}`, u),
     [] as PmTask[],
   );
-  if (Array.isArray(res)) return res;
-  return Array.isArray(res?.items) ? res.items : [];
+  if (Array.isArray(res)) return normalizePmTasks(res);
+  return normalizePmTasks(Array.isArray(res?.items) ? res.items : []);
 };
 // ---- @all scope reader (P4-A1 landed 2026-08-07; P4-A3/A5 are the consumers) ----
 // `listAllPmTasks` above deliberately stops at the FIRST page — six existing callers want "the
@@ -567,10 +595,12 @@ export const listAllPmTasksPaged = async (u: string, t: string, filters: PmTaskF
     if (!next) break;
     cursor = next;
   }
-  return out;
+  return normalizePmTasks(out);
 };
-export const getPmTask = (u: string, t: string, id: string) =>
-  skipUnavailable(platformFetch<PmTask | null>(`/api/${t}/pm/tasks/${id}`, u), null);
+export const getPmTask = async (u: string, t: string, id: string): Promise<PmTask | null> => {
+  const task = await skipUnavailable(platformFetch<PmTask | null>(`/api/${t}/pm/tasks/${id}`, u), null);
+  return task ? normalizePmTask(task) : null;
+};
 export const listMilestones = (u: string, t: string, projectId: string) =>
   skipUnavailable(platformFetch<Milestone[]>(`/api/${t}/pm/projects/${projectId}/milestones`, u), [] as Milestone[]);
 export const listDocs = (u: string, t: string, projectId: string) =>

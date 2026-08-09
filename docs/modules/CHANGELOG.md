@@ -34,6 +34,33 @@ reconstructed from this table alone. Format defined in [`VERSIONING.md`](./VERSI
 > Not corrected retroactively (moving a pushed, already-deployed tag is its own risk); flagging so
 > the next session doesn't re-diagnose the same gap.
 
+### `Alpha 01.031.0080a` - 2026-08-09 - the list that forgot six columns
+
+Manifest (counter +2, 0078 -> 0080): `platform-nest 0.20.1`, `platform-ui 0.23.1`.
+
+**HOTFIX — every page rendering a PM card threw.** `TypeError: Cannot read properties
+of undefined (reading 'length')` at `Board.tsx`'s subtask counter, caught by the error
+boundary, on My Work / boards / departments / tasks / calendar / Gantt.
+
+Root cause: the tenant-wide paginated task list (`GET /api/:t/pm/tasks`, added
+2026-08-07) carries its OWN hand-written CTE instead of the shared `TASK_SELECT`, and
+that projection never selected `t.subtasks` - nor `description`, `estimate_minutes`,
+`custom_fields`, `recurrence`, `loggedMinutes`, `contributors`. Six frontend call sites
+funnel through that one endpoint, so every card built from it arrived with
+`subtasks: undefined`.
+
+Why no gate caught it: `lib/pm.ts` declares `subtasks: Subtask[]` REQUIRED, so TypeScript
+treated "always present" as proven. A type that overstates a guarantee does not merely
+fail to catch this class of bug - it suppresses the checks that would.
+
+Fixed at three layers, deliberately: the CTE now matches `TASK_SELECT` (the real defect);
+`normalizePmTask` guarantees the shape at the platform-ui boundary regardless of which
+endpoint answered (so the next hand-written query that drifts cannot blank the app); and
+the render site short-circuits on an absent array.
+
+The regression test asserts CONTENT, not key-presence, and was proven by reverting the SQL
+fix and watching it fail. That is the difference between a test and a decoration.
+
 ### `Alpha 01.030.0078a` - 2026-08-09 - the provisioning seam is in place and gated
 
 Manifest (counter +4, 0074 → 0078): `platform-nest 0.20.0`, `platform-ui 0.23.0`, `mcp-hub 0.10.1`, `webdev 0.13.0`.

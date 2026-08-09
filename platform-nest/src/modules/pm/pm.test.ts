@@ -1912,6 +1912,71 @@ describe.skipIf(!TEST_URL)("PM subsystem (§5)", () => {
       expect(doneRow.isDone).toBe(true);
     });
 
+    // Regression for the production incident on alpha-01.030.0078a: this endpoint's `base` CTE is a
+    // SEPARATE hand-written SQL projection from `TASK_SELECT` (the one every other task reader uses),
+    // and it shipped without `subtasks` (plus `description`/`estimateMinutes`/`customFields`/
+    // `recurrence`/`loggedMinutes`/`contributors`) in its SELECT list. platform-ui's `PmTask` type
+    // declares `subtasks: Subtask[]` non-optional, so nothing there defended against `undefined` —
+    // `Board.tsx`'s `task.subtasks.length` threw for every card built from this list, taking down
+    // every page that renders a PM card (Board, My Work, Calendar, Departments, Tasks, Gantt all
+    // read tasks through this endpoint). `tsc` cannot catch a contract two independently-deployed
+    // apps disagree on; only a test that asserts the ACTUAL response contains the field, with real
+    // content (not merely "key is not undefined" on an all-defaults row), can. This is that test —
+    // it must fail if this CTE ever drops a column TASK_SELECT carries again.
+    it("the tenant-wide list's task shape carries every field platform-ui's PmTask contract declares required, with real content", async () => {
+      const iso = await isoPm("full shape");
+      const pid = await iso.newProject("A1 full shape");
+      const taskId = await iso.newTask(pid, {
+        title: "Full shape task",
+        description: "A real description body",
+        subtasks: ["Step one", "Step two"],
+        estimateMinutes: 45,
+      });
+
+      // Give the task some actual state to assert CONTENT on, not just "the key exists": toggle one
+      // subtask done (so subtasks[].done isn't a uniform false), and log time (so loggedMinutes isn't
+      // a uniform zero-default that would pass even if the column were never joined at all).
+      const detail = (await app.inject({ method: "GET", url: `/api/${iso.t}/pm/tasks/${taskId}`, headers: iso.hdr }).then((r) => r.json())) as {
+        subtasks: { id: string; title: string; done: boolean }[];
+      };
+      const firstSubtaskId = detail.subtasks[0].id;
+      await app.inject({ method: "PATCH", url: `/api/${iso.t}/pm/tasks/${taskId}`, headers: iso.hdr, payload: { toggleSubtask: firstSubtaskId } });
+      await app.inject({ method: "POST", url: `/api/${iso.t}/pm/tasks/${taskId}/time`, headers: iso.hdr, payload: { minutes: 30 } });
+
+      const r = await iso.list("?includeClosed=true");
+      expect(r.statusCode).toBe(200);
+      const { items } = r.json() as {
+        items: Array<{
+          id: string; description: string; estimateMinutes: number | null; loggedMinutes: number;
+          customFields: Record<string, unknown>; recurrence: unknown; contributors: unknown[];
+          subtasks: { id: string; title: string; done: boolean }[]; tags: string[]; dependsOn: string[];
+        }>;
+      };
+      const row = items.find((x) => x.id === taskId);
+      expect(row).toBeDefined();
+
+      // subtasks: the exact crash — must be an array, with the right length and the toggled state.
+      expect(Array.isArray(row!.subtasks)).toBe(true);
+      expect(row!.subtasks).toHaveLength(2);
+      expect(row!.subtasks.map((s) => s.title).sort()).toEqual(["Step one", "Step two"]);
+      expect(row!.subtasks.find((s) => s.id === firstSubtaskId)?.done).toBe(true);
+
+      // description/estimateMinutes: real authored values, not defaults.
+      expect(row!.description).toBe("A real description body");
+      expect(row!.estimateMinutes).toBe(45);
+
+      // loggedMinutes: summed from the time entry just logged, not the zero every task starts at.
+      expect(row!.loggedMinutes).toBe(30);
+
+      // Fields that stay at their honest default for a task that never set them — still present,
+      // still the correct TYPE (an object/array), never `undefined`.
+      expect(row!.customFields).toEqual({});
+      expect(row!.recurrence).toBeNull();
+      expect(Array.isArray(row!.contributors)).toBe(true);
+      expect(Array.isArray(row!.tags)).toBe(true);
+      expect(Array.isArray(row!.dependsOn)).toBe(true);
+    });
+
     it("isDone/isBlocked are FLAG-DRIVEN off the task's OWN project registry, not a literal status match", async () => {
       const iso = await isoPm("custom registry");
       const pid = await iso.newProject("A1 custom registry");

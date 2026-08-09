@@ -1776,11 +1776,31 @@ export class PmController {
           SELECT t.id, t.project_id AS "projectId", p.name AS "projectName",
                  p.short_code AS "projectShortCode", t.seq,
                  CASE WHEN p.short_code IS NOT NULL AND t.seq IS NOT NULL THEN p.short_code || '-' || t.seq ELSE NULL END AS "displayCode",
-                 t.title, t.status, t.priority, t.progress, t.assignee,
-                 t.milestone_id AS "milestoneId",
+                 t.title, t.description, t.status, t.priority, t.progress, t.assignee,
+                 t.subtasks, t.milestone_id AS "milestoneId",
                  to_char(t.start_date, 'YYYY-MM-DD') AS "startDate",
                  to_char(t.due_date, 'YYYY-MM-DD') AS "dueDate",
-                 t.tags, t.depends_on AS "dependsOn", t.updated_at AS "updatedAt",
+                 t.estimate_minutes AS "estimateMinutes",
+                 t.tags, t.depends_on AS "dependsOn", t.custom_fields AS "customFields",
+                 t.recurrence, t.updated_at AS "updatedAt",
+                 -- description/subtasks/estimateMinutes/customFields/recurrence and the two
+                 -- subqueries below were ALL missing from this CTE's projection (P4-A1) even
+                 -- though every OTHER task reader (TASK_SELECT above) has always carried them:
+                 -- this endpoint feeds Board/My-Work/Calendar/Departments/Tasks/Gantt for the
+                 -- WHOLE tenant, and platform-ui's PmTask type declares subtasks non-optional
+                 -- (subtasks: Subtask[]) -- a task rendered from this page came back with
+                 -- subtasks = undefined, and Board.tsx's task.subtasks.length threw for every
+                 -- card, taking down the whole app (production incident, alpha-01.030.0078a).
+                 -- Same subquery shape as TASK_SELECT so the two projections agree on every
+                 -- field the frontend contract requires. NOTE: no backtick characters in this
+                 -- comment -- this whole SQL string is itself a JS template literal, so a stray
+                 -- backtick here would silently truncate the query string.
+                 COALESCE((SELECT SUM(minutes) FROM time_entries te WHERE te.pm_task_id = t.id AND te.deleted_at IS NULL), 0)::int AS "loggedMinutes",
+                 COALESCE((
+                   SELECT json_agg(json_build_object('userId', pta.user_id, 'name', u.name) ORDER BY u.name)
+                   FROM pm_task_assignees pta JOIN users u ON u.id = pta.user_id
+                   WHERE pta.tenant_id = t.tenant_id AND pta.task_id = t.id AND pta.role = 'contributor'
+                 ), '[]'::json) AS "contributors",
                  CASE WHEN reg.materialized THEN COALESCE(reg.is_done_row, false) ELSE (t.status = 'done') END AS "isDone",
                  CASE WHEN reg.materialized THEN COALESCE(reg.is_blocked_row, false) ELSE (t.status = 'blocked') END AS "isBlocked",
                  COALESCE(t.due_date, DATE '9999-12-31') AS "effDue",

@@ -609,7 +609,11 @@ function Card({
         </div>
         <div className="pm-card__meta">
           <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            {task.subtasks.length > 0 && (
+            {/* `subtasks` is declared required on `PmTask` and normalized to `[]` at the lib/pm.ts
+                reader boundary — but a single malformed row (a stale demo fixture, a future
+                backend regression) must never blank the whole board again, so this card defends
+                itself too rather than trusting the type alone. */}
+            {(task.subtasks ?? []).length > 0 && (
               <span className="pm-card__subs">{task.subtasks.filter((s) => s.done).length}/{task.subtasks.length}</span>
             )}
             {blocked && <span className="pm-blocked-chip">Blocked</span>}
