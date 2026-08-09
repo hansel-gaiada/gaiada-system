@@ -34,6 +34,23 @@ reconstructed from this table alone. Format defined in [`VERSIONING.md`](./VERSI
 > Not corrected retroactively (moving a pushed, already-deployed tag is its own risk); flagging so
 > the next session doesn't re-diagnose the same gap.
 
+### `Alpha 01.032.0081a` - 2026-08-09 - the ball gets its own tab
+
+Manifest (counter +1, 0080 -> 0081): `platform-ui 0.23.2`.
+
+Owner report: the ball cluttered the board. It was Board's fourth "Group by"
+swimlane, turning the whole board into ball-holder columns. It is now a peer tab —
+Board / Ball / Gantt / Charts / Productivity — and the swimlane option is gone from
+Board's dropdown.
+
+A move, not a redesign: same filters, same empty state, same canEdit note, same
+`reassignBall` write path (pm.contribute) that commit 6b2154d made real. The ball
+FILTER facet stays in Board deliberately — a filter is not the surface that cluttered.
+
+A stale `?view=board&swimlane=ball` bookmark degrades to the status default instead
+of rendering a branch that no longer exists. Tab anchors gained `aria-current`,
+which they were missing.
+
 ### `Alpha 01.031.0080a` - 2026-08-09 - the list that forgot six columns
 
 Manifest (counter +2, 0078 -> 0080): `platform-nest 0.20.1`, `platform-ui 0.23.1`.

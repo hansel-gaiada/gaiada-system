@@ -3,11 +3,13 @@ import { isSwimlane, isView, representativeTag, leadWithUnassigned, PM_SWIMLANES
 import type { Tag, AxisColumn } from "@/lib/pm";
 
 describe("pm page-helpers", () => {
-  it("isSwimlane accepts exactly the four board axes this page mounts", () => {
+  it("isSwimlane accepts exactly the three board axes this page mounts", () => {
     expect(isSwimlane("status")).toBe(true);
     expect(isSwimlane("assignee")).toBe(true);
-    expect(isSwimlane("ball")).toBe(true);
     expect(isSwimlane("priority")).toBe(true);
+    // "ball" moved out to its own tab (owner decision 2026-08-09) — it is a PmView now, not a
+    // Board swimlane, so a stale `?swimlane=ball` link must degrade rather than crash.
+    expect(isSwimlane("ball")).toBe(false);
     // Division/grid swimlanes are deliberately NOT here — they only mean something inside one
     // department (see the page.tsx header note) and stay on the department board.
     expect(isSwimlane("division")).toBe(false);
@@ -16,12 +18,13 @@ describe("pm page-helpers", () => {
   });
 
   it("PM_SWIMLANES lists exactly what isSwimlane accepts, in the same order", () => {
-    expect(PM_SWIMLANES.map((s) => s.value)).toEqual(["status", "assignee", "ball", "priority"]);
+    expect(PM_SWIMLANES.map((s) => s.value)).toEqual(["status", "assignee", "priority"]);
     for (const s of PM_SWIMLANES) expect(isSwimlane(s.value)).toBe(true);
   });
 
-  it("isView accepts exactly the four mounted views", () => {
+  it("isView accepts exactly the five mounted views, including the standalone ball tab", () => {
     expect(isView("board")).toBe(true);
+    expect(isView("ball")).toBe(true);
     expect(isView("gantt")).toBe(true);
     expect(isView("charts")).toBe(true);
     expect(isView("productivity")).toBe(true);

@@ -37,7 +37,7 @@ import "@/components/pm/pm.css";
 // the exact same three views (P4-A3's whole point: one scope layer, no fourth set of components).
 // `/pm` is the new home for this (decision 1) — `/` stays the personal My Work landing.
 //
-// One page, tab-switched views (`?view=board|gantt|charts|productivity`, same `?view=` idiom
+// One page, tab-switched views (`?view=board|ball|gantt|charts|productivity`, same `?view=` idiom
 // `ProjectWorkspaceView` already uses) rather than one route per view: the scope switcher's whole
 // point is to stay on the view you're looking at while re-scoping it, and a single page/search-param
 // pair makes that trivial (no pathname plumbing needed to know "which view was I on"). `productivity`
@@ -54,10 +54,14 @@ import "@/components/pm/pm.css";
 // backend's `?userId=` param exists for a future person-switcher, deliberately not built here —
 // out of this ticket's scope).
 //
-// P4-A6: `Responsible`/`Ball` ARE first-class views here, at every scope — reached via the same
-// swimlane selector the department board uses (no fourth set of components, per the ticket), with
-// `leadWithUnassigned` (./page-helpers) normalising both to lead with a "no user" column, matching
-// the reference (§1.4/§1.5).
+// P4-A6: `Responsible`/`Ball` ARE first-class views here, at every scope, with `leadWithUnassigned`
+// (./page-helpers) normalising both to lead with a "no user" column, matching the reference
+// (§1.4/§1.5). `Responsible` is reached through Board's "Group by" swimlane selector (no fourth
+// set of components, per the ticket). `Ball` used to be the fourth swimlane option there too, but
+// owner decision 2026-08-09 pulled it out into its own peer tab (`BallSection` below) — a full
+// board-layout switch just to see who's holding the ball cluttered the board view's real job
+// (status triage). `page-helpers.ts`'s `PM_SWIMLANES`/`isSwimlane` no longer accept "ball"; it
+// lives only in `PmView`/`isView` now.
 
 type SearchParams = Promise<{
   view?: string; swimlane?: string; tags?: string | string[]; ball?: string | string[]; responsible?: string | string[];
@@ -86,8 +90,8 @@ export default async function PmPage({ searchParams }: { searchParams: SearchPar
   const taskUrgencyById: Record<string, UrgencyTier> = {};
   for (const t of work.tasks) taskUrgencyById[t.id] = taskUrgency({ dueDate: t.dueDate, isDone: isDoneStatus(t.status, work.statusesByProject[t.projectId]) }, today);
 
-  const tab = (v: "board" | "gantt" | "charts" | "productivity", label: string) => (
-    <a href={`/pm?view=${v}`} className={`pm-tab${view === v ? " pm-tab--active" : ""}`}>{label}</a>
+  const tab = (v: "board" | "ball" | "gantt" | "charts" | "productivity", label: string) => (
+    <a href={`/pm?view=${v}`} className={`pm-tab${view === v ? " pm-tab--active" : ""}`} aria-current={view === v ? "page" : undefined}>{label}</a>
   );
 
   return (
@@ -105,6 +109,7 @@ export default async function PmPage({ searchParams }: { searchParams: SearchPar
       <div className="pm-tabsrow">
         <div className="pm-tabs">
           {tab("board", PM_TERMS.board)}
+          {tab("ball", PM_TERMS.ball)}
           {tab("gantt", PM_TERMS.gantt)}
           {tab("charts", PM_TERMS.charts)}
           {tab("productivity", PM_TERMS.productivity)}
@@ -113,6 +118,9 @@ export default async function PmPage({ searchParams }: { searchParams: SearchPar
 
       {view === "board" && (
         <BoardSection work={work} sp={sp} canEdit={canEdit} taskUrgencyById={taskUrgencyById} userId={userId} tenant={tenant} />
+      )}
+      {view === "ball" && (
+        <BallSection work={work} sp={sp} canEdit={canEdit} taskUrgencyById={taskUrgencyById} userId={userId} tenant={tenant} />
       )}
       {view === "gantt" && (
         <GanttSection work={work} canEdit={canEdit} taskUrgencyById={taskUrgencyById} today={today} userId={userId} tenant={tenant} />
@@ -260,14 +268,141 @@ async function BoardSection({
         <Board columns={priorityColumns(facetFilteredTasks)} move={setTaskPriority} blockedIds={blockedIds} taskTags={taskTags} taskUrgency={taskUrgencyById} />
       ) : swimlane === "assignee" ? (
         <Board columns={leadWithUnassigned(assigneeColumns(facetFilteredTasks), "__unassigned")} move={reassignResponsible} blockedIds={blockedIds} taskTags={taskTags} taskUrgency={taskUrgencyById} />
-      ) : swimlane === "ball" ? (
-        <Board columns={leadWithUnassigned(ballColumns(facetFilteredTasks), "__no_ball")} move={reassignBall} blockedIds={blockedIds} taskTags={taskTags} taskUrgency={taskUrgencyById} />
       ) : (
         <Board
           columns={unionStatusColumns(facetFilteredTasks, work.statusesByProject)}
           move={moveTaskToStatusLabel}
           movePick={moveTask}
           colorColumns={showStatusColors}
+          blockedIds={blockedIds}
+          taskTags={taskTags}
+          taskUrgency={taskUrgencyById}
+        />
+      )}
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Ball — its own tab (owner decision 2026-08-09, "Ball should be in this tab list so it doesn't
+// clutter the board view"). This used to be Board's fourth "Group by" axis (`swimlane === "ball"`
+// in `BoardSection` above); it is now the only place `ballColumns`/`reassignBall` render on this
+// page. Same data, same filters, same write path (`reassignBall` — P4-B6, "anyone can pass the
+// ball" is `pm.contribute`, not `pm.manage`; unchanged here) — only the "Group by" selector itself
+// is gone, since this whole tab IS the ball grouping (nothing left to switch between).
+async function BallSection({
+  work, sp, canEdit, taskUrgencyById, userId, tenant,
+}: {
+  work: Awaited<ReturnType<typeof resolveScopeWork>>;
+  sp: { tags?: string | string[]; ball?: string | string[]; responsible?: string | string[] };
+  canEdit: boolean;
+  taskUrgencyById: Record<string, UrgencyTier>;
+  userId: string;
+  tenant: string;
+}) {
+  const taskById = new Map(work.tasks.map((t) => [t.id, t]));
+  const blockedIds = new Set(
+    work.tasks.filter((t) => openDependencies(t, taskById, work.statusesByProject[t.projectId]).length > 0).map((t) => t.id),
+  );
+
+  const registriesByProject = await scopeTagRegistries(userId, tenant, work.projectIds);
+  const allTagLabels = distinctTagLabels(registriesByProject);
+  const selectedTagLabels = parseTagFilterParam(sp.tags);
+  const tagFilteredTasks = filterTasksByTagLabels(work.tasks, registriesByProject, selectedTagLabels);
+  const taskTags: Record<string, Tag[]> = {};
+  for (const t of work.tasks) taskTags[t.id] = resolveTags(t.tags, registriesByProject[t.projectId] ?? []);
+
+  const selectedBallIds = parseTagFilterParam(sp.ball);
+  const selectedResponsibleIds = parseTagFilterParam(sp.responsible);
+  const ballOptions = ballFacetOptions(work.tasks);
+  const responsibleOptions = responsibleFacetOptions(work.tasks);
+  const facetFilteredTasks = filterTasksByResponsible(filterTasksByBall(tagFilteredTasks, selectedBallIds), selectedResponsibleIds);
+
+  return (
+    <>
+      {allTagLabels.length > 0 && (
+        <Card style={{ marginBottom: 16 }}>
+          <form className="lux-filters" method="get" aria-label="Filter by tag">
+            <input type="hidden" name="view" value="ball" />
+            {selectedBallIds.map((id) => <input key={id} type="hidden" name="ball" value={id} />)}
+            {selectedResponsibleIds.map((id) => <input key={id} type="hidden" name="responsible" value={id} />)}
+            <div className="pm-tagfilter">
+              <span className="pm-tagfilter__label">Tags</span>
+              <div className="pm-tagfilter__options">
+                {allTagLabels.map((label) => {
+                  const rep = representativeTag(label, registriesByProject);
+                  return (
+                    <label key={label} className="pm-tagfilter__opt">
+                      <input type="checkbox" name="tags" value={label} defaultChecked={selectedTagLabels.includes(label)} />
+                      {rep ? <TagChip label={label} color={rep.color} /> : label}
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+            <div className="lux-filters__actions">
+              <button type="submit" className="lux-btn lux-btn--solid lux-btn--sm">Apply</button>
+              {selectedTagLabels.length > 0 && (
+                <a href="/pm?view=ball" className="lux-btn lux-btn--ghost lux-btn--sm">Reset</a>
+              )}
+            </div>
+          </form>
+        </Card>
+      )}
+
+      {(ballOptions.length > 0 || responsibleOptions.length > 0) && (
+        <Card style={{ marginBottom: 16 }}>
+          <form className="lux-filters" method="get" aria-label={`Filter by ${PM_TERMS.ball} or ${PM_TERMS.responsible}`}>
+            <input type="hidden" name="view" value="ball" />
+            {selectedTagLabels.map((l) => <input key={l} type="hidden" name="tags" value={l} />)}
+            {ballOptions.length > 0 && (
+              <div className="pm-tagfilter">
+                <span className="pm-tagfilter__label">{PM_TERMS.ball}</span>
+                <div className="pm-tagfilter__options">
+                  {ballOptions.map((o) => (
+                    <label key={o.id} className="pm-tagfilter__opt">
+                      <input type="checkbox" name="ball" value={o.id} defaultChecked={selectedBallIds.includes(o.id)} />
+                      {o.label}
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
+            {responsibleOptions.length > 0 && (
+              <div className="pm-tagfilter">
+                <span className="pm-tagfilter__label">{PM_TERMS.responsible}</span>
+                <div className="pm-tagfilter__options">
+                  {responsibleOptions.map((o) => (
+                    <label key={o.id} className="pm-tagfilter__opt">
+                      <input type="checkbox" name="responsible" value={o.id} defaultChecked={selectedResponsibleIds.includes(o.id)} />
+                      {o.label}
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
+            <div className="lux-filters__actions">
+              <button type="submit" className="lux-btn lux-btn--solid lux-btn--sm">Apply</button>
+              {(selectedBallIds.length > 0 || selectedResponsibleIds.length > 0) && (
+                <a href="/pm?view=ball" className="lux-btn lux-btn--ghost lux-btn--sm">Reset</a>
+              )}
+            </div>
+          </form>
+        </Card>
+      )}
+
+      {!canEdit && (
+        <Card style={{ marginBottom: 16 }}>
+          <EmptyNote>You can view this board but can&apos;t move cards here — that needs {PM_TERMS.ball.toLowerCase()}/task-management access.</EmptyNote>
+        </Card>
+      )}
+
+      {facetFilteredTasks.length === 0 ? (
+        <EmptyNote>{work.tasks.length === 0 ? `No work in ${work.label} yet.` : "No tasks match these filters."}</EmptyNote>
+      ) : (
+        <Board
+          columns={leadWithUnassigned(ballColumns(facetFilteredTasks), "__no_ball")}
+          move={reassignBall}
           blockedIds={blockedIds}
           taskTags={taskTags}
           taskUrgency={taskUrgencyById}

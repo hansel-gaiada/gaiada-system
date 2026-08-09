@@ -5,21 +5,28 @@
 import { PM_TERMS } from "@/lib/pmVocabulary";
 import type { Tag, AxisColumn } from "@/lib/pm";
 
-export type PmSwimlane = "status" | "assignee" | "ball" | "priority";
+// `ball` used to be a fourth "Group by" axis here — owner decision 2026-08-09: it cluttered the
+// board view (switching the whole board layout just to see who's holding the ball), so it moved
+// out to its own top-level tab (`PmView`'s "ball", page.tsx's `BallSection`) and is no longer a
+// Board grouping option. A bookmarked `?swimlane=ball` link degrades gracefully — `isSwimlane`
+// below no longer accepts it, so `page.tsx` falls back to its `"status"` default rather than
+// throwing or rendering something that no longer exists.
+export type PmSwimlane = "status" | "assignee" | "priority";
 export const PM_SWIMLANES: { value: PmSwimlane; label: string }[] = [
   { value: "status", label: "Status" },
   { value: "assignee", label: PM_TERMS.responsible },
-  { value: "ball", label: PM_TERMS.ball },
   { value: "priority", label: "Priority" },
 ];
 
 export function isSwimlane(v: string | undefined): v is PmSwimlane {
-  return v === "status" || v === "assignee" || v === "ball" || v === "priority";
+  return v === "status" || v === "assignee" || v === "priority";
 }
 
-export type PmView = "board" | "gantt" | "charts" | "productivity";
+// "ball" (P4-B6/owner decision 2026-08-09) is a peer tab now, not a Board swimlane — see the note
+// above `PmSwimlane`.
+export type PmView = "board" | "ball" | "gantt" | "charts" | "productivity";
 export function isView(v: string | undefined): v is PmView {
-  return v === "board" || v === "gantt" || v === "charts" || v === "productivity";
+  return v === "board" || v === "ball" || v === "gantt" || v === "charts" || v === "productivity";
 }
 
 // Same "first registry that carries this label" display-colour rule the department board's tag
