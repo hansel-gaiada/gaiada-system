@@ -1515,6 +1515,17 @@ Portal view for client-submitted change requests + staff triage queue.
 | ✅ | POST | `/api/:t/webdev/change-requests` | `{kind, title, body?, clientId?, projectId?}` → `{id, status:'new'}`. Staff-logged maintenance work. `source='internal'` (staff-raised, no client solicitation). `client_id` may be NULL (internal-only work). Server-derives all identity fields. No notification on create (internal work, not client-actionable). Authz: `webdev_change_request` create. |
 | ✅ | POST | `/api/:t/webdev/change-requests/:id/triage` | `{action, route?, reason?, kindOverride?}` → `{id, status, route, pipelineRunId?, pmTaskId?, signers[]?}`. Single triage decision (decline or convert). `action` ∈ `decline|convert`. Decline requires `reason` (≤1000 chars); convert picks a `route` ∈ `control_plane|mini_run|pm_task` (defaults by kind: content→pm_task, design/feature→mini_run, bug→pm_task). `kindOverride` ∈ `content|design|feature|bug` (optional, re-stamps the kind if provided). Serialized on the CR + precondition re-check (lock → re-read → check `status='new'` → spawn/update). **D-2a:** CR table takes CORE tenant wall, no `app_module_allowed()`. **F1:** notification audience follows source (portal requests notify contacts; internal requests don't — even when converted to a mini-run that opens a real `prd_sign` gate the client must sign, the disposition *notification* is withheld for internal-sourced requests; the gate opening itself notifies signers separately). Converts mini_run route spawn gates `prd_sign` directly (no dispatcher step); emits `pipeline.run.created` with honest `sourceMeetingId:null`. Emits `webdev.change_request.updated` + lifecycle event per outcome. Authz: `webdev_change_request` triage. |
 
+### 16g. Site Provisioning (PRV-00..04) — `src/modules/webdev/webdev.controller.ts` — **STATUS: PROTOTYPED**
+
+**⚠ GATES FAIL-CLOSED:** until Cerbos loads the `webdev_provisioned_site` resource policy (PRV-03), all endpoints return 403. That is the correct resting state for a surface that creates public infrastructure (GitHub repos + vhosts).
+
+| Status | Method | Path | Notes |
+|---|---|---|---|
+| ⛔ | POST | `/api/:t/modules/webdev/provision` | `{runId?: string, framework?: string, slug?: string, stack?: string}` → `201 {site}` (new) or `200 {site}` (existing, idempotent re-call). `runId` or `slug` required. Idempotent provision: lock → re-read → precondition re-check → egress in one transaction. Returns mirror row immediately; polling is detached. On 409 `slug_conflict_foreign`, the mirror row is committed as `failed/slug_conflict_foreign` before the response. Authz: `webdev_provisioned_site` provision (gated by Cerbos policy `resource_webdev_provisioned_site.yaml`; policy does not exist yet). Emits `provisioned` activity. Migration `0090`. |
+| ⛔ | GET | `/api/:t/modules/webdev/provisioned-sites` | `SiteDto[]` (list all, optionally filtered by `?runId=`). Authz: `webdev_provisioned_site` read. |
+| ⛔ | GET | `/api/:t/modules/webdev/provisioned-sites/:id` | `SiteDto` (single row). Authz: `webdev_provisioned_site` read. |
+| ⛔ | POST | `/api/:t/modules/webdev/provisioned-sites/:id/reconcile` | `{} → SiteDto`. Re-drive the poller synchronously; same logic as `POST /provision` detached poll but on-demand and blocking. Authz: `webdev_provisioned_site` reconcile (different action, can cause egress). |
+
 ---
 
 ## 17. Mail subsystem (MAIL-* program, 2026-08-04) — `src/mail/` — **STATUS: IN PROGRESS**

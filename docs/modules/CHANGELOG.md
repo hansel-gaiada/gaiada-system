@@ -34,6 +34,16 @@ reconstructed from this table alone. Format defined in [`VERSIONING.md`](./VERSI
 > Not corrected retroactively (moving a pushed, already-deployed tag is its own risk); flagging so
 > the next session doesn't re-diagnose the same gap.
 
+### `Alpha 01.030.0078a` - 2026-08-09 - the provisioning seam is in place and gated
+
+Manifest (counter +4, 0074 → 0078): `platform-nest 0.20.0`, `platform-ui 0.23.0`, `mcp-hub 0.10.1`, `webdev 0.13.0`.
+
+**The site provisioning seam (PRV-00..04).** Idempotent provisioning of GitHub repos + vhosts: `POST /api/:t/modules/webdev/provision` creates a mirror row, spawns egress in one transaction, and returns immediately (polling is detached); `GET /provisioned-sites[?runId=]` and `GET /provisioned-sites/:id` read back the state; `POST /provisioned-sites/:id/reconcile` re-drives the poller. Migration `0090` adds the `webdev_provisioned_sites` table (THIRD-WALL RLS, three partial uniques for idempotency). `ProvisionProvider` driver interface + `provision-http` driver + the `webdev.provisionSite` MCP tool. Cerbos policy + D14 executable-registry entry gate the endpoints (PRV-03) — until the policy exists, all calls 403 (correct fail-closed for infrastructure creation). **PROTOTYPED:** verified against the in-process PRV-00 mock; DEV-VERIFIED claim belongs to PRV-07's live leg on the boxes after this deploys.
+
+**The Site & repo card and print fix.** `(app)/pipeline/[runId]` gained a "Site & repo" card showing provisioning status + link to the provisioned site. Print/PDF export no longer overlaps the provenance banner on page 2 onward (`position: fixed` repeats on every page, but CSS `padding-top` applies only once; banner is now in-flow).
+
+**MCP Hub exposes provision.** `webdev.provisionSite` added to the `wf:delivery` allowlist so automation can provision sites under approvals suspension.
+
 ### `Alpha 01.029.0074a` - 2026-08-08 - the follow-ups the last cut owed
 
 Manifest: `platform-nest 0.19.0`, `platform-ui 0.22.0` (counter +2, 0072 -> 0074). The bookkeeping

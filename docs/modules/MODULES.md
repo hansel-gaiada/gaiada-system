@@ -34,10 +34,10 @@ versions below; the running build reports it at `GET /health`.
 
 | Module | Ver | Status | Workstream | Since |
 |---|---|---|---|---|
-| platform-nest | `0.19.0` | IN PROGRESS | WS1 | 2026-08-08 |
-| platform-ui | `0.22.0` | IN PROGRESS | WS5 | 2026-08-08 |
+| platform-nest | `0.20.0` | IN PROGRESS | WS1 | 2026-08-09 |
+| platform-ui | `0.23.0` | IN PROGRESS | WS5 | 2026-08-09 |
 | ai-gateway-go | `0.13.2` | PROTOTYPED | WS3 | 2026-08-07 |
-| mcp-hub | `0.10.0` | PROTOTYPED | WS2 | 2026-08-06 |
+| mcp-hub | `0.10.1` | PROTOTYPED | WS2 | 2026-08-09 |
 | sync-engine-go | `0.7.0` | PROTOTYPED | WS1 | 2026-07 |
 | automation (n8n) | `0.4.1` | DEV-VERIFIED | WS4 | 2026-07 |
 | observability | `0.6.1` | DEV-VERIFIED | WS9 | 2026-08-06 |
@@ -46,7 +46,7 @@ versions below; the running build reports it at `GET /health`.
 | ai-agents | `0.7.1` | PROTOTYPED | WS8 | 2026-08-07 |
 | hermes-gateway | `0.2.0` | PROTOTYPED | WS3 | 2026-07 |
 | capture-helper | `0.2.0` | IN PROGRESS | WS11 | 2026-07 |
-| webdev | `0.12.0` | IN PROGRESS | Web Dev | 2026-08-08 |
+| webdev | `0.13.0` | IN PROGRESS | Web Dev | 2026-08-09 |
 | webdesk | `0.0.0` | PLANNED | Web Dev | 2026-07-23 |
 | search-marketing | `0.5.1` | DEV-VERIFIED | SEO | 2026-08-04 |
 | social-media | `0.0.0` | PLANNED | Social Media | 2026-07-23 |
@@ -58,7 +58,7 @@ versions below; the running build reports it at `GET /health`.
 
 ---
 
-## platform-nest â€” Platform Core Â· `0.6.3` Â· PROTOTYPED
+## platform-nest â€” Platform Core Â· `0.20.0` Â· PROTOTYPED
 
 **What exists (dev):** modular multi-tenant NestJS core with FORCE-RLS schema, `ModuleContract`
 framework + custom fields, Cerbos RBAC (scope cascade, decision audit, revocation, PlanResources),
@@ -80,7 +80,7 @@ authoritative `/admin/session/status`, instead of showing "unknown" as if it wer
 **Known gaps:** not deployed to production.
 **Future plans:** additional verticals (resort/marine/print) â†’ hardening to production.
 
-## platform-ui â€” ERP Suite Â· `0.6.5` Â· PROTOTYPED
+## platform-ui â€” ERP Suite Â· `0.23.0` Â· PROTOTYPED
 
 **What exists (dev):** Next.js ERP UI, BFF to platform-nest, RBAC-gated nav + company switcher; My Work,
 Approvals inbox, Companies/Projects/Tasks, Agency, Rollups, Systems/Intelligence/Admin consoles, People
@@ -143,7 +143,7 @@ for tenant-attributed load).
 deploy. Deferred: OpenBao-issued creds, media DLP classification, native per-provider streaming, cert rotation.
 **Future plans:** verify container build â†’ OpenBao creds â†’ media DLP â†’ prod.
 
-## mcp-hub â€” Access Layer Â· `0.9.0` Â· PROTOTYPED
+## mcp-hub â€” Access Layer Â· `0.10.1` Â· PROTOTYPED
 
 **What exists (dev):** MCP server (official SDK, Streamable HTTP, stateless) fronting platform-nest; OBO
 principal minting, Cerbos-authoritative policy, full Tools/Resources/Prompts surface, module-aggregated
@@ -271,7 +271,7 @@ headless. **Known gaps:** dev-only convenience; not in production.
 feeds the meetingâ†’MOMâ†’PRD delivery pipeline. **Known gaps:** pipeline tails in progress; not in production.
 **Future plans:** complete the delivery pipeline (MOMâ†’PRD/report/scope) â†’ prod.
 
-## webdev â€” Delivery Rail Â· Cockpit Â· `0.12.0` Â· IN PROGRESS
+## webdev â€” Delivery Rail Â· Cockpit Â· `0.13.0` Â· IN PROGRESS
 
 **Design:** [`../blueprints/webdev-design.md`](../blueprints/webdev-design.md) (Â§12 has the ticket
 ledger); Phase-3 ticket plan:
