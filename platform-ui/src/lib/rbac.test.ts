@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { can, isElevated, canManageIT, accessibleCompanies, canSwitchCompany, isManagerTier, isClient, isStaff, isClientOnly } from "./rbac";
+import { can, isElevated, canManageIT, accessibleCompanies, canSwitchCompany, isManagerTier, isClient, isStaff, isClientOnly, CAPABILITIES } from "./rbac";
 import type { Me } from "./platform";
 
 const companies = [
@@ -31,6 +31,41 @@ describe("can() — capability + scope", () => {
     expect(can(mgrA, "admin.access", "co-a")).toBe(false);
     expect(can(mgrA, "rollups.view")).toBe(false); // cross-company needs a global grant
     expect(isElevated(mgrA)).toBe(false);
+  });
+
+  // Gap 3 (2026-08 sweep): resource_integration_connection.yaml's own header names this the
+  // "company.manage tier" and lists `company_admin`/`manager` together for it — `manager` was
+  // missing the capability entirely, so `departments/[deptId]/connections`'s admin seat-mapping
+  // button was silently hidden from every manager even though Cerbos would have allowed the write
+  // (the dangerous under-grant direction this whole ticket is about). Widening it is a deliberate,
+  // reported judgement call: `company.manage` also gates billing/company-edit/automation-retry
+  // surfaces where Cerbos stays company_admin-only (resource_invoice.yaml, resource_company.yaml,
+  // resource_automation_approval.yaml's `retry`) — a manager will now see those too and get a
+  // clean 403, which is the SAFE direction (visible refusal, not a silent one).
+  it("manager holds company.manage (Gap 3: resource_integration_connection.yaml grants manager the company.manage tier)", () => {
+    expect(can(mgrA, "company.manage", "co-a")).toBe(true);
+    expect(can(mgrA, "company.manage", "co-b")).toBe(false);
+  });
+
+  // Gap 1 (2026-08 owner audit): `can()` does NOT special-case platform_admin/group_executive —
+  // it looks up ROLE_CAPS[role] like any other role — so "superadmin/owner can do anything" is
+  // kept true only by ROLE_CAPS actually holding every capability that exists. Before the fix,
+  // `Capability` was a hand-written type union and `ALL` was a SEPARATE hand-written array; a
+  // capability added to the type and forgotten in `ALL` would silently and permanently deny it to
+  // the owner's own account. `CAPABILITIES` is now the ONE list `Capability` and `ALL` both derive
+  // from, so this loop can never go stale by construction — but pin it anyway so a future
+  // refactor that reintroduces a second hand-maintained list (e.g. someone "simplifying" ALL back
+  // into a literal array) fails here immediately instead of silently regressing.
+  it("platform_admin and group_executive hold every known Capability", () => {
+    const admin = me([{ role: "platform_admin", scopeType: "global", scopeId: null }]);
+    const exec = me([{ role: "group_executive", scopeType: "global", scopeId: null }]);
+    for (const cap of CAPABILITIES) {
+      expect(can(admin, cap, "co-a"), `platform_admin missing ${cap}`).toBe(true);
+      expect(can(exec, cap, "co-a"), `group_executive missing ${cap}`).toBe(true);
+      // Global grants must also answer true with NO companyId (cross-company questions).
+      expect(can(admin, cap), `platform_admin missing ${cap} (no companyId)`).toBe(true);
+      expect(can(exec, cap), `group_executive missing ${cap} (no companyId)`).toBe(true);
+    }
   });
 
   it("company_admin has admin.access + it.manage scoped to their company", () => {
@@ -85,6 +120,48 @@ describe("hr caps (hr_staff/hr_manager)", () => {
   });
 });
 
+// Gap 2 — team_lead was entirely absent from Role/ROLE_CAPS despite being a real, granted Cerbos
+// derived role. This pins the exact capability sweep documented in rbac.ts's `team_lead` entry.
+// NOTE: a company-scoped fixture is used deliberately here (not the real team-scoped shape, which
+// is covered separately above and below) so this describe block tests ONLY "what does ROLE_CAPS.
+// team_lead contain", isolated from the scope-cascade question `scopeCovers — A4 fixes` already
+// answers. Real team_lead grants are always team-scoped — see that describe block.
+describe("team_lead caps (Gap 2 sweep) — mirrors what Cerbos actually grants team_lead", () => {
+  const leadA = me([{ role: "team_lead", scopeType: "company", scopeId: "co-a" }]);
+
+  it("has full PM parity with manager (resource_pm_task.yaml + resource_pm_project.yaml)", () => {
+    expect(can(leadA, "pm.manage", "co-a")).toBe(true);
+    expect(can(leadA, "pm.contribute", "co-a")).toBe(true);
+  });
+
+  it("has the dept-lead reporting + appraisal tier (resource_report_document.yaml + resource_appraisal.yaml)", () => {
+    expect(can(leadA, "reports.person.view", "co-a")).toBe(true);
+    expect(can(leadA, "reports.project.view", "co-a")).toBe(true);
+    expect(can(leadA, "reports.department.view", "co-a")).toBe(true);
+    expect(can(leadA, "appraisal.read", "co-a")).toBe(true);
+    expect(can(leadA, "appraisal.score", "co-a")).toBe(true);
+  });
+
+  it("does NOT get checkin, approvals, hr, search, it.manage, or the exec-only reporting tier", () => {
+    // Every one of these is a resource/action pair where team_lead is either absent from the
+    // policy entirely (checkin, automation/agency approvals, scope_signoff, hr, search) or
+    // explicitly excluded from the elevated rule (device create/update/delete is company_admin +
+    // it_staff only) — see rbac.ts's team_lead comment for the file-by-file citation.
+    for (const cap of [
+      "checkin.read", "checkin.excuse",
+      "approvals.decide", "approvals.retry",
+      "hr.view", "hr.manage",
+      "search.view", "search.manage",
+      "it.manage",
+      "admin.access", "org.edit", "rollups.view", "knowledge.review", "company.manage",
+      "reports.company.view", "reports.period.seal", "reports.facts.admin", "reports.ops.poll",
+      "appraisal.cycle.admin",
+    ] as const) {
+      expect(can(leadA, cap, "co-a"), cap).toBe(false);
+    }
+  });
+});
+
 describe("scopeCovers — A4 fixes (no over-grant)", () => {
   it("a null-scope company grant does NOT cover any company (not a wildcard)", () => {
     const nullScoped = me([{ role: "manager", scopeType: "company", scopeId: null }]);
@@ -96,6 +173,21 @@ describe("scopeCovers — A4 fixes (no over-grant)", () => {
     const teamScoped = me([{ role: "manager", scopeType: "team", scopeId: "div-1" }]);
     expect(can(teamScoped, "pm.manage", "co-a")).toBe(false);
     expect(can(teamScoped, "pm.manage", "co-b")).toBe(false);
+  });
+
+  // Gap 2's real-world case, not a stand-in role: derived_roles.yaml's `team_lead` derived role
+  // matches ONLY `g.scopeType == "team"` — a team_lead grant is never company/global-scoped in
+  // practice, unlike the synthetic "manager-with-team-scope" fixture above. Pin it directly so
+  // adding the role never quietly starts blanket-covering a company from a team grant (that would
+  // be the over-grant this ticket's A4 discipline exists to prevent, even though the framing
+  // elsewhere treats over-grant as the "merely 403s" safe direction — scope cascade is the one
+  // place this file already decided over-granting is not acceptable, and that has not changed).
+  it("a real team_lead grant (scopeType: team) does not cover any company", () => {
+    const teamLead = me([{ role: "team_lead", scopeType: "team", scopeId: "team-1" }]);
+    for (const cap of ["pm.manage", "pm.contribute", "reports.person.view", "appraisal.score"] as const) {
+      expect(can(teamLead, cap, "co-a")).toBe(false);
+      expect(can(teamLead, cap, "co-b")).toBe(false);
+    }
   });
 
   it("hr_staff scoped to company B covers only B, never A", () => {

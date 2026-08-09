@@ -34,6 +34,31 @@ reconstructed from this table alone. Format defined in [`VERSIONING.md`](./VERSI
 > Not corrected retroactively (moving a pushed, already-deployed tag is its own risk); flagging so
 > the next session doesn't re-diagnose the same gap.
 
+### `Alpha 01.034.0083a` - 2026-08-10 - the mirror stops drifting from the authority
+
+Manifest (counter +1, 0082 -> 0083): `platform-ui 0.24.0`.
+
+Owner's question: does the superadmin actually have everything? Answer: yes today —
+all 31 capabilities were in the hand-written `ALL` array — but NOTHING KEPT IT TRUE.
+`can()` has no superadmin bypass; it tests membership of that array. Now `Capability`
+and `ALL` both derive from one `CAPABILITIES` tuple, so a new capability is the
+owner's automatically, pinned by a test that loops the tuple rather than a second list.
+
+TWO ROLES WERE MISSING FROM THE MIRROR ENTIRELY. `team_lead` (granted PM parity with
+manager, dept-lead report reads, and the appraisal tier across ~27 policies) and
+`viewer` (granted `pm_task:update`) held ZERO capability in the UI — features silently
+absent for anyone in those tiers. `manager` was also missing `company.manage`, which
+hid the connections seat-mapping admin from every manager.
+
+The new parity test parses `derived_roles.yaml`'s own `g.role == "xxx"` comparisons and
+asserts each exists in ROLE_CAPS. **It failed on `viewer` before the fix** — it caught an
+omission nobody had reported, which is the only proof a drift test is worth having.
+
+Judgement calls, stated not buried: `people.directory` for team_lead (no Cerbos resource
+models directory browsing; granted on `resource_member.yaml`'s baseline read) and
+`company.manage` for manager (widens a few company_admin-only buttons to a clean 403 —
+the safe direction, since the server remains the authority).
+
 ### `Alpha 01.033.0082a` - 2026-08-09 - the ball was open; the UI said it wasn't
 
 Manifest (counter +1, 0081 -> 0082): `platform-ui 0.23.3`.
