@@ -28,12 +28,27 @@
      server.ts`) calls `page.pdf()` with a BLANK `headerTemplate` and a generic, document-agnostic
      `footerTemplate` (page numbers only) — it has no channel for per-document text, and extending
      that channel is TR-19/TR-21's call, not this ticket's file scope. So the mark is rendered as
-     ordinary page content, styled to read as an unmissable banner at the very top of the document
-     (guaranteed on page 1 — the same "once, prominently" bar TR-18's XLSX meets by putting it in
-     cell A1) AND given `position: fixed` so it repeats on every PAGE Chromium's print pagination
-     produces from a `position: fixed` element — verified against a real multi-page PDF render (see
-     the ticket report); if a future Chromium/Playwright version stops replicating fixed elements
-     per page, the page-1 banner still satisfies the bar on its own. */
+     ordinary, in-flow page content: once at the very top of the document and once at the very
+     end — the same "once, prominently" bar TR-18's XLSX meets by putting it in cell A1.
+
+     BUG FIXED (2026-08-09, owner report "pdf download result is overlapping with the top
+     branding"): this used to be `position: fixed` so it would repeat on every printed page, with
+     `.tr20-print__body`'s one-time `padding-top`/`padding-bottom` meant to reserve clearance for
+     it. That pairing is broken by construction — CSS box-model padding applies exactly ONCE, at
+     the true start/end of a box that Chromium then fragments across pages, but a `position: fixed`
+     element (when Chromium's print pagination does replicate it — confirmed inconsistent across
+     pages in practice, see below) reappears at the top/bottom of the CONTENT area on every single
+     page. So page 1 had real clearance (the one-time padding lands exactly where flow starts) but
+     page 2+ did not: the flow resumed flush at the page's content-area top, directly under the
+     repeating banner, and the two visually collided (confirmed by rendering an actual multi-page
+     PDF: page 2's "Throughput (weighted)" chart title sat behind/under the orange AD HOC banner).
+     Pushing the fixed banner up into the physical margin strip with a negative offset (so it would
+     sit in space Chromium reserves fresh on every page, unlike box padding) was tried and rejected:
+     the same negative-offset rule rendered differently page to page in this Chromium build — fully
+     clipped/invisible on page 1, still visible and still overlapping on page 2 — i.e. `position:
+     fixed` repeat-per-page is not dependable enough here to build a fix on top of. Making the mark
+     ordinary flow content sidesteps all of that: it appears exactly once, exactly where the
+     one-time `padding-top`/`padding-bottom` clearance already lands, on every page count. */
 
 .tr20-print, .tr20-print * {
   print-color-adjust: exact;
@@ -54,26 +69,25 @@
   transition: none !important;
 }
 
-/* ---- the provenance banner (in-flow on page 1; fixed so it repeats on every page — see header) */
+/* ---- the provenance banner (ordinary in-flow content: once at the true top of the document,
+   once at the true end — NOT `position: fixed`, see the file header comment for why) */
 .tr20-mark {
-  position: fixed;
-  left: 0;
-  right: 0;
-  z-index: 1000;
   padding: 6px 14px;
   font: 700 10px/1.4 var(--font-body, system-ui, sans-serif);
   letter-spacing: 0.06em;
   text-transform: uppercase;
   text-align: center;
+  break-inside: avoid;
 }
-.tr20-mark--top { top: 0; }
-.tr20-mark--bottom { bottom: 0; }
+.tr20-mark--top { break-after: avoid; }
+.tr20-mark--bottom { break-before: avoid; }
 .tr20-mark--adhoc { background: #fab219; color: #241a00; border-bottom: 1px solid #241a00; }
 .tr20-mark--bottom.tr20-mark--adhoc { border-top: 1px solid #241a00; border-bottom: 0; }
 .tr20-mark--sealed { background: #0ca30c; color: #ffffff; }
 
-/* The fixed banner overlays page content unless the content itself makes room — a bare
-   `position: fixed` element does not push anything else down. */
+/* Clearance between the (now in-flow, one-time) banner and the report body — this padding
+   correctly applies once, at the true start/end of `.tr20-print__body`'s box, which is exactly
+   where the top/bottom marks now sit too. */
 .tr20-print__body { padding-top: 30px; padding-bottom: 26px; }
 
 .tr20-print__scope { padding: 0 24px 24px; }
