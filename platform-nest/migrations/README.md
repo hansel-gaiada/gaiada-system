@@ -283,3 +283,37 @@ at it, run `node dist/db/migrate.js`, confirm the ordered `applied:` list and ex
    concurrent PM session's `pm_dependency_enforcement.sql`, landed between this ticket's
    authoring-time check and its commit — re-verify with `ls migrations | sort | tail` before
    trusting that, exactly as every entry in this log has had to).
+
+   **2026-08-09 update (PRV-01, `webdev_provisioned_sites`) — `0090` TAKEN, no collision.** The
+   design doc (`docs/blueprints/provision-erp-seam-design.md` §05) named "next-unused at merge
+   time" rather than a fixed number, correctly anticipating drift. `ls migrations | sort | tail`
+   at authoring time showed the real head as `0089_pm_dependency_enforcement.sql` with `0090`
+   genuinely free; re-verified again immediately after the test suite ran, still free, no
+   concurrent session had taken it in the interim. Shipped as `0090_webdev_provisioned_sites.sql`:
+   the ERP-side mirror of a provision/webdesk-created site+repo, brand new, zero DML. Composite
+   tenant-scoped FK to `pipeline_runs (id, tenant_id)`, reusing `ux_pipeline_runs_id_tenant`
+   (added by 0088 — NOT recreated here). Takes the `app_module_allowed('webdev')` **THIRD WALL**
+   (0028/0079's shape), deliberately NOT 0088's plain wall — see this file's own header for the
+   full justification: 0088's D-2a exception applies only because the client portal is that
+   table's primary writer, and nothing portal- or core-scoped ever touches
+   `webdev_provisioned_sites` (every access path is the new `webdev` module's controllers,
+   PRV-02). Two deviations from the design's literal §05 DDL sketch, both flagged in the
+   migration's own header rather than made silently: (1) `provider_ref` is nullable (state-tied
+   by a CHECK, `wps_provider_ref_present_once_egressed`) because the design's own state machine
+   requires a pre-egress `requested` row that cannot yet have one; (2) an added tenant-scoped
+   partial-unique on `(tenant_id, provider_ref)` beyond what the sketch enumerated, as a second
+   idempotency backstop. Verified on a disposable per-test-file Postgres via the repo's own
+   `initTestDb` harness against the **test containers** (`gaiada-test-pg` :55433 /
+   `gaiada-test-cerbos` :3592, distinct `TEST_DB_PREFIX`), migrated as owner, queried as
+   `platform_app_test` (NOSUPERUSER NOBYPASSRLS): cross-tenant isolation, the two-sided
+   `app_module_allowed` handshake (unset AND wrong-scope both read zero rows, no error; correct
+   scope reads the row), the composite-FK cross-tenant rejection (constructed mismatch against a
+   real different-tenant run, with a same-tenant positive control), the status-tied provider_ref
+   CHECK, the slug-grammar CHECK, and all three partial-unique backstops' many-NULLs-allowed /
+   second-non-failed-refused / retry-after-failure-allowed behavior — 13/13 assertions green;
+   test database dropped after the run (confirmed zero leftover `prv01_*`-prefixed databases; one
+   unrelated `pgtest_f_*` database from a different concurrent session was left untouched, not
+   this ticket's to clean up). `npm run lint:migration-rls` green (89 migrations scanned, 36
+   enforced). `0058`/`0059`/`0070` remain the permanently-orphaned reservation gaps — still do NOT
+   fill them. **Next unused is `0091`** — re-verify with `ls migrations | sort | tail` before
+   trusting that, exactly as every entry in this log has had to.

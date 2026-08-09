@@ -65,6 +65,11 @@ import { SearchGoogleOauthCallbackController } from "./modules/search/search-goo
 import { SearchGoogleAdsController } from "./modules/search/search-google-ads.controller";
 import { SearchReportsController } from "./modules/search/search-reports.controller";
 import { ReportsController } from "./modules/reports/reports.controller";
+// PRV-02: the `webdev` module shell's HTTP surface (provision a site+repo, read/reconcile the mirror
+// rows). Mounts at /api/:tenantId/modules/webdev/* behind ModuleEnabledGuard("webdev") — the FIRST
+// webdev surface to be module-scoped rather than core, because `webdev_provisioned_sites` (0090)
+// carries the third RLS wall and the client portal never touches it.
+import { WebdevController } from "./modules/webdev/webdev.controller";
 import { CheckinsController } from "./modules/reports/checkins.controller"; // TR-09
 import { AppraisalsController } from "./modules/reports/appraisals.controller"; // TR-24
 import { PrintPayloadController } from "./modules/reports/print-payload.controller"; // TR-21
@@ -110,6 +115,8 @@ import { MagicLinkController } from "./mail/magic-link/controller";
     // wave; SM-10 already added its own reports GET/POST section there). Shares SearchController's
     // exact route prefix; no individual route path collides (search-reports.controller.ts's own header).
     SearchReportsController,
+    // PRV-02: /api/:t/modules/webdev/* (provision · provisioned-sites · reconcile).
+    WebdevController,
     // TR-07: reports admin/ops surface (facts recompute). §6.2 routes it at /api/:t/reports/*,
     // not /api/:t/modules/reports/*, so it is listed with the verticals but mounts top-level.
     ReportsController,

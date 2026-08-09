@@ -35,6 +35,7 @@ import { hrModule } from "./modules/hr";
 import { assistantModule } from "./modules/assistant";
 import { searchModule } from "./modules/search";
 import { reportsModule } from "./modules/reports";
+import { webdevModule } from "./modules/webdev";
 import { createDataForSeoProviderFromConfig } from "./modules/search/providers/dataforseo";
 import { createSemrushProviderFromConfig } from "./modules/search/providers/semrush";
 import { createAhrefsProviderFromConfig } from "./modules/search/providers/ahrefs";
@@ -332,6 +333,10 @@ async function bootstrap(): Promise<void> {
   registerModule(assistantModule);
   registerModule(searchModule);
   registerModule(reportsModule);
+  // PRV-02: contributes the `webdev.provisionSite` McpToolDef to `GET /mcp/tool-defs` (nothing is
+  // hardcoded hub-side). Registering the module does NOT make the tool reachable by automation —
+  // that needs the hub's AUTOMATION_ALLOWLIST entry and its Cerbos `mcp_tool` row, both PRV-03's.
+  registerModule(webdevModule);
   // SM-75: the search provider-mode + ads-write-mode boot wiring — see wireSearchProviderModeAndAdsWriteMode's
   // own header above `bootstrap()` for why this is a single unconditional call rather than inline code.
   wireSearchProviderModeAndAdsWriteMode();

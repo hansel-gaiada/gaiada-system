@@ -326,6 +326,44 @@ const configBase = {
     // AGENT_RUNNER_TOKEN gates every runner call, same convention as the other service tokens.
     agents: { url: process.env.AGENTS_URL ?? "", token: process.env.AGENT_RUNNER_TOKEN ?? "" },
   },
+  // PRV-02 — the `provision` seam (docs/blueprints/provision-erp-seam-design.md §03/§04). This is a
+  // REAL cross-host hop: platform-nest on gda-aicenter calling `provision` on gda-s01 over public
+  // HTTPS. Deliberately its OWN namespace, not a `services.*` row, because `services.*` is the
+  // admin/systems console's read-only aggregation and this is a WRITE seam that creates public
+  // infrastructure (a GitHub repo + an nginx vhost).
+  //
+  // ── NO DEFAULT ENDPOINT, EVER ────────────────────────────────────────────────────────────────
+  // `baseUrl` defaults to "" and MUST NOT be given a fallback of `https://provision.gaiada.online`
+  // (or anything else). A default endpoint turns "this deployment was never configured" into "this
+  // deployment silently provisions against production" — the exact class of accident that creates a
+  // repo and a public vhost nobody asked for. `provisionConfigured()` below is the fail-closed
+  // predicate; unconfigured ⇒ 503, never a half-attempt. `src/modules/webdev/egress-inventory.test.ts`
+  // pins the absence of any hardcoded provision host in module source.
+  //
+  // ── THE PASSWORD IS A CREDENTIAL, NOT A SETTING ──────────────────────────────────────────────
+  // `servicePassword` authenticates the ERP to provision as a dedicated, revocable SERVICE account
+  // (design D-P9). It is never logged, never serialized into a mirror row, never returned in a
+  // response, and never handed to the MCP hub. The GitHub PAT and the fleet deploy SSH key live on
+  // gda-s01 and NEVER enter Zone A (D-P4) — nothing here references them, by design.
+  provision: {
+    baseUrl: process.env.PROVISION_BASE_URL ?? "",
+    serviceEmail: process.env.PROVISION_SERVICE_EMAIL ?? "",
+    servicePassword: process.env.PROVISION_SERVICE_PASSWORD ?? "",
+    // Per-request timeout on ONE HTTP call to provision (login / provision / project read).
+    timeoutMs: Number(process.env.PROVISION_TIMEOUT_MS ?? 20_000),
+    // Connect/TLS-error retry budget for a single logical call (design §03: 3 attempts,
+    // exponential backoff, ≤30s total). Deliberately NOT applied to a completed HTTP response —
+    // a 4xx/5xx from provision is an answer, and re-POSTing an answered create is how you get two
+    // repos. Only transport failures (where we cannot know whether the request was received) are
+    // retried, and even then the far side's DB-unique name + repo-exists check (layer 2) holds.
+    retryAttempts: Number(process.env.PROVISION_RETRY_ATTEMPTS ?? 3),
+    retryBaseDelayMs: Number(process.env.PROVISION_RETRY_BASE_DELAY_MS ?? 500),
+    // Status poll after a successful egress (design §04: ~5s → 30s backoff, ≤5 min, then an honest
+    // `failed/poll_timeout` that the hourly reconcile flow can still flip forward).
+    pollIntervalMs: Number(process.env.PROVISION_POLL_INTERVAL_MS ?? 5_000),
+    pollMaxIntervalMs: Number(process.env.PROVISION_POLL_MAX_INTERVAL_MS ?? 30_000),
+    pollMaxMs: Number(process.env.PROVISION_POLL_MAX_MS ?? 5 * 60_000),
+  },
   // ASST-06 — the assistant's send->stream engine. Reuses `services.gateway` above for the actual
   // ai-gateway-go URL/token (already the one place GATEWAY_URL/GATEWAY_TOKEN are wired from env,
   // same binding admin-systems.controller.ts and search's providers/gateway-client.ts read) —
@@ -874,6 +912,23 @@ const configBase = {
 // so no deployment has to learn anything new.
 export const config: typeof configBase & { google: typeof configBase.search.google } =
   Object.assign(configBase, { google: configBase.search.google });
+
+/** PRV-02 — the `provision` seam is fully configured and an egress is even attemptable.
+ *
+ *  All THREE knobs are required: a base URL with no service credential cannot authenticate (every
+ *  provision call is `Bearer`-gated behind `POST /api/users/login`), and a credential with no base
+ *  URL has nowhere to go. Anything less is "unconfigured", not "partly working" — the provisioning
+ *  service turns a false here into `ProvisionNotConfiguredError` -> 503, exactly the fail-closed
+ *  convention `googleOAuthConfigured()` above and `mcp-hub/src/delivery-tools.ts:78` already use.
+ *
+ *  Fail-CLOSED is load-bearing here in a way it is not for a read-only integration: the alternative
+ *  failure mode (a default endpoint, or "just skip the call") would either provision against a
+ *  production host nobody configured, or silently report success for infrastructure that was never
+ *  created. Both are worse than a 503. */
+export function provisionConfigured(): boolean {
+  const p = config.provision;
+  return !!(p.baseUrl && p.serviceEmail && p.servicePassword);
+}
 
 /** The bridge is fully configured (all four knobs present) and may start. */
 export function n8nBridgeEnabled(): boolean {
