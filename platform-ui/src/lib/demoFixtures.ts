@@ -9,6 +9,7 @@ import { pmDemo, allTrackerNotifications, pmTasksForUser } from "./demoPm";
 import { meetingsDemo } from "./demoMeetings";
 import { pipelineDemo, portalDemo } from "./demoPipeline";
 import { webdevChangeRequestsDemo } from "./demoWebdevChangeRequests";
+import { webdevProvisionedSitesDemo } from "./demoWebdevProvisionedSites";
 import { portalDashboardDemo } from "./demoPortal";
 import { reportsDemo } from "./demoReports";
 import { checkinsDemo } from "./demoCheckins";
@@ -1814,6 +1815,10 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
   // (lib/demoWebdevChangeRequests.ts).
   const webdevCr = webdevChangeRequestsDemo(method, p, url.searchParams, body, userId);
   if (webdevCr) return webdevCr;
+
+  // PRV-04 — Web Dev "Site & repo" card (run workspace) — stateful store (lib/demoWebdevProvisionedSites.ts).
+  const webdevSites = webdevProvisionedSitesDemo(method, p, url.searchParams, body, userId);
+  if (webdevSites) return webdevSites;
 
   // Client portal DASHBOARD (CP-2..CP-5) — overview/projects/timeline/deliverables/invoices/contracts/
   // profile/change-requests (MI-04 maintenance intake). Runs FIRST so its routes win, and returns

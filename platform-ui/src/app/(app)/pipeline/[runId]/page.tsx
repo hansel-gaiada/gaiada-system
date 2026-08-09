@@ -34,10 +34,13 @@ import {
 } from "@/lib/pipelineActions";
 import { findRecordingByMeetingId } from "@/lib/meetings";
 import { getClient, getProject } from "@/lib/entities";
+import { listProvisionedSitesForRun } from "@/lib/webdevProvisionedSites-data";
+import { provisionSiteAction, reconcileSiteAction } from "@/lib/webdevProvisionedSitesActions";
 import { Card, Eyebrow, StatusBadge } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { ArtifactMarkdown } from "@/components/pipeline/ArtifactMarkdown";
+import { SiteRepoCard, type SiteListState } from "@/components/pipeline/SiteRepoCard";
 import { MailThreadPanel } from "@/components/mail/MailThreadPanel";
 import { formatDateTime } from "@/lib/format";
 import "@/components/pipeline/pipeline.css";
@@ -96,6 +99,14 @@ export default async function PipelineRunPage({ params }: { params: Promise<{ ru
       else if (!(e instanceof PlatformError)) throw e;
     }
   }
+
+  // PRV-04 — the "Site & repo" card. Same refuse-vs-empty discipline as the project link above:
+  // `not_enabled`/`refused` are distinct states from "zero sites", never coalesced (see
+  // lib/webdevProvisionedSites-data.ts's header for why).
+  const sitesRead = await listProvisionedSitesForRun(userId, tenant, run.id);
+  const siteList: SiteListState = sitesRead.ok
+    ? { kind: "ok", sites: sitesRead.sites }
+    : { kind: sitesRead.reason === "not_enabled" ? "not_enabled" : "refused" };
 
   async function onDecide(formData: FormData) {
     "use server";
@@ -189,6 +200,13 @@ export default async function PipelineRunPage({ params }: { params: Promise<{ ru
             </div>
           </div>
         </Card>
+
+        <SiteRepoCard
+          runId={run.id}
+          list={siteList}
+          mayProvision={mayDecide}
+          actions={{ provision: provisionSiteAction, reconcile: reconcileSiteAction }}
+        />
 
         <Card title="Gates">
           {run.gates.length === 0 ? (

@@ -86,6 +86,10 @@ const STATUS_FAMILY: Record<string, StatusFamily> = {
   // already covered above by draft/pending/at-risk-family aliases where they
   // overlap; only the two not already present are added here).
   linked: "ok", unconfigured: "idle",
+  // PRV-04 — webdev_provisioned_sites lifecycle (requested/pending/provisioned already fall through
+  // to the default "progress" family). "live" is the terminal success state, same family as
+  // active/shipped; "failed" is already covered by the D14-08 entry above.
+  live: "ok",
 };
 function familyOf(s: string): StatusFamily {
   return STATUS_FAMILY[normalizeStatus(s)] ?? "progress";

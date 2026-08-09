@@ -250,3 +250,96 @@ describe.skipIf(!live)("W0-4 Cerbos matrix — scope_signoff.create now includes
     expect(await allow(p, signoff, "create")).toBe(false);
   });
 });
+
+// PRV-03 (provision <-> ERP seam, docs/blueprints/provision-erp-seam-design.md §06) —
+// resource_webdev_provisioned_site.yaml. Byte-level sibling of resource_webdev_change_request.yaml
+// (same module tiers, same TRAP #4 exec carve-out, same "no client role anywhere" invariant), so
+// this matrix mirrors that resource's own coverage rather than inventing a new shape.
+describe.skipIf(!live)("PRV-03 Cerbos matrix — webdev_provisioned_site (manager/exec/module tiers, client denial)", () => {
+  const site: Resource = { kind: "webdev_provisioned_site", tenantId: T1, module: "webdev" };
+  const siteT2: Resource = { kind: "webdev_provisioned_site", tenantId: T2, module: "webdev" };
+  const ACTIONS = ["read", "provision", "reconcile"];
+
+  it("company_admin: read + provision + reconcile all ALLOWED within their tenant", async () => {
+    const p = principal("company_admin", "company", T1);
+    for (const action of ACTIONS) expect(await allow(p, site, action)).toBe(true);
+  });
+
+  it("manager: read + provision + reconcile all ALLOWED within their tenant (a staff human driving the manual trigger)", async () => {
+    const p = principal("manager", "company", T1);
+    for (const action of ACTIONS) expect(await allow(p, site, action)).toBe(true);
+  });
+
+  it("manager of T1 is denied on T2's rows — cross-tenant deny, independent of RLS", async () => {
+    const p = principal("manager", "company", T1);
+    for (const action of ACTIONS) expect(await allow(p, siteT2, action)).toBe(false);
+  });
+
+  it("PLAIN MEMBER: denied on every action — no rule in this policy names `member` at all (provisioning is never a plain-member act)", async () => {
+    const p = principal("member", "company", T1);
+    for (const action of ACTIONS) expect(await allow(p, site, action)).toBe(false);
+  });
+
+  it("viewer: denied on every action too (same exclusion as member — this table has no self-service tier)", async () => {
+    const p = principal("viewer", "company", T1);
+    for (const action of ACTIONS) expect(await allow(p, site, action)).toBe(false);
+  });
+
+  it("TRAP #4 — group_executive (owner) with NO membership row ANYWHERE is ALLOWED read/provision/reconcile (the exec rule is notLow-only, never inTenant)", async () => {
+    const execNoMembership: Principal = {
+      userId: ME,
+      assurance: "high",
+      companies: [], // no company_memberships row at all — inTenant would be false for ANY tenant-gated rule
+      roles: [{ role: "group_executive", scopeType: "global", scopeId: null }],
+      sessionVersion: 1,
+    };
+    for (const action of ACTIONS) {
+      expect(await allow(execNoMembership, site, action)).toBe(true);
+      // and cross-company too — the whole point of the global grant
+      expect(await allow(execNoMembership, siteT2, action)).toBe(true);
+    }
+  });
+
+  it("group_executive at LOW assurance is denied (D4 ceiling applies even to the exec carve-out)", async () => {
+    const execLow: Principal = {
+      userId: ME, assurance: "low", companies: [],
+      roles: [{ role: "group_executive", scopeType: "global", scopeId: null }], sessionVersion: 1,
+    };
+    for (const action of ACTIONS) expect(await allow(execLow, site, action)).toBe(false);
+  });
+
+  it("module_manager (webdev dept manager, ORG-6): read + provision + reconcile ALLOWED in the served company", async () => {
+    const p = principal("webdev_manager", "company", T1);
+    for (const action of ACTIONS) expect(await allow(p, site, action)).toBe(true);
+  });
+
+  it("module_staff (webdev dept staff, ORG-6): read ALLOWED, provision/reconcile DENIED — creating infrastructure is manager-tier only", async () => {
+    const p = principal("webdev_staff", "company", T1);
+    expect(await allow(p, site, "read")).toBe(true);
+    expect(await allow(p, site, "provision")).toBe(false);
+    expect(await allow(p, site, "reconcile")).toBe(false);
+  });
+
+  it("A CLIENT-ONLY PRINCIPAL IS DENIED ON EVERYTHING — the `client` derived role appears nowhere in this policy, deliberately (same invariant resource_webdev_change_request.yaml states for its sibling table)", async () => {
+    const clientOnly: Principal = {
+      userId: ME, assurance: "high", companies: [T1],
+      roles: [{ role: "client", scopeType: "company", scopeId: T1 }], sessionVersion: 1,
+    };
+    for (const action of ACTIONS) expect(await allow(clientOnly, site, action)).toBe(false);
+  });
+
+  it("platform_admin: full access regardless of tenant", async () => {
+    const p: Principal = { userId: ME, assurance: "high", companies: [], roles: [{ role: "platform_admin", scopeType: "global", scopeId: null }], sessionVersion: 1 };
+    for (const action of ACTIONS) {
+      expect(await allow(p, site, action)).toBe(true);
+      expect(await allow(p, siteT2, action)).toBe(true);
+    }
+  });
+
+  it("everything is denied at assurance low, regardless of role", async () => {
+    for (const role of ["company_admin", "manager", "member", "webdev_manager", "webdev_staff", "viewer"]) {
+      const p: Principal = { userId: ME, assurance: "low", companies: [T1], roles: [{ role, scopeType: "company", scopeId: T1 }], sessionVersion: 1 };
+      for (const action of ACTIONS) expect(await allow(p, site, action)).toBe(false);
+    }
+  });
+});

@@ -1,0 +1,221 @@
+{
+  "id": "wswdprovision0001",
+  "name": "Subworkflow: webdev.provisionSite (PRV-03 provision<->ERP seam)",
+  "meta": {
+    "description": "PRV-03. Sub-workflow, called via Execute Workflow from pipeline-delivery.json's ADDITIVE 'prd_sign approved/signed?' branch (never triggered by its own webhook -- pipeline-delivery.json already owns POST ev/pipeline.gate.decided, and n8n allows exactly one active workflow per webhook path; a second trigger on the same path would silently steal or fail to claim it). Inputs (Define Below): tenantId (string), runId (string). Body: calls the hub tool webdev.provisionSite as wf:delivery (OBO). That call is write:true/impact:'medium', so the D14 gate SUSPENDS it for a human approval every time an automation principal calls it with no grant -- design section 04's stated contract is that 'suspended_for_approval' (detected via the hub's 'suspend: ...' isError text, the SAME shape pipeline-delivery.json's own deploy.production branch already parses) IS the success outcome here, not a failure. On suspend this sub-workflow files the WS4 approval itself via approvals.request (already allow-listed for wf:delivery) so a human sees it in the approvals inbox; D14's executor re-drives the ORIGINAL webdev.provisionSite call (as the wf:delivery principal) if/when a human approves, re-deriving the run + prd_sign-gate precondition at that time (platform-nest core/approval-executables.ts, PRV-03 entry) rather than trusting this moment's state. A non-suspend isError is a genuine failure (hub down, workflow de-scoped, tool bug) and is notified, not silently dropped. Output (Return node): { ok, action: 'provision_suspended'|'provision_failed'|'provisioned', approvalId?, error? }. Env: HUB_SERVICE_TOKEN, NOTIFY_USER_ID."
+  },
+  "nodes": [
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            { "name": "tenantId", "type": "string" },
+            { "name": "runId", "type": "string" }
+          ]
+        }
+      },
+      "name": "When Executed by Another Workflow",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://mcp-hub:3003/mcp",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{ $env.HUB_SERVICE_TOKEN }}" },
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "Accept", "value": "application/json, text/event-stream" },
+            { "name": "x-obo-provider", "value": "n8n" },
+            { "name": "x-obo-external-id", "value": "wf:delivery" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", id: 1, method: \"tools/call\", params: { name: \"webdev.provisionSite\", arguments: { tenantId: $json.tenantId, runId: $json.runId, framework: \"vite\" } } }) }}",
+        "options": { "response": { "response": { "responseFormat": "text" } } }
+      },
+      "name": "MCP webdev.provisionSite (wf:delivery)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [220, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json.data ?? $input.first().json.body ?? '';\nconst line = String(raw).split('\\n').find((l) => l.startsWith('data:')) ?? '';\nconst rpc = JSON.parse(line.slice(5).trim());\nconst t = $('When Executed by Another Workflow').first().json;\nlet suspended = false, failed = false, reason = '', site = null;\nif (rpc.result?.isError) {\n  reason = rpc.result.content?.[0]?.text || 'webdev.provisionSite failed';\n  // Same shape pipeline-delivery.json's own 'Prod result' node already parses for deploy.production:\n  // the D14 write gate's denial text is prefixed 'suspend: ...' -- design section 04's CONTRACT is that\n  // this IS the success outcome for an automation-triggered provision (a human decides via WS4).\n  suspended = /^suspend:/.test(reason);\n  failed = !suspended;\n} else {\n  try { site = JSON.parse(rpc.result?.content?.[0]?.text ?? '{}'); } catch { site = null; }\n}\nreturn [{ json: { tenantId: t.tenantId, runId: t.runId, suspended, failed, reason, site } }];"
+      },
+      "name": "Parse provision result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [440, 0]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "typeValidation": "loose", "version": 2 },
+          "conditions": [
+            {
+              "id": "is-suspended",
+              "leftValue": "={{ $json.suspended }}",
+              "rightValue": "",
+              "operator": { "type": "boolean", "operation": "true", "singleValue": true }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Suspended (D14)?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [660, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://mcp-hub:3003/mcp",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{ $env.HUB_SERVICE_TOKEN }}" },
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "Accept", "value": "application/json, text/event-stream" },
+            { "name": "x-obo-provider", "value": "n8n" },
+            { "name": "x-obo-external-id", "value": "wf:delivery" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", id: 2, method: \"tools/call\", params: { name: \"approvals.request\", arguments: { tenantId: $json.tenantId, workflowId: \"wf:delivery\", toolName: \"webdev.provisionSite\", toolArgs: { tenantId: $json.tenantId, runId: $json.runId, framework: \"vite\" }, impact: \"medium\", reason: $json.reason } } }) }}",
+        "options": { "response": { "response": { "responseFormat": "text" } } }
+      },
+      "name": "MCP approvals.request (webdev.provisionSite)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [880, -100]
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json.data ?? $input.first().json.body ?? '';\nconst line = String(raw).split('\\n').find((l) => l.startsWith('data:')) ?? '';\nconst rpc = JSON.parse(line.slice(5).trim());\nif (rpc.result?.isError) throw new Error(rpc.result.content?.[0]?.text ?? 'approvals.request failed');\nlet a = {}; try { a = JSON.parse(rpc.result?.content?.[0]?.text ?? '{}'); } catch {}\nconst p = $('Parse provision result').first().json;\nreturn [{ json: { ok: true, action: 'provision_suspended', tenantId: p.tenantId, runId: p.runId, approvalId: a.id ?? null } }];"
+      },
+      "name": "Parse approval (provision)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1100, -100]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "typeValidation": "loose", "version": 2 },
+          "conditions": [
+            {
+              "id": "is-failed",
+              "leftValue": "={{ $json.failed }}",
+              "rightValue": "",
+              "operator": { "type": "boolean", "operation": "true", "singleValue": true }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Genuine failure?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [880, 100]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://mcp-hub:3003/mcp",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{ $env.HUB_SERVICE_TOKEN }}" },
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "Accept", "value": "application/json, text/event-stream" },
+            { "name": "x-obo-provider", "value": "n8n" },
+            { "name": "x-obo-external-id", "value": "wf:delivery" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", id: 3, method: \"tools/call\", params: { name: \"notify\", arguments: { tenantId: $json.tenantId, recipientId: $env.NOTIFY_USER_ID, type: \"provision_propose_failed\", payload: { runId: $json.runId, reason: $json.reason } } } }) }}",
+        "options": { "response": { "response": { "responseFormat": "text" } } }
+      },
+      "name": "MCP notify (genuine failure)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1100, 100]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            { "name": "ok", "type": "boolean", "value": "={{ false }}" },
+            { "name": "action", "type": "string", "value": "provision_failed" },
+            { "name": "tenantId", "type": "string", "value": "={{ $('Parse provision result').first().json.tenantId }}" },
+            { "name": "runId", "type": "string", "value": "={{ $('Parse provision result').first().json.runId }}" },
+            { "name": "error", "type": "string", "value": "={{ $('Parse provision result').first().json.reason }}" }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Return (failed)",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [1320, 100]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            { "name": "ok", "type": "boolean", "value": "={{ true }}" },
+            { "name": "action", "type": "string", "value": "provisioned" },
+            { "name": "tenantId", "type": "string", "value": "={{ $('Parse provision result').first().json.tenantId }}" },
+            { "name": "runId", "type": "string", "value": "={{ $('Parse provision result').first().json.runId }}" }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Return (provisioned)",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [1100, 300]
+    }
+  ],
+  "connections": {
+    "When Executed by Another Workflow": {
+      "main": [[{ "node": "MCP webdev.provisionSite (wf:delivery)", "type": "main", "index": 0 }]]
+    },
+    "MCP webdev.provisionSite (wf:delivery)": {
+      "main": [[{ "node": "Parse provision result", "type": "main", "index": 0 }]]
+    },
+    "Parse provision result": {
+      "main": [[{ "node": "Suspended (D14)?", "type": "main", "index": 0 }]]
+    },
+    "Suspended (D14)?": {
+      "main": [
+        [{ "node": "MCP approvals.request (webdev.provisionSite)", "type": "main", "index": 0 }],
+        [{ "node": "Genuine failure?", "type": "main", "index": 0 }]
+      ]
+    },
+    "MCP approvals.request (webdev.provisionSite)": {
+      "main": [[{ "node": "Parse approval (provision)", "type": "main", "index": 0 }]]
+    },
+    "Genuine failure?": {
+      "main": [
+        [{ "node": "MCP notify (genuine failure)", "type": "main", "index": 0 }],
+        [{ "node": "Return (provisioned)", "type": "main", "index": 0 }]
+      ]
+    },
+    "MCP notify (genuine failure)": {
+      "main": [[{ "node": "Return (failed)", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {},
+  "pinData": {}
+}

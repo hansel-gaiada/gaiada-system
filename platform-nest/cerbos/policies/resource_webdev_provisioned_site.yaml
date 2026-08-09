@@ -1,0 +1,75 @@
+# PRV-03 (provision <-> ERP seam, docs/blueprints/provision-erp-seam-design.md §06) — authz for the
+# NEW `webdev_provisioned_site` resource kind. Nothing existed for this kind before this file landed;
+# an unlisted kind/action is a SILENT DENY that reads exactly like a logic bug (standing estate trap)
+# — `webdev.controller.ts`'s own header already called this out while it waited for this policy.
+# Restart `gaiada-test-cerbos` after editing this file; the bind-mount does not hot-reload.
+#
+# webdev_provisioned_site = the ERP-side mirror row for one provision (repo+hosting) attempt —
+# `provider`, `provider_ref`, slug, framework, status, urls (0090). Handlers pass
+# resource.attr = {kind:"webdev_provisioned_site", tenantId, module:"webdev", id?} — same shape as
+# the sibling `webdev_change_request` resource (resource_webdev_change_request.yaml), which this file
+# is a byte-level sibling of.
+#
+# ── ACTIONS ──────────────────────────────────────────────────────────────────────────────────────
+#   read      — list/detail (the run workspace's "Site & repo" card, PRV-04).
+#   provision — POST …/provision. Creates PUBLIC infrastructure (a private org repo, a server
+#               directory, an nginx vhost, a TLS cert) — never a plain-member action. A human calling
+#               this endpoint directly IS the approval on the manual/staff trigger (design §04's
+#               secondary trigger); the AUTOMATION trigger never reaches this policy as a human at
+#               all — it suspends into WS4 (D14) and the APPROVER's decision is what unlocks a
+#               `resource_mcp_tool.yaml`-gated re-drive, not a grant on THIS resource.
+#   reconcile — POST …/reconcile. Also gated with `provision`'s tier (not folded into `read`)
+#               because a resume-path reconcile can itself cause an egress (provisioning.service.ts's
+#               own header: "reconcile can cause an egress").
+#
+# ── THE INVARIANT THIS FILE MUST NOT BREAK ──────────────────────────────────────────────────────
+# The `client` derived role appears NOWHERE in this policy, deliberately — same invariant
+# resource_webdev_change_request.yaml states for its own sibling table. A provisioned-site row is
+# never portal-readable (v1 has no client-facing surface for it at all, design §06's UI row is
+# staff-only) and a principal holding only the `client` grant must DENY on every action here.
+#
+# ── TRAP #4 (repeated verbatim; this file is the Nth application of it) ─────────────────────────
+# `group_executive` is a GLOBAL cross-company grant (`scopeType == "global"`,
+# derived_roles.yaml:19-24). `variables.inTenant` is `resource.tenantId in principal.companies`, and
+# `principal.companies` is built exclusively from the caller's `company_memberships` rows — so an
+# owner who holds the global grant but has NO membership row in a given company has an empty (or
+# non-matching) `companies` set and `inTenant` is FALSE for them there. Folding the exec into the
+# company_admin/manager rule below would produce a global grant that never fires for exactly the
+# case it exists to cover. The shipped correct shape is resource_integration_connection.yaml:29-33 /
+# resource_webdev_change_request.yaml:44-58, copied here. `notLow` still applies — a low-assurance
+# session gets nothing, owner or not. QA probes this positively: exec with NO membership row => ALLOW
+# on read/provision/reconcile.
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: webdev_provisioned_site
+  importDerivedRoles: ["gaiada_scopes"]
+  variables:
+    import: ["gaiada_common"]
+  rules:
+    - actions: ["*"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["platform_admin"]
+    # group_executive — see TRAP #4 above. Gated on `notLow` ONLY, never `inTenant`.
+    - actions: ["read", "provision", "reconcile"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["group_executive"]
+      condition: { match: { expr: "variables.notLow" } }
+    # The in-tenant elevated tier: company_admin and manager get the full surface (a staff human
+    # provisioning a site for one of their own runs, or reading/reconciling the mirror table).
+    - actions: ["read", "provision", "reconcile"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin", "manager"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    # ORG-6 module tiers (derived_roles.yaml:108-135), string-composed from resource.attr.module —
+    # the webdev dept's own manager may provision/reconcile; its staff may only read. Mirrors
+    # resource_webdev_change_request.yaml's manager/staff split exactly (same module, same table
+    # family, same reasoning: creating infrastructure is a manager-tier act, reading the card is not).
+    - actions: ["read", "provision", "reconcile"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["module_manager"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["module_staff"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }

@@ -424,6 +424,60 @@ describe.skipIf(!liveReachable)("D14-13 — LIVE resource_mcp_tool.yaml policy",
     expect(without).toBe(true); // a verified human may run a high-impact write; D14 never applied to them
   });
 
+  // ── PRV-03 — the SAME grant-lift matrix, for `webdev.provisionSite` (write:true, impact:"medium",
+  // added to `wf:delivery`'s REAL allowlist entry and to the executable list in this same policy
+  // file). Distinct from deploy.production's block above because the tool is medium-impact (a
+  // different in-code suspend-reason string) and is a REAL, permanent AUTOMATION_ALLOWLIST member
+  // (not a fixture scope added/removed for this test), so no beforeAll/afterAll wiring is needed.
+  describe("PRV-03 — webdev.provisionSite (medium-impact write, wf:delivery)", () => {
+    const PROVISION_ARGS = { tenantId: "tenant-1", runId: "run-1", framework: "vite" };
+
+    beforeEach(() => {
+      registerTool({
+        name: "webdev.provisionSite",
+        description: "provision a site+repo",
+        minAssurance: "low",
+        write: true,
+        impact: "medium",
+        inputSchema: { type: "object" },
+        handler: async () => "PROVISIONED",
+      });
+    });
+
+    it("ALLOW: automation + workflow-scoped (wf:delivery) + verified grant + tool in the executable list", async () => {
+      const grant = mintVerified("webdev.provisionSite", PROVISION_ARGS);
+      expect(await livePolicyAllows(deliveryWf, "webdev.provisionSite", grant)).toBe(true);
+      const d = await authorizeCall(deliveryWf, "webdev.provisionSite", grant);
+      expect(d.allow).toBe(true);
+    });
+
+    it("DENY: no grant ⇒ suspend for a medium-impact write (the D14 beat the design's WS4 approval IS)", async () => {
+      expect(await livePolicyAllows(deliveryWf, "webdev.provisionSite")).toBe(false);
+      const d = await authorizeCall(deliveryWf, "webdev.provisionSite");
+      expect(d.allow).toBe(false);
+      if (!d.allow) expect(d.reason).toMatch(/suspend.*medium-impact/);
+    });
+
+    it("DENY (MISPLACEMENT DETECTOR): verified grant but the workflow is NOT scoped to webdev.provisionSite", async () => {
+      const grant = mintVerified("webdev.provisionSite", PROVISION_ARGS);
+      expect(await livePolicyAllows(noScopeWf, "webdev.provisionSite", grant)).toBe(false);
+      const d = await authorizeCall(noScopeWf, "webdev.provisionSite", grant);
+      expect(d.allow).toBe(false);
+    });
+
+    it("DENY: a grant minted for a DIFFERENT tool name does not lift webdev.provisionSite (args/tool binding)", async () => {
+      const grant = mintVerified("deploy.production", DEPLOY_ARGS);
+      expect(await livePolicyAllows(deliveryWf, "webdev.provisionSite", grant)).toBe(false);
+    });
+
+    it("non-automation principals decide IDENTICALLY with and without a grant (D14 never applied to them)", async () => {
+      const without = await livePolicyAllows(human, "webdev.provisionSite");
+      const withGrant = await livePolicyAllows(human, "webdev.provisionSite", mintVerified("webdev.provisionSite", PROVISION_ARGS));
+      expect(withGrant).toBe(without);
+      expect(without).toBe(true);
+    });
+  });
+
   it("PARITY: with CERBOS_URL unset the in-code engine yields the same verdicts", async () => {
     config.cerbosUrl = "";
     const { authorize } = await import("./policy");

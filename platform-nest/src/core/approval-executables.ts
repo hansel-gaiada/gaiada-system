@@ -27,6 +27,7 @@
 // alone is not the fix.
 import type { PoolClient } from "pg";
 import { lockPipelineRun } from "./pipeline-lock";
+import { evaluateProvisionPrecondition } from "../modules/webdev/provisioning.service";
 
 /** The result of a server-side precondition re-evaluation. `reason` is a TYPED token (snake_case,
  *  e.g. `run_blocked`, `stage_already_deployed`, `run_not_found`) — it is stored verbatim after the
@@ -130,12 +131,14 @@ export function getExecutable(toolName: string): ExecutableApprovalEntry | undef
  * test files that register their own fixture entries don't collide with entries left over from a
  * prior test run in the same process.
  *
- * NOTE for callers: this also clears the D14-05 `deploy.staging`/`deploy.production` entries AND the
- * D14-15 `pm.createTask`/`pm.createDoc` entries registered below (they are all plain calls to
- * `registerExecutableApproval`, no different from a test fixture, once the module has loaded). A
- * test file that needs the deploy pair back after resetting calls `registerCoreExecutableApprovals()`;
- * one that needs the PM pair back calls `registerPmExecutableApprovals()` — either way, do not
- * hand-roll a second copy of their lock/precondition.
+ * NOTE for callers: this also clears the D14-05 `deploy.staging`/`deploy.production` entries, the
+ * D14-15 `pm.createTask`/`pm.createDoc` entries, AND the PRV-03 `webdev.provisionSite` entry
+ * registered below (they are all plain calls to `registerExecutableApproval`, no different from a
+ * test fixture, once the module has loaded). A test file that needs the deploy pair back after
+ * resetting calls `registerCoreExecutableApprovals()`; one that needs the PM pair back calls
+ * `registerPmExecutableApprovals()`; one that needs the webdev entry back calls
+ * `registerWebdevExecutableApprovals()` — either way, do not hand-roll a second copy of their
+ * lock/precondition.
  */
 export function resetExecutableApprovals(): void {
   registry.clear();
@@ -479,3 +482,88 @@ registerPmExecutableApprovals();
 // `search.launchCampaign` (SM-55 / architect ruling A13) — see this file's header doctrine. VER-01
 // verified `search.setBudget` stays `not_applicable` even after a human approves it; nothing here
 // changes that.
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════════
+// PRV-03 — `webdev.provisionSite`: the provision<->ERP seam's one registry entry.
+// ═════════════════════════════════════════════════════════════════════════════════════════════════
+//
+// Design: docs/blueprints/provision-erp-seam-design.md §04 (idempotency/precondition), §06 (D14
+// integration point), §09 D-P5/D-P3. The tool is defined in `modules/webdev/index.ts`
+// (`write:true`, `impact:"medium"`) and dispatched by `modules/webdev/webdev.controller.ts` ->
+// `provisioning.service.ts#provisionSite`. It creates PUBLIC infrastructure — a private repo under
+// `Gaia-Digital-Agency`, a `/var/www/<slug>` directory, an nginx vhost, a Let's Encrypt cert — so an
+// `origin='automation'` re-drive needs BOTH this entry (D14's in-code half) AND the
+// `resource_mcp_tool.yaml` executable-list entry (Cerbos's independent half, PRV-03's own note
+// there) before it can execute at all. Absent either one, an approved row stays `failed` — the safe
+// direction, never a silent unattended-dispatch.
+//
+// WHAT THIS PRECONDITION CHECKS, AND WHY IT IS NARROWER THAN `provisionSite`'s OWN RE-CHECK — READ
+// THIS BEFORE ASSUMING A ROW-EXISTENCE CHECK IS MISSING. `provisioning.service.ts` exports
+// `evaluateProvisionPrecondition(client, runId, opts)` PRECISELY so this entry could re-derive it
+// verbatim rather than re-implementing a second copy that could drift from the one the manual/staff
+// endpoint path also uses (see that function's own header — it says as much). Called here with
+// `requireSignedPrdGate: true`, per its own documented split: the AUTOMATION path (this one) is only
+// entitled to propose in the first place because a `prd_sign` gate landed `approved`/`signed`
+// (design §04's primary trigger) — re-checking it here closes the window where the gate was
+// reopened, reversed, or the run parked `blocked` between proposal and a human clicking Approve
+// (which can be minutes, hours, or days later; WD-29's whole lesson is that "fine when approved" is
+// not the same claim as "fine now").
+//
+// The "no existing non-failed mirror row for this run" arm is DELIBERATELY NOT duplicated here, and
+// that is not an oversight — `evaluateProvisionPrecondition`'s own header states why: that answer is
+// a ROW, not a boolean (the loser of a race is handed the existing site, never an error), so it
+// belongs to `provisionSite`'s own LOCK -> re-read -> claim sequence, which is exactly what runs when
+// the executor's hub call actually lands (`webdev.controller.ts` -> `provisionSite`). This entry's
+// job is narrower and different: decide whether the executor may call the hub AT ALL. Both checks
+// run under a lock keyed on the SAME `runId` (this entry via `lockPipelineRun` below, the endpoint's
+// own `takeLock` via `lockPipelineRun` too), just in two SEPARATE transactions — the claim
+// transaction here commits before the hub call is made (approval-execute.ts's own "TRANSACTION
+// BOUNDARY" note: never hold an advisory lock across the network hop back into this same platform),
+// so the two checks narrow, but do not eliminate, the same tiny window every other D14 entry accepts
+// (`deployPrecondition`'s header note applies verbatim: re-derived is not the same guarantee as
+// atomic-with-the-write, and the SECOND, schema-level backstop — `ux_wps_run`/`ux_wps_slug` in 0090
+// — is what makes a slipped race land a 409/`existing` outcome rather than a second repo).
+//
+// LOCK KEY: reuses `deployLockKey` (already generic over `toolName`, despite its name) rather than
+// hand-rolling a second copy of "runId, or a tool-prefixed fallback for malformed args" — the exact
+// same fail-closed shape `deployLockKey`/`pmLockKey` already established for this file.
+function webdevProvisionLockKey(toolArgs: Record<string, unknown>): string {
+  return deployLockKey(toolArgs, "webdev.provisionSite");
+}
+
+/** The registry precondition. Never writes; only reads (via `evaluateProvisionPrecondition`) under
+ *  the pipeline-run lock taken as the FIRST statement — same ordering `deployPrecondition` requires,
+ *  for the same reason (`pipeline_runs.status` and `pipeline_gates` are mutated elsewhere under this
+ *  exact lock; reading them without it would reopen the WD-29 TOCTOU gap for a second writer). */
+async function webdevProvisionPrecondition(
+  client: PoolClient,
+  toolArgs: Record<string, unknown>,
+): Promise<PreconditionVerdict> {
+  const runId = extractRunId(toolArgs);
+  // Fail closed on a missing/malformed runId: there is no run to lock or re-evaluate against.
+  // `run_not_found` matches `evaluateProvisionPrecondition`'s own token for "no such run" — one typed
+  // vocabulary, not two spellings of the same fact.
+  if (!runId) return { ok: false, reason: "run_not_found" };
+
+  await lockPipelineRun(client, runId);
+  const verdict = await evaluateProvisionPrecondition(client, runId, { requireSignedPrdGate: true });
+  if (!verdict.ok) return { ok: false, reason: verdict.reason };
+  return { ok: true };
+}
+
+/**
+ * Registers `webdev.provisionSite`. Exported for the same reason `registerCoreExecutableApprovals`/
+ * `registerPmExecutableApprovals` are: a test file that calls `resetExecutableApprovals()` and wants
+ * this entry back afterward should call this rather than hand-roll a second copy of its lock/
+ * precondition. `resetExecutableApprovals()` clears this along with every other entry — same note
+ * applies as `resetExecutableApprovals`'s own doc.
+ */
+export function registerWebdevExecutableApprovals(): void {
+  registerExecutableApproval({
+    toolName: "webdev.provisionSite",
+    lockKey: webdevProvisionLockKey,
+    precondition: webdevProvisionPrecondition,
+  });
+}
+
+registerWebdevExecutableApprovals();

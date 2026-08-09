@@ -38,7 +38,12 @@ export const AUTOMATION_ALLOWLIST: Record<string, readonly string[]> = {
   // dedupe branch calling createRun itself and minting a phantom run.
   "wf:mtg-dispatcher": ["media.transcribe", "llm.summarize", "llm.extract", "meeting.recordingContext", "pipeline.runBySourceMeeting", "pipeline.createRun", "pipeline.updateStage", "notify"],
   // pipeline.updateRun (WD-05): parks a run 'blocked' once the bounded revise loop escalates.
-  "wf:delivery": ["pipeline.getRun", "pipeline.createStage", "pipeline.updateStage", "pipeline.updateRun", "pipeline.openGate", "design.prototype", "code.scaffold", "github.repoStatus", "deploy.staging", "deploy.production", "notify", "approvals.request"],
+  // webdev.provisionSite (PRV-03, provision<->ERP seam design §04/§06): proposed on prd_sign
+  // decided approved/signed. write:true/impact:"medium" — the D14 gate SUSPENDS this call into WS4
+  // exactly like deploy.*, and resource_mcp_tool.yaml's executable list is the only thing that lets
+  // an approved re-drive land (see that policy's PRV-03 note). Do not widen this entry to cover any
+  // other webdev tool without its own gate — same house rule deploy.* already established.
+  "wf:delivery": ["pipeline.getRun", "pipeline.createStage", "pipeline.updateStage", "pipeline.updateRun", "pipeline.openGate", "design.prototype", "code.scaffold", "github.repoStatus", "deploy.staging", "deploy.production", "webdev.provisionSite", "notify", "approvals.request"],
   "wf:scope": ["pipeline.getRun", "pipeline.openGate", "notify"],
   // pm.createDoc / pm.createTask (WD-06, D-4): the report-track sink — a PM doc + review task
   // under the run's project, scoped to wf:report ONLY (invisible to wf:scope/wf:delivery/etc).

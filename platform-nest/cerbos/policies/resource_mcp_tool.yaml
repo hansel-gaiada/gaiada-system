@@ -42,6 +42,14 @@
 # (search.setBudget / search.applyNegatives / search.launchCampaign — SM-55 / architect ruling A13)
 # ARE PERMANENTLY BARRED FROM BOTH LISTS.
 #
+# PRV-03 (2026-08-09) — `webdev.provisionSite` added. It is `write:true`/`impact:"medium"` (creates a
+# private org repo + a server directory + an nginx vhost + a TLS cert — public infrastructure, not a
+# row edit), so an `origin='automation'` re-drive needs the SAME grant-lift disjunct deploy.* needed.
+# The suspension is the human beat the design's "auto-generates" ask requires (provision-erp-seam-
+# design.md §04 D-P3) — do NOT lower `minAssurance` or widen `wf:delivery`'s allow-list scope to dodge
+# it; the tool's registry entry (approval-executables.ts) re-derives run/prd_sign-gate state under
+# the SAME lock at execution time, never trusting approval-time state.
+#
 # The `has()` + string-type + non-empty triple is fail-closed for every shape a request can carry:
 # attribute absent (every pre-existing request), empty string, and JSON null all fall through to the
 # unchanged deny. Without the `type(...) == string` guard, CEL's heterogeneous `!=` would let a null
@@ -111,4 +119,4 @@ resourcePolicy:
                     (has(request.resource.attr.approvalId) &&
                      type(request.resource.attr.approvalId) == string &&
                      request.resource.attr.approvalId != "" &&
-                     request.resource.attr.name in ["deploy.staging", "deploy.production"])))
+                     request.resource.attr.name in ["deploy.staging", "deploy.production", "webdev.provisionSite"])))

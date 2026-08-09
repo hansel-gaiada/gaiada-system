@@ -156,17 +156,17 @@ export class WebdevController {
         // The name is held by a site that is not ours. The mirror row is COMMITTED as
         // `failed/slug_conflict_foreign` before this throw — the refusal is a recorded fact with a
         // notification behind it, not just a status code.
-        throw new ConflictException({ error: "slug_conflict_foreign", site: outcome.site });
+        throw new ConflictException({ message: "slug_conflict_foreign", site: outcome.site });
       case "slug_taken":
-        throw new ConflictException({ error: "slug_taken" });
+        throw new ConflictException({ message: "slug_taken" });
       case "invalid":
-        throw new BadRequestException({ error: outcome.reason });
+        throw new BadRequestException({ message: outcome.reason });
       case "precondition_failed":
-        throw new BadRequestException({ error: outcome.reason });
+        throw new BadRequestException({ message: outcome.reason });
       case "provider_rejected":
-        throw new ServiceUnavailableException({ error: "provider_rejected", site: outcome.site });
+        throw new ServiceUnavailableException({ message: "provider_rejected", site: outcome.site });
       case "egress_error":
-        throw new ServiceUnavailableException({ error: "egress_error", site: outcome.site });
+        throw new ServiceUnavailableException({ message: "egress_error", site: outcome.site });
       default: {
         const never: never = outcome;
         throw new Error(`unhandled provisioning outcome: ${JSON.stringify(never)}`);
@@ -192,14 +192,14 @@ export class WebdevController {
     });
     if (outcome.outcome === "not_found") throw new NotFoundException("provisioned site not found");
     if (outcome.outcome === "conflict_foreign") {
-      throw new ConflictException({ error: "slug_conflict_foreign", site: outcome.site });
+      throw new ConflictException({ message: "slug_conflict_foreign", site: outcome.site });
     }
-    if (outcome.outcome === "slug_taken") throw new ConflictException({ error: "slug_taken" });
+    if (outcome.outcome === "slug_taken") throw new ConflictException({ message: "slug_taken" });
     if (outcome.outcome === "invalid" || outcome.outcome === "precondition_failed") {
-      throw new BadRequestException({ error: outcome.reason });
+      throw new BadRequestException({ message: outcome.reason });
     }
     if (outcome.outcome === "egress_error" || outcome.outcome === "provider_rejected") {
-      throw new ServiceUnavailableException({ error: outcome.site.failureReason ?? "failed", site: outcome.site });
+      throw new ServiceUnavailableException({ message: outcome.site.failureReason ?? "failed", site: outcome.site });
     }
     return outcome.site;
   }

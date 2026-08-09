@@ -24,21 +24,38 @@ export class HttpErrorFilter implements ExceptionFilter {
     let error: string;
     let field: string | undefined;
     let existing: Record<string, unknown> | undefined;
+    let site: Record<string, unknown> | undefined;
     if (typeof res === "string") {
       error = res;
     } else {
-      const r = res as { message?: string | string[]; field?: string; existing?: unknown };
+      const r = res as {
+        message?: string | string[]; field?: string; existing?: unknown; site?: unknown;
+      };
       const m = r.message;
       error = Array.isArray(m) ? m.join(", ") : m ?? exception.message;
       if (typeof r.field === "string") field = r.field;
       if (r.existing && typeof r.existing === "object" && !Array.isArray(r.existing)) {
         existing = r.existing as Record<string, unknown>;
       }
+      // PRV-04: `site`, same additive rule as `field`/`existing`. The provisioning surface refuses
+      // with a typed token AND the mirror row it just committed, so a client can show what actually
+      // happened without a second round trip.
+      //
+      // ⚠️ THE BUG THIS CLOSES, because it is the trap of this whole file: the controller originally
+      // threw `{ error: "<token>", site }`, and NOTHING here reads `error` — the reshape below RENAMES
+      // `message` to `error` on the way out. So every typed token (`slug_conflict_foreign`,
+      // `egress_error`, …) was replaced by Nest's constructor-derived string ("Conflict Exception")
+      // and `site` was dropped entirely. It looked fine: the status codes were right and the shape
+      // was right, only the meaning was missing. A thrower here must set `message`, not `error`.
+      if (r.site && typeof r.site === "object" && !Array.isArray(r.site)) {
+        site = r.site as Record<string, unknown>;
+      }
     }
     void reply.status(status).send({
       error,
       ...(field ? { field } : {}),
       ...(existing ? { existing } : {}),
+      ...(site ? { site } : {}),
     });
   }
 }

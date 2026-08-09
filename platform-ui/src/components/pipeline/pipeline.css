@@ -64,3 +64,24 @@
 .pl-edit__form { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
 .pl-edit__textarea { font: 400 13px/1.5 var(--font-mono, monospace); padding: 10px; border: 0.5px solid var(--erp-hairline); border-radius: 6px; background: var(--erp-surface, transparent); color: var(--text-primary); resize: vertical; }
 .pl-edit__locked-note { margin: 8px 0 0; font: 400 12px/1.4 var(--font-body); color: var(--erp-ink-50); }
+
+/* PRV-04 — the "Site & repo" card (SiteRepoCard.tsx). */
+.pl-site__refused, .pl-site__hint { margin: 0; font: 400 13px/1.5 var(--font-body); color: var(--erp-ink-50); }
+.pl-site-list { display: flex; flex-direction: column; gap: 16px; margin-bottom: 4px; }
+.pl-site-row { padding: 14px 0; border-top: 0.5px solid var(--erp-hairline-soft); }
+.pl-site-row:first-child { border-top: none; padding-top: 0; }
+.pl-site-row__head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
+.pl-site-row__slug { font: 700 14px var(--font-body); color: var(--text-primary); }
+.pl-site-row__framework { font: 400 12px var(--font-body); color: var(--erp-ink-50); padding: 2px 8px; border: 0.5px solid var(--erp-hairline); border-radius: 999px; }
+.pl-site-row__links { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; font: 400 13px/1.5 var(--font-body); color: var(--text-primary); }
+.pl-site-row__links a { color: var(--erp-accent); word-break: break-all; }
+.pl-site-row__links em { font-style: normal; color: var(--erp-ink-50); }
+.pl-site-row__meta { margin: 0 0 8px; font: 400 12px var(--font-body); color: var(--erp-ink-50); }
+.pl-site-row__failure { margin: 0 0 10px; padding: 10px 12px; border-radius: 8px; background: color-mix(in srgb, var(--status-critical) 8%, transparent); border: 1px solid color-mix(in srgb, var(--status-critical) 25%, transparent); font: 400 13px/1.5 var(--font-body); color: var(--text-primary); }
+.pl-site-row__error, .pl-site-form__error { margin: 8px 0 0; font: 500 12px/1.4 var(--font-body); color: var(--status-critical-fg); }
+.pl-site-row__ok, .pl-site-form__ok { margin: 8px 0 0; font: 500 12px/1.4 var(--font-body); color: var(--status-ok-fg); }
+
+.pl-site-form { display: flex; flex-direction: column; gap: 12px; margin-top: 18px; padding-top: 16px; border-top: 0.5px solid var(--erp-hairline-soft); }
+.pl-site-form__field { display: flex; flex-direction: column; gap: 6px; font: 700 10px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--erp-ink-50); max-width: 340px; }
+.pl-site-form__field select, .pl-site-form__field input { border: 0.5px solid var(--erp-hairline); border-radius: 6px; padding: 8px 10px; font: 400 13px var(--font-body); letter-spacing: normal; text-transform: none; background: transparent; color: var(--text-primary); }
+.pl-site-form__field input:focus-visible, .pl-site-form__field select:focus-visible { outline: 2px solid var(--erp-accent); outline-offset: 1px; }

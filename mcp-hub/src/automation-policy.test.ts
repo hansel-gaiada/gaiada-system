@@ -114,6 +114,28 @@ describe("automation scoped service accounts + write gate (WS4 §3)", () => {
     }
   });
 
+  // PRV-03 — the provision<->ERP seam's automation entry point. Registration is part of the
+  // feature (this estate has hit "correct-but-unwired" six times), so this pins BOTH halves: the
+  // allow-list membership itself, and that calling it directly (no grant) suspends as a
+  // medium-impact write rather than either executing or being invisible/unscoped.
+  it("wf:delivery is scoped to webdev.provisionSite (PRV-03), and an ungranted call suspends as a medium-impact write", () => {
+    expect(AUTOMATION_ALLOWLIST["wf:delivery"]).toContain("webdev.provisionSite");
+    registerTool({
+      name: "webdev.provisionSite",
+      description: "provision a site+repo",
+      minAssurance: "low",
+      write: true,
+      impact: "medium",
+      inputSchema: { type: "object" },
+      handler: async () => "PROVISIONED",
+    });
+    const p = wf("wf:delivery");
+    expect(visibleTools(p).map((t) => t.name)).toContain("webdev.provisionSite");
+    const d = authorize(p, "webdev.provisionSite");
+    expect(d.allow).toBe(false);
+    if (!d.allow) expect(d.reason).toMatch(/suspend.*medium-impact/);
+  });
+
   it("does NOT grant humans automation scoping (a low human keeps normal visibility)", () => {
     const human: Principal = { provider: "whatsapp", externalId: "628110@c.us", assurance: "low" };
     const names = visibleTools(human).map((t) => t.name);

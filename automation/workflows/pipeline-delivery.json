@@ -1774,6 +1774,83 @@
         1300,
         1220
       ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const got = $input.first().json.headers?.['x-gaiada-bridge-secret'];\nif (!got || got !== $env.N8N_BRIDGE_SECRET) throw new Error('bad bridge secret');\nconst e = $input.first().json.body ?? {};\nif (e.v !== 1) throw new Error('bad envelope v');\n// OWN dedupe key ('seenProvision'), namespaced apart from 'Verify (gate)''s 'seen' key on the SAME\n// shared workflow static-data object -- this branch must never read or clear the delivery track's\n// dedupe state, and vice versa.\nconst store = $getWorkflowStaticData('global'); store.seenProvision = store.seenProvision || {};\nconst dup = Object.prototype.hasOwnProperty.call(store.seenProvision, e.id);\nif (!dup) { store.seenProvision[e.id] = Date.now(); const ids = Object.keys(store.seenProvision); if (ids.length > 1000) for (const k of ids.slice(0, ids.length - 1000)) delete store.seenProvision[k]; }\n// PRV-03 (provision<->ERP seam design section 04, D-P3): propose ONLY on prd_sign decided\n// approved/signed. Read straight off the envelope's own payload (pipeline.controller.ts emits\n// {runId, kind, actorSide, decision} on pipeline.gate.decided) -- no pipeline.getRun round trip\n// needed, unlike the delivery track's own 'Load + decide' node which needs the FULL run for its\n// state machine. This branch cares about exactly one fact: did THIS gate just decide prd_sign.\nconst kind = e.payload?.kind ?? '';\nconst decision = e.payload?.decision ?? '';\nconst runId = e.payload?.runId ?? e.entityId;\nconst propose = !dup && kind === 'prd_sign' && (decision === 'approved' || decision === 'signed');\nreturn [{ json: { tenantId: e.tenantId, runId, propose } }];"
+      },
+      "name": "Provisioning: verify + parse decided envelope",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        340
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "propose-provisioning",
+              "leftValue": "={{ $json.propose }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Propose provisioning? (prd_sign approved/signed)",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        440,
+        340
+      ]
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "value": "wswdprovision0001",
+          "mode": "id",
+          "cachedResultName": "Subworkflow: webdev.provisionSite (PRV-03 provision<->ERP seam)"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "tenantId": "={{ $json.tenantId }}",
+            "runId": "={{ $json.runId }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            { "id": "tenantId", "displayName": "tenantId", "type": "string", "removed": false },
+            { "id": "runId", "displayName": "runId", "type": "string", "removed": false }
+          ]
+        },
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "name": "Execute: wd-provision.json",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        660,
+        340
+      ]
     }
   ],
   "connections": {
@@ -1784,8 +1861,36 @@
             "node": "Verify (gate)",
             "type": "main",
             "index": 0
+          },
+          {
+            "node": "Provisioning: verify + parse decided envelope",
+            "type": "main",
+            "index": 0
           }
         ]
+      ]
+    },
+    "Provisioning: verify + parse decided envelope": {
+      "main": [
+        [
+          {
+            "node": "Propose provisioning? (prd_sign approved/signed)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Propose provisioning? (prd_sign approved/signed)": {
+      "main": [
+        [
+          {
+            "node": "Execute: wd-provision.json",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
       ]
     },
     "Verify (gate)": {
