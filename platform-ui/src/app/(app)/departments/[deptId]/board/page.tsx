@@ -6,19 +6,20 @@ import { getActiveTenant } from "@/lib/tenant";
 import {
   getDepartment, parseBoardFocus, encodeBoardFocus, filterTasksByFocus,
   priorityColumns, assigneeColumns, divisionColumns, divisionStatusGrid, assigneeStatusGrid,
-  ballColumns, filterTasksByBall, filterTasksByResponsible, ballFacetOptions, responsibleFacetOptions,
+  filterTasksByBall, filterTasksByResponsible, ballFacetOptions, responsibleFacetOptions,
   type BoardSwimlane,
 } from "@/lib/departments";
 import {
   unionStatusColumns, isSynthDefaultStatuses, openDependencies, listTags, resolveTags, distinctTagLabels, filterTasksByTagLabels,
   parseTagFilterParam, isDoneStatus, taskUrgency, type Tag, type UrgencyTier,
 } from "@/lib/pm";
-import { moveTask, moveTaskToStatusLabel, setTaskPriority, reassignResponsible, reassignBall, setDivisionAssignee } from "@/lib/pmActions";
+import { moveTask, moveTaskToStatusLabel, setTaskPriority, reassignResponsible, setDivisionAssignee } from "@/lib/pmActions";
 import { PM_TERMS } from "@/lib/pmVocabulary";
 import { Card } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
 import { Board, BoardGrid } from "@/components/pm/Board";
-import { TagChip } from "@/components/pm/TagChip";
+import { FacetFilters } from "@/components/pm/FacetFilters";
+import { TAG_COLOR_HEX } from "@/lib/tagColors";
 
 type Params = Promise<{ deptId: string }>;
 // Next 15: searchParams is async. `focus`: "dept" | "me" | "division:<id>"
@@ -27,7 +28,9 @@ type Params = Promise<{ deptId: string }>;
 // P1-03 unified every axis through one `Board`); `tags`: the P2-02 tag
 // filter, matched by LABEL across projects (D-1) since a department's board
 // spans multiple projects, each with its own tag id space.
-// P4-B9: `ball`/`responsible` are the two new filter facets, same shape as `tags`.
+// P4-B9: `ball`/`responsible` are the two filter facets, same shape as `tags`, now rendered
+// through the shared `FacetFilters` panel (components/pm/FacetFilters.tsx) rather than a
+// hand-rolled checkbox Card — see that file's header for why (findable/clearable/shows-active).
 type SearchParams = Promise<{ focus?: string; swimlane?: string; tags?: string | string[]; ball?: string | string[]; responsible?: string | string[] }>;
 
 // A department's board can span several projects, each with its own tag
@@ -42,13 +45,21 @@ function representativeTag(label: string, registriesByProject: Record<string, Ta
   return undefined;
 }
 
+// Ball moved OUT to its own tab (owner decision 2026-08-10, same pass as `/pm`'s: "Ball gets its
+// own tab in EVERY project-management surface — not just /pm — and stops polluting the board").
+// It used to be one more "Group by" axis here; it now lives only in `../ball/page.tsx`
+// (`ballColumns`/`reassignBall`, imported there instead). `DeptBoardSwimlane` is a local narrowing
+// of the shared `BoardSwimlane` type (lib/departments.ts) — same precedent as `/pm/page-helpers.ts`'s
+// own `PmSwimlane`. A stale bookmarked `?swimlane=ball` degrades to the `status` default below
+// rather than throwing.
+//
 // P4-B6: "assignee" is keyed off `responsibleId` (`assigneeColumns`, lib/departments.ts) — it IS
 // the Responsible board; the persisted `?swimlane=` value stays `assignee` for old bookmarked
-// links, only its label changes. "ball" is the new, separate axis keyed off `assignee.refId`.
-const SWIMLANES: { value: BoardSwimlane; label: string }[] = [
+// links, only its label changes.
+type DeptBoardSwimlane = Exclude<BoardSwimlane, "ball">;
+const SWIMLANES: { value: DeptBoardSwimlane; label: string }[] = [
   { value: "status", label: "Status" },
   { value: "assignee", label: PM_TERMS.responsible },
-  { value: "ball", label: PM_TERMS.ball },
   { value: "priority", label: "Priority" },
   { value: "division", label: "Division" },
   // P2-09 (design spec §8) — true 2-axis grid: rows=Division/Assignee, columns=Status. Kept as
@@ -58,8 +69,8 @@ const SWIMLANES: { value: BoardSwimlane; label: string }[] = [
   { value: "grid-assignee", label: "Assignee × Status (grid)" },
 ];
 
-function isSwimlane(v: string | undefined): v is BoardSwimlane {
-  return v === "assignee" || v === "ball" || v === "priority" || v === "division" || v === "grid-division" || v === "grid-assignee";
+function isSwimlane(v: string | undefined): v is DeptBoardSwimlane {
+  return v === "assignee" || v === "priority" || v === "division" || v === "grid-division" || v === "grid-assignee";
 }
 
 // Board — the department's working kanban (decision #10 split: this used to
@@ -90,7 +101,7 @@ export default async function DepartmentBoardPage({ params, searchParams }: { pa
 
   const sp = await searchParams;
   const focus = parseBoardFocus(sp.focus);
-  const swimlane: BoardSwimlane = isSwimlane(sp.swimlane) ? sp.swimlane : "status";
+  const swimlane: DeptBoardSwimlane = isSwimlane(sp.swimlane) ? sp.swimlane : "status";
 
   const focusedTasks = filterTasksByFocus(dept.tasks, dept.divisions, focus, userId);
   const taskById = new Map(dept.tasks.map((t) => [t.id, t]));
@@ -171,84 +182,23 @@ export default async function DepartmentBoardPage({ params, searchParams }: { pa
         </form>
       </Card>
 
-      {/* Tag filter (P2-02, design spec §6/§9): bookmarkable GET form, matched
-          by LABEL across every project this department's work touches (D-1). */}
-      {allTagLabels.length > 0 && (
-        <Card style={{ marginBottom: 16 }}>
-          <form className="lux-filters" method="get" aria-label="Filter by tag">
-            <input type="hidden" name="focus" value={encodeBoardFocus(focus)} />
-            <input type="hidden" name="swimlane" value={swimlane} />
-            {selectedBallIds.map((id) => <input key={id} type="hidden" name="ball" value={id} />)}
-            {selectedResponsibleIds.map((id) => <input key={id} type="hidden" name="responsible" value={id} />)}
-            <div className="pm-tagfilter">
-              <span className="pm-tagfilter__label">Tags</span>
-              <div className="pm-tagfilter__options">
-                {allTagLabels.map((label) => {
-                  const rep = representativeTag(label, registriesByProject);
-                  return (
-                    <label key={label} className="pm-tagfilter__opt">
-                      <input type="checkbox" name="tags" value={label} defaultChecked={selectedTagLabels.includes(label)} />
-                      {rep ? <TagChip label={label} color={rep.color} /> : label}
-                    </label>
-                  );
-                })}
-              </div>
-            </div>
-            <div className="lux-filters__actions">
-              <button type="submit" className="lux-btn lux-btn--solid lux-btn--sm">Apply</button>
-              {selectedTagLabels.length > 0 && (
-                <a href={`/departments/${deptId}/board?focus=${encodeBoardFocus(focus)}&swimlane=${swimlane}`} className="lux-btn lux-btn--ghost lux-btn--sm">Reset</a>
-              )}
-            </div>
-          </form>
-        </Card>
-      )}
-
-      {/* Ball/Responsible filter facets (P4-B9) — same bookmarkable GET-form shape as the tag
-          filter above, and independent of it (both can narrow the board at once). Options are
-          drawn from the department's FULL task set, not the already-filtered one, same precedent
-          as `allTagLabels`. */}
-      {(ballOptions.length > 0 || responsibleOptions.length > 0) && (
-        <Card style={{ marginBottom: 16 }}>
-          <form className="lux-filters" method="get" aria-label={`Filter by ${PM_TERMS.ball} or ${PM_TERMS.responsible}`}>
-            <input type="hidden" name="focus" value={encodeBoardFocus(focus)} />
-            <input type="hidden" name="swimlane" value={swimlane} />
-            {selectedTagLabels.map((l) => <input key={l} type="hidden" name="tags" value={l} />)}
-            {ballOptions.length > 0 && (
-              <div className="pm-tagfilter">
-                <span className="pm-tagfilter__label">{PM_TERMS.ball}</span>
-                <div className="pm-tagfilter__options">
-                  {ballOptions.map((o) => (
-                    <label key={o.id} className="pm-tagfilter__opt">
-                      <input type="checkbox" name="ball" value={o.id} defaultChecked={selectedBallIds.includes(o.id)} />
-                      {o.label}
-                    </label>
-                  ))}
-                </div>
-              </div>
-            )}
-            {responsibleOptions.length > 0 && (
-              <div className="pm-tagfilter">
-                <span className="pm-tagfilter__label">{PM_TERMS.responsible}</span>
-                <div className="pm-tagfilter__options">
-                  {responsibleOptions.map((o) => (
-                    <label key={o.id} className="pm-tagfilter__opt">
-                      <input type="checkbox" name="responsible" value={o.id} defaultChecked={selectedResponsibleIds.includes(o.id)} />
-                      {o.label}
-                    </label>
-                  ))}
-                </div>
-              </div>
-            )}
-            <div className="lux-filters__actions">
-              <button type="submit" className="lux-btn lux-btn--solid lux-btn--sm">Apply</button>
-              {(selectedBallIds.length > 0 || selectedResponsibleIds.length > 0) && (
-                <a href={`/departments/${deptId}/board?focus=${encodeBoardFocus(focus)}&swimlane=${swimlane}`} className="lux-btn lux-btn--ghost lux-btn--sm">Reset</a>
-              )}
-            </div>
-          </form>
-        </Card>
-      )}
+      {/* Tag/Ball/Responsible filters: ONE shared, findable/clearable panel (components/pm/
+          FacetFilters.tsx) — replaces what used to be two separate always-open checkbox Cards. */}
+      <FacetFilters
+        basePath={`/departments/${deptId}/board`}
+        hidden={{ focus: encodeBoardFocus(focus), swimlane }}
+        groups={[
+          {
+            key: "tags", label: PM_TERMS.tags, selected: selectedTagLabels,
+            options: allTagLabels.map((label) => {
+              const rep = representativeTag(label, registriesByProject);
+              return { id: label, label, swatch: rep ? <span className="pm-col__dot" aria-hidden style={{ background: TAG_COLOR_HEX[rep.color]?.onLight ?? "currentColor" }} /> : undefined };
+            }),
+          },
+          { key: "ball", label: PM_TERMS.ball, selected: selectedBallIds, options: ballOptions },
+          { key: "responsible", label: PM_TERMS.responsible, selected: selectedResponsibleIds, options: responsibleOptions },
+        ]}
+      />
 
       {facetFilteredTasks.length === 0 ? (
         <EmptyNote>
@@ -262,8 +212,6 @@ export default async function DepartmentBoardPage({ params, searchParams }: { pa
         <Board columns={priorityColumns(facetFilteredTasks)} move={setTaskPriority} blockedIds={blockedIds} taskTags={taskTags} taskUrgency={taskUrgencyById} />
       ) : swimlane === "assignee" ? (
         <Board columns={assigneeColumns(facetFilteredTasks)} move={reassignResponsible} blockedIds={blockedIds} taskTags={taskTags} taskUrgency={taskUrgencyById} />
-      ) : swimlane === "ball" ? (
-        <Board columns={ballColumns(facetFilteredTasks)} move={reassignBall} blockedIds={blockedIds} taskTags={taskTags} taskUrgency={taskUrgencyById} />
       ) : swimlane === "division" ? (
         <Board columns={divisionColumns(facetFilteredTasks, dept.divisions)} move={setDivisionAssignee} blockedIds={blockedIds} taskTags={taskTags} taskUrgency={taskUrgencyById} />
       ) : swimlane === "grid-division" ? (

@@ -19,6 +19,11 @@ describe("navFor (RBAC-gated visibility)", () => {
     expect(meGroup.items.map((i) => i.label)).toEqual(["Overview", "Inbox", "Leave", "Loans"]);
     const business = groups.find((g) => g.label === "Business")!;
     expect(business.items.map((i) => i.label)).not.toContain("Rollups");
+    // 2026-08-10 owner directive: Business collapses to ONE "Project Management" entry — Projects
+    // and Tasks are no longer separate sidebar rows (they're tabs on /project-management now).
+    expect(business.items.map((i) => i.label)).not.toContain("Projects");
+    expect(business.items.map((i) => i.label)).not.toContain("Tasks");
+    expect(business.items[0]).toEqual({ label: "Project Management", href: "/project-management", icon: "projects" });
     // TR-17: a plain member always sees the self/scoped grain reports, never the exec-only Company one.
     const reports = groups.find((g) => g.label === "Reports")!;
     expect(reports.items.map((i) => i.label)).toEqual(["My Report", "Project Reports", "Department Reports"]);
@@ -30,10 +35,13 @@ describe("navFor (RBAC-gated visibility)", () => {
     const org = groups.find((g) => g.label === "Organization")!;
     expect(org.items.map((i) => i.label)).toEqual(["Overview"]);
     // No standalone IT group (IT is now a department) and no People in Workspace (now HR).
-    // P4-A5: "PM" (the cross-project scope surface, /pm) sits right after Dashboard — ungated,
-    // same as Projects/Tasks elsewhere.
+    // P4-A5: the cross-project scope surface (/pm) sits right after Dashboard — ungated, same as
+    // Business's own Project Management row. 2026-08-10: relabelled "PM" -> "Project Management"
+    // (PM_TERMS.projectManagement) — the same string Business's row and every department console's
+    // Work group now use.
     const workspace = groups.find((g) => g.label === "Workspace")!;
-    expect(workspace.items.map((i) => i.label)).toEqual(["Dashboard", "PM", "Calendar", "Approvals"]);
+    expect(workspace.items.map((i) => i.label)).toEqual(["Dashboard", "Project Management", "Calendar", "Approvals"]);
+    expect(workspace.items.find((i) => i.label === "Project Management")!.href).toBe("/pm");
   });
   it("renders Departments as its own group: business departments plus functional HR/IT", () => {
     const groups = navFor(

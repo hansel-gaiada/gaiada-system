@@ -11,6 +11,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { Card } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
 import { DataTable, type Column } from "@/components/data/DataTable";
+import { PmSurfaceTabs } from "@/components/pm/PmSurfaceTabs";
 
 const COLUMNS: Column[] = [
   { key: "name", header: "Name", sortable: true },
@@ -60,6 +61,7 @@ export default async function ProjectsPage() {
       return (
         <>
           <PageHeader eyebrow="Business" title="Projects" />
+          <PmSurfaceTabs active="projects" />
           <Card>
             <p style={{ margin: 0, font: "400 14px/1.5 var(--font-body)", color: "var(--ink-muted)" }}>
               You don&apos;t have access to this in the current company.
@@ -113,6 +115,7 @@ export default async function ProjectsPage() {
         title="Projects"
         actions={<Link href="/projects/new" className="lux-btn lux-btn--solid lux-btn--sm">New project</Link>}
       />
+      <PmSurfaceTabs active="projects" />
       {projects.length === 0 ? (
         <EmptyNote>No projects yet. Create the first project to get started.</EmptyNote>
       ) : (

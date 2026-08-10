@@ -31,7 +31,10 @@ export function PendingLink({ href, className, children, ...rest }: {
   className?: string;
   children: ReactNode;
   "aria-selected"?: boolean;
-  "aria-current"?: "true" | undefined;
+  // "page" — the value every OTHER tab row in this app uses for "this is the active view"
+  // (`/pm`'s own inline `tab()`, `PmSurfaceTabs`) — added so the project workspace's tab row can
+  // finally match (it never set `aria-current` at all before P4-UX1).
+  "aria-current"?: "page" | "true" | undefined;
   "aria-label"?: string;
   role?: string;
   title?: string;

@@ -1,5 +1,6 @@
 import type { Me } from "@/lib/platform";
 import { can, isElevated, isClientOnly, canManageIT } from "@/lib/rbac";
+import { PM_TERMS } from "@/lib/pmVocabulary";
 import type { IconName } from "./icons";
 
 // Access helpers live in lib/rbac (the RBAC source of truth); re-exported here
@@ -32,9 +33,13 @@ export function navFor(me: Me, tenantId?: string | null, departments: { id: stri
     // sidebar and no way back.
     return [{ label: "Portal", items: [{ label: "Your portal", href: "/portal", icon: "home" }] }];
   }
+  // 2026-08-10 owner directive: Business collapses Projects+Tasks into ONE entry
+  // (PM_TERMS.projectManagement) — those two are the PM-domain items, now tabs on
+  // `/project-management` alongside Overview/Ball/Timeline/Charts/Productivity (see that page's
+  // own header). Clients/Deliverables/Timesheets/Billing/Agency/Meetings/Delivery Pipeline/Rollups
+  // stay siblings — folding those in too would make one page mean everything, defeating the point.
   const business: NavItem[] = [
-    { label: "Projects", href: "/projects", icon: "projects" },
-    { label: "Tasks", href: "/tasks", icon: "check" },
+    { label: PM_TERMS.projectManagement, href: "/project-management", icon: "projects" },
     { label: "Clients", href: "/clients", icon: "finance" },
     { label: "Deliverables", href: "/deliverables", icon: "box" },
     { label: "Timesheets", href: "/timesheets", icon: "clock" },
@@ -77,10 +82,14 @@ export function navFor(me: Me, tenantId?: string | null, departments: { id: stri
     { label: "Workspace", pinned: true, items: [
       { label: "Dashboard", href: "/", icon: "home" },
       // P4-A5: the cross-project (`@all`) PM surface — plan decision 1 makes this the new PM home
-      // (`/` stays the personal My Work landing). Ungated, same precedent as the Projects/Tasks
-      // nav rows below (no `pm.view` capability exists — the server/Cerbos side is the authority
-      // on what a caller's tasks actually contain; this is a place to look, not a grant).
-      { label: "PM", href: "/pm", icon: "projects" },
+      // (`/` stays the personal My Work landing). Ungated, same precedent as Business's own
+      // Project Management row below (no `pm.view` capability exists — the server/Cerbos side is
+      // the authority on what a caller's tasks actually contain; this is a place to look, not a
+      // grant). Label 2026-08-10: "PM" read as the exact abbreviation the owner asked to stop —
+      // see PM_RENAMES in pmVocabulary.ts. Same string as Business's row and every department
+      // console's Work group, so the surface reads identically everywhere it appears; only the
+      // scope differs (this one keeps its `ScopeSwitcher`, Business's is fixed to `@all`).
+      { label: PM_TERMS.projectManagement, href: "/pm", icon: "projects" },
       { label: "Calendar", href: "/calendar", icon: "clock" },
       { label: "Approvals", href: "/approvals", icon: "check" },
     ] },

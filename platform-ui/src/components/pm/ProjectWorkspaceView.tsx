@@ -46,6 +46,9 @@ import {
   ballFacetOptions, responsibleFacetOptions, type BoardSwimlane,
 } from "@/lib/departments";
 import { PM_TERMS } from "@/lib/pmVocabulary";
+import { FacetFilters } from "@/components/pm/FacetFilters";
+import { TAG_COLOR_HEX } from "@/lib/tagColors";
+import { BALL_GATE_CAPABILITY, leadWithUnassigned } from "@/app/(app)/pm/page-helpers";
 import "@/components/pm/pm.css";
 
 // The full project workspace (Board/List/Timeline/Milestones/Docs + owner/
@@ -71,27 +74,33 @@ export type ProjectWorkspaceSearch = {
 // "files", "discussion" and "meetings" are tabs, not always-rendered cards. They used to sit below
 // every view as three large panels — usually empty — so the page ended in dead weight and the board
 // above it had to compete for attention with an empty comment box.
-const VIEWS = ["board", "list", "timeline", "charts", "milestones", "docs", "files", "discussion", "meetings"] as const;
+//
+// "ball" is its own tab (owner decision 2026-08-10, same pass as `/pm`'s and the department
+// console's: "Ball gets its own tab in EVERY project-management surface — not just /pm — and
+// stops polluting the board"). It used to be a "Group by" axis on the Board tab below; see
+// `ProjectSwimlane`'s doc comment just below for what replaced it.
+const VIEWS = ["board", "ball", "list", "timeline", "charts", "milestones", "docs", "files", "discussion", "meetings"] as const;
 type View = (typeof VIEWS)[number];
 
 // The project board only groups by axes that make sense scoped to ONE
-// project — Status (default), Responsible, Ball, Priority. Division and the dept
+// project — Status (default), Responsible, Priority. Division and the dept
 // "focus" filter are department-scoped concepts (see the dept Board tab,
-// lib/departments.ts) and don't apply inside a single project's workspace.
+// lib/departments.ts) and don't apply inside a single project's workspace. "ball" moved OUT to
+// its own tab (see the VIEWS comment above) — `ProjectSwimlane` is a local narrowing of the
+// shared `BoardSwimlane` type (lib/departments.ts) that excludes it, same precedent as the
+// department board page's own `DeptBoardSwimlane`. A stale bookmarked `?swimlane=ball` degrades
+// to the `status` default below rather than throwing.
 //
 // P4-B6: "assignee" keys off `responsibleId` (see `assigneeColumns`) — it IS the Responsible
-// board, only the persisted `?swimlane=` value stays `assignee` for old bookmarked links. "ball"
-// is the new, genuinely separate axis (`ballColumns`, keyed off `assignee.refId`) — Repsona's two
-// boards show DIFFERENT tasks for the same person, which is the entire point (plan §1.5).
-type ProjectSwimlane = Extract<BoardSwimlane, "status" | "assignee" | "ball" | "priority">;
+// board, only the persisted `?swimlane=` value stays `assignee` for old bookmarked links.
+type ProjectSwimlane = Extract<BoardSwimlane, "status" | "assignee" | "priority">;
 const SWIMLANES: { value: ProjectSwimlane; label: string }[] = [
   { value: "status", label: "Status" },
   { value: "assignee", label: PM_TERMS.responsible },
-  { value: "ball", label: PM_TERMS.ball },
   { value: "priority", label: "Priority" },
 ];
 function isSwimlane(v: string | undefined): v is Exclude<ProjectSwimlane, "status"> {
-  return v === "assignee" || v === "ball" || v === "priority";
+  return v === "assignee" || v === "priority";
 }
 
 function who(t: PmTask): string {
@@ -158,6 +167,10 @@ export async function ProjectWorkspaceView({
   const statusLabel = (id: string) => statusLabelById.get(id) ?? id;
   const statusColorById = new Map(projectStatuses.map((s) => [s.id, s.color]));
   const canManageStatuses = can(me, "pm.manage", tenant);
+  // The Ball tab's OWN gate — deliberately NOT `canManageStatuses` (pm.manage) above. Same
+  // BALL_GATE_CAPABILITY (pm.contribute — "anyone can pass the ball") the /pm and department Ball
+  // tabs use; see its doc comment in app/(app)/pm/page-helpers.ts.
+  const canPassBall = can(me, BALL_GATE_CAPABILITY, tenant);
   const showStatusColors = !isSynthDefaultStatuses(projectStatuses);
   const statusUsage: Record<string, number> = {};
   for (const s of projectStatuses) statusUsage[s.id] = 0;
@@ -223,8 +236,10 @@ export async function ProjectWorkspaceView({
 
   // PendingLink, not Link: a ?view= change is not a segment change, so Next fires no loading.tsx
   // and a tab click on a cold view looked like nothing happened. See components/PendingLink.tsx.
+  // `aria-current="page"` — matches every other tab row in the app (/pm, PmSurfaceTabs); this one
+  // never set it at all before this pass.
   const tab = (v: View, label: string) => (
-    <PendingLink href={`${basePath}?view=${v}`} className={`pm-tab${view === v ? " pm-tab--active" : ""}`}>{label}</PendingLink>
+    <PendingLink href={`${basePath}?view=${v}`} className={`pm-tab${view === v ? " pm-tab--active" : ""}`} aria-current={view === v ? "page" : undefined}>{label}</PendingLink>
   );
 
   return (
@@ -272,7 +287,7 @@ export async function ProjectWorkspaceView({
 
       <div className="pm-tabsrow">
         <div className="pm-tabs">
-          {tab("board", "Board")}{tab("list", "List")}{tab("timeline", "Timeline")}{tab("charts", "Charts")}{tab("milestones", "Milestones")}{tab("docs", "Docs")}
+          {tab("board", PM_TERMS.board)}{tab("ball", PM_TERMS.ball)}{tab("list", "List")}{tab("timeline", PM_TERMS.gantt)}{tab("charts", "Charts")}{tab("milestones", "Milestones")}{tab("docs", "Docs")}
           {tab("files", files.length ? `Files (${files.length})` : "Files")}
           {tab("discussion", comments.length ? `Discussion (${comments.length})` : "Discussion")}
           {tab("meetings", meetings.length ? `Meetings (${meetings.length})` : "Meetings")}
@@ -280,82 +295,22 @@ export async function ProjectWorkspaceView({
         <NewTaskForm assignable={assignable} milestones={milestones} customFieldDefs={taskCustomFieldDefs} create={createPmTask.bind(null, projectId)} />
       </div>
 
-      {/* Tag filter (P2-02, design spec §6/§9): a bookmarkable GET form, same
-          pattern as the board's own swimlane control. Applies to Board/List/
-          Timeline uniformly (Milestones/Docs aren't task-list views). */}
-      {tags.length > 0 && (
-        <div className="pm-filterbar">
-          <form className="lux-filters" method="get" aria-label="Filter by tag">
-            <input type="hidden" name="view" value={view} />
-            {swimlane !== "status" && <input type="hidden" name="swimlane" value={swimlane} />}
-            {selectedBallIds.map((id) => <input key={id} type="hidden" name="ball" value={id} />)}
-            {selectedResponsibleIds.map((id) => <input key={id} type="hidden" name="responsible" value={id} />)}
-            <div className="pm-tagfilter">
-              <span className="pm-tagfilter__label">Tags</span>
-              <div className="pm-tagfilter__options">
-                {tags.map((tg) => (
-                  <label key={tg.id} className="pm-tagfilter__opt">
-                    <input type="checkbox" name="tags" value={tg.id} defaultChecked={selectedTagIds.includes(tg.id)} />
-                    <TagChip label={tg.label} color={tg.color} />
-                  </label>
-                ))}
-              </div>
-            </div>
-            <div className="lux-filters__actions">
-              <button type="submit" className="lux-btn lux-btn--ghost lux-btn--sm">Apply</button>
-              {selectedTagIds.length > 0 && (
-                <a href={`${basePath}?view=${view}`} className="lux-btn lux-btn--ghost lux-btn--sm">Reset</a>
-              )}
-            </div>
-          </form>
-        </div>
-      )}
-
-      {/* Ball/Responsible filter facets (P4-B9) — same bookmarkable-GET-form shape as the tag
-          filter above, and independent of it (both can be active at once). Only renders when the
-          project has more than the trivial "no assignee at all" option, same threshold the tag
-          filter uses (`tags.length > 0`). */}
-      {(ballOptions.length > 0 || responsibleOptions.length > 0) && (
-        <div className="pm-filterbar">
-          <form className="lux-filters" method="get" aria-label={`Filter by ${PM_TERMS.ball} or ${PM_TERMS.responsible}`}>
-            <input type="hidden" name="view" value={view} />
-            {swimlane !== "status" && <input type="hidden" name="swimlane" value={swimlane} />}
-            {selectedTagIds.map((id) => <input key={id} type="hidden" name="tags" value={id} />)}
-            {ballOptions.length > 0 && (
-              <div className="pm-tagfilter">
-                <span className="pm-tagfilter__label">{PM_TERMS.ball}</span>
-                <div className="pm-tagfilter__options">
-                  {ballOptions.map((o) => (
-                    <label key={o.id} className="pm-tagfilter__opt">
-                      <input type="checkbox" name="ball" value={o.id} defaultChecked={selectedBallIds.includes(o.id)} />
-                      {o.label}
-                    </label>
-                  ))}
-                </div>
-              </div>
-            )}
-            {responsibleOptions.length > 0 && (
-              <div className="pm-tagfilter">
-                <span className="pm-tagfilter__label">{PM_TERMS.responsible}</span>
-                <div className="pm-tagfilter__options">
-                  {responsibleOptions.map((o) => (
-                    <label key={o.id} className="pm-tagfilter__opt">
-                      <input type="checkbox" name="responsible" value={o.id} defaultChecked={selectedResponsibleIds.includes(o.id)} />
-                      {o.label}
-                    </label>
-                  ))}
-                </div>
-              </div>
-            )}
-            <div className="lux-filters__actions">
-              <button type="submit" className="lux-btn lux-btn--ghost lux-btn--sm">Apply</button>
-              {(selectedBallIds.length > 0 || selectedResponsibleIds.length > 0) && (
-                <a href={`${basePath}?view=${view}`} className="lux-btn lux-btn--ghost lux-btn--sm">Reset</a>
-              )}
-            </div>
-          </form>
-        </div>
-      )}
+      {/* Tag/Ball/Responsible filters: ONE shared, findable/clearable panel (components/pm/
+          FacetFilters.tsx). Applies to Board/Ball/List/Timeline uniformly (Milestones/Docs aren't
+          task-list views) — same bookmarkable-GET-form idiom this used to hand-roll as two
+          separate blocks. */}
+      <FacetFilters
+        basePath={basePath}
+        hidden={{ view, swimlane: swimlane !== "status" ? swimlane : undefined }}
+        groups={[
+          {
+            key: "tags", label: PM_TERMS.tags, selected: selectedTagIds,
+            options: tags.map((tg) => ({ id: tg.id, label: tg.label, swatch: <span className="pm-col__dot" aria-hidden style={{ background: TAG_COLOR_HEX[tg.color]?.onLight ?? "currentColor" }} /> })),
+          },
+          { key: "ball", label: PM_TERMS.ball, selected: selectedBallIds, options: ballOptions },
+          { key: "responsible", label: PM_TERMS.responsible, selected: selectedResponsibleIds, options: responsibleOptions },
+        ]}
+      />
 
       {view === "board" && (
         filteredTasks.length === 0 ? (
@@ -400,13 +355,34 @@ export async function ProjectWorkspaceView({
                 <Board columns={priorityColumns(filteredTasks)} move={setTaskPriority} blockedIds={blockedIds} taskHrefBase={taskHrefBase} taskTags={taskTags} taskUrgency={taskUrgencyById} />
               ) : swimlane === "assignee" ? (
                 <Board columns={assigneeColumns(filteredTasks)} move={reassignResponsible} blockedIds={blockedIds} taskHrefBase={taskHrefBase} taskTags={taskTags} taskUrgency={taskUrgencyById} />
-              ) : swimlane === "ball" ? (
-                <Board columns={ballColumns(filteredTasks)} move={reassignBall} blockedIds={blockedIds} taskHrefBase={taskHrefBase} taskTags={taskTags} taskUrgency={taskUrgencyById} />
               ) : (
                 <Board columns={groupByStatus(filteredTasks, projectStatuses)} move={moveTask} colorColumns={showStatusColors} blockedIds={blockedIds} taskHrefBase={taskHrefBase} taskTags={taskTags} taskUrgency={taskUrgencyById} />
               )}
             </>
           )
+      )}
+
+      {/* Ball — its own tab (see the VIEWS comment above). Same data/filters/write path
+          (`reassignBall`, pm.contribute) as the old "Group by: Ball" Board axis — only the
+          Group-by selector itself is gone, since this whole tab IS the ball grouping. */}
+      {view === "ball" && (
+        filteredTasks.length === 0 ? (
+          <EmptyNote>{tasks.length === 0 ? "No tasks yet — create the first one above." : "No tasks match these filters."}</EmptyNote>
+        ) : (
+          <>
+            {!canPassBall && (
+              <EmptyNote>You can view this board but can&apos;t pass the {PM_TERMS.ball.toLowerCase()} here — passing it is open to any member of this company&apos;s project team, so that&apos;s the access to ask for.</EmptyNote>
+            )}
+            <Board
+              columns={leadWithUnassigned(ballColumns(filteredTasks), "__no_ball")}
+              move={reassignBall}
+              blockedIds={blockedIds}
+              taskHrefBase={taskHrefBase}
+              taskTags={taskTags}
+              taskUrgency={taskUrgencyById}
+            />
+          </>
+        )
       )}
 
       {view === "list" && (
@@ -445,14 +421,19 @@ export async function ProjectWorkspaceView({
         for (const t of filteredTasks) { const c = statusColorById.get(t.status); if (c) barColors[t.id] = c; }
         const burndown = tl ? burndownOverlay(tl, burndownSeries) : [];
         return (
-          <Card>
-            {/* `todayISO`/`taskTags` are threaded from here for the same reason `taskUrgency` is:
-                this page already resolves `today` once on the server, and Gantt's client-side
-                fallback exists only for callers that don't. Passing it keeps the today-marker on the
-                server clock — the one that decided every urgency tier on this page — instead of the
-                viewer's, which can disagree across a timezone or a midnight boundary. */}
-            {tl ? <Gantt timeline={tl} taskHrefBase={taskHrefBase} barColors={barColors} burndown={burndown} taskUrgency={taskUrgencyById} todayISO={today} taskTags={taskTags} /> : <EmptyNote>Add start/due dates to tasks to see them on the timeline.</EmptyNote>}
-          </Card>
+          // `pm-timeline-widen` (shell.css): lifts the app shell's own 1180px content-column cap
+          // for this view — the real fix for "the Timeline must be far bigger" (Gantt.tsx already
+          // has horizontal scroll + Day/Week/Month zoom; the constraint was the outer shell).
+          <div className="pm-timeline-widen">
+            <Card>
+              {/* `todayISO`/`taskTags` are threaded from here for the same reason `taskUrgency` is:
+                  this page already resolves `today` once on the server, and Gantt's client-side
+                  fallback exists only for callers that don't. Passing it keeps the today-marker on the
+                  server clock — the one that decided every urgency tier on this page — instead of the
+                  viewer's, which can disagree across a timezone or a midnight boundary. */}
+              {tl ? <Gantt timeline={tl} taskHrefBase={taskHrefBase} barColors={barColors} burndown={burndown} taskUrgency={taskUrgencyById} todayISO={today} taskTags={taskTags} /> : <EmptyNote>Add start/due dates to tasks to see them on the timeline.</EmptyNote>}
+            </Card>
+          </div>
         );
       })()}
 

@@ -389,6 +389,27 @@ button.pm-tag--btn:focus-visible .pm-tag { outline: 2px solid var(--pm-accent); 
 .pm-tagfilter__opt { display: inline-flex; align-items: center; gap: 6px; font: 400 13px var(--font-body); color: var(--pm-text); cursor: pointer; }
 .pm-tagfilter__opt input[type="checkbox"] { width: 14px; height: 14px; min-width: 0; border: 0; padding: 0; accent-color: var(--pm-accent); cursor: pointer; }
 
+/* ---- shared facet filter panel (components/pm/FacetFilters.tsx) ----
+   Replaces the bare always-open checkbox lists this used to be (Board/Ball's tag +
+   ball/responsible filters, the department board's own copy, the project workspace's own
+   copy) with ONE findable/clearable panel. `.pm-facets*` is the disclosure chrome; the
+   picklist inside it reuses `.pm-tagfilter*` above unchanged. */
+.pm-facets { border: 0.5px solid var(--pm-line); border-radius: var(--pm-radius); background: var(--pm-surface-card); }
+.pm-facets__summary { cursor: pointer; padding: 7px 10px; font: 700 11px var(--font-body); color: var(--pm-text); list-style: none; }
+.pm-facets__summary::-webkit-details-marker { display: none; }
+.pm-facets__summary:hover, .pm-facets__summary:focus-visible { color: var(--pm-accent); }
+.pm-facets__body { display: flex; flex-direction: column; gap: 10px; padding: 2px 10px 10px; border-top: 0.5px solid var(--pm-line-soft); }
+.pm-facets__chips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 10px; }
+.pm-facets__chip {
+  display: inline-flex; align-items: center; gap: 5px; font: 600 11px var(--font-body); line-height: 1.4;
+  padding: 3px 8px; border-radius: var(--pm-radius-pill); border: 0.5px solid var(--pm-accent);
+  color: var(--pm-accent); text-decoration: none; background: transparent; transition: background 0.15s var(--erp-ease), color 0.15s var(--erp-ease);
+}
+.pm-facets__chip:hover, .pm-facets__chip:focus-visible { background: var(--pm-accent); color: var(--pm-accent-fg); }
+.pm-facets__chip-x { font-weight: 700; }
+.pm-facets__clearall { font: 700 11px var(--font-body); letter-spacing: 0.04em; color: var(--pm-text-dim); text-decoration: underline; }
+.pm-facets__clearall:hover, .pm-facets__clearall:focus-visible { color: var(--pm-accent); }
+
 /* ---- shared color swatch picker (P2-02 tags; P2-05 custom statuses reuse) ---- */
 .pm-swatch-wrap { position: relative; display: inline-block; }
 .pm-swatch-trigger { width: 22px; height: 22px; padding: 0; border: 0.5px solid var(--pm-line); border-radius: var(--pm-radius); background: var(--pm-surface-card); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }

@@ -13,6 +13,7 @@ import { EmptyNote } from "@/components/systems/EmptyNote";
 import { DataTable, type Column } from "@/components/data/DataTable";
 import { ScopePill } from "@/components/scope/ScopePill";
 import { EnvelopeBanner } from "@/components/scope/EnvelopeBanner";
+import { PmSurfaceTabs } from "@/components/pm/PmSurfaceTabs";
 
 type Search = Promise<{ assignee?: string; scope?: string }>;
 
@@ -49,7 +50,7 @@ export default async function TasksPage({ searchParams }: { searchParams: Search
   const scope = rawScope && companies.some((c) => c.id === rawScope) ? rawScope : "all";
 
   if (companies.length === 0) {
-    return (<><PageHeader eyebrow="Business" title="Tasks" /><EmptyNote>You don&apos;t have access to any company yet.</EmptyNote></>);
+    return (<><PageHeader eyebrow="Business" title="Tasks" /><PmSurfaceTabs active="tasks" /><EmptyNote>You don&apos;t have access to any company yet.</EmptyNote></>);
   }
 
   const buildScopeHref = (v: "all" | string) => {
@@ -105,6 +106,7 @@ export default async function TasksPage({ searchParams }: { searchParams: Search
           </div>
         }
       />
+      <PmSurfaceTabs active="tasks" />
       {scope !== "all" && (
         <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
           {tab("All tasks", `/tasks?scope=${scope}`, !mine)}

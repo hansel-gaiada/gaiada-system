@@ -17,7 +17,7 @@ describe("toolkitFor", () => {
     expect(tk.groups.map((g) => g.key)).toEqual(["home", "work", "build", "connections"]);
     // Flattened tabs preserve the full route set (paths unchanged from the flat model).
     expect(deptTabs(tk).map((t) => t.key)).toEqual([
-      "home", "projects", "board", "timeline", "charts", "activity", "prd", "requests", "repositories", "deliverables", "connections",
+      "home", "projects", "board", "ball", "timeline", "charts", "activity", "prd", "requests", "repositories", "deliverables", "connections",
     ]);
     expect(tk.launchers.some((l) => l.key === "claude-code")).toBe(true);
   });
@@ -60,7 +60,7 @@ describe("toolkitFor", () => {
     const paths = deptTabs(toolkitFor("SEO")).map((t) => t.path);
     expect(paths).toEqual([
       "", // Home
-      "projects", "board", "timeline", "charts", "activity", // Work (generic)
+      "projects", "board", "ball", "timeline", "charts", "activity", // Project Management (generic)
       "engagements", "ledger", "reports",
       "audit", "keywords", "rankings", "gsc-ga4", "briefs", "ai-visibility",
       "planner", "ads", "search-terms", "pacing",

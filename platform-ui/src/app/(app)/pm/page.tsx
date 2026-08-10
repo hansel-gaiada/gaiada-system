@@ -4,32 +4,15 @@ import { getMe } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
 import { can } from "@/lib/rbac";
 import { getPmScope } from "@/lib/pmScopeActions";
-import {
-  resolveScopeWork, pmScopeOptions, scopeTagRegistries, scopeMilestones, scopeBurndownOverlay, scopeChartsData,
-} from "@/lib/pmScope-data";
-import {
-  unionStatusColumns, isSynthDefaultStatuses, openDependencies, resolveTags, distinctTagLabels,
-  filterTasksByTagLabels, parseTagFilterParam, isDoneStatus, taskUrgency, getProductivity,
-  computeTimeline, groupTimelineBars, milestoneMarkers, dependencyEdges,
-  type Tag, type UrgencyTier, type Milestone,
-} from "@/lib/pm";
-import { PlatformError } from "@/lib/platform";
-import {
-  assigneeColumns, ballColumns, priorityColumns, filterTasksByBall, filterTasksByResponsible,
-  ballFacetOptions, responsibleFacetOptions,
-} from "@/lib/departments";
-import { moveTask, moveTaskToStatusLabel, setTaskPriority, reassignResponsible, reassignBall } from "@/lib/pmActions";
+import { resolveScopeWork, pmScopeOptions } from "@/lib/pmScope-data";
+import { isDoneStatus, taskUrgency, type UrgencyTier } from "@/lib/pm";
 import { PM_TERMS } from "@/lib/pmVocabulary";
 import { PageHeader } from "@/components/PageHeader";
 import { Card } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
-import { Board } from "@/components/pm/Board";
-import { Gantt } from "@/components/pm/Gantt";
-import { Charts } from "@/components/pm/Charts";
-import { Productivity } from "@/components/pm/Productivity";
-import { TagChip } from "@/components/pm/TagChip";
 import { ScopeSwitcher } from "@/components/pm/ScopeSwitcher";
-import { PM_SWIMLANES, isSwimlane, isView, representativeTag, leadWithUnassigned, BALL_GATE_CAPABILITY, type PmSwimlane } from "./page-helpers";
+import { OverviewSection, BallSection, TimelineSection, ChartsSection, ProductivitySection } from "@/components/pm/PmScopeSections";
+import { isView, BALL_GATE_CAPABILITY } from "./page-helpers";
 import "@/components/pm/pm.css";
 
 // The `@all` cross-project PM surface (plan §1.1/§3 workstream A, tickets P4-A3/A4/A5) — Repsona's
@@ -56,12 +39,25 @@ import "@/components/pm/pm.css";
 //
 // P4-A6: `Responsible`/`Ball` ARE first-class views here, at every scope, with `leadWithUnassigned`
 // (./page-helpers) normalising both to lead with a "no user" column, matching the reference
-// (§1.4/§1.5). `Responsible` is reached through Board's "Group by" swimlane selector (no fourth
+// (§1.4/§1.5). `Responsible` is reached through Overview's "Group by" swimlane selector (no fourth
 // set of components, per the ticket). `Ball` used to be the fourth swimlane option there too, but
-// owner decision 2026-08-09 pulled it out into its own peer tab (`BallSection` below) — a full
-// board-layout switch just to see who's holding the ball cluttered the board view's real job
-// (status triage). `page-helpers.ts`'s `PM_SWIMLANES`/`isSwimlane` no longer accept "ball"; it
-// lives only in `PmView`/`isView` now.
+// owner decision 2026-08-09 pulled it out into its own peer tab — a full board-layout switch just
+// to see who's holding the ball cluttered the board view's real job (status triage).
+// `page-helpers.ts`'s `PM_SWIMLANES`/`isSwimlane` no longer accept "ball"; it lives only in
+// `PmView`/`isView` now.
+//
+// 2026-08-10 owner directive ("one component set parameterized by scope, not three parallel
+// implementations"): the section bodies that used to live below this component (BoardSection/
+// BallSection/GanttSection/ChartsSection/ProductivitySection) moved to
+// `components/pm/PmScopeSections.tsx` (as OverviewSection/BallSection/TimelineSection/
+// ChartsSection/ProductivitySection — "Board"->"Overview" and "Gantt"->"Timeline" per the same
+// decision) so `/project-management` (Business's surface) and this page render the identical
+// bodies, parameterized only by `basePath` and which `PmScope` they resolved `work` from. A
+// department console's Work/Board/Ball/Timeline/Charts tabs stay their own thin pages (they
+// already were) — they read a DIFFERENT `dept.tasks`/focus/division shape (lib/departments.ts)
+// that doesn't fit `resolveScopeWork`'s `PmScope`, so they call `Board`/`Gantt`/`FacetFilters`
+// directly rather than through these sections; see the department board/ball/timeline pages'
+// own headers.
 
 type SearchParams = Promise<{
   view?: string; swimlane?: string; tags?: string | string[]; ball?: string | string[]; responsible?: string | string[];
@@ -123,409 +119,16 @@ export default async function PmPage({ searchParams }: { searchParams: SearchPar
       </div>
 
       {view === "board" && (
-        <BoardSection work={work} sp={sp} canEdit={canEdit} taskUrgencyById={taskUrgencyById} userId={userId} tenant={tenant} />
+        <OverviewSection basePath="/pm" work={work} sp={sp} canEdit={canEdit} taskUrgencyById={taskUrgencyById} userId={userId} tenant={tenant} />
       )}
       {view === "ball" && (
-        <BallSection work={work} sp={sp} canPassBall={canPassBall} taskUrgencyById={taskUrgencyById} userId={userId} tenant={tenant} />
+        <BallSection basePath="/pm" work={work} sp={sp} canPassBall={canPassBall} taskUrgencyById={taskUrgencyById} userId={userId} tenant={tenant} />
       )}
       {view === "gantt" && (
-        <GanttSection work={work} canEdit={canEdit} taskUrgencyById={taskUrgencyById} today={today} userId={userId} tenant={tenant} />
+        <TimelineSection basePath="/pm" work={work} canEdit={canEdit} taskUrgencyById={taskUrgencyById} today={today} userId={userId} tenant={tenant} />
       )}
       {view === "charts" && <ChartsSection work={work} userId={userId} tenant={tenant} />}
       {view === "productivity" && <ProductivitySection userId={userId} tenant={tenant} scopeName={me.name} />}
     </>
-  );
-}
-
-// ---------------------------------------------------------------------------
-async function BoardSection({
-  work, sp, canEdit, taskUrgencyById, userId, tenant,
-}: {
-  work: Awaited<ReturnType<typeof resolveScopeWork>>;
-  sp: { swimlane?: string; tags?: string | string[]; ball?: string | string[]; responsible?: string | string[] };
-  canEdit: boolean;
-  taskUrgencyById: Record<string, UrgencyTier>;
-  userId: string;
-  tenant: string;
-}) {
-  const swimlane: PmSwimlane = isSwimlane(sp.swimlane) ? sp.swimlane : "status";
-  const taskById = new Map(work.tasks.map((t) => [t.id, t]));
-  const blockedIds = new Set(
-    work.tasks.filter((t) => openDependencies(t, taskById, work.statusesByProject[t.projectId]).length > 0).map((t) => t.id),
-  );
-  const showStatusColors = Object.values(work.statusesByProject).some((s) => !isSynthDefaultStatuses(s));
-
-  const registriesByProject = await scopeTagRegistries(userId, tenant, work.projectIds);
-  const allTagLabels = distinctTagLabels(registriesByProject);
-  const selectedTagLabels = parseTagFilterParam(sp.tags);
-  const tagFilteredTasks = filterTasksByTagLabels(work.tasks, registriesByProject, selectedTagLabels);
-  const taskTags: Record<string, Tag[]> = {};
-  for (const t of work.tasks) taskTags[t.id] = resolveTags(t.tags, registriesByProject[t.projectId] ?? []);
-
-  const selectedBallIds = parseTagFilterParam(sp.ball);
-  const selectedResponsibleIds = parseTagFilterParam(sp.responsible);
-  const ballOptions = ballFacetOptions(work.tasks);
-  const responsibleOptions = responsibleFacetOptions(work.tasks);
-  const facetFilteredTasks = filterTasksByResponsible(filterTasksByBall(tagFilteredTasks, selectedBallIds), selectedResponsibleIds);
-
-  return (
-    <>
-      <Card style={{ marginBottom: 16 }}>
-        <form className="lux-filters" method="get" aria-label="Board group by">
-          <input type="hidden" name="view" value="board" />
-          <label className="lux-filters__field">
-            <span>Group by</span>
-            <select name="swimlane" defaultValue={swimlane}>
-              {PM_SWIMLANES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
-            </select>
-          </label>
-          {selectedTagLabels.map((l) => <input key={l} type="hidden" name="tags" value={l} />)}
-          {selectedBallIds.map((id) => <input key={id} type="hidden" name="ball" value={id} />)}
-          {selectedResponsibleIds.map((id) => <input key={id} type="hidden" name="responsible" value={id} />)}
-          <div className="lux-filters__actions">
-            <button type="submit" className="lux-btn lux-btn--solid lux-btn--sm">Apply</button>
-            {swimlane !== "status" && <a href="/pm?view=board" className="lux-btn lux-btn--ghost lux-btn--sm">Reset</a>}
-          </div>
-        </form>
-      </Card>
-
-      {allTagLabels.length > 0 && (
-        <Card style={{ marginBottom: 16 }}>
-          <form className="lux-filters" method="get" aria-label="Filter by tag">
-            <input type="hidden" name="view" value="board" />
-            <input type="hidden" name="swimlane" value={swimlane} />
-            {selectedBallIds.map((id) => <input key={id} type="hidden" name="ball" value={id} />)}
-            {selectedResponsibleIds.map((id) => <input key={id} type="hidden" name="responsible" value={id} />)}
-            <div className="pm-tagfilter">
-              <span className="pm-tagfilter__label">Tags</span>
-              <div className="pm-tagfilter__options">
-                {allTagLabels.map((label) => {
-                  const rep = representativeTag(label, registriesByProject);
-                  return (
-                    <label key={label} className="pm-tagfilter__opt">
-                      <input type="checkbox" name="tags" value={label} defaultChecked={selectedTagLabels.includes(label)} />
-                      {rep ? <TagChip label={label} color={rep.color} /> : label}
-                    </label>
-                  );
-                })}
-              </div>
-            </div>
-            <div className="lux-filters__actions">
-              <button type="submit" className="lux-btn lux-btn--solid lux-btn--sm">Apply</button>
-              {selectedTagLabels.length > 0 && (
-                <a href={`/pm?view=board&swimlane=${swimlane}`} className="lux-btn lux-btn--ghost lux-btn--sm">Reset</a>
-              )}
-            </div>
-          </form>
-        </Card>
-      )}
-
-      {(ballOptions.length > 0 || responsibleOptions.length > 0) && (
-        <Card style={{ marginBottom: 16 }}>
-          <form className="lux-filters" method="get" aria-label={`Filter by ${PM_TERMS.ball} or ${PM_TERMS.responsible}`}>
-            <input type="hidden" name="view" value="board" />
-            <input type="hidden" name="swimlane" value={swimlane} />
-            {selectedTagLabels.map((l) => <input key={l} type="hidden" name="tags" value={l} />)}
-            {ballOptions.length > 0 && (
-              <div className="pm-tagfilter">
-                <span className="pm-tagfilter__label">{PM_TERMS.ball}</span>
-                <div className="pm-tagfilter__options">
-                  {ballOptions.map((o) => (
-                    <label key={o.id} className="pm-tagfilter__opt">
-                      <input type="checkbox" name="ball" value={o.id} defaultChecked={selectedBallIds.includes(o.id)} />
-                      {o.label}
-                    </label>
-                  ))}
-                </div>
-              </div>
-            )}
-            {responsibleOptions.length > 0 && (
-              <div className="pm-tagfilter">
-                <span className="pm-tagfilter__label">{PM_TERMS.responsible}</span>
-                <div className="pm-tagfilter__options">
-                  {responsibleOptions.map((o) => (
-                    <label key={o.id} className="pm-tagfilter__opt">
-                      <input type="checkbox" name="responsible" value={o.id} defaultChecked={selectedResponsibleIds.includes(o.id)} />
-                      {o.label}
-                    </label>
-                  ))}
-                </div>
-              </div>
-            )}
-            <div className="lux-filters__actions">
-              <button type="submit" className="lux-btn lux-btn--solid lux-btn--sm">Apply</button>
-              {(selectedBallIds.length > 0 || selectedResponsibleIds.length > 0) && (
-                <a href={`/pm?view=board&swimlane=${swimlane}`} className="lux-btn lux-btn--ghost lux-btn--sm">Reset</a>
-              )}
-            </div>
-          </form>
-        </Card>
-      )}
-
-      {!canEdit && (
-        <Card style={{ marginBottom: 16 }}>
-          <EmptyNote>You can view this board but can&apos;t move cards here — that needs {PM_TERMS.ball.toLowerCase()}/task-management access.</EmptyNote>
-        </Card>
-      )}
-
-      {facetFilteredTasks.length === 0 ? (
-        <EmptyNote>{work.tasks.length === 0 ? `No work in ${work.label} yet.` : "No tasks match these filters."}</EmptyNote>
-      ) : swimlane === "priority" ? (
-        <Board columns={priorityColumns(facetFilteredTasks)} move={setTaskPriority} blockedIds={blockedIds} taskTags={taskTags} taskUrgency={taskUrgencyById} />
-      ) : swimlane === "assignee" ? (
-        <Board columns={leadWithUnassigned(assigneeColumns(facetFilteredTasks), "__unassigned")} move={reassignResponsible} blockedIds={blockedIds} taskTags={taskTags} taskUrgency={taskUrgencyById} />
-      ) : (
-        <Board
-          columns={unionStatusColumns(facetFilteredTasks, work.statusesByProject)}
-          move={moveTaskToStatusLabel}
-          movePick={moveTask}
-          colorColumns={showStatusColors}
-          blockedIds={blockedIds}
-          taskTags={taskTags}
-          taskUrgency={taskUrgencyById}
-        />
-      )}
-    </>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Ball — its own tab (owner decision 2026-08-09, "Ball should be in this tab list so it doesn't
-// clutter the board view"). This used to be Board's fourth "Group by" axis (`swimlane === "ball"`
-// in `BoardSection` above); it is now the only place `ballColumns`/`reassignBall` render on this
-// page. Same data, same filters, same write path (`reassignBall` — P4-B6, "anyone can pass the
-// ball" is `pm.contribute`, not `pm.manage`) — only the "Group by" selector itself is gone, since
-// this whole tab IS the ball grouping (nothing left to switch between).
-//
-// `canPassBall` (NOT Board/Gantt's `canEdit`) is this tab's own gate — see `BALL_GATE_CAPABILITY`'s
-// comment in ./page-helpers. Board itself never actually blocks the drag (it has no such prop);
-// `canPassBall` only drives the empty-state note below, but that note is user-facing truth about
-// what this tab lets you do, so it must name the real capability rather than borrow Board/Gantt's.
-async function BallSection({
-  work, sp, canPassBall, taskUrgencyById, userId, tenant,
-}: {
-  work: Awaited<ReturnType<typeof resolveScopeWork>>;
-  sp: { tags?: string | string[]; ball?: string | string[]; responsible?: string | string[] };
-  canPassBall: boolean;
-  taskUrgencyById: Record<string, UrgencyTier>;
-  userId: string;
-  tenant: string;
-}) {
-  const taskById = new Map(work.tasks.map((t) => [t.id, t]));
-  const blockedIds = new Set(
-    work.tasks.filter((t) => openDependencies(t, taskById, work.statusesByProject[t.projectId]).length > 0).map((t) => t.id),
-  );
-
-  const registriesByProject = await scopeTagRegistries(userId, tenant, work.projectIds);
-  const allTagLabels = distinctTagLabels(registriesByProject);
-  const selectedTagLabels = parseTagFilterParam(sp.tags);
-  const tagFilteredTasks = filterTasksByTagLabels(work.tasks, registriesByProject, selectedTagLabels);
-  const taskTags: Record<string, Tag[]> = {};
-  for (const t of work.tasks) taskTags[t.id] = resolveTags(t.tags, registriesByProject[t.projectId] ?? []);
-
-  const selectedBallIds = parseTagFilterParam(sp.ball);
-  const selectedResponsibleIds = parseTagFilterParam(sp.responsible);
-  const ballOptions = ballFacetOptions(work.tasks);
-  const responsibleOptions = responsibleFacetOptions(work.tasks);
-  const facetFilteredTasks = filterTasksByResponsible(filterTasksByBall(tagFilteredTasks, selectedBallIds), selectedResponsibleIds);
-
-  return (
-    <>
-      {allTagLabels.length > 0 && (
-        <Card style={{ marginBottom: 16 }}>
-          <form className="lux-filters" method="get" aria-label="Filter by tag">
-            <input type="hidden" name="view" value="ball" />
-            {selectedBallIds.map((id) => <input key={id} type="hidden" name="ball" value={id} />)}
-            {selectedResponsibleIds.map((id) => <input key={id} type="hidden" name="responsible" value={id} />)}
-            <div className="pm-tagfilter">
-              <span className="pm-tagfilter__label">Tags</span>
-              <div className="pm-tagfilter__options">
-                {allTagLabels.map((label) => {
-                  const rep = representativeTag(label, registriesByProject);
-                  return (
-                    <label key={label} className="pm-tagfilter__opt">
-                      <input type="checkbox" name="tags" value={label} defaultChecked={selectedTagLabels.includes(label)} />
-                      {rep ? <TagChip label={label} color={rep.color} /> : label}
-                    </label>
-                  );
-                })}
-              </div>
-            </div>
-            <div className="lux-filters__actions">
-              <button type="submit" className="lux-btn lux-btn--solid lux-btn--sm">Apply</button>
-              {selectedTagLabels.length > 0 && (
-                <a href="/pm?view=ball" className="lux-btn lux-btn--ghost lux-btn--sm">Reset</a>
-              )}
-            </div>
-          </form>
-        </Card>
-      )}
-
-      {(ballOptions.length > 0 || responsibleOptions.length > 0) && (
-        <Card style={{ marginBottom: 16 }}>
-          <form className="lux-filters" method="get" aria-label={`Filter by ${PM_TERMS.ball} or ${PM_TERMS.responsible}`}>
-            <input type="hidden" name="view" value="ball" />
-            {selectedTagLabels.map((l) => <input key={l} type="hidden" name="tags" value={l} />)}
-            {ballOptions.length > 0 && (
-              <div className="pm-tagfilter">
-                <span className="pm-tagfilter__label">{PM_TERMS.ball}</span>
-                <div className="pm-tagfilter__options">
-                  {ballOptions.map((o) => (
-                    <label key={o.id} className="pm-tagfilter__opt">
-                      <input type="checkbox" name="ball" value={o.id} defaultChecked={selectedBallIds.includes(o.id)} />
-                      {o.label}
-                    </label>
-                  ))}
-                </div>
-              </div>
-            )}
-            {responsibleOptions.length > 0 && (
-              <div className="pm-tagfilter">
-                <span className="pm-tagfilter__label">{PM_TERMS.responsible}</span>
-                <div className="pm-tagfilter__options">
-                  {responsibleOptions.map((o) => (
-                    <label key={o.id} className="pm-tagfilter__opt">
-                      <input type="checkbox" name="responsible" value={o.id} defaultChecked={selectedResponsibleIds.includes(o.id)} />
-                      {o.label}
-                    </label>
-                  ))}
-                </div>
-              </div>
-            )}
-            <div className="lux-filters__actions">
-              <button type="submit" className="lux-btn lux-btn--solid lux-btn--sm">Apply</button>
-              {(selectedBallIds.length > 0 || selectedResponsibleIds.length > 0) && (
-                <a href="/pm?view=ball" className="lux-btn lux-btn--ghost lux-btn--sm">Reset</a>
-              )}
-            </div>
-          </form>
-        </Card>
-      )}
-
-      {!canPassBall && (
-        <Card style={{ marginBottom: 16 }}>
-          <EmptyNote>You can view this board but can&apos;t pass the {PM_TERMS.ball.toLowerCase()} here — passing it is open to any member of this company&apos;s project team, so that&apos;s the access to ask for.</EmptyNote>
-        </Card>
-      )}
-
-      {facetFilteredTasks.length === 0 ? (
-        <EmptyNote>{work.tasks.length === 0 ? `No work in ${work.label} yet.` : "No tasks match these filters."}</EmptyNote>
-      ) : (
-        <Board
-          columns={leadWithUnassigned(ballColumns(facetFilteredTasks), "__no_ball")}
-          move={reassignBall}
-          blockedIds={blockedIds}
-          taskTags={taskTags}
-          taskUrgency={taskUrgencyById}
-        />
-      )}
-    </>
-  );
-}
-
-// ---------------------------------------------------------------------------
-async function GanttSection({
-  work, canEdit, taskUrgencyById, today, userId, tenant,
-}: {
-  work: Awaited<ReturnType<typeof resolveScopeWork>>;
-  canEdit: boolean;
-  taskUrgencyById: Record<string, UrgencyTier>;
-  today: string;
-  userId: string;
-  tenant: string;
-}) {
-  const timeline = computeTimeline(work.tasks);
-  if (!timeline) {
-    return (
-      <Card title={PM_TERMS.gantt}>
-        <EmptyNote>
-          {work.tasks.length === 0
-            ? `No work in ${work.label} yet.`
-            : `None of ${work.label}'s tasks have start/due dates yet. Add dates to see them on the timeline.`}
-        </EmptyNote>
-      </Card>
-    );
-  }
-
-  // `scopeMilestones` already fetches exactly this scope's own projects, so every row here already
-  // belongs to `work.projectIds` — no further filtering needed. `milestoneMarkers` below drops any
-  // undated ones on its own (same as the department Timeline page).
-  const milestones: Milestone[] = await scopeMilestones(userId, tenant, work.projectIds);
-  const groups = groupTimelineBars(timeline.bars, "project", milestones.map((m) => ({ id: m.id, name: m.name })));
-  const markers = milestoneMarkers(timeline, milestones);
-  const edges = dependencyEdges(timeline.bars);
-  const burndown = await scopeBurndownOverlay(userId, tenant, work, timeline);
-
-  return (
-    <Card
-      title={PM_TERMS.gantt}
-      headerRight={<span style={{ font: "700 10px var(--font-body)", letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--erp-ink-50)" }}>{work.projectIds.length} project{work.projectIds.length === 1 ? "" : "s"}</span>}
-    >
-      <Gantt
-        timeline={timeline}
-        groups={groups}
-        groupBy="project"
-        milestones={markers}
-        depEdges={edges}
-        interactive
-        canEdit={canEdit}
-        burndown={burndown}
-        taskUrgency={taskUrgencyById}
-        todayISO={today}
-      />
-    </Card>
-  );
-}
-
-// ---------------------------------------------------------------------------
-async function ChartsSection({ work, userId, tenant }: { work: Awaited<ReturnType<typeof resolveScopeWork>>; userId: string; tenant: string }) {
-  if (work.tasks.length === 0) {
-    return <Card title={PM_TERMS.charts}><EmptyNote>No work in {work.label} yet.</EmptyNote></Card>;
-  }
-  const data = await scopeChartsData(userId, tenant, work);
-  return (
-    <Card
-      title={PM_TERMS.charts}
-      headerRight={<span style={{ font: "700 10px var(--font-body)", letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--erp-ink-50)" }}>{work.projectIds.length} project{work.projectIds.length === 1 ? "" : "s"}</span>}
-    >
-      <Charts kpis={data.kpis} flow={data.flow} burndownSeries={data.burndownSeries} burndownOverlay={data.burndownOverlay} tagRows={data.tagRows} />
-    </Card>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Productivity (P4-E3/E4, plan §1.7) — self-view only for now (see the header note above this
-// component). `getProductivity` degrades a 404 (stale backend / module disabled) to `null`; a 403
-// is deliberately NOT swallowed by the reader (self is always allowed server-side, so hitting one
-// here would mean something is actually wrong, not "no data yet") — surfaced honestly rather than
-// silently reproduced as an empty state.
-async function ProductivitySection({ userId, tenant, scopeName }: { userId: string; tenant: string; scopeName: string }) {
-  let report;
-  try {
-    report = await getProductivity(userId, tenant, {});
-  } catch (e) {
-    if (e instanceof PlatformError && e.status === 403) {
-      return (
-        <Card title={PM_TERMS.productivity}>
-          <EmptyNote>You can&apos;t view this productivity series — {e.message}.</EmptyNote>
-        </Card>
-      );
-    }
-    throw e;
-  }
-  if (!report) {
-    return (
-      <Card title={PM_TERMS.productivity}>
-        <EmptyNote>Productivity data isn&apos;t available yet.</EmptyNote>
-      </Card>
-    );
-  }
-  return (
-    <Card
-      title={PM_TERMS.productivity}
-      headerRight={<span style={{ font: "700 10px var(--font-body)", letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--erp-ink-50)" }}>{scopeName}</span>}
-    >
-      <Productivity report={report} scopeName={scopeName} viewingSelf />
-    </Card>
   );
 }

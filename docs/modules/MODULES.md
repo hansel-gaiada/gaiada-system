@@ -35,7 +35,7 @@ versions below; the running build reports it at `GET /health`.
 | Module | Ver | Status | Workstream | Since |
 |---|---|---|---|---|
 | platform-nest | `0.20.1` | IN PROGRESS | WS1 | 2026-08-09 |
-| platform-ui | `0.24.0` | IN PROGRESS | WS5 | 2026-08-09 |
+| platform-ui | `0.25.0` | IN PROGRESS | WS5 | 2026-08-09 |
 | ai-gateway-go | `0.13.2` | PROTOTYPED | WS3 | 2026-08-07 |
 | mcp-hub | `0.10.1` | PROTOTYPED | WS2 | 2026-08-09 |
 | sync-engine-go | `0.7.0` | PROTOTYPED | WS1 | 2026-07 |
@@ -80,7 +80,7 @@ authoritative `/admin/session/status`, instead of showing "unknown" as if it wer
 **Known gaps:** not deployed to production.
 **Future plans:** additional verticals (resort/marine/print) â†’ hardening to production.
 
-## platform-ui â€” ERP Suite Â· `0.24.0` Â· PROTOTYPED
+## platform-ui â€” ERP Suite Â· `0.25.0` Â· PROTOTYPED
 
 **What exists (dev):** Next.js ERP UI, BFF to platform-nest, RBAC-gated nav + company switcher; My Work,
 Approvals inbox, Companies/Projects/Tasks, Agency, Rollups, Systems/Intelligence/Admin consoles, People

@@ -85,6 +85,18 @@
 
 /* ---- Display preferences (data-attributes set on .erp-app by the Shell) ---- */
 .erp-app[data-width="wide"] .erp-main__inner { max-width: none; }
+
+/* The Timeline (Gantt) view is a structurally wide surface — the REAL constraint making it read
+   cramped was never a fixed height or a day-width constant inside Gantt.tsx (it already has
+   horizontal scroll + Day/Week/Month zoom); it was this file's own `.erp-main__inner` capping
+   EVERY page's content column at 1180px regardless of what the page is. A department Timeline
+   tab is exempted from the department console's own rail (`fullBleed`, departments.css) but that
+   never touched this outer cap, so the chart still only ever got ~1100px of the viewport to work
+   with. Rather than opt every Timeline mount into the user's global `wide` density preference
+   (a different setting, off by default, and not this ticket's to flip for everyone), any page can
+   mark its own content with `.pm-timeline-widen` and get the same `max-width: none` `data-width`
+   already grants — `:has()` is already this file's own idiom (`.sec-tabs:has(+ .sub-tabs)` above). */
+.erp-main:has(.pm-timeline-widen) .erp-main__inner { max-width: none; }
 .erp-app[data-density="compact"] .erp-main__inner { padding: 18px 22px 30px; }
 .erp-app[data-density="compact"] .lux-card,
 .erp-app[data-density="compact"] .lux-kpi { padding: 15px; }

@@ -12,10 +12,17 @@
 // 2026-07-23-dept-console-ia-redesign.md). A department console is a small stable
 // spine of GROUPS (primary strip); each group holds one or more related TABS
 // (secondary sub-tab strip, shown only when a group has >1 tab). The universal
-// spine every department inherits is Home · Work · <craft group> · Connections;
-// only the craft group differs per department. Routes/paths are unchanged from the
-// old flat model — only the grouping is new — so existing deep links keep working.
+// spine every department inherits is Home · Project Management · <craft group> ·
+// Connections; only the craft group differs per department. Routes/paths are unchanged
+// from the old flat model — only the grouping is new — so existing deep links keep working.
+//
+// 2026-08-10 owner decision: this group's label was "Work" (a vague word, per the same
+// complaint that renamed the sidebar's "PM" row) — it is now PM_TERMS.projectManagement,
+// the SAME string the sidebar and Business surface use, so the surface reads identically
+// everywhere it appears. The group's `key` ("work") and every tab's `path` are unchanged —
+// only the label moved, see PM_RENAMES in pmVocabulary.ts.
 import type { IconName } from "@/components/shell/icons";
+import { PM_TERMS } from "@/lib/pmVocabulary";
 
 export interface DeptTab {
   key: string;
@@ -83,13 +90,17 @@ const HOME_GROUP: DeptGroup = { key: "home", label: "Home", icon: "home", tabs: 
 
 const WORK_GROUP: DeptGroup = {
   key: "work",
-  label: "Work",
+  label: PM_TERMS.projectManagement,
   icon: "projects",
   tabs: [
     { key: "projects", label: "Projects", path: "projects", icon: "projects", blurb: "Projects this department owns.", fullBleed: true },
-    { key: "board", label: "Board", path: "board", icon: "box", blurb: "The department's working kanban board.", fullBleed: true },
-    { key: "timeline", label: "Timeline", path: "timeline", icon: "clock", blurb: "Schedule and milestones across owned projects.", fullBleed: true },
-    { key: "charts", label: "Charts", path: "charts", icon: "pulse", blurb: "Cumulative flow, burndown, and tag breakdown across owned projects.", fullBleed: true },
+    { key: "board", label: PM_TERMS.board, path: "board", icon: "box", blurb: "The department's working kanban board.", fullBleed: true },
+    // Ball — its own tab (owner decision: it must stop polluting the Board view on EVERY
+    // PM surface, not just /pm). Same precedent as pm/page-helpers.ts's `BALL_GATE_CAPABILITY`
+    // note: this used to be a "Group by" swimlane option on the Board tab above.
+    { key: "ball", label: PM_TERMS.ball, path: "ball", icon: "box", blurb: "Who's holding the ball on this department's work.", fullBleed: true },
+    { key: "timeline", label: PM_TERMS.gantt, path: "timeline", icon: "clock", blurb: "Schedule and milestones across owned projects.", fullBleed: true },
+    { key: "charts", label: PM_TERMS.charts, path: "charts", icon: "pulse", blurb: "Cumulative flow, burndown, and tag breakdown across owned projects.", fullBleed: true },
     { key: "activity", label: "Activity", path: "activity", icon: "pulse", blurb: "The full cross-source activity feed." },
   ],
 };

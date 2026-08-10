@@ -28,9 +28,17 @@ export const PM_TERMS = {
   crossProject: "Cross project",
   allTasks: "All Tasks",
 
-  // Views.
-  gantt: "Gantt",
-  board: "Board",
+  // The one PM surface name (owner decision 2026-08-10: "PM" and the department "Work" group both
+  // read as the abbreviation/vague word the owner explicitly asked to stop — see PM_RENAMES below).
+  // Every place that names this surface — the Workspace nav row, the Business nav row, and each
+  // department console's primary-strip group — imports THIS, not a local string.
+  projectManagement: "Project Management",
+
+  // Views. 2026-08-10 owner decision, reversing the 2026-08-06 Timeline->Gantt rename and adding
+  // Board->Overview: three surfaces (`/pm`, Business, a department console) had drifted onto
+  // different words for the same two views. See PM_RENAMES.
+  gantt: "Timeline",
+  board: "Overview",
   charts: "Charts",
   productivity: "Productivity",
   milestones: "Milestones",
@@ -94,7 +102,25 @@ export const PM_RENAMES: { was: string; now: string; idUnchanged?: string; note?
   { was: "Assignee", now: PM_TERMS.ball, note: "assignee.refId/kind — the field itself is unchanged" },
   { was: "In progress", now: "Doing", idUnchanged: "in_progress" },
   { was: "To do", now: "ToDo", idUnchanged: "todo" },
-  { was: "Timeline", now: PM_TERMS.gantt, note: "the ?view=timeline query value stays for old links" },
+  {
+    // `was` records the FULL history (2026-08-06 renamed this "Timeline" -> "Gantt"; 2026-08-10
+    // reverses that) — only `now` has to be a currently-published word (pinned by this file's own
+    // test), so the intermediate "Gantt" step lives here as free-text context, not a second entry.
+    was: "Timeline (2026-08-06), then Gantt", now: PM_TERMS.gantt,
+    note: "2026-08-10 owner decision: three surfaces (/pm, Business, a department console) disagreed on names — back to \"Timeline\". The ?view=gantt query value, Gantt.tsx, and every pm-gantt__* CSS class stay for old links/code (id-stability rule above).",
+  },
+  {
+    was: "Board", now: PM_TERMS.board,
+    note: "2026-08-10 owner decision, same pass as Gantt->Timeline: \"Overview\", so the kanban view stops sharing a name with the department console's Work/Project Management group. The ?view=board query value, the tab key \"board\", Board.tsx, and every pm-col__*/pm-board__* CSS class stay unchanged.",
+  },
+  {
+    was: "PM", now: PM_TERMS.projectManagement,
+    note: "2026-08-10 owner decision: the sidebar's Workspace row, the collapsed Business row, and every department console's \"Work\" group all read \"Project Management\" now — one name for the one surface. Routes/paths are unchanged (/pm, /project-management, /departments/[deptId]/<tab>).",
+  },
+  {
+    was: "Work", now: PM_TERMS.projectManagement,
+    note: "the department console's primary-strip group — see the PM entry above; same rename, same reason.",
+  },
   { was: "Docs", now: PM_TERMS.notes, note: "route/endpoint segment stays /docs" },
   { was: "Discussion", now: PM_TERMS.comment },
   { was: "Unassigned", now: PM_TERMS.unassigned },

@@ -10,6 +10,7 @@ import {
   taskDateEnvelope, projectUrgency,
   type PmTask, type Milestone, type UrgencyTier,
 } from "@/lib/pm";
+import { PM_TERMS } from "@/lib/pmVocabulary";
 import { Card } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
 import { Gantt, type GanttProjectBar } from "@/components/pm/Gantt";
@@ -82,7 +83,7 @@ export default async function DepartmentTimelinePage({ params }: { params: Param
 
   if (!timeline) {
     return (
-      <Card title="Timeline">
+      <Card title={PM_TERMS.gantt}>
         {owned.length === 0 ? (
           <EmptyNote>No owned projects yet — projects with this department as owner will appear here.</EmptyNote>
         ) : (
@@ -103,27 +104,32 @@ export default async function DepartmentTimelinePage({ params }: { params: Param
   const burndown = burndownOverlay(timeline, aggregateBurndown(burndownSeries));
 
   return (
-    <Card
-      title="Timeline"
-      headerRight={<span style={{ font: "700 10px var(--font-body)", letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--erp-ink-50)" }}>{datedOwned.length} project{datedOwned.length === 1 ? "" : "s"} scheduled</span>}
-    >
-      <Gantt
-        timeline={timeline}
-        groups={groups}
-        groupBy="project"
-        milestones={markers}
-        depEdges={edges}
-        undatedGroups={undatedGroups}
-        interactive
-        canEdit={canEdit}
-        burndown={burndown}
-        taskUrgency={taskUrgencyById}
-        projectBars={projectBars}
-        projectUrgency={projectUrgencyById}
-        // Server-resolved today — the same one that decided every tier in taskUrgencyById, so the
-        // marker line and the bars around it can never disagree about what day it is.
-        todayISO={today}
-      />
-    </Card>
+    // `pm-timeline-widen` (shell.css): the Timeline chart is a structurally wide surface — this
+    // marker lifts the app shell's own `.erp-main__inner` 1180px cap for this page, the real fix
+    // for "the Timeline must be far bigger" (see shell.css's comment on the `:has()` rule).
+    <div className="pm-timeline-widen">
+      <Card
+        title={PM_TERMS.gantt}
+        headerRight={<span style={{ font: "700 10px var(--font-body)", letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--erp-ink-50)" }}>{datedOwned.length} project{datedOwned.length === 1 ? "" : "s"} scheduled</span>}
+      >
+        <Gantt
+          timeline={timeline}
+          groups={groups}
+          groupBy="project"
+          milestones={markers}
+          depEdges={edges}
+          undatedGroups={undatedGroups}
+          interactive
+          canEdit={canEdit}
+          burndown={burndown}
+          taskUrgency={taskUrgencyById}
+          projectBars={projectBars}
+          projectUrgency={projectUrgencyById}
+          // Server-resolved today — the same one that decided every tier in taskUrgencyById, so the
+          // marker line and the bars around it can never disagree about what day it is.
+          todayISO={today}
+        />
+      </Card>
+    </div>
   );
 }

@@ -37,25 +37,52 @@ describe("Ball tab's gate matches the server's actual write-path capability", ()
     expect(sendCall![1]).toBe(BALL_GATE_CAPABILITY);
   });
 
+  // 2026-08-10: BoardSection/GanttSection/BallSection moved to the shared
+  // components/pm/PmScopeSections.tsx (as OverviewSection/TimelineSection/BallSection — "Board"->
+  // "Overview" and "Gantt"->"Timeline" per the same owner decision) so `/project-management`
+  // (Business) can mount the identical bodies. page.tsx now just calls them; the gate wiring this
+  // test guards is unchanged, only the component names moved.
   it("page.tsx wires BALL_GATE_CAPABILITY — not a hardcoded pm.manage — into the Ball tab's canPassBall", () => {
     const src = read("./page.tsx");
     expect(src).toMatch(/const canPassBall = can\(me, BALL_GATE_CAPABILITY, tenant\);/);
 
-    // BallSection must receive canPassBall; it must NOT receive Board/Gantt's canEdit (that was
-    // exactly the bug — the manage-tier flag leaking into the contribute-tier tab).
+    // BallSection must receive canPassBall; it must NOT receive Overview/Timeline's canEdit (that
+    // was exactly the bug — the manage-tier flag leaking into the contribute-tier tab).
     const ballCallStart = src.indexOf("<BallSection");
     expect(ballCallStart).toBeGreaterThan(-1);
     const ballCall = src.slice(ballCallStart, src.indexOf("/>", ballCallStart));
     expect(ballCall).toContain("canPassBall={canPassBall}");
     expect(ballCall).not.toContain("canEdit={canEdit}");
 
-    // BoardSection/GanttSection are untouched — their writes ARE manage-gated, so they must keep
-    // using `canEdit`, not accidentally get downgraded to the ball's capability.
-    const boardCallStart = src.indexOf("<BoardSection");
+    // OverviewSection/TimelineSection are untouched — their writes ARE manage-gated, so they must
+    // keep using `canEdit`, not accidentally get downgraded to the ball's capability.
+    const boardCallStart = src.indexOf("<OverviewSection");
+    expect(boardCallStart).toBeGreaterThan(-1);
     const boardCall = src.slice(boardCallStart, src.indexOf("/>", boardCallStart));
     expect(boardCall).toContain("canEdit={canEdit}");
-    const ganttCallStart = src.indexOf("<GanttSection");
+    const ganttCallStart = src.indexOf("<TimelineSection");
+    expect(ganttCallStart).toBeGreaterThan(-1);
     const ganttCall = src.slice(ganttCallStart, src.indexOf("/>", ganttCallStart));
     expect(ganttCall).toContain("canEdit={canEdit}");
+  });
+
+  // Business's Project Management surface (`/project-management`) mounts the SAME
+  // OverviewSection/BallSection/TimelineSection — the exact reuse this whole rename program
+  // exists to force ("no fourth shape") — so the same gate-drift bug could recur there
+  // independently of `/pm`. Same shape of guard, second surface.
+  it("project-management/page.tsx wires the same gates the same way", () => {
+    const src = read("../project-management/page.tsx");
+    expect(src).toMatch(/const canPassBall = can\(me, BALL_GATE_CAPABILITY, tenant\);/);
+
+    const ballCallStart = src.indexOf("<BallSection");
+    expect(ballCallStart).toBeGreaterThan(-1);
+    const ballCall = src.slice(ballCallStart, src.indexOf("/>", ballCallStart));
+    expect(ballCall).toContain("canPassBall={canPassBall}");
+    expect(ballCall).not.toContain("canEdit={canEdit}");
+
+    const boardCallStart = src.indexOf("<OverviewSection");
+    expect(boardCallStart).toBeGreaterThan(-1);
+    const boardCall = src.slice(boardCallStart, src.indexOf("/>", boardCallStart));
+    expect(boardCall).toContain("canEdit={canEdit}");
   });
 });

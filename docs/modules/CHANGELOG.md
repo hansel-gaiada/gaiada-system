@@ -34,6 +34,33 @@ reconstructed from this table alone. Format defined in [`VERSIONING.md`](./VERSI
 > Not corrected retroactively (moving a pushed, already-deployed tag is its own risk); flagging so
 > the next session doesn't re-diagnose the same gap.
 
+### `Alpha 01.035.0084a` - 2026-08-10 - one project-management interface, everywhere
+
+Manifest (counter +1, 0083 -> 0084): `platform-ui 0.25.0`.
+
+The owner found three surfaces showing the same data with different names, different
+tabs and different filters. They are now one interface: `Overview` (was Board),
+`Ball`, `Timeline` (was Gantt), `Charts`, `Productivity` — on /pm, on the new Business
+`/project-management`, in every department console, and in the single-project
+workspace. "PM" and the vague "Work" tab are gone; everything is called Project
+Management. Names are single-sourced through `PM_TERMS`, so the next rename has one
+place to change rather than four to miss.
+
+Ball is its own tab on EVERY surface and no longer a Board swimlane. Business collapses
+to one sidebar entry with Projects/Tasks as tabs instead of separate rows.
+
+THE TIMELINE WAS NEVER THE GANTT'S FAULT. It already had scroll and Day/Week/Month
+zoom; the constraint was `shell.css`'s `.erp-main__inner { max-width: 1180px }` capping
+every page regardless of content shape. Fixed with a `:has()` widen rule — the same
+idiom that file already uses — rather than by inflating numbers inside the chart.
+
+Filters: active selections are now removable chips with Clear all, above a collapsible
+picklist. Native HTML, no client JS, no dependency.
+
+Deep links: none broken, none redirected. /pm, /projects, /tasks and ?view= all resolve
+as before. Business points at /project-management rather than a query-param on /pm so it
+cannot inherit a stale scope cookie.
+
 ### `Alpha 01.034.0083a` - 2026-08-10 - the mirror stops drifting from the authority
 
 Manifest (counter +1, 0082 -> 0083): `platform-ui 0.24.0`.
