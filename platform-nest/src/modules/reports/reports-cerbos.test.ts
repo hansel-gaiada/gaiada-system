@@ -21,7 +21,6 @@
 //   exec             = group_executive  (global, cross-company — §8's "Exec group")
 //   admin            = company_admin    (the tenant's OWN administrator)
 //   lead             = manager          (company-scoped — §8's "Dept lead (own unit)", COARSE here)
-//   teamLead         = team_lead        (team-scoped — the same tier by another grant shape)
 //   member           = member           (company-scoped — §8's "Self")
 //   hrReader         = hr_staff         (§8's "HR-appraisal role", BASELINE half — TR-25 finding ②)
 //   hrOps            = hr_manager       (§8's "HR-appraisal role", ACTING half)
@@ -56,7 +55,6 @@ const owner = principal([{ role: "platform_admin", scopeType: "global", scopeId:
 const exec = principal([{ role: "group_executive", scopeType: "global", scopeId: null }], []);
 const admin = principal([{ role: "company_admin", scopeType: "company", scopeId: T1 }]);
 const lead = principal([{ role: "manager", scopeType: "company", scopeId: T1 }]);
-const teamLead = principal([{ role: "team_lead", scopeType: "team", scopeId: "d-seo" }]);
 const member = principal([{ role: "member", scopeType: "company", scopeId: T1 }]);
 const hrReader = principal([{ role: "hr_staff", scopeType: "company", scopeId: T1 }]);
 const hrOps = principal([{ role: "hr_manager", scopeType: "company", scopeId: T1 }]);
@@ -117,12 +115,11 @@ describe.skipIf(!live)("⚡ TR-25 Cerbos policy parity — tracker/reporting §8
       expect(await allow(lead, companyDoc, "read_company")).toBe(false);
     });
 
-    it("a team-scoped team_lead grant behaves as the same tier on its OWN unit, and not on another", async () => {
-      expect(await allow(teamLead, deptDoc, "read_department")).toBe(true); // teamId === 'd-seo'
-      const otherDept: Resource = { kind: "report_document", tenantId: T1, module: "reports", id: "d-web", teamId: "d-web" };
-      expect(await allow(teamLead, otherDept, "read_department")).toBe(false);
-      expect(await allow(teamLead, companyDoc, "read_company")).toBe(false);
-    });
+    // HIER-3 (2026-08-11): the "a team-scoped team_lead grant behaves as the same tier on its OWN
+    // unit, and not on another" case that used to sit here is REMOVED — `team_lead` and the `team`
+    // scope_type are retired (docs/superpowers/plans/2026-08-11-hier-3-report.md). The replacement
+    // mechanism's equivalent ancestor-vs-sibling proof (`org_unit_lead` on `read_department`) lives
+    // in `src/rbac/cerbos-org-unit-lead-cascade.test.ts`, not here.
 
     it("HR (both halves) read person/project/department, NEVER company — §8's 'person data yes, company strategy no'", async () => {
       for (const p of [hrReader, hrOps]) {
@@ -204,7 +201,7 @@ describe.skipIf(!live)("⚡ TR-25 Cerbos policy parity — tracker/reporting §8
     });
 
     it("dept lead, HR (both halves) and member are ALL denied seal/amend/pin (§8: ⛔ across the row)", async () => {
-      for (const p of [lead, teamLead, hrReader, hrOps, member]) {
+      for (const p of [lead, hrReader, hrOps, member]) {
         expect(await allow(p, period, "seal")).toBe(false);
         expect(await allow(p, period, "amend")).toBe(false);
         expect(await allow(p, period, "pin")).toBe(false);
@@ -226,7 +223,7 @@ describe.skipIf(!live)("⚡ TR-25 Cerbos policy parity — tracker/reporting §8
     });
 
     it("dept lead, HR (both halves) and member are DENIED — a lead who re-derives a window moves their own team's appraisal inputs", async () => {
-      for (const p of [lead, teamLead, hrReader, hrOps, member]) {
+      for (const p of [lead, hrReader, hrOps, member]) {
         expect(await allow(p, reportAdmin, "recompute")).toBe(false);
       }
     });
@@ -271,7 +268,7 @@ describe.skipIf(!live)("⚡ TR-25 Cerbos policy parity — tracker/reporting §8
     it("finding ③: the n8n ops reads are company_admin-only — lead, exec, HR and member all denied", async () => {
       for (const action of ["pending_reminders", "missed_by_unit"]) {
         expect(await allow(admin, checkinNoSubject, action)).toBe(true);
-        for (const p of [lead, teamLead, exec, hrReader, hrOps, member]) {
+        for (const p of [lead, exec, hrReader, hrOps, member]) {
           expect(await allow(p, checkinNoSubject, action)).toBe(false);
         }
       }
@@ -312,30 +309,11 @@ describe.skipIf(!live)("⚡ TR-25 Cerbos policy parity — tracker/reporting §8
       expect(await allow(lead, appraisalOther, "ack")).toBe(false); // ack is the SUBJECT's own act
     });
 
-    it("⚠ FINDING: `team_lead` is listed in resource_appraisal.yaml but is UNREACHABLE there — pinned as a denial so it cannot become a silent grant", async () => {
-      // `gaiada_scopes.team_lead` matches ONLY when `grant.scopeId == resource.attr.teamId`.
-      // `appraisals.controller.ts` never sets `teamId` on an `appraisal` resource (it has no unit axis
-      // — it narrows on `manager_user_id`), so the attribute is "" and the derived role can never
-      // match. The rule is therefore inert: harmless and fail-CLOSED, but misleading to a reader who
-      // assumes listing a role grants it. TR-25 chose to KEEP the rule and pin its real behaviour here
-      // rather than delete it, because it becomes live the moment a future ticket passes a `teamId` —
-      // and this assertion turns that from a silent widening into a failing test.
-      //
-      // The same is true of `team_lead` on `resource_report_period.yaml`'s `view` and on
-      // `resource_report_document.yaml`'s `read_person`/`read_project` (neither resource carries
-      // `teamId` for those grains). It is REACHABLE, and genuinely meaningful, on exactly one action:
-      // `read_department`, where `teamId` IS the org unit node id — asserted in the report_document
-      // block above. That single reachable case is the closest thing this codebase has to a real
-      // unit-scoped authz primitive, and the reason it cannot be adopted wholesale is recorded in
-      // person-scope.ts's header: `user_roles.scope_id` is `uuid`, while org-unit node ids are
-      // free-form text, so the GRANT cannot be stored even though the POLICY can express it.
-      for (const action of ["read", "write", "submit", "confirm_evidence", "finalize", "cycle_admin"]) {
-        expect(await allow(teamLead, appraisalOther, action)).toBe(false);
-      }
-      expect(await allow(teamLead, period, "view")).toBe(false);
-      expect(await allow(teamLead, personDoc(false), "read_person")).toBe(false);
-      expect(await allow(teamLead, projectDoc, "read_project")).toBe(false);
-    });
+    // HIER-3 (2026-08-11): the "⚠ FINDING: `team_lead` is listed in resource_appraisal.yaml but is
+    // UNREACHABLE there" pin that used to sit here is REMOVED, not replaced — `team_lead` is
+    // retired everywhere, including from resource_appraisal.yaml/resource_report_period.yaml/
+    // resource_report_document.yaml's rule lists (docs/superpowers/plans/2026-08-11-hier-3-report.md),
+    // so there is no longer a dead-tier listing left to pin a denial against.
 
     it("self reads + acks own only; never writes, submits, finalizes or admins a cycle", async () => {
       expect(await allow(member, appraisalSelf, "read")).toBe(true);

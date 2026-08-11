@@ -175,6 +175,35 @@ describe.skipIf(!TEST_URL)("W0: the portal admits a client_contacts-provisioned 
     expect(r.statusCode).toBeGreaterThanOrEqual(400);
   });
 
+  // IAM-DR12 (2026-08-11): the test above only ever drove `member`, who never held a Cerbos grant
+  // on `portal` `read` to begin with (resource_portal.yaml never listed `member`) — so it denied
+  // for the boring, expected reason and never touched the actually-interesting case. Before this
+  // ticket, `resource_portal.yaml` DID grant `read` to `company_admin`/`manager`/`group_executive`
+  // "for support", but IAM-VERIFY-01 (docs/superpowers/plans/2026-08-11-iam-verify-01-report.md,
+  // Defect B) drove that exact case live and found it dead: `callerClientIds()` throws for any
+  // principal with zero `client_contacts` rows, which every staff member has by construction, so
+  // the Cerbos-granted "support read" could never be exercised. DR-12's decision was to delete the
+  // dead rule rather than wire it up — staff have no portal access, full stop. These two cases
+  // pin exactly that: a `company_admin`/`manager` is refused the SAME way `member` always was,
+  // now for a reason the policy is honest about (no rule at all) rather than an unreachable one.
+  it("a company_admin is still not a portal client (IAM-DR12 — the dead support-read rule is gone, not just unreachable)", async () => {
+    const admin = await createUser("company-admin@cc-portal.test");
+    await addMembership(co, admin);
+    await grantRole(admin, await createRole("company_admin"), "company", co);
+    const r = await app.inject({ method: "GET", url: `/api/${co}/portal/runs`, headers: asUser(admin) });
+    expect(r.statusCode).toBeGreaterThanOrEqual(400);
+    expect(r.json()).toMatchObject({ error: expect.any(String) });
+  });
+
+  it("a manager is still not a portal client (IAM-DR12 — same dead support-read rule, removed)", async () => {
+    const manager = await createUser("manager@cc-portal.test");
+    await addMembership(co, manager);
+    await grantRole(manager, await createRole("manager"), "company", co);
+    const r = await app.inject({ method: "GET", url: `/api/${co}/portal/runs`, headers: asUser(manager) });
+    expect(r.statusCode).toBeGreaterThanOrEqual(400);
+    expect(r.json()).toMatchObject({ error: expect.any(String) });
+  });
+
   it("a client-wide grant WIDENS access even alongside a narrower project row", async () => {
     // Adding a project-scoped row to someone who already had client-wide access must not TAKE access
     // away — the resolver treats any client-wide row as unrestricted.

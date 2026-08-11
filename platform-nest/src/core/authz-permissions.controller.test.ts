@@ -6,7 +6,7 @@
 //      is tested by direct instantiation with manufactured req/reply objects — same idiom as
 //      `module-catalog.controller.test.ts` — no DB/Cerbos needed either.
 //   3. A live-Cerbos parity sweep that proves `scopeLevelPermissions` for `platform_admin`
-//      actually equals what `can()` (real Cerbos) grants across every one of the 215 grantable
+//      actually equals what `can()` (real Cerbos) grants across every one of the grantable
 //      keys — the concrete verification behind this ticket's "must reflect their real reach"
 //      requirement, not just an assertion about the bundle's shape.
 //
@@ -28,6 +28,13 @@ import {
 import { can } from "../rbac/can";
 import type { Principal, RoleGrant, PermissionGrant } from "../rbac/principal";
 import permissionCatalog from "../rbac/permission-catalog.json";
+
+/** Every `class: "grantable"` key in the catalog — the set superadmin's scope-level answer must
+ *  cover in full. Derived, so retiring or adding a permission cannot leave this test asserting a
+ *  number that no longer describes anything. */
+const GRANTABLE_KEY_COUNT = (permissionCatalog.permissions as Array<{ class: string }>).filter(
+  (p) => p.class === "grantable",
+).length;
 import roleBundles from "../rbac/role-permission-bundles.json";
 import { config } from "../config";
 import { buildApp } from "../main";
@@ -333,10 +340,17 @@ describe("AuthzPermissionsController.globalScoped — no tenancy gate, answers t
 // ───────────────────────────────────────────────────────────────────────────────────────────
 
 describe.skipIf(!live)("scopeLevelPermissions vs can() — live parity sweep (superadmin reach)", () => {
-  it("platform_admin: EVERY one of the 215 grantable keys that scopeLevelPermissions lists is ALSO granted by can() at the same scope", async () => {
+  it("platform_admin: EVERY grantable key that scopeLevelPermissions lists is ALSO granted by can() at the same scope", async () => {
     const p = bundlePrincipal("platform_admin");
     const body = computeEffectivePermissions(p, { scopeType: "company", scopeId: T1 });
-    expect(body.scopeLevelPermissions).toHaveLength(215); // the full grantable catalog
+    // DERIVED from the catalog, never written down. This was a literal `215` and went stale the
+    // same day HIER-3 retired the `team` kind (4 `core.team.*` keys -> 211). A hardcoded count of a
+    // deliberately-moving set is a tripwire that fires on CORRECT work, which trains readers to bump
+    // the number without looking — and it does not even test what it appears to, since it passes
+    // whenever the endpoint and the expectation are wrong by the same amount. The real property is
+    // "superadmin's scope-level answer covers the WHOLE grantable catalog", so the catalog IS the
+    // expected value.
+    expect(body.scopeLevelPermissions).toHaveLength(GRANTABLE_KEY_COUNT);
 
     const mismatches: string[] = [];
     for (const key of body.scopeLevelPermissions) {

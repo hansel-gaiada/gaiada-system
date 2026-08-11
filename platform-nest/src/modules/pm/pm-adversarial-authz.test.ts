@@ -298,8 +298,8 @@ describe.skipIf(!TEST_URL)("PM adversarial authz (P4-J7)", () => {
   });
 
   // ════════════════════════════════════════════════════════════════════════════════════════════
-  // 3. TIER BOUNDARIES — viewer / member / team_lead / manager / company_admin against the actions
-  //    each is supposed to be able (or unable) to take.
+  // 3. TIER BOUNDARIES — viewer / member / manager / company_admin against the actions each is
+  //    supposed to be able (or unable) to take.
   // ════════════════════════════════════════════════════════════════════════════════════════════
   describe("tier boundaries", () => {
     it("viewer: read-only everywhere — denied create/delete/manage, allowed read", async () => {
@@ -350,31 +350,12 @@ describe.skipIf(!TEST_URL)("PM adversarial authz (P4-J7)", () => {
       expect(reschedule.statusCode).toBe(200);
     });
 
-    it("REAL FINDING: a `team_lead` grant scoped to the COMPANY (rather than `team`) satisfies NO pm_task/pm_project rule — even plain READ is denied, unlike manager/member/viewer at the same scope", async () => {
-      // `derived_roles.yaml`'s `team_lead` definition matches ONLY `g.scopeType == 'team' &&
-      // g.scopeId == resource.attr.teamId`. Every PM `authorize()` call in pm.controller.ts passes
-      // `{ kind: 'pm_task'|'pm_project', tenantId, id/projectId }` — it NEVER sets `teamId` on the
-      // resource. So a `team_lead` grant can never derive on a PM resource no matter how it is
-      // scoped: a `company`-scoped one fails the `scopeType == 'team'` check, and a `team`-scoped
-      // one has no `resource.attr.teamId` to match against (it is always unset/empty for PM). This
-      // is a REAL behavioural gap between what `resource_pm_task.yaml`'s rule text lists as an
-      // eligible role ("viewer","member","manager","team_lead") and what is actually reachable —
-      // the same person who successfully leads a team elsewhere in the platform reads as having NO
-      // PM access at all, indistinguishable from having no grant whatsoever. Pinned here rather
-      // than silently worked around; routed to the architect/senior-be for a decision (either PM
-      // resources need to carry `teamId`, or the rule text should drop the dead role name).
-      const { t, projectId } = await freshTenant("tier-team-lead");
-      const teamLead = await createUser(`${newId()}@x.test`, "Team Lead (company-scoped)");
-      await addMembership(t, teamLead);
-      await grantRole(teamLead, await createRole("team_lead"), "company", t);
-
-      const readTasks = await app.inject({ method: "GET", url: `/api/${t}/pm/projects/${projectId}/tasks`, headers: asUser(teamLead) });
-      expect(readTasks.statusCode).toBe(403);
-      const readProject = await app.inject({ method: "GET", url: `/api/${t}/pm/projects/${projectId}`, headers: asUser(teamLead) });
-      expect(readProject.statusCode).toBe(403);
-      const listAll = await app.inject({ method: "GET", url: `/api/${t}/pm/tasks`, headers: asUser(teamLead) });
-      expect(listAll.statusCode).toBe(403);
-    });
+    // HIER-3 (2026-08-11): the "REAL FINDING: a `team_lead` grant scoped to the COMPANY..." case
+    // that used to sit here is REMOVED, not replaced. It pinned a routed-but-undecided finding
+    // ("either PM resources need to carry `teamId`, or the rule text should drop the dead role
+    // name") — HIER-3 IS that decision: `team_lead` is retired entirely (role, derived role, and
+    // every writer that could mint the grant), so `resource_pm_task.yaml`/`resource_pm_project.yaml`
+    // no longer list it at all, and there is nothing left to pin.
 
     it("manager: full authority — create/delete/reschedule/priority/status-change/tag+status registry edits/suggestion confirm", async () => {
       const { t, manager, projectId } = await freshTenant("tier-manager");

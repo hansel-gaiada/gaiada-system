@@ -569,7 +569,7 @@ in code, flagged only for "no frontend wired" rather than "backend pending":
 | ✅ (no UI) | POST | `/api/:t/authz/check` | `core/authz-check.controller.ts`. |
 | ✅ (no UI, IAM-05c, 2026-08-10) | GET | `/api/:t/authz/permissions` | `core/authz-permissions.controller.ts`. Company-scope **effective permissions** — `{scopeType, scopeId, scopeLevelPermissions, excludedRelationshipClass, wildcardBypassRoles, caveat}`. `scopeLevelPermissions` is resolved from the pre-computed role→permission bundle (no live Cerbos round trip) over the 215 grantable catalog keys — **NOT** a per-resource answer. See `docs/PERMISSION-CONTRACT.md` §4–§5 before wiring any UI consumer: this is for rendering ("does the caller hold this key ANYWHERE in this scope"), never for deciding whether one specific action on one specific resource may proceed (condition-dependent grants — `ownerId`/`subjectUserId`/`teamId`/assurance — cannot be answered in bulk; use `can()` server-side for that). 403 (never 404) if the caller has no membership in `:t` and no global `platform_admin`. ETag'd (`private, max-age=30, must-revalidate`), keyed on `(userId, sessionVersion, scope, computed answer)` — a `session_version` bump (D11 revoke/downgrade) invalidates the ETag by construction, no explicit purge. `wildcardBypassRoles` names any held role from `["platform_admin","group_executive"]` — for those, the caveat states the list is a floor, not a ceiling, because a bundle regeneration lag could under-report a brand-new wildcard grant. |
 | ✅ (no UI, IAM-05c, 2026-08-10) | GET | `/api/authz/permissions` | Same controller — **global-scope** effective permissions, no tenancy gate (global names no company). What a principal with zero company memberships (e.g. a `group_executive`-shaped seed) uses to learn cross-company reach before picking a company. Same response shape, same caveat semantics, `scopeId: null`. |
-| ✅ (no UI) | GET/POST/PATCH | `/api/:t/teams[/:teamId]`, POST/DELETE `/api/:t/teams/:teamId/members[/:userId]` | `core/teams.controller.ts` — base teams entity, no UI screen yet. |
+| 🗑️ RETIRED (HIER-3, 2026-08-11) | ~~GET/POST/PATCH~~ | ~~`/api/:t/teams[/:teamId]`, POST/DELETE `/api/:t/teams/:teamId/members[/:userId]`~~ | `core/teams.controller.ts` DELETED — `teams`/`team_memberships` were 0-row vestigial tables with zero UI callers; the `team`/`org_unit` hierarchy consolidation (`docs/superpowers/plans/2026-08-10-hierarchy-consolidation.md`) retired the whole surface. The org chart (`company_org_structure`/`org_units`/`org_unit_memberships`) is the one surviving hierarchy; `org_unit_lead` (HIER-2) is `team_lead`'s replacement. |
 | ✅ (no UI) | GET | `/health` | `health/health.controller.ts` — bare, no `/api` prefix; infra healthcheck only. |
 | ✅ (UI built, APPR-01) | POST/GET | `/api/:t/automation-approvals[/:id][/:id/decide]` | `core/automation-approvals.controller.ts` — WS4 automation-suspension surface; distinct from `/modules/agency/approvals`. **APPR-01 (2026-08-05) added `GET /:id`** — the single-row read backing `platform-ui`'s `/approvals/[id]` detail page (`lib/approvals.ts`'s `getAutomationApprovalDetail`). Fetches the row BEFORE authorizing (mirrors the existing `decide()`'s own WSD-4 pattern) so an hr-origin row's `module:'hr'` branch of `resource_automation_approval.yaml` still applies; a cross-tenant id is invisible via RLS ⇒ 404, never a leak. Response is camelCase (`workflowId`/`toolName`/`toolArgs`/`agentName`/`requestedByName`/`decidedByName`/`executionStatus`/…), NOT a mirror of the list's snake_case rows — nothing else consumed a single row before this. Same `read` action the list already gates on; no Cerbos policy change. |
 | ✅ (UI built, APPR-01) | GET | `/api/:t/modules/agency/approvals/:approvalId` | `modules/agency/agency.controller.ts` — the agency twin of the row above, same rationale + same fetch-before-authorize shape, same `read` action `pending`/`decided` already use. camelCase (`campaignId`/`campaign`/`assetId`/`requestedByName`/`decidedByName`/…). Module-gated like every other route in this controller (404 if `agency` isn't enabled for the tenant). |
@@ -803,8 +803,8 @@ consumer forward only.
 - `deliverable_evidence` — a plain SQL VIEW (no RLS of its own; inherits the base tables' FORCE RLS
   as any view does) over `work_activity` rows whose `objectKind ∈ {file,doc,deliverable}`, left-
   joined to `work_activity_links`. No endpoint yet — a future reporting surface reads it directly.
-- Cerbos: `cerbos/policies/resource_work_activity.yaml` (read = member/viewer/manager/team_lead/
-  company_admin; create = company_admin/platform_admin only). Policy-parity tests added to
+- Cerbos: `cerbos/policies/resource_work_activity.yaml` (read = member/viewer/manager/
+  company_admin — `team_lead` retired, HIER-3; create = company_admin/platform_admin only). Policy-parity tests added to
   `src/rbac/cerbos.test.ts` (5 new cases, live-Cerbos-gated like the rest of that file).
 
 **WD-26 additions (2026-07-30) — `wd-digests`/`wd-stale-nag` n8n automation data seams. No UI
@@ -885,8 +885,8 @@ for the Phase-2 OAuth callbacks that ride this foundation.
   own-vs-company authz. A forged/other-tenant `:id` is a **404** (tenant-scoped row load before authz).
 - Events: `integration_connection.created` / `.updated` / `.revoked` / `.linked` on the outbox.
 - Cerbos: `cerbos/policies/resource_integration_connection.yaml` — own user-rows = self-service
-  (`member`/`viewer`/`team_lead` gated by the shared `owns` variable); company rows + others' rows =
-  `company_admin`/`manager`/`group_executive`/`platform_admin`.
+  (`member`/`viewer` gated by the shared `owns` variable — `team_lead` retired, HIER-3); company
+  rows + others' rows = `company_admin`/`manager`/`group_executive`/`platform_admin`.
 
 ### 12a. C1 Claude seat registry (WSUX-17, ex-P1-10) — `src/core/claude-seats.{controller,service}.ts` — **BACKEND ✅ BUILT, UI ✅ WIRED (`platform-ui/src/lib/claudeSeats.ts` — reconciled 2026-07-30, WD-20)**
 

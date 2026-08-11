@@ -1552,6 +1552,44 @@ anywhere real.
 ---
 
 ## platform-nest
+### [0.21.1] - 2026-08-11 - IN PROGRESS (HIER-3 — retire `team_lead`/`team`/`teams`, the contract half of HIER-1's expand/contract pair)
+- **Migration `0103` closes what `0100` opened.** `user_roles.scope_type` is hard-narrowed to
+  `global | company | org_unit | project` — `team`/`record` are DELETED, not merely unwritten:
+  0103 restores 0100's own downgraded guards as hard `RAISE EXCEPTION`s (count-asserts zero
+  `team`/`record` rows first) before narrowing both the scope_type CHECK and the per-scope shape
+  CHECK. `teams`/`team_memberships` are DROPPED (0 rows live, count-asserted). The global
+  `team_lead` role is deleted (cascades its `role_permissions` bundle); the 4 `core.team.*`
+  catalog permissions are deleted (cascades any remaining bundle references) — catalog 230→226,
+  grantable 215→211, distinct Cerbos kinds 61→60.
+- **Every writer that could mint a `team`-scoped grant is removed in the SAME change** (the
+  ticket's own lesson from HIER-1: values and writers come out together, or not at all):
+  `core/teams.controller.ts` deleted outright (module wiring + its own test file), zero UI callers
+  / zero live rows / zero other backend importers, per the consolidation plan's inventory.
+  `testing/personas.ts`/`seed/personas.ts`'s `team_lead` persona reworked to `org_unit_lead` — an
+  org-unit placement + an `org_unit`-scoped grant, so person-scope narrowing (not just raw-grant
+  existence) is actually exercised by the fixture.
+- **23 Cerbos policy files + `derived_roles.yaml` swept.** `team_lead` derivedRoles entries
+  removed from every resource policy that named it; `resource_team.yaml` (the `team` kind) and the
+  `team_lead` derived role deleted; the 5 `perm_pm_task_*` permission-arm roles' `team_lead`
+  grants-exclusion clauses simplified back to plain global-or-company mirrors (the exclusion was
+  built specifically for `team_lead`×`pm_task` and has nothing left to exclude once the role is
+  gone). Live-probed post-restart: a `team_lead` grant now denies everywhere; `manager` and
+  `org_unit_lead` decisions are unaffected.
+- **`permission-arm-hazard-scan.test.ts` co-updated, not weakened.** `pm_task` (the IAM-04b pilot's
+  original control kind) measurably moved HAZARDOUS → SAFE — its only-ever hazard was `team_lead`
+  mixing, now gone — and drops out of the REGISTER test; `time_entry` replaces it alongside
+  `hr_case` (an independent Pattern-B hazard, unrelated to `team_lead`, survives the retirement
+  untouched, exactly as the HIER-01 consolidation plan predicted). PART 4's synthetic teeth-proof
+  is rebased onto `client` (still genuinely unsafe today) instead of the retired role. The
+  detector's own classification logic is byte-unchanged.
+- **`docs/PERMISSION-CONTRACT.md` and `docs/FRONTEND-BFF-CONTRACT.md` updated in the same pass** —
+  the `/api/:t/teams*` row is marked retired, the `team_lead`/scope-type "NOT frozen, actively
+  moving" caveats in the permission contract are resolved to their landed state.
+- **Zero authorization decisions changed for any REACHABLE grant** — every removed reach was
+  provably unreachable (the HIER-01 measurement's whole premise): `team_lead` legitimately
+  disappears from the permission-arm hazard register, which is a coverage reduction (fewer
+  concepts to carry), not authorization drift.
+
 ### [0.21.0] - 2026-08-11 - IN PROGRESS (IAM Phase 1 — catalog, bundles, permission-arm rollout, the BFF endpoint)
 - **Consolidated entry** for a two-day, many-ticket wave (`docs/superpowers/plans/2026-08-10-iam-*`,
   25+ per-ticket reports) that this changelog line summarizes rather than repeats. Full detail and

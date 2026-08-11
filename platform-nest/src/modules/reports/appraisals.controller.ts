@@ -108,10 +108,10 @@ function hasBroadAppraisalReadTier(principal: Principal, tenantId: string): bool
   return tier === "unrestricted" || tier === "company_wide";
 }
 
-/** True when the caller's ONLY relevant grant is the coarse company/project/team-scoped
- *  `manager`/`team_lead` tier — i.e. Cerbos will have allowed `read`/`write`/`submit` on the
- *  strength of that grant alone, and this controller must narrow the rest of the way to the
- *  specific row's `manager_user_id`.
+/** True when the caller's ONLY relevant grant is the coarse company/project-scoped `manager`
+ *  tier (HIER-3, 2026-08-11: `team_lead` retired) — i.e. Cerbos will have allowed
+ *  `read`/`write`/`submit` on the strength of that grant alone, and this controller must narrow
+ *  the rest of the way to the specific row's `manager_user_id`.
  *
  *  Kept as a NAMED wrapper rather than calling `requiresUnitNarrowing` inline, because on THIS
  *  resource the narrowing target is different: `report_appraisals.manager_user_id` is a real per-row
@@ -362,10 +362,10 @@ export class AppraisalsController {
 
     // Cerbos is the PRIMARY gate, always consulted first (so every decision — allow or deny — is
     // audited): self only for `subjectUserId == principal.id`, hr_people_ops/group_executive/
-    // platform_admin unconditionally, manager/team_lead COARSE company-scoped (the known
-    // approximation — see file header), org_unit_lead via unit-ancestor containment (HIER-2). A
-    // plain member reading someone else's row is already denied HERE by Cerbos itself (no rule
-    // matches), with no further controller logic needed.
+    // platform_admin unconditionally, manager COARSE company-scoped (the known approximation —
+    // see file header; HIER-3, 2026-08-11: `team_lead` retired), org_unit_lead via unit-ancestor
+    // containment (HIER-2). A plain member reading someone else's row is already denied HERE by
+    // Cerbos itself (no rule matches), with no further controller logic needed.
     await authorize(principal, { kind: "appraisal", tenantId, id, subjectUserId: row.subjectUserId, unitAncestors }, "read");
 
     // Narrowings Cerbos cannot express, applied only for the tiers its own rules leave coarse:
@@ -401,14 +401,15 @@ export class AppraisalsController {
 
     if (!admin) {
       if (wantsScoreEdit) {
-        // Cerbos "write" is manager/team_lead-coarse only (resource_appraisal.yaml never grants
-        // hr_people_ops/group_executive "write") — narrowed here to the EXACT assigned manager.
+        // Cerbos "write" is manager-coarse only (resource_appraisal.yaml never grants
+        // hr_people_ops/group_executive "write"; HIER-3 retired team_lead) — narrowed here to the
+        // EXACT assigned manager.
         await authorize(principal, { kind: "appraisal", tenantId, id }, "write");
         if (principal.userId !== row.managerUserId) throw new ForbiddenException("not your assigned subject");
       }
       if (wantsConfirm) {
-        // "confirm_evidence" is granted to the SAME manager/team_lead-coarse tier PLUS
-        // hr_people_ops (§15's re-confirm path is not "scores" — see resource_appraisal.yaml).
+        // "confirm_evidence" is granted to the SAME manager-coarse tier PLUS hr_people_ops (§15's
+        // re-confirm path is not "scores" — see resource_appraisal.yaml).
         await authorize(principal, { kind: "appraisal", tenantId, id }, "confirm_evidence");
         if (!hr && principal.userId !== row.managerUserId) throw new ForbiddenException("not your assigned subject");
       }

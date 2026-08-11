@@ -12,7 +12,7 @@ resourcePolicy:
     # Any member of the company can view the device registry / topology / monitoring.
     - actions: ["read"]
       effect: EFFECT_ALLOW
-      derivedRoles: ["company_admin", "manager", "member", "viewer", "team_lead"]
+      derivedRoles: ["company_admin", "manager", "member", "viewer"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }
     # Register / edit / heartbeat-ingest — company admins and IT staff only.
     - actions: ["create", "update", "delete"]

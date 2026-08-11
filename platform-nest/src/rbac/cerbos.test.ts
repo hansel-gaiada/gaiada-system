@@ -82,11 +82,13 @@ describe.skipIf(!live)("Cerbos policy parity (role × scope matrix)", () => {
     expect(await allow(p, project, "update")).toBe(false);
   });
 
-  it("team_lead grant covers that team's resources only (5b.7)", async () => {
-    const p = principal([{ role: "team_lead", scopeType: "team", scopeId: "team-9" }]);
-    expect(await allow(p, { kind: "task", tenantId: T1, teamId: "team-9" }, "update")).toBe(true);
-    expect(await allow(p, { kind: "task", tenantId: T1, teamId: "team-8" }, "update")).toBe(false);
-  });
+  // HIER-3 (2026-08-11): the "team_lead grant covers that team's resources only (5b.7)" case that
+  // used to sit here is REMOVED, not replaced — `team_lead`, the `team` scope_type, and the `team`
+  // Cerbos kind are all retired (docs/superpowers/plans/2026-08-11-hier-3-report.md). The
+  // replacement mechanism (`org_unit_lead`'s subtree cascade, HIER-2) is exercised end-to-end by
+  // `src/rbac/cerbos-org-unit-lead-cascade.test.ts`, not here — it depends on
+  // `resource.attr.unitAncestors`, which the generic `task`/`project` kinds this file tests never
+  // carry, so there is no like-for-like drop-in replacement in this matrix.
 
   it("PlanResources (D16): admin → always-allowed, no-role → always-denied", async () => {
     const admin = principal([{ role: "platform_admin", scopeType: "global", scopeId: null }], []);

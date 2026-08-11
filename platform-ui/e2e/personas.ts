@@ -13,7 +13,11 @@ import type { Page } from "@playwright/test";
 //    `DEMO_MODE_EMAIL` below for exactly which 4, and `isDemoModeSupported` to check before
 //    writing a demo-mode spec against a persona that isn't one of them.
 export type PersonaKey =
-  | "superadmin" | "company_admin" | "manager" | "team_lead" | "member" | "viewer"
+  // HIER-3 (2026-08-11): `team_lead` retired — role, derived role, policies and every
+  // writer are gone (migration 0103). `org_unit_lead` is its replacement, but it is NOT
+  // added here: no demo identity maps to it, so listing it would only widen the
+  // "unsupported persona" set this file exists to make loud.
+  | "superadmin" | "company_admin" | "manager" | "member" | "viewer"
   | "hr_staff" | "hr_manager" | "it_admin" | "search_staff" | "search_manager"
   | "agency_approver" | "group_executive" | "client_contact";
 
@@ -36,7 +40,7 @@ const DEMO_MODE_EMAIL: Partial<Record<PersonaKey, string>> = {
   client_contact: "client@northwind.example", // contains "client" -> demo-client, exact `client` match
 };
 
-// The 9 personas with NO demo-mode equivalent today — company_admin, manager, team_lead, viewer,
+// The personas with NO demo-mode equivalent today — company_admin, manager, viewer,
 // hr_staff, hr_manager, it_admin, search_manager, agency_approver. Listed explicitly (not derived)
 // so this file is honest even if someone adds a key to PersonaKey without updating DEMO_MODE_EMAIL.
 export function isDemoModeSupported(key: PersonaKey): boolean {
@@ -48,7 +52,7 @@ function demoUnsupportedMessage(key: PersonaKey): string {
     `DEMO_MODE has no identity for persona "${key}". src/lib/demoIdentity.ts only resolves 4 ` +
     `coarse tiers today (superadmin/group_executive via demo-hansel, member via gede-ic, ` +
     `search_staff via seo-staff, client_contact via demo-client) — company_admin, manager, ` +
-    `team_lead, viewer, hr_staff, hr_manager, it_admin, search_manager and agency_approver have ` +
+    `viewer, hr_staff, hr_manager, it_admin, search_manager and agency_approver have ` +
     `NO demo equivalent. Run this spec against a real backend instead: unset DEMO_MODE, start ` +
     `platform-nest, run \`npm run seed:personas\` there once, then \`PLATFORM_URL=... npm run e2e\`. ` +
     `See platform-nest/README-PERSONAS.md.`

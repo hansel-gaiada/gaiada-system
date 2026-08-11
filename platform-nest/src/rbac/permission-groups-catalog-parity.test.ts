@@ -76,8 +76,8 @@ describe("IAM-07b · permission-groups.json <-> permission-catalog.json (previou
   const relationshipKeys = new Set(catalog.filter((e) => e.class === "relationship").map((e) => e.key));
   const sensitiveByKey = new Map(catalog.map((e) => [e.key, e.sensitive]));
 
-  it("sanity: 215 grantable / 15 relationship catalog permissions (this suite's fixed inputs)", () => {
-    expect(grantable.length).toBe(215);
+  it("sanity: 211 grantable / 15 relationship catalog permissions (this suite's fixed inputs; HIER-3, 2026-08-11: core.team.* retired, 215 -> 211)", () => {
+    expect(grantable.length).toBe(211);
     expect(relationshipKeys.size).toBe(15);
   });
 

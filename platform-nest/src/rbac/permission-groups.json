@@ -3,12 +3,12 @@
     "title": "Gaiada permission groups — the authoring layer (IAM-01b-3)",
     "status": "PROTOTYPED — 2026-08-10. Seeded from the ~40 existing platform-ui CAPABILITIES plus every grantable catalog permission they did not already reach. Pending owner/HR review before use in role authoring.",
     "parent": "docs/superpowers/plans/2026-08-10-permission-groups.md",
-    "catalogSource": "platform-nest/src/rbac/permission-catalog.json (215 grantable permissions, frozen input)",
+    "catalogSource": "platform-nest/src/rbac/permission-catalog.json (211 grantable permissions, frozen input)",
     "model": "Two-layer (Ruling 1, option C): groups are the authoring surface; every permission remains individually assignable via an 'advanced' expansion. A group's sensitive flag is mechanical — true iff ANY member permission carries catalog sensitive:true.",
     "counts": {
-      "groups": 75,
-      "grantablePermissionsInCatalog": 215,
-      "permissionsCoveredByGroups": 213,
+      "groups": 74,
+      "grantablePermissionsInCatalog": 211,
+      "permissionsCoveredByGroups": 209,
       "permissionsAdvancedOnly": 2,
       "permissionsAppearingInMultipleGroups": 2,
       "sensitiveGroups": 42
@@ -94,19 +94,6 @@
         "core.compliance_gate.update"
       ],
       "sensitive": true
-    },
-    {
-      "key": "teams",
-      "name": "Teams",
-      "domain": "core",
-      "description": "Create teams and manage their membership.",
-      "permissions": [
-        "core.team.create",
-        "core.team.read",
-        "core.team.update",
-        "core.team.delete"
-      ],
-      "sensitive": false
     },
     {
       "key": "everyday_collaboration",

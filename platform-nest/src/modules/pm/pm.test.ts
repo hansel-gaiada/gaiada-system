@@ -2689,7 +2689,7 @@ describe.skipIf(!TEST_URL)("PM subsystem (§5)", () => {
       expect(crossTenant.statusCode).toBe(403);
     });
 
-    it("unit_scoped tier (manager/team_lead) is narrowed to their own led unit: allowed inside, denied outside", async () => {
+    it("unit_scoped tier (manager/org_unit_lead) is narrowed to their own led unit: allowed inside, denied outside", async () => {
       const iso = await isoE2("unit scoped");
       const lead = await createUser(`${newId()}@x.test`, "E2 unit lead");
       const outsider = await createUser(`${newId()}@x.test`, "E2 unit outsider");

@@ -76,17 +76,18 @@ export const OUT_OF_LINE_MESSAGE = "outside your reporting line";
  * Replaces THREE divergent hand-rolled helpers that this ticket consolidated:
  * `checkins.controller.ts`'s `isManagerTierOnly`, and `appraisals.controller.ts`'s
  * `hasBroadAppraisalReadTier` + `isManagerCoarseOnly`. They disagreed: the check-in one counted
- * `hr_staff` as broad but ignored `team_lead`; the appraisal one counted `team_lead` but not
- * `company_admin`. Two spellings of one boundary is exactly how an over-broad read ships unnoticed.
+ * `hr_staff` as broad but ignored the (then-live, since HIER-3-retired) `team_lead`; the appraisal
+ * one counted `team_lead` but not `company_admin`. Two spellings of one boundary is exactly how an
+ * over-broad read ships unnoticed.
  *
  * - `unrestricted` — `platform_admin`. Holds an unconditional Cerbos wildcard everywhere else in
  *   this codebase; narrowing it here would be inconsistent with the rest of the estate.
  * - `company_wide` — §8's "Exec group" + "HR-appraisal role" columns, plus the tenant's own
  *   `company_admin`, plus a reconciler-materialized served-company module grant. Legitimately reads
  *   every person in the tenant, so nothing to narrow.
- * - `unit_scoped` — §8's "Dept lead (own unit)" column: a `manager`/`team_lead` grant and nothing
- *   broader. Cerbos allowed the action on the strength of a COMPANY-scoped grant; this file narrows
- *   it to the caller's own led unit subtree.
+ * - `unit_scoped` — §8's "Dept lead (own unit)" column: a `manager` grant (COMPANY-scoped) or an
+ *   `org_unit_lead` grant (org-unit-scoped, HIER-2's subtree cascade) and nothing broader; this
+ *   file narrows either to the caller's own led unit subtree.
  * - `self_only` — a plain `member` (or no relevant grant). Cerbos's own self-rules
  *   (`owns` / `subjectUserId == principal.id`) already bound these; reaching a narrowing check at
  *   all means the request was for someone else, which is denied.
@@ -114,19 +115,16 @@ const COMPANY_WIDE_ROLES = new Set([
   "reports_staff",
   "reports_manager",
 ]);
-// HIER-2 (2026-08-11): `org_unit_lead` added ALONGSIDE `team_lead` — a pure widening, not a
-// narrowing swap. The HIER-2 plan's own sketch (docs/superpowers/plans/2026-08-10-iam-hier-01-
-// plan.md §HIER-2) writes this as `{"manager","unit_lead"}` (dropping team_lead), but this ticket
-// does not own retiring team_lead from any surface — that is HIER-3's job, gated on `teams`/
-// `team_memberships`/`teams.controller.ts` still existing. Keeping team_lead here is strictly
-// additive and behaviour-preserving for every existing team_lead holder; HIER-3 removes it in the
-// same sweep that removes the role everywhere else.
-const UNIT_SCOPED_ROLES = new Set(["manager", "team_lead", "org_unit_lead"]);
+// HIER-2 (2026-08-11) added `org_unit_lead` alongside `team_lead` as a pure widening. HIER-3
+// (2026-08-11) now retires `team_lead` itself — the role, its Cerbos derived role, and every
+// writer that could mint the grant are gone — so it comes out of this set in the same change, per
+// the HIER-01 consolidation plan's own sketch (`{"manager","unit_lead"}`).
+const UNIT_SCOPED_ROLES = new Set(["manager", "org_unit_lead"]);
 
 /** Does this grant apply to `tenantId`? A `global` grant covers everything; `company` must match
  *  exactly (a null/absent scopeId is NEVER a wildcard — the same A4 rule `rbac.ts`'s `scopeCovers`
- *  enforces on the UI side). `project`/`team`/`record` grants are unit-ish by nature and are only
- *  ever consulted for the `unit_scoped` tier. */
+ *  enforces on the UI side). `project`/`org_unit` grants are unit-ish by nature and are only ever
+ *  consulted for the `unit_scoped` tier. */
 function grantCoversTenant(g: Principal["roles"][number], tenantId: string): boolean {
   if (g.scopeType === "global") return true;
   return g.scopeType === "company" && g.scopeId === tenantId;
@@ -146,13 +144,12 @@ export function personAxisTier(principal: Principal, tenantId: string): PersonAx
     roles.some(
       (g) =>
         UNIT_SCOPED_ROLES.has(g.role) &&
-        // HIER-2: `org_unit` added — an `org_unit_lead` grant is never company/global/project/
-        // team/record-scoped by construction (0100's shape CHECK), so without this branch an
-        // org_unit_lead holder would never register as `unit_scoped` at all.
+        // HIER-2: `org_unit` added — an `org_unit_lead` grant is never company/global/project-
+        // scoped by construction (0100's shape CHECK), so without this branch an org_unit_lead
+        // holder would never register as `unit_scoped` at all. HIER-3 (2026-08-11) removed the
+        // `team`/`record` branches — both scope_type values are retired.
         (grantCoversTenant(g, tenantId) ||
           g.scopeType === "project" ||
-          g.scopeType === "team" ||
-          g.scopeType === "record" ||
           g.scopeType === "org_unit"),
     )
   ) {

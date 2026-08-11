@@ -96,15 +96,17 @@ resourcePolicy:
     # §8's "Dept lead (own unit)" column. COARSE — person-scope.ts narrows `read_person` to the
     # subject's as-of unit being inside this caller's led unit SUBTREE, and `read_department` to the
     # requested unit being inside it. Excluded from company-grain per §8.
+    # HIER-3 (2026-08-11): `team_lead` retired — `manager` alone carries this tier now.
     - actions: ["read_person", "read_project", "read_department"]
       effect: EFFECT_ALLOW
-      derivedRoles: ["manager", "team_lead"]
+      derivedRoles: ["manager"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }
 
     # ══════════ HIER-2 (DR-9) — org_unit_lead's own rule, subtree cascade via ancestor ══════════
-    # containment (derived_roles.yaml). NEVER mixed into the manager/team_lead rule above — the
-    # binding authoring rule that keeps the team_lead over-grant shape from re-firing on the
-    # replacement. `read_department` ONLY: this is the one report_document action where
+    # containment (derived_roles.yaml). NEVER mixed into the manager rule above — the binding
+    # authoring rule that kept the (now-retired) team_lead over-grant shape from re-firing on the
+    # replacement, still honoured for `manager`. `read_department` ONLY: this is the one
+    # report_document action where
     # reports.controller.ts resolves a real org-unit node id (`scopeRef`) and can therefore supply
     # `resource.attr.unitAncestors` via IAM-09's closure table (org-unit-closure.ts's
     # `loadUnitAncestors`). `read_person`/`read_project` are deliberately EXCLUDED — no handler

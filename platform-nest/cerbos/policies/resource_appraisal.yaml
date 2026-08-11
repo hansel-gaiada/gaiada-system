@@ -114,21 +114,23 @@ resourcePolicy:
     # approximation); appraisals.controller.ts narrows read (to the caller's own assigned
     # subjects) and write/submit (to an EXACT manager_user_id match on the specific row) the rest
     # of the way, server-side, never from a client-supplied id.
+    # HIER-3 (2026-08-11): `team_lead` retired — `manager` alone carries this tier now.
     - actions: ["read", "write", "submit", "confirm_evidence"]
       effect: EFFECT_ALLOW
-      derivedRoles: ["manager", "team_lead"]
+      derivedRoles: ["manager"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }
 
     # ══════════ HIER-2 (DR-9/DR-11) — org_unit_lead's dept-lead read tier lands WITH this ══════════
     # ticket, not deferred to positions (owner decision, 2026-08-10). Own rule; NEVER mixed into the
-    # manager/team_lead rule above — the binding authoring rule that keeps the team_lead over-grant
-    # shape from re-firing on the replacement. `resource.attr.unitAncestors` here is the SUBJECT's
-    # current unit ancestor chain (appraisals.controller.ts resolves it off `org_unit_memberships`
-    # via person-scope.ts's `resolveSubjectUnit`, then IAM-09's closure via
-    # `org-unit-closure.ts::loadUnitAncestors` — appraisal has no separate department grain the way
-    # report_document does, so the "unit" this rule reasons about is the subject's own placement).
+    # manager rule above — the binding authoring rule that kept the (now-retired) team_lead
+    # over-grant shape from re-firing on the replacement, still honoured for `manager`.
+    # `resource.attr.unitAncestors` here is the SUBJECT's current unit ancestor chain
+    # (appraisals.controller.ts resolves it off `org_unit_memberships` via person-scope.ts's
+    # `resolveSubjectUnit`, then IAM-09's closure via `org-unit-closure.ts::loadUnitAncestors` —
+    # appraisal has no separate department grain the way report_document does, so the "unit" this
+    # rule reasons about is the subject's own placement).
     # READ ONLY — write/submit/confirm_evidence/finalize/cycle_admin stay with the exact
-    # `manager_user_id` match (manager/team_lead, narrowed in-app) and hr_people_ops; a dept head
+    # `manager_user_id` match (manager, narrowed in-app) and hr_people_ops; a dept head
     # does not gain score-write access merely by leading the subtree, matching this file's existing
     # "HR: cycle admin, not scores" posture for the acting-HR tier.
     - actions: ["read"]

@@ -4,10 +4,14 @@
 // authority; this enforces the same model in the UI so nav, the company
 // switcher, and write actions all gate consistently and fail closed.
 //
-// Model: a user has role GRANTS, each scoped global | company | team. A grant
+// Model: a user has role GRANTS, each scoped global | company | org_unit | project. A grant
 // confers a set of CAPABILITIES within its scope. `can()` answers a capability
 // question, optionally against a specific company. Cross-company capabilities
 // (rollups, admin-wide) are asked with no companyId and require a GLOBAL grant.
+//
+// HIER-3 (2026-08-11): `team`/`team_lead` are RETIRED — zero live grants, superseded by
+// `org_unit`/`org_unit_lead` (HIER-1/HIER-2). See
+// `docs/superpowers/plans/2026-08-10-hierarchy-consolidation.md` for why.
 import type { Me } from "./platform";
 
 export type Role =
@@ -15,14 +19,6 @@ export type Role =
   | "group_executive"  // owner — everything across the group's companies (unrestricted)
   | "company_admin"    // admin within a company
   | "manager"          // runs work within a company
-  // Gap 2 (2026-08 owner audit): a dept/team lead. TEAM-scoped, never company/global —
-  // derived_roles.yaml's `team_lead` derived role matches ONLY `g.scopeType == "team" &&
-  // g.scopeId == resource.attr.teamId`. This role existed in Cerbos policy (resource_pm_task.yaml
-  // et al.) with NO corresponding `Role` member here at all, so a team-scoped lead held ZERO
-  // capability in the UI mirror — see ROLE_CAPS's `team_lead` entry for the full grant sweep and
-  // `scopeCovers`'s comment for why a team-scoped grant deliberately still does not blanket-cover
-  // a company-wide `can()` question (A4 — same treatment as an existing project-scoped grant).
-  | "team_lead"
   | "member"           // baseline access
   // Gap 3 (2026-08 sweep — found while writing the drift-proof test, not requested by name but the
   // same bug shape as `team_lead`): `viewer` is ALSO a real raw grant role in derived_roles.yaml
@@ -287,57 +283,6 @@ export const ROLE_CAPS: Record<Role, Capability[]> = {
     "company.manage",
     ...REPORT_READS, "checkin.read", "checkin.excuse", "appraisal.read", "appraisal.score",
   ],
-  // Gap 2 (2026-08 owner audit) — team_lead was entirely absent from `Role`/ROLE_CAPS despite
-  // Cerbos granting it real actions across ~27 resource policies. Capability set below is the
-  // full sweep of every policy that names `team_lead` (not just PM), cross-checked against the
-  // Capability this file already defines for the matching Cerbos action:
-  //   pm.manage / pm.contribute — resource_pm_task.yaml grants team_lead read+update (any member's
-  //     tier) AND create/delete/manage (the leads/admins tier); resource_pm_project.yaml grants it
-  //     read + manage identically. Full PM parity with `manager`.
-  //   reports.person/project/department.view — resource_report_document.yaml's "Dept lead (own
-  //     unit)" rule lists `["manager", "team_lead"]` together for read_person/read_project/
-  //     read_department. Identical to manager's REPORT_READS tier (never company-grain).
-  //   appraisal.read / appraisal.score — resource_appraisal.yaml's dept-lead rule lists
-  //     `["manager", "team_lead"]` together for read/write/submit/confirm_evidence. Identical to
-  //     manager's appraisal tier.
-  //   people.directory — JUDGEMENT CALL, flagged rather than guessed silently: no Cerbos resource
-  //     literally models "browse the staff directory"; the closest signal is resource_member.yaml's
-  //     baseline tenant-directory `read` rule, which lists `team_lead` on the SAME line as
-  //     `manager`. Granted on that basis (matches the one policy that speaks to it at all), erring
-  //     toward "show it, the server/RLS still narrows" per this ticket's tie-break rule.
-  //
-  // Deliberately EXCLUDED (checked, not assumed) — `team_lead` is genuinely narrower than
-  // `manager` on several resources, not a blanket copy of it:
-  //   checkin.read / checkin.excuse — resource_checkin.yaml grants `read`/`excuse` to `manager`
-  //     but `team_lead` NEVER appears in that file at all.
-  //   approvals.decide / approvals.retry — `team_lead` appears in NONE of
-  //     resource_automation_approval.yaml / resource_agency_approval.yaml / resource_scope_signoff.yaml
-  //     / resource_pipeline_gate.yaml / resource_pipeline_run.yaml (scope_signoff's header even says
-  //     so explicitly: "Deliberately still NOT member/team_lead").
-  //   it.manage — resource_device.yaml's create/update/delete rule is `["company_admin",
-  //     "it_staff"]` only; team_lead gets device READ (baseline, ungated) but not management.
-  //   hr.*, search.*, reports.company.view, reports.period.seal, reports.facts.admin,
-  //     reports.ops.poll, appraisal.cycle.admin, admin.access, org.edit, rollups.view,
-  //     knowledge.review — team_lead appears in none of the backing policies for any of these.
-  //   pipeline.write / pipeline.manage / webdev.provision (IAM-02a-FIX-2) — `team_lead` appears in
-  //     NONE of resource_pipeline_run/stage/gate.yaml, resource_scope_signoff.yaml (whose own comment
-  //     says so explicitly), or resource_webdev_provisioned_site.yaml. Unlike PM/reports/appraisal,
-  //     this is not a tier team_lead shares with manager at all.
-  //
-  // Scope reminder (do not "fix" this by widening `scopeCovers`): a team_lead grant is ALWAYS
-  // `scopeType: "team"` (derived_roles.yaml matches only that), and `scopeCovers` deliberately does
-  // NOT let a team-scoped grant satisfy a company-wide `can(me, cap, companyId)` question (A4 — see
-  // that function's comment). So these capabilities are real and mirror Cerbos correctly, but a
-  // caller asking "can this team_lead act on company X" via plain `can()` will get `false` unless
-  // the grant is ALSO company/global-scoped — exactly the same known limitation the project-scope
-  // comment already documents for `manager`/`member`. Resolving a specific team-scoped resource
-  // requires the caller to compare `grant.scopeId` against that resource's own `teamId` directly;
-  // no UI surface does that today, so this tier is capability-complete in the mirror but not yet
-  // exercised by any page — ready for the first team-scoped surface, not inert-by-accident.
-  team_lead: [
-    "pm.manage", "pm.contribute", "people.directory",
-    ...REPORT_READS, "appraisal.read", "appraisal.score",
-  ],
   // A plain member's own report, own check-in and own appraisal are NOT capabilities — they are
   // self-service, gated server-side by `ownerId`/`subjectUserId == principal.id` (§11 principle 2:
   // "nothing about you that you cannot read"). Adding a capability for them here would imply the UI
@@ -459,11 +404,12 @@ type Grant = Me["roles"][number];
 // Does a grant's scope cover the target company? A global grant covers
 // everything. With no companyId (a cross-company question) only global counts.
 // A company grant must match the granted company EXACTLY — a null/absent
-// scopeId is NOT a wildcard for "any company" (that over-grants; A4). A team
-// grant is scoped to its unit, not the whole company: `can()` only reasons
-// about companyId, so a team grant can never resolve "yes, this company" from
-// here — it must not blanket-cover company-wide capabilities (A4). Unit-level
-// checks belong to a caller that actually has the unit id.
+// scopeId is NOT a wildcard for "any company" (that over-grants; A4). An
+// org_unit (or project) grant is scoped to its own node, not the whole company:
+// `can()` only reasons about companyId, so a unit-scoped grant can never
+// resolve "yes, this company" from here — it must not blanket-cover
+// company-wide capabilities (A4). Unit-level checks (e.g. `org_unit_lead`'s
+// subtree cascade) belong to the server, which actually has the ancestor list.
 function scopeCovers(g: Grant, companyId?: string | null): boolean {
   if (g.scopeType === "global") return true;
   if (companyId == null) return false;

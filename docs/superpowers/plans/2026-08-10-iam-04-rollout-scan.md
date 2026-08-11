@@ -19,7 +19,216 @@ the ticket's constraints.
 
 ---
 
-## 0. Headline numbers
+## RE-BASELINE (HIER-5, 2026-08-11) — the measured post-retirement estate
+
+**Status:** MEASURED / DEV-VERIFIED. This section supersedes §0–§6 below as the *current* register;
+§0–§6 are preserved verbatim beneath as **Appendix A**, unedited, because the BEFORE numbers are the
+evidence the `team_lead` consolidation (HIER-1..HIER-3) was worth doing — deleting them would erase
+that argument. Everything in this section was re-derived this session by re-running the real
+detector (`platform-nest/src/rbac/permission-arm-hazard-scan.test.ts`, 74/74 green) plus a
+byte-equivalent throwaway scratchpad port of its PART 1/2 functions (same method the HIER-01
+consolidation plan used for its own pre-work projection), against the tree as it stands after
+HIER-1/2/3 (migrations through `0104`) and after `IAM-DR12` (an unrelated, concurrent fix — see
+§R.2). Cerbos was confirmed freshly started (`StartedAt 2026-08-11T06:00:20Z`, postdating every
+policy edit) and probed live before any finding below was trusted.
+
+### R.1 Bucket counts: BEFORE → PREDICTED → MEASURED
+
+| Bucket | BEFORE (2026-08-10 scan) | PREDICTED AFTER (HIER-01 plan, pre-work) | **MEASURED AFTER (HIER-5, this ticket)** | Held? |
+|---|---:|---:|---:|---|
+| Kinds in the estate | 61 | 60 | **60** | ✅ exact |
+| EXEMPT | 4 | 4 | **4** | ✅ exact |
+| **SAFE** | 17 | 34 | **35** | ⚠ off by +1 |
+| **HAZARDOUS** | 40 | 22 | **21** | ⚠ off by −1 |
+| — of which DEAD-GRANT SUSPECT | 22 | 0 | **0** | ✅ exact |
+| Hazard rate (non-exempt) | 40/57 = 70% | 22/56 = 39% | **21/56 = 37.5%** | ✅ within noise |
+
+**The prediction held, with one explained, non-`team_lead` delta.** The `team_lead`-specific effect
+the plan measured — 18 kinds leaving HAZARDOUS (17 HAZARDOUS→SAFE + `team` deleted with its policy),
+DEAD-GRANT SUSPECT 22→0 — landed **exactly** as predicted; re-deriving it independently this session
+reproduces the identical 18-kind list (§R.3) and the identical zero. The ±1 SAFE/HAZARDOUS delta
+(35 vs 34, 21 vs 22) is **not** a miss in the `team_lead` prediction — it is `portal`, which moved
+HAZARDOUS→SAFE via a **second, unrelated, concurrently-landed** ticket, `IAM-DR12`
+(`docs/superpowers/plans/2026-08-11-iam-dr12-report.md`): the owner decided to **delete** portal's
+dead staff/`group_executive` read rule outright rather than split it (portal-scope.ts's
+`callerClientIds()` makes it unreachable for staff regardless), which incidentally also resolved
+that one kind's TRAP-4 mixing (§R.5) as a side effect of a decision that had nothing to do with
+hierarchy consolidation. Net: **the real numbers are not worse than forecast — they are one kind
+better, for a reason the forecast could not have included** (DR-12 was scoped and landed after the
+HIER-01 plan was written). Stated plainly per the ticket's instruction: no surprise, no shortfall.
+
+### R.2 What "60 kinds" is made of, restated with wiring status folded in
+
+The detector's SAFE/HAZARDOUS buckets classify **policy shape**, not "has a permission arm yet" —
+mitigating a kind changes its *risk*, not its *shape* (a mixed rule stays mixed after an exclusion is
+added; a module-gated rule stays gated after its reliability is confirmed). Since the 2026-08-10
+scan, **`IAM-04-ROLLOUT-B12`** (concurrent, unrelated to HIER-3) already wired batches 1–3 of the
+*original* rollout order (§4 of Appendix A) for real — 29 of the 60 kinds now carry a live `perm_*`
+arm (`grep -l "perm_" cerbos/policies/resource_*.yaml` → 29 files, cross-checked against
+`kindsWithPermissionArm()`'s own discovery). Folding that in:
+
+| | SAFE (35) | HAZARDOUS (21) |
+|---|---|---|
+| **Already wired** (`perm_*` arm exists) | 18 — the original 17-kind SAFE batch + `pm_task` (pilot) | 11 — `hr_case` (pilot) + `hr_record`/`agency_approval`/7×`search_*` (confirm-reliable batch) + `checkin` (self-scope batch) |
+| **NOT yet wired** | **17** — see §R.4 | **10** — see §R.5/§R.6 |
+
+So of the 60-kind estate, **29 already carry a permission arm** (2 pilot + 26 B12 + nothing from
+this ticket — HIER-5 wires nothing, per its own constraint), and **27 kinds are genuinely open
+rollout work**, down from the original register's implied "59 kinds left" the day the pilot shipped.
+
+### R.3 The 18 kinds `team_lead` retirement actually moved (reproduced exactly, as predicted)
+
+HAZARDOUS → SAFE (17): `activity`, `client`, `client_contact`, `comment`, `custom_field`,
+`deliverable`, `device`, `file`, `meeting_recording`, `member`, `notification`, `org_structure`,
+`pm_project`, `pm_task`, `report_period`, `task`, `work_activity`. Left the estate entirely (1):
+`team` (policy + table + role, all deleted). Zero DEAD-GRANT SUSPECT kinds remain anywhere — the
+mechanism that produced all 22 (`team_lead` mixed into a rule its handlers never fed `teamId` for)
+no longer exists: the role, its derived role, and every writer that could mint the grant are gone
+(migration `0103`, `derived_roles.yaml`, `core/teams.controller.ts` all confirmed absent/removed).
+
+The 5 `team_lead`-affected kinds that **stayed** hazardous did so for their **independent** Pattern-B
+(self-scope vs unconditional) hazard, exactly as the plan called out — retirement was never claimed
+to touch this: `appraisal`, `integration_connection`, `project`, `report_document`, `time_entry`.
+
+### R.4 The 17 SAFE-and-not-yet-wired kinds (mechanically wireable now, zero judgment calls)
+
+`activity`, `client`, `client_contact`, `comment`, `custom_field`, `deliverable`, `device`, `file`,
+`meeting_recording`, `member`, `notification`, `org_structure`, `pm_project`, `portal`,
+`report_period`, `task`, `work_activity`.
+
+16 of these are the `team_lead`-retirement SAFE kinds from §R.3 minus `pm_task` (already wired by the
+pilot); the 17th, `portal`, is new this session — freed by `IAM-DR12`'s unrelated rule deletion
+(§R.1). All 17 follow the **identical** pattern `IAM-04-ROLLOUT-B12`'s batch 1 already used for the
+other 17: one new rule per action, `derivedRoles: ["perm_<kind>_<action>"]`, condition copied verbatim
+from the SAFE role rule it mirrors, no exclusion clause needed (the detector found zero mixing
+anywhere in these 17, confirmed structurally — not asserted). `portal`'s own wildcard/`client` rules
+are untouched by this (IAM-04c: never mirror the bypass or a still-unsafe role); its `client`-only
+read/decide/sign/pay/etc. rule was already excluded from any prior mirror discussion and stays so.
+
+### R.5 The 5 Pattern-B-only kinds — mitigation needed: selective self-scoped mirroring
+
+`appraisal`, `integration_connection`, `project`, `report_document`, `time_entry`. Each carries a
+self-scoped rule (inline `subjectUserId`/`ownerId == principal.id`, or the shared `variables.owns`)
+coexisting with an unconditional rule on the SAME action — flattening both into one `perms` key would
+let any holder of that key in, not just the self-scoped grant's own holder (the `hr_case` Finding-1
+shape). Per-kind action list, re-derived fresh this session (identical to the HIER-01 plan's own
+prediction — team_lead's retirement changed nothing about these 5, confirmed):
+
+| Kind | Actions needing selective self-scoped mirroring | Unconditional roles also holding the action |
+|---|---|---|
+| `appraisal` | `read` | `hr_people_ops`, `company_admin`, `group_executive`, `manager`, `org_unit_lead` |
+| `checkin` | *(already mitigated — see R.2, wired via batch 3)* | — |
+| `integration_connection` | `read`, `create`, `update`, `delete` | `group_executive`, `company_admin`+`manager` |
+| `project` | `create`, `update`, `delete` | `company_admin`+`manager` |
+| `report_document` | `read_person` | `group_executive`, `company_admin`, `hr_people_reader`, `manager` |
+| `time_entry` | `update`, `delete` | `company_admin`+`manager` |
+
+One simplification worth naming: `report_document`'s hardest historical nuance — `team_lead` dead on
+2 grains, live on 1 (`read_department`), needing a per-action-not-per-kind exclusion — **is gone**.
+The kind's only remaining hazard is the single `read_person` self-scope shape above; `org_unit_lead`
+(HIER-2's replacement) already occupies its own separate rule on `read_department` per the binding
+authoring rule the consolidation plan wrote for it, so it produces no new Pattern-A mixing to design
+around. This kind is now a **one-mechanism, one-action** mitigation — the easiest it has ever been.
+
+### R.6 The 5 `group_executive` TRAP-4 kinds — still blocked; the call on fix-now vs D-7
+
+`automation_approval`, `pipeline_gate`, `pipeline_run`, `pipeline_stage`, `scope_signoff`. **Down
+from 6** — `portal` is out (§R.1/§R.4), not by the TRAP-4 fix the original register recommended
+(splitting `group_executive` into its own `notLow`-only rule, matching `appraisal`/`checkin`/
+`client_contact`'s already-correct shape) but by deleting the whole dead rule outright (IAM-DR12).
+The remaining 5 still fold `group_executive` into the SAME rule as `company_admin`/`manager` under
+an `inTenant && notLow` condition, and `inTenant` (`resource.tenantId in principal.companies`) is
+**never true** for a pure global grant with no `company_memberships` row in that tenant.
+
+**Re-confirmed LIVE this session** against a freshly-restarted `gaiada-test-cerbos`
+(`POST /api/check/resources`, real derived-role evaluation, not inferred from the YAML text):
+
+- `group_executive`@global, principal has a `company_memberships`-equivalent (`companies: ["t1"]`)
+  → `automation_approval.read` → **ALLOW**.
+- The SAME grant, principal has **zero** company membership in `t1` (the pure-exec shape the role
+  exists for) → `automation_approval.read` → **DENY**. This is the live bug.
+- Contrast control: `appraisal` (already correctly split into its own `notLow`-only `group_executive`
+  rule) → the identical zero-membership pure-exec principal → **ALLOW**, proving the fix shape works
+  and is cheap to copy (3 lines, matching `appraisal`/`checkin`/`client_contact`'s existing pattern).
+
+**The call this ticket was asked to make: fix now, or wait for D-7's Phase-3 deletion of
+`group_executive` entirely?** Recommend **fix now**, not wait, for three reasons: (1) this is a live
+authorization-correctness bug independent of IAM-04 — it silently denies the ONE role whose entire
+purpose is cross-company oversight, on 5 governance-sensitive surfaces (approvals, pipeline
+gates/runs/stages, scope sign-offs), **today**, regardless of whether the permission-arm rollout ever
+reaches these 5 kinds; (2) the fix is trivial and precedented — split the rule into two, copy the
+`appraisal`/`checkin`/`client_contact` shape verbatim, no new mechanism to invent; (3) `D-7` is an
+unscheduled Phase-3 item with no committed date, and blocking a known, cheap, live-bug fix on it
+indefinitely is a worse trade than fixing it now and letting D-7 delete the (by-then-correct) rule
+later along with the role — the fix is not wasted work either way, since a correctly-split rule is
+exactly as easy to delete as an incorrectly-mixed one. **Caveat, stated honestly:** whether this bug
+has *live* blast radius today (i.e., whether any real `group_executive` holder on `gda-aicenter`
+currently lacks a `company_memberships` row in an affected tenant) was not checked — that requires a
+live DB query against the production estate, out of this ticket's read-only-against-test-containers
+scope. The recommendation to fix now stands regardless of that answer (a correctness bug with unknown
+current blast radius is still worth closing at 3-lines-per-kind cost), but the urgency framing should
+not overstate what was and wasn't verified.
+
+**Sequencing consequence:** wiring a permission arm around this known-broken role arm would encode
+the bug's shape into the permission catalog (a generic global-or-company mirror would ALLOW a
+zero-membership exec where the real role arm denies AND where the real role arm should — post-fix —
+allow; today it would merely fail to match the role arm's own incorrect denial, which is at least not
+a *new* over-grant, but is not a clean mirror either). The original register's own recommendation to
+fix the role arm before wiring these 5 stands, unchanged by this measurement.
+
+### R.7 Re-derived remaining rollout order (concrete, ordered)
+
+| Order | Batch | Kinds | Status / mitigation |
+|---|---|---|---|
+| — | Original batches 1–3 | 29 kinds (17 SAFE + `pm_task`/`hr_case` pilot + 9 confirm-reliable + `checkin`) | **DONE** — wired by `IAM-04-ROLLOUT-B12` + the IAM-04b pilot, concurrent with HIER-1..3. Zero action needed. |
+| **1** | New-SAFE, freed by retirement + DR-12 | `activity`, `client`, `client_contact`, `comment`, `custom_field`, `deliverable`, `device`, `file`, `meeting_recording`, `member`, `notification`, `org_structure`, `pm_project`, `portal`, `report_period`, `task`, `work_activity` (17) | Wire mechanically, batchable — identical pattern to the already-shipped batch 1. Zero judgment calls. |
+| **2** | Role-arm correctness fix (blocks batch 3) | `automation_approval`, `pipeline_gate`, `pipeline_run`, `pipeline_stage`, `scope_signoff` (role-arm fix only, not the permission arm yet) | Split `group_executive` into its own `notLow`-only rule on each (§R.6) — a role-arm fix, not a permission-arm ticket; do this **first**, before batch 3 below touches these 5 kinds. Recommended NOW, not deferred to D-7 (§R.6). |
+| **3** | HAZARDOUS, self-scope only, remaining | `integration_connection`, `project`, `report_document`, `time_entry`, `appraisal` (5) | Selective self-scoped mirroring per §R.5's action table — one kind at a time, each with its own adversarial pin proving the self-check survives wiring (mirror `hr_case`'s own pattern). |
+| **4** | HAZARDOUS, permission arm, post-fix | `automation_approval`, `pipeline_gate`, `pipeline_run`, `pipeline_stage`, `scope_signoff` (5) | Only after batch 2's role-arm fix lands — wire the permission arm mirroring the NOW-correct role arm (do not mirror the pre-fix shape). |
+
+Batches 1 and 3 have no ordering dependency on each other or on batch 2/4 and can proceed in
+parallel. Batch 4 is strictly gated on batch 2.
+
+### R.8 Orphaned-reference sweep (HIER-5's own spec) — summary; full detail in the HIER-5 report
+
+Full detail, evidence, and file-level citations are in
+`docs/superpowers/plans/2026-08-11-hier-5-report.md` §4. Headline:
+
+- Cerbos policies, `derived_roles.yaml`, `role-permission-bundles.json` (20 roles/861 pairs),
+  `permission-catalog.json` (226 permissions/211 grantable — content, not `_meta`, see below),
+  `permission-groups.json`, `principal.ts`, `person-scope.ts`, `fixtures.ts`: **swept clean**, zero
+  functional `team_lead`/`team`-scope/`core.team.*` references remain anywhere (only accurate
+  historical comments, matching this repo's own idiom for retired concepts).
+- **One genuine, currently-red, previously-unfound regression:**
+  `platform-nest/src/admin/managed-by-invariant.test.ts`'s "promoting a team lead never produces a
+  managed_by-set user_roles row" test still POSTs to the deleted `/api/:t/teams` and
+  `/api/:t/teams/:teamId/members` endpoints and gets `404`, not the `201` it expects. This test was
+  outside HIER-3's own enumerated W1–W13 sweep and outside every concurrent ticket's touched-files
+  list; reproduced twice (isolated re-run and full-directory re-run), not a transient stack issue.
+- **One live, functional (not comment-only) orphan in a separate project, previously flagged as
+  out-of-boundary and still unresolved:** `platform-ui/e2e/personas.ts`'s `PersonaKey` union still
+  includes `"team_lead"`, and `platform-ui/e2e/iam-personas-fixture.spec.ts` has a real test driving
+  `loginAsPersona(page, "team_lead")`. Not a live crash (it asserts the DEMO_MODE-unsupported-persona
+  throw, which is still technically true), but the persona key names a backend seed identity that no
+  longer exists under that name (reworked to `org_unit_lead`).
+- **One minor, unenforced documentation drift:** `permission-catalog.json`'s own `_meta.counts` block
+  still reads `cerbosKinds:61, concretePairs:230, grantable:215` — stale against the file's own
+  current `permissions` array (60/226/211, confirmed by direct count). No test reads this block (only
+  `permission-groups.json`'s own `_meta.counts` is parity-tested), so this passed silently. Low
+  severity, but the exact "hand-maintained fact that lies" pattern this program keeps re-finding.
+- **Already closed, checked not assumed:** the DB-side `role_permissions` orphan `IAM-DR12` itself
+  flagged as a follow-up (3 `('<role>','portal.read')` rows with no matching Cerbos grant) — migration
+  `0104` landed and `role-permission-parity.db.test.ts` passes clean (confirmed in this session's own
+  416/416 `src/rbac/` run).
+- `docs/PERMISSION-CONTRACT.md`/`docs/FRONTEND-BFF-CONTRACT.md` — refreshed by `IAM-DOCS-01` **before**
+  HIER-3/DR-12 landed, so their catalog counts (230/215/61 kinds) are stale again relative to the
+  current 226/211/60. Not this ticket's ownership to fix; flagged for whoever next touches those docs.
+
+---
+
+## Appendix A — the original 2026-08-10 scan (historical; preserved verbatim below for the delta evidence)
+
+## 0. Headline numbers (ORIGINAL, 2026-08-10 — superseded by the RE-BASELINE above; kept for the BEFORE/AFTER delta)
 
 | Bucket | Count | Definition |
 |---|---:|---|

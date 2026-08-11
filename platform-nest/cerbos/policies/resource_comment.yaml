@@ -11,10 +11,10 @@ resourcePolicy:
       derivedRoles: ["platform_admin"]
     - actions: ["read"]
       effect: EFFECT_ALLOW
-      derivedRoles: ["company_admin", "manager", "member", "viewer", "team_lead"]
+      derivedRoles: ["company_admin", "manager", "member", "viewer"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }
     # Viewers are read-only; commenting is a write and excludes them.
     - actions: ["create"]
       effect: EFFECT_ALLOW
-      derivedRoles: ["company_admin", "manager", "member", "team_lead"]
+      derivedRoles: ["company_admin", "manager", "member"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }

@@ -38,31 +38,35 @@ owner decision DR-4, because the portal is a separate trust surface.
 Domains: `agency` `assistant` `billing` `core` `hr` `it` `knowledge` `pm` `portal` `reports`
 `search` `webdev`.
 
-## 2. Current numbers (re-derived from the artifacts, 2026-08-11)
+## 2. Current numbers (re-derived from the artifacts, 2026-08-11, post-HIER-3)
 
 | Artifact | Value | File |
 |---|---|---|
-| Catalog | **230** entries = **215 grantable** + **15 relationship**; 79 flagged `sensitive`; 61 distinct Cerbos kinds | `platform-nest/src/rbac/permission-catalog.json` |
-| Role bundles | **936** pairs across **20** roles (unchanged from 2026-08-10) | `platform-nest/src/rbac/role-permission-bundles.json` |
-| Permission groups | **75** | `platform-nest/src/rbac/permission-groups.json` |
+| Catalog | **226** entries = **211 grantable** + **15 relationship**; 79 flagged `sensitive`; 60 distinct Cerbos kinds (HIER-3: `core.team.*` (4 grantable) and the `team` kind retired, 230/215/61 → 226/211/60) | `platform-nest/src/rbac/permission-catalog.json` |
+| Role bundles | **861** pairs across **20** roles (`team_lead` retired — HIER-3; `org_unit_lead` added — HIER-2; net 21 → 20) | `platform-nest/src/rbac/role-permission-bundles.json` |
+| Permission groups | **74** (the `teams` group retired with `core.team.*`) | `platform-nest/src/rbac/permission-groups.json` |
 | UI capabilities | **34** | `platform-ui/src/lib/rbac.ts` |
 
-**Bundle sizes per role** (re-counted from `role-permission-bundles.json`'s own `_meta.counts.perRole`,
-not copied from the plan doc — the plan doc's "199→200 after DR-5" claim checked out exactly):
+**Bundle sizes per role** (re-counted from `role-permission-bundles.json`'s own `_meta.counts.perRole`):
 
 | Role | Pairs | Role | Pairs | Role | Pairs |
 |---|---:|---|---:|---|---:|
-| `platform_admin` | 215 | `viewer` | 30 | `search_manager` | 37 |
-| `company_admin` | **200** | `team_lead` | 60 | `search_staff` | 24 |
-| `group_executive` | 118 | `client` | 6 | `reports_manager` | 3 |
-| `manager` | 109 | `it_admin`/`it_manager`/`it` | 3 each | `reports_staff` | 4 |
-| `member` | 74 | `agency_approver` | 1 | `webdev_manager` | 6 |
+| `platform_admin` | 211 | `viewer` | 29 | `search_manager` | 37 |
+| `company_admin` | 195 | `org_unit_lead` | 2 | `search_staff` | 24 |
+| `group_executive` | 117 | `client` | 6 | `reports_manager` | 3 |
+| `manager` | 104 | `it_admin`/`it_manager`/`it` | 3 each | `reports_staff` | 4 |
+| `member` | 73 | `agency_approver` | 1 | `webdev_manager` | 6 |
 | | | `hr_staff` | 13 | `webdev_staff` | 4 |
 | | | `hr_manager` | 23 | | |
 
-`company_admin`'s 200 (was 199) is DR-5 (`company_admin` × `reports.appraisal.read`, granted in
-Cerbos — the program's first deliberate authorization **widening**, migration `0099`). The
-`webdev_staff`/`webdev_manager` rows are new since the 08-10 freeze (`0097`/`0098`).
+`company_admin`'s 195 reflects two independent moves since the prior 200 (199 baseline + DR-5's
+`reports.appraisal.read`, migration `0099`): HIER-3 retired 4 `core.team.*` keys, and a concurrent,
+unrelated session (DR-12) deleted `resource_portal.yaml`'s dead staff-read rule, removing
+`portal.read` (200 − 4 − 1 = 195; same −5 shape hit `manager`, and −1 hit `member`/`viewer`/
+`group_executive` from their own narrower `core.team.read`/`portal.read` holdings). `org_unit_lead`
+(2 pairs: `reports.appraisal.read`, `reports.document.read_department`) replaces `team_lead` (was
+60 pairs, full PM parity with `manager` — that PM-wide reach was itself the dead-grant defect this
+retirement removed; see §9).
 
 **IAM-04-ROLLOUT progress (the permission-arm rewrite, separate from the numbers above — role-name
 matching is still what decides every live authorization; the permission arm is an additive mirror
@@ -206,24 +210,24 @@ substituting a different identity.
   `wildcardBypassRoles`/`caveat`) and its scope-level-only semantics.
 
 **NOT frozen — actively moving as of 2026-08-11, do not build on the specifics below:**
-- **Scope types are mid-migration, not settled.** The DB `scope_type` CHECK (migration `0100`,
-  DR-8/DR-10) is now `global | company | org_unit | project` — **`team` and `record` are gone from
-  the CHECK**, `org_unit` exists, `scope_id` is widened `uuid → text` with a per-shape CHECK. This
-  is the substrate only. **`org_unit_lead` (the `team_lead` replacement, HIER-2) does not exist
-  yet** — no role, no Cerbos condition consumes an `org_unit` grant today. Three write paths
-  (`core/teams.controller.ts`'s promote-to-lead, `testing/personas.ts`, `seed/personas.ts`) still
-  insert `scope_type='team'` and now hit the new CHECK — a **known, deliberately-sequenced 500** on
-  the team-promote path until HIER-3 lands and rewrites those three call sites (zero live rows are
-  affected; the `teams` UI has no screen and zero live callers). **Do not gate anything on
-  `org_unit` today** — the scope exists in the DB and nowhere else yet.
-- **`team_lead`.** Named in ~27 policies (60 bundle pairs, full PM parity with `manager`) but
-  reachable in almost none — `teamId` reaches authorization in exactly two handlers
-  (`teams.controller.ts`, `reports.controller.ts`'s department grain). Confirmed genuinely
-  unreachable at the DB layer too for its one plausible live grain
-  (`report_document.read_department`: the handler passes a text org-node id where `scope_id` was
-  `uuid` before `0100` — that specific incompatibility is now gone post-widening, but no Cerbos rule
-  or role consumes it yet). Do not gate anything new on it; it is slated for retirement onto
-  `org_unit`/`org_unit_lead`, not repair.
+- **Scope types finished moving (HIER-3, 2026-08-11).** The DB `scope_type` CHECK (migration
+  `0103`) is now `global | company | org_unit | project` — **`team` and `record` are DELETED from
+  the CHECK, not merely absent from new writes** (0103 hard-aborts if a leftover row of either
+  exists, then narrows the CHECK for real), `org_unit` exists, `scope_id` is widened `uuid → text`
+  (0100) with a per-shape CHECK (narrowed again by 0103 to match). `teams`/`team_memberships` are
+  DROPPED (0 rows, count-asserted). `core/teams.controller.ts` is DELETED, and
+  `testing/personas.ts`/`seed/personas.ts`'s `team_lead` persona is reworked to `org_unit_lead`.
+  **`org_unit_lead` (HIER-2, the `team_lead` replacement) is a real, seeded, Cerbos-consuming role**
+  landed on exactly two rules (`report_document.read_department`, `appraisal.read`) — see the
+  `team_lead` bullet immediately below for what changed. `org_unit` is otherwise still a narrow
+  scope (two landing surfaces only); do not assume it is wired everywhere.
+- **`team_lead` is RETIRED (HIER-3, 2026-08-11) — the role, its Cerbos derived role, its
+  `role_permissions` bundle, and every writer that could mint the grant are gone.** It is no longer
+  named in any resource policy, any catalog permission, any seeded role, or any test fixture; the
+  `team` Cerbos kind and `resource_team.yaml` are deleted with it. Its replacement is
+  `org_unit_lead` (HIER-2's subtree-cascade role, landed on `report_document.read_department` and
+  `appraisal.read` only — do not assume broader PM-parity reach the way `team_lead` claimed; that
+  claim was the dead-grant defect this retirement removed).
 - **`owner` (D-8) does not exist yet** and `group_executive` is slated for deletion (D-7). There is
   deliberately no `owner` persona. IAM-04c ruled `owner` will be expressed with **zero Cerbos
   policy rules** — a platform-managed bundle generated by exclusion from the 215 grantable keys —
@@ -278,19 +282,24 @@ catch it — treat that one, not the parity suite, as the authority for "no role
 
 **Still open, unresolved as of this pass:**
 - **IAM-04-ROLLOUT.** 28 of 61 kinds now carry a permission arm (up from the 2-kind pilot) — see §2
-  for the exact list. Rollout batches 3–8 (self-scope-only `checkin`; the dead-grant `team_lead`
-  sweep across 18 kinds; 3 dual-mitigation kinds; `report_document`'s per-action split; `team`
-  itself; the 6 `group_executive`/TRAP-4-blocked kinds) are not started. **Rollout batches 4–7
-  additionally cannot proceed until HIER-3 lands** — their subject matter (`team`-scoped grants,
-  `team_lead`) is what HIER-3 deletes. Still invisible to consumers of `can()` either way — role
-  names, not permissions, decide every live authorization today.
+  for the exact list; §2's kind count itself is now 60, not 61 (HIER-3 deleted the `team` kind).
+  Rollout batches 4–7 (the dead-grant `team_lead` sweep across 18 kinds, 3 dual-mitigation kinds,
+  `report_document`'s per-action split, `team` itself) **dissolve rather than proceed**: their
+  entire subject matter (`team`-scoped grants, `team_lead`) no longer exists post-HIER-3, exactly
+  as the HIER-01 consolidation plan predicted — `pm_task` (the pilot's own `team_lead` control kind)
+  measurably moved HAZARDOUS → SAFE and dropped out of `permission-arm-hazard-scan.test.ts`'s
+  register (see that file's own regression-guard comment). Batch 3 (self-scope-only `checkin`) and
+  batch 8 (the 6 `group_executive`/TRAP-4-blocked kinds) are unaffected and still not started.
+  Still invisible to consumers of `can()` either way — role names, not permissions, decide every
+  live authorization today.
 - **The permission-arm hazard detector's blind spot (found during IAM-04-ROLLOUT-B12, NOT yet a
   ticket).** `permission-arm-hazard-scan.test.ts` only catches a role that is unsafe because it sits
   *mixed* with a safe role inside one rule (Pattern A/B). It does not catch a role that is unsafe
   because its ONLY reach is through a wildcard or unconditional rule whose own `derived_roles.yaml`
   condition doesn't match the mirror's assumed scope shape — the exact shape IAM-SEC-02 turned out
   to be, and which is *already* present, unaddressed, in the shipped `pm_task`/`hr_case` pilot
-  (neither pilot's `perm_*` roles exclude `platform_admin`/`group_executive`, only `team_lead`). No
+  (neither pilot's `perm_*` roles exclude `platform_admin`/`group_executive`; `pm_task`'s own
+  `team_lead` exclusion was retired with the role itself, HIER-3). No
   live grant makes this reachable today (IAM-SEC-02's fix closed the one path that would have
   created one), but the detector itself has not been extended, and an architect decision is
   outstanding between (a) adding a fourth hazard pattern + retroactively fixing the pilot, or (b) a
@@ -305,7 +314,11 @@ catch it — treat that one, not the parity suite, as the authority for "no role
   scoped per domain; not re-verified in this pass, carried forward from the 08-10 register.
 - **Sensitivity sign-off** (79 permissions + 42 groups flagged) still needs the owner + an
   HR/finance pass; blocks D-9/D-10, not Phase 1.
-- **HIER-2 (`org_unit_lead`) and HIER-3 (the `team`/`team_lead` retirement sweep)** have not
-  started. Until they land, `org_unit` is a DB-only scope with zero consumers (§7), and the three
-  `scope_type='team'`-writing call sites are a known, deliberately-sequenced live 500 waiting for
-  anyone who exercises the team-promote path (zero known live callers today).
+- ~~HIER-2 (`org_unit_lead`) and HIER-3 (the `team`/`team_lead` retirement sweep)~~ — **LANDED
+  (2026-08-11).** `org_unit_lead` is seeded and Cerbos-consuming on two rules; `team_lead`, the
+  `team`/`record` scope values, and `teams`/`team_memberships` are retired. See §7's rewritten
+  bullets for the current shape. Follow-up not yet done: `Resource.teamId` (the shared attribute
+  field `reports.controller.ts` and others still pass) is now a fully dead attribute — no Cerbos
+  rule reads it anymore — but renaming/removing it from `src/rbac/cerbos.ts` and every call site
+  was reported as out of this ticket's scope (HIER-2's own report explicitly deferred it to
+  HIER-3, but the rename touches ~10 files beyond team/team_lead itself); left for a future ticket.

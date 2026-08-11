@@ -58,6 +58,45 @@ describe("Role mirrors every raw role Cerbos actually grants (drift-proof, not a
     expect(missing, `Cerbos grants these raw roles but Role/ROLE_CAPS has no entry for them: ${missing.join(", ")}`).toEqual([]);
   });
 
+  // ── THE REVERSE DIRECTION, added 2026-08-11 (HIER-3) ──────────────────────────────────────────
+  //
+  // This file only ever checked Cerbos → mirror: "Cerbos grants X, does the mirror know it?" That
+  // caught the original defect it was built for (two whole roles missing from `Role`/`ROLE_CAPS`).
+  // It could NOT catch the opposite: a mirror entry for a role Cerbos no longer grants.
+  //
+  // That gap stopped being theoretical the moment this program started RETIRING roles. HIER-3
+  // removed `team_lead` from `derived_roles.yaml` and from `ROLE_CAPS` in two separate, concurrently
+  // -running changes — and if only the Cerbos half had landed, every test here would still have
+  // passed while the UI kept offering capabilities for a role that no longer exists. A stale mirror
+  // entry is exactly as wrong as a missing one; it just fails in the over-claim direction (a button
+  // that 403s) instead of the under-claim direction (functionality invisible).
+  //
+  // ⚠ MODULE ROLES ARE NOT LITERALS, which is very likely why this direction was never written.
+  // `hr_staff`, `search_manager`, `reports_staff` etc. are STRING-COMPOSED by `derived_roles.yaml`
+  // (`g.role == (resource.attr.module + "_staff")`), so they never appear as a `g.role == "..."`
+  // literal and a naive reverse check would flag every one of them as stale. They are matched by
+  // suffix here instead — the same composition contract `role-catalog-drift.db.test.ts` derives on
+  // the backend.
+  const MODULE_ROLE_SUFFIXES = ["_staff", "_manager", "_approver"];
+
+  it("every Role/ROLE_CAPS entry is still a role Cerbos grants — no STALE mirror entries", () => {
+    const policy = read(DERIVED_ROLES_POLICY_PATH);
+    const rawRoles = new Set(rawRolesGrantedByCerbos(policy));
+
+    const stale = Object.keys(ROLE_CAPS).filter((role) => {
+      if (rawRoles.has(role)) return false;                                    // a literal Cerbos grant
+      if (MODULE_ROLE_SUFFIXES.some((s) => role.endsWith(s))) return false;    // string-composed
+      return true;
+    });
+
+    expect(
+      stale,
+      `Role/ROLE_CAPS still names these roles but derived_roles.yaml no longer grants them — the ` +
+        `mirror is STALE and will offer capabilities for a role that does not exist: ${stale.join(", ")}. ` +
+        `Remove them from rbac.ts (and check rbac-capability-map.ts + any KNOWN_NON_DRIFT entry).`,
+    ).toEqual([]);
+  });
+
   it("the documented exception list itself stays real — 'client' must still be a role Cerbos actually grants", () => {
     // Guards the guard: if `client` is ever removed from derived_roles.yaml, this exception
     // becomes dead weight hiding a real omission instead of documenting an intentional one.

@@ -26,7 +26,7 @@ resourcePolicy:
     # meeting_recording read).
     - actions: ["read"]
       effect: EFFECT_ALLOW
-      derivedRoles: ["company_admin", "manager", "member", "viewer", "team_lead"]
+      derivedRoles: ["company_admin", "manager", "member", "viewer"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }
     # Ingest is an admin/service-principal write (the P1-05 outbox consumer, or an admin backfill
     # script) — NOT an everyday staff action, mirrors resource_rollup_recompute.yaml's create tier.

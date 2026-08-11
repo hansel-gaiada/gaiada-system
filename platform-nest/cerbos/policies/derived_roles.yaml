@@ -61,17 +61,12 @@ derivedRoles:
               g.scopeType == "global" ||
               (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
 
-    # Team scope (5b.7): a team_lead grant covers resources tagged with that team id.
-    - name: team_lead
-      parentRoles: ["user"]
-      condition:
-        match:
-          expr: >-
-            request.principal.attr.grants.exists(g, g.role == "team_lead" &&
-              g.scopeType == "team" && g.scopeId == request.resource.attr.teamId)
-
     # ══════════════ HIER-2 (DR-9) — org_unit_lead: the org-chart subtree cascade ══════════════
-    # `team_lead`'s replacement for department-scoped authority. A grant at unit U covers every
+    # `team_lead`'s replacement for department-scoped authority (HIER-3, 2026-08-11: `team_lead`
+    # itself — the `team`-scoped raw-grant role this comment used to sit directly below — is now
+    # RETIRED: the `team` scope, `teams`/`team_memberships`, and the `team_lead` derived role are
+    # all gone in the same change; see docs/superpowers/plans/2026-08-11-hier-3-report.md). A
+    # grant at unit U covers every
     # resource whose OWN unit is U or a descendant of U — expressed as ANCESTOR CONTAINMENT rather
     # than a subtree walk: the RESOURCE carries `unitAncestors` = every ancestor of its own unit
     # (IAM-09's org_unit_closure table, self-inclusive at depth 0 — org-unit-closure.ts's header),
@@ -233,14 +228,14 @@ derivedRoles:
     # SCOPE SEMANTICS (do not widen beyond this — matches the ticket's own instruction and
     # `principal.ts::principalHasPermission()`'s documented boundary): a GLOBAL-scope permission
     # grant covers every tenant; a COMPANY-scope grant covers EXACTLY the company it was granted at
-    # (`scopeId == request.resource.attr.tenantId`) — nothing narrower, nothing broader. Project/team
-    # cascades (manager/member's project scope, team_lead's team scope) are DELIBERATELY NOT
-    # reproduced here: `perms` carries scope copied verbatim from whichever grant produced it, with
-    # no record of which named role that was, so a permission-arm rule can only safely test the ONE
-    # cascade shape that is unambiguous regardless of origin (global-covers-all, company-covers-
-    # itself). Project/team-scoped grants simply are not recognized by these derived roles — which is
-    # SAFE, not a gap: the pre-existing, byte-unchanged role-name rules still grant those cases
-    # exactly as before, so a decision that depended on project/team scope is untouched.
+    # (`scopeId == request.resource.attr.tenantId`) — nothing narrower, nothing broader. The
+    # project-scope cascade (manager/member's project scope) is DELIBERATELY NOT reproduced here:
+    # `perms` carries scope copied verbatim from whichever grant produced it, with no record of
+    # which named role that was, so a permission-arm rule can only safely test the ONE cascade shape
+    # that is unambiguous regardless of origin (global-covers-all, company-covers-itself). Project-
+    # scoped grants simply are not recognized by these derived roles — which is SAFE, not a gap: the
+    # pre-existing, byte-unchanged role-name rules still grant that case exactly as before, so a
+    # decision that depended on project scope is untouched.
     #
     # WHY NOT ONE GENERIC PARAMETERIZED DERIVED ROLE: Cerbos derived-role conditions have no access
     # to the action currently being evaluated (that's why `module_staff`/`module_manager` above
@@ -265,41 +260,26 @@ derivedRoles:
     #
     # pm_task (IAM-04b pilot resource #1).
     #
-    # ⚠ REAL FINDING while building this (verified live against the seeded 0094/0098 bundle, not
-    # theoretical): `team_lead` sits in resource_pm_task.yaml's role list ALONGSIDE company_admin/
-    # manager/member/viewer, so 0094 bundled it `pm.task.*` too — but `team_lead`'s OWN derived role
-    # above matches ONLY `scopeType == "team" && scopeId == resource.attr.teamId`, and
-    # `pm-adversarial-authz.test.ts`'s own "REAL FINDING" pins that `pm.controller.ts` NEVER sets
-    # `resource.attr.teamId` — so `team_lead` is PROVABLY UNREACHABLE on this kind at ANY grant
-    # scope (team, company, OR global), yet its bundle row still exists (0094's methodology treats
-    # a resource-instance condition as "satisfiable" without checking whether the handler ever
-    # actually populates the attribute it depends on). A `team_lead` grant made at COMPANY or
-    # GLOBAL scope (the platform's schema permits granting any role at any scope_type) therefore
-    # produces a `perms` entry indistinguishable from a LEGITIMATE company_admin/manager/member/
-    # viewer grant at that same scope — confirmed empirically: granting ONLY `team_lead` at company
-    # scope and probing live Cerbos initially returned ALLOW through a naive global-or-company
-    # permission mirror, where the role arm (and the pinned adversarial test) require DENY.
-    #
-    # FIX: exclude exactly the scope value a `team_lead` grant occupies, via `attr.grants` (already
-    # sent, unchanged) as a corroborating witness — NOT to require holding a role (that would defeat
-    # the isolation proof), but to refuse to trust a `perms` scope value when the ONLY thing at that
-    # exact scope is `team_lead`. This can never cause a real access LOSS: if the SAME principal also
-    # holds a genuinely qualifying role (company_admin/manager/member/viewer) at that scope, the
-    # UNCHANGED role-arm rules grant it directly regardless of what this derived role decides — this
-    # exclusion only ever removes a permission-arm path that was never backed by real reachability in
-    # the first place. `cerbos-permission-dual-match.test.ts` proves both directions: the permission
-    # arm still fires with EMPTY grants (isolation preserved) and still denies the exact
-    # team_lead-at-company-scope shape the adversarial test pins.
+    # HIER-3 (2026-08-11): this block used to carry a `team_lead` exclusion clause on every rule
+    # below — `team_lead` sat in resource_pm_task.yaml's role list ALONGSIDE company_admin/manager/
+    # member/viewer, so 0094 bundled it `pm.task.*` too, but `team_lead`'s OWN derived role matched
+    # ONLY `scopeType == "team" && scopeId == resource.attr.teamId` and `pm.controller.ts` never set
+    # `resource.attr.teamId` — so a `team_lead` grant at COMPANY or GLOBAL scope produced a `perms`
+    # entry indistinguishable from a legitimate company_admin/manager/member/viewer grant at that
+    # same scope, and each rule below excluded exactly that scope value via `attr.grants` as a
+    # corroborating witness. `team_lead` is now retired (role, derived role, and every writer that
+    # could mint the grant) — there is nothing left to distinguish, so the exclusion clause is
+    # removed and these are now plain global-or-company mirrors of their role-arm counterparts,
+    # matching every other IAM-04-ROLLOUT-B12 pair below. See
+    # docs/superpowers/plans/2026-08-11-hier-3-report.md for the retirement's full account.
     - name: perm_pm_task_read
       parentRoles: ["user"]
       condition:
         match:
           expr: >-
             request.principal.attr.perms.exists(g, g.key == "pm.task.read" && (
-              (g.scopeType == "global" &&
-                !request.principal.attr.grants.exists(x, x.role == "team_lead" && x.scopeType == "global")) ||
-              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId &&
-                !request.principal.attr.grants.exists(x, x.role == "team_lead" && x.scopeType == "company" && x.scopeId == g.scopeId))))
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
 
     - name: perm_pm_task_update
       parentRoles: ["user"]
@@ -307,10 +287,8 @@ derivedRoles:
         match:
           expr: >-
             request.principal.attr.perms.exists(g, g.key == "pm.task.update" && (
-              (g.scopeType == "global" &&
-                !request.principal.attr.grants.exists(x, x.role == "team_lead" && x.scopeType == "global")) ||
-              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId &&
-                !request.principal.attr.grants.exists(x, x.role == "team_lead" && x.scopeType == "company" && x.scopeId == g.scopeId))))
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
 
     - name: perm_pm_task_create
       parentRoles: ["user"]
@@ -318,10 +296,8 @@ derivedRoles:
         match:
           expr: >-
             request.principal.attr.perms.exists(g, g.key == "pm.task.create" && (
-              (g.scopeType == "global" &&
-                !request.principal.attr.grants.exists(x, x.role == "team_lead" && x.scopeType == "global")) ||
-              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId &&
-                !request.principal.attr.grants.exists(x, x.role == "team_lead" && x.scopeType == "company" && x.scopeId == g.scopeId))))
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
 
     - name: perm_pm_task_delete
       parentRoles: ["user"]
@@ -329,10 +305,8 @@ derivedRoles:
         match:
           expr: >-
             request.principal.attr.perms.exists(g, g.key == "pm.task.delete" && (
-              (g.scopeType == "global" &&
-                !request.principal.attr.grants.exists(x, x.role == "team_lead" && x.scopeType == "global")) ||
-              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId &&
-                !request.principal.attr.grants.exists(x, x.role == "team_lead" && x.scopeType == "company" && x.scopeId == g.scopeId))))
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
 
     - name: perm_pm_task_manage
       parentRoles: ["user"]
@@ -340,10 +314,8 @@ derivedRoles:
         match:
           expr: >-
             request.principal.attr.perms.exists(g, g.key == "pm.task.manage" && (
-              (g.scopeType == "global" &&
-                !request.principal.attr.grants.exists(x, x.role == "team_lead" && x.scopeType == "global")) ||
-              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId &&
-                !request.principal.attr.grants.exists(x, x.role == "team_lead" && x.scopeType == "company" && x.scopeId == g.scopeId))))
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
 
     # hr_case (IAM-04b pilot resource #2 — exercises module-role composition). Only the actions with
     # NO resource-instance ambiguity get a companion here; see the header block above and

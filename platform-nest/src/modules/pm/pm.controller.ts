@@ -1934,7 +1934,7 @@ export class PmController {
   // with it. Chosen tier, deliberately the NARROWEST that still lets the org actually use this: a
   // caller may always read their own series; `unrestricted`/`company_wide` tiers (platform_admin,
   // group_executive, company_admin, the HR tiers) may read anyone in the tenant; `unit_scoped`
-  // (manager/team_lead) is narrowed to their own led-unit subtree (TR-25's own subtree walk, so a
+  // (manager/org_unit_lead) is narrowed to their own led-unit subtree (TR-25's own subtree walk, so a
   // department lead's reach here is identical to their reach in `/reports`); a plain member
   // (`self_only`) may read ONLY themselves — never a colleague, however innocuous the ask feels. This
   // is stricter than `assertPersonInLedScope`'s own default (that function assumes Cerbos already

@@ -84,7 +84,14 @@ describe("IAM-DR5 — role-permission-bundles.json mirrors the read-only grant e
     expect(appraisalKeys).toEqual(["reports.appraisal.read"]);
   });
 
-  it("company_admin's total bundle size is 200 (199 + this one DR-5 grant)", () => {
-    expect(companyAdminPerms.length).toBe(200);
+  // HIER-3 (2026-08-11): was 200 (199 + this one DR-5 grant). Two independent, concurrent changes
+  // shifted it to 195 when this bundle was next regenerated: (a) HIER-3 itself retired
+  // `core.team.{create,read,update,delete}` (4 keys) from company_admin's reach — the `team` kind
+  // and `resource_team.yaml` are deleted entirely; (b) DR-12 (a concurrent, unrelated session)
+  // deleted the dead staff-read rule on `resource_portal.yaml`, which had also granted
+  // company_admin `portal.read` (1 key) — see that policy file's own header for the full finding.
+  // 200 - 4 - 1 = 195. Verified directly against the regenerated bundle, not just arithmetic.
+  it("company_admin's total bundle size is 195 (200 - 4 core.team.* (HIER-3) - 1 portal.read (DR-12, concurrent))", () => {
+    expect(companyAdminPerms.length).toBe(195);
   });
 });

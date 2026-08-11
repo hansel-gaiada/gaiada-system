@@ -70,7 +70,7 @@ const CATALOG_PATH = join(__dirname, "permission-catalog.json");
 // list is now automatically compared here on the very next run — no edit to this file required.
 //
 // Derived-role LABELS in derived_roles.yaml (platform_admin, company_admin, group_executive,
-// manager, member, viewer, team_lead, client, it_staff, module_approver, module_staff,
+// manager, member, viewer, org_unit_lead, client, it_staff, module_approver, module_staff,
 // module_manager, hr_people_ops, hr_people_reader) are NOT role names a user can hold — they are
 // the Cerbos-side abstraction. REAL_ROLES is what actually appears in a `grants` array / a `roles`
 // row. `it_staff` fans out to 3 real roles; `module_staff`/`module_manager`/`module_approver` fan
@@ -98,8 +98,8 @@ const DIRECT: Record<string, RealRole[]> = {
   manager: ["manager"],
   member: ["member"],
   viewer: ["viewer"],
-  team_lead: ["team_lead"],
-  // HIER-2/0102: `org_unit_lead` — team_lead's org-chart-subtree-scoped replacement (DR-9). Mirrors
+  // HIER-2/0102: `org_unit_lead` — team_lead's org-chart-subtree-scoped replacement (DR-9; `team_lead`
+  // itself retired by HIER-3, 2026-08-11). Mirrors
   // generate-role-bundles.mjs's own DIRECT entry so this file's independent re-derivation agrees.
   org_unit_lead: ["org_unit_lead"],
   client: ["client"],
@@ -294,10 +294,10 @@ describe.skipIf(!TEST_URL)("IAM-02b · role_permissions bundle parity vs live Ce
     await teardownTestDb();
   });
 
-  it("sanity: the catalog is the frozen 230-pair / 61-kind / 215-grantable / 15-relationship universe", () => {
-    expect(catalog.length).toBe(230);
-    expect(new Set(catalog.map((e) => e.cerbosKind)).size).toBe(61);
-    expect(catalog.filter((e) => e.class === "grantable").length).toBe(215);
+  it("sanity: the catalog is the 226-pair / 60-kind / 211-grantable / 15-relationship universe (HIER-3, 2026-08-11: team_lead/team retired, core.team.* dropped from 230/61/215)", () => {
+    expect(catalog.length).toBe(226);
+    expect(new Set(catalog.map((e) => e.cerbosKind)).size).toBe(60);
+    expect(catalog.filter((e) => e.class === "grantable").length).toBe(211);
     expect(catalog.filter((e) => e.class === "relationship").length).toBe(15);
   });
 

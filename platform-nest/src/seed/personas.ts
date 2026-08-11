@@ -9,8 +9,8 @@
 //
 // Run: DATABASE_URL=... tsx src/seed/personas.ts   (or `npm run seed:personas` after a build)
 //
-// Emails are deterministic: persona.<key>@iam-personas.test — so "log in as team_lead" is always
-// the same address, in every environment this has been seeded into, forever.
+// Emails are deterministic: persona.<key>@iam-personas.test — so "log in as org_unit_lead" is
+// always the same address, in every environment this has been seeded into, forever.
 //
 // ⚠ Two personas this file deliberately does NOT create:
 //   - `owner` (D-8) — NOT YET BUILT. There is no `owner` role in Cerbos or `roles` today. A
@@ -33,27 +33,34 @@ const site = () => config.originSite;
 const TENANT_NAME = "IAM Persona Sandbox";
 const EMAIL_DOMAIN = "iam-personas.test";
 const CLIENT_NAME = "Persona Client Co";
-const TEAM_NAME = "Persona Team";
+// HIER-3 (2026-08-11): replaces TEAM_NAME. A bare 0029-convention free-form org-unit node id (no
+// `company_org_structure` blob needed — `org_unit_memberships.unit_node_id` has no FK, per 0055's
+// header). Self-inclusive-at-depth-0 (HIER-2's ancestor containment), so the org_unit_lead grant
+// covers the persona's own placement at this same unit without needing a subtree.
+const ORG_UNIT_ID = "d-persona";
 
 export type PersonaKey =
-  | "superadmin" | "company_admin" | "manager" | "team_lead" | "member" | "viewer"
+  | "superadmin" | "company_admin" | "manager" | "org_unit_lead" | "member" | "viewer"
   | "hr_staff" | "hr_manager" | "it_admin" | "search_staff" | "search_manager"
   | "agency_approver" | "group_executive" | "client_contact";
 
 interface PersonaSpec {
   key: PersonaKey;
   role: string; // roles.name
-  scope: "global" | "company" | "team";
+  scope: "global" | "company" | "org_unit";
   label: string;
   extraRole?: string; // e.g. agency_approver also holds plain `member`, mirroring seed:agency
 }
 
+// HIER-3 (2026-08-11): `team_lead` retired ALONGSIDE the role itself; `org_unit_lead` (HIER-2's
+// org-chart subtree-cascade replacement) takes its slot — placed AND granted at the same fixed
+// org-unit node id (ORG_UNIT_ID below), so person-scope narrowing is actually exercised.
 // Ordered so the report/README table reads sensibly top-to-bottom (tier, then module roles).
 export const PERSONAS: PersonaSpec[] = [
   { key: "superadmin", role: "platform_admin", scope: "global", label: "Persona Superadmin" },
   { key: "company_admin", role: "company_admin", scope: "company", label: "Persona Company Admin" },
   { key: "manager", role: "manager", scope: "company", label: "Persona Manager" },
-  { key: "team_lead", role: "team_lead", scope: "team", label: "Persona Team Lead" },
+  { key: "org_unit_lead", role: "org_unit_lead", scope: "org_unit", label: "Persona Org Unit Lead" },
   { key: "member", role: "member", scope: "company", label: "Persona Member" },
   { key: "viewer", role: "viewer", scope: "company", label: "Persona Viewer" },
   { key: "hr_staff", role: "hr_staff", scope: "company", label: "Persona HR Staff" },
@@ -69,7 +76,7 @@ export const PERSONAS: PersonaSpec[] = [
 
 export interface SeededPersonas {
   tenantId: string;
-  teamId: string;
+  orgUnitId: string;
   clientId: string;
   users: Record<PersonaKey, string>;
   emails: Record<PersonaKey, string>;
@@ -104,24 +111,23 @@ async function ensureCompany(name: string): Promise<string> {
   return id;
 }
 
-async function ensureTeam(tenantId: string, name: string): Promise<string> {
+/** Places `userId` at `unitNodeId` as their PRIMARY, currently-open org-unit membership —
+ *  idempotent (skips if an open placement at this exact unit already exists), matching this
+ *  file's `ensure*` idiom. Placement matters: `person-scope.ts` narrows a unit-scoped tier by the
+ *  SUBJECT's placement, not merely by the caller holding a grant. */
+async function ensureOrgUnitPlacement(tenantId: string, userId: string, unitNodeId: string): Promise<void> {
   const found = await withTenants([tenantId], (c) =>
-    c.query<{ id: string }>(`SELECT id FROM teams WHERE tenant_id=$1 AND name=$2`, [tenantId, name]),
+    c.query<{ id: string }>(
+      `SELECT id FROM org_unit_memberships WHERE tenant_id=$1 AND user_id=$2 AND unit_node_id=$3 AND valid_to IS NULL`,
+      [tenantId, userId, unitNodeId],
+    ),
   );
-  if (found.rows[0]) return found.rows[0].id;
-  const id = newId();
-  await withTenants([tenantId], (c) =>
-    c.query(`INSERT INTO teams (id, tenant_id, name, origin_site) VALUES ($1,$2,$3,$4)`, [id, tenantId, name, site()]),
-  );
-  return id;
-}
-
-async function ensureTeamMembership(tenantId: string, teamId: string, userId: string, role: string): Promise<void> {
+  if (found.rows[0]) return;
   await withTenants([tenantId], (c) =>
     c.query(
-      `INSERT INTO team_memberships (id, tenant_id, user_id, team_id, role, origin_site) VALUES ($1,$2,$3,$4,$5,$6)
-       ON CONFLICT (tenant_id, user_id, team_id) DO UPDATE SET role = EXCLUDED.role`,
-      [newId(), tenantId, userId, teamId, role, site()],
+      `INSERT INTO org_unit_memberships (id, tenant_id, user_id, unit_node_id, is_primary, valid_from, source, origin_site)
+       VALUES ($1,$2,$3,$4,true,'2020-01-01','manual',$5)`,
+      [newId(), tenantId, userId, unitNodeId, site()],
     ),
   );
 }
@@ -165,7 +171,7 @@ async function ensureClientContact(tenantId: string, clientId: string, userId: s
 
 export async function seedPersonas(): Promise<SeededPersonas> {
   const tenantId = await ensureCompany(TENANT_NAME);
-  const teamId = await ensureTeam(tenantId, TEAM_NAME);
+  const orgUnitId = ORG_UNIT_ID;
   const clientId = await ensureClient(tenantId, CLIENT_NAME);
 
   const users = {} as Record<PersonaKey, string>;
@@ -178,10 +184,10 @@ export async function seedPersonas(): Promise<SeededPersonas> {
     emails[p.key] = email;
 
     const roleId = await createRole(p.role);
-    if (p.scope === "team") {
+    if (p.scope === "org_unit") {
       await addMembership(tenantId, userId);
-      await ensureTeamMembership(tenantId, teamId, userId, "lead");
-      await grantRole(userId, roleId, "team", teamId);
+      await ensureOrgUnitPlacement(tenantId, userId, orgUnitId);
+      await grantRole(userId, roleId, "org_unit", orgUnitId);
     } else if (p.scope === "global") {
       // Global role AND a company membership — the membership is what puts this tenant in the
       // principal's authorized-tenant set at all (mirrors seed:agency's superadmin/exec pattern).
@@ -203,7 +209,7 @@ export async function seedPersonas(): Promise<SeededPersonas> {
   users.client_contact = clientUserId;
   emails.client_contact = clientEmail;
 
-  return { tenantId, teamId, clientId, users, emails };
+  return { tenantId, orgUnitId, clientId, users, emails };
 }
 
 if (require.main === module) {

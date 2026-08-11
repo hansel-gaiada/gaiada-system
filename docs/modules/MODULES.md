@@ -34,7 +34,7 @@ versions below; the running build reports it at `GET /health`.
 
 | Module | Ver | Status | Workstream | Since |
 |---|---|---|---|---|
-| platform-nest | `0.21.0` | IN PROGRESS | WS1 | 2026-08-11 |
+| platform-nest | `0.21.1` | IN PROGRESS | WS1 | 2026-08-11 |
 | platform-ui | `0.25.1` | IN PROGRESS | WS5 | 2026-08-11 |
 | ai-gateway-go | `0.13.2` | PROTOTYPED | WS3 | 2026-08-07 |
 | mcp-hub | `0.10.1` | PROTOTYPED | WS2 | 2026-08-09 |
@@ -58,7 +58,24 @@ versions below; the running build reports it at `GET /health`.
 
 ---
 
-## platform-nest â€” Platform Core Â· `0.21.0` Â· PROTOTYPED
+## platform-nest â€” Platform Core Â· `0.21.1` Â· PROTOTYPED
+
+**0.21.1 (2026-08-11, HIER-3 — the `team`/`team_lead` retirement, contract half):** migration
+`0103` closes the expand/contract pair `0100` opened. `user_roles.scope_type` is now hard-narrowed
+to `global | company | org_unit | project` (`team`/`record` DELETED, not just unwritten — 0103
+hard-aborts if a leftover row of either exists, then drops the values for real); `teams`/
+`team_memberships` are DROPPED (0 rows, count-asserted); the global `team_lead` role and its
+`role_permissions` bundle are deleted (cascade); the 4 `core.team.*` catalog permissions are
+deleted (catalog 230→226, grantable 215→211, kinds 61→60). Every writer that could mint a
+`team`-scoped grant is removed in the SAME change: `core/teams.controller.ts` (and its module
+wiring + test file) is deleted outright; `testing/personas.ts`/`seed/personas.ts`'s `team_lead`
+persona is reworked to `org_unit_lead` (an org-unit placement + grant, so person-scope narrowing
+is actually exercised). 23 Cerbos policy files + `derived_roles.yaml` swept (`team_lead`
+derivedRoles entries removed, the `team` kind's `resource_team.yaml` deleted, the 5
+`perm_pm_task_*` team_lead-exclusion clauses simplified back to plain global-or-company mirrors).
+`permission-arm-hazard-scan.test.ts`'s control kinds swapped (`pm_task`→`time_entry` alongside
+`hr_case`, since `pm_task` measurably moved HAZARDOUS→SAFE) and its synthetic teeth-proof rebased
+onto `client`. Full detail: `docs/superpowers/plans/2026-08-11-hier-3-report.md`.
 
 **0.21.0 (2026-08-10/11, IAM Phase 1 catch-up — many concurrent tickets, this entry consolidates):**
 the permission catalog is now DB-persisted and module-boot-validated (migrations `0091`-`0101`):
@@ -66,8 +83,9 @@ the permission catalog is now DB-persisted and module-boot-validated (migrations
 across 20 roles (`0094`/`0097`/`0098`, `company_admin` widened 199→200 by DR-5's deliberate
 `reports.appraisal.read` grant, `0099`), six previously-ungrantable roles seeded (`0091`), the
 global-scope-uniqueness dedupe fix (`0092`), and the `org_unit` scope substrate (`0100`,
-expand-only — drops `team`/`record` from the CHECK, widens `scope_id` to text — its consumer,
-`org_unit_lead`, is HIER-2 and does not exist yet) plus its closure table (`0101`, IAM-09). The
+expand-only — drops `team`/`record` from the CHECK, widens `scope_id` to text) plus its closure
+table (`0101`, IAM-09) and the `org_unit_lead` role (`0102`, HIER-2 — landed after this entry was
+first written; see 0.21.1 above for its own follow-on retirement of `team_lead`). The
 permission-arm rewrite (IAM-04) now covers 28 of 61 Cerbos kinds as an additive, proven-identical
 mirror beside the existing role-name matching, which is still what decides every live
 authorization. New BFF surface: `GET /api/:t/authz/permissions` + `GET /api/authz/permissions`

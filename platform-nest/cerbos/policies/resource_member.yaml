@@ -12,7 +12,7 @@ resourcePolicy:
     # Tenant directory (owner/assignee pickers): any in-tenant role may read it.
     - actions: ["read"]
       effect: EFFECT_ALLOW
-      derivedRoles: ["company_admin", "manager", "member", "viewer", "team_lead"]
+      derivedRoles: ["company_admin", "manager", "member", "viewer"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }
     # WSD-2: HR staff may read the SERVED company's directory — but only on the HR-workspace
     # directory path, where the members controller sets resource.attr.module = "hr". The

@@ -14,22 +14,13 @@ const UUID_RE = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0
 
 export type Assurance = "low" | "linked" | "high";
 
-// HIER-1 (2026-08-10): `org_unit` added to this union — a pure WIDENING, not a narrowing swap for
-// `team`/`record`. `team`/`record` are kept here on purpose even though migration 0100's DB-level
-// CHECK on `user_roles.scope_type` no longer permits either: retiring them from THIS TS union is
-// HIER-3's job (docs/superpowers/plans/2026-08-10-hierarchy-consolidation.md §3 W11), sequenced
-// AFTER HIER-2 builds `org_unit`'s replacement role — narrowing here first would force a
-// simultaneous edit of every test file that still constructs a `team`-scoped `Principal` literal
-// (cerbos.test.ts, cerbos-webdev-matrix.test.ts, cerbos-permission-dual-match.test.ts,
-// principal-permissions.db.test.ts, person-scope.test.ts — none of which touch the DB, so none of
-// them are broken by 0100's CHECK; they would ONLY break from narrowing this type, which is not
-// this ticket's mandate). The DB is authoritative on what can be STORED; this union is
-// authoritative on what TypeScript will let a caller construct in memory — the two are allowed to
-// diverge during the phased retirement, and 0100's shape CHECK is what actually enforces the new
-// boundary at the only layer that matters for data integrity.
+// HIER-1 (2026-08-10) added `org_unit` to this union as a pure WIDENING. HIER-3 (2026-08-11) now
+// retires `team`/`record` from it too, in the same change that removes migration 0100's DB-level
+// CHECK values' last writers (`teams.controller.ts`, the `team_lead` persona seeds) — the DB and
+// this TS union are back in agreement: both permit exactly `global | company | org_unit | project`.
 export interface RoleGrant {
   role: string;
-  scopeType: "global" | "company" | "org_unit" | "team" | "project" | "record";
+  scopeType: "global" | "company" | "org_unit" | "project";
   scopeId: string | null;
 }
 
@@ -38,13 +29,10 @@ export interface RoleGrant {
  *  `permissions.key` from the catalog (migration 0093, `permission-catalog.json`), e.g.
  *  `"core.task.update"`. `scopeType`/`scopeId` are copied from the GRANT the permission was
  *  reached through — a company-scope `manager` grant yields company-scope perms at that same
- *  company, not global ones; a global-scope `platform_admin` grant yields global-scope perms.
- *  `org_unit` WAS deliberately excluded from this union pending IAM-08/HIER-1 — HIER-1 (migration
- *  0100) is that ticket, so it is added now, additively, alongside (not replacing) `team`/
- *  `record` per this file's `RoleGrant` comment just above. */
+ *  company, not global ones; a global-scope `platform_admin` grant yields global-scope perms. */
 export interface PermissionGrant {
   key: string;
-  scopeType: "global" | "company" | "org_unit" | "team" | "project" | "record";
+  scopeType: "global" | "company" | "org_unit" | "project";
   scopeId: string | null;
 }
 

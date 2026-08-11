@@ -265,7 +265,9 @@ describe.skipIf(!TEST_URL)("IAM-03a · assemblePrincipal() perms resolution", ()
   it("principalHasPermission: a global grant covers any scope query", async () => {
     const p = await assemblePrincipal(platformAdminId, "high");
     expect(principalHasPermission(p!, "core.task.update", "company", companyA)).toBe(true);
-    expect(principalHasPermission(p!, "core.task.update", "team", "some-team-id")).toBe(true);
+    // HIER-3 (2026-08-11): scope type was "team" (retired) — "org_unit" exercises the identical
+    // intent (an arbitrary non-global scope type/id a global grant must still cover).
+    expect(principalHasPermission(p!, "core.task.update", "org_unit", "some-unit-id")).toBe(true);
     expect(principalHasPermission(p!, "core.task.update", "global", null)).toBe(true);
   });
 
@@ -273,7 +275,9 @@ describe.skipIf(!TEST_URL)("IAM-03a · assemblePrincipal() perms resolution", ()
     const p = await assemblePrincipal(companyAdminId, "high");
     expect(principalHasPermission(p!, "core.task.update", "company", companyA)).toBe(true);
     expect(principalHasPermission(p!, "core.task.update", "company", companyB)).toBe(false);
-    expect(principalHasPermission(p!, "core.task.update", "team", companyA)).toBe(false);
+    // HIER-3 (2026-08-11): scope type was "team" (retired) — "org_unit" exercises the identical
+    // "different scope type entirely" intent.
+    expect(principalHasPermission(p!, "core.task.update", "org_unit", companyA)).toBe(false);
     expect(principalHasPermission(p!, "no.such.permission", "company", companyA)).toBe(false);
   });
 

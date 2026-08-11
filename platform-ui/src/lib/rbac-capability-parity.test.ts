@@ -168,14 +168,12 @@ const KNOWN_NON_DRIFT: RegisterEntry[] = [
   // identically to manager's, even though the underlying Cerbos rule and role list are entirely
   // different. Same root-cause class as the hr_case entries above, confirmed directly against
   // the policy text (not inferred).
-  {
-    role: "team_lead",
-    capability: "company.manage",
-    direction: "under-claim",
-    reason:
-      "resource_integration_connection.yaml grants team_lead CRUD on integration_connection ONLY under `owns` (self-linked tools); the company.manage tier (company-owned rows + others' rows) is a separate, unconditioned company_admin/manager-only rule team_lead is not part of.",
-    decisionRef: "resource_integration_connection.yaml lines 44-49 (direct read); same conflation class as IAM-02a drift register §3",
-  },
+  // HIER-3 (2026-08-11): the `team_lead` x `company.manage` entry that sat here was REMOVED, not
+  // rewritten. `team_lead` is retired — the role, its derived role, every policy naming it, and
+  // every writer that could mint the grant are gone (migration 0103). An exception register entry
+  // for a role that no longer exists is exactly the stale-exception rot this file's own
+  // guard-the-guard test exists to catch, and that test is what flagged it: an exception nobody
+  // revisits is how a parity suite quietly stops asserting anything.
   {
     role: "member",
     capability: "company.manage",

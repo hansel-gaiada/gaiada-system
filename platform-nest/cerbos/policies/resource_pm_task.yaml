@@ -12,12 +12,12 @@ resourcePolicy:
     # Read + execution updates (progress/status/subtasks/time/tracker-run) — any member.
     - actions: ["read", "update"]
       effect: EFFECT_ALLOW
-      derivedRoles: ["company_admin", "manager", "member", "viewer", "team_lead"]
+      derivedRoles: ["company_admin", "manager", "member", "viewer"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }
     # Management actions (create/delete + assignee/meta changes + suggestion confirm) — leads/admins.
     - actions: ["create", "delete", "manage"]
       effect: EFFECT_ALLOW
-      derivedRoles: ["company_admin", "manager", "team_lead"]
+      derivedRoles: ["company_admin", "manager"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }
     # ══════════ IAM-04b — permission-matching arm (dual-match pilot). PURELY ADDITIVE: every ══════
     # rule above is byte-for-byte unchanged. Each action gets its OWN rule + its OWN permission-

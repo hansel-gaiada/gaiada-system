@@ -11,10 +11,10 @@ resourcePolicy:
       derivedRoles: ["platform_admin", "group_executive"]
     - actions: ["read"]
       effect: EFFECT_ALLOW
-      derivedRoles: ["company_admin", "manager", "member", "viewer", "team_lead"]
+      derivedRoles: ["company_admin", "manager", "member", "viewer"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }
     # Owner/status + milestones + docs are managed by leads/admins (UI gates on pm.manage).
     - actions: ["manage"]
       effect: EFFECT_ALLOW
-      derivedRoles: ["company_admin", "manager", "team_lead"]
+      derivedRoles: ["company_admin", "manager"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }

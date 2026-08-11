@@ -149,18 +149,11 @@ describe.skipIf(!live)("can() — wraps check(), both arms, both directions (liv
 });
 
 describe.skipIf(!live)("can() vs can.scopeOnly() — where they LEGITIMATELY DISAGREE (the ruling's whole point)", () => {
-  // Finding 2 (IAM-04 report §4): team_lead's role_permissions bundle claims pm.task.* reach,
-  // but pm.controller.ts never sets resource.attr.teamId, so team_lead is PROVABLY unreachable
-  // on pm_task at any scope. can.scopeOnly() cannot see that — it only sees the flat bundle
-  // entry. can() sees the real Cerbos condition and correctly denies.
-  it("DISAGREEMENT: team_lead's dead pm.task bundle entry — scopeOnly says yes, can() says no", async () => {
-    const p = principal(
-      [{ role: "team_lead", scopeType: "company", scopeId: T1 }],
-      [{ key: "pm.task.read", scopeType: "company", scopeId: T1 }],
-    );
-    expect(can.scopeOnly(p, "pm.task.read", { scopeType: "company", scopeId: T1 })).toBe(true); // fast path over-grants
-    expect(await can(p, "pm.task.read", { id: "task-1", tenantId: T1 })).toBe(false); // authoritative: denies
-  });
+  // HIER-3 (2026-08-11): the "DISAGREEMENT: team_lead's dead pm.task bundle entry" case that used
+  // to sit here is REMOVED, not replaced — `team_lead` (role, derived role, and bundle) is retired
+  // entirely (docs/superpowers/plans/2026-08-11-hier-3-report.md), so there is no longer a
+  // role_permissions bundle entry to disagree about. The hr.case example below stands alone as
+  // this suite's live proof of the can()-vs-scopeOnly() disagreement class.
 
   // Finding 1 (IAM-04 report §4): a member's hr.case.read bundle entry is a SELF-ONLY grant
   // once resolved through role_permissions — indistinguishable, once flattened into `perms`,

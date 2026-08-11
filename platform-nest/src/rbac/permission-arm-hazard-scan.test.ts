@@ -13,10 +13,21 @@
 // `teamId`, so the grant is dead in practice — a pre-existing adversarial test pins the 403, and
 // the pilot's first cut of the permission arm flipped it to 200 before the fix landed.
 //
-// THIS TICKET (IAM-04-ROLLOUT-SCAN) is the scan across all 61 kinds this hazard implies. It is
-// analysis + a detector, NOT a migration: no policy file gains a permission arm here. See
+// THIS TICKET (IAM-04-ROLLOUT-SCAN) is the scan across all kinds this hazard implies (61 at the
+// time this file was written; 60 as of HIER-3, 2026-08-11 — see below). It is analysis + a
+// detector, NOT a migration: no policy file gains a permission arm here. See
 // docs/superpowers/plans/2026-08-10-iam-04-rollout-scan.md for the full register (61-kind
 // SAFE/HAZARDOUS/DEAD-GRANT-SUSPECT classification, handler evidence, recommended rollout order).
+//
+// ⚠ HIER-3 (2026-08-11): `team_lead` — this file's own headline example of the hazard (see the
+// paragraph below) — is RETIRED: the role, its derived role, and every writer that could mint the
+// grant are gone (docs/superpowers/plans/2026-08-11-hier-3-report.md). `pm_task` (the pilot's
+// original control kind) consequently moved HAZARDOUS -> SAFE and drops out of the REGISTER
+// control-kind test below; `time_entry` replaces it. PART 4's synthetic teeth-proof is re-based
+// onto `client` (still genuinely unsafe today). The detector's OWN logic
+// (`classifyDerivedRoleExpr`/`scanPatternA`/`scanPatternB`/`hasGrantsExclusionFor`) is
+// byte-unchanged — only the fixtures naming a now-retired role were adjusted, per this ticket's
+// own instruction not to weaken the detector to make it pass.
 //
 // WHAT THIS FILE DOES, AND WHY IT MUST NEVER HARD-CODE A KIND LIST:
 // this program has hit the SAME hand-maintained-list-drift defect FIVE TIMES in one day (see the
@@ -481,8 +492,8 @@ describe("IAM-04-ROLLOUT-SCAN · permission-arm hazard detector (static, re-deri
   const patternA = scanPatternA(kinds, roleClass);
   const patternB = scanPatternB(kinds);
 
-  it("sanity: parses all 61 resource kinds", () => {
-    expect(kinds.size).toBe(61);
+  it("sanity: parses all 60 resource kinds (HIER-3, 2026-08-11: team kind retired, 61 -> 60)", () => {
+    expect(kinds.size).toBe(60);
   });
 
   it("sanity: classifies every non-perm_* derived role in derived_roles.yaml", () => {
@@ -491,14 +502,32 @@ describe("IAM-04-ROLLOUT-SCAN · permission-arm hazard detector (static, re-deri
     expect(roleClass.size).toBeGreaterThan(5);
   });
 
-  it("REGISTER: the two known-positive control kinds (pm_task, hr_case) are flagged hazardous by this detector", () => {
-    // These are the pilot's own two resources — IAM-04b already applied a mitigation to both, but
-    // the RAW SHAPE (team_lead/module_staff mixed with scope-only roles) is still present in the
-    // role-arm rules and must still be detected here; this is what the register calls the
-    // "known-positive controls". If this assertion goes red, the detector itself is broken.
+  it("REGISTER: the two known-positive control kinds (hr_case, time_entry) are flagged hazardous by this detector", () => {
+    // HIER-3 (2026-08-11): this used to pin (pm_task, hr_case) — the IAM-04b pilot's own two
+    // resources. pm_task's ONLY hazard was `team_lead` mixed into its role-arm rules (Pattern A);
+    // `team_lead` is now retired (role, derived role, and every writer that could mint the grant),
+    // so pm_task has ZERO Pattern-A/B hits left and correctly falls out of this register — see the
+    // dedicated pm_task assertion further down. `time_entry` replaces it as the second control: it
+    // carries an INDEPENDENT Pattern-B hazard (an unconditional company_admin/manager
+    // update/delete rule coexists with member's self-scoped-via-`variables.owns` update/delete
+    // rule on the SAME actions) that has nothing to do with `team_lead` and survives the
+    // retirement untouched — exactly the "stays hazardous only for Pattern B" shape the HIER-01
+    // consolidation plan predicted for this kind. `hr_case` is unaffected either way (its hazard is
+    // module_staff mixing + self-scope, never team_lead) and stays the first control. If this
+    // assertion goes red, the detector itself is broken.
     const kindsHit = new Set([...patternA.map((h) => h.kind), ...patternB.map((h) => h.kind)]);
-    expect(kindsHit.has("pm_task"), "pm_task must be re-derived as hazardous (team_lead mixing)").toBe(true);
+    expect(kindsHit.has("time_entry"), "time_entry must be re-derived as hazardous (Pattern B: self vs unconditional update/delete)").toBe(true);
     expect(kindsHit.has("hr_case"), "hr_case must be re-derived as hazardous (module_staff mixing + self-scope)").toBe(true);
+  });
+
+  it("HIER-3 (2026-08-11): the REAL pm_task has ZERO Pattern-A/B hits — team_lead retirement moved it HAZARDOUS -> SAFE as measured", () => {
+    // pm_task's only-ever hazard was `team_lead` co-listed with company_admin/manager/member/viewer
+    // in its role-arm rules. That mixing is now gone (team_lead removed from every rule this kind
+    // carries), and pm_task has no self-scoped condition anywhere, so it has no Pattern-B shape
+    // either. This is the regression check that the retirement itself didn't silently introduce a
+    // NEW hazard on this kind while removing the old one.
+    const kindsHit = new Set([...patternA.map((h) => h.kind), ...patternB.map((h) => h.kind)]);
+    expect(kindsHit.has("pm_task"), "pm_task must have ZERO Pattern-A/B hits now that team_lead is retired").toBe(false);
   });
 
   it("REGISTER: total hazardous-kind count is reported (informational — not a pinned literal; see the rollout-scan doc)", () => {
@@ -650,10 +679,18 @@ describe("IAM-04-ROLLOUT-SCAN · permission-arm hazard detector (static, re-deri
 
   describe("PART 4 — teeth proof: a synthetic hazardous rule is detected, then reverted", () => {
     // Construct a SYNTHETIC in-memory kind — never touches any real YAML file — reproducing the
-    // exact pre-fix shape IAM-04b's pilot caught: a rule mixing a safe scope-only role with
-    // team_lead, PLUS a naive perm_* arm with NO grants-exclusion (the "first cut" that flipped
-    // the pinned adversarial test 403->200 before the real fix landed). If PART 3's guard cannot
-    // catch this, it has no teeth.
+    // exact pre-fix shape IAM-04b's pilot caught: a rule mixing a safe scope-only role with an
+    // attribute-limited unsafe one, PLUS a naive perm_* arm with NO grants-exclusion (the "first
+    // cut" that flipped the pinned adversarial test 403->200 before the real fix landed). If PART
+    // 3's guard cannot catch this, it has no teeth.
+    //
+    // HIER-3 (2026-08-11): this fixture used to mix in `team_lead` (the ORIGINAL real-world
+    // instance, pm_task x team_lead). `team_lead` is now retired, so the fixture is re-based onto
+    // `client` — a role that is STILL genuinely unsafe today (`missing-scope-branch`: its
+    // derived-role condition has a `company` branch only, no `global` escape — see
+    // derived_roles.yaml's `client` definition). This is a fixture swap only: `classifyDerivedRoleExpr`/
+    // `scanPatternA`/`hasGrantsExclusionFor` are byte-unchanged; the detector's logic is not
+    // weakened, only the synthetic example role it is exercised against.
     it("a naive (unmitigated) permission arm on a Pattern-A hazard IS flagged", () => {
       const syntheticKinds = new Map<string, ParsedKind>(kinds);
       syntheticKinds.set("synthetic_widget", {
@@ -663,7 +700,7 @@ describe("IAM-04-ROLLOUT-SCAN · permission-arm hazard detector (static, re-deri
           {
             actions: ["read"],
             effect: "EFFECT_ALLOW",
-            derivedRoles: ["company_admin", "manager", "team_lead"], // the hazardous mix
+            derivedRoles: ["company_admin", "manager", "client"], // the hazardous mix
             condition: "variables.inTenant && variables.notLow",
           },
           {
@@ -684,10 +721,10 @@ describe("IAM-04-ROLLOUT-SCAN · permission-arm hazard detector (static, re-deri
       const hits = scanPatternA(syntheticKinds, roleClass);
       const synthHit = hits.find((h) => h.kind === "synthetic_widget");
       expect(synthHit, "the synthetic mix must be re-derived as a Pattern-A hazard").toBeDefined();
-      expect(synthHit!.unsafeRoles.map((r) => r.name)).toContain("team_lead");
+      expect(synthHit!.unsafeRoles.map((r) => r.name)).toContain("client");
 
       expect(
-        hasGrantsExclusionFor(naivePermRoleExpr, "team_lead"),
+        hasGrantsExclusionFor(naivePermRoleExpr, "client"),
         "the synthetic arm was deliberately built WITHOUT the exclusion — this must be false",
       ).toBe(false);
       // ^ This is the exact condition PART 3's real guard turns into a failing `expect(...).toBe(true)`
@@ -695,23 +732,12 @@ describe("IAM-04-ROLLOUT-SCAN · permission-arm hazard detector (static, re-deri
       // needing to actually break a real policy file to watch the suite go red.
     });
 
-    it("REVERT: the synthetic kind is never persisted anywhere — the real 61-kind parse is unaffected", () => {
+    it("REVERT: the synthetic kind is never persisted anywhere — the real 60-kind parse is unaffected", () => {
       // Re-parsing from disk (not reusing the `kinds` map with the synthetic entry spliced in)
       // proves the synthetic construction above was purely in-memory.
       const freshParse = parsePolicies();
       expect(freshParse.has("synthetic_widget")).toBe(false);
-      expect(freshParse.size).toBe(61);
-    });
-
-    it("the SAME detector, run against the REAL pm_task (post-mitigation), finds the exclusion present", () => {
-      const pmTaskHit = patternA.find((h) => h.kind === "pm_task" && h.actions.includes("read"));
-      expect(pmTaskHit, "pm_task's read rule must still mix team_lead with the safe roles").toBeDefined();
-      const permRoleExpr = allDerivedRoleExprs.get("perm_pm_task_read");
-      expect(permRoleExpr, "perm_pm_task_read must exist in derived_roles.yaml").toBeDefined();
-      expect(
-        hasGrantsExclusionFor(permRoleExpr!, "team_lead"),
-        "the REAL perm_pm_task_read role must carry the team_lead exclusion IAM-04b landed",
-      ).toBe(true);
+      expect(freshParse.size).toBe(60);
     });
 
     // ── IAM-SEC-03's own teeth proof: reproduce the platform_admin wildcard shape in isolation ──
@@ -768,11 +794,11 @@ describe("IAM-04-ROLLOUT-SCAN · permission-arm hazard detector (static, re-deri
       expect(hits.some((h) => h.kind === "synthetic_widget_3")).toBe(false);
     });
 
-    it("REVERT: neither synthetic kind above is persisted anywhere — the real 61-kind parse is unaffected", () => {
+    it("REVERT: neither synthetic kind above is persisted anywhere — the real 60-kind parse is unaffected", () => {
       const freshParse = parsePolicies();
       expect(freshParse.has("synthetic_widget_2")).toBe(false);
       expect(freshParse.has("synthetic_widget_3")).toBe(false);
-      expect(freshParse.size).toBe(61);
+      expect(freshParse.size).toBe(60);
     });
 
     it("the SAME Pattern-C detector, run against REAL platform_admin, finds it flagged in every wildcard-carrying kind", () => {

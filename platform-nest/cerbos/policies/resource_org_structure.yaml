@@ -17,7 +17,7 @@ resourcePolicy:
     # Any in-tenant member may read the org chart.
     - actions: ["read"]
       effect: EFFECT_ALLOW
-      derivedRoles: ["company_admin", "manager", "member", "viewer", "team_lead"]
+      derivedRoles: ["company_admin", "manager", "member", "viewer"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }
     # Editing the structure is elevated: company admins (in-tenant).
     - actions: ["update"]

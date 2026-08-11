@@ -19,6 +19,9 @@ test.describe("IAM-06b persona fixture — reference example", () => {
   });
 
   test("a DEMO_MODE-unsupported persona fails loudly, not silently as the wrong identity", async ({ page }) => {
-    await expect(loginAsPersona(page, "team_lead")).rejects.toThrow(/no identity for persona "team_lead"/);
+    // HIER-3: was `team_lead`, retired 2026-08-11. `hr_manager` is used instead — still a real
+    // persona with no demo identity, so the property under test (fail LOUDLY rather than
+    // silently sign in as the wrong identity) is unchanged.
+    await expect(loginAsPersona(page, "hr_manager")).rejects.toThrow(/no identity for persona "hr_manager"/);
   });
 });

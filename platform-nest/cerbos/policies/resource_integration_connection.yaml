@@ -43,7 +43,7 @@ resourcePolicy:
     # link their own tools; the `owns` clause keeps it to strictly their own rows.
     - actions: ["read", "create", "update", "delete"]
       effect: EFFECT_ALLOW
-      derivedRoles: ["member", "viewer", "team_lead"]
+      derivedRoles: ["member", "viewer"]
       condition:
         match:
           expr: "variables.inTenant && variables.notLow && variables.owns"

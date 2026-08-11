@@ -2,10 +2,10 @@
 //
 // This is what PM/Web Dev suites should actually import — NOT `src/seed/personas.ts` (IAM-06a),
 // which plants durable rows in a real, shared database for manual/staging use. This file seeds a
-// brand-new, disposable tenant (+ team + client) on every call, so tests never depend on IAM-06a
-// having run and never collide with each other's data — the same isolation `freshTenant()` helpers
-// already use ad hoc in files like `pm-adversarial-authz.test.ts`, just generalized to the FULL
-// persona set instead of 4 hand-rolled roles per suite.
+// brand-new, disposable tenant (+ org unit + client) on every call, so tests never depend on
+// IAM-06a having run and never collide with each other's data — the same isolation `freshTenant()`
+// helpers already use ad hoc in files like `pm-adversarial-authz.test.ts`, just generalized to the
+// FULL persona set instead of 4 hand-rolled roles per suite.
 //
 // See `platform-nest/README-PERSONAS.md` for copy-pasteable ALLOW and DENY examples. The short
 // version:
@@ -22,17 +22,18 @@
 import { newId, withTenants } from "../db";
 import { config } from "../config";
 import { createCompany, createUser, createRole, grantRole, addMembership } from "./fixtures";
+import { assemblePrincipal, type Assurance, type Principal } from "../rbac/principal";
 
 const site = () => config.originSite;
 
 export type PersonaKey =
-  | "superadmin" | "company_admin" | "manager" | "team_lead" | "member" | "viewer"
+  | "superadmin" | "company_admin" | "manager" | "org_unit_lead" | "member" | "viewer"
   | "hr_staff" | "hr_manager" | "it_admin" | "search_staff" | "search_manager"
   | "agency_approver" | "group_executive" | "client_contact";
 
 interface PersonaDef {
   role: string;
-  scope: "global" | "company" | "team";
+  scope: "global" | "company" | "org_unit";
   /** Also grant this second role — mirrors seed:agency's agency_approver, who holds `member` too. */
   extraRole?: string;
 }
@@ -40,11 +41,16 @@ interface PersonaDef {
 // ⚠ `group_executive` is D-7-obsolete (slated for removal in Phase 3) — kept because it exists
 // today. There is no `owner` persona (D-8): the role does not exist yet, and inventing a fixture
 // for an unbuilt role would silently teach consumers to test against a fiction.
+//
+// HIER-3 (2026-08-11): the `team_lead` persona is retired ALONGSIDE the role itself and reworked
+// into `org_unit_lead` — an org-chart department node id + a placement + an `org_unit`-scoped
+// grant (HIER-2's subtree-cascade replacement), so person-scope narrowing is actually exercised,
+// not merely a raw-grant existence check the way the old `team`-scoped shape was.
 const PERSONA_DEFS: Record<Exclude<PersonaKey, "client_contact">, PersonaDef> = {
   superadmin: { role: "platform_admin", scope: "global" },
   company_admin: { role: "company_admin", scope: "company" },
   manager: { role: "manager", scope: "company" },
-  team_lead: { role: "team_lead", scope: "team" },
+  org_unit_lead: { role: "org_unit_lead", scope: "org_unit" },
   member: { role: "member", scope: "company" },
   viewer: { role: "viewer", scope: "company" },
   hr_staff: { role: "hr_staff", scope: "company" },
@@ -58,29 +64,43 @@ const PERSONA_DEFS: Record<Exclude<PersonaKey, "client_contact">, PersonaDef> = 
 
 export const ALL_PERSONA_KEYS: PersonaKey[] = [...(Object.keys(PERSONA_DEFS) as PersonaKey[]), "client_contact"];
 
+/** The org-unit node id every persona tenant's `org_unit_lead` is placed AND granted at — a bare
+ *  0029-convention free-form node id (no `company_org_structure` blob needed: `org_unit_memberships
+ *  .unit_node_id` has no FK, per 0055's own header). Self-inclusive-at-depth-0 (HIER-2's ancestor
+ *  containment), so this grant covers the persona's own placement without needing a subtree. */
+const PERSONA_ORG_UNIT_ID = "d-persona";
+
 export interface PersonaTenant {
   tenantId: string;
-  teamId: string;
+  orgUnitId: string;
   clientId: string;
   users: Partial<Record<PersonaKey, string>>;
   /** The one-line accessor: HTTP headers to `app.inject`/supertest AS this persona. Throws if the
    *  persona wasn't in the `which` list passed to `seedPersonaTenant` — loud, not a silent 401. */
   as(persona: PersonaKey): { authorization: string; "x-user-id": string };
+  /** IAM-VERIFY-02 — the sibling of `.as()` for the ONE assurance tier `.as()` structurally cannot
+   *  reach over HTTP: `assurance: "low"` on a NAMED (non-null `userId`) principal. See this file's
+   *  `assemblePersonaPrincipal` doc comment below for the full mechanism/why. Returns a REAL
+   *  `Principal` — same DB-backed `roles`/`perms`/`companies` `assemblePrincipal()` would produce
+   *  for this persona at ANY assurance — for driving `authorize()`/`check()` (the same functions
+   *  every controller calls) directly, bypassing only the HTTP transport + `AuthGuard` layer that
+   *  cannot mint this shape today. NOT a substitute for `.as()` — prefer `.as()` whenever the tier
+   *  you need is reachable through it (`"high"` via `x-user-id`, or `"linked"` via a verified OBO
+   *  envelope, both of which `.as()` already covers for every other ticket's purposes). */
+  assemble(persona: PersonaKey, assurance: Assurance): Promise<Principal>;
 }
 
-async function ensureTeam(tenantId: string, name: string): Promise<string> {
-  const id = newId();
-  await withTenants([tenantId], (c) =>
-    c.query(`INSERT INTO teams (id, tenant_id, name, origin_site) VALUES ($1,$2,$3,$4)`, [id, tenantId, name, site()]),
-  );
-  return id;
-}
-
-async function addTeamLead(tenantId: string, teamId: string, userId: string): Promise<void> {
+/** Places `userId` at `unitNodeId` as their PRIMARY, currently-open org-unit membership — the
+ *  fixture equivalent of `pm.test.ts`'s own `setPrimaryUnit` helper. Placement matters:
+ *  `person-scope.ts` narrows a unit-scoped tier by the SUBJECT's placement, not merely by the
+ *  caller holding a grant, so an `org_unit_lead` persona with no placement of their own would
+ *  exercise the grant but never the narrowing it is meant to prove. */
+async function placeInOrgUnit(tenantId: string, userId: string, unitNodeId: string): Promise<void> {
   await withTenants([tenantId], (c) =>
     c.query(
-      `INSERT INTO team_memberships (id, tenant_id, user_id, team_id, role, origin_site) VALUES ($1,$2,$3,$4,'lead',$5)`,
-      [newId(), tenantId, userId, teamId, site()],
+      `INSERT INTO org_unit_memberships (id, tenant_id, user_id, unit_node_id, is_primary, valid_from, source, origin_site)
+       VALUES ($1,$2,$3,$4,true,'2020-01-01','manual',$5)`,
+      [newId(), tenantId, userId, unitNodeId, site()],
     ),
   );
 }
@@ -124,9 +144,9 @@ async function createClientAndContact(tenantId: string): Promise<{ clientId: str
 
 /**
  * Seeds one fresh user per requested persona (default: ALL of them, including the client
- * contact) in a brand-new tenant + team + client. Returns `.as(persona)` — the entire integration
- * -test contract. Idempotent is not a concern here on purpose: every call makes a NEW tenant, so
- * there is nothing to collide with, unlike IAM-06a's durable seed.
+ * contact) in a brand-new tenant + org unit + client. Returns `.as(persona)` — the entire
+ * integration-test contract. Idempotent is not a concern here on purpose: every call makes a NEW
+ * tenant, so there is nothing to collide with, unlike IAM-06a's durable seed.
  */
 export async function seedPersonaTenant(
   which: PersonaKey[] = ALL_PERSONA_KEYS,
@@ -135,7 +155,7 @@ export async function seedPersonaTenant(
   const tenantId = await createCompany(`${label} ${newId().slice(0, 8)}`, [
     "agency", "hr", "reports", "search", "assistant", "webdev", "pm", "it",
   ]);
-  const teamId = await ensureTeam(tenantId, "Persona Team");
+  const orgUnitId = PERSONA_ORG_UNIT_ID;
   const users: Partial<Record<PersonaKey, string>> = {};
   let clientId = "";
 
@@ -151,9 +171,9 @@ export async function seedPersonaTenant(
     users[key] = userId;
     await addMembership(tenantId, userId);
     const roleId = await createRole(def.role);
-    if (def.scope === "team") {
-      await addTeamLead(tenantId, teamId, userId);
-      await grantRole(userId, roleId, "team", teamId);
+    if (def.scope === "org_unit") {
+      await placeInOrgUnit(tenantId, userId, orgUnitId);
+      await grantRole(userId, roleId, "org_unit", orgUnitId);
     } else {
       await grantRole(userId, roleId, def.scope, def.scope === "global" ? null : tenantId);
     }
@@ -164,7 +184,7 @@ export async function seedPersonaTenant(
 
   return {
     tenantId,
-    teamId,
+    orgUnitId,
     clientId,
     users,
     as(persona: PersonaKey) {
@@ -177,7 +197,64 @@ export async function seedPersonaTenant(
       }
       return { authorization: `Bearer ${config.serviceToken}`, "x-user-id": userId };
     },
+    async assemble(persona: PersonaKey, assurance: Assurance): Promise<Principal> {
+      const userId = users[persona];
+      if (!userId) {
+        throw new Error(
+          `seedPersonaTenant: persona "${persona}" was not seeded for this tenant. ` +
+            `Pass it in the "which" list, or drop the argument to seed the full set.`,
+        );
+      }
+      const p = await assemblePrincipal(userId, assurance);
+      if (!p) throw new Error(`assemblePersonaPrincipal: persona "${persona}" (${userId}) did not resolve — ` +
+        `is the seeded user active?`);
+      return p;
+    },
   };
+}
+
+/** IAM-VERIFY-02 (docs/superpowers/plans/2026-08-11-iam-verify-02-report.md) — WHY THIS EXISTS AND
+ *  WHY IT IS NOT A HEADER.
+ *
+ *  IAM-VERIFY-01 found that no fixture could drive a NAMED (real `userId`), low-assurance principal
+ *  through the real HTTP surface, and — per that ticket's own brief — reported the gap rather than
+ *  guessing around it. This ticket traced the mechanism to `src/auth/guards.ts`'s `AuthGuard`:
+ *
+ *    - the dev `x-user-id` path (what `.as()` uses) hardcodes `assemblePrincipal(userId, "high")` —
+ *      no header can lower it.
+ *    - the OIDC bearer path's `assuranceFor()` (`src/auth/oidc.ts`) only ever returns `"high"` or
+ *      `"linked"` — "low" is not in its range.
+ *    - the OBO-envelope path (`x-obo-provider`/`x-obo-external-id`) is the ONE branch that looks
+ *      capable: an identity_links row that exists but is UNVERIFIED is exactly the production shape
+ *      a real, not-yet-linked chat identity has. But `AuthGuard`'s own handling of that case
+ *      (`req.principal = { ...ANONYMOUS }`) drops `row.user_id` entirely — the result is
+ *      indistinguishable from a totally unknown identity. Its sibling implementation of the SAME
+ *      lookup, `IdentityController.resolve()` (`src/identity/identity.controller.ts`), does NOT drop
+ *      it (`return { ...ANONYMOUS, userId: row.user_id }`) — so the codebase already models "known
+ *      user, unverified link" as a real principal shape ELSEWHERE, `AuthGuard` just never produces it
+ *      over HTTP. This asymmetry is reported to the report file as a finding, not fixed here — fixing
+ *      `guards.ts` is a production-behaviour change outside this ticket's owned files, and per the
+ *      ticket's own constraint any such change must be reported BEFORE being made, not folded into a
+ *      test fixture.
+ *
+ *  Given that, no header combination this file could add would be modeling a real request shape —
+ *  it would be inventing one `AuthGuard` does not have, which the ticket explicitly rules out
+ *  ("do NOT add a backdoor header the real path does not have"). `assemblePersonaPrincipal` instead
+ *  calls the actual, unmodified `assemblePrincipal()` — the SAME function every real guard branch
+ *  calls, and the one whose output (`roles`, `perms`, `companies`) is entirely a function of
+ *  `userId`, never of the `assurance` argument passed in. Calling it with `"low"` for an
+ *  already-seeded, membership-bearing persona does not fabricate a fictional principal shape; it
+ *  exercises the exact code path a corrected `AuthGuard` (or any future guard branch — e.g. a
+ *  step-up expiry that downgrades an existing session) would use, with a real DB-backed user. What it
+ *  does NOT do is drive the HTTP transport/guard layer itself — that layer is proven UNREACHABLE for
+ *  this shape today, not merely untested (see the report's mechanism section for the live proof).
+ */
+export async function assemblePersonaPrincipal(
+  tenant: PersonaTenant,
+  persona: PersonaKey,
+  assurance: Assurance,
+): Promise<Principal> {
+  return tenant.assemble(persona, assurance);
 }
 
 /** Convenience for the DENY direction — asserts a 401/403, and fails loudly (naming the actual

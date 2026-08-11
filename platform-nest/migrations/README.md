@@ -399,3 +399,31 @@ at it, run `node dist/db/migrate.js`, confirm the ordered `applied:` list and ex
    permanently-orphaned reservation gaps — still do NOT fill them. **Next unused is `0099`** —
    re-verify with `ls migrations | sort | tail` before trusting that; this checkout has three other
    concurrent sessions in flight as of this entry.
+
+   **2026-08-10/11 update (HIER-1..HIER-3, the `team`/`org_unit` hierarchy consolidation) —
+   `0100`–`0103` all TAKEN, no collision.** Four migrations landed across three tickets in this
+   same program (`docs/superpowers/plans/2026-08-10-iam-hier-01-plan.md`):
+   - `0099_iam_dr5_company_admin_appraisal_read.sql` (DR-5) — landed between the entry above and
+     this one.
+   - `0100_user_roles_org_unit_scope.sql` (HIER-1) — adds `org_unit` to `user_roles.scope_type`,
+     widens `scope_id` `uuid` -> `text`, adds the per-scope shape CHECK. **Expand-only by
+     amendment** (its own header explains why): `team`/`record` stay in both CHECKs pending their
+     writers' removal.
+   - `0101_org_unit_closure.sql` (HIER-2/IAM-09) — the org-unit ancestor closure table.
+   - `0102_iam_hier2_org_unit_lead_role.sql` (HIER-2) — seeds the global `org_unit_lead` role +
+     its 2-permission bundle.
+   - `0103_hier3_retire_team_scope.sql` (HIER-3) — the CONTRACT half: hard-aborts on any
+     surviving `team`/`record` row, narrows both CHECKs to `(global,company,org_unit,project)`,
+     drops `teams`/`team_memberships` (0 rows, count-asserted), deletes the global `team_lead`
+     role (cascades its bundle), and deletes the 4 `core.team.*` catalog permissions (cascades
+     any remaining bundle references). Landed in the SAME change as deleting
+     `core/teams.controller.ts`, `resource_team.yaml`, and reworking the `team_lead` persona to
+     `org_unit_lead` — values and writers retired together, per this program's own HIER-1 lesson.
+   `0058`/`0059`/`0070` remain the permanently-orphaned reservation gaps — still do NOT fill them.
+   **`0104` was ALREADY TAKEN by the time this entry was written** — a concurrent session
+   (IAM-DR12, `0104_iam_dr12_drop_portal_staff_bundle_rows.sql`) was authoring it in this same
+   checkout at the same time, pre-assigned per this file's own `0091`/`0092` precedent (the
+   coordinating session assigns numbers up front when two migrations are known to be in flight
+   together, rather than each author racing `ls | tail`). **Next unused is `0105`** — re-verify
+   with `ls migrations | sort | tail` before trusting that, exactly as every entry in this log has
+   had to.

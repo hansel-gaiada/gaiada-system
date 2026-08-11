@@ -58,24 +58,10 @@ describe.skipIf(!TEST_URL)("IAM-VERIFY-01 · real HTTP drive as personas", () =>
       }
     });
 
-    // README-PERSONAS.md ⚠ + PERMISSION-CONTRACT.md §5: team_lead's bundle claims pm.task.* reach
-    // no handler enables, because every pm_task authorize() call site (grepped: 20 call sites in
-    // pm.controller.ts) NEVER passes a `teamId` resource attribute — so the Cerbos `team_lead`
-    // derived role (which requires `g.scopeId == request.resource.attr.teamId`) can never activate
-    // on pm_task, for ANY action, including read/update where the role-arm rule text lists
-        // team_lead by name. Observed live, not inferred from the policy file.
-    it("DENY — team_lead cannot create OR even READ a pm_task (no teamId attribute ever reaches this kind's authorize() calls)", async () => {
-      const p = await seedPersonaTenant(["team_lead"]);
-      const projectId = await createProject(p.tenantId, "IAM-VERIFY team_lead project");
-      const create = await app.inject({
-        method: "POST", url: `/api/${p.tenantId}/pm/tasks`, headers: p.as("team_lead"),
-        payload: { projectId, title: "team_lead create attempt" },
-      });
-      expect(isDeniedStatus(create.statusCode), `team_lead create pm_task, got ${create.statusCode}`).toBe(true);
-
-      const read = await app.inject({ method: "GET", url: `/api/${p.tenantId}/pm/tasks`, headers: p.as("team_lead") });
-      expect(isDeniedStatus(read.statusCode), `team_lead read pm_task list, got ${read.statusCode}`).toBe(true);
-    });
+    // HIER-3 (2026-08-11): the "DENY — team_lead cannot create OR even READ a pm_task" case that
+    // used to sit here is REMOVED, not replaced — `team_lead` is retired entirely (role, derived
+    // role, and every writer that could mint the grant); `resource_pm_task.yaml` no longer lists
+    // it at all, so there is no dead-tier finding left to observe.
 
     it("ALLOW — member, viewer CAN read tasks (read/update tier is broader than create/delete/manage)", async () => {
       const p = await seedPersonaTenant(["member", "viewer"]);
@@ -265,12 +251,30 @@ describe.skipIf(!TEST_URL)("IAM-VERIFY-01 · real HTTP drive as personas", () =>
       expect(res.statusCode, "client_contact WITH the client role grant read /portal/runs").toBe(200);
     });
 
-    it("DEFECT B, observed — company_admin and manager clear Cerbos's staff-support read rule but are STILL refused by portal-scope.ts's unconditional client-contact check", async () => {
+    // ⚠ DEFECT B — RESOLVED 2026-08-11 (owner decision DR-12), and this test was UPDATED to match.
+    //
+    // As written by this observer ticket it asserted the DIVERGENCE: Cerbos ALLOWED staff
+    // (`company_admin`/`manager`/`group_executive`) portal `read` under a "for support" rule, while
+    // `portal-scope.ts`'s `callerClientIds()` refused every one of them with `"not a portal client"`
+    // — because that function throws for any principal with no `client_contacts` row, which is every
+    // staff member by construction. The Cerbos rule was dead code that no code path could satisfy.
+    //
+    // The owner ruled: DELETE the dead rule — staff have no portal access. It matched what the
+    // system had always actually done, and client-portal data is another company's commercial
+    // information, so support access (if ever wanted) gets built deliberately with its own
+    // capability and audit trail rather than inherited by every manager from an inert rule.
+    // `resource_portal.yaml`'s staff rule is gone; migration `0104` removed the orphaned bundle rows.
+    //
+    // So staff are STILL refused — but now at the Cerbos layer (`cerbos denied read on portal`)
+    // rather than by an app-layer throw behind a grant that pretended to allow it. The assertion
+    // below deliberately checks the DENIAL, not the message text: `portal-client-contacts.test.ts`
+    // owns the precise-reason assertions, and pinning an error string here would just make this
+    // brittle to the next refactor.
+    it("staff (company_admin, manager) are denied the portal — the dead support rule was removed (was DEFECT B)", async () => {
       const p = await seedPersonaTenant(["company_admin", "manager"]);
       for (const persona of ["company_admin", "manager"] as const) {
         const res = await app.inject({ method: "GET", url: `/api/${p.tenantId}/portal/runs`, headers: p.as(persona) });
-        expect(res.statusCode, `persona "${persona}" read /portal/runs (Cerbos allows "read", app layer still refuses)`).toBe(403);
-        expect((res.json() as { error: string }).error, `persona "${persona}" portal error body`).toBe("not a portal client");
+        expect(isDeniedStatus(res.statusCode), `persona "${persona}" read /portal/runs, got ${res.statusCode}`).toBe(true);
       }
     });
 
@@ -288,31 +292,10 @@ describe.skipIf(!TEST_URL)("IAM-VERIFY-01 · real HTTP drive as personas", () =>
   //    Drives EVERY assertion above's persona a second way and diffs the two answers.
   // ══════════════════════════════════════════════════════════════════════════════════════════
   describe("GET /:tenantId/authz/permissions — scopeLevelPermissions vs observed endpoint behaviour", () => {
-    it("EXPECTED DIVERGENCE — team_lead's scopeLevelPermissions claims pm.task.create/read but the real endpoint denies both (the exact hazard the caveat names)", async () => {
-      const p = await seedPersonaTenant(["team_lead"]);
-      const perms = await app.inject({ method: "GET", url: `/api/${p.tenantId}/authz/permissions`, headers: p.as("team_lead") });
-      expect(perms.statusCode).toBe(200);
-      const body = perms.json() as { scopeLevelPermissions: string[] };
-      const claimsRead = body.scopeLevelPermissions.includes("pm.task.read");
-      const claimsCreate = body.scopeLevelPermissions.includes("pm.task.create");
-
-      const projectId = await createProject(p.tenantId, "IAM-VERIFY divergence project");
-      const realRead = await app.inject({ method: "GET", url: `/api/${p.tenantId}/pm/tasks`, headers: p.as("team_lead") });
-      const realCreate = await app.inject({
-        method: "POST", url: `/api/${p.tenantId}/pm/tasks`, headers: p.as("team_lead"),
-        payload: { projectId, title: "team_lead divergence probe" },
-      });
-
-      // Record exactly what was observed rather than assuming the divergence — if a concurrent
-      // policy edit closes it mid-run, this assertion should fail loudly, not silently pass.
-      if (claimsRead || claimsCreate) {
-        expect(isDeniedStatus(realRead.statusCode), "real /pm/tasks read for team_lead").toBe(true);
-        expect(isDeniedStatus(realCreate.statusCode), "real /pm/tasks create for team_lead").toBe(true);
-      }
-      // Always true regardless of the bundle's current shape: the real endpoint denies team_lead.
-      expect(isDeniedStatus(realRead.statusCode)).toBe(true);
-      expect(isDeniedStatus(realCreate.statusCode)).toBe(true);
-    });
+    // HIER-3 (2026-08-11): the "EXPECTED DIVERGENCE — team_lead's scopeLevelPermissions claims
+    // pm.task.create/read but the real endpoint denies both" case that used to sit here is
+    // REMOVED, not replaced — `team_lead` is retired entirely, so there is no longer a
+    // `role_permissions` bundle to claim anything in `scopeLevelPermissions` for that role.
 
     it("AGREEMENT — hr_manager's scopeLevelPermissions includes hr.case.create and the real endpoint agrees (ALLOW)", async () => {
       const p = await seedPersonaTenant(["hr_manager"]);

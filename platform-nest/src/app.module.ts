@@ -1,11 +1,12 @@
 // Root module. Health + identity/admin/dev + core /api controllers. Subsequent stages add
-// the write controllers (client-work, collab, files, teams, custom-fields) and the module
+// the write controllers (client-work, collab, files, custom-fields) and the module
 // registry as DynamicModules — each gated green by porting the matching existing test file.
+// HIER-3 (2026-08-11): TeamsController retired — `teams`/`team_memberships` are 0-row vestigial
+// tables (docs/superpowers/plans/2026-08-11-hier-3-report.md); zero UI callers of `/api/:t/teams*`.
 import { Module } from "@nestjs/common";
 import { HealthController } from "./health/health.controller";
 import { IdentityController } from "./identity/identity.controller";
 import { CoreController } from "./core/core.controller";
-import { TeamsController } from "./core/teams.controller";
 import { CustomFieldsController } from "./core/custom-fields.controller";
 import { AuthzCheckController } from "./core/authz-check.controller";
 import { AuthzPermissionsController } from "./core/authz-permissions.controller";
@@ -95,7 +96,7 @@ import { MagicLinkController } from "./mail/magic-link/controller";
 
 @Module({
   controllers: [
-    HealthController, IdentityController, CoreController, TeamsController, CustomFieldsController,
+    HealthController, IdentityController, CoreController, CustomFieldsController,
     AuthzCheckController, AuthzPermissionsController, ClientWorkController, BillingController, CollabController, AutomationApprovalsController, PipelineController, ApprovalsController, ApprovalsDecideController, TasksMineController, MeetingRecordingsController, PortalController, PortalWorkspaceController, PortalCommerceController, PortalProfileController, PortalStreamController, WebdevChangeRequestsPortalController, WebdevChangeRequestsController, ContractsController, ClientContactsController, ClientInviteAcceptController, FilesController, CreativeController, WorkActivityController, IntegrationsController, ClaudeSeatsController, AdminIdentityController,
     CompanyAdminController, ServiceAssignmentsController, CompanyCrudController, AdminSystemsController, BotAdminController, IntelligenceController,
     // Vertical modules (compiled-in; per-tenant enable gate at the controller).

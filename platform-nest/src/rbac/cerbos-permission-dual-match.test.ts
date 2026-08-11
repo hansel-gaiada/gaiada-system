@@ -75,7 +75,7 @@ describe.skipIf(!live)("IAM-04b dual-match pilot: pm_task", () => {
     expect(await allow(p, pmTask, "read")).toBe(false);
   });
 
-  it("ROLE ARM UNCHANGED (empty perms): manager/member/viewer/team_lead/company_admin decisions match cerbos.test.ts's pre-existing pm_task-equivalent behavior", async () => {
+  it("ROLE ARM UNCHANGED (empty perms): manager/member/viewer/company_admin decisions match cerbos.test.ts's pre-existing pm_task-equivalent behavior", async () => {
     const manager = principal([{ role: "manager", scopeType: "company", scopeId: T1 }], []);
     expect(await allow(manager, pmTask, "read")).toBe(true);
     expect(await allow(manager, pmTask, "update")).toBe(true);
@@ -90,41 +90,15 @@ describe.skipIf(!live)("IAM-04b dual-match pilot: pm_task", () => {
     expect(await allow(noRole, pmTask, "read")).toBe(false);
   });
 
-  it("REAL FINDING pin (found while building this pilot, verified live against the seeded 0094/0098 bundle): `team_lead`'s role_permissions bundle claims pm.task.* reach (it sits in resource_pm_task.yaml's role list), but team_lead is PROVABLY unreachable on pm_task at ANY scope — pm.controller.ts never sets resource.attr.teamId (see pm-adversarial-authz.test.ts's own pinned finding). A team_lead grant made at COMPANY or GLOBAL scope must NOT be resurrected by the permission arm just because its bundle entry shares that scope with legitimate company_admin/manager/member/viewer grants.", async () => {
-    // Principal's ONLY grant is team_lead at COMPANY scope — perms carries the same bundle entries
-    // a real assemblePrincipal() would produce for this exact user_roles row (verified empirically:
-    // `SELECT ... FROM role_permissions WHERE role='team_lead' AND key LIKE 'pm.task%'` returns all 5).
-    const teamLeadCompany = principal(
-      [{ role: "team_lead", scopeType: "company", scopeId: T1 }],
-      [
-        { key: "pm.task.read", scopeType: "company", scopeId: T1 },
-        { key: "pm.task.update", scopeType: "company", scopeId: T1 },
-        { key: "pm.task.create", scopeType: "company", scopeId: T1 },
-        { key: "pm.task.delete", scopeType: "company", scopeId: T1 },
-        { key: "pm.task.manage", scopeType: "company", scopeId: T1 },
-      ],
-    );
-    for (const action of ["read", "update", "create", "delete", "manage"]) {
-      expect(await allow(teamLeadCompany, pmTask, action), `team_lead@company must NOT reach pm.task.${action}`).toBe(false);
-    }
-    // Same shape at GLOBAL scope — team_lead's own role-arm condition never accepts global either.
-    const teamLeadGlobal = principal(
-      [{ role: "team_lead", scopeType: "global", scopeId: null }],
-      [{ key: "pm.task.read", scopeType: "global", scopeId: null }],
-      [],
-    );
-    expect(await allow(teamLeadGlobal, pmTask, "read")).toBe(false);
-    // Sanity: a principal who ALSO holds a genuinely qualifying role at the SAME scope is unaffected
-    // (the role arm — unchanged — grants it regardless of what the permission arm decides).
-    const teamLeadPlusManager = principal(
-      [
-        { role: "team_lead", scopeType: "company", scopeId: T1 },
-        { role: "manager", scopeType: "company", scopeId: T1 },
-      ],
-      [],
-    );
-    expect(await allow(teamLeadPlusManager, pmTask, "read")).toBe(true);
-  });
+  // HIER-3 (2026-08-11): the "REAL FINDING pin" that used to sit here proved `team_lead`'s
+  // role_permissions bundle claimed pm.task.* reach while the role was PROVABLY unreachable on
+  // pm_task at any scope (pm.controller.ts never set resource.attr.teamId). `team_lead` is now
+  // retired entirely — the role, its Cerbos derived role, its bundle rows, and the exclusion
+  // clause the permission arm carried for it are all gone (docs/superpowers/plans/
+  // 2026-08-11-hier-3-report.md). There is no longer a real-world instance of this specific
+  // dual-match hazard to pin: granting a role name Cerbos no longer recognizes at all is a
+  // different (much weaker) claim than the original finding, so the test is removed rather than
+  // kept as a vacuously-passing shell.
 
   it("BOTH ARMS TOGETHER still yield exactly one decision, not a conflicting pair (role grants read, permission independently grants update — both ALLOW, neither denies the other)", async () => {
     const p = principal(

@@ -78,32 +78,23 @@ describe("pm page-helpers", () => {
     });
   });
 
-  // Gap 2 verification — drives the REAL `/pm` page.tsx gates (`page.tsx:85` `canEdit = can(me,
-  // "pm.manage", tenant)`, `page.tsx:91` `canPassBall = can(me, BALL_GATE_CAPABILITY, tenant)`),
-  // not a reinvented stand-in, against an actual team_lead `Me` fixture — proving the fix actually
-  // reaches the page a team-scoped lead lands on. Before Gap 2, `team_lead` was not a member of
-  // `Role` at all, so `ROLE_CAPS[g.role as Role]` looked up `undefined` for it and every capability
-  // check below was `false` regardless of scope; a team_lead saw the Board/Gantt read-only note and
-  // the Ball tab refusal exactly like a stranger. A genuinely unauthorized identity (`hr_staff`, a
-  // real staff tier with no PM grant anywhere in Cerbos) sits right beside it as the control so the
-  // pass/fail contrast is the actual proof, not an assumption.
-  describe("Gap 2 — the /pm page's own gates now recognize a team_lead identity", () => {
+  // Gap 2 verification (HISTORIC) — drove the REAL `/pm` page.tsx gates (`page.tsx:85` `canEdit =
+  // can(me, "pm.manage", tenant)`, `page.tsx:91` `canPassBall = can(me, BALL_GATE_CAPABILITY,
+  // tenant)`) against an actual `team_lead` `Me` fixture, proving the Gap-2 fix reached the page a
+  // team-scoped lead landed on. HIER-3 (2026-08-11) RETIRES `team_lead` itself (zero live grants;
+  // `docs/superpowers/plans/2026-08-10-hierarchy-consolidation.md`), so the positive case this
+  // block pinned no longer has a role to exercise it with — `org_unit_lead`, `team_lead`'s
+  // successor (HIER-2), does NOT hold `pm.manage`/`pm.contribute` at all (its bundle is exactly
+  // `reports.department.view` + `appraisal.read`; see rbac.ts's `org_unit_lead` entry), so it is
+  // not a like-for-like replacement fixture here. The control case (a genuinely unauthorized staff
+  // identity gets neither capability) remains valid and is kept.
+  describe("the /pm page's own gates deny a genuinely unauthorized identity", () => {
     const tenant = "co-a";
-    const teamLead: Me = {
-      userId: "u-lead", name: "Lead", email: "lead@x.com", title: null, assurance: "high",
-      companies: [{ id: tenant, name: "Company A", type: "agency" }],
-      roles: [{ role: "team_lead", scopeType: "company", scopeId: tenant }],
-    };
     const unauthorized: Me = {
       userId: "u-hr", name: "HR", email: "hr@x.com", title: null, assurance: "high",
       companies: [{ id: tenant, name: "Company A", type: "agency" }],
       roles: [{ role: "hr_staff", scopeType: "company", scopeId: tenant }],
     };
-
-    it("team_lead: Board/Gantt's canEdit AND the Ball tab's canPassBall both render", () => {
-      expect(can(teamLead, "pm.manage", tenant)).toBe(true);   // page.tsx's `canEdit`
-      expect(can(teamLead, BALL_GATE_CAPABILITY, tenant)).toBe(true); // page.tsx's `canPassBall`
-    });
 
     it("control: a genuinely unauthorized staff identity (hr_staff) gets neither", () => {
       expect(can(unauthorized, "pm.manage", tenant)).toBe(false);

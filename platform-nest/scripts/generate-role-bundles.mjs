@@ -62,12 +62,14 @@ const POLICIES_DIR = join(ROOT, "cerbos/policies");
 const CATALOG_PATH = join(ROOT, "src/rbac/permission-catalog.json");
 const OUTPUT_PATH = join(ROOT, "src/rbac/role-permission-bundles.json");
 
-// ── The 21 real, nameable roles — matches 0102's own list and the parity suite's REAL_ROLES.
-// (IAM-02g/0098 added `webdev_staff`/`webdev_manager` — 18 -> 20; HIER-2/0102 adds `org_unit_lead`
-// — 20 -> 21, `team_lead`'s org-chart-subtree-scoped replacement, DR-9.) ──
+// ── The 20 real, nameable roles — matches 0102's own list and the parity suite's REAL_ROLES.
+// (IAM-02g/0098 added `webdev_staff`/`webdev_manager` — 18 -> 20; HIER-2/0102 added `org_unit_lead`
+// — 20 -> 21, `team_lead`'s org-chart-subtree-scoped replacement, DR-9; HIER-3 (2026-08-11) retired
+// `team_lead` itself — 21 -> 20, the role, its derived role, and every writer that could mint the
+// grant are all gone.) ──
 const REAL_ROLES = [
   "platform_admin", "company_admin", "group_executive", "manager", "member", "viewer",
-  "team_lead", "org_unit_lead", "client", "it_admin", "it_manager", "it",
+  "org_unit_lead", "client", "it_admin", "it_manager", "it",
   "agency_approver",
   "hr_staff", "hr_manager",
   "search_staff", "search_manager",
@@ -95,7 +97,6 @@ const DIRECT = {
   manager: ["manager"],
   member: ["member"],
   viewer: ["viewer"],
-  team_lead: ["team_lead"],
   org_unit_lead: ["org_unit_lead"],
   client: ["client"],
   it_staff: ["it_admin", "it_manager", "it"],

@@ -11,11 +11,11 @@ resourcePolicy:
       derivedRoles: ["platform_admin"]
     - actions: ["read"]
       effect: EFFECT_ALLOW
-      derivedRoles: ["company_admin", "manager", "member", "viewer", "team_lead"]
+      derivedRoles: ["company_admin", "manager", "member", "viewer"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }
     - actions: ["create", "update", "delete"]
       effect: EFFECT_ALLOW
-      derivedRoles: ["company_admin", "manager", "team_lead"]
+      derivedRoles: ["company_admin", "manager"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }
     - actions: ["create", "update", "delete"]
       effect: EFFECT_ALLOW

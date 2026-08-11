@@ -12,14 +12,14 @@ resourcePolicy:
     # Reading the recordings registry is member-level (the whole team references recordings).
     - actions: ["read"]
       effect: EFFECT_ALLOW
-      derivedRoles: ["company_admin", "manager", "member", "viewer", "team_lead"]
+      derivedRoles: ["company_admin", "manager", "member", "viewer"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }
     # Registering / advancing / ingesting / Drive-syncing a recording — "whoever did the meeting"
     # (any staff member), mirroring deliverable create/update. ingest proxies the frozen contract;
     # sync_drive triggers the non-blocking Shared-Drive upload.
     - actions: ["create", "update", "ingest", "sync_drive"]
       effect: EFFECT_ALLOW
-      derivedRoles: ["company_admin", "manager", "member", "team_lead"]
+      derivedRoles: ["company_admin", "manager", "member"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }
     # WD-26 (DEF-1 relink sweep): admin/service-only, mirrors resource_work_activity.yaml's ingest
     # tier — this is a bulk reconciliation action over the whole registry, not an everyday staff

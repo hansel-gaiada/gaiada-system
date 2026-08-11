@@ -49,27 +49,26 @@ describe.skipIf(!TEST_URL)("0100 — user_roles scope_type/scope_id shape after 
       ]),
     );
 
-  // ── scope_type CHECK: team/record are RETIRING, not yet retired ────────────────────────────
+  // ── scope_type CHECK: team/record are RETIRED (HIER-3, migration 0103) ─────────────────────
   //
-  // ⚠ REWRITTEN 2026-08-10 for the expand-only amendment. These two originally asserted that
-  // `team`/`record` were REJECTED, matching 0100's first draft. That draft could not land: three
-  // write paths still insert `scope_type='team'` (`core/teams.controller.ts:119`,
-  // `testing/personas.ts`, `seed/personas.ts`) and they belong to HIER-3, so dropping the value
-  // here turned 4 tests across 3 files into CHECK violations. 0100 is now expand-only — it ADDS
-  // `org_unit` and keeps `team`/`record` until HIER-3 removes them together with their writers.
+  // ⚠ INVERTED 2026-08-11 (HIER-3). These two originally asserted 'team'/'record' were REJECTED
+  // (0100's first-draft intent), then were REWRITTEN 2026-08-10 to assert the OPPOSITE
+  // (`resolves.toBeDefined()`) when 0100 was amended to expand-only — three write paths
+  // (`core/teams.controller.ts:119`, `testing/personas.ts`, `seed/personas.ts`) still minted
+  // `scope_type='team'` grants at the time, so dropping the value in 0100 would have turned those
+  // into CHECK violations. HIER-3 removes all three writers in the same change that drops the
+  // values (migration 0103) — the drop is real now, so these two invert back to asserting
+  // REJECTION, matching 0100's own header's explicit instruction to do so.
   //
-  // ⚠ AND THE 'team' CASE WAS A FALSE PASS even before that. It inserted scope_id
-  // `"some-team-id"`, which is not uuid-shaped, so the row was rejected by the SHAPE check while
-  // the test's name credited the SCOPE_TYPE check — and its regex accepted either constraint name,
-  // so it would have kept passing no matter which one fired. A test that passes for the wrong
-  // reason is worse than one that fails: it reports coverage it does not have. Both cases now use
-  // a uuid-shaped scope_id so the shape check cannot mask the scope_type behaviour.
-  it("scope_type CHECK still ACCEPTS 'team' — retired by HIER-3, not by 0100 (expand-only)", async () => {
-    await expect(insert("team", REAL_UUID)).resolves.toBeDefined();
+  // Uses a uuid-shaped scope_id (not e.g. "some-team-id") so the SHAPE check cannot mask the
+  // scope_type behaviour this test targets — a lesson from the prior rewrite's own note that an
+  // earlier version of this test passed for the wrong reason.
+  it("scope_type CHECK REJECTS 'team' — retired by HIER-3 (migration 0103)", async () => {
+    await expect(insert("team", REAL_UUID)).rejects.toThrow(/violates check constraint|user_roles_scope_type_check/i);
   });
 
-  it("scope_type CHECK still ACCEPTS 'record' — retired by HIER-3, not by 0100 (expand-only)", async () => {
-    await expect(insert("record", REAL_UUID)).resolves.toBeDefined();
+  it("scope_type CHECK REJECTS 'record' — retired by HIER-3 (migration 0103)", async () => {
+    await expect(insert("record", REAL_UUID)).rejects.toThrow(/violates check constraint|user_roles_scope_type_check/i);
   });
 
   it("scope_type CHECK accepts the new 'org_unit' value (shape check permitting)", async () => {

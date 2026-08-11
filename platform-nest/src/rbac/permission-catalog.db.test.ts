@@ -38,11 +38,11 @@ describe.skipIf(!TEST_URL)("IAM-01c · permission catalog migration (0093)", () 
     await teardownTestDb();
   });
 
-  it("sanity: the catalog JSON itself is 230/215/15/79 (the numbers this suite asserts against)", () => {
+  it("sanity: the catalog JSON itself is 226/211/15/79 (the numbers this suite asserts against; HIER-3, 2026-08-11: team_lead/team retired, core.team.* (4 grantable, 0 sensitive) dropped from 230/215)", () => {
     // Guards against a future edit to permission-catalog.json silently changing what "correct"
     // means without anyone noticing — these are the ticket's own headline counts.
-    expect(EXPECTED_TOTAL).toBe(230);
-    expect(EXPECTED_GRANTABLE).toBe(215);
+    expect(EXPECTED_TOTAL).toBe(226);
+    expect(EXPECTED_GRANTABLE).toBe(211);
     expect(EXPECTED_RELATIONSHIP).toBe(15);
     expect(EXPECTED_SENSITIVE).toBe(79);
   });
@@ -118,8 +118,18 @@ describe.skipIf(!TEST_URL)("IAM-01c · permission catalog migration (0093)", () 
 
     await adminPool().query(MIGRATION_SQL);
 
+    // HIER-3 (2026-08-11, migration 0103): 0093 is an already-APPLIED migration and is never
+    // edited (rule 4) — its own SQL text still unconditionally `INSERT ... ON CONFLICT (key) DO
+    // UPDATE`s all 230 ORIGINAL rows, including the 4 `core.team.*` ones 0103 later DELETEs from
+    // this same table (in the same change that deletes `resource_team.yaml`/`teams.controller.ts`
+    // /`team_lead`). Re-running 0093's raw text in isolation — which is exactly what this
+    // assertion does, bypassing the ledger — therefore RESURRECTS those 4 rows: this is a fact
+    // about re-running an old migration's text out of order, not a defect in either migration.
+    // `EXPECTED_TOTAL` (226, from the CURRENT catalog.json) is the wrong yardstick for THIS
+    // specific re-run; the correct expectation is 0093's own original count, +4 for the
+    // resurrection.
     const after = await adminPool().query<{ n: string }>(`SELECT count(*)::text AS n FROM permissions`);
-    expect(Number(after.rows[0].n)).toBe(EXPECTED_TOTAL);
+    expect(Number(after.rows[0].n)).toBe(EXPECTED_TOTAL + 4);
 
     // ON CONFLICT (key) DO UPDATE never touches `id` — the second run re-syncs columns onto the
     // SAME row, not a duplicate.
@@ -128,6 +138,12 @@ describe.skipIf(!TEST_URL)("IAM-01c · permission catalog migration (0093)", () 
     );
     expect(afterRow.rows).toHaveLength(1);
     expect(afterRow.rows[0].id).toBe(idBefore);
+
+    // Clean up the resurrection so this test doesn't leave the file's DB in a state that
+    // contradicts every other test in this suite (which all assume the post-0103 catalog shape).
+    await adminPool().query(
+      `DELETE FROM permissions WHERE key IN ('core.team.create','core.team.read','core.team.update','core.team.delete')`,
+    );
   });
 
   describe("Ruling 3 enforcement — the 15 relationship permissions can never be granted to a role", () => {

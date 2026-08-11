@@ -55,12 +55,14 @@ describe("TR-25 personAxisTier — ONE tier detector replacing three divergent o
     expect(personAxisTier(p([g("reports_staff", "company", T1)], [T1, T2]), T1)).toBe("company_wide");
   });
 
-  it("manager AND team_lead both resolve to unit_scoped — the divergence TR-25 closed", () => {
-    // checkins.controller.ts's old `isManagerTierOnly` ignored `team_lead` entirely (so such a
-    // principal fell through to self-only and got NO narrowing applied at all on that surface), while
-    // appraisals.controller.ts's copy counted it. One boundary, one answer.
+  it("manager AND org_unit_lead both resolve to unit_scoped — the divergence TR-25 closed", () => {
+    // checkins.controller.ts's old `isManagerTierOnly` ignored the dept-lead grant shape entirely
+    // (so such a principal fell through to self-only and got NO narrowing applied at all on that
+    // surface), while appraisals.controller.ts's copy counted it. One boundary, one answer.
+    // HIER-3 (2026-08-11): `team_lead`/`team`-scoped is retired; `org_unit_lead`/`org_unit`-scoped
+    // (HIER-2's subtree-cascade replacement) is the live second case.
     expect(personAxisTier(p([g("manager", "company", T1)]), T1)).toBe("unit_scoped");
-    expect(personAxisTier(p([g("team_lead", "team", "d-web")]), T1)).toBe("unit_scoped");
+    expect(personAxisTier(p([g("org_unit_lead", "org_unit", "d-web")]), T1)).toBe("unit_scoped");
     expect(personAxisTier(p([g("manager", "project", "proj-1")]), T1)).toBe("unit_scoped");
   });
 

@@ -37,11 +37,30 @@ resourcePolicy:
       effect: EFFECT_ALLOW
       derivedRoles: ["client"]
       condition: { match: { expr: "variables.inTenant" } }
-    # Staff read-only, for support ("what does the client actually see?"). Deliberately excludes `pay`,
-    # `sign` and `update_profile`: a manager must not be able to sign a contract or record a payment AS
-    # the client side — those routes resolve the actor's own client contact rows and a staff member has
-    # none, but failing at the policy is clearer than failing four queries deep.
-    - actions: ["read"]
-      effect: EFFECT_ALLOW
-      derivedRoles: ["company_admin", "manager", "group_executive"]
-      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    # IAM-DR12 (2026-08-11): there is DELIBERATELY no staff read rule here — no
+    # `company_admin`/`manager`/`group_executive` grant of any kind on this resource. The next
+    # person to read this file must NOT "restore" one for consistency with neighbouring
+    # policies' admin wildcards, or because `group_executive` looks conspicuously absent —
+    # it isn't an oversight, see below.
+    #
+    # There USED to be one — "staff read-only, for support" — granting `company_admin`/`manager`/
+    # `group_executive` a `read` on this resource. IAM-VERIFY-01
+    # (docs/superpowers/plans/2026-08-11-iam-verify-01-report.md, Defect B) drove the real API as a
+    # real `company_admin`/`manager` persona, not inferred from the policy text, and found the grant
+    # was dead: `src/core/portal-scope.ts`'s `callerClientIds()` unconditionally throws `"not a
+    # portal client"` for any principal with zero `client_contacts` rows, which is every staff
+    # member by construction (clients are deliberately excluded from `company_memberships` —
+    # `principal.ts`'s own header). So the Cerbos grant could never be exercised: no staff member
+    # has ever reached this branch, live evidence was `{"error":"not a portal client"}` on every
+    # attempt, and none can with `portal-scope.ts` as it stands.
+    #
+    # OWNER DECISION (DR-12, 2026-08-11): DELETE the dead rule rather than wire it up. Staff have no
+    # portal access — this matches what the system has always actually done end to end, so removing
+    # the rule makes the policy honest rather than aspirational. Client-portal data is another
+    # company's commercial information; if staff/support read access is ever wanted, it must be
+    # built deliberately — its own capability, its own audit trail — not inherited by every manager
+    # from a rule nobody had noticed was inert. `callerClientIds()`'s throw is the ratified
+    # behaviour and is NOT to be changed to accommodate this.
+    #
+    # `group_executive` was part of the same dead grant and is removed for the identical reason —
+    # this is not a partial rollback, the whole staff-support branch was unreachable.

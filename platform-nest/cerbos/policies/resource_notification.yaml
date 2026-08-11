@@ -13,7 +13,7 @@ resourcePolicy:
     # user_id = principal, so this is a per-user inbox even though RLS is tenant-level.
     - actions: ["read", "update"]
       effect: EFFECT_ALLOW
-      derivedRoles: ["company_admin", "manager", "member", "viewer", "team_lead"]
+      derivedRoles: ["company_admin", "manager", "member", "viewer"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }
     # Raising a notification FOR another member is an elevated/automation action: company
     # admins, managers (their team), and scoped automation service accounts granted those roles.

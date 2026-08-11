@@ -63,17 +63,16 @@ describe.skipIf(!TEST_URL)("IAM-06b · persona fixtures — one line, both direc
     }
   });
 
-  // Caught by writing this test, not assumed going in: `resource_device.yaml` LISTS team_lead in
-  // its read rule's derivedRoles, but device is a company-wide resource with no `teamId` attribute
-  // — and derived_roles.yaml's `team_lead` condition only activates when
-  // `g.scopeId == request.resource.attr.teamId`. A team-scoped grant does NOT blanket-cover a
-  // company resource (the exact scope-cascade nuance rbac.ts's own `scopeCovers` comment documents
-  // for `can()` — this is the same rule enforced on the Cerbos side). So the honest answer for
-  // team_lead on /it/devices is DENY, not the ALLOW every other staff tier gets — and a fixture
-  // that assumed otherwise would have hidden a real boundary instead of proving it.
-  it("DENY — team_lead is TEAM-scoped and devices carry no teamId attribute, so the read rule never activates for it", async () => {
-    const p = await seedPersonaTenant(["team_lead"]);
-    const res = await app.inject({ method: "GET", url: `/api/${p.tenantId}/it/devices`, headers: p.as("team_lead") });
+  // HIER-3 (2026-08-11): `team_lead` is retired; `org_unit_lead` (HIER-2's subtree-cascade
+  // replacement) is the persona now. `resource_device.yaml` does NOT list `org_unit_lead` at all
+  // (the role's only two landing surfaces are report_document.read_department and appraisal.read,
+  // per HIER-2's own "ship what a handler feeds, not what would recreate the dead-grant pattern"
+  // rule), and device carries no `unitAncestors` attribute regardless — so the honest answer for
+  // org_unit_lead on /it/devices is DENY, not the ALLOW every other staff tier gets, for a
+  // different (and now genuinely correct-by-design) reason than team_lead's old dead-tier bug.
+  it("DENY — org_unit_lead has no landing rule on /it/devices at all (its two rules are report_document/appraisal only)", async () => {
+    const p = await seedPersonaTenant(["org_unit_lead"]);
+    const res = await app.inject({ method: "GET", url: `/api/${p.tenantId}/it/devices`, headers: p.as("org_unit_lead") });
     expect(isDeniedStatus(res.statusCode)).toBe(true);
   });
 
@@ -85,9 +84,9 @@ describe.skipIf(!TEST_URL)("IAM-06b · persona fixtures — one line, both direc
     expect(isDeniedStatus(res.statusCode)).toBe(true);
   });
 
-  it("team_lead is TEAM-scoped — asking for a persona not in the seeded set throws loudly, not a silent 401", async () => {
+  it("asking for a persona not in the seeded set throws loudly, not a silent 401", async () => {
     const p = await seedPersonaTenant(["manager"]);
-    expect(() => p.as("team_lead")).toThrow(/was not seeded/);
+    expect(() => p.as("org_unit_lead")).toThrow(/was not seeded/);
   });
 
   it("group_executive is seeded (D-7: obsolete, not yet removed) and still passes the platform_admin/group_executive wildcard", async () => {

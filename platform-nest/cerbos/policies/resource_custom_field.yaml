@@ -12,7 +12,7 @@ resourcePolicy:
     # Any member may read field defs (the UI renders dynamic forms from them).
     - actions: ["read"]
       effect: EFFECT_ALLOW
-      derivedRoles: ["company_admin", "manager", "member", "viewer", "team_lead"]
+      derivedRoles: ["company_admin", "manager", "member", "viewer"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }
     # Only admins/managers define fields.
     - actions: ["create", "update", "delete"]

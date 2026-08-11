@@ -89,9 +89,9 @@ describe("IAM-07b link 1 · Cerbos policies <-> permission-catalog.json (the wav
   const catalogKindSet = new Set(catalog.map((e) => e.cerbosKind));
   const policyKindSet = new Set(policyKinds.keys());
 
-  it("sanity: catalog headline numbers this suite depends on (230 pairs / 61 kinds)", () => {
-    expect(catalog.length).toBe(230);
-    expect(catalogKindSet.size).toBe(61);
+  it("sanity: catalog headline numbers this suite depends on (226 pairs / 60 kinds — HIER-3, 2026-08-11: team_lead/team retired, resource_team.yaml deleted, core.team.* dropped from the catalog)", () => {
+    expect(catalog.length).toBe(226);
+    expect(catalogKindSet.size).toBe(60);
   });
 
   it("(a-forward) every catalog kind is backed by a real resourcePolicy file", () => {

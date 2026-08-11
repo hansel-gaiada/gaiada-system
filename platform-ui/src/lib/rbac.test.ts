@@ -183,16 +183,21 @@ describe("pipeline.write / pipeline.manage / webdev.provision (IAM-02a-FIX-2) �
   const mgrA = me([{ role: "manager", scopeType: "company", scopeId: "co-a" }]);
   const memberA = me([{ role: "member", scopeType: "company", scopeId: "co-a" }]);
   const viewerA = me([{ role: "viewer", scopeType: "company", scopeId: "co-a" }]);
-  const leadA = me([{ role: "team_lead", scopeType: "company", scopeId: "co-a" }]);
+  // HIER-3: was `team_lead` (retired). `org_unit_lead` is the successor and, like `team_lead`
+  // before it, holds none of these three pipeline/webdev capabilities — its whole grant is
+  // `reports.department.view` + `appraisal.read` (see rbac.ts's `org_unit_lead` entry). Company-
+  // scoped here (synthetic, not the real org_unit shape) to isolate "what does ROLE_CAPS contain"
+  // from the scope-cascade question, same as every other fixture in this describe block.
+  const orgUnitLeadA = me([{ role: "org_unit_lead", scopeType: "company", scopeId: "co-a" }]);
   const approver = me([{ role: "agency_approver", scopeType: "company", scopeId: "co-a" }]);
 
   // resource_pipeline_run.yaml (create/update), resource_pipeline_stage.yaml (create),
   // resource_pipeline_gate.yaml (create) — all three: company_admin, manager, member.
-  it("pipeline.write: company_admin, manager, member (platform_admin/group_executive via ALL) — NOT viewer, team_lead, agency_approver", () => {
+  it("pipeline.write: company_admin, manager, member (platform_admin/group_executive via ALL) — NOT viewer, org_unit_lead, agency_approver", () => {
     for (const who of [admin, exec, coAdminA, mgrA, memberA]) {
       expect(can(who, "pipeline.write", "co-a")).toBe(true);
     }
-    for (const who of [viewerA, leadA, approver]) {
+    for (const who of [viewerA, orgUnitLeadA, approver]) {
       expect(can(who, "pipeline.write", "co-a")).toBe(false);
     }
     // company-scoped, not global, for the non-elevated roles.
@@ -201,12 +206,13 @@ describe("pipeline.write / pipeline.manage / webdev.provision (IAM-02a-FIX-2) �
   });
 
   // resource_pipeline_stage.yaml (update) and resource_scope_signoff.yaml (create) both explicitly
-  // exclude member (and, for scope_signoff, team_lead) — company_admin, manager only (+ ALL roles).
-  it("pipeline.manage: company_admin, manager — member and team_lead explicitly excluded", () => {
+  // exclude member (and, for scope_signoff, team_lead/org_unit_lead) — company_admin, manager only
+  // (+ ALL roles).
+  it("pipeline.manage: company_admin, manager — member and org_unit_lead explicitly excluded", () => {
     for (const who of [admin, exec, coAdminA, mgrA]) {
       expect(can(who, "pipeline.manage", "co-a")).toBe(true);
     }
-    for (const who of [memberA, viewerA, leadA, approver]) {
+    for (const who of [memberA, viewerA, orgUnitLeadA, approver]) {
       expect(can(who, "pipeline.manage", "co-a")).toBe(false);
     }
     expect(can(mgrA, "pipeline.manage", "co-b")).toBe(false);
@@ -218,7 +224,7 @@ describe("pipeline.write / pipeline.manage / webdev.provision (IAM-02a-FIX-2) �
     for (const who of [admin, exec, coAdminA, mgrA]) {
       expect(can(who, "webdev.provision", "co-a")).toBe(true);
     }
-    for (const who of [memberA, viewerA, leadA, approver]) {
+    for (const who of [memberA, viewerA, orgUnitLeadA, approver]) {
       expect(can(who, "webdev.provision", "co-a")).toBe(false);
     }
     expect(can(mgrA, "webdev.provision", "co-b")).toBe(false);
@@ -256,45 +262,39 @@ describe("hr caps (hr_staff/hr_manager)", () => {
   });
 });
 
-// Gap 2 — team_lead was entirely absent from Role/ROLE_CAPS despite being a real, granted Cerbos
-// derived role. This pins the exact capability sweep documented in rbac.ts's `team_lead` entry.
-// NOTE: a company-scoped fixture is used deliberately here (not the real team-scoped shape, which
-// is covered separately above and below) so this describe block tests ONLY "what does ROLE_CAPS.
-// team_lead contain", isolated from the scope-cascade question `scopeCovers — A4 fixes` already
-// answers. Real team_lead grants are always team-scoped — see that describe block.
-describe("team_lead caps (Gap 2 sweep) — mirrors what Cerbos actually grants team_lead", () => {
-  const leadA = me([{ role: "team_lead", scopeType: "company", scopeId: "co-a" }]);
+// HIER-3 (2026-08-11) — `team_lead` is RETIRED (zero live grants; ~23 policies named it but only
+// two handlers ever wired `teamId` into authorization). The "Gap 2 sweep" describe block that used
+// to pin its capability set is removed with the role. Its successor, `org_unit_lead` (HIER-2), is
+// covered by its own describe block below (`org_unit_lead caps (HIER-2)`), including the exact
+// exclusion sweep this block used to run for `team_lead`.
+// NOTE: a company-scoped fixture is used deliberately here (not the real org_unit-scoped shape,
+// which is covered separately in `scopeCovers — A4 fixes` below) so this describe block tests
+// ONLY "what does ROLE_CAPS.org_unit_lead contain", isolated from the scope-cascade question
+// `scopeCovers` already answers — same discipline the retired team_lead sweep used.
+describe("org_unit_lead caps (HIER-2) — exactly its two bundled permissions, no more", () => {
+  const leadA = me([{ role: "org_unit_lead", scopeType: "company", scopeId: "co-a" }]);
 
-  it("has full PM parity with manager (resource_pm_task.yaml + resource_pm_project.yaml)", () => {
-    expect(can(leadA, "pm.manage", "co-a")).toBe(true);
-    expect(can(leadA, "pm.contribute", "co-a")).toBe(true);
-  });
-
-  it("has the dept-lead reporting + appraisal tier (resource_report_document.yaml + resource_appraisal.yaml)", () => {
-    expect(can(leadA, "reports.person.view", "co-a")).toBe(true);
-    expect(can(leadA, "reports.project.view", "co-a")).toBe(true);
+  it("has the dept-lead reporting + appraisal tier it was actually wired for", () => {
     expect(can(leadA, "reports.department.view", "co-a")).toBe(true);
     expect(can(leadA, "appraisal.read", "co-a")).toBe(true);
-    expect(can(leadA, "appraisal.score", "co-a")).toBe(true);
   });
 
-  it("does NOT get checkin, approvals, hr, search, it.manage, or the exec-only reporting tier", () => {
-    // Every one of these is a resource/action pair where team_lead is either absent from the
-    // policy entirely (checkin, automation/agency approvals, scope_signoff, hr, search) or
-    // explicitly excluded from the elevated rule (device create/update/delete is company_admin +
-    // it_staff only) — see rbac.ts's team_lead comment for the file-by-file citation.
+  it("does NOT get PM, checkin, approvals, hr, search, it.manage, person/project reports, or the exec-only reporting tier", () => {
+    // HIER-2 deliberately left read_person/read_project unwired (no handler resolves a unit
+    // ancestor list there) and appraisal.score/PM/etc. were never part of org_unit_lead's bundle —
+    // see rbac.ts's `org_unit_lead` comment and the HIER-2 report (§5) for the full citation.
     for (const cap of [
+      "pm.manage", "pm.contribute",
+      "reports.person.view", "reports.project.view",
+      "appraisal.score",
       "checkin.read", "checkin.excuse",
       "approvals.decide", "approvals.retry",
       "hr.view", "hr.manage",
       "search.view", "search.manage",
-      "it.manage",
+      "it.manage", "people.directory",
       "admin.access", "org.edit", "rollups.view", "knowledge.review", "company.manage",
       "reports.company.view", "reports.period.seal", "reports.facts.admin", "reports.ops.poll",
       "appraisal.cycle.admin",
-      // IAM-02a-FIX-2 — team_lead appears in none of resource_pipeline_run/stage/gate.yaml,
-      // resource_scope_signoff.yaml, or resource_webdev_provisioned_site.yaml (see rbac.ts's
-      // team_lead comment's "Deliberately EXCLUDED" list).
       "pipeline.write", "pipeline.manage", "webdev.provision",
     ] as const) {
       expect(can(leadA, cap, "co-a"), cap).toBe(false);
@@ -309,24 +309,25 @@ describe("scopeCovers — A4 fixes (no over-grant)", () => {
     expect(can(nullScoped, "pm.manage", "co-b")).toBe(false);
   });
 
-  it("a team-scoped grant does not blanket-cover the whole company", () => {
-    const teamScoped = me([{ role: "manager", scopeType: "team", scopeId: "div-1" }]);
-    expect(can(teamScoped, "pm.manage", "co-a")).toBe(false);
-    expect(can(teamScoped, "pm.manage", "co-b")).toBe(false);
+  it("an org_unit-scoped grant does not blanket-cover the whole company", () => {
+    const unitScoped = me([{ role: "manager", scopeType: "org_unit", scopeId: "d-web" }]);
+    expect(can(unitScoped, "pm.manage", "co-a")).toBe(false);
+    expect(can(unitScoped, "pm.manage", "co-b")).toBe(false);
   });
 
-  // Gap 2's real-world case, not a stand-in role: derived_roles.yaml's `team_lead` derived role
-  // matches ONLY `g.scopeType == "team"` — a team_lead grant is never company/global-scoped in
-  // practice, unlike the synthetic "manager-with-team-scope" fixture above. Pin it directly so
-  // adding the role never quietly starts blanket-covering a company from a team grant (that would
-  // be the over-grant this ticket's A4 discipline exists to prevent, even though the framing
+  // HIER-2's real-world case, not a stand-in role: derived_roles.yaml's `org_unit_lead` derived
+  // role matches ONLY `g.scopeType == "org_unit"` — an org_unit_lead grant is never company/global-
+  // scoped in practice, unlike the synthetic "manager-with-org_unit-scope" fixture above. Pin it
+  // directly so the role never quietly starts blanket-covering a company from a unit grant (that
+  // would be the over-grant this ticket's A4 discipline exists to prevent, even though the framing
   // elsewhere treats over-grant as the "merely 403s" safe direction — scope cascade is the one
   // place this file already decided over-granting is not acceptable, and that has not changed).
-  it("a real team_lead grant (scopeType: team) does not cover any company", () => {
-    const teamLead = me([{ role: "team_lead", scopeType: "team", scopeId: "team-1" }]);
-    for (const cap of ["pm.manage", "pm.contribute", "reports.person.view", "appraisal.score"] as const) {
-      expect(can(teamLead, cap, "co-a")).toBe(false);
-      expect(can(teamLead, cap, "co-b")).toBe(false);
+  // This is exactly the shape `team_lead` used to occupy here before HIER-3 retired it.
+  it("a real org_unit_lead grant (scopeType: org_unit) does not cover any company", () => {
+    const orgUnitLead = me([{ role: "org_unit_lead", scopeType: "org_unit", scopeId: "d-web" }]);
+    for (const cap of ["reports.department.view", "appraisal.read"] as const) {
+      expect(can(orgUnitLead, cap, "co-a")).toBe(false);
+      expect(can(orgUnitLead, cap, "co-b")).toBe(false);
     }
   });
 

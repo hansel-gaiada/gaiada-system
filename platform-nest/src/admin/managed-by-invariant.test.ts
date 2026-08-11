@@ -116,33 +116,23 @@ describe.skipIf(!TEST_URL)("A1 detective control — managed_by is reconciler-on
   });
 
   // ---- 3. team lead promotion (POST /:tenantId/teams/:teamId/members) ----
-  it("promoting a team lead never produces a managed_by-set user_roles row", async () => {
-    const plain = await createUser("mbi-teamlead@a.test");
-    await addMembership(A, plain);
-    const created = await app.inject({
-      method: "POST",
-      url: `/api/${A}/teams`,
-      headers: asUser(superadmin),
-      payload: { name: "MBI Team" },
-    });
-    expect(created.statusCode).toBe(201);
-    const { id: teamId } = created.json() as { id: string };
-    const promoted = await app.inject({
-      method: "POST",
-      url: `/api/${A}/teams/${teamId}/members`,
-      headers: asUser(superadmin),
-      payload: { userId: plain, role: "lead" },
-    });
-    expect(promoted.statusCode).toBe(201);
-
-    const role = await adminPool().query<{ managed_by: string | null }>(
-      `SELECT ur.managed_by FROM user_roles ur JOIN roles r ON r.id = ur.role_id
-       WHERE ur.user_id = $1 AND ur.scope_type = 'team' AND ur.scope_id = $2`,
-      [plain, teamId],
-    );
-    expect(role.rows).toHaveLength(1);
-    expect(role.rows[0].managed_by).toBeNull();
-  });
+  // ---- 3. (RETIRED) team-lead promotion ----
+  //
+  // HIER-3 (2026-08-11) deleted this case with the surface it tested. It drove
+  // `POST /api/:t/teams` + `/teams/:id/members` (role: "lead") and asserted the resulting
+  // `scope_type='team'` grant carried `managed_by IS NULL` — i.e. that promote-to-lead was a MANUAL
+  // grant path, never a reconciler-managed one.
+  //
+  // All of it is gone: `core/teams.controller.ts` was deleted, `teams`/`team_memberships` dropped
+  // (migration 0103), `team_lead` retired, and `scope_type='team'` removed from the CHECK. The
+  // endpoint now 404s, so the test failed on `expected 404 to be 201` — a stale test, not a broken
+  // invariant.
+  //
+  // NOT replaced with an `org_unit_lead` equivalent: that grant has no self-service promotion
+  // endpoint (it is assigned through the normal admin role-assignment path), which case 2
+  // ("assignRole never produces a managed_by-set row") already covers directly. The invariant this
+  // file protects — `managed_by` is reconciler-only — remains pinned by cases 1, 2, 4, 5 and the
+  // static sweep, including the one path that legitimately SETS it.
 
   // ---- 4. company creation (POST /companies) — creator's own membership ----
   it("creating a company never produces a managed_by-set membership row for the creator", async () => {

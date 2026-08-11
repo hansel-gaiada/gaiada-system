@@ -122,8 +122,8 @@ describe("IAM-04c-1 · the 215-boundary pin (static, unfiltered re-derivation)",
   const policies = parsePolicies();
   const universes = kindActionUniverse();
 
-  it("sanity: the catalog + policy files cover the same 61 kinds this test iterates", () => {
-    expect(universes.size).toBe(61);
+  it("sanity: the catalog + policy files cover the same 60 kinds this test iterates (HIER-3, 2026-08-11: team kind retired, 61 -> 60)", () => {
+    expect(universes.size).toBe(60);
     for (const kind of universes.keys()) {
       expect(policies.has(kind), `catalog names kind "${kind}" but no resource_*.yaml defines it`).toBe(true);
     }
@@ -151,8 +151,8 @@ describe("IAM-04c-1 · the 215-boundary pin (static, unfiltered re-derivation)",
 
   const nonExemptKinds = [...universes.keys()].filter((k) => !(EXEMPT_KINDS as readonly string[]).includes(k));
 
-  it("sanity: 57 non-exempt kinds remain (61 - 4)", () => {
-    expect(nonExemptKinds.length).toBe(57);
+  it("sanity: 56 non-exempt kinds remain (60 - 4) — HIER-3, 2026-08-11: team kind retired, 57 -> 56", () => {
+    expect(nonExemptKinds.length).toBe(56);
   });
 
   it.each(nonExemptKinds)("kind \"%s\": platform_admin reach == the kind's full action universe", (kind) => {

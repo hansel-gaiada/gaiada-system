@@ -23,7 +23,7 @@ want to click around a real UI/API by hand as a given role.
 | `superadmin` | `platform_admin` | global | everything, everywhere |
 | `company_admin` | `company_admin` | company | administers the persona tenant |
 | `manager` | `manager` | company | |
-| `team_lead` | `team_lead` | **team** | scoped to a team, NOT the whole company — see ⚠ below |
+| `org_unit_lead` | `org_unit_lead` | **org_unit** | scoped to an org-chart unit, NOT the whole company — see ⚠ below |
 | `member` | `member` | company | baseline |
 | `viewer` | `viewer` | company | read-only baseline |
 | `hr_staff` | `hr_staff` | company | HR module |
@@ -53,11 +53,14 @@ want to click around a real UI/API by hand as a given role.
   a staff-facing surface, this persona should be **denied**, not merely "different" — a 200 here on
   a staff endpoint is a bug, not a quirk.
 
-- **`team_lead` does not blanket-cover company resources.** Its Cerbos derived role only activates
-  when the resource itself carries a matching `teamId` attribute (`derived_roles.yaml`). A
-  company-wide resource with no team concept (e.g. the IT device registry) denies `team_lead`
-  even though the resource's OWN policy lists `team_lead` in its read rule — the rule only fires
-  when the attribute condition holds too. `src/testing/personas.test.ts` has a worked example.
+- **`org_unit_lead` does not blanket-cover company resources.** Its Cerbos derived role only
+  activates when the resource itself carries a matching `unitAncestors` attribute
+  (`derived_roles.yaml`) — landed on exactly two kinds today (`report_document.read_department`,
+  `appraisal.read`; HIER-2, DR-9). A resource with no unit-ancestry attribute (e.g. the IT device
+  registry) denies `org_unit_lead` even though other resources' policies may list it — the rule
+  only fires when the attribute condition holds too. `src/testing/personas.test.ts` has a worked
+  example. (HIER-3, 2026-08-11: this replaces the retired `team_lead` persona, which had the same
+  shape of caveat against a `teamId` attribute.)
 
 ---
 
@@ -94,7 +97,7 @@ with. Pass a subset of keys if you only need a couple of personas (faster, and t
 from `p.as(key)` on a persona you didn't ask for is loud and names the fix, not a silent 401):
 
 ```
-Error: seedPersonaTenant: persona "team_lead" was not seeded for this tenant. Pass it in the
+Error: seedPersonaTenant: persona "org_unit_lead" was not seeded for this tenant. Pass it in the
 "which" list, or drop the argument to seed the full set.
 ```
 
@@ -143,6 +146,17 @@ test("DENY — member does not see Settings", async ({ page }) => {
 Full runnable version: `platform-ui/e2e/iam-personas-fixture.spec.ts` (project `personas` in
 `playwright.config.ts` — `npx playwright test --project=personas`).
 
+### ⚠ HIER-3 cross-repo note (2026-08-11)
+
+The backend `PersonaKey` union (`src/testing/personas.ts`, `src/seed/personas.ts`) dropped
+`team_lead` for `org_unit_lead` in this change. `platform-ui/e2e/personas.ts` and
+`src/lib/demoIdentity.ts` are a **separate, standalone project** (root `CLAUDE.md` — no shared
+package layer) and were **not** touched here per this ticket's own boundary (a concurrent session
+owns the UI half of this retirement, incl. `rbac.ts`'s `team_lead` sweep). The DEMO_MODE table and
+examples below still describe `team_lead` as of this writing — verify against
+`platform-ui/e2e/personas.ts` directly before trusting this section; it will read `org_unit_lead`
+once that project's own HIER-3 companion change lands.
+
 ### ⚠ DEMO_MODE coverage — read this before writing a demo-mode persona spec
 
 `npm run e2e`'s default project runs against `DEMO_MODE=1` (no backend). **DEMO_MODE does NOT
@@ -184,10 +198,10 @@ and call `loginAsPersona(page, key, { demoMode: false })`.
 
 ## What you still have to figure out yourself
 
-- **Team scoping beyond the default team.** `seedPersonaTenant()`'s `team_lead` is always the lead
-  of ONE auto-created team. If your test needs two teams (e.g. "lead of team A denied on team B's
-  resource"), seed the second team yourself with a direct insert — this helper doesn't generalize
-  to multi-team scenarios.
+- **Org-unit scoping beyond the default unit.** `seedPersonaTenant()`'s `org_unit_lead` is always
+  placed AND granted at the same single fixed unit id (`"d-persona"`). If your test needs two
+  units (e.g. "lead of unit A denied on unit B's resource"), seed the second placement/grant
+  yourself with a direct insert — this helper doesn't generalize to multi-unit scenarios.
 - **Module-gating surprises.** Both seed paths enable a broad module set (`agency, hr, reports,
   search, assistant, webdev, pm, it`) on the persona tenant so a persona's role actually reaches
   something. If you add a NEW module-gated surface, its module key needs adding to both

@@ -134,16 +134,14 @@ describe.skipIf(!live)("WD-20 Cerbos matrix — integration_connection (own/othe
     expect(await allow(p, otherUserRow, "update")).toBe(false);
   });
 
-  it("team_lead is listed in the self-service rule but its derived role needs resource.attr.teamId — " +
-     "the controller never sets teamId on integration_connection, so a team-scoped grant can never " +
-     "derive here even for the caller's OWN row (dead tier for this resource; not exploitable, just noted)", async () => {
-    const p: Principal = { userId: ME, assurance: "high", companies: [T1], roles: [{ role: "team_lead", scopeType: "team", scopeId: "team-x" }], sessionVersion: 1 };
-    expect(await allow(p, ownRow, "read")).toBe(false);
-  });
+  // HIER-3 (2026-08-11): the "team_lead is listed in the self-service rule but ... dead tier for
+  // this resource" case that used to sit here is REMOVED, not replaced — `team_lead` and the
+  // `team` scope_type are retired everywhere, including from
+  // resource_integration_connection.yaml's rule list (docs/superpowers/plans/2026-08-11-hier-3-report.md).
 });
 
 // W0-4 QA gate — resource_client_contact.yaml. Governance-action tier (create/update/revoke) is
-// company_admin/manager only, never member/team_lead/viewer; read is team-level (everyone delivering
+// company_admin/manager only, never member/viewer; read is team-level (everyone delivering
 // the work needs to know who the client's stakeholders are). group_executive gets its OWN rule gated
 // on `notLow` ONLY, never `inTenant` — the WD-20-R1 lesson: `inTenant` is
 // `resource.tenantId in principal.companies`, which never holds for a global grant, so an exec who is
@@ -175,17 +173,9 @@ describe.skipIf(!live)("W0-4 Cerbos matrix — client_contact (governance tier v
     }
   });
 
-  it("team_lead: listed in the read rule, but SAME dead-tier gap already documented for " +
-     "integration_connection above — team_lead's derived role needs a TEAM-scoped grant matching " +
-     "resource.attr.teamId (derived_roles.yaml:65-71), and client-contacts.controller.ts never sets " +
-     "teamId on this resource, so a company-scoped team_lead grant can never derive here even for " +
-     "read. Denied is the REAL behaviour, not the ticket's assumption — confirmed, not adjusted to fit.", async () => {
-    const p = principal("team_lead", "company", T1);
-    expect(await allow(p, cc, "read")).toBe(false);
-    for (const action of ["create", "update", "revoke"]) {
-      expect(await allow(p, cc, action)).toBe(false);
-    }
-  });
+  // HIER-3 (2026-08-11): the "team_lead: listed in the read rule, but SAME dead-tier gap ..." case
+  // that used to sit here is REMOVED, not replaced — `team_lead` is retired from
+  // resource_client_contact.yaml's rule list too.
 
   it("viewer: read allowed, create/update/revoke denied", async () => {
     const p = principal("viewer", "company", T1);
@@ -219,7 +209,7 @@ describe.skipIf(!live)("W0-4 Cerbos matrix — client_contact (governance tier v
   });
 
   it("everything is denied at assurance low, regardless of role", async () => {
-    for (const role of ["company_admin", "manager", "member", "team_lead", "viewer"]) {
+    for (const role of ["company_admin", "manager", "member", "viewer"]) {
       const p: Principal = { userId: ME, assurance: "low", companies: [T1], roles: [{ role, scopeType: "company", scopeId: T1 }], sessionVersion: 1 };
       for (const action of ["read", "create", "update", "revoke"]) {
         expect(await allow(p, cc, action)).toBe(false);
