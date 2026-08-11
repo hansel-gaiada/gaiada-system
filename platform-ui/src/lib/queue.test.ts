@@ -76,7 +76,16 @@ describe("getMyWorkQueue — the shared R-1 spine", () => {
       expect(queue.items[i - 1].urgencyScore).toBeGreaterThanOrEqual(queue.items[i].urgencyScore);
     }
     const approval = queue.items.find((i) => i.id === "agency:ap-1")!;
-    expect(approval.decidable).toBe(true); // manager grant on co-a -> approvals.decide
+    // IAM-02a-FIX-2: this used to assert `true` with the comment "manager grant on co-a ->
+    // approvals.decide". That was the OLD, WRONG behaviour DR-1 (2026-08-10) corrected: `decidable`
+    // is computed once per company (`can(me, "approvals.decide", c.id)`, queue.ts above) and applied
+    // uniformly to every item origin in that leg, including this agency-origin one. Cerbos's
+    // `resource_agency_approval.yaml` grants `approve` to `company_admin`/`module_approver` ONLY —
+    // `manager` appears in neither — so a manager's agency-origin approval is correctly
+    // non-decidable in the UI now, matching what the backend has always enforced (this manager
+    // grant would 403 on `POST .../approve` if it tried). The fix is in rbac.ts (DR-1), not here;
+    // this assertion is only catching up to it.
+    expect(approval.decidable).toBe(false); // manager has NO approvals.decide grant (DR-1) — Cerbos denies agency_approval:approve to manager
     expect(approval.companyId).toBe("co-a");
     expect(approval.origin).toBe("agency");
     // one source 500ing on co-b never throws / never drops the leg entirely

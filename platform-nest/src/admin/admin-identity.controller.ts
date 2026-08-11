@@ -14,7 +14,43 @@ import { emitEvent } from "../events/outbox.service";
 import { AuthGuard } from "../auth/guards";
 import { adoptManagedGrantAsManual } from "./service-reconciler";
 
-const SCOPE_TYPES = new Set(["global", "company", "team", "project", "record"]);
+// HIER-1 (migration 0100): `team`/`record` removed here to match the DB's new scope_type CHECK
+// exactly — leaving them would let a caller submit a value the CHECK now rejects, turning what
+// used to be a valid (if inert — team/record never conferred anything reachable) grant into an
+// unhandled Postgres CHECK-violation 500 instead of this endpoint's own clean 400.
+//
+// HIER-2 (migration 0102): `org_unit` ADDED — `org_unit_lead` now has something to do (own rules
+// on `resource_report_document.yaml`'s `read_department` and `resource_appraisal.yaml`'s `read`,
+// via IAM-09's closure-table ancestor cascade), so offering the scope here is no longer minting an
+// inert grant. `scopeId` for this scope_type is a free-form org-unit node id (0029/0055
+// convention, e.g. `'d-web'`) — NOT validated as a uuid here, matching 0100's own per-scope shape
+// CHECK (`org_unit` -> non-empty text, no uuid-regex branch), unlike `company`/`project`.
+const SCOPE_TYPES = new Set(["global", "company", "project", "org_unit"]);
+
+// GLOBAL-ONLY ROLES. Their Cerbos derived roles (derived_roles.yaml) match ONLY
+// `g.scopeType == "global"`, so a company- or project-scoped grant of either confers NOTHING
+// through the role arm — it is inert by construction.
+//
+// ⚠ WHY THIS IS ENFORCED RATHER THAN LEFT INERT (found by IAM-04-ROLLOUT-B12, 2026-08-11):
+// under permission matching the two arms DISAGREE about such a grant, and the permission arm is
+// the permissive one. `assemblePrincipal()` resolves `perms` from `role_permissions` carrying the
+// GRANT's own scope, so a `platform_admin` grant at `scopeType:"company"` yields all 215 grantable
+// permissions AT THAT COMPANY — which the `perm_*` derived roles then honour, while the
+// role-name arm correctly refuses. That is the permission arm granting what the role arm denies:
+// exactly the class of defect the IAM-04 pilot caught for `team_lead`×`pm_task`, but arising from
+// a wildcard/unconditional rule rather than same-rule mixing, so
+// `permission-arm-hazard-scan.test.ts` structurally cannot see it.
+//
+// It was REACHABLE, not theoretical: this endpoint is authorized by `user:create`, which
+// `company_admin` holds — so a company admin could mint `platform_admin@their-company` and pick up
+// the ~16 permissions their own bundle lacks, in their own tenant. That also violates D-9's
+// no-self-escalation safeguard. No such grant exists in any seed, fixture or live row (verified),
+// so this closes the door before anyone walks through it.
+//
+// Enforced HERE, at the only unrestricted write path, rather than by narrowing the `perm_*` rules
+// in 26+ policy files: this is one check at the source, and it makes the DB state impossible
+// instead of making a bad state harmless in one consumer.
+const GLOBAL_ONLY_ROLES = new Set(["platform_admin", "group_executive"]);
 
 interface RoleGrantRow {
   grantId: string;
@@ -275,14 +311,54 @@ export class AdminIdentityController {
     if (!(await memberIds(tenantId)).includes(userId)) {
       throw new NotFoundException("user is not a member of this company");
     }
-    const role = await withGlobal((c) => c.query(`SELECT 1 FROM roles WHERE id = $1`, [roleId]));
+    // Select the NAME too — needed for the global-only guard below (see GLOBAL_ONLY_ROLES).
+    const role = await withGlobal((c) =>
+      c.query<{ name: string }>(`SELECT name FROM roles WHERE id = $1`, [roleId]),
+    );
     if (!role.rows[0]) throw new BadRequestException("unknown role");
-    const scopeId = scopeType === "global" ? null : body.scopeId ?? (scopeType === "company" ? tenantId : null);
+    // GLOBAL-ONLY GUARD — see GLOBAL_ONLY_ROLES' comment for the full rationale. A scoped grant of
+    // an elevated role is inert under role-name matching but resolves its FULL bundle at that scope
+    // under permission matching, i.e. the permission arm granting what the role arm denies.
+    if (GLOBAL_ONLY_ROLES.has(role.rows[0].name) && scopeType !== "global") {
+      throw new BadRequestException(
+        `role "${role.rows[0].name}" may only be granted at global scope`,
+      );
+    }
+    // HIER-1 (migration 0100): a scoped grant with NO scopeId used to silently insert scope_id =
+    // NULL for any non-company scope (the old fallback below defaulted everything but "company"
+    // to null) — dead but harmless while scope_id was untyped-by-CHECK. Migration 0100's new
+    // per-scope shape CHECK now REJECTS a non-global grant with a NULL scope_id (company/project
+    // require a uuid-shaped value), so that same silent-null path would turn into an unhandled
+    // CHECK-violation 500. Validated here instead so the caller gets this endpoint's own clean
+    // 400 — "global" still forces null (client-supplied scopeId for a global grant is ignored, as
+    // before); "company" still defaults to the URL's own tenantId when omitted (as before, and
+    // never null in practice since tenantId is always present); any other scope now REQUIRES an
+    // explicit scopeId rather than silently defaulting to null.
+    let scopeId: string | null;
+    if (scopeType === "global") {
+      scopeId = null;
+    } else if (scopeType === "company") {
+      scopeId = body.scopeId ?? tenantId;
+    } else {
+      if (!body.scopeId) throw new BadRequestException(`scopeId required for scopeType "${scopeType}"`);
+      scopeId = body.scopeId;
+    }
     const id = newId();
     const inserted = await withGlobal((c) =>
       c.query<{ id: string }>(
+        // UNTARGETED `ON CONFLICT DO NOTHING`, deliberately — do not "tighten" this back to a
+        // column list. Migration 0092 added a PARTIAL unique index
+        // (`user_roles_global_scope_uniq` on (user_id, role_id, scope_type) WHERE scope_id IS NULL)
+        // to close the hole where `UNIQUE (user_id, role_id, scope_type, scope_id)` never fires for
+        // global grants, because scope_id IS NULL and SQL NULLs are never equal (that hole is why
+        // both live elevated accounts carried duplicate grants). A TARGETED conflict clause names
+        // the 4-column constraint as its arbiter — which still does not fire on NULL scope_id — so
+        // the new partial index would raise an unhandled 23505 and turn a re-grant of an
+        // already-held GLOBAL role from this endpoint's graceful no-op/adopt path into a 500.
+        // Untargeted arbitrates over BOTH, and the `IS NOT DISTINCT FROM` lookup below already
+        // recovers the existing row correctly for NULL scope_id, so the adopt path is unchanged.
         `INSERT INTO user_roles (id, user_id, role_id, scope_type, scope_id) VALUES ($1, $2, $3, $4, $5)
-         ON CONFLICT (user_id, role_id, scope_type, scope_id) DO NOTHING RETURNING id`,
+         ON CONFLICT DO NOTHING RETURNING id`,
         [id, userId, roleId, scopeType, scopeId],
       ),
     );

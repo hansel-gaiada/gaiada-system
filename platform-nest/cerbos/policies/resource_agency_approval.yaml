@@ -21,3 +21,23 @@ resourcePolicy:
       effect: EFFECT_ALLOW
       derivedRoles: ["company_admin", "module_approver"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+
+    # =========== IAM-04-ROLLOUT-B12 -- permission-matching arm. PURELY ADDITIVE: every rule =====
+    # above is byte-for-byte unchanged. Generic global-or-company mirror per action (see this
+    # kind's entry in docs/superpowers/plans/2026-08-10-iam-04-rollout-b12-report.md for the
+    # per-kind safety argument). Any group_executive-only or platform_admin wildcard rule on this
+    # kind is deliberately NOT mirrored here (IAM-04c: the tier bypass never enters the permission
+    # catalog).
+
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_agency_approval_read"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    - actions: ["create"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_agency_approval_create"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    - actions: ["approve"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_agency_approval_approve"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }

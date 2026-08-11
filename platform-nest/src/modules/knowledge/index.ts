@@ -7,9 +7,13 @@ import type { ModuleContract } from "../contract";
 export const knowledgeModule: ModuleContract = {
   key: "knowledge",
   migrations: [],
+  // IAM-01d migration: `source:read` CLEAN. `source:review` was ALIAS (approve/reject quarantine
+  // authorizes Cerbos `update`, not a distinct `review` action) — adopted the real spelling
+  // (knowledge.source.update) rather than dropped, since the module's review UI needs a named
+  // permission to gate on.
   permissions: [
-    { key: "knowledge:source:read", description: "View knowledge sources" },
-    { key: "knowledge:source:review", description: "Approve/reject quarantined knowledge sources" },
+    { key: "knowledge.source.read", description: "View knowledge sources" },
+    { key: "knowledge.source.update", description: "Approve/reject quarantined knowledge sources" },
   ],
   customFieldTargets: [],
   mcpTools: [

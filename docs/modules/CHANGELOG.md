@@ -1552,6 +1552,45 @@ anywhere real.
 ---
 
 ## platform-nest
+### [0.21.0] - 2026-08-11 - IN PROGRESS (IAM Phase 1 — catalog, bundles, permission-arm rollout, the BFF endpoint)
+- **Consolidated entry** for a two-day, many-ticket wave (`docs/superpowers/plans/2026-08-10-iam-*`,
+  25+ per-ticket reports) that this changelog line summarizes rather than repeats. Full detail and
+  re-derived numbers: `docs/PERMISSION-CONTRACT.md` (updated 2026-08-11 in the same pass as this
+  entry).
+- **The permission catalog is DB-persisted and boot-validated.** Migrations `0091`-`0101`: 215
+  grantable + 15 relationship permissions (`0093`), six previously-ungrantable roles seeded
+  (`0091`), a global-scope grant dedupe fix (`0092`), 936 role→permission bundle pairs across 20
+  roles (`0094`/`0097`/`0098`), `company_admin`'s bundle widened 199→200 by DR-5's deliberate
+  `reports.appraisal.read` grant (`0099` — the program's first authorization-widening decision, not
+  a mirror correction), and the `org_unit` scope substrate (`0100`, expand-only: drops `team`/
+  `record` from the `scope_type` CHECK, widens `scope_id` uuid→text) plus its closure table
+  (`0101`). `ModuleContract.permissions` now fails boot closed on an uncatalogued declaration.
+- **IAM-04's permission-arm rewrite reaches 28 of 61 Cerbos kinds** (2-kind pilot + 26 more:
+  `agency_brief/campaign/creative_asset`, `chat_group`, `company`, `compliance_gate`, `contract`,
+  `identity_link`, `invoice`, `knowledge_source`, `report_admin`, `rollup`, `rollup_recompute`,
+  `service_assignment`, `user`, `webdev_change_request`, `webdev_provisioned_site`, `hr_record`,
+  `agency_approval`, 7× `resource_search_*`) as an additive mirror beside existing role-name
+  matching, which still decides every live authorization — proven identical by a parity suite and
+  16→42 isolation tests granting the permission with `roles: []`. A real regression was caught and
+  fixed before landing (`team_lead`'s dead `pm_task` grant would have flipped 403→200 on the first
+  cut). A related, NOT-yet-fixed hazard is named in the contract doc: the wildcard-bleed shape on
+  `platform_admin`/`group_executive`, which the hazard detector doesn't catch.
+- **New BFF endpoint (IAM-05c):** `GET /api/:tenantId/authz/permissions` + `GET /api/authz/
+  permissions` — scope-level effective permissions, ETag-cached and invalidated on
+  `session_version`. Explicitly NOT a per-resource answer; see the contract doc §4-§5 before
+  wiring a UI consumer.
+- **A live defect found and fixed during the rollout (IAM-SEC-02):** `platform_admin`/
+  `group_executive` were grantable at company/project scope through the generic role-assign
+  endpoint even though both roles' Cerbos conditions match global scope only — a grant that would
+  have been silently inert for Cerbos while still resolving into `principal.perms` at company
+  scope. Closed at the source (`admin-identity.controller.ts`'s new `GLOBAL_ONLY_ROLES` guard),
+  pinned by `global-only-role-scope.test.ts`.
+- **CI promotion (IAM-07b):** three new static guards (Cerbos↔catalog alignment, groups↔catalog
+  parity, a chain meta-test) wired into the `platform-nest` CI job ahead of the full suite.
+- **Zero authorization decisions changed** for any existing user — every ticket in this wave
+  carried a parity assertion (`role-permission-parity.db.test.ts`, `iam-215-boundary-pin.test.ts`)
+  kept green throughout; the one deliberate exception (DR-5) was an explicit, named owner decision.
+
 ### [0.17.0] - 2026-08-07 - IN PROGRESS (a handoff no longer files a write behind your back)
 - **The confirm-chip bypass is closed, and it was worse than "skips the chip".** `createHandoff` never
   sent `fileOnSuspend`, so it inherited the runner's default of TRUE: a handoff-driven `high_write` was
@@ -2003,7 +2042,20 @@ tenant's 8 seeded rows still need purging (per-tenant SQL in the design doc §12
 - **Unreleased / next:** identity writes, org-structure endpoints.
 
 ## platform-ui
-<<<<<<< HEAD
+### [0.25.1] — 2026-08-10 · IN PROGRESS (IAM Phase 1 mirror corrections — DR-6, DR-7, a capability-map defect)
+- `lib/rbac.ts` corrected against re-derived Cerbos ground truth: `it_admin` loses
+  `company.manage` (DR-6 — zero Cerbos overlap on `resource_device.yaml`, a dead-button
+  over-claim, 1 live holder); `hr_staff`/`search_staff`/`reports_staff` gain `people.directory`
+  (DR-7 — `resource_member.yaml`'s `module_staff` rule grants it unconditionally; 0 live holders
+  today, a pre-staffing fix).
+- `lib/rbac-capability-map.ts` drops `hr.case.cancel` from `hr.manage`'s permission set — a real
+  defect, not an owner decision: no Cerbos rule ever granted `cancel` to `module_manager`/
+  `company_admin`, so the capability was silently unsatisfiable for the two roles that hold every
+  other member of the set unconditionally.
+- Zero Cerbos changes; mirror-only. 6 new pinning tests plus the pre-existing 547-pair
+  `rbac-capability-parity.test.ts` stay green. Full program context:
+  `docs/PERMISSION-CONTRACT.md`.
+
 ### [0.20.0] — 2026-08-07 · IN PROGRESS (the sidebar collapses to a 64px icon rail)
 - Merged `fadhil/ui` (1 commit, forked 163 commits back). Expanded mode gets collapsible nav groups;
   collapsed mode swaps renderer entirely - a 64px rail with one glyph per group, children in a

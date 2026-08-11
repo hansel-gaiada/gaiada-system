@@ -166,6 +166,17 @@ jobs:
           # that follows (src/testing/setup.ts derives the DB name from the test path, so two runs
           # against one Postgres would otherwise drop each other's schema mid-run).
           TEST_DB_PREFIX: mailcorpus
+      # IAM-07b — promotes the wave-3 "Cerbos alignment audit" (previously a one-off manual run:
+      # `cerbos compile` + a by-hand diff of the policy matrix against permission-catalog.json) into
+      # a permanent, named, CI-enforced gate. Both files are STATIC (no DB, no live Cerbos PDP — pure
+      # YAML/JSON parsing), so this step needs neither the Postgres nor the Cerbos container above;
+      # it is redundant with the `npm test` step that follows (same two files run there too) by the
+      # same deliberate design as the mail-corpus step immediately above: a chain-alignment
+      # regression is legible as its own red step, fails fast (before the full suite), and survives
+      # any future narrowing of `npm test`'s scope. See docs/superpowers/plans/2026-08-10-iam-07b-
+      # report.md for the chain map this closes (links 1 and the catalog<->groups link).
+      - name: IAM permission-contract chain alignment (IAM-07b — CI promotion of the wave-3 audit)
+        run: npm run test:iam-chain-alignment
       - run: npm test
         env:
           DATABASE_URL_TEST: postgres://postgres:postgres@localhost:5432/postgres

@@ -37,12 +37,20 @@ const agencyRollups: RollupProvider = {
 export const agencyModule: ModuleContract = {
   key: "agency",
   migrations: ["0002_module_agency.sql", "0006_agency_creative_assets.sql"],
+  // IAM-01d migration (§7 of docs/superpowers/plans/2026-08-10-permission-catalog.md): all 5
+  // colon-style keys were CLEAN — the two bundle keys (`brief:write`, `asset:write`) expand to
+  // their fine-grained create/update/delete triad per the catalog's own recommendation, so the
+  // registry validates against real grantable permissions rather than a summary label.
   permissions: [
-    { key: "agency:campaign:read", description: "View campaigns" },
-    { key: "agency:campaign:create", description: "Create campaigns" },
-    { key: "agency:brief:write", description: "Write campaign briefs" },
-    { key: "agency:asset:write", description: "Add/update creative assets" },
-    { key: "agency:approval:approve", description: "Decide approvals" },
+    { key: "agency.campaign.read", description: "View campaigns" },
+    { key: "agency.campaign.create", description: "Create campaigns" },
+    { key: "agency.brief.create", description: "Create campaign briefs" },
+    { key: "agency.brief.update", description: "Edit campaign briefs" },
+    { key: "agency.brief.delete", description: "Delete campaign briefs" },
+    { key: "agency.creative_asset.create", description: "Add creative assets" },
+    { key: "agency.creative_asset.update", description: "Update creative assets" },
+    { key: "agency.creative_asset.delete", description: "Delete creative assets" },
+    { key: "agency.approval.approve", description: "Decide approvals" },
   ],
   customFieldTargets: ["agency_campaign", "agency_creative_asset"],
   mcpTools: [

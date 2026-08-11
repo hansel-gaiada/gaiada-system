@@ -47,6 +47,9 @@ import {
 import type { FastifyRequest } from "fastify";
 import { AuthGuard } from "../../auth/guards";
 import { authorize, notify, writeActivity } from "../../core/http";
+import { withTenants } from "../../db";
+import { config } from "../../config";
+import { loadUnitAncestors } from "../../core/org-unit-closure";
 import type { Principal } from "../../rbac/principal";
 import { ModuleEnabledGuard } from "../module-enabled.guard";
 import {
@@ -68,7 +71,7 @@ import {
   type GenerateSubjectInput,
 } from "./appraisal-engine";
 import type { AppraisalAxis } from "./appraisal-document";
-import { personAxisTier } from "./person-scope";
+import { PERSON_SCOPE_MODULES, personAxisTier, resolveSubjectUnit, todayIsoInTz } from "./person-scope";
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -116,6 +119,37 @@ function hasBroadAppraisalReadTier(principal: Principal, tenantId: string): bool
  *  org-unit subtree. Same tier, strictly TIGHTER boundary — see this file's header. */
 function isManagerCoarseOnly(principal: Principal, tenantId: string): boolean {
   return personAxisTier(principal, tenantId) === "unit_scoped";
+}
+
+/** HIER-2 (DR-9/DR-11) — the SUBJECT's current unit ancestor chain (IAM-09's closure), so
+ *  org_unit_lead's own Cerbos rule (derived_roles.yaml, resource_appraisal.yaml) has an ancestor
+ *  list to match a dept-lead grant against. Appraisal has no separate department grain the way
+ *  report_document does — the "unit" this resource reasons about is the subject's OWN placement,
+ *  resolved the identical way person-scope.ts resolves it elsewhere in this program. Returns `[]`
+ *  when the subject has no resolvable current unit (pre-adoption history, offboarded) — fail
+ *  closed by construction, same as every other consumer of `loadUnitAncestors`. */
+async function subjectUnitAncestors(tenantId: string, subjectUserId: string): Promise<string[]> {
+  const asOf = todayIsoInTz(config.reportsTz);
+  return withTenants(
+    [tenantId],
+    async (c) => {
+      const unit = await resolveSubjectUnit(c, tenantId, subjectUserId, asOf);
+      return unit ? loadUnitAncestors(c, tenantId, unit) : [];
+    },
+    { modules: PERSON_SCOPE_MODULES },
+  );
+}
+
+/** Does `principal` hold an `org_unit`-scoped `org_unit_lead` grant covering the subject (i.e.
+ *  its scopeId appears in `unitAncestors`)? Re-derives the SAME containment Cerbos's org_unit_lead
+ *  rule just evaluated to reach ALLOW — belt-and-suspenders, matching every other in-app
+ *  confirmation in this program (e.g. `assertPersonInLedScope` re-checking after Cerbos already
+ *  allowed). Never widens: a principal without a qualifying grant was already denied by
+ *  `authorize()` above, before this is ever consulted. */
+function isOrgUnitLeadForSubject(principal: Principal, unitAncestors: string[]): boolean {
+  return principal.roles.some(
+    (g) => g.role === "org_unit_lead" && g.scopeType === "org_unit" && !!g.scopeId && unitAncestors.includes(g.scopeId),
+  );
 }
 
 function assertDate(value: string | undefined, field: string): string {
@@ -273,6 +307,17 @@ export class AppraisalsController {
 
   // ---------------- read: list / mine / single ----------------
 
+  // ⚠ HIER-2 BOUNDARY, stated rather than silently missed: this endpoint's `managerCoarse` branch
+  // (via `isManagerCoarseOnly` -> `personAxisTier`) now also classifies an `org_unit_lead`-only
+  // caller as `unit_scoped`, but the query below filters by an EXACT `managerUserId` match — the
+  // `manager`/`team_lead` tier's own semantic, not org_unit_lead's ancestor-based one. An
+  // org_unit_lead-only caller (no manager/team_lead grant) therefore fails CLOSED here: the coarse
+  // `authorize()` call below carries no `unitAncestors` (there is no single subject to resolve one
+  // for on a bulk list), so org_unit_lead's own Cerbos rule cannot fire and this throws a 403 —
+  // correctly denying, just via a less specific path than `getOneRoute`'s dedicated wiring. Listing
+  // is NOT part of this ticket's landing surface (only `getOneRoute` resolves and passes
+  // `unitAncestors`); wiring the list query to the subtree scope is left for the ticket that wants
+  // it, same "ship what you need, flag the boundary" posture this file's header already uses.
   @Get()
   async listRoute(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Query("cycleId") cycleId?: string, @Query("subjectId") subjectId?: string) {
     const principal = req.principal;
@@ -311,18 +356,25 @@ export class AppraisalsController {
     const row = await fetchAppraisalRow(tenantId, id);
     if (!row) throw new NotFoundException("appraisal not found");
 
+    // HIER-2: the subject's unit ancestor chain, so org_unit_lead's own rule has something to
+    // match a dept-lead grant against (see subjectUnitAncestors' own comment).
+    const unitAncestors = await subjectUnitAncestors(tenantId, row.subjectUserId);
+
     // Cerbos is the PRIMARY gate, always consulted first (so every decision — allow or deny — is
     // audited): self only for `subjectUserId == principal.id`, hr_people_ops/group_executive/
     // platform_admin unconditionally, manager/team_lead COARSE company-scoped (the known
-    // approximation — see file header). A plain member reading someone else's row is already
-    // denied HERE by Cerbos itself (no rule matches), with no further controller logic needed.
-    await authorize(principal, { kind: "appraisal", tenantId, id, subjectUserId: row.subjectUserId }, "read");
+    // approximation — see file header), org_unit_lead via unit-ancestor containment (HIER-2). A
+    // plain member reading someone else's row is already denied HERE by Cerbos itself (no rule
+    // matches), with no further controller logic needed.
+    await authorize(principal, { kind: "appraisal", tenantId, id, subjectUserId: row.subjectUserId, unitAncestors }, "read");
 
-    // Two narrowings Cerbos cannot express, applied only for the tiers its own rules leave coarse:
+    // Narrowings Cerbos cannot express, applied only for the tiers its own rules leave coarse:
     if (!hasBroadAppraisalReadTier(principal, tenantId)) {
       const isSelf = principal.userId === row.subjectUserId;
       if (isSelf && row.status === "draft") throw new ForbiddenException("this appraisal has not been submitted yet");
-      if (!isSelf && principal.userId !== row.managerUserId) throw new ForbiddenException("not your assigned subject");
+      const isExactManager = principal.userId === row.managerUserId;
+      const isDeptLead = isOrgUnitLeadForSubject(principal, unitAncestors);
+      if (!isSelf && !isExactManager && !isDeptLead) throw new ForbiddenException("not your assigned subject");
     }
 
     return hydrateAppraisalPack(tenantId, row);

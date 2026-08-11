@@ -317,3 +317,85 @@ at it, run `node dist/db/migrate.js`, confirm the ordered `applied:` list and ex
    enforced). `0058`/`0059`/`0070` remain the permanently-orphaned reservation gaps — still do NOT
    fill them. **Next unused is `0091`** — re-verify with `ls migrations | sort | tail` before
    trusting that, exactly as every entry in this log has had to.
+
+   **2026-08-10 update (IAM program, `0091` AND `0092` TAKEN together — pre-assigned, no collision.)**
+   Two migrations were authored **concurrently by two different sessions in this same checkout**, so
+   for the first time the numbers were **assigned up front by the coordinating session** rather than
+   each author reading the head and hoping. That is the fix for the race this log has recorded twice
+   (see the `0089` and `0090` entries above, both of which discovered a concurrent taker only after
+   authoring): when two migrations are in flight at once, `ls | tail` is *structurally* incapable of
+   being right for the second author, because the first author's file does not exist yet.
+   - `0091_iam_02d_ungrantable_roles.sql` (IAM-02d) — seeds `team_lead`, `viewer`, `it_manager`,
+     `it`, `search_staff`, `search_manager` as global roles. Six role names were referenced by the
+     Cerbos policies and `platform-ui/src/lib/rbac.ts` but had **no `roles` row**, so they could not
+     be granted. Ships `src/rbac/role-catalog-drift.db.test.ts` as the recurrence guard.
+   - `0092_user_roles_global_scope_unique.sql` (IAM-01c-2) — dedupes global-scope duplicate grants
+     and adds partial unique index `user_roles_global_scope_uniq (user_id, role_id, scope_type)
+     WHERE scope_id IS NULL`, closing the hole where `UNIQUE (user_id, role_id, scope_type,
+     scope_id)` never fires because `scope_id IS NULL` and SQL NULLs are never equal.
+   `0058`/`0059`/`0070` remain the permanently-orphaned reservation gaps — still do NOT fill them.
+   **Next unused is `0093`.** Re-verify with `ls migrations | sort | tail` as always — and if another
+   session is authoring a migration at the same time, agree the numbers in advance instead.
+
+   **2026-08-10 update (IAM-02e, six BASELINE roles) — `0095` TAKEN, pre-assigned, no collision.**
+   Coordinated up front like the `0091`/`0092` pair above: `0093`/`0094` were reserved for two other
+   concurrently-working sessions per the coordinating session's ticket brief, so IAM-02e was told to
+   use `0095` directly rather than reading `ls | tail` and hoping. Re-verified at authoring time
+   (head was `0092_user_roles_global_scope_unique.sql`, `0093`/`0094` correctly absent yet) and again
+   immediately before this entry (`0093_iam_permission_catalog.sql` has since landed; `0094` is still
+   absent/in flight; `0095` remained free throughout). Shipped as
+   `0095_iam_02e_baseline_roles.sql`: seeds `member`, `manager`, `company_admin`, `platform_admin`,
+   `group_executive`, `it_admin` as global (`company_id IS NULL`) `roles` rows — the six baseline
+   roles that, until now, were created ONLY by the manual `npm run seed:agency` script and by no
+   migration at all, so a freshly-migrated environment with no seed run had no baseline roles at
+   all. Same `NOT EXISTS`-guarded idiom as `0026`/`0069`/`0091`. **No new partial-unique index
+   needed** — `0073_dedupe_global_roles.sql` already added
+   `roles_global_name_uniq ON roles (name) WHERE company_id IS NULL`, well before this ticket;
+   confirmed by reading that file directly rather than assuming. `0058`/`0059`/`0070` remain the
+   permanently-orphaned reservation gaps — still do NOT fill them. **Next unused is `0096`**
+   (`0094` may still land before it — re-verify with `ls migrations | sort | tail` before trusting
+   that, exactly as every entry in this log has had to).
+
+   **2026-08-10 update (IAM phase 1, `0096` TAKEN by the coordinating session).**
+   `0096_iam_agency_approver_role.sql` seeds `agency_approver` — the SEVENTH role with the
+   "seed-script-only, no migration behind it" defect that `0091` and `0095` closed for the other
+   twelve. Taken by the coordinator rather than an agent because it closed a **red test in the
+   shared tree**, and it is worth recording HOW it surfaced, because the mechanism is the point:
+   `0091` shipped `src/rbac/role-catalog-drift.db.test.ts`, which asserts every role named in
+   `platform-ui/src/lib/rbac.ts`'s `Role` union has a global `roles` row in a migrations-only
+   database. `agency_approver` was absent from `rbac.ts` entirely (drift-register finding #1 — a
+   live-held role the UI mirror conferred ZERO capabilities for), so the guard could not see the
+   seeding gap underneath it. Owner decision **DR-2b** added the role to `rbac.ts`; the guard went
+   red the same day. **Two half-defects had been hiding each other.** Not folded into `0095` per
+   rule 4 (never edit an existing migration to absorb a late finding) — `0095`'s author found it
+   while verifying their own work, after that file was written.
+   Verified: `role-catalog-drift.db.test.ts` + `baseline-roles-migration.db.test.ts` 6/6 green,
+   `npm run lint:migration-rls` OK across 94 migrations. `0058`/`0059`/`0070` remain the
+   permanently-orphaned reservation gaps. **Next unused is `0097`** — `0094` is STILL in flight and
+   absent as of this entry, so it will land out of numeric order; that is expected and harmless (the
+   runner sorts lexicographically and applies by filename, and `0094`/`0096` are independent).
+   Re-verify with `ls migrations | sort | tail` before trusting this, as always.
+
+   **2026-08-10 update (IAM-02g, webdev `role_permissions` bundle) — `0098` TAKEN, pre-assigned, no
+   collision.** The ticket brief named `0098` directly (reserved for IAM-03, released unused per
+   the Wave 4 entry above — "the benchmark showed no index was warranted, so it returned to the
+   pool"). Re-verified with `ls migrations | sort | tail` at authoring time: real head was
+   `0097_webdev_module_roles.sql` with `0098` genuinely free. Shipped as
+   `0098_iam_02g_webdev_role_permission_bundles.sql`: 10 `role_permissions` rows bundling
+   `webdev_staff` (4: `webdev.change_request.read`, `webdev.provisioned_site.read`,
+   `core.member.read`, `core.service_assignment.read`) and `webdev_manager` (6: adds
+   `webdev.change_request.triage`, `webdev.provisioned_site.provision`/`.reconcile`,
+   `core.service_assignment.read`; drops `core.member.read` — that generic rule is module_staff
+   ONLY, per `resource_member.yaml`) — closing 0094's own finding (b): `0097` seeded the `roles`
+   rows, but no migration bundled them, so a webdev module grant would have resolved to an EMPTY
+   permission set the moment IAM-04's rollout makes `role_permissions` load-bearing. Zero DML
+   against any other role; zero Cerbos policy edits; zero `rbac.ts` edits. `role-permission-
+   bundles.json` regenerated (18 -> 20 roles, 925 -> 935 pairs) via `scripts/generate-role-
+   bundles.mjs`, which was extended (REAL_ROLES + module_staff/module_manager resolvers) to close
+   the same finding on the generator side. New completeness guard
+   `src/rbac/role-bundle-completeness.db.test.ts` (IAM-02g) derives every global `roles` row live
+   from the DB and asserts a non-empty bundle for each — no hand-maintained role list, so a future
+   variant #5 fails loudly by name instead of by accident. `0058`/`0059`/`0070` remain the
+   permanently-orphaned reservation gaps — still do NOT fill them. **Next unused is `0099`** —
+   re-verify with `ls migrations | sort | tail` before trusting that; this checkout has three other
+   concurrent sessions in flight as of this entry.

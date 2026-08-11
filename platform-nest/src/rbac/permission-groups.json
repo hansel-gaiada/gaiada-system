@@ -1,0 +1,920 @@
+{
+  "_meta": {
+    "title": "Gaiada permission groups — the authoring layer (IAM-01b-3)",
+    "status": "PROTOTYPED — 2026-08-10. Seeded from the ~40 existing platform-ui CAPABILITIES plus every grantable catalog permission they did not already reach. Pending owner/HR review before use in role authoring.",
+    "parent": "docs/superpowers/plans/2026-08-10-permission-groups.md",
+    "catalogSource": "platform-nest/src/rbac/permission-catalog.json (215 grantable permissions, frozen input)",
+    "model": "Two-layer (Ruling 1, option C): groups are the authoring surface; every permission remains individually assignable via an 'advanced' expansion. A group's sensitive flag is mechanical — true iff ANY member permission carries catalog sensitive:true.",
+    "counts": {
+      "groups": 75,
+      "grantablePermissionsInCatalog": 215,
+      "permissionsCoveredByGroups": 213,
+      "permissionsAdvancedOnly": 2,
+      "permissionsAppearingInMultipleGroups": 2,
+      "sensitiveGroups": 42
+    }
+  },
+  "groups": [
+    {
+      "key": "company_overview",
+      "name": "Company Overview (read-only)",
+      "domain": "core",
+      "description": "See the company profile, staff directory, user account list, org chart, and recent activity feed. View-only — no edit rights.",
+      "permissions": [
+        "core.company.read",
+        "core.member.read",
+        "core.user.read",
+        "core.activity.read",
+        "core.org_structure.read"
+      ],
+      "sensitive": false
+    },
+    {
+      "key": "company_settings_admin",
+      "name": "Company Settings Administration",
+      "domain": "core",
+      "description": "Edit company settings and enabled modules, or delete the company (tenant) record itself.",
+      "permissions": [
+        "core.company.update",
+        "core.company.delete"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "user_account_admin",
+      "name": "User Account Administration",
+      "domain": "core",
+      "description": "Create, edit, or delete/deactivate platform login accounts for people in this company.",
+      "permissions": [
+        "core.user.create",
+        "core.user.update",
+        "core.user.delete"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "org_structure_edit",
+      "name": "Edit Organization Chart",
+      "domain": "core",
+      "description": "Change the company's org chart (who reports where) — this drives automatic role and access changes for everyone under the edited unit.",
+      "permissions": [
+        "core.org_structure.update"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "custom_fields",
+      "name": "Custom Field Definitions",
+      "domain": "core",
+      "description": "Create, edit, or remove the custom fields available on projects, tasks, and other records.",
+      "permissions": [
+        "core.custom_field.create",
+        "core.custom_field.read",
+        "core.custom_field.update",
+        "core.custom_field.delete"
+      ],
+      "sensitive": false
+    },
+    {
+      "key": "compliance_gates_view",
+      "name": "View Compliance Gates",
+      "domain": "core",
+      "description": "See the legal/compliance gates set for this company.",
+      "permissions": [
+        "core.compliance_gate.read"
+      ],
+      "sensitive": false
+    },
+    {
+      "key": "compliance_gates_manage",
+      "name": "Flip Compliance Gates",
+      "domain": "core",
+      "description": "Turn a legal/compliance gate for this company on or off — controls whether regulated features may run.",
+      "permissions": [
+        "core.compliance_gate.update"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "teams",
+      "name": "Teams",
+      "domain": "core",
+      "description": "Create teams and manage their membership.",
+      "permissions": [
+        "core.team.create",
+        "core.team.read",
+        "core.team.update",
+        "core.team.delete"
+      ],
+      "sensitive": false
+    },
+    {
+      "key": "everyday_collaboration",
+      "name": "Everyday Collaboration",
+      "domain": "core",
+      "description": "Comment on work, upload and manage your own files, receive notifications, and submit your own daily check-in. The baseline every staff member needs.",
+      "permissions": [
+        "core.comment.create",
+        "core.comment.read",
+        "core.file.create",
+        "core.file.read",
+        "core.file.delete",
+        "core.notification.create",
+        "core.notification.read",
+        "core.notification.update",
+        "reports.checkin.submit"
+      ],
+      "sensitive": false
+    },
+    {
+      "key": "appraisal_acknowledge",
+      "name": "Acknowledge Own Appraisal",
+      "domain": "reports",
+      "description": "Acknowledge your own finalized performance appraisal. Kept separate from Everyday Collaboration because it touches HR performance data.",
+      "permissions": [
+        "reports.appraisal.ack"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "client_records",
+      "name": "Client Records",
+      "domain": "core",
+      "description": "Create, view, and edit client records.",
+      "permissions": [
+        "core.client.create",
+        "core.client.read",
+        "core.client.update"
+      ],
+      "sensitive": false
+    },
+    {
+      "key": "client_records_delete",
+      "name": "Delete Client Records",
+      "domain": "core",
+      "description": "Permanently delete a client record. Kept separate from everyday client management — deletion is a bigger step than editing.",
+      "permissions": [
+        "core.client.delete"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "client_portal_contacts_view",
+      "name": "View Client Portal Contacts",
+      "domain": "core",
+      "description": "See the external contacts who have client-portal access.",
+      "permissions": [
+        "core.client_contact.read"
+      ],
+      "sensitive": false
+    },
+    {
+      "key": "client_portal_contacts_manage",
+      "name": "Manage Client Portal Contacts",
+      "domain": "core",
+      "description": "Create, edit, or revoke an external client contact's portal access — controls who outside the company can log in.",
+      "permissions": [
+        "core.client_contact.create",
+        "core.client_contact.update",
+        "core.client_contact.revoke"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "client_contracts_draft",
+      "name": "Draft Client Contracts",
+      "domain": "core",
+      "description": "Create, view, and edit client contracts before they go out for signature.",
+      "permissions": [
+        "core.contract.create",
+        "core.contract.read",
+        "core.contract.update"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "client_contracts_send",
+      "name": "Send Contracts for Signature",
+      "domain": "core",
+      "description": "Send a client contract out for signature — the step that puts a commercial commitment in front of the client. Kept separate from drafting: see the dangerous-combination register.",
+      "permissions": [
+        "core.contract.send"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "client_contracts_delete",
+      "name": "Delete Client Contracts",
+      "domain": "core",
+      "description": "Permanently delete a client contract record.",
+      "permissions": [
+        "core.contract.delete"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "client_deliverables",
+      "name": "Client Deliverables",
+      "domain": "core",
+      "description": "Create, view, edit, and delete the deliverables tracked against a client.",
+      "permissions": [
+        "core.deliverable.create",
+        "core.deliverable.read",
+        "core.deliverable.update",
+        "core.deliverable.delete"
+      ],
+      "sensitive": false
+    },
+    {
+      "key": "invoices_view",
+      "name": "View Invoices",
+      "domain": "billing",
+      "description": "See client invoices.",
+      "permissions": [
+        "billing.invoice.read"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "invoices_manage",
+      "name": "Manage Invoices",
+      "domain": "billing",
+      "description": "Create, edit, or delete client invoices, including changing an invoice's status.",
+      "permissions": [
+        "billing.invoice.create",
+        "billing.invoice.update",
+        "billing.invoice.delete"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "company_projects",
+      "name": "Projects",
+      "domain": "core",
+      "description": "Create, view, edit, and delete company projects.",
+      "permissions": [
+        "core.project.create",
+        "core.project.read",
+        "core.project.update",
+        "core.project.delete"
+      ],
+      "sensitive": false
+    },
+    {
+      "key": "company_tasks",
+      "name": "Tasks",
+      "domain": "core",
+      "description": "Create, view, edit, and delete company tasks.",
+      "permissions": [
+        "core.task.create",
+        "core.task.read",
+        "core.task.update",
+        "core.task.delete"
+      ],
+      "sensitive": false
+    },
+    {
+      "key": "time_tracking",
+      "name": "Time Tracking",
+      "domain": "core",
+      "description": "Create, view, edit, and delete logged time entries.",
+      "permissions": [
+        "core.time_entry.create",
+        "core.time_entry.read",
+        "core.time_entry.update",
+        "core.time_entry.delete"
+      ],
+      "sensitive": false
+    },
+    {
+      "key": "pm_contribute",
+      "name": "PM Console — Contribute",
+      "domain": "pm",
+      "description": "View PM console projects and tasks, update task status/progress/dates, and pass the ball to someone else. What any team member doing project work needs.",
+      "permissions": [
+        "pm.task.read",
+        "pm.task.update",
+        "pm.project.read"
+      ],
+      "sensitive": false
+    },
+    {
+      "key": "pm_manage",
+      "name": "PM Console — Manage",
+      "domain": "pm",
+      "description": "Create and delete PM console tasks, change task ownership (assign the Responsible person), and manage project settings/milestones/structure.",
+      "permissions": [
+        "pm.task.create",
+        "pm.task.delete",
+        "pm.task.manage",
+        "pm.project.manage"
+      ],
+      "sensitive": false
+    },
+    {
+      "key": "pipeline_advance",
+      "name": "Advance Delivery Pipeline Runs",
+      "domain": "core",
+      "description": "Start and advance a delivery-pipeline run, add stages, open approval gates, and view scope sign-offs. The everyday working tier for running a client engagement through its stages.",
+      "permissions": [
+        "core.pipeline_run.create",
+        "core.pipeline_run.update",
+        "core.pipeline_run.read",
+        "core.pipeline_stage.create",
+        "core.pipeline_stage.read",
+        "core.pipeline_gate.create",
+        "core.pipeline_gate.read",
+        "core.scope_signoff.read"
+      ],
+      "sensitive": false
+    },
+    {
+      "key": "pipeline_edit_signed_artifacts",
+      "name": "Edit Signed Pipeline Artifacts",
+      "domain": "core",
+      "description": "Edit a delivery-pipeline stage's artifacts or status after it has already been through a stage gate. Kept separate from Sign Client Scope — see the dangerous-combination register.",
+      "permissions": [
+        "core.pipeline_stage.update"
+      ],
+      "sensitive": false
+    },
+    {
+      "key": "pipeline_sign_scope",
+      "name": "Sign Client Scope",
+      "domain": "core",
+      "description": "Record a scope sign-off with a client — the act that commits the agency to the agreed scope. Kept separate from editing signed artifacts: see the dangerous-combination register.",
+      "permissions": [
+        "core.scope_signoff.create"
+      ],
+      "sensitive": false
+    },
+    {
+      "key": "meeting_recordings",
+      "name": "Meeting Recordings",
+      "domain": "core",
+      "description": "Create, view, edit, ingest, and sync meeting recordings to the shared drive.",
+      "permissions": [
+        "core.meeting_recording.create",
+        "core.meeting_recording.ingest",
+        "core.meeting_recording.sync_drive",
+        "core.meeting_recording.update",
+        "core.meeting_recording.read"
+      ],
+      "sensitive": false
+    },
+    {
+      "key": "meeting_recordings_relink",
+      "name": "Re-link Meeting Recordings",
+      "domain": "core",
+      "description": "Re-attach a recording to a different client or pipeline run. Rare and easy to misuse — can move a recording into the wrong client's context.",
+      "permissions": [
+        "core.meeting_recording.relink"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "approvals_file_automation",
+      "name": "File Automation Approval Requests",
+      "domain": "core",
+      "description": "File and view automation/agent write requests awaiting approval.",
+      "permissions": [
+        "core.automation_approval.create",
+        "core.automation_approval.read"
+      ],
+      "sensitive": false
+    },
+    {
+      "key": "approvals_file_agency",
+      "name": "File Agency Approval Requests",
+      "domain": "agency",
+      "description": "File and view agency campaign/creative approval requests.",
+      "permissions": [
+        "agency.approval.create",
+        "agency.approval.read"
+      ],
+      "sensitive": false
+    },
+    {
+      "key": "approvals_decide",
+      "name": "Decide Approvals",
+      "domain": "core",
+      "description": "Approve or reject automation write requests, agency approval requests, and delivery-pipeline gates. The general approve/reject authority across the approvals inbox.",
+      "permissions": [
+        "core.automation_approval.decide",
+        "agency.approval.approve",
+        "core.pipeline_gate.decide"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "approvals_retry",
+      "name": "Retry Failed Automation Actions",
+      "domain": "core",
+      "description": "Re-attempt an approved automation action that failed partway through. Narrower than Decide Approvals — deciding does not include retrying.",
+      "permissions": [
+        "core.automation_approval.retry"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "rollups",
+      "name": "Cross-Company Rollups",
+      "domain": "core",
+      "description": "Read cross-company metric rollups and trigger a recompute. The only way to see numbers spanning more than one company.",
+      "permissions": [
+        "core.rollup.read",
+        "core.rollup_recompute.create"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "service_assignments_propose",
+      "name": "Propose Shared Service Assignments",
+      "domain": "core",
+      "description": "Propose that one company's department provide a service to another company, and view existing assignments. Kept separate from approving — see the dangerous-combination register.",
+      "permissions": [
+        "core.service_assignment.propose",
+        "core.service_assignment.read"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "service_assignments_approve",
+      "name": "Approve Shared Service Assignments",
+      "domain": "core",
+      "description": "Accept a proposed cross-company service assignment, which activates the cross-company access it grants. Kept separate from proposing — see the dangerous-combination register.",
+      "permissions": [
+        "core.service_assignment.accept",
+        "core.service_assignment.read"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "service_assignments_admin",
+      "name": "Administer Service Assignments",
+      "domain": "core",
+      "description": "Suspend, resume, revoke, re-link, or reconcile an existing cross-company service assignment.",
+      "permissions": [
+        "core.service_assignment.suspend",
+        "core.service_assignment.resume",
+        "core.service_assignment.revoke",
+        "core.service_assignment.relink",
+        "core.service_assignment.reconcile",
+        "core.service_assignment.read"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "integrations_view",
+      "name": "View Integrations",
+      "domain": "core",
+      "description": "See the third-party integration connections configured for this company.",
+      "permissions": [
+        "core.integration_connection.read"
+      ],
+      "sensitive": false
+    },
+    {
+      "key": "integrations_manage",
+      "name": "Manage Integrations",
+      "domain": "core",
+      "description": "Create, edit, or delete third-party integration connections (OAuth/API credentials).",
+      "permissions": [
+        "core.integration_connection.create",
+        "core.integration_connection.update",
+        "core.integration_connection.delete"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "identity_links",
+      "name": "Cross-Channel Identity Links",
+      "domain": "core",
+      "description": "View, edit, or delete the links between a WhatsApp/Telegram identity and a platform user account.",
+      "permissions": [
+        "core.identity_link.read",
+        "core.identity_link.update",
+        "core.identity_link.delete"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "chat_group_messaging",
+      "name": "WhatsApp Group Messaging",
+      "domain": "core",
+      "description": "Pin a message or change the subject line in a bot-managed WhatsApp group.",
+      "permissions": [
+        "core.chat_group.pin",
+        "core.chat_group.set_subject"
+      ],
+      "sensitive": false
+    },
+    {
+      "key": "chat_group_membership",
+      "name": "WhatsApp Group Membership",
+      "domain": "core",
+      "description": "Add, remove, or promote members in a bot-managed WhatsApp group.",
+      "permissions": [
+        "core.chat_group.add_member",
+        "core.chat_group.remove_member",
+        "core.chat_group.promote_member"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "agency_briefs",
+      "name": "Campaign Briefs",
+      "domain": "agency",
+      "description": "Create, view, edit, and delete agency campaign briefs.",
+      "permissions": [
+        "agency.brief.create",
+        "agency.brief.read",
+        "agency.brief.update",
+        "agency.brief.delete"
+      ],
+      "sensitive": false
+    },
+    {
+      "key": "agency_campaigns",
+      "name": "Marketing Campaigns",
+      "domain": "agency",
+      "description": "Create, view, edit, and delete agency marketing campaigns.",
+      "permissions": [
+        "agency.campaign.create",
+        "agency.campaign.read",
+        "agency.campaign.update",
+        "agency.campaign.delete"
+      ],
+      "sensitive": false
+    },
+    {
+      "key": "agency_creative_assets",
+      "name": "Creative Assets",
+      "domain": "agency",
+      "description": "Create, view, edit, and delete agency creative assets.",
+      "permissions": [
+        "agency.creative_asset.create",
+        "agency.creative_asset.read",
+        "agency.creative_asset.update",
+        "agency.creative_asset.delete"
+      ],
+      "sensitive": false
+    },
+    {
+      "key": "hr_view",
+      "name": "View HR Cases & Records",
+      "domain": "hr",
+      "description": "Read HR cases (onboarding, leave, loans, grievances) and HR records (contracts, documents, notes). Read-only.",
+      "permissions": [
+        "hr.case.read",
+        "hr.record.read"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "hr_cases_manage",
+      "name": "Manage HR Cases",
+      "domain": "hr",
+      "description": "Create, edit, cancel, or delete HR cases such as leave, loans, onboarding, and grievances on someone else's behalf.",
+      "permissions": [
+        "hr.case.create",
+        "hr.case.update",
+        "hr.case.cancel",
+        "hr.case.delete"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "hr_records_manage",
+      "name": "Manage HR Records",
+      "domain": "hr",
+      "description": "Create, edit, or delete HR records — contracts, documents, and notes on an employee's file.",
+      "permissions": [
+        "hr.record.create",
+        "hr.record.update",
+        "hr.record.delete"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "hr_export",
+      "name": "Export HR Data",
+      "domain": "hr",
+      "description": "Bulk-export HR cases and records. Kept separate and requires step-up verification — bulk export is a data-exposure risk in its own right.",
+      "permissions": [
+        "hr.case.export",
+        "hr.record.export"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "it_devices_view",
+      "name": "View IT Devices",
+      "domain": "it",
+      "description": "See the IT device registry.",
+      "permissions": [
+        "it.device.read"
+      ],
+      "sensitive": false
+    },
+    {
+      "key": "it_devices_manage",
+      "name": "Manage IT Devices",
+      "domain": "it",
+      "description": "Register, edit, or remove entries in the IT device registry.",
+      "permissions": [
+        "it.device.create",
+        "it.device.update",
+        "it.device.delete"
+      ],
+      "sensitive": false
+    },
+    {
+      "key": "knowledge_view",
+      "name": "View Knowledge Sources",
+      "domain": "knowledge",
+      "description": "Browse the sources feeding the organization-wide knowledge base (RAG).",
+      "permissions": [
+        "knowledge.source.read"
+      ],
+      "sensitive": false
+    },
+    {
+      "key": "knowledge_review",
+      "name": "Review Knowledge Sources",
+      "domain": "knowledge",
+      "description": "Approve, reject, or edit a knowledge source — controls what enters the organization-wide knowledge base.",
+      "permissions": [
+        "knowledge.source.update"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "search_view",
+      "name": "View Search & SEM Data",
+      "domain": "search",
+      "description": "See search-marketing properties, engagements, keywords, audits, campaigns, reports, and the provider cost ledger. Read-only.",
+      "permissions": [
+        "search.audit.read",
+        "search.campaign.read",
+        "search.engagement.read",
+        "search.keyword.read",
+        "search.property.read",
+        "search.report.read",
+        "search.ledger.read"
+      ],
+      "sensitive": false
+    },
+    {
+      "key": "search_manage_drafts",
+      "name": "Draft Search & SEM Work",
+      "domain": "search",
+      "description": "Create and edit search properties, engagements, keyword sets, audits, campaign drafts and change proposals, and report drafts. Draft-only — does not touch anything live.",
+      "permissions": [
+        "search.audit.create",
+        "search.audit.update",
+        "search.audit.delete",
+        "search.audit.run",
+        "search.campaign.create",
+        "search.campaign.update",
+        "search.campaign.delete",
+        "search.campaign.propose_change",
+        "search.engagement.create",
+        "search.engagement.update",
+        "search.engagement.delete",
+        "search.keyword.create",
+        "search.keyword.update",
+        "search.keyword.delete",
+        "search.keyword.research",
+        "search.property.create",
+        "search.property.update",
+        "search.property.delete",
+        "search.report.create",
+        "search.report.update",
+        "search.report.delete"
+      ],
+      "sensitive": false
+    },
+    {
+      "key": "search_scope_and_budget",
+      "name": "Set Engagement Scope & Budget Cap",
+      "domain": "search",
+      "description": "Set a search engagement's commercial scope and provider budget cap.",
+      "permissions": [
+        "search.engagement.set_scope"
+      ],
+      "sensitive": false
+    },
+    {
+      "key": "search_launch_live_campaigns",
+      "name": "Launch Live Ad Campaigns",
+      "domain": "search",
+      "description": "Execute changes on the live ad platform — launch a campaign, apply a manual-mode change, apply negative keywords, or set the live budget. Real client ad spend. Kept separate from drafting — see the dangerous-combination register.",
+      "permissions": [
+        "search.campaign.launch",
+        "search.campaign.apply_manual",
+        "search.campaign.apply_negatives",
+        "search.campaign.set_budget"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "search_report_approve",
+      "name": "Approve & Deliver SEM Reports",
+      "domain": "search",
+      "description": "Approve an engagement report and deliver it to the client. Kept separate from drafting — see the dangerous-combination register.",
+      "permissions": [
+        "search.report.approve",
+        "search.report.deliver"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "search_ledger_admin",
+      "name": "Override Ad Spend Stop-Loss",
+      "domain": "search",
+      "description": "Override a provider budget stop-loss cap. Rare, high-impact, audited.",
+      "permissions": [
+        "search.ledger.admin"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "exec_reporting",
+      "name": "Executive Reporting",
+      "domain": "reports",
+      "description": "Read company-wide report documents, view/pin/seal/amend reporting periods, and trigger a recompute of the underlying report facts. The tenant's own administrator tier.",
+      "permissions": [
+        "reports.document.read_company",
+        "reports.period.view",
+        "reports.period.pin",
+        "reports.period.seal",
+        "reports.period.amend",
+        "reports.admin.recompute"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "team_project_reports",
+      "name": "Team & Project Reports",
+      "domain": "reports",
+      "description": "Read person-, project-, and department-grain report documents. What a department head needs to see their own unit's numbers.",
+      "permissions": [
+        "reports.document.read_person",
+        "reports.document.read_project",
+        "reports.document.read_department"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "checkins_view",
+      "name": "View Check-ins",
+      "domain": "reports",
+      "description": "Read other people's check-in history and the compliance grid.",
+      "permissions": [
+        "reports.checkin.read"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "checkins_manage",
+      "name": "Manage Check-ins",
+      "domain": "reports",
+      "description": "Excuse a missed check-in. Usually granted together with View Check-ins.",
+      "permissions": [
+        "reports.checkin.excuse"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "checkin_ops_automation",
+      "name": "Check-in Reminders & Compliance Feed",
+      "domain": "reports",
+      "description": "List pending check-in reminders and missed check-ins by org unit. Mainly consumed by the automation/reminder pipeline, not a human console.",
+      "permissions": [
+        "reports.checkin.pending_reminders",
+        "reports.checkin.missed_by_unit"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "appraisals_view",
+      "name": "View Appraisals",
+      "domain": "reports",
+      "description": "Read performance appraisal packs beyond your own.",
+      "permissions": [
+        "reports.appraisal.read"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "appraisals_score",
+      "name": "Score Appraisals",
+      "domain": "reports",
+      "description": "Write and submit appraisal scores for the people you are the assigned manager for.",
+      "permissions": [
+        "reports.appraisal.write",
+        "reports.appraisal.submit"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "appraisals_cycle_admin",
+      "name": "Administer Appraisal Cycles",
+      "domain": "reports",
+      "description": "Open, configure, and close appraisal cycles; confirm the evidence pack attached to an appraisal; and finalize an appraisal, sealing its outcome. Kept separate from scoring — see the dangerous-combination register.",
+      "permissions": [
+        "reports.appraisal.cycle_admin",
+        "reports.appraisal.finalize",
+        "reports.appraisal.confirm_evidence"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "webdev_file_change_requests",
+      "name": "File Website Change Requests",
+      "domain": "webdev",
+      "description": "File and view website change requests.",
+      "permissions": [
+        "webdev.change_request.create",
+        "webdev.change_request.read"
+      ],
+      "sensitive": false
+    },
+    {
+      "key": "webdev_triage_change_requests",
+      "name": "Triage Website Change Requests",
+      "domain": "webdev",
+      "description": "Accept, route, or reject an incoming website change request.",
+      "permissions": [
+        "webdev.change_request.triage",
+        "webdev.change_request.read"
+      ],
+      "sensitive": false
+    },
+    {
+      "key": "webdev_provisioning",
+      "name": "Website Provisioning",
+      "domain": "webdev",
+      "description": "Provision a client site's real infrastructure (repo + hosting) and re-check its provisioning status.",
+      "permissions": [
+        "webdev.provisioned_site.provision",
+        "webdev.provisioned_site.reconcile",
+        "webdev.provisioned_site.read"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "portal_basic_access",
+      "name": "Client Portal — Basic Access",
+      "domain": "portal",
+      "description": "Open the client portal workspace, file a website change request, and update your own client-contact profile.",
+      "permissions": [
+        "portal.read",
+        "portal.request_change",
+        "portal.update_profile"
+      ],
+      "sensitive": false
+    },
+    {
+      "key": "portal_sign",
+      "name": "Client Portal — Sign Documents",
+      "domain": "portal",
+      "description": "Sign a contract or scope document from the client portal.",
+      "permissions": [
+        "portal.sign"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "portal_pay",
+      "name": "Client Portal — Pay Invoices",
+      "domain": "portal",
+      "description": "Initiate payment of an invoice from the client portal.",
+      "permissions": [
+        "portal.pay"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "portal_decide",
+      "name": "Client Portal — Decide Gates",
+      "domain": "portal",
+      "description": "Decide a gate that has been exposed to the client in the portal.",
+      "permissions": [
+        "portal.decide"
+      ],
+      "sensitive": true
+    }
+  ],
+  "advancedOnly": [
+    {
+      "key": "core.work_activity.create",
+      "reason": "Machine/automation tracker-event ingestion (bot/agent writes). Not a duty a human role is composed for; would confuse a group picker with a technical write action."
+    },
+    {
+      "key": "core.work_activity.read",
+      "reason": "Raw tracker event stream — a support/debugging read, not an everyday duty. (core.activity.read, the human-facing activity feed, is already in Company Overview.)"
+    }
+  ]
+}

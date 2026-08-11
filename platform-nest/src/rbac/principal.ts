@@ -14,9 +14,37 @@ const UUID_RE = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0
 
 export type Assurance = "low" | "linked" | "high";
 
+// HIER-1 (2026-08-10): `org_unit` added to this union — a pure WIDENING, not a narrowing swap for
+// `team`/`record`. `team`/`record` are kept here on purpose even though migration 0100's DB-level
+// CHECK on `user_roles.scope_type` no longer permits either: retiring them from THIS TS union is
+// HIER-3's job (docs/superpowers/plans/2026-08-10-hierarchy-consolidation.md §3 W11), sequenced
+// AFTER HIER-2 builds `org_unit`'s replacement role — narrowing here first would force a
+// simultaneous edit of every test file that still constructs a `team`-scoped `Principal` literal
+// (cerbos.test.ts, cerbos-webdev-matrix.test.ts, cerbos-permission-dual-match.test.ts,
+// principal-permissions.db.test.ts, person-scope.test.ts — none of which touch the DB, so none of
+// them are broken by 0100's CHECK; they would ONLY break from narrowing this type, which is not
+// this ticket's mandate). The DB is authoritative on what can be STORED; this union is
+// authoritative on what TypeScript will let a caller construct in memory — the two are allowed to
+// diverge during the phased retirement, and 0100's shape CHECK is what actually enforces the new
+// boundary at the only layer that matters for data integrity.
 export interface RoleGrant {
   role: string;
-  scopeType: "global" | "company" | "team" | "project" | "record";
+  scopeType: "global" | "company" | "org_unit" | "team" | "project" | "record";
+  scopeId: string | null;
+}
+
+/** IAM-03a: a single resolved (permission key, scope) a principal holds — the role→permission
+ *  expansion of one `RoleGrant` via `role_permissions` (IAM-02a, migration 0094). `key` is a
+ *  `permissions.key` from the catalog (migration 0093, `permission-catalog.json`), e.g.
+ *  `"core.task.update"`. `scopeType`/`scopeId` are copied from the GRANT the permission was
+ *  reached through — a company-scope `manager` grant yields company-scope perms at that same
+ *  company, not global ones; a global-scope `platform_admin` grant yields global-scope perms.
+ *  `org_unit` WAS deliberately excluded from this union pending IAM-08/HIER-1 — HIER-1 (migration
+ *  0100) is that ticket, so it is added now, additively, alongside (not replacing) `team`/
+ *  `record` per this file's `RoleGrant` comment just above. */
+export interface PermissionGrant {
+  key: string;
+  scopeType: "global" | "company" | "org_unit" | "team" | "project" | "record";
   scopeId: string | null;
 }
 
@@ -25,10 +53,31 @@ export interface Principal {
   assurance: Assurance;
   companies: string[]; // authorized tenant set (active memberships)
   roles: RoleGrant[];
+  /** IAM-03a: STRICTLY ADDITIVE alongside `roles` — every existing call site that only reads
+   *  `roles` is unaffected. Resolved from `role_permissions` (IAM-02a); NEVER contains a
+   *  `class='relationship'` key (Ruling 3) — enforced twice over, see `assemblePrincipal`'s query
+   *  comment and 0093's `role_permissions_reject_relationship` trigger. Nothing consumes this yet
+   *  (Cerbos still matches role names; the permission-matching rewrite is IAM-04).
+   *
+   *  Declared OPTIONAL, not required, so this ticket touches zero files outside `src/rbac/`:
+   *  ~20 existing test files across `src/rbac/`, `src/modules/reports/`, `src/modules/search/`
+   *  hand-construct `Principal` literals for mocking and are owned by other work/other concurrent
+   *  agents in this checkout. `assemblePrincipal()` (the one real producer) always populates it;
+   *  `principalHasPermission()` below defends with `p.perms ?? []` for the synthetic literals that
+   *  don't. A later ticket that starts actually depending on `perms` can tighten this to required
+   *  once those call sites are updated — not this one's remit. */
+  perms?: PermissionGrant[];
   sessionVersion: number; // D11
 }
 
-export const ANONYMOUS: Principal = { userId: null, assurance: "low", companies: [], roles: [], sessionVersion: 0 };
+export const ANONYMOUS: Principal = {
+  userId: null,
+  assurance: "low",
+  companies: [],
+  roles: [],
+  perms: [],
+  sessionVersion: 0,
+};
 
 export async function assemblePrincipal(userId: string, assurance: Assurance): Promise<Principal | null> {
   const user = await withGlobal((c) =>
@@ -39,13 +88,37 @@ export async function assemblePrincipal(userId: string, assurance: Assurance): P
   );
   if (!user.rows[0] || user.rows[0].status !== "active") return null;
 
-  const roles = await withGlobal((c) =>
-    c.query<RoleGrant>(
+  // IAM-03a: `roles` (unchanged query, unchanged shape — every existing caller keeps working) and
+  // its `perms` expansion resolved in the SAME connection checkout (one extra query, not one extra
+  // pool round trip) — see the IAM-03b report for the measured cost. The perms query joins through
+  // `role_permissions` (IAM-02a, 0094) to the SAME `user_roles` grant row, so a permission's
+  // scopeType/scopeId is always the scope the enclosing ROLE grant was made at, never invented.
+  // `p.class = 'grantable'` is defense-in-depth, not the only thing preventing a relationship-class
+  // leak here: 0093's `role_permissions_reject_relationship` trigger already makes it structurally
+  // impossible for any of the 15 class='relationship' permissions to be a row in `role_permissions`
+  // in the first place, so this WHERE clause can never actually have anything to filter out — kept
+  // anyway so this query's own correctness doesn't depend on a reader remembering that fact, and so
+  // a future bug that somehow got a relationship row into `role_permissions` would still be caught
+  // here rather than surfacing only in the DB trigger. `SELECT DISTINCT` collapses the case where
+  // two held roles grant the identical (key, scope) pair (e.g. `member` and `manager` both reaching
+  // `core.task.read` at the same company scope) into one entry, and also absorbs the pre-existing
+  // duplicate-global-grant defect (Finding F, migration 0092) without needing its own dedup pass.
+  const { roles, perms } = await withGlobal(async (c) => {
+    const rolesRes = await c.query<RoleGrant>(
       `SELECT r.name AS role, ur.scope_type AS "scopeType", ur.scope_id AS "scopeId"
        FROM user_roles ur JOIN roles r ON r.id = ur.role_id WHERE ur.user_id = $1`,
       [userId],
-    ),
-  );
+    );
+    const permsRes = await c.query<PermissionGrant>(
+      `SELECT DISTINCT p.key AS key, ur.scope_type AS "scopeType", ur.scope_id AS "scopeId"
+       FROM user_roles ur
+       JOIN role_permissions rp ON rp.role_id = ur.role_id
+       JOIN permissions p ON p.id = rp.permission_id
+       WHERE ur.user_id = $1 AND p.class = 'grantable'`,
+      [userId],
+    );
+    return { roles: rolesRes.rows, perms: permsRes.rows };
+  });
 
   // Memberships are RLS-protected; the dedicated principal_lookup policy exposes only
   // the rows of the user being resolved, keyed on this transaction-local setting.
@@ -94,9 +167,30 @@ export async function assemblePrincipal(userId: string, assurance: Assurance): P
     userId,
     assurance,
     companies: companies.rows.map((r) => r.tenant_id),
-    roles: roles.rows,
+    roles,
+    perms,
     sessionVersion: user.rows[0].session_version,
   };
+}
+
+/** IAM-03a: does `p` hold `key` in a grant that covers `scopeType`/`scopeId`? A `global`-scope
+ *  grant of `key` covers every scope (global is the top of the cascade); any other grant must
+ *  match the exact (scopeType, scopeId) pair it was resolved at. This does NOT resolve narrower
+ *  cascades (e.g. whether a company-scope grant should also cover that company's teams/projects)
+ *  — that cascade lives in Cerbos's derived-role policy conditions today (D16 PlanResources) and
+ *  is deliberately left there; this only saves a future consumer the "global beats everything"
+ *  special case and a linear re-scan of `perms`, not a full authorization decision. Nothing calls
+ *  this yet — IAM-04's permission-matching derived roles and IAM-05a's `can()` are the intended
+ *  consumers. */
+export function principalHasPermission(
+  p: Principal,
+  key: string,
+  scopeType: PermissionGrant["scopeType"],
+  scopeId: string | null,
+): boolean {
+  return (p.perms ?? []).some(
+    (g) => g.key === key && (g.scopeType === "global" || (g.scopeType === scopeType && g.scopeId === scopeId)),
+  );
 }
 
 /** D11: sensitive paths re-check the live session version — a revoked/downgraded user

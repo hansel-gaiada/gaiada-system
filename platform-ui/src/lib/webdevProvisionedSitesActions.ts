@@ -2,11 +2,15 @@
 // PRV-04 — writes for the "Site & repo" card (run workspace, `/pipeline/[runId]`).
 //
 // Same shape as pipelineActions.ts: a `ctx()` resolving session -> me -> active tenant, gated on
-// `approvals.decide` (the same elevated-dept capability already gating every other manual action on
-// this page — the design's "Cerbos-gated staff action... elevated dept roles"; the real Cerbos
-// resource kind `webdev_provisioned_site`/`provision`|`reconcile` is PRV-03's, still landing in
-// parallel, so this UI gate is cosmetic defense-in-depth only, exactly like everywhere else on this
-// page — the backend is the authority and currently denies everything until PRV-03 merges).
+// `webdev.provision` — a purpose-built capability (IAM-02a-FIX-2), NOT `approvals.decide`. This file
+// originally gated on `approvals.decide` "the same elevated-dept capability already gating every
+// other manual action on this page"; DR-1 (2026-08-10) then removed `approvals.decide` from
+// `manager` because Cerbos denies `manager` on the three genuine approval-DECIDE surfaces, which
+// also silently removed manager's access here even though Cerbos's `webdev_provisioned_site`
+// policy (resource_webdev_provisioned_site.yaml, PRV-03, landed) grants `manager` `provision`/
+// `reconcile` directly. `webdev.provision` mirrors that policy's in-tenant tier exactly
+// (company_admin/manager; see rbac.ts's `webdev.provision` comment on `CAPABILITIES`) and is kept
+// permanently separate from `approvals.decide` so this cannot regress the same way twice.
 //
 // Both actions revalidate the run path unconditionally, including on a THROWN error: the mirror row
 // is committed to `failed/<reason>` server-side BEFORE several of the exceptions are thrown (see
@@ -41,7 +45,7 @@ async function ctx(): Promise<{ userId: string; tenant: string; me: Me } | { err
 export async function provisionSiteAction(formData: FormData): Promise<SiteActionResult> {
   const c = await ctx();
   if ("error" in c) return { ok: false, error: c.error };
-  if (!can(c.me, "approvals.decide", c.tenant)) {
+  if (!can(c.me, "webdev.provision", c.tenant)) {
     return { ok: false, error: "You don't have permission to provision a site for this run." };
   }
   const runId = String(formData.get("runId") ?? "").trim();
@@ -67,11 +71,11 @@ export async function provisionSiteAction(formData: FormData): Promise<SiteActio
 
 /** Re-poll now — also the resume path for a row that never egressed. Cerbos-gates this separately
  *  from `read` on the backend (a reconcile can cause a real egress), so it stays behind the same
- *  elevated capability as the create form rather than being folded into a plain "refresh". */
+ *  `webdev.provision` capability as the create form rather than being folded into a plain "refresh". */
 export async function reconcileSiteAction(formData: FormData): Promise<SiteActionResult> {
   const c = await ctx();
   if ("error" in c) return { ok: false, error: c.error };
-  if (!can(c.me, "approvals.decide", c.tenant)) {
+  if (!can(c.me, "webdev.provision", c.tenant)) {
     return { ok: false, error: "You don't have permission to reconcile this site." };
   }
   const runId = String(formData.get("runId") ?? "").trim();

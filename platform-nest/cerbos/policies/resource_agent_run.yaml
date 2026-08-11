@@ -19,6 +19,27 @@
 # someone else's — reading it back is not an elevation, unlike a transcript from a run some OTHER
 # user's authority produced (which is exactly what stays elevated-only, unconditionally, above).
 #
+# ── IAM-SEC-01 (2026-08-10) — added `variables.notLow`. OWNER-SIGHTED, THIS NARROWS ACCESS. ──────
+# WHAT CHANGED: the `read` rule below now also requires `variables.notLow`
+# (`request.principal.attr.assurance != "low"`), matching `resource_assistant_thread.yaml`'s floor.
+# A low-assurance owner who could read their own handoff run before this change is now DENIED.
+#
+# WHY: this rule's own sensitivity argument above ("the transcript is ... output fetched under the
+# READER's OWN authority") is IDENTICAL to `resource_assistant_thread.yaml`'s — a handoff run's
+# transcript is exactly as sensitive as the owning thread's transcript, because it's read by the same
+# owner over the same class of tenant-scoped tool output. That sibling file carries `notLow` (D4: "low-
+# assurance chat sessions get NO company data") and this file omitted it. Cross-checked against the
+# other two Cerbos kinds that also lack `notLow` (`resource_mcp_tool.yaml`, `resource_rollup.yaml`):
+# both have their OWN, more precise assurance mechanism in its place (mcp_tool's own per-tool
+# `minAssurance` rank check; rollup's role-only gate to `platform_admin`/`group_executive`, roles that
+# in practice never carry `low`) and both document that substitution at length. This file has neither
+# an alternative mechanism nor any discussion of assurance at all — the header above analyzes
+# `isElevated`, `owns`, and `origin` in depth but never once mentions assurance. That asymmetry is the
+# signature of an oversight in the original ASST-21 rule, not a considered exclusion, so it is closed
+# here rather than left as unreviewed drift (IAM-01b-2's boundary review was about `agent_run`'s
+# absence from the SUPERADMIN 215-permission catalog — a different question already resolved
+# separately — and did not examine this rule's assurance floor).
+#
 # ── THE RULE ITSELF: owner AND origin, both required ──────────────────────────────────────────────
 # `variables.owns` (`resource.attr.ownerId == principal.id`) is necessary but NOT sufficient on its
 # own — it must also be a run this policy actually knows is a handoff (`resource.attr.origin ==
@@ -42,6 +63,11 @@
 #      `gaiada-cerbos-1`. Restarting the wrong container changes nothing the tests can see. Prod is
 #      unaffected: the deploy pipeline's Cerbos-restart step already restarts the real container on
 #      every deploy.
+#   4. IAM-SEC-01's `notLow` addition is an EDIT to this now-EXISTING file, not a new file — ASST-23
+#      observed same-file edits hot-reload live over the bind mount, unlike item 1's brand-new-file
+#      case. Restart `gaiada-test-cerbos` anyway before trusting any result below: the restart costs
+#      nothing and this is a narrowing change, so a stale in-memory policy silently PASSING the old,
+#      wider rule is the one failure mode that must not go unnoticed here.
 apiVersion: api.cerbos.dev/v1
 resourcePolicy:
   version: default
@@ -55,5 +81,5 @@ resourcePolicy:
       condition:
         match:
           expr: >-
-            variables.inTenant && variables.owns &&
+            variables.inTenant && variables.notLow && variables.owns &&
             request.resource.attr.origin == "assistant_handoff"

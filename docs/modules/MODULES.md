@@ -34,8 +34,8 @@ versions below; the running build reports it at `GET /health`.
 
 | Module | Ver | Status | Workstream | Since |
 |---|---|---|---|---|
-| platform-nest | `0.20.1` | IN PROGRESS | WS1 | 2026-08-09 |
-| platform-ui | `0.25.0` | IN PROGRESS | WS5 | 2026-08-09 |
+| platform-nest | `0.21.0` | IN PROGRESS | WS1 | 2026-08-11 |
+| platform-ui | `0.25.1` | IN PROGRESS | WS5 | 2026-08-11 |
 | ai-gateway-go | `0.13.2` | PROTOTYPED | WS3 | 2026-08-07 |
 | mcp-hub | `0.10.1` | PROTOTYPED | WS2 | 2026-08-09 |
 | sync-engine-go | `0.7.0` | PROTOTYPED | WS1 | 2026-07 |
@@ -58,7 +58,25 @@ versions below; the running build reports it at `GET /health`.
 
 ---
 
-## platform-nest â€” Platform Core Â· `0.20.1` Â· PROTOTYPED
+## platform-nest â€” Platform Core Â· `0.21.0` Â· PROTOTYPED
+
+**0.21.0 (2026-08-10/11, IAM Phase 1 catch-up — many concurrent tickets, this entry consolidates):**
+the permission catalog is now DB-persisted and module-boot-validated (migrations `0091`-`0101`):
+215 grantable + 15 relationship permissions seeded (`0093`), 936 role→permission bundle pairs
+across 20 roles (`0094`/`0097`/`0098`, `company_admin` widened 199→200 by DR-5's deliberate
+`reports.appraisal.read` grant, `0099`), six previously-ungrantable roles seeded (`0091`), the
+global-scope-uniqueness dedupe fix (`0092`), and the `org_unit` scope substrate (`0100`,
+expand-only — drops `team`/`record` from the CHECK, widens `scope_id` to text — its consumer,
+`org_unit_lead`, is HIER-2 and does not exist yet) plus its closure table (`0101`, IAM-09). The
+permission-arm rewrite (IAM-04) now covers 28 of 61 Cerbos kinds as an additive, proven-identical
+mirror beside the existing role-name matching, which is still what decides every live
+authorization. New BFF surface: `GET /api/:t/authz/permissions` + `GET /api/authz/permissions`
+(IAM-05c, scope-level effective permissions, ETag-cached on `session_version`). A live defect
+(IAM-SEC-02 — elevated roles grantable at non-global scope) was found and fixed at the source
+during the rollout. Full detail: `docs/PERMISSION-CONTRACT.md` (updated in the same pass) and
+`docs/superpowers/plans/2026-08-10-iam-*` (25+ per-ticket reports). **Nothing here changes an
+existing user's access** — every ticket in this wave carried a parity assertion; the one
+deliberate widening (DR-5) was an explicit owner decision, not a side effect.
 
 **What exists (dev):** modular multi-tenant NestJS core with FORCE-RLS schema, `ModuleContract`
 framework + custom fields, Cerbos RBAC (scope cascade, decision audit, revocation, PlanResources),
@@ -80,7 +98,17 @@ authoritative `/admin/session/status`, instead of showing "unknown" as if it wer
 **Known gaps:** not deployed to production.
 **Future plans:** additional verticals (resort/marine/print) â†’ hardening to production.
 
-## platform-ui â€” ERP Suite Â· `0.25.0` Â· PROTOTYPED
+## platform-ui â€” ERP Suite Â· `0.25.1` Â· PROTOTYPED
+
+**0.25.1 (2026-08-10, IAM Phase 1 mirror corrections):** `lib/rbac.ts` and the new
+`lib/rbac-capability-map.ts` corrected against re-derived Cerbos ground truth rather than the
+hand-written list: `it_admin` loses `company.manage` (DR-6, zero Cerbos overlap), `hr_staff`/
+`search_staff`/`reports_staff` gain `people.directory` (DR-7, `resource_member.yaml`'s
+`module_staff` rule grants it unconditionally), and `hr.manage` drops `hr.case.cancel` (a map
+defect, not an owner decision — no Cerbos rule ever granted `cancel` to `module_manager`/
+`company_admin`). Zero Cerbos changes; mirror-only, pinned by 6 new tests plus the pre-existing
+547-pair `rbac-capability-parity.test.ts`. See `docs/PERMISSION-CONTRACT.md` for the full IAM
+Phase 1 picture this UI correction is one piece of.
 
 **What exists (dev):** Next.js ERP UI, BFF to platform-nest, RBAC-gated nav + company switcher; My Work,
 Approvals inbox, Companies/Projects/Tasks, Agency, Rollups, Systems/Intelligence/Admin consoles, People

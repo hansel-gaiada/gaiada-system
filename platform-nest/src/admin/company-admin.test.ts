@@ -315,4 +315,208 @@ describe.skipIf(!TEST_URL)("company-admin API (Phase B)", () => {
       expect(await countRows()).toBe(before); // no row inserted for the unrepresentable ref
     });
   });
+
+  // ─────────────────────────── IAM-09 — org-structure PUT rebuilds org_unit_closure ───────────────────────────
+  // Each PUT wholesale-replaces the tenant's tree, and rebuildOrgUnitClosure (called from putOrg,
+  // same transaction as the blob write — src/core/org-unit-closure.ts) wholesale-replaces the
+  // tenant's closure rows to match. That means each test below can assert the FULL closure snapshot
+  // for the tenant it just PUT, with zero coupling to whatever an earlier test in this file left
+  // behind — there is nothing incremental for a prior PUT's rows to leak through.
+  describe("IAM-09: org-structure PUT rebuilds org_unit_closure", () => {
+    type ClosureRow = { ancestor_id: string; descendant_id: string; depth: number };
+    const closureRows = async (tenantId: string): Promise<ClosureRow[]> =>
+      (
+        await withTenants([tenantId], (c) =>
+          c.query<ClosureRow>(
+            `SELECT ancestor_id, descendant_id, depth FROM org_unit_closure
+              WHERE tenant_id = $1 ORDER BY ancestor_id, descendant_id`,
+            [tenantId],
+          ),
+        )
+      ).rows;
+
+    it("a PUT populates a self-inclusive ancestor chain matching the blob, in the same request as the blob write", async () => {
+      const put = await app.inject({
+        method: "PUT",
+        url: `/api/${tenantA}/org-structure`,
+        headers: asUser(admin),
+        payload: {
+          root: {
+            id: "root", name: "Agency A", kind: "company",
+            children: [
+              { id: "c-d1", name: "Web Dev", kind: "department", children: [
+                { id: "c-d1-div1", name: "Frontend", kind: "division", children: [] },
+              ] },
+              { id: "c-d2", name: "SEO", kind: "department", children: [] },
+            ],
+          },
+        },
+      });
+      expect(put.statusCode).toBe(200);
+
+      const rows = await closureRows(tenantA);
+      expect(rows).toEqual([
+        { ancestor_id: "c-d1", descendant_id: "c-d1", depth: 0 },
+        { ancestor_id: "c-d1", descendant_id: "c-d1-div1", depth: 1 },
+        { ancestor_id: "c-d1-div1", descendant_id: "c-d1-div1", depth: 0 },
+        { ancestor_id: "c-d2", descendant_id: "c-d2", depth: 0 },
+        { ancestor_id: "root", descendant_id: "c-d1", depth: 1 },
+        { ancestor_id: "root", descendant_id: "c-d1-div1", depth: 2 },
+        { ancestor_id: "root", descendant_id: "c-d2", depth: 1 },
+        { ancestor_id: "root", descendant_id: "root", depth: 0 },
+      ]);
+    });
+
+    it("a node MOVED to a different parent updates every affected ancestor path, not just its own row", async () => {
+      await app.inject({
+        method: "PUT",
+        url: `/api/${tenantA}/org-structure`,
+        headers: asUser(admin),
+        payload: {
+          root: {
+            id: "root", name: "Agency A", kind: "company",
+            children: [
+              { id: "m-d1", name: "Web Dev", kind: "department", children: [
+                { id: "m-node", name: "Moving", kind: "division", children: [] },
+              ] },
+              { id: "m-d2", name: "SEO", kind: "department", children: [] },
+            ],
+          },
+        },
+      });
+      const before = await closureRows(tenantA);
+      expect(before.filter((r) => r.descendant_id === "m-node").map((r) => r.ancestor_id).sort()).toEqual(
+        ["m-d1", "m-node", "root"].sort(),
+      );
+
+      // Move 'm-node' from under 'm-d1' to under 'm-d2'.
+      const put2 = await app.inject({
+        method: "PUT",
+        url: `/api/${tenantA}/org-structure`,
+        headers: asUser(admin),
+        payload: {
+          root: {
+            id: "root", name: "Agency A", kind: "company",
+            children: [
+              { id: "m-d1", name: "Web Dev", kind: "department", children: [] },
+              { id: "m-d2", name: "SEO", kind: "department", children: [
+                { id: "m-node", name: "Moving", kind: "division", children: [] },
+              ] },
+            ],
+          },
+        },
+      });
+      expect(put2.statusCode).toBe(200);
+
+      const after = await closureRows(tenantA);
+      // The OLD ancestor (m-d1) no longer covers m-node at all.
+      expect(after.some((r) => r.ancestor_id === "m-d1" && r.descendant_id === "m-node")).toBe(false);
+      // m-d1's own descendant set no longer includes m-node.
+      expect(after.filter((r) => r.ancestor_id === "m-d1").map((r) => r.descendant_id)).toEqual(["m-d1"]);
+      // The NEW ancestor path is fully present: m-node itself, m-d2, and root.
+      expect(after.filter((r) => r.descendant_id === "m-node").map((r) => r.ancestor_id).sort()).toEqual(
+        ["m-d2", "m-node", "root"].sort(),
+      );
+    });
+
+    it("a node DELETED from the blob leaves no orphan closure rows", async () => {
+      await app.inject({
+        method: "PUT",
+        url: `/api/${tenantA}/org-structure`,
+        headers: asUser(admin),
+        payload: {
+          root: {
+            id: "root", name: "Agency A", kind: "company",
+            children: [
+              { id: "del-d1", name: "Web Dev", kind: "department", children: [
+                { id: "del-doomed", name: "Doomed", kind: "division", children: [] },
+              ] },
+            ],
+          },
+        },
+      });
+      const before = await closureRows(tenantA);
+      expect(before.some((r) => r.ancestor_id === "del-doomed" || r.descendant_id === "del-doomed")).toBe(true);
+
+      const put2 = await app.inject({
+        method: "PUT",
+        url: `/api/${tenantA}/org-structure`,
+        headers: asUser(admin),
+        payload: {
+          root: {
+            id: "root", name: "Agency A", kind: "company",
+            children: [{ id: "del-d1", name: "Web Dev", kind: "department", children: [] }],
+          },
+        },
+      });
+      expect(put2.statusCode).toBe(200);
+
+      const after = await closureRows(tenantA);
+      expect(after.some((r) => r.ancestor_id === "del-doomed" || r.descendant_id === "del-doomed")).toBe(false);
+    });
+
+    it("re-PUTting the IDENTICAL tree is idempotent: byte-identical closure rows", async () => {
+      const payload = {
+        root: {
+          id: "root", name: "Agency A", kind: "company",
+          children: [
+            { id: "idem-d1", name: "Web Dev", kind: "department", children: [
+              { id: "idem-div1", name: "Frontend", kind: "division", children: [] },
+            ] },
+          ],
+        },
+      };
+      await app.inject({ method: "PUT", url: `/api/${tenantA}/org-structure`, headers: asUser(admin), payload });
+      const first = await closureRows(tenantA);
+      expect(first.length).toBeGreaterThan(0);
+
+      await app.inject({ method: "PUT", url: `/api/${tenantA}/org-structure`, headers: asUser(admin), payload });
+      const second = await closureRows(tenantA);
+      expect(second).toEqual(first);
+    });
+
+    it("two DIFFERENT companies using the SAME free-form node id never bleed into each other's closure", async () => {
+      const tenantC = await createCompany("Closure Collision Co C", ["agency"]);
+      const adminC = await createUser("closure-admin-c@a.test");
+      await addMembership(tenantC, adminC);
+      const roleC = await createRole("company_admin");
+      await grantRole(adminC, roleC, "company", tenantC);
+
+      // tenantA gets a node 'collide' WITH a child; tenantC gets a node 'collide' with NO child.
+      await app.inject({
+        method: "PUT",
+        url: `/api/${tenantA}/org-structure`,
+        headers: asUser(admin),
+        payload: {
+          root: {
+            id: "root", name: "Agency A", kind: "company",
+            children: [{ id: "collide", name: "Collide", kind: "department", children: [
+              { id: "collide-child", name: "Child", kind: "division", children: [] },
+            ] }],
+          },
+        },
+      });
+      const putC = await app.inject({
+        method: "PUT",
+        url: `/api/${tenantC}/org-structure`,
+        headers: asUser(adminC),
+        payload: {
+          root: { id: "root", name: "Collision Co C", kind: "company", children: [
+            { id: "collide", name: "Collide", kind: "department", children: [] },
+          ] },
+        },
+      });
+      expect(putC.statusCode).toBe(200);
+
+      const rowsA = await closureRows(tenantA);
+      const rowsC = await closureRows(tenantC);
+
+      // tenantA's 'collide' has a descendant 'collide-child'.
+      expect(rowsA.some((r) => r.ancestor_id === "collide" && r.descendant_id === "collide-child")).toBe(true);
+      // tenantC's closure has NO knowledge of 'collide-child' at all — it never wrote that node.
+      expect(rowsC.some((r) => r.descendant_id === "collide-child")).toBe(false);
+      // tenantC's OWN 'collide' self-row exists, and its descendant set is exactly itself.
+      expect(rowsC.filter((r) => r.ancestor_id === "collide").map((r) => r.descendant_id)).toEqual(["collide"]);
+    });
+  });
 });

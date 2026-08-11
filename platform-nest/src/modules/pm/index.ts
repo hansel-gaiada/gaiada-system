@@ -10,10 +10,11 @@ export const pmModule: ModuleContract = {
     "0018_pm.sql", "0036_pm_tags.sql", "0037_pm_task_custom_fields.sql", "0038_pm_project_statuses.sql",
     "0039_pm_task_recurrence.sql", "0040_pm_progress_snapshots.sql",
   ],
+  // IAM-01d migration: all 3 CLEAN — pure colon-to-dot renames onto the catalog's pm.task.* keys.
   permissions: [
-    { key: "pm:task:read", description: "View project tasks" },
-    { key: "pm:task:create", description: "Create project tasks" },
-    { key: "pm:task:manage", description: "Assign/manage tasks, milestones and docs" },
+    { key: "pm.task.read", description: "View project tasks" },
+    { key: "pm.task.create", description: "Create project tasks" },
+    { key: "pm.task.manage", description: "Assign/manage tasks, milestones and docs" },
   ],
   customFieldTargets: [],
   mcpTools: [

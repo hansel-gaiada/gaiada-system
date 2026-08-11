@@ -101,6 +101,21 @@ resourcePolicy:
       derivedRoles: ["manager", "team_lead"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }
 
+    # ══════════ HIER-2 (DR-9) — org_unit_lead's own rule, subtree cascade via ancestor ══════════
+    # containment (derived_roles.yaml). NEVER mixed into the manager/team_lead rule above — the
+    # binding authoring rule that keeps the team_lead over-grant shape from re-firing on the
+    # replacement. `read_department` ONLY: this is the one report_document action where
+    # reports.controller.ts resolves a real org-unit node id (`scopeRef`) and can therefore supply
+    # `resource.attr.unitAncestors` via IAM-09's closure table (org-unit-closure.ts's
+    # `loadUnitAncestors`). `read_person`/`read_project` are deliberately EXCLUDED — no handler
+    # today resolves a unit ancestor list for a person/project scopeRef, and a rule fed an
+    # attribute no handler populates is precisely the dead grant this program spent two days
+    # removing (see the HIER-01 consolidation plan §1.4).
+    - actions: ["read_department"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["org_unit_lead"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+
     # §8's fifth column — the served-dept provider tier (see the header for the two ACTIVE gates and
     # for why `read_person`/`read_company` are deliberately absent). `module` is pinned to "reports"
     # so an unrelated module's served grant (e.g. `hr_staff` riding an HR assignment) cannot light up

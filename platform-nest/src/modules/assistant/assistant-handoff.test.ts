@@ -280,8 +280,19 @@ describe.skipIf(!TEST_URL)("Assistant handoff + roster (ASST-21) — live PG + C
     expect(body.episodicHistory).toEqual([]);
   });
 
-  it("module contract: the ASST-21 migration + permission are registered", () => {
+  it("module contract: the ASST-21 migration is registered", () => {
     expect(assistantModule.migrations).toContain("0084_assistant_handoffs.sql");
-    expect(assistantModule.permissions.map((p) => p.key)).toContain("assistant:handoff");
+  });
+
+  // IAM-01d (2026-08-10): `assistant:handoff` used to be declared here, but the reconciliation in
+  // docs/superpowers/plans/2026-08-10-permission-catalog.md §7 traced it to the catalog's
+  // RELATIONSHIP class (assistant.thread.handoff + assistant.agent_run.read — the 15 bypass-exempt
+  // pairs, Ruling 3) — held by owning the resource, never role-grantable. The module registry's
+  // `validateModulePermissions()` fails closed on any module declaring a relationship-class
+  // permission, so it was removed rather than renamed. Handoff authorization is unchanged: still
+  // enforced by Cerbos's `owns`/`inTenant`/`notLow` conditions, just never through
+  // `ModuleContract.permissions`/`role_permissions`.
+  it("module contract: assistant declares NO grantable permissions (all 5 are relationship-class, never role-grantable)", () => {
+    expect(assistantModule.permissions).toEqual([]);
   });
 });

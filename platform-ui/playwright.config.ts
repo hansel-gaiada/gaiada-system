@@ -26,7 +26,7 @@ export default defineConfig({
       name: "chromium",
       use: { ...devices["Desktop Chrome"], storageState: ".auth/user.json" },
       dependencies: ["setup"],
-      testIgnore: [/auth\.spec\.ts/, /smoke\.spec\.ts/, /portal\.spec\.ts/],
+      testIgnore: [/auth\.spec\.ts/, /smoke\.spec\.ts/, /portal\.spec\.ts/, /iam-personas-fixture\.spec\.ts/],
     },
     {
       // CP-17 client portal. Its OWN project with NO stored session, because every test here signs in as
@@ -42,6 +42,15 @@ export default defineConfig({
       name: "anon",
       use: { ...devices["Desktop Chrome"] },
       testMatch: /auth\.spec\.ts/,
+    },
+    {
+      // IAM-06b — persona fixture specs. Self-contained (each test signs in fresh via
+      // `loginAsPersona`), no dependency on the "setup" project's stored staff session — a spec
+      // here may sign in as a client or as staff in the same file, and a stale stored session
+      // would silently test the wrong shell (same reasoning as the "portal" project above).
+      name: "personas",
+      use: { ...devices["Desktop Chrome"] },
+      testMatch: /iam-personas-fixture\.spec\.ts/,
     },
     {
       // P3-12 CI build-gate smoke check. Self-contained (does its own login),

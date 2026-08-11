@@ -211,7 +211,25 @@ describe.skipIf(!TEST_URL)("MI-03: staff change-request surface, triage + mini-r
     expect(roles).not.toContain("client");
     // 0072's safety argument is "a client-grant-only principal satisfies exactly ONE policy". If a
     // future edit adds a client rule here, that argument silently retires — this is the tripwire.
-    expect(new Set(roles)).toEqual(new Set(["platform_admin", "group_executive", "company_admin", "manager", "module_manager", "module_staff"]));
+    //
+    // IAM-04-ROLLOUT-B12 (purely additive): added the three perm_webdev_change_request_* permission-
+    // matching derived roles (read/create/triage), mirroring company_admin+manager+module_manager+
+    // module_staff's combined reach per action — see derived_roles.yaml and
+    // docs/superpowers/plans/2026-08-10-iam-04-rollout-b12-report.md. None of them is `client`; the
+    // invariant this test exists to pin (line above: `roles` never contains "client") is unaffected.
+    expect(new Set(roles)).toEqual(
+      new Set([
+        "platform_admin",
+        "group_executive",
+        "company_admin",
+        "manager",
+        "module_manager",
+        "module_staff",
+        "perm_webdev_change_request_read",
+        "perm_webdev_change_request_create",
+        "perm_webdev_change_request_triage",
+      ]),
+    );
   });
 
   it("a client-role-only principal is DENIED on all three actions (read, create, triage) — while its portal surface still works", async () => {

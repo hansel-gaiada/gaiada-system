@@ -3,6 +3,7 @@ import { getSessionUserId } from "@/lib/session-server";
 import { getMe, PlatformError } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
 import { listUsers, listRoles } from "@/lib/adminData";
+import { getOrgStructure, flattenOrgUnits } from "@/lib/org";
 import { PageHeader } from "@/components/PageHeader";
 import { Card, HairlineTable, StatusBadge } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
@@ -48,6 +49,11 @@ export default async function AdminUsersPage() {
   }
 
   const roles = tenant ? await listRoles(userId, tenant) : [];
+  // The `org_unit` scope picker (RoleManager) reuses the same org chart the org builder reads —
+  // no new fetch, per IAM-UI-SCOPE's constraint. Falls back to an empty list (renders as "no
+  // departments/divisions yet") if there's no active company at all.
+  const company = tenant ? me.companies.find((c) => c.id === tenant) ?? { id: tenant, name: tenant, type: null } : null;
+  const orgUnits = tenant && company ? flattenOrgUnits((await getOrgStructure(userId, tenant, company)).structure) : [];
 
   return (
     <>
@@ -80,6 +86,7 @@ export default async function AdminUsersPage() {
                 userId={u.id}
                 currentRoles={u.roles}
                 roles={roles}
+                orgUnits={orgUnits}
                 assign={assignRoleAction.bind(null, u.id)}
                 revoke={revokeRoleAction.bind(null, u.id)}
                 revokeSession={revokeSessionAction.bind(null, u.id)}

@@ -50,3 +50,70 @@ resourcePolicy:
             variables.inTenant && variables.notLow &&
             has(request.resource.attr.subjectUserId) &&
             request.resource.attr.subjectUserId == request.principal.id
+    # ══════════ IAM-04b — permission-matching arm (dual-match pilot #2: module-role composition). ══
+    # PURELY ADDITIVE: every rule above is byte-for-byte unchanged.
+    #
+    # Unconditional (module_staff/module_manager/company_admin-equivalent) tier — added ONLY for
+    # update/delete/export. Safe because no OTHER rule in this file grants those three specific
+    # actions to any role under a narrower condition (`member`'s self-only rule above never lists
+    # update/delete/export), so "holds the permission" cannot be satisfied by anyone whose real
+    # access is actually narrower than this rule's condition.
+    - actions: ["update"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_hr_case_update"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    - actions: ["delete"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_hr_case_delete"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    - actions: ["export"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_hr_case_export"]
+      condition:
+        match:
+          expr: >-
+            variables.inTenant && request.principal.attr.assurance == "high"
+    # Self-scoped tier — mirrors the member-self rule immediately above EXACTLY, subjectUserId check
+    # included as this rule's OWN condition (not folded into the derived role — see derived_roles.yaml).
+    #
+    # ⚠ DELIBERATELY NOT extended to an unconditional read/create mirror. `member`'s role_permissions
+    # bundle (migration 0094) carries `hr.case.read` / `hr.case.create` / `hr.case.cancel` from ITS
+    # OWN self-only rule above — 0094's bundling methodology treats a resource-instance condition
+    # (self-ownership) as "satisfied" when computing reach, so those three keys sit in `member`'s
+    # bundle indistinguishably from how `company_admin`/`module_staff`/`module_manager` hold the SAME
+    # keys UNCONDITIONALLY. `attr.perms` carries no record of which role a grant came through, so a
+    # permission-arm rule testing only "does `perms` contain hr.case.read" cannot tell those two
+    # apart — adding an unconditional mirror for read/create would silently let any `member` read or
+    # create ANY hr_case in the tenant, not just their own. This is a real granularity gap in the
+    # current 215-permission catalog (self-scoped vs. unconditional reach are ONE key), not something
+    # fixable from this ticket's owned files (derived_roles.yaml / resource policies / cerbos.ts) —
+    # flagged for IAM-04-ROLLOUT / a catalog owner, not resolved here by narrowing `member` or
+    # widening the mirror. `update`/`delete`/`export` above have no such ambiguity: no other role
+    # reaches them through a narrower condition anywhere in this file.
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_hr_case_read_self"]
+      condition:
+        match:
+          expr: >-
+            variables.inTenant && variables.notLow &&
+            has(request.resource.attr.subjectUserId) &&
+            request.resource.attr.subjectUserId == request.principal.id
+    - actions: ["create"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_hr_case_create_self"]
+      condition:
+        match:
+          expr: >-
+            variables.inTenant && variables.notLow &&
+            has(request.resource.attr.subjectUserId) &&
+            request.resource.attr.subjectUserId == request.principal.id
+    - actions: ["cancel"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_hr_case_cancel_self"]
+      condition:
+        match:
+          expr: >-
+            variables.inTenant && variables.notLow &&
+            has(request.resource.attr.subjectUserId) &&
+            request.resource.attr.subjectUserId == request.principal.id

@@ -1,6 +1,6 @@
 // Module registry: aggregates compiled-in modules; the per-tenant enable flag
 // (companies.enabled_modules) gates ACCESS at request time (spec §1.1).
-import { withTenants } from "../db";
+import { withTenants, withGlobal } from "../db";
 import type { ModuleContract } from "./contract";
 
 const modules = new Map<string, ModuleContract>();
@@ -67,4 +67,57 @@ export async function enabledModuleKeys(tenantId: string): Promise<string[]> {
     ),
   );
   return rows.map((r) => r.key);
+}
+
+/**
+ * IAM-01d: fail-closed drift guard between `ModuleContract.permissions` (compile-time, this
+ * registry) and the DB permission catalog (IAM-01c, `permissions` table seeded by migration
+ * 0093 from `src/rbac/permission-catalog.json`).
+ *
+ * Every module-declared permission key must resolve to a `class = 'grantable'` (and not
+ * `deprecated_at`) row in the catalog. This deliberately EXCLUDES `class = 'relationship'` rows
+ * (the 15 bypass-exempt pairs, Ruling 3 — assistant thread/memory/agent_run + `mcp_tool.call`) —
+ * a module declaring one of those is exactly the defect class this guard exists to catch, not a
+ * pass. Coverage is asymmetric on purpose: `module-declared ⊆ catalog`, never equality (161 of
+ * 215 grantable permissions have no module declaration at all, per the IAM-01b reconciliation —
+ * see docs/superpowers/plans/2026-08-10-permission-catalog.md §7), so this only checks the
+ * declared-subset direction.
+ *
+ * Call this ONCE, after every `registerModule()` call in bootstrap (main.ts), with the DB pool
+ * already up (i.e. after `migrate()`). Throws — refusing to start the process — rather than
+ * logging and continuing, because a module whose declared permission is invisible to the catalog
+ * is a module the UI/MCP/future bundle-authoring layer cannot reason about safely; per the ticket,
+ * "a module declaring an uncatalogued permission must refuse to start, not silently no-op."
+ *
+ * Uses `withGlobal` (no tenant/module GUC) because `permissions` is global reference data — no
+ * `tenant_id` column, never FORCE-RLS (see migration 0093's own header) — exactly like the
+ * `users`/`identity_links` reads that already use this helper.
+ */
+export async function validateModulePermissions(): Promise<void> {
+  const { rows } = await withGlobal((c) =>
+    c.query<{ key: string }>(
+      `SELECT key FROM permissions WHERE class = 'grantable' AND deprecated_at IS NULL`,
+    ),
+  );
+  const catalog = new Set(rows.map((r) => r.key));
+
+  const problems: string[] = [];
+  for (const mod of allModules()) {
+    for (const perm of mod.permissions) {
+      if (!catalog.has(perm.key)) {
+        problems.push(`${mod.key}: "${perm.key}"`);
+      }
+    }
+  }
+
+  if (problems.length > 0) {
+    throw new Error(
+      "IAM-01d boot-block: the following module-declared permissions are not catalogued as a " +
+        "role-grantable permission in the DB 'permissions' table (either uncatalogued, or the " +
+        "catalog itself has not been seeded — run migrations first). A module must never declare " +
+        "a permission the catalog does not recognize as grantable (this also rejects the 15 " +
+        "class='relationship' pairs, which by Ruling 3 must never be role-grantable). " +
+        `Refusing to start:\n  ${problems.join("\n  ")}`,
+    );
+  }
 }

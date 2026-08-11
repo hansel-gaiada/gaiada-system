@@ -114,7 +114,14 @@ const COMPANY_WIDE_ROLES = new Set([
   "reports_staff",
   "reports_manager",
 ]);
-const UNIT_SCOPED_ROLES = new Set(["manager", "team_lead"]);
+// HIER-2 (2026-08-11): `org_unit_lead` added ALONGSIDE `team_lead` — a pure widening, not a
+// narrowing swap. The HIER-2 plan's own sketch (docs/superpowers/plans/2026-08-10-iam-hier-01-
+// plan.md §HIER-2) writes this as `{"manager","unit_lead"}` (dropping team_lead), but this ticket
+// does not own retiring team_lead from any surface — that is HIER-3's job, gated on `teams`/
+// `team_memberships`/`teams.controller.ts` still existing. Keeping team_lead here is strictly
+// additive and behaviour-preserving for every existing team_lead holder; HIER-3 removes it in the
+// same sweep that removes the role everywhere else.
+const UNIT_SCOPED_ROLES = new Set(["manager", "team_lead", "org_unit_lead"]);
 
 /** Does this grant apply to `tenantId`? A `global` grant covers everything; `company` must match
  *  exactly (a null/absent scopeId is NEVER a wildcard — the same A4 rule `rbac.ts`'s `scopeCovers`
@@ -139,7 +146,14 @@ export function personAxisTier(principal: Principal, tenantId: string): PersonAx
     roles.some(
       (g) =>
         UNIT_SCOPED_ROLES.has(g.role) &&
-        (grantCoversTenant(g, tenantId) || g.scopeType === "project" || g.scopeType === "team" || g.scopeType === "record"),
+        // HIER-2: `org_unit` added — an `org_unit_lead` grant is never company/global/project/
+        // team/record-scoped by construction (0100's shape CHECK), so without this branch an
+        // org_unit_lead holder would never register as `unit_scoped` at all.
+        (grantCoversTenant(g, tenantId) ||
+          g.scopeType === "project" ||
+          g.scopeType === "team" ||
+          g.scopeType === "record" ||
+          g.scopeType === "org_unit"),
     )
   ) {
     return "unit_scoped";
@@ -272,19 +286,32 @@ async function loadOrgStructure(c: PoolClient, tenantId: string): Promise<unknow
  *
  * An EMPTY set means "this caller leads no unit" — which must read as *no access*, never as
  * *unfiltered access*. Every consumer below honours that, and it is asserted by the parity suite.
+ *
+ * HIER-2: `principal`, when passed, adds a SECOND, GRANT-DERIVED source — the union of the
+ * caller's `org_unit`-scoped `org_unit_lead` grant scopeIds, each expanded by the SAME
+ * `collectUnitSubtree` walk used for the placement-derived `manager` path below. Additive, never
+ * replacing: leadership is now also explicit and grant-auditable (D-3), not solely inferred from
+ * where the caller happens to sit in the chart. `principal` is OPTIONAL and defaults to no
+ * grant-derived source, so every pre-existing call site that doesn't pass it keeps its exact
+ * prior behaviour.
  */
 export async function loadLedUnitScope(
   c: PoolClient,
   tenantId: string,
   userId: string | null,
   asOf: string,
+  principal?: Principal,
 ): Promise<Set<string>> {
   if (!userId) return new Set();
   const own = await ownPrimaryUnits(c, tenantId, userId, asOf);
-  if (own.length === 0) return new Set();
+  const grantedUnits = (principal?.roles ?? [])
+    .filter((g) => g.role === "org_unit_lead" && g.scopeType === "org_unit" && !!g.scopeId)
+    .map((g) => g.scopeId as string);
+  if (own.length === 0 && grantedUnits.length === 0) return new Set();
   const structure = await loadOrgStructure(c, tenantId);
   const scope = new Set<string>();
   for (const unit of own) for (const id of collectUnitSubtree(structure, unit)) scope.add(id);
+  for (const unit of grantedUnits) for (const id of collectUnitSubtree(structure, unit)) scope.add(id);
   return scope;
 }
 
@@ -318,7 +345,7 @@ export async function assertPersonInLedScope(
 ): Promise<void> {
   if (!requiresUnitNarrowing(principal, tenantId)) return;
   if (principal.userId && principal.userId === subjectUserId) return;
-  const scope = await loadLedUnitScope(c, tenantId, principal.userId, asOf);
+  const scope = await loadLedUnitScope(c, tenantId, principal.userId, asOf, principal);
   if (scope.size === 0) throw new ForbiddenException(OUT_OF_LINE_MESSAGE);
   const theirs = await resolveSubjectUnit(c, tenantId, subjectUserId, asOf);
   if (!theirs || !scope.has(theirs)) throw new ForbiddenException(OUT_OF_LINE_MESSAGE);
@@ -337,7 +364,7 @@ export async function assertUnitInLedScope(
   asOf: string,
 ): Promise<void> {
   if (!requiresUnitNarrowing(principal, tenantId)) return;
-  const scope = await loadLedUnitScope(c, tenantId, principal.userId, asOf);
+  const scope = await loadLedUnitScope(c, tenantId, principal.userId, asOf, principal);
   if (!scope.has(unitNodeId)) throw new ForbiddenException(OUT_OF_LINE_MESSAGE);
 }
 

@@ -8,6 +8,7 @@
     "start": "node dist/main.js",
     "migrate": "node dist/db/migrate.js",
     "seed:agency": "node dist/seed/agency.js",
+    "seed:personas": "node dist/seed/personas.js",
     "seed:departments": "node dist/seed/departments.js",
     "seed:automation": "node dist/seed/automation.js",
     "seed:claude-seats": "node dist/seed/claude-seats.js",
@@ -15,10 +16,12 @@
     "seed:portal-clients": "node dist/seed/portal-clients.js",
     "test": "vitest run",
     "test:mail-corpus": "vitest run src/mail",
+    "test:iam-chain-alignment": "vitest run src/rbac/cerbos-catalog-alignment.test.ts src/rbac/permission-groups-catalog-parity.test.ts src/rbac/iam-07b-chain-meta.test.ts",
     "mail:replay-inbound": "node scripts/replay-inbound.mjs",
     "typecheck": "tsc --noEmit",
     "lint:withtenants": "node scripts/lint-withtenants.mjs",
-    "lint:migration-rls": "node scripts/lint-migration-rls.mjs"
+    "lint:migration-rls": "node scripts/lint-migration-rls.mjs",
+    "gen:role-bundles": "node scripts/generate-role-bundles.mjs"
   },
   "dependencies": {
     "@fastify/multipart": "^8.3.1",
@@ -46,6 +49,7 @@
     "@nestjs/cli": "^10.4.5",
     "@nestjs/testing": "^10.4.4",
     "@swc/core": "^1.7.28",
+    "@types/js-yaml": "^4.0.9",
     "@types/node": "^22.9.0",
     "@types/nodemailer": "^6.4.16",
     "@types/pg": "^8.11.10",

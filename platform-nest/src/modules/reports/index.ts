@@ -109,9 +109,12 @@ export const reportsModule: ModuleContract = {
     "0068_report_appraisals.sql",
     "0069_report_module_roles.sql",
   ],
-  permissions: [
-    { key: "reports:metrics:read", description: "View the tenant's report/appraisal rollup metrics" },
-  ],
+  // IAM-01d migration: `reports:metrics:read` was ALIAS (§7) — it maps onto
+  // reports.document.read_* + reports.period.view, none of which this key names directly, and the
+  // catalog recommendation is to drop it: the fine-grained reads already cover the surface, and
+  // "view rollup metrics" becomes a UI-only grouping (IAM-01b-3) rather than a distinct module
+  // declaration.
+  permissions: [],
   customFieldTargets: [],
   mcpTools: [
     {

@@ -77,6 +77,7 @@ import {
   requiresUnitNarrowing,
   todayIsoInTz,
 } from "./person-scope";
+import { loadUnitAncestors } from "../../core/org-unit-closure";
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const GRAINS = new Set(["person", "project", "department", "company"]);
@@ -154,6 +155,18 @@ function resolveScopeRefForGrain(grain: ReportGrain, scopeRefRaw: string | undef
  *  queries — `requiresUnitNarrowing` is a pure check over `principal.roles` and short-circuits before
  *  any transaction is opened. */
 async function authorizeReportDocumentRead(principal: Principal, tenantId: string, grain: ReportGrain, scopeRef: string): Promise<void> {
+  // HIER-2 (DR-9): org_unit_lead's own Cerbos rule (derived_roles.yaml) needs the resource's unit
+  // ANCESTOR chain to match a dept-lead grant via containment (IAM-09's closure). `department`
+  // grain ONLY — `scopeRef` IS a real org-unit node id for this grain (the same value already
+  // passed as `teamId` below), the one case this controller resolves a concrete unit id for.
+  // `person`/`project` grains carry no org-unit id at all today (`ownerId`/`projectId` are not
+  // unit ids), so no unitAncestors can be supplied for them — deliberately NOT wired; the Cerbos
+  // rule itself only lists `read_department` for exactly this reason (see that rule's comment).
+  const unitAncestors =
+    grain === "department"
+      ? await withTenants([tenantId], (c) => loadUnitAncestors(c, tenantId, scopeRef), { modules: PERSON_SCOPE_MODULES })
+      : undefined;
+
   await authorize(
     principal,
     {
@@ -164,6 +177,7 @@ async function authorizeReportDocumentRead(principal: Principal, tenantId: strin
       ownerId: grain === "person" ? scopeRef : undefined,
       projectId: grain === "project" ? scopeRef : undefined,
       teamId: grain === "department" ? scopeRef : undefined,
+      unitAncestors,
     },
     `read_${grain}`,
   );
@@ -387,7 +401,9 @@ export class ReportsController {
       scopeRefs = await withTenants(
         [tenantId],
         async (c) => {
-          const scope = await loadLedUnitScope(c, tenantId, req.principal.userId, asOf);
+          // HIER-2: `req.principal` passed so a grant-derived org_unit_lead scope (person-scope.ts's
+          // `loadLedUnitScope`) is unioned with the placement-derived one — additive, never narrower.
+          const scope = await loadLedUnitScope(c, tenantId, req.principal.userId, asOf, req.principal);
           if (scope.size === 0) return []; // leads no unit ⇒ nothing in scope, never "everything"
           if (grain === "department") return scopeRefs.filter((ref) => scope.has(ref));
           const unitByUser = await loadUnitByUser(c, tenantId, scopeRefs, asOf);
@@ -449,7 +465,8 @@ export class ReportsController {
       filtered = await withTenants(
         [tenantId],
         async (c) => {
-          const scope = await loadLedUnitScope(c, tenantId, req.principal.userId, asOf);
+          // HIER-2: see the `overview` endpoint's identical comment above.
+          const scope = await loadLedUnitScope(c, tenantId, req.principal.userId, asOf, req.principal);
           if (scope.size === 0) return [];
           if (grain === "department") return filtered.filter((r) => scope.has(String((r.dimensions ?? {}).unit ?? "")));
           const userIds = [...new Set(filtered.map((r) => String((r.dimensions ?? {}).userId ?? "")).filter((u) => u.length > 0))];

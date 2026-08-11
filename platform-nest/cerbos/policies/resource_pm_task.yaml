@@ -19,3 +19,32 @@ resourcePolicy:
       effect: EFFECT_ALLOW
       derivedRoles: ["company_admin", "manager", "team_lead"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    # ══════════ IAM-04b — permission-matching arm (dual-match pilot). PURELY ADDITIVE: every ══════
+    # rule above is byte-for-byte unchanged. Each action gets its OWN rule + its OWN permission-
+    # derived-role (derived_roles.yaml's IAM-04a section) rather than being folded into the rules
+    # above, because a single combined rule can't tell "holds pm.task.read" apart from "holds
+    # pm.task.update" — a principal with only one of the two must never ride the other through here.
+    # Safe to add without any self/instance-condition caveat (unlike hr_case): every role listed in
+    # the rules above reaches these five actions under the IDENTICAL `inTenant && notLow` condition,
+    # with no resource-instance carve-out anywhere in this file, so there is no role whose reach is
+    # narrower than "holds the permission" for pm_task specifically.
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_pm_task_read"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    - actions: ["update"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_pm_task_update"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    - actions: ["create"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_pm_task_create"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    - actions: ["delete"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_pm_task_delete"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    - actions: ["manage"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_pm_task_manage"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }

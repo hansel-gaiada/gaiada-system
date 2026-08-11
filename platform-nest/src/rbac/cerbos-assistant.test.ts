@@ -30,7 +30,10 @@ function principal(userId: string, roles: RoleGrant[], companies: string[] = [T1
 }
 const allow = async (p: Principal, r: Resource, a: string) => (await check(p, r, a)).allow;
 
-const THREAD_ACTIONS = ["create", "read", "update", "delete", "message", "stream", "stop"];
+// IAM-04c-1 / Finding G2 (2026-08-10): this matrix used to omit `handoff` (ASST-21) and
+// `confirm_write` (ASST-23) — both joined resource_assistant_thread.yaml's owner-only rule after
+// this suite was first written and never joined the test matrix. Both are now included.
+const THREAD_ACTIONS = ["create", "read", "update", "delete", "message", "stream", "stop", "handoff", "confirm_write"];
 const MEMORY_ACTIONS = ["list", "propose", "confirm", "delete"];
 
 describe.skipIf(!live)("Cerbos: assistant_thread / assistant_memory (ASST-02, owner-only)", () => {
@@ -118,6 +121,16 @@ describe.skipIf(!live)("Cerbos: assistant_thread / assistant_memory (ASST-02, ow
       }
     });
 
+    // IAM-04c-1 / Finding G2 (2026-08-10): this is the exact case Finding G2 flagged as MISSING —
+    // platform_admin is the role the ruling's exempted-by-absence design is FOR. Granted at GLOBAL
+    // scope (matching the group_executive case above) so the derived role actually activates.
+    it("platform_admin is DENIED (no admin backdoor — this is the case the 215-boundary exemption exists to prove) — granted at GLOBAL scope so the derived role actually activates", async () => {
+      const p = principal(ADMIN, [{ role: "platform_admin", scopeType: "global", scopeId: null }], []);
+      for (const action of THREAD_ACTIONS) {
+        expect(await allow(p, thread, action)).toBe(false);
+      }
+    });
+
     it("cross-tenant is DENIED even for the owner (tenant not in the authorized set)", async () => {
       const p = principal(OWNER, [], [T2]); // owner, but only authorized for T2
       for (const action of THREAD_ACTIONS) {
@@ -157,6 +170,15 @@ describe.skipIf(!live)("Cerbos: assistant_thread / assistant_memory (ASST-02, ow
 
     it("group_executive is DENIED (no admin backdoor) — granted at GLOBAL scope so the derived role actually activates", async () => {
       const p = principal(EXEC, [{ role: "group_executive", scopeType: "global", scopeId: null }], []);
+      for (const action of MEMORY_ACTIONS) {
+        expect(await allow(p, memory, action)).toBe(false);
+      }
+    });
+
+    // IAM-04c-1 / Finding G2 (2026-08-10): missing platform_admin case, same rationale as the
+    // assistant_thread block above.
+    it("platform_admin is DENIED (no admin backdoor) — granted at GLOBAL scope so the derived role actually activates", async () => {
+      const p = principal(ADMIN, [{ role: "platform_admin", scopeType: "global", scopeId: null }], []);
       for (const action of MEMORY_ACTIONS) {
         expect(await allow(p, memory, action)).toBe(false);
       }

@@ -89,6 +89,20 @@ function resolveDeciderRoles(rules: PolicyRule[], action: string, moduleRoleName
   for (const rule of rules) {
     if (!rule.actions.includes(action)) continue;
     for (const role of rule.derivedRoles) {
+      // IAM-04 rollout: skip `perm_*` derived roles. They are the PERMISSION arm — they match on
+      // `attr.perms` (a resolved permission), not on `attr.grants` (a named role a person holds).
+      // This guard exists to keep `approval-deciders.ts`'s NOTIFICATION ROUTING in step with who can
+      // actually decide, and routing is a query for role HOLDERS: there is no such thing as a user
+      // who "holds" `perm_agency_approval_approve`, so treating it as a decider role would make the
+      // guard demand a mirror entry nobody could ever match.
+      //
+      // Safe, not a coverage hole — the same reasoning (and the same skip) that
+      // `role-permission-parity.db.test.ts` applies: every permission-arm rule can only fire for a
+      // principal whose `perms` already came from some ROLE's bundle, and that role is still counted
+      // here through its own role-name rule. The permission arm's own correctness is proven
+      // separately by `cerbos-permission-dual-match.test.ts` (which grants the permission with
+      // `roles: []`, so the role arm cannot be what answers).
+      if (role.startsWith("perm_")) continue;
       roles.add(moduleRoleName[role] ?? role);
     }
   }

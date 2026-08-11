@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { can, isElevated, canManageIT, accessibleCompanies, canSwitchCompany, isManagerTier, isClient, isStaff, isClientOnly, CAPABILITIES } from "./rbac";
+import { CAPABILITY_MAP } from "./rbac-capability-map";
 import type { Me } from "./platform";
 
 const companies = [
@@ -91,9 +92,144 @@ describe("can() — capability + scope", () => {
     expect(can(coAdminA, "approvals.retry", "co-a")).toBe(true);
     expect(can(mgrA, "approvals.retry", "co-a")).toBe(false);
     expect(can(member, "approvals.retry", "co-a")).toBe(false);
-    // manager still decides — retry is a strictly narrower cut of the same surface, not a
-    // replacement for approvals.decide.
-    expect(can(mgrA, "approvals.decide", "co-a")).toBe(true);
+    // IAM-02a-FIX / DR-1 — manager no longer decides either. Before this fix the line below read
+    // `.toBe(true)` with the comment "manager still decides"; that was the drift register's
+    // finding #5 (11 live managers saw a dead Approve/Reject button on automation/agency/
+    // pipeline-gate decisions — Cerbos never granted `manager` `decide` on any of the three backing
+    // policies). See the `manager` entry's DR-1 comment in rbac.ts for the full evidence trail.
+    expect(can(mgrA, "approvals.decide", "co-a")).toBe(false);
+  });
+
+  // IAM-02a-FIX / DR-1 (drift register finding #5) — pins the correction directly, independent of
+  // the approvals.retry test above. VERIFIED against all three backing policies in rbac.ts's
+  // `manager` comment: resource_automation_approval.yaml (decide/retry -> company_admin/
+  // group_executive only), resource_agency_approval.yaml (approve -> company_admin/module_approver
+  // only), resource_pipeline_gate.yaml (decide -> company_admin/group_executive only). Cerbos is
+  // unchanged; this is the mirror catching up to what Cerbos always said.
+  it("DR-1: manager no longer holds approvals.decide (Cerbos never granted it)", () => {
+    expect(can(mgrA, "approvals.decide", "co-a")).toBe(false);
+    // company_admin/platform_admin/group_executive are unaffected — they still decide everywhere.
+    expect(can(coAdminA, "approvals.decide", "co-a")).toBe(true);
+    expect(can(admin, "approvals.decide", "co-a")).toBe(true);
+    expect(can(exec, "approvals.decide", "co-a")).toBe(true);
+  });
+
+  // IAM-02a-FIX / DR-2a (drift register finding #3) — `people.directory` for member/viewer.
+  // resource_member.yaml's baseline tenant-directory read rule is the only Cerbos signal, and it
+  // lists member/viewer on the same line as company_admin/manager/team_lead — the identical
+  // reasoning this file already used to justify team_lead's grant (see rbac.ts's `member` comment).
+  it("DR-2a: member and viewer hold people.directory", () => {
+    const viewerA = me([{ role: "viewer", scopeType: "company", scopeId: "co-a" }]);
+    expect(can(member, "people.directory", "co-a")).toBe(true);
+    expect(can(viewerA, "people.directory", "co-a")).toBe(true);
+    // still company-scoped like every other capability here — no cross-company over-grant.
+    expect(can(member, "people.directory", "co-b")).toBe(false);
+    expect(can(viewerA, "people.directory", "co-b")).toBe(false);
+  });
+});
+
+// IAM-02a-FIX / DR-2b (drift register finding #1) — `agency_approver` was entirely absent from
+// `Role`/`ROLE_CAPS`: a live-held role (1 real holder, IAM-02a-0) that resolved zero capabilities
+// anywhere in the UI. Its verified Cerbos reach is exactly `agency_approval:approve` (via
+// `module_approver`, module hardcoded "agency" at every `agency.controller.ts` call site) — nothing
+// else, not even a baseline read on that same resource kind. See rbac.ts's `agency_approver`
+// comment for the full derivation and why `approvals.decide` (not a copy of any other role) is the
+// correct, non-invented mapping.
+describe("agency_approver (DR-2b) — mirrors exactly what Cerbos grants, nothing borrowed", () => {
+  const approver = me([{ role: "agency_approver", scopeType: "company", scopeId: "co-a" }]);
+
+  it("holds approvals.decide (the only capability gating agency_approval:approve in this UI)", () => {
+    expect(can(approver, "approvals.decide", "co-a")).toBe(true);
+    expect(can(approver, "approvals.decide", "co-b")).toBe(false);
+  });
+
+  it("holds NOTHING else — not pm, not hr, not people.directory, not approvals.retry, not pipeline/webdev", () => {
+    for (const cap of [
+      "admin.access", "company.manage", "org.edit", "people.directory", "rollups.view",
+      "pm.manage", "pm.contribute", "it.manage", "approvals.retry", "knowledge.review",
+      "hr.view", "hr.manage", "search.view", "search.manage",
+      "reports.person.view", "reports.company.view", "checkin.read", "appraisal.read",
+      // IAM-02a-FIX-2 — agency_approver's entire verified Cerbos reach is agency_approval:approve
+      // (via module_approver); it appears in NONE of the pipeline/scope_signoff/webdev policies.
+      "pipeline.write", "pipeline.manage", "webdev.provision",
+    ] as const) {
+      expect(can(approver, cap, "co-a"), cap).toBe(false);
+    }
+  });
+
+  it("was previously capability-invisible entirely — the exact bug shape this closes", () => {
+    // Before DR-2b, `Role` had no `agency_approver` member and `ROLE_CAPS` had no entry for it, so
+    // `can()`'s `ROLE_CAPS[g.role as Role]` resolved `undefined` and the `!!caps` guard made every
+    // single capability question resolve false for this role — a live account with zero UI
+    // capabilities, full stop. `Me.roles[].role` is typed as a plain `string` (not the `Role` union
+    // — `platform.ts`), so nothing here would have failed to compile before the fix; the only thing
+    // that changed is that `ROLE_CAPS["agency_approver"]` now exists. Re-asserted here (redundant
+    // with the "holds approvals.decide" case above) so the regression this ticket closes is pinned
+    // by name, not just by consequence.
+    expect(can(approver, "approvals.decide", "co-a")).toBe(true);
+  });
+});
+
+// IAM-02a-FIX-2 (2026-08-10) — repairs DR-1's own collateral damage: `approvals.decide` was ALSO the
+// sole UI gate for 8 pipeline/webdev-provisioning server actions Cerbos genuinely grants `manager`
+// (and, for a subset, `member`) — see rbac.ts's `pipeline.write`/`pipeline.manage`/`webdev.provision`
+// comments on `CAPABILITIES` for the full per-policy citation. Pinned here so the exact role sets
+// cannot silently drift again — a future edit that widens or narrows one of these three without
+// touching this test will fail loudly.
+describe("pipeline.write / pipeline.manage / webdev.provision (IAM-02a-FIX-2) — exact role sets", () => {
+  const admin = me([{ role: "platform_admin", scopeType: "global", scopeId: null }]);
+  const exec = me([{ role: "group_executive", scopeType: "global", scopeId: null }]);
+  const coAdminA = me([{ role: "company_admin", scopeType: "company", scopeId: "co-a" }]);
+  const mgrA = me([{ role: "manager", scopeType: "company", scopeId: "co-a" }]);
+  const memberA = me([{ role: "member", scopeType: "company", scopeId: "co-a" }]);
+  const viewerA = me([{ role: "viewer", scopeType: "company", scopeId: "co-a" }]);
+  const leadA = me([{ role: "team_lead", scopeType: "company", scopeId: "co-a" }]);
+  const approver = me([{ role: "agency_approver", scopeType: "company", scopeId: "co-a" }]);
+
+  // resource_pipeline_run.yaml (create/update), resource_pipeline_stage.yaml (create),
+  // resource_pipeline_gate.yaml (create) — all three: company_admin, manager, member.
+  it("pipeline.write: company_admin, manager, member (platform_admin/group_executive via ALL) — NOT viewer, team_lead, agency_approver", () => {
+    for (const who of [admin, exec, coAdminA, mgrA, memberA]) {
+      expect(can(who, "pipeline.write", "co-a")).toBe(true);
+    }
+    for (const who of [viewerA, leadA, approver]) {
+      expect(can(who, "pipeline.write", "co-a")).toBe(false);
+    }
+    // company-scoped, not global, for the non-elevated roles.
+    expect(can(mgrA, "pipeline.write", "co-b")).toBe(false);
+    expect(can(memberA, "pipeline.write", "co-b")).toBe(false);
+  });
+
+  // resource_pipeline_stage.yaml (update) and resource_scope_signoff.yaml (create) both explicitly
+  // exclude member (and, for scope_signoff, team_lead) — company_admin, manager only (+ ALL roles).
+  it("pipeline.manage: company_admin, manager — member and team_lead explicitly excluded", () => {
+    for (const who of [admin, exec, coAdminA, mgrA]) {
+      expect(can(who, "pipeline.manage", "co-a")).toBe(true);
+    }
+    for (const who of [memberA, viewerA, leadA, approver]) {
+      expect(can(who, "pipeline.manage", "co-a")).toBe(false);
+    }
+    expect(can(mgrA, "pipeline.manage", "co-b")).toBe(false);
+  });
+
+  // resource_webdev_provisioned_site.yaml's in-tenant tier: company_admin, manager only ("never a
+  // plain-member action", the policy's own header).
+  it("webdev.provision: company_admin, manager — never member", () => {
+    for (const who of [admin, exec, coAdminA, mgrA]) {
+      expect(can(who, "webdev.provision", "co-a")).toBe(true);
+    }
+    for (const who of [memberA, viewerA, leadA, approver]) {
+      expect(can(who, "webdev.provision", "co-a")).toBe(false);
+    }
+    expect(can(mgrA, "webdev.provision", "co-b")).toBe(false);
+  });
+
+  // DR-1 must still stand: fixing the collateral damage never restores approvals.decide to manager.
+  it("DR-1 still stands — manager holds the new capabilities but NOT approvals.decide", () => {
+    expect(can(mgrA, "pipeline.write", "co-a")).toBe(true);
+    expect(can(mgrA, "pipeline.manage", "co-a")).toBe(true);
+    expect(can(mgrA, "webdev.provision", "co-a")).toBe(true);
+    expect(can(mgrA, "approvals.decide", "co-a")).toBe(false);
   });
 });
 
@@ -156,6 +292,10 @@ describe("team_lead caps (Gap 2 sweep) — mirrors what Cerbos actually grants t
       "admin.access", "org.edit", "rollups.view", "knowledge.review", "company.manage",
       "reports.company.view", "reports.period.seal", "reports.facts.admin", "reports.ops.poll",
       "appraisal.cycle.admin",
+      // IAM-02a-FIX-2 — team_lead appears in none of resource_pipeline_run/stage/gate.yaml,
+      // resource_scope_signoff.yaml, or resource_webdev_provisioned_site.yaml (see rbac.ts's
+      // team_lead comment's "Deliberately EXCLUDED" list).
+      "pipeline.write", "pipeline.manage", "webdev.provision",
     ] as const) {
       expect(can(leadA, cap, "co-a"), cap).toBe(false);
     }
@@ -341,5 +481,74 @@ describe("pm.contribute mirrors Cerbos pm_task:update", () => {
       if (!can(who, "pm.manage", "co-a")) continue;
       expect(can(who, "pm.contribute", "co-a"), label).toBe(true);
     }
+  });
+});
+
+// IAM-DR67 / DR-6 (drift register finding #7, owner-decided 2026-08-10) — `it_admin` no longer
+// holds `company.manage`. Verified against resource_device.yaml (it_admin's entire Cerbos reach:
+// it.device.create/update/delete) vs. company.manage's ten-permission ANY set (integration
+// connections, company update, billing, automation retry) — zero overlap. Cerbos is unchanged;
+// this pins the mirror-only correction so a future edit cannot silently reintroduce the over-claim.
+describe("IAM-DR67 / DR-6 — it_admin no longer holds company.manage", () => {
+  const itAdminA = me([{ role: "it_admin", scopeType: "company", scopeId: "co-a" }]);
+
+  it("it_admin keeps it.manage but not company.manage, in their own company", () => {
+    expect(can(itAdminA, "it.manage", "co-a")).toBe(true);
+    expect(can(itAdminA, "company.manage", "co-a")).toBe(false);
+  });
+
+  it("it_manager and it (never had company.manage) are unaffected", () => {
+    const itManagerA = me([{ role: "it_manager", scopeType: "company", scopeId: "co-a" }]);
+    const itA = me([{ role: "it", scopeType: "company", scopeId: "co-a" }]);
+    expect(can(itManagerA, "it.manage", "co-a")).toBe(true);
+    expect(can(itManagerA, "company.manage", "co-a")).toBe(false);
+    expect(can(itA, "it.manage", "co-a")).toBe(true);
+    expect(can(itA, "company.manage", "co-a")).toBe(false);
+  });
+});
+
+// IAM-DR67 / DR-7 (owner-decided 2026-08-10) — `people.directory` granted to the three
+// `module_staff`-tier roles (resource_member.yaml's unconditioned module_staff read rule), and
+// deliberately NOT to their `_manager` siblings, which that rule does not name.
+describe("IAM-DR67 / DR-7 — people.directory for hr_staff/search_staff/reports_staff only", () => {
+  it("hr_staff/search_staff/reports_staff hold people.directory, scoped to their company", () => {
+    const hrStaffA = me([{ role: "hr_staff", scopeType: "company", scopeId: "co-a" }]);
+    const searchStaffA = me([{ role: "search_staff", scopeType: "company", scopeId: "co-a" }]);
+    const reportsStaffA = me([{ role: "reports_staff", scopeType: "company", scopeId: "co-a" }]);
+    for (const who of [hrStaffA, searchStaffA, reportsStaffA]) {
+      expect(can(who, "people.directory", "co-a")).toBe(true);
+      expect(can(who, "people.directory", "co-b")).toBe(false);
+    }
+  });
+
+  it("hr_manager/search_manager/reports_manager do NOT gain people.directory — Cerbos names only module_staff", () => {
+    const hrManagerA = me([{ role: "hr_manager", scopeType: "company", scopeId: "co-a" }]);
+    const searchManagerA = me([{ role: "search_manager", scopeType: "company", scopeId: "co-a" }]);
+    const reportsManagerA = me([{ role: "reports_manager", scopeType: "company", scopeId: "co-a" }]);
+    for (const who of [hrManagerA, searchManagerA, reportsManagerA]) {
+      expect(can(who, "people.directory", "co-a")).toBe(false);
+    }
+  });
+});
+
+// IAM-DR67 MAP DEFECT — `hr.manage`'s permission set no longer includes `hr.case.cancel`.
+// resource_hr_case.yaml grants `cancel` only to `group_executive` (wholesale) and `member`-self
+// (subjectUserId == principal.id) — never to `module_manager`/`company_admin` under any condition.
+// Including it made `hr.manage` unsatisfiable under `all` semantics for company_admin/hr_manager
+// (IAM-05b-3 report findings #6/#7). Pinned here directly against CAPABILITY_MAP (not the parity
+// guard, which this ticket must not edit) so a future re-add of hr.case.cancel to this set fails
+// loudly rather than silently reproducing the two false over-claims.
+describe("IAM-DR67 map defect — hr.manage excludes hr.case.cancel", () => {
+  it("hr.manage's permission set has no hr.case.cancel member", () => {
+    expect(CAPABILITY_MAP["hr.manage"].permissions).not.toContain("hr.case.cancel");
+  });
+
+  it("hr.manage still requires every genuine hr_case/hr_record write action", () => {
+    expect(CAPABILITY_MAP["hr.manage"].permissions).toEqual(
+      expect.arrayContaining([
+        "hr.case.create", "hr.case.update", "hr.case.delete",
+        "hr.record.create", "hr.record.update", "hr.record.delete",
+      ]),
+    );
   });
 });

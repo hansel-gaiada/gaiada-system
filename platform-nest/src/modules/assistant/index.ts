@@ -27,13 +27,18 @@ import type { ModuleContract } from "../contract";
 export const assistantModule: ModuleContract = {
   key: "assistant",
   migrations: ["0079_module_assistant.sql", "0084_assistant_handoffs.sql"],
-  permissions: [
-    { key: "assistant:thread:read", description: "Read your own assistant threads and messages" },
-    { key: "assistant:thread:write", description: "Create, rename, pin, archive or delete your own assistant threads" },
-    { key: "assistant:memory:read", description: "Read your own assistant memory (durable facts/preferences)" },
-    { key: "assistant:memory:write", description: "Propose, confirm or delete your own assistant memory" },
-    { key: "assistant:handoff", description: "Hand off a thread to a specialist agent and watch its run" },
-  ],
+  // IAM-01d migration: all 5 declared keys are RELATIONSHIP (§7 of docs/superpowers/plans/
+  // 2026-08-10-permission-catalog.md) — they map ONLY to the catalog's 15 bypass-exempt pairs
+  // (assistant_thread.*, assistant_memory.*, agent_run.read; Ruling 3). A chat thread is a
+  // transcript the chatting user owns; widening it to any role-grantable permission — even one
+  // this module declares for itself — is exactly the "admin grant becomes a transcript-reading
+  // backdoor" hazard `resource_assistant_thread.yaml`'s own header warns against, and one of the 7
+  // boot-blockers IAM-01d's fail-closed validation would refuse to start on if these stayed
+  // colon-style (or were re-declared dotted). REMOVED, not renamed: these permissions are real and
+  // enforced (via `owns` + `inTenant` + `notLow` in Cerbos, never via `permissions`/
+  // `role_permissions`), just never role-grantable, so they have no place in a module's grantable
+  // permission declarations.
+  permissions: [],
   customFieldTargets: [],
   mcpTools: [],
   rollupProviders: [],

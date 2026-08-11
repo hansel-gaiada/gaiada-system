@@ -70,6 +70,35 @@ derivedRoles:
             request.principal.attr.grants.exists(g, g.role == "team_lead" &&
               g.scopeType == "team" && g.scopeId == request.resource.attr.teamId)
 
+    # ══════════════ HIER-2 (DR-9) — org_unit_lead: the org-chart subtree cascade ══════════════
+    # `team_lead`'s replacement for department-scoped authority. A grant at unit U covers every
+    # resource whose OWN unit is U or a descendant of U — expressed as ANCESTOR CONTAINMENT rather
+    # than a subtree walk: the RESOURCE carries `unitAncestors` = every ancestor of its own unit
+    # (IAM-09's org_unit_closure table, self-inclusive at depth 0 — org-unit-closure.ts's header),
+    # and the grant matches if its scopeId is anywhere in that list. A grant at 'd-web' therefore
+    # covers a 'dv-frontend' resource (whose ancestor chain includes 'd-web') with no per-request
+    # tree walk — containment falls out of the closure's own precomputation. `unitAncestors` is
+    # populated ONLY by the two handlers that resolve it (reports.controller.ts for
+    # report_document's read_department; appraisals.controller.ts for appraisal's read, off the
+    # SUBJECT's current unit) — an unfed resource fails closed (an empty/absent list contains
+    # nothing, so no grant can ever satisfy `in`).
+    #
+    # ⚠ BINDING AUTHORING RULE (the §1.4 guard from docs/superpowers/plans/2026-08-10-iam-hier-01-
+    # plan.md): org_unit_lead is ALWAYS its own rule in every resource policy that uses it, NEVER
+    # mixed with a scope-only role (company_admin/manager/member/viewer/...) in the SAME rule. That
+    # same-rule mixing is exactly the `team_lead` defect this role replaces — a flat `perms` bundle
+    # records what a rule NAMES, not what it can REACH, so mixing would let a future permission-arm
+    # mirror over-grant. Classified UNSAFE by permission-arm-hazard-scan.test.ts's own structural
+    # detector (no global/company disjunction) — correctly: this role IS attribute-dependent, by
+    # design, and must never be treated as if it were scope-only.
+    - name: org_unit_lead
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.grants.exists(g, g.role == "org_unit_lead" &&
+              g.scopeType == "org_unit" && g.scopeId in request.resource.attr.unitAncestors)
+
     # IT staff (it_admin/it_manager/it) covering the IT device registry for their company.
     - name: it_staff
       parentRoles: ["user"]
@@ -188,5 +217,1090 @@ derivedRoles:
         match:
           expr: >-
             request.principal.attr.grants.exists(g, (g.role == "hr_staff" || g.role == "hr_manager") && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+
+    # ═══════════════════════════ IAM-04a — PERMISSION-MATCHING DERIVED ROLES ═══════════════════════
+    # Compat shim (IAM Phase 1, D-2): a permission-based alternative to the role-name derived roles
+    # above, so a resource-policy rule can eventually match EITHER a role name OR a resolved
+    # permission and reach the same decision. `cerbos.ts::principalPayload()` now sends
+    # `attr.perms = [{key, scopeType, scopeId}]` alongside the pre-existing `attr.grants` — the flat
+    # (permissions.key, scope) rows IAM-03a's `assemblePrincipal()` resolves through
+    # `role_permissions` (0094). NOTHING in this repo's rules consumed these until IAM-04b's pilot
+    # below wired the first two resources; every existing rule (and every derived role above this
+    # line) is untouched.
+    #
+    # SCOPE SEMANTICS (do not widen beyond this — matches the ticket's own instruction and
+    # `principal.ts::principalHasPermission()`'s documented boundary): a GLOBAL-scope permission
+    # grant covers every tenant; a COMPANY-scope grant covers EXACTLY the company it was granted at
+    # (`scopeId == request.resource.attr.tenantId`) — nothing narrower, nothing broader. Project/team
+    # cascades (manager/member's project scope, team_lead's team scope) are DELIBERATELY NOT
+    # reproduced here: `perms` carries scope copied verbatim from whichever grant produced it, with
+    # no record of which named role that was, so a permission-arm rule can only safely test the ONE
+    # cascade shape that is unambiguous regardless of origin (global-covers-all, company-covers-
+    # itself). Project/team-scoped grants simply are not recognized by these derived roles — which is
+    # SAFE, not a gap: the pre-existing, byte-unchanged role-name rules still grant those cases
+    # exactly as before, so a decision that depended on project/team scope is untouched.
+    #
+    # WHY NOT ONE GENERIC PARAMETERIZED DERIVED ROLE: Cerbos derived-role conditions have no access
+    # to the action currently being evaluated (that's why `module_staff`/`module_manager` above
+    # string-compose from `resource.attr.module`, never from the action) — so "does the principal
+    # hold the permission this specific action requires" cannot be expressed as one reusable
+    # condition. Each permission key needs its own concretely-named derived role, mirroring how
+    # `module_staff`/`module_manager` already need one companion resource-policy rule per action.
+    #
+    # ⚠ FOUND WHILE BUILDING THIS (read before adding a THIRD resource, IAM-04-ROLLOUT): the flat
+    # `perms` array cannot distinguish "holds this key via an unconditional/full-access role" from
+    # "holds this SAME key via a resource-instance-scoped carve-out" (self-ownership, high-assurance-
+    # only, etc.) — `role_permissions`' own bundling methodology (0094's header) deliberately treats
+    # such resource-instance conditions as "satisfied" when computing a role's reach, so e.g.
+    # `member`'s bundle contains `hr.case.read`/`create`/`cancel` from ITS OWN self-service-only rule
+    # in resource_hr_case.yaml, indistinguishable at the permission layer from `company_admin`
+    # holding the SAME keys unconditionally. A permission-arm rule that grants an action whenever
+    # ANY role's bundle contains that key, without re-imposing the SAME resource-instance condition
+    # the role-arm rule uses, would silently widen access. See resource_hr_case.yaml's own comment
+    # for the concrete pairs this blocked (unconditional read/create) and the ones it did not
+    # (update/delete/export, cancel-self) — each new rule below re-applies whatever condition its
+    # role-arm counterpart uses; none of them are just "if perms has the key, allow".
+    #
+    # pm_task (IAM-04b pilot resource #1).
+    #
+    # ⚠ REAL FINDING while building this (verified live against the seeded 0094/0098 bundle, not
+    # theoretical): `team_lead` sits in resource_pm_task.yaml's role list ALONGSIDE company_admin/
+    # manager/member/viewer, so 0094 bundled it `pm.task.*` too — but `team_lead`'s OWN derived role
+    # above matches ONLY `scopeType == "team" && scopeId == resource.attr.teamId`, and
+    # `pm-adversarial-authz.test.ts`'s own "REAL FINDING" pins that `pm.controller.ts` NEVER sets
+    # `resource.attr.teamId` — so `team_lead` is PROVABLY UNREACHABLE on this kind at ANY grant
+    # scope (team, company, OR global), yet its bundle row still exists (0094's methodology treats
+    # a resource-instance condition as "satisfiable" without checking whether the handler ever
+    # actually populates the attribute it depends on). A `team_lead` grant made at COMPANY or
+    # GLOBAL scope (the platform's schema permits granting any role at any scope_type) therefore
+    # produces a `perms` entry indistinguishable from a LEGITIMATE company_admin/manager/member/
+    # viewer grant at that same scope — confirmed empirically: granting ONLY `team_lead` at company
+    # scope and probing live Cerbos initially returned ALLOW through a naive global-or-company
+    # permission mirror, where the role arm (and the pinned adversarial test) require DENY.
+    #
+    # FIX: exclude exactly the scope value a `team_lead` grant occupies, via `attr.grants` (already
+    # sent, unchanged) as a corroborating witness — NOT to require holding a role (that would defeat
+    # the isolation proof), but to refuse to trust a `perms` scope value when the ONLY thing at that
+    # exact scope is `team_lead`. This can never cause a real access LOSS: if the SAME principal also
+    # holds a genuinely qualifying role (company_admin/manager/member/viewer) at that scope, the
+    # UNCHANGED role-arm rules grant it directly regardless of what this derived role decides — this
+    # exclusion only ever removes a permission-arm path that was never backed by real reachability in
+    # the first place. `cerbos-permission-dual-match.test.ts` proves both directions: the permission
+    # arm still fires with EMPTY grants (isolation preserved) and still denies the exact
+    # team_lead-at-company-scope shape the adversarial test pins.
+    - name: perm_pm_task_read
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "pm.task.read" && (
+              (g.scopeType == "global" &&
+                !request.principal.attr.grants.exists(x, x.role == "team_lead" && x.scopeType == "global")) ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId &&
+                !request.principal.attr.grants.exists(x, x.role == "team_lead" && x.scopeType == "company" && x.scopeId == g.scopeId))))
+
+    - name: perm_pm_task_update
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "pm.task.update" && (
+              (g.scopeType == "global" &&
+                !request.principal.attr.grants.exists(x, x.role == "team_lead" && x.scopeType == "global")) ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId &&
+                !request.principal.attr.grants.exists(x, x.role == "team_lead" && x.scopeType == "company" && x.scopeId == g.scopeId))))
+
+    - name: perm_pm_task_create
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "pm.task.create" && (
+              (g.scopeType == "global" &&
+                !request.principal.attr.grants.exists(x, x.role == "team_lead" && x.scopeType == "global")) ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId &&
+                !request.principal.attr.grants.exists(x, x.role == "team_lead" && x.scopeType == "company" && x.scopeId == g.scopeId))))
+
+    - name: perm_pm_task_delete
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "pm.task.delete" && (
+              (g.scopeType == "global" &&
+                !request.principal.attr.grants.exists(x, x.role == "team_lead" && x.scopeType == "global")) ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId &&
+                !request.principal.attr.grants.exists(x, x.role == "team_lead" && x.scopeType == "company" && x.scopeId == g.scopeId))))
+
+    - name: perm_pm_task_manage
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "pm.task.manage" && (
+              (g.scopeType == "global" &&
+                !request.principal.attr.grants.exists(x, x.role == "team_lead" && x.scopeType == "global")) ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId &&
+                !request.principal.attr.grants.exists(x, x.role == "team_lead" && x.scopeType == "company" && x.scopeId == g.scopeId))))
+
+    # hr_case (IAM-04b pilot resource #2 — exercises module-role composition). Only the actions with
+    # NO resource-instance ambiguity get a companion here; see the header block above and
+    # resource_hr_case.yaml's comment for the read/create exclusion.
+    - name: perm_hr_case_update
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "hr.case.update" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+
+    - name: perm_hr_case_delete
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "hr.case.delete" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+
+    - name: perm_hr_case_export
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "hr.case.export" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+
+    # Self-scoped tier: the derived role tests ONLY permission+scope, exactly mirroring how the
+    # role-arm's "member" derived role above carries no self-check of its own — the self-check
+    # (`subjectUserId == principal.id`) is layered on separately, in the resource-policy rule's own
+    # `condition`, matching resource_hr_case.yaml's existing member-self rule structure exactly.
+    - name: perm_hr_case_read_self
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "hr.case.read" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+
+    - name: perm_hr_case_create_self
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "hr.case.create" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+
+    - name: perm_hr_case_cancel_self
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "hr.case.cancel" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+
+    # =============== IAM-04-ROLLOUT-B12 - batches 1+2 permission-matching derived roles ========
+    # Purely additive (IAM-04a shim, IAM-04b pattern). All generic global-or-company mirrors -- no
+    # exclusion clause needed for any kind/action below: the register
+    # (docs/superpowers/plans/2026-08-10-iam-04-rollout-scan.md) classified every kind touched here
+    # SAFE (17, batch 1) or confirm-reliable module-mechanism (9, batch 2 -- module_staff/manager/
+    # approver's resource.attr.module is verified hardcoded-literal for every real handler call site
+    # on these kinds; no team_lead/client/group_executive mixing occurs in any rule these roles
+    # mirror). Where a kind also carries a group_executive-only or platform_admin-wildcard rule,
+    # that rule is DELIBERATELY not mirrored here (per IAM-04c: the tier bypass never enters the
+    # permission catalog) -- only the company_admin/manager/member/viewer/module_staff/module_manager/
+    # module_approver reach for each action is mirrored, exactly matching each kind's own SAFE
+    # non-wildcard, non-group_executive-only rule(s). See
+    # docs/superpowers/plans/2026-08-10-iam-04-rollout-b12-report.md for the full per-kind account.
+
+    # perm_agency_brief_* — IAM-04-ROLLOUT-B12
+    - name: perm_agency_brief_read
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "agency.brief.read" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_agency_brief_create
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "agency.brief.create" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_agency_brief_update
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "agency.brief.update" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_agency_brief_delete
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "agency.brief.delete" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    # perm_agency_campaign_* — IAM-04-ROLLOUT-B12
+    - name: perm_agency_campaign_read
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "agency.campaign.read" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_agency_campaign_create
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "agency.campaign.create" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_agency_campaign_update
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "agency.campaign.update" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_agency_campaign_delete
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "agency.campaign.delete" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    # perm_agency_creative_asset_* — IAM-04-ROLLOUT-B12
+    - name: perm_agency_creative_asset_read
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "agency.creative_asset.read" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_agency_creative_asset_create
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "agency.creative_asset.create" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_agency_creative_asset_update
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "agency.creative_asset.update" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_agency_creative_asset_delete
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "agency.creative_asset.delete" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    # perm_chat_group_* — IAM-04-ROLLOUT-B12
+    - name: perm_chat_group_remove_member
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "core.chat_group.remove_member" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_chat_group_promote_member
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "core.chat_group.promote_member" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_chat_group_set_subject
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "core.chat_group.set_subject" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_chat_group_pin
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "core.chat_group.pin" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_chat_group_add_member
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "core.chat_group.add_member" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    # perm_company_* — IAM-04-ROLLOUT-B12
+    - name: perm_company_read
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "core.company.read" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_company_update
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "core.company.update" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_company_delete
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "core.company.delete" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    # perm_compliance_gate_* — IAM-04-ROLLOUT-B12
+    - name: perm_compliance_gate_read
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "core.compliance_gate.read" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_compliance_gate_update
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "core.compliance_gate.update" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    # perm_contract_* — IAM-04-ROLLOUT-B12
+    - name: perm_contract_read
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "core.contract.read" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_contract_create
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "core.contract.create" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_contract_update
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "core.contract.update" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_contract_delete
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "core.contract.delete" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_contract_send
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "core.contract.send" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    # perm_identity_link_* — IAM-04-ROLLOUT-B12
+    - name: perm_identity_link_read
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "core.identity_link.read" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_identity_link_update
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "core.identity_link.update" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_identity_link_delete
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "core.identity_link.delete" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    # perm_invoice_* — IAM-04-ROLLOUT-B12
+    - name: perm_invoice_read
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "billing.invoice.read" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_invoice_create
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "billing.invoice.create" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_invoice_update
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "billing.invoice.update" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_invoice_delete
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "billing.invoice.delete" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    # perm_knowledge_source_* — IAM-04-ROLLOUT-B12
+    - name: perm_knowledge_source_read
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "knowledge.source.read" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_knowledge_source_update
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "knowledge.source.update" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    # perm_report_admin_* — IAM-04-ROLLOUT-B12
+    - name: perm_report_admin_recompute
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "reports.admin.recompute" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    # perm_rollup_* — IAM-04-ROLLOUT-B12
+    - name: perm_rollup_read
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "core.rollup.read" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    # perm_rollup_recompute_* — IAM-04-ROLLOUT-B12
+    - name: perm_rollup_recompute_create
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "core.rollup_recompute.create" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    # perm_service_assignment_* — IAM-04-ROLLOUT-B12
+    - name: perm_service_assignment_propose
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "core.service_assignment.propose" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_service_assignment_accept
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "core.service_assignment.accept" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_service_assignment_revoke
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "core.service_assignment.revoke" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_service_assignment_suspend
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "core.service_assignment.suspend" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_service_assignment_resume
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "core.service_assignment.resume" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_service_assignment_relink
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "core.service_assignment.relink" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_service_assignment_read
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "core.service_assignment.read" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    # perm_user_* — IAM-04-ROLLOUT-B12
+    - name: perm_user_read
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "core.user.read" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_user_create
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "core.user.create" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_user_update
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "core.user.update" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_user_delete
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "core.user.delete" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    # perm_webdev_change_request_* — IAM-04-ROLLOUT-B12
+    - name: perm_webdev_change_request_read
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "webdev.change_request.read" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_webdev_change_request_create
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "webdev.change_request.create" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_webdev_change_request_triage
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "webdev.change_request.triage" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    # perm_webdev_provisioned_site_* — IAM-04-ROLLOUT-B12
+    - name: perm_webdev_provisioned_site_read
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "webdev.provisioned_site.read" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_webdev_provisioned_site_provision
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "webdev.provisioned_site.provision" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_webdev_provisioned_site_reconcile
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "webdev.provisioned_site.reconcile" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    # perm_hr_record_* — IAM-04-ROLLOUT-B12
+    - name: perm_hr_record_read
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "hr.record.read" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_hr_record_create
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "hr.record.create" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_hr_record_update
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "hr.record.update" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_hr_record_delete
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "hr.record.delete" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_hr_record_export
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "hr.record.export" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    # perm_agency_approval_* — IAM-04-ROLLOUT-B12
+    - name: perm_agency_approval_read
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "agency.approval.read" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_agency_approval_create
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "agency.approval.create" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_agency_approval_approve
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "agency.approval.approve" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    # perm_resource_search_audit_* — IAM-04-ROLLOUT-B12
+    - name: perm_resource_search_audit_read
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "search.audit.read" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_resource_search_audit_create
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "search.audit.create" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_resource_search_audit_update
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "search.audit.update" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_resource_search_audit_delete
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "search.audit.delete" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_resource_search_audit_run
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "search.audit.run" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    # perm_resource_search_campaign_* — IAM-04-ROLLOUT-B12
+    - name: perm_resource_search_campaign_read
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "search.campaign.read" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_resource_search_campaign_create
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "search.campaign.create" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_resource_search_campaign_update
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "search.campaign.update" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_resource_search_campaign_delete
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "search.campaign.delete" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_resource_search_campaign_propose_change
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "search.campaign.propose_change" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_resource_search_campaign_apply_manual
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "search.campaign.apply_manual" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_resource_search_campaign_launch
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "search.campaign.launch" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_resource_search_campaign_apply_negatives
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "search.campaign.apply_negatives" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_resource_search_campaign_set_budget
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "search.campaign.set_budget" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    # perm_resource_search_engagement_* — IAM-04-ROLLOUT-B12
+    - name: perm_resource_search_engagement_read
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "search.engagement.read" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_resource_search_engagement_create
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "search.engagement.create" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_resource_search_engagement_update
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "search.engagement.update" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_resource_search_engagement_delete
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "search.engagement.delete" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_resource_search_engagement_set_scope
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "search.engagement.set_scope" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    # perm_resource_search_keyword_* — IAM-04-ROLLOUT-B12
+    - name: perm_resource_search_keyword_read
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "search.keyword.read" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_resource_search_keyword_create
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "search.keyword.create" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_resource_search_keyword_update
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "search.keyword.update" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_resource_search_keyword_delete
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "search.keyword.delete" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_resource_search_keyword_research
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "search.keyword.research" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    # perm_resource_search_ledger_* — IAM-04-ROLLOUT-B12
+    - name: perm_resource_search_ledger_read
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "search.ledger.read" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_resource_search_ledger_admin
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "search.ledger.admin" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    # perm_resource_search_property_* — IAM-04-ROLLOUT-B12
+    - name: perm_resource_search_property_read
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "search.property.read" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_resource_search_property_create
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "search.property.create" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_resource_search_property_update
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "search.property.update" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_resource_search_property_delete
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "search.property.delete" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    # perm_resource_search_report_* — IAM-04-ROLLOUT-B12
+    - name: perm_resource_search_report_read
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "search.report.read" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_resource_search_report_create
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "search.report.create" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_resource_search_report_update
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "search.report.update" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_resource_search_report_delete
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "search.report.delete" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_resource_search_report_approve
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "search.report.approve" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_resource_search_report_deliver
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "search.report.deliver" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+
+    # =============== HIER-2 rollout batch 3 — checkin's permission arm ==========================
+    # (docs/superpowers/plans/2026-08-10-iam-04-rollout-scan.md §3, "checkin is the one Mechanism-4
+    # kind with NO team_lead involvement at all — it needs only the self-scoped-mirror treatment").
+    # `read` is Pattern B (member's self-scoped rule coexists with group_executive/
+    # hr_people_reader/company_admin/manager's unconditional reach on the SAME action) — mitigation
+    # 3 (selective self-scoped mirroring): a SELF-SCOPED-ONLY arm, never an unconditional mirror for
+    # that action. `submit` has no unconditional counterpart at all (member-self is the ONLY role
+    # that ever holds it), so it gets the identical self-scoped shape for the same reason hr_case's
+    # create/cancel got one — not because it is hazardous, but because "self-scoped" is still the
+    # correct, non-widening shape. `excuse`/`pending_reminders`/`missed_by_unit` have no self path
+    # whatsoever (no Pattern-B ambiguity) and no team_lead mixing either, so they get the plain
+    # IAM-04-ROLLOUT-B12-style generic global-or-company mirror, one action per rule/role (pm_task
+    # pilot's own rule: "each action gets its OWN rule + its OWN permission-derived-role").
+    - name: perm_checkin_submit_self
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "reports.checkin.submit" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+
+    - name: perm_checkin_read_self
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "reports.checkin.read" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+
+    - name: perm_checkin_excuse
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "reports.checkin.excuse" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+
+    - name: perm_checkin_pending_reminders
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "reports.checkin.pending_reminders" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+
+    - name: perm_checkin_missed_by_unit
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "reports.checkin.missed_by_unit" && (
               g.scopeType == "global" ||
               (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))

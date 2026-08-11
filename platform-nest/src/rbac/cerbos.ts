@@ -24,18 +24,40 @@ export interface Resource {
    *  assistant's handoff endpoint, never every owner-attributed run in the platform. Omitted -> "" ->
    *  that rule's `==` comparison fails closed, same convention as every other optional attr here. */
   origin?: string;
+  /** HIER-2 (DR-9): every ancestor of this resource's own org-unit node id, self-inclusive at
+   *  depth 0 (IAM-09's `org_unit_closure` table — `org-unit-closure.ts::loadUnitAncestors`).
+   *  `org_unit_lead`'s derived role (derived_roles.yaml) matches when its grant's `scopeId` is
+   *  anywhere in this list — that containment IS the subtree cascade, computed by the caller, not
+   *  walked per request. Omitted -> `[]` -> the derived role's `in` test can never match anything,
+   *  fail-closed by construction (an unfed resource confers nothing, same convention as every
+   *  other optional attr on this type). Only two call sites populate it today
+   *  (reports.controller.ts's report_document department grain; appraisals.controller.ts's
+   *  subject-unit resolution) — see each rule's own comment for why it stops there. */
+  unitAncestors?: string[];
 }
 
 export type Decision = { allow: true } | { allow: false; reason: string };
 
-function principalPayload(p: Principal) {
+// Exported (HIER-1) so `assemblePrincipal() -> attr.grants` can be tested against the REAL
+// mapping rather than a hand-duplicated copy that could silently drift from this function.
+// Visibility-only change — no behavioural difference, still called the same way internally.
+export function principalPayload(p: Principal) {
   return {
     id: p.userId ?? "anonymous",
-    roles: ["user"], // base role; the real logic is in derived roles over attr.grants
+    roles: ["user"], // base role; the real logic is in derived roles over attr.grants / attr.perms
     attr: {
       assurance: p.assurance,
       companies: p.companies,
       grants: p.roles.map((g) => ({ role: g.role, scopeType: g.scopeType, scopeId: g.scopeId ?? "" })),
+      // IAM-04a: additive alongside `grants` — the resolved (permission key, scope) pairs IAM-03a's
+      // `assemblePrincipal()` expands through `role_permissions` (0094). `p.perms` is optional on
+      // `Principal` (see principal.ts's own comment on why: ~20 pre-existing test files construct
+      // `Principal` literals without it), so this defaults to `[]` rather than throwing — an empty
+      // array makes every `attr.perms.exists(...)` in derived_roles.yaml evaluate false, never a CEL
+      // error, which is exactly the same fail-closed shape `grants` already has for a roleless
+      // principal. Nothing in this repo's policies read `attr.perms` before IAM-04b's two-resource
+      // pilot (resource_pm_task.yaml, resource_hr_case.yaml) — every other decision is unaffected.
+      perms: (p.perms ?? []).map((g) => ({ key: g.key, scopeType: g.scopeType, scopeId: g.scopeId ?? "" })),
     },
   };
 }
@@ -53,6 +75,7 @@ function resourcePayload(r: Resource) {
       module: r.module ?? "",
       subjectUserId: r.subjectUserId ?? "",
       origin: r.origin ?? "",
+      unitAncestors: r.unitAncestors ?? [],
     },
   };
 }

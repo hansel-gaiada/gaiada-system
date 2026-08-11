@@ -94,7 +94,9 @@ export async function createRole(name: string, companyId: string | null = null):
 export async function grantRole(
   userId: string,
   roleId: string,
-  scopeType: "global" | "company" | "team" | "project" | "record",
+  // HIER-1: `org_unit` added (widening) — see principal.ts's `RoleGrant` comment for why `team`/
+  // `record` stay in this union for now even though migration 0100 removes both from the DB CHECK.
+  scopeType: "global" | "company" | "org_unit" | "team" | "project" | "record",
   scopeId: string | null,
 ): Promise<void> {
   await withGlobal((c) =>

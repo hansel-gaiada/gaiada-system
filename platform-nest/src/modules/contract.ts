@@ -7,7 +7,16 @@ import type { PoolClient } from "pg";
 import type { OutboxEvent } from "../events/types";
 
 export interface PermissionDef {
-  key: string; // e.g. 'agency:campaign:approve'
+  // IAM-01d: dotted `<domain>.<resource>.<action>` format, matching a `class='grantable'` row in
+  // the DB `permissions` catalog (IAM-01c, migration 0093; docs/superpowers/plans/
+  // 2026-08-10-permission-catalog.md). e.g. 'agency.campaign.read', 'hr.case.create'.
+  // `registerModule()`/`validateModulePermissions()` (registry.ts) FAIL CLOSED at boot if a
+  // declared key here has no catalogued grantable row — a module must never declare a
+  // `class='relationship'` permission (the 15 bypass-exempt pairs, Ruling 3) or an uncatalogued
+  // one. Coverage is deliberately partial: most of the 215 catalog permissions have no module
+  // declaration at all (module-declared ⊆ catalog, never equality) — only declare what the
+  // module's own UI/MCP surfaces need named here.
+  key: string;
   description: string;
 }
 

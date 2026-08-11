@@ -35,10 +35,12 @@ import type { ModuleContract } from "../contract";
 export const webdevModule: ModuleContract = {
   key: "webdev",
   migrations: ["0090_webdev_provisioned_sites.sql"],
+  // IAM-01d migration: all 3 CLEAN (renamed) — the catalog's kind is `webdev_provisioned_site`
+  // (singular resource, per N1), so the dotted key is `webdev.provisioned_site.*`.
   permissions: [
-    { key: "webdev:site:read", description: "Read provisioned sites (repo + hosting) for this company" },
-    { key: "webdev:site:provision", description: "Provision a site and repo for a delivery run" },
-    { key: "webdev:site:reconcile", description: "Re-poll a provisioned site's status from its provider" },
+    { key: "webdev.provisioned_site.read", description: "Read provisioned sites (repo + hosting) for this company" },
+    { key: "webdev.provisioned_site.provision", description: "Provision a site and repo for a delivery run" },
+    { key: "webdev.provisioned_site.reconcile", description: "Re-poll a provisioned site's status from its provider" },
   ],
   customFieldTargets: [],
   mcpTools: [

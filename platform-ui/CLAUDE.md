@@ -4,7 +4,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Scope: `platform-ui/` — the ERP Suite web surface. Standalone Next.js project (own
 `package.json`, own deploy); the repo root is deliberately **not** a monorepo. Root
-`../CLAUDE.md` has program context; it is stale in places — this file governs here.
+`../CLAUDE.md` carries program-wide rules (it was rewritten 2026-08-10 to hold only
+non-rotting rules; its former status narrative is in `../docs/history/`); this file governs here.
 
 ## Stack + hard constraints
 

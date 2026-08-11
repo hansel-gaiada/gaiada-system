@@ -42,13 +42,48 @@ export type Role =
   | "it_admin" | "it_manager" | "it"  // IT operators
   | "hr_staff" | "hr_manager" // HR module derived roles (WSD-2 module_staff/module_manager, string-composed from grants — see hr module design §2.1). Company-scoped; may be reconciler-materialized onto a SERVED company (Me.serviceScopes) when the grant rides a service assignment.
   | "search_staff" | "search_manager" // search-marketing (SEO/SEM/GEO) module derived roles (SM-03; same WSD-2 module_staff/module_manager linchpin as HR — string-composed from grants, resource.attr.module === "search"). Company-scoped; may be reconciler-materialized onto a SERVED company.
+  // IAM-02a-FIX / DR-2b — `agency_approver` is a REAL, LIVE-HELD role (1 real holder, IAM-02a-0's
+  // live query 2026-08-10) that was entirely absent from this union — same defect shape as Gap 1/2/3
+  // above: a raw grant role exists in Cerbos but has no `Role` member here, so `ROLE_CAPS[g.role]`
+  // resolves `undefined` and the holder gets ZERO capabilities anywhere in the UI, including the one
+  // thing Cerbos actually lets them do. Its Cerbos reach is `derived_roles.yaml`'s `module_approver`
+  // (string-composes `"<module>_approver"` from `resource.attr.module`), which is referenced by
+  // exactly ONE resource policy in the whole estate: `resource_agency_approval.yaml`'s `approve` rule
+  // (`derivedRoles: ["company_admin", "module_approver"]`, module is always `"agency"` — every
+  // `agency.controller.ts` call site hardcodes it). No other resource file names `module_approver` at
+  // all, and `agency_approver` is not a raw-role string any OTHER derived role matches (it is not
+  // `manager`/`member`/`viewer`/etc.), so this is its ENTIRE Cerbos surface — not even a baseline
+  // `agency_approval:read` (that rule lists `company_admin`/`manager`/`member`/`viewer` explicitly,
+  // never `module_approver`). See `ROLE_CAPS.agency_approver`'s comment for why the grant is
+  // therefore exactly one capability, not a guess and not copied from another role.
+  | "agency_approver"
   // TR-25 — §8's fifth column (served-dept provider tier). Same WSD-2 module_staff/module_manager
   // linchpin, `resource.attr.module === "reports"`. Reconciler-materialized onto a SERVED company for
   // the members of a providing unit, and ONLY while the assignment is status='active'.
   // ⚠ These roles are NOT SEEDED in the platform yet (0026 seeds only the hr_* pair, and
   // `service-reconciler.ts` no-ops on an unseeded module role) — so this tier is currently inert in
   // production. Mirrored here so the UI is ready and the intent is recorded, not because it is live.
-  | "reports_staff" | "reports_manager";
+  | "reports_staff" | "reports_manager"
+  // HIER-2 (2026-08-11) — `team_lead`'s REPLACEMENT, and the first role scoped to an org-chart unit
+  // (`scopeType: "org_unit"`, `scopeId` = a text node id like `'d-web'`). Added here because
+  // `rbac-cerbos-parity.test.ts` caught its absence the moment HIER-2 landed the Cerbos side: that
+  // guard exists precisely because two whole roles once went missing from this mirror.
+  //
+  // Capability set derived from its ACTUAL bundle (`role-permission-bundles.json`), which is two
+  // permissions and only two — `reports.appraisal.read` and `reports.document.read_department` —
+  // matching the two policies HIER-2 wired (`resource_appraisal.yaml` read,
+  // `resource_report_document.yaml` read_department). Deliberately NOT given the rest of the
+  // reports family: HIER-2 left `read_person`/`read_project` unwired because no handler resolves a
+  // unit ancestor list there, so claiming them here would re-create the dead-grant pattern this
+  // whole consolidation is removing.
+  //
+  // ⚠ SCOPE CAVEAT, same shape as `team_lead`'s: an `org_unit_lead` grant is ALWAYS
+  // `scopeType: "org_unit"`, and `scopeCovers()` deliberately does not let a unit-scoped grant
+  // satisfy a company-wide `can()` question. The real subtree containment is evaluated server-side
+  // (Cerbos matches `g.scopeId in resource.attr.unitAncestors` off IAM-09's closure), which the
+  // browser cannot and must not replicate. So these capabilities are correct for "should the UI
+  // offer this at all", never for "may this lead see THAT unit".
+  | "org_unit_lead";
 
 // The single source of truth for every capability the platform knows about. `Capability` is
 // DERIVED from this tuple (below) rather than hand-declared as a separate union, and `ALL` (the
@@ -82,6 +117,53 @@ export const CAPABILITIES = [
   // `manager` may decide but must not retry — retry re-attempts a write that already failed once,
   // which the backend restricts to superadmin/company_admin/group_executive (D14-07's grant).
   "approvals.retry",
+  // IAM-02a-FIX-2 (2026-08-10) — REPAIRING DR-1's OWN COLLATERAL DAMAGE, NOT REOPENING IT. DR-1
+  // correctly removed `approvals.decide` from `manager` because Cerbos denies `manager` on the three
+  // genuine DECIDE surfaces it gates (automation_approval.decide/retry, agency_approval.approve,
+  // pipeline_gate.decide — see the `manager` entry's DR-1 comment below). But `approvals.decide` was
+  // ALSO, accidentally, the sole UI gate for 8 operational server actions in `pipelineActions.ts` /
+  // `webdevProvisionedSitesActions.ts` that Cerbos DOES still grant `manager` — a completely different
+  // Cerbos tier that happened to be expressed through the same UI capability. Removing the capability
+  // from `manager` therefore ALSO silently removed those 8 real, Cerbos-granted affordances: a NEW
+  // UI-side under-claim, the dangerous drift direction this whole program exists to eliminate. The fix
+  // is the two purpose-built capabilities below, kept permanently separate from `approvals.decide` —
+  // do NOT "simplify" them back into it; that recreates this exact bug.
+  //
+  // `pipeline.write` — the MEMBER-INCLUSIVE operational tier. Verified against every policy it gates,
+  // all three carrying the IDENTICAL role list under the IDENTICAL condition (`inTenant && notLow`):
+  //   resource_pipeline_run.yaml    actions ["create","update"] -> company_admin, manager, member
+  //   resource_pipeline_stage.yaml  action  "create"            -> company_admin, manager, member
+  //   resource_pipeline_gate.yaml   action  "create"            -> company_admin, manager, member
+  // This is the low-privilege "open / advance / ask" tier — automation accounts authenticate at
+  // `manager` tier (`seedAutomationAccounts`), never `member`, so this is genuinely a HUMAN member's
+  // own grant, not just automation's. Gates: `createRunAction`, `updateRunStatusAction`,
+  // `createStageAction`, `openGateAction` (all in `pipelineActions.ts`).
+  "pipeline.write",
+  // `pipeline.manage` — the ELEVATED-ONLY tier within pipeline, and the reason it is a SECOND
+  // capability rather than widening `pipeline.write`: `member` is explicitly absent from both of the
+  // policies it gates, so folding the two together would over-grant a plain member the power to edit
+  // an already-signed artifact and to sign the agency's own commercial commitment.
+  //   resource_pipeline_stage.yaml  action "update" -> company_admin, manager, group_executive
+  //     (member EXCLUDED — WD-03/D-3's own comment: "A plain member role is denied per the D-3 AC")
+  //   resource_scope_signoff.yaml   action "create" -> company_admin, manager, group_executive
+  //     (member AND team_lead both explicitly excluded — the file's own comment: "signing a scope
+  //     agreement commits the agency commercially, and the whole point of the dual-sign is that a
+  //     named accountable person does it")
+  // Gates: `editStageArtifactAction`, `recordScopeSignoffAction` (both in `pipelineActions.ts`).
+  "pipeline.manage",
+  // `webdev.provision` — provisioning REAL infrastructure (a private org repo, a server directory, an
+  // nginx vhost, a TLS cert). Verified against resource_webdev_provisioned_site.yaml's `provision`/
+  // `reconcile` rules: `["read","provision","reconcile"] -> company_admin, manager` on the in-tenant
+  // tier (that file's own header: "never a plain-member action"). Kept as its OWN capability rather
+  // than merged into `pipeline.manage`, even though the two role sets are identical TODAY
+  // (company_admin/manager): this resource kind also carries an unmirrored `module_manager`/
+  // `module_staff` (webdev-dept) tier — string-composed from `resource.attr.module === "webdev"` —
+  // that the pipeline resources above do not have and that this file does not yet model as a `Role`
+  // (no `webdev_manager`/`webdev_staff` member exists here; out of this ticket's scope). The two
+  // capabilities are expected to diverge once that tier lands, so collapsing them now would only have
+  // to be un-collapsed later. Gates: `provisionSiteAction`, `reconcileSiteAction` (both in
+  // `webdevProvisionedSitesActions.ts`).
+  "webdev.provision",
   "knowledge.review",   // review/quarantine knowledge sources
   "hr.view",            // read hr_cases/hr_records/leave/attendance for a company
   "hr.manage",          // file/decide leave on others' behalf, edit cases/records/checklists, manage templates
@@ -138,6 +220,12 @@ export const ROLE_CAPS: Record<Role, Capability[]> = {
   group_executive: ALL,
   company_admin: [
     "admin.access", "company.manage", "org.edit", "people.directory", "pm.manage", "pm.contribute", "it.manage", "approvals.decide", "approvals.retry", "knowledge.review",
+    // IAM-02a-FIX-2 — company_admin appears in every one of the five backing policies for these three
+    // (resource_pipeline_run/stage/gate.yaml, resource_scope_signoff.yaml,
+    // resource_webdev_provisioned_site.yaml), same as it always did for `approvals.decide`'s own
+    // three policies. Nothing changes for company_admin here — it already had these via the old
+    // over-broad `approvals.decide` mapping; this just keeps them held under the correctly-split name.
+    "pipeline.write", "pipeline.manage", "webdev.provision",
     "hr.view", "hr.manage",
     "search.view", "search.manage", "search.scope.write", "search.campaign.launch", "search.report.approve", "search.ledger.admin",
     // The tenant's own administrator holds the exec-only reporting tier within its company (§8's
@@ -149,8 +237,40 @@ export const ROLE_CAPS: Record<Role, Capability[]> = {
   // seal/amend, NEVER facts recompute, NEVER the n8n ops polls, NEVER cycle admin. May score the
   // appraisals they are ASSIGNED (the server narrows to `manager_user_id`; this only decides whether
   // the scoring UI renders at all).
+  // IAM-02a-FIX / DR-1 (owner-decided 2026-08-10, drift register finding #5) — `approvals.decide`
+  // REMOVED. VERIFIED: `resource_automation_approval.yaml`'s `decide`/`retry` rule is
+  // `derivedRoles: ["company_admin", "group_executive"]` and its own comment says so explicitly
+  // ("A plain `manager` is deliberately excluded from both"); `resource_agency_approval.yaml`'s
+  // `approve` rule is `["company_admin", "module_approver"]`; `resource_pipeline_gate.yaml`'s
+  // `decide` rule is `["company_admin", "group_executive"]`. `manager` appears in NONE of the three
+  // policies this capability gates a decision on. Before this fix, 11 live managers (IAM-02a-0) saw
+  // an Approve/Reject/Decide control on the general approvals inbox
+  // (`app/(app)/approvals/[id]/page.tsx`'s `mayDecide`) and every pipeline-gate decide action
+  // (`pipeline/page.tsx`, `pipeline/[runId]/page.tsx`) that 403'd every single time — a fully dead
+  // button, not a partial gap. Cerbos is UNCHANGED; this is a mirror-only correction, so removing it
+  // grants nothing and takes away nothing a manager could actually do.
+  //
+  // ✅ IAM-02a-FIX-2 (2026-08-10) — RESOLVED the collateral damage flagged above. `approvals.decide`
+  // was ALSO the sole UI gate for 8 `pipelineActions.ts`/`webdevProvisionedSitesActions.ts` server
+  // actions that mirror Cerbos actions `manager` genuinely DOES hold — `pipeline_stage:update`
+  // (editStageArtifactAction), `scope_signoff:create` (recordScopeSignoffAction),
+  // `pipeline_run:create`/`update` (createRunAction/updateRunStatusAction),
+  // `pipeline_stage:create` (createStageAction), `pipeline_gate:create` (openGateAction), and
+  // `webdev_provisioned_site:provision`/`reconcile` (provisionSiteAction/reconcileSiteAction) — all
+  // re-verified directly against their resource policy files (see the `pipeline.write`/
+  // `pipeline.manage`/`webdev.provision` comments on `CAPABILITIES` above for the exact role sets and
+  // per-policy citations). `approvals.decide` had been doing double duty for two Cerbos tiers that are
+  // NOT the same set — "the elevated DECIDE tier" (company_admin/group_executive/module_approver only)
+  // and "the elevated pipeline/webdev WRITE tier" (company_admin/manager/group_executive, sometimes
+  // member) — and DR-1's removal was correct for the first and an accurate over-correction for the
+  // second. The fix is the three new capabilities below, NOT restoring `approvals.decide` to
+  // `manager` — DR-1 stands: Cerbos still denies `manager` on all three genuine decide surfaces, so
+  // `approvals.decide` is deliberately absent from this list. `relinkOrphanRecordingsAction` remains
+  // correctly ungranted: its Cerbos action (`meeting_recording:relink`) is `company_admin`-only, so
+  // manager never had it and loses nothing.
   manager: [
-    "pm.manage", "pm.contribute", "approvals.decide", "people.directory",
+    "pm.manage", "pm.contribute", "people.directory",
+    "pipeline.write", "pipeline.manage", "webdev.provision",
     // Gap 3 (2026-08 sweep): resource_integration_connection.yaml's "company.manage tier" rule
     // (its own header's name for the rule) explicitly lists `company_admin` AND `manager` for
     // managing company-owned connection rows / other people's seats — `departments/[deptId]/
@@ -199,6 +319,10 @@ export const ROLE_CAPS: Record<Role, Capability[]> = {
   //   hr.*, search.*, reports.company.view, reports.period.seal, reports.facts.admin,
   //     reports.ops.poll, appraisal.cycle.admin, admin.access, org.edit, rollups.view,
   //     knowledge.review — team_lead appears in none of the backing policies for any of these.
+  //   pipeline.write / pipeline.manage / webdev.provision (IAM-02a-FIX-2) — `team_lead` appears in
+  //     NONE of resource_pipeline_run/stage/gate.yaml, resource_scope_signoff.yaml (whose own comment
+  //     says so explicitly), or resource_webdev_provisioned_site.yaml. Unlike PM/reports/appraisal,
+  //     this is not a tier team_lead shares with manager at all.
   //
   // Scope reminder (do not "fix" this by widening `scopeCovers`): a team_lead grant is ALWAYS
   // `scopeType: "team"` (derived_roles.yaml matches only that), and `scopeCovers` deliberately does
@@ -218,12 +342,49 @@ export const ROLE_CAPS: Record<Role, Capability[]> = {
   // self-service, gated server-side by `ownerId`/`subjectUserId == principal.id` (§11 principle 2:
   // "nothing about you that you cannot read"). Adding a capability for them here would imply the UI
   // decides, and would have to be granted to everyone, which tells a gating check nothing.
-  member: ["pm.contribute"],
+  //
+  // IAM-02a-FIX / DR-2a (owner-decided 2026-08-10, drift register finding #3) — `people.directory`
+  // ADDED. Same precedent this file already used to justify `team_lead`'s grant above: no Cerbos
+  // resource literally models "browse the staff directory", but `resource_member.yaml`'s baseline
+  // tenant-directory `read` rule is the closest — and only — signal, and it lists `member`/`viewer`
+  // on the SAME line as `company_admin`/`manager`/`team_lead` ("any in-tenant role may read it," the
+  // file's own comment says). Before this, 18 live `member`-only accounts (IAM-02a-0) could not open
+  // `/hr/people` (`app/(app)/hr/people/page.tsx:29` gates on `can(me, "people.directory", tenant) ||
+  // isElevated(me)`) even though Cerbos's only opinion on the question says they could. `viewer` gets
+  // the same grant on the identical reasoning, though it is currently THEORETICAL — no live holder,
+  // no seeded `roles` row (see the `Role` union's `viewer` comment) — so this closes the mirror gap
+  // without yet having a real account to observe it against.
+  //
+  // IAM-02a-FIX-2 — `pipeline.write` ADDED. Verified against all three backing policies (see the
+  // `pipeline.write` comment on `CAPABILITIES` above): resource_pipeline_run.yaml (`create`/`update`),
+  // resource_pipeline_stage.yaml (`create`), resource_pipeline_gate.yaml (`create`) all list `member`
+  // alongside `company_admin`/`manager` under the identical `inTenant && notLow` condition. `member`
+  // does NOT get `pipeline.manage` or `webdev.provision` — both of those policies explicitly exclude
+  // `member` (see those two capabilities' comments above); a plain member may open a gate, advance a
+  // run, or add a stage, but may not edit a signed artifact, sign the agency's scope commitment, or
+  // provision infrastructure.
+  member: ["pm.contribute", "people.directory", "pipeline.write"],
   // Gap 3 find — see the `Role` union's `viewer` comment for the full evidence trail. Matches
-  // `member` exactly: `pm.contribute` only, nothing else (viewer is excluded from every write rule
-  // this file gates other than pm_task's read+update).
-  viewer: ["pm.contribute"],
-  it_admin: ["it.manage", "company.manage"],
+  // `member`'s ORIGINAL two capabilities exactly: `pm.contribute` + `people.directory` (DR-2a above).
+  // Deliberately does NOT also pick up `member`'s IAM-02a-FIX-2 `pipeline.write` grant: `viewer` is
+  // absent from resource_pipeline_run/stage/gate.yaml entirely (unlike `people.directory`'s baseline
+  // read rule, no pipeline policy lists `viewer` on the same line as `member`), so there is no Cerbos
+  // signal to justify it — granting it here would be exactly the "guess, not evidence" this file's
+  // own discipline forbids. `viewer` and `member` are therefore no longer capability-identical, on
+  // purpose; a future reader diffing the two should read this comment before "fixing" the gap back in.
+  // excluded from every write rule this file gates other than pm_task's read+update).
+  viewer: ["pm.contribute", "people.directory"],
+  // IAM-DR67 / DR-6 (owner-decided 2026-08-10, drift register finding #7) — `company.manage`
+  // REMOVED. Verified directly against the backing policies: `it_admin`'s entire Cerbos reach is
+  // `resource_device.yaml`'s three `it.device.*` actions (create/update/delete) — ZERO overlap with
+  // `company.manage`'s ANY-of-ten set (`core.integration_connection.*`, `core.company.update`,
+  // `billing.invoice.*`, `core.automation_approval.retry`; see that capability's own comment on
+  // `CAPABILITY_MAP` above). IT administers devices and accounts, not company settings / module
+  // enablement / billing / automation retry. Same class of over-claim as DR-1 (a dead button, 1
+  // live holder per IAM-02a-0's live query) — independently recommended by the IAM-05b design
+  // ruling (§7 item 2) as a "known first-run red," and confirmed here rather than assumed. Cerbos
+  // is unchanged; this is a mirror-only correction. `it_admin` keeps `it.manage`.
+  it_admin: ["it.manage"],
   it_manager: ["it.manage"],
   it: ["it.manage"],
   // ⚠ TR-25 finding ② — THE HR SPLIT, mirrored. `hr_staff` is the BASELINE read tier and `hr_manager`
@@ -234,20 +395,63 @@ export const ROLE_CAPS: Record<Role, Capability[]> = {
   // (`hr_people_reader` vs `hr_people_ops`) and this mirror matches it: `hr_staff` reads person-grain
   // reports and check-in history (that IS `hr.view`-shaped work) but holds NO appraisal capability and
   // cannot excuse a missed day (which rewrites an appraisal-SAFE metric).
-  hr_staff: ["hr.view", ...REPORT_READS, "checkin.read"],
+  // IAM-DR67 / DR-7 (owner-decided 2026-08-10) — `people.directory` ADDED to hr_staff (and, below,
+  // search_staff/reports_staff — the three `module_staff`-tier roles, NOT their `_manager`
+  // siblings). `resource_member.yaml`'s `module_staff` rule (lines 21-24) grants tenant-directory
+  // `read` UNCONDITIONALLY to any module_staff-derived role — gated only on `inTenant && notLow`
+  // and the module attribute being present, no self/`owns` clause at all. This is a genuinely
+  // different signal from the self-service `owns`-conditioned entries the parity guard's
+  // `KNOWN_NON_DRIFT` register carries for other roles: the rule itself carries no condition
+  // narrower than "any served-company module_staff." Only `module_staff` is named in that rule
+  // (`module_manager` is not), so `_manager` tiers are deliberately NOT widened here — Cerbos gives
+  // them no independent signal for this capability, and IAM-02a-FIX-2's own discipline is to grant
+  // exactly what a cited policy says, never by inference from a sibling role. All three roles have
+  // 0 live holders today (IAM-02a-0's census), so this closes the mirror gap before HR/search/
+  // reports staffing exists, rather than after — same precedent as DR-2a (`member`/`viewer`).
+  hr_staff: ["hr.view", ...REPORT_READS, "checkin.read", "people.directory"],
   hr_manager: ["hr.view", "hr.manage", ...REPORT_READS, "checkin.read", "appraisal.read", ...HR_OPS],
   // search_staff = Cerbos module_staff (draft-only baseline: read/create/update, propose_change,
   // research/run — never launch/set_scope/approve/admin). search_manager = module_manager (adds
   // the elevated actions). Mirrors hr_staff/hr_manager's split exactly (SM-03).
-  search_staff: ["search.view", "search.manage"],
+  // DR-7 — `people.directory` ADDED (see hr_staff's comment above for the full citation; identical
+  // reasoning, same `module_staff` rule, `search_manager` deliberately excluded for the same reason).
+  search_staff: ["search.view", "search.manage", "people.directory"],
   search_manager: ["search.view", "search.manage", "search.scope.write", "search.campaign.launch", "search.report.approve", "search.ledger.admin"],
   // §8's served-dept column: department + project grain ONLY. Deliberately NO `reports.person.view`
   // — §8's person-grain cell for this column ("only persons acting under the assignment, via the
   // provider view") is NOT enforceable, because no endpoint can bound a person read that way, so
   // granting it would expose ARBITRARY served-company persons. Cerbos denies it; this mirrors that.
   // Also no company grain, no appraisals, no check-ins, no seal, no recompute (§8: all ⛔).
-  reports_staff: ["reports.department.view", "reports.project.view"],
+  // DR-7 — `people.directory` ADDED (see hr_staff's comment above; identical `module_staff` rule,
+  // `reports_manager` deliberately excluded for the same reason).
+  reports_staff: ["reports.department.view", "reports.project.view", "people.directory"],
   reports_manager: ["reports.department.view", "reports.project.view"],
+  // HIER-2 — exactly its two bundled permissions, no more. See the `Role` union comment above for
+  // why the rest of the reports family is deliberately excluded.
+  org_unit_lead: ["reports.department.view", "appraisal.read"],
+  // IAM-02a-FIX / DR-2b — see the `Role` union's `agency_approver` comment for the full trail. Its
+  // ENTIRE verified Cerbos reach is `agency_approval:approve` (via `module_approver`, module always
+  // `"agency"`) — nothing else, not even `agency_approval:read` (that baseline rule names
+  // `company_admin`/`manager`/`member`/`viewer` explicitly, never `module_approver`). The UI's own
+  // per-approval decide surface (`app/(app)/approvals/[id]/page.tsx`'s `mayDecide`) gates BOTH
+  // `automation_approval` and `agency_approval` decisions through the identical `approvals.decide`
+  // capability + `/decide` façade — there is no finer-grained capability in this file that means
+  // "approve only an agency_approval" — so `approvals.decide` is the correct, non-invented mapping
+  // for what Cerbos actually grants this role, not a copy of `manager`'s old (removed, DR-1) grant or
+  // of `company_admin`'s broader one.
+  //
+  // ⚠ Read this alongside DR-1 above: `approvals.decide` was just REMOVED from `manager` because
+  // Cerbos denies `manager` on all three policies it gates. Cerbos ALSO denies `agency_approver` on
+  // two of those three (`automation_approval:decide`/`retry` and `pipeline_gate:decide` — neither
+  // names `module_approver`), so this role's `can(me, "approvals.decide", …) === true` only actually
+  // resolves to an ALLOW at the backend for the one policy that does (`agency_approval:approve`); the
+  // other two 403 exactly as they would for anyone else without `company_admin`/`group_executive`.
+  // That is not a mirror bug and not an inconsistency to "fix" by mimicking `manager`'s exclusion or
+  // widening this role to something narrower — one UI capability legitimately covers a role that
+  // Cerbos allows on a strict subset of what the capability's Cerbos-side actions are. A future
+  // reader diffing `manager` (0 of 3) against `agency_approver` (1 of 3, both non-zero-but-partial)
+  // should not conclude either grant is wrong from that shape alone.
+  agency_approver: ["approvals.decide"],
 };
 
 type Grant = Me["roles"][number];

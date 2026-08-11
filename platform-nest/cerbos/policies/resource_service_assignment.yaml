@@ -57,3 +57,39 @@ resourcePolicy:
       effect: EFFECT_ALLOW
       derivedRoles: ["module_staff", "module_manager"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+
+    # =========== IAM-04-ROLLOUT-B12 -- permission-matching arm. PURELY ADDITIVE: every rule =====
+    # above is byte-for-byte unchanged. Generic global-or-company mirror per action (see this
+    # kind's entry in docs/superpowers/plans/2026-08-10-iam-04-rollout-b12-report.md for the
+    # per-kind safety argument). Any group_executive-only or platform_admin wildcard rule on this
+    # kind is deliberately NOT mirrored here (IAM-04c: the tier bypass never enters the permission
+    # catalog).
+
+    - actions: ["propose"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_service_assignment_propose"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    - actions: ["accept"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_service_assignment_accept"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    - actions: ["revoke"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_service_assignment_revoke"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    - actions: ["suspend"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_service_assignment_suspend"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    - actions: ["resume"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_service_assignment_resume"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    - actions: ["relink"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_service_assignment_relink"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_service_assignment_read"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }

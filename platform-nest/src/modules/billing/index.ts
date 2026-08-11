@@ -6,10 +6,12 @@ import type { ModuleContract } from "../contract";
 export const billingModule: ModuleContract = {
   key: "billing",
   migrations: ["0021_invoices.sql"],
+  // IAM-01d migration: all 3 CLEAN — pure colon-to-dot renames (billing.invoice.delete also exists
+  // in the catalog, undeclared here — module declarations are a partial subset by design).
   permissions: [
-    { key: "billing:invoice:read", description: "View invoices" },
-    { key: "billing:invoice:create", description: "Generate invoices" },
-    { key: "billing:invoice:update", description: "Transition invoice status" },
+    { key: "billing.invoice.read", description: "View invoices" },
+    { key: "billing.invoice.create", description: "Generate invoices" },
+    { key: "billing.invoice.update", description: "Transition invoice status" },
   ],
   customFieldTargets: [],
   mcpTools: [

@@ -1,4 +1,9 @@
 // ASST-21 — Cerbos policy parity for the additive `agent_run` rule (resource_agent_run.yaml).
+// IAM-SEC-01 (2026-08-10) extends this file: the `read` rule now also requires
+// `variables.notLow`, an OWNER-SIGHTED NARROWING (a low-assurance owner who could read their own
+// handoff run before this change is now DENIED). See the policy file's own header for the full
+// rationale and the independent-verdict writeup in
+// docs/superpowers/plans/2026-08-10-iam-sec-01-report.md.
 //
 // Needs a LIVE Cerbos (skips otherwise) — the container the harness actually reaches is
 // `gaiada-test-cerbos` (publishes :3592), NOT the app's own dev `gaiada-cerbos-1`. This is a
@@ -9,6 +14,10 @@
 // from "the owner rule is wrong" unless something proves the kind resolves at all — that is exactly
 // what the smoke check below does, via a raw `includeMeta` request that reads `matchedPolicy` off
 // the live Cerbos response (`check()` in `./cerbos.ts` does not surface that field).
+// IAM-SEC-01 note: this is an EDIT to an existing file (item 4 in the policy's own trap writeup) —
+// same-file edits have been observed to hot-reload live in this program, but restart anyway before
+// trusting the low-assurance-DENY case below: a stale in-memory policy would silently keep ALLOWING
+// the old, wider rule, which is the one failure mode a narrowing change must not miss.
 import { describe, it, expect } from "vitest";
 import { check, type Resource } from "./cerbos";
 import type { Principal, RoleGrant } from "./principal";
@@ -22,8 +31,13 @@ const OWNER = "u-run-owner";
 const OTHER = "u-run-other";
 const ADMIN = "u-run-admin";
 
-function principal(userId: string, roles: RoleGrant[], companies: string[] = [T1]): Principal {
-  return { userId, assurance: "high", companies, roles, sessionVersion: 1 };
+function principal(
+  userId: string,
+  roles: RoleGrant[],
+  companies: string[] = [T1],
+  assurance: Principal["assurance"] = "high",
+): Principal {
+  return { userId, assurance, companies, roles, sessionVersion: 1 };
 }
 const allow = async (p: Principal, r: Resource, a: string) => (await check(p, r, a)).allow;
 
@@ -97,5 +111,32 @@ describe.skipIf(!live)("Cerbos: agent_run (ASST-21, additive)", () => {
     expect(await allow(principal(OWNER, []), notAHandoff, "read")).toBe(false);
     const wrongOrigin: Resource = { kind: "agent_run", id: "run-3", tenantId: T1, ownerId: OWNER, origin: "something_else" };
     expect(await allow(principal(OWNER, []), wrongOrigin, "read")).toBe(false);
+  });
+
+  // IAM-SEC-01 (2026-08-10) — the `notLow` floor. OWNER-SIGHTED NARROWING: before this change a
+  // low-assurance owner could read their own handoff run; this proves that path is now closed,
+  // and that it was closed WITHOUT disturbing the assurance tiers this rule already allowed.
+  describe("IAM-SEC-01: notLow assurance floor (owner-sighted narrowing, matches resource_assistant_thread.yaml)", () => {
+    it("a low-assurance owner is DENIED, even though they own the run and the origin matches", async () => {
+      const p = principal(OWNER, [], [T1], "low");
+      expect(await allow(p, handoffRun, "read")).toBe(false);
+    });
+
+    it("a linked-assurance owner is still ALLOWED (the floor only excludes 'low', it does not raise the bar to 'high')", async () => {
+      const p = principal(OWNER, [], [T1], "linked");
+      expect(await allow(p, handoffRun, "read")).toBe(true);
+    });
+
+    it("a high-assurance owner is still ALLOWED (unchanged from before this ticket)", async () => {
+      const p = principal(OWNER, [], [T1], "high");
+      expect(await allow(p, handoffRun, "read")).toBe(true);
+    });
+
+    it("low assurance does not accidentally OPEN a path for a non-owner or wrong-origin run (the new conjunct is additive-restrictive, not a replacement of the existing conditions)", async () => {
+      const p = principal(OTHER, [], [T1], "low");
+      expect(await allow(p, handoffRun, "read")).toBe(false);
+      const wrongOrigin: Resource = { kind: "agent_run", id: "run-4", tenantId: T1, ownerId: OWNER, origin: "something_else" };
+      expect(await allow(principal(OWNER, [], [T1], "low"), wrongOrigin, "read")).toBe(false);
+    });
   });
 });

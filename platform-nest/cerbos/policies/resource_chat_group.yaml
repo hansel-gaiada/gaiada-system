@@ -17,3 +17,31 @@ resourcePolicy:
       effect: EFFECT_ALLOW
       derivedRoles: ["company_admin"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+
+    # =========== IAM-04-ROLLOUT-B12 -- permission-matching arm. PURELY ADDITIVE: every rule =====
+    # above is byte-for-byte unchanged. Generic global-or-company mirror per action (see this
+    # kind's entry in docs/superpowers/plans/2026-08-10-iam-04-rollout-b12-report.md for the
+    # per-kind safety argument). Any group_executive-only or platform_admin wildcard rule on this
+    # kind is deliberately NOT mirrored here (IAM-04c: the tier bypass never enters the permission
+    # catalog).
+
+    - actions: ["remove_member"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_chat_group_remove_member"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    - actions: ["promote_member"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_chat_group_promote_member"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    - actions: ["set_subject"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_chat_group_set_subject"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    - actions: ["pin"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_chat_group_pin"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    - actions: ["add_member"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_chat_group_add_member"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }

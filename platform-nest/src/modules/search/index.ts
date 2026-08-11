@@ -150,21 +150,45 @@ export const searchModule: ModuleContract = {
     // comment immediately above (0047's omission from this array is this module's own repeated bug).
     "0066_search_ads_execution_manifest.sql",
   ],
+  // IAM-01d migration (§7 of docs/superpowers/plans/2026-08-10-permission-catalog.md — the largest
+  // module reconciliation, 14 declared keys):
+  //   - engagement:read, audit:run, ledger:read -> CLEAN, adopted verbatim (dotted).
+  //   - engagement:write, keyword:write, campaign:write, campaign:launch, report:write,
+  //     report:approve -> CLEAN bundles, expanded to their fine-grained catalog permissions.
+  //   - scope:write -> ALIAS, adopted the real action name (search.engagement.set_scope).
+  //   - provider:admin -> ALIAS, adopted the real kind/action (search.ledger.admin).
+  //   - rank:read -> ALIAS, DROPPED (aliases search.keyword.read; "rank tracking" is a UI grouping,
+  //     IAM-01b-3, not a distinct module declaration).
+  //   - brief:write -> ALIAS, DROPPED (aliases search.property.update/.delete — briefs authorize
+  //     against the parent property; "brief authoring" is a UI grouping, not a distinct
+  //     declaration).
+  //   - content:publish -> TRUE ORPHAN (one of only 2 in the whole reconciliation), DROPPED. No
+  //     Cerbos enforcement exists anywhere — `ai-drafts.ts` has zero authorize() calls; this key was
+  //     declared ahead of an unbuilt feature. It is one of the 7 boot-blockers IAM-01d's fail-closed
+  //     validation would refuse to start on. When publishing actually ships, the correct sequence is
+  //     to mint the Cerbos action + catalog entry FIRST (additive, Phase 2+), then re-add the
+  //     declaration here — not to keep a catalog-less permission alive by never validating it.
   permissions: [
-    { key: "search:engagement:read", description: "View search-marketing engagements/properties/KPI targets" },
-    { key: "search:engagement:write", description: "Create/update engagements, properties and KPI targets" },
-    { key: "search:scope:write", description: "Set an engagement's tool-scope config and provider budget cap (D-11)" },
-    { key: "search:keyword:write", description: "Import/edit keyword sets and keywords" },
-    { key: "search:rank:read", description: "View rank-tracking snapshots" },
-    { key: "search:audit:run", description: "Trigger a technical/CWV/content audit" },
-    { key: "search:brief:write", description: "Create/edit content briefs" },
-    { key: "search:campaign:write", description: "Create/edit SEM campaigns, ad groups, ads and negatives" },
-    { key: "search:campaign:launch", description: "Mark a manual-mode change proposal applied, or execute an api-mode one (covers both dual-mode twins)" },
-    { key: "search:content:publish", description: "Publish drafted content to a client's live site (WebDesk seam)" },
-    { key: "search:report:write", description: "Draft/edit an engagement report" },
-    { key: "search:report:approve", description: "Approve and delivery-gate an engagement report" },
-    { key: "search:ledger:read", description: "View the provider usage/cost ledger" },
-    { key: "search:provider:admin", description: "Override a budget stop-loss (elevated, audited)" },
+    { key: "search.engagement.read", description: "View search-marketing engagements/properties/KPI targets" },
+    { key: "search.engagement.create", description: "Create engagements" },
+    { key: "search.engagement.update", description: "Update engagements and KPI targets" },
+    { key: "search.property.create", description: "Create search properties" },
+    { key: "search.property.update", description: "Update search properties, GSC bindings and content briefs" },
+    { key: "search.engagement.set_scope", description: "Set an engagement's tool-scope config and provider budget cap (D-11)" },
+    { key: "search.keyword.create", description: "Import keyword sets" },
+    { key: "search.keyword.update", description: "Edit keyword sets and keywords" },
+    { key: "search.audit.run", description: "Trigger a technical/CWV/content audit" },
+    { key: "search.campaign.create", description: "Create SEM campaigns, ad groups and ads" },
+    { key: "search.campaign.update", description: "Edit SEM campaigns, ad groups, ads and negatives" },
+    { key: "search.campaign.propose_change", description: "Draft a SEM change proposal" },
+    { key: "search.campaign.launch", description: "Execute an api-mode SEM change on the live ad platform" },
+    { key: "search.campaign.apply_manual", description: "Mark a manual-mode change proposal as applied" },
+    { key: "search.report.create", description: "Draft an engagement report" },
+    { key: "search.report.update", description: "Edit an engagement report" },
+    { key: "search.report.approve", description: "Approve an engagement report (delivery gate)" },
+    { key: "search.report.deliver", description: "Deliver an approved engagement report to the client" },
+    { key: "search.ledger.read", description: "View the provider usage/cost ledger" },
+    { key: "search.ledger.admin", description: "Override a budget stop-loss (elevated, audited)" },
   ],
   customFieldTargets: ["search_engagement", "search_campaign"],
   // Per §07: reads are minAssurance 'low'; every write:true tool (paid pulls, AI drafts, live

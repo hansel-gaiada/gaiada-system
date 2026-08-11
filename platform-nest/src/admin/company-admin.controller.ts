@@ -15,6 +15,7 @@ import {
   deriveBlobPlacements, diffMembershipSweep, isUuidShaped, todayIso,
   type BlobPlacement, type OpenPrimaryMembership,
 } from "../core/dept-resolution";
+import { rebuildOrgUnitClosure } from "../core/org-unit-closure";
 
 // ---- Org-structure types + sanitizer (mirror platform-ui/src/lib/org.ts) ----
 // Canonical depth: holding → company → department → division → role → person.
@@ -117,6 +118,12 @@ export class CompanyAdminController {
       // rewrites history). Same transaction as the blob write, so a sweep failure rolls back the
       // structure change too rather than leaving them inconsistent.
       await sweepMemberships(c, tenantId, structure.root);
+      // IAM-09 — every org-blob write is ALSO a closure rebuild: org_unit_closure is wholesale
+      // DELETE+re-INSERTed for this tenant, in the SAME transaction as the blob write, so the
+      // closure can never disagree with the tree it describes (a node moved/deleted is trivially
+      // correct — there is no incremental diff to get wrong). Load-bearing prerequisite for
+      // HIER-2's (not yet built) org_unit_lead subtree cascade.
+      await rebuildOrgUnitClosure(c, tenantId, structure.root);
       await emitEvent(c, tenantId, "org_structure", tenantId, "org_structure.updated", {
         nodeCount: countNodes(structure.root),
       });

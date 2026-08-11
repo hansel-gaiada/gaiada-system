@@ -23,7 +23,7 @@ import { maxUploadBytes } from "./core/meetings.controller";
 import { migrate } from "./db/migrate";
 import { getPool } from "./db";
 import { seedClockFromDb } from "./events/hlc";
-import { registerModule } from "./modules/registry";
+import { registerModule, validateModulePermissions } from "./modules/registry";
 import { agencyModule } from "./modules/agency";
 import { pmModule } from "./modules/pm";
 import { itModule } from "./modules/it";
@@ -337,6 +337,11 @@ async function bootstrap(): Promise<void> {
   // hardcoded hub-side). Registering the module does NOT make the tool reachable by automation —
   // that needs the hub's AUTOMATION_ALLOWLIST entry and its Cerbos `mcp_tool` row, both PRV-03's.
   registerModule(webdevModule);
+  // IAM-01d: fail-closed drift guard — every module's declared ModuleContract.permissions must
+  // resolve to a class='grantable' row in the DB catalog (IAM-01c, migration 0093), or boot is
+  // refused outright. Runs AFTER every registerModule() call above (needs the full registered set)
+  // and AFTER migrate() (already ran at the top of bootstrap(), so 0093's seed is in place).
+  await validateModulePermissions();
   // SM-75: the search provider-mode + ads-write-mode boot wiring — see wireSearchProviderModeAndAdsWriteMode's
   // own header above `bootstrap()` for why this is a single unconditional call rather than inline code.
   wireSearchProviderModeAndAdsWriteMode();

@@ -14,9 +14,19 @@ import type { ModuleContract } from "../contract";
 export const automationConsoleModule: ModuleContract = {
   key: "automation-console",
   migrations: [],
-  permissions: [
-    { key: "automation:workflow:read", description: "View n8n workflows (read-only canvas)" },
-  ],
+  // IAM-01d: `automation:workflow:read` is a TRUE ORPHAN (docs/superpowers/plans/
+  // 2026-08-10-permission-catalog.md §7) — one of the 2 declared keys with NO Cerbos enforcement
+  // anywhere. This file's own header above already documents why: AdminSystemsController is
+  // global/platform-admin-scoped in code (isElevated()-style check, plus IT staff for the workflow
+  // viewer), not Cerbos-authorized, and has no :tenantId route param for a Cerbos principal to
+  // resolve against. Declaring it here would misrepresent an in-code admin check as a role-
+  // grantable Cerbos permission, and IAM-01d's fail-closed validation would refuse to boot on it
+  // (one of the 7 boot-blockers named in the IAM-01c/01d ticket — 5 assistant relationship keys +
+  // this + search:content:publish). REMOVED rather than catalogued: if the n8n viewer should ever
+  // become role-grantable, the correct fix is to mint a real `automation_workflow` Cerbos kind
+  // first (additive, Phase 2+) and declare the resulting catalog key here — not to invent a
+  // catalog entry with no enforcement behind it.
+  permissions: [],
   customFieldTargets: [],
   mcpTools: [
     {

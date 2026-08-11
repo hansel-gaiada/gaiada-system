@@ -8,11 +8,15 @@ import type { ModuleContract } from "../contract";
 export const clientsModule: ModuleContract = {
   key: "clients",
   migrations: ["0001_core.sql"],
+  // IAM-01d migration: all 4 CLEAN but RE-DOMAINED — `client` is a 0001 core-schema kind shared by
+  // files/meetings/pipeline/portal/contracts/search (catalog Judgement J1), so the grantable
+  // permission is `core.client.*`, not `clients.client.*`, even though this module owns the CRUD
+  // routes for it.
   permissions: [
-    { key: "clients:client:read", description: "View clients" },
-    { key: "clients:client:create", description: "Create clients" },
-    { key: "clients:client:update", description: "Edit clients" },
-    { key: "clients:client:delete", description: "Delete clients" },
+    { key: "core.client.read", description: "View clients" },
+    { key: "core.client.create", description: "Create clients" },
+    { key: "core.client.update", description: "Edit clients" },
+    { key: "core.client.delete", description: "Delete clients" },
   ],
   customFieldTargets: [],
   mcpTools: [

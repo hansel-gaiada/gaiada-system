@@ -46,15 +46,16 @@ export async function decideGateAction(formData: FormData): Promise<PipelineResu
   }
 }
 
-/** WD-03 (D-3) — edit a stage's drafted artifact from the run workspace. Gated on approvals.decide
- *  in the UI (same elevated set the backend's Cerbos policy allows for `pipeline_stage.update` —
- *  company_admin/manager/group_executive, non-elevated members denied); the BACKEND remains the
- *  real authority, including the signature lock: once the stage's client sign gate is decided, the
- *  PATCH 409s and this surfaces that as a plain "locked" message rather than a raw error. */
+/** WD-03 (D-3) — edit a stage's drafted artifact from the run workspace. Gated on `pipeline.manage`
+ *  (IAM-02a-FIX-2 — was `approvals.decide` until that capability was split; see rbac.ts's
+ *  `pipeline.manage` comment), which mirrors the backend's Cerbos policy for `pipeline_stage.update`
+ *  exactly — company_admin/manager/group_executive, non-elevated members denied. The BACKEND remains
+ *  the real authority, including the signature lock: once the stage's client sign gate is decided,
+ *  the PATCH 409s and this surfaces that as a plain "locked" message rather than a raw error. */
 export async function editStageArtifactAction(formData: FormData): Promise<PipelineResult> {
   const c = await ctx();
   if ("error" in c) return { ok: false, error: c.error };
-  if (!can(c.me, "approvals.decide", c.tenant)) return { ok: false, error: "You don't have permission to edit this artifact." };
+  if (!can(c.me, "pipeline.manage", c.tenant)) return { ok: false, error: "You don't have permission to edit this artifact." };
   const stageId = String(formData.get("stageId") ?? "");
   const artifactRef = String(formData.get("artifactRef") ?? "");
   const runId = String(formData.get("runId") ?? "");
@@ -79,13 +80,14 @@ export async function editStageArtifactAction(formData: FormData): Promise<Pipel
 // B1 (gap-assessment §B) — the agency's half of the scope dual-sign. Before this the app had no way
 // to record it at all (only a curl against the backend could); "party" is always "provider" here —
 // the client's own countersignature arrives through the separate portal BFF, never this action.
-// Gated the same as every other elevated pipeline write (`approvals.decide` == company_admin/manager/
-// group_executive), which now matches the backend's `scope_signoff.create` Cerbos rule exactly
-// (widened 2026-08-03 to include `manager` — see resource_scope_signoff.yaml).
+// Gated on `pipeline.manage` (IAM-02a-FIX-2 — was `approvals.decide` until that capability was split),
+// which matches the backend's `scope_signoff.create` Cerbos rule exactly: company_admin/manager/
+// group_executive (widened 2026-08-03 to include `manager` — see resource_scope_signoff.yaml),
+// member and team_lead both still excluded.
 export async function recordScopeSignoffAction(formData: FormData): Promise<PipelineResult> {
   const c = await ctx();
   if ("error" in c) return { ok: false, error: c.error };
-  if (!can(c.me, "approvals.decide", c.tenant)) return { ok: false, error: "You don't have permission to record the agency's scope sign-off." };
+  if (!can(c.me, "pipeline.manage", c.tenant)) return { ok: false, error: "You don't have permission to record the agency's scope sign-off." };
   const runId = String(formData.get("runId") ?? "");
   const signerName = String(formData.get("signerName") ?? "").trim();
   if (!runId) return { ok: false, error: "runId required." };
@@ -103,13 +105,14 @@ export async function recordScopeSignoffAction(formData: FormData): Promise<Pipe
   }
 }
 
-// B3 — a run-lifecycle recovery tool: park/unblock/re-status a stuck run by hand. Same elevated
-// gate as the rest of this file; the backend's own status enum is the real validation (a bad value
-// 400s and surfaces as a plain message rather than a raw platform error).
+// B3 — a run-lifecycle recovery tool: park/unblock/re-status a stuck run by hand. Gated on
+// `pipeline.write` (IAM-02a-FIX-2 — was `approvals.decide`), matching `pipeline_run.update`'s Cerbos
+// rule exactly (company_admin/manager/member); the backend's own status enum is the real validation
+// (a bad value 400s and surfaces as a plain message rather than a raw platform error).
 export async function updateRunStatusAction(formData: FormData): Promise<PipelineResult> {
   const c = await ctx();
   if ("error" in c) return { ok: false, error: c.error };
-  if (!can(c.me, "approvals.decide", c.tenant)) return { ok: false, error: "You don't have permission to change a run's status." };
+  if (!can(c.me, "pipeline.write", c.tenant)) return { ok: false, error: "You don't have permission to change a run's status." };
   const runId = String(formData.get("runId") ?? "");
   const status = String(formData.get("status") ?? "");
   if (!runId || !status) return { ok: false, error: "runId and status required." };
@@ -127,11 +130,13 @@ export async function updateRunStatusAction(formData: FormData): Promise<Pipelin
   }
 }
 
-// B4 — add a beat by hand when automation didn't create one. Recovery tool, same elevated gate.
+// B4 — add a beat by hand when automation didn't create one. Recovery tool, gated on `pipeline.write`
+// (IAM-02a-FIX-2 — was `approvals.decide`), matching `pipeline_stage.create`'s Cerbos rule exactly
+// (company_admin/manager/member).
 export async function createStageAction(formData: FormData): Promise<PipelineResult> {
   const c = await ctx();
   if ("error" in c) return { ok: false, error: c.error };
-  if (!can(c.me, "approvals.decide", c.tenant)) return { ok: false, error: "You don't have permission to add a stage." };
+  if (!can(c.me, "pipeline.write", c.tenant)) return { ok: false, error: "You don't have permission to add a stage." };
   const runId = String(formData.get("runId") ?? "");
   const track = String(formData.get("track") ?? "");
   const name = String(formData.get("name") ?? "").trim();
@@ -151,11 +156,12 @@ export async function createStageAction(formData: FormData): Promise<PipelineRes
 }
 
 // B5 — open a review gate manually, the only recovery when a workflow missed one. Recovery tool,
-// same elevated gate.
+// gated on `pipeline.write` (IAM-02a-FIX-2 — was `approvals.decide`), matching `pipeline_gate.create`'s
+// Cerbos rule exactly (company_admin/manager/member).
 export async function openGateAction(formData: FormData): Promise<PipelineResult> {
   const c = await ctx();
   if ("error" in c) return { ok: false, error: c.error };
-  if (!can(c.me, "approvals.decide", c.tenant)) return { ok: false, error: "You don't have permission to open a gate." };
+  if (!can(c.me, "pipeline.write", c.tenant)) return { ok: false, error: "You don't have permission to open a gate." };
   const runId = String(formData.get("runId") ?? "");
   const kind = String(formData.get("kind") ?? "");
   const actorSide = String(formData.get("actorSide") ?? "");
@@ -187,10 +193,13 @@ export async function openGateAction(formData: FormData): Promise<PipelineResult
 // with a real ingest later. clientId is REQUIRED here even though the API allows null, because a run
 // with no client cannot appear in any client portal, and creating one from this form would silently
 // produce work the client can never see.
+//
+// Gated on `pipeline.write` (IAM-02a-FIX-2 — was `approvals.decide`), matching `pipeline_run.create`'s
+// Cerbos rule exactly (company_admin/manager/member).
 export async function createRunAction(formData: FormData): Promise<PipelineResult & { id?: string }> {
   const c = await ctx();
   if ("error" in c) return { ok: false, error: c.error };
-  if (!can(c.me, "approvals.decide", c.tenant)) return { ok: false, error: "You don't have permission to start a run." };
+  if (!can(c.me, "pipeline.write", c.tenant)) return { ok: false, error: "You don't have permission to start a run." };
   const title = String(formData.get("title") ?? "").trim();
   const clientId = String(formData.get("clientId") ?? "").trim();
   const projectId = String(formData.get("projectId") ?? "").trim();

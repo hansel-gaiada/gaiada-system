@@ -130,6 +130,34 @@ export function sanitizeStructure(input: unknown, fallbackName = "Company"): Org
 
 export type OrgSource = "backend" | "local" | "default";
 
+// IAM-UI-SCOPE — the `org_unit` role-grant scope (migration 0100) is anchored to a department or
+// division node id (0055's `org_unit_memberships` / the closure-table convention — 'd-hr',
+// 'dv-web'), never a role/person/company/holding node. This is the picker data the admin
+// role-assignment UI (RoleManager) reuses instead of asking an admin to type a node id free-hand
+// (which would be unvalidatable against the real tree and easy to typo into an orphaned grant —
+// see HIER-2's fail-closed note: an orphaned node id confers nothing, silently). Pure; the caller
+// (a server component/page — org.ts itself is `server-only`) flattens once and passes plain
+// objects down to the client-side picker.
+export interface OrgUnitOption {
+  id: string;
+  name: string;
+  kind: OrgKind;
+  /** Nesting depth from the company root (department = 1, division = 2, …) — for indentation. */
+  depth: number;
+}
+
+export function flattenOrgUnits(structure: OrgStructure): OrgUnitOption[] {
+  const out: OrgUnitOption[] = [];
+  function walk(node: OrgNode, depth: number): void {
+    if (node.kind === "department" || node.kind === "division") {
+      out.push({ id: node.id, name: node.name, kind: node.kind, depth });
+    }
+    for (const child of node.children) walk(child, depth + 1);
+  }
+  walk(structure.root, 0);
+  return out;
+}
+
 export async function getOrgStructure(
   u: string,
   t: string,

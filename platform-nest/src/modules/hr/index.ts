@@ -52,17 +52,26 @@ const hrRollups: RollupProvider = {
 export const hrModule: ModuleContract = {
   key: "hr",
   migrations: ["0028_module_hr.sql", "0081_hr_loans.sql"],
+  // IAM-01d migration (§7): `case:read`/`record:read`/`record:export` CLEAN; `case:write` and
+  // `record:write` bundles expand to their create/update pair. The other 5 declared keys were
+  // ALIAS, each mapping onto a permission already covered above or onto a core permission outside
+  // this module's own domain, and are DROPPED per the catalog's recommendation rather than
+  // redeclared:
+  //   - hr:leave:file   -> hr.case.create (leave is an hr_case type; already covered)
+  //   - hr:leave:decide -> core.automation_approval.decide (module=hr routing rule in policy)
+  //   - hr:loan:request -> hr.case.create (already covered)
+  //   - hr:loan:decide  -> core.automation_approval.decide (same as leave:decide)
+  //   - hr:loan:repay   -> hr.case.{create,update} (already covered)
+  // "File leave" / "request loan" / "decide" / "repay" become UI-only permission groups
+  // (IAM-01b-3) over these fine-grained permissions, not distinct module declarations.
   permissions: [
-    { key: "hr:case:read", description: "View HR cases (onboarding/offboarding/review/grievance/other)" },
-    { key: "hr:case:write", description: "Create/update HR cases" },
-    { key: "hr:leave:file", description: "File a leave request" },
-    { key: "hr:leave:decide", description: "Approve/deny a leave request (unified approvals surface)" },
-    { key: "hr:loan:request", description: "Request an employee loan (self-service)" },
-    { key: "hr:loan:decide", description: "Approve/decline an employee loan (unified approvals surface)" },
-    { key: "hr:loan:repay", description: "Record a repayment against an employee loan (staff only)" },
-    { key: "hr:record:read", description: "View HR records (contract/document/note)" },
-    { key: "hr:record:write", description: "Create/update HR records" },
-    { key: "hr:record:export", description: "Bulk-export HR records (high assurance only)" },
+    { key: "hr.case.read", description: "View HR cases (onboarding/offboarding/review/grievance/other)" },
+    { key: "hr.case.create", description: "Create HR cases (incl. leave/loan requests)" },
+    { key: "hr.case.update", description: "Update HR cases (incl. loan repayments)" },
+    { key: "hr.record.read", description: "View HR records (contract/document/note)" },
+    { key: "hr.record.create", description: "Create HR records" },
+    { key: "hr.record.update", description: "Update HR records" },
+    { key: "hr.record.export", description: "Bulk-export HR records (high assurance only)" },
   ],
   customFieldTargets: ["hr_case", "hr_record"],
   mcpTools: [
