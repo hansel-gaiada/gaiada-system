@@ -1852,3 +1852,72 @@ derivedRoles:
             request.principal.attr.perms.exists(g, g.key == "core.scope_signoff.read" && (
               g.scopeType == "global" ||
               (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+
+    # =============== IAM-04-B5 — Batch 3: selective mirroring, self-scope/pipeline dual- =========
+    # mitigation kinds (integration_connection, project, report_document, time_entry, appraisal).
+    # Closes Batch 3 of docs/superpowers/plans/2026-08-10-iam-04-rollout-scan.md §R.7. ZERO DECISIONS
+    # CHANGED: every rule below mirrors ONLY a plain company-scoped role rule (company_admin/
+    # manager/member/hr_people_ops @ variables.inTenant && variables.notLow, UNCONDITIONAL) that has
+    # NO Pattern-B self-scoped rule coexisting on the SAME action. Three things are DELIBERATELY NOT
+    # mirrored anywhere in this batch — every instance enumerated in the IAM-04-B5 report:
+    #   1. group_executive-only (notLow, no inTenant) rules — same Hazard-2 reasoning IAM-04-B4
+    #      already established: mirroring it would hand a company-scoped permission holder
+    #      cross-tenant reach the role arm never gave them.
+    #   2. Every Pattern-B self-scoped action (a self-scoped rule — inline subjectUserId or
+    #      variables.owns — coexists with an unconditional rule on the SAME action):
+    #      integration_connection.{read,create,update,delete} (ALL FOUR of its actions — this kind
+    #      gets ZERO new rules), project.{create,update,delete}, report_document.read_person,
+    #      time_entry.{update,delete}, appraisal.{read,ack}. Building the unconditional half alone
+    #      (skipping only the self-scoped companion) is NOT a safe partial mirror here — it is the
+    #      exact over-grant Pattern B exists to catch, and permission-arm-hazard-scan.test.ts's own
+    #      PART 3 guard enforces this structurally (an unconditional perm_* rule on a Pattern-B
+    #      action must re-apply the self-check or must not exist at all).
+    #   3. `report_document` and `appraisal` get NO permission arm AT ALL in this ticket — not even
+    #      on their otherwise-clean actions (read_project/read_department/read_company;
+    #      cycle_admin/finalize/confirm_evidence/write/submit). Both kinds carry org_unit_lead's own
+    #      rule (org_unit-scope-only — no g.scopeType=="company" branch at all), and
+    #      permission-arm-hazard-scan.test.ts's PART 3b "REACHABILITY (other-narrow direction,
+    #      IAM-SEC-04)" check is KIND-scoped, not action-scoped: the moment ANY perm_* rule exists
+    #      anywhere on a kind that also carries a scope-narrower-than-company role (org_unit_lead
+    #      here), that check fails — because a org_unit_lead grant mis-recorded at company/global
+    #      scope (admin-identity.controller.ts's ROLE_SCOPE_CONSTRAINTS write-path guard is the ONLY
+    #      thing preventing that today, and this static gate is deliberately defense-in-depth against
+    #      it, not reliant on it) would bundle into `attr.perms` at that wider scope and walk through
+    #      ANY generic mirror on the kind, flattening the subtree boundary — the exact hazard the
+    #      ticket's own brief named by name. No GLOBAL_ONLY_ROLES-shaped exclusion exists for this
+    #      direction (confirmed: the test's own comment says so), so there is no faithful mirror to
+    #      build for either kind's clean actions without inventing that mitigation — out of this
+    #      ticket's remit per its own instruction ("if you think you can [demonstrate an equivalent],
+    #      report the reasoning and DON'T ship it"). Verified empirically, not just reasoned: adding
+    #      the candidate rules and running the suite flips this exact assertion red; reverted. See the
+    #      IAM-04-B5 report for the full account.
+    #
+    # perm_project_* — IAM-04-B5. Only `read` (company_admin/manager/member/viewer, unconditional, no
+    # competing self-scoped rule) is mirrored.
+    - name: perm_project_read
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "core.project.read" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+
+    # perm_time_entry_* — IAM-04-B5. `read`/`create` have no competing self-scoped rule;
+    # `update`/`delete` are Pattern-B (member+owns) and stay unmirrored.
+    - name: perm_time_entry_read
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "core.time_entry.read" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_time_entry_create
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "core.time_entry.create" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))

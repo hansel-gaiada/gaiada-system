@@ -262,6 +262,57 @@ excluded by its own owner-ruling block, unrelated to any batch here.
 
 ---
 
+## UPDATE (IAM-04-B5, 2026-08-12) — Batch 3 (§R.7) attempted: 3 of 5 kinds partially landed, 2 fully blocked
+
+**Status:** PROTOTYPED / DEV-VERIFIED (policy-side only; not deployed to the live estate). Closes
+`docs/superpowers/plans/2026-08-10-iam-04-rollout-scan.md` §R.7's Batch 3 as far as it can safely
+go — `integration_connection`, `project`, `report_document`, `time_entry`, `appraisal`. Full
+account: `docs/superpowers/plans/2026-08-12-iam-04-b5-report.md`.
+
+**What landed:** 3 new `perm_*` derived roles / 3 new resource-policy rules total —
+`perm_project_read` (`project.read`), `perm_time_entry_read`, `perm_time_entry_create`
+(`time_entry.read`/`create`) — each mirroring ONLY the plain company-scoped, non-self-scoped
+role-arm rule for that action. Every Pattern-B self-scoped action on all 5 kinds
+(`integration_connection.{read,create,update,delete}`, `project.{create,update,delete}`,
+`report_document.read_person`, `time_entry.{update,delete}`, `appraisal.{read,ack}`) was left
+unmirrored — self-scope mirroring is out of this ticket's remit per its own brief, and (verified
+against `permission-arm-hazard-scan.test.ts`'s PART 3 guard) wiring the unconditional half alone
+on any of these actions is not a safe partial mirror, it is the exact over-grant Pattern B exists
+to catch.
+
+**What did NOT land, and could not, this ticket:** `report_document` and `appraisal` get **zero**
+new rules — not even on their otherwise-clean actions (`read_project`/`read_department`/
+`read_company`; `cycle_admin`/`finalize`/`confirm_evidence`/`write`/`submit`). Both kinds carry
+`org_unit_lead`'s own org-unit-scope-only rule, and `permission-arm-hazard-scan.test.ts`'s PART 3b
+"REACHABILITY (other-narrow direction, IAM-SEC-04)" check is **kind-scoped, not action-scoped**:
+the moment ANY `perm_*` rule exists anywhere on a kind that also carries a scope-narrower-than-
+company role, the check fails, because a mis-scoped grant of that role would bundle into
+`attr.perms` at the wider scope and walk through any mirror on the kind. Confirmed empirically (not
+just reasoned): adding a candidate `perm_report_document_read_project` rule and running the suite
+flipped that exact assertion red; reverted before shipping anything. No `GLOBAL_ONLY_ROLES`-shaped
+guard exists for this direction (`org_unit_lead`), so there is no faithful mirror to build without
+inventing a new mitigation mechanism — out of remit, flagged for a follow-up ticket, not solved
+here.
+
+**Live-probed** against a freshly-restarted `gaiada-test-cerbos`: the 3 landed actions ALLOW for a
+company-scoped perm-holder in their own tenant and DENY against another (isolation intact); every
+deferred action (all of `integration_connection`, `project.{create,update,delete}`,
+`time_entry.{update,delete}`, and all of `report_document`/`appraisal`) DENIES for a
+permission-only holder regardless of org-unit subtree, proving nothing was accidentally wired;
+`org_unit_lead`'s own role-arm subtree cascade on `report_document`/`appraisal` is unchanged
+(ALLOW inside the subtree, DENY outside, exactly as before); global `group_executive` on
+`appraisal.read` is unchanged. `npm run gen:role-bundles`: byte-identical, 22 roles / 1023 pairs.
+
+**Register update (§R.7):** Batch 3 is now **PARTIALLY LANDED** — 3 of 5 kinds got a (partial)
+mirror; `report_document` and `appraisal` remain fully unmirrored, blocked on a new mitigation
+mechanism for the "other-narrow-direction" hazard (no `perm_*` arm can land on either kind until
+one exists). This is a **new, narrower follow-up** than the original register's Batch 3/4
+framing — not the same shape as Batch 2's `group_executive` role-arm fix, since `org_unit_lead`'s
+role arm is already correct; what's missing is a permission-arm-side exclusion mechanism (or
+equivalent) for scope-narrower-than-company roles, which does not exist yet for any kind.
+
+---
+
 ## Appendix A — the original 2026-08-10 scan (historical; preserved verbatim below for the delta evidence)
 
 ## 0. Headline numbers (ORIGINAL, 2026-08-10 — superseded by the RE-BASELINE above; kept for the BEFORE/AFTER delta)

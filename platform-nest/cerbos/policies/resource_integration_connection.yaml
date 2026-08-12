@@ -47,3 +47,19 @@ resourcePolicy:
       condition:
         match:
           expr: "variables.inTenant && variables.notLow && variables.owns"
+
+    # ══════════ IAM-04-B5 (2026-08-12) — NO permission arm wired on this kind at all. ══════════
+    # EVERY one of this kind's four actions (read/create/update/delete) is Pattern-B: the
+    # member/viewer self-scoped `owns` rule immediately above coexists with the company_admin/
+    # manager unconditional rule above it on the SAME four actions — there is no action left that is
+    # "just" a plain company-scoped mirror. Building the unconditional half alone (mirroring
+    # company_admin/manager's reach, skipping only the self-scoped companion) is not a safe partial
+    # mirror: it is the exact over-grant Pattern B exists to catch (any permission holder — including
+    # one who only ever held the key via the self-scoped grant's own bundled reach — would gain
+    # UNCONDITIONAL access), and permission-arm-hazard-scan.test.ts's PART 3 guard enforces this
+    # structurally. Self-scope mirroring itself (the mitigation hr_case/checkin already use
+    # elsewhere) is an explicitly deferred hazard class for this ticket, per its own brief — not
+    # invented here. group_executive's own notLow-only rule above is also left alone, unchanged
+    # (Hazard 2: mirroring it would hand a company-scoped permission holder cross-tenant reach the
+    # role arm never gave them). Net: this kind gets zero new rules this ticket. See
+    # docs/superpowers/plans/2026-08-12-iam-04-b5-report.md for the full account.

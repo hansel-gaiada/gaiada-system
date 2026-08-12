@@ -27,3 +27,16 @@ resourcePolicy:
       effect: EFFECT_ALLOW
       derivedRoles: ["member"]
       condition: { match: { expr: "variables.inTenant && variables.notLow && variables.owns" } }
+    # ══════════ IAM-04-B5 — permission-matching arm (Batch 3, selective mirror). ══════════
+    # PURELY ADDITIVE. `read`/`create` have no competing self-scoped rule above; `update`/`delete`
+    # are Pattern-B (member's owns-gated rule immediately above coexists with company_admin/
+    # manager's unconditional rule on the SAME actions) and are DELIBERATELY left unmirrored; see
+    # docs/superpowers/plans/2026-08-12-iam-04-b5-report.md.
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_time_entry_read"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    - actions: ["create"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_time_entry_create"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
