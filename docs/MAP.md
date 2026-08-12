@@ -149,6 +149,7 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 | `pm` | `pm` | yes |
 | `reports` | `reports` | yes |
 | `search` | `search` | yes |
+| `social` | `social` | yes |
 | `webdev` | `webdev` | yes |
 
 ## platform-nest — migrations
@@ -213,6 +214,7 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 | `/api/:tenantId/modules/search` | `platform-nest/src/modules/search/search-google-ads.controller.ts` |
 | `/api/:tenantId/modules/search` | `platform-nest/src/modules/search/search-reports.controller.ts` |
 | `/api/:tenantId/modules/search` | `platform-nest/src/modules/search/search.controller.ts` |
+| `/api/:tenantId/modules/social` | `platform-nest/src/modules/social/social.controller.ts` |
 | `/api/:tenantId/modules/webdev` | `platform-nest/src/modules/webdev/webdev.controller.ts` |
 | `/api/:tenantId/reports` | `platform-nest/src/modules/reports/reports.controller.ts` |
 | `/api/admin` | `platform-nest/src/admin/admin-systems.controller.ts` |

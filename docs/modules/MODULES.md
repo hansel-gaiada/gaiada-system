@@ -49,7 +49,7 @@ versions below; the running build reports it at `GET /health`.
 | webdev | `0.13.0` | IN PROGRESS | Web Dev | 2026-08-09 |
 | webdesk | `0.0.0` | PLANNED | Web Dev | 2026-07-23 |
 | search-marketing | `0.5.1` | DEV-VERIFIED | SEO | 2026-08-04 |
-| social-media | `0.1.0` | IN PROGRESS | Social Media | 2026-08-12 |
+| social-media | `0.2.0` | IN PROGRESS | Social Media | 2026-08-12 |
 | creative | `0.1.0` | PROTOTYPED | Creative | 2026-07 |
 | render-gateway-go | `0.0.0` | PLANNED | Creative | 2026-07-23 |
 | reports | `0.3.1` | PROTOTYPED | Cross-cutting | 2026-08-03 |
@@ -1210,7 +1210,26 @@ SM-23 (this reconciliation) â†’ SM-24.
 
 </details>
 
-## social-media — SMM · Organic Publishing · `0.1.0` · IN PROGRESS
+## social-media — SMM · Organic Publishing · `0.2.0` · IN PROGRESS
+
+**0.2.0 (2026-08-12, SMM-02 — the module shell, DEV-VERIFIED):** the `social` ModuleContract is
+registered in `bootstrap()` and `SocialController` serves `/api/:tenantId/modules/social` behind
+`AuthGuard` + `ModuleEnabledGuard("social")` — dark unless the company enables `social` OR an ACTIVE
+`service_assignment` serves it (the served path is the normal one here). Endpoints: engagements CRUD,
+the **scope dial** on its own endpoint and its own permission (`social.engagement.set_scope`, merged
+one level deep under `FOR UPDATE` so a partial patch cannot erase what may be published), brand
+profiles (config + WS8 pointers only, D-13), campaigns (`kind` fixed `'organic'`), KPI targets. Six
+rollup metrics registered. **Built TO the agentic bar rather than retrofitted onto it** (the one
+department that still could be): 4 MCP tools with the same authorize() calls as the HTTP surface,
+snake_case refusal tokens an agent can branch on, caller-supplied-uuid idempotency so an
+at-least-once retry cannot double-create, `setEngagementScope` impact-classified `medium` (so an
+automation principal SUSPENDS into WS4 rather than moving the money dial unattended), and 14 golden
+cases driving every capability through the real endpoint. Two bugs its own tests caught before
+merge: refusal tokens thrown as `error` were being silently replaced by the global filter (they must
+be `message`), and the brand-profile upsert's `COALESCE(EXCLUDED.…)` erased a client's brand voice on
+any partial patch. Defaults enforce the owner decisions — every network OFF, `networks.x` false
+(keeping the publish path $0 and D14-registry-eligible), `ai.imageGen` false and INERT with a named
+warning, since no generative-image backend exists yet. BFF contract §19 documents the surface.
 
 **0.1.0 (2026-08-12, SMM-01 + SMM-30 — the P0 substrate, DEV-VERIFIED against a real Postgres and a
 real Cerbos compile):** migration `0105` creates the 16-table schema on **two deliberately different

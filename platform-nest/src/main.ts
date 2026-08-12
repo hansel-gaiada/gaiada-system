@@ -32,6 +32,7 @@ import { clientsModule } from "./modules/clients";
 import { knowledgeModule } from "./modules/knowledge";
 import { automationConsoleModule } from "./modules/automation-console";
 import { hrModule } from "./modules/hr";
+import { socialModule } from "./modules/social";
 import { assistantModule } from "./modules/assistant";
 import { searchModule } from "./modules/search";
 import { reportsModule } from "./modules/reports";
@@ -337,6 +338,11 @@ async function bootstrap(): Promise<void> {
   // hardcoded hub-side). Registering the module does NOT make the tool reachable by automation —
   // that needs the hub's AUTOMATION_ALLOWLIST entry and its Cerbos `mcp_tool` row, both PRV-03's.
   registerModule(webdevModule);
+  // SMM-02: the social-media department. Registering it contributes its permissions (validated
+  // against the 0106 catalog rows immediately below), its rollup metrics, and its McpToolDefs to
+  // `GET /mcp/tool-defs` — nothing is hardcoded hub-side. It does NOT make the module reachable for
+  // any tenant: that still needs 'social' in enabled_modules or an ACTIVE service_assignment.
+  registerModule(socialModule);
   // IAM-01d: fail-closed drift guard — every module's declared ModuleContract.permissions must
   // resolve to a class='grantable' row in the DB catalog (IAM-01c, migration 0093), or boot is
   // refused outright. Runs AFTER every registerModule() call above (needs the full registered set)

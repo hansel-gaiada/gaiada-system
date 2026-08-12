@@ -2739,3 +2739,65 @@ therefore reuses T3b's existing confirm-chip machinery end to end rather than ad
   or navigates away and back — a UX-latency gap, not a safety bypass (the backend never files
   without confirmation regardless of when the FE notices). Minimal follow-up: have `RosterPanel`'s
   poll also trigger a silent thread refresh once any handoff's status is `'suspended'`.
+
+---
+
+## 19. Social-media module — SMM · Organic Publishing (SMM-* program, 2026-08-12) — `modules/social/social.controller.ts` — **STATUS: IN PROGRESS (SMM-02 backend built; NO UI yet)**
+
+Design: `blueprints/smm-design.md` as amended by **`blueprints/smm-design-addendum-2026-08-12.md`
+(binding)**. Schema `migrations/0105_module_social.sql`; IAM registration `0106` + eight
+`cerbos/policies/resource_social_*.yaml`.
+
+**Frontend-first note, stated because this program's recurring bug class is the opposite.** There is
+no `platform-ui/src/lib/social.ts` yet and no console route — SMM-11 builds both. The rows below are
+the BACKEND as it actually exists today, verified against a live response by
+`modules/social/social.test.ts` (14 golden cases). When the console lands, `lib/social.ts` becomes
+the canonical shape and this section is reconciled against it, exactly as §14 was for search.
+
+All routes are under `/api/:tenantId/modules/social`, behind `AuthGuard` +
+`ModuleEnabledGuard("social")`. The module is **dark** unless the company has `social` in
+`enabled_modules` **or** an ACTIVE `service_assignment` serves `social` to it — for this department
+the served path is the normal one (the agency runs social for sibling companies).
+
+| Method + path | Permission (Cerbos `social_engagement`) | Notes |
+|---|---|---|
+| `GET engagements?clientId=&status=` | `read` | 403 on denial, **never `[]`** — criterion 5 is asserted directly. |
+| `POST engagements` | `create` | **Idempotent**: pass a caller-supplied uuid `id`; a retry answers `201 {id, created:false}` rather than 409, because a retry is the point of the key, not an error. |
+| `GET engagements/:id` | `read` | Joins the client's brand profile. |
+| `PATCH engagements/:id` | `update` | name/status/projectId/ownerId/dates only — **not** scope or budget (see below). |
+| `DELETE engagements/:id` | `delete` | Soft delete. |
+| `GET engagements/:id/scope` | `read` | Returns `{toolScope, usageBudgetUsd}`, with defaults merged UNDER the stored value so a consumer never sees `undefined` for a toggle that post-dates the row. |
+| `PATCH engagements/:id/scope` | **`set_scope`** | Its own permission and its own endpoint: this is the money-and-blast-radius dial. Merges one level deep under `FOR UPDATE`. Returns `{toolScope, usageBudgetUsd, warnings[]}`. |
+| `GET brand-profiles/:clientId` | `read` | Config + WS8 knowledge-source POINTERS only — never corpus text, never an embedding (D-13). |
+| `PATCH brand-profiles/:clientId` | `update` | Upsert on `(tenant_id, client_id)`; a partial patch does not erase sibling fields. |
+| `GET campaigns?engagementId=` / `POST campaigns` | `read` / `update` | `kind` is fixed `'organic'`; `'paid'` is a reserved schema seam, not a parameter. |
+| `GET kpi-targets?engagementId=` / `POST kpi-targets` | `read` / `update` | `metricKey` is the canonical set (`followers_total`, `reach_month`, …). |
+
+**Refusal shape (binding for every FE consumer).** A 400 answers `{ error: "<snake_case_token>" }` —
+the token IS the contract: `missing_field`, `invalid_id`, `invalid_status`, `unknown_network`,
+`invalid_scope`, `invalid_scope_value`, `invalid_budget`, `invalid_direction`, `no_fields`. Render
+against the token, never by matching prose. (Note for anyone adding a refusal here: the token must
+be thrown as `message`, not `error` — `src/http-error.filter.ts` renames `message` to `error` on the
+way out and would silently replace an `error` you set yourself. That trap cost this ticket a
+debugging round; its own test caught it.)
+
+**Two owner-decided defaults a UI must render honestly:**
+- `toolScope.networks.x` is **false** by default. X is the only pay-per-post network; enabling it is
+  allowed and audited, and the PATCH answers with a `warnings[]` entry naming the metered path.
+- `toolScope.ai.imageGen` is **false and currently inert** — there is no generative-image backend in
+  the estate (the gateway has `/complete`, `/media`, `/embed`; `render-gateway-go` is `0.0.0`).
+  Enabling it is stored and answers with a warning naming `image_generation_unavailable`. A console
+  must show that state as "not available yet", not as an active feature.
+
+**MCP surface** (`GET /mcp/tool-defs`, aggregated — nothing hub-side is hardcoded):
+`social.listEngagements`, `social.getEngagementScope` (reads, `low`),
+`social.createEngagement` (write, impact `low`), `social.setEngagementScope` (write, impact
+**`medium`** — an automation principal is SUSPENDED into WS4 rather than applied). The publish,
+inbox, report and ledger tools are deliberately NOT declared yet: their endpoints do not exist, and
+a tool the hub publishes to every agent without a handler behind it is this program's
+"frontend-first drift" bug pointed at automation instead of a console.
+
+**Rollup metrics** (D12): `social.engagements.active`, `social.accounts.connected`,
+`social.posts.published.month`, `social.approvals.pending`, `social.inbox.open`,
+`social.usage_cost.month` (USD minor units, `isMonetary`). All are real queries against 0105's
+tables and read zero until the later write paths land.

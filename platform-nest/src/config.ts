@@ -418,6 +418,17 @@ const configBase = {
   // capability fails closed at the registry (NoCapableProviderError / unknown_provider) instead of
   // half-working against a phantom endpoint. The $0 pillars (crawl audits, keyword clustering, AI
   // drafts) are unaffected — that is the whole point of the P1-before-P2 build order.
+  // SMM-02 — the social-media module. Deliberately tiny for now: the publisher (Postiz) base URL
+  // and org API-key aliases arrive with SMM-06's config plumbing, once SMM-04's containment spike
+  // has decided whether that engine survives its own tripwires.
+  //
+  // `defaultUsageBudgetUsd` is the monthly metered cap a NEW engagement starts on. Small on
+  // purpose: the stop-loss should be tripped by a runaway loop long before it is tripped by real
+  // work, and raising it is a deliberate, audited act (`social.ledger.admin`, held by
+  // company_admin — one tier above the department head who wants to spend it).
+  social: {
+    defaultUsageBudgetUsd: Number(process.env.SOCIAL_DEFAULT_USAGE_BUDGET_USD ?? 10),
+  },
   search: {
     defaultProvider: process.env.SEARCH_DEFAULT_PROVIDER ?? "dataforseo",
     tenantDefaultProvider: process.env.SEARCH_TENANT_DEFAULT_PROVIDER ?? "",
