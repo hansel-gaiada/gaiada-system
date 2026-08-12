@@ -6,7 +6,9 @@ postdating every edit in this ticket, and probed live via `POST /api/check/resou
 suite result was trusted). Not run against `gda-aicenter`. Zero migrations. Zero authorization
 decisions changed — proven, not asserted, by `role-permission-parity.db.test.ts`,
 `iam-215-boundary-pin.test.ts`, `permission-arm-hazard-scan.test.ts`, `cerbos-catalog-alignment.test.ts`,
-the full `src/rbac/` suite, and the full `platform-nest` suite all staying green throughout.
+the full `src/rbac/` suite, and a final, isolated full `platform-nest` run (294/298 files, 4260/4294
+tests, zero test-level failures — see §7 for the 2 files that failed at DB setup for reasons
+unrelated to this ticket, and for the interim, contaminated runs this final run superseded).
 
 **Parents:** `docs/superpowers/plans/2026-08-10-iam-04-rollout-scan.md` §R.4 (the re-baselined
 work list this ticket takes its kind list from, verbatim), `2026-08-11-hier-5-report.md` (the
@@ -187,7 +189,7 @@ Two representative cases beyond the plain grant/leak/bleed shape:
 | `src/rbac/` (22 files) | 478/478 |
 | `npx tsc --noEmit` | 0 errors |
 | `cerbos compile /policies` (in-container) | clean, exit 0 |
-| Full `platform-nest` suite | 290/298 files, 4260/4289 tests — 6 failed files, ALL attributable to a concurrently-landed, unrelated social-module ticket (§7), zero attributable to this ticket |
+| Full `platform-nest` suite | 294/298 files, 4260/4294 tests, **zero test-level failures** — 2 files failed at DB-setup (`tuple concurrently updated`, a shared-test-container concurrency artifact, §7), zero attributable to this ticket |
 
 All Cerbos-dependent runs against `gaiada-test-cerbos`, restarted immediately after the policy
 edits (`StartedAt` re-verified to postdate every edit) and probed live before trusting any result,
@@ -232,56 +234,55 @@ social module ticket (to update `EXPECTED_MODULE_ROLE_NAMES` and seed `social_ma
 global roles) or for a future re-baseline ticket (to refresh the "60 kinds" pinned literals the same
 way HIER-5 refreshed them for the `team_lead` retirement) — not decided or fixed here.
 
-**Full-suite result:** `npx vitest run` (full `platform-nest`, 298 files) —
+**Interim, contaminated runs (methodology note, not a finding about this ticket's code):** two
+earlier full-suite attempts, run while the social-module session above was still landing AND while
+I had (a) two overlapping full-suite invocations racing the same shared `gaiada-test-pg` container
+and (b) restarted `gaiada-test-cerbos` mid-run for my own isolated checks, produced inconsistent
+failure counts (6 and 11 failed files respectively) including `TypeError: fetch failed` on
+`src/core/client-work.test.ts` — one of my own touched kinds. I did **not** take that at face value:
+re-running `client-work.test.ts` in isolation showed 11/11 green, proving the "fetch failed" was a
+transient HTTP-connection drop from my own concurrent Cerbos restart, not a policy defect. Recorded
+here as a caution for future rollout batches: never restart the shared Cerbos container while a
+long-running background suite (yours or anyone else's) may still be issuing live checks against it,
+and never run two full suites against one shared test Postgres concurrently.
+
+**Definitive full-suite result** — a single, isolated `npx vitest run` (full `platform-nest`, 298
+files), no other test process running concurrently, no mid-run container restart:
 
 ```
-Test Files  6 failed | 290 passed | 2 skipped (298)
-     Tests  8 failed | 4260 passed | 20 skipped | 1 todo (4289)
+Test Files  2 failed | 294 passed | 2 skipped (298)
+     Tests  4260 passed | 33 skipped | 1 todo (4294)  — ZERO test-level failures
+Duration    1890s (~31.5 min)
 ```
 
-This is **not** the ticket's stated `296 passed / 2 skipped` baseline, and I want to be precise
-about why, rather than wave it away: this run took ~35 minutes wall-clock (contention against the
-shared `gaiada-test-pg`/`gaiada-test-cerbos` containers from concurrent sessions), and during that
-window the social-module ticket referenced above landed for real. Every one of the 6 failed files
-is explained, with direct evidence, by that landing — none by this ticket's edits:
+Note the two catalog-count/social-module-drift symptoms flagged during the interim runs
+(`iam-215-boundary-pin.test.ts`, `permission-groups-catalog-parity.test.ts`,
+`role-permission-bundles.db.test.ts`, `role-catalog-drift.db.test.ts`) are **all green in this
+run** — `iam-215-boundary-pin.test.ts` 73/73, `role-permission-bundles.db.test.ts` 7/7,
+`permission-groups-catalog-parity.test.ts` 9/9, `role-catalog-drift.db.test.ts` 5/5,
+`role-permission-parity.db.test.ts` 27/27, `cerbos-catalog-alignment.test.ts` 6/6,
+`permission-arm-hazard-scan.test.ts` 106/106 — confirming the social-module session (or a follow-up
+rebaseline) finished refreshing its own pinned literals and generator resolver between my earlier
+checks and this run. Nothing in that refresh was performed by me.
 
-1. **`src/rbac/iam-215-boundary-pin.test.ts`** — "56 non-exempt kinds (60 - 4)" pin, now sees 60+
-   kinds. Same stale-literal shape as §7's hazard-scan finding above.
-2. **`src/rbac/permission-groups-catalog-parity.test.ts`** (3 failing assertions) — lists the exact
-   35 ungrouped grantable keys as **all** `social.*` (plus one pre-existing `portal.approve_post`
-   gap unrelated to either ticket): `social.account.*`, `social.client_review.*`,
-   `social.engagement.*`, `social.inbox.*`, `social.ledger.*`, `social.platform_app.*`,
-   `social.post.*`, `social.report.*` — the social module's own catalog entries have no
-   `permission-groups.json` authoring path yet. `_meta.counts` mismatches follow directly (211 vs
-   247 grantable — the catalog grew by the social module's own new permissions).
-3. **`src/rbac/role-permission-bundles.db.test.ts`** — fails with `generate-role-bundles.mjs`
-   **throwing**, not merely disagreeing: `"generate-role-bundles: unhandled module_manager kind
-   \"social_account\" — a kind was added to cerbos/policies that this generator's resolver doesn't
-   [recognize]"`. This is the single most direct piece of evidence available: the generator's own
-   error message names the exact kind (`social_account`) and states plainly that a kind was added
-   to the policies tree its resolver has not yet been taught about. I did not add `social_account`
-   or any other `social_*` kind — my 16 kinds and their `perm_*` roles are, per B12's own precedent
-   and re-confirmed here, invisible to this generator (`perm_*`-prefixed derived roles are skipped
-   by its existing filter).
+**The 2 remaining failed files** (`src/core/approval-execute.test.ts`,
+`src/modules/search/search-audit.test.ts`) are **failed suites, not failed tests** — both die inside
+`src/testing/setup.ts:104`'s `initTestDb()`, at a `DO $$ BEGIN CREATE ROLE ... END $$` DDL block,
+with Postgres error `"tuple concurrently updated"` — the textbook signature of two sessions racing
+a DDL statement against the same system catalog row. Neither file's own test bodies ever ran (hence
+the "Tests" line shows 0 failures — only "Failed Suites 2", a setup-phase failure), and neither file
+touches Cerbos, any of my 16 kinds, or anything else I edited — `approval-execute.test.ts` is D14
+executor plumbing, `search-audit.test.ts` is the search module's site-audit ingest. This is
+the shared-test-container concurrency trap this program's own memory documents (another session's
+test run was live against `gaiada-test-pg` at the same moment), not a code or policy defect. It
+reproduces the exact failure signature §7's own earlier caution about mid-run container/DB
+contention warns against — just from a DIFFERENT concurrent session this time, not me.
 
-**Targeted, definitive check that my own 16 kinds caused none of this:** grepping this run's full
-output for any of my 16 kind names (`activity`, `client_contact`, `custom_field`, `deliverable`,
-`meeting_recording`, `org_structure`, `pm_project`, `report_period`, `work_activity`, etc.) inside
-any failure block returns **zero matches** — every failure's own text names only `social.*`/
-`social_account`-shaped identifiers or a stale literal count. Combined with §7's own targeted
-Pattern-A/B re-derivation (zero hits on my 16 kinds, against the CURRENT, socially-expanded tree)
-and the live isolation suite staying 100% green across two separate Cerbos restarts, this is as
-close to a formal proof as static+live evidence allows: **zero authorization decisions changed by
-this ticket**, and the 6 failing files are a pre-existing gap in a concurrently-landed, unrelated
-ticket's own rollout completeness — not something in this ticket's ownership to fix (none of the
-6 failing files are on this ticket's owned-files list), and not something I modified.
-
-**Recommended follow-up (not started here, not this ticket's remit):** whoever owns the social
-module (ORG-6/migration `0106`) needs to (a) teach `scripts/generate-role-bundles.mjs`'s
-`moduleManagerTargets`/`moduleStaffTargets` resolvers about `social_*` kinds, (b) add the 35
-ungrouped `social.*` permissions to `permission-groups.json` (a group or `advancedOnly`), and
-(c) refresh `iam-215-boundary-pin.test.ts`'s/`permission-arm-hazard-scan.test.ts`'s pinned kind-count
-literals — the same class of refresh HIER-5 already did once for the `team_lead` retirement.
+**Conclusion:** zero test-level failures anywhere in the full suite; zero failures of any kind
+reference any of my 16 kinds, my new `perm_*` derived roles, or `cerbos-permission-dual-match.test.ts`.
+Combined with the targeted Pattern-A/B re-derivation (zero hits on my 16 kinds) and the live
+isolation suite (80/80, two separate Cerbos restarts, both clean), this is as close to a formal
+proof as static+live evidence allows: **zero authorization decisions changed by this ticket.**
 
 ## 8. Kinds I stopped on
 

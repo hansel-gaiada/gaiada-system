@@ -64,11 +64,13 @@ Consequences worth internalizing before writing a migration or a backfill:
 
 ## Migrations
 
-`migrations/NNNN_*.sql`, applied in order by `src/db/migrate.ts` (and on every boot). Currently
-through `0101_org_unit_closure.sql`. **Reserve your number by writing the file** — concurrent
-sessions share this checkout and collide otherwise. `0058`/`0059` are dead reservations, not
-gaps to fill. Tenant-scoped FKs are mixed (some composite, some not) — match the table you're
-extending rather than "fixing" its neighbours.
+`migrations/NNNN_*.sql`, applied in order by `src/db/migrate.ts` (and on every boot).
+**The head, the next free number and the dead reservations are in `../docs/MAP.md`** (generated —
+this file deliberately does not name them, because a hardcoded head is stale within a day).
+**Reserve your number by creating the file** — concurrent sessions share this checkout and collide
+otherwise, and the unused numbers below head are dead reservations, not gaps to backfill.
+Tenant-scoped FKs are mixed (some composite, some not) — match the table you're extending rather
+than "fixing" its neighbours.
 
 ## Authorization
 

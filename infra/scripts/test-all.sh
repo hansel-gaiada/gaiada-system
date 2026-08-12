@@ -50,4 +50,9 @@ go test ./...
 echo "=== observability configs ==="
 sh "$ROOT/infra/scripts/lint-observability.sh"
 
+# docs/MAP.md is generated from the filesystem — same gate the CI `docs-map` job runs. Fails if a
+# controller / compose service / migration / route was added without regenerating the map.
+echo "=== docs/MAP.md ==="
+node "$ROOT/scripts/gen-map.mjs" --check
+
 echo "=== ALL GREEN ==="

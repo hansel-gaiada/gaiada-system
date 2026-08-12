@@ -31,6 +31,11 @@ deploy). Nothing is shared through packages; contracts are shared through HTTP +
 
 ## Where truth lives (check here, never assert from memory)
 
+- **Structure** — `docs/MAP.md`, **generated** from the filesystem by `node scripts/gen-map.mjs`
+  and gated by the CI `docs-map` job, so it cannot drift: components, every compose service with
+  its profile/ports, the module registry, the migration head + next free number, the whole
+  `@Controller` surface, every UI route, and the n8n workflow ids. Start there instead of
+  grepping. If it disagrees with the repo, regenerate it — never hand-patch it.
 - **Version** — `/VERSION` (`Alpha MM.mmm.bbbba`); the deploy workflow enforces tag ↔ VERSION.
 - **Module status** — `docs/modules/MODULES.md` + `docs/modules/CHANGELOG.md`. Bump the module
   and append an entry on any notable change.

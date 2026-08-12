@@ -282,6 +282,26 @@ jobs:
           # booted and every test failed as a waitForURL timeout. CI-only dummy value.
           SESSION_SECRET: ci-smoke-secret-not-a-real-key
 
+  # docs/MAP.md is GENERATED from the filesystem (scripts/gen-map.mjs) — the structural index:
+  # components, compose services, module registry, migration head, the @Controller surface, UI
+  # routes, workflow ids. Every hand-maintained orientation doc in this program has gone stale and
+  # then misled someone (the 2026-07-09 root guide, archived in docs/history/, is the case in
+  # point). This job is what makes staleness impossible rather than merely discouraged: add a
+  # controller, a compose service or a migration without regenerating, and the build goes red.
+  #
+  # Cheapest job in the file — no npm ci, no services, one Node script over the checkout. Note the
+  # workflow's `paths-ignore` means a docs-only commit skips it; that is correct, because the map
+  # is derived from CODE, and code changes are exactly what this catches.
+  docs-map:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: docs/MAP.md is current (regenerate with `node scripts/gen-map.mjs`)
+        run: node scripts/gen-map.mjs --check
+
   # WS9 observability config-lint: promtool (rules + scrape), amtool (alertmanager, env-rendered),
   # and a YAML/JSON parse fallback. otelcol validate is skipped in CI (large binary); the collector
   # config is YAML-parsed here and otelcol-validated on a Docker host before deploy.
