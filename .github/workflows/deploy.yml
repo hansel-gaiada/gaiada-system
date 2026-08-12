@@ -147,7 +147,24 @@ jobs:
           scp infra/db/*.sh vps:"${DEPLOY_DIR}/infra/db/"
           rsync -az -e ssh infra/observability/ vps:"${DEPLOY_DIR}/infra/observability/"
           # Cerbos config + versioned policy repo (bind-mounted read-only at /config and /policies).
-          rsync -az -e ssh platform-nest/cerbos/ vps:"${DEPLOY_DIR}/platform-nest/cerbos/"
+          #
+          # ⚠ `--delete` IS LOAD-BEARING, added 2026-08-12 after it took production down.
+          # Without it this rsync only ever ADDS and OVERWRITES, so a policy file DELETED in git
+          # lived on forever on the box. Cerbos compiles its whole policy repo at startup and
+          # REFUSES TO START on any compilation error — so the deploy that retired `team_lead`
+          # shipped a `derived_roles.yaml` without it while the server kept a stale
+          # `resource_team.yaml` that still referenced it:
+          #
+          #   resource_team.yaml:24:22: Derived role "team_lead" is not defined in any imports
+          #
+          # Cerbos crash-looped 41 times; authorization was down platform-wide until the orphan file
+          # was removed by hand. Nothing in CI could have caught it — locally the file was gone, so
+          # `cerbos compile` passed. The broken state existed ONLY in the union of new-plus-stale
+          # files that the server assembled, which is precisely what `--delete` prevents.
+          #
+          # Safe here because this is a full mirror of a directory the deploy owns end to end
+          # (`cerbos.yaml` + `policies/`); nothing on the box writes into it.
+          rsync -az --delete -e ssh platform-nest/cerbos/ vps:"${DEPLOY_DIR}/platform-nest/cerbos/"
           # Keycloak realm import (bind-mounted at /opt/keycloak/data/import).
           if [ -d infra/compose/keycloak ]; then
             rsync -az -e ssh infra/compose/keycloak/ vps:"${DEPLOY_DIR}/infra/compose/keycloak/"
@@ -257,8 +274,22 @@ jobs:
           set -euo pipefail
           C="docker compose ${COMPOSE_FILES}"
           for i in $(seq 1 60); do
-            # Any container that declares a healthcheck and is not yet healthy, or has exited.
-            bad="$($C ps --format '{{.Service}} {{.State}} {{.Health}}' \
+            # Any container that declares a healthcheck and is not yet healthy, or is not running.
+            #
+            # ⚠ `-a` IS LOAD-BEARING, added 2026-08-12 after this gate passed through an outage.
+            # Plain `docker compose ps` lists only RUNNING containers. A crash-looping service is in
+            # state `restarting`, so it was omitted from the listing entirely — `bad` came back empty
+            # and this loop printed "all services healthy" while Cerbos was failing to start on a
+            # policy compilation error, 41 restarts deep, with authorization down platform-wide.
+            # The awk filter was correct all along ($2!="running" would have caught `restarting`);
+            # it simply never saw the row. A gate that cannot observe the failure it screens for is
+            # worse than no gate, because the green tick is taken as evidence.
+            #
+            # With `-a`, an exited or restarting service is listed and therefore flagged, so the
+            # deploy fails here — which is exactly what the "Reload Cerbos policies" step above says
+            # is supposed to happen ("a policy repo that fails to parse fails THIS deploy rather than
+            # silently denying in production"). That promise was untrue until this flag.
+            bad="$($C ps -a --format '{{.Service}} {{.State}} {{.Health}}' \
                    | awk '$2!="running" || ($3!="" && $3!="healthy") {print $1}')"
             if [ -z "$bad" ]; then echo "all services healthy"; exit 0; fi
             echo "waiting on: $(echo $bad | tr '\n' ' ')"

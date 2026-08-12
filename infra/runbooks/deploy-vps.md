@@ -353,3 +353,46 @@ which satisfies `notLow`.
 **Still owner-gated:** `clients.portal_user_id` is unset for every client, so the client-side
 `scope_signoff` / review gates cannot be countersigned — a client portal identity is a business
 decision, not a deploy step. The agency half signs fine (`complete:false`, waiting on the client).
+
+## Incident 2026-08-12 — Cerbos crash-looped after a policy DELETION (authorization down)
+
+**Symptom.** Deploy of `alpha-01.037.0087a` reported success. `/health` returned the new version and
+the correct image tags were running — but `gaiada-cerbos-1` was restarting in a loop (41 restarts),
+so every authorization check failed platform-wide.
+
+```
+cerbos: error: failed to create rule table from loader: policy compilation error:
+  resource_team.yaml:24:22: Derived role "team_lead" is not defined in any imports
+```
+
+**Cause — two independent gaps, both now fixed in `.github/workflows/deploy.yml`:**
+
+1. **The policy rsync had no `--delete`.** It only ever added and overwrote, so a policy file deleted
+   in git lived on forever on the box. The release retired `team_lead` (removing it from
+   `derived_roles.yaml` and deleting `resource_team.yaml`), and the server ended up with the NEW
+   derived roles beside the STALE resource policy. Cerbos compiles its whole repo at startup and
+   refuses to start on any error. **Nothing in CI could catch this**: locally the file was gone, so
+   `cerbos compile` passed. The broken state existed only in the union of new-plus-stale files the
+   server assembled.
+2. **The health gate could not see the failure.** It ran `docker compose ps` without `-a`, which
+   lists only RUNNING containers — a crash-looping service is `restarting` and was omitted from the
+   listing entirely, so the check found nothing wrong and printed "all services healthy". The awk
+   filter was correct all along (`$2!="running"`); it never saw the row.
+
+**Recovery (what was actually done):** removed the orphan on the box (backup at
+`/tmp/resource_team.yaml.bak`), then `docker restart gaiada-cerbos-1`. Healthy in ~25s, restart count
+back to 0. Verified by DECISION PROBE, not by health: `org_unit_lead` at an ancestor unit → ALLOW on a
+descendant document; a `team_lead` grant → DENY on `pm_task` read and create.
+
+**If it happens again:**
+```
+docker logs gaiada-cerbos-1 --tail 20          # the compilation error names the offending file
+ls /home/Hansel/gaiada/platform-nest/cerbos/policies/   # compare against git
+rm <orphan>.yaml && docker restart gaiada-cerbos-1
+```
+
+**The lesson worth keeping:** a green deploy plus a correct `/health` version is not evidence that
+authorization works. Cerbos fails CLOSED, so an unloadable policy repo looks like a healthy platform
+that denies everything. Verify a policy change with a real decision probe against
+`POST /api/check/resources` — assert an ALLOW *and* a DENY, so a PDP that is merely reachable cannot
+be mistaken for one that is correct.
