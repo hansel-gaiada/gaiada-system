@@ -12,14 +12,22 @@ test("My Work dashboard loads", async ({ page }) => {
 test("sidebar navigates the business modules", async ({ page }) => {
   await page.goto("/");
   // Nav groups collapse; Business holds these four and starts closed on the dashboard.
+  // 2026-08-10 (commit c89fed6): Business's separate "Projects"/"Tasks" rows collapsed into one
+  // "Project Management" entry (PM_TERMS.projectManagement) pointing at /project-management,
+  // which carries Projects/Tasks as tabs instead — see e2e/pm-unified-interface.spec.ts for
+  // coverage of that surface's own tab set/deep-links. Updated here so this pre-existing test
+  // matches the shipped nav rather than asserting sidebar rows that no longer exist.
   await sidebar(page).getByRole("button", { name: "Business" }).click();
+  // Scoped to #nav-business: Workspace's OWN row (`/pm`) carries the identical "Project
+  // Management" label (PM_TERMS.projectManagement, same string everywhere on purpose) and
+  // Workspace is pinned open, so an unscoped lookup is ambiguous between the two rows.
+  const business = page.locator("#nav-business");
   for (const [label, heading] of [
-    ["Projects", /projects/i],
-    ["Tasks", /tasks/i],
+    ["Project Management", /project management/i],
     ["Deliverables", /deliverables/i],
     ["Agency", /agency|campaign/i],
   ] as const) {
-    await sidebar(page).getByRole("link", { name: label, exact: true }).click();
+    await business.getByRole("link", { name: label, exact: true }).click();
     await expect(page.getByRole("heading", { level: 1 })).toContainText(heading);
   }
   // Workspace is pinned: its daily rows stay open away from the dashboard too.
@@ -290,6 +298,9 @@ test("the mobile drawer keeps labels even when the desktop rail is collapsed", a
   await page.getByRole("button", { name: "Open navigation" }).click();
   await expect(sidebar(page).getByRole("button", { name: "Business" })).toBeVisible();
   await sidebar(page).getByRole("button", { name: "Business" }).click();
-  await expect(sidebar(page).getByRole("link", { name: "Projects", exact: true })).toBeVisible();
+  // c89fed6 collapsed Business's "Projects" row into "Project Management" — see the note on
+  // "sidebar navigates the business modules" above. Scoped to #nav-business: Workspace's own
+  // pinned-open row (/pm) carries the identical label.
+  await expect(page.locator("#nav-business").getByRole("link", { name: "Project Management", exact: true })).toBeVisible();
   await expect(page.locator(".erp-railmenu")).toHaveCount(0);
 });

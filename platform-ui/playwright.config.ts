@@ -26,7 +26,7 @@ export default defineConfig({
       name: "chromium",
       use: { ...devices["Desktop Chrome"], storageState: ".auth/user.json" },
       dependencies: ["setup"],
-      testIgnore: [/auth\.spec\.ts/, /smoke\.spec\.ts/, /portal\.spec\.ts/, /iam-personas-fixture\.spec\.ts/],
+      testIgnore: [/auth\.spec\.ts/, /smoke\.spec\.ts/, /portal\.spec\.ts/, /iam-personas-fixture\.spec\.ts/, /pm-unified-interface\.spec\.ts/],
     },
     {
       // CP-17 client portal. Its OWN project with NO stored session, because every test here signs in as
@@ -51,6 +51,15 @@ export default defineConfig({
       name: "personas",
       use: { ...devices["Desktop Chrome"] },
       testMatch: /iam-personas-fixture\.spec\.ts/,
+    },
+    {
+      // Unified PM interface coverage (commit c89fed6) — self-contained, no dependency on the
+      // "setup" project: each test signs in as a different demo identity (elevated/member/
+      // search_staff) itself, mirroring the "personas" project's reasoning above (a stale shared
+      // staff session would silently test the wrong identity for the capability assertions here).
+      name: "pm-unified",
+      use: { ...devices["Desktop Chrome"] },
+      testMatch: /pm-unified-interface\.spec\.ts/,
     },
     {
       // P3-12 CI build-gate smoke check. Self-contained (does its own login),
