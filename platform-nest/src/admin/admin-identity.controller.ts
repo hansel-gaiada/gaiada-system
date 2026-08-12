@@ -41,6 +41,15 @@ const SCOPE_TYPES = new Set(["global", "company", "project", "org_unit"]);
 // `org_unit_lead@company` — inert today only because those three kinds carry no `perm_*` mirror yet,
 // which is a property of the rollout's current position, not a safeguard.
 //
+// ⚠ IAM-SEC-05 (2026-08-12): this map was being CONSULTED from exactly one writer (`assignRole`),
+// whose own comment claimed it was "the only unrestricted grant write path". That was false —
+// `inviteUser`'s optional initial-role grant (below) ran the SAME class of INSERT with a
+// caller-supplied `roleId`, gated only by a role-EXISTENCE check, never this map. A `company_admin`
+// could invite a target user with `roleId` = `platform_admin`'s (or `org_unit_lead`'s) id and mint
+// `platform_admin@company:X` — the exact self/other-escalation this map exists to make structurally
+// impossible, reachable through the writer the map never covered. Fixed by routing BOTH writers
+// through the single `assertRoleScopeAllowed()` helper below — see its comment.
+//
 // Values are the scope types each role's condition in `derived_roles.yaml` can actually satisfy.
 // **This map is machine-checked against that file** by `permission-arm-hazard-scan.test.ts`, which
 // re-derives it from the policy source — it is the eighth hand-maintained list in this program, and
@@ -51,6 +60,22 @@ const ROLE_SCOPE_CONSTRAINTS: Record<string, readonly string[]> = {
   client: ["company"],
   org_unit_lead: ["org_unit"],
 };
+
+/** THE single scope-guard check — every write path that mints a `user_roles` row from a
+ *  caller-chosen `roleId` MUST call this before inserting, with no bespoke re-implementation.
+ *  IAM-SEC-05: `inviteUser` and `assignRole` used to run two independently-hand-written versions of
+ *  this check, and they drifted — `assignRole` had it, `inviteUser` didn't. A second copy is exactly
+ *  how that class of defect happens twice; this is the one place left to update. Throws a clean 400
+ *  and performs no DB write of its own — callers must invoke this BEFORE any write, so a refusal
+ *  never leaves a partial row behind. */
+function assertRoleScopeAllowed(roleName: string, scopeType: string): void {
+  const allowedScopes = ROLE_SCOPE_CONSTRAINTS[roleName];
+  if (allowedScopes && !allowedScopes.includes(scopeType)) {
+    throw new BadRequestException(
+      `role "${roleName}" may only be granted at ${allowedScopes.join(" or ")} scope`,
+    );
+  }
+}
 
 interface RoleGrantRow {
   grantId: string;
@@ -196,9 +221,20 @@ export class AdminIdentityController {
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) throw new BadRequestException("invalid email");
     await authorize(req.principal, { kind: "user", tenantId }, "create");
 
+    // IAM-SEC-05: this optional initial grant is inserted at a HARDCODED 'company' scope below
+    // (line ~253) — resolve the role's NAME (not just existence) and run it through the SAME
+    // scope guard `assignRole` uses, via the one shared helper. Done here, before ANY write
+    // (user/membership included), so a refused role leaves NO row at all — not a partially
+    // onboarded user with a silently-dropped role, and not a user_roles row that never should
+    // have existed. If an admin needs to invite someone AND grant them a scope-constrained role
+    // (e.g. platform_admin@global, org_unit_lead@org_unit), invite without roleId first, then use
+    // `assignRole` — the one endpoint that can express a non-company scope at all.
     if (body?.roleId) {
-      const role = await withGlobal((c) => c.query(`SELECT 1 FROM roles WHERE id = $1`, [body.roleId]));
+      const role = await withGlobal((c) =>
+        c.query<{ name: string }>(`SELECT name FROM roles WHERE id = $1`, [body.roleId]),
+      );
       if (!role.rows[0]) throw new BadRequestException("unknown role");
+      assertRoleScopeAllowed(role.rows[0].name, "company");
     }
 
     // Reuse an existing global user by email (invite an existing person into another company)
@@ -316,16 +352,13 @@ export class AdminIdentityController {
       c.query<{ name: string }>(`SELECT name FROM roles WHERE id = $1`, [roleId]),
     );
     if (!role.rows[0]) throw new BadRequestException("unknown role");
-    // SCOPE GUARD — see ROLE_SCOPE_CONSTRAINTS' comment for the full rationale. A grant at a scope
-    // the role's own Cerbos condition cannot satisfy is inert under role-name matching but resolves
-    // its FULL bundle at that scope under permission matching: the permission arm granting what the
-    // role arm denies. Refused here, at the only unrestricted write path, so the row cannot exist.
-    const allowedScopes = ROLE_SCOPE_CONSTRAINTS[role.rows[0].name];
-    if (allowedScopes && !allowedScopes.includes(scopeType)) {
-      throw new BadRequestException(
-        `role "${role.rows[0].name}" may only be granted at ${allowedScopes.join(" or ")} scope`,
-      );
-    }
+    // SCOPE GUARD — see ROLE_SCOPE_CONSTRAINTS' and assertRoleScopeAllowed's comments for the full
+    // rationale. A grant at a scope the role's own Cerbos condition cannot satisfy is inert under
+    // role-name matching but resolves its FULL bundle at that scope under permission matching: the
+    // permission arm granting what the role arm denies. Refused here, before any write, via the
+    // one shared helper `inviteUser`'s own optional grant now also calls (IAM-SEC-05) — this is NOT
+    // the only writer that can mint a caller-chosen role; it is one of two callers of one guard.
+    assertRoleScopeAllowed(role.rows[0].name, scopeType);
     // HIER-1 (migration 0100): a scoped grant with NO scopeId used to silently insert scope_id =
     // NULL for any non-company scope (the old fallback below defaulted everything but "company"
     // to null) — dead but harmless while scope_id was untyped-by-CHECK. Migration 0100's new

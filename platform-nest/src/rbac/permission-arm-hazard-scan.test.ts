@@ -499,6 +499,19 @@ function loadGlobalOnlyRolesFromController(): Set<string> {
   return out;
 }
 
+/** Back-compat view for the OTHER-narrow assertions (IAM-SEC-05): every role the controller pins
+ *  to some scope-constrained set that is NOT global-only — company-only (`client`), org_unit-only
+ *  (`org_unit_lead`), or any future scope-constrained role sharing that shape. Derived from the
+ *  same map as `loadGlobalOnlyRolesFromController` so the two views cannot drift apart, and so a
+ *  role can never silently belong to neither view. */
+function loadOtherNarrowRolesFromController(): Set<string> {
+  const out = new Set<string>();
+  for (const [role, scopes] of loadRoleScopeConstraintsFromController()) {
+    if (!(scopes.size === 1 && scopes.has("global"))) out.add(role);
+  }
+  return out;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────────────────────
 // PART 3 — the regression guard: whichever kinds already carry a `perm_*` permission arm
 // (discovered by prefix, never named) must still carry the SAME mitigation shape the pilot
@@ -738,6 +751,33 @@ describe("IAM-04-ROLLOUT-SCAN · permission-arm hazard detector (static, re-deri
           `GLOBAL_ONLY_ROLES-shaped guard available. STOP wiring that kind's permission arm and ` +
           `report this, do not tune the predicate to make it pass.`,
       ).toEqual([]);
+    });
+
+    // IAM-SEC-05 (2026-08-12), per IAM-04c's ruling §4/§8 invariant 2: `:707` above machine-checks
+    // that every global-only Pattern-C role is present in ROLE_SCOPE_CONSTRAINTS, but NOTHING
+    // asserted the same for the other-narrow direction — the map's other-narrow half (`client`,
+    // `org_unit_lead`) was maintained by hand with no test going red if a role fell out of it. This
+    // mirrors `:707` exactly, just against `otherNarrowRoles` instead of `globalOnlyRoles`, PLUS a
+    // direct pin on the two roles the ruling named — belt-and-suspenders so removing either from
+    // ROLE_SCOPE_CONSTRAINTS turns this RED even if the policy-derived sweep somehow found nothing.
+    it("REACHABILITY (other-narrow direction) completeness: every other-narrow Pattern-C role is present in admin-identity.controller.ts's ROLE_SCOPE_CONSTRAINTS", () => {
+      const otherNarrowRoles = loadOtherNarrowRolesFromController();
+      expect(otherNarrowRoles.size, "ROLE_SCOPE_CONSTRAINTS must be parseable from the controller source").toBeGreaterThan(0);
+      const rolesFound = new Set(otherNarrowHits.map((h) => h.role));
+      for (const role of rolesFound) {
+        expect(
+          otherNarrowRoles.has(role),
+          `role "${role}" appears in a rule with a narrower-than-global (company/org_unit/attr) ` +
+            `scope, but is NOT in admin-identity.controller.ts's ROLE_SCOPE_CONSTRAINTS — a ` +
+            `completeness gap in the other-narrow direction (IAM-04c §4/§8). A new company-only or ` +
+            `org-unit-only role could silently fall out of the write-path guard with no test going ` +
+            `red; this is that test.`,
+        ).toBe(true);
+      }
+      // Direct pins: the two roles IAM-04c's ruling named explicitly. If either is ever removed
+      // from ROLE_SCOPE_CONSTRAINTS, this must go RED regardless of what the policy sweep finds.
+      expect(otherNarrowRoles.has("client"), `"client" must remain in ROLE_SCOPE_CONSTRAINTS`).toBe(true);
+      expect(otherNarrowRoles.has("org_unit_lead"), `"org_unit_lead" must remain in ROLE_SCOPE_CONSTRAINTS`).toBe(true);
     });
 
     it("informational: exactly which roles and how many kinds carry this shape (for the report, not pinned)", () => {

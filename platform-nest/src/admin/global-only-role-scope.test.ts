@@ -24,7 +24,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import type { NestFastifyApplication } from "@nestjs/platform-fastify";
 import { buildApp } from "../main";
 import { config } from "../config";
-import { initTestDb, teardownTestDb, TEST_URL } from "../testing/setup";
+import { initTestDb, teardownTestDb, adminPool, TEST_URL } from "../testing/setup";
 import { createCompany, createUser, addMembership, createRole } from "../testing/fixtures";
 
 const svc = { authorization: "Bearer svc-token" };
@@ -132,4 +132,119 @@ describe.skipIf(!TEST_URL)("IAM-SEC-02/04 — a role is grantable only at scopes
     assign(managerRole, "company", tenant).then((res) => {
       expect([200, 201]).toContain(res.statusCode);
     }));
+});
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+// IAM-SEC-05 (2026-08-12) — inviteUser's OWN optional initial-role grant, unguarded until now.
+//
+// THE DEFECT: `inviteUser` (`POST /:tenantId/users`) mints its optional initial role grant with a
+// HARDCODED 'company' scope and only a role-EXISTENCE check — never `ROLE_SCOPE_CONSTRAINTS`. A
+// `company_admin` (or any caller holding `user:create`) could invite an arbitrary target with
+// `roleId` = platform_admin's/org_unit_lead's id and mint `platform_admin@company:X` /
+// `org_unit_lead@company:X` — the exact IAM-SEC-02/04 self/other-escalation shape
+// `ROLE_SCOPE_CONSTRAINTS` exists to make structurally impossible, reachable through the ONE writer
+// that guard was never wired onto. Fixed by routing this grant through the SAME
+// `assertRoleScopeAllowed()` helper `assignRole` calls (admin-identity.controller.ts) rather than a
+// second hand-written check — see that file's comments.
+//
+// Both directions pinned below, same discipline as the block above: the refusal (400, no row at
+// ALL — see the no-partial-state case), AND that a legitimate company-scoped invite-with-a-role
+// still succeeds. A guard that breaks onboarding is its own outage.
+describe.skipIf(!TEST_URL)("IAM-SEC-05 — inviteUser's optional role grant honours the SAME scope guard as assignRole", () => {
+  let app: NestFastifyApplication;
+  let tenant: string;
+  let admin: string;
+  let platformAdminRole: string;
+  let orgUnitLeadRole: string;
+  let clientRole: string;
+  let managerRole: string;
+
+  beforeAll(async () => {
+    await initTestDb();
+    config.serviceToken = "svc-token";
+
+    tenant = await createCompany("IAMSEC05 Co", ["agency"]);
+    admin = await createUser("iamsec05-admin@a.test");
+    await addMembership(tenant, admin);
+
+    platformAdminRole = await createRole("platform_admin");
+    orgUnitLeadRole = await createRole("org_unit_lead");
+    clientRole = await createRole("client");
+    managerRole = await createRole("manager");
+    // The caller is a platform admin — deliberately the strongest possible caller, same reasoning
+    // as the block above: if even they cannot mint a mis-scoped grant through inviteUser, no weaker
+    // caller (e.g. a plain company_admin, who also holds user:create) can either.
+    await (await import("../testing/fixtures")).grantRole(admin, platformAdminRole, "global", null);
+
+    app = await buildApp();
+  });
+
+  afterAll(async () => {
+    await app?.close();
+    await teardownTestDb();
+  });
+
+  let seq = 0;
+  const invite = (roleId: string | undefined, emailPrefix: string) => {
+    const email = `${emailPrefix}-${seq++}@iamsec05.test`;
+    return app
+      .inject({
+        method: "POST",
+        url: `/api/${tenant}/users`,
+        headers: asUser(admin),
+        payload: { name: "Invitee", email, roleId },
+      })
+      .then((res) => ({ res, email }));
+  };
+
+  // ── the refusal, both mis-scopable roles ────────────────────────────────────────────────────
+  it("refuses to invite-with platform_admin (company is the ONLY scope this endpoint can express) with a clean 400", async () => {
+    const { res } = await invite(platformAdminRole, "invite-pa");
+    expect(res.statusCode).toBe(400);
+    expect(res.body).toContain("global scope");
+  });
+
+  it("refuses to invite-with org_unit_lead — its Cerbos condition is org_unit-only, never company", async () => {
+    const { res } = await invite(orgUnitLeadRole, "invite-oul");
+    expect(res.statusCode).toBe(400);
+    expect(res.body).toContain("org_unit scope");
+  });
+
+  // ── no partial state on refusal: NOT EVEN the user/membership rows exist ────────────────────
+  it("a refused invite leaves NO row at all — not the user, not the membership, not the grant", async () => {
+    const { res, email } = await invite(platformAdminRole, "invite-nopartial");
+    expect(res.statusCode).toBe(400);
+    const users = await adminPool().query(`SELECT id FROM users WHERE email = $1`, [email]);
+    expect(
+      users.rows,
+      "the scope check runs before any write in inviteUser specifically so a refusal can never " +
+        "leave a user provisioned with a silently-dropped role, or any other half-applied state",
+    ).toHaveLength(0);
+  });
+
+  // ── the happy path: a real, in-use flow must keep working ───────────────────────────────────
+  it("still permits inviting with `client` — company is exactly the scope client's condition allows", async () => {
+    const { res, email } = await invite(clientRole, "invite-client");
+    expect([200, 201]).toContain(res.statusCode);
+    const { id: userId } = res.json() as { id: string };
+    const grant = await adminPool().query(
+      `SELECT ur.scope_type, ur.scope_id FROM user_roles ur WHERE ur.user_id = $1 AND ur.role_id = $2`,
+      [userId, clientRole],
+    );
+    expect(grant.rows).toHaveLength(1);
+    expect(grant.rows[0].scope_type).toBe("company");
+    expect(grant.rows[0].scope_id).toBe(tenant);
+    const users = await adminPool().query(`SELECT id FROM users WHERE email = $1`, [email]);
+    expect(users.rows).toHaveLength(1);
+  });
+
+  it("still permits inviting with a plain, non-constrained role (manager) at company scope", async () => {
+    const { res } = await invite(managerRole, "invite-manager");
+    expect([200, 201]).toContain(res.statusCode);
+  });
+
+  it("still permits inviting with NO role at all (the roleId-less onboarding flow)", async () => {
+    const { res } = await invite(undefined, "invite-norole");
+    expect([200, 201]).toContain(res.statusCode);
+  });
 });
