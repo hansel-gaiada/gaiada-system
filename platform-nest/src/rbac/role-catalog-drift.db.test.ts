@@ -388,6 +388,11 @@ const EXPECTED_MODULE_ROLE_NAMES = new Set([
   "search_manager",
   "webdev_staff",
   "webdev_manager",
+  // SMM-30, 2026-08-12 — the social-media module's tiers. The names are derived, not chosen:
+  // module_staff/module_manager string-compose `resource.attr.module + "_staff"|"_manager"`, and the
+  // module key is `social`. Seeded by migration 0106.
+  "social_staff",
+  "social_manager",
   "agency_approver",
 ]);
 

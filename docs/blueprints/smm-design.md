@@ -1,5 +1,14 @@
 # Social-Media Subsystem — Architect Design (SMM · Organic Publishing)
 
+> **⚠ READ THE ADDENDUM FIRST (2026-08-12):**
+> [`smm-design-addendum-2026-08-12.md`](./smm-design-addendum-2026-08-12.md) re-bases this document
+> onto the platform as it stands today and **binds where it contradicts what follows**. Six
+> assumptions below expired: permission keys are now catalog DATA (`social.engagement.read`, not
+> `social:engagement:read`), D14 has a canonical grant/execute contract that replaces the bespoke
+> `payload_hash`, the agentic-native bar is binding on every ticket, there is no image-generation
+> backend to call, the client portal makes client approval a real P2 surface, and migrations rebase
+> `0034+` → `0105+`. The addendum also carries the re-planned ticket set (§A4) that supersedes §12.
+>
 > **Status:** Design blueprint — targets a future **`social-media` module, `0.0.0 · PLANNED`**
 > (register in [`../modules/MODULES.md`](../modules/MODULES.md) on approval; nothing in this doc exists as code).
 > **Version:** v1.0 · **Date:** 2026-07-23 · **Author:** System Architect (Claude)

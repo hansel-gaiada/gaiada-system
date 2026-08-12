@@ -82,6 +82,15 @@ const SEARCH_KINDS = new Set([
   "resource_search_keyword", "resource_search_ledger", "resource_search_audit",
   "resource_search_report",
 ]);
+
+// SMM-30 — the seven module-tiered social kinds (0105/0106). BARE names (`social_post`), matching
+// hr_case / webdev_change_request and the value this suite reads from the policy (`rp.resource`);
+// SEARCH_KINDS above is prefixed only because the search policies declare their kind that way.
+// `social_platform_app` is deliberately absent: its policy carries no module tier at all.
+const SOCIAL_KINDS = new Set([
+  "social_engagement", "social_account", "social_post", "social_inbox",
+  "social_report", "social_ledger", "social_client_review",
+]);
 // Historical note (IAM-02a/0094 finding (b), CLOSED by 0097+0098, wired into THIS file's own
 // resolver by IAM-02h): `webdev_change_request`/`webdev_provisioned_site` module_staff/
 // module_manager pairs used to resolve to an empty target set because no `webdev_staff`/
@@ -111,6 +120,7 @@ const DIRECT: Record<string, RealRole[]> = {
 function moduleStaffTargets(kind: string, cond: string | undefined): RealRole[] {
   if (kind === "hr_case" || kind === "hr_record") return ["hr_staff"];
   if (SEARCH_KINDS.has(kind)) return ["search_staff"];
+  if (SOCIAL_KINDS.has(kind)) return ["social_staff"];
   if (kind === "report_document") {
     return cond?.includes('attr.module == "reports"')
       ? ["reports_staff"]
@@ -120,7 +130,7 @@ function moduleStaffTargets(kind: string, cond: string | undefined): RealRole[] 
     return ["webdev_staff"];
   }
   if (kind === "service_assignment" || kind === "member") {
-    return ["hr_staff", "search_staff", "reports_staff", "webdev_staff"];
+    return ["hr_staff", "search_staff", "reports_staff", "webdev_staff", "social_staff"];
   }
   if (NO_ROLE_SEEDED_KINDS.has(kind)) return [];
   throw new Error(`role-permission-parity: unhandled module_staff kind "${kind}" — a new module_staff ` +
@@ -132,6 +142,7 @@ function moduleManagerTargets(kind: string, cond: string | undefined): RealRole[
   if (kind === "hr_case" || kind === "hr_record") return ["hr_manager"];
   if (kind === "automation_approval") return ["hr_manager"]; // rule condition hardcodes attr.module == "hr"
   if (SEARCH_KINDS.has(kind)) return ["search_manager"];
+  if (SOCIAL_KINDS.has(kind)) return ["social_manager"];
   if (kind === "report_document") {
     return cond?.includes('attr.module == "reports"')
       ? ["reports_manager"]
@@ -140,7 +151,7 @@ function moduleManagerTargets(kind: string, cond: string | undefined): RealRole[
   if (kind === "webdev_change_request" || kind === "webdev_provisioned_site") {
     return ["webdev_manager"];
   }
-  if (kind === "service_assignment") return ["hr_manager", "search_manager", "reports_manager", "webdev_manager"];
+  if (kind === "service_assignment") return ["hr_manager", "search_manager", "reports_manager", "webdev_manager", "social_manager"];
   if (NO_ROLE_SEEDED_KINDS.has(kind)) return [];
   throw new Error(`role-permission-parity: unhandled module_manager kind "${kind}" — see moduleStaffTargets' ` +
     `sibling note.`);
@@ -193,9 +204,19 @@ interface CatalogEntry {
   class: "grantable" | "relationship";
 }
 
+interface CatalogDoc {
+  _meta: { counts: { concretePairs: number; cerbosKinds: number; grantable: number; relationship: number } };
+  permissions: CatalogEntry[];
+}
+
+/** The whole catalog document, `_meta` included — the sanity test below asserts that block
+ *  describes the array beneath it, rather than pinning counts that grow with every new module. */
+function loadCatalogDoc(): CatalogDoc {
+  return JSON.parse(readFileSync(CATALOG_PATH, "utf8")) as CatalogDoc;
+}
+
 function loadCatalog(): CatalogEntry[] {
-  const raw = JSON.parse(readFileSync(CATALOG_PATH, "utf8"));
-  return raw.permissions as CatalogEntry[];
+  return loadCatalogDoc().permissions;
 }
 
 /** Re-derives, from the live policy files, which catalog permission keys each of REAL_ROLES
@@ -294,10 +315,27 @@ describe.skipIf(!TEST_URL)("IAM-02b · role_permissions bundle parity vs live Ce
     await teardownTestDb();
   });
 
-  it("sanity: the catalog is the 226-pair / 60-kind / 211-grantable / 15-relationship universe (HIER-3, 2026-08-11: team_lead/team retired, core.team.* dropped from 230/61/215)", () => {
-    expect(catalog.length).toBe(226);
-    expect(new Set(catalog.map((e) => e.cerbosKind)).size).toBe(60);
-    expect(catalog.filter((e) => e.class === "grantable").length).toBe(211);
+  // ⚠ COUNTS ARE DERIVED, not written down (2026-08-12). This block pinned 226/60/211 and went red
+  // the moment an unrelated session legitimately added the `social` module's 8 kinds (-> 262/68/247)
+  // — a tripwire firing on CORRECT work, for the fifth time in this program. A literal count of a
+  // deliberately-growing set also does not test what it appears to: it passes whenever the artifact
+  // and the expectation are wrong by the same amount.
+  //
+  // What is worth asserting is INTERNAL CONSISTENCY — the catalog's own `_meta.counts` must describe
+  // the array beneath it (that block drifted silently once already, found by HIER-5) — plus the ONE
+  // number that is a real invariant rather than a tally.
+  it("sanity: the catalog's own _meta.counts matches the array it describes", () => {
+    const meta = loadCatalogDoc()._meta.counts;
+    expect(catalog.length, "concretePairs").toBe(meta.concretePairs);
+    expect(new Set(catalog.map((e) => e.cerbosKind)).size, "cerbosKinds").toBe(meta.cerbosKinds);
+    expect(catalog.filter((e) => e.class === "grantable").length, "grantable").toBe(meta.grantable);
+    expect(catalog.filter((e) => e.class === "relationship").length, "relationship").toBe(meta.relationship);
+  });
+
+  // The one count that is an INVARIANT, not a tally: Ruling 3's bypass-exempt set. Adding a module
+  // grows `grantable`; it must never grow THIS. A change here is a deliberate, owner-sighted move of
+  // the 15/215 boundary — so it stays a literal on purpose, unlike the counts above.
+  it("Ruling 3 invariant: exactly 15 relationship-class permissions, whatever else the estate grows", () => {
     expect(catalog.filter((e) => e.class === "relationship").length).toBe(15);
   });
 

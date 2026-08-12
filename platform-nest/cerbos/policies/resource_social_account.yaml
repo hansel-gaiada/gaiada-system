@@ -1,0 +1,57 @@
+# SMM-30 — authz for the `social_account` kind: the CONNECTOR REGISTRY row for one client × network
+# account (0105). Mirrors state ABOUT a connection — status, quota counters, capabilities, health —
+# and never a token: network tokens live inside the contained Postiz process and are never copied
+# into our DB, vault or logs (design D-5).
+# Restart `gaiada-test-cerbos` after editing; the bind-mount does not hot-reload.
+#
+# Handlers pass resource.attr = {kind:"social_account", tenantId, module:"social", id?}.
+#
+# ── ACTIONS ──────────────────────────────────────────────────────────────────────────────────────
+#   read    — the registry table: which accounts are connected, expiring, erroring, near quota.
+#   connect — run the OAuth flow that BINDS a client's real social account to our platform app.
+#             Its own action, and a manager-tier one: it grants an outside system standing
+#             permission to post as that brand, it consumes one of our (weeks-to-obtain, app-review
+#             gated) platform-app slots, and it is the step that makes every publish action on that
+#             account possible. `update` is not a substitute — renaming a row is not authorizing a
+#             connection.
+#   update  — edit registry metadata (display name, notes).
+#   delete  — disconnect/soft-delete a registry row.
+#
+# ── THE INVARIANT THIS FILE MUST NOT BREAK ───────────────────────────────────────────────────────
+# `client` appears NOWHERE. A client does not manage the connector registry from the portal, even
+# for their own accounts: the connect flow is brokered by staff through our platform apps.
+#
+# ── TRAP #4 ─────────────────────────────────────────────────────────────────────────────────────
+# `group_executive` gets its own `notLow`-only rule (global scope, no membership row => `inTenant`
+# false), read-only.
+#
+# ── NO PERMISSION ARM YET ───────────────────────────────────────────────────────────────────────
+# See resource_social_engagement.yaml's header.
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: social_account
+  importDerivedRoles: ["gaiada_scopes"]
+  variables:
+    import: ["gaiada_common"]
+  rules:
+    - actions: ["*"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["platform_admin"]
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["group_executive"]
+      condition: { match: { expr: "variables.notLow" } }
+    - actions: ["read", "connect", "update", "delete"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin", "manager"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    # ORG-6 module tiers -> social_manager / social_staff (0106).
+    - actions: ["read", "connect", "update", "delete"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["module_manager"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["module_staff"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }

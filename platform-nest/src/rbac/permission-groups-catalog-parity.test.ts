@@ -76,8 +76,13 @@ describe("IAM-07b · permission-groups.json <-> permission-catalog.json (previou
   const relationshipKeys = new Set(catalog.filter((e) => e.class === "relationship").map((e) => e.key));
   const sensitiveByKey = new Map(catalog.map((e) => [e.key, e.sensitive]));
 
-  it("sanity: 211 grantable / 15 relationship catalog permissions (this suite's fixed inputs; HIER-3, 2026-08-11: core.team.* retired, 215 -> 211)", () => {
-    expect(grantable.length).toBe(211);
+  // SMM-30, 2026-08-12: 211 -> 247 grantable (the social module's 35 keys + portal.approve_post).
+  // The RELATIONSHIP count is unchanged at 15 and that is load-bearing, not incidental: the social
+  // module adds no relationship-class permission, so the Ruling-3 bypass-exempt set is exactly where
+  // it was. If a future social ticket moves this number, that is the change to justify, not the
+  // grantable one. Prior movement: HIER-3, 2026-08-11 — core.team.* retired (215 -> 211).
+  it("sanity: 247 grantable / 15 relationship catalog permissions (this suite's fixed inputs; SMM-30, 2026-08-12: 211 -> 247, relationship set untouched)", () => {
+    expect(grantable.length).toBe(247);
     expect(relationshipKeys.size).toBe(15);
   });
 

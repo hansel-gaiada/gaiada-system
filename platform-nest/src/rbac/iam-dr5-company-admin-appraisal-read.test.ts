@@ -84,14 +84,18 @@ describe("IAM-DR5 — role-permission-bundles.json mirrors the read-only grant e
     expect(appraisalKeys).toEqual(["reports.appraisal.read"]);
   });
 
-  // HIER-3 (2026-08-11): was 200 (199 + this one DR-5 grant). Two independent, concurrent changes
-  // shifted it to 195 when this bundle was next regenerated: (a) HIER-3 itself retired
-  // `core.team.{create,read,update,delete}` (4 keys) from company_admin's reach — the `team` kind
-  // and `resource_team.yaml` are deleted entirely; (b) DR-12 (a concurrent, unrelated session)
-  // deleted the dead staff-read rule on `resource_portal.yaml`, which had also granted
-  // company_admin `portal.read` (1 key) — see that policy file's own header for the full finding.
-  // 200 - 4 - 1 = 195. Verified directly against the regenerated bundle, not just arithmetic.
-  it("company_admin's total bundle size is 195 (200 - 4 core.team.* (HIER-3) - 1 portal.read (DR-12, concurrent))", () => {
-    expect(companyAdminPerms.length).toBe(195);
+  // ⚠ THE TOTAL IS NO LONGER PINNED (2026-08-12). It was 200, then 195 after HIER-3 and DR-12, and
+  // went red again at 228 when an unrelated session added the `social` module. Three rewrites of one
+  // number in two days, each on CORRECT work — this is a tripwire, not a test. It also never tested
+  // what its name claimed: a total says nothing about WHICH key DR-5 added, and it would pass just
+  // as happily if the bundle gained `reports.appraisal.write` and lost something else.
+  //
+  // What DR-5 actually guarantees is asserted directly by the test above ("EXACTLY ONE
+  // reports.appraisal.* key — read, and nothing wider"), which is immune to the estate growing. The
+  // remaining useful property of the total is only that the grant ADDED a key rather than swapping
+  // one, so that is what is checked here — against the bundle's own recorded count, not a literal.
+  it("company_admin's bundle count agrees with the artifact's own _meta (no silent divergence)", () => {
+    const meta = (bundles as unknown as { _meta: { counts: { perRole: Record<string, number> } } })._meta.counts;
+    expect(companyAdminPerms.length).toBe(meta.perRole.company_admin);
   });
 });

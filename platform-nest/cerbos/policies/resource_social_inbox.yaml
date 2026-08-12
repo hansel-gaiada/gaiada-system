@@ -1,0 +1,63 @@
+# SMM-30 — authz for the `social_inbox` kind: comment/mention/DM threads and their messages (0105).
+# Restart `gaiada-test-cerbos` after editing; the bind-mount does not hot-reload.
+#
+# Handlers pass resource.attr = {kind:"social_inbox", tenantId, module:"social", id?}.
+#
+# ── ACTIONS ──────────────────────────────────────────────────────────────────────────────────────
+#   read     — the triage queue and thread view (including AI-stamped sentiment).
+#   reply    — decide that a reply is SENT. Outbound and public, exactly like a publish: it speaks
+#              in the client's name, under their handle, permanently. Same two-gate structure —
+#              this policy says who may be the human; the WS4 suspension + single-use grant
+#              (addendum D-14/D-15) is what makes the send happen at all. Drafting a reply is NOT
+#              this action: a draft is a row in our DB and rides `assign`/`read` plus the AI path.
+#   assign   — take/give ownership of a thread, set its status, start its SLA clock.
+#   escalate — raise a thread out of the queue to a lead. Deliberately separate from `assign`: it is
+#              the "this is a problem" signal a staff member must be able to pull without also
+#              holding reassignment rights.
+#
+# ── WHY STAFF MAY REPLY HERE, BUT MAY NOT PUBLISH ───────────────────────────────────────────────
+# A community-manager replying to comments IS the job; requiring a manager for every "thanks!" would
+# make the inbox unusable and push the work off-platform, which is worse than the risk it avoids.
+# The blast radii genuinely differ: a reply is one message in one thread, addressed to one person,
+# and it is still WS4-gated and one-shot-consumed like every other outbound action. Publishing is a
+# broadcast in the brand's voice. If a client ever needs replies at manager tier, that is a
+# `tool_scope` decision on their engagement, not a rewrite of this policy.
+#
+# ── THE INVARIANT THIS FILE MUST NOT BREAK ───────────────────────────────────────────────────────
+# `client` appears NOWHERE. The engagement inbox is the agency's working surface; a client does not
+# reach it from the portal.
+#
+# ── TRAP #4 ─────────────────────────────────────────────────────────────────────────────────────
+# `group_executive` gets its own `notLow`-only rule, read-only.
+#
+# ── NO PERMISSION ARM YET ───────────────────────────────────────────────────────────────────────
+# See resource_social_engagement.yaml's header.
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: social_inbox
+  importDerivedRoles: ["gaiada_scopes"]
+  variables:
+    import: ["gaiada_common"]
+  rules:
+    - actions: ["*"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["platform_admin"]
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["group_executive"]
+      condition: { match: { expr: "variables.notLow" } }
+    - actions: ["read", "reply", "assign", "escalate"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin", "manager"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    # ORG-6 module tiers -> social_manager / social_staff (0106). Staff run the inbox; see the
+    # "why staff may reply" note above for why this differs from the publish split.
+    - actions: ["read", "reply", "assign", "escalate"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["module_manager"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    - actions: ["read", "reply", "assign", "escalate"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["module_staff"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }

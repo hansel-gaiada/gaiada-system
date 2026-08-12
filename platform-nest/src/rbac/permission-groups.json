@@ -6,12 +6,12 @@
     "catalogSource": "platform-nest/src/rbac/permission-catalog.json (211 grantable permissions, frozen input)",
     "model": "Two-layer (Ruling 1, option C): groups are the authoring surface; every permission remains individually assignable via an 'advanced' expansion. A group's sensitive flag is mechanical — true iff ANY member permission carries catalog sensitive:true.",
     "counts": {
-      "groups": 74,
-      "grantablePermissionsInCatalog": 211,
-      "permissionsCoveredByGroups": 209,
+      "groups": 83,
+      "grantablePermissionsInCatalog": 247,
+      "permissionsCoveredByGroups": 245,
       "permissionsAdvancedOnly": 2,
       "permissionsAppearingInMultipleGroups": 2,
-      "sensitiveGroups": 42
+      "sensitiveGroups": 49
     }
   },
   "groups": [
@@ -818,6 +818,113 @@
       "sensitive": true
     },
     {
+      "key": "social_view",
+      "name": "View Social Media Work",
+      "domain": "social",
+      "description": "See the content calendar, posts, the engagement inbox, client reports, the connector registry, client sign-off state, and metered spend. Read-only.",
+      "permissions": [
+        "social.engagement.read",
+        "social.account.read",
+        "social.post.read",
+        "social.inbox.read",
+        "social.report.read",
+        "social.ledger.read",
+        "social.client_review.read"
+      ],
+      "sensitive": false
+    },
+    {
+      "key": "social_manage_content",
+      "name": "Draft Social Content",
+      "domain": "social",
+      "description": "Create and edit posts and their per-network variants, submit them for publish approval, ask a client to sign off, and record posts published by hand. Draft-only — nothing here reaches a live account.",
+      "permissions": [
+        "social.post.create",
+        "social.post.update",
+        "social.post.delete",
+        "social.post.submit",
+        "social.post.import_native",
+        "social.client_review.request",
+        "social.engagement.create",
+        "social.engagement.update",
+        "social.report.create",
+        "social.report.update",
+        "social.report.delete"
+      ],
+      "sensitive": false
+    },
+    {
+      "key": "social_publish",
+      "name": "Publish & Retract Social Content",
+      "domain": "social",
+      "description": "Decide that approved content goes public on a client's account, cancel a scheduled post, take a published post back down, and withdraw a pending client sign-off request. The outward-facing half of the department.",
+      "permissions": [
+        "social.post.publish",
+        "social.post.cancel",
+        "social.post.delete_published",
+        "social.client_review.withdraw"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "social_engage",
+      "name": "Run the Engagement Inbox",
+      "domain": "social",
+      "description": "Reply from a client's social account, and assign, triage or escalate inbox threads.",
+      "permissions": [
+        "social.inbox.reply",
+        "social.inbox.assign",
+        "social.inbox.escalate"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "social_deliver_reports",
+      "name": "Approve & Deliver Social Reports",
+      "domain": "social",
+      "description": "Sign off a social-media client report and send it to the client.",
+      "permissions": [
+        "social.report.approve",
+        "social.report.deliver"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "social_manage_accounts",
+      "name": "Connect Social Accounts",
+      "domain": "social",
+      "description": "Connect a client's social account to our platform app, edit connector-registry entries, and disconnect.",
+      "permissions": [
+        "social.account.connect",
+        "social.account.update",
+        "social.account.delete"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "social_manage_spend",
+      "name": "Set Social Scope & Spend",
+      "domain": "social",
+      "description": "Set an engagement's tool scope and metered budget, delete an engagement, and override a metered stop-loss. This is the money and blast-radius dial for the department.",
+      "permissions": [
+        "social.engagement.set_scope",
+        "social.engagement.delete",
+        "social.ledger.admin"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "social_platform_apps",
+      "name": "Manage Social Platform Apps",
+      "domain": "social",
+      "description": "Our own approved developer-app fleet across the networks: registrations, app-review outcomes, and credential aliases. Global, not per-client.",
+      "permissions": [
+        "social.platform_app.read",
+        "social.platform_app.admin"
+      ],
+      "sensitive": true
+    },
+    {
       "key": "webdev_file_change_requests",
       "name": "File Website Change Requests",
       "domain": "webdev",
@@ -890,6 +997,16 @@
       "description": "Decide a gate that has been exposed to the client in the portal.",
       "permissions": [
         "portal.decide"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "portal_approve_posts",
+      "name": "Client Portal — Approve Social Posts",
+      "domain": "portal",
+      "description": "Approve, or request changes to, social posts drafted for your brand before they are published.",
+      "permissions": [
+        "portal.approve_post"
       ],
       "sensitive": true
     }

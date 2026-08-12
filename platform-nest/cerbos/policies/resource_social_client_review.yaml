@@ -1,0 +1,66 @@
+# SMM-30 — authz for the `social_client_review` kind: the STAFF SIDE of client post approval
+# (`social_post_client_reviews`, 0105; addendum D-16, owner decision 2026-08-12).
+# Restart `gaiada-test-cerbos` after editing; the bind-mount does not hot-reload.
+#
+# Handlers pass resource.attr = {kind:"social_client_review", tenantId, module:"social", id?}.
+#
+# ── THE TWO-SIDED SEAM (read this before adding a rule) ─────────────────────────────────────────
+# This kind covers what STAFF do with a client review: ask for one, look at it, take it back.
+# The CLIENT's own decision — approve / request changes — is `approve_post` on `resource_portal.yaml`
+# and is reached through the portal controllers, NOT here. That split is deliberate and mirrors how
+# the underlying tables are walled: `social_post_client_reviews` takes the PLAIN core tenant wall
+# precisely because portal controllers declare no module scope, while everything else in this module
+# is third-walled behind `app_module_allowed('social')`. One resource kind spanning both sides would
+# invite a `client` derived role into a social_* policy, and from there into the staff surface.
+#
+# ── ACTIONS ──────────────────────────────────────────────────────────────────────────────────────
+#   read     — see whether the client has responded, and what they said.
+#   request  — send a variant to the client for sign-off. Staff-tier: asking a client to look at a
+#              draft is ordinary account work, and it puts nothing in public.
+#   withdraw — pull a pending review back (the post changed, the campaign was cancelled). Manager-
+#              tier: it retracts something the client has already been asked to look at, and a
+#              withdrawn-then-reissued review is how an approval trail gets confusing.
+#
+# ── WHAT THIS POLICY DOES NOT DECIDE ────────────────────────────────────────────────────────────
+# Client OK is a PRECONDITION of submitting a variant for staff approval — never a substitute for
+# it. Nothing in this file can cause a publish: the WS4 suspension plus the single-use grant remain
+# the only path, and `social_post.publish` remains the human decision (addendum D-16).
+#
+# ── THE INVARIANT THIS FILE MUST NOT BREAK ───────────────────────────────────────────────────────
+# `client` appears NOWHERE in this policy. If a future ticket needs the client to see something more
+# here, it belongs on the portal kind with its own narrow action name, the way `approve_post` and
+# `request_change` already are.
+#
+# ── TRAP #4 ─────────────────────────────────────────────────────────────────────────────────────
+# `group_executive` gets its own `notLow`-only rule, read-only.
+#
+# ── NO PERMISSION ARM YET ───────────────────────────────────────────────────────────────────────
+# See resource_social_engagement.yaml's header.
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: social_client_review
+  importDerivedRoles: ["gaiada_scopes"]
+  variables:
+    import: ["gaiada_common"]
+  rules:
+    - actions: ["*"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["platform_admin"]
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["group_executive"]
+      condition: { match: { expr: "variables.notLow" } }
+    - actions: ["read", "request", "withdraw"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin", "manager"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    # ORG-6 module tiers -> social_manager / social_staff (0106).
+    - actions: ["read", "request", "withdraw"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["module_manager"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    - actions: ["read", "request"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["module_staff"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }

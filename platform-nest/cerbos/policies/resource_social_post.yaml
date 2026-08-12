@@ -1,0 +1,87 @@
+# SMM-30 — authz for the `social_post` kind: master posts, their per-network variants, and the
+# content campaigns that group them (design §11 folds all three into one kind on purpose — they are
+# one editorial object at the authorization layer). THE most consequential policy in this module:
+# three of its actions put content in front of the public, irreversibly.
+# Restart `gaiada-test-cerbos` after editing; the bind-mount does not hot-reload.
+#
+# Handlers pass resource.attr = {kind:"social_post", tenantId, module:"social", id?}.
+#
+# ── ACTIONS ──────────────────────────────────────────────────────────────────────────────────────
+#   read              — calendar, composer, post/variant detail.
+#   create/update     — author a post and its per-network variants. Drafting is a staff act.
+#   delete            — remove an UNPUBLISHED post/variant (soft delete). Not the same power as
+#                       `delete_published`, which reaches the public internet — see below.
+#   submit            — file a variant into the WS4 approval queue. Deliberately separate from
+#                       `update`: proposing is weaker than approving, and this is the action an
+#                       AI/agent draft path is allowed to reach (design §07, the whole point of the
+#                       agent surface is that it may propose and can never publish).
+#   publish           — DECIDE that approved content ships, and thereby execute it. This is the
+#                       gate the entire module is built around; holding it is holding the ability to
+#                       say something publicly in a client's name. Manager tier and above, never
+#                       module_staff, never `member`.
+#   cancel            — pull a SCHEDULED (not yet public) post out of the queue. A mutation of
+#                       outbound state, hence its own action rather than part of `update`.
+#   delete_published  — delete something ALREADY PUBLIC. Irreversible in the direction that matters
+#                       (the internet may have already seen it) and separately revocable from
+#                       `publish` for the same reason `pay` is separate from `sign` on the portal:
+#                       different powers, different blast radii.
+#   import_native     — record a post that was published BY HAND in the network's own app.
+#                       Bookkeeping only (0105's `svar_native_import_is_bookkeeping` CHECK makes
+#                       that structural: no approval, no provider id, published only). Staff-tier
+#                       because it cannot cause an outbound action — it describes one that already
+#                       happened.
+#
+# ── WHY A PERMISSION IS NOT THE APPROVAL ────────────────────────────────────────────────────────
+# Holding `publish` does NOT let a principal publish unapproved content. Every outbound-public tool
+# is registered `write:true, impact:"high"`, so it SUSPENDS into WS4, and dispatch consumes a
+# single-use approval grant whose `argsSha256` must match the variant's own hash (addendum D-14/
+# D-15). This policy decides WHO MAY BE THE HUMAN IN THAT LOOP. The two gates are independent and
+# both required; neither substitutes for the other. Do not "simplify" by widening this action list
+# on the reasoning that the approval gate already protects it.
+#
+# ── THE INVARIANT THIS FILE MUST NOT BREAK ───────────────────────────────────────────────────────
+# `client` appears NOWHERE here. Client sign-off on a post is `portal.approve_post` on the portal
+# kind, against `social_post_client_reviews` — a different resource, a different wall, and never a
+# grant on this one. A client must DENY on every action in this file, including `read`.
+#
+# ── TRAP #4 ─────────────────────────────────────────────────────────────────────────────────────
+# `group_executive` is global-scope and has no `company_memberships` row in most companies, so
+# `inTenant` is FALSE for them there — it gets its own `notLow`-only rule, never folded into the
+# company_admin/manager rule. Read-only here: overseeing is not publishing.
+#
+# ── NO PERMISSION ARM YET ───────────────────────────────────────────────────────────────────────
+# See resource_social_engagement.yaml's header for the full reasoning (PERMISSION-CONTRACT.md §2/§9
+# hazard is unresolved; role names still decide every live authorization).
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: social_post
+  importDerivedRoles: ["gaiada_scopes"]
+  variables:
+    import: ["gaiada_common"]
+  rules:
+    - actions: ["*"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["platform_admin"]
+    # group_executive — see TRAP #4. Oversight reads the calendar; it does not ship posts.
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["group_executive"]
+      condition: { match: { expr: "variables.notLow" } }
+    - actions: ["read", "create", "update", "delete", "submit", "publish", "cancel",
+                "delete_published", "import_native"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin", "manager"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    # ORG-6 module tiers -> social_manager / social_staff (0106). The manager/staff split IS the
+    # publish line: staff author, validate and submit; the manager is the human who decides that
+    # something becomes public and who can take it back down.
+    - actions: ["read", "create", "update", "delete", "submit", "publish", "cancel",
+                "delete_published", "import_native"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["module_manager"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    - actions: ["read", "create", "update", "submit", "import_native"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["module_staff"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }

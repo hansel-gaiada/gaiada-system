@@ -33,7 +33,18 @@ resourcePolicy:
     # src/core/portal-scope.ts's SQL predicate, applied on every portal query; RLS is the tenant wall
     # beneath both. Widening this list does NOT widen which rows a client can reach — but REMOVING the
     # scope predicate from a query would, so read that file before adding a portal route.
-    - actions: ["read", "decide", "sign", "pay", "update_profile", "request_change"]
+    #   approve_post   — SMM-31 (addendum D-16, owner decision 2026-08-12): approve, or request
+    #                    changes to, a social post drafted for their own brand, before staff submit
+    #                    it for the internal publish approval. Narrow-named for the same reason
+    #                    `update_profile` and `request_change` are — a generic `approve` would
+    #                    silently widen the day someone reuses it on a different object.
+    #                    Deliberately available to EVERY active contact regardless of `capability`,
+    #                    on the same ratified reasoning as `request_change`: saying "yes, that post
+    #                    reads right" is weaker than recording a payment or signing a scope. It is
+    #                    NOT a publish and cannot become one — client OK is a precondition of staff
+    #                    submitting the variant, and the WS4 approval plus the single-use grant
+    #                    remain the only path to anything public (addendum D-14/D-16).
+    - actions: ["read", "decide", "sign", "pay", "update_profile", "request_change", "approve_post"]
       effect: EFFECT_ALLOW
       derivedRoles: ["client"]
       condition: { match: { expr: "variables.inTenant" } }

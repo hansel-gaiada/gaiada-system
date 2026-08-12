@@ -1,0 +1,58 @@
+# SMM-30 — authz for the `social_report` kind: the client-facing monthly/campaign engagement report
+# (0105). A different grain from the reports module's four internal grains, exactly as
+# search_reports is; rendering and delivery reuse the existing report-renderer + print-payload
+# pipeline rather than a second renderer.
+# Restart `gaiada-test-cerbos` after editing; the bind-mount does not hot-reload.
+#
+# Handlers pass resource.attr = {kind:"social_report", tenantId, module:"social", id?}.
+#
+# ── ACTIONS ──────────────────────────────────────────────────────────────────────────────────────
+#   read                — the report list/detail in the console.
+#   create/update       — assemble the metric snapshot and edit the AI-drafted narrative.
+#   delete              — soft-delete a draft.
+#   approve             — sign off that the numbers and the narrative are right. Maker/checker: the
+#                         same person may author and approve only if they hold both, and the
+#                         module_staff tier deliberately does not.
+#   deliver             — send it to the client (Shared Drive + deliverable + notification). Its own
+#                         action, separate from `approve`, because delivery is the outward-facing
+#                         half: approving is an internal judgment, delivering puts a document in a
+#                         client's hands and cannot be un-sent.
+#
+# ── THE INVARIANT THIS FILE MUST NOT BREAK ───────────────────────────────────────────────────────
+# `client` appears NOWHERE. A delivered report reaches the client as a `deliverables` row + a Drive
+# file through the existing delivery path — never by granting a client read on this kind.
+#
+# ── TRAP #4 ─────────────────────────────────────────────────────────────────────────────────────
+# `group_executive` gets its own `notLow`-only rule, read-only.
+#
+# ── NO PERMISSION ARM YET ───────────────────────────────────────────────────────────────────────
+# See resource_social_engagement.yaml's header.
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: social_report
+  importDerivedRoles: ["gaiada_scopes"]
+  variables:
+    import: ["gaiada_common"]
+  rules:
+    - actions: ["*"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["platform_admin"]
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["group_executive"]
+      condition: { match: { expr: "variables.notLow" } }
+    - actions: ["read", "create", "update", "delete", "approve", "deliver"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin", "manager"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    # ORG-6 module tiers -> social_manager / social_staff (0106). Staff draft; the manager signs off
+    # and delivers.
+    - actions: ["read", "create", "update", "delete", "approve", "deliver"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["module_manager"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    - actions: ["read", "create", "update"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["module_staff"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }

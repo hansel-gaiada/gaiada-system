@@ -89,9 +89,15 @@ describe("IAM-07b link 1 · Cerbos policies <-> permission-catalog.json (the wav
   const catalogKindSet = new Set(catalog.map((e) => e.cerbosKind));
   const policyKindSet = new Set(policyKinds.keys());
 
-  it("sanity: catalog headline numbers this suite depends on (226 pairs / 60 kinds — HIER-3, 2026-08-11: team_lead/team retired, resource_team.yaml deleted, core.team.* dropped from the catalog)", () => {
-    expect(catalog.length).toBe(226);
-    expect(catalogKindSet.size).toBe(60);
+  // SMM-30, 2026-08-12: 226 -> 262 pairs / 60 -> 68 kinds. The social-media module registered its 8
+  // Cerbos kinds (social_engagement/account/post/inbox/report/ledger/platform_app/client_review) with
+  // 35 catalog permissions, plus `portal.approve_post` — a new ACTION on the existing `portal` kind
+  // (the client half of the post sign-off seam, addendum D-16), which is why the pair count grows by
+  // 36 while the kind count grows by only 8. Prior movement: HIER-3, 2026-08-11 — team_lead/team
+  // retired, resource_team.yaml deleted, core.team.* dropped (230/61 -> 226/60).
+  it("sanity: catalog headline numbers this suite depends on (262 pairs / 68 kinds — SMM-30, 2026-08-12: the social module's 8 kinds + portal.approve_post)", () => {
+    expect(catalog.length).toBe(262);
+    expect(catalogKindSet.size).toBe(68);
   });
 
   it("(a-forward) every catalog kind is backed by a real resourcePolicy file", () => {

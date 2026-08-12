@@ -1,0 +1,44 @@
+# SMM-30 — authz for the `social_platform_app` kind: OUR OWN approved developer-app fleet
+# (`social_platform_apps`, 0105) — the Meta/TikTok/LinkedIn/X/YouTube app registrations that every
+# tenant's connections ride on.
+# Restart `gaiada-test-cerbos` after editing; the bind-mount does not hot-reload.
+#
+# ── THIS KIND IS NOT TENANT-SCOPED, AND THAT IS THE WHOLE POINT ─────────────────────────────────
+# The underlying table has NO tenant_id and NO RLS (design D-4): one approved app serves every
+# tenant on that network. So there is nothing for `inTenant` to compare against, and a rule gated on
+# it would be either meaningless or accidentally false. Handlers pass
+# resource.attr = {kind:"social_platform_app", module:"social"} with NO tenantId, and the reach is
+# GLOBAL-ROLE-ONLY by construction:
+#   * `platform_admin` — the wildcard, as everywhere.
+#   * `group_executive` — read, `notLow`-gated (it is a global grant already; TRAP #4's inTenant
+#     concern is moot here because nothing in this policy uses inTenant at all).
+# No company_admin rule, no manager rule, and no module tier: a company admin in one tenant must not
+# be able to edit the app fleet that carries every OTHER tenant's connections. That is a
+# cross-tenant blast radius wearing a per-tenant role name.
+#
+# ── ACTIONS ──────────────────────────────────────────────────────────────────────────────────────
+#   read  — the fleet's state: which networks are approved, which reviews are pending or rejected,
+#           which credentials expire when. This is what makes "why can't I connect this client's
+#           TikTok?" answerable instead of mysterious.
+#   admin — register an app, record a review outcome, rotate the credential ALIAS. Never the secret
+#           itself: `credential_ref` points into env/OpenBao and the value is injected into the
+#           contained publisher at deploy (design D-5). No action in this policy exposes a secret,
+#           because no column holds one.
+#
+# ── NO PERMISSION ARM YET ───────────────────────────────────────────────────────────────────────
+# See resource_social_engagement.yaml's header.
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: social_platform_app
+  importDerivedRoles: ["gaiada_scopes"]
+  variables:
+    import: ["gaiada_common"]
+  rules:
+    - actions: ["*"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["platform_admin"]
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["group_executive"]
+      condition: { match: { expr: "variables.notLow" } }

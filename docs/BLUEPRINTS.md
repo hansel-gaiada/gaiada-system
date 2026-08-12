@@ -89,7 +89,8 @@ defence in depth), the full **P0–P4 ticket decomposition** (27 tickets + 2 dec
 the open questions & decision log.
 
 - **Design doc:** [`blueprints/smm-design.md`](./blueprints/smm-design.md) · **Foundation:** [`blueprints/smm-foundation.md`](./blueprints/smm-foundation.md)
-- **Version:** v1.0 · 2026-07-23
+- **⚠ Addendum (BINDING, read first):** [`blueprints/smm-design-addendum-2026-08-12.md`](./blueprints/smm-design-addendum-2026-08-12.md) — re-bases the design onto the current platform (permissions-as-data, the closed D14 execute contract, the agentic-native bar, no image-gen backend, the live client portal, migrations `0105+`) and re-plans §12 into 30 tickets + 3 decision-gated.
+- **Version:** v1.0 · 2026-07-23 (+ addendum 2026-08-12)
 - **Print:** A4/Letter, page-breaks per section. (Not yet hosted as a claude.ai artifact.)
 
 ---

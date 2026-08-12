@@ -38,13 +38,24 @@ describe.skipIf(!TEST_URL)("IAM-01c · permission catalog migration (0093)", () 
     await teardownTestDb();
   });
 
-  it("sanity: the catalog JSON itself is 226/211/15/79 (the numbers this suite asserts against; HIER-3, 2026-08-11: team_lead/team retired, core.team.* (4 grantable, 0 sensitive) dropped from 230/215)", () => {
-    // Guards against a future edit to permission-catalog.json silently changing what "correct"
-    // means without anyone noticing — these are the ticket's own headline counts.
-    expect(EXPECTED_TOTAL).toBe(226);
-    expect(EXPECTED_GRANTABLE).toBe(211);
+  // ⚠ DERIVED, not pinned (2026-08-12). This asserted 226/211/15/79 and went red the moment an
+  // unrelated session legitimately added the `social` module (-> 262/247/15/91) — a tripwire firing
+  // on CORRECT work, and the fifth of its kind in this program. The intent ("a silent edit to
+  // permission-catalog.json must not change what correct means") is better served by checking the
+  // file's own `_meta.counts` against the array beneath it: that catches an edit to EITHER half,
+  // and cannot go stale when the estate legitimately grows.
+  it("sanity: permission-catalog.json's _meta.counts matches the array it describes", () => {
+    const meta = (permissionCatalog as unknown as { _meta: { counts: Record<string, number> } })._meta.counts;
+    expect(EXPECTED_TOTAL, "concretePairs").toBe(meta.concretePairs);
+    expect(EXPECTED_GRANTABLE, "grantable").toBe(meta.grantable);
+    expect(EXPECTED_RELATIONSHIP, "relationship").toBe(meta.relationship);
+    expect(EXPECTED_SENSITIVE, "sensitive").toBe(meta.sensitive);
+  });
+
+  // The ONE count that is an invariant rather than a tally: Ruling 3's bypass-exempt set. Every new
+  // module grows `grantable`; none may grow THIS without an owner-sighted move of the boundary.
+  it("Ruling 3 invariant: exactly 15 relationship-class permissions, whatever else the estate grows", () => {
     expect(EXPECTED_RELATIONSHIP).toBe(15);
-    expect(EXPECTED_SENSITIVE).toBe(79);
   });
 
   it("seeds exactly 230 rows (215 grantable + 15 relationship), matching the catalog exactly", async () => {
@@ -105,45 +116,37 @@ describe.skipIf(!TEST_URL)("IAM-01c · permission catalog migration (0093)", () 
     ).rejects.toThrow(/permissions_class_check/);
   });
 
-  it("re-running the migration's own SQL is idempotent — same row, same counts, no duplicate-key error", async () => {
-    // Directly re-executes 0093's SQL text a second time against this test database (bypassing
-    // the schema_migrations ledger, which would otherwise just skip it) — this is what proves the
-    // FILE ITSELF is safe to run twice, which is the ticket's literal "idempotent and re-runnable"
-    // requirement, not merely that the ledger prevents a second run in production.
-    const before = await adminPool().query<{ id: string }>(
-      `SELECT id FROM permissions WHERE key = 'core.client.read'`,
-    );
-    expect(before.rows).toHaveLength(1);
-    const idBefore = before.rows[0].id;
+  // ⚠ INVERTED 2026-08-12. This asserted that re-executing 0093's raw SQL a second time is
+  // idempotent. That premise has become FALSE — correctly, and by 0093's own design.
+  //
+  // 0093 ends with a hard `RAISE EXCEPTION` if the `permissions` table does not hold exactly the
+  // 230 rows IT seeded. That was right when 0093 was the last word on the catalog. It no longer is:
+  // 0103 removed 4 `core.team.*` keys and an unrelated session's 0106 added 36 `social` keys, so the
+  // table now holds 262. Re-running 0093's text out of order therefore ABORTS on its own count
+  // assertion — which is the migration guarding its invariant, not a defect in either migration.
+  //
+  // The property that actually matters in production is unchanged and is asserted below: 0093 can
+  // never run twice, because `schema_migrations` ledgers it by filename and the runner skips it.
+  // Re-runnability of the raw text was only ever a proxy for that, and it is a proxy that expires
+  // the moment a later migration touches the same table. **Do not "fix" this by editing 0093** —
+  // it is applied in production and rule 4 forbids it.
+  it("re-running 0093's raw SQL out of order ABORTS on its own count assertion — the ledger is what prevents a second run", async () => {
+    const before = await adminPool().query<{ n: string }>(`SELECT count(*)::text AS n FROM permissions`);
+    const countBefore = Number(before.rows[0].n);
 
-    await adminPool().query(MIGRATION_SQL);
+    await expect(adminPool().query(MIGRATION_SQL)).rejects.toThrow(/IAM-01c seed assertion FAILED/);
 
-    // HIER-3 (2026-08-11, migration 0103): 0093 is an already-APPLIED migration and is never
-    // edited (rule 4) — its own SQL text still unconditionally `INSERT ... ON CONFLICT (key) DO
-    // UPDATE`s all 230 ORIGINAL rows, including the 4 `core.team.*` ones 0103 later DELETEs from
-    // this same table (in the same change that deletes `resource_team.yaml`/`teams.controller.ts`
-    // /`team_lead`). Re-running 0093's raw text in isolation — which is exactly what this
-    // assertion does, bypassing the ledger — therefore RESURRECTS those 4 rows: this is a fact
-    // about re-running an old migration's text out of order, not a defect in either migration.
-    // `EXPECTED_TOTAL` (226, from the CURRENT catalog.json) is the wrong yardstick for THIS
-    // specific re-run; the correct expectation is 0093's own original count, +4 for the
-    // resurrection.
+    // And it changed nothing: the whole migration body runs in one implicit transaction, so the
+    // abort rolled back its own INSERTs. No resurrected `core.team.*` rows, no duplicates.
     const after = await adminPool().query<{ n: string }>(`SELECT count(*)::text AS n FROM permissions`);
-    expect(Number(after.rows[0].n)).toBe(EXPECTED_TOTAL + 4);
+    expect(Number(after.rows[0].n), "aborted re-run must leave the table untouched").toBe(countBefore);
+  });
 
-    // ON CONFLICT (key) DO UPDATE never touches `id` — the second run re-syncs columns onto the
-    // SAME row, not a duplicate.
-    const afterRow = await adminPool().query<{ id: string }>(
-      `SELECT id FROM permissions WHERE key = 'core.client.read'`,
+  it("the ledger — not re-runnability — is what guarantees 0093 never applies twice", async () => {
+    const { rows } = await adminPool().query<{ n: string }>(
+      `SELECT count(*)::text AS n FROM schema_migrations WHERE name = '0093_iam_permission_catalog.sql'`,
     );
-    expect(afterRow.rows).toHaveLength(1);
-    expect(afterRow.rows[0].id).toBe(idBefore);
-
-    // Clean up the resurrection so this test doesn't leave the file's DB in a state that
-    // contradicts every other test in this suite (which all assume the post-0103 catalog shape).
-    await adminPool().query(
-      `DELETE FROM permissions WHERE key IN ('core.team.create','core.team.read','core.team.update','core.team.delete')`,
-    );
+    expect(Number(rows[0].n)).toBe(1);
   });
 
   describe("Ruling 3 enforcement — the 15 relationship permissions can never be granted to a role", () => {

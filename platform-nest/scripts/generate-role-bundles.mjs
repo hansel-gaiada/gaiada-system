@@ -75,6 +75,12 @@ const REAL_ROLES = [
   "search_staff", "search_manager",
   "reports_staff", "reports_manager",
   "webdev_staff", "webdev_manager",
+  // SMM-30: the social-media department's module tiers. The names are NOT free-form — `module_staff`/
+  // `module_manager` string-compose `resource.attr.module + "_staff"|"_manager"` at request time, and
+  // the module key is `social`, so the only names Cerbos will ever look for are these two. (The SMM
+  // design's own "smm_manager/smm_staff" wording predates this constraint and is wrong; corrected in
+  // the 2026-08-12 addendum.) Seeded by migration 0106.
+  "social_staff", "social_manager",
 ];
 
 const SEARCH_KINDS = new Set([
@@ -88,6 +94,21 @@ const SEARCH_KINDS = new Set([
 // concretely in moduleStaffTargets()/moduleManagerTargets() below. Kept as an empty set (rather
 // than deleted) so a FUTURE module found in this same unseeded-role shape has an established,
 // named place to land pending its own role-seeding ticket.
+// SMM-30 — the eight social kinds (0105/0106). `social_platform_app` is deliberately ABSENT: it is a
+// global, non-tenant-scoped fleet table whose policy carries no module tier at all (a company admin
+// in one tenant must not edit the app fleet every other tenant's connections ride on), so it never
+// reaches moduleStaffTargets()/moduleManagerTargets().
+// NOTE ON NAMING: these are BARE kind names (`social_post`), matching hr_case / webdev_change_request
+// and the value this generator actually reads (`rp.resource`). The neighbouring SEARCH_KINDS set is
+// prefixed (`resource_search_property`) because the search policies genuinely declare their kind
+// that way — an estate-wide inconsistency, not a convention. Do not "align" one to the other here:
+// each set must match what its own policy files declare, or the lookup silently misses and the
+// resolver throws.
+const SOCIAL_KINDS = new Set([
+  "social_engagement", "social_account", "social_post", "social_inbox",
+  "social_report", "social_ledger", "social_client_review",
+]);
+
 const NO_ROLE_SEEDED_KINDS = new Set([]);
 
 const DIRECT = {
@@ -115,8 +136,9 @@ function moduleStaffTargets(kind, cond) {
   if (kind === "webdev_change_request" || kind === "webdev_provisioned_site") {
     return ["webdev_staff"];
   }
+  if (SOCIAL_KINDS.has(kind)) return ["social_staff"];
   if (kind === "service_assignment" || kind === "member") {
-    return ["hr_staff", "search_staff", "reports_staff", "webdev_staff"];
+    return ["hr_staff", "search_staff", "reports_staff", "webdev_staff", "social_staff"];
   }
   if (NO_ROLE_SEEDED_KINDS.has(kind)) return [];
   throw new Error(
@@ -139,7 +161,10 @@ function moduleManagerTargets(kind, cond) {
   if (kind === "webdev_change_request" || kind === "webdev_provisioned_site") {
     return ["webdev_manager"];
   }
-  if (kind === "service_assignment") return ["hr_manager", "search_manager", "reports_manager", "webdev_manager"];
+  if (SOCIAL_KINDS.has(kind)) return ["social_manager"];
+  if (kind === "service_assignment") {
+    return ["hr_manager", "search_manager", "reports_manager", "webdev_manager", "social_manager"];
+  }
   if (NO_ROLE_SEEDED_KINDS.has(kind)) return [];
   throw new Error(
     `generate-role-bundles: unhandled module_manager kind "${kind}" — see moduleStaffTargets' sibling note.`,

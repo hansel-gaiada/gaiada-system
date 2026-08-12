@@ -1,0 +1,60 @@
+# SMM-30 — authz for the `social_ledger` kind: the metered usage ledger (0105,
+# `social_usage_ledger`) and the stop-loss caps it feeds.
+# Restart `gaiada-test-cerbos` after editing; the bind-mount does not hot-reload.
+#
+# Handlers pass resource.attr = {kind:"social_ledger", tenantId, module:"social"}.
+#
+# ── ACTIONS ──────────────────────────────────────────────────────────────────────────────────────
+#   read  — the usage panel: month-to-date metered spend per engagement, and how close it is to the
+#           cap. A department that cannot see its own spend cannot manage it, so this is staff-tier.
+#   admin — OVERRIDE a stop-loss: raise an engagement's `usage_budget_usd`, or clear a blocked
+#           state. This is the action that turns a refusal into a charge, so it is deliberately NOT
+#           held by `module_manager` — the department head who wants to spend more is exactly the
+#           person who should not be able to authorize it alone. Mirrors search.ledger.admin, and it
+#           is why `set_scope` (which also moves the budget) is manager-tier while this is not:
+#           set_scope writes the PLANNED envelope up front; admin overrides a cap that has already
+#           been hit, mid-flight, when the money is being spent.
+#
+# ── WHY THIS MATTERS EVEN THOUGH v1 SPENDS ALMOST NOTHING ───────────────────────────────────────
+# `networks.x` ships disabled and the generative-image kinds are inert (addendum D-14/D-17), so the
+# only live metered kind is `ai_cloud_text`. The discipline is built now anyway: the ledger and its
+# permissions are the thing that must already exist and already be correct on the day X or image
+# generation is switched on for a client — retrofitting a money boundary after money starts moving
+# is how the estate's other cost centres nearly got it wrong.
+#
+# ── TRAP #4 ─────────────────────────────────────────────────────────────────────────────────────
+# `group_executive` gets its own `notLow`-only rule. Read-only: cross-company money VISIBILITY is
+# exactly what an exec is for; overriding one department's cap is not.
+#
+# ── NO PERMISSION ARM YET ───────────────────────────────────────────────────────────────────────
+# See resource_social_engagement.yaml's header.
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: social_ledger
+  importDerivedRoles: ["gaiada_scopes"]
+  variables:
+    import: ["gaiada_common"]
+  rules:
+    - actions: ["*"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["platform_admin"]
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["group_executive"]
+      condition: { match: { expr: "variables.notLow" } }
+    - actions: ["read", "admin"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    # `manager` reads but does not override — see the ACTIONS note above. company_admin holds the
+    # override, deliberately one tier up from the person spending the budget.
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["manager"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    # ORG-6 module tiers -> social_manager / social_staff (0106). Both read; neither overrides.
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["module_manager", "module_staff"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
