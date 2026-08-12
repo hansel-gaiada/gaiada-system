@@ -18,8 +18,19 @@ resourcePolicy:
     # Reading the inbox is elevated (it exposes intended writes across the tenant's workflows).
     - actions: ["read"]
       effect: EFFECT_ALLOW
-      derivedRoles: ["company_admin", "manager", "group_executive"]
+      derivedRoles: ["company_admin", "manager"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    # IAM-TRAP4: `group_executive` is a GLOBAL-scope-only role (derived_roles.yaml: `g.scopeType ==
+    # "global"`), so a holder never has a `company_memberships` row and `variables.inTenant` is
+    # FALSE for every resource. Folding it into the rule above (as `company_admin`/`manager`'s
+    # `inTenant && notLow` companion) denied it outright, defeating the role's entire cross-company-
+    # oversight purpose. Own rule, `variables.notLow` only — matching `resource_appraisal.yaml`'s
+    # `group_executive` rule exactly (the cross-company owner tier is by definition never "in
+    # tenant"). See docs/superpowers/plans/2026-08-11-hier-5-report.md §5 / 2026-08-12-iam-trap4-report.md.
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["group_executive"]
+      condition: { match: { expr: "variables.notLow" } }
     # Deciding (approve/reject) is a human governance action — company admins and owners only.
     #
     # D14-06 adds `retry`: re-running the EXECUTION of an already-approved row (D14-07's endpoint)
@@ -34,8 +45,13 @@ resourcePolicy:
     # redundant and would invite someone to later "tidy" one of the two and change behaviour.
     - actions: ["decide", "retry"]
       effect: EFFECT_ALLOW
-      derivedRoles: ["company_admin", "group_executive"]
+      derivedRoles: ["company_admin"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    # IAM-TRAP4: same fold-in defect as `read` above — own rule, `variables.notLow` only.
+    - actions: ["decide", "retry"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["group_executive"]
+      condition: { match: { expr: "variables.notLow" } }
     # WSD-2: hr-origin approvals (leave). Rows carry resource.attr.module == "hr". Both sides of
     # the shared-service relationship can unblock people: the served company's admin (via the
     # company_admin rules above) AND the PROVIDING unit's hr_manager (module_manager here). Scoped
