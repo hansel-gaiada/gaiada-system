@@ -710,3 +710,40 @@ is filing this as the follow-up: **a new ticket should re-run the confirm-reliab
 audit against `iam-04-reg1-mirror-reach-invariant.test.ts`'s baseline, resolve each entry to
 SAFE (confirmed kind-constant, document why) or FIX (remove the mirror, matching this ticket's
 `automation_approval` fix), and shrink the pinned baseline as each is resolved.**
+
+---
+
+## 8. IAM-04-REG2 addendum (2026-08-12) — the follow-up above, closed
+
+**Status:** DEV-VERIFIED (targeted suites, `cerbos compile`, live probes against a restarted local
+test Cerbos; live estate touched read-only only). Full account:
+`docs/superpowers/plans/2026-08-12-iam-04-reg2-report.md`.
+
+Ran the confirm-reliable handler-evidence audit §7's addendum asked for, against all 54 pinned
+`kind.action` pairs (16 kinds). Grepped every real `authorize()` call site for `hr_case`,
+`hr_record`, `agency_approval`, the 9 `resource_search_*` kinds, `webdev_change_request`, and
+`webdev_provisioned_site` — **every one hardcodes a literal `module` value with zero exceptions**,
+confirming §3 Mechanism 3's original "confirm-reliable" reasoning holds for all of them: **51 of
+the 54 pairs are SAFE, no code change** (the module-attribute gate never actually excludes anything
+for these kinds, so the flat mirror's reach already equals the role arm's reach in practice).
+
+**3 pairs were real, and are fixed:**
+- `member.read`, `service_assignment.read` — `resource.attr.module` on these two kinds is resolved
+  from a genuinely CALLER-SUPPLIED query parameter, not a hardcoded literal — confirming the
+  suspicion both files' own pre-existing comments already raised. Mirrors removed.
+- `hr_record.export` — a DIFFERENT hazard mechanism entirely, found by the same detector: an
+  assurance-tier mismatch (mirror checked `notLow`, role arm requires `assurance=="high"`) that has
+  nothing to do with the module attribute. Mirror removed.
+
+Live-exposure check (read-only SELECT against `gda-aicenter`, no writes): zero of the ten roles
+`member.read`/`service_assignment.read` over-granted hold any live grant today (53 total
+`user_roles` rows estate-wide, none of them these ten role names) — zero current blast radius, but
+a real structural fix ahead of the service-reconciler ever materializing one of those grants.
+`hr_record.export`'s one live-relevant holder (`company_admin`, 11 grants: 7 bots at
+assurance-`"low"` by construction, 2 a `.test`-domain seed persona, 2 the one real human login in
+this holder set) has an open, unconfirmed question — whether that login's current session assembles
+at `"linked"` (exploitable) or `"high"` (not) — flagged for the owner to check directly against
+Keycloak rather than an agent session.
+
+**The pinned baseline in `iam-04-reg1-mirror-reach-invariant.test.ts` is shrunk to the 51 confirmed-
+SAFE pairs.** Nothing remains open from this register's own §7 follow-up ask.

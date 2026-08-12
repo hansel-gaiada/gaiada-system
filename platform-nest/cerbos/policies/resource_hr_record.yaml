@@ -60,7 +60,17 @@ resourcePolicy:
       effect: EFFECT_ALLOW
       derivedRoles: ["perm_hr_record_delete"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }
-    - actions: ["export"]
-      effect: EFFECT_ALLOW
-      derivedRoles: ["perm_hr_record_export"]
-      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+
+    # perm_hr_record_export REMOVED (IAM-04-REG2, 2026-08-12). Both `company_admin` and
+    # `hr_manager` hold hr.record.export in role-permission-bundles.json, but their ONLY real
+    # role-arm path to this action (the "export" rule above) requires `variables.inTenant &&
+    # request.principal.attr.assurance == "high"` — strictly narrower than `notLow`
+    # (`_variables.yaml`: `notLow = assurance != "low"`, so "linked" assurance — every real SSO
+    # login without MFA, per `src/auth/oidc.ts::assuranceFor()` — satisfies notLow but not
+    # "high"). This mirror was wired at `inTenant && notLow`, so a "linked"-assurance holder of
+    # either role could export raw per-subject HR records (contracts/documents/notes) through the
+    # flat permission arm even though the role arm's own D4 high-assurance tier denies them. This
+    # is a DIFFERENT hazard shape than the module-attribute one this ticket's other findings are
+    # (assurance-tier mismatch, not a resource-attribute gate) — caught by the SAME invariant
+    # because the mechanism is identical (an independent, narrower role-arm rule the flat mirror's
+    # own condition doesn't reproduce). See docs/superpowers/plans/2026-08-12-iam-04-reg2-report.md.

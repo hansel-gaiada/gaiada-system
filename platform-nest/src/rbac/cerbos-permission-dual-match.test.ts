@@ -283,10 +283,10 @@ describe.skipIf(!live)("IAM-04-ROLLOUT-B12: dual-match isolation across batches 
     expect(await allow(p, { ...resource, tenantId: T2 }, "create")).toBe(false);
   });
 
-  it("service_assignment.read: PERMISSION ARM ALONE (roles: []) allows; no cross-tenant leak; no sibling-action bleed into .propose", async () => {
+  it("service_assignment.read: PERMISSION ARM ALONE (roles: []) now DENIES — perm_service_assignment_read was REMOVED (IAM-04-REG2, 2026-08-12): the role arm's only 'read' path for module-tier roles is gated on resource.attr.module, a CALLER-SUPPLIED value for this kind (service-assignments.controller.ts:186/601/668), not a kind-constant — a flat mirror could not re-check it and over-granted every module-tier role cross-module. Only company_admin's own unconditional rule (untested here directly, see the ROLE ARM UNCHANGED coverage elsewhere) still grants this action.", async () => {
     const resource: Resource = { kind: "service_assignment", id: "x1", tenantId: T1 };
     const p = principal([], [{ key: "core.service_assignment.read", scopeType: "company", scopeId: T1 }]);
-    expect(await allow(p, resource, "read")).toBe(true);
+    expect(await allow(p, resource, "read")).toBe(false);
     expect(await allow(p, { ...resource, tenantId: T2 }, "read")).toBe(false);
     expect(await allow(p, resource, "propose")).toBe(false);
   });
@@ -601,10 +601,10 @@ describe.skipIf(!live)("IAM-04-ROLLOUT-B4: dual-match isolation across the new-S
     }
   });
 
-  it("member.read: PERMISSION ARM ALONE (roles: []) allows the company_admin/manager/member/viewer directory tier; no cross-tenant leak", async () => {
+  it("member.read: PERMISSION ARM ALONE (roles: []) now DENIES — perm_member_read was REMOVED (IAM-04-REG2, 2026-08-12): hr_staff/reports_staff/search_staff/social_staff/webdev_staff hold core.member.read in role-permission-bundles.json only via module_staff's rule, gated on a CALLER-SUPPLIED resource.attr.module (core.controller.ts:292-294) that genuinely varies — the flat mirror could not re-check it and let those roles read the directory via ANY module context, not just their own. company_admin/manager/member/viewer still get this action through their own unconditional role-arm rule directly (untouched by this removal).", async () => {
     const resource: Resource = { kind: "member", id: "x1", tenantId: T1 };
     const p = principal([], [{ key: "core.member.read", scopeType: "company", scopeId: T1 }]);
-    expect(await allow(p, resource, "read")).toBe(true);
+    expect(await allow(p, resource, "read")).toBe(false);
     expect(await allow(p, { ...resource, tenantId: T2 }, "read")).toBe(false);
   });
 

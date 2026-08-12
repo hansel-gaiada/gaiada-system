@@ -89,7 +89,16 @@ resourcePolicy:
       effect: EFFECT_ALLOW
       derivedRoles: ["perm_service_assignment_relink"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }
-    - actions: ["read"]
-      effect: EFFECT_ALLOW
-      derivedRoles: ["perm_service_assignment_read"]
-      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+
+    # perm_service_assignment_read REMOVED (IAM-04-REG2, 2026-08-12). `role-permission-bundles.json`
+    # unions the "read" rule above (module_staff/module_manager, gated on `resource.attr.module`)
+    # into hr_manager/hr_staff/reports_manager/reports_staff/search_manager/search_staff/
+    # social_manager/social_staff/webdev_manager/webdev_staff's bundles for core.service_assignment.
+    # read. This kind's own ORG-7b header already flags why: `module` is resolved from a
+    # CALLER-SUPPLIED query parameter (service-assignments.controller.ts:186,601,668, `module:
+    # moduleQ || undefined`), not a hardcoded literal, so a flat `inTenant && notLow` mirror (no
+    # module check) let any of those ten roles read a tenant's service-assignment edges for EVERY
+    # module, not just their own. Removing this mirror does not narrow `company_admin` — it holds
+    # the key via its own unconditional rule above (same condition, exact match, unaffected). See
+    # docs/superpowers/plans/2026-08-12-iam-04-reg2-report.md (zero of the ten affected roles carry
+    # any live grant today, per a read-only DB check against gda-aicenter).

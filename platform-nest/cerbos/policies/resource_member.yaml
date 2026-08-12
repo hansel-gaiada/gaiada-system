@@ -23,17 +23,19 @@ resourcePolicy:
       derivedRoles: ["module_staff"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }
 
-    # ══════════ IAM-04-ROLLOUT-B4 — permission-matching arm. PURELY ADDITIVE: both rules above ═══
-    # are byte-for-byte unchanged. Only company_admin/manager/member/viewer's plain-directory reach
-    # is mirrored. module_staff's rule above is DELIBERATELY NOT mirrored: its `resource.attr.module`
-    # is resolved from a caller-supplied query parameter (core.controller.ts:294, `module: moduleQ
-    # || undefined`) — the identical shape resource_service_assignment.yaml's own IAM-04-ROLLOUT-B12
-    # header already declined to mirror for the same reason (a flat `perms` array has no per-request
-    # module argument to re-check, so a generic mirror would let e.g. hr_staff's bundled
-    # core.member.read reach a search/webdev-module directory call too — a real over-grant, not
-    # merely a theoretical one). No exclusion clause is invented here; the permission arm simply
-    # does not cover this action's module tier yet, same disposition as service_assignment.read.
-    - actions: ["read"]
-      effect: EFFECT_ALLOW
-      derivedRoles: ["perm_member_read"]
-      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    # perm_member_read REMOVED (IAM-04-REG2, 2026-08-12). This header used to explain why
+    # module_staff's OWN rule (above) was never mirrored — but the mirror that WAS wired here
+    # over-granted anyway. `role-permission-bundles.json` UNIONS every rule that grants a role
+    # reach regardless of which rule granted it, so `hr_staff`/`reports_staff`/`search_staff`/
+    # `social_staff`/`webdev_staff` (bundle holders of core.member.read, via module_staff's
+    # gated rule above) ALSO satisfied this flat `inTenant && notLow` mirror — which does not
+    # check `resource.attr.module` at all. Unlike hr_case/hr_record (module is a hardcoded
+    # literal for every real call site on those kinds), `member`'s `module` attribute is resolved
+    # from a CALLER-SUPPLIED query parameter (core.controller.ts:292-294, `module: moduleQ ||
+    # undefined`) that genuinely varies per request — so the flat mirror let e.g. `hr_staff` read
+    # the tenant directory via ANY module context (or none), not just the HR-workspace path
+    # module_staff's own gate restricts them to. Removing this mirror does not narrow
+    # `company_admin`/`manager`/`member`/`viewer` — they hold the key via the FIRST rule above
+    # (same `inTenant && notLow` condition, exact match, unaffected). See
+    # docs/superpowers/plans/2026-08-12-iam-04-reg2-report.md for the live-exposure finding (zero
+    # of the five affected roles carry any live grant today).

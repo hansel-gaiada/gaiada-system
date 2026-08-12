@@ -339,28 +339,40 @@ const IAM_04_REG1_OWNED_KINDS = new Set([
 /**
  * IAM-04-REG1 DISCOVERY (2026-08-12) — running this same mechanism, unscoped, against the WHOLE
  * estate (every kind, not just the 7 this ticket owns) found the IDENTICAL hazard shape already
- * live on ~20 OTHER kinds, all mediated by `module_staff`/`module_manager`/`module_approver` — e.g.
- * `resource_member.yaml`'s own comment about `perm_member_read` already names this exact concern
- * for `hr_staff` ("a real over-grant, not merely a theoretical one... the permission arm simply
- * does not cover this action's module tier yet"). These predate this ticket (earlier batches:
- * IAM-04-ROLLOUT-B12, IAM-04-ROLLOUT-B4, the IAM-04b pilot), live in policy files this ticket does
- * NOT own, and — unlike `automation_approval`'s rule-level `module == "hr"` PIN — most of them
- * cannot be resolved from policy text alone: whether `resource.attr.module` is a per-request-
- * VARYING value (a real hazard, `member`/`service_assignment`'s own comments confirm this for
- * THOSE two) or a KIND-CONSTANT the controller always sets to the same literal (in which case the
- * generic `module_staff`/`module_manager` gate never actually excludes anything for THAT kind, and
- * mirroring is arguably safe) requires HANDLER EVIDENCE this static, policy-only test cannot
- * gather — exactly the ambiguity `permission-arm-hazard-scan.test.ts`'s own PART 3 already
- * documents and explicitly declines to resolve structurally ("mitigated by CONFIRMING the gating
- * attribute is reliably populated... nothing to assert structurally here").
+ * live on ~20 OTHER kinds, all mediated by `module_staff`/`module_manager`/`module_approver`.
+ * These predate IAM-04-REG1 (earlier batches: IAM-04-ROLLOUT-B12, IAM-04-ROLLOUT-B4, the IAM-04b
+ * pilot), and most cannot be resolved from policy text alone: whether `resource.attr.module` is a
+ * per-request-VARYING value (a real hazard) or a KIND-CONSTANT the controller always sets to the
+ * same literal (in which case the generic `module_staff`/`module_manager` gate never actually
+ * excludes anything for THAT kind, and mirroring is safe) requires HANDLER EVIDENCE this static,
+ * policy-only test cannot gather.
  *
- * So this file does NOT assert these away, and does NOT fix them (out of ownership) — it PINS the
- * exact register below (kind.action -> sorted holder role names) as a NON-REGRESSION baseline: if
- * a future change makes this set GROW (a new instance) or its members change shape, the pin below
+ * IAM-04-REG2 (2026-08-12) ran exactly that handler-evidence audit and resolved every entry below
+ * to either SAFE (confirmed: every real `authorize()` call site for that kind passes a hardcoded
+ * module literal — grepped, not assumed — so the module-attribute gate never actually excludes
+ * anything, and the mirror's reach equals the role arm's reach in practice; `hr_case`/`hr_record`/
+ * `agency_approval`/all 9 `resource_search_*`/`webdev_change_request`/`webdev_provisioned_site`)
+ * or FIX (a real over-grant, mirror removed). Three were FIX, shrinking the baseline below:
+ *   - `member.read` / `service_assignment.read` — `module` is resolved from a CALLER-SUPPLIED
+ *     query parameter for these two kinds specifically (core.controller.ts:292-294,
+ *     service-assignments.controller.ts:186/601/668, `module: moduleQ || undefined`), confirmed
+ *     genuinely varying, not a kind-constant — matching what both files' own pre-existing comments
+ *     already suspected. Mirrors removed.
+ *   - `hr_record.export` — a DIFFERENT hazard shape than the other 19 entries here: not a
+ *     module-attribute gate at all, but an ASSURANCE-TIER mismatch. The role arm requires
+ *     `assurance == "high"`; the wired mirror only checked `notLow` (`assurance != "low"`), which
+ *     "linked"-assurance (every real SSO login without MFA, per `oidc.ts::assuranceFor()`)
+ *     satisfies. Found by the SAME detector (an independent, narrower role-arm rule the mirror's
+ *     own condition doesn't reproduce) even though the specific mechanism differs. Mirror removed.
+ * Full account, live-exposure findings, and the DB/Cerbos evidence for each verdict:
+ * docs/superpowers/plans/2026-08-12-iam-04-reg2-report.md.
+ *
+ * This file does NOT assert the remaining (confirmed-SAFE) entries away — it PINS the exact
+ * register below (kind.action -> sorted holder role names) as a NON-REGRESSION baseline: if a
+ * future change makes this set GROW (a new instance) or its members change shape, the pin below
  * goes red and must be updated deliberately, the same discipline `iam-215-boundary-pin.test.ts`
  * uses for its own frozen baseline. If a future ticket FIXES one of these, shrink the pin to match
- * — do not widen it to "make it pass" without also shrinking. See
- * docs/superpowers/plans/2026-08-12-iam-04-reg1-report.md for the follow-up this discovery needs.
+ * — do not widen it to "make it pass" without also shrinking.
  */
 const IAM_04_REG1_PRE_EXISTING_OUT_OF_SCOPE_BASELINE: Record<string, string[]> = {
   "agency_approval.approve": ["agency_approver"],
@@ -373,8 +385,6 @@ const IAM_04_REG1_PRE_EXISTING_OUT_OF_SCOPE_BASELINE: Record<string, string[]> =
   "hr_record.create": ["hr_manager", "hr_staff"],
   "hr_record.update": ["hr_manager", "hr_staff"],
   "hr_record.delete": ["hr_manager"],
-  "hr_record.export": ["company_admin", "hr_manager"],
-  "member.read": ["hr_staff", "reports_staff", "search_staff", "social_staff", "webdev_staff"],
   "resource_search_audit.read": ["search_manager", "search_staff"],
   "resource_search_audit.create": ["search_manager", "search_staff"],
   "resource_search_audit.update": ["search_manager", "search_staff"],
@@ -411,11 +421,6 @@ const IAM_04_REG1_PRE_EXISTING_OUT_OF_SCOPE_BASELINE: Record<string, string[]> =
   "resource_search_report.delete": ["search_manager"],
   "resource_search_report.approve": ["search_manager"],
   "resource_search_report.deliver": ["search_manager"],
-  "service_assignment.read": [
-    "hr_manager", "hr_staff", "reports_manager", "reports_staff",
-    "search_manager", "search_staff", "social_manager", "social_staff",
-    "webdev_manager", "webdev_staff",
-  ],
   "webdev_change_request.read": ["webdev_manager", "webdev_staff"],
   "webdev_change_request.triage": ["webdev_manager"],
   "webdev_provisioned_site.read": ["webdev_manager", "webdev_staff"],

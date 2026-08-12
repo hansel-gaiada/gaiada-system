@@ -766,14 +766,9 @@ derivedRoles:
             request.principal.attr.perms.exists(g, g.key == "core.service_assignment.relink" && (
               g.scopeType == "global" ||
               (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
-    - name: perm_service_assignment_read
-      parentRoles: ["user"]
-      condition:
-        match:
-          expr: >-
-            request.principal.attr.perms.exists(g, g.key == "core.service_assignment.read" && (
-              g.scopeType == "global" ||
-              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    # perm_service_assignment_read REMOVED (IAM-04-REG2, 2026-08-12) — see
+    # resource_service_assignment.yaml's own comment at the removed rule's old location for the
+    # full account (module is caller-supplied, not a kind-constant, for this kind's "read" action).
     # perm_user_* — IAM-04-ROLLOUT-B12
     - name: perm_user_read
       parentRoles: ["user"]
@@ -890,14 +885,9 @@ derivedRoles:
             request.principal.attr.perms.exists(g, g.key == "hr.record.delete" && (
               g.scopeType == "global" ||
               (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
-    - name: perm_hr_record_export
-      parentRoles: ["user"]
-      condition:
-        match:
-          expr: >-
-            request.principal.attr.perms.exists(g, g.key == "hr.record.export" && (
-              g.scopeType == "global" ||
-              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    # perm_hr_record_export REMOVED (IAM-04-REG2, 2026-08-12) — see resource_hr_record.yaml's own
+    # comment at the removed rule's old location for the full account (assurance-tier mismatch:
+    # the role arm requires assurance=="high", this mirror only checked notLow).
     # perm_agency_approval_* — IAM-04-ROLLOUT-B12
     - name: perm_agency_approval_read
       parentRoles: ["user"]
@@ -1557,15 +1547,9 @@ derivedRoles:
             request.principal.attr.perms.exists(g, g.key == "core.meeting_recording.update" && (
               g.scopeType == "global" ||
               (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
-    # perm_member_* — IAM-04-ROLLOUT-B4
-    - name: perm_member_read
-      parentRoles: ["user"]
-      condition:
-        match:
-          expr: >-
-            request.principal.attr.perms.exists(g, g.key == "core.member.read" && (
-              g.scopeType == "global" ||
-              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    # perm_member_read REMOVED (IAM-04-REG2, 2026-08-12) — see resource_member.yaml's own comment
+    # at the removed rule's old location for the full account (module is caller-supplied, not a
+    # kind-constant, for this kind's "read" action).
     # perm_notification_* — IAM-04-ROLLOUT-B4
     - name: perm_notification_create
       parentRoles: ["user"]
