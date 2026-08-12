@@ -1736,22 +1736,15 @@ derivedRoles:
             request.principal.attr.perms.exists(g, g.key == "core.automation_approval.create" && (
               g.scopeType == "global" ||
               (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
-    - name: perm_automation_approval_read
-      parentRoles: ["user"]
-      condition:
-        match:
-          expr: >-
-            request.principal.attr.perms.exists(g, g.key == "core.automation_approval.read" && (
-              g.scopeType == "global" ||
-              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
-    - name: perm_automation_approval_decide
-      parentRoles: ["user"]
-      condition:
-        match:
-          expr: >-
-            request.principal.attr.perms.exists(g, g.key == "core.automation_approval.decide" && (
-              g.scopeType == "global" ||
-              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    # perm_automation_approval_read / perm_automation_approval_decide REMOVED (IAM-04-REG1,
+    # 2026-08-12). Both keys are held by `hr_manager` in role-permission-bundles.json, but
+    # hr_manager's only role-arm path to either action is resource_automation_approval.yaml's
+    # `module_manager` rule, gated to `resource.attr.module == "hr"` — an attribute this flat
+    # perms-array mirror cannot re-check. Wiring either derived role granted hr_manager
+    # read/decide on every approval in the tenant, not just hr-origin ones (the defect
+    # src/**/org14-preflight-adversarial.test.ts T6(c) caught). See
+    # resource_automation_approval.yaml's own comment at the same point and
+    # docs/superpowers/plans/2026-08-12-iam-04-reg1-report.md for the full account.
     - name: perm_automation_approval_retry
       parentRoles: ["user"]
       condition:

@@ -69,20 +69,27 @@ resourcePolicy:
     # for-byte unchanged. Mirrors ONLY the company_admin/manager/member `inTenant && notLow` reach
     # above. `group_executive`'s own `variables.notLow`-only rule (IAM-TRAP4) is DELIBERATELY not
     # mirrored (IAM-04c: the cross-company owner tier never enters the permission catalog).
-    # `module_manager`'s hr-scoped rule is ALSO deliberately not mirrored — a different hazard
-    # mechanism (top-level-attr-gate) out of this ticket's remit; see the B4 report.
     - actions: ["create"]
       effect: EFFECT_ALLOW
       derivedRoles: ["perm_automation_approval_create"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }
-    - actions: ["read"]
-      effect: EFFECT_ALLOW
-      derivedRoles: ["perm_automation_approval_read"]
-      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
-    - actions: ["decide"]
-      effect: EFFECT_ALLOW
-      derivedRoles: ["perm_automation_approval_decide"]
-      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    # IAM-04-REG1 (2026-08-12): `read` and `decide` are DELIBERATELY NOT mirrored here, reverting
+    # Batch 4's over-grant. `role-permission-bundles.json` shows `core.automation_approval.read`
+    # AND `.decide` are held by `hr_manager` — but hr_manager's ONLY role-arm path to either action
+    # is the `module_manager` rule two blocks up, gated to `resource.attr.module == "hr"`. A flat
+    # `perm_automation_approval_read`/`_decide` mirror at `inTenant && notLow` (no module gate)
+    # would grant hr_manager `read`/`decide` on EVERY approval in the tenant, not just hr-origin
+    # ones — the exact defect `src/**/org14-preflight-adversarial.test.ts` T6(c) pinned. The
+    # catalog's flat `perms` array has no attribute dimension to re-express "only when
+    # resource.attr.module == 'hr'", so this is a permanent deferral, not a gap to "fix" by adding
+    # the attr check into a `perm_*` rule (IAM-04's own brief forbids that shape — see
+    # derived_roles.yaml's IAM-04a header). `retry` has NO hr_manager (or any other
+    # module_manager-shaped) holder — module_manager's rule above only ever grants `read`/`decide`
+    # — so it is unaffected and stays mirrored below.
+    # perm_automation_approval_read / perm_automation_approval_decide REMOVED — see above; their
+    # derived-role definitions were also removed from derived_roles.yaml (IAM-04-REG1).
+    # See src/rbac/iam-04-reg1-mirror-reach-invariant.test.ts for the mechanical invariant that
+    # would have caught this, and docs/superpowers/plans/2026-08-12-iam-04-reg1-report.md.
     - actions: ["retry"]
       effect: EFFECT_ALLOW
       derivedRoles: ["perm_automation_approval_retry"]

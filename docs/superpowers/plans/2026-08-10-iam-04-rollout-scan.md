@@ -667,3 +667,46 @@ surfaced as a side effect.
   kind once it's mitigated; instead extend PART 3's mitigation check (already generic) to cover
   each newly-wired kind, which happens automatically the moment that kind's name appears in
   `kindsWithPermissionArm()`'s discovered set — no code change needed there either.
+
+---
+
+## 7. IAM-04-REG1 addendum (2026-08-12) — batch 8 shipped, then regressed, then fixed
+
+Batch 8 (`automation_approval`, `pipeline_gate`, `pipeline_run`, `pipeline_stage`, `scope_signoff`
+— `portal` was dropped from the batch, no `perm_*` arm exists on it) landed in commit `20a67ae`
+after the TRAP-4 role-arm fix (`1214eb3`) unblocked it, per this register's own §4 ordering. It
+introduced a REGRESSION this register's own §3 mitigation catalogue predicts but this specific
+instance slipped past review: `automation_approval`'s `module_manager` rule (hr-scoped,
+`top-level-attr-gate`) was deliberately left unmirrored, but the FLAT `perm_automation_approval_
+read`/`_decide` mirrors were still wired unconditionally — and because `role-permission-bundles.
+json` UNIONS every rule that grants a role reach regardless of which rule did the granting,
+`hr_manager` (a bundle holder via `module_manager`) satisfied the flat mirror anyway, gaining
+tenant-wide `read`/`decide` the role arm never gave it. Caught by
+`src/**/org14-preflight-adversarial.test.ts` T6(c), fixed by IAM-04-REG1 (removing the two mirrors;
+`create`/`retry` on the same kind pass the same check and were kept). Full account:
+`docs/superpowers/plans/2026-08-12-iam-04-reg1-report.md`.
+
+**The durable output of that ticket is a NEW, general test** —
+`platform-nest/src/rbac/iam-04-reg1-mirror-reach-invariant.test.ts` — that cross-checks every
+wired `perm_*` mirror's bundle holders against their ACTUAL role-arm reach, catching exactly this
+shape (two independent rules on the same kind.action, one wide, one narrower, whose UNION the flat
+bundle cannot distinguish) mechanically rather than by inspection. Run UNSCOPED against the whole
+estate (not just batch 8), it found the IDENTICAL shape already live on roughly 20 OTHER kinds —
+`hr_case`, `hr_record`, `member`, `service_assignment`, all 9 `resource_search_*` kinds,
+`agency_approval`, `webdev_change_request`, `webdev_provisioned_site` — every one mediated by
+`module_staff`/`module_manager`/`module_approver`, predating this ticket (batches 2/3's
+"confirm-reliable" mechanism, §3 above, plus the IAM-04b pilot and IAM-04-ROLLOUT-B4). Unlike
+`automation_approval` (a genuinely multi-module kind where the rule PINS to one literal
+`module == "hr"` value), most of these are SINGLE-purpose kinds where §3's "confirm-reliable"
+mechanism argues the module attribute never actually varies — but `resource_member.yaml`'s own
+`perm_member_read` comment ALREADY names the identical concern for `hr_staff` as live, not
+theoretical ("the permission arm simply does not cover this action's module tier yet"), and
+`service_assignment.read` carries the same open disposition. **Whether each of the ~20 is a false
+positive (module is a kind-constant; §3 Mechanism 2's confirm-reliable reasoning holds) or a real,
+unfixed instance of THIS defect cannot be resolved from policy text alone** — it needs the same
+handler-evidence pass §3 Mechanism 2 originally did, kind by kind. IAM-04-REG1 pinned the exact
+set as a non-regression baseline (does not fix any of them — out of that ticket's ownership) and
+is filing this as the follow-up: **a new ticket should re-run the confirm-reliable handler-evidence
+audit against `iam-04-reg1-mirror-reach-invariant.test.ts`'s baseline, resolve each entry to
+SAFE (confirmed kind-constant, document why) or FIX (remove the mirror, matching this ticket's
+`automation_approval` fix), and shrink the pinned baseline as each is resolved.**
