@@ -1,4 +1,6 @@
-// IAM-SEC-02 — `platform_admin` / `group_executive` may only be granted at GLOBAL scope.
+// IAM-SEC-02 / IAM-SEC-04 — a role may only be granted at a scope its own Cerbos condition
+// can actually satisfy. Started as "the two elevated roles are global-only"; generalised
+// 2026-08-12 once the widened hazard detector found the same shape pointing the other way.
 //
 // THE DEFECT THIS PINS (found by IAM-04-ROLLOUT-B12, 2026-08-11; fixed at the source in
 // `admin-identity.controller.ts`'s `GLOBAL_ONLY_ROLES` guard):
@@ -28,7 +30,7 @@ import { createCompany, createUser, addMembership, createRole } from "../testing
 const svc = { authorization: "Bearer svc-token" };
 const asUser = (id: string) => ({ ...svc, "x-user-id": id });
 
-describe.skipIf(!TEST_URL)("IAM-SEC-02 — elevated roles are global-scope-only", () => {
+describe.skipIf(!TEST_URL)("IAM-SEC-02/04 — a role is grantable only at scopes its Cerbos condition satisfies", () => {
   let app: NestFastifyApplication;
   let tenant: string;
   let admin: string;
@@ -89,6 +91,36 @@ describe.skipIf(!TEST_URL)("IAM-SEC-02 — elevated roles are global-scope-only"
       expect(res.statusCode).toBe(400);
       expect(res.body).toContain("global scope");
     }));
+
+  // ── IAM-SEC-04 (2026-08-12): the guard generalised beyond the two elevated roles ───────────
+  //
+  // The widened hazard detector swept all 68 kinds and found the SAME shape in the other direction:
+  // `client`'s Cerbos condition is company-ONLY (`resource_portal.yaml`) and `org_unit_lead`'s is
+  // org_unit-ONLY (`appraisal`, `report_document`). Nothing stopped a `company_admin` minting
+  // `client@global` or `org_unit_lead@company` — inert today ONLY because those three kinds carry no
+  // `perm_*` mirror yet, which is a property of where the rollout happens to be, not a safeguard.
+  // `GLOBAL_ONLY_ROLES` became `ROLE_SCOPE_CONSTRAINTS` (role -> allowed scope types) to cover both
+  // directions, and `permission-arm-hazard-scan.test.ts` re-derives that map from
+  // `derived_roles.yaml` so it cannot drift from the policy it claims to mirror.
+  it("refuses client at GLOBAL scope — its Cerbos condition is company-only", async () => {
+    const clientRole = await createRole("client");
+    const res = await assign(clientRole, "global", null);
+    expect(res.statusCode).toBe(400);
+    expect(res.body).toContain("company scope");
+  });
+
+  it("still permits client at COMPANY scope — the scope it is actually for", async () => {
+    const clientRole = await createRole("client");
+    const res = await assign(clientRole, "company", tenant);
+    expect([200, 201]).toContain(res.statusCode);
+  });
+
+  it("refuses org_unit_lead at COMPANY scope — its Cerbos condition is org_unit-only", async () => {
+    const oul = await createRole("org_unit_lead");
+    const res = await assign(oul, "company", tenant);
+    expect(res.statusCode).toBe(400);
+    expect(res.body).toContain("org_unit scope");
+  });
 
   // ── the other direction: the guard must not over-refuse ───────────────────────────────────
   it("still permits an elevated role at GLOBAL scope", () =>

@@ -42,10 +42,30 @@ Domains: `agency` `assistant` `billing` `core` `hr` `it` `knowledge` `pm` `porta
 
 | Artifact | Value | File |
 |---|---|---|
-| Catalog | **226** entries = **211 grantable** + **15 relationship**; 79 flagged `sensitive`; 60 distinct Cerbos kinds (HIER-3: `core.team.*` (4 grantable) and the `team` kind retired, 230/215/61 → 226/211/60) | `platform-nest/src/rbac/permission-catalog.json` |
-| Role bundles | **861** pairs across **20** roles (`team_lead` retired — HIER-3; `org_unit_lead` added — HIER-2; net 21 → 20) | `platform-nest/src/rbac/role-permission-bundles.json` |
-| Permission groups | **74** (the `teams` group retired with `core.team.*`) | `platform-nest/src/rbac/permission-groups.json` |
+| Catalog | **262** entries = **247 grantable** + **15 relationship**; 91 flagged `sensitive`; 68 distinct Cerbos kinds (SMM-30, 2026-08-12: the `social` module's 8 kinds + 35 keys, plus `portal.approve_post` — a new action on the existing `portal` kind, which is why pairs +36 but kinds +8. Prior: HIER-3 230/215/61 → 226/211/60) | `platform-nest/src/rbac/permission-catalog.json` |
+| Role bundles | **1023** pairs across **22** roles (SMM-30: `social_staff`/`social_manager` seeded by migration `0106`, 20 → 22; +162 pairs, **and zero removed** — no existing user's reach changed) | `platform-nest/src/rbac/role-permission-bundles.json` |
+| Permission groups | **83** (SMM-30 added 8 social groups + `portal_approve_posts`) | `platform-nest/src/rbac/permission-groups.json` |
 | UI capabilities | **34** | `platform-ui/src/lib/rbac.ts` |
+
+**⚠ The relationship count is unchanged at 15, and that is load-bearing.** The social module adds no
+relationship-class permission, so the Ruling-3 bypass-exempt set is exactly where it was. If a future
+social ticket moves that number, that is the change requiring justification — not the grantable one.
+
+**SMM-30 (2026-08-12) — the social module's IAM registration, what it did and did not do.** Migration
+`0106` seeds the 36 catalog rows, the two module roles, and all 162 bundle pairs the 8 new Cerbos
+policies imply (`platform_admin` +36, `company_admin` +33, `manager` +32, `social_manager` +33,
+`social_staff` +19, `group_executive` +8, `client` +1). It grants nothing to any user: seeding a
+`roles` row makes a name grantable, and `service-reconciler.ts` still only materializes the module
+roles onto a SERVED company via an active `service_assignments` row — of which there are none for
+`module_key='social'`, because the module has no code yet. **The role names are derived, not chosen:**
+`module_staff`/`module_manager` string-compose `resource.attr.module + "_staff"|"_manager"` and the
+module key is `social`, so `social_staff`/`social_manager` are the only names Cerbos will ever look
+for. (The SMM design and its first addendum both said `smm_*`; that would have reproduced the
+silent-skip defect `0069`/`0091`/`0097` each closed. Corrected at source.) **The 8 new kinds ship with
+the ROLE arm only — no `perm_social_*` mirror** — deliberately: §2's wildcard-bleed hazard and §9's
+detector blind spot are unresolved and awaiting an architect decision, and mirroring 8 brand-new kinds
+ahead of it would widen precisely the surface flagged open. They join the IAM-04 rollout register as a
+deliberate batch once that decision lands; the catalog entries exist now, so nothing blocks it.
 
 **Bundle sizes per role** (re-counted from `role-permission-bundles.json`'s own `_meta.counts.perRole`):
 

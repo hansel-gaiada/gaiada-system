@@ -27,30 +27,30 @@ import { adoptManagedGrantAsManual } from "./service-reconciler";
 // CHECK (`org_unit` -> non-empty text, no uuid-regex branch), unlike `company`/`project`.
 const SCOPE_TYPES = new Set(["global", "company", "project", "org_unit"]);
 
-// GLOBAL-ONLY ROLES. Their Cerbos derived roles (derived_roles.yaml) match ONLY
-// `g.scopeType == "global"`, so a company- or project-scoped grant of either confers NOTHING
-// through the role arm — it is inert by construction.
+// SCOPE-CONSTRAINED ROLES — every role whose Cerbos derived-role condition can only ever be
+// satisfied at particular `scope_type` values. A grant at any other scope is INERT under role-name
+// matching, and actively DANGEROUS under permission matching, because `assemblePrincipal()` resolves
+// `perms` carrying the GRANT's scope: the permission arm would then allow at a scope the role arm
+// refuses. That is the IAM-SEC-02 defect, and it was reachable — `assignRole` is authorized by
+// `user:create`, which `company_admin` holds.
 //
-// ⚠ WHY THIS IS ENFORCED RATHER THAN LEFT INERT (found by IAM-04-ROLLOUT-B12, 2026-08-11):
-// under permission matching the two arms DISAGREE about such a grant, and the permission arm is
-// the permissive one. `assemblePrincipal()` resolves `perms` from `role_permissions` carrying the
-// GRANT's own scope, so a `platform_admin` grant at `scopeType:"company"` yields all 215 grantable
-// permissions AT THAT COMPANY — which the `perm_*` derived roles then honour, while the
-// role-name arm correctly refuses. That is the permission arm granting what the role arm denies:
-// exactly the class of defect the IAM-04 pilot caught for `team_lead`×`pm_task`, but arising from
-// a wildcard/unconditional rule rather than same-rule mixing, so
-// `permission-arm-hazard-scan.test.ts` structurally cannot see it.
+// ⚠ GENERALISED 2026-08-12 (IAM-SEC-04) from a two-entry `GLOBAL_ONLY_ROLES` set. The widened hazard
+// detector swept all 68 kinds and found the same shape in the OTHER direction: `client` is
+// company-ONLY (`resource_portal.yaml`) and `org_unit_lead` is org_unit-ONLY (`appraisal`,
+// `report_document`). Nothing stopped a company_admin minting `client@global` or
+// `org_unit_lead@company` — inert today only because those three kinds carry no `perm_*` mirror yet,
+// which is a property of the rollout's current position, not a safeguard.
 //
-// It was REACHABLE, not theoretical: this endpoint is authorized by `user:create`, which
-// `company_admin` holds — so a company admin could mint `platform_admin@their-company` and pick up
-// the ~16 permissions their own bundle lacks, in their own tenant. That also violates D-9's
-// no-self-escalation safeguard. No such grant exists in any seed, fixture or live row (verified),
-// so this closes the door before anyone walks through it.
-//
-// Enforced HERE, at the only unrestricted write path, rather than by narrowing the `perm_*` rules
-// in 26+ policy files: this is one check at the source, and it makes the DB state impossible
-// instead of making a bad state harmless in one consumer.
-const GLOBAL_ONLY_ROLES = new Set(["platform_admin", "group_executive"]);
+// Values are the scope types each role's condition in `derived_roles.yaml` can actually satisfy.
+// **This map is machine-checked against that file** by `permission-arm-hazard-scan.test.ts`, which
+// re-derives it from the policy source — it is the eighth hand-maintained list in this program, and
+// the first that cannot silently drift, because the guard reads the policy rather than a copy.
+const ROLE_SCOPE_CONSTRAINTS: Record<string, readonly string[]> = {
+  platform_admin: ["global"],
+  group_executive: ["global"],
+  client: ["company"],
+  org_unit_lead: ["org_unit"],
+};
 
 interface RoleGrantRow {
   grantId: string;
@@ -311,17 +311,19 @@ export class AdminIdentityController {
     if (!(await memberIds(tenantId)).includes(userId)) {
       throw new NotFoundException("user is not a member of this company");
     }
-    // Select the NAME too — needed for the global-only guard below (see GLOBAL_ONLY_ROLES).
+    // Select the NAME too — needed for the scope guard below (see ROLE_SCOPE_CONSTRAINTS).
     const role = await withGlobal((c) =>
       c.query<{ name: string }>(`SELECT name FROM roles WHERE id = $1`, [roleId]),
     );
     if (!role.rows[0]) throw new BadRequestException("unknown role");
-    // GLOBAL-ONLY GUARD — see GLOBAL_ONLY_ROLES' comment for the full rationale. A scoped grant of
-    // an elevated role is inert under role-name matching but resolves its FULL bundle at that scope
-    // under permission matching, i.e. the permission arm granting what the role arm denies.
-    if (GLOBAL_ONLY_ROLES.has(role.rows[0].name) && scopeType !== "global") {
+    // SCOPE GUARD — see ROLE_SCOPE_CONSTRAINTS' comment for the full rationale. A grant at a scope
+    // the role's own Cerbos condition cannot satisfy is inert under role-name matching but resolves
+    // its FULL bundle at that scope under permission matching: the permission arm granting what the
+    // role arm denies. Refused here, at the only unrestricted write path, so the row cannot exist.
+    const allowedScopes = ROLE_SCOPE_CONSTRAINTS[role.rows[0].name];
+    if (allowedScopes && !allowedScopes.includes(scopeType)) {
       throw new BadRequestException(
-        `role "${role.rows[0].name}" may only be granted at global scope`,
+        `role "${role.rows[0].name}" may only be granted at ${allowedScopes.join(" or ")} scope`,
       );
     }
     // HIER-1 (migration 0100): a scoped grant with NO scopeId used to silently insert scope_id =

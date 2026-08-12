@@ -34,7 +34,7 @@ versions below; the running build reports it at `GET /health`.
 
 | Module | Ver | Status | Workstream | Since |
 |---|---|---|---|---|
-| platform-nest | `0.21.1` | IN PROGRESS | WS1 | 2026-08-11 |
+| platform-nest | `0.21.2` | IN PROGRESS | WS1 | 2026-08-12 |
 | platform-ui | `0.25.1` | IN PROGRESS | WS5 | 2026-08-11 |
 | ai-gateway-go | `0.13.2` | PROTOTYPED | WS3 | 2026-08-07 |
 | mcp-hub | `0.10.1` | PROTOTYPED | WS2 | 2026-08-09 |
@@ -49,7 +49,7 @@ versions below; the running build reports it at `GET /health`.
 | webdev | `0.13.0` | IN PROGRESS | Web Dev | 2026-08-09 |
 | webdesk | `0.0.0` | PLANNED | Web Dev | 2026-07-23 |
 | search-marketing | `0.5.1` | DEV-VERIFIED | SEO | 2026-08-04 |
-| social-media | `0.0.0` | PLANNED | Social Media | 2026-07-23 |
+| social-media | `0.1.0` | IN PROGRESS | Social Media | 2026-08-12 |
 | creative | `0.1.0` | PROTOTYPED | Creative | 2026-07 |
 | render-gateway-go | `0.0.0` | PLANNED | Creative | 2026-07-23 |
 | reports | `0.3.1` | PROTOTYPED | Cross-cutting | 2026-08-03 |
@@ -1210,9 +1210,28 @@ SM-23 (this reconciliation) â†’ SM-24.
 
 </details>
 
-## social-media â€” SMM Â· Organic Publishing Â· `0.0.0` Â· PLANNED
+## social-media — SMM · Organic Publishing · `0.1.0` · IN PROGRESS
 
-**What exists:** foundation research + architect design, no code. See
+**0.1.0 (2026-08-12, SMM-01 + SMM-30 — the P0 substrate, DEV-VERIFIED against a real Postgres and a
+real Cerbos compile):** migration `0105` creates the 16-table schema on **two deliberately different
+RLS walls** — 14 `social_*` tables behind the third wall (`app_module_allowed('social')`),
+`social_platform_apps` global with no RLS (our own app fleet: zero client data, credential *aliases*
+only), and `social_post_client_reviews` on the **plain core tenant wall** because the client portal
+writes it and portal controllers declare no module scope, where a third wall would read zero rows
+silently (0088's D-2a lesson, applied before it could bite). Structural state law on the variants:
+anything past drafting must carry both an approval and its `args_sha256`, a native import can never
+carry an approval or a provider id, and `provider_post_id`/`approval_id`/`postiz_org_id` are each
+claimable exactly once. Migration `0106` registers the module in the IAM layer — 36 catalog
+permissions (35 `social.*` + `portal.approve_post`), 8 Cerbos policies, 9 permission groups, and the
+two module roles **`social_staff`/`social_manager`** (names derived by `module_staff`/`module_manager`
+from the module key, NOT the `smm_*` the design assumed — that would have repeated the silent-skip
+defect 0069/0091/0097 each closed). Bundle diff: **861 → 1023 pairs, 162 added, 0 removed — no
+existing user's access changed.** Policies ship with the ROLE arm only; the `perm_*` mirror waits on
+the unresolved wildcard-bleed decision (PERMISSION-CONTRACT §2/§9). **No module code yet** — the
+`ModuleContract` shell, controllers and console are SMM-02 onward, and nothing grants these roles to
+anyone until a `service_assignments` row for `module_key='social'` exists.
+
+**What else exists:** foundation research + architect design + the 2026-08-12 platform re-base. See
 [`../blueprints/smm-foundation.md`](../blueprints/smm-foundation.md) (research + locked decisions) and
 [`../blueprints/smm-design.md`](../blueprints/smm-design.md) (v1.0 design, Â§00â€“Â§14) + the print blueprint
 [`../blueprints/GAIADA-Social-Media-Engineering-Blueprint.pdf`](../blueprints/GAIADA-Social-Media-Engineering-Blueprint.pdf).
@@ -1230,9 +1249,19 @@ no-RLS cache (all social data client-private). Mixpost Pro is the documented pai
 proves impractical; Chatwoot dropped (engagement uses Postiz's comment/collab surface, no second inbox stack).
 **Scope v1 = organic publish + engagement + copywriting + digital assets; paid social ads, listening, and
 influencer/UGC are parked as future service lines.**
-**Future plans (27 tickets P0â€“P4 + 2 decision-gated, /army-ready â€” design Â§12):** P0 contracts + containment
-spike â†’ P1 organic publish/calendar/composer (own accounts, $0) â†’ P2 engagement inbox â†’ P3 AI copy/assets +
-reporting â†’ P4 agent-proposed drafts. Decision-gated: SMM-28 Mixpost fallback, SMM-29 ClipsAI video.
+**Future plans â€” RE-PLANNED 2026-08-12, see the addendum
+[`../blueprints/smm-design-addendum-2026-08-12.md`](../blueprints/smm-design-addendum-2026-08-12.md)**
+(binding over design Â§12). The base plan was written against the 2026-07-23 platform; six assumptions
+expired (permissions are now catalog DATA with dotted keys + six parity guards; D14 is closed and carries a
+canonical single-use-grant execute contract that replaces the bespoke payload-hash; the agentic-native bar is
+binding per capability; there is **no image-generation backend** â€” the gateway has no generative endpoint and
+`render-gateway-go` is `0.0.0`; the live client portal makes client post-approval a real surface; migrations
+rebase `0034+` â†’ `0105+`). **30 tickets P0â€“P4 + 3 decision-gated:** P0 substrate/IAM/containment (incl. new
+SMM-30 IAM registration + `smm_manager`/`smm_staff` roles) â†’ P1 publish loop on own accounts ($0, publish
+registered as an executable approval; X ships disabled so the path carries no money) â†’ P2 inbox **+ client
+approval via the portal** (new SMM-31/32, plain-tenant-wall table per 0088's lesson) â†’ P3 AI copy +
+analytics + reports (attach-only assets) â†’ P4 agents + assistant. Decision-gated: SMM-28 Mixpost fallback,
+SMM-29 ClipsAI video, SMM-34 generative images (gated on the Creative render gateway).
 
 ## creative â€” Creative Studio Â· `0.1.0` Â· PROTOTYPED
 

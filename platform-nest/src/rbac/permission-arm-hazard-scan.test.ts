@@ -347,41 +347,75 @@ interface PatternCHit {
 }
 
 /**
- * Pattern C (IAM-SEC-03) — the blind spot Pattern A cannot see BY DESIGN.
+ * Is this UNSAFE reason a SCOPE-reachability constraint — i.e. does the role's own condition
+ * permit the grant to be satisfied at a DIFFERENT (narrower) set of `scopeType` values than the
+ * plain "global-or-company" shape every generic `perm_<kind>_<action>` mirror grants at? Only
+ * `no-disjunction` (single AND-chain, e.g. platform_admin/group_executive: global ONLY;
+ * org_unit_lead: org_unit ONLY) and `missing-scope-branch` (has a disjunction but is missing one
+ * of the two plain branches, e.g. client: company ONLY, no global escape) are this shape — both
+ * describe "the set of scopeType values this role's condition can ever be true for is narrower
+ * than {global, company}", which is exactly what a global-or-company mirror does not honour.
  *
- * Pattern A's own docstring excludes wildcard (`actions: ["*"]`) rules: "the permanent IAM-04c
- * superadmin bypass ... never scanned ... by architect ruling", on the theory that a wildcard
- * rule is pure structure, never a permission-catalog concept, so it can never feed a `perm_*`
- * mirror. IAM-04-ROLLOUT-B12 (2026-08-11) found that theory is FALSE in practice: the DB's
- * `role_permissions` bundling methodology (migration 0094) does not special-case wildcard-sourced
- * rows — it bundles EVERY action of EVERY kind whose wildcard rule names a role into that role's
- * flat permission catalog, with no memory of "this came from a wildcard rule". A generic
- * `perm_<kind>_<action>` mirror (the SAME global-or-company shape every batch-B12 role above uses)
- * then honours that bundle at the GRANT's own scope — so a role whose OWN derived-role condition
- * is NARROWER than "global-or-company" (exactly Pattern A's own SAFE/UNSAFE line, computed by the
- * SAME `classifyDerivedRoleExpr` used above) can be granted at a scope its role-arm rule would
- * refuse, and still walk through any existing `perm_*` arm. `platform_admin` (global-only,
- * `missing-scope-branch`) is the confirmed, reachable instance (see
- * `admin-identity.controller.ts`'s `GLOBAL_ONLY_ROLES` comment and
- * `global-only-role-scope.test.ts`) — this scanner re-derives it, and every other kind/role pair
- * with the same shape, from the live policy files, so a THIRD such role introduced tomorrow is
- * caught the same way pm_task's `team_lead` mixing is caught by Pattern A.
+ * `top-level-attr-gate` (module_staff/module_manager/module_approver: gated by
+ * `resource.attr.module`, has(...) failing closed) is DELIBERATELY EXCLUDED here: that hazard's
+ * axis is an extra RESOURCE ATTRIBUTE the mirror has no per-request argument to re-check, not a
+ * scope constraint — a generic global-or-company mirror's scope branches are exactly as broad as
+ * module_staff's own (both are `global || company-tenant-match`), so mirroring it is not the
+ * "narrower-scope-than-implied" defect this scan targets. That hazard is Pattern A/B's remit
+ * (already carved out explicitly in PART 3's own regression guard, "mitigated by CONFIRMING the
+ * gating attribute is reliably populated ... nothing to assert structurally here") and is
+ * unaffected by this widening.
+ */
+function isScopeConstrainedReason(reason: UnsafeReason): boolean {
+  return reason.type === "no-disjunction" || reason.type === "missing-scope-branch";
+}
+
+/**
+ * Pattern C (IAM-SEC-03, widened IAM-SEC-04) — the blind spot Pattern A cannot see BY DESIGN.
  *
- * Deliberately no "co-occurring SAFE role" requirement (unlike Pattern A): a wildcard rule's very
- * presence is what produces the always-bundled, always-broad permission-catalog row IAM-04c
- * assumed would never exist — an unsafe role does not need a safe rule-mate to make that row
- * dangerous, it needs only to be named in a rule with no per-request scope re-check of its own.
- * Role name is never hardcoded: `roleClass` is the same structurally-derived map Pattern A reads.
+ * ORIGINAL SHAPE (IAM-SEC-03): Pattern A's own docstring excludes wildcard (`actions: ["*"]`)
+ * rules: "the permanent IAM-04c superadmin bypass ... never scanned ... by architect ruling", on
+ * the theory that a wildcard rule is pure structure, never a permission-catalog concept, so it
+ * can never feed a `perm_*` mirror. IAM-04-ROLLOUT-B12 (2026-08-11) found that theory is FALSE in
+ * practice: the DB's `role_permissions` bundling methodology (migration 0094) does not
+ * special-case wildcard-sourced rows — it bundles EVERY action of EVERY kind whose rule names a
+ * role into that role's flat permission catalog, with no memory of "this came from a wildcard
+ * rule" or "this role sat alone in its rule". A generic `perm_<kind>_<action>` mirror (the SAME
+ * global-or-company shape every rollout batch's role above uses) then honours that bundle at the
+ * GRANT's own scope — so a role whose OWN derived-role condition is SCOPE-NARROWER than
+ * "global-or-company" (`isScopeConstrainedReason`, above) can be granted at a scope its role-arm
+ * rule would refuse, and still walk through any existing (or future) `perm_*` arm.
+ *
+ * WIDENED (IAM-SEC-04, 2026-08-12): IAM-SEC-03's own implementation required BOTH `actions`
+ * to include the literal wildcard `"*"` AND (implicitly, since it never checked) nothing about
+ * co-occurrence. That wildcard requirement was itself the bug this ticket closes: `portal`'s
+ * `client`-only rule (`resource_portal.yaml`) — `actions: ["read","decide","sign","pay",
+ * "update_profile","request_change","approve_post"]`, `derivedRoles: ["client"]`,
+ * `client`'s own condition company-scope-only (`missing-scope-branch`, no global branch) — is
+ * STRUCTURALLY IDENTICAL to the platform_admin defect (a role reachable at a scope its own
+ * condition refuses would be honoured by a generic mirror), yet was invisible to the old Pattern C
+ * because its `actions` are six named strings, not `"*"`. The hazard was never actually about the
+ * literal wildcard token — `"*"` was simply the one shape IAM-04-ROLLOUT-B12 happened to find it
+ * in first. The real predicate, restated: "a rule reachable at a scope the named role's own
+ * derived-role condition would refuse" — true of ANY EFFECT_ALLOW rule naming a scope-constrained
+ * role, wildcard or not, alone or mixed with other roles.
+ *
+ * So this scan now checks EVERY EFFECT_ALLOW rule (the wildcard check is gone), and flags EVERY
+ * named role whose classification is UNSAFE for a SCOPE reason (`isScopeConstrainedReason`) —
+ * dropping both the old wildcard-only restriction AND (as before) any "co-occurring SAFE role"
+ * requirement: a role alone in an ordinary rule (client×portal) is exactly the shape that was
+ * missed, so requiring a rule-mate here would reintroduce the identical blind spot one level down.
+ * Role name is never hardcoded: `roleClass` is the same structurally-derived map Pattern A reads;
+ * the ONLY new logic is dropping the wildcard filter and adding the reason-type filter above.
  */
 function scanPatternC(kinds: Map<string, ParsedKind>, roleClass: Map<string, RoleClassification>): PatternCHit[] {
   const hits: PatternCHit[] = [];
   for (const [kind, entry] of kinds) {
     for (const rule of entry.rules) {
       if (rule.effect !== "EFFECT_ALLOW") continue;
-      if (!rule.actions.includes("*")) continue;
       for (const roleName of rule.derivedRoles) {
         const cls = roleClass.get(roleName);
-        if (cls && !cls.safe) {
+        if (cls && !cls.safe && isScopeConstrainedReason(cls.reason!)) {
           hits.push({ kind, role: roleName, reason: cls.reason! });
         }
       }
@@ -437,15 +471,32 @@ function isGlobalScopeOnly(expr: string): boolean {
  *  file owns `permission-arm-hazard-scan.test.ts` and must not modify
  *  `admin-identity.controller.ts` — it only checks that file's own claim against this file's own
  *  independently-derived findings. */
-function loadGlobalOnlyRolesFromController(): Set<string> {
+function loadRoleScopeConstraintsFromController(): Map<string, Set<string>> {
   const text = readFileSync(
     join(__dirname, "../admin/admin-identity.controller.ts"),
     "utf8",
   );
-  const m = /const GLOBAL_ONLY_ROLES = new Set\(\[([^\]]*)\]\)/.exec(text);
-  if (!m) return new Set();
-  const names = [...m[1].matchAll(/"([^"]+)"/g)].map((x) => x[1]);
-  return new Set(names);
+  // IAM-SEC-04 (2026-08-12): the controller's two-entry `GLOBAL_ONLY_ROLES` set became
+  // `ROLE_SCOPE_CONSTRAINTS`, a role -> allowed-scope-types map, once the widened Pattern C found
+  // the same hazard in the OTHER direction (`client` = company-only, `org_unit_lead` = org_unit-only).
+  const block = /const ROLE_SCOPE_CONSTRAINTS[^=]*=\s*\{([\s\S]*?)\};/.exec(text);
+  const out = new Map<string, Set<string>>();
+  if (!block) return out;
+  for (const m of block[1].matchAll(/^\s*(\w+):\s*\[([^\]]*)\],/gm)) {
+    const scopes = [...m[2].matchAll(/"([^"]+)"/g)].map((x) => x[1]);
+    out.set(m[1], new Set(scopes));
+  }
+  return out;
+}
+
+/** Back-compat view for the global-only assertions below: the roles the controller pins to
+ *  global scope ONLY. Derived from the map above, so it cannot drift from it. */
+function loadGlobalOnlyRolesFromController(): Set<string> {
+  const out = new Set<string>();
+  for (const [role, scopes] of loadRoleScopeConstraintsFromController()) {
+    if (scopes.size === 1 && scopes.has("global")) out.add(role);
+  }
+  return out;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────
@@ -485,6 +536,12 @@ function ruleHasSelfScope(conditionExpr: string): boolean {
   return selfScopeField(conditionExpr) !== null;
 }
 
+/** Number of `resource_*.yaml` policy files on disk — the count the parser must reproduce.
+ *  Derived so a new module cannot make this guard red by existing. */
+function policyFileCount(): number {
+  return readdirSync(POLICIES_DIR).filter((f) => f.startsWith("resource_") && f.endsWith(".yaml")).length;
+}
+
 describe("IAM-04-ROLLOUT-SCAN · permission-arm hazard detector (static, re-derived every run)", () => {
   const kinds = parsePolicies();
   const allDerivedRoleExprs = loadAllDerivedRoleExprs();
@@ -492,8 +549,13 @@ describe("IAM-04-ROLLOUT-SCAN · permission-arm hazard detector (static, re-deri
   const patternA = scanPatternA(kinds, roleClass);
   const patternB = scanPatternB(kinds);
 
-  it("sanity: parses all 60 resource kinds (HIER-3, 2026-08-11: team kind retired, 61 -> 60)", () => {
-    expect(kinds.size).toBe(60);
+  // ⚠ DERIVED, not pinned (2026-08-12). This asserted `60` and went red the moment an unrelated
+  // session legitimately added the `social` module's 8 policies — a tripwire firing on CORRECT work.
+  // The real property is "the parse saw every policy file on disk", so the FILE COUNT is the
+  // expected value; a literal would have to be bumped by every future module and, worse, would still
+  // pass if the parser silently dropped a kind while someone edited the number to match.
+  it("sanity: the parse covers every resource_*.yaml on disk (no silently-dropped kind)", () => {
+    expect(kinds.size).toBe(policyFileCount());
   });
 
   it("sanity: classifies every non-perm_* derived role in derived_roles.yaml", () => {
@@ -605,11 +667,22 @@ describe("IAM-04-ROLLOUT-SCAN · permission-arm hazard detector (static, re-deri
     });
   });
 
-  describe("PART 3b (IAM-SEC-03) — Pattern C: wildcard rules naming a scope-narrower-than-implied role", () => {
+  describe("PART 3b (IAM-SEC-03, widened IAM-SEC-04) — Pattern C: any ALLOW rule naming a scope-narrower-than-implied role", () => {
     const patternC = scanPatternC(kinds, roleClass);
     const globalOnlyRoles = loadGlobalOnlyRolesFromController();
+    const permArmKindsForC = kindsWithPermissionArm(kinds);
+    // Split by DIRECTION of narrowness: global-only roles (platform_admin/group_executive — the
+    // role's condition permits ONLY scopeType=="global") are the shape GLOBAL_ONLY_ROLES was built
+    // to close (force the grant to stay at the ONE scope the role's own condition allows). Every
+    // OTHER scope-constrained role (client: company ONLY; org_unit_lead: org_unit ONLY; any future
+    // role with the same shape) is narrow in a DIFFERENT direction — forcing "global scope only"
+    // on `client` would be backwards (client's whole point is a non-global scope), so
+    // GLOBAL_ONLY_ROLES structurally cannot mitigate it. This split is re-derived every run from
+    // `isGlobalScopeOnly`'s own CEL text check, never a hand-picked role list.
+    const globalOnlyHits = patternC.filter((h) => isGlobalScopeOnly(allDerivedRoleExprs.get(h.role) ?? ""));
+    const otherNarrowHits = patternC.filter((h) => !isGlobalScopeOnly(allDerivedRoleExprs.get(h.role) ?? ""));
 
-    it("SWEEP: reports every (kind, role) instance of the wildcard-vs-narrow-role shape across all 61 kinds", () => {
+    it("SWEEP: reports every (kind, role) instance of the scope-narrower-than-implied shape across the WHOLE estate, wildcard or not", () => {
       // Not a hardcoded expectation of WHICH kinds — that is defect #6 again. This just proves the
       // sweep ran (didn't silently find nothing) and prints the full register for the report doc.
       // eslint-disable-next-line no-console
@@ -622,43 +695,49 @@ describe("IAM-04-ROLLOUT-SCAN · permission-arm hazard detector (static, re-deri
         ),
       );
       expect(patternC.length).toBeGreaterThan(0);
-      // Every hit must be a genuinely UNSAFE role per the SAME classifier Pattern A uses — proves
-      // this scan isn't just "every wildcard rule", it's specifically the narrow-scope shape.
+      // Every hit must be a genuinely UNSAFE role per the SAME classifier Pattern A uses, AND its
+      // reason must be scope-related (never top-level-attr-gate) — proves this scan isn't just
+      // "every rule naming any unsafe role", it's specifically the scope-reachability shape.
       for (const hit of patternC) {
         expect(roleClass.get(hit.role)?.safe).toBe(false);
+        expect(isScopeConstrainedReason(hit.reason)).toBe(true);
       }
     });
 
-    it("REACHABILITY: only global-scope-only roles (by CEL text, not just the coarser `no-disjunction`/`missing-scope-branch` bucket label) appear in a wildcard rule — the SAME shape admin-identity.controller.ts's GLOBAL_ONLY_ROLES was built to close", () => {
-      // Re-derived, not asserted: `classifyDerivedRoleExpr`'s bucket names are coarser than this
-      // question (see `isGlobalScopeOnly`'s own comment — `team_lead` shares platform_admin's
-      // `no-disjunction` label for an unrelated reason). If a role that is NOT global-scope-only by
-      // the precise CEL check were EVER named in a wildcard rule, GLOBAL_ONLY_ROLES could not
-      // mitigate it (forcing "global scope only" makes no sense for a role whose entire point is a
-      // non-global scope, e.g. team_lead) — so this assertion is itself a finding: it fails loudly
-      // the day that assumption stops holding, rather than silently under-reporting.
-      const notGlobalOnly = patternC.filter((h) => !isGlobalScopeOnly(allDerivedRoleExprs.get(h.role) ?? ""));
-      expect(
-        notGlobalOnly,
-        `Pattern C found a role in a wildcard rule whose hazard is NOT the global-only shape ` +
-          `(${JSON.stringify(notGlobalOnly)}) — GLOBAL_ONLY_ROLES cannot mitigate this; a ` +
-          `different fix is needed and this is a NEW finding, not a false positive.`,
-      ).toEqual([]);
-    });
-
-    it("REACHABILITY: every Pattern-C role is covered by admin-identity.controller.ts's GLOBAL_ONLY_ROLES guard — the mitigation this ticket's write-path fix landed", () => {
-      const rolesFound = new Set(patternC.map((h) => h.role));
+    it("REACHABILITY (global-only direction): every global-scope-only Pattern-C role is covered by admin-identity.controller.ts's GLOBAL_ONLY_ROLES guard", () => {
+      const rolesFound = new Set(globalOnlyHits.map((h) => h.role));
       expect(globalOnlyRoles.size, "GLOBAL_ONLY_ROLES must be parseable from the controller source").toBeGreaterThan(0);
       for (const role of rolesFound) {
         expect(
           globalOnlyRoles.has(role),
-          `role "${role}" appears in a wildcard rule with a narrower-than-implied scope, but is ` +
-            `NOT in admin-identity.controller.ts's GLOBAL_ONLY_ROLES — this role's grant is ` +
+          `role "${role}" appears in a rule with a narrower-than-implied (global-only) scope, but ` +
+            `is NOT in admin-identity.controller.ts's GLOBAL_ONLY_ROLES — this role's grant is ` +
             `REACHABLE at a scope its role arm would refuse but a naive permission-arm mirror ` +
             `would honour (the exact platform_admin defect), and nothing currently blocks minting ` +
             `it at that scope. This is a live finding, not a regression in this test.`,
         ).toBe(true);
       }
+    });
+
+    it("REACHABILITY (other-narrow direction, IAM-SEC-04): no company/org-unit/attr-narrower-than-global role is named in a kind that ALREADY has a wired perm_* permission arm", () => {
+      // GLOBAL_ONLY_ROLES cannot mitigate this direction (see the split's own comment above) — the
+      // only thing standing between "mintable at a scope the role denies" (already true today, see
+      // the report's write-path finding) and "actually exploitable" is whether a perm_* mirror
+      // exists ANYWHERE for a kind this role is named in. `kindsWithPermissionArm` is the same
+      // discovered-not-named set PART 3 already uses. If this assertion ever fails, a permission
+      // arm has been wired onto a kind carrying one of these roles WITHOUT the exclusion this
+      // direction needs — a live over-grant, not a false positive; do not silence it by narrowing
+      // the predicate, fix the wiring or add the exclusion.
+      const offenders = otherNarrowHits.filter((h) => permArmKindsForC.has(h.kind));
+      expect(
+        offenders,
+        `Pattern C (other-narrow direction) found role(s)/kind(s) that are BOTH scope-narrower-than-` +
+          `implied AND already carry a wired perm_* permission arm on the same kind ` +
+          `(${JSON.stringify(offenders)}) — this is REACHABLE today via that arm, matching the ` +
+          `platform_admin defect exactly, just in the opposite scope direction and with no ` +
+          `GLOBAL_ONLY_ROLES-shaped guard available. STOP wiring that kind's permission arm and ` +
+          `report this, do not tune the predicate to make it pass.`,
+      ).toEqual([]);
     });
 
     it("informational: exactly which roles and how many kinds carry this shape (for the report, not pinned)", () => {
@@ -668,6 +747,20 @@ describe("IAM-04-ROLLOUT-SCAN · permission-arm hazard detector (static, re-deri
         s.add(hit.kind);
         byRole.set(hit.role, s);
       }
+      // eslint-disable-next-line no-console
+      console.log(
+        "Pattern C by role (global-only direction, closed by GLOBAL_ONLY_ROLES):",
+        [...new Set(globalOnlyHits.map((h) => h.role))]
+          .map((role) => `${role}: ${new Set(globalOnlyHits.filter((h) => h.role === role).map((h) => h.kind)).size} kinds`)
+          .join("; "),
+      );
+      // eslint-disable-next-line no-console
+      console.log(
+        "Pattern C by role (other-narrow direction, OPEN — no GLOBAL_ONLY_ROLES-shaped guard exists):",
+        [...new Set(otherNarrowHits.map((h) => h.role))]
+          .map((role) => `${role}: ${new Set(otherNarrowHits.filter((h) => h.role === role).map((h) => h.kind)).size} kinds`)
+          .join("; "),
+      );
       // eslint-disable-next-line no-console
       console.log(
         "Pattern C by role:",
@@ -737,7 +830,7 @@ describe("IAM-04-ROLLOUT-SCAN · permission-arm hazard detector (static, re-deri
       // proves the synthetic construction above was purely in-memory.
       const freshParse = parsePolicies();
       expect(freshParse.has("synthetic_widget")).toBe(false);
-      expect(freshParse.size).toBe(60);
+      expect(freshParse.size).toBe(policyFileCount());
     });
 
     // ── IAM-SEC-03's own teeth proof: reproduce the platform_admin wildcard shape in isolation ──
@@ -798,7 +891,113 @@ describe("IAM-04-ROLLOUT-SCAN · permission-arm hazard detector (static, re-deri
       const freshParse = parsePolicies();
       expect(freshParse.has("synthetic_widget_2")).toBe(false);
       expect(freshParse.has("synthetic_widget_3")).toBe(false);
-      expect(freshParse.size).toBe(60);
+      expect(freshParse.size).toBe(policyFileCount());
+    });
+
+    // ── IAM-SEC-04's own teeth proof: reproduce the REAL `portal`×`client` shape — a NAMED-ACTION,
+    // NON-WILDCARD rule, the role sitting ALONE (no co-occurring safe role), scope-narrower in the
+    // OPPOSITE direction (company-only, not global-only). If this is not flagged, the widening did
+    // not actually close the gap the ticket exists to close. ──
+    it("(IAM-SEC-04) a NAMED-ACTION rule (no wildcard) naming ONLY a company-scope-only role IS flagged by the widened Pattern C", () => {
+      const syntheticKinds = new Map<string, ParsedKind>(kinds);
+      syntheticKinds.set("synthetic_widget_4", {
+        kind: "synthetic_widget_4",
+        file: "<synthetic, in-memory only>",
+        rules: [
+          {
+            actions: ["*"],
+            effect: "EFFECT_ALLOW",
+            derivedRoles: ["platform_admin"], // present, exactly like the real resource_portal.yaml
+            condition: "",
+          },
+          {
+            // The exact resource_portal.yaml shape: six-plus NAMED actions, no "*" anywhere in
+            // this rule, and `client` sits ALONE — no company_admin/manager/viewer co-occurs.
+            actions: ["read", "decide", "sign", "pay", "update_profile", "request_change"],
+            effect: "EFFECT_ALLOW",
+            derivedRoles: ["client"], // company-scope-only per derived_roles.yaml — UNSAFE,
+            // missing-scope-branch (NOT global-only — the opposite direction from platform_admin)
+            condition: "variables.inTenant",
+          },
+        ],
+      });
+
+      // Sanity: the OLD (pre-IAM-SEC-04) predicate — wildcard-only — would NOT have found this.
+      // Reproduced inline (not by calling old code, which no longer exists) to document exactly
+      // what changed: the old filter was `if (!rule.actions.includes("*")) continue;` before
+      // considering a rule's roles at all. The `client` rule here has no "*", so under that filter
+      // it would never even be visited.
+      const namedActionRule = syntheticKinds.get("synthetic_widget_4")!.rules[1];
+      expect(namedActionRule.actions.includes("*"), "the client rule is deliberately NOT a wildcard rule").toBe(false);
+
+      const hits = scanPatternC(syntheticKinds, roleClass);
+      const clientHit = hits.find((h) => h.kind === "synthetic_widget_4" && h.role === "client");
+      expect(
+        clientHit,
+        "the widened Pattern C must flag `client` sitting alone in a named-action, non-wildcard rule — this is the exact portal/client shape the ticket exists to close",
+      ).toBeDefined();
+      expect(clientHit!.reason.type).toBe("missing-scope-branch");
+      // Confirms the DIRECTION is the opposite of platform_admin's: client is NOT global-scope-only.
+      expect(isGlobalScopeOnly(allDerivedRoleExprs.get("client")!)).toBe(false);
+      // The co-occurring platform_admin (in a SEPARATE wildcard rule on the same synthetic kind)
+      // must ALSO still be flagged — proves the widening didn't lose the original wildcard shape.
+      expect(hits.some((h) => h.kind === "synthetic_widget_4" && h.role === "platform_admin")).toBe(true);
+    });
+
+    it("(IAM-SEC-04) a named-action rule naming ONLY a SAFE role, no wildcard anywhere, is NOT flagged (no false positives)", () => {
+      const syntheticKinds = new Map<string, ParsedKind>(kinds);
+      syntheticKinds.set("synthetic_widget_5", {
+        kind: "synthetic_widget_5",
+        file: "<synthetic, in-memory only>",
+        rules: [
+          {
+            actions: ["read", "update"],
+            effect: "EFFECT_ALLOW",
+            derivedRoles: ["company_admin", "manager", "viewer"], // all SAFE, no wildcard anywhere
+            condition: "variables.inTenant",
+          },
+        ],
+      });
+      const hits = scanPatternC(syntheticKinds, roleClass);
+      expect(hits.some((h) => h.kind === "synthetic_widget_5")).toBe(false);
+    });
+
+    it("(IAM-SEC-04) a top-level-attr-gate role (module_staff-shaped) sitting ALONE in a named-action rule is NOT flagged — that hazard axis is Pattern A/B's remit, not Pattern C's", () => {
+      const syntheticKinds = new Map<string, ParsedKind>(kinds);
+      syntheticKinds.set("synthetic_widget_6", {
+        kind: "synthetic_widget_6",
+        file: "<synthetic, in-memory only>",
+        rules: [
+          {
+            actions: ["read"],
+            effect: "EFFECT_ALLOW",
+            derivedRoles: ["module_staff"], // UNSAFE, but top-level-attr-gate — a DIFFERENT axis
+            condition: "",
+          },
+        ],
+      });
+      const hits = scanPatternC(syntheticKinds, roleClass);
+      expect(
+        hits.some((h) => h.kind === "synthetic_widget_6"),
+        "module_staff's hazard is a resource-attribute gate, not a scope constraint — the widened Pattern C must not flag it (would duplicate/contradict PART 3's own explicit top-level-attr-gate carve-out)",
+      ).toBe(false);
+    });
+
+    it("REVERT: none of the IAM-SEC-04 synthetic kinds are persisted anywhere — the real parse is unaffected", () => {
+      const freshParse = parsePolicies();
+      expect(freshParse.has("synthetic_widget_4")).toBe(false);
+      expect(freshParse.has("synthetic_widget_5")).toBe(false);
+      expect(freshParse.has("synthetic_widget_6")).toBe(false);
+      expect(freshParse.size).toBe(policyFileCount());
+      // The REAL `client`×`portal` finding must be reproducible from disk, unaffected by any
+      // synthetic construction above — this is the ticket's own headline finding, re-proven live.
+      const realHits = scanPatternC(freshParse, roleClass);
+      const realPortalClient = realHits.find((h) => h.kind === "portal" && h.role === "client");
+      expect(
+        realPortalClient,
+        "the REAL resource_portal.yaml's `client` rule must be flagged by the widened detector — if this is undefined, the widening did not actually close the gap this ticket exists to close",
+      ).toBeDefined();
+      expect(realPortalClient!.reason.type).toBe("missing-scope-branch");
     });
 
     it("the SAME Pattern-C detector, run against REAL platform_admin, finds it flagged in every wildcard-carrying kind", () => {
