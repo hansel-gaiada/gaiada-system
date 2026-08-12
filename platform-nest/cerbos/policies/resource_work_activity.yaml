@@ -34,3 +34,16 @@ resourcePolicy:
       effect: EFFECT_ALLOW
       derivedRoles: ["company_admin"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+
+    # ══════════ IAM-04-ROLLOUT-B4 — permission-matching arm. PURELY ADDITIVE: every rule above ═══
+    # is byte-for-byte unchanged. group_executive's own notLow-only rule above is DELIBERATELY not
+    # mirrored (IAM-04c/TRAP-4 — same WD-20-R1 reasoning the file's own header already documents).
+    # No exclusion needed on the mirrored actions (zero team_lead mixing).
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_work_activity_read"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    - actions: ["create"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_work_activity_create"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }

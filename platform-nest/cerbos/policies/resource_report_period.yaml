@@ -81,3 +81,28 @@ resourcePolicy:
       effect: EFFECT_ALLOW
       derivedRoles: ["member"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+
+    # ══════════ IAM-04-ROLLOUT-B4 — permission-matching arm. PURELY ADDITIVE: every rule above ═══
+    # is byte-for-byte unchanged. group_executive's own notLow-only rules above are DELIBERATELY not
+    # mirrored (IAM-04c/TRAP-4). `view`'s four in-tenant roles above (company_admin, hr_people_reader,
+    # manager, member) each carry a SEPARATE rule but the IDENTICAL inTenant&&notLow condition and
+    # zero resource-instance carve-out, so their combined reach folds safely into one generic mirror
+    # per action, exactly like client.create/update/delete's own multi-rule-same-condition shape
+    # above. `seal`/`amend`/`pin` mirror company_admin's own rule only. No exclusion needed anywhere
+    # (zero team_lead mixing — HIER-3 already retired it from this file's `view` dept-lead tier).
+    - actions: ["view"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_report_period_view"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    - actions: ["seal"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_report_period_seal"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    - actions: ["amend"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_report_period_amend"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    - actions: ["pin"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_report_period_pin"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }

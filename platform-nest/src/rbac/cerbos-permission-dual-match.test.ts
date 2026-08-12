@@ -478,3 +478,264 @@ describe.skipIf(!live)("HIER-2 rollout batch 3: checkin's permission arm (Patter
     expect(await allow(p, checkin(), "missed_by_unit")).toBe(false); // neither arm grants this
   });
 });
+
+describe.skipIf(!live)("IAM-04-ROLLOUT-B4: dual-match isolation across the new-SAFE batch (16 kinds freed by team_lead retirement + IAM-DR12; `portal` deliberately excluded — see the B4 report's STOP)", () => {
+  // Same isolation shape as the B12 block above: every case grants the permission WITHOUT any role
+  // at all (roles: []) — the role arm cannot possibly be what answers. Each case also probes (a)
+  // cross-tenant non-leak (same perms, resource moved to T2) and (b) sibling-action non-bleed where
+  // the kind has ≥2 actions.
+
+  it("activity.read: PERMISSION ARM ALONE (roles: []) allows; no cross-tenant leak", async () => {
+    const resource: Resource = { kind: "activity", id: "x1", tenantId: T1 };
+    const p = principal([], [{ key: "core.activity.read", scopeType: "company", scopeId: T1 }]);
+    expect(await allow(p, resource, "read")).toBe(true);
+    expect(await allow(p, { ...resource, tenantId: T2 }, "read")).toBe(false);
+  });
+
+  it("client.read: PERMISSION ARM ALONE (roles: []) allows; no cross-tenant leak; no sibling-action bleed into .create/.update/.delete", async () => {
+    const resource: Resource = { kind: "client", id: "x1", tenantId: T1 };
+    const p = principal([], [{ key: "core.client.read", scopeType: "company", scopeId: T1 }]);
+    expect(await allow(p, resource, "read")).toBe(true);
+    expect(await allow(p, { ...resource, tenantId: T2 }, "read")).toBe(false);
+    expect(await allow(p, resource, "create")).toBe(false);
+    expect(await allow(p, resource, "update")).toBe(false);
+    expect(await allow(p, resource, "delete")).toBe(false);
+  });
+
+  it("client.delete: PERMISSION ARM ALONE (roles: []) allows the sensitive action too (delete is `sensitive: true` in the catalog, but the arm itself does not gate on that flag)", async () => {
+    const resource: Resource = { kind: "client", id: "x1", tenantId: T1 };
+    const p = principal([], [{ key: "core.client.delete", scopeType: "company", scopeId: T1 }]);
+    expect(await allow(p, resource, "delete")).toBe(true);
+    expect(await allow(p, { ...resource, tenantId: T2 }, "delete")).toBe(false);
+  });
+
+  it("client_contact.create: PERMISSION ARM ALONE (roles: []) allows; no cross-tenant leak; no sibling-action bleed into .read/.revoke", async () => {
+    const resource: Resource = { kind: "client_contact", id: "x1", tenantId: T1 };
+    const p = principal([], [{ key: "core.client_contact.create", scopeType: "company", scopeId: T1 }]);
+    expect(await allow(p, resource, "create")).toBe(true);
+    expect(await allow(p, { ...resource, tenantId: T2 }, "create")).toBe(false);
+    expect(await allow(p, resource, "read")).toBe(false);
+    expect(await allow(p, resource, "revoke")).toBe(false);
+  });
+
+  it("client_contact.read: PERMISSION ARM ALONE (roles: []) allows (member/viewer tier's own reach, mirrored independently of create/update/revoke's narrower company_admin+manager tier)", async () => {
+    const resource: Resource = { kind: "client_contact", id: "x1", tenantId: T1 };
+    const p = principal([], [{ key: "core.client_contact.read", scopeType: "company", scopeId: T1 }]);
+    expect(await allow(p, resource, "read")).toBe(true);
+    expect(await allow(p, { ...resource, tenantId: T2 }, "read")).toBe(false);
+  });
+
+  it("comment.read: PERMISSION ARM ALONE (roles: []) allows; no cross-tenant leak; no sibling-action bleed into .create", async () => {
+    const resource: Resource = { kind: "comment", id: "x1", tenantId: T1 };
+    const p = principal([], [{ key: "core.comment.read", scopeType: "company", scopeId: T1 }]);
+    expect(await allow(p, resource, "read")).toBe(true);
+    expect(await allow(p, { ...resource, tenantId: T2 }, "read")).toBe(false);
+    expect(await allow(p, resource, "create")).toBe(false);
+  });
+
+  it("custom_field.update: PERMISSION ARM ALONE (roles: []) allows; no cross-tenant leak; no sibling-action bleed into .read/.create/.delete", async () => {
+    const resource: Resource = { kind: "custom_field", id: "x1", tenantId: T1 };
+    const p = principal([], [{ key: "core.custom_field.update", scopeType: "company", scopeId: T1 }]);
+    expect(await allow(p, resource, "update")).toBe(true);
+    expect(await allow(p, { ...resource, tenantId: T2 }, "update")).toBe(false);
+    expect(await allow(p, resource, "read")).toBe(false);
+    expect(await allow(p, resource, "create")).toBe(false);
+    expect(await allow(p, resource, "delete")).toBe(false);
+  });
+
+  it("deliverable.create: PERMISSION ARM ALONE (roles: []) allows; no cross-tenant leak; no sibling-action bleed into .read/.update/.delete", async () => {
+    const resource: Resource = { kind: "deliverable", id: "x1", tenantId: T1 };
+    const p = principal([], [{ key: "core.deliverable.create", scopeType: "company", scopeId: T1 }]);
+    expect(await allow(p, resource, "create")).toBe(true);
+    expect(await allow(p, { ...resource, tenantId: T2 }, "create")).toBe(false);
+    expect(await allow(p, resource, "read")).toBe(false);
+    expect(await allow(p, resource, "update")).toBe(false);
+    expect(await allow(p, resource, "delete")).toBe(false);
+  });
+
+  it("device.update: PERMISSION ARM ALONE (roles: []) allows the company_admin+it_staff combined tier; no cross-tenant leak; no sibling-action bleed into .read", async () => {
+    const resource: Resource = { kind: "device", id: "x1", tenantId: T1 };
+    const p = principal([], [{ key: "it.device.update", scopeType: "company", scopeId: T1 }]);
+    expect(await allow(p, resource, "update")).toBe(true);
+    expect(await allow(p, { ...resource, tenantId: T2 }, "update")).toBe(false);
+    expect(await allow(p, resource, "read")).toBe(false);
+  });
+
+  it("device: ROLE ARM UNCHANGED — the wildcard platform_admin+group_executive tier is still decided by the role arm alone, not mirrored into the permission catalog (IAM-04c)", async () => {
+    const resource: Resource = { kind: "device", id: "x1", tenantId: T1 };
+    const groupExec = principal([{ role: "group_executive", scopeType: "global", scopeId: null }], [], []);
+    expect(await allow(groupExec, resource, "delete")).toBe(true); // via the untouched wildcard rule
+    // The permission arm's OWN rule still requires inTenant&&notLow (it is not the wildcard rule),
+    // so the principal must be a member of the resource's tenant for the global-scope grant to
+    // apply here — same "inTenant is a SEPARATE, unchanged gate" shape pm_task's own pilot test
+    // documents (§ above, "a global-scope grant covers every tenant the principal is authorized for").
+    const permOnly = principal([], [{ key: "it.device.delete", scopeType: "global", scopeId: null }], [T1]);
+    expect(await allow(permOnly, resource, "delete")).toBe(true); // via the permission arm's OWN global branch, not the wildcard
+  });
+
+  it("file.create: PERMISSION ARM ALONE (roles: []) allows; no cross-tenant leak; no sibling-action bleed into .read/.delete", async () => {
+    const resource: Resource = { kind: "file", id: "x1", tenantId: T1 };
+    const p = principal([], [{ key: "core.file.create", scopeType: "company", scopeId: T1 }]);
+    expect(await allow(p, resource, "create")).toBe(true);
+    expect(await allow(p, { ...resource, tenantId: T2 }, "create")).toBe(false);
+    expect(await allow(p, resource, "read")).toBe(false);
+    expect(await allow(p, resource, "delete")).toBe(false);
+  });
+
+  it("meeting_recording.relink: PERMISSION ARM ALONE (roles: []) allows the company_admin-only tier; no cross-tenant leak; no sibling-action bleed into .create/.ingest/.sync_drive", async () => {
+    const resource: Resource = { kind: "meeting_recording", id: "x1", tenantId: T1 };
+    const p = principal([], [{ key: "core.meeting_recording.relink", scopeType: "company", scopeId: T1 }]);
+    expect(await allow(p, resource, "relink")).toBe(true);
+    expect(await allow(p, { ...resource, tenantId: T2 }, "relink")).toBe(false);
+    expect(await allow(p, resource, "create")).toBe(false);
+    expect(await allow(p, resource, "ingest")).toBe(false);
+    expect(await allow(p, resource, "sync_drive")).toBe(false);
+  });
+
+  it("meeting_recording.create/ingest/sync_drive: PERMISSION ARM ALONE (roles: []) each allows independently, none bleeds into .relink (the company_admin-only tier)", async () => {
+    const resource: Resource = { kind: "meeting_recording", id: "x1", tenantId: T1 };
+    for (const action of ["create", "ingest", "sync_drive"]) {
+      const p = principal([], [{ key: `core.meeting_recording.${action}`, scopeType: "company", scopeId: T1 }]);
+      expect(await allow(p, resource, action), `meeting_recording.${action} via permission alone`).toBe(true);
+      expect(await allow(p, resource, "relink"), `meeting_recording.${action} must not unlock .relink`).toBe(false);
+    }
+  });
+
+  it("member.read: PERMISSION ARM ALONE (roles: []) allows the company_admin/manager/member/viewer directory tier; no cross-tenant leak", async () => {
+    const resource: Resource = { kind: "member", id: "x1", tenantId: T1 };
+    const p = principal([], [{ key: "core.member.read", scopeType: "company", scopeId: T1 }]);
+    expect(await allow(p, resource, "read")).toBe(true);
+    expect(await allow(p, { ...resource, tenantId: T2 }, "read")).toBe(false);
+  });
+
+  it("member.read: the module_staff tier is DELIBERATELY NOT mirrored — a bare hr_staff role with no module query param still resolves via the (untouched) role arm only, and the permission arm alone does not manufacture a caller-supplied-module grant it cannot re-check", async () => {
+    const resource: Resource = { kind: "member", id: "x1", tenantId: T1 };
+    const hrStaff = principal([{ role: "hr_staff", scopeType: "company", scopeId: T1 }], []);
+    expect(await allow(hrStaff, resource, "read")).toBe(false); // no module attr on the resource -> module_staff's own rule cannot fire
+    expect(await allow(hrStaff, { ...resource, module: "hr" }, "read")).toBe(true); // role arm, WITH the module attr the controller sets
+  });
+
+  it("notification.read: PERMISSION ARM ALONE (roles: []) allows; no cross-tenant leak; no sibling-action bleed into .create", async () => {
+    const resource: Resource = { kind: "notification", id: "x1", tenantId: T1 };
+    const p = principal([], [{ key: "core.notification.read", scopeType: "company", scopeId: T1 }]);
+    expect(await allow(p, resource, "read")).toBe(true);
+    expect(await allow(p, { ...resource, tenantId: T2 }, "read")).toBe(false);
+    expect(await allow(p, resource, "create")).toBe(false);
+  });
+
+  it("notification.create: PERMISSION ARM ALONE (roles: []) allows the company_admin+manager-only tier; does not bleed into .read/.update", async () => {
+    const resource: Resource = { kind: "notification", id: "x1", tenantId: T1 };
+    const p = principal([], [{ key: "core.notification.create", scopeType: "company", scopeId: T1 }]);
+    expect(await allow(p, resource, "create")).toBe(true);
+    expect(await allow(p, resource, "read")).toBe(false);
+    expect(await allow(p, resource, "update")).toBe(false);
+  });
+
+  it("org_structure.read: PERMISSION ARM ALONE (roles: []) allows the company_admin/manager/member/viewer tier; no cross-tenant leak; no sibling-action bleed into .update", async () => {
+    const resource: Resource = { kind: "org_structure", id: "x1", tenantId: T1 };
+    const p = principal([], [{ key: "core.org_structure.read", scopeType: "company", scopeId: T1 }]);
+    expect(await allow(p, resource, "read")).toBe(true);
+    expect(await allow(p, { ...resource, tenantId: T2 }, "read")).toBe(false);
+    expect(await allow(p, resource, "update")).toBe(false);
+  });
+
+  it("org_structure.update: PERMISSION ARM ALONE (roles: []) allows the company_admin-only tier; the group_executive-only rule remains untouched by this (still decided by the role arm alone)", async () => {
+    const resource: Resource = { kind: "org_structure", id: "x1", tenantId: T1 };
+    const p = principal([], [{ key: "core.org_structure.update", scopeType: "company", scopeId: T1 }]);
+    expect(await allow(p, resource, "update")).toBe(true);
+    expect(await allow(p, { ...resource, tenantId: T2 }, "update")).toBe(false);
+    const groupExec = principal([{ role: "group_executive", scopeType: "global", scopeId: null }], [], []);
+    expect(await allow(groupExec, resource, "update")).toBe(true); // via the untouched role-arm rule, not the perm arm
+  });
+
+  it("pm_project.read: PERMISSION ARM ALONE (roles: []) allows; no cross-tenant leak; no sibling-action bleed into .manage", async () => {
+    const resource: Resource = { kind: "pm_project", id: "x1", tenantId: T1 };
+    const p = principal([], [{ key: "pm.project.read", scopeType: "company", scopeId: T1 }]);
+    expect(await allow(p, resource, "read")).toBe(true);
+    expect(await allow(p, { ...resource, tenantId: T2 }, "read")).toBe(false);
+    expect(await allow(p, resource, "manage")).toBe(false);
+  });
+
+  it("pm_project.manage: PERMISSION ARM ALONE (roles: []) allows the company_admin+manager tier; no cross-tenant leak", async () => {
+    const resource: Resource = { kind: "pm_project", id: "x1", tenantId: T1 };
+    const p = principal([], [{ key: "pm.project.manage", scopeType: "company", scopeId: T1 }]);
+    expect(await allow(p, resource, "manage")).toBe(true);
+    expect(await allow(p, { ...resource, tenantId: T2 }, "manage")).toBe(false);
+  });
+
+  it("report_period.view: PERMISSION ARM ALONE (roles: []) allows the combined company_admin/hr_people_reader/manager/member tier; no cross-tenant leak; no sibling-action bleed into .seal/.amend/.pin", async () => {
+    const resource: Resource = { kind: "report_period", id: "x1", tenantId: T1 };
+    const p = principal([], [{ key: "reports.period.view", scopeType: "company", scopeId: T1 }]);
+    expect(await allow(p, resource, "view")).toBe(true);
+    expect(await allow(p, { ...resource, tenantId: T2 }, "view")).toBe(false);
+    expect(await allow(p, resource, "seal")).toBe(false);
+    expect(await allow(p, resource, "amend")).toBe(false);
+    expect(await allow(p, resource, "pin")).toBe(false);
+  });
+
+  it("report_period.seal/amend/pin: PERMISSION ARM ALONE (roles: []) each allows the company_admin-only tier independently; group_executive's own rule remains untouched", async () => {
+    const resource: Resource = { kind: "report_period", id: "x1", tenantId: T1 };
+    for (const action of ["seal", "amend", "pin"]) {
+      const p = principal([], [{ key: `reports.period.${action}`, scopeType: "company", scopeId: T1 }]);
+      expect(await allow(p, resource, action), `report_period.${action} via permission alone`).toBe(true);
+    }
+    const groupExec = principal([{ role: "group_executive", scopeType: "global", scopeId: null }], [], []);
+    expect(await allow(groupExec, resource, "seal")).toBe(true); // via the untouched role-arm rule
+  });
+
+  it("task.update: PERMISSION ARM ALONE (roles: []) allows; no cross-tenant leak; no sibling-action bleed into .read/.create/.delete", async () => {
+    const resource: Resource = { kind: "task", id: "x1", tenantId: T1 };
+    const p = principal([], [{ key: "core.task.update", scopeType: "company", scopeId: T1 }]);
+    expect(await allow(p, resource, "update")).toBe(true);
+    expect(await allow(p, { ...resource, tenantId: T2 }, "update")).toBe(false);
+    expect(await allow(p, resource, "read")).toBe(false);
+    expect(await allow(p, resource, "create")).toBe(false);
+    expect(await allow(p, resource, "delete")).toBe(false);
+  });
+
+  it("work_activity.read: PERMISSION ARM ALONE (roles: []) allows the company_admin/manager/member/viewer tier; no cross-tenant leak; no sibling-action bleed into .create", async () => {
+    const resource: Resource = { kind: "work_activity", id: "x1", tenantId: T1 };
+    const p = principal([], [{ key: "core.work_activity.read", scopeType: "company", scopeId: T1 }]);
+    expect(await allow(p, resource, "read")).toBe(true);
+    expect(await allow(p, { ...resource, tenantId: T2 }, "read")).toBe(false);
+    expect(await allow(p, resource, "create")).toBe(false);
+  });
+
+  it("work_activity.create: PERMISSION ARM ALONE (roles: []) allows the company_admin-only tier; group_executive's own read-only rule remains untouched (it never held create anyway)", async () => {
+    const resource: Resource = { kind: "work_activity", id: "x1", tenantId: T1 };
+    const p = principal([], [{ key: "core.work_activity.create", scopeType: "company", scopeId: T1 }]);
+    expect(await allow(p, resource, "create")).toBe(true);
+    expect(await allow(p, { ...resource, tenantId: T2 }, "create")).toBe(false);
+    const groupExec = principal([{ role: "group_executive", scopeType: "global", scopeId: null }], [], []);
+    expect(await allow(groupExec, resource, "create")).toBe(false); // group_executive never held `create` on this kind, role arm or otherwise
+  });
+
+  it("PERMISSION ARM: low assurance still gets nothing across a sample of the batch (D4 ceiling honored, not bypassed)", async () => {
+    const p = principal([], [{ key: "core.task.read", scopeType: "company", scopeId: T1 }], [T1], "low");
+    expect(await allow(p, { kind: "task", id: "x1", tenantId: T1 }, "read")).toBe(false);
+  });
+
+  it("PERMISSION ARM: a global-scope grant covers every tenant the principal is authorized for, on a sample of the batch", async () => {
+    const p = principal([], [{ key: "core.task.read", scopeType: "global", scopeId: null }], [T1, T2]);
+    expect(await allow(p, { kind: "task", id: "x1", tenantId: T1 }, "read")).toBe(true);
+    expect(await allow(p, { kind: "task", id: "x1", tenantId: T2 }, "read")).toBe(true);
+  });
+
+  it("ROLE ARM UNCHANGED: a sample of the batch's plain role-arm decisions match pre-existing behavior (empty perms) — proves the additions are additive, not replacements", async () => {
+    const manager = principal([{ role: "manager", scopeType: "company", scopeId: T1 }], []);
+    expect(await allow(manager, { kind: "task", id: "x1", tenantId: T1 }, "update")).toBe(true);
+    const viewer = principal([{ role: "viewer", scopeType: "company", scopeId: T1 }], []);
+    expect(await allow(viewer, { kind: "task", id: "x1", tenantId: T1 }, "update")).toBe(false);
+    expect(await allow(viewer, { kind: "task", id: "x1", tenantId: T1 }, "read")).toBe(true);
+  });
+
+  it("BOTH ARMS TOGETHER still yield exactly one decision, not a conflicting pair (role grants read via viewer, permission independently grants update — neither denies the other)", async () => {
+    const p = principal(
+      [{ role: "viewer", scopeType: "company", scopeId: T1 }],
+      [{ key: "core.task.update", scopeType: "company", scopeId: T1 }],
+    );
+    expect(await allow(p, { kind: "task", id: "x1", tenantId: T1 }, "read")).toBe(true); // via role arm (viewer)
+    expect(await allow(p, { kind: "task", id: "x1", tenantId: T1 }, "update")).toBe(true); // via permission arm (viewer alone couldn't update)
+    expect(await allow(p, { kind: "task", id: "x1", tenantId: T1 }, "delete")).toBe(false); // neither arm grants this
+  });
+});

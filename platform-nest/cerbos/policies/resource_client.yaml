@@ -21,3 +21,24 @@ resourcePolicy:
       effect: EFFECT_ALLOW
       derivedRoles: ["member"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    # ══════════ IAM-04-ROLLOUT-B4 — permission-matching arm. PURELY ADDITIVE: every rule above ═══
+    # is byte-for-byte unchanged. One rule per action; the combined company_admin+manager+member
+    # reach on create/update/delete is safe to fold into a single generic mirror per action (both
+    # role-arm rules above use the IDENTICAL inTenant&&notLow condition, no resource-instance
+    # carve-out anywhere in this file). No exclusion needed anywhere (zero team_lead mixing).
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_client_read"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    - actions: ["create"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_client_create"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    - actions: ["update"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_client_update"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    - actions: ["delete"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_client_delete"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }

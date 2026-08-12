@@ -28,3 +28,29 @@ resourcePolicy:
       effect: EFFECT_ALLOW
       derivedRoles: ["company_admin"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    # ══════════ IAM-04-ROLLOUT-B4 — permission-matching arm. PURELY ADDITIVE: every rule above ═══
+    # is byte-for-byte unchanged. No exclusion needed (zero team_lead mixing on this kind).
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_meeting_recording_read"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    - actions: ["create"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_meeting_recording_create"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    - actions: ["update"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_meeting_recording_update"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    - actions: ["ingest"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_meeting_recording_ingest"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    - actions: ["sync_drive"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_meeting_recording_sync_drive"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    - actions: ["relink"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_meeting_recording_relink"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }

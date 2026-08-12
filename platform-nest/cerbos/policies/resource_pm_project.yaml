@@ -18,3 +18,14 @@ resourcePolicy:
       effect: EFFECT_ALLOW
       derivedRoles: ["company_admin", "manager"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    # ══════════ IAM-04-ROLLOUT-B4 — permission-matching arm. PURELY ADDITIVE: every rule above ═══
+    # is byte-for-byte unchanged. Wildcard platform_admin+group_executive rule DELIBERATELY not
+    # mirrored (IAM-04c). No exclusion needed on the mirrored actions (zero team_lead mixing).
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_pm_project_read"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    - actions: ["manage"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_pm_project_manage"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }

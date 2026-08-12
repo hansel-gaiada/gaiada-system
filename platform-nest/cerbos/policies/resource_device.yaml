@@ -19,3 +19,24 @@ resourcePolicy:
       effect: EFFECT_ALLOW
       derivedRoles: ["company_admin", "it_staff"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    # ══════════ IAM-04-ROLLOUT-B4 — permission-matching arm. PURELY ADDITIVE: every rule above ═══
+    # is byte-for-byte unchanged. Wildcard platform_admin+group_executive rule DELIBERATELY not
+    # mirrored (IAM-04c). it_staff's own derived role is a plain global-or-company grants check
+    # (SAFE, re-verified structurally this ticket) so folding its create/update/delete reach into
+    # the SAME generic mirror as company_admin's is safe. No exclusion needed anywhere.
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_device_read"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    - actions: ["create"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_device_create"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    - actions: ["update"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_device_update"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    - actions: ["delete"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_device_delete"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }

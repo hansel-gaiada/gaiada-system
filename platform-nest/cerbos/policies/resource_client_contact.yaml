@@ -40,3 +40,26 @@ resourcePolicy:
       effect: EFFECT_ALLOW
       derivedRoles: ["group_executive"]
       condition: { match: { expr: "variables.notLow" } }
+
+    # ══════════ IAM-04-ROLLOUT-B4 — permission-matching arm. PURELY ADDITIVE: every rule above ═══
+    # is byte-for-byte unchanged. group_executive's own notLow-only rule above is DELIBERATELY not
+    # mirrored (IAM-04c/TRAP-4: the exec tier never enters the permission catalog via this file's
+    # own already-correct split). Only company_admin/manager's create/update/revoke reach and
+    # company_admin/manager/member/viewer's read reach are mirrored — no exclusion needed (zero
+    # team_lead mixing anywhere on this kind, per HIER-3's own header note above).
+    - actions: ["create"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_client_contact_create"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    - actions: ["update"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_client_contact_update"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    - actions: ["revoke"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_client_contact_revoke"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_client_contact_read"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }

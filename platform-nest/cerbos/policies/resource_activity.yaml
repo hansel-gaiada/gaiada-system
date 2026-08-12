@@ -13,3 +13,10 @@ resourcePolicy:
       effect: EFFECT_ALLOW
       derivedRoles: ["company_admin", "manager", "member", "viewer"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    # ══════════ IAM-04-ROLLOUT-B4 — permission-matching arm. PURELY ADDITIVE: the rule above ══════
+    # is byte-for-byte unchanged. Generic global-or-company mirror, no exclusion needed (zero
+    # team_lead/client/group_executive mixing anywhere on this kind).
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_activity_read"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }

@@ -22,3 +22,18 @@ resourcePolicy:
       effect: EFFECT_ALLOW
       derivedRoles: ["module_staff"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+
+    # ══════════ IAM-04-ROLLOUT-B4 — permission-matching arm. PURELY ADDITIVE: both rules above ═══
+    # are byte-for-byte unchanged. Only company_admin/manager/member/viewer's plain-directory reach
+    # is mirrored. module_staff's rule above is DELIBERATELY NOT mirrored: its `resource.attr.module`
+    # is resolved from a caller-supplied query parameter (core.controller.ts:294, `module: moduleQ
+    # || undefined`) — the identical shape resource_service_assignment.yaml's own IAM-04-ROLLOUT-B12
+    # header already declined to mirror for the same reason (a flat `perms` array has no per-request
+    # module argument to re-check, so a generic mirror would let e.g. hr_staff's bundled
+    # core.member.read reach a search/webdev-module directory call too — a real over-grant, not
+    # merely a theoretical one). No exclusion clause is invented here; the permission arm simply
+    # does not cover this action's module tier yet, same disposition as service_assignment.read.
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_member_read"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
