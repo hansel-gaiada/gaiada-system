@@ -122,8 +122,12 @@ describe("IAM-04c-1 · the 215-boundary pin (static, unfiltered re-derivation)",
   const policies = parsePolicies();
   const universes = kindActionUniverse();
 
-  it("sanity: the catalog + policy files cover the same 60 kinds this test iterates (HIER-3, 2026-08-11: team kind retired, 61 -> 60)", () => {
-    expect(universes.size).toBe(60);
+  // SMM-30, 2026-08-12: 60 -> 68. The social-media module added 8 resource kinds. None of them is
+  // exempt (the 4 relationship kinds are unchanged — social adds no relationship-class permission),
+  // which is why the non-exempt count below moves by the same 8. Prior movement: HIER-3, 2026-08-11
+  // — the team kind retired (61 -> 60).
+  it("sanity: the catalog + policy files cover the same 68 kinds this test iterates (SMM-30, 2026-08-12: 8 social kinds added, 60 -> 68)", () => {
+    expect(universes.size).toBe(68);
     for (const kind of universes.keys()) {
       expect(policies.has(kind), `catalog names kind "${kind}" but no resource_*.yaml defines it`).toBe(true);
     }
@@ -151,8 +155,8 @@ describe("IAM-04c-1 · the 215-boundary pin (static, unfiltered re-derivation)",
 
   const nonExemptKinds = [...universes.keys()].filter((k) => !(EXEMPT_KINDS as readonly string[]).includes(k));
 
-  it("sanity: 56 non-exempt kinds remain (60 - 4) — HIER-3, 2026-08-11: team kind retired, 57 -> 56", () => {
-    expect(nonExemptKinds.length).toBe(56);
+  it("sanity: 64 non-exempt kinds remain (68 - 4) — SMM-30, 2026-08-12: 8 social kinds added, 56 -> 64; the 4 exempt relationship kinds are UNCHANGED", () => {
+    expect(nonExemptKinds.length).toBe(64);
   });
 
   it.each(nonExemptKinds)("kind \"%s\": platform_admin reach == the kind's full action universe", (kind) => {
