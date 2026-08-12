@@ -1708,3 +1708,147 @@ derivedRoles:
             request.principal.attr.perms.exists(g, g.key == "core.work_activity.read" && (
               g.scopeType == "global" ||
               (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+
+    # =============== IAM-04-B4 -- the 5 group_executive-TRAP4-repaired kinds ====================
+    # (automation_approval, pipeline_gate, pipeline_run, pipeline_stage, scope_signoff). Gated on
+    # IAM-TRAP4 (docs/superpowers/plans/2026-08-12-iam-trap4-report.md), which split each kind's
+    # `group_executive` role-arm rule OUT of the `inTenant && notLow`-conditioned rule it used to
+    # share with company_admin/manager, into its OWN `variables.notLow`-only rule (no `inTenant`) --
+    # matching resource_appraisal.yaml's already-correct shape. This block mirrors ONLY the
+    # company_admin/manager/member reach on each action -- the SAME `inTenant && notLow` condition
+    # every prior batch's generic mirror uses. `group_executive`'s own notLow-only rule is
+    # DELIBERATELY NOT mirrored here (IAM-04c: the cross-company owner tier never enters the
+    # permission catalog, same as every other kind's group_executive-only rule -- see
+    # resource_org_structure.yaml/resource_report_period.yaml's identical carve-out). Mirroring it
+    # would require a SEPARATE notLow-only perm_* rule with no `inTenant` clause, which this ticket's
+    # own brief explicitly warned against building by default: a permission holder is normally
+    # company-scoped, and a notLow-only mirror would hand a company-scoped holder cross-tenant reach
+    # the role arm never gave them. See docs/superpowers/plans/2026-08-12-iam-04-b4-report.md for
+    # the full per-kind account, including automation_approval's `module_manager` (hr-scoped) rule --
+    # a DIFFERENT hazard mechanism (top-level-attr-gate, not the TRAP4 shape) that this ticket did
+    # NOT mirror, out of its own remit.
+    # perm_automation_approval_* — IAM-04-B4
+    - name: perm_automation_approval_create
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "core.automation_approval.create" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_automation_approval_read
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "core.automation_approval.read" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_automation_approval_decide
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "core.automation_approval.decide" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_automation_approval_retry
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "core.automation_approval.retry" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    # perm_pipeline_gate_* — IAM-04-B4
+    - name: perm_pipeline_gate_create
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "core.pipeline_gate.create" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_pipeline_gate_read
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "core.pipeline_gate.read" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_pipeline_gate_decide
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "core.pipeline_gate.decide" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    # perm_pipeline_run_* — IAM-04-B4
+    - name: perm_pipeline_run_create
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "core.pipeline_run.create" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_pipeline_run_update
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "core.pipeline_run.update" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_pipeline_run_read
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "core.pipeline_run.read" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    # perm_pipeline_stage_* — IAM-04-B4
+    - name: perm_pipeline_stage_create
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "core.pipeline_stage.create" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_pipeline_stage_update
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "core.pipeline_stage.update" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_pipeline_stage_read
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "core.pipeline_stage.read" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    # perm_scope_signoff_* — IAM-04-B4
+    - name: perm_scope_signoff_create
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "core.scope_signoff.create" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_scope_signoff_read
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "core.scope_signoff.read" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))

@@ -226,6 +226,42 @@ Full detail, evidence, and file-level citations are in
 
 ---
 
+## UPDATE (IAM-04-B4, 2026-08-12) — Batch 4 (§R.7) landed: the 5 group_executive/TRAP4 kinds
+
+**Status:** PROTOTYPED / DEV-VERIFIED (policy-side only; not deployed to the live estate). Gated on
+IAM-TRAP4 (merged `1214eb3`), which split each kind's `group_executive` rule out of the
+`inTenant && notLow` rule it shared with `company_admin`/`manager` into its own `notLow`-only rule.
+This ticket wires the `perm_*` mirror onto `automation_approval`, `pipeline_gate`, `pipeline_run`,
+`pipeline_stage`, `scope_signoff` — closing §R.7's Batch 4, the last row of the re-derived rollout
+order. Full account: `docs/superpowers/plans/2026-08-12-iam-04-b4-report.md`.
+
+**What was mirrored:** ONLY the `company_admin`/`manager`/`member` `inTenant && notLow` reach on each
+action (14 `perm_*` derived roles total across the 5 kinds). `group_executive`'s own `notLow`-only
+rule (the thing TRAP4 just fixed) was **deliberately NOT mirrored** — a company-scoped permission
+holder mirroring a `notLow`-only, no-`inTenant` condition would gain cross-tenant reach the role arm
+never gave them, the exact hazard direction this ticket's own brief warned about. `module_manager`'s
+hr-scoped rule on `automation_approval` (`read`/`decide`) was also not mirrored — a different hazard
+mechanism (top-level-attr-gate) out of this ticket's remit.
+
+**Live-probed** against a freshly-restarted `gaiada-test-cerbos`: company-scoped perm-holder ALLOWed
+in their own tenant, DENIED against a different tenant (isolation intact — no cross-tenant leak from
+the new mirror), global `group_executive`/`companies:[]` still ALLOWed on read/decide/update via the
+role arm alone (TRAP4 not regressed by this change), low-assurance perm-holder DENIED everywhere
+(`notLow` gate holds regardless of held permission keys). `npm run gen:role-bundles`:
+byte-identical, 22 roles / 1023 pairs before and after (expected — the generator bundles role NAMES,
+not `perm_*` shim roles).
+
+**Register update (§R.7):** Batch 1 (new-SAFE, 17 kinds) landed separately as `IAM-04-ROLLOUT-B4`
+(concurrent with, not part of, this ticket — visible in `derived_roles.yaml`'s own
+"IAM-04-ROLLOUT-B4" comment block, distinct naming collision with this ticket's "IAM-04-B4" worth
+flagging for whoever reads both). Batch 2 (the role-arm fix) landed as IAM-TRAP4. **Batch 4 (this
+ticket) is now landed.** Batch 3 — `integration_connection`, `project`, `report_document`,
+`time_entry`, `appraisal` (selective self-scoped mirroring, dual-mitigation kinds) — remains
+**NOT STARTED**; it has no dependency on this ticket and can proceed independently. `portal` stays
+excluded by its own owner-ruling block, unrelated to any batch here.
+
+---
+
 ## Appendix A — the original 2026-08-10 scan (historical; preserved verbatim below for the delta evidence)
 
 ## 0. Headline numbers (ORIGINAL, 2026-08-10 — superseded by the RE-BASELINE above; kept for the BEFORE/AFTER delta)

@@ -64,3 +64,26 @@ resourcePolicy:
           expr: >-
             variables.inTenant && variables.notLow &&
             request.resource.attr.module == "hr"
+
+    # ══════════ IAM-04-B4 — permission-matching arm. PURELY ADDITIVE: every rule above is byte-
+    # for-byte unchanged. Mirrors ONLY the company_admin/manager/member `inTenant && notLow` reach
+    # above. `group_executive`'s own `variables.notLow`-only rule (IAM-TRAP4) is DELIBERATELY not
+    # mirrored (IAM-04c: the cross-company owner tier never enters the permission catalog).
+    # `module_manager`'s hr-scoped rule is ALSO deliberately not mirrored — a different hazard
+    # mechanism (top-level-attr-gate) out of this ticket's remit; see the B4 report.
+    - actions: ["create"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_automation_approval_create"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_automation_approval_read"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    - actions: ["decide"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_automation_approval_decide"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    - actions: ["retry"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_automation_approval_retry"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }

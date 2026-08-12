@@ -42,3 +42,17 @@ resourcePolicy:
       effect: EFFECT_ALLOW
       derivedRoles: ["group_executive"]
       condition: { match: { expr: "variables.notLow" } }
+
+    # ══════════ IAM-04-B4 — permission-matching arm. PURELY ADDITIVE: every rule above is byte-
+    # for-byte unchanged. Mirrors ONLY the company_admin/manager `inTenant && notLow` reach above
+    # (this kind never grants `member`, on purpose — see the header note on the dual-sign design).
+    # `group_executive`'s own `variables.notLow`-only rules (IAM-TRAP4) are DELIBERATELY not
+    # mirrored (IAM-04c: the cross-company owner tier never enters the permission catalog).
+    - actions: ["create"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_scope_signoff_create"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_scope_signoff_read"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
