@@ -482,6 +482,62 @@ requirement.** The design's most conservative choice is the one that aged best.
 sequence is Instagram/Facebook and LinkedIn, own accounts first, with 8–12 weeks of review running in
 parallel — which is exactly why OQ-1 was worth starting before the build needed it.
 
+## §A4i · The dossier's contradictions register — and one that may force a product change
+
+Full detail in [`smm-app-review-dossier.md`](./smm-app-review-dossier.md) (§7 lists 19). The ones
+that change what we build:
+
+### ⚠ OPEN QUESTION (OQ-8, NEW): TikTok's consent timing may be incompatible with approve-then-queue
+
+TikTok's Content Sharing Guidelines require the creator to be shown a preview, to choose
+`privacy_level` from a **live** `creator_info` fetch with no default, to set the interaction toggles
+explicitly, and to **expressly consent immediately before the upload starts**.
+
+Our spine (D-6) approves at time T and publishes unattended at T+hours. If "immediately before"
+is read strictly, **scheduled TikTok posting is not approvable at all** — and this is a product
+question, not an implementation detail:
+
+- **(a)** TikTok becomes approve-and-publish-now only: no scheduling on that network, the operator
+  clicks publish at the moment it goes out.
+- **(b)** We treat the composer's preview + explicit selections as the consent, re-fetch
+  `creator_info` at dispatch, and refuse if anything the creator chose has since changed. Defensible,
+  and closer to what our `args_sha256` hash already enforces — but it is an interpretation, and the
+  auditor's reading is the one that counts.
+- **(c)** TikTok stays inbox-mode (`video.upload` → the creator finishes in the TikTok app), which
+  our validator already warns about and which sidesteps the audit entirely.
+
+**UNVERIFIED and not ours to guess.** The dossier marks it so, and the SMM-04 spike has been asked
+whether Postiz can even carry the required fields. Escalated as **OQ-8** — an owner decision once the
+spike reports, because it decides whether "schedule a week of TikTok content" is a feature we can
+honestly sell.
+
+### The rest, in order of how much they cost if missed
+
+- **`{"youtubeUnitsToday":1600}` in 0105's comment is actively misleading.** YouTube's model is now
+  three buckets (100 `search.list`/day, 100 `videos.insert`/day, 10,000 units for the rest, uploads
+  costing 1 unit). A quota reading built on that example would report headroom while uploads are
+  already blocked. Folded into **SMM-37**.
+- **TikTok gives the inbox NOTHING.** No comment scope exists on the developer platform — only
+  `allow_comment` at post time. `social_accounts.capabilities.comments` must be false for TikTok, and
+  P2's inbox covers four networks at most.
+- **LinkedIn comment reading needs the `*_social_feed` scopes**, not `r_organization_social`. A
+  submission with the wrong strings is approved and then **fails at runtime** — the worst failure
+  shape, since it passes review and breaks in front of a client.
+- **Facebook Pages schedule natively but only 10 minutes to 30 days out.** Our calendar has no such
+  bound, so D-12 ("never let the network do the rejecting") is currently unsatisfied for FB.
+  Validator work, folded into **SMM-37**.
+- **`access_tier` is fleet-wide, not a LinkedIn quirk**, and `review_status='approved'` means little
+  without it — a `social_platform_apps` row can be "approved" and still unable to do the thing.
+- **A LinkedIn rejection burns the app registration** (new `client_id`, guaranteed OpenBao rotation).
+  First submission has to be right.
+
+### Doc-hygiene note for whoever reads the dossier next
+
+The dossier says "§A4d doesn't exist". It did not, in that agent's worktree — the branch was cut
+before §A4d–§A4h were written. Nothing to fix; the sections exist here on `main`. It is a worked
+example of the shared-checkout hazard reappearing in worktree form: isolation stops agents
+overwriting each other, but it does not stop them reading a stale copy of the world.
+
 ## §A5 · Sequencing note — what to do first
 
 1. **SMM-30 + SMM-01 together** (they are one schema conversation: tables, then the permission rows
