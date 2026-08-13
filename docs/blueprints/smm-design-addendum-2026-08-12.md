@@ -895,7 +895,7 @@ four were run read-only against the VPS. **Two came back clean; two produced wor
 | 1 | `wireguard.ko` present | ✅ `/lib/modules/6.8.0-101-generic/.../wireguard.ko.zst` — kernel side ready |
 | 1b | `wg` / `wg-quick` userspace tools | ❌ **NOT installed** — `wireguard-tools` is a prerequisite, not an assumption |
 | 2 | VPS underlay MTU | `eth0` = **1500** — the VPS is NOT the binding constraint |
-| 3 | Firewall | `ufw` **active**, allowing 22/tcp + 80/tcp only. `DOCKER-USER` chain exists but is **EMPTY** |
+| 3 | Firewall | `ufw` **active**; `DOCKER-USER` chain exists but is **EMPTY**. (See the correction below — the port list I first reported was truncated.) |
 | 4 | Container baseline | **19 running / 20 total** — matches the pre-prune baseline exactly |
 
 **Two of these change the plan.**
@@ -918,8 +918,18 @@ ends up not applying at all.
 restating because it is invisible: small requests all succeed and the link looks healthy, while media
 upload — the only megabyte traffic on this hop — black-holes.
 
-**Still needed before deploy:** a `ufw allow` for UDP/51820 scoped to `35.240.135.48`, since `ufw` is
-active and currently permits only 22 and 80.
+**DONE (2026-08-13):** `wireguard-tools` v1.0.20210914 installed (`/usr/bin/wg`, `/usr/bin/wg-quick`)
+and `ufw allow from 35.240.135.48 to any port 51820 proto udp` added, commented for provenance.
+Verified additive: apt reported "No containers need to be restarted", and the container count was 19
+before and 19 after.
+
+**⚠ CORRECTION to row 3 (2026-08-13).** I reported `ufw` as "active, allowing 22/tcp and 80/tcp
+only". That was an artefact of reading a `head -6` truncation as the whole list. The actual ruleset
+also opens **443/tcp, 9090/tcp, 3010/tcp and 3001/tcp to Anywhere**. This changes nothing about our
+design — Postiz still publishes no port and rides the tunnel — but it is worth stating plainly for
+two reasons: a truncated command output was mistaken for a fact, and **9090 is conventionally
+Prometheus, which ships with no authentication**. Those ports belong to the owner's own private
+production and are the owner's call, not this programme's; flagged rather than touched.
 
 ## §A5 · Sequencing note — what to do first
 
