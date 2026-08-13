@@ -212,6 +212,76 @@ pairs, **162 added, 0 removed**. No existing user's access changed.
 
 ---
 
+## §A4c · SMM-04 pre-spike finding (2026-08-12) — the footprint is 3x what this document assumed
+
+Verified against upstream before mobilising the spike, because it is cheap to check and it moves a
+decision. **Two of three premises hold; one is wrong in a way that matters.**
+
+**Holds — the containment premise is intact.** `gitroomhq/postiz-app` is still **AGPL-3.0** with no
+licence change, no open-core split and no commercial-edition notice; self-hosting is explicitly
+supported ("no difference between the hosted version and the self-hosted version"); the public REST
+API exists and is positioned for exactly our use (n8n/Make/Zapier automation, plus a Node SDK);
+~34.6k stars; the network list still covers our core five. Nothing here invalidates the
+architecture, and the Mixpost fallback stays unmobilised.
+
+**Wrong — "app + own Postgres + own Redis" (§A2 D-20, §A4 SMM-04).** The published compose stack is
+**nine services**, not three:
+
+| Service | Image | Verdict for our deploy |
+|---|---|---|
+| `postiz` | `ghcr.io/gitroomhq/postiz-app` | required |
+| `postiz-postgres` | `postgres:17-alpine` | required |
+| `postiz-redis` | `redis:7.2` | required |
+| `temporal` | `temporalio/auto-setup:1.28.1` | required — the queue engine the publisher runs on |
+| `temporal-postgresql` | `postgres:16` | required by Temporal — a **second** Postgres, on a different major |
+| `temporal-elasticsearch` | `elasticsearch:7.17.27` | **probably droppable** — Temporal has supported Postgres-backed advanced visibility since 1.20, so this is worth an explicit spike question rather than an assumption |
+| `spotlight` | `getsentry/spotlight` | drop — a dev-time error viewer |
+| `temporal-admin-tools` | `temporalio/admin-tools` | drop — a CLI toolbox, not a runtime dependency |
+| `temporal-ui` | `temporalio/ui:2.34.0` | drop — and our doctrine forbids exposing it anyway |
+
+Plus **6 named volumes** and **2 networks**.
+
+**Why this matters more than a count.** The live box already runs 13 containers, this program has
+already had one deploy fill the disk and roll back, and the realistic floor here is **5–6 new
+containers** (app, its Postgres, its Redis, Temporal, Temporal's Postgres, and Elasticsearch unless
+the spike proves it droppable) — including a second Postgres major version and, worst case, a JVM.
+The upstream doc's "tested on 2 GB RAM / 2 vCPU" claim is hard to reconcile with that set and should
+be treated as untested marketing until measured.
+
+**Consequences, folded into SMM-04 rather than left as a surprise:**
+1. The ticket's first output is a **measured** footprint (RAM/disk at idle and under a publish), not
+   a container count. It gates on real numbers from the live box.
+2. **Trimming the stack to the required set is packaging** — category (a) of the fork-touchpoint
+   budget (§06), so it stays inside the thin-fork line. Dropping Elasticsearch by reconfiguring
+   Temporal's visibility store is also config, not a fork.
+3. **OQ-7 is upgraded from "is there disk headroom?" to a decision:** does this stack belong on the
+   `gda-aicenter` box beside the ERP at all, or on its own host? That is now an owner question with
+   a cost attached, and it is better asked before the spike than after it.
+4. The **Mixpost fallback's tripwire list gains a line**: "the engine's own infrastructure footprint
+   is not affordable on the target host" is a legitimate reason to swap drivers, independent of the
+   licence question §06 was written around.
+
+## §A4d · Owner decisions, 2026-08-13 — the open questions are closed
+
+| # | Question | DECISION | Consequence |
+|---|---|---|---|
+| **OQ-7** | Where the Postiz stack lives | **Same box (`gda-aicenter`), behind its own compose profile.** | SMM-04 is UNBLOCKED and its remit tightens: the stack must be **trimmed to the required set before it is deployed**, not after. Drop `spotlight`, `temporal-admin-tools` and `temporal-ui` outright; attempt Postgres-backed Temporal visibility to drop `temporal-elasticsearch` too, taking the footprint from 9 services to 5 (app, its Postgres, its Redis, Temporal, Temporal's Postgres). The ticket reports **measured** RAM/disk at idle and under a publish, and a disk-headroom check against the live box, BEFORE anything is deployed there. The owner took this decision with the risk stated: a box already running 13 containers, in a programme that has had a deploy fill the disk and roll back. The profile is what keeps `--remove-orphans` from eating it. |
+| **OQ-1** | Platform-app reviews | **Submit all four now** — Meta (Instagram + Facebook), LinkedIn, TikTok, YouTube. | Non-code, starts immediately and in parallel with everything else; it is wall-clock, not effort. TikTok's is the most restrictive and may need business verification, so it is the one to start first within the four. Gates **client** account connects only — own-brand accounts ride sandbox/dev tiers and P1 does not wait. |
+| **OQ-3** | AGPL counsel sign-off | **Own accounts proceed; client connects wait for sign-off.** | Zero delay to engineering. The containment memo (§06's five invariants + the fork-touchpoint budget + source-offer mechanics) goes to counsel in parallel; no client account is connected until it returns. |
+| **OQ-2** | Enable X publishing | **Settled — ships disabled** in every scope. | D-14 depends on it: a $0 publish path is what keeps `social.publishPost` eligible for the D14 executable-approval registry. |
+| **OQ-5** | Video/media storage | **Settled — `files` + Drive mirror**, as SMM-08 shipped. | No further decision. |
+| **OQ-4** | DM coverage | Deferred to SMM-04's measurement of Postiz's DM surface. | Answerable with evidence rather than in advance. |
+| **OQ-6** | Video service line | Parked. | SMM-29 stays decision-gated. |
+
+**Delivery mode, same decision point:** work parallelises across **3–4 agents in ISOLATED GIT
+WORKTREES**. Not the shared checkout — that configuration has already produced a red release (a
+release commit cut without two files its own ticket needed) and three cancelled CI runs in a single
+day, and both failures were silent until something downstream broke. Worktrees keep HEAD still
+under each agent and make it impossible for one ticket to sweep another's half-landed work into a
+commit.
+
+---
+
 ## §A5 · Sequencing note — what to do first
 
 1. **SMM-30 + SMM-01 together** (they are one schema conversation: tables, then the permission rows
