@@ -352,6 +352,72 @@ Facebook and TikTok, and SMM-04's Postiz measurement answers those.
   first submission has to be right, which is the strongest argument for the dossier this research
   is producing.
 
+## §A4f · OQ-1 research, second return (Meta) — a number we have carried since day one is wrong
+
+### 1. ⚠ The "IG ~25 posts/24h" figure in the design is OBSOLETE
+
+Meta's current Content Publishing doc says **100** API-published posts per 24-hour moving period —
+and, on the *same page*, **50** in its carousel section. Meta's own documentation contradicts itself,
+and **25 appears nowhere in it**: that was the legacy Instagram Business API figure, and the SMM
+design (§04/§08/D-12) and 0105's illustrative comment have carried it since 2026-07-23.
+
+**We are not affected in code — by luck of design rather than foresight.** `media-rules.ts` reads the
+cap from the account's live quota snapshot (`q.cap`) and hardcodes nothing; the `25`s live only in
+comments, examples and docs. Two things follow:
+
+- The registry sync (SMM-05) must populate `social_accounts.quota` from
+  **`GET /<IG_ID>/content_publishing_limit`**, per-account and live — never from a constant. That
+  also sidesteps the 50-vs-100 ambiguity entirely, because we ask the account what its own limit is.
+- The design's `25` references mean "whatever the live endpoint reports". Anyone tempted to
+  re-introduce a literal should read this section first.
+
+This is why `checkQuota()` treats an absent counter as `quota_unknown` (a warning) rather than as
+zero-used: the shipped behaviour was right, for a reason now vindicated twice.
+
+### 2. ⚠ A real gap in shipped code: we validate media COUNT and KIND, never FORMAT
+
+Instagram accepts **JPEG only** for image posts; PNG and WebP fail at the API. `media-rules.ts`
+checks counts, kinds, mixing and alt text — but never the file format, so a PNG passes our validator
+and dies at the network. That is precisely the failure D-12 exists to prevent ("we never let a human
+queue what the API will reject").
+
+Tracked as **SMM-37** (new, small): per-network accepted media formats in the validation engine, with
+the transcode-or-refuse decision made explicitly. Deferred rather than patched in-flight because an
+agent currently holds `src/modules/social/` in a worktree and a same-file edit would collide.
+
+### 3. Constraints the publisher chain must be designed around (SMM-05/09/10)
+
+- **Instagram containers expire after 24 hours.** A container cannot be pre-built days ahead: it must
+  be created within 24h of the publish moment, then polled to `FINISHED` before publishing. Whether
+  Postiz does this correctly is now a **specific question for SMM-04's spike**, not an assumption —
+  it decides whether a week-ahead calendar is even possible on Instagram.
+- **Instagram has no native API scheduling; Facebook Pages do** (`scheduled_publish_time`, 10 minutes
+  to 30 days). The two networks need genuinely different scheduling paths, and for Instagram our
+  queue's availability IS publishing reliability — the same conclusion LinkedIn's research reached,
+  from a second direction.
+- **BUC rate limits are ENGAGEMENT-DENOMINATED** (`4800 × impressions` for Instagram, `4800 × engaged
+  users` for Pages). A brand-new client Page has a near-zero quota, so throttling bites hardest on
+  exactly the small new accounts an agency onboards. Back off per-business off
+  `X-Business-Use-Case-Usage`, never globally.
+- **Carousels crop every image to the FIRST image's aspect ratio**, max 10 — worth a composer warning.
+- **Stories are business-account only**; Creator accounts may not qualify. Verify per account before
+  promising story scheduling.
+- `ads_management`/`ads_read` become **required** when the app user holds their Page role via Business
+  Manager — the normal case for agency staff. Both are heavily scrutinised at review, so the frozen
+  scope list must account for them.
+
+### 4. The review process is heavier than OQ-1 assumed
+
+Business Verification (required for Advanced Access) → App Review with a screen recording **per
+permission** → a Data Protection Assessment on a **60-day clock** whenever triggered → an **annual**
+Data Use Checkup, forever. The most-cited official rejection reason is that **reviewers could not
+access the app** — "your entire submission will be rejected" — which is the default outcome for an
+internal ERP behind SSO. **A reachable demo path with test credentials must exist BEFORE we submit**,
+and that is a build task, not paperwork.
+
+Planning figure: **8–12 weeks** from cold start to Advanced Access on the full permission set, with at
+least two review rounds. No official SLA exists for any of it.
+
 ## §A5 · Sequencing note — what to do first
 
 1. **SMM-30 + SMM-01 together** (they are one schema conversation: tables, then the permission rows
