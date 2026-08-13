@@ -242,14 +242,51 @@ const SEO: DeptToolkit = {
   ],
 };
 
-// ── SMM — DESIGNED, NOT YET BUILT (Phase B) ──────────────────────────────────
-// Reuses the Home / Work / Connections spine unchanged; only its craft group is
-// new. Do NOT add it to TOOLKITS until its craft-group pages exist (a toolkit
-// pointing at missing routes would 404). Planned craft group:
-//   SMM → "Publish": Calendar · Composer · Inbox · Analytics
-// See docs/superpowers/plans/2026-07-23-dept-console-ia-redesign.md §2 & §6.
+// ── Social Media — organic publishing (SMM-11) ───────────────────────────────
+// D-18/Δ12 (smm-design-addendum-2026-08-12.md): the department is named "Social Media" (NOT
+// "SMM" — the base design's dept name and slug `smm` were both wrong; `deptSlug("Social Media")`
+// derives `social-media`, matching `src/seed/roster.ts`'s `d-social` roster entry). Reuses the
+// Home / Work / Connections spine unchanged (Δ11); the only NEW group is the reserved craft group
+// "Publish": Calendar · Composer · Inbox · Analytics. The module key stays `social` (Cerbos roles
+// `social_staff`/`social_manager`, table prefix `social_*`) — only the department's display name
+// and console slug changed, never the module.
+//
+// Registered here ONLY because all four tab routes now exist:
+//   Calendar / Composer are REAL — backed by SMM-01/02/08 (engagements, posts, per-network
+//   variants, the media-rule/quota validation engine; see lib/social.ts for the exact BFF surface
+//   and its documented gaps — most notably no account-listing endpoint yet, SMM-05/07).
+//   Inbox / Analytics render the BackendPending shell — their backends are SMM-15 (inbox sync) and
+//   SMM-21 (metrics), both still 0.0.0. Per this file's own standing rule ("do NOT add a toolkit to
+//   TOOLKITS until its craft-group routes exist, or the toolkit points at 404s"), the ROUTES exist
+//   (so the toolkit does not 404) even though two of the four are honest stubs, not live data.
+const SOCIAL_MEDIA: DeptToolkit = {
+  slug: "social-media",
+  label: "Social Media",
+  mission: "Social media — organic publishing across every connected network, one master post at a time.",
+  groups: [
+    HOME_GROUP,
+    WORK_GROUP,
+    {
+      key: "publish",
+      label: "Publish",
+      icon: "gateway",
+      tabs: [
+        { key: "calendar", label: "Calendar", path: "calendar", icon: "clock", blurb: "Every post and its per-network variants, by scheduled date.", fullBleed: true },
+        { key: "composer", label: "Composer", path: "composer", icon: "pulse", blurb: "Draft a master post and its per-network content." },
+        { key: "inbox", label: "Inbox", path: "inbox", icon: "bell", blurb: "Comments and DMs across every connected account." },
+        { key: "analytics", label: "Analytics", path: "analytics", icon: "pulse", blurb: "Reach, engagement and delivery metrics per network." },
+      ],
+    },
+    CONNECTIONS_GROUP,
+  ],
+  launchers: [
+    { key: "claude", label: "Claude", desc: "Draft captions, hashtags, and reply copy.", url: "https://claude.ai/new", glyph: "✳" },
+    { key: "claude-design", label: "Claude Design", desc: "Generate creative mockups & artifacts.", url: "https://claude.ai/new", glyph: "◆" },
+    { key: "drive", label: "Shared Drive", desc: "Brand assets and approved creative.", url: "https://drive.google.com", glyph: "▲" },
+  ],
+};
 
-const TOOLKITS: DeptToolkit[] = [WEB_DEV, CREATIVES, SEO];
+const TOOLKITS: DeptToolkit[] = [WEB_DEV, CREATIVES, SEO, SOCIAL_MEDIA];
 
 // The generic toolkit for departments without a bespoke build-out yet. Renders
 // the exact same Home shell as a bespoke department's Home group — just without
