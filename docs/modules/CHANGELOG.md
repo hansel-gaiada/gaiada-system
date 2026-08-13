@@ -9,6 +9,25 @@ local stack). None of these mean "production-done".
 
 ---
 
+## Untagged — queued for the next app release cut
+
+Per-module changes made between cuts, recorded here so they are not lost the way `0028a`/`0030a`/
+`0031a`/`0086a`/`0087a`/`0089a` were (see the LOG GAPs below) — no tag exists yet for these, so no row
+is added to the App release log table until one is cut.
+
+- **2026-08-13 — SMM-37**, `social-media 0.4.0 -> 0.4.1` (IN PROGRESS). Three pre-publish
+  validation-engine gaps closed in `platform-nest/src/modules/social/media-rules.ts` per
+  `docs/blueprints/smm-design-addendum-2026-08-12.md` §A4f item 2 / §A4i: media FORMAT is now
+  checked (Instagram JPEG-only; refuse, do not transcode — no transcode backend exists anywhere in
+  the estate), Facebook's native 10-minute-to-30-day schedule window is now checked (Facebook only —
+  no other network in the research trail documents a bound), and `QuotaSnapshot`'s YouTube shape
+  moved from the old single 10,000-unit-pool model to the real three-bucket model (100 `search.list`
+  calls/day, 100 `videos.insert` calls/day, 10,000 units for the rest) so a reading no longer reports
+  headroom while uploads are already blocked. Full detail in `MODULES.md`'s social-media 0.4.1 entry.
+  No migration, no new route/controller (MAP.md unaffected). 104/104 tests passing
+  (`npx vitest run src/modules/social`, 36 in `media-rules.test.ts`, was 17). BFF contract §19
+  extended with `unsupported_media_format`, `media_format_unknown`, `facebook_schedule_window`.
+
 ## App release log
 
 Every cut app version and the exact module manifest it contains, so any deployed build can be

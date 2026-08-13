@@ -812,6 +812,7 @@ export class SocialController {
       firstComment: body.firstComment ?? null,
       media: (body.media ?? []) as never[],
       settings: body.settings ?? {},
+      scheduledAt: body.scheduledAt ?? null,
     };
     const validation = validateVariant(account.network, draft, account.quota);
     const argsSha256 = variantArgsSha256({
@@ -909,6 +910,7 @@ export class SocialController {
       firstComment: result.next.firstComment,
       media: (result.next.media ?? []) as never[],
       settings: result.next.settings,
+      scheduledAt: result.next.scheduledAt,
     }, account.quota);
     await withTenants(
       [tenantId],
@@ -959,8 +961,8 @@ export class SocialController {
     await authorize(req.principal, { kind: "social_post", id: variantId, tenantId, module: "social" }, "read");
     const { rows } = await withTenants(
       [tenantId],
-      (c) => c.query<{ account_id: string; body: string; first_comment: string | null; media: unknown; settings: Record<string, unknown> }>(
-        `SELECT account_id, body, first_comment, media, settings
+      (c) => c.query<{ account_id: string; body: string; first_comment: string | null; media: unknown; settings: Record<string, unknown>; scheduled_at: Date | null }>(
+        `SELECT account_id, body, first_comment, media, settings, scheduled_at
            FROM social_post_variants WHERE id = $1 AND deleted_at IS NULL`,
         [variantId],
       ),
@@ -971,6 +973,7 @@ export class SocialController {
     const shape = {
       body: rows[0].body, firstComment: rows[0].first_comment,
       media: (rows[0].media ?? []) as never[], settings: rows[0].settings ?? {},
+      scheduledAt: rows[0].scheduled_at,
     };
     // Computed FRESH rather than read from the stored column: the quota moves under us between
     // edits, so the stored verdict answers "was it valid when last written", and the caller asking

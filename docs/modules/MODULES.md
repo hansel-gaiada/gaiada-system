@@ -49,7 +49,7 @@ versions below; the running build reports it at `GET /health`.
 | webdev | `0.13.0` | IN PROGRESS | Web Dev | 2026-08-09 |
 | webdesk | `0.0.0` | PLANNED | Web Dev | 2026-07-23 |
 | search-marketing | `0.5.1` | DEV-VERIFIED | SEO | 2026-08-04 |
-| social-media | `0.4.0` | IN PROGRESS | Social Media | 2026-08-13 |
+| social-media | `0.4.1` | IN PROGRESS | Social Media | 2026-08-13 |
 | creative | `0.1.0` | PROTOTYPED | Creative | 2026-07 |
 | render-gateway-go | `0.0.0` | PLANNED | Creative | 2026-07-23 |
 | reports | `0.3.1` | PROTOTYPED | Cross-cutting | 2026-08-03 |
@@ -1229,7 +1229,49 @@ SM-23 (this reconciliation) â†’ SM-24.
 
 </details>
 
-## social-media — SMM · Organic Publishing · `0.4.0` · IN PROGRESS
+## social-media — SMM · Organic Publishing · `0.4.1` · IN PROGRESS
+
+**0.4.1 (2026-08-13, SMM-37 — three validation-engine gaps closed, DEV-VERIFIED):**
+`media-rules.ts` — the pure pre-publish engine consumed at all three call sites (composer create,
+composer edit, `GET variants/:variantId/validation`) — gains three fixes the platform-app research
+(addendum §A4f/§A4i) found against the live networks, no schema change:
+
+1. **Media FORMAT is now checked.** Instagram accepts JPEG images only; a PNG/WebP attachment now
+   refuses `unsupported_media_format` (a structural error, same class as media count/kind) instead of
+   sailing through and dying at the API. The engine REFUSES rather than transcodes — explicit choice,
+   reasoned in the file header: no transcode backend exists anywhere in the estate (the same gap D-17
+   already named for images), and silently converting bytes a human is about to approve is a worse
+   surprise than a re-attach prompt. `MediaItem.format` is composer-supplied — the same trust boundary
+   `kind` already uses, not derived from the `files` row (`files.content_type` is itself
+   client-supplied, so a DB join there buys no extra assurance). Missing format warns
+   (`media_format_unknown`), never blocks, so variants attached before this ticket keep validating.
+2. **Facebook's native schedule window is now checked** (10 minutes to 30 days from the publish call,
+   `facebook_schedule_window`). Checked ONLY for `facebook` — Instagram has no native API scheduling
+   to violate (our own queue publishes it) and no other network in the research trail documents a
+   bound. `validateVariant` takes `now` as an optional parameter (default the real clock) precisely so
+   this is deterministic in tests and so the identical call, re-run at dispatch against the real
+   dispatch moment, catches drift a submit-time check could not have seen.
+3. **`QuotaSnapshot`'s YouTube shape is fixed.** YouTube moved to three independent daily buckets on
+   2026-06-01 (100 `search.list` calls, 100 `videos.insert` calls, 10,000 units for the rest); the old
+   single-pool `{"youtubeUnitsToday":1600}` model this design carried would report headroom in the
+   10,000-unit pool while the 100-call upload bucket is already exhausted. `checkQuota` now reads
+   `youtubeQuota.videosInsertCallsToday` — the bucket that actually gates an upload — with the same
+   "unknown is not zero" doctrine `igPosts24h` already uses. **`migrations/0105_module_social.sql`
+   itself carries no such literal comment** (only `smm-design.md` §04, the frozen v1.0 base doc, and
+   the dossier's citation of it, do) — nothing there needed fixing, and it would have been
+   off-limits regardless (0105 is applied; migrations README forbids editing applied migrations).
+   The type + its doc comment are the fix; the historical doc stays as the record of why.
+
+Also carried forward, not a code change: the design's old "IG ~25 posts/24h" figure is obsolete
+(Meta's current doc says 100, self-contradicting with 50 in its own carousel section) but nothing
+here was ever wrong in code — `igPosts24h.cap` was always read live from the account's connector
+registry, never hardcoded. Comments now say so explicitly rather than repeating "25".
+
+36 media-rules tests (was 17); 104/104 passing across the module (`npx vitest run
+src/modules/social`). BFF contract §19 extended with the three new tokens. No migration, no new
+endpoint, no new route — `scheduledAt` was added to `VariantShape` (engine-internal) and threaded
+through the three EXISTING call sites in `social.controller.ts`; MAP.md is unaffected (Δ15's trigger
+is a new controller/route/migration/workflow, none of which this ticket adds).
 
 **0.4.0 (2026-08-13, SMM-19 — brand-voice RAG + AI drafting, DEV-VERIFIED):** caption/hashtag/idea
 drafting through **ai-gateway-go only** — Hermes by default, Claude only as a per-request `provider`
