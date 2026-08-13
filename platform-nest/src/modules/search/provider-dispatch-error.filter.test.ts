@@ -146,6 +146,14 @@ describe("SM-53/SM-57/SM-58/SM-25a · the filters are actually REGISTERED, not m
     // LastResortExceptionFilter's generic 500 — discarding .status, .code and the missing-env list
     // that is the entire value of the 503. Same bug class as SM-53 and SM-57: a doc comment claiming a
     // mapping is not a mapping.
+    // SMM-05 (social publisher). SEVENTH member, added DELIBERATELY here — which is, again, the whole
+    // point of the exact-set pin below, and this ticket is the case it was written for: the filter
+    // was registered in main.ts and this list was not updated, so the pin failed in CI exactly as
+    // designed. It maps `SocialPublisherError`, which extends Error rather than HttpException, so
+    // `HttpErrorFilter` (@Catch(HttpException)) never sees it. Without the mapping, a publisher
+    // outage surfaces as LastResortExceptionFilter's generic 500 instead of the 503
+    // `publisher_unreachable` an operator can act on — the same bug class as SM-53, SM-57 and W0-4.
+    "SocialPublisherErrorFilter",
     "ClientAccessErrorFilter",
   ])("%s is passed to useGlobalFilters in main.ts", (filterName) => {
     // Anchored to the call itself, not merely to the identifier appearing somewhere in the file —
@@ -186,6 +194,9 @@ describe("SM-53/SM-57/SM-58/SM-25a · the filters are actually REGISTERED, not m
       // disjoint), so appending here is safe; what matters is that LastResortExceptionFilter stays
       // FIRST, which the next test pins independently.
       "ClientAccessErrorFilter",
+      // SMM-05: SocialPublisherErrorFilter, appended last and therefore CHECKED first — safe,
+      // because @Catch(SocialPublisherError) is disjoint from every other type above.
+      "SocialPublisherErrorFilter",
     ]);
   });
 
