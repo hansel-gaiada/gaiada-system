@@ -138,7 +138,7 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 
 | Service | Image / build | Profiles | Ports | depends_on |
 |---|---|---|---|---|
-| `postiz` | ghcr.io/gitroomhq/postiz-app@sha256:785f97312f66a347fb96cdccc4ded5a33ced69a672c89a9adc8054e7d6a21dc5 | `social` | `127.0.0.1:${SOCIAL_POSTIZ_PORT:-4007}:5000` | — |
+| `postiz` | ghcr.io/gitroomhq/postiz-app@sha256:785f97312f66a347fb96cdccc4ded5a33ced69a672c89a9adc8054e7d6a21dc5 | `social` | `${SOCIAL_BIND_ADDR:-127.0.0.1}:${SOCIAL_POSTIZ_PORT:-4007}:5000` | — |
 | `social-postgres` | postgres:17-alpine | `social` | — | — |
 | `social-redis` | redis:7.2-alpine | `social` | — | — |
 | `social-temporal` | temporalio/auto-setup:1.28.1 | `social` | — | — |

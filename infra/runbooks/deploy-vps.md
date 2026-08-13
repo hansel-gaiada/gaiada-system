@@ -291,32 +291,185 @@ rollback cannot regress `/n8n/`, `/idp/`, the portal stream, or the UI root — 
 `curl -I https://erp.gaiada.online/` (expect 200) after any nginx change here regardless of
 direction.
 
-## Postiz / SMM publishing engine (SMM-04, 2026-08-13) — NOT DEPLOYED, owner-gated
+## Postiz / SMM publishing engine (SMM-04 / SMM-04b) — NOT DEPLOYED, runs on a DIFFERENT HOST
 
-The SMM department's publishing engine is Postiz (AGPL-3.0, run contained). Its compose file is
-`infra/compose/docker-compose.social.yml`. **It has never been started on `gda-aicenter`, and it
-must not be until the owner rules on the footprint finding below.** Full evidence:
-`../../docs/superpowers/plans/2026-08-13-smm-04-containment-spike.md`.
+> ### ⚠ Read this box before anything else in this section.
+> **This section is not about `gda-aicenter`.** Everything else in this runbook is. The SMM
+> publishing engine runs on the **SumoPod VPS, `150.109.15.108`** (Ubuntu 24.04.4, user
+> `ubuntu`) — owner decision 2026-08-13, addendum §A4k, retargeted by §A4l. It was never
+> started on `gda-aicenter` and it never will be: the footprint tripwire fired there
+> (~3.4 GiB needed against ~4.0 GB available on a box already 2.45 GB into swap).
+>
+> **That VPS runs 19 containers of the owner's private production projects** (project-hug among
+> them), in compose projects that are none of ours. The hard rules are two paragraphs down and
+> they are not advisory.
+>
+> **Status: PROTOTYPED. Nothing has been deployed to that host.** The stack was built, started
+> and driven on local Docker only. Full evidence:
+> `../../docs/superpowers/plans/2026-08-13-smm-04-containment-spike.md`.
 
-### The blocker, stated once
+The engine is Postiz (AGPL-3.0, run contained). Its compose file is
+`infra/compose/docker-compose.social.yml` — a separate compose project (`gaiada-social`) behind
+profile `social`, digest-pinned, five services trimmed from upstream's nine.
 
-Measured on local Docker, the trimmed five-service stack needs **~3.4 GiB RSS** and **~6.7 GB of
-new disk**. Measured on `gda-aicenter` the same day: **7.95 GB RAM total with ~4.0 GB available
-and 2.45 GB ALREADY IN SWAP**, and **13 GB of 49 GB disk free**. That is ~85% of remaining RAM
-and ~52% of remaining disk, on a box that is already swapping and that has previously had a
-deploy fill the disk and roll a healthy release back. Do not start it "just to see" — the
-failure mode is the ERP's own containers getting OOM-killed beside it.
+### Host safety — the rules for operating on someone else's production box
 
-Also correct a stale number while you are here: the box runs **22 containers**, not 13.
+The blast radius of a careless Docker command on `150.109.15.108` is the owner's live private
+projects, not our department. Three rules, in descending order of how badly they end:
 
-### It is a separate compose PROJECT, on purpose
+1. **NEVER run a Docker command there that is not scoped to this project.** Every command in
+   this section carries `-p gaiada-social` or `-f docker-compose.social.yml`. Specifically
+   banned, with no exception:
+   - `docker system prune` (any flags) — reaps other projects' networks, build cache and, with
+     `-a`, images that other people's stopped containers need to restart from.
+   - `docker image prune -a` — **note that this used to be step 0 of this very procedure.** It
+     was correct when the target was `gda-aicenter` with 13 GB free and our own images on it.
+     On this host it would delete images belonging to production that is not ours. **It has
+     been removed from the bootstrap below. Do not put it back.**
+   - `docker volume prune`, `docker network prune` — same reasoning, worse outcome.
+   - any `--remove-orphans` without `-p gaiada-social`.
+2. **NEVER publish a port on `0.0.0.0` there.** Docker writes its own DNAT/FORWARD rules, and
+   they are evaluated **before** ufw's. A `0.0.0.0` bind is internet-reachable on a box whose
+   firewall says "deny incoming", and `ufw status` will report everything is fine. This is
+   controlled by `SOCIAL_BIND_ADDR` in that host's `.env`; its default is `127.0.0.1` so a
+   missing value fails safe. The deploy value is the WireGuard address, `10.88.0.2`.
+3. **Take a `docker ps -a` before and after every session there, and diff it.** 19 containers
+   before, 19 + ours after. Anything else is an incident, and finding out at the next
+   `docker ps` beats finding out from the owner.
+
+**One maintenance item that IS safe and IS wanted** (from §A4k): `docker builder prune -af`.
+Build cache had accumulated 2467 entries and 147 GB, zero of it active, and filled the disk to
+85%; removing build cache cannot stop a container or delete an image. That belongs in this box's
+periodic maintenance — the condition will creep back.
+
+### The cross-host hop — WireGuard, and why not the alternatives
+
+`platform-nest` runs on `gda-aicenter` (`35.240.135.48`, GCP, Debian 12). Postiz runs on the
+VPS. The REST hop therefore leaves the machine, and design §03's "private network" premise no
+longer holds on its own terms. **The transport is a two-peer WireGuard point-to-point link.**
+
+| | | |
+|---|---|---|
+| `gda-aicenter` | `10.88.0.1` | initiator, `PersistentKeepalive` |
+| VPS | `10.88.0.2` | listener, UDP/51820, allowed **only** from `35.240.135.48` |
+
+**Why this and not nginx + Let's Encrypt on the VPS.** The TLS option means putting a new
+public `:443` (and `:80`, for ACME http-01) on a box that runs the owner's unrelated private
+production — a new attack surface we introduced onto their machine — plus a DNS record, plus a
+certificate that must renew forever, plus a source-address ACL. That ACL is the weak part: it
+authenticates a *network position*, not a party. It holds exactly as long as nothing about
+routing, NAT or the ERP's public address changes, and it is one typo away from publishing
+`/api/public/v1/*` to the internet. WireGuard authenticates the **peer by key**, gives
+ChaCha20-Poly1305 confidentiality and integrity a layer below HTTP, and leaves the VPS with
+**no public listener at all** — an unauthenticated probe of UDP/51820 gets silence, not a
+handshake. It satisfies the intent of "TLS on the hop" with a stronger authentication property
+than TLS-plus-IP-allowlist would have given.
+
+**Why not an SSH tunnel.** It is the fastest to stand up and it is the one to reject hardest.
+It requires a shell-capable credential **on the production VPS**, held by the ERP box — a far
+larger blast radius than a peer key that can reach one TCP port. `autossh`'s characteristic
+failure is a half-open tunnel that accepts connections and never delivers, which is precisely
+the "green health over a dead service" shape this estate has already been burned by twice
+(Cerbos, and Postiz's own search-attribute trap below). Keep it named only as a 30-minute
+emergency bridge if WireGuard cannot be installed for some reason, and take it down after.
+
+**Cost to operate, honestly.** Setup is two `wg0.conf` files, one package, one systemd unit per
+host. After that: no DNS, no certificates, no renewal, no cron. The standing cost is key
+custody — WireGuard keys are long-lived and there is no expiry to force a rotation, so
+**rotation is a manual ops item on host rebuild or staff change**, and that is the one thing
+this design does worse than certificates. Health is a one-line probe (`wg show wg0
+latest-handshakes`); a handshake older than ~3 minutes on a link with keepalive means the
+tunnel is down.
+
+#### Facts measured 2026-08-13 (read-only, from `gda-aicenter`)
+
+```
+$ ping -c 8 -q 150.109.15.108
+8 packets transmitted, 8 received, 0% packet loss
+rtt min/avg/max/mdev = 2.473/2.604/2.956/0.167 ms      ← 2.6 ms, not "internet RTT"
+
+$ for i in 1 2 3 4 5; do curl -o /dev/null -w '%{time_connect}\n' telnet://150.109.15.108:22; done
+0.001993 0.002732 0.002621 0.003015 0.002246           ← TCP handshake 2.0-3.0 ms, corroborates
+
+$ traceroute -n 150.109.15.108
+ 1  72.14.232.209   1.674 ms                           ← still inside Google's network
+ 3  30.245.21.41    1.351 ms                           ← ~3 hops apart; effectively same metro
+
+$ uname -r                                              6.1.0-51-cloud-amd64  (Debian 12)
+$ ls /lib/modules/$(uname -r)/kernel/drivers/net/wireguard/
+wireguard.ko                                            ← module present
+$ command -v wg wg-quick                                ← ABSENT: apt install wireguard-tools
+$ ip -o link show ens4
+... mtu 1460 ...                                        ← GCP. See the MTU trap below.
+$ ping -c 2 -M do -s 1432 150.109.15.108                0% loss  ← path MTU ≥ 1460 end to end
+```
+
+> **⚠ MTU TRAP — set it explicitly or large uploads black-hole silently.** `wg-quick`'s default
+> tunnel MTU is 1420, derived from a 1500-byte underlay. **`gda-aicenter`'s `ens4` is MTU 1460**
+> (GCP's default), so 1420 is 40 bytes too big. Small requests work perfectly and the link looks
+> healthy; what breaks is exactly the traffic that fills packets — **media uploads**, the one
+> thing on this hop that sends megabytes. Set `MTU = 1380` (1460 − 80) on **both** ends, and
+> verify with a DF-bit ping across the tunnel before believing it.
+
+#### Setup — both hosts. Nothing here is deployed yet; this is the reviewed procedure.
+
+```bash
+# ── On BOTH hosts ──────────────────────────────────────────────────────────────────────────
+sudo apt-get update && sudo apt-get install -y wireguard-tools
+umask 077 && wg genkey | sudo tee /etc/wireguard/privatekey | wg pubkey | sudo tee /etc/wireguard/publickey
+# Exchange the two PUBLIC keys only. The private keys never leave their host, never enter a
+# commit, a chat message, a log or this repo.
+
+# ── VPS 150.109.15.108 — /etc/wireguard/wg0.conf (mode 0600) ───────────────────────────────
+# [Interface]
+# Address    = 10.88.0.2/24
+# ListenPort = 51820
+# MTU        = 1380
+# PrivateKey = <VPS private key>
+# [Peer]
+# PublicKey  = <gda-aicenter public key>
+# AllowedIPs = 10.88.0.1/32          # /32 — this peer may source exactly one address
+sudo ufw allow from 35.240.135.48 to any port 51820 proto udp   # the ONLY inbound rule added
+sudo systemctl enable --now wg-quick@wg0
+
+# ── gda-aicenter — /etc/wireguard/wg0.conf (mode 0600) ─────────────────────────────────────
+# [Interface]
+# Address    = 10.88.0.1/24
+# MTU        = 1380
+# PrivateKey = <gda-aicenter private key>
+# [Peer]
+# PublicKey  = <VPS public key>
+# Endpoint   = 150.109.15.108:51820
+# AllowedIPs = 10.88.0.2/32
+# PersistentKeepalive = 25           # keeps the path open; also means the VPS never initiates
+sudo systemctl enable --now wg-quick@wg0
+```
+
+**No GCP VPC firewall change is needed.** `gda-aicenter` only ever initiates (that is what
+`PersistentKeepalive` buys), so nothing new has to be allowed inbound to the ERP box. One
+inbound rule exists in the whole design, on the VPS, scoped to one source address.
+
+**Verify the tunnel before touching Postiz** — assert the negative as hard as the positive:
+
+```bash
+# on gda-aicenter
+sudo wg show wg0 latest-handshakes        # a recent timestamp, not 0
+ping -c 3 10.88.0.2                       # ~2.6 ms
+ping -c 3 -M do -s 1352 10.88.0.2         # 1352 + 28 = 1380. MUST be 0% loss.
+ping -c 3 -M do -s 1400 10.88.0.2         # MUST fail — proves MTU is enforced, not accidental
+# from a THIRD machine, neither host — the whole design rests on this being unreachable:
+curl -s -m 5 -o /dev/null -w '%{http_code}\n' http://150.109.15.108:4007/   # must time out
+```
+
+### It is a separate compose PROJECT, on purpose — and now a separate host too
 
 `docker-compose.social.yml` declares `name: gaiada-social`. The deploy workflow's
 `up -d --no-build --remove-orphans` targets the `gaiada` project and deletes any container in
 **that** project whose profile is absent from the command. A separate project is invisible to
-it, so the orphan trap is structurally unreachable rather than merely documented. The `social`
-profile sits on top so nothing starts by accident (verified: without
-`COMPOSE_PROFILES=social`, `config --services` lists nothing).
+it, so the orphan trap is structurally unreachable rather than merely documented (verified:
+without `COMPOSE_PROFILES=social`, `config --services` lists nothing). Since the retarget it is
+also on a host the release pipeline cannot reach at all. Both properties are kept — the second
+is not a reason to relax the first, because the stack may yet move again.
 
 Consequently — and this is the part that is easy to get wrong in the opposite direction:
 
@@ -326,19 +479,31 @@ Consequently — and this is the part that is easy to get wrong in the opposite 
   is upgraded only by a human editing that digest. Leaving it on `:latest` inside the release
   path would let `docker compose pull` roll an unreviewed AGPL engine onto the box between
   releases — the licence boundary is a reviewed surface.
+- **The `SOCIAL_*` env block lives on the VPS, not on `gda-aicenter`.** `.env.example` carries
+  both halves with a banner on each; filling the VPS block into the ERP box's `.env` does
+  nothing at all (no service there names those vars) while scattering the group's platform-app
+  secrets onto a host with no use for them.
 
 ### Bootstrap, in order (every step is required)
 
 ```bash
-cd ~/gaiada/infra/compose
-# 0. PRUNE FIRST. 6.7 GB against 13 GB free is not a margin. `docker system df` showed
-#    ~6.2 GB reclaimable in stale release images at the time of writing.
-docker image prune -a --filter "until=168h"
-df -h /                                  # confirm the headroom you think you have
+# Run on 150.109.15.108, in the checkout's infra/compose. Every command is project-scoped.
+cd ~/gaiada-social/infra/compose
 
-# 1. Fill the SOCIAL_* block in .env (see .env.example). Keep
-#    SOCIAL_POSTIZ_DISABLE_REGISTRATION=true for now.
+# 0. CONFIRM YOU ARE NOT ABOUT TO DISTURB PRODUCTION. Record the baseline; diff it at the end.
+docker ps -a --format '{{.Names}}\t{{.Status}}' | sort | tee /tmp/containers-before.txt | wc -l
+df -h /                                  # expect ~169 GB free; disk is not a constraint here
+free -g                                  # expect ~12 GiB available
+#    NOTE: there is deliberately NO `docker image prune` step. See the host-safety rules.
+
+# 1. Fill the SOCIAL_* block in this host's .env (see .env.example — the block with the
+#    "belongs on a different machine" banner IS this one). Keep
+#    SOCIAL_POSTIZ_DISABLE_REGISTRATION=true, and set SOCIAL_BIND_ADDR=10.88.0.2.
+chmod 600 .env
 COMPOSE_PROFILES=social docker compose -f docker-compose.social.yml config -q   # true dry run
+#    Prove the bind address is what you think BEFORE anything listens:
+COMPOSE_PROFILES=social docker compose -f docker-compose.social.yml config \
+  | grep -A2 'published'                 # must show 10.88.0.2, never 0.0.0.0
 
 # 2. Start ONLY the datastores + Temporal. Postiz comes later, and the order matters.
 COMPOSE_PROFILES=social docker compose -f docker-compose.social.yml up -d \
@@ -357,13 +522,13 @@ COMPOSE_PROFILES=social docker compose -f docker-compose.social.yml exec -T soci
   temporal operator search-attribute remove --name CustomStringField \
   --address social-temporal:7233 --namespace default --yes
 
-# 4. Now start Postiz. Allow up to ~4 minutes to healthy (measured 90-150s on a 16 GB dev box;
-#    this box is smaller and swapping, so expect worse).
+# 4. Now start Postiz. First boot also pulls ~1.9 GB compressed and expands it to 5.66 GB,
+#    which the 240s start_period does not cover — let the pull finish before judging health.
 COMPOSE_PROFILES=social docker compose -f docker-compose.social.yml up -d postiz
 
 # 5. PROVE the backend is actually up. `healthy` is NOT evidence — see step 3.
 #    Expect 401 {"msg":"No API Key found"}. A 502 means step 3 was skipped or failed.
-curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:4007/api/public/v1/posts
+curl -s -o /dev/null -w '%{http_code}\n' http://10.88.0.2:4007/api/public/v1/posts
 COMPOSE_PROFILES=social docker compose -f docker-compose.social.yml exec -T social-temporal \
   temporal operator search-attribute list --address social-temporal:7233 --namespace default \
   | grep -E 'organizationId|postId'      # both must be present, typed Text
@@ -376,28 +541,47 @@ SOCIAL_POSTIZ_DISABLE_REGISTRATION=false COMPOSE_PROFILES=social \
 #    ...create the org over the API, then:
 COMPOSE_PROFILES=social docker compose -f docker-compose.social.yml up -d --force-recreate postiz
 #    VERIFY the door is shut — expect 400 "Registration is disabled":
-curl -s -X POST http://127.0.0.1:4007/api/auth/register -H 'Content-Type: application/json' \
+curl -s -X POST http://10.88.0.2:4007/api/auth/register -H 'Content-Type: application/json' \
      -d '{"email":"probe@invalid.test","password":"Xx12345678!","company":"probe","provider":"LOCAL"}'
+
+# 7. PROVE THE HOP FROM THE OTHER SIDE, and prove the internet cannot.
+#    From gda-aicenter (must be 401 — a real backend answer, not a proxy error):
+#      curl -s -m 10 -o /dev/null -w '%{http_code}\n' http://10.88.0.2:4007/api/public/v1/posts
+#    From a third machine (must time out):
+#      curl -s -m 5 -o /dev/null -w '%{http_code}\n' http://150.109.15.108:4007/
+
+# 8. Diff the baseline. 19 production containers before, 19 + 5 after. Nothing else moved.
+docker ps -a --format '{{.Names}}\t{{.Status}}' | sort > /tmp/containers-after.txt
+diff /tmp/containers-before.txt /tmp/containers-after.txt
 ```
 
 ### Ongoing operational notes
 
 - **Disk keeps growing after install.** `social-postiz-uploads` is the media store and is
-  unbounded — every image and video ever attached to a post lands there. Add it to whatever
-  disk alerting exists before, not after, it matters.
+  unbounded — every image and video ever attached to a post lands there. 169 GB free makes this
+  a slow problem rather than an immediate one, which is exactly how it gets forgotten. Add it
+  to whatever disk alerting exists before, not after, it matters.
 - **Never back up the Postiz volumes.** They hold live network OAuth tokens. Same rule as the
   bot's `keys.json` (see the Backups section): key material in a backup set voids crypto-shred.
   Postiz's Postgres holds only Postiz's own data, which is reconstructible by re-connecting
-  accounts; the tokens are not ours to archive.
-- **`restart` does not re-read `.env`** here either — recreate. Same trap as everything else on
-  this box.
-- **nginx is NOT configured by this.** The edge allowlist lives in
-  `infra/nginx/snippets/gaiada-social-postiz.conf` and is hand-applied like the CP-5 and
+  accounts; the tokens are not ours to archive. **This now applies to a host whose backup policy
+  is the owner's, not ours** — confirm the VPS's own backup regime does not snapshot these
+  volumes before the first real account is connected.
+- **`restart` does not re-read `.env`** here either — recreate. Same trap as everything else.
+- **The tunnel is a dependency of the department, so monitor it like one.** If `wg0` is down,
+  every publish and every status read fails closed with a connection error. `wg show wg0
+  latest-handshakes` older than ~3 minutes is the signal. This is a *good* failure mode — loud
+  and unambiguous — but only if something is watching.
+- **nginx is NOT configured by this, and it stays on `gda-aicenter`.** The edge allowlist lives
+  in `infra/nginx/snippets/gaiada-social-postiz.conf` and is hand-applied like the CP-5 and
   ASST-09 blocks. Read its header first: the preferred design exposes **nothing** of Postiz at
-  the edge, and the fallback blocks carry a real containment cost.
+  the edge, the fallback blocks carry a real containment cost, and since the retarget their
+  `proxy_pass` targets the tunnel peer rather than loopback. **The VPS gets no vhost, no
+  certificate and no public listener.**
 - **Rollback** is `COMPOSE_PROFILES=social docker compose -f docker-compose.social.yml down`
-  (add `-v` only if you intend to destroy connected accounts). Because it is its own project,
-  this cannot affect the ERP stack.
+  (add `-v` only if you intend to destroy connected accounts). Because it is its own project on
+  its own host, this cannot affect the ERP stack or the owner's 19 containers. Do not add
+  `--remove-orphans` to it — there is no orphan to remove and the flag's scope is the danger.
 
 ## Security notes
 

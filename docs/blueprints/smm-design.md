@@ -173,6 +173,16 @@ control), extended with the **license zone** this subsystem introduces:
 | Creative Image Studio / gateway image seam | **A** | Generative calls ride ai-gateway-go (budget caps, DLP, egress audit apply automatically); outputs land as `files` rows + Studio asset tables — no new trust surface. |
 | wa-chat-bot | **untouched** | Explicitly out of scope; WhatsApp/Telegram engagement stays there (locked — no second inbox stack, and no social traffic routed into it). |
 
+> **⚠ Pointer, not an amendment (2026-08-13).** Row 2's "reached ONLY via REST from
+> platform-nest" premise assumed both sat on one machine. They no longer do: the owner moved
+> Postiz to its own host (addendum §A4k), so that REST hop leaves the machine. It is carried by
+> a two-peer **WireGuard** link rather than a public listener, which keeps rows 2 and 3 true as
+> written — the edge did not move, the allowlist did not grow, and `FRONTEND_URL` is unchanged.
+> The mechanism, the measured 2.6 ms RTT, and the custody consequence (platform-app secrets now
+> live on a host that also runs unrelated private production) are in **§A4l**. Anyone rewriting
+> this table should read that first; the wording here is deliberately left alone pending the
+> architect.
+
 ---
 
 ## §04 · Domain model & schema
