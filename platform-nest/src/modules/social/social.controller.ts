@@ -369,7 +369,16 @@ export class SocialController {
           groups: patch ? Object.keys(patch) : [],
           budgetChanged: budget !== undefined,
         });
-        return merged;
+        // Read the budget BACK rather than echoing the request field. A scope-only patch leaves
+        // `budget` undefined while the row keeps its cap, so echoing the input made this response
+        // claim the engagement had NO budget — a console rendering it would show "no cap" for an
+        // engagement that has one. Found by SMM-11 while wiring lib/social.ts against this endpoint:
+        // the frontend-first drift check working in the useful direction for once.
+        const { rows: after } = await c.query<{ usageBudgetUsd: string }>(
+          `SELECT usage_budget_usd AS "usageBudgetUsd" FROM social_engagements WHERE id = $1`,
+          [engagementId],
+        );
+        return { merged, usageBudgetUsd: Number(after[0].usageBudgetUsd) };
       },
       { modules: ["social"] },
     );
@@ -378,8 +387,8 @@ export class SocialController {
       scopeGroups: patch ? Object.keys(patch) : [], budgetChanged: budget !== undefined,
     });
     return {
-      toolScope: mergeScope(DEFAULT_TOOL_SCOPE as unknown as ToolScope, result),
-      usageBudgetUsd: budget,
+      toolScope: mergeScope(DEFAULT_TOOL_SCOPE as unknown as ToolScope, result.merged),
+      usageBudgetUsd: result.usageBudgetUsd,
       // Legal, stored, and currently inert toggles are NAMED rather than silently accepted.
       warnings,
     };
