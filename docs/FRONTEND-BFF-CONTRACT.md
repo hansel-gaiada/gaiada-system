@@ -2825,14 +2825,26 @@ model proposes, every time.
 `{rule, message}` where `rule` is a snake_case token — render against the token. Errors block a
 submit; warnings never do. Current tokens: `body_required`, `body_too_long`, `body_near_limit`,
 `body_over_base_limit`, `media_required`, `too_many_media`, `wrong_media_kind`, `mixed_media_kinds`,
-`missing_alt_text`, `media_missing_file`, `first_comment_unsupported`, `too_many_hashtags`,
-`invalid_ig_type`, `reel_requires_video`, `story_single_media`, `invalid_tiktok_mode`,
-`tiktok_inbox_mode`, `invalid_yt_visibility`, `quota_exhausted`, `quota_near`, `quota_unknown`.
+`missing_alt_text`, `media_missing_file`, `unsupported_media_format`, `media_format_unknown`,
+`first_comment_unsupported`, `too_many_hashtags`, `invalid_ig_type`, `reel_requires_video`,
+`story_single_media`, `invalid_tiktok_mode`, `tiktok_inbox_mode`, `invalid_yt_visibility`,
+`facebook_schedule_window`, `quota_exhausted`, `quota_near`, `quota_unknown`.
 
-Two behaviours a console must not paper over: **X's 280 is a soft limit** (a longer body warns, it
-does not block — premium accounts exist and the tier is not visible to us), and **an unknown quota
-is a warning, never a pass** — `quota_unknown` means the registry has not synced, not that zero
-posts have been used.
+Three behaviours a console must not paper over:
+- **X's 280 is a soft limit** (a longer body warns, it does not block — premium accounts exist and
+  the tier is not visible to us).
+- **An unknown quota is a warning, never a pass** — `quota_unknown` means the registry has not
+  synced, not that zero posts (or, for YouTube, zero `videos.insert` calls) have been used.
+- **Media format is checked, format-unknown is a warning** (SMM-37, addendum §A4f item 2): Instagram
+  accepts JPEG images only — a PNG/WebP attachment is a hard `unsupported_media_format` error, never
+  transcoded (the engine refuses rather than silently converting bytes an approver never saw; no
+  transcode backend exists in the estate either). `MediaItem.format` is composer-supplied, the same
+  trust boundary `kind` already uses; an attachment with no format stated warns
+  (`media_format_unknown`) rather than blocking, so pre-existing variants keep validating. Facebook
+  Pages' native scheduling is bounded **10 minutes to 30 days** from the publish call
+  (`facebook_schedule_window`, error on either side) — Instagram has no native API scheduling to
+  bound (our own queue publishes it) and no other network in the research trail documents a window,
+  so this check is Facebook-only by design, not an oversight.
 
 **Refusal shape (binding for every FE consumer).** A 400 answers `{ error: "<snake_case_token>" }` —
 the token IS the contract: `missing_field`, `invalid_id`, `invalid_status`, `unknown_network`,

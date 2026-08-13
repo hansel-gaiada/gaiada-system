@@ -4,10 +4,10 @@
 // will reject". Each case below is a rejection the network would have made, caught before an
 // approver was asked to sign off on it.
 import { describe, it, expect } from "vitest";
-import { validateVariant, checkQuota, estimateCostUsd, NETWORKS, isNetwork } from "./media-rules";
+import { validateVariant, checkQuota, estimateCostUsd, NETWORKS, isNetwork, normalizeMediaFormat } from "./media-rules";
 
-const img = (alt = "a photo") => ({ fileId: "f1", kind: "image" as const, alt });
-const vid = () => ({ fileId: "v1", kind: "video" as const });
+const img = (alt = "a photo", format?: string) => ({ fileId: "f1", kind: "image" as const, alt, ...(format ? { format } : {}) });
+const vid = (format?: string) => ({ fileId: "v1", kind: "video" as const, ...(format ? { format } : {}) });
 
 describe("media rules (SMM-08 / design D-12)", () => {
   it("covers every network the schema admits — no silent gap between CHECK and validator", () => {
@@ -108,6 +108,99 @@ describe("media rules (SMM-08 / design D-12)", () => {
   });
 });
 
+describe("media format (SMM-37, addendum §A4f item 2) — Instagram accepts JPEG only", () => {
+  it("refuses a PNG image on Instagram, and says which rule", () => {
+    const r = validateVariant("instagram", { body: "b", media: [img("alt", "png")] });
+    expect(r.ok).toBe(false);
+    expect(r.errors.map((e) => e.rule)).toContain("unsupported_media_format");
+  });
+
+  it("refuses a WebP image on Instagram too", () => {
+    const r = validateVariant("instagram", { body: "b", media: [img("alt", "webp")] });
+    expect(r.errors.map((e) => e.rule)).toContain("unsupported_media_format");
+  });
+
+  it("accepts a JPEG image on Instagram, format stated explicitly", () => {
+    const r = validateVariant("instagram", { body: "b", media: [img("alt", "jpeg")] });
+    expect(r.ok).toBe(true);
+    expect(r.errors).toEqual([]);
+  });
+
+  it("accepts jpg/JPG/.jpg/image-jpeg-mime spellings as jpeg", () => {
+    for (const spelling of ["jpg", "JPG", ".jpg", "image/jpeg", "JPEG"]) {
+      const r = validateVariant("instagram", { body: "b", media: [img("alt", spelling)] });
+      expect(r.errors.map((e) => e.rule)).not.toContain("unsupported_media_format");
+    }
+  });
+
+  it("warns — never refuses — when the format is not known at all", () => {
+    // A variant attached before this ticket added `MediaItem.format` must not suddenly fail.
+    const r = validateVariant("instagram", { body: "b", media: [img()] });
+    expect(r.ok).toBe(true);
+    expect(r.warnings.map((w) => w.rule)).toContain("media_format_unknown");
+    expect(r.errors.map((e) => e.rule)).not.toContain("unsupported_media_format");
+  });
+
+  it("does not check format on a network with no documented restriction", () => {
+    // Facebook has no format restriction in this file's research trail — a PNG must sail through.
+    const r = validateVariant("facebook", { body: "b", media: [img("alt", "png")] });
+    expect(r.errors.map((e) => e.rule)).not.toContain("unsupported_media_format");
+    expect(r.warnings.map((w) => w.rule)).not.toContain("media_format_unknown");
+  });
+
+  it("normalizeMediaFormat folds aliases and strips MIME/dot prefixes", () => {
+    expect(normalizeMediaFormat("jpg")).toBe("jpeg");
+    expect(normalizeMediaFormat(".PNG")).toBe("png");
+    expect(normalizeMediaFormat("image/webp")).toBe("webp");
+    expect(normalizeMediaFormat(undefined)).toBeUndefined();
+    expect(normalizeMediaFormat("")).toBeUndefined();
+  });
+});
+
+describe("Facebook's native schedule window (SMM-37, addendum §A4i) — 10 minutes to 30 days", () => {
+  const NOW = new Date("2026-08-13T12:00:00Z");
+
+  it("refuses a post scheduled only 2 minutes out", () => {
+    const scheduledAt = new Date(NOW.getTime() + 2 * 60_000).toISOString();
+    const r = validateVariant("facebook", { body: "b", scheduledAt }, undefined, NOW);
+    expect(r.ok).toBe(false);
+    expect(r.errors.map((e) => e.rule)).toContain("facebook_schedule_window");
+  });
+
+  it("refuses a post scheduled 45 days out", () => {
+    const scheduledAt = new Date(NOW.getTime() + 45 * 24 * 60 * 60_000).toISOString();
+    const r = validateVariant("facebook", { body: "b", scheduledAt }, undefined, NOW);
+    expect(r.ok).toBe(false);
+    expect(r.errors.map((e) => e.rule)).toContain("facebook_schedule_window");
+  });
+
+  it("accepts a post scheduled comfortably inside the window", () => {
+    const scheduledAt = new Date(NOW.getTime() + 3 * 24 * 60 * 60_000).toISOString();
+    const r = validateVariant("facebook", { body: "b", scheduledAt }, undefined, NOW);
+    expect(r.errors.map((e) => e.rule)).not.toContain("facebook_schedule_window");
+  });
+
+  it("accepts the exact boundaries — 10 minutes and 30 days", () => {
+    const min = new Date(NOW.getTime() + 10 * 60_000).toISOString();
+    const max = new Date(NOW.getTime() + 30 * 24 * 60 * 60_000).toISOString();
+    expect(validateVariant("facebook", { body: "b", scheduledAt: min }, undefined, NOW).errors.map((e) => e.rule))
+      .not.toContain("facebook_schedule_window");
+    expect(validateVariant("facebook", { body: "b", scheduledAt: max }, undefined, NOW).errors.map((e) => e.rule))
+      .not.toContain("facebook_schedule_window");
+  });
+
+  it("does not apply the window when there is no scheduledAt (publish now)", () => {
+    const r = validateVariant("facebook", { body: "b" }, undefined, NOW);
+    expect(r.errors.map((e) => e.rule)).not.toContain("facebook_schedule_window");
+  });
+
+  it("is NOT checked on Instagram — no native API scheduling exists to violate", () => {
+    const scheduledAt = new Date(NOW.getTime() + 45 * 24 * 60 * 60_000).toISOString();
+    const r = validateVariant("instagram", { body: "b", media: [img("alt", "jpeg")], scheduledAt }, undefined, NOW);
+    expect(r.errors.map((e) => e.rule)).not.toContain("facebook_schedule_window");
+  });
+});
+
 describe("quota — unknown is not zero", () => {
   it("refuses at the cap", () => {
     const r = checkQuota("instagram", { igPosts24h: { used: 25, cap: 25 } });
@@ -127,6 +220,37 @@ describe("quota — unknown is not zero", () => {
     expect(r.ok).toBe(true);
     expect(r.warnings.map((w) => w.rule)).toContain("quota_unknown");
     expect(checkQuota("instagram", {}).warnings.map((w) => w.rule)).toContain("quota_unknown");
+  });
+});
+
+describe("YouTube quota (SMM-37) — the videos.insert bucket gates uploads, NOT the 10,000-unit pool", () => {
+  it("refuses at the videos.insert cap even with the unit pool wide open", () => {
+    // The exact failure this ticket closes: a reading built on the old single-pool model would see
+    // "1,600/10,000 used" and report headroom while uploads are already blocked.
+    const r = checkQuota("youtube", {
+      youtubeQuota: { videosInsertCallsToday: { used: 100, cap: 100 }, otherUnitsToday: { used: 1600, cap: 10000 } },
+    });
+    expect(r.ok).toBe(false);
+    expect(r.errors[0].rule).toBe("quota_exhausted");
+  });
+
+  it("warns near the videos.insert cap", () => {
+    expect(checkQuota("youtube", { youtubeQuota: { videosInsertCallsToday: { used: 99, cap: 100 } } }).warnings.map((w) => w.rule))
+      .toContain("quota_near");
+  });
+
+  it("WARNS when the videos.insert counter is missing — never reads as zero used", () => {
+    expect(checkQuota("youtube", undefined).warnings.map((w) => w.rule)).toContain("quota_unknown");
+    expect(checkQuota("youtube", { youtubeQuota: {} }).warnings.map((w) => w.rule)).toContain("quota_unknown");
+    // Having the OTHER buckets populated does not count as "known" for videos.insert.
+    expect(checkQuota("youtube", { youtubeQuota: { searchListCallsToday: { used: 1, cap: 100 } } }).warnings.map((w) => w.rule))
+      .toContain("quota_unknown");
+  });
+
+  it("has plenty of headroom when videos.insert itself has headroom", () => {
+    const r = checkQuota("youtube", { youtubeQuota: { videosInsertCallsToday: { used: 3, cap: 100 } } });
+    expect(r.ok).toBe(true);
+    expect(r.warnings).toEqual([]);
   });
 });
 
