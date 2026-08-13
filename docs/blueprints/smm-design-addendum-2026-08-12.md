@@ -627,6 +627,69 @@ blocker is *where it is hosted*, not whether it works.
 
 ---
 
+## §A4k · OQ-7 RESOLVED (2026-08-13) — Postiz moves to the SumoPod VPS, measured
+
+SMM-04's footprint tripwire fired against `gda-aicenter` (§A4j): ~3.4 GiB needed on a box with 4.0 GB
+available and already 2.45 GB into swap. The owner proposed an alternative host and it was measured
+rather than assumed.
+
+### The decision
+
+**Postiz runs on the SumoPod VPS, not on `gda-aicenter`.** Owner decision 2026-08-13, superseding
+§A4d's "same box, own compose profile".
+
+| | SumoPod VPS | `gda-aicenter` | Postiz needs |
+|---|---|---|---|
+| RAM available | **12 GiB** of 15 | 4.0 GB, **already swapping 2.45 GB** | ~3.4 GiB |
+| CPU | 4 × EPYC 7K62, load ~0.9 | contended | modest |
+| Disk free | **169 GB** (19% used, after the prune below) | 13 GB of 49 GB | ~6.7 GB day-one + media growth |
+
+RAM headroom is 3.5×, and the disk question is closed outright rather than managed.
+
+### How the disk was freed — and why it was safe on a production box
+
+The VPS carries the owner's **private production projects (19 containers, project-hug among them)**,
+so the prune was scoped to what provably cannot affect a running service:
+
+- **Docker build cache: 147.3 GB total, 118.6 GB reclaimable, 2467 entries, ZERO active.** Build
+  cache only accelerates future `docker build`s — removing it cannot stop a container or delete an
+  image. Pruned. **136 GB reclaimed; 85% → 19% used.**
+- **Images (4.3 GB reclaimable) were deliberately NOT pruned.** On a box running someone else's
+  production, removing a tagged image risks a restart finding nothing to start from. 4 GB is not
+  worth that.
+- Volumes and containers untouched. All 19 containers verified still running afterwards.
+
+**Standing operational note:** 2467 cache entries had accumulated to fill a 217 GB disk to 85%. That
+will creep back. A periodic `docker builder prune -af` belongs in this box's maintenance, or the same
+condition returns and next time it may bite a production deploy rather than our spike.
+
+### What this changes, and the new work it creates
+
+**Accepted by the owner, with reasoning worth recording:** the ERP dev box and the publisher now sit
+on different hosts, so `platform-nest → Postiz` leaves the machine. The owner's position is that this
+is acceptable now (the company box is a personal dev environment) **and actively useful** — a
+cross-host hop produces real latency and failure-mode data for what staging and production will look
+like, instead of a localhost illusion that has to be re-learned later. That is a better reason than
+convenience and is recorded as the rationale, not just the outcome.
+
+The consequences are real work, and they land on SMM-04/05/06:
+
+1. **§03's "private network" premise no longer holds.** The REST hop crosses the public internet, so
+   it needs TLS plus an authenticated, firewalled channel — an org API key over a trusted LAN is no
+   longer the whole story. Firewall allowlist both directions between the two hosts.
+2. **The edge design changes shape.** The spike built a loopback-only exposure with an exact-path
+   nginx allowlist. Now `platform-nest` itself is a remote caller, so the allowlist must admit it
+   explicitly — narrowly, by source address, not by opening the API.
+3. **Latency enters the reconcile loop.** Publishing is unaffected (it is already async), but the
+   status-poll cadence in SMM-10 is now paying internet RTT per call. Budget it deliberately rather
+   than discovering it.
+4. **The AGPL containment argument is unchanged and arguably stronger** — the licence zone is now a
+   different machine entirely, which makes "arm's length, REST only, no shared process" easier to
+   demonstrate, not harder.
+
+**SMM-04 is unblocked.** Its compose file, digest pins, `.env` guards and runbook section carry over;
+what changes is the host it targets and the ingress/egress rules around it.
+
 ## §A5 · Sequencing note — what to do first
 
 1. **SMM-30 + SMM-01 together** (they are one schema conversation: tables, then the permission rows
