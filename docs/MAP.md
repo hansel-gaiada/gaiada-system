@@ -342,6 +342,8 @@ Pages (`page.tsx`), route groups `(x)` stripped:
 - `/me/loans/[loanId]`
 - `/meetings`
 - `/meetings/[id]`
+- `/monitoring`
+- `/monitoring/[id]`
 - `/notifications`
 - `/organization`
 - `/people`

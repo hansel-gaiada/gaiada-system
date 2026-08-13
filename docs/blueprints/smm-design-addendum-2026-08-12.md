@@ -687,8 +687,12 @@ The consequences are real work, and they land on SMM-04/05/06:
    nginx allowlist. Now `platform-nest` itself is a remote caller, so the allowlist must admit it
    explicitly — narrowly, by source address, not by opening the API.
 3. **Latency enters the reconcile loop.** Publishing is unaffected (it is already async), but the
-   status-poll cadence in SMM-10 is now paying internet RTT per call. Budget it deliberately rather
-   than discovering it.
+   status-poll cadence in SMM-10 now pays a network hop per call.
+   **⚠ CORRECTED (2026-08-13, measured — see §A4l):** I wrote "internet RTT" as though it were a
+   real cost. SMM-04b measured it from `gda-aicenter`: **2.6 ms**, ~3 hops, 8/8 ICMP — a LAN-grade
+   number. The 15-minute cadence stands unchanged and sweep cost is dominated by in-flight post
+   count, not latency. The genuine latency cost on this hop is **media upload**, which is why the
+   adapter splits its timeouts (connect 5 s, read 30 s, upload 120 s) instead of using one value.
 4. **The AGPL containment argument is unchanged and arguably stronger** — the licence zone is now a
    different machine entirely, which makes "arm's length, REST only, no shared process" easier to
    demonstrate, not harder.
@@ -879,6 +883,43 @@ one is a thing that would otherwise be discovered during a deploy onto someone e
 | the rest of `SOCIAL_*` | VPS | Filling these into `gda-aicenter`'s `.env` does **nothing** — no service there names them — while scattering the group's app secrets onto a host with no use for them. `.env.example` now banners both halves. |
 
 ---
+
+## §A4m · SMM-04b's four outstanding confirmations — closed (2026-08-13, read-only)
+
+SMM-04b could not obtain these (no SSH credential in its worktree) and correctly listed them as
+things that would otherwise be discovered mid-deploy on a box running the owner's production. All
+four were run read-only against the VPS. **Two came back clean; two produced work.**
+
+| # | Check | Result |
+|---|---|---|
+| 1 | `wireguard.ko` present | ✅ `/lib/modules/6.8.0-101-generic/.../wireguard.ko.zst` — kernel side ready |
+| 1b | `wg` / `wg-quick` userspace tools | ❌ **NOT installed** — `wireguard-tools` is a prerequisite, not an assumption |
+| 2 | VPS underlay MTU | `eth0` = **1500** — the VPS is NOT the binding constraint |
+| 3 | Firewall | `ufw` **active**, allowing 22/tcp + 80/tcp only. `DOCKER-USER` chain exists but is **EMPTY** |
+| 4 | Container baseline | **19 running / 20 total** — matches the pre-prune baseline exactly |
+
+**Two of these change the plan.**
+
+**(a) `wireguard-tools` is missing.** The kernel module is present so the design holds, but
+`wg-quick up` would simply fail. It becomes an explicit, ordered prerequisite in the runbook.
+
+**(b) The empty `DOCKER-USER` chain is the important one — and it argues FOR the WireGuard design.**
+Docker inserts its own iptables rules ahead of `ufw`, so **a Docker-published port bypasses `ufw`
+entirely**: `ufw` reporting "active, 22 and 80 only" would be actively misleading about a container
+publishing `4007`. On a box running the owner's private production, that is not theoretical.
+SMM-04b's design binds Postiz to the tunnel address and publishes nothing, sidestepping the trap
+rather than mitigating it. Had we taken the nginx + public `:443` + source-ACL route, `DOCKER-USER`
+is exactly where that ACL would have needed to live — and its emptiness is how such an ACL silently
+ends up not applying at all.
+
+**MTU confirmed by derivation, not guess:** the VPS side is 1500, so `gda-aicenter`'s GCP `ens4` at
+1460 is the binding end. WireGuard's IPv4/UDP overhead is 60 bytes, giving a 1400 ceiling; SMM-04b's
+**MTU 1380** sits safely under and is correct as written. The failure mode it prevents deserves
+restating because it is invisible: small requests all succeed and the link looks healthy, while media
+upload — the only megabyte traffic on this hop — black-holes.
+
+**Still needed before deploy:** a `ufw allow` for UDP/51820 scoped to `35.240.135.48`, since `ufw` is
+active and currently permits only 22 and 80.
 
 ## §A5 · Sequencing note — what to do first
 
