@@ -110,6 +110,15 @@ services:
     volumes:
       - alertmanager-config:/etc/alertmanager
       - alertmanager-data:/alertmanager
+    ports:
+      # loopback-only (SSH tunnel) — mirrors prometheus:9090 and grafana:3001 above.
+      # This block was MISSING while alertmanager ran as its own project from
+      # docker-compose.alertmanager-mail.yml, which published it. Consolidating the two projects
+      # (2026-08-13) therefore silently removed the operator's only route to the Alertmanager UI —
+      # alerting kept working (Prometheus reaches `alertmanager:9093` on the compose network), so
+      # nothing broke loudly, but SILENCING an alert is done through this UI. An alerting system
+      # you cannot silence gets muted at the source instead, which is how alerting dies.
+      - "127.0.0.1:9093:9093"
     depends_on:
       alertmanager-render:
         condition: service_completed_successfully

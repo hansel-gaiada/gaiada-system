@@ -24,6 +24,33 @@ groups:
           summary: "{{ $labels.instance }} is failing its health probe"
           description: "Blackbox probe to {{ $labels.instance }} has failed for 2m."
 
+      # --- Disk. The observability stack is itself the largest disk consumer on this box
+      # (Prometheus 15d + Loki 7d + Tempo 7d), and a full disk has already rolled back a healthy
+      # release once. `docker system df` showed ~0 reclaimable, so pruning is NOT a recovery lever
+      # here — the only warning we get is this rule. Fires long before the write fails.
+      - alert: DiskSpaceLow
+        expr: |
+          (node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs"}
+           / node_filesystem_size_bytes{fstype!~"tmpfs|overlay|squashfs"}) < 0.15
+        for: 10m
+        labels:
+          severity: page
+        annotations:
+          summary: "Disk below 15% free on {{ $labels.mountpoint }}"
+          description: "{{ $labels.instance }}:{{ $labels.mountpoint }} has {{ $value | humanizePercentage }} free. Prune is not a lever on this box — reduce retention (Prometheus --storage.tsdb.retention.time, loki retention_period, tempo block_retention) or grow the volume."
+
+      # --- Predictive: linear-extrapolate the last 6h of usage. Catches a runaway log/trace
+      # producer while there is still time to act, which a static threshold does not.
+      - alert: DiskWillFillIn24h
+        expr: |
+          predict_linear(node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs"}[6h], 24*3600) < 0
+        for: 30m
+        labels:
+          severity: page
+        annotations:
+          summary: "{{ $labels.mountpoint }} projected to fill within 24h"
+          description: "Trend over the last 6h projects {{ $labels.instance }}:{{ $labels.mountpoint }} full within 24h. Usual cause: a service logging at volume into Loki, or trace sampling turned up."
+
       # --- Event backbone: any dead-letter is worth a ticket (data path is dropping events).
       - alert: EventBackboneDeadLetters
         expr: increase(platform_events_dead_lettered_total[15m]) > 0
