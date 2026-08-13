@@ -291,6 +291,114 @@ rollback cannot regress `/n8n/`, `/idp/`, the portal stream, or the UI root — 
 `curl -I https://erp.gaiada.online/` (expect 200) after any nginx change here regardless of
 direction.
 
+## Postiz / SMM publishing engine (SMM-04, 2026-08-13) — NOT DEPLOYED, owner-gated
+
+The SMM department's publishing engine is Postiz (AGPL-3.0, run contained). Its compose file is
+`infra/compose/docker-compose.social.yml`. **It has never been started on `gda-aicenter`, and it
+must not be until the owner rules on the footprint finding below.** Full evidence:
+`../../docs/superpowers/plans/2026-08-13-smm-04-containment-spike.md`.
+
+### The blocker, stated once
+
+Measured on local Docker, the trimmed five-service stack needs **~3.4 GiB RSS** and **~6.7 GB of
+new disk**. Measured on `gda-aicenter` the same day: **7.95 GB RAM total with ~4.0 GB available
+and 2.45 GB ALREADY IN SWAP**, and **13 GB of 49 GB disk free**. That is ~85% of remaining RAM
+and ~52% of remaining disk, on a box that is already swapping and that has previously had a
+deploy fill the disk and roll a healthy release back. Do not start it "just to see" — the
+failure mode is the ERP's own containers getting OOM-killed beside it.
+
+Also correct a stale number while you are here: the box runs **22 containers**, not 13.
+
+### It is a separate compose PROJECT, on purpose
+
+`docker-compose.social.yml` declares `name: gaiada-social`. The deploy workflow's
+`up -d --no-build --remove-orphans` targets the `gaiada` project and deletes any container in
+**that** project whose profile is absent from the command. A separate project is invisible to
+it, so the orphan trap is structurally unreachable rather than merely documented. The `social`
+profile sits on top so nothing starts by accident (verified: without
+`COMPOSE_PROFILES=social`, `config --services` lists nothing).
+
+Consequently — and this is the part that is easy to get wrong in the opposite direction:
+
+- **Do NOT** add `docker-compose.social.yml` to the `COMPOSE_FILES` repo variable.
+- **Do NOT** add `social` to the `COMPOSE_PROFILES` repo variable.
+- This stack is **not** carried by `git push --tags`. Its image is **pinned by digest**, and it
+  is upgraded only by a human editing that digest. Leaving it on `:latest` inside the release
+  path would let `docker compose pull` roll an unreviewed AGPL engine onto the box between
+  releases — the licence boundary is a reviewed surface.
+
+### Bootstrap, in order (every step is required)
+
+```bash
+cd ~/gaiada/infra/compose
+# 0. PRUNE FIRST. 6.7 GB against 13 GB free is not a margin. `docker system df` showed
+#    ~6.2 GB reclaimable in stale release images at the time of writing.
+docker image prune -a --filter "until=168h"
+df -h /                                  # confirm the headroom you think you have
+
+# 1. Fill the SOCIAL_* block in .env (see .env.example). Keep
+#    SOCIAL_POSTIZ_DISABLE_REGISTRATION=true for now.
+COMPOSE_PROFILES=social docker compose -f docker-compose.social.yml config -q   # true dry run
+
+# 2. Start ONLY the datastores + Temporal. Postiz comes later, and the order matters.
+COMPOSE_PROFILES=social docker compose -f docker-compose.social.yml up -d \
+  social-postgres social-redis social-temporal-postgres social-temporal
+
+# 3. ── THE STEP THAT IS EASY TO MISS AND FAILS SILENTLY ──
+#    Free one Temporal Text search-attribute slot BEFORE Postiz ever starts.
+#    Dropping Elasticsearch puts Temporal's visibility store on Postgres, which allows at most
+#    THREE custom Text search attributes. Temporal pre-registers two of its own; Postiz's
+#    backend registers two more (organizationId, postId). 2+2 > 3, so the BACKEND dies on boot
+#    with "cannot have more than 3 search attribute of type Text", never binds its API port,
+#    and every /api call 502s — while `docker compose ps` still says the container is HEALTHY,
+#    because the healthcheck only probes the Next frontend. CustomStringField is an unused
+#    Temporal default; removing it is config, not a fork.
+COMPOSE_PROFILES=social docker compose -f docker-compose.social.yml exec -T social-temporal \
+  temporal operator search-attribute remove --name CustomStringField \
+  --address social-temporal:7233 --namespace default --yes
+
+# 4. Now start Postiz. Allow up to ~4 minutes to healthy (measured 90-150s on a 16 GB dev box;
+#    this box is smaller and swapping, so expect worse).
+COMPOSE_PROFILES=social docker compose -f docker-compose.social.yml up -d postiz
+
+# 5. PROVE the backend is actually up. `healthy` is NOT evidence — see step 3.
+#    Expect 401 {"msg":"No API Key found"}. A 502 means step 3 was skipped or failed.
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:4007/api/public/v1/posts
+COMPOSE_PROFILES=social docker compose -f docker-compose.social.yml exec -T social-temporal \
+  temporal operator search-attribute list --address social-temporal:7233 --namespace default \
+  | grep -E 'organizationId|postId'      # both must be present, typed Text
+
+# 6. Create the ONE org, then close the door again.
+#    Registration must be enabled for exactly this call and nothing else.
+#    (recreate, not restart — compose bakes env at CREATE time)
+SOCIAL_POSTIZ_DISABLE_REGISTRATION=false COMPOSE_PROFILES=social \
+  docker compose -f docker-compose.social.yml up -d --force-recreate postiz
+#    ...create the org over the API, then:
+COMPOSE_PROFILES=social docker compose -f docker-compose.social.yml up -d --force-recreate postiz
+#    VERIFY the door is shut — expect 400 "Registration is disabled":
+curl -s -X POST http://127.0.0.1:4007/api/auth/register -H 'Content-Type: application/json' \
+     -d '{"email":"probe@invalid.test","password":"Xx12345678!","company":"probe","provider":"LOCAL"}'
+```
+
+### Ongoing operational notes
+
+- **Disk keeps growing after install.** `social-postiz-uploads` is the media store and is
+  unbounded — every image and video ever attached to a post lands there. Add it to whatever
+  disk alerting exists before, not after, it matters.
+- **Never back up the Postiz volumes.** They hold live network OAuth tokens. Same rule as the
+  bot's `keys.json` (see the Backups section): key material in a backup set voids crypto-shred.
+  Postiz's Postgres holds only Postiz's own data, which is reconstructible by re-connecting
+  accounts; the tokens are not ours to archive.
+- **`restart` does not re-read `.env`** here either — recreate. Same trap as everything else on
+  this box.
+- **nginx is NOT configured by this.** The edge allowlist lives in
+  `infra/nginx/snippets/gaiada-social-postiz.conf` and is hand-applied like the CP-5 and
+  ASST-09 blocks. Read its header first: the preferred design exposes **nothing** of Postiz at
+  the edge, and the fallback blocks carry a real containment cost.
+- **Rollback** is `COMPOSE_PROFILES=social docker compose -f docker-compose.social.yml down`
+  (add `-v` only if you intend to destroy connected accounts). Because it is its own project,
+  this cannot affect the ERP stack.
+
 ## Security notes
 
 - All service tokens are distinct random values; the only exposed port is localhost-bound.

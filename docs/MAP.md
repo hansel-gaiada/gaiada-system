@@ -34,7 +34,7 @@ Node scripts per component:
 
 ## Compose
 
-All compose files in `infra/compose/`: `docker-compose.alertmanager-mail.yml`, `docker-compose.build.yml`, `docker-compose.devui.yml`, `docker-compose.hostdata.yml`, `docker-compose.local.yml`, `docker-compose.loki.yml`, `docker-compose.obs-local.yml`, `docker-compose.observability.yml`, `docker-compose.otel-metrics.yml`, `docker-compose.vps.yml`.
+All compose files in `infra/compose/`: `docker-compose.alertmanager-mail.yml`, `docker-compose.build.yml`, `docker-compose.devui.yml`, `docker-compose.hostdata.yml`, `docker-compose.local.yml`, `docker-compose.loki.yml`, `docker-compose.obs-local.yml`, `docker-compose.observability.yml`, `docker-compose.otel-metrics.yml`, `docker-compose.social.yml`, `docker-compose.vps.yml`.
 Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 
 ### `infra/compose/docker-compose.vps.yml`
@@ -133,6 +133,16 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 | `report-renderer` | ../../report-renderer | — | — | — |
 | `search-crawl` | ../../search-crawl-go | — | — | — |
 | `sync-central` | ../../sync-engine-go | — | — | — |
+
+### `infra/compose/docker-compose.social.yml`
+
+| Service | Image / build | Profiles | Ports | depends_on |
+|---|---|---|---|---|
+| `postiz` | ghcr.io/gitroomhq/postiz-app@sha256:785f97312f66a347fb96cdccc4ded5a33ced69a672c89a9adc8054e7d6a21dc5 | `social` | `127.0.0.1:${SOCIAL_POSTIZ_PORT:-4007}:5000` | — |
+| `social-postgres` | postgres:17-alpine | `social` | — | — |
+| `social-redis` | redis:7.2-alpine | `social` | — | — |
+| `social-temporal` | temporalio/auto-setup:1.28.1 | `social` | — | — |
+| `social-temporal-postgres` | postgres:16-alpine | `social` | — | — |
 
 ## platform-nest — modules
 

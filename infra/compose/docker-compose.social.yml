@@ -1,0 +1,232 @@
+# Gaiada — the SMM department's publishing engine (Postiz, AGPL-3.0, CONTAINED).
+#
+# STATUS: PROTOTYPED. Verified on local Docker by SMM-04 (2026-08-13). NOT deployed to
+# gda-aicenter — the footprint tripwire fired and the deploy is owner-gated. Read
+# `docs/superpowers/plans/2026-08-13-smm-04-containment-spike.md` BEFORE starting this
+# anywhere, and `infra/runbooks/deploy-vps.md` §"Postiz / SMM" for the operational steps.
+#
+# ─── Why this is a SEPARATE compose project, not a profile in docker-compose.vps.yml ───
+# `name: gaiada-social` puts these containers in their own compose project. The deploy
+# workflow runs `up -d --remove-orphans` against the `gaiada` project; that flag deletes any
+# container IN THAT PROJECT whose profile is not in the command. A profile alone would make
+# this stack's survival depend on someone remembering to keep `social` in the COMPOSE_PROFILES
+# repo variable forever. A separate project cannot be seen by that command at all, so the
+# trap is structurally unreachable rather than merely documented. The `social` profile is kept
+# on top of that so nothing here can start by accident. Precedent on the same box:
+# `gaiada-automation` (n8n), `gaiada-loki`, `gaiada-otel-metrics`, `gaiada-alertmanager`.
+#
+# ─── The trim: upstream ships NINE services, this runs FIVE ───
+# Dropped: `spotlight` (dev error viewer; upstream already gates it behind profile `debug`),
+# `temporal-admin-tools` (a CLI toolbox, not a runtime dependency), `temporal-ui` (our doctrine
+# forbids exposing it), and `temporal-elasticsearch` (see the `temporal` service note below).
+# All four drops are packaging/config — category (a) of the design §06 fork-touchpoint budget.
+# No Postiz code is patched by this file.
+#
+# ─── Invocation (NEVER a bare `up -d` — the profile is required) ───
+#   cd infra/compose
+#   COMPOSE_PROFILES=social docker compose -f docker-compose.social.yml up -d
+# Do NOT add this file to the COMPOSE_FILES repo variable and do NOT add `social` to the
+# COMPOSE_PROFILES repo variable: this stack is deliberately NOT part of the release deploy.
+# It is pinned by digest and upgraded deliberately, never carried along by `git push --tags`.
+
+name: gaiada-social
+
+services:
+  # ── The publishing engine. AGPL-3.0. Reached ONLY over its REST API, from the
+  # platform-nest SocialPublisher adapter (SMM-05). Its UI is not routed anywhere.
+  postiz:
+    profiles: [social]
+    # PINNED BY DIGEST, deliberately. `:latest` plus the deploy's `docker compose pull` would
+    # silently roll an unreviewed AGPL engine onto the live box between releases; the licence
+    # boundary is a reviewed surface, so it moves only when a human moves it. This digest is
+    # the image SMM-04 measured and drove.
+    image: ghcr.io/gitroomhq/postiz-app@sha256:785f97312f66a347fb96cdccc4ded5a33ced69a672c89a9adc8054e7d6a21dc5
+    restart: unless-stopped
+    # MEASURED at 2.27-2.83 GiB RSS (SMM-04). The limit is a blast-radius bound so a Postiz
+    # leak cannot OOM the ERP beside it — NOT a claim that 3g is enough. Node is not told about
+    # this limit, so hitting it is an OOM-kill, not graceful degradation. Revisit with evidence.
+    mem_limit: 3g
+    environment:
+      # --- URLs. MAIN_URL/FRONTEND_URL are load-bearing: Postiz builds each network's OAuth
+      # redirect_uri as `${FRONTEND_URL}/integrations/social/<provider>` (verified in
+      # tiktok.provider.ts:325-355), and that exact string is both registered with the network
+      # and replayed in the token exchange. Changing it invalidates every connected account.
+      # See the spike report §7 for why this SHOULD point at a path WE serve, not at Postiz.
+      MAIN_URL: ${SOCIAL_POSTIZ_MAIN_URL:?}
+      FRONTEND_URL: ${SOCIAL_POSTIZ_FRONTEND_URL:?}
+      NEXT_PUBLIC_BACKEND_URL: ${SOCIAL_POSTIZ_BACKEND_URL:?}
+      BACKEND_INTERNAL_URL: 'http://localhost:3000'
+      JWT_SECRET: ${SOCIAL_POSTIZ_JWT_SECRET:?}
+      DATABASE_URL: postgresql://postiz:${SOCIAL_POSTIZ_DB_PASSWORD:?}@social-postgres:5432/postiz
+      REDIS_URL: redis://social-redis:6379
+      TEMPORAL_ADDRESS: social-temporal:7233
+      IS_GENERAL: 'true'
+      # VERIFIED by SMM-04: with this true, POST /api/auth/register returns
+      # 400 "Registration is disabled". Containment invariant — the only principals that ever
+      # exist inside Postiz are the ones we provision. Bootstrap needs it FALSE exactly once
+      # (see the runbook); it must be flipped back before the edge is opened.
+      DISABLE_REGISTRATION: ${SOCIAL_POSTIZ_DISABLE_REGISTRATION:-true}
+      RUN_CRON: 'true'
+      STORAGE_PROVIDER: 'local'
+      UPLOAD_DIRECTORY: '/uploads'
+      NEXT_PUBLIC_UPLOAD_DIRECTORY: '/uploads'
+      NX_ADD_PLUGINS: 'false'
+      API_LIMIT: ${SOCIAL_POSTIZ_API_LIMIT:-30}
+      # --- Platform-app credentials (design §11 custody split (a)): the group's OWN app
+      # secrets, injected here and NOWHERE else. Never per-tenant rows, never in n8n
+      # credentials, never in the browser. Client network tokens are created and held by
+      # Postiz's own OAuth machinery and are never copied out (custody split (c)).
+      # Every one of these is listed HERE on purpose: a var in .env does nothing unless the
+      # service's `environment:` block names it. That trap has burned real tickets.
+      FACEBOOK_APP_ID: ${SOCIAL_FACEBOOK_APP_ID:-}
+      FACEBOOK_APP_SECRET: ${SOCIAL_FACEBOOK_APP_SECRET:-}
+      LINKEDIN_CLIENT_ID: ${SOCIAL_LINKEDIN_CLIENT_ID:-}
+      LINKEDIN_CLIENT_SECRET: ${SOCIAL_LINKEDIN_CLIENT_SECRET:-}
+      TIKTOK_CLIENT_ID: ${SOCIAL_TIKTOK_CLIENT_ID:-}
+      TIKTOK_CLIENT_SECRET: ${SOCIAL_TIKTOK_CLIENT_SECRET:-}
+      YOUTUBE_CLIENT_ID: ${SOCIAL_YOUTUBE_CLIENT_ID:-}
+      YOUTUBE_CLIENT_SECRET: ${SOCIAL_YOUTUBE_CLIENT_SECRET:-}
+      # X ships DISABLED in every scope (addendum OQ-2 / D-14): a $0 publish path is what keeps
+      # social.publishPost eligible for the D14 executable-approval registry. Empty on purpose.
+      X_API_KEY: ''
+      X_API_SECRET: ''
+    volumes:
+      - social-postiz-config:/config/
+      - social-postiz-uploads:/uploads/
+    ports:
+      # LOOPBACK ONLY. Nothing about Postiz is bound to a public interface. The edge reaches
+      # this through nginx, and only on the exact paths the allowlist names.
+      - "127.0.0.1:${SOCIAL_POSTIZ_PORT:-4007}:5000"
+    networks: [social-app, social-temporal]
+    healthcheck:
+      test: ["CMD", "node", "-e", "const r=require('http').get('http://localhost:5000/',res=>process.exit(res.statusCode<500?0:1));r.on('error',()=>process.exit(1));r.setTimeout(4000,()=>{r.destroy();process.exit(1)})"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      # MEASURED: ~90-150s to healthy on a 16 GB dev box with the image already local.
+      # The live box is smaller and swapping; do not tighten this without re-measuring there.
+      start_period: 240s
+    depends_on:
+      social-postgres: {condition: service_healthy}
+      social-redis: {condition: service_healthy}
+      social-temporal: {condition: service_healthy}
+
+  # ── Postiz's OWN Postgres. Per the db-topology doctrine of per-service isolation, and per
+  # design §03: its DB is opaque to us and we never query it from platform-nest.
+  social-postgres:
+    profiles: [social]
+    image: postgres:17-alpine
+    restart: unless-stopped
+    mem_limit: 512m
+    environment:
+      POSTGRES_USER: postiz
+      POSTGRES_PASSWORD: ${SOCIAL_POSTIZ_DB_PASSWORD:?}
+      POSTGRES_DB: postiz
+    volumes:
+      - social-postiz-pg:/var/lib/postgresql/data
+    networks: [social-app]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postiz -d postiz"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  # ── Postiz's OWN Redis. Upstream uses redis:7.2 (debian, 170 MB); alpine is 57 MB and is
+  # what SMM-04 measured. Packaging only.
+  social-redis:
+    profiles: [social]
+    image: redis:7.2-alpine
+    restart: unless-stopped
+    mem_limit: 320m
+    command: ["redis-server", "--save", "60", "1", "--maxmemory", "192mb", "--maxmemory-policy", "noeviction"]
+    volumes:
+      - social-redis-data:/data
+    networks: [social-app]
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
+  # ── Temporal — the queue engine Postiz's publisher actually runs on. Not optional.
+  #
+  # ELASTICSEARCH IS DROPPED HERE, and this is the one trim that needed proving rather than
+  # asserting. `ENABLE_ES` is deliberately UNSET: auto-setup.sh:46 defaults it to false, and
+  # the false branch (auto-setup.sh:251) provisions the POSTGRES visibility schema
+  # (`temporal_visibility`) instead of an ES index. SMM-04 verified end to end with no ES host
+  # in existence: cluster health SERVING, `temporal workflow list` returned live rows, and the
+  # visibility rows were readable in Postgres.
+  #
+  # THE CATCH — and this is a REQUIRED BOOTSTRAP STEP, not a nicety. The SQL visibility store
+  # allows at most THREE custom search attributes of type Text (columns text01..text03).
+  # Temporal pre-registers two of its own (`CustomStringField`, `CustomTextField`), and Postiz's
+  # backend registers two more (`organizationId`, `postId` — temporal.register.js). 2 + 2 = 4,
+  # so the backend dies on boot with "cannot have more than 3 search attribute of type Text",
+  # never binds its API port, and every /api call 502s while the CONTAINER STILL REPORTS
+  # HEALTHY (the healthcheck only probes the Next frontend on :5000). Free a slot ONCE, before
+  # first starting Postiz — see the runbook. Config only; no Postiz code is touched.
+  social-temporal:
+    profiles: [social]
+    image: temporalio/auto-setup:1.28.1
+    restart: unless-stopped
+    mem_limit: 768m
+    environment:
+      DB: postgres12
+      DB_PORT: '5432'
+      POSTGRES_USER: temporal
+      POSTGRES_PWD: ${SOCIAL_TEMPORAL_DB_PASSWORD:?}
+      POSTGRES_SEEDS: social-temporal-postgres
+      TEMPORAL_NAMESPACE: default
+      # NO ENABLE_ES / ES_SEEDS / ES_VERSION — that is the whole Elasticsearch drop.
+      # NO DYNAMIC_CONFIG_FILE_PATH either: upstream points it at development-sql.yaml, which
+      # exists only in their bind-mounted ./dynamicconfig directory, not in the image. Setting
+      # it without that mount makes Temporal look for a file that isn't there.
+    networks: [social-temporal]
+    healthcheck:
+      test: ["CMD", "temporal", "operator", "cluster", "health", "--address", "social-temporal:7233"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 60s
+    depends_on:
+      social-temporal-postgres: {condition: service_healthy}
+    # NO published port. Upstream publishes 127.0.0.1:7233; nothing of ours needs it, and the
+    # adapter never talks to Temporal — it talks to Postiz's REST API. Use `docker compose exec`
+    # for the bootstrap step instead of opening a port for it.
+
+  # ── Temporal's OWN Postgres — a SECOND Postgres instance, on a different major than Postiz's.
+  # Upstream uses postgres:16 (debian, 642 MB); alpine is 420 MB and is already resident on
+  # gda-aicenter, so it costs zero new bytes there. Packaging only.
+  social-temporal-postgres:
+    profiles: [social]
+    image: postgres:16-alpine
+    restart: unless-stopped
+    mem_limit: 384m
+    environment:
+      POSTGRES_USER: temporal
+      POSTGRES_PASSWORD: ${SOCIAL_TEMPORAL_DB_PASSWORD:?}
+    volumes:
+      - social-temporal-pg:/var/lib/postgresql/data
+    networks: [social-temporal]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U temporal"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+volumes:
+  social-postiz-pg:
+  social-postiz-uploads:   # media storage — UNBOUNDED growth, see the runbook's disk note
+  social-postiz-config:
+  social-redis-data:
+  social-temporal-pg:
+
+networks:
+  # Two networks, mirroring upstream's split: Temporal's database is not reachable from the
+  # Postiz app, and Postiz's database is not reachable from Temporal. Postiz sits on both
+  # because it is the only thing that talks to Temporal.
+  social-app:
+  social-temporal:

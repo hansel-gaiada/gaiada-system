@@ -282,6 +282,47 @@ commit.
 
 ---
 
+## §A4e · SMM-04 spike results (2026-08-13) — measured, and two things that need an architect
+
+Full evidence: [`2026-08-13-smm-04-containment-spike.md`](../superpowers/plans/2026-08-13-smm-04-containment-spike.md).
+Recorded here in the §A4b/§A4c style — **findings, not new decisions.** SMM-04 is
+**PROTOTYPED**; the deploy is **BLOCKED**.
+
+**The trim worked.** 9 → **5 services**, DEV-VERIFIED on local Docker: all five healthy, Postiz's
+REST API driven with a real org key. `temporal-elasticsearch` **is** droppable — `ENABLE_ES`
+defaults false and auto-setup provisions a Postgres visibility schema. **But** the SQL visibility
+store caps custom Text search attributes at 3, Temporal pre-registers 2 and Postiz needs 2, so
+Postiz's backend dies on boot **while the container still reports healthy**. One config-only
+bootstrap step fixes it (`search-attribute remove --name CustomStringField`), now in the runbook.
+Zero Postiz code was patched — the whole trim is category (a)/(b).
+
+**§A4c's footprint worry was right, and understated.** Measured: **~3.4 GiB RSS** (Postiz alone
+**2.27–2.83 GiB**; its orchestrator spawns one Temporal worker per network, 30+ when we need 5,
+with no env var to trim it) and **~6.7 GB new disk**. Measured on `gda-aicenter` the same day:
+**~4.0 GB RAM available, already 2.45 GB into swap**, 13 GB of 49 GB disk free — and **22
+containers, not 13**. **The §A4c footprint tripwire has fired.** Escalated, not worked around.
+
+**Three items that are the architect's, flagged and not taken:**
+
+| # | Finding | Why it is not SMM-04's call |
+|---|---|---|
+| **1** | **OQ-7 needs revisiting with numbers.** The same-box decision was taken on a stated risk; the risk is now quantified and RAM does not fit. Options: add RAM, own host, or re-open the engine choice. | An owner decision was already taken here; only the owner can amend it. |
+| **2** | **OQ-4 is ANSWERED, and the answer breaks P2's plan. Postiz has ZERO inbound surface — no comments, no DMs, for any of the five networks.** Not "unexposed": the capability does not exist. Verified from its live OpenAPI (22 `/public/v1` routes, no comments/messages controller) and its providers (only aggregate `comment_count` metrics). ⚠ `GET /public/posts/{id}/comments` exists and is a **decoy** — Prisma's `Comments` model is internal team notes on a draft. **SMM-15/16/17/18 have nothing to call.** Closing it inside Postiz needs new tables + controllers = the §06 tripwire verbatim. | P2's engagement half must be re-planned (own per-network integrations, or the Mixpost fallback whose inbox is why §06 listed it). That is a design decision. |
+| **3** | **TikTok direct-post needs a ~15-line, 1-file fork-budget exception.** Publish parameters are all fine over REST (with inverted polarity + renamed fields our composer must translate). But `creator_info` — which TikTok's guidelines make mandatory — is fetched into dead code that discards `privacy_level_options` and the interaction flags, and is not reachable over REST (no `@Tool` decorator). The patch is additive, uses upstream's own extension mechanism, changes no schema and no tenancy. | It is **not** one of §06's four permitted categories, so it needs an explicit exception rather than a silent pass. SMM-04 recommends granting it. |
+
+**Containment holds, with one caveat.** Four of five invariants verified (isolation + REST-only,
+our-side tenancy, zero fork, source-offer intact). **Invariant 5 is at risk**: Postiz's OAuth
+`redirect_uri` is `${FRONTEND_URL}/integrations/social/<provider>`, a *Postiz frontend page*, so
+the obvious wiring serves its frontend JS to a browser. Config-only fix — point `FRONTEND_URL` at
+a path `platform-ui` serves and hand the code to `POST /integrations/social-connect/{integration}`
+over loopback, leaving Postiz unexposed entirely. **Reasoned from source, not yet driven; SMM-07
+owns proving it** (it needs a real app credential, and OQ-1 is still in flight).
+
+**Not blocked by any of this:** SMM-05/06 can be built against the trimmed stack locally. The
+blocker is *where it is hosted*, not whether it works.
+
+---
+
 ## §A5 · Sequencing note — what to do first
 
 1. **SMM-30 + SMM-01 together** (they are one schema conversation: tables, then the permission rows
