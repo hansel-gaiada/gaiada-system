@@ -560,10 +560,16 @@ honestly sell.
 
 ### The rest, in order of how much they cost if missed
 
-- **`{"youtubeUnitsToday":1600}` in 0105's comment is actively misleading.** YouTube's model is now
-  three buckets (100 `search.list`/day, 100 `videos.insert`/day, 10,000 units for the rest, uploads
-  costing 1 unit). A quota reading built on that example would report headroom while uploads are
-  already blocked. Folded into **SMM-37**.
+- **The `{"youtubeUnitsToday":1600}` example is obsolete.** YouTube's model is now three buckets
+  (100 `search.list`/day, 100 `videos.insert`/day, 10,000 units for the rest, uploads costing 1
+  unit); a quota reading built on that example would report headroom while uploads are already
+  blocked. Closed by **SMM-37**, which models the three real buckets on `QuotaSnapshot` and gates on
+  `videosInsertCallsToday`.
+  **⚠ CORRECTION (2026-08-13):** this bullet originally claimed the example lived in `0105`'s
+  comment. It does not, and never did — the string appears only in `smm-design.md` §04 (the frozen
+  v1.0 base doc) and in the dossier's citation of it. Caught by the SMM-37 agent, which went looking
+  for the string it had been told to fix, found it absent, and said so instead of quietly fixing
+  something adjacent. The migration was never wrong; this addendum was.
 - **TikTok gives the inbox NOTHING.** No comment scope exists on the developer platform — only
   `allow_comment` at post time. `social_accounts.capabilities.comments` must be false for TikTok, and
   P2's inbox covers four networks at most.
