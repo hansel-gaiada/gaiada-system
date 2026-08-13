@@ -50,6 +50,23 @@ Also: a var in `.env` does nothing unless the service's `environment:` block lis
 compose files sharing one mtime means *a deploy synced the directory* — not that another session
 edited them under you.
 
+### `docker-compose.social.yml` targets a DIFFERENT HOST
+
+One of the ten is not about `gda-aicenter` at all. The SMM publishing engine (Postiz, AGPL,
+contained) runs on the **SumoPod VPS `150.109.15.108`** — owner decision 2026-08-13, addendum
+§A4k/§A4l — as its own compose project `gaiada-social`, digest-pinned, outside the release path.
+Three things that will bite whoever touches it next:
+
+- **That box runs 19 containers of the owner's PRIVATE PRODUCTION.** Never run a Docker command
+  there that is not scoped to `-p gaiada-social`. No `system prune`, no `image prune -a`, no
+  bare `--remove-orphans`. Read `runbooks/deploy-vps.md` §"Postiz / SMM" first — it has the rules.
+- **The `SOCIAL_*` block in `.env.example` belongs on that host, not on this one.** Filling it
+  into `gda-aicenter`'s `.env` does nothing and scatters the group's app secrets.
+- `platform-nest` reaches it over a **WireGuard** link (`10.88.0.1` ↔ `10.88.0.2`), not over
+  loopback and not over a public listener. Postiz's port binds to the tunnel address —
+  `SOCIAL_BIND_ADDR` is never `0.0.0.0`, because Docker's port rules are evaluated *before*
+  ufw's and a `0.0.0.0` bind is internet-reachable on a box whose firewall says otherwise.
+
 ## Deploy
 
 One point: `git push --tags` → `release.yml` (build + cosign-sign + SLSA provenance → GHCR) →

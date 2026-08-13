@@ -690,6 +690,190 @@ The consequences are real work, and they land on SMM-04/05/06:
 **SMM-04 is unblocked.** Its compose file, digest pins, `.env` guards and runbook section carry over;
 what changes is the host it targets and the ingress/egress rules around it.
 
+> **Implemented and measured in §A4l (SMM-04b), immediately below.**
+> Two of the four consequences above shrank once the hop was measured rather than
+> assumed. Consequence 1 stands but the hop is **2.6 ms** and ~3 network hops, not internet
+> latency; consequence 2 was **not** implemented as an allowlist addition — the edge did not move
+> and the public surface did not grow, because the transport is a WireGuard tunnel with no public
+> listener on the VPS at all; consequence 3's cadence stays at 15 minutes for reasons §A4l §4
+> re-derives; consequence 4 is unchanged. Read §A4l §6 before trusting the spike report: the
+> `docker image prune` step in its runbook procedure was **dangerous on this host** and has been
+> removed.
+
+## §A4l · SMM-04b — the retarget, and the measurement that shrinks its biggest consequence
+
+§A4k resolved *where* Postiz runs. This section is what implementing that decision actually
+costs, and one number that makes a large part of §A4k's own consequence list smaller than it
+looked. **Findings and mechanism, not new decisions** — the one thing here that is genuinely a
+choice (the transport) is recommended with its alternatives priced, for the owner to accept or
+reject. SMM-04 stays **PROTOTYPED**; nothing has been deployed to the VPS, and per the ticket's
+hard constraint nothing was.
+
+### 1. ⚠ "The REST hop crosses the public internet" is true in law and misleading in practice
+
+§A4k reasoned about a cross-host hop as though it meant internet latency. Measured, read-only,
+from `gda-aicenter` on 2026-08-13:
+
+| Probe | Result |
+|---|---|
+| ICMP RTT to `150.109.15.108`, 8 packets | **2.473 / 2.604 / 2.956 ms** min/avg/max, 0% loss |
+| TCP handshake (`time_connect`), 5 samples | **2.0 – 3.0 ms** |
+| `traceroute` | hop 1 is still inside Google's network; ~3 hops apart |
+| Path MTU, DF-bit at 1460 bytes | passes end to end |
+
+**The two hosts are effectively in the same metro.** The hop costs ~2.5 ms more than loopback,
+not the 50–250 ms "internet RTT" the phrase invites. That does not make the hop private — it is
+still off-machine and still needs encryption and authentication — but it removes latency as a
+design constraint, and consequence 3 of §A4k ("latency enters the reconcile loop") turns out to
+be the smallest of the four rather than the one to budget around. **Section 4 below re-derives
+the cadence from the measurement instead of from the assumption.**
+
+### 2. The transport: WireGuard point-to-point — RECOMMENDED, with the alternatives priced
+
+`gda-aicenter` `10.88.0.1` ↔ VPS `10.88.0.2`, UDP/51820, one inbound rule scoped to
+`35.240.135.48`. Postiz's published port binds to the tunnel address, so **the VPS gets no
+public listener of any kind** — not `:443`, not `:80`, not `:4007`.
+
+| Option | What it costs to operate | Honest read |
+|---|---|---|
+| **WireGuard (recommended)** | Two `wg0.conf`s, one package, one systemd unit per host. Then: no DNS, no certificate, no renewal, no cron. Health is `wg show wg0 latest-handshakes`. | Peer authenticated **by key**; ChaCha20-Poly1305 below HTTP; silent to unauthenticated probes. Its one real weakness is that keys are long-lived with no expiry to force rotation — **rotation is a manual ops item on host rebuild or staff change**, and that is the thing it does worse than certificates. |
+| nginx + Let's Encrypt on the VPS | A DNS record, a public `:443` and `:80` **on a box running the owner's unrelated private production**, a certificate renewing forever, and a source-address ACL. | Satisfies the *letter* of "TLS on the hop". But it authenticates a **network position, not a party**: it holds only while routing, NAT and the ERP's public address are unchanged, and one typo publishes `/api/public/v1/*` to the internet. It also means we introduced a new public attack surface onto someone else's machine. |
+| SSH tunnel / `autossh` | Fastest to stand up; no new listener. | **Reject.** It needs a shell-capable credential on the production VPS held by the ERP box — a far larger blast radius than a peer key that reaches one TCP port. `autossh`'s characteristic failure is a half-open tunnel that accepts connections and never delivers: the "green health over a dead service" shape this estate has already been burned by twice. Keep it named only as an emergency bridge. |
+
+**On "the ERP must reach Postiz over TLS".** WireGuard meets the intent — confidentiality,
+integrity, and mutual authentication of the hop — with a *stronger* authentication property than
+TLS-plus-IP-allowlist, one layer lower. TLS inside the tunnel is cheap to add later if an audit
+checklist demands the literal word; it would buy nothing cryptographically and is not
+recommended now.
+
+**Measured prerequisites** (read-only, `gda-aicenter`): kernel 6.1.0-51-cloud-amd64, Debian 12;
+`wireguard.ko` **present**; `wireguard-tools` **absent** (one `apt install`). The VPS side is
+unverified — no credential for that host exists on the working machine, and asking for one was
+preferred to inventing one. See §6.
+
+> **⚠ MTU trap, and it targets exactly the wrong traffic.** `wg-quick` defaults the tunnel to
+> MTU 1420, derived from a 1500-byte underlay. **`gda-aicenter`'s `ens4` is 1460** (GCP's
+> default), so 1420 is 40 bytes too large. Small requests work perfectly and the link looks
+> healthy; what black-holes is the traffic that fills packets — **media uploads**, the one thing
+> on this hop that sends megabytes. Set `MTU = 1380` on both ends and verify with a DF-bit ping
+> before believing the link. Procedure and verification in the runbook.
+
+### 3. The edge did NOT move, and the ERP was NOT added to the allowlist
+
+§A4k's consequence 2 anticipated that the allowlist would have to admit `platform-nest`
+explicitly. **It does not, and refusing that is the point.**
+
+- The OAuth callback and webhook blocks **stay on `erp.gaiada.online`, on `gda-aicenter`** — the
+  estate's one reviewed public edge, which already terminates TLS, already rate-limits and
+  already has a rollback people have used. The only change to
+  `infra/nginx/snippets/gaiada-social-postiz.conf` is `proxy_pass`: `127.0.0.1:4007` →
+  `10.88.0.2:4007`. Same two paths, same limits, nothing widened.
+- **`FRONTEND_URL` is unchanged** (`https://erp.gaiada.online/social`, a path `platform-ui`
+  serves). The spike's §7 preferred design gets *cheaper* under the split, not harder: the
+  callback still lands on a URL that is public for reasons predating SMM, and the hand-off to
+  Postiz's backend goes over the tunnel instead of over loopback. Because the registered
+  `redirect_uri` string does not change, **the host move cannot invalidate an already-connected
+  account** — that hazard is real but this change does not trip it.
+- The ERP reaches `/api/public/v1/*` over the tunnel, where there is no public listener to
+  allowlist. **The public surface does not grow by one path as a result of the host move.** If
+  anyone later proposes an ERP `location` block on a VPS vhost, that is the proposal to refuse.
+
+**The honest cost, stated rather than buried.** Who can reach Postiz's full surface is unchanged
+*in kind* — before, anyone with a shell on `gda-aicenter`; now, anyone with a shell on either
+host, or holding the tunnel's private key. The perimeter is two hosts wide instead of one. "The
+tunnel is the new loopback" is a claim worth checking, not assuming, and the runbook asserts the
+negative (`curl` :4007 from a third machine must time out) as hard as the positive.
+
+### 4. Reconcile cadence (SMM-10) — keep 15 minutes; the latency is not where the cost is
+
+Design §10 sets `smm-post-status-sync` at a webhook trigger plus a 15-minute safety poll.
+**Recommendation: leave it at 15 minutes.** The reasoning, now that the number is measured:
+
+- The sweep's wall-clock is dominated by the **number of in-flight posts**, not by RTT. At
+  2.6 ms, even a naive per-post loop over 200 variants costs ~0.5 s of network time. 15 minutes
+  was chosen for *freshness*, and freshness is unaffected by the host split.
+- **Batch the sweep anyway.** `GET /public/v1/posts` takes a date range, so one authenticated
+  call per (org, window) covers the period. Per-call RTT then amortises to nothing and the
+  cadence stays a freshness decision rather than a cost decision.
+- **Do not add a tight post-dispatch poll.** If the console wants "did it publish?" freshness at
+  the scheduled instant, use a bounded decaying re-check on that one post — **+60 s, +5 min,
+  +15 min**, then fall back to the sweep. Three extra calls, not a busy loop.
+- **Set the adapter's HTTP timeouts explicitly.** This estate has already shipped a default
+  30 s timeout against a real 31–40 s round trip (the n8n dispatcher, `dispatcher_unreachable`
+  after the run was already created). Recommended: **connect 5 s, read 30 s, media upload 120 s.**
+- **⚠ The real latency cost is media upload, not status polling.** Every image and video now
+  crosses a host boundary before it ever reaches a network. That is the one call whose duration
+  changed by more than milliseconds, and it is also the one the MTU trap above breaks silently.
+- **Cross-host makes §11's ambiguous-publish rule load-bearing.** A timed-out publish call is
+  materially more likely off-machine than over loopback, so "no auto-retry of ambiguous publish
+  failures" stops being a theoretical safeguard and becomes the thing that prevents a
+  double-post. SMM-10 should treat it as a tested path, not a comment.
+
+### 5. Key custody (D-5) — unchanged in shape; two new facts about where it lives
+
+The three-way split holds exactly as written in §11. What the retarget adds:
+
+- **The Postiz org API key now travels on every call** (custody split (b)), as an `Authorization`
+  header, **inside the tunnel**. It is still server-side only: `platform-nest`'s env → the
+  adapter → the wire. Never platform-ui, never n8n credentials, never a tenant row, never an
+  audit line. Named in the contract as `SOCIAL_POSTIZ_ORG_API_KEY` (see §7) so a rename cannot
+  drift across two hosts. Two logging obligations follow, both cheap and both easy to miss: no
+  nginx log format on either host may include `$http_authorization`, and the adapter's OTel/module
+  logging keeps to org/network/op as §11 already specifies.
+- **⚠ The platform-app credentials (custody split (a) — the moat) now live on a host that also
+  runs unrelated private production.** `SOCIAL_FACEBOOK_APP_SECRET` and its siblings move to the
+  VPS's `.env`, because that is where the Postiz container reads them. That is a real change in
+  custody surface and it is an owner-visible fact, not an implementation detail. Mitigations in
+  the runbook: `.env` at mode 0600 under a dedicated directory, and rotation on decommission of
+  that host. **Client network tokens are unaffected** — custody split (c) keeps them inside
+  Postiz, which is now simply a different machine.
+- **Confirm the VPS's backup regime does not snapshot the Postiz volumes.** The "never back up
+  volumes holding live OAuth tokens" rule is ours; that box's backup policy is the owner's.
+
+### 6. What the host change invalidates in the SMM-04 spike — read before trusting it
+
+The spike report carries a retarget banner and a §12 with the same list. In short:
+
+| Spike claim | Status after the retarget |
+|---|---|
+| §5, `gda-aicenter` headroom (4.0 GB / 13 GB / 22 containers) | **Moot as a gate, still correct as facts.** The tripwire was cleared by changing hosts, **not** by shrinking the footprint — that is unchanged (~3.4 GiB RSS floor; ~7.6 GB day-one disk on the VPS, up from ~6.7 GB because none of the base images are resident there). |
+| §4's `mem_limit: 3g` on `postiz` | **Raised to 4g, deliberately.** 3g was a 6% margin over a measured peak on a process whose RSS was *still climbing* when measurement stopped — on a 12 GiB host that converts a normal soak into a routine OOM-kill and destroys the signal. The limit's job also changed: it no longer protects the ERP (different machine) — **it protects the owner's 19 production containers.** All five limits sum to ~5.97 GiB of ~12 GiB. |
+| §11.4, "RSS was still drifting; treat §4 as a floor" | **More important now, not less.** 12 GiB of headroom invites complacency about an orchestrator that spawns 30+ Temporal workers with no env var to trim it. A soak test is still owed. |
+| §10, runbook step 0: `docker image prune -a --filter until=168h` | **⚠ DELETED, and must not come back.** It was correct against 13 GB of free disk and our own images. On the VPS it would delete images belonging to production that is not ours. Replaced by a `docker ps -a` baseline/diff and a `df -h`. The safe maintenance item is `docker builder prune -af` (build cache only, provably inert), per §A4k. |
+| §10's `--remove-orphans` analysis | **Still true and now doubly so** (separate project *and* unreachable host) — but a **new** trap replaces it: the VPS has 19 containers in other people's compose projects, so any non-project-scoped Docker command there is the danger. Rules in the runbook. |
+| §6/§7 containment audit, invariants 1–5 | **Unchanged, and invariant 1 is stronger** — the licence zone is now a separate machine, which makes "arm's length, REST only, no shared process" easier to demonstrate. §A4k's point 4 holds. |
+| §7 preferred ingress design | **Unchanged and cheaper.** Still unverified end to end; still SMM-07's to prove. |
+| §11.2, "nothing was run on `gda-aicenter`" | **Extend it: nothing has been run on the VPS either.** All footprint numbers remain local-Docker floors. New unverified items: the tunnel itself, and every VPS-side prerequisite in §7 below. |
+| §8a (TikTok fork exception), §8b (**OQ-4: Postiz has ZERO inbound surface**) | **Untouched by the host change.** Both remain the architect's, and §8b still means SMM-15/16/17/18 have nothing to call. |
+
+### 7. Blocked on facts, not on decisions — what still needs a credential
+
+Everything above about the VPS is planned from the owner's stated measurements plus this repo,
+because **no SSH credential for `150.109.15.108` exists on the working machine** (`~/.ssh/vps_zenvix`
+is referenced by project-hug's DEPLOYMENT.md and is absent). Asking was preferred to inventing.
+Four read-only checks would close it, and all four are one line:
+
+1. `ls /lib/modules/$(uname -r)/kernel/drivers/net/wireguard/` — is `wireguard.ko` present?
+   (Ubuntu 24.04 ships it; unverified on this host.)
+2. `ip -o link show` — the underlay MTU, to confirm 1380 is right from that side too.
+3. `sudo ufw status` and `sudo iptables -S DOCKER-USER` — what the firewall actually does, and
+   whether anything already contends for UDP/51820 or TCP/4007.
+4. `docker ps -a --format '{{.Names}}'` — the 19-container baseline to diff against later.
+
+Nothing in the plan changes if all four come back as expected; they are confirmations, and each
+one is a thing that would otherwise be discovered during a deploy onto someone else's production.
+
+**The contract SMM-05 implements** (named here so it cannot drift across two hosts):
+
+| Var | Host | Meaning |
+|---|---|---|
+| `SOCIAL_POSTIZ_BASE_URL` | `gda-aicenter` | `http://10.88.0.2:4007` — the tunnel peer. Not a public hostname, not https: there is no public listener to name, and the tunnel supplies what https would. A tunnel outage must fail closed here, loudly. Never "fix" it by pointing at a public address. |
+| `SOCIAL_POSTIZ_ORG_API_KEY` | `gda-aicenter` | Custody split (b). Server-side only; sent as `Authorization`; rotating it is a two-host edit. |
+| `SOCIAL_BIND_ADDR` | VPS | `10.88.0.2`. **Never `0.0.0.0`** — Docker's published-port rules are evaluated before ufw's, so a `0.0.0.0` bind is internet-reachable on a box whose firewall reports "deny incoming". Default is `127.0.0.1` so a missing value fails safe. |
+| the rest of `SOCIAL_*` | VPS | Filling these into `gda-aicenter`'s `.env` does **nothing** — no service there names them — while scattering the group's app secrets onto a host with no use for them. `.env.example` now banners both halves. |
+
+---
+
 ## §A5 · Sequencing note — what to do first
 
 1. **SMM-30 + SMM-01 together** (they are one schema conversation: tables, then the permission rows

@@ -1,8 +1,15 @@
 # SMM-04 — Postiz containment spike + deploy plan
 
+> ## ⚠ SUPERSEDED IN PART, 2026-08-13 — read §12 before acting on anything below.
+> The owner resolved OQ-7 (addendum §A4k) and **the target host changed**: Postiz runs on the
+> SumoPod VPS `150.109.15.108`, not on `gda-aicenter`. §9's blocked decision is **closed**
+> (option C). §5's headroom read is moot as a gate. **One instruction in this report is
+> actively dangerous on the new host** — the `docker image prune -a` in the runbook procedure —
+> and §12 lists it with everything else the move invalidates. The retarget is SMM-04b; its
+> reasoning lives in addendum **§A4l**.
+
 > **Status:** **PROTOTYPED** — the trimmed stack was built, started and driven on local Docker.
-> **Nothing was deployed to `gda-aicenter`**, and the deploy is now **BLOCKED pending an owner
-> decision**: the footprint tripwire named in addendum §A4c has fired on measured numbers.
+> **Nothing has been deployed to either host.**
 > **Ticket:** SMM-04 (⚡ contract-touching: licence + security boundary; QA gate mandatory).
 > **Date:** 2026-08-13 · **Seat:** senior-integrator ·
 > **Binding inputs:** [`smm-design-addendum-2026-08-12.md`](../../blueprints/smm-design-addendum-2026-08-12.md)
@@ -407,7 +414,44 @@ stops the publish loop being developed; it stops it being *hosted on that box*.
 
 ---
 
+## §12 · SMM-04b retarget (2026-08-13) — what this report still means
+
+The owner moved the host (§A4k). Full reasoning, the transport decision and the measurements are
+in addendum **§A4l**; this section exists so nobody acts on a stale instruction from §1–§11.
+
+**One thing here is dangerous, not merely stale.** §10's runbook procedure opened with
+`docker image prune -a --filter "until=168h"`. That was correct against `gda-aicenter`'s 13 GB
+of free disk and our own images. The new host runs **19 containers of the owner's private
+production**, so on that box the same command deletes images that are not ours and that stopped
+production containers need to restart from. **It has been removed from the runbook. Do not put
+it back.** The safe equivalent is `docker builder prune -af` (build cache only, provably inert).
+
+| § | Claim | After the retarget |
+|---|---|---|
+| §1 / §4 | ~3.4 GiB RSS, ~6.7 GB disk | **Footprint unchanged** — the tripwire was cleared by changing hosts, not by shrinking anything. Disk is now **~7.6 GB** day one: none of `postgres:16/17-alpine` or `redis:7.2-alpine` is resident on the VPS, so the "zero new bytes" credits do not apply there. |
+| §5 | `gda-aicenter` headroom | **Moot as a gate; still correct as facts** about that box. |
+| §9 | The blocked decision | **CLOSED — option C.** Own host for the Postiz stack. |
+| §6 / §7 | Containment invariants 1–5 | **Unchanged; invariant 1 is stronger.** The licence zone is a separate machine now, which makes "arm's length, REST only, no shared process" easier to demonstrate. §7's preferred ingress design is unchanged, cheaper, and still SMM-07's to prove. |
+| §7 | `proxy_pass http://127.0.0.1:4007` | Now `http://10.88.0.2:4007` — the WireGuard peer. The edge blocks **stay on `erp.gaiada.online`**; the VPS gets no vhost, no certificate and no public listener. `FRONTEND_URL` is unchanged, so no connected account can be invalidated by the move. |
+| §8a / §8b | TikTok fork exception; **OQ-4 = zero inbound surface** | **Untouched.** Both remain the architect's. |
+| §10 | separate project / `--remove-orphans` | Still true, now doubly so. **New trap in its place:** never run a non-project-scoped Docker command on the VPS. |
+| §11 | "Nothing was run on `gda-aicenter`" | **Extend: nothing has been run on the VPS either.** All figures remain local-Docker floors. New unverified items: the tunnel, and the VPS-side prerequisites (§A4l §7). |
+
+**Two things this report could not have known, both measured 2026-08-13:** the hop is **2.6 ms**
+(8/8 ICMP, ~3 hops, TCP handshake 2.0–3.0 ms), so latency is not a design constraint; and
+`gda-aicenter`'s `ens4` is **MTU 1460**, so the tunnel MTU must be 1380 or **media uploads
+black-hole silently** while every small request succeeds.
+
+**One deliberate change to a number this report set:** `postiz`'s `mem_limit` goes 3g → **4g**.
+3g was a 6% margin over a peak that was still climbing when measurement stopped — defensible on
+a 4 GB box, self-defeating on a 12 GiB one, where it turns a soak into a routine OOM-kill and
+destroys the signal. The limit's purpose also changed: it no longer protects the ERP, it
+protects the owner's 19 production containers.
+
+---
+
 *Cross-references:* [SMM addendum §A4c/§A4d](../../blueprints/smm-design-addendum-2026-08-12.md) ·
+[§A4k/§A4l retarget](../../blueprints/smm-design-addendum-2026-08-12.md) ·
 [base design §03/§06/§11](../../blueprints/smm-design.md) ·
 [deploy runbook](../../../infra/runbooks/deploy-vps.md) ·
 [compose](../../../infra/compose/docker-compose.social.yml) ·
