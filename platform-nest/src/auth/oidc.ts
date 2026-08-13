@@ -28,7 +28,18 @@ export interface VerifiedToken {
   email: string;
   emailVerified: boolean;
   name: string;
-  amr: string[]; // auth methods — includes "mfa"/"otp" when the IdP stepped the user up
+  amr: string[]; // auth methods actually completed, per the IdP's `amr` claim — includes
+  // "mfa"/"otp"/"hwk"/"totp" when the IdP stepped the user up. An empty array is a LEGITIMATE
+  // weak-auth login (e.g. password-only) once the claim is wired; see `amrClaimPresent` below
+  // for the separate "the claim never arrived at all" signal — the two must never be conflated
+  // (IAM-MFA-01).
+  amrClaimPresent: boolean; // false ONLY when `amr` was entirely absent or not an array on the
+  // verified token — i.e. the IdP client has no AMR mapper wired (or emitted garbage). This is
+  // the root-cause distinction IAM-MFA-01 fixes: Keycloak's built-in AMR protocol mapper, once
+  // attached, ALWAYS sets the claim (as an array — empty for a plain password login, non-empty
+  // once a step-up authenticator with a reference value completes); it is never omitted by a
+  // correctly-wired client. So an absent claim key is not "the user didn't do MFA", it's "this
+  // client/realm was never configured to say so" — see infra/runbooks/enable-mfa.md.
 }
 
 export async function verifyToken(token: string): Promise<VerifiedToken> {
@@ -47,12 +58,18 @@ export async function verifyToken(token: string): Promise<VerifiedToken> {
   // Only a real, IdP-VERIFIED email may ever be used to link to a pre-existing account
   // (account-takeover guard). preferred_username is NOT an email and is never verified.
   const email = typeof p.email === "string" ? p.email : "";
+  // IAM-MFA-01: distinguish "claim absent/malformed" (amrClaimPresent=false, a misconfiguration)
+  // from "claim present but empty" (a legitimate weak-auth login) — see the VerifiedToken
+  // doc comment. Do NOT collapse both into `[]` without recording which one happened; that
+  // collapse is exactly what made "high" assurance structurally unreachable and silent.
+  const amrClaimPresent = Array.isArray(p.amr);
   return {
     sub: p.sub,
     email,
     emailVerified: email !== "" && p.email_verified === true,
     name: p.name ?? p.preferred_username ?? email ?? p.sub,
-    amr: Array.isArray(p.amr) ? p.amr : [],
+    amr: amrClaimPresent ? (p.amr as string[]) : [],
+    amrClaimPresent,
   };
 }
 
@@ -91,9 +108,50 @@ export async function provisionUser(tok: VerifiedToken): Promise<string> {
   return id;
 }
 
-/** MFA'd IdP session → 'high' assurance (unlocks step-up-gated actions, D4.3). */
+const STRONG_AMR_METHODS = ["mfa", "otp", "hwk", "totp"];
+
+// IAM-MFA-01: counts every verified token whose `amr` claim was absent/malformed — i.e. every
+// login `assuranceFor()` was FORCED to cap at "linked" because the IdP client isn't emitting the
+// claim it needs, rather than because the user genuinely didn't step up. Before this ticket that
+// case was indistinguishable from "no MFA" and silently became "linked" forever, with nothing to
+// grep or alert on — the actual defect this ticket closes. A misconfigured client/realm now shows
+// up here on the very first login attempt instead of only being found by an audit months later.
+// Exported so a boot/health check or metrics scrape can be wired to it later (owner decision —
+// out of this ticket's file scope, see the IAM-MFA-01 report).
+let amrClaimMissingCount = 0;
+
+/** Introspection for a future boot/health/metrics wire-up; also the test seam's assertion point. */
+export function getAmrClaimMissingCount(): number {
+  return amrClaimMissingCount;
+}
+
+/** Test seam: isolate the counter between test cases/files. */
+export function resetAmrClaimMissingCounterForTest(): void {
+  amrClaimMissingCount = 0;
+}
+
+/** MFA'd IdP session → 'high' assurance (unlocks step-up-gated actions, D4.3).
+ *
+ *  IAM-MFA-01 root cause: Keycloak never sent an `amr` claim, so every session assembled at
+ *  "linked" no matter what the user did, and enrolling in TOTP could never change that — the
+ *  claim carrying the fact didn't exist. Wiring Keycloak's built-in AMR protocol mapper (see
+ *  `infra/runbooks/enable-mfa.md`) fixes the emission side; THIS function fixes the consumption
+ *  side so the same failure mode can't recur invisibly: an absent/malformed claim still fails
+ *  CLOSED to "linked" (never invents "high"), but it is now a DISTINCT, loud, countable case
+ *  instead of being silently indistinguishable from a legitimate weak-auth login. */
 function assuranceFor(tok: VerifiedToken): "high" | "linked" {
-  return tok.amr.some((m) => ["mfa", "otp", "hwk", "totp"].includes(m)) ? "high" : "linked";
+  if (!tok.amrClaimPresent) {
+    amrClaimMissingCount++;
+    console.error(
+      `[oidc:amr-claim-missing] verified token for sub=${tok.sub} carries no usable "amr" claim — ` +
+        `the IdP client has no AMR protocol mapper wired (or it emitted a non-array value). ` +
+        `Assurance is capped at "linked"; the high-assurance tier is UNREACHABLE for this ` +
+        `session and will stay that way for every session until the mapper is fixed. ` +
+        `See infra/runbooks/enable-mfa.md. (occurrences this process: ${amrClaimMissingCount})`,
+    );
+    return "linked";
+  }
+  return tok.amr.some((m) => STRONG_AMR_METHODS.includes(m)) ? "high" : "linked";
 }
 
 /** Full path: verify token → provision → assemble principal at the right assurance. */

@@ -1,10 +1,16 @@
 // 5b.1: OIDC verification + auto-provision + assurance mapping, driven by an in-test
 // signing key (no running IdP). Live-Keycloak wiring is exercised in the phase e2e.
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
 import { generateKeyPair, exportJWK, SignJWT, createLocalJWKSet, type JWK } from "jose";
 import { config } from "../config";
 import { withGlobal } from "../db";
-import { setJwksForTest, verifyToken, principalFromToken } from "./oidc";
+import {
+  setJwksForTest,
+  verifyToken,
+  principalFromToken,
+  getAmrClaimMissingCount,
+  resetAmrClaimMissingCounterForTest,
+} from "./oidc";
 import { initTestDb, teardownTestDb, TEST_URL } from "../testing/setup";
 import { createUser } from "../testing/fixtures";
 
@@ -82,5 +88,64 @@ describe.skipIf(!TEST_URL)("OIDC verification (5b.1)", () => {
     expect(mfa?.assurance).toBe("high");
     const pwd = await principalFromToken(await token({ sub: "kc-pwd", email: "p@gaiada.test", email_verified: true, amr: ["pwd"] }));
     expect(pwd?.assurance).toBe("linked");
+  });
+
+  // IAM-MFA-01: the platform read a claim (`amr`) Keycloak never sent, so "high" assurance was
+  // structurally unreachable and the gap was silent — an absent claim was indistinguishable from
+  // a legitimate weak-auth login. These four cases pin the fixed contract: fail-closed stays
+  // exactly "linked" (never invents "high"), but an absent/malformed claim is now a DISTINCT,
+  // surfaced case (logged + counted), while a genuinely empty — but PRESENT — claim (a real
+  // password-only login on a correctly wired client) is NOT surfaced, so ops isn't paged for
+  // every ordinary login once MFA is enabled.
+  describe("IAM-MFA-01: amr claim presence vs content", () => {
+    let errorSpy: ReturnType<typeof vi.spyOn>;
+
+    beforeEach(() => {
+      resetAmrClaimMissingCounterForTest();
+      errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    });
+
+    afterAll(() => {
+      errorSpy?.mockRestore();
+    });
+
+    it("claim WITH a strong-auth method → high, no surfacing", async () => {
+      const p = await principalFromToken(
+        await token({ sub: "kc-mfa01-strong", email: "s1@gaiada.test", email_verified: true, amr: ["pwd", "otp"] }),
+      );
+      expect(p?.assurance).toBe("high");
+      expect(getAmrClaimMissingCount()).toBe(0);
+      expect(errorSpy).not.toHaveBeenCalled();
+    });
+
+    it("claim WITHOUT the amr key at all (mapper never wired) → linked, AND surfaced", async () => {
+      const before = getAmrClaimMissingCount();
+      const p = await principalFromToken(
+        await token({ sub: "kc-mfa01-absent", email: "s2@gaiada.test", email_verified: true }), // no `amr` at all
+      );
+      expect(p?.assurance).toBe("linked"); // fail-closed: never "high" on a missing claim
+      expect(getAmrClaimMissingCount()).toBe(before + 1); // surfaced via the counter
+      expect(errorSpy).toHaveBeenCalledTimes(1);
+      expect(errorSpy.mock.calls[0][0]).toContain("[oidc:amr-claim-missing]");
+    });
+
+    it("malformed claim (amr is a string, not an array) → linked, AND surfaced", async () => {
+      const before = getAmrClaimMissingCount();
+      const p = await principalFromToken(
+        await token({ sub: "kc-mfa01-malformed", email: "s3@gaiada.test", email_verified: true, amr: "otp" }),
+      );
+      expect(p?.assurance).toBe("linked");
+      expect(getAmrClaimMissingCount()).toBe(before + 1);
+      expect(errorSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it("claim PRESENT but genuinely empty (real password-only login) → linked, NOT surfaced", async () => {
+      const p = await principalFromToken(
+        await token({ sub: "kc-mfa01-empty", email: "s4@gaiada.test", email_verified: true, amr: [] }),
+      );
+      expect(p?.assurance).toBe("linked");
+      expect(getAmrClaimMissingCount()).toBe(0); // a legitimate weak login, not a misconfiguration
+      expect(errorSpy).not.toHaveBeenCalled();
+    });
   });
 });
