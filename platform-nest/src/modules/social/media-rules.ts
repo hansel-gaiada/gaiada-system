@@ -97,8 +97,22 @@ const IG_TYPES = new Set(["feed", "reel", "story"]);
 const TIKTOK_MODES = new Set(["direct", "inbox"]);
 const YT_VISIBILITY = new Set(["public", "unlisted", "private"]);
 
-function countHashtags(text: string): number {
+export function countHashtags(text: string): number {
   return (text.match(/(^|\s)#[\p{L}\p{N}_]+/gu) ?? []).length;
+}
+
+/** SMM-19 — the per-network hashtag cap this file already enforces during validation, exposed so AI
+ *  hashtag drafting (`ai-drafts.ts`) constrains its OWN output to the SAME number instead of growing
+ *  a second table that could silently drift from the one `validateVariant` checks against.
+ *  `undefined` means the network has no documented hashtag convention we actively check. */
+export function maxHashtagsFor(network: Network): number | undefined {
+  return SPECS[network].maxHashtags;
+}
+
+/** Whether `network` has a first-comment surface (Instagram-style hashtag placement) — the same
+ *  one-source-of-truth reasoning as `maxHashtagsFor`. */
+export function supportsFirstCommentFor(network: Network): boolean {
+  return SPECS[network].supportsFirstComment;
 }
 
 /** Validate ONE variant against ONE network. `quota` is optional: pass the account's live snapshot

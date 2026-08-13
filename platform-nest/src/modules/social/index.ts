@@ -306,6 +306,87 @@ export const socialModule: ModuleContract = {
         required: ["tenantId", "engagementId", "accountId", "title"],
       },
     },
+    // ── SMM-19: brand-voice RAG + AI drafting ──────────────────────────────────────────────────
+    // Tool parity with the same three HTTP endpoints, the SAME authorize() calls (update/update/
+    // create — no new permission was declared for these: every one of them writes exactly the kind
+    // of thing its existing permission already governs, and a NEW key with no OTHER endpoint behind
+    // it is the reach-nobody-reviewed trap this file's own header warns about). All three are
+    // write+impact:'low': every one persists a DRAFT row (or a knowledge pointer) and none of them
+    // can reach a live network — the D19 "impact-classed" criterion here is "this is not the
+    // publish surface", not "an automation principal is suspended".
+    {
+      name: "social.ingestBrandCorpus",
+      description:
+        "Ingest approved past posts and brand guidelines into this engagement's brand-voice "
+        + "knowledge corpus (WS8-owned, tenant+client ACL'd — design D-13). Re-ingesting REPLACES "
+        + "the prior chunks for this client. Every drafting call below grounds itself in this corpus.",
+      minAssurance: "low",
+      write: true,
+      impact: "low",
+      method: "POST",
+      pathTemplate: "/api/:tenantId/modules/social/engagements/:engagementId/brand-corpus/ingest",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tenantId: { type: "string", description: "Company id (route scope)." },
+          engagementId: { type: "string", description: "The engagement whose client's corpus this feeds." },
+          chunks: {
+            type: "array", items: { type: "string" },
+            description: "Approved past captions / brand guideline text, one chunk per entry.",
+          },
+        },
+        required: ["tenantId", "engagementId", "chunks"],
+      },
+    },
+    {
+      name: "social.draftPostVariant",
+      description:
+        "Draft (or re-draft) one network variant's caption and hashtags via the brand-voice RAG. "
+        + "Honours the brand's hashtag_strategy and the network's own caps (media-rules.ts) — never "
+        + "a second set of limits. Hermes by default, Claude when the engagement's "
+        + "tool_scope.ai.cloudPolish is on. Writes a DRAFT row and re-runs the same validation/hash "
+        + "state law a human edit would trigger — it never dispatches. Refuses "
+        + "'image_generation_unavailable' if asked to generate an image: no such backend exists.",
+      minAssurance: "low",
+      write: true,
+      impact: "low",
+      method: "POST",
+      pathTemplate: "/api/:tenantId/modules/social/posts/:postId/variants/:variantId/draft-caption",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tenantId: { type: "string", description: "Company id (route scope)." },
+          postId: { type: "string", description: "The master post." },
+          variantId: { type: "string", description: "The per-network variant to draft into. Must be in an editable state (draft/in_review/approved), never a native import." },
+        },
+        required: ["tenantId", "postId", "variantId"],
+      },
+    },
+    {
+      name: "social.draftPostIdeas",
+      description:
+        "Draft N content-idea posts (title + brief) for an engagement, grounded in the brand corpus "
+        + "and the engagement's own recent posts. Writes rows with status='idea', source='ai' — "
+        + "never dispatches. Idempotent: pass an `ids` array matching `count` and a retry updates "
+        + "nothing rather than creating a second set.",
+      minAssurance: "low",
+      write: true,
+      impact: "low",
+      method: "POST",
+      pathTemplate: "/api/:tenantId/modules/social/posts/draft-ideas",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tenantId: { type: "string", description: "Company id (route scope)." },
+          engagementId: { type: "string", description: "The engagement to draft ideas for." },
+          campaignId: { type: "string", description: "Optional campaign to group the ideas under." },
+          campaignGoal: { type: "string", description: "Optional goal/angle to steer the ideas." },
+          count: { type: "number", description: "How many ideas to draft (default 3, max 10)." },
+          ids: { type: "array", items: { type: "string" }, description: "Optional caller-supplied uuids, one per idea, matching `count` — the idempotency key for a retry." },
+        },
+        required: ["tenantId", "engagementId"],
+      },
+    },
   ],
   rollupProviders: [socialRollups],
   // D-18: the console is the department template's reserved "Publish" craft group, under the

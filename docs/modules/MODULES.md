@@ -49,7 +49,7 @@ versions below; the running build reports it at `GET /health`.
 | webdev | `0.13.0` | IN PROGRESS | Web Dev | 2026-08-09 |
 | webdesk | `0.0.0` | PLANNED | Web Dev | 2026-07-23 |
 | search-marketing | `0.5.1` | DEV-VERIFIED | SEO | 2026-08-04 |
-| social-media | `0.3.0` | IN PROGRESS | Social Media | 2026-08-13 |
+| social-media | `0.4.0` | IN PROGRESS | Social Media | 2026-08-13 |
 | creative | `0.1.0` | PROTOTYPED | Creative | 2026-07 |
 | render-gateway-go | `0.0.0` | PLANNED | Creative | 2026-07-23 |
 | reports | `0.3.1` | PROTOTYPED | Cross-cutting | 2026-08-03 |
@@ -1229,7 +1229,48 @@ SM-23 (this reconciliation) â†’ SM-24.
 
 </details>
 
-## social-media — SMM · Organic Publishing · `0.3.0` · IN PROGRESS
+## social-media — SMM · Organic Publishing · `0.4.0` · IN PROGRESS
+
+**0.4.0 (2026-08-13, SMM-19 — brand-voice RAG + AI drafting, DEV-VERIFIED):** caption/hashtag/idea
+drafting through **ai-gateway-go only** — Hermes by default, Claude only as a per-request `provider`
+reorder hint when the engagement's `tool_scope.ai.cloudPolish` is on — grounded in each client's own
+brand corpus, ingested as **tenant+client-ACL'd WS8 knowledge sources** (`social-brand:{tenantId}:
+{clientId}`, design D-13: WS8 stays the sole owner of derived knowledge stores; `social_brand_profiles`
+holds only the `knowledge_source_ids` pointer, never corpus text, never an embedding column — no new
+migration needed for this ticket). Three new files (`gateway-client.ts`, `knowledge-client.ts`,
+`ai-drafts.ts`) and three new endpoints, all reusing EXISTING permissions
+(`social.engagement.update`, `social.post.update`, `social.post.create`) rather than declaring new
+catalog reach nothing else enforces:
+
+1. **The cross-client leak test — the assertion that mattered most.** A fake WS8 server
+   (`social-ai-drafts.test.ts`) reimplements the real isolation predicate
+   (`scope = ANY(acl)`) over a store holding BOTH clients' corpora at once. Drafting for client A's
+   variant is proven to retrieve and quote ONLY client A's excerpts — the prompt Hermes actually saw,
+   the `groundedOn` sourceRefs returned, and the WS8 `/search` request itself are all asserted
+   directly — and the same holds in reverse for client B. The scope string is derived from the
+   variant/engagement's own DB-joined `client_id`, never from a request body field, which is what
+   makes the property hold even against a caller trying to influence it.
+2. **Hashtags are never the model's own answer.** `applyHashtagStrategy()` re-derives the final list
+   every time: the brand's `hashtag_strategy` (banned/required/count/placement) and the network's own
+   cap — **reused from `media-rules.ts`'s `maxHashtagsFor`/`supportsFirstCommentFor`, never a second
+   table of limits** — both apply regardless of what the AI proposed.
+3. **Drafts are rows, never dispatches.** Caption drafting reuses the EXACT state law
+   `updateVariant` enforces (re-validate, recompute `args_sha256`, invalidate any existing approval
+   in the same statement) via a shared private helper — an AI-authored edit is still an edit. Idea
+   drafting writes `social_posts` rows (`status='idea', source='ai'`), idempotent via a
+   caller-supplied `ids` array. Nothing here can reach a live network.
+4. **`ai.drafting` off refuses `ai_drafting_disabled` before any gateway egress**; a `wantImage`
+   request refuses `image_generation_unavailable` before any gateway egress either — D-17's "no
+   image path" boundary is enforced at the surface, not just documented.
+
+Zero direct vendor calls asserted directly: `gateway-client.test.ts` proves every `/complete` call
+targets the ONE configured gateway host (never a vendor SDK), and the cloudPolish `provider` hint is
+a pure reorder — this module never asserts a vendor identity. 3 MCP tools added
+(`social.ingestBrandCorpus`, `social.draftPostVariant`, `social.draftPostIdeas`), all
+`write:true, impact:'low'` with the SAME `authorize()` calls as the HTTP surface. 59 new tests across
+three files (22 pure prompt/hashtag unit tests, 5 gateway-client host-isolation tests, 10 golden-case
+endpoint tests incl. the leak test) on top of the existing 50; **87/87 passing**. BFF contract §19
+extended.
 
 **0.3.0 (2026-08-13, SMM-08 - the composer backend, DEV-VERIFIED):** posts + per-network variants
 CRUD, the media-rule validation engine, quota pre-check, `args_sha256` maintenance and the

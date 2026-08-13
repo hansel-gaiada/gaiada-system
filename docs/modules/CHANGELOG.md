@@ -4573,6 +4573,38 @@ Built by a 4-agent parallel run against a frozen contract (`docs/superpowers/pla
 - 26 tickets P0–P3 + 2 committed P4 (design §12).
 
 ## social-media
+### [0.4.0] — 2026-08-13 · IN PROGRESS
+- **SMM-19 — brand-voice RAG + AI drafting, DEV-VERIFIED against live Postgres + Cerbos-stubbed
+  HTTP.** Three new endpoints, all through `ai-gateway-go` (zero direct vendor calls — asserted
+  directly, see below), all writing DRAFT rows only, never dispatching:
+  - `POST engagements/:id/brand-corpus/ingest` — approved past posts + brand guidelines become
+    tenant+client-ACL'd WS8 knowledge sources (`social-brand:{tenantId}:{clientId}`, design D-13).
+    `social_brand_profiles.knowledge_source_ids` stores the pointer only — never corpus text, never
+    an embedding column; no new migration needed for this ticket.
+  - `POST posts/:postId/variants/:variantId/draft-caption` — caption + hashtags grounded in the
+    client's own corpus (Hermes by default, Claude only as a `provider` reorder hint when
+    `tool_scope.ai.cloudPolish` is on). Hashtags are re-derived through `applyHashtagStrategy()`
+    every time — the brand's `hashtag_strategy` and the network's own cap
+    (`media-rules.ts`'s `maxHashtagsFor`/`supportsFirstCommentFor`, REUSED not duplicated) both
+    apply regardless of what the model proposed. Persists through the SAME state law
+    `updateVariant` enforces (re-validate, recompute `args_sha256`, invalidate any existing
+    approval in one statement).
+  - `POST posts/draft-ideas` — N content-idea posts (`status='idea', source='ai'`), idempotent via
+    a caller-supplied `ids` array.
+  - **The cross-client leak test** (`social-ai-drafts.test.ts`): a fake WS8 server reimplementing
+    the real `scope = ANY(acl)` isolation predicate over a store holding BOTH clients' corpora
+    proves a draft for client A's variant retrieves and quotes ONLY client A's excerpts — never
+    client B's — in both directions. The scope is derived from the DB-joined `client_id`, never a
+    request field.
+  - `ai.drafting` off refuses `ai_drafting_disabled`; a `wantImage` request refuses
+    `image_generation_unavailable` — both before any gateway egress (D-17: no image-generation
+    backend exists, and none is built here).
+  - 3 new MCP tools (`social.ingestBrandCorpus`, `social.draftPostVariant`, `social.draftPostIdeas`),
+    `write:true, impact:'low'`, reusing the EXISTING `social.engagement.update`/`social.post.update`/
+    `social.post.create` permissions — no new catalog/Cerbos change in this ticket.
+  - 59 new tests (22 unit + 5 gateway-host-isolation + 10 golden-case incl. the leak test); social
+    module suite **87/87 passing**. `FRONTEND-BFF-CONTRACT.md` §19 extended.
+
 ### [0.0.0] — 2026-07-23 · PLANNED
 - Foundation research + v1.0 architect design; no code. See `blueprints/smm-foundation.md` +
   `blueprints/smm-design.md` (+ print `GAIADA-Social-Media-Engineering-Blueprint.pdf`).
