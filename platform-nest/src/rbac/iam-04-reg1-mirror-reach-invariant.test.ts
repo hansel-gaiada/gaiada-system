@@ -389,6 +389,22 @@ const IAM_04_REG1_OWNED_KINDS = new Set([
  * `member.read`/`service_assignment.read` are untouched by REG3 and stay removed from this
  * register. See docs/superpowers/plans/2026-08-13-iam-04-reg3-report.md.
  *
+ * IAM-04-B6 (2026-08-13) wired `social_engagement` (read/create/update/delete/set_scope) and
+ * `social_post` (read/create/update/delete/import_native only — submit/publish/cancel/
+ * delete_published have no handler and stay unmirrored) via the SAME module_manager/module_staff
+ * mechanism as every entry above. Handler evidence (not assumed): `src/modules/social/
+ * social.controller.ts` is real, wired code (`registerModule(socialModule)` in main.ts), and every
+ * one of its ~20 `authorize()` call sites for these two kinds hardcodes `module: "social"`, zero
+ * exceptions — grepped tree-wide, matching IAM-04-REG2's exact method. The 10 new pairs below are
+ * added to this ticket's baseline as CONFIRMED FALSE, by the same reasoning as every other
+ * module-mediated entry here. `social_ledger.admin` — the one other IAM-04-B6 action — is NOT in
+ * this register: it has no module_manager/module_staff holder in its bundle at all (company_admin
+ * only), so it never appears in the DISCOVERY sweep in the first place. `portal` gets NO mirror at
+ * all (BLOCKED by this file's sibling Pattern-C gate in `permission-arm-hazard-scan.test.ts` — see
+ * docs/superpowers/plans/2026-08-13-iam-04-b6-report.md) and so contributes nothing here either.
+ * `social_account`/`social_client_review`/`social_inbox`/`social_platform_app`/`social_report` get
+ * zero new rules (no real handler exists for any of them yet), so none of them can appear here.
+ *
  * This file does NOT assert the remaining (confirmed-SAFE) entries away — it PINS the exact
  * register below (kind.action -> sorted holder role names) as a NON-REGRESSION baseline: if a
  * future change makes this set GROW (a new instance) or its members change shape, the pin below
@@ -449,6 +465,17 @@ const IAM_04_REG1_PRE_EXISTING_OUT_OF_SCOPE_BASELINE: Record<string, string[]> =
   "webdev_provisioned_site.read": ["webdev_manager", "webdev_staff"],
   "webdev_provisioned_site.provision": ["webdev_manager"],
   "webdev_provisioned_site.reconcile": ["webdev_manager"],
+  // IAM-04-B6 (2026-08-13) — see the header comment above for the handler evidence.
+  "social_engagement.read": ["social_manager", "social_staff"],
+  "social_engagement.create": ["social_manager"],
+  "social_engagement.update": ["social_manager"],
+  "social_engagement.delete": ["social_manager"],
+  "social_engagement.set_scope": ["social_manager"],
+  "social_post.read": ["social_manager", "social_staff"],
+  "social_post.create": ["social_manager", "social_staff"],
+  "social_post.update": ["social_manager", "social_staff"],
+  "social_post.delete": ["social_manager"],
+  "social_post.import_native": ["social_manager", "social_staff"],
 };
 
 describe("IAM-04-REG1 · permission-arm MIRROR-REACH invariant (static, re-derived every run)", () => {

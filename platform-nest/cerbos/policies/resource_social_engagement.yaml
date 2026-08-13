@@ -34,15 +34,23 @@
 # exactly the case it exists to cover. `notLow` still applies — a low-assurance session gets
 # nothing, owner or not.
 #
-# ── NO PERMISSION ARM YET (deliberate, SMM-30) ──────────────────────────────────────────────────
-# No `perm_social_*` derived-role mirror is shipped with this file. Role names — not permissions —
-# still decide every live authorization (PERMISSION-CONTRACT.md §7), the IAM-04 rollout stands at
-# 28 of 60 kinds with batches dissolved or unstarted, and §2/§9 of that contract record an
-# UNRESOLVED hazard: the mirror does not exclude `platform_admin`/`group_executive`, and the
-# detector's blind spot is awaiting an architect decision. Mirroring 8 brand-new kinds ahead of
-# that decision would widen precisely the surface that is flagged open. These kinds join the
-# rollout register as a deliberate batch once it is settled; the catalog entries land now, so
-# nothing blocks that later step.
+# ── PERMISSION ARM (IAM-04-B6, 2026-08-13) ──────────────────────────────────────────────────────
+# SMM-30's own "NO PERMISSION ARM YET" deferral above (superseded, kept in git history) cited an
+# UNRESOLVED wildcard-bleed hazard (PERMISSION-CONTRACT.md §2/§9) as the blocker. That hazard's
+# detection gap is CLOSED (IAM-SEC-03, 2026-08-11: Pattern C swept all 68 kinds, found zero OPEN
+# finding — both platform_admin and group_executive's wildcard-adjacent reach are already covered
+# by admin-identity.controller.ts's ROLE_SCOPE_CONSTRAINTS write-path guard). This ticket wires all
+# 5 actions here: `read`/`create`/`update`/`delete`/`set_scope`, mirroring ONLY the company_admin/
+# manager `inTenant && notLow` rule. `group_executive`'s own `notLow`-only `read` rule is a strict
+# SUBSET of the mirror's clauses and survives the mirror-reach invariant automatically (same
+# reasoning as automation_approval/pipeline_* in IAM-04-B4). CONFIRM-RELIABLE, not assumed:
+# `src/modules/social/social.controller.ts` is real, wired code (`registerModule(socialModule)` in
+# main.ts, `SocialController` in app.module.ts) — every one of its ~20 `authorize()` call sites for
+# this kind hardcodes `module: "social"`, zero exceptions (grepped, matching IAM-04-REG2's method
+# exactly), so `module_manager`/`module_staff`'s attribute gate never actually excludes
+# `social_manager`/`social_staff` in practice — they show up as a false "narrower" flag in
+# `iam-04-reg1-mirror-reach-invariant.test.ts`'s static DISCOVERY register (pinned there, not a
+# hard-gate failure). Full holders×reach table and live probes: the IAM-04-B6 report.
 apiVersion: api.cerbos.dev/v1
 resourcePolicy:
   version: default
@@ -76,4 +84,29 @@ resourcePolicy:
     - actions: ["read"]
       effect: EFFECT_ALLOW
       derivedRoles: ["module_staff"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+
+    # ═══ IAM-04-B6 — permission-matching arm. PURELY ADDITIVE: every rule above is byte-for-byte ═══
+    # unchanged. Mirrors ONLY the company_admin/manager rule above (exact same condition); see this
+    # file's header for the confirm-reliable handler evidence and the group_executive/module-tier
+    # reasoning.
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_social_engagement_read"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    - actions: ["create"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_social_engagement_create"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    - actions: ["update"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_social_engagement_update"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    - actions: ["delete"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_social_engagement_delete"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    - actions: ["set_scope"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_social_engagement_set_scope"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }

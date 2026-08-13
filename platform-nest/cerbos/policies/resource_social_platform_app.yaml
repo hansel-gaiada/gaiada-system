@@ -25,8 +25,14 @@
 #           contained publisher at deploy (design D-5). No action in this policy exposes a secret,
 #           because no column holds one.
 #
-# ── NO PERMISSION ARM YET ───────────────────────────────────────────────────────────────────────
-# See resource_social_engagement.yaml's header.
+# ── NO PERMISSION ARM (IAM-04-B6, 2026-08-13) ───────────────────────────────────────────────────
+# Considered and DEFERRED, not overlooked — a DIFFERENT reason than this module's other kinds:
+# `admin` has no non-wildcard holder at all (platform_admin only), and `read` has only
+# `group_executive` besides platform_admin — a group_executive-ONLY rule is never mirrored (IAM-04c
+# / IAM-04-B4/B5 precedent: mirroring it would hand a company-scoped permission holder cross-tenant
+# reach the role arm never gave them). There is no company_admin/manager/module-tier rule on this
+# kind to mirror in the first place (deliberate — see "THIS KIND IS NOT TENANT-SCOPED" above), so
+# there is nothing left after excluding the wildcard and the exec-only rule. Zero rules, by design.
 apiVersion: api.cerbos.dev/v1
 resourcePolicy:
   version: default

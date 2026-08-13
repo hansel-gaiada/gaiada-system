@@ -26,8 +26,15 @@
 # `group_executive` gets its own `notLow`-only rule. Read-only: cross-company money VISIBILITY is
 # exactly what an exec is for; overriding one department's cap is not.
 #
-# ── NO PERMISSION ARM YET ───────────────────────────────────────────────────────────────────────
-# See resource_social_engagement.yaml's header.
+# ── PERMISSION ARM (IAM-04-B6, 2026-08-13) — `admin` ONLY ───────────────────────────────────────
+# See resource_social_engagement.yaml's header for why this batch is unblocked. `admin` is the ONE
+# action on this kind with NO module_manager/module_staff holder at all (company_admin only, no
+# manager either — see the ACTIONS note above), so the confirm-reliability question this file's
+# sibling kinds need does not even arise here: mirrors company_admin's own rule exactly.
+# `read` is NOT mirrored — it DOES have a module-tier holder (module_manager/module_staff, plus
+# group_executive), and `social_ledger` has no real handler anywhere in the tree yet (unlike
+# `social_engagement`/`social_post`), so there is no call-site evidence to confirm the module
+# attribute is reliable. Left unmirrored, a documented deferral.
 apiVersion: api.cerbos.dev/v1
 resourcePolicy:
   version: default
@@ -57,4 +64,11 @@ resourcePolicy:
     - actions: ["read"]
       effect: EFFECT_ALLOW
       derivedRoles: ["module_manager", "module_staff"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+
+    # ═══ IAM-04-B6 — permission-matching arm, `admin` ONLY (see this file's header). PURELY ═══════
+    # ADDITIVE: every rule above is byte-for-byte unchanged.
+    - actions: ["admin"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_social_ledger_admin"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }

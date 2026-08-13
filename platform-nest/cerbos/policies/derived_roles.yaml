@@ -1918,3 +1918,147 @@ derivedRoles:
             request.principal.attr.perms.exists(g, g.key == "core.time_entry.create" && (
               g.scopeType == "global" ||
               (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+
+    # =============== IAM-04-B6 — social_engagement / social_post / social_ledger ================
+    # (SMM-30's 8 social_* kinds + portal, per the owner's IAM-04-B6 ruling to join the rollout as
+    # the last batch.) ZERO DECISIONS CHANGED. Two things this batch does NOT do, both discovered
+    # DURING this ticket, not assumed going in — full account in the IAM-04-B6 report:
+    #
+    #  1. `portal` gets NO permission arm AT ALL. `resource_portal.yaml`'s `client` rule is ALREADY
+    #     a live Pattern-C "other-narrow" finding in `permission-arm-hazard-scan.test.ts`
+    #     (`{kind:"portal", role:"client", reason:"missing-scope-branch"}` — `client`'s own condition
+    #     is company-scope-ONLY, no global branch, structurally identical to the platform_admin
+    #     wildcard-bleed shape, just in the opposite scope direction). That test's own REACHABILITY
+    #     (other-narrow direction, IAM-SEC-04) gate fails the MOMENT any `perm_*` rule exists
+    #     anywhere on a kind that also carries this shape — verified empirically, not just reasoned:
+    #     adding a candidate `perm_portal_read` rule flips that exact assertion red, matching the
+    #     IAM-04-B5 precedent for `report_document`/`appraisal`+`org_unit_lead` exactly. No
+    #     GLOBAL_ONLY_ROLES-shaped guard exists for this direction (the test's own comment says so),
+    #     so there is no faithful mirror to build without inventing that mitigation — out of this
+    #     ticket's remit per its own STOP instruction on the client boundary. Reverted before
+    #     shipping; see the report for the verbatim before/after test run.
+    #  2. Of the 8 social_* kinds, only 3 get ANY rule, and each only PARTIALLY:
+    #     `social_engagement` (read/create/update/delete/set_scope — all 5 actions, confirm-reliable:
+    #     SocialController's ~20 real authorize() call sites for this kind ALL hardcode
+    #     module:"social", zero exceptions, grepped not assumed);
+    #     `social_post` (read/create/update/delete/import_native only — the 5 actions
+    #     SocialController actually implements; submit/publish/cancel/delete_published have NO real
+    #     handler yet anywhere in the tree, so "module is a kind-constant" cannot be confirmed the
+    #     way it was for the other 5 — left unmirrored, not guessed);
+    #     `social_ledger` (admin ONLY — the one action with no module_manager/module_staff holder in
+    #     its bundle at all, so the confirm-reliability question does not even arise; `read` DOES
+    #     have a module-tier holder and no handler exists to confirm it, so it stays unmirrored).
+    #     `social_account`, `social_client_review`, `social_inbox`, `social_platform_app`,
+    #     `social_report` get ZERO new rules: no real handler exists for any of them yet (grepped
+    #     tree-wide for `kind: "social_account"` etc — only social_engagement/social_post appear in
+    #     SocialController), so the module attribute's reliability cannot be confirmed, and
+    #     `social_platform_app`'s two actions have no non-group_executive-only, non-wildcard rule to
+    #     mirror in the first place (group_executive-only rules are never mirrored, matching the
+    #     automation_approval/pipeline_* precedent). Every one of these is a documented deferral, not
+    #     a silent gap — see the report for the full per-kind reasoning and the holders×reach table.
+    #
+    # For the 11 actions that DO get a rule: standard global-or-company mirror, condition
+    # `variables.inTenant && variables.notLow` matching company_admin/manager's own unconditional
+    # rule exactly. `group_executive`'s own `notLow`-only rule (no `inTenant`) is a STRICT SUBSET of
+    # the mirror's clauses, so it survives the mirror-reach invariant automatically (same reasoning
+    # already proven for automation_approval/pipeline_*/scope_signoff in IAM-04-B4). `social_manager`/
+    # `social_staff` (materialized via `module_manager`/`module_staff`, gated on
+    # `resource.attr.module`) DO show up as "narrower" in `iam-04-reg1-mirror-reach-invariant.test.ts`'s
+    # static DISCOVERY register the moment these rules land — a FALSE FLAG, confirmed by the SAME
+    # handler-evidence method IAM-04-REG2 used for hr_case/hr_record/search_*/webdev_*/agency_approval:
+    # every real call site hardcodes the module literal, so the gate never actually excludes anything
+    # for these two kinds in practice. The pinned baseline in that file is grown to include these new,
+    # confirmed-FALSE entries — see the report for the exact holder list per action.
+    - name: perm_social_engagement_read
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "social.engagement.read" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_social_engagement_create
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "social.engagement.create" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_social_engagement_update
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "social.engagement.update" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_social_engagement_delete
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "social.engagement.delete" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_social_engagement_set_scope
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "social.engagement.set_scope" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    # perm_social_post_* — only the 5 actions SocialController actually implements (see the header
+    # block above; submit/publish/cancel/delete_published have no handler, stay unmirrored).
+    - name: perm_social_post_read
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "social.post.read" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_social_post_create
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "social.post.create" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_social_post_update
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "social.post.update" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_social_post_delete
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "social.post.delete" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_social_post_import_native
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "social.post.import_native" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    # perm_social_ledger_admin — the ONLY social_ledger action with no module_manager/module_staff
+    # holder at all (company_admin only; `read` has a module-tier holder and no handler exists to
+    # confirm it, so `read` stays unmirrored).
+    - name: perm_social_ledger_admin
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "social.ledger.admin" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))

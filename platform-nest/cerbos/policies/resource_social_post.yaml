@@ -49,9 +49,18 @@
 # `inTenant` is FALSE for them there — it gets its own `notLow`-only rule, never folded into the
 # company_admin/manager rule. Read-only here: overseeing is not publishing.
 #
-# ── NO PERMISSION ARM YET ───────────────────────────────────────────────────────────────────────
-# See resource_social_engagement.yaml's header for the full reasoning (PERMISSION-CONTRACT.md §2/§9
-# hazard is unresolved; role names still decide every live authorization).
+# ── PERMISSION ARM (IAM-04-B6, 2026-08-13) — PARTIAL, deliberately ──────────────────────────────
+# See resource_social_engagement.yaml's header for why this batch is unblocked (IAM-SEC-03 closed
+# the wildcard-bleed detection gap this file used to cite) and for the confirm-reliable method.
+# ONLY `read`/`create`/`update`/`delete`/`import_native` are mirrored — the 5 actions
+# `src/modules/social/social.controller.ts` actually implements (`listPosts`/`createPost`/`getPost`/
+# `updatePost`/`deletePost`/`createVariant`/`updateVariant`/`deleteVariant`/`getVariantValidation`/
+# `importNative`, every one hardcoding `module: "social"`). `submit`/`publish`/`cancel`/
+# `delete_published` — the three most consequential, outbound-public actions this kind has — have
+# NO handler anywhere in the tree (grepped: zero `authorize(...)` call sites for any of the four).
+# Since "module is a kind-constant" cannot be confirmed by handler evidence for actions nobody has
+# written yet, these stay UNMIRRORED — a documented deferral, not a guess, and not to be widened by
+# a future ticket without the same grep-based confirmation this file's other 5 actions got.
 apiVersion: api.cerbos.dev/v1
 resourcePolicy:
   version: default
@@ -84,4 +93,29 @@ resourcePolicy:
     - actions: ["read", "create", "update", "submit", "import_native"]
       effect: EFFECT_ALLOW
       derivedRoles: ["module_staff"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+
+    # ═══ IAM-04-B6 — permission-matching arm, PARTIAL (see this file's header). PURELY ADDITIVE: ═══
+    # every rule above is byte-for-byte unchanged. `submit`/`publish`/`cancel`/`delete_published`
+    # are deliberately ABSENT below — no handler exists to confirm the module attribute is reliable
+    # for those four, and they are this kind's most consequential (outbound-public) actions.
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_social_post_read"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    - actions: ["create"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_social_post_create"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    - actions: ["update"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_social_post_update"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    - actions: ["delete"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_social_post_delete"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    - actions: ["import_native"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_social_post_import_native"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }

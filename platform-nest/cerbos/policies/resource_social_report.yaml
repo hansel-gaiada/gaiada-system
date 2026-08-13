@@ -25,8 +25,13 @@
 # ── TRAP #4 ─────────────────────────────────────────────────────────────────────────────────────
 # `group_executive` gets its own `notLow`-only rule, read-only.
 #
-# ── NO PERMISSION ARM YET ───────────────────────────────────────────────────────────────────────
-# See resource_social_engagement.yaml's header.
+# ── NO PERMISSION ARM (IAM-04-B6, 2026-08-13) ───────────────────────────────────────────────────
+# Considered and DEFERRED, not overlooked — same reasoning as resource_social_account.yaml: every
+# action (`read`/`create`/`update`/`delete`/`approve`/`deliver`) is also held by `social_manager`/
+# `social_staff` via `module_manager`/`module_staff`, and no real handler for `social_report` exists
+# anywhere in the tree yet (grepped: zero call sites) — `deliver` in particular puts a document in a
+# client's hands (see the ACTIONS note above). Left unmirrored; re-audit once this kind gets a real
+# handler.
 apiVersion: api.cerbos.dev/v1
 resourcePolicy:
   version: default

@@ -25,8 +25,15 @@
 # `group_executive` gets its own `notLow`-only rule (global scope, no membership row => `inTenant`
 # false), read-only.
 #
-# ── NO PERMISSION ARM YET ───────────────────────────────────────────────────────────────────────
-# See resource_social_engagement.yaml's header.
+# ── NO PERMISSION ARM (IAM-04-B6, 2026-08-13) ───────────────────────────────────────────────────
+# Considered and DEFERRED, not overlooked. The wildcard-bleed blocker resource_social_engagement.yaml's
+# header used to cite is closed (IAM-SEC-03), but every action here (`read`/`connect`/`update`/
+# `delete`) is ALSO held by `social_manager`/`social_staff` via `module_manager`/`module_staff`, and
+# — unlike `social_engagement`/`social_post` — NO real handler for `social_account` exists anywhere
+# in the tree yet (grepped `kind: "social_account"` tree-wide: zero call sites). Without a call site
+# there is no evidence the module attribute is reliably "social", so the confirm-reliable mitigation
+# (IAM-04-REG2's method) is unavailable here. Left unmirrored; re-audit the moment this kind gets a
+# real handler.
 apiVersion: api.cerbos.dev/v1
 resourcePolicy:
   version: default

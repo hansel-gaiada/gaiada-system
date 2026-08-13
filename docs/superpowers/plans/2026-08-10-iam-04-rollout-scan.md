@@ -793,3 +793,46 @@ Keycloak's OTP subflows are *Conditional* and never fire today), so `assurance =
 presently unreachable in production — this mirror grants nobody anything on `gda-aicenter` until
 MFA is enabled. Expected, and the owner's call to make when it matters; not a reason to weaken the
 restored condition, and this ticket did not weaken it.
+
+---
+
+## 10. IAM-04-B6 addendum (2026-08-13) — the last rollout batch: `portal` BLOCKED, 3 of 8 social
+kinds partially landed
+
+**Status:** PROTOTYPED / DEV-VERIFIED (policy-side only; targeted suites + live probes against a
+restarted local `gaiada-test-cerbos`; not deployed to the live estate — no commit, no push, per
+this ticket's own constraint). Full account:
+`docs/superpowers/plans/2026-08-13-iam-04-b6-report.md`.
+
+The owner ruled `portal` and the 8 `social_*` kinds should join the rollout as the last batch. Two
+findings changed the shape of what could actually land, both real and both checked, not assumed:
+
+1. **`portal` is BLOCKED, not deferred by choice.** `resource_portal.yaml`'s `client` rule is
+   ALREADY a live Pattern-C "other-narrow" finding in `permission-arm-hazard-scan.test.ts`
+   (`{kind:"portal", role:"client", reason:"missing-scope-branch"}` — `client`'s own condition is
+   company-scope-ONLY, no global branch, structurally identical to the platform_admin wildcard-bleed
+   shape in the OPPOSITE scope direction). That finding stays invisible to the hard
+   "REACHABILITY (other-narrow direction)" gate only because no `perm_*` rule exists on `portal`
+   yet. Verified empirically (a candidate `perm_portal_read` rule was added, the gate flipped red,
+   reverted before shipping anything): wiring ANY permission arm on `portal` today would trip a
+   pre-existing, load-bearing gate whose own text says "STOP wiring that kind's permission arm and
+   report this, do not tune the predicate to make it pass" — the SAME mechanism IAM-04-B5 hit for
+   `report_document`/`appraisal`+`org_unit_lead`. No `GLOBAL_ONLY_ROLES`-shaped guard exists for
+   this direction. `portal` gets a documentation-only comment explaining this; zero rule changes.
+2. **Only 3 of the 8 `social_*` kinds get any rule, and 2 of those only partially.**
+   `social_engagement` (all 5 actions: read/create/update/delete/set_scope — confirm-reliable, real
+   handler evidence) and `social_post` (read/create/update/delete/import_native only — the 5
+   actions its real handler implements; submit/publish/cancel/delete_published have no handler
+   anywhere and stay unmirrored) and `social_ledger` (`admin` only — the one action with no
+   module-tier holder at all). `social_account`, `social_client_review`, `social_inbox`,
+   `social_platform_app`, `social_report` get ZERO rules: no real handler exists for any of them
+   yet, so the module-attribute reliability question this mechanism turns on cannot be answered by
+   evidence, only guessed — and this program does not wire permission arms on guesses.
+
+**Register update (§R.7 / the original §4 rollout order):** this closes the LAST open item this
+register named (the 6 kinds blocked behind the `group_executive` TRAP-4 fix are already landed,
+IAM-04-B4). `portal` moves from "not started" to **BLOCKED (structural, documented)** — not a
+future-batch candidate until a new mitigation mechanism for the Pattern-C other-narrow direction is
+designed. The 5 fully-unmirrored social kinds are **NOT STARTED, blocked on real handlers landing**
+(re-audit each the moment SMM's own tickets give it one, using IAM-04-REG2's exact confirm-reliable
+method). `social_post`'s 4 outbound actions are the same: NOT STARTED, blocked on a handler.
