@@ -19,3 +19,8 @@ CREDENTIALS.local.md
 *.local.md
 *.secret
 .secrets/
+
+# Agent isolation worktrees + local agent state. These live INSIDE the repo, so an unqualified
+# `git add -A` in any session would otherwise sweep an entire second checkout into a commit —
+# and this repo is worked by several concurrent sessions that do exactly that.
+.claude/
