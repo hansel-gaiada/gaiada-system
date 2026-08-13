@@ -143,10 +143,14 @@ BEGIN
        GROUP BY act.target_entity_id, act.actor_id
     ),
     unambiguous AS (
-      -- Only invoices where EXACTLY ONE distinct actor claims the 'created' event — `min()` is
-      -- irrelevant to correctness (there is only one value in the group when count = 1); it's
-      -- there because an aggregate is required for a bare SELECT alongside GROUP BY/HAVING.
-      SELECT invoice_id, min(actor_id) AS actor_id
+      -- Only invoices where EXACTLY ONE distinct actor claims the 'created' event. The aggregate
+      -- is irrelevant to correctness (there is only one value in the group when count = 1); it is
+      -- required because a bare SELECT cannot sit alongside GROUP BY/HAVING.
+      -- `(array_agg(...))[1]` and NOT `min()`: Postgres has NO min/max aggregate for `uuid`, and
+      -- `actor_id` is a uuid. This shipped as `min(actor_id)` in alpha-01.040.0093a and failed on
+      -- the server with `function min(uuid) does not exist`, rolling that deploy back — the
+      -- migration is transactional, so nothing partially applied. array_agg accepts any type.
+      SELECT invoice_id, (array_agg(actor_id))[1] AS actor_id
         FROM distinct_actors
        GROUP BY invoice_id
       HAVING count(*) = 1
