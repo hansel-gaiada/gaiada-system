@@ -2742,7 +2742,7 @@ therefore reuses T3b's existing confirm-chip machinery end to end rather than ad
 
 ---
 
-## 19. Social-media module — SMM · Organic Publishing (SMM-* program, 2026-08-12) — `modules/social/social.controller.ts` — **STATUS: IN PROGRESS (SMM-02 backend built; NO UI yet)**
+## 19. Social-media module — SMM · Organic Publishing (SMM-* program, 2026-08-13) — `modules/social/social.controller.ts` — **STATUS: IN PROGRESS (SMM-02/08/19 backend built; NO UI yet)**
 
 Design: `blueprints/smm-design.md` as amended by **`blueprints/smm-design-addendum-2026-08-12.md`
 (binding)**. Schema `migrations/0105_module_social.sql`; IAM registration `0106` + eight
@@ -2750,9 +2750,11 @@ Design: `blueprints/smm-design.md` as amended by **`blueprints/smm-design-addend
 
 **Frontend-first note, stated because this program's recurring bug class is the opposite.** There is
 no `platform-ui/src/lib/social.ts` yet and no console route — SMM-11 builds both. The rows below are
-the BACKEND as it actually exists today, verified against a live response by
-`modules/social/social.test.ts` (14 golden cases). When the console lands, `lib/social.ts` becomes
-the canonical shape and this section is reconciled against it, exactly as §14 was for search.
+the BACKEND as it actually exists today, verified against a live response across
+`modules/social/social.test.ts`, `social-ai-drafts.test.ts`, `ai-drafts.test.ts`,
+`gateway-client.test.ts`, `media-rules.test.ts` and `canonical-args.test.ts` (87 golden/unit cases).
+When the console lands, `lib/social.ts` becomes the canonical shape and this section is reconciled
+against it, exactly as §14 was for search.
 
 All routes are under `/api/:tenantId/modules/social`, behind `AuthGuard` +
 `ModuleEnabledGuard("social")`. The module is **dark** unless the company has `social` in
@@ -2790,6 +2792,29 @@ the served path is the normal one (the agency runs social for sibling companies)
 Additional refusal tokens: `invalid_source`, `post_has_live_variants`, `variant_not_editable`,
 `variant_native_import_immutable`, `variant_is_live`.
 
+**Brand-voice RAG + AI drafting (SMM-19).** Every capability below runs through `ai-gateway-go`
+ONLY (Hermes by default, Claude as a per-request `provider` reorder hint when the engagement's
+`toolScope.ai.cloudPolish` is on — never a vendor identity of its own) and writes DRAFT rows only:
+nothing here dispatches or reaches a live network. Grounding is a client's own brand corpus,
+ingested as tenant+client-ACL'd WS8 knowledge (design D-13) — `social_brand_profiles` holds only
+the `knowledge_source_ids` pointer, never corpus text.
+
+| Method + path | Permission | Notes |
+|---|---|---|
+| `POST engagements/:id/brand-corpus/ingest` | `social.engagement.update` | Body `{chunks: string[]}` (approved past posts + guidelines, ≤40). Ingests into WS8 under a deterministic per-client scope (`social-brand:{tenantId}:{clientId}`) — re-ingesting REPLACES the prior corpus. Returns `{ok, knowledgeSourceIds, chunkCount}`. |
+| `POST posts/:postId/variants/:variantId/draft-caption` | `social.post.update` | Drafts (or re-drafts) the variant's `body`/`hashtags`/`firstComment`, RAG-grounded in the variant's own client corpus. Persists through the SAME state law a human `PATCH` triggers: re-validates, recomputes `args_sha256`, invalidates any existing approval (`approvalInvalidated` in the response). Returns `{ok, draft:{body,hashtags,firstComment}, draftedVia:'ai'\|'fallback', groundedOn: string[], validation, argsSha256, estimatedCostUsd, approvalInvalidated}`. |
+| `POST posts/draft-ideas` | `social.post.create` | Body `{engagementId, campaignId?, campaignGoal?, count? (default 3, max 10), ids?: string[]}`. Writes `social_posts` rows (`status:'idea', source:'ai'`) — pass `ids` (length == `count`) for idempotency on retry. Returns `{ideas:[{id,created,title,brief}], draftedVia, groundedOn}`. |
+
+Both drafting endpoints refuse `ai_drafting_disabled` (naming the toggle) when the engagement's
+`toolScope.ai.drafting` is off, and refuse `image_generation_unavailable` if the body carries
+`wantImage:true` — **before any gateway call is attempted**. There is no image-generation path to
+opt into (D-17): `ai.imageGen` stays inert, per the two owner-decided defaults below.
+
+Hashtags are NEVER the model's own answer: the brand's `hashtagStrategy` (on `brand-profiles/:clientId`
+— `{maxCount?, bannedTags?, requiredTags?, placement?:'body'\|'first_comment'}`) and the network's
+own cap (the SAME `validation` matrix's limits, reused not duplicated) both apply to whatever the
+model proposes, every time.
+
 **Validation contract.** `validation` is `{ok, errors[], warnings[]}`; every issue is
 `{rule, message}` where `rule` is a snake_case token — render against the token. Errors block a
 submit; warnings never do. Current tokens: `body_required`, `body_too_long`, `body_near_limit`,
@@ -2822,10 +2847,13 @@ debugging round; its own test caught it.)
 **MCP surface** (`GET /mcp/tool-defs`, aggregated — nothing hub-side is hardcoded):
 `social.listEngagements`, `social.getEngagementScope` (reads, `low`),
 `social.createEngagement` (write, impact `low`), `social.setEngagementScope` (write, impact
-**`medium`** — an automation principal is SUSPENDED into WS4 rather than applied). The publish,
-inbox, report and ledger tools are deliberately NOT declared yet: their endpoints do not exist, and
-a tool the hub publishes to every agent without a handler behind it is this program's
-"frontend-first drift" bug pointed at automation instead of a console.
+**`medium`** — an automation principal is SUSPENDED into WS4 rather than applied),
+`social.ingestBrandCorpus` / `social.draftPostVariant` / `social.draftPostIdeas` (SMM-19, write,
+impact `low` — every one writes a draft row or a knowledge pointer, none can reach a live network;
+same `authorize()` calls as their HTTP twins above). The publish, inbox, report and ledger tools are
+deliberately NOT declared yet: their endpoints do not exist, and a tool the hub publishes to every
+agent without a handler behind it is this program's "frontend-first drift" bug pointed at
+automation instead of a console.
 
 **Rollup metrics** (D12): `social.engagements.active`, `social.accounts.connected`,
 `social.posts.published.month`, `social.approvals.pending`, `social.inbox.open`,
