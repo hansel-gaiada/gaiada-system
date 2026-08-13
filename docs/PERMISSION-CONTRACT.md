@@ -1,9 +1,10 @@
 # Permission contract (IAM Phase 1)
 
-**Status:** PROTOTYPED — updated 2026-08-11 (originally frozen 2026-08-10; this pass reconciles
-two days of IAM rollout work against the doc). This is the contract Web Dev and PM build against.
+**Status:** PROTOTYPED — updated 2026-08-13 (IAM-GAP-01: invoice maker/checker + the dedicated HR
+leave decision right; originally frozen 2026-08-10, reconciled 2026-08-11 against two days of IAM
+rollout work). This is the contract Web Dev and PM build against.
 **Companion to** `docs/FRONTEND-BFF-CONTRACT.md`. Program docs live in
-`docs/superpowers/plans/2026-08-10-iam-*`.
+`docs/superpowers/plans/2026-08-10-iam-*` and `docs/superpowers/plans/2026-08-13-iam-gap-01-report.md`.
 
 > **⚠ Concurrent-edit notice (2026-08-11).** This checkout is shared by several agents actively
 > editing Cerbos policies, `derived_roles.yaml` and `role-permission-bundles.json` as this doc was
@@ -38,14 +39,14 @@ owner decision DR-4, because the portal is a separate trust surface.
 Domains: `agency` `assistant` `billing` `core` `hr` `it` `knowledge` `pm` `portal` `reports`
 `search` `webdev`.
 
-## 2. Current numbers (re-derived from the artifacts, 2026-08-11, post-HIER-3)
+## 2. Current numbers (re-derived from the artifacts, 2026-08-13, post-IAM-GAP-01)
 
 | Artifact | Value | File |
 |---|---|---|
-| Catalog | **262** entries = **247 grantable** + **15 relationship**; 91 flagged `sensitive`; 68 distinct Cerbos kinds (SMM-30, 2026-08-12: the `social` module's 8 kinds + 35 keys, plus `portal.approve_post` — a new action on the existing `portal` kind, which is why pairs +36 but kinds +8. Prior: HIER-3 230/215/61 → 226/211/60) | `platform-nest/src/rbac/permission-catalog.json` |
-| Role bundles | **1023** pairs across **22** roles (SMM-30: `social_staff`/`social_manager` seeded by migration `0106`, 20 → 22; +162 pairs, **and zero removed** — no existing user's reach changed) | `platform-nest/src/rbac/role-permission-bundles.json` |
-| Permission groups | **83** (SMM-30 added 8 social groups + `portal_approve_posts`) | `platform-nest/src/rbac/permission-groups.json` |
-| UI capabilities | **34** | `platform-ui/src/lib/rbac.ts` |
+| Catalog | **264** entries = **249 grantable** + **15 relationship**; 93 flagged `sensitive`; 68 distinct Cerbos kinds (IAM-GAP-01, 2026-08-13: +2 literal actions on EXISTING kinds — `invoice.approve` and `automation_approval.decide_leave` — so pairs/grantable/sensitive move by 2 each but the kind count does NOT. Prior: SMM-30, 2026-08-12: the `social` module's 8 kinds + 35 keys, plus `portal.approve_post`, 226/211/60 → 262/247/68) | `platform-nest/src/rbac/permission-catalog.json` |
+| Role bundles | **1031** pairs across **22** roles (IAM-GAP-01: +8 pairs — `billing.invoice.approve` to `company_admin`/`group_executive`/`manager`/`platform_admin`; `hr.leave.decide` to `company_admin`/`group_executive`/`hr_manager`/`platform_admin` — **zero removed**, no existing user's reach narrows) | `platform-nest/src/rbac/role-permission-bundles.json` |
+| Permission groups | **85** (IAM-GAP-01 added `invoices_approve` + `hr_leave_decide`; prior: SMM-30 added 8 social groups + `portal_approve_posts`) | `platform-nest/src/rbac/permission-groups.json` |
+| UI capabilities | **34** — UNCHANGED by IAM-GAP-01 (`platform-ui/` is out of this ticket's scope; the new server-side permissions have no capability mirror yet) | `platform-ui/src/lib/rbac.ts` |
 
 **⚠ The relationship count is unchanged at 15, and that is load-bearing.** The social module adds no
 relationship-class permission, so the Ruling-3 bypass-exempt set is exactly where it was. If a future
@@ -67,17 +68,20 @@ detector blind spot are unresolved and awaiting an architect decision, and mirro
 ahead of it would widen precisely the surface flagged open. They join the IAM-04 rollout register as a
 deliberate batch once that decision lands; the catalog entries exist now, so nothing blocks it.
 
-**Bundle sizes per role** (re-counted from `role-permission-bundles.json`'s own `_meta.counts.perRole`):
+**Bundle sizes per role** (re-counted 2026-08-13 from `role-permission-bundles.json`'s own
+`_meta.counts.perRole`, post-IAM-GAP-01; five roles moved — `platform_admin`/`company_admin`/
+`group_executive`/`manager` +2 each, `hr_manager` +1 — see §9's changelog entry for which two keys):
 
 | Role | Pairs | Role | Pairs | Role | Pairs |
 |---|---:|---|---:|---|---:|
-| `platform_admin` | 211 | `viewer` | 29 | `search_manager` | 37 |
-| `company_admin` | 195 | `org_unit_lead` | 2 | `search_staff` | 24 |
-| `group_executive` | 117 | `client` | 6 | `reports_manager` | 3 |
-| `manager` | 104 | `it_admin`/`it_manager`/`it` | 3 each | `reports_staff` | 4 |
+| `platform_admin` | 249 | `viewer` | 29 | `search_manager` | 37 |
+| `company_admin` | 230 | `org_unit_lead` | 2 | `search_staff` | 24 |
+| `group_executive` | 127 | `client` | 7 | `reports_manager` | 3 |
+| `manager` | 137 | `it_admin`/`it_manager`/`it` | 3 each | `reports_staff` | 4 |
 | `member` | 73 | `agency_approver` | 1 | `webdev_manager` | 6 |
 | | | `hr_staff` | 13 | `webdev_staff` | 4 |
-| | | `hr_manager` | 23 | | |
+| | | `hr_manager` | 24 | `social_staff` | 19 |
+| | | | | `social_manager` | 33 |
 
 `company_admin`'s 195 reflects two independent moves since the prior 200 (199 baseline + DR-5's
 `reports.appraisal.read`, migration `0099`): HIER-3 retired 4 `core.team.*` keys, and a concurrent,
@@ -299,6 +303,40 @@ catch it — treat that one, not the parity suite, as the authority for "no role
   `global-only-role-scope.test.ts`. The underlying *detector* blind spot that let this class of bug
   exist unnoticed (`permission-arm-hazard-scan.test.ts` doesn't catch wildcard-adjacent roles) is
   **still open** — see below.
+- ~~No invoice `approve` action (no maker/checker seam)~~ — **CLOSED, IAM-GAP-01 (2026-08-13,
+  PROTOTYPED).** Migration `0107` adds `invoices.created_by`/`approved_by`/`approved_at` and widens
+  the status CHECK to include `'approved'`; `resource_invoice.yaml` gains an `approve` action
+  granted to `company_admin`/`manager` (the owner's "department manager tier" default) with a
+  fail-CLOSED condition — `has(creatorId) && creatorId != "" && creatorId != principal.id` — so an
+  invoice whose creator is unknown (every pre-migration row; no backfill was possible) is
+  permanently unapprovable by anyone but the pre-existing `platform_admin`/`group_executive`
+  wildcard. New catalog key `billing.invoice.approve` (sensitive). The BFF endpoint
+  `POST /api/:tenantId/invoices/:invoiceId/approve` (`billing.controller.ts`) is the only door into
+  `'approved'`; the pre-existing `PATCH .../invoices/:id` cannot set it directly, and `'sent'`/`'paid'`
+  now require the invoice to already be `'approved'` (`'draft'`/`'void'` remain reachable from any
+  state). No `perm_invoice_approve` permission-arm mirror — the condition is an attribute-instance
+  check the flat catalog cannot re-express (same doctrine as `resource_hr_case.yaml`'s excluded
+  self-only mirrors). DEV-VERIFIED: live Cerbos probes (creator denied self-approval, a different
+  company_admin/manager allowed, unknown-creator legacy row denied, cross-tenant denied, low-assurance
+  denied) and `app.inject` end-to-end tests in `src/core/billing.test.ts`.
+- ~~HR leave decisions ride the generic `core.automation_approval.decide`~~ — **CLOSED, IAM-GAP-01
+  (2026-08-13, PROTOTYPED).** New catalog key `hr.leave.decide`, mapped onto a NEW literal Cerbos
+  action `decide_leave` on the existing `automation_approval` kind (not a new kind — the unified
+  `POST /automation-approvals/:id/decide` endpoint still has no fork; `automation-approvals.
+  controller.ts`'s `decide()` requests `decide_leave` instead of `decide` only when the row is
+  origin='hr' AND `workflow_id='hr:leave'` — loan requests, `workflow_id='hr:loan'`, are
+  BYTE-UNCHANGED and keep the generic `decide`). Granted to `company_admin`/`group_executive`/
+  `platform_admin` (non-regression: all three already reached hr-origin leave decisions through the
+  generic rule) plus `hr_manager` via `module_manager` gated on `module=='hr' && subKind=='leave'` —
+  the owner's "department manager tier" default. `hr_staff` (module_staff, non-manager) does **not**
+  hold it — adversarially proven in `src/modules/hr/hr.test.ts`, not just structurally asserted. No
+  permission-arm mirror (same attribute-gate exclusion as `automation_approval`'s pre-existing
+  `read`/`decide` — see `IAM_04_REG1_PRE_EXISTING_OUT_OF_SCOPE_BASELINE`'s own comment). Today this
+  is a Phase-1 catalog/authoring addition, not a live decider-set change: no custom-role authoring
+  surface exists yet (§7), so the actual population of people who can decide a leave request is
+  identical before and after this ticket — what's new is that "who may approve leave" is now its
+  OWN grantable key instead of being indistinguishable from `core.automation_approval.decide`'s
+  reach over every other origin (loans, automation, agent).
 
 **Still open, unresolved as of this pass:**
 - **IAM-04-ROLLOUT.** 28 of 61 kinds now carry a permission arm (up from the 2-kind pilot) — see §2
@@ -327,11 +365,11 @@ catch it — treat that one, not the parity suite, as the authority for "no role
 - `module_manager` cannot read the tenant directory though `module_staff` can
   (`resource_member.yaml`'s directory rule names `module_staff` only) — re-verified directly against
   the policy file in this pass, still present, still looks like an oversight rather than a decision.
-- No invoice **approve** action exists (re-verified: `resource_invoice.yaml` has no `approve` rule
-  and the catalog has only create/read/update/delete), so no maker/checker seam on invoices.
-- HR leave/loan decisions route through the generic `core.automation_approval.decide` rather than a
-  dedicated permission — this directly undercuts DR-1's premise that approval authority is cleanly
-  scoped per domain; not re-verified in this pass, carried forward from the 08-10 register.
+- HR **loan** decisions still route through the generic `core.automation_approval.decide` — only
+  **leave** got its own dedicated key this pass (IAM-GAP-01, closed above); the owner did not ask for
+  loans in this ticket and the report flags it as a candidate follow-up rather than assuming it in
+  scope. DR-1's premise (approval authority cleanly scoped per domain) is now true for leave, not
+  yet for loans.
 - **Sensitivity sign-off** (79 permissions + 42 groups flagged) still needs the owner + an
   HR/finance pass; blocks D-9/D-10, not Phase 1.
 - ~~HIER-2 (`org_unit_lead`) and HIER-3 (the `team`/`team_lead` retirement sweep)~~ — **LANDED

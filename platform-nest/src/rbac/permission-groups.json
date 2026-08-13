@@ -6,12 +6,12 @@
     "catalogSource": "platform-nest/src/rbac/permission-catalog.json (211 grantable permissions, frozen input)",
     "model": "Two-layer (Ruling 1, option C): groups are the authoring surface; every permission remains individually assignable via an 'advanced' expansion. A group's sensitive flag is mechanical — true iff ANY member permission carries catalog sensitive:true.",
     "counts": {
-      "groups": 83,
-      "grantablePermissionsInCatalog": 247,
-      "permissionsCoveredByGroups": 245,
+      "groups": 85,
+      "grantablePermissionsInCatalog": 249,
+      "permissionsCoveredByGroups": 247,
       "permissionsAdvancedOnly": 2,
       "permissionsAppearingInMultipleGroups": 2,
-      "sensitiveGroups": 49
+      "sensitiveGroups": 51
     }
   },
   "groups": [
@@ -231,6 +231,16 @@
         "billing.invoice.create",
         "billing.invoice.update",
         "billing.invoice.delete"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "invoices_approve",
+      "name": "Approve Invoices",
+      "domain": "billing",
+      "description": "Approve an invoice for send/payment. Maker/checker: kept separate from Manage Invoices so an approver's authority can be granted without also granting them the ability to create/edit — and policy denies approving your own invoice regardless of this grant.",
+      "permissions": [
+        "billing.invoice.approve"
       ],
       "sensitive": true
     },
@@ -568,6 +578,16 @@
         "hr.case.update",
         "hr.case.cancel",
         "hr.case.delete"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "hr_leave_decide",
+      "name": "Decide Leave Requests",
+      "domain": "hr",
+      "description": "Approve or reject employee leave requests. Kept separate from Manage HR Cases so leave-approval authority is grantable on its own (e.g. to a department manager) without also granting general HR case management.",
+      "permissions": [
+        "hr.leave.decide"
       ],
       "sensitive": true
     },

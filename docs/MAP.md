@@ -27,7 +27,7 @@ Node scripts per component:
 - `capture-helper` — `check`, `devices`, `drive-token`, `start`
 - `hermes-gateway` — `start`, `test`
 - `mcp-hub` — `dev`, `start`, `test`, `typecheck`
-- `platform-nest` — `build`, `gen:role-bundles`, `lint:migration-rls`, `lint:withtenants`, `mail:replay-inbound`, `migrate`, `seed:agency`, `seed:automation`, `seed:claude-seats`, `seed:departments`, `seed:personas`, `seed:portal-clients`, `seed:search`, `start`, `test`, `test:iam-chain-alignment`, `test:mail-corpus`, `typecheck`
+- `platform-nest` — `build`, `gen:role-bundles`, `gen:scope-constrained-roles`, `lint:migration-rls`, `lint:withtenants`, `mail:replay-inbound`, `migrate`, `seed:agency`, `seed:automation`, `seed:claude-seats`, `seed:departments`, `seed:personas`, `seed:portal-clients`, `seed:search`, `start`, `test`, `test:iam-chain-alignment`, `test:mail-corpus`, `typecheck`
 - `platform-ui` — `build`, `dev`, `e2e`, `e2e:a11y`, `start`, `test`, `test:watch`, `typecheck`
 - `report-renderer` — `dev`, `start`, `test`, `typecheck`
 - `wa-chat-bot` — `dev`, `gateway`, `media-worker`, `start`, `test`, `typecheck`
@@ -164,9 +164,9 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 
 ## platform-nest — migrations
 
-- Head: `0106_iam_social_permissions.sql`
-- Next free number: `0107` — **reserve it by creating the file**, concurrent sessions share this checkout.
-- Applied files on disk: 105
+- Head: `0107_iam_gap_01_invoice_approve_hr_leave_decide.sql`
+- Next free number: `0108` — **reserve it by creating the file**, concurrent sessions share this checkout.
+- Applied files on disk: 106
 - Unused numbers below head: `0058`, `0059`, `0070` (dead reservations — do not backfill)
 
 ## platform-nest — HTTP surface (`@Controller` prefixes)

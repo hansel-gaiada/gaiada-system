@@ -58,9 +58,12 @@ export const hrModule: ModuleContract = {
   // this module's own domain, and are DROPPED per the catalog's recommendation rather than
   // redeclared:
   //   - hr:leave:file   -> hr.case.create (leave is an hr_case type; already covered)
-  //   - hr:leave:decide -> core.automation_approval.decide (module=hr routing rule in policy)
+  //   - hr:leave:decide -> hr.leave.decide (IAM-GAP-01, 2026-08-13: split out of
+  //       core.automation_approval.decide into its OWN dedicated decision right — see
+  //       resource_automation_approval.yaml's `decide_leave` action and migration 0107. Loan
+  //       decisions are UNCHANGED and still ride core.automation_approval.decide.)
   //   - hr:loan:request -> hr.case.create (already covered)
-  //   - hr:loan:decide  -> core.automation_approval.decide (same as leave:decide)
+  //   - hr:loan:decide  -> core.automation_approval.decide (unchanged — only leave got its own key)
   //   - hr:loan:repay   -> hr.case.{create,update} (already covered)
   // "File leave" / "request loan" / "decide" / "repay" become UI-only permission groups
   // (IAM-01b-3) over these fine-grained permissions, not distinct module declarations.
@@ -68,6 +71,7 @@ export const hrModule: ModuleContract = {
     { key: "hr.case.read", description: "View HR cases (onboarding/offboarding/review/grievance/other)" },
     { key: "hr.case.create", description: "Create HR cases (incl. leave/loan requests)" },
     { key: "hr.case.update", description: "Update HR cases (incl. loan repayments)" },
+    { key: "hr.leave.decide", description: "Approve or reject a leave request (dedicated decision right)" },
     { key: "hr.record.read", description: "View HR records (contract/document/note)" },
     { key: "hr.record.create", description: "Create HR records" },
     { key: "hr.record.update", description: "Update HR records" },

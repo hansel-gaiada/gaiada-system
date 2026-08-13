@@ -65,6 +65,50 @@ resourcePolicy:
             variables.inTenant && variables.notLow &&
             request.resource.attr.module == "hr"
 
+    # ══════════ IAM-GAP-01 (2026-08-13) — HR leave gets its OWN decision right, separate from the
+    # generic `decide` above. NEW literal action `decide_leave`, requested by
+    # automation-approvals.controller.ts's decide() ONLY for origin='hr' rows whose workflow_id is
+    # 'hr:leave' (hr.controller.ts's fileLeave()) — loan requests ('hr:loan', loans.controller.ts)
+    # and every other origin keep using the generic `decide` action above, byte-unchanged. This
+    # lets "who may approve leave" be scoped in the permission catalog/authoring layer separately
+    # from "who may decide automation approvals in general" (PERMISSION-CONTRACT.md §9's open item),
+    # without forking the endpoint (still one POST .../:id/decide route, per this file's own WSD-4
+    # "no fork" design note).
+    #
+    # Owner-approved defaults: platform superadmin always acts (the wildcard rule at the top of this
+    # file already covers `decide_leave`, needing no new rule), and approval authority sits with the
+    # department-manager tier — hr_manager, via `module_manager` gated to module=='hr' AND
+    # subKind=='leave' (belt-and-suspenders: the controller already only asks for this action on
+    # genuine leave rows, but the attribute check means a future caller cannot get this rule to fire
+    # on a loan row by accident). company_admin and group_executive are ALSO given `decide_leave` —
+    # not a widening, a NON-REGRESSION: both could already decide hr-origin leave rows through the
+    # generic `decide` rules above, and omitting them here would silently narrow who can approve
+    # leave the moment the controller stops asking for `decide`.
+    - actions: ["decide_leave"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    # IAM-TRAP4 shape (same reason as `read`/`decide` above): group_executive is global-scope-only,
+    # so `variables.inTenant` is always false for it — own rule, `variables.notLow` only.
+    - actions: ["decide_leave"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["group_executive"]
+      condition: { match: { expr: "variables.notLow" } }
+    - actions: ["decide_leave"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["module_manager"]
+      condition:
+        match:
+          expr: >-
+            variables.inTenant && variables.notLow &&
+            request.resource.attr.module == "hr" && request.resource.attr.subKind == "leave"
+    # NO perm_hr_leave_decide mirror: hr_manager's ONLY role-arm path to `decide_leave` is the
+    # `module_manager` rule immediately above, gated on `module=='hr' && subKind=='leave'` — the
+    # exact attribute-gated shape IAM-04-REG1 already excludes for this kind's `read`/`decide`
+    # (see this file's own comment above, and derived_roles.yaml's IAM-04a header). A flat mirror
+    # would grant hr_manager `decide_leave` on ANY automation_approval resource regardless of
+    # module/subKind, which the catalog's flat `perms` array cannot re-narrow. Do not wire one.
+
     # ══════════ IAM-04-B4 — permission-matching arm. PURELY ADDITIVE: every rule above is byte-
     # for-byte unchanged. Mirrors ONLY the company_admin/manager/member `inTenant && notLow` reach
     # above. `group_executive`'s own `variables.notLow`-only rule (IAM-TRAP4) is DELIBERATELY not

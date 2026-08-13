@@ -20,6 +20,40 @@ resourcePolicy:
       derivedRoles: ["manager"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }
 
+    # ══════════ IAM-GAP-01 (2026-08-13) — the maker/checker seam. NEW action. Owner-approved
+    # defaults: approval authority sits with the department-manager tier (`manager`, alongside a
+    # SECOND `company_admin` — "Finance surface" per this file's own header comment), and the
+    # approver must NOT be the invoice's own creator. `manager` previously held only `read` here;
+    # this is a deliberate widening (the alternative — restricting `approve` to `company_admin`
+    # only — would leave "department manager tier" unimplemented for this gap; flagged in the
+    # ticket report for the owner to adjust).
+    #
+    # FAIL CLOSED on an unknown creator: `has(...) && != ""` before the `!=` comparison. Without
+    # the non-empty check, an unset/legacy `creatorId` ("" — see cerbos.ts's resourcePayload
+    # default) would satisfy `creatorId != principal.id` VACUOUSLY (empty string is never equal to
+    # a real user id), which would read "we don't know who made this" as "definitely not you" and
+    # ALLOW — exactly backwards. Migration 0107 adds `invoices.created_by` with NO backfill (no
+    # reliable historical actor exists), so every pre-existing invoice is PERMANENTLY unapprovable
+    # by company_admin/manager until an operator sets `created_by` by hand — only the
+    # platform_admin/group_executive wildcard rule at the top of this file (pre-existing, unchanged
+    # by this ticket) can still approve a legacy row, same as it already bypasses create/read/
+    # update/delete.
+    - actions: ["approve"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin", "manager"]
+      condition:
+        match:
+          expr: >-
+            variables.inTenant && variables.notLow &&
+            has(request.resource.attr.creatorId) && request.resource.attr.creatorId != "" &&
+            request.resource.attr.creatorId != request.principal.id
+    # NO perm_invoice_approve mirror (IAM-04c doctrine, resource_hr_case.yaml's precedent): this
+    # rule's condition is an attribute-instance check (creator != approver) that `0094`'s bundling
+    # methodology treats as "satisfied" when computing company_admin/manager's reach — so a flat
+    # `perms`-array mirror would grant `approve` to a company_admin/manager who IS the creator,
+    # exactly the over-grant `iam-04-reg1-mirror-reach-invariant.test.ts` exists to catch. Do not
+    # wire one; see derived_roles.yaml's IAM-04a header for the general rule this follows.
+
     # =========== IAM-04-ROLLOUT-B12 -- permission-matching arm. PURELY ADDITIVE: every rule =====
     # above is byte-for-byte unchanged. Generic global-or-company mirror per action (see this
     # kind's entry in docs/superpowers/plans/2026-08-10-iam-04-rollout-b12-report.md for the

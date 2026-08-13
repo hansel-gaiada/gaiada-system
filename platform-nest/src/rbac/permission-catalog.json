@@ -13,12 +13,12 @@
     "sensitive": "assessed 2026-08-10 for step-up auth + D-10 approval routing; touches HR/people data, finance, client commitments, deploys/provisioning, credentials/identity, or cross-company access. Owner review pending \u2014 tighten additively, loosen only by owner decision.",
     "counts": {
       "cerbosKinds": 68,
-      "concretePairs": 262,
-      "grantable": 247,
+      "concretePairs": 264,
+      "grantable": 249,
       "relationship": 15,
-      "sensitive": 91
+      "sensitive": 93
     },
-    "countsNote": "DERIVED from `permissions` below \u2014 re-derive rather than hand-edit. HIER-5 (2026-08-11) found this block stale after HIER-3 retired the `team` kind: it still read 61/230/215 while the array held 60/226/211. Nothing enforced it, so it drifted silently \u2014 the same hand-maintained-number rot this program has hit repeatedly. `role-permission-bundles.db.test.ts` pins the BUNDLE artifact's own counts; this block had no equivalent guard."
+    "countsNote": "DERIVED from `permissions` below \u2014 re-derive rather than hand-edit. HIER-5 (2026-08-11) found this block stale after HIER-3 retired the `team` kind: it still read 61/230/215 while the array held 60/226/211. Nothing enforced it, so it drifted silently \u2014 the same hand-maintained-number rot this program has hit repeatedly. `role-permission-bundles.db.test.ts` pins the BUNDLE artifact's own counts; this block had no equivalent guard. IAM-GAP-01 (2026-08-13): 262/247/91 -> 264/249/93 \u2014 two new grantable, both sensitive: `billing.invoice.approve` (new literal action on the existing `invoice` kind) and `hr.leave.decide` (new literal action `decide_leave` on the existing `automation_approval` kind). Kind count (68) and relationship count (15) are unchanged \u2014 no new Cerbos kind, no new relationship-class permission."
   },
   "permissions": [
     {
@@ -353,6 +353,17 @@
       "class": "relationship",
       "sensitive": false,
       "grantedVia": "ownership: base role `user` + owns (resource.attr.ownerId == principal.id), inTenant, assurance >= linked. No admin/wildcard rule by design (resource_assistant_thread.yaml header)."
+    },
+    {
+      "key": "billing.invoice.approve",
+      "domain": "billing",
+      "resource": "invoice",
+      "action": "approve",
+      "description": "Approve an invoice for send/payment. Maker/checker seam (IAM-GAP-01): the approver may not be the invoice's own creator; policy fails closed if the creator is unknown (legacy pre-migration rows).",
+      "cerbosKind": "invoice",
+      "cerbosAction": "approve",
+      "class": "grantable",
+      "sensitive": true
     },
     {
       "key": "billing.invoice.create",
@@ -1639,6 +1650,17 @@
       "description": "Edit HR cases (onboarding, leave, loans, grievances).",
       "cerbosKind": "hr_case",
       "cerbosAction": "update",
+      "class": "grantable",
+      "sensitive": true
+    },
+    {
+      "key": "hr.leave.decide",
+      "domain": "hr",
+      "resource": "leave",
+      "action": "decide",
+      "description": "Approve or reject a leave request. Dedicated decision right (IAM-GAP-01), separate from the generic core.automation_approval.decide so 'who may approve leave' is scopeable on its own; maps onto automation_approval's new decide_leave Cerbos action, requested only for hr-origin rows whose workflow_id is 'hr:leave' (loan requests keep the generic decide).",
+      "cerbosKind": "automation_approval",
+      "cerbosAction": "decide_leave",
       "class": "grantable",
       "sensitive": true
     },

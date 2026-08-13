@@ -266,6 +266,30 @@ describe.skipIf(!TEST_URL || !REDIS_TEST_URL)("HR module (WSD-4)", () => {
     expect(decided.statusCode).toBe(200);
   });
 
+  // ══════════════════ IAM-GAP-01 (2026-08-13) — the dedicated hr.leave.decide right ══════════════
+  it("plain hr_staff (module_staff, not module_manager) is DENIED deciding a leave request — the owner's 'department manager tier' default, adversarially proven, not just structurally asserted", async () => {
+    const filed = await app.inject({
+      method: "POST", url: `/api/${B}/modules/hr/leave`, headers: asUser(admin),
+      payload: { subjectUserId: member, leaveType: "unpaid", startsOn: "2026-10-01", endsOn: "2026-10-01", minutes: 480 },
+    });
+    expect(filed.statusCode).toBe(201);
+    // u2 holds hr_staff at B — can FILE/READ the module fine (proven above), but this ticket's new
+    // `decide_leave` Cerbos action names module_manager only, never module_staff. A green structural
+    // suite (the catalog/bundle parity tests) would not catch a controller that forgot to gate this;
+    // only driving the real endpoint does.
+    const denied = await app.inject({
+      method: "POST", url: `/api/${B}/automation-approvals/${filed.json().approvalId}/decide`, headers: asUser(u2), payload: { decision: "approved" },
+    });
+    expect(denied.statusCode).toBe(403);
+  });
+
+  it("a DIFFERENT company's automation-approvals list never reveals its origin='hr' rows — the tenant wall is unaffected by the new decide_leave split", async () => {
+    // C has hr enabled but neither u2 (as company_admin/manager) nor any relevant grant at all
+    // there — filing at B and reading at C must 404/empty, never leak the leave row cross-tenant.
+    const crossTenant = await app.inject({ method: "GET", url: `/api/${C}/automation-approvals?origin=hr`, headers: asUser(u2) });
+    expect(crossTenant.statusCode).toBe(403); // u2 holds no company_admin/manager grant at C at all
+  });
+
   it("user.invited auto-instantiates a default onboarding hr_case through the real pipeline", async () => {
     await withTenants([B], (c) =>
       c.query(

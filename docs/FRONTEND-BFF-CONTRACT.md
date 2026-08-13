@@ -133,6 +133,7 @@ pm.manage, it.manage, approvals.decide, knowledge.review`.
 | ✅ (UI built) | GET/POST/PATCH | `/api/:t/deliverables[?projectId][/:id]` | BUILT (`client-work.controller.ts`). UI: `/deliverables` list + `/deliverables/new`. |
 | ✅ (UI built) | GET/POST | `/api/:t/time-entries` | BUILT (incl. PATCH). UI: `/timesheets` (totals + billable rollup + log). POST body `{minutes,projectId?,taskId?,billable,entryDate,notes}`. |
 | ✅ (UI built) | GET/POST | `/api/:t/invoices[/:id]` (+`PATCH` status) | BUILT (`billing.controller.ts`: GET, GET/:id, POST, PATCH). **Billing** UI: `/billing` list + `/billing/new` (generate from billable time in a period × rate) + `/billing/[id]` (line items, mark sent/paid). `Invoice` shape in `lib/billing.ts`. `company.manage` only. |
+| — (no UI yet) | POST | `/api/:t/invoices/:invoiceId/approve` | **NEW, IAM-GAP-01 (2026-08-13, BACKEND BUILT, no UI).** Maker/checker: `draft → approved`. Requires `billing.invoice.approve`; policy denies the invoice's own creator (`created_by`, migration `0107`) and fails closed if the creator is unknown (legacy pre-migration rows). `PATCH .../invoices/:id` can no longer reach `'sent'`/`'paid'` unless the invoice is already `'approved'` — `'approved'` itself is reachable ONLY through this endpoint, never via the generic PATCH. Response adds `createdBy`/`approvedBy`/`approvedAt` to the GET/list shape. **UI TODO**: an "Approve" action + these three fields on `/billing/[id]`; not built by this backend-only ticket. |
 | ✅ (UI built) | GET | `/api/:t/modules/agency/approvals/decided` | BUILT. Decided-approval **history** (Approvals page "Recently decided"). Add `campaignId` to pending items so the UI deep-links to the campaign. |
 | — | (pure UI) | Calendar `/calendar` | Agenda + workload built entirely from existing task/deliverable/project due dates — no new endpoint. |
 | ✅ (UI built) | GET/POST/DELETE | `/api/:t/files[?entityType&entityId][/:id]` | BUILT (`files.controller.ts`: GET, POST, GET/:id, GET/:id/content, DELETE). **Attachments** on project + task detail. POST body today is a **reference** `{entityType,entityId,filename,url?}` → `{id}`. **TODO: true binary/multipart upload** (`multipart/form-data` with the file part) — UI attaches references for now. |
@@ -683,7 +684,12 @@ From `docs/superpowers/specs/2026-07-20-hr-module-design.md`. Module key `'hr'`;
   ✅ `GET /api/:t/modules/hr/leave/balances`. Deciding rides the EXISTING
   `POST /api/:t/automation-approvals/:id/decide` (now accepts `?origin=hr` on the list GET too) —
   no forked decide endpoint; the hr eventHandler applies the outcome + moves the balance + notifies
-  the subject (`payload.href = "/hr/leave/:id"`).
+  the subject (`payload.href = "/hr/leave/:id"`). **IAM-GAP-01 (2026-08-13):** this same route now
+  authorizes leave rows (`workflow_id:'hr:leave'`) against the dedicated `hr.leave.decide` permission
+  (Cerbos action `decide_leave`) rather than the generic `core.automation_approval.decide` — loan
+  requests (`workflow_id:'hr:loan'`, §10a below) are unaffected and still use the generic action.
+  No client-visible change: the decider population is identical (`company_admin`/`group_executive`/
+  `hr_manager`/`platform_admin`), only the permission catalog gained a dedicated key.
 - ✅ `GET/POST /api/:t/modules/hr/attendance` (staff-editable only, per-day upsert).
 - ✅ `GET/POST /api/:t/modules/hr/checklist-templates`, ✅ `POST /api/:t/modules/hr/onboarding/instantiate`
   (manual trigger; the same helper backs the automatic `user.invited` → onboarding-case spawn).

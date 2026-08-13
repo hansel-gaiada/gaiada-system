@@ -243,14 +243,26 @@ export class AutomationApprovalsController {
     // decide (resource_automation_approval.yaml, WSD-2). Every other origin is unaffected
     // (module stays "").  404s here (not 403) when the id doesn't exist/isn't visible, same
     // as before this change — no new information disclosed to a non-authorized caller.
+    //
+    // IAM-GAP-01: also fetch workflow_id so an hr-origin row can be told apart as LEAVE
+    // ('hr:leave', hr.controller.ts's fileLeave()) vs LOAN ('hr:loan', loans.controller.ts) —
+    // leave now authorizes against its OWN dedicated `decide_leave` Cerbos action/permission
+    // (hr.leave.decide) instead of the generic `decide`; loans and every other origin are
+    // BYTE-UNCHANGED (still `decide`). Still one route, no fork — only the internal Cerbos
+    // action requested differs.
     const existing = await withTenants([tenantId], (c) =>
-      c.query<{ origin: string; tool_name: string }>(`SELECT origin, tool_name FROM automation_approvals WHERE id = $1 AND deleted_at IS NULL`, [id]),
+      c.query<{ origin: string; tool_name: string; workflow_id: string }>(
+        `SELECT origin, tool_name, workflow_id FROM automation_approvals WHERE id = $1 AND deleted_at IS NULL`,
+        [id],
+      ),
     );
     if (!existing.rows[0]) throw new NotFoundException("approval not found or already decided");
     const rowOrigin = existing.rows[0].origin;
     const rowToolName = existing.rows[0].tool_name;
     const module = rowOrigin === "hr" ? "hr" : undefined;
-    await authorize(req.principal, { kind: "automation_approval", id, tenantId, module }, "decide");
+    const isLeave = rowOrigin === "hr" && existing.rows[0].workflow_id === "hr:leave";
+    const subKind = isLeave ? "leave" : undefined;
+    await authorize(req.principal, { kind: "automation_approval", id, tenantId, module, subKind }, isLeave ? "decide_leave" : "decide");
     // D14-02: the executor is REGISTRY-scoped, not origin-scoped (approval-executables.ts's own
     // doctrine + migration 0078's header). execution_status is computed here and flipped in the
     // SAME UPDATE that flips `status` below — never a second statement — so a crash between the two

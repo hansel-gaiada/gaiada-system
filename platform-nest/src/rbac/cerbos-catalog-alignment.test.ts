@@ -95,8 +95,8 @@ describe("IAM-07b link 1 · Cerbos policies <-> permission-catalog.json (the wav
   // (the client half of the post sign-off seam, addendum D-16), which is why the pair count grows by
   // 36 while the kind count grows by only 8. Prior movement: HIER-3, 2026-08-11 — team_lead/team
   // retired, resource_team.yaml deleted, core.team.* dropped (230/61 -> 226/60).
-  it("sanity: catalog headline numbers this suite depends on (262 pairs / 68 kinds — SMM-30, 2026-08-12: the social module's 8 kinds + portal.approve_post)", () => {
-    expect(catalog.length).toBe(262);
+  it("sanity: catalog headline numbers this suite depends on (264 pairs / 68 kinds — IAM-GAP-01, 2026-08-13: +2 literal actions [invoice.approve, automation_approval.decide_leave] on EXISTING kinds, so pairs move but the kind count does not; prior: SMM-30, 2026-08-12, the social module's 8 kinds + portal.approve_post)", () => {
+    expect(catalog.length).toBe(264);
     expect(catalogKindSet.size).toBe(68);
   });
 

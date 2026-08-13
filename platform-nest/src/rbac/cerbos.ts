@@ -24,6 +24,20 @@ export interface Resource {
    *  assistant's handoff endpoint, never every owner-attributed run in the platform. Omitted -> "" ->
    *  that rule's `==` comparison fails closed, same convention as every other optional attr here. */
   origin?: string;
+  /** IAM-GAP-01 — the maker/checker seam (invoice `approve`). The DB user id that CREATED this
+   *  resource (`invoices.created_by`), distinct from `ownerId`'s self-service-ownership semantics
+   *  (`gaiada_common.yaml`'s `owns` asserts EQUALITY; this attribute backs an INEQUALITY check —
+   *  approver must NOT be the creator). Omitted/empty -> the policy's `has() && != ""` guard denies
+   *  rather than treating an unknown creator as "no conflict" (fail CLOSED — a legacy invoice with
+   *  no recorded creator, or a handler that forgot to pass this, must never be approvable by
+   *  anyone but the platform_admin/group_executive wildcard). */
+  creatorId?: string;
+  /** IAM-GAP-01 — disambiguates WHICH kind of `automation_approval` row this is, for kinds whose
+   *  origin alone is not specific enough (hr-origin rows cover BOTH leave and loan requests).
+   *  Currently only `"leave"` (hr.controller.ts's fileLeave()); loans never set this. Omitted -> ""
+   *  -> the dedicated `decide_leave` rule's `== "leave"` check fails closed, same convention as
+   *  every other optional attr here. */
+  subKind?: string;
   /** HIER-2 (DR-9): every ancestor of this resource's own org-unit node id, self-inclusive at
    *  depth 0 (IAM-09's `org_unit_closure` table — `org-unit-closure.ts::loadUnitAncestors`).
    *  `org_unit_lead`'s derived role (derived_roles.yaml) matches when its grant's `scopeId` is
@@ -76,6 +90,8 @@ function resourcePayload(r: Resource) {
       subjectUserId: r.subjectUserId ?? "",
       origin: r.origin ?? "",
       unitAncestors: r.unitAncestors ?? [],
+      creatorId: r.creatorId ?? "",
+      subKind: r.subKind ?? "",
     },
   };
 }
