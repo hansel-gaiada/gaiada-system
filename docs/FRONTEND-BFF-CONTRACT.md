@@ -2748,7 +2748,7 @@ therefore reuses T3b's existing confirm-chip machinery end to end rather than ad
 
 ---
 
-## 19. Social-media module — SMM · Organic Publishing (SMM-* program, 2026-08-13) — `modules/social/social.controller.ts` — **STATUS: IN PROGRESS (SMM-02/08/19 backend built; NO UI yet)**
+## 19. Social-media module — SMM · Organic Publishing (SMM-* program, 2026-08-13) — `modules/social/social.controller.ts` — **STATUS: IN PROGRESS (SMM-02/08/19/05 backend built; NO UI yet)**
 
 Design: `blueprints/smm-design.md` as amended by **`blueprints/smm-design-addendum-2026-08-12.md`
 (binding)**. Schema `migrations/0105_module_social.sql`; IAM registration `0106` + eight
@@ -2862,16 +2862,62 @@ debugging round; its own test caught it.)
   Enabling it is stored and answers with a warning naming `image_generation_unavailable`. A console
   must show that state as "not available yet", not as an active feature.
 
+**Publisher seam + connector registry (SMM-05).** Cerbos kind `social_account`. This is the
+`SocialPublisher` port's console surface — the mapping publishing will ride on, the registry that
+mirrors it, and a status read that keeps answering while the engine is down. **There is still no
+publish endpoint**; `social.post.publish` and the D14 executable-approval entry are SMM-09's.
+
+| Method + path | Permission | Notes |
+|---|---|---|
+| `GET accounts?clientId=&status=` | `social.account.read` | The connector registry as data. A **pure DB read — it never calls the publisher**, which is what makes it keep answering during an outage. Rows carry `{network, handle, displayName, status, quota, capabilities, lastError, healthCheckedAt, connectedAt, publisherOrgRef, driver}`. There is no token field, and there never will be (design D-5: network tokens live inside the engine and are never copied out). |
+| `POST publisher-orgs` | `social.account.connect` | Body `{clientId, publisherOrgRef, apiKeyRef?, driver?}`. **Idempotent**: a repeat with the same org ref answers `created:false`. The organization is created by an operator ON THE PUBLISHER HOST (its API has no such route) — this records the mapping. `apiKeyRef` is an **alias**, never a key. Returns `{publisherOrgId, clientId, driver, publisherOrgRef, apiKeyRef, created, verification}`. |
+| `POST publisher-orgs/:clientId/sync` | `social.account.update` | Mirrors the engine's integrations into the registry: status, live quota, resolved capabilities, health. Returns `{orgId, accounts[], skipped[], disconnected[]}`. |
+| `GET publisher/status` | `social.account.read` | What the seam can do in THIS deployment, **without calling it**: `{configured, driver, enabledNetworks[], capabilities[], inboxSurface, quotaProbe, orgs[]}`. Consult it before spending a call on a capability that may be absent. |
+
+Four behaviours a console (and an agent) must render honestly rather than smooth over:
+
+- **`verification` is an honest field, including when it is a failure.** Provisioning writes the
+  mapping even if the engine is unreachable — the mapping is OUR data and an outage must not make our
+  own schema hostage to it — and answers `{ok:false, reason:"publisher_unreachable"}` (or
+  `publisher_not_configured`). Show "recorded, not yet verified", never a green tick.
+- **A sync failure changes NOTHING.** If the publisher is unreachable the call refuses `503`
+  `{error, code:"publisher_unreachable"}` and not one registry row is rewritten. An outage is never
+  recorded as "every client account is disconnected" — that would be a false, alarming state that
+  also hides the real accounts behind it.
+- **`capabilities` explains its own falses.** Shape:
+  `{schedule, nativeSchedule, directPost, stories, comments, dm, analytics, unsupported:{<cap>:"network"|"driver"|"unverified"}}`.
+  `network` = the platform has no such API and waiting will not help (TikTok comments — no comment
+  scope exists on its developer platform; LinkedIn/YouTube/TikTok DMs — no DM API exists at all;
+  YouTube/TikTok `directPost` — audit-locked to private/SELF_ONLY). `driver` = our engine cannot
+  reach it *yet* (today: **comments and DMs on every network** — the engine has zero inbound
+  surface). `unverified` = nobody has researched it (the four networks outside OQ-1's scope);
+  treated as unavailable, and labelled so it reads as a gap in our knowledge, not a confident "no".
+- **`quota` is live or it is unknown — never a constant.** Instagram's is read from the account's own
+  `content_publishing_limit`. When the probe is unavailable the column is `{}` and `quotaSource` is
+  `probe_unavailable`, which surfaces downstream as the `quota_unknown` WARNING above. Do not render
+  a default cap: the long-carried "25/24h" is obsolete and Meta's own doc contradicts itself.
+
+Refusal codes on this surface answer `{error, code}` (the `code` is the discriminator; these are not
+`{error: token}` 400s): `publisher_not_configured` · `publisher_unreachable` (503) ·
+`publisher_http_error` (502) · `capability_unsupported` (**501** — permanent until a different
+driver is deployed, deliberately not a retryable 503) · `org_key_unresolved` (503) · `org_conflict` ·
+`org_not_provisioned` · `cross_client_account` · `account_not_connected` · `network_disabled` ·
+`approval_required` (409). Plain 400 tokens on these routes: `invalid_client`,
+`missing_publisher_org_ref`, `unknown_driver`.
+
 **MCP surface** (`GET /mcp/tool-defs`, aggregated — nothing hub-side is hardcoded):
 `social.listEngagements`, `social.getEngagementScope` (reads, `low`),
 `social.createEngagement` (write, impact `low`), `social.setEngagementScope` (write, impact
 **`medium`** — an automation principal is SUSPENDED into WS4 rather than applied),
 `social.ingestBrandCorpus` / `social.draftPostVariant` / `social.draftPostIdeas` (SMM-19, write,
 impact `low` — every one writes a draft row or a knowledge pointer, none can reach a live network;
-same `authorize()` calls as their HTTP twins above). The publish, inbox, report and ledger tools are
-deliberately NOT declared yet: their endpoints do not exist, and a tool the hub publishes to every
-agent without a handler behind it is this program's "frontend-first drift" bug pointed at
-automation instead of a console.
+same `authorize()` calls as their HTTP twins above), and SMM-05's `social.listAccounts` /
+`social.getPublisherStatus` (reads, `low`), `social.provisionPublisherOrg` (write, impact
+**`medium`** — it is the tenant-mapping row whose corruption is the wrong-account-publish nightmare)
+and `social.syncConnectorRegistry` (write, impact `low` — mirrored state only, nothing public). The
+publish, inbox, report and ledger tools are deliberately NOT declared yet: their endpoints do not
+exist, and a tool the hub publishes to every agent without a handler behind it is this program's
+"frontend-first drift" bug pointed at automation instead of a console.
 
 **Rollup metrics** (D12): `social.engagements.active`, `social.accounts.connected`,
 `social.posts.published.month`, `social.approvals.pending`, `social.inbox.open`,

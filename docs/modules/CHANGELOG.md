@@ -15,6 +15,28 @@ Per-module changes made between cuts, recorded here so they are not lost the way
 `0031a`/`0086a`/`0087a`/`0089a` were (see the LOG GAPs below) — no tag exists yet for these, so no row
 is added to the App release log table until one is cut.
 
+- **2026-08-13 — SMM-05**, `social-media 0.4.1 -> 0.5.0` (IN PROGRESS). The `SocialPublisher` port,
+  its Postiz HTTP+JSON driver, `social_publisher_orgs` provisioning, connector-registry sync and the
+  cross-client dispatch-chain check land in `platform-nest/src/modules/social/publisher/`. **This is
+  the AGPL containment line in code**, and it is now a build gate: `npm run lint:postiz-deps` (new,
+  wired into CI's `platform-nest` job) fails on any Postiz package or module import anywhere in
+  `src/` — design §11 asked for exactly this ("lint-enforced zero Postiz deps") and it had never
+  existed. Provisioning is idempotent and lets 0105's two UNIQUEs decide, including the GLOBAL
+  `UNIQUE (postiz_org_id)` whose violation is invisible to a SELECT under RLS. The registry mirrors
+  status/quota/capabilities/health and **never a token** (D-5); Instagram quota is read LIVE from the
+  account or recorded UNKNOWN — never the obsolete "25/24h" constant, pinned by a source-grepping
+  test. `capabilities.unsupported` distinguishes a permanent NETWORK gap (TikTok comments, §A4h;
+  LinkedIn/YouTube/TikTok DMs, §A4e/§A4g/§A4h) from a fixable DRIVER gap (Postiz has zero inbound
+  surface for any network, spike §8b) from `unverified`. The cross-client FK-chain check refuses
+  fail-closed with an audit line and has its own adversarial test. Config plumbing absorbs **SMM-06**
+  (base URL, alias-resolved org keys, split timeouts, per-network deployment flags) and **boots
+  cleanly with Postiz unreachable** — the one boot refusal is a base URL that looks PUBLIC. Three
+  design-§05 members were corrected against the spike's findings rather than carried: `createOrg` is
+  unimplementable (no such route), `listComments`/`sendReply` are optional and unimplemented, and
+  `getPostStatus` is a batched date-ranged sweep. **No publish path is built** — `social.publishPost`
+  and the D14 entry remain SMM-09's. No migration; new directory + 3 routes, so MAP.md regenerated.
+  163/163 passing (`npx vitest run src/modules/social`, 59 new). BFF §19 extended.
+
 - **2026-08-13 — SMM-37**, `social-media 0.4.0 -> 0.4.1` (IN PROGRESS). Three pre-publish
   validation-engine gaps closed in `platform-nest/src/modules/social/media-rules.ts` per
   `docs/blueprints/smm-design-addendum-2026-08-12.md` §A4f item 2 / §A4i: media FORMAT is now

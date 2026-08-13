@@ -49,7 +49,7 @@ versions below; the running build reports it at `GET /health`.
 | webdev | `0.13.0` | IN PROGRESS | Web Dev | 2026-08-09 |
 | webdesk | `0.0.0` | PLANNED | Web Dev | 2026-07-23 |
 | search-marketing | `0.5.1` | DEV-VERIFIED | SEO | 2026-08-04 |
-| social-media | `0.4.1` | IN PROGRESS | Social Media | 2026-08-13 |
+| social-media | `0.5.0` | IN PROGRESS | Social Media | 2026-08-13 |
 | creative | `0.1.0` | PROTOTYPED | Creative | 2026-07 |
 | render-gateway-go | `0.0.0` | PLANNED | Creative | 2026-07-23 |
 | reports | `0.3.1` | PROTOTYPED | Cross-cutting | 2026-08-03 |
@@ -1229,7 +1229,65 @@ SM-23 (this reconciliation) â†’ SM-24.
 
 </details>
 
-## social-media — SMM · Organic Publishing · `0.4.1` · IN PROGRESS
+## social-media — SMM · Organic Publishing · `0.5.0` · IN PROGRESS
+
+**0.5.0 (2026-08-13, SMM-05 — the `SocialPublisher` port + org provisioning + connector-registry
+sync, DEV-VERIFIED against a mock/contract suite; the engine itself is still undeployed):**
+`src/modules/social/publisher/` is now the ONE place anything in this platform reaches a publishing
+engine — the AGPL containment line in code (design §06 invariant 1, §11). Six source files, three
+endpoints, no migration.
+
+- **The port** (`publisher/types.ts`) is capability-based, so a partial driver is a modelled state
+  rather than a method that throws. One driver ships (`postiz`, HTTP+JSON only); `mixpost` remains a
+  driver swap, not a redesign, and 0105 already admits it on `social_publisher_orgs.driver`.
+- **Containment is mechanically enforced**, not asserted: `npm run lint:postiz-deps` (new CI gate in
+  the `platform-nest` job) fails the build on any Postiz package in `package.json` or any
+  Postiz-ish module specifier in an import/require position anywhere in `src/`, and
+  `publisher.test.ts` re-asserts it locally plus pins that the driver imports ONLY relative paths.
+  Zero deps today. It deliberately does **not** ban the *string* "postiz" — `postiz_org_id` is a
+  column, `SOCIAL_POSTIZ_BASE_URL` is a config key, and banning the word would train people to work
+  around the lint.
+- **Org provisioning is idempotent and lets the DATABASE decide.** 0105's `UNIQUE (tenant_id,
+  client_id)` and the GLOBAL `UNIQUE (postiz_org_id)` are honoured rather than re-implemented: a
+  repeat returns the existing row (`created:false`), re-pointing a client at a different org refuses
+  `org_conflict`, and an org already mapped elsewhere refuses `org_conflict` **including when
+  "elsewhere" is a tenant the caller's RLS scope cannot see** — which no SELECT-first check could
+  have caught.
+- **Connector-registry sync** mirrors status / live quota / resolved capabilities / health into
+  `social_accounts`, and **never a token** (D-5 custody split (c)). Instagram quota is read LIVE from
+  the account (`content_publishing_limit`, §A4f) or recorded as UNKNOWN — never a constant; a test
+  greps the sources to keep it that way. `capabilities` carries an `unsupported` reason per false
+  (`network` / `driver` / `unverified`), so "TikTok will never have comments" (§A4h) and "our engine
+  cannot read Instagram comments yet" (spike §8b) stay the different sentences they are.
+- **The cross-client FK-chain check** (`assertDispatchChain`) is the wrong-account-publish defence at
+  the dispatch choke-point. 0105 enforces same-TENANT with composite FKs and says in its own comment
+  that the client-level walk belongs here; `variant → post → engagement → client` must equal
+  `variant → account → client` must equal `account → publisher_org → client`, or it refuses
+  fail-closed with an audit line. It takes an existing transaction client so SMM-09 can run it in
+  the same transaction that consumes the approval — a validated-then-dispatched TOCTOU gap would
+  defeat the point.
+- **Config plumbing absorbs SMM-06**: base URL, alias-resolved org keys, split timeouts (connect 5s
+  / read 30s / upload 120s, §A4l §4), per-network deployment flags defaulting to
+  `instagram,facebook,linkedin` (§A4h's own roadmap conclusion). **Boots cleanly with the publisher
+  unreachable** — registration is a pure decision from config, opens no socket, and an unset base URL
+  is a supported deployment. The one boot REFUSAL is the inverse of the search module's guard: a
+  base URL that looks PUBLIC aborts startup, because the VPS has no public listener and a public
+  value means the containment perimeter moved.
+- **Every driver call is OTel-wrapped** at the port (`invokePublisher`), not in the driver — so the
+  network/org/op/cost_usd contract is a property of the port and a second driver cannot forget it.
+
+**What SMM-04's findings made obsolete in design §05, corrected here rather than carried:**
+`createOrg` is capability-gated and refuses on Postiz (there is no org-creation route — an org is
+the runbook's one-shot registration ceremony, by a human, on the licence-zone host);
+`listComments`/`sendReply` are OPTIONAL members that the Postiz driver does not implement at all
+(the engine has ZERO inbound engagement surface for any network — P2 has nothing behind this port to
+call); and `getPostStatus` is a batched, date-ranged sweep rather than a per-id loop.
+
+3 endpoints: `GET accounts`, `POST publisher-orgs`, `POST publisher-orgs/:clientId/sync`, plus
+`GET publisher/status` (a read that answers while the engine is down). 4 MCP tools with the same
+`authorize()` calls. 3 permissions declared (`social.account.read|connect|update`) — `social.post.publish`
+is still deliberately ABSENT: **this ticket builds no publish path**, and the D14 executable-approval
+entry is SMM-09's. 163/163 passing across the module (59 new). BFF §19 extended.
 
 **0.4.1 (2026-08-13, SMM-37 — three validation-engine gaps closed, DEV-VERIFIED):**
 `media-rules.ts` — the pure pre-publish engine consumed at all three call sites (composer create,

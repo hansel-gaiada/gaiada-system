@@ -931,6 +931,81 @@ two reasons: a truncated command output was mistaken for a fact, and **9090 is c
 Prometheus, which ships with no authentication**. Those ports belong to the owner's own private
 production and are the owner's call, not this programme's; flagged rather than touched.
 
+## §A4n · SMM-05 landed (2026-08-13) — what §05 got wrong, and what the port now says instead
+
+**Findings, not new decisions** — same discipline as §A4b/§A4j. SMM-05 is **DEV-VERIFIED against a
+mock/contract suite** (163/163 across `src/modules/social`, 59 of them new); the engine itself is
+still undeployed, so nothing here is evidence about a live network. Code:
+[`platform-nest/src/modules/social/publisher/`](../../platform-nest/src/modules/social/publisher/).
+
+### 1. Three members of design §05's interface did not survive contact with the product
+
+The §05 sketch predates the measurement. Corrected in the shipped port rather than carried:
+
+| §05 member | What it says now, and why |
+|---|---|
+| `createOrg(ref)` | **Capability-gated; the Postiz driver refuses `capability_unsupported`.** There is no org-creation route in the 22-route public surface. An org is minted by the runbook's one-shot registration ceremony on the licence-zone host — flip `DISABLE_REGISTRATION` false, `POST /api/auth/register` once, flip it back, verify the door is shut. Giving the ERP an HTTP path to that would mean either forking the engine or leaving its signup open, and the second is containment invariant 5's neighbour. So provisioning **adopts** an operator-created org: `verifyOrg` proves the pair answers and our row is the mapping — which was always the half that was ours (D-2). The method stays on the port because a driver that CAN mint orgs (Mixpost) should not need an interface change to say so. |
+| `listComments` / `sendReply` | **OPTIONAL members, unimplemented by the Postiz driver.** §8b's "zero inbound surface" is a capability fact, and making them required would have forced a method that throws — which reads as a bug and invites a retry. Absent, they are a fact the registry mirrors (`capabilities.comments=false, unsupported.comments='driver'`) and the console can explain. |
+| `getPostStatus(orgId, ids)` | **Batched and date-ranged**, not a per-id loop, per §A4l §4. One authenticated call per (org, window) keeps the 15-minute cadence a freshness decision instead of a cost decision. |
+
+Everything else in §05 held, including — worth saying plainly — the decision to put the port inside
+platform-nest at all. The retarget made the licence zone a separate machine, which makes the
+"arm's length, REST only, no shared process" claim easier to demonstrate, not harder.
+
+### 2. The containment lint §11 asked for did not exist. It does now.
+
+§11 states it verbatim — "lint-enforced zero Postiz deps in platform-nest" — and nothing enforced
+it. `npm run lint:postiz-deps` is now a CI gate: no Postiz package in `package.json`, no
+Postiz-ish specifier in any import/require position in `src/`. It deliberately does **not** ban the
+*string* "postiz" (`postiz_org_id` is a column, `SOCIAL_POSTIZ_BASE_URL` is a config key) — banning
+the word trains people to work around the lint, and what matters is a module boundary being crossed.
+
+### 3. Two capability facts are now first-class data, because they are not the same fact
+
+`social_accounts.capabilities` carries an `unsupported` reason per false: **`network`** (the platform
+has no such API — TikTok comments §A4h, LinkedIn/YouTube/TikTok DMs §A4e/§A4g/§A4h, YouTube/TikTok
+public posting), **`driver`** (our engine cannot reach it *yet* — today that is comments and DMs on
+every network), **`unverified`** (the four networks 0105 admits that OQ-1 never researched; treated
+as unavailable and labelled, rather than given a confident "no"). Collapsing these into one boolean
+would send someone to evaluate Mixpost over a gap no engine can close, or leave a closable gap
+looking permanent.
+
+### 4. The Instagram live-quota probe is BUILT but transport-BLOCKED, and that is a named gap
+
+§A4f is implemented end to end — `getQuota` → `content_publishing_limit` → `social_accounts.quota`,
+with a source-grepping test that fails if anyone reintroduces a cap literal. But we cannot call
+Graph ourselves (custody split (c) keeps the token inside the engine), so the probe must ride
+`POST /public/v1/integration-trigger/:id`, which upstream gates on a `@Tool` decorator — and the
+spike proved the TikTok provider carries none. **Whether the Instagram provider carries one is
+UNVERIFIED**, so the trigger name is configuration (`SOCIAL_POSTIZ_QUOTA_PROBE_TOOL`), empty by
+default, and the registry records `quotaSource: 'probe_unavailable'` until someone confirms it
+against a live engine with a connected IG account. Downstream that is the existing `quota_unknown`
+warning, which §A4f already vindicated twice. **If the decorator turns out to be absent there too,
+this is a second candidate for the same fork-budget exception §8a requested for `creator_info` —
+architect's call, flagged not taken.**
+
+### 5. One boot refusal added, deliberately the inverse of the search module's
+
+`SOCIAL_POSTIZ_BASE_URL` pointing at a **public** address aborts startup. The search guard refuses a
+*live* vendor URL pointed somewhere *private*; here the hazard runs the other way — the engine holds
+every client's live network tokens and was deliberately given no public listener at all, so the only
+correct value is a tunnel address and a public one means the perimeter moved. Same doctrine, opposite
+polarity, and the shared host classifier is reused so "what counts as private" cannot drift between
+them. It is honest about being a lexical ACCIDENT guard, not an authz control.
+
+### 6. Still owed, and owed by someone else
+
+- **SMM-09 owns the publish gate.** The port exposes `schedulePost` and the dispatch-chain check; no
+  approval path, no publish endpoint and no publish MCP tool were wired here, on purpose.
+- **P2 (SMM-15/16/17/18) still has nothing behind this port to call.** §A4j finding 2 is unchanged
+  and remains the architect's.
+- **`connectTimeoutMs` is carried but not independently enforced** — global `fetch` has no
+  connect-phase deadline without an undici `Agent`, so a black-holed connection is caught by the read
+  deadline instead. Stated in config, `.env.example` and the driver header rather than quietly
+  conflated.
+- **Every Postiz route beyond the five the spike drove is ⚠UNVERIFIED**, collected in one exported
+  `POSTIZ_ROUTES` table so the first live drive (SMM-07) corrects them in one edit.
+
 ## §A5 · Sequencing note — what to do first
 
 1. **SMM-30 + SMM-01 together** (they are one schema conversation: tables, then the permission rows

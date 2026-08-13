@@ -96,6 +96,15 @@ export const socialModule: ModuleContract = {
     { key: "social.post.update", description: "Edit a social post, its variants, media and schedule" },
     { key: "social.post.delete", description: "Delete an unpublished social post or variant" },
     { key: "social.post.import_native", description: "Record a post published by hand in the network's own app" },
+    // SMM-05 — the publisher seam. Three keys for three endpoints, and no more: `social.post.publish`
+    // is still ABSENT because SMM-09 owns the publish gate and this ticket builds no publish path.
+    // `connect` gates the org mapping (the act that makes every future publish on that client
+    // possible — the same reasoning resource_social_account.yaml gives for it being manager-tier),
+    // `update` gates the registry sync (it writes metadata, it does not authorize a connection),
+    // and `read` gates the registry + publisher-status reads.
+    { key: "social.account.read", description: "View the social connector registry: connection status, quota and health" },
+    { key: "social.account.connect", description: "Bind a client to a publisher organization so its accounts can be connected" },
+    { key: "social.account.update", description: "Refresh connector-registry state from the publisher" },
   ],
   customFieldTargets: ["social_engagement", "social_campaign", "social_post"],
   // Agentic-bar criterion 1 (tool parity): everything this ticket's UI can do is reachable as a
@@ -385,6 +394,103 @@ export const socialModule: ModuleContract = {
           ids: { type: "array", items: { type: "string" }, description: "Optional caller-supplied uuids, one per idea, matching `count` — the idempotency key for a retry." },
         },
         required: ["tenantId", "engagementId"],
+      },
+    },
+    // ── SMM-05: the publisher seam ─────────────────────────────────────────────────────────────
+    // Tool parity for all three endpoints, same authorize() calls. Note there is no publish tool
+    // here and there must not be one until SMM-09 — a declared MCP tool whose endpoint does not
+    // exist is a lie the hub publishes to every agent in the estate, and a publish tool is the
+    // worst possible instance of it.
+    {
+      name: "social.listAccounts",
+      description:
+        "List a company's social connector registry: each connected account's network, handle, connection "
+        + "status, live posting quota, resolved capabilities and health. Reads only our own registry — "
+        + "it never calls the publisher, so it keeps answering while the publisher is unreachable. "
+        + "`capabilities.unsupported` says WHY a capability is false: 'network' (the platform has no "
+        + "such API and never will), 'driver' (our publishing engine cannot reach it yet), or "
+        + "'unverified' (nobody has researched it — treated as unavailable).",
+      minAssurance: "low",
+      method: "GET",
+      pathTemplate: "/api/:tenantId/modules/social/accounts",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tenantId: { type: "string", description: "Company id (route scope)." },
+          clientId: { type: "string", description: "Optional: only this client's accounts." },
+          status: { type: "string", enum: ["pending", "connected", "expiring", "expired", "error", "disconnected"], description: "Optional status filter." },
+        },
+        required: ["tenantId"],
+      },
+    },
+    {
+      name: "social.getPublisherStatus",
+      description:
+        "What the publishing engine can do in THIS deployment: whether a driver is configured, which "
+        + "networks are enabled at the deployment level, the driver's capability set, whether an "
+        + "engagement inbox surface exists at all, whether live quota probing is available, and each "
+        + "publisher org with its account count and last sync time. Makes no network call, so it is "
+        + "the surface to consult BEFORE spending a call on a capability that may be absent.",
+      minAssurance: "low",
+      method: "GET",
+      pathTemplate: "/api/:tenantId/modules/social/publisher/status",
+      inputSchema: {
+        type: "object",
+        properties: { tenantId: { type: "string", description: "Company id (route scope)." } },
+        required: ["tenantId"],
+      },
+    },
+    {
+      name: "social.provisionPublisherOrg",
+      description:
+        "Map a client to a publisher organization — the mapping every future publish for that client "
+        + "rides on. IDEMPOTENT: repeating it with the same org reference returns the existing "
+        + "mapping. The organization itself is created by an operator on the publisher host (there is "
+        + "no API for it); this records the mapping and verifies the pair answers. Re-pointing a "
+        + "client at a DIFFERENT org is refused ('org_conflict'), as is an org already mapped to "
+        + "another client — one organization can never serve two clients.",
+      minAssurance: "low",
+      write: true,
+      // 'medium', not 'low': this is the tenant-mapping row whose corruption is the wrong-account-
+      // publish nightmare, so an automation principal is SUSPENDED into WS4 rather than applied. It
+      // is not 'high' — it puts nothing in public by itself; publishing is the 'high' surface and it
+      // arrives with SMM-09.
+      impact: "medium",
+      method: "POST",
+      pathTemplate: "/api/:tenantId/modules/social/publisher-orgs",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tenantId: { type: "string", description: "Company id (route scope)." },
+          clientId: { type: "string", description: "The client this organization serves." },
+          publisherOrgRef: { type: "string", description: "The opaque organization id from the publishing engine." },
+          apiKeyRef: { type: "string", description: "Alias naming which server-side API key serves this org (default: 'default'). Never a key — aliases only." },
+          driver: { type: "string", enum: ["postiz", "mixpost"], description: "Publishing engine driver. Defaults to the deployment's configured driver." },
+        },
+        required: ["tenantId", "clientId", "publisherOrgRef"],
+      },
+    },
+    {
+      name: "social.syncConnectorRegistry",
+      description:
+        "Refresh one client's connector registry from the publishing engine: connection status, live "
+        + "posting quota, resolved capabilities and health. Mirrors STATE ABOUT each connection and "
+        + "never a token. If the publisher is unreachable this refuses and changes NOTHING — an "
+        + "outage is never recorded as 'every account disconnected'.",
+      minAssurance: "low",
+      write: true,
+      // 'low': it writes only mirrored state about connections that already exist, and can put
+      // nothing in public. Its blast radius is a stale row, not a post.
+      impact: "low",
+      method: "POST",
+      pathTemplate: "/api/:tenantId/modules/social/publisher-orgs/:clientId/sync",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tenantId: { type: "string", description: "Company id (route scope)." },
+          clientId: { type: "string", description: "The client whose registry to refresh." },
+        },
+        required: ["tenantId", "clientId"],
       },
     },
   ],

@@ -48,6 +48,11 @@ import {
   MAX_KNOWLEDGE_HITS, MAX_BRAND_INGEST_CHUNKS, MAX_IDEA_COUNT,
   type HashtagStrategy,
 } from "./ai-drafts";
+// SMM-05 — the publisher seam. Note what is imported and what is NOT: the provisioning/sync
+// capabilities and the driver REGISTRY, never a driver and never a transport. The controller is one
+// client of the port, exactly as it is one client of every other capability here.
+import { provisionPublisherOrg, syncConnectorRegistry } from "./publisher/provisioning";
+import { getPublisher } from "./publisher/registry";
 
 const ENGAGEMENT_STATUSES = new Set(["draft", "active", "paused", "closed"]);
 const NETWORKS = new Set([
@@ -1159,6 +1164,139 @@ export class SocialController {
       if (c.created) await writeActivity(tenantId, req.principal.userId, "created", "social_post", c.id, { source: "ai", ideaDraft: true });
     }
     return { ideas: created, draftedVia, groundedOn: knowledgeHits.map((h) => h.sourceRef) };
+  }
+
+  // ============================================ PUBLISHER ORGS + CONNECTOR REGISTRY (SMM-05) ==
+  // The three surfaces this ticket adds, and the line it does NOT cross: there is no publish
+  // endpoint here. `social.publishPost`, the D14 executable-approval entry and the barred metered
+  // twin are SMM-09's, and SMM-09 runs alone. What lands here is the mapping that publishing will
+  // ride on, the registry that mirrors it, and a status read that keeps answering when the engine
+  // is unreachable.
+
+  /** The connector registry as data: which accounts are connected, expiring, erroring, and what
+   *  each can actually do. A PURE DB READ — it never touches the publisher, which is what makes it
+   *  keep working while the engine is down (the "degrade visibly, keep serving reads" property). */
+  @Get("accounts")
+  async listAccounts(
+    @Req() req: FastifyRequest, @Param("tenantId") tenantId: string,
+    @Query("clientId") clientId?: string, @Query("status") status?: string,
+  ) {
+    await authorize(req.principal, { kind: "social_account", tenantId, module: "social" }, "read");
+    const params: unknown[] = [];
+    const where: string[] = ["a.deleted_at IS NULL"];
+    if (clientId) { params.push(clientId); where.push(`a.client_id = $${params.length}`); }
+    if (status) { params.push(status); where.push(`a.status = $${params.length}`); }
+    const { rows } = await withTenants(
+      [tenantId],
+      (c) => c.query(
+        `SELECT a.id, a.client_id AS "clientId", a.network, a.handle, a.display_name AS "displayName",
+                a.status, a.quota, a.capabilities, a.last_error AS "lastError",
+                a.health_checked_at AS "healthCheckedAt", a.connected_at AS "connectedAt",
+                o.postiz_org_id AS "publisherOrgRef", o.driver
+           FROM social_accounts a
+           JOIN social_publisher_orgs o ON o.id = a.publisher_org_id AND o.tenant_id = a.tenant_id
+          WHERE ${where.join(" AND ")}
+          ORDER BY a.client_id, a.network, a.handle`,
+        params,
+      ),
+      { modules: ["social"] },
+    );
+    // NOTE the absence: no token column is selected, because none exists (0105 / design D-5). A
+    // future `SELECT *` here would be the moment that stopped being true by accident.
+    return { accounts: rows };
+  }
+
+  /** Provision the (tenant, client) → publisher-org mapping. Idempotent. See provisioning.ts for
+   *  why the org id is an INPUT rather than something we mint (there is no org-creation route on
+   *  the engine's public API; an org is a human runbook ceremony on the licence-zone host). */
+  @Post("publisher-orgs")
+  async provisionOrg(
+    @Req() req: FastifyRequest, @Param("tenantId") tenantId: string,
+    @Body() body: { clientId?: string; publisherOrgRef?: string; apiKeyRef?: string; driver?: string },
+  ) {
+    // `connect` — not `update`. Binding a client to a publisher org is the act that makes every
+    // future publish on that client possible, which is exactly the reasoning
+    // resource_social_account.yaml already gives for why `connect` is its own manager-tier action.
+    await authorize(req.principal, { kind: "social_account", tenantId, module: "social" }, "connect");
+    if (!body?.clientId || !UUID_RE.test(body.clientId)) refuse("invalid_client");
+    const orgRef = (body?.publisherOrgRef ?? "").trim();
+    if (!orgRef) refuse("missing_publisher_org_ref");
+    if (body?.driver && !["postiz", "mixpost"].includes(body.driver)) refuse("unknown_driver");
+    const result = await provisionPublisherOrg(tenantId, {
+      clientId: body.clientId,
+      postizOrgId: orgRef,
+      apiKeyRef: body.apiKeyRef,
+      driver: body.driver,
+      actorId: req.principal.userId,
+    });
+    return {
+      publisherOrgId: result.org.id,
+      clientId: result.org.clientId,
+      driver: result.org.driver,
+      publisherOrgRef: result.org.postizOrgId,
+      // The ALIAS, never the key. keys.ts resolves it from env at call time and nothing persists it.
+      apiKeyRef: result.org.apiKeyRef,
+      created: result.created,
+      // An honest verification result, including when it is a failure: the mapping is OUR data and
+      // a remote outage must not block recording it, but it must not be dressed up as verified
+      // either. `{ok:false, reason:"publisher_unreachable"}` is the answer, not a thrown error.
+      verification: result.verification,
+    };
+  }
+
+  /** Mirror the engine's integrations into the connector registry. Refuses — touching NOT ONE row —
+   *  when the publisher is unreachable, so a tunnel outage can never be mistaken for "every client
+   *  account is disconnected". */
+  @Post("publisher-orgs/:clientId/sync")
+  @HttpCode(200)
+  async syncRegistry(
+    @Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("clientId") clientId: string,
+  ) {
+    // `update` — the sync writes registry METADATA (status, quota, capabilities, health). It does
+    // not authorize a new connection, so it must not need `connect`.
+    await authorize(req.principal, { kind: "social_account", tenantId, module: "social" }, "update");
+    if (!UUID_RE.test(clientId)) refuse("invalid_client");
+    return syncConnectorRegistry(tenantId, clientId, req.principal.userId);
+  }
+
+  /** What the publisher seam can do in THIS deployment, without calling it. Answers while the
+   *  engine is down — that is the point. The console reads it to explain a degraded 🔌 feature
+   *  instead of showing an empty panel, and an agent reads it to know a capability is absent
+   *  BEFORE spending a call on it (agentic bar: explicit refusal, never an empty list). */
+  @Get("publisher/status")
+  async publisherStatus(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string) {
+    await authorize(req.principal, { kind: "social_account", tenantId, module: "social" }, "read");
+    const driver = getPublisher((config.social.publisher.driver ?? "postiz") as "postiz" | "mixpost");
+    const { rows } = await withTenants(
+      [tenantId],
+      (c) => c.query(
+        `SELECT o.id AS "publisherOrgId", o.client_id AS "clientId", o.driver, o.status,
+                count(a.id) FILTER (WHERE a.deleted_at IS NULL) AS "accountCount",
+                max(a.health_checked_at) AS "lastSyncedAt"
+           FROM social_publisher_orgs o
+           LEFT JOIN social_accounts a ON a.publisher_org_id = o.id AND a.tenant_id = o.tenant_id
+          WHERE o.deleted_at IS NULL
+          GROUP BY o.id, o.client_id, o.driver, o.status
+          ORDER BY o.created_at`,
+        [],
+      ),
+      { modules: ["social"] },
+    );
+    return {
+      configured: Boolean(driver),
+      driver: driver?.key ?? null,
+      // Deployment-level network gate — a second, higher gate than any engagement's tool_scope.
+      enabledNetworks: config.social.publisher.enabledNetworks,
+      capabilities: driver ? [...driver.capabilities].sort() : [],
+      // Stated explicitly because it is the single biggest correction the SMM-04 spike produced and
+      // it is otherwise invisible: this engine has NO inbound engagement surface, for any network
+      // (spike §8b). P2's inbox has nothing behind this port to call.
+      inboxSurface: driver?.capabilities.has("inbox_read") ? "available" : "none",
+      // Likewise: the live Instagram quota probe is off unless a verified trigger name is set.
+      // Absent ⇒ `quota_unknown` warnings, never a fabricated cap (addendum §A4f).
+      quotaProbe: config.social.publisher.quotaProbeTool ? "live" : "unavailable",
+      orgs: rows,
+    };
   }
 
   /** Load an account's network + live quota, refusing anything outside this tenant. Shared by every
