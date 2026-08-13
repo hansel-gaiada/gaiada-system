@@ -38,6 +38,14 @@ export type Role =
   | "it_admin" | "it_manager" | "it"  // IT operators
   | "hr_staff" | "hr_manager" // HR module derived roles (WSD-2 module_staff/module_manager, string-composed from grants — see hr module design §2.1). Company-scoped; may be reconciler-materialized onto a SERVED company (Me.serviceScopes) when the grant rides a service assignment.
   | "search_staff" | "search_manager" // search-marketing (SEO/SEM/GEO) module derived roles (SM-03; same WSD-2 module_staff/module_manager linchpin as HR — string-composed from grants, resource.attr.module === "search"). Company-scoped; may be reconciler-materialized onto a SERVED company.
+  // social-media module derived roles (SMM-30/SMM-11; same WSD-2 module_staff/module_manager
+  // linchpin, resource.attr.module === "social"). ⚠ NAMED `social_staff`/`social_manager`, NOT
+  // `smm_*` — the addendum's own §A1 Δ1 correction: `derived_roles.yaml` string-composes
+  // `resource.attr.module + "_staff"/"_manager"`, and the module key is `social` (the department's
+  // display name "Social Media" and console slug "social-media" are cosmetic; the module key that
+  // decides the Cerbos role string never changed). Company-scoped; may be reconciler-materialized
+  // onto a SERVED company exactly like search_staff/search_manager.
+  | "social_staff" | "social_manager"
   // IAM-02a-FIX / DR-2b — `agency_approver` is a REAL, LIVE-HELD role (1 real holder, IAM-02a-0's
   // live query 2026-08-10) that was entirely absent from this union — same defect shape as Gap 1/2/3
   // above: a raw grant role exists in Cerbos but has no `Role` member here, so `ROLE_CAPS[g.role]`
@@ -169,6 +177,25 @@ export const CAPABILITIES = [
   "search.campaign.launch", // mark a manual-mode change proposal applied OR execute an api-mode one (Cerbos actions `launch`/`apply_manual`/`apply_negatives`/`set_budget`, elevated-only)
   "search.report.approve",  // approve + deliver an engagement report (Cerbos actions `approve`/`deliver`, elevated-only)
   "search.ledger.admin",    // override a provider budget stop-loss cap (Cerbos action `admin` on resource_search_ledger, elevated-only)
+  // ────────────────────────────── social-media (SMM-11) ──────────────────────────────────────────
+  // Verified directly against cerbos/policies/resource_social_engagement.yaml +
+  // resource_social_post.yaml (SMM-30) and role-permission-bundles.json's actual generated bundles
+  // (not inferred from a module-role comment the way search's three were) — every set below is a
+  // 1:1 match, per role, checked before writing it: company_admin/manager/social_manager hold every
+  // permission each capability names; social_staff holds exactly the subset each capability's own
+  // comment states; member/viewer hold NONE of any social.* permission (denied by both policies
+  // entirely — social is a department-scoped module, not a baseline grant).
+  "social.view",         // read engagements + the content calendar (Cerbos social_engagement/social_post `read`) — held by staff and manager alike
+  "social.manage",       // author/edit a post and its per-network variants, record a native import (Cerbos social_post `create`/`update`/`import_native`) — staff's OWN tier, not manager-only
+  "social.scope.write",  // set an engagement's tool scope + metered budget (Cerbos social_engagement `set_scope`) — manager-tier only, mirrors search.scope.write exactly
+  // ⚠ Deliberately narrower than `social.manage` even though both ride the `social_post` kind:
+  // Cerbos's module_staff rule grants read/create/update/submit/import_native but explicitly
+  // EXCLUDES delete (resource_social_post.yaml's own header: "the manager/staff split IS the
+  // publish line: staff author... the manager is the human who decides... and who can take it
+  // back down"). Folding this into `social.manage` would hand every staff account a delete button
+  // Cerbos will 403 — a dead button, the safe-but-wrong direction this file's own discipline (Gap-3)
+  // still flags rather than accepts by default.
+  "social.post.delete",  // delete an unpublished post/variant (Cerbos social_post `delete`) — manager-tier only
   // ─────────── TR-25: the tracker/reporting program (§8's matrix). Mirrors, never decides. ───────────
   // ⚠ READ THIS BEFORE USING ANY `reports.*` CAPABILITY FOR ANYTHING BUT RENDERING.
   // These capabilities answer "should the UI OFFER this?", never "may this user SEE this person?". The
@@ -224,6 +251,10 @@ export const ROLE_CAPS: Record<Role, Capability[]> = {
     "pipeline.write", "pipeline.manage", "webdev.provision",
     "hr.view", "hr.manage",
     "search.view", "search.manage", "search.scope.write", "search.campaign.launch", "search.report.approve", "search.ledger.admin",
+    // company_admin holds the FULL social manager-tier bundle (role-permission-bundles.json: every
+    // permission social_manager holds, company_admin holds identically — same Cerbos rule lists
+    // company_admin alongside module_manager on every social_engagement/social_post action).
+    "social.view", "social.manage", "social.scope.write", "social.post.delete",
     // The tenant's own administrator holds the exec-only reporting tier within its company (§8's
     // company-grain / seal / recompute rows read "exec"; resource_report_period.yaml's header
     // establishes that §6.2's "lead" there means the COMPANY's lead, not a per-department manager).
@@ -281,6 +312,9 @@ export const ROLE_CAPS: Record<Role, Capability[]> = {
     // refusal, never a silent one) — flagged here as the judgement call it is, not asserted as
     // risk-free in every one of `company.manage`'s several consuming surfaces.
     "company.manage",
+    // manager's bundle matches company_admin's on every social.* permission this file cites — same
+    // Cerbos rule (`company_admin, manager` on both social_engagement and social_post), verified.
+    "social.view", "social.manage", "social.scope.write", "social.post.delete",
     ...REPORT_READS, "checkin.read", "checkin.excuse", "appraisal.read", "appraisal.score",
   ],
   // A plain member's own report, own check-in and own appraisal are NOT capabilities — they are
@@ -362,6 +396,20 @@ export const ROLE_CAPS: Record<Role, Capability[]> = {
   // reasoning, same `module_staff` rule, `search_manager` deliberately excluded for the same reason).
   search_staff: ["search.view", "search.manage", "people.directory"],
   search_manager: ["search.view", "search.manage", "search.scope.write", "search.campaign.launch", "search.report.approve", "search.ledger.admin"],
+  // social_staff = Cerbos module_staff on social_engagement (read only — NOT create/update/
+  // delete/set_scope, unlike search's engagement policy) and on social_post (read/create/update/
+  // submit/import_native — NOT delete/publish/cancel/delete_published). Both verified directly
+  // against role-permission-bundles.json's generated `social_staff` bundle (17 permissions) rather
+  // than inferred from a comment: `social.manage` (post create/update/import_native) is held;
+  // `social.post.delete` and `social.scope.write` are NOT — the manager/staff split IS the publish
+  // line (resource_social_post.yaml's own header). DR-7 precedent — `people.directory` added on the
+  // identical `module_staff` tenant-directory baseline rule search_staff/hr_staff already cite.
+  social_staff: ["social.view", "social.manage", "people.directory"],
+  // social_manager = Cerbos module_manager: every social_staff permission PLUS
+  // social.engagement.create/update/delete/set_scope and social.post.delete/publish/cancel/
+  // delete_published (32-permission bundle). `social.scope.write` and `social.post.delete` are
+  // this role's OWN tier — deliberately excluded from social_staff above.
+  social_manager: ["social.view", "social.manage", "social.scope.write", "social.post.delete"],
   // §8's served-dept column: department + project grain ONLY. Deliberately NO `reports.person.view`
   // — §8's person-grain cell for this column ("only persons acting under the assignment, via the
   // provider view") is NOT enforceable, because no endpoint can bound a person read that way, so

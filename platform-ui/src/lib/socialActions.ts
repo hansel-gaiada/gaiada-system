@@ -1,0 +1,238 @@
+"use server";
+// Social-media (SMM) write paths — SMM-11. Mirrors the `lib/hrActions.ts` / `searchMarketingActions.ts`
+// `ctx()` convention exactly. RBAC gating here is defence-in-depth only, a UI hint — Cerbos's
+// `social_engagement`/`social_post` actions (cerbos/policies/resource_social_engagement.yaml,
+// resource_social_post.yaml) are the real boundary and are enforced server-side by platform-nest
+// regardless of what this file does.
+//
+// Every refusal token below is whatever `social.controller.ts`'s `refuse()` throws as `message`
+// (renamed to `error` by the global HttpErrorFilter on the way out) — returned VERBATIM as
+// `result.error` so a caller can render or branch on the exact snake_case contract token
+// (docs/FRONTEND-BFF-CONTRACT.md §19: "Render against the token, never by matching prose"), never
+// a re-worded string invented on this side of the wire.
+import { revalidatePath } from "next/cache";
+import { getSessionUserId } from "./session-server";
+import { getMe, platformFetch, PlatformError, type Me } from "./platform";
+import { getActiveTenant } from "./tenant";
+import { can } from "./rbac";
+import type { ToolScope, CreatedResult, CreateVariantResult, UpdateVariantResult } from "./socialShared";
+
+async function ctx(tenantOverride?: string): Promise<{ userId: string; tenant: string; me: Me } | { error: string }> {
+  const userId = await getSessionUserId();
+  if (!userId) return { error: "Session expired — sign in again." };
+  const me = await getMe(userId);
+  const tenant = tenantOverride ?? (await getActiveTenant(me));
+  if (!tenant) return { error: "No active company selected." };
+  return { userId, tenant, me };
+}
+
+const base = (t: string) => `/api/${t}/modules/social`;
+
+// eslint-disable-next-line @typescript-eslint/ban-types -- the empty-object default is deliberate:
+// a plain write (delete, PATCH with no echoed payload) resolves to exactly `{ ok: true }`.
+export type ActionResult<T = {}> = ({ ok: true } & T) | { ok: false; error: string };
+
+function isCtxError(c: Awaited<ReturnType<typeof ctx>>): c is { error: string } {
+  return "error" in c;
+}
+
+async function run<T>(tenantOverride: string | undefined, fn: (c: { userId: string; tenant: string; me: Me }) => Promise<T>): Promise<ActionResult<T>> {
+  const c = await ctx(tenantOverride);
+  if (isCtxError(c)) return { ok: false, error: c.error };
+  try {
+    const result = await fn(c);
+    return { ok: true, ...result };
+  } catch (e) {
+    if (e instanceof PlatformError) return { ok: false, error: e.message };
+    throw e;
+  }
+}
+
+// ── engagements ──────────────────────────────────────────────────────────────────────────────────
+
+export async function createEngagement(
+  tenantId: string,
+  body: { clientId: string; name: string; projectId?: string; id?: string },
+): Promise<ActionResult<CreatedResult>> {
+  return run(tenantId, async (c) => {
+    const res = await platformFetch<CreatedResult>(`${base(c.tenant)}/engagements`, c.userId, {
+      method: "POST", body: JSON.stringify(body),
+    });
+    revalidatePath(`/departments`, "layout");
+    return res;
+  });
+}
+
+export async function updateEngagement(
+  tenantId: string, engagementId: string,
+  body: { name?: string; status?: string; projectId?: string | null; ownerId?: string | null; startsOn?: string | null; endsOn?: string | null },
+): Promise<ActionResult> {
+  return run(tenantId, async (c) => {
+    await platformFetch(`${base(c.tenant)}/engagements/${engagementId}`, c.userId, { method: "PATCH", body: JSON.stringify(body) });
+    return {};
+  });
+}
+
+export async function deleteEngagement(tenantId: string, engagementId: string): Promise<ActionResult> {
+  return run(tenantId, async (c) => {
+    await platformFetch(`${base(c.tenant)}/engagements/${engagementId}`, c.userId, { method: "DELETE" });
+    return {};
+  });
+}
+
+export type SetScopeResult = { toolScope: ToolScope; usageBudgetUsd: number | undefined; warnings: string[] };
+
+/** `social.engagement.set_scope` — the money-and-blast-radius dial (D-14). Gated on
+ *  `social.scope.write` here as a UI hint; Cerbos's `set_scope` action is the real boundary.
+ *  NOTE (contract discrepancy #1, see lib/social.ts's header): the response's `usageBudgetUsd` is
+ *  only the value THIS call sent, not the persisted one — callers needing the true current budget
+ *  after a scope-only patch must re-read `getEngagementScope`. */
+export async function setEngagementScope(
+  tenantId: string, engagementId: string, body: { toolScope?: Partial<ToolScope>; usageBudgetUsd?: number },
+): Promise<ActionResult<SetScopeResult>> {
+  const c0 = await ctx(tenantId);
+  if (isCtxError(c0)) return { ok: false, error: c0.error };
+  if (!can(c0.me, "social.scope.write", c0.tenant)) {
+    return { ok: false, error: "You don't have the social.scope.write permission." };
+  }
+  return run(tenantId, async (c) => {
+    const res = await platformFetch<SetScopeResult>(`${base(c.tenant)}/engagements/${engagementId}/scope`, c.userId, {
+      method: "PATCH", body: JSON.stringify(body),
+    });
+    revalidatePath(`/departments`, "layout");
+    return res;
+  });
+}
+
+// ── brand profile ───────────────────────────────────────────────────────────────────────────────
+
+export async function upsertBrandProfile(
+  tenantId: string, clientId: string,
+  body: { tone?: Record<string, unknown>; hashtagStrategy?: Record<string, unknown>; knowledgeSourceIds?: string[] },
+): Promise<ActionResult> {
+  return run(tenantId, async (c) => {
+    await platformFetch(`${base(c.tenant)}/brand-profiles/${clientId}`, c.userId, { method: "PATCH", body: JSON.stringify(body) });
+    return {};
+  });
+}
+
+// ── campaigns / kpi targets ──────────────────────────────────────────────────────────────────────
+
+export async function createCampaign(
+  tenantId: string, body: { engagementId: string; name: string; goal?: string; id?: string },
+): Promise<ActionResult<CreatedResult>> {
+  return run(tenantId, async (c) => platformFetch<CreatedResult>(`${base(c.tenant)}/campaigns`, c.userId, {
+    method: "POST", body: JSON.stringify(body),
+  }));
+}
+
+export async function createKpiTarget(
+  tenantId: string,
+  body: { engagementId: string; metricKey: string; targetValue: number; baselineValue?: number; direction?: "up" | "down"; duePeriod?: string; id?: string },
+): Promise<ActionResult<CreatedResult>> {
+  return run(tenantId, async (c) => platformFetch<CreatedResult>(`${base(c.tenant)}/kpi-targets`, c.userId, {
+    method: "POST", body: JSON.stringify(body),
+  }));
+}
+
+// ── posts ────────────────────────────────────────────────────────────────────────────────────────
+
+export async function createPost(
+  tenantId: string,
+  body: { engagementId: string; title: string; brief?: string; source?: "human" | "ai" | "agent"; campaignId?: string; scheduledAt?: string; id?: string },
+): Promise<ActionResult<CreatedResult>> {
+  return run(tenantId, async (c) => {
+    const res = await platformFetch<CreatedResult>(`${base(c.tenant)}/posts`, c.userId, {
+      method: "POST", body: JSON.stringify(body),
+    });
+    revalidatePath(`/departments`, "layout");
+    return res;
+  });
+}
+
+export async function updatePost(
+  tenantId: string, postId: string,
+  body: { title?: string; brief?: string; campaignId?: string | null; scheduledAt?: string | null; status?: string },
+): Promise<ActionResult> {
+  return run(tenantId, async (c) => {
+    await platformFetch(`${base(c.tenant)}/posts/${postId}`, c.userId, { method: "PATCH", body: JSON.stringify(body) });
+    revalidatePath(`/departments`, "layout");
+    return {};
+  });
+}
+
+/** May refuse `post_has_live_variants` — anything queued/publishing/published under the post
+ *  blocks a soft delete; taking a LIVE post down is `delete_published`, a separate power (D-14/09,
+ *  not built by this ticket). Gated on `social.post.delete` — same Cerbos `delete` action as
+ *  `deleteVariant` below, denied to `module_staff`. */
+export async function deletePost(tenantId: string, postId: string): Promise<ActionResult> {
+  const c0 = await ctx(tenantId);
+  if (isCtxError(c0)) return { ok: false, error: c0.error };
+  if (!can(c0.me, "social.post.delete", c0.tenant)) {
+    return { ok: false, error: "You don't have the social.post.delete permission." };
+  }
+  return run(tenantId, async (c) => {
+    await platformFetch(`${base(c.tenant)}/posts/${postId}`, c.userId, { method: "DELETE" });
+    revalidatePath(`/departments`, "layout");
+    return {};
+  });
+}
+
+export async function importNativePost(
+  tenantId: string,
+  body: { engagementId: string; accountId: string; title: string; body?: string; publishedUrl?: string; publishedAt?: string; id?: string },
+): Promise<ActionResult<CreatedResult>> {
+  return run(tenantId, async (c) => {
+    const res = await platformFetch<CreatedResult>(`${base(c.tenant)}/posts/import-native`, c.userId, {
+      method: "POST", body: JSON.stringify(body),
+    });
+    revalidatePath(`/departments`, "layout");
+    return res;
+  });
+}
+
+// ── variants ─────────────────────────────────────────────────────────────────────────────────────
+
+export async function createVariant(
+  tenantId: string, postId: string,
+  body: { accountId: string; body?: string; firstComment?: string | null; media?: unknown[]; settings?: Record<string, unknown>; scheduledAt?: string | null; id?: string },
+): Promise<ActionResult<CreateVariantResult>> {
+  return run(tenantId, async (c) => {
+    const res = await platformFetch<CreateVariantResult>(`${base(c.tenant)}/posts/${postId}/variants`, c.userId, {
+      method: "POST", body: JSON.stringify(body),
+    });
+    revalidatePath(`/departments`, "layout");
+    return res;
+  });
+}
+
+/** Edit invalidates approval (design D-15) — the response's `approvalInvalidated` tells the
+ *  caller immediately when this drops an approved/in-review variant back to `draft`; render it,
+ *  don't let the operator find out on the next load. */
+export async function updateVariant(
+  tenantId: string, variantId: string,
+  body: { body?: string; firstComment?: string | null; media?: unknown[]; settings?: Record<string, unknown>; scheduledAt?: string | null },
+): Promise<ActionResult<UpdateVariantResult>> {
+  return run(tenantId, async (c) => {
+    const res = await platformFetch<UpdateVariantResult>(`${base(c.tenant)}/variants/${variantId}`, c.userId, {
+      method: "PATCH", body: JSON.stringify(body),
+    });
+    revalidatePath(`/departments`, "layout");
+    return res;
+  });
+}
+
+/** Gated on `social.post.delete` — Cerbos denies this to `module_staff` (staff may author/submit
+ *  but not remove) even though `social.manage`'s create/update tier is shared with staff. */
+export async function deleteVariant(tenantId: string, variantId: string): Promise<ActionResult> {
+  const c0 = await ctx(tenantId);
+  if (isCtxError(c0)) return { ok: false, error: c0.error };
+  if (!can(c0.me, "social.post.delete", c0.tenant)) {
+    return { ok: false, error: "You don't have the social.post.delete permission." };
+  }
+  return run(tenantId, async (c) => {
+    await platformFetch(`${base(c.tenant)}/variants/${variantId}`, c.userId, { method: "DELETE" });
+    revalidatePath(`/departments`, "layout");
+    return {};
+  });
+}

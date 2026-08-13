@@ -31,12 +31,14 @@ describe("toolkitFor", () => {
     expect(deptTabs(tk).some((t) => t.path === "tools")).toBe(false);
     expect(tk.launchers.length).toBeGreaterThan(0);
   });
-  // SMM is the fallback case now that SEO is built (SM-11). Kept pointed at a
-  // genuinely unbuilt department rather than deleted — the generic shell is what
+  // "Legal" is the fallback case now that Social Media is built (SMM-11) — "SMM" stopped being a
+  // safe placeholder the moment the addendum corrected the department's real name to "Social
+  // Media" (slug `social-media`, NOT `smm`; see deptToolkits.ts's own SOCIAL_MEDIA comment).
+  // Pointed at a genuinely unbuilt department rather than deleted — the generic shell is what
   // every department gets before its craft group exists, so it needs a guard.
   it("falls back to a generic Home-only toolkit for unbuilt departments", () => {
-    const tk = toolkitFor("SMM");
-    expect(tk.slug).toBe("smm");
+    const tk = toolkitFor("Legal");
+    expect(tk.slug).toBe("legal");
     expect(tk.groups.map((g) => g.key)).toEqual(["home"]);
     expect(deptTabs(tk).map((t) => t.key)).toEqual(["home"]);
     expect(tk.launchers).toEqual([]);
@@ -73,7 +75,30 @@ describe("hasBespokeToolkit", () => {
   it("is true only for departments with a built-out toolkit", () => {
     expect(hasBespokeToolkit("Web Dev")).toBe(true);
     expect(hasBespokeToolkit("SEO")).toBe(true);
-    expect(hasBespokeToolkit("SMM")).toBe(false);
+    expect(hasBespokeToolkit("Social Media")).toBe(true);
+    expect(hasBespokeToolkit("Legal")).toBe(false);
+  });
+});
+
+// Social Media (SMM-11) — D-18/Δ12: named "Social Media" (slug `social-media`, NOT "SMM"/`smm`),
+// inherits Home/Work/Connections unchanged, and adds exactly one new craft group: "Publish".
+describe("Social Media toolkit (SMM-11)", () => {
+  it("gives Social Media the Home · Work · Publish · Connections spine, slug social-media", () => {
+    const tk = toolkitFor("Social Media");
+    expect(tk.slug).toBe("social-media");
+    expect(tk.groups.map((g) => g.key)).toEqual(["home", "work", "publish", "connections"]);
+    const publish = tk.groups.find((g) => g.key === "publish");
+    expect(publish?.tabs.map((t) => t.path)).toEqual(["calendar", "composer", "inbox", "analytics"]);
+  });
+
+  it("advertises only tab paths that exist as routes", () => {
+    const paths = deptTabs(toolkitFor("Social Media")).map((t) => t.path);
+    expect(paths).toEqual([
+      "", // Home
+      "projects", "board", "ball", "timeline", "charts", "activity", // Project Management (generic)
+      "calendar", "composer", "inbox", "analytics",
+      "connections",
+    ]);
   });
 });
 

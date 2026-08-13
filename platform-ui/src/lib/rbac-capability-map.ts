@@ -422,6 +422,48 @@ export const CAPABILITY_MAP = {
     semantics: "all",
   },
 
+  // ────────────────────────────── social-media (SMM-11) ──────────────────────────────────────────
+  // Every set below was checked directly against role-permission-bundles.json's generated bundles
+  // for company_admin/manager/social_staff/social_manager BEFORE being written (not inferred from a
+  // policy comment the way search's three entries above were) — see rbac.ts's ROLE_CAPS comments
+  // for the exact bundle sizes cited (social_staff 17 permissions, social_manager 32).
+
+  // rbac.ts's own citation: "read engagements + the content calendar... held by staff and manager
+  // alike." Both `social_staff` and `social_manager` (and company_admin/manager) hold BOTH keys
+  // unconditionally.
+  "social.view": {
+    permissions: ["social.engagement.read", "social.post.read"],
+    semantics: "all",
+  },
+
+  // rbac.ts's own citation: "author/edit a post and its per-network variants, record a native
+  // import... staff's OWN tier, not manager-only." `social_staff`'s bundle holds all three; so does
+  // every other role that holds any social permission at all (company_admin/manager/
+  // social_manager). Deliberately excludes `social.post.delete` (its own capability below) —
+  // Cerbos's module_staff rule grants create/update/submit/import_native but NOT delete.
+  "social.manage": {
+    permissions: ["social.post.create", "social.post.update", "social.post.import_native"],
+    semantics: "all",
+  },
+
+  // rbac.ts's own citation: "set an engagement's tool scope + metered budget... manager-tier only,
+  // mirrors search.scope.write exactly." A singleton, direct citation — `social_staff`'s bundle
+  // does NOT hold `social.engagement.set_scope` (resource_social_engagement.yaml denies module_
+  // staff every action but `read`); company_admin/manager/social_manager all hold it.
+  "social.scope.write": {
+    permissions: ["social.engagement.set_scope"],
+    semantics: "all",
+  },
+
+  // rbac.ts's own citation: the manager/staff split IS the publish line — `social_staff`'s bundle
+  // holds `social.post.create/update/submit/import_native/read` but NOT `social.post.delete`
+  // (resource_social_post.yaml's module_staff rule omits it on purpose). company_admin/manager/
+  // social_manager all hold it.
+  "social.post.delete": {
+    permissions: ["social.post.delete"],
+    semantics: "all",
+  },
+
   // ─────────────── TR-25: reports / check-in / appraisal (§8's matrix, mirrors never decides) ────
   // Every entry in this block cites an exact Cerbos action name in rbac.ts's own comment — this is
   // the most precisely-documented block in the whole file despite nine of its twelve members being
