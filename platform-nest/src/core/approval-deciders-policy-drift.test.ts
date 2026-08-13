@@ -153,24 +153,50 @@ describe("approval-deciders.ts — Cerbos policy drift guard (MAIL-23)", () => {
     assertDeciderRolesMatch("resource_agency_approval.yaml", "approve", actual, AGENCY_EXPECTED);
   });
 
-  // ── ANCHORS RE-BASED 2026-08-12 (IAM-TRAP4) ────────────────────────────────────────────────────
-  // `group_executive` used to share the `decide`/`retry` rule with `company_admin`, so a single
-  // `derivedRoles: ["company_admin", "group_executive"]` anchored both mutation proofs below.
-  // IAM-TRAP4 split it into its OWN rule (it is a global-scope role, so the shared rule's
-  // `inTenant` gate meant the grant could never fire for it), leaving two sibling rules that each
-  // grant `["decide", "retry"]`. The old anchor now matches ZERO times and the `actions` anchor
-  // matches TWICE — which is what these three tests were failing on.
+  // ── ANCHORING BY RULE IDENTITY, NOT BY TEXT (rewritten 2026-08-13) ─────────────────────────────
+  // These mutation proofs broke TWICE IN ONE DAY on unrelated policy edits, which is a signal that
+  // the approach was wrong rather than that the string needed updating again:
+  //   - IAM-TRAP4 split `group_executive` out of company_admin's `decide`/`retry` rule, so the old
+  //     `derivedRoles: ["company_admin", "group_executive"]` anchor matched ZERO times.
+  //   - IAM-GAP-01 then added `decide_leave` rules that REUSE the literal
+  //     `derivedRoles: ["company_admin"]`, so its replacement anchor matched TWICE.
+  // Both times the decider set itself was untouched; only the text moved. A bare role literal can
+  // never be a stable anchor, because the same role-set can legitimately appear on any number of
+  // rules.
   //
-  // Worth stating plainly, because it is the reassuring half: the DECIDER SET DID NOT CHANGE. The
-  // two assertions above still pass unmodified — company_admin, group_executive and hr_manager
-  // remain exactly who may decide, so `approval-deciders.ts` needed no edit. The split changed how
-  // the grant is expressed, not who holds it. Only these text anchors needed re-basing.
-  const COMPANY_ADMIN_DECIDE_ANCHOR = 'derivedRoles: ["company_admin"]';
+  // So: locate the rule by its IDENTITY — the (actions, derivedRoles) pair, which is unique per
+  // rule — and mutate that block alone. A new rule elsewhere reusing either half no longer breaks
+  // these tests, while a change to the rule we actually target still does, which is the whole point.
+  const DECIDE_ACTIONS = 'actions: ["decide", "retry"]';
+  const DECIDE_ROLES = 'derivedRoles: ["company_admin"]';
+
+  /** Rewrite the `derivedRoles` line of the ONE rule whose actions and roles both match, leaving
+   *  every other rule (including ones that reuse either literal) untouched. Throws with a specific
+   *  message if the rule is not found exactly once — a real drift signal, not a stale anchor. */
+  function mutateRuleRoles(yamlText: string, actionsLiteral: string, rolesLiteral: string, replacement: string): string {
+    const lines = yamlText.split("\n");
+    const hits: number[] = [];
+    for (let i = 0; i < lines.length; i++) {
+      if (!lines[i].includes(actionsLiteral)) continue;
+      // Scan forward to this rule's own derivedRoles, stopping at the next sibling rule so we can
+      // never reach into the following one.
+      for (let j = i + 1; j < lines.length && !/^\s*-\s*actions:/.test(lines[j]); j++) {
+        if (lines[j].includes(rolesLiteral)) { hits.push(j); break; }
+      }
+    }
+    expect(
+      hits.length,
+      `expected exactly ONE rule with ${actionsLiteral} + ${rolesLiteral}; found ${hits.length}. ` +
+        `The rule this proof targets has been split, merged or removed — re-read the policy before ` +
+        `changing this test.`,
+    ).toBe(1);
+    const out = [...lines];
+    out[hits[0]] = out[hits[0]].replace(rolesLiteral, replacement);
+    return out.join("\n");
+  }
 
   it("a role added to the automation policy's `decide` rule trips the guard (mutates an in-memory copy only — never the real policy file)", () => {
-    const anchor = COMPANY_ADMIN_DECIDE_ANCHOR;
-    expect(automationYaml.split(anchor).length - 1, "anchor text not found exactly once — policy text moved, update this test's anchor").toBe(1);
-    const mutated = automationYaml.replace(anchor, 'derivedRoles: ["company_admin", "manager"]');
+    const mutated = mutateRuleRoles(automationYaml, DECIDE_ACTIONS, DECIDE_ROLES, 'derivedRoles: ["company_admin", "manager"]');
     const rules = parsePolicyRules(mutated);
     const actual = resolveDeciderRoles(rules, "decide", { module_manager: "hr_manager" });
     expect(() => assertDeciderRolesMatch("resource_automation_approval.yaml", "decide", actual, AUTOMATION_EXPECTED)).toThrow(
@@ -199,9 +225,10 @@ describe("approval-deciders.ts — Cerbos policy drift guard (MAIL-23)", () => {
   });
 
   it("an unrelated comment edit near the `decide` rule does NOT trip the guard", () => {
-    const anchor = COMPANY_ADMIN_DECIDE_ANCHOR;
-    expect(automationYaml.split(anchor).length - 1).toBe(1);
-    const mutated = automationYaml.replace(anchor, `${anchor}\n      # a totally unrelated reworded comment, no role change`);
+    const mutated = mutateRuleRoles(
+      automationYaml, DECIDE_ACTIONS, DECIDE_ROLES,
+      `${DECIDE_ROLES}\n      # a totally unrelated reworded comment, no role change`,
+    );
     const actual = resolveDeciderRoles(parsePolicyRules(mutated), "decide", { module_manager: "hr_manager" });
     expect(() => assertDeciderRolesMatch("resource_automation_approval.yaml", "decide", actual, AUTOMATION_EXPECTED)).not.toThrow();
   });
