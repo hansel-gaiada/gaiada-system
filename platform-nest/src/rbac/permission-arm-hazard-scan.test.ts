@@ -52,6 +52,12 @@ import { describe, it, expect } from "vitest";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import * as yaml from "js-yaml";
+// IAM-04-B7: the machine-derived (role -> reachable scope-type set) artifact IAM-SEC-06 built —
+// a READ only, this file does not own or edit `scope-constrained-roles.*` (see that module's own
+// header for what generates it). Used below so the "other-narrow" reachability gate can consult
+// the SAME resolution-boundary mitigation `assemblePrincipal()` actually applies, instead of
+// treating every co-occurrence as an unconditional hazard forever.
+import scopeConstrainedRolesDoc from "./scope-constrained-roles.json";
 
 const POLICIES_DIR = join(__dirname, "../../cerbos/policies");
 
@@ -512,6 +518,26 @@ function loadOtherNarrowRolesFromController(): Set<string> {
   return out;
 }
 
+/** IAM-04-B7: every role name IAM-SEC-06's resolution-boundary filter (`assemblePrincipal()`, via
+ *  `isGrantScopeReachable()` in `./scope-constrained-roles.ts`) actively restricts — read straight
+ *  from `scope-constrained-roles.json`, itself machine-generated from THIS FILE's own
+ *  `derived_roles.yaml` source (`scripts/generate-scope-constrained-roles.mjs`), never a
+ *  hand-written exemption list re-typed here. A role present in this set can NEVER resolve a
+ *  permission into `principal.attr.perms` at a scope its own Cerbos condition refuses — see
+ *  docs/superpowers/plans/2026-08-13-iam-sec-06-report.md — which is the authority-layer closure
+ *  IAM-04c's ruling (§8 option A) named as the precondition before the "other-narrow" reachability
+ *  gate below could stop treating EVERY co-occurrence with a wired perm_* arm as an unconditional
+ *  hazard. This is a SEPARATE artifact from `loadOtherNarrowRolesFromController()` above (that one
+ *  reads the write-path guard, `ROLE_SCOPE_CONSTRAINTS` — the ruling explicitly rejected relying on
+ *  that layer alone for closure, see IAM-04c §8: seeds/migrations bypass it by design, and
+ *  IAM-SEC-05 found it incomplete besides). Both are independently re-derived from the same
+ *  `derived_roles.yaml`, so neither can silently drift from the policy even though they answer
+ *  different questions (write-path completeness vs. resolution-layer protection). */
+function loadSec06ProtectedRoles(): Set<string> {
+  const doc = scopeConstrainedRolesDoc as { roles: Record<string, string[]> };
+  return new Set(Object.keys(doc.roles));
+}
+
 // ─────────────────────────────────────────────────────────────────────────────────────────────
 // PART 3 — the regression guard: whichever kinds already carry a `perm_*` permission arm
 // (discovered by prefix, never named) must still carry the SAME mitigation shape the pilot
@@ -732,25 +758,88 @@ describe("IAM-04-ROLLOUT-SCAN · permission-arm hazard detector (static, re-deri
       }
     });
 
-    it("REACHABILITY (other-narrow direction, IAM-SEC-04): no company/org-unit/attr-narrower-than-global role is named in a kind that ALREADY has a wired perm_* permission arm", () => {
-      // GLOBAL_ONLY_ROLES cannot mitigate this direction (see the split's own comment above) — the
-      // only thing standing between "mintable at a scope the role denies" (already true today, see
-      // the report's write-path finding) and "actually exploitable" is whether a perm_* mirror
-      // exists ANYWHERE for a kind this role is named in. `kindsWithPermissionArm` is the same
-      // discovered-not-named set PART 3 already uses. If this assertion ever fails, a permission
-      // arm has been wired onto a kind carrying one of these roles WITHOUT the exclusion this
-      // direction needs — a live over-grant, not a false positive; do not silence it by narrowing
-      // the predicate, fix the wiring or add the exclusion.
-      const offenders = otherNarrowHits.filter((h) => permArmKindsForC.has(h.kind));
+    it("REACHABILITY (other-narrow direction, IAM-SEC-04 + IAM-SEC-06 closure): a company/org-unit/attr-narrower-than-global role co-occurring with a wired perm_* arm is safe ONLY if IAM-SEC-06's resolution-boundary filter actually covers it", () => {
+      // UNTIL 2026-08-13 (IAM-04-B7) this assertion was unconditional: ANY co-occurrence of an
+      // other-narrow role with a wired perm_* arm was treated as a live hazard, full stop — nothing
+      // stood between "mintable at a scope the role's own condition denies" (true today regardless,
+      // see the IAM-04c ruling's write-path finding) and "honoured by a flat perm mirror at that
+      // same denied scope". A write-path guard (GLOBAL_ONLY_ROLES / ROLE_SCOPE_CONSTRAINTS) was
+      // ruled the WRONG layer to rely on for closing THIS (IAM-04c ruling §8: seeds/migrations
+      // bypass it by design, and IAM-SEC-05 proved it incomplete besides — `inviteUser` minted
+      // constrained roles at the wrong scope with no guard at all). That blocked `portal`+`client`
+      // in IAM-04-B6 — docs/superpowers/plans/2026-08-13-iam-04-b6-report.md §2.1.
+      //
+      // IAM-SEC-06 (2026-08-13) closed the hazard at the layer the ruling actually asked for:
+      // `assemblePrincipal()` now drops any resolved permission whose grant's (role, scopeType)
+      // pairing the role's OWN Cerbos condition can never satisfy, regardless of how the grant row
+      // came to exist. A role in `scope-constrained-roles.json` (`loadSec06ProtectedRoles()`,
+      // re-derived from `derived_roles.yaml` — the SAME source this file's own `roleClass` reads)
+      // can therefore NEVER hand a perm_* mirror a permission at a scope its role-arm rule would
+      // refuse. That is the SPECIFIC mechanism this hazard needs closed, so a co-occurrence is safe
+      // iff the role is in that set — and remains a live, un-mitigated finding otherwise.
+      //
+      // If the offenders assertion below ever fails, a permission arm has been wired onto a kind
+      // carrying an other-narrow role that IAM-SEC-06's filter does NOT cover — a live over-grant,
+      // not a false positive. Do not silence it by narrowing the predicate; fix the wiring, extend
+      // the filter's own source (`derived_roles.yaml`, then regenerate
+      // `scope-constrained-roles.json`), or add a Cerbos-side exclusion.
+      const sec06ProtectedRoles = loadSec06ProtectedRoles();
+      expect(
+        sec06ProtectedRoles.size,
+        "scope-constrained-roles.json must be parseable and non-empty",
+      ).toBeGreaterThan(0);
+
+      const coOccurring = otherNarrowHits.filter((h) => permArmKindsForC.has(h.kind));
+      const offenders = coOccurring.filter((h) => !sec06ProtectedRoles.has(h.role));
+
       expect(
         offenders,
         `Pattern C (other-narrow direction) found role(s)/kind(s) that are BOTH scope-narrower-than-` +
-          `implied AND already carry a wired perm_* permission arm on the same kind ` +
-          `(${JSON.stringify(offenders)}) — this is REACHABLE today via that arm, matching the ` +
-          `platform_admin defect exactly, just in the opposite scope direction and with no ` +
-          `GLOBAL_ONLY_ROLES-shaped guard available. STOP wiring that kind's permission arm and ` +
-          `report this, do not tune the predicate to make it pass.`,
+          `implied AND already carry a wired perm_* permission arm on the same kind, AND are NOT ` +
+          `present in scope-constrained-roles.json (${JSON.stringify(offenders)}) — this IS ` +
+          `reachable today via that arm, matching the platform_admin defect exactly, just in the ` +
+          `opposite scope direction, with no IAM-SEC-06 protection covering it. STOP wiring that ` +
+          `kind's permission arm and report this, do not tune the predicate to make it pass.`,
       ).toEqual([]);
+
+      // Informational: which co-occurrences exist today and are excused specifically because
+      // IAM-SEC-06 covers them (not because the hazard stopped existing structurally) — logged for
+      // the report, not pinned to a literal so a future mitigated kind needs no hand-edit here.
+      const mitigated = coOccurring.filter((h) => sec06ProtectedRoles.has(h.role));
+      // eslint-disable-next-line no-console
+      console.log(
+        "Pattern C (other-narrow) co-occurrences excused by IAM-SEC-06:",
+        JSON.stringify(mitigated.map((h) => ({ kind: h.kind, role: h.role }))),
+      );
+    });
+
+    it("IAM-SEC-06 completeness: every other-narrow Pattern-C role is present in scope-constrained-roles.json, independent of whether a perm_* arm is wired yet", () => {
+      // Belt-and-suspenders, same discipline as the ROLE_SCOPE_CONSTRAINTS completeness check below
+      // (and the shape `scope-constrained-roles.test.ts` already pins from the OTHER side —
+      // regeneration byte-identical to the checked-in JSON). This one is checked from THIS file's
+      // OWN independently-derived Pattern C register, not from the JSON's own generator, so the two
+      // can never silently drift into agreement on a wrong answer: if a role this file's structural
+      // parse finds other-narrow is missing from the JSON, wiring a perm_* arm on ANY kind naming
+      // it — even one this ticket never touches — would be a live, unmitigated hole the moment
+      // someone runs the next rollout batch, invisible to the test above until that day.
+      const sec06ProtectedRoles = loadSec06ProtectedRoles();
+      const rolesFound = new Set(otherNarrowHits.map((h) => h.role));
+      for (const role of rolesFound) {
+        expect(
+          sec06ProtectedRoles.has(role),
+          `role "${role}" appears in a rule with a narrower-than-global (company/org_unit/attr) ` +
+            `scope, but is NOT in scope-constrained-roles.json — IAM-SEC-06's resolution-boundary ` +
+            `filter would NOT protect a perm_* mirror wired onto any kind naming this role. Fix by ` +
+            `regenerating scope-constrained-roles.json from derived_roles.yaml (this role's own ` +
+            `condition should already describe its true reachable scope set), not by adding a ` +
+            `hand-written exemption here.`,
+        ).toBe(true);
+      }
+      // Direct pins: the two roles IAM-04c's ruling and IAM-SEC-06's report both name explicitly.
+      // If either is ever removed from scope-constrained-roles.json, this must go RED regardless of
+      // what the policy sweep finds.
+      expect(sec06ProtectedRoles.has("client"), `"client" must remain in scope-constrained-roles.json`).toBe(true);
+      expect(sec06ProtectedRoles.has("org_unit_lead"), `"org_unit_lead" must remain in scope-constrained-roles.json`).toBe(true);
     });
 
     // IAM-SEC-05 (2026-08-12), per IAM-04c's ruling §4/§8 invariant 2: `:707` above machine-checks

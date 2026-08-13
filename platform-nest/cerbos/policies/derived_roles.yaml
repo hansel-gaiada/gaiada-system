@@ -2062,3 +2062,78 @@ derivedRoles:
             request.principal.attr.perms.exists(g, g.key == "social.ledger.admin" && (
               g.scopeType == "global" ||
               (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    # perm_portal_* (IAM-04-B7, 2026-08-13) — WIRED, after IAM-04-B6 found this kind BLOCKED.
+    # `resource_portal.yaml`'s `client` rule is company-scope-ONLY (no global branch,
+    # `missing-scope-branch`) — a live Pattern-C "other-narrow" finding
+    # (`permission-arm-hazard-scan.test.ts`). B6 proved that wiring ANY generic global-or-company
+    # mirror here flips that gate's "REACHABILITY (other-narrow direction)" assertion red, because
+    # nothing stood between a mis-scoped `client@global` grant and a mirror that would honour it at
+    # that scope. IAM-SEC-06 (2026-08-13, `docs/superpowers/plans/2026-08-13-iam-sec-06-report.md`)
+    # closed that exact hazard at the resolution boundary: `assemblePrincipal()` now drops any
+    # resolved permission whose grant's (role, scopeType) pairing the role's OWN Cerbos condition
+    # can never satisfy — so a `client@global` grant resolves ZERO permissions, full stop, before
+    # Cerbos ever sees it. `permission-arm-hazard-scan.test.ts`'s "REACHABILITY (other-narrow
+    # direction, IAM-SEC-04 + IAM-SEC-06 closure)" gate was updated (IAM-04-B7) to consult
+    # `scope-constrained-roles.json` (machine-derived from THIS file, not a hand-written exemption)
+    # and treats a co-occurrence as closed only when the role is listed there — `client` is
+    # (`["company"]`), so this is not a special case carved out for `portal` alone.
+    #
+    # These 7 roles deliberately do NOT reproduce the generic "global || company" shape the social_*
+    # mirrors above use — they faithfully mirror `client`'s OWN reach (company-scope-only, no global
+    # branch at all), matching the hand-crafted mirror B6 §5 built and probed in isolation before
+    # reverting it. This is belt-and-suspenders on top of IAM-SEC-06: even in a hypothetical world
+    # where the resolution-boundary filter were bypassed, this mirror structurally cannot admit a
+    # global-scope grant, because `client` itself never could. DR-12 (no staff read on this kind) is
+    # untouched: no OTHER role's bundle holds any `portal.*` key today (role-permission-bundles.json,
+    # confirmed) — platform_admin's wildcard rule is the only other route to any portal action, and
+    # it is exempt from this concern by the same IAM-04c structural-bypass ruling every other kind's
+    # perm arm already relies on.
+    - name: perm_portal_read
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "portal.read" &&
+              g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)
+    - name: perm_portal_decide
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "portal.decide" &&
+              g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)
+    - name: perm_portal_sign
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "portal.sign" &&
+              g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)
+    - name: perm_portal_pay
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "portal.pay" &&
+              g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)
+    - name: perm_portal_update_profile
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "portal.update_profile" &&
+              g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)
+    - name: perm_portal_request_change
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "portal.request_change" &&
+              g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)
+    - name: perm_portal_approve_post
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "portal.approve_post" &&
+              g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)

@@ -836,3 +836,48 @@ future-batch candidate until a new mitigation mechanism for the Pattern-C other-
 designed. The 5 fully-unmirrored social kinds are **NOT STARTED, blocked on real handlers landing**
 (re-audit each the moment SMM's own tickets give it one, using IAM-04-REG2's exact confirm-reliable
 method). `social_post`'s 4 outbound actions are the same: NOT STARTED, blocked on a handler.
+
+---
+
+## 11. IAM-04-B7 addendum (2026-08-13) — `portal`'s block genuinely lifted, all 7 actions WIRED
+
+**Status:** PROTOTYPED / DEV-VERIFIED (policy-side + targeted suites + live probes against a
+restarted `gaiada-test-cerbos`; not deployed to the live estate — no commit, no push, per this
+ticket's own constraint). Full account: `docs/superpowers/plans/2026-08-13-iam-04-b7-report.md`.
+
+IAM-04-B6 (§10 above) found `portal` structurally BLOCKED: `client`'s own condition
+(company-scope-only, no global branch) is a live Pattern-C "other-narrow" finding, and no
+`GLOBAL_ONLY_ROLES`-shaped guard existed for that direction — wiring ANY `perm_portal_*` rule
+tripped `permission-arm-hazard-scan.test.ts`'s hard "REACHABILITY (other-narrow direction)" gate.
+The architect's IAM-04c ruling (`2026-08-12-iam-04c-ruling.md` §8) named the precondition for
+closure: "until at least IAM-SEC-06 (or a Cerbos-side exclusion) lands AND IAM-SEC-05 is fixed."
+Both landed (`59d3a75`, `a9cb210`) before this ticket started.
+
+IAM-04-B7 **verified, not assumed**, that the closure actually applies to `client`+`portal`
+specifically (see the report §1 for the full evidence, including the enumeration of every
+principal-assembly path — all four authenticated-request paths and `/principal/resolve` resolve
+through the ONE producer of `Principal.perms`, `assemblePrincipal()`, which now carries
+IAM-SEC-06's filter; no other production path assembles a Cerbos principal payload for this
+kind), then:
+
+1. Updated `permission-arm-hazard-scan.test.ts`'s "REACHABILITY (other-narrow direction)" gate to
+   consult `scope-constrained-roles.json` (IAM-SEC-06's own machine-derived artifact) instead of
+   treating every co-occurrence with a wired perm arm as an unconditional hazard — a role is now
+   only flagged if it is BOTH other-narrow AND absent from that closure map. Added a companion
+   completeness test (mirrors the existing `:763`-region ROLE_SCOPE_CONSTRAINTS completeness check,
+   now against `scope-constrained-roles.json`) so a role losing its entry there goes red
+   immediately, not only the next time someone tries to wire a mirror on its kind.
+2. Wired all 7 `portal` actions (`read`/`decide`/`sign`/`pay`/`update_profile`/`request_change`/
+   `approve_post`), each with its own `perm_portal_<action>` derived role — deliberately
+   **company-scope-only** (no global branch), faithfully mirroring `client`'s own reach rather than
+   the generic "global || company" shape every other kind's perm arm in this file uses. This is
+   belt-and-suspenders on top of IAM-SEC-06, not a replacement for it.
+
+**Register update:** `portal` moves from **BLOCKED (structural, documented)** to **WIRED (all 7
+actions, company-scope-only)**. The 5 fully-unmirrored social kinds and `social_post`'s 4 outbound
+actions are untouched by this ticket and remain exactly as §10 left them: NOT STARTED, blocked on
+real handlers. `org_unit_lead`+`appraisal`/`report_document` remain **permanently unwired by owner
+ruling** (IAM-04c §9 option C) — the SAME closure mechanism now covers `org_unit_lead` too (it is
+also present in `scope-constrained-roles.json`), but the owner's decision to keep those two kinds
+unwired stands independently of whether the gate WOULD allow it; this ticket did not touch either
+kind's policy file.

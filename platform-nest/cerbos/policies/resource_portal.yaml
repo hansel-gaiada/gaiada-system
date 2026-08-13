@@ -76,20 +76,60 @@ resourcePolicy:
     # `group_executive` was part of the same dead grant and is removed for the identical reason —
     # this is not a partial rollback, the whole staff-support branch was unreachable.
 
-    # ── NO PERMISSION ARM — BLOCKED, checked and confirmed this session (IAM-04-B6, 2026-08-13) ──
-    # The owner ruled this kind should join the rollout, but it CANNOT be mirrored without breaking
-    # the client boundary a static, pre-existing gate is built to catch — do not "fix" this by
-    # tuning that gate. `permission-arm-hazard-scan.test.ts`'s Pattern C (widened IAM-SEC-04)
-    # ALREADY flags the `client` rule above as `{kind:"portal", role:"client",
-    # reason:"missing-scope-branch"}` — `client`'s own derived-role condition is company-scope-ONLY
-    # (no global branch), structurally identical to the platform_admin wildcard-bleed shape, just in
-    # the opposite scope direction. That finding is TODAY invisible to the "REACHABILITY (other-narrow
-    # direction)" hard gate only because no `perm_*` rule exists anywhere on this kind yet
-    # (`kindsWithPermissionArm()` doesn't include "portal"). The moment ANY `perm_portal_*` rule is
-    # added — verified empirically this session, not just reasoned, then reverted — that gate goes
-    # RED: "STOP wiring that kind's permission arm and report this, do not tune the predicate to make
-    # it pass" (the test's own words). This is the SAME mechanism that blocked `report_document`/
-    # `appraisal`+`org_unit_lead` in IAM-04-B5, here for `portal`+`client`. No GLOBAL_ONLY_ROLES-shaped
-    # guard exists for this direction (confirmed: the test's own comment says so), so there is no
-    # faithful mirror to build without inventing that mitigation — out of this ticket's remit.
-    # Full account: docs/superpowers/plans/2026-08-13-iam-04-b6-report.md.
+    # ── PERMISSION ARM — WIRED (IAM-04-B7, 2026-08-13), retrying the block IAM-04-B6 hit ──
+    # IAM-04-B6 found this kind BLOCKED: `client` above is a live Pattern-C "other-narrow" finding
+    # (`{kind:"portal", role:"client", reason:"missing-scope-branch"}` — company-scope-ONLY, no
+    # global branch), and wiring ANY `perm_portal_*` rule used to flip
+    # `permission-arm-hazard-scan.test.ts`'s "REACHABILITY (other-narrow direction)" gate red, with
+    # no mitigation available at the time. Full account:
+    # docs/superpowers/plans/2026-08-13-iam-04-b6-report.md §2.1.
+    #
+    # IAM-SEC-06 (2026-08-13, docs/superpowers/plans/2026-08-13-iam-sec-06-report.md) closed the
+    # hazard at the layer IAM-04c's ruling actually required (§8 option A): `assemblePrincipal()`
+    # now drops any resolved permission whose grant's (role, scopeType) pairing the role's OWN
+    # Cerbos condition can never satisfy, regardless of how the grant row came to exist. A
+    # `client@global` grant therefore resolves ZERO permissions before Cerbos ever sees it — the
+    # exact mechanism this hazard needed closed. `permission-arm-hazard-scan.test.ts`'s
+    # "REACHABILITY (other-narrow direction)" gate was updated (IAM-04-B7) to treat a co-occurrence
+    # as closed only when the role is present in `scope-constrained-roles.json` (machine-derived
+    # from THIS file by IAM-SEC-06's own generator) — `client` is (`["company"]`), verified by a
+    # live probe (a synthetic `client@global` grant resolves zero perms end-to-end, restarted
+    # `gaiada-test-cerbos`) before this rule was added, not assumed.
+    #
+    # The 7 mirrors below deliberately do NOT use the generic "global || company" shape the social_*
+    # mirrors above use — see derived_roles.yaml's own comment on `perm_portal_read` for why: they
+    # faithfully reproduce `client`'s OWN reach (company-scope-only), the exact hand-crafted mirror
+    # IAM-04-B6 §5 built and probed in isolation before reverting it, belt-and-suspenders on top of
+    # IAM-SEC-06. No staff permission-holder can ride through these: no other role's bundle holds
+    # any `portal.*` key today (role-permission-bundles.json, confirmed), and DR-12's staff-read
+    # removal above is untouched — these mirrors add a SECOND path to the SAME reach `client`
+    # already had via the role-arm rule, never a wider one, and zero decisions changed for anyone
+    # who isn't a `client` grant holder.
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_portal_read"]
+      condition: { match: { expr: "variables.inTenant" } }
+    - actions: ["decide"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_portal_decide"]
+      condition: { match: { expr: "variables.inTenant" } }
+    - actions: ["sign"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_portal_sign"]
+      condition: { match: { expr: "variables.inTenant" } }
+    - actions: ["pay"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_portal_pay"]
+      condition: { match: { expr: "variables.inTenant" } }
+    - actions: ["update_profile"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_portal_update_profile"]
+      condition: { match: { expr: "variables.inTenant" } }
+    - actions: ["request_change"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_portal_request_change"]
+      condition: { match: { expr: "variables.inTenant" } }
+    - actions: ["approve_post"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_portal_approve_post"]
+      condition: { match: { expr: "variables.inTenant" } }

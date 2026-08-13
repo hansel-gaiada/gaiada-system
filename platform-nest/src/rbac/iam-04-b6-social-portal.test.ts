@@ -68,15 +68,23 @@ function wiredPermActions(kinds: Map<string, ParsedKind>, kind: string): Set<str
 describe("IAM-04-B6 · portal + social_* permission-arm rollout (static, re-derived every run)", () => {
   const kinds = parseResourcePolicies();
 
-  it("REGRESSION PIN: portal carries ZERO perm_* rules — do not wire one without re-checking Pattern C first", () => {
-    expect(
-      [...wiredPermActions(kinds, "portal")],
-      "resource_portal.yaml's `client` rule is a live Pattern-C 'other-narrow' finding " +
-        "(missing-scope-branch, company-only). Wiring ANY perm_portal_* rule flips " +
-        "permission-arm-hazard-scan.test.ts's 'REACHABILITY (other-narrow direction)' gate red. " +
-        "If a future ticket believes this is now safe, it must first extend that detector's " +
-        "mitigation (a GLOBAL_ONLY_ROLES-shaped guard for the OTHER direction), not silence this pin.",
-    ).toEqual([]);
+  it("IAM-04-B7 (2026-08-13) SUPERSEDES this pin: portal now wires all 7 actions, deliberately, after the closure mechanism landed", () => {
+    // This test used to pin `portal` at ZERO perm_* rules — that was correct THEN, because no
+    // mitigation existed for the "other-narrow" hazard `client`'s company-scope-only condition
+    // triggers on this kind. IAM-SEC-06 (2026-08-13) closed that hazard at the resolution boundary
+    // (`assemblePrincipal()` drops any permission a mis-scoped grant would otherwise resolve), and
+    // `permission-arm-hazard-scan.test.ts`'s "REACHABILITY (other-narrow direction)" gate was
+    // updated (IAM-04-B7) to consult that closure via `scope-constrained-roles.json` instead of
+    // treating every co-occurrence as an unconditional hazard. `portal` was then wired — see
+    // `iam-04-b7-portal.test.ts` (this directory) for the full structural pin and
+    // docs/superpowers/plans/2026-08-13-iam-04-b7-report.md for the re-verification this ticket did
+    // BEFORE wiring anything (the whole point of that ticket was confirming the block was genuinely
+    // lifted, not assuming it). Per this program's own discipline ("if it SHRANK, update the
+    // baseline down, don't leave it stale" — REG1's own header), this pin is updated to match, not
+    // silenced: the finding changed, deliberately, with evidence.
+    expect([...wiredPermActions(kinds, "portal")].sort()).toEqual(
+      ["approve_post", "decide", "pay", "read", "request_change", "sign", "update_profile"],
+    );
   });
 
   it("REGRESSION PIN: social_engagement wires exactly read/create/update/delete/set_scope", () => {
