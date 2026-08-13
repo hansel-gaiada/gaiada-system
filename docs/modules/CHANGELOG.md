@@ -34,9 +34,11 @@ reconstructed from this table alone. Format defined in [`VERSIONING.md`](./VERSI
 > Not corrected retroactively (moving a pushed, already-deployed tag is its own risk); flagging so
 > the next session doesn't re-diagnose the same gap.
 
-### `Alpha 01.039.0091a` - 2026-08-12 - the social module gets a surface
+### `Alpha 01.039.0092a` - 2026-08-13 - the social module gets a surface, and a composer
 
-Manifest (counter +2, 0089 -> 0091): `social-media 0.2.0`, `platform-nest 0.21.3`.
+Manifest (counter +3, 0089 -> 0092): `social-media 0.2.0` then `0.3.0` (two bumps), and
+`platform-nest 0.21.3`. The counter counts BUMPS, not modules — SMM-02 and SMM-08 landed as
+separate module versions, so they advance it twice.
 
 **Full module manifest** (rule 2 - what makes this build reconstructible):
 
@@ -52,6 +54,9 @@ Manifest (counter +2, 0089 -> 0091): `social-media 0.2.0`, `platform-nest 0.21.3
 
 **What is in it.**
 
+- **SMM-08** - the composer backend: posts + per-network variants, the media-rule/quota validation
+  engine, `args_sha256` (the estate's canonical hash, vector-pinned against the MCP hub), and the
+  native-import path. Edit-invalidates-approval is mechanical, not policy.
 - **SMM-02** - the `social` module registers and serves `/api/:tenantId/modules/social`:
   engagements CRUD, the tool-scope dial on its own endpoint and its own permission, brand profiles,
   campaigns, KPI targets, six rollup metrics, four MCP tools. The first department built TO the
