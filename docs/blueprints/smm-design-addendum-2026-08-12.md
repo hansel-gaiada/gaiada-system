@@ -282,6 +282,76 @@ commit.
 
 ---
 
+## §A4e · OQ-1 research, first return (LinkedIn) — three findings that change the design
+
+The app-review research is still running; LinkedIn's leg has reported. Recorded here immediately
+because one finding lands on schema that is **already deployed**. Sources are cited in the dossier
+(`smm-app-review-dossier.md`); anything the researcher could not confirm is marked UNVERIFIED there
+rather than guessed at, and this section inherits that discipline.
+
+### 1. ⚠ DATA RETENTION — our schema currently cannot comply (NEW TICKET REQUIRED)
+
+LinkedIn's Data Storage Requirements impose **maximum retention**, not minimum:
+
+| Data | Max retention |
+|---|---|
+| Another member's profile data (a commenter's name, photo) | **24 hours** |
+| A member's social activity (comment text, posts, likes, mentions) | **48 hours** |
+| An organization's social activity | 6 weeks (6 months if that org authenticated into our app) |
+| Org page admin/reporting data (follower counts, aggregate social actions — no member-level data) | 1 year |
+| IDs/URNs, and an authenticated member's own profile | no restriction |
+
+Where two rules overlap, **the shortest applies**.
+
+**The conflict is concrete.** `social_inbox_threads` (`author_handle`, `author_name`, `excerpt`) and
+`social_inbox_messages` (`body`, `author_handle`) were designed to retain indefinitely — that is
+what an engagement inbox is. For LinkedIn, comment text must be purged at 48h and commenter profile
+fields at 24h. `social_post_metrics` is fine (aggregate, no member data); `social_metrics_daily` is
+fine (page reporting, 1 year).
+
+This is not a bug in 0105 — it is a requirement nobody had surfaced when 0105 was written. It needs a
+**per-network retention policy with a purge job**, and it must exist before the first LinkedIn client
+connects, because compliance is checked at Standard Tier review and demonstrated at Technical Sign
+Off. Tracked as **SMM-36** (new): retention metadata per network on the inbox tables, a scheduled
+purge, and the IDs/URNs deliberately preserved so the thread survives as a shell after its content
+is purged.
+
+Two further consequences of the same rules:
+- **No member-data export** — client-facing reports (SMM-23) must not carry commenter names for
+  LinkedIn. Aggregate engagement only.
+- **No social-feed use case** — we may not render a feed of a client's LinkedIn updates as a
+  product surface. Our calendar shows *our own* scheduled/published work, which is a different
+  thing, but any future "client activity feed" idea is out.
+
+### 2. LinkedIn has NO DM API — this partly answers OQ-4 in advance
+
+There is no messaging/conversation scope anywhere in the Marketing API surface, and the restricted-
+use-cases page forbids mass messaging outright. A partner-gated Conversations API is reported to
+exist but its scopes and terms are UNVERIFIED and not publicly documented. **Design LinkedIn DMs out
+of scope and never promise them to a client.** OQ-4's remaining question is now only about Instagram,
+Facebook and TikTok, and SMM-04's Postiz measurement answers those.
+
+### 3. Operational constraints SMM-05/07 must be built around
+
+- **No server-side scheduling.** `lifecycleState` accepts only `PUBLISHED` at creation, so the queue
+  is ours (via Postiz) and *our* runner's availability IS publishing reliability. Consistent with
+  D-1, but it makes the reconcile flow (SMM-10) load-bearing rather than a safety net.
+- **Development-tier quota is 500 calls/app/day and 100/member/day, with NO webhooks and no
+  BATCH_GET.** A 15-minute inbox poll per engagement would exhaust that within a handful of clients.
+  The sync cadence must be scope-driven and quota-aware from the start (SMM-15), not tuned later.
+- **Changing the requested scope set invalidates every existing token**, forcing every client back
+  through consent. The scope list must be FROZEN before the first client is onboarded — this is a
+  decision to take at SMM-07, not to discover at SMM-15.
+- **Tokens need annual human re-consent** (60-day access token; 365-day refresh token whose TTL does
+  not reset on use). `social_accounts.status` already models `expiring`/`expired`; the proactive
+  nudge is a real requirement, not a nicety.
+- **The versioned `Linkedin-Version` header sunsets roughly every 12 months.** Hardcode it and the
+  publisher hard-fails about a year after shipping. It goes in config with an alert on the
+  deprecation error.
+- **A rejected application burns the app registration** — reapplying needs a brand-new app. The
+  first submission has to be right, which is the strongest argument for the dossier this research
+  is producing.
+
 ## §A5 · Sequencing note — what to do first
 
 1. **SMM-30 + SMM-01 together** (they are one schema conversation: tables, then the permission rows
