@@ -1,10 +1,24 @@
 # Permission contract (IAM Phase 1)
 
-**Status:** PROTOTYPED — updated 2026-08-13 (IAM-GAP-01: invoice maker/checker + the dedicated HR
-leave decision right; originally frozen 2026-08-10, reconciled 2026-08-11 against two days of IAM
-rollout work). This is the contract Web Dev and PM build against.
+**Status:** PROTOTYPED — updated 2026-08-13 (IAM Phase 2 P2-02/P2-03: 4 new Cerbos kinds
+[role_grant/position/employee/it_account] + the `ui_grantable` allow-list; prior: IAM-GAP-01,
+invoice maker/checker + the dedicated HR leave decision right; originally frozen 2026-08-10,
+reconciled 2026-08-11 against two days of IAM rollout work). This is the contract Web Dev and PM
+build against.
 **Companion to** `docs/FRONTEND-BFF-CONTRACT.md`. Program docs live in
-`docs/superpowers/plans/2026-08-10-iam-*` and `docs/superpowers/plans/2026-08-13-iam-gap-01-report.md`.
+`docs/superpowers/plans/2026-08-10-iam-*`, `docs/superpowers/plans/2026-08-13-iam-gap-01-report.md`,
+`docs/superpowers/plans/2026-08-13-iam-phase2-design.md`, and
+`docs/superpowers/plans/2026-08-13-p2-02-03-report.md`.
+
+> **⚠ NEW AXIS (2026-08-13, P2-03): `ui_grantable`.** Every catalog entry now carries a REQUIRED
+> `uiGrantable: boolean` (and a DB-side `permissions.ui_grantable`, migration 0110). It answers a
+> DIFFERENT question than `sensitive` or `class`: **may this permission ever appear in a role bundle
+> attached through a UI-adjacent write path** — a position's role-set today (design §2.3(b)), a
+> Phase-4 composed custom role tomorrow? `portal.*` and every `class: "relationship"` key are
+> `false`, structurally pinned (`src/rbac/ui-grantable-catalog.test.ts`); everything else is `true`
+> by the initial marking pass. **Flipping a key `false -> true` is a PERMISSION-CONTRACT change
+> requiring an owner decision line in the catalog entry — the same bar as a rename.** Flipping
+> `true -> false` is always safe (narrowing). See §10 below for the full mechanism.
 
 > **⚠ Concurrent-edit notice (2026-08-11).** This checkout is shared by several agents actively
 > editing Cerbos policies, `derived_roles.yaml` and `role-permission-bundles.json` as this doc was
@@ -39,14 +53,14 @@ owner decision DR-4, because the portal is a separate trust surface.
 Domains: `agency` `assistant` `billing` `core` `hr` `it` `knowledge` `pm` `portal` `reports`
 `search` `webdev`.
 
-## 2. Current numbers (re-derived from the artifacts, 2026-08-13, post-IAM-GAP-01)
+## 2. Current numbers (re-derived from the artifacts, 2026-08-13, post-P2-02/P2-03)
 
 | Artifact | Value | File |
 |---|---|---|
-| Catalog | **264** entries = **249 grantable** + **15 relationship**; 93 flagged `sensitive`; 68 distinct Cerbos kinds (IAM-GAP-01, 2026-08-13: +2 literal actions on EXISTING kinds — `invoice.approve` and `automation_approval.decide_leave` — so pairs/grantable/sensitive move by 2 each but the kind count does NOT. Prior: SMM-30, 2026-08-12: the `social` module's 8 kinds + 35 keys, plus `portal.approve_post`, 226/211/60 → 262/247/68) | `platform-nest/src/rbac/permission-catalog.json` |
-| Role bundles | **1031** pairs across **22** roles (IAM-GAP-01: +8 pairs — `billing.invoice.approve` to `company_admin`/`group_executive`/`manager`/`platform_admin`; `hr.leave.decide` to `company_admin`/`group_executive`/`hr_manager`/`platform_admin` — **zero removed**, no existing user's reach narrows) | `platform-nest/src/rbac/role-permission-bundles.json` |
-| Permission groups | **85** (IAM-GAP-01 added `invoices_approve` + `hr_leave_decide`; prior: SMM-30 added 8 social groups + `portal_approve_posts`) | `platform-nest/src/rbac/permission-groups.json` |
-| UI capabilities | **34** — UNCHANGED by IAM-GAP-01 (`platform-ui/` is out of this ticket's scope; the new server-side permissions have no capability mirror yet) | `platform-ui/src/lib/rbac.ts` |
+| Catalog | **282** entries = **267 grantable** + **15 relationship**; 107 flagged `sensitive`; 72 distinct Cerbos kinds (P2-02, 2026-08-13: +18 grantable across 4 NEW kinds — `role_grant` [create/revoke/read], `position` [create/update/retire/assign/unassign/read], `employee` [create/read/update/delete], `it_account` [read/provision/disable/enable/reset_password] — design §6.2. Every entry also now carries `uiGrantable` [P2-03, §7] — see the box above. Prior: IAM-GAP-01, 2026-08-13: +2 literal actions on EXISTING kinds — `invoice.approve` and `automation_approval.decide_leave`, 264/249/68; before that: SMM-30, 2026-08-12: the `social` module's 8 kinds + 35 keys, plus `portal.approve_post`, 226/211/60 → 262/247/68) | `platform-nest/src/rbac/permission-catalog.json` |
+| Role bundles | **1093** pairs across **22** roles (P2-02: +62 pairs — `platform_admin`/`company_admin` +18 each [full reach on all 4 new kinds]; `org_unit_lead` +6 [`role_grant`.create/read/revoke + `position`.assign/read/unassign — the dept-head subtree rule, reusing the EXISTING `org_unit_lead` derived role]; `hr_manager` +8 / `hr_staff` +2 [`hr_people_ops`/`hr_people_reader` reach on `position`/`employee`]; `it_admin`/`it_manager` +5 each [the new `it_managers` derived role's reach on `it_account`.*] — **zero removed**, no existing user's reach narrows. Prior: IAM-GAP-01: +8 pairs, 1031 total) | `platform-nest/src/rbac/role-permission-bundles.json` |
+| Permission groups | **85** groups, **20** `advancedOnly` entries (P2-02 added the 18 new keys to `advancedOnly` — no curated friendly group exists yet for grant/position/employee/IT-account administration, deferred to P2-11/P2-12/P2-10/P2-14's own authoring surfaces; prior: IAM-GAP-01 added `invoices_approve` + `hr_leave_decide`; before that: SMM-30 added 8 social groups + `portal_approve_posts`) | `platform-nest/src/rbac/permission-groups.json` |
+| UI capabilities | **34** — UNCHANGED by P2-02/P2-03 (`platform-ui/` is explicitly out of this ticket's scope; the new server-side permissions have no capability mirror yet) | `platform-ui/src/lib/rbac.ts` |
 
 **⚠ The relationship count is unchanged at 15, and that is load-bearing.** The social module adds no
 relationship-class permission, so the Ruling-3 bypass-exempt set is exactly where it was. If a future
@@ -69,19 +83,20 @@ ahead of it would widen precisely the surface flagged open. They join the IAM-04
 deliberate batch once that decision lands; the catalog entries exist now, so nothing blocks it.
 
 **Bundle sizes per role** (re-counted 2026-08-13 from `role-permission-bundles.json`'s own
-`_meta.counts.perRole`, post-IAM-GAP-01; five roles moved — `platform_admin`/`company_admin`/
-`group_executive`/`manager` +2 each, `hr_manager` +1 — see §9's changelog entry for which two keys):
+`_meta.counts.perRole`, post-P2-02; seven roles moved this pass — `platform_admin`/`company_admin`
++18 each, `org_unit_lead` +6, `hr_manager` +8, `hr_staff` +2, `it_admin`/`it_manager` +5 each — see
+§10 below for exactly which keys):
 
 | Role | Pairs | Role | Pairs | Role | Pairs |
 |---|---:|---|---:|---|---:|
-| `platform_admin` | 249 | `viewer` | 29 | `search_manager` | 37 |
-| `company_admin` | 230 | `org_unit_lead` | 2 | `search_staff` | 24 |
+| `platform_admin` | 267 | `viewer` | 29 | `search_manager` | 37 |
+| `company_admin` | 248 | `org_unit_lead` | 8 | `search_staff` | 24 |
 | `group_executive` | 127 | `client` | 7 | `reports_manager` | 3 |
-| `manager` | 137 | `it_admin`/`it_manager`/`it` | 3 each | `reports_staff` | 4 |
-| `member` | 73 | `agency_approver` | 1 | `webdev_manager` | 6 |
-| | | `hr_staff` | 13 | `webdev_staff` | 4 |
-| | | `hr_manager` | 24 | `social_staff` | 19 |
-| | | | | `social_manager` | 33 |
+| `manager` | 137 | `it_admin`/`it_manager` | 8 each | `reports_staff` | 4 |
+| `member` | 73 | `it` | 3 | `webdev_manager` | 6 |
+| | | `agency_approver` | 1 | `webdev_staff` | 4 |
+| | | `hr_staff` | 15 | `social_staff` | 19 |
+| | | `hr_manager` | 32 | `social_manager` | 33 |
 
 `company_admin`'s 195 reflects two independent moves since the prior 200 (199 baseline + DR-5's
 `reports.appraisal.read`, migration `0099`): HIER-3 retired 4 `core.team.*` keys, and a concurrent,
@@ -279,6 +294,8 @@ substituting a different identity.
 | `permission-groups-catalog-parity.test.ts` (**NEW, IAM-07b**) | `permission-groups.json` ↔ catalog: key existence/grantability both directions, exhaustive coverage (every grantable key lands in a group or `advancedOnly`), no contradiction, `_meta.counts` re-derivation. |
 | `iam-07b-chain-meta.test.ts` (**NEW, IAM-07b**) | the chain itself — enumerates all 8 pairwise links (the six the design doc named, plus the role-axis link and the 215/15 boundary) and fails if any named guard file is deleted, emptied, or has zero test cases. Cannot prove a guard still tests the right thing, only that it exists and isn't vacuous-by-omission. |
 | `global-only-role-scope.test.ts` (**NEW, IAM-SEC-02**) | `platform_admin`/`group_executive` may only be granted at **global** scope — both roles' derived-role conditions match `scopeType=="global"` only, so a company-scoped grant of either would be silently inert for Cerbos while still resolving into `principal.perms` at company scope, which is exactly the wildcard-bleed shape §2 flags unresolved for the permission-arm mirror. Fixed at the source in `admin-identity.controller.ts`'s `GLOBAL_ONLY_ROLES` guard (found by IAM-04-ROLLOUT-B12). |
+| `ui-grantable-catalog.test.ts` (**NEW, P2-03**) | the `ui_grantable` allow-list's catalog axis: completeness (every entry carries a real boolean, teeth-proven by deleting/corrupting the field on a clone), and the two pinned invariants (`portal.*` and `class:"relationship"` are always `false`, teeth-proven by flipping one to `true` on a clone). Static only. |
+| `src/db/iam-phase2-ui-grantable-guard.test.ts` (**NEW, P2-03**) | the allow-list's DB axis: `permissions.ui_grantable` matches the catalog exactly (full parity, all 282 rows); `position_roles_guard()`'s clause (b) rejects a non-ui_grantable bundle on INSERT and UPDATE, teeth-proven by dropping the trigger and watching the same insert succeed, then restoring it; `assertRoleUiGrantable()`/`nonUiGrantableKeysForRole()` (`src/rbac/ui-grantable.ts`) proven against the identical clean/dirty roles the trigger test uses. |
 
 Every one was required to demonstrate a **real failure** under mutation before being accepted. A
 guard that cannot fail is worse than none — this program found one that had been quietly vacuous
@@ -446,3 +463,57 @@ catch it — treat that one, not the parity suite, as the authority for "no role
   rule reads it anymore — but renaming/removing it from `src/rbac/cerbos.ts` and every call site
   was reported as out of this ticket's scope (HIER-2's own report explicitly deferred it to
   HIER-3, but the rename touches ~10 files beyond team/team_lead itself); left for a future ticket.
+
+## 10. IAM Phase 2 (P2-02/P2-03, 2026-08-13) — 4 new kinds + the `ui_grantable` allow-list
+
+Design: `docs/superpowers/plans/2026-08-13-iam-phase2-design.md` §6.2 (the kinds), §7 (the
+allow-list). Full account: `docs/superpowers/plans/2026-08-13-p2-02-03-report.md`.
+
+### 10.1 The four new Cerbos kinds — ROLE-ARM ONLY
+
+| Kind | Domain | Actions → catalog key | Who (role-arm) | Perm-mirror |
+|---|---|---|---|---|
+| `role_grant` | core | create/revoke/read → `core.role_grant.*` | `platform_admin` (wildcard); `company_admin` (full tenant); `org_unit_lead` (own subtree, via `resource.attr.unitAncestors` — reuses the EXISTING derived role, not a new one) | **PERMANENTLY UNWIRED** (IAM-04c §9 option C — the dept-head rule is subtree-attribute-dependent, same class as `appraisal`/`report_document`) |
+| `position` | core | create/update/retire/read → HR tier; assign/unassign/read → dept-head tier → `core.position.*` | `platform_admin`; `company_admin` (all actions); `hr_people_ops`/`hr_people_reader` (create/update/retire/read); `org_unit_lead` (assign/unassign/read, own subtree) | **PERMANENTLY UNWIRED**, same reason as `role_grant` |
+| `employee` | hr | create/read/update/delete → `hr.employee.*` | `platform_admin`; `company_admin`; `hr_people_ops` (write); `hr_people_reader` (read) | **DEFERRED** (not attribute-dependent — `hr_people_ops`/`hr_people_reader` are SAFE global-or-company shapes — but no handler exists yet; P2-06 owns building one before a mirror is wired) |
+| `it_account` | it | read/provision/disable/enable/reset_password → `it.account.*` | `platform_admin`; `company_admin`; `it_managers` (NEW derived role: `it_admin`∨`it_manager`, deliberately excluding the baseline `it` role) | **DEFERRED**, same reason as `employee` — P2-13 owns the handler |
+
+**Self-target/self-assign structural DENY** (`role_grant.create`, `position.assign`): `roles:
+["user"]` (matches every principal, deny-overrides beats every ALLOW including `platform_admin`'s
+wildcard) — copies `resource_invoice.yaml`'s IAM-GAP-02 pattern. Live-probed both ways (dept head
+self-target, `platform_admin` self-target) against `gaiada-test-cerbos`; see the P2-02/03 report.
+
+**Deviation from the design doc's illustrative text, flagged (not silent):** §6.2 names the
+role_grant resource attribute `targetUnitAncestors`. This shipped as `unitAncestors` instead — the
+SAME attribute name `report_document`/`appraisal`/`position` already use for the org_unit_lead
+subtree cascade — so `role_grant` reuses the EXISTING `org_unit_lead` derived role rather than
+forking a second, differently-named one that would need its own duplicate entry in
+`scope-constrained-roles.json` and `admin-identity.controller.ts`'s `ROLE_SCOPE_CONSTRAINTS` for
+zero behavioral gain. `position.read` was also added beyond the design text's literal action list
+(assign/unassign/create/update/retire only) — every downstream ticket that reads positions needs it
+and every other kind in the repo has one.
+
+### 10.2 The `ui_grantable` allow-list (P2-03, design §7)
+
+- **Catalog axis:** `uiGrantable: boolean` REQUIRED on every `permission-catalog.json` entry (282
+  of 282, enforced by `src/rbac/ui-grantable-catalog.test.ts`'s completeness check). DB mirror:
+  `permissions.ui_grantable boolean NOT NULL` (migration 0110).
+- **Pinned invariants:** every `portal.*` key and every `class:"relationship"` key is `false`.
+  Everything else — INCLUDING all 18 of this ticket's new keys — is `true`: positions must be able
+  to confer `org_unit_lead`/`hr_manager`/`it_admin`/`it_manager` bundles that now include
+  `role_grant.*`/`position.*`/`employee.*`/`it_account.*`, or the whole dept-head mechanism this
+  phase exists to build would be rejected at the trigger the moment a real position tried to carry
+  `org_unit_lead @ own_unit`.
+- **Enforcement, 3 independent layers** (design §7):
+  1. `assertRoleUiGrantable(c, roleId, roleName?)` (`platform-nest/src/rbac/ui-grantable.ts`) — the
+     one helper every future write path that attaches a role to a UI-authored surface must call.
+     **Not wired into any write path by this ticket** — `GrantWriteService` is P2-04's choke point;
+     this ships the helper + its teeth test for P2-04/P2-08/P2-12 to import.
+  2. `position_roles_guard()`'s clause (b) (migration 0110, `CREATE OR REPLACE FUNCTION` on the
+     SAME trigger 0109 shipped clauses (a)/(c) on) — rejects an INSERT/UPDATE onto `position_roles`
+     whose role's bundle contains any `ui_grantable=false` permission. Teeth-proven (trigger
+     dropped ⇒ the same insert succeeds; restored ⇒ rejected again).
+  3. Static catalog pins (`ui-grantable-catalog.test.ts`), each teeth-proven by mutating a clone.
+- **Contract rule (binding):** flipping a key `false → true` is a PERMISSION-CONTRACT change
+  requiring an owner decision line in the catalog entry, identical to a rename (§7 of this
+  document's own frozen list). Flipping `true → false` is always a safe narrowing.

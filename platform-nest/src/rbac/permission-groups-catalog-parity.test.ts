@@ -81,8 +81,8 @@ describe("IAM-07b · permission-groups.json <-> permission-catalog.json (previou
   // module adds no relationship-class permission, so the Ruling-3 bypass-exempt set is exactly where
   // it was. If a future social ticket moves this number, that is the change to justify, not the
   // grantable one. Prior movement: HIER-3, 2026-08-11 — core.team.* retired (215 -> 211).
-  it("sanity: 249 grantable / 15 relationship catalog permissions (this suite's fixed inputs; IAM-GAP-01, 2026-08-13: 247 -> 249 [billing.invoice.approve, hr.leave.decide], relationship set untouched; prior: SMM-30, 2026-08-12: 211 -> 247)", () => {
-    expect(grantable.length).toBe(249);
+  it("sanity: 267 grantable / 15 relationship catalog permissions (this suite's fixed inputs; IAM Phase 2 P2-02, 2026-08-13: 249 -> 267 [+18 across role_grant/position/employee/it_account], relationship set untouched; prior: IAM-GAP-01, 2026-08-13: 247 -> 249; SMM-30, 2026-08-12: 211 -> 247)", () => {
+    expect(grantable.length).toBe(267);
     expect(relationshipKeys.size).toBe(15);
   });
 

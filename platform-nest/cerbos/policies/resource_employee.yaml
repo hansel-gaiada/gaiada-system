@@ -1,0 +1,37 @@
+# IAM Phase 2 (P2-02) — the `employee` kind: the HR people file (design §2.1/§4.1/§6.2). HR-owned:
+# hr_manager/company_admin write, the HR reader tier (hr_staff OR hr_manager) read. Deliberately NO
+# self-service rule and NO dept-head reach here, matching resource_hr_record.yaml's own precedent
+# exactly (that file's header: "more sensitive than hr_case ... no member rule here — deliberately"):
+# HR self-service is explicitly scoped out (design §10), and the org chart (org_unit_lead) has no
+# grant mechanism over raw person/PD data — dept heads reach POSITIONS and ROLE_GRANTs (their own
+# kinds, above), never the employee record itself.
+#
+# ⚠ ROLE-ARM ONLY this wave — no perm_employee_* mirror. Unlike role_grant/position, this is NOT
+# because the rule is attribute-dependent (hr_people_ops/hr_people_reader are both SAFE, plain
+# global-or-company shapes per permission-arm-hazard-scan.test.ts's own classifier — a mirror COULD
+# be wired safely later). Deferred per this ticket's own brief ("new kinds get an arm only after
+# their handlers exist and their holders are audited" — no employee-record handler exists yet;
+# P2-06 owns building one).
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: employee
+  importDerivedRoles: ["gaiada_scopes"]
+  variables:
+    import: ["gaiada_common"]
+  rules:
+    - actions: ["*"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["platform_admin"]
+    # Write: hr_manager (the ACTING HR tier, hr_people_ops) + company_admin (design §6.2:
+    # "hr_manager/company_admin write").
+    - actions: ["create", "update", "delete"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin", "hr_people_ops"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    # Read: the baseline HR reader tier (hr_staff OR hr_manager) + company_admin (design §6.2:
+    # "hr-reader tier read").
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin", "hr_people_reader"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }

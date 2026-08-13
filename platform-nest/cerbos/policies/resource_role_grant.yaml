@@ -1,0 +1,80 @@
+# IAM Phase 2 (P2-02) — the `role_grant` kind: WHO may grant/revoke a role to/from a target
+# principal, and read who holds what grant. Design: docs/superpowers/plans/2026-08-13-iam-phase2-
+# design.md §6.2. Granting stops riding `user:create` (the legacy admin surface,
+# `admin-identity.controller.ts`, keeps its own unrelated semantics per design §6.4 — untouched by
+# this ticket) — this is the real Cerbos kind for the position/dept-head granting surface P2-08 wires.
+#
+# Resource attrs a caller (GrantWriteService, P2-04/P2-08 — NOT built by this ticket) must set:
+#   tenantId       — the target's company (D5 tenant gate, variables.inTenant)
+#   targetUserId   — the principal the grant/revoke is ABOUT. The self-target DENY below compares
+#                    this to request.principal.id — fail-closed empty/absent (has(...) && != "").
+#   unitAncestors  — the TARGET's current unit ancestry from org_unit_closure (IAM-09), fail-closed
+#                    empty exactly like org_unit_lead's existing feed on report_document/appraisal.
+#                    Reused verbatim (NOT a new "targetUnitAncestors" name, despite the design doc's
+#                    own illustrative wording) so this kind can reuse the EXISTING `org_unit_lead`
+#                    derived role rather than forking a differently-named one — see this ticket's own
+#                    report for why: scope-constrained-roles.json and permission-arm-hazard-scan.
+#                    test.ts's Pattern-C completeness checks key off the DERIVED ROLE's own name, and
+#                    a second name resolving to the identical literal-role-and-scope shape would need
+#                    a duplicate registry entry for zero behavioral gain.
+#
+# ⚠ ROLE-ARM ONLY (design §6.2's own instruction + this ticket's brief). No perm_role_grant_* mirror
+# is wired. The dept-head rule is attribute-dependent (subtree containment via org_unit_lead), so per
+# IAM-04c §9 option C precedent (appraisal/report_document) it is PERMANENTLY-UNWIRED, not "not yet"
+# — a flat permission-catalog key has no attribute dimension to re-express subtree containment, and
+# wiring one would over-grant exactly the way IAM-04-REG1 found on 20+ module-mediated kinds.
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: role_grant
+  importDerivedRoles: ["gaiada_scopes"]
+  variables:
+    import: ["gaiada_common"]
+  rules:
+    - actions: ["*"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["platform_admin"]
+    # company_admin: full-tenant granting authority (today's reality, kept — design §6.2).
+    - actions: ["create", "revoke", "read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+
+    # Dept head — OWN rule, NEVER mixed with a scope-only role in the same rule (the §1.4 binding
+    # authoring rule from docs/superpowers/plans/2026-08-10-iam-hier-01-plan.md, restated by this
+    # ticket's own brief as the TRAP-4/REG1 lesson: folding a differently-scoped role into a shared
+    # condition denied group_executive everywhere; folding an attr-gated role into a flat rule
+    # over-granted hr_manager). Reuses the EXISTING org_unit_lead derived role (attribute-dependent
+    # subtree containment via resource.attr.unitAncestors) — dept-head authority over granting
+    # therefore comes from holding a lead POSITION whose role set carries org_unit_lead @ own_unit
+    # (design §6.2), the same mechanism report_document/appraisal already use for the identical shape.
+    - actions: ["create", "revoke", "read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["org_unit_lead"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+
+    # ══════ Structural self-target DENY (design §6.2/§6.3.5) — copies resource_invoice.yaml's
+    # IAM-GAP-02 pattern verbatim, same reasoning. `roles: ["user"]` matches EVERY principal
+    # (cerbos.ts's principalPayload() sets the base role unconditionally for every caller) — Cerbos
+    # combines a kind's matching rules with deny-overrides semantics, so this DENY beats every ALLOW
+    # above, platform_admin's wildcard included. D-9's no-self-escalation, expressed in the authority
+    # layer itself, not only in a controller: nobody grants themselves a role through this surface,
+    # superadmin included. FAIL CLOSED on an unknown/empty targetUserId (has(...) && != "" before the
+    # equality check) — an unset targetUserId can never equal a real principal.id, so this can never
+    # spuriously fire on a malformed/legacy request; it only ever fires when targetUserId is KNOWN
+    # and equals the caller.
+    - actions: ["create"]
+      effect: EFFECT_DENY
+      roles: ["user"]
+      condition:
+        match:
+          expr: >-
+            has(request.resource.attr.targetUserId) && request.resource.attr.targetUserId != "" &&
+            request.resource.attr.targetUserId == request.principal.id
+
+    # =========== IAM Phase 2 (P2-02) — NO permission-matching arm on this kind. ==================
+    # Registered in the rollout register as PERMANENTLY-UNWIRED (design §6.2, IAM-04c §9 option C
+    # precedent — appraisal/report_document's own header explains the identical reasoning): the
+    # dept-head rule's subtree containment is an attribute-instance check a flat perms array cannot
+    # re-express, so a perm_role_grant_* mirror would over-grant exactly the way IAM-04-REG1 found on
+    # 20+ other module-mediated kinds. Do not wire one.

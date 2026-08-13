@@ -1,0 +1,26 @@
+# IAM Phase 2 (P2-02) — the `it_account` kind: the IT accounts console's derived worklist +
+# Keycloak-backed actions (design §5.4/§6.2). Deliberately NARROWER than the generic `it_staff`
+# derived role used elsewhere for the device registry (it_admin||it_manager||it): design §5.4/§6.2
+# name only "it_admin/it_manager + company_admin" for accounts specifically — the baseline `it`
+# role does NOT reach login/credential actions. `it_managers` (derived_roles.yaml, new this ticket)
+# expresses exactly that narrower pair.
+#
+# ⚠ ROLE-ARM ONLY this wave — no perm_it_account_* mirror. `it_managers`/`company_admin` are both
+# SAFE (global-or-company) shapes, so a mirror could be wired safely later — deferred per this
+# ticket's own brief; no IT-accounts handler exists yet (P2-13 owns building one over
+# keycloak-admin.ts).
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: it_account
+  importDerivedRoles: ["gaiada_scopes"]
+  variables:
+    import: ["gaiada_common"]
+  rules:
+    - actions: ["*"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["platform_admin"]
+    - actions: ["read", "provision", "disable", "enable", "reset_password"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin", "it_managers"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }

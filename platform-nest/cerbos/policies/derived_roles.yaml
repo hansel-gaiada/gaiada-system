@@ -105,6 +105,22 @@ derivedRoles:
                 g.scopeType == "global" ||
                 (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
 
+    # IAM Phase 2 (P2-02) — the `it_account` kind's OWN, NARROWER IT tier: it_admin OR it_manager
+    # only, deliberately EXCLUDING the baseline `it` role. Design §5.4/§6.2 name the it_account
+    # authority set as "it_admin/it_manager + company_admin" — narrower than it_staff's generic
+    # it_admin||it_manager||it used everywhere else (device registry, etc). SAFE shape (global +
+    # company-tenant disjunction, no top-level attribute gate) per
+    # permission-arm-hazard-scan.test.ts's own classifier — mixable with company_admin in one rule.
+    - name: it_managers
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.grants.exists(g,
+              (g.role == "it_admin" || g.role == "it_manager") && (
+                g.scopeType == "global" ||
+                (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+
     # External client (WS11 portal): a `client` grant covers the client-portal surface for its
     # company. Client-to-run isolation (a client sees only THEIR runs) is enforced in the portal
     # controller by run.client_id, not here — this only establishes "is an authenticated client of

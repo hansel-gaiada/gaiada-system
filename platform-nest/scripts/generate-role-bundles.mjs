@@ -123,6 +123,8 @@ const DIRECT = {
   it_staff: ["it_admin", "it_manager", "it"],
   hr_people_ops: ["hr_manager"],
   hr_people_reader: ["hr_staff", "hr_manager"],
+  // IAM Phase 2 (P2-02) — it_account's own narrower IT tier (it_admin/it_manager, NOT plain "it").
+  it_managers: ["it_admin", "it_manager"],
 };
 
 function moduleStaffTargets(kind, cond) {

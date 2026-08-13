@@ -1,0 +1,80 @@
+# IAM Phase 2 (P2-02) — the `position` kind: org-chart seat CRUD, plus who may assign/unassign a
+# person to a seat. Design: docs/superpowers/plans/2026-08-13-iam-phase2-design.md §2.2/§4.1/§6.2.
+#
+# Resource attrs a caller (P2-06/P2-08/P2-11/P2-12 — none built by this ticket) must set: tenantId
+# (D5 gate); targetUserId (assign only — the person BEING assigned, for the self-assign DENY below);
+# unitAncestors (assign/unassign/the dept-head read rule — the POSITION's OWN unit ancestry from
+# org_unit_closure, the SAME attribute name/shape resource_role_grant.yaml's org_unit_lead rule and
+# report_document/appraisal already use).
+#
+# ⚠ ACTIONS BEYOND DESIGN §6.2's LITERAL TEXT — flagged, not silently assumed (P2-01's own report set
+# this transparency precedent for this same ticket chain). Design §6.2 names only assign / unassign /
+# create / update / retire. `read` is ADDED here because every downstream ticket that depends on this
+# kind (P2-11 dept-head page's "roster from a closure-backed endpoint", P2-12 positions admin UI,
+# P2-06's employee flows) needs to READ positions, and every other resource kind in this repo has a
+# read action; omitting it would leave positions structurally unreadable through Cerbos. Tier mirrors
+# the same split as the write actions: company_admin/hr_people_ops reach it tenant-wide, org_unit_lead
+# reaches it over their own subtree. This is a deliberate addition, not a design deviation — flag for
+# the architect to fold into §6.2's text if that's preferred over living in this comment.
+#
+# ⚠ ROLE-ARM ONLY — no perm_position_* mirror wired (same reasoning as resource_role_grant.yaml: the
+# dept-head assign/unassign/read rule is subtree-attribute-dependent via org_unit_lead).
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: position
+  importDerivedRoles: ["gaiada_scopes"]
+  variables:
+    import: ["gaiada_common"]
+  rules:
+    - actions: ["*"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["platform_admin"]
+
+    # HR creates/retires positions; company_admin keeps full-tenant authority (design §4.1: "HR
+    # creates/retires positions"; §6.2: "create/update/retire are company_admin + hr_manager").
+    - actions: ["create", "update", "retire"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin", "hr_people_ops"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+
+    # Read: tenant-wide for company_admin + the HR reader tier (hr_staff OR hr_manager).
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin", "hr_people_reader"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+
+    # company_admin's full-tenant reach over assign/unassign too (design §6.2: "assign/unassign
+    # carry the same rule shape (company_admin, dept-head-own-rule over the position's unit
+    # ancestry, self-assign DENY)").
+    - actions: ["assign", "unassign"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+
+    # Dept head — OWN rule, never mixed (§1.4 binding authoring rule — the same TRAP-4/REG1 lesson
+    # resource_role_grant.yaml's comment restates). Reuses org_unit_lead exactly as
+    # resource_role_grant.yaml does, this time over the POSITION's own unit ancestry (the org chart's
+    # "department head handles positions under that department" — design §4.1).
+    - actions: ["assign", "unassign", "read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["org_unit_lead"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+
+    # Self-assign DENY (design §6.2: "self-assign DENY") — copies resource_invoice.yaml's
+    # IAM-GAP-02/resource_role_grant.yaml's self-target pattern: `roles: ["user"]` matches every
+    # principal, deny-overrides beats every ALLOW above including platform_admin's wildcard. Nobody
+    # assigns themselves to a position through this surface, superadmin included.
+    - actions: ["assign"]
+      effect: EFFECT_DENY
+      roles: ["user"]
+      condition:
+        match:
+          expr: >-
+            has(request.resource.attr.targetUserId) && request.resource.attr.targetUserId != "" &&
+            request.resource.attr.targetUserId == request.principal.id
+
+    # =========== IAM Phase 2 (P2-02) — NO permission-matching arm on this kind. ==================
+    # Same reasoning as resource_role_grant.yaml — the dept-head assign/unassign/read rule is
+    # subtree-attribute-dependent; a flat perms mirror cannot re-express it. Registered
+    # permanently-unwired.

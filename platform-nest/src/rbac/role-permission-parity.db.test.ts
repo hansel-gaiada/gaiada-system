@@ -115,6 +115,9 @@ const DIRECT: Record<string, RealRole[]> = {
   it_staff: ["it_admin", "it_manager", "it"],
   hr_people_ops: ["hr_manager"],
   hr_people_reader: ["hr_staff", "hr_manager"],
+  // IAM Phase 2 (P2-02) — it_account's own narrower IT tier (it_admin/it_manager, NOT plain "it").
+  // Mirrors generate-role-bundles.mjs's own DIRECT entry so this file's independent re-derivation agrees.
+  it_managers: ["it_admin", "it_manager"],
 };
 
 function moduleStaffTargets(kind: string, cond: string | undefined): RealRole[] {

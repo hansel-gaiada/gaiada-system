@@ -116,6 +116,11 @@ describe.skipIf(!TEST_URL)("IAM-SEC-06 · assemblePrincipal() drops perms from a
     expect(p!.perms).toEqual([]);
   });
 
+  // IAM Phase 2 (P2-02, 2026-08-13): org_unit_lead's bundle grew from 2 to 8 — the new role_grant
+  // (create/read/revoke) and position (assign/read/unassign) kinds' own dept-head rules ALSO reuse
+  // the org_unit_lead derived role (design §6.2), so a legitimate org_unit@org_unit grant now
+  // resolves 6 more perms alongside the original 2 (reports.appraisal.read/read_department). This
+  // is additive bundle growth, not a regression of the over-refusal control this test guards.
   it("ACCEPTANCE (over-refusal control): a legitimate org_unit_lead@org_unit grant resolves its permissions NORMALLY", async () => {
     const p = await assemblePrincipal(orgUnitLeadLegitId, "high");
     expect(p).not.toBeNull();
@@ -126,7 +131,11 @@ describe.skipIf(!TEST_URL)("IAM-SEC-06 · assemblePrincipal() drops perms from a
       expect(g.scopeId).toBe(orgUnitId);
     }
     const keys = p!.perms!.map((g) => g.key).sort();
-    expect(keys).toEqual(["reports.appraisal.read", "reports.document.read_department"]);
+    expect(keys).toEqual([
+      "core.position.assign", "core.position.read", "core.position.unassign",
+      "core.role_grant.create", "core.role_grant.read", "core.role_grant.revoke",
+      "reports.appraisal.read", "reports.document.read_department",
+    ]);
   });
 
   it("ACCEPTANCE: a legitimate client@company grant is completely unaffected", async () => {

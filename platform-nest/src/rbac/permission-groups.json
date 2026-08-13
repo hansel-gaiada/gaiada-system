@@ -3,13 +3,13 @@
     "title": "Gaiada permission groups — the authoring layer (IAM-01b-3)",
     "status": "PROTOTYPED — 2026-08-10. Seeded from the ~40 existing platform-ui CAPABILITIES plus every grantable catalog permission they did not already reach. Pending owner/HR review before use in role authoring.",
     "parent": "docs/superpowers/plans/2026-08-10-permission-groups.md",
-    "catalogSource": "platform-nest/src/rbac/permission-catalog.json (211 grantable permissions, frozen input)",
+    "catalogSource": "platform-nest/src/rbac/permission-catalog.json (267 grantable permissions, IAM Phase 2 P2-02 2026-08-13)",
     "model": "Two-layer (Ruling 1, option C): groups are the authoring surface; every permission remains individually assignable via an 'advanced' expansion. A group's sensitive flag is mechanical — true iff ANY member permission carries catalog sensitive:true.",
     "counts": {
       "groups": 85,
-      "grantablePermissionsInCatalog": 249,
+      "grantablePermissionsInCatalog": 267,
       "permissionsCoveredByGroups": 247,
-      "permissionsAdvancedOnly": 2,
+      "permissionsAdvancedOnly": 20,
       "permissionsAppearingInMultipleGroups": 2,
       "sensitiveGroups": 51
     }
@@ -1039,6 +1039,78 @@
     {
       "key": "core.work_activity.read",
       "reason": "Raw tracker event stream — a support/debugging read, not an everyday duty. (core.activity.read, the human-facing activity feed, is already in Company Overview.)"
+    },
+    {
+      "key": "core.role_grant.create",
+      "reason": "IAM Phase 2 (P2-02): the granting authority itself — deliberately advancedOnly rather than folded into a friendly group until the position/grant authoring UI (P2-04/P2-08/P2-11) lands with its own ceiling/allow-list checks in front of it."
+    },
+    {
+      "key": "core.role_grant.revoke",
+      "reason": "IAM Phase 2 (P2-02): pairs with core.role_grant.create — same advancedOnly reasoning."
+    },
+    {
+      "key": "core.role_grant.read",
+      "reason": "IAM Phase 2 (P2-02): audit visibility over who holds which grants — advancedOnly alongside its sibling create/revoke actions rather than split into its own group."
+    },
+    {
+      "key": "core.position.create",
+      "reason": "IAM Phase 2 (P2-02): org-chart seat administration — advancedOnly until the positions admin UI (P2-12) curates a dedicated group."
+    },
+    {
+      "key": "core.position.update",
+      "reason": "IAM Phase 2 (P2-02): see core.position.create."
+    },
+    {
+      "key": "core.position.retire",
+      "reason": "IAM Phase 2 (P2-02): see core.position.create."
+    },
+    {
+      "key": "core.position.assign",
+      "reason": "IAM Phase 2 (P2-02): the action that actually confers a position's role-set to a person — advancedOnly until the dept-head access page (P2-11) lands."
+    },
+    {
+      "key": "core.position.unassign",
+      "reason": "IAM Phase 2 (P2-02): pairs with core.position.assign — same reasoning."
+    },
+    {
+      "key": "core.position.read",
+      "reason": "IAM Phase 2 (P2-02): see core.position.create."
+    },
+    {
+      "key": "hr.employee.create",
+      "reason": "IAM Phase 2 (P2-02): the HR people file — advancedOnly until the HR console's hire/transfer/terminate flows (P2-10) land with their own typed forms in front of it."
+    },
+    {
+      "key": "hr.employee.read",
+      "reason": "IAM Phase 2 (P2-02): see hr.employee.create."
+    },
+    {
+      "key": "hr.employee.update",
+      "reason": "IAM Phase 2 (P2-02): see hr.employee.create."
+    },
+    {
+      "key": "hr.employee.delete",
+      "reason": "IAM Phase 2 (P2-02): see hr.employee.create."
+    },
+    {
+      "key": "it.account.read",
+      "reason": "IAM Phase 2 (P2-02): the IT accounts worklist — advancedOnly until the IT accounts console (P2-13/P2-14) lands over keycloak-admin.ts."
+    },
+    {
+      "key": "it.account.provision",
+      "reason": "IAM Phase 2 (P2-02): mints a Keycloak login — advancedOnly, same reasoning as it.account.read."
+    },
+    {
+      "key": "it.account.disable",
+      "reason": "IAM Phase 2 (P2-02): see it.account.provision."
+    },
+    {
+      "key": "it.account.enable",
+      "reason": "IAM Phase 2 (P2-02): see it.account.provision."
+    },
+    {
+      "key": "it.account.reset_password",
+      "reason": "IAM Phase 2 (P2-02): see it.account.provision."
     }
   ]
 }

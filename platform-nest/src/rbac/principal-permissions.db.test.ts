@@ -205,10 +205,18 @@ describe.skipIf(!TEST_URL)("IAM-03a · assemblePrincipal() perms resolution", ()
     expect(p!.perms).toEqual([{ key: "agency.approval.approve", scopeType: "company", scopeId: companyA }]);
   });
 
-  it("it_admin @ companyA resolves exactly 3 perms (device create/update/delete — no device:read, documented gap)", async () => {
+  // IAM Phase 2 (P2-02, 2026-08-13): it_admin's bundle grew from 3 to 8 — the new it_account.*
+  // kind's 5 actions (read/provision/disable/enable/reset_password, design §6.2/§5.4) are ALSO
+  // reachable by it_admin via the new `it_managers` derived role. The 3-perm device-only shape (no
+  // device:read, documented gap) is unaffected — this is a real, additive bundle growth, not a
+  // regression of the original finding.
+  it("it_admin @ companyA resolves exactly 8 perms (3 device create/update/delete + 5 new it.account.* — no device:read, documented gap)", async () => {
     const p = await assemblePrincipal(itAdminId, "high");
     const keys = p!.perms!.map((g) => g.key).sort();
-    expect(keys).toEqual(["it.device.create", "it.device.delete", "it.device.update"]);
+    expect(keys).toEqual([
+      "it.account.disable", "it.account.enable", "it.account.provision", "it.account.read", "it.account.reset_password",
+      "it.device.create", "it.device.delete", "it.device.update",
+    ]);
   });
 
   it("two roles at the SAME scope dedupe to the union, not the sum, with no duplicate (key,scope) pairs", async () => {

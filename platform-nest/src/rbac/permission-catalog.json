@@ -1,24 +1,29 @@
 {
   "_meta": {
     "title": "Gaiada permission catalog (IAM-01b)",
-    "status": "PROTOTYPED \u2014 derived from source 2026-08-10; frozen only after owner review (IAM-07a)",
-    "source": "platform-nest/cerbos/policies/resource_*.yaml \u2014 61 resource kinds, parsed and wildcard-expanded",
-    "rulings": "docs/superpowers/plans/2026-08-10-iam-01a-02a-analysis.md \u00a76 (Rulings 1\u20133, owner-decided 2026-08-10)",
+    "status": "PROTOTYPED — derived from source 2026-08-10; frozen only after owner review (IAM-07a)",
+    "source": "platform-nest/cerbos/policies/resource_*.yaml — 61 resource kinds, parsed and wildcard-expanded",
+    "rulings": "docs/superpowers/plans/2026-08-10-iam-01a-02a-analysis.md §6 (Rulings 1–3, owner-decided 2026-08-10)",
     "companionDoc": "docs/superpowers/plans/2026-08-10-permission-catalog.md",
-    "keyFormat": "<domain>.<resource>.<action> \u2014 domain is the owning module, or `core` for non-module kinds; the mapping to the real Cerbos kind is carried by cerbosKind/cerbosAction (e.g. search.property.update -> resource_search_property).",
+    "keyFormat": "<domain>.<resource>.<action> — domain is the owning module, or `core` for non-module kinds; the mapping to the real Cerbos kind is carried by cerbosKind/cerbosAction (e.g. search.property.update -> resource_search_property).",
     "classes": {
       "grantable": "role-assignable enforcement primitive; maps 1:1 to a Cerbos (kind, action) pair",
       "relationship": "held by owning the resource (or via the hub channel for mcp_tool.call), NEVER by any role; bypass-exempt: no wildcard, no superadmin, and no future `owner` role may reach these (Ruling 3)"
     },
-    "sensitive": "assessed 2026-08-10 for step-up auth + D-10 approval routing; touches HR/people data, finance, client commitments, deploys/provisioning, credentials/identity, or cross-company access. Owner review pending \u2014 tighten additively, loosen only by owner decision.",
+    "sensitive": "assessed 2026-08-10 for step-up auth + D-10 approval routing; touches HR/people data, finance, client commitments, deploys/provisioning, credentials/identity, or cross-company access. Owner review pending — tighten additively, loosen only by owner decision.",
     "counts": {
-      "cerbosKinds": 68,
-      "concretePairs": 264,
-      "grantable": 249,
+      "cerbosKinds": 72,
+      "concretePairs": 282,
+      "grantable": 267,
       "relationship": 15,
-      "sensitive": 93
+      "sensitive": 107
     },
-    "countsNote": "DERIVED from `permissions` below \u2014 re-derive rather than hand-edit. HIER-5 (2026-08-11) found this block stale after HIER-3 retired the `team` kind: it still read 61/230/215 while the array held 60/226/211. Nothing enforced it, so it drifted silently \u2014 the same hand-maintained-number rot this program has hit repeatedly. `role-permission-bundles.db.test.ts` pins the BUNDLE artifact's own counts; this block had no equivalent guard. IAM-GAP-01 (2026-08-13): 262/247/91 -> 264/249/93 \u2014 two new grantable, both sensitive: `billing.invoice.approve` (new literal action on the existing `invoice` kind) and `hr.leave.decide` (new literal action `decide_leave` on the existing `automation_approval` kind). Kind count (68) and relationship count (15) are unchanged \u2014 no new Cerbos kind, no new relationship-class permission."
+    "countsNote": "DERIVED from `permissions` below — re-derive rather than hand-edit. HIER-5 (2026-08-11) found this block stale after HIER-3 retired the `team` kind: it still read 61/230/215 while the array held 60/226/211. Nothing enforced it, so it drifted silently — the same hand-maintained-number rot this program has hit repeatedly. `role-permission-bundles.db.test.ts` pins the BUNDLE artifact's own counts; this block had no equivalent guard. IAM-GAP-01 (2026-08-13): 262/247/91 -> 264/249/93 — two new grantable, both sensitive: `billing.invoice.approve` (new literal action on the existing `invoice` kind) and `hr.leave.decide` (new literal action `decide_leave` on the existing `automation_approval` kind). Kind count (68) and relationship count (15) are unchanged — no new Cerbos kind, no new relationship-class permission. P2-02 (2026-08-13): +18 grantable (4 new Cerbos kinds — role_grant/position/employee/it_account, design §6.2; role_grant/position are role-arm ONLY, permanently-unwired perm mirror per IAM-04c §9 option C; employee/it_account are role-arm only THIS wave, deferred pending their handlers). Kind count 68 -> 72 (+4). Relationship count (15) unchanged — none of the 18 new keys are relationship-class.",
+    "uiGrantable": {
+      "note": "P2-03 (2026-08-13): `uiGrantable` is now a REQUIRED field on every entry (design §7). true/false counts below are informational, re-derivable from the array; the load-bearing invariants (portal.* and class=relationship must be false) are pinned by src/rbac/ui-grantable-catalog.test.ts, not by this block.",
+      "true": 260,
+      "false": 22
+    }
   },
   "permissions": [
     {
@@ -30,7 +35,8 @@
       "cerbosKind": "agency_approval",
       "cerbosAction": "approve",
       "class": "grantable",
-      "sensitive": true
+      "sensitive": true,
+      "uiGrantable": true
     },
     {
       "key": "agency.approval.create",
@@ -41,7 +47,8 @@
       "cerbosKind": "agency_approval",
       "cerbosAction": "create",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "agency.approval.read",
@@ -52,7 +59,8 @@
       "cerbosKind": "agency_approval",
       "cerbosAction": "read",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "agency.brief.create",
@@ -63,7 +71,8 @@
       "cerbosKind": "agency_brief",
       "cerbosAction": "create",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "agency.brief.delete",
@@ -74,7 +83,8 @@
       "cerbosKind": "agency_brief",
       "cerbosAction": "delete",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "agency.brief.read",
@@ -85,7 +95,8 @@
       "cerbosKind": "agency_brief",
       "cerbosAction": "read",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "agency.brief.update",
@@ -96,7 +107,8 @@
       "cerbosKind": "agency_brief",
       "cerbosAction": "update",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "agency.campaign.create",
@@ -107,7 +119,8 @@
       "cerbosKind": "agency_campaign",
       "cerbosAction": "create",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "agency.campaign.delete",
@@ -118,7 +131,8 @@
       "cerbosKind": "agency_campaign",
       "cerbosAction": "delete",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "agency.campaign.read",
@@ -129,7 +143,8 @@
       "cerbosKind": "agency_campaign",
       "cerbosAction": "read",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "agency.campaign.update",
@@ -140,7 +155,8 @@
       "cerbosKind": "agency_campaign",
       "cerbosAction": "update",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "agency.creative_asset.create",
@@ -151,7 +167,8 @@
       "cerbosKind": "agency_creative_asset",
       "cerbosAction": "create",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "agency.creative_asset.delete",
@@ -162,7 +179,8 @@
       "cerbosKind": "agency_creative_asset",
       "cerbosAction": "delete",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "agency.creative_asset.read",
@@ -173,7 +191,8 @@
       "cerbosKind": "agency_creative_asset",
       "cerbosAction": "read",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "agency.creative_asset.update",
@@ -184,7 +203,8 @@
       "cerbosKind": "agency_creative_asset",
       "cerbosAction": "update",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "assistant.agent_run.read",
@@ -196,7 +216,8 @@
       "cerbosAction": "read",
       "class": "relationship",
       "sensitive": false,
-      "grantedVia": "ownership + provenance: base role `user` + owns + resource.attr.origin == \"assistant_handoff\". NOTE: no assurance floor in the condition (flagged for IAM-01b-2)."
+      "grantedVia": "ownership + provenance: base role `user` + owns + resource.attr.origin == \"assistant_handoff\". NOTE: no assurance floor in the condition (flagged for IAM-01b-2).",
+      "uiGrantable": false
     },
     {
       "key": "assistant.memory.confirm",
@@ -208,7 +229,8 @@
       "cerbosAction": "confirm",
       "class": "relationship",
       "sensitive": false,
-      "grantedVia": "ownership: base role `user` + owns (resource.attr.ownerId == principal.id), inTenant, assurance >= linked. Same owner-private model as assistant_thread."
+      "grantedVia": "ownership: base role `user` + owns (resource.attr.ownerId == principal.id), inTenant, assurance >= linked. Same owner-private model as assistant_thread.",
+      "uiGrantable": false
     },
     {
       "key": "assistant.memory.delete",
@@ -220,7 +242,8 @@
       "cerbosAction": "delete",
       "class": "relationship",
       "sensitive": false,
-      "grantedVia": "ownership: base role `user` + owns (resource.attr.ownerId == principal.id), inTenant, assurance >= linked. Same owner-private model as assistant_thread."
+      "grantedVia": "ownership: base role `user` + owns (resource.attr.ownerId == principal.id), inTenant, assurance >= linked. Same owner-private model as assistant_thread.",
+      "uiGrantable": false
     },
     {
       "key": "assistant.memory.list",
@@ -232,7 +255,8 @@
       "cerbosAction": "list",
       "class": "relationship",
       "sensitive": false,
-      "grantedVia": "ownership: base role `user` + owns (resource.attr.ownerId == principal.id), inTenant, assurance >= linked. Same owner-private model as assistant_thread."
+      "grantedVia": "ownership: base role `user` + owns (resource.attr.ownerId == principal.id), inTenant, assurance >= linked. Same owner-private model as assistant_thread.",
+      "uiGrantable": false
     },
     {
       "key": "assistant.memory.propose",
@@ -244,7 +268,8 @@
       "cerbosAction": "propose",
       "class": "relationship",
       "sensitive": false,
-      "grantedVia": "ownership: base role `user` + owns (resource.attr.ownerId == principal.id), inTenant, assurance >= linked. Same owner-private model as assistant_thread."
+      "grantedVia": "ownership: base role `user` + owns (resource.attr.ownerId == principal.id), inTenant, assurance >= linked. Same owner-private model as assistant_thread.",
+      "uiGrantable": false
     },
     {
       "key": "assistant.thread.confirm_write",
@@ -256,7 +281,8 @@
       "cerbosAction": "confirm_write",
       "class": "relationship",
       "sensitive": false,
-      "grantedVia": "ownership: base role `user` + owns (resource.attr.ownerId == principal.id), inTenant, assurance >= linked. No admin/wildcard rule by design (resource_assistant_thread.yaml header)."
+      "grantedVia": "ownership: base role `user` + owns (resource.attr.ownerId == principal.id), inTenant, assurance >= linked. No admin/wildcard rule by design (resource_assistant_thread.yaml header).",
+      "uiGrantable": false
     },
     {
       "key": "assistant.thread.create",
@@ -268,7 +294,8 @@
       "cerbosAction": "create",
       "class": "relationship",
       "sensitive": false,
-      "grantedVia": "ownership: base role `user` + owns (resource.attr.ownerId == principal.id), inTenant, assurance >= linked. No admin/wildcard rule by design (resource_assistant_thread.yaml header)."
+      "grantedVia": "ownership: base role `user` + owns (resource.attr.ownerId == principal.id), inTenant, assurance >= linked. No admin/wildcard rule by design (resource_assistant_thread.yaml header).",
+      "uiGrantable": false
     },
     {
       "key": "assistant.thread.delete",
@@ -280,7 +307,8 @@
       "cerbosAction": "delete",
       "class": "relationship",
       "sensitive": false,
-      "grantedVia": "ownership: base role `user` + owns (resource.attr.ownerId == principal.id), inTenant, assurance >= linked. No admin/wildcard rule by design (resource_assistant_thread.yaml header)."
+      "grantedVia": "ownership: base role `user` + owns (resource.attr.ownerId == principal.id), inTenant, assurance >= linked. No admin/wildcard rule by design (resource_assistant_thread.yaml header).",
+      "uiGrantable": false
     },
     {
       "key": "assistant.thread.handoff",
@@ -292,7 +320,8 @@
       "cerbosAction": "handoff",
       "class": "relationship",
       "sensitive": false,
-      "grantedVia": "ownership: base role `user` + owns (resource.attr.ownerId == principal.id), inTenant, assurance >= linked. No admin/wildcard rule by design (resource_assistant_thread.yaml header)."
+      "grantedVia": "ownership: base role `user` + owns (resource.attr.ownerId == principal.id), inTenant, assurance >= linked. No admin/wildcard rule by design (resource_assistant_thread.yaml header).",
+      "uiGrantable": false
     },
     {
       "key": "assistant.thread.message",
@@ -304,7 +333,8 @@
       "cerbosAction": "message",
       "class": "relationship",
       "sensitive": false,
-      "grantedVia": "ownership: base role `user` + owns (resource.attr.ownerId == principal.id), inTenant, assurance >= linked. No admin/wildcard rule by design (resource_assistant_thread.yaml header)."
+      "grantedVia": "ownership: base role `user` + owns (resource.attr.ownerId == principal.id), inTenant, assurance >= linked. No admin/wildcard rule by design (resource_assistant_thread.yaml header).",
+      "uiGrantable": false
     },
     {
       "key": "assistant.thread.read",
@@ -316,7 +346,8 @@
       "cerbosAction": "read",
       "class": "relationship",
       "sensitive": false,
-      "grantedVia": "ownership: base role `user` + owns (resource.attr.ownerId == principal.id), inTenant, assurance >= linked. No admin/wildcard rule by design (resource_assistant_thread.yaml header)."
+      "grantedVia": "ownership: base role `user` + owns (resource.attr.ownerId == principal.id), inTenant, assurance >= linked. No admin/wildcard rule by design (resource_assistant_thread.yaml header).",
+      "uiGrantable": false
     },
     {
       "key": "assistant.thread.stop",
@@ -328,7 +359,8 @@
       "cerbosAction": "stop",
       "class": "relationship",
       "sensitive": false,
-      "grantedVia": "ownership: base role `user` + owns (resource.attr.ownerId == principal.id), inTenant, assurance >= linked. No admin/wildcard rule by design (resource_assistant_thread.yaml header)."
+      "grantedVia": "ownership: base role `user` + owns (resource.attr.ownerId == principal.id), inTenant, assurance >= linked. No admin/wildcard rule by design (resource_assistant_thread.yaml header).",
+      "uiGrantable": false
     },
     {
       "key": "assistant.thread.stream",
@@ -340,7 +372,8 @@
       "cerbosAction": "stream",
       "class": "relationship",
       "sensitive": false,
-      "grantedVia": "ownership: base role `user` + owns (resource.attr.ownerId == principal.id), inTenant, assurance >= linked. No admin/wildcard rule by design (resource_assistant_thread.yaml header)."
+      "grantedVia": "ownership: base role `user` + owns (resource.attr.ownerId == principal.id), inTenant, assurance >= linked. No admin/wildcard rule by design (resource_assistant_thread.yaml header).",
+      "uiGrantable": false
     },
     {
       "key": "assistant.thread.update",
@@ -352,7 +385,8 @@
       "cerbosAction": "update",
       "class": "relationship",
       "sensitive": false,
-      "grantedVia": "ownership: base role `user` + owns (resource.attr.ownerId == principal.id), inTenant, assurance >= linked. No admin/wildcard rule by design (resource_assistant_thread.yaml header)."
+      "grantedVia": "ownership: base role `user` + owns (resource.attr.ownerId == principal.id), inTenant, assurance >= linked. No admin/wildcard rule by design (resource_assistant_thread.yaml header).",
+      "uiGrantable": false
     },
     {
       "key": "billing.invoice.approve",
@@ -363,7 +397,8 @@
       "cerbosKind": "invoice",
       "cerbosAction": "approve",
       "class": "grantable",
-      "sensitive": true
+      "sensitive": true,
+      "uiGrantable": true
     },
     {
       "key": "billing.invoice.create",
@@ -374,7 +409,8 @@
       "cerbosKind": "invoice",
       "cerbosAction": "create",
       "class": "grantable",
-      "sensitive": true
+      "sensitive": true,
+      "uiGrantable": true
     },
     {
       "key": "billing.invoice.delete",
@@ -385,7 +421,8 @@
       "cerbosKind": "invoice",
       "cerbosAction": "delete",
       "class": "grantable",
-      "sensitive": true
+      "sensitive": true,
+      "uiGrantable": true
     },
     {
       "key": "billing.invoice.read",
@@ -396,7 +433,8 @@
       "cerbosKind": "invoice",
       "cerbosAction": "read",
       "class": "grantable",
-      "sensitive": true
+      "sensitive": true,
+      "uiGrantable": true
     },
     {
       "key": "billing.invoice.update",
@@ -407,7 +445,8 @@
       "cerbosKind": "invoice",
       "cerbosAction": "update",
       "class": "grantable",
-      "sensitive": true
+      "sensitive": true,
+      "uiGrantable": true
     },
     {
       "key": "core.activity.read",
@@ -418,7 +457,8 @@
       "cerbosKind": "activity",
       "cerbosAction": "read",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "core.automation_approval.create",
@@ -429,7 +469,8 @@
       "cerbosKind": "automation_approval",
       "cerbosAction": "create",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "core.automation_approval.decide",
@@ -440,7 +481,8 @@
       "cerbosKind": "automation_approval",
       "cerbosAction": "decide",
       "class": "grantable",
-      "sensitive": true
+      "sensitive": true,
+      "uiGrantable": true
     },
     {
       "key": "core.automation_approval.read",
@@ -451,7 +493,8 @@
       "cerbosKind": "automation_approval",
       "cerbosAction": "read",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "core.automation_approval.retry",
@@ -462,7 +505,8 @@
       "cerbosKind": "automation_approval",
       "cerbosAction": "retry",
       "class": "grantable",
-      "sensitive": true
+      "sensitive": true,
+      "uiGrantable": true
     },
     {
       "key": "core.chat_group.add_member",
@@ -473,7 +517,8 @@
       "cerbosKind": "chat_group",
       "cerbosAction": "add_member",
       "class": "grantable",
-      "sensitive": true
+      "sensitive": true,
+      "uiGrantable": true
     },
     {
       "key": "core.chat_group.pin",
@@ -484,7 +529,8 @@
       "cerbosKind": "chat_group",
       "cerbosAction": "pin",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "core.chat_group.promote_member",
@@ -495,7 +541,8 @@
       "cerbosKind": "chat_group",
       "cerbosAction": "promote_member",
       "class": "grantable",
-      "sensitive": true
+      "sensitive": true,
+      "uiGrantable": true
     },
     {
       "key": "core.chat_group.remove_member",
@@ -506,7 +553,8 @@
       "cerbosKind": "chat_group",
       "cerbosAction": "remove_member",
       "class": "grantable",
-      "sensitive": true
+      "sensitive": true,
+      "uiGrantable": true
     },
     {
       "key": "core.chat_group.set_subject",
@@ -517,7 +565,8 @@
       "cerbosKind": "chat_group",
       "cerbosAction": "set_subject",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "core.client.create",
@@ -528,7 +577,8 @@
       "cerbosKind": "client",
       "cerbosAction": "create",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "core.client.delete",
@@ -539,7 +589,8 @@
       "cerbosKind": "client",
       "cerbosAction": "delete",
       "class": "grantable",
-      "sensitive": true
+      "sensitive": true,
+      "uiGrantable": true
     },
     {
       "key": "core.client.read",
@@ -550,7 +601,8 @@
       "cerbosKind": "client",
       "cerbosAction": "read",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "core.client.update",
@@ -561,7 +613,8 @@
       "cerbosKind": "client",
       "cerbosAction": "update",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "core.client_contact.create",
@@ -572,7 +625,8 @@
       "cerbosKind": "client_contact",
       "cerbosAction": "create",
       "class": "grantable",
-      "sensitive": true
+      "sensitive": true,
+      "uiGrantable": true
     },
     {
       "key": "core.client_contact.read",
@@ -583,7 +637,8 @@
       "cerbosKind": "client_contact",
       "cerbosAction": "read",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "core.client_contact.revoke",
@@ -594,7 +649,8 @@
       "cerbosKind": "client_contact",
       "cerbosAction": "revoke",
       "class": "grantable",
-      "sensitive": true
+      "sensitive": true,
+      "uiGrantable": true
     },
     {
       "key": "core.client_contact.update",
@@ -605,7 +661,8 @@
       "cerbosKind": "client_contact",
       "cerbosAction": "update",
       "class": "grantable",
-      "sensitive": true
+      "sensitive": true,
+      "uiGrantable": true
     },
     {
       "key": "core.comment.create",
@@ -616,7 +673,8 @@
       "cerbosKind": "comment",
       "cerbosAction": "create",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "core.comment.read",
@@ -627,7 +685,8 @@
       "cerbosKind": "comment",
       "cerbosAction": "read",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "core.company.delete",
@@ -638,7 +697,8 @@
       "cerbosKind": "company",
       "cerbosAction": "delete",
       "class": "grantable",
-      "sensitive": true
+      "sensitive": true,
+      "uiGrantable": true
     },
     {
       "key": "core.company.read",
@@ -649,7 +709,8 @@
       "cerbosKind": "company",
       "cerbosAction": "read",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "core.company.update",
@@ -660,7 +721,8 @@
       "cerbosKind": "company",
       "cerbosAction": "update",
       "class": "grantable",
-      "sensitive": true
+      "sensitive": true,
+      "uiGrantable": true
     },
     {
       "key": "core.compliance_gate.read",
@@ -671,7 +733,8 @@
       "cerbosKind": "compliance_gate",
       "cerbosAction": "read",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "core.compliance_gate.update",
@@ -682,7 +745,8 @@
       "cerbosKind": "compliance_gate",
       "cerbosAction": "update",
       "class": "grantable",
-      "sensitive": true
+      "sensitive": true,
+      "uiGrantable": true
     },
     {
       "key": "core.contract.create",
@@ -693,7 +757,8 @@
       "cerbosKind": "contract",
       "cerbosAction": "create",
       "class": "grantable",
-      "sensitive": true
+      "sensitive": true,
+      "uiGrantable": true
     },
     {
       "key": "core.contract.delete",
@@ -704,7 +769,8 @@
       "cerbosKind": "contract",
       "cerbosAction": "delete",
       "class": "grantable",
-      "sensitive": true
+      "sensitive": true,
+      "uiGrantable": true
     },
     {
       "key": "core.contract.read",
@@ -715,7 +781,8 @@
       "cerbosKind": "contract",
       "cerbosAction": "read",
       "class": "grantable",
-      "sensitive": true
+      "sensitive": true,
+      "uiGrantable": true
     },
     {
       "key": "core.contract.send",
@@ -726,7 +793,8 @@
       "cerbosKind": "contract",
       "cerbosAction": "send",
       "class": "grantable",
-      "sensitive": true
+      "sensitive": true,
+      "uiGrantable": true
     },
     {
       "key": "core.contract.update",
@@ -737,7 +805,8 @@
       "cerbosKind": "contract",
       "cerbosAction": "update",
       "class": "grantable",
-      "sensitive": true
+      "sensitive": true,
+      "uiGrantable": true
     },
     {
       "key": "core.custom_field.create",
@@ -748,7 +817,8 @@
       "cerbosKind": "custom_field",
       "cerbosAction": "create",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "core.custom_field.delete",
@@ -759,7 +829,8 @@
       "cerbosKind": "custom_field",
       "cerbosAction": "delete",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "core.custom_field.read",
@@ -770,7 +841,8 @@
       "cerbosKind": "custom_field",
       "cerbosAction": "read",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "core.custom_field.update",
@@ -781,7 +853,8 @@
       "cerbosKind": "custom_field",
       "cerbosAction": "update",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "core.deliverable.create",
@@ -792,7 +865,8 @@
       "cerbosKind": "deliverable",
       "cerbosAction": "create",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "core.deliverable.delete",
@@ -803,7 +877,8 @@
       "cerbosKind": "deliverable",
       "cerbosAction": "delete",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "core.deliverable.read",
@@ -814,7 +889,8 @@
       "cerbosKind": "deliverable",
       "cerbosAction": "read",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "core.deliverable.update",
@@ -825,7 +901,8 @@
       "cerbosKind": "deliverable",
       "cerbosAction": "update",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "core.file.create",
@@ -836,7 +913,8 @@
       "cerbosKind": "file",
       "cerbosAction": "create",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "core.file.delete",
@@ -847,7 +925,8 @@
       "cerbosKind": "file",
       "cerbosAction": "delete",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "core.file.read",
@@ -858,7 +937,8 @@
       "cerbosKind": "file",
       "cerbosAction": "read",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "core.identity_link.delete",
@@ -869,7 +949,8 @@
       "cerbosKind": "identity_link",
       "cerbosAction": "delete",
       "class": "grantable",
-      "sensitive": true
+      "sensitive": true,
+      "uiGrantable": true
     },
     {
       "key": "core.identity_link.read",
@@ -880,7 +961,8 @@
       "cerbosKind": "identity_link",
       "cerbosAction": "read",
       "class": "grantable",
-      "sensitive": true
+      "sensitive": true,
+      "uiGrantable": true
     },
     {
       "key": "core.identity_link.update",
@@ -891,7 +973,8 @@
       "cerbosKind": "identity_link",
       "cerbosAction": "update",
       "class": "grantable",
-      "sensitive": true
+      "sensitive": true,
+      "uiGrantable": true
     },
     {
       "key": "core.integration_connection.create",
@@ -902,7 +985,8 @@
       "cerbosKind": "integration_connection",
       "cerbosAction": "create",
       "class": "grantable",
-      "sensitive": true
+      "sensitive": true,
+      "uiGrantable": true
     },
     {
       "key": "core.integration_connection.delete",
@@ -913,7 +997,8 @@
       "cerbosKind": "integration_connection",
       "cerbosAction": "delete",
       "class": "grantable",
-      "sensitive": true
+      "sensitive": true,
+      "uiGrantable": true
     },
     {
       "key": "core.integration_connection.read",
@@ -924,7 +1009,8 @@
       "cerbosKind": "integration_connection",
       "cerbosAction": "read",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "core.integration_connection.update",
@@ -935,7 +1021,8 @@
       "cerbosKind": "integration_connection",
       "cerbosAction": "update",
       "class": "grantable",
-      "sensitive": true
+      "sensitive": true,
+      "uiGrantable": true
     },
     {
       "key": "core.mcp_tool.call",
@@ -947,7 +1034,8 @@
       "cerbosAction": "call",
       "class": "relationship",
       "sensitive": false,
-      "grantedVia": "channel: base role `hub_caller`, minted only by the MCP hub's OBO principal (mcp-hub/src/cerbos.ts), conditioned on assurance vs tool minAssurance + automation scope + D14 approval for high-impact writes."
+      "grantedVia": "channel: base role `hub_caller`, minted only by the MCP hub's OBO principal (mcp-hub/src/cerbos.ts), conditioned on assurance vs tool minAssurance + automation scope + D14 approval for high-impact writes.",
+      "uiGrantable": false
     },
     {
       "key": "core.meeting_recording.create",
@@ -958,7 +1046,8 @@
       "cerbosKind": "meeting_recording",
       "cerbosAction": "create",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "core.meeting_recording.ingest",
@@ -969,7 +1058,8 @@
       "cerbosKind": "meeting_recording",
       "cerbosAction": "ingest",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "core.meeting_recording.read",
@@ -980,7 +1070,8 @@
       "cerbosKind": "meeting_recording",
       "cerbosAction": "read",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "core.meeting_recording.relink",
@@ -991,7 +1082,8 @@
       "cerbosKind": "meeting_recording",
       "cerbosAction": "relink",
       "class": "grantable",
-      "sensitive": true
+      "sensitive": true,
+      "uiGrantable": true
     },
     {
       "key": "core.meeting_recording.sync_drive",
@@ -1002,7 +1094,8 @@
       "cerbosKind": "meeting_recording",
       "cerbosAction": "sync_drive",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "core.meeting_recording.update",
@@ -1013,7 +1106,8 @@
       "cerbosKind": "meeting_recording",
       "cerbosAction": "update",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "core.member.read",
@@ -1024,7 +1118,8 @@
       "cerbosKind": "member",
       "cerbosAction": "read",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "core.notification.create",
@@ -1035,7 +1130,8 @@
       "cerbosKind": "notification",
       "cerbosAction": "create",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "core.notification.read",
@@ -1046,7 +1142,8 @@
       "cerbosKind": "notification",
       "cerbosAction": "read",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "core.notification.update",
@@ -1057,7 +1154,8 @@
       "cerbosKind": "notification",
       "cerbosAction": "update",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "core.org_structure.read",
@@ -1068,7 +1166,8 @@
       "cerbosKind": "org_structure",
       "cerbosAction": "read",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "core.org_structure.update",
@@ -1079,7 +1178,8 @@
       "cerbosKind": "org_structure",
       "cerbosAction": "update",
       "class": "grantable",
-      "sensitive": true
+      "sensitive": true,
+      "uiGrantable": true
     },
     {
       "key": "core.pipeline_gate.create",
@@ -1090,7 +1190,8 @@
       "cerbosKind": "pipeline_gate",
       "cerbosAction": "create",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "core.pipeline_gate.decide",
@@ -1101,7 +1202,8 @@
       "cerbosKind": "pipeline_gate",
       "cerbosAction": "decide",
       "class": "grantable",
-      "sensitive": true
+      "sensitive": true,
+      "uiGrantable": true
     },
     {
       "key": "core.pipeline_gate.read",
@@ -1112,7 +1214,8 @@
       "cerbosKind": "pipeline_gate",
       "cerbosAction": "read",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "core.pipeline_run.create",
@@ -1123,7 +1226,8 @@
       "cerbosKind": "pipeline_run",
       "cerbosAction": "create",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "core.pipeline_run.read",
@@ -1134,7 +1238,8 @@
       "cerbosKind": "pipeline_run",
       "cerbosAction": "read",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "core.pipeline_run.update",
@@ -1145,7 +1250,8 @@
       "cerbosKind": "pipeline_run",
       "cerbosAction": "update",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "core.pipeline_stage.create",
@@ -1156,7 +1262,8 @@
       "cerbosKind": "pipeline_stage",
       "cerbosAction": "create",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "core.pipeline_stage.read",
@@ -1167,7 +1274,8 @@
       "cerbosKind": "pipeline_stage",
       "cerbosAction": "read",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "core.pipeline_stage.update",
@@ -1178,84 +1286,80 @@
       "cerbosKind": "pipeline_stage",
       "cerbosAction": "update",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
-      "key": "portal.approve_post",
-      "domain": "portal",
-      "resource": "portal",
-      "action": "approve_post",
-      "description": "Approve, or request changes to, a social post drafted for your brand.",
-      "cerbosKind": "portal",
-      "cerbosAction": "approve_post",
+      "key": "core.position.assign",
+      "domain": "core",
+      "resource": "position",
+      "action": "assign",
+      "description": "Assign a person to a position (open a position assignment) — this is what actually confers the position's role-set to them.",
+      "cerbosKind": "position",
+      "cerbosAction": "assign",
       "class": "grantable",
-      "sensitive": true
+      "sensitive": true,
+      "uiGrantable": true
     },
     {
-      "key": "portal.decide",
-      "domain": "portal",
-      "resource": "portal",
-      "action": "decide",
-      "description": "Decide a gate exposed to the client in the portal.",
-      "cerbosKind": "portal",
-      "cerbosAction": "decide",
+      "key": "core.position.create",
+      "domain": "core",
+      "resource": "position",
+      "action": "create",
+      "description": "Create an org-chart position (seat).",
+      "cerbosKind": "position",
+      "cerbosAction": "create",
       "class": "grantable",
-      "sensitive": true
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
-      "key": "portal.pay",
-      "domain": "portal",
-      "resource": "portal",
-      "action": "pay",
-      "description": "Initiate payment of an invoice in the client portal.",
-      "cerbosKind": "portal",
-      "cerbosAction": "pay",
-      "class": "grantable",
-      "sensitive": true
-    },
-    {
-      "key": "portal.read",
-      "domain": "portal",
-      "resource": "portal",
+      "key": "core.position.read",
+      "domain": "core",
+      "resource": "position",
       "action": "read",
-      "description": "Access the client portal workspace (client-facing surface).",
-      "cerbosKind": "portal",
+      "description": "View positions and their role-set templates.",
+      "cerbosKind": "position",
       "cerbosAction": "read",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
-      "key": "portal.request_change",
-      "domain": "portal",
-      "resource": "portal",
-      "action": "request_change",
-      "description": "File a website change request from the portal.",
-      "cerbosKind": "portal",
-      "cerbosAction": "request_change",
+      "key": "core.position.retire",
+      "domain": "core",
+      "resource": "position",
+      "action": "retire",
+      "description": "Retire a position (soft-delete; rows are never deleted).",
+      "cerbosKind": "position",
+      "cerbosAction": "retire",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
-      "key": "portal.sign",
-      "domain": "portal",
-      "resource": "portal",
-      "action": "sign",
-      "description": "Sign a contract/scope document in the client portal.",
-      "cerbosKind": "portal",
-      "cerbosAction": "sign",
+      "key": "core.position.unassign",
+      "domain": "core",
+      "resource": "position",
+      "action": "unassign",
+      "description": "Remove a person from a position (close a position assignment).",
+      "cerbosKind": "position",
+      "cerbosAction": "unassign",
       "class": "grantable",
-      "sensitive": true
+      "sensitive": true,
+      "uiGrantable": true
     },
     {
-      "key": "portal.update_profile",
-      "domain": "portal",
-      "resource": "portal",
-      "action": "update_profile",
-      "description": "Update your own client-contact profile in the portal.",
-      "cerbosKind": "portal",
-      "cerbosAction": "update_profile",
+      "key": "core.position.update",
+      "domain": "core",
+      "resource": "position",
+      "action": "update",
+      "description": "Edit a position's title, unit, is_lead flag, or headcount.",
+      "cerbosKind": "position",
+      "cerbosAction": "update",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "core.project.create",
@@ -1266,7 +1370,8 @@
       "cerbosKind": "project",
       "cerbosAction": "create",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "core.project.delete",
@@ -1277,7 +1382,8 @@
       "cerbosKind": "project",
       "cerbosAction": "delete",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "core.project.read",
@@ -1288,7 +1394,8 @@
       "cerbosKind": "project",
       "cerbosAction": "read",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "core.project.update",
@@ -1299,7 +1406,44 @@
       "cerbosKind": "project",
       "cerbosAction": "update",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
+    },
+    {
+      "key": "core.role_grant.create",
+      "domain": "core",
+      "resource": "role_grant",
+      "action": "create",
+      "description": "Grant a role to a user — subtree-bounded for a dept-head position holder (org_unit_lead), full-tenant for company_admin.",
+      "cerbosKind": "role_grant",
+      "cerbosAction": "create",
+      "class": "grantable",
+      "sensitive": true,
+      "uiGrantable": true
+    },
+    {
+      "key": "core.role_grant.read",
+      "domain": "core",
+      "resource": "role_grant",
+      "action": "read",
+      "description": "View who holds which role grants.",
+      "cerbosKind": "role_grant",
+      "cerbosAction": "read",
+      "class": "grantable",
+      "sensitive": true,
+      "uiGrantable": true
+    },
+    {
+      "key": "core.role_grant.revoke",
+      "domain": "core",
+      "resource": "role_grant",
+      "action": "revoke",
+      "description": "Revoke a role previously granted to a user.",
+      "cerbosKind": "role_grant",
+      "cerbosAction": "revoke",
+      "class": "grantable",
+      "sensitive": true,
+      "uiGrantable": true
     },
     {
       "key": "core.rollup.read",
@@ -1310,7 +1454,8 @@
       "cerbosKind": "rollup",
       "cerbosAction": "read",
       "class": "grantable",
-      "sensitive": true
+      "sensitive": true,
+      "uiGrantable": true
     },
     {
       "key": "core.rollup_recompute.create",
@@ -1321,7 +1466,8 @@
       "cerbosKind": "rollup_recompute",
       "cerbosAction": "create",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "core.scope_signoff.create",
@@ -1332,7 +1478,8 @@
       "cerbosKind": "scope_signoff",
       "cerbosAction": "create",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "core.scope_signoff.read",
@@ -1343,7 +1490,8 @@
       "cerbosKind": "scope_signoff",
       "cerbosAction": "read",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "core.service_assignment.accept",
@@ -1354,7 +1502,8 @@
       "cerbosKind": "service_assignment",
       "cerbosAction": "accept",
       "class": "grantable",
-      "sensitive": true
+      "sensitive": true,
+      "uiGrantable": true
     },
     {
       "key": "core.service_assignment.propose",
@@ -1365,7 +1514,8 @@
       "cerbosKind": "service_assignment",
       "cerbosAction": "propose",
       "class": "grantable",
-      "sensitive": true
+      "sensitive": true,
+      "uiGrantable": true
     },
     {
       "key": "core.service_assignment.read",
@@ -1376,7 +1526,8 @@
       "cerbosKind": "service_assignment",
       "cerbosAction": "read",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "core.service_assignment.reconcile",
@@ -1387,7 +1538,8 @@
       "cerbosKind": "service_assignment",
       "cerbosAction": "reconcile",
       "class": "grantable",
-      "sensitive": true
+      "sensitive": true,
+      "uiGrantable": true
     },
     {
       "key": "core.service_assignment.relink",
@@ -1398,7 +1550,8 @@
       "cerbosKind": "service_assignment",
       "cerbosAction": "relink",
       "class": "grantable",
-      "sensitive": true
+      "sensitive": true,
+      "uiGrantable": true
     },
     {
       "key": "core.service_assignment.resume",
@@ -1409,7 +1562,8 @@
       "cerbosKind": "service_assignment",
       "cerbosAction": "resume",
       "class": "grantable",
-      "sensitive": true
+      "sensitive": true,
+      "uiGrantable": true
     },
     {
       "key": "core.service_assignment.revoke",
@@ -1420,7 +1574,8 @@
       "cerbosKind": "service_assignment",
       "cerbosAction": "revoke",
       "class": "grantable",
-      "sensitive": true
+      "sensitive": true,
+      "uiGrantable": true
     },
     {
       "key": "core.service_assignment.suspend",
@@ -1431,7 +1586,8 @@
       "cerbosKind": "service_assignment",
       "cerbosAction": "suspend",
       "class": "grantable",
-      "sensitive": true
+      "sensitive": true,
+      "uiGrantable": true
     },
     {
       "key": "core.task.create",
@@ -1442,7 +1598,8 @@
       "cerbosKind": "task",
       "cerbosAction": "create",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "core.task.delete",
@@ -1453,7 +1610,8 @@
       "cerbosKind": "task",
       "cerbosAction": "delete",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "core.task.read",
@@ -1464,7 +1622,8 @@
       "cerbosKind": "task",
       "cerbosAction": "read",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "core.task.update",
@@ -1475,7 +1634,8 @@
       "cerbosKind": "task",
       "cerbosAction": "update",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "core.time_entry.create",
@@ -1486,7 +1646,8 @@
       "cerbosKind": "time_entry",
       "cerbosAction": "create",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "core.time_entry.delete",
@@ -1497,7 +1658,8 @@
       "cerbosKind": "time_entry",
       "cerbosAction": "delete",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "core.time_entry.read",
@@ -1508,7 +1670,8 @@
       "cerbosKind": "time_entry",
       "cerbosAction": "read",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "core.time_entry.update",
@@ -1519,7 +1682,8 @@
       "cerbosKind": "time_entry",
       "cerbosAction": "update",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "core.user.create",
@@ -1530,7 +1694,8 @@
       "cerbosKind": "user",
       "cerbosAction": "create",
       "class": "grantable",
-      "sensitive": true
+      "sensitive": true,
+      "uiGrantable": true
     },
     {
       "key": "core.user.delete",
@@ -1541,7 +1706,8 @@
       "cerbosKind": "user",
       "cerbosAction": "delete",
       "class": "grantable",
-      "sensitive": true
+      "sensitive": true,
+      "uiGrantable": true
     },
     {
       "key": "core.user.read",
@@ -1552,7 +1718,8 @@
       "cerbosKind": "user",
       "cerbosAction": "read",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "core.user.update",
@@ -1563,7 +1730,8 @@
       "cerbosKind": "user",
       "cerbosAction": "update",
       "class": "grantable",
-      "sensitive": true
+      "sensitive": true,
+      "uiGrantable": true
     },
     {
       "key": "core.work_activity.create",
@@ -1574,7 +1742,8 @@
       "cerbosKind": "work_activity",
       "cerbosAction": "create",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "core.work_activity.read",
@@ -1585,7 +1754,8 @@
       "cerbosKind": "work_activity",
       "cerbosAction": "read",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "hr.case.cancel",
@@ -1596,7 +1766,8 @@
       "cerbosKind": "hr_case",
       "cerbosAction": "cancel",
       "class": "grantable",
-      "sensitive": true
+      "sensitive": true,
+      "uiGrantable": true
     },
     {
       "key": "hr.case.create",
@@ -1607,7 +1778,8 @@
       "cerbosKind": "hr_case",
       "cerbosAction": "create",
       "class": "grantable",
-      "sensitive": true
+      "sensitive": true,
+      "uiGrantable": true
     },
     {
       "key": "hr.case.delete",
@@ -1618,7 +1790,8 @@
       "cerbosKind": "hr_case",
       "cerbosAction": "delete",
       "class": "grantable",
-      "sensitive": true
+      "sensitive": true,
+      "uiGrantable": true
     },
     {
       "key": "hr.case.export",
@@ -1629,7 +1802,8 @@
       "cerbosKind": "hr_case",
       "cerbosAction": "export",
       "class": "grantable",
-      "sensitive": true
+      "sensitive": true,
+      "uiGrantable": true
     },
     {
       "key": "hr.case.read",
@@ -1640,7 +1814,8 @@
       "cerbosKind": "hr_case",
       "cerbosAction": "read",
       "class": "grantable",
-      "sensitive": true
+      "sensitive": true,
+      "uiGrantable": true
     },
     {
       "key": "hr.case.update",
@@ -1651,7 +1826,56 @@
       "cerbosKind": "hr_case",
       "cerbosAction": "update",
       "class": "grantable",
-      "sensitive": true
+      "sensitive": true,
+      "uiGrantable": true
+    },
+    {
+      "key": "hr.employee.create",
+      "domain": "hr",
+      "resource": "employee",
+      "action": "create",
+      "description": "Create an employee record (HR people file).",
+      "cerbosKind": "employee",
+      "cerbosAction": "create",
+      "class": "grantable",
+      "sensitive": true,
+      "uiGrantable": true
+    },
+    {
+      "key": "hr.employee.delete",
+      "domain": "hr",
+      "resource": "employee",
+      "action": "delete",
+      "description": "Delete/deactivate an employee record.",
+      "cerbosKind": "employee",
+      "cerbosAction": "delete",
+      "class": "grantable",
+      "sensitive": true,
+      "uiGrantable": true
+    },
+    {
+      "key": "hr.employee.read",
+      "domain": "hr",
+      "resource": "employee",
+      "action": "read",
+      "description": "View employee records.",
+      "cerbosKind": "employee",
+      "cerbosAction": "read",
+      "class": "grantable",
+      "sensitive": true,
+      "uiGrantable": true
+    },
+    {
+      "key": "hr.employee.update",
+      "domain": "hr",
+      "resource": "employee",
+      "action": "update",
+      "description": "Edit an employee record.",
+      "cerbosKind": "employee",
+      "cerbosAction": "update",
+      "class": "grantable",
+      "sensitive": true,
+      "uiGrantable": true
     },
     {
       "key": "hr.leave.decide",
@@ -1662,7 +1886,8 @@
       "cerbosKind": "automation_approval",
       "cerbosAction": "decide_leave",
       "class": "grantable",
-      "sensitive": true
+      "sensitive": true,
+      "uiGrantable": true
     },
     {
       "key": "hr.record.create",
@@ -1673,7 +1898,8 @@
       "cerbosKind": "hr_record",
       "cerbosAction": "create",
       "class": "grantable",
-      "sensitive": true
+      "sensitive": true,
+      "uiGrantable": true
     },
     {
       "key": "hr.record.delete",
@@ -1684,7 +1910,8 @@
       "cerbosKind": "hr_record",
       "cerbosAction": "delete",
       "class": "grantable",
-      "sensitive": true
+      "sensitive": true,
+      "uiGrantable": true
     },
     {
       "key": "hr.record.export",
@@ -1695,7 +1922,8 @@
       "cerbosKind": "hr_record",
       "cerbosAction": "export",
       "class": "grantable",
-      "sensitive": true
+      "sensitive": true,
+      "uiGrantable": true
     },
     {
       "key": "hr.record.read",
@@ -1706,7 +1934,8 @@
       "cerbosKind": "hr_record",
       "cerbosAction": "read",
       "class": "grantable",
-      "sensitive": true
+      "sensitive": true,
+      "uiGrantable": true
     },
     {
       "key": "hr.record.update",
@@ -1717,7 +1946,68 @@
       "cerbosKind": "hr_record",
       "cerbosAction": "update",
       "class": "grantable",
-      "sensitive": true
+      "sensitive": true,
+      "uiGrantable": true
+    },
+    {
+      "key": "it.account.disable",
+      "domain": "it",
+      "resource": "account",
+      "action": "disable",
+      "description": "Disable a person's Keycloak login.",
+      "cerbosKind": "it_account",
+      "cerbosAction": "disable",
+      "class": "grantable",
+      "sensitive": true,
+      "uiGrantable": true
+    },
+    {
+      "key": "it.account.enable",
+      "domain": "it",
+      "resource": "account",
+      "action": "enable",
+      "description": "Re-enable a person's Keycloak login.",
+      "cerbosKind": "it_account",
+      "cerbosAction": "enable",
+      "class": "grantable",
+      "sensitive": true,
+      "uiGrantable": true
+    },
+    {
+      "key": "it.account.provision",
+      "domain": "it",
+      "resource": "account",
+      "action": "provision",
+      "description": "Provision a Keycloak login for a person.",
+      "cerbosKind": "it_account",
+      "cerbosAction": "provision",
+      "class": "grantable",
+      "sensitive": true,
+      "uiGrantable": true
+    },
+    {
+      "key": "it.account.read",
+      "domain": "it",
+      "resource": "account",
+      "action": "read",
+      "description": "View the IT accounts worklist (login/account status by person).",
+      "cerbosKind": "it_account",
+      "cerbosAction": "read",
+      "class": "grantable",
+      "sensitive": true,
+      "uiGrantable": true
+    },
+    {
+      "key": "it.account.reset_password",
+      "domain": "it",
+      "resource": "account",
+      "action": "reset_password",
+      "description": "Reset a person's Keycloak password (shown once).",
+      "cerbosKind": "it_account",
+      "cerbosAction": "reset_password",
+      "class": "grantable",
+      "sensitive": true,
+      "uiGrantable": true
     },
     {
       "key": "it.device.create",
@@ -1728,7 +2018,8 @@
       "cerbosKind": "device",
       "cerbosAction": "create",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "it.device.delete",
@@ -1739,7 +2030,8 @@
       "cerbosKind": "device",
       "cerbosAction": "delete",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "it.device.read",
@@ -1750,7 +2042,8 @@
       "cerbosKind": "device",
       "cerbosAction": "read",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "it.device.update",
@@ -1761,7 +2054,8 @@
       "cerbosKind": "device",
       "cerbosAction": "update",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "knowledge.source.read",
@@ -1772,7 +2066,8 @@
       "cerbosKind": "knowledge_source",
       "cerbosAction": "read",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "knowledge.source.update",
@@ -1783,7 +2078,8 @@
       "cerbosKind": "knowledge_source",
       "cerbosAction": "update",
       "class": "grantable",
-      "sensitive": true
+      "sensitive": true,
+      "uiGrantable": true
     },
     {
       "key": "pm.project.manage",
@@ -1794,7 +2090,8 @@
       "cerbosKind": "pm_project",
       "cerbosAction": "manage",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "pm.project.read",
@@ -1805,7 +2102,8 @@
       "cerbosKind": "pm_project",
       "cerbosAction": "read",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "pm.task.create",
@@ -1816,7 +2114,8 @@
       "cerbosKind": "pm_task",
       "cerbosAction": "create",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "pm.task.delete",
@@ -1827,7 +2126,8 @@
       "cerbosKind": "pm_task",
       "cerbosAction": "delete",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "pm.task.manage",
@@ -1838,7 +2138,8 @@
       "cerbosKind": "pm_task",
       "cerbosAction": "manage",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "pm.task.read",
@@ -1849,7 +2150,8 @@
       "cerbosKind": "pm_task",
       "cerbosAction": "read",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "pm.task.update",
@@ -1860,7 +2162,92 @@
       "cerbosKind": "pm_task",
       "cerbosAction": "update",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
+    },
+    {
+      "key": "portal.approve_post",
+      "domain": "portal",
+      "resource": "portal",
+      "action": "approve_post",
+      "description": "Approve, or request changes to, a social post drafted for your brand.",
+      "cerbosKind": "portal",
+      "cerbosAction": "approve_post",
+      "class": "grantable",
+      "sensitive": true,
+      "uiGrantable": false
+    },
+    {
+      "key": "portal.decide",
+      "domain": "portal",
+      "resource": "portal",
+      "action": "decide",
+      "description": "Decide a gate exposed to the client in the portal.",
+      "cerbosKind": "portal",
+      "cerbosAction": "decide",
+      "class": "grantable",
+      "sensitive": true,
+      "uiGrantable": false
+    },
+    {
+      "key": "portal.pay",
+      "domain": "portal",
+      "resource": "portal",
+      "action": "pay",
+      "description": "Initiate payment of an invoice in the client portal.",
+      "cerbosKind": "portal",
+      "cerbosAction": "pay",
+      "class": "grantable",
+      "sensitive": true,
+      "uiGrantable": false
+    },
+    {
+      "key": "portal.read",
+      "domain": "portal",
+      "resource": "portal",
+      "action": "read",
+      "description": "Access the client portal workspace (client-facing surface).",
+      "cerbosKind": "portal",
+      "cerbosAction": "read",
+      "class": "grantable",
+      "sensitive": false,
+      "uiGrantable": false
+    },
+    {
+      "key": "portal.request_change",
+      "domain": "portal",
+      "resource": "portal",
+      "action": "request_change",
+      "description": "File a website change request from the portal.",
+      "cerbosKind": "portal",
+      "cerbosAction": "request_change",
+      "class": "grantable",
+      "sensitive": false,
+      "uiGrantable": false
+    },
+    {
+      "key": "portal.sign",
+      "domain": "portal",
+      "resource": "portal",
+      "action": "sign",
+      "description": "Sign a contract/scope document in the client portal.",
+      "cerbosKind": "portal",
+      "cerbosAction": "sign",
+      "class": "grantable",
+      "sensitive": true,
+      "uiGrantable": false
+    },
+    {
+      "key": "portal.update_profile",
+      "domain": "portal",
+      "resource": "portal",
+      "action": "update_profile",
+      "description": "Update your own client-contact profile in the portal.",
+      "cerbosKind": "portal",
+      "cerbosAction": "update_profile",
+      "class": "grantable",
+      "sensitive": false,
+      "uiGrantable": false
     },
     {
       "key": "reports.admin.recompute",
@@ -1871,7 +2258,8 @@
       "cerbosKind": "report_admin",
       "cerbosAction": "recompute",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "reports.appraisal.ack",
@@ -1882,7 +2270,8 @@
       "cerbosKind": "appraisal",
       "cerbosAction": "ack",
       "class": "grantable",
-      "sensitive": true
+      "sensitive": true,
+      "uiGrantable": true
     },
     {
       "key": "reports.appraisal.confirm_evidence",
@@ -1893,7 +2282,8 @@
       "cerbosKind": "appraisal",
       "cerbosAction": "confirm_evidence",
       "class": "grantable",
-      "sensitive": true
+      "sensitive": true,
+      "uiGrantable": true
     },
     {
       "key": "reports.appraisal.cycle_admin",
@@ -1904,7 +2294,8 @@
       "cerbosKind": "appraisal",
       "cerbosAction": "cycle_admin",
       "class": "grantable",
-      "sensitive": true
+      "sensitive": true,
+      "uiGrantable": true
     },
     {
       "key": "reports.appraisal.finalize",
@@ -1915,7 +2306,8 @@
       "cerbosKind": "appraisal",
       "cerbosAction": "finalize",
       "class": "grantable",
-      "sensitive": true
+      "sensitive": true,
+      "uiGrantable": true
     },
     {
       "key": "reports.appraisal.read",
@@ -1926,7 +2318,8 @@
       "cerbosKind": "appraisal",
       "cerbosAction": "read",
       "class": "grantable",
-      "sensitive": true
+      "sensitive": true,
+      "uiGrantable": true
     },
     {
       "key": "reports.appraisal.submit",
@@ -1937,7 +2330,8 @@
       "cerbosKind": "appraisal",
       "cerbosAction": "submit",
       "class": "grantable",
-      "sensitive": true
+      "sensitive": true,
+      "uiGrantable": true
     },
     {
       "key": "reports.appraisal.write",
@@ -1948,7 +2342,8 @@
       "cerbosKind": "appraisal",
       "cerbosAction": "write",
       "class": "grantable",
-      "sensitive": true
+      "sensitive": true,
+      "uiGrantable": true
     },
     {
       "key": "reports.checkin.excuse",
@@ -1959,7 +2354,8 @@
       "cerbosKind": "checkin",
       "cerbosAction": "excuse",
       "class": "grantable",
-      "sensitive": true
+      "sensitive": true,
+      "uiGrantable": true
     },
     {
       "key": "reports.checkin.missed_by_unit",
@@ -1970,7 +2366,8 @@
       "cerbosKind": "checkin",
       "cerbosAction": "missed_by_unit",
       "class": "grantable",
-      "sensitive": true
+      "sensitive": true,
+      "uiGrantable": true
     },
     {
       "key": "reports.checkin.pending_reminders",
@@ -1981,7 +2378,8 @@
       "cerbosKind": "checkin",
       "cerbosAction": "pending_reminders",
       "class": "grantable",
-      "sensitive": true
+      "sensitive": true,
+      "uiGrantable": true
     },
     {
       "key": "reports.checkin.read",
@@ -1992,7 +2390,8 @@
       "cerbosKind": "checkin",
       "cerbosAction": "read",
       "class": "grantable",
-      "sensitive": true
+      "sensitive": true,
+      "uiGrantable": true
     },
     {
       "key": "reports.checkin.submit",
@@ -2003,7 +2402,8 @@
       "cerbosKind": "checkin",
       "cerbosAction": "submit",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "reports.document.read_company",
@@ -2014,7 +2414,8 @@
       "cerbosKind": "report_document",
       "cerbosAction": "read_company",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "reports.document.read_department",
@@ -2025,7 +2426,8 @@
       "cerbosKind": "report_document",
       "cerbosAction": "read_department",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "reports.document.read_person",
@@ -2036,7 +2438,8 @@
       "cerbosKind": "report_document",
       "cerbosAction": "read_person",
       "class": "grantable",
-      "sensitive": true
+      "sensitive": true,
+      "uiGrantable": true
     },
     {
       "key": "reports.document.read_project",
@@ -2047,7 +2450,8 @@
       "cerbosKind": "report_document",
       "cerbosAction": "read_project",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "reports.period.amend",
@@ -2058,7 +2462,8 @@
       "cerbosKind": "report_period",
       "cerbosAction": "amend",
       "class": "grantable",
-      "sensitive": true
+      "sensitive": true,
+      "uiGrantable": true
     },
     {
       "key": "reports.period.pin",
@@ -2069,7 +2474,8 @@
       "cerbosKind": "report_period",
       "cerbosAction": "pin",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "reports.period.seal",
@@ -2080,7 +2486,8 @@
       "cerbosKind": "report_period",
       "cerbosAction": "seal",
       "class": "grantable",
-      "sensitive": true
+      "sensitive": true,
+      "uiGrantable": true
     },
     {
       "key": "reports.period.view",
@@ -2091,7 +2498,8 @@
       "cerbosKind": "report_period",
       "cerbosAction": "view",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "search.audit.create",
@@ -2102,7 +2510,8 @@
       "cerbosKind": "resource_search_audit",
       "cerbosAction": "create",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "search.audit.delete",
@@ -2113,7 +2522,8 @@
       "cerbosKind": "resource_search_audit",
       "cerbosAction": "delete",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "search.audit.read",
@@ -2124,7 +2534,8 @@
       "cerbosKind": "resource_search_audit",
       "cerbosAction": "read",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "search.audit.run",
@@ -2135,7 +2546,8 @@
       "cerbosKind": "resource_search_audit",
       "cerbosAction": "run",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "search.audit.update",
@@ -2146,7 +2558,8 @@
       "cerbosKind": "resource_search_audit",
       "cerbosAction": "update",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "search.campaign.apply_manual",
@@ -2157,7 +2570,8 @@
       "cerbosKind": "resource_search_campaign",
       "cerbosAction": "apply_manual",
       "class": "grantable",
-      "sensitive": true
+      "sensitive": true,
+      "uiGrantable": true
     },
     {
       "key": "search.campaign.apply_negatives",
@@ -2168,7 +2582,8 @@
       "cerbosKind": "resource_search_campaign",
       "cerbosAction": "apply_negatives",
       "class": "grantable",
-      "sensitive": true
+      "sensitive": true,
+      "uiGrantable": true
     },
     {
       "key": "search.campaign.create",
@@ -2179,7 +2594,8 @@
       "cerbosKind": "resource_search_campaign",
       "cerbosAction": "create",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "search.campaign.delete",
@@ -2190,7 +2606,8 @@
       "cerbosKind": "resource_search_campaign",
       "cerbosAction": "delete",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "search.campaign.launch",
@@ -2201,7 +2618,8 @@
       "cerbosKind": "resource_search_campaign",
       "cerbosAction": "launch",
       "class": "grantable",
-      "sensitive": true
+      "sensitive": true,
+      "uiGrantable": true
     },
     {
       "key": "search.campaign.propose_change",
@@ -2212,7 +2630,8 @@
       "cerbosKind": "resource_search_campaign",
       "cerbosAction": "propose_change",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "search.campaign.read",
@@ -2223,7 +2642,8 @@
       "cerbosKind": "resource_search_campaign",
       "cerbosAction": "read",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "search.campaign.set_budget",
@@ -2234,7 +2654,8 @@
       "cerbosKind": "resource_search_campaign",
       "cerbosAction": "set_budget",
       "class": "grantable",
-      "sensitive": true
+      "sensitive": true,
+      "uiGrantable": true
     },
     {
       "key": "search.campaign.update",
@@ -2245,7 +2666,8 @@
       "cerbosKind": "resource_search_campaign",
       "cerbosAction": "update",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "search.engagement.create",
@@ -2256,7 +2678,8 @@
       "cerbosKind": "resource_search_engagement",
       "cerbosAction": "create",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "search.engagement.delete",
@@ -2267,7 +2690,8 @@
       "cerbosKind": "resource_search_engagement",
       "cerbosAction": "delete",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "search.engagement.read",
@@ -2278,7 +2702,8 @@
       "cerbosKind": "resource_search_engagement",
       "cerbosAction": "read",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "search.engagement.set_scope",
@@ -2289,7 +2714,8 @@
       "cerbosKind": "resource_search_engagement",
       "cerbosAction": "set_scope",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "search.engagement.update",
@@ -2300,7 +2726,8 @@
       "cerbosKind": "resource_search_engagement",
       "cerbosAction": "update",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "search.keyword.create",
@@ -2311,7 +2738,8 @@
       "cerbosKind": "resource_search_keyword",
       "cerbosAction": "create",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "search.keyword.delete",
@@ -2322,7 +2750,8 @@
       "cerbosKind": "resource_search_keyword",
       "cerbosAction": "delete",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "search.keyword.read",
@@ -2333,7 +2762,8 @@
       "cerbosKind": "resource_search_keyword",
       "cerbosAction": "read",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "search.keyword.research",
@@ -2344,7 +2774,8 @@
       "cerbosKind": "resource_search_keyword",
       "cerbosAction": "research",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "search.keyword.update",
@@ -2355,7 +2786,8 @@
       "cerbosKind": "resource_search_keyword",
       "cerbosAction": "update",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "search.ledger.admin",
@@ -2366,7 +2798,8 @@
       "cerbosKind": "resource_search_ledger",
       "cerbosAction": "admin",
       "class": "grantable",
-      "sensitive": true
+      "sensitive": true,
+      "uiGrantable": true
     },
     {
       "key": "search.ledger.read",
@@ -2377,7 +2810,8 @@
       "cerbosKind": "resource_search_ledger",
       "cerbosAction": "read",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "search.property.create",
@@ -2388,7 +2822,8 @@
       "cerbosKind": "resource_search_property",
       "cerbosAction": "create",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "search.property.delete",
@@ -2399,7 +2834,8 @@
       "cerbosKind": "resource_search_property",
       "cerbosAction": "delete",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "search.property.read",
@@ -2410,7 +2846,8 @@
       "cerbosKind": "resource_search_property",
       "cerbosAction": "read",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "search.property.update",
@@ -2421,7 +2858,8 @@
       "cerbosKind": "resource_search_property",
       "cerbosAction": "update",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "search.report.approve",
@@ -2432,7 +2870,8 @@
       "cerbosKind": "resource_search_report",
       "cerbosAction": "approve",
       "class": "grantable",
-      "sensitive": true
+      "sensitive": true,
+      "uiGrantable": true
     },
     {
       "key": "search.report.create",
@@ -2443,7 +2882,8 @@
       "cerbosKind": "resource_search_report",
       "cerbosAction": "create",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "search.report.delete",
@@ -2454,7 +2894,8 @@
       "cerbosKind": "resource_search_report",
       "cerbosAction": "delete",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "search.report.deliver",
@@ -2465,7 +2906,8 @@
       "cerbosKind": "resource_search_report",
       "cerbosAction": "deliver",
       "class": "grantable",
-      "sensitive": true
+      "sensitive": true,
+      "uiGrantable": true
     },
     {
       "key": "search.report.read",
@@ -2476,7 +2918,8 @@
       "cerbosKind": "resource_search_report",
       "cerbosAction": "read",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "search.report.update",
@@ -2487,7 +2930,8 @@
       "cerbosKind": "resource_search_report",
       "cerbosAction": "update",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "social.account.connect",
@@ -2498,7 +2942,8 @@
       "cerbosKind": "social_account",
       "cerbosAction": "connect",
       "class": "grantable",
-      "sensitive": true
+      "sensitive": true,
+      "uiGrantable": true
     },
     {
       "key": "social.account.delete",
@@ -2509,7 +2954,8 @@
       "cerbosKind": "social_account",
       "cerbosAction": "delete",
       "class": "grantable",
-      "sensitive": true
+      "sensitive": true,
+      "uiGrantable": true
     },
     {
       "key": "social.account.read",
@@ -2520,7 +2966,8 @@
       "cerbosKind": "social_account",
       "cerbosAction": "read",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "social.account.update",
@@ -2531,7 +2978,8 @@
       "cerbosKind": "social_account",
       "cerbosAction": "update",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "social.client_review.read",
@@ -2542,7 +2990,8 @@
       "cerbosKind": "social_client_review",
       "cerbosAction": "read",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "social.client_review.request",
@@ -2553,7 +3002,8 @@
       "cerbosKind": "social_client_review",
       "cerbosAction": "request",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "social.client_review.withdraw",
@@ -2564,7 +3014,8 @@
       "cerbosKind": "social_client_review",
       "cerbosAction": "withdraw",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "social.engagement.create",
@@ -2575,7 +3026,8 @@
       "cerbosKind": "social_engagement",
       "cerbosAction": "create",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "social.engagement.delete",
@@ -2586,7 +3038,8 @@
       "cerbosKind": "social_engagement",
       "cerbosAction": "delete",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "social.engagement.read",
@@ -2597,7 +3050,8 @@
       "cerbosKind": "social_engagement",
       "cerbosAction": "read",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "social.engagement.set_scope",
@@ -2608,7 +3062,8 @@
       "cerbosKind": "social_engagement",
       "cerbosAction": "set_scope",
       "class": "grantable",
-      "sensitive": true
+      "sensitive": true,
+      "uiGrantable": true
     },
     {
       "key": "social.engagement.update",
@@ -2619,7 +3074,8 @@
       "cerbosKind": "social_engagement",
       "cerbosAction": "update",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "social.inbox.assign",
@@ -2630,7 +3086,8 @@
       "cerbosKind": "social_inbox",
       "cerbosAction": "assign",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "social.inbox.escalate",
@@ -2641,7 +3098,8 @@
       "cerbosKind": "social_inbox",
       "cerbosAction": "escalate",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "social.inbox.read",
@@ -2652,7 +3110,8 @@
       "cerbosKind": "social_inbox",
       "cerbosAction": "read",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "social.inbox.reply",
@@ -2663,7 +3122,8 @@
       "cerbosKind": "social_inbox",
       "cerbosAction": "reply",
       "class": "grantable",
-      "sensitive": true
+      "sensitive": true,
+      "uiGrantable": true
     },
     {
       "key": "social.ledger.admin",
@@ -2674,7 +3134,8 @@
       "cerbosKind": "social_ledger",
       "cerbosAction": "admin",
       "class": "grantable",
-      "sensitive": true
+      "sensitive": true,
+      "uiGrantable": true
     },
     {
       "key": "social.ledger.read",
@@ -2685,7 +3146,8 @@
       "cerbosKind": "social_ledger",
       "cerbosAction": "read",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "social.platform_app.admin",
@@ -2696,7 +3158,8 @@
       "cerbosKind": "social_platform_app",
       "cerbosAction": "admin",
       "class": "grantable",
-      "sensitive": true
+      "sensitive": true,
+      "uiGrantable": true
     },
     {
       "key": "social.platform_app.read",
@@ -2707,7 +3170,8 @@
       "cerbosKind": "social_platform_app",
       "cerbosAction": "read",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "social.post.cancel",
@@ -2718,7 +3182,8 @@
       "cerbosKind": "social_post",
       "cerbosAction": "cancel",
       "class": "grantable",
-      "sensitive": true
+      "sensitive": true,
+      "uiGrantable": true
     },
     {
       "key": "social.post.create",
@@ -2729,7 +3194,8 @@
       "cerbosKind": "social_post",
       "cerbosAction": "create",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "social.post.delete",
@@ -2740,7 +3206,8 @@
       "cerbosKind": "social_post",
       "cerbosAction": "delete",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "social.post.delete_published",
@@ -2751,7 +3218,8 @@
       "cerbosKind": "social_post",
       "cerbosAction": "delete_published",
       "class": "grantable",
-      "sensitive": true
+      "sensitive": true,
+      "uiGrantable": true
     },
     {
       "key": "social.post.import_native",
@@ -2762,7 +3230,8 @@
       "cerbosKind": "social_post",
       "cerbosAction": "import_native",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "social.post.publish",
@@ -2773,7 +3242,8 @@
       "cerbosKind": "social_post",
       "cerbosAction": "publish",
       "class": "grantable",
-      "sensitive": true
+      "sensitive": true,
+      "uiGrantable": true
     },
     {
       "key": "social.post.read",
@@ -2784,7 +3254,8 @@
       "cerbosKind": "social_post",
       "cerbosAction": "read",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "social.post.submit",
@@ -2795,7 +3266,8 @@
       "cerbosKind": "social_post",
       "cerbosAction": "submit",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "social.post.update",
@@ -2806,7 +3278,8 @@
       "cerbosKind": "social_post",
       "cerbosAction": "update",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "social.report.approve",
@@ -2817,7 +3290,8 @@
       "cerbosKind": "social_report",
       "cerbosAction": "approve",
       "class": "grantable",
-      "sensitive": true
+      "sensitive": true,
+      "uiGrantable": true
     },
     {
       "key": "social.report.create",
@@ -2828,7 +3302,8 @@
       "cerbosKind": "social_report",
       "cerbosAction": "create",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "social.report.delete",
@@ -2839,7 +3314,8 @@
       "cerbosKind": "social_report",
       "cerbosAction": "delete",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "social.report.deliver",
@@ -2850,7 +3326,8 @@
       "cerbosKind": "social_report",
       "cerbosAction": "deliver",
       "class": "grantable",
-      "sensitive": true
+      "sensitive": true,
+      "uiGrantable": true
     },
     {
       "key": "social.report.read",
@@ -2861,7 +3338,8 @@
       "cerbosKind": "social_report",
       "cerbosAction": "read",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "social.report.update",
@@ -2872,7 +3350,8 @@
       "cerbosKind": "social_report",
       "cerbosAction": "update",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "webdev.change_request.create",
@@ -2883,7 +3362,8 @@
       "cerbosKind": "webdev_change_request",
       "cerbosAction": "create",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "webdev.change_request.read",
@@ -2894,7 +3374,8 @@
       "cerbosKind": "webdev_change_request",
       "cerbosAction": "read",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "webdev.change_request.triage",
@@ -2905,7 +3386,8 @@
       "cerbosKind": "webdev_change_request",
       "cerbosAction": "triage",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "webdev.provisioned_site.provision",
@@ -2916,7 +3398,8 @@
       "cerbosKind": "webdev_provisioned_site",
       "cerbosAction": "provision",
       "class": "grantable",
-      "sensitive": true
+      "sensitive": true,
+      "uiGrantable": true
     },
     {
       "key": "webdev.provisioned_site.read",
@@ -2927,7 +3410,8 @@
       "cerbosKind": "webdev_provisioned_site",
       "cerbosAction": "read",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     },
     {
       "key": "webdev.provisioned_site.reconcile",
@@ -2938,7 +3422,8 @@
       "cerbosKind": "webdev_provisioned_site",
       "cerbosAction": "reconcile",
       "class": "grantable",
-      "sensitive": false
+      "sensitive": false,
+      "uiGrantable": true
     }
   ]
 }
