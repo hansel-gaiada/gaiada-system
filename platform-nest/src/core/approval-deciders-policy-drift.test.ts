@@ -153,10 +153,24 @@ describe("approval-deciders.ts — Cerbos policy drift guard (MAIL-23)", () => {
     assertDeciderRolesMatch("resource_agency_approval.yaml", "approve", actual, AGENCY_EXPECTED);
   });
 
+  // ── ANCHORS RE-BASED 2026-08-12 (IAM-TRAP4) ────────────────────────────────────────────────────
+  // `group_executive` used to share the `decide`/`retry` rule with `company_admin`, so a single
+  // `derivedRoles: ["company_admin", "group_executive"]` anchored both mutation proofs below.
+  // IAM-TRAP4 split it into its OWN rule (it is a global-scope role, so the shared rule's
+  // `inTenant` gate meant the grant could never fire for it), leaving two sibling rules that each
+  // grant `["decide", "retry"]`. The old anchor now matches ZERO times and the `actions` anchor
+  // matches TWICE — which is what these three tests were failing on.
+  //
+  // Worth stating plainly, because it is the reassuring half: the DECIDER SET DID NOT CHANGE. The
+  // two assertions above still pass unmodified — company_admin, group_executive and hr_manager
+  // remain exactly who may decide, so `approval-deciders.ts` needed no edit. The split changed how
+  // the grant is expressed, not who holds it. Only these text anchors needed re-basing.
+  const COMPANY_ADMIN_DECIDE_ANCHOR = 'derivedRoles: ["company_admin"]';
+
   it("a role added to the automation policy's `decide` rule trips the guard (mutates an in-memory copy only — never the real policy file)", () => {
-    const anchor = 'derivedRoles: ["company_admin", "group_executive"]';
+    const anchor = COMPANY_ADMIN_DECIDE_ANCHOR;
     expect(automationYaml.split(anchor).length - 1, "anchor text not found exactly once — policy text moved, update this test's anchor").toBe(1);
-    const mutated = automationYaml.replace(anchor, 'derivedRoles: ["company_admin", "group_executive", "manager"]');
+    const mutated = automationYaml.replace(anchor, 'derivedRoles: ["company_admin", "manager"]');
     const rules = parsePolicyRules(mutated);
     const actual = resolveDeciderRoles(rules, "decide", { module_manager: "hr_manager" });
     expect(() => assertDeciderRolesMatch("resource_automation_approval.yaml", "decide", actual, AUTOMATION_EXPECTED)).toThrow(
@@ -166,9 +180,16 @@ describe("approval-deciders.ts — Cerbos policy drift guard (MAIL-23)", () => {
 
   it("D14-06 (`retry` added alongside `decide`, same roles) does NOT trip the guard — the exact live case", () => {
     const withRetryAnchor = 'actions: ["decide", "retry"]';
-    expect(automationYaml.split(withRetryAnchor).length - 1).toBe(1);
-    // Simulate "before D14-06": the same rule with only `decide`, no `retry`.
-    const preD14 = automationYaml.replace(withRetryAnchor, 'actions: ["decide"]');
+    // TWO occurrences since IAM-TRAP4 split group_executive out of company_admin's rule (see the
+    // note above): one rule per tier, each granting the same two actions. Pinned exactly rather
+    // than loosened to `toBeGreaterThan(0)` — if a third appears, or one disappears, the shape this
+    // test simulates has changed and the simulation below would quietly stop meaning anything.
+    expect(automationYaml.split(withRetryAnchor).length - 1).toBe(2);
+    // Simulate "before D14-06": the same rules with only `decide`, no `retry`. BOTH occurrences
+    // must be rewritten — `String.replace` with a string pattern only replaces the first, which
+    // would leave the group_executive rule still granting `retry` and make this a different test
+    // than the one it claims to be.
+    const preD14 = automationYaml.replaceAll(withRetryAnchor, 'actions: ["decide"]');
     const beforeRoles = resolveDeciderRoles(parsePolicyRules(preD14), "decide", { module_manager: "hr_manager" });
     const afterRoles = resolveDeciderRoles(parsePolicyRules(automationYaml), "decide", { module_manager: "hr_manager" });
     expect([...afterRoles].sort()).toEqual([...beforeRoles].sort());
@@ -178,7 +199,7 @@ describe("approval-deciders.ts — Cerbos policy drift guard (MAIL-23)", () => {
   });
 
   it("an unrelated comment edit near the `decide` rule does NOT trip the guard", () => {
-    const anchor = 'derivedRoles: ["company_admin", "group_executive"]';
+    const anchor = COMPANY_ADMIN_DECIDE_ANCHOR;
     expect(automationYaml.split(anchor).length - 1).toBe(1);
     const mutated = automationYaml.replace(anchor, `${anchor}\n      # a totally unrelated reworded comment, no role change`);
     const actual = resolveDeciderRoles(parsePolicyRules(mutated), "decide", { module_manager: "hr_manager" });
