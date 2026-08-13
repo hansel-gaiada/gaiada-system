@@ -418,6 +418,70 @@ and that is a build task, not paperwork.
 Planning figure: **8–12 weeks** from cold start to Advanced Access on the full permission set, with at
 least two review rounds. No official SLA exists for any of it.
 
+## §A4h · OQ-1 research, fourth return (TikTok) — and what all four together mean
+
+### TikTok's three findings
+
+**1. ⚠ Comments and mentions are NOT on the developer platform at all.** There is no comment scope
+and no mention scope on `developers.tiktok.com`; the Display API returns no comment bodies. Both live
+only on the *separate* `business-api.tiktok.com` platform (Organic Accounts + Mentions APIs), which
+needs its own app, Business Center linkage, and — since **2026-03-20** — a separate Accounts API
+Access Application Form. **The TikTok inbox is a second workstream with its own approval clock**, not
+a scope we tick on the first submission. SMM-15's scope shrinks accordingly.
+
+**2. ⚠ Unaudited clients cannot publish publicly** — `SELF_ONLY` visibility, posting accounts must be
+private, 5 users per 24h. The same private-lock shape as YouTube, from a third vendor.
+
+**3. ⚠ Our chosen engine has been REJECTED by this exact audit, twice.** Postiz carries public issues
+#1563 and #1362, both TikTok direct-post rejections for UX non-compliance. TikTok requires the API
+client to show a content preview, have the creator explicitly choose `privacy_level` from
+`creator_info`'s returned options **with no default**, explicitly set Comment/Duet/Stitch toggles with
+disabled ones greyed out, display the Music Usage Confirmation, and handle the brand-content
+disclosure toggles. UX non-compliance is the top rejection reason.
+
+We build our own composer, so the UX obligation is ours and that half is fine. **The risk is the
+transport**: if Postiz's driver does not surface `creator_info`'s options or pass an explicit privacy
+level and the toggles through, our composer cannot be compliant however well we build it. This has
+been sent to the SMM-04 spike as a specific question, with instructions to answer it from Postiz's
+API surface and source rather than its marketing. If it is a genuine gap, it is precisely what the
+Mixpost fallback exists for — and far cheaper to learn now than after submitting for audit.
+
+**Also:** no DM API (confirmed — the only DM-adjacent scopes are Data Portability bulk *export*);
+access token 24h / refresh 365 days; an undocumented `reached_active_user_cap` limits how many
+distinct users may publish per client per day; Business Center caps at 200 TikTok accounts.
+
+---
+
+### What the four legs together change about the module
+
+**OQ-4 is answered without the spike.** LinkedIn: no DM API. YouTube: no DM API. TikTok: no DM API.
+**Only Instagram and Facebook can ever offer DMs**, so the engagement inbox is comments + mentions on
+three of five networks by necessity, not by choice. SMM-15 should be scoped that way from the start.
+
+**Three of five networks cannot publish publicly until an audit passes.** YouTube (private lock),
+TikTok (`SELF_ONLY` lock) and — for client accounts — Meta and LinkedIn (Advanced Access / Standard
+Tier). This is the single largest correction to the plan: **P1's "publish loop on our own accounts"
+was already the right call, and is now the only possible one.** Client publishing is gated behind
+weeks-to-months of review on every network simultaneously.
+
+**Every network requires the client's own owner to authenticate personally** — LinkedIn (no shared
+profile), Meta (client grants via Login for Business), YouTube (delegated managers have no API
+access), TikTok (no credential-free agency access exists). Onboarding is a scheduled human ceremony
+per client per network. SMM-07 must be built as a guided, resumable flow, and the re-consent nudge is
+a first-class feature.
+
+**Human-in-the-loop is not just our preference — it is what makes us approvable.** YouTube Policy
+III.I.2 and TikTok's Content Sharing Guidelines both require explicit user consent BEFORE an action
+executes, and TikTok additionally requires the creator to choose privacy and interaction settings
+with no defaults. A fully autonomous "AI drafts and posts" flow is not approvable on either network.
+**D-6 (no auto-publish, ever) was written as a safety decision and turns out to be a compliance
+requirement.** The design's most conservative choice is the one that aged best.
+
+**Roadmap consequence.** `tool_scope.networks` defaults ship FALSE for **x** (metered), **youtube**
+(audit-locked) and **tiktok** (audit-locked + inbox needs a second platform). Realistic first-client
+sequence is Instagram/Facebook and LinkedIn, own accounts first, with 8–12 weeks of review running in
+parallel — which is exactly why OQ-1 was worth starting before the build needed it.
+
 ## §A5 · Sequencing note — what to do first
 
 1. **SMM-30 + SMM-01 together** (they are one schema conversation: tables, then the permission rows
