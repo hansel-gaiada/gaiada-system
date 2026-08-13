@@ -418,16 +418,70 @@ const configBase = {
   // capability fails closed at the registry (NoCapableProviderError / unknown_provider) instead of
   // half-working against a phantom endpoint. The $0 pillars (crawl audits, keyword clustering, AI
   // drafts) are unaffected — that is the whole point of the P1-before-P2 build order.
-  // SMM-02 — the social-media module. Deliberately tiny for now: the publisher (Postiz) base URL
-  // and org API-key aliases arrive with SMM-06's config plumbing, once SMM-04's containment spike
-  // has decided whether that engine survives its own tripwires.
+  // SMM-02/SMM-05 — the social-media module.
   //
   // `defaultUsageBudgetUsd` is the monthly metered cap a NEW engagement starts on. Small on
   // purpose: the stop-loss should be tripped by a runaway loop long before it is tripped by real
   // work, and raising it is a deliberate, audited act (`social.ledger.admin`, held by
   // company_admin — one tier above the department head who wants to spend it).
+  //
+  // ── `publisher` (SMM-05, absorbing SMM-06's config plumbing) ────────────────────────────────
+  // The ERP half of the cross-host contract the integrator named in infra/compose/.env.example so
+  // it could not drift across two machines (addendum §A4l §7). Everything else `SOCIAL_*` lives on
+  // the VPS that runs the licence zone; filling those into THIS host's .env does nothing at all
+  // while scattering the group's platform-app secrets onto a box with no use for them.
+  //
+  // KEYLESS/URL-LESS IS A SUPPORTED MODE, and it is the default. With no SOCIAL_POSTIZ_BASE_URL no
+  // driver is registered at boot, no network call is attempted at boot, and every publisher-touching
+  // endpoint refuses `publisher_not_configured` (503) while every READ the module serves keeps
+  // working. That is the shape the search module already uses for an unfunded vendor, and it is
+  // what makes "Postiz is unreachable" a visibly degraded feature rather than a dead module.
   social: {
     defaultUsageBudgetUsd: Number(process.env.SOCIAL_DEFAULT_USAGE_BUDGET_USD ?? 10),
+    publisher: {
+      driver: process.env.SOCIAL_PUBLISHER_DRIVER ?? "postiz",
+      // The WireGuard peer address, NOT a public hostname and NOT https — there is no public
+      // listener on the VPS to name, and the tunnel supplies what https would (§A4l §2). A tunnel
+      // outage must fail closed here, loudly; `assertPublisherBaseUrlIsPrivate` in main.ts refuses
+      // BOOT if this is ever "fixed" by pointing it at a public address.
+      baseUrl: (process.env.SOCIAL_POSTIZ_BASE_URL ?? "").replace(/\/$/, ""),
+      apiPrefix: process.env.SOCIAL_POSTIZ_API_PREFIX ?? "/api/public/v1",
+      // Split timeouts, not one value (§A4l §4). This estate has already shipped a default 30s
+      // timeout against a real 31-40s round trip (the n8n dispatcher, reported unreachable after
+      // the run had already been created). Media upload is the ONE call on this hop whose duration
+      // changed by more than milliseconds when the engine moved hosts, so it gets its own class.
+      // ⚠ connectTimeoutMs is carried and reported but NOT independently enforced: global `fetch`
+      // exposes no connect-phase deadline without an undici Agent, and this project does not depend
+      // on undici directly. Named rather than silently conflated — see the driver's header.
+      connectTimeoutMs: Number(process.env.SOCIAL_POSTIZ_CONNECT_TIMEOUT_MS ?? 5000),
+      readTimeoutMs: Number(process.env.SOCIAL_POSTIZ_READ_TIMEOUT_MS ?? 30000),
+      uploadTimeoutMs: Number(process.env.SOCIAL_POSTIZ_UPLOAD_TIMEOUT_MS ?? 120000),
+      // Custody split (b), design §11 / D-5: the org-scoped API key is resolved SERVER-SIDE BY
+      // ALIAS at call time from `social_publisher_orgs.api_key_ref`, never stored in a column,
+      // never sent to platform-ui, never put in an n8n credential, never written to a log or an
+      // audit line. `defaultOrgApiKey` backs the `default` alias; any other alias resolves from
+      // `SOCIAL_POSTIZ_ORG_API_KEY__<ALIAS>` (see publisher/keys.ts).
+      defaultOrgApiKey: process.env.SOCIAL_POSTIZ_ORG_API_KEY ?? "",
+      // Per-network DEPLOYMENT flags — a second, higher gate than the per-engagement tool_scope.
+      // The default set is the addendum's own roadmap conclusion (§A4h): Instagram/Facebook and
+      // LinkedIn first, own accounts. `x` is metered (OQ-2 / D-14), `youtube` is audit-locked to
+      // private uploads for ~3 months (§A4g), and `tiktok` is audit-locked AND carries the open
+      // OQ-8 consent-timing question (§A4i) — a toggle that cannot do what its name says is worse
+      // than an absent one, so all three ship off at the deployment level too.
+      enabledNetworks: (process.env.SOCIAL_NETWORKS_ENABLED ?? "instagram,facebook,linkedin")
+        .split(",").map((s) => s.trim().toLowerCase()).filter(Boolean),
+      // The LIVE Instagram quota probe (`GET /<IG_ID>/content_publishing_limit`, addendum §A4f).
+      // EMPTY BY DEFAULT, and the emptiness is a finding, not laziness: Postiz's only generic
+      // passthrough is `POST /public/v1/integration-trigger/:id`, which is gated on an upstream
+      // `@Tool` decorator, and the SMM-04 spike proved the TikTok provider carries none. Whether
+      // the Instagram provider exposes one is UNVERIFIED — it needs a live engine and a connected
+      // IG account, which OQ-1 gates. Unset ⇒ the driver does not advertise `quota_probe`, the
+      // registry records `quota: {}` with `quotaSource: 'probe_unavailable'`, and media-rules'
+      // checkQuota degrades to its existing `quota_unknown` warning. What must NEVER happen is a
+      // constant: 25 is obsolete, Meta's own doc says 100 and 50 on the same page, and a synthesized
+      // cap is wrong in a way nothing downstream can detect.
+      quotaProbeTool: process.env.SOCIAL_POSTIZ_QUOTA_PROBE_TOOL ?? "",
+    },
   },
   search: {
     defaultProvider: process.env.SEARCH_DEFAULT_PROVIDER ?? "dataforseo",

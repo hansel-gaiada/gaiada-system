@@ -18,6 +18,10 @@ import { GatewayNotConfiguredErrorFilter } from "./modules/search/gateway-not-co
 // exactly the reason SM-53/SM-57 had to be — an unmapped plain Error escapes as a body-less 500.
 import { GoogleOAuthErrorFilter } from "./modules/search/google/google-oauth-error.filter";
 import { ClientAccessErrorFilter } from "./core/client-access-error.filter";
+// SMM-05 — the social publisher's typed refusals. Registered for the same reason its search
+// sibling above is: SocialPublisherError is a plain Error, so without a filter every refusal —
+// including the cross-client publish defence REPORTING that it fired — escapes as a body-less 500.
+import { SocialPublisherErrorFilter } from "./modules/social/publisher-error.filter";
 import { LastResortExceptionFilter } from "./last-resort-exception.filter";
 import { maxUploadBytes } from "./core/meetings.controller";
 import { migrate } from "./db/migrate";
@@ -49,6 +53,10 @@ import {
 // check (design addendum §A4.3) used below to make mode/driver mutual exclusion a BOOT ERROR.
 import { createSimulationProviders, isSimulatedProvider } from "./modules/search/providers/simulation";
 import { registerProvider } from "./modules/search/providers/registry";
+// SMM-05/06 — the social publisher boot wiring. Opens NO socket: registration is a pure decision
+// from config, so the platform boots normally with Postiz unreachable and the publisher-touching
+// capabilities degrade to typed 503s. See that file's header.
+import { wireSocialPublisher } from "./modules/social/publisher/boot";
 // SM-49 AC 9 (tracker §6u; design addendum §A10.4) — the repointed-base-URL boot guard. Lives outside
 // config.ts (SM-48 owns it this wave) and outside modules/search (it isn't itself an egress file — see
 // its own header). registerProvider above already makes the simulate/live branches structurally
@@ -134,6 +142,7 @@ export async function buildApp(): Promise<NestFastifyApplication> {
     new GatewayNotConfiguredErrorFilter(),
     new GoogleOAuthErrorFilter(),
     new ClientAccessErrorFilter(),
+    new SocialPublisherErrorFilter(),
   );
   // WD-04: the one multipart consumer in the app (in-ERP meeting audio/video upload). The size cap
   // is enforced HERE (busboy truncates + MeetingRecordingsController turns that into a clean 400)
@@ -351,6 +360,10 @@ async function bootstrap(): Promise<void> {
   // SM-75: the search provider-mode + ads-write-mode boot wiring — see wireSearchProviderModeAndAdsWriteMode's
   // own header above `bootstrap()` for why this is a single unconditional call rather than inline code.
   wireSearchProviderModeAndAdsWriteMode();
+  // SMM-05/06: register the social publisher driver (or deliberately register nothing). Also the
+  // home of the one social BOOT REFUSAL — a publisher base URL pointing at a PUBLIC address, which
+  // means the containment perimeter moved (addendum §A4l §2/§3). No network call is made here.
+  wireSocialPublisher();
   registerCoreRollupProvider(coreTaskRollups);
   registerCoreRollupProvider(clientWorkRollups);
   await syncMetricDefinitions();

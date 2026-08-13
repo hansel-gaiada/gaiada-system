@@ -148,6 +148,12 @@ jobs:
       # 0051). Pure static analysis, no DB needed, so it fails at authoring/PR time rather than
       # only showing up as bad data after a real deploy. See scripts/lint-migration-rls.mjs.
       - run: npm run lint:migration-rls
+      # SMM-05 — the AGPL containment line, as a build gate. smm-design.md §11 states it verbatim
+      # ("lint-enforced zero Postiz deps in platform-nest"): the social publisher is reached over
+      # HTTP+JSON from one adapter, and a single Postiz package or module import would put the
+      # proprietary platform into the AGPL derivative-work conversation the whole design exists to
+      # stay out of. Licensing boundary first, architecture second — not a reviewer's spot-check.
+      - run: npm run lint:postiz-deps
       # MAIL-13 / design A13 — the inbound adversarial corpus as a NAMED, FAIL-FAST gate.
       #
       # A13 makes the committed corpus (platform-nest/src/mail/__fixtures__/inbound/) a permanent
