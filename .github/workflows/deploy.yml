@@ -289,8 +289,35 @@ jobs:
             # deploy fails here — which is exactly what the "Reload Cerbos policies" step above says
             # is supposed to happen ("a policy repo that fails to parse fails THIS deploy rather than
             # silently denying in production"). That promise was untrue until this flag.
-            bad="$($C ps -a --format '{{.Service}} {{.State}} {{.Health}}' \
-                   | awk '$2!="running" || ($3!="" && $3!="healthy") {print $1}')"
+            #
+            # ⚠ EXIT CODE 0 IS NOT A FAILURE, added 2026-08-13 after `-a` caused the opposite
+            # outage to the one it fixed. `$2!="running"` treats a RUN-ONCE container as broken
+            # forever: `alertmanager-render` renders a config and exits 0 by design, so it is
+            # never `running`, `bad` never emptied, and alpha-01.040.0093b timed out after two
+            # minutes and rolled back a healthy stack. The `-a` flag is still right — the fix is
+            # to distinguish "exited because it finished" from "exited because it broke", which
+            # the previous filter could not express because it never read the exit code.
+            #
+            # Classification, deliberately explicit rather than a negation:
+            #   running + no healthcheck            -> OK
+            #   running + healthy                   -> OK
+            #   exited  + code 0                    -> OK   (one-shot job completed)
+            #   restarting / dead / created / paused-> BAD  (crash loop still caught)
+            #   exited  + code != 0                 -> BAD
+            #   running + starting/unhealthy        -> BAD  (keep waiting)
+            # ⚠ PIPE-DELIMITED, NOT SPACE. `{{.Health}}` is EMPTY for any container without a
+            # healthcheck, and awk's default splitting collapses runs of whitespace — so with a
+            # space-separated format the exit code slides into $3 and $4 is empty, marking every
+            # healthcheck-less container BAD. Caught by running this exact filter against the live
+            # box before shipping it; the 3-field version escaped it only because nothing followed
+            # the empty field. -F'|' keeps empty fields positional.
+            bad="$($C ps -a --format '{{.Service}}|{{.State}}|{{.Health}}|{{.ExitCode}}' \
+                   | awk -F'|' '{
+                            ok = 0
+                            if ($2 == "running" && ($3 == "" || $3 == "healthy")) ok = 1
+                            if ($2 == "exited"  && $4 == 0)                       ok = 1
+                            if (!ok) print $1
+                          }')"
             if [ -z "$bad" ]; then echo "all services healthy"; exit 0; fi
             echo "waiting on: $(echo $bad | tr '\n' ' ')"
             sleep 5
