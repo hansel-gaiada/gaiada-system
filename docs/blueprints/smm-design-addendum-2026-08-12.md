@@ -1006,6 +1006,29 @@ them. It is honest about being a lexical ACCIDENT guard, not an authz control.
 - **Every Postiz route beyond the five the spike drove is ⚠UNVERIFIED**, collected in one exported
   `POSTIZ_ROUTES` table so the first live drive (SMM-07) corrects them in one edit.
 
+## §A4o · A method note: "pre-existing failure" reports from parallel agents
+
+**Twice now**, an agent working in an isolated worktree has reported a pre-existing failure in
+`src/rbac` — SMM-19 against `role-permission-bundles.db.test.ts`, SMM-05 against that plus
+`scope-constrained-roles.test.ts` — and **both times the suites passed on `main` when re-run**
+(7/7 and 15/15 respectively).
+
+The cause is not drift. It is **shared-test-container contention**: every agent points
+`DATABASE_URL_TEST` at the same Postgres, and `src/testing/setup.ts` gives each test FILE its own
+database created and dropped `WITH (FORCE)`. Two agents running suites concurrently drop each
+other's connections mid-run, which surfaces as regen/comparison mismatches and
+`Connection terminated unexpectedly` — failures that look like artifact drift and are not.
+
+**Both agents did the right thing**: each reported the failure, stated it had touched no
+permission/catalog/policy file, and declined to "fix" it. That is exactly the behaviour to keep — a
+silent fix would have edited a correct artifact to match a corrupted run.
+
+**The standing rule this establishes:** a failure reported by an agent that shares the test
+containers is a HYPOTHESIS until re-run on `main` in isolation. Verify before propagating, and never
+change a checked-in artifact on the strength of a contended run. The real fix — per-agent test
+databases or a serialised test lane — is worth doing if parallel agents become routine; recorded
+here rather than actioned, because it belongs to the test harness, not this module.
+
 ## §A5 · Sequencing note — what to do first
 
 1. **SMM-30 + SMM-01 together** (they are one schema conversation: tables, then the permission rows

@@ -94,7 +94,7 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 | Service | Image / build | Profiles | Ports | depends_on |
 |---|---|---|---|---|
 | `ai-gateway` | — | — | — | — |
-| `alertmanager` | prom/alertmanager:v0.28.0 | — | — | alertmanager-render |
+| `alertmanager` | prom/alertmanager:v0.28.0 | — | `127.0.0.1:9093:9093` | alertmanager-render |
 | `alertmanager-render` | alpine:3.21 | — | — | — |
 | `blackbox-exporter` | prom/blackbox-exporter:v0.25.0 | — | — | — |
 | `bot` | — | — | — | — |
@@ -344,6 +344,8 @@ Pages (`page.tsx`), route groups `(x)` stripped:
 - `/meetings/[id]`
 - `/monitoring`
 - `/monitoring/[id]`
+- `/monitoring/channels`
+- `/monitoring/new`
 - `/notifications`
 - `/organization`
 - `/people`
