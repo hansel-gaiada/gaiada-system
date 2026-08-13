@@ -427,3 +427,26 @@ at it, run `node dist/db/migrate.js`, confirm the ordered `applied:` list and ex
    together, rather than each author racing `ls | tail`). **Next unused is `0105`** — re-verify
    with `ls migrations | sort | tail` before trusting that, exactly as every entry in this log has
    had to.
+
+   **2026-08-13 update (P2-01, IAM Phase 2 foundation) — `0109` TAKEN, no collision.** This log had
+   again drifted (last entry said "next is `0105`"); `ls migrations | sort | tail` at authoring
+   time showed the real head as `0108_iam_gap_02_invoice_self_approval_deny_and_revisions.sql`
+   (four concurrent IAM/social migrations — `0105`-`0108` — had landed without a README entry each)
+   with `0109` genuinely free; re-verified again immediately before writing DDL and once more before
+   this entry (still free both times, no concurrent taker). Shipped as
+   `0109_iam_phase2_positions.sql`: `employees` (HR-owned, THIRD wall
+   `app_module_allowed('hr')`), `positions`/`position_roles`/`position_assignments`/
+   `position_grant_claims` (CORE, plain `tenant_isolation` — design §2 preamble explicitly rules
+   these platform-wide-read, not module-gated), plus three additive `user_roles` columns
+   (`managed_by_position`, `expires_at`, `origin_approval_id`) + one exclusivity CHECK. Design:
+   `docs/superpowers/plans/2026-08-13-iam-phase2-design.md`. Zero backfill DML — every table is a
+   fresh CREATE TABLE; the `user_roles` ALTER only adds nullable columns (count/value-asserted
+   unchanged in the test suite). The design's §2.3 guard trigger on `position_roles` is IMPLEMENTED
+   for the denied-role registry and the scope-shape check; the `ui_grantable` bundle clause is
+   DEFERRED to P2-03 (that column doesn't exist yet and this ticket is expressly forbidden from
+   touching the permission catalog) — `CREATE OR REPLACE FUNCTION`, same trigger, no renumbering,
+   when P2-03 lands. Full report: `docs/superpowers/plans/2026-08-13-p2-01-report.md`. `0058`/
+   `0059`/`0070` remain the permanently-orphaned reservation gaps — still do NOT fill them. **Next
+   unused is `0110`** — re-verify with `ls migrations | sort | tail` before trusting that, exactly
+   as every entry in this log has had to; this checkout is shared with at least one other
+   concurrent session (a monitoring feature, per this ticket's own brief) as of this entry.
