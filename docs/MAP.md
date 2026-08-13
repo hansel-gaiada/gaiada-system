@@ -164,9 +164,9 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 
 ## platform-nest — migrations
 
-- Head: `0107_iam_gap_01_invoice_approve_hr_leave_decide.sql`
-- Next free number: `0108` — **reserve it by creating the file**, concurrent sessions share this checkout.
-- Applied files on disk: 106
+- Head: `0108_iam_gap_02_invoice_self_approval_deny_and_revisions.sql`
+- Next free number: `0109` — **reserve it by creating the file**, concurrent sessions share this checkout.
+- Applied files on disk: 107
 - Unused numbers below head: `0058`, `0059`, `0070` (dead reservations — do not backfill)
 
 ## platform-nest — HTTP surface (`@Controller` prefixes)

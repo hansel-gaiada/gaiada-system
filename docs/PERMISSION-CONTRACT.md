@@ -292,9 +292,75 @@ expand, get filtered out by that line on both sides, and leave the suite green w
 is destroyed. `iam-215-boundary-pin.test.ts` (66 tests) is the real static boundary-pin that would
 catch it — treat that one, not the parity suite, as the authority for "no role reaches the 15."
 
-## 9. Known-open items (refreshed 2026-08-11)
+## 9. Known-open items (refreshed 2026-08-13, IAM-GAP-02)
 
 **Closed since the 2026-08-10 freeze:**
+- ~~IAM-GAP-01's filed hole #1: platform_admin/group_executive's wildcard bypassed the invoice
+  maker/checker seam's own creator check~~ — **CLOSED, IAM-GAP-02 (2026-08-13, PROTOTYPED).**
+  `resource_invoice.yaml` gains a structural `EFFECT_DENY` on `approve` (`roles: ["user"]` — matches
+  every principal by construction, no role name to keep in sync) whose condition is
+  `has(creatorId) && creatorId != "" && creatorId == principal.id`. Cerbos combines a kind's
+  matching rules with deny-overrides semantics, so this DENY beats the pre-existing
+  `actions: ["*"]` wildcard for BOTH `platform_admin` and `group_executive` — live-probed and
+  `app.inject`-adversarially-proven for both roles (`src/core/billing.test.ts`'s
+  `"invoice approve — the self-approval hole, elevated roles (IAM-GAP-02)"` block): each can create
+  an invoice and is then 403'd approving that SAME invoice, while still 200ing on a DIFFERENT
+  invoice (the DENY does not over-fire into a blanket lockout). No catalog/bundle change — a
+  restriction has nothing to grant. The wildcard's SEPARATE, pre-existing ability to approve an
+  UNKNOWN-creator (legacy) row is explicitly UNCHANGED by this pass — Part 2 of the ticket targeted
+  only creator == approver, not the wildcard's fail-open reach over legacy rows; live-probed both
+  ways (§ this ticket's own report) so the boundary is stated, not assumed.
+- ~~"Approval is based on managers related" — owner correction to IAM-GAP-01's default~~ —
+  **CONFIRMED, IAM-GAP-02 (2026-08-13).** No narrowing: `company_admin`/`manager` (department-
+  manager tier) plus `platform_admin`/`group_executive` ("due to the nature of account
+  specification") is exactly IAM-GAP-01's shipped approver set. "Related" resolves to **same-company
+  `manager`** — `derived_roles.yaml`'s existing `manager` role at `scopeType == "company"` — stated
+  PLAINLY as the interpretation actually implemented, not silently assumed: invoices carry only
+  `client_id`; their lines are computed from potentially MULTIPLE of that client's projects with no
+  `project_id` persisted per line (only the project's name); `clients` has no manager/account-owner
+  column at all. A tighter client/project relation is therefore NOT cheaply expressible without a
+  schema change (storing project_id per invoice line) or widening `manager`'s own derived-role
+  condition (shared by ~30 other resource kinds) — both bigger than a policy-only pass. Flagged for
+  the owner to tighten in a follow-up if "related" was meant narrower than "any manager in the
+  tenant"; see `resource_invoice.yaml`'s own IAM-GAP-02 comment for the full account.
+- ~~No revision/version-control trail for invoices~~ — **CLOSED, IAM-GAP-02 (2026-08-13,
+  PROTOTYPED).** New `invoice_revisions` table (migration `0108`) plus `invoices.updated_by`.
+  SNAPSHOT-based (full before/after row state per mutation, not a diff) — a diff-only design would
+  require replaying every prior revision to answer "what did this look like before edit N", so one
+  missing/corrupt row would break every reconstruction after it; a self-contained snapshot pair
+  answers that question from ANY single revision row alone. `changed_fields` is a derived,
+  human-skimmable convenience computed from the two snapshots — never authoritative. Wired into all
+  THREE real write paths that ever mutate `invoices` (enumerated and each independently
+  `app.inject`-tested): `billing.controller.ts`'s `create()`/`setStatus()`/`approve()`, and
+  `contracts.controller.ts`'s `decidePayment()` — the ONE place `invoices.status` moves to `'paid'`
+  outside the billing module entirely, previously untested end-to-end at all
+  (`src/core/contracts-invoice-payment-revision.test.ts`, new). Two dev/test-only seed scripts
+  (`src/seed/agency.ts`, `src/seed/portal-workspace.ts`) insert invoices directly with no
+  authenticated principal and are deliberately NOT wired — fabricating an actor for a seed row would
+  be worse than the honest gap. Pre-existing rows (the live estate's 12 invoices, once this
+  migration actually runs against them) each get exactly one
+  `action='baseline_pre_revision_tracking'` marker row (`actor_id`/`before_snapshot` NULL) instead
+  of silently-empty history — so "no history" always means "known to predate tracking", never
+  "nothing happened, or we lost it". FORCE RLS + `tenant_isolation`, mirroring `0021`/`0075`'s
+  NULLIF-hardened form; `lint:migration-rls` clean. No new Cerbos action/catalog key — this pass is
+  data capture only, no read/analysis surface (deferred, per the ticket, to a separate session).
+- ~~The stuck live draft with no recorded creator (IAM-GAP-01 blocker, one of the live estate's 12
+  invoices)~~ — **INVESTIGATED, NOT RESOLVED FROM THIS SESSION — genuine recovery path shipped,
+  outcome unverified against the live 12-row dataset.** This session had no live-database
+  connectivity to inspect the actual stuck row, so migration `0108` ships a GENERAL recovery rule
+  rather than a one-row hand-fix: for every invoice with `created_by IS NULL`, it checks the
+  `activities` log (`verb='created', target_entity_type='invoice'`) — which
+  `billing.controller.ts::create()` has written to since before `created_by` existed, recording the
+  SAME fact that column was always meant to capture, just in a different table — and backfills
+  `created_by` ONLY when exactly one DISTINCT actor claims that invoice's creation (an ambiguous or
+  absent signal leaves it NULL, same no-fabrication policy `created_by` itself follows). The
+  fail-closed `approve` rule is NOT weakened either way. `RAISE NOTICE` reports the recovered/left-
+  NULL counts when the migration actually runs; **the owner or devops seat applying this migration
+  to production should read that log line** to learn whether the specific stuck row was recovered.
+  If it reports zero recovered for that row, the documented operator step is a hand-fix:
+  `UPDATE invoices SET created_by = '<a real user id>' WHERE id = '<the stuck row's id>';` run as the
+  `platform_owner`/migrator role — after which the row becomes approvable by company_admin/manager
+  on the caller's next request (no restart needed; this is a data change, not a policy change).
 - ~~IAM-05c (bulk effective-permissions endpoint)~~ — **LANDED.** `GET /api/:tenantId/authz/
   permissions` + `GET /api/authz/permissions`, see §4 and `FRONTEND-BFF-CONTRACT.md` §8.
 - ~~IAM-SEC-02 (elevated roles grantable at non-global scope)~~ — **found and fixed** during

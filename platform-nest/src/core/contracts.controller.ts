@@ -30,6 +30,7 @@ import { emitEvent } from "../events/outbox.service";
 import { AuthGuard } from "../auth/guards";
 import { scrubText } from "./scrub";
 import { notifyBestEffort, resolveClientRecipients } from "./client-notify";
+import { recordInvoiceRevision, snapshotInvoice } from "../modules/billing/invoice-revisions";
 
 const CONTRACT_SELECT = `
   SELECT k.id, k.client_id AS "clientId", cl.name AS "clientName", k.project_id AS "projectId",
@@ -425,8 +426,19 @@ export class ContractsController {
       const confirmed = Number(totals.rows[0]?.confirmed ?? 0);
       const fullyPaid = confirmed >= total - 1;
       if (fullyPaid) {
-        // Only from `sent`: a `void` invoice must not be resurrected to `paid` by a late confirmation.
-        await c.query(`UPDATE invoices SET status = 'paid', updated_at = now() WHERE id = $1 AND status = 'sent'`, [pay.invoice_id]);
+        // IAM-GAP-02: this is the THIRD (and last) place invoices.status ever moves — outside the
+        // billing module entirely. Snapshot before the conditional UPDATE; only record a revision
+        // if the UPDATE actually matched a row (it may not: a `void` invoice must not be
+        // resurrected to `paid` by a late confirmation, so "0 rows updated" is a legitimate no-op,
+        // not an error, and must not fabricate a revision for a mutation that didn't happen).
+        const before = await snapshotInvoice(c, pay.invoice_id);
+        const res = await c.query(
+          `UPDATE invoices SET status = 'paid', updated_by = $2, updated_at = now() WHERE id = $1 AND status = 'sent'`,
+          [pay.invoice_id, req.principal.userId],
+        );
+        if (res.rowCount && res.rowCount > 0) {
+          await recordInvoiceRevision(c, tenantId, pay.invoice_id, req.principal.userId, "paid_via_payment_confirmation", before);
+        }
         await emitEvent(c, tenantId, "invoice", pay.invoice_id, "invoice.updated", { status: "paid" });
       }
       await emitEvent(c, tenantId, "invoice_payment", paymentId, "invoice.payment.confirmed", {

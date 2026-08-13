@@ -18,6 +18,8 @@ describe.skipIf(!TEST_URL)("billing / invoices (§4)", () => {
   let admin2: string;
   let manager: string;
   let member: string;
+  let platformAdmin: string; // global scope — IAM-GAP-02 self-approval hole probes
+  let groupExec: string; // global scope — ditto
   let clientId: string;
   let projectId: string;
 
@@ -29,6 +31,8 @@ describe.skipIf(!TEST_URL)("billing / invoices (§4)", () => {
     admin2 = await createUser("admin2@a.test");
     manager = await createUser("mgr@a.test");
     member = await createUser("mem@a.test");
+    platformAdmin = await createUser("superadmin@a.test");
+    groupExec = await createUser("exec@a.test");
     await addMembership(tenant, admin);
     await addMembership(tenant, admin2);
     await addMembership(tenant, manager);
@@ -37,6 +41,12 @@ describe.skipIf(!TEST_URL)("billing / invoices (§4)", () => {
     await grantRole(admin2, await createRole("company_admin"), "company", tenant);
     await grantRole(manager, await createRole("manager"), "company", tenant);
     await grantRole(member, await createRole("member"), "company", tenant);
+    // IAM-GAP-02: global scope, no company membership needed — platform_admin/group_executive's
+    // wildcard rule has no `inTenant` condition, and `withTenants([tenantId], ...)` scopes every
+    // DB query by the explicit `tenantId` parameter regardless of the caller's own memberships
+    // (same pattern as src/admin/org14-preflight-adversarial.test.ts's `exec` fixture).
+    await grantRole(platformAdmin, await createRole("platform_admin"), "global", null);
+    await grantRole(groupExec, await createRole("group_executive"), "global", null);
     app = await buildApp();
 
     // A client + project + billable time in the period to invoice against.
@@ -198,6 +208,142 @@ describe.skipIf(!TEST_URL)("billing / invoices (§4)", () => {
       const id5 = created.json().id as string;
       const r = await app.inject({ method: "PATCH", url: `/api/${tenant}/invoices/${id5}`, headers: asUser(admin), payload: { status: "void" } });
       expect(r.statusCode).toBe(200);
+    });
+  });
+
+  // ══════════════════════ IAM-GAP-02 — the self-approval hole, closed for BOTH elevated tiers ══════════════════════
+  // IAM-GAP-01's own report (§4.5/§12.2) flagged this loudly: platform_admin/group_executive's
+  // PRE-EXISTING wildcard rule sat above the maker/checker ALLOW rule with no condition at all, so
+  // either could approve an invoice it created itself — the exact hole the owner's two-person rule
+  // ("1 superadmin + 1 owner") forbids. Closed with a structural EFFECT_DENY in
+  // resource_invoice.yaml (`roles: ["user"]` — matches every principal, Cerbos deny-overrides an
+  // ALLOW including a wildcard). Adversarially proven end-to-end here, not just via a live Cerbos
+  // probe — the hole was reachable through this exact HTTP endpoint.
+  describe("invoice approve — the self-approval hole, elevated roles (IAM-GAP-02)", () => {
+    it("platform_admin CANNOT approve an invoice IT created — 403 (the hole being closed)", async () => {
+      const created = await app.inject({
+        method: "POST", url: `/api/${tenant}/invoices`, headers: asUser(platformAdmin),
+        payload: { clientId, periodStart: "2026-07-01", periodEnd: "2026-07-31", rate: 10 },
+      });
+      expect(created.statusCode).toBe(201);
+      const id = created.json().id as string;
+      const selfApprove = await app.inject({ method: "POST", url: `/api/${tenant}/invoices/${id}/approve`, headers: asUser(platformAdmin) });
+      expect(selfApprove.statusCode).toBe(403);
+      // Non-regression: the SAME platform_admin can still approve someone ELSE's invoice — the
+      // DENY must not have over-fired into a blanket platform_admin lockout.
+      const other = await app.inject({
+        method: "POST", url: `/api/${tenant}/invoices`, headers: asUser(admin),
+        payload: { clientId, periodStart: "2026-07-01", periodEnd: "2026-07-31", rate: 10 },
+      });
+      const otherApprove = await app.inject({ method: "POST", url: `/api/${tenant}/invoices/${other.json().id}/approve`, headers: asUser(platformAdmin) });
+      expect(otherApprove.statusCode).toBe(200);
+    });
+
+    it("group_executive CANNOT approve an invoice IT created — 403 (the hole being closed)", async () => {
+      const created = await app.inject({
+        method: "POST", url: `/api/${tenant}/invoices`, headers: asUser(groupExec),
+        payload: { clientId, periodStart: "2026-07-01", periodEnd: "2026-07-31", rate: 10 },
+      });
+      expect(created.statusCode).toBe(201);
+      const id = created.json().id as string;
+      const selfApprove = await app.inject({ method: "POST", url: `/api/${tenant}/invoices/${id}/approve`, headers: asUser(groupExec) });
+      expect(selfApprove.statusCode).toBe(403);
+      const otherApprove = await app.inject({ method: "POST", url: `/api/${tenant}/invoices/${id}/approve`, headers: asUser(platformAdmin) });
+      expect(otherApprove.statusCode).toBe(200);
+    });
+  });
+
+  // ══════════════════════════════ IAM-GAP-02 — revision tracking, real endpoints ══════════════════════════════
+  // "draft need to track the maker and the last person who make changes and the changes itself. so
+  // we can have proper version control and able to identify and have forensic capabilities." Drives
+  // create -> edit -> approve through the real HTTP surface and asserts a revision row per mutation
+  // with the right actor, and that the PRE-EDIT state is reconstructible from `before_snapshot`
+  // alone (not by replaying every prior revision).
+  describe("invoice revision tracking (IAM-GAP-02)", () => {
+    type Revision = {
+      action: string; actorId: string | null;
+      before: { status: string; total: string; updatedBy: string | null } | null;
+      after: { status: string; total: string; updatedBy: string | null };
+      changedFields: string[];
+    };
+    const getRevisions = (invoiceId: string) =>
+      withTenants([tenant], (c) =>
+        c.query<Revision>(
+          `SELECT action, actor_id AS "actorId", before_snapshot AS before, after_snapshot AS after,
+                  changed_fields AS "changedFields"
+             FROM invoice_revisions WHERE invoice_id = $1 ORDER BY occurred_at ASC`,
+          [invoiceId],
+        ),
+      ).then((r) => r.rows);
+
+    it("create -> edit (void) -> approve-then-send each write exactly one revision row, actor-attributed, pre-edit state reconstructible", async () => {
+      const created = await app.inject({
+        method: "POST", url: `/api/${tenant}/invoices`, headers: asUser(admin),
+        payload: { clientId, periodStart: "2026-07-01", periodEnd: "2026-07-31", rate: 10 },
+      });
+      const id = created.json().id as string;
+
+      let revs = await getRevisions(id);
+      expect(revs).toHaveLength(1);
+      expect(revs[0]).toMatchObject({ action: "created", actorId: admin, before: null });
+      expect(revs[0].after.status).toBe("draft");
+      expect(revs[0].after.updatedBy).toBe(admin); // IAM-GAP-02: updated_by = creator right after create
+
+      // A GET reflects `updatedBy` too — additive field on the existing response shape.
+      const afterCreate = (await app.inject({ method: "GET", url: `/api/${tenant}/invoices/${id}`, headers: asUser(admin) })).json() as { updatedBy: string };
+      expect(afterCreate.updatedBy).toBe(admin);
+
+      // EDIT #1: a DIFFERENT actor voids it. `manager` holds only `read` on invoices
+      // (resource_invoice.yaml: "Managers may view invoices but not issue/edit them" — `approve`
+      // is the ONE manager exception, added by IAM-GAP-01/02), so a DIFFERENT company_admin
+      // (admin2) is the one who legitimately holds `update` here.
+      const voided = await app.inject({ method: "PATCH", url: `/api/${tenant}/invoices/${id}`, headers: asUser(admin2), payload: { status: "void" } });
+      expect(voided.statusCode).toBe(200);
+
+      revs = await getRevisions(id);
+      expect(revs).toHaveLength(2);
+      expect(revs[1]).toMatchObject({ action: "status_changed", actorId: admin2 });
+      // The PRE-EDIT state is reconstructible from this ONE revision row's own before_snapshot —
+      // no need to touch revs[0] at all.
+      expect(revs[1].before?.status).toBe("draft");
+      expect(revs[1].after.status).toBe("void");
+      expect(revs[1].changedFields).toEqual(expect.arrayContaining(["status", "updatedAt", "updatedBy"]));
+
+      const afterVoid = (await app.inject({ method: "GET", url: `/api/${tenant}/invoices/${id}`, headers: asUser(admin) })).json() as { updatedBy: string; status: string };
+      expect(afterVoid.updatedBy).toBe(admin2); // "the last person who made changes"
+      expect(afterVoid.status).toBe("void");
+    });
+
+    it("approve() records a revision with before.status='draft', after.status='approved', actor=the approver (not the creator)", async () => {
+      const created = await app.inject({
+        method: "POST", url: `/api/${tenant}/invoices`, headers: asUser(admin),
+        payload: { clientId, periodStart: "2026-07-01", periodEnd: "2026-07-31", rate: 10 },
+      });
+      const id = created.json().id as string;
+      const approve = await app.inject({ method: "POST", url: `/api/${tenant}/invoices/${id}/approve`, headers: asUser(admin2) });
+      expect(approve.statusCode).toBe(200);
+
+      const revs = await getRevisions(id);
+      expect(revs).toHaveLength(2); // created, approved
+      const approvedRev = revs[1];
+      expect(approvedRev.action).toBe("approved");
+      expect(approvedRev.actorId).toBe(admin2); // the CHECKER, not admin (the maker)
+      expect(approvedRev.before?.status).toBe("draft");
+      expect(approvedRev.after.status).toBe("approved");
+      expect(approvedRev.after.updatedBy).toBe(admin2);
+    });
+
+    it("a self-approval attempt that Cerbos denies (403) records NO revision — a rejected mutation must not appear in the forensic trail", async () => {
+      const created = await app.inject({
+        method: "POST", url: `/api/${tenant}/invoices`, headers: asUser(admin),
+        payload: { clientId, periodStart: "2026-07-01", periodEnd: "2026-07-31", rate: 10 },
+      });
+      const id = created.json().id as string;
+      const revsBefore = await getRevisions(id);
+      const denied = await app.inject({ method: "POST", url: `/api/${tenant}/invoices/${id}/approve`, headers: asUser(admin) });
+      expect(denied.statusCode).toBe(403);
+      const revsAfter = await getRevisions(id);
+      expect(revsAfter).toHaveLength(revsBefore.length); // unchanged — the 403 short-circuits before any DB write
     });
   });
 });

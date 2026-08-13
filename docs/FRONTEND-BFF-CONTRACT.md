@@ -133,7 +133,8 @@ pm.manage, it.manage, approvals.decide, knowledge.review`.
 | ✅ (UI built) | GET/POST/PATCH | `/api/:t/deliverables[?projectId][/:id]` | BUILT (`client-work.controller.ts`). UI: `/deliverables` list + `/deliverables/new`. |
 | ✅ (UI built) | GET/POST | `/api/:t/time-entries` | BUILT (incl. PATCH). UI: `/timesheets` (totals + billable rollup + log). POST body `{minutes,projectId?,taskId?,billable,entryDate,notes}`. |
 | ✅ (UI built) | GET/POST | `/api/:t/invoices[/:id]` (+`PATCH` status) | BUILT (`billing.controller.ts`: GET, GET/:id, POST, PATCH). **Billing** UI: `/billing` list + `/billing/new` (generate from billable time in a period × rate) + `/billing/[id]` (line items, mark sent/paid). `Invoice` shape in `lib/billing.ts`. `company.manage` only. |
-| — (no UI yet) | POST | `/api/:t/invoices/:invoiceId/approve` | **NEW, IAM-GAP-01 (2026-08-13, BACKEND BUILT, no UI).** Maker/checker: `draft → approved`. Requires `billing.invoice.approve`; policy denies the invoice's own creator (`created_by`, migration `0107`) and fails closed if the creator is unknown (legacy pre-migration rows). `PATCH .../invoices/:id` can no longer reach `'sent'`/`'paid'` unless the invoice is already `'approved'` — `'approved'` itself is reachable ONLY through this endpoint, never via the generic PATCH. Response adds `createdBy`/`approvedBy`/`approvedAt` to the GET/list shape. **UI TODO**: an "Approve" action + these three fields on `/billing/[id]`; not built by this backend-only ticket. |
+| — (no UI yet) | POST | `/api/:t/invoices/:invoiceId/approve` | **NEW, IAM-GAP-01 (2026-08-13, BACKEND BUILT, no UI).** Maker/checker: `draft → approved`. Requires `billing.invoice.approve`; policy denies the invoice's own creator (`created_by`, migration `0107`) and fails closed if the creator is unknown (legacy pre-migration rows). `PATCH .../invoices/:id` can no longer reach `'sent'`/`'paid'` unless the invoice is already `'approved'` — `'approved'` itself is reachable ONLY through this endpoint, never via the generic PATCH. Response adds `createdBy`/`approvedBy`/`approvedAt` to the GET/list shape. **UI TODO**: an "Approve" action + these three fields on `/billing/[id]`; not built by this backend-only ticket. **IAM-GAP-02 (2026-08-13) update: the self-approval hole is closed for EVERY approver tier, including `platform_admin`/`group_executive`** (they previously bypassed the creator check via their pre-existing wildcard; now a structural Cerbos `EFFECT_DENY` blocks creator===approver for anyone, no exceptions) — no contract/shape change, callers just see the SAME 403 a company_admin/manager already got, now also for those two roles. |
+| — (no UI, no read endpoint yet) | — | *(data-layer only)* invoice revision history | **NEW, IAM-GAP-02 (2026-08-13, DATA CAPTURE ONLY).** Every invoice mutation (create/status-change/approve, plus the staff payment-confirmation path in `contracts.controller.ts`) now writes one `invoice_revisions` row (who/when/before-snapshot/after-snapshot) in the SAME transaction as the mutation, and every mutation sets `invoices.updated_by`. The GET/list response gains one additive field: **`updatedBy`** alongside the existing `createdBy`/`approvedBy`/`approvedAt`. **No new read endpoint for the revision history itself** — deeper forensics/analysis surface is explicitly deferred to a separate session (per the ticket); this row exists so the UI team knows `updatedBy` is now real data, not so they build a history view against it yet. |
 | ✅ (UI built) | GET | `/api/:t/modules/agency/approvals/decided` | BUILT. Decided-approval **history** (Approvals page "Recently decided"). Add `campaignId` to pending items so the UI deep-links to the campaign. |
 | — | (pure UI) | Calendar `/calendar` | Agenda + workload built entirely from existing task/deliverable/project due dates — no new endpoint. |
 | ✅ (UI built) | GET/POST/DELETE | `/api/:t/files[?entityType&entityId][/:id]` | BUILT (`files.controller.ts`: GET, POST, GET/:id, GET/:id/content, DELETE). **Attachments** on project + task detail. POST body today is a **reference** `{entityType,entityId,filename,url?}` → `{id}`. **TODO: true binary/multipart upload** (`multipart/form-data` with the file part) — UI attaches references for now. |
@@ -2877,3 +2878,86 @@ automation instead of a console.
 `social.posts.published.month`, `social.approvals.pending`, `social.inbox.open`,
 `social.usage_cost.month` (USD minor units, `isMonetary`). All are real queries against 0105's
 tables and read zero until the later write paths land.
+
+---
+
+## 20. Monitoring module — Plane B property/service monitoring (MON-* program, 2026-08-13) — `platform-ui/src/lib/monitoring.ts` — **STATUS: UI PROTOTYPED, BACKEND NOT STARTED (every row PENDING)**
+
+Design: `docs/blueprints/monitoring-program.md`. Shapes are **canonical in `platform-ui/src/lib/monitoring.ts`** —
+implement the backend to match those exported types, not a re-derivation from this table.
+
+**Plane separation is load-bearing.** This section covers **Plane B only** — the tenant's clients'
+websites and services. Plane A (our own containers: Prometheus/Loki/Tempo/Grafana on `gda-aicenter`)
+is staff-only, lives in Grafana behind an SSH tunnel, and must **never** be surfaced through these
+endpoints. Merging the two is what made Gaia Nexus's monitoring dashboard fictional.
+
+**Tenancy.** Every row is scoped `company → client → property`, matching `search_properties`
+(`tenant_id` + `client_id NOT NULL`). Hierarchy traversal must never cross a root company
+(MON-00) — DnA Holding rolling up its children must not become a path to another root's rows.
+
+| Method | Path | Scope / gate | Returns | Status |
+|---|---|---|---|---|
+| GET | `/api/:t/monitoring/monitors?clientId&kind&status` | `monitoring.read` | `Monitor[]` | ⏳ PENDING |
+| POST | `/api/:t/monitoring/monitors` | `monitoring.write` | `{ id }` | ⏳ PENDING |
+| GET | `/api/:t/monitoring/monitors/:id` | `monitoring.read` | `MonitorDetail` \| 404 | ⏳ PENDING |
+| PATCH | `/api/:t/monitoring/monitors/:id` | `monitoring.write` | `{ id }` | ⏳ PENDING |
+| GET | `/api/:t/monitoring/monitors/:id/results?window=24h\|7d\|30d` | `monitoring.read` | `MonitorResult[]` | ⏳ PENDING |
+| GET | `/api/:t/monitoring/incidents?status&limit` | `monitoring.read` | `Incident[]` | ⏳ PENDING |
+| POST | `/api/:t/monitoring/incidents/:id/ack` | `monitoring.ack` | `{ id }` | ⏳ PENDING |
+| GET | `/api/:t/monitoring/summary` | `monitoring.read` | `MonitoringSummary` | ⏳ PENDING |
+| GET | `/api/:t/monitoring/kinds` | `monitoring.read` | `MonitorKindSpec[]` | ⏳ PENDING |
+| GET | `/api/:t/monitoring/maintenance` | `monitoring.read` | `MaintenanceWindow[]` | ⏳ PENDING |
+| POST | `/api/:t/monitoring/maintenance` | `monitoring.write` | `{ id }` | ⏳ PENDING |
+| POST | `/api/:t/monitoring/heartbeat/:token` | **unauthenticated by design** (token IS the credential) | `204` | ⏳ PENDING |
+| GET | `/api/:t/monitoring/channels` | `monitoring.read` | `MonitorChannel[]` | ⏳ PENDING |
+| POST | `/api/:t/monitoring/channels/:id/test` | `monitoring.write` | `{ ok }` | ⏳ PENDING |
+| GET | `/api/:t/monitoring/routes` | `monitoring.read` | `MonitorRoute[]` | ⏳ PENDING |
+
+### Contract notes the backend must honour
+
+1. **`GET /summary` must 404 when the module is not enabled — never return a zeroed summary.**
+   The UI treats `null` as "backend absent" and renders an explicit *not connected* warning; a
+   zeroed `{total:0, up:0, …}` would render as a confident all-clear. This is the single most
+   important row in this section: the module exists to replace a dashboard that always looked green.
+2. **`lastCheckedAt: null` means never checked.** The UI renders "never" and treats the monitor as
+   stale. Do not backfill it with `created_at`.
+3. **Staleness is computed client-side** as `age > max(intervalSec * 3, 60s)`. The backend must
+   therefore return an accurate `intervalSec` per monitor; a wrong interval silently disables the
+   staleness warning.
+4. **`GET /kinds` drives the UI kind picker** from the driver registry. A kind whose driver is not
+   registered must appear with `available:false`, not be omitted — "absent, not silently inert".
+   Omitting it makes an unimplemented capability indistinguishable from one that was never designed.
+5. **`config` on `MonitorDetail` is redacted server-side.** It may carry secret *references* only.
+   A webhook URL with an embedded token is a credential and must not appear here.
+6. **Heartbeat ingest is unauthenticated on purpose** — the URL token is the credential, so that a
+   cron job or n8n flow can `curl` it with no session. It must therefore be rate-limited, constant-
+   time compared, and scoped to exactly one monitor.
+7. **`MonitorChannel.destination` is a DISPLAY-SAFE summary, not the config.** A webhook URL with
+   an embedded token is a credential; return `https://host/webhook/abc…` truncated, never the whole
+   thing. `monitoring.read` is a broad grant — anyone who can see the board can see this field.
+8. **`channelHealth` is computed client-side from `failureCount` + `lastDeliveryOk`.** The backend
+   must maintain `failureCount` as *consecutive* failures reset to 0 on success. A channel that is
+   enabled and failing is worse than no channel — it looks like coverage — so this counter is what
+   the UI escalates on, not a boolean.
+9. **Public status pages (`/status/:slug`) are NOT in this section.** They are an unauthenticated
+   surface with their own strict field allowlist (monitoring-program.md §3.5) and must not reuse
+   these shapes — `target`, `config` and assertion strings are all forbidden there.
+
+### UI consumers (built 2026-08-13)
+
+- `/monitoring` — operations board: KPI tiles, worst-first monitor table, open incidents, explicit
+  stale-monitor callout, explicit backend-absent state.
+- `/monitoring/[id]` — monitor detail: uptime strip (one cell per check), incident history, recent
+  checks, TLS/domain expiry tiles.
+- `/monitoring/new` — monitor editor. The kind picker is rendered **from `GET /kinds`**, so a driver
+  registered server-side appears here with no frontend change; a kind with `available:false` renders
+  disabled rather than hidden.
+- `/monitoring/channels` — notification channels + routes, surfacing three quiet failure modes:
+  a channel failing its last 3 deliveries, an enabled channel with no route pointing at it, and a
+  catch-all route that matches every event.
+- Writes: `lib/monitoringActions.ts` (`createMonitor`, `acknowledgeIncident`, `scheduleMaintenance`,
+  `testChannel`).
+- Nav: **Business → Monitoring** (`components/shell/nav.ts`, indexed in `docs/sidebar-nav-map.md`).
+- DEMO_MODE fixtures: `lib/demoMonitoring.ts` — seeded with a down/degraded/stale/maintenance/
+  unknown/never-checked spread plus expiring cert and domain, so every branch is drivable with no
+  backend. Wired into `demoFixtures.getDemoResponse`.

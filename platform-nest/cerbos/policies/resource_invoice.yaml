@@ -28,6 +28,32 @@ resourcePolicy:
     # only — would leave "department manager tier" unimplemented for this gap; flagged in the
     # ticket report for the owner to adjust).
     #
+    # IAM-GAP-02 (2026-08-13) — "approval is based on managers related" — CONFIRMED reading, NOT a
+    # narrowing: the owner's own words. This rule's `manager` reach is exactly what
+    # `derived_roles.yaml`'s `manager` definition already grants at `scopeType == "company"` —
+    # ANY manager holding a company-scope grant for THIS invoice's tenant, stated PLAINLY as the
+    # interpretation actually implemented, per the ticket's own instruction not to silently equate
+    # "related" with "any manager in the tenant" without flagging it:
+    #   - `invoices` carries only `client_id`; its lines are computed at creation from
+    #     `time_entries` across potentially MULTIPLE of that client's projects (one line per
+    #     project) and frozen as JSONB `{description, hours, rate, amount}` — no `project_id` is
+    #     stored per line, only the project's NAME. There is therefore no persisted per-invoice
+    #     project identifier this policy could check against `manager`'s existing project-scope
+    #     branch (`g.scopeType == "project" && g.scopeId == request.resource.attr.projectId`).
+    #   - `clients` carries no manager/account-owner column at all (`0001_core.sql`); `projects`
+    #     has `owner_id`, but that is an arbitrary PM-tool assignee field, not a Cerbos grant scope
+    #     — it cannot be compared against `request.principal.attr.grants` without a second lookup
+    #     Cerbos's resource-attribute model doesn't support here.
+    #   - A tighter relation (e.g. "a manager scoped to ANY project this invoice's lines were drawn
+    #     from") is NOT cheaply expressible without a schema change (storing `project_id` per
+    #     invoice line, or a `projectIds` resource attribute + widening `manager`'s own derived-role
+    #     condition to check array containment instead of equality) — both are bigger than this
+    #     ticket's authorized surface (the manager derived role is shared by ~30 other resource
+    #     kinds; widening its shape belongs with the schema owner, not a policy-only pass).
+    # So: same-company `manager`, exactly as this rule already read before this pass — flagged so
+    # the owner can tighten it in a follow-up (e.g. by capturing project_id per invoice line) if
+    # "related" was meant to be narrower than "any manager in the tenant".
+    #
     # FAIL CLOSED on an unknown creator: `has(...) && != ""` before the `!=` comparison. Without
     # the non-empty check, an unset/legacy `creatorId` ("" — see cerbos.ts's resourcePayload
     # default) would satisfy `creatorId != principal.id` VACUOUSLY (empty string is never equal to
@@ -37,7 +63,9 @@ resourcePolicy:
     # by company_admin/manager until an operator sets `created_by` by hand — only the
     # platform_admin/group_executive wildcard rule at the top of this file (pre-existing, unchanged
     # by this ticket) can still approve a legacy row, same as it already bypasses create/read/
-    # update/delete.
+    # update/delete... EXCEPT that the DENY rule immediately below now closes exactly that bypass
+    # for the one case where it was actually a hole: the wildcard holder being the invoice's OWN
+    # creator. See that rule's own comment for the full IAM-GAP-02 account.
     - actions: ["approve"]
       effect: EFFECT_ALLOW
       derivedRoles: ["company_admin", "manager"]
@@ -53,6 +81,53 @@ resourcePolicy:
     # `perms`-array mirror would grant `approve` to a company_admin/manager who IS the creator,
     # exactly the over-grant `iam-04-reg1-mirror-reach-invariant.test.ts` exists to catch. Do not
     # wire one; see derived_roles.yaml's IAM-04a header for the general rule this follows.
+
+    # ══════════ IAM-GAP-02 (2026-08-13) — the self-approval hole, closed STRUCTURALLY. IAM-GAP-01's
+    # own report (docs/superpowers/plans/2026-08-13-iam-gap-01-report.md §4.5) flagged this loudly:
+    # the wildcard rule at the very top of this file (`actions: ["*"]`, `platform_admin` +
+    # `group_executive`, NO condition) sits ABOVE the maker/checker ALLOW rule and grants `approve`
+    # unconditionally — so either elevated role could approve an invoice it created itself. The
+    # owner: a two-person rule means "1 superadmin + 1 owner" — being IN the approver set must
+    # never mean being able to approve your OWN invoice, and that must hold for EVERY holder of
+    # `approve`, platform_admin/group_executive included, not just company_admin/manager.
+    #
+    # SHAPE: `roles: ["user"]`, not `derivedRoles: [...]`. Every principal Cerbos ever evaluates
+    # carries the BASE role `"user"` (cerbos.ts's `principalPayload()` sets it unconditionally,
+    # for every caller), so this rule matches EVERYONE — company_admin, manager, platform_admin,
+    # group_executive, and any future role ever added to the approver set — with no name to keep
+    # in sync. Cerbos combines a kind's matching rules with deny-overrides semantics: if ANY rule
+    # matching the requested action evaluates EFFECT_DENY, the final decision is DENY regardless of
+    # how many EFFECT_ALLOW rules also matched, wildcard included. That is what makes this rule
+    # "cannot be walked around" rather than "one more condition to remember to copy" — a future
+    # rule (or a future wildcard on some other tier) that grants `approve` without repeating the
+    # creator check still loses to this DENY, because DENY is evaluated independently of which
+    # ALLOW rule fired. This is the FIRST `EFFECT_DENY` rule in this policy repository — the static
+    # suites that assumed a "zero-EFFECT_DENY invariant" as a defensive simplification
+    # (`iam-215-boundary-pin.test.ts`, `role-permission-parity.db.test.ts`) are unaffected: both
+    # compute reach ONLY from `EFFECT_ALLOW` rules that name a role via `derivedRoles`, and this
+    # rule names no derived role at all (`roles: ["user"]`), so it is invisible to — and does not
+    # perturb — either computation. It is a genuine behavioural change ONLY at Cerbos decision time.
+    #
+    # GUARD SHAPE MIRRORS THE ALLOW RULE ABOVE ON PURPOSE: `has(...) && != ""` BEFORE the equality
+    # check. This is NOT symmetrical with the ALLOW rule's fail-closed need (an unauthenticated-
+    # feeling empty creatorId can never equal a real `principal.id`, so the guard is technically
+    # unreachable either way) — it is kept so a future reader can never "simplify" this to a bare
+    # `creatorId == principal.id` and change the empty-string case's behaviour without noticing.
+    # Consequence, stated plainly per the ticket's own instruction: an UNKNOWN/empty creatorId
+    # NEVER satisfies this DENY's condition, so it never fires for a legacy row — that row's fate
+    # is decided entirely by the ALLOW rules' own fail-closed condition (no matching ALLOW =
+    # default-deny for company_admin/manager; the wildcard still ALLOWs it for platform_admin/
+    # group_executive, unchanged from IAM-GAP-01 — a legacy row has no recorded creator to conflict
+    # with anyone). This rule narrows NOTHING about the unknown-creator case; it only ever fires
+    # when creatorId is KNOWN and equals the caller.
+    - actions: ["approve"]
+      effect: EFFECT_DENY
+      roles: ["user"]
+      condition:
+        match:
+          expr: >-
+            has(request.resource.attr.creatorId) && request.resource.attr.creatorId != "" &&
+            request.resource.attr.creatorId == request.principal.id
 
     # =========== IAM-04-ROLLOUT-B12 -- permission-matching arm. PURELY ADDITIVE: every rule =====
     # above is byte-for-byte unchanged. Generic global-or-company mirror per action (see this

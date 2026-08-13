@@ -10,6 +10,7 @@ import { authorize, writeActivity } from "../../core/http";
 import { emitEvent } from "../../events/outbox.service";
 import { AuthGuard } from "../../auth/guards";
 import { ModuleEnabledGuard } from "../module-enabled.guard";
+import { recordInvoiceRevision, snapshotInvoice } from "./invoice-revisions";
 
 // IAM-GAP-01: `approved` is a real status (migration 0107 widened the CHECK) but is DELIBERATELY
 // NOT in this set — the only way INTO 'approved' is the dedicated /approve endpoint below, which
@@ -27,7 +28,8 @@ const INVOICE_SELECT = `
   SELECT i.id, i.client_id AS "clientId", COALESCE(cl.name, '(no client)') AS "clientName",
          to_char(i.period_start, 'YYYY-MM-DD') AS "periodStart", to_char(i.period_end, 'YYYY-MM-DD') AS "periodEnd",
          i.status, i.currency, i.lines, i.total::float8 AS total, i.created_at AS "createdAt",
-         i.created_by AS "createdBy", i.approved_by AS "approvedBy", i.approved_at AS "approvedAt"
+         i.created_by AS "createdBy", i.approved_by AS "approvedBy", i.approved_at AS "approvedAt",
+         i.updated_by AS "updatedBy"
   FROM invoices i LEFT JOIN clients cl ON cl.id = i.client_id
   WHERE i.deleted_at IS NULL`;
 
@@ -83,12 +85,17 @@ export class BillingController {
         return { description: r.project, hours, rate, amount };
       });
       const total = Math.round(lines.reduce((s, l) => s + l.amount, 0) * 100) / 100;
+      // IAM-GAP-02: `updated_by` is set to the creator at INSERT time too — right after creation
+      // the creator IS "the last person who made changes" (a trivially true, not fabricated,
+      // starting value), so the column is never spuriously NULL for a row nobody has touched yet.
       await c.query(
-        `INSERT INTO invoices (id, tenant_id, client_id, period_start, period_end, currency, lines, total, origin_site, created_by)
-         VALUES ($1, $2, $3, $4::date, $5::date, $6, $7, $8, $9, $10)`,
+        `INSERT INTO invoices (id, tenant_id, client_id, period_start, period_end, currency, lines, total, origin_site, created_by, updated_by)
+         VALUES ($1, $2, $3, $4::date, $5::date, $6, $7, $8, $9, $10, $10)`,
         [id, tenantId, clientId, periodStart, periodEnd, currency, JSON.stringify(lines), total, config.originSite, req.principal.userId],
       );
       await emitEvent(c, tenantId, "invoice", id, "invoice.created", { clientId, total, currency });
+      // IAM-GAP-02: revision #1 — before=null (nothing existed), after=the row just inserted.
+      await recordInvoiceRevision(c, tenantId, id, req.principal.userId, "created", null);
       return { total, lineCount: lines.length };
     });
     await writeActivity(tenantId, req.principal.userId, "created", "invoice", id, { total: invoice.total });
@@ -117,9 +124,17 @@ export class BillingController {
           throw new BadRequestException(`invoice must be approved before it can be marked '${b.status}' (currently '${current.rows[0].status}')`);
         }
       }
-      const res = await c.query(`UPDATE invoices SET status = $2, updated_at = now() WHERE id = $1 AND deleted_at IS NULL`, [invoiceId, b.status]);
+      // IAM-GAP-02: snapshot BEFORE the mutation — the row must still exist to 404 correctly, and
+      // the revision needs the pre-edit state to be reconstructible.
+      const before = await snapshotInvoice(c, invoiceId);
+      if (!before || before.deletedAt) throw new NotFoundException("invoice not found");
+      const res = await c.query(
+        `UPDATE invoices SET status = $2, updated_by = $3, updated_at = now() WHERE id = $1 AND deleted_at IS NULL`,
+        [invoiceId, b.status, req.principal.userId],
+      );
       if (res.rowCount === 0) throw new NotFoundException("invoice not found");
       await emitEvent(c, tenantId, "invoice", invoiceId, "invoice.updated", { status: b.status });
+      await recordInvoiceRevision(c, tenantId, invoiceId, req.principal.userId, "status_changed", before);
     });
     await writeActivity(tenantId, req.principal.userId, "updated", "invoice", invoiceId, { status: b.status });
     return { ok: true };
@@ -147,13 +162,20 @@ export class BillingController {
       throw new BadRequestException(`invoice is '${row.rows[0].status}', not awaiting approval (only 'draft' invoices can be approved)`);
     }
     await withTenants([tenantId], async (c) => {
+      // IAM-GAP-02: snapshot BEFORE the mutation, inside the SAME transaction as the UPDATE below
+      // (not the earlier, pre-authorize SELECT above, which ran in its own separate `withTenants`
+      // call — a concurrent edit between that check and this transaction must not corrupt the
+      // revision's "before" state).
+      const before = await snapshotInvoice(c, invoiceId);
+      if (!before) throw new NotFoundException("invoice not found");
       const res = await c.query(
-        `UPDATE invoices SET status = 'approved', approved_by = $2, approved_at = now(), updated_at = now()
+        `UPDATE invoices SET status = 'approved', approved_by = $2, approved_at = now(), updated_by = $2, updated_at = now()
          WHERE id = $1 AND deleted_at IS NULL AND status = 'draft'`,
         [invoiceId, req.principal.userId],
       );
       if (res.rowCount === 0) throw new NotFoundException("invoice not found or no longer awaiting approval");
       await emitEvent(c, tenantId, "invoice", invoiceId, "invoice.approved", { approvedBy: req.principal.userId });
+      await recordInvoiceRevision(c, tenantId, invoiceId, req.principal.userId, "approved", before);
     });
     await writeActivity(tenantId, req.principal.userId, "approved", "invoice", invoiceId, {});
     return { ok: true, status: "approved" };
