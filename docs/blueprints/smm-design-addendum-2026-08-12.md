@@ -418,6 +418,53 @@ and that is a build task, not paperwork.
 Planning figure: **8–12 weeks** from cold start to Advanced Access on the full permission set, with at
 least two review rounds. No official SLA exists for any of it.
 
+## §A4g · OQ-1 research, third return (YouTube) — we cannot publish there for ~3 months
+
+**Recorded late (2026-08-13).** The command that should have written this section died at bash-parse
+time, so it never ran, and it was reported as recorded when it was not. Restored here from the
+research verbatim; the gap was caught when the section headings were listed after a merge.
+
+### 1. ⚠ Uploads are LOCKED TO PRIVATE until YouTube's own compliance audit passes
+
+Verified on three official pages: every video uploaded via `videos.insert` from an API project
+created after **2020-07-28** is **forced to `private`**, whatever `privacyStatus` we send. It does not
+error — it silently lands private. Any project we create today is affected.
+
+**The lift is the YouTube API Services compliance audit — NOT Google OAuth verification.** Two
+separate processes, two different teams; passing OAuth does nothing for this. Consequences:
+
+- **YouTube is upload-to-draft only until the audit passes.** A human must open YouTube Studio and
+  flip each video public. A scheduled YouTube publisher is not deliverable pre-audit.
+- No published SLA; reported outcomes run weeks to months (one documented five-month case). With
+  OAuth verification, plan **~3 months** before client-facing YouTube publishing is operable.
+- `tool_scope.networks.youtube` ships FALSE and stays false until the audit clears — same reasoning
+  as `networks.x`: a toggle that cannot do what its name says is worse than an absent one.
+- **UNVERIFIED, worth an empirical check:** whether `publishAt` scheduling fires at all under the
+  private lock. Google does not document the interaction. Assume it does not.
+
+### 2. ⚠ Delegated channel managers CANNOT use the API
+
+YouTube's help page states invited Managers/Editors cannot access **YouTube APIs**, though the owner
+can. The natural agency pattern — client invites `social@gaiada.com` as a channel Manager, we
+authenticate as that account — **does not work**. Every client's channel OWNER must personally
+complete our OAuth flow, and the only alternative is the client handing over owner credentials,
+which we should refuse.
+
+### 3. Good news, and a validation
+
+- **CASA is NOT required.** Every YouTube/yt-analytics scope is *sensitive*, not *restricted*; only
+  restricted scopes trigger the security assessment. Removes ~6 weeks and a four-figure cost.
+- **The quota model changed on 2026-06-01, in our favour:** `videos.insert` costs **1 unit** from a
+  separate **100 uploads/day** bucket, not 1,600 from the 10,000 pool. The real constraint is the
+  default bucket (~50–100 units per fully-configured publish). **Comment polling is the quota eater**
+  at agency scale; prefer the bulk Reporting API over Analytics polling.
+- **Policy III.I.2 forbids automating uploads/comments "without the user's prior specific and express
+  consent"**, and III.E.3.d requires consent *before* execution. **Our WS4 human-in-the-loop design is
+  what makes us compliant**, and its absence is a plausible audit rejection. D-6 was right for a
+  reason we had not anticipated.
+- **YouTube has no DM API** — its 26-resource surface has no messages/inbox resource; the in-app
+  feature was discontinued in 2019. Confirmed, not inferred.
+
 ## §A4h · OQ-1 research, fourth return (TikTok) — and what all four together mean
 
 ### TikTok's three findings
