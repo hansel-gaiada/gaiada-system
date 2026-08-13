@@ -243,7 +243,7 @@ function render() {
   for (const c of comps.filter((x) => x.kind === "node")) w(`- \`${c.dir}\` — ${c.scripts.map((s) => `\`${s}\``).join(", ")}`);
   w();
 
-  const files = ["docker-compose.vps.yml", "docker-compose.local.yml", "docker-compose.hostdata.yml", "docker-compose.observability.yml", "docker-compose.build.yml"];
+  const files = ["docker-compose.vps.yml", "docker-compose.local.yml", "docker-compose.hostdata.yml", "docker-compose.observability.yml", "docker-compose.build.yml", "docker-compose.social.yml"];
   w("## Compose");
   w();
   w("All compose files in `infra/compose/`: " + listFiles("infra/compose", ".yml").map((f) => `\`${f}\``).join(", ") + ".");
