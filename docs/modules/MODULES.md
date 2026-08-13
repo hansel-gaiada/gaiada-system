@@ -34,7 +34,7 @@ versions below; the running build reports it at `GET /health`.
 
 | Module | Ver | Status | Workstream | Since |
 |---|---|---|---|---|
-| platform-nest | `0.21.2` | IN PROGRESS | WS1 | 2026-08-12 |
+| platform-nest | `0.21.3` | IN PROGRESS | WS1 | 2026-08-12 |
 | platform-ui | `0.25.1` | IN PROGRESS | WS5 | 2026-08-11 |
 | ai-gateway-go | `0.13.2` | PROTOTYPED | WS3 | 2026-08-07 |
 | mcp-hub | `0.10.1` | PROTOTYPED | WS2 | 2026-08-09 |
@@ -49,7 +49,7 @@ versions below; the running build reports it at `GET /health`.
 | webdev | `0.13.0` | IN PROGRESS | Web Dev | 2026-08-09 |
 | webdesk | `0.0.0` | PLANNED | Web Dev | 2026-07-23 |
 | search-marketing | `0.5.1` | DEV-VERIFIED | SEO | 2026-08-04 |
-| social-media | `0.2.0` | IN PROGRESS | Social Media | 2026-08-12 |
+| social-media | `0.3.0` | IN PROGRESS | Social Media | 2026-08-13 |
 | creative | `0.1.0` | PROTOTYPED | Creative | 2026-07 |
 | render-gateway-go | `0.0.0` | PLANNED | Creative | 2026-07-23 |
 | reports | `0.3.1` | PROTOTYPED | Cross-cutting | 2026-08-03 |
@@ -58,7 +58,26 @@ versions below; the running build reports it at `GET /health`.
 
 ---
 
-## platform-nest â€” Platform Core Â· `0.21.1` Â· PROTOTYPED
+## platform-nest â€” Platform Core Â· `0.21.3` Â· PROTOTYPED
+
+**0.21.3 (2026-08-12, HIER-5/TRAP-4 - `group_executive` was denied everywhere it was folded into
+an `inTenant` gate):** `group_executive` is a GLOBAL-scope-only role, so a holder has no
+`company_memberships` row and `variables.inTenant` is FALSE for them against every resource. Five
+policies (`automation_approval`, `pipeline_run`, `pipeline_gate`, `pipeline_stage`,
+`scope_signoff`) granted it inside the SAME rule as company_admin/manager, gated on
+`inTenant && notLow` - so the grant could never fire, and the cross-company oversight tier was
+denied on exactly the kinds it exists to oversee. Confirmed by live probe, not inferred. Split
+into its own `notLow`-only rule, matching `resource_appraisal.yaml`, which already had the right
+shape. This repairs the fold-in; it does not widen the role (D-7 will delete it). **Role bundles
+are unchanged and no migration is needed** - the bundle generator treats resource-instance
+conditions as satisfied when computing reach, so the split moves live Cerbos behaviour without
+moving computed coverage (`--check` byte-identical, re-verified). Landed by a concurrent session;
+recorded here by the `01.039.0091a` release cut, which needs an accurate manifest. The `social`
+module's own eight policies were written with this shape from the start and were never affected.
+
+**0.21.2 (2026-08-12, IAM scope guard + hazard detector):** shipped inside `Alpha 01.038.0089a`
+alongside the social module's IAM registration - see that release's entry and
+`docs/superpowers/plans/2026-08-11-iam-sec-03-report.md`.
 
 **0.21.1 (2026-08-11, HIER-3 — the `team`/`team_lead` retirement, contract half):** migration
 `0103` closes the expand/contract pair `0100` opened. `user_roles.scope_type` is now hard-narrowed
@@ -1210,7 +1229,33 @@ SM-23 (this reconciliation) â†’ SM-24.
 
 </details>
 
-## social-media — SMM · Organic Publishing · `0.2.0` · IN PROGRESS
+## social-media — SMM · Organic Publishing · `0.3.0` · IN PROGRESS
+
+**0.3.0 (2026-08-13, SMM-08 - the composer backend, DEV-VERIFIED):** posts + per-network variants
+CRUD, the media-rule validation engine, quota pre-check, `args_sha256` maintenance and the
+native-import path. Three things worth naming:
+
+1. **The hash is the estate's, not the module's.** `canonical-args.ts` reproduces the MCP hub's
+   canonical-JSON algorithm and asserts its three PUBLISHED fixed vectors, because that value is
+   what a single-use approval grant is bound to - if the two implementations drift by a byte,
+   every approved publish fails at the grant check. Two standalone projects, no shared package,
+   one contract held by copied vectors.
+2. **Edit invalidates approval, mechanically.** A content edit recomputes the hash, NULLs
+   `approval_id` and drops the variant back to `draft` in the SAME statement - there is no window
+   in which an approval points at content nobody approved. Proven end-to-end against a real
+   approval row, not asserted in a comment.
+3. **Validation refuses what the API would refuse, before an approver is asked.** Per-network
+   media/length/hashtag/settings rules plus the live quota, all pure functions so the composer,
+   the submit gate and the dispatch re-check share ONE implementation. Caption length counts code
+   POINTS (an emoji is one character, not two - counting UTF-16 units would have halved
+   Instagram's real allowance). X's 280 is deliberately SOFT (premium tiers exist and we cannot
+   see the account's), and an unknown quota WARNS rather than passing - `unknown` must never read
+   as `zero used`, which is how you queue the 26th Instagram post of the day.
+
+The network is always taken from the connector registry, never the request body, so a caller
+cannot claim a different network to dodge its rules. 50 tests across three files (10 hash, 19
+validation-matrix, 21 endpoint golden cases). Five MCP tools added; `submit` and `publish` remain
+deliberately UNDECLARED until SMM-09 builds the gate that honours them. BFF contract SS19 extended.
 
 **0.2.0 (2026-08-12, SMM-02 — the module shell, DEV-VERIFIED):** the `social` ModuleContract is
 registered in `bootstrap()` and `SocialController` serves `/api/:tenantId/modules/social` behind

@@ -39,6 +39,8 @@ import { emitEvent } from "../../events/outbox.service";
 import { AuthGuard } from "../../auth/guards";
 import { ModuleEnabledGuard } from "../module-enabled.guard";
 import { DEFAULT_TOOL_SCOPE, DEFAULT_USAGE_BUDGET_USD } from "./index";
+import { variantArgsSha256 } from "./canonical-args";
+import { validateVariant, estimateCostUsd, isNetwork, type Network, type QuotaSnapshot } from "./media-rules";
 
 const ENGAGEMENT_STATUSES = new Set(["draft", "active", "paused", "closed"]);
 const NETWORKS = new Set([
@@ -46,6 +48,14 @@ const NETWORKS = new Set([
   "youtube", "threads", "pinterest", "bluesky", "mastodon",
 ]);
 const UUID_RE = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+const POST_STATUSES = new Set([
+  "idea", "draft", "in_review", "approved", "scheduled", "publishing",
+  "published", "partially_published", "failed", "archived",
+]);
+/** The variant states an EDIT is allowed to touch. Anything past this is either in flight at the
+ *  provider or already public, and editing the row would desynchronise us from the network — the
+ *  content is out there, and our copy would start lying about what was posted. */
+const EDITABLE_VARIANT_STATUSES = new Set(["draft", "in_review", "approved"]);
 
 /** Criterion 2: a refusal an agent can branch on. The snake_case TOKEN goes in `message`, which the
  *  global HttpErrorFilter renames to `error` on the way out — so the response is
@@ -538,5 +548,421 @@ export class SocialController {
     );
     if (created) await writeActivity(tenantId, req.principal.userId, "created", "social_kpi_target", id, { metricKey: body.metricKey });
     return { id, created };
+  }
+
+  // ================================================================== POSTS ==================
+  // The master post carries the idea and rolls up its variants' states; the per-network content
+  // lives on the variants (design §00.2 — there is deliberately NO universal post object).
+
+  @Get("posts")
+  async listPosts(
+    @Req() req: FastifyRequest, @Param("tenantId") tenantId: string,
+    @Query("engagementId") engagementId?: string, @Query("status") status?: string,
+  ) {
+    await authorize(req.principal, { kind: "social_post", tenantId, module: "social" }, "read");
+    const params: unknown[] = [];
+    const clauses = ["p.deleted_at IS NULL"];
+    if (engagementId) { params.push(engagementId); clauses.push(`p.engagement_id = $${params.length}`); }
+    if (status) {
+      if (!POST_STATUSES.has(status)) refuse("invalid_status");
+      params.push(status); clauses.push(`p.status = $${params.length}`);
+    }
+    const { rows } = await withTenants(
+      [tenantId],
+      (c) => c.query(
+        // The variant roll-up is what the calendar renders, so it comes back with the list rather
+        // than as N+1 follow-up reads.
+        `SELECT p.id, p.engagement_id AS "engagementId", p.campaign_id AS "campaignId", p.title,
+                p.brief, p.source, p.status, p.scheduled_at AS "scheduledAt",
+                p.created_by AS "createdBy", p.created_at AS "createdAt",
+                COALESCE(v.variants, '[]'::json) AS variants
+           FROM social_posts p
+           LEFT JOIN LATERAL (
+             SELECT json_agg(json_build_object(
+                      'id', sv.id, 'accountId', sv.account_id, 'status', sv.status,
+                      'scheduledAt', sv.scheduled_at, 'publishedUrl', sv.published_url,
+                      'nativeImport', sv.native_import,
+                      'estimatedCostUsd', sv.estimated_cost_usd) ORDER BY sv.created_at) AS variants
+               FROM social_post_variants sv
+              WHERE sv.post_id = p.id AND sv.deleted_at IS NULL
+           ) v ON true
+          WHERE ${clauses.join(" AND ")}
+          ORDER BY COALESCE(p.scheduled_at, p.created_at) DESC LIMIT 500`,
+        params,
+      ),
+      { modules: ["social"] },
+    );
+    return rows;
+  }
+
+  @Post("posts")
+  @HttpCode(201)
+  async createPost(
+    @Req() req: FastifyRequest, @Param("tenantId") tenantId: string,
+    @Body() body: { id?: string; engagementId?: string; campaignId?: string; title?: string; brief?: string; source?: string; scheduledAt?: string },
+  ) {
+    if (!body?.engagementId || !body?.title) refuse("missing_field");
+    if (body.id && !UUID_RE.test(body.id)) refuse("invalid_id");
+    // `source` records WHO originated the idea — human, ai, agent, or a native import. It is not
+    // cosmetic: P4's agent flow is measured on it, and 'native_import' carries a different state
+    // law (see importNative below), so it is never settable here.
+    const source = body.source ?? "human";
+    if (!["human", "ai", "agent"].includes(source)) refuse("invalid_source");
+    await authorize(req.principal, { kind: "social_post", tenantId, module: "social" }, "create");
+    const id = body.id ?? newId();
+    const created = await withTenants(
+      [tenantId],
+      async (c) => {
+        const ins = await c.query(
+          `INSERT INTO social_posts (id, tenant_id, engagement_id, campaign_id, title, brief, source, scheduled_at, created_by, origin_site)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT (id) DO NOTHING`,
+          [id, tenantId, body.engagementId, body.campaignId ?? null, body.title, body.brief ?? null,
+           source, body.scheduledAt ?? null, req.principal.userId, config.originSite],
+        );
+        return (ins.rowCount ?? 0) > 0;
+      },
+      { modules: ["social"] },
+    );
+    if (created) await writeActivity(tenantId, req.principal.userId, "created", "social_post", id, { title: body.title, source });
+    return { id, created };
+  }
+
+  @Get("posts/:postId")
+  async getPost(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("postId") postId: string) {
+    await authorize(req.principal, { kind: "social_post", id: postId, tenantId, module: "social" }, "read");
+    const { rows } = await withTenants(
+      [tenantId],
+      (c) => c.query(
+        `SELECT p.id, p.engagement_id AS "engagementId", p.campaign_id AS "campaignId", p.title, p.brief,
+                p.source, p.status, p.scheduled_at AS "scheduledAt", p.custom_fields AS "customFields",
+                p.created_by AS "createdBy", p.created_at AS "createdAt", p.updated_at AS "updatedAt"
+           FROM social_posts p WHERE p.id = $1 AND p.deleted_at IS NULL`,
+        [postId],
+      ),
+      { modules: ["social"] },
+    );
+    if (!rows[0]) throw new NotFoundException("social post not found");
+    const variants = await withTenants(
+      [tenantId],
+      (c) => c.query(
+        `SELECT v.id, v.account_id AS "accountId", a.network, a.handle, v.body, v.first_comment AS "firstComment",
+                v.media, v.settings, v.validation, v.args_sha256 AS "argsSha256", v.approval_id AS "approvalId",
+                v.native_import AS "nativeImport", v.scheduled_at AS "scheduledAt", v.status,
+                v.published_url AS "publishedUrl", v.published_at AS "publishedAt", v.last_error AS "lastError",
+                v.estimated_cost_usd AS "estimatedCostUsd"
+           FROM social_post_variants v
+           JOIN social_accounts a ON a.id = v.account_id
+          WHERE v.post_id = $1 AND v.deleted_at IS NULL ORDER BY v.created_at`,
+        [postId],
+      ),
+      { modules: ["social"] },
+    );
+    return { ...rows[0], variants: variants.rows };
+  }
+
+  @Patch("posts/:postId")
+  async updatePost(
+    @Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("postId") postId: string,
+    @Body() body: { title?: string; brief?: string; campaignId?: string | null; scheduledAt?: string | null; status?: string },
+  ) {
+    await authorize(req.principal, { kind: "social_post", id: postId, tenantId, module: "social" }, "update");
+    if (body?.status && !POST_STATUSES.has(body.status)) refuse("invalid_status");
+    const sets: string[] = [];
+    const params: unknown[] = [];
+    for (const [col, val] of [
+      ["title", body?.title], ["brief", body?.brief], ["campaign_id", body?.campaignId],
+      ["scheduled_at", body?.scheduledAt], ["status", body?.status],
+    ] as const) {
+      if (val !== undefined) { params.push(val); sets.push(`${col} = $${params.length}`); }
+    }
+    if (!sets.length) refuse("no_fields");
+    params.push(postId);
+    const { rowCount } = await withTenants(
+      [tenantId],
+      (c) => c.query(`UPDATE social_posts SET ${sets.join(", ")}, updated_at = now() WHERE id = $${params.length} AND deleted_at IS NULL`, params),
+      { modules: ["social"] },
+    );
+    if (!rowCount) throw new NotFoundException("social post not found");
+    await writeActivity(tenantId, req.principal.userId, "updated", "social_post", postId, { fields: sets.length });
+    return { ok: true };
+  }
+
+  @Delete("posts/:postId")
+  async deletePost(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("postId") postId: string) {
+    await authorize(req.principal, { kind: "social_post", id: postId, tenantId, module: "social" }, "delete");
+    // A post with anything public under it is not deletable here: taking a live post down is
+    // `delete_published`, a separately-permissioned outbound action (SMM-09/10), not a soft-delete
+    // of our own row. Deleting the row would orphan something the world can still see.
+    const live = await withTenants(
+      [tenantId],
+      (c) => c.query<{ n: string }>(
+        `SELECT count(*) AS n FROM social_post_variants
+          WHERE post_id = $1 AND deleted_at IS NULL AND status IN ('queued','publishing','published')`,
+        [postId],
+      ),
+      { modules: ["social"] },
+    );
+    if (Number(live.rows[0].n) > 0) refuse("post_has_live_variants");
+    const { rowCount } = await withTenants(
+      [tenantId],
+      async (c) => {
+        await c.query(`UPDATE social_post_variants SET deleted_at = now() WHERE post_id = $1 AND deleted_at IS NULL`, [postId]);
+        return c.query(`UPDATE social_posts SET deleted_at = now() WHERE id = $1 AND deleted_at IS NULL`, [postId]);
+      },
+      { modules: ["social"] },
+    );
+    if (!rowCount) throw new NotFoundException("social post not found");
+    await writeActivity(tenantId, req.principal.userId, "deleted", "social_post", postId, {});
+    return { ok: true };
+  }
+
+  // ================================================================ VARIANTS =================
+  // Per-network content. Every write here maintains `args_sha256` (addendum D-15) and re-runs the
+  // validation engine, because those two values are what the publish gate and the approval card
+  // consume — computing them later, at submit time, would let a variant sit "looking fine" in the
+  // composer and fail at the gate.
+
+  @Post("posts/:postId/variants")
+  @HttpCode(201)
+  async createVariant(
+    @Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("postId") postId: string,
+    @Body() body: { id?: string; accountId?: string; body?: string; firstComment?: string | null; media?: unknown[]; settings?: Record<string, unknown>; scheduledAt?: string | null },
+  ) {
+    if (!body?.accountId) refuse("missing_field");
+    if (body.id && !UUID_RE.test(body.id)) refuse("invalid_id");
+    await authorize(req.principal, { kind: "social_post", id: postId, tenantId, module: "social" }, "update");
+    const account = await this.loadAccount(tenantId, body.accountId);
+    const id = body.id ?? newId();
+    const draft = {
+      body: body.body ?? "",
+      firstComment: body.firstComment ?? null,
+      media: (body.media ?? []) as never[],
+      settings: body.settings ?? {},
+    };
+    const validation = validateVariant(account.network, draft, account.quota);
+    const argsSha256 = variantArgsSha256({
+      tenantId, id, accountId: body.accountId, body: draft.body, firstComment: draft.firstComment,
+      media: draft.media, settings: draft.settings, scheduledAt: body.scheduledAt ?? null,
+    });
+    const created = await withTenants(
+      [tenantId],
+      async (c) => {
+        const ins = await c.query(
+          `INSERT INTO social_post_variants
+             (id, tenant_id, post_id, account_id, body, first_comment, media, settings, validation,
+              args_sha256, scheduled_at, estimated_cost_usd, origin_site)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) ON CONFLICT (id) DO NOTHING`,
+          [id, tenantId, postId, body.accountId, draft.body, draft.firstComment,
+           JSON.stringify(draft.media), JSON.stringify(draft.settings), JSON.stringify(validation),
+           argsSha256, body.scheduledAt ?? null, estimateCostUsd(account.network, draft), config.originSite],
+        );
+        return (ins.rowCount ?? 0) > 0;
+      },
+      { modules: ["social"] },
+    );
+    if (created) await writeActivity(tenantId, req.principal.userId, "created", "social_post_variant", id, { network: account.network });
+    // The validation travels back with the 201 so the composer can render it immediately — the
+    // caller should never have to make a second call to find out whether what it just created is
+    // publishable.
+    return { id, created, validation, argsSha256, estimatedCostUsd: estimateCostUsd(account.network, draft) };
+  }
+
+  @Patch("variants/:variantId")
+  async updateVariant(
+    @Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("variantId") variantId: string,
+    @Body() body: { body?: string; firstComment?: string | null; media?: unknown[]; settings?: Record<string, unknown>; scheduledAt?: string | null },
+  ) {
+    await authorize(req.principal, { kind: "social_post", id: variantId, tenantId, module: "social" }, "update");
+    if (!body || Object.keys(body).length === 0) refuse("no_fields");
+
+    const result = await withTenants(
+      [tenantId],
+      async (c) => {
+        const { rows } = await c.query<{
+          id: string; account_id: string; body: string; first_comment: string | null;
+          media: unknown; settings: Record<string, unknown>; scheduled_at: Date | null;
+          status: string; approval_id: string | null; native_import: boolean;
+        }>(
+          `SELECT id, account_id, body, first_comment, media, settings, scheduled_at, status, approval_id, native_import
+             FROM social_post_variants WHERE id = $1 AND deleted_at IS NULL FOR UPDATE`,
+          [variantId],
+        );
+        const row = rows[0];
+        if (!row) return { kind: "not_found" as const };
+        // A native import DESCRIBES something already public; there is nothing here to edit that
+        // would change the world, and letting the text drift from what was actually posted turns
+        // the calendar into fiction.
+        if (row.native_import) return { kind: "refuse" as const, reason: "variant_native_import_immutable" };
+        if (!EDITABLE_VARIANT_STATUSES.has(row.status)) return { kind: "refuse" as const, reason: "variant_not_editable" };
+
+        const next = {
+          body: body.body ?? row.body,
+          firstComment: body.firstComment !== undefined ? body.firstComment : row.first_comment,
+          media: body.media ?? row.media,
+          settings: body.settings ?? row.settings,
+          scheduledAt: body.scheduledAt !== undefined ? body.scheduledAt : row.scheduled_at,
+        };
+        const argsSha256 = variantArgsSha256({ tenantId, id: row.id, accountId: row.account_id, ...next });
+        // THE STATE LAW, mechanically (design §04 / addendum D-15): an edit to approved content
+        // invalidates its approval. Not by policy, not by a reviewer remembering — the hash moves,
+        // so the grant can no longer match, and we drop the row back to `draft` in the same
+        // statement that changes the content. There is no window in which an approval points at
+        // content nobody approved.
+        const wasApproved = row.approval_id !== null || row.status === "approved";
+        await c.query(
+          `UPDATE social_post_variants
+              SET body = $1, first_comment = $2, media = $3, settings = $4, scheduled_at = $5,
+                  args_sha256 = $6, approval_id = NULL,
+                  status = CASE WHEN status IN ('in_review','approved') THEN 'draft' ELSE status END,
+                  updated_at = now()
+            WHERE id = $7`,
+          [next.body, next.firstComment, JSON.stringify(next.media), JSON.stringify(next.settings),
+           next.scheduledAt, argsSha256, variantId],
+        );
+        return { kind: "ok" as const, accountId: row.account_id, next, argsSha256, wasApproved };
+      },
+      { modules: ["social"] },
+    );
+    if (result.kind === "not_found") throw new NotFoundException("post variant not found");
+    if (result.kind === "refuse") refuse(result.reason);
+
+    // Re-validate against the account's live rules OUTSIDE the write transaction, then store the
+    // verdict. Split deliberately: validation reads the connector registry, and holding the row
+    // lock across that read would serialise every composer keystroke behind it.
+    const account = await this.loadAccount(tenantId, result.accountId);
+    const validation = validateVariant(account.network, {
+      body: result.next.body,
+      firstComment: result.next.firstComment,
+      media: (result.next.media ?? []) as never[],
+      settings: result.next.settings,
+    }, account.quota);
+    await withTenants(
+      [tenantId],
+      (c) => c.query(
+        `UPDATE social_post_variants SET validation = $1, estimated_cost_usd = $2 WHERE id = $3`,
+        [JSON.stringify(validation), estimateCostUsd(account.network, {
+          body: result.next.body, media: (result.next.media ?? []) as never[], settings: result.next.settings,
+        }), variantId],
+      ),
+      { modules: ["social"] },
+    );
+    await writeActivity(tenantId, req.principal.userId, "updated", "social_post_variant", variantId, {
+      approvalInvalidated: result.wasApproved,
+    });
+    return {
+      ok: true, validation, argsSha256: result.argsSha256,
+      // Say it out loud rather than leaving the caller to notice the status moved. An operator who
+      // edits an approved post must learn immediately that it needs approving again.
+      approvalInvalidated: result.wasApproved,
+    };
+  }
+
+  @Delete("variants/:variantId")
+  async deleteVariant(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("variantId") variantId: string) {
+    await authorize(req.principal, { kind: "social_post", id: variantId, tenantId, module: "social" }, "delete");
+    const result = await withTenants(
+      [tenantId],
+      async (c) => {
+        const { rows } = await c.query<{ status: string }>(
+          `SELECT status FROM social_post_variants WHERE id = $1 AND deleted_at IS NULL`, [variantId]);
+        if (!rows[0]) return { kind: "not_found" as const };
+        if (["queued", "publishing", "published"].includes(rows[0].status)) return { kind: "refuse" as const, reason: "variant_is_live" };
+        await c.query(`UPDATE social_post_variants SET deleted_at = now() WHERE id = $1`, [variantId]);
+        return { kind: "ok" as const };
+      },
+      { modules: ["social"] },
+    );
+    if (result.kind === "not_found") throw new NotFoundException("post variant not found");
+    if (result.kind === "refuse") refuse(result.reason);
+    await writeActivity(tenantId, req.principal.userId, "deleted", "social_post_variant", variantId, {});
+    return { ok: true };
+  }
+
+  @Get("variants/:variantId/validation")
+  async getVariantValidation(
+    @Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("variantId") variantId: string,
+  ) {
+    await authorize(req.principal, { kind: "social_post", id: variantId, tenantId, module: "social" }, "read");
+    const { rows } = await withTenants(
+      [tenantId],
+      (c) => c.query<{ account_id: string; body: string; first_comment: string | null; media: unknown; settings: Record<string, unknown> }>(
+        `SELECT account_id, body, first_comment, media, settings
+           FROM social_post_variants WHERE id = $1 AND deleted_at IS NULL`,
+        [variantId],
+      ),
+      { modules: ["social"] },
+    );
+    if (!rows[0]) throw new NotFoundException("post variant not found");
+    const account = await this.loadAccount(tenantId, rows[0].account_id);
+    const shape = {
+      body: rows[0].body, firstComment: rows[0].first_comment,
+      media: (rows[0].media ?? []) as never[], settings: rows[0].settings ?? {},
+    };
+    // Computed FRESH rather than read from the stored column: the quota moves under us between
+    // edits, so the stored verdict answers "was it valid when last written", and the caller asking
+    // this endpoint wants "is it valid now".
+    return {
+      validation: validateVariant(account.network, shape, account.quota),
+      estimatedCostUsd: estimateCostUsd(account.network, shape),
+      network: account.network,
+    };
+  }
+
+  // =============================================================== NATIVE IMPORT =============
+  // Bookkeeping for a post somebody published BY HAND in the network's own app. Calendar
+  // completeness without faking an approval trail: 0105's `svar_native_import_is_bookkeeping`
+  // CHECK makes the honesty structural — no approval id, no provider id, `published` only.
+  @Post("posts/import-native")
+  @HttpCode(201)
+  async importNative(
+    @Req() req: FastifyRequest, @Param("tenantId") tenantId: string,
+    @Body() body: { id?: string; engagementId?: string; accountId?: string; title?: string; body?: string; publishedUrl?: string; publishedAt?: string },
+  ) {
+    if (!body?.engagementId || !body?.accountId || !body?.title) refuse("missing_field");
+    if (body.id && !UUID_RE.test(body.id)) refuse("invalid_id");
+    await authorize(req.principal, { kind: "social_post", tenantId, module: "social" }, "import_native");
+    await this.loadAccount(tenantId, body.accountId); // 404s a cross-tenant or unknown account
+    const postId = body.id ?? newId();
+    const variantId = newId();
+    const created = await withTenants(
+      [tenantId],
+      async (c) => {
+        const ins = await c.query(
+          `INSERT INTO social_posts (id, tenant_id, engagement_id, title, source, status, scheduled_at, created_by, origin_site)
+           VALUES ($1,$2,$3,$4,'native_import','published',$5,$6,$7) ON CONFLICT (id) DO NOTHING`,
+          [postId, tenantId, body.engagementId, body.title, body.publishedAt ?? null, req.principal.userId, config.originSite],
+        );
+        if ((ins.rowCount ?? 0) === 0) return false;
+        await c.query(
+          `INSERT INTO social_post_variants
+             (id, tenant_id, post_id, account_id, body, native_import, status, published_url, published_at, origin_site)
+           VALUES ($1,$2,$3,$4,$5,true,'published',$6,$7,$8)`,
+          [variantId, tenantId, postId, body.accountId, body.body ?? "", body.publishedUrl ?? null,
+           body.publishedAt ?? null, config.originSite],
+        );
+        return true;
+      },
+      { modules: ["social"] },
+    );
+    if (created) await writeActivity(tenantId, req.principal.userId, "created", "social_post", postId, { nativeImport: true });
+    return { id: postId, created };
+  }
+
+  /** Load an account's network + live quota, refusing anything outside this tenant. Shared by every
+   *  variant path so the network a variant is validated against always comes from the REGISTRY,
+   *  never from the request body — a caller must not be able to claim "this is a Facebook post"
+   *  and dodge Instagram's rules. */
+  private async loadAccount(tenantId: string, accountId: string): Promise<{ network: Network; quota: QuotaSnapshot }> {
+    const { rows } = await withTenants(
+      [tenantId],
+      (c) => c.query<{ network: string; quota: QuotaSnapshot }>(
+        `SELECT network, quota FROM social_accounts WHERE id = $1 AND deleted_at IS NULL`,
+        [accountId],
+      ),
+      { modules: ["social"] },
+    );
+    if (!rows[0]) throw new NotFoundException("social account not found");
+    if (!isNetwork(rows[0].network)) refuse("unknown_network");
+    return { network: rows[0].network, quota: rows[0].quota ?? {} };
   }
 }

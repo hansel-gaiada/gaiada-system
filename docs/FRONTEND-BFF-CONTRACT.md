@@ -2773,6 +2773,36 @@ the served path is the normal one (the agency runs social for sibling companies)
 | `GET campaigns?engagementId=` / `POST campaigns` | `read` / `update` | `kind` is fixed `'organic'`; `'paid'` is a reserved schema seam, not a parameter. |
 | `GET kpi-targets?engagementId=` / `POST kpi-targets` | `read` / `update` | `metricKey` is the canonical set (`followers_total`, `reach_month`, …). |
 
+**Composer surface (SMM-08).** Cerbos kind `social_post`.
+
+| Method + path | Permission | Notes |
+|---|---|---|
+| `GET posts?engagementId=&status=` | `social.post.read` | Each row carries its variant roll-up (status, schedule, published URL, metered cost) — the calendar as data, without an N+1. |
+| `POST posts` | `social.post.create` | Idempotent on a caller-supplied `id`. `source` is `human\|ai\|agent`; `native_import` is NOT settable here. |
+| `GET posts/:postId` | `social.post.read` | Post + its variants joined to the account's network and handle. |
+| `PATCH posts/:postId` / `DELETE posts/:postId` | `social.post.update` / `.delete` | Delete refuses with `post_has_live_variants` when anything under it is queued/publishing/published — taking a live post down is `delete_published`, a different power. |
+| `POST posts/:postId/variants` | `social.post.update` | Returns `{validation, argsSha256, estimatedCostUsd}`. **The network comes from the connector registry, never the request** — a caller cannot claim a different network to dodge its rules. |
+| `PATCH variants/:variantId` | `social.post.update` | **Edit invalidates approval**: recomputes `args_sha256`, NULLs `approval_id` and drops `in_review`/`approved` back to `draft`, in the same statement. Answers `approvalInvalidated: true` so the caller learns it immediately. Refuses `variant_native_import_immutable` / `variant_not_editable`. |
+| `DELETE variants/:variantId` | `social.post.delete` | Refuses `variant_is_live`. |
+| `GET variants/:variantId/validation` | `social.post.read` | Computed **fresh**, not read from the stored column: answers "is this publishable now", since quota moves between edits. |
+| `POST posts/import-native` | `social.post.import_native` | Bookkeeping for a hand-posted item: `published`, `native_import`, no approval, no provider id (0105 CHECK-enforced). |
+
+Additional refusal tokens: `invalid_source`, `post_has_live_variants`, `variant_not_editable`,
+`variant_native_import_immutable`, `variant_is_live`.
+
+**Validation contract.** `validation` is `{ok, errors[], warnings[]}`; every issue is
+`{rule, message}` where `rule` is a snake_case token — render against the token. Errors block a
+submit; warnings never do. Current tokens: `body_required`, `body_too_long`, `body_near_limit`,
+`body_over_base_limit`, `media_required`, `too_many_media`, `wrong_media_kind`, `mixed_media_kinds`,
+`missing_alt_text`, `media_missing_file`, `first_comment_unsupported`, `too_many_hashtags`,
+`invalid_ig_type`, `reel_requires_video`, `story_single_media`, `invalid_tiktok_mode`,
+`tiktok_inbox_mode`, `invalid_yt_visibility`, `quota_exhausted`, `quota_near`, `quota_unknown`.
+
+Two behaviours a console must not paper over: **X's 280 is a soft limit** (a longer body warns, it
+does not block — premium accounts exist and the tier is not visible to us), and **an unknown quota
+is a warning, never a pass** — `quota_unknown` means the registry has not synced, not that zero
+posts have been used.
+
 **Refusal shape (binding for every FE consumer).** A 400 answers `{ error: "<snake_case_token>" }` —
 the token IS the contract: `missing_field`, `invalid_id`, `invalid_status`, `unknown_network`,
 `invalid_scope`, `invalid_scope_value`, `invalid_budget`, `invalid_direction`, `no_fields`. Render

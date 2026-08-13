@@ -87,6 +87,15 @@ export const socialModule: ModuleContract = {
     { key: "social.engagement.update", description: "Edit a social-media engagement and its brand-voice profile" },
     { key: "social.engagement.delete", description: "Delete a social-media engagement" },
     { key: "social.engagement.set_scope", description: "Set an engagement's tool scope and metered budget" },
+    // SMM-08 — the composer surface. `social.post.submit` and `.publish` are deliberately still
+    // ABSENT: submit arrives with the WS4 wiring and publish with the D14 gate (SMM-09). Declaring
+    // a permission before the endpoint that honours it exists is how a role gets granted reach
+    // nothing enforces.
+    { key: "social.post.read", description: "View the content calendar, posts and per-network variants" },
+    { key: "social.post.create", description: "Create a social post and its per-network variants" },
+    { key: "social.post.update", description: "Edit a social post, its variants, media and schedule" },
+    { key: "social.post.delete", description: "Delete an unpublished social post or variant" },
+    { key: "social.post.import_native", description: "Record a post published by hand in the network's own app" },
   ],
   customFieldTargets: ["social_engagement", "social_campaign", "social_post"],
   // Agentic-bar criterion 1 (tool parity): everything this ticket's UI can do is reachable as a
@@ -179,6 +188,122 @@ export const socialModule: ModuleContract = {
           usageBudgetUsd: { type: "number", description: "Monthly metered cap in USD." },
         },
         required: ["tenantId", "engagementId"],
+      },
+    },
+    {
+      name: "social.listPosts",
+      description:
+        "List social posts for a company with their per-network variant roll-up: status, schedule, "
+        + "published URL and metered cost. This is the content calendar as data.",
+      minAssurance: "low",
+      method: "GET",
+      pathTemplate: "/api/:tenantId/modules/social/posts",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tenantId: { type: "string", description: "Company id (route scope)." },
+          engagementId: { type: "string", description: "Optional: only this engagement's posts." },
+          status: { type: "string", description: "Optional status filter (idea|draft|in_review|approved|scheduled|publishing|published|partially_published|failed|archived)." },
+        },
+        required: ["tenantId"],
+      },
+    },
+    {
+      name: "social.createPost",
+      description:
+        "Create a social post (the master idea; per-network content goes on its variants). "
+        + "Idempotent: pass a stable `id` and a repeat call returns the existing post. Creating a "
+        + "post publishes NOTHING — it cannot reach a live account without a variant, a validation "
+        + "pass and a human approval.",
+      minAssurance: "low",
+      write: true,
+      impact: "low",
+      method: "POST",
+      pathTemplate: "/api/:tenantId/modules/social/posts",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tenantId: { type: "string", description: "Company id (route scope)." },
+          engagementId: { type: "string", description: "The engagement this post belongs to." },
+          title: { type: "string", description: "Internal working title." },
+          brief: { type: "string", description: "The idea or angle the variants execute." },
+          source: { type: "string", enum: ["human", "ai", "agent"], description: "Who originated it. An agent drafting posts should pass 'agent'." },
+          campaignId: { type: "string", description: "Optional campaign to group under." },
+          scheduledAt: { type: "string", description: "Plan-level slot, ISO 8601." },
+          id: { type: "string", description: "Optional caller-supplied uuid — the idempotency key for a retry." },
+        },
+        required: ["tenantId", "engagementId", "title"],
+      },
+    },
+    {
+      name: "social.addPostVariant",
+      description:
+        "Add or replace the per-network content for one account on a post. Returns the validation "
+        + "verdict (media rules, quota, per-network settings) and the estimated metered cost, so a "
+        + "caller learns immediately whether what it wrote is publishable.",
+      minAssurance: "low",
+      write: true,
+      impact: "low",
+      method: "POST",
+      pathTemplate: "/api/:tenantId/modules/social/posts/:postId/variants",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tenantId: { type: "string", description: "Company id (route scope)." },
+          postId: { type: "string", description: "The master post." },
+          accountId: { type: "string", description: "The connected account this variant targets. The network is taken from the registry, never from the caller." },
+          body: { type: "string", description: "Caption/copy for this network." },
+          firstComment: { type: "string", description: "First comment (Instagram-style hashtag placement); refused on networks without one." },
+          media: { type: "array", description: "Ordered [{fileId, kind:'image'|'video', alt}].", items: { type: "object" } },
+          settings: { type: "object", description: "Network-specific, e.g. {\"igType\":\"reel\"}, {\"tiktokMode\":\"inbox\"}." },
+          scheduledAt: { type: "string", description: "Per-network offset from the master slot, ISO 8601." },
+          id: { type: "string", description: "Optional caller-supplied uuid — the idempotency key." },
+        },
+        required: ["tenantId", "postId", "accountId"],
+      },
+    },
+    {
+      name: "social.validateVariant",
+      description:
+        "Re-check one variant against its network's media rules, hashtag limits, per-network "
+        + "settings and the account's live posting quota, and return the metered cost estimate. "
+        + "Computed fresh, so it answers 'is this publishable NOW', not 'was it when last saved'.",
+      minAssurance: "low",
+      method: "GET",
+      pathTemplate: "/api/:tenantId/modules/social/variants/:variantId/validation",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tenantId: { type: "string", description: "Company id (route scope)." },
+          variantId: { type: "string", description: "The variant to validate." },
+        },
+        required: ["tenantId", "variantId"],
+      },
+    },
+    {
+      name: "social.importNativePost",
+      description:
+        "Record a post that was published BY HAND in the network's own app, for calendar "
+        + "completeness. Bookkeeping only: it describes something already public and can never "
+        + "carry an approval or dispatch anything.",
+      minAssurance: "low",
+      write: true,
+      impact: "low",
+      method: "POST",
+      pathTemplate: "/api/:tenantId/modules/social/posts/import-native",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tenantId: { type: "string", description: "Company id (route scope)." },
+          engagementId: { type: "string", description: "The engagement." },
+          accountId: { type: "string", description: "The account it was posted from." },
+          title: { type: "string", description: "Internal working title." },
+          body: { type: "string", description: "What was actually posted." },
+          publishedUrl: { type: "string", description: "Link to the live post." },
+          publishedAt: { type: "string", description: "When it went out, ISO 8601." },
+          id: { type: "string", description: "Optional caller-supplied uuid — the idempotency key." },
+        },
+        required: ["tenantId", "engagementId", "accountId", "title"],
       },
     },
   ],

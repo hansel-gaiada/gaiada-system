@@ -369,4 +369,204 @@ describe.skipIf(!TEST_URL)("social module (SMM-02)", () => {
     expect(list.json()).toHaveLength(1);
     expect(list.json()[0].metricKey).toBe("followers_total");
   });
+
+  // =============================================================================================
+  // SMM-08 - the composer. The claims worth proving here are the STATE LAW ones: an edit to
+  // approved content invalidates its approval mechanically (not by anyone remembering), a native
+  // import can never masquerade as a dispatched post, and nothing already public can be edited or
+  // deleted through the composer.
+  // =============================================================================================
+  async function makeAccount(tenant: string, client: string, network = "instagram", quota: unknown = { igPosts24h: { used: 1, cap: 25 } }): Promise<string> {
+    const accId = newId();
+    await withTenants([tenant], async (c) => {
+      // ONE publisher org per (tenant, client) - 0105's UNIQUE is the D-2 guarantee that a Postiz
+      // org can never serve two clients, so the helper REUSES the client's org rather than making
+      // a second one. (Written the naive way first; the constraint caught it, which is the point
+      // of putting the rule in the schema instead of in a convention.)
+      await c.query(
+        `INSERT INTO social_publisher_orgs (id, tenant_id, client_id, postiz_org_id, api_key_ref, origin_site)
+         VALUES ($1,$2,$3,$4,'env:KEY','central') ON CONFLICT (tenant_id, client_id) DO NOTHING`,
+        [newId(), tenant, client, `org-${tenant}-${client}`],
+      );
+      const { rows: orgRows } = await c.query<{ id: string }>(
+        `SELECT id FROM social_publisher_orgs WHERE tenant_id = $1 AND client_id = $2`, [tenant, client]);
+      const orgId = orgRows[0].id;
+      await c.query(
+        `INSERT INTO social_accounts (id, tenant_id, client_id, publisher_org_id, network, handle, status, quota, origin_site)
+         VALUES ($1,$2,$3,$4,$5,$6,'connected',$7,'central')`,
+        [accId, tenant, client, orgId, network, `@h-${accId}`, JSON.stringify(quota)],
+      );
+    }, { modules: ["social"] });
+    return accId;
+  }
+
+  async function makeEngagement(tenant: string, client: string): Promise<string> {
+    const id = newId();
+    await app.inject({
+      method: "POST", url: `/api/${tenant}/modules/social/engagements`, headers: asUser(manager),
+      payload: { id, clientId: client, name: "composer engagement" },
+    });
+    return id;
+  }
+
+  async function makePost(tenant: string, engagementId: string): Promise<string> {
+    const res = await app.inject({
+      method: "POST", url: `/api/${tenant}/modules/social/posts`, headers: asUser(manager),
+      payload: { engagementId, title: "composer probe" },
+    });
+    expect(res.statusCode).toBe(201);
+    return res.json().id;
+  }
+
+  it("creates a variant, validating it against the network from the REGISTRY (not the caller)", async () => {
+    const eng = await makeEngagement(B, clientB);
+    const postId = await makePost(B, eng);
+    const accountId = await makeAccount(B, clientB, "instagram");
+    const res = await app.inject({
+      method: "POST", url: `/api/${B}/modules/social/posts/${postId}/variants`, headers: asUser(manager),
+      payload: { accountId, body: "text only, no media" },
+    });
+    expect(res.statusCode).toBe(201);
+    const { validation, argsSha256 } = res.json();
+    // Instagram requires media - the caller never said "instagram", the registry did.
+    expect(validation.ok).toBe(false);
+    expect(validation.errors.map((e: { rule: string }) => e.rule)).toContain("media_required");
+    expect(argsSha256).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it("EDIT INVALIDATES APPROVAL - the state law, proven end to end", async () => {
+    const eng = await makeEngagement(B, clientB);
+    const postId = await makePost(B, eng);
+    const accountId = await makeAccount(B, clientB, "linkedin");
+    const created = await app.inject({
+      method: "POST", url: `/api/${B}/modules/social/posts/${postId}/variants`, headers: asUser(manager),
+      payload: { accountId, body: "the approved copy" },
+    });
+    const variantId = created.json().id;
+    const hashBefore = created.json().argsSha256;
+
+    // Simulate the state SMM-09 will produce: approved, carrying an approval.
+    const approvalId = newId();
+    await withTenants([B], async (c) => {
+      await c.query(
+        `INSERT INTO automation_approvals (id, tenant_id, workflow_id, tool_name, tool_args, impact, status, origin, requested_by, origin_site)
+         VALUES ($1,$2,'smm08-fixture','social.publishPost','{}'::jsonb,'high','approved','automation',$3,'central')`,
+        [approvalId, B, manager],
+      );
+      await c.query(`UPDATE social_post_variants SET status='approved', approval_id=$1 WHERE id=$2`, [approvalId, variantId]);
+    }, { modules: ["social"] });
+
+    const edited = await app.inject({
+      method: "PATCH", url: `/api/${B}/modules/social/variants/${variantId}`, headers: asUser(manager),
+      payload: { body: "the copy someone changed afterwards" },
+    });
+    expect(edited.statusCode).toBe(200);
+    expect(edited.json().approvalInvalidated).toBe(true);
+    expect(edited.json().argsSha256).not.toBe(hashBefore);
+
+    const { rows } = await withTenants([B], (c) =>
+      c.query<{ status: string; approval_id: string | null }>(
+        `SELECT status, approval_id FROM social_post_variants WHERE id = $1`, [variantId]),
+      { modules: ["social"] });
+    // Back to draft, approval dropped - in the SAME statement that changed the content, so there is
+    // no window where an approval points at content nobody approved.
+    expect(rows[0].status).toBe("draft");
+    expect(rows[0].approval_id).toBeNull();
+  });
+
+  it("refuses to edit or delete anything already live", async () => {
+    const eng = await makeEngagement(B, clientB);
+    const postId = await makePost(B, eng);
+    const accountId = await makeAccount(B, clientB, "linkedin");
+    const created = await app.inject({
+      method: "POST", url: `/api/${B}/modules/social/posts/${postId}/variants`, headers: asUser(manager),
+      payload: { accountId, body: "going out" },
+    });
+    const variantId = created.json().id;
+    await withTenants([B], (c) =>
+      c.query(`UPDATE social_post_variants SET status='published', approval_id=NULL, native_import=true WHERE id=$1`, [variantId]),
+      { modules: ["social"] });
+
+    const edit = await app.inject({
+      method: "PATCH", url: `/api/${B}/modules/social/variants/${variantId}`, headers: asUser(manager),
+      payload: { body: "rewriting history" },
+    });
+    expect(edit.statusCode).toBe(400);
+    expect(edit.json().error).toBe("variant_native_import_immutable");
+
+    const del = await app.inject({
+      method: "DELETE", url: `/api/${B}/modules/social/variants/${variantId}`, headers: asUser(manager),
+    });
+    expect(del.statusCode).toBe(400);
+    expect(del.json().error).toBe("variant_is_live");
+  });
+
+  it("records a native import as bookkeeping - published, no approval, no provider id", async () => {
+    const eng = await makeEngagement(B, clientB);
+    const accountId = await makeAccount(B, clientB, "instagram");
+    const res = await app.inject({
+      method: "POST", url: `/api/${B}/modules/social/posts/import-native`, headers: asUser(manager),
+      payload: { engagementId: eng, accountId, title: "posted by hand", body: "from the phone", publishedUrl: "https://instagram.com/p/x" },
+    });
+    expect(res.statusCode).toBe(201);
+    const { rows } = await withTenants([B], (c) =>
+      c.query<{ status: string; native_import: boolean; approval_id: string | null; provider_post_id: string | null }>(
+        `SELECT status, native_import, approval_id, provider_post_id FROM social_post_variants WHERE post_id = $1`,
+        [res.json().id]),
+      { modules: ["social"] });
+    // 0105's CHECK makes this structural, but the endpoint has to actually honour it.
+    expect(rows[0]).toMatchObject({ status: "published", native_import: true, approval_id: null, provider_post_id: null });
+  });
+
+  it("refuses a post delete while a variant is live, rather than orphaning something public", async () => {
+    const eng = await makeEngagement(B, clientB);
+    const postId = await makePost(B, eng);
+    const accountId = await makeAccount(B, clientB, "linkedin");
+    const created = await app.inject({
+      method: "POST", url: `/api/${B}/modules/social/posts/${postId}/variants`, headers: asUser(manager),
+      payload: { accountId, body: "live one" },
+    });
+    await withTenants([B], (c) =>
+      c.query(`UPDATE social_post_variants SET status='published', native_import=true WHERE id=$1`, [created.json().id]),
+      { modules: ["social"] });
+    const del = await app.inject({ method: "DELETE", url: `/api/${B}/modules/social/posts/${postId}`, headers: asUser(manager) });
+    expect(del.statusCode).toBe(400);
+    expect(del.json().error).toBe("post_has_live_variants");
+  });
+
+  it("refuses a variant targeting another tenant's account", async () => {
+    const engB = await makeEngagement(B, clientB);
+    const postId = await makePost(B, engB);
+    const foreignAccount = await makeAccount(A, clientA, "instagram");
+    const res = await app.inject({
+      method: "POST", url: `/api/${B}/modules/social/posts/${postId}/variants`, headers: asUser(manager),
+      payload: { accountId: foreignAccount, body: "wrong tenant" },
+    });
+    // 404, not 500: from B's side that account does not exist, and the composite FK is the
+    // structural backstop underneath.
+    expect(res.statusCode).toBe(404);
+  });
+
+  it("answers validation FRESH - a quota that moved since the last save changes the verdict", async () => {
+    const eng = await makeEngagement(B, clientB);
+    const postId = await makePost(B, eng);
+    const accountId = await makeAccount(B, clientB, "instagram", { igPosts24h: { used: 1, cap: 25 } });
+    const created = await app.inject({
+      method: "POST", url: `/api/${B}/modules/social/posts/${postId}/variants`, headers: asUser(manager),
+      payload: { accountId, body: "ok now", media: [{ fileId: "f1", kind: "image", alt: "a" }] },
+    });
+    expect(created.json().validation.ok).toBe(true);
+
+    // The account hits its cap after the variant was saved.
+    await withTenants([B], (c) =>
+      c.query(`UPDATE social_accounts SET quota = $1 WHERE id = $2`, [JSON.stringify({ igPosts24h: { used: 25, cap: 25 } }), accountId]),
+      { modules: ["social"] });
+
+    const fresh = await app.inject({
+      method: "GET", url: `/api/${B}/modules/social/variants/${created.json().id}/validation`, headers: asUser(manager),
+    });
+    expect(fresh.json().validation.ok).toBe(false);
+    expect(fresh.json().validation.errors.map((e: { rule: string }) => e.rule)).toContain("quota_exhausted");
+  });
+
 });
