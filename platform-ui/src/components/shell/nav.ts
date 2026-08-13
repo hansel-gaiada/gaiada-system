@@ -47,6 +47,12 @@ export function navFor(me: Me, tenantId?: string | null, departments: { id: stri
     { label: "Agency", href: "/agency", icon: "sales" },
     { label: "Meetings", href: "/meetings", icon: "clock" },
     { label: "Delivery Pipeline", href: "/pipeline", icon: "pulse" },
+    // Monitoring is Plane B — the CLIENT's properties and services, not our own containers
+    // (that is Plane A and lives in Grafana, deliberately off the ERP surface). It sits in
+    // Business rather than Systems for exactly that reason: the subject is client work.
+    // Ungated for now, matching the Clients/Deliverables precedent — the backend's Cerbos
+    // `monitoring.read` is the real boundary and this row is only a mirror.
+    { label: "Monitoring", href: "/monitoring", icon: "pulse" },
     ...(can(me, "rollups.view") ? [{ label: "Rollups", href: "/rollups", icon: "pulse" } as NavItem] : []),
   ];
   // Departments is its own section (rendered exactly like Organization — a group

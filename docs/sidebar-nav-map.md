@@ -47,7 +47,7 @@ Order top → bottom. "Rail" is what the collapsed 64px mode shows.
 | 2 | **Workspace** | **flat (pinned)** | — | Dashboard `/` · Calendar `/calendar` · Approvals `/approvals` | none |
 | 3 | **Organization** | flat (1 row) | `sitemap` (unused while 1 row) | Overview `/organization` | none |
 | 4 | **Departments** | flyout | `hr` | one row per department `/departments/:id` · HR `/hr` · IT `/it` | none (rows come from the active company's org structure) |
-| 5 | **Business** | flyout | `briefcase` | Projects · Tasks · Clients · Deliverables · Timesheets · **Billing** · Agency · Meetings · Delivery Pipeline · **Rollups** | Billing → `company.manage`; Rollups → `rollups.view` |
+| 5 | **Business** | flyout | `briefcase` | Projects · Tasks · Clients · Deliverables · Timesheets · **Billing** · Agency · Meetings · Delivery Pipeline · **Monitoring** (+ `/monitoring/new`, `/monitoring/channels`) · **Rollups** | Billing → `company.manage`; Rollups → `rollups.view`; Monitoring → none (backend `monitoring.read` is the boundary) |
 | 6 | **Reports** | flyout | `chart` | My Report `/reports/person` · Project `/reports/project` · Department `/reports/department` · **Company** `/reports/company` | Company → `rollups.view` |
 | 7 | **Appraisals** | flyout | `award` | My Appraisals `/appraisals/mine` · **Team** `/appraisals` · **Cycles** `/appraisals/cycles` | Team → `appraisal.score`\|`appraisal.read`; Cycles → `appraisal.cycle.admin` |
 | 8 | **Intelligence** | flyout | `agents` | Assistant `/assistant` · Knowledge `/knowledge` · AI Agents `/agents` | none (Assistant threads are owner-private in the backend) |
@@ -64,6 +64,28 @@ Rail glyph budget for an elevated user: 3 flat (Workspace) + 1 (Organization) + 
 ---
 
 ## 3. Change log — one entry per push that touches `nav.ts`
+
+### 2026-08-13 — MON: **Monitoring** added to Business
+
+Plane B (client property/service monitoring) gets one row: **Monitoring** `/monitoring`, icon
+`pulse`. Sub-surfaces `/monitoring/new` and `/monitoring/channels` are reached from the page, not
+the sidebar — three rows for one capability would crowd a group that already has ten.
+
+**Why Business and not Systems.** Systems holds *our* infrastructure consoles (Bot, Gateway, Hub,
+Automation). Monitoring's subject is the **client's** websites and services — it is client work, and
+it is the surface we intend to sell. Putting it in Systems would file it as internal plumbing and
+quietly re-merge the two planes the design keeps apart (`docs/blueprints/monitoring-program.md` §0).
+Platform observability (Prometheus/Grafana/Loki/Tempo) stays out of the ERP entirely, behind an SSH
+tunnel, and is deliberately **not** a nav row.
+
+**Ungated on purpose.** No capability in the Gate column: `monitoring.read` on platform-nest is the
+boundary, and `nav.test.ts` pins the row for a plain `member` so a future gate cannot be added here
+by accident. A UI-only gate would hide a page the server would serve — which users read as broken,
+not forbidden.
+
+**Glyph:** reuses `pulse` (shared with Delivery Pipeline and Rollups). No new icon: `pulse` is the
+right shape for a health/liveness surface, and the rail only draws a group glyph, so the collision
+is invisible there.
 
 ### 2026-08-07 — merge `fadhil/ui` → `main` (collapsible sidebar + 64px icon rail)
 

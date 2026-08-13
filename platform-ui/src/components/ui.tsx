@@ -90,6 +90,13 @@ const STATUS_FAMILY: Record<string, StatusFamily> = {
   // to the default "progress" family). "live" is the terminal success state, same family as
   // active/shipped; "failed" is already covered by the D14-08 entry above.
   live: "ok",
+  // MON — Plane B monitor states (docs/blueprints/monitoring-program.md §3). These MUST be listed
+  // explicitly: the default family is "progress" (bronze), which would render a DOWN monitor in the
+  // same neutral tone as an in-flight task. A monitoring surface whose failure state reads as
+  // neutral is the exact defect this module was built to replace, so the mapping is load-bearing.
+  // "degraded" takes the attention family rather than progress — a partial failure is a failure.
+  // "maintenance"/"unknown" take idle: honest "not currently evidence of health", never a green.
+  up: "ok", down: "critical", degraded: "critical", maintenance: "idle", unknown: "idle",
 };
 function familyOf(s: string): StatusFamily {
   return STATUS_FAMILY[normalizeStatus(s)] ?? "progress";

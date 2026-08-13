@@ -24,6 +24,12 @@ describe("navFor (RBAC-gated visibility)", () => {
     expect(business.items.map((i) => i.label)).not.toContain("Projects");
     expect(business.items.map((i) => i.label)).not.toContain("Tasks");
     expect(business.items[0]).toEqual({ label: "Project Management", href: "/project-management", icon: "projects" });
+    // MON — Monitoring (Plane B: the CLIENT's properties) is ungated in the sidebar, so a plain
+    // member must see it. Pinned as an equality assertion rather than a `toContain` because the
+    // point is that it is NOT capability-gated here: the backend's `monitoring.read` is the real
+    // boundary, and adding a UI gate would hide a surface the server would happily serve, which
+    // reads to the user as "broken" rather than "forbidden".
+    expect(business.items).toContainEqual({ label: "Monitoring", href: "/monitoring", icon: "pulse" });
     // TR-17: a plain member always sees the self/scoped grain reports, never the exec-only Company one.
     const reports = groups.find((g) => g.label === "Reports")!;
     expect(reports.items.map((i) => i.label)).toEqual(["My Report", "Project Reports", "Department Reports"]);

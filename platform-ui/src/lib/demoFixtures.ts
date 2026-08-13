@@ -10,6 +10,7 @@ import { meetingsDemo } from "./demoMeetings";
 import { pipelineDemo, portalDemo } from "./demoPipeline";
 import { webdevChangeRequestsDemo } from "./demoWebdevChangeRequests";
 import { webdevProvisionedSitesDemo } from "./demoWebdevProvisionedSites";
+import { monitoringDemo } from "./demoMonitoring";
 import { portalDashboardDemo } from "./demoPortal";
 import { reportsDemo } from "./demoReports";
 import { checkinsDemo } from "./demoCheckins";
@@ -1819,6 +1820,12 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
   // PRV-04 — Web Dev "Site & repo" card (run workspace) — stateful store (lib/demoWebdevProvisionedSites.ts).
   const webdevSites = webdevProvisionedSitesDemo(method, p, url.searchParams, body, userId);
   if (webdevSites) return webdevSites;
+
+  // MON — monitoring board (Plane B: client properties + services). Read-only fixtures
+  // (lib/demoMonitoring.ts); seeded with a down/degraded/stale/maintenance/unknown spread so every
+  // branch of the board is drivable in a browser without the backend module existing.
+  const monitoring = monitoringDemo(method, p, url.searchParams);
+  if (monitoring) return monitoring;
 
   // Client portal DASHBOARD (CP-2..CP-5) — overview/projects/timeline/deliverables/invoices/contracts/
   // profile/change-requests (MI-04 maintenance intake). Runs FIRST so its routes win, and returns
