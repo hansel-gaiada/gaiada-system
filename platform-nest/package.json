@@ -21,7 +21,8 @@
     "typecheck": "tsc --noEmit",
     "lint:withtenants": "node scripts/lint-withtenants.mjs",
     "lint:migration-rls": "node scripts/lint-migration-rls.mjs",
-    "gen:role-bundles": "node scripts/generate-role-bundles.mjs"
+    "gen:role-bundles": "node scripts/generate-role-bundles.mjs",
+    "gen:scope-constrained-roles": "node scripts/generate-scope-constrained-roles.mjs"
   },
   "dependencies": {
     "@fastify/multipart": "^8.3.1",

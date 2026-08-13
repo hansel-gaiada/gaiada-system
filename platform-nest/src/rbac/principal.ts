@@ -6,6 +6,7 @@
 //               standard in-tenant access; sensitive/bulk/cross-tenant still need 'high'.
 //   'low'     — unverified link or unknown external identity: no company data at all.
 import { withGlobal, withTenants } from "../db";
+import { isGrantScopeReachable } from "./scope-constrained-roles";
 
 /** Local copy (2 lines, zero deps) rather than importing `isUuidShaped` from `core/dept-resolution.ts`:
  *  this file is the authz substrate and must not gain a dependency on a domain module. See
@@ -87,25 +88,56 @@ export async function assemblePrincipal(userId: string, assurance: Assurance): P
   // in the first place, so this WHERE clause can never actually have anything to filter out — kept
   // anyway so this query's own correctness doesn't depend on a reader remembering that fact, and so
   // a future bug that somehow got a relationship row into `role_permissions` would still be caught
-  // here rather than surfacing only in the DB trigger. `SELECT DISTINCT` collapses the case where
-  // two held roles grant the identical (key, scope) pair (e.g. `member` and `manager` both reaching
-  // `core.task.read` at the same company scope) into one entry, and also absorbs the pre-existing
-  // duplicate-global-grant defect (Finding F, migration 0092) without needing its own dedup pass.
+  // here rather than surfacing only in the DB trigger.
+  //
+  // IAM-SEC-06: the query ALSO selects the grant's own role NAME (one more JOIN to `roles`, already
+  // paid for by `rolesRes` above on a different connection round trip — this is still exactly ONE
+  // query, not one per grant) so each resolved row can be checked against
+  // `isGrantScopeReachable(role, scopeType)` (`./scope-constrained-roles.ts`) BEFORE it survives into
+  // `perms`. A row whose (role, scopeType) pairing is one that role's OWN Cerbos derived-role
+  // condition could never satisfy — `platform_admin@company`, `org_unit_lead@company`, … — is
+  // DROPPED here: the grant itself is untouched (still visible in `roles`/the DB), only the
+  // permission this filter would otherwise have let a `perm_*` mirror honour at that mis-scoped scope
+  // is withheld. This is the fix IAM-04c's ruling (§8 option A) calls for: the write-path guard
+  // (`admin-identity.controller.ts`'s `ROLE_SCOPE_CONSTRAINTS`) is defense-in-depth, not the
+  // authority — seeds/migrations write grants directly, and a guard is only as good as its
+  // completeness (IAM-SEC-05 found it wasn't). Filtering here closes the hazard regardless of how the
+  // mis-scoped grant row came to exist.
+  //
+  // De-duplication moves from SQL to this function's own loop because adding `roleName` to the
+  // SELECT list would otherwise make `DISTINCT` stop collapsing the case two DIFFERENT roles reach
+  // the identical (key, scopeType, scopeId) triple (e.g. `member` and `manager` both reaching
+  // `core.task.read` at the same company scope) — `roleName` differs between those two rows, so
+  // `DISTINCT` alone would no longer merge them. The loop below re-establishes that exact guarantee
+  // (and still absorbs the pre-existing duplicate-global-grant defect, Finding F / migration 0092)
+  // by keying on (key, scopeType, scopeId) itself, AFTER the per-row scope-reachability filter —
+  // so a (key, scope) pair is dropped only if EVERY grant that would have produced it was mis-scoped,
+  // and kept if any OTHER, validly-scoped grant also reaches it.
   const { roles, perms } = await withGlobal(async (c) => {
     const rolesRes = await c.query<RoleGrant>(
       `SELECT r.name AS role, ur.scope_type AS "scopeType", ur.scope_id AS "scopeId"
        FROM user_roles ur JOIN roles r ON r.id = ur.role_id WHERE ur.user_id = $1`,
       [userId],
     );
-    const permsRes = await c.query<PermissionGrant>(
-      `SELECT DISTINCT p.key AS key, ur.scope_type AS "scopeType", ur.scope_id AS "scopeId"
+    const permsRes = await c.query<PermissionGrant & { roleName: string }>(
+      `SELECT DISTINCT p.key AS key, ur.scope_type AS "scopeType", ur.scope_id AS "scopeId",
+              r.name AS "roleName"
        FROM user_roles ur
        JOIN role_permissions rp ON rp.role_id = ur.role_id
        JOIN permissions p ON p.id = rp.permission_id
+       JOIN roles r ON r.id = ur.role_id
        WHERE ur.user_id = $1 AND p.class = 'grantable'`,
       [userId],
     );
-    return { roles: rolesRes.rows, perms: permsRes.rows };
+    const filtered = new Map<string, PermissionGrant>();
+    for (const row of permsRes.rows) {
+      if (!isGrantScopeReachable(row.roleName, row.scopeType)) continue; // IAM-SEC-06
+      const dedupeKey = `${row.key} ${row.scopeType} ${row.scopeId ?? ""}`;
+      if (!filtered.has(dedupeKey)) {
+        filtered.set(dedupeKey, { key: row.key, scopeType: row.scopeType, scopeId: row.scopeId });
+      }
+    }
+    return { roles: rolesRes.rows, perms: [...filtered.values()] };
   });
 
   // Memberships are RLS-protected; the dedicated principal_lookup policy exposes only
