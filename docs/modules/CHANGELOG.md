@@ -11,6 +11,37 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.22.0` — 2026-08-13 — IAM authorization hardening
+
+**Fixed**
+- `group_executive` was denied on five kinds that folded a global-scope-only role into an
+  `inTenant` gate it can never satisfy (IAM-TRAP4).
+- `inviteUser` minted a grant at company scope with no scope check, letting a company admin mint a
+  247-permission bundle. Both writers now share one guard; a static sweep fails on any new
+  unguarded writer (IAM-SEC-05).
+- Three deployed permission mirrors over-granted: `automation_approval.{read,decide}` let an
+  hr_manager act outside HR, and `hr_record.export` sat one assurance tier below its role arm,
+  letting a no-MFA session export raw employee records (IAM-04-REG1/REG2).
+- A missing `amr` claim was indistinguishable from a weak login, capping every session below the
+  high-assurance tier with nothing to alert on (IAM-MFA-01).
+
+**Added**
+- Resolution-source filter: permissions are dropped from any grant at a scope the role cannot
+  satisfy, closing the class rather than a kind. Role→scope map generated from `derived_roles.yaml`
+  and byte-identity-guarded (IAM-SEC-06).
+- Invoice maker/checker seam: `approve` action, creator/approver attribution, `invoice_revisions`
+  snapshot history across all four write paths, and the first `EFFECT_DENY` rule in the policy
+  repository so no principal — superadmin included — approves their own invoice (IAM-GAP-01/02).
+- `hr.leave.decide`, a dedicated decision right for leave, scoped to leave rows only.
+- Permission arm on 11 social actions; `portal` remains blocked on a structural hazard gate.
+- Mirror-reach invariant test: every bundle holder of a mirrored key must already have
+  equal-or-wider role-arm reach.
+
+**Note** — the high-assurance tier is unreachable until the Keycloak AMR mapper is added; see
+`infra/runbooks/enable-mfa.md`. One legacy draft invoice has no recorded creator and needs an
+operator step before it can be approved or sent.
+
+
 Per-module changes made between cuts, recorded here so they are not lost the way `0028a`/`0030a`/
 `0031a`/`0086a`/`0087a`/`0089a` were (see the LOG GAPs below) — no tag exists yet for these, so no row
 is added to the App release log table until one is cut.

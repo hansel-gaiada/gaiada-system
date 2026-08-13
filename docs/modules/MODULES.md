@@ -34,7 +34,7 @@ versions below; the running build reports it at `GET /health`.
 
 | Module | Ver | Status | Workstream | Since |
 |---|---|---|---|---|
-| platform-nest | `0.21.3` | IN PROGRESS | WS1 | 2026-08-12 |
+| platform-nest | `0.22.0` | IN PROGRESS | WS1 | 2026-08-13 |
 | platform-ui | `0.25.1` | IN PROGRESS | WS5 | 2026-08-11 |
 | ai-gateway-go | `0.13.2` | PROTOTYPED | WS3 | 2026-08-07 |
 | mcp-hub | `0.10.1` | PROTOTYPED | WS2 | 2026-08-09 |
@@ -58,7 +58,23 @@ versions below; the running build reports it at `GET /health`.
 
 ---
 
-## platform-nest â€” Platform Core Â· `0.21.3` Â· PROTOTYPED
+## platform-nest â€” Platform Core Â· `0.22.0` Â· PROTOTYPED
+**0.22.0 (2026-08-13, IAM authorization hardening — permission arm, scope filter, invoice
+maker/checker):** Closed the mis-scoped-grant class at the resolution source — `assemblePrincipal()`
+now drops permissions from any grant at a scope the role's own Cerbos condition can never satisfy,
+with the role→scope map generated from `derived_roles.yaml` and byte-identity-guarded against drift
+(IAM-SEC-06). Closed a privilege escalation where `inviteUser` minted any role at company scope with
+no guard, via one shared check both writers call plus a static sweep that fails on any new unguarded
+writer (IAM-SEC-05). Removed three deployed permission mirrors that over-granted — including
+`hr_record.export`, whose mirror sat one assurance tier below its role arm and let a no-MFA session
+export raw employee records — and restored it at the correct tier (IAM-04-REG1/REG2/REG3). Wired the
+permission arm onto 11 social actions; `portal` stays blocked on a structural gate. Gave invoices a
+maker/checker seam: an `approve` action, creator/approver attribution, an `invoice_revisions` history
+covering all four write paths, and the repository's first `EFFECT_DENY` rule so nobody — superadmin
+included — approves their own invoice (IAM-GAP-01/02). Gave HR leave decisions their own
+`hr.leave.decide` right. A missing `amr` claim now surfaces instead of silently capping every session
+below the high-assurance tier (IAM-MFA-01).
+
 
 **0.21.3 (2026-08-12, HIER-5/TRAP-4 - `group_executive` was denied everywhere it was folded into
 an `inTenant` gate):** `group_executive` is a GLOBAL-scope-only role, so a holder has no
