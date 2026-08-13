@@ -885,9 +885,29 @@ derivedRoles:
             request.principal.attr.perms.exists(g, g.key == "hr.record.delete" && (
               g.scopeType == "global" ||
               (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
-    # perm_hr_record_export REMOVED (IAM-04-REG2, 2026-08-12) — see resource_hr_record.yaml's own
-    # comment at the removed rule's old location for the full account (assurance-tier mismatch:
-    # the role arm requires assurance=="high", this mirror only checked notLow).
+    # perm_hr_record_export REMOVED then RESTORED (IAM-04-REG2 2026-08-12 removed it; IAM-04-REG3
+    # 2026-08-13 restored it). REG2's removal reason stays true and must not be lost: the mirror
+    # was originally wired at `inTenant && notLow`, strictly WIDER than the role arm's own
+    # `inTenant && assurance=="high"` D4 tier for this action, so a "linked"-assurance holder
+    # (every real SSO login without MFA, per `src/auth/oidc.ts::assuranceFor()`) could export raw
+    # per-subject HR records through the flat permission arm while the role arm denied exactly
+    # that. REG2 fixed the hole by deleting the mirror outright, which also deleted the
+    # permission-driven path entirely — contrary to the owner's confirmed design intent that
+    # access must work for anyone whose ROLE carries enough PERMISSION, not only named roles.
+    # REG3 restores the mirror in `resource_hr_record.yaml`'s own rule at the CORRECT tier —
+    # mirroring `perm_hr_case_export`'s precedent exactly: this derived role stays a plain
+    # perms-exists check (no assurance clause here), and the high-assurance condition lives in
+    # the resource-policy rule itself (resource_hr_record.yaml), the same place the role arm's own
+    # export rule carries it. Do not fold `assurance=="high"` into this derived role, and do not
+    # ever widen the resource-policy rule's condition back to `notLow` — that is REG2's mistake.
+    - name: perm_hr_record_export
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "hr.record.export" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
     # perm_agency_approval_* — IAM-04-ROLLOUT-B12
     - name: perm_agency_approval_read
       parentRoles: ["user"]

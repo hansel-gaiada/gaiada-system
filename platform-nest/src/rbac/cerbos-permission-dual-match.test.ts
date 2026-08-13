@@ -323,6 +323,24 @@ describe.skipIf(!live)("IAM-04-ROLLOUT-B12: dual-match isolation across batches 
     expect(await allow(p, resource, "delete")).toBe(false);
   });
 
+  // IAM-04-REG3 (2026-08-13): perm_hr_record_export was REMOVED by IAM-04-REG2 (wired at
+  // `notLow`, which let a "linked"-assurance holder export through the flat arm while the role
+  // arm's own D4 tier denied them) and RESTORED here at the CORRECT tier — mirroring
+  // hr_case.export's own "PERMISSION ARM: export still requires HIGH assurance" test above
+  // (lines ~124-127). Both tiers are asserted so this can never silently regress back to REG2's
+  // mistake: a `notLow`-only mirror would make the "linked" case below wrongly ALLOW.
+  it("hr_record.export: PERMISSION ARM ALONE (roles: []) allows at HIGH assurance — the restored, correctly-tiered perm_hr_record_export mirror", async () => {
+    const resource: Resource = { kind: "hr_record", id: "x1", tenantId: T1, module: "hr" };
+    const p = principal([], [{ key: "hr.record.export", scopeType: "company", scopeId: T1 }], [T1], "high");
+    expect(await allow(p, resource, "export")).toBe(true);
+  });
+
+  it("hr_record.export: PERMISSION ARM ALONE at LINKED assurance DENIES — the exact hole IAM-04-REG2 closed by removal; must stay denied now that the mirror is restored at the high-assurance tier", async () => {
+    const resource: Resource = { kind: "hr_record", id: "x1", tenantId: T1, module: "hr" };
+    const p = principal([], [{ key: "hr.record.export", scopeType: "company", scopeId: T1 }], [T1], "linked");
+    expect(await allow(p, resource, "export")).toBe(false);
+  });
+
   it("agency_approval.approve: PERMISSION ARM ALONE (roles: []) allows; no cross-tenant leak; no sibling-action bleed into .create", async () => {
     const resource: Resource = { kind: "agency_approval", id: "x1", tenantId: T1, module: "agency" };
     const p = principal([], [{ key: "agency.approval.approve", scopeType: "company", scopeId: T1 }]);

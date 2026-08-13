@@ -61,16 +61,32 @@ resourcePolicy:
       derivedRoles: ["perm_hr_record_delete"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }
 
-    # perm_hr_record_export REMOVED (IAM-04-REG2, 2026-08-12). Both `company_admin` and
-    # `hr_manager` hold hr.record.export in role-permission-bundles.json, but their ONLY real
-    # role-arm path to this action (the "export" rule above) requires `variables.inTenant &&
-    # request.principal.attr.assurance == "high"` — strictly narrower than `notLow`
-    # (`_variables.yaml`: `notLow = assurance != "low"`, so "linked" assurance — every real SSO
-    # login without MFA, per `src/auth/oidc.ts::assuranceFor()` — satisfies notLow but not
-    # "high"). This mirror was wired at `inTenant && notLow`, so a "linked"-assurance holder of
-    # either role could export raw per-subject HR records (contracts/documents/notes) through the
-    # flat permission arm even though the role arm's own D4 high-assurance tier denies them. This
-    # is a DIFFERENT hazard shape than the module-attribute one this ticket's other findings are
-    # (assurance-tier mismatch, not a resource-attribute gate) — caught by the SAME invariant
-    # because the mechanism is identical (an independent, narrower role-arm rule the flat mirror's
-    # own condition doesn't reproduce). See docs/superpowers/plans/2026-08-12-iam-04-reg2-report.md.
+    # perm_hr_record_export — REMOVED by IAM-04-REG2 (2026-08-12), RESTORED by IAM-04-REG3
+    # (2026-08-13) at the CORRECT tier. Keeping REG2's own account here rather than deleting it:
+    # that mirror was wired at `inTenant && notLow`, strictly WIDER than this rule's own
+    # `inTenant && assurance == "high"` D4 tier. Both `company_admin` and `hr_manager` hold
+    # hr.record.export in role-permission-bundles.json, but their ONLY real role-arm path to this
+    # action (the "export" rule above) requires `assurance == "high"` — `_variables.yaml`:
+    # `notLow = assurance != "low"`, so "linked" assurance (every real SSO login without MFA, per
+    # `src/auth/oidc.ts::assuranceFor()`) satisfied `notLow` but not `"high"`. That let a
+    # "linked"-assurance holder export raw per-subject HR records (contracts/documents/notes)
+    # through the flat permission arm even though the role arm's own D4 high-assurance tier denied
+    # them. REG2 fixed that by deleting the mirror outright — which also deleted the
+    # permission-driven access path entirely, contrary to the owner's confirmed design intent that
+    # anyone whose ROLE carries enough PERMISSION should be able to act, not only named roles.
+    #
+    # REG3's fix: restore the mirror, but carry the SAME high-assurance condition in the mirror's
+    # OWN rule below — exactly `resource_hr_case.yaml`'s `perm_hr_case_export` precedent (compare
+    # that file's identical rule shape). This satisfies both the D4 tier and the permission-arm
+    # intent: a permission-only holder gets export ONLY at `assurance == "high"`, matching the
+    # role arm exactly, never at `notLow`/`linked`. Do not lower this back to `notLow` — that is
+    # the exact mistake REG2 caught and removed. See
+    # docs/superpowers/plans/2026-08-12-iam-04-reg2-report.md (the removal) and
+    # docs/superpowers/plans/2026-08-13-iam-04-reg3-report.md (this restoration).
+    - actions: ["export"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_hr_record_export"]
+      condition:
+        match:
+          expr: >-
+            variables.inTenant && request.principal.attr.assurance == "high"

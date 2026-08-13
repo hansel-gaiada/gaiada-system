@@ -352,20 +352,42 @@ const IAM_04_REG1_OWNED_KINDS = new Set([
  * module literal — grepped, not assumed — so the module-attribute gate never actually excludes
  * anything, and the mirror's reach equals the role arm's reach in practice; `hr_case`/`hr_record`/
  * `agency_approval`/all 9 `resource_search_*`/`webdev_change_request`/`webdev_provisioned_site`)
- * or FIX (a real over-grant, mirror removed). Three were FIX, shrinking the baseline below:
+ * or FIX (a real over-grant, mirror removed). Three were FIX, shrinking the baseline at the time:
  *   - `member.read` / `service_assignment.read` — `module` is resolved from a CALLER-SUPPLIED
  *     query parameter for these two kinds specifically (core.controller.ts:292-294,
  *     service-assignments.controller.ts:186/601/668, `module: moduleQ || undefined`), confirmed
  *     genuinely varying, not a kind-constant — matching what both files' own pre-existing comments
- *     already suspected. Mirrors removed.
+ *     already suspected. Mirrors removed, and STILL removed today — see IAM-04-REG3 below, which
+ *     did not touch either of these; they are not a module-attribute gate on the assurance axis
+ *     and nothing about REG3's fix reopens them.
  *   - `hr_record.export` — a DIFFERENT hazard shape than the other 19 entries here: not a
  *     module-attribute gate at all, but an ASSURANCE-TIER mismatch. The role arm requires
  *     `assurance == "high"`; the wired mirror only checked `notLow` (`assurance != "low"`), which
  *     "linked"-assurance (every real SSO login without MFA, per `oidc.ts::assuranceFor()`)
  *     satisfies. Found by the SAME detector (an independent, narrower role-arm rule the mirror's
- *     own condition doesn't reproduce) even though the specific mechanism differs. Mirror removed.
+ *     own condition doesn't reproduce) even though the specific mechanism differs. REG2 fixed it
+ *     by removing the mirror outright.
  * Full account, live-exposure findings, and the DB/Cerbos evidence for each verdict:
  * docs/superpowers/plans/2026-08-12-iam-04-reg2-report.md.
+ *
+ * IAM-04-REG3 (2026-08-13) restored `hr_record.export`'s mirror — REG2's removal, while a correct
+ * FIX for the wrong-tier hole, also removed the permission-driven access path entirely, contrary
+ * to the owner's confirmed design intent that anyone whose ROLE carries enough PERMISSION should
+ * reach an action, not only named roles. The restored mirror (`perm_hr_record_export` in
+ * `derived_roles.yaml`, wired in `resource_hr_record.yaml`) now carries the SAME
+ * `inTenant && assurance=="high"` condition as the role arm's own export rule — the
+ * `resource_hr_case.yaml`/`perm_hr_case_export` precedent's shape, not the removed mirror's
+ * `notLow` shape. That is why `hr_record.export` reappears in the register below with only
+ * `hr_manager` (not `company_admin`, whose role-arm condition now matches the mirror's condition
+ * exactly and is therefore no longer narrower) — a strictly SMALLER entry than the pre-REG2
+ * baseline (`["company_admin", "hr_manager"]`) had, because the tier fix removed one of the two
+ * false-narrow holders. `hr_manager`'s entry is the SAME false flag as `hr_case.export`'s own
+ * `hr_manager` entry immediately above (module is a hardcoded "hr" constant on every real
+ * `hr_record`/`hr_case` call site — REG2 §2.2 — so `module_manager`'s attribute gate never
+ * actually excludes `hr_manager` in practice; this static test cannot see that and correctly
+ * treats it as an open, informational, non-hard-gate finding rather than asserting it away).
+ * `member.read`/`service_assignment.read` are untouched by REG3 and stay removed from this
+ * register. See docs/superpowers/plans/2026-08-13-iam-04-reg3-report.md.
  *
  * This file does NOT assert the remaining (confirmed-SAFE) entries away — it PINS the exact
  * register below (kind.action -> sorted holder role names) as a NON-REGRESSION baseline: if a
@@ -385,6 +407,7 @@ const IAM_04_REG1_PRE_EXISTING_OUT_OF_SCOPE_BASELINE: Record<string, string[]> =
   "hr_record.create": ["hr_manager", "hr_staff"],
   "hr_record.update": ["hr_manager", "hr_staff"],
   "hr_record.delete": ["hr_manager"],
+  "hr_record.export": ["hr_manager"],
   "resource_search_audit.read": ["search_manager", "search_staff"],
   "resource_search_audit.create": ["search_manager", "search_staff"],
   "resource_search_audit.update": ["search_manager", "search_staff"],

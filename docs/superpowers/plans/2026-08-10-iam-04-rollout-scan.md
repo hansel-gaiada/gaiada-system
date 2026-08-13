@@ -747,3 +747,49 @@ Keycloak rather than an agent session.
 
 **The pinned baseline in `iam-04-reg1-mirror-reach-invariant.test.ts` is shrunk to the 51 confirmed-
 SAFE pairs.** Nothing remains open from this register's own §7 follow-up ask.
+
+---
+
+## 9. IAM-04-REG3 addendum (2026-08-13) — `hr_record.export`'s mirror restored at the correct tier
+
+**Status:** PROTOTYPED / DEV-VERIFIED (targeted suites, `cerbos compile`, `tsc --noEmit`, live
+probes against a restarted local test Cerbos, both tiers; not deployed to the live estate — no
+commit, no push, per this ticket's own constraint). Full account:
+`docs/superpowers/plans/2026-08-13-iam-04-reg3-report.md`.
+
+§8's `hr_record.export` fix (removal) closed a real hole but, per the owner's confirmed design
+intent, was an overcorrection: access via the permission arm must work for anyone whose ROLE
+carries enough PERMISSION, not only for named roles, and outright removal deleted that path
+entirely rather than fixing its tier. IAM-04-REG3 restores `perm_hr_record_export`
+(`derived_roles.yaml`) and its resource-policy rule (`resource_hr_record.yaml`), this time carrying
+the SAME `variables.inTenant && request.principal.attr.assurance == "high"` condition the role
+arm's own export rule uses — copying `resource_hr_case.yaml`'s `perm_hr_case_export` precedent
+exactly, rather than reintroducing §8's `notLow` mistake.
+
+**Re-verified against the mirror-reach invariant, holder by holder:** `hr_record.export`'s bundle
+holders are `platform_admin` (exempt by construction), `company_admin`, `hr_manager`.
+`company_admin`'s role-arm rule now carries the IDENTICAL condition as the restored mirror, so it
+is no longer narrower (unlike §8's pre-removal baseline, which had `company_admin` flagged too,
+under the old `notLow` mirror). `hr_manager`'s only role-arm path is `module_manager`, gated on
+`resource.attr.module` — the same already-accepted, already-documented false flag `hr_case.export`
+carries for the identical role and identical reason (§2.2/§8: every real `hr_record`/`hr_case`
+`authorize()` call site hardcodes `module: "hr"`, so the gate never actually excludes `hr_manager`
+in practice; this is a static-only limitation of the invariant, not a live hole). The register in
+`iam-04-reg1-mirror-reach-invariant.test.ts`'s pin therefore reads `"hr_record.export":
+["hr_manager"]` — one holder, not two, because the tier fix (not module reasoning) is what dropped
+`company_admin` out of the flagged set.
+
+**Both assurance tiers verified live**, closing the loop §8 opened and left correctly denied:
+permission-only holder at `assurance: "high"` → ALLOW; the identical holder at `assurance:
+"linked"` → DENY (the exact case §8's removal existed to close, now closed by tier instead of by
+deletion); at `assurance: "low"` → DENY; cross-tenant → DENY; `hr_case.export` (the untouched,
+copied-from file) unchanged at both tiers. `cerbos-permission-dual-match.test.ts` gained the two
+assertions asserting both tiers explicitly, so a future regression back to `notLow` would flip the
+"linked" case red immediately rather than needing another mirror-reach audit to notice.
+
+**Context that does not change the tier decision, stated per the ticket's own instruction:** no
+user on the live estate currently has MFA configured (17 password credentials, zero OTP enrolled;
+Keycloak's OTP subflows are *Conditional* and never fire today), so `assurance == "high"` is
+presently unreachable in production — this mirror grants nobody anything on `gda-aicenter` until
+MFA is enabled. Expected, and the owner's call to make when it matters; not a reason to weaken the
+restored condition, and this ticket did not weaken it.
