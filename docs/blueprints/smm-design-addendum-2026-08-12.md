@@ -1029,6 +1029,54 @@ change a checked-in artifact on the strength of a contended run. The real fix �
 databases or a serialised test lane — is worth doing if parallel agents become routine; recorded
 here rather than actioned, because it belongs to the test harness, not this module.
 
+## §A4p · DEPLOYED (2026-08-13/14) — the Postiz stack is live on the VPS, DEV-VERIFIED
+
+Owner authorised the deploy. Driven by hand against the SMM-04b runbook. **Status: DEV-VERIFIED** —
+the stack is up, the transport is proven end to end, and no client account is connected yet.
+
+### What is running
+
+Five services under compose project **`gaiada-social`** on the SumoPod VPS, all healthy:
+`postiz`, `social-postgres`, `social-redis`, `social-temporal`, `social-temporal-postgres`.
+
+### The transport
+
+`gda-aicenter 10.88.0.1` ↔ `VPS 10.88.0.2`, WireGuard, MTU 1380, `wg-quick@wg0` **enabled on both
+hosts** so it survives reboot. Handshake confirmed both directions.
+
+**Measured, and better than either estimate:** the ERP reaches Postiz's API in **7.9 ms total**
+(HTTP round trip, not just ICMP) over a tunnel whose ping is **1.7 ms**. §A4k worried about "internet
+RTT"; §A4l corrected that to 2.6 ms measured over the public path; the encrypted tunnel is faster
+still. The 15-minute reconcile cadence is not remotely stressed.
+
+### Proofs taken, not assumed
+
+| Claim | How it was proven |
+|---|---|
+| The backend is genuinely up | `HTTP 401 {"msg":"No API Key found"}` — **not** the container's `healthy`, which only probes the frontend and was the spike's documented trap |
+| The search-attribute fix held | `organizationId` and `postId` both registered as Text; `CustomStringField` gone. Removed BEFORE Postiz first started, per the runbook's ordered step |
+| Nothing published publicly | `ss -ltn` shows `10.88.0.2:4007` only — no `0.0.0.0` bind, which matters doubly here because Docker's iptables rules sit ahead of `ufw` |
+| The internet cannot reach it | `curl http://150.109.15.108:4007/...` from outside → `HTTP 000`, refused |
+| The ERP can | Same request over the tunnel → `401` in 7.9 ms |
+| Production was untouched | Container baseline **20 → 25**; the five added are exactly ours, and the **removed list is empty** |
+
+### Custody and containment
+
+Secrets (`SOCIAL_POSTIZ_JWT_SECRET`, both DB passwords) were generated **on the host** with
+`openssl rand` and never traversed a chat, a log or this repo; `.env` is mode 600.
+`SOCIAL_POSTIZ_DISABLE_REGISTRATION=true` from first boot. Postiz's UI is not routed anywhere. Zero
+Postiz code was patched — the entire deployment is compose and config, categories (a)/(b) of the §06
+fork budget, so the thin-fork line holds.
+
+### What is NOT done
+
+- **No org exists yet.** Provisioning ADOPTS an operator-created org (§A4n), which is a deliberate
+  one-shot ceremony: open signup, create the single org, close signup, record the API key alias.
+  That is the next step and it is the owner's to authorise.
+- **No client account is connected**, and none can be until the platform-app reviews land (OQ-1).
+- The two fork-exception candidates (TikTok `creator_info`, the Instagram quota probe) are unchanged
+  by this deploy — they are engine capability gaps, not deployment state.
+
 ## §A5 · Sequencing note — what to do first
 
 1. **SMM-30 + SMM-01 together** (they are one schema conversation: tables, then the permission rows
