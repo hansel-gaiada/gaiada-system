@@ -32,6 +32,10 @@ import type { PoolClient } from "pg";
 import { newId, withGlobal, withTenants } from "../db";
 import { config } from "../config";
 import { emitEvent } from "../events/outbox.service";
+// P2-04: this reconciler's grant/revoke statements live in the ONE choke point. It is a
+// TRUSTED_INTERNAL caller — no caller-choice validation runs — for the reasons stated at each
+// call site and pinned by name in `user-roles-writer-guard.test.ts`.
+import { insertGrantRow, revokeManagedGrant } from "./grant-write.service";
 
 const UNIT_KINDS = new Set(["department", "division"]);
 const LIVE_ISH = ["active", "suspended", "proposed"];
@@ -274,12 +278,22 @@ export async function reconcileAssignment(
       ).rows[0];
       let grantId: string | null;
       if (!g) {
-        grantId = newId();
-        await c.query(
-          `INSERT INTO user_roles (id, user_id, role_id, scope_type, scope_id, managed_by)
-           VALUES ($1, $2, $3, 'company', $4, $5) ON CONFLICT (user_id, role_id, scope_type, scope_id) DO NOTHING`,
-          [grantId, userId, rid, target, assignmentId],
-        );
+        // P2-04: routed through the choke point as a TRUSTED_INTERNAL caller — same statement,
+        // same conflict clause, same transaction (the claim INSERT below must stay atomic with
+        // this one, so the service writes on THIS client rather than opening its own). No
+        // caller-choice validation runs, and that is the correct call here: `rid` comes from
+        // `moduleRoleId()` — derived from the service assignment's OWN module contract, never
+        // from request input — and scope_type/scope_id are hardcoded 'company'/the served tenant.
+        // There is no (role, scope) pair a caller can steer through this path.
+        grantId = await insertGrantRow(c, {
+          origin: "trusted_internal",
+          targetUserId: userId,
+          roleId: rid,
+          scopeType: "company",
+          scopeId: target,
+          managedBy: assignmentId,
+          onConflict: "unique_columns",
+        });
         const back = (
           await c.query<{ id: string; managed_by: string | null }>(
             `SELECT id, managed_by FROM user_roles
@@ -360,13 +374,14 @@ export async function reconcileAssignment(
       // (4) last claim + reconciler-owned ⇒ tear down (guard spares employee/manual rows).
       if (remaining === 0) {
         if (rm.kind === "grant") {
-          const del = await c.query<{ user_id: string }>(
-            `DELETE FROM user_roles WHERE id = $1 AND managed_by IS NOT NULL RETURNING user_id`,
-            [rm.artifactId],
-          );
-          if (del.rowCount) {
+          // P2-04: routed through the choke point (TRUSTED_INTERNAL). Same statement, same
+          // `AND managed_by IS NOT NULL` deletion guard — the thing that makes manual and
+          // employee rows structurally untouchable from this teardown path (A2) — and still on
+          // THIS client, inside the FOR UPDATE-serialized section above.
+          const revokedUserId = await revokeManagedGrant(c, rm.artifactId);
+          if (revokedUserId) {
             revoked++;
-            affected.add(del.rows[0].user_id);
+            affected.add(revokedUserId);
           }
         } else {
           const del = await c.query<{ user_id: string }>(

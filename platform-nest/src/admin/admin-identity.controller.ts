@@ -13,6 +13,11 @@ import { authorize, writeActivity } from "../core/http";
 import { emitEvent } from "../events/outbox.service";
 import { AuthGuard } from "../auth/guards";
 import { adoptManagedGrantAsManual } from "./service-reconciler";
+// P2-04: THE choke point. Every `user_roles` INSERT/DELETE in this controller goes through it —
+// see `grant-write.service.ts`'s header for why the rule set differs per origin, and why this
+// controller's two writers keep the `legacy_admin` origin (design §6.4) rather than picking up
+// the allow-list/ceiling/fence that the Phase-2 surfaces get.
+import { assertGrantAllowed, insertGrantRow, revokeGrantById } from "./grant-write.service";
 
 // HIER-1 (migration 0100): `team`/`record` removed here to match the DB's new scope_type CHECK
 // exactly — leaving them would let a caller submit a value the CHECK now rejects, turning what
@@ -68,7 +73,7 @@ const ROLE_SCOPE_CONSTRAINTS: Record<string, readonly string[]> = {
  *  how that class of defect happens twice; this is the one place left to update. Throws a clean 400
  *  and performs no DB write of its own — callers must invoke this BEFORE any write, so a refusal
  *  never leaves a partial row behind. */
-function assertRoleScopeAllowed(roleName: string, scopeType: string): void {
+export function assertRoleScopeAllowed(roleName: string, scopeType: string): void {
   const allowedScopes = ROLE_SCOPE_CONSTRAINTS[roleName];
   if (allowedScopes && !allowedScopes.includes(scopeType)) {
     throw new BadRequestException(
@@ -229,12 +234,34 @@ export class AdminIdentityController {
     // have existed. If an admin needs to invite someone AND grant them a scope-constrained role
     // (e.g. platform_admin@global, org_unit_lead@org_unit), invite without roleId first, then use
     // `assignRole` — the one endpoint that can express a non-company scope at all.
+    //
+    // P2-04: the lookup + scope guard that used to be inline here is now `assertGrantAllowed()`
+    // (the choke point's own guard, `legacy_admin` origin — scope validity, unchanged, plus the
+    // new self-target refusal). It still runs HERE, before any write, so the no-partial-state
+    // property this block was built for is preserved for the new refusal too, not just the old
+    // one. The write itself re-runs the same guard; this early call is the no-partial-state
+    // courtesy, the write-time call is the enforcement.
+    //
+    // The target user is resolved read-only first, and ONLY on the roleId path, purely so the
+    // self-target check has something to compare: an admin inviting their OWN email with a role
+    // is a self-grant. A brand-new invitee has no row yet, so `null` here is correct and the
+    // self-target check is then vacuously false — it cannot be the caller if it does not exist.
     if (body?.roleId) {
-      const role = await withGlobal((c) =>
-        c.query<{ name: string }>(`SELECT name FROM roles WHERE id = $1`, [body.roleId]),
+      const existingTarget = await withGlobal((c) =>
+        c.query<{ id: string }>(`SELECT id FROM users WHERE email = $1 AND deleted_at IS NULL`, [email]),
       );
-      if (!role.rows[0]) throw new BadRequestException("unknown role");
-      assertRoleScopeAllowed(role.rows[0].name, "company");
+      await withGlobal((c) =>
+        assertGrantAllowed(c, {
+          origin: "legacy_admin",
+          targetUserId: existingTarget.rows[0]?.id ?? "",
+          roleId: body.roleId!,
+          scopeType: "company",
+          scopeId: tenantId,
+          actorUserId: req.principal.userId,
+          tenantId,
+          onConflict: "unique_columns",
+        }),
+      );
     }
 
     // Reuse an existing global user by email (invite an existing person into another company)
@@ -283,12 +310,21 @@ export class AdminIdentityController {
     }
 
     if (body?.roleId) {
+      // P2-04: routed through the choke point. Same scope ('company'), same conflict arbitration
+      // (`unique_columns` — this writer's own clause, preserved; see insertGrantRow's comment),
+      // same session bump. The guard runs again here with the REAL target id now that the user
+      // row exists, which is what actually enforces the self-target refusal.
       await withGlobal((c) =>
-        c.query(
-          `INSERT INTO user_roles (id, user_id, role_id, scope_type, scope_id) VALUES ($1, $2, $3, 'company', $4)
-           ON CONFLICT (user_id, role_id, scope_type, scope_id) DO NOTHING`,
-          [newId(), userId, body.roleId, tenantId],
-        ),
+        insertGrantRow(c, {
+          origin: "legacy_admin",
+          targetUserId: userId,
+          roleId: body.roleId!,
+          scopeType: "company",
+          scopeId: tenantId,
+          actorUserId: req.principal.userId,
+          tenantId,
+          onConflict: "unique_columns",
+        }),
       );
       await bumpSession(userId);
     }
@@ -347,18 +383,30 @@ export class AdminIdentityController {
     if (!(await memberIds(tenantId)).includes(userId)) {
       throw new NotFoundException("user is not a member of this company");
     }
-    // Select the NAME too — needed for the scope guard below (see ROLE_SCOPE_CONSTRAINTS).
-    const role = await withGlobal((c) =>
-      c.query<{ name: string }>(`SELECT name FROM roles WHERE id = $1`, [roleId]),
+    // GUARD — P2-04 routed the inline "resolve the role name, then assertRoleScopeAllowed" pair
+    // into `assertGrantAllowed()` (the choke point's guard, `legacy_admin` origin). It runs at
+    // EXACTLY the position the old pair did — after the membership 404, before the scopeId
+    // derivation — so the order in which a caller sees `unknown role` vs `scopeId required` is
+    // unchanged. `scopeId` is passed as the caller supplied it because the `legacy_admin`
+    // invariants (scope validity + self-target) do not read it; the derived value goes to the
+    // write below, which re-runs the same guard.
+    //
+    // The scope half is byte-unchanged from IAM-SEC-02/04/05's fix: a grant at a scope the role's
+    // own Cerbos condition cannot satisfy is inert under role-name matching but resolves its FULL
+    // bundle at that scope under permission matching — the permission arm granting what the role
+    // arm denies. The self-target half is NEW (design §6.4, D-9): target == caller is now a 400.
+    await withGlobal((c) =>
+      assertGrantAllowed(c, {
+        origin: "legacy_admin",
+        targetUserId: userId,
+        roleId,
+        scopeType,
+        scopeId: body.scopeId ?? null,
+        actorUserId: req.principal.userId,
+        tenantId,
+        onConflict: "untargeted",
+      }),
     );
-    if (!role.rows[0]) throw new BadRequestException("unknown role");
-    // SCOPE GUARD — see ROLE_SCOPE_CONSTRAINTS' and assertRoleScopeAllowed's comments for the full
-    // rationale. A grant at a scope the role's own Cerbos condition cannot satisfy is inert under
-    // role-name matching but resolves its FULL bundle at that scope under permission matching: the
-    // permission arm granting what the role arm denies. Refused here, before any write, via the
-    // one shared helper `inviteUser`'s own optional grant now also calls (IAM-SEC-05) — this is NOT
-    // the only writer that can mint a caller-chosen role; it is one of two callers of one guard.
-    assertRoleScopeAllowed(role.rows[0].name, scopeType);
     // HIER-1 (migration 0100): a scoped grant with NO scopeId used to silently insert scope_id =
     // NULL for any non-company scope (the old fallback below defaulted everything but "company"
     // to null) — dead but harmless while scope_id was untyped-by-CHECK. Migration 0100's new
@@ -378,26 +426,31 @@ export class AdminIdentityController {
       if (!body.scopeId) throw new BadRequestException(`scopeId required for scopeType "${scopeType}"`);
       scopeId = body.scopeId;
     }
-    const id = newId();
-    const inserted = await withGlobal((c) =>
-      c.query<{ id: string }>(
-        // UNTARGETED `ON CONFLICT DO NOTHING`, deliberately — do not "tighten" this back to a
-        // column list. Migration 0092 added a PARTIAL unique index
-        // (`user_roles_global_scope_uniq` on (user_id, role_id, scope_type) WHERE scope_id IS NULL)
-        // to close the hole where `UNIQUE (user_id, role_id, scope_type, scope_id)` never fires for
-        // global grants, because scope_id IS NULL and SQL NULLs are never equal (that hole is why
-        // both live elevated accounts carried duplicate grants). A TARGETED conflict clause names
-        // the 4-column constraint as its arbiter — which still does not fire on NULL scope_id — so
-        // the new partial index would raise an unhandled 23505 and turn a re-grant of an
-        // already-held GLOBAL role from this endpoint's graceful no-op/adopt path into a 500.
-        // Untargeted arbitrates over BOTH, and the `IS NOT DISTINCT FROM` lookup below already
-        // recovers the existing row correctly for NULL scope_id, so the adopt path is unchanged.
-        `INSERT INTO user_roles (id, user_id, role_id, scope_type, scope_id) VALUES ($1, $2, $3, $4, $5)
-         ON CONFLICT DO NOTHING RETURNING id`,
-        [id, userId, roleId, scopeType, scopeId],
-      ),
+    // P2-04: routed through the choke point. The UNTARGETED `ON CONFLICT DO NOTHING` this writer
+    // depends on is preserved as `onConflict: "untargeted"` — do not "tighten" it to a column
+    // list. Migration 0092 added a PARTIAL unique index (`user_roles_global_scope_uniq` on
+    // (user_id, role_id, scope_type) WHERE scope_id IS NULL) to close the hole where
+    // `UNIQUE (user_id, role_id, scope_type, scope_id)` never fires for global grants, because
+    // scope_id IS NULL and SQL NULLs are never equal (that hole is why both live elevated accounts
+    // carried duplicate grants). A TARGETED conflict clause names the 4-column constraint as its
+    // arbiter — which still does not fire on NULL scope_id — so the new partial index would raise
+    // an unhandled 23505 and turn a re-grant of an already-held GLOBAL role from this endpoint's
+    // graceful no-op/adopt path into a 500. Untargeted arbitrates over BOTH, and the
+    // `IS NOT DISTINCT FROM` lookup below already recovers the existing row correctly for NULL
+    // scope_id, so the adopt path is unchanged.
+    const insertedId = await withGlobal((c) =>
+      insertGrantRow(c, {
+        origin: "legacy_admin",
+        targetUserId: userId,
+        roleId,
+        scopeType,
+        scopeId,
+        actorUserId: req.principal.userId,
+        tenantId,
+        onConflict: "untargeted",
+      }),
     );
-    let grantId: string | undefined = inserted.rows[0]?.id;
+    let grantId: string | undefined = insertedId ?? undefined;
     if (!grantId) {
       // The row already existed (ON CONFLICT DO NOTHING fired) — fetch it, and check whether it
       // is reconciler-managed. A14: an admin explicitly (re-)granting a role that collides with a
@@ -435,10 +488,11 @@ export class AdminIdentityController {
     @Param("grantId") grantId: string,
   ) {
     await authorize(req.principal, { kind: "user", tenantId }, "delete");
-    const res = await withGlobal((c) =>
-      c.query(`DELETE FROM user_roles WHERE id = $1 AND user_id = $2 RETURNING id`, [grantId, userId]),
-    );
-    if (res.rowCount === 0) throw new NotFoundException("grant not found");
+    // P2-04: routed through the choke point (same statement, same `id` + `user_id` pinning).
+    // No self-target refusal here, deliberately: revoking your own grant is a de-escalation, and
+    // P2-02's structural Cerbos DENY is scoped to `actions: ["create"]` for the same reason.
+    const revokedId = await withGlobal((c) => revokeGrantById(c, grantId, userId));
+    if (!revokedId) throw new NotFoundException("grant not found");
     await bumpSession(userId);
     await writeActivity(tenantId, req.principal.userId, "role.revoked", "user", userId, { grantId });
     return { revoked: true };

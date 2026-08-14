@@ -34,6 +34,7 @@ import { config } from "../config";
 import { newId, withGlobal, withTenants } from "../db";
 import { authorize, notify, writeActivity } from "./http";
 import { emitEvent } from "../events/outbox.service";
+import { insertGrantRow } from "../admin/grant-write.service";
 import { createInvite, consumeInvite, generatePassword } from "./client-invites";
 import {
   createUser as kcCreateUser,
@@ -361,12 +362,24 @@ export class ClientInviteAcceptController {
     await withGlobal(async (c) => {
       const role = await c.query<{ id: string }>(`SELECT id FROM roles WHERE company_id IS NULL AND name = 'client'`);
       if (!role.rows[0]) return; // 0072 seeds it; a missing row is a deployment fault, not this request's
-      await c.query(
-        `INSERT INTO user_roles (id, user_id, role_id, scope_type, scope_id)
-         VALUES ($1, $2, $3, 'company', $4)
-         ON CONFLICT DO NOTHING`,
-        [newId(), cc.user_id, role.rows[0].id, invite.tenantId],
-      );
+      // P2-04: routed through the ONE `user_roles` choke point as a TRUSTED_INTERNAL caller —
+      // same statement, same untargeted conflict clause. No caller-choice validation runs, and
+      // that is correct here: the role is looked up by the LITERAL name 'client' immediately
+      // above (never a caller-supplied roleId) and the scope is hardcoded 'company'/this invite's
+      // own tenant, so a client contact accepting their own portal invite cannot steer either.
+      //
+      // ⚠ This is ALSO precisely why it cannot take the `ui` origin: `client`'s bundle is the 7
+      // `portal.*` keys, every one of them `ui_grantable = false`, and `client` sits on the
+      // elevated fence — the allow-list and the fence exist to keep a STAFF role out of the
+      // client portal, not to break the one legitimate path that puts a client contact in it.
+      await insertGrantRow(c, {
+        origin: "trusted_internal",
+        targetUserId: cc.user_id,
+        roleId: role.rows[0].id,
+        scopeType: "company",
+        scopeId: invite.tenantId,
+        onConflict: "untargeted",
+      });
     });
 
     // Tell the inviting side it landed. This works only because notify() was widened to accept client

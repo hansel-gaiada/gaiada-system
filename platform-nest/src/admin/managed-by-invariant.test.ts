@@ -193,8 +193,34 @@ describe.skipIf(!TEST_URL)("A1 detective control — managed_by is reconciler-on
     expect(role.rows[0].managed_by).toBe(assignmentId);
   });
 
-  // ---- 6. static sweep: no source file OTHER than service-reconciler.ts inserts managed_by ----
-  it("static sweep: service-reconciler.ts is the only source file that INSERTs a managed_by value", () => {
+  // ---- 6. static sweep: no source file OTHER than the two named below inserts managed_by ----
+  //
+  // ⚠ P2-04 (2026-08-13) — THE SUBJECT OF THIS SWEEP MOVED, THE INVARIANT DID NOT.
+  //
+  // This assertion used to read `["src/admin/service-reconciler.ts"]`. P2-04 routed every
+  // production `user_roles` INSERT/DELETE into the ONE choke point (`grant-write.service.ts`,
+  // design §6.1), so the SQL TEXT carrying the `managed_by` column now lives there — while the
+  // reconciler keeps its own `company_memberships` INSERT, which P2-04 did not touch (this
+  // ticket's remit was `user_roles`). Hence two legitimate hits instead of one.
+  //
+  // This is a source-text relocation, NOT a behavioural change, and the distinction is provable
+  // rather than asserted: parts 1-5 of this very file are RUNTIME probes against the live app —
+  // "assignRole never produces a managed_by-set row", "inviteUser never produces one", "the
+  // reconciler's own path is the one path that sets it" — and all of them passed UNMODIFIED
+  // across this refactor. Only this static sweep, which pins a FILE PATH, needed updating.
+  //
+  // The invariant is also now pinned TIGHTER than before, by the companion sweep below: the
+  // choke point merely has a `managed_by` PARAMETER, and what actually matters is who fills it.
+  // `insertGrantRow()` writes `spec.managedBy ?? null`, so a caller that omits it gets NULL —
+  // and the companion test asserts `service-reconciler.ts` is the only file in `src/` that
+  // supplies a value at all. A new endpoint that tried to forge a reconciler-owned grant would
+  // have to pass `managedBy:`, and that is exactly what turns red.
+  const MANAGED_BY_INSERT_FILES = [
+    "src/admin/grant-write.service.ts", // user_roles — THE choke point (P2-04, design §6.1)
+    "src/admin/service-reconciler.ts", // company_memberships — untouched by P2-04
+  ];
+
+  it("static sweep: only the choke point and the reconciler INSERT a managed_by value", () => {
     const ROOT = join(__dirname, "..", "..");
     const SRC = join(ROOT, "src");
     const offenders: string[] = [];
@@ -222,7 +248,42 @@ describe.skipIf(!TEST_URL)("A1 detective control — managed_by is reconciler-on
     }
     walk(SRC);
 
-    const uniqueOffenders = [...new Set(offenders)];
-    expect(uniqueOffenders).toEqual(["src/admin/service-reconciler.ts"]);
+    const uniqueOffenders = [...new Set(offenders)].sort();
+    expect(uniqueOffenders).toEqual(MANAGED_BY_INSERT_FILES);
+  });
+
+  // ---- 6b. P2-04 companion sweep: who FILLS the choke point's managed_by parameter ----
+  //
+  // Moving the SQL into one file means the old "which file writes this column" question is no
+  // longer the sharp one. The sharp question is which file passes a VALUE for it. A grant is
+  // reconciler-owned iff its caller said so, so this is the assertion that actually carries A1's
+  // weight now: exactly one file in `src/` supplies `managedBy:` to the choke point.
+  it("static sweep: service-reconciler.ts is the only caller that SUPPLIES a managed_by value", () => {
+    const ROOT = join(__dirname, "..", "..");
+    const SRC = join(ROOT, "src");
+    const suppliers: string[] = [];
+
+    function walk(dir: string) {
+      for (const entry of readdirSync(dir)) {
+        const p = join(dir, entry);
+        const st = statSync(p);
+        if (st.isDirectory()) {
+          if (entry === "node_modules" || entry === "dist") continue;
+          walk(p);
+        } else if (entry.endsWith(".ts") && !entry.endsWith(".test.ts") && !entry.endsWith(".d.ts")) {
+          const rel = relative(ROOT, p).split("\\").join("/");
+          if (rel === "src/admin/grant-write.service.ts") continue; // the parameter's own declaration
+          if (/\bmanagedBy:\s*(?!null\b)/.test(readFileSync(p, "utf8"))) suppliers.push(rel);
+        }
+      }
+    }
+    walk(SRC);
+
+    expect(
+      [...new Set(suppliers)].sort(),
+      "a file other than the reconciler is passing `managedBy:` to GrantWriteService — that forges " +
+        "a reconciler-owned grant, which bypasses the A14 human-adoption hooks and makes " +
+        "service-scopes.ts treat the row as a legitimate service grant. This is the A1 bug class.",
+    ).toEqual(["src/admin/service-reconciler.ts"]);
   });
 });
