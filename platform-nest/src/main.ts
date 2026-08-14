@@ -75,6 +75,7 @@ import { registerCoreRollupProvider, coreTaskRollups, syncMetricDefinitions } fr
 import { clientWorkRollups } from "./core/client-work";
 import { startRelayLoop } from "./events/relay";
 import { startConsumerLoop, registerCoreEventHandler } from "./events/consumer.service";
+import { registerPositionEventHandlers, POSITION_STREAMS } from "./events/position-consumer";
 // D14-03 — the core automation-approval EXECUTOR (replaces D14-02's stub handler below).
 import { automationApprovalExecutorHandler } from "./core/approval-execute";
 import { startReconcileLoop, startDriftSweepLoop } from "./events/reconcile-consumer";
@@ -390,7 +391,27 @@ async function bootstrap(): Promise<void> {
     // registerCoreEventHandler's header (consumer.service.ts) for why this runs with no
     // isModuleEnabled gate. The stream is already in the watched list below ("automation_approval").
     registerCoreEventHandler("automation_approval.decided", automationApprovalExecutorHandler);
-    startConsumerLoop(["deliverable", "user", "automation_approval", "search_engagement", "search_audit", "search_property", "search_change_proposal"]);
+    // P2-05: the position reconciler's outbox triggers. The HANDLERS are flag-gated (they also
+    // re-check `positionSyncEnabled` internally, and every reconciler entry point returns null when
+    // it is off) but the STREAMS below are listed unconditionally — an always-drained stream can
+    // never build a backlog that a later flag flip suddenly replays, and it makes the
+    // registered-handler-with-no-stream trap structurally impossible for this pair.
+    if (config.positionSyncEnabled) {
+      registerPositionEventHandlers();
+      // eslint-disable-next-line no-console
+      console.log(`position reconciler on: streams [${POSITION_STREAMS.join(", ")}]`);
+    }
+    startConsumerLoop([
+      "deliverable",
+      "user",
+      "automation_approval",
+      "search_engagement",
+      "search_audit",
+      "search_property",
+      "search_change_proposal",
+      // P2-05 — see registerPositionEventHandlers' header for why these are unconditional.
+      ...POSITION_STREAMS,
+    ]);
     // ORG-6 service-assignment reconciler (A7): outbox-driven, own consumer group. Only when the
     // release-train flag is on — dark by default so assignments stay dormant metadata.
     if (config.serviceAssignmentsEnabled) {

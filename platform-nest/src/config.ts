@@ -266,6 +266,22 @@ const configBase = {
   // ORG-7 §3: how often the nightly drift/orphan sweep runs (sweepDriftAndOrphans). Default 24h;
   // dev/tests override to something short-lived. No effect unless serviceAssignmentsEnabled.
   serviceDriftSweepIntervalMs: Number(process.env.SERVICE_DRIFT_SWEEP_INTERVAL_MS ?? 24 * 3600 * 1000),
+  // ── IAM Phase 2 (P2-05) — the POSITION reconciler. Design §3: "Flag-gated
+  // `POSITION_SYNC_ENABLED` (default off) until QA's battery passes." DARK by default exactly as
+  // serviceAssignmentsEnabled is: when off, every entry point in `position-reconciler.ts` returns
+  // an empty result BEFORE reading anything, and the consumer drains its streams materializing
+  // nothing — position rows stay dormant provisioning metadata (as P2-01 left them).
+  positionSyncEnabled:
+    process.env.POSITION_SYNC_ENABLED === "1" || process.env.POSITION_SYNC_ENABLED === "true",
+  // Design §3.2 mass-revoke brake: "a single reconcile computing more than N revocations (N
+  // configurable, default ~20) aborts and reports instead of applying". The program risk table
+  // names "position reconciler mass-revokes on an org edit" as the TOP hazard — a reconciler bug
+  // that revokes everyone is far worse than one that revokes nothing, so this fails CLOSED (the
+  // run aborts before any write commits) rather than clamping to the first N revocations.
+  positionMassRevokeThreshold: Number(process.env.POSITION_MASS_REVOKE_THRESHOLD ?? 20),
+  // Design §3.4 nightly drift detector + expiry sweep cadence. Default 24h. No effect unless
+  // positionSyncEnabled.
+  positionDriftSweepIntervalMs: Number(process.env.POSITION_DRIFT_SWEEP_INTERVAL_MS ?? 24 * 3600 * 1000),
   // P2-07 (pm-console-ux-design-spec.md §4, §0 D-2): nightly burndown-snapshot pre-warmer. DARK
   // by default — the lazy upsert-on-read on every burndown GET (pm.controller.ts) is the
   // correctness backstop, so this job is a pure best-effort optimization, never load-bearing.
