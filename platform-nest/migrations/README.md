@@ -450,3 +450,19 @@ at it, run `node dist/db/migrate.js`, confirm the ordered `applied:` list and ex
    unused is `0110`** — re-verify with `ls migrations | sort | tail` before trusting that, exactly
    as every entry in this log has had to; this checkout is shared with at least one other
    concurrent session (a monitoring feature, per this ticket's own brief) as of this entry.
+
+   **2026-08-18 update (P2-06, IAM Phase 2 JML) — `0111` TAKEN.** `ls migrations | sort | tail`
+   immediately before writing showed the head as
+   `0110_iam_phase2_role_grant_kinds_ui_grantable.sql` with `0111` free.
+   `0111_iam_phase2_employee_work_email_key.sql` adds ONE partial unique index —
+   `ux_employees_tenant_work_email` on `(tenant_id, work_email) WHERE work_email IS NOT NULL AND
+   deleted_at IS NULL` — because design §5.1's stated joiner natural key was NOT enforced by
+   `0109`: its unique is on `(tenant_id, user_id) WHERE user_id IS NOT NULL`, and a `pending_start`
+   candidate has no `user_id`, so two retries of the same hire before the principal existed would
+   have produced two employee rows for one person. Index creation only, zero DML (the table had no
+   rows in any environment before P2-06 wrote the first one). Case-insensitivity is maintained by
+   the application lowercasing `work_email` on every write — recorded here because that half of the
+   invariant lives in `employees.controller.ts`, not in the index. Full report:
+   `docs/superpowers/plans/2026-08-18-p2-06-report.md`. `0058`/`0059`/`0070` remain the
+   permanently-orphaned reservation gaps — still do NOT fill them. **Next unused is `0112`** —
+   re-verify with `ls migrations | sort | tail` before trusting that.

@@ -3007,3 +3007,50 @@ endpoints. Merging the two is what made Gaia Nexus's monitoring dashboard fictio
 - DEMO_MODE fixtures: `lib/demoMonitoring.ts` — seeded with a down/degraded/stale/maintenance/
   unknown/never-checked spread plus expiring cert and domain, so every branch is drivable with no
   backend. Wired into `demoFixtures.getDemoResponse`.
+
+---
+
+## IAM Phase 2 — employees + joiner/mover/leaver (P2-06, 2026-08-18)
+
+**Status:** PROTOTYPED / DEV-VERIFIED against `gaiada-test-pg` + a restarted test Cerbos
+(`src/admin/employees-jml.test.ts`, 14/14, driven through `app.inject()` — not by calling the
+controller). No UI consumer exists yet; P2-10 (HR console) is the intended one.
+
+Design: `docs/superpowers/plans/2026-08-13-iam-phase2-design.md` §4–§5. Backend:
+`platform-nest/src/admin/employees.controller.ts`. Migration: `0111` (the joiner's natural key).
+
+| Method + path | Cerbos (kind · action) | Notes |
+|---|---|---|
+| `GET /api/:tenantId/hr/employees?status=` | `employee · read` | `{ employees: Employee[] }`. `status` ∈ `pending_start`\|`active`\|`on_leave`\|`suspended`\|`terminated`; unknown ⇒ 400. |
+| `GET /api/:tenantId/hr/employees/:employeeId` | `employee · read` | Employee + `seats[]` (`assignmentId`, `positionId`, `title`, `unitNodeId`, `validFrom`, `validTo`, `current`). |
+| `POST /api/:tenantId/hr/employees` | `employee · create` **+ `position · assign`** when `positionId` is given | 201. Joiner. Body: `displayName` (required), `workEmail`, `legalName`, `personalEmail`, `phone`, `hireDate`, `notes`, `managerUserId`, `positionId`, `startDate`. Returns the employee plus `reconciled: {granted, revoked} \| null`. |
+| `PATCH /api/:tenantId/hr/employees/:employeeId` | `employee · update` | Record edits only. `employmentStatus: "terminated"` is **refused** (400) — termination is a flow, not a field. |
+| `DELETE /api/:tenantId/hr/employees/:employeeId` | `employee · delete` | Soft delete. **Refused (400) while the person holds an open seat** — terminate first. |
+| `POST /api/:tenantId/hr/employees/:employeeId/transfer` | `employee · update` **+ `position · assign`** (incoming) **+ `position · unassign`** (every outgoing seat) | Mover. Body `{ toPositionId, effectiveDate?, reason? }`. Returns `closedAssignmentIds`, `assignmentId`, `reconciled`. Already-held seat ⇒ `{ ok: true, unchanged: true }`. |
+| `POST /api/:tenantId/hr/employees/:employeeId/terminate` | `employee · update` **+ `position · unassign`** per open seat | Leaver. Body `{ lastDay?, reason? }`. Returns `closedAssignmentIds`, `revokedManualGrants[]` (the audited list §5.3 requires), `userDisabled`, `itFollowUp` (`"disable_login"` \| `null`). |
+
+**Error shape** is the platform-wide `{ error: "<message>" }` (`http-error.filter.ts`) — **not**
+`{ message }`. Two consumers have already been written against the wrong one; check this row first.
+
+### ⚠ Three behaviours a consumer must render, not assume
+
+1. **HR cannot place, transfer, or terminate — only `company_admin` or the dept lead can.**
+   `resource_position.yaml` grants `assign`/`unassign` to `company_admin` and `org_unit_lead` only;
+   `hr_people_ops` is deliberately absent. So an `hr_manager` gets **201 on a record-only hire and
+   403 the moment `positionId` is present**, and 403 on transfer/terminate. This is a real divergence
+   between design §5.1 ("HR … + optional immediate placement") and §4.1/§6.2 ("dept head assigns") —
+   see the P2-06 report; it is an owner call, not a bug to route around in the UI. Gate the placement
+   fields on `position.assign` reach, not on the HR capability.
+2. **No future-dated JML.** `startDate`/`effectiveDate`/`lastDay` in the future ⇒ 400. The reconciler
+   resolves on `valid_to IS NULL` with no as-of axis, so a future date would apply *now* while the
+   record claimed otherwise. Scheduled JML is deferred, not silently approximated.
+3. **A candidate with no `positionId` gets NO `users` row** (`userId: null`, `pending_start`) — so a
+   console must not assume every employee is a principal, and must not offer login actions for one.
+
+### Events emitted
+
+`employee.hired`, `employee.transferred`, `employee.terminated`, `employee.record_deleted`,
+`position_assignment.created`, `position_assignment.closed`, plus `org_structure.updated` from the
+shared blob pipeline. The position reconciler already consumes the `position_assignment.*` pair
+(P2-05), and these flows are its first producer; the flows ALSO reconcile in-band so the HTTP
+response reflects committed reality rather than an eventual one.

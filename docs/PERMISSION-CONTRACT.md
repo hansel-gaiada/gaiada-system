@@ -539,3 +539,49 @@ and every other kind in the repo has one.
 - **Contract rule (binding):** flipping a key `false → true` is a PERMISSION-CONTRACT change
   requiring an owner decision line in the catalog entry, identical to a rename (§7 of this
   document's own frozen list). Flipping `true → false` is always a safe narrowing.
+
+---
+
+## 11. IAM Phase 2 (P2-06, 2026-08-18) — the first consumers of the Phase-2 kinds
+
+P2-02 registered `employee`/`position`/`role_grant`/`it_account` with **no handler behind them**.
+P2-06 built the first ones (`employees.controller.ts`), which turned two paper rules into live
+decisions and surfaced two things worth recording.
+
+### 11.1 `targetUserId` was an attribute no handler could send
+
+`resource_position.yaml`'s self-assign DENY and `resource_role_grant.yaml`'s self-target DENY both
+match `request.resource.attr.targetUserId`, but the TypeScript `Resource` type (`src/rbac/cerbos.ts`)
+had no such field, and `resourcePayload()` therefore never sent one. Every such DENY was
+**structurally unreachable** — not because the policy was wrong, but because the only way to feed it
+did not exist. Added in P2-06 (`targetUserId?: string`, defaulted to `""` like every other optional
+attr, so the `has() && != ""` guards keep failing safe when a caller omits it).
+
+**The general lesson, which has now cost this program twice** (`team_lead`'s `teamId`,
+`report_document`'s `scope_id`, and now this): a rule that reads an attribute is only as real as the
+narrowest layer able to carry it — policy, the `Resource` type, `resourcePayload()`, and the handler
+all have to agree. When registering a kind ahead of its handler, say explicitly which attributes do
+not yet have a transport.
+
+### 11.2 HR cannot place, move, or terminate anyone — by policy, and it contradicts design §5.1
+
+`resource_position.yaml` grants `assign`/`unassign` to **`company_admin` and `org_unit_lead` only**.
+`hr_people_ops` is absent, which matches design §4.1 ("HR creates/retires positions; dept head
+assigns within their subtree") and §6.2 — but design §5.1 describes the joiner as "HR (hr_manager /
+company_admin) creates the employee … if `positionId` is given … open the position assignment", and
+§5.2/§5.3 present transfer and terminate as HR endpoints.
+
+**What shipped honours Cerbos** (the authority per the program's own non-negotiables): `hr_manager`
+gets 201 on a record-only hire and **403** on the placement half, on transfer, and on terminate. Both
+directions are pinned in `employees-jml.test.ts`, so widening this later is a visible decision.
+
+**Owner call needed** — either (a) give `hr_people_ops` `assign`/`unassign` (HR runs JML end to end,
+dept heads keep their subtree rule), or (b) keep the split and correct design §5.1's text so the HR
+console (P2-10) is built with the placement fields gated on `position.assign` reach. Recommendation:
+**(a)** — an HR manager who cannot complete a hire they started will be handed `company_admin`
+instead, which is the larger grant and the worse outcome.
+
+### 11.3 Unchanged by this ticket
+
+No permission key was added, no bundle moved, no `perm_*` arm wired. The four Phase-2 kinds remain
+role-arm-only and permanently-unwired in the rollout register (§9).

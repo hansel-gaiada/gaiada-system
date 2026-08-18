@@ -50,6 +50,8 @@ import { IntegrationsController } from "./core/integrations.controller";
 import { ClaudeSeatsController } from "./core/claude-seats.controller";
 import { AdminIdentityController } from "./admin/admin-identity.controller";
 import { CompanyAdminController } from "./admin/company-admin.controller";
+import { EmployeesController } from "./admin/employees.controller";
+import { PositionsController } from "./admin/positions.controller";
 import { ServiceAssignmentsController } from "./admin/service-assignments.controller";
 import { CompanyCrudController } from "./admin/company-crud.controller";
 import { AdminSystemsController } from "./admin/admin-systems.controller";
@@ -99,7 +101,7 @@ import { MagicLinkController } from "./mail/magic-link/controller";
   controllers: [
     HealthController, IdentityController, CoreController, CustomFieldsController,
     AuthzCheckController, AuthzPermissionsController, ClientWorkController, BillingController, CollabController, AutomationApprovalsController, PipelineController, ApprovalsController, ApprovalsDecideController, TasksMineController, MeetingRecordingsController, PortalController, PortalWorkspaceController, PortalCommerceController, PortalProfileController, PortalStreamController, WebdevChangeRequestsPortalController, WebdevChangeRequestsController, ContractsController, ClientContactsController, ClientInviteAcceptController, FilesController, CreativeController, WorkActivityController, IntegrationsController, ClaudeSeatsController, AdminIdentityController,
-    CompanyAdminController, ServiceAssignmentsController, CompanyCrudController, AdminSystemsController, BotAdminController, IntelligenceController,
+    CompanyAdminController, EmployeesController, PositionsController, ServiceAssignmentsController, CompanyCrudController, AdminSystemsController, BotAdminController, IntelligenceController,
     // Vertical modules (compiled-in; per-tenant enable gate at the controller).
     AgencyController, PmController, ItController, ClientsController, HrController, LoansController, AssistantController, SearchController,
     SocialController,
