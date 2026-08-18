@@ -106,6 +106,27 @@ reconstructed from this table alone. Format defined in [`VERSIONING.md`](./VERSI
 > Not corrected retroactively (moving a pushed, already-deployed tag is its own risk); flagging so
 > the next session doesn't re-diagnose the same gap.
 
+### `Alpha 01.043.0095b` - 2026-08-18 - the position reconciler is switchable on the live box
+
+Manifest: **no module version moved** — this is an infra/compose change only, so per VERSIONING the
+REVISION LETTER advances (`0095a` -> `0095b`) and the module-reference counter stays at `0095`.
+Module set identical to `Alpha 01.042.0095a`.
+
+**What it changes:** `POSITION_SYNC_ENABLED` and `POSITION_DRIFT_SWEEP_INTERVAL_MS` are now passed
+into the `platform` container by `docker-compose.vps.yml`, and documented in
+`platform-nest/.env.example`.
+
+**Why it is its own cut:** the flag was already read by the code (P2-05 shipped it), but compose never
+forwarded it — so setting it in the box `.env` did nothing. Verified on the live box before this
+change: hire, transfer and terminate each returned 2xx with `reconciled: null` and zero
+`user_roles.managed_by_position` rows. Seats moved; authorization did not. The capability looked
+healthy while the half that matters was inert.
+
+**Deploying this does NOT turn the reconciler on.** It makes the switch reachable. Flipping it is a
+separate, deliberate act: set `POSITION_SYNC_ENABLED=1` in the box `.env` and recreate `platform`.
+That changes live authorization for every position holder — grants materialise from role-sets and
+closing a seat revokes what only that seat justified, with the mass-revoke brake as the backstop.
+
 ### `Alpha 01.042.0095a` - 2026-08-18 - four owner decisions, and a client over-grant closed
 
 Manifest (counter +1, 0094 -> 0095): `platform-nest 0.23.0 -> 0.23.1`.

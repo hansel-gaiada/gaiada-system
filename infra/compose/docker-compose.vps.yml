@@ -522,6 +522,25 @@ services:
       # ORG-6 release train (WSD-8 go-live 2026-07-22): shared-service assignments + reconciler.
       # Dark by default (empty/unset -> off); "1"/"true" flips the whole train on.
       SERVICE_ASSIGNMENTS_ENABLED: ${SERVICE_ASSIGNMENTS_ENABLED:-}
+      # IAM Phase 2 (P2-05/P2-06/P2-09): the POSITION reconciler - placement provisions access, a
+      # transfer moves it, a termination removes it. Dark by default, exactly like the ORG-6 train
+      # above (empty/unset -> off; "1"/"true" on).
+      #
+      # THIS LINE IS WHY THE FLAG WORKS AT ALL. Setting POSITION_SYNC_ENABLED in the box `.env`
+      # alone does NOTHING: compose reads `.env` for variable INTERPOLATION, it does not pass it
+      # into the container. Verified on the live box 2026-08-18 - hire/transfer/terminate each
+      # returned 2xx with `reconciled: null` and ZERO `user_roles.managed_by_position` rows, i.e.
+      # the seats moved and the authorization did not. The flows look healthy while the half that
+      # matters is inert.
+      #
+      # WARNING: turning this ON changes live authorization for every position holder. Grants
+      # materialise from role-sets, and closing a seat REVOKES what only that seat justified. The
+      # mass-revoke brake (position-reconciler.ts) is what stops a bad org edit doing that
+      # estate-wide; the drift sweep reports rather than auto-heals.
+      POSITION_SYNC_ENABLED: ${POSITION_SYNC_ENABLED:-}
+      # P2-09's sweep interval. The EXPIRY half of that loop runs regardless of the flag above,
+      # because P2-08's grant surface can write `expires_at` whether or not positions are live.
+      POSITION_DRIFT_SWEEP_INTERVAL_MS: ${POSITION_DRIFT_SWEEP_INTERVAL_MS:-}
       # OBS-01 follow-up (2026-08-06 incident): platform used to read the SAME shared OTEL_ENABLED
       # as the other 5 telemetry-carrying services. Turning it on for platform alone meant either an
       # unscoped `.env` edit (which once accidentally restarted ai-gateway) or a shell-level override
