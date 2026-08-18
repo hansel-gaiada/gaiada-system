@@ -91,7 +91,7 @@ async function purgeInboxRetention(c: PoolClient, tenantId: string, now: Date): 
         `UPDATE social_inbox_threads
             SET author_handle = NULL, author_name = NULL, profile_data_purged_at = $3
           WHERE tenant_id = $1 AND network = $2 AND profile_data_purged_at IS NULL
-            AND deleted_at IS NULL AND created_at < $3 - make_interval(hours => $4)`,
+            AND deleted_at IS NULL AND created_at < $3::timestamptz - make_interval(hours => $4::int)`,
         [tenantId, network, now, policy.profileDataMaxHours],
       );
       counts.threadsProfile += threads.rowCount ?? 0;
@@ -102,7 +102,7 @@ async function purgeInboxRetention(c: PoolClient, tenantId: string, now: Date): 
            FROM social_inbox_threads t
           WHERE m.thread_id = t.id AND t.tenant_id = $1 AND t.network = $2
             AND m.tenant_id = $1 AND m.profile_data_purged_at IS NULL
-            AND m.created_at < $3 - make_interval(hours => $4)`,
+            AND m.created_at < $3::timestamptz - make_interval(hours => $4::int)`,
         [tenantId, network, now, policy.profileDataMaxHours],
       );
       counts.messagesProfile += messages.rowCount ?? 0;
@@ -113,7 +113,7 @@ async function purgeInboxRetention(c: PoolClient, tenantId: string, now: Date): 
         `UPDATE social_inbox_threads
             SET excerpt = NULL, activity_content_purged_at = $3
           WHERE tenant_id = $1 AND network = $2 AND activity_content_purged_at IS NULL
-            AND deleted_at IS NULL AND created_at < $3 - make_interval(hours => $4)`,
+            AND deleted_at IS NULL AND created_at < $3::timestamptz - make_interval(hours => $4::int)`,
         [tenantId, network, now, policy.activityContentMaxHours],
       );
       counts.threadsActivity += threads.rowCount ?? 0;
@@ -124,7 +124,7 @@ async function purgeInboxRetention(c: PoolClient, tenantId: string, now: Date): 
            FROM social_inbox_threads t
           WHERE m.thread_id = t.id AND t.tenant_id = $1 AND t.network = $2
             AND m.tenant_id = $1 AND m.activity_content_purged_at IS NULL
-            AND m.created_at < $3 - make_interval(hours => $4)`,
+            AND m.created_at < $3::timestamptz - make_interval(hours => $4::int)`,
         [tenantId, network, now, policy.activityContentMaxHours],
       );
       counts.messagesActivity += messages.rowCount ?? 0;
