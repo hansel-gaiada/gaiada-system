@@ -209,11 +209,27 @@ services:
     image: gcr.io/cadvisor/cadvisor:v0.49.1
     restart: unless-stopped
     privileged: true
+    # MON-09l: with the mounts alone, cAdvisor logged 'Failed to create existing container:
+    # /system.slice/docker-<hash>' for EVERY container and produced only host cgroup series --
+    # 51 of them, none carrying a `name` label. So per-container CPU/memory did not exist while
+    # the cadvisor scrape target sat green. Third instance today of the same shape: a collector
+    # that answers is not a collector that collects.
+    #
+    # On a cgroup-v2 host cAdvisor additionally needs /dev/kmsg (kernel event source) and
+    # /dev/disk (block device stats); without them container discovery fails per-container
+    # rather than failing loudly at startup, which is why it looked healthy.
+    # --docker_only drops the host-cgroup noise that was all it managed to report before.
+    command:
+      - "--docker_only=true"
+      - "--store_container_labels=false"
+    devices:
+      - /dev/kmsg
     volumes:
       - /:/rootfs:ro
       - /var/run:/var/run:ro
       - /sys:/sys:ro
       - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
 
   blackbox-exporter:
     image: prom/blackbox-exporter:v0.25.0
