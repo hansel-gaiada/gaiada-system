@@ -114,8 +114,9 @@ proven identical, not yet load-bearing):** the two-kind pilot (`pm_task`, `hr_ca
 `agency_brief/campaign/creative_asset`, `chat_group`, `company`, `compliance_gate`, `contract`,
 `identity_link`, `invoice`, `knowledge_source`, `report_admin`, `rollup`, `rollup_recompute`,
 `service_assignment`, `user`, `webdev_change_request`, `webdev_provisioned_site`, `hr_record`,
-`agency_approval`, and the 7 `resource_search_*` kinds) — **28 of 61 kinds now carry a `perm_*`
-arm**, verified via `permission-arm-hazard-scan.test.ts` (12→64 tests as each kind joined its own
+`agency_approval`, and the 7 `resource_search_*` kinds) — **55 of 72 kinds now carry a `perm_*`
+arm** (re-derived 2026-08-18 by counting resource policies that actually reference a `perm_*`
+derived role, not from a prior doc's snapshot; see §9's register for the 17 that do not), verified via `permission-arm-hazard-scan.test.ts` (12→64 tests as each kind joined its own
 regression guard). Batches 3–8 (self-scope-only `checkin`; the dead-grant `team_lead` sweep; 3
 dual-mitigation kinds; `report_document`'s per-action split; `team`; the 6 `group_executive`
 TRAP-4-blocked kinds) are **not started**. This is a snapshot — another concurrent session may move
@@ -140,9 +141,11 @@ no-self-escalation safeguard.
   cases return **201 instead of 400** — i.e. the grant is created). Enforced at the single
   unrestricted write path rather than by narrowing `perm_*` rules across 28 policy files: one check
   that makes the bad row impossible, instead of making a bad row harmless in one consumer.
-- ⏳ **Detection gap OPEN.** `permission-arm-hazard-scan.test.ts` models only SAME-RULE mixing, so a
-  wildcard/unconditional rule combined with a role whose own condition is narrower stays invisible to
-  it. **IAM-SEC-03** extends the detector and sweeps all 61 kinds for other instances.
+- ✅ **Detection gap CLOSED.** `permission-arm-hazard-scan.test.ts` originally modelled only
+  SAME-RULE mixing, so a wildcard/unconditional rule combined with a role whose own condition is
+  narrower stayed invisible to it. **IAM-SEC-03 landed** (2026-08-11): the detector carries Pattern C,
+  all kinds were swept, and no open exposure was found. IAM-SEC-04/05/06 extended the same instrument
+  further (resolution-source filter in `assemblePrincipal()`).
 
 ## 3. The 15 permissions no role can ever hold
 
@@ -422,8 +425,17 @@ catch it — treat that one, not the parity suite, as the authority for "no role
   reach over every other origin (loans, automation, agent).
 
 **Still open, unresolved as of this pass:**
-- **IAM-04-ROLLOUT.** 28 of 61 kinds now carry a permission arm (up from the 2-kind pilot) — see §2
-  for the exact list; §2's kind count itself is now 60, not 61 (HIER-3 deleted the `team` kind).
+- **IAM-04-ROLLOUT.** **55 of 72 kinds carry a permission arm** (measured 2026-08-18 from the
+  policies themselves: `grep -lE '^\s*derivedRoles:.*perm_' cerbos/policies/resource_*.yaml`).
+  The remaining **17**, classified — this list, not a batch number, is the register now:
+  | Kinds | Why unwired | Disposition |
+  |---|---|---|
+  | `assistant_thread`, `assistant_memory`, `agent_run`, `mcp_tool` | Ruling-3 relationship-class exemption; superadmin deliberately cannot reach them | **NEVER wire** |
+  | `role_grant`, `position`, `employee`, `it_account` | Phase-2 kinds shipped role-arm-only on purpose (P2-02, §10.1) | Deferred past the rollout |
+  | `integration_connection` | `group_executive`-only rule, no mirrorable tier (IAM-04-B5) | Blocked on D-7 (`group_executive` removal) |
+  | `report_document`, `appraisal` | Blocked in B5 §4 — `org_unit_lead`'s attribute-dependent rule cannot be expressed as a flat mirror | Needs its own narrow ticket |
+  | `social_account`, `social_client_review`, `social_inbox`, `social_platform_app`, `social_report` | B6 wired only the 3 social kinds with real handler code; these five have none | Wire when the handlers exist |
+  | `member` | **Correctly excluded, reason established 2026-08-18.** It was in the §R.7 Batch-1 list but landed as 16 kinds, not 17 (`eec0b98`), with no recorded reason. Re-derived: `resource_member.yaml`'s `module_staff` rule gates tenant-directory `read` on `resource.attr.module` matching the staff role's module, while the bundles record `core.member.read` for **all six** module-staff roles (`hr_staff`, `search_staff`, `reports_staff`, `webdev_staff`, `social_staff`). A flat company-scope `perm_member_read` mirror would therefore hand every module-staff role tenant-wide directory read that the role arm refuses — the attribute-gate shape a flat mirror structurally cannot express. | **Do not wire** without a selective/self-scoped mitigation |
   Rollout batches 4–7 (the dead-grant `team_lead` sweep across 18 kinds, 3 dual-mitigation kinds,
   `report_document`'s per-action split, `team` itself) **dissolve rather than proceed**: their
   entire subject matter (`team`-scoped grants, `team_lead`) no longer exists post-HIER-3, exactly
@@ -453,8 +465,18 @@ catch it — treat that one, not the parity suite, as the authority for "no role
   loans in this ticket and the report flags it as a candidate follow-up rather than assuming it in
   scope. DR-1's premise (approval authority cleanly scoped per domain) is now true for leave, not
   yet for loans.
-- **Sensitivity sign-off** (79 permissions + 42 groups flagged) still needs the owner + an
-  HR/finance pass; blocks D-9/D-10, not Phase 1.
+- **Sensitivity sign-off** — now **107** catalog permissions flagged `sensitive` (was 79 when this
+  row was written; the social module, IAM-GAP-01 and P2-02 all added flagged keys). Still needs the
+  owner + an HR/finance pass; blocks D-9/D-10, not Phase 1.
+- **IAM-02c** (retire Cerbos-side `module_staff`/`module_manager` string composition in favour of
+  explicitly-named per-module derived roles) — **DEFERRED, reviewed 2026-08-18.** Its own gate is
+  "once IAM-04 lands", and the rollout is at 55/72 kinds with three blocked classes above. The
+  narrower half of 02c is already satisfied: module roles carry explicit bundles (`0094`), every
+  module role is seeded (`0091`/`0097`/`0106`), and `role-catalog-drift.db.test.ts` **derives** the
+  composed names from the policies + call sites rather than listing them, so the silent-skip defect
+  class that motivated 02c is already guarded. What remains is a pure no-behavior-change policy
+  rewrite across every module kind — deliberately not done mid-rollout, since it would churn exactly
+  the rules the rollout is still reasoning about.
 - ~~HIER-2 (`org_unit_lead`) and HIER-3 (the `team`/`team_lead` retirement sweep)~~ — **LANDED
   (2026-08-11).** `org_unit_lead` is seeded and Cerbos-consuming on two rules; `team_lead`, the
   `team`/`record` scope values, and `teams`/`team_memberships` are retired. See §7's rewritten
