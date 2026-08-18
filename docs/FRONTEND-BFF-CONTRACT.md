@@ -2749,7 +2749,7 @@ therefore reuses T3b's existing confirm-chip machinery end to end rather than ad
 
 ---
 
-## 19. Social-media module — SMM · Organic Publishing (SMM-* program, 2026-08-13) — `modules/social/social.controller.ts` — **STATUS: IN PROGRESS (SMM-02/08/19/05 backend built; NO UI yet)**
+## 19. Social-media module — SMM · Organic Publishing (SMM-* program, 2026-08-13) — `modules/social/social.controller.ts` — **STATUS: IN PROGRESS (SMM-02/08/19/05/09 backend built; NO UI yet)**
 
 Design: `blueprints/smm-design.md` as amended by **`blueprints/smm-design-addendum-2026-08-12.md`
 (binding)**. Schema `migrations/0105_module_social.sql`; IAM registration `0106` + eight
@@ -2865,8 +2865,9 @@ debugging round; its own test caught it.)
 
 **Publisher seam + connector registry (SMM-05).** Cerbos kind `social_account`. This is the
 `SocialPublisher` port's console surface — the mapping publishing will ride on, the registry that
-mirrors it, and a status read that keeps answering while the engine is down. **There is still no
-publish endpoint**; `social.post.publish` and the D14 executable-approval entry are SMM-09's.
+mirrors it, and a status read that keeps answering while the engine is down. The D14
+executable-approval entry and the gate's read surface are SMM-09's, immediately below; the DISPATCH
+endpoint (`schedulePost` + the transactional stamp) is still SMM-10's and does not exist yet.
 
 | Method + path | Permission | Notes |
 |---|---|---|
@@ -2915,10 +2916,65 @@ impact `low` — every one writes a draft row or a knowledge pointer, none can r
 same `authorize()` calls as their HTTP twins above), and SMM-05's `social.listAccounts` /
 `social.getPublisherStatus` (reads, `low`), `social.provisionPublisherOrg` (write, impact
 **`medium`** — it is the tenant-mapping row whose corruption is the wrong-account-publish nightmare)
-and `social.syncConnectorRegistry` (write, impact `low` — mirrored state only, nothing public). The
-publish, inbox, report and ledger tools are deliberately NOT declared yet: their endpoints do not
-exist, and a tool the hub publishes to every agent without a handler behind it is this program's
-"frontend-first drift" bug pointed at automation instead of a console.
+and `social.syncConnectorRegistry` (write, impact `low` — mirrored state only, nothing public), plus
+SMM-09's `social.checkPublishPreconditions` (read, `low`). The publish, inbox, report and ledger
+tools are deliberately NOT declared yet: their endpoints do not exist, and a tool the hub publishes
+to every agent without a handler behind it is this program's "frontend-first drift" bug pointed at
+automation instead of a console. **`social.publishPost` is registered in the D14 executable-approval
+registry but is NOT declared as an MCP tool** until SMM-10 builds the dispatch endpoint it would
+front; `social.publishPostMetered` is BARRED and must never be declared at all.
+
+**The publish gate (SMM-09) — BUILT.** Cerbos kind `social_post`. This is the D14
+executable-approval spine SMM-10/17/22/31 consume. Design: addendum D-14 (publish executes on
+approval, money split out of that path), D-15 (`payload_hash` IS `argsSha256`), D-22 (owner decision
+2026-08-18 — the composer's explicit selections ARE the TikTok creator consent, and `creator_info`
+is re-verified at dispatch).
+
+| Method + path | Permission | Notes |
+|---|---|---|
+| `GET variants/:variantId/publish-preconditions` | `social.post.read` | **A dry run of the D14 execution precondition — it publishes nothing, consumes no approval and makes no network call.** Runs the EXACT function the approval executor runs, so a console's "why can't this publish" cannot drift from what execution will actually say. Returns `{ok, stage?, reason?, stages[], tool, meteredTool}`. A refusal is DATA with a **200** (it is a successful answer to the question asked); an unknown variant is a **404**; a principal with no social grant is a **403**, never `ok:false`. Read-tier on purpose: asking whether a publish would be allowed is not publishing, and `social.post.publish` stays manager-tier. |
+
+**The refusal vocabulary — a CONTRACT, not log text.** The same snake_case tokens appear in this
+endpoint's `reason` and in `automation_approvals.execution_error` after the `precondition_failed: `
+prefix. Evaluated strictly in this order, and the first refusal wins:
+
+| Stage | Tokens |
+|---|---|
+| `scope` | `variant_not_found` · `cross_client_account` · `account_not_connected` · `network_disabled` · `network_not_in_scope` · `engagement_inactive` · `metered_network_requires_metered_tool` |
+| `quota` | `quota_exhausted` · `media_rules_failed` |
+| `hash` | `args_hash_mismatch` |
+| `unconsumed` | `already_dispatched` · `approval_already_consumed` · `variant_not_approved` |
+| `budget` | `budget_exceeded` |
+| `creator_info` | `creator_info_unverified` · `creator_selection_no_longer_permitted` |
+
+Five properties a console (and every downstream ticket) must not smooth over:
+
+- **Edit invalidates approval, structurally.** The approval is bound to `args_sha256`. Any content
+  edit moves the hash, so the grant stops matching and the publish refuses `args_hash_mismatch` —
+  this is a property of the hash, not a rule someone remembered to enforce. `PATCH variants/:id`
+  already answers `approvalInvalidated: true`; this is the other end of the same fact.
+- **Replay is refused twice over.** The approval's own single-use claim stops one row executing
+  twice; the VARIANT's `provider_post_id` / `approval_id` stops a SECOND approval publishing the same
+  content (`already_dispatched` / `approval_already_consumed`).
+- **An ambiguous failure is NEVER auto-retried.** A publish whose outcome is unknown
+  (`hub_unreachable`, `tool_error`) may already be on a client's public feed. The row lands `failed`,
+  both principals are notified at severity `warning`, and only a HUMAN pressing Retry (which re-takes
+  the lock and re-runs this precondition) moves it. The tenant's `automation.approvalRetry.autoRetryCount`
+  setting does NOT apply to a publish — the tool's policy outranks it.
+- **`quota_unknown` is still only a warning.** An unsynced registry must never read as an exhausted
+  account; only a live counter at or over its cap refuses.
+- **TikTok fails closed on consent (D-22).** A TikTok variant refuses `creator_info_unverified`
+  unless a dispatch-side `creator_info` verification is available, and
+  `creator_selection_no_longer_permitted` when the creator's live settings no longer permit the
+  approved selections. Neither is auto-retried. SMM-10 installs the verifier; the hook and its typed
+  reasons are SMM-09's.
+
+**The D-14 money split, at the tool surface.** `social.publishPost` (the $0 path) is the registered
+executable; `social.publishPostMetered` (any metered network — X, which ships disabled in every
+scope) is **BARRED**: it is absent from the executable registry and from
+`cerbos/policies/resource_mcp_tool.yaml`'s executable-tool list, so an approved row for it stays
+`execution_status='not_applicable'` forever. Belt and braces, the free tool's own precondition
+refuses a metered-network variant with `metered_network_requires_metered_tool` rather than spending.
 
 **Rollup metrics** (D12): `social.engagements.active`, `social.accounts.connected`,
 `social.posts.published.month`, `social.approvals.pending`, `social.inbox.open`,
