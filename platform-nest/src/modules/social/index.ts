@@ -76,7 +76,11 @@ export const socialModule: ModuleContract = {
   key: "social",
   // Registered AT WRITE TIME. searchModule's own header records this as its repeated bug (0047 was
   // omitted from that array and had to be fixed after the fact); it is cheap to not repeat.
-  migrations: ["0105_module_social.sql", "0106_iam_social_permissions.sql"],
+  migrations: [
+    "0105_module_social.sql", "0106_iam_social_permissions.sql",
+    // SMM-36 — inbox retention purge markers + state-law CHECKs; registered at write time.
+    "0113_social_inbox_retention.sql",
+  ],
   // Dotted keys, matching class='grantable' catalog rows (0106). `validateModulePermissions()`
   // refuses boot if any of these is uncatalogued — which is why 0106 lands before this module is
   // registered, not after. Only the keys THIS ticket's surfaces use are declared; the rest of the

@@ -300,8 +300,14 @@ export function publishLockKey(toolArgs: Record<string, unknown>, toolName: stri
  * contract is about domain rows, and this narrows nothing and mutates nothing durable. The only
  * other tables the executor touches on this connection are `automation_approvals` and `companies`,
  * neither of which consults `app.scopes` at all (0014's policy is the tenant wall only).
+ *
+ * Exported so `inbox-retention-job.ts` (SMM-36) can reuse the EXACT same additive scope declaration
+ * rather than growing a second copy — the purge job's per-tenant transaction is opened the same
+ * module-less way the D14 executor's is, for the same reason (a generic scheduled sweep has no
+ * business knowing which module it is about to touch), and a second hand-written version of this
+ * function is exactly how the two copies would drift.
  */
-async function declareSocialModuleScope(c: PoolClient): Promise<void> {
+export async function declareSocialModuleScope(c: PoolClient): Promise<void> {
   await c.query(
     `SELECT set_config('app.scopes',
        CASE

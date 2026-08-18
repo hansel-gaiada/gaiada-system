@@ -480,3 +480,21 @@ at it, run `node dist/db/migrate.js`, confirm the ordered `applied:` list and ex
    sensitive, and `hr_staff` must NOT hold the position keys. Paired with the policy edits and the
    regenerated JSON in the same commit, because the parity suites compare all three. **Next unused is
    `0113`** — re-verify with `ls migrations | sort | tail` before trusting that.
+
+
+   **2026-08-18 update (SMM-36, per-network inbox retention + purge) -- `0113` TAKEN.**
+   `ls migrations | sort | tail` immediately before writing showed the head as
+   `0112_iam_owner_decisions_2026_08_18.sql` with `0113` genuinely free.
+   `0113_social_inbox_retention.sql` is additive-only, zero DML (both inbox tables have zero rows in
+   every environment -- SMM-15's sync has not shipped yet): two purge-marker columns
+   (`profile_data_purged_at`, `activity_content_purged_at`) on BOTH `social_inbox_threads` and
+   `social_inbox_messages`, four state-law CHECK constraints ("if the marker is set, the column it
+   covers is scrubbed"), and two partial retention-scan indexes matching 0105's own
+   `deleted_at IS NULL` idiom. The retention NUMBERS themselves (LinkedIn 24h profile / 48h activity,
+   documented; every other network `unverified`, never a guessed default) live in code
+   (`src/modules/social/retention-policy.ts`), not in this migration -- a schema-level constant would
+   need a new migration every time OQ-1 research corrects or adds a network. Registered in
+   `src/modules/social/index.ts`'s `migrations` array. `0058`/`0059`/`0070` remain the
+   permanently-orphaned reservation gaps -- still do NOT fill them. **Next unused is `0114`** --
+   re-verify with `ls migrations | sort | tail` before trusting that; this checkout has other
+   concurrent social-module sessions in flight as of this entry.

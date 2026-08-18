@@ -86,6 +86,7 @@ import { startWorkActivityConsumerLoop } from "./events/work-activity-consumer";
 import { runWorkActivityBackfill } from "./core/work-activity-backfill";
 import { startBurndownSnapshotLoop } from "./modules/pm/burndown-job";
 import { startStaleReaperLoop } from "./modules/it/discovery.service";
+import { startInboxRetentionPurgeLoop } from "./modules/social/inbox-retention-job";
 // SM-54 (tracker §6ad Ruling 1 / addendum §A13.2) — the search department's cadence loop lives in the
 // platform, NOT in n8n: it executes configuration a verified human already set (each engagement's
 // `tool_scope` toggle + cadence + budget cap, written under `search:scope:write`), and every automation
@@ -491,6 +492,18 @@ async function bootstrap(): Promise<void> {
     startStaleReaperLoop(config.itDiscovery.reaperIntervalMs);
     // eslint-disable-next-line no-console
     console.log(`IT device stale reaper on: every ${config.itDiscovery.reaperIntervalMs}ms`);
+  }
+  // SMM-36: the LinkedIn-driven engagement-inbox retention purge. A plain Postgres sweep (no Redis
+  // dependency), same dark-by-default pattern as the sweeps above — but unlike the burndown/drift
+  // sweeps this one is NOT a pure optimization: until it runs, LinkedIn comment text and commenter
+  // profile fields accumulate past the 24h/48h ceiling LinkedIn's own Data Storage Requirements
+  // impose (addendum §A4e), which is checked at their Standard Tier review. Off by default because
+  // no LinkedIn client is connected yet (OQ-1/OQ-3 still gate that) — turning this on is a
+  // deploy-time decision paired with turning LinkedIn on for real.
+  if (config.social.inboxRetention.purgeEnabled) {
+    startInboxRetentionPurgeLoop(config.social.inboxRetention.purgeIntervalMs);
+    // eslint-disable-next-line no-console
+    console.log(`social inbox retention purge on: every ${config.social.inboxRetention.purgeIntervalMs}ms`);
   }
   // SM-54: the search pull scheduler. A plain Postgres sweep (no Redis dependency), so it sits outside
   // the redisUrl gate above alongside the drift sweep and the burndown job — but unlike those two this

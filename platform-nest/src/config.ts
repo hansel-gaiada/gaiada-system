@@ -508,6 +508,24 @@ const configBase = {
       // cap is wrong in a way nothing downstream can detect.
       quotaProbeTool: process.env.SOCIAL_POSTIZ_QUOTA_PROBE_TOOL ?? "",
     },
+    // SMM-36 — the LinkedIn-driven inbox retention purge (`inbox-retention-job.ts`). DARK by
+    // default, same pattern as `pmBurndownSnapshotEnabled`/`serviceAssignmentsEnabled`: unlike
+    // those two this job is NOT a pure optimization with a lazy backstop — until it runs, LinkedIn
+    // comment text and commenter profile fields accumulate past the 24h/48h ceiling their own
+    // Data Storage Requirements impose (addendum §A4e). It still defaults OFF because
+    // `SOCIAL_NETWORKS_ENABLED` also defaults every network but instagram/facebook/linkedin off at
+    // the deployment level, and no LinkedIn client is connected yet (OQ-1/OQ-3 both still gate
+    // that) — turning this job on is a deploy-time decision paired with turning LinkedIn on for
+    // real, not a boot-time default.
+    inboxRetention: {
+      purgeEnabled:
+        process.env.SOCIAL_INBOX_RETENTION_PURGE_ENABLED === "1"
+        || process.env.SOCIAL_INBOX_RETENTION_PURGE_ENABLED === "true",
+      // Default 1h: LinkedIn's SHORTER window is 24h, so an hourly sweep gives at most ~4% window
+      // slack even at the moment a purge run was due — tight enough that "we purge daily" could
+      // never be mistaken for compliant. No effect unless purgeEnabled.
+      purgeIntervalMs: Number(process.env.SOCIAL_INBOX_RETENTION_PURGE_INTERVAL_MS ?? 3600 * 1000),
+    },
   },
   search: {
     defaultProvider: process.env.SEARCH_DEFAULT_PROVIDER ?? "dataforseo",
