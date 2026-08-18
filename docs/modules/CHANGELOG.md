@@ -1679,6 +1679,51 @@ anywhere real.
 ---
 
 ## platform-nest
+### [0.23.0] - 2026-08-18 - IN PROGRESS (IAM Phase 2: JML, positions, the grant surface, and the expiry sweep)
+- **A hire, a transfer and a termination now move real authorization (P2-06).** Seven endpoints under
+  `/api/:t/hr/employees` — list/detail/hire/patch/delete plus `transfer` and `terminate`. The §5.2 mover
+  criterion is proven in its HTTP form against RUNNING Cerbos: after a transfer, zero `user_roles` rows
+  point at the closed assignment, the OLD department's probe is 403, the NEW department's is 200, and
+  `session_version` moved. Probed with a principal `assemblePrincipal()` builds from the rows the
+  reconciler wrote — not from a role bundle, which cannot witness this at all.
+- **The org-blob write pipeline is now ONE implementation** (`admin/org-structure.service.ts`), with the
+  org PUT and the JML flows as its two callers. A transfer that moved a seat without moving the blob
+  person node would be silently reverted by the next org edit's membership sweep.
+- **Positions have an HTTP surface at last (P2-12 backend).** Until now a seat could only be created with
+  raw SQL, so the JML flows had nothing to hire into. CRUD + the role-set composer + assign/unassign,
+  with a dept head narrowed to their own subtree and `attachable-roles` returning refused roles WITH a
+  reason rather than omitting them.
+- **The grant/revoke surface (P2-08 part A).** `/api/:t/role-grants` over the `role_grant` kind:
+  `unitAncestors` derived server-side from the closure (never from the body), every other invariant left
+  to Cerbos or the choke point, and a position-managed grant refused as `managed_grant_not_revocable`
+  rather than deleted and silently restored by the next reconcile.
+- **`expires_at` finally means something (P2-09).** The column shipped in `0109` and no writer set it;
+  P2-08 writes it and P2-09's sweep revokes on it, bumps the session and audits `role_grant.expired`.
+  P2-05's drift sweep — built, never started — is on the same loop. ⚠ `assemblePrincipal()` still does
+  not filter on `expires_at`, so the gap between expiry and the next tick is real and recorded.
+- 🔴 **The ceiling could not pass the commonest grant in the system.** `company_admin` granting `member`
+  was refused over three keys `member` holds only for SELF-SERVICE. A plain subset test therefore
+  forbids granting the baseline role to anyone, forever — and the sensitive gate had the same defect
+  (baseline `member` carries 11 sensitive-flagged keys). Both now subtract the baseline bundle. This
+  relaxes a guard P2-04 shipped: `PERMISSION-CONTRACT` §12.1 records it as needing ratification.
+- 🔴 **`targetUserId` was an attribute no handler could send**, so the self-assign and self-target DENY
+  rules on `position`/`role_grant` were structurally unreachable. Added to the `Resource` type; the DENY
+  now fires, proven against the strongest possible caller.
+- 🔴 **The leaver flow would have disabled every leaver's login** — the "still employed elsewhere?" count
+  ran under `withGlobal`, so RLS returned zero rows for everyone with no error. Now uses the
+  `principal_lookup` policy. Caught by its own test going red first.
+- ⚠ **HR cannot place, transfer or terminate anyone** — `assign`/`unassign` are `company_admin` +
+  `org_unit_lead` only, which contradicts design §5.1. What shipped honours Cerbos and pins both
+  directions; the owner call is recorded with a recommendation.
+- **NOT built, and refused rather than faked:** the routed override (`decide_override` exists in neither
+  the policy nor the catalog, so an above-baseline sensitive grant from a dept head returns a typed
+  `override_required`); future-dated JML (the reconciler has no as-of axis); P2-07's MCP tools, so none
+  of these capabilities meet the agentic-native bar yet.
+- Migration `0111` (the joiner's natural key, which `0109` did not cover for principal-less candidates).
+- Gates: `employees-jml` 14/14, `positions` 11/11, `role-grants` 14/14, `grant-expiry-sweep` 6/6,
+  `grant-write-invariants` 26/26, `src/admin`+`src/rbac`+`src/db` regression, `tsc` clean,
+  `lint:withtenants` + `lint:migration-rls` clean. **Not deployed** — the push credential in the working
+  session had no write access to the repo.
 ### [0.21.2] - 2026-08-12 - IN PROGRESS (IAM-04 batch 4 + IAM-SEC-04 — 16 permission arms, and the scope guard generalised)
 - **16 of the 17 kinds `team_lead`'s retirement made SAFE now carry a permission arm** (`activity`,
   `client`, `client_contact`, `comment`, `custom_field`, `deliverable`, `device`, `file`,

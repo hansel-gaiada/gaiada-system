@@ -164,9 +164,9 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 
 ## platform-nest — migrations
 
-- Head: `0110_iam_phase2_role_grant_kinds_ui_grantable.sql`
-- Next free number: `0111` — **reserve it by creating the file**, concurrent sessions share this checkout.
-- Applied files on disk: 109
+- Head: `0111_iam_phase2_employee_work_email_key.sql`
+- Next free number: `0112` — **reserve it by creating the file**, concurrent sessions share this checkout.
+- Applied files on disk: 110
 - Unused numbers below head: `0058`, `0059`, `0070` (dead reservations — do not backfill)
 
 ## platform-nest — HTTP surface (`@Controller` prefixes)
@@ -181,7 +181,10 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 | `/api` | `platform-nest/src/admin/admin-identity.controller.ts` |
 | `/api` | `platform-nest/src/admin/company-admin.controller.ts` |
 | `/api` | `platform-nest/src/admin/company-crud.controller.ts` |
+| `/api` | `platform-nest/src/admin/employees.controller.ts` |
 | `/api` | `platform-nest/src/admin/intelligence.controller.ts` |
+| `/api` | `platform-nest/src/admin/positions.controller.ts` |
+| `/api` | `platform-nest/src/admin/role-grants.controller.ts` |
 | `/api` | `platform-nest/src/admin/service-assignments.controller.ts` |
 | `/api` | `platform-nest/src/core/approvals-decide.controller.ts` |
 | `/api` | `platform-nest/src/core/approvals.controller.ts` |
