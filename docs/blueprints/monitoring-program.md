@@ -136,8 +136,28 @@ disk has already rolled back a healthy release once ([[deploy-disk-fills-and-rol
 |---|---|---|
 | **MON-09e** | **Rollback is still broken for any release that ADDS a service** (dies on `<image>:<prev-tag>: not found`). This deploy added 11 services at once, so the exposure is now larger, not smaller. Unfixed. | devops |
 | **MON-09f** | `synthetic-prober` must be **built and pushed to GHCR by `release.yml`**, not built by hand on the box. Today's fix survives only until the box is rebuilt; after that every deploy fails at `--no-build`. | devops |
-| **MON-09g** | Commit the drift: `infra/observability/prometheus/rules/alerts.yml` (disk rules) and `infra/compose/docker-compose.observability.yml` (alertmanager port) exist on the box but are **uncommitted**. The next pipeline deploy re-syncs `infra/` from the tag and **reverts both**. | devops |
+| **MON-09g** | ✅ **CLOSED in repo, drift remains until the next release.** Both files are now committed (`966a17a`) and on `origin/main`. ⚠ **The predicted revert actually happened first** — see below. | devops |
 | **MON-09h** | Retire `docker-compose.alertmanager-mail.yml`, `otel-metrics.yml`, `loki.yml`, `obs-local.yml` or mark them dev-only — they now describe projects that no longer exist and would re-create port collisions on 9090/9093 if anyone ran them. | devops |
+
+### 2.5 The MON-09g revert happened, and is worth keeping
+
+While this work was in progress another session tagged and deployed `alpha-01.040.0093c`. That
+deploy rsynced `infra/` from the tag — which predated the two fixes — and **silently reverted both
+on the box**:
+
+- `alerts.yml` lost `DiskSpaceLow` + `DiskWillFillIn24h`. Prometheus kept serving them *from memory*
+  because it had not reloaded, so `/api/v1/rules` still listed them. **The rules would have vanished
+  at the next restart, with nothing to indicate they had ever been there.** A file check and a
+  runtime check disagreed, and only the file was telling the truth about the future.
+- `docker-compose.observability.yml` lost the alertmanager `ports:` block, so `:9093` went
+  unreachable again — the same silent loss of the silencing UI described in §2.3.
+
+Both were re-applied by hand and verified (`alertmanager=200`, both rules loaded, file on box
+contains them). They are committed, so the next release carries them permanently.
+
+**The general rule this proves:** on this estate, *a hand-applied infra change has a maximum lifetime
+of one deploy by anyone else*, and the shared checkout means "anyone else" is routine. Hand-apply to
+restore service; commit in the same session or accept that it will be undone without warning.
 
 **`COMPOSE_FILES` repo variable updated** to include `docker-compose.observability.yml`, so the
 pipeline keeps OTEL enabled and treats the observability services as owned rather than as orphans.
