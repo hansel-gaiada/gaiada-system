@@ -15,6 +15,10 @@ services:
     volumes:
       - ../../infra/observability/otel-collector/config.yaml:/etc/otelcol/config.yaml:ro
       # Read-only tail of container stdout for the filelog receiver (logs → Loki).
+      # MON relocation: backs the exporters' persistent sending queue (file_storage
+      # extension). Without a durable directory a WireGuard outage would drop telemetry silently,
+      # and a silent gap looks identical to a quiet system.
+      - otel-queue:/var/lib/otelcol/queue
       - /var/lib/docker/containers:/var/lib/docker/containers:ro
     depends_on:
       - tempo
@@ -279,7 +283,10 @@ services:
       #    a var in .env silently does nothing unless a service's environment block lists it,
       #    which is a trap this repo has already been bitten by.
       # Unset => the console reports itself unconfigured; it never implies the box is healthy.
-      PROMETHEUS_URL: "http://prometheus:9090"
+      # Points at the RELOCATED Prometheus over WireGuard (docs/plans/2026-08-18-observability-
+      # relocation.md). The local one is decommissioned, so the in-project name no longer resolves.
+      # Not localhost and not a compose service name: this crosses hosts now.
+      PROMETHEUS_URL: "http://10.88.0.2:19090"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4318"
       OTEL_SERVICE_NAME: "platform"
   sync-central:
@@ -309,6 +316,7 @@ services:
       OTEL_SERVICE_NAME: "bot-media-worker"
 
 volumes:
+  otel-queue:
   prometheus-data:
   tempo-data:
   loki-data:
