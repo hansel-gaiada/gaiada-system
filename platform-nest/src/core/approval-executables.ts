@@ -28,6 +28,14 @@
 import type { PoolClient } from "pg";
 import { lockPipelineRun } from "./pipeline-lock";
 import { evaluateProvisionPrecondition } from "../modules/webdev/provisioning.service";
+// SMM-09 — see this file's own SMM-09 section, at the bottom, for the reasoning behind every one of
+// these four. Same siting as PRV-03's import above: the domain rules live in the module.
+import {
+  SOCIAL_PUBLISH_TOOL,
+  SOCIAL_PUBLISH_METERED_TOOL,
+  publishLockKey,
+  evaluatePublishPrecondition,
+} from "../modules/social/publish-precondition";
 
 /** The result of a server-side precondition re-evaluation. `reason` is a TYPED token (snake_case,
  *  e.g. `run_blocked`, `stage_already_deployed`, `run_not_found`) — it is stored verbatim after the
@@ -75,6 +83,32 @@ export interface ExecutableApprovalEntry {
    * Must not write. Must not call out over the network (it runs inside an open transaction).
    */
   precondition(client: PoolClient, toolArgs: Record<string, unknown>): Promise<PreconditionVerdict>;
+
+  /**
+   * SMM-09 — opt OUT of `core/approval-execute.ts`'s bounded in-invocation auto-retry, entirely and
+   * regardless of the tenant's `automation.approvalRetry.autoRetryCount` setting.
+   *
+   * Default `false` (absent), which preserves the existing behaviour for every entry that shipped
+   * before this field: the tenant setting decides, and 0 (manual retry only) is already that
+   * setting's own default.
+   *
+   * WHY AN ENTRY WOULD SET IT. The executor's auto-retry is safe for a tool whose precondition can
+   * DETECT a first attempt that landed — `deploy.*` re-reads the stage's `done` status, so a retry
+   * after a lost response refuses instead of redeploying. For an OUTBOUND-PUBLIC action there is no
+   * such observation available in the ambiguous window: a `hub_unreachable` (no verdict obtained,
+   * the call may or may not have landed) or a `tool_error` (may have partially applied) on a publish
+   * means the post may ALREADY BE ON A CLIENT'S PUBLIC FEED while our row says nothing landed. The
+   * one thing that must not happen next is an unattended second attempt.
+   *
+   * So a publish surfaces for HUMAN resolution instead: the row lands `failed` with its typed error,
+   * both principals are notified at severity `warning`, and D14-07's retry endpoint is the only way
+   * forward — a human decision, re-earning the right through a fresh lock + precondition. That is
+   * the same doctrine `approval-execute.ts`'s header already states for the crash-wedge case ("the
+   * platform cannot know whether a call whose response was lost actually landed, so unwedging
+   * automatically would be a coin-flip on double-execution"), applied to the retry loop for the one
+   * class of tool where the coin-flip is public and irreversible.
+   */
+  neverAutoRetry?: boolean;
 }
 
 /**
@@ -91,7 +125,7 @@ export interface ExecutableApprovalEntry {
  *    and notifies), never silently executable.
  */
 export type ExecutableApprovalInput = Pick<ExecutableApprovalEntry, "toolName"> &
-  Partial<Pick<ExecutableApprovalEntry, "lockKey" | "precondition">>;
+  Partial<Pick<ExecutableApprovalEntry, "lockKey" | "precondition" | "neverAutoRetry">>;
 
 const registry = new Map<string, ExecutableApprovalEntry>();
 
@@ -101,11 +135,20 @@ export const NO_PRECONDITION_REASON = "no_precondition_registered";
 /**
  * Register an executable-approval entry. Throws on a duplicate `toolName` — registration is
  * deliberate and one-shot per tool (see the file header's doctrine), never a silent overwrite that
- * could let a later, weaker registration replace an earlier precondition unnoticed.
+ * could let a later, weaker registration replace an earlier precondition unnoticed. Also throws for
+ * a tool that is BARRED (see `registerBarredExecutable` below): a bar is a decision, and a later
+ * ticket must not be able to un-make it by adding an entry.
  */
 export function registerExecutableApproval(entry: ExecutableApprovalInput): void {
   if (registry.has(entry.toolName)) {
     throw new Error(`executable approval already registered for tool '${entry.toolName}'`);
+  }
+  if (barred.has(entry.toolName)) {
+    throw new Error(
+      `tool '${entry.toolName}' is BARRED from executable approval (${barred.get(entry.toolName)!.reason}) `
+      + "— registering it would undo a deliberate bar; if the bar is genuinely wrong, remove the "
+      + "registerBarredExecutable() call in the same change and say why",
+    );
   }
   registry.set(entry.toolName, {
     toolName: entry.toolName,
@@ -113,7 +156,76 @@ export function registerExecutableApproval(entry: ExecutableApprovalInput): void
     // lock is still taken and still real), and the precondition refuses outright.
     lockKey: entry.lockKey ?? (() => `executable-approval:${entry.toolName}`),
     precondition: entry.precondition ?? (async () => ({ ok: false, reason: NO_PRECONDITION_REASON })),
+    neverAutoRetry: entry.neverAutoRetry === true,
   });
+}
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════════
+// THE BARRED LIST — a NEGATIVE registration (SMM-09).
+// ═════════════════════════════════════════════════════════════════════════════════════════════════
+//
+// Read this before assuming a barred entry weakens the header's doctrine — it is the opposite.
+//
+// The doctrine says an absent entry is the SAFE default and money-spending tools must NEVER be
+// registered. Both still hold, byte for byte: a barred tool is NOT in the executable map,
+// `getExecutable()` returns undefined for it, so both decide surfaces leave its approved rows at
+// `execution_status='not_applicable'` FOREVER and the executor fails closed with `not_executable`.
+// Nothing about a bar makes a tool more reachable.
+//
+// What a bar ADDS is that the decision is a FACT IN CODE with a typed reason, rather than an absence
+// somebody has to already know about:
+//   * `registerExecutableApproval` throws for a barred name, so a future ticket cannot quietly make
+//     the twin executable — the bar is enforced, not merely documented in a comment.
+//   * `isBarredExecutable(name)` gives the UI, the tool surface and the tests a positive answer to
+//     "why can this never auto-execute", instead of an undefined that is indistinguishable from
+//     "nobody has got round to it yet".
+//
+// SMM-09's `social.publishPostMetered` is the first, and it exists for D-14's money split: the free
+// path is registry-eligible precisely BECAUSE the metered one is separately named and cannot
+// execute. The pre-existing permanent bars (`search.setBudget` / `search.applyNegatives` /
+// `search.launchCampaign`, SM-55 / architect ruling A13) are deliberately NOT converted here — that
+// is a behaviour-neutral change to another module's contract and belongs to whoever owns it next.
+
+export interface BarredExecutableEntry {
+  toolName: string;
+  /** A snake_case TOKEN, same contract rules as a `PreconditionVerdict.reason`. */
+  reason: string;
+  /** Prose for a human reading the registry or a refusal. Never rendered as the token. */
+  note: string;
+}
+
+const barred = new Map<string, BarredExecutableEntry>();
+
+/**
+ * Record that a tool may NEVER auto-execute on approval. Throws if the name is already registered
+ * as executable (a bar must not silently disarm a live entry — remove the registration in the same
+ * change) or already barred.
+ */
+export function registerBarredExecutable(entry: BarredExecutableEntry): void {
+  if (registry.has(entry.toolName)) {
+    throw new Error(
+      `cannot bar '${entry.toolName}': it is already registered as an executable approval — remove `
+      + "that registration in the same change if the bar is intended",
+    );
+  }
+  if (barred.has(entry.toolName)) {
+    throw new Error(`tool '${entry.toolName}' is already barred`);
+  }
+  barred.set(entry.toolName, entry);
+}
+
+/** The bar entry for `toolName`, or undefined. */
+export function getBarredExecutable(toolName: string): BarredExecutableEntry | undefined {
+  return barred.get(toolName);
+}
+
+export function isBarredExecutable(toolName: string): boolean {
+  return barred.has(toolName);
+}
+
+/** Every bar, for a status/registry surface. Copy, never the live map. */
+export function listBarredExecutables(): BarredExecutableEntry[] {
+  return [...barred.values()];
 }
 
 /**
@@ -132,16 +244,22 @@ export function getExecutable(toolName: string): ExecutableApprovalEntry | undef
  * prior test run in the same process.
  *
  * NOTE for callers: this also clears the D14-05 `deploy.staging`/`deploy.production` entries, the
- * D14-15 `pm.createTask`/`pm.createDoc` entries, AND the PRV-03 `webdev.provisionSite` entry
- * registered below (they are all plain calls to `registerExecutableApproval`, no different from a
- * test fixture, once the module has loaded). A test file that needs the deploy pair back after
+ * D14-15 `pm.createTask`/`pm.createDoc` entries, the PRV-03 `webdev.provisionSite` entry AND the
+ * SMM-09 `social.publishPost` entry + its `social.publishPostMetered` BAR registered below (they
+ * are all plain calls to `registerExecutableApproval`/`registerBarredExecutable`, no different from
+ * a test fixture, once the module has loaded). A test file that needs the deploy pair back after
  * resetting calls `registerCoreExecutableApprovals()`; one that needs the PM pair back calls
- * `registerPmExecutableApprovals()`; one that needs the webdev entry back calls
- * `registerWebdevExecutableApprovals()` — either way, do not hand-roll a second copy of their
- * lock/precondition.
+ * `registerPmExecutableApprovals()`; the webdev entry, `registerWebdevExecutableApprovals()`; the
+ * social entry AND its bar, `registerSocialExecutableApprovals()` — either way, do not hand-roll a
+ * second copy of their lock/precondition.
+ *
+ * ⚠ It clears the BARRED map too. That is the right direction for a test seam (a leftover bar would
+ * make an unrelated suite's registration throw), and it is safe because the bar's real enforcement
+ * is the empty executable map, not the bar itself: a cleared registry executes nothing at all.
  */
 export function resetExecutableApprovals(): void {
   registry.clear();
+  barred.clear();
 }
 
 // ═════════════════════════════════════════════════════════════════════════════════════════════════
@@ -567,3 +685,118 @@ export function registerWebdevExecutableApprovals(): void {
 }
 
 registerWebdevExecutableApprovals();
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════════
+// SMM-09 — `social.publishPost` (executable) and `social.publishPostMetered` (BARRED twin).
+// ═════════════════════════════════════════════════════════════════════════════════════════════════
+//
+// Design: docs/blueprints/smm-design-addendum-2026-08-12.md — the SMM-09 row, D-14 (publish executes
+// on approval; money split out of that path), D-15 (`payload_hash` IS `argsSha256`), OQ-2 (X ships
+// disabled), plus D-22 (owner decision 2026-08-18, TikTok creator consent). The precondition body
+// lives in `modules/social/publish-precondition.ts` — same siting decision as PRV-03's
+// `evaluateProvisionPrecondition`: the domain rules belong to the module, this file is the thin,
+// auditable binding of (lockKey, precondition, retry policy) to a tool name.
+//
+// ── WHY A PUBLISH IS REGISTRY-ELIGIBLE AT ALL ────────────────────────────────────────────────────
+// The doctrine at the top of this file bars money-spending tools PERMANENTLY, and publishing is the
+// obvious candidate for that bar. D-14 resolves it by SPLITTING THE PATH BY TOOL NAME rather than by
+// a runtime branch:
+//
+//   social.publishPost         — every network Postiz reaches for $0. Registered below. An approval
+//                                for it EXECUTES, which is what closes the "approved but never
+//                                published" dead end D14 exists to fix (agentic criterion 4).
+//   social.publishPostMetered  — any variant on a metered network. X is the only one in v1, it
+//                                ships DISABLED in every scope (OQ-2, and `DEFAULT_TOOL_SCOPE` in
+//                                modules/social/index.ts pins `networks.x: false`), and this name is
+//                                BARRED below. It stays caller-re-driven, honouring the money bar.
+//
+// Splitting by NAME is the load-bearing choice: it makes the metered path visibly different at the
+// tool surface, where an operator, an agent and this registry can all see it, instead of hiding the
+// distinction inside a conditional that a later edit could invert. Belt and braces, the free tool's
+// own precondition ALSO refuses a metered-network variant
+// (`metered_network_requires_metered_tool`), so a routing bug cannot spend a client's money by
+// reaching the registered tool with an X variant.
+//
+// ── LOCK KEY: THE VARIANT, NOT THE POST AND NOT THE TENANT ───────────────────────────────────────
+// `tool_args.variantId`. A variant is one post on one account — the actual unit of publication, and
+// the unit two approvals contend over. Keying on the POST would serialize a five-network fan-out
+// behind itself for no correctness gain; keying on the TENANT would serialize every publish in the
+// agency behind every other (this deployment is nearly all one tenant — see pipeline-lock.ts's
+// "LOCK SCOPE" note). A missing/malformed id falls back to a tool-prefixed key over the raw args:
+// still pure and stable across retries, and it never collapses every bad call onto one shared lock.
+//
+// ── NO PIPELINE CO-LOCK ──────────────────────────────────────────────────────────────────────────
+// Stated so nobody adds `lockPipelineRun` here "for safety" later: nothing in the social module
+// reads or writes `pipeline_runs`/`pipeline_stages`. Co-locking would manufacture a false dependency
+// between two systems that share no state. The state THIS precondition reads (`social_post_variants`,
+// `social_engagements`, `social_accounts`, `social_usage_ledger`) is written under
+// `APPROVAL_EXEC_LOCK_NS` by this path and by SMM-10's dispatch, which must take the SAME key.
+//
+// ── NO AUTO-RETRY (the one behavioural difference from every entry above) ────────────────────────
+// `neverAutoRetry: true`. A publish whose outcome is UNKNOWN — `hub_unreachable` (no verdict) or
+// `tool_error` (may have partially applied) — may already be on a client's public feed. `deploy.*`
+// can afford the executor's bounded auto-retry because its precondition can OBSERVE a landed first
+// attempt (the stage goes `done`); a publish in the ambiguous window has no such observation, so an
+// unattended second attempt is a coin-flip on a duplicate public post. It surfaces for a human
+// instead: `failed`, notified at `warning`, and D14-07's retry endpoint (which re-takes the lock and
+// re-evaluates this precondition) is the only way forward.
+//
+// ── THE CERBOS HALF ──────────────────────────────────────────────────────────────────────────────
+// `social.publishPost` is `write:true, impact:"high"` at the hub, so an `origin='automation'`
+// re-drive also needs the tool name in `cerbos/policies/resource_mcp_tool.yaml`'s executable-tool
+// list (D14-13). That file's own header states the both-places rule and that drift fails CLOSED.
+// This ticket adds it there. `social.publishPostMetered` is added to NEITHER list, which is what
+// being barred means.
+//
+// ── WHAT THIS TICKET DELIBERATELY DOES NOT DO ────────────────────────────────────────────────────
+// It declares no `McpToolDef` for either name. `modules/social/index.ts`'s own header states the
+// rule: "a declared MCP tool whose endpoint does not exist is a lie the hub will happily publish to
+// every agent in the estate" — and a publish tool is the worst possible instance of it. The dispatch
+// endpoint (approval-execution → `schedulePost` + the transactional stamp of `approval_id` and
+// `provider_post_id`) is SMM-10's. When SMM-10 wires it, it declares the tool with
+// `SOCIAL_PUBLISH_TOOL_CLASSIFICATION` (`write:true, impact:"high"`, exported and pinned by a test)
+// — those two values ARE the D14 gate, and a publish that is not `high` is a publish that never
+// suspends. Until then the entry below is inert in exactly the way the doctrine wants: registered,
+// precondition-guarded, and reachable by nothing.
+
+function socialPublishLockKey(toolArgs: Record<string, unknown>): string {
+  return publishLockKey(toolArgs, SOCIAL_PUBLISH_TOOL);
+}
+
+/** Adapts the module's richer `{ok, stage, reason}` verdict onto the registry's `PreconditionVerdict`.
+ *  The STAGE is dropped on this path deliberately: `execution_error` carries one typed token and
+ *  `PUBLISH_REFUSAL_STAGE` maps it back to its stage for anyone who wants it, so putting both in the
+ *  string would give the estate two spellings of one refusal. */
+async function socialPublishPrecondition(
+  client: PoolClient,
+  toolArgs: Record<string, unknown>,
+): Promise<PreconditionVerdict> {
+  const verdict = await evaluatePublishPrecondition(client, toolArgs, SOCIAL_PUBLISH_TOOL);
+  if (verdict.ok) return { ok: true };
+  return { ok: false, reason: verdict.reason };
+}
+
+/**
+ * Registers `social.publishPost` AND the `social.publishPostMetered` bar. Exported for the same
+ * reason the other three bootstraps are: a test file that calls `resetExecutableApprovals()` and
+ * wants this state back should call this rather than hand-roll a second copy of the lock/precondition
+ * — or, worse, restore the executable entry and forget the bar.
+ */
+export function registerSocialExecutableApprovals(): void {
+  registerBarredExecutable({
+    toolName: SOCIAL_PUBLISH_METERED_TOOL,
+    reason: "metered_tool_barred",
+    note:
+      "D-14: any variant on a metered network (X today) rides this separately-named tool, which is "
+      + "never auto-executed on approval. It stays caller-re-driven so the registry's permanent bar "
+      + "on money-spending tools holds without an owner amendment. SMM-22 owns the metered path.",
+  });
+  registerExecutableApproval({
+    toolName: SOCIAL_PUBLISH_TOOL,
+    lockKey: socialPublishLockKey,
+    precondition: socialPublishPrecondition,
+    neverAutoRetry: true,
+  });
+}
+
+registerSocialExecutableApprovals();

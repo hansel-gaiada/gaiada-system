@@ -401,6 +401,39 @@ export const socialModule: ModuleContract = {
     // here and there must not be one until SMM-09 — a declared MCP tool whose endpoint does not
     // exist is a lie the hub publishes to every agent in the estate, and a publish tool is the
     // worst possible instance of it.
+    // SMM-09 — the publish GATE's read surface (agentic criterion 1: tool parity, same authorize()
+    // call as the endpoint). Note what is still ABSENT and why: `social.publishPost` itself is NOT
+    // declared here. It is registered in the D14 executable-approval registry
+    // (core/approval-executables.ts, SMM-09 section) with `write:true, impact:"high"` semantics
+    // pinned as `SOCIAL_PUBLISH_TOOL_CLASSIFICATION`, but the dispatch endpoint it would front —
+    // approval-execution → `schedulePost` + the transactional stamp — is SMM-10's. This file's own
+    // header states the rule that keeps it out until then: "a declared MCP tool whose endpoint does
+    // not exist is a lie the hub will happily publish to every agent in the estate", and a publish
+    // tool is the worst possible instance of it. `social.publishPostMetered` is barred outright and
+    // must never appear here at all.
+    {
+      name: "social.checkPublishPreconditions",
+      description:
+        "Dry-run the publish gate for one post variant: would an approved publish of it actually "
+        + "execute right now, and if not, which gate stopped it and why. Runs the EXACT server-side "
+        + "precondition the D14 approval executor runs (scope → quota → hash → unconsumed → budget → "
+        + "creator-info), so the answer cannot drift from the one execution will give. Publishes "
+        + "nothing, consumes no approval and makes no network call. `reason` is a snake_case token "
+        + "(e.g. 'network_not_in_scope', 'quota_exhausted', 'args_hash_mismatch', "
+        + "'already_dispatched', 'budget_exceeded', 'creator_info_unverified') — the SAME vocabulary "
+        + "that lands in an approval's execution_error after the 'precondition_failed: ' prefix.",
+      minAssurance: "low",
+      method: "GET",
+      pathTemplate: "/api/:tenantId/modules/social/variants/:variantId/publish-preconditions",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tenantId: { type: "string", description: "Company id (route scope)." },
+          variantId: { type: "string", description: "The per-network post variant to check." },
+        },
+        required: ["tenantId", "variantId"],
+      },
+    },
     {
       name: "social.listAccounts",
       description:

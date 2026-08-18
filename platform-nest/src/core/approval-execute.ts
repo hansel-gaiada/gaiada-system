@@ -251,7 +251,13 @@ export async function executeApprovedAutomationWrite(
     // Invariant: retry policy is read at EXECUTION time, never cached at boot (constraint 10). Same
     // connection, same instant as the claim, so a change made in the approvals-settings UI a second
     // ago is already in force with no restart.
-    const autoRetryCount = await readAutoRetryCount(c, row.tenant_id);
+    //
+    // SMM-09: an entry may opt OUT entirely, and the ENTRY WINS over the tenant setting — that
+    // direction is deliberate and must not be inverted. `neverAutoRetry` is a property of the TOOL
+    // ("an ambiguous outcome for this action may already be public and irreversible"), not a
+    // preference of the tenant, so a tenant that has turned auto-retry on for its deploys does not
+    // thereby buy an unattended second publish. See `ExecutableApprovalEntry.neverAutoRetry`.
+    const autoRetryCount = entry.neverAutoRetry === true ? 0 : await readAutoRetryCount(c, row.tenant_id);
     return { kind: "claimed" as const, row, args, entry, autoRetryCount };
   });
 

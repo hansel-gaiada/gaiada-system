@@ -39,7 +39,13 @@ import { emitEvent } from "../../events/outbox.service";
 import { AuthGuard } from "../../auth/guards";
 import { ModuleEnabledGuard } from "../module-enabled.guard";
 import { DEFAULT_TOOL_SCOPE, DEFAULT_USAGE_BUDGET_USD } from "./index";
-import { variantArgsSha256 } from "./canonical-args";
+import { variantArgsSha256, variantPublishArgs } from "./canonical-args";
+// SMM-09 — the publish gate. The controller imports the SAME evaluator the D14 registry entry runs
+// (core/approval-executables.ts), never a UI-friendly second copy of the rules.
+import {
+  evaluatePublishPrecondition, PUBLISH_PRECONDITION_STAGES,
+  SOCIAL_PUBLISH_TOOL, SOCIAL_PUBLISH_METERED_TOOL,
+} from "./publish-precondition";
 import { validateVariant, estimateCostUsd, isNetwork, type Network, type QuotaSnapshot } from "./media-rules";
 import { completeViaGateway } from "./gateway-client";
 import { ingestBrandKnowledge, queryBrandKnowledge, brandCorpusScope } from "./knowledge-client";
@@ -987,6 +993,89 @@ export class SocialController {
       validation: validateVariant(account.network, shape, account.quota),
       estimatedCostUsd: estimateCostUsd(account.network, shape),
       network: account.network,
+    };
+  }
+
+  // ==================================================== THE PUBLISH GATE (SMM-09) ============
+  //
+  // A DRY RUN of the D14 execution precondition, and nothing else. It does not publish, does not
+  // consume an approval and does not touch a network — it answers "would the publish gate let this
+  // variant through RIGHT NOW, and if not, which gate stopped it and why".
+  //
+  // Why it exists rather than being inferable from the composer's `validation`: the two answer
+  // different questions. `validation` is about the CONTENT (does this caption fit, is this media
+  // legal for this network). The publish gate is about EVERYTHING ELSE that has to still be true at
+  // dispatch — the client chain, the engagement's scope, the args hash, single-use consumption, the
+  // metered budget and (for TikTok) creator consent. The approval card must show the human WHY a
+  // publish will refuse BEFORE they approve it, because the alternative is an approval that lands
+  // `failed` minutes later with nobody watching, which is precisely the dead end D14 exists to fix.
+  //
+  // ONE IMPLEMENTATION, TWO CALLERS. This runs the exact function
+  // `core/approval-executables.ts`'s `social.publishPost` entry runs at execution time
+  // (`evaluatePublishPrecondition`). A second, "UI-friendly" copy of these rules would drift, and
+  // the drift would show up as a card that says green and an execution that says no.
+  //
+  // Read-tier authorization (`social_post` / `read`), deliberately: asking whether a publish WOULD
+  // be allowed is not publishing, and staff who author the content are exactly who needs the answer.
+  // The `publish` action itself gates the act, and it remains manager-tier (resource_social_post.yaml).
+  //
+  // ⚠ The verdict is returned as DATA with a 200, not thrown as an error. "This variant is not
+  // currently publishable" is a successful answer to the question that was asked. The typed tokens
+  // this surface reports are the same ones the executor writes into
+  // `automation_approvals.execution_error` after the `precondition_failed: ` prefix, so a caller
+  // branches on ONE vocabulary regardless of which side it heard it from.
+  @Get("variants/:variantId/publish-preconditions")
+  async getVariantPublishPreconditions(
+    @Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("variantId") variantId: string,
+  ) {
+    await authorize(req.principal, { kind: "social_post", id: variantId, tenantId, module: "social" }, "read");
+    const result = await withTenants(
+      [tenantId],
+      async (c) => {
+        // The args a publish of this variant WOULD be called with, built from the live row by the
+        // same function the composer and the submit path use. Evaluating against these makes the
+        // hash stage compare live-against-live — which still has teeth: it catches a stored
+        // `args_sha256` that has drifted from the content (a direct SQL edit, or a future write path
+        // that forgot to recompute the anchor), which is exactly the condition that would make a
+        // real approval unmatchable later. What it cannot report is "this specific approval no
+        // longer matches", because a dry run holds no approval; that comparison happens at execution
+        // time against the grant's own args.
+        const { rows } = await c.query<{
+          account_id: string; body: string; first_comment: string | null; media: unknown;
+          settings: Record<string, unknown> | null; scheduled_at: Date | null;
+        }>(
+          `SELECT account_id, body, first_comment, media, settings, scheduled_at
+             FROM social_post_variants WHERE id = $1 AND deleted_at IS NULL`,
+          [variantId],
+        );
+        if (!rows[0]) return { found: false as const };
+        const args = variantPublishArgs({
+          tenantId, id: variantId, accountId: rows[0].account_id, body: rows[0].body,
+          firstComment: rows[0].first_comment, media: rows[0].media,
+          settings: rows[0].settings, scheduledAt: rows[0].scheduled_at,
+        });
+        return {
+          found: true as const,
+          verdict: await evaluatePublishPrecondition(
+            c, args as unknown as Record<string, unknown>, SOCIAL_PUBLISH_TOOL,
+          ),
+        };
+      },
+      { modules: ["social"] },
+    );
+    // A missing variant is a 404, not a 200 carrying `variant_not_found`: every other read on this
+    // controller answers it that way, and folding it into the verdict body would make "no such
+    // variant" indistinguishable from "this variant exists and is currently blocked".
+    if (!result.found) throw new NotFoundException("post variant not found");
+    const verdict = result.verdict;
+    return {
+      ok: verdict.ok,
+      ...(verdict.ok ? {} : { stage: verdict.stage, reason: verdict.reason }),
+      stages: PUBLISH_PRECONDITION_STAGES,
+      // Names the split so a caller never has to infer it: the free tool is the one that
+      // auto-executes on approval; the metered twin exists and cannot (addendum D-14).
+      tool: SOCIAL_PUBLISH_TOOL,
+      meteredTool: SOCIAL_PUBLISH_METERED_TOOL,
     };
   }
 
