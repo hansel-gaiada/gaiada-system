@@ -79,6 +79,7 @@ import { registerPositionEventHandlers, POSITION_STREAMS } from "./events/positi
 // D14-03 — the core automation-approval EXECUTOR (replaces D14-02's stub handler below).
 import { automationApprovalExecutorHandler } from "./core/approval-execute";
 import { startReconcileLoop, startDriftSweepLoop } from "./events/reconcile-consumer";
+import { startPositionMaintenanceLoop } from "./admin/grant-expiry-sweep";
 import { startN8nBridgeLoop } from "./events/n8n-bridge";
 import { startGraphBridgeLoop } from "./events/graph-bridge";
 import { startWorkActivityConsumerLoop } from "./events/work-activity-consumer";
@@ -459,6 +460,19 @@ async function bootstrap(): Promise<void> {
     // eslint-disable-next-line no-console
     console.log(`service-assignment drift sweep on: every ${config.serviceDriftSweepIntervalMs}ms`);
   }
+  // P2-09 (IAM Phase 2): the position maintenance loop — the grant EXPIRY sweep plus P2-05's drift
+  // sweep, which P2-05 built and deliberately left unstarted. Started unconditionally, unlike the
+  // sweeps around it, because the expiry half is NOT position-scoped: P2-08's grant surface writes
+  // `user_roles.expires_at` regardless of POSITION_SYNC_ENABLED, and `assemblePrincipal()` does not
+  // filter on it — so gating this loop on the position flag would leave expired grants fully live in
+  // exactly the configuration able to create them. The drift half self-gates (`sweepPositionDrift()`
+  // returns zeroes when the flag is off), so nothing position-related runs early because of this.
+  startPositionMaintenanceLoop(config.positionDriftSweepIntervalMs);
+  // eslint-disable-next-line no-console
+  console.log(
+    `IAM grant-expiry + position-drift sweep on: every ${config.positionDriftSweepIntervalMs}ms ` +
+      `(expiry always; drift only while POSITION_SYNC_ENABLED)`,
+  );
   // P2-07: nightly burndown-snapshot pre-warmer — a plain Postgres sweep (no Redis dependency),
   // same as the drift sweep above. Dark unless PM_BURNDOWN_SNAPSHOT_ENABLED; the lazy
   // upsert-on-read in pm.controller.ts's getBurndown() is the correctness backstop regardless.

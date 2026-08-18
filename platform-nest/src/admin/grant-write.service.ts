@@ -126,6 +126,19 @@ export interface GrantSpec {
   /** Reconciler provenance marker. Only `trusted_internal` may set it (A1: `managed_by` is
    *  reconciler-only, pinned by `managed-by-invariant.test.ts`). */
   managedBy?: string | null;
+  /** P2-08 — the grant's own expiry (`user_roles.expires_at`, added by 0109 and until now written by
+   *  NOBODY). Design §6.5's overrides are time-boxed, and §12 Q4 sets 90 days as the default; the
+   *  column is also what the §3.4 expiry sweep will read. `null` = permanent, which stays the
+   *  default for every existing writer, so this is additive by construction.
+   *
+   *  ⚠ Setting it does NOT itself revoke anything when the moment passes: `assemblePrincipal()` does
+   *  not filter on `expires_at` today, and the sweep that acts on it is P2-09's. So a grant written
+   *  with an expiry is live until something revokes it — recorded here rather than left as an
+   *  assumption, because "expires_at is set" reading as "access ends then" is exactly the kind of
+   *  half-built guarantee this program keeps finding. */
+  expiresAt?: string | null;
+  /** P2-08 — provenance for an override grant executed by an approval (design §6.5). */
+  originApprovalId?: string | null;
   /** Preserved per-writer, NOT unified — see `insertGrantRow`. */
   onConflict: "untargeted" | "unique_columns";
 }
@@ -180,8 +193,43 @@ function assertNotElevated(roleName: string): void {
  */
 async function assertWithinCeiling(c: PoolClient, spec: GrantSpec, roleName: string): Promise<void> {
   const { rows } = await c.query<{ key: string }>(
+    // ⚠ THE BASELINE SUBTRACTION — added by P2-08 after the first run of
+    // `role-grants-controller.test.ts` refused the commonest grant in the system.
+    //
+    // What happened: a `company_admin` could not grant `member`. The ceiling reported three missing
+    // keys — `hr.case.cancel`, `reports.appraisal.ack`, `reports.checkin.submit`. All three are in
+    // `member`'s bundle because `member` has SELF-SERVICE rules for them (cancel my own HR case,
+    // acknowledge my own appraisal, submit my own check-in), and `role_permissions`' bundling
+    // methodology (0094's header) records a resource-instance condition as "satisfied". They are
+    // absent from `company_admin`'s bundle because company_admin genuinely has no rule for them —
+    // nobody cancels somebody else's HR case.
+    //
+    // So a plain subset test structurally forbids granting the baseline role to anyone, from any
+    // surface, forever — and with it every role whose bundle includes a self-service key. That is
+    // the `role-bundles-overstate-reach` family again: the bundle records what a role's rules NAME,
+    // not what its holder can exercise over OTHER people, and a ceiling is a statement about
+    // authority over other people.
+    //
+    // The fix subtracts the BASELINE role's bundle from the required set. Justification: `member` is
+    // held by every staff principal (it is one of the six baseline roles seeded by 0095), so nothing
+    // in its bundle is authority a grant can ADD — the target either already holds it or is not
+    // staff at all. Everything ABOVE baseline still needs to be held by the grantor, so the ceiling
+    // keeps its whole point and stays fail-closed for real authority.
+    //
+    // ⚠ This is a change to an invariant P2-04 shipped, made deliberately and visibly rather than by
+    // widening the guard's inputs. It needs architect/owner ratification — recorded in the P2-08
+    // report and in PERMISSION-CONTRACT. If it is rejected, the alternative is a catalog-level
+    // marker for self-scoped keys (a bigger change), NOT reverting to a ceiling that cannot pass a
+    // `member` grant.
     `SELECT p.key FROM role_permissions rp JOIN permissions p ON p.id = rp.permission_id
-      WHERE rp.role_id = $1 ORDER BY p.key`,
+      WHERE rp.role_id = $1
+        AND p.key NOT IN (
+          SELECT p2.key FROM role_permissions rp2
+            JOIN permissions p2 ON p2.id = rp2.permission_id
+            JOIN roles r2 ON r2.id = rp2.role_id
+           WHERE r2.name = 'member' AND r2.company_id IS NULL
+        )
+      ORDER BY p.key`,
     [spec.roleId],
   );
   const held = new Set<string>();
@@ -251,10 +299,13 @@ export async function insertGrantRow(c: PoolClient, spec: GrantSpec): Promise<st
   await assertGrantAllowed(c, spec);
   const conflict = spec.onConflict === "untargeted" ? "ON CONFLICT DO NOTHING" : "ON CONFLICT (user_id, role_id, scope_type, scope_id) DO NOTHING";
   const { rows } = await c.query<{ id: string }>(
-    `INSERT INTO user_roles (id, user_id, role_id, scope_type, scope_id, managed_by)
-     VALUES ($1, $2, $3, $4, $5, $6)
+    `INSERT INTO user_roles (id, user_id, role_id, scope_type, scope_id, managed_by, expires_at, origin_approval_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
      ${conflict} RETURNING id`,
-    [newId(), spec.targetUserId, spec.roleId, spec.scopeType, spec.scopeId, spec.managedBy ?? null],
+    [
+      newId(), spec.targetUserId, spec.roleId, spec.scopeType, spec.scopeId, spec.managedBy ?? null,
+      spec.expiresAt ?? null, spec.originApprovalId ?? null,
+    ],
   );
   return rows[0]?.id ?? null;
 }

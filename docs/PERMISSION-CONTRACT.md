@@ -585,3 +585,51 @@ instead, which is the larger grant and the worse outcome.
 
 No permission key was added, no bundle moved, no `perm_*` arm wired. The four Phase-2 kinds remain
 role-arm-only and permanently-unwired in the rollout register (§9).
+
+---
+
+## 12. IAM Phase 2 (P2-08/P2-09, 2026-08-18) — the ceiling, the sensitive gate, and two open items
+
+### 12.1 The ceiling now subtracts the BASELINE role's bundle — a change to a shipped invariant
+
+§6.3.2's ceiling ("the granted role's bundle must be a subset of the grantor's own resolved
+permissions") **could not pass `company_admin` granting `member`**. The three blocking keys —
+`hr.case.cancel`, `reports.appraisal.ack`, `reports.checkin.submit` — are in `member`'s bundle because
+`member` has SELF-SERVICE rules for them, and absent from `company_admin`'s because nobody cancels
+another person's HR case. A plain subset test therefore forbids granting the baseline role to anyone,
+from any surface, forever.
+
+`assertWithinCeiling()` now computes `bundle(role) − bundle(global 'member')`. Justification: `member`
+is one of the six baseline roles every staff principal holds (`0095`), so nothing in its bundle is
+authority a grant can ADD; everything above baseline still must be held by the grantor.
+
+⚠ **This needs architect/owner ratification** — it relaxes a guard shipped by P2-04. The alternative, if
+rejected, is a catalog-level marker distinguishing self-scoped keys from authority-over-others keys.
+Reverting to the unsubtracted form is not an option: it makes the grant surface unusable.
+
+### 12.2 The sensitive gate (§6.3.7) inherits the same subtraction — and its data is unratified
+
+The baseline `member` role carries **11 `sensitive`-flagged keys**, so an unsubtracted gate routes the
+baseline grant (and everything above it) as an override — refusing the entire dept-head surface. Same
+subtraction applied in `role-grants.controller.ts`.
+
+**The sensitivity flags are the first thing in this program to become load-bearing, and they have never
+been owner-reviewed** (§9's sign-off item, now 107 keys). The subtraction is necessary either way, but
+the SET this gate acts on is un-reviewed data. Raising the priority of that sign-off accordingly.
+
+### 12.3 `decide_override` does not exist — the override path fails closed
+
+§6.5's routed override needs a `decide_override` literal action on `automation_approval`. It is in
+neither the policy nor the catalog. Adding it = catalog entry + bundles migration + re-derived parity
+chain, i.e. its own ticket. Until then a dept head requesting an above-baseline sensitive role is
+**refused** with a typed `override_required`, naming the missing mechanism. company_admin is
+unaffected.
+
+### 12.4 `expires_at` is swept, not filtered
+
+`user_roles.expires_at` has existed since `0109` and, until P2-08, **no writer set it**. P2-08 writes it
+and P2-09 sweeps it (revoke + session bump + `role_grant.expired` audit event). But
+`assemblePrincipal()` still does not filter on it, so between expiry and the next sweep tick an expired
+grant is fully live. The durable fix is one clause at resolution time
+(`AND (expires_at IS NULL OR expires_at > now())`), which belongs with IAM-SEC-06's resolution-source
+filter. Recorded here so "expires_at is set" is never read as "access ended then".

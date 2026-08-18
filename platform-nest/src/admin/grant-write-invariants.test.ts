@@ -42,8 +42,15 @@ describe.skipIf(!TEST_URL)("P2-04 — GrantWriteService invariants (design §6.3
   let portalCarryingRole: string; // synthetic: bundle = { portal.read } — non-ui_grantable
   let twoKeyRole: string; // synthetic: bundle = { core.task.read, core.task.update }
 
-  const KEY_A = "core.task.read";
-  const KEY_B = "core.task.update";
+  // ⚠ These two keys MUST NOT be in the global `member` bundle. P2-08 taught the ceiling to subtract
+  // the baseline role's bundle from the required set (a bundle records self-service keys that no
+  // admin holds, which made `company_admin` unable to grant `member` — see PERMISSION-CONTRACT §12.1).
+  // The original fixture used `core.task.read`/`core.task.update`, BOTH of which `member` carries, so
+  // after that change the required set was empty and four of the assertions below passed vacuously —
+  // they went red, which is exactly how a decorative guard should announce itself. Swapped for two
+  // above-baseline keys so this suite still tests the ceiling rather than agreeing with it.
+  const KEY_A = "agency.campaign.create";
+  const KEY_B = "agency.campaign.delete";
 
   async function permId(key: string): Promise<string> {
     const { rows } = await withGlobal((c) =>
@@ -246,6 +253,17 @@ describe.skipIf(!TEST_URL)("P2-04 — GrantWriteService invariants (design §6.3
 
     it("FAIL-CLOSED: a grantor with no resolved perms at all holds NOTHING, and is refused", async () => {
       await expect(check({ roleId: twoKeyRole, actorPerms: undefined })).rejects.toThrow(/ceiling_exceeded/);
+    });
+
+    it("BASELINE SUBTRACTION (P2-08): a bundle that is baseline-only needs nothing held", async () => {
+      // The defect this encodes: `member`'s bundle carries self-service keys no admin holds, so an
+      // unsubtracted subset test refused `company_admin` granting `member` — the commonest grant in
+      // the system. A role whose ENTIRE bundle is inside the baseline confers no authority a grant can
+      // add, so it passes even for a grantor with no resolved perms at all. Everything ABOVE baseline
+      // still fails closed, which the five cases above assert with above-baseline keys.
+      const baselineOnlyRole = await createRole(`p208-baseline-only-${newId()}`);
+      await attach(baselineOnlyRole, "core.task.read"); // in the global `member` bundle
+      await expect(check({ roleId: baselineOnlyRole, actorPerms: undefined })).resolves.toBeTruthy();
     });
 
     it("BOUNDARY (deliberate): the legacy origin does NOT apply the ceiling (design §6.4)", async () => {

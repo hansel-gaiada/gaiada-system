@@ -3054,3 +3054,47 @@ Design: `docs/superpowers/plans/2026-08-13-iam-phase2-design.md` §4–§5. Back
 shared blob pipeline. The position reconciler already consumes the `position_assignment.*` pair
 (P2-05), and these flows are its first producer; the flows ALSO reconcile in-band so the HTTP
 response reflects committed reality rather than an eventual one.
+
+---
+
+## IAM Phase 2 — positions + role grants (P2-12 backend, P2-08 part A, 2026-08-18)
+
+**Status:** PROTOTYPED / DEV-VERIFIED (`positions-controller.test.ts` 11/11,
+`role-grants-controller.test.ts` 14/14, both via `app.inject()` against real Postgres + Cerbos). No UI
+consumer yet — P2-11 (dept-head access page) and P2-12 (positions admin) are the intended ones.
+
+### Positions — `platform-nest/src/admin/positions.controller.ts`
+
+| Method + path | Cerbos | Notes |
+|---|---|---|
+| `GET /api/:tenantId/positions` | `position · read` | `{ positions[], scope: "tenant" \| "subtree" }`. A dept head (`org_unit_lead`) gets **only their subtree** and `scope: "subtree"`; each row carries `roleSet[]`, `currentHolders`, `orphaned`. |
+| `GET /api/:tenantId/positions/attachable-roles` | `position · read` | The composer's option list: `{ roleId, role, attachable, reason }`. Unattachable roles are **returned with a reason**, not omitted — render them disabled. |
+| `POST /api/:tenantId/positions` | `position · create` | `{ unitNodeId, title, isLead?, roles?: [{roleId, scopeKind}] }`. `unitNodeId` must exist in the org blob (400 otherwise). |
+| `PATCH /api/:tenantId/positions/:positionId` | `position · update` | `{ title?, isLead?, unitNodeId? }`. Moving the unit re-reconciles every holder. |
+| `POST /api/:tenantId/positions/:positionId/retire` | `position · retire` | Closes every open assignment and reconciles; a retired seat cannot be assigned (400). |
+| `POST /api/:tenantId/positions/:positionId/roles` | `position · update` | Attach one role. Three bounds: denied-role registry, `uiGrantable` allow-list, and 0109's guard trigger. |
+| `DELETE /api/:tenantId/positions/:positionId/roles/:roleId` | `position · update` | Detach — **revokes from every current holder** immediately, not at the next sweep. |
+| `POST /api/:tenantId/positions/:positionId/assign` | `position · assign` | `{ userId, validFrom?, reason? }`. Idempotent. Self-assign is a **403** (structural Cerbos DENY). Target must be an active member. |
+| `POST /api/:tenantId/positions/:positionId/unassign` | `position · unassign` | `{ userId }`. |
+
+### Role grants — `platform-nest/src/admin/role-grants.controller.ts`
+
+| Method + path | Cerbos | Notes |
+|---|---|---|
+| `GET /api/:tenantId/role-grants?userId=` | `role_grant · read` | Each grant carries `source` (`manual` \| `position` \| `service_assignment`), `expiresAt`, `originApprovalId`, `revocable`. |
+| `POST /api/:tenantId/role-grants` | `role_grant · create` | `{ userId, roleId, scopeType?: "company"\|"org_unit", scopeId?, temporary?, expiresInDays?, reason? }`. `global`/`project` are refused on this surface. |
+| `DELETE /api/:tenantId/role-grants/:grantId` | `role_grant · revoke` | Refused (400 `managed_grant_not_revocable`) for position- or service-managed grants. |
+
+### ⚠ Refusal tokens a consumer must handle (all 400 unless noted)
+
+`elevated_role_forbidden` · `not_ui_grantable` · `ceiling_exceeded` · `override_required` ·
+`managed_grant_not_revocable` · `self_grant_forbidden` (self-target is normally a **403** from Cerbos,
+which fires first) · `denied-role registry` on position role attach.
+
+**`override_required` is the one to design for:** a dept head granting a role with above-baseline
+sensitive permissions is refused, because the routed-override mechanism (`decide_override`) is not
+built. The UI should offer "ask a company administrator", not a retry.
+
+**Unplaced targets:** a member with no org-unit placement has empty ancestry, so only company_admin and
+above can grant to them. That is fail-closed by design, not a bug — surface it as "place this person in
+the org chart first".
