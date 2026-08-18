@@ -39,11 +39,18 @@ describe.skipIf(!TEST_URL)("P2-09 — the grant expiry sweep", () => {
     );
   }
 
-  it("an EXPIRED grant is live until the sweep runs, and gone after it (the whole point)", async () => {
+  it("an expired grant stops resolving IMMEDIATELY, and the sweep then removes the row", async () => {
+    // ⚠ This case changed shape mid-session, and the reason matters. It was written to assert what
+    // was TRUE at the time: an expired grant still resolved into the principal until the sweep ran,
+    // because `assemblePrincipal()` did not look at `expires_at`. That is up to a full sweep interval
+    // of access a human explicitly time-boxed, so the resolver gained the conjunct
+    // (`expires_at IS NULL OR expires_at > now()`) and the window is closed at resolution time.
+    // The sweep is still what removes the row, audits it and cuts the session — it is no longer what
+    // makes the expiry take effect.
     await grantExpiring(viewerRole, "- interval '1 day'");
 
     const before = await assemblePrincipal(user, "high");
-    expect(before!.roles.some((r) => r.role === "viewer")).toBe(true); // expiry alone changes nothing
+    expect(before!.roles.some((r) => r.role === "viewer")).toBe(false); // already gone, pre-sweep
 
     const result = await sweepExpiredGrants();
     expect(result.expired).toBeGreaterThan(0);
@@ -51,6 +58,17 @@ describe.skipIf(!TEST_URL)("P2-09 — the grant expiry sweep", () => {
 
     const after = await assemblePrincipal(user, "high");
     expect(after!.roles.some((r) => r.role === "viewer")).toBe(false);
+    const row = await withGlobal((c) =>
+      c.query(`SELECT id FROM user_roles WHERE user_id = $1 AND role_id = $2`, [user, viewerRole]),
+    );
+    expect(row.rows).toHaveLength(0);
+  });
+
+  it("a NOT-yet-expired grant DOES resolve (the conjunct is not over-broad)", async () => {
+    const liveRole = await createRole("it_admin");
+    await grantExpiring(liveRole, "+ interval '7 days'");
+    const p = await assemblePrincipal(user, "high");
+    expect(p!.roles.some((r) => r.role === "it_admin")).toBe(true);
   });
 
   it("cuts the session of every user it revoked (D11)", async () => {

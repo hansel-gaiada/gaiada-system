@@ -115,8 +115,17 @@ export async function assemblePrincipal(userId: string, assurance: Assurance): P
   // and kept if any OTHER, validly-scoped grant also reaches it.
   const { roles, perms } = await withGlobal(async (c) => {
     const rolesRes = await c.query<RoleGrant>(
+      // P2-09/§12.4 — EXPIRY IS ENFORCED AT RESOLUTION, not only by the nightly sweep.
+      // `user_roles.expires_at` shipped in 0109; P2-08 became its first writer (time-boxed grants and
+      // §6.5 overrides) and P2-09 added the sweep that revokes on it. A sweep alone means an expired
+      // grant is FULLY LIVE until the next tick — up to a day of access a human explicitly time-boxed
+      // — because nothing in this resolver looked at the column. This conjunct closes that window: the
+      // moment the timestamp passes, the grant stops resolving into the principal, so Cerbos never
+      // sees it and the sweep's job is reduced to tidying the row and auditing it.
+      // NULL = permanent, which is every pre-P2-08 row, so this is a no-op for existing grants.
       `SELECT r.name AS role, ur.scope_type AS "scopeType", ur.scope_id AS "scopeId"
-       FROM user_roles ur JOIN roles r ON r.id = ur.role_id WHERE ur.user_id = $1`,
+       FROM user_roles ur JOIN roles r ON r.id = ur.role_id
+       WHERE ur.user_id = $1 AND (ur.expires_at IS NULL OR ur.expires_at > now())`,
       [userId],
     );
     const permsRes = await c.query<PermissionGrant & { roleName: string }>(
@@ -126,7 +135,8 @@ export async function assemblePrincipal(userId: string, assurance: Assurance): P
        JOIN role_permissions rp ON rp.role_id = ur.role_id
        JOIN permissions p ON p.id = rp.permission_id
        JOIN roles r ON r.id = ur.role_id
-       WHERE ur.user_id = $1 AND p.class = 'grantable'`,
+       WHERE ur.user_id = $1 AND p.class = 'grantable'
+         AND (ur.expires_at IS NULL OR ur.expires_at > now())`,
       [userId],
     );
     const filtered = new Map<string, PermissionGrant>();

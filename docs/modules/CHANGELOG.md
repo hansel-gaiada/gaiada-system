@@ -106,6 +106,44 @@ reconstructed from this table alone. Format defined in [`VERSIONING.md`](./VERSI
 > Not corrected retroactively (moving a pushed, already-deployed tag is its own risk); flagging so
 > the next session doesn't re-diagnose the same gap.
 
+### `Alpha 01.041.0094a` - 2026-08-18 - IAM Phase 2: JML, positions, the grant surface
+
+Manifest (counter +1, 0093 -> 0094): `platform-nest 0.22.0 -> 0.23.0`. One module bumped, so the
+revision letter resets to `a`.
+
+> **⚠ LOG GAP (noted at this cut).** Tags `alpha-01.040.0093a`, `alpha-01.040.0093b` and
+> `alpha-01.040.0093c` exist in git with **no entry in this table** — the same rule-2 skip the
+> 2026-08-04 note above records. Not back-filled here (this session does not know what those three
+> cuts contained beyond `platform-nest 0.22.0`); whoever cut them should add them. The
+> **App version** line in `MODULES.md` was also stale at `01.029.0074a` — twelve releases behind —
+> and is corrected at this cut, per VERSIONING rule 5 (`/VERSION` is authoritative).
+
+**Full module manifest** (rule 2 - what makes this build reconstructible):
+
+| Module | Ver | Module | Ver | Module | Ver |
+|---|---|---|---|---|---|
+| **platform-nest** | **`0.23.0`** | wa-chat-bot | `0.9.2` | search-marketing | `0.5.1` |
+| platform-ui | `0.25.1` | ai-agents | `0.7.1` | social-media | `0.5.0` |
+| ai-gateway-go | `0.13.2` | hermes-gateway | `0.2.0` | creative | `0.1.0` |
+| mcp-hub | `0.10.1` | capture-helper | `0.2.0` | render-gateway-go | `0.0.0` |
+| sync-engine-go | `0.7.0` | webdev | `0.13.0` | reports | `0.3.1` |
+| automation (n8n) | `0.4.1` | webdesk | `0.0.0` | | |
+| observability | `0.6.1` | infra | `0.8.6` | | |
+
+**What is in it:** the IAM Phase-2 capability wave — `POST /hr/employees` + `transfer` + `terminate`
+(P2-06), positions CRUD and the role-set composer (P2-12 backend), the `role_grant` grant/revoke
+surface (P2-08 part A), and the expiry + drift sweeps (P2-09), plus migration `0111`. The §5.2 mover
+criterion is proven against running Cerbos. Expiry is now enforced at resolution time as well as
+swept.
+
+**What is deliberately NOT in it:** the routed override (`decide_override` does not exist), MCP tools
+for any Phase-2 capability (so none of them meet the agentic-native bar yet), future-dated JML, and
+every UI surface. `POSITION_SYNC_ENABLED` remains **off** by default, so the reconciler ships dark;
+the grant surface and the expiry sweep are NOT behind that flag and are live on deploy.
+
+**Two owner decisions ride with it:** the ceiling's new baseline subtraction needs ratification
+(`PERMISSION-CONTRACT` §12.1), and HR's lack of `position.assign` reach needs a ruling (§11.2).
+
 ### `Alpha 01.039.0092a` - 2026-08-13 - the social module gets a surface, and a composer
 
 Manifest (counter +3, 0089 -> 0092): `social-media 0.2.0` then `0.3.0` (two bumps), and

@@ -625,11 +625,17 @@ chain, i.e. its own ticket. Until then a dept head requesting an above-baseline 
 **refused** with a typed `override_required`, naming the missing mechanism. company_admin is
 unaffected.
 
-### 12.4 `expires_at` is swept, not filtered
+### 12.4 `expires_at` is now enforced at RESOLUTION, and swept afterwards
 
-`user_roles.expires_at` has existed since `0109` and, until P2-08, **no writer set it**. P2-08 writes it
-and P2-09 sweeps it (revoke + session bump + `role_grant.expired` audit event). But
-`assemblePrincipal()` still does not filter on it, so between expiry and the next sweep tick an expired
-grant is fully live. The durable fix is one clause at resolution time
-(`AND (expires_at IS NULL OR expires_at > now())`), which belongs with IAM-SEC-06's resolution-source
-filter. Recorded here so "expires_at is set" is never read as "access ended then".
+`user_roles.expires_at` has existed since `0109` and, until P2-08, **no writer set it**. P2-08 writes it,
+P2-09 sweeps it (revoke + session bump + `role_grant.expired` audit event), and — because a sweep alone
+left an expired grant **fully live for up to a whole sweep interval** — `assemblePrincipal()` now
+carries the conjunct `(expires_at IS NULL OR expires_at > now())` on BOTH its role and permission
+resolution queries.
+
+So the order of enforcement is: the resolver makes the expiry take effect at the next request; the sweep
+removes the row, cuts the session and files the audit event. `NULL` means permanent, which is every
+pre-P2-08 row, so the conjunct is a no-op for existing grants. This is a deliberate TIGHTENING of a hot
+path (`assemblePrincipal()` runs per request) — the direction is fail-closed, and it sits beside
+IAM-SEC-06's resolution-source filter, which is the other conjunct that decides what a grant is allowed
+to resolve into.
