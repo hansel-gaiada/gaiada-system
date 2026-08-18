@@ -218,3 +218,16 @@ LinkedIn client connects**; compliance is checked at Standard Tier review.
 3. **Start SMM-09** (the publish gate) — highest-value unblocked ticket, and it must run alone.
 4. **Start SMM-36** in parallel — it is independent and it gates the first LinkedIn client.
 5. Keep using **isolated worktrees**; verify every agent's "pre-existing failure" claim before acting.
+
+---
+
+## 10. Owner decisions taken 2026-08-18 — §5 is CLOSED
+
+These answer §5a/5b/5c and supersede the recommendations recorded above.
+
+| # | Decision | Consequence |
+|---|---|---|
+| **D-20 (§5a)** | **Build the `direct` driver now; Postiz is the incumbent, not the destination.** A second `SocialPublisher` implementation (OAuth, token refresh, media upload, per-network queue) is added ALONGSIDE the Postiz driver and switched per capability. The owner chose option (3), not the recommended (1). | This is the only free path that removes the AGPL zone, both fork exceptions AND the inbox gap in one move — but it is a real build, not a config change. **New ticket SMM-38** (direct driver, per-network, phased). P2's inbox (SMM-15/16/17/18) now targets the direct driver, not Postiz. Token custody moves in-house for networks the direct driver owns, so SMM-36's retention/purge work becomes load-bearing sooner. SMM-28 (Mixpost) is formally dead. |
+| **D-21 (§5b)** | **Fork exception GRANTED, once, with both items in scope:** TikTok `creator_info` exposure and the Instagram live-quota probe. ~15 additive lines in one Postiz file, behind the same missing decorator. | Bridges compliance until SMM-38 covers those networks. The §06 containment budget is amended to permit exactly these two additions; anything further needs a new exception. The AGPL source-offer obligation now definitely applies (SMM-24). |
+| **D-22 (§5c)** | **The composer's explicit selections ARE the consent, and `creator_info` is re-verified at dispatch.** If the creator's live settings changed between approval and dispatch such that the chosen selections are no longer permitted, dispatch **refuses** with a typed refusal and does not auto-retry. | Scheduled TikTok stays sellable. Carries app-review risk, which the dossier must state plainly rather than paper over. SMM-09's precondition and SMM-10's dispatch chain both gain the re-verify step; the refusal is a golden case (agentic criterion 5). |
+| **—** | **The Postiz org ceremony stays with the owner.** Not taken. | **SMM-07 remains blocked.** Everything else proceeds. |

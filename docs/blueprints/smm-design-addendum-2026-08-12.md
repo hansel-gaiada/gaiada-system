@@ -169,16 +169,50 @@ moved (Δ15).
 | **SMM-27** | Best-time-to-post: classical stats job + suggestion chip | medior | default | SMM-21 | unchanged |
 | **SMM-35** | **NEW — assistant integration**: social drafting/summary reachable from `/assistant` through the write-intent propose → confirm → approve path (ASST-23) | medior | default | SMM-26 | **NEW** |
 
-**Decision-gated (do not mobilize):** **SMM-28** Mixpost-Pro swap (only if SMM-04's tripwires fire) ·
+### PD — the `direct` driver (owner decision D-20, 2026-08-18)
+
+D-20 chose option (3) of the handoff's §5a: build a second `SocialPublisher` implementation
+alongside the Postiz driver, switched **per capability**, and let Postiz become the incumbent rather
+than the destination. This is the only free path that removes the AGPL zone, both fork exceptions
+and the P2 inbox gap in one move — but it is a real build, not a config change.
+
+| # | Ticket | Tier | Model | Deps | Changed? |
+|---|---|---|---|---|---|
+| **SMM-38** | **NEW — `direct` SocialPublisher driver.** Per-network OAuth (app-owned client creds, PKCE where offered), encrypted token storage + refresh-ahead, media upload, an outbound queue with the same idempotency contract as the Postiz driver, `pullComments`, and a per-capability driver switch on the port. Ships for **LinkedIn + YouTube first** — the two networks whose app registrations are ours and which are NOT blocked on Meta Business Verification | senior-integrator | **default (Sonnet·high)** | SMM-05, SMM-09 | **NEW** (D-20) |
+
+**Phasing — SMM-38 is a wave, not a ticket.** Mobilize in this order; each phase is separately
+mergeable and each leaves the Postiz driver as the live default until its capability is proven:
+
+| Phase | Scope | Exit |
+|---|---|---|
+| **38a** | Driver skeleton behind the port + the **per-capability switch** (config-driven, defaults to `postiz` for every capability) + the contract test suite the Postiz driver already passes, run against both drivers | Both drivers green on one shared suite; switch flips nothing yet |
+| **38b** | **Token custody**: encrypted-at-rest token table on the tenant wall, refresh-ahead job, revocation handling, and the retention/purge hooks SMM-36 defines | Tokens never leave the wall; a revoked grant fails closed with a typed refusal |
+| **38c** | **LinkedIn**: OAuth grant flow, org-page publish, media upload, `pullComments` (48h comment-text retention per SMM-36) | Own-brand LinkedIn post published + a comment read, end to end |
+| **38d** | **YouTube**: OAuth grant, resumable upload, quota accounting against the 3-bucket regime SMM-37 models, `pullComments` via `youtube.force-ssl` | Own-brand upload + comment read, with quota measured not assumed |
+| **38e** | Flip LinkedIn + YouTube publishing to `direct` in config; Postiz retained for IG/FB/TikTok | Capability inventory (SMM-33) records which driver serves each capability |
+
+**Custody note — this is the security-relevant half.** D-5 put client tokens INSIDE Postiz precisely
+so we never held them. 38b reverses that for the networks the direct driver serves. It is a
+deliberate trade the owner accepted with D-20, and it means **SMM-36 stops being a LinkedIn
+compliance chore and becomes load-bearing custody work** — it must land before 38c, not after.
+
+**What SMM-38 does NOT do:** it does not retire Postiz. IG/FB ride a single Meta app blocked on
+Business Verification, and TikTok is the highest-risk registration in the fleet; both stay on the
+Postiz driver until their own phases are scheduled. The D-21 fork exception therefore still applies
+and is still needed.
+
+**Decision-gated (do not mobilize):** **SMM-28** Mixpost-Pro swap — **DEAD as of the 2026-08-14 free-only constraint and D-20; retained only as a record** ·
 **SMM-29** ClipsAI video repurposing (OQ-6) · **SMM-34** generative images — **gated on
 `render-gateway-go` leaving `0.0.0`** (Creative `CR-*`), then wires into the inert `ai.imageGen`
 toggle + ledger kind SMM-20 leaves in place.
 
-**Totals:** 30 mobilized (was 27) + 3 decision-gated (was 2). Opus flags: **7** (SMM-01 med,
+**Totals (revised 2026-08-18):** 31 mobilized (was 30) + 3 decision-gated, of which SMM-28 is dead.
+Opus flags: **7** (SMM-01 med,
 SMM-30 med, SMM-03 med, SMM-04 med, SMM-05 med, SMM-09 **high**, SMM-31 med). Concurrency: respect
 the 1–2 agent cap; safe early pairs are (SMM-03 ∥ SMM-04) and (SMM-07 ∥ SMM-08); **SMM-09 runs
 alone** — it defines the spine SMM-10/17/22/31 all consume. SMM-30 must land before SMM-02 boots
-(the contract drift-guard fails against an unseeded catalog).
+(the contract drift-guard fails against an unseeded catalog). **SMM-38 depends on SMM-09** (it must
+implement the same dispatch-chain contract the publish gate defines) and **38c depends on SMM-36**.
 
 ---
 
