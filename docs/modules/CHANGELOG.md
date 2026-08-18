@@ -106,6 +106,21 @@ reconstructed from this table alone. Format defined in [`VERSIONING.md`](./VERSI
 > Not corrected retroactively (moving a pushed, already-deployed tag is its own risk); flagging so
 > the next session doesn't re-diagnose the same gap.
 
+### `Alpha 01.044.0096a` - 2026-08-18 - fix the sweep busy-loop, and verify the reconciler live
+
+Manifest (counter +1, 0095 -> 0096): `platform-nest 0.23.1 -> 0.23.2`.
+
+**Why:** `0095b` made `POSITION_SYNC_ENABLED` reachable; turning it on exposed that an empty
+`POSITION_DRIFT_SWEEP_INTERVAL_MS` became a 0ms sweep interval — a hot loop at ~46% CPU against
+Postgres on the live box. Fixed in the app (empty/NaN/<=0 coerced to the default), in the loop (refuses
+a non-positive interval), and in compose (a real default instead of an empty passthrough).
+
+**Also in this cut:** the reconciler is now VERIFIED live, not just enabled. On the real VPS through
+real SSO: a hire returned `reconciled: {granted: 1}`, and a transfer re-pointed the grant's claim from
+the closed seat to the new open seat in the destination department with zero stale claims — the A2
+refcount behaving as designed (same role at company scope, so the artifact is unchanged and only the
+justification moves).
+
 ### `Alpha 01.043.0095b` - 2026-08-18 - the position reconciler is switchable on the live box
 
 Manifest: **no module version moved** — this is an infra/compose change only, so per VERSIONING the
@@ -1760,6 +1775,24 @@ anywhere real.
 ---
 
 ## platform-nest
+### [0.23.2] - 2026-08-18 - IN PROGRESS (the sweep busy-looped on the live box; three layers fixed)
+- 🔴 **INCIDENT, self-inflicted and self-found.** Enabling `POSITION_SYNC_ENABLED` on the live box
+  produced `IAM grant-expiry + position-drift sweep on: every 0ms` and platform sat at **~46% CPU**
+  sweeping Postgres continuously. Nothing errored; `/health` stayed 200. A busy loop presents as
+  healthy uptime, which is why it needed a log line to be noticed at all.
+- **Cause, in three parts, all mine:** compose was given `${POSITION_DRIFT_SWEEP_INTERVAL_MS:-}`, and
+  that form passes an **empty string** when the variable is unset; `config.ts` read it as
+  `Number(env ?? default)`, and `??` does not fire on `""` while `Number("")` is `0`; and
+  `startPositionMaintenanceLoop` accepted a 0 interval without complaint.
+- **Fixed at all three:** `positiveIntFromEnv()` treats empty/NaN/<=0 as unconfigured; the loop
+  REFUSES a non-positive interval loudly and returns an inert handle; compose carries a real default
+  (`:-86400000`) so the container never receives a value the app has to guess about.
+- **Also removed a duplicated env block** in `docker-compose.vps.yml` — the same `POSITION_*` block had
+  been committed twice. Compose tolerated it (last key wins), which is exactly why it went unnoticed.
+- Mitigated live before the fix shipped by setting an explicit interval; CPU returned to ~5%.
+- Pinned by `src/admin/sweep-interval-guard.test.ts` (11 cases): the empty-string case is called out
+  as THE incident value, and both a positive interval and a real configured value are asserted so the
+  guards are not over-broad. The incident itself is the teeth proof — the 0ms behaviour was observed.
 ### [0.23.1] - 2026-08-18 - IN PROGRESS (four owner decisions, and a live over-grant closed)
 - 🔴 **`member` could delete any client in the tenant — closed.** Found while preparing the
   sensitivity-flag review, not by a scan: `core.client.delete` sat in the BASELINE `member` bundle, and

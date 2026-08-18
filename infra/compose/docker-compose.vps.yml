@@ -540,26 +540,10 @@ services:
       POSITION_SYNC_ENABLED: ${POSITION_SYNC_ENABLED:-}
       # P2-09's sweep interval. The EXPIRY half of that loop runs regardless of the flag above,
       # because P2-08's grant surface can write `expires_at` whether or not positions are live.
-      POSITION_DRIFT_SWEEP_INTERVAL_MS: ${POSITION_DRIFT_SWEEP_INTERVAL_MS:-}
-      # IAM Phase 2 (P2-05/P2-06/P2-09): the POSITION reconciler — placement provisions access, a
-      # transfer moves it, a termination removes it. Dark by default, exactly like the ORG-6 train
-      # above (empty/unset -> off; "1"/"true" on).
-      #
-      # 🚨 THIS LINE IS WHY THE FLAG WORKS AT ALL. Setting POSITION_SYNC_ENABLED in the box `.env`
-      # alone does NOTHING: compose reads `.env` for variable INTERPOLATION, it does not pass it into
-      # the container. Verified on the live box 2026-08-18 — hire/transfer/terminate each returned
-      # 2xx with `reconciled: null` and ZERO `user_roles.managed_by_position` rows, i.e. the seats
-      # moved and the authorization did not. The flows look healthy while the half that matters is
-      # inert, which is the same silently-degraded shape the SOCIAL_* block below is flagged for.
-      #
-      # ⚠ Turning this ON changes live authorization for every position holder: grants materialise
-      # from role-sets, and closing a seat REVOKES what only that seat justified. The mass-revoke
-      # brake (position-reconciler.ts) is what stops a bad org edit doing that estate-wide, and the
-      # drift sweep reports rather than auto-heals.
-      POSITION_SYNC_ENABLED: ${POSITION_SYNC_ENABLED:-}
-      # P2-09's sweep interval. The EXPIRY half of that loop runs regardless of the flag above,
-      # because P2-08's grant surface can write `expires_at` whether or not positions are live.
-      POSITION_DRIFT_SWEEP_INTERVAL_MS: ${POSITION_DRIFT_SWEEP_INTERVAL_MS:-}
+      # NOT the `${VAR:-}` form: that passes an EMPTY string when unset, which reached the app
+      # as 0 and busy-looped the sweep at ~46% CPU (2026-08-18). A real default means the
+      # container never receives a value the app has to guess about.
+      POSITION_DRIFT_SWEEP_INTERVAL_MS: ${POSITION_DRIFT_SWEEP_INTERVAL_MS:-86400000}
       # OBS-01 follow-up (2026-08-06 incident): platform used to read the SAME shared OTEL_ENABLED
       # as the other 5 telemetry-carrying services. Turning it on for platform alone meant either an
       # unscoped `.env` edit (which once accidentally restarted ai-gateway) or a shell-level override

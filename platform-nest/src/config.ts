@@ -171,6 +171,36 @@ function mailStreamConfig(prefix: "NOTIFY" | "AUTH", defaultFrom: string) {
   };
 }
 
+/**
+ * Read a POSITIVE integer from the environment, treating **empty string, NaN, and any value <= 0 as
+ * "not configured"** and returning `fallback` instead.
+ *
+ * Why this exists rather than `Number(process.env.X ?? fallback)`: `??` does not fire on `""`, and
+ * `Number("")` is `0`. Compose's `${VAR:-}` passthrough turns an unset variable into an EMPTY one, so
+ * the idiomatic-looking expression silently yields 0 — for an interval that means a hot loop, for a
+ * threshold it means everything trips the brake. Learned the hard way on 2026-08-18; see
+ * `positionDriftSweepIntervalMs` below.
+ *
+ * Deliberately NOT retrofitted onto every numeric env read in this file: none of the others is
+ * currently passed empty by any compose file (audited against the live container the same day), and
+ * rewriting them blind would change behaviour on paths this change has no business touching. New
+ * numeric settings should use this helper.
+ */
+function positiveIntFromEnv(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (raw === undefined || raw === null || raw.trim() === "") return fallback;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) {
+    // eslint-disable-next-line no-console
+    console.warn(
+      `[config] ${name}="${raw}" is not a positive number — falling back to ${fallback}. ` +
+        `A zero or negative interval would busy-loop.`,
+    );
+    return fallback;
+  }
+  return n;
+}
+
 const configBase = {
   port: Number(process.env.PLATFORM_PORT ?? 3004),
   host: process.env.HOST ?? "0.0.0.0",
@@ -279,9 +309,20 @@ const configBase = {
   // that revokes everyone is far worse than one that revokes nothing, so this fails CLOSED (the
   // run aborts before any write commits) rather than clamping to the first N revocations.
   positionMassRevokeThreshold: Number(process.env.POSITION_MASS_REVOKE_THRESHOLD ?? 20),
-  // Design §3.4 nightly drift detector + expiry sweep cadence. Default 24h. No effect unless
-  // positionSyncEnabled.
-  positionDriftSweepIntervalMs: Number(process.env.POSITION_DRIFT_SWEEP_INTERVAL_MS ?? 24 * 3600 * 1000),
+  // Design §3.4 nightly drift detector + expiry sweep cadence. Default 24h.
+  //
+  // 🔴 `??` IS NOT ENOUGH HERE, AND THIS CAUSED A LIVE INCIDENT (2026-08-18). `??` falls back only on
+  // `undefined`/`null`, and `Number("")` is **0** — so an EMPTY value yields a 0ms interval and
+  // `startPositionMaintenanceLoop`'s self-rescheduling `setTimeout(tick, interval)` becomes a hot
+  // loop. Exactly that happened: compose was given
+  // `POSITION_DRIFT_SWEEP_INTERVAL_MS: ${POSITION_DRIFT_SWEEP_INTERVAL_MS:-}`, which turns "unset"
+  // into "empty string"; the box logged `sweep on: every 0ms` and platform sat at ~46% CPU spinning
+  // against Postgres until an explicit value was set.
+  //
+  // `positiveIntFromEnv` treats empty / NaN / <= 0 as "not configured". The loop ALSO refuses a
+  // non-positive value (grant-expiry-sweep.ts) — two layers, because a busy loop presents as healthy
+  // uptime rather than as an error.
+  positionDriftSweepIntervalMs: positiveIntFromEnv("POSITION_DRIFT_SWEEP_INTERVAL_MS", 24 * 3600 * 1000),
   // P2-07 (pm-console-ux-design-spec.md §4, §0 D-2): nightly burndown-snapshot pre-warmer. DARK
   // by default — the lazy upsert-on-read on every burndown GET (pm.controller.ts) is the
   // correctness backstop, so this job is a pure best-effort optimization, never load-bearing.

@@ -115,6 +115,27 @@ export async function sweepExpiredGrants(): Promise<ExpirySweepResult> {
  * expired grants live in exactly the configuration that can create them.
  */
 export function startPositionMaintenanceLoop(intervalMs: number): { stop: () => void } {
+  // 🔴 SECOND LAYER, added after a live incident (2026-08-18). A non-positive interval turns the
+  // self-rescheduling `setTimeout(tick, intervalMs)` below into a hot loop: on the live box an empty
+  // `POSITION_DRIFT_SWEEP_INTERVAL_MS` reached here as 0 and platform sat at ~46% CPU sweeping
+  // Postgres continuously. It never errored and `/health` stayed green — a busy loop presents as
+  // healthy uptime, which is why the guard belongs HERE and not only in `config.ts`.
+  //
+  // Refusing outright (returning an inert handle) rather than clamping: a sweep that silently runs on
+  // a cadence nobody configured is the same class of surprise, and the expiry half is not urgent
+  // enough to be worth guessing about. The log line is loud, and `config.positionDriftSweepIntervalMs`
+  // now cannot produce this value in the first place.
+  if (!Number.isFinite(intervalMs) || intervalMs <= 0) {
+    // eslint-disable-next-line no-console
+    console.error(
+      `[IAM-SWEEP] refusing to start: intervalMs=${intervalMs} is not a positive number. A zero or ` +
+        `negative interval would busy-loop against Postgres. Set POSITION_DRIFT_SWEEP_INTERVAL_MS ` +
+        `to a positive value (default 86400000). Expired grants will NOT be swept until this is fixed ` +
+        `— note assemblePrincipal() still refuses expired grants at resolution time, so access is not ` +
+        `widened by this refusal.`,
+    );
+    return { stop: () => {} };
+  }
   let stopped = false;
   let timer: NodeJS.Timeout | null = null;
   const tick = async () => {
