@@ -185,6 +185,11 @@ services:
   # Synthetic JOURNEY prober — functional probes (real authenticated requests through the provider
   # chain / tool catalog), not just liveness. Exports synthetic_journey_up/_duration_ms over OTLP.
   synthetic-prober:
+    # MON-09f: `image` AND `build`. The image is what deploy.yml can actually start --- it runs
+    # `up -d --no-build`, so a build-only service has nothing to launch and the deploy dies at
+    # that service (it did). release.yml now builds and pushes this tag like any other component.
+    # `build` stays so local development can still `docker compose build synthetic-prober`.
+    image: ghcr.io/${GHCR_OWNER:-hansel-gaiada}/gaiada-synthetic-prober:${GAIADA_TAG:-latest}
     build: ../../infra/observability/synthetic-prober
     restart: unless-stopped
     environment:

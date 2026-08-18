@@ -134,10 +134,33 @@ disk has already rolled back a healthy release once ([[deploy-disk-fills-and-rol
 
 | Ticket | Scope | Tier |
 |---|---|---|
-| **MON-09e** | **Rollback is still broken for any release that ADDS a service** (dies on `<image>:<prev-tag>: not found`). This deploy added 11 services at once, so the exposure is now larger, not smaller. Unfixed. | devops |
-| **MON-09f** | `synthetic-prober` must be **built and pushed to GHCR by `release.yml`**, not built by hand on the box. Today's fix survives only until the box is rebuilt; after that every deploy fails at `--no-build`. | devops |
-| **MON-09g** | ✅ **CLOSED in repo, drift remains until the next release.** Both files are now committed (`966a17a`) and on `origin/main`. ⚠ **The predicted revert actually happened first** — see below. | devops |
+| **MON-09e** | ✅ **DEV-VERIFIED.** `infra/scripts/rollback-to.sh` replaces the bare `up -d` in `deploy.yml`'s rollback: it starts what existed at `<prev>` and **removes** what did not. Carries a safety gate — see §2.6. | devops |
+| **MON-09f** | ✅ **DEV-VERIFIED.** Added to `release.yml`'s matrix (with a `context:` override — it is the only component not at `./<component>`), and the compose service now declares `image:` alongside `build:` so `--no-build` has something to start. | devops |
+| **MON-09g** | ✅ **CLOSED.** Committed (`966a17a`), shipped in `alpha-01.042.0095a`, and verified present on the box **from the tag** rather than by hand. Zero drift. ⚠ The predicted revert happened first — §2.5. | devops |
 | **MON-09h** | Retire `docker-compose.alertmanager-mail.yml`, `otel-metrics.yml`, `loki.yml`, `obs-local.yml` or mark them dev-only — they now describe projects that no longer exist and would re-create port collisions on 9090/9093 if anyone ran them. | devops |
+
+### 2.6 The rollback safety gate, and how it was found (see also §2.5 below)
+
+`rollback-to.sh` classifies each service by whether its image exists at the target tag: present =>
+bring it up, absent-and-ours => it is new in the failed release, so remove it. That logic is correct
+and was verified against the live compose config.
+
+It is also, on its own, capable of destroying the estate. **Testing it with a deliberately bogus tag
+classified all nine of our services as "new"** — because none of our images exist at a tag that was
+never built — and the next thing it would have done is delete every application container. The run
+survived only because the output was piped through `head`, and SIGPIPE killed the script before the
+removal step. Luck, not design.
+
+The missing insight: **"this service is new" and "this tag is wrong" are indistinguishable from a
+single missing image.** Only the *proportion* separates them — a real release adds one or two
+services; a wrong tag is missing all of them. So the script now refuses when none of our images
+exist at the target, and refuses when more of ours are missing than present, and it has a
+`--dry-run` that prints the plan without acting. Verified both ways: bogus tag => refuses, exit 1,
+nothing changed; real tag => plans 32 services up, 0 removed.
+
+The general lesson is not about rollback. It is that **a recovery tool needs a bad-input gate more
+than a normal tool does**, because it runs only when something has already gone wrong, and it runs
+unattended.
 
 ### 2.5 The MON-09g revert happened, and is worth keeping
 

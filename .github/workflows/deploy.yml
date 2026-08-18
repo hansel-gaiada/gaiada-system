@@ -387,8 +387,17 @@ jobs:
         run: |
           set -euo pipefail
           echo "::error::Deploy of ${TAG} failed — rolling back to ${{ steps.prev.outputs.tag }}"
+          # MON-09e: via infra/scripts/rollback-to.sh, NOT a bare `up -d`. A release that ADDS a
+          # service has no image for it at the previous tag, so the bare form died on
+          # `<image>:<prev-tag>: not found` PART WAY THROUGH - after compose had already stopped
+          # and recreated other services, leaving the stack as neither release. The script starts
+          # what existed at <prev> and REMOVES what did not, which is what rolling back means.
+          # It also REFUSES if the target tag has none/few of our images: 'this service is new'
+          # and 'this tag is wrong' look identical from one missing image, and only the
+          # proportion separates them - without that gate a wrong tag classifies EVERY service
+          # as new and deletes the whole application.
           ssh vps "cd '${DEPLOY_DIR}/infra/compose' && GAIADA_TAG='${{ steps.prev.outputs.tag }}' GHCR_OWNER='${OWNER}' \
-            COMPOSE_PROFILES='${COMPOSE_PROFILES}' docker compose ${COMPOSE_FILES} up -d --no-build --remove-orphans"
+            COMPOSE_PROFILES='${COMPOSE_PROFILES}' sh ../scripts/rollback-to.sh ${COMPOSE_FILES}"
           echo "::warning::Rolled back to ${{ steps.prev.outputs.tag }}. Schema was NOT reverted — check migrations."
 
       - name: Summary

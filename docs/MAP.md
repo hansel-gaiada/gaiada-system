@@ -114,7 +114,7 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 | `redis-exporter` | oliver006/redis_exporter:v1.67.0 | — | — | — |
 | `redis-exporter-bot` | oliver006/redis_exporter:v1.67.0 | — | — | — |
 | `sync-central` | — | — | — | — |
-| `synthetic-prober` | ../../infra/observability/synthetic-prober | — | — | otel-collector |
+| `synthetic-prober` | ghcr.io/${GHCR_OWNER:-hansel-gaiada}/gaiada-synthetic-prober:${GAIADA_TAG:-latest} | — | — | otel-collector |
 | `tempo` | grafana/tempo:2.7.0 | — | — | — |
 
 ### `infra/compose/docker-compose.build.yml`
@@ -452,7 +452,7 @@ Contracts + top-level docs (`docs/`): `BLUEPRINTS.md`, `FRONTEND-BFF-CONTRACT.md
 
 Runbooks (`infra/runbooks/`): `db-topology-cutover.md`, `deploy-vps.md`, `enable-mfa.md`, `local-model-serving.md`, `nginx-mail-inbound-route.md`, `observability-loki.md`, `observability-slo.md`, `observability.md`, `restore-drill.md`
 
-Ops scripts (`infra/scripts/`): `backup-cron.sh`, `backup.sh`, `healthcheck.sh`, `lint-observability.sh`, `restore-drill.sh`, `test-all.sh`, `wire-env.sh`
+Ops scripts (`infra/scripts/`): `backup-cron.sh`, `backup.sh`, `healthcheck.sh`, `lint-observability.sh`, `restore-drill.sh`, `rollback-to.sh`, `test-all.sh`, `wire-env.sh`
 
 Component guides: `CLAUDE.md`, `ai-agents/CLAUDE.md`, `ai-gateway-go/CLAUDE.md`, `automation/CLAUDE.md`, `infra/CLAUDE.md`, `mcp-hub/CLAUDE.md`, `platform-nest/CLAUDE.md`, `platform-ui/CLAUDE.md`, `sync-engine-go/CLAUDE.md`, `wa-chat-bot/CLAUDE.md`
 
