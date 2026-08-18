@@ -164,9 +164,9 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 
 ## platform-nest — migrations
 
-- Head: `0111_iam_phase2_employee_work_email_key.sql`
-- Next free number: `0112` — **reserve it by creating the file**, concurrent sessions share this checkout.
-- Applied files on disk: 110
+- Head: `0112_iam_owner_decisions_2026_08_18.sql`
+- Next free number: `0113` — **reserve it by creating the file**, concurrent sessions share this checkout.
+- Applied files on disk: 111
 - Unused numbers below head: `0058`, `0059`, `0070` (dead reservations — do not backfill)
 
 ## platform-nest — HTTP surface (`@Controller` prefixes)

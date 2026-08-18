@@ -106,6 +106,28 @@ reconstructed from this table alone. Format defined in [`VERSIONING.md`](./VERSI
 > Not corrected retroactively (moving a pushed, already-deployed tag is its own risk); flagging so
 > the next session doesn't re-diagnose the same gap.
 
+### `Alpha 01.042.0095a` - 2026-08-18 - four owner decisions, and a client over-grant closed
+
+Manifest (counter +1, 0094 -> 0095): `platform-nest 0.23.0 -> 0.23.1`.
+
+**Full module manifest** (rule 2 - what makes this build reconstructible):
+
+| Module | Ver | Module | Ver | Module | Ver |
+|---|---|---|---|---|---|
+| **platform-nest** | **`0.23.1`** | wa-chat-bot | `0.9.2` | search-marketing | `0.5.1` |
+| platform-ui | `0.25.1` | ai-agents | `0.7.1` | social-media | `0.5.0` |
+| ai-gateway-go | `0.13.2` | hermes-gateway | `0.2.0` | creative | `0.1.0` |
+| mcp-hub | `0.10.1` | capture-helper | `0.2.0` | render-gateway-go | `0.0.0` |
+| sync-engine-go | `0.7.0` | webdev | `0.13.0` | reports | `0.3.1` |
+| automation (n8n) | `0.4.1` | webdesk | `0.0.0` | | |
+| observability | `0.6.1` | infra | `0.8.6` | | |
+
+**Why this cut exists:** it carries an authorization NARROWING (a plain member can no longer delete
+clients) and an authorization WIDENING (hr_manager can place/transfer/terminate). Both change live
+behaviour, so both want their own deployable version rather than riding along in a later release.
+The Cerbos policy change only takes effect once the container restarts with the new bundle — the
+deploy does that, but verify it, because a healthy Cerbos has served stale policy on this estate before.
+
 ### `Alpha 01.041.0094a` - 2026-08-18 - IAM Phase 2: JML, positions, the grant surface
 
 Manifest (counter +1, 0093 -> 0094): `platform-nest 0.22.0 -> 0.23.0`. One module bumped, so the
@@ -1717,6 +1739,34 @@ anywhere real.
 ---
 
 ## platform-nest
+### [0.23.1] - 2026-08-18 - IN PROGRESS (four owner decisions, and a live over-grant closed)
+- 🔴 **`member` could delete any client in the tenant — closed.** Found while preparing the
+  sensitivity-flag review, not by a scan: `core.client.delete` sat in the BASELINE `member` bundle, and
+  a live probe (a principal whose only grant was `member @ company`) returned EFFECT_ALLOW on client
+  create/update/delete — no `owns` carve-out, and the handler passes no ownership attribute to narrow
+  it. Soft-delete and audited, so recoverable, but real reach over a core business entity, and
+  deployed. `member` now keeps create/update and loses delete (owner decision); `manager`/
+  `company_admin` are untouched, which the new test asserts so the narrowing cannot over-correct.
+- **HR runs joiner/mover/leaver end to end.** `hr_people_ops` gains `core.position.assign`/`.unassign`,
+  resolving the §5.1-vs-§4.1 contradiction P2-06 surfaced (an `hr_manager` used to get 403 the moment
+  `positionId` was present). `hr_staff` deliberately does NOT — `hr_people_ops` is the ACTING tier —
+  and that refusal is pinned. A dept head's assignment becoming a REQUEST is the owner's chosen
+  end-state and waits on P2-08 part B; direct assign stays live until then rather than leaving a gap.
+- **Seven READ permissions are no longer `sensitive`** (`contract.read`, `identity_link.read`,
+  `rollup.read`, `role_grant.read`, `invoice.read`, `it.account.read`, `hr.case.read`) — 107 -> 100.
+  `hr.record.read` stays flagged (bulk personal data). The flag became load-bearing when P2-08's
+  dept-head gate started routing sensitive-carrying roles as overrides, and flagging reads meant any
+  role that can *view* a contract or a dashboard was refused. Two groups (`invoices_view`, `rollups`)
+  lost their derived flag mechanically; both `_meta` counts were RE-DERIVED, never hand-edited.
+- **The ceiling's baseline subtraction is now an explicit interim.** The owner ruled the durable form
+  is a per-key catalog marker separating self-scoped keys from authority-over-others keys; the
+  subtraction ships until that lands, and PERMISSION-CONTRACT §12.1 says so rather than leaving it
+  looking permanent. `core.integration_connection.*` vs `core.client.delete` is the worked example of
+  why a marker beats a subtraction: both sat in the baseline bundle, only one was genuinely self-scoped.
+- Migration `0112` syncs the DB half (bundle row dropped, two added, seven flags cleared), asserting
+  every delta with `GET DIAGNOSTICS` rather than trusting it.
+- Gates: parity chain `src/rbac`+`src/db` **920/920**, `employees-jml` 15/15, the new live-probe suite
+  9/9, `cerbos compile` clean, Cerbos restarted before every probe.
 ### [0.23.0] - 2026-08-18 - IN PROGRESS (IAM Phase 2: JML, positions, the grant surface, and the expiry sweep)
 - **A hire, a transfer and a termination now move real authorization (P2-06).** Seven endpoints under
   `/api/:t/hr/employees` — list/detail/hire/patch/delete plus `transfer` and `terminate`. The §5.2 mover

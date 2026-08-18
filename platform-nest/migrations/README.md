@@ -466,3 +466,17 @@ at it, run `node dist/db/migrate.js`, confirm the ordered `applied:` list and ex
    `docs/superpowers/plans/2026-08-18-p2-06-report.md`. `0058`/`0059`/`0070` remain the
    permanently-orphaned reservation gaps — still do NOT fill them. **Next unused is `0112`** —
    re-verify with `ls migrations | sort | tail` before trusting that.
+
+   **2026-08-18 update (owner decisions) — `0112` TAKEN.** `ls migrations | sort | tail` immediately
+   before writing showed the head as `0111_iam_phase2_employee_work_email_key.sql` with `0112` free.
+   `0112_iam_owner_decisions_2026_08_18.sql` is **DML only, zero schema change**: it drops the
+   `(member, core.client.delete)` bundle row (the live over-grant PERMISSION-CONTRACT §12.5 records),
+   adds `(hr_manager, core.position.assign/.unassign)`, and clears `sensitive` on seven READ keys
+   (107 -> 100, `hr.record.read` deliberately excluded). Every statement asserts its own DELTA with
+   `GET DIAGNOSTICS` — never a total, per the 0093 lesson that a migration may assert what it did but
+   never the state of a shared table forever. The `member` delete is tolerant of 0 rows (an
+   environment seeded after the policy change never had the row) but refuses >1 (duplicates are a real
+   defect). Two negative invariants are asserted rather than assumed: `hr.record.read` must still be
+   sensitive, and `hr_staff` must NOT hold the position keys. Paired with the policy edits and the
+   regenerated JSON in the same commit, because the parity suites compare all three. **Next unused is
+   `0113`** — re-verify with `ls migrations | sort | tail` before trusting that.

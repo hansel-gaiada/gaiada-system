@@ -3034,13 +3034,15 @@ Design: `docs/superpowers/plans/2026-08-13-iam-phase2-design.md` §4–§5. Back
 
 ### ⚠ Three behaviours a consumer must render, not assume
 
-1. **HR cannot place, transfer, or terminate — only `company_admin` or the dept lead can.**
-   `resource_position.yaml` grants `assign`/`unassign` to `company_admin` and `org_unit_lead` only;
-   `hr_people_ops` is deliberately absent. So an `hr_manager` gets **201 on a record-only hire and
-   403 the moment `positionId` is present**, and 403 on transfer/terminate. This is a real divergence
-   between design §5.1 ("HR … + optional immediate placement") and §4.1/§6.2 ("dept head assigns") —
-   see the P2-06 report; it is an owner call, not a bug to route around in the UI. Gate the placement
-   fields on `position.assign` reach, not on the HR capability.
+1. **HR runs the whole flow (owner decision 2026-08-18) — but `hr_staff` does not.**
+   `hr_people_ops` now holds `position.assign`/`.unassign` (`0112`), so an `hr_manager` can hire with
+   placement, transfer and terminate. `hr_people_ops` resolves to **`hr_manager` alone**, so an
+   `hr_staff` caller still gets **201 on a record-only hire and 403 the moment `positionId` is
+   present**. Gate the placement fields on `position.assign` reach (via the IAM-05c effective-permission
+   endpoint), never on "is this user in HR" — the two are not the same set.
+   ⚠ A dept head's assignment is slated to become a REQUEST rather than a direct write once P2-08
+   part B ships; direct assign still works today. Do not build the dept-head UI around direct assign
+   being permanent.
 2. **No future-dated JML.** `startDate`/`effectiveDate`/`lastDay` in the future ⇒ 400. The reconciler
    resolves on `valid_to IS NULL` with no as-of axis, so a future date would apply *now* while the
    record claimed otherwise. Scheduled JML is deferred, not silently approximated.

@@ -11,7 +11,7 @@
       "permissionsCoveredByGroups": 247,
       "permissionsAdvancedOnly": 20,
       "permissionsAppearingInMultipleGroups": 2,
-      "sensitiveGroups": 51
+      "sensitiveGroups": 49
     }
   },
   "groups": [
@@ -220,7 +220,7 @@
       "permissions": [
         "billing.invoice.read"
       ],
-      "sensitive": true
+      "sensitive": false
     },
     {
       "key": "invoices_manage",
@@ -422,7 +422,7 @@
         "core.rollup.read",
         "core.rollup_recompute.create"
       ],
-      "sensitive": true
+      "sensitive": false
     },
     {
       "key": "service_assignments_propose",

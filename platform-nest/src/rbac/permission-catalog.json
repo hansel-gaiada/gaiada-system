@@ -16,7 +16,7 @@
       "concretePairs": 282,
       "grantable": 267,
       "relationship": 15,
-      "sensitive": 107
+      "sensitive": 100
     },
     "countsNote": "DERIVED from `permissions` below — re-derive rather than hand-edit. HIER-5 (2026-08-11) found this block stale after HIER-3 retired the `team` kind: it still read 61/230/215 while the array held 60/226/211. Nothing enforced it, so it drifted silently — the same hand-maintained-number rot this program has hit repeatedly. `role-permission-bundles.db.test.ts` pins the BUNDLE artifact's own counts; this block had no equivalent guard. IAM-GAP-01 (2026-08-13): 262/247/91 -> 264/249/93 — two new grantable, both sensitive: `billing.invoice.approve` (new literal action on the existing `invoice` kind) and `hr.leave.decide` (new literal action `decide_leave` on the existing `automation_approval` kind). Kind count (68) and relationship count (15) are unchanged — no new Cerbos kind, no new relationship-class permission. P2-02 (2026-08-13): +18 grantable (4 new Cerbos kinds — role_grant/position/employee/it_account, design §6.2; role_grant/position are role-arm ONLY, permanently-unwired perm mirror per IAM-04c §9 option C; employee/it_account are role-arm only THIS wave, deferred pending their handlers). Kind count 68 -> 72 (+4). Relationship count (15) unchanged — none of the 18 new keys are relationship-class.",
     "uiGrantable": {
@@ -433,7 +433,7 @@
       "cerbosKind": "invoice",
       "cerbosAction": "read",
       "class": "grantable",
-      "sensitive": true,
+      "sensitive": false,
       "uiGrantable": true
     },
     {
@@ -781,7 +781,7 @@
       "cerbosKind": "contract",
       "cerbosAction": "read",
       "class": "grantable",
-      "sensitive": true,
+      "sensitive": false,
       "uiGrantable": true
     },
     {
@@ -961,7 +961,7 @@
       "cerbosKind": "identity_link",
       "cerbosAction": "read",
       "class": "grantable",
-      "sensitive": true,
+      "sensitive": false,
       "uiGrantable": true
     },
     {
@@ -1430,7 +1430,7 @@
       "cerbosKind": "role_grant",
       "cerbosAction": "read",
       "class": "grantable",
-      "sensitive": true,
+      "sensitive": false,
       "uiGrantable": true
     },
     {
@@ -1454,7 +1454,7 @@
       "cerbosKind": "rollup",
       "cerbosAction": "read",
       "class": "grantable",
-      "sensitive": true,
+      "sensitive": false,
       "uiGrantable": true
     },
     {
@@ -1814,7 +1814,7 @@
       "cerbosKind": "hr_case",
       "cerbosAction": "read",
       "class": "grantable",
-      "sensitive": true,
+      "sensitive": false,
       "uiGrantable": true
     },
     {
@@ -1994,7 +1994,7 @@
       "cerbosKind": "it_account",
       "cerbosAction": "read",
       "class": "grantable",
-      "sensitive": true,
+      "sensitive": false,
       "uiGrantable": true
     },
     {

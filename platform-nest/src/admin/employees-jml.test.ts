@@ -84,14 +84,13 @@ describe.skipIf(!TEST_URL || !live)("P2-06 — joiner / mover / leaver over the 
     return decision.allow ? 200 : 403;
   }
 
-  // ⚠ FINDING (P2-06, established by running this suite — see the report): design §5.1 says "HR
-  // (hr_manager / company_admin) creates the employee ... if positionId is given, open the position
-  // assignment", but `resource_position.yaml` (P2-02) grants `assign` to **company_admin and
-  // org_unit_lead only** — `hr_people_ops` is deliberately absent, matching design §4.1's split
-  // ("HR creates/retires positions; dept head assigns"). The two design sections disagree, and this
-  // file honours CERBOS, which is the authority: the placing actor is company_admin, and
-  // hr_manager's 403 on the placement half is PINNED below rather than "fixed" by widening a policy
-  // on my own authority.
+  // ⚠ RESOLVED BY OWNER DECISION, 2026-08-18. This suite originally PINNED the opposite: design §5.1
+  // ("HR ... opens the position assignment") contradicted §4.1/§6.2 ("dept head assigns"), the policy
+  // sided with §4.1, and an `hr_manager` got 403 the moment `positionId` was present. Rather than
+  // widen a policy on my own authority I pinned the refusal and escalated. The owner ruled that HR
+  // runs joiner/mover/leaver end to end, so `hr_people_ops` now holds `position.assign`/`.unassign`
+  // (migration `0112`), and the cases below assert the NEW behaviour — with `hr_staff`'s continued
+  // refusal pinned too, because `hr_people_ops` is the ACTING tier (hr_manager only), not all of HR.
   const hire = (body: Record<string, unknown>, actor = companyAdmin) =>
     app.inject({ method: "POST", url: `/api/${T}/hr/employees`, headers: asUser(actor), payload: body });
 
@@ -204,32 +203,41 @@ describe.skipIf(!TEST_URL || !live)("P2-06 — joiner / mover / leaver over the 
     expect(future.json().error).toContain("cannot be in the future");
   });
 
-  it("hr_manager may create the record but NOT place: the placement half is 403 (the §5.1/§4.1 split)", async () => {
+  it("hr_manager runs the WHOLE flow: hire-with-placement, transfer and terminate (owner decision)", async () => {
     const recordOnly = await hire({ displayName: "HR Made", workEmail: "hrmade@a.test" }, hrManager);
     expect(recordOnly.statusCode).toBe(201);
+
     const placed = await hire({ displayName: "HR Placed", workEmail: "hrplaced@a.test", positionId: webPosition }, hrManager);
+    expect(placed.statusCode).toBe(201);
+    expect(placed.json().reconciled.granted).toBeGreaterThan(0);
+    const placedId = placed.json().id as string;
+
+    const mv = await app.inject({
+      method: "POST", url: `/api/${T}/hr/employees/${placedId}/transfer`,
+      headers: asUser(hrManager), payload: { toPositionId: hrPosition },
+    });
+    expect(mv.statusCode).toBe(200);
+
+    const tm = await app.inject({
+      method: "POST", url: `/api/${T}/hr/employees/${placedId}/terminate`, headers: asUser(hrManager), payload: {},
+    });
+    expect(tm.statusCode).toBe(200);
+  });
+
+  it("hr_STAFF still cannot place, transfer or terminate — hr_people_ops is the ACTING tier only", async () => {
+    // The decision widened `hr_people_ops`, which resolves to hr_manager ALONE. If a future edit
+    // grants hr_staff the same reach, that is a real widening and this case is what says so.
+    const hrStaff = await createUser("jml-hrstaff@a.test");
+    await addMembership(T, hrStaff);
+    await grantRole(hrStaff, await createRole("hr_staff"), "company", T);
+
+    const placed = await hire({ displayName: "Staff Placed", workEmail: "staffplaced@a.test", positionId: webPosition }, hrStaff);
     expect(placed.statusCode).toBe(403);
-    // and no employee row was created by the refused request — the authorization runs before any write
     const rows = await withTenants([T], (c) =>
-      c.query(`SELECT id FROM employees WHERE tenant_id = $1 AND work_email = 'hrplaced@a.test'`, [T]),
+      c.query(`SELECT id FROM employees WHERE tenant_id = $1 AND work_email = 'staffplaced@a.test'`, [T]),
       { modules: ["hr"] },
     );
     expect(rows.rows).toHaveLength(0);
-
-    // The same split applies to the MOVER and LEAVER flows, because both close/open seats: they are
-    // `position.unassign`/`assign`, which hr_people_ops does not hold. Pinned so a future policy
-    // widening is a deliberate, visible decision rather than an accident.
-    const seated = await hire({ displayName: "Seated", workEmail: "seated@a.test", positionId: webPosition });
-    const seatedId = seated.json().id as string;
-    const mv = await app.inject({
-      method: "POST", url: `/api/${T}/hr/employees/${seatedId}/transfer`,
-      headers: asUser(hrManager), payload: { toPositionId: hrPosition },
-    });
-    expect(mv.statusCode).toBe(403);
-    const tm = await app.inject({
-      method: "POST", url: `/api/${T}/hr/employees/${seatedId}/terminate`, headers: asUser(hrManager), payload: {},
-    });
-    expect(tm.statusCode).toBe(403);
   });
 
   it("refuses the whole hire when the caller may not create employees (403, no row left behind)", async () => {

@@ -23,7 +23,7 @@ version and add a `CHANGELOG.md` entry on every notable module change.
 
 ## App version
 
-**`Alpha 01.041.0094a`** â€” see [`VERSIONING.md`](./VERSIONING.md) for the format, and
+**`Alpha 01.042.0095a`** â€” see [`VERSIONING.md`](./VERSIONING.md) for the format, and
 
 [`/VERSION`](../../VERSION) for the machine-readable source. The app version composes the module
 versions below; the running build reports it at `GET /health`.
@@ -34,7 +34,7 @@ versions below; the running build reports it at `GET /health`.
 
 | Module | Ver | Status | Workstream | Since |
 |---|---|---|---|---|
-| platform-nest | `0.23.0` | IN PROGRESS | WS1 | 2026-08-18 |
+| platform-nest | `0.23.1` | IN PROGRESS | WS1 | 2026-08-18 |
 | platform-ui | `0.25.1` | IN PROGRESS | WS5 | 2026-08-11 |
 | ai-gateway-go | `0.13.2` | PROTOTYPED | WS3 | 2026-08-07 |
 | mcp-hub | `0.10.1` | PROTOTYPED | WS2 | 2026-08-09 |
@@ -58,7 +58,7 @@ versions below; the running build reports it at `GET /health`.
 
 ---
 
-## platform-nest â€” Platform Core Â· `0.23.0` Â· PROTOTYPED
+## platform-nest â€” Platform Core Â· `0.23.1` Â· PROTOTYPED
 **0.22.0 (2026-08-13, IAM authorization hardening — permission arm, scope filter, invoice
 maker/checker):** Closed the mis-scoped-grant class at the resolution source — `assemblePrincipal()`
 now drops permissions from any grant at a scope the role's own Cerbos condition can never satisfy,

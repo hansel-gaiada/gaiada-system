@@ -575,11 +575,17 @@ company_admin) creates the employee … if `positionId` is given … open the po
 gets 201 on a record-only hire and **403** on the placement half, on transfer, and on terminate. Both
 directions are pinned in `employees-jml.test.ts`, so widening this later is a visible decision.
 
-**Owner call needed** — either (a) give `hr_people_ops` `assign`/`unassign` (HR runs JML end to end,
-dept heads keep their subtree rule), or (b) keep the split and correct design §5.1's text so the HR
-console (P2-10) is built with the placement fields gated on `position.assign` reach. Recommendation:
-**(a)** — an HR manager who cannot complete a hire they started will be handed `company_admin`
-instead, which is the larger grant and the worse outcome.
+**✅ RULED BY THE OWNER, 2026-08-18: option (a).** `hr_people_ops` now holds `core.position.assign`
+and `.unassign` (`resource_position.yaml`, migration `0112`), so HR runs joiner/mover/leaver end to
+end and dept heads keep their own subtree rule unchanged. `hr_staff` is deliberately NOT included —
+`hr_people_ops` resolves to `hr_manager` alone (the ACTING tier), and both directions are pinned in
+`employees-jml.test.ts` and `client-member-delete-denied.test.ts`.
+
+The owner also chose the stricter long-term shape: **a dept head's assignment should become a
+REQUEST that HR/company_admin approves.** That half is NOT built — it needs the same approval
+plumbing as §12.3's override. Dept-head DIRECT assign therefore stays live until P2-08 part B lands,
+at which point it flips to the request path; doing it now would remove a working capability and
+leave nothing in its place. Recorded so the flip is a scheduled step, not a forgotten one.
 
 ### 11.3 Unchanged by this ticket
 
@@ -603,9 +609,22 @@ from any surface, forever.
 is one of the six baseline roles every staff principal holds (`0095`), so nothing in its bundle is
 authority a grant can ADD; everything above baseline still must be held by the grantor.
 
-⚠ **This needs architect/owner ratification** — it relaxes a guard shipped by P2-04. The alternative, if
-rejected, is a catalog-level marker distinguishing self-scoped keys from authority-over-others keys.
-Reverting to the unsubtracted form is not an option: it makes the grant surface unusable.
+⚠ **RULED BY THE OWNER, 2026-08-18: replace the baseline subtraction with a CATALOG MARKER.** A
+per-key marker distinguishing self-scoped keys (`hr.case.cancel` — cancel *my own* case) from
+authority-over-others keys is the precise form; the baseline subtraction is a proxy that happens to
+work today and would silently widen every grantor's reach if `member`'s bundle ever grew.
+
+**Status: the subtraction SHIPS as the interim** (it is deployed in `alpha-01.041.0094a` and the
+surface is unusable without it). The marker is its own ticket: new catalog field, migration, and the
+parity chain re-derived across all 282 entries — then `assertWithinCeiling()` subtracts on the marker
+instead of on `bundle(member)`, and this section is rewritten. Until then the interim is load-bearing;
+do not remove it without the replacement in place.
+
+**The `core.integration_connection.*` case is the worked example of why the marker is better:** those
+three keys sit in `member`'s bundle from an `owns`-gated self-service rule (manage your own provider
+link), so the baseline subtraction and the marker agree. `core.client.delete` also sat in that bundle
+— and there the reach was REAL, not self-scoped (see §12.5). A subtraction cannot tell those two apart;
+a marker can.
 
 ### 12.2 The sensitive gate (§6.3.7) inherits the same subtraction — and its data is unratified
 
@@ -613,9 +632,18 @@ The baseline `member` role carries **11 `sensitive`-flagged keys**, so an unsubt
 baseline grant (and everything above it) as an override — refusing the entire dept-head surface. Same
 subtraction applied in `role-grants.controller.ts`.
 
-**The sensitivity flags are the first thing in this program to become load-bearing, and they have never
-been owner-reviewed** (§9's sign-off item, now 107 keys). The subtraction is necessary either way, but
-the SET this gate acts on is un-reviewed data. Raising the priority of that sign-off accordingly.
+**✅ REVIEWED BY THE OWNER, 2026-08-18** — the full list is
+`docs/superpowers/plans/2026-08-18-sensitivity-review.md`, grouped by domain and marking every key
+that sits in the baseline bundle. Ruling: **a READ is not sensitive authority**, with `hr.record.read`
+the sole exception (bulk personal data). Seven keys were un-flagged — `core.contract.read`,
+`core.identity_link.read`, `core.rollup.read`, `core.role_grant.read`, `billing.invoice.read`,
+`it.account.read`, `hr.case.read` — taking the catalog from **107 to 100** flagged (`0112`). Two
+permission groups (`invoices_view`, `rollups`) lost their derived `sensitive` flag as a mechanical
+consequence, and both `_meta` counts were re-derived rather than hand-edited.
+
+Rationale: flagging reads meant any role that can *view* contracts, invoices, identity links or
+dashboards routed as an override — and until §12.3's mechanism exists, "routes as an override" means
+"is refused". The override path stays reserved for authority that CHANGES something.
 
 ### 12.3 `decide_override` does not exist — the override path fails closed
 
@@ -639,3 +667,24 @@ pre-P2-08 row, so the conjunct is a no-op for existing grants. This is a deliber
 path (`assemblePrincipal()` runs per request) — the direction is fail-closed, and it sits beside
 IAM-SEC-06's resolution-source filter, which is the other conjunct that decides what a grant is allowed
 to resolve into.
+
+### 12.5 🔴 A live over-grant the sensitivity review found: `member` could delete any client
+
+Not a Phase-2 defect — it predates this work and was deployed. `core.client.delete` appeared in the
+BASELINE `member` bundle, which prompted a live probe: a principal whose only grant was
+`member @ company` got **EFFECT_ALLOW on client create/update/delete**, tenant-wide.
+`resource_client.yaml` carried a second rule naming `member` for all three actions, gated on nothing
+but `inTenant && notLow` — no `owns` — and `clients.controller.ts:80` passes no ownership attribute
+that could narrow it. Every staff member could remove any client in their company. Soft-delete,
+audited, recoverable; still real reach over a core business entity.
+
+**Owner ruled 2026-08-18: `member` keeps create/update, loses `delete`.** Rationale: agency staff
+plausibly onboard and edit clients as ordinary work; nobody plausibly needs every staffer able to
+remove one. `resource_client.yaml` amended, bundle row dropped (`0112`), and
+`src/rbac/client-member-delete-denied.test.ts` probes the live engine in both directions — including
+that `manager`/`company_admin` can *still* delete, so the narrowing did not over-correct.
+
+**The transferable lesson:** the flag review was not the point — asking "why does the baseline role
+hold a `delete` key?" was. A permission that is both *sensitive* and *held by everyone* is a
+contradiction, and the resolution is sometimes that the FLAG is wrong (the seven reads) and sometimes
+that the REACH is (this). Check which before adjusting either.
