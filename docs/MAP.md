@@ -233,6 +233,7 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 | `/api/admin` | `platform-nest/src/admin/admin-systems.controller.ts` |
 | `/api/admin/bot` | `platform-nest/src/admin/bot-admin.controller.ts` |
 | `/api/admin/mail` | `platform-nest/src/mail/admin-mail.controller.ts` |
+| `/api/admin/observability` | `platform-nest/src/admin/observability.controller.ts` |
 | `/api/mail` | `platform-nest/src/mail/inbound.controller.ts` |
 | `/api/mail` | `platform-nest/src/mail/webhook.controller.ts` |
 | `/api/search/google/oauth` | `platform-nest/src/modules/search/search-google-oauth.controller.ts` |
@@ -388,6 +389,7 @@ Pages (`page.tsx`), route groups `(x)` stripped:
 - `/systems/bot`
 - `/systems/gateway`
 - `/systems/hub`
+- `/systems/observability`
 - `/tasks`
 - `/tasks/[taskId]`
 - `/tasks/[taskId]`

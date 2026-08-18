@@ -132,24 +132,64 @@ services:
       - ntfy-data:/var/cache/ntfy
 
   # --- Exporters ---
+  # MON-09j: the exporters must reach the DATABASE, and on gda-aicenter Postgres and Redis run
+  # on the HOST, not in Docker (hostdata.yml !resets those container services). Hardcoding
+  # `postgres:5432` / `redis://redis:6379` therefore pointed both exporters at services that
+  # are deliberately never started: they scraped fine, so Prometheus showed the targets UP,
+  # while `pg_up`/`redis_up` sat at 0 and nobody was watching those. A green target is not a
+  # working check --- the exporter answering says nothing about the thing it measures.
+  #
+  # Fixed by reusing the SAME vars the app services already use (PG_HOST, REDIS_URL), so there
+  # is one source of truth for 'where is the database' and the exporters cannot drift from the
+  # platform's own connection. Defaults keep the all-in-Docker local topology working.
+  # NB: this must live HERE and not in hostdata.yml --- observability.yml is loaded LAST in
+  # COMPOSE_FILES, so anything hostdata.yml set for these services would be overridden back.
   postgres-exporter:
     image: quay.io/prometheuscommunity/postgres-exporter:v0.16.0
     restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
-      DATA_SOURCE_NAME: "postgresql://postgres:${POSTGRES_SUPER_PASSWORD}@postgres:5432/gaiada?sslmode=disable"
+      # Was `postgres:$POSTGRES_SUPER_PASSWORD@.../gaiada` --- a user AND a database that do not
+      # exist on this box. POSTGRES_SUPER_PASSWORD belongs to the CONTAINER Postgres (profile
+      # `data`, never started here); the host instance serves `gaiada_platform` through the
+      # per-service roles in vps.yml. So the exporter authenticated as nobody against nothing,
+      # and reported pg_up=0 while its scrape target showed green.
+      # Now it reuses the platform's own runtime role: the credential we already know works,
+      # because the application is up on it.
+      # NOTE: platform_app is intentionally restricted (NOBYPASSRLS), so collectors needing
+      # pg_monitor return nothing. That is a far smaller gap than a blind exporter; the proper
+      # fix is a dedicated read-only pg_monitor role (MON-09m), needing rights not held here.
+      DATA_SOURCE_NAME: "postgresql://platform_app:${PLATFORM_APP_PASSWORD}@${PG_HOST:-postgres}:5432/gaiada_platform?sslmode=disable"
     depends_on:
       - prometheus
 
   postgres-exporter-bot:
     image: quay.io/prometheuscommunity/postgres-exporter:v0.16.0
     restart: unless-stopped
+    # MON-09k, two separate faults found while wiring the PostgresDown alert:
+    #  1. This pointed at database `gaiada` on pg-bot, but the bot service uses `gaiada_bot`
+    #     (see vps.yml). `gaiada` exists there, so it CONNECTED and looked fine while reporting
+    #     on a database nothing uses --- a monitor aimed at the wrong target, which is worse than
+    #     no monitor because it produces confident numbers about nothing.
+    #  2. pg-bot is postgres:17, and exporter v0.16.0 predates PG17 splitting
+    #     pg_stat_bgwriter.checkpoints_timed out into pg_stat_checkpointer. The stat_bgwriter
+    #     collector therefore errors on every scrape. Disabled here rather than pinned to a newer
+    #     exporter, so the fix is verifiable now and does not couple to an untested image bump;
+    #     the host Postgres is 15 and its exporter keeps the collector.
+    command: ["--no-collector.stat_bgwriter"]
     environment:
-      DATA_SOURCE_NAME: "postgresql://postgres:${POSTGRES_SUPER_PASSWORD}@pg-bot:5432/gaiada?sslmode=disable"
+      DATA_SOURCE_NAME: "postgresql://postgres:${POSTGRES_SUPER_PASSWORD}@pg-bot:5432/gaiada_bot?sslmode=disable"
 
   redis-exporter:
     image: oliver006/redis_exporter:v1.67.0
     restart: unless-stopped
-    command: ["--redis.addr=redis://redis:6379"]
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    # REDIS_URL carries the host, port AND password the platform already uses. Sending the whole
+    # URL rather than a host means the exporter authenticates; a hostname alone would connect and
+    # then fail every command with NOAUTH, which reports as up-but-empty.
+    command: ["--redis.addr=${REDIS_URL:-redis://redis:6379}"]
 
   redis-exporter-bot:
     image: oliver006/redis_exporter:v1.67.0
@@ -215,6 +255,15 @@ services:
   platform:
     environment:
       OTEL_ENABLED: "1"
+      # MON-09i: lets the admin Observability console (/systems/observability) read this box's own
+      # health back out of Prometheus. Set HERE rather than in vps.yml or .env deliberately:
+      #  * it is only meaningful when the observability stack is deployed, and this file IS that
+      #    condition -- so the console cannot be configured to point at a Prometheus that is absent;
+      #  * a literal beats an env var because the address is fixed inside the compose project, and
+      #    a var in .env silently does nothing unless a service's environment block lists it,
+      #    which is a trap this repo has already been bitten by.
+      # Unset => the console reports itself unconfigured; it never implies the box is healthy.
+      PROMETHEUS_URL: "http://prometheus:9090"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4318"
       OTEL_SERVICE_NAME: "platform"
   sync-central:

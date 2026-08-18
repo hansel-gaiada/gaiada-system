@@ -3156,3 +3156,34 @@ built. The UI should offer "ask a company administrator", not a retry.
 **Unplaced targets:** a member with no org-unit placement has empty ancestry, so only company_admin and
 above can grant to them. That is fail-closed by design, not a bug — surface it as "place this person in
 the org chart first".
+
+### 20.1 Plane A admin console — `GET /api/admin/observability` — **BACKEND ✅ BUILT, UI ✅ WIRED (MON-09i, 2026-08-18)**
+
+Shapes canonical in `platform-ui/src/lib/observability.ts`, mirrored by
+`platform-nest/src/admin/observability.controller.ts`.
+
+| Method | Path | Gate | Returns | Status |
+|---|---|---|---|---|
+| GET | `/api/admin/observability` | **platform admin** (`isElevated`) — NOT tenant-scoped | `ObservabilitySnapshot` | ✅ BUILT |
+
+This is **Plane A** — our own box — and is the deliberate exception to §20's tenancy rules: there is
+nothing per-tenant to scope, so it is admin-gated instead of Cerbos/RLS-scoped, and it must never be
+exposed to a tenant. It exists because Plane A telemetry was collected for weeks and displayed
+nowhere (all four Grafana dashboards are application-level; none reads a `node_*`, `container_*`,
+`pg_*` or `redis_*` series), which is how a completely broken datastore exporter went unnoticed.
+
+Contract notes:
+
+1. **`available:false` is a first-class answer**, returned with a `reason` when `PROMETHEUS_URL` is
+   unset or Prometheus is unreadable. The UI prints the reason. It must never be conflated with a
+   healthy box.
+2. **Every metric is a `Reading` with `value: number | null`** — `null` means "asked, got nothing"
+   and renders as `—`. Do not coerce a missing series to `0`; a zeroed CPU reads as an idle server.
+3. **`alerts` excludes `Watchdog`.** It always fires by design (D15), so including it would show a
+   permanent red on a healthy box — the fastest way to teach operators to ignore the list.
+4. **`targets.up` is scrape health, not check validity.** A target is "up" when the exporter answers;
+   it says nothing about whether the thing being measured is reachable. That distinction is why the
+   response carries `datastores` separately — `pg_up`/`redis_up` were 0 for weeks while both targets
+   showed green.
+5. **Disk queries must stay identical to the `DiskSpaceLow` alert expression.** The console and the
+   pager reading different series is worse than having only one of them.

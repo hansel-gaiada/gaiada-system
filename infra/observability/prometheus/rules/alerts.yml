@@ -51,6 +51,30 @@ groups:
           summary: "{{ $labels.mountpoint }} projected to fill within 24h"
           description: "Trend over the last 6h projects {{ $labels.instance }}:{{ $labels.mountpoint }} full within 24h. Usual cause: a service logging at volume into Loki, or trace sampling turned up."
 
+      # --- Datastores. MON-09k: these were completely unwatched, and the gap hid a real fault.
+      # postgres-exporter and redis-exporter both pointed at container hostnames that are never
+      # started on this box (Postgres/Redis run on the host), so `pg_up`/`redis_up` were 0 for as
+      # long as the stack had been running. Prometheus showed BOTH TARGETS UP the whole time --- the
+      # exporter was healthy, the database was simply unreachable to it, and no rule read the value.
+      # A scrape target being up is not a check passing. These two rules are what make that visible.
+      - alert: PostgresDown
+        expr: pg_up == 0
+        for: 2m
+        labels:
+          severity: page
+        annotations:
+          summary: "Postgres unreachable from the exporter ({{ $labels.instance }})"
+          description: "pg_up=0 for 2m. Either the database is down, or the exporter DSN points somewhere the database is not (PG_HOST). Check `docker logs` on the exporter before assuming an outage."
+
+      - alert: RedisDown
+        expr: redis_up == 0
+        for: 2m
+        labels:
+          severity: page
+        annotations:
+          summary: "Redis unreachable from the exporter ({{ $labels.instance }})"
+          description: "redis_up=0 for 2m. As with Postgres, suspect the exporter address (REDIS_URL, including its password) before concluding Redis is down --- a hostname without credentials connects and then fails every command."
+
       # --- Event backbone: any dead-letter is worth a ticket (data path is dropping events).
       - alert: EventBackboneDeadLetters
         expr: increase(platform_events_dead_lettered_total[15m]) > 0

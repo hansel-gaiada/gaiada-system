@@ -321,6 +321,16 @@ const configBase = {
   },
   // Downstream service endpoints the admin/systems console aggregates (Phase C). All
   // read-only; empty URL -> that system reports "not configured" (fail-soft, never fake).
+  // MON-09i: read-only Plane A summary for the admin Observability console. Both are optional
+  // and default to empty: an unset PROMETHEUS_URL makes the console report itself unconfigured
+  // rather than pretend the box is healthy, and it never blocks boot -- Plane A telemetry is
+  // collected by Prometheus whether or not the platform can read it back.
+  observability: {
+    prometheusUrl: process.env.PROMETHEUS_URL ?? "",
+    // Display-only: an operator-facing hint about where the full dashboards live. Never fetched
+    // (Grafana requires its own auth and is reached over an SSH tunnel, not proxied by us).
+    grafanaUrl: process.env.GRAFANA_PUBLIC_HINT ?? "",
+  },
   services: {
     gateway: { url: process.env.GATEWAY_URL ?? "", token: process.env.GATEWAY_TOKEN ?? "" },
     bot: { url: process.env.BOT_URL ?? "", token: process.env.BOT_ADMIN_TOKEN ?? process.env.ADMIN_TOKEN ?? "" },
