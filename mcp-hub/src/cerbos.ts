@@ -61,17 +61,59 @@ function toolResource(t: HubTool, grant?: VerifiedExecutionGrant) {
   };
 }
 
+/**
+ * Cerbos refuses a `CheckResources` request carrying more resources than its own
+ * `server.requestLimits.maxActionsPerResource`/batch cap — 50 by default, and this deployment runs the
+ * default. The cap is SERVER-side, so the client must chunk.
+ *
+ * ⚠ THIS IS NOT A TUNING KNOB, IT IS A LIVE DEFECT FIX (2026-08-19). Once the hub's tool count passed
+ * 50, EVERY visibility check began failing with `InvalidArgument: number of resources in batch (128)
+ * exceeds configured limit (50)`, and `visibleToolsFor` caught it and fell back to the in-code engine.
+ * Not fail-open — the in-code engine is deny-by-default and mirrors the assurance and
+ * automation-scope rules — but Cerbos had silently stopped being AUTHORITATIVE for the tool list,
+ * which is the one thing `resource_mcp_tool.yaml` exists to be. It was invisible because the fallback
+ * logs a warning and returns a plausible answer; it was found by reading cerbos's own logs on the box,
+ * not by any test or alert.
+ *
+ * 40 rather than 50: headroom, so a deployment that lowers the limit slightly does not silently
+ * reintroduce the same failure. Chunking client-side rather than raising the server limit is
+ * deliberate — the limit is a defence against unbounded requests, and the hub's tool count only grows.
+ */
+export const CERBOS_RESOURCE_BATCH_MAX = 40;
+
 /** Authorize a batch of tools for `call`; returns the set of allowed tool names. Throws on a
  *  transport/Cerbos error so callers fail closed.
  *
  *  `grant` (D14-13) is optional and only ever passed by the single-call path — the tool-LIST path
- *  never has a grant, so visibility is computed exactly as before. */
+ *  never has a grant, so visibility is computed exactly as before.
+ *
+ *  Chunked at CERBOS_RESOURCE_BATCH_MAX (see above). Chunks are evaluated CONCURRENTLY and any one
+ *  chunk's rejection rejects the whole call, preserving the fail-closed contract: a partial answer
+ *  would be indistinguishable from "Cerbos denied those tools", which is exactly the confusion that
+ *  let the original defect hide. */
 export async function cerbosAllowedTools(
   principal: Principal,
   tools: HubTool[],
   grant?: VerifiedExecutionGrant,
 ): Promise<Set<string>> {
   if (tools.length === 0) return new Set();
+
+  const chunks: HubTool[][] = [];
+  for (let i = 0; i < tools.length; i += CERBOS_RESOURCE_BATCH_MAX) {
+    chunks.push(tools.slice(i, i + CERBOS_RESOURCE_BATCH_MAX));
+  }
+
+  const sets = await Promise.all(chunks.map((chunk) => checkChunk(principal, chunk, grant)));
+  const allowed = new Set<string>();
+  for (const s of sets) for (const name of s) allowed.add(name);
+  return allowed;
+}
+
+async function checkChunk(
+  principal: Principal,
+  tools: HubTool[],
+  grant?: VerifiedExecutionGrant,
+): Promise<Set<string>> {
   const res = await fetch(`${config.cerbosUrl}/api/check/resources`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },

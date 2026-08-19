@@ -128,6 +128,30 @@ reconstructed from this table alone. Format defined in [`VERSIONING.md`](./VERSI
 > Not corrected retroactively (moving a pushed, already-deployed tag is its own risk); flagging so
 > the next session doesn't re-diagnose the same gap.
 
+### `Alpha 01.051.0104a` - 2026-08-19 - IAM reaches the agents, and Cerbos goes back to deciding
+
+Manifest (counter +2, 0102 -> 0104): `platform-nest 0.27.0 -> 0.28.0`, `mcp-hub 0.10.1 -> 0.10.2`.
+No migration.
+
+Two things, and the second is the one worth reading.
+
+**Core gets a tool surface.** `positions` and `role-grants` had no module to be declared under, so the
+IAM Phase 2 surface was invisible to agents. Three reads and two PROPOSAL tools now ship;
+`iam.requestAssignment`/`iam.requestOverride` file a pending request a human decides. The direct
+grant/assign writes are deliberately absent pending an owner decision — not for want of a D14
+executor (that pattern is now worked) but because a role-granting tool is a privilege-escalation
+surface and this estate's audit attribution still names the human, not their agent.
+
+**Cerbos had silently stopped deciding which tools a caller can see.** Verifying 0102a on the box
+showed `[policy] cerbos visibility check failed (cerbos 400)` in the hub's log; cerbos's own log gave
+the reason: `number of resources in batch (128) exceeds configured limit (50)`. The hub asks about
+every tool at once, so the check has been failing — and falling back to the in-code engine — since the
+tool count crossed 50. Not fail-open (in-code is deny-by-default and mirrors the same rules) and the
+per-CALL path was never affected (one resource per request), but the policy file was not the authority
+it was believed to be. Fixed by chunking at 40 with fail-closed merging. Nothing detected this: the
+fallback logs one warning and returns a plausible answer, which is worth remembering the next time a
+"graceful degradation" path is written.
+
 ### `Alpha 01.050.0102a` - 2026-08-19 - an approved hire actually happens, and cannot happen twice
 
 Manifest (counter +1, 0101 -> 0102): `platform-nest 0.26.0 -> 0.27.0`. No migration.
@@ -1881,6 +1905,43 @@ anywhere real.
 ---
 
 ## platform-nest
+### [0.28.0] - 2026-08-19 - IN PROGRESS (core gets a tool surface; IAM Phase 2 becomes agent-reachable)
+- **`src/core/core-tools.ts`** — a registry for tools owned by CORE controllers, unioned into
+  `GET /mcp/tool-defs` ahead of the module tools. Closes the structural gap 0.26.0 recorded: the
+  endpoint returned `allModules().flatMap(m => m.mcpTools)`, so every tool needed a MODULE owner, and
+  `positions`/`role-grants` have none — they are core controllers over core tables. The whole IAM
+  Phase 2 surface was unreachable to an agent while `hr.*` was reachable.
+- **Why not the other two options.** Folding them into `hr` is semantically wrong (granting a role is
+  not HR, and `hr`'s tools are precisely the ones behind the HR module's RLS wall, which these are
+  not). An `iam` ModuleContract would be a module whose tables are core and which no tenant can
+  meaningfully disable — and `enabled_modules` would then imply IAM is switchable off.
+- **A core tool has NO per-tenant enablement gate**, because core has no flag to consult. Stated in
+  the file, because "advertised to every tenant" is a stronger default than a module tool's and anyone
+  adding an entry is choosing it. Authorization is Cerbos + the controller's own guards — the same
+  posture the human UI already has against these endpoints. No Cerbos change was needed:
+  `resource_mcp_tool.yaml` is name-agnostic apart from automationScope and the D14-13 executable list.
+- **Declared: three reads and two PROPOSALS.** `iam.listPositions`, `iam.listAttachableRoles`,
+  `iam.listRoleGrants`, plus `iam.requestAssignment` and `iam.requestOverride` at impact **`low`** —
+  load-bearing, not a shrug. Their entire effect is a PENDING approval row a human then decides;
+  marking them medium would require an approval in order to ask for an approval, and (since a
+  medium write needs a D14 executor to complete at all) would dead-end the natural agent path
+  silently. Filing a request is the low-impact action.
+- 🔴 **NOT declared, and this one is an owner decision rather than missing work:** `iam.grantRole`,
+  `iam.revokeRoleGrant`, `iam.assignPosition`, `iam.unassignPosition`. The D14-executor objection that
+  held the JML writes back is solved and the pattern is worked — this is a different and bigger
+  objection. A tool that grants a role is a privilege-escalation surface, and the estate's audit
+  attribution still says "Alice" rather than "Alice's agent". Granting rights through a surface whose
+  attribution is known to be wrong is the combination worth refusing on purpose. Pinned by a test, so
+  the absence is a position rather than a hole someone fills by accident. If the owner wants them, the
+  work is three D14 entries plus allow-list names — small, and blocked on the decision, not the code.
+- **The aggregator now THROWS on a duplicate tool name** across the two registries. It is the only
+  place that can see both, and de-duplicating would make the advertised surface depend on registration
+  order with the loser silently unreachable — a failure that presents as "the tool exists but does the
+  wrong thing".
+- `mcp-tools.controller.test.ts`'s "is empty when no modules are registered" case became "with no
+  modules the aggregate is exactly the core set" — the fact it asserted changed, and the new fact is
+  the point: core tools do not depend on modules.
+- Gates: `core-tools.test.ts` 8/8 (new), aggregator 4/4, search module 26/26, `tsc --noEmit` clean.
 ### [0.27.0] - 2026-08-19 - IN PROGRESS (P2-07's write half: the JML loop closes, and an RLS trap inside it)
 - **`hr.hireEmployee` / `hr.transferEmployee` / `hr.terminateEmployee` are declared**, and 0.26.0's
   refusal to declare them is now satisfied rather than waived: each has a `registerExecutableApproval`
@@ -3360,6 +3421,30 @@ Verified: 939 unit tests pass, `tsc` clean, `next build` green. Not driven in a 
 - **Known risk:** docker build unverified. **Next:** verify container build, OpenBao creds, media DLP.
 
 ## mcp-hub
+### [0.10.2] - 2026-08-19 - PROTOTYPED (Cerbos was silently not authoritative for the tool list)
+- 🔴 **A LIVE DEFECT, found by reading cerbos's own logs on the box — not by a test and not by an
+  alert.** Cerbos rejects a `CheckResources` request carrying more resources than its configured batch
+  limit (50, the default this deployment runs). The hub asks about EVERY tool in one request for the
+  visibility check, so once the tool count passed 50 every check failed with
+  `InvalidArgument: number of resources in batch (128) exceeds configured limit (50)` and
+  `visibleToolsFor` caught it and fell back to the in-code engine.
+- **What that did and did not mean.** NOT fail-open: the in-code engine is deny-by-default and mirrors
+  the assurance and automation-scope rules, so no caller saw a tool it should not have. But Cerbos had
+  stopped being AUTHORITATIVE for the tool list, which is the one thing `resource_mcp_tool.yaml` exists
+  to be — any listing rule expressible only in the policy was simply not applied. It hid because the
+  fallback logs one warning and returns a plausible answer.
+- **The per-CALL path was never affected** and that distinction is asserted, not assumed:
+  `cerbosAllowsTool` batches exactly one resource. So D14-13's executable allow-list — including the
+  JML names added in `platform-nest 0.27.0` — has governed real calls throughout.
+- **Fixed by chunking client-side** at `CERBOS_RESOURCE_BATCH_MAX = 40` (headroom below 50), chunks
+  evaluated concurrently, verdicts merged, and any one chunk's failure rejecting the whole call. A
+  partial allow-set is indistinguishable from "Cerbos denied those tools" — exactly the ambiguity that
+  let this hide — so the fail-closed contract is preserved. Chunking rather than raising the server
+  limit: the limit is a defence against unbounded requests, and the hub's tool count only grows.
+- **4 new cases** whose stub REFUSES an oversized batch the way the server does, so they fail against
+  the pre-fix client rather than asserting an internal detail. Verified red-then-green by raising the
+  constant to 1000 and re-running (3 failed), then restoring it (29/29).
+- BOOKKEEPING GAP, flagged rather than backfilled silently: MODULES.md recorded `0.10.1` but this changelog has no `[0.10.1]` entry, and rule 1 requires both. Whatever shipped as 0.10.1 is undocumented here. This entry is numbered 0.10.2 so MODULES.md stays continuous.
 ### [0.10.0] — 2026-08-06 · PROTOTYPED (the assurance ceiling is closed — `verified` can finally be minted)
 - **NEW `elevateAssurance()` (`principal.ts`) — the ONLY path from `low` to `verified`.** Nothing in
   the codebase had ever minted `verified`, so every `minAssurance: "verified"` tool was *statically*
