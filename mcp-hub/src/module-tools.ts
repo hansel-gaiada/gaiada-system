@@ -87,11 +87,21 @@ async function callPlatform(def: RemoteToolDef, args: Record<string, unknown>, p
     body = JSON.stringify(rest);
   }
   const res = await fetch(`${config.platformUrl}${path}`, { method, headers, body });
-  if (res.status === 401 || res.status === 403) {
+  if (!res.ok) {
+    // SMM-10: extract the platform's own typed `.error` token when the response body carries one
+    // (every platform-nest error body is `{error, code?}` — `http-error.filter.ts`/publisher-error
+    // filters both build it), for EVERY non-2xx status, not only 401/403. Before this fix, a 409-
+    // shaped domain refusal (e.g. a publish precondition failing at the SMM-10 dispatch endpoint)
+    // lost its token entirely — `executeApprovedAutomationWrite` recorded only
+    // `tool_error: platform /api/.../publish 409`, discarding exactly the information an operator
+    // reading `automation_approvals.execution_error` needs. 401/403 stay first because their default
+    // fallback text ("platform denied the request") differs from the generic one below.
     const b = (await res.json().catch(() => ({}))) as { error?: string };
-    throw new Error(b.error ?? "platform denied the request");
+    if (res.status === 401 || res.status === 403) {
+      throw new Error(b.error ?? "platform denied the request");
+    }
+    throw new Error(b.error ?? `platform ${path} ${res.status}`);
   }
-  if (!res.ok) throw new Error(`platform ${path} ${res.status}`);
   return JSON.stringify(await res.json());
 }
 
