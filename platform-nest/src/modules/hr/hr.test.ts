@@ -118,7 +118,14 @@ describe.skipIf(!TEST_URL || !REDIS_TEST_URL)("HR module (WSD-4)", () => {
     expect(getModule("hr")).toBe(hrModule);
     // Wave E added the two loan tools. hr.requestLoan is impact `high` (leave's file is `medium`) —
     // approving it moves money, so D14 suspends the agent/n8n path for a human decision.
+    //
+    // P2-07 (2026-08-19) prepended the two employee READ tools. This is an EXACT list on purpose — it is
+    // the one place a tool silently appearing or vanishing from the agent surface shows up — so it moves
+    // deliberately, in the same change that adds a tool, and never by loosening the assertion.
+    // The JML WRITE tools are absent by design until their D14 executors exist; `hr-employee-tools.ts`
+    // holds that invariant and explains why.
     expect(hrModule.mcpTools.map((t) => t.name)).toEqual([
+      "hr.listEmployees", "hr.getEmployee",
       "hr.listCases", "hr.listLeave", "hr.fileLeave", "hr.listLoans", "hr.requestLoan",
     ]);
     expect(hrModule.mcpTools.find((t) => t.name === "hr.requestLoan")?.impact).toBe("high");

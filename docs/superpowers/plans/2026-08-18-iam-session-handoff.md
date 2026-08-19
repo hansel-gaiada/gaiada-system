@@ -23,6 +23,9 @@ shell invocations) — see [[gh-active-account-reverts]]. Switch and push in ONE
 | `alpha-01.043.0095b` | compose passthrough for `POSITION_SYNC_ENABLED` (infra only ⇒ revision letter) | both vars present in the container |
 | `alpha-01.044.0096a` | the busy-loop fix (§6) | `sweep on: every 86400000ms`, CPU 4.5%, empty-value coercion demonstrated inside the container |
 | `alpha-01.045.0097a` | the self-scoped marker — the ceiling's durable mechanism (§9) · migration `0114` | see §9 |
+| `alpha-01.046.0098a` | **P2-08 part B** — the routed override · migration `0115` | routing + structural self-approval DENY probed live |
+| `alpha-01.047.0099a` | dept-head assign → request path · **and** `0117`, FORCE RLS on `monitor_results` partitions (another session's gap) | all 4 partitions `relforcerowsecurity=t` on the box |
+| `alpha-01.048.0100a` | `decide_override` split into `decide_override` + `decide_assignment` · migration `0118` | both keys, 4 holders each, description corrected |
 
 **`POSITION_SYNC_ENABLED=1` is ON, and the reconciler is VERIFIED live** — not merely enabled. Driven
 through the real SSO flow (`scripts/sso-login.sh`) against the real VPS in a scratch tenant since
@@ -219,3 +222,50 @@ The next ticket, deliberately left unstarted rather than half-built. Everything 
 Work: 1 policy edit, 1 catalog key, 1 bundles migration + regeneration, 1 request endpoint, 1 branch in
 the decide handler, and an adversarial battery (self-approval, cross-tenant, expired, non-routed
 approver). Roughly one focused session.
+
+---
+
+## 11. Where P2-07 actually stands (partial, and honestly labelled)
+
+**Done:** the `hr` module declares `hr.listEmployees` and `hr.getEmployee` — the employee READ surface is
+agent-reachable through `GET /mcp/tool-defs`, which the hub aggregates (nothing hardcoded hub-side).
+`hr` owns them because `employees` sits behind the HR module's own RLS wall.
+
+**NOT done, deliberately: the JML WRITE tools.** Design §9 requires medium/high writes to be registered
+with the impact gate so *an agent-origin approval EXECUTES*. Declaring `hr.hireEmployee` /
+`transferEmployee` / `terminateEmployee` before those `registerExecutableApproval` entries exist would
+give an agent a path that suspends and then, on a human's approval, **does nothing** —
+`getExecutable()` returns undefined for an unregistered tool, `execution_status` lands
+`not_applicable`, and the hire never happens. Silently. For a hire that is a person approved and never
+onboarded.
+
+`src/modules/hr/hr-employee-tools.test.ts` pins this: the moment one of those three names is declared
+without an executor, the suite goes red.
+
+**What each write tool needs** (`deploy.staging`'s registry entry is the worked precedent):
+- a `precondition` that re-checks the world at execution time — a hire whose position was retired while
+  the approval waited must refuse, the same staleness rule `iam-approval-execute.ts` already applies to
+  assignment requests;
+- a `lockKey` keyed on the person, so two approvals for the same employee cannot interleave;
+- a golden agent-mode fixture per capability, and the UI-vs-tool reach parity test §9 asks for.
+
+**A structural gap P2-07 surfaced, which is NOT mine to decide:** `positions` and `role-grants` are CORE
+controllers, and `/mcp/tool-defs` is the union of registered **modules'** tools. There is no module for
+them to be declared under. Options: fold them into an existing module (semantically wrong — role
+granting is not HR), introduce an `iam` module contract (a real architectural addition), or give the
+platform a core-tools surface. Until one is chosen, positions and grants cannot be agent-reachable at
+all, and no amount of tool-writing changes that.
+
+## 12. 🔴 Migration numbering is broken, twice over — owner decision needed
+
+`0114` AND `0118` are both double-booked. The second collision happened *after* this ledger gained the
+rule "reserve the number by creating the file before writing DDL" — a rule followed exactly, which still
+lost the race, because creating a file only helps if the other session lists the directory afterwards.
+Reserve-by-file is not atomic and nothing arbitrates it.
+
+Harmless three times running by the same three properties (deterministic `readdirSync().sort()`, a ledger
+keyed on the full filename, disjoint tables). That is luck holding, not a protocol working.
+
+Candidates, in `migrations/README.md`: per-session number blocks · **timestamp-prefixed filenames**
+(recommended — removes the race by construction and the runner's sort keeps working) · a git-committed
+claims file. Expect recurrence until one is picked.

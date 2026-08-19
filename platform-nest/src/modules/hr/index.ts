@@ -79,6 +79,54 @@ export const hrModule: ModuleContract = {
   ],
   customFieldTargets: ["hr_case", "hr_record"],
   mcpTools: [
+    // ── P2-07 (partial): the EMPLOYEE READ surface, agent-reachable ──────────────────────────────
+    //
+    // The `hr` module declares these rather than some core surface because `employees` sits behind the
+    // HR module's own RLS wall (`app_module_allowed('hr')`, 0109) — the module that gates the table is
+    // the module that should own its tools.
+    //
+    // ⚠ THE JML WRITES (hire / transfer / terminate) ARE DELIBERATELY NOT DECLARED HERE YET, and that
+    // is the honest state rather than an omission. Design §9 (P2-07) requires medium/high writes to be
+    // "registered with the impact gate [so] an agent-origin approval EXECUTES (D14 closed-loop test)".
+    // Declaring the write tools before those `registerExecutableApproval` entries exist would give an
+    // agent a path that SUSPENDS and then, on approval, does nothing: `getExecutable()` returns
+    // undefined for an unregistered tool, so `execution_status` lands `not_applicable` and the hire
+    // never happens. That is the estate's normal shape for most tools (and correct for the barred
+    // money-spending ones), but it is explicitly NOT what §9 asks of JML.
+    //
+    // What the write half needs, per tool: a `precondition` that re-checks the world at execution time
+    // (a hire whose position was retired while the approval sat in the inbox must refuse — the same
+    // staleness rule `iam-approval-execute.ts` already implements for assignment requests) and a
+    // `lockKey` chosen so two approvals for the same person cannot interleave. `deploy.staging`'s entry
+    // is the worked precedent. Pinned by `hr-employee-tools.test.ts` so nobody adds the write tools
+    // without noticing this.
+    {
+      name: "hr.listEmployees",
+      description: "List the served company's employee records (HR people file). Optional status filter.",
+      minAssurance: "verified",
+      method: "GET",
+      pathTemplate: "/api/:tenantId/hr/employees",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tenantId: { type: "string" },
+          status: { type: "string", enum: ["pending_start", "active", "on_leave", "suspended", "terminated"] },
+        },
+        required: ["tenantId"],
+      },
+    },
+    {
+      name: "hr.getEmployee",
+      description: "Read one employee record plus their position history (current and past seats)",
+      minAssurance: "verified",
+      method: "GET",
+      pathTemplate: "/api/:tenantId/hr/employees/:employeeId",
+      inputSchema: {
+        type: "object",
+        properties: { tenantId: { type: "string" }, employeeId: { type: "string" } },
+        required: ["tenantId", "employeeId"],
+      },
+    },
     {
       name: "hr.listCases",
       description: "List the served company's HR cases",

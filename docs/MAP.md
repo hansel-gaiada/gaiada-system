@@ -156,6 +156,7 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 | `hr` | `hr` | yes |
 | `it` | `it` | yes |
 | `knowledge` | `knowledge` | yes |
+| `monitoring` | `monitoring` | yes |
 | `pm` | `pm` | yes |
 | `reports` | `reports` | yes |
 | `search` | `search` | yes |
@@ -166,7 +167,7 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 
 - Head: `0118_social_variant_uploaded_media.sql`
 - Next free number: `0119` — **reserve it by creating the file**, concurrent sessions share this checkout.
-- Applied files on disk: 119
+- Applied files on disk: 120
 - Unused numbers below head: `0058`, `0059`, `0070` (dead reservations — do not backfill)
 
 ## platform-nest — HTTP surface (`@Controller` prefixes)

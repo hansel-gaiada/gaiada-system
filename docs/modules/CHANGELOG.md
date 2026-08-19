@@ -128,6 +128,15 @@ reconstructed from this table alone. Format defined in [`VERSIONING.md`](./VERSI
 > Not corrected retroactively (moving a pushed, already-deployed tag is its own risk); flagging so
 > the next session doesn't re-diagnose the same gap.
 
+### `Alpha 01.049.0101a` - 2026-08-19 - the first agent-reachable slice of the people file
+
+Manifest (counter +1, 0100 -> 0101): `platform-nest 0.25.2 -> 0.26.0`. No migration.
+
+P2-07 in part: employee READS are now agent-reachable. The WRITES are not, and these notes say so rather
+than letting "P2-07" read as finished — the write half needs a D14 executor per tool (a precondition that
+re-checks staleness at execution time, a lockKey keyed on the person), or an agent's approved hire would
+silently do nothing.
+
 ### `Alpha 01.048.0100a` - 2026-08-19 - one decision right becomes two
 
 Manifest (counter +1, 0099 -> 0100): `platform-nest 0.25.1 -> 0.25.2`. Migration `0118`.
@@ -1848,6 +1857,27 @@ anywhere real.
 ---
 
 ## platform-nest
+### [0.26.0] - 2026-08-19 - IN PROGRESS (P2-07 partial: the employee READ surface goes agent-reachable)
+- **`hr.listEmployees` + `hr.getEmployee`** declared on the `hr` module, so they reach the hub through
+  `GET /mcp/tool-defs` with nothing hardcoded hub-side. `hr` owns them because `employees` sits behind
+  the HR module's own RLS wall (`app_module_allowed('hr')`, 0109) — the module that gates the table owns
+  its tools. Both require a verified caller; neither is a write.
+- 🔴 **The JML WRITE tools are deliberately NOT declared, and that is the honest state.** Design §9 wants
+  medium/high writes registered so an agent-origin approval EXECUTES. Declaring `hr.hireEmployee` before
+  its `registerExecutableApproval` entry exists would give an agent a path that SUSPENDS and then, on a
+  human's approval, does nothing — `getExecutable()` returns undefined, `execution_status` lands
+  `not_applicable`, and the hire silently never happens. For a hire that is a person approved and never
+  onboarded. `hr-employee-tools.test.ts` goes RED the moment one is declared without an executor.
+- **Corrected my own first reading:** suspend-without-auto-execute is the estate's NORM for most tools
+  and deliberate for the barred money-spending ones. It is wrong specifically for JML because §9 asks
+  otherwise — not wrong in general.
+- ⚠ **A structural gap P2-07 surfaced:** `positions` and `role-grants` are CORE controllers, and
+  `/mcp/tool-defs` unions registered MODULES' tools. There is nowhere for them to be declared. Folding
+  them into `hr` is semantically wrong (role granting is not HR); the alternatives are an `iam` module
+  contract or a platform core-tools surface. Until that is chosen they cannot be agent-reachable at all.
+- `hr.test.ts`'s exact tool-name list moved deliberately — it is the one place a tool silently appearing
+  or vanishing from the agent surface shows up, so it moves in the same change, never loosened.
+- Gates: employee tool surface 5/5, hr module suites 75/75.
 ### [0.25.2] - 2026-08-19 - IN PROGRESS (the IAM decision right splits in two)
 - **`core.position.decide_assignment`** is split out of `core.role_grant.decide_override` at the owner's
   instruction (migration `0118`). A routed ROLE override and a dept head's PLACEMENT request now
