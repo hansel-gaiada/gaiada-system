@@ -92,8 +92,8 @@ secrets were created under. Store it in the password manager, not in a shell his
 mailbox we control and will still control in two years: this is the only human principal that will
 ever exist inside the engine.
 
-> The field names are Postiz's, not ours. If it 400s, read the response body — it names the field it
-> wanted — and **record the working payload in this file.**
+**✅ VERIFIED 2026-08-19.** The payload above is correct exactly as written. A successful create
+returns `{"register":true}` with **HTTP 200** — not a 201, and no user or org object in the body.
 
 ### 4 — Close the door again
 
@@ -104,14 +104,28 @@ docker compose -f docker-compose.social.yml up -d postiz
 
 ### 5 — Prove it is shut. This is the step people skip
 
+🚨 **THE CANARY PASSWORD MUST BE LONG ENOUGH TO PASS VALIDATION.** This bit us on 2026-08-19. A
+short password (`"x"`) returns `400 {"message":["password must be longer than or equal to 3
+characters"],"error":"Bad Request"}` — a **validation** rejection that never reaches the
+registration-disabled check. You get a `400`, you tick the box, and you have proven **nothing**.
+
 ```sh
-curl -s -X POST http://10.88.0.2:4007/api/auth/register \
-  -H 'Content-Type: application/json' \
-  -d '{"email":"canary@example.invalid","password":"x","company":"canary","provider":"LOCAL"}'
+# one line on purpose: a pasted multi-line block half-executes in some shells
+curl -s -X POST http://10.88.0.2:4007/api/auth/register -H 'Content-Type: application/json' -d '{"email":"canary-smm07@example.invalid","password":"AaBbCc123456xyz","company":"canary-smm07","provider":"LOCAL"}' -w 'HTTP %{http_code}'
 ```
 
-**Expect `400` with `"Registration is disabled"`** (verified by SMM-04). Anything else — a `201`
-above all — means signup is still open and the containment invariant is broken. Fix before going on.
+**Expect `400` and the body `Registration is disabled` — that exact string.** If the body names a
+field instead, the payload failed validation and the test is VOID. If you get `{"register":true}` you
+have just created a second account on an open signup: delete it and restart from step 4.
+
+**Belt and braces — read what the container actually received.** Immune to payload mistakes in a way
+the HTTP probe is not:
+
+```sh
+docker exec gaiada-social-postiz-1 printenv DISABLE_REGISTRATION      # must print: true
+```
+
+**✅ Both VERIFIED 2026-08-19:** env `true`, canary body `Registration is disabled`, HTTP 400.
 
 ```sh
 ss -ltn | grep 4007        # expect 10.88.0.2:4007 and NOTHING on 0.0.0.0
