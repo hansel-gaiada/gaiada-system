@@ -45,6 +45,15 @@ export interface MockPublisherState {
   calls: Array<{ op: string; orgId: string }>;
   /** Set to make the next call throw — how the tests drive "Postiz is unreachable". */
   failWith?: SocialPublisherError;
+  /** SMM-39 — filenames (as passed to `uploadMedia`) that must throw, independent of `failWith`.
+   *  `failWith` is a blunt "everything from now on fails" flag; a partial-media-upload-failure test
+   *  (attachment 2 of 3 fails, 1 and 3 must not) needs a PER-CALL failure a test can target by name
+   *  without also failing the calls around it. */
+  failUploadFilenames?: Set<string>;
+  /** SMM-39 — the full request `schedulePost` was last called with, so a test can assert WHAT
+   *  reached the engine (e.g. that `media` carries resolved `{id, url?}` refs, never the composer's
+   *  raw `{fileId}` descriptors) rather than only that a call happened. */
+  lastScheduleRequest?: VariantDispatch;
 }
 
 export function newMockPublisherState(): MockPublisherState {
@@ -114,6 +123,7 @@ export function createMockPublisher(
     },
     async schedulePost(org: OrgHandle, req: VariantDispatch): Promise<{ providerPostId: string }> {
       record("schedulePost", org);
+      state.lastScheduleRequest = req;
       // The same structural D-6 assertion the real driver makes, so a test that reaches the mock
       // without an approval fails the same way production would.
       if (!req.approvalId) {
@@ -139,7 +149,10 @@ export function createMockPublisher(
     },
     async uploadMedia(org: OrgHandle, file): Promise<{ id: string; url?: string }> {
       record("uploadMedia", org);
-      return { id: `mock-media-${file.filename}` };
+      if (state.failUploadFilenames?.has(file.filename)) {
+        throw new SocialPublisherError("publisher_http_error", `mock upload refused ${file.filename}`);
+      }
+      return { id: `mock-media-${file.filename}`, url: `https://mock.invalid/media/${file.filename}` };
     },
     async getAccountMetrics(org: OrgHandle): Promise<DailyMetrics[]> {
       record("getAccountMetrics", org);

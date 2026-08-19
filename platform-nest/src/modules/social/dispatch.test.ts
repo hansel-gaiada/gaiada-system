@@ -19,6 +19,7 @@ import { newId, withTenants } from "../../db";
 import { initTestDb, teardownTestDb, adminPool, TEST_URL } from "../../testing/setup";
 import { createCompany } from "../../testing/fixtures";
 import { seedAutomationAccounts } from "../../seed/automation";
+import { setStorageForTest } from "../../core/storage";
 import { registerPublisher, resetPublishers } from "./publisher/registry";
 import { createMockPublisher, newMockPublisherState, type MockPublisherState } from "./publisher/mock-driver";
 import { SocialPublisherError } from "./publisher/types";
@@ -28,10 +29,13 @@ import { installCreatorInfoVerifier } from "./creator-info-verifier";
 import { dispatchApprovedPublish, DISPATCH_REFUSAL } from "./dispatch";
 
 const MODULES: { modules: string[] } = { modules: ["social"] };
-const IG_MEDIA = [{ fileId: "file-1", kind: "image", alt: "a photo", format: "jpeg" }];
 
 let seq = 0;
 const uniq = (label: string): string => `smm10-dispatch-${label}-${++seq}`;
+
+// SMM-39 — in-memory storage backend so `resolveEngineMedia`'s `storage().get(...)` reads real bytes
+// without touching disk, mirroring `core/files.test.ts`'s own pattern exactly.
+const mem = new Map<string, Buffer>();
 
 describe.skipIf(!TEST_URL)("SMM-10 · dispatchApprovedPublish — the transactional stamp", () => {
   let co: string;
@@ -39,8 +43,27 @@ describe.skipIf(!TEST_URL)("SMM-10 · dispatchApprovedPublish — the transactio
   let clientId: string;
   let publisherOrgId: string;
   let igAccount: string;
+  let fbAccount: string;
   let state: MockPublisherState;
   let enabledNetworksBefore: string[];
+  let igFileId: string;
+  let IG_MEDIA: Array<{ fileId: string; kind: string; alt: string; format: string }>;
+
+  /** SMM-39 — a real `files` row with real bytes in the in-memory storage backend, so
+   *  `resolveEngineMedia` has something genuine to read. Plain core tenant wall (no module scope) —
+   *  `files` is not a `social_*` table, mirroring `core/files.controller.ts`'s own reads exactly. */
+  async function createFile(filename: string, contentType: string, bytes: Buffer): Promise<string> {
+    const id = newId();
+    const storageKey = `${co}/${id}`;
+    mem.set(storageKey, bytes);
+    await withTenants([co], (c) =>
+      c.query(
+        `INSERT INTO files (id, tenant_id, target_entity_type, target_entity_id, filename, content_type, byte_size, storage_key, scrubbed, origin_site)
+         VALUES ($1,$2,'client',$3,$4,$5,$6,$7,false,'central')`,
+        [id, co, clientId, filename, contentType, bytes.byteLength, storageKey],
+      ));
+    return id;
+  }
 
   beforeAll(async () => {
     await initTestDb();
@@ -50,6 +73,11 @@ describe.skipIf(!TEST_URL)("SMM-10 · dispatchApprovedPublish — the transactio
     // driver never reads it, but `resolveOrgApiKey` still refuses `org_key_unresolved` if no alias
     // resolves, so the 'default' alias needs a value even for a fake key.
     config.social.publisher.defaultOrgApiKey = "test-org-key";
+    setStorageForTest({
+      put: async (k, d) => { mem.set(k, d); },
+      get: async (k) => { const b = mem.get(k); if (!b) throw new Error("missing"); return b; },
+      del: async (k) => { mem.delete(k); },
+    });
 
     co = await createCompany("SMM-10 Dispatch Co", ["social"]);
     await seedAutomationAccounts(co);
@@ -74,6 +102,24 @@ describe.skipIf(!TEST_URL)("SMM-10 · dispatchApprovedPublish — the transactio
            (id, tenant_id, client_id, publisher_org_id, network, handle, postiz_integration_id, status, quota, origin_site)
          VALUES ($1,$2,$3,$4,'instagram',$5,$6,'connected','{}','central')`,
         [igAccount, co, clientId, publisherOrgId, uniq("@brand"), uniq("ig")]), MODULES);
+    // A Facebook account too: unlike Instagram, `media-rules.ts`'s SPECS.facebook has
+    // `mediaRequired: false`, so the text-only-path tests (T4, T12) below can dispatch WITHOUT
+    // media without the precondition's own `media_required` rule refusing them first.
+    fbAccount = newId();
+    await withTenants([co], (c) =>
+      c.query(
+        `INSERT INTO social_accounts
+           (id, tenant_id, client_id, publisher_org_id, network, handle, postiz_integration_id, status, quota, origin_site)
+         VALUES ($1,$2,$3,$4,'facebook',$5,$6,'connected','{}','central')`,
+        [fbAccount, co, clientId, publisherOrgId, uniq("@brand-fb"), uniq("fb")]), MODULES);
+
+    // SMM-39 — a REAL `files` row backing the default IG media descriptor. Before this ticket,
+    // `IG_MEDIA` named a fileId ("file-1") with no `files` row behind it at all — the placeholder
+    // `toDispatchMedia` never checked, which is exactly the defect this ticket closes. Any variant
+    // in this file that attaches media must now resolve to a real file or `resolveEngineMedia`
+    // refuses `media_upload_failed`, so the fixture is the real thing throughout.
+    igFileId = await createFile("brand-photo.jpg", "image/jpeg", Buffer.from("fake-jpeg-bytes"));
+    IG_MEDIA = [{ fileId: igFileId, kind: "image", alt: "a photo", format: "jpeg" }];
   });
 
   afterAll(async () => {
@@ -98,14 +144,18 @@ describe.skipIf(!TEST_URL)("SMM-10 · dispatchApprovedPublish — the transactio
     return id;
   }
 
-  async function makeApprovedVariant(opts: { engagementId?: string } = {}): Promise<{ variantId: string; engagementId: string }> {
+  async function makeApprovedVariant(
+    opts: { engagementId?: string; media?: unknown; accountId?: string; settings?: Record<string, unknown> } = {},
+  ): Promise<{ variantId: string; engagementId: string }> {
     const engagementId = opts.engagementId ?? (await makeEngagement());
     const postId = newId();
     const variantId = newId();
+    const accountId = opts.accountId ?? igAccount;
     const body = "Hello from SMM-10's dispatch flow";
+    const media = opts.media ?? IG_MEDIA;
+    const settings = opts.settings ?? { igType: "feed" };
     const hash = variantArgsSha256({
-      tenantId: co, id: variantId, accountId: igAccount, body, firstComment: null, media: IG_MEDIA,
-      settings: { igType: "feed" }, scheduledAt: null,
+      tenantId: co, id: variantId, accountId, body, firstComment: null, media, settings, scheduledAt: null,
     });
     await withTenants([co], async (c) => {
       await c.query(
@@ -115,7 +165,7 @@ describe.skipIf(!TEST_URL)("SMM-10 · dispatchApprovedPublish — the transactio
         `INSERT INTO social_post_variants
            (id, tenant_id, post_id, account_id, body, media, settings, args_sha256, status, origin_site)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'approved','central')`,
-        [variantId, co, postId, igAccount, body, JSON.stringify(IG_MEDIA), JSON.stringify({ igType: "feed" }), hash],
+        [variantId, co, postId, accountId, body, JSON.stringify(media), JSON.stringify(settings), hash],
       );
     }, MODULES);
     return { variantId, engagementId };
@@ -124,12 +174,18 @@ describe.skipIf(!TEST_URL)("SMM-10 · dispatchApprovedPublish — the transactio
   /** File the `automation_approvals` row in the state `checkPreconditionAndResolveApproval` looks
    *  for: `execution_status='executing'` — the state the D14 executor's claim holds for the duration
    *  of exactly one hub round trip, which is what this file's `dispatchApprovedPublish` call stands
-   *  in for. */
-  async function fileExecutingApproval(variantId: string): Promise<string> {
+   *  in for. `media`/`accountId`/`settings` MUST match the variant's own stored values exactly — they
+   *  feed the SAME hash the hub binds the grant to (canonical-args.ts), so a mismatch here would fail
+   *  `args_hash_mismatch`, not exercise the case the test wants. */
+  async function fileExecutingApproval(
+    variantId: string,
+    media: unknown = IG_MEDIA,
+    opts: { accountId?: string; settings?: Record<string, unknown> } = {},
+  ): Promise<string> {
     const id = newId();
     const args = variantPublishArgs({
-      tenantId: co, id: variantId, accountId: igAccount, body: "Hello from SMM-10's dispatch flow",
-      firstComment: null, media: IG_MEDIA, settings: { igType: "feed" }, scheduledAt: null,
+      tenantId: co, id: variantId, accountId: opts.accountId ?? igAccount, body: "Hello from SMM-10's dispatch flow",
+      firstComment: null, media, settings: opts.settings ?? { igType: "feed" }, scheduledAt: null,
     });
     await withTenants([co], (c) =>
       c.query(
@@ -141,6 +197,14 @@ describe.skipIf(!TEST_URL)("SMM-10 · dispatchApprovedPublish — the transactio
       ),
     );
     return id;
+  }
+
+  /** SMM-39 — read the persisted idempotency map (migration 0116) directly, to assert what
+   *  `resolveEngineMedia` actually wrote rather than inferring it from the dispatch verdict alone. */
+  async function uploadedMediaOf(variantId: string): Promise<Record<string, { id: string; url?: string }>> {
+    const { rows } = await withTenants([co], (c) =>
+      c.query(`SELECT uploaded_media FROM social_post_variants WHERE id = $1`, [variantId]), MODULES);
+    return rows[0]?.uploaded_media ?? {};
   }
 
   async function variantRow(variantId: string) {
@@ -180,6 +244,15 @@ describe.skipIf(!TEST_URL)("SMM-10 · dispatchApprovedPublish — the transactio
 
     // The mock's own D-6 assertion: schedulePost was called WITH an approvalId, exactly once.
     expect(state.calls.filter((c) => c.op === "schedulePost")).toHaveLength(1);
+    // SMM-39 — the upload actually happened (one real uploadMedia call for the one attachment)...
+    expect(state.calls.filter((c) => c.op === "uploadMedia")).toHaveLength(1);
+    // ...the ENGINE ref (not the composer's raw fileId) is what actually reached schedulePost...
+    expect(state.lastScheduleRequest?.media).toEqual([{ id: "mock-media-brand-photo.jpg", url: "https://mock.invalid/media/brand-photo.jpg" }]);
+    // ...and the persisted idempotency map (migration 0116) carries the SAME engine ref, keyed by
+    // the composer's fileId — proving this is a real resolved reference, not the old passthrough.
+    const uploaded = await uploadedMediaOf(variantId);
+    expect(uploaded[igFileId]).toMatchObject({ id: "mock-media-brand-photo.jpg" });
+    expect(uploaded[igFileId].id).not.toBe(igFileId);
 
     const events = await outboxEvents(variantId);
     expect(events.map((e) => e.event_type)).toContain("social.post.dispatched");
@@ -215,8 +288,15 @@ describe.skipIf(!TEST_URL)("SMM-10 · dispatchApprovedPublish — the transactio
   // ══ (T4) ON FAILURE THE APPROVAL IS STILL CONSUMED ══════════════════════════════════════════════
 
   it("(T4) ⭐ schedulePost throwing still stamps approval_id (0105's state law) with a NULL provider id, status=failed, and emits social.post.failed", async () => {
-    const { variantId } = await makeApprovedVariant();
-    const approvalId = await fileExecutingApproval(variantId);
+    // Text-only, on the Facebook account (`mediaRequired: false` — Instagram's own
+    // `mediaRequired: true` would refuse this at the precondition before dispatch is ever reached):
+    // isolates "schedulePost itself throws" from SMM-39's own upload-failure path (T10 below) —
+    // `state.failWith` throws on ANY driver call, and a media-bearing variant would hit `uploadMedia`
+    // first, which is a DIFFERENT failure this file's own token vocabulary now distinguishes
+    // (`media_upload_failed` vs this test's `dispatch_error`).
+    const engagementId = await makeEngagement({ networks: { facebook: true } });
+    const { variantId } = await makeApprovedVariant({ engagementId, media: [], accountId: fbAccount, settings: {} });
+    const approvalId = await fileExecutingApproval(variantId, [], { accountId: fbAccount, settings: {} });
     state.failWith = new SocialPublisherError("publisher_unreachable", "simulated tunnel outage");
 
     const verdict = await dispatchApprovedPublish(co, variantId, wfUser);
@@ -262,6 +342,110 @@ describe.skipIf(!TEST_URL)("SMM-10 · dispatchApprovedPublish — the transactio
     expect(state.calls.filter((c) => c.op === "schedulePost")).toHaveLength(0);
   });
 
+  // ══ (T10)–(T12) SMM-39: uploadMedia actually wired into the dispatch path ══════════════════════
+
+  it("(T10) ⭐ three attachments, the second upload fails ⇒ refuses media_upload_failed BEFORE schedulePost is ever called, and the approval is still consumed", async () => {
+    const fileA = await createFile("a.jpg", "image/jpeg", Buffer.from("aaa"));
+    const fileB = await createFile("b.jpg", "image/jpeg", Buffer.from("bbb"));
+    const fileC = await createFile("c.jpg", "image/jpeg", Buffer.from("ccc"));
+    const media = [
+      { fileId: fileA, kind: "image", alt: "a", format: "jpeg" },
+      { fileId: fileB, kind: "image", alt: "b", format: "jpeg" },
+      { fileId: fileC, kind: "image", alt: "c", format: "jpeg" },
+    ];
+    state.failUploadFilenames = new Set(["b.jpg"]);
+    const { variantId } = await makeApprovedVariant({ media });
+    const approvalId = await fileExecutingApproval(variantId, media);
+
+    const verdict = await dispatchApprovedPublish(co, variantId, wfUser);
+
+    expect(verdict).toMatchObject({ ok: false, stage: "dispatch", reason: DISPATCH_REFUSAL.mediaUploadFailed });
+    // THE assertion this ticket's AC exists for: a three-image approval must never publish a
+    // one/two-image post. schedulePost is NEVER reached.
+    expect(state.calls.filter((c) => c.op === "schedulePost")).toHaveLength(0);
+    // a was attempted and succeeded; b was attempted and failed; c was NEVER reached (the loop
+    // stops at the first failure rather than continuing past it).
+    expect(state.calls.filter((c) => c.op === "uploadMedia")).toHaveLength(2);
+
+    const row = await variantRow(variantId);
+    expect(row.status).toBe("failed");
+    expect(row.approvalId).toBe(approvalId); // still consumed — SMM-09's neverAutoRetry doctrine
+    expect(row.providerPostId).toBeNull();
+    expect(row.lastError).toContain("b.jpg");
+
+    // The idempotency backstop (migration 0116): a's ref IS durably persisted even though the
+    // overall dispatch refused; b and c carry no ref (b failed before persisting, c never ran).
+    const uploaded = await uploadedMediaOf(variantId);
+    expect(Object.keys(uploaded)).toEqual([fileA]);
+
+    const events = await outboxEvents(variantId);
+    expect(events.map((e) => e.event_type)).toContain("social.post.failed");
+  });
+
+  it("(T11) ⭐ a redispatch after a failed attempt does not re-upload the attachment that already succeeded", async () => {
+    const fileA = await createFile("retry-a.jpg", "image/jpeg", Buffer.from("aaa"));
+    const fileB = await createFile("retry-b.jpg", "image/jpeg", Buffer.from("bbb"));
+    const media = [
+      { fileId: fileA, kind: "image", alt: "a", format: "jpeg" },
+      { fileId: fileB, kind: "image", alt: "b", format: "jpeg" },
+    ];
+    state.failUploadFilenames = new Set(["retry-b.jpg"]);
+    const { variantId } = await makeApprovedVariant({ media });
+    await fileExecutingApproval(variantId, media);
+
+    const first = await dispatchApprovedPublish(co, variantId, wfUser);
+    expect(first).toMatchObject({ ok: false, reason: DISPATCH_REFUSAL.mediaUploadFailed });
+    expect(state.calls.filter((c) => c.op === "uploadMedia")).toHaveLength(2); // a (ok), b (failed)
+    expect(Object.keys(await uploadedMediaOf(variantId))).toEqual([fileA]);
+
+    // A human fixes whatever made the upload fail and files a FRESH approval (SMM-09's
+    // neverAutoRetry doctrine — no unattended retry on the same grant). The variant's CONTENT is
+    // unchanged, so its hash is still valid; only the consumed grant needs replacing. This test
+    // resets that state directly via SQL rather than through the composer's edit endpoint — it is
+    // exercising dispatch.ts's own idempotency contract, not the edit flow. The FIRST approval also
+    // needs its `execution_status` moved off 'executing' (mirroring what the real D14 executor does
+    // once a hub round trip completes, `core/approval-execute.ts`'s own terminal UPDATE) — otherwise
+    // `resolveExecutingApprovalId`'s ambiguity guard would see TWO 'executing' rows naming this
+    // variant and refuse `approval_not_resolvable` instead of exercising the redispatch this test is
+    // about.
+    await withTenants([co], (c) =>
+      c.query(
+        `UPDATE automation_approvals SET execution_status = 'failed'
+          WHERE tenant_id = $1 AND tool_name = $2 AND tool_args @> $3::jsonb AND execution_status = 'executing'`,
+        [co, SOCIAL_PUBLISH_TOOL, JSON.stringify({ variantId })],
+      ),
+    );
+    await withTenants([co], (c) =>
+      c.query(`UPDATE social_post_variants SET approval_id = NULL, status = 'approved' WHERE id = $1`, [variantId]),
+      MODULES,
+    );
+    state.failUploadFilenames = new Set(); // "fixed" — b now succeeds too
+    await fileExecutingApproval(variantId, media);
+
+    const second = await dispatchApprovedPublish(co, variantId, wfUser);
+    expect(second.ok).toBe(true);
+    // THE assertion this test exists for: a is NOT re-uploaded on the retry — only 1 more call
+    // happens (b's retry), for a cumulative total of 3 (a-once, b-twice: once failed, once ok).
+    expect(state.calls.filter((c) => c.op === "uploadMedia")).toHaveLength(3);
+    expect(state.calls.filter((c) => c.op === "schedulePost")).toHaveLength(1); // only the 2nd attempt ever reaches it
+
+    const uploaded = await uploadedMediaOf(variantId);
+    expect(Object.keys(uploaded).sort()).toEqual([fileA, fileB].sort());
+  });
+
+  it("(T12) a text-only variant never touches files, storage, or uploadMedia — it must not acquire an upload round trip it never needed", async () => {
+    const engagementId = await makeEngagement({ networks: { facebook: true } });
+    const { variantId } = await makeApprovedVariant({ engagementId, media: [], accountId: fbAccount, settings: {} });
+    await fileExecutingApproval(variantId, [], { accountId: fbAccount, settings: {} });
+
+    const verdict = await dispatchApprovedPublish(co, variantId, wfUser);
+
+    expect(verdict.ok).toBe(true);
+    expect(state.calls.filter((c) => c.op === "uploadMedia")).toHaveLength(0);
+    expect(state.calls.filter((c) => c.op === "schedulePost")).toHaveLength(1);
+    expect(await uploadedMediaOf(variantId)).toEqual({});
+  });
+
   // ══ (T7)–(T9) D-22 END TO END: the live fetch happens BEFORE the verifier reads it ═══════════
   //
   // Unlike creator-info-verifier.test.ts (which drives `verifyCreatorInfo`/`refreshCreatorInfoSnapshot`
@@ -273,6 +457,7 @@ describe.skipIf(!TEST_URL)("SMM-10 · dispatchApprovedPublish — the transactio
     let tiktokAccount: string;
     let tiktokIntegrationId: string;
     let networksBefore: string[];
+    let tiktokFileId: string;
 
     beforeAll(async () => {
       resetCreatorInfoVerifier();
@@ -287,6 +472,10 @@ describe.skipIf(!TEST_URL)("SMM-10 · dispatchApprovedPublish — the transactio
              (id, tenant_id, client_id, publisher_org_id, network, handle, postiz_integration_id, status, quota, origin_site)
            VALUES ($1,$2,$3,$4,'tiktok',$5,$6,'connected','{}','central')`,
           [tiktokAccount, co, clientId, publisherOrgId, uniq("@brand"), tiktokIntegrationId]), MODULES);
+      // SMM-39 — a real `files` row backing the TikTok fixture's video attachment (was the literal
+      // "v-1" with no `files` row at all — precisely the gap this ticket closes; T7 below now
+      // exercises a real upload, not a no-op passthrough).
+      tiktokFileId = await createFile("clip.mp4", "video/mp4", Buffer.from("fake-mp4-bytes"));
     });
     afterAll(async () => {
       config.social.publisher.enabledNetworks = networksBefore;
@@ -303,9 +492,10 @@ describe.skipIf(!TEST_URL)("SMM-10 · dispatchApprovedPublish — the transactio
       const postId = newId();
       const variantId = newId();
       const settings = { tiktokMode: "direct", privacyLevel: "PUBLIC_TO_EVERYONE" };
+      const media = [{ fileId: tiktokFileId, kind: "video", format: "mp4" }];
       const hash = variantArgsSha256({
         tenantId: co, id: variantId, accountId: tiktokAccount, body: "tiktok body", firstComment: null,
-        media: [{ fileId: "v-1", kind: "video", format: "mp4" }], settings, scheduledAt: null,
+        media, settings, scheduledAt: null,
       });
       await withTenants([co], async (c) => {
         await c.query(`INSERT INTO social_posts (id, tenant_id, engagement_id, title, status, origin_site)
@@ -314,7 +504,7 @@ describe.skipIf(!TEST_URL)("SMM-10 · dispatchApprovedPublish — the transactio
           `INSERT INTO social_post_variants
              (id, tenant_id, post_id, account_id, body, media, settings, args_sha256, status, origin_site)
            VALUES ($1,$2,$3,$4,'tiktok body',$5,$6,$7,'approved','central')`,
-          [variantId, co, postId, tiktokAccount, JSON.stringify([{ fileId: "v-1", kind: "video", format: "mp4" }]), JSON.stringify(settings), hash],
+          [variantId, co, postId, tiktokAccount, JSON.stringify(media), JSON.stringify(settings), hash],
         );
       }, MODULES);
       return variantId;
@@ -331,6 +521,10 @@ describe.skipIf(!TEST_URL)("SMM-10 · dispatchApprovedPublish — the transactio
 
       expect(verdict).toMatchObject({ ok: true, network: "tiktok" });
       expect(state.calls.filter((c) => c.op === "getCreatorInfo")).toHaveLength(1);
+      // SMM-39 — the video attachment was actually uploaded before schedulePost, and the ref (not
+      // the raw fileId) is what schedulePost received.
+      expect(state.calls.filter((c) => c.op === "uploadMedia")).toHaveLength(1);
+      expect(state.lastScheduleRequest?.media).toEqual([{ id: "mock-media-clip.mp4", url: "https://mock.invalid/media/clip.mp4" }]);
       expect(state.calls.filter((c) => c.op === "schedulePost")).toHaveLength(1);
     });
 

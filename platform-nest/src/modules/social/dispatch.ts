@@ -53,6 +53,7 @@ import type { PoolClient } from "pg";
 import { withTenants } from "../../db";
 import { emitEvent } from "../../events/outbox.service";
 import { writeActivity } from "../../core/http";
+import { storage } from "../../core/storage";
 import { APPROVAL_EXEC_LOCK_NS } from "../../core/approval-execute";
 import {
   SOCIAL_PUBLISH_TOOL,
@@ -66,7 +67,7 @@ import {
 import { variantPublishArgs, type VariantPublishArgs } from "./canonical-args";
 import { assertDispatchChain, openOrg, type DispatchChain } from "./publisher/provisioning";
 import { invokePublisher } from "./publisher/registry";
-import { SocialPublisherError, type VariantDispatch } from "./publisher/types";
+import { SocialPublisherError, type OrgHandle, type SocialPublisher, type VariantDispatch } from "./publisher/types";
 import { refreshCreatorInfoSnapshot } from "./creator-info-verifier";
 
 /** Refusals that belong to THIS file's own routing question ("who authorized this call"), not to
@@ -84,6 +85,20 @@ export const DISPATCH_REFUSAL = {
    *  approval is still consumed (0105's state law) but nothing was published; see this file's header
    *  "ON FAILURE, THE APPROVAL IS STILL CONSUMED". */
   publishDispatchFailed: "dispatch_error",
+  /** SMM-39 — resolving one of the variant's attachments to engine media (missing `files` row,
+   *  unreadable storage bytes, or the driver's `uploadMedia` itself threw) failed BEFORE
+   *  `schedulePost` was ever called. A NEW token, not a reuse of `dispatch_error`: that token means
+   *  "the engine rejected the publish attempt", this one means "we never reached the engine with a
+   *  publish attempt at all because we could not finish assembling its media" — an operator reading
+   *  an approval's `execution_error` needs to tell "the engine is unhappy with what we sent" from
+   *  "we never sent anything" apart, the same distinction `quotaExhausted` vs `mediaRulesFailed`
+   *  already draws in `publish-precondition.ts`. Structural, not advisory: three attachments with the
+   *  second failing must never publish a one-image post (this ticket's own AC), so ALL of a
+   *  variant's media is resolved before `schedulePost` is ever invoked — see `resolveEngineMedia`.
+   *  The approval is still consumed on this path too, for the same `neverAutoRetry` reason
+   *  `publishDispatchFailed` already carries: a human must look at why the upload failed (a deleted
+   *  file, a licence-zone outage) and file a fresh approval, never get an unattended second shot. */
+  mediaUploadFailed: "media_upload_failed",
 } as const;
 export type DispatchRefusalReason = (typeof DISPATCH_REFUSAL)[keyof typeof DISPATCH_REFUSAL];
 
@@ -91,14 +106,173 @@ export type DispatchVerdict =
   | { ok: true; providerPostId: string; network: string }
   | { ok: false; stage: PublishPreconditionStage | "dispatch"; reason: PublishRefusalReason | DispatchRefusalReason; critical?: boolean };
 
-/** See `dispatchApprovedPublish`'s own "KNOWN LIMITATION" comment at the call site. `fileId` is
- *  mapped onto `id` verbatim — a placeholder mapping, not a real upload. */
-function toDispatchMedia(raw: unknown): VariantDispatch["media"] {
+// ── SMM-39 — resolving the composer's `{fileId}` descriptors to uploaded engine media ─────────────
+//
+// `VariantDispatch.media` wants ALREADY-UPLOADED engine refs (`{id, url?}` — `uploadMedia`'s own
+// return shape); the variant's stored descriptors are `{fileId, kind, alt, format}` — composer-side
+// references into `files`, never uploaded to the publisher yet (0105's own comment on the `media`
+// column). `resolveEngineMedia` below is the wiring SMM-05 built `uploadMedia` for and no ticket
+// ever called: for each descriptor, reuse a persisted ref if this exact (variant, file) pair has
+// already been uploaded (the idempotency backstop, migration 0116), otherwise read the file's bytes
+// out of `files` (a PLAIN core tenant wall — no `declareSocialModuleScope` needed for THAT read, see
+// the header note below) and call `SocialPublisher.uploadMedia` for real.
+
+/** Thrown by `resolveEngineMedia` on ANY failure to finish resolving one attachment — a missing
+ *  `files` row, an unreadable storage blob, or the driver's `uploadMedia` itself throwing. Caught by
+ *  `dispatchApprovedPublish` and turned into `DISPATCH_REFUSAL.mediaUploadFailed` BEFORE
+ *  `schedulePost` is ever called — see that token's own doc for why this is a distinct reason from
+ *  `dispatch_error` rather than a reuse. */
+class MediaUploadError extends Error {
+  constructor(
+    readonly fileId: string,
+    message: string,
+  ) {
+    super(message);
+    this.name = "MediaUploadError";
+  }
+}
+
+interface MediaDescriptor {
+  fileId: string;
+  kind?: string;
+}
+
+/** Parse the variant's stored `media` jsonb into descriptors this file cares about. Mirrors
+ *  `toDispatchMedia`'s old filtering (object, string `fileId`) — a malformed entry (no `fileId`) is
+ *  a data problem `media-rules.ts`'s `media_missing_file` rule already catches at the precondition's
+ *  quota stage, so it is silently dropped here rather than re-raised as a second error surface. */
+function parseMediaDescriptors(raw: unknown): MediaDescriptor[] {
   if (!Array.isArray(raw)) return [];
   return raw
     .map((m) => (m && typeof m === "object" ? (m as Record<string, unknown>) : null))
     .filter((m): m is Record<string, unknown> => m !== null && typeof m.fileId === "string")
-    .map((m) => ({ id: m.fileId as string }));
+    .map((m) => ({ fileId: m.fileId as string, kind: typeof m.kind === "string" ? m.kind : undefined }));
+}
+
+type UploadedMediaMap = Record<string, { id: string; url?: string }>;
+
+/** Read the persisted idempotency map (migration 0116's `uploaded_media` column) — a social_* table,
+ *  hence `declareSocialModuleScope`. Never the hashed `media` column; see that column's own doc. */
+async function loadUploadedMediaRefs(tenantId: string, variantId: string): Promise<UploadedMediaMap> {
+  return withTenants([tenantId], async (c) => {
+    await declareSocialModuleScope(c);
+    const { rows } = await c.query<{ uploaded_media: UploadedMediaMap }>(
+      `SELECT uploaded_media FROM social_post_variants WHERE id = $1`,
+      [variantId],
+    );
+    return rows[0]?.uploaded_media ?? {};
+  });
+}
+
+/** Persist ONE fileId's ref the instant its own upload succeeds — never batched to the end of the
+ *  loop, because the whole point is that a later attachment failing must not lose the record of
+ *  earlier ones that already succeeded (a redispatch must not re-upload them). A plain jsonb merge:
+ *  it can only ever ADD this key, never touch a sibling's, and never touches `media`/`args_sha256`
+ *  (D-15) — this UPDATE and the transactional stamp's UPDATE guard completely disjoint columns. */
+async function persistUploadedMediaRef(
+  tenantId: string,
+  variantId: string,
+  fileId: string,
+  ref: { id: string; url?: string },
+): Promise<void> {
+  await withTenants([tenantId], async (c) => {
+    await declareSocialModuleScope(c);
+    await c.query(
+      `UPDATE social_post_variants SET uploaded_media = uploaded_media || $2::jsonb WHERE id = $1`,
+      [variantId, JSON.stringify({ [fileId]: ref })],
+    );
+  });
+}
+
+interface FileForUpload {
+  filename: string;
+  contentType: string;
+  storageKey: string;
+}
+
+/** `files` is NOT a `social_*` table (no module GUC) — it carries only the plain core tenant wall,
+ *  exactly like `core/files.controller.ts`'s own reads. Conflating the two scopes is the trap this
+ *  ticket's brief names by name; this function deliberately does NOT call
+ *  `declareSocialModuleScope`. */
+async function loadFileForUpload(tenantId: string, fileId: string): Promise<FileForUpload | null> {
+  return withTenants([tenantId], async (c) => {
+    const { rows } = await c.query<{ filename: string; content_type: string; storage_key: string | null }>(
+      `SELECT filename, content_type, storage_key FROM files WHERE id = $1 AND deleted_at IS NULL`,
+      [fileId],
+    );
+    const f = rows[0];
+    if (!f || !f.storage_key) return null; // no row, or a reference-only attach with no bytes
+    return { filename: f.filename, contentType: f.content_type, storageKey: f.storage_key };
+  });
+}
+
+/** THE UPLOAD STEP. Called OUTSIDE any claim transaction and OUTSIDE the advisory lock — real
+ *  network I/O against the licence zone, the same discipline `dispatchApprovedPublish`'s own header
+ *  and `core/approval-execute.ts`'s TRANSACTION BOUNDARY note both enforce for `schedulePost` and the
+ *  D-22 creator-info fetch. A text-only variant (`descriptors.length === 0`) returns `[]` immediately
+ *  without touching `files`, `storage()` or the driver at all — it must never acquire an upload round
+ *  trip it never needed (this ticket's own AC).
+ *
+ *  Resolves and uploads attachments ONE AT A TIME, in order, persisting each successful ref before
+ *  moving to the next. On ANY failure — a missing `files` row, unreadable bytes, or the driver
+ *  throwing — this throws `MediaUploadError` immediately: it does NOT continue to the remaining
+ *  attachments and does NOT return a partial list, because a partial list is exactly what would let
+ *  a caller assemble a one-image post out of a three-image approval (this ticket's own AC). Whatever
+ *  succeeded before the failing attachment is already durably persisted (migration 0116), so a
+ *  redispatch after a human files a fresh approval resumes rather than re-uploading from zero. */
+async function resolveEngineMedia(
+  tenantId: string,
+  variantId: string,
+  descriptors: MediaDescriptor[],
+  driver: SocialPublisher,
+  handle: OrgHandle,
+  network: string,
+): Promise<Array<{ id: string; url?: string }>> {
+  if (descriptors.length === 0) return [];
+
+  const persisted = await loadUploadedMediaRefs(tenantId, variantId);
+  const resolved: Array<{ id: string; url?: string }> = [];
+
+  for (const d of descriptors) {
+    const cached = persisted[d.fileId];
+    if (cached) {
+      // Idempotency: this exact (variant, fileId) pair was already uploaded by a prior attempt
+      // (this call, or an earlier failed dispatch for the same variant). Reuse it — never a second
+      // upload, and never a second gallery entry for the same attachment.
+      resolved.push(cached);
+      continue;
+    }
+
+    const file = await loadFileForUpload(tenantId, d.fileId);
+    if (!file) {
+      throw new MediaUploadError(d.fileId, `attachment references file '${d.fileId}', which does not exist or has no stored bytes`);
+    }
+
+    let bytes: Buffer;
+    try {
+      bytes = await storage().get(file.storageKey);
+    } catch (err) {
+      throw new MediaUploadError(d.fileId, `could not read stored bytes for file '${d.fileId}': ${(err as Error)?.message ?? "unknown storage error"}`);
+    }
+
+    let ref: { id: string; url?: string };
+    try {
+      ref = await invokePublisher(
+        { op: "uploadMedia", org: handle, network, costUsd: 0 },
+        () => driver.uploadMedia(handle, { filename: file.filename, contentType: file.contentType, bytes }),
+      );
+    } catch (err) {
+      const detail = err instanceof SocialPublisherError ? `${err.code}: ${err.message}` : (err as Error)?.message ?? "unknown upload error";
+      throw new MediaUploadError(d.fileId, `uploadMedia failed for file '${d.fileId}': ${detail}`);
+    }
+
+    // Persist BEFORE moving to the next attachment — see this function's own header.
+    await persistUploadedMediaRef(tenantId, variantId, d.fileId, ref);
+    persisted[d.fileId] = ref;
+    resolved.push(ref);
+  }
+
+  return resolved;
 }
 
 interface VariantForDispatch {
@@ -256,43 +430,56 @@ export async function dispatchApprovedPublish(
   const { approvalId, chain, args, variant } = outcome.claim;
   const expectedHash = variant.args_sha256 as string; // non-null: the hash stage already passed
 
-  // ── Phase 2: the network call. OUTSIDE any transaction and outside the advisory lock (this file's
-  // header, and the same discipline `core/approval-execute.ts`'s TRANSACTION BOUNDARY note enforces
-  // for the hub call itself: never hold Postgres locks across an external HTTP round trip).
+  // ── Phase 2: the network call(s). OUTSIDE any transaction and outside the advisory lock (this
+  // file's header, and the same discipline `core/approval-execute.ts`'s TRANSACTION BOUNDARY note
+  // enforces for the hub call itself: never hold Postgres locks across an external HTTP round
+  // trip). SMM-39's media upload shares this discipline — it is the SLOWEST call on this hop (its
+  // own 120s timeout class, `SOCIAL_POSTIZ_UPLOAD_TIMEOUT_MS`) and holding the advisory lock across
+  // it would be a self-inflicted outage, exactly the shape D-22's creator-info fetch above already
+  // established for this file.
   const { driver, handle } = openOrg(chain.org);
-  const dispatch: VariantDispatch = {
-    integrationId: chain.integrationId,
-    network: chain.network as VariantDispatch["network"],
-    body: args.body,
-    firstComment: args.firstComment,
-    // ⚠ KNOWN LIMITATION, named rather than silently wrong: `VariantDispatch.media` wants ALREADY-
-    // UPLOADED engine media refs (`{id, url?}` — `SocialPublisher.uploadMedia`'s own return shape),
-    // and the variant's stored descriptors are `{fileId, kind, alt}` (0105's own comment on the
-    // `media` column) — composer-side references into `files`, never uploaded to the publisher yet.
-    // SMM-05 built `uploadMedia` on the port; wiring the upload step (reading each `fileId`'s bytes
-    // out of `files` and calling it once per attachment, before this call) is real work this ticket's
-    // scope — "approval-execution → schedulePost (transactional stamp)" — did not size for, and it is
-    // NOT silently faked here: `toDispatchMedia` below maps `fileId` onto `id` verbatim, which is
-    // correct ONLY for a variant whose media was already resolved to engine-side ids by an earlier
-    // step. A real image/video attachment reaching this line uploads nothing and will fail
-    // `publisher_http_error`/an upstream 4xx rather than silently posting the wrong asset — loud, not
-    // silent, but still a gap for the next ticket to close (flagged in this ticket's own report).
-    media: toDispatchMedia(args.media),
-    settings: (args.settings ?? {}) as Record<string, unknown>,
-    scheduledAt: args.scheduledAt,
-    approvalId,
-    variantId,
-  };
 
   let dispatched: { providerPostId: string } | null = null;
   let dispatchError: string | null = null;
+  let dispatchReason: DispatchRefusalReason = DISPATCH_REFUSAL.publishDispatchFailed;
+  let engineMedia: Array<{ id: string; url?: string }> = [];
   try {
-    dispatched = await invokePublisher(
-      { op: "schedulePost", org: handle, network: chain.network, costUsd: 0 },
-      () => driver.schedulePost(handle, dispatch),
-    );
+    // SMM-39 — resolve the composer's `{fileId}` descriptors to already-uploaded engine refs.
+    // A text-only variant (`args.media` empty/absent) returns here immediately: `resolveEngineMedia`
+    // never touches `files`, `storage()` or the driver when there is nothing to upload — it must not
+    // acquire an upload round trip it never needed (this ticket's own AC).
+    engineMedia = await resolveEngineMedia(tenantId, variantId, parseMediaDescriptors(args.media), driver, handle, chain.network);
   } catch (err) {
-    dispatchError = err instanceof SocialPublisherError ? `${err.code}: ${err.message}` : (err as Error)?.message ?? "unknown dispatch error";
+    // Refuse closed on ANY partial failure: `resolveEngineMedia` never returns a partial list (see
+    // its own doc), so reaching here means `schedulePost` is NEVER called below — a three-image
+    // variant whose second upload fails must not publish a one-image post (this ticket's own AC).
+    dispatchReason = DISPATCH_REFUSAL.mediaUploadFailed;
+    dispatchError = err instanceof MediaUploadError ? err.message : ((err as Error)?.message ?? "unknown media upload error");
+  }
+
+  if (!dispatchError) {
+    const dispatch: VariantDispatch = {
+      integrationId: chain.integrationId,
+      network: chain.network as VariantDispatch["network"],
+      body: args.body,
+      firstComment: args.firstComment,
+      // Already-uploaded engine refs (SMM-39), never the composer's raw `{fileId}` descriptors.
+      // Empty for a text-only variant, matching `resolveEngineMedia`'s own no-op path above.
+      media: engineMedia,
+      settings: (args.settings ?? {}) as Record<string, unknown>,
+      scheduledAt: args.scheduledAt,
+      approvalId,
+      variantId,
+    };
+    try {
+      dispatched = await invokePublisher(
+        { op: "schedulePost", org: handle, network: chain.network, costUsd: 0 },
+        () => driver.schedulePost(handle, dispatch),
+      );
+    } catch (err) {
+      dispatchReason = DISPATCH_REFUSAL.publishDispatchFailed;
+      dispatchError = err instanceof SocialPublisherError ? `${err.code}: ${err.message}` : (err as Error)?.message ?? "unknown dispatch error";
+    }
   }
 
   // ── Phase 3: the transactional stamp — ONE UPDATE, both columns, only now that the network call
@@ -328,13 +515,13 @@ export async function dispatchApprovedPublish(
   if (!dispatched) {
     await withTenants([tenantId], (c) =>
       emitEvent(c, tenantId, "social_post_variant", variantId, "social.post.failed", {
-        reason: "dispatch_error", network: chain.network, engagementId: variant.engagement_id, detail: dispatchError,
+        reason: dispatchReason, network: chain.network, engagementId: variant.engagement_id, detail: dispatchError,
       }),
     );
     if (actorId) {
       await writeActivity(tenantId, actorId, "failed", "social_post_variant", variantId, { detail: dispatchError });
     }
-    return { ok: false, stage: "dispatch", reason: DISPATCH_REFUSAL.publishDispatchFailed };
+    return { ok: false, stage: "dispatch", reason: dispatchReason };
   }
 
   await withTenants([tenantId], (c) =>

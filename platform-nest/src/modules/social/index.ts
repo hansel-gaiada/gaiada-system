@@ -90,6 +90,8 @@ export const socialModule: ModuleContract = {
     "0113_social_inbox_retention.sql",
     // SMM-10 — D-22's creator-info snapshot columns on social_post_variants; registered at write time.
     "0114_social_creator_info_snapshot.sql",
+    // SMM-39 — `uploaded_media` column (already-uploaded engine media refs, kept out of args_sha256).
+    "0118_social_variant_uploaded_media.sql",
   ],
   // Dotted keys, matching class='grantable' catalog rows (0106). `validateModulePermissions()`
   // refuses boot if any of these is uncatalogued — which is why 0106 lands before this module is
