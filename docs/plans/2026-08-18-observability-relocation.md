@@ -348,3 +348,46 @@ simultaneously and reads as a failed revert:
 A durable metrics path remains worth having, but it requires a `resource`/`transform` processor
 stripping those attributes **before** export, applied deliberately with a cardinality check — not as a
 tail-end swap. The disk-backed queue on **traces and logs is unaffected** and stays in place.
+
+---
+
+## 13. MON-09m done; MON-09n exhausted (2026-08-19)
+
+### MON-09m — RESOLVED
+
+`postgres-exporter` was using `platform_app`, the application's own runtime role, which is
+intentionally `NOBYPASSRLS` — so several collectors returned nothing while `pg_up` read 1. Monitoring
+that is *up and partially blind*, the session's recurring theme.
+
+A dedicated `gaiada_exporter` role now holds **only** `pg_monitor` (Postgres's built-in role for
+exactly this) plus `CONNECT`. It can read monitoring views and functions and **no table data**, so
+pointing a scraper at it does not hand a collection component access to business rows. Created via
+peer auth (`sudo -u postgres`), password generated on the box and stored in the gitignored `.env`.
+
+Verified: `pg_up = 1` on both instances, and the previously-empty collectors now return data —
+`pg_stat_activity_count` 72 series, `pg_locks_count` 108, bgwriter stats present.
+
+The compose entry falls back to `platform_app` when `PG_EXPORTER_PASSWORD` is unset, so a box without
+the role provisioned keeps the previous reduced behaviour rather than losing the exporter entirely.
+
+### MON-09n — five hypotheses eliminated, still unresolved
+
+Per-container metrics still do not exist. What has been **ruled out**, so nobody repeats it:
+
+| Attempt | Result |
+|---|---|
+| `/dev/kmsg` + `/dev/disk` mounts | necessary-but-insufficient; no discovery |
+| `cgroup: host` (private cgroup ns on cgroup v2) | correct and kept, but no discovery |
+| `--docker_only=true` | **reverted** — cut 49 series to 1, trading partial signal for none |
+| `--containerd=/var/run/containerd/containerd.sock` | **removed** — no effect; unverified config that changes nothing is future confusion |
+| Image bump v0.49.1 → **v0.52.1** | **reverted** — same zero discovery *and* resurrected the error spam. Strictly worse, so the Docker-29.7/containerd-snapshotter version gap is NOT the cause |
+
+**Current deliberate state:** v0.49.1 + `cgroup: host`, 51 host-cgroup series, and `Failed to create
+existing container` spam in the logs. That spam is the price of coverage: `--docker_only` silences it
+but leaves exactly 1 series. **Coverage beats quiet logs** — a silent monitor that sees nothing is the
+failure this programme exists to prevent, and the noise is at least honest about the fault.
+
+Next avenue for whoever picks this up: cAdvisor's Docker client talks to the daemon successfully
+(`Registering Docker factory` succeeds, `docker.sock` is readable), yet enumerates nothing — so the
+question is what the daemon returns to it under the overlayfs snapshotter, not permissions, cgroups,
+or version.

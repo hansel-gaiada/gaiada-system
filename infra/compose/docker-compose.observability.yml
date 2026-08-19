@@ -180,7 +180,15 @@ services:
       # NOTE: platform_app is intentionally restricted (NOBYPASSRLS), so collectors needing
       # pg_monitor return nothing. That is a far smaller gap than a blind exporter; the proper
       # fix is a dedicated read-only pg_monitor role (MON-09m), needing rights not held here.
-      DATA_SOURCE_NAME: "postgresql://platform_app:${PLATFORM_APP_PASSWORD}@${PG_HOST:-postgres}:5432/gaiada_platform?sslmode=disable"
+      # MON-09m: a dedicated READ-ONLY role, not the application's runtime user.
+      # platform_app is intentionally NOBYPASSRLS and lacks the privileges several collectors need,
+      # so those returned nothing while pg_up read 1 -- monitoring that is up and partially blind.
+      # gaiada_exporter holds ONLY pg_monitor (the built-in role for exactly this) plus CONNECT.
+      # It can read monitoring views and functions and no table data, so pointing an exporter at
+      # it does not hand a scraping component access to business rows.
+      # Falls back to platform_app if PG_EXPORTER_PASSWORD is unset, so a box without the role
+      # provisioned keeps the previous (reduced) behaviour instead of losing the exporter entirely.
+      DATA_SOURCE_NAME: "postgresql://${PG_EXPORTER_USER:-gaiada_exporter}:${PG_EXPORTER_PASSWORD:-${PLATFORM_APP_PASSWORD}}@${PG_HOST:-postgres}:5432/gaiada_platform?sslmode=disable"
     depends_on:
       - prometheus
 
@@ -226,6 +234,9 @@ services:
       - /:/host:ro,rslave
 
   cadvisor:
+    # MON-09n: v0.52.1 was TRIED and reverted. It produced the same zero per-container metrics
+    # AND resurrected the `Failed to create existing container` spam that `cgroup: host` had
+    # silenced on v0.49.1 -- strictly worse, so the version gap was not the cause after all.
     image: gcr.io/cadvisor/cadvisor:v0.49.1
     restart: unless-stopped
     privileged: true
@@ -244,6 +255,8 @@ services:
     # optimisation that reduces coverage while the underlying fault is unfixed is a regression.
     command:
       - "--store_container_labels=false"
+      # (--containerd=/var/run/containerd/containerd.sock was tried and removed: no effect on
+      # discovery, and unverified config that changes nothing is just future confusion.)
     # MON-09n, the actual fix. This host is cgroup v2 (cgroup2fs), and on cgroup v2 Docker gives
     # each container a PRIVATE cgroup namespace: inside cadvisor, /sys/fs/cgroup shows only its
     # own cgroup, so the paths it needs (/system.slice/docker-<id>.scope) do not exist. It logged
