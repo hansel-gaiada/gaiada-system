@@ -11,18 +11,30 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Button, StatusBadge } from "@/components/ui";
-import { updateVariant, deleteVariant } from "@/lib/socialActions";
-import { describeRefusal, type SocialPostVariant } from "@/lib/socialShared";
+import { updateVariant, deleteVariant, checkPublishPreconditions } from "@/lib/socialActions";
+import {
+  describeRefusal, describeQuota, type SocialPostVariant, type SocialAccount,
+  type PublishPreconditionResult,
+} from "@/lib/socialShared";
 import { ValidationList } from "./ValidationList";
 
 export function VariantCard({
-  tenantId, variant, canDelete,
+  tenantId, variant, canDelete, account, accountsForbidden,
 }: {
   tenantId: string;
   variant: SocialPostVariant;
   /** `social.post.delete` — Cerbos denies module_staff this action even though staff hold
    *  `social.manage` (create/update). UI hint only; the backend re-checks regardless. */
   canDelete: boolean;
+  /** The connected account this variant targets (SMM-05 registry, `lib/social.ts`'s
+   *  `listAccounts`) — carries the live quota probe the quota strip renders. `undefined` when the
+   *  post-detail page's account lookup missed (account deleted since, or the read was denied —
+   *  see `accountsForbidden`), in which case the strip must say "unavailable", never fabricate. */
+  account?: SocialAccount;
+  /** True only on a genuine 403 reading the account registry — rendered distinctly from "no
+   *  account" so a denial never reads as "nothing to report" (the same rule `AccessDenied.tsx`
+   *  states for a whole-page read). */
+  accountsForbidden?: boolean;
 }) {
   const router = useRouter();
   const [body, setBody] = useState(variant.body);
@@ -32,6 +44,18 @@ export function VariantCard({
   const [approvalInvalidated, setApprovalInvalidated] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
+  const [preview, setPreview] = useState<PublishPreconditionResult | null>(null);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+  const [previewPending, startPreviewTransition] = useTransition();
+
+  function runPreview() {
+    setPreviewError(null);
+    startPreviewTransition(async () => {
+      const res = await checkPublishPreconditions(tenantId, variant.id);
+      if (!res.ok) { setPreviewError(res.error); setPreview(null); return; }
+      setPreview(res.verdict);
+    });
+  }
 
   const locked = variant.nativeImport || !["draft", "in_review", "approved"].includes(variant.status);
 
@@ -73,6 +97,8 @@ export function VariantCard({
         </span>
         <StatusBadge label={variant.status} />
       </div>
+
+      <QuotaStrip network={variant.network} account={account} accountsForbidden={accountsForbidden} />
 
       {variant.nativeImport && (
         <p style={{ margin: 0, font: "400 12px var(--font-body)", color: "var(--erp-ink-50)" }}>
@@ -122,6 +148,45 @@ export function VariantCard({
         </div>
       </div>
 
+      <div>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <span style={{ font: "600 11px var(--font-body)", letterSpacing: "0.04em", color: "var(--erp-ink-60)" }}>
+            Publish readiness
+          </span>
+          <Button variant="ghost" size="sm" onClick={runPreview} disabled={previewPending}>
+            {previewPending ? "Checking…" : "Check now"}
+          </Button>
+        </div>
+        {/* Submit-with-preview: a DRY RUN of the exact D14 execution precondition
+            (`GET .../publish-preconditions`), not a re-derived guess — same evaluator, same
+            typed vocabulary the executor itself reports. The verdict is DATA, not an error: a
+            refusal here is a legitimate, informative answer and is rendered as the token it is,
+            never folded into "something went wrong" (criterion 5). */}
+        <div style={{ marginTop: 6 }}>
+          {previewError && (
+            <p style={{ margin: 0, font: "400 12px var(--font-body)", color: "var(--status-critical-fg, #b3261e)" }}>{previewError}</p>
+          )}
+          {!previewError && preview === null && (
+            <p style={{ margin: 0, font: "400 12px var(--font-body)", color: "var(--erp-ink-50)" }}>
+              Not checked yet — this asks the same gate the publish approval will run at dispatch time.
+            </p>
+          )}
+          {!previewError && preview?.ok && (
+            <p style={{ margin: 0, font: "600 12px var(--font-body)", color: "var(--status-positive-fg, #1a7f37)" }}>
+              Publishable right now — every gate (scope, quota, hash, single-use, budget, creator-info) passes.
+            </p>
+          )}
+          {!previewError && preview && !preview.ok && (
+            <p style={{ margin: 0, font: "400 12px/1.5 var(--font-body)", color: "var(--status-critical-fg, #b3261e)" }}>
+              <code style={{ font: "700 10px var(--font-mono, monospace)", background: "var(--tint-hover)", border: "0.5px solid var(--status-critical-fg, #b3261e)", padding: "1px 5px", marginRight: 6 }}>
+                {preview.stage}
+              </code>
+              {describeRefusal(preview.reason ?? "")}
+            </p>
+          )}
+        </div>
+      </div>
+
       {variant.estimatedCostUsd > 0 && (
         <p style={{ margin: 0, font: "400 12px var(--font-body)", color: "var(--erp-ink-60)" }}>
           Estimated metered cost: ${variant.estimatedCostUsd.toFixed(3)}
@@ -148,6 +213,48 @@ export function VariantCard({
         )}
         {error && <span style={{ font: "400 12px var(--font-body)", color: "var(--status-critical-fg, #b3261e)" }}>{error}</span>}
       </div>
+    </div>
+  );
+}
+
+/** The quota strip (SMM-12) — three visibly different states, never collapsed into one another:
+ *  a KNOWN live count (bar + numbers), UNKNOWN (registry hasn't synced — never rendered as "0
+ *  used"), and NOT MODELED (this network has no live counter at all, a different fact from
+ *  "unsynced"). `describeQuota` (socialShared.ts) picks the state; this only draws it. */
+function QuotaStrip({
+  network, account, accountsForbidden,
+}: {
+  network: SocialPostVariant["network"];
+  account?: SocialAccount;
+  accountsForbidden?: boolean;
+}) {
+  if (accountsForbidden) {
+    return (
+      <p style={{ margin: 0, font: "400 11px var(--font-body)", color: "var(--status-critical-fg, #b3261e)" }}>
+        Quota: access denied reading the account registry (403) — not the same as unknown.
+      </p>
+    );
+  }
+  if (!account) {
+    return (
+      <p style={{ margin: 0, font: "400 11px var(--font-body)", color: "var(--erp-ink-50)" }}>
+        Quota: no connected-account record found for this variant.
+      </p>
+    );
+  }
+  const info = describeQuota(network, account.quota);
+  const pct = info.status === "known" && info.cap && info.cap > 0 ? Math.min(100, (info.used! / info.cap) * 100) : 0;
+  const color = info.status === "known"
+    ? (pct >= 100 ? "var(--status-critical-fg, #b3261e)" : pct >= (100 - (2 / (info.cap || 1)) * 100) ? "var(--status-caution-fg, #9a6700)" : "var(--erp-ink-60)")
+    : "var(--erp-ink-50)";
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+      {info.status === "known" && (
+        <div style={{ width: 72, height: 6, background: "var(--tint-hover)", border: "0.5px solid var(--erp-hairline)", flex: "0 0 auto" }}>
+          <div style={{ width: `${pct}%`, height: "100%", background: color }} />
+        </div>
+      )}
+      <span style={{ font: "400 11px var(--font-body)", color }}>{info.label}</span>
     </div>
   );
 }
