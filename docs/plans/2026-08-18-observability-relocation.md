@@ -1,6 +1,6 @@
 # Relocating the observability stack to the SumoPod VPS
 
-**Date:** 2026-08-18 · **Status:** PLANNED — access RESOLVED, execution gated on WireGuard (§4) · **Owner ask:** move Prometheus/Loki/Tempo off `gda-aicenter` to the SumoPod VPS "as it has more room"
+**Date:** 2026-08-18 · **Status:** **EXECUTED 2026-08-18** — metrics + traces DEV-VERIFIED, logs OPEN (§9) · **Owner ask:** move Prometheus/Loki/Tempo off `gda-aicenter` to the SumoPod VPS "as it has more room"
 **Related:** [`docs/blueprints/monitoring-program.md`](../blueprints/monitoring-program.md) §2 · `infra/runbooks/deploy-vps.md` §"Postiz / SMM"
 
 ---
@@ -161,3 +161,51 @@ not paraphrased:
 Capacity figures are from live `df`/`docker system df`/`docker ps` on each host on 2026-08-18,
 including `150.109.15.108` once the owner supplied access. Host-safety rules are
 quoted from `infra/runbooks/deploy-vps.md`. Nothing in this document has been executed.
+
+---
+
+## 9. Executed — what is verified, and the one leg that is not
+
+Relocation ran on 2026-08-18. Storage, query and alerting now live on the SumoPod VPS as compose
+project `gaiada-obs`; collection stayed on `gda-aicenter`.
+
+### Verified
+
+| Check | Result |
+|---|---|
+| Container diff on the VPS (runbook rule 3) | 37 → 45, **exactly our 8**, nothing else touched |
+| Bind addresses | all six on `10.88.0.2`; asserted **zero `0.0.0.0` binds** before starting |
+| Cross-tunnel reachability from `gda-aicenter` | all ports OPEN; `/api/v1/write` returns **400, not 404** (receiver enabled) |
+| **Metrics** | **16 `up` series / 8 jobs remotely = local's 14/7 plus the VPS's own two.** Exact parity |
+| **Traces** | **17,204 spans received, 16,029 traces created**, zero errors either side |
+| Alert rules | 21 loaded remotely, `Watchdog` firing ⇒ transports live |
+| Grafana | datasource health OK for Prometheus *and* Loki; a real query through `/api/ds/query` returns data; 5 dashboards provisioned |
+| Local decommission | storage layer stopped by explicit service name (never `--remove-orphans`); collection layer confirmed surviving; `erp=200` throughout; `gda-aicenter` 82% → 80% |
+
+### 🔴 OPEN — logs are NOT confirmed (MON-09q)
+
+Loki itself is healthy: a direct push returned **204** and the line read back, and the labels API then
+listed `["job","service_name"]`. So the server, the tunnel and the query path all work.
+
+But **the only stream in Loki is that test probe.** `service_name` has exactly one value —
+`relocation-probe` — meaning no application logs have arrived. `loki_distributor_lines_received_total`
+reads 750, which is what made this look fine at first glance and is why it is worth writing down:
+*a receive counter is not a queryable stream.*
+
+Collector-side counters (`otelcol_receiver_accepted_log_records_total`,
+`otelcol_exporter_sent_log_records_total`, `..._send_failed_...`) exist as metric NAMES in the remote
+Prometheus but currently return **no series**, which points at the collector's `filelog` receiver not
+producing records rather than at an export failure. The collector logged a
+`fileconsumer "finding files"` warning after the restart. Prime suspect: the filelog receiver's glob
+(`/var/lib/docker/containers/*/*-json.log`) not matching — either a log-driver change or the mount.
+
+**This did not regress in the move** — it needs checking against whether logs were flowing *before*
+it, which is the first diagnostic step, not an assumption. Metrics and traces are unaffected.
+
+### Also open
+
+| Ticket | Scope |
+|---|---|
+| **MON-09p** | Durable metrics queue. `prometheusremotewrite` in collector 0.116.1 has only an in-memory `remote_write_queue`, so a long tunnel outage loses metrics. Traces and logs got the persistent `file_storage` queue. The durable path is Prometheus's OTLP receiver (`--web.enable-otlp-receiver`) + `otlphttp`; deliberately not taken mid-migration because it would re-translate label semantics right after parity was established. |
+| **MON-09q** | The log leg above. |
+| ERP console | `PROMETHEUS_URL` repointed to `http://10.88.0.2:19090` in `observability.yml`, but it only takes effect on the next release. Until then Systems → Observability reports itself unconfigured — the correct failure mode, but still a gap. |
