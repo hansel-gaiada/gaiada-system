@@ -26,6 +26,8 @@ import type { ModuleContract, RollupProvider } from "../contract";
 // this ticket's own AC requires. `social.publishPostMetered` stays undeclared and barred — see the
 // module contract's own header for why a declared tool needs a real endpoint before it exists here.
 import { SOCIAL_PUBLISH_TOOL, SOCIAL_PUBLISH_TOOL_CLASSIFICATION } from "./publish-precondition";
+// SMM-13 — event handlers for social post notifications and mail routing
+import { handlePostDispatched, handlePostPublished, handlePostFailed } from "./event-handlers";
 
 const socialRollups: RollupProvider = {
   metrics: [
@@ -591,6 +593,12 @@ export const socialModule: ModuleContract = {
   // `social-media` dept slug. The pages themselves are SMM-11; this entry is what makes the module
   // visible in the module catalog meanwhile.
   uiManifest: [{ label: "Social Media", path: "/departments/social-media" }],
+  // SMM-13 — event handlers for social post notifications and mail routing
+  eventHandlers: {
+    "social.post.dispatched": handlePostDispatched,
+    "social.post.published": handlePostPublished,
+    "social.post.failed": handlePostFailed,
+  },
 };
 
 /** The scope shape every social capability reads. Exported so the controller, the tests and every

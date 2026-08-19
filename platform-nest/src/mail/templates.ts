@@ -170,11 +170,42 @@ function renderAuthMagicLink(payload: AuthMagicLinkPayload): RenderedMail {
   return { subject, html, text };
 }
 
+/** SMM-13 — social post failure risk warning. Notifies the engagement owner when a post fails to
+ *  publish (a customer-visible problem). */
+export interface SocialPostFailedPayload {
+  href: string;
+  network: string;
+  engagementName: string;
+  reason: string;
+  detail?: string | null;
+  [key: string]: unknown;
+}
+
+function renderSocialPostFailed(payload: SocialPostFailedPayload): RenderedMail {
+  const href = asStr(payload.href);
+  const network = asStr(payload.network, "a network");
+  const engagement = asStr(payload.engagementName, "your engagement");
+  const reason = asStr(payload.reason, "unknown error");
+  const detail = typeof payload.detail === "string" && payload.detail ? asStr(payload.detail) : null;
+  const subject = stripHeaderInjection(`Post failed on ${network}`);
+  const text =
+    `A post in the "${engagement}" engagement failed to publish on ${network}.\n` +
+    `Reason: ${reason}${detail ? `\nDetails: ${detail}` : ""}\n\n` +
+    `Review your posts: ${href}`;
+  const html =
+    `<p>A post in the <strong>${escapeHtml(engagement)}</strong> engagement failed to publish on ` +
+    `<strong>${escapeHtml(network)}</strong>.</p>` +
+    `<p>Reason: ${escapeHtml(reason)}${detail ? `<br/>Details: ${escapeHtml(detail)}` : ""}</p>` +
+    `<p><a href="${escapeHtml(safeHref(href))}">Review your posts</a></p>`;
+  return { subject, html, text };
+}
+
 const TEMPLATES: Record<string, (payload: Record<string, unknown>) => RenderedMail> = {
   "approval.warning": (p) => renderApprovalWarning(p as ApprovalMailPayload),
   "approval.actionable": (p) => renderApprovalActionable(p as ApprovalMailPayload),
   "auth.shell": (p) => renderAuthShell(p as AuthShellPayload),
   "auth.magic_link": (p) => renderAuthMagicLink(p as AuthMagicLinkPayload),
+  "social.post_failed": (p) => renderSocialPostFailed(p as SocialPostFailedPayload),
 };
 
 export function knownTemplateKeys(): string[] {
