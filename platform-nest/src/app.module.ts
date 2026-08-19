@@ -57,6 +57,7 @@ import { ServiceAssignmentsController } from "./admin/service-assignments.contro
 import { CompanyCrudController } from "./admin/company-crud.controller";
 import { AdminSystemsController } from "./admin/admin-systems.controller";
 import { ObservabilityController } from "./admin/observability.controller";
+import { MonitoringController, MonitoringHeartbeatController } from "./modules/monitoring/monitoring.controller";
 import { BotAdminController } from "./admin/bot-admin.controller";
 import { IntelligenceController } from "./admin/intelligence.controller";
 import { AgencyController } from "./modules/agency/agency.controller";
@@ -103,7 +104,7 @@ import { MagicLinkController } from "./mail/magic-link/controller";
   controllers: [
     HealthController, IdentityController, CoreController, CustomFieldsController,
     AuthzCheckController, AuthzPermissionsController, ClientWorkController, BillingController, CollabController, AutomationApprovalsController, PipelineController, ApprovalsController, ApprovalsDecideController, TasksMineController, MeetingRecordingsController, PortalController, PortalWorkspaceController, PortalCommerceController, PortalProfileController, PortalStreamController, WebdevChangeRequestsPortalController, WebdevChangeRequestsController, ContractsController, ClientContactsController, ClientInviteAcceptController, FilesController, CreativeController, WorkActivityController, IntegrationsController, ClaudeSeatsController, AdminIdentityController,
-    CompanyAdminController, EmployeesController, PositionsController, RoleGrantsController, ServiceAssignmentsController, CompanyCrudController, AdminSystemsController, ObservabilityController, BotAdminController, IntelligenceController,
+    CompanyAdminController, EmployeesController, PositionsController, RoleGrantsController, ServiceAssignmentsController, CompanyCrudController, AdminSystemsController, ObservabilityController, MonitoringController, MonitoringHeartbeatController, BotAdminController, IntelligenceController,
     // Vertical modules (compiled-in; per-tenant enable gate at the controller).
     AgencyController, PmController, ItController, ClientsController, HrController, LoansController, AssistantController, SearchController,
     SocialController,

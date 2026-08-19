@@ -2999,18 +2999,18 @@ endpoints. Merging the two is what made Gaia Nexus's monitoring dashboard fictio
 
 | Method | Path | Scope / gate | Returns | Status |
 |---|---|---|---|---|
-| GET | `/api/:t/monitoring/monitors?clientId&kind&status` | `monitoring.read` | `Monitor[]` | ⏳ PENDING |
+| GET | `/api/:t/monitoring/monitors?clientId&kind&status` | `monitoring.read` | `Monitor[]` | ✅ BUILT |
 | POST | `/api/:t/monitoring/monitors` | `monitoring.write` | `{ id }` | ⏳ PENDING |
-| GET | `/api/:t/monitoring/monitors/:id` | `monitoring.read` | `MonitorDetail` \| 404 | ⏳ PENDING |
+| GET | `/api/:t/monitoring/monitors/:id` | `monitoring.read` | `MonitorDetail` \| 404 | ✅ BUILT |
 | PATCH | `/api/:t/monitoring/monitors/:id` | `monitoring.write` | `{ id }` | ⏳ PENDING |
 | GET | `/api/:t/monitoring/monitors/:id/results?window=24h\|7d\|30d` | `monitoring.read` | `MonitorResult[]` | ⏳ PENDING |
-| GET | `/api/:t/monitoring/incidents?status&limit` | `monitoring.read` | `Incident[]` | ⏳ PENDING |
+| GET | `/api/:t/monitoring/incidents?status&limit` | `monitoring.read` | `Incident[]` | ✅ BUILT |
 | POST | `/api/:t/monitoring/incidents/:id/ack` | `monitoring.ack` | `{ id }` | ⏳ PENDING |
-| GET | `/api/:t/monitoring/summary` | `monitoring.read` | `MonitoringSummary` | ⏳ PENDING |
-| GET | `/api/:t/monitoring/kinds` | `monitoring.read` | `MonitorKindSpec[]` | ⏳ PENDING |
-| GET | `/api/:t/monitoring/maintenance` | `monitoring.read` | `MaintenanceWindow[]` | ⏳ PENDING |
+| GET | `/api/:t/monitoring/summary` | `monitoring.read` | `MonitoringSummary` | ✅ BUILT |
+| GET | `/api/:t/monitoring/kinds` | `monitoring.read` | `MonitorKindSpec[]` | ✅ BUILT (from the driver registry) |
+| GET | `/api/:t/monitoring/maintenance` | `monitoring.read` | `MaintenanceWindow[]` | ✅ BUILT |
 | POST | `/api/:t/monitoring/maintenance` | `monitoring.write` | `{ id }` | ⏳ PENDING |
-| POST | `/api/:t/monitoring/heartbeat/:token` | **unauthenticated by design** (token IS the credential) | `204` | ⏳ PENDING |
+| POST | `/api/monitoring/heartbeat/:token` | **unauthenticated by design** (token IS the credential) | `{ok:true}`, always | ✅ BUILT — NOTE the path has NO `:t`: there is no principal, so no tenant to scope by; the token identifies the row |
 | GET | `/api/:t/monitoring/channels` | `monitoring.read` | `MonitorChannel[]` | ⏳ PENDING |
 | POST | `/api/:t/monitoring/channels/:id/test` | `monitoring.write` | `{ ok }` | ⏳ PENDING |
 | GET | `/api/:t/monitoring/routes` | `monitoring.read` | `MonitorRoute[]` | ⏳ PENDING |
@@ -3236,3 +3236,21 @@ approvals still return `{ id, status }` with no `iam` key at all.
 lacks tenant-wide `position · assign`, and surface the returned `approvalId` so the lead can follow it.
 A stale request whose position was retired before approval fails at decide time with a `stale` message
 — show that to the approver, not to the requester.
+
+### 20.2 Implementation notes that change how a caller should read these (2026-08-19)
+
+* **`uptime24h` / `uptime30d` are `null`, not `0`.** MON-12's runner has not landed, so nothing has
+  computed them. The UI renders null as `—` and 0 as `0.00%` — "not computed" must never read as "down
+  all day".
+* **`lastSweepAt` is `null` until the runner reports.** The board prints "the runner has not reported a
+  sweep yet" rather than implying freshness it cannot vouch for.
+* **`MonitorDetail.config` is always `null` today.** It can hold secret *references* and
+  `monitoring.read` is a broad grant, so it is redacted at the boundary rather than filtered per-field.
+* **An unknown `kind` filter is a 400, not an empty list.** `[]` would look like "no monitors of that
+  type" and hide the typo.
+* **The heartbeat endpoint always answers `{ok:true}`, matched token or not.** A 404 on a bad token
+  turns it into an oracle for enumerating valid ones. It compares SHA-256 hashes with
+  `timingSafeEqual`, and the token is only ever stored hashed — a plain SQL `=` on a secret is a
+  timing oracle, and clear storage would make a DB read equivalent to forging any job's liveness.
+* **A heartbeat arriving CLOSES an open incident.** The ping *is* the recovery signal; leaving it open
+  would make a human close something that already resolved itself.

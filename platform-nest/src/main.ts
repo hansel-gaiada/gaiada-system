@@ -32,6 +32,9 @@ import { agencyModule } from "./modules/agency";
 import { pmModule } from "./modules/pm";
 import { itModule } from "./modules/it";
 import { monitoringModule } from "./modules/monitoring";
+import { registerDriver } from "./modules/monitoring/drivers/registry";
+import { httpDriver, keywordDriver } from "./modules/monitoring/drivers/http";
+import { heartbeatDriver } from "./modules/monitoring/drivers/heartbeat";
 import { billingModule } from "./modules/billing";
 import { clientsModule } from "./modules/clients";
 import { knowledgeModule } from "./modules/knowledge";
@@ -345,6 +348,13 @@ async function bootstrap(): Promise<void> {
   registerModule(pmModule);
   registerModule(itModule);
   registerModule(monitoringModule);
+  // Registering the MODULE does not register DRIVERS. Kept explicit rather than folded into the
+  // module contract: a kind with no driver reports available:false and refuses at dispatch, so the
+  // failure is visible either way - but this line is what makes http/keyword/heartbeat runnable,
+  // and it should be obvious in the boot sequence which kinds this deployment can actually check.
+  registerDriver(httpDriver);
+  registerDriver(keywordDriver);
+  registerDriver(heartbeatDriver);
   registerModule(billingModule);
   registerModule(clientsModule);
   registerModule(knowledgeModule);

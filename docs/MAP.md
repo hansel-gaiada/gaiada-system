@@ -221,6 +221,7 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 | `/api` | `platform-nest/src/modules/clients/clients.controller.ts` |
 | `/api` | `platform-nest/src/modules/it/it.controller.ts` |
 | `/api` | `platform-nest/src/modules/module-catalog.controller.ts` |
+| `/api` | `platform-nest/src/modules/monitoring/monitoring.controller.ts` |
 | `/api` | `platform-nest/src/modules/pm/pm.controller.ts` |
 | `/api/:tenantId/appraisals` | `platform-nest/src/modules/reports/appraisals.controller.ts` |
 | `/api/:tenantId/checkins` | `platform-nest/src/modules/reports/checkins.controller.ts` |
