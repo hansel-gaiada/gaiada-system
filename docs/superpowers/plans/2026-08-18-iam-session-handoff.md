@@ -22,6 +22,7 @@ shell invocations) — see [[gh-active-account-reverts]]. Switch and push in ONE
 | `alpha-01.042.0095a` | The four owner decisions · migration `0112` | Live Cerbos probe: `member`/`client`/`delete` → **DENY** (was ALLOW); `hr_manager`/`position`/`assign` → **ALLOW** (was 403); 100 sensitive keys |
 | `alpha-01.043.0095b` | compose passthrough for `POSITION_SYNC_ENABLED` (infra only ⇒ revision letter) | both vars present in the container |
 | `alpha-01.044.0096a` | the busy-loop fix (§6) | `sweep on: every 86400000ms`, CPU 4.5%, empty-value coercion demonstrated inside the container |
+| `alpha-01.045.0097a` | the self-scoped marker — the ceiling's durable mechanism (§9) · migration `0114` | see §9 |
 
 **`POSITION_SYNC_ENABLED=1` is ON, and the reconciler is VERIFIED live** — not merely enabled. Driven
 through the real SSO flow (`scripts/sso-login.sh`) against the real VPS in a scratch tenant since
@@ -155,3 +156,66 @@ Also: `gaiada-test-pg` could not start (port `55433` held by an unrelated `mimi-
 
 Deferred by design: scheduled (future-dated) JML — refused with a typed 400 because the reconciler
 resolves on `valid_to IS NULL` and has no as-of axis. Phases 3–7 untouched.
+
+---
+
+## 9. The self-scoped marker (`0114`) — and the correction the ruling needed
+
+The owner ruled on 2026-08-18 that the ceiling's interim "subtract the baseline `member` bundle"
+should be replaced by a per-key catalog marker. That shipped as `alpha-01.045.0097a`, with one
+substantive correction found by measuring before committing to it.
+
+**What the marker is.** `role_permissions.self_scoped`: TRUE for a (role, key) pair when EVERY Cerbos
+ALLOW rule granting that key to that role is self-scoped (`resource.attr.X == principal.id`, or
+`variables.owns`). 21 pairs today — member 17, viewer 4. **Derived, not hand-listed**:
+`scripts/generate-role-bundles.mjs::computeSelfScoped` reuses the hazard scan's Pattern-B predicate
+verbatim, emits `selfScoped` into `role-permission-bundles.json`, and
+`self-scoped-marker-parity.db.test.ts` fails if policies, JSON and DB disagree.
+
+**🔴 The marker does NOT subsume the baseline argument.** Measured with the real bundles:
+
+| grant | required | missing with marker-only |
+|---|---:|---:|
+| `company_admin` → `member` | 55 | 0 |
+| `org_unit_lead` → `member` | 55 | **55** |
+| `hr_manager` → `hr_staff` | 15 | **1** (`core.member.read`) |
+
+Marker-only would have refused every dept-head grant — re-breaking the surface the interim existed to
+protect. Both rules now apply, each on its correct side: the **marker on the REQUIRED side** ("is this
+authority over OTHER people?"), the **baseline on the HELD side** ("a grantor is themselves staff, so
+passing on baseline reach confers nothing new"). The held-side placement also keeps refusals truthful —
+a missing key is one the grantor genuinely lacks, not one the algebra hid.
+
+**Why the marker was still worth building:** `hr.case.cancel` and `core.client.delete` both sat in
+`member`'s bundle; the subtraction removed both, and only the first was self-service. The second was
+real tenant-wide reach and a live over-grant (§12.5). A subtraction cannot tell those apart. The parity
+suite pins `core.client.delete` as never-markable, on both sides of the chain.
+
+**A bug in my own tooling, worth the warning:** the first version of the generator predicate contained a
+literal backspace byte — a Python heredoc read `` as an escape — so the regex silently matched nothing
+and produced 7 pairs instead of 21. It was caught by instrumenting the tally when `viewer` looked wrong,
+not by reading the code. Same class as `Number("") === 0`: a value that looks right and quietly means
+something else. When generating code from a script, check the emitted bytes (`cat -A`), not the source.
+
+## 10. P2-08 part B — scoped, not started
+
+The next ticket, deliberately left unstarted rather than half-built. Everything needed to begin:
+
+- **The seam already exists.** `automation-approvals.controller.ts` picks the Cerbos action from the
+  row's `origin` + `workflow_id` (`hr:leave` → `decide_leave`). An override is `origin='iam'`,
+  `workflow_id='iam:override'` → `decide_override`. One route, no fork — the precedent is in that file.
+- **The catalog convention is proven:** a literal Cerbos action can carry a domain-appropriate key —
+  `hr.leave.decide` → `automation_approval:decide_leave`. So the override key is
+  `core.role_grant.decide_override` → `automation_approval:decide_override`.
+- **Execution must be in-band** (design §6.5), not via the D14 registry: that registry is deliberately
+  origin-scoped to `automation|agent` (`approval-executables.ts`), and HR's own non-registry origin
+  uses a module eventHandler — which IAM cannot, not being a module. So: execute through
+  `GrantWriteService` inside the decide handler when `origin='iam'`, tagging `expires_at` +
+  `origin_approval_id` (both columns already exist and are already written by P2-08 part A).
+- **Requester ≠ decider** is a structural Cerbos DENY, the pattern `resource_invoice.yaml` already uses.
+- **Then flip dept-head assign to the request path** (owner's chosen end-state, §11.2) — it stays
+  direct until this lands, because removing a working capability with nothing in its place is worse.
+
+Work: 1 policy edit, 1 catalog key, 1 bundles migration + regeneration, 1 request endpoint, 1 branch in
+the decide handler, and an adversarial battery (self-approval, cross-tenant, expired, non-routed
+approver). Roughly one focused session.
