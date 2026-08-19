@@ -52,6 +52,12 @@ services:
       # gda-aicenter is silently dropped: the receiver 404s, the collector queues then discards, and
       # the dashboards simply show no data with nothing anywhere saying why.
       - "--web.enable-remote-write-receiver"
+      # MON-09p: also accept OTLP. The collector's prometheusremotewrite exporter has only an
+      # IN-MEMORY queue in 0.116.1, so a tunnel outage longer than the buffer loses metrics
+      # outright. The otlphttp exporter DOES support a disk-backed queue, and this is the
+      # receiver that makes that path possible. remote-write stays enabled so the switch is
+      # reversible without touching this box again.
+      - "--web.enable-otlp-receiver"
     volumes:
       - ../observability/prometheus/prometheus.remote.yml:/etc/prometheus/prometheus.yml:ro
       - ../observability/prometheus/rules:/etc/prometheus/rules:ro

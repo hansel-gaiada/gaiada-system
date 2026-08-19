@@ -114,9 +114,15 @@ exporters:
     endpoint: http://10.88.0.2:19090/api/v1/write
     tls:
       insecure: true
-    # Preserves resource attributes as labels, matching what the local Prometheus recorded before.
+    # DISABLED 2026-08-19. This promotes every resource attribute to a Prometheus label, and for
+    # SCRAPED metrics the collector's prometheus receiver attaches a lot of them: http_scheme,
+    # net_host_name, net_host_port, server_address, server_port, service_instance_id,
+    # service_name, url_scheme. job and instance are already carried natively, so all that adds
+    # is eight labels of noise on every series -- changing series identity and multiplying
+    # cardinality for no gain. Found while investigating MON-09p, which surfaced the same
+    # promotion through Prometheus's OTLP receiver.
     resource_to_telemetry_conversion:
-      enabled: true
+      enabled: false
     retry_on_failure:
       enabled: true
       initial_interval: 5s
@@ -133,6 +139,21 @@ exporters:
       enabled: true
       queue_size: 10000
       num_consumers: 5
+
+  # MON-09p: metrics to Prometheus's OTLP receiver instead of remote_write, because THIS exporter
+  # supports a disk-backed sending_queue and prometheusremotewrite does not (0.116.1 has only an
+  # in-memory remote_write_queue, so a tunnel outage past the buffer loses metrics for good).
+  # `prometheusremotewrite` above is deliberately left configured but unreferenced: reverting is
+  # then a one-line change to the pipeline below, with no config archaeology, if label semantics
+  # turn out to shift. job/instance are what every alert rule matches on, so that risk is real.
+  otlphttp/metrics:
+    endpoint: http://10.88.0.2:19090/api/v1/otlp
+    retry_on_failure:
+      enabled: true
+    sending_queue:
+      enabled: true
+      storage: file_storage
+      queue_size: 10000
 
   otlp/tempo:
     endpoint: 10.88.0.2:4317
@@ -181,6 +202,19 @@ service:
     metrics/scrape:
       receivers: [prometheus/scrape]
       processors: [memory_limiter, batch]
+      # MON-09p ATTEMPTED AND REVERTED 2026-08-19. Switching to otlphttp (for its disk-backed
+      # queue) made Prometheus's OTLP receiver promote every resource attribute to a label:
+      # http_scheme, net_host_name, net_host_port, server_address, server_port,
+      # service_instance_id, service_name, url_scheme -- SEVEN extra labels on every series.
+      # job and instance survived, so rules still matched, but series IDENTITY changed: the
+      # post-switch series are different series from the historical ones, breaking continuity
+      # and multiplying cardinality. Verified live: up went 16 -> 30, pg_up 2 -> 4,
+      # probe_success 6 -> 12, each instance appearing twice.
+      #
+      # Not worth it for durability that only bites on an outage longer than the 10k in-memory
+      # queue. Reinstating remote_write. Making the OTLP path viable needs a resource/transform
+      # processor stripping those attributes first -- that is the real MON-09p, and it should be
+      # done deliberately with a cardinality check, not as a tail-end swap.
       exporters: [prometheusremotewrite]
     logs:
       receivers: [otlp, filelog]
