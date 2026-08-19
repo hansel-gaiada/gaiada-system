@@ -366,7 +366,32 @@ export type PublisherRefusalCode =
   /** A dispatch arrived with no one-shot approval id (D-6). Structural, not advisory. */
   | "approval_required"
   /** A driver key that is not registered. */
-  | "unknown_publisher";
+  | "unknown_publisher"
+  // ── SMM-07 — the connect flow's own refusals. NEW tokens, deliberately, and deliberately NOT in
+  // publish-precondition.ts's `PUBLISH_REFUSAL` — that vocabulary is the D14 execution gate's, keyed
+  // to a VARIANT; these three are keyed to a (client, network) CONNECT ATTEMPT, a different question
+  // asked at a different time, by a different caller (the console's connect button, not the approval
+  // executor). Folding them into PUBLISH_REFUSAL would make one vocabulary answer two questions.
+  /** OQ-1: no `social_platform_apps` row for this network carries a live `credential_ref` (or the
+   *  one that exists is `rejected`/soft-deleted). Verified on the live engine 2026-08-19:
+   *  FACEBOOK_APP_ID, FACEBOOK_APP_SECRET, LINKEDIN_CLIENT_ID, LINKEDIN_CLIENT_SECRET,
+   *  TIKTOK_CLIENT_ID, YOUTUBE_CLIENT_ID are all length 0 — there is no app for OAuth to start
+   *  against, on ANY network, today. This is NOT `capability_unsupported`: the DRIVER can carry a
+   *  connect flow perfectly well; there is simply no platform app registered yet for the OAuth
+   *  dance to name. And it is NOT `network_disabled`: that is a deployment dial an operator can flip
+   *  today; this is a weeks-long non-code review (the app-review dossier) nobody can shortcut. */
+  | "platform_app_not_registered"
+  /** OQ-3 (owner decision): "own accounts proceed; client connects wait for AGPL counsel sign-off."
+   *  Thrown when the target client is not on the deployment's `ownBrandClientIds` allow-list. This
+   *  token exists to be temporary — the day counsel signs off, the check it names is deleted, not
+   *  flipped, which is also why the gate lives in config rather than a schema column (see
+   *  config.ts's `ownBrandClientIds` comment). */
+  | "client_connect_requires_signoff"
+  /** `SOCIAL_CONNECT_REDIRECT_URL` is unset. The engine's `connectUrl` needs a destination to hand
+   *  the browser back to when its OWN OAuth round trip with the network finishes; an empty string is
+   *  not a URL and must never be sent. A deployment configuration gap, same class as
+   *  `publisher_not_configured` — nothing the caller can fix by retrying. */
+  | "connect_redirect_not_configured";
 
 export class SocialPublisherError extends Error {
   constructor(

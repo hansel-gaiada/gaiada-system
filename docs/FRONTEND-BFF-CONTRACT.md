@@ -2875,6 +2875,8 @@ endpoint (`schedulePost` + the transactional stamp) is still SMM-10's and does n
 | `POST publisher-orgs` | `social.account.connect` | Body `{clientId, publisherOrgRef, apiKeyRef?, driver?}`. **Idempotent**: a repeat with the same org ref answers `created:false`. The organization is created by an operator ON THE PUBLISHER HOST (its API has no such route) — this records the mapping. `apiKeyRef` is an **alias**, never a key. Returns `{publisherOrgId, clientId, driver, publisherOrgRef, apiKeyRef, created, verification}`. |
 | `POST publisher-orgs/:clientId/sync` | `social.account.update` | Mirrors the engine's integrations into the registry: status, live quota, resolved capabilities, health. Returns `{orgId, accounts[], skipped[], disconnected[]}`. |
 | `GET publisher/status` | `social.account.read` | What the seam can do in THIS deployment, **without calling it**: `{configured, driver, enabledNetworks[], capabilities[], inboxSurface, quotaProbe, orgs[]}`. Consult it before spending a call on a capability that may be absent. |
+| `GET publisher-orgs/:clientId/connect/:network` | `social.account.read` | **BUILT (SMM-07).** Read-only, never calls the publisher: may this (client, network) start a connect attempt right now, and if not, why. Returns `{ok, reason?, detail?}`. Render a disabled connect button with the EXACT reason the POST below would refuse — never guess separately from it. |
+| `POST publisher-orgs/:clientId/connect` | `social.account.connect` | **BUILT (SMM-07).** Body `{network, handle}` — `handle` is the account handle the AGENCY already knows (e.g. the client told us `@acmebrand`); it is never discovered from the engine, because at this instant the engine has not been told about the account at all. **Idempotent/resumable** on `(client, network, handle)` (0105's own unique index): a human who closes the tab and comes back later resumes the SAME pending row (`resumed:true`), never a duplicate. Returns `{accountId, status:"pending", connectUrl, resumed}`. The pending row converges to `connected` the next time `sync` (above) observes the SAME `(network, handle)` from the engine — no separate "complete the connection" endpoint exists or is needed. |
 
 Four behaviours a console (and an agent) must render honestly rather than smooth over:
 
@@ -2906,6 +2908,26 @@ driver is deployed, deliberately not a retryable 503) · `org_key_unresolved` (5
 `org_not_provisioned` · `cross_client_account` · `account_not_connected` · `network_disabled` ·
 `approval_required` (409). Plain 400 tokens on these routes: `invalid_client`,
 `missing_publisher_org_ref`, `unknown_driver`.
+
+**The connect flow's own two refusals (SMM-07), both new and both explained on the `GET
+.../connect/:network` read before a console ever has to guess:**
+
+- **`platform_app_not_registered` (409).** No `social_platform_apps` row for that network carries a
+  live `credential_ref`. Verified on the live engine 2026-08-19: `FACEBOOK_APP_ID`,
+  `FACEBOOK_APP_SECRET`, `LINKEDIN_CLIENT_ID`, `LINKEDIN_CLIENT_SECRET`, `TIKTOK_CLIENT_ID`,
+  `YOUTUBE_CLIENT_ID` are all length 0 — **no account can be connected today, on any network, for
+  any client, including our own brand**, until the OQ-1 app-review dossier lands at least one
+  approved app per network. Render this as "not connectable yet: no platform app is registered", not
+  as a broken button and not as an empty list.
+- **`client_connect_requires_signoff` (409).** OQ-3 (owner decision): own-brand accounts proceed,
+  client accounts wait for AGPL counsel sign-off. Driven by a deployment-level allow-list
+  (`SOCIAL_OWN_BRAND_CLIENT_IDS`), empty by default — so with no configuration at all, the honest
+  default is that EVERY client refuses, including a would-be "own brand" one nobody has listed yet.
+- **`connect_redirect_not_configured` (503).** `SOCIAL_CONNECT_REDIRECT_URL` is unset — a deployment
+  configuration gap, same shape as `publisher_not_configured`, nothing the caller can fix by
+  retrying.
+
+Plain 400 tokens on the connect POST: `invalid_client`, `unknown_network`, `missing_handle`.
 
 **MCP surface** (`GET /mcp/tool-defs`, aggregated — nothing hub-side is hardcoded):
 `social.listEngagements`, `social.getEngagementScope` (reads, `low`),

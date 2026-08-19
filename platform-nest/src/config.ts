@@ -562,6 +562,28 @@ const configBase = {
       // live fetch returns `undefined`, and a TikTok publish refuses `creator_info_unverified` — the
       // fail-closed steady state addendum §A4i/D-22 both describe.
       creatorInfoProbeTool: process.env.SOCIAL_POSTIZ_CREATOR_INFO_PROBE_TOOL ?? "",
+      // SMM-07 — the guided connect flow's own two knobs. Both are EMPTY BY DEFAULT and the
+      // emptiness is a finding, not laziness — see provisioning.ts's `initiateAccountConnect`.
+      //
+      // `connectRedirectUrl` is the platform-ui page the engine hands the browser back to once ITS
+      // OWN OAuth round trip with the network finishes (the third argument of
+      // `SocialPublisher.connectUrl`) — mirroring `GOOGLE_OAUTH_REDIRECT_URI`'s shape (SM-25): one
+      // fixed, deployment-level destination, config-driven rather than derived per request. It is
+      // NOT Postiz's own `FRONTEND_URL` (that is the licence-zone host's env, governs the
+      // network-facing leg of the OAuth dance, and is out of this platform's control by design —
+      // addendum §A4j's containment-invariant-5 finding). Unset ⇒ connect refuses
+      // `connect_redirect_not_configured` rather than handing the engine an empty destination.
+      connectRedirectUrl: (process.env.SOCIAL_CONNECT_REDIRECT_URL ?? "").replace(/\/$/, ""),
+      // OQ-3 (owner decision, addendum §A4i / the design addendum's OQ-3 row): "own accounts
+      // proceed; client connects wait for AGPL counsel sign-off." This is a LEGAL gate, not a
+      // technical capability, and it is temporary by nature — it goes away entirely the day counsel
+      // signs off, at which point this whole check (and this config key) should be deleted rather
+      // than flipped. A schema column would outlive that day as dead weight; a deployment-level list
+      // does not. `clients.id` values, comma-separated — deliberately GLOBAL (not per-tenant) same
+      // as every other deployment dial in this block, because there is exactly one legal answer to
+      // "have we cleared client connects" and it does not vary by tenant.
+      ownBrandClientIds: (process.env.SOCIAL_OWN_BRAND_CLIENT_IDS ?? "")
+        .split(",").map((s) => s.trim()).filter(Boolean),
     },
     // SMM-10 — the dispatch/reconcile pair's own knobs.
     //

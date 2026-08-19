@@ -46,7 +46,13 @@ import { SocialPublisherError } from "./publisher/types";
  *    `org_not_provisioned` / `approval_required` → **409**. The request is well-formed; the state of
  *    the data or the configuration forbids it. Not a 4xx-input error, definitely not a server fault,
  *    and emphatically not a 500 — every one of these is a decision the module made on purpose.
- *    `cross_client_account` in particular is a control REPORTING SUCCESS at refusing. */
+ *    `cross_client_account` in particular is a control REPORTING SUCCESS at refusing.
+ *  - SMM-07's connect-flow refusals join the same two families rather than inventing a third:
+ *    `platform_app_not_registered` / `client_connect_requires_signoff` → **409** (well-formed
+ *    request; a non-code review or a legal sign-off — not this deployment's config — is what is
+ *    missing, same shape as `org_not_provisioned`). `connect_redirect_not_configured` → **503**
+ *    (a deployment configuration gap, same shape as `publisher_not_configured`/`org_key_unresolved`
+ *    — nothing the caller can fix by retrying). */
 const STATUS_BY_CODE: Record<string, number> = {
   publisher_not_configured: 503,
   publisher_unreachable: 503,
@@ -60,6 +66,9 @@ const STATUS_BY_CODE: Record<string, number> = {
   org_conflict: 409,
   org_not_provisioned: 409,
   approval_required: 409,
+  platform_app_not_registered: 409,
+  client_connect_requires_signoff: 409,
+  connect_redirect_not_configured: 503,
 };
 
 @Catch(SocialPublisherError)

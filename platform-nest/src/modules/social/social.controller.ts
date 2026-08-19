@@ -63,7 +63,9 @@ import {
 // SMM-05 — the publisher seam. Note what is imported and what is NOT: the provisioning/sync
 // capabilities and the driver REGISTRY, never a driver and never a transport. The controller is one
 // client of the port, exactly as it is one client of every other capability here.
-import { provisionPublisherOrg, syncConnectorRegistry } from "./publisher/provisioning";
+import {
+  checkConnectReadiness, initiateAccountConnect, provisionPublisherOrg, syncConnectorRegistry,
+} from "./publisher/provisioning";
 import { getPublisher } from "./publisher/registry";
 
 const ENGAGEMENT_STATUSES = new Set(["draft", "active", "paused", "closed"]);
@@ -1339,7 +1341,7 @@ export class SocialController {
   // endpoint here. `social.publishPost`, the D14 executable-approval entry and the barred metered
   // twin are SMM-09's, and SMM-09 runs alone. What lands here is the mapping that publishing will
   // ride on, the registry that mirrors it, and a status read that keeps answering when the engine
-  // is unreachable.
+  // is unreachable. SMM-07 (below, after `syncRegistry`) adds the guided connect flow itself.
 
   /** The connector registry as data: which accounts are connected, expiring, erroring, and what
    *  each can actually do. A PURE DB READ — it never touches the publisher, which is what makes it
@@ -1425,6 +1427,48 @@ export class SocialController {
     await authorize(req.principal, { kind: "social_account", tenantId, module: "social" }, "update");
     if (!UUID_RE.test(clientId)) refuse("invalid_client");
     return syncConnectorRegistry(tenantId, clientId, req.principal.userId);
+  }
+
+  // =============================================== ACCOUNT CONNECT FLOW (SMM-07) ============
+  // The engine holds NO platform-app credentials on any network today (verified on the live engine
+  // 2026-08-19 — every FACEBOOK_APP_ID/LINKEDIN_CLIENT_ID/etc. is length 0), so no OAuth round trip
+  // can start yet, for a client OR for our own brand. Both routes below run the SAME precondition
+  // (`checkConnectReadiness`) so the console can explain a disabled connect button with the EXACT
+  // reason the POST would refuse, never a guess rendered separately from the truth.
+
+  /** Read-only: may this (client, network) connect right now, and if not, why. Never calls the
+   *  publisher and never writes a row — a console renders this to explain a disabled connect button
+   *  honestly ("Instagram is not connectable yet: no platform app is registered") instead of letting
+   *  the user find out by clicking into a dead end. */
+  @Get("publisher-orgs/:clientId/connect/:network")
+  async connectReadiness(
+    @Req() req: FastifyRequest, @Param("tenantId") tenantId: string,
+    @Param("clientId") clientId: string, @Param("network") network: string,
+  ) {
+    await authorize(req.principal, { kind: "social_account", tenantId, module: "social" }, "read");
+    if (!UUID_RE.test(clientId)) refuse("invalid_client");
+    return checkConnectReadiness(tenantId, clientId, network);
+  }
+
+  /** Start — or RESUME — the guided connect ceremony for one (client, network, handle). `connect`,
+   *  same manager-tier action `provisionOrg` already gates: this is the step that grants an outside
+   *  system standing permission to post as a brand. Idempotent on the (client, network, handle)
+   *  triple (0105's own unique index) — a human who closes the tab and comes back tomorrow resumes
+   *  the SAME pending row rather than growing a second one. See provisioning.ts's SMM-07 section for
+   *  the full resumability + own-brand-first (OQ-3) reasoning. */
+  @Post("publisher-orgs/:clientId/connect")
+  @HttpCode(200)
+  async connectAccount(
+    @Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("clientId") clientId: string,
+    @Body() body: { network?: string; handle?: string },
+  ) {
+    await authorize(req.principal, { kind: "social_account", tenantId, module: "social" }, "connect");
+    if (!UUID_RE.test(clientId)) refuse("invalid_client");
+    const network = (body?.network ?? "").trim();
+    if (!NETWORKS.has(network)) refuse("unknown_network");
+    const handle = (body?.handle ?? "").trim();
+    if (!handle) refuse("missing_handle");
+    return initiateAccountConnect(tenantId, { clientId, network, handle, actorId: req.principal.userId });
   }
 
   /** What the publisher seam can do in THIS deployment, without calling it. Answers while the
