@@ -25,13 +25,12 @@ import {
   UseGuards,
 } from "@nestjs/common";
 import type { FastifyRequest } from "fastify";
-import { timingSafeEqual, createHash } from "node:crypto";
+import { createHash } from "node:crypto";
 import { AuthGuard } from "../../auth/guards";
 import { ModuleEnabledGuard } from "../module-enabled.guard";
 import { authorize } from "../../core/http";
 import { withTenants, withGlobal } from "../../db";
 import { listKindSpecs, parseKind } from "./drivers/registry";
-import { evaluateHeartbeat } from "./drivers/heartbeat";
 
 const MOD = { modules: ["monitoring"] as string[] };
 
@@ -300,47 +299,26 @@ export class MonitoringController {
 export class MonitoringHeartbeatController {
   @Post("monitoring/heartbeat/:token")
   async ingest(@Param("token") token: string) {
-    const supplied = createHash("sha256").update(token).digest();
+    // Hash here; the plaintext token never reaches the database and is never stored.
+    const hash = createHash("sha256").update(token).digest("hex");
 
+    // ONE call to a SECURITY DEFINER function (migration 0119) rather than a table read.
+    //
+    // The read-then-match version this replaced was BROKEN and looked fine: with no principal there
+    // is no tenant context, so `withGlobal` left `app_current_tenants()` empty, FORCE RLS filtered
+    // every row out, and the endpoint answered 200 having matched nothing. It could never have worked
+    // in production. Found by the live-DB suite; no pure test could see it.
+    //
+    // The function also removes the timing question entirely: matching happens on a UNIQUE indexed
+    // hash inside Postgres instead of a JS loop over every row, so there is no per-candidate compare
+    // to time. It takes and returns no secrets and can touch at most one row.
     await withGlobal(async (c) => {
-      const rows = await c.query<{ id: string; token_hash: string; monitor_id: string; grace_sec: number }>(
-        `SELECT id, token_hash, monitor_id, grace_sec FROM monitor_heartbeats`,
-      );
-      for (const r of rows.rows) {
-        let stored: Buffer;
-        try {
-          stored = Buffer.from(r.token_hash, "hex");
-        } catch {
-          continue;
-        }
-        if (stored.length !== supplied.length) continue;
-        if (!timingSafeEqual(stored, supplied)) continue;
-
-        // Found it. Record liveness and drive the monitor's denormalised status in the same
-        // transaction, so the board can never show a stale `down` for a job that just checked in.
-        await c.query(`UPDATE monitor_heartbeats SET last_seen_at = now() WHERE id = $1`, [r.id]);
-        const verdict = evaluateHeartbeat({ graceSec: r.grace_sec }, { lastSeenAt: new Date() });
-        await c.query(
-          `UPDATE monitors SET status = $2, last_checked_at = now(), updated_at = now() WHERE id = $1`,
-          [r.monitor_id, verdict.status],
-        );
-        await c.query(
-          `INSERT INTO monitor_results (tenant_id, client_id, monitor_id, status, detail)
-           SELECT tenant_id, client_id, id, $2, NULL FROM monitors WHERE id = $1`,
-          [r.monitor_id, verdict.status],
-        );
-        // Recovery closes the incident: a heartbeat arriving IS the recovery signal, and leaving it
-        // open would require a human to close something that has already resolved itself.
-        await c.query(
-          `UPDATE monitor_incidents SET closed_at = now()
-            WHERE monitor_id = $1 AND closed_at IS NULL`,
-          [r.monitor_id],
-        );
-        return;
-      }
-      // No match: fall through silently. See the 204-always note above.
+      await c.query(`SELECT * FROM monitoring_heartbeat_touch($1)`, [hash]);
     });
 
+    // ALWAYS the same answer, matched or not. A 404 on a bad token turns this into an oracle for
+    // enumerating valid ones — and the function returning zero rows is indistinguishable from here
+    // by design.
     return { ok: true };
   }
 }
