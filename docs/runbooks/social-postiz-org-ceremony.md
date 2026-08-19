@@ -33,6 +33,7 @@ reviews (OQ-1) and the AGPL counsel sign-off (OQ-3), neither of which is done.
 |---|---|
 | Licence-zone host | SumoPod VPS `150.109.15.108` — **runs someone else's production** |
 | Compose project | `gaiada-social`, file `docker-compose.social.yml` |
+| Working dir on the VPS | `/home/ubuntu/gaiada-social/infra/compose` (verified 2026-08-19) |
 | Postiz listener | `10.88.0.2:4007` — the WireGuard tunnel address. **No public listener exists.** |
 | ERP host | `gda-aicenter` (`35.240.135.48`), tunnel peer `10.88.0.1` |
 
@@ -174,8 +175,27 @@ deployment that is the literal string `default`. `verifyOrg` then proves the pai
 - [ ] `ss -ltn` shows `10.88.0.2:4007` and nothing on `0.0.0.0`
 - [ ] The ERP resolves the key without `org_key_unresolved`
 - [ ] `verifyOrg` succeeds against the adopted org
-- [ ] The VPS container count is unchanged at 25 — if it moved, something of the owner's did
+- [ ] Our five `gaiada-social-*` containers are all still up, and the total has not DROPPED
+      (do not check for a fixed total — see the note below)
 - [ ] Step 6 has been corrected to what you actually did
+
+## Verified live, 2026-08-19 — pre-ceremony state
+
+Read-only pass over both hosts. Everything the ceremony depends on is in place:
+
+| Check | Result |
+|---|---|
+| Our five containers | all `Up 5 days (healthy)` |
+| Listener | `10.88.0.2:4007` only — **nothing on `0.0.0.0`** |
+| API probe, on-VPS | **401** — backend genuinely up, not merely "healthy" |
+| API probe, from `gda-aicenter` over the tunnel | **401 in 43 ms** |
+| `.env` | mode `600`, `SOCIAL_POSTIZ_DISABLE_REGISTRATION=true` |
+
+⚠ **The container-count check in the earlier draft was wrong and has been corrected.** The handoff's
+"baseline 20 → 25" is stale: the box now runs **44** containers. The owner's own estate has grown by
+roughly nineteen since 2026-08-13. A fixed expected total is therefore not a safety check — it will
+produce a false alarm on every future run. What matters is that **our five are up and nothing of
+theirs disappears**, which is what the checklist now says.
 
 ## What this unblocks
 
